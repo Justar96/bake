@@ -162,6 +162,46 @@ Recorded so the questions do not get relitigated:
 - **Full-screen alt-screen mode.** It discards scrollback on exit, so the session vanishes when the program does. The transcript surviving exit is the point.
 - **Progress bars for model output.** Token counts are not a denominator; there is no total to divide by.
 
+## 6a. Separating the chat area, the status line, and the composer
+
+The three regions must read as three kinds of thing at a glance. A terminal offers few ways to say that, and they do not cost the same. `prototype/separation.mjs` renders the candidates with their row cost.
+
+### Spacing is cheap above and expensive below
+
+A blank line inside the transcript is charged to scrollback, which is unbounded. A blank line in the dynamic region is charged to the L1 budget the live region needs — on a 10-row window that is a tenth of the screen. The same pixel of whitespace has two very different prices depending on which side of the boundary it falls.
+
+So: **spend rows on structure inside the chat area, spend none on chrome.**
+
+### Chrome separates by alignment, not by rows
+
+| Candidate | Chrome cost | Verdict |
+| --- | --- | --- |
+| status as one more sentence | 2 rows | reads as another chat row; its stray leading space looks like a mistake |
+| blank line above status | 3 rows | works, and pays a row for what alignment gives free |
+| full-width rule | 3 rows | draws the eye to a line carrying no information |
+| **justified status bar** | **2 rows** | **adopted** |
+
+The status line splits into a left cluster and a right cluster pushed to the edges:
+
+```
+▸ ready  ·  deepseek/chat                  ctx 12%  ·  turn 3  ·  0f3a9c
+❯ Ask anything, / for commands
+```
+
+Nothing in a transcript is right-aligned. A row filled to both edges reads as chrome before a single word of it is read, and it costs no rows and no color — so it survives `NO_COLOR` and a screen reader, which a dim rule does not.
+
+### The composer is the same family, one weight heavier
+
+A user message opens with `›`; the composer opens with `❯`. Same chevron, more weight: *what you said* against *where you speak*. Related roles should look related; only their weight should say which is active.
+
+### The right slot is contextual, never decorative
+
+The composer's right edge can hold `↵ send`, `esc interrupt` while a turn runs, or `↑↓ select` while an overlay is open. It must stay contextual. A permanent hint teaches nothing after the first day and becomes noise on a surface the user looks at hundreds of times a day — the same reason nothing here animates on keystroke.
+
+### Turn boundaries, not message boundaries
+
+One blank line opens each user turn inside the transcript. Separating every message would stripe the screen; separating turns gives the eye a place to land when scrolling back through a long session, which is the actual task.
+
 ## 7a. Overlays: completion and pickers
 
 Completion popups and choice pickers draw from unbounded sources — every registered command, every skill, every file in the workspace — into the dynamic region that §1 caps. `prototype/overlays.mjs` renders them and checks the rules below.
