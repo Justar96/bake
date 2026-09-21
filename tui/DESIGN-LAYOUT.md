@@ -162,6 +162,44 @@ Recorded so the questions do not get relitigated:
 - **Full-screen alt-screen mode.** It discards scrollback on exit, so the session vanishes when the program does. The transcript surviving exit is the point.
 - **Progress bars for model output.** Token counts are not a denominator; there is no total to divide by.
 
+## 7a. Overlays: completion and pickers
+
+Completion popups and choice pickers draw from unbounded sources — every registered command, every skill, every file in the workspace — into the dynamic region that §1 caps. `prototype/overlays.mjs` renders them and checks the rules below.
+
+### The item limit is derived, never constant
+
+```
+rows   no header   with header
+  10           6             5
+  24          20            19
+  60          56            55
+```
+
+`limit = rows - chrome - header - 1`, where chrome is status, composer, and one line of margin. A constant tuned on an 80×24 window overflows a split pane, and overflow is the one failure that clears the user's screen. Compute it from `useWindowSize()`.
+
+### Anchor overlays below the composer
+
+Results change on every keystroke. An overlay above the input pushes the line being typed into up and down as the user types; below it, the caret stays put and the overlay grows downward into space the user is not reading. This is the layout's one deliberate inversion of reading order, and it exists because the caret outranks the list.
+
+### Hold the last loaded height through a re-query, not the limit
+
+Height across `loading → loaded → empty → error`:
+
+```
+unheld : 2 9 2 2   moves
+held   : 9 9 9 9   stable
+```
+
+Holding to the **limit** would leave a twenty-row hole under three matches. Holding to the **last loaded row count** keeps the display still across a transient re-query while letting the overlay shrink when the result set genuinely shrinks. L2 applies to states the user did not cause; it does not mean freezing a list that legitimately got shorter.
+
+### Truncate paths from the start
+
+`packages/app/src/module-7.ts` truncated at the end reads `packages/app/src/module…`, hiding the only part that distinguishes it. Paths use `wrap="truncate-start"`; names with descriptions keep a fixed name column so descriptions align. A path row drops the description column entirely rather than repeating `workspace file` forty times.
+
+### Overflow marker
+
+`+N more — keep typing to narrow` tells the user both that the list is cut and what to do about it. A bare count implies scrolling that is not offered.
+
 ## 8. Robust rendering: no flicker, no jumping
 
 Two distinct failures, two distinct causes. Neither is fixed by drawing faster.

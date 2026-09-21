@@ -8,6 +8,7 @@ node tui/prototype/frames.mjs --plain    # no ANSI, for docs and diffs
 node tui/prototype/frames.mjs --rows 10  # prove the collapse order on a short window
 node tui/prototype/stability.mjs         # measure screen movement across a streaming turn
 node tui/prototype/realloop.mjs          # same claims against Ink's real render loop
+node tui/prototype/overlays.mjs          # completion and picker geometry
 ```
 
 `realloop.mjs` is the one that settles arguments: it drives a live `render()` through a fake TTY, captures every byte, and reproduces the L1 violation on demand. All three exit non-zero on failure and are safe to wire into `check.sh`.
@@ -61,6 +62,16 @@ Gate: `prototype/stability.mjs` asserts zero height change and exits non-zero ot
 ### S5 — Status line
 
 Priority-ordered fields, dropped right-to-left, never wrapping. Adds the `turnBoundary` turn/step counter — the last `DESIGN.md` §3b projection not yet surfaced. `turnBoundary` exposes `lastTurn`; a step *number* is not in the projection, so step display needs `step/start` payloads or it stays turn-only.
+
+### S5b — Completion and picker geometry
+
+Applies to the `Completion`/`FileCatalog`/`Picker` work already in flight (`DESIGN-LAYOUT.md` §7a).
+
+- `Picker`'s `limit` prop comes from `useWindowSize()`, not a constant: `rows - chrome - header - 1`. At 10 rows that is 5 items; a constant tuned for 24 rows overflows and clears the screen.
+- Anchor the completion overlay **below** the composer so the caret does not move as results change.
+- Hold the last loaded row count through a re-query; do not hold to the limit.
+- Paths truncate from the start; path rows drop the description column.
+- Gate: `prototype/overlays.mjs` checks L1 at 10/16/24/40 rows and L2 across loading, loaded, empty and error.
 
 ### S6 — Interaction overlay
 
