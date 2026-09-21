@@ -71,6 +71,15 @@
     },
     {
       "path": "../../../packages/llm/token-meter"
+    },
+    {
+      "path": "../../../packages/skill/skill"
+    },
+    {
+      "path": "../../../packages/context/file-reference"
+    },
+    {
+      "path": "../../../packages/attachment/attachment"
     }
   ]
 }

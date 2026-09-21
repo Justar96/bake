@@ -1,7 +1,7 @@
 /** Fresh-session creation and exact persisted-session adoption. */
 import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
-import { installModelSelection, type Agent, type AgentHandle } from '@deepseek-ai/dsh-agent'
+import { installModelSelection, type Agent, type AgentHandle, type ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-agent-presets'
@@ -24,7 +24,8 @@ export interface SessionOptions {
  * @returns the owned agent handle; the caller must dispose it.
  */
 export async function openSession(
-  ctx: Context, options: SessionOptions, signal: AbortSignal, connect: (agent: Agent) => void,
+  ctx: Context, options: SessionOptions, signal: AbortSignal,
+  connect: (agent: Agent, selection: ModelSelectionRef) => void,
 ): Promise<AgentHandle> {
   const agents = ctx.get('agents')
   const defaults = ctx.get('agentDefaultModel')
@@ -42,7 +43,8 @@ export async function openSession(
   const selection = defaults.currentSelection()
   const initialPreset = presets === undefined || (options.resume !== undefined && options.preset === undefined)
     ? undefined : (await presets.resolve(options.preset)).id
-  const setup = async (agentCtx: Context, agent: Agent): Promise<void> => {
+  let setupWork: Promise<void> | undefined
+  const setup = (agentCtx: Context, agent: Agent): Promise<void> => (setupWork = (async () => {
     signal.throwIfAborted()
     let preset = initialPreset
     if (options.resume !== undefined) {
@@ -57,24 +59,40 @@ export async function openSession(
         throw new Error('tui: this session requires the agentPresets service')
       }
     }
-    installModelSelection(agentCtx, { current: selection, assembled: undefined })
+    const lastRequest = options.resume === undefined ? undefined : agent.session.requestHeader()
+    // Adapter-materialized efforts retain default semantics after resume.
+    const restored = lastRequest === undefined ? selection : {
+      provider: lastRequest.config.provider, model: lastRequest.config.model,
+      ...lastRequest.config.reasoningEffort === undefined || lastRequest.adapterDefaults?.reasoningEffort === true
+        ? {} : { reasoningEffort: lastRequest.config.reasoningEffort },
+    }
+    const selectionRef: ModelSelectionRef = { current: restored, assembled: undefined }
+    installModelSelection(agentCtx, selectionRef)
     if (presets !== undefined && preset !== undefined) {
       await presets.mount(agentCtx, preset)
+      signal.throwIfAborted()
       if (options.resume !== undefined && projections.stateOf(agent.session, 'agentPreset') === null) {
         agent.session.append('agent-preset/selected', { agentPreset: preset })
       }
     }
-    connect(agent)
+    signal.throwIfAborted()
+    connect(agent, selectionRef)
+  })())
+  try {
+    if (options.resume !== undefined) {
+      if (ctx.get('sessionPersistence') === undefined) throw new Error('tui: --resume requires sessionPersistence')
+      const id = brandString<SessionId>(options.resume)
+      if (agents.get(id) !== undefined) throw new Error(`tui: session ${id} already has a live owner`)
+      return await agents.resume({ resumeSessionId: id, agentOptions: selection, signal, setup })
+    }
+    return await agents.create({
+      sessionId: brandString<SessionId>(`session-${randomUUID()}`),
+      meta: { cwd, ...initialPreset === undefined ? {} : { agentPreset: initialPreset } },
+      agentOptions: selection, signal, setup,
+    })
+  } catch (error) {
+    // Preset mounting has no abort parameter; retain its lifetime through rollback.
+    await setupWork?.catch(() => {})
+    throw error
   }
-  if (options.resume !== undefined) {
-    if (ctx.get('sessionPersistence') === undefined) throw new Error('tui: --resume requires sessionPersistence')
-    const id = brandString<SessionId>(options.resume)
-    if (agents.get(id) !== undefined) throw new Error(`tui: session ${id} already has a live owner`)
-    return await agents.resume({ resumeSessionId: id, agentOptions: selection, signal, setup })
-  }
-  return await agents.create({
-    sessionId: brandString<SessionId>(`session-${randomUUID()}`),
-    meta: { cwd, ...initialPreset === undefined ? {} : { agentPreset: initialPreset } },
-    agentOptions: selection, signal, setup,
-  })
 }

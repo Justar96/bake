@@ -3,13 +3,16 @@ import React from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render } from 'ink-testing-library'
 import { App, type AppProps } from '../src/app.tsx'
+import { emptyTranscript } from '../src/transcript.ts'
 import { dictionaries } from '../src/copy.ts'
 
 afterEach(cleanup)
 
 function props(overrides: Partial<AppProps> = {}): AppProps {
   return {
-    committed: [], live: [], pending: [], status: 'idle', stopping: false,
+    files: { query: undefined, entries: [], loading: false, error: undefined }, onReferenceQuery: () => {},
+    completion: { entries: [], loading: false, error: undefined }, completionLimit: 8,
+    committed: emptyTranscript, live: [], pending: [], status: 'idle', stopping: false,
     command: undefined, notice: undefined, interaction: undefined,
     model: 'mock/model', cwd: '/workspace', sessionId: 'session-test',
     copy: dictionaries.en, context: undefined,
@@ -20,7 +23,7 @@ function props(overrides: Partial<AppProps> = {}): AppProps {
 describe('context occupancy', () => {
   it('reports used, capacity, and percent once the meter has measured a request', () => {
     const ui = render(<App {...props({ context: { used: 12_340, window: 1_000_000 } })} />)
-    expect(ui.lastFrame()).toContain('Context: 12.3k/1M (1%)')
+    expect(ui.lastFrame()).toContain('Context: ~12.3k/1M (1%)')
   })
 
   it('shows nothing before the meter reports', () => {
@@ -33,6 +36,15 @@ describe('context occupancy', () => {
 
   it('labels the figure in the active locale', () => {
     const ui = render(<App {...props({ copy: dictionaries.zh, context: { used: 500, window: 128_000 } })} />)
-    expect(ui.lastFrame()).toContain('上下文: 500/128k (0%)')
+    expect(ui.lastFrame()).toContain('上下文: ~500/128k (0%)')
+  })
+
+  it.each(['en', 'zh'] as const)('shows the discard action beside retained input in %s', async locale => {
+    const copy = dictionaries[locale]
+    const ui = render(<App {...props({ copy, context: { used: 12_340, window: 128_000 }, pending: [{ id: 'pending-1', target: 'next-step', text: 'Queued direction' }] })} />)
+    expect(ui.lastFrame()).toContain('Queued direction')
+    expect(ui.lastFrame()).toContain(copy.pendingHelp)
+    expect(ui.lastFrame()).toContain('/clear-pending')
+    await expect(ui.lastFrame() + '\n').toMatchFileSnapshot(`./expected/pending-context.${locale}.txt`)
   })
 })

@@ -44,6 +44,8 @@ Every directly consumed workspace package has an owning reference below. Type-on
 | `dsh-authorization` | [Authorization](../packages/credentials/authorization/README.md) | List flows, present prompts, pass command cancellation |
 | `dsh-credentials` | [Credentials](../packages/credentials/credentials/README.md) | Describe configured/writable references and store secret values |
 | `dsh-cmdline` | [Command line](../packages/boot/cmdline/README.md) | Parse flags and use the launcher-owned exit callback |
+| `dsh-file-reference` | [Reference service and grammar](../packages/context/file-reference/README.md) | Cancellable scoped discovery; pure token detection and canonical mention formatting |
+| `dsh-file-reference-local` | [Local provider](../packages/context/file-reference-local/README.md) | Profile composition supplies workspace path search and model guidance |
 | `dsh-fs` | [Filesystem](../packages/fs/fs/README.md) | Resolve the actual process workspace path |
 | `dsh-util-values` | [Value utilities](../packages/util/values/README.md) | Exhaustive terminal row rendering with `assertNever` |
 | `dsh-brand` | [Brands](../packages/util/brand/README.md) | Preserve opaque Session ids |

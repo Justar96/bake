@@ -12,22 +12,19 @@ async function connected() {
   const fixture = await harness()
   cleanup.push(fixture.dispose)
   let controller!: SessionController
-  const handle = await openSession(fixture.ctx, {}, new AbortController().signal, agent => {
-    controller = new SessionController(fixture.ctx, agent, dictionaries.en, [], () => {})
+  const handle = await openSession(fixture.ctx, {}, new AbortController().signal, (agent, selection) => {
+    controller = new SessionController(fixture.ctx, agent, dictionaries.en, [], () => {}, { attachmentMaxBytes: 1048576, attachmentLimit: 8 }, selection)
   })
   cleanup.push(async () => { controller.close(); await handle.dispose(); await controller.drain() })
   await controller.replay(new AbortController().signal)
   return { ...fixture, handle, controller }
 }
 
-/** Settle the command's own async handler, which submit() does not await. */
-const settle = async (): Promise<void> => { await new Promise(resolve => { setTimeout(resolve, 20) }) }
-
 describe('/help', () => {
   it('lists every registered command with its description', async () => {
     const { controller } = await connected()
     controller.submit('/help')
-    await settle()
+    await controller.drain()
 
     const notice = controller.view.notice ?? ''
     expect(notice).toContain('/help — List available commands')
@@ -45,7 +42,7 @@ describe('/help', () => {
     }))
     try {
       controller.submit('/help')
-      await settle()
+      await controller.drain()
       expect(controller.view.notice ?? '').toContain('/elsewhere — Contributed by another plugin')
     } finally {
       void dispose()

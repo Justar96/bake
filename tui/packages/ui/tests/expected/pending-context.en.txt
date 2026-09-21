@@ -1,0 +1,9 @@
+· Session: session-test
+Pending input
+Next step: Queued direction
+/clear-pending discards queued input
+○ Ready  mock/model  /workspace
+Session: session-test  Context: ~12.3k/128k (9%)
+Enter sends · Esc interrupts · Ctrl-C twice quits
+←→ move · Home/End line · ↑↓ history · Shift-Enter newline
+> ▌

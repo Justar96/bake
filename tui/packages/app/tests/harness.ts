@@ -15,7 +15,7 @@ import Query, { type SessionEventSearchRequest } from '@deepseek-ai/dsh-session-
 import Commands from '@deepseek-ai/dsh-commands'
 import Approval from '@deepseek-ai/dsh-user-approval'
 import Questions from '@deepseek-ai/dsh-user-questions'
-import { LlmAdapter, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm'
+import { LlmAdapter, type GenerateOptions, type StreamChunk, type LlmResolvedModelInfo } from '@deepseek-ai/dsh-llm'
 
 /** Exact queries use the production implementation; ranked search is not exercised. */
 class ExactQuery extends Query {
@@ -30,7 +30,7 @@ export class ScriptedModel extends LlmAdapter {
   readonly requests: GenerateOptions[] = []
   response: (options: GenerateOptions) => AsyncIterable<StreamChunk> = async function* () { yield* textResponse('Recorded answer') }
   override providerInfo(provider: string) { return { id: provider, name: provider } }
-  override async resolveModel(provider: string, model: string) {
+  override async resolveModel(provider: string, model: string, _signal?: AbortSignal): Promise<LlmResolvedModelInfo> {
     return { provider, id: model, name: model, inputModalities: ['text'] as const, context: { contextWindow: 8192 } }
   }
   override async *stream(options: GenerateOptions) {

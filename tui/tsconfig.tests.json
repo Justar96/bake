@@ -33,6 +33,24 @@
     },
     {
       "path": "../packages/test-support/llm-replay"
+    },
+    {
+      "path": "../packages/skill/tool-skill"
+    },
+    {
+      "path": "../packages/goal/goal"
+    },
+    {
+      "path": "../packages/goal/command-goal"
+    },
+    {
+      "path": "../packages/context/file-reference-local"
+    },
+    {
+      "path": "../packages/attachment/attachment-local"
+    },
+    {
+      "path": "../packages/fs/fs-local"
     }
   ]
 }

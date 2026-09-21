@@ -2,7 +2,7 @@
 
 /** Context occupancy as the harness measures it, or absent when unknown. */
 export interface ContextUsage {
-  /** Tokens the next request would carry. */
+  /** Provider-anchored estimate of tokens in the next request. */
   readonly used: number
   /** The exact model's context capacity. */
   readonly window: number
@@ -23,7 +23,7 @@ export function formatTokens(tokens: number): string {
 }
 
 /**
- * Render context occupancy as `used/window (percent)`.
+ * Render estimated context occupancy as `~used/window (percent)`.
  *
  * The percentage rounds down, so a context that is merely close to full never
  * reads as 100%: the one number a user acts on must not overstate itself.
@@ -33,7 +33,7 @@ export function formatTokens(tokens: number): string {
  */
 export function formatContext(usage: ContextUsage): string {
   const percent = usage.window === 0 ? 0 : Math.floor((usage.used / usage.window) * 100)
-  return `${formatTokens(usage.used)}/${formatTokens(usage.window)} (${percent}%)`
+  return `~${formatTokens(usage.used)}/${formatTokens(usage.window)} (${percent}%)`
 }
 
 /**

@@ -1,0 +1,8 @@
+· Session: session-test
+○ Ready  mock/model  /workspace
+Session: session-test
+Workspace files
+› @"notes folder/read me.txt" · File
+  @"notes folder/todo.txt" · File
+↑↓ choose · Tab completes · Esc closes · Enter sends · 1/2
+> Review @"notes folder/▌"

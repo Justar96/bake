@@ -4,6 +4,7 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { AgentHandle } from '@deepseek-ai/dsh-agent'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import type { SessionId } from '@deepseek-ai/dsh-session'
+import { transcriptRows } from '@dsh-tui/ui'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'
 import { openSession } from '../src/session.ts'
 import { SessionController } from '../src/controller.ts'
@@ -17,7 +18,7 @@ async function connected() {
   cleanup.push(fixture.dispose)
   let controller!: SessionController
   const handle = await openSession(fixture.ctx, {}, new AbortController().signal, agent => {
-    controller = new SessionController(fixture.ctx, agent, dictionaries.en, [], () => {})
+    controller = new SessionController(fixture.ctx, agent, dictionaries.en, [], () => {}, { attachmentMaxBytes: 1048576, attachmentLimit: 8 })
   })
   cleanup.push(async () => { controller.close(); await handle.dispose(); await controller.drain() })
   await controller.replay(new AbortController().signal)
@@ -31,23 +32,23 @@ describe('session wiring', () => {
     controller.submit('Remember this turn')
     await handle.agent.whenIdle()
     expect(model.requests).toHaveLength(1)
-    const before = controller.view.committed
+    const before = transcriptRows(controller.view.committed)
     expect(before).toEqual([{ kind: 'user', text: 'Remember this turn' }, { kind: 'assistant', text: 'Recorded answer' }])
     const id = handle.agent.id
     controller.close()
     await handle.dispose()
     let resumed!: SessionController
     const second = await openSession(ctx, { resume: id }, new AbortController().signal, agent => {
-      resumed = new SessionController(ctx, agent, dictionaries.en, [], () => {})
+      resumed = new SessionController(ctx, agent, dictionaries.en, [], () => {}, { attachmentMaxBytes: 1048576, attachmentLimit: 8 })
     })
     cleanup.push(async () => { resumed.close(); await second.dispose() })
     await resumed.replay(new AbortController().signal)
     expect(second.agent.id).toBe(id)
     expect(ctx.sessionProjections.stateOf(second.agent.session, 'agentPreset')).toBe('audit')
-    expect(resumed.view.committed).toEqual(before)
+    expect(transcriptRows(resumed.view.committed)).toEqual(before)
     resumed.submit('Continue here')
     await second.agent.whenIdle()
-    expect(resumed.view.committed.filter(row => row.kind === 'user')).toHaveLength(2)
+    expect(transcriptRows(resumed.view.committed).filter(row => row.kind === 'user')).toHaveLength(2)
   })
 
   it('refuses an unknown id, live owner, or a conflicting preset', async () => {
@@ -88,20 +89,20 @@ describe('session wiring', () => {
   })
 
   it('routes slash commands to the registry with exact arguments and durable output', async () => {
-    const { ctx, controller, model } = await connected()
+    const { ctx, controller, model, handle } = await connected()
     const handler = vi.fn(({ rawInput }: { rawInput: string }) => ({ kind: 'success' as const, text: `Selected:${rawInput}` }))
     ctx.effect(() => ctx.commands.register({ name: 'select', description: 'Select an item', handler }))
     controller.submit('/select  item\nnext')
     await controller.drain()
     expect(handler).toHaveBeenCalledWith(expect.objectContaining({ rawInput: '  item\nnext' }))
-    expect(controller.view.committed).toEqual([
+    expect(transcriptRows(controller.view.committed)).toEqual([
       { kind: 'user', text: '/select  item\nnext' },
       { kind: 'notice', tone: 'info', text: 'Selected:  item\nnext' },
     ])
     controller.submit('/missing')
-    await controller.drain()
-    expect(controller.view.notice).toContain('Unknown command')
-    expect(model.requests).toHaveLength(0)
+    await handle.agent.whenIdle()
+    expect(model.requests).toHaveLength(1)
+    expect(JSON.stringify(model.requests[0]?.messages)).toContain('/missing')
   })
 
   it('serializes commands and records cancellation before releasing the session', async () => {
@@ -129,7 +130,7 @@ describe('session wiring', () => {
     await controller.drain()
     await finished.promise
     expect(controller.view.command).toBeUndefined()
-    expect(controller.view.committed.filter(row => row.kind === 'user')).toEqual([{ kind: 'user', text: '/wait' }])
+    expect(transcriptRows(controller.view.committed).filter(row => row.kind === 'user')).toEqual([{ kind: 'user', text: '/wait' }])
     expect(model.requests).toHaveLength(0)
     expect(handle.agent.status).toBe('idle')
     using observation = await ctx.sessionQuery.observeSession(handle.agent.id, { projectionMode: 'none' })
@@ -162,7 +163,26 @@ describe('session wiring', () => {
     expect(controller.view.stopping).toBe(false)
     expect(controller.view.live).toEqual([])
     expect(controller.view.pending).toEqual([expect.objectContaining({ text: 'Keep this steering' })])
-    expect(controller.view.committed).toContainEqual({ kind: 'notice', tone: 'warn', text: 'Interrupted' })
+    expect(transcriptRows(controller.view.committed)).toContainEqual({ kind: 'notice', tone: 'warn', text: 'Interrupted' })
+    const context = createUserMessage({ content: [{ type: 'text', text: 'Plugin context' }], source: { kind: 'plugin', plugin: 'test' } })
+    handle.agent.inject(context)
+    handle.agent.inbox.append('next-turn', createUserMessage({ content: [{ type: 'text', text: 'Queued followup' }], source: { kind: 'user' } }))
+    controller.submit('/clear-pending extra')
+    await controller.drain()
+    expect(controller.view.pending).toHaveLength(2)
+    controller.submit('/clear-pending')
+    await controller.drain()
+    expect(controller.view.pending).toEqual([])
+    expect(handle.agent.inbox.nextStep).toEqual([context])
+    expect(handle.agent.inbox.nextTurn).toEqual([])
+    controller.submit('/clear-pending')
+    await controller.drain()
+    expect(transcriptRows(controller.view.committed).at(-1)).toEqual({ kind: 'notice', tone: 'info', text: dictionaries.en.noPending })
+    model.response = async function* () { yield* textResponse('New task answer') }
+    controller.submit('A different task')
+    await handle.agent.whenIdle()
+    expect(JSON.stringify(model.requests.at(-1)?.messages)).not.toContain('Keep this steering')
+    expect(JSON.stringify(model.requests.at(-1)?.messages)).not.toContain('Queued followup')
   })
 
   it('replaces a completed live response with exactly one committed row', async () => {
@@ -171,6 +191,6 @@ describe('session wiring', () => {
     controller.submit('Answer')
     await handle.agent.whenIdle()
     expect(controller.view.live).toEqual([])
-    expect(controller.view.committed.filter(row => row.kind === 'assistant')).toEqual([{ kind: 'assistant', text: 'Only once' }])
+    expect(transcriptRows(controller.view.committed).filter(row => row.kind === 'assistant')).toEqual([{ kind: 'assistant', text: 'Only once' }])
   })
 })

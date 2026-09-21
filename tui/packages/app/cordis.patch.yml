@@ -13,6 +13,9 @@
   disabled: true
 
 - insert:
+    - id: file-reference-local
+      name: '@deepseek-ai/dsh-file-reference-local'
+
     # Agent presets, so the session mounts `standard` — the roster the web
     # surface ships. Not a base row. `default` names the preset the runner
     # mounts when --preset is absent; the runner reads it as `presets.defaultId`

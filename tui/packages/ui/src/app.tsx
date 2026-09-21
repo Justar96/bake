@@ -1,12 +1,15 @@
 /** Terminal view over committed history, live presentation, and harness-owned state. */
-import React from 'react'
+import React, { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Box, Static, Text, useInput, usePaste } from 'ink'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
 import type { AgentStatus } from '@deepseek-ai/dsh-agent'
-import type { Row } from './rows.ts'
+import { formatAttachment, type AttachmentSummary, type Row } from './rows.ts'
+import { transcriptRows, type Transcript } from './transcript.ts'
 import type { TuiCopy } from './copy.ts'
 import { formatContext, type ContextUsage } from './format.ts'
-import { useComposer } from './composer.ts'
+import { useComposer, type Submit } from './composer.ts'
+import { completionMenu, type CompletionCatalog, type CompletionChoice, type FileCatalog } from './completion.ts'
+import { inputHistory } from './history.ts'
 import { InteractionView, type Interaction, type InteractionAnswer } from './interaction.tsx'
 
 /** Display-only projection of one pending inbox message. */
@@ -14,11 +17,15 @@ export interface PendingInput {
   readonly id: string
   readonly target: 'next-step' | 'next-turn'
   readonly text: string
+  readonly attachments?: readonly AttachmentSummary[]
 }
 
 /** Application state and actions supplied by the terminal owner. */
 export interface AppProps {
-  readonly committed: readonly Row[]
+  /** Suppress composer edits while the application prepares a session handoff. */
+  readonly inputBlocked?: boolean
+  readonly attachments?: readonly AttachmentSummary[]
+  readonly committed: Transcript
   readonly live: readonly Row[]
   readonly pending: readonly PendingInput[]
   readonly status: AgentStatus
@@ -29,10 +36,15 @@ export interface AppProps {
   readonly model: string
   readonly cwd: string
   readonly sessionId: string
-  /** Context occupancy from the harness meter, absent until a request reports one. */
+  /** Projected context occupancy from the harness meter, absent before a usage sample. */
   readonly context: ContextUsage | undefined
   readonly copy: TuiCopy
-  readonly onSubmit: (text: string) => void
+  readonly completion: CompletionCatalog
+  readonly files: FileCatalog
+  readonly onReferenceQuery: (query: string | undefined) => void
+  /** Maximum visible completion and picker rows, supplied by application configuration. */
+  readonly completionLimit: number
+  readonly onSubmit: Submit
   readonly onCancel: () => void
   readonly onInterrupt: () => void
   readonly onAnswer: (id: number, answer: InteractionAnswer) => void
@@ -48,12 +60,25 @@ export function RowView({ row }: { readonly row: Row }): React.ReactElement {
     case 'tool-call': return <Text color="yellow">{'⚙ '}{row.tool}({row.input})</Text>
     case 'tool-result': return <Text color={row.ok ? 'gray' : 'red'}>{'← '}{row.text}</Text>
     case 'notice': return <Text color={row.tone === 'error' ? 'red' : row.tone === 'warn' ? 'yellow' : 'cyan'}>{row.tone === 'info' ? '· ' : '! '}{row.text}</Text>
-    case 'user': return <Text color="cyan">{'> '}{row.text}</Text>
+    case 'user': return <Text color="cyan">{'> '}{[row.text, ...(row.attachments ?? []).map(formatAttachment)].filter(Boolean).join('\n')}</Text>
     case 'reasoning': return <Text dimColor>{'· '}{row.text}</Text>
     case 'assistant': return <Text>{'  '}{row.text}</Text>
     default: return assertNever(row)
   }
 }
+
+/** Print each committed suffix once; live output and composer updates do not visit history. */
+const CommittedTranscript = memo(function CommittedTranscript({ transcript, heading }: { readonly transcript: Transcript; readonly heading: string }): React.ReactElement {
+  const printed = useRef(-1)
+  const rows = useMemo(() => {
+    const suffix = transcriptRows(transcript, Math.max(0, printed.current))
+    return printed.current < 0 ? [{ kind: 'notice' as const, tone: 'info' as const, text: heading }, ...suffix] : suffix
+  }, [transcript, heading])
+  useLayoutEffect(() => { printed.current = transcript.length }, [transcript])
+  return <Static key={transcript.length} items={rows}>
+    {(row, index) => <RowView key={index} row={row} />}
+  </Static>
+})
 
 /**
  * Render the terminal session. Ink owns key decoding and bracketed-paste mode.
@@ -61,32 +86,100 @@ export function RowView({ row }: { readonly row: Row }): React.ReactElement {
  * @returns transcript, active interaction, status, and composer.
  */
 export function App(props: AppProps): React.ReactElement {
-  const composer = useComposer(props.onSubmit)
+  return <SessionView key={props.sessionId} {...props} />
+}
+
+function SessionView(props: AppProps): React.ReactElement {
+  const composer = useComposer(props.onSubmit, () => inputHistory(props.committed, props.pending), (props.attachments?.length ?? 0) > 0)
   const { copy, interaction } = props
-  usePaste(composer.paste, { isActive: interaction === undefined })
+  const [menu, setMenu] = useState({ draft: '', cursor: 0, selected: '', dismissed: false })
+  const currentMenu = useRef(menu)
+  const updateMenu = (selected: string, dismissed: boolean): void => {
+    currentMenu.current = { draft: composer.value, cursor: composer.position, selected, dismissed }
+    setMenu(currentMenu.current)
+  }
+  const samePosition = (draft: string, cursor: number) => currentMenu.current.draft === draft && currentMenu.current.cursor === cursor
+  const matchesFor = (draft: string, cursor: number) => interaction !== undefined || props.inputBlocked === true || composer.blocked
+    || (samePosition(draft, cursor) && currentMenu.current.dismissed)
+    ? undefined : completionMenu(props.completion, props.files, draft, cursor)
+  const selectedIndex = (matches: readonly CompletionChoice[], draft: string, cursor: number): number =>
+    samePosition(draft, cursor) ? Math.max(0, matches.findIndex(item => item.name === currentMenu.current.selected)) : 0
+  const visibleMenu = matchesFor(composer.text, composer.cursor)
+  const matches = visibleMenu?.entries
+  const query = visibleMenu?.query
+  useEffect(() => { props.onReferenceQuery(query) }, [props.onReferenceQuery, query])
+  const selected = matches === undefined ? 0 : selectedIndex(matches, composer.text, composer.cursor)
+  const start = Math.max(0, selected - props.completionLimit + 1)
+  usePaste(composer.paste, { isActive: interaction === undefined && props.inputBlocked !== true && !composer.submitting })
   useInput((text, key) => {
     if (key.ctrl && text === 'c') { props.onInterrupt(); return }
-    if (key.escape) { props.onCancel(); return }
-    if (interaction !== undefined || key.ctrl || key.meta) return
-    if (key.backspace || key.delete) composer.erase()
-    else composer.type(key.return ? '\n' : text)
+    const choices = matchesFor(composer.value, composer.position)?.entries
+    if (key.escape) {
+      if (choices !== undefined) { updateMenu('', true); return }
+      props.onCancel(); return
+    }
+    if (interaction !== undefined || props.inputBlocked === true || composer.blocked || key.meta) return
+    if (key.ctrl && (text === 'p' || text === 'n')) {
+      composer.recall(text === 'p' ? 'older' : 'newer'); updateMenu('', true); return
+    }
+    if (composer.editKey(text, key)) return
+    if (key.ctrl) return
+    if (choices !== undefined && (key.upArrow || key.downArrow || key.tab)) {
+      if (choices.length === 0) return
+      const index = selectedIndex(choices, composer.value, composer.position)
+      if (key.tab) composer.replace(choices[index]!.draft, choices[index]!.cursor)
+      else updateMenu(choices[(index + (key.downArrow ? 1 : -1) + choices.length) % choices.length]!.name, false)
+      return
+    }
+    if (key.upArrow || key.downArrow) {
+      composer.recall(key.upArrow ? 'older' : 'newer'); updateMenu('', true); return
+    }
+    if (key.shift && key.return) { composer.paste('\n'); return }
+    const parts = (key.return ? '\n' : text).split('\t')
+    for (let index = 0; index < parts.length; index++) {
+      if (index > 0) {
+        const candidates = matchesFor(composer.value, composer.position)?.entries
+        if (candidates === undefined) composer.type('\t')
+        else if (candidates.length > 0) {
+          const choice = candidates[selectedIndex(candidates, composer.value, composer.position)]!
+          composer.replace(choice.draft, choice.cursor)
+        }
+      }
+      composer.type(parts[index]!)
+    }
   })
-  const status = props.stopping ? copy.stopping : props.status === 'running' ? copy.working : copy.ready
+  const status = props.inputBlocked === true ? copy.sessionsBusy : props.stopping ? copy.stopping : props.status === 'running' ? copy.working : copy.ready
   return <Box flexDirection="column">
-    <Static items={props.committed.map((row, key) => ({ row, key }))}>
-      {item => <RowView key={item.key} row={item.row} />}
-    </Static>
+    <CommittedTranscript transcript={props.committed} heading={`${copy.session}: ${props.sessionId}`} />
     {props.live.map((row, index) => <RowView key={index} row={row} />)}
     {props.pending.length > 0 && <Box flexDirection="column">
       <Text color="yellow">{copy.pending}</Text>
-      {props.pending.map(message => <Text key={message.id} dimColor>{message.target === 'next-step' ? copy.nextStep : copy.nextTurn}: {message.text}</Text>)}
+      {props.pending.map(message => <Text key={message.id} dimColor>{message.target === 'next-step' ? copy.nextStep : copy.nextTurn}: {[message.text, ...(message.attachments ?? []).map(formatAttachment)].filter(Boolean).join('\n')}</Text>)}
+      <Text dimColor>{copy.pendingHelp}</Text>
     </Box>}
-    {interaction !== undefined && <InteractionView key={interaction.id} interaction={interaction} copy={copy} onAnswer={props.onAnswer} />}
+    {(props.attachments?.length ?? 0) > 0 && <Box flexDirection="column">
+      <Text color="cyan">{copy.attachmentsTitle}{': '}{props.attachments!.length}</Text>
+      {props.attachments!.slice(0, props.completionLimit).map((item, index) => <Text key={index} dimColor>{index + 1}. {formatAttachment(item)}</Text>)}
+      <Text dimColor>{copy.attachmentsHelp}</Text>
+    </Box>}
+    {composer.submitting && <Text color="yellow">{copy.attachmentsSending}</Text>}
+    {interaction !== undefined && <InteractionView key={interaction.id} interaction={interaction} copy={copy} limit={props.completionLimit} onAnswer={props.onAnswer} />}
     <Text dimColor>{props.status === 'running' ? '● ' : '○ '}{status}{'  '}{props.model}{'  '}{props.cwd}</Text>
     <Text dimColor>{copy.session}: {props.sessionId}{props.context === undefined ? '' : `  ${copy.context}: ${formatContext(props.context)}`}</Text>
     {props.command !== undefined && <Text>{copy.command}: {props.command}</Text>}
     {props.notice !== undefined && <Text color="yellow">{props.notice}</Text>}
-    <Text dimColor>{copy.help}{props.status === 'running' ? ` · ${copy.steering}` : ''}</Text>
-    {interaction === undefined && <Text>{'> '}{composer.text}▌</Text>}
+    {matches !== undefined && <Box flexDirection="column">
+      <Text dimColor>{visibleMenu?.kind === 'file' ? copy.filesTitle : copy.completionTitle}</Text>
+      {matches.slice(start, start + props.completionLimit).map((entry, index) => <Text key={entry.name} wrap="truncate-end" {...start + index === selected ? { color: 'cyan' as const } : {}}>
+        {start + index === selected ? '› ' : '  '}{entry.name}{' · '}{copy[entry.kind]}{entry.description === '' ? '' : ` · ${entry.description}`}
+      </Text>)}
+      {matches.length === 0 && !visibleMenu?.loading && <Text dimColor>{visibleMenu?.kind === 'file' ? copy.noFiles : copy.noCompletions}</Text>}
+      {visibleMenu?.loading && <Text dimColor>{visibleMenu?.kind === 'file' ? copy.filesLoading : copy.catalogLoading}</Text>}
+      {visibleMenu?.error !== undefined && <Text color="yellow">{visibleMenu?.kind === 'file' ? copy.filesError : copy.catalogError}{': '}{visibleMenu.error}</Text>}
+      <Text dimColor>{copy.completionHelp}{' · '}{props.status === 'running' ? copy.steering : copy.send}{matches.length === 0 ? '' : ` · ${selected + 1}/${matches.length}`}</Text>
+    </Box>}
+    {matches === undefined && interaction === undefined && <Text dimColor>{copy.help}{props.status === 'running' ? ` · ${copy.steering}` : ''}</Text>}
+    {matches === undefined && interaction === undefined && <Text dimColor>{copy.editHelp}</Text>}
+    {interaction === undefined && <Text>{'> '}{composer.before}▌{composer.after}</Text>}
   </Box>
 }

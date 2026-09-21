@@ -11,6 +11,9 @@
   disabled: true
 
 - insert:
+    - id: file-reference-local
+      name: '@deepseek-ai/dsh-file-reference-local'
+
     - id: agent-presets
       name: '@deepseek-ai/dsh-agent-presets'
       config:

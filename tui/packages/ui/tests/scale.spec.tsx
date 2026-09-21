@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'ink'
 import { App, type AppProps } from '../src/app.tsx'
 import { dictionaries } from '../src/copy.ts'
+import { appendTranscript, emptyTranscript, type Transcript } from '../src/transcript.ts'
 import type { Row } from '../src/rows.ts'
 
 /** A write-capturing stand-in for the terminal; Ink only needs these members. */
@@ -13,8 +14,9 @@ function fakeStdout(): NodeJS.WriteStream & { chunks: string[] } {
     columns: 200,
     rows: 40,
     isTTY: true,
-    write(chunk: string): boolean {
+    write(chunk: string, callback?: () => void): boolean {
       stream.chunks.push(chunk)
+      callback?.()
       return true
     },
     on: () => stream,
@@ -50,8 +52,10 @@ function fakeStdin(): NodeJS.ReadStream {
   return stream as unknown as NodeJS.ReadStream
 }
 
-function props(committed: readonly Row[], overrides: Partial<AppProps> = {}): AppProps {
+function props(committed: Transcript, overrides: Partial<AppProps> = {}): AppProps {
   return {
+    files: { query: undefined, entries: [], loading: false, error: undefined }, onReferenceQuery: () => {},
+    completion: { entries: [], loading: false, error: undefined }, completionLimit: 8,
     committed,
     live: [], pending: [], status: 'idle', stopping: false,
     command: undefined, notice: undefined, interaction: undefined,
@@ -64,9 +68,6 @@ function props(committed: readonly Row[], overrides: Partial<AppProps> = {}): Ap
 const rowsUpTo = (count: number): Row[] =>
   Array.from({ length: count }, (_, index) => ({ kind: 'assistant', text: `row-${index}-marker` }))
 
-/** Ink throttles writes, so a measurement that does not wait measures nothing. */
-const flush = async (): Promise<void> => { await new Promise(resolve => { setTimeout(resolve, 80) }) }
-
 const instances: { unmount: () => void }[] = []
 afterEach(() => {
   for (const instance of instances.splice(0)) instance.unmount()
@@ -78,49 +79,92 @@ async function mounted(count: number): Promise<{
   append: (rows: readonly Row[]) => Promise<string>
 }> {
   const stdout = fakeStdout()
-  const instance = render(<App {...props(rowsUpTo(count))} />, {
+  let transcript = appendTranscript(emptyTranscript, rowsUpTo(count))
+  const instance = render(<App {...props(transcript)} />, {
     stdout, stdin: fakeStdin(), patchConsole: false, exitOnCtrlC: false,
   })
   instances.push(instance)
-  await flush()
+  await instance.waitUntilRenderFlush()
   return {
     stdout,
     async append(rows: readonly Row[]): Promise<string> {
       stdout.chunks.length = 0
-      instance.rerender(<App {...props(rows)} />)
-      await flush()
+      transcript = appendTranscript(transcript, rows)
+      instance.rerender(<App {...props(transcript)} />)
+      await instance.waitUntilRenderFlush()
       return stdout.chunks.join('')
     },
   }
 }
 
 describe('transcript cost', () => {
+  it.each([50, 10_000])('does not read %i committed rows while streaming', async count => {
+    let reads = 0
+    const history = new Proxy(rowsUpTo(count), {
+      get(target, property, receiver) {
+        if (typeof property === 'string' && /^\d+$/.test(property)) reads++
+        return Reflect.get(target, property, receiver)
+      },
+    })
+    const committed = appendTranscript(emptyTranscript, history)
+    const stdout = fakeStdout()
+    const instance = render(<App {...props(committed)} />, {
+      stdout, stdin: fakeStdin(), patchConsole: false, exitOnCtrlC: false,
+    })
+    instances.push(instance)
+    await instance.waitUntilRenderFlush()
+    reads = 0
+    instance.rerender(<App {...props(committed, { live: [{ kind: 'assistant', text: 'stream-marker' }] })} />)
+    await instance.waitUntilRenderFlush()
+    expect(stdout.chunks.join('')).toContain('stream-marker')
+    expect(reads).toBe(0)
+    instance.rerender(<App {...props(appendTranscript(committed, [{ kind: 'assistant', text: 'append-marker' }]))} />)
+    await instance.waitUntilRenderFlush()
+    expect(stdout.chunks.join('')).toContain('append-marker')
+    expect(reads).toBe(0)
+  })
+
   it('writes a committed row once and never again', async () => {
     const ui = await mounted(50)
-    const written = await ui.append([...rowsUpTo(50), { kind: 'assistant', text: 'row-50-marker' }])
+    const written = await ui.append([{ kind: 'assistant', text: 'row-50-marker' }])
 
-    // The new row is emitted...
     expect(written).toContain('row-50-marker')
-    // ...and no earlier row is re-emitted with it. A transcript that repaints
-    // would carry every one of these on every append, which is the quadratic
-    // cost `<Static>` exists to avoid.
     expect(written).not.toContain('row-0-marker')
     expect(written).not.toContain('row-49-marker')
   })
 
-  it('costs the same to append at 50 rows as at 2000', async () => {
+  it('prints every committed row once across coalesced and flushed appends', async () => {
+    const stdout = fakeStdout()
+    let transcript = emptyTranscript
+    const instance = render(<App {...props(transcript)} />, {
+      stdout, stdin: fakeStdin(), patchConsole: false, exitOnCtrlC: false,
+    })
+    instances.push(instance)
+    await instance.waitUntilRenderFlush()
+    const expected: string[] = []
+    for (let burst = 0; burst < 4; burst++) {
+      for (let item = 0; item < 8; item++) {
+        const text = `burst-${burst}-${item}-marker`
+        expected.push(text)
+        transcript = appendTranscript(transcript, [{ kind: 'assistant', text }])
+        instance.rerender(<App {...props(transcript)} />)
+      }
+      await instance.waitUntilRenderFlush()
+    }
+    const printed = stdout.chunks.join('').match(/burst-\d+-\d+-marker/g)
+    expect(printed).toEqual(expected)
+  })
+
+  it('emits bounded terminal output when appending at 50 and 2000 rows', async () => {
     const short = await mounted(50)
     const long = await mounted(2000)
 
     const row = { kind: 'assistant', text: 'appended-marker' } as const
-    const afterShort = await short.append([...rowsUpTo(50), row])
-    const afterLong = await long.append([...rowsUpTo(2000), row])
+    const afterShort = await short.append([row])
+    const afterLong = await long.append([row])
 
     expect(afterShort).toContain('appended-marker')
     expect(afterLong).toContain('appended-marker')
-    // History length must not enter the cost of one append. Compared as a
-    // ratio so the dynamic footer, which every append redraws, does not make
-    // this an exact-byte assertion.
     expect(afterLong.length).toBeLessThan(afterShort.length * 1.5)
   })
 })

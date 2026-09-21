@@ -1,0 +1,12 @@
+· Session: session-test
+> First prompt
+  Do not recall this answer
+> Second prompt
+Pending input
+Next step: Queued prompt
+/clear-pending discards queued input
+○ Ready  mock/model  /workspace
+Session: session-test
+Enter sends · Esc interrupts · Ctrl-C twice quits
+←→ move · Home/End line · ↑↓ history · Shift-Enter newline
+> Unsent draf▌t

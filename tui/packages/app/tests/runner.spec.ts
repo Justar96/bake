@@ -38,7 +38,7 @@ it.each(['quit', 'dispose'] as const)('restores Ink modes and drains the agent o
   const exit = vi.fn()
   // These streams implement exactly the terminal methods Ink consumes.
   const io = { in: input, out: output, err: error, exit } as unknown as TuiIo
-  const finished = run(fixture.ctx, { locale: 'en', doubleInterruptMs: 500, credentialRefs: [] }, io)
+  const finished = run(fixture.ctx, { locale: 'en', completionLimit: 8, attachmentMaxBytes: 1048576, attachmentLimit: 8, doubleInterruptMs: 500, credentialRefs: [] }, io)
   cleanup.push(async () => { await fixture.ctx.fiber.dispose(); await finished })
   await Promise.race([finished, vi.waitFor(() => expect(output.text).toContain('Ready'))])
   expect(input.isRaw).toBe(true)
@@ -65,7 +65,7 @@ it('refuses a piped launch before acquiring terminal modes', async () => {
   const input = new Input()
   input.isTTY = false
   const output = new Output()
-  await expect(run(fixture.ctx, { locale: 'en', doubleInterruptMs: 500, credentialRefs: [] }, {
+  await expect(run(fixture.ctx, { locale: 'en', completionLimit: 8, attachmentMaxBytes: 1048576, attachmentLimit: 8, doubleInterruptMs: 500, credentialRefs: [] }, {
     in: input, out: output, err: output, exit: vi.fn(),
   } as unknown as TuiIo)).rejects.toThrow('interactive terminal')
   expect(input.isRaw).toBe(false)

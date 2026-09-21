@@ -1,0 +1,10 @@
+· Session: session-test
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Choose model                                                                                     │
+│   mock/current · Current                                                                         │
+│ › mock/other                                                                                     │
+│ Type to filter · ↑↓ choose · Enter selects · Esc cancels · 2/3                                   │
+│ > ▌                                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+○ Ready  mock/model  /workspace
+Session: session-test

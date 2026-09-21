@@ -8,7 +8,7 @@
  */
 
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
-import type { Row } from './rows.ts'
+import { attachmentSummaries, type Row } from './rows.ts'
 
 /** Rows for one event; empty when the event has no terminal presentation. */
 export type Projection = readonly Row[]
@@ -34,7 +34,8 @@ export function project(event: SessionEvent): Projection {
       // Only the human's own words belong in the transcript as a user row.
       if (event.data.source.kind !== 'user') return NONE
       const text = textOf(event.data.content)
-      return text === '' ? NONE : [{ kind: 'user', text }]
+      const attachments = attachmentSummaries(event.data.content)
+      return text === '' && attachments.length === 0 ? NONE : [{ kind: 'user', text, ...attachments.length === 0 ? {} : { attachments } }]
     }
 
     case 'assistant/message': {

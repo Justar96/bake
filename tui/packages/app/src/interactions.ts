@@ -4,6 +4,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 import { UserQuestionError } from '@deepseek-ai/dsh-user-questions'
 import type { AuthorizationPrompt } from '@deepseek-ai/dsh-authorization/types'
+import type { ChoicePrompt } from '@dsh-tui/ui/picker.tsx'
 import type { Interaction, InteractionAnswer } from '@dsh-tui/ui/interaction.tsx'
 
 interface Pending {
@@ -44,7 +45,7 @@ export class Interactions {
           return value
         }, () => { throw new UserQuestionError('Question cancelled', 'ASK_ABORTED') })
     }))
-    ctx.effect(() => () => this.dispose(), 'tui interactions')
+    agent.ctx.effect(() => () => this.dispose(), 'tui interactions')
   }
 
   /** The oldest outstanding question; later requests cannot replace it. */
@@ -85,6 +86,19 @@ export class Interactions {
         if (typeof value !== 'string') throw new Error('tui: invalid authorization answer')
         return value
       }, () => { throw new Error('Authorization cancelled') })
+  }
+
+  /**
+   * Request a terminal-owned choice without writing conversation input.
+   * @param prompt - available values, labels, and initial selection.
+   * @param signal - owning command lifetime.
+   * @returns the chosen value, or undefined when dismissed.
+   */
+  choose(prompt: ChoicePrompt, signal: AbortSignal): Promise<string | undefined> {
+    return this.enqueue({ ...prompt, id: ++this.nextId, kind: 'select' }, signal, value => {
+      if (typeof value !== 'string' || !prompt.choices.some(choice => choice.value === value)) throw new Error('tui: invalid picker answer')
+      return value
+    }, () => undefined)
   }
 
   private enqueue<T>(view: Interaction, signal: AbortSignal | undefined,

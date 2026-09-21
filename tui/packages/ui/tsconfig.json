@@ -20,6 +20,9 @@
     },
     {
       "path": "../../../packages/util/values"
+    },
+    {
+      "path": "../../../packages/context/file-reference"
     }
   ]
 }

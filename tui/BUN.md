@@ -73,6 +73,6 @@ All read or write `bun.lock`. The workspace is pnpm-managed and must stay that w
 
 ### Bun Shell for Windows-portable scripts
 
-`scripts/{build,check,pty-smoke}.sh` are bash, so a Windows contributor cannot run the gate. Bun Shell (`$`) runs the same script on Windows, and scripts never enter the dsh process, so the rule permits it.
+`scripts/tui` and `scripts/{build,check,pty-smoke}.sh` are bash, so a Windows contributor cannot run the gate. Bun Shell (`$`) runs the same script on Windows, and scripts never enter the dsh process, so the rule permits it.
 
 Two caveats before anyone starts: `pty-smoke.py` uses `openpty` and is Unix-only regardless of shell, and upstream already carries `check:windows-wine`, so the fork should match however upstream expects Windows to be exercised rather than inventing a second answer.

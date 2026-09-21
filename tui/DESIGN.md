@@ -1,6 +1,6 @@
 # TUI wiring reference
 
-The TUI owns one terminal and one root Agent. [Application usage](packages/app/README.md), [presentation](packages/ui/README.md), and [dependency references](DEPENDENCIES.md) describe its supported behavior.
+The TUI owns one terminal and displays one root Agent at a time. [Application usage](packages/app/README.md), [presentation](packages/ui/README.md), and [dependency references](DEPENDENCIES.md) describe its supported behavior.
 
 ## 1. Topology
 
@@ -16,14 +16,18 @@ A fresh session records `cwd` and the resolved `agentPreset` in its header. Resu
 
 | Action | Harness owner |
 |---|---|
+| Session navigation | `sessionQuery.filterSessions` and `readTitleSnapshots`; `navigation.ts` owns the displayed handle |
 | Create and resume | `agents.create` / `agents.resume`, returning an owned `AgentHandle` |
-| Model selection | `agentDefaultModel.currentSelection` and `installModelSelection` |
+| Model selection | `llm.listProviders` / `listModels` / `resolveModelInfo`, `agentDefaultModel.currentSelection`, and `installModelSelection`; resume reads the last `session.requestHeader()` |
 | Preset composition | `agentPresets.resolve` / `mount` and the `agentPreset` projection |
 | History | `sessionQuery.observeSession` plus `session/event` |
 | New prompt / steering | `agent.followup` / `agent.steer`, selected from current `agent.status` |
-| Slash input | `parseCommand` and `commands.execute`, including a session-scoped `/login` registration |
+| Slash input | `parseCommand`, `commands.find` / `execute`; unregistered names remain ordinary user input |
+| Slash discovery | `commands.list(agent)` and the preset-owned `skills.snapshot({ cwd, scope: agent, signal })`, filtered with `isUserInvocable` |
+| File discovery | `agent.ctx.fileReferences.list(agent, query, signal)`, supplied by the composed `file-reference-local` provider |
 | Tool approval | `approval/request` waterfall |
 | Questions and plan review | `user-questions/request` waterfall |
+| Discard queued human input | `agent.inbox.remove(id)` for both pending targets |
 | Interrupt | `agent.cancel({ kind: 'user' }, { keepInbox: true })` |
 | Shutdown | `AgentHandle.dispose`, which drains the driver and persistence |
 
@@ -33,11 +37,12 @@ A fresh session records `cwd` and the resolved `agentPreset` in its header. Resu
 |---|---|
 | Activity | `agent.status`, notified by `agent/status` |
 | Pending input | `sessionProjections.stateOf(session, 'inbox')`, notified by `onChanged` |
+| Context occupancy | `sessionProjections.snapshot(session, ['contextPressure']).values.contextPressure.projectedTokens` and `contextWindow`, notified by `onChanged` |
 | Committed transcript | Session events projected into immutable rows |
 | Live response | Ordered `agent/assistant-stream` frames for the active attempt |
 | Human request | The oldest outstanding scoped interaction and its abort signal |
 
-The TUI stores only presentation state: draft text, transient output, the displayed request, command activity, a requested interruption, and application notices. It does not fold turn boundaries, inbox state, tokens, or context pressure independently. Stopping ends when the Agent reports idle.
+The TUI stores only presentation state: draft text, transient output, the displayed request, command activity, a requested interruption, and application notices. It does not fold turn boundaries, inbox state, tokens, or context pressure independently. Stopping ends when the Agent reports idle. The context figure includes projected growth and compaction after the last provider usage sample; `~` marks it as an estimate. Internal `stateOf` values do not expose the public `projectedTokens` field.
 
 ## 4. Transcript flow
 
@@ -53,17 +58,23 @@ Compaction replacements do not append duplicate tool rows. Terminal scrollback r
 
 ### 4.4. Measured transcript cost
 
-`packages/ui/tests/scale.spec.tsx` holds `Static` to its guarantee: a committed row is emitted once and never re-emitted, and appending at 2000 rows costs no more than appending at 50. History length does not enter the cost of an append.
+Committed history uses immutable linked batches. Appending a batch shares the preceding snapshot without reading or copying its rows. A memoized renderer reads only the unprinted suffix and passes it to Ink `Static`; streaming and composer updates leave committed rows untouched. Initial replay still reads the complete history, and retained memory grows with transcript size.
 
-Three measurement facts, each of which otherwise fakes a pass. Ink throttles writes, so a synchronous rerender loop coalesces every append into one frame and measures nothing. A test stdout needs a matching stdin: without one, `useInput` calls `setRawMode` on the real non-TTY stdin, throws inside an effect, and the component stops re-rendering after its first frame, which reads exactly like a transcript that never repaints. `ink-testing-library` cannot measure this at all, because its frames are full-frame snapshots that contain every old row by construction; raw stdout capture is the only instrument that separates the two.
+`packages/ui/tests/scale.spec.tsx` counts history reads at 50 and 10,000 rows, checks row order and single emission across coalesced appends, and compares terminal bytes at 50 and 2000 rows. Each measurement waits for Ink’s render flush on paired fake terminal streams. These checks cover row processing and terminal output, not whole-process latency or memory bounds.
 
 ## 5. Input flow
 
-Ink `usePaste` owns bracketed-paste decoding and mode changes. Paste only inserts text, including line breaks. The independent `useInput` handler interprets Enter, Escape, and Ctrl-C; it also handles ordinary text and Enter delivered in one read. A shared composer keeps same-read edits available before the next React paint. Backspace removes one Unicode grapheme.
+Ink `usePaste` owns bracketed-paste decoding and mode changes. Paste inserts text at the cursor, including line breaks, without submitting. The independent `useInput` handler interprets Enter, Escape, and Ctrl-C; it also handles ordinary text and Enter delivered in one read. A shared composer keeps same-read edits available before the next React paint. Cursor movement and deletion preserve Unicode graphemes; Home/End and Ctrl-A/E use logical-line boundaries. Shift-Enter inserts a newline, and Enter submits the entire draft.
+
+History recall lazily traverses the current pending human input and immutable committed user rows, newest first. A browse visit retains its starting transcript snapshot, the unsent draft and cursor, and local edits to visited entries. Returning past the newest entry restores that draft; submitting clears the visit. No separate durable history is stored, and ordinary typing does not traverse the transcript. Up/Down browses when completion is closed; Ctrl-P/N recalls through an open menu. Recall dismisses completion until the text or cursor changes. Questions and login prompts receive no history source.
+
+A leading slash token opens the command and skill menu while the cursor is in that token. Up/Down selects a row; Tab replaces the token without submitting and preserves subsequent arguments. Command registrations win name collisions. Discovery observes `commands/change` and `skills/change`; cancellation prevents stale reads from replacing current entries. Metadata reads never load skill bodies. Unregistered slash names pass unchanged to the Harness’s ordinary input path; `tool-skill` owns recognition, instruction injection, and durable recording.
+
+An active `@` token at the cursor opens path discovery through `references.ts`. The Harness grammar detects tokens and formats mentions, including quoted spaces and directory suffixes. Tab replaces the entire token while preserving surrounding text and reusing an existing separator. Quoted directory completion leaves the cursor before the closing quote to keep discovery open; moving past that quote closes the menu. Query-tagged results prevent stale insertion, and changing or closing a query aborts its read. The provider owns cwd, exclusions, ranking, limits, and path-only model guidance; the TUI never reads file contents for completion.
 
 Enter submits a non-empty prompt or registered command. While an Agent runs, ordinary text steers its next step. The inbox projection displays queued human input until the harness consumes it. One command runs at a time, with visible feedback for a competing command.
 
-Escape cancels the displayed interaction, otherwise the active command, otherwise the Agent. Agent interruption retains the inbox. Ctrl-C displays a quit hint; another Ctrl-C within the configured interval quits. The application owns that timer; presentation components have no clock.
+Escape closes an open completion menu, otherwise cancels the displayed interaction, active command, or Agent in that order. Agent interruption retains the inbox. The pending panel offers `/clear-pending`, which removes only queued human messages through `agent.inbox.remove`; plugin context remains untouched. Command results and removals use the existing durable Harness events, so discarded input stays discarded after resume. Ctrl-C displays a quit hint; another Ctrl-C within the configured interval quits. The application owns that timer; presentation components have no clock.
 
 ## 6. Human decisions
 
@@ -71,13 +82,35 @@ The interaction queue accepts requests only for the exact owned Agent and calls 
 
 Approval displays the tool, call id when supplied, and reason. Typed Y grants once, N rejects, and Escape cancels. Pasted Y cannot grant permission. Structured questions display every option and the complete detail, including plan Markdown. Numbered answers resolve to the exact option labels; written answers use the service's custom-answer field. Plan approval follows the named option, without assuming its position.
 
-## 6b. Provider login
+## 6a. Model selection
+
+`/model` offers a filterable route picker and, when declared by that model, an effort picker. `model.ts` reads advisory provider catalogs and resolves exact capabilities only for selected routes. Failed catalogs produce a visible warning without hiding other providers or the current route. Effort values and labels come from the adapter; omitting an effort preserves provider-default behavior. Both pickers share the abortable interaction queue and configured row limit.
+
+The controller changes `ModelSelectionRef.current` only after acceptance and final capability validation. Agent activity aborts the pending selection, preventing a lookup started while idle from committing during a turn. The Harness records the selected route and effort in request headers and supplies model-switch notices. Resume restores the last requested selection and uses `adapterDefaults.reasoningEffort` to distinguish implicit defaults from explicit choices. Unused choices are not durable and do not change profile settings.
+
+## 6b. Session navigation
+
+`/sessions` finishes its Harness command lifecycle before `navigation.ts` lists current-workspace sessions and reads their log-backed titles. The filterable picker includes a new-session choice, omits subagents and other live Agent owners, and keeps ids usable when title reads fail. New sessions use profile defaults; resumed sessions use the existing exact-id workspace, preset, and last-request configuration checks. Legacy preset selection remains a startup operation.
+
+Navigation requires the displayed Agent to be idle with both inbox targets empty, including plugin input. Status and inbox changes abort preparation, and the application refuses composer submissions until navigation settles. The previous controller stays displayed while the replacement mounts and replays; failure or cancellation disposes the candidate. Handoff changes the displayed controller synchronously, then closes and drains the previous controller and handle. Escape cancels preparation before handoff; handle retirement completes once handoff is accepted. Preset mounting has no cancellation parameter, so rollback waits for that work to settle before returning.
+
+The session id keys presentation lifetime. Switching resets the draft, cursor, completion, and recall visit and prints the selected history beneath a localized session heading. Existing terminal scrollback remains, with one history replay per visit. No TUI session store or model-request lifecycle is introduced.
+
+## 6c. Provider login
 
 `/login` is a session-scoped harness command. Configured credential references are described through `credentials`; interactive flows come from `authorization.list`. Secret prompts are masked and their values never enter command arguments, Session events, or model input. Key writes use `credentials.set`; authorization flows receive the command's abort signal. The existing credentials provider owns storage and write restrictions.
 
+## 6d. Attachment input
+
+The attachment controls and supported formats are documented in the [application README](packages/app/README.md#use-this-package). `AttachmentDraft` owns only bounded, unsubmitted source bytes. Scoped Harness filesystem reads resolve paths; the attachment store validates and admits image batches and saves generic files. The selected Harness model reference supplies image capability lookup and is rechecked before inbox submission. No attachment receipts or persistence formats are introduced.
+
+The controller serializes attachment operations, drains storage calls that have no abort parameter, and checks cancellation before submitting. The Agent's current status chooses `steer` or `followup`; accepted inbox input clears the draft. The UI receives metadata and an acceptance result, retaining text and cursor on refusal. Staged bytes block session navigation and are released during controller closure.
+
 ## 7. Teardown
 
-One idempotent `releaseTerminal` closes observers and human requests, clears the quit timer, and calls Ink `cleanup`. It runs before asynchronous Agent disposal. The same Cordis effect handles plugin unmount and the launcher's `installFailLoud` release hook. `waitUntilExit` propagates renderer errors instead of leaving the runner waiting for keyboard input.
+One idempotent `releaseTerminal` cancels navigation and closes observers and human requests, aborts command, skill, and file discovery, clears the quit timer, and calls Ink `cleanup`. It runs before asynchronous Agent disposal. The same Cordis effect handles plugin unmount and the launcher's `installFailLoud` release hook. `waitUntilExit` propagates renderer errors instead of leaving the runner waiting for keyboard input.
+
+Model catalog reads use the upstream `listModels` API, which has no cancellation parameter. Canceled commands suppress later UI updates and drain an active catalog call after terminal release.
 
 Ink owns raw mode, bracketed paste, and cursor restoration. The application does not issue a second manual paste-mode lease. Node integration tests exercise ordinary quit and context disposal; the PTY smoke additionally checks actual terminal attributes, exit status, and paste-mode release.
 
@@ -89,14 +122,21 @@ Ink owns raw mode, bracketed paste, and cursor restoration. The application does
 | `preset` | roster default for a fresh session | Fresh composition, or explicit legacy-session composition |
 | `locale` | `en` | `en` or `zh` labels |
 | `doubleInterruptMs` | `500` | Interval for a second Ctrl-C to quit |
+| `completionLimit` | `8` | Positive integer limiting visible completion, picker, and staged-attachment rows |
+| `attachmentMaxBytes` | `16777216` | Positive integer bounding total staged source bytes; Harness image limits also apply |
+| `attachmentLimit` | `8` | Positive integer bounding staged source count |
 | `credentialRefs` | `[]` | Provider key references offered by `/login`; the supplied patch names `DEEPSEEK_API_KEY` |
 
 Schemastery validates and defaults configuration before the runner receives it. Locale dictionaries own application text; model output, tool results, and provider-owned diagnostics remain verbatim.
 
 ## 9. Validation
 
-[The check script](scripts/check.sh) runs strict application/test TypeScript checks, pure Bun tests, and Node component/integration tests. [The PTY smoke](scripts/pty-smoke.py) launches the built profile in a private workspace and home, replays the shared recorded bash scenario, compares persisted model and real tool output, resumes the exact session, and checks terminal restoration. `--live` uses the root `.env` for a real DeepSeek call.
+[The dispatcher](scripts/tui) runs every development and validation command; `tui/scripts/tui help` prints them, and `verify` is the pre-push pair.
+
+[The check script](scripts/check.sh) owns six individually selectable targets: React instance identity for upstream DOM tests and each TUI Ink consumer, strict application/test TypeScript checks, pure Bun tests, Node component/integration tests, the rendered layout invariants, and local Markdown links.
+
+[The PTY smoke](scripts/pty-smoke.py) launches the built profile in a private workspace and home and drives it through named scenarios, each declaring what it proves and which scenarios it requires, so `--only` runs one with its prerequisites. Together they replay the shared recorded bash scenario, compare persisted model and real tool output, resume the exact session, check projected context display, and exercise cursor editing, paste, history recall with draft restoration after resume, picker cancellation and new-session/resume navigation, model/effort selection and restored request configuration, slash and quoted-file completion, logged skill invocation, cancellation, pending-input discard, attachment admission and exact stored bytes, durable metadata replay, and terminal restoration. Every wait is named, so a step that never happens reports that name, the process state, and the screen within its own timeout, with the transcript kept in `tui/.smoke/` and the session state kept on disk. `--live` uses the root `.env` for a real DeepSeek call.
 
 ## 10. Limits
 
-One session owns the process. Inline scrollback has no session switcher or virtualized transcript. The component development loop, attachment UI, model picker, and long-history performance qualification remain separate work. Source launch is unsuitable for qualifying tool execution on this checkout; use the built profile and the runbook in [PLAN.md](PLAN.md#132-build-from-a-clean-checkout).
+Navigation supports one displayed session in the current workspace. The picker reads matching records and titles in full while bounding visible rows. Inline scrollback has no virtualized transcript. Clipboard images and inline attachment previews are deferred, as is whole-process long-history performance qualification. Source launch is unsuitable for qualifying tool execution on this checkout; use the built profile and the runbook in [PLAN.md](PLAN.md#132-build-from-a-clean-checkout).

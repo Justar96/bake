@@ -1,0 +1,32 @@
+[
+  {
+    "source": {
+      "kind": "user"
+    },
+    "content": [
+      {
+        "type": "text",
+        "text": "Review @\"notes folder/read me.txt\" "
+      }
+    ]
+  },
+  {
+    "source": {
+      "kind": "plugin",
+      "plugin": "@deepseek-ai/dsh-system-prompt",
+      "form": "snapshot",
+      "sections": [
+        {
+          "name": "approval:policy",
+          "text": "Approval policy: ask. Operations that require approval may ask through the configured answerers; without an available answerer, the request fails closed."
+        }
+      ]
+    },
+    "content": [
+      {
+        "type": "text",
+        "text": "Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nApproval policy: ask. Operations that require approval may ask through the configured answerers; without an available answerer, the request fails closed."
+      }
+    ]
+  }
+]

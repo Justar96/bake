@@ -3,7 +3,7 @@
 Fork-local planning document. Lives in `tui/`, a directory upstream does not own, so syncing
 `deepseek-ai/deepseek-harness` never conflicts with it.
 
-- **Status:** TUI alignment findings 1–7 are implemented: safe paste, exact resume, persisted presets, scoped human decisions, registry commands, live state, and strict TypeScript checks. Validation and current behavior are owned by [DESIGN.md](DESIGN.md); remaining milestone work below includes the component development loop, attachments, model selection, and publishing.
+- **Status:** TUI alignment findings 1–7, command/file completion, model/effort selection, composer cursor/history editing, interactive session navigation, and prompt attachments are implemented. Validation and current behavior are owned by [DESIGN.md](DESIGN.md); remaining work includes whole-process performance qualification and publishing.
 - **Runtime:** Node **26.9.0** primary, **24.21.0** floor — both verified booting the harness.
 - **Decisions:** TypeScript · Ink · in-process Cordis plugin on the **Node** runtime · Bun as build,
   test, and component-harness toolchain · shipped as a `dsh` profile bundle.
@@ -420,11 +420,11 @@ Each milestone states the acceptance criterion that closes it.
 | ~~**M0**~~ | ~~Restore Node; run the staged probe~~ | **done** — Node 26.9.0 + 24.21.0; 15 of 19 services reachable ([§2.3.1](#231-m0-result--verified-service-reachability)) |
 | ~~**M1**~~ | ~~Scaffold `@dsh-tui/app` + `@dsh-tui/ui`; workspace line; Bun-import guard~~ | **done** — boots and exits 0 on Node 26.9.0 and 24.21.0; `--help`, `--preset`, and flag rejection verified; 8 `bun test` assertions in 32ms; the guard proven to fail on a planted `Bun.file` |
 | ~~**M2**~~ | ~~`tui-runner`: agent creation, terminal ownership, `release` teardown, Ctrl-C~~ | **done** — `tui/scripts/pty-smoke.sh` passes on 26.9.0 and 24.21.0: renders, accepts typed input, Ctrl-C ×2 exits 0, and `[?2004l` confirms the terminal was handed back. 12 `bun test` assertions in 32ms |
-| **M3** | Fixture recorder + Bun harness | `bun --hot` renders a recorded session with no dsh runtime |
-| **M4** | Transcript + LiveTurn; commit-boundary promotion | 10k-row transcript scrolls without repaint; Node/vitest render test passes |
-| **M5** | Composer: input, `/` commands, `@` references | `/goal` and a skill invoke identically to Web |
-| **M6** | Approvals, model selection, status bar | approval waterfall answers correctly; non-answers call `next()` |
-| **M7** | Publish out-of-tree; exact resume is implemented through `agents.resume` and query replay | `dsh tui --resume <id>` replays history; `bun build --target=node` output installs through `dsh plugin --profile tui add` |
+| **M3** | Fixture recorder + Bun harness | **implemented** — `tui/packages/harness/dev.tsx` replays recorded rows without dsh; the shared bash recording also owns a rendered screen snapshot |
+| **M4** | Transcript + LiveTurn; commit-boundary promotion | **done** — 10k-row work-count checks, coalesced append tests, and built PTY replay/resume verify suffix-only processing and single emission |
+| **M5** | Composer: input, `/` commands, `@` references | **done** — scoped command/skill and workspace-path discovery, completion at the cursor, durable skill/reference input, grapheme editing, multiline drafts, lazy session-input recall with draft restoration, and bounded file/image staging through Harness attachment admission |
+| **M6** | Approvals, model selection, status bar | **done** — scoped approvals, filterable model/effort pickers, atomic idle selection, restored request configuration, pending-input controls, and projected context display |
+| **M7** | Publish out-of-tree; exact resume | **partly implemented** — built PTY tests cover exact persisted resume and interactive session navigation; package publication remains gated on upstream version alignment |
 
 M7's publish step is gated on upstream version alignment ([§2.4](#24-published-package-state)).
 
@@ -466,7 +466,7 @@ continues to mean exactly what upstream means by it.
 
 - Local branch `main` tracks `origin/master` (`deepseek-ai/deepseek-harness`), so `git pull` still syncs.
 - Upstream-owned files we modify: `pnpm-workspace.yaml` adds the TUI workspace glob, and `pnpm-lock.yaml` records its declared dependency graph. The lockfile is a required second exception: pnpm owns reproducible resolution, including React types, Ink component tests, and the harness services the app imports. Source, fixtures, checks, and documentation remain under `tui/`.
-- Keep upstream lockfile importers unchanged when adding TUI React dependencies; the upstream DOM test graph uses React 18, while Ink uses React 19. Validate the edited lockfile with a frozen install.
+- Keep upstream lockfile importers unchanged when adding TUI React dependencies; the upstream DOM test graph uses React 18, while Ink uses React 19. Validate the edited lockfile with `pnpm install --frozen-lockfile --ignore-scripts --no-optimistic-repeat-install`; disabling the optimistic repeat shortcut ensures that lockfile-only peer changes relink installed packages. `node tui/scripts/check-react-peers.mjs` checks renderer identity and imports the upstream DOM testing library.
 - With a fork remote: `git remote rename origin upstream`, add the fork as `origin`, then
   `git branch -u origin/main` and sync with `git fetch upstream && git merge upstream/master`.
 - Re-run `tsc -b tsconfig.host.json` + `tsdown` after any sync that touches `packages/`; `lib/` is not
@@ -532,8 +532,7 @@ Notes: pnpm 12 cannot run this repo's pinned `@pnpm/exe@11.7.0` on darwin-x64 �
    `agentPresets` and mount `standard`, or compose the tool roster directly in the patch.
 2. **Alternate screen.** Full-screen app, or inline like Claude Code? Inline keeps native scrollback and
    pairs naturally with `<Static>`; full-screen enables panes. Recommend inline through M6.
-3. **Multi-session.** One session per process (like headless), or in-TUI session switching via
-   `ctx.sessionQuery`? Recommend one session through M6, switching at M7.
+3. **Multi-session.** Current-workspace navigation uses `ctx.sessionQuery` and owned Agent handles; see [the supported flow](DESIGN.md#6b-session-navigation). Background session execution and cross-workspace navigation remain outside this flow.
 4. **Locale.** Client UI copy is locale-owned upstream (`verify-client-ui-i18n`). Do we route TUI strings
    through typed dictionaries from the start, or English-only until M7?
 5. **Terminal tools.** Does the TUI surface `terminal_*` tool output as a pane? `tool-terminal`'s README

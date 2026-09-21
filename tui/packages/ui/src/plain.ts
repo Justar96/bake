@@ -6,7 +6,7 @@
  * @module @dsh-tui/ui/plain
  */
 
-import type { Row } from './rows.ts'
+import { formatAttachment, type Row } from './rows.ts'
 
 /** Left gutter marking each row kind, wide enough to align in a fixed-width terminal. */
 const GUTTER: Record<Row['kind'], string> = {
@@ -27,6 +27,8 @@ const GUTTER: Record<Row['kind'], string> = {
 export function formatRow(row: Row): string {
   const gutter = GUTTER[row.kind]
   switch (row.kind) {
+    case 'user':
+      return `${gutter} ${oneLine([row.text, ...(row.attachments ?? []).map(formatAttachment)].filter(Boolean).join('\n'))}`
     case 'tool-call':
       return `${gutter} ${row.tool}(${oneLine(row.input)})`
     case 'tool-result':

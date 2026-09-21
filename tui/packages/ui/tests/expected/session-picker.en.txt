@@ -1,0 +1,10 @@
+· Session: session-test
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Choose session                                                                                   │
+│   New session                                                                                    │
+│ › First conversation · Current                                                                   │
+│ Type to filter · ↑↓ choose · Enter selects · Esc cancels · 2/3                                   │
+│ > ▌                                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+○ Session navigation is in progress  mock/model  /workspace
+Session: session-test

@@ -4,12 +4,14 @@ import { Box, Text, useInput, usePaste } from 'ink'
 import type { AskUserQuestionAnswer, AskUserQuestionAnswerItem, AskUserQuestionItem } from '@deepseek-ai/dsh-user-questions'
 import type { TuiCopy } from './copy.ts'
 import { useComposer } from './composer.ts'
+import { Picker, type ChoicePrompt } from './picker.tsx'
 
 /** One pending interaction; the application owns settlement and cancellation. */
 export type Interaction =
   | { readonly id: number; readonly kind: 'approval'; readonly tool: string; readonly reason: string; readonly callId?: string }
   | { readonly id: number; readonly kind: 'questions'; readonly questions: readonly AskUserQuestionItem[] }
   | { readonly id: number; readonly kind: 'login'; readonly message: string; readonly secret: boolean }
+  | ({ readonly id: number; readonly kind: 'select' } & ChoicePrompt)
 
 /** A human decision submitted for the displayed request. */
 export type InteractionAnswer = string | AskUserQuestionAnswer
@@ -35,8 +37,19 @@ export function questionAnswer(question: AskUserQuestionItem, text: string): Ask
  * @param props - pending interaction, localized labels, and settlement callback.
  * @returns the interaction panel.
  */
-export function InteractionView({ interaction, copy, onAnswer }: {
+export function InteractionView({ interaction, copy, onAnswer, limit }: {
   readonly interaction: Interaction
+  readonly limit: number
+  readonly copy: TuiCopy
+  readonly onAnswer: (id: number, answer: InteractionAnswer) => void
+}): React.ReactElement {
+  return interaction.kind === 'select'
+    ? <Picker prompt={interaction} copy={copy} limit={limit} onSelect={value => onAnswer(interaction.id, value)} />
+    : <RequestView interaction={interaction} copy={copy} onAnswer={onAnswer} />
+}
+
+function RequestView({ interaction, copy, onAnswer }: {
+  readonly interaction: Exclude<Interaction, { kind: 'select' }>
   readonly copy: TuiCopy
   readonly onAnswer: (id: number, answer: InteractionAnswer) => void
 }): React.ReactElement {
@@ -59,13 +72,15 @@ export function InteractionView({ interaction, copy, onAnswer }: {
     if (interaction.kind !== 'approval') composer.paste(text)
   })
   useInput((text, key) => {
-    if (key.ctrl || key.meta || key.escape) return
+    if (key.meta || key.escape) return
     if (interaction.kind === 'approval') {
+      if (key.ctrl) return
       if (text.trim().toLowerCase() === 'y') onAnswer(interaction.id, 'allowed-once')
       else if (text.trim().toLowerCase() === 'n') onAnswer(interaction.id, 'rejected')
       return
     }
-    if (key.backspace || key.delete) composer.erase()
+    if (composer.editKey(text, key) || key.ctrl) return
+    if (key.shift && key.return) composer.paste('\n')
     else composer.type(key.return ? '\n' : text)
   })
   if (interaction.kind === 'approval') return <Box flexDirection="column" borderStyle="round" paddingX={1}>
@@ -74,7 +89,7 @@ export function InteractionView({ interaction, copy, onAnswer }: {
   </Box>
   if (interaction.kind === 'login') return <Box flexDirection="column" borderStyle="round" paddingX={1}>
     <Text color="yellow">{interaction.message}</Text><Text dimColor>{copy.cancelHelp}</Text>
-    <Text>{'? '}{interaction.secret ? '*'.repeat(composer.text.length) : composer.text}▌</Text>
+    <Text>{'? '}{interaction.secret ? '*'.repeat(composer.before.length) : composer.before}▌{interaction.secret ? '*'.repeat(composer.after.length) : composer.after}</Text>
   </Box>
   return <Box flexDirection="column" borderStyle="round" paddingX={1}>
     <Text color="yellow">{copy.questions} ({answers.length + 1}/{interaction.questions.length})</Text>
@@ -82,6 +97,6 @@ export function InteractionView({ interaction, copy, onAnswer }: {
     {question?.detail !== undefined && <Text>{question.detail}</Text>}
     {question?.options?.map((option, index) => <Text key={option.label}>{index + 1}. {option.label}{option.description ? ` — ${option.description}` : ''}</Text>)}
     <Text dimColor>{question?.multiSelect ? copy.multiHelp : copy.questionHelp}</Text>
-    <Text>{'> '}{composer.text}▌</Text>
+    <Text>{'> '}{composer.before}▌{composer.after}</Text>
   </Box>
 }

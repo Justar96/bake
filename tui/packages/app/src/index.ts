@@ -19,6 +19,9 @@ export const Config: z<Config> = z.object({
   locale: z.union(['en', 'zh']).default('en'),
   doubleInterruptMs: z.number().min(1).default(500),
   credentialRefs: z.array(z.string()).default([]),
+  completionLimit: z.number().min(1).step(1).default(8),
+  attachmentMaxBytes: z.number().min(1).step(1).default(16 * 1024 * 1024),
+  attachmentLimit: z.number().min(1).step(1).default(8),
 })
 
 /**

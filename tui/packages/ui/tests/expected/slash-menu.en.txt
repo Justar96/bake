@@ -1,0 +1,8 @@
+· Session: session-test
+○ Ready  mock/model  /workspace
+Session: session-test
+Commands and skills
+  /reset · Command · Reset the view
+› /review · Skill · Review the current patch
+↑↓ choose · Tab completes · Esc closes · Enter sends · 2/3
+> /r▌

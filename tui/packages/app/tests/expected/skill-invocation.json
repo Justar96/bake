@@ -1,0 +1,26 @@
+[
+  {
+    "source": {
+      "kind": "user"
+    },
+    "content": [
+      {
+        "type": "text",
+        "text": "/review  current patch"
+      }
+    ]
+  },
+  {
+    "source": {
+      "kind": "skill-invocation",
+      "name": "review",
+      "form": "instructions"
+    },
+    "content": [
+      {
+        "type": "text",
+        "text": "<skill_content name=\"review\">\n<skill_resources>\nResources for this skill are managed by provider \"runtime\".\nLoad referenced resources only as needed.\n</skill_resources>\n\n<skill_instructions>\nCheck the change and report concrete findings.\n</skill_instructions>\n</skill_content>"
+      }
+    ]
+  }
+]

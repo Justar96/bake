@@ -19,10 +19,10 @@
  */
 
 import { readFileSync } from 'node:fs'
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { render } from 'ink'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
-import { App, project } from '@dsh-tui/ui'
+import { App, appendTranscript, emptyTranscript, project } from '@dsh-tui/ui'
 import type { Row } from '@dsh-tui/ui'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'
 import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
@@ -46,6 +46,8 @@ export function rowsOf(path: string): readonly Row[] {
 /** Everything the shell needs that a replay has no live source for. */
 function staticProps(copy: TuiCopy) {
   return {
+    files: { query: undefined, entries: [], loading: false, error: undefined }, onReferenceQuery: () => {},
+    completion: { entries: [], loading: false, error: undefined }, completionLimit: 8,
     live: [] as const,
     pending: [] as const,
     stopping: false,
@@ -68,6 +70,10 @@ function staticProps(copy: TuiCopy) {
 function Replay(
   { rows, copy, stepMs }: { readonly rows: readonly Row[], readonly copy: TuiCopy, readonly stepMs: number },
 ): React.ReactElement {
+  const versions = useMemo(() => {
+    let transcript = emptyTranscript
+    return rows.map(row => (transcript = appendTranscript(transcript, [row])))
+  }, [rows])
   const [shown, setShown] = useState(1)
   useEffect(() => {
     if (shown >= rows.length) return
@@ -75,7 +81,7 @@ function Replay(
     return () => { clearTimeout(timer) }
   }, [shown, rows.length, stepMs])
   const running = shown < rows.length
-  return <App {...staticProps(copy)} committed={rows.slice(0, shown)} status={running ? 'running' : 'idle'} />
+  return <App {...staticProps(copy)} committed={versions[shown - 1] ?? emptyTranscript} status={running ? 'running' : 'idle'} />
 }
 
 const args = process.argv.slice(2)
@@ -89,4 +95,4 @@ const fixture = args.find((arg, index) => !arg.startsWith('--') && args[index - 
 const rows = rowsOf(fixture)
 
 if (args.includes('--replay')) render(<Replay rows={rows} copy={copy} stepMs={220} />)
-else render(<App {...staticProps(copy)} committed={rows} status="idle" />)
+else render(<App {...staticProps(copy)} committed={appendTranscript(emptyTranscript, rows)} status="idle" />)

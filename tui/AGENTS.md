@@ -62,9 +62,10 @@ correct where inferring it is only usually correct ([DESIGN.md §3b](DESIGN.md#3
   `turn/end`. `running` covers draining, closing, and checkpointing, so a turn-event copy disagrees
   exactly when it matters, during cancellation convergence.
 - Turn and step boundaries are the `turnBoundary` projection; pending input is the `inbox` projection;
-  tokens and context are `tokenUsage` and `contextPressure`. Read them with
-  `sessionProjections.stateOf(session, key)` and watch with `onChanged()`. The values are live: never
-  mutate them.
+  tokens and context are `tokenUsage` and `contextPressure`. Read host fold state with
+  `sessionProjections.stateOf(session, key)`; read projected context occupancy through
+  `snapshot(session, ['contextPressure']).values.contextPressure`. Watch with `onChanged()`. Never mutate
+  projection values.
 - The transcript is the session log through `project()`. There is no second message list.
 - Action vocabularies are the harness's: `agent.cancel({ kind: 'user' }, …)` takes a tagged
   `AgentCancelCause`, not a string, and `followup` versus `steer` is chosen by reading `agent.status` at
@@ -117,24 +118,43 @@ means by it.
 
 ## Commands
 
+`tui/scripts/tui` runs everything this fork owns; `tui/scripts/tui help` prints the list.
+
 ```sh
-node --import tsx/esm apps/cli/src/bin.ts --profile tui \
-  --patch ./tui/packages/app/cordis.patch.yml    # from source: fast, but NO tools (see below)
-./tui/scripts/build.sh                           # bundle the plugin to Node ESM
-node apps/cli/lib/bin.js --profile tui \
-  --patch ./tui/packages/app/cordis.built.patch.yml   # production path: tools work
-./tui/scripts/check.sh                         # strict types, pure Bun tests, Node integration
-./tui/scripts/pty-smoke.sh                       # built profile: keyless replay and resume
-./tui/scripts/pty-smoke.sh --live                # real DeepSeek tool turn using root .env
-./tui/scripts/pty-smoke.sh node24                # the engine floor
-bun --hot tui/packages/harness/dev.tsx           # component loop: no dsh, no agent, no key
-bun tui/packages/harness/dev.tsx --replay --locale zh   # watch rows arrive; check a dictionary
-node apps/cli/lib/bin.js --profile headless \
-  --patch ./tui/packages/harness/record.patch.yml "…"   # record a fixture (needs a key)
+./tui/scripts/tui dev                    # component loop under Bun: no dsh, no agent, no key
+./tui/scripts/tui dev --replay --locale zh   # watch rows arrive; check a dictionary
+./tui/scripts/tui source                 # the TUI from src/ through tsx: fast, but NO tools (see below)
+./tui/scripts/tui app                    # build, then run from lib/: the production path, tools work
+./tui/scripts/tui check                  # the static and unit gate
+./tui/scripts/tui e2e                    # the built profile through a real terminal
+./tui/scripts/tui verify                 # check + e2e: run this before every push
+./tui/scripts/tui record "…"             # record a fixture through headless (needs a key)
 ```
 
-`check.sh` is the gate: strict types for all three packages, then each test suite on its own runtime.
-Run it before every push.
+Arguments after the command reach the underlying tool unchanged, which is where the iteration speed is:
+
+```sh
+./tui/scripts/tui check --list           # name the targets
+./tui/scripts/tui check types spec       # re-run one failure without the rest
+./tui/scripts/tui spec -t resume         # one vitest suite; --watch to keep it open
+./tui/scripts/tui unit --watch           # pure modules under bun test
+./tui/scripts/tui e2e --list             # name the terminal scenarios
+./tui/scripts/tui e2e --only cancel      # that scenario and its prerequisites, ~2s instead of ~12s
+./tui/scripts/tui e2e --trace            # print each step and its timing as it is satisfied
+./tui/scripts/tui e2e --no-build         # iterate on the driver, not the plugin
+./tui/scripts/tui e2e --live node24      # real DeepSeek tool turn on the engine floor, using root .env
+```
+
+`check` is the static gate — React peer identity, strict types, `bun test`, vitest, the layout
+invariants, and Markdown links — and `verify` adds the terminal scenarios. Run `verify` before every
+push.
+
+Each `e2e` scenario declares what it proves and which scenarios it needs first, so `--only` runs one
+without the rest. Every wait is named: a step that never happens reports that name, the process state,
+and the tail of the screen within its own timeout rather than after a whole-run deadline, and the full
+transcript lands in `tui/.smoke/`. A failing run keeps its `DSH_HOME` and workspace and prints the path.
+Add a scenario with the `@scenario` decorator; take the session logs it produced from the difference
+between `run.logs()` before and after, never from a fixed position in the run, so it stays selectable.
 
 **Tools do not work under the tsx source launch.** `dsh-tools` keys its scheduler with `Symbol('…')`
 rather than `Symbol.for('…')`, and the source launch ends up with two module instances of that package,
