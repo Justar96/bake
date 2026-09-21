@@ -1,0 +1,38 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "incremental": false,
+    "noEmit": true,
+    "jsx": "react",
+    "rewriteRelativeImportExtensions": false
+  },
+  "include": [
+    "packages/**/*.spec.ts",
+    "packages/**/*.spec.tsx",
+    "tests/**/*.spec.ts"
+  ],
+  "references": [
+    {
+      "path": "packages/app"
+    },
+    {
+      "path": "packages/ui"
+    },
+    {
+      "path": "../packages/test-support/agent-loop-testkit"
+    },
+    {
+      "path": "../packages/session/session-persistence-jsonl"
+    },
+    {
+      "path": "../packages/core/agent-default-model"
+    },
+    {
+      "path": "../vendor/include"
+    },
+    {
+      "path": "../packages/test-support/llm-replay"
+    }
+  ]
+}

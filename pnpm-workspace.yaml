@@ -13,6 +13,9 @@ packages:
   # Deploy root of the single-exe build: a pure dependency manifest whose
   # closure is what the exe bundles and what the Python runtime distributes.
   - python/sdk-runtime
+  # Fork-local terminal UI. The only upstream file this fork edits; see
+  # tui/AGENTS.md before adding a second exception.
+  - tui/packages/*
 
 overrides:
   'extract-zip>yauzl': '3.4.0'

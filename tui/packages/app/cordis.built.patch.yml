@@ -1,0 +1,33 @@
+# The built-plugin overlay: identical composition to cordis.patch.yml, pointing
+# at `lib/` instead of `src/`.
+#
+# The built `dsh` CLI runs plain Node and cannot import TypeScript, and tools
+# only work outside the tsx source launch (see tui/scripts/build.sh). Use this
+# overlay with `node apps/cli/lib/bin.js` after running that script.
+
+- id: headless-runner
+  disabled: true
+- id: headless-startup
+  disabled: true
+
+- insert:
+    - id: agent-presets
+      name: '@deepseek-ai/dsh-agent-presets'
+      config:
+        default: standard
+
+    - id: subagent-model-selection-settings
+      name: '@deepseek-ai/dsh-tool-subagent/model-selection-settings'
+
+    - id: tui-startup
+      name: ./lib/startup.js
+
+    - id: tui-runner
+      name: ./lib/index.js
+      inject:
+        - tuiStartup
+      config:
+        resume: !!js ctx.tuiStartup.resume
+        preset: !!js ctx.tuiStartup.preset
+        credentialRefs:
+          - DEEPSEEK_API_KEY

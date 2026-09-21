@@ -1,0 +1,51 @@
+# The @dsh-tui/app patch: the interactive terminal surface over a base-backed
+# profile. Applied after the profile's own bundle layers, so rows here override
+# theirs by id, with the profile patch and any --patch overlays still to come.
+#
+# A patch replaces the targeted row's whole `config`, so each row below restates
+# every key it owns.
+
+# The one-shot runner owns stdout and exits after a single task. A terminal
+# session cannot share a process with it.
+- id: headless-runner
+  disabled: true
+- id: headless-startup
+  disabled: true
+
+- insert:
+    # Agent presets, so the session mounts `standard` — the roster the web
+    # surface ships. Not a base row. `default` names the preset the runner
+    # mounts when --preset is absent; the runner reads it as `presets.defaultId`
+    # rather than repeating the name.
+    #
+    # `cmdlineArgs` needs no row: the launcher provides it, which is why the
+    # headless bundle also injects it without inserting a provider.
+    - id: agent-presets
+      name: '@deepseek-ai/dsh-agent-presets'
+      config:
+        default: standard
+
+    # The `standard` preset's subagent row requires this settings plugin in the
+    # Host scope; the web bundle inserts the same row for the same reason.
+    - id: subagent-model-selection-settings
+      name: '@deepseek-ai/dsh-tool-subagent/model-selection-settings'
+
+    # argv → ctx.tuiStartup, before the runner resolves its lazy config.
+    - id: tui-startup
+      name: ./src/startup.ts
+
+    # The terminal surface. `inject` makes Loader resolve the `!!js`
+    # expressions below only after tui-startup provides the service.
+    - id: tui-runner
+      name: ./src/index.ts
+      inject:
+        - tuiStartup
+      config:
+        resume: !!js ctx.tuiStartup.resume
+        preset: !!js ctx.tuiStartup.preset
+        # The composition knows which providers it mounted; the surface does
+        # not. `llm-deepseek` reads this reference (its `apiKeyEnv` default),
+        # so `/login` can set it. A patch adding another provider adds its
+        # reference here.
+        credentialRefs:
+          - DEEPSEEK_API_KEY

@@ -1,0 +1,27 @@
+{
+  "name": "@dsh-tui/ui",
+  "description": "Terminal presentation for the dsh TUI: session-event projection and row rendering, pure over props",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "ink": "^7.1.1",
+    "react": "^19.3.0",
+    "@deepseek-ai/dsh-util-values": "workspace:^"
+  },
+  "devDependencies": {
+    "@deepseek-ai/dsh-agent": "workspace:^",
+    "@deepseek-ai/dsh-session": "workspace:^",
+    "@types/react": "^19.3.0",
+    "@deepseek-ai/dsh-user-questions": "workspace:^",
+    "ink-testing-library": "^4.0.0"
+  },
+  "scripts": {
+    "typecheck": "tsc -b"
+  }
+}

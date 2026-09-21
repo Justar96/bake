@@ -1,0 +1,21 @@
+{
+  "name": "@dsh-tui/harness",
+  "description": "Component development loop: replays recorded sessions through the real projection and shell, with no harness runtime",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "dependencies": {
+    "@dsh-tui/ui": "workspace:^",
+    "ink": "^7.1.1",
+    "react": "^19.3.0"
+  },
+  "devDependencies": {
+    "@deepseek-ai/dsh-session": "workspace:^",
+    "@deepseek-ai/schemastery": "workspace:^",
+    "@types/react": "^19.2.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "workspace:^"
+  }
+}

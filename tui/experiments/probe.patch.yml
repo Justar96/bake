@@ -1,0 +1,5 @@
+# Dev-loop probe: insert an out-of-tree plugin by relative path.
+# App-boot converts patch-relative `./` names to file URLs at load.
+- insert:
+    - id: tui-probe
+      name: ./probe.ts
