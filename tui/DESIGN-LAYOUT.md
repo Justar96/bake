@@ -162,6 +162,32 @@ Recorded so the questions do not get relitigated:
 - **Full-screen alt-screen mode.** It discards scrollback on exit, so the session vanishes when the program does. The transcript surviving exit is the point.
 - **Progress bars for model output.** Token counts are not a denominator; there is no total to divide by.
 
+## 6. Spacing and zones inside the chat area
+
+`prototype/chat.mjs` renders one turn at 80 and 160 columns.
+
+### Prose is measured; tool output is not
+
+Prose wraps at **88 columns** however wide the terminal is. A 160-character monospace line is hard to track back to its start, and terminals get arbitrarily wide. Tool output takes the full width instead, because wrapping a log or a diff to a narrow measure destroys the column alignment that makes it scannable.
+
+This is the one place where the chat area deliberately does not fill the window, and the reason is legibility rather than decoration.
+
+### Output wraps, never truncates
+
+A result the user cannot finish reading is worse than a ragged one. Long output lines wrap; they are never cut with an ellipsis. Truncation is reserved for surfaces where the full value is one keystroke away — a completion row or a picker — never for a result that already cost a tool call.
+
+### A call and its result are one zone
+
+The call sits at the rail; its output indents to column 4 beneath it. The indent does the grouping, so no whitespace divides a call from what it produced, and consecutive calls stay legible as separate units through the `⚙` rail alone.
+
+Failed output is **not** dimmed. Dim means supporting detail, and a failure is the thing the user needs to read.
+
+### Zones come from indentation, not from blank lines
+
+Within a turn the levels are: rail glyph at column 0, prose at 2, tool output at 4, reasoning at 4. That is enough structure to read the turn without spending a single blank row inside it. The only blank line is the one opening each user turn.
+
+More whitespace would stripe the transcript, and striping reads as noise once a session is long — exactly when the transcript matters most.
+
 ## 6a. Separating the chat area, the status line, and the composer
 
 The three regions must read as three kinds of thing at a glance. A terminal offers few ways to say that, and they do not cost the same. `prototype/separation.mjs` renders the candidates with their row cost.
