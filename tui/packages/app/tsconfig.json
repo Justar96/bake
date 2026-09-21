@@ -68,6 +68,9 @@
     },
     {
       "path": "../../../packages/compaction/compaction"
+    },
+    {
+      "path": "../../../packages/llm/token-meter"
     }
   ]
 }

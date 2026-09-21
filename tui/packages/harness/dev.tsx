@@ -55,6 +55,7 @@ function staticProps(copy: TuiCopy) {
     model: 'harness/replay',
     cwd: process.cwd(),
     sessionId: 'session-harness',
+    context: undefined,
     copy,
     onSubmit: () => {},
     onCancel: () => {},

@@ -5,6 +5,7 @@ import { assertNever } from '@deepseek-ai/dsh-util-values'
 import type { AgentStatus } from '@deepseek-ai/dsh-agent'
 import type { Row } from './rows.ts'
 import type { TuiCopy } from './copy.ts'
+import { formatContext, type ContextUsage } from './format.ts'
 import { useComposer } from './composer.ts'
 import { InteractionView, type Interaction, type InteractionAnswer } from './interaction.tsx'
 
@@ -28,6 +29,8 @@ export interface AppProps {
   readonly model: string
   readonly cwd: string
   readonly sessionId: string
+  /** Context occupancy from the harness meter, absent until a request reports one. */
+  readonly context: ContextUsage | undefined
   readonly copy: TuiCopy
   readonly onSubmit: (text: string) => void
   readonly onCancel: () => void
@@ -80,7 +83,7 @@ export function App(props: AppProps): React.ReactElement {
     </Box>}
     {interaction !== undefined && <InteractionView key={interaction.id} interaction={interaction} copy={copy} onAnswer={props.onAnswer} />}
     <Text dimColor>{props.status === 'running' ? '● ' : '○ '}{status}{'  '}{props.model}{'  '}{props.cwd}</Text>
-    <Text dimColor>{copy.session}: {props.sessionId}</Text>
+    <Text dimColor>{copy.session}: {props.sessionId}{props.context === undefined ? '' : `  ${copy.context}: ${formatContext(props.context)}`}</Text>
     {props.command !== undefined && <Text>{copy.command}: {props.command}</Text>}
     {props.notice !== undefined && <Text color="yellow">{props.notice}</Text>}
     <Text dimColor>{copy.help}{props.status === 'running' ? ` · ${copy.steering}` : ''}</Text>

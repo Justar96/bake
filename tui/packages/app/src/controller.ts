@@ -11,6 +11,9 @@ import { project, type Row } from '@dsh-tui/ui'
 import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
 import { Interactions } from './interactions.ts'
 import { listTargets, login } from './login.ts'
+// Empty type import: the token meter declaration-merges `contextPressure` into
+// the projection map, and that key is invisible to this module without it.
+import type {} from '@deepseek-ai/dsh-token-meter'
 
 /** One terminal's presentation over a live Agent and its durable projections. */
 export class SessionController {
@@ -64,7 +67,8 @@ export class SessionController {
     const projections = ctx.get('sessionProjections')
     if (projections === undefined) throw new Error('tui: sessionProjections is required')
     this.off.push(projections.onChanged((session, key) => {
-      if (session === agent.session && key === 'inbox') this.repaint()
+      if (session !== agent.session) return
+      if (key === 'inbox' || key === 'contextPressure') this.repaint()
     }))
   }
 
@@ -91,10 +95,18 @@ export class SessionController {
     const pending = (['next-step', 'next-turn'] as const).flatMap(target => inbox[target]
       .filter(message => message.source.kind === 'user')
       .map(message => ({ id: message.id, target, text: message.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('') })))
+    // The meter owns these numbers. Both fields are optional there — a session
+    // reports nothing until a request measures it, and a model with no exact
+    // capacity never reports a window — so occupancy stays absent rather than
+    // rendering a fraction of an unknown whole.
+    const pressure = projections?.stateOf(this.agent.session, 'contextPressure')
+    const used = pressure?.pressureTokens
+    const window = pressure?.contextWindow
     return {
       committed: this.committed, live: this.live, pending, status: this.agent.status,
       stopping: this.stopping, command: this.command?.text, notice: this.notice,
       interaction: this.interactions.current,
+      context: used === undefined || window === undefined ? undefined : { used, window },
     }
   }
 

@@ -12,7 +12,7 @@ function props(overrides: Partial<AppProps> = {}): AppProps {
   return {
     committed: [], live: [], pending: [], status: 'idle', stopping: false,
     command: undefined, notice: undefined, interaction: undefined,
-    model: 'mock/model', cwd: '/workspace', sessionId: 'session-test', copy: dictionaries.en,
+    model: 'mock/model', cwd: '/workspace', sessionId: 'session-test', copy: dictionaries.en, context: undefined,
     onSubmit: vi.fn(), onCancel: vi.fn(), onInterrupt: vi.fn(), onAnswer: vi.fn(), ...overrides,
   }
 }

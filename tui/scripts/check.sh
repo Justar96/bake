@@ -5,5 +5,8 @@ TASK_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$TASK_ROOT"
 node node_modules/typescript/bin/tsc -b tui/tsconfig.json --pretty false
 node node_modules/typescript/bin/tsc -p tui/tsconfig.tests.json --pretty false
-(cd tui && bun test tests/no-bun-runtime.test.ts packages/ui/tests/project.test.ts packages/ui/tests/editor.test.ts)
+# Filter by suffix rather than naming files: `bun test` matches `.spec.` too,
+# and those need Node, while an explicit list silently omits every pure test
+# added later.
+(cd tui && bun test .test.ts)
 node node_modules/vitest/vitest.mjs run --config tui/vitest.config.ts
