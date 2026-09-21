@@ -49,6 +49,17 @@ export class SessionController {
         return { kind: 'success' }
       },
     })))
+    this.off.push(agent.ctx.effect(() => commands.register({
+      name: 'help', description: copy.listCommands, recordInput: false,
+      handler: () => {
+        // The registry is the list: a command contributed by any plugin appears
+        // here without this surface knowing it exists.
+        this.notify(commands.list(this.agent)
+          .map(command => `/${command.name} — ${command.description}`)
+          .join('\n'))
+        return { kind: 'success' }
+      },
+    })))
     this.off.push(ctx.on('session/event', (session, event) => {
       if (session !== agent.session) return
       if (this.buffered !== undefined) this.buffered.push(event)

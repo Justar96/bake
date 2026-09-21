@@ -16,7 +16,7 @@ export const dictionaries = {
     noTargets: 'This profile has no sign-in targets', configured: 'Configured',
     notSet: 'Not set', readOnly: 'Read-only', stored: 'Stored; the next request uses it',
     loginCancelled: 'Sign-in cancelled', unknownTarget: 'Unknown sign-in target',
-    context: 'Context',
+    context: 'Context', listCommands: 'List available commands',
   },
   zh: {
     ready: '就绪', working: '处理中', stopping: '正在停止', command: '命令',
@@ -34,7 +34,7 @@ export const dictionaries = {
     noTargets: '此配置没有登录目标', configured: '已配置',
     notSet: '未设置', readOnly: '只读', stored: '已保存；下次请求将使用它',
     loginCancelled: '已取消登录', unknownTarget: '未知登录目标',
-    context: '上下文',
+    context: '上下文', listCommands: '列出可用命令',
   },
 } as const
 
