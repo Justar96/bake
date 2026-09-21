@@ -200,6 +200,46 @@ Holding to the **limit** would leave a twenty-row hole under three matches. Hold
 
 `+N more — keep typing to narrow` tells the user both that the list is cut and what to do about it. A bare count implies scrolling that is not offered.
 
+## 7b. Reasoning stream and tool use
+
+`agent/assistant-stream` delivers `AssistantStreamFrame`s carrying `StreamChunk`s, which separate `reasoning-delta` from `text-delta` and stream tool arguments as partial JSON in `tool-call-delta`. `prototype/stream.mjs` implements the fold from frames to view and checks the rules below.
+
+### Three stream rules that are correctness, not taste
+
+The frame type carries a `revision` that "restarts at 1" on replacement, and an `end` outcome of `committed` or `abandoned`. Each has one right rendering:
+
+| Frame | Rule | Bug if ignored |
+| --- | --- | --- |
+| `start` with a new `revision` | clear what the previous attempt drew | a retry appends, so the answer appears twice |
+| `chunk` with a stale `revision` | ignore it | a late chunk from a replaced attempt corrupts the new one |
+| `end` → `committed` | drop the live copy; the session event owns it now | the same text renders live *and* in the transcript |
+| `end` → `abandoned` | drop the live copy; commit nothing | abandoned text leaks into scrollback |
+
+The reducer is pure and total, so all four are testable without a model.
+
+### Reasoning is watched, not re-read
+
+Reasoning streams dim and tail-windowed while it happens, and commits to the transcript as a single `thought for 8s` line. It is worth watching live and rarely worth re-reading; the full text stays in the session log, which is the durable record under **Model-visible ⇔ logged**. Replaying it into scrollback would bury the answer under the working-out.
+
+How much to keep is deployment-varying, so it is a validated `Config` field (`summary` / `full` / `hidden`), not a constant — a debugging session wants `full`, a demo wants `hidden`.
+
+### Reasoning is distinguished by geometry, not color
+
+Reasoning sits at **column 4**, the answer at **column 2**. Dim alone merges the two under `NO_COLOR` and for a screen reader; indentation survives both. This is why §6's "color is semantic only" is not sufficient on its own — semantic color still needs a non-color carrier.
+
+### Tool arguments: never render partial JSON
+
+`tool-call-delta` carries `argumentsDelta`, so arguments arrive character by character. Rendering them live shows the user `{"comm` and then `{"command": "rg -n \"comm`, which reads as a malfunction. Until `block-end` delivers the complete block, a call renders as its name and an ellipsis:
+
+```
+⚙ bash · …                          arguments still streaming
+⚙ bash · rg -n "commands.register"   complete
+```
+
+### Each tool presents as its own summary
+
+A call reads as the thing it does: `bash` as its command, a search as its pattern, a file tool as its path. The fallback is an argument count, never a JSON dump. Presenters stay pure and live with the tool, matching the repository rule that every tool's UI presentation is designed up front.
+
 ## 8. Robust rendering: no flicker, no jumping
 
 Two distinct failures, two distinct causes. Neither is fixed by drawing faster.
