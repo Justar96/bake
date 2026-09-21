@@ -106,6 +106,29 @@ S1 gates everything. S3 is the only stage that fixes a shipped defect, so it fol
 
 The three stages that decide whether this feels professional are **S4 (L2 stability)**, **S6b (no debris)**, and **S3 (bounded regions)** — they remove, in order, the jumping, the corruption, and the screen-clearing. S7 and S8 are polish, except S7's paste overlap, which is correctness.
 
+## Integration: two row-rendering paths
+
+Two renderers now exist and they overlap partly, not wholly. The split that keeps both people's work is: **`app.tsx` owns when a row is written, `present.ts` and `line.tsx` own how it is laid out.**
+
+### What `app.tsx` owns, and keeps
+
+`CommittedTranscript` prints only the suffix since the last print and gives each batch a fresh `<Static>`. Measured through a live `render()` against a fake TTY, that writes each committed row exactly once — 260 bytes for a five-append run, identical to a stable-key baseline, against 375 bytes and six draws of the first row if the same key change is paired with cumulative items. The suffix batching is correct and the geometry work does not touch it.
+
+### What `RowView` should hand over
+
+| `RowView` today | Replacement | Why |
+| --- | --- | --- |
+| `⚙ bash(rg -n foo)` | `run    rg -n foo` | `⚙` is the glyph `string-width` and a terminal disagree about; the verb names the action |
+| `← result`, `· reasoning` | output and `think` rows at column 9 | non-ASCII markers, and no column structure to group a call with its result |
+| `<Text>` at full terminal width | `budget.measure` for prose, `budget.output` for output | prose at 200 columns is hard to scan back; output must not be narrowed |
+| colour per row kind | `styleOf(tone)` | one place decides semantics, testable without a terminal |
+
+`present(row)` returns the lines; `<Line line budget>` renders one. The substitution is mechanical inside `RowView`'s switch.
+
+### A gap in the gate, stated plainly
+
+The ASCII invariant runs over `prototype/ascii.mjs`, which is the prototype, not the product. `RowView`'s `⚙` is not caught by it today. The check belongs on real rendered output — the `tests/expected/*.txt` snapshots are the natural place, since they already capture what a user sees. Wiring it there will fail until the substitution above lands, which is the correct order: fix, then gate.
+
 ## Open questions
 
 - **Who owns bracketed paste** — Ink or `terminal.ts`? (S7)
