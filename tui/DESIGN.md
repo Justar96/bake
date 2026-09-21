@@ -49,6 +49,14 @@ Committed rows render through Ink `Static`. Assistant chunks render separately u
 
 Compaction replacements do not append duplicate tool rows. Terminal scrollback retains the original output, and a localized compaction notice marks the context change. The transcript displays historical output; it does not claim to reproduce the model's current compacted context.
 
+`project` drops any event whose `surfaceOp` is not `append`, for every event type rather than tool results alone, so one rule covers the whole vocabulary instead of a per-case list that later event types escape silently.
+
+### 4.4. Measured transcript cost
+
+`packages/ui/tests/scale.spec.tsx` holds `Static` to its guarantee: a committed row is emitted once and never re-emitted, and appending at 2000 rows costs no more than appending at 50. History length does not enter the cost of an append.
+
+Three measurement facts, each of which otherwise fakes a pass. Ink throttles writes, so a synchronous rerender loop coalesces every append into one frame and measures nothing. A test stdout needs a matching stdin: without one, `useInput` calls `setRawMode` on the real non-TTY stdin, throws inside an effect, and the component stops re-rendering after its first frame, which reads exactly like a transcript that never repaints. `ink-testing-library` cannot measure this at all, because its frames are full-frame snapshots that contain every old row by construction; raw stdout capture is the only instrument that separates the two.
+
 ## 5. Input flow
 
 Ink `usePaste` owns bracketed-paste decoding and mode changes. Paste only inserts text, including line breaks. The independent `useInput` handler interprets Enter, Escape, and Ctrl-C; it also handles ordinary text and Enter delivered in one read. A shared composer keeps same-read edits available before the next React paint. Backspace removes one Unicode grapheme.
