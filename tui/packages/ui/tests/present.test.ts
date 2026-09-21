@@ -1,7 +1,7 @@
 /** Placement of transcript rows into display lines. */
 import { describe, expect, test } from 'bun:test'
 import { COLUMN, MARKER, VERB } from '../src/layout.ts'
-import { present, styleOf, verbFor } from '../src/present.ts'
+import { hintFor, present, styleOf, verbFor } from '../src/present.ts'
 
 describe('verbFor', () => {
   test('names the action, not the implementation', () => {
@@ -21,6 +21,25 @@ describe('verbFor', () => {
 
   test('falls back to a verb rather than showing an unknown tool name raw', () => {
     expect(verbFor('some_new_tool')).toBe(VERB.run)
+  })
+})
+
+describe('hintFor', () => {
+  const idle = { running: false, asking: false, listing: false, drafting: false }
+
+  test('says nothing when there is nothing to say', () => {
+    expect(hintFor(idle)).toBeUndefined()
+  })
+
+  test('offers send only once there is a draft to send', () => {
+    expect(hintFor({ ...idle, drafting: true })).toBe('send')
+  })
+
+  test('prefers the most immediate action when several apply', () => {
+    // A pending question outranks a running turn, which outranks a draft.
+    expect(hintFor({ running: true, asking: true, listing: true, drafting: true })).toBe('answer')
+    expect(hintFor({ running: true, asking: false, listing: true, drafting: true })).toBe('select')
+    expect(hintFor({ running: true, asking: false, listing: false, drafting: true })).toBe('interrupt')
   })
 })
 

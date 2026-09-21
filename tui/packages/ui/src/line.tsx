@@ -11,8 +11,8 @@
 
 import React from 'react'
 import { Box, Text } from 'ink'
-import { COLUMN, type Budget } from './layout.ts'
-import { styleOf, type PresentedLine } from './present.ts'
+import { COLUMN, MARKER, type Budget } from './layout.ts'
+import { hintFor, styleOf, type ComposerState, type Hint, type PresentedLine } from './present.ts'
 
 /**
  * One display line.
@@ -86,6 +86,50 @@ export function StatusBar({ left, right, columns, color }: {
       <Text>{' '.repeat(gap)}</Text>
       <Text dimColor>{rightText}</Text>
     </Text>
+  )
+}
+
+/**
+ * Status line and composer, and nothing else.
+ *
+ * Two rows, both of which carry live state. Standing hint rows are deliberately
+ * absent: every row here is charged to the budget that keeps Ink off its
+ * screen-clearing path, for the whole session, and a hint the user has read
+ * once is no longer information. What a key does is shown in the composer's
+ * right slot at the moment it applies.
+ *
+ * @param props.left - session-state fields, highest priority first.
+ * @param props.right - supporting fields, dropped first as width shrinks.
+ * @param props.columns - terminal width.
+ * @param props.color - colour for the leading status field.
+ * @param props.state - what the surface is doing, apart from the draft, which
+ *   is read from `text` so the two cannot disagree.
+ * @param props.text - current draft, or undefined for the placeholder.
+ * @param props.placeholder - locale-owned prompt text.
+ * @param props.hints - locale-owned text for each hint key.
+ */
+export function Chrome({ left, right, columns, color, state, text, placeholder, hints }: {
+  readonly left: readonly string[]
+  readonly right: readonly string[]
+  readonly columns: number
+  readonly color?: string
+  readonly state: Omit<ComposerState, 'drafting'>
+  readonly text: string | undefined
+  readonly placeholder: string
+  readonly hints: Readonly<Record<Exclude<Hint, undefined>, string>>
+}): React.ReactElement {
+  const hint = hintFor({ ...state, drafting: text !== undefined && text !== '' })
+  const colored = color === undefined ? {} : { color }
+  return (
+    <Box flexDirection="column">
+      <StatusBar left={left} right={right} columns={columns} {...colored} />
+      <Composer
+        marker={MARKER.prompt}
+        text={text}
+        placeholder={placeholder}
+        {...hint === undefined ? {} : { hint: hints[hint] }}
+      />
+    </Box>
   )
 }
 

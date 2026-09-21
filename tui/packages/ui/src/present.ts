@@ -27,6 +27,39 @@ export type Tone =
   /** A question awaiting an answer. */
   | 'asking'
 
+/** What the composer's right slot says, or nothing when there is nothing to say. */
+export type Hint = 'send' | 'interrupt' | 'select' | 'answer' | undefined
+
+/** What the surface is doing, as far as the composer is concerned. */
+export interface ComposerState {
+  /** Whether a turn is running. */
+  readonly running: boolean
+  /** Whether a question is waiting for an answer. */
+  readonly asking: boolean
+  /** Whether a completion list or picker is open. */
+  readonly listing: boolean
+  /** Whether the draft has any content. */
+  readonly drafting: boolean
+}
+
+/**
+ * Hint for the composer's right slot.
+ *
+ * Contextual, never permanent. A fixed hint row teaches nothing after the first
+ * day, and on this surface it costs a row of the live region's budget on every
+ * frame for the whole session. Returns a key rather than text, because copy is
+ * locale-owned.
+ *
+ * @param state - what the surface is currently doing.
+ * @returns the hint key, or undefined when the slot stays empty.
+ */
+export function hintFor(state: ComposerState): Hint {
+  if (state.asking) return 'answer'
+  if (state.listing) return 'select'
+  if (state.running) return 'interrupt'
+  return state.drafting ? 'send' : undefined
+}
+
 /** Colour and weight for a tone, decided here so it needs no terminal to test. */
 export interface LineStyle {
   /** Semantic colour, or undefined to inherit the terminal's foreground. */

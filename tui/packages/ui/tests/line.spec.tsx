@@ -4,7 +4,7 @@ import { renderToString } from 'ink'
 import { describe, expect, it } from 'vitest'
 import { budgetFor, COLUMN, MARKER, PROSE_MEASURE } from '../src/layout.ts'
 import { present } from '../src/present.ts'
-import { Composer, Line, StatusBar } from '../src/line.tsx'
+import { Chrome, Composer, Line, StatusBar } from '../src/line.tsx'
 
 const strip = (text: string): string => text.replace(/\u001B\[[0-9;]*m/g, '')
 const at80 = budgetFor({ columns: 80, rows: 24 })
@@ -79,6 +79,35 @@ describe('StatusBar', () => {
     expect(rendered.split('\n')).toHaveLength(1)
     expect(rendered).toContain('ready')
     expect(rendered).not.toContain('0f3a9c')
+  })
+})
+
+describe('Chrome', () => {
+  const hints = { send: 'enter to send', interrupt: 'esc interrupts', select: 'up/down to select', answer: 'y or n' }
+  // No `drafting` here: Chrome reads it from the draft, so the two cannot disagree.
+  const idle = { running: false, asking: false, listing: false }
+  const render = (state: typeof idle, text?: string): string => strip(renderToString(
+    <Chrome
+      left={['ready', 'deepseek/chat']} right={['ctx 12%']} columns={60}
+      state={state} text={text} placeholder="Ask anything" hints={hints}
+    />, { columns: 60 }))
+
+  it('spends two rows, not five', () => {
+    // The shipped surface carries a status row, a session row and two standing
+    // hint rows. Three of those are charged to the live region for the whole
+    // session; only state belongs here.
+    expect(render(idle).split('\n')).toHaveLength(2)
+  })
+
+  it('leaves the right slot empty until something applies', () => {
+    expect(render(idle)).not.toContain('enter to send')
+    expect(render(idle, 'hello')).toContain('enter to send')
+  })
+
+  it('shows the interrupt hint exactly while a turn runs', () => {
+    const running = render({ ...idle, running: true }, 'hello')
+    expect(running).toContain('esc interrupts')
+    expect(running).not.toContain('enter to send')
   })
 })
 
