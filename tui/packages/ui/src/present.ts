@@ -12,7 +12,7 @@
  */
 
 import { COLUMN, MARKER, VERB, type Verb } from './layout.ts'
-import type { Row } from './rows.ts'
+import { formatAttachment, type Row } from './rows.ts'
 
 /** How a line is emphasized. Colour is chosen by the component layer. */
 export type Tone =
@@ -26,6 +26,33 @@ export type Tone =
   | 'failed'
   /** A question awaiting an answer. */
   | 'asking'
+
+/**
+ * Model name without its provider prefix.
+ *
+ * The provider is in `/model` when it is needed, which is when more than one is
+ * configured. On the status line it is a word the user reads every frame and
+ * acts on never.
+ *
+ * @param route - `provider/model`, or a bare model name.
+ * @returns the model name alone.
+ */
+export const compactModel = (route: string): string => route.slice(route.lastIndexOf('/') + 1)
+
+/**
+ * Working directory, shortened against home.
+ *
+ * An absolute path spends most of its width on the part every path shares.
+ *
+ * @param cwd - absolute working directory.
+ * @param home - home directory, when one is known.
+ * @returns a home-relative path, or the original when it lies outside home.
+ */
+export function compactPath(cwd: string, home: string | undefined): string {
+  if (home === undefined || home === '' || !cwd.startsWith(home)) return cwd
+  const rest = cwd.slice(home.length)
+  return rest === '' ? '~' : rest.startsWith('/') ? `~${rest}` : cwd
+}
 
 /** What the composer's right slot says, or nothing when there is nothing to say. */
 export type Hint = 'send' | 'interrupt' | 'select' | 'answer' | undefined
@@ -149,7 +176,7 @@ const continuation = (text: string, tone: Tone): PresentedLine =>
 export function present(row: Row): readonly PresentedLine[] {
   switch (row.kind) {
     case 'user':
-      return linesOf(row.text).map((text, index) => ({
+      return [...linesOf(row.text), ...(row.attachments ?? []).map(formatAttachment)].map((text, index) => ({
         marker: index === 0 ? MARKER.prompt : MARKER.none,
         verb: '', text, column: COLUMN.rail, tone: 'said' as const,
       }))

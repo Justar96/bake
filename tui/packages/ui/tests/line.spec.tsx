@@ -92,11 +92,16 @@ describe('Chrome', () => {
       state={state} text={text} placeholder="Ask anything" hints={hints}
     />, { columns: 60 }))
 
-  it('spends two rows, not five', () => {
+  it('spends three rows, not five', () => {
     // The shipped surface carries a status row, a session row and two standing
-    // hint rows. Three of those are charged to the live region for the whole
-    // session; only state belongs here.
-    expect(render(idle).split('\n')).toHaveLength(2)
+    // hint rows. Here: a rule that separates the conversation from the
+    // controls, the status, and the composer.
+    expect(render(idle).split('\n')).toHaveLength(3)
+  })
+
+  it('rules the full width, in characters a CJK locale cannot widen', () => {
+    const [rule] = render(idle).split('\n')
+    expect(rule).toBe('-'.repeat(60))
   })
 
   it('leaves the right slot empty until something applies', () => {

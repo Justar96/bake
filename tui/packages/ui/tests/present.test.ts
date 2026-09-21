@@ -1,7 +1,7 @@
 /** Placement of transcript rows into display lines. */
 import { describe, expect, test } from 'bun:test'
 import { COLUMN, MARKER, VERB } from '../src/layout.ts'
-import { hintFor, present, styleOf, verbFor } from '../src/present.ts'
+import { compactModel, compactPath, hintFor, present, styleOf, verbFor } from '../src/present.ts'
 
 describe('verbFor', () => {
   test('names the action, not the implementation', () => {
@@ -21,6 +21,38 @@ describe('verbFor', () => {
 
   test('falls back to a verb rather than showing an unknown tool name raw', () => {
     expect(verbFor('some_new_tool')).toBe(VERB.run)
+  })
+})
+
+describe('compactModel', () => {
+  test('drops the provider, which the user reads every frame and acts on never', () => {
+    expect(compactModel('deepseek-official/deepseek-flash')).toBe('deepseek-flash')
+    expect(compactModel('anthropic/claude-sonnet-4')).toBe('claude-sonnet-4')
+  })
+
+  test('leaves a bare model name alone', () => {
+    expect(compactModel('deepseek-flash')).toBe('deepseek-flash')
+  })
+})
+
+describe('compactPath', () => {
+  test('shortens against home', () => {
+    expect(compactPath('/Users/me/projects/bake', '/Users/me')).toBe('~/projects/bake')
+    expect(compactPath('/Users/me', '/Users/me')).toBe('~')
+  })
+
+  test('leaves a path outside home absolute', () => {
+    expect(compactPath('/etc/hosts', '/Users/me')).toBe('/etc/hosts')
+  })
+
+  test('does not shorten a sibling that merely shares the prefix', () => {
+    // /Users/mestre is not inside /Users/me.
+    expect(compactPath('/Users/mestre/work', '/Users/me')).toBe('/Users/mestre/work')
+  })
+
+  test('leaves the path alone when home is unknown', () => {
+    expect(compactPath('/srv/app', undefined)).toBe('/srv/app')
+    expect(compactPath('/srv/app', '')).toBe('/srv/app')
   })
 })
 

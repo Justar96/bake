@@ -90,13 +90,21 @@ export function StatusBar({ left, right, columns, color }: {
 }
 
 /**
- * Status line and composer, and nothing else.
+ * A rule, the status line, and the composer.
  *
- * Two rows, both of which carry live state. Standing hint rows are deliberately
- * absent: every row here is charged to the budget that keeps Ink off its
- * screen-clearing path, for the whole session, and a hint the user has read
- * once is no longer information. What a key does is shown in the composer's
- * right slot at the moment it applies.
+ * Three rows, against the five the surface spent on status, session id and two
+ * standing hint rows. Every row here is charged to the budget that keeps Ink
+ * off its screen-clearing path, on every frame, for the whole session, so each
+ * one has to carry live state or separate two regions.
+ *
+ * The rule earns its row by marking where the conversation ends and the
+ * controls begin; the hint rows did not, because a hint the user has read once
+ * is no longer information. What a key does appears in the composer's right
+ * slot at the moment it applies.
+ *
+ * The rule is drawn with ASCII `-`. Box-drawing characters look better and are
+ * East Asian Ambiguous, so a CJK locale may render them double-width and push
+ * the rule past the terminal edge.
  *
  * @param props.left - session-state fields, highest priority first.
  * @param props.right - supporting fields, dropped first as width shrinks.
@@ -122,6 +130,7 @@ export function Chrome({ left, right, columns, color, state, text, placeholder, 
   const colored = color === undefined ? {} : { color }
   return (
     <Box flexDirection="column">
+      <Text dimColor>{'-'.repeat(Math.max(1, columns))}</Text>
       <StatusBar left={left} right={right} columns={columns} {...colored} />
       <Composer
         marker={MARKER.prompt}
