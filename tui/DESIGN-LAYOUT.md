@@ -128,15 +128,41 @@ A window under ~10 rows cannot honor this. There, draw interaction-or-composer p
 - **Gutter: 2 columns**, one glyph plus one space, giving every row kind a constant left rail so the eye tracks a single column.
 - Text measurement is Ink's (`string-width`), which handles CJK wide cells and emoji correctly. Never use `.length` for layout arithmetic.
 
-| Row kind | Gutter | Color |
-| --- | --- | --- |
-| user | `›` | default |
-| assistant | ` ` | default |
-| tool call | `⚙` | dim |
-| tool result | ` ` | dim |
-| error | `✗` | red |
-| notice | `•` | yellow |
-| interaction | `?` | cyan |
+### ASCII only, and actions are named rather than pictured
+
+Symbol glyphs are a measurement risk before they are a style question. `string-width` reports `U+2699` as one cell and `U+2699 U+FE0F` as two, and a terminal with an emoji font may draw the bare codepoint double-width anyway. Ink measures with that same library, so when the terminal disagrees, every column after the glyph shifts and **nothing in the layout engine can detect it** — `renderToString` measures it the same wrong way. Characters below `0x80` cannot disagree.
+
+So the render vocabulary is a **verb column**: a named action, its argument, and any output aligned beneath it.
+
+```
+> Find where the session controller registers commands
+  think  The registry is the list, so discovery should read it.
+  run    rg -n "commands.register" -g '*.ts'
+         packages/app/src/controller.ts:45
+         packages/app/src/controller.ts:52
+  read   packages/app/src/controller.ts
+  Two registrations, both through ctx.effect.
+ready   deepseek/chat                       ctx 12%   turn 3   0f3a9c
+> Ask anything, / for commands
+```
+
+`run`, `read`, `think`, `ask`, `error` read at a glance, survive every font and locale, and stay legible pasted into a bug report. Reasoning and approvals join the same grammar instead of inventing their own marks, which is why `think` and `ask` are verbs rather than symbols.
+
+| Row kind | Marker | Columns | Color |
+| --- | --- | --- | --- |
+| user | `>` | text at 2 | default, bold |
+| assistant | none | text at 2 | default |
+| tool call | verb | verb at 2, argument at 9 | dim |
+| tool output | none | aligned at 9 | dim, not dim on failure |
+| reasoning | `think` | as a verb row | dim |
+| interaction | `ask` | as a verb row | cyan |
+| error | `error` or a red verb | as a verb row | red |
+| list selection | `*` | marker at 0 | cyan |
+| composer | `>` | text at 2 | cyan, bold |
+
+`*` marks a selection and a current value; `>` is the composer prompt and a user's own words. They are never swapped: two identical markers a row apart read as one list.
+
+`prototype/ascii.mjs` renders the vocabulary and fails if any rendered character is above `0x80`.
 
 ## 5. Bounding unbounded content
 
