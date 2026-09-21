@@ -4,7 +4,7 @@ import { renderToString } from 'ink'
 import { describe, expect, it } from 'vitest'
 import { budgetFor, COLUMN, MARKER, PROSE_MEASURE } from '../src/layout.ts'
 import { present } from '../src/present.ts'
-import { Chrome, Composer, Line, StatusBar } from '../src/line.tsx'
+import { Chrome, Completion, Composer, Line, StatusBar } from '../src/line.tsx'
 
 const strip = (text: string): string => text.replace(/\u001B\[[0-9;]*m/g, '')
 const at80 = budgetFor({ columns: 80, rows: 24 })
@@ -92,11 +92,12 @@ describe('Chrome', () => {
       state={state} text={text} placeholder="Ask anything" hints={hints}
     />, { columns: 60 }))
 
-  it('spends three rows, not five', () => {
+  it('spends four rows, not five, and one of them is breathing room', () => {
     // The shipped surface carries a status row, a session row and two standing
-    // hint rows. Here: a rule that separates the conversation from the
-    // controls, the status, and the composer.
-    expect(render(idle).split('\n')).toHaveLength(3)
+    // hint rows. Here: a rule, the status, a blank row, and the composer.
+    const rows = render(idle).split('\n')
+    expect(rows).toHaveLength(4)
+    expect(rows[2]!.trim()).toBe('')
   })
 
   it('rules the full width, in characters a CJK locale cannot widen', () => {
@@ -117,6 +118,67 @@ describe('Chrome', () => {
 })
 
 describe('Composer', () => {
+  it('grows with a multi-line draft', () => {
+    const rendered = strip(renderToString(
+      <Composer marker={MARKER.prompt} text={'one\ntwo\nthree'} placeholder="Ask" />, { columns: 40 }))
+    expect(rendered.split('\n')).toHaveLength(3)
+    expect(rendered.split('\n')[0]).toBe('> one')
+    expect(rendered.split('\n')[1]).toBe('  two')
+  })
+
+  it('windows a long draft from the bottom, where the caret is', () => {
+    const text = Array.from({ length: 12 }, (_, index) => `line ${index}`).join('\n')
+    const rendered = strip(renderToString(
+      <Composer marker={MARKER.prompt} text={text} placeholder="Ask" maxRows={5} />, { columns: 40 }))
+    const rows = rendered.split('\n')
+
+    expect(rows).toHaveLength(5)
+    expect(rows.at(-1)).toContain('line 11')
+    // The prompt marker belongs to the draft's first line, which is scrolled off.
+    expect(rows[0]!.startsWith('>')).toBe(false)
+  })
+
+  it('keeps the hint on the last row, beside the caret', () => {
+    const rendered = strip(renderToString(
+      <Composer marker={MARKER.prompt} text={'one\ntwo'} placeholder="Ask" hint="enter to send" />,
+      { columns: 40 }))
+    const rows = rendered.split('\n')
+    expect(rows[0]).not.toContain('enter to send')
+    expect(rows[1]).toContain('enter to send')
+  })
+})
+
+describe('Completion', () => {
+  const items = [
+    { name: '/model', description: 'List or select the model' },
+    { name: '/compact', description: 'Compact the conversation' },
+  ]
+  const show = (selected: number, hidden = 0): string => strip(renderToString(
+    <Completion items={items} selected={selected} hidden={hidden} more={`+${hidden} more`} />,
+    { columns: 60 }))
+
+  it('marks the selection without reusing the composer prompt', () => {
+    const rows = show(0).split('\n')
+    expect(rows[0]!.startsWith(`${MARKER.selected} `)).toBe(true)
+    expect(rows[0]!.startsWith(MARKER.prompt)).toBe(false)
+    expect(rows[1]!.startsWith('  ')).toBe(true)
+  })
+
+  it('moves the marker with the selection', () => {
+    expect(show(1).split('\n')[1]!.startsWith(`${MARKER.selected} `)).toBe(true)
+  })
+
+  it('reports what the window omitted', () => {
+    expect(show(0, 6)).toContain('+6 more')
+  })
+
+  it('renders nothing when there is nothing to offer', () => {
+    expect(strip(renderToString(
+      <Completion items={[]} selected={0} hidden={0} more="" />, { columns: 40 }))).toBe('')
+  })
+})
+
+describe('Composer placeholder', () => {
   it('shows the placeholder until there is a draft', () => {
     const empty = strip(renderToString(
       <Composer marker={MARKER.prompt} text={undefined} placeholder="Ask anything" />, { columns: 40 }))

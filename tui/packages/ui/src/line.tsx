@@ -11,7 +11,7 @@
 
 import React from 'react'
 import { Box, Text } from 'ink'
-import { COLUMN, MARKER, type Budget } from './layout.ts'
+import { COLUMN, MARKER, tailOf, type Budget } from './layout.ts'
 import { hintFor, styleOf, type ComposerState, type Hint, type PresentedLine } from './present.ts'
 
 /**
@@ -132,6 +132,8 @@ export function Chrome({ left, right, columns, color, state, text, placeholder, 
     <Box flexDirection="column">
       <Text dimColor>{'-'.repeat(Math.max(1, columns))}</Text>
       <StatusBar left={left} right={right} columns={columns} {...colored} />
+      {/* One blank row: the status reads as a label on the input without it. */}
+      <Text> </Text>
       <Composer
         marker={MARKER.prompt}
         text={text}
@@ -154,25 +156,87 @@ export function Chrome({ left, right, columns, color, state, text, placeholder, 
  * @param props.placeholder - locale-owned prompt text.
  * @param props.hint - contextual right-slot text, omitted when there is nothing to say.
  */
-export function Composer({ marker, text, placeholder, hint }: {
+export function Composer({ marker, text, placeholder, hint, maxRows = 5 }: {
   readonly marker: string
   readonly text: string | undefined
   readonly placeholder: string
   readonly hint?: string
+  readonly maxRows?: number
 }): React.ReactElement {
+  const lines = text === undefined ? [placeholder] : text.split('\n')
+  // The caret is at the end of the draft, so a long one is windowed from the
+  // bottom: the user must always see the line they are typing.
+  const visible = tailOf(lines, maxRows)
+  const windowed = visible.length < lines.length
   return (
-    <Box flexDirection="row">
-      <Box width={COLUMN.rail} flexShrink={0}>
-        <Text bold color="cyan">{marker}</Text>
-      </Box>
-      <Box flexGrow={1}>
-        <Text dimColor={text === undefined}>{text ?? placeholder}</Text>
-      </Box>
-      {hint === undefined
+    <Box flexDirection="column">
+      {visible.map((line, index) => (
+        <Box key={index} flexDirection="row">
+          <Box width={COLUMN.rail} flexShrink={0}>
+            <Text bold color="cyan">{index === 0 && !windowed ? marker : MARKER.none}</Text>
+          </Box>
+          <Box flexGrow={1}>
+            <Text dimColor={text === undefined}>{line}</Text>
+          </Box>
+          {hint === undefined || index !== visible.length - 1
+            ? null
+            : (
+              <Box flexShrink={0}>
+                <Text dimColor>{hint}</Text>
+              </Box>
+              )}
+        </Box>
+      ))}
+    </Box>
+  )
+}
+
+/**
+ * Candidate list under the composer.
+ *
+ * Selection is marked three ways, because no single one survives every terminal:
+ * a marker for a screen reader and for NO_COLOR, weight for a glance, and an
+ * undimmed description so the selected row's meaning is the one in focus. The
+ * marker is `*`, never the composer's `>`, which sits directly above it.
+ *
+ * @param props.items - candidates in display order, already windowed.
+ * @param props.selected - index of the selected candidate.
+ * @param props.hidden - candidates omitted by the window.
+ * @param props.more - locale-owned text for the omitted-count row.
+ * @param props.nameWidth - width of the name column.
+ */
+export function Completion({ items, selected, hidden, more, nameWidth = 12 }: {
+  readonly items: readonly { readonly name: string, readonly description: string }[]
+  readonly selected: number
+  readonly hidden: number
+  readonly more: string
+  readonly nameWidth?: number
+}): React.ReactElement | null {
+  if (items.length === 0 && hidden === 0) return null
+  return (
+    <Box flexDirection="column">
+      {items.map((item, index) => {
+        const active = index === selected
+        return (
+          <Box key={item.name} flexDirection="row">
+            <Box width={COLUMN.rail} flexShrink={0}>
+              <Text bold color="cyan">{active ? MARKER.selected : MARKER.none}</Text>
+            </Box>
+            <Box width={nameWidth} flexShrink={0}>
+              <Text bold={active} {...active ? { color: 'cyan' } : {}}>{item.name}</Text>
+            </Box>
+            <Box flexGrow={1}>
+              <Text dimColor={!active}>{item.description}</Text>
+            </Box>
+          </Box>
+        )
+      })}
+      {hidden === 0
         ? null
         : (
-          <Box flexShrink={0}>
-            <Text dimColor>{hint}</Text>
+          <Box flexDirection="row">
+            <Box width={COLUMN.rail} flexShrink={0}><Text> </Text></Box>
+            <Text dimColor>{more}</Text>
           </Box>
           )}
     </Box>
