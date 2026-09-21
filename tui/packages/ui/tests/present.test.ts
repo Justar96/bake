@@ -1,7 +1,7 @@
 /** Placement of transcript rows into display lines. */
 import { describe, expect, test } from 'bun:test'
 import { COLUMN, MARKER, VERB } from '../src/layout.ts'
-import { present, verbFor } from '../src/present.ts'
+import { present, styleOf, verbFor } from '../src/present.ts'
 
 describe('verbFor', () => {
   test('names the action, not the implementation', () => {
@@ -81,6 +81,15 @@ describe('present', () => {
   test('drops the empty line a trailing newline would add', () => {
     expect(present({ kind: 'assistant', text: 'one\n' })).toHaveLength(1)
     expect(present({ kind: 'assistant', text: 'one\ntwo\n' })).toHaveLength(2)
+  })
+
+  test('never dims a failure, and keeps colour semantic', () => {
+    expect(styleOf('failed')).toEqual({ color: 'red', dim: false, bold: false })
+    expect(styleOf('asking')).toEqual({ color: 'cyan', dim: false, bold: false })
+    expect(styleOf('quiet')).toEqual({ dim: true, bold: false })
+    expect(styleOf('said')).toEqual({ dim: false, bold: true })
+    expect(styleOf('plain')).toEqual({ dim: false, bold: false })
+    expect(styleOf('unknown' as never)).toEqual({ dim: false, bold: false })
   })
 
   test('renders nothing for a row kind this build does not know', () => {

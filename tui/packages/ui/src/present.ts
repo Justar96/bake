@@ -27,6 +27,37 @@ export type Tone =
   /** A question awaiting an answer. */
   | 'asking'
 
+/** Colour and weight for a tone, decided here so it needs no terminal to test. */
+export interface LineStyle {
+  /** Semantic colour, or undefined to inherit the terminal's foreground. */
+  readonly color?: 'red' | 'cyan'
+  /** Whether the text is supporting detail. */
+  readonly dim: boolean
+  /** Whether the text carries the weight of the user's own words. */
+  readonly bold: boolean
+}
+
+/**
+ * Style for one tone.
+ *
+ * Colour is semantic and never decorative: red is a failure, cyan is a question
+ * awaiting an answer. A failure is never dimmed, because dim means supporting
+ * detail and a failure is the thing the user needs to read.
+ *
+ * @param tone - emphasis carried by the line.
+ * @returns colour and weight for the component layer.
+ */
+export function styleOf(tone: Tone): LineStyle {
+  switch (tone) {
+    case 'said': return { dim: false, bold: true }
+    case 'plain': return { dim: false, bold: false }
+    case 'quiet': return { dim: true, bold: false }
+    case 'failed': return { color: 'red', dim: false, bold: false }
+    case 'asking': return { color: 'cyan', dim: false, bold: false }
+    default: return { dim: false, bold: false }
+  }
+}
+
 /** One display line, already placed in its columns. */
 export interface PresentedLine {
   /** Marker column content: a prompt, a selection mark, or a space. */
