@@ -12849,6 +12849,9 @@ importers:
       '@deepseek-ai/dsh-session-query':
         specifier: workspace:^
         version: link:../../../packages/session-query/session-query
+      '@deepseek-ai/dsh-token-meter':
+        specifier: workspace:^
+        version: link:../../../packages/llm/token-meter
       '@deepseek-ai/dsh-tool-subagent':
         specifier: workspace:^
         version: link:../../../packages/subagent/tool-subagent
