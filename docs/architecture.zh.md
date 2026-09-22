@@ -8,7 +8,7 @@ Bake 是基于 Cordis 插件运行时的终端应用。修改共享包前应阅�
 
 Bun 管理源码工作区并构建应用。受支持的 Node 应用通过 `dsh` profile 启动。随附的 profile 包括用于交互终端会话的 `tui`，以及用于单个任务的 `headless`。自定义组合仍使用 profile 和有序补丁，而不是新增可执行文件或内联应用树。
 
-终端 profile 依次加载 [`dsh-base`](../packages/bundle/base/README.zh.md) 和 [`@dsh-tui/app`](../tui/packages/app/README.zh.md)。Base 提供模型、工具、持久化、沙箱策略、设置和凭据；TUI 提供 Agent 选择、终端所有权、用户输入和呈现。[启动器](../apps/cli/README.zh.md) 负责 profile 初始化和参数转发。
+终端 profile 依次加载 [`dsh-base`](../packages/bundle/base/README.zh.md) 和 [`@dsh-tui/app`](../apps/tui/packages/app/README.zh.md)。Base 提供模型、工具、持久化、沙箱策略、设置和凭据；TUI 提供 Agent 选择、终端所有权、用户输入和呈现。[启动器](../apps/cli/README.zh.md) 负责 profile 初始化和参数转发。
 
 每个 profile 在 `dsh.profile.bundles` 中列出组合包。配置依次应用组合包补丁、profile 补丁、home 补丁和调用补丁。YAML 控制 HMR。现有 profile 清单保留用户选择的组合包。
 
@@ -41,13 +41,13 @@ Assistant 流在执行期间实时可见。完成的消息和已结束的失败�
 
 不得移动、覆盖或删除已提交代次。迁移写入会在不改变前序文件的情况下发布带版本名称的后继。未来或不支持的格式明确失败，而非静默回退。[会话格式状态](session-format-status.zh.md) 与 [JSONL 持久化](../packages/session/session-persistence-jsonl/README.zh.md) 定义数据规则。
 
-TUI 从 `agent.status` 读取活动状态，从 inbox 投影读取待处理输入，从运行时 context-pressure 投影读取上下文用量。不得从回合事件推断这些事实，也不得维护竞争性 reducer。参见 [TUI 接线](../tui/DESIGN.md)。
+TUI 从 `agent.status` 读取活动状态，从 inbox 投影读取待处理输入，从运行时 context-pressure 投影读取上下文用量。不得从回合事件推断这些事实，也不得维护竞争性 reducer。参见 [TUI 接线](../apps/tui/DESIGN.md)。
 
 ## 终端所有权
 
 应用运行器持有一个显示中的会话和终端释放路径。Ink 管理原始模式、括号粘贴和光标恢复。正常退出、Cordis 拆卸和致命启动失败都会释放终端资源。拆卸等待所持有的工作结束。
 
-实时区域保持在终端行数预算内；已提交的转录行保留在滚动历史中。纯 Ink 组件接收属性和本地化文本。Agent 访问、文件系统读取等副作用留在应用包中。[布局设计](../tui/DESIGN-LAYOUT.md) 定义终端几何和渲染规则。
+实时区域保持在终端行数预算内；已提交的转录行保留在滚动历史中。纯 Ink 组件接收属性和本地化文本。Agent 访问、文件系统读取等副作用留在应用包中。[布局设计](../apps/tui/DESIGN-LAYOUT.md) 定义终端几何和渲染规则。
 
 ## 采用上游变更
 

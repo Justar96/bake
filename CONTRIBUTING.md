@@ -29,7 +29,7 @@ Bake's `start`, `dev:tui`, and `dsh` commands use `~/.bake` by default. Set `DSH
 
 The preview accepts input for layout testing but does not submit tasks. Ctrl-C exits the preview; the real agent requires two Ctrl-C presses to quit. Stop the real agent before rebuilding its files. Never substitute `bun --bun` for the Node process: its loader uses V8 internals.
 
-`bun run dsh --help` exposes the built profile/plugin launcher using the same Bake home. External profile-plugin installation remains separate from Bun's source workspace. Session navigation and the terminal's commands are documented in the [application README](tui/packages/app/README.md).
+`bun run dsh --help` exposes the built profile/plugin launcher using the same Bake home. External profile-plugin installation remains separate from Bun's source workspace. Session navigation and the terminal's commands are documented in the [application README](apps/tui/packages/app/README.md).
 
 ## End-to-end checks
 
@@ -48,11 +48,11 @@ bun run check
 bun run test:e2e --list
 bun run test:e2e --only rendering
 bun run test:e2e --no-build
-bun tui/scripts/tui.ts spec packages/ui/tests/anchoring.spec.tsx
+bun apps/tui/scripts/tui.ts spec packages/ui/tests/placement.spec.tsx
 bun run test:runtime apps/cli/tests/args.spec.ts
 ```
 
-`--only` includes a scenario's prerequisites. E2E normally rebuilds the TUI, not the shared runtime; `--no-build` uses existing artifacts unchanged. Failed scenarios report their wait condition and retain transcripts in `tui/.smoke/`. `bun tui/scripts/tui.ts help` lists watch modes and other diagnostic options. Run `bun run lint` for source linting.
+`--only` includes a scenario's prerequisites. E2E normally rebuilds the TUI, not the shared runtime; `--no-build` uses existing artifacts unchanged. Failed scenarios report their wait condition and retain transcripts in `apps/tui/.smoke/`. `bun apps/tui/scripts/tui.ts help` lists watch modes and other diagnostic options. Run `bun run lint` for source linting.
 
 A failed check is not a reason to refresh every snapshot or bypass hooks. Use fixed terminal streams for component snapshots and explicit interactive rendering for terminal-emulator tests; keep CI detection intact. Preserve session generations and review expected-output changes. Credentials never belong in commits.
 

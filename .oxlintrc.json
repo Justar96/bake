@@ -34,8 +34,8 @@
       "files": [
         "packages/*/*/src/**/*.{ts,tsx}",
         "packages/*/*/tests/**/*.{ts,tsx}",
-        "apps/*/src/**/*.{ts,tsx}",
-        "apps/*/tests/**/*.{ts,tsx}",
+        "apps/cli/src/**/*.{ts,tsx}",
+        "apps/cli/tests/**/*.{ts,tsx}",
         "examples/**/*.{ts,tsx}",
         "scripts/**/*.{ts,tsx}"
       ],
@@ -149,7 +149,7 @@
     {
       "files": [
         "packages/*/*/src/**/*.{ts,tsx}",
-        "apps/*/src/**/*.{ts,tsx}",
+        "apps/cli/src/**/*.{ts,tsx}",
         "examples/**/*.{ts,tsx}",
         "scripts/**/*.{ts,tsx}"
       ],
@@ -195,7 +195,7 @@
     {
       "files": [
         "packages/*/*/tests/**/*.{ts,tsx}",
-        "apps/*/tests/**/*.{ts,tsx}",
+        "apps/cli/tests/**/*.{ts,tsx}",
         "examples/*/tests/**/*.{ts,tsx}",
         "scripts/**/*.spec.{ts,tsx}"
       ],
@@ -227,7 +227,8 @@
     {
       "files": [
         "packages/**/*.{ts,tsx}",
-        "apps/**/*.{ts,tsx}",
+        // apps/tui keeps the conventions it was written to; these rules never covered it.
+        "apps/cli/**/*.{ts,tsx}",
         "examples/**/*.{ts,tsx}",
         "scripts/**/*.{ts,tsx}"
       ],
@@ -248,7 +249,8 @@
     {
       "files": [
         "packages/**/*.{ts,tsx}",
-        "apps/**/*.{ts,tsx}",
+        // apps/tui keeps the conventions it was written to; these rules never covered it.
+        "apps/cli/**/*.{ts,tsx}",
         "examples/**/*.{ts,tsx}",
         "scripts/**/*.{ts,tsx}"
       ],

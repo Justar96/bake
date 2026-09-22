@@ -6,9 +6,9 @@ Bake is an independent terminal coding agent. `origin` is Bake's repository; `up
 
 Bun owns dependency installation, `bun.lock`, workspace scripts, builds, hooks, and CI. Use `bun install --frozen-lockfile` to reproduce the checkout. Do not add a root pnpm or npm lockfile. The agent process runs on Node; Bun builds and launches it. The runtime's external-profile package manager is separate from this workspace. Bake launch commands default to `~/.bake`; explicit `DSH_HOME` values select another home without migrating upstream data.
 
-- `tui/packages/app/`: profile composition, agent control, terminal lifecycle.
-- `tui/packages/ui/`: pure Ink components, projection, layout, localized copy.
-- `tui/packages/harness/`: component development and recording.
+- `apps/tui/packages/app/`: profile composition, agent control, terminal lifecycle.
+- `apps/tui/packages/ui/`: pure Ink components, projection, layout, localized copy.
+- `apps/tui/packages/harness/`: component development and recording.
 - `apps/cli/`: Node profile launcher and external-plugin management.
 - `packages/`: shared agent runtime and its tests; read [the architecture](docs/architecture.md) before changing it.
 - `native/`, `vendor/`: native support and pinned Cordis sources. Preserve licenses and upstream attribution.
@@ -38,7 +38,7 @@ Run relevant checks, not an exhaustive suite by default. Built-profile PTY scena
 - Model-visible input must be reconstructable from the session log. Preserve released data and migration behavior; consult [session format status](docs/session-format-status.md) before persistence changes.
 - Read [defensive patterns](docs/defensive-patterns.md) before lifecycle or concurrency work. Teardown must await owned work, restore terminal state, and leave no late callbacks.
 - Tests own temporary paths, ports, global mutations, and subprocesses. Mock external nondeterminism, not the runtime being tested.
-- Keep UI state authoritative: render logged events and runtime projections rather than maintaining competing copies. Localized product text belongs in `tui/packages/ui/src/copy.ts`.
+- Keep UI state authoritative: render logged events and runtime projections rather than maintaining competing copies. Localized product text belongs in `apps/tui/packages/ui/src/copy.ts`.
 - Remove obsolete consumers, tests, and documentation with a removed feature. Do not delete a shared package until imports, package dependencies, TypeScript references, and YAML compositions have been checked.
 - Documentation describes current Bake behavior. Update the owning README and JSDoc with code changes; keep English and Chinese text aligned when editing a paired page. Historical upstream design material is reference, not an instruction to restore removed products.
 - Keep comments local and explain non-obvious obligations. Files end with one newline. Never commit credentials or `.env`.

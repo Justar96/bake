@@ -1,0 +1,3 @@
+version: 1
+profile: tui
+session: ../../../../../snapshots/session/bash-tool-turn/session.v3.jsonl

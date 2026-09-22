@@ -8,7 +8,7 @@ Bake is a terminal application over a Cordis plugin runtime. Read this map befor
 
 Bun manages the source workspace and builds the application. Supported Node application launches go through `dsh` profiles. The shipped profiles are `tui`, for interactive terminal sessions, and `headless`, for one task. Custom composition remains a profile plus ordered patches, not an additional executable or inline application tree.
 
-The terminal profile stacks [`dsh-base`](../packages/bundle/base/README.md) and [`@dsh-tui/app`](../tui/packages/app/README.md). Base supplies models, tools, persistence, sandbox policy, settings, and credentials. The TUI supplies agent selection, terminal ownership, user input, and presentation. The [launcher](../apps/cli/README.md) owns profile initialization and argument forwarding.
+The terminal profile stacks [`dsh-base`](../packages/bundle/base/README.md) and [`@dsh-tui/app`](../apps/tui/packages/app/README.md). Base supplies models, tools, persistence, sandbox policy, settings, and credentials. The TUI supplies agent selection, terminal ownership, user input, and presentation. The [launcher](../apps/cli/README.md) owns profile initialization and argument forwarding.
 
 Each profile lists its bundles under `dsh.profile.bundles`. Composition applies bundle patches, the profile patch, the home patch, and invocation patches in that order. YAML controls HMR. Existing profile manifests retain their user-selected bundles.
 
@@ -41,13 +41,13 @@ Anything visible to the model must be reconstructable from the session log. A ne
 
 Never move, overwrite, or delete committed generations. A migrated write publishes a version-named successor beside unchanged predecessors. Future or unsupported formats fail rather than silently falling back. [Session format status](session-format-status.md) and [JSONL persistence](../packages/session/session-persistence-jsonl/README.md) own the data rules.
 
-The TUI reads agent activity from `agent.status`, pending input from the inbox projection, and context usage from the runtime's context-pressure projection. It must not infer these facts from turn events or keep competing reducers. See [TUI wiring](../tui/DESIGN.md).
+The TUI reads agent activity from `agent.status`, pending input from the inbox projection, and context usage from the runtime's context-pressure projection. It must not infer these facts from turn events or keep competing reducers. See [TUI wiring](../apps/tui/DESIGN.md).
 
 ## Terminal ownership
 
 The application runner owns one displayed session and the terminal's release path. Ink manages raw mode, bracketed paste, and cursor restoration. Normal exit, Cordis disposal, and fatal startup failure all release terminal resources. Teardown waits for owned work to settle.
 
-The live region stays within the terminal row budget; committed transcript rows remain in scrollback. Pure Ink components receive props and localized strings. Agent access, filesystem reads, and other effects stay in the application package. [Layout design](../tui/DESIGN-LAYOUT.md) owns terminal geometry and rendering rules.
+The live region stays within the terminal row budget; committed transcript rows remain in scrollback. Pure Ink components receive props and localized strings. Agent access, filesystem reads, and other effects stay in the application package. [Layout design](../apps/tui/DESIGN-LAYOUT.md) owns terminal geometry and rendering rules.
 
 ## Upstream adoption
 

@@ -57,7 +57,7 @@ export function workspaceConfig(root: string): string {
   }
   const references = packages.flatMap(({ path }) => {
     const directory = dirname(path)
-    if (directory.startsWith('tui/')) return []
+    if (directory.startsWith('apps/tui/')) return []
     const host = join(directory, 'tsconfig.host.json')
     const config = existsSync(join(root, host)) ? host : join(directory, 'tsconfig.json')
     return existsSync(join(root, config)) ? [{ path: `./${config}` }] : []

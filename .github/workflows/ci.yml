@@ -38,5 +38,5 @@ jobs:
         if: failure()
         with:
           name: terminal-failures-${{ matrix.os }}
-          path: tui/.smoke/
+          path: apps/tui/.smoke/
           if-no-files-found: ignore

@@ -30,17 +30,17 @@ bun run test:e2e              # 真实终端回放；需要已有运行时构建
 bun run verify               # 构建、检查和无密钥终端场景
 ```
 
-[开发指南](CONTRIBUTING.zh.md#选择开发流程) 介绍重新构建命令、场景筛选和故障排查。`bun tui/scripts/tui.ts help` 列出独立测试目标、录制和性能诊断命令。
+[开发指南](CONTRIBUTING.zh.md#选择开发流程) 介绍重新构建命令、场景筛选和故障排查。`bun apps/tui/scripts/tui.ts help` 列出独立测试目标、录制和性能诊断命令。
 
 ## 仓库结构
 
-- [`tui/`](tui/DESIGN.md)：终端应用、Ink 组件、测试数据和开发工具。
+- [`apps/tui/`](apps/tui/DESIGN.md)：终端应用、Ink 组件、测试数据和开发工具。
 - [`apps/cli/`](apps/cli/README.zh.md)：启动 `tui` 和 `headless` profile 的 Node 启动器。
 - [`packages/`](packages/README.zh.md)：共享 Agent、会话、模型、工具、沙箱和插件服务。
 - [`native/`](native/README.zh.md) 和 [`vendor/`](vendor/README.md)：原生支持和固定版本的 Cordis 源码。
 - [`snapshots/`](snapshots/AGENTS.md)：录制的会话验证数据，包括保留的历史代次。
 
-[`CONTRIBUTING.md`](CONTRIBUTING.zh.md) 介绍开发与上游发布评估。TUI 的[限制](tui/DESIGN.md#10-limits) 与设计一同记录。
+[`CONTRIBUTING.md`](CONTRIBUTING.zh.md) 介绍开发与上游发布评估。TUI 的[限制](apps/tui/DESIGN.md#10-limits) 与设计一同记录。
 
 ## 许可证
 

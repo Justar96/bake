@@ -14,7 +14,7 @@ Layers apply in order: bundle patches, profile patch, home patch, then invocatio
 
 ## Development
 
-From the repository root, `bun run build` builds the runtime and terminal bundle. `bun run start` runs the terminal with production React. `bun run start --help` shows its options. Use `bun tui/scripts/tui.ts e2e` for recorded, keyless verification through a real PTY.
+From the repository root, `bun run build` builds the runtime and terminal bundle. `bun run start` runs the terminal with production React. `bun run start --help` shows its options. Use `bun apps/tui/scripts/tui.ts e2e` for recorded, keyless verification through a real PTY.
 
 `bun run dsh` runs the built launcher with Bake's `~/.bake` home, shared with `bun run start`; an explicit `DSH_HOME` overrides it. The raw shared-runtime launcher retains its upstream home defaults. Use the Bun commands for Bake, and rebuild after launcher changes.
 

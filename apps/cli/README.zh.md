@@ -14,7 +14,7 @@
 
 ## 开发
 
-在仓库根目录运行 `bun run build` 构建运行时和终端包。`bun run start` 使用生产版 React 启动终端；`bun run start --help` 显示选项。使用 `bun tui/scripts/tui.ts e2e` 通过真实 PTY 进行无密钥录制重放验证。
+在仓库根目录运行 `bun run build` 构建运行时和终端包。`bun run start` 使用生产版 React 启动终端；`bun run start --help` 显示选项。使用 `bun apps/tui/scripts/tui.ts e2e` 通过真实 PTY 进行无密钥录制重放验证。
 
 `bun run dsh` 运行构建后的启动器，使用与 `bun run start` 相同的 Bake 数据目录 `~/.bake`；显式设置 `DSH_HOME` 可覆盖它。直接运行共享运行时启动器仍使用上游默认目录。使用 Bun 命令运行 Bake，修改启动器后需重新构建。
 

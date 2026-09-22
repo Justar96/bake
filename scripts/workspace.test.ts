@@ -14,7 +14,7 @@ afterEach(() => {
 function fixture(): string {
   const root = mkdtempSync(join(tmpdir(), 'bake-workspace-'))
   roots.push(root)
-  put(root, 'package.json', { name: 'bake', packageManager: 'bun@1.4.3', workspaces: ['packages/*', 'tui/*'] })
+  put(root, 'package.json', { name: 'bake', packageManager: 'bun@1.4.3', workspaces: ['packages/*', 'apps/tui/*'] })
   return root
 }
 
@@ -30,8 +30,8 @@ test('discovers host leaf configs and excludes separately checked TUI projects',
     put(root, `packages/${name}/tsconfig.json`, {})
   }
   put(root, 'packages/b/tsconfig.host.json', {})
-  put(root, 'tui/ui/package.json', { name: 'ui', dependencies: { a: 'workspace:*' } })
-  put(root, 'tui/ui/tsconfig.json', {})
+  put(root, 'apps/tui/ui/package.json', { name: 'ui', dependencies: { a: 'workspace:*' } })
+  put(root, 'apps/tui/ui/tsconfig.json', {})
   expect(JSON.parse(workspaceConfig(root))).toEqual({ extends: './tsconfig.base.json', files: [], references: [
     { path: './packages/a/tsconfig.json' },
     { path: './packages/b/tsconfig.host.json' },

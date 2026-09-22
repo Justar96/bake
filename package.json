@@ -16,7 +16,7 @@
     "native/system",
     "native/system/packages/*",
     "apps/cli",
-    "tui/packages/*"
+    "apps/tui/packages/*"
   ],
   "patchedDependencies": {
     "node-pty@1.2.0-beta.15": "patches/node-pty@1.2.0-beta.15.patch"
@@ -29,29 +29,29 @@
     "node-pty"
   ],
   "scripts": {
-    "start": "bun tui/scripts/tui.ts app",
-    "dev": "bun tui/scripts/tui.ts dev",
+    "start": "bun apps/tui/scripts/tui.ts app",
+    "dev": "bun apps/tui/scripts/tui.ts dev",
     "dev:tui": "bun run build && bun run start",
     "build": "bun run verify-workspace && bun run verify-tsconfig-paths && bun run build:runtime && bun run build:tui",
-    "build:tui": "bun tui/scripts/tui.ts build",
+    "build:tui": "bun apps/tui/scripts/tui.ts build",
     "build:runtime": "bun run build:native-system && bun run build:lib:host",
     "build:native-system": "bun native/system/scripts/build.ts --host-addon-only",
     "build:lib:host": "bun node_modules/typescript/bin/tsc -b tsconfig.host.json && bun run --bun tsdown",
-    "typecheck": "bun node_modules/typescript/bin/tsc -b tsconfig.host.json && bun tui/scripts/tui.ts check types",
-    "check": "bun run verify-workspace && bun run verify-tsconfig-paths && bun test scripts/workspace.test.ts && bun tui/scripts/tui.ts check",
-    "test": "bun tui/scripts/tui.ts check unit spec",
+    "typecheck": "bun node_modules/typescript/bin/tsc -b tsconfig.host.json && bun apps/tui/scripts/tui.ts check types",
+    "check": "bun run verify-workspace && bun run verify-tsconfig-paths && bun test scripts/workspace.test.ts && bun apps/tui/scripts/tui.ts check",
+    "test": "bun apps/tui/scripts/tui.ts check unit spec",
     "test:runtime": "node node_modules/vitest/vitest.mjs run",
-    "test:e2e": "bun tui/scripts/tui.ts e2e",
+    "test:e2e": "bun apps/tui/scripts/tui.ts e2e",
     "verify": "bun run build && bun run check && bun run test:e2e --no-build",
-    "lint": "bun scripts/run-oxlint.ts tui scripts --config .oxlintrc.staged.json",
-    "doc-sync": "bun tui/scripts/tui.ts check docs",
+    "lint": "bun scripts/run-oxlint.ts apps/tui scripts --config .oxlintrc.staged.json",
+    "doc-sync": "bun apps/tui/scripts/tui.ts check docs",
     "gen-workspace": "bun scripts/gen-workspace.ts",
     "verify-workspace": "bun scripts/gen-workspace.ts --check",
     "gen-tsconfig-paths": "bun scripts/gen-tsconfig-paths.ts",
     "verify-tsconfig-paths": "bun scripts/gen-tsconfig-paths.ts --check",
     "gen-workflow-guest": "bun scripts/gen-workflow-guest.ts",
     "gen-session-format-catalog": "bun scripts/gen-session-format-catalog.ts",
-    "dsh": "bun tui/scripts/tui.ts dsh",
+    "dsh": "bun apps/tui/scripts/tui.ts dsh",
     "postinstall": "lefthook install"
   },
   "devDependencies": {

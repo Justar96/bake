@@ -90,7 +90,7 @@ Loader 结算后，app-boot 在仅 optional 条目未激活时输出警告。如
 
 上面的 required 列表包含 `modules` 与 `connection`；只要其中一个已启用条目失败，Web 就无法成功启动。Optional 提供方失败也可能使 required 消费方无法激活。现有条目的新配置在更新前被 schema 校验拒绝，并不等于对兄弟插件的变更做事务回滚。
 
-[App-boot 测试](tests/app-boot.spec.ts) 覆盖激活失败、必需终端条目和根 Include 失败。[终端重放](../../../tui/scripts/pty-smoke.ts) 验证随附 TUI 组合和终端恢复。
+[App-boot 测试](tests/app-boot.spec.ts) 覆盖激活失败、必需终端条目和根 Include 失败。[终端重放](../../../apps/tui/scripts/pty-smoke.ts) 验证随附 TUI 组合和终端恢复。
 
 如果你的应用持有终端，它可以在进程退出前把终端交还，你的 shell 绝不会残留在 raw 模式。交还过程有界：卡住的清理只会延迟致命退出，而不会取消它。
 

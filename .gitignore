@@ -55,11 +55,11 @@ native/system/test/bin/
 packages/**/src/**/*.js
 apps/**/src/**/*.js
 vendor/**/src/**/*.js
-tui/**/src/**/*.js
+apps/tui/**/src/**/*.js
 packages/**/src/**/*.d.ts
 apps/**/src/**/*.d.ts
 vendor/**/src/**/*.d.ts
-tui/**/src/**/*.d.ts
+apps/tui/**/src/**/*.d.ts
 !packages/**/src/**/css-modules.d.ts
 !packages/**/src/**/asset-imports.d.ts
 !packages/**/src/**/use-sync-external-store.d.ts
@@ -69,4 +69,4 @@ tui/**/src/**/*.d.ts
 
 
 # A failing PTY run keeps its transcript here.
-tui/.smoke/
+apps/tui/.smoke/

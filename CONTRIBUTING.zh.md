@@ -29,7 +29,7 @@ Bake 的 `start`、`dev:tui` 和 `dsh` 命令默认使用 `~/.bake`。设置 `DS
 
 预览接受输入以测试布局，但不会提交任务。Ctrl-C 退出预览；真实 Agent 需要按两次 Ctrl-C 才会退出。重新构建文件前请停止真实 Agent。不要用 `bun --bun` 替换 Node 进程：其加载器依赖 V8 内部接口。
 
-`bun run dsh --help` 显示构建后的配置和插件启动器，它使用同一个 Bake 数据目录。外部配置的插件安装与 Bun 源码工作区互相独立。会话导航和终端命令见[应用 README](tui/packages/app/README.zh.md)。
+`bun run dsh --help` 显示构建后的配置和插件启动器，它使用同一个 Bake 数据目录。外部配置的插件安装与 Bun 源码工作区互相独立。会话导航和终端命令见[应用 README](apps/tui/packages/app/README.zh.md)。
 
 ## 端到端检查
 
@@ -48,11 +48,11 @@ bun run check
 bun run test:e2e --list
 bun run test:e2e --only rendering
 bun run test:e2e --no-build
-bun tui/scripts/tui.ts spec packages/ui/tests/anchoring.spec.tsx
+bun apps/tui/scripts/tui.ts spec packages/ui/tests/placement.spec.tsx
 bun run test:runtime apps/cli/tests/args.spec.ts
 ```
 
-`--only` 包含场景所需的前置场景。E2E 默认只重新构建 TUI，不构建共享运行时；`--no-build` 直接使用现有产物。失败场景会报告等待条件，并将终端记录保留在 `tui/.smoke/`。`bun tui/scripts/tui.ts help` 列出监听模式和其他诊断选项。运行 `bun run lint` 检查源码。
+`--only` 包含场景所需的前置场景。E2E 默认只重新构建 TUI，不构建共享运行时；`--no-build` 直接使用现有产物。失败场景会报告等待条件，并将终端记录保留在 `apps/tui/.smoke/`。`bun apps/tui/scripts/tui.ts help` 列出监听模式和其他诊断选项。运行 `bun run lint` 检查源码。
 
 检查失败不意味着可以刷新全部快照或绕过钩子。组件快照使用固定尺寸的终端流，终端模拟器测试显式启用交互渲染；保留 CI 检测。保留会话代际文件并审阅预期输出变更。不要提交凭据。
 

@@ -30,17 +30,17 @@ bun run test:e2e              # real-terminal replay; runtime must be built
 bun run verify               # build + check + keyless terminal scenarios
 ```
 
-See the [development guide](CONTRIBUTING.md#choose-a-development-loop) for rebuild commands, scenario filters, and troubleshooting. `bun tui/scripts/tui.ts help` lists individual test targets, fixture recording, and performance diagnostics.
+See the [development guide](CONTRIBUTING.md#choose-a-development-loop) for rebuild commands, scenario filters, and troubleshooting. `bun apps/tui/scripts/tui.ts help` lists individual test targets, fixture recording, and performance diagnostics.
 
 ## Repository
 
-- [`tui/`](tui/DESIGN.md): terminal application, Ink components, fixtures, and development tools.
+- [`apps/tui/`](apps/tui/DESIGN.md): terminal application, Ink components, fixtures, and development tools.
 - [`apps/cli/`](apps/cli/README.md): Node launcher for `tui` and `headless` profiles.
 - [`packages/`](packages/README.md): shared agent, session, model, tool, sandbox, and plugin services.
 - [`native/`](native/README.md) and [`vendor/`](vendor/README.md): native support and pinned Cordis sources.
 - [`snapshots/`](snapshots/AGENTS.md): recorded session evidence, including retained historical generations.
 
-[`CONTRIBUTING.md`](CONTRIBUTING.md) covers development and reviewing upstream releases. The TUI's [limitations](tui/DESIGN.md#10-limits) are documented with its design.
+[`CONTRIBUTING.md`](CONTRIBUTING.md) covers development and reviewing upstream releases. The TUI's [limitations](apps/tui/DESIGN.md#10-limits) are documented with its design.
 
 ## License
 

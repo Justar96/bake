@@ -1,0 +1,37 @@
+{
+  "extends": "../../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types",
+    "jsx": "react-jsx"
+  },
+  "include": [
+    "src"
+  ],
+  "references": [
+    {
+      "path": "../../../../packages/core/agent"
+    },
+    {
+      "path": "../../../../packages/core/session"
+    },
+    {
+      "path": "../../../../packages/interaction/user-questions"
+    },
+    {
+      "path": "../../../../packages/util/values"
+    },
+    {
+      "path": "../../../../packages/context/file-reference"
+    },
+    {
+      "path": "../../../../packages/core/tools"
+    },
+    {
+      "path": "../../../../packages/compaction/compaction"
+    },
+    {
+      "path": "../../../../packages/interaction/commands"
+    }
+  ]
+}
