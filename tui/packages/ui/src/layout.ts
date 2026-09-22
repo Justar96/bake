@@ -137,10 +137,14 @@ export const padTo = (used: number, hold: number | undefined): number =>
 
 /** Marker characters. All ASCII: a terminal and `string-width` can disagree about anything above 0x7f. */
 export const MARKER = {
-  /** The composer prompt, and a user's own words in the transcript. */
+  /** Opens a turn in the transcript: the user's words that started it. */
+  turn: '.',
+  /** The composer prompt. Only the live input carries it, never history. */
   prompt: '>',
-  /** A selected list row, or a current value. Never `>`, which the prompt owns. */
+  /** A selected list row, or a current value. */
   selected: '*',
+  /** Session state, coloured by what the session is doing. */
+  state: '.',
   /** An unmarked row: assistant prose, and unselected list rows. */
   none: ' ',
 } as const

@@ -20,7 +20,7 @@ describe('Line', () => {
     const output = show(present({ kind: 'tool-result', callId: 'c', ok: true, text: 'result' })
       .map((line, index) => <Line key={index} line={line} budget={at80} />))
 
-    expect(said).toBe(`${MARKER.prompt} hello`)
+    expect(said).toBe(`${MARKER.turn} hello`)
     expect(output.indexOf('result')).toBe(COLUMN.output)
   })
 
@@ -67,7 +67,8 @@ describe('StatusBar', () => {
       { columns: 60 }))
 
     expect(rendered).toHaveLength(60)
-    expect(rendered.startsWith('ready')).toBe(true)
+    // The state indicator opens the row; the fields follow it.
+    expect(rendered.startsWith(`${MARKER.state} ready`)).toBe(true)
     expect(rendered.endsWith('turn 3')).toBe(true)
   })
 

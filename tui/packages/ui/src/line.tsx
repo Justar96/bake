@@ -74,6 +74,9 @@ export function StatusBar({ left, right, columns, color }: {
   readonly columns: number
   readonly color?: string
 }): React.ReactElement {
+  // Only the indicator takes the state colour. Colouring the whole cluster would
+  // make the model and path change colour for reasons that have nothing to do
+  // with them, and the state word already carries the meaning without colour.
   const colored = color === undefined ? {} : { color }
   // Yoga measures display width, so the gap is laid out rather than computed.
   // Arithmetic on `.length` counts code points and puts a CJK status line one
@@ -81,8 +84,11 @@ export function StatusBar({ left, right, columns, color }: {
   // row of the live region's budget.
   return (
     <Box width={columns}>
+      <Box width={COLUMN.rail} flexShrink={0}>
+        <Text {...colored}>{MARKER.state}</Text>
+      </Box>
       <Box flexGrow={1}>
-        <Text wrap="truncate-end" {...colored}>{left.join('   ')}</Text>
+        <Text wrap="truncate-end">{left.join('   ')}</Text>
       </Box>
       <Box flexShrink={0}>
         <Text dimColor wrap="truncate-start">{right.join('   ')}</Text>

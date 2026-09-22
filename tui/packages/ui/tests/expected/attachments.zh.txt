@@ -7,6 +7,6 @@ pixel.png · image/png · 84 B · 1×1
 1. pixel.png · image/png · 84 B · 1×1
 Enter 发送 · /remove-attachment <编号> 移除 · /clear-attachments 清除
 ----------------------------------------------------------------------------------------------------
-o 就绪   model   /workspace
+. 就绪   model   /workspace
 
 > ▌Enter 发送 · Esc 中断 · 按两次 Ctrl-C 退出

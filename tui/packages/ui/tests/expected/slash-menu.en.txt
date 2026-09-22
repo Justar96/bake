@@ -4,6 +4,6 @@ Commands and skills
 * /review  Skill  Review the current patch
 ↑↓ choose · Tab completes · Esc closes · Enter sends · 2/3
 ----------------------------------------------------------------------------------------------------
-o Ready   model   /workspace
+. Ready   model   /workspace
 
 > /r▌

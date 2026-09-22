@@ -7,6 +7,6 @@ Staged attachments: 1
 1. pixel.png · image/png · 84 B · 1×1
 Enter sends · /remove-attachment <number> removes · /clear-attachments clears
 ----------------------------------------------------------------------------------------------------
-o Ready   model   /workspace
+. Ready   model   /workspace
 
 > ▌Enter sends · Esc interrupts · Ctrl-C twice quits

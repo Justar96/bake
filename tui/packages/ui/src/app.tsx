@@ -196,10 +196,10 @@ function SessionView(props: AppProps): React.ReactElement {
       <Text dimColor>{copy.completionHelp}{' · '}{props.status === 'running' ? copy.steering : copy.send}{matches.length === 0 ? '' : ` · ${selected + 1}/${matches.length}`}</Text>
     </Box>}
     {interaction === undefined && <Chrome
-      left={[`${props.status === 'running' ? '*' : 'o'} ${status}`, compactModel(props.model), compactPath(props.cwd, process.env['HOME'])]}
+      left={[status, compactModel(props.model), compactPath(props.cwd, process.env['HOME'])]}
       right={props.context === undefined ? [] : [`${copy.context}: ${formatContext(props.context)}`]}
       columns={size.columns}
-      color={props.status === 'running' ? 'yellow' : 'green'}
+      color={props.stopping || props.inputBlocked === true ? 'red' : props.status === 'running' ? 'yellow' : 'green'}
       state={{ running: props.status === 'running', asking: false, listing: matches !== undefined }}
       before={composer.before}
       after={composer.after}

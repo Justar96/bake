@@ -99,6 +99,12 @@ describe('vocabulary', () => {
     expect(MARKER.selected).not.toBe(MARKER.prompt)
   })
 
+  test('history and live input are marked differently', () => {
+    // A turn in scrollback is not an invitation to type; the prompt is.
+    expect(MARKER.turn).not.toBe(MARKER.prompt)
+    expect(MARKER.turn).not.toBe(MARKER.selected)
+  })
+
   test('every verb fits its column with a gap', () => {
     for (const verb of Object.values(VERB)) expect(verb.length).toBeLessThan(COLUMN.verb)
   })

@@ -177,7 +177,7 @@ export function present(row: Row): readonly PresentedLine[] {
   switch (row.kind) {
     case 'user':
       return [...linesOf(row.text), ...(row.attachments ?? []).map(formatAttachment)].map((text, index) => ({
-        marker: index === 0 ? MARKER.prompt : MARKER.none,
+        marker: index === 0 ? MARKER.turn : MARKER.none,
         verb: '', text, column: COLUMN.rail, tone: 'said' as const,
       }))
 

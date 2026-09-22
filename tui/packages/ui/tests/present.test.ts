@@ -76,9 +76,9 @@ describe('hintFor', () => {
 })
 
 describe('present', () => {
-  test('marks the user row once, not on every wrapped line', () => {
+  test('opens a turn once, not on every wrapped line', () => {
     const lines = present({ kind: 'user', text: 'first\nsecond' })
-    expect(lines.map(line => line.marker)).toEqual([MARKER.prompt, MARKER.none])
+    expect(lines.map(line => line.marker)).toEqual([MARKER.turn, MARKER.none])
     expect(lines.every(line => line.column === COLUMN.rail)).toBe(true)
   })
 
