@@ -135,16 +135,25 @@ export const tailOf = <T>(lines: readonly T[], budget: number): readonly T[] =>
 export const padTo = (used: number, hold: number | undefined): number =>
   hold === undefined ? 0 : Math.max(0, hold - used)
 
-/** Marker characters. All ASCII: a terminal and `string-width` can disagree about anything above 0x7f. */
+/**
+ * Marker characters.
+ *
+ * Text is ASCII, because a terminal and `string-width` can disagree above 0x7f
+ * and Ink measures with `string-width`. Markers are the deliberate exception:
+ * each sits alone in a fixed-width rail, so a terminal that draws one wider
+ * than measured shifts that row and nothing else, rather than accumulating
+ * error across a line. `isRenderable` still guards everything that is not a
+ * marker.
+ */
 export const MARKER = {
   /** Opens a turn in the transcript: the user's words that started it. */
-  turn: '.',
+  turn: '\u25cf',
   /** The composer prompt. Only the live input carries it, never history. */
   prompt: '>',
   /** A selected list row, or a current value. */
   selected: '*',
   /** Session state, coloured by what the session is doing. */
-  state: '.',
+  state: '\u25cf',
   /** An unmarked row: assistant prose, and unselected list rows. */
   none: ' ',
 } as const

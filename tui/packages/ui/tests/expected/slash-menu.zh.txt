@@ -4,6 +4,6 @@
 * /review  技能  Review the current patch
 ↑↓ 选择 · Tab 补全 · Esc 关闭 · Enter 发送 · 2/3
 ----------------------------------------------------------------------------------------------------
-. 就绪   model   /workspace
+● 就绪   model   /workspace
 
 > /r▌

@@ -4,6 +4,6 @@ Workspace files
   @"notes folder/todo.txt"     File
 ↑↓ choose · Tab completes · Esc closes · Enter sends · 1/2
 ----------------------------------------------------------------------------------------------------
-. Ready   model   /workspace
+● Ready   model   /workspace
 
 > Review @"notes folder/▌"

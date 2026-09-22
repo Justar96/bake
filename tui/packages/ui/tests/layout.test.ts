@@ -89,9 +89,14 @@ describe('padTo', () => {
 })
 
 describe('vocabulary', () => {
-  test('every marker and verb is ASCII', () => {
-    for (const marker of Object.values(MARKER)) expect(isRenderable(marker)).toBe(true)
+  test('every verb is ASCII, since verbs sit in a line with other text', () => {
     for (const verb of Object.values(VERB)) expect(isRenderable(verb)).toBe(true)
+  })
+
+  test('every marker is a single cell as measured', () => {
+    // A marker may be non-ASCII: it sits alone in a fixed-width rail, so a
+    // terminal drawing it wider than measured shifts that row and no other.
+    for (const marker of Object.values(MARKER)) expect([...marker]).toHaveLength(1)
   })
 
   test('the prompt and the selection marker stay distinct', () => {
