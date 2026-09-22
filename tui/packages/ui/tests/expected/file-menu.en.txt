@@ -2,6 +2,6 @@
 ----------------------------------------------------------------------------------------------------
 ● Ready   model   /workspace
 
-> Review @"notes folder/▌"
-▸ @"notes folder/read me.txt"  File
-  @"notes folder/todo.txt"     File
+> Review @"notes folder/▌"                                                             Tab completes
+▸ @"notes folder/read me.txt"
+  @"notes folder/todo.txt"

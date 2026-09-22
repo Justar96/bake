@@ -2,7 +2,7 @@
 ----------------------------------------------------------------------------------------------------
 ● Ready   model   /workspace
 
-> /r▌
+> /r▌                                                                                  Tab completes
   /reset   Command  Reset the view
 ▸ /review  Skill  Review the current patch
   +1 more, keep typing to narrow

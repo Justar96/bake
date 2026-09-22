@@ -175,6 +175,12 @@ function SessionView(props: AppProps): React.ReactElement {
   const status = props.inputBlocked === true ? copy.sessionsBusy : props.stopping ? copy.stopping : props.status === 'running' ? copy.working : copy.ready
   const size = useWindowSize()
   const budget = budgetFor(size)
+  // Configuration asks for a number of rows; the terminal decides whether they
+  // exist. A panel past the viewport makes Ink clear the screen and replay the
+  // whole transcript on every keystroke.
+  const menuLimit = Math.min(props.completionLimit, budget.items)
+  const visibleMatches = matches?.slice(start, start + menuLimit) ?? []
+  const mixedKinds = new Set(visibleMatches.map(entry => entry.kind)).size > 1
   return <Box flexDirection="column">
     <CommittedTranscript transcript={props.committed} heading={`${copy.session}: ${props.sessionId}`} budget={budget} />
     {props.live.map((row, index) => <RowView key={index} row={row} budget={budget} />)}
@@ -201,21 +207,23 @@ function SessionView(props: AppProps): React.ReactElement {
       before={composer.before}
       after={composer.after}
       placeholder={copy.help}
-      // No hint while the menu is open: it prints the same keys above, with a
-      // position counter the slot has no room for.
-      hints={{ send: copy.send, interrupt: copy.stopping, select: '', answer: copy.send }}
+      // The panel carries no key help of its own, so the slot names the one key
+      // that is not discoverable by pressing it.
+      hints={{ send: copy.send, interrupt: copy.stopping, select: copy.tabCompletes, answer: copy.send }}
     />}
     {/* Below the composer, never above it: matches change on every keystroke, and
         a panel above the input would move the line being typed. */}
     {matches !== undefined && interaction === undefined && <Box flexDirection="column">
       <Completion
-        items={matches.slice(start, start + props.completionLimit).map(entry => ({
+        items={visibleMatches.map(entry => ({
           name: entry.name,
-          description: entry.description === '' ? copy[entry.kind] : `${copy[entry.kind]}  ${entry.description}`,
+          // The kind is dropped when every visible row shares one: nine rows
+          // reading `Command` say nothing that the panel itself does not.
+          description: [mixedKinds ? copy[entry.kind] : '', entry.description].filter(part => part !== '').join('  '),
         }))}
         selected={selected - start}
-        hidden={Math.max(0, matches.length - (start + props.completionLimit))}
-        more={`+${Math.max(0, matches.length - (start + props.completionLimit))} ${copy.moreMatches}`}
+        hidden={Math.max(0, matches.length - (start + menuLimit))}
+        more={`+${Math.max(0, matches.length - (start + menuLimit))} ${copy.moreMatches}`}
       />
       {matches.length === 0 && !visibleMenu?.loading && <Status text={visibleMenu?.kind === 'file' ? copy.noFiles : copy.noCompletions} />}
       {visibleMenu?.loading === true && <Status text={visibleMenu?.kind === 'file' ? copy.filesLoading : copy.catalogLoading} />}

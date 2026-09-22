@@ -2,6 +2,6 @@
 ----------------------------------------------------------------------------------------------------
 ● 就绪   model   /workspace
 
-> Review @"notes folder/▌"
-▸ @"notes folder/read me.txt"  文件
-  @"notes folder/todo.txt"     文件
+> Review @"notes folder/▌"                                                                  Tab 补全
+▸ @"notes folder/read me.txt"
+  @"notes folder/todo.txt"
