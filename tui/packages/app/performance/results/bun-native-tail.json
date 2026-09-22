@@ -1,0 +1,65 @@
+{
+  "metadata": {
+    "dirty": true,
+    "bundleSha256": "d11a8ba2b75ed676d2c5eff337128af1331b333c309f009ddcd8f65a4c463b32",
+    "bundleBytes": 58824,
+    "mode": "production",
+    "node": "v26.9.0",
+    "artifacts": {
+      "index.js": "d11a8ba2b75ed676d2c5eff337128af1331b333c309f009ddcd8f65a4c463b32",
+      "startup.js": "caa4663c88a769a7280b8bb062879acb26eb538676dafad983f52c015aad931b",
+      "seed.js": "e2ece2e119545faa0a1aa714a19010d42a4bfcec46c8b1f2932accea53e48ee0",
+      "metrics.mjs": "dc3cccf514fbbd99e941770eb0856278f96d0599eba8594a10554ee72e3ae54f"
+    },
+    "compositionSha256": "3936dbd4610bb2770de435f7eaff13d58c91d495ac87646330c624c60f968ce2",
+    "sourceSha256": "6aa447e3bb54360f50876f4ffa452b179aef287b8d5082ebbcd6d419e345051d",
+    "lockSha256": "ba79e12361a699c6bd4fdb86ab565799193191fbde2571c97c3311e3b256e4d4",
+    "platform": "darwin",
+    "arch": "x64",
+    "viewport": {
+      "columns": 120,
+      "rows": 40
+    },
+    "terminalDriver": "Bun.Terminal",
+    "bun": "1.4.3",
+    "samples": 1,
+    "workloads": [
+      "tail"
+    ],
+    "heapLimitMiB": 1024,
+    "cpuProfile": false,
+    "clock": "fresh process; warm filesystem cache; no model/network latency",
+    "memory": "main Node process; forced GC at ready and after streaming; RSS includes worker threads",
+    "evidenceNote": "Checkout commit id and native stacks omitted for repository documentation. Artifact hashes, failure endpoints, fatal messages and numeric samples are unchanged."
+  },
+  "interrupted": false,
+  "summary": [
+    {
+      "workload": "tail",
+      "completed": 0,
+      "failed": 1,
+      "readyMs": null,
+      "maxIdleInputMs": null,
+      "liveInputMs": null,
+      "firstDeltaMs": null,
+      "streamMs": null,
+      "retainedHeapMiB": null,
+      "peakRssMiB": null
+    }
+  ],
+  "results": [
+    {
+      "workload": "tail",
+      "iteration": 0,
+      "dimensions": {
+        "turns": 2000,
+        "events": 13001,
+        "deltaCount": 82000,
+        "toolCount": 500,
+        "fileBytes": 14264383,
+        "sessionId": "tui-perf-session"
+      },
+      "error": "Ink input registration: Node exited {\"code\":134,\"signal\":\"SIGABRT\"}\nFATAL ERROR: Ineffective mark-compacts near heap limit Allocation failed - JavaScript heap out of memory"
+    }
+  ]
+}

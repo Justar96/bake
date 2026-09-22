@@ -1,78 +1,48 @@
 # Bun in this fork
 
-What Bun is used for, what it is not used for, and which 1.4 features earn their place. Every claim here was checked against the installed binary.
+Bun builds the TUI, runs development tools, and drives real Node processes for qualification. The built application uses production React. The [performance report](packages/app/performance/README.md) owns measured startup, input, and memory results.
 
-**Installed: 1.4.2** (upgraded from 1.3.14; registry `latest` was 1.4.2 at the time).
+Installed and exercised here: **Bun 1.4.3**. The [Bun bundler](https://bun.com/docs/bundler) and [terminal API](https://bun.com/docs/runtime/child-process#terminal-pty-support) document the APIs used below.
 
-## The standing rule
+## Runtime ownership
 
-> Bun may touch anything that never enters the dsh process.
+Bun may run tooling that stays outside the dsh process. Harness runs on Node: `app-boot` uses `node-addon-require-builtin` to reach V8 current-context symbols for `internal/modules/esm/loader`. Bun's JavaScriptCore engine cannot load that V8 integration. A Harness runtime migration would require upstream launcher and native-loader work, outside this fork's `tui/` ownership.
 
-Bun **cannot** run dsh. `app-boot` uses `node-addon-require-builtin`, which reaches V8 current-context symbols to obtain `internal/modules/esm/loader`. JavaScriptCore has no such symbols, and the failure happens during host preparation, before any plugin mounts. This is not a gap to be closed by a newer Bun; it is an engine difference.
+| Work | Runtime and benefit |
+|---|---|
+| Bundle the application | `Bun.build` compiles TypeScript/JSX and minifies production output; Node executes the resulting ESM. |
+| Develop components | Bun's hot component harness gives a short edit/render loop without booting Harness. |
+| Pure modules and tooling tests | `bun test` runs the fork's `.test.ts` files. PTY tests start separate Node children. |
+| Measure the application | Bun coordinates fixed workloads and owns a native PTY; Node runs Harness and authors durable fixtures. |
+| Exercise Harness services and Ink integration | Node/vitest remains the owner of `.spec.ts(x)` tests. The resolver-identity check also runs on Node. |
+| Manage dependencies | pnpm owns the workspace, overrides, links, patches, and lockfile. Do not use `bun install` here. |
 
-So Bun is toolchain only: bundling, pure-module tests, the component harness, and fixture tooling. Never `bun install` at the repository root — that discards pnpm `overrides`, `link:vendor/*`, and `patches/`.
+Bun upgrades require build and built-PTY checks because compiler changes affect the JavaScript Node executes. Runtime separation preserves Harness ownership; it does not make compiler upgrades validation-free.
 
-Upgrading Bun is therefore low-risk by construction: no version of it reaches the runtime.
+## Shared production build
 
-## Verified after the 1.4.2 upgrade
+[`scripts/build.ts`](scripts/build.ts) owns the app, recorder, and diagnostic bundling options. It inlines `@dsh-tui/ui` and keeps `@deepseek-ai/*`, Ink, React, and Commander external, preserving host singleton identity. Production bundles compile with production JSX and minification. The dispatcher supplies `NODE_ENV=production` to built app, recorder, and PTY launches so external React and Ink use the same mode.
 
-| Path | Result |
-| --- | --- |
-| `bun test .test.ts` | 17 pass, 0 fail, 27 ms |
-| `bun build` in `scripts/build.sh` | unchanged, still produces the three bundles |
-| prototype scripts (`node`) | unaffected; they run on Node by design |
-
-## Adopt
-
-### 1. Coverage gate for pure modules
-
-`bun test --coverage` works today and `bunfig.toml` thresholds are enforced with a real exit code:
-
-```
-threshold 0.95 vs 40% coverage -> exit 1
-threshold 0.30 vs 40% coverage -> exit 0
+```sh
+./tui/scripts/tui.ts build
+./tui/scripts/tui.ts app
+./tui/scripts/tui.ts perf --workload fresh --workload typical --samples 3 --output /tmp/bake-bun-native-production.json
 ```
 
-Current state of the fork's pure modules:
+`dev` and `source` retain their development entry paths. The performance command accepts `--mode development` for a controlled baseline; it uses the same bundler and inputs. Production compilation reduces bundle size and development-renderer work. It does not bound the allocations required to render a complete history; the large-history failure remains recorded in the performance report.
 
-```
-All files                      |   95.83 |   92.45 |
- packages/ui/src/editor.ts     |  100.00 |  100.00 |
- packages/ui/src/format.ts     |  100.00 |  100.00 |
- packages/ui/src/project.ts    |   83.33 |   69.81 | 47,49-54,72-73,100-106
- packages/ui/src/transcript.ts |  100.00 |  100.00 |
-```
+The [build test](packages/app/tests/build.test.ts) executes compiled JSX under Node with external production React and rejects a missing entry. Restoring development bundling makes its production-runtime assertion fail. Strict tooling programs include the shared build, dispatcher, diagnostic, and Bun test drivers; Bun declarations remain a TUI development dependency.
 
-Upstream's CI gate is per-file 100% on `packages/*/*/src`; the fork sits outside that gate and has drifted below it. The uncovered lines in `project.ts` are not incidental — they are the `tool/call` projection, the error-notice branch, and `resultText`'s content-block handling. All three are user-visible, and the session-log projection is the module where a mistake silently shows the wrong thing.
+## Native PTY for performance measurements
 
-Adopt in two steps: add the missing `project.ts` tests, then add `tui/bunfig.toml` with a threshold and wire `--coverage` into `check.sh`. Setting the threshold before the tests exist would only make the gate red.
+[`performance/terminal.ts`](packages/app/performance/terminal.ts) uses `Bun.spawn({ terminal: ... })` directly. Bun supplies the 120-column, 40-row terminal and the measured Node PID. The driver retains bounded output, counts historical answers, samples the Node heap, and awaits Node exit before closing the terminal. No `script`, `cat`, shell pipeline, PID file, or exit-status file is needed.
 
-### 2. `--reporter=junit --reporter-outfile`
+The driver distinguishes process exit from terminal EOF. Bun leaves `exitCode` null for signal termination, so the driver waits on `exited` and records `signalCode` independently. The [PTY tests](packages/app/tests/performance-terminal.test.ts) cover native TTY dimensions, Node runtime identity, memory samples, failed exits, fatal signals, timeout cleanup, and cancellation.
 
-Free once the fork publishes CI results. No work until there is a CI job to consume it.
+The ordinary [`pty-smoke.ts`](scripts/pty-smoke.ts) still uses `bun:ffi` to compare terminal mode bytes before and after application teardown. Those assertions are separate from performance sampling. The performance diagnostic remains macOS/Linux-only because its Node memory preload uses SIGUSR2; Windows/ConPTY qualification is not claimed.
 
-## Reject, with reasons
+## Further tooling opportunities
 
-### `--packages=external`
+Bun coverage reporting can help identify missing pure-projection cases before adopting a coverage threshold. Coverage policy needs its own focused change and negative control. JUnit output becomes useful when a TUI CI job consumes it. Test sharding or concurrency should follow measured suite cost, especially because process-level performance samples must run without competing CPU-heavy jobs.
 
-Tempting as a replacement for the explicit external list in `scripts/build.sh`, and wrong here. It externalizes every bare specifier, including `@dsh-tui/ui`, which the build deliberately **inlines** so the plugin ships as one file. The hand-written list (`@deepseek-ai/*`, `ink`, `react`, `commander`) expresses an intent the flag cannot: inline our own packages, externalize everything the host already has.
-
-### `--compile` standalone executables
-
-The plugin is loaded in-process by Node through `--patch`. A Bun executable cannot be loaded that way, and a separate binary would reintroduce the out-of-process split that was rejected because ACP has no `session/load`.
-
-### `--shard` / `--timings` / `--concurrent`
-
-Built for suites that take minutes. Ours takes 27 ms.
-
-### `bun why`, `bun audit`, catalogs, isolated installs
-
-All read or write `bun.lock`. The workspace is pnpm-managed and must stay that way.
-
-## Worth considering later
-
-### Bun Shell for Windows-portable scripts
-
-`scripts/tui` and `scripts/{build,check,pty-smoke}.sh` are bash, so a Windows contributor cannot run the gate. Bun Shell (`$`) runs the same script on Windows, and scripts never enter the dsh process, so the rule permits it.
-
-Two caveats before anyone starts: `pty-smoke.py` uses `openpty` and is Unix-only regardless of shell, and upstream already carries `check:windows-wine`, so the fork should match however upstream expects Windows to be exercised rather than inventing a second answer.
+`--packages=external` is unsuitable here: it would also externalize `@dsh-tui/ui`, which must be inlined. `--compile` creates a Bun executable, while the application is an in-process Node plugin loaded through a `dsh` profile. Bun package-manager commands cannot replace pnpm's workspace configuration.

@@ -1,0 +1,157 @@
+{
+  "metadata": {
+    "dirty": true,
+    "bundleSha256": "40cfe141df96ae72cf5964f960a323af65df0b4f19103b7a9119d60a059499dd",
+    "bundleBytes": 58920,
+    "mode": "production",
+    "node": "v24.21.0",
+    "artifacts": {
+      "index.js": "40cfe141df96ae72cf5964f960a323af65df0b4f19103b7a9119d60a059499dd",
+      "startup.js": "caa4663c88a769a7280b8bb062879acb26eb538676dafad983f52c015aad931b",
+      "seed.js": "e2ece2e119545faa0a1aa714a19010d42a4bfcec46c8b1f2932accea53e48ee0",
+      "metrics.mjs": "dc3cccf514fbbd99e941770eb0856278f96d0599eba8594a10554ee72e3ae54f"
+    },
+    "compositionSha256": "3936dbd4610bb2770de435f7eaff13d58c91d495ac87646330c624c60f968ce2",
+    "sourceSha256": "ac3190d45f0a9a127ca781df0013690ec53532e1a05cd086d7a012f1e7086762",
+    "lockSha256": "ba79e12361a699c6bd4fdb86ab565799193191fbde2571c97c3311e3b256e4d4",
+    "platform": "darwin",
+    "arch": "x64",
+    "viewport": {
+      "columns": 120,
+      "rows": 40
+    },
+    "terminalDriver": "Bun.Terminal",
+    "bun": "1.4.3",
+    "samples": 1,
+    "workloads": [
+      "typical"
+    ],
+    "heapLimitMiB": 1024,
+    "cpuProfile": false,
+    "clock": "fresh process; warm filesystem cache; no model/network latency",
+    "memory": "main Node process; forced GC at ready and after streaming; RSS includes worker threads",
+    "evidenceNote": "Checkout commit id omitted for repository documentation. Artifact hashes and numeric samples are unchanged. Single compatibility sample, not a timing aggregate."
+  },
+  "interrupted": false,
+  "summary": [
+    {
+      "workload": "typical",
+      "completed": 1,
+      "failed": 0,
+      "readyMs": 5539.563497,
+      "maxIdleInputMs": 6.8034609999995155,
+      "liveInputMs": 2.2667939999992086,
+      "firstDeltaMs": 153.12149899999986,
+      "streamMs": 1535.468132,
+      "retainedHeapMiB": 57.13932800292969,
+      "peakRssMiB": 857.53515625
+    }
+  ],
+  "results": [
+    {
+      "workload": "typical",
+      "iteration": 0,
+      "dimensions": {
+        "turns": 500,
+        "events": 3251,
+        "deltaCount": 20500,
+        "toolCount": 125,
+        "fileBytes": 3561500,
+        "sessionId": "tui-perf-session"
+      },
+      "readyMs": 5539.563497,
+      "idleInputMs": [
+        6.8034609999995155,
+        2.228161,
+        2.0664319999996223,
+        2.174875000000611,
+        2.1764269999994212
+      ],
+      "idleBytes": 2310,
+      "initialBytes": 1972567,
+      "firstDeltaMs": 153.12149899999986,
+      "liveInputMs": 2.2667939999992086,
+      "streamMs": 1535.468132,
+      "streamBytes": 167361,
+      "historyMarkerOccurrences": 500,
+      "readyMemory": {
+        "sequence": 1,
+        "beforeGc": {
+          "rss": 896438272,
+          "heapTotal": 677588992,
+          "heapUsed": 577751712,
+          "external": 91360387,
+          "arrayBuffers": 212543
+        },
+        "afterGc": {
+          "rss": 892919808,
+          "heapTotal": 283955200,
+          "heapUsed": 59914928,
+          "external": 91355623,
+          "arrayBuffers": 212389
+        },
+        "resources": {
+          "userCPUTime": 7517942,
+          "systemCPUTime": 537328,
+          "maxRSS": 878116,
+          "sharedMemorySize": 0,
+          "unsharedDataSize": 0,
+          "unsharedStackSize": 0,
+          "minorPageFault": 224497,
+          "majorPageFault": 273,
+          "swappedOut": 0,
+          "fsRead": 0,
+          "fsWrite": 0,
+          "ipcSent": 0,
+          "ipcReceived": 0,
+          "signalsCount": 1,
+          "voluntaryContextSwitches": 1933,
+          "involuntaryContextSwitches": 2781
+        },
+        "cpu": {
+          "user": 7518108,
+          "system": 537332
+        }
+      },
+      "settledMemory": {
+        "sequence": 2,
+        "beforeGc": {
+          "rss": 891965440,
+          "heapTotal": 218165248,
+          "heapUsed": 80075368,
+          "external": 91354915,
+          "arrayBuffers": 212405
+        },
+        "afterGc": {
+          "rss": 891965440,
+          "heapTotal": 207941632,
+          "heapUsed": 55825424,
+          "external": 91354899,
+          "arrayBuffers": 212405
+        },
+        "resources": {
+          "userCPUTime": 8278038,
+          "systemCPUTime": 562196,
+          "maxRSS": 878116,
+          "sharedMemorySize": 0,
+          "unsharedDataSize": 0,
+          "unsharedStackSize": 0,
+          "minorPageFault": 225567,
+          "majorPageFault": 274,
+          "swappedOut": 0,
+          "fsRead": 0,
+          "fsWrite": 0,
+          "ipcSent": 0,
+          "ipcReceived": 0,
+          "signalsCount": 2,
+          "voluntaryContextSwitches": 2064,
+          "involuntaryContextSwitches": 4485
+        },
+        "cpu": {
+          "user": 8278106,
+          "system": 562200
+        }
+      }
+    }
+  ]
+}

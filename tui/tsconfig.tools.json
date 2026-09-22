@@ -1,0 +1,12 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "incremental": false,
+    "noEmit": true,
+    "rewriteRelativeImportExtensions": false,
+    "typeRoots": ["./packages/app/node_modules/@types", "../node_modules/@types"],
+    "types": ["node", "bun"]
+  },
+  "include": ["scripts/build.ts", "scripts/tui.ts", "packages/app/tests/*.test.ts"]
+}

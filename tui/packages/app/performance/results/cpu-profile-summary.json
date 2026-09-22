@@ -1,0 +1,135 @@
+{
+  "workload": "typical",
+  "turns": 500,
+  "node": "v26.9.0",
+  "mode": "development",
+  "bundleSha256": "e034a9190fd6e9a5186c24837bde006fc1f45fbf908acc11f282251b214e2ca9",
+  "note": "Self-sample counts from a separate profiled run; includes startup, idle, streaming, forced GC and shutdown, not phase-specific costs. No timing verdict uses this run.",
+  "topFrames": [
+    {
+      "function": "(idle)",
+      "module": "",
+      "selfSamples": 835
+    },
+    {
+      "function": "diffAnsiCodes",
+      "module": "node_modules/.pnpm/@alcalzone+ansi-tokenize@0.3.1/node_modules/@alcalzone/ansi-tokenize/build/diff.js",
+      "selfSamples": 324
+    },
+    {
+      "function": "(garbage collector)",
+      "module": "",
+      "selfSamples": 318
+    },
+    {
+      "function": "(anonymous)",
+      "module": "node_modules/.pnpm/yoga-layout@3.2.1/node_modules/yoga-layout/dist/binaries/yoga-wasm-base64-esm.js",
+      "selfSamples": 186
+    },
+    {
+      "function": "removeChildNode",
+      "module": "node_modules/.pnpm/ink@7.1.1_@types+react@19.3.0_react@19.3.0/node_modules/ink/build/dom.js",
+      "selfSamples": 159
+    },
+    {
+      "function": "get",
+      "module": "node_modules/.pnpm/ink@7.1.1_@types+react@19.3.0_react@19.3.0/node_modules/ink/build/output.js",
+      "selfSamples": 155
+    },
+    {
+      "function": "runWithFiberInDEV",
+      "module": "node_modules/.pnpm/react-reconciler@0.33.0_react@19.3.0/node_modules/react-reconciler/cjs/react-reconciler.development.js",
+      "selfSamples": 124
+    },
+    {
+      "function": "ReactElement",
+      "module": "node_modules/.pnpm/react@19.3.0/node_modules/react/cjs/react.development.js",
+      "selfSamples": 119
+    },
+    {
+      "function": "ReactElement",
+      "module": "node_modules/.pnpm/react@19.3.0/node_modules/react/cjs/react-jsx-dev-runtime.development.js",
+      "selfSamples": 111
+    },
+    {
+      "function": "ansiCodesToString",
+      "module": "node_modules/.pnpm/@alcalzone+ansi-tokenize@0.3.1/node_modules/@alcalzone/ansi-tokenize/build/ansiCodes.js",
+      "selfSamples": 110
+    },
+    {
+      "function": "(anonymous)",
+      "module": "node_modules/.pnpm/ink@7.1.1_@types+react@19.3.0_react@19.3.0/node_modules/ink/build/output.js",
+      "selfSamples": 105
+    },
+    {
+      "function": "Ua",
+      "module": "node_modules/.pnpm/yoga-layout@3.2.1/node_modules/yoga-layout/dist/binaries/yoga-wasm-base64-esm.js",
+      "selfSamples": 95
+    },
+    {
+      "function": "compileSourceTextModule",
+      "module": "node:internal/modules/esm/utils",
+      "selfSamples": 94
+    },
+    {
+      "function": "wasm-function[61]",
+      "module": "wasm://wasm/000460e2",
+      "selfSamples": 83
+    },
+    {
+      "function": "stringWidth",
+      "module": "node_modules/.pnpm/string-width@8.2.2/node_modules/string-width/index.js",
+      "selfSamples": 71
+    },
+    {
+      "function": "(program)",
+      "module": "",
+      "selfSamples": 70
+    },
+    {
+      "function": "wasm-function[31]",
+      "module": "wasm://wasm/000460e2",
+      "selfSamples": 61
+    },
+    {
+      "function": "now",
+      "module": "",
+      "selfSamples": 59
+    },
+    {
+      "function": "(anonymous)",
+      "module": "node_modules/.pnpm/ink@7.1.1_@types+react@19.3.0_react@19.3.0/node_modules/ink/build/components/Box.js",
+      "selfSamples": 53
+    },
+    {
+      "function": "undoAnsiCodes",
+      "module": "node_modules/.pnpm/@alcalzone+ansi-tokenize@0.3.1/node_modules/@alcalzone/ansi-tokenize/build/undo.js",
+      "selfSamples": 53
+    },
+    {
+      "function": "renderNodeToOutput",
+      "module": "node_modules/.pnpm/ink@7.1.1_@types+react@19.3.0_react@19.3.0/node_modules/ink/build/render-node-to-output.js",
+      "selfSamples": 48
+    },
+    {
+      "function": "wrapSafe",
+      "module": "node:internal/modules/cjs/loader",
+      "selfSamples": 45
+    },
+    {
+      "function": "wasm-function[51]",
+      "module": "wasm://wasm/000460e2",
+      "selfSamples": 44
+    },
+    {
+      "function": "logComponentRender",
+      "module": "node_modules/.pnpm/react-reconciler@0.33.0_react@19.3.0/node_modules/react-reconciler/cjs/react-reconciler.development.js",
+      "selfSamples": 40
+    },
+    {
+      "function": "process.env.NODE_ENV.exports.createElement",
+      "module": "node_modules/.pnpm/react@19.3.0/node_modules/react/cjs/react.development.js",
+      "selfSamples": 38
+    }
+  ]
+}

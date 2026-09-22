@@ -107,6 +107,7 @@ under deadline pressure. Anything impure belongs in `packages/app`.
 | Scope | Runner |
 |---|---|
 | Pure projection, folding, width math, keymaps, diffs | `bun test` |
+| Bun build and PTY helpers, with Node children | `bun test` |
 | Component render | Node + vitest + `ink-testing-library` |
 | Plugin integration, terminal lifecycle | Node + vitest |
 | End to end | `dsh --profile tui` with recorded LLM replay |
@@ -118,31 +119,34 @@ means by it.
 
 ## Commands
 
-`tui/scripts/tui` runs everything this fork owns; `tui/scripts/tui help` prints the list.
+`tui/scripts/tui.ts` runs everything this fork owns; `tui/scripts/tui.ts help` prints the list. The
+toolchain is Bun throughout — dispatcher, bundler, pure tests, component harness, and the terminal
+driver. Two things stay on Node and both are deliberate: the product, which cannot run on Bun at all,
+and checks that mount Harness/Ink in-process or inspect Node's resolver (`spec` and `peers`). Bun tooling tests may spawn Node children.
 
 ```sh
-./tui/scripts/tui dev                    # component loop under Bun: no dsh, no agent, no key
-./tui/scripts/tui dev --replay --locale zh   # watch rows arrive; check a dictionary
-./tui/scripts/tui source                 # the TUI from src/ through tsx: fast, but NO tools (see below)
-./tui/scripts/tui app                    # build, then run from lib/: the production path, tools work
-./tui/scripts/tui check                  # the static and unit gate
-./tui/scripts/tui e2e                    # the built profile through a real terminal
-./tui/scripts/tui verify                 # check + e2e: run this before every push
-./tui/scripts/tui record "…"             # record a fixture through headless (needs a key)
+./tui/scripts/tui.ts dev                    # component loop under Bun: no dsh, no agent, no key
+./tui/scripts/tui.ts dev --replay --locale zh   # watch rows arrive; check a dictionary
+./tui/scripts/tui.ts source                 # the TUI from src/ through tsx: fast, but NO tools (see below)
+./tui/scripts/tui.ts app                    # build, then run from lib/: the production path, tools work
+./tui/scripts/tui.ts check                  # the static and unit gate
+./tui/scripts/tui.ts e2e                    # the built profile through a real terminal
+./tui/scripts/tui.ts verify                 # check + e2e: run this before every push
+./tui/scripts/tui.ts record "…"             # record a fixture through headless (needs a key)
 ```
 
 Arguments after the command reach the underlying tool unchanged, which is where the iteration speed is:
 
 ```sh
-./tui/scripts/tui check --list           # name the targets
-./tui/scripts/tui check types spec       # re-run one failure without the rest
-./tui/scripts/tui spec -t resume         # one vitest suite; --watch to keep it open
-./tui/scripts/tui unit --watch           # pure modules under bun test
-./tui/scripts/tui e2e --list             # name the terminal scenarios
-./tui/scripts/tui e2e --only cancel      # that scenario and its prerequisites, ~2s instead of ~12s
-./tui/scripts/tui e2e --trace            # print each step and its timing as it is satisfied
-./tui/scripts/tui e2e --no-build         # iterate on the driver, not the plugin
-./tui/scripts/tui e2e --live node24      # real DeepSeek tool turn on the engine floor, using root .env
+./tui/scripts/tui.ts check --list           # name the targets
+./tui/scripts/tui.ts check types spec       # re-run one failure without the rest
+./tui/scripts/tui.ts spec -t resume         # one vitest suite; --watch to keep it open
+./tui/scripts/tui.ts unit --watch           # pure modules under bun test
+./tui/scripts/tui.ts e2e --list             # name the terminal scenarios
+./tui/scripts/tui.ts e2e --only cancel      # that scenario and its prerequisites, ~2s instead of ~12s
+./tui/scripts/tui.ts e2e --trace            # print each step and its timing as it is satisfied
+./tui/scripts/tui.ts e2e --no-build         # iterate on the driver, not the plugin
+./tui/scripts/tui.ts e2e --live node24      # real DeepSeek tool turn on the engine floor, using root .env
 ```
 
 `check` is the static gate — React peer identity, strict types, `bun test`, vitest, the layout
@@ -153,8 +157,12 @@ Each `e2e` scenario declares what it proves and which scenarios it needs first, 
 without the rest. Every wait is named: a step that never happens reports that name, the process state,
 and the tail of the screen within its own timeout rather than after a whole-run deadline, and the full
 transcript lands in `tui/.smoke/`. A failing run keeps its `DSH_HOME` and workspace and prints the path.
-Add a scenario with the `@scenario` decorator; take the session logs it produced from the difference
-between `run.logs()` before and after, never from a fixed position in the run, so it stays selectable.
+Add a scenario with `scenario(name, summary, options, body)`; take the session logs it produced from the
+difference between `run.logs()` before and after, never from a fixed position in the run, so it stays
+selectable. Wait on the vocabulary, not on glyphs: `MARKER` and `VERB` come from
+[`ui/src/layout.ts`](packages/ui/src/layout.ts), and the few screen elements whose module exports no
+constant are named once in the driver's `SCREEN` table. A marker that reaches a scenario as a literal is
+a marker that breaks every scenario the next time the surface changes.
 
 **Tools do not work under the tsx source launch.** `dsh-tools` keys its scheduler with `Symbol('…')`
 rather than `Symbol.for('…')`, and the source launch ends up with two module instances of that package,
@@ -164,7 +172,7 @@ so `ctx.tools[TOOL_RUNTIME_SCHEDULER]` reads `undefined` and every tool call fai
 touching tools on the built path.
 
 **A piped run cannot test rendering.** Ink needs a TTY for raw mode, so a non-TTY invocation is refused
-by design. Use `pty-smoke.sh`, which allocates one with Python `openpty` and waits for Ink paste mode before sending
+by design. Use `tui.ts e2e`, which allocates one through `bun:ffi` `openpty` and waits for Ink paste mode before sending
 keys — input typed before the app mounts is swallowed by the terminal and never reaches `useInput`.
 
 A full `pnpm run build` is required once per checkout, not just `tsc` + `tsdown`: the generators it runs

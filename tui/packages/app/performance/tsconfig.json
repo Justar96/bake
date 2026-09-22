@@ -1,0 +1,17 @@
+{
+  "extends": "../../../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "incremental": false,
+    "noEmit": true,
+    "rewriteRelativeImportExtensions": false,
+    "types": ["node", "bun"]
+  },
+  "include": ["*.ts"],
+  "references": [
+    { "path": "../../../../vendor/cordis" },
+    { "path": "../../../../packages/core/session" },
+    { "path": "../../../../packages/llm/llm" },
+    { "path": "../../../../packages/session/session-persistence-jsonl" }
+  ]
+}
