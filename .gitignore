@@ -47,3 +47,28 @@ worktrees/
 .agents/worktrees/
 .typert-*/
 native/system/test/bin/
+
+# tsc emit beside a source file when a command omits outDir. The build writes
+# lib/, ignored above. A .js here is loaded instead of the .ts module.
+*.js.map
+*.d.ts.map
+packages/**/src/**/*.js
+apps/**/src/**/*.js
+vendor/**/src/**/*.js
+tui/**/src/**/*.js
+packages/**/src/**/*.d.ts
+apps/**/src/**/*.d.ts
+vendor/**/src/**/*.d.ts
+tui/**/src/**/*.d.ts
+!packages/**/src/**/css-modules.d.ts
+!packages/**/src/**/asset-imports.d.ts
+!packages/**/src/**/use-sync-external-store.d.ts
+!packages/**/src/**/ripgrep.d.ts
+!packages/**/src/**/turndown-plugin-gfm.d.ts
+!apps/**/src/**/vite-env.d.ts
+
+# pnpm owns the workspace lockfile. A root bun install is not one.
+/bun.lock
+
+# A failing PTY run keeps its transcript here.
+tui/.smoke/
