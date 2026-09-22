@@ -26,6 +26,15 @@ import { App, appendTranscript, emptyTranscript, project, projector } from '@dsh
 import type { Row } from '@dsh-tui/ui'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'
 import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
+import type { Clock } from '@dsh-tui/ui/activity.ts'
+
+/**
+ * The turn header's clock, as the product supplies it: none without a
+ * terminal or when colour is off, so a captured preview stays still.
+ */
+const clock: Clock | undefined = process.stdout.isTTY === true && (process.env['NO_COLOR'] ?? '') === ''
+  ? { now: () => performance.now(), every: (ms, tick) => { const timer = setInterval(tick, ms); return () => { clearInterval(timer) } } }
+  : undefined
 
 /**
  * Read a recorded session and project it into transcript rows.
@@ -40,7 +49,7 @@ import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
  * @returns every row the recording produces, in log order.
  */
 export function rowsOf(path: string, copy: TuiCopy): readonly Row[] {
-  const file = new URL(path, import.meta.url).pathname
+  const file = new URL(path, import.meta.url)
   const seam = projector(copy, () => undefined)
   const rows: Row[] = []
   for (const line of readFileSync(file, 'utf8').split('\n')) {
@@ -54,12 +63,12 @@ export function rowsOf(path: string, copy: TuiCopy): readonly Row[] {
 function staticProps(copy: TuiCopy) {
   return {
     files: { query: undefined, entries: [], loading: false, error: undefined }, onReferenceQuery: () => {},
-    completion: { entries: [], loading: false, error: undefined }, completionLimit: 8,
+    completion: { entries: [], loading: false, error: undefined }, completionLimit: 8, resultLines: 8,
     live: [] as const,
     pending: [] as const,
     stopping: false,
     command: undefined,
-    notice: undefined,
+    notice: copy.previewHelp,
     interaction: undefined,
     todos: undefined,
     model: 'harness/replay',
@@ -67,29 +76,49 @@ function staticProps(copy: TuiCopy) {
     sessionId: 'session-harness',
     context: undefined,
     copy,
-    onSubmit: () => {},
+    // The shipped look. `@dsh-tui/app` resolves this from the terminal, and
+    // this file never imports it, so a developer iterating on components sees
+    // the frame the product draws wherever the environment allows it.
+    frame: 'round' as const,
+    quitting: false,
+    ...clock === undefined ? {} : { clock },
     onCancel: () => {},
     onInterrupt: () => { process.exit(0) },
     onAnswer: () => {},
   }
 }
 
-/** Replay rows one at a time so the transcript can be watched as it arrives. */
-function Replay(
-  { rows, copy, stepMs }: { readonly rows: readonly Row[], readonly copy: TuiCopy, readonly stepMs: number },
+/** Show recorded rows and local composer submissions without executing a task. */
+function Preview(
+  { rows, copy, stepMs }: { readonly rows: readonly Row[], readonly copy: TuiCopy, readonly stepMs?: number },
 ): React.ReactElement {
-  const versions = useMemo(() => {
-    let transcript = emptyTranscript
-    return rows.map(row => (transcript = appendTranscript(transcript, [row])))
-  }, [rows])
-  const [shown, setShown] = useState(1)
+  const previewCopy = useMemo(() => ({
+    ...copy, ready: copy.preview, working: copy.previewReplaying, prompt: copy.previewPrompt,
+    steering: copy.previewPrompt, send: copy.previewSend,
+  }), [copy])
+  const [state, setState] = useState(() => {
+    const shown = stepMs === undefined ? rows.length : Math.min(1, rows.length)
+    return { shown, committed: appendTranscript(emptyTranscript, rows.slice(0, shown)) }
+  })
   useEffect(() => {
-    if (shown >= rows.length) return
-    const timer = setTimeout(() => { setShown(count => count + 1) }, stepMs)
+    if (stepMs === undefined || state.shown >= rows.length) return
+    const timer = setTimeout(() => {
+      setState(current => ({
+        shown: current.shown + 1,
+        committed: appendTranscript(current.committed, rows.slice(current.shown, current.shown + 1)),
+      }))
+    }, stepMs)
     return () => { clearTimeout(timer) }
-  }, [shown, rows.length, stepMs])
-  const running = shown < rows.length
-  return <App {...staticProps(copy)} committed={versions[shown - 1] ?? emptyTranscript} status={running ? 'running' : 'idle'} />
+  }, [state.shown, rows, stepMs])
+  return <App {...staticProps(previewCopy)} committed={state.committed}
+    status={state.shown < rows.length ? 'running' : 'idle'}
+    onSubmit={text => { setState(current => ({
+      ...current,
+      committed: appendTranscript(current.committed, [
+        { kind: 'user', text }, { kind: 'notice', tone: 'info', text: copy.previewAccepted },
+      ]),
+    })) }}
+  />
 }
 
 const args = process.argv.slice(2)
@@ -102,5 +131,8 @@ const fixture = args.find((arg, index) => !arg.startsWith('--') && args[index - 
   ?? 'fixtures/session.jsonl'
 const rows = rowsOf(fixture, copy)
 
-if (args.includes('--replay')) render(<Replay rows={rows} copy={copy} stepMs={220} />)
-else render(<App {...staticProps(copy)} committed={appendTranscript(emptyTranscript, rows)} status="idle" />)
+// The preview's interrupt callback exits Bun's hot watcher as well as the renderer.
+const options = {
+  exitOnCtrlC: false, interactive: process.stdin.isTTY === true && process.stdout.isTTY === true, incrementalRendering: true,
+}
+render(<Preview rows={rows} copy={copy} {...args.includes('--replay') ? { stepMs: 220 } : {}} />, options)

@@ -50,21 +50,61 @@ export type Row =
    * the draft the user typed.
    */
   | { readonly kind: 'command', readonly name: string, readonly args: string }
-  | { readonly kind: 'assistant', readonly text: string }
-  | { readonly kind: 'reasoning', readonly text: string }
   /**
-   * A tool call. `input` is the headline on the verb line: the title the tool's
-   * own presenter gave this call, or the raw arguments when it declared none.
-   * `detail` carries the rest of its card, already localized.
+   * Answer text. `continued` marks the rest of a block whose opening lines
+   * already printed: a streaming answer prints each line as it completes, and
+   * what follows carries neither the section's blank nor its marker again.
    */
-  | { readonly kind: 'tool-call', readonly callId: string, readonly tool: string, readonly input: string, readonly detail?: readonly CardLine[] }
+  | { readonly kind: 'assistant', readonly text: string, readonly continued?: boolean }
+  /** Reasoning text; `continued` as for `assistant`. */
+  | { readonly kind: 'reasoning', readonly text: string, readonly continued?: boolean }
   /**
-   * A tool result. `text` is the raw model-facing result, empty when the tool's
-   * presenter supplied a card instead; `detail` is that card's lines. Both
-   * render, so a card adds to the raw text rather than hiding it.
+   * A tool call, and once it has one, its outcome: one action, drawn as one
+   * block. `input` is the presenter's title, or the raw arguments when it
+   * declared none; `detail` carries the rest of its card, already localized.
+   * The call id matches the result to its call and is not drawn.
+   *
+   * A call without `result` is still running, and lives in the live region;
+   * the application commits it once `result` arrives, so the block prints to
+   * history once, finished, rather than as a call and a result stacked apart.
    */
-  | { readonly kind: 'tool-result', readonly callId: string, readonly ok: boolean, readonly text: string, readonly detail?: readonly CardLine[] }
-  | { readonly kind: 'notice', readonly tone: NoticeTone, readonly text: string }
+  | {
+    readonly kind: 'tool-call'
+    readonly callId: string
+    readonly tool: string
+    readonly input: string
+    readonly detail?: readonly CardLine[]
+    readonly result?: ToolOutcome
+  }
+  /**
+   * A tool result. Its call id and outcome precede the output, including when
+   * empty. `text` is the raw model-facing result, empty when the presenter
+   * supplied a card instead; `detail` is that card's lines. Failed results
+   * retain failure emphasis for both raw text and card lines.
+   *
+   * `title` is the card's replacement headline, absent when the tool declared
+   * none. It is held apart from `detail` because it is the one line that
+   * survives a collapsed result: a surface that reports the body as a count
+   * still says which file was edited or which command was run.
+   */
+  | {
+    readonly kind: 'tool-result'
+    readonly callId: string
+    readonly ok: boolean
+    readonly text: string
+    readonly title?: string
+    readonly detail?: readonly CardLine[]
+  }
+  | {
+    readonly kind: 'notice'
+    readonly tone: NoticeTone
+    readonly text: string
+    /** Recorded turn outcomes close the group separately from command notices. */
+    readonly placement?: 'turn-end'
+  }
+
+/** How a call ended: a `tool-result` row's fields, without its identity. */
+export type ToolOutcome = Omit<Extract<Row, { readonly kind: 'tool-result' }>, 'kind' | 'callId'>
 
 /**
  * One line of a tool card, already localized and placed in order.

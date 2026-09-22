@@ -27,6 +27,12 @@ interface OpenBlock {
   name?: string
 }
 
+/** A live row and the stream index of the block it shows. */
+export interface KeyedRow {
+  readonly key: number
+  readonly row: Row
+}
+
 /**
  * Live rows for one assistant attempt, rebuilt from the chunks it has streamed.
  *
@@ -92,15 +98,24 @@ export class LiveBlocks {
    * @returns live rows in stream order, empty before anything displayable arrives.
    */
   rows(): readonly Row[] {
-    return this.order.flatMap((index): Row[] => {
+    return this.keyed().map(entry => entry.row)
+  }
+
+  /**
+   * The same rows, each with its block's stream index, which stays fixed while
+   * a block that had nothing to show yet gains a row ahead of it.
+   * @returns keyed live rows in stream order.
+   */
+  keyed(): readonly KeyedRow[] {
+    return this.order.flatMap((index): KeyedRow[] => {
       const block = this.blocks.get(index)!
-      if (block.type === 'text') return block.text.trim() === '' ? [] : [{ kind: 'assistant', text: block.text }]
-      if (block.type === 'reasoning') return block.text.trim() === '' ? [] : [{ kind: 'reasoning', text: block.text }]
+      if (block.type === 'text') return block.text.trim() === '' ? [] : [{ key: index, row: { kind: 'assistant', text: block.text } }]
+      if (block.type === 'reasoning') return block.text.trim() === '' ? [] : [{ key: index, row: { kind: 'reasoning', text: block.text } }]
       // A call is shown from the moment its name is known and not before: the
       // verb column is derived from the name, so a nameless call could only be
       // drawn by guessing at what the agent is doing.
       if (block.type === 'tool-call' && block.name !== undefined) {
-        return [{ kind: 'tool-call', callId: block.id ?? `live-${index}`, tool: block.name, input: `${block.name} ${PENDING_ARGUMENTS}` }]
+        return [{ key: index, row: { kind: 'tool-call', callId: block.id ?? `live-${index}`, tool: block.name, input: PENDING_ARGUMENTS } }]
       }
       return []
     })

@@ -1,6 +1,9 @@
   note   Session: session-test
+
 Pending input
 Next step: Queued direction
 /clear-pending discards queued input
-Ready  model                                                   Context: ~12.3k/128k (9%)  /workspace
-> ▌Ask anything
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ > ▌Ask anything                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+  Ready  model  Context: ~12.3k/128k (9%)  /workspace

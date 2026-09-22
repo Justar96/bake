@@ -1,7 +1,7 @@
 /** Status-line reporting of harness-owned context occupancy. */
 import React from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render } from 'ink-testing-library'
+import { cleanup, render } from '../../../tests/render.tsx'
 import { App, type AppProps } from '../src/app.tsx'
 import { emptyTranscript } from '../src/transcript.ts'
 import { dictionaries } from '../src/copy.ts'
@@ -11,11 +11,11 @@ afterEach(cleanup)
 function props(overrides: Partial<AppProps> = {}): AppProps {
   return {
     files: { query: undefined, entries: [], loading: false, error: undefined }, onReferenceQuery: () => {},
-    completion: { entries: [], loading: false, error: undefined }, completionLimit: 8,
+    completion: { entries: [], loading: false, error: undefined }, completionLimit: 8, resultLines: 8,
     committed: emptyTranscript, live: [], pending: [], status: 'idle', stopping: false,
     command: undefined, notice: undefined, interaction: undefined, todos: undefined,
     model: 'mock/model', cwd: '/workspace', sessionId: 'session-test',
-    copy: dictionaries.en, context: undefined,
+    copy: dictionaries.en, frame: 'round', quitting: false, context: undefined,
     onSubmit: vi.fn(), onCancel: vi.fn(), onInterrupt: vi.fn(), onAnswer: vi.fn(), ...overrides,
   }
 }
@@ -47,4 +47,19 @@ describe('context occupancy', () => {
     expect(ui.lastFrame()).toContain('/clear-pending')
     await expect(ui.lastFrame() + '\n').toMatchFileSnapshot(`./expected/pending-context.${locale}.txt`)
   })
+})
+
+it.each([
+  [{ active: true, pending: false }, dictionaries.en.planActive],
+  [{ active: false, pending: true }, dictionaries.en.planEntryPending],
+  [{ active: true, pending: true }, dictionaries.en.planExitPending],
+] as const)('shows the projected plan state %s in the status line', (plan, label) => {
+  const ui = render(<App {...props({ plan })} />)
+  expect(ui.lastFrame()).toContain(label)
+})
+
+it('omits the plan indicator when the profile has no plan projection', () => {
+  const ui = render(<App {...props()} />)
+  expect(ui.lastFrame()).not.toContain(dictionaries.en.planEntryPending)
+  expect(ui.lastFrame()).not.toContain(dictionaries.en.planActive)
 })

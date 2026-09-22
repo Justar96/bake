@@ -31,6 +31,7 @@ import { readSync, writeSync, closeSync, existsSync, mkdirSync, mkdtempSync, rmS
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
+import xterm from '@xterm/headless'
 
 import { MARKER, VERB } from '../packages/ui/src/layout.ts'
 import { dictionaries } from '../packages/ui/src/copy.ts'
@@ -84,6 +85,7 @@ const pty = dlopen(darwin ? 'libSystem.B.dylib' : 'libutil.so.1', {
 const libc = dlopen(darwin ? 'libSystem.B.dylib' : 'libc.so.6', {
   fcntl: { args: [FFIType.int, FFIType.int, FFIType.int], returns: FFIType.int },
   tcgetattr: { args: [FFIType.int, FFIType.ptr], returns: FFIType.int },
+  ioctl: { args: [FFIType.int, FFIType.u64, FFIType.ptr], returns: FFIType.int },
 })
 const F_SETFL = 4
 const O_NONBLOCK = darwin ? 0x0004 : 0o4000
@@ -211,10 +213,10 @@ class Terminal {
    * @param timeout - seconds this single step may take; the run default otherwise.
    * @returns the screen once the condition holds.
    */
-  async wait(description: string, predicate: (text: string) => boolean, timeout?: number): Promise<string> {
+  async wait(description: string, predicate: (text: string) => boolean | Promise<boolean>, timeout?: number): Promise<string> {
     const started = performance.now()
     const limit = started + (timeout ?? this.options.step) * 1000
-    while (!predicate(this.text)) {
+    while (!await predicate(this.text)) {
       if (this.raw.includes('failed to import')) this.fail(description, 'a profile plugin failed to import')
       const now = performance.now()
       if (now >= this.deadline) this.fail(description, `the terminal budget of ${this.options.budget}s ran out`)
@@ -290,6 +292,18 @@ class Terminal {
     const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data
     this.trace(`send ${note ?? JSON.stringify(typeof data === 'string' ? data : [...bytes])}`)
     writeSync(this.master, bytes)
+  }
+
+  /** Trigger a process-local fixture after the interactive surface is ready. */
+  signal(name: 'SIGUSR2'): void {
+    this.child.kill(name)
+  }
+
+  /** Resize the PTY and notify its Node renderer even without a controlling terminal. */
+  resize(columns: number, rows: number): void {
+    const size = new Uint16Array([rows, columns, 0, 0])
+    if (libc.symbols.ioctl(this.master, darwin ? 0x80087467 : 0x5414, ptr(size)) !== 0) throw new Error('TIOCSWINSZ failed')
+    this.child.kill('SIGWINCH')
   }
 
   /**
@@ -368,16 +382,22 @@ class Terminal {
     this.send('\x03', 'Ctrl-C')
     await this.expect('Press Ctrl-C again')
     this.send('\x03', 'Ctrl-C again')
+    return this.exited(0, 'the second Ctrl-C')
+  }
+
+  /** Verify process outcome and the PTY state after a normal or fatal exit. */
+  async exited(code: number, reason: string): Promise<string> {
     const limit = performance.now() + this.options.step * 1000
     while (this.child.exitCode === null) {
       if (performance.now() >= limit) {
-        this.fail('the process to exit after the second Ctrl-C', `still running after ${this.options.step}s`)
+        this.fail(`the process to exit after ${reason}`, `still running after ${this.options.step}s`)
       }
       this.drain()
       await Bun.sleep(20)
     }
     while (this.drain()) { /* absorb whatever the exit wrote */ }
-    this.check('a clean exit', this.child.exitCode === 0, `exit code ${this.child.exitCode}`)
+    this.check(`exit code ${code} after ${reason}`, this.child.exitCode === code && this.child.signalCode === null,
+               `exit code ${this.child.exitCode}, signal ${this.child.signalCode}`)
     const after = new Uint8Array(TERMIOS_BYTES)
     libc.symbols.tcgetattr(this.slave, ptr(after))
     this.check('terminal modes to be restored', Buffer.compare(Buffer.from(this.modes), Buffer.from(after)) === 0,
@@ -448,17 +468,10 @@ class Run {
     this.sessionsRoot = join(this.home, 'sessions')
     this.overlay = join(root, 'replay.patch.yml')
     mkdirSync(this.workspace, { recursive: true })
-    const profile = join(this.home, 'profiles/tui')
-    mkdirSync(profile, { recursive: true })
-    Bun.write(join(profile, 'package.json'), JSON.stringify({
-      name: 'tui-replay-profile', private: true,
-      dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-headless'] } },
-    }))
     this.env = { ...process.env as Record<string, string>, DSH_HOME: this.home,
                  DSH_AGENTS_HOME: join(root, 'agents'), TERM: 'xterm-256color', NO_COLOR: '1' }
-    // A key or a CI marker in the environment would change what the product does.
+    // Replay must not pick up a developer's provider key; CI detection stays intact.
     delete this.env.DEEPSEEK_API_KEY
-    delete this.env.CI
   }
 
   /** Read the fixture the replay and the assertions share. */
@@ -499,10 +512,9 @@ class Run {
    * @param extra - arguments appended after the profile patches.
    * @returns the argv to spawn.
    */
-  command(extra: readonly string[]): string[] {
-    return [this.node, ...(this.live ? [`--env-file=${join(ROOT, '.env')}`] : []),
+  command(extra: readonly string[], nodeArgs: readonly string[] = []): string[] {
+    return [this.node, ...nodeArgs, ...(this.live ? [`--env-file=${join(ROOT, '.env')}`] : []),
             join(ROOT, 'apps/cli/lib/bin.js'), '--profile', 'tui',
-            '--patch', join(ROOT, 'tui/packages/app/cordis.built.patch.yml'),
             '--patch', this.overlay, ...extra]
   }
 
@@ -567,7 +579,7 @@ function same(left: unknown, right: unknown): boolean {
   return Bun.deepEquals(left, right)
 }
 
-const DONE_LINE = /\n {2}DONE\r?\n/
+const DONE_LINE = new RegExp(`\\n${MARKER.reply} DONE\\r?\\n`)
 
 scenario('fresh', 'login, model and effort selection, paste, cursor editing, a bash tool turn, and the context estimate', {},
   async run => {
@@ -637,6 +649,72 @@ scenario('fresh', 'login, model and effort selection, paste, cursor editing, a b
     Object.assign(run.state, { log: path, id: log[0].id, model, headers })
   })
 
+scenario('plan', 'plan-mode status follows the logged Harness projection', { replayOnly: true },
+  async run => {
+    const before = await run.logs()
+    await run.terminal('plan', [], async tty => {
+      tty.send('/plan\r', 'enter plan mode')
+      await tty.search(/Ready  Plan  /)
+      const after = tty.mark()
+      tty.send('/plan off\r', 'leave plan mode')
+      await tty.search(/Ready  deepseek-v4-flash  /, after)
+    })
+    const log = await events(await run.created(before, 'persisted'))
+    const modes = log.filter(e => e.type === 'plan/mode').map(e => e.data.active)
+    assert(same(modes, [true, false]), 'plan status did not follow the logged mode changes')
+  })
+
+scenario('rendering', 'preserved scrollback after resize and a visible caret in short terminals and wrapped drafts', { requires: ['fresh'], replayOnly: true },
+  async run => {
+    await run.terminal('rendering', ['--resume', run.state.id], async tty => {
+      const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
+      let consumed = 0
+      const capture = async (): Promise<string[]> => {
+        const raw = tty.raw
+        await new Promise<void>(resolve => screen.write(raw.slice(consumed), resolve))
+        consumed = raw.length
+        return Array.from({ length: screen.buffer.active.length }, (_, row) => screen.buffer.active.getLine(row)?.translateToString(true) ?? '')
+      }
+      const shown = async (): Promise<string> => (await capture()).slice(screen.buffer.active.viewportY).join('\n')
+      const resize = async (columns: number, rows: number): Promise<number> => {
+        await capture()
+        const mark = tty.raw.length
+        screen.resize(columns, rows)
+        tty.resize(columns, rows)
+        return mark
+      }
+      try {
+        await tty.wait('resumed answer in the terminal buffer', async () => (await capture()).some(line => line === '< DONE'))
+        const shrunk = await resize(40, 4)
+        await tty.wait('composer remains visible at 40x4', async () => {
+          const visible = (await shown()).split('\n')
+          return tty.raw.length > shrunk && visible[1]?.includes(`> ${SCREEN.caret}`) === true && visible[2]?.length === 40
+        })
+        const history = await capture()
+        assert(history.filter(line => line === '< DONE').length === 1, 'resize lost or duplicated the resumed answer')
+        tty.send(`\x1b[200~START ${'word '.repeat(100)}END\x1b[201~`, 'a wrapped draft')
+        await tty.wait('end of the wrapped draft', async () => (await shown()).includes(`END${SCREEN.caret}`))
+        tty.send('\x1b[H', 'Home inside the wrapped draft')
+        await tty.wait('caret at the start of the wrapped draft', async () => (await shown()).includes(`${SCREEN.caret}START`))
+        tty.send('\x1b[F', 'End inside the wrapped draft')
+        await tty.wait('caret returns to the end', async () => (await shown()).includes(`END${SCREEN.caret}`))
+        const expanded = await resize(120, 40)
+        await tty.wait('expanded composer keeps its draft', async () => {
+          // The caret row, the frame's bottom edge, then the status line: the
+          // composer follows the history rather than a fixed terminal row.
+          const visible = (await shown()).split('\n')
+          const caret = visible.findIndex(line => line.includes(`END${SCREEN.caret}`))
+          return tty.raw.length > expanded && caret > visible.indexOf('< DONE')
+            && visible[caret + 1]?.startsWith('╰') === true && visible[caret + 2]?.includes(SCREEN.idle) === true
+        })
+        assert((await capture()).filter(line => line === '< DONE').length === 1, 'expanding the terminal lost or duplicated history')
+      } finally {
+        await capture()
+        screen.dispose()
+      }
+    })
+  })
+
 scenario('resume', 'exact replay of committed history, the restored draft, and history recall', { requires: ['fresh'] },
   async run => {
     const text = await run.terminal('resume', ['--resume', run.state.id], async tty => {
@@ -679,7 +757,9 @@ scenario('navigate', 'session picker cancellation, a new session, and switching 
       tty.send('\r', 'Enter to start a new session')
       const created = await tty.search(/Session: (session-[a-f0-9-]+)/, start)
       assert(created[1] !== identity, 'new-session selection reused the current identity')
-      await tty.expect(SCREEN.idle, 'deepseek-v4-flash', start)
+      // Both fields must belong to the new footer. An older Ready row plus
+      // the new model's still-busy row would send keys during retirement.
+      await tty.expect(`${SCREEN.idle}deepseek-v4-flash`, start)
 
       start = tty.mark()
       tty.send('/sessions\r')
@@ -770,6 +850,28 @@ scenario('cancel', 'skill and quoted-file completion, steering a running turn, i
     assert(log.some(e => e.type === 'agent/inbox/spliced' && e.data?.outcome === 'canceled'
                     && e.data?.removedCount === 1), 'discard did not persist an inbox removal')
     Object.assign(run.state, { cancelledLog: path, cancelledId: log[0].id })
+  })
+
+scenario('fatal-exception', 'an uncaught callback restores terminal modes before the launcher exits 1',
+  { replayOnly: true },
+  async run => {
+    const preload = join(run.root, 'fatal-exception.mjs')
+    await Bun.write(preload,
+      "process.on('SIGUSR2', () => { throw Object.assign(new Error('PTY_FATAL_EXCEPTION'), { code: 'TUI_FATAL_TEST' }) })\n")
+    const tty = new Terminal('fatal-exception', run.command([], ['--import', preload]),
+      run.workspace, run.env, run.options)
+    try {
+      await tty.ready()
+      tty.signal('SIGUSR2')
+      const output = await tty.exited(1, 'the uncaught exception')
+      tty.check('the fatal exception to be reported', output.includes('fatal uncaught exception: Error: PTY_FATAL_EXCEPTION'))
+      tty.check('the error code to be retained', output.includes("code: 'TUI_FATAL_TEST'"))
+    } catch (error) {
+      tty.save()
+      throw error
+    } finally {
+      tty.close()
+    }
   })
 
 scenario('resume-cleared',

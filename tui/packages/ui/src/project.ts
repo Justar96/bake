@@ -122,21 +122,34 @@ export function project(event: SessionEvent, projector: Projector): Projection {
         // A card reformats the result for a reader; showing the model-facing
         // text under it would print the same outcome twice.
         text: card === undefined ? text : '',
-        ...card === undefined ? {} : {
-          detail: card.title === '' ? card.detail : [{ text: card.title }, ...card.detail],
-        },
+        // The title stays out of `detail` so a bound that reports the body as a
+        // count keeps it: `Edit packages/ui/src/app.tsx` is the part of an
+        // applied diff a reader needs after the hunks have scrolled away.
+        ...card === undefined || card.title === '' ? {} : { title: card.title },
+        ...card === undefined || card.detail.length === 0 ? {} : { detail: card.detail },
       }]
     }
 
     case 'turn/end': {
-      const reason = event.data.reason
-      if (reason.kind === 'error') {
-        return [{ kind: 'notice', tone: 'error', text: `${reason.error.code}: ${reason.error.message}` }]
+      const { reason } = event.data
+      const { copy } = projector
+      const kind: string = reason.kind
+      switch (reason.kind) {
+        case 'completed':
+          return [{ kind: 'notice', placement: 'turn-end', tone: 'info', text: copy.turnCompleted }]
+        case 'error':
+          return [{ kind: 'notice', placement: 'turn-end', tone: 'error', text: `${reason.error.code}: ${reason.error.message}` }]
+        case 'aborted':
+        case 'interrupted':
+          return [{ kind: 'notice', placement: 'turn-end', tone: 'warn', text: copy.cancelled }]
+        case 'blocked':
+          return [{ kind: 'notice', placement: 'turn-end', tone: 'warn', text: copy.turnBlocked }]
+        case 'max-tokens':
+          return [{ kind: 'notice', placement: 'turn-end', tone: 'warn', text: copy.turnMaxTokens }]
+        default:
+          // Plugins may add end reasons; show the recorded kind, never success.
+          return [{ kind: 'notice', placement: 'turn-end', tone: 'warn', text: kind }]
       }
-      if (reason.kind === 'aborted' || reason.kind === 'interrupted') {
-        return [{ kind: 'notice', tone: 'warn', text: projector.copy.cancelled }]
-      }
-      return NONE
     }
 
     case 'compaction/summary':

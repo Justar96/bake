@@ -32,14 +32,34 @@ export function formatRow(row: Row): string {
       return `${gutter} ${oneLine([row.text, ...(row.attachments ?? []).map(formatAttachment)].filter(Boolean).join('\n'))}`
     case 'command':
       return `${gutter} ${row.name}${oneLine(row.args)}`
-    case 'tool-call':
-      return `${gutter} ${row.tool}(${oneLine(row.input)})${cardText(row.detail)}`
+    case 'tool-call': {
+      const call = `${gutter} ${row.tool} [${row.callId}](${oneLine(row.input)})${cardText(row.detail)}`
+      if (row.result === undefined) return call
+      // One action, one line: the call, then how it ended.
+      return `${call} ${GUTTER['tool-result']} ${outcomeText(row.result.ok, row.result.title, row.result.text, row.result.detail)}`.trimEnd()
+    }
     case 'tool-result':
-      // A card leaves `text` empty, so its lines are the whole result here.
-      return `${gutter} ${row.ok ? '' : 'error '}${oneLine(row.text)}${cardText(row.detail)}`
+      // A card leaves `text` empty, so its title and lines are the whole
+      // result here. This surface is one line already, so it needs no bound.
+      return `${gutter} ${outcomeText(row.ok, row.title, row.text, row.detail, row.callId)}`.trimEnd()
     default:
       return `${gutter} ${oneLine(row.text)}`
   }
+}
+
+/**
+ * A result's outcome and output on one line.
+ * @param ok - whether the call succeeded.
+ * @param title - the card's headline, when it declared one.
+ * @param text - raw output, empty when a card replaced it.
+ * @param detail - the card's lines.
+ * @param callId - the call it answers, named when it stands apart from it.
+ * @returns the outcome text.
+ */
+function outcomeText(ok: boolean, title: string | undefined, text: string, detail: readonly CardLine[] | undefined, callId?: string): string {
+  const parts = [ok ? 'done' : 'error', callId === undefined ? undefined : `[${callId}]`, [title, text]
+    .map(part => oneLine(part ?? '')).filter(part => part !== '').join(' ')]
+  return `${parts.filter(part => part !== undefined && part !== '').join(' ')}${cardText(detail)}`
 }
 
 /**

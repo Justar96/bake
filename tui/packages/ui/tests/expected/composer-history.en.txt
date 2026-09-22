@@ -1,11 +1,17 @@
   note   Session: session-test
 
+  ----------------------------------------------------------------------------------------
 ● First prompt
-  Do not recall this answer
 
+< Do not recall this answer
+
+  ----------------------------------------------------------------------------------------
 ● Second prompt
+
 Pending input
 Next step: Queued prompt
 /clear-pending discards queued input
-Ready  model                                                                              /workspace
-> Unsent draf▌t                                                                          Enter sends
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ > Unsent draf▌t                                                                      Enter sends │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+  Ready  model  /workspace

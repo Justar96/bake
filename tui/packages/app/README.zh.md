@@ -25,13 +25,13 @@ kind: "package-bundle"
 
 ## 使用此包
 
-在仓库根目录构建本地包，并使用已准备的 `tui` 配置启动。Bun 生成生产 JSX；`NODE_ENV=production` 选择对应的外部 React/Ink 运行时。`tui/scripts/tui.ts app` 使用此环境完成这两步。配置必须包含 `dsh-base`；提供的补丁会禁用 headless 运行器并挂载 standard 预设和 Harness 本地文件引用提供器。
+在仓库根目录构建，然后启动 Bake。随附的 `tui` profile 使用 `dsh-base` 和本组合包初始化，包含 standard 预设和本地文件引用提供器。Bun 生成生产 JSX；`bun run start` 使用对应的 Node React/Ink 运行时执行现有产物。Bake 默认使用 `~/.bake`，可通过 `DSH_HOME` 覆盖。输入和输出必须是 TTY；设置 `CI` 时仍启用交互渲染。
 
 ```sh
 
-./tui/scripts/tui.ts build
+bun run build
 
-NODE_ENV=production node apps/cli/lib/bin.js --profile tui --patch ./tui/packages/app/cordis.built.patch.yml
+bun run start
 
 ```
 
@@ -52,6 +52,8 @@ Enter 提交输入；运行期间输入会引导下一步。Escape 先关闭打�
 附件提交期间输入框暂停编辑，直到接收流程结束。Escape 取消提交；失败或取消会保留文字、光标和暂存源数据，以便重试。`/attach` 读取期间拒绝提交，直到读取结束。代理将消息接收到收件箱后才清除暂存源数据。待处理输入和恢复后的对话记录显示附件元数据；调出历史文字不会重新暂存附件。运行 `/sessions` 或其他处理输入的已注册命令之前，请先发送或清除暂存条目；`/model`、`/login`、`/help` 和待处理输入控制仍可使用。退出时丢弃未发送的源数据。
 
 中断代理会保留排队输入。`/clear-pending` 丢弃下一步和下一轮收件箱中排队的人工消息，插件上下文仍保留在队列中。待处理面板会显示此操作。上下文用量显示 Harness 预测的占用估计值，以 `~` 为前缀，包含输出增长和压缩的影响。
+
+组合配置提供规划模式时，状态栏会在模式生效期间显示“规划”。“待进入规划”或“待退出规划”表示请求的切换仍在等待下一次被接受的步骤。这些标签读取 Harness 的规划投影，并在恢复会话或运行 `/plan` 命令后更新。
 
 请在会话记录的工作目录中使用 `--resume <id>`。已保存的预设为唯一依据；冲突的 `--preset` 会被拒绝。未记录预设的旧会话必须显式指定 `--preset`。未知 ID 不会创建替代会话。新建空会话遵循 Harness 的持久化策略，退出后不一定保留。恢复会话时从最后一次已记录请求恢复模型和显式推理强度；提供器默认强度保持隐式。
 

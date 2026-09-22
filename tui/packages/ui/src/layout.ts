@@ -38,18 +38,51 @@ export const PROSE_MEASURE = 88
 /**
  * Rows the dynamic region always owes, whatever else it draws.
  *
- * `Chrome` spends them on the status line and the composer's first line. A
- * draft taller than one line takes further rows from the regions above it,
- * which is why the composer is counted at its floor rather than its maximum.
+ * `Chrome` spends them on a blank row, the composer's frame above and below,
+ * the composer's first line, and the status line under the frame. A draft
+ * taller than one line takes further rows from the regions above it, which is
+ * why the composer is counted at its floor rather than its maximum.
  *
- * Understating this understates nothing else: the live region reserves
- * `budget.live` rows for the whole of a running turn, so a chrome height
- * counted short is an L1 violation held for the length of every turn.
+ * Understating this understates nothing else: the live region may grow to
+ * `budget.live` rows during a running turn, so a chrome height counted short
+ * is an L1 violation for as long as a turn's output fills its window.
  */
-export const CHROME_ROWS = 2
+export const CHROME_ROWS = 5
+
+/**
+ * Narrowest terminal the composer draws its frame in.
+ *
+ * The frame costs four columns — two for the border and two for the padding —
+ * and at §4's supported minimum of 40 that is a tenth of the line the user is
+ * typing on. Below it the frame is dropped rather than shrunk: the rail and
+ * the status line below already say where input lands, and a draft with room
+ * to read is worth more than a box around it.
+ */
+export const FRAME_MIN_COLUMNS = 40
+
+/**
+ * Narrowest terminal the composer's right slot draws a hint in.
+ *
+ * The slot is contextual help, so it is the first thing to go: a hint that has
+ * to be truncated to fit has stopped being help, and the keys it names still
+ * work unnamed. Above this width the hint keeps its full text and the draft
+ * wraps around it, which is why it never has to shrink.
+ */
+export const HINT_MIN_COLUMNS = 60
 
 /** Largest live-region height, before the terminal's own height is considered. */
 export const LIVE_BUDGET = 10
+
+/**
+ * Largest composer height, before the terminal's own height is considered.
+ *
+ * The composer's first row is charged to {@link CHROME_ROWS}; the rest are
+ * taken from the regions above it as the draft grows, so this is the most a
+ * draft can cost them. Unbounded, a pasted paragraph would take the whole
+ * dynamic region and put Ink on its screen-clearing path with the cursor still
+ * in the box.
+ */
+export const COMPOSER_BUDGET = 5
 
 /**
  * Largest notice height, before the terminal's own height is considered.
@@ -60,6 +93,15 @@ export const LIVE_BUDGET = 10
  * anything else from pushing the status line and composer off the screen.
  */
 export const NOTICE_BUDGET = 6
+
+/**
+ * Frame the composer draws around the draft.
+ *
+ * `round` is box-drawing characters; `classic` is ASCII. Which one a terminal
+ * can render is a property of that terminal, resolved once at the application
+ * boundary and passed in, so this layer needs no environment to lay out.
+ */
+export type FrameStyle = 'round' | 'classic'
 
 /** Terminal size, as reported by `useWindowSize()`. */
 export interface WindowSize {
@@ -78,8 +120,12 @@ export interface Budget {
    * terminal and replaying every committed row on each frame.
    */
   readonly dynamic: number
-  /** Rows the live region may draw, and the height it is padded to while a turn runs. */
+  /** Visible composer structure, including its first input row. */
+  readonly chrome: ChromeLayout
+  /** Rows the live region may draw; it is sized to its content below that. */
   readonly live: number
+  /** Rows a draft may occupy, its first — charged to the chrome — included. */
+  readonly composer: number
   /** Items an overlay may list before it must show a `+N more` footer. */
   readonly items: number
   /** Lines a notice may draw before it must show a `+N more` footer. */
@@ -88,6 +134,28 @@ export interface Budget {
   readonly measure: number
   /** Columns tool output may use. */
   readonly output: number
+}
+
+/** Composer structure that fits before any additional draft rows are reserved. */
+export interface ChromeLayout {
+  readonly frame: boolean
+  readonly status: boolean
+  readonly gap: boolean
+  readonly rows: number
+}
+
+/**
+ * Yield decorative rows before hiding input on a short or narrow terminal.
+ * @param columns - terminal width.
+ * @param available - rows available to the footer, excluding Ink's cursor row.
+ * @returns visible structure and its exact height with a one-row draft.
+ */
+export function chromeFor(columns: number, available = CHROME_ROWS): ChromeLayout {
+  const frame = columns >= FRAME_MIN_COLUMNS && available >= 3
+  const input = frame ? 3 : 1
+  const status = available > input
+  const gap = available > input + 1
+  return { frame, status, gap, rows: input + Number(status) + Number(gap) }
 }
 
 /**
@@ -103,11 +171,13 @@ export interface Budget {
  */
 export function budgetFor(size: WindowSize, options: { readonly header?: boolean } = {}): Budget {
   const dynamic = Math.max(1, size.rows - 1)
-  const live = Math.max(1, Math.min(LIVE_BUDGET, dynamic - CHROME_ROWS))
-  const items = Math.max(1, dynamic - CHROME_ROWS - (options.header === true ? 1 : 0))
-  const notice = Math.max(1, Math.min(NOTICE_BUDGET, dynamic - CHROME_ROWS))
+  const chrome = chromeFor(size.columns, dynamic)
+  const live = Math.max(1, Math.min(LIVE_BUDGET, dynamic - chrome.rows))
+  const composer = Math.max(1, Math.min(COMPOSER_BUDGET, dynamic - chrome.rows))
+  const items = Math.max(1, dynamic - chrome.rows - (options.header === true ? 1 : 0))
+  const notice = Math.max(1, Math.min(NOTICE_BUDGET, dynamic - chrome.rows))
   const measure = Math.max(1, Math.min(PROSE_MEASURE, size.columns - COLUMN.rail))
-  return { dynamic, live, items, notice, measure, output: Math.max(1, size.columns - COLUMN.output) }
+  return { dynamic, chrome, live, composer, items, notice, measure, output: Math.max(1, size.columns - COLUMN.output) }
 }
 
 /**
@@ -128,6 +198,27 @@ export function windowOf<T>(items: readonly T[], limit: number): {
   if (items.length <= limit) return { shown: items, hidden: 0 }
   const shown = items.slice(0, Math.max(0, limit - 1))
   return { shown, hidden: items.length - shown.length }
+}
+
+/**
+ * Window a selectable list without hiding its selection; reserve an omission row
+ * when at least two rows fit. A one-row window prioritizes the selected item.
+ * @param items - candidates in display order.
+ * @param selected - selected index in the complete list.
+ * @param limit - available rows, including the omission row.
+ * @param maximum - configured maximum number of candidates.
+ * @returns visible candidates, their relative selection, and omitted count.
+ */
+export function selectionWindow<T>(items: readonly T[], selected: number, limit: number, maximum = limit): {
+  readonly shown: readonly T[]
+  readonly selected: number
+  readonly hidden: number
+} {
+  const overflow = items.length > Math.min(limit, maximum)
+  const capacity = Math.max(1, Math.min(maximum, limit - (overflow && limit > 1 ? 1 : 0)))
+  const start = Math.max(0, selected - capacity + 1)
+  const shown = items.slice(start, start + capacity)
+  return { shown, selected: selected - start, hidden: items.length - shown.length }
 }
 
 /**
@@ -156,6 +247,8 @@ export const tailOf = <T>(lines: readonly T[], budget: number): readonly T[] =>
 export const MARKER = {
   /** Opens a turn in the transcript: the user's words that started it. */
   turn: '\u25cf',
+  /** First line of an assistant reply. */
+  reply: '<',
   /**
    * A slash command the user ran.
    *
@@ -171,6 +264,12 @@ export const MARKER = {
   selected: '\u25b8',
   /** A value already in force, as opposed to the one under the cursor. */
   current: '*',
+  /**
+   * Opens an action: pulsing while it runs, green once it succeeded, red once
+   * it failed. The shape is the same in every state, so `NO_COLOR` still reads
+   * each action as one block.
+   */
+  action: '\u25cf',
   /** An unmarked row: assistant prose, and unselected list rows. */
   none: ' ',
 } as const
@@ -192,10 +291,31 @@ export const VERB = {
   ask: 'ask',
   note: 'note',
   error: 'error',
+  done: 'done',
 } as const
 
 /** A verb this vocabulary names. */
 export type Verb = typeof VERB[keyof typeof VERB]
+
+/**
+ * What a finished action's verb becomes.
+ *
+ * The block keeps its place and its words, and the verb changes tense: a
+ * running `run` reads as work in progress, a finished `ran` as done, without a
+ * second row saying so. Every form fits the verb column with its gap.
+ */
+export const PAST: Readonly<Record<Verb, string>> = {
+  think: 'think',
+  run: 'ran',
+  read: 'read',
+  edit: 'edited',
+  find: 'found',
+  fetch: 'got',
+  ask: 'asked',
+  note: 'note',
+  error: 'error',
+  done: 'done',
+}
 
 /** True when every character is ASCII and can therefore be measured reliably. */
 export const isRenderable = (text: string): boolean => {

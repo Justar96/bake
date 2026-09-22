@@ -55,11 +55,11 @@ function fakeStdin(): NodeJS.ReadStream {
 function props(committed: Transcript, overrides: Partial<AppProps> = {}): AppProps {
   return {
     files: { query: undefined, entries: [], loading: false, error: undefined }, onReferenceQuery: () => {},
-    completion: { entries: [], loading: false, error: undefined }, completionLimit: 8,
+    completion: { entries: [], loading: false, error: undefined }, completionLimit: 8, resultLines: 8,
     committed,
     live: [], pending: [], status: 'idle', stopping: false,
     command: undefined, notice: undefined, interaction: undefined, todos: undefined,
-    model: 'mock/model', cwd: '/workspace', sessionId: 'session-scale', copy: dictionaries.en, context: undefined,
+    model: 'mock/model', cwd: '/workspace', sessionId: 'session-scale', copy: dictionaries.en, frame: 'round', quitting: false, context: undefined,
     onSubmit: vi.fn(), onCancel: vi.fn(), onInterrupt: vi.fn(), onAnswer: vi.fn(), ...overrides,
   }
 }
@@ -81,7 +81,7 @@ async function mounted(count: number): Promise<{
   const stdout = fakeStdout()
   let transcript = appendTranscript(emptyTranscript, rowsUpTo(count))
   const instance = render(<App {...props(transcript)} />, {
-    stdout, stdin: fakeStdin(), patchConsole: false, exitOnCtrlC: false,
+    stdout, stdin: fakeStdin(), patchConsole: false, exitOnCtrlC: false, interactive: true,
   })
   instances.push(instance)
   await instance.waitUntilRenderFlush()
@@ -109,7 +109,7 @@ describe('transcript cost', () => {
     const committed = appendTranscript(emptyTranscript, history)
     const stdout = fakeStdout()
     const instance = render(<App {...props(committed)} />, {
-      stdout, stdin: fakeStdin(), patchConsole: false, exitOnCtrlC: false,
+      stdout, stdin: fakeStdin(), patchConsole: false, exitOnCtrlC: false, interactive: true,
     })
     instances.push(instance)
     await instance.waitUntilRenderFlush()
@@ -137,7 +137,7 @@ describe('transcript cost', () => {
     const stdout = fakeStdout()
     let transcript = emptyTranscript
     const instance = render(<App {...props(transcript)} />, {
-      stdout, stdin: fakeStdin(), patchConsole: false, exitOnCtrlC: false,
+      stdout, stdin: fakeStdin(), patchConsole: false, exitOnCtrlC: false, interactive: true,
     })
     instances.push(instance)
     await instance.waitUntilRenderFlush()

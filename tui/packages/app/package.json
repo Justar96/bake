@@ -8,12 +8,13 @@
     ".": "./src/index.ts",
     "./startup": "./src/startup.ts",
     "./cordis.patch.yml": "./cordis.patch.yml",
+    "./cordis.built.patch.yml": "./cordis.built.patch.yml",
     "./package.json": "./package.json"
   },
   "license": "MIT",
   "dsh": {
     "bundle": {
-      "patch": "./cordis.patch.yml"
+      "patch": "./cordis.built.patch.yml"
     }
   },
   "dependencies": {
@@ -27,6 +28,7 @@
     "@deepseek-ai/dsh-credentials": "workspace:^",
     "@deepseek-ai/dsh-fs": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
+    "@deepseek-ai/dsh-plan-mode": "workspace:^",
     "@deepseek-ai/dsh-session": "workspace:^",
     "@deepseek-ai/dsh-session-persistence": "workspace:^",
     "@deepseek-ai/dsh-session-projection": "workspace:^",

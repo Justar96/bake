@@ -1,17 +1,22 @@
   note   Session: recorded-session
 
-● Use the bash tool to run exactly: echo TERMINAL_OK. Then reply with the single
-   word DONE and stop.
+  ----------------------------------------------------------------------------------------
+● Use the bash tool to run exactly: echo TERMINAL_OK. Then reply with the single word DONE
+   and stop.
 
-  think  The user wants me to run a simple bash command and then reply with
-         "DONE".
+  think  The user wants me to run a simple bash command and then reply with "DONE".
 
-  run    {"command": "echo TERMINAL_OK", "description": "Echo TERMINAL_OK to
-         verify terminal access"}
+● ran    {"command": "echo TERMINAL_OK", "description": "Echo TERMINAL_OK to verify terminal
+         access"}
          TERMINAL_OK
 
-  think  The command ran successfully and output "TERMINAL_OK". I should now
-         reply with just "DONE".
-  DONE
-Ready  deepseek-v4-flash                                              /workspace
-> ▌Ask anything
+  think  The command ran successfully and output "TERMINAL_OK". I should now reply with just
+         "DONE".
+
+< DONE
+
+✓ Completed  ran 1
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ > ▌Ask anything                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+  Ready  deepseek-v4-flash  /workspace

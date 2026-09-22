@@ -1,4 +1,5 @@
   note   Session: session-test
+
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
 │ Choose reasoning effort                                                                          │
 │   Provider default · low                                                                         │

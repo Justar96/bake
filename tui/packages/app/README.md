@@ -25,13 +25,13 @@ This private workspace bundle adds a terminal runner and flag provider to a base
 
 ## Use this package
 
-From the repository root, build the local bundle and launch it over the prepared `tui` profile. Bun emits production JSX; `NODE_ENV=production` selects the matching external React/Ink runtime. `tui/scripts/tui.ts app` performs both steps with this environment. The profile must include `dsh-base`; the supplied patch disables the headless runner and mounts the standard preset and the Harness local file-reference provider.
+Build from the repository root, then start Bake. The shipped `tui` profile initializes with `dsh-base` and this bundle, including the standard preset and local file-reference provider. Bun emits production JSX; `bun run start` runs existing artifacts with the matching Node React/Ink runtime. Bake uses `~/.bake` unless `DSH_HOME` is set. TTY input and output are required; interactive rendering remains enabled when `CI` is set.
 
 ```sh
 
-./tui/scripts/tui.ts build
+bun run build
 
-NODE_ENV=production node apps/cli/lib/bin.js --profile tui --patch ./tui/packages/app/cordis.built.patch.yml
+bun run start
 
 ```
 
@@ -52,6 +52,8 @@ Use `/attach notes with spaces.bin` to stage a file for the next ordinary prompt
 Attachment submission holds the composer until admission finishes. Escape cancels it; failures and cancellation preserve the text, cursor, and staged sources for retry. Submission during `/attach` reads is refused until the read settles. Sources clear after the Agent accepts the message into its inbox. Pending input and resumed transcripts show attachment metadata; recalling text does not restage attachments. Send or clear staged items before `/sessions` or another registered command that consumes input; `/model`, `/login`, `/help`, and pending-input controls remain available. Unsaved sources disappear on exit.
 
 Agent interruption retains queued input. `/clear-pending` discards queued human messages from both the next-step and next-turn inboxes; plugin context remains queued. The pending panel displays this action. Context usage shows the Harness’s projected occupancy as an estimate prefixed with `~`, including output growth and compaction.
+
+When the composed profile has plan mode, the status line shows `Plan` while it is active. `Plan pending` or `Plan exit pending` means a requested change is waiting for the next accepted step. These labels read the Harness plan projection and update after resume or a `/plan` command.
 
 Use `--resume <id>` from the session’s recorded workspace. The stored preset remains authoritative; a conflicting `--preset` is rejected. A legacy session with no recorded preset requires an explicit `--preset`. Unknown ids never create replacement sessions. Fresh empty sessions follow the harness persistence policy and need not survive exit. Resume restores the model and explicit effort from the last recorded request; provider-default effort remains implicit.
 

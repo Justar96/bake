@@ -57,6 +57,18 @@ const StatusBar = ({ width }) => {
     h(Text, { dimColor: true }, right))
 }
 
+/**
+ * Status left-packed: the fields stop where they stop.
+ *
+ * Adopted with the boxed composer, which carries the separation the
+ * justification used to. `classic` borders keep the frame ASCII, so a terminal
+ * cannot draw it at twice the width it was measured at.
+ */
+const StatusPacked = () =>
+  h(Text, null,
+    h(Text, { color: 'green' }, 'ready'),
+    h(Text, { dimColor: true }, '  deepseek/chat  ctx 12%  turn 3  0f3a9c'))
+
 const Composer = ({ glyph, color }) =>
   h(Box, { flexDirection: 'row' },
     h(Box, { width: 2, flexShrink: 0 }, h(Text, { color, bold: true }, glyph)),
@@ -102,6 +114,37 @@ const VARIANTS = {
         h(Box, { width: 2, flexShrink: 0 }, h(Text, { color: 'cyan', bold: true }, '\u276f')),
         h(Box, { flexGrow: 1 }, h(Text, { dimColor: true }, 'Ask anything, / for commands')),
         h(Box, { flexShrink: 0 }, h(Text, { dimColor: true }, '\u21b5 send')))),
+
+  // The two border rows are the only rows this document spends on structure
+  // alone, and they buy back the justification: with the frame separating the
+  // chrome, the status line can pack left and close the gap a wide terminal
+  // opened between the model and the next field. Superseded by H.
+  'G \u2014 left-packed status above a boxed composer': ({ width }) =>
+    h(Box, { flexDirection: 'column', width },
+      h(Chat), h(StatusPacked),
+      h(Box, {
+        width, flexDirection: 'column', flexShrink: 0,
+        borderStyle: 'classic', borderDimColor: true, paddingX: 1,
+      }, h(Box, { flexDirection: 'row' },
+        h(Box, { width: 2, flexShrink: 0 }, h(Text, { color: 'cyan', bold: true }, '>')),
+        h(Box, { flexGrow: 1 }, h(Text, { dimColor: true }, 'Ask anything, / for commands')),
+        h(Box, { flexShrink: 0 }, h(Text, { dimColor: true }, 'Enter sends'))))),
+
+  // Adopted. G's rows in a different order: a blank, then the box directly
+  // under the newest line, then the status line as the box's footer, indented
+  // to the prompt. The input is the row the eye returns to, so it sits closest
+  // to what was just said, and the status reads as a caption on it.
+  'H \u2014 blank, boxed composer, status beneath': ({ width }) =>
+    h(Box, { flexDirection: 'column', width },
+      h(Chat), h(Text, null, ' '),
+      h(Box, {
+        width, flexDirection: 'column', flexShrink: 0,
+        borderStyle: 'classic', borderDimColor: true, paddingX: 1,
+      }, h(Box, { flexDirection: 'row' },
+        h(Box, { width: 2, flexShrink: 0 }, h(Text, { color: 'cyan', bold: true }, '>')),
+        h(Box, { flexGrow: 1 }, h(Text, { dimColor: true }, 'Ask anything, / for commands')),
+        h(Box, { flexShrink: 0 }, h(Text, { dimColor: true }, 'Enter sends')))),
+      h(Box, { paddingLeft: 2 }, h(StatusPacked))),
 }
 
 const strip = text => text.replace(/\u001B\[[0-9;]*m/g, '')
@@ -120,4 +163,11 @@ console.log(`
 Row cost is charged against the same budget the live region spends, so a
 separator row is not free: at 10 rows it is a tenth of the screen. Alignment
 and glyph weight cost nothing and survive NO_COLOR, which is why D and E carry
-the separation without spending rows on it.`)
+the separation without spending rows on it.
+
+G and H spend frame rows anyway: a closed frame encloses something, so it says
+where typing lands rather than merely dividing, and it is what lets the status
+line drop the justification \u2014 which on a wide terminal put the width of the
+screen between the model and the next field. H is adopted: its blank row keeps
+the frame off the last line of the answer, and the status line under the frame
+reads as its footer rather than as one more row of output.`)

@@ -4,11 +4,11 @@ The TUI owns one terminal and displays one root Agent at a time. [Application us
 
 ## 1. Topology
 
-The profile combines `dsh-base`, a disabled headless runner, and the TUI patch. `tui-startup` parses flags with Commander through `parseCmdline`; its `tuiStartup` service supplies the runner's lazy configuration. The patch also mounts the `standard` preset roster and its required subagent model-selection settings. The launcher provides `cmdlineArgs` and `appExit`.
+The shipped `tui` profile combines `dsh-base` and `@dsh-tui/app`. `tui-startup` parses flags with Commander through `parseCmdline`; its `tuiStartup` service supplies the runner's lazy configuration. The patch also mounts the `standard` preset roster and its required subagent model-selection settings. The launcher provides `cmdlineArgs` and `appExit`.
 
 ## 2. Boot sequence
 
-The runner registers its disposal effect before awaiting Loader settlement. It then resolves the workspace and model selection, creates or resumes the Agent, connects observers in the registry's `setup` callback, replays history, and renders Ink. Failure before rendering leaves the terminal untouched; failure afterward reaches the same release function as ordinary exit.
+The runner registers its disposal effect before awaiting Loader settlement. It then resolves the workspace and model selection, creates or resumes the Agent, connects observers in the registry's `setup` callback, replays history, and renders Ink. The runner requires TTY input and output and explicitly enables interactive rendering, including when CI variables are present. Failure before rendering leaves the terminal untouched; failure afterward reaches the same release function as ordinary exit.
 
 A fresh session records `cwd` and the resolved `agentPreset` in its header. Resume calls `agents.resume` with the exact requested id. It refuses a missing session, a live owner, a different workspace, or a conflicting explicit preset. The `agentPreset` projection determines resumed composition; a session without a recorded preset requires an explicit `--preset`, which is recorded after successful mounting.
 
@@ -40,6 +40,7 @@ A fresh session records `cwd` and the resolved `agentPreset` in its header. Resu
 | Context occupancy | `sessionProjections.snapshot(session, ['contextPressure']).values.contextPressure.projectedTokens` and `contextWindow`, notified by `onChanged` |
 | Committed transcript | Session events projected into immutable rows |
 | Task list | `sessionProjections.stateOf(session, 'todos')`, notified by `onChanged` |
+| Plan mode | `sessionProjections.snapshot(session, ['contextPressure', 'plan']).values.plan`, notified by `onChanged` |
 | Tool presentation | `tools.get(name)` and the call's own `presentCall` / `presentResult` |
 | Live response | Ordered `agent/assistant-stream` frames for the active attempt |
 | Human request | The oldest outstanding scoped interaction and its abort signal |
@@ -141,8 +142,10 @@ Ink owns raw mode, bracketed paste, and cursor restoration. The application does
 | `resume` | absent | Exact persisted session id |
 | `preset` | roster default for a fresh session | Fresh composition, or explicit legacy-session composition |
 | `locale` | `en` | `en` or `zh` labels |
+| `composerFrame` | `auto` | `round`, `classic`, or `auto` to read the terminal's encoding, `TERM`, and character locale ([why](DESIGN-LAYOUT.md#the-frame-is-chosen-from-the-terminal-not-assumed)) |
 | `doubleInterruptMs` | `500` | Interval for a second Ctrl-C to quit |
 | `completionLimit` | `8` | Positive integer limiting visible completion, picker, and staged-attachment rows |
+| `resultLines` | `4` | Non-negative integer bounding the tool-result lines the transcript keeps under each outcome, with the rest counted ([why](DESIGN-LAYOUT.md#a-results-output-is-previewed-not-replayed)) |
 | `attachmentMaxBytes` | `16777216` | Positive integer bounding total staged source bytes; Harness image limits also apply |
 | `attachmentLimit` | `8` | Positive integer bounding staged source count |
 | `credentialRefs` | `[]` | Provider key references offered by `/login`; the supplied patch names `DEEPSEEK_API_KEY` |
@@ -153,10 +156,10 @@ Schemastery validates and defaults configuration before the runner receives it. 
 
 [The dispatcher](scripts/tui.ts) runs every development and validation command; `tui/scripts/tui.ts help` prints them, and `verify` is the pre-push pair. It is Bun, as is everything it runs except the product and the two checks whose subject is the Node process the product runs in.
 
-Its `check` command owns six individually selectable targets: React instance identity for upstream DOM tests and each TUI Ink consumer, strict application/test/tooling TypeScript checks, pure-module and tooling tests on Bun, Node component/integration tests, the rendered layout invariants, and local Markdown links. Built app and PTY launches use production React; the component harness and source launch retain their development paths. [Bun ownership](BUN.md) describes the shared build and performance driver.
+Its `check` command owns six individually selectable targets: React instance identity for TUI Ink consumers, strict application/test/tooling TypeScript checks, pure-module and tooling tests on Bun, Node component/integration tests, rendered layout invariants, and local Markdown links. `bun run verify` builds the workspace before running the checks and PTY scenarios. Built app and PTY launches use production React; the hot component preview runs separately on Bun. [Bun ownership](BUN.md) describes the shared build and performance driver.
 
-[The PTY smoke](scripts/pty-smoke.ts) allocates a terminal through `bun:ffi` `openpty`, launches the built profile in a private workspace and home and drives it through named scenarios, each declaring what it proves and which scenarios it requires, so `--only` runs one with its prerequisites. Together they replay the shared recorded bash scenario, compare persisted model and real tool output, resume the exact session, check projected context display, and exercise cursor editing, paste, history recall with draft restoration after resume, picker cancellation and new-session/resume navigation, model/effort selection and restored request configuration, slash and quoted-file completion, logged skill invocation, cancellation, pending-input discard, attachment admission and exact stored bytes, durable metadata replay, and terminal restoration. Every wait is named, so a step that never happens reports that name, the process state, and the screen within its own timeout, with the transcript kept in `tui/.smoke/` and the session state kept on disk. `--live` uses the root `.env` for a real DeepSeek call.
+[The PTY smoke](scripts/pty-smoke.ts) allocates a terminal through `bun:ffi` `openpty`, launches the built profile in a private workspace and home and drives it through named scenarios, each declaring what it proves and which scenarios it requires, so `--only` runs one with its prerequisites. Together they replay the shared recorded bash scenario, compare persisted model and real tool output, resume the exact session, check projected context and plan-mode status, and exercise cursor editing, paste, history recall with draft restoration after resume, picker cancellation and new-session/resume navigation, model/effort selection and restored request configuration, slash and quoted-file completion, logged skill invocation, cancellation, pending-input discard, attachment admission and exact stored bytes, durable metadata replay, terminal restoration, and screen-buffer checks for scrollback preservation and wrapped-draft cursor visibility after terminal resize. Every wait is named, so a step that never happens reports that name, the process state, and the screen within its own timeout, with the transcript kept in `tui/.smoke/` and the session state kept on disk. `--live` uses the root `.env` for a real DeepSeek call.
 
 ## 10. Limits
 
-Plan mode, session goals, workspace changes, the subagent catalog and scheduled follow-ups reach the log but not the screen: their events are dropped, and only the task list has a panel. Navigation supports one displayed session in the current workspace. The picker reads matching records and titles in full while bounding visible rows. Inline scrollback has no virtualized transcript, and long-history performance qualification remains incomplete. Clipboard images and inline attachment previews are deferred. Source launch is unsuitable for qualifying tool execution on this checkout; use the built profile and the runbook in [PLAN.md](PLAN.md#132-build-from-a-clean-checkout).
+Session goals, workspace changes, the subagent catalog and scheduled follow-ups reach the log but not the screen: their events are dropped. Plan mode appears in the status line and the task list has a panel. Navigation supports one displayed session in the current workspace. The picker reads matching records and titles in full while bounding visible rows. Inline scrollback has no virtualized transcript, and long-history performance qualification remains incomplete. Clipboard images and inline attachment previews are deferred. Source launch is unsuitable for qualifying tool execution on this checkout; use the built profile and the runbook in [PLAN.md](PLAN.md#132-build-from-a-clean-checkout).

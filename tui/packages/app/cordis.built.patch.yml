@@ -1,14 +1,5 @@
-# The built-plugin overlay: identical composition to cordis.patch.yml, pointing
-# at `lib/` instead of `src/`.
-#
-# The built `dsh` CLI runs plain Node and cannot import TypeScript, and tools
-# only work outside the tsx source launch (see tui/scripts/build.sh). Use this
-# overlay with `node apps/cli/lib/bin.js` after running that script.
-
-- id: headless-runner
-  disabled: true
-- id: headless-startup
-  disabled: true
+# The terminal bundle applied after dsh-base by the shipped tui profile.
+# Build with `bun run build` before starting the Node launcher.
 
 - insert:
     - id: file-reference-local

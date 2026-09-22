@@ -1,0 +1,16 @@
+
+  --------------------------------------
+● Read both files, then summarize.
+
+● read   {"path":"notes.md"}  1 行
+
+● read   {"path":"private.md"}
+         Permission denied
+
+< Read notes.md; private.md was
+  unavailable.
+
+  --------------------------------------
+● Try again.
+
+- 已中断

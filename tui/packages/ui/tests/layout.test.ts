@@ -1,7 +1,7 @@
 /** Region budgets and the render vocabulary. */
 import { describe, expect, test } from 'bun:test'
 import {
-  budgetFor, CHROME_ROWS, COLUMN, isRenderable, LIVE_BUDGET, MARKER, PROSE_MEASURE, tailOf, VERB, windowOf,
+  budgetFor, CHROME_ROWS, COLUMN, isRenderable, LIVE_BUDGET, MARKER, PROSE_MEASURE, selectionWindow, tailOf, VERB, windowOf,
 } from '../src/layout.ts'
 
 describe('budgetFor', () => {
@@ -13,18 +13,21 @@ describe('budgetFor', () => {
 
   test('shrinks the live region on a short window instead of overrunning', () => {
     expect(budgetFor({ columns: 80, rows: 40 }).live).toBe(LIVE_BUDGET)
-    expect(budgetFor({ columns: 80, rows: 10 }).live).toBe(10 - 1 - CHROME_ROWS)
-    expect(budgetFor({ columns: 80, rows: 6 }).live).toBe(6 - 1 - CHROME_ROWS)
-    // Below this height the live region is the one-row floor: chrome still fits,
-    // and the viewport row Ink needs is still left free.
+    expect(budgetFor({ columns: 80, rows: 12 }).live).toBe(12 - 1 - CHROME_ROWS)
+    expect(budgetFor({ columns: 80, rows: CHROME_ROWS + 3 }).live).toBe(2)
+    // Below the height where chrome and one live row both fit, the live region
+    // is the one-row floor. DESIGN-LAYOUT.md §3 scopes the priority order to
+    // windows that can honour it and names the degraded mode for the rest:
+    // interaction-or-composer plus status, and nothing else.
     expect(budgetFor({ columns: 80, rows: 3 }).live).toBe(1)
   })
 
   test('leaves the chrome its rows, since a running turn reserves the whole live budget', () => {
     // The live region holds its budget for the length of every turn, so a live
     // budget that does not leave the chrome its rows is an L1 violation held
-    // for the length of every turn rather than a transient one.
-    for (const rows of [6, 10, 24, 40, 120]) {
+    // for the length of every turn rather than a transient one. It holds from
+    // the smallest window that can seat the chrome and a row above it.
+    for (const rows of [CHROME_ROWS + 2, 12, 24, 40, 120]) {
       const budget = budgetFor({ columns: 80, rows })
       expect(budget.live + CHROME_ROWS).toBeLessThanOrEqual(budget.dynamic)
     }
@@ -40,9 +43,12 @@ describe('budgetFor', () => {
   })
 
   test('derives the item limit from height, and charges a header a row', () => {
-    expect(budgetFor({ columns: 80, rows: 24 }).items).toBe(21)
-    expect(budgetFor({ columns: 80, rows: 24 }, { header: true }).items).toBe(20)
-    expect(budgetFor({ columns: 80, rows: 10 }, { header: true }).items).toBe(6)
+    // Stated against the chrome floor rather than as a number: an overlay may
+    // use every row the viewport has left once chrome and its title are paid.
+    const rowsLeft = (rows: number): number => rows - 1 - CHROME_ROWS
+    expect(budgetFor({ columns: 80, rows: 24 }).items).toBe(rowsLeft(24))
+    expect(budgetFor({ columns: 80, rows: 24 }, { header: true }).items).toBe(rowsLeft(24) - 1)
+    expect(budgetFor({ columns: 80, rows: 10 }, { header: true }).items).toBe(rowsLeft(10) - 1)
   })
 
   test('caps prose at the measure however wide the terminal is', () => {
@@ -71,6 +77,36 @@ describe('windowOf', () => {
   test('survives a limit of one, where only the footer fits', () => {
     expect(windowOf(['a', 'b'], 1)).toEqual({ shown: [], hidden: 2 })
     expect(windowOf(['a', 'b'], 0)).toEqual({ shown: [], hidden: 2 })
+  })
+})
+
+describe('selectionWindow', () => {
+  const items = Array.from({ length: 12 }, (_, index) => index)
+
+  test('keeps every selection visible after the terminal reduces the row limit', () => {
+    for (const limit of [1, 2, 4, 8]) {
+      for (const selected of items) {
+        const window = selectionWindow(items, selected, limit)
+        expect(window.shown[window.selected]).toBe(selected)
+        expect(window.shown.length + (window.hidden > 0 && limit > 1 ? 1 : 0)).toBeLessThanOrEqual(limit)
+        expect(window.hidden).toBe(items.length - window.shown.length)
+      }
+    }
+  })
+
+  test('counts omitted entries above and below the selected window', () => {
+    expect(selectionWindow(items, 11, 4)).toEqual({ shown: [9, 10, 11], selected: 2, hidden: 9 })
+    expect(selectionWindow(items, 5, 4)).toEqual({ shown: [3, 4, 5], selected: 2, hidden: 9 })
+  })
+
+  test('honors the configured candidate limit even when the terminal has room for more', () => {
+    expect(selectionWindow([0, 1, 2], 0, 3, 2)).toEqual({ shown: [0, 1], selected: 0, hidden: 1 })
+    expect(selectionWindow([0, 1, 2], 2, 3, 2)).toEqual({ shown: [1, 2], selected: 1, hidden: 1 })
+  })
+
+  test('shows the complete list when it fits', () => {
+    expect(selectionWindow([0, 1], 1, 4)).toEqual({ shown: [0, 1], selected: 1, hidden: 0 })
+    expect(selectionWindow([], 0, 4)).toEqual({ shown: [], selected: 0, hidden: 0 })
   })
 })
 

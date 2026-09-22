@@ -9,10 +9,11 @@ import type {} from '@deepseek-ai/dsh-session-query'
 import type {} from '@deepseek-ai/dsh-compaction'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import { attachmentSummaries } from '@dsh-tui/ui/rows.ts'
-import { appendTranscript, emptyTranscript, project, projector, type Projector, type Row } from '@dsh-tui/ui'
+import { Actions, appendTranscript, emptyTranscript, project, projector, type Projector, type Row } from '@dsh-tui/ui'
 import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
 import { AttachmentDraft, type AttachmentOptions } from './attachments.ts'
 import { LiveBlocks } from './live.ts'
+import { Printed } from './printed.ts'
 import { Interactions } from './interactions.ts'
 import { InputCatalog } from './catalog.ts'
 import { FileReferences } from './references.ts'
@@ -23,6 +24,7 @@ import type { ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 // (`contextPressure`, `todos`), and those keys are invisible here without them.
 import type {} from '@deepseek-ai/dsh-token-meter'
 import type {} from '@deepseek-ai/dsh-tool-todo/types'
+import type {} from '@deepseek-ai/dsh-plan-mode/types'
 
 /** One terminal's presentation over a live Agent and its durable projections. */
 export class SessionController {
@@ -38,8 +40,19 @@ export class SessionController {
   private readonly projector: Projector
   private buffered: SessionEvent[] | undefined = []
   private cursor = -1
-  private live: readonly Row[] = []
-  private stream: { revision: number; attemptId: string; blocks: LiveBlocks } | undefined
+  /** Rows for the attempt currently streaming that have not printed yet. */
+  private blocks: readonly Row[] = []
+  /**
+   * Actions whose block has not printed, in call order: running, or finished
+   * behind one that is.
+   *
+   * A call and its result print together, once, as one block, so an action
+   * never appears as a call with its outcome stacked a few rows below it. In
+   * order, so parallel calls read in the order the model made them however
+   * they finish.
+   */
+  private readonly actions = new Actions()
+  private stream: { revision: number; attemptId: string; blocks: LiveBlocks; printed: Printed } | undefined
   private stopping = false
   private command: { text: string; abort: AbortController; done: Promise<void> } | undefined
   private notice: string | undefined
@@ -124,7 +137,11 @@ export class SessionController {
       if (session !== agent.session) return
       if (this.buffered !== undefined) this.buffered.push(event)
       else this.append(event)
-      if (event.type === 'assistant/message' || event.type === 'assistant/attempt') this.live = []
+      // The rows the stream stood in for have committed. `turn/end` covers an
+      // interrupted turn, which reaches neither.
+      if (event.type === 'assistant/message' || event.type === 'assistant/attempt' || event.type === 'turn/end') {
+        this.blocks = []
+      }
       this.repaint()
     }))
     this.off.push(ctx.on('agent/status', payload => {
@@ -139,7 +156,7 @@ export class SessionController {
     if (projections === undefined) throw new Error('tui: sessionProjections is required')
     this.off.push(projections.onChanged((session, key) => {
       if (session !== agent.session) return
-      if (key === 'inbox' || key === 'contextPressure' || key === 'todos') this.repaint()
+      if (key === 'inbox' || key === 'contextPressure' || key === 'todos' || key === 'plan') this.repaint()
     }))
     this.references = new FileReferences(agent, copy, () => this.repaint())
     this.catalog = new InputCatalog(ctx, agent, copy, () => this.repaint())
@@ -169,19 +186,22 @@ export class SessionController {
     const pending = (['next-step', 'next-turn'] as const).flatMap(target => inbox[target]
       .filter(message => message.source.kind === 'user')
       .map(message => ({ id: message.id, target, text: message.content.flatMap(block => block.type === 'text' ? [block.text] : []).join(''), attachments: attachmentSummaries(message.content) })))
-    const pressure = projections?.snapshot(this.agent.session, ['contextPressure']).values.contextPressure
+    const surface = projections?.snapshot(this.agent.session, ['contextPressure', 'plan']).values
+    const pressure = surface?.contextPressure
     // The agent's list, not a log of writes to it: `todos` folds every
     // `todo/write` to the latest whole list, which is the only version that
     // is still true.
     const todos = projections?.stateOf(this.agent.session, 'todos')
+    const plan = surface?.plan
     const used = pressure?.projectedTokens
     const window = pressure?.contextWindow
     return {
-      committed: this.committed, live: this.live, pending, status: this.agent.status,
+      committed: this.committed, live: [...this.actions.pending, ...this.blocks], pending, status: this.agent.status,
       stopping: this.stopping, command: this.command?.text, notice: this.notice,
       interaction: this.interactions.current,
       todos: todos === undefined || todos === null ? undefined
         : todos.map(item => ({ text: item.content, status: item.status })),
+      ...plan === undefined ? {} : { plan },
       completion: this.catalog.view, files: this.references.view, attachments: this.attachments.view,
       model: this.selection?.current === undefined
         ? `${this.agent.options.provider}/${this.agent.options.model}` : `${routeOf(this.selection.current)}${this.selection.current.reasoningEffort === undefined ? '' : ` (${this.selection.current.reasoningEffort})`}`,
@@ -294,26 +314,60 @@ export class SessionController {
 
   private repaint(): void { if (!this.closed) this.changed() }
 
-  private append(event: SessionEvent): void {
-    if (event.seq <= this.cursor) return
+  /**
+   * Commit one event's rows, skipping an event the transcript already holds.
+   * @param event - the session event to project.
+   * @returns the rows it contributed, empty when it was a duplicate.
+   */
+  private append(event: SessionEvent): readonly Row[] {
+    if (event.seq <= this.cursor) return []
     this.cursor = event.seq
-    this.committed = appendTranscript(this.committed, project(event, this.projector))
+    let rows = project(event, this.projector)
+    // The streaming attempt printed its finished lines already; the commit
+    // adds only what it has not.
+    if (event.type === 'assistant/message' && this.stream !== undefined) {
+      rows = this.stream.printed.reconcile(rows)
+      this.stream.printed = new Printed()
+    }
+    // A message or a turn's end follows every action before it, finished or not.
+    const out = this.actions.fold(rows, event.type === 'assistant/message' || event.type === 'turn/end')
+    this.committed = appendTranscript(this.committed, out)
+    return out
+  }
+
+  /**
+   * Close an attempt whose printed lines no commit will stand behind.
+   *
+   * Scrollback cannot be unwritten, so the lines stay; the notice says they
+   * were discarded, where a retry would otherwise read as the answer twice.
+   */
+  private discard(): void {
+    if (this.stream?.printed.any !== true) return
+    this.stream.printed = new Printed()
+    this.committed = appendTranscript(this.committed, [{ kind: 'notice', tone: 'info', text: this.copy.attemptDiscarded }])
   }
 
   private streamFrame(frame: AssistantStreamFrame): void {
-    if (frame.type === 'start') this.stream = { revision: frame.revision, attemptId: frame.attemptId, blocks: new LiveBlocks() }
+    if (frame.type === 'start') {
+      this.discard()
+      this.stream = { revision: frame.revision, attemptId: frame.attemptId, blocks: new LiveBlocks(), printed: new Printed() }
+    }
     if (this.stream === undefined || this.stream.attemptId !== frame.attemptId) return
     if (frame.type !== 'start' && frame.revision <= this.stream.revision) return
     this.stream.revision = frame.revision
     if (frame.type === 'chunk') {
       this.stream.blocks.push(frame.chunk)
-      this.live = this.stream.blocks.rows()
+      const { print, live } = this.stream.printed.split(this.stream.blocks.keyed())
+      if (print.length > 0) this.committed = appendTranscript(this.committed, print)
+      this.blocks = live
     } else if (frame.type === 'end') {
       // `end` is published once the assistant message has committed, so the
       // rows these stood in for are already in the transcript; holding them a
-      // frame longer would show every block twice.
+      // frame longer would show every block twice. An attempt that committed
+      // no message printed lines nothing will replace.
+      if (frame.outcome.kind === 'abandoned' || frame.outcome.eventType !== 'assistant/message') this.discard()
       this.stream = undefined
-      this.live = []
+      this.blocks = []
     }
     this.repaint()
   }

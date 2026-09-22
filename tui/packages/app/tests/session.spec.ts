@@ -1,6 +1,6 @@
 /** Durable session identity, command dispatch, and live state through real harness services. */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import type { AgentHandle } from '@deepseek-ai/dsh-agent'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import type { SessionId } from '@deepseek-ai/dsh-session'
@@ -33,7 +33,10 @@ describe('session wiring', () => {
     await handle.agent.whenIdle()
     expect(model.requests).toHaveLength(1)
     const before = transcriptRows(controller.view.committed)
-    expect(before).toEqual([{ kind: 'user', text: 'Remember this turn' }, { kind: 'assistant', text: 'Recorded answer' }])
+    expect(before).toEqual([
+      { kind: 'user', text: 'Remember this turn' }, { kind: 'assistant', text: 'Recorded answer' },
+      { kind: 'notice', placement: 'turn-end', tone: 'info', text: 'Completed' },
+    ])
     const id = handle.agent.id
     controller.close()
     await handle.dispose()
@@ -163,7 +166,7 @@ describe('session wiring', () => {
     expect(controller.view.stopping).toBe(false)
     expect(controller.view.live).toEqual([])
     expect(controller.view.pending).toEqual([expect.objectContaining({ text: 'Keep this steering' })])
-    expect(transcriptRows(controller.view.committed)).toContainEqual({ kind: 'notice', tone: 'warn', text: 'Interrupted' })
+    expect(transcriptRows(controller.view.committed)).toContainEqual({ kind: 'notice', placement: 'turn-end', tone: 'warn', text: 'Interrupted' })
     const context = createUserMessage({ content: [{ type: 'text', text: 'Plugin context' }], source: { kind: 'plugin', plugin: 'test' } })
     handle.agent.inject(context)
     handle.agent.inbox.append('next-turn', createUserMessage({ content: [{ type: 'text', text: 'Queued followup' }], source: { kind: 'user' } }))
@@ -183,6 +186,64 @@ describe('session wiring', () => {
     await handle.agent.whenIdle()
     expect(JSON.stringify(model.requests.at(-1)?.messages)).not.toContain('Keep this steering')
     expect(JSON.stringify(model.requests.at(-1)?.messages)).not.toContain('Queued followup')
+  })
+
+  it('prints each finished line while streaming and commits only the rest', async () => {
+    const { ctx, handle, controller, model } = await connected()
+    const paused = Promise.withResolvers<void>()
+    const resume = Promise.withResolvers<void>()
+    const text = 'Line one.\nLine two.\nLine three.'
+    model.response = async function* () {
+      yield { type: 'block-start', index: 0, blockType: 'text' }
+      yield { type: 'text-delta', index: 0, text: 'Line one.\nLine two.\nLi' }
+      paused.resolve()
+      await resume.promise
+      yield { type: 'text-delta', index: 0, text: 'ne three.' }
+      yield { type: 'block-end', index: 0, block: { type: 'text', text } }
+      yield { type: 'finish', reason: { kind: 'stop' } }
+    }
+    controller.submit('Stream it')
+    await paused.promise
+    // The finished lines are history already; the frame holds the one still arriving.
+    await vi.waitFor(() => expect(controller.view.live).toEqual([{ kind: 'assistant', text: 'Li', continued: true }]))
+    expect(transcriptRows(controller.view.committed).filter(row => row.kind === 'assistant')).toEqual([
+      { kind: 'assistant', text: 'Line one.\nLine two.' },
+    ])
+    resume.resolve()
+    await handle.agent.whenIdle()
+    const answer = transcriptRows(controller.view.committed).filter(row => row.kind === 'assistant')
+    expect(answer).toEqual([
+      { kind: 'assistant', text: 'Line one.\nLine two.' }, { kind: 'assistant', text: 'Line three.', continued: true },
+    ])
+    expect(controller.view.live).toEqual([])
+    // Printing is display only: the log holds one message, and a resume draws it whole.
+    let resumed!: SessionController
+    const id = handle.agent.id
+    controller.close()
+    await handle.dispose()
+    const second = await openSession(ctx, { resume: id }, new AbortController().signal, agent => {
+      resumed = new SessionController(ctx, agent, dictionaries.en, [], () => {}, { attachmentMaxBytes: 1048576, attachmentLimit: 8 })
+    })
+    cleanup.push(async () => { resumed.close(); await second.dispose() })
+    await resumed.replay(new AbortController().signal)
+    expect(transcriptRows(resumed.view.committed).filter(row => row.kind === 'assistant')).toEqual([{ kind: 'assistant', text }])
+  })
+
+  it('marks printed lines discarded when their attempt never commits', async () => {
+    const { handle, controller, model } = await connected()
+    model.response = async function* () {
+      yield { type: 'block-start', index: 0, blockType: 'text' }
+      yield { type: 'text-delta', index: 0, text: 'Printed line.\nrest' }
+      // A block the assembler cannot finalize abandons the attempt.
+      yield { type: 'block-start', index: 1, blockType: 'external-block' } as unknown as StreamChunk
+      yield { type: 'finish', reason: { kind: 'stop' } }
+    }
+    controller.submit('Fail to settle')
+    await handle.agent.whenIdle()
+    const rows = transcriptRows(controller.view.committed)
+    const printed = rows.findIndex(row => row.kind === 'assistant' && row.text === 'Printed line.')
+    expect(printed).toBeGreaterThan(-1)
+    expect(rows[printed + 1]).toEqual({ kind: 'notice', tone: 'info', text: dictionaries.en.attemptDiscarded })
   })
 
   it('replaces a completed live response with exactly one committed row', async () => {

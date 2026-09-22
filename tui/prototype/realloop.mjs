@@ -25,7 +25,6 @@ const h = React.createElement
 const COLUMNS = 80
 const ROWS = 24
 const LIVE_BUDGET = 6
-const sleep = ms => new Promise(resolve => { setTimeout(resolve, ms) })
 
 /** A terminal Ink will treat as real, recording everything written to it. */
 function fakeTty() {
@@ -99,19 +98,18 @@ async function runTurn(reserve, overflow = false, transcriptRows = COMMITTED.len
   const store = createStore({ committed: transcriptOf(transcriptRows), live: filler, running: true })
   if (overflow) store.set({ ...store.snapshot(), overflow: true })
   const instance = render(h(App, { store, reserve }), {
-    stdout, stdin, exitOnCtrlC: false, patchConsole: false,
+    stdout, stdin, exitOnCtrlC: false, patchConsole: false, interactive: true,
   })
-  await sleep(20)
+  await instance.waitUntilRenderFlush()
   const boundaries = [stdout.chunks.length]
   for (const token of TOKENS) {
     store.set({ ...store.snapshot(), live: [...store.snapshot().live, token] })
-    await sleep(20)
+    await instance.waitUntilRenderFlush()
     boundaries.push(stdout.chunks.length)
   }
   store.set({ ...store.snapshot(), running: false })
-  await sleep(20)
+  await instance.waitUntilRenderFlush()
   instance.unmount()
-  await sleep(10)
   return { stream: stdout.chunks.join(''), chunks: stdout.chunks, boundaries }
 }
 

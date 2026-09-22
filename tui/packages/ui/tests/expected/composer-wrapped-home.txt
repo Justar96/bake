@@ -1,0 +1,9 @@
+  note   Session: screen
+
+╭──────────────────────────────────────╮
+│ > ▌START 你好 word 你好 word 你好    │
+│   word 你好 word 你好 word 你好 word │
+│    你好 word 你好 word 你好 word     │
+│   你好 word 你好 word 你好 word 你好 │
+╰──────────────────────────────────────╯
+  Ready  model  /workspace

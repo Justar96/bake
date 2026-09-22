@@ -53,14 +53,31 @@ describe('project', () => {
     expect(project(event({
       type: 'turn/end',
       data: { turn: 1, reason: { kind: 'error', error: { code: 'MISSING_CREDENTIAL', message: 'no API key' } } },
-    }), bare())).toEqual([{ kind: 'notice', tone: 'error', text: 'MISSING_CREDENTIAL: no API key' }])
+    }), bare())).toEqual([{ kind: 'notice', placement: 'turn-end', tone: 'error', text: 'MISSING_CREDENTIAL: no API key' }])
   })
 
   it('words a cancelled turn and a compaction in the reader locale', () => {
     expect(project(event({ type: 'turn/end', data: { turn: 1, reason: { kind: 'interrupted' } } }), bare()))
-      .toEqual([{ kind: 'notice', tone: 'warn', text: dictionaries.en.cancelled }])
+      .toEqual([{ kind: 'notice', placement: 'turn-end', tone: 'warn', text: dictionaries.en.cancelled }])
     expect(project(event({ type: 'compaction/summary', data: {} }), projector(dictionaries.zh, () => undefined)))
       .toEqual([{ kind: 'notice', tone: 'info', text: dictionaries.zh.compacted }])
+  })
+
+  it.each(['en', 'zh'] as const)('renders each turn ending without treating it as agent idle (%s)', locale => {
+    const copy = dictionaries[locale]
+    const endings = [
+      ['completed', copy.turnCompleted, 'info'],
+      ['blocked', copy.turnBlocked, 'warn'],
+      ['max-tokens', copy.turnMaxTokens, 'warn'],
+      ['aborted', copy.cancelled, 'warn'],
+      ['plugin-stop', 'plugin-stop', 'warn'],
+    ] as const
+    for (const [kind, label, tone] of endings) {
+      expect(project(event({ type: 'turn/end', data: { turn: 7, reason: { kind } } }), projector(copy, () => undefined)))
+        .toEqual([{ kind: 'notice', placement: 'turn-end', tone, text: label }])
+    }
+    expect(project(event({ type: 'turn/end', surfaceOp: 'replace', data: { turn: 7, reason: { kind: 'completed' } } }), bare()))
+      .toEqual([])
   })
 
   it('keeps a command apart from the words the user sent the model', () => {

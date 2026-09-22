@@ -17,9 +17,17 @@ export const Config: z<Config> = z.object({
   resume: z.string(),
   preset: z.string(),
   locale: z.union(['en', 'zh']).default('en'),
+  // `auto` reads the terminal; see `resolveFrame`. The explicit values are for
+  // a terminal the environment describes wrongly, which is the case no
+  // detection can cover.
+  composerFrame: z.union(['round', 'classic', 'auto']).default('auto'),
   doubleInterruptMs: z.number().min(1).default(500),
   credentialRefs: z.array(z.string()).default([]),
   completionLimit: z.number().min(1).step(1).default(8),
+  // Lines of each tool result the transcript keeps under its outcome. Zero
+  // keeps output out of the terminal entirely, which a deployment reading
+  // transcripts out of a log rather than off the screen wants.
+  resultLines: z.number().min(0).step(1).default(4),
   attachmentMaxBytes: z.number().min(1).step(1).default(16 * 1024 * 1024),
   attachmentLimit: z.number().min(1).step(1).default(8),
 })

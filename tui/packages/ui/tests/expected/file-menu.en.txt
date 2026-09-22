@@ -1,5 +1,8 @@
   note   Session: session-test
-Ready  model                                                                              /workspace
-> Review @"notes folder/▌"                                                             Tab completes
+
 ▸ @"notes folder/read me.txt"
   @"notes folder/todo.txt"
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ > Review @"notes folder/▌"                                                         Tab completes │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+  Ready  model  /workspace

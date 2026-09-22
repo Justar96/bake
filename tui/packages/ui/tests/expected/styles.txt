@@ -1,0 +1,22 @@
+
+  <ESC>[2mthink<ESC>[22m  <ESC>[2mCheck the files.<ESC>[22m
+         <ESC>[2mThen verify the change.<ESC>[22m
+
+<ESC>[1m<ESC>[32m●<ESC>[39m<ESC>[22m <ESC>[1mran<ESC>[22m    ls -a
+         <ESC>[2mList the directory<ESC>[22m
+         one.ts
+         two.ts
+         three.ts
+         <ESC>[2m+1 more lines<ESC>[22m
+
+<ESC>[1m<ESC>[32m●<ESC>[39m<ESC>[22m <ESC>[1medited<ESC>[22m one.ts
+           context
+<ESC>[31m <ESC>[39m        <ESC>[31m- old<ESC>[39m
+<ESC>[32m <ESC>[39m        <ESC>[32m+ new<ESC>[39m
+
+<ESC>[31m●<ESC>[39m <ESC>[1m<ESC>[31mread<ESC>[39m<ESC>[22m   secret.md
+<ESC>[31m <ESC>[39m        <ESC>[31mPermission denied<ESC>[39m
+
+<ESC>[1m<ESC>[38;5;180m●<ESC>[39m<ESC>[22m <ESC>[1mfind<ESC>[22m   TODO
+
+< Updated one.ts.

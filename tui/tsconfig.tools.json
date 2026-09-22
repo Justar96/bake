@@ -4,9 +4,14 @@
     "composite": false,
     "incremental": false,
     "noEmit": true,
+    "jsx": "react-jsx",
     "rewriteRelativeImportExtensions": false,
     "typeRoots": ["./packages/app/node_modules/@types", "../node_modules/@types"],
     "types": ["node", "bun"]
   },
-  "include": ["scripts/build.ts", "scripts/tui.ts", "packages/app/tests/*.test.ts"]
+  "include": ["scripts/build.ts", "scripts/tui.ts", "packages/app/tests/*.test.ts", "../scripts/gen-workspace.ts", "../scripts/workspace.test.ts"],
+  "references": [
+    { "path": "packages/app" },
+    { "path": "packages/ui" }
+  ]
 }

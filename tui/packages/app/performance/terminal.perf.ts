@@ -47,7 +47,7 @@ try {
     compositionSha256: createHash('sha256').update(sourcePatch).digest('hex'),
     sourceSha256: createHash('sha256').update(execFileSync('rg', ['--files', 'tui/packages/app/src', 'tui/packages/ui/src'], { cwd: ROOT, encoding: 'utf8' })
       .trim().split('\n').sort().map(file => file + ':' + sha(join(ROOT, file))).join('\n') + sha(join(ROOT, 'tui/scripts/build.ts'))).digest('hex'),
-    lockSha256: sha(join(ROOT, 'pnpm-lock.yaml')),
+    lockSha256: sha(join(ROOT, 'bun.lock')),
     platform: process.platform, arch: process.arch, viewport: { columns: 120, rows: 40 }, terminalDriver: 'Bun.Terminal', bun: Bun.version,
     samples, workloads: names, heapLimitMiB: 1024, cpuProfile: values['cpu-profile'] !== undefined,
     clock: 'fresh process; warm filesystem cache; no model/network latency', memory: 'main Node process; forced GC at ready and after streaming; RSS includes worker threads' }
@@ -66,7 +66,7 @@ try {
       const home = join(root, 'home')
       const profile = join(home, 'profiles/tui')
       await mkdir(profile, { recursive: true })
-      await writeFile(join(profile, 'package.json'), JSON.stringify({ name: 'tui-perf-profile', private: true, dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-headless'] } } }))
+      await writeFile(join(profile, 'package.json'), JSON.stringify({ name: 'tui-perf-profile', private: true, dsh: { profile: { bundles: ['@deepseek-ai/dsh-base'] } } }))
       const composition = join(root, 'tui.patch.yml')
       await writeFile(composition, sourcePatch.replace('./lib/index.js', JSON.stringify(join(bundle, 'index.js'))).replace('./lib/startup.js', JSON.stringify(join(bundle, 'startup.js'))))
       const patch = join(root, 'profile.json')

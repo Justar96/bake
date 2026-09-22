@@ -1,9 +1,10 @@
 /** Built JSX must execute with production React under Node. No Harness service runs on Bun. */
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
+import { tmpdir } from 'node:os'
 import { pathToFileURL } from 'node:url'
 import { afterEach, expect, it } from 'bun:test'
-import { bundle, BUILT_ENV } from '../../../scripts/build.ts'
+import { bundle, BUILT_ENV, profileEnvironment, requireBuilt } from '../../../scripts/build.ts'
 
 const roots: string[] = []
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }) })
@@ -29,6 +30,26 @@ it('executes bundled JSX with external production React on Node', async () => {
     await child.exited
   }
 }, 30_000)
+
+it('isolates Bake profiles from upstream and respects an explicit data directory', () => {
+  const home = join(tmpdir(), 'bake-user')
+  const custom = join(tmpdir(), 'bake-custom')
+  expect(profileEnvironment(home, {})).toEqual({ NODE_ENV: 'production', DSH_HOME: join(home, '.bake') })
+  const env = { DSH_HOME: custom, NODE_ENV: 'development' }
+  expect(profileEnvironment(home, env)).toEqual({ NODE_ENV: 'production', DSH_HOME: custom })
+  expect(env).toEqual({ DSH_HOME: custom, NODE_ENV: 'development' })
+  expect(() => profileEnvironment(home, { DSH_HOME: '' })).toThrow('DSH_HOME must name a directory or be unset')
+})
+
+it('requires every built entry and gives a clean checkout its build command', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bake-entry-test-'))
+  roots.push(root)
+  const present = join(root, 'index.js')
+  const missing = join(root, 'startup.js')
+  await writeFile(present, 'export {};\n')
+  expect(() => requireBuilt([present])).not.toThrow()
+  expect(() => requireBuilt([present, missing])).toThrow(`Missing built entry: ${missing}. Run bun run build from the repository root.`)
+})
 
 it('rejects a missing bundle entry', async () => {
   const lib = resolve(import.meta.dirname, '../lib')

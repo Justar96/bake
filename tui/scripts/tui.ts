@@ -1,27 +1,13 @@
 #!/usr/bin/env bun
-/**
- * One entry point for TUI development: `tui/scripts/tui.ts help` lists
- * everything this fork can run, so the commands live next to the code instead
- * of only in AGENTS.md.
- *
- * The toolchain is Bun — this dispatcher, the bundler, the pure tests, the
- * component harness, and the terminal driver. Two things still run on Node, and
- * both are deliberate: the product itself, because `app-boot` reaches V8
- * current-context symbols JavaScriptCore does not have
- * ([PLAN.md](../PLAN.md#22-bun-cannot-run-the-harness)), and the checks whose
- * subject is that Node process — the integration specs and the resolver
- * identity gate.
- *
- * @module tui-dispatcher
- */
+/** Bun development commands; the agent and Ink integration tests execute on Node. */
 
 import { resolve, join } from 'node:path'
-import { bundle, BUILT_ENV } from './build.ts'
+import { homedir } from 'node:os'
+import { bundle, BUILT_ENV, profileEnvironment, requireBuilt } from './build.ts'
 
 const ROOT = resolve(import.meta.dir, '../..')
-const SOURCE_PATCH = './tui/packages/app/cordis.patch.yml'
-const BUILT_PATCH = './tui/packages/app/cordis.built.patch.yml'
 const APP_LIB = join(ROOT, 'tui/packages/app/lib')
+const CLI = join(ROOT, 'apps/cli/lib/bin.js')
 
 /**
  * Run a command with the terminal attached, so an interactive app keeps its tty.
@@ -79,9 +65,8 @@ interface Check {
 const CHECKS: Check[] = [
   {
     name: 'peers',
-    summary: 'React instance identity across upstream DOM and Ink consumers',
-    // On Node because the guarantee is about the resolver the product and the
-    // upstream DOM tests actually run under.
+    summary: 'React instance identity across Bake and Ink consumers',
+    // Check the resolver used by the shipped Node application.
     run: () => must(['node', 'tui/scripts/check-react-peers.mjs']),
   },
   {
@@ -137,6 +122,10 @@ const CHECKS: Check[] = [
  * @param names - the targets asked for; empty or `all` runs every one.
  */
 async function check(names: string[]): Promise<void> {
+  if (names.length > 1 && (names.includes('--list') || names.includes('all'))) {
+    console.error('check all and check --list must be used without other targets')
+    process.exit(2)
+  }
   if (names[0] === '--list') {
     for (const target of CHECKS) console.log(`${target.name.padEnd(8)} ${target.summary}`)
     return
@@ -166,7 +155,11 @@ async function check(names: string[]): Promise<void> {
  */
 async function e2e(args: string[]): Promise<void> {
   const forwarded = args.filter(argument => argument !== '--no-build')
-  if (!args.includes('--no-build') && !args.includes('--list') && !args.includes('--help')) await build()
+  if (!args.includes('--list') && !args.includes('--help')) {
+    requireBuilt([CLI])
+    if (!args.includes('--no-build')) await build()
+    requireBuilt([join(APP_LIB, 'index.js'), join(APP_LIB, 'startup.js')])
+  }
   await must(['bun', 'tui/scripts/pty-smoke.ts', ...forwarded], { env: BUILT_ENV })
 }
 
@@ -177,8 +170,8 @@ function usage(): void {
 run the app
   dev [args]         component loop under Bun: no harness, no agent, no key
                      (--replay watches rows arrive, --locale zh checks a dictionary)
-  source [args]      the TUI from src/ through tsx: fast, but tools do not work
-  app [args]         the TUI from lib/: the production path, where tools work
+  app [args]         run the built Node TUI; run bun run build first
+  dsh [args]         built profile/plugin CLI using Bake's home (~/.bake by default)
   build              bundle the plugin and recorder for Node with production React
 
 verify
@@ -188,7 +181,7 @@ verify
   e2e [args]         the built profile through a real terminal
                      (--list, --only NAME, --trace, --live, --no-build)
   perf [args]        built-profile latency and memory diagnostic; --mode development for a baseline
-  verify             check + e2e: what to run before pushing
+  verify             workspace build + check + e2e (same as bun run verify)
 
 fixtures
   record "<task>"    record a session fixture through the headless profile (needs a key)
@@ -200,16 +193,15 @@ const [command = 'help', ...args] = Bun.argv.slice(2)
 
 switch (command) {
   case 'dev':
-    await must(['bun', '--hot', 'tui/packages/harness/dev.tsx', ...args])
-    break
-  case 'source':
-    // The product is Node, always: Bun cannot host an in-process dsh plugin.
-    await must(['node', '--import', 'tsx/esm', 'apps/cli/src/bin.ts', '--profile', 'tui',
-                '--patch', SOURCE_PATCH, ...args])
+    await must(['bun', '--hot', 'tui/packages/harness/dev.tsx', ...args], { env: { NODE_ENV: 'development' } })
     break
   case 'app':
-    await build()
-    await must(['node', 'apps/cli/lib/bin.js', '--profile', 'tui', '--patch', BUILT_PATCH, ...args], { env: BUILT_ENV })
+    requireBuilt([CLI, join(APP_LIB, 'index.js'), join(APP_LIB, 'startup.js')])
+    await must(['node', CLI, '--profile', 'tui', ...args], { env: profileEnvironment(homedir(), process.env) })
+    break
+  case 'dsh':
+    requireBuilt([CLI])
+    await must(['node', CLI, ...args], { env: profileEnvironment(homedir(), process.env) })
     break
   case 'build':
     await build()
@@ -235,13 +227,13 @@ switch (command) {
     await must(['bun', 'tui/packages/app/performance/terminal.perf.ts', ...args])
     break
   case 'verify':
-    await check([])
-    await e2e([])
+    await must(['bun', 'run', 'verify', ...args])
     break
   case 'record':
+    requireBuilt([CLI])
     await build()
-    await must(['node', 'apps/cli/lib/bin.js', '--profile', 'headless',
-                '--patch', './tui/packages/harness/record.patch.yml', ...args], { env: BUILT_ENV })
+    await must(['node', CLI, '--profile', 'headless',
+                '--patch', './tui/packages/harness/record.patch.yml', ...args], { env: profileEnvironment(homedir(), process.env) })
     break
   case 'help':
   case '--help':

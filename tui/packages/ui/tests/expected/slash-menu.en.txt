@@ -1,6 +1,9 @@
   note   Session: session-test
-Ready  model                                                                              /workspace
-> /r▌                                                                                  Tab completes
+
   /reset   Command  Reset the view
 ▸ /review  Skill  Review the current patch
   +1 more, keep typing to narrow
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ > /r▌                                                                              Tab completes │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+  Ready  model  /workspace

@@ -1,7 +1,7 @@
 /** Input integration against Ink's real key and paste channels. */
 import React from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render } from 'ink-testing-library'
+import { cleanup, render } from '../../../tests/render.tsx'
 import { App, type AppProps } from '../src/app.tsx'
 import { appendTranscript, emptyTranscript } from '../src/transcript.ts'
 import { dictionaries } from '../src/copy.ts'
@@ -14,10 +14,10 @@ afterEach(cleanup)
 function props(overrides: Partial<AppProps> = {}): AppProps {
   return {
     files: { query: undefined, entries: [], loading: false, error: undefined }, onReferenceQuery: () => {},
-    completion: { entries: [], loading: false, error: undefined }, completionLimit: 8,
+    completion: { entries: [], loading: false, error: undefined }, completionLimit: 8, resultLines: 8,
     committed: emptyTranscript, live: [], pending: [], status: 'idle', stopping: false,
     command: undefined, notice: undefined, interaction: undefined, todos: undefined,
-    model: 'mock/model', cwd: '/workspace', sessionId: 'session-test', copy: dictionaries.en, context: undefined,
+    model: 'mock/model', cwd: '/workspace', sessionId: 'session-test', copy: dictionaries.en, frame: 'round', quitting: false, context: undefined,
     onSubmit: vi.fn(), onCancel: vi.fn(), onInterrupt: vi.fn(), onAnswer: vi.fn(), ...overrides,
   }
 }
@@ -205,7 +205,14 @@ describe('terminal composer', () => {
     ui.stdin.write('first')
     await vi.waitFor(() => expect(ui.lastFrame()).toContain('> first▌'))
     ui.stdin.write('\u001b[13;2u')
-    await vi.waitFor(() => expect(ui.lastFrame()).toContain('first\n  ▌'))
+    // The composer's frame sits between the two draft rows in the frame text,
+    // so the rows are read separately rather than as one adjacent string.
+    await vi.waitFor(() => {
+      const rows = ui.lastFrame()!.split('\n')
+      const first = rows.findIndex(row => row.includes('> first'))
+      expect(first).toBeGreaterThanOrEqual(0)
+      expect(rows[first + 1]).toContain('  ▌')
+    })
     ui.stdin.write('last')
     await vi.waitFor(() => expect(ui.lastFrame()).toContain('last▌'))
     ui.stdin.write('\u0001')

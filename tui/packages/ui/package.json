@@ -13,9 +13,12 @@
     "@deepseek-ai/dsh-file-reference": "workspace:^",
     "@deepseek-ai/dsh-util-values": "workspace:^",
     "ink": "^7.1.1",
-    "react": "^19.3.0"
+    "react": "^19.3.0",
+    "string-width": "^8.2.2",
+    "wrap-ansi": "^10.0.1"
   },
   "devDependencies": {
+    "@xterm/headless": "^6.0.0",
     "@deepseek-ai/dsh-agent": "workspace:^",
     "@deepseek-ai/dsh-commands": "workspace:^",
     "@deepseek-ai/dsh-compaction": "workspace:^",
