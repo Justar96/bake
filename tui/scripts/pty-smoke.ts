@@ -29,7 +29,7 @@
 import { dlopen, FFIType, ptr } from 'bun:ffi'
 import { readSync, writeSync, closeSync, existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import xterm from '@xterm/headless'
 
@@ -486,8 +486,9 @@ class Run {
    * Rewrite the profile overlay the CLI loads over the built patch.
    *
    * @param override - a replay override file staging the next model response.
+   * @param persistence - storage root and encoding for a scenario-specific profile.
    */
-  async writeOverlay(override?: string): Promise<void> {
+  async writeOverlay(override?: string, persistence: { root?: string; compression?: 'none' | 'zstd' } = {}): Promise<void> {
     const replay: any = {
       id: 'tui-replay', name: join(ROOT, 'packages/test-support/llm-replay/lib/index.js'),
       config: { file: FIXTURE, providers: [{ id: 'deepseek-official', models: [
@@ -499,7 +500,9 @@ class Run {
     const patches: any[] = [
       { id: 'session-title-llm', disabled: true },
       { id: 'agent-default-model', config: { provider: 'deepseek-official', model: 'deepseek-v4-flash' } },
-      { id: 'session-persistence-jsonl', config: { root: this.sessionsRoot, compression: 'none' } },
+      { id: 'session-persistence-jsonl', config: {
+        root: persistence.root ?? this.sessionsRoot, compression: persistence.compression ?? 'none',
+      } },
     ]
     await Bun.write(this.overlay, JSON.stringify(this.live ? patches : [
       { id: 'llm-deepseek', disabled: true }, { id: 'llm-pi-ai', disabled: true },
@@ -790,6 +793,38 @@ scenario('navigate', 'session picker cancellation, a new session, and switching 
       const runs = saved.filter(e => e.type === 'command/run').map(e => e.data.commandId)
       const settled = saved.filter(e => e.type === 'command/done').map(e => e.data.commandId)
       assert(same(runs, settled), 'navigation disposed a session before command settlement')
+    }
+  })
+
+scenario('corrupt-picker', 'a damaged compressed header does not hide healthy sessions from the picker',
+  { replayOnly: true },
+  async run => {
+    const root = join(run.root, 'zstd-sessions')
+    await run.writeOverlay(undefined, { root, compression: 'zstd' })
+    try {
+      const seed = await run.terminal('zstd-seed', [], async tty => {
+        tty.send(`${run.prompt}\r`, 'record a compressed session')
+        await tty.wait('the recorded turn to finish', text => DONE_LINE.test(text))
+      })
+      const id = seed.match(/Session: (session-[a-f0-9-]+)/)?.[1]
+      assert(id !== undefined, 'compressed session identity was not shown')
+      const [healthy] = await glob('**/session.v*.jsonl.zstd', root)
+      assert(healthy !== undefined, 'compressed session log was not created')
+      const damaged = Buffer.from(await Bun.file(healthy).arrayBuffer())
+      damaged[0] = damaged[0]! ^ 0xFF
+      const corrupt = join(dirname(dirname(healthy)), 'corrupt-zstd', basename(healthy))
+      mkdirSync(dirname(corrupt), { recursive: true })
+      await Bun.write(corrupt, damaged)
+
+      await run.terminal('corrupt-picker', ['--resume', id], async tty => {
+        tty.send('/sessions\r', 'open the picker beside a damaged header')
+        await tty.expect('Choose session')
+        tty.refuse('the damaged session being listed', tty.text.includes('corrupt-zstd'))
+        tty.send('\x1b', 'close the picker')
+        await tty.expect('Session navigation cancelled')
+      })
+    } finally {
+      await run.writeOverlay()
     }
   })
 

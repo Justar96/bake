@@ -988,9 +988,9 @@ class JsonlSessionPersistence extends SessionPersistence {
         try {
           header = await this.readGenerationHeader(selected, undefined, signal)
         } catch (error: unknown) {
-          // Listing skips a foreign format while opening its id still refuses
-          // with the selected physical location.
-          if (error instanceof SessionFormatUnsupportedError) continue
+          // Discovery isolates unsupported or corrupt headers; a targeted
+          // stat/open still reports the selected physical artifact's failure.
+          if (error instanceof SessionFormatUnsupportedError || error instanceof SessionPersistenceCorruptionError) continue
           throw error
         }
         if (header === undefined) continue
@@ -1328,7 +1328,7 @@ class JsonlSessionPersistence extends SessionPersistence {
     }
   }
 
-  /** Read and validate only the independently compressed header frame. */
+  /** Read only the header frame; compression failures reject as corruption, while I/O and cancellation propagate. */
   private async readFirstZstdLine(path: string, signal?: AbortSignal): Promise<string | undefined> {
     signal?.throwIfAborted()
     const handle = await open(path, 'r')
@@ -1344,21 +1344,21 @@ class JsonlSessionPersistence extends SessionPersistence {
         signal?.throwIfAborted()
         content = Buffer.concat([content, chunk.subarray(0, bytesRead)])
         signal?.throwIfAborted()
-        const first = scanZstdFrames(content, 1).frames[0]
-        signal?.throwIfAborted()
-        if (first === undefined) continue
-        let plaintext: Buffer
         try {
+          const first = scanZstdFrames(content, 1).frames[0]
+          if (first === undefined) continue
+          const plaintext = await decompressZstdFrame(content.subarray(first.start, first.end))
           signal?.throwIfAborted()
-          plaintext = await decompressZstdFrame(content.subarray(first.start, first.end))
+          assertZstdHeaderFrame(plaintext)
+          return plaintext.subarray(0, -1).toString('utf8')
         } catch (error) {
           /* v8 ignore next -- decoder failure plus concurrent abort is timing-dependent */
           if (signal?.aborted) signal.throwIfAborted()
-          throw new Error('corrupt Zstandard session log: header frame failed validation', { cause: error })
+          throw new SessionPersistenceCorruptionError(
+            `corrupt Zstandard session log: header frame failed validation: ${String(error)} (raw log: ${path})`,
+            { cause: error },
+          )
         }
-        signal?.throwIfAborted()
-        assertZstdHeaderFrame(plaintext)
-        return plaintext.subarray(0, -1).toString('utf8')
       }
     } finally {
       await handle.close()

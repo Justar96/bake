@@ -81,6 +81,8 @@ kind: "package-reference"
 
 `open(id, 'read'|'write')` 选择最高规范 generation。当前格式输入走普通快速路径。对于历史输入，只读 open 会单遍解码并迁移源、校验当前逻辑结果，然后在不发布后继的情况下返回。写 open 会在可用时复用按 revision 为键的 preparation，否则执行同一套 preparation，再按有界分片编码同目录临时文件、在 Worker Thread 中校验、复查源修订，并在返回前以不覆盖方式发布当前后继。源保持逐字节不变。如果源在 preparation 后发生变化，该次写 open 会失败，已经返回给读方的逻辑历史不会被替换；后续写 open 会针对新的 revision 重新执行 preparation。后端在 memo 化前冻结已解码的 event graph，并在此时将其标记为 `shared-frozen`；句柄读取和 slice 即使为空也保留该状态。只有尚未实体化的 pending 空日志报告 `detached`。`stat(id)` 与 `list()` 只选择并转换最高 generation 的 header，不读取事件行，也不启动迁移；快照携带所选文件的 `sizeBytes` 与尽力而为的 stat 派生修订号。选择 `compression: 'none'` 后，日志是外部读取方可直接消费的换行分隔文本；压缩默认值必须经后端读取。
 
+发现会话时，`list()` 会跳过压缩 header 帧已损坏的会话，继续列出健康会话，且不会改动损坏文件。按 id 调用 `stat(id)` 或 `open(id)` 仍会报告该损坏；header 的 I/O 错误与取消仍会传播。
+
 -----
 
 <a id="understand-the-implementation"></a>
