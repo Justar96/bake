@@ -56,7 +56,7 @@ describe('parseDshArgs', () => {
       .toEqual({ mode: 'profile', profile: 'web', fromDefaultProfile: 'web', patches: [], args: [] })
   })
 
-  it.each(['web', 'headless', 'sdk', 'sdk-minimal', 'acp', 'tui', 'custom', 'run', 'help'])('expands %s without looking up profiles', (profile) => {
+  it.each(['headless', 'tui', 'custom', 'desktop', 'run', 'help'])('expands %s without looking up profiles', (profile) => {
     for (const args of [
       [], ['task', 'words'], ['--help'], ['-h'], ['web'],
       ['--patch', 'a.yml', '--patch', 'b.yml'],
@@ -80,7 +80,7 @@ describe('parseDshArgs', () => {
   })
 
   it.each([
-    [''], ['desktop'], ['Desktop'], ['DESKTOP'],
+    [''],
     ['custom', '--patch='], ['custom', '--from-default-profile='],
     ['custom', '--dump-config', '--dump-default-config'],
     ['custom', '--dump-default-config', '--patch', 'a.yml'],
@@ -167,19 +167,15 @@ describe('parseDshArgs', () => {
     expect(exitCode(['plugin', 'add', 'x'])).toBe(1) // --profile required
     expect(exitCode(['plugin', '--profile', 'tui'])).toBe(1) // nothing to forward
     expect(exitCode(['plugin', '--profile', ''])).toBe(1)
-    expect(exitCode(['--profile', 'desktop'])).toBe(1)
-    expect(exitCode(['--profile', 'Desktop'])).toBe(1)
-    expect(exitCode(['--profile', 'DESKTOP'])).toBe(1)
-    expect(exitCode(['--profile', 'desktop', '--dump-config'])).toBe(1)
-    expect(exitCode(['plugin', '--profile', 'desktop', 'add', 'x'])).toBe(1)
-    expect(exitCode(['plugin', '--profile', 'Desktop', 'add', 'x'])).toBe(1)
     expect(exitCode(['--from-default-profile', 'web', 'plugin', '--profile', 'x', 'add', 'y'])).toBe(1)
   })
 
-  it('keeps its own help for an invocation with no app to hand it to', () => {
+  it('keeps its own help for an invocation with no app to hand it to', async () => {
     const stdout = vi.spyOn(process.stdout, 'write').mockReturnValue(true)
     expect(exitCode(['--help'])).toBe(0)
-    expect(stdout.mock.calls.map(([chunk]) => String(chunk)).join('')).not.toContain('help [command]')
+    const help = stdout.mock.calls.map(([chunk]) => String(chunk)).join('')
+    expect(help).not.toContain('help [command]')
+    await expect(help.trimEnd() + '\n').toMatchFileSnapshot('./expected/launcher-help.txt')
     expect(exitCode(['-h'])).toBe(0)
     expect(exitCode(['--version'])).toBe(0)
   })

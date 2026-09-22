@@ -6,7 +6,7 @@ export type PersistenceCatalogLocale = 'en' | 'zh'
 const english = {
   title: 'Session Persistence Event Catalog',
   intro: 'Every repository-declared durable Session event appears here with its source declaration and resolved types. The catalog covers the logical and physical headers, event envelopes, and every plugin declaration merge. See [Session](subsystems/session.md) for replay and [persistence](subsystems/persistence.md) for storage.',
-  generation: 'Run `pnpm run gen-persistence-catalog` to regenerate both catalog languages, their pairing record, the known-event module, and the machine schema inventory. `pnpm run verify-persistence-catalog` checks all generated files. Declaration fences preserve source JSDoc and type references; resolved definitions expose their transitive structure.',
+  generation: 'Run `bun run gen-persistence-catalog` to regenerate both catalog languages, their pairing record, the known-event module, and the machine schema inventory. `bun run verify-persistence-catalog` checks all generated files. Declaration fences preserve source JSDoc and type references; resolved definitions expose their transitive structure.',
   envelopeIntro: 'The envelope carries `type`, `seq`, `time`, `data`, optional `ignorable`, and conditional `surfaceOp` / `sourceEventSeqs`. A **surface** event produces model history; a **log-only** event does not. The inventory covers this repository; external plugin types require their own declarations and are outside this catalog.',
   envelope: 'Event envelope', events: 'Events', sources: 'Sources: ', source: 'Source: ', types: 'Types: ',
   fingerprints: 'Persistence type fingerprints',
@@ -24,7 +24,7 @@ const english = {
 const chinese: Record<keyof typeof english, string> = {
   title: '会话持久化事件目录',
   intro: '本目录列出仓库声明的每个持久化 Session 事件及其源码声明和解析类型，覆盖逻辑与物理 header、事件信封以及各插件的声明合并。回放规则参见 [Session](subsystems/session.zh.md)，存储规则参见[持久化](subsystems/persistence.zh.md)。',
-  generation: '运行 `pnpm run gen-persistence-catalog` 可重新生成目录的两种语言、配对记录、已知事件模块和机器 schema 目录。`pnpm run verify-persistence-catalog` 检查所有生成文件。声明围栏保留源码 JSDoc 和类型引用；解析后的定义展开其传递引用结构。',
+  generation: '运行 `bun run gen-persistence-catalog` 可重新生成目录的两种语言、配对记录、已知事件模块和机器 schema 目录。`bun run verify-persistence-catalog` 检查所有生成文件。声明围栏保留源码 JSDoc 和类型引用；解析后的定义展开其传递引用结构。',
   envelopeIntro: '信封包含 `type`、`seq`、`time`、`data`、可选的 `ignorable` 以及条件字段 `surfaceOp` / `sourceEventSeqs`。**surface** 事件产生模型历史，**log-only** 事件不产生模型历史。目录覆盖本仓库；外部插件类型需要独立声明，不属于本目录。',
   envelope: '事件信封', events: '事件', sources: '来源：', source: '来源：', types: '类型：',
   fingerprints: '持久化类型指纹',

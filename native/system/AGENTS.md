@@ -1,6 +1,6 @@
 # AGENTS.md
 
-This workspace owns `@deepseek-ai/node-addon-system`: the Linux `landlock-run` confinement executable and the POSIX `system.node` binding. It shares the root pnpm workspace and lockfile; native packages have one independent version and release workflow.
+This workspace owns `@deepseek-ai/node-addon-system`: the Linux `landlock-run` confinement executable and the POSIX `system.node` binding. It shares Bake's Bun workspace and lockfile; native packages retain their independent versions and platform metadata.
 
 ## Runtime rules
 
@@ -16,7 +16,7 @@ This workspace owns `@deepseek-ai/node-addon-system`: the Linux `landlock-run` c
 
 `packages/entry/` owns JavaScript, types, and auditable C sources. Platform packages hold only binaries and metadata. `scripts/` owns native builds, packing, validation, and release; `test/` owns real process and lock behavior.
 
-Run `pnpm build:ts`, `pnpm build:native`, `pnpm build:test-oracle`, `pnpm typecheck`, and `pnpm test` in this directory. Linux full builds require musl-gcc; macOS uses cc. Repository tests build only their host addon through the root `build:native-system` script. The independent syscall fixture is test-only and never enters a published platform package.
+Use Bun to run this directory's build and test scripts. Native build scripts resolve Node development headers from `node` on PATH. Linux full builds require musl-gcc; macOS uses cc. Repository tests build only their host addon through the root `build:native-system` script. The independent syscall fixture is test-only and never enters a published platform package.
 
 ## Packaging and verification
 

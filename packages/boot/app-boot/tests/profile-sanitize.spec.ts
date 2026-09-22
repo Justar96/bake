@@ -21,8 +21,8 @@ afterEach(() => {
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'dsh-profile-sanitize-'))
   roots.push(root)
-  const dir = join(root, 'profiles', 'web')
-  const bundles = PROFILE_TEMPLATES.web!.bundles
+  const dir = join(root, 'profiles', 'tui')
+  const bundles = PROFILE_TEMPLATES.tui!.bundles
   initProfile(dir, [...bundles, 'broken-plugin'])
   const manifestPath = join(dir, 'package.json')
   const manifest = { ...readProfileManifest('test', dir), dependencies: { 'broken-plugin': '1.2.3' }, custom: 'retained' }

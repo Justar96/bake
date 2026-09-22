@@ -1,0 +1,20 @@
+# Bun owns the development workspace: install, lockfile, and script running.
+# The product itself still runs on Node (packages/boot/app-boot reaches V8
+# current-context symbols that JavaScriptCore does not expose), and the dsh
+# plugin manager still drives pnpm inside a user profile at runtime.
+
+[install]
+# Hoisting lets the Node launcher and Ink consumers share their resolved React
+# instance. The peer-identity check verifies their actual Node resolution.
+linker = "hoisted"
+
+# Ranges stay as authored so a range edit is always a manifest edit.
+exact = false
+
+# Peers are declared, never inferred: @deepseek-ai/cordis is a peerDependency
+# plus devDependency of every harness package, and the runtime closure checks
+# assume nothing was auto-installed behind them.
+peer = false
+
+[install.lockfile]
+save = true

@@ -1,9 +1,9 @@
 /**
  * Build this host's declared system binaries. Landlock is a static musl
  * executable; flock uses stable Node-API with separate Linux libc builds.
- * Node headers come from the Node installation running this script.
+ * Node headers come from the Node executable on PATH, including when Bun runs this build.
  */
-import { spawnSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
@@ -32,7 +32,8 @@ const host = `${process.platform}-${process.arch}`
 const libc = process.platform === 'linux'
   ? ((process.report.getReport() as { header: { glibcVersionRuntime?: string } }).header.glibcVersionRuntime ? 'glibc' : 'musl')
   : undefined
-const headers = resolve(dirname(process.execPath), '../include/node')
+const nodeExecutable = execFileSync('node', ['-p', 'process.execPath'], { encoding: 'utf8' }).trim()
+const headers = resolve(dirname(nodeExecutable), '../include/node')
 let built = 0
 
 for (const name of readdirSync(join(root, 'packages')).sort()) {

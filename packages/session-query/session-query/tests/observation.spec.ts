@@ -126,7 +126,7 @@ function stubPersistence(
     }
     return Promise.resolve(handle)
   }
-  return { stat, open } as never
+  return { identity: Symbol('stubPersistence'), stat, open } as never
 }
 
 async function readerContext(): Promise<Context> {
@@ -518,6 +518,13 @@ describe('SessionObservationReader cold path', () => {
       using observed = await reader.read(meta.id, { projectionMode: 'none' })
       void observed
     }
+    expect(SwapPersistence.readCalls).toBe(1)
+    {
+      using observed = await reader.read(meta.id, { projectionMode: 'none' })
+      void observed
+    }
+    // Context may return a fresh service proxy for each read; the mounted
+    // persistence instance still owns the same revision and prepared Session.
     expect(SwapPersistence.readCalls).toBe(1)
     await first.dispose()
     const second = await ctx.plugin(SwapPersistence)

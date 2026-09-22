@@ -1,5 +1,0 @@
-- menu:
-  - menuitem "bash":
-    - text: bash
-    - img
-  - menuitem "sh"

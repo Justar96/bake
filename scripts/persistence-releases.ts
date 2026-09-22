@@ -241,7 +241,7 @@ export function runPersistenceReleases(args: readonly string[], root = resolve(i
   const artifacts = persistenceReleaseFactArtifacts(root, archive)
   const changed = artifacts.filter(artifact => readFileSync(join(root, artifact.path), 'utf8') !== artifact.content)
   const stale = changed.filter(artifact => artifact.path.endsWith('.md'))
-  if (!values.write && stale.length > 0) throw new Error(`Stale persistence release facts: ${stale.map(file => file.path).join(', ')}. Run pnpm run verify-persistence-releases --write.`)
+  if (!values.write && stale.length > 0) throw new Error(`Stale persistence release facts: ${stale.map(file => file.path).join(', ')}. Run bun run verify-persistence-releases --write.`)
   if (values.write) for (const artifact of changed) writeFileSync(join(root, artifact.path), artifact.content)
   return `Persistence release archive: ${archive.entries.length} records, ${archive.entries.length - 1} adjacent transitions verified.`
     + (values.write ? ` Refreshed ${changed.length} file${changed.length === 1 ? '' : 's'}.` : '')

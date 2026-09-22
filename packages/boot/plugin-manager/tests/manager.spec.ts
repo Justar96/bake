@@ -3,11 +3,11 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { realpath } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { pathToFileURL } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
 import { expect, it, onTestFinished, vi } from 'vitest'
 import {
-  boot, composeEntries, initProfile, readProfilePatches, readProfileManifest, reconcileProfilePatches, OPTIONAL_BUNDLES,
+  boot, composeEntries, initProfile, readProfilePatches, readProfileManifest, reconcileProfilePatches,
   type ProfileContext,
 } from '@deepseek-ai/dsh-app-boot'
 import PluginManager, { type Config, type PluginChange, type PluginInstallLogChunk, type PluginInstallProgress, type PluginInstallRequestId } from '../src/index.ts'
@@ -675,11 +675,9 @@ it('refuses removal of a hot-installed bundle after HMR is disabled', async () =
   expect(await manager.removeBundle('later')).toMatchObject({ changed: false, application: 'failed' })
 })
 
-it('offers the launcher\'s optional bundles switched off and never removable', async () => {
+it('offers installation bundles outside shipped templates without allowing their removal', async () => {
   const { manager, profile } = await fixture()
-  // The launcher names the bundles the installation ships; the fixture supplies one of them from the
-  // installation's own node_modules, which the resolver consults before the profile's and before the repository's.
-  const offered = OPTIONAL_BUNDLES[0]!
+  const offered = '@test/optional-bundle'
   const supplied = join(profile.home, 'node_modules', offered)
   mkdirSync(supplied, { recursive: true })
   writeFileSync(join(supplied, 'package.json'), JSON.stringify({
@@ -742,28 +740,4 @@ it('applies watched configuration while pnpm installation is still running', asy
   expect(await installing).toMatchObject({ application: 'applied', changed: true })
   expect(readProfileManifest('test', dir).dsh?.profile?.bundles).toEqual(['core', 'extra', 'new-bundle'])
   expect(ctx.get('managedProbe')).toBeUndefined()
-})
-
-it('installs and removes with the bundled pnpm when PATH contains no pnpm', async () => {
-  const pnpm = fileURLToPath(new URL('../../../../apps/desktop/node_modules/pnpm/bin/pnpm.mjs', import.meta.url))
-  const { manager, dir } = await fixture('startup', false, undefined, { pnpmCommand: 'must-not-be-used' }, {
-    command: process.execPath, args: ['--expose-internals', pnpm], env: { PATH: '', ELECTRON_RUN_AS_NODE: '1' },
-  })
-  const target = join(dir, 'local-bundle')
-  mkdirSync(target)
-  writeFileSync(join(target, 'package.json'), JSON.stringify({ name: '@test/desktop-manager', version: '1.0.0',
-    dsh: { bundle: { patch: './cordis.patch.yml' } } }))
-  writeFileSync(join(target, 'cordis.patch.yml'), '[]\n')
-  // Fixture-only packages need no registry resolution during this local install.
-  const manifest = readProfileManifest('test', dir)
-  delete manifest.dependencies
-  writeFileSync(join(dir, 'package.json'), JSON.stringify(manifest))
-  const installed = await manager.installBundle(target)
-  expect(installed.error).toBeUndefined()
-  expect(installed.packageResult?.exitCode).toBe(0)
-  expect(readProfileManifest('test', dir).dependencies).toHaveProperty('@test/desktop-manager')
-  const removed = await manager.removeBundle('@test/desktop-manager')
-  expect(removed.error).toBeUndefined()
-  expect(removed.packageResult?.exitCode).toBe(0)
-  expect(readProfileManifest('test', dir).dependencies ?? {}).not.toHaveProperty('@test/desktop-manager')
 })

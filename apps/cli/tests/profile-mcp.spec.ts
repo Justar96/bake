@@ -34,7 +34,7 @@ describe('shipped MCP resource composition', () => {
         return manifest.dependencies?.[resourcePackage] !== undefined
       })
       expect(owners.map(owner => owner.packageName)).toEqual([
-        name === 'sdk-minimal' ? '@deepseek-ai/dsh-sdk-minimal' : '@deepseek-ai/dsh-base',
+        '@deepseek-ai/dsh-base',
       ])
     } finally {
       rmSync(home, { recursive: true, force: true })

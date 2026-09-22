@@ -1,96 +1,47 @@
-# DeepSeek Harness
+# Bake
 
 [English](README.md) | 中文
 
-DeepSeek Harness（`dsh`）是由 [DeepSeek AI](https://deepseek.com) 开发的开源 agent harness（智能体框架）。
+Bake 是一个终端编程 Agent，支持流式响应、工具执行、持久会话和键盘交互。它使用 Ink 渲染界面，并采用源自 DeepSeek Harness 的 Cordis 插件运行时。
 
-它构建于**一切皆插件**的架构之上，由 [Cordis](https://github.com/cordiverse/cordis) 驱动，其设计参见论文 [_A Programming Paradigm for Spatiotemporal Composability_](https://arxiv.org/abs/2608.25512)。
+Bake 是独立项目。上游发布由维护者评估后选择性采用；Bake 不会自动跟踪或合并上游分支。
 
-文档：[https://deepseek-harness.github.io/deepseek-harness/](https://deepseek-harness.github.io/deepseek-harness/)
+## 从源码运行
 
-## 开发者预览
-
-DeepSeek Harness 处于 _开发者预览_ 阶段，正在快速迭代。**未来将出现破坏兼容性的变更。**
-
-运行本项目前，请阅读[安全说明](SAFETY.zh.md)。
-
-<a id="run"></a>
-
-## 运行
-
-### 通过 `npm` 运行
-
-安装 `Node.js`，然后运行：
+安装 `package.json` 中固定版本的 Bun、Node 24 或更新版本，以及 C/C++ 编译器和 Node 开发头文件。当前终端检查运行于 Linux 和 macOS。
 
 ```sh
-npx @deepseek-ai/dsh web
+bun install --frozen-lockfile
+bun run build
+bun run start
 ```
 
-该命令默认会在 `http://127.0.0.1:3080` 启动 Web UI，本机启动时还会用默认浏览器打开页面。通过 SSH 启动时只打印宿主机 URL，因为本地转发地址由 SSH 客户端或编辑器持有。传入 `--no-open` 可仅运行服务器而不打开浏览器。详见 [Web UI 指南](docs/user/guide/index.zh.md)。
+`start` 运行现有构建产物，默认将 Bake 数据保存在 `~/.bake`，可通过 `DSH_HOME` 覆盖。上游的 `~/.dsh` 数据不会被修改。在终端中使用 `/login`，或在环境中设置 `DEEPSEEK_API_KEY`。不要提交密钥或 `.env`。`bun run start --help` 显示终端应用的选项。
 
-<a id="run-from-source"></a>
-
-### 从源码运行
-
-如需从仓库源码运行：
-
-```sh
-git clone https://github.com/deepseek-ai/deepseek-harness.git
-cd deepseek-harness
-pnpm install
-pnpm run build
-pnpm dsh web
-```
-
-`pnpm run build` 会准备仓库产物。`pnpm dsh web` 会直接使用这些已构建产物，不会重新构建。
-
-## 社区与支持
-
-- 通过 [GitHub Discussions](https://github.com/deepseek-ai/deepseek-harness/discussions) 提交反馈或 bug 报告。
-- 为你的插件仓库添加 [`dsh-plugin`](https://github.com/topics/dsh-plugin) 话题，便于被发现。
-- 欢迎加入 DeepSeek Harness 企微群：扫码添加企微小助手并填写入群问卷，完成后小助手会邀请你入群。
-
-<table>
-  <thead>
-    <tr>
-      <th align="center">企微小助手</th>
-      <th align="center">入群问卷</th>
-      <th align="center">微信公众号</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td align="center"><img src="https://cdn.deepseek.com/harness/readme/community-wecom-assistant.png" alt="DeepSeek Harness 企微小助手二维码" width="180" height="180"></td>
-      <td align="center"><a href="https://trtgsjkv6r.feishu.cn/share/base/form/shrcnIt5twSVdLGD52KJBckGCgg"><img src="https://cdn.deepseek.com/harness/readme/community-wecom-survey.png" alt="DeepSeek Harness 入群问卷二维码" width="180" height="180"></a></td>
-      <td align="center"><img src="https://cdn.deepseek.com/harness/readme/community-wechat-official-account.png" alt="DeepSeek Harness 团队微信公众号二维码" width="180" height="180"></td>
-    </tr>
-  </tbody>
-</table>
-
-## 参与贡献
-
-参见 [CONTRIBUTING.md](CONTRIBUTING.zh.md)。
+Bun 管理工作区和锁文件。构建后的 Agent 使用 Node 运行，因为启动加载器依赖 Node 内部功能。外部 profile 插件安装使用运行时独立的包管理配置。
 
 ## 开发
 
-请先阅读[开发指南](docs/development.zh.md)与[架构文档](docs/architecture.zh.md)。
-
-面向 agent：请遵循 [AGENTS.md](AGENTS.md)。
-
-## 引用
-
-```bibtex
-@misc{deepseek-harness2026,
-  title={DeepSeek Harness: Everything is a Plugin},
-  author={DeepSeek-AI},
-  year={2026},
-  publisher={GitHub},
-  howpublished={\url{https://github.com/deepseek-ai/deepseek-harness}},
-}
+```sh
+bun run dev                  # 热重载组件预览；不启动 Agent，不需要模型密钥
+bun run dev:tui              # 重新构建并运行完整 Node Agent
+bun run check                # 类型、测试、渲染器实例、布局和文档
+bun run test:e2e              # 真实终端回放；需要已有运行时构建
+bun run verify               # 构建、检查和无密钥终端场景
 ```
+
+[开发指南](CONTRIBUTING.zh.md#选择开发流程) 介绍重新构建命令、场景筛选和故障排查。`bun tui/scripts/tui.ts help` 列出独立测试目标、录制和性能诊断命令。
+
+## 仓库结构
+
+- [`tui/`](tui/DESIGN.md)：终端应用、Ink 组件、测试数据和开发工具。
+- [`apps/cli/`](apps/cli/README.zh.md)：启动 `tui` 和 `headless` profile 的 Node 启动器。
+- [`packages/`](packages/README.zh.md)：共享 Agent、会话、模型、工具、沙箱和插件服务。
+- [`native/`](native/README.zh.md) 和 [`vendor/`](vendor/README.md)：原生支持和固定版本的 Cordis 源码。
+- [`snapshots/`](snapshots/AGENTS.md)：录制的会话验证数据，包括保留的历史代次。
+
+[`CONTRIBUTING.md`](CONTRIBUTING.zh.md) 介绍开发与上游发布评估。TUI 的[限制](tui/DESIGN.md#10-limits) 与设计一同记录。
 
 ## 许可证
 
-[MIT](LICENSE)
-
-第三方依赖及其许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+MIT。Bake 保留原始版权声明和 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。共享运行时包继续使用 `@deepseek-ai/*` 名称，但这不代表 Bake 是 DeepSeek 官方产品。

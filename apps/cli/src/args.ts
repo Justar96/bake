@@ -8,7 +8,7 @@
  * `@deepseek-ai/dsh-cmdline`). Launcher flags therefore come first: the first
  * token this parser does not recognize starts the inner arguments, so
  * `dsh --profile tui --resume abc` boots the tui profile with `--resume abc`,
- * and `dsh --profile web -h` prints the web app's help, not this one's.
+ * and `dsh --profile tui -h` prints the terminal app's help, not this one's.
  *
  * `dsh <name>` abbreviates `dsh --profile <name>`; `plugin` manages a profile's
  * plugin dependencies by forwarding to pnpm.
@@ -70,22 +70,16 @@ function selectProfile(value: string, previous?: string): string {
   return value
 }
 
-function rejectElectronProfile(program: Command, profile: string): void {
-  if (profile.toLowerCase() === 'desktop') {
-    program.error('error: profile "desktop" is managed exclusively by the Electron application')
-  }
-}
-
 /** The launcher's own help text; each app prints its own. */
 const HELP_EXAMPLES = `
 Examples:
-  dsh web                                   boot the web profile (same as: dsh --profile web)
-  dsh rescue --from-default-profile web
-                                            create rescue from the shipped web template, then boot it
+  dsh tui                                  boot Bake's terminal profile
+  dsh rescue --from-default-profile tui
+                                            create rescue from the terminal template, then boot it
   dsh headless "run the tests"              answer one task, print the result, and exit
   dsh tui --patch ./extra.yml               boot a custom profile with one extra overlay
   dsh tui --resume <session>                arguments after the launcher flags reach the app
-  dsh web --help                            the web app's own flags and help
+  dsh tui --help                            the terminal app's own flags and help
   dsh plugin --profile tui add <package>    install a plugin into the tui profile
 `
 
@@ -138,7 +132,7 @@ export function parseDshArgs(argv: readonly string[], version: string): DshInvoc
     .name('dsh')
     .version(version, '-V, --version', 'output the version number')
     .usage('[--profile] <name> [options] [app-args...]\n       dsh plugin --profile <name> <pnpm-args...>')
-    .description('dsh: boot a DeepSeek Harness profile — an ordered stack of plugin-bundle patch layers under your own overrides.')
+    .description('Bake profile launcher: compose the terminal agent or a headless task from plugin bundles.')
     .addHelpText('after', HELP_EXAMPLES)
     .exitOverride()
     // The launcher's flags come first and end at the first token it does not
@@ -164,7 +158,6 @@ export function parseDshArgs(argv: readonly string[], version: string): DshInvoc
       }
       const profile = options.profile
       if (profile === '') program.error('error: --profile needs a name')
-      rejectElectronProfile(program, profile)
       resolved = resolveBoot(program, profile, options, args)
     })
 
@@ -176,7 +169,6 @@ export function parseDshArgs(argv: readonly string[], version: string): DshInvoc
       .argument('[args...]', 'pnpm arguments, forwarded verbatim (add <pkg>, remove <pkg>, why <pkg>, ...)')
       .action((args: string[], options: { profile: string }) => {
         if (options.profile === '') program.error('error: --profile needs a name')
-        rejectElectronProfile(plugin, options.profile)
         if (args.length === 0) program.error('error: plugin needs pnpm arguments to forward (e.g. add <package>)')
         resolved = { mode: 'plugin', profile: options.profile, args }
       })

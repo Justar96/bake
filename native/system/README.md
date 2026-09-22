@@ -32,7 +32,7 @@ Linux x64/arm64 packages contain the static Landlock executable and separate gli
 
 ## Development
 
-From this directory, `pnpm build:ts` builds the entry, `pnpm build:native` builds the host's declared native payload, and `pnpm build:test-oracle` builds an independent flock syscall fixture. Then `pnpm test` exercises entry, lock, packaging, and available kernel behavior. Linux requires musl-gcc for a complete build; macOS uses cc. The root `pnpm run build:native-system` builds only the current host addon for source tests.
+From the repository root, `bun run build:native-system` builds the current host addon. The build uses the development headers of `node` on PATH even when Bun runs the build script. Linux requires musl-gcc for a complete Landlock build; the host addon uses cc on glibc Linux and macOS. Native entry, lock, and packaging tests remain in this package.
 
 The [architecture](docs/architecture.md), [packaging](docs/packaging.md), and [release procedure](docs/release.md) own implementation and publication details.
 

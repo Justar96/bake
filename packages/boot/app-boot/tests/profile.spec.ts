@@ -308,56 +308,27 @@ describe('loadProfile', () => {
     const home = tmp()
     expect(() => loadProfile('t', 'custom', anchor, home))
       .toThrow('profile "custom" does not exist')
-    // The web template auto-initializes on first load. Bundle resolution
-    // cannot be asserted to fail here: the source-plane test runner resolves
-    // @deepseek-ai/* through tsconfig paths regardless of the staged anchor.
-    expect(PROFILE_TEMPLATES.web?.bundles).toContain('@deepseek-ai/dsh-base')
-    expect(PROFILE_TEMPLATES.acp).toEqual({
-      bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-acp-app'],
+    expect(PROFILE_TEMPLATES).toEqual({
+      tui: { bundles: ['@deepseek-ai/dsh-base', '@dsh-tui/app'] },
+      headless: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-headless'] },
     })
-    expect(PROFILE_TEMPLATES.sdk).toEqual({
-      bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-sdk-app'],
+    const shippedAnchor = stageInstallation({
+      '@deepseek-ai/dsh-base': { patch: '[]\n' },
+      '@dsh-tui/app': { patch: '[]\n' },
     })
-    expect(PROFILE_TEMPLATES['sdk-minimal']).toEqual({
-      bundles: ['@deepseek-ai/dsh-sdk-minimal'],
-    })
-    try {
-      loadProfile('t', 'web', anchor, home)
-    } catch {
-      // Resolution failure is the plain-Node outcome for this empty anchor.
-    }
-    expect(readProfileManifest('t', resolveProfileDir('web', home)).dsh?.profile?.bundles)
-      .toEqual([...PROFILE_TEMPLATES.web?.bundles ?? []])
+    expect(loadProfile('t', 'tui', shippedAnchor, home).layers.map(layer => layer.packageName))
+      .toEqual(PROFILE_TEMPLATES.tui!.bundles)
+    expect(readProfileManifest('t', resolveProfileDir('tui', home)).dsh?.profile?.bundles)
+      .toEqual(PROFILE_TEMPLATES.tui!.bundles)
   })
 
-  it('normalizes only the exact installation-owned headless bundle tuple', () => {
-    const anchor = stageInstallation({
-      '@deepseek-ai/dsh-base': { patch: '[]\n' },
-      '@deepseek-ai/dsh-web-app': { patch: '[]\n' },
-      '@deepseek-ai/dsh-headless': { patch: '[]\n' },
-      'custom-bundle': { patch: '[]\n' },
-    })
+  it('preserves an existing profile bundle selection', () => {
+    const anchor = stageInstallation({ 'custom-bundle': { patch: '[]\n' } })
     const home = tmp()
-    const stock = resolveProfileDir('headless', home)
-    initProfile(stock, [
-      '@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', '@deepseek-ai/dsh-headless',
-    ])
-    const retiredManifest = readProfileManifest('t', stock)
-    writeProfileManifest(stock, retiredManifest)
+    const dir = resolveProfileDir('headless', home)
+    initProfile(dir, ['custom-bundle'])
     loadProfile('t', 'headless', anchor, home)
-    expect(readProfileManifest('t', stock).dsh?.profile).toEqual({
-      bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-headless'],
-    })
-
-    const customHome = tmp()
-    const custom = resolveProfileDir('headless', customHome)
-    initProfile(custom, [
-      '@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', '@deepseek-ai/dsh-headless', 'custom-bundle',
-    ])
-    loadProfile('t', 'headless', anchor, customHome)
-    expect(readProfileManifest('t', custom).dsh?.profile?.bundles).toEqual([
-      '@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', '@deepseek-ai/dsh-headless', 'custom-bundle',
-    ])
+    expect(readProfileManifest('t', dir).dsh?.profile?.bundles).toEqual(['custom-bundle'])
   })
 
   it('fails loud when a listed bundle declares no dsh.bundle', () => {

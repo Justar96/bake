@@ -239,7 +239,7 @@ function main(): void {
     let current = ''
     try { current = readFileSync(target, 'utf8') } catch { /* missing is stale */ }
     if (current !== output) {
-      console.error(`gen-session-format-catalog: ${OUT} is stale; run pnpm run gen-session-format-catalog`)
+      console.error(`gen-session-format-catalog: ${OUT} is stale; run bun run gen-session-format-catalog`)
       process.exitCode = 1
       return
     }

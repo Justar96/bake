@@ -214,7 +214,7 @@ export function runPersistenceFormats(args: readonly string[], root = resolve(im
   const formats = loadPersistenceFormats(root)
   const changed = persistenceFormatFactArtifacts(root, formats).filter(artifact => !existsSync(join(root, artifact.path))
     || readFileSync(join(root, artifact.path), 'utf8') !== artifact.content)
-  if (!values.write && changed.length > 0) throw new Error(`Stale persistence format facts: ${changed.map(artifact => artifact.path).join(', ')}. Run pnpm run verify-persistence-formats --write.`)
+  if (!values.write && changed.length > 0) throw new Error(`Stale persistence format facts: ${changed.map(artifact => artifact.path).join(', ')}. Run bun run verify-persistence-formats --write.`)
   if (values.write) for (const artifact of changed) writeFileSync(join(root, artifact.path), artifact.content)
   return `Persistence formats: v0 through v${formats.currentVersion} verified (${formats.entries.length} complete reference${formats.entries.length === 1 ? '' : 's'}).`
     + (values.write ? ` Refreshed ${changed.length} file${changed.length === 1 ? '' : 's'}.` : '')

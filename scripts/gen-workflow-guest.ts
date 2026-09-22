@@ -60,7 +60,7 @@ export async function generateWorkflowGuest(root: string, check: boolean): Promi
   const path = resolve(root, GUEST_SOURCE)
   if (check) {
     const current = await readFile(path, 'utf8')
-    if (current !== generated) throw new Error('workflow guest source is stale; run pnpm gen-workflow-guest')
+    if (current !== generated) throw new Error('workflow guest source is stale; run bun run gen-workflow-guest')
   } else {
     await writeFile(path, generated)
   }

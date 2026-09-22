@@ -40,14 +40,14 @@ installFailLoud('dsh')
 const ctx = await boot('dsh', resolveConfigPath(argv[2], process.env.DSH_SNAPSHOT))
 ```
 
-With that entry point, startup keeps every plugin that can activate. An enabled failed plugin produces a labelled warning. A failed required entry makes startup dispose the whole app and exit nonzero; required ids absent from a profile and disabled required entries do not affect startup. The global required list covers shared Agent execution, application endpoints, and Web bootstrap/transport: `agent-loop`, `webserver`, `modules`, `connection`, `headless-runner`, `acp`, and `sdk-jsonrpc-server`.
+`installFailLoud` reports an unhandled rejection or uncaught exception to stderr with `util.inspect`, waits up to two seconds for the app's release hook, then exits 1. Control never returns to the failed operation; the event loop runs only until release settles or times out. With that entry point, startup keeps every plugin that can activate. An enabled failed plugin produces a labelled warning. A failed required entry makes startup dispose the whole app and exit nonzero; required ids absent from a profile and disabled required entries do not affect startup. The global required list includes `agent-loop`, `tui-startup`, `tui-runner`, and `headless-runner`, plus recognized external application endpoint ids. Missing or disabled ids do not require a profile to mount that application.
 
 <a id="profiles"></a>
 ### Profiles
 
 Import profile and bundle declaration types from [`@deepseek-ai/dsh-package-manifest`](../../util/package-manifest/README.md). App-boot adapts `DshPackageManifest` to `ProfileManifest` with optional package identity because local profiles need no published version. App-boot owns profile loading, JSON validation, and resolved runtime data.
 
-A profile is how one dsh installation ships different app surfaces: `web`, `headless`, `acp`, `sdk`, and `sdk-minimal` start distinct compositions from the same launcher. A profile lives at `$DSH_HOME/profiles/<name>` and combines installable bundles with its own `cordis.patch.yml`. The YAML composition enables or disables HMR. The shipped `web` template uses live reload, while the other shipped templates apply patches only at startup. `sdk-minimal` names only its standalone bundle; the other templates retain base-plus-mode stacks. `dsh --profile <name> --from-default-profile <template>` creates a custom profile at a new non-shipped name from one shipped template, while `dsh plugin` initializes a base-backed profile and manages its installed bundles. A missing bundle or one without a patch declaration fails startup loudly. Application-owned npm projects, such as Electron's reserved Desktop profile, use `loadProfileDirectory` to load an already initialized directory without exposing it through CLI profile lookup.
+Bake ships `tui` and `headless` profile templates. Each profile lives at `$DSH_HOME/profiles/<name>` and combines ordered bundles with its own `cordis.patch.yml`; YAML controls HMR. `tui` selects base and `@dsh-tui/app`, while headless selects base and its one-shot runner. `dsh --profile <name> --from-default-profile <template>` initializes a new custom profile from a shipped template. Existing profile bundle lists remain unchanged. A missing bundle or one without a patch declaration fails startup loudly. `loadProfileDirectory` loads an already initialized directory directly.
 
 Your machine-local preferences also live in the Harness home:
 
@@ -85,11 +85,12 @@ After the Loader settles, app-boot warns when only optional entries are inactive
 | An injected service is unavailable | Warn; continue while the entry waits for its dependencies | Stop startup | Keep the entry waiting; adding the missing provider can activate it |
 | HTTP port binding fails | Warn; continue without that endpoint | Stop startup | Keep the process running without the failed endpoint; corrected config can restore it |
 | Detached asynchronous work outside the `apply()` return Promise produces an unhandled rejection | Fatal: dispose the app and exit nonzero | Fatal: dispose the app and exit nonzero | Fatal: dispose the app and exit nonzero, regardless of entry id |
+| A synchronous callback or timer throws an uncaught exception | Fatal: release the app and exit nonzero | Fatal: release the app and exit nonzero | Fatal: release the app and exit nonzero, regardless of entry id |
 | Entry is absent or explicitly disabled | Ignore it | Ignore it | Do not activate it; no required-startup audit |
 
 The required list above includes `modules` and `connection`; Web startup cannot succeed when either enabled entry fails. Failure of an optional provider can also prevent a required consumer from activating. Schema rejection before an existing entry updates is not a transactional rollback of sibling changes.
 
-The [Web process matrix](../../../apps/cli/tests/profiles/web/tests/web-failure-matrix.expected.e2e.ts) and [startup acceptance](../../../apps/cli/tests/profiles/web/tests/web-best-effort-startup.expected.e2e.ts) verify these outcomes through the shipped Web profile; [app-boot tests](tests/app-boot.spec.ts) also exercise root Include failures.
+The [app-boot tests](tests/app-boot.spec.ts) cover activation failures, required terminal entries, and root Include failures. [Terminal replay](../../../tui/scripts/pty-smoke.ts) exercises the shipped TUI composition and terminal restoration.
 
 If your app owns the terminal, it can hand the terminal back before the process exits, so your shell is never left in raw mode. The handoff is bounded: a stuck cleanup delays the fatal exit but never cancels it.
 

@@ -67,8 +67,6 @@ tui/**/src/**/*.d.ts
 !packages/**/src/**/turndown-plugin-gfm.d.ts
 !apps/**/src/**/vite-env.d.ts
 
-# pnpm owns the workspace lockfile. A root bun install is not one.
-/bun.lock
 
 # A failing PTY run keeps its transcript here.
 tui/.smoke/

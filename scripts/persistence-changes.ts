@@ -558,7 +558,7 @@ export function loadPersistenceHistory(root: string): PersistenceHistory {
 
 function readPersistenceEntries(root: string, allowIncompleteId?: string): PersistenceHistoryEntry[] {
   const directory = join(root, HISTORY_DIRECTORY)
-  if (!existsSync(directory)) throw new Error('persistence history is missing; use pnpm run persistence-changes --baseline ID for explicit initialization')
+  if (!existsSync(directory)) throw new Error('persistence history is missing; use bun run persistence-changes --baseline ID for explicit initialization')
   const files = readdirSync(directory).sort()
   const documents = files.filter(file => file.endsWith('.md') && !file.endsWith('.zh.md') && file !== 'README.md' && file !== 'AGENTS.md')
   const snapshots = new Set(files.filter(file => file.endsWith('.schema.json')))

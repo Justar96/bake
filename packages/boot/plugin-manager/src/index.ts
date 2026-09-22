@@ -11,7 +11,7 @@ import z from '@deepseek-ai/schemastery'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import { pluginEntryId, readPluginInventory } from '@deepseek-ai/dsh-host-plugin-inventory'
 import {
-  readProfileManifest, resolveBundleDir, loadOverlayPatches, composeEntries, reconcileProfilePatches, readProfilePatches, OPTIONAL_BUNDLES,
+  readProfileManifest, resolveBundleDir, loadOverlayPatches, composeEntries, reconcileProfilePatches, readProfilePatches, PROFILE_TEMPLATES,
 } from '@deepseek-ai/dsh-app-boot'
 import type {} from '@deepseek-ai/dsh-hmr'
 import type { ProfileContext, ProfileManifest } from '@deepseek-ai/dsh-app-boot'
@@ -200,7 +200,8 @@ export class PluginManager extends TypertRemoteService {
     const bundles: BundleInfo[] = []
     for (const name of names) {
       const installed = dependencies.includes(name)
-      const optional = OPTIONAL_BUNDLES.includes(name)
+      const optional = Object.hasOwn(installation.dependencies ?? {}, name)
+        && !Object.values(PROFILE_TEMPLATES).some(template => template.bundles.includes(name))
       const removable = installed && !Object.hasOwn(installation.dependencies ?? {}, name)
       const enabled = selected.includes(name)
       try {
@@ -212,7 +213,7 @@ export class PluginManager extends TypertRemoteService {
         const readOnlyReason = this.protectsManager(name) ? 'management-required' as const : undefined
         bundles.push({ name, ...(info.version === undefined ? {} : { version: info.version }),
           ...(info.description === undefined || info.description === '' ? {} : { description: info.description }),
-          enabled, installed, optional, removable: removable && readOnlyReason === undefined,
+          enabled, installed, optional: optional && readOnlyReason === undefined, removable: removable && readOnlyReason === undefined,
           ...(readOnlyReason === undefined ? {} : { readOnlyReason }),
           ...this.declaredRows(name, info) })
       } catch (error) {

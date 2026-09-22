@@ -25,7 +25,7 @@ import { fileURLToPath } from 'node:url'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const CONFIG = join(ROOT, 'tsconfig.base.json')
-const BEGIN = '      // BEGIN generated package aliases — pnpm run gen-tsconfig-paths'
+const BEGIN = '      // BEGIN generated package aliases — bun run gen-tsconfig-paths'
 const END = '      // END generated package aliases'
 
 /** Package-name prefix the expanded aliases cover. */
@@ -224,10 +224,26 @@ function handWrittenSpecifiers(text: string): Set<string> {
   return keys
 }
 
+/**
+ * Remove single-line aliases whose source directory was deleted from the workspace.
+ * @param text - JSONC path map with one alias per line.
+ * @param root - checkout directory containing the source paths.
+ * @returns the map without aliases to absent sources.
+ */
+export function removeMissingAliases(text: string, root: string): string {
+  return text.split('\n').filter((line) => {
+    const encoded = /^\s*"@deepseek-ai\/[^\"]+": (\[[^\]]+\]),?$/.exec(line)?.[1]
+    if (encoded === undefined) return true
+    const paths = JSON.parse(encoded) as string[]
+    return paths.some(path => existsSync(resolve(root, path.replace(/\*.*$/, ''))))
+  }).join('\n')
+}
+
 if (process.argv[1] && import.meta.filename === resolve(process.argv[1])) {
   const check = process.argv.includes('--check')
   const current = readFileSync(CONFIG, 'utf8')
-  const next = writeRegion(current, renderAliases(collectPackageAliases(), handWrittenSpecifiers(current)))
+  const pruned = removeMissingAliases(current, ROOT)
+  const next = writeRegion(pruned, renderAliases(collectPackageAliases(), handWrittenSpecifiers(pruned)))
   const uncovered = uncoveredPackages(collectPackageNames(), mappedSpecifiers(next))
   if (uncovered.length > 0) {
     console.error(
@@ -239,7 +255,7 @@ if (process.argv[1] && import.meta.filename === resolve(process.argv[1])) {
   } else if (current === next) {
     console.log('gen-tsconfig-paths: tsconfig.base.json package aliases are current.')
   } else if (check) {
-    console.error('gen-tsconfig-paths: tsconfig.base.json is stale; run `pnpm run gen-tsconfig-paths`.')
+    console.error('gen-tsconfig-paths: tsconfig.base.json is stale; run `bun run gen-tsconfig-paths`.')
     process.exitCode = 1
   } else {
     writeFileSync(CONFIG, next)

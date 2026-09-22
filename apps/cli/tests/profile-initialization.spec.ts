@@ -61,20 +61,20 @@ describe('initializeProfileFromDefault', () => {
 
   it('does not copy the local source profile dependencies or user patch', () => {
     withHome((home) => {
-      const sourceDir = resolveProfileDir('web', home)
+      const sourceDir = resolveProfileDir('tui', home)
       initProfile(sourceDir, ['local-bundle'])
       const sourceManifest = readProfileManifest('test', sourceDir)
       sourceManifest.dependencies = { 'local-bundle': '1.0.0' }
       writeProfileManifest(sourceDir, sourceManifest)
       writeFileSync(join(sourceDir, PROFILE_PATCH_FILENAME), '- id: local-only\n  disabled: true\n')
 
-      initializeProfileFromDefault('rescue', 'web', home)
+      initializeProfileFromDefault('rescue', 'tui', home)
 
       const targetDir = resolveProfileDir('rescue', home)
       const target = readProfileManifest('test', targetDir)
       expect(target.dependencies).toEqual({})
       expect(target.dsh?.profile).toEqual({
-        bundles: [...PROFILE_TEMPLATES.web!.bundles],
+        bundles: [...PROFILE_TEMPLATES.tui!.bundles],
       })
       expect(readFileSync(join(targetDir, PROFILE_PATCH_FILENAME), 'utf8')).not.toContain('local-only')
     })
@@ -89,7 +89,7 @@ describe('initializeProfileFromDefault', () => {
       const before = paths.map(path => readFileSync(path))
 
       expect(() => {
-        initializeProfileFromDefault('rescue', 'web', home)
+        initializeProfileFromDefault('rescue', 'tui', home)
       })
         .toThrow('profile "rescue" already exists')
       expect(paths.map(path => readFileSync(path))).toEqual(before)
@@ -105,7 +105,7 @@ describe('initializeProfileFromDefault', () => {
       const before = readFileSync(residual)
 
       expect(() => {
-        initializeProfileFromDefault('rescue', 'web', home)
+        initializeProfileFromDefault('rescue', 'tui', home)
       })
         .toThrow('profile directory')
       expect(readFileSync(residual)).toEqual(before)
@@ -116,7 +116,7 @@ describe('initializeProfileFromDefault', () => {
   it.each(Object.keys(PROFILE_TEMPLATES))('rejects shipped target name %s without creating it', (name) => {
     withHome((home) => {
       expect(() => {
-        initializeProfileFromDefault(name, 'web', home)
+        initializeProfileFromDefault(name, 'tui', home)
       })
         .toThrow(`profile ${JSON.stringify(name)} is shipped`)
       expect(existsSync(resolveProfileDir(name, home))).toBe(false)
@@ -139,7 +139,7 @@ describe('initializeProfileFromDefault', () => {
     const ready = [join(home, 'ready-1'), join(home, 'ready-2')]
     const children = ready.map(marker => execa(
       process.execPath,
-      ['--import', tsxLoader, childEntry, home, 'rescue', 'web', marker, gate],
+      ['--import', tsxLoader, childEntry, home, 'rescue', 'tui', marker, gate],
       { reject: false, timeout: CHILD_TIMEOUT_MS },
     ))
     try {
@@ -148,7 +148,7 @@ describe('initializeProfileFromDefault', () => {
       const results = await Promise.all(children)
       expect(results.map(result => result.exitCode).sort()).toEqual([0, 1])
       expect(readProfileManifest('test', resolveProfileDir('rescue', home)).dsh?.profile)
-        .toEqual(PROFILE_TEMPLATES.web)
+        .toEqual(PROFILE_TEMPLATES.tui)
     } finally {
       for (const child of children) child.kill('SIGKILL')
       rmSync(home, { recursive: true, force: true })
