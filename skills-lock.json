@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "skills": {
+    "ink-component-patterns": {
+      "source": "thebushidocollective/han",
+      "sourceType": "github",
+      "skillPath": "plugins/frameworks/ink/skills/ink-component-patterns/SKILL.md",
+      "computedHash": "b25478bb51248eca84ff7d836f0852ea1d1b70ea1d2f77b05c9a0dc04ff906fb"
+    },
+    "ink-hooks-state": {
+      "source": "thebushidocollective/han",
+      "sourceType": "github",
+      "skillPath": "plugins/frameworks/ink/skills/ink-hooks-state/SKILL.md",
+      "computedHash": "b8e50739b7b10fe53eb856463f19bdacfacd9644d48cb6f1187e204e9c45fbe0"
+    },
+    "ink-layout-styling": {
+      "source": "thebushidocollective/han",
+      "sourceType": "github",
+      "skillPath": "plugins/frameworks/ink/skills/ink-layout-styling/SKILL.md",
+      "computedHash": "8fb60b8ed37bbd12ed03cefa4dee05cbc6f14a77173794793703ce6c94c2135b"
+    }
+  }
+}

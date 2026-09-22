@@ -1,7 +1,7 @@
 /** Session observers and human actions shared by the renderer and integration tests. */
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, AssistantStreamFrame } from '@deepseek-ai/dsh-agent'
-import { BlockAssembler, createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
 import { parseCommand } from '@deepseek-ai/dsh-commands'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
@@ -12,6 +12,7 @@ import { attachmentSummaries } from '@dsh-tui/ui/rows.ts'
 import { appendTranscript, emptyTranscript, project, projector, type Projector, type Row } from '@dsh-tui/ui'
 import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
 import { AttachmentDraft, type AttachmentOptions } from './attachments.ts'
+import { LiveBlocks } from './live.ts'
 import { Interactions } from './interactions.ts'
 import { InputCatalog } from './catalog.ts'
 import { FileReferences } from './references.ts'
@@ -38,7 +39,7 @@ export class SessionController {
   private buffered: SessionEvent[] | undefined = []
   private cursor = -1
   private live: readonly Row[] = []
-  private stream: { revision: number; attemptId: string; assembler: BlockAssembler } | undefined
+  private stream: { revision: number; attemptId: string; blocks: LiveBlocks } | undefined
   private stopping = false
   private command: { text: string; abort: AbortController; done: Promise<void> } | undefined
   private notice: string | undefined
@@ -300,18 +301,20 @@ export class SessionController {
   }
 
   private streamFrame(frame: AssistantStreamFrame): void {
-    if (frame.type === 'start') this.stream = { revision: frame.revision, attemptId: frame.attemptId, assembler: new BlockAssembler() }
+    if (frame.type === 'start') this.stream = { revision: frame.revision, attemptId: frame.attemptId, blocks: new LiveBlocks() }
     if (this.stream === undefined || this.stream.attemptId !== frame.attemptId) return
     if (frame.type !== 'start' && frame.revision <= this.stream.revision) return
     this.stream.revision = frame.revision
     if (frame.type === 'chunk') {
-      this.stream.assembler.push(frame.chunk)
-      this.live = this.stream.assembler.interruptedBlocks().flatMap((block): Row[] => {
-        if (block.type === 'text') return [{ kind: 'assistant', text: block.text }]
-        if (block.type === 'reasoning') return [{ kind: 'reasoning', text: block.text }]
-        return []
-      })
-    } else if (frame.type === 'end') { this.stream = undefined; this.live = [] }
+      this.stream.blocks.push(frame.chunk)
+      this.live = this.stream.blocks.rows()
+    } else if (frame.type === 'end') {
+      // `end` is published once the assistant message has committed, so the
+      // rows these stood in for are already in the transcript; holding them a
+      // frame longer would show every block twice.
+      this.stream = undefined
+      this.live = []
+    }
     this.repaint()
   }
 
