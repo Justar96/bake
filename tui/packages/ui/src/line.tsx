@@ -11,7 +11,7 @@
 
 import React from 'react'
 import { Box, Text } from 'ink'
-import { COLUMN, MARKER, tailOf, type Budget } from './layout.ts'
+import { COLUMN, MARKER, type Budget } from './layout.ts'
 import { hintFor, styleOf, type ComposerState, type Hint, type PresentedLine } from './present.ts'
 
 /**
@@ -60,8 +60,8 @@ export function Line({ line, budget }: {
  * as chrome before a word of it is read. That separation costs no rows and no
  * colour, which is why it survives NO_COLOR where a dim rule would not.
  *
- * Fields drop from the right as width shrinks; the line never wraps, because a
- * wrapped status line silently spends a row of the live region's budget.
+ * The line never wraps: the left cluster truncates instead, because a wrapped
+ * status line silently spends a row of the live region's budget.
  *
  * @param props.left - fields that identify the session state, highest priority first.
  * @param props.right - supporting fields, dropped first.
@@ -74,18 +74,20 @@ export function StatusBar({ left, right, columns, color }: {
   readonly columns: number
   readonly color?: string
 }): React.ReactElement {
-  const leftText = left.join('   ')
-  const kept = [...right]
-  while (kept.length > 0 && leftText.length + kept.join('   ').length + 3 > columns) kept.pop()
-  const rightText = kept.join('   ')
-  const gap = Math.max(1, columns - leftText.length - rightText.length)
   const colored = color === undefined ? {} : { color }
+  // Yoga measures display width, so the gap is laid out rather than computed.
+  // Arithmetic on `.length` counts code points and puts a CJK status line one
+  // cell per wide character past the edge, where it wraps and silently spends a
+  // row of the live region's budget.
   return (
-    <Text>
-      <Text {...colored}>{leftText}</Text>
-      <Text>{' '.repeat(gap)}</Text>
-      <Text dimColor>{rightText}</Text>
-    </Text>
+    <Box width={columns}>
+      <Box flexGrow={1}>
+        <Text wrap="truncate-end" {...colored}>{left.join('   ')}</Text>
+      </Box>
+      <Box flexShrink={0}>
+        <Text dimColor wrap="truncate-start">{right.join('   ')}</Text>
+      </Box>
+    </Box>
   )
 }
 
@@ -111,22 +113,24 @@ export function StatusBar({ left, right, columns, color }: {
  * @param props.columns - terminal width.
  * @param props.color - colour for the leading status field.
  * @param props.state - what the surface is doing, apart from the draft, which
- *   is read from `text` so the two cannot disagree.
- * @param props.text - current draft, or undefined for the placeholder.
+ *   is read from the draft text so the two cannot disagree.
+ * @param props.before - draft text before the caret.
+ * @param props.after - draft text after the caret.
  * @param props.placeholder - locale-owned prompt text.
  * @param props.hints - locale-owned text for each hint key.
  */
-export function Chrome({ left, right, columns, color, state, text, placeholder, hints }: {
+export function Chrome({ left, right, columns, color, state, before, after, placeholder, hints }: {
   readonly left: readonly string[]
   readonly right: readonly string[]
   readonly columns: number
   readonly color?: string
   readonly state: Omit<ComposerState, 'drafting'>
-  readonly text: string | undefined
+  readonly before: string
+  readonly after: string
   readonly placeholder: string
   readonly hints: Readonly<Record<Exclude<Hint, undefined>, string>>
 }): React.ReactElement {
-  const hint = hintFor({ ...state, drafting: text !== undefined && text !== '' })
+  const hint = hintFor({ ...state, drafting: `${before}${after}` !== '' })
   const colored = color === undefined ? {} : { color }
   return (
     <Box flexDirection="column">
@@ -136,7 +140,8 @@ export function Chrome({ left, right, columns, color, state, text, placeholder, 
       <Text> </Text>
       <Composer
         marker={MARKER.prompt}
-        text={text}
+        before={before}
+        after={after}
         placeholder={placeholder}
         {...hint === undefined ? {} : { hint: hints[hint] }}
       />
@@ -154,42 +159,73 @@ export function Chrome({ left, right, columns, color, state, text, placeholder, 
  * @param props.marker - prompt marker.
  * @param props.text - current draft, or undefined to show the placeholder.
  * @param props.placeholder - locale-owned prompt text.
- * @param props.hint - contextual right-slot text, omitted when there is nothing to say.
+ * @param props.hint - contextual right-slot text; empty or absent leaves the
+ *   slot unused, which a caller chooses when the surface already says it.
  */
-export function Composer({ marker, text, placeholder, hint, maxRows = 5 }: {
+export function Composer({ marker, before, after, placeholder, hint, maxRows = 5 }: {
   readonly marker: string
-  readonly text: string | undefined
+  readonly before: string
+  readonly after: string
   readonly placeholder: string
   readonly hint?: string
   readonly maxRows?: number
 }): React.ReactElement {
-  const lines = text === undefined ? [placeholder] : text.split('\n')
-  // The caret is at the end of the draft, so a long one is windowed from the
-  // bottom: the user must always see the line they are typing.
-  const visible = tailOf(lines, maxRows)
-  const windowed = visible.length < lines.length
+  const empty = before === '' && after === ''
+  const lines = empty ? [''] : `${before}${after}`.split('\n')
+  const caretRow = empty ? 0 : before.split('\n').length - 1
+  const caretColumn = empty ? 0 : (before.split('\n').at(-1) ?? '').length
+  // Window so the caret row is the last visible one. A draft taller than its
+  // rows must never hide the line being typed, whichever line that is.
+  const start = Math.max(0, Math.min(caretRow - maxRows + 1, lines.length - maxRows))
+  const visible = lines.slice(Math.max(0, start), Math.max(0, start) + maxRows)
   return (
     <Box flexDirection="column">
-      {visible.map((line, index) => (
-        <Box key={index} flexDirection="row">
-          <Box width={COLUMN.rail} flexShrink={0}>
-            <Text bold color="cyan">{index === 0 && !windowed ? marker : MARKER.none}</Text>
+      {visible.map((line, index) => {
+        const absolute = Math.max(0, start) + index
+        const caret = absolute === caretRow
+        return (
+          <Box key={absolute} flexDirection="row">
+            <Box width={COLUMN.rail} flexShrink={0}>
+              <Text bold color="cyan">{absolute === 0 ? marker : MARKER.none}</Text>
+            </Box>
+            <Box flexGrow={1}>
+              {/* A drawn caret, not inverse video: ANSI attributes vanish under
+                  NO_COLOR and in any non-TTY frame, which would leave the user
+                  with no cursor at all. */}
+              {caret
+                ? (
+                  <Text>
+                    {line.slice(0, caretColumn)}{CARET}{line.slice(caretColumn)}
+                    {/* The placeholder follows the caret rather than replacing
+                        it: an empty composer still has to show where typing
+                        will land. */}
+                    {empty ? <Text dimColor>{placeholder}</Text> : null}
+                  </Text>
+                  )
+                : <Text>{line}</Text>}
+            </Box>
+            {hint === undefined || hint === '' || index !== visible.length - 1
+              ? null
+              : (
+                <Box flexShrink={0}>
+                  <Text dimColor>{hint}</Text>
+                </Box>
+                )}
           </Box>
-          <Box flexGrow={1}>
-            <Text dimColor={text === undefined}>{line}</Text>
-          </Box>
-          {hint === undefined || index !== visible.length - 1
-            ? null
-            : (
-              <Box flexShrink={0}>
-                <Text dimColor>{hint}</Text>
-              </Box>
-              )}
-        </Box>
-      ))}
+        )
+      })}
     </Box>
   )
 }
+
+/**
+ * Caret drawn in the composer.
+ *
+ * A Block Element, so East Asian Ambiguous: a CJK-configured terminal may draw
+ * it two cells wide. That is accepted here and nowhere else, because the
+ * alternative is an attribute that disappears exactly when colour does.
+ */
+const CARET = '\u258c'
 
 /**
  * Candidate list under the composer.
@@ -203,9 +239,9 @@ export function Composer({ marker, text, placeholder, hint, maxRows = 5 }: {
  * @param props.selected - index of the selected candidate.
  * @param props.hidden - candidates omitted by the window.
  * @param props.more - locale-owned text for the omitted-count row.
- * @param props.nameWidth - width of the name column.
+ * @param props.nameWidth - width of the name column; sized to the content when absent.
  */
-export function Completion({ items, selected, hidden, more, nameWidth = 12 }: {
+export function Completion({ items, selected, hidden, more, nameWidth }: {
   readonly items: readonly { readonly name: string, readonly description: string }[]
   readonly selected: number
   readonly hidden: number
@@ -213,6 +249,9 @@ export function Completion({ items, selected, hidden, more, nameWidth = 12 }: {
   readonly nameWidth?: number
 }): React.ReactElement | null {
   if (items.length === 0 && hidden === 0) return null
+  // Sized to the content: a fixed column wraps a file path onto a second row and
+  // leaves command names in a field far wider than they need.
+  const width = nameWidth ?? Math.min(40, Math.max(8, ...items.map(item => item.name.length + 2)))
   return (
     <Box flexDirection="column">
       {items.map((item, index) => {
@@ -222,8 +261,8 @@ export function Completion({ items, selected, hidden, more, nameWidth = 12 }: {
             <Box width={COLUMN.rail} flexShrink={0}>
               <Text bold color="cyan">{active ? MARKER.selected : MARKER.none}</Text>
             </Box>
-            <Box width={nameWidth} flexShrink={0}>
-              <Text bold={active} {...active ? { color: 'cyan' } : {}}>{item.name}</Text>
+            <Box width={width} flexShrink={0}>
+              <Text bold={active} wrap="truncate-start" {...active ? { color: 'cyan' } : {}}>{item.name}</Text>
             </Box>
             <Box flexGrow={1}>
               <Text dimColor={!active}>{item.description}</Text>

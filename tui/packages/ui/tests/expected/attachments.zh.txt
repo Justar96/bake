@@ -1,4 +1,4 @@
-· 会话: session-test
+  note   会话: session-test
 待处理输入
 下一步: Inspect
 pixel.png · image/png · 84 B · 1×1
@@ -6,8 +6,7 @@ pixel.png · image/png · 84 B · 1×1
 暂存附件: 1
 1. pixel.png · image/png · 84 B · 1×1
 Enter 发送 · /remove-attachment <编号> 移除 · /clear-attachments 清除
-○ 就绪  mock/model  /workspace
-会话: session-test
-Enter 发送 · Esc 中断 · 按两次 Ctrl-C 退出
-←→ 移动 · Home/End 行首行尾 · ↑↓ 历史 · Shift-Enter 换行
-> ▌
+----------------------------------------------------------------------------------------------------
+o 就绪   model   /workspace
+
+> ▌Enter 发送 · Esc 中断 · 按两次 Ctrl-C 退出

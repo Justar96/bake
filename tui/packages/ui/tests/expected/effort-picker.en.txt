@@ -1,11 +1,9 @@
-· Session: session-test
+  note   Session: session-test
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
 │ Choose reasoning effort                                                                          │
 │   Provider default · low                                                                         │
 │   Low                                                                                            │
-│ › High · Current                                                                                 │
+│ * High · Current                                                                                 │
 │ Type to filter · ↑↓ choose · Enter selects · Esc cancels · 3/3                                   │
 │ > ▌                                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-○ Ready  mock/model  /workspace
-Session: session-test

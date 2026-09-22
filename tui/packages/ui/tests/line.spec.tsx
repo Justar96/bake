@@ -71,14 +71,23 @@ describe('StatusBar', () => {
     expect(rendered.endsWith('turn 3')).toBe(true)
   })
 
-  it('drops supporting fields rather than wrapping to a second row', () => {
+  it('truncates rather than wrapping to a second row', () => {
     const rendered = strip(renderToString(
       <StatusBar left={['ready', 'deepseek/chat']} right={['ctx 12%', 'turn 3', '0f3a9c']} columns={34} />,
       { columns: 34 }))
 
     expect(rendered.split('\n')).toHaveLength(1)
     expect(rendered).toContain('ready')
-    expect(rendered).not.toContain('0f3a9c')
+  })
+
+  it('keeps a wide-character line on one row', () => {
+    // Each CJK cell is two columns: counting code points puts this past the edge.
+    const rendered = strip(renderToString(
+      <StatusBar left={['\u5c31\u7eea', 'model', '/workspace']} right={['\u4e0a\u4e0b\u6587: ~500/128k (0%)']} columns={60} />,
+      { columns: 60 }))
+
+    expect(rendered.split('\n')).toHaveLength(1)
+    expect(rendered).toContain('\u4e0a\u4e0b\u6587: ~500/128k (0%)')
   })
 })
 
@@ -86,10 +95,10 @@ describe('Chrome', () => {
   const hints = { send: 'enter to send', interrupt: 'esc interrupts', select: 'up/down to select', answer: 'y or n' }
   // No `drafting` here: Chrome reads it from the draft, so the two cannot disagree.
   const idle = { running: false, asking: false, listing: false }
-  const render = (state: typeof idle, text?: string): string => strip(renderToString(
+  const render = (state: typeof idle, text = ''): string => strip(renderToString(
     <Chrome
       left={['ready', 'deepseek/chat']} right={['ctx 12%']} columns={60}
-      state={state} text={text} placeholder="Ask anything" hints={hints}
+      state={state} before={text} after="" placeholder="Ask anything" hints={hints}
     />, { columns: 60 }))
 
   it('spends four rows, not five, and one of them is breathing room', () => {
@@ -120,7 +129,7 @@ describe('Chrome', () => {
 describe('Composer', () => {
   it('grows with a multi-line draft', () => {
     const rendered = strip(renderToString(
-      <Composer marker={MARKER.prompt} text={'one\ntwo\nthree'} placeholder="Ask" />, { columns: 40 }))
+      <Composer marker={MARKER.prompt} before={'one\ntwo\nthree'} after="" placeholder="Ask" />, { columns: 40 }))
     expect(rendered.split('\n')).toHaveLength(3)
     expect(rendered.split('\n')[0]).toBe('> one')
     expect(rendered.split('\n')[1]).toBe('  two')
@@ -129,7 +138,7 @@ describe('Composer', () => {
   it('windows a long draft from the bottom, where the caret is', () => {
     const text = Array.from({ length: 12 }, (_, index) => `line ${index}`).join('\n')
     const rendered = strip(renderToString(
-      <Composer marker={MARKER.prompt} text={text} placeholder="Ask" maxRows={5} />, { columns: 40 }))
+      <Composer marker={MARKER.prompt} before={text} after="" placeholder="Ask" maxRows={5} />, { columns: 40 }))
     const rows = rendered.split('\n')
 
     expect(rows).toHaveLength(5)
@@ -140,7 +149,7 @@ describe('Composer', () => {
 
   it('keeps the hint on the last row, beside the caret', () => {
     const rendered = strip(renderToString(
-      <Composer marker={MARKER.prompt} text={'one\ntwo'} placeholder="Ask" hint="enter to send" />,
+      <Composer marker={MARKER.prompt} before={'one\ntwo'} after="" placeholder="Ask" hint="enter to send" />,
       { columns: 40 }))
     const rows = rendered.split('\n')
     expect(rows[0]).not.toContain('enter to send')
@@ -181,9 +190,9 @@ describe('Completion', () => {
 describe('Composer placeholder', () => {
   it('shows the placeholder until there is a draft', () => {
     const empty = strip(renderToString(
-      <Composer marker={MARKER.prompt} text={undefined} placeholder="Ask anything" />, { columns: 40 }))
+      <Composer marker={MARKER.prompt} before="" after="" placeholder="Ask anything" />, { columns: 40 }))
     const typed = strip(renderToString(
-      <Composer marker={MARKER.prompt} text="/model" placeholder="Ask anything" />, { columns: 40 }))
+      <Composer marker={MARKER.prompt} before="/model" after="" placeholder="Ask anything" />, { columns: 40 }))
 
     expect(empty).toContain('Ask anything')
     expect(typed).toContain('/model')
@@ -192,11 +201,11 @@ describe('Composer placeholder', () => {
 
   it('omits the right slot when there is nothing contextual to say', () => {
     const without = strip(renderToString(
-      <Composer marker={MARKER.prompt} text="y" placeholder="Ask" />, { columns: 40 }))
+      <Composer marker={MARKER.prompt} before="y" after="" placeholder="Ask" />, { columns: 40 }))
     const with_ = strip(renderToString(
-      <Composer marker={MARKER.prompt} text="y" placeholder="Ask" hint="enter to send" />, { columns: 40 }))
+      <Composer marker={MARKER.prompt} before="y" after="" placeholder="Ask" hint="enter to send" />, { columns: 40 }))
 
-    expect(without.trimEnd()).toBe('> y')
+    expect(without.trimEnd()).toBe('> y\u258c')
     expect(with_).toContain('enter to send')
   })
 })

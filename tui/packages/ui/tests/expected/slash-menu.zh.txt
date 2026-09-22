@@ -1,8 +1,9 @@
-· 会话: session-test
-○ 就绪  mock/model  /workspace
-会话: session-test
+  note   会话: session-test
 命令和技能
-  /reset · 命令 · Reset the view
-› /review · 技能 · Review the current patch
+  /reset   命令  Reset the view
+* /review  技能  Review the current patch
 ↑↓ 选择 · Tab 补全 · Esc 关闭 · Enter 发送 · 2/3
+----------------------------------------------------------------------------------------------------
+o 就绪   model   /workspace
+
 > /r▌

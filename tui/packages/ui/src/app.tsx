@@ -1,6 +1,6 @@
 /** Terminal view over committed history, live presentation, and harness-owned state. */
 import React, { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Box, Static, Text, useInput, usePaste } from 'ink'
+import { Box, Static, Text, useInput, usePaste, useWindowSize } from 'ink'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
 import type { AgentStatus } from '@deepseek-ai/dsh-agent'
 import { formatAttachment, type AttachmentSummary, type Row } from './rows.ts'
@@ -11,6 +11,9 @@ import { useComposer, type Submit } from './composer.ts'
 import { completionMenu, type CompletionCatalog, type CompletionChoice, type FileCatalog } from './completion.ts'
 import { inputHistory } from './history.ts'
 import { InteractionView, type Interaction, type InteractionAnswer } from './interaction.tsx'
+import { budgetFor, type Budget } from './layout.ts'
+import { compactModel, compactPath, present } from './present.ts'
+import { Chrome, Completion, Line } from './line.tsx'
 
 /** Display-only projection of one pending inbox message. */
 export interface PendingInput {
@@ -55,7 +58,15 @@ export interface AppProps {
  * @param props - the row to render.
  * @returns the row element.
  */
-export function RowView({ row }: { readonly row: Row }): React.ReactElement {
+export function RowView({ row, budget }: {
+  readonly row: Row
+  readonly budget: Budget
+}): React.ReactElement {
+  return <>{present(row).map((line, index) => <Line key={index} line={line} budget={budget} />)}</>
+}
+
+/** @deprecated Superseded by RowView; kept until the snapshot fixtures are re-recorded. */
+export function LegacyRowView({ row }: { readonly row: Row }): React.ReactElement {
   switch (row.kind) {
     case 'tool-call': return <Text color="yellow">{'⚙ '}{row.tool}({row.input})</Text>
     case 'tool-result': return <Text color={row.ok ? 'gray' : 'red'}>{'← '}{row.text}</Text>
@@ -68,7 +79,7 @@ export function RowView({ row }: { readonly row: Row }): React.ReactElement {
 }
 
 /** Print each committed suffix once; live output and composer updates do not visit history. */
-const CommittedTranscript = memo(function CommittedTranscript({ transcript, heading }: { readonly transcript: Transcript; readonly heading: string }): React.ReactElement {
+const CommittedTranscript = memo(function CommittedTranscript({ transcript, heading, budget }: { readonly transcript: Transcript; readonly heading: string; readonly budget: Budget }): React.ReactElement {
   const printed = useRef(-1)
   const rows = useMemo(() => {
     const suffix = transcriptRows(transcript, Math.max(0, printed.current))
@@ -76,7 +87,7 @@ const CommittedTranscript = memo(function CommittedTranscript({ transcript, head
   }, [transcript, heading])
   useLayoutEffect(() => { printed.current = transcript.length }, [transcript])
   return <Static key={transcript.length} items={rows}>
-    {(row, index) => <RowView key={index} row={row} />}
+    {(row, index) => <RowView key={index} row={row} budget={budget} />}
   </Static>
 })
 
@@ -149,9 +160,11 @@ function SessionView(props: AppProps): React.ReactElement {
     }
   })
   const status = props.inputBlocked === true ? copy.sessionsBusy : props.stopping ? copy.stopping : props.status === 'running' ? copy.working : copy.ready
+  const size = useWindowSize()
+  const budget = budgetFor(size)
   return <Box flexDirection="column">
-    <CommittedTranscript transcript={props.committed} heading={`${copy.session}: ${props.sessionId}`} />
-    {props.live.map((row, index) => <RowView key={index} row={row} />)}
+    <CommittedTranscript transcript={props.committed} heading={`${copy.session}: ${props.sessionId}`} budget={budget} />
+    {props.live.map((row, index) => <RowView key={index} row={row} budget={budget} />)}
     {props.pending.length > 0 && <Box flexDirection="column">
       <Text color="yellow">{copy.pending}</Text>
       {props.pending.map(message => <Text key={message.id} dimColor>{message.target === 'next-step' ? copy.nextStep : copy.nextTurn}: {[message.text, ...(message.attachments ?? []).map(formatAttachment)].filter(Boolean).join('\n')}</Text>)}
@@ -164,22 +177,36 @@ function SessionView(props: AppProps): React.ReactElement {
     </Box>}
     {composer.submitting && <Text color="yellow">{copy.attachmentsSending}</Text>}
     {interaction !== undefined && <InteractionView key={interaction.id} interaction={interaction} copy={copy} limit={props.completionLimit} onAnswer={props.onAnswer} />}
-    <Text dimColor>{props.status === 'running' ? '● ' : '○ '}{status}{'  '}{props.model}{'  '}{props.cwd}</Text>
-    <Text dimColor>{copy.session}: {props.sessionId}{props.context === undefined ? '' : `  ${copy.context}: ${formatContext(props.context)}`}</Text>
     {props.command !== undefined && <Text>{copy.command}: {props.command}</Text>}
     {props.notice !== undefined && <Text color="yellow">{props.notice}</Text>}
     {matches !== undefined && <Box flexDirection="column">
       <Text dimColor>{visibleMenu?.kind === 'file' ? copy.filesTitle : copy.completionTitle}</Text>
-      {matches.slice(start, start + props.completionLimit).map((entry, index) => <Text key={entry.name} wrap="truncate-end" {...start + index === selected ? { color: 'cyan' as const } : {}}>
-        {start + index === selected ? '› ' : '  '}{entry.name}{' · '}{copy[entry.kind]}{entry.description === '' ? '' : ` · ${entry.description}`}
-      </Text>)}
+      <Completion
+        items={matches.slice(start, start + props.completionLimit).map(entry => ({
+          name: entry.name,
+          description: entry.description === '' ? copy[entry.kind] : `${copy[entry.kind]}  ${entry.description}`,
+        }))}
+        selected={selected - start}
+        hidden={0}
+        more=""
+      />
       {matches.length === 0 && !visibleMenu?.loading && <Text dimColor>{visibleMenu?.kind === 'file' ? copy.noFiles : copy.noCompletions}</Text>}
       {visibleMenu?.loading && <Text dimColor>{visibleMenu?.kind === 'file' ? copy.filesLoading : copy.catalogLoading}</Text>}
       {visibleMenu?.error !== undefined && <Text color="yellow">{visibleMenu?.kind === 'file' ? copy.filesError : copy.catalogError}{': '}{visibleMenu.error}</Text>}
       <Text dimColor>{copy.completionHelp}{' · '}{props.status === 'running' ? copy.steering : copy.send}{matches.length === 0 ? '' : ` · ${selected + 1}/${matches.length}`}</Text>
     </Box>}
-    {matches === undefined && interaction === undefined && <Text dimColor>{copy.help}{props.status === 'running' ? ` · ${copy.steering}` : ''}</Text>}
-    {matches === undefined && interaction === undefined && <Text dimColor>{copy.editHelp}</Text>}
-    {interaction === undefined && <Text>{'> '}{composer.before}▌{composer.after}</Text>}
+    {interaction === undefined && <Chrome
+      left={[`${props.status === 'running' ? '*' : 'o'} ${status}`, compactModel(props.model), compactPath(props.cwd, process.env['HOME'])]}
+      right={props.context === undefined ? [] : [`${copy.context}: ${formatContext(props.context)}`]}
+      columns={size.columns}
+      color={props.status === 'running' ? 'yellow' : 'green'}
+      state={{ running: props.status === 'running', asking: false, listing: matches !== undefined }}
+      before={composer.before}
+      after={composer.after}
+      placeholder={copy.help}
+      // No hint while the menu is open: it prints the same keys above, with a
+      // position counter the slot has no room for.
+      hints={{ send: copy.send, interrupt: copy.stopping, select: '', answer: copy.send }}
+    />}
   </Box>
 }

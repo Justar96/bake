@@ -2,6 +2,7 @@
 import React, { useRef, useState } from 'react'
 import { Box, Text, useInput, usePaste } from 'ink'
 import type { TuiCopy } from './copy.ts'
+import { MARKER } from './layout.ts'
 import { composerText, eraseLast } from './editor.ts'
 
 /** A provider-owned value with its display metadata. */
@@ -71,7 +72,7 @@ export function Picker({ prompt, copy, limit, onSelect }: {
     <Text color="yellow">{prompt.title}</Text>
     {prompt.warning !== undefined && <Text color="yellow">{prompt.warning}</Text>}
     {choices.slice(start, start + limit).map((choice, index) => <Text key={choice.value} wrap="truncate-end" {...start + index === selectedIndex ? { color: 'cyan' as const } : {}}>
-      {start + index === selectedIndex ? '› ' : '  '}{choice.label}{choice.current ? ` · ${copy.currentSelection}` : ''}{choice.description === undefined ? '' : ` · ${choice.description}`}
+      {start + index === selectedIndex ? `${MARKER.selected} ` : '  '}{choice.label}{choice.current ? ` · ${copy.currentSelection}` : ''}{choice.description === undefined ? '' : ` · ${choice.description}`}
     </Text>)}
     {choices.length === 0 && <Text dimColor>{copy.noChoices}</Text>}
     <Text dimColor>{copy.pickerHelp}{choices.length === 0 ? '' : ` · ${selectedIndex + 1}/${choices.length}`}</Text>

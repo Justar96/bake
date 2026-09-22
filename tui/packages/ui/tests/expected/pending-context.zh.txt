@@ -1,9 +1,8 @@
-· 会话: session-test
+  note   会话: session-test
 待处理输入
 下一步: Queued direction
 /clear-pending 丢弃排队输入
-○ 就绪  mock/model  /workspace
-会话: session-test  上下文: ~12.3k/128k (9%)
-Enter 发送 · Esc 中断 · 按两次 Ctrl-C 退出
-←→ 移动 · Home/End 行首行尾 · ↑↓ 历史 · Shift-Enter 换行
-> ▌
+----------------------------------------------------------------------------------------------------
+o 就绪   model   /workspace                                                 上下文: ~12.3k/128k (9%)
+
+> ▌Enter 发送 · Esc 中断 · 按两次 Ctrl-C 退出

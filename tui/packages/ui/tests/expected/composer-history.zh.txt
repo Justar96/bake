@@ -1,12 +1,11 @@
-· 会话: session-test
+  note   会话: session-test
 > First prompt
   Do not recall this answer
 > Second prompt
 待处理输入
 下一步: Queued prompt
 /clear-pending 丢弃排队输入
-○ 就绪  mock/model  /workspace
-会话: session-test
-Enter 发送 · Esc 中断 · 按两次 Ctrl-C 退出
-←→ 移动 · Home/End 行首行尾 · ↑↓ 历史 · Shift-Enter 换行
-> Unsent draf▌t
+----------------------------------------------------------------------------------------------------
+o 就绪   model   /workspace
+
+> Unsent draf▌t                                                                           Enter 发送
