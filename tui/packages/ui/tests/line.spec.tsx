@@ -20,14 +20,17 @@ describe('Line', () => {
     const output = show(present({ kind: 'tool-result', callId: 'c', ok: true, text: 'result' })
       .map((line, index) => <Line key={index} line={line} budget={at80} />))
 
-    expect(said).toBe(`${MARKER.turn} hello`)
+    // A blank row opens the turn, so the eye has somewhere to land when
+    // scrolling back; scrollback pays for it, not the dynamic region.
+    expect(said).toBe(`\n${MARKER.turn} hello`)
     expect(output.indexOf('result')).toBe(COLUMN.output)
   })
 
   it('places a call verb in its own column, with the argument beside it', () => {
     const rendered = show(present({ kind: 'tool-call', callId: 'c', tool: 'bash', input: 'rg -n foo' })
       .map((line, index) => <Line key={index} line={line} budget={at80} />))
-    expect(rendered).toBe(`  run    rg -n foo`)
+    // The blank that opens the call's zone renders as an empty first row.
+    expect(rendered).toBe(`\n  run    rg -n foo`)
   })
 
   it('wraps prose at the measure however wide the terminal is', () => {
@@ -67,9 +70,10 @@ describe('StatusBar', () => {
       { columns: 60 }))
 
     expect(rendered).toHaveLength(60)
-    // The state indicator opens the row; the fields follow it.
-    expect(rendered.startsWith(`${MARKER.state} ready`)).toBe(true)
+    // The state word opens the row. The right cluster is what makes it a bar.
+    expect(rendered.startsWith('ready')).toBe(true)
     expect(rendered.endsWith('turn 3')).toBe(true)
+    expect(rendered).toContain('deepseek/chat')
   })
 
   it('truncates rather than wrapping to a second row', () => {
@@ -79,6 +83,34 @@ describe('StatusBar', () => {
 
     expect(rendered.split('\n')).toHaveLength(1)
     expect(rendered).toContain('ready')
+  })
+
+  it('yields the right cluster before the left, whatever the path costs', () => {
+    // The regression this guards: an unbounded right field starving the two
+    // fields the row exists to show. A deep temp path is the everyday case.
+    const path = '/private/var/folders/jg/zcyzdbb13bnfr5q882y_h8_r0000gn/T/dsh-tui-pty-1B3VG9/workspace'
+    const rendered = strip(renderToString(
+      <StatusBar left={['Ready', 'tui-picked-model (high)']} right={['Context: ~3k/128k (2%)', path]} columns={120} />,
+      { columns: 120 }))
+
+    expect(rendered.split('\n')).toHaveLength(1)
+    expect(rendered).toContain('Ready')
+    expect(rendered).toContain('tui-picked-model (high)')
+    // The meter is bounded, so it is never shortened to fit the path.
+    expect(rendered).toContain('Context: ~3k/128k (2%)')
+    // The path is ordered last, so it is the field that gives up room, and it
+    // keeps the tail that names the workspace rather than the mount point.
+    expect(rendered.endsWith('workspace')).toBe(true)
+    expect(rendered).not.toContain('/private/var/folders')
+  })
+
+  it('clips rather than wrapping once the left cluster alone overruns', () => {
+    const rendered = strip(renderToString(
+      <StatusBar left={['Ready', 'a-very-long-model-name-indeed']} right={['/deep/path']} columns={12} />,
+      { columns: 12 }))
+
+    expect(rendered.split('\n')).toHaveLength(1)
+    expect(rendered.startsWith('Ready')).toBe(true)
   })
 
   it('keeps a wide-character line on one row', () => {
@@ -102,17 +134,13 @@ describe('Chrome', () => {
       state={state} before={text} after="" placeholder="Ask anything" hints={hints}
     />, { columns: 60 }))
 
-  it('spends four rows, not five, and one of them is breathing room', () => {
-    // The shipped surface carries a status row, a session row and two standing
-    // hint rows. Here: a rule, the status, a blank row, and the composer.
+  it('spends the status row and the composer, and nothing between them', () => {
     const rows = render(idle).split('\n')
-    expect(rows).toHaveLength(4)
-    expect(rows[2]!.trim()).toBe('')
-  })
-
-  it('rules the full width, in characters a CJK locale cannot widen', () => {
-    const [rule] = render(idle).split('\n')
-    expect(rule).toBe('-'.repeat(60))
+    expect(rows).toHaveLength(2)
+    expect(rows[0]).toContain('ready')
+    expect(rows[0]).toContain('ctx 12%')
+    expect(rows[1]).toContain('Ask anything')
+    expect(rows.join('\n')).not.toContain('---')
   })
 
   it('leaves the right slot empty until something applies', () => {
@@ -145,6 +173,7 @@ describe('Composer', () => {
     expect(rows).toHaveLength(5)
     expect(rows.at(-1)).toContain('line 11')
     // The prompt marker belongs to the draft's first line, which is scrolled off.
+    expect(rows[0]!.startsWith('^')).toBe(true)
     expect(rows[0]!.startsWith('>')).toBe(false)
   })
 

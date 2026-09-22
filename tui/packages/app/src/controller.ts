@@ -9,7 +9,7 @@ import type {} from '@deepseek-ai/dsh-session-query'
 import type {} from '@deepseek-ai/dsh-compaction'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import { attachmentSummaries } from '@dsh-tui/ui/rows.ts'
-import { appendTranscript, emptyTranscript, project, type Row } from '@dsh-tui/ui'
+import { appendTranscript, emptyTranscript, project, projector, type Projector, type Row } from '@dsh-tui/ui'
 import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
 import { AttachmentDraft, type AttachmentOptions } from './attachments.ts'
 import { Interactions } from './interactions.ts'
@@ -18,9 +18,10 @@ import { FileReferences } from './references.ts'
 import { listTargets, login } from './login.ts'
 import { listRoutes, routeOf, resolveRoute, resolveSelection } from './model.ts'
 import type { ModelSelectionRef } from '@deepseek-ai/dsh-agent'
-// Empty type import: the token meter declaration-merges `contextPressure` into
-// the projection map, and that key is invisible to this module without it.
+// Empty type imports: each declaration-merges a key into the projection map
+// (`contextPressure`, `todos`), and those keys are invisible here without them.
 import type {} from '@deepseek-ai/dsh-token-meter'
+import type {} from '@deepseek-ai/dsh-tool-todo/types'
 
 /** One terminal's presentation over a live Agent and its durable projections. */
 export class SessionController {
@@ -32,6 +33,8 @@ export class SessionController {
   /** Cancellable discovery for the composer’s active workspace-path query. */
   readonly references: FileReferences
   private committed = emptyTranscript
+  /** This transcript's words and tool cards; one projector per session. */
+  private readonly projector: Projector
   private buffered: SessionEvent[] | undefined = []
   private cursor = -1
   private live: readonly Row[] = []
@@ -56,6 +59,11 @@ export class SessionController {
     private readonly credentialRefs: readonly string[], private readonly changed: () => void,
     attachmentOptions: AttachmentOptions, private readonly selection?: ModelSelectionRef) {
     this.attachments = new AttachmentDraft(agent, attachmentOptions, copy)
+    // The tool registry is the lookup: a tool contributed by any plugin
+    // presents its own calls here without this surface knowing it exists, and
+    // a profile with no tools service renders every call at its raw arguments.
+    const tools = agent.ctx.get('tools')
+    this.projector = projector(copy, name => tools?.get(name))
     this.interactions = new Interactions(ctx, agent, () => this.repaint())
     const commands = agent.ctx.get('commands')
     if (commands === undefined) throw new Error('tui: commands service is required')
@@ -98,10 +106,17 @@ export class SessionController {
       handler: () => {
         // The registry is the list: a command contributed by any plugin appears
         // here without this surface knowing it exists.
-        this.notify(commands.list(this.agent)
-          .map(command => `/${command.name} — ${command.description}`)
-          .join('\n'))
-        return { kind: 'success' }
+        //
+        // Returned rather than notified, so the catalog commits to the
+        // transcript. The notice region is bounded by the terminal's height and
+        // a list of every registered command does not fit it; scrollback has
+        // room for the whole thing and can scroll it.
+        return {
+          kind: 'success',
+          text: commands.list(this.agent)
+            .map(command => `/${command.name} — ${command.description}`)
+            .join('\n'),
+        }
       },
     })))
     this.off.push(ctx.on('session/event', (session, event) => {
@@ -123,7 +138,7 @@ export class SessionController {
     if (projections === undefined) throw new Error('tui: sessionProjections is required')
     this.off.push(projections.onChanged((session, key) => {
       if (session !== agent.session) return
-      if (key === 'inbox' || key === 'contextPressure') this.repaint()
+      if (key === 'inbox' || key === 'contextPressure' || key === 'todos') this.repaint()
     }))
     this.references = new FileReferences(agent, copy, () => this.repaint())
     this.catalog = new InputCatalog(ctx, agent, copy, () => this.repaint())
@@ -154,12 +169,18 @@ export class SessionController {
       .filter(message => message.source.kind === 'user')
       .map(message => ({ id: message.id, target, text: message.content.flatMap(block => block.type === 'text' ? [block.text] : []).join(''), attachments: attachmentSummaries(message.content) })))
     const pressure = projections?.snapshot(this.agent.session, ['contextPressure']).values.contextPressure
+    // The agent's list, not a log of writes to it: `todos` folds every
+    // `todo/write` to the latest whole list, which is the only version that
+    // is still true.
+    const todos = projections?.stateOf(this.agent.session, 'todos')
     const used = pressure?.projectedTokens
     const window = pressure?.contextWindow
     return {
       committed: this.committed, live: this.live, pending, status: this.agent.status,
       stopping: this.stopping, command: this.command?.text, notice: this.notice,
       interaction: this.interactions.current,
+      todos: todos === undefined || todos === null ? undefined
+        : todos.map(item => ({ text: item.content, status: item.status })),
       completion: this.catalog.view, files: this.references.view, attachments: this.attachments.view,
       model: this.selection?.current === undefined
         ? `${this.agent.options.provider}/${this.agent.options.model}` : `${routeOf(this.selection.current)}${this.selection.current.reasoningEffort === undefined ? '' : ` (${this.selection.current.reasoningEffort})`}`,
@@ -275,13 +296,7 @@ export class SessionController {
   private append(event: SessionEvent): void {
     if (event.seq <= this.cursor) return
     this.cursor = event.seq
-    let rows: readonly Row[]
-    if (event.type === 'command/run') rows = [{ kind: 'user', text: `/${event.data.name}${event.data.args ?? ''}` }]
-    else if (event.type === 'command/done') rows = event.data.text === undefined ? [] : [{ kind: 'notice', tone: event.data.kind === 'error' ? 'error' : 'info', text: event.data.text }]
-    else if (event.type === 'turn/end' && (event.data.reason.kind === 'aborted' || event.data.reason.kind === 'interrupted')) rows = [{ kind: 'notice', tone: 'warn', text: this.copy.cancelled }]
-    else if (event.type === 'compaction/summary') rows = [{ kind: 'notice', tone: 'info', text: this.copy.compacted }]
-    else rows = project(event)
-    this.committed = appendTranscript(this.committed, rows)
+    this.committed = appendTranscript(this.committed, project(event, this.projector))
   }
 
   private streamFrame(frame: AssistantStreamFrame): void {

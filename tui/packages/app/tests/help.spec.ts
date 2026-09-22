@@ -1,5 +1,6 @@
 /** Command discovery through the harness registry. */
 import { afterEach, describe, expect, it } from 'vitest'
+import { formatRow, transcriptRows } from '@dsh-tui/ui'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'
 import { openSession } from '../src/session.ts'
 import { SessionController } from '../src/controller.ts'
@@ -20,15 +21,22 @@ async function connected() {
   return { ...fixture, handle, controller }
 }
 
+/** The catalog as it lands in the transcript, which is where /help puts it. */
+const listed = (controller: SessionController): string =>
+  transcriptRows(controller.view.committed).map(formatRow).join('\n')
+
 describe('/help', () => {
   it('lists every registered command with its description', async () => {
     const { controller } = await connected()
     controller.submit('/help')
     await controller.drain()
 
-    const notice = controller.view.notice ?? ''
-    expect(notice).toContain('/help — List available commands')
-    expect(notice).toContain('/login — Sign in to a provider')
+    // The transcript, not the notice region: the region is bounded by the
+    // terminal's height and would cut the catalog to fit, while scrollback
+    // holds the whole list and can scroll it.
+    expect(listed(controller)).toContain('/help — List available commands')
+    expect(listed(controller)).toContain('/login — Sign in to a provider')
+    expect(controller.view.notice).toBeUndefined()
   })
 
   it('lists commands this surface never registered', async () => {
@@ -43,7 +51,7 @@ describe('/help', () => {
     try {
       controller.submit('/help')
       await controller.drain()
-      expect(controller.view.notice ?? '').toContain('/elsewhere — Contributed by another plugin')
+      expect(listed(controller)).toContain('/elsewhere — Contributed by another plugin')
     } finally {
       void dispose()
     }

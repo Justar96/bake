@@ -39,6 +39,8 @@ A fresh session records `cwd` and the resolved `agentPreset` in its header. Resu
 | Pending input | `sessionProjections.stateOf(session, 'inbox')`, notified by `onChanged` |
 | Context occupancy | `sessionProjections.snapshot(session, ['contextPressure']).values.contextPressure.projectedTokens` and `contextWindow`, notified by `onChanged` |
 | Committed transcript | Session events projected into immutable rows |
+| Task list | `sessionProjections.stateOf(session, 'todos')`, notified by `onChanged` |
+| Tool presentation | `tools.get(name)` and the call's own `presentCall` / `presentResult` |
 | Live response | Ordered `agent/assistant-stream` frames for the active attempt |
 | Human request | The oldest outstanding scoped interaction and its abort signal |
 
@@ -56,11 +58,29 @@ Compaction replacements do not append duplicate tool rows. Terminal scrollback r
 
 `project` drops any event whose `surfaceOp` is not `append`, for every event type rather than tool results alone, so one rule covers the whole vocabulary instead of a per-case list that later event types escape silently.
 
-### 4.4. Measured transcript cost
+### 4.4. One projection
+
+Every event with a terminal presentation is projected by `project`, including the ones this surface words itself: a command echo, a cancelled turn, and a compaction notice. The localized dictionary is a parameter for that reason. A caller that worded those rows where it happened to hold a dictionary would keep them out of the recorded fixtures and out of the Bun component loop, which replay through `project` alone.
+
+### 4.5. Tool cards
+
+A tool says how one of its calls reads by declaring `presentCall` / `presentResult` in `dsh-tools`; each returns a `card`-tagged intent that names no surface. `cards.ts` is the terminal's half of that seam, and the only place a `card` becomes display lines: a command and its description for `terminal`, the changed span between a hunk's shared context for `diff`, numbered lines for `read`, matches grouped by file for `search`, and a status and url for `web`.
+
+The registry is the lookup, so a tool contributed by any plugin presents its own calls without this surface knowing it exists. A tool that declares no presenter, one the registry no longer knows, a card kind newer than this build, and a presenter that throws all fall back to the raw arguments and result text, which is the presentation every tool had before the seam existed. Because the presenters are pure over the arguments and the durable result — including the `meta` the log persists for exactly this — a replayed session reproduces the identical card.
+
+A capped search reports its total and says it was capped. A card that quietly listed the matches it retained would read as a complete result.
+
+### 4.6. The task list
+
+`todo/write` replaces the whole list, so the transcript would carry the same plan several times with a different tick each time. The `todos` projection folds the writes to the one version still true, and a panel above the chrome shows it. Finished entries collapse into a count: they are what the reader already watched happen. The panel is capped like every other, because the dynamic region shares one budget.
+
+### 4.7. Measured transcript cost
 
 Committed history uses immutable linked batches. Appending a batch shares the preceding snapshot without reading or copying its rows. A memoized renderer reads only the unprinted suffix and passes it to Ink `Static`; streaming and composer updates leave committed rows untouched. Initial replay still reads the complete history, and retained memory grows with transcript size.
 
 `packages/ui/tests/scale.spec.tsx` counts history reads at 50 and 10,000 rows, checks row order and single emission across coalesced appends, and compares terminal bytes at 50 and 2000 rows. Each measurement waits for Ink’s render flush on paired fake terminal streams. These checks cover row processing and terminal output, not whole-process latency or memory bounds.
+
+The [whole-process diagnostic](packages/app/performance/README.md) uses the shared Bun production build and native PTY to measure Node profile readiness, input echoes, streaming, retained heap, and peak RSS with fixed synthetic histories. Its large-history workload fails under the diagnostic heap constraint; the measurement card and layout follow-up remain with that owner.
 
 ## 5. Input flow
 
@@ -131,12 +151,12 @@ Schemastery validates and defaults configuration before the runner receives it. 
 
 ## 9. Validation
 
-[The dispatcher](scripts/tui) runs every development and validation command; `tui/scripts/tui help` prints them, and `verify` is the pre-push pair.
+[The dispatcher](scripts/tui.ts) runs every development and validation command; `tui/scripts/tui.ts help` prints them, and `verify` is the pre-push pair. It is Bun, as is everything it runs except the product and the two checks whose subject is the Node process the product runs in.
 
-[The check script](scripts/check.sh) owns six individually selectable targets: React instance identity for upstream DOM tests and each TUI Ink consumer, strict application/test TypeScript checks, pure Bun tests, Node component/integration tests, the rendered layout invariants, and local Markdown links.
+Its `check` command owns six individually selectable targets: React instance identity for upstream DOM tests and each TUI Ink consumer, strict application/test/tooling TypeScript checks, pure-module and tooling tests on Bun, Node component/integration tests, the rendered layout invariants, and local Markdown links. Built app and PTY launches use production React; the component harness and source launch retain their development paths. [Bun ownership](BUN.md) describes the shared build and performance driver.
 
-[The PTY smoke](scripts/pty-smoke.py) launches the built profile in a private workspace and home and drives it through named scenarios, each declaring what it proves and which scenarios it requires, so `--only` runs one with its prerequisites. Together they replay the shared recorded bash scenario, compare persisted model and real tool output, resume the exact session, check projected context display, and exercise cursor editing, paste, history recall with draft restoration after resume, picker cancellation and new-session/resume navigation, model/effort selection and restored request configuration, slash and quoted-file completion, logged skill invocation, cancellation, pending-input discard, attachment admission and exact stored bytes, durable metadata replay, and terminal restoration. Every wait is named, so a step that never happens reports that name, the process state, and the screen within its own timeout, with the transcript kept in `tui/.smoke/` and the session state kept on disk. `--live` uses the root `.env` for a real DeepSeek call.
+[The PTY smoke](scripts/pty-smoke.ts) allocates a terminal through `bun:ffi` `openpty`, launches the built profile in a private workspace and home and drives it through named scenarios, each declaring what it proves and which scenarios it requires, so `--only` runs one with its prerequisites. Together they replay the shared recorded bash scenario, compare persisted model and real tool output, resume the exact session, check projected context display, and exercise cursor editing, paste, history recall with draft restoration after resume, picker cancellation and new-session/resume navigation, model/effort selection and restored request configuration, slash and quoted-file completion, logged skill invocation, cancellation, pending-input discard, attachment admission and exact stored bytes, durable metadata replay, and terminal restoration. Every wait is named, so a step that never happens reports that name, the process state, and the screen within its own timeout, with the transcript kept in `tui/.smoke/` and the session state kept on disk. `--live` uses the root `.env` for a real DeepSeek call.
 
 ## 10. Limits
 
-Navigation supports one displayed session in the current workspace. The picker reads matching records and titles in full while bounding visible rows. Inline scrollback has no virtualized transcript. Clipboard images and inline attachment previews are deferred, as is whole-process long-history performance qualification. Source launch is unsuitable for qualifying tool execution on this checkout; use the built profile and the runbook in [PLAN.md](PLAN.md#132-build-from-a-clean-checkout).
+Plan mode, session goals, workspace changes, the subagent catalog and scheduled follow-ups reach the log but not the screen: their events are dropped, and only the task list has a panel. Navigation supports one displayed session in the current workspace. The picker reads matching records and titles in full while bounding visible rows. Inline scrollback has no virtualized transcript, and long-history performance qualification remains incomplete. Clipboard images and inline attachment previews are deferred. Source launch is unsuitable for qualifying tool execution on this checkout; use the built profile and the runbook in [PLAN.md](PLAN.md#132-build-from-a-clean-checkout).

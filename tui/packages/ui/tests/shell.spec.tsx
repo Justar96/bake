@@ -16,7 +16,7 @@ function props(overrides: Partial<AppProps> = {}): AppProps {
     files: { query: undefined, entries: [], loading: false, error: undefined }, onReferenceQuery: () => {},
     completion: { entries: [], loading: false, error: undefined }, completionLimit: 8,
     committed: emptyTranscript, live: [], pending: [], status: 'idle', stopping: false,
-    command: undefined, notice: undefined, interaction: undefined,
+    command: undefined, notice: undefined, interaction: undefined, todos: undefined,
     model: 'mock/model', cwd: '/workspace', sessionId: 'session-test', copy: dictionaries.en, context: undefined,
     onSubmit: vi.fn(), onCancel: vi.fn(), onInterrupt: vi.fn(), onAnswer: vi.fn(), ...overrides,
   }
@@ -134,7 +134,7 @@ describe('terminal composer', () => {
     } })
     const ui = render(<App {...state} />)
     await vi.waitFor(() => expect(ui.lastFrame()).toContain('▸ mock/current'))
-    expect(ui.lastFrame()).not.toContain(state.copy.help)
+    expect(ui.lastFrame()).not.toContain(state.copy.prompt)
     expect(ui.lastFrame()).not.toContain('provider/model')
     ui.stdin.write('\u001b[B')
     await vi.waitFor(() => expect(ui.lastFrame()).toContain('▸ mock/other'))

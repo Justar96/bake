@@ -1,7 +1,6 @@
 /** Terminal view over committed history, live presentation, and harness-owned state. */
 import React, { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Box, Static, Text, useInput, usePaste, useWindowSize } from 'ink'
-import { assertNever } from '@deepseek-ai/dsh-util-values'
 import type { AgentStatus } from '@deepseek-ai/dsh-agent'
 import { formatAttachment, type AttachmentSummary, type Row } from './rows.ts'
 import { transcriptRows, type Transcript } from './transcript.ts'
@@ -11,9 +10,9 @@ import { useComposer, type Submit } from './composer.ts'
 import { completionMenu, type CompletionCatalog, type CompletionChoice, type FileCatalog } from './completion.ts'
 import { inputHistory } from './history.ts'
 import { InteractionView, type Interaction, type InteractionAnswer } from './interaction.tsx'
-import { budgetFor, type Budget } from './layout.ts'
+import { budgetFor, MARKER, type Budget } from './layout.ts'
 import { compactModel, compactPath, present } from './present.ts'
-import { Chrome, Completion, Line } from './line.tsx'
+import { Chrome, Completion, Line, LiveRegion, Notice } from './line.tsx'
 
 /** Display-only projection of one pending inbox message. */
 export interface PendingInput {
@@ -21,6 +20,17 @@ export interface PendingInput {
   readonly target: 'next-step' | 'next-turn'
   readonly text: string
   readonly attachments?: readonly AttachmentSummary[]
+}
+
+/**
+ * Display-only projection of one entry in the agent's task list.
+ *
+ * The agent replaces the whole list on every write, so an entry needs no
+ * identity: what it is and where it stands is all this surface shows.
+ */
+export interface TaskEntry {
+  readonly text: string
+  readonly status: 'pending' | 'in_progress' | 'completed'
 }
 
 /** Application state and actions supplied by the terminal owner. */
@@ -36,6 +46,8 @@ export interface AppProps {
   readonly command: string | undefined
   readonly notice: string | undefined
   readonly interaction: Interaction | undefined
+  /** The agent's current task list, absent until it writes one. */
+  readonly todos: readonly TaskEntry[] | undefined
   readonly model: string
   readonly cwd: string
   readonly sessionId: string
@@ -78,17 +90,45 @@ export function RowView({ row, budget }: {
   return <>{present(row).map((line, index) => <Line key={index} line={line} budget={budget} />)}</>
 }
 
-/** @deprecated Superseded by RowView; kept until the snapshot fixtures are re-recorded. */
-export function LegacyRowView({ row }: { readonly row: Row }): React.ReactElement {
-  switch (row.kind) {
-    case 'tool-call': return <Text color="yellow">{'⚙ '}{row.tool}({row.input})</Text>
-    case 'tool-result': return <Text color={row.ok ? 'gray' : 'red'}>{'← '}{row.text}</Text>
-    case 'notice': return <Text color={row.tone === 'error' ? 'red' : row.tone === 'warn' ? 'yellow' : 'cyan'}>{row.tone === 'info' ? '· ' : '! '}{row.text}</Text>
-    case 'user': return <Text color="cyan">{'> '}{[row.text, ...(row.attachments ?? []).map(formatAttachment)].filter(Boolean).join('\n')}</Text>
-    case 'reasoning': return <Text dimColor>{'· '}{row.text}</Text>
-    case 'assistant': return <Text>{'  '}{row.text}</Text>
-    default: return assertNever(row)
-  }
+/**
+ * The agent's task list, as current state rather than as history.
+ *
+ * Every write replaces the list, so the transcript would show the same plan
+ * several times with a different tick each time. A panel shows the one version
+ * that is still true, and costs its rows only while a list exists.
+ *
+ * Finished work collapses into the header count: it is what the reader has
+ * already watched happen, and the rows are needed by the work that has not.
+ * The list is capped like every other panel, because the dynamic region shares
+ * one budget and a long plan would spend the live region's share of it.
+ *
+ * @param props.todos - the current list, in the agent's own order.
+ * @param props.copy - locale-owned labels.
+ * @param props.limit - rows the list may draw before it must summarize.
+ * @returns the panel, or null when nothing is left to do.
+ */
+function Tasks({ todos, copy, limit }: {
+  readonly todos: readonly TaskEntry[]
+  readonly copy: TuiCopy
+  readonly limit: number
+}): React.ReactElement | null {
+  const done = todos.filter(item => item.status === 'completed').length
+  const open = todos.filter(item => item.status !== 'completed')
+  if (open.length === 0) return null
+  const shown = open.slice(0, limit)
+  const hidden = open.length - shown.length
+  return <Box flexDirection="column">
+    <Text dimColor>{copy.todoTitle} {done}/{todos.length}</Text>
+    {shown.map((item, index) => <Box key={index} flexDirection="row">
+      <Box width={2} flexShrink={0}>
+        <Text {...item.status === 'in_progress' ? { color: 'cyan' as const } : {}}>
+          {item.status === 'in_progress' ? MARKER.selected : MARKER.none}
+        </Text>
+      </Box>
+      <Text dimColor={item.status !== 'in_progress'}>{item.text}</Text>
+    </Box>)}
+    {hidden > 0 && <Text dimColor>  +{hidden} {copy.todoPending}</Text>}
+  </Box>
 }
 
 /** Print each committed suffix once; live output and composer updates do not visit history. */
@@ -179,11 +219,21 @@ function SessionView(props: AppProps): React.ReactElement {
   // exist. A panel past the viewport makes Ink clear the screen and replay the
   // whole transcript on every keystroke.
   const menuLimit = Math.min(props.completionLimit, budget.items)
+  // An open question outranks the live region: a user deciding whether to allow
+  // `rm -rf` needs the command and the choices, not concurrent token streaming.
+  // Collapsing to one line also keeps the reservation below the interaction
+  // affordable on a short window, where the two together would not fit.
+  const liveLimit = interaction === undefined ? budget.live : 1
+  // Reserved while running, released at rest: the calm state stays compact and
+  // the busy state stays still, and the one transition happens at a moment the
+  // user already expects the display to change.
+  const liveHold = props.status === 'running' ? liveLimit : undefined
   const visibleMatches = matches?.slice(start, start + menuLimit) ?? []
   const mixedKinds = new Set(visibleMatches.map(entry => entry.kind)).size > 1
   return <Box flexDirection="column">
     <CommittedTranscript transcript={props.committed} heading={`${copy.session}: ${props.sessionId}`} budget={budget} />
-    {props.live.map((row, index) => <RowView key={index} row={row} budget={budget} />)}
+    <LiveRegion rows={props.live} budget={budget} limit={liveLimit} hold={liveHold} />
+    {props.todos !== undefined && <Tasks todos={props.todos} copy={copy} limit={menuLimit} />}
     {props.pending.length > 0 && <Box flexDirection="column">
       <Text color="yellow">{copy.pending}</Text>
       {props.pending.map(message => <Text key={message.id} dimColor>{message.target === 'next-step' ? copy.nextStep : copy.nextTurn}: {[message.text, ...(message.attachments ?? []).map(formatAttachment)].filter(Boolean).join('\n')}</Text>)}
@@ -197,19 +247,26 @@ function SessionView(props: AppProps): React.ReactElement {
     {composer.submitting && <Text color="yellow">{copy.attachmentsSending}</Text>}
     {interaction !== undefined && <InteractionView key={interaction.id} interaction={interaction} copy={copy} limit={props.completionLimit} onAnswer={props.onAnswer} />}
     {props.command !== undefined && <Text>{copy.command}: {props.command}</Text>}
-    {props.notice !== undefined && <Text color="yellow">{props.notice}</Text>}
+    {props.notice !== undefined && <Notice text={props.notice} limit={budget.notice} more={copy.moreLines} />}
     {interaction === undefined && <Chrome
-      left={[status, compactModel(props.model), compactPath(props.cwd, process.env['HOME'])]}
-      right={props.context === undefined ? [] : [`${copy.context}: ${formatContext(props.context)}`]}
+      left={[status, compactModel(props.model)]}
+      right={[
+        // The path is last because it is the unbounded field: it is the one the
+        // status line shortens, and it keeps its tail, which names the workspace.
+        ...props.context === undefined ? [] : [`${copy.context}: ${formatContext(props.context)}`],
+        compactPath(props.cwd, process.env['HOME']),
+      ]}
       columns={size.columns}
       color={props.stopping || props.inputBlocked === true ? 'red' : props.status === 'running' ? 'yellow' : 'green'}
       state={{ running: props.status === 'running', asking: false, listing: matches !== undefined }}
       before={composer.before}
       after={composer.after}
-      placeholder={copy.help}
+      // Idle invites a prompt. While a turn runs, Enter steers instead of
+      // sending, and the placeholder is the only text that says so.
+      placeholder={props.status === 'running' ? copy.steering : copy.prompt}
       // The panel carries no key help of its own, so the slot names the one key
       // that is not discoverable by pressing it.
-      hints={{ send: copy.send, interrupt: copy.stopping, select: copy.tabCompletes, answer: copy.send }}
+      hints={{ send: copy.send, interrupt: copy.interrupt, select: copy.tabCompletes, answer: copy.send }}
     />}
     {/* Below the composer, never above it: matches change on every keystroke, and
         a panel above the input would move the line being typed. */}

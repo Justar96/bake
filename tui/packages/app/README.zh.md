@@ -25,13 +25,13 @@ kind: "package-bundle"
 
 ## 使用此包
 
-在仓库根目录构建本地包，并使用已准备的 `tui` 配置启动。配置必须包含 `dsh-base`；提供的补丁会禁用 headless 运行器并挂载 standard 预设和 Harness 本地文件引用提供器。
+在仓库根目录构建本地包，并使用已准备的 `tui` 配置启动。Bun 生成生产 JSX；`NODE_ENV=production` 选择对应的外部 React/Ink 运行时。`tui/scripts/tui.ts app` 使用此环境完成这两步。配置必须包含 `dsh-base`；提供的补丁会禁用 headless 运行器并挂载 standard 预设和 Harness 本地文件引用提供器。
 
 ```sh
 
-./tui/scripts/build.sh
+./tui/scripts/tui.ts build
 
-node apps/cli/lib/bin.js --profile tui --patch ./tui/packages/app/cordis.built.patch.yml
+NODE_ENV=production node apps/cli/lib/bin.js --profile tui --patch ./tui/packages/app/cordis.built.patch.yml
 
 ```
 
@@ -59,7 +59,7 @@ Enter 提交输入；运行期间输入会引导下一步。Escape 先关闭打�
 
 成功切换后会重置输入框及历史浏览，打印带标签的会话记录区段，并等待上一个代理句柄完成清理。先前输出保留在终端回滚区中。恢复会话时使用已记录的预设和最后请求的模型配置；新会话使用配置默认值。选择器不切换工作区，也不为旧会话补充预设；这类会话请使用 `--resume <id> --preset <name>`。会话列表和标题通过 Harness 服务读取；标题不可用时仍可按 ID 选择。
 
-运行器的[配置表](../../DESIGN.md#8-configuration)包含语言、退出间隔和凭据引用。[无密钥 PTY 检查](../../scripts/pty-smoke.py)会创建独立的临时配置和工作区，无需修改用户配置。
+运行器的[配置表](../../DESIGN.md#8-configuration)包含语言、退出间隔和凭据引用。[无密钥 PTY 检查](../../scripts/pty-smoke.ts)会创建独立的临时配置和工作区，无需修改用户配置。
 
 <a id="understand-the-implementation"></a>
 
@@ -98,6 +98,8 @@ TUI 不构建模型请求，也不修改缓存设置。
 - 工具执行验证使用构建后的配置；源码启动的模块重复问题见[运行手册](../../PLAN.md#132-build-from-a-clean-checkout)。
 
 - 上下文压缩后，终端回滚区保留原始输出。
+
+- 长历史恢复有较大的瞬时内存开销；[整进程诊断](performance/README.zh.md)记录可复现的工作负载、测量结果及尚未解决的大型历史失败。
 
 ### 开发备注
 

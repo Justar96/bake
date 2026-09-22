@@ -58,7 +58,7 @@ function props(committed: Transcript, overrides: Partial<AppProps> = {}): AppPro
     completion: { entries: [], loading: false, error: undefined }, completionLimit: 8,
     committed,
     live: [], pending: [], status: 'idle', stopping: false,
-    command: undefined, notice: undefined, interaction: undefined,
+    command: undefined, notice: undefined, interaction: undefined, todos: undefined,
     model: 'mock/model', cwd: '/workspace', sessionId: 'session-scale', copy: dictionaries.en, context: undefined,
     onSubmit: vi.fn(), onCancel: vi.fn(), onInterrupt: vi.fn(), onAnswer: vi.fn(), ...overrides,
   }

@@ -1,7 +1,5 @@
   note   会话: session-test
-----------------------------------------------------------------------------------------------------
-● 就绪   model   /workspace
-
+就绪  model                                                                               /workspace
 > /r▌                                                                                       Tab 补全
   /reset   命令  Reset the view
 ▸ /review  技能  Review the current patch

@@ -208,11 +208,25 @@ The call sits at the rail; its output indents to column 4 beneath it. The indent
 
 Failed output is **not** dimmed. Dim means supporting detail, and a failure is the thing the user needs to read.
 
-### Zones come from indentation, not from blank lines
+### Indentation separates columns; a blank row separates actions
 
-Within a turn the levels are: rail glyph at column 0, prose at 2, tool output at 4, reasoning at 4. That is enough structure to read the turn without spending a single blank row inside it. The only blank line is the one opening each user turn.
+Within a turn the levels are: rail glyph at column 0, prose at 2, tool output and reasoning at 9. Indentation carries every separation it can, and it carries most of them — an answer at the rail is never confused with output under a verb.
 
-More whitespace would stripe the transcript, and striping reads as noise once a session is long — exactly when the transcript matters most.
+What it cannot carry is two actions in a row, because they share the verb column. A `think` drawn directly under the previous call's output is at the same indent as that output and reads as more of it. So **a blank row opens each action**: a reasoning block and a tool call. Nothing else gets one. A result continues the call above it, and a command's notice continues the command, so neither ever floats away from what produced it.
+
+That is one blank per action rather than one per row. Separating every row would stripe the transcript, and striping reads as noise once a session is long — exactly when the transcript matters most. The cost falls on scrollback, which is unbounded, not on the dynamic region's budget.
+
+```
+● Use the bash tool to run exactly: echo TERMINAL_OK
+
+  think  The user wants me to run a command and then reply.
+
+  run    {"command": "echo TERMINAL_OK"}
+         TERMINAL_OK
+
+  think  The command ran. I should reply with just "DONE".
+  DONE
+```
 
 ## 6a. Separating the chat area, the status line, and the composer
 
@@ -353,7 +367,9 @@ reserved live region   heights 8 8 8 8 8 8 8   0 changes   0 rows of travel
 
 Reserved at idle too would leave dead space below a finished answer, so the rule is scoped: **reserve while running, release at idle.** The calm state stays compact; the busy state stays still. The transition happens once per turn, at a moment the user is already expecting the display to change.
 
-This is also why the status line must never wrap (§2.5) and why notices are bounded (§5): both silently change the dynamic height.
+`LiveRegion` in `packages/ui/src/line.tsx` holds the height through the layout engine: a box fixed at `budget.live` rows, its content pinned to the bottom, overflow clipped. Counting blank rows onto the end of the list would hold the *line* count instead, and a line is not a row — prose wraps at the measure and tool output at the terminal width, so one streamed sentence past the measure grows a padded region by a row. Yoga already computes that wrapping, which is why the box is held rather than the list padded, and why the clipping runs from the top: the newest line is the one the user is reading.
+
+This is also why the status line must never wrap (§2.5), why notices are bounded (§5), and why `CHROME_ROWS` counts every row `Chrome` draws: the status line and the composer's first line. The live region reserves its budget for the whole of a turn, so a chrome height counted short is an L1 violation held for a whole turn rather than a transient one.
 
 ### 8.2 Flicker — a frame is observed half-drawn
 
@@ -398,7 +414,7 @@ Layout claims are mechanically checkable and should be gated:
 | append cost is O(1) | `packages/ui/tests/scale.spec.tsx` (raw stdout capture, not `frames`) |
 | no full-clear in a normal turn | assert `ansiEscapes.clearTerminal` never appears in captured stdout for a scripted turn |
 | status never wraps | render at 40, 80, 200 columns, assert one line |
-| L2: no jumping while running | `prototype/stability.mjs`; assert zero height change across a turn's frames |
+| L2: no jumping while running | `packages/ui/tests/live.spec.tsx` renders a streaming turn through Ink and asserts one height across its frames, including a line that wraps; `prototype/stability.mjs` measures the same property on the mockup |
 | no foreign terminal writes | scripted turn asserts nothing reaches stderr while mounted |
 
 The third is the direct regression test for §1 and the one most worth adding first. The last two are the regression tests for §8.1 and §8.3, which are what the user actually perceives as quality.

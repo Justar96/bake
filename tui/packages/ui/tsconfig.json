@@ -23,6 +23,15 @@
     },
     {
       "path": "../../../packages/context/file-reference"
+    },
+    {
+      "path": "../../../packages/core/tools"
+    },
+    {
+      "path": "../../../packages/compaction/compaction"
+    },
+    {
+      "path": "../../../packages/interaction/commands"
     }
   ]
 }

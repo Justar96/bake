@@ -1,7 +1,5 @@
   note   会话: session-test
-----------------------------------------------------------------------------------------------------
-● 就绪   model   /workspace
-
+就绪  model                                                                               /workspace
 > Review @"notes folder/▌"                                                                  Tab 补全
 ▸ @"notes folder/read me.txt"
   @"notes folder/todo.txt"

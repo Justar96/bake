@@ -22,7 +22,7 @@ import { readFileSync } from 'node:fs'
 import React, { useEffect, useMemo, useState } from 'react'
 import { render } from 'ink'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
-import { App, appendTranscript, emptyTranscript, project } from '@dsh-tui/ui'
+import { App, appendTranscript, emptyTranscript, project, projector } from '@dsh-tui/ui'
 import type { Row } from '@dsh-tui/ui'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'
 import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
@@ -30,15 +30,22 @@ import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
 /**
  * Read a recorded session and project it into transcript rows.
  *
+ * The lookup finds no tool: there is no registry here, and resolving one would
+ * mean booting the harness this loop exists to avoid. Every tool call
+ * therefore renders at its raw arguments, which is the fallback a profile with
+ * an unknown tool gets too.
+ *
  * @param path - the fixture path, relative to this file's directory.
+ * @param copy - the dictionary the replay is being read in.
  * @returns every row the recording produces, in log order.
  */
-export function rowsOf(path: string): readonly Row[] {
+export function rowsOf(path: string, copy: TuiCopy): readonly Row[] {
   const file = new URL(path, import.meta.url).pathname
+  const seam = projector(copy, () => undefined)
   const rows: Row[] = []
   for (const line of readFileSync(file, 'utf8').split('\n')) {
     if (line.trim() === '') continue
-    rows.push(...project(JSON.parse(line) as SessionEvent))
+    rows.push(...project(JSON.parse(line) as SessionEvent, seam))
   }
   return rows
 }
@@ -54,6 +61,7 @@ function staticProps(copy: TuiCopy) {
     command: undefined,
     notice: undefined,
     interaction: undefined,
+    todos: undefined,
     model: 'harness/replay',
     cwd: process.cwd(),
     sessionId: 'session-harness',
@@ -92,7 +100,7 @@ const locale = args.includes('--locale') && localeArg !== undefined && localeArg
 const copy = dictionaries[locale]
 const fixture = args.find((arg, index) => !arg.startsWith('--') && args[index - 1] !== '--locale')
   ?? 'fixtures/session.jsonl'
-const rows = rowsOf(fixture)
+const rows = rowsOf(fixture, copy)
 
 if (args.includes('--replay')) render(<Replay rows={rows} copy={copy} stepMs={220} />)
 else render(<App {...staticProps(copy)} committed={appendTranscript(emptyTranscript, rows)} status="idle" />)

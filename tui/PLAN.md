@@ -3,7 +3,7 @@
 Fork-local planning document. Lives in `tui/`, a directory upstream does not own, so syncing
 `deepseek-ai/deepseek-harness` never conflicts with it.
 
-- **Status:** TUI alignment findings 1–7, command/file completion, model/effort selection, composer cursor/history editing, interactive session navigation, and prompt attachments are implemented. Validation and current behavior are owned by [DESIGN.md](DESIGN.md); remaining work includes whole-process performance qualification and publishing.
+- **Status:** TUI alignment findings 1–7, command/file completion, model/effort selection, composer cursor/history editing, interactive session navigation, and prompt attachments are implemented. Validation and current behavior are owned by [DESIGN.md](DESIGN.md). The [whole-process diagnostic](packages/app/performance/README.md) records an unresolved large-history allocation failure; long-history qualification and publishing remain open.
 - **Runtime:** Node **26.9.0** primary, **24.21.0** floor — both verified booting the harness.
 - **Decisions:** TypeScript · Ink · in-process Cordis plugin on the **Node** runtime · Bun as build,
   test, and component-harness toolchain · shipped as a `dsh` profile bundle.
@@ -419,7 +419,7 @@ Each milestone states the acceptance criterion that closes it.
 |---|---|---|
 | ~~**M0**~~ | ~~Restore Node; run the staged probe~~ | **done** — Node 26.9.0 + 24.21.0; 15 of 19 services reachable ([§2.3.1](#231-m0-result--verified-service-reachability)) |
 | ~~**M1**~~ | ~~Scaffold `@dsh-tui/app` + `@dsh-tui/ui`; workspace line; Bun-import guard~~ | **done** — boots and exits 0 on Node 26.9.0 and 24.21.0; `--help`, `--preset`, and flag rejection verified; 8 `bun test` assertions in 32ms; the guard proven to fail on a planted `Bun.file` |
-| ~~**M2**~~ | ~~`tui-runner`: agent creation, terminal ownership, `release` teardown, Ctrl-C~~ | **done** — `tui/scripts/pty-smoke.sh` passes on 26.9.0 and 24.21.0: renders, accepts typed input, Ctrl-C ×2 exits 0, and `[?2004l` confirms the terminal was handed back. 12 `bun test` assertions in 32ms |
+| ~~**M2**~~ | ~~`tui-runner`: agent creation, terminal ownership, `release` teardown, Ctrl-C~~ | **done** — `tui/scripts/tui.ts e2e` passes on 26.9.0 and 24.21.0: renders, accepts typed input, Ctrl-C ×2 exits 0, and `[?2004l` confirms the terminal was handed back. 12 `bun test` assertions in 32ms |
 | **M3** | Fixture recorder + Bun harness | **implemented** — `tui/packages/harness/dev.tsx` replays recorded rows without dsh; the shared bash recording also owns a rendered screen snapshot |
 | **M4** | Transcript + LiveTurn; commit-boundary promotion | **done** — 10k-row work-count checks, coalesced append tests, and built PTY replay/resume verify suffix-only processing and single emission |
 | **M5** | Composer: input, `/` commands, `@` references | **done** — scoped command/skill and workspace-path discovery, completion at the cursor, durable skill/reference input, grapheme editing, multiline drafts, lazy session-input recall with draft restoration, and bounded file/image staging through Harness attachment admission |
@@ -453,8 +453,8 @@ continues to mean exactly what upstream means by it.
 | Pre-stable `@deepseek-ai/dsh-*` APIs churn | high | develop in-repo against the workspace; pin on publish; AGENTS.md: "update every consumer" |
 | `SessionEventMap` is required-on-read; unknown events refuse the log | high | switch on discriminant tags, `assertNever` closed unions, document the merge-extensible default |
 | Published versions fragmented | medium | M7 gate; in-repo until then |
-| Ink repaint cost on long transcripts | medium | `<Static>` + commit-boundary promotion; M4 measures 10k rows |
-| **Tools are broken under the tsx source launch** | medium (upstream, not ours) | `dsh-tools` keys its scheduler with `Symbol('…')`; the source launch gets two instances of the package, so the lookup misses and every tool call fails with `reading 'prepare'`. Upstream `headless` fails identically from source and works from `lib/`. Mitigation: `tui/scripts/build.sh` plus `cordis.built.patch.yml`, exercised by `pty-smoke.sh --built` |
+| Ink rendering cost on long transcripts | high | M4 bounds repeated row processing; [whole-process measurements](packages/app/performance/README.md) identify initial replay allocation as remaining work |
+| **Tools are broken under the tsx source launch** | medium (upstream, not ours) | `dsh-tools` keys its scheduler with `Symbol('…')`; the source launch gets two instances of the package, so the lookup misses and every tool call fails with `reading 'prepare'`. Upstream `headless` fails identically from source and works from `lib/`. Mitigation: `tui/scripts/tui.ts build` plus `cordis.built.patch.yml`, exercised by `tui.ts e2e` |
 | ~~Ink unresolvable inside the dsh process~~ | resolved | Ink 7.1.1 + React 19.3.0 import and render inside the harness; the package-resolution generation does not interfere, provided the importing package declares the dependency |
 | Bun/Node divergence in components | medium | components pure over props; harness renders to a string buffer; double-verified at M4 |
 | Upstream ships its own TUI | medium | our seams are all public API; adopt or diverge cheaply |

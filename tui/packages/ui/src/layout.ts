@@ -35,11 +35,31 @@ export const COLUMN = {
  */
 export const PROSE_MEASURE = 88
 
-/** Rows the dynamic region always owes: one status line and one composer line. */
+/**
+ * Rows the dynamic region always owes, whatever else it draws.
+ *
+ * `Chrome` spends them on the status line and the composer's first line. A
+ * draft taller than one line takes further rows from the regions above it,
+ * which is why the composer is counted at its floor rather than its maximum.
+ *
+ * Understating this understates nothing else: the live region reserves
+ * `budget.live` rows for the whole of a running turn, so a chrome height
+ * counted short is an L1 violation held for the length of every turn.
+ */
 export const CHROME_ROWS = 2
 
 /** Largest live-region height, before the terminal's own height is considered. */
 export const LIVE_BUDGET = 10
+
+/**
+ * Largest notice height, before the terminal's own height is considered.
+ *
+ * The notice region is for short feedback — "model set for the next turn" — not
+ * for catalogs. A command whose full output matters returns it, so it commits
+ * to the transcript where the terminal can scroll it; this bound is what stops
+ * anything else from pushing the status line and composer off the screen.
+ */
+export const NOTICE_BUDGET = 6
 
 /** Terminal size, as reported by `useWindowSize()`. */
 export interface WindowSize {
@@ -62,6 +82,8 @@ export interface Budget {
   readonly live: number
   /** Items an overlay may list before it must show a `+N more` footer. */
   readonly items: number
+  /** Lines a notice may draw before it must show a `+N more` footer. */
+  readonly notice: number
   /** Columns prose may wrap at. */
   readonly measure: number
   /** Columns tool output may use. */
@@ -83,8 +105,9 @@ export function budgetFor(size: WindowSize, options: { readonly header?: boolean
   const dynamic = Math.max(1, size.rows - 1)
   const live = Math.max(1, Math.min(LIVE_BUDGET, dynamic - CHROME_ROWS))
   const items = Math.max(1, dynamic - CHROME_ROWS - (options.header === true ? 1 : 0))
+  const notice = Math.max(1, Math.min(NOTICE_BUDGET, dynamic - CHROME_ROWS))
   const measure = Math.max(1, Math.min(PROSE_MEASURE, size.columns - COLUMN.rail))
-  return { dynamic, live, items, measure, output: Math.max(1, size.columns - COLUMN.output) }
+  return { dynamic, live, items, notice, measure, output: Math.max(1, size.columns - COLUMN.output) }
 }
 
 /**
@@ -121,21 +144,6 @@ export const tailOf = <T>(lines: readonly T[], budget: number): readonly T[] =>
   budget <= 0 ? [] : lines.slice(-budget)
 
 /**
- * Rows of padding that hold a region at a constant height.
- *
- * A region that grows line by line moves everything below it on every frame.
- * Padding to a fixed height keeps the status line and composer still while a
- * turn runs; at rest the padding is released so a finished answer is not
- * followed by empty space.
- *
- * @param used - rows the region currently draws.
- * @param hold - height to hold, or undefined to let the region shrink.
- * @returns blank rows to append.
- */
-export const padTo = (used: number, hold: number | undefined): number =>
-  hold === undefined ? 0 : Math.max(0, hold - used)
-
-/**
  * Marker characters.
  *
  * Text is ASCII, because a terminal and `string-width` can disagree above 0x7f
@@ -148,14 +156,21 @@ export const padTo = (used: number, hold: number | undefined): number =>
 export const MARKER = {
   /** Opens a turn in the transcript: the user's words that started it. */
   turn: '\u25cf',
+  /**
+   * A slash command the user ran.
+   *
+   * The rail carries the slash, so the row breaks the left column the way a
+   * command breaks the conversation, and the name reads without it. Colour
+   * alone would not do this: dim prose at the text column is indistinguishable
+   * from an answer under NO_COLOR and to a screen reader.
+   */
+  command: '/',
   /** The composer prompt. Only the live input carries it, never history. */
   prompt: '>',
   /** A selected list row: a pointer, because the eye follows it as it moves. */
   selected: '\u25b8',
   /** A value already in force, as opposed to the one under the cursor. */
   current: '*',
-  /** Session state, coloured by what the session is doing. */
-  state: '\u25cf',
   /** An unmarked row: assistant prose, and unselected list rows. */
   none: ' ',
 } as const

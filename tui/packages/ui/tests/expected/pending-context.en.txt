@@ -2,7 +2,5 @@
 Pending input
 Next step: Queued direction
 /clear-pending discards queued input
-----------------------------------------------------------------------------------------------------
-● Ready   model   /workspace                                               Context: ~12.3k/128k (9%)
-
-> ▌Enter sends · Esc interrupts · Ctrl-C twice quits
+Ready  model                                                   Context: ~12.3k/128k (9%)  /workspace
+> ▌Ask anything

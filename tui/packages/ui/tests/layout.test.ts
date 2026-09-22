@@ -1,7 +1,7 @@
 /** Region budgets and the render vocabulary. */
 import { describe, expect, test } from 'bun:test'
 import {
-  budgetFor, CHROME_ROWS, COLUMN, isRenderable, LIVE_BUDGET, MARKER, padTo, PROSE_MEASURE, tailOf, VERB, windowOf,
+  budgetFor, CHROME_ROWS, COLUMN, isRenderable, LIVE_BUDGET, MARKER, PROSE_MEASURE, tailOf, VERB, windowOf,
 } from '../src/layout.ts'
 
 describe('budgetFor', () => {
@@ -14,7 +14,20 @@ describe('budgetFor', () => {
   test('shrinks the live region on a short window instead of overrunning', () => {
     expect(budgetFor({ columns: 80, rows: 40 }).live).toBe(LIVE_BUDGET)
     expect(budgetFor({ columns: 80, rows: 10 }).live).toBe(10 - 1 - CHROME_ROWS)
-    expect(budgetFor({ columns: 80, rows: 6 }).live).toBe(3)
+    expect(budgetFor({ columns: 80, rows: 6 }).live).toBe(6 - 1 - CHROME_ROWS)
+    // Below this height the live region is the one-row floor: chrome still fits,
+    // and the viewport row Ink needs is still left free.
+    expect(budgetFor({ columns: 80, rows: 3 }).live).toBe(1)
+  })
+
+  test('leaves the chrome its rows, since a running turn reserves the whole live budget', () => {
+    // The live region holds its budget for the length of every turn, so a live
+    // budget that does not leave the chrome its rows is an L1 violation held
+    // for the length of every turn rather than a transient one.
+    for (const rows of [6, 10, 24, 40, 120]) {
+      const budget = budgetFor({ columns: 80, rows })
+      expect(budget.live + CHROME_ROWS).toBeLessThanOrEqual(budget.dynamic)
+    }
   })
 
   test('keeps every budget positive at sizes no one should use', () => {
@@ -70,21 +83,6 @@ describe('tailOf', () => {
   test('returns nothing rather than everything when no rows are available', () => {
     expect(tailOf([1, 2], 0)).toEqual([])
     expect(tailOf([1, 2], -1)).toEqual([])
-  })
-})
-
-describe('padTo', () => {
-  test('holds a region at a constant height while a turn runs', () => {
-    expect(padTo(3, 8)).toBe(5)
-    expect(padTo(8, 8)).toBe(0)
-  })
-
-  test('never pads negatively when a region outgrows the height it holds', () => {
-    expect(padTo(9, 8)).toBe(0)
-  })
-
-  test('releases the padding at rest, so a finished answer has no empty space under it', () => {
-    expect(padTo(3, undefined)).toBe(0)
   })
 })
 

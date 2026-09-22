@@ -96,7 +96,7 @@ describe('session wiring', () => {
     await controller.drain()
     expect(handler).toHaveBeenCalledWith(expect.objectContaining({ rawInput: '  item\nnext' }))
     expect(transcriptRows(controller.view.committed)).toEqual([
-      { kind: 'user', text: '/select  item\nnext' },
+      { kind: 'command', name: 'select', args: '  item\nnext' },
       { kind: 'notice', tone: 'info', text: 'Selected:  item\nnext' },
     ])
     controller.submit('/missing')
@@ -130,7 +130,7 @@ describe('session wiring', () => {
     await controller.drain()
     await finished.promise
     expect(controller.view.command).toBeUndefined()
-    expect(transcriptRows(controller.view.committed).filter(row => row.kind === 'user')).toEqual([{ kind: 'user', text: '/wait' }])
+    expect(transcriptRows(controller.view.committed).filter(row => row.kind === 'command')).toEqual([{ kind: 'command', name: 'wait', args: '' }])
     expect(model.requests).toHaveLength(0)
     expect(handle.agent.status).toBe('idle')
     using observation = await ctx.sessionQuery.observeSession(handle.agent.id, { projectionMode: 'none' })

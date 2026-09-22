@@ -76,10 +76,59 @@ describe('hintFor', () => {
 })
 
 describe('present', () => {
-  test('opens a turn once, not on every wrapped line', () => {
+  test('opens a turn with a blank row, then marks it once', () => {
+    // The blank is the transcript's only whitespace: it gives the eye somewhere
+    // to land when scrolling back, and scrollback pays for it rather than the
+    // dynamic region's budget.
     const lines = present({ kind: 'user', text: 'first\nsecond' })
-    expect(lines.map(line => line.marker)).toEqual([MARKER.turn, MARKER.none])
+    expect(lines.map(line => line.marker)).toEqual([MARKER.none, MARKER.turn, MARKER.none])
+    expect(lines[0]!.text).toBe('')
     expect(lines.every(line => line.column === COLUMN.rail)).toBe(true)
+  })
+
+  test('lets attachment metadata recede from the words the user said', () => {
+    const lines = present({ kind: 'user', text: 'Inspect this', attachments: [{ name: 'shot.png', bytes: 12 }] })
+    expect(lines.map(line => line.tone)).toEqual(['plain', 'said', 'quiet'])
+    expect(lines.at(-1)!.text).toContain('shot.png')
+  })
+
+  test('breaks the rail for a command, and keeps it quiet', () => {
+    // A command addresses the surface, not the model: the rail carries the
+    // slash so the row is unmistakable without colour, and the row recedes
+    // because what the user is reading for is the notice beneath it.
+    const [line] = present({ kind: 'command', name: 'model', args: ' deepseek/chat high' })
+    expect(line).toEqual({
+      marker: MARKER.command, verb: '', text: 'model deepseek/chat high',
+      column: COLUMN.rail, tone: 'quiet',
+    })
+    expect(MARKER.command).not.toBe(MARKER.turn)
+  })
+
+  test('places a card under the call it belongs to', () => {
+    const [, ...lines] = present({
+      kind: 'tool-call', callId: 'c1', tool: 'bash', input: 'ls -a',
+      detail: [{ text: 'List the directory' }],
+    })
+    // The headline keeps the verb; the card continues under the argument, so
+    // every card kind lands in one column whatever tool produced it.
+    expect(lines.map(line => [line.verb, line.text, line.column]))
+      .toEqual([[VERB.run, 'ls -a', COLUMN.output], ['', 'List the directory', COLUMN.output]])
+  })
+
+  test('colours the two sides of a change and leaves its context quiet', () => {
+    const lines = present({
+      kind: 'tool-result', callId: 'c1', ok: true, text: '',
+      detail: [{ text: '  keep' }, { text: '- old', emphasis: 'removed' }, { text: '+ new', emphasis: 'added' }],
+    })
+    expect(lines.map(line => line.tone)).toEqual(['quiet', 'removed', 'added'])
+    // A diff is read as a pair, so neither side recedes into supporting detail.
+    expect(styleOf('added')).toEqual({ color: 'green', dim: false, bold: false })
+    expect(styleOf('removed')).toEqual({ color: 'red', dim: false, bold: false })
+  })
+
+  test('keeps raw result text when a tool declared no card', () => {
+    const lines = present({ kind: 'tool-result', callId: 'c1', ok: true, text: 'a\nb' })
+    expect(lines.map(line => line.text)).toEqual(['a', 'b'])
   })
 
   test('leaves the answer unmarked, at the prose column', () => {
@@ -90,7 +139,8 @@ describe('present', () => {
   })
 
   test('opens reasoning with a verb and indents its continuation', () => {
-    const lines = present({ kind: 'reasoning', text: 'first\nsecond' })
+    const [blank, ...lines] = present({ kind: 'reasoning', text: 'first\nsecond' })
+    expect(blank!.text).toBe('')
     expect(lines[0]!.verb).toBe(VERB.think)
     expect(lines[1]!.verb).toBe('')
     expect(lines.every(line => line.column === COLUMN.output)).toBe(true)
@@ -98,9 +148,21 @@ describe('present', () => {
   })
 
   test('presents a call as its verb and argument', () => {
-    const [line] = present({ kind: 'tool-call', callId: 'c1', tool: 'bash', input: 'rg -n foo' })
+    const [, line] = present({ kind: 'tool-call', callId: 'c1', tool: 'bash', input: 'rg -n foo' })
     expect(line?.verb).toBe(VERB.run)
     expect(line?.text).toBe('rg -n foo')
+  })
+
+  test('opens each action with a blank, and keeps a result against its call', () => {
+    // Indentation separates an answer at the rail from output under a verb, but
+    // two actions share the verb column: a `think` directly under the previous
+    // call's output would read as more of that output.
+    const opens = (row: Parameters<typeof present>[0]) => present(row)[0]!.text === ''
+    expect(opens({ kind: 'reasoning', text: 'why' })).toBe(true)
+    expect(opens({ kind: 'tool-call', callId: 'c1', tool: 'bash', input: 'ls' })).toBe(true)
+    expect(opens({ kind: 'tool-result', callId: 'c1', ok: true, text: 'out' })).toBe(false)
+    expect(opens({ kind: 'notice', tone: 'info', text: 'set' })).toBe(false)
+    expect(opens({ kind: 'assistant', text: 'the answer' })).toBe(false)
   })
 
   test('aligns output under the call, carrying no verb of its own', () => {

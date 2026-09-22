@@ -25,13 +25,13 @@ This private workspace bundle adds a terminal runner and flag provider to a base
 
 ## Use this package
 
-From the repository root, build the local bundle and launch it over the prepared `tui` profile. The profile must include `dsh-base`; the supplied patch disables the headless runner and mounts the standard preset and the Harness local file-reference provider.
+From the repository root, build the local bundle and launch it over the prepared `tui` profile. Bun emits production JSX; `NODE_ENV=production` selects the matching external React/Ink runtime. `tui/scripts/tui.ts app` performs both steps with this environment. The profile must include `dsh-base`; the supplied patch disables the headless runner and mounts the standard preset and the Harness local file-reference provider.
 
 ```sh
 
-./tui/scripts/build.sh
+./tui/scripts/tui.ts build
 
-node apps/cli/lib/bin.js --profile tui --patch ./tui/packages/app/cordis.built.patch.yml
+NODE_ENV=production node apps/cli/lib/bin.js --profile tui --patch ./tui/packages/app/cordis.built.patch.yml
 
 ```
 
@@ -59,7 +59,7 @@ Use `/sessions` to choose a saved session from the current workspace or create a
 
 A successful switch resets the composer and history recall, prints a labeled transcript section, and drains the previous Agent handle. Earlier output remains in terminal scrollback. Resume restores the recorded preset and last requested model configuration; new sessions use profile defaults. The picker does not change workspaces or supply a preset for legacy sessions; use `--resume <id> --preset <name>` for those sessions. Session listing and title reads use Harness services; unavailable titles remain selectable by id.
 
-The runner’s [configuration table](../../DESIGN.md#8-configuration) includes locale, quit timing, and credential references. [The keyless PTY check](../../scripts/pty-smoke.py) creates its own temporary profile and workspace; it does not require changes to a user profile.
+The runner’s [configuration table](../../DESIGN.md#8-configuration) includes locale, quit timing, and credential references. [The keyless PTY check](../../scripts/pty-smoke.ts) creates its own temporary profile and workspace; it does not require changes to a user profile.
 
 <a id="understand-the-implementation"></a>
 
@@ -98,6 +98,8 @@ The TUI does not assemble model requests or alter cache settings.
 - Tool execution qualification uses the built profile; source-launch module duplication is documented in [the runbook](../../PLAN.md#132-build-from-a-clean-checkout).
 
 - Terminal scrollback keeps original output after compaction.
+
+- Long-history resume has substantial transient memory cost; the [whole-process diagnostic](performance/README.md) records reproducible workloads, measurements, and the unresolved large-history failure.
 
 ### Dev Note
 
