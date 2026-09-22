@@ -54,6 +54,19 @@ export interface AppProps {
 }
 
 /**
+ * One dim line under the completion panel: what it is doing, or why it is empty.
+ * @param props.text - locale-owned message.
+ * @param props.tone - `error` to colour a failure.
+ * @returns the message row, aligned with the panel's names.
+ */
+function Status({ text, tone }: { readonly text: string, readonly tone?: 'error' }): React.ReactElement {
+  return <Box flexDirection="row">
+    <Box width={2} flexShrink={0}><Text> </Text></Box>
+    <Text dimColor={tone === undefined} {...tone === 'error' ? { color: 'red' as const } : {}}>{text}</Text>
+  </Box>
+}
+
+/**
  * Render one complete committed or transient row without silently truncating results.
  * @param props - the row to render.
  * @returns the row element.
@@ -179,22 +192,6 @@ function SessionView(props: AppProps): React.ReactElement {
     {interaction !== undefined && <InteractionView key={interaction.id} interaction={interaction} copy={copy} limit={props.completionLimit} onAnswer={props.onAnswer} />}
     {props.command !== undefined && <Text>{copy.command}: {props.command}</Text>}
     {props.notice !== undefined && <Text color="yellow">{props.notice}</Text>}
-    {matches !== undefined && <Box flexDirection="column">
-      <Text dimColor>{visibleMenu?.kind === 'file' ? copy.filesTitle : copy.completionTitle}</Text>
-      <Completion
-        items={matches.slice(start, start + props.completionLimit).map(entry => ({
-          name: entry.name,
-          description: entry.description === '' ? copy[entry.kind] : `${copy[entry.kind]}  ${entry.description}`,
-        }))}
-        selected={selected - start}
-        hidden={0}
-        more=""
-      />
-      {matches.length === 0 && !visibleMenu?.loading && <Text dimColor>{visibleMenu?.kind === 'file' ? copy.noFiles : copy.noCompletions}</Text>}
-      {visibleMenu?.loading && <Text dimColor>{visibleMenu?.kind === 'file' ? copy.filesLoading : copy.catalogLoading}</Text>}
-      {visibleMenu?.error !== undefined && <Text color="yellow">{visibleMenu?.kind === 'file' ? copy.filesError : copy.catalogError}{': '}{visibleMenu.error}</Text>}
-      <Text dimColor>{copy.completionHelp}{' · '}{props.status === 'running' ? copy.steering : copy.send}{matches.length === 0 ? '' : ` · ${selected + 1}/${matches.length}`}</Text>
-    </Box>}
     {interaction === undefined && <Chrome
       left={[status, compactModel(props.model), compactPath(props.cwd, process.env['HOME'])]}
       right={props.context === undefined ? [] : [`${copy.context}: ${formatContext(props.context)}`]}
@@ -208,5 +205,21 @@ function SessionView(props: AppProps): React.ReactElement {
       // position counter the slot has no room for.
       hints={{ send: copy.send, interrupt: copy.stopping, select: '', answer: copy.send }}
     />}
+    {/* Below the composer, never above it: matches change on every keystroke, and
+        a panel above the input would move the line being typed. */}
+    {matches !== undefined && interaction === undefined && <Box flexDirection="column">
+      <Completion
+        items={matches.slice(start, start + props.completionLimit).map(entry => ({
+          name: entry.name,
+          description: entry.description === '' ? copy[entry.kind] : `${copy[entry.kind]}  ${entry.description}`,
+        }))}
+        selected={selected - start}
+        hidden={Math.max(0, matches.length - (start + props.completionLimit))}
+        more={`+${Math.max(0, matches.length - (start + props.completionLimit))} ${copy.moreMatches}`}
+      />
+      {matches.length === 0 && !visibleMenu?.loading && <Status text={visibleMenu?.kind === 'file' ? copy.noFiles : copy.noCompletions} />}
+      {visibleMenu?.loading === true && <Status text={visibleMenu?.kind === 'file' ? copy.filesLoading : copy.catalogLoading} />}
+      {visibleMenu?.error !== undefined && <Status text={`${visibleMenu?.kind === 'file' ? copy.filesError : copy.catalogError}: ${visibleMenu.error}`} tone="error" />}
+    </Box>}
   </Box>
 }

@@ -1,9 +1,8 @@
   note   Session: session-test
-Commands and skills
-  /reset   Command  Reset the view
-* /review  Skill  Review the current patch
-↑↓ choose · Tab completes · Esc closes · Enter sends · 2/3
 ----------------------------------------------------------------------------------------------------
 ● Ready   model   /workspace
 
 > /r▌
+  /reset   Command  Reset the view
+▸ /review  Skill  Review the current patch
+  +1 more, keep typing to narrow

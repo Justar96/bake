@@ -1,9 +1,7 @@
   note   会话: session-test
-工作区文件
-* @"notes folder/read me.txt"  文件
-  @"notes folder/todo.txt"     文件
-↑↓ 选择 · Tab 补全 · Esc 关闭 · Enter 发送 · 1/2
 ----------------------------------------------------------------------------------------------------
 ● 就绪   model   /workspace
 
 > Review @"notes folder/▌"
+▸ @"notes folder/read me.txt"  文件
+  @"notes folder/todo.txt"     文件

@@ -150,8 +150,10 @@ export const MARKER = {
   turn: '\u25cf',
   /** The composer prompt. Only the live input carries it, never history. */
   prompt: '>',
-  /** A selected list row, or a current value. */
-  selected: '*',
+  /** A selected list row: a pointer, because the eye follows it as it moves. */
+  selected: '\u25b8',
+  /** A value already in force, as opposed to the one under the cursor. */
+  current: '*',
   /** Session state, coloured by what the session is doing. */
   state: '\u25cf',
   /** An unmarked row: assistant prose, and unselected list rows. */
