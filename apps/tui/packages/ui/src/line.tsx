@@ -552,9 +552,10 @@ export interface MeasuredField {
   readonly color: PaletteColor
 }
 
-/** Primary status text, drawn in the terminal's normal foreground without dimming. */
+/** Primary status text, with an optional complete narrow reading. */
 export interface PrimaryField {
   readonly text: string
+  readonly short?: string
 }
 
 /** One status-line field: dim supporting text, primary text, or a measured reading. */
@@ -588,9 +589,9 @@ const textOf = (field: StatusField): string => typeof field === 'string' ? field
  * from the start so it keeps the workspace's name. The other right fields are
  * bounded, and a bounded field is dropped whole rather than cut: `cache hi`
  * reads as a different number, and a clipped context meter as a smaller one.
- * They drop from the end of the list, so the caller orders them by priority.
- * Optional badges reserve their width before the model and supporting fields.
- * The first (permission) takes priority when both do not fit.
+ * A first field with a short reading may take cells from the model instead;
+ * it keeps the model label and the access and thinking badges. Other fields
+ * drop from the end, so the caller orders them by priority.
  * The left cluster truncates from the end within its remaining space. Widths are
  * measured in terminal cells, so a CJK field is not laid out by code-point
  * length.
@@ -621,7 +622,17 @@ export function StatusBar({ left, right, badge, secondaryBadge, columns }: {
     badges.push({ field, width: Math.min(columns, width) })
     badgesWidth += gap + Math.min(columns, width)
   }
-  const headWidth = Math.max(0, Math.min(stringWidth(head), columns - badgesWidth - (badges.length === 0 ? 0 : FIELD_GAP.length)))
+  const availableHead = Math.max(0, columns - badgesWidth - (badges.length === 0 ? 0 : FIELD_GAP.length))
+  let headWidth = Math.min(stringWidth(head), availableHead)
+  const first = right[0]
+  if (first !== undefined && typeof first !== 'string' && 'short' in first && first.short !== undefined) {
+    const reserve = FIELD_GAP.length + stringWidth(first.short)
+    const labelEnd = head.indexOf(':')
+    const labelWidth = labelEnd < 0 ? 0 : stringWidth(head.slice(0, labelEnd + 2))
+    if (availableHead >= labelWidth + reserve && headWidth + reserve > availableHead) {
+      headWidth = Math.min(headWidth, availableHead - reserve)
+    }
+  }
   const used = headWidth + badgesWidth + (badges.length > 0 && headWidth > 0 ? FIELD_GAP.length : 0)
   const kept = used >= columns ? [] : fitting(right, columns - used, used > 0)
   const last = kept.length - 1
@@ -679,10 +690,15 @@ function fitting(right: readonly StatusField[], room: number, after: boolean): r
   const kept: StatusField[] = []
   let used = 0
   for (const field of bounded) {
-    const width = (kept.length > 0 || after ? FIELD_GAP.length : 0) + stringWidth(textOf(field))
-    if (used + width > room) break
-    kept.push(field)
-    used += width
+    const gap = kept.length > 0 || after ? FIELD_GAP.length : 0
+    let chosen = field
+    if (used + gap + stringWidth(textOf(chosen)) > room) {
+      if (typeof field === 'string' || !('short' in field) || field.short === undefined
+        || used + gap + stringWidth(field.short) > room) break
+      chosen = { text: field.short }
+    }
+    kept.push(chosen)
+    used += gap + stringWidth(textOf(chosen))
   }
   return unbounded === undefined ? kept : [...kept, unbounded]
 }

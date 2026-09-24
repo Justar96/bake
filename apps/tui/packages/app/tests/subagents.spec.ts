@@ -9,6 +9,7 @@ import { SessionController } from '../src/controller.ts'
 import { openSession } from '../src/session.ts'
 import { harness } from './harness.ts'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import TokenMeter from '@deepseek-ai/dsh-token-meter'
 
 it('shows live delegated children and lists their authoritative saved metadata', async () => {
   const fixture = await harness()
@@ -84,6 +85,7 @@ it('observes a running child, returns without cancellation, and opens its saved 
   let child: Awaited<ReturnType<typeof fixture.ctx.agents.create>> | undefined
   try {
     await fixture.ctx.plugin(SubagentRuntime)
+    await fixture.ctx.plugin(TokenMeter)
     parent = await openSession(fixture.ctx, {}, new AbortController().signal, (agent, selection) => {
       controller = new SessionController(fixture.ctx, agent, dictionaries.en, [], () => {},
         { attachmentMaxBytes: 1048576, attachmentLimit: 8 }, selection)
@@ -94,7 +96,8 @@ it('observes a running child, returns without cancellation, and opens its saved 
     child.agent.session.append('subagent/descriptor', {
       version: SUBAGENT_DESCRIPTOR_VERSION, mode: 'continuable', provider: 'spawn', label: 'Inspect the code',
     })
-    fixture.model.response = async function* () {
+    fixture.model.response = async function* (request) {
+      yield { type: 'usage', usage: { inputTokens: request.sessionId === child?.agent.id ? 900 : 100, outputTokens: 20 } }
       yield { type: 'block-start', index: 0, blockType: 'text' }
       yield { type: 'text-delta', index: 0, text: 'Child ' }
       await release.promise
@@ -115,6 +118,7 @@ it('observes a running child, returns without cancellation, and opens its saved 
     }
     await open()
     expect(controller!.view.inspection?.status).toBe('running')
+    expect(controller!.view.inspection?.context).toBeUndefined()
     expect(transcriptRows(controller!.view.inspection!.committed)).toContainEqual({ kind: 'user', text: 'Child task' })
     expect(controller!.submit('Must not steer either agent')).toBe(false)
     controller!.cancel()
@@ -132,14 +136,22 @@ it('observes a running child, returns without cancellation, and opens its saved 
     finish.resolve()
     await Promise.all([child.agent.whenIdle(), parent.agent.whenIdle()])
     expect(controller!.view.inspection?.status).toBe('idle')
+    expect(controller!.view.context?.used).toBeLessThan(200)
+    expect(controller!.view.inspection?.context?.used).toBeGreaterThan(900)
+    expect(controller!.view.inspection?.context?.window).toBe(8192)
+    expect(controller!.view.inspection?.usage).toEqual({ input: 900, output: 20 })
     expect(transcriptRows(controller!.view.inspection!.committed).filter(row => row.kind === 'assistant'))
       .toEqual([{ kind: 'assistant', text: 'Child completed the review' }])
-    controller!.cancel()
     await child.dispose()
     await controller!.drain()
+    expect(controller!.view.inspection?.context?.used).toBeGreaterThan(900)
+    expect(controller!.view.inspection?.usage).toEqual({ input: 900, output: 20 })
     expect(controller!.view.subagents[0]).toMatchObject({ state: 'saved', outcome: 'completed' })
+    controller!.cancel()
     await open()
     expect(fixture.ctx.agents.get(child.agent.id)).toBeUndefined()
+    expect(controller!.view.inspection?.context?.used).toBeGreaterThan(900)
+    expect(controller!.view.inspection?.usage).toEqual({ input: 900, output: 20 })
     expect(transcriptRows(controller!.view.inspection!.committed)).toContainEqual({ kind: 'assistant', text: 'Child completed the review' })
     expect(fixture.model.requests).toHaveLength(2)
     controller!.close()

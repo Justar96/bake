@@ -23,6 +23,7 @@ import { SubagentInspection } from './inspection.ts'
 import { FileReferences } from './references.ts'
 import { listTargets, login } from './login.ts'
 import { bakeVersion, changelogFor } from './release.ts'
+import { contextFor, usageFor } from './status.ts'
 import { listRoutes, namesRoute, routeOf, resolveRoute, resolveSelection } from './model.ts'
 import type { ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 // Empty type imports: each declaration-merges a key into the projection map
@@ -268,16 +269,11 @@ export class SessionController {
     // is still true.
     const todos = projections?.stateOf(this.agent.session, 'todos')
     const plan = surface?.plan
-    const used = pressure?.projectedTokens
-    const window = pressure?.contextWindow
-    const usage = surface?.tokenUsage
     const children = this.subagents.view
     const subagents = subagentEntries(children, this.ctx, this.copy)
-    // Billed input is the sum of disjoint buckets. Totals of zero are a
-    // session no request has reported on yet, and cache buckets of zero are a
-    // provider that reports no cache traffic: neither is shown as a miss.
-    const input = usage === undefined ? 0 : usage.uncachedInputTokens + usage.cacheReadTokens + usage.cacheWriteTokens
     const selected = this.selection?.current
+    const model = selected === undefined ? `${this.agent.options.provider}/${this.agent.options.model}` : routeOf(selected)
+    const usage = usageFor(surface?.tokenUsage)
     const reasoning = selected === undefined || this.reasoning?.route !== routeOf(selected) ? undefined : this.reasoning.info
     const thinkingLevel = selected?.reasoningEffort ?? reasoning?.defaultEffort
       ?? (reasoning === undefined ? undefined : this.copy.providerDefault)
@@ -295,13 +291,9 @@ export class SessionController {
       ...surface?.permissions === undefined ? {} : { permission: surface.permissions.currentValue },
       ...thinkingLevel === undefined ? {} : { thinkingLevel },
       completion: this.catalog.view, files: this.references.view, attachments: this.attachments.view,
-      model: this.selection?.current === undefined
-        ? `${this.agent.options.provider}/${this.agent.options.model}` : routeOf(this.selection.current),
-      context: used === undefined || window === undefined ? undefined : { used, window },
-      ...usage === undefined || input + usage.outputTokens === 0 ? {} : { usage: {
-        input, output: usage.outputTokens,
-        ...usage.cacheReadTokens + usage.cacheWriteTokens === 0 ? {} : { cached: usage.cacheReadTokens },
-      } },
+      model,
+      context: contextFor(pressure, model),
+      ...usage === undefined ? {} : { usage },
     }
   }
 

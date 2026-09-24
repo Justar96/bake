@@ -5,7 +5,7 @@ import type { AgentStatus } from '@deepseek-ai/dsh-agent'
 import { formatAttachment, type AttachmentSummary, type Row } from './rows.ts'
 import { transcriptRows, type Transcript } from './transcript.ts'
 import type { TuiCopy } from './copy.ts'
-import { cacheHit, formatContext, formatTotals, type ContextUsage, type TokenTotals } from './format.ts'
+import { cacheHit, contextPercent, formatContext, formatTotals, type ContextUsage, type TokenTotals } from './format.ts'
 import { useComposer, type Submit } from './composer.ts'
 import { completionMenu, type CompletionCatalog, type CompletionChoice, type FileCatalog } from './completion.ts'
 import { inputHistory } from './history.ts'
@@ -73,6 +73,8 @@ export interface AppProps {
     readonly live: readonly Row[]
     readonly status: AgentStatus
     readonly model: string
+    readonly context?: ContextUsage | undefined
+    readonly usage?: TokenTotals
     readonly permission?: string
     readonly thinkingLevel?: string
   } | undefined
@@ -633,11 +635,11 @@ function SessionView(props: AppProps): React.ReactElement {
   </>
   if (props.inspection !== undefined) {
     const child = props.inspection
-    const { usage: _usage, plan: _plan, permission: _permission, thinkingLevel: _thinkingLevel,
+    const { context: _context, usage: _usage, plan: _plan, permission: _permission, thinkingLevel: _thinkingLevel,
       compactPhase: _compactPhase, ...childProps } = props
     return <SessionView {...childProps} {...child} key={child.sessionId} inspection={undefined}
       inspectionParent={props.sessionId} inputBlocked={true} stopping={false}
-      pending={[]} todos={undefined} subagents={[]} attachments={[]} context={undefined}
+      pending={[]} todos={undefined} subagents={[]} attachments={[]} context={child.context}
       interaction={undefined} command={undefined}
       notice={`${child.label} · ${copy.subagentBack}`} />
   }
@@ -679,7 +681,8 @@ function SessionView(props: AppProps): React.ReactElement {
                 // session cost. The path is last because it is the unbounded
                 // field: the one the status line shortens, keeping its tail,
                 // which names the workspace.
-                ...props.context === undefined ? [] : [{ text: `${copy.context}: ${formatContext(props.context)}` }],
+                ...props.context === undefined ? [] : [{ text: `${copy.context}: ${formatContext(props.context)}`,
+                  short: `${copy.contextShort} ~${contextPercent(props.context)}%` }],
                 ...props.usage === undefined ? [] : formatTotals(props.usage, { input: copy.tokensIn, output: copy.tokensOut }),
                 ...hit === undefined ? [] : [{ label: copy.cacheHit, value: `${hit}%`, color: cacheTone(hit) }],
                 compactPath(props.cwd, process.env['HOME']),

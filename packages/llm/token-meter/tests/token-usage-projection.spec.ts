@@ -361,7 +361,8 @@ describe('contextPressure session projection', () => {
     const { ctx, session } = await harness()
     startStep(session, 1, 1)
     recordContext(session, 'small', 64_000)
-    expect(pressure(ctx, session)).toEqual({ contextWindow: 64_000 })
+    expect(pressure(ctx, session)).toEqual({ contextWindow: 64_000,
+      requestRoute: { provider: 'mock', model: 'small' } })
   })
 
   it('sums prompt-side buckets and excludes response output', async () => {
@@ -394,11 +395,38 @@ describe('contextPressure session projection', () => {
     recordContext(session, 'small', 64_000)
     usageChunk(session, { inputTokens: 100, outputTokens: 10 }, 1, 1)
     expect(pressure(ctx, session)).toEqual({
-      pressureTokens: 100, projectedTokens: 100, contextWindow: 64_000,
+      pressureTokens: 100, projectedTokens: 100, contextWindow: 64_000, sampledContextWindow: 64_000,
+      requestRoute: { provider: 'mock', model: 'small' }, sampledRoute: { provider: 'mock', model: 'small' },
     })
     recordContext(session, 'large', 256_000)
     expect(pressure(ctx, session)).toEqual({
-      pressureTokens: 100, projectedTokens: 100, contextWindow: 256_000,
+      pressureTokens: 100, projectedTokens: 100, contextWindow: 256_000, sampledContextWindow: 64_000,
+      requestRoute: { provider: 'mock', model: 'large' }, sampledRoute: { provider: 'mock', model: 'small' },
+    })
+  })
+
+  it('retains the sampled capacity when the same route advertises a different window', async () => {
+    const { ctx, session } = await harness()
+    recordContext(session, 'small', 64_000)
+    usageChunk(session, { inputTokens: 100, outputTokens: 10 }, 1, 1)
+    recordContext(session, 'small', 128_000)
+    expect(pressure(ctx, session)).toMatchObject({ contextWindow: 128_000, sampledContextWindow: 64_000 })
+    usageChunk(session, { inputTokens: 100, outputTokens: 10 }, 2, 1)
+    expect(pressure(ctx, session)).toMatchObject({ contextWindow: 128_000, sampledContextWindow: 128_000 })
+  })
+
+  it('attributes an equal-sized new usage sample to the latest request route', async () => {
+    const { ctx, session } = await harness()
+    recordContext(session, 'small', 64_000)
+    usageChunk(session, { inputTokens: 100, outputTokens: 10 }, 1, 1)
+    session.append('request/header', { header: { config: { provider: 'mock', model: 'large' } }, reason: 'change' })
+    expect(pressure(ctx, session).requestRoute).toEqual({ provider: 'mock', model: 'large' })
+    expect(pressure(ctx, session).sampledRoute).toEqual({ provider: 'mock', model: 'small' })
+    recordContext(session, 'large', 256_000)
+    usageChunk(session, { inputTokens: 100, outputTokens: 10 }, 2, 1)
+    expect(pressure(ctx, session)).toMatchObject({
+      pressureTokens: 100, contextWindow: 256_000,
+      requestRoute: { provider: 'mock', model: 'large' }, sampledRoute: { provider: 'mock', model: 'large' },
     })
   })
 
@@ -408,7 +436,9 @@ describe('contextPressure session projection', () => {
     recordContext(session, 'small', 64_000)
     usageChunk(session, { inputTokens: 100, outputTokens: 10 }, 1, 1)
     recordContext(session, 'unknown')
-    expect(pressure(ctx, session)).toEqual({ pressureTokens: 100, projectedTokens: 100 })
+    expect(pressure(ctx, session)).toEqual({ pressureTokens: 100, projectedTokens: 100,
+      sampledContextWindow: 64_000,
+      requestRoute: { provider: 'mock', model: 'unknown' }, sampledRoute: { provider: 'mock', model: 'small' } })
   })
 
   it('pushes no change for unrelated events or a restated capacity', async () => {
@@ -439,16 +469,18 @@ describe('contextPressure session projection', () => {
     const checkpoint = JSON.parse(JSON.stringify(
       ctx.sessionProjections.checkpoint(session),
     )) as ReturnType<typeof ctx.sessionProjections.checkpoint>
-    expect(checkpoint.contextPressure?.ver).toBe(5)
+    expect(checkpoint.contextPressure?.ver).toBe(6)
+    const old = { ...checkpoint, contextPressure: { ...checkpoint.contextPressure!, ver: 5 } }
+    expect(ctx.sessionProjections.restoreFloor(old)).toBe(0)
+    expect(ctx.sessionProjections.viewCheckpoint(old).contextPressure).toBeUndefined()
 
     await meterFiber.dispose()
     expect(ctx.sessionProjections.snapshot(session).values).not.toHaveProperty('contextPressure')
 
     await ctx.plugin(TokenMeter)
     expect(ctx.sessionProjections.viewCheckpoint(checkpoint).contextPressure).toEqual({
-      pressureTokens: 42,
-      projectedTokens: 42,
-      contextWindow: 64_000,
+      pressureTokens: 42, projectedTokens: 42, contextWindow: 64_000, sampledContextWindow: 64_000,
+      requestRoute: { provider: 'mock', model: 'small' }, sampledRoute: { provider: 'mock', model: 'small' },
     })
   })
 

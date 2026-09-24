@@ -37,7 +37,7 @@ A fresh session records `cwd` and the resolved `agentPreset` in its header. Resu
 |---|---|
 | Activity | `agent.status`, notified by `agent/status` |
 | Pending input | `sessionProjections.stateOf(session, 'inbox')`, notified by `onChanged` |
-| Context occupancy | `sessionProjections.snapshot(session, ['contextPressure']).values.contextPressure.projectedTokens` and `contextWindow`, notified by `onChanged` |
+| Context occupancy | `contextPressure.projectedTokens` and `contextWindow`, shown only when `sampledRoute` and `requestRoute` match the displayed model and `sampledContextWindow` matches the capacity; notified by `onChanged` |
 | Committed transcript | Session events projected into immutable rows |
 | Task list | `sessionProjections.stateOf(session, 'todos')`, notified by `onChanged` |
 | Plan mode | `sessionProjections.snapshot(session, ['contextPressure', 'plan', 'tokenUsage', 'permissions']).values.plan`, notified by `onChanged` |
@@ -48,7 +48,7 @@ A fresh session records `cwd` and the resolved `agentPreset` in its header. Resu
 | Live response | Ordered `agent/assistant-stream` frames for the active attempt |
 | Human request | The oldest outstanding scoped interaction and its abort signal |
 
-The TUI stores only presentation state: draft text, transient output, the displayed request, command activity, a requested interruption, and application notices. It does not fold turn boundaries, inbox state, tokens, or context pressure independently. Stopping ends when the Agent reports idle. The context figure includes projected growth and compaction after the last provider usage sample; `~` marks it as an estimate. Internal `stateOf` values do not expose the public `projectedTokens` field.
+The TUI stores only presentation state: draft text, transient output, the displayed request, command activity, a requested interruption, and application notices. It does not fold turn boundaries, inbox state, tokens, or context pressure independently. Stopping ends when the Agent reports idle. The context figure includes projected growth and compaction after the last provider usage sample; `~` marks it as an estimate. A model change hides the previous route's occupancy until the new route reports usage, while cumulative billed totals remain. Child inspection reads its own live or saved projection, not the parent's. Internal `stateOf` values do not expose the public `projectedTokens` field.
 
 ## 4. Transcript flow
 

@@ -107,6 +107,22 @@ describe('permission boundary', () => {
   })
 })
 
+it('shows only the inspected child’s context and usage, then restores the parent’s', () => {
+  const parent = props({ context: { used: 9_000, window: 128_000 }, usage: { input: 9000, output: 400 } })
+  const child = { sessionId: 'child', label: 'Review', committed: emptyTranscript,
+    live: [], status: 'idle' as const, model: 'mock/child-model' }
+  const ui = render(<App {...parent} inspection={child} />)
+  expect(ui.lastFrame()).not.toContain('Context:')
+  expect(ui.lastFrame()).not.toContain('in 9k')
+  ui.rerender(<App {...parent} inspection={{ ...child, context: { used: 750, window: 8192 },
+    usage: { input: 700, output: 50 } }} />)
+  expect(ui.lastFrame()).toContain('Context: ~750/8.2k (9%)')
+  expect(ui.lastFrame()).toContain('in 700  out 50')
+  expect(ui.lastFrame()).not.toContain('Context: ~9k/128k')
+  ui.rerender(<App {...parent} />)
+  expect(ui.lastFrame()).toContain('Context: ~9k/128k (7%)')
+})
+
 describe('thinking level', () => {
   it.each(['en', 'zh'] as const)('labels a selected effort in %s and omits unknown levels', locale => {
     const copy = dictionaries[locale]

@@ -64,14 +64,22 @@ const tokenUsageStateSchema = z.object({
 
 type TokenUsageState = z.infer<typeof tokenUsageStateSchema>
 
+const routeSchema = z.object({ provider: z.string(), model: z.string() }).strict()
+
 const pressureSchema: z.ZodType<ContextPressureProjection> = z.object({
   pressureTokens: z.number().int().nonnegative().optional(),
   projectedTokens: z.number().int().nonnegative().optional(),
   contextWindow: z.number().int().positive().optional(),
-}).strict().transform(({ pressureTokens, projectedTokens, contextWindow }) => ({
+  sampledContextWindow: z.number().int().positive().optional(),
+  requestRoute: routeSchema.optional(),
+  sampledRoute: routeSchema.optional(),
+}).strict().transform(({ pressureTokens, projectedTokens, contextWindow, sampledContextWindow, requestRoute, sampledRoute }) => ({
   ...pressureTokens === undefined ? {} : { pressureTokens },
   ...projectedTokens === undefined ? {} : { projectedTokens },
   ...contextWindow === undefined ? {} : { contextWindow },
+  ...sampledContextWindow === undefined ? {} : { sampledContextWindow },
+  ...requestRoute === undefined ? {} : { requestRoute },
+  ...sampledRoute === undefined ? {} : { sampledRoute },
 }))
 
 /** Prompt-side pressure of one request: input plus cache traffic, no output. */
@@ -95,7 +103,10 @@ declare module '@deepseek-ai/dsh-session-projection/types' {
 /** The context-pressure state schema and source of its inferred type. */
 const contextPressureStateSchema = z.object({
   contextWindow: z.number().int().positive().optional(),
+  sampledContextWindow: z.number().int().positive().optional(),
   pressureTokens: z.number().int().nonnegative().optional(),
+  requestRoute: routeSchema.optional(),
+  sampledRoute: routeSchema.optional(),
   surfaceTokens: z.number().int().nonnegative(),
   sampledSurfaceTokens: z.number().int().nonnegative().optional(),
   claim: z.object({
@@ -153,10 +164,9 @@ export const tokenUsageProjectionDefinition = {
  * Token-meter's context-occupancy projection unit.
  *
  * Independent last-wins slots: the newest usage sample supplies the provider
- * numerator, the newest `request/context` record the denominator. Both are
- * whole values, so replay order alone decides the result and no cross-field
- * consistency is claimed — the pair is explicitly not one atomic request
- * observation (see {@link ContextPressureProjection}).
+ * numerator, the newest `request/context` record the denominator. The view
+ * also exposes both routes and capacities so a display can withhold the ratio
+ * while a new request has not supplied its own usage sample.
  *
  * `pressureTokens` is prompt-side only, so it holds still while a turn streams
  * and steps forward once the next request reports its usage. Because nothing
@@ -172,12 +182,18 @@ export const tokenUsageProjectionDefinition = {
  */
 export const contextPressureProjectionDefinition = {
   key: 'contextPressure',
-  stateVersion: 5,
+  stateVersion: 6,
   stateSchema: contextPressureStateSchema,
   init: () => ({ surfaceTokens: 0 }),
   apply: (state, event) => {
     const fold = foldSurfaceProjection(state.claim, event)
     let next = state
+    if (event.type === 'request/header' || event.type === 'request/context') {
+      const { provider, model } = event.type === 'request/header' ? event.data.header.config : event.data
+      if (provider !== next.requestRoute?.provider || model !== next.requestRoute.model) {
+        next = { ...next, requestRoute: { provider, model } }
+      }
+    }
     if (event.type === 'request/context') {
       const contextWindow = event.data.contextWindow
       if (contextWindow !== state.contextWindow) {
@@ -192,8 +208,13 @@ export const contextPressureProjectionDefinition = {
     const usage = usageOf(event)
     if (usage !== undefined) {
       const pressureTokens = pressureFrom(usage)
-      if (pressureTokens !== next.pressureTokens || next.sampledSurfaceTokens !== next.surfaceTokens) {
-        next = { ...next, pressureTokens, sampledSurfaceTokens: next.surfaceTokens }
+      if (pressureTokens !== next.pressureTokens || next.sampledSurfaceTokens !== next.surfaceTokens
+        || next.sampledRoute?.provider !== next.requestRoute?.provider || next.sampledRoute?.model !== next.requestRoute?.model
+        || next.sampledContextWindow !== next.contextWindow) {
+        const { sampledContextWindow: _old, ...withoutSampledWindow } = next
+        next = { ...withoutSampledWindow, pressureTokens, sampledSurfaceTokens: next.surfaceTokens,
+          ...next.contextWindow === undefined ? {} : { sampledContextWindow: next.contextWindow },
+          ...next.requestRoute === undefined ? {} : { sampledRoute: next.requestRoute } }
       }
     }
     if (fold.deltaTokens !== 0) {
@@ -207,8 +228,11 @@ export const contextPressureProjectionDefinition = {
   },
   wire: {
     viewSchema: pressureSchema,
-    view: ({ contextWindow, pressureTokens, surfaceTokens, sampledSurfaceTokens }) => ({
+    view: ({ contextWindow, sampledContextWindow, pressureTokens, requestRoute, sampledRoute, surfaceTokens, sampledSurfaceTokens }) => ({
       ...contextWindow === undefined ? {} : { contextWindow },
+      ...sampledContextWindow === undefined ? {} : { sampledContextWindow },
+      ...requestRoute === undefined ? {} : { requestRoute },
+      ...sampledRoute === undefined ? {} : { sampledRoute },
       ...pressureTokens === undefined ? {} : { pressureTokens },
       ...pressureTokens === undefined || sampledSurfaceTokens === undefined
         ? {}

@@ -1,10 +1,13 @@
 /** Read-only child transcript observation; the subagent retains its own handle. */
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
+import type { ProjectionSnapshot } from '@deepseek-ai/dsh-session-projection'
+import type {} from '@deepseek-ai/dsh-token-meter'
 import type {} from '@deepseek-ai/dsh-permission-presets/types'
 import { Actions, announcedCalls, appendTranscript, emptyTranscript, project, projector, SETTLES } from '@dsh-tui/ui'
 import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
 import { LiveBlocks } from './live.ts'
+import { contextFor, usageFor } from './status.ts'
 
 /** Subscribe before replay so a child can keep running while its history opens. */
 export class SubagentInspection {
@@ -14,7 +17,7 @@ export class SubagentInspection {
   private cursor = -1
   private model = ''
   private thinkingLevel: string | undefined
-  private savedPermission: string | undefined
+  private savedSurface: ProjectionSnapshot | undefined
   private stream: { attempt: string; revision: number; blocks: LiveBlocks } | undefined
   private readonly off: (() => void)[]
   private readonly projection
@@ -50,9 +53,9 @@ export class SubagentInspection {
     ]
     const projections = ctx.get('sessionProjections')
     const offProjection = projections?.onChanged((session, key) => {
-      if (session.id !== id || key !== 'permissions' || this.closed) return
-      // Retain the last authoritative value if the live child is released.
-      this.savedPermission = projections.snapshot(session, ['permissions']).values.permissions?.currentValue
+      if (session.id !== id || !['permissions', 'contextPressure', 'tokenUsage'].includes(key) || this.closed) return
+      // Retain the last authoritative values if the live child is released.
+      this.savedSurface = projections.snapshot(session, ['permissions', 'contextPressure', 'tokenUsage'])
       changed()
     })
     if (offProjection !== undefined) this.off.push(offProjection)
@@ -66,8 +69,17 @@ export class SubagentInspection {
     signal.throwIfAborted()
     if (this.closed) return
     const session = this.ctx.sessions.get(this.id)
-    this.savedPermission = session === undefined ? observation.projections?.values.permissions?.currentValue
-      : this.ctx.get('sessionProjections')?.snapshot(session, ['permissions']).values.permissions?.currentValue
+    const surface = session === undefined ? observation.projections
+      : this.ctx.get('sessionProjections')?.snapshot(session, ['permissions', 'contextPressure', 'tokenUsage'])
+    if (surface !== undefined && (this.savedSurface === undefined || surface.asOfSeq >= this.savedSurface.asOfSeq)) {
+      // Prepared observations include unrelated projections; retain only status readings.
+      const { permissions, contextPressure, tokenUsage } = surface.values
+      this.savedSurface = { asOfSeq: surface.asOfSeq, values: {
+        ...permissions === undefined ? {} : { permissions },
+        ...contextPressure === undefined ? {} : { contextPressure },
+        ...tokenUsage === undefined ? {} : { tokenUsage },
+      } }
+    }
     for (const event of observation.events) this.append(event)
     for (const event of this.buffered ?? []) this.append(event)
     this.buffered = undefined
@@ -76,16 +88,22 @@ export class SubagentInspection {
   get view() {
     const agent = this.ctx.get('agents')?.get(this.id)
     const session = this.ctx.sessions.get(this.id)
-    const permission = session === undefined ? this.savedPermission
-      : this.ctx.get('sessionProjections')?.snapshot(session, ['permissions']).values.permissions?.currentValue
+    const surface = (session === undefined ? this.savedSurface
+      : this.ctx.get('sessionProjections')?.snapshot(session, ['permissions', 'contextPressure', 'tokenUsage']))?.values
+    const permission = surface?.permissions?.currentValue
     const lastRequest = session?.requestHeader()
     const thinkingLevel = lastRequest === undefined ? agent?.options.reasoningEffort ?? this.thinkingLevel
       : lastRequest.config.reasoningEffort
+    const model = lastRequest === undefined
+      ? agent === undefined ? this.model : `${agent.options.provider}/${agent.options.model}`
+      : `${lastRequest.config.provider}/${lastRequest.config.model}`
+    const context = contextFor(surface?.contextPressure, model)
+    const usage = usageFor(surface?.tokenUsage)
     return {
       sessionId: this.id, label: this.label, committed: this.committed,
-      live: this.actions.live(this.stream?.blocks.rows()),
-      status: agent?.status ?? 'idle' as const,
-      model: agent === undefined ? this.model : `${agent.options.provider}/${agent.options.model}`,
+      live: this.actions.live(this.stream?.blocks.rows()), status: agent?.status ?? 'idle' as const,
+      model, context,
+      ...usage === undefined ? {} : { usage },
       ...permission === undefined ? {} : { permission },
       ...thinkingLevel === undefined ? {} : { thinkingLevel },
     }

@@ -722,6 +722,15 @@ scenario('status-colour', 'model and context use normal foreground while support
             }
             return false
           })
+          screen.resize(60, 40)
+          tty.resize(60, 40)
+          await tty.wait('the compact context reading beside access at 60 columns', async () => {
+            const raw = tty.raw
+            await new Promise<void>(resolve => screen.write(raw.slice(consumed), resolve))
+            consumed = raw.length
+            const line = screen.buffer.active.getLine(screen.buffer.active.viewportY + screen.rows - 2)?.translateToString(true) ?? ''
+            return line.includes('Access workspace-write') && /ctx ~\d+%/.test(line)
+          })
         } finally { screen.dispose() }
       })
     } finally {
@@ -1314,7 +1323,7 @@ scenario('inspect-agent', 'select a saved child, read its session, and return wi
       tty.send('\x07', 'Ctrl+G opens the child picker')
       await tty.expect('Select a child to view its session', 'Review terminal output', start)
       tty.send('\r', 'open the selected child session')
-      await tty.expect(`Parent: ${parentId}`, 'Read-only', SCREEN.toolResult, 'Access read-only', start)
+      await tty.expect(`Parent: ${parentId}`, 'Read-only', SCREEN.toolResult, 'Access read-only', 'Context: ~', start)
       tty.send('must not reach the model\r', 'inspection does not accept prompts')
       start = tty.mark()
       tty.send('\x1b', 'return to the running parent without cancelling it')

@@ -7,7 +7,17 @@ import type { AgentHandle } from '@deepseek-ai/dsh-agent'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'
 import { SessionController } from '../src/controller.ts'
 import { openSession } from '../src/session.ts'
+import { contextFor } from '../src/status.ts'
 import { harness, textResponse } from './harness.ts'
+
+it('does not pair one route’s sample with a changed capacity on the same route', () => {
+  const route = { provider: 'mock', model: 'model' }
+  const pressure = { projectedTokens: 900, contextWindow: 64_000, sampledContextWindow: 8192,
+    requestRoute: route, sampledRoute: route }
+  expect(contextFor(pressure, 'mock/model')).toBeUndefined()
+  expect(contextFor({ ...pressure, sampledContextWindow: 64_000 }, 'mock/model'))
+    .toEqual({ used: 900, window: 64_000 })
+})
 
 it('reports projected context after output and reduces it immediately after compaction', async () => {
   const fixture = await harness()
@@ -54,6 +64,62 @@ it('reports projected context after output and reduces it immediately after comp
     controller?.close()
     await handle?.dispose()
     await fixture.dispose()
+  }
+})
+
+it('withholds a previous model’s context through selection and the next request until its usage arrives', async () => {
+  const fixture = await harness()
+  const began = Promise.withResolvers<void>()
+  const release = Promise.withResolvers<void>()
+  let controller: SessionController | undefined
+  let handle: AgentHandle | undefined
+  try {
+    await fixture.ctx.plugin(TokenMeter)
+    const resolve = fixture.model.resolveModel.bind(fixture.model)
+    fixture.model.resolveModel = async (provider, model, signal) => ({
+      ...await resolve(provider, model, signal), context: { contextWindow: model === 'other' ? 64_000 : 8192 },
+    })
+    handle = await openSession(fixture.ctx, {}, new AbortController().signal, (agent, selection) => {
+      controller = new SessionController(fixture.ctx, agent, dictionaries.en, [], () => {},
+        { attachmentMaxBytes: 1048576, attachmentLimit: 8 }, selection)
+    })
+    await controller!.replay(new AbortController().signal)
+    fixture.model.response = async function* () {
+      yield { type: 'usage', usage: { inputTokens: 900, outputTokens: 20 } }
+      yield* textResponse('First answer')
+    }
+    controller!.submit('First question')
+    await handle.agent.whenIdle()
+    expect(controller!.view.context?.window).toBe(8192)
+    expect(controller!.view.usage).toEqual({ input: 900, output: 20 })
+
+    controller!.submit('/model mock/other')
+    await controller!.drain()
+    expect(controller!.view.model).toBe('mock/other')
+    expect(controller!.view.context).toBeUndefined()
+    expect(controller!.view.usage).toEqual({ input: 900, output: 20 })
+
+    fixture.model.response = async function* () {
+      began.resolve()
+      await release.promise
+      yield { type: 'usage', usage: { inputTokens: 1250, outputTokens: 30 } }
+      yield* textResponse('Second answer')
+    }
+    controller!.submit('Use the other model')
+    await began.promise
+    const mixed = fixture.ctx.sessionProjections.snapshot(handle.agent.session, ['contextPressure']).values.contextPressure
+    expect(mixed?.contextWindow).toBe(64_000)
+    expect(mixed?.sampledRoute).toEqual({ provider: 'mock', model: 'model' })
+    expect(controller!.view.context).toBeUndefined()
+    release.resolve()
+    await handle.agent.whenIdle()
+    expect(controller!.view.context?.window).toBe(64_000)
+    expect(controller!.view.context?.used).toBeGreaterThan(1250)
+    expect(controller!.view.usage).toEqual({ input: 2150, output: 50 })
+  } finally {
+    release.resolve()
+    controller?.close()
+    try { await controller?.drain() } finally { await handle?.dispose(); await fixture.dispose() }
   }
 })
 

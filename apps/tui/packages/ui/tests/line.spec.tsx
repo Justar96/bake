@@ -159,6 +159,21 @@ describe('StatusBar', () => {
     expect(rendered.trimEnd()).toBe('Model: deepseek/chat  plan  ctx 12%  turn 3')
   })
 
+  it.each(['en', 'zh'] as const)('keeps a complete compact context reading beside access at 60 cells in %s', locale => {
+    const copy = dictionaries[locale]
+    const draw = (columns: number) => strip(renderToString(<StatusBar
+      left={[{ text: `${copy.model}: a-very-long-model-name` }]}
+      badge={{ label: copy.permission, value: 'workspace-write', color: permissionTone('workspace-write') }}
+      secondaryBadge={{ label: copy.thinking, value: 'high', color: PALETTE.asking }}
+      right={[{ text: `${copy.context}: ~3k/128k (2%)`, short: `${copy.contextShort} ~2%` }, '/workspace']}
+      columns={columns} />, { columns }))
+    expect(draw(120)).toContain(`${copy.context}: ~3k/128k (2%)`)
+    expect(draw(60)).toContain(`${copy.contextShort} ~2%`)
+    expect(draw(60)).toContain(`${copy.permission} workspace-write`)
+    expect(draw(60)).toContain(`${copy.model}:`)
+    expect(draw(60).split('\n')).toHaveLength(1)
+  })
+
   it('truncates rather than wrapping to a second row', () => {
     const rendered = strip(renderToString(
       <StatusBar left={['Model: deepseek/chat']} right={['ctx 12%', 'turn 3', '0f3a9c']} columns={34} />,

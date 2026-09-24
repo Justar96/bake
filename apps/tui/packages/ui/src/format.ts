@@ -72,9 +72,13 @@ export function formatTokens(tokens: number): string {
  * @param usage - the occupancy reported by the harness.
  * @returns the status-line fragment.
  */
+/** Whole-percent occupancy, rounded down for both full and compact readings. */
+export function contextPercent(usage: ContextUsage): number {
+  return usage.window === 0 ? 0 : Math.floor((usage.used / usage.window) * 100)
+}
+
 export function formatContext(usage: ContextUsage): string {
-  const percent = usage.window === 0 ? 0 : Math.floor((usage.used / usage.window) * 100)
-  return `~${formatTokens(usage.used)}/${formatTokens(usage.window)} (${percent}%)`
+  return `~${formatTokens(usage.used)}/${formatTokens(usage.window)} (${contextPercent(usage)}%)`
 }
 
 /**
