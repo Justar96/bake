@@ -15,8 +15,10 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import { credentialRef } from '@deepseek-ai/dsh-credentials'
+import { credentialRef, type CredentialKey } from '@deepseek-ai/dsh-credentials'
 import type { AuthorizationNotice, AuthorizationPrompt } from '@deepseek-ai/dsh-authorization/types'
+import { CLIPROXYAPI_ID, CLIPROXYAPI_KEY, configureCliProxyApi } from './cliproxyapi.ts'
+import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
 
 /** One thing the user can sign in to, whichever seam provides it. */
 export interface LoginTarget {
@@ -29,7 +31,7 @@ export interface LoginTarget {
   /** Whether this surface can change it, or a read-only source shadows it. */
   readonly writable: boolean
   /** Which seam backs it. */
-  readonly kind: 'key' | 'flow'
+  readonly kind: 'key' | 'flow' | 'cliproxyapi'
 }
 
 /** How the surface asks the human for something during a login. */
@@ -61,6 +63,10 @@ export async function listTargets(ctx: Context, refs: readonly string[]): Promis
       const info = await credentials.describe(credentialRef(ref))
       targets.push({ id: ref, label: ref, configured: info.configured, writable: info.writable, kind: 'key' })
     }
+    const info = await credentials.describe(credentialRef(CLIPROXYAPI_KEY))
+    targets.push({ id: CLIPROXYAPI_ID, label: 'CLIProxyAPI',
+      configured: info.configured && (ctx.get('llm')?.listProviders().some(provider => provider.id === CLIPROXYAPI_ID) ?? false),
+      writable: info.writable && (ctx.get('settings')?.writable ?? false), kind: 'cliproxyapi' })
   }
   for (const entry of ctx.get('authorization')?.list() ?? []) {
     targets.push({
@@ -78,7 +84,7 @@ export async function listTargets(ctx: Context, refs: readonly string[]): Promis
 
 /** What one `/login` attempt did. */
 export type LoginResult =
-  | { readonly kind: 'stored', readonly target: string }
+  | { readonly kind: 'stored', readonly target: string, readonly models?: number }
   | { readonly kind: 'cancelled', readonly target: string }
   | { readonly kind: 'unknown-target', readonly id: string }
 
@@ -94,7 +100,7 @@ export type LoginResult =
  * @param id - the target the user named.
  * @param interaction - how to reach the human.
  * @param signal - command cancellation lifetime.
- * @param promptLabel - localized label preceding the credential reference.
+ * @param copy - localized credential and CLIProxyAPI prompt labels.
  * @returns what happened, for the surface to report.
  */
 export async function login(
@@ -103,16 +109,36 @@ export async function login(
   id: string,
   interaction: LoginInteraction,
   signal: AbortSignal,
-  promptLabel: string,
+  copy: Pick<TuiCopy, 'pasteCredential' | 'cliProxyUrl' | 'cliProxyKey' | 'cliProxyChecking'>,
 ): Promise<LoginResult> {
   signal.throwIfAborted()
   const target = targets.find(candidate => candidate.id === id)
   if (target === undefined) return { kind: 'unknown-target', id }
 
+  if (target.kind === 'cliproxyapi') {
+    let declined = false
+    let models: number
+    try {
+      models = await configureCliProxyApi(ctx, async question => {
+        try {
+          const answer = await interaction.prompt(question)
+          if (question.kind === 'secret') interaction.notify({ message: copy.cliProxyChecking })
+          return answer
+        }
+        catch (error) { declined = true; throw error }
+      }, signal, { url: copy.cliProxyUrl, key: copy.cliProxyKey })
+    } catch (error) {
+      if (declined) return { kind: 'cancelled', target: id }
+      throw error
+    }
+    return { kind: 'stored', target: id, models }
+  }
+
   if (target.kind === 'flow') {
     const authorization = ctx.get('authorization')
     if (authorization === undefined) return { kind: 'cancelled', target: id }
-    const outcome = await authorization.begin({ key: target.id, interaction, signal })
+    // A flow target's id was taken directly from authorization.list().
+    const outcome = await authorization.begin({ key: target.id as CredentialKey, interaction, signal })
     return outcome.status === 'authorized' ? { kind: 'stored', target: id } : { kind: 'cancelled', target: id }
   }
 
@@ -120,7 +146,7 @@ export async function login(
   if (credentials === undefined) return { kind: 'cancelled', target: id }
   let value: string
   try {
-    value = await interaction.prompt({ kind: 'secret', message: `${promptLabel}: ${target.label}` })
+    value = await interaction.prompt({ kind: 'secret', message: `${copy.pasteCredential}: ${target.label}` })
   } catch (error) {
     // Prompt rejection represents a declined authorization attempt.
     void error

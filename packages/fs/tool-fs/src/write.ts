@@ -100,7 +100,7 @@ export function applyWriteTool(ctx: Context, sandbox: FsSandboxController): void
         diffs: value.before === null
           ? []
           : computeHunkDiffs(args.file_path, value.before, value.after)
-            .map(({ path, oldText, newText }) => ({ path, oldText, newText })),
+            .map(({ path, oldText, newText, oldStart, newStart }) => ({ path, oldText, newText, oldStart, newStart })),
       }),
     },
     async execute(args: WriteToolArgs, exec) {

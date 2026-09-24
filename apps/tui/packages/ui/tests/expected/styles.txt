@@ -1,22 +1,21 @@
 
-  <ESC>[2mthink<ESC>[22m  <ESC>[2mCheck the files.<ESC>[22m
-         <ESC>[2mThen verify the change.<ESC>[22m
+  <ESC>[3m<ESC>[2mCheck the files.<ESC>[22m<ESC>[23m
+  <ESC>[3m<ESC>[2mThen verify the change.<ESC>[22m<ESC>[23m
 
-<ESC>[1m<ESC>[32m●<ESC>[39m<ESC>[22m <ESC>[1mran<ESC>[22m    ls -a
+<ESC>[1m<ESC>[38;2;34;197;94m●<ESC>[39m<ESC>[22m <ESC>[1mran<ESC>[22m    ls -a
          <ESC>[2mList the directory<ESC>[22m
-         one.ts
-         two.ts
-         three.ts
-         <ESC>[2m+1 more lines<ESC>[22m
+         <ESC>[38;2;96;165;250mone.ts<ESC>[39m
+         <ESC>[38;2;96;165;250mtwo.ts<ESC>[39m
+         <ESC>[38;2;96;165;250mthree.ts<ESC>[39m
+         <ESC>[38;2;96;165;250mfour.ts<ESC>[39m
 
-<ESC>[1m<ESC>[32m●<ESC>[39m<ESC>[22m <ESC>[1medited<ESC>[22m one.ts
-           context
-<ESC>[31m <ESC>[39m        <ESC>[31m- old<ESC>[39m
-<ESC>[32m <ESC>[39m        <ESC>[32m+ new<ESC>[39m
+<ESC>[1m<ESC>[38;2;34;197;94m●<ESC>[39m<ESC>[22m <ESC>[1medited<ESC>[22m one.ts<ESC>[38;2;34;197;94m  +1<ESC>[39m <ESC>[38;2;239;68;68m−1<ESC>[39m
+<ESC>[38;2;239;68;68m <ESC>[39m <ESC>[38;2;239;68;68m     4 - const a = <ESC>[7mold<ESC>[39m<ESC>[27m
+<ESC>[38;2;34;197;94m <ESC>[39m <ESC>[38;2;34;197;94m     4 + const a = <ESC>[7mnew<ESC>[39m<ESC>[27m
 
-<ESC>[31m●<ESC>[39m <ESC>[1m<ESC>[31mread<ESC>[39m<ESC>[22m   secret.md
-<ESC>[31m <ESC>[39m        <ESC>[31mPermission denied<ESC>[39m
+<ESC>[38;2;239;68;68m●<ESC>[39m <ESC>[1m<ESC>[38;2;239;68;68mread<ESC>[39m<ESC>[22m   secret.md
+<ESC>[38;2;239;68;68m <ESC>[39m        <ESC>[38;2;239;68;68mPermission denied<ESC>[39m
 
-<ESC>[1m<ESC>[38;5;180m●<ESC>[39m<ESC>[22m <ESC>[1mfind<ESC>[22m   TODO
+<ESC>[1m<ESC>[38;2;249;115;22m●<ESC>[39m<ESC>[22m <ESC>[1mfind<ESC>[22m   TODO
 
 < Updated one.ts.

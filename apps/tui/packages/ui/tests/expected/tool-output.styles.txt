@@ -1,0 +1,27 @@
+
+<ESC>[1m<ESC>[38;2;34;197;94m●<ESC>[39m<ESC>[22m <ESC>[1mread<ESC>[22m   src/app.ts
+         <ESC>[38;2;96;165;250m1  <ESC>[39mconst <ESC>[38;2;38;139;210mtitle<ESC>[39m <ESC>[38;2;133;153;0m=<ESC>[39m <ESC>[38;2;42;161;152m"中文"<ESC>[39m
+         <ESC>[38;2;96;165;250m2  <ESC>[39m<ESC>[3m// a comment stays readable<ESC>[23m
+         <ESC>[38;2;96;165;250m3  <ESC>[38;2;133;153;0mexport<ESC>[39m <ESC>[38;2;133;153;0mdefault<ESC>[39m <ESC>[38;2;38;139;210mtitle<ESC>[39m
+
+<ESC>[1m<ESC>[38;2;34;197;94m●<ESC>[39m<ESC>[22m <ESC>[1mfound<ESC>[22m  title<ESC>[2m  1 match<ESC>[22m
+         <ESC>[38;2;96;165;250msrc/app.ts<ESC>[39m
+         <ESC>[38;2;96;165;250m  3  <ESC>[38;2;133;153;0mexport<ESC>[39m <ESC>[38;2;133;153;0mdefault<ESC>[39m <ESC>[38;2;38;139;210mtitle<ESC>[39m
+
+<ESC>[1m<ESC>[38;2;34;197;94m●<ESC>[39m<ESC>[22m <ESC>[1mran<ESC>[22m    inspect-json
+         {<ESC>[38;2;133;153;0m"ok"<ESC>[39m:<ESC>[38;2;181;137;0mtrue<ESC>[39m,<ESC>[38;2;133;153;0m"count"<ESC>[39m:<ESC>[38;2;211;54;130m3<ESC>[39m}
+
+<ESC>[1m<ESC>[38;2;34;197;94m●<ESC>[39m<ESC>[22m <ESC>[1mran<ESC>[22m    check
+         <ESC>[38;2;234;179;8mWARN<ESC>[39m <ESC>[38;2;96;165;250msrc/app.ts:3<ESC>[39m
+         <ESC>[38;2;34;197;94mPASS<ESC>[39m tests
+         <ESC>[38;2;96;165;250mhttps://example.com/docs<ESC>[39m
+
+<ESC>[1m<ESC>[38;2;34;197;94m●<ESC>[39m<ESC>[22m <ESC>[1mran<ESC>[22m    <ESC>[1mcustom<ESC>[22m Snippet
+         def <ESC>[38;2;38;139;210mhello<ESC>[39m():
+             <ESC>[38;2;133;153;0mreturn<ESC>[39m <ESC>[38;2;42;161;152m"ready"<ESC>[39m
+
+<ESC>[1m<ESC>[38;2;34;197;94m●<ESC>[39m<ESC>[22m <ESC>[1mran<ESC>[22m    <ESC>[1mcustom<ESC>[22m Unknown
+         keep **literal**
+
+<ESC>[38;2;239;68;68m●<ESC>[39m <ESC>[1m<ESC>[38;2;239;68;68mran<ESC>[39m<ESC>[22m    failed-check<ESC>[38;2;239;68;68m  exit 1<ESC>[39m
+<ESC>[38;2;239;68;68m <ESC>[39m        <ESC>[38;2;239;68;68mERROR src/app.ts:3<ESC>[39m

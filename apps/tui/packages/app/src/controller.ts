@@ -2,6 +2,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, AssistantStreamFrame } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import type { LlmModelReasoningInfo } from '@deepseek-ai/dsh-llm'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
 import { parseCommand } from '@deepseek-ai/dsh-commands'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
@@ -9,22 +10,27 @@ import type {} from '@deepseek-ai/dsh-session-query'
 import type {} from '@deepseek-ai/dsh-compaction'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import { attachmentSummaries } from '@dsh-tui/ui/rows.ts'
-import { Actions, appendTranscript, emptyTranscript, project, projector, type Projector, type Row } from '@dsh-tui/ui'
+import { Actions, announcedCalls, appendTranscript, emptyTranscript, project, projector, SETTLES, type Projector, type Row } from '@dsh-tui/ui'
 import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
 import { AttachmentDraft, type AttachmentOptions } from './attachments.ts'
 import { LiveBlocks } from './live.ts'
 import { Printed } from './printed.ts'
 import { Interactions } from './interactions.ts'
 import { InputCatalog } from './catalog.ts'
+import { SubagentCatalog, subagentEntries } from './subagents.ts'
+import { subagentStatus } from '@dsh-tui/ui/subagents.tsx'
+import { SubagentInspection } from './inspection.ts'
 import { FileReferences } from './references.ts'
 import { listTargets, login } from './login.ts'
-import { listRoutes, routeOf, resolveRoute, resolveSelection } from './model.ts'
+import { bakeVersion, changelogFor } from './release.ts'
+import { listRoutes, namesRoute, routeOf, resolveRoute, resolveSelection } from './model.ts'
 import type { ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 // Empty type imports: each declaration-merges a key into the projection map
 // (`contextPressure`, `todos`), and those keys are invisible here without them.
 import type {} from '@deepseek-ai/dsh-token-meter'
 import type {} from '@deepseek-ai/dsh-tool-todo/types'
 import type {} from '@deepseek-ai/dsh-plan-mode/types'
+import type {} from '@deepseek-ai/dsh-permission-presets/types'
 
 /** One terminal's presentation over a live Agent and its durable projections. */
 export class SessionController {
@@ -33,6 +39,8 @@ export class SessionController {
   readonly attachments: AttachmentDraft
   private submission: { abort: AbortController; done: Promise<boolean> } | undefined
   private readonly catalog: InputCatalog
+  private readonly subagents: SubagentCatalog
+  private inspection: SubagentInspection | undefined
   /** Cancellable discovery for the composer’s active workspace-path query. */
   readonly references: FileReferences
   private committed = emptyTranscript
@@ -40,6 +48,10 @@ export class SessionController {
   private readonly projector: Projector
   private buffered: SessionEvent[] | undefined = []
   private cursor = -1
+  private reasoning: { route: string; info: LlmModelReasoningInfo | undefined } | undefined
+  private reasoningRevision = 0
+  private readonly reasoningAbort = new AbortController()
+  private reasoningLoad: Promise<void> | undefined
   /** Rows for the attempt currently streaming that have not printed yet. */
   private blocks: readonly Row[] = []
   /**
@@ -52,9 +64,13 @@ export class SessionController {
    * they finish.
    */
   private readonly actions = new Actions()
-  private stream: { revision: number; attemptId: string; blocks: LiveBlocks; printed: Printed } | undefined
+  private stream: { attemptId: string; blocks: LiveBlocks; printed: Printed } | undefined
+  private streamRevision = -1
   private stopping = false
-  private command: { text: string; abort: AbortController; done: Promise<void> } | undefined
+  private command: {
+    text: string; abort: AbortController; done: Promise<void>
+    commandId?: string; compactPhase?: 'preparing' | 'summarizing' | 'saving'
+  } | undefined
   private notice: string | undefined
   private closed = false
   private readonly off: (() => void)[] = []
@@ -107,6 +123,43 @@ export class SessionController {
       },
     })))
     this.off.push(agent.ctx.effect(() => commands.register({
+      name: 'agents', description: copy.listSubagents, recordInput: false,
+      handler: async ({ rawInput, signal }) => {
+        if (rawInput.trim() !== '') return { kind: 'error', text: copy.agentsUsage }
+        const entries = await this.subagents.list(signal)
+        if (entries === undefined) return { kind: 'error', text: copy.subagentsUnavailable }
+        const children = subagentEntries(this.subagents.view, ctx, copy)
+        if (children.length === 0) return { kind: 'success', text: copy.noSubagents }
+        const selected = await this.interactions.choose({
+          title: copy.subagentsTitle, initial: children.find(child => child.inspectable)?.id ?? children[0]!.id,
+          choices: children.map(child => ({ value: child.id, label: child.label,
+            description: `${child.detail} · ${child.id}`,
+            status: { text: subagentStatus(child, copy),
+              ...child.state === 'working' ? { tone: 'waiting' as const }
+                : child.state === 'issue' || child.outcome === 'failed' ? { tone: 'failed' as const }
+                : child.outcome === 'completed' ? { tone: 'done' as const }
+                : child.outcome === 'stopped' ? { tone: 'waiting' as const } : {} },
+          })),
+          warning: copy.subagentChoose,
+        }, signal)
+        signal.throwIfAborted()
+        if (selected === undefined) return { kind: 'success' }
+        const child = children.find(entry => entry.id === selected)!
+        if (!child.inspectable) return { kind: 'error', text: `${child.label}: ${child.detail} · ${copy.subagentNoTranscript}` }
+        const entry = entries.find(entry => entry.id === selected)!
+        const inspection = new SubagentInspection(ctx, entry.id, child.label, copy, () => this.repaint())
+        try {
+          await inspection.replay(signal)
+          signal.throwIfAborted()
+          if (this.closed) { inspection.close(); return { kind: 'success' } }
+          this.inspection?.close()
+          this.inspection = inspection
+          this.repaint()
+        } catch (error) { inspection.close(); throw error }
+        return { kind: 'success' }
+      },
+    })))
+    this.off.push(agent.ctx.effect(() => commands.register({
       name: 'clear-pending', description: copy.clearPending,
       handler: ({ rawInput }) => {
         if (rawInput.trim() !== '') return { kind: 'error', text: copy.clearPendingUsage }
@@ -133,8 +186,28 @@ export class SessionController {
         }
       },
     })))
+    this.off.push(agent.ctx.effect(() => commands.register({
+      name: 'changelog', description: copy.changelogCommand, recordInput: false,
+      handler: async ({ rawInput, signal }) => {
+        if (rawInput.trim() !== '') return { kind: 'error', text: copy.changelogUsage }
+        // Returned, like /help, so the entry commits to scrollback instead of
+        // being cut to the notice region's height.
+        const entry = await changelogFor(bakeVersion(), signal)
+        return entry === undefined ? { kind: 'error', text: copy.changelogUnavailable } : { kind: 'success', text: entry }
+      },
+    })))
     this.off.push(ctx.on('session/event', (session, event) => {
       if (session !== agent.session) return
+      const command = this.command
+      if (command?.compactPhase !== undefined) {
+        if (event.type === 'command/run' && event.data.name === 'compact' && command.commandId === undefined) {
+          command.commandId = event.data.commandId
+        } else if (event.type === 'compaction/start' && event.data.sourceCommandId === command.commandId) {
+          command.compactPhase = 'summarizing'
+        } else if (event.type === 'compaction/end' && event.data.sourceCommandId === command.commandId) {
+          command.compactPhase = 'saving'
+        }
+      }
       if (this.buffered !== undefined) this.buffered.push(event)
       else this.append(event)
       // The rows the stream stood in for have committed. `turn/end` covers an
@@ -156,11 +229,13 @@ export class SessionController {
     if (projections === undefined) throw new Error('tui: sessionProjections is required')
     this.off.push(projections.onChanged((session, key) => {
       if (session !== agent.session) return
-      if (key === 'inbox' || key === 'contextPressure' || key === 'todos' || key === 'plan') this.repaint()
+      if (key === 'inbox' || key === 'contextPressure' || key === 'todos' || key === 'plan' || key === 'permissions') this.repaint()
     }))
     this.references = new FileReferences(agent, copy, () => this.repaint())
     this.catalog = new InputCatalog(ctx, agent, copy, () => this.repaint())
     this.catalog.refresh()
+    this.subagents = new SubagentCatalog(ctx, agent, () => this.repaint())
+    this.reasoningLoad = this.loadReasoning()
   }
 
   /**
@@ -186,7 +261,7 @@ export class SessionController {
     const pending = (['next-step', 'next-turn'] as const).flatMap(target => inbox[target]
       .filter(message => message.source.kind === 'user')
       .map(message => ({ id: message.id, target, text: message.content.flatMap(block => block.type === 'text' ? [block.text] : []).join(''), attachments: attachmentSummaries(message.content) })))
-    const surface = projections?.snapshot(this.agent.session, ['contextPressure', 'plan']).values
+    const surface = projections?.snapshot(this.agent.session, ['contextPressure', 'plan', 'tokenUsage', 'permissions']).values
     const pressure = surface?.contextPressure
     // The agent's list, not a log of writes to it: `todos` folds every
     // `todo/write` to the latest whole list, which is the only version that
@@ -195,17 +270,38 @@ export class SessionController {
     const plan = surface?.plan
     const used = pressure?.projectedTokens
     const window = pressure?.contextWindow
+    const usage = surface?.tokenUsage
+    const children = this.subagents.view
+    const subagents = subagentEntries(children, this.ctx, this.copy)
+    // Billed input is the sum of disjoint buckets. Totals of zero are a
+    // session no request has reported on yet, and cache buckets of zero are a
+    // provider that reports no cache traffic: neither is shown as a miss.
+    const input = usage === undefined ? 0 : usage.uncachedInputTokens + usage.cacheReadTokens + usage.cacheWriteTokens
+    const selected = this.selection?.current
+    const reasoning = selected === undefined || this.reasoning?.route !== routeOf(selected) ? undefined : this.reasoning.info
+    const thinkingLevel = selected?.reasoningEffort ?? reasoning?.defaultEffort
+      ?? (reasoning === undefined ? undefined : this.copy.providerDefault)
     return {
-      committed: this.committed, live: [...this.actions.pending, ...this.blocks], pending, status: this.agent.status,
-      stopping: this.stopping, command: this.command?.text, notice: this.notice,
+      committed: this.committed, live: this.actions.live(this.blocks), pending, status: this.agent.status,
+      stopping: this.stopping, command: this.command?.text,
+      ...(this.command?.compactPhase === undefined ? {} : { compactPhase: this.command.compactPhase }),
+      notice: this.notice,
       interaction: this.interactions.current,
       todos: todos === undefined || todos === null ? undefined
         : todos.map(item => ({ text: item.content, status: item.status })),
+      subagents,
+      inspection: this.inspection?.view,
       ...plan === undefined ? {} : { plan },
+      ...surface?.permissions === undefined ? {} : { permission: surface.permissions.currentValue },
+      ...thinkingLevel === undefined ? {} : { thinkingLevel },
       completion: this.catalog.view, files: this.references.view, attachments: this.attachments.view,
       model: this.selection?.current === undefined
-        ? `${this.agent.options.provider}/${this.agent.options.model}` : `${routeOf(this.selection.current)}${this.selection.current.reasoningEffort === undefined ? '' : ` (${this.selection.current.reasoningEffort})`}`,
+        ? `${this.agent.options.provider}/${this.agent.options.model}` : routeOf(this.selection.current),
       context: used === undefined || window === undefined ? undefined : { used, window },
+      ...usage === undefined || input + usage.outputTokens === 0 ? {} : { usage: {
+        input, output: usage.outputTokens,
+        ...usage.cacheReadTokens + usage.cacheWriteTokens === 0 ? {} : { cached: usage.cacheReadTokens },
+      } },
     }
   }
 
@@ -221,10 +317,11 @@ export class SessionController {
    * @returns acceptance; asynchronous attachment failure retains the composer draft.
    */
   submit(text: string): boolean | Promise<boolean> {
-    if (this.closed || this.submission !== undefined) return false
+    if (this.closed || this.submission !== undefined || this.inspection !== undefined) return false
     this.notice = undefined
     const parsed = parseCommand(text)
     if (parsed === undefined || this.ctx.get('commands')?.find(this.agent, parsed.name) === undefined) {
+      if (this.command?.compactPhase !== undefined) { this.notify(this.copy.compactBusy); return false }
       if (this.command !== undefined && parseCommand(this.command.text)?.name === 'attach') { this.notify(this.copy.commandBusy); return false }
       if (this.attachments.pending) {
         if (this.command !== undefined) { this.notify(this.copy.commandBusy); return false }
@@ -237,7 +334,7 @@ export class SessionController {
       this.repaint()
       return true
     }
-    if (this.attachments.pending && !['attach', 'remove-attachment', 'clear-attachments', 'model', 'login', 'help', 'clear-pending', 'sessions'].includes(parsed.name)) {
+    if (this.attachments.pending && !['attach', 'remove-attachment', 'clear-attachments', 'model', 'login', 'help', 'changelog', 'agents', 'clear-pending', 'sessions', 'resume', 'new', 'clear'].includes(parsed.name)) {
       this.notify(this.copy.attachmentCommandsUnsupported); return false
     }
     if (this.command !== undefined) { this.notify(this.copy.commandBusy); return false }
@@ -250,13 +347,16 @@ export class SessionController {
     }).catch((error: unknown) => {
       this.notify(abort.signal.aborted ? this.copy.cancelled : error instanceof Error ? error.message : String(error))
     }).finally(() => { this.command = undefined; this.repaint() })
-    this.command = { text, abort, done }
+    this.command = { text, abort, done, ...(parsed.name === 'compact' ? { compactPhase: 'preparing' as const } : {}) }
     this.repaint()
     return true
   }
 
   /** Cancel the nearest interaction or command; otherwise interrupt while retaining visible pending work. */
   cancel(): void {
+    if (this.inspection !== undefined) {
+      this.inspection.close(); this.inspection = undefined; this.repaint(); return
+    }
     if (this.submission !== undefined) { this.submission.abort.abort(); return }
     if (this.interactions.current !== undefined) { this.interactions.cancel(); return }
     if (this.command !== undefined) this.command.abort.abort()
@@ -280,7 +380,10 @@ export class SessionController {
   close(): void {
     if (this.closed) return
     this.closed = true
+    this.reasoningAbort.abort()
+    this.inspection?.close()
     this.catalog.close()
+    this.subagents.close()
     this.references.close()
     for (const off of this.off) off()
     this.interactions.dispose()
@@ -290,7 +393,24 @@ export class SessionController {
   }
 
   /** @returns after outstanding command and catalog work has settled. */
-  async drain(): Promise<void> { await Promise.all([this.submission?.done, this.command?.done, this.catalog.drain(), this.references.drain()]) }
+  async drain(): Promise<void> { await Promise.all([this.submission?.done, this.command?.done, this.reasoningLoad, this.catalog.drain(), this.subagents.drain(), this.references.drain()]) }
+
+  /** Read only the selected route's advertised default; explicit efforts need no lookup. */
+  private async loadReasoning(): Promise<void> {
+    const selected = this.selection?.current
+    const llm = this.agent.ctx.get('llm')
+    if (selected === undefined || llm === undefined) return
+    const route = routeOf(selected)
+    const revision = this.reasoningRevision
+    try {
+      const info = await resolveRoute(llm, route, this.reasoningAbort.signal)
+      if (this.closed || revision !== this.reasoningRevision || route !== routeOf(this.selection?.current ?? selected)) return
+      this.reasoning = { route, info: info?.reasoning }
+      this.repaint()
+    } catch (error) {
+      if (!this.reasoningAbort.signal.aborted) throw error
+    }
+  }
 
   private submitAttachments(text: string): Promise<boolean> {
     const abort = new AbortController()
@@ -312,7 +432,14 @@ export class SessionController {
     return done
   }
 
-  private repaint(): void { if (!this.closed) this.changed() }
+  private repaint(): void {
+    // Parent approvals must remain reachable while its child is being inspected.
+    if (this.inspection !== undefined && this.interactions.current !== undefined) {
+      this.inspection.close()
+      this.inspection = undefined
+    }
+    if (!this.closed) this.changed()
+  }
 
   /**
    * Commit one event's rows, skipping an event the transcript already holds.
@@ -329,8 +456,11 @@ export class SessionController {
       rows = this.stream.printed.reconcile(rows)
       this.stream.printed = new Printed()
     }
-    // A message or a turn's end follows every action before it, finished or not.
-    const out = this.actions.fold(rows, event.type === 'assistant/message' || event.type === 'turn/end')
+    // A step's end follows every action it made, finished or not.
+    const out = this.actions.fold(rows, SETTLES.has(event.type))
+    // After the fold, since the message settles the step before it: its calls
+    // keep their places until the loop dispatches each.
+    if (event.type === 'assistant/message') this.actions.announce(announcedCalls(event))
     this.committed = appendTranscript(this.committed, out)
     return out
   }
@@ -347,14 +477,18 @@ export class SessionController {
     this.committed = appendTranscript(this.committed, [{ kind: 'notice', tone: 'info', text: this.copy.attemptDiscarded }])
   }
 
+  /** Keep process-local frames in revision order; the log remains the commit source. */
   private streamFrame(frame: AssistantStreamFrame): void {
     if (frame.type === 'start') {
+      // Revisions are monotone across attempts; a delayed start cannot replace
+      // the current reply or restore an attempt whose end already arrived.
+      if (frame.revision <= this.streamRevision) return
       this.discard()
-      this.stream = { revision: frame.revision, attemptId: frame.attemptId, blocks: new LiveBlocks(), printed: new Printed() }
+      this.stream = { attemptId: frame.attemptId, blocks: new LiveBlocks(), printed: new Printed() }
     }
     if (this.stream === undefined || this.stream.attemptId !== frame.attemptId) return
-    if (frame.type !== 'start' && frame.revision <= this.stream.revision) return
-    this.stream.revision = frame.revision
+    if (frame.type !== 'start' && frame.revision <= this.streamRevision) return
+    this.streamRevision = frame.revision
     if (frame.type === 'chunk') {
       this.stream.blocks.push(frame.chunk)
       const { print, live } = this.stream.printed.split(this.stream.blocks.keyed())
@@ -399,7 +533,8 @@ export class SessionController {
         this.notify(undefined)
         route = await this.interactions.choose({
           title: this.copy.chooseModel, initial: routeOf(current),
-          choices: catalog.entries.map(entry => ({ value: entry.route, label: entry.route, current: entry.current, description: entry.name })),
+          choices: catalog.entries.map(entry => ({ value: entry.route, label: entry.route, current: entry.current,
+            ...namesRoute(entry.name, entry.route) ? {} : { description: entry.name } })),
           ...catalog.unavailable.length === 0 ? {} : { warning: `${this.copy.modelCatalogError}: ${catalog.unavailable.join(', ')}` },
         }, signal)
         signal.throwIfAborted()
@@ -429,6 +564,8 @@ export class SessionController {
       signal.throwIfAborted()
       switch (result.kind) {
         case 'selected':
+          this.reasoningRevision += 1
+          this.reasoning = { route: routeOf(result.selection), info: result.reasoning }
           selection.current = result.selection
           this.notify(`${this.copy.modelSelected}: ${routeOf(result.selection)}${result.selection.reasoningEffort === undefined ? '' : ` (${result.selection.reasoningEffort})`}`)
           return
@@ -443,15 +580,25 @@ export class SessionController {
     const targets = await listTargets(this.ctx, this.credentialRefs)
     signal.throwIfAborted()
     if (targets.length === 0) { this.notify(this.copy.noTargets); return }
-    if (id === '') {
-      this.notify(targets.map(target => `/login ${target.id} — ${target.label}: ${target.configured ? this.copy.configured : this.copy.notSet}${target.writable ? '' : ` (${this.copy.readOnly})`}`).join('\n'))
-      return
-    }
-    const result = await login(this.ctx, targets, id, {
+    const chosen = id === '' ? await this.interactions.choose({
+      title: this.copy.chooseLogin,
+      initial: targets.find(target => target.id === 'cliproxyapi' && !target.configured)?.id ?? targets[0]!.id,
+      choices: targets.map(target => ({
+        value: target.id, label: target.label,
+        status: target.configured ? { text: this.copy.configured, tone: 'done' as const } : { text: this.copy.notSet },
+        description: [target.writable ? undefined : this.copy.readOnly,
+          target.kind === 'cliproxyapi' ? this.copy.cliProxySetupHint : undefined,
+        ].filter(part => part !== undefined).join(' · '),
+      })),
+    }, signal) : id
+    signal.throwIfAborted()
+    if (chosen === undefined) { this.notify(this.copy.loginCancelled); return }
+    const result = await login(this.ctx, targets, chosen, {
       notify: notice => this.notify([notice.message, notice.url, notice.code].filter(value => value !== undefined).join(' ')),
       prompt: prompt => this.interactions.prompt(prompt, signal),
-    }, signal, this.copy.pasteCredential)
-    this.notify(result.kind === 'stored' ? `${result.target}: ${this.copy.stored}`
+    }, signal, this.copy)
+    this.notify(result.kind === 'stored' ? result.models === undefined
+      ? `${result.target}: ${this.copy.stored}` : `${result.target}: ${result.models} ${result.models === 1 ? this.copy.cliProxyReadyOne : this.copy.cliProxyReady}`
       : result.kind === 'cancelled' ? this.copy.loginCancelled : `${this.copy.unknownTarget}: ${result.id}`)
   }
 }

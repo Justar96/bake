@@ -3,6 +3,7 @@ import { describe, expect, it as test } from 'vitest'
 import type { Row } from '@dsh-tui/ui'
 import { Printed } from '../src/printed.ts'
 import type { KeyedRow } from '../src/live.ts'
+import { present } from '../../ui/src/present.ts'
 
 const answer = (text: string, key = 1): KeyedRow => ({ key, row: { kind: 'assistant', text } })
 const reasoning = (text: string, key = 0): KeyedRow => ({ key, row: { kind: 'reasoning', text } })
@@ -23,24 +24,45 @@ function stream(printed: Printed, chunks: readonly string[]): { printed: Row[], 
 }
 
 describe('printing a streaming answer', () => {
-  test('prints each line once it ends and keeps the line still arriving live', () => {
+  test('prints settled paragraphs once and keeps the unfinished paragraph live', () => {
     const printed = new Printed()
-    const { printed: rows, live } = stream(printed, ['First li', 'ne.\nSecond ', 'line.\nThi'])
+    const { printed: rows, live } = stream(printed, ['First li', 'ne.\n\nSecond ', 'line.\n\nThi'])
     expect(rows).toEqual([
       { kind: 'assistant', text: 'First line.' },
-      { kind: 'assistant', text: 'Second line.', continued: true },
+      { kind: 'assistant', text: '\nSecond line.', continued: true },
     ])
-    expect(live).toEqual([{ kind: 'assistant', text: 'Thi', continued: true }])
+    expect(live).toEqual([{ kind: 'assistant', text: '\nThi', continued: true }])
   })
 
   test('keeps a paragraph break with the paragraph it opens', () => {
-    const { printed: rows, live } = stream(new Printed(), ['One.\n', '\n', 'Two.\n'])
+    const { printed: rows, live } = stream(new Printed(), ['One.\n', '\n', 'Two.\n\n'])
     expect(rows).toEqual([
       { kind: 'assistant', text: 'One.' },
       { kind: 'assistant', text: '\nTwo.', continued: true },
     ])
     // Still a row while empty, so the header keeps reading `writing`.
-    expect(live).toEqual([{ kind: 'assistant', text: '', continued: true }])
+    expect(live).toEqual([{ kind: 'assistant', text: '\n', continued: true }])
+  })
+
+  test.each([
+    [['One.\n\nTw', 'o.\n\n']],
+    [['One.', '\n\nTw', 'o.\n\n']],
+    [['One.\n\n', 'Two.\n\n']],
+  ])('keeps a paragraph break that arrives in one delta: %j', chunks => {
+    const { printed: rows } = stream(new Printed(), chunks)
+    expect(rows).toEqual([
+      { kind: 'assistant', text: 'One.' },
+      { kind: 'assistant', text: '\nTwo.', continued: true },
+    ])
+  })
+
+  test('holds every break of a run for the paragraph it opens', () => {
+    const printed = new Printed()
+    const { printed: rows, live } = stream(printed, ['One.\n\n\nTwo'])
+    expect(rows).toEqual([{ kind: 'assistant', text: 'One.' }])
+    expect(live).toEqual([{ kind: 'assistant', text: '\n\nTwo', continued: true }])
+    expect(printed.reconcile([{ kind: 'assistant', text: 'One.\n\n\nTwo.' }]))
+      .toEqual([{ kind: 'assistant', text: '\n\nTwo.', continued: true }])
   })
 
   test('draws nothing ahead of the first finished line', () => {
@@ -68,28 +90,28 @@ describe('printing a streaming answer', () => {
 describe('reconciling the commit', () => {
   test('adds only what did not print', () => {
     const printed = new Printed()
-    stream(printed, ['One.\nTwo.\nThr'])
-    expect(printed.reconcile([{ kind: 'assistant', text: 'One.\nTwo.\nThree.' }]))
-      .toEqual([{ kind: 'assistant', text: 'Three.', continued: true }])
+    stream(printed, ['One.\n\nTwo.\n\nThr'])
+    expect(printed.reconcile([{ kind: 'assistant', text: 'One.\n\nTwo.\n\nThree.' }]))
+      .toEqual([{ kind: 'assistant', text: '\nThree.', continued: true }])
   })
 
   test('adds nothing when everything printed, even without the final newline', () => {
     const printed = new Printed()
-    stream(printed, ['Done.\n'])
+    stream(printed, ['Done.\n\n'])
     expect(printed.reconcile([{ kind: 'assistant', text: 'Done.' }])).toEqual([])
     expect(printed.reconcile([{ kind: 'assistant', text: 'Done.\n' }])).toEqual([])
   })
 
   test('drops printed reasoning and keeps the order of the rest', () => {
     const printed = new Printed()
-    printed.split([reasoning('Why.'), answer('Because.\nSo')])
-    expect(printed.reconcile([{ kind: 'reasoning', text: 'Why.' }, { kind: 'assistant', text: 'Because.\nSo.' }]))
-      .toEqual([{ kind: 'assistant', text: 'So.', continued: true }])
+    printed.split([reasoning('Why.'), answer('Because.\n\nSo')])
+    expect(printed.reconcile([{ kind: 'reasoning', text: 'Why.' }, { kind: 'assistant', text: 'Because.\n\nSo.' }]))
+      .toEqual([{ kind: 'assistant', text: '\nSo.', continued: true }])
   })
 
   test('prints a block again whole when the commit changed it', () => {
     const printed = new Printed()
-    stream(printed, ['Draft.\n'])
+    stream(printed, ['Draft.\n\n'])
     const committed: Row = { kind: 'assistant', text: 'Final.' }
     expect(printed.reconcile([committed])).toEqual([committed])
   })
@@ -98,4 +120,19 @@ describe('reconciling the commit', () => {
     const rows: Row[] = [{ kind: 'reasoning', text: 'a' }, { kind: 'assistant', text: 'b' }]
     expect(new Printed().reconcile(rows)).toEqual(rows)
   })
+})
+
+test.each([1, 2, 7, 4096])('streamed Markdown matches replay with %i-character deltas', size => {
+  const source = '# Summary\n\n**bold across\nlines** and [docs](https://example.com).\n\n'
+    + 'Setext heading\n---\n\n3. first\n   - nested\n4. second\n\n'
+    + '```ts\nconst snake_case = "**literal**"\n\n  return snake_case\n```\n\n'
+    + '| Name | State |\n| --- | --- |\n| 中文 | **ready** |\n\n'
+    + '> a quote\n> with a continuation\n\n[**ref**][id]\n\n[id]: https://example.com\n\nDone.'
+  const printed = new Printed()
+  const chunks = Array.from({ length: Math.ceil(source.length / size) }, (_, index) => source.slice(index * size, (index + 1) * size))
+  const { printed: rows } = stream(printed, chunks)
+  const commit: Row[] = [{ kind: 'assistant', text: source }]
+  const bound = { lines: 3, unit: 'lines', more: 'more lines' }
+  expect([...rows, ...printed.reconcile(commit)].flatMap(row => present(row, bound)))
+    .toEqual(commit.flatMap(row => present(row, bound)))
 })

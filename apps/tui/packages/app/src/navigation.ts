@@ -2,6 +2,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent'
 import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
+import { formatAge } from '@dsh-tui/ui/format.ts'
 import type { AttachmentOptions } from './attachments.ts'
 import { SessionController } from './controller.ts'
 import { openSession, type SessionOptions } from './session.ts'
@@ -84,11 +85,15 @@ export class SessionNavigation {
         if (this.closed) throw new Error(this.copy.sessionsCancelled)
         const commands = agent.ctx.get('commands')
         if (commands === undefined) throw new Error('tui: commands service is required')
-        agent.ctx.effect(() => commands.register({
-          name: 'sessions', description: this.copy.chooseSession, recordInput: false,
+        for (const [name, description] of [
+          ['sessions', this.copy.chooseSession], ['resume', this.copy.resumeSession],
+          ['new', this.copy.newSessionCommand], ['clear', this.copy.clearSessionCommand],
+        ] as const) agent.ctx.effect(() => commands.register({
+          name, description, recordInput: false,
           handler: ({ rawInput }) => {
-            if (rawInput.trim() !== '') return { kind: 'error', text: this.copy.sessionsUsage }
-            this.request(agent)
+            if (rawInput.trim() !== '') return { kind: 'error', text: name === 'new' || name === 'clear'
+              ? this.copy.newSessionUsage : this.copy.sessionsUsage }
+            this.request(agent, name === 'new' || name === 'clear')
             return { kind: 'success' }
           },
         }))
@@ -107,14 +112,14 @@ export class SessionNavigation {
     } finally { this.candidate = undefined }
   }
 
-  private request(agent: Agent): void {
+  private request(agent: Agent, newSession: boolean): void {
     if (this.closed || this.busy || agent !== this.controller?.agent) return
     const abort = new AbortController()
     // The registry must finish command/done before its Session can be retired.
     const done = Promise.resolve().then(async () => {
       await this.controller?.drain()
       abort.signal.throwIfAborted()
-      await this.navigate(abort.signal)
+      await this.navigate(abort.signal, newSession)
     }).catch((error: unknown) => {
       this.controller?.notify(abort.signal.aborted ? this.copy.sessionsCancelled
         : `${this.copy.sessionsError}: ${error instanceof Error ? error.message : String(error)}`)
@@ -129,7 +134,7 @@ export class SessionNavigation {
     if (agent.inbox.nextStep.length > 0 || agent.inbox.nextTurn.length > 0) throw new Error(this.copy.sessionsPending)
   }
 
-  private async navigate(commandSignal: AbortSignal): Promise<void> {
+  private async navigate(commandSignal: AbortSignal, newSession: boolean): Promise<void> {
     const previous = this.current!
     const { agent } = previous.handle
     this.assertAvailable(agent)
@@ -140,34 +145,13 @@ export class SessionNavigation {
     }
     const offStatus = this.ctx.on('agent/status', payload => { if (payload.agent === agent) recheck() })
     const projections = this.ctx.get('sessionProjections')
-    const agents = this.ctx.get('agents')
-    if (projections === undefined || agents === undefined) throw new Error('tui: sessionProjections and agents are required')
+    if (projections === undefined) throw new Error('tui: sessionProjections is required')
     const offInbox = projections.onChanged((session, key) => {
       if (session === agent.session && key === 'inbox') recheck()
     })
     let next: ConnectedSession | undefined
     try {
-      const query = this.ctx.get('sessionQuery')
-      if (query === undefined) throw new Error('tui: sessionQuery is required')
-      previous.controller.notify(this.copy.sessionsLoading)
-      const records = (await query.filterSessions([{ kind: 'cwd', values: [agent.session.header.cwd ?? null] }], signal))
-        .filter(record => record.header.origin !== 'subagent'
-          && (record.header.id === agent.id || (record.persisted && agents.get(record.header.id) === undefined)))
-      const titles = await query.readTitleSnapshots(records.map(record => record.header.id), signal)
-      signal.throwIfAborted()
-      const names = new Map(titles.flatMap(result => result.status === 'fulfilled'
-        && result.value.title !== undefined ? [[result.sessionId, result.value.title.title] as const] : []))
-      previous.controller.notify(undefined)
-      const selected = await previous.controller.interactions.choose({
-        title: this.copy.chooseSession, initial: agent.id,
-        choices: [
-          { value: '', label: this.copy.newSession },
-          ...records.map(record => ({ value: record.header.id, label: names.get(record.header.id) ?? record.header.id,
-            description: `${record.header.id} · ${new Date(record.header.createdAt).toISOString()}`,
-            current: record.header.id === agent.id })),
-        ],
-        ...titles.some(result => result.status === 'rejected') ? { warning: this.copy.sessionTitlesUnavailable } : {},
-      }, signal)
+      const selected = newSession ? '' : await this.selectSession(previous, signal)
       signal.throwIfAborted()
       if (selected === undefined) { previous.controller.notify(this.copy.sessionsCancelled); return }
       if (selected === agent.id) return
@@ -191,8 +175,61 @@ export class SessionNavigation {
     }
   }
 
+  private async selectSession(previous: ConnectedSession, signal: AbortSignal): Promise<string | undefined> {
+    const { agent } = previous.handle
+    const query = this.ctx.get('sessionQuery')
+    const agents = this.ctx.get('agents')
+    if (query === undefined || agents === undefined) throw new Error('tui: sessionQuery and agents are required')
+    previous.controller.notify(this.copy.sessionsLoading)
+    const records = (await query.filterSessions([{ kind: 'cwd', values: [agent.session.header.cwd ?? null] }], signal))
+      .filter(record => record.header.origin !== 'subagent'
+        && (record.header.id === agent.id || (record.persisted && agents.get(record.header.id) === undefined)))
+    const titles = await query.readTitleSnapshots(records.map(record => record.header.id), signal)
+    signal.throwIfAborted()
+    const names = new Map(titles.flatMap(result => result.status === 'fulfilled'
+      && result.value.title !== undefined ? [[result.sessionId, result.value.title.title] as const] : []))
+    const saved = records.filter(record => record.header.id !== agent.id)
+      .sort((left, right) => right.header.createdAt - left.header.createdAt
+        || left.header.id.localeCompare(right.header.id))
+    const current = records.find(record => record.header.id === agent.id) ?? { header: agent.session.header }
+    previous.controller.notify(undefined)
+    const now = Date.now()
+    const age = { now: this.copy.ageNow, minutes: this.copy.ageMinutes, hours: this.copy.ageHours, days: this.copy.ageDays }
+    return previous.controller.interactions.choose({
+      title: this.copy.chooseSession,
+      initial: agent.id,
+      choices: [
+        ...[current, ...saved].map(record => {
+          const name = names.get(record.header.id)
+          // An untitled session is labelled by its id, so the id is not repeated;
+          // the full id stays searchable either way through the choice's value.
+          const when = formatAge(record.header.createdAt, now, age)
+          return {
+            value: record.header.id, label: name ?? record.header.id,
+            description: name === undefined ? when : `${when} · ${shortId(record.header.id)}`,
+            role: record.header.id === agent.id ? 'session-current' as const : 'session-saved' as const,
+          }
+        }),
+        // Pinned, so a long history never scrolls the way to a fresh session out of view.
+        { value: '', label: this.copy.newSession, role: 'session-new' as const, pinned: true },
+      ],
+      ...titles.some(result => result.status === 'rejected') ? { warning: this.copy.sessionTitlesUnavailable } : {},
+    }, signal)
+  }
+
   private async dispose(session: ConnectedSession): Promise<void> {
     session.controller.close()
     try { await session.controller.drain() } finally { await session.handle.dispose() }
   }
+}
+
+/**
+ * Enough of a session id to tell sessions apart: its first block of eight hex
+ * digits, as a UUID's is. Any other id is short enough, or opaque enough, to
+ * show whole.
+ * @param id - the session id.
+ * @returns the id's leading hex block, or the id.
+ */
+function shortId(id: string): string {
+  return /[0-9a-f]{8}/i.exec(id)?.[0] ?? id
 }

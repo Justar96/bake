@@ -27,20 +27,10 @@ export const COLUMN = {
 } as const
 
 /**
- * Widest comfortable prose column.
- *
- * Long monospace lines are hard to scan back to the start of, and terminals get
- * arbitrarily wide. Tool output is exempt: wrapping a log or a diff to a narrow
- * measure destroys the alignment that makes it readable.
- */
-export const PROSE_MEASURE = 88
-
-/**
  * Rows the dynamic region always owes, whatever else it draws.
  *
- * `Chrome` spends them on a blank row, the composer's frame above and below,
- * the composer's first line, and the status line under the frame. A draft
- * taller than one line takes further rows from the regions above it, which is
+ * `Chrome` spends them on a blank row, the rule, the composer's first line,
+ * a blank padding row, and the status line. A draft taller than one line takes further rows from the regions above it, which is
  * why the composer is counted at its floor rather than its maximum.
  *
  * Understating this understates nothing else: the live region may grow to
@@ -50,13 +40,11 @@ export const PROSE_MEASURE = 88
 export const CHROME_ROWS = 5
 
 /**
- * Narrowest terminal the composer draws its frame in.
+ * Narrowest terminal the welcome card draws its border in.
  *
- * The frame costs four columns — two for the border and two for the padding —
- * and at §4's supported minimum of 40 that is a tenth of the line the user is
- * typing on. Below it the frame is dropped rather than shrunk: the rail and
- * the status line below already say where input lands, and a draft with room
- * to read is worth more than a box around it.
+ * The border costs four columns — two for the border and two for the padding —
+ * and at §4's supported minimum of 40 that is a tenth of the line. Below it
+ * the border is dropped rather than shrunk.
  */
 export const FRAME_MIN_COLUMNS = 40
 
@@ -95,13 +83,25 @@ export const COMPOSER_BUDGET = 5
 export const NOTICE_BUDGET = 6
 
 /**
- * Frame the composer draws around the draft.
+ * Line glyphs the welcome card's border and the composer's rule draw.
  *
  * `round` is box-drawing characters; `classic` is ASCII. Which one a terminal
  * can render is a property of that terminal, resolved once at the application
  * boundary and passed in, so this layer needs no environment to lay out.
  */
 export type FrameStyle = 'round' | 'classic'
+
+/**
+ * The composer's rule: its resting line, and the heavier line the turn's
+ * light is drawn in as it sweeps along it. The heavier glyph is what carries
+ * the light where colour cannot. Box-drawing characters are East Asian
+ * Ambiguous, and a full-width run of them is the one place such a glyph
+ * accumulates error across a row, so `classic` draws both in ASCII.
+ */
+export const RULE: Readonly<Record<FrameStyle, { readonly line: string, readonly light: string }>> = {
+  round: { line: '\u2500', light: '\u2501' },
+  classic: { line: '-', light: '=' },
+}
 
 /** Terminal size, as reported by `useWindowSize()`. */
 export interface WindowSize {
@@ -130,32 +130,48 @@ export interface Budget {
   readonly items: number
   /** Lines a notice may draw before it must show a `+N more` footer. */
   readonly notice: number
+  /** Current terminal width, including the rail and output columns. */
+  readonly columns: number
   /** Columns prose may wrap at. */
   readonly measure: number
   /** Columns tool output may use. */
   readonly output: number
 }
 
-/** Composer structure that fits before any additional draft rows are reserved. */
+/**
+ * Composer structure that fits before any additional draft rows are reserved:
+ * from the top, a blank, the rule, the draft's first row, a blank padding row,
+ * and the status line.
+ */
 export interface ChromeLayout {
-  readonly frame: boolean
-  readonly status: boolean
+  /** The blank that opens the stack under the conversation. */
   readonly gap: boolean
+  /** The rule over the draft, which carries the turn's state. */
+  readonly rule: boolean
+  /** The blank between the draft and the status line. */
+  readonly pad: boolean
+  readonly status: boolean
   readonly rows: number
 }
 
 /**
- * Yield decorative rows before hiding input on a short or narrow terminal.
- * @param columns - terminal width.
+ * Yield structure row by row before hiding input on a short terminal: the gap
+ * first, then the padding, then the status line, then the rule, which is the
+ * last to go because it says whether a turn is running.
+ *
+ * Every piece is one row at any width, so the chrome's height depends on the
+ * terminal's rows alone and a width change never moves the input vertically.
+ *
+ * @param _columns - terminal width, which no row depends on.
  * @param available - rows available to the footer, excluding Ink's cursor row.
  * @returns visible structure and its exact height with a one-row draft.
  */
-export function chromeFor(columns: number, available = CHROME_ROWS): ChromeLayout {
-  const frame = columns >= FRAME_MIN_COLUMNS && available >= 3
-  const input = frame ? 3 : 1
-  const status = available > input
-  const gap = available > input + 1
-  return { frame, status, gap, rows: input + Number(status) + Number(gap) }
+export function chromeFor(_columns: number, available = CHROME_ROWS): ChromeLayout {
+  const rule = available >= 2
+  const status = available >= 3
+  const pad = available >= 4
+  const gap = available >= 5
+  return { gap, rule, pad, status, rows: 1 + Number(rule) + Number(pad) + Number(status) + Number(gap) }
 }
 
 /**
@@ -176,8 +192,9 @@ export function budgetFor(size: WindowSize, options: { readonly header?: boolean
   const composer = Math.max(1, Math.min(COMPOSER_BUDGET, dynamic - chrome.rows))
   const items = Math.max(1, dynamic - chrome.rows - (options.header === true ? 1 : 0))
   const notice = Math.max(1, Math.min(NOTICE_BUDGET, dynamic - chrome.rows))
-  const measure = Math.max(1, Math.min(PROSE_MEASURE, size.columns - COLUMN.rail))
-  return { dynamic, chrome, live, composer, items, notice, measure, output: Math.max(1, size.columns - COLUMN.output) }
+  const columns = Math.max(1, size.columns)
+  const measure = Math.max(1, columns - COLUMN.rail)
+  return { dynamic, chrome, live, composer, items, notice, columns, measure, output: Math.max(1, columns - COLUMN.output) }
 }
 
 /**
@@ -249,21 +266,14 @@ export const MARKER = {
   turn: '\u25cf',
   /** First line of an assistant reply. */
   reply: '<',
-  /**
-   * A slash command the user ran.
-   *
-   * The rail carries the slash, so the row breaks the left column the way a
-   * command breaks the conversation, and the name reads without it. Colour
-   * alone would not do this: dim prose at the text column is indistinguishable
-   * from an answer under NO_COLOR and to a screen reader.
-   */
-  command: '/',
   /** The composer prompt. Only the live input carries it, never history. */
   prompt: '>',
   /** A selected list row: a pointer, because the eye follows it as it moves. */
   selected: '\u25b8',
   /** A value already in force, as opposed to the one under the cursor. */
   current: '*',
+  /** Something held that has not started: a task still to do, a child at rest. */
+  waiting: '\u25cb',
   /**
    * Opens an action: pulsing while it runs, green once it succeeded, red once
    * it failed. The shape is the same in every state, so `NO_COLOR` still reads
@@ -275,19 +285,30 @@ export const MARKER = {
 } as const
 
 /**
+ * Tree glyphs hanging a block's items from its head, drawn in the rail: a
+ * branch opens each item, a stem carries an item's lines down to the next,
+ * and the last item's corner closes the block. A step's calls hang from the
+ * head that counts them this way, and so do the task list's and the
+ * subagents' entries, so every block with a head and items reads alike.
+ * Markers, for the reason {@link MARKER} gives.
+ */
+export const TREE = { branch: '\u251c', corner: '\u2514', stem: '\u2502' } as const
+
+/**
  * Verbs naming what the agent did.
  *
  * Named rather than pictured: a verb reads at a glance, survives every font and
- * locale, and stays legible pasted into a bug report. Reasoning and approvals
- * use the same grammar rather than inventing their own marks.
+ * locale, and stays legible pasted into a bug report. Approvals use the same
+ * grammar rather than inventing their own marks. Reasoning takes none: it is
+ * the model's prose, not an action, and reads as a dim italic paragraph.
  */
 export const VERB = {
-  think: 'think',
   run: 'run',
   read: 'read',
   edit: 'edit',
   find: 'find',
   fetch: 'fetch',
+  plan: 'plan',
   ask: 'ask',
   note: 'note',
   error: 'error',
@@ -305,12 +326,12 @@ export type Verb = typeof VERB[keyof typeof VERB]
  * second row saying so. Every form fits the verb column with its gap.
  */
 export const PAST: Readonly<Record<Verb, string>> = {
-  think: 'think',
   run: 'ran',
   read: 'read',
   edit: 'edited',
   find: 'found',
   fetch: 'got',
+  plan: 'plan',
   ask: 'asked',
   note: 'note',
   error: 'error',

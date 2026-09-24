@@ -8,6 +8,7 @@ import { App, type AppProps } from '../src/app.tsx'
 import { dictionaries } from '../src/copy.ts'
 import { appendTranscript, emptyTranscript } from '../src/transcript.ts'
 import type { Row } from '../src/rows.ts'
+import { SPINNER_REST, THINKING_ROWS } from '../src/activity.ts'
 
 class Input extends EventEmitter {
   isTTY = true
@@ -32,9 +33,24 @@ class Output extends EventEmitter {
 const disposers: (() => void)[] = []
 afterEach(() => { for (const dispose of disposers.splice(0).reverse()) dispose() })
 
-async function mount(columns: number, rows: number) {
+/** Ink's `clearTerminal`, which starts a replay of history. */
+const CLEAR_TERMINAL = '\u001b[2J\u001b[3J\u001b[H'
+/** Cursor Next Line, which the runner writes as a scrolling newline (`scrolling` in its output). */
+const NEXT_LINE = '\u001b[E'
+
+/**
+ * Mount the app in a terminal, placed as the runner places it.
+ *
+ * The runner's output (`packages/app/src/output.ts`) starts the frame on the
+ * bottom row, under whatever the shell printed, and returns there after each
+ * screen clear, and steps over unchanged rows with a newline that scrolls.
+ * The streams here are Ink's own, so the terminal is given the same moves;
+ * `packages/app/tests/output.spec.tsx` checks the runner's.
+ */
+async function mount(columns: number, rows: number, overrides: Partial<AppProps> = {}) {
   const terminal = new xterm.Terminal({ cols: columns, rows, convertEol: true, allowProposedApi: true })
   disposers.push(() => terminal.dispose())
+  await new Promise<void>(resolve => terminal.write(`$ bake\n\u001b[${rows}B`, resolve))
   const stdout = new Output(columns, rows)
   const stdin = new Input()
   let state: AppProps = {
@@ -45,6 +61,7 @@ async function mount(columns: number, rows: number) {
     model: 'mock/model', cwd: '/workspace', sessionId: 'screen', copy: dictionaries.en,
     frame: 'round', quitting: false, context: undefined,
     onSubmit: () => {}, onCancel: () => {}, onInterrupt: () => {}, onAnswer: () => {},
+    ...overrides,
   }
   const instance = render(<App {...state} />, {
     stdout: stdout as unknown as NodeJS.WriteStream, stdin: stdin as unknown as NodeJS.ReadStream,
@@ -56,7 +73,8 @@ async function mount(columns: number, rows: number) {
   let consumed = 0
   async function screen(): Promise<string[]> {
     await instance.waitUntilRenderFlush()
-    const bytes = stdout.chunks.slice(consumed).join('')
+    const bytes = stdout.chunks.slice(consumed).join('').replaceAll(CLEAR_TERMINAL, `${CLEAR_TERMINAL}\u001b[${stdout.rows}B`)
+      .replaceAll(NEXT_LINE, '\r\n')
     consumed = stdout.chunks.length
     if (bytes !== '') await new Promise<void>(resolve => terminal.write(bytes, resolve))
     return Array.from({ length: stdout.rows }, (_, row) => terminal.buffer.active.getLine(terminal.buffer.active.viewportY + row)?.translateToString(true) ?? '')
@@ -94,32 +112,55 @@ const inputRow = (screen: readonly string[]): number => screen.findIndex(line =>
 const lastRow = (screen: readonly string[], text: string): number => screen.findLastIndex(line => line.includes(text))
 
 /**
- * Assert the Claude Code shape: newest line, one blank, the turn header while
- * one runs or its summary after, the framed input, and the status line as the frame's footer.
+ * Assert the resting shape: the newest line, blank rows, the thinking window
+ * while one streams, the rule — bare, naming the running turn, or holding its
+ * summary — the input under it, a blank padding row, and the status line on
+ * the terminal's last rows, over Ink's cursor row.
+ * @returns the blank rows between the newest line and what rests on the
+ *   input: one, and more while the frame holds rows something above the
+ *   input gave up.
  */
-function expectInputUnder(screen: readonly string[], text: string): void {
+function expectInputUnder(screen: readonly string[], text: string): number {
   const newest = lastRow(screen, text)
   const input = inputRow(screen)
-  expect(newest, screen.join('\n')).toBeGreaterThanOrEqual(0)
-  expect(screen[newest + 1], screen.join('\n')).toBe('')
-  const top = screen.findIndex((line, index) => index > newest && line.startsWith('╭'))
-  expect(screen[top]).toMatch(/^╭─+╮$/)
-  const header = screen.slice(newest + 2, top)
-  // The reasoning ticker while there is one, then the turn header resting on
-  // the frame: nothing else between, and nothing under the header.
-  expect(header.length, screen.join('\n')).toBeLessThanOrEqual(2)
-  // While a turn runs, the header, which yields to the output on a short
-  // terminal; once it ends, the same row holds the turn's summary.
-  if (header.length > 0) {
-    const status = screen[input + 2]!
-    expect(header.at(-1)).toMatch(/^ {2}Working/.test(status) ? /^✻ \S+…/ : /^[✓■✗] /)
-  }
-  expect(input, screen.join('\n')).toBe(top + 1)
-  expect(screen[input + 1]).toMatch(/^╰─+╯$/)
-  expect(screen[input + 2]).toMatch(/^ {2}(Ready|Working)/)
+  const dump = screen.join('\n')
+  expect(newest, dump).toBeGreaterThanOrEqual(0)
+  expect(screen[newest + 1], dump).toBe('')
+  const rule = input - 1
+  expect(rule, dump).toBeGreaterThan(newest + 1)
+  expect(screen[rule], dump).toMatch(new RegExp(`^(─+|─ (> |${SPINNER_REST} )\\S+….*|─ [✓■✗] .*)$`))
+  let first = rule
+  while (first > newest + 1 && screen[first - 1] !== '') first--
+  expect(screen.slice(newest + 1, first).every(line => line === ''), dump).toBe(true)
+  // The thinking window while there is one, resting on the rule: nothing
+  // else between.
+  expect(rule - first, dump).toBeLessThanOrEqual(THINKING_ROWS)
+  expect(screen[input]!.startsWith('> '), dump).toBe(true)
+  expect(screen[input + 1], dump).toBe('')
+  expect(screen[input + 2], dump).toMatch(/^ {2}Model: /)
+  expect(input + 3, dump).toBe(screen.length - 1)
+  return first - newest - 1
 }
 
 describe('composer placement', () => {
+  it.each([[80, 24], [40, 10], [24, 3]])('prints the welcome once without displacing input at %ix%i', async (columns, rows) => {
+    const ui = await mount(columns, rows, { version: '1.2.3' })
+    const first = await ui.screen()
+    const input = inputRow(first)
+    expect(input).toBeGreaterThanOrEqual(0)
+    expect((await ui.history()).join('\n')).toContain('BAKE  v1.2.3')
+    const committed = appendTranscript(emptyTranscript, [{ kind: 'user', text: 'First prompt' }])
+    expect(inputRow(await ui.update({ committed, status: 'running' }))).toBe(input)
+    await ui.update({ status: 'idle' })
+    const history = (await ui.history()).join('\n')
+    expect(history.split('BAKE  v1.2.3')).toHaveLength(2)
+    expect(history).toContain('First prompt')
+    expect(stdoutClears(ui.stdout)).toBe(false)
+    const resized = await ui.resize(columns + 10, rows + 4)
+    expect(inputRow(resized)).toBeGreaterThanOrEqual(0)
+    expect((await ui.history()).join('\n').split('BAKE  v1.2.3')).toHaveLength(2)
+  })
+
   it.each([[24, 2], [24, 3], [39, 5], [40, 3], [80, 5]])('keeps a usable composer at %ix%i', async (columns, rows) => {
     const ui = await mount(columns, rows)
     expect(inputRow(await ui.screen())).toBeGreaterThanOrEqual(0)
@@ -140,20 +181,24 @@ describe('composer placement', () => {
     // row carries `^` rather than the prompt marker.
     const input = screen.findIndex(line => line.includes('fourth▌'))
     expect(input).toBeGreaterThanOrEqual(0)
-    expect(screen[input + 1]).toMatch(/^╰─+╯$/)
+    // The rule is the last structure to yield, so it stays on the input.
+    expect(screen[input - 1]).toMatch(/^─+$/)
     expect(screen[rows - 1]).toBe('')
     await expect(snapshotOf(screen)).toMatchFileSnapshot(`./expected/composer-short.${columns}x${rows}.txt`)
   })
 
-  it('opens directly under the session heading, with the status line beneath the frame', async () => {
+  it('opens on the bottom rows under the session heading, below what the shell printed', async () => {
     const ui = await mount(80, 24)
     const screen = await ui.screen()
-    expectInputUnder(screen, 'Session: screen')
-    expect(inputRow(screen)).toBe(3)
-    expect(screen[5]).toBe('  Ready  model  /workspace')
+    // The frame grew up from the bottom row, scrolling the shell's line away.
+    expect((await ui.history())[0]).toBe('$ bake')
+    expect(screen.slice(0, lastRow(screen, 'Session: screen')).every(line => line === '')).toBe(true)
+    expect(expectInputUnder(screen, 'Session: screen')).toBe(1)
+    expect(inputRow(screen)).toBe(24 - 4)
+    expect(screen[22]).toBe('  Model: model  /workspace')
   })
 
-  it.each([[80, 24], [40, 10], [120, 40]])('follows the newest line through streaming and commits at %ix%i', async (columns, rows) => {
+  it.each([[80, 24], [40, 10], [120, 40]])('holds the input on the bottom row through streaming and commits at %ix%i', async (columns, rows) => {
     const ui = await mount(columns, rows)
     await ui.screen()
     let committed = emptyTranscript
@@ -162,25 +207,26 @@ describe('composer placement', () => {
       expectInputUnder(await ui.update({ committed, status: 'running' }), `Prompt ${turn}`)
       for (const count of [1, 4, 18]) {
         const text = Array.from({ length: count }, (_, index) => `Response ${turn} line ${index}`).join('\n')
-        const frame = await ui.update({ live: [{ kind: 'assistant', text }] })
-        expectInputUnder(frame, `Response ${turn} line ${count - 1}`)
-        // The status line and Ink's cursor row stay on screen below the input.
-        expect(inputRow(frame)).toBeLessThanOrEqual(rows - 4)
+        expectInputUnder(await ui.update({ live: [{ kind: 'assistant', text }] }), `Response ${turn} line ${count - 1}`)
       }
+      // One committed row for an answer the window drew at its full height:
+      // the frame holds the rows the answer gave up rather than rising.
       committed = appendTranscript(committed, [{ kind: 'assistant', text: `Response ${turn} final` }])
       expectInputUnder(await ui.update({ committed, live: [], status: 'idle' }), `Response ${turn} final`)
     }
     expect(stdoutClears(ui.stdout)).toBe(false)
   })
 
-  it('starts short live output directly below history, with the input right after it', async () => {
+  it('starts short live output directly below history, with the controls resting on the bottom', async () => {
     const ui = await mount(80, 24)
     await ui.screen()
     const frame = await ui.update({ status: 'running', live: [{ kind: 'assistant', text: 'First response' }] })
-    expect(frame.findIndex(line => line.includes('First response'))).toBe(2)
-    // Blank, the turn header, then the frame.
-    expect(frame[4]).toMatch(/^✻ \S+…  writing$/)
-    expect(inputRow(frame)).toBe(6)
+    const heading = lastRow(frame, 'Session: screen')
+    expect(lastRow(frame, 'First response')).toBe(heading + 2)
+    // Blank, then the rule naming the turn, resting on the input.
+    expect(frame[heading + 4]).toMatch(new RegExp(`^─ ${SPINNER_REST} \\S+…  writing ─+$`))
+    expect(inputRow(frame)).toBe(heading + 5)
+    expect(expectInputUnder(frame, 'First response')).toBe(1)
   })
 
   it('rests at the terminal bottom once history fills the screen', async () => {
@@ -218,7 +264,7 @@ describe('composer placement', () => {
       committed = appendTranscript(committed, [{ kind: 'assistant', text: `Streamed ${line} paragraph, long enough to wrap onto a second row at eighty columns, ending FIN-${line}.`, ...line === 0 ? {} : { continued: true } }])
       screen = await ui.update({ committed, live: [{ kind: 'assistant', text: '', continued: true }] })
       expect(inputRow(screen), screen.join('\n')).toBe(resting)
-      expectInputUnder(screen, `FIN-${line}.`)
+      expect(expectInputUnder(screen, `FIN-${line}.`)).toBe(1)
     }
     expect(stdoutClears(ui.stdout)).toBe(false)
   })
@@ -266,20 +312,48 @@ describe('composer placement', () => {
   })
 
   it('repaints without leftover frame rows when the terminal narrows', async () => {
-    // A reflowing terminal re-wraps the full-width borders of the last frame,
-    // so Ink's line-counted erase misses rows of it on every narrowing.
+    // A reflowing terminal re-wraps the full-width surface rows of the last
+    // frame, so Ink's line-counted erase misses rows of it on every narrowing.
     const ui = await mount(80, 24)
     await ui.screen()
     const committed = appendTranscript(emptyTranscript, [{ kind: 'user', text: 'Prompt one' }, { kind: 'assistant', text: 'Answer one' }])
     await ui.update({ committed })
     for (const [columns, rows] of [[60, 24], [45, 24], [100, 24], [40, 10]] as const) {
       const screen = await ui.resize(columns, rows)
-      expect(screen.filter(line => line.startsWith('╭')), `${columns}x${rows}:\n${screen.join('\n')}`).toHaveLength(1)
+      const dump = `${columns}x${rows}:\n${screen.join('\n')}`
+      expect(screen.filter(line => line.includes('Model: ')), dump).toHaveLength(1)
+      expect(screen.filter(line => line.includes('▌')), dump).toHaveLength(1)
       expectInputUnder(screen, 'Answer one')
     }
     const history = (await ui.history()).join('\n')
     expect(history.split('Prompt one')).toHaveLength(2)
     expect(history.split('▌')).toHaveLength(2)
+  })
+
+  it('keeps a wrapped draft regular and inside its surface through resizes', async () => {
+    const ui = await mount(80, 24)
+    await ui.screen()
+    await ui.update({ committed: appendTranscript(emptyTranscript, [{ kind: 'assistant', text: 'Answer one' }]) })
+    const words = `START ${'alpha 你好 beta '.repeat(10)}/a/very/long/path/that/does/not/fit/anywhere.ts\tEND`
+    ui.stdin.write(`\u001b[200~${words}\u001b[201~`)
+    await vi.waitFor(async () => expect((await ui.screen()).join('\n')).toContain('END▌'))
+    for (const [columns, rows] of [[60, 24], [45, 16], [39, 12], [100, 30], [41, 10], [80, 24]] as const) {
+      const screen = await ui.resize(columns, rows)
+      const dump = `${columns}x${rows}:\n${screen.join('\n')}`
+      expect(screen.filter(line => line.includes('▌')), dump).toHaveLength(1)
+      // Between the rule and the padding row, the draft's text starts at the
+      // prompt column, and no row it wraps onto opens with a stray space.
+      const caret = screen.findIndex(line => line.includes('▌'))
+      let start = caret
+      while (start > 0 && !screen[start - 1]!.startsWith('─')) start--
+      expect(screen[caret + 1], dump).toBe('')
+      expect(screen[caret + 2], dump).toMatch(/^ {2}Model: /)
+      const draft = screen.slice(start, caret + 1)
+      expect(draft.length, dump).toBeGreaterThan(1)
+      for (const line of draft) expect(line, dump).toMatch(/^(> |\^ | {2})\S/)
+    }
+    // A tab reaches the terminal as spaces, the width the layout measured.
+    expect(ui.stdout.chunks.join('')).not.toContain('\t')
   })
 
   it('follows wrapped history and survives terminal resizing', async () => {
@@ -304,27 +378,61 @@ describe('composer placement', () => {
     ui.stdin.write('/')
     await vi.waitFor(async () => expect((await ui.screen()).join('\n')).toContain('/command0'))
     let screen = await ui.screen()
-    // The blank opens the stack under the heading; the list sits on the frame.
-    expect(screen[1]).toBe('')
+    // The blank opens the stack under the heading; the list sits on the rule.
+    expect(screen[lastRow(screen, 'Session: screen') + 1]).toBe('')
     expect(lastRow(screen, 'more')).toBe(inputRow(screen) - 2)
-    expect(screen[inputRow(screen) + 2]).toMatch(/^ {2}Working/)
+    expect(screen[inputRow(screen) + 2]).toMatch(/^ {2}Model: /)
+    expect(inputRow(screen)).toBe(anchor)
     for (const notice of ['Short notice', 'Long notice\n'.repeat(30)]) {
       screen = await ui.update({ notice, pending: [{ id: 'queued', target: 'next-step', text: 'Next instruction' }] })
       expect(lastRow(screen, 'Session: screen')).toBeLessThan(lastRow(screen, 'Next instruction'))
       expect(lastRow(screen, 'notice')).toBeLessThan(inputRow(screen))
-      expect(inputRow(screen)).toBeLessThanOrEqual(24 - 4)
+      expect(inputRow(screen)).toBe(anchor)
     }
     await ui.update({ notice: undefined })
     ui.stdin.write('\u001b')
     await vi.waitFor(async () => expect((await ui.screen()).join('\n')).not.toContain('/command0'))
     screen = await ui.update({ pending: [], quitting: true, status: 'idle' })
     expect(lastRow(screen, dictionaries.en.quit)).toBe(inputRow(screen) - 2)
-    // Everything closed, the input returns under the heading and the one row
-    // the finished turn's summary holds.
+    expect(inputRow(screen)).toBe(anchor)
+    // Everything closed, the input stays where it was, under the rule that
+    // holds the finished turn's summary, and the rows the panels gave up are
+    // blank until printed history takes them.
     screen = await ui.update({ quitting: false })
-    expect(inputRow(screen)).toBe(anchor + 1)
-    expect(screen[anchor - 1]).toMatch(/^✓ /)
+    expect(inputRow(screen)).toBe(anchor)
+    expect(screen[anchor - 1]).toMatch(/^─ ✓ /)
+    expect(expectInputUnder(screen, 'Session: screen')).toBeGreaterThan(1)
+    const committed = appendTranscript(emptyTranscript,
+      Array.from({ length: 30 }, (_, index) => ({ kind: 'user' as const, text: `Prompt ${index}` })))
+    screen = await ui.update({ committed })
+    expect(inputRow(screen)).toBe(anchor)
+    expect(expectInputUnder(screen, 'Prompt 29')).toBe(1)
     expect(stdoutClears(ui.stdout)).toBe(false)
+  })
+
+  it('keeps compaction progress above the draft without moving the composer off short screens', async () => {
+    const ui = await mount(80, 8)
+    ui.stdin.write('keep this draft')
+    await vi.waitFor(async () => expect((await ui.screen()).join('\n')).toContain('keep this draft▌'))
+    for (const [compactPhase, label] of [
+      ['preparing', dictionaries.en.compactPreparing],
+      ['summarizing', dictionaries.en.compactSummarizing],
+      ['saving', dictionaries.en.compactSaving],
+    ] as const) {
+      const screen = await ui.update({ command: '/compact', compactPhase })
+      expect(screen.join('\n')).toContain('Compacting history…')
+      expect(screen.join('\n')).toContain(label)
+      // The progress is the turn's to say; the status row still names the model.
+      expect(screen[inputRow(screen) + 2]).toMatch(/^ {2}Model: /)
+      expect(screen.join('\n')).toContain('keep this draft▌')
+      expect(lastRow(screen, 'Compacting history…')).toBeLessThan(inputRow(screen))
+    }
+    expect(stdoutClears(ui.stdout)).toBe(false)
+    const short = await ui.resize(40, 4)
+    expect(short.join('\n')).toContain('keep this draft▌')
+    const resized = ui.stdout.chunks.length
+    expect((await ui.update({ compactPhase: 'summarizing' })).join('\n')).toContain('keep this draft▌')
+    expect(ui.stdout.chunks.slice(resized).join('')).not.toContain('\u001b[2J')
   })
 })
 
@@ -340,3 +448,22 @@ function snapshotOf(screen: readonly string[]): string {
 function stdoutClears(stdout: Output): boolean {
   return /\u001b\[2J/.test(stdout.chunks.join(''))
 }
+
+
+it.each([[80, 24], [40, 10], [40, 4]])('bounds child branches and inspection at %i by %i', async (columns, rows) => {
+  const terminal = await mount(columns!, rows!)
+  const subagents = Array.from({ length: 12 }, (_, index) => ({ id: `child-${index}`, label: `Review child ${index}`,
+    state: 'working' as const, detail: 'Continuable', inspectable: true }))
+  let screen = await terminal.update({ subagents })
+  expect(inputRow(screen), screen.join('\n')).toBeGreaterThanOrEqual(0)
+  if (rows! >= 10) expect(inputRow(screen), screen.join('\n')).toBe(rows! - 4)
+  screen = await terminal.update({ inspection: { sessionId: 'child-0', label: 'Review child 0',
+    committed: appendTranscript(emptyTranscript, [{ kind: 'assistant', text: 'Child history' }]),
+    live: [{ kind: 'assistant', text: 'Child is still reviewing' }], status: 'running', model: 'mock/child' } })
+  expect(inputRow(screen), screen.join('\n')).toBeGreaterThanOrEqual(0)
+  if (rows! >= 10) expect(inputRow(screen), screen.join('\n')).toBe(rows! - 4)
+  screen = await terminal.update({ inspection: undefined })
+  expect(inputRow(screen), screen.join('\n')).toBeGreaterThanOrEqual(0)
+  if (rows! >= 10) expect(inputRow(screen), screen.join('\n')).toBe(rows! - 4)
+  expect(screen.join('\n')).not.toContain('Session navigation')
+})

@@ -24,13 +24,24 @@ async function connected() {
   return { ...fixture, navigation, changed }
 }
 
-async function picker(navigation: SessionNavigation) {
-  navigation.submit('/sessions')
+async function picker(navigation: SessionNavigation, command: '/sessions' | '/resume' = '/sessions') {
+  navigation.submit(command)
   await vi.waitFor(() => expect(navigation.controller?.view.interaction?.kind).toBe('select'))
   const interaction = navigation.controller!.view.interaction!
   if (interaction.kind !== 'select') throw new Error('Expected session picker')
   return interaction
 }
+
+it.each(['/new', '/clear'] as const)('%s starts a fresh session without opening the picker', async command => {
+  const { ctx, navigation } = await connected()
+  const first = navigation.controller!
+  navigation.submit(command)
+  await vi.waitFor(() => expect(navigation.controller).not.toBe(first))
+  await vi.waitFor(() => expect(navigation.busy).toBe(false))
+  expect(navigation.controller?.view.interaction).toBeUndefined()
+  expect(ctx.agents.get(first.agent.id)).toBeUndefined()
+  expect(navigation.controller?.view.committed.length).toBe(0)
+})
 
 async function select(navigation: SessionNavigation, value: string) {
   const prompt = await picker(navigation)
@@ -58,8 +69,13 @@ it('creates, switches, and resumes recorded history with one live handle and ses
   navigation.submit('Second conversation')
   await second.agent.whenIdle()
   const firstBefore = first.view.committed
-  const prompt = await picker(navigation)
+  const prompt = await picker(navigation, '/resume')
   expect(prompt.choices).toContainEqual(expect.objectContaining({ value: first.agent.id, label: 'First title' }))
+  expect(prompt.title).toBe(copy.chooseSession)
+  expect(prompt.choices.at(-1)).toMatchObject({ value: '', label: copy.newSession, pinned: true })
+  expect(prompt.choices.map(choice => choice.role)).toEqual(['session-current', 'session-saved', 'session-new'])
+  expect(prompt.choices[0]?.value).toBe(second.agent.id)
+  expect(prompt.choices[1]?.value).toBe(first.agent.id)
   const requests = model.requests.length
   second.interactions.answer(prompt.id, first.agent.id)
   await vi.waitFor(() => expect(navigation.busy).toBe(false))
@@ -71,6 +87,7 @@ it('creates, switches, and resumes recorded history with one live handle and ses
   expect(transcriptRows(resumed.view.committed)).toContainEqual({ kind: 'user', text: 'First conversation' })
   expect(transcriptRows(resumed.view.committed)).not.toContainEqual({ kind: 'user', text: 'Second conversation' })
   expect(resumed.view.completion.entries.filter(entry => entry.name === 'sessions')).toHaveLength(1)
+  expect(resumed.view.completion.entries.filter(entry => entry.name === 'resume')).toHaveLength(1)
   expect(model.requests).toHaveLength(requests)
   using observation = await ctx.sessionQuery.observeSession(second.agent.id, { projectionMode: 'none' })
   const runs = observation.events.filter(event => event.type === 'command/run')
@@ -94,8 +111,41 @@ it('keeps the current controller on dismissal or current selection and rejects c
   expect(navigation.controller).toBe(first)
   navigation.submit('/sessions invalid')
   await first.drain()
-  expect(transcriptRows(first.view.committed).at(-1)).toEqual({ kind: 'notice', tone: 'error', text: copy.sessionsUsage })
+  expect(transcriptRows(first.view.committed).at(-1)).toEqual({ kind: 'notice', placement: 'command', tone: 'error', text: copy.sessionsUsage })
+  navigation.submit('/resume invalid')
+  await first.drain()
+  expect(transcriptRows(first.view.committed).at(-1)).toEqual({ kind: 'notice', placement: 'command', tone: 'error', text: copy.sessionsUsage })
+  navigation.submit('/new invalid')
+  await first.drain()
+  expect(transcriptRows(first.view.committed).at(-1)).toEqual({ kind: 'notice', placement: 'command', tone: 'error', text: copy.newSessionUsage })
   expect(model.requests).toEqual([])
+})
+
+it('pins the active session before saved history ordered by creation time', async () => {
+  const { ctx, navigation } = await connected()
+  const active = navigation.controller!.agent.id
+  for (const id of ['older', 'newer']) {
+    const handle = await ctx.agents.create({
+      sessionId: brandString<SessionId>(`session-${id}`),
+      meta: { cwd: process.cwd() },
+      agentOptions: { provider: 'mock', model: 'model' },
+    })
+    handle.agent.session.append('session/title', { title: id, messageSeqs: [], source: { kind: 'user' } })
+    await handle.dispose()
+  }
+  const filter = ctx.sessionQuery.filterSessions.bind(ctx.sessionQuery)
+  vi.spyOn(ctx.sessionQuery, 'filterSessions').mockImplementation(async (filters, signal) => {
+    const records = await filter(filters, signal)
+    return records.map(record => ({ ...record, header: { ...record.header,
+      createdAt: record.header.id === 'session-older' ? 100
+        : record.header.id === 'session-newer' ? 200 : record.header.createdAt,
+    } })).reverse()
+  })
+  const prompt = await picker(navigation)
+  expect(prompt.choices.map(choice => choice.value)).toEqual([active, 'session-newer', 'session-older', ''])
+  expect(prompt.choices.map(choice => choice.role)).toEqual([
+    'session-current', 'session-saved', 'session-saved', 'session-new',
+  ])
 })
 
 it('filters other workspaces, subagents, and live owners while retaining sessions with unreadable titles', async () => {

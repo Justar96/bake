@@ -616,7 +616,7 @@ describe('result-time contextual diff (meta + presentResult)', () => {
     const result = await call(ctx, 'edit', { file_path: 'a.txt', old_string: 'OLD', new_string: 'NEW' }, { session })
     expect(result.isError).toBe(false)
     expect(result.meta).toEqual({
-      diffs: [{ path: 'a.txt', oldText: 'a\nb\nc\nOLD\nd\ne\nf', newText: 'a\nb\nc\nNEW\nd\ne\nf' }],
+      diffs: [{ path: 'a.txt', oldText: 'a\nb\nc\nOLD\nd\ne\nf', newText: 'a\nb\nc\nNEW\nd\ne\nf', oldStart: 1, newStart: 1 }],
     })
   })
 
@@ -629,7 +629,7 @@ describe('result-time contextual diff (meta + presentResult)', () => {
     const view = ctx.tools.get('edit')?.presentResult?.({ file_path: 'a.txt', old_string: 'OLD', new_string: 'NEW' }, result)
     expect(view).toEqual({
       card: 'diff', title: 'Edit a.txt',
-      diffs: [{ path: 'a.txt', oldText: 'a\nb\nc\nOLD\nd\ne\nf', newText: 'a\nb\nc\nNEW\nd\ne\nf' }],
+      diffs: [{ path: 'a.txt', oldText: 'a\nb\nc\nOLD\nd\ne\nf', newText: 'a\nb\nc\nNEW\nd\ne\nf', oldStart: 1, newStart: 1 }],
     })
   })
 
@@ -640,9 +640,9 @@ describe('result-time contextual diff (meta + presentResult)', () => {
     await call(ctx, 'read', { file_path: 'a.txt' }, { session })
     const result = await call(ctx, 'write', { file_path: 'a.txt', content: 'a\nb\nc\nNEW\nd\ne\nf\n' }, { session })
     expect(result.isError).toBe(false)
-    expect(result.meta).toEqual({ operation: 'update', diffs: [{ path: 'a.txt', oldText: 'a\nb\nc\nOLD\nd\ne\nf', newText: 'a\nb\nc\nNEW\nd\ne\nf' }] })
+    expect(result.meta).toEqual({ operation: 'update', diffs: [{ path: 'a.txt', oldText: 'a\nb\nc\nOLD\nd\ne\nf', newText: 'a\nb\nc\nNEW\nd\ne\nf', oldStart: 1, newStart: 1 }] })
     const view = ctx.tools.get('write')?.presentResult?.({ file_path: 'a.txt', content: 'x' }, result)
-    expect(view).toEqual({ card: 'diff', title: 'Write a.txt', diffs: [{ path: 'a.txt', oldText: 'a\nb\nc\nOLD\nd\ne\nf', newText: 'a\nb\nc\nNEW\nd\ne\nf' }] })
+    expect(view).toEqual({ card: 'diff', title: 'Write a.txt', diffs: [{ path: 'a.txt', oldText: 'a\nb\nc\nOLD\nd\ne\nf', newText: 'a\nb\nc\nNEW\nd\ne\nf', oldStart: 1, newStart: 1 }] })
   })
 
   it('write CREATE: an empty applied-diff projection still falls back to the whole-file diff card', async () => {

@@ -1,7 +1,7 @@
 /** Region budgets and the render vocabulary. */
 import { describe, expect, test } from 'bun:test'
 import {
-  budgetFor, CHROME_ROWS, COLUMN, isRenderable, LIVE_BUDGET, MARKER, PROSE_MEASURE, selectionWindow, tailOf, VERB, windowOf,
+  budgetFor, CHROME_ROWS, COLUMN, isRenderable, LIVE_BUDGET, MARKER, selectionWindow, tailOf, VERB, windowOf,
 } from '../src/layout.ts'
 
 describe('budgetFor', () => {
@@ -51,15 +51,18 @@ describe('budgetFor', () => {
     expect(budgetFor({ columns: 80, rows: 10 }, { header: true }).items).toBe(rowsLeft(10) - 1)
   })
 
-  test('caps prose at the measure however wide the terminal is', () => {
-    expect(budgetFor({ columns: 300, rows: 24 }).measure).toBe(PROSE_MEASURE)
-    expect(budgetFor({ columns: 40, rows: 24 }).measure).toBe(40 - COLUMN.rail)
+  test('uses the current width for prose, including after a resize', () => {
+    for (const columns of [1, 8, 20, 40, 80, 300]) {
+      const budget = budgetFor({ columns, rows: 24 })
+      expect(budget.columns).toBe(columns)
+      expect(budget.measure).toBe(Math.max(1, columns - COLUMN.rail))
+    }
   })
 
   test('gives tool output the full width, since a wrapped log loses its alignment', () => {
     const wide = budgetFor({ columns: 300, rows: 24 })
     expect(wide.output).toBe(300 - COLUMN.output)
-    expect(wide.output).toBeGreaterThan(wide.measure)
+    expect(wide.output).toBeLessThan(wide.measure)
   })
 })
 

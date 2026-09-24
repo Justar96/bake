@@ -32,6 +32,8 @@ bun run verify               # 构建、检查和无密钥终端场景
 
 [开发指南](CONTRIBUTING.zh.md#选择开发流程) 介绍重新构建命令、场景筛选和故障排查。`bun apps/tui/scripts/tui.ts help` 列出独立测试目标、录制和性能诊断命令。
 
+直接下载发行版的准备和本机安装检查见[发行指南](distribution/README.zh.md)。Railway 下载服务尚未发布包含全部平台的发行版。
+
 ## 仓库结构
 
 - [`apps/tui/`](apps/tui/DESIGN.md)：终端应用、Ink 组件、测试数据和开发工具。

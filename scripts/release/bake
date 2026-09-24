@@ -1,0 +1,16 @@
+#!/bin/sh
+set -eu
+source=$0
+while [ -L "$source" ]; do
+  link=$(readlink "$source")
+  case $link in
+    /*) source=$link ;;
+    *) source=$(dirname "$source")/$link ;;
+  esac
+done
+root=$(CDPATH= cd -- "$(dirname -- "$source")/.." && pwd -P)
+if [ -z "${DSH_HOME+x}" ]; then DSH_HOME="$HOME/.bake"; export DSH_HOME; fi
+case ${1-} in
+  tui|headless|plugin|--profile) exec node "$root/apps/cli/lib/bin.js" "$@" ;;
+  *) exec node "$root/apps/cli/lib/bin.js" --profile tui "$@" ;;
+esac

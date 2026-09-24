@@ -2,8 +2,8 @@
 
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
 │ Choose session                                                                                   │
-│   New session                                                                                    │
-│ ▸ First conversation · Current                                                                   │
-│ Type to filter · ↑↓ choose · Enter selects · Esc cancels · 2/3                                   │
-│ > ▌                                                                                              │
+│ > ▌Type to filter                                                                                │
+│ ▸ ● First conversation   Current  5m ago · 514e6406                                              │
+│   + New session                                                                                  │
+│ ↑↓ choose · Enter selects · Esc cancels                                                      1/3 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

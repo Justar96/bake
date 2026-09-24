@@ -37,6 +37,13 @@ export interface FileDiff {
   oldText: string | null
   /** Content after the change. */
   newText: string
+  /**
+   * 1-based line of the prior content that `oldText` starts at, when the
+   * producer knows where its hunk sits. Absent, a surface draws no line numbers.
+   */
+  oldStart?: number
+  /** 1-based line of the new content that `newText` starts at, as for {@link FileDiff.oldStart}. */
+  newStart?: number
 }
 
 /**

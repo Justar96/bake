@@ -39,6 +39,9 @@
       "path": "../../credentials/credentials"
     },
     {
+      "path": "../../interaction/commands"
+    },
+    {
       "path": "../deepseek-llm-api-extensions"
     },
     {

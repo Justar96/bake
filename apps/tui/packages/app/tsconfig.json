@@ -58,6 +58,9 @@
       "path": "../../../../packages/interaction/user-approval"
     },
     {
+      "path": "../../../../packages/interaction/permission-presets"
+    },
+    {
       "path": "../../../../packages/session/session-persistence"
     },
     {
@@ -89,6 +92,9 @@
     },
     {
       "path": "../../../../packages/plan/plan-mode"
+    },
+    {
+      "path": "../../../../packages/subagent/subagent"
     }
   ]
 }

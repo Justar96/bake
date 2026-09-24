@@ -43,7 +43,9 @@ export async function bundle(entries: readonly string[], outdir: string, mode: B
   const result = await Bun.build({
     entrypoints: entries.map(entry => resolve(entry)), outdir, target: 'node', format: 'esm',
     // @dsh-tui/ui is inlined; the host's packages retain their module identity.
-    external: ['@deepseek-ai/*', 'ink', 'react', 'commander'], naming: '[name].js',
+    // Shiki loads each grammar by dynamic import, which an unsplit bundle
+    // would inline: every bundled language, loaded or not.
+    external: ['@deepseek-ai/*', 'ink', 'react', 'commander', 'shiki'], naming: '[name].js',
     jsx: { runtime: 'automatic', development: mode === 'development' },
     define: { 'process.env.NODE_ENV': JSON.stringify(mode) }, minify: mode === 'production',
   })

@@ -236,6 +236,7 @@
     - id: permission
       name: '@deepseek-ai/dsh-permission-presets'
       config:
+        defaultPreset: !!js process.env.DSH_PERMISSION_MODE ?? 'workspace-write'
         presets:
           read-only:
             sandbox: read-only

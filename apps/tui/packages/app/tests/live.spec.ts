@@ -32,7 +32,8 @@ describe('LiveBlocks', () => {
       { type: 'tool-call-delta', index: 1, id: ToolCallId('c1'), name: 'read_file', argumentsDelta: '{"pa' },
     )
     expect(rows.map(row => row.kind)).toEqual(['reasoning', 'tool-call'])
-    expect(verbs(rows)).toEqual([VERB.think, VERB.read])
+    // Reasoning is a paragraph with no verb; the call below it names its action.
+    expect(verbs(rows)).toEqual([VERB.read])
   })
 
   it('keeps blocks in stream order, so reasoning stays above the call it led to', () => {

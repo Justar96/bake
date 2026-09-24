@@ -20,7 +20,8 @@ import type {} from '@deepseek-ai/dsh-commands'
 import type {} from '@deepseek-ai/dsh-compaction'
 import { ToolCards, type ToolLookup } from './cards.ts'
 import type { TuiCopy } from './copy.ts'
-import { attachmentSummaries, type Row } from './rows.ts'
+import { PENDING_ARGUMENTS } from './present.ts'
+import { attachmentSummaries, type Row, type ToolCallRow } from './rows.ts'
 
 /** Rows for one event; empty when the event has no terminal presentation. */
 export type Projection = readonly Row[]
@@ -49,6 +50,28 @@ const NONE: Projection = []
 export function projector(copy: TuiCopy, lookup: ToolLookup): Projector {
   return { copy, cards: new ToolCards(lookup, copy) }
 }
+
+/**
+ * The calls an assistant message makes, as they stand before each is dispatched.
+ *
+ * The message commits with every call it makes, but each call's own event
+ * follows only as the loop reaches it, one after another. Until then the
+ * surface knows a call is coming and what tool it is for, and nothing else,
+ * so it draws it as a call still streaming: named, arguments pending. Not part
+ * of {@link project}, because these rows stand in for rows the call's event
+ * will commit, and must never be committed themselves.
+ *
+ * @param event - the committed session event.
+ * @returns the message's calls in order, empty for any other event.
+ */
+export function announcedCalls(event: SessionEvent): readonly ToolCallRow[] {
+  if (event.type !== 'assistant/message') return NONE_CALLS
+  return event.data.message.content.flatMap((block): ToolCallRow[] => block.type === 'tool-call'
+    ? [{ kind: 'tool-call', callId: String(block.id), tool: block.name, input: PENDING_ARGUMENTS }]
+    : [])
+}
+
+const NONE_CALLS: readonly ToolCallRow[] = []
 
 /**
  * Project one session event into transcript rows.
@@ -88,7 +111,7 @@ export function project(event: SessionEvent, projector: Projector): Projection {
 
     case 'command/done':
       return event.data.text === undefined ? NONE
-        : [{ kind: 'notice', tone: event.data.kind === 'error' ? 'error' : 'info', text: event.data.text }]
+        : [{ kind: 'notice', placement: 'command', tone: event.data.kind === 'error' ? 'error' : 'info', text: event.data.text }]
 
     case 'tool/call': {
       const callId = String(event.data.callId)

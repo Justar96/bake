@@ -1,12 +1,71 @@
-/** Status-line reporting of harness-owned context occupancy. */
+/** Status-line reporting of the model, harness-owned context occupancy, and billed tokens. */
 import React from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render } from '../../../tests/render.tsx'
-import { App, type AppProps } from '../src/app.tsx'
+import { App, Tasks, type AppProps } from '../src/app.tsx'
 import { emptyTranscript } from '../src/transcript.ts'
 import { dictionaries } from '../src/copy.ts'
+import { Subagents } from '../src/subagents.tsx'
+import { renderToString } from 'ink'
 
 afterEach(cleanup)
+
+it.each(['en', 'zh'] as const)('shows connected subagents with inspection keys in %s', async locale => {
+  const ui = render(<App {...props({ copy: dictionaries[locale], subagents: [
+    { id: 'child-1', label: 'Review tests', state: 'working', detail: 'Continuable', inspectable: true },
+    { id: 'child-2', label: 'Check types', state: 'saved', outcome: 'completed', detail: 'One-shot', inspectable: true },
+    { id: 'child-3', label: 'Review security', state: 'saved', outcome: 'failed', detail: 'Continuable', inspectable: true },
+    { id: 'child-4', label: 'Review docs', state: 'saved', outcome: 'stopped', detail: 'Continuable', inspectable: true },
+  ] })} />)
+  expect(ui.lastFrame()).toContain(`\u25cf ${dictionaries[locale].subagentsTitle}  4 \u00b7 1 ${dictionaries[locale].subagentWorking}`)
+  expect(ui.lastFrame()).toContain('\u251c \u25cf Review tests')
+  expect(ui.lastFrame()).toContain('├ ✓ Check types')
+  expect(ui.lastFrame()).toContain('├ ✗ Review security')
+  expect(ui.lastFrame()).toContain('└ ■ Review docs')
+  expect(ui.lastFrame()).toContain('Ctrl+G /agents')
+  await expect(ui.lastFrame() + '\n').toMatchFileSnapshot(`./expected/subagents.${locale}.txt`)
+})
+
+it('lists tasks as a checklist under a heading with a progress bar', () => {
+  const ui = render(<App {...props({ todos: [
+    { text: 'Read startup', status: 'completed' },
+    { text: 'Thread the home', status: 'in_progress' },
+    { text: 'Test it', status: 'pending' },
+  ] })} />)
+  const frame = ui.lastFrame() ?? ''
+  expect(frame).toContain('Tasks  \u2501\u2501\u2501\u2501\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500  1/3 done\n'
+    + '  \u2713 Read startup\n  \u25b8 Thread the home\n  \u25a1 Test it')
+  expect(frame).not.toContain('\u251c')
+})
+
+it('gives up finished tasks first, oldest first, when rows run short', () => {
+  const todos = [
+    { text: 'Read startup', status: 'completed' },
+    { text: 'Trace the home', status: 'completed' },
+    { text: 'Thread the home', status: 'in_progress' },
+    { text: 'Test it', status: 'pending' },
+    { text: 'Document it', status: 'pending' },
+  ] as const
+  const draw = (limit: number) => renderToString(<Tasks todos={todos} copy={dictionaries.en} limit={limit} />, { columns: 60 })
+    .split('\n').slice(1).map(line => line.trim())
+  expect(draw(6)).toHaveLength(5)
+  expect(draw(5)).toEqual(['\u2713 Trace the home', '\u25b8 Thread the home', '\u25a1 Test it', '\u25a1 Document it'])
+  expect(draw(4)).toEqual(['\u25b8 Thread the home', '\u25a1 Test it', '\u25a1 Document it'])
+  expect(draw(3)).toEqual(['\u25b8 Thread the home', '+2 next'])
+  expect(draw(1)).toEqual([])
+})
+
+it('keeps the subagents head when rows run short, and the keys only beside a child', () => {
+  const entries = [
+    { id: 'a', label: 'Review tests', state: 'working', detail: '', inspectable: true },
+    { id: 'b', label: 'Check types', state: 'saved', detail: '', inspectable: true },
+  ] as const
+  const draw = (limit: number) => renderToString(<Subagents entries={entries} copy={dictionaries.en} limit={limit} />, { columns: 60 }).split('\n')
+  expect(draw(1)).toEqual(['\u25cf Subagents  2 \u00b7 1 Working'])
+  expect(draw(2)).toEqual(['\u25cf Subagents  2 \u00b7 1 Working', '\u2514 +2 more'])
+  expect(draw(3).at(-1)).toBe('  Ctrl+G /agents \u00b7 choose a child \u00b7 Enter to open')
+  expect(draw(4)).toHaveLength(4)
+})
 
 function props(overrides: Partial<AppProps> = {}): AppProps {
   return {
@@ -19,6 +78,46 @@ function props(overrides: Partial<AppProps> = {}): AppProps {
     onSubmit: vi.fn(), onCancel: vi.fn(), onInterrupt: vi.fn(), onAnswer: vi.fn(), ...overrides,
   }
 }
+
+describe('permission boundary', () => {
+  it.each(['en', 'zh'] as const)('follows the supplied session projection in %s', locale => {
+    const copy = dictionaries[locale]
+    const ui = render(<App {...props({ copy })} />)
+    expect(ui.lastFrame()).not.toContain(copy.permission)
+    for (const permission of ['workspace-write', 'read-only', 'danger-full-access', 'auto', 'custom']) {
+      ui.rerender(<App {...props({ copy, permission })} />)
+      expect(ui.lastFrame()).toContain(`${copy.permission} ${permission}`)
+    }
+  })
+
+  it('shows a child boundary without borrowing the parent permission', () => {
+    const inspection = { sessionId: 'child', label: 'Review', committed: emptyTranscript,
+      live: [], status: 'idle' as const, model: 'mock/child-model' }
+    const ui = render(<App {...props({ permission: 'danger-full-access', thinkingLevel: 'high', inspection })} />)
+    expect(ui.lastFrame()).not.toContain('Access')
+    expect(ui.lastFrame()).not.toContain('Think high')
+    ui.rerender(<App {...props({ permission: 'danger-full-access', thinkingLevel: 'high',
+      inspection: { ...inspection, permission: 'custom', thinkingLevel: 'low' } })} />)
+    expect(ui.lastFrame()).toContain('Access custom')
+    expect(ui.lastFrame()).toContain('Think low')
+    expect(ui.lastFrame()).not.toContain('danger-full-access')
+    ui.rerender(<App {...props({ permission: 'danger-full-access', thinkingLevel: 'high' })} />)
+    expect(ui.lastFrame()).toContain('Access danger-full-access')
+    expect(ui.lastFrame()).toContain('Think high')
+  })
+})
+
+describe('thinking level', () => {
+  it.each(['en', 'zh'] as const)('labels a selected effort in %s and omits unknown levels', locale => {
+    const copy = dictionaries[locale]
+    const ui = render(<App {...props({ copy, permission: 'workspace-write' })} />)
+    expect(ui.lastFrame()).not.toContain(copy.thinking)
+    ui.rerender(<App {...props({ copy, permission: 'workspace-write', thinkingLevel: 'high' })} />)
+    expect(ui.lastFrame()).toContain(`${copy.thinking} high`)
+    ui.rerender(<App {...props({ copy, permission: 'workspace-write', thinkingLevel: copy.providerDefault })} />)
+    expect(ui.lastFrame()).toContain(`${copy.thinking} ${copy.providerDefault}`)
+  })
+})
 
 describe('context occupancy', () => {
   it('reports used, capacity, and percent once the meter has measured a request', () => {
@@ -62,4 +161,54 @@ it('omits the plan indicator when the profile has no plan projection', () => {
   const ui = render(<App {...props()} />)
   expect(ui.lastFrame()).not.toContain(dictionaries.en.planEntryPending)
   expect(ui.lastFrame()).not.toContain(dictionaries.en.planActive)
+})
+
+describe('model and billed tokens', () => {
+  const statusRow = (frame: string | undefined) => (frame ?? '').split('\n').findLast(line => line.startsWith('  ')) ?? ''
+
+  it('names the model where the state word was, and no token fields before a request reports', () => {
+    const ui = render(<App {...props({ status: 'running' })} />)
+    const row = statusRow(ui.lastFrame())
+    expect(row).toMatch(/^ {2}Model: model {2}/)
+    expect(row).not.toContain(dictionaries.en.working)
+    expect(row).not.toContain(' in ')
+  })
+
+  it.each(['en', 'zh'] as const)('reports input, output, and the cache hit the provider reported in %s', locale => {
+    const copy = dictionaries[locale]
+    const ui = render(<App {...props({ copy, context: { used: 500, window: 128_000 }, usage: { input: 12_340, output: 1_200, cached: 10_000 } })} />)
+    expect(statusRow(ui.lastFrame())).toContain(
+      `${copy.model}: model  ${locale === 'en' ? 'Context' : '上下文'}: ~500/128k (0%)  ${copy.tokensIn} 12.3k  ${copy.tokensOut} 1.2k  ${copy.cacheHit} 81%  /workspace`)
+  })
+
+  it('leaves the cache field out for a provider that reports no cache traffic', () => {
+    const ui = render(<App {...props({ usage: { input: 900, output: 100 } })} />)
+    const row = statusRow(ui.lastFrame())
+    expect(row).toContain('in 900  out 100  /workspace')
+    expect(row).not.toContain(dictionaries.en.cacheHit)
+  })
+})
+
+
+it('opens a child from the shortcut, blocks child input, and preserves the parent draft', async () => {
+  const onSubagents = vi.fn()
+  const onCancel = vi.fn()
+  const onSubmit = vi.fn()
+  const state = props({ onSubagents, onCancel, onSubmit, subagents: [
+    { id: 'child', label: 'Review', state: 'working', detail: 'Continuable', inspectable: true },
+  ] })
+  const ui = render(<App {...state} />)
+  ui.stdin.write('Unsent parent draft')
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain('Unsent parent draft'))
+  ui.stdin.write('\x07')
+  await vi.waitFor(() => expect(onSubagents).toHaveBeenCalledOnce())
+  ui.rerender(<App {...state} inspection={{ sessionId: 'child', label: 'Review', committed: emptyTranscript,
+    live: [{ kind: 'assistant', text: 'Checking the child session' }], status: 'running', model: 'mock/child' }} />)
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain(dictionaries.en.subagentBack))
+  ui.stdin.write('do not submit\r')
+  ui.stdin.write('\x1b')
+  await vi.waitFor(() => expect(onCancel).toHaveBeenCalledOnce())
+  expect(onSubmit).not.toHaveBeenCalled()
+  ui.rerender(<App {...state} />)
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain('Unsent parent draft'))
 })

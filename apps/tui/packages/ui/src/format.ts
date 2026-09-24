@@ -9,6 +9,47 @@ export interface ContextUsage {
 }
 
 /**
+ * Tokens the provider reported for the session so far, summed across its requests.
+ *
+ * Only what the provider reports: a session that has made no request has no
+ * totals, and a provider that reports no cache traffic has no `cached`, which
+ * is not the same as a cache that missed.
+ */
+export interface TokenTotals {
+  /** Prompt tokens sent, whether or not the provider served them from its cache. */
+  readonly input: number
+  /** Tokens the model generated. */
+  readonly output: number
+  /** Of `input`, the tokens the provider read from its prompt cache. */
+  readonly cached?: number
+}
+
+/**
+ * The session's token totals as status-line fields: input and output.
+ *
+ * @param totals - the provider-reported totals.
+ * @param words - locale-owned labels for each field.
+ * @returns `in 12.3k` and `out 1.2k`.
+ */
+export function formatTotals(totals: TokenTotals, words: { readonly input: string, readonly output: string }): readonly string[] {
+  return [`${words.input} ${formatTokens(totals.input)}`, `${words.output} ${formatTokens(totals.output)}`]
+}
+
+/**
+ * The share of input the provider's cache served, in whole percent.
+ *
+ * Rounds down, as occupancy does, so a cache that missed once never reads as
+ * a perfect one.
+ *
+ * @param totals - the provider-reported totals.
+ * @returns 0 to 100, or undefined when the provider reports no cache traffic.
+ */
+export function cacheHit(totals: TokenTotals): number | undefined {
+  if (totals.cached === undefined) return undefined
+  return totals.input === 0 ? 0 : Math.floor((totals.cached / totals.input) * 100)
+}
+
+/**
  * Abbreviate a token count for a status line.
  * @param tokens - a non-negative count.
  * @returns the count with a magnitude suffix, or the exact digits below 1000.
@@ -44,4 +85,25 @@ export function formatContext(usage: ContextUsage): string {
 function trim(value: number): string {
   const fixed = value.toFixed(1)
   return fixed.endsWith('.0') ? fixed.slice(0, -2) : fixed
+}
+
+/**
+ * How long ago something happened, to the coarsest unit that is not zero.
+ *
+ * For telling sessions apart at a glance, where `3d ago` reads faster than a
+ * timestamp and the exact time is one keypress away in the session itself.
+ *
+ * @param then - epoch milliseconds of the event.
+ * @param now - epoch milliseconds to measure from.
+ * @param words - locale-owned unit suffixes.
+ * @returns `just now`, `5m ago`, `2h ago`, or `3d ago`; a future time reads as now.
+ */
+export function formatAge(then: number, now: number, words: {
+  readonly now: string, readonly minutes: string, readonly hours: string, readonly days: string
+}): string {
+  const minutes = Math.floor(Math.max(0, now - then) / 60_000)
+  if (minutes < 1) return words.now
+  if (minutes < 60) return `${minutes}${words.minutes}`
+  const hours = Math.floor(minutes / 60)
+  return hours < 24 ? `${hours}${words.hours}` : `${Math.floor(hours / 24)}${words.days}`
 }

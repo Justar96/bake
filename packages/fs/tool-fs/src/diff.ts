@@ -23,8 +23,9 @@ export type FsDiffMeta = { diffs: FileDiff[]; operation?: 'create' | 'update' }
 
 /**
  * Compute one {@link FileDiff} per hunk between `before` and `after`, each carrying the
- * applied change plus {@link DIFF_CONTEXT} context lines. Pure insertions use `oldText: null`,
- * patch-only no-newline markers are omitted, and scattered replacements remain separate hunks.
+ * applied change plus {@link DIFF_CONTEXT} context lines and the line each side starts at.
+ * Pure insertions use `oldText: null`, patch-only no-newline markers are omitted, and scattered
+ * replacements remain separate hunks.
  *
  * @param path - the path stamped on every produced diff (the model-facing `file_path`; the
  *   bridge relativizes it).
@@ -32,9 +33,9 @@ export type FsDiffMeta = { diffs: FileDiff[]; operation?: 'create' | 'update' }
  * @param after - the file text after the change, on the same basis.
  * @returns one diff per applied hunk, in file order; empty when the texts are identical.
  */
-export function computeHunkDiffs(path: string, before: string, after: string): FileDiff[] {
+export function computeHunkDiffs(path: string, before: string, after: string): (FileDiff & { oldStart: number; newStart: number })[] {
   const patch = structuredPatch('', '', before, after, undefined, undefined, { context: DIFF_CONTEXT })
-  const diffs: FileDiff[] = []
+  const diffs: (FileDiff & { oldStart: number; newStart: number })[] = []
   for (const hunk of patch.hunks) {
     const oldLines: string[] = []
     const newLines: string[] = []
@@ -53,7 +54,14 @@ export function computeHunkDiffs(path: string, before: string, after: string): F
         newLines.push(text)
       }
     }
-    diffs.push({ path, oldText: oldLines.length > 0 ? oldLines.join('\n') : null, newText: newLines.join('\n') })
+    diffs.push({
+      path,
+      oldText: oldLines.length > 0 ? oldLines.join('\n') : null,
+      newText: newLines.join('\n'),
+      // A side with no lines names the line before the hunk, 0 at the start.
+      oldStart: Math.max(1, hunk.oldStart),
+      newStart: Math.max(1, hunk.newStart),
+    })
   }
   return diffs
 }
@@ -61,11 +69,15 @@ export function computeHunkDiffs(path: string, before: string, after: string): F
 /** Whether `value` is a valid {@link FileDiff} (defensive narrowing from opaque `meta`). */
 function isFileDiff(value: unknown): value is FileDiff {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
-  const { path, oldText, newText } = value as Record<string, unknown>
+  const { path, oldText, newText, oldStart, newStart } = value as Record<string, unknown>
   return typeof path === 'string'
     && (oldText === null || typeof oldText === 'string')
     && typeof newText === 'string'
+    && isLine(oldStart) && isLine(newStart)
 }
+
+/** Whether `value` is absent or a 1-based line number; logs written before it was recorded omit it. */
+const isLine = (value: unknown): boolean => value === undefined || (Number.isInteger(value) && (value as number) >= 1)
 
 /**
  * Narrow opaque live or replayed result metadata to non-empty file diffs. Malformed metadata

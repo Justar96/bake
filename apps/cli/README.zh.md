@@ -18,6 +18,8 @@
 
 `bun run dsh` 运行构建后的启动器，使用与 `bun run start` 相同的 Bake 数据目录 `~/.bake`；显式设置 `DSH_HOME` 可覆盖它。直接运行共享运行时启动器仍使用上游默认目录。使用 Bun 命令运行 Bake，修改启动器后需重新构建。
 
+[直接下载归档](../../distribution/README.zh.md) 会在此启动器外安装 `bake` 包装命令。默认启动 `tui` profile；`bake tui`、`bake headless`、`bake plugin` 和 `bake --profile` 会转交给 profile CLI。除非设置 `DSH_HOME`，该命令使用 `~/.bake`。
+
 ## 外部插件
 
 `bun run dsh plugin --profile <name>` 将包操作委托给 profile 的 pnpm 配置。这与 Bun 管理的 Bake 源码工作区独立。Profile 管理器负责安装批准、锁、回滚和配置重载，参见[插件管理器](../../packages/boot/plugin-manager/README.zh.md)。

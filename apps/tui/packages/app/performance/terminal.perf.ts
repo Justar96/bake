@@ -107,7 +107,13 @@ try {
       const firstDeltaMs = performance.now() - continueStart
       const liveInputMs = await terminal.input('PERF_LIVE_DRAFT', 'PERF_LIVE_DRAFT')
       await terminal.wait('complete synthetic response', () => terminal!.clean.includes('PERF_STREAM_DONE'))
-      await terminal.wait('idle after durable stream completion', () => terminal!.clean.lastIndexOf(dictionaries.en.ready) > terminal!.clean.lastIndexOf('PERF_STREAM_DONE'))
+      // The draft typed mid-stream is still there, so idle reads as the send
+      // hint taking the interrupt hint's place.
+      await terminal.wait('idle after durable stream completion', () => {
+        const clean = terminal!.clean
+        const idle = clean.lastIndexOf(dictionaries.en.send)
+        return idle > clean.lastIndexOf('PERF_STREAM_DONE') && idle > clean.lastIndexOf(dictionaries.en.interrupt)
+      })
       const streamMs = performance.now() - continueStart
       const streamBytes = terminal.bytes - beforeStream
       const settledMemory = await terminal.sample()

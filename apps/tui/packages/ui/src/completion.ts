@@ -42,6 +42,12 @@ export interface CompletionMenu {
   readonly error: string | undefined
 }
 
+const frequentCommands = ['model', 'resume', 'new', 'clear'] as const
+const commandRank = (entry: Completion): number => {
+  const index = entry.kind === 'command' ? frequentCommands.findIndex(name => name === entry.name) : -1
+  return index < 0 ? frequentCommands.length : index
+}
+
 /**
  * Build a menu at the cursor; earlier path queries cannot supply choices.
  * @param commands - scoped command and skill metadata.
@@ -97,4 +103,5 @@ export function completions(entries: readonly Completion[], draft: string): read
   if (token === null) return undefined
   const prefix = token[1]!.toLowerCase()
   return entries.filter(entry => entry.name.startsWith(prefix))
+    .sort((left, right) => commandRank(left) - commandRank(right))
 }

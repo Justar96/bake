@@ -1,10 +1,26 @@
 /** Completion replaces the cursor's token while preserving the rest of the draft. */
 import { expect, it } from 'bun:test'
-import { completionMenu, type CompletionCatalog, type FileCatalog } from '../src/completion.ts'
+import { completionMenu, completions, type CompletionCatalog, type FileCatalog } from '../src/completion.ts'
 
 const commands: CompletionCatalog = { loading: false, error: undefined, entries: [{ name: 'help', description: 'Help', kind: 'command' }] }
 const files = (query: string, path: string, kind: 'file' | 'directory' = 'file'): FileCatalog => ({
   query, entries: [{ path, kind }], loading: false, error: undefined,
+})
+
+it('puts common commands first while retaining other registered commands and skills', () => {
+  const entries: CompletionCatalog['entries'] = [
+    { name: 'help', description: 'Help', kind: 'command' },
+    { name: 'compact', description: 'Compact', kind: 'command' },
+    { name: 'clear', description: 'Clear', kind: 'command' },
+    { name: 'review', description: 'Review', kind: 'skill' },
+    { name: 'resume', description: 'Resume', kind: 'command' },
+    { name: 'new', description: 'New', kind: 'command' },
+    { name: 'model', description: 'Model', kind: 'command' },
+  ]
+  expect(completions(entries, '/')?.map(entry => entry.name)).toEqual([
+    'model', 'resume', 'new', 'clear', 'help', 'compact', 'review',
+  ])
+  expect(completions(entries, '/c')?.map(entry => entry.name)).toEqual(['clear', 'compact'])
 })
 
 it('replaces the entire slash token and retains existing arguments', () => {

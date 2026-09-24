@@ -21,7 +21,9 @@ export const Config: z<Config> = z.object({
   // a terminal the environment describes wrongly, which is the case no
   // detection can cover.
   composerFrame: z.union(['round', 'classic', 'auto']).default('auto'),
-  doubleInterruptMs: z.number().min(1).default(500),
+  // Long enough to read the prompt and press again; any other key ends it
+  // sooner, so the prompt never lingers over what the user went on to do.
+  doubleInterruptMs: z.number().min(1).default(2000),
   credentialRefs: z.array(z.string()).default([]),
   completionLimit: z.number().min(1).step(1).default(8),
   // Lines of each tool result the transcript keeps under its outcome. Zero

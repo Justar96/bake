@@ -6,7 +6,9 @@ import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 import type {} from '@deepseek-ai/dsh-settings'
 import { deepEqualJson } from '@deepseek-ai/dsh-util-values'
 import { getOrCreateAnonymousUserId, type AnonymousUserId } from '@deepseek-ai/dsh-anonymous-user-id'
+import { CommandDefinitionId, type CommandResult } from '@deepseek-ai/dsh-commands'
 import { DeepSeekAdapter } from './adapter.ts'
+import { fetchDeepSeekBalance, formatDeepSeekBalance } from './common/balance-api.ts'
 import { Config, resolveAdapterOptions } from './config.ts'
 import type { ResolvedDeepSeekOptions } from './config.ts'
 
@@ -103,6 +105,49 @@ export function apply(ctx: Context, config: Config): void {
       'MISSING_CREDENTIAL',
     )
   }
+
+  ctx.inject(['commands'], (commandCtx) => {
+    const active = new Set<{ abort: AbortController; done: Promise<CommandResult> }>()
+    commandCtx.effect(function* () {
+      yield async () => {
+        for (const operation of active) operation.abort.abort()
+        await Promise.allSettled([...active].map(operation => operation.done))
+      }
+      yield commandCtx.commands.register({
+        definitionId: CommandDefinitionId('@deepseek-ai/dsh-llm-deepseek/usage'),
+        name: 'usage',
+        description: 'Show remaining DeepSeek API credit',
+        handler: (invocation) => {
+          if (invocation.rawInput.trim() !== '') return { kind: 'error', text: 'Usage: /usage' }
+          const abort = new AbortController()
+          const signal = AbortSignal.any([invocation.signal, abort.signal, AbortSignal.timeout(10_000)])
+          const done = (async (): Promise<CommandResult> => {
+            try {
+              signal.throwIfAborted()
+              const connection = options()
+              const key = await resolveApiKey(connection)
+              signal.throwIfAborted()
+              const balance = await fetchDeepSeekBalance({ baseURL: connection.baseURL,
+                protocol: connection.protocol, apiKey: key }, signal)
+              return { kind: 'success', text: formatDeepSeekBalance(balance) }
+            } catch (error) {
+              if (invocation.signal.aborted || abort.signal.aborted) throw error
+              if (signal.aborted) return { kind: 'error', text: 'DeepSeek balance request timed out.' }
+              const credentialError = error instanceof LlmError
+                && (error.code === 'MISSING_CREDENTIAL' || error.code === 'INVALID_CREDENTIAL')
+              return { kind: 'error', text: error instanceof Error
+                && (error.message.startsWith('DeepSeek') || credentialError)
+                ? error.message : 'DeepSeek balance request failed.' }
+            }
+          })()
+          const operation = { abort, done }
+          active.add(operation)
+          void done.then(() => { active.delete(operation) }, () => { active.delete(operation) })
+          return done
+        },
+      })
+    }, 'llm-deepseek balance command')
+  })
 
   let userId: AnonymousUserId | undefined
   const resolveUserId = (): AnonymousUserId => userId ??= getOrCreateAnonymousUserId()

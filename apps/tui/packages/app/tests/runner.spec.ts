@@ -40,12 +40,19 @@ it.each(['quit', 'dispose'] as const)('restores Ink modes and drains the agent o
   const io = { in: input, out: output, err: error, exit } as unknown as TuiIo
   const finished = run(fixture.ctx, { locale: 'en', composerFrame: 'auto', completionLimit: 8, resultLines: 8, attachmentMaxBytes: 1048576, attachmentLimit: 8, doubleInterruptMs: 500, credentialRefs: [] }, io)
   cleanup.push(async () => { await fixture.ctx.fiber.dispose(); await finished })
-  await Promise.race([finished, vi.waitFor(() => expect(output.text).toContain('Ready'))])
+  await Promise.race([finished, vi.waitFor(() => expect(output.text).toContain('Model: '))])
   expect(input.isRaw).toBe(true)
   expect(output.text).toContain('\u001b[?2004h')
   if (mode === 'quit') {
     input.write('\u0003')
     await vi.waitFor(() => expect(output.text).toContain('Press Ctrl-C again'))
+    // Another key ends the prompt, so the next Ctrl-C asks again rather than quitting.
+    const asked = output.text.split('Press Ctrl-C again').length
+    input.write('x')
+    await new Promise(resolve => setTimeout(resolve, 50))
+    input.write('\u0003')
+    await vi.waitFor(() => expect(output.text.split('Press Ctrl-C again').length).toBeGreaterThan(asked))
+    expect(exit).not.toHaveBeenCalled()
     input.write('\u0003')
   } else {
     // The launcher's installFailLoud release hook awaits this same operation.

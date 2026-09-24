@@ -1,0 +1,12 @@
+120: Model: a-very-long-model-name  Access workspace-write  Think high  Context: ~3k/128k (2%)  /workspace
+120: Model: a-very-long-model-name  Access danger-full-access  Think high  Context: ~3k/128k (2%)  /workspace
+60: Model: a-very-long-mode…  Access workspace-write  Think high
+60: Model: a-very-long-m…  Access danger-full-access  Think high
+40: Mod…  Access workspace-write  Think high
+40: …  Access danger-full-access  Think high
+38: M…  Access workspace-write  Think high
+38: Access danger-full-access  Think high
+24: Access workspace-write
+24: Access danger-full-acce…
+1: …
+1: …

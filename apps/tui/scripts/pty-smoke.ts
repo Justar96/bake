@@ -52,10 +52,16 @@ const SCREEN = {
   /** `line.tsx` draws the caret rather than using inverse video, which NO_COLOR would erase. */
   caret: '\u258c',
   /**
-   * Idle status. The two spaces are the gap between status fields, so a
-   * transcript sentence that contains the word does not match.
+   * The status line's first field, which names the model. It is drawn from
+   * the first frame, whatever the session is doing.
    */
-  idle: `${dictionaries.en.ready}  `,
+  status: `${dictionaries.en.model}: `,
+  /**
+   * An idle session with an empty draft: the composer's placeholder. A running
+   * turn replaces it with the steering hint and blocked input with the reason,
+   * so its last appearance after a turn's output means the turn has ended.
+   */
+  idle: dictionaries.en.prompt,
   /** The composer's prompt rail. */
   prompt: `${MARKER.prompt} `,
   /**
@@ -279,7 +285,7 @@ class Terminal {
    */
   async ready(): Promise<string> {
     return this.wait('the app to mount and enable bracketed paste',
-                     text => text.includes(SCREEN.idle) && this.raw.includes('\x1b[?2004h'))
+                     text => text.includes(SCREEN.status) && this.raw.includes('\x1b[?2004h'))
   }
 
   /**
@@ -472,6 +478,7 @@ class Run {
                  DSH_AGENTS_HOME: join(root, 'agents'), TERM: 'xterm-256color', NO_COLOR: '1' }
     // Replay must not pick up a developer's provider key; CI detection stays intact.
     delete this.env.DEEPSEEK_API_KEY
+    delete this.env.CLIPROXYAPI_API_KEY
   }
 
   /** Read the fixture the replay and the assertions share. */
@@ -486,12 +493,12 @@ class Run {
    * Rewrite the profile overlay the CLI loads over the built patch.
    *
    * @param override - a replay override file staging the next model response.
-   * @param persistence - storage root and encoding for a scenario-specific profile.
+   * @param profile - scenario-specific storage, goal-round, replay, or balance-endpoint settings.
    */
-  async writeOverlay(override?: string, persistence: { root?: string; compression?: 'none' | 'zstd' } = {}): Promise<void> {
+  async writeOverlay(override?: string, profile: { root?: string; compression?: 'none' | 'zstd'; goalMaxRounds?: number; paceMs?: number; balanceBaseURL?: string; cliProxyApi?: boolean } = {}): Promise<void> {
     const replay: any = {
       id: 'tui-replay', name: join(ROOT, 'packages/test-support/llm-replay/lib/index.js'),
-      config: { file: FIXTURE, providers: [{ id: 'deepseek-official', models: [
+      config: { file: FIXTURE, ...(profile.paceMs === undefined ? {} : { paceMs: profile.paceMs }), providers: [{ id: 'deepseek-official', models: [
         { id: 'deepseek-v4-flash', contextWindow: 128000 },
         { id: 'tui-picked-model', contextWindow: 128000,
           reasoningEfforts: ['low', 'high'], defaultReasoningEffort: 'low' }] }] },
@@ -501,12 +508,17 @@ class Run {
       { id: 'session-title-llm', disabled: true },
       { id: 'agent-default-model', config: { provider: 'deepseek-official', model: 'deepseek-v4-flash' } },
       { id: 'session-persistence-jsonl', config: {
-        root: persistence.root ?? this.sessionsRoot, compression: persistence.compression ?? 'none',
+        root: profile.root ?? this.sessionsRoot, compression: profile.compression ?? 'none',
       } },
+      ...(profile.goalMaxRounds === undefined ? [] : [{ id: 'goal', config: { defaultMaxGoalRounds: profile.goalMaxRounds } }]),
     ]
     await Bun.write(this.overlay, JSON.stringify(this.live ? patches : [
-      { id: 'llm-deepseek', disabled: true }, { id: 'llm-pi-ai', disabled: true },
-      ...patches, { insert: [replay] }]))
+      profile.balanceBaseURL === undefined
+        ? { id: 'llm-deepseek', disabled: true }
+        : { id: 'llm-deepseek', config: { baseURL: profile.balanceBaseURL, protocol: 'messages' } },
+      ...profile.cliProxyApi ? [] : [{ id: 'llm-pi-ai', disabled: true }],
+      ...patches, ...(profile.balanceBaseURL === undefined ? [{ insert: [replay] }] : []),
+    ]))
   }
 
   /**
@@ -584,7 +596,7 @@ function same(left: unknown, right: unknown): boolean {
 
 const DONE_LINE = new RegExp(`\\n${MARKER.reply} DONE\\r?\\n`)
 
-scenario('fresh', 'login, model and effort selection, paste, cursor editing, a bash tool turn, and the context estimate', {},
+scenario('fresh', 'login, model and effort selection, paste, cursor editing, a bash tool turn, the context estimate, and billed tokens', {},
   async run => {
     const before = await run.logs()
     const prompt = run.prompt
@@ -594,7 +606,9 @@ scenario('fresh', 'login, model and effort selection, paste, cursor editing, a b
       tty.send('\t', 'Tab to complete it')
       await tty.expect(`> /login ${SCREEN.caret}`)
       tty.send('\r', 'Enter')
-      await tty.expect('/login DEEPSEEK_API_KEY')
+      await tty.expect('Choose a sign-in target')
+      tty.send('\x1b', 'dismiss the login picker')
+      await tty.expect('Sign-in cancelled')
       if (!run.live) {
         tty.send('/model\r')
         await tty.expect('Choose model')
@@ -606,6 +620,7 @@ scenario('fresh', 'login, model and effort selection, paste, cursor editing, a b
         await tty.search(picked('high'))
         tty.send('\r', 'Enter to pick the effort')
         await tty.expect('Model set for the next turn: deepseek-official/tui-picked-model (high)')
+        await tty.expect(`${SCREEN.status}tui-picked-model  Access workspace-write  Think high`)
       }
       tty.send(`\x1b[200~X${prompt}Z\x1b[201~`, 'a bracketed paste padded with X and Z')
       await tty.expect(`> X${prompt}Z${SCREEN.caret}`)
@@ -625,6 +640,9 @@ scenario('fresh', 'login, model and effort selection, paste, cursor editing, a b
                      text => text.includes(SCREEN.toolResult) && DONE_LINE.test(text))
       await tty.follows(SCREEN.idle, SCREEN.toolResult)
       await tty.expect('Context: ~')
+      // Billed tokens as the provider reported them, cache reads included.
+      if (run.live) await tty.search(/ {2}in [\d.]+k? {2}out [\d.]+k?(?: {2}cache hit \d+%)?/)
+      else await tty.expect('  in 5.9k  out 115  cache hit 48%')
     })
 
     const path = await run.created(before, 'persisted')
@@ -652,19 +670,792 @@ scenario('fresh', 'login, model and effort selection, paste, cursor editing, a b
     Object.assign(run.state, { log: path, id: log[0].id, model, headers })
   })
 
+scenario('welcome', 'a fresh session opens with the BAKE block, its version and session line, and /changelog prints the entry',
+  { replayOnly: true },
+  async run => {
+    const version = (await Bun.file(join(ROOT, 'package.json')).json() as { version: string }).version
+    const copy = dictionaries.en
+    const heading = `${copy.session}: `
+    await run.terminal('welcome', [], async tty => {
+      const opening = await tty.expect('BAKE', `v${version}`, heading, '/help', '/changelog', copy.welcomeChangelog)
+      tty.check('the session line sits inside the welcome block', opening.indexOf('BAKE') < opening.indexOf(heading))
+      const start = tty.mark()
+      tty.send('/changelog\r', 'print the running version\'s changelog')
+      await tty.expect(`## [${version}]`, start)
+      await tty.follows(SCREEN.idle, `## [${version}]`)
+      for (const command of ['/new', '/clear']) {
+        const after = tty.mark()
+        tty.send(`${command}\r`, 'open a fresh session')
+        await tty.expect('BAKE', `v${version}`, heading, copy.welcomeChangelog, after)
+        await tty.follows(SCREEN.idle, heading)
+      }
+    })
+  })
+
+scenario('status-colour', 'model and context use normal foreground while supporting status fields stay dim', { replayOnly: true },
+  async run => {
+    const colour = { NO_COLOR: run.env.NO_COLOR, FORCE_COLOR: run.env.FORCE_COLOR }
+    delete run.env.NO_COLOR
+    run.env.FORCE_COLOR = '3'
+    try {
+      await run.terminal('status-colour', [], async tty => {
+        const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
+        let consumed = 0
+        try {
+          tty.send(`${run.prompt}\r`)
+          await tty.follows(SCREEN.idle, SCREEN.toolResult)
+          await tty.wait('the complete status row with context and billed tokens', async () => {
+            const raw = tty.raw
+            await new Promise<void>(resolve => screen.write(raw.slice(consumed), resolve))
+            consumed = raw.length
+            const buffer = screen.buffer.active
+            for (let row = buffer.length - 1; row >= 0; row--) {
+              const line = buffer.getLine(row)
+              const text = line?.translateToString(true) ?? ''
+              if (!text.includes(SCREEN.status) || !text.includes('Context: ~') || !text.includes('in 5.9k')) continue
+              for (const field of [SCREEN.status.trim(), 'Context: ~']) {
+                const cell = line!.getCell(text.indexOf(field))!
+                tty.check(`${field} uses normal foreground`, !cell.isDim() && cell.isFgDefault())
+              }
+              tty.check('billed input stays dim', !!line!.getCell(text.indexOf('in 5.9k'))!.isDim())
+              return true
+            }
+            return false
+          })
+        } finally { screen.dispose() }
+      })
+    } finally {
+      for (const [key, value] of Object.entries(colour)) {
+        if (value === undefined) delete run.env[key]
+        else run.env[key] = value
+      }
+    }
+  })
+
 scenario('plan', 'plan-mode status follows the logged Harness projection', { replayOnly: true },
   async run => {
     const before = await run.logs()
     await run.terminal('plan', [], async tty => {
       tty.send('/plan\r', 'enter plan mode')
-      await tty.search(/Ready  Plan  /)
+      await tty.expect(`${SCREEN.status}deepseek-v4-flash  Plan  `)
       const after = tty.mark()
       tty.send('/plan off\r', 'leave plan mode')
-      await tty.search(/Ready  deepseek-v4-flash  /, after)
+      await tty.expect(`${SCREEN.status}deepseek-v4-flash  Access workspace-write`, after)
     })
     const log = await events(await run.created(before, 'persisted'))
     const modes = log.filter(e => e.type === 'plan/mode').map(e => e.data.active)
     assert(same(modes, [true, false]), 'plan status did not follow the logged mode changes')
+  })
+
+scenario('thinking', 'selected and provider-default thinking levels follow model changes without wrapping', { replayOnly: true },
+  async run => {
+    const before = await run.logs()
+    await run.terminal('thinking', [], async tty => {
+      const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
+      let consumed = 0
+      const footer = async (description: string, accepts: (line: string) => boolean) => {
+        await tty.wait(description, async () => {
+          const raw = tty.raw
+          await new Promise<void>(resolve => screen.write(raw.slice(consumed), resolve))
+          consumed = raw.length
+          const buffer = screen.buffer.active
+          return accepts(buffer.getLine(buffer.viewportY + screen.rows - 2)?.translateToString(true) ?? '')
+            && buffer.getLine(buffer.viewportY + screen.rows - 1)?.translateToString(true) === ''
+        })
+      }
+      try {
+        await footer('no invented level for a model without reasoning controls', line =>
+          line.includes('Model: deepseek-v4-flash') && !line.includes('Think'))
+        tty.send('/model deepseek-official/tui-picked-model high\r')
+        await footer('explicit high thinking level', line =>
+          line.includes('Model: tui-picked-model  Access workspace-write  Think high'))
+        screen.resize(40, 12)
+        tty.resize(40, 12)
+        await footer('full access and thinking indicators at 40 columns', line =>
+          line.includes('Access workspace-write  Think high') && !line.includes('tui-picked-model (high)'))
+        screen.resize(120, 40)
+        tty.resize(120, 40)
+        tty.send('/model deepseek-official/tui-picked-model\r')
+        await footer('advertised provider default low', line =>
+          line.includes('Model: tui-picked-model  Access workspace-write  Think low'))
+        tty.send('/model deepseek-official/deepseek-v4-flash\r')
+        await footer('unsupported thinking level omitted after switching models', line =>
+          line.includes('Model: deepseek-v4-flash') && !line.includes('Think'))
+      } finally { screen.dispose() }
+    })
+    const log = await events(await run.created(before, 'thinking'))
+    assert(!log.some(e => e.type === 'request/header'), '/model commands unexpectedly called the model')
+  })
+
+scenario('permissions', 'workspace-write default, live permission status at narrow widths, and durable session selection', { replayOnly: true },
+  async run => {
+    const override = run.env.DSH_PERMISSION_MODE
+    delete run.env.DSH_PERMISSION_MODE
+    const inspect = async (tty: Terminal, drive: (footer: (mode: string) => Promise<void>, resize: () => void) => Promise<void>) => {
+      const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
+      let consumed = 0
+      const footer = async (mode: string) => {
+        await tty.wait(`current footer shows ${mode}`, async () => {
+          const raw = tty.raw
+          await new Promise<void>(resolve => screen.write(raw.slice(consumed), resolve))
+          consumed = raw.length
+          const buffer = screen.buffer.active
+          return buffer.getLine(buffer.viewportY + screen.rows - 2)?.translateToString(true).includes(`Access ${mode}`) === true
+            && buffer.getLine(buffer.viewportY + screen.rows - 1)?.translateToString(true) === ''
+        })
+      }
+      try { await drive(footer, () => { screen.resize(40, 12); tty.resize(40, 12) }) }
+      finally { screen.dispose() }
+    }
+    try {
+      const before = await run.logs()
+      await run.terminal('permissions', [], tty => inspect(tty, async (footer, resize) => {
+        await footer('workspace-write')
+        tty.send('/permission read-only\r')
+        await footer('read-only')
+        tty.send('/permission danger-full-access\r')
+        await footer('danger-full-access')
+        resize()
+        await footer('danger-full-access')
+        tty.send('/permission read-only\r')
+        await footer('read-only')
+      }))
+      const path = await run.created(before, 'permission')
+      const log = await events(path)
+      assert(same(log.filter(e => e.type === 'permission/preset').map(e => e.data.preset),
+        ['workspace-write', 'read-only', 'danger-full-access', 'read-only']), 'permission changes did not reach the session log')
+      assert(log.find(e => e.type === 'sandbox/mode')?.data.mode === 'workspace-write', 'new session sandbox was not workspace-write')
+      assert(log.find(e => e.type === 'approval/policy')?.data.policy === 'ask', 'new session approval policy was not ask')
+      const beforeNew = await run.logs()
+      await run.terminal('permissions-resume', ['--resume', log[0].id], tty => inspect(tty, async footer => {
+        await footer('read-only')
+        tty.send('/new\r')
+        await footer('workspace-write')
+      }))
+      const fresh = await events(await run.created(beforeNew, 'new permission'))
+      assert(fresh.find(e => e.type === 'permission/preset')?.data.preset === 'workspace-write', '/new did not use the configured default')
+      for (const record of [await events(path), fresh]) {
+        assert(!record.some(e => e.type === 'request/header'), 'permission commands unexpectedly called the model')
+      }
+      run.env.DSH_PERMISSION_MODE = 'read-only'
+      await run.terminal('permissions-override', [], tty => inspect(tty, async footer => {
+        await footer('read-only')
+      }))
+    } finally {
+      if (override === undefined) delete run.env.DSH_PERMISSION_MODE
+      else run.env.DSH_PERMISSION_MODE = override
+    }
+  })
+
+scenario('questions', 'a real ask_user_question tool call offers choices and retains an Other draft',
+  { replayOnly: true },
+  async run => {
+    const override = join(run.root, 'questions-replay.json')
+    const args = JSON.stringify({ questions: [{ id: 'method', question: 'Choose a method',
+      options: [{ label: 'Alpha' }, { label: 'Beta' }], multi_select: true }] })
+    const call = { type: 'tool-call' as const, id: 'call-question-1', name: 'ask_user_question', arguments: args }
+    await Bun.write(override, JSON.stringify([
+      { kind: 'chunks', chunks: [
+        { type: 'block-start', index: 0, blockType: 'tool-call' },
+        { type: 'tool-call-delta', index: 0, id: call.id, name: call.name, argumentsDelta: args },
+        { type: 'block-end', index: 0, block: call },
+        { type: 'finish', reason: { kind: 'tool-calls' } },
+      ] },
+      { kind: 'chunks', chunks: [
+        { type: 'block-start', index: 0, blockType: 'text' },
+        { type: 'text-delta', index: 0, text: 'Question answered.' },
+        { type: 'block-end', index: 0, block: { type: 'text', text: 'Question answered.' } },
+        { type: 'finish', reason: { kind: 'stop' } },
+      ] },
+    ]))
+    await run.writeOverlay(override)
+    const before = await run.logs()
+    try {
+      await run.terminal('questions', [], async tty => {
+        tty.send('Ask me to choose a method.\r', 'trigger the recorded question tool call')
+        await tty.expect('Choose a method', 'Other answer:')
+        tty.send(' ', 'select Alpha')
+        await tty.expect('[x] 1. Alpha')
+        tty.send('A custom method', 'start an Other answer')
+        await tty.expect('Other answer: A custom method')
+        tty.send('\x1b[A', 'inspect the choices while keeping the draft')
+        await tty.search(picked('[ ] 2. Beta'))
+        await tty.expect('Other answer: A custom method')
+        tty.send('\x1b[B\r', 'return to Other and submit the combined answer')
+        await tty.expect('Question answered.')
+      })
+    } finally { await run.writeOverlay() }
+    const log = await events(await run.created(before, 'question answer'))
+    const result = log.find(event => event.type === 'tool/result'
+      && event.data.message.content.some((item: any) => item.type === 'tool-result'
+        && item.toolCallId === 'call-question-1'))
+    assert(result !== undefined, 'question tool result did not reach the session log')
+    const toolResult = result.data.message.content.find((item: any) => item.type === 'tool-result'
+      && item.toolCallId === 'call-question-1')
+    const answerText = toolResult.content.find((item: any) => item.type === 'text')?.text
+    assert(typeof answerText === 'string', 'question tool result has no answer text')
+    assert(same(JSON.parse(answerText), { answers: [{ id: 'method', selected: ['Alpha'], custom: 'A custom method' }] }),
+      'selected and custom answers were not both returned by the tool')
+  })
+
+scenario('edit', 'a recorded edit draws only its changed lines, numbered, with changed words reversed and code highlighted',
+  { replayOnly: true },
+  async run => {
+    const file = join(run.workspace, 'startup.ts')
+    const source = `${Array.from({ length: 40 }, (_, index) => index === 12 ? '  const home = process.env.HOME ?? fallback()' : `  line(${index + 1})`).join('\n')}\n`
+    await Bun.write(file, source)
+    const override = join(run.root, 'edit-replay.json')
+    const calls = [
+      { type: 'tool-call' as const, id: 'call-read-1', name: 'read', arguments: JSON.stringify({ file_path: 'startup.ts' }) },
+      { type: 'tool-call' as const, id: 'call-edit-1', name: 'edit', arguments: JSON.stringify({
+        file_path: 'startup.ts', old_string: 'const home = process.env.HOME', new_string: 'const home = resolvedHome ?? process.env.HOME' }) },
+    ]
+    await Bun.write(override, JSON.stringify([
+      ...calls.map(call => ({ kind: 'chunks', chunks: [
+        { type: 'block-start', index: 0, blockType: 'tool-call' },
+        { type: 'tool-call-delta', index: 0, id: call.id, name: call.name, argumentsDelta: call.arguments },
+        { type: 'block-end', index: 0, block: call },
+        { type: 'finish', reason: { kind: 'tool-calls' } },
+      ] })),
+      { kind: 'chunks', chunks: [
+        { type: 'block-start', index: 0, blockType: 'text' },
+        { type: 'text-delta', index: 0, text: 'Edited.' },
+        { type: 'block-end', index: 0, block: { type: 'text', text: 'Edited.' } },
+        { type: 'finish', reason: { kind: 'stop' } },
+      ] },
+    ]))
+    await run.writeOverlay(override)
+    // Colour on for this run alone: reversed words and syntax colour are
+    // escape sequences, and `NO_COLOR` erases both.
+    const colour = { NO_COLOR: run.env.NO_COLOR, FORCE_COLOR: run.env.FORCE_COLOR }
+    delete run.env.NO_COLOR
+    run.env.FORCE_COLOR = '3'
+    try {
+      await run.terminal('edit', [], async tty => {
+        const start = tty.mark()
+        const from = tty.raw.length
+        tty.send('Make the home configurable.\r', 'trigger the recorded read and edit')
+        await tty.expect('edited startup.ts  +1 −1', '13 -   const home = process.env.HOME ?? fallback()',
+          '13 +   const home = resolvedHome ?? process.env.HOME ?? fallback()', 'Edited.', start)
+        const shown = tty.text.slice(start)
+        tty.check('the context lines around the change are not drawn', !shown.includes('line(12)') && !shown.includes('line(14)'))
+        const raw = tty.raw.slice(from)
+        tty.check('the words the edit added are reversed', raw.includes('\x1b[7mresolvedHome ?? '))
+        const removed = raw.slice(raw.indexOf('13 -'), raw.indexOf('\n', raw.indexOf('13 -')))
+        const colours = new Set(removed.match(/\x1b\[38;(?:5;\d+|2;\d+;\d+;\d+)m/g) ?? [])
+        tty.check('the removed line carries syntax colour beside its red', colours.size >= 2)
+      })
+    } finally {
+      for (const [name, value] of Object.entries(colour)) {
+        if (value === undefined) delete run.env[name]
+        else run.env[name] = value
+      }
+      await run.writeOverlay()
+    }
+    assert(await Bun.file(file).text() === source.replace('const home = process.env.HOME', 'const home = resolvedHome ?? process.env.HOME'),
+      'the recorded edit did not change the file')
+  })
+
+scenario('tool-colour', 'real read, search, and shell results retain syntax colour, bounds, and readable replay without colour',
+  { replayOnly: true }, async run => {
+    const file = join(run.workspace, 'colours.ts')
+    const source = 'export const colourValue = "ready"\n// source stays unchanged\n'
+    await Bun.write(file, source)
+    const json = '{"tool_colour":true,"count":3}'
+    const requests = [
+      ['read', { file_path: 'colours.ts' }],
+      ['grep', { pattern: 'colourValue', path: '.', include: 'colours.ts' }],
+      ['bash', { command: `printf '%s\\n' '${json}'`, description: 'Print JSON' }],
+      ['bash', { command: "printf '%s\\n' 'WARN colours.ts:1' 'PASS syntax checks'", description: 'Print diagnostics' }],
+    ] as const
+    const override = join(run.root, 'tool-colour-replay.json')
+    await Bun.write(override, JSON.stringify([
+      ...requests.map(([name, args], index) => {
+        const call = { type: 'tool-call', id: `colour-${index}`, name, arguments: JSON.stringify(args) }
+        return { kind: 'chunks', chunks: [
+          { type: 'block-start', index: 0, blockType: 'tool-call' },
+          { type: 'tool-call-delta', index: 0, id: call.id, name, argumentsDelta: call.arguments },
+          { type: 'block-end', index: 0, block: call },
+          { type: 'finish', reason: { kind: 'tool-calls' } },
+        ] }
+      }),
+      { kind: 'chunks', chunks: [
+        { type: 'block-start', index: 0, blockType: 'text' },
+        { type: 'text-delta', index: 0, text: 'TOOL_COLOUR_DONE' },
+        { type: 'block-end', index: 0, block: { type: 'text', text: 'TOOL_COLOUR_DONE' } },
+        { type: 'finish', reason: { kind: 'stop' } },
+      ] },
+    ]))
+    const before = await run.logs()
+    const colour = { NO_COLOR: run.env.NO_COLOR, FORCE_COLOR: run.env.FORCE_COLOR, COLORTERM: run.env.COLORTERM }
+    await run.writeOverlay(override)
+    delete run.env.NO_COLOR
+    run.env.FORCE_COLOR = '3'
+    run.env.COLORTERM = 'truecolor'
+    try {
+      await run.terminal('tool-colour', [], async tty => {
+        const from = tty.raw.length
+        tty.send('Inspect the source and structured output.\r')
+        await tty.follows(SCREEN.idle, 'TOOL_COLOUR_DONE')
+        const raw = tty.raw.slice(from)
+        tty.check('read and grep source tokens are coloured', /\x1b\[38;[^m]+mcolourValue/.test(raw))
+        tty.check('JSON keys are coloured', /\x1b\[38;[^m]+m"tool_colour"/.test(raw))
+        tty.check('diagnostic labels use semantic colours', raw.includes('\x1b[38;2;234;179;8mWARN') && raw.includes('\x1b[38;2;34;197;94mPASS'))
+        const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
+        try {
+          await new Promise<void>(resolve => screen.write(tty.raw, resolve))
+          const lines = Array.from({ length: screen.buffer.active.length }, (_, row) => screen.buffer.active.getLine(row)?.translateToString(true) ?? '')
+          tty.check('both read and search show the source once', lines.filter(line => line.includes('export const colourValue = "ready"')).length === 2)
+          tty.check('JSON remains exact', lines.some(line => line.trim() === json))
+        } finally { screen.dispose() }
+      })
+    } finally {
+      for (const [name, value] of Object.entries(colour)) {
+        if (value === undefined) delete run.env[name]
+        else run.env[name] = value
+      }
+      await run.writeOverlay()
+    }
+    const log = await events(await run.created(before, 'tool colour'))
+    assert((await Bun.file(file).text()) === source, 'read or search modified its source')
+    assert(log.filter(event => event.type === 'tool/result').length === requests.length, 'not every real tool completed')
+    await run.terminal('tool-colour-resume', ['--resume', log[0].id], async tty => {
+      await tty.expect('TOOL_COLOUR_DONE', 'colourValue', json, 'WARN colours.ts:1', 'PASS syntax checks')
+      const colours = tty.raw.match(/\x1b\[(?:3[0-7]|38;(?:5;\d+|2;\d+;\d+;\d+))m/g) ?? []
+      tty.check(`NO_COLOR replay emits no foreground colour (${JSON.stringify([...new Set(colours)])})`, colours.length === 0)
+    })
+  })
+
+scenario('arrow-wave', 'the single-line processing wave loops in place and yields to a short composer',
+  { replayOnly: true }, async run => {
+    const override = join(run.root, 'arrow-wave-replay.json')
+    const reasoning = 'Checking the processing indicator. '.repeat(80)
+    await Bun.write(override, JSON.stringify([{ kind: 'chunks', chunks: [
+      { type: 'block-start', index: 0, blockType: 'reasoning' },
+      ...Array.from({ length: 80 }, () => ({ type: 'reasoning-delta', index: 0, text: 'Checking the processing indicator. ' })),
+      { type: 'block-end', index: 0, block: { type: 'reasoning', text: reasoning } },
+      { type: 'block-start', index: 1, blockType: 'text' },
+      { type: 'text-delta', index: 1, text: 'WAVE_DONE' },
+      { type: 'block-end', index: 1, block: { type: 'text', text: 'WAVE_DONE' } },
+      { type: 'finish', reason: { kind: 'stop' } },
+    ] }]))
+    const colour = { NO_COLOR: run.env.NO_COLOR, FORCE_COLOR: run.env.FORCE_COLOR }
+    delete run.env.NO_COLOR
+    run.env.FORCE_COLOR = '3'
+    try {
+      await run.writeOverlay(override, { paceMs: 100 })
+      await run.terminal('arrow-wave', [], async tty => {
+        const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
+        let consumed = 0
+        const capture = async (): Promise<string[]> => {
+          const raw = tty.raw
+          await new Promise<void>(resolve => screen.write(raw.slice(consumed), resolve))
+          consumed = raw.length
+          return Array.from({ length: screen.rows }, (_, row) =>
+            screen.buffer.active.getLine(screen.buffer.active.viewportY + row)?.translateToString(true) ?? '')
+        }
+        try {
+          const frames = new Set<string>()
+          tty.send('Show the processing wave.\r')
+          await tty.wait('all six arrow frames at the same position', async () => {
+            const rows = await capture()
+            const header = rows.findIndex(line => /^─ [\u2800-\u283f]{3} \S+…/.test(line))
+            if (header < 1) return false
+            // PTY reads may end mid-frame, before its final scroll anchors the controls.
+            // The rule rests on the input, then a padding row, then the status line.
+            if (header !== 35 || !rows[36]!.startsWith('> ') || rows[37]!.trim() !== ''
+              || !rows[38]!.includes(SCREEN.status)) return false
+            tty.check('there is no dot zone above the processing line', !rows.some(line => /^[\u2800-\u283f]{3}$/.test(line)))
+            frames.add(rows[header]!.slice(2, 5))
+            return frames.size === 6
+          })
+          tty.check('the wave stays in the rule directly above the input', frames.size === 6)
+          const mark = tty.raw.length
+          screen.resize(40, 4)
+          tty.resize(40, 4)
+          await tty.wait('the short terminal keeps its input visible', async () => {
+            const rows = await capture()
+            // Three rows: the rule, the input, and the status line.
+            return tty.raw.length > mark && rows[0]!.startsWith('─') && rows[1]!.includes('> ') && rows[2]!.includes(SCREEN.status)
+          })
+          screen.resize(80, 24)
+          tty.resize(80, 24)
+          await tty.follows(SCREEN.idle, 'WAVE_DONE')
+          const rows = await capture()
+          tty.check('completion removes the dot field', !rows.some(line => /[\u2800-\u283f]/.test(line)))
+          tty.check('the completed composer stays at the bottom', rows[22]!.includes(SCREEN.status))
+        } finally { screen.dispose() }
+      })
+    } finally {
+      for (const [key, value] of Object.entries(colour)) {
+        if (value === undefined) delete run.env[key]
+        else run.env[key] = value
+      }
+      await run.writeOverlay()
+    }
+  })
+
+scenario('markdown', 'streamed Markdown formats once, survives resize and resume, and preserves the logged source',
+  { replayOnly: true }, async run => {
+    const reasoning = '**Review** the formatter.'
+    const answer = '# Formatted response\n\n**Ready** with `snake_case` and [docs](https://example.com).\n\n'
+      + '- [x] parsed\n- [ ] verified\n\n```ts\nconst snake_case = "**literal**"\n```\n\n'
+      + '| Check | State |\n| --- | --- |\n| Stream | ready |\n\n'
+      + `${'Wide '.repeat(22)}end.\n\nFORMATTER_DONE`
+    const override = join(run.root, 'markdown-replay.json')
+    const chunks = [
+      { type: 'block-start', index: 0, blockType: 'reasoning' },
+      { type: 'reasoning-delta', index: 0, text: reasoning },
+      { type: 'block-end', index: 0, block: { type: 'reasoning', text: reasoning } },
+      { type: 'block-start', index: 1, blockType: 'text' },
+      ...Array.from({ length: Math.ceil(answer.length / 7) }, (_, index) => ({
+        type: 'text-delta', index: 1, text: answer.slice(index * 7, (index + 1) * 7),
+      })),
+      { type: 'block-end', index: 1, block: { type: 'text', text: answer } },
+      { type: 'finish', reason: { kind: 'stop' } },
+    ]
+    await Bun.write(override, JSON.stringify([{ kind: 'chunks', chunks }]))
+    const before = await run.logs()
+    await run.writeOverlay(override)
+    const checkScreen = (screen: InstanceType<typeof xterm.Terminal>): void => {
+      const lines = Array.from({ length: screen.buffer.active.length }, (_, row) => screen.buffer.active.getLine(row)?.translateToString(true) ?? '')
+      assert(lines.filter(line => line === '< Formatted response').length === 1, 'Markdown heading was lost or printed twice')
+      const text = lines.join('\n')
+      assert(text.includes('Review the formatter.') && text.includes('Check: Stream') && text.includes('State: ready'), 'reasoning or table was not formatted')
+      assert(text.includes('const snake_case = "**literal**"') && !text.includes('```'), 'code was parsed as prose or retained its fences')
+      const wide = lines.filter(line => line.includes('Wide '))
+      assert(wide.length > 0 && text.includes('end.'), 'long response was lost')
+      if (screen.cols >= 120) assert(wide.some(line => line.length > 90), 'wide terminal still caps response at a fixed prose measure')
+      else assert(wide.length > 1, 'narrow terminal did not rewrap the response')
+    }
+    try {
+      await run.terminal('markdown', [], async tty => {
+        const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
+        let consumed = 0
+        const capture = async (): Promise<void> => {
+          const raw = tty.raw
+          await new Promise<void>(resolve => screen.write(raw.slice(consumed), resolve))
+          consumed = raw.length
+        }
+        try {
+          tty.send('Show formatted output.\r')
+          await tty.follows(SCREEN.idle, 'FORMATTER_DONE')
+          await capture()
+          checkScreen(screen)
+          const mark = tty.raw.length
+          screen.resize(40, 12)
+          tty.resize(40, 12)
+          await tty.wait('formatted history and composer after resize', async () => {
+            await capture()
+            return tty.raw.length > mark && screen.buffer.active.getLine(screen.buffer.active.viewportY + 10)?.translateToString(true).includes(SCREEN.status) === true
+          })
+          checkScreen(screen)
+        } finally { screen.dispose() }
+      })
+      const path = await run.created(before, 'Markdown')
+      const log = await events(path)
+      const messages = log.filter(event => event.type === 'assistant/message').map(event => event.data.message.content)
+      assert(same(messages, [[{ type: 'reasoning', text: reasoning }, { type: 'text', text: answer }]]), 'formatting changed the logged model source')
+      await run.terminal('markdown-resume', ['--resume', log[0].id], async tty => {
+        await tty.expect('FORMATTER_DONE')
+        const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
+        try {
+          await new Promise<void>(resolve => screen.write(tty.raw, resolve))
+          checkScreen(screen)
+        } finally { screen.dispose() }
+      })
+    } finally { await run.writeOverlay() }
+  })
+
+scenario('usage', 'the built TUI reads DeepSeek remaining credit through /usage without a model call',
+  { replayOnly: true },
+  async run => {
+    const requests: Array<{ path: string; authorization: string | null }> = []
+    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
+      const url = new URL(request.url)
+      requests.push({ path: url.pathname, authorization: request.headers.get('authorization') })
+      return Response.json({ is_available: true, balance_infos: [
+        { currency: 'USD', total_balance: '7.50', granted_balance: '2.00', topped_up_balance: '5.50' },
+      ] })
+    } })
+    run.env.DEEPSEEK_API_KEY = 'smoke-balance-key'
+    await run.writeOverlay(undefined, { balanceBaseURL: new URL('anthropic', server.url).href })
+    const before = await run.logs()
+    try {
+      await run.terminal('usage', [], async tty => {
+        tty.send('/help\r', 'discover composed commands')
+        await tty.expect('/usage — Show remaining DeepSeek API credit')
+        const start = tty.mark()
+        tty.send('/usage\r', 'read DeepSeek account balance')
+        await tty.expect('USD: 7.50 remaining (2.00 granted, 5.50 topped up)', start)
+      })
+    } finally {
+      delete run.env.DEEPSEEK_API_KEY
+      await run.writeOverlay()
+      server.stop(true)
+    }
+    assert(same(requests, [{ path: '/user/balance', authorization: 'Bearer smoke-balance-key' }]),
+      'usage did not call the configured balance API with its key')
+    const log = await events(await run.created(before, 'usage'))
+    assert(log.some(event => event.type === 'command/done' && event.data.kind === 'success'
+      && event.data.text?.includes('USD: 7.50 remaining')), '/usage result did not commit to the session')
+    assert(!log.some(event => event.type === 'user/message'), '/usage entered model input')
+  })
+
+scenario('cliproxyapi', 'the built TUI configures a CLIProxyAPI URL and key and selects its models',
+  { replayOnly: true },
+  async run => {
+    const before = await run.logs()
+    const requests: Array<{ path: string, query: string, authorization: string | null, model?: string }> = []
+    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
+      const url = new URL(request.url)
+      if (url.pathname === '/v1/responses') {
+        const body = await request.json() as { model: string }
+        requests.push({ path: url.pathname, query: url.search, authorization: request.headers.get('authorization'), model: body.model })
+        const item = { id: 'msg_proxy', type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'PROXY_OK' }] }
+        const events = [
+          { type: 'response.created', response: { id: 'resp_proxy', status: 'in_progress' } },
+          { type: 'response.output_item.added', output_index: 0, item: { ...item, content: [] } },
+          { type: 'response.output_text.delta', output_index: 0, content_index: 0, delta: 'PROXY_OK' },
+          { type: 'response.output_item.done', output_index: 0, item },
+          { type: 'response.completed', response: { id: 'resp_proxy', status: 'completed', output: [item], usage: { input_tokens: 4, output_tokens: 2, total_tokens: 6 } } },
+        ]
+        const empty = 'event: response.completed\n: keep-alive\n\n'
+        // First request loses its terminal payload; the real retry plugin must recover.
+        const wire = requests.filter(request => request.path === '/v1/responses').length === 1
+          ? empty : events.map(event => `${empty}data: ${JSON.stringify(event)}\n\n`).join('') + empty + 'data: [DONE]\n\n'
+        return new Response(wire,
+          { headers: { 'content-type': 'text/event-stream' } })
+      }
+      requests.push({ path: url.pathname, query: url.search, authorization: request.headers.get('authorization') })
+      return Response.json({ models: [{ slug: 'gpt-test', display_name: 'GPT Test', context_window: 128000 }] })
+    } })
+    await run.writeOverlay(undefined, { cliProxyApi: true })
+    try {
+      const transcript = await run.terminal('cliproxyapi', [], async tty => {
+        tty.send('/login\r', 'choose a login target')
+        await tty.expect('Choose a sign-in target')
+        await tty.expect('CLIProxyAPI', 'Not set', 'URL + API key')
+        tty.send('\r', 'choose CLIProxyAPI')
+        await tty.expect('1/2 · CLIProxyAPI base URL')
+        tty.send(`${server.url.toString()}\r`, 'set the proxy URL')
+        await tty.expect('2/2 · CLIProxyAPI API key')
+        tty.send('smoke-proxy-key\r', 'store the proxy key')
+        await tty.expect('cliproxyapi: 1 model ready; choose it with /model')
+        tty.send('/model cliproxyapi/gpt-test\r', 'select the discovered model')
+        await tty.expect('Model set for the next turn: cliproxyapi/gpt-test')
+        tty.send('Say PROXY_OK\r', 'run one turn through the configured proxy')
+        await tty.expect('< PROXY_OK')
+        await tty.expect('✓ Completed')
+      })
+      assert(!transcript.includes('smoke-proxy-key'), 'CLIProxyAPI secret appeared on the terminal')
+      assert(!transcript.includes('Could not parse message into JSON'), 'empty SSE framing leaked an SDK parse error')
+    } finally {
+      await run.writeOverlay()
+      server.stop(true)
+    }
+    assert(same(requests, [
+      { path: '/v1/models', query: '?client_version=pi', authorization: 'Bearer smoke-proxy-key' },
+      { path: '/v1/responses', query: '', authorization: 'Bearer smoke-proxy-key', model: 'gpt-test' },
+      { path: '/v1/responses', query: '', authorization: 'Bearer smoke-proxy-key', model: 'gpt-test' },
+    ]), 'CLIProxyAPI did not validate the catalog and send the selected model to the entered proxy')
+    assert(!(await Bun.file(join(run.home, 'settings.yaml')).text()).includes('smoke-proxy-key'),
+      'CLIProxyAPI secret was saved in model settings')
+    const log = await events(await run.created(before, 'proxy retry'))
+    assert(log.filter(event => event.type === 'user/message' && event.data.source.kind === 'user').length === 1,
+      'proxy retry duplicated user input')
+    const retries = log.filter(event => event.type === 'llm/retry')
+    assert(retries.length === 1 && retries[0]!.data.failure.code === 'TRANSPORT',
+      'missing SSE completion did not produce exactly one transport retry')
+    assert(log.filter(event => event.type === 'assistant/message').length === 1, 'proxy retry persisted an extra assistant message')
+    assert(log.some(event => event.type === 'turn/end' && event.data.reason.kind === 'completed'),
+      'proxy recovery did not complete the turn')
+  })
+
+scenario('agents', 'the built TUI exposes the Harness subagent catalog through /agents',
+  { replayOnly: true },
+  async run => {
+    const before = await run.logs()
+    await run.terminal('agents', [], async tty => {
+      tty.send('/help\r', 'discover the subagent command')
+      await tty.expect('/agents — List delegated agents')
+      const start = tty.mark()
+      tty.send('/agents\r', 'list this session’s children')
+      await tty.expect('No subagents in this session', start)
+    })
+    const path = await run.created(before, 'agents')
+    const log = await events(path)
+    assert(!log.some(event => event.type === 'user/message'), '/agents entered model input')
+  })
+
+scenario('inspect-agent', 'select a saved child, read its session, and return with the parent draft intact',
+  { requires: ['fresh'], replayOnly: true },
+  async run => {
+    const source = await events(run.state.log)
+    const parentId = 'tui-inspection-parent'
+    const parentPath = join(dirname(dirname(run.state.log)), parentId, basename(run.state.log))
+    mkdirSync(dirname(parentPath), { recursive: true })
+    await Bun.write(parentPath, [{ ...source[0], id: parentId }, ...source.slice(1)].map(event => JSON.stringify(event)).join('\n') + '\n')
+    const childId = 'tui-inspected-child'
+    const path = join(dirname(dirname(run.state.log)), childId, basename(run.state.log))
+    const child = [{ ...source[0], id: childId, parentSession: parentId, origin: 'subagent' },
+      ...source.slice(1), { type: 'subagent/descriptor', seq: source.length - 1, time: Date.now(),
+        data: { version: 3, mode: 'continuable', provider: 'spawn', label: 'Review terminal output' } },
+      { type: 'permission/preset', seq: source.length, time: Date.now(), data: { preset: 'read-only' } },
+      { type: 'sandbox/mode', seq: source.length + 1, time: Date.now(), data: { mode: 'read-only' } }]
+    mkdirSync(dirname(path), { recursive: true })
+    const recorded = child.map(event => JSON.stringify(event)).join('\n') + '\n'
+    await Bun.write(path, recorded)
+    await run.terminal('inspect-agent', ['--resume', parentId], async tty => {
+      await tty.expect('Review terminal output', 'Completed · Saved', 'Ctrl+G /agents')
+      tty.send('Keep this parent draft', 'write a draft before inspecting a child')
+      await tty.expect(`> Keep this parent draft${SCREEN.caret}`)
+      let start = tty.mark()
+      tty.send('\x07', 'Ctrl+G opens the child picker')
+      await tty.expect('Select a child to view its session', 'Review terminal output', start)
+      tty.send('\r', 'open the selected child session')
+      await tty.expect(`Parent: ${parentId}`, 'Read-only', SCREEN.toolResult, 'Access read-only', start)
+      tty.send('must not reach the model\r', 'inspection does not accept prompts')
+      start = tty.mark()
+      tty.send('\x1b', 'return to the running parent without cancelling it')
+      await tty.expect(`> Keep this parent draft${SCREEN.caret}`, 'Access workspace-write', start)
+      tty.send('!', 'continue editing the parent draft')
+      await tty.expect(`> Keep this parent draft!${SCREEN.caret}`, start)
+    })
+    assert(await Bun.file(path).text() === recorded, 'inspection modified the saved child')
+    const parent = await events(parentPath)
+    assert(parent.filter(event => event.type === 'request/header').length === run.state.headers.length,
+      'child inspection requested a model response')
+    assert(!parent.some(event => event.type === 'user/message'
+      && JSON.stringify(event).includes('must not reach')), 'inspection submitted input to the parent')
+  })
+
+scenario('goal-compact', 'the built TUI exposes goal and compact commands and shows their results',
+  { replayOnly: true },
+  async run => {
+    await run.writeOverlay(undefined, { goalMaxRounds: 1 })
+    const before = await run.logs()
+    try {
+      await run.terminal('goal-compact', [], async tty => {
+        tty.send('/help\r', 'list composed commands')
+        await tty.expect('/goal — Set or view the goal for a long-running task')
+        await tty.expect('/compact — Compact older conversation history')
+        tty.send('/goal\r', 'inspect the current goal')
+        await tty.expect('No goal is currently set.')
+        for (const [index, character] of [...'/compact'].entries()) {
+          const after = tty.mark()
+          tty.send(character, `type /compact key ${index + 1}`)
+          await tty.expect(`${SCREEN.prompt}${'/compact'.slice(0, index + 1)}${SCREEN.caret}`, after)
+        }
+        const edit = tty.mark()
+        tty.send('\x7f', 'leave /compac as a completion prefix')
+        await tty.expect(`${SCREEN.prompt}/compac${SCREEN.caret}`, edit)
+        tty.send('\r', 'run the selected /compact completion')
+        await tty.expect('No compactable history yet.')
+        const menuStart = tty.mark()
+        tty.send('/', 'open the slash menu with only a slash in the draft')
+        await tty.expect(`${SCREEN.prompt}/${SCREEN.caret}`, menuStart)
+        let compactSelected = false
+        for (let step = 0; step < 40; step++) {
+          const beforeSelection = tty.mark()
+          tty.send('\x1b[B', 'move through the slash menu')
+          const frame = await tty.wait('a slash menu selection to render', text =>
+            text.slice(beforeSelection).includes(`${MARKER.selected} /`))
+          if (picked('/compact').test(frame.slice(beforeSelection))) { compactSelected = true; break }
+        }
+        tty.check('/compact can be selected from the slash menu', compactSelected)
+        const selection = tty.mark()
+        tty.send('\r', 'run /compact from the slash menu')
+        await tty.expect('No compactable history yet.', selection)
+        const goalStart = tty.mark()
+        tty.send('/goal Complete this test task\r', 'create a goal')
+        await tty.expect('Goal created', goalStart)
+        const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
+        try {
+          await new Promise<void>(resolve => screen.write(tty.raw, resolve))
+          const visible = Array.from({ length: 40 }, (_, row) =>
+            screen.buffer.active.getLine(screen.buffer.active.viewportY + row)?.translateToString(true) ?? '').join('\n')
+          assert(visible.includes('Goal created'), 'goal result is absent from the current terminal viewport')
+        } finally { screen.dispose() }
+        await tty.wait('the goal driver to run its first round', text => DONE_LINE.test(text.slice(goalStart)))
+      })
+    } finally { await run.writeOverlay() }
+    const log = await events(await run.created(before, 'persisted'))
+    assert(log.some(event => event.type === 'goal/change' && event.data.operation === 'create'), 'goal creation did not persist')
+    assert(log.some(event => event.type === 'user/message' && event.data.source.kind === 'goal'), 'goal driver did not submit a round')
+    const runs = log.filter(event => event.type === 'command/run')
+    const done = new Map(log.filter(event => event.type === 'command/done')
+      .map(event => [event.data.commandId, event.data] as const))
+    for (const name of ['goal', 'compact']) {
+      const matches = runs.filter(event => event.data.name === name)
+      assert(matches.length > 0, `/${name} did not execute`)
+      assert(matches.every(event => done.get(event.data.commandId)?.kind === 'success'), `/${name} did not settle successfully`)
+    }
+    assert(runs.filter(event => event.data.name === 'compact').length === 2,
+      'the prefix and selected-menu /compact attempts did not both execute')
+    assert(!log.some(event => event.type === 'user/message' && event.data.source.kind === 'user'
+      && event.data.content.some((block: any) => block.type === 'text' && block.text === '/')),
+    'selecting /compact sent the slash prefix to the model')
+  })
+
+scenario('compact-history', 'manual compaction works after completed replayed turns',
+  { replayOnly: true },
+  async run => {
+    const before = await run.logs()
+    const seed = await run.terminal('compact-seed', [], async tty => {
+      tty.send(`${run.prompt}\r`, 'record the first completed turn')
+      await tty.wait('the first turn to finish', text => DONE_LINE.test(text))
+      await tty.follows(SCREEN.idle, 'DONE')
+    })
+    const id = seed.match(/Session: (session-[a-f0-9-]+)/)?.[1]
+    assert(id !== undefined, 'compaction seed session identity was not shown')
+    const path = await run.created(before, 'compaction seed')
+    const override = join(run.root, 'compact-summary.json')
+    await Bun.write(override, JSON.stringify({ patches: [{ at: 2, entry: { kind: 'chunks', chunks: [
+      { type: 'block-start', index: 0, blockType: 'text' },
+      { type: 'text-delta', index: 0, text: 'The previous work completed successfully.' },
+      { type: 'block-end', index: 0, block: { type: 'text', text: 'The previous work completed successfully.' } },
+      { type: 'finish', reason: { kind: 'stop' } },
+    ] } }] }))
+    await run.writeOverlay(override, { paceMs: 120 })
+    try {
+      await run.terminal('compact-history', ['--resume', id], async tty => {
+        const start = tty.mark()
+        tty.send(`${run.prompt}\r`, 'add another completed turn')
+        await tty.wait('the replayed turn to finish', text => DONE_LINE.test(text.slice(start)))
+        await tty.follows(SCREEN.idle, 'DONE')
+        tty.send('/compact\r', 'compact completed history')
+        await tty.expect('Compacting history…  summarizing')
+        tty.send('hold this draft\r', 'try to submit while compaction owns the session')
+        await tty.expect('Wait for compaction to finish, or press Esc to cancel')
+        await tty.search(/Compacted \d+ history items/)
+        // The result prints in the same write as the frame redrawn under it,
+        // and a PTY read can end part-way through that write, so the viewport
+        // is judged once the frame has arrived, not the moment the text does.
+        // `wait` drains the terminal between checks; the assertions below say
+        // which half never arrived.
+        let visible = ''
+        try {
+          await tty.wait('the compaction result and the held draft in the viewport', async () => {
+            const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
+            try {
+              await new Promise<void>(resolve => screen.write(tty.raw, resolve))
+              visible = Array.from({ length: 40 }, (_, row) =>
+                screen.buffer.active.getLine(screen.buffer.active.viewportY + row)?.translateToString(true) ?? '').join('\n')
+            } finally { screen.dispose() }
+            return visible.includes('Compacted') && visible.includes('hold this draft▌')
+          }, 5)
+        } catch {
+          // Reported by the assertions, with what the viewport last showed.
+        }
+        assert(visible.includes('Compacted'), 'compaction result is absent from the current terminal viewport')
+        assert(visible.includes('hold this draft▌'), 'the draft was lost while compaction was running')
+      })
+    } finally { await run.writeOverlay() }
+    const log = await events(path)
+    assert(log.some(event => event.type === 'compaction/summary'), '/compact did not commit a summary')
+    assert(!log.some(event => event.type === 'user/message' && event.data.content.some((block: any) => block.type === 'text' && block.text === 'hold this draft')),
+      'input submitted during compaction entered model history')
   })
 
 scenario('rendering', 'preserved scrollback after resize and a visible caret in short terminals and wrapped drafts', { requires: ['fresh'], replayOnly: true },
@@ -688,6 +1479,12 @@ scenario('rendering', 'preserved scrollback after resize and a visible caret in 
       }
       try {
         await tty.wait('resumed answer in the terminal buffer', async () => (await capture()).some(line => line === '< DONE'))
+        // The runner starts the frame on the bottom row, however short the
+        // history above it: the status line, then only Ink's cursor row.
+        await tty.wait('composer resting on the bottom rows', async () => {
+          const visible = (await shown()).split('\n')
+          return visible.length === 40 && visible[38]?.includes(SCREEN.status) === true && visible[39] === ''
+        })
         const shrunk = await resize(40, 4)
         await tty.wait('composer remains visible at 40x4', async () => {
           const visible = (await shown()).split('\n')
@@ -703,12 +1500,13 @@ scenario('rendering', 'preserved scrollback after resize and a visible caret in 
         await tty.wait('caret returns to the end', async () => (await shown()).includes(`END${SCREEN.caret}`))
         const expanded = await resize(120, 40)
         await tty.wait('expanded composer keeps its draft', async () => {
-          // The caret row, the frame's bottom edge, then the status line: the
-          // composer follows the history rather than a fixed terminal row.
+          // The caret row, the padding row, then the status line,
+          // under the history the resize replayed and back on the bottom rows.
           const visible = (await shown()).split('\n')
           const caret = visible.findIndex(line => line.includes(`END${SCREEN.caret}`))
           return tty.raw.length > expanded && caret > visible.indexOf('< DONE')
-            && visible[caret + 1]?.startsWith('╰') === true && visible[caret + 2]?.includes(SCREEN.idle) === true
+            && visible[caret + 1]?.trim() === '' && visible[caret + 2]?.includes(SCREEN.status) === true
+            && caret + 2 === 38
         })
         assert((await capture()).filter(line => line === '< DONE').length === 1, 'expanding the terminal lost or duplicated history')
       } finally {
@@ -722,7 +1520,7 @@ scenario('resume', 'exact replay of committed history, the restored draft, and h
   async run => {
     const text = await run.terminal('resume', ['--resume', run.state.id], async tty => {
       await tty.expect(SCREEN.toolResult, SCREEN.idle)
-      if (!run.live) await tty.expect('tui-picked-model (high)')
+      if (!run.live) await tty.expect(`${SCREEN.status}tui-picked-model  Access workspace-write  Think high`)
       tty.send('Unsent draft')
       await tty.expect(`> Unsent draft${SCREEN.caret}`)
       tty.send('\x1b[D', 'Left')
@@ -735,6 +1533,7 @@ scenario('resume', 'exact replay of committed history, the restored draft, and h
     })
     assert([...text.matchAll(new RegExp(DONE_LINE.source, 'g'))].length === 1,
            'resume duplicated or omitted committed output')
+    assert(!text.includes('BAKE'), 'a resumed session printed the welcome block')
     const log = await events(run.state.log)
     assert(log.filter(e => e.type === 'assistant/message').length === run.state.model.length,
            'resume made an unsolicited model call')
@@ -745,10 +1544,33 @@ scenario('navigate', 'session picker cancellation, a new session, and switching 
   async run => {
     const before = await run.logs()
     const identity = run.state.id
-    const text = await run.terminal('navigate', ['--resume', identity], async tty => {
+    delete run.env.NO_COLOR
+    run.env.FORCE_COLOR = '3'
+    let text: string
+    try { text = await run.terminal('navigate', ['--resume', identity], async tty => {
+      const hints = tty.mark()
+      tty.send('/', 'open the frequent slash commands')
+      const menu = await tty.expect('/model', '/resume', '/new', '/clear', hints)
+      const shown = menu.slice(hints)
+      tty.check('frequent commands lead the slash menu', ['/model', '/resume', '/new', '/clear']
+        .map(name => shown.indexOf(name)).every((position, index, positions) => position >= 0
+          && (index === 0 || position > positions[index - 1]!)))
+      const closed = tty.mark()
+      tty.send('\x1b', 'close slash hints')
+      await tty.expect(`> /${SCREEN.caret}`, closed)
+      tty.send('\x7f', 'remove the slash draft')
+      await tty.expect(`> ${SCREEN.caret}`)
+      tty.send('/help\r', 'list session commands')
+      await tty.expect('/resume — Browse sessions or start a new one')
       let start = tty.mark()
       tty.send('/sessions\r')
-      await tty.expect('Choose session', start)
+      await tty.expect('Choose session', '● ', 'Current', '+ New session', start)
+      const indicatorColor = (glyph: string) => tty.raw.slice(start)
+        .match(new RegExp(`\\x1b\\[38;(?:5;\\d+|2;\\d+;\\d+;\\d+)m${glyph.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`))?.[0]
+      const currentColor = indicatorColor('●')
+      const newColor = indicatorColor('+')
+      tty.check('current and new sessions have distinct colors', currentColor !== undefined
+        && newColor !== undefined && currentColor !== newColor)
       tty.send('\x1b', 'Escape to cancel the picker')
       await tty.expect('Session navigation cancelled', start)
 
@@ -756,21 +1578,26 @@ scenario('navigate', 'session picker cancellation, a new session, and switching 
       tty.send('/sessions\r')
       await tty.expect('Choose session', start)
       tty.send('New session')
-      await tty.search(picked('New session'), start)
+      await tty.expect('▸ + New session', start)
       tty.send('\r', 'Enter to start a new session')
       const created = await tty.search(/Session: (session-[a-f0-9-]+)/, start)
       assert(created[1] !== identity, 'new-session selection reused the current identity')
-      // Both fields must belong to the new footer. An older Ready row plus
-      // the new model's still-busy row would send keys during retirement.
-      await tty.expect(`${SCREEN.idle}deepseek-v4-flash`, start)
+      // The new footer names the new model, and its composer accepts input: a
+      // key sent while the old session retires is refused as navigation busy.
+      await tty.expect(`${SCREEN.status}deepseek-v4-flash`, start)
+      await tty.wait('the new session to accept input', text => {
+        const shown = text.slice(start)
+        return shown.lastIndexOf(SCREEN.idle) > Math.max(shown.indexOf(created[0]), shown.lastIndexOf(dictionaries.en.sessionsBusy))
+      })
 
       start = tty.mark()
-      tty.send('/sessions\r')
-      await tty.expect('Choose session', start)
+      tty.send('/resume\r')
+      await tty.expect('Choose session', '○ ', dictionaries.en.ageNow, start)
+      tty.check('saved sessions have a subdued indicator', tty.raw.slice(start).includes('\x1b[2m○'))
       tty.send(identity, 'the original session id')
       await tty.expect(`> ${identity}${SCREEN.caret}`, start)
       tty.send('\r', 'Enter to switch back')
-      await tty.expect(SCREEN.toolResult, 'tui-picked-model (high)', start)
+      await tty.expect(SCREEN.toolResult, `${SCREEN.status}tui-picked-model  Access workspace-write  Think high`, start)
       await tty.follows(SCREEN.idle, SCREEN.toolResult)
 
       start = tty.mark()
@@ -778,7 +1605,20 @@ scenario('navigate', 'session picker cancellation, a new session, and switching 
       await tty.expect(`> /sessions${SCREEN.caret}`, start)
       tty.send('\x1b[B', 'Down, back to an empty composer')
       await tty.expect(`> ${SCREEN.caret}`, start)
-    })
+
+      const known = new Set([...tty.text.matchAll(/Session: (session-[a-f0-9-]+)/g)].map(match => match[1]))
+      tty.send('/new\r', 'start a session without the picker')
+      const directText = await tty.wait('/new opens a different session', text =>
+        [...text.matchAll(/Session: (session-[a-f0-9-]+)/g)].some(match => !known.has(match[1])))
+      const direct = [...directText.matchAll(/Session: (session-[a-f0-9-]+)/g)].at(-1)![1]!
+      await tty.follows(SCREEN.idle, `Session: ${direct}`)
+      known.add(direct)
+      tty.send('/clear\r', 'start another fresh session')
+      const clearedText = await tty.wait('/clear opens another session', text =>
+        [...text.matchAll(/Session: (session-[a-f0-9-]+)/g)].some(match => !known.has(match[1])))
+      const cleared = [...clearedText.matchAll(/Session: (session-[a-f0-9-]+)/g)].at(-1)![1]!
+      await tty.follows(SCREEN.idle, `Session: ${cleared}`)
+    }) } finally { run.env.NO_COLOR = '1'; delete run.env.FORCE_COLOR }
 
     assert([...text.matchAll(new RegExp(DONE_LINE.source, 'g'))].length === 2,
            'navigation did not replay the selected history exactly once per visit')

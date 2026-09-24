@@ -5,6 +5,7 @@ import { dictionaries } from '@dsh-tui/ui/copy.ts'
 import { openSession } from '../src/session.ts'
 import { SessionController } from '../src/controller.ts'
 import { harness } from './harness.ts'
+import { bakeVersion } from '../src/release.ts'
 
 const cleanup: (() => Promise<void>)[] = []
 afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await dispose() })
@@ -35,7 +36,7 @@ describe('/help', () => {
     // terminal's height and would cut the catalog to fit, while scrollback
     // holds the whole list and can scroll it.
     expect(listed(controller)).toContain('/help — List available commands')
-    expect(listed(controller)).toContain('/login — Sign in to a provider')
+    expect(listed(controller)).toContain('/login — Sign in or set up CLIProxyAPI')
     expect(controller.view.notice).toBeUndefined()
   })
 
@@ -55,5 +56,25 @@ describe('/help', () => {
     } finally {
       void dispose()
     }
+  })
+})
+
+describe('/changelog', () => {
+  it('commits the running version\'s entry to the transcript', async () => {
+    const { controller } = await connected()
+    controller.submit('/changelog')
+    await controller.drain()
+    expect(listed(controller)).toContain(`## [${bakeVersion()}]`)
+    expect(controller.view.notice).toBeUndefined()
+  })
+
+  it('is listed by /help and rejects arguments', async () => {
+    const { controller } = await connected()
+    controller.submit('/help')
+    await controller.drain()
+    expect(listed(controller)).toContain('/changelog — Show what changed in this Bake version')
+    controller.submit('/changelog extra')
+    await controller.drain()
+    expect(listed(controller)).toContain('Usage: /changelog')
   })
 })

@@ -76,15 +76,18 @@ for (const locale of ['en', 'zh'] as const) test.skipIf(process.platform !== 'da
           screen.resize(cols!, rows!)
           child.terminal!.resize(cols!, rows!)
           child.kill('SIGWINCH')
-          // The input row, its frame's bottom edge under it, and Ink's cursor
-          // row, with the status line between them when the height allows it.
+          // The rule over the input row, then the padding row when the height
+          // allows it, the status line, and Ink's cursor row.
           const lines = await painted(`repaint the composer at ${cols}x${rows}`, lines => {
             const input = lines.findIndex(line => line.includes('▌'))
-            return output.length > beforeResize && input >= 0 && input <= rows! - 3
-              && lines[input + 1] === `╰${'─'.repeat(cols! - 2)}╯`
-              && lines.filter(line => line.startsWith('╭')).length === 1
+            return output.length > beforeResize && input >= 1 && input <= rows! - 3
+              && lines[input - 1]!.startsWith('─')
+              && (rows! <= 4 || lines[input + 1] === '')
+              && lines.filter(line => line.includes('▌')).length === 1
           })
-          if (rows === 4) expect(lines.join('\n')).toBe(
+          // The status line ends in the fixture's temporary path, so the rows
+          // above it are what is compared.
+          if (rows === 4) expect(`${lines.slice(0, 2).join('\n')}\n`).toBe(
             await Bun.file(join(import.meta.dirname, 'expected', `preview-short.${locale}.txt`)).text())
         }
         const history = Array.from({ length: screen.buffer.active.length }, (_, row) =>

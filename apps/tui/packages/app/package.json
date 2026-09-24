@@ -20,19 +20,26 @@
   "dependencies": {
     "@deepseek-ai/dsh-agent": "workspace:^",
     "@deepseek-ai/dsh-agent-presets": "workspace:^",
+    "@deepseek-ai/dsh-attachment": "workspace:^",
     "@deepseek-ai/dsh-authorization": "workspace:^",
     "@deepseek-ai/dsh-brand": "workspace:^",
     "@deepseek-ai/dsh-cmdline": "workspace:^",
     "@deepseek-ai/dsh-commands": "workspace:^",
     "@deepseek-ai/dsh-compaction": "workspace:^",
     "@deepseek-ai/dsh-credentials": "workspace:^",
+    "@deepseek-ai/dsh-file-reference": "workspace:^",
+    "@deepseek-ai/dsh-file-reference-local": "workspace:^",
     "@deepseek-ai/dsh-fs": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
+    "@deepseek-ai/dsh-permission-presets": "workspace:^",
     "@deepseek-ai/dsh-plan-mode": "workspace:^",
     "@deepseek-ai/dsh-session": "workspace:^",
     "@deepseek-ai/dsh-session-persistence": "workspace:^",
     "@deepseek-ai/dsh-session-projection": "workspace:^",
     "@deepseek-ai/dsh-session-query": "workspace:^",
+    "@deepseek-ai/dsh-settings": "workspace:^",
+    "@deepseek-ai/dsh-skill": "workspace:^",
+    "@deepseek-ai/dsh-subagent": "workspace:^",
     "@deepseek-ai/dsh-token-meter": "workspace:^",
     "@deepseek-ai/dsh-tool-subagent": "workspace:^",
     "@deepseek-ai/dsh-user-approval": "workspace:^",
@@ -43,10 +50,7 @@
     "commander": "^15.0.0",
     "ink": "^7.1.1",
     "react": "^19.3.0",
-    "@deepseek-ai/dsh-skill": "workspace:^",
-    "@deepseek-ai/dsh-file-reference": "workspace:^",
-    "@deepseek-ai/dsh-file-reference-local": "workspace:^",
-    "@deepseek-ai/dsh-attachment": "workspace:^"
+    "shiki": "^4.4.3"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "workspace:^"

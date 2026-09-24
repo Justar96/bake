@@ -56,3 +56,39 @@ it('reports projected context after output and reduces it immediately after comp
     await fixture.dispose()
   }
 })
+
+it('reports billed tokens once a request has, and a cache hit only from a provider that reports cache traffic', async () => {
+  const fixture = await harness()
+  let controller: SessionController | undefined
+  let handle: AgentHandle | undefined
+  try {
+    await fixture.ctx.plugin(TokenMeter)
+    handle = await openSession(fixture.ctx, {}, new AbortController().signal, agent => {
+      controller = new SessionController(fixture.ctx, agent, dictionaries.en, [], () => {}, { attachmentMaxBytes: 1048576, attachmentLimit: 8 })
+    })
+    const view = controller!
+    await view.replay(new AbortController().signal)
+    expect(view.view.usage).toBeUndefined()
+
+    fixture.model.response = async function* () {
+      yield { type: 'usage', usage: { inputTokens: 900, outputTokens: 100 } }
+      yield* textResponse('First answer.')
+    }
+    view.submit('First question')
+    await handle.agent.whenIdle()
+    expect(view.view.usage).toEqual({ input: 900, output: 100 })
+
+    // Billed input is the disjoint buckets together; the hit is the read share.
+    fixture.model.response = async function* () {
+      yield { type: 'usage', usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 800, cacheWriteTokens: 100 } }
+      yield* textResponse('Second answer.')
+    }
+    view.submit('Second question')
+    await handle.agent.whenIdle()
+    expect(view.view.usage).toEqual({ input: 1900, output: 150, cached: 800 })
+  } finally {
+    controller?.close()
+    await handle?.dispose()
+    await fixture.dispose()
+  }
+})

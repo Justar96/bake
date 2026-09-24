@@ -1,6 +1,6 @@
 /** Model discovery and selection validation delegated to the Harness LLM catalog. */
 import type { ModelSelection } from '@deepseek-ai/dsh-agent'
-import type { LlmRuntime, LlmResolvedModelInfo } from '@deepseek-ai/dsh-llm'
+import type { LlmRuntime, LlmModelReasoningInfo, LlmResolvedModelInfo } from '@deepseek-ai/dsh-llm'
 
 /**
  * Format a model selection for the composer and status line.
@@ -8,6 +8,20 @@ import type { LlmRuntime, LlmResolvedModelInfo } from '@deepseek-ai/dsh-llm'
  * @returns the provider/model route.
  */
 export const routeOf = (selection: ModelSelection): string => `${selection.provider}/${selection.model}`
+
+/**
+ * Whether a catalog's display name only restates its route, as a catalog that
+ * names models by id does: `deepseek-v4-flash` for `deepseek/deepseek-v4-flash`.
+ * The picker drops such a name rather than print the model twice on a row.
+ * @param name - the catalog's display name.
+ * @param route - the provider/model route.
+ * @returns true when the name, ignoring case and separators, is the route or its model.
+ */
+export function namesRoute(name: string, route: string): boolean {
+  const plain = (text: string): string => text.toLowerCase().replace(/[\s._/-]/g, '')
+  const model = route.slice(route.indexOf('/') + 1)
+  return plain(name) === '' || plain(name) === plain(route) || plain(name) === plain(model)
+}
 
 /** One advertised route; catalog membership is advisory. */
 export interface CatalogLine {
@@ -73,7 +87,7 @@ export async function resolveRoute(llm: LlmRuntime, route: string, signal: Abort
 
 /** A validated selection or the reason the requested route/effort was refused. */
 export type SelectionResult =
-  | { readonly kind: 'selected'; readonly selection: ModelSelection }
+  | { readonly kind: 'selected'; readonly selection: ModelSelection; readonly reasoning?: LlmModelReasoningInfo }
   | { readonly kind: 'unknown-route'; readonly route: string }
   | { readonly kind: 'unknown-effort'; readonly offered: readonly string[] }
 
@@ -93,5 +107,5 @@ export async function resolveSelection(llm: LlmRuntime, route: string, effort: s
   if (effort !== undefined && chosen === undefined) return { kind: 'unknown-effort', offered: offered.map(item => item.id) }
   return { kind: 'selected', selection: { provider: info.provider, model: info.id,
     ...chosen === undefined ? {} : { reasoningEffort: chosen.id },
-  } }
+  }, ...info.reasoning === undefined ? {} : { reasoning: info.reasoning } }
 }

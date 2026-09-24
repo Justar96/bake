@@ -1,7 +1,7 @@
 /** Durable session identity, command dispatch, and live state through real harness services. */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createUserMessage, type StreamChunk } from '@deepseek-ai/dsh-llm'
-import type { AgentHandle } from '@deepseek-ai/dsh-agent'
+import type { AgentHandle, AssistantStreamFrame } from '@deepseek-ai/dsh-agent'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { transcriptRows } from '@dsh-tui/ui'
@@ -100,7 +100,7 @@ describe('session wiring', () => {
     expect(handler).toHaveBeenCalledWith(expect.objectContaining({ rawInput: '  item\nnext' }))
     expect(transcriptRows(controller.view.committed)).toEqual([
       { kind: 'command', name: 'select', args: '  item\nnext' },
-      { kind: 'notice', tone: 'info', text: 'Selected:  item\nnext' },
+      { kind: 'notice', placement: 'command', tone: 'info', text: 'Selected:  item\nnext' },
     ])
     controller.submit('/missing')
     await handle.agent.whenIdle()
@@ -180,7 +180,7 @@ describe('session wiring', () => {
     expect(handle.agent.inbox.nextTurn).toEqual([])
     controller.submit('/clear-pending')
     await controller.drain()
-    expect(transcriptRows(controller.view.committed).at(-1)).toEqual({ kind: 'notice', tone: 'info', text: dictionaries.en.noPending })
+    expect(transcriptRows(controller.view.committed).at(-1)).toEqual({ kind: 'notice', placement: 'command', tone: 'info', text: dictionaries.en.noPending })
     model.response = async function* () { yield* textResponse('New task answer') }
     controller.submit('A different task')
     await handle.agent.whenIdle()
@@ -188,14 +188,45 @@ describe('session wiring', () => {
     expect(JSON.stringify(model.requests.at(-1)?.messages)).not.toContain('Queued followup')
   })
 
-  it('prints each finished line while streaming and commits only the rest', async () => {
+  it('does not replay settled text when a stream start is repeated', async () => {
     const { ctx, handle, controller, model } = await connected()
     const paused = Promise.withResolvers<void>()
     const resume = Promise.withResolvers<void>()
-    const text = 'Line one.\nLine two.\nLine three.'
+    cleanup.push(async () => { resume.resolve() })
+    let start: Extract<AssistantStreamFrame, { type: 'start' }> | undefined
+    const off = ctx.on('agent/assistant-stream', ({ agent, frame }) => {
+      if (agent === handle.agent && frame.type === 'start') start = frame
+    })
+    cleanup.push(async () => { off() })
+    model.response = async function* () {
+      yield { type: 'text-delta', index: 0, text: 'First.\n\nNext' }
+      paused.resolve()
+      await resume.promise
+      yield { type: 'text-delta', index: 0, text: ' paragraph.' }
+      yield { type: 'finish', reason: { kind: 'stop' } }
+    }
+    controller.submit('Start')
+    await paused.promise
+    await vi.waitFor(() => expect(controller.view.live).toEqual([{ kind: 'assistant', text: '\nNext', continued: true }]))
+    expect(start).toBeDefined()
+    handle.agent.ctx.emit('agent/assistant-stream', { agent: handle.agent, frame: start! })
+    expect(controller.view.live).toEqual([{ kind: 'assistant', text: '\nNext', continued: true }])
+    resume.resolve()
+    await handle.agent.whenIdle()
+    expect(transcriptRows(controller.view.committed).filter(row => row.kind === 'assistant')).toEqual([
+      { kind: 'assistant', text: 'First.' }, { kind: 'assistant', text: '\nNext paragraph.', continued: true },
+    ])
+  })
+
+  it('prints settled Markdown while streaming and commits only the rest', async () => {
+    const { ctx, handle, controller, model } = await connected()
+    const paused = Promise.withResolvers<void>()
+    const resume = Promise.withResolvers<void>()
+    cleanup.push(async () => { resume.resolve() })
+    const text = 'Line one.\n\nLine two.\n\nLine three.'
     model.response = async function* () {
       yield { type: 'block-start', index: 0, blockType: 'text' }
-      yield { type: 'text-delta', index: 0, text: 'Line one.\nLine two.\nLi' }
+      yield { type: 'text-delta', index: 0, text: 'Line one.\n\nLine two.\n\nLi' }
       paused.resolve()
       await resume.promise
       yield { type: 'text-delta', index: 0, text: 'ne three.' }
@@ -204,16 +235,16 @@ describe('session wiring', () => {
     }
     controller.submit('Stream it')
     await paused.promise
-    // The finished lines are history already; the frame holds the one still arriving.
-    await vi.waitFor(() => expect(controller.view.live).toEqual([{ kind: 'assistant', text: 'Li', continued: true }]))
+    // Settled paragraphs are history; the unfinished paragraph stays live.
+    await vi.waitFor(() => expect(controller.view.live).toEqual([{ kind: 'assistant', text: '\nLi', continued: true }]))
     expect(transcriptRows(controller.view.committed).filter(row => row.kind === 'assistant')).toEqual([
-      { kind: 'assistant', text: 'Line one.\nLine two.' },
+      { kind: 'assistant', text: 'Line one.\n\nLine two.' },
     ])
     resume.resolve()
     await handle.agent.whenIdle()
     const answer = transcriptRows(controller.view.committed).filter(row => row.kind === 'assistant')
     expect(answer).toEqual([
-      { kind: 'assistant', text: 'Line one.\nLine two.' }, { kind: 'assistant', text: 'Line three.', continued: true },
+      { kind: 'assistant', text: 'Line one.\n\nLine two.' }, { kind: 'assistant', text: '\nLine three.', continued: true },
     ])
     expect(controller.view.live).toEqual([])
     // Printing is display only: the log holds one message, and a resume draws it whole.
@@ -233,7 +264,7 @@ describe('session wiring', () => {
     const { handle, controller, model } = await connected()
     model.response = async function* () {
       yield { type: 'block-start', index: 0, blockType: 'text' }
-      yield { type: 'text-delta', index: 0, text: 'Printed line.\nrest' }
+      yield { type: 'text-delta', index: 0, text: 'Printed line.\n\nrest' }
       // A block the assembler cannot finalize abandons the attempt.
       yield { type: 'block-start', index: 1, blockType: 'external-block' } as unknown as StreamChunk
       yield { type: 'finish', reason: { kind: 'stop' } }

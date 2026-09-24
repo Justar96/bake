@@ -40,7 +40,10 @@ A fresh session records `cwd` and the resolved `agentPreset` in its header. Resu
 | Context occupancy | `sessionProjections.snapshot(session, ['contextPressure']).values.contextPressure.projectedTokens` and `contextWindow`, notified by `onChanged` |
 | Committed transcript | Session events projected into immutable rows |
 | Task list | `sessionProjections.stateOf(session, 'todos')`, notified by `onChanged` |
-| Plan mode | `sessionProjections.snapshot(session, ['contextPressure', 'plan']).values.plan`, notified by `onChanged` |
+| Plan mode | `sessionProjections.snapshot(session, ['contextPressure', 'plan', 'tokenUsage', 'permissions']).values.plan`, notified by `onChanged` |
+| Permission mode | `values.permissions.currentValue` from the same snapshot, notified by `onChanged`; child inspection reads the child's live projection or saved observation |
+| Thinking level | Agent-scoped `ModelSelectionRef.current.reasoningEffort`, or the selected route's `llm.resolveModelInfo().reasoning.defaultEffort`; unsupported models omit it. A child uses its own request header. |
+| Billed tokens | `values.tokenUsage` from the same snapshot: input is `uncachedInputTokens + cacheReadTokens + cacheWriteTokens`, the cache hit is `cacheReadTokens` over it, and a cache field appears only when either cache bucket is non-zero |
 | Tool presentation | `tools.get(name)` and the call's own `presentCall` / `presentResult` |
 | Live response | Ordered `agent/assistant-stream` frames for the active attempt |
 | Human request | The oldest outstanding scoped interaction and its abort signal |
@@ -73,7 +76,7 @@ A capped search reports its total and says it was capped. A card that quietly li
 
 ### 4.6. The task list
 
-`todo/write` replaces the whole list, so the transcript would carry the same plan several times with a different tick each time. The `todos` projection folds the writes to the one version still true, and a panel above the chrome shows it. Finished entries collapse into a count: they are what the reader already watched happen. The panel is capped like every other, because the dynamic region shares one budget.
+`todo/write` replaces the whole list, so the transcript would carry the same plan several times with a different tick each time. The `todos` projection folds the writes to the one version still true, and a panel above the chrome shows it. The panel is a checklist: a heading with a progress bar and a count, then the tasks in the agent's order, indented, each with a box that is ticked, pointed at, or empty. It deliberately does not take the branch shape of a step's calls and the subagent panel: those are things that ran or are running, and a plan is a list of things to do, so the two panels beside each other must not read as one kind. When rows run short, finished entries give up theirs first: they are what the reader already watched happen. Each task is one truncated row, and the panel is capped like every other, because the dynamic region shares one budget.
 
 ### 4.7. Measured transcript cost
 
@@ -109,9 +112,11 @@ Approval displays the tool, call id when supplied, and reason. Typed Y grants on
 
 The controller changes `ModelSelectionRef.current` only after acceptance and final capability validation. Agent activity aborts the pending selection, preventing a lookup started while idle from committing during a turn. The Harness records the selected route and effort in request headers and supplies model-switch notices. Resume restores the last requested selection and uses `adapterDefaults.reasoningEffort` to distinguish implicit defaults from explicit choices. Unused choices are not durable and do not change profile settings.
 
+The subagent branch panel derives identities from `subagents.listChildren` and activity from live Agent status and scoped subagent run events. Ctrl+G and `/agents` open a filterable picker. A selected child is observed through `sessionQuery.observeSession`, with a sequence-fenced buffered tail and live assistant frames. Inspection owns only observers: it neither resumes nor disposes the child. Escape returns to the mounted parent composer, and parent interactions take focus. Remote runs without local transcripts and unreadable catalog entries report their unavailable state.
+
 ## 6b. Session navigation
 
-`/sessions` finishes its Harness command lifecycle before `navigation.ts` lists current-workspace sessions and reads their log-backed titles. The filterable picker includes a new-session choice, omits subagents and other live Agent owners, and keeps ids usable when title reads fail. New sessions use profile defaults; resumed sessions use the existing exact-id workspace, preset, and last-request configuration checks. Legacy preset selection remains a startup operation.
+`/sessions` and `/resume` share one navigation flow. The command finishes its Harness lifecycle before `navigation.ts` lists current-workspace sessions and reads their log-backed titles. The filterable picker pins the current session above saved history, sorts that history newest first, places the new-session action last, omits subagents and other live Agent owners, and keeps ids usable when title reads fail. New sessions use profile defaults; resumed sessions use the existing exact-id workspace, preset, and last-request configuration checks. Legacy preset selection remains a startup operation.
 
 Navigation requires the displayed Agent to be idle with both inbox targets empty, including plugin input. Status and inbox changes abort preparation, and the application refuses composer submissions until navigation settles. The previous controller stays displayed while the replacement mounts and replays; failure or cancellation disposes the candidate. Handoff changes the displayed controller synchronously, then closes and drains the previous controller and handle. Escape cancels preparation before handoff; handle retirement completes once handoff is accepted. Preset mounting has no cancellation parameter, so rollback waits for that work to settle before returning.
 
@@ -142,10 +147,10 @@ Ink owns raw mode, bracketed paste, and cursor restoration. The application does
 | `resume` | absent | Exact persisted session id |
 | `preset` | roster default for a fresh session | Fresh composition, or explicit legacy-session composition |
 | `locale` | `en` | `en` or `zh` labels |
-| `composerFrame` | `auto` | `round`, `classic`, or `auto` to read the terminal's encoding, `TERM`, and character locale ([why](DESIGN-LAYOUT.md#the-frame-is-chosen-from-the-terminal-not-assumed)) |
-| `doubleInterruptMs` | `500` | Interval for a second Ctrl-C to quit |
+| `composerFrame` | `auto` | line glyphs for the composer's rule and the welcome card: `round`, `classic`, or `auto` to read the terminal's encoding, `TERM`, and character locale ([why](DESIGN-LAYOUT.md#the-frame-is-chosen-from-the-terminal-not-assumed)) |
+| `doubleInterruptMs` | `2000` | How long the quit prompt waits for a second Ctrl-C; any other key dismisses it sooner |
 | `completionLimit` | `8` | Positive integer limiting visible completion, picker, and staged-attachment rows |
-| `resultLines` | `4` | Non-negative integer bounding the tool-result lines the transcript keeps under each outcome, with the rest counted ([why](DESIGN-LAYOUT.md#a-results-output-is-previewed-not-replayed)) |
+| `resultLines` | `4` | Non-negative integer bounding the tool-result lines the transcript keeps under each outcome, and the reasoning rows it keeps from each step, with the rest counted ([why](DESIGN-LAYOUT.md#a-results-output-is-previewed-not-replayed)) |
 | `attachmentMaxBytes` | `16777216` | Positive integer bounding total staged source bytes; Harness image limits also apply |
 | `attachmentLimit` | `8` | Positive integer bounding staged source count |
 | `credentialRefs` | `[]` | Provider key references offered by `/login`; the supplied patch names `DEEPSEEK_API_KEY` |
@@ -162,4 +167,4 @@ Its `check` command owns six individually selectable targets: React instance ide
 
 ## 10. Limits
 
-Session goals, workspace changes, the subagent catalog and scheduled follow-ups reach the log but not the screen: their events are dropped. Plan mode appears in the status line and the task list has a panel. Navigation supports one displayed session in the current workspace. The picker reads matching records and titles in full while bounding visible rows. Inline scrollback has no virtualized transcript, and long-history performance qualification remains incomplete. Clipboard images and inline attachment previews are deferred. Source launch is unsuitable for qualifying tool execution on this checkout; use the built profile and the runbook in [PLAN.md](PLAN.md#132-build-from-a-clean-checkout).
+Session goals, workspace changes and scheduled follow-ups reach the log but not the screen: their events are dropped. Subagent identities and activity appear in a bounded branch panel with read-only session inspection. Plan mode appears in the status line and the task list has a panel. Navigation supports one displayed session in the current workspace. The picker reads matching records and titles in full while bounding visible rows. Inline scrollback has no virtualized transcript, and long-history performance qualification remains incomplete. Clipboard images and inline attachment previews are deferred. Source launch is unsuitable for qualifying tool execution on this checkout; use the built profile and the runbook in [PLAN.md](PLAN.md#132-build-from-a-clean-checkout).

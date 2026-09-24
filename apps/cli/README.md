@@ -18,6 +18,8 @@ From the repository root, `bun run build` builds the runtime and terminal bundle
 
 `bun run dsh` runs the built launcher with Bake's `~/.bake` home, shared with `bun run start`; an explicit `DSH_HOME` overrides it. The raw shared-runtime launcher retains its upstream home defaults. Use the Bun commands for Bake, and rebuild after launcher changes.
 
+The [direct download archive](../../distribution/README.md) installs a `bake` wrapper around this launcher. It opens the `tui` profile by default, forwards `bake tui`, `bake headless`, `bake plugin`, and `bake --profile` to the profile CLI, and selects `~/.bake` unless `DSH_HOME` is set.
+
 ## External plugins
 
 `bun run dsh plugin --profile <name>` delegates package operations to the profile's pnpm configuration. This is separate from Bake's Bun-managed source workspace. The profile manager owns installation approval, locking, rollback, and configuration reload; see [Plugin Manager](../../packages/boot/plugin-manager/README.md).

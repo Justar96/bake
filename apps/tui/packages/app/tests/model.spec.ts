@@ -45,6 +45,38 @@ async function connected() {
 }
 
 describe('/model', () => {
+  it('cancels the initial default lookup when the session closes', async () => {
+    const fixture = await harness()
+    const began = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<LlmResolvedModelInfo>()
+    let controller: SessionController | undefined
+    let handle: Awaited<ReturnType<typeof openSession>> | undefined
+    let paints = 0
+    try {
+      vi.spyOn(fixture.model, 'resolveModel').mockImplementation(async () => {
+        began.resolve()
+        return release.promise
+      })
+      handle = await openSession(fixture.ctx, {}, new AbortController().signal, (agent, ref) => {
+        controller = new SessionController(fixture.ctx, agent, dictionaries.en, [], () => { paints += 1 },
+          { attachmentMaxBytes: 1048576, attachmentLimit: 8 }, ref)
+      })
+      await began.promise
+      controller!.close()
+      const atClose = paints
+      release.resolve(info('model'))
+      await controller!.drain()
+      expect(controller!.view.thinkingLevel).toBeUndefined()
+      expect(paints).toBe(atClose)
+    } finally {
+      release.resolve(info('model'))
+      controller?.close()
+      await controller?.drain()
+      await handle?.dispose()
+      await fixture.dispose()
+    }
+  })
+
   it('commits model and effort together, then logs the exact request configuration', async () => {
     const { controller, selection, model, handle, picker, chooseModel } = await connected()
     controller.submit('First turn')
@@ -62,7 +94,8 @@ describe('/model', () => {
     controller.interactions.answer(efforts.id, 'high')
     await controller.drain()
     expect(selection.current).toEqual({ provider: 'mock', model: 'other', reasoningEffort: 'high' })
-    expect(controller.view.model).toBe('mock/other (high)')
+    expect(controller.view.model).toBe('mock/other')
+    expect(controller.view.thinkingLevel).toBe('high')
     controller.submit('Use the selected model')
     await handle.agent.whenIdle()
     expect(model.requests.at(-1)).toMatchObject({ provider: 'mock', model: 'other', reasoningEffort: 'high' })
@@ -103,6 +136,7 @@ describe('/model', () => {
     controller.interactions.answer(efforts.id, '')
     await controller.drain()
     expect(selection.current).toEqual({ provider: 'mock', model: 'model' })
+    expect(controller.view.thinkingLevel).toBe('low')
     controller.submit('Use the provider default')
     await handle.agent.whenIdle()
     expect(model.requests.at(-1)?.reasoningEffort).toBe('low')
@@ -116,6 +150,17 @@ describe('/model', () => {
     await controller.drain()
     expect(controller.view.interaction).toBeUndefined()
     expect(selection.current).toEqual({ provider: 'mock', model: 'plain' })
+    expect(controller.view.thinkingLevel).toBeUndefined()
+  })
+
+  it('names a provider default when the adapter advertises no specific level', async () => {
+    const { controller, resolve } = await connected()
+    resolve.mockImplementation(async (_provider, model) => model === 'other'
+      ? { ...info(model), reasoning: { efforts: info(model).reasoning!.efforts } }
+      : info(model))
+    controller.submit('/model mock/other')
+    await controller.drain()
+    expect(controller.view.thinkingLevel).toBe(dictionaries.en.providerDefault)
   })
 
   it('reports partial catalog failure and retains an unadvertised current route', async () => {
@@ -193,6 +238,8 @@ describe('/model', () => {
     })
     cleanup.push(async () => { resumed.close(); await resumed.drain(); await next.dispose() })
     expect(restored.current).toEqual({ provider: 'mock', model: 'other', ...effort === undefined ? {} : { reasoningEffort: effort } })
+    await resumed.drain()
+    expect(resumed.view.thinkingLevel).toBe(effort ?? 'low')
     resumed.submit('Continue with the recorded model')
     await next.agent.whenIdle()
     expect(model.requests.at(-1)).toMatchObject({ model: 'other', reasoningEffort: effort ?? 'low' })

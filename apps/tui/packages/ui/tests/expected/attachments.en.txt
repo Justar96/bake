@@ -7,7 +7,7 @@ pixel.png · image/png · 84 B · 1×1
 Staged attachments: 1
 1. pixel.png · image/png · 84 B · 1×1
 Enter sends · /remove-attachment <number> removes · /clear-attachments clears
-╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ > ▌Ask anything                                                                                  │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-  Ready  model  /workspace
+────────────────────────────────────────────────────────────────────────────────────────────────────
+> ▌Ask anything
+
+  Model: model  /workspace

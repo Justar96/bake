@@ -20,6 +20,8 @@ describe('computeHunkDiffs', () => {
       path: 'f.txt',
       oldText: 'line1\nline2\nline3\nline4\nline5\nline6\nline7',
       newText: 'line1\nline2\nline3\nCHANGED\nline5\nline6\nline7',
+      oldStart: 1,
+      newStart: 1,
     }])
   })
 
@@ -33,6 +35,8 @@ describe('computeHunkDiffs', () => {
     expect(diffs[0]?.newText).toContain('A')
     expect(diffs[1]?.oldText).toContain('line16')
     expect(diffs[1]?.newText).toContain('B')
+    // Each hunk says where it sits: three context lines above line 16.
+    expect(diffs[1]).toMatchObject({ oldStart: 13, newStart: 13 })
     // The two hunks are distinct sites, not one merged block.
     expect(diffs[0]?.newText).not.toContain('B')
     expect(diffs[1]?.newText).not.toContain('A')
@@ -44,18 +48,18 @@ describe('computeHunkDiffs', () => {
 
   it('a pure insertion into empty content reports oldText null (nothing to diff against)', () => {
     const diffs = computeHunkDiffs('f.txt', '', 'brand new\n')
-    expect(diffs).toEqual([{ path: 'f.txt', oldText: null, newText: 'brand new' }])
+    expect(diffs).toEqual([{ path: 'f.txt', oldText: null, newText: 'brand new', oldStart: 1, newStart: 1 }])
   })
 
   it('a pure deletion of the whole file reports newText empty', () => {
     const diffs = computeHunkDiffs('f.txt', 'gone\n', '')
-    expect(diffs).toEqual([{ path: 'f.txt', oldText: 'gone', newText: '' }])
+    expect(diffs).toEqual([{ path: 'f.txt', oldText: 'gone', newText: '', oldStart: 1, newStart: 1 }])
   })
 
   it('drops the "\\ No newline at end of file" marker from a no-trailing-newline change', () => {
     const diffs = computeHunkDiffs('f.txt', 'x', 'y')
     // The marker line (starting with "\\") must never leak into a diff block.
-    expect(diffs).toEqual([{ path: 'f.txt', oldText: 'x', newText: 'y' }])
+    expect(diffs).toEqual([{ path: 'f.txt', oldText: 'x', newText: 'y', oldStart: 1, newStart: 1 }])
     expect(diffs[0]?.oldText).not.toContain('\\')
     expect(diffs[0]?.newText).not.toContain('\\')
   })
@@ -109,5 +113,14 @@ describe('diffsFromMeta (defensive narrowing)', () => {
     expect(diffsFromMeta(m({ diffs: [null] }))).toBeUndefined()
     expect(diffsFromMeta(m({ diffs: ['x'] }))).toBeUndefined()
     expect(diffsFromMeta(m({ diffs: [[]] }))).toBeUndefined()
+  })
+
+  it('accepts hunk start lines, and rejects ones that are not 1-based integers', () => {
+    const placed = { diffs: [{ path: 'f.txt', oldText: 'a', newText: 'b', oldStart: 4, newStart: 5 }] }
+    expect(diffsFromMeta(m(placed))).toEqual(placed.diffs)
+    for (const bad of [0, -1, 1.5, '3', null]) {
+      expect(diffsFromMeta(m({ diffs: [{ path: 'f', oldText: 'a', newText: 'b', oldStart: bad }] }))).toBeUndefined()
+      expect(diffsFromMeta(m({ diffs: [{ path: 'f', oldText: 'a', newText: 'b', newStart: bad }] }))).toBeUndefined()
+    }
   })
 })

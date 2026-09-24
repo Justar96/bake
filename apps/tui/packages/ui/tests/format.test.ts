@@ -1,7 +1,7 @@
 /** Status-line number formatting. */
 
 import { describe, expect, it } from 'bun:test'
-import { formatContext, formatTokens } from '../src/format.ts'
+import { cacheHit, formatAge, formatContext, formatTokens, formatTotals } from '../src/format.ts'
 
 describe('formatTokens', () => {
   it('keeps small counts exact', () => {
@@ -31,5 +31,41 @@ describe('formatContext', () => {
 
   it('reports an unknown capacity as zero percent rather than dividing by it', () => {
     expect(formatContext({ used: 10, window: 0 })).toBe('~10/0 (0%)')
+  })
+})
+
+describe('formatTotals', () => {
+  it('shows input and output', () => {
+    expect(formatTotals({ input: 12_340, output: 1_200 }, { input: 'in', output: 'out' })).toEqual(['in 12.3k', 'out 1.2k'])
+  })
+})
+
+describe('cacheHit', () => {
+  it('is absent when the provider reports no cache traffic', () => {
+    expect(cacheHit({ input: 900, output: 100 })).toBeUndefined()
+  })
+
+  it('is the share of input read from cache, rounded down', () => {
+    expect(cacheHit({ input: 1_900, output: 150, cached: 800 })).toBe(42)
+    // A hit is never rounded up to a whole cache.
+    expect(cacheHit({ input: 1_000, output: 0, cached: 999 })).toBe(99)
+    expect(cacheHit({ input: 0, output: 10, cached: 0 })).toBe(0)
+  })
+})
+
+describe('formatAge', () => {
+  const words = { now: 'just now', minutes: 'm ago', hours: 'h ago', days: 'd ago' }
+  const minute = 60_000
+
+  it('names the coarsest non-zero unit', () => {
+    expect(formatAge(0, 59_999, words)).toBe('just now')
+    expect(formatAge(0, 5 * minute, words)).toBe('5m ago')
+    expect(formatAge(0, 59 * minute, words)).toBe('59m ago')
+    expect(formatAge(0, 60 * minute, words)).toBe('1h ago')
+    expect(formatAge(0, 47 * 60 * minute, words)).toBe('1d ago')
+  })
+
+  it('reads a future time as now', () => {
+    expect(formatAge(10 * minute, 0, words)).toBe('just now')
   })
 })

@@ -2,8 +2,8 @@
 
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
 │ Choose model                                                                                     │
-│   mock/current · Current                                                                         │
+│ > ▌Type to filter                                                                                │
 │ ▸ mock/other                                                                                     │
-│ Type to filter · ↑↓ choose · Enter selects · Esc cancels · 2/3                                   │
-│ > ▌                                                                                              │
+│   provider/model                                                                                 │
+│ ↑↓ choose · Enter selects · Esc cancels                                                      2/3 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

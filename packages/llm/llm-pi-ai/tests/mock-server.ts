@@ -14,7 +14,10 @@ const servers: Server[] = []
 
 /** Close every server opened since the last call; run from each spec's afterEach. */
 export async function closeMockServers(): Promise<void> {
-  await Promise.all(servers.splice(0).map(server => new Promise(resolve => server.close(resolve))))
+  await Promise.all(servers.splice(0).map(server => new Promise<void>((resolve) => {
+    server.close(() => resolve())
+    server.closeAllConnections()
+  })))
 }
 
 /** A minimal complete text generation in pi-ai's chat-completions shape. */
@@ -29,6 +32,8 @@ export const textEvents = [
 export async function mockServer(script: {
   status?: number
   events?: string[]
+  wire?: readonly string[]
+  holdOpen?: boolean
   body?: string
   delayMs?: number
   headers?: Record<string, string>
@@ -60,14 +65,18 @@ export async function mockServer(script: {
         response.end(behavior.body)
         return
       }
-      response.writeHead(200, { 'content-type': 'text/event-stream' })
+      response.writeHead(200, { 'content-type': 'text/event-stream', ...behavior.headers })
+      let timer: ReturnType<typeof setTimeout> | undefined
+      response.on('close', () => { clearTimeout(timer) })
       let index = 0
       const writeNext = (): void => {
-        const event = behavior.events?.[index++]
-        if (event === undefined) { response.end(); return }
-        response.write(`data: ${event}\n\n`)
+        if (response.destroyed) return
+        const event = behavior.wire?.[index] ?? behavior.events?.[index]
+        index++
+        if (event === undefined) { if (!behavior.holdOpen) response.end(); return }
+        response.write(behavior.wire === undefined ? `data: ${event}\n\n` : event)
         if (behavior.delayMs === undefined) writeNext()
-        else setTimeout(writeNext, behavior.delayMs)
+        else timer = setTimeout(writeNext, behavior.delayMs)
       }
       writeNext()
     })

@@ -5,7 +5,8 @@
 
 import { describe, expect, it } from 'bun:test'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
-import { project, projector, type Projector } from '../src/project.ts'
+import { announcedCalls, project, projector, type Projector } from '../src/project.ts'
+import { PENDING_ARGUMENTS } from '../src/present.ts'
 import { dictionaries } from '../src/copy.ts'
 
 /** Build a session event literal without restating the durable envelope. */
@@ -40,6 +41,23 @@ describe('project', () => {
       { kind: 'reasoning', text: 'checking the config' },
       { kind: 'assistant', text: 'done' },
     ])
+  })
+
+  it('reads the calls a message announces, without committing them as rows', () => {
+    const message = event({
+      type: 'assistant/message',
+      data: { message: { content: [
+        { type: 'text', text: 'Reading both' },
+        { type: 'tool-call', id: 'c1', name: 'read', arguments: '{"file_path":"a.ts"}' },
+        { type: 'tool-call', id: 'c2', name: 'read', arguments: '{"file_path":"b.ts"}' },
+      ] } },
+    })
+    expect(announcedCalls(message)).toEqual([
+      { kind: 'tool-call', callId: 'c1', tool: 'read', input: PENDING_ARGUMENTS },
+      { kind: 'tool-call', callId: 'c2', tool: 'read', input: PENDING_ARGUMENTS },
+    ])
+    expect(project(message, bare())).toEqual([{ kind: 'assistant', text: 'Reading both' }])
+    expect(announcedCalls(event({ type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } }))).toEqual([])
   })
 
   it('ignores a compaction rewrite of a tool result', () => {
@@ -117,7 +135,8 @@ describe('project', () => {
       data: { message: { content: [{ toolCallId: 'c1', isError: false, content: 'raw envelope text' }] } },
     }), seam)).toEqual([{
       kind: 'tool-result', callId: 'c1', ok: true, text: '',
-      detail: [{ text: '1  first' }, { text: '2  second' }],
+      detail: [{ text: '1  first', source: 'notes.md', codeOffset: 3, number: 1, codeStart: true },
+        { text: '2  second', source: 'notes.md', codeOffset: 3, number: 2 }],
     }])
   })
 

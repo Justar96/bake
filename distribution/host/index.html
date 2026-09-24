@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bake CLI</title>
+  <style>
+    :root { color-scheme: dark; font-family: ui-sans-serif, system-ui, sans-serif; background: #101319; color: #e9edf3; }
+    body { max-width: 700px; margin: 0 auto; padding: 12vh 24px 48px; line-height: 1.55; }
+    h1 { font-size: clamp(2.5rem, 6vw, 4rem); letter-spacing: -.05em; margin: 0 0 .3em; }
+    h2 { font-size: 1rem; margin: 2.2em 0 .6em; color: #aeb9c9; }
+    p { color: #aeb9c9; }
+    pre { overflow-x: auto; padding: 16px; border: 1px solid #303946; border-radius: 10px; background: #181d26; color: #f1f5fa; }
+    a { color: #9ec9ff; }
+  </style>
+</head>
+<body>
+  <h1>Bake</h1>
+  <p>A terminal coding agent. Install Node.js 24 or newer, then choose the command for your system.</p>
+  <h2>macOS and Linux</h2>
+  <pre><code>curl -fsSL https://bake.justar.dev/install.sh | sh</code></pre>
+  <h2>Windows PowerShell</h2>
+  <pre><code>irm https://bake.justar.dev/install.ps1 | iex</code></pre>
+  <p>The installer checks the archive hash before installing. See the <a href="/latest.json">release manifest</a> for available platforms and checksums.</p>
+</body>
+</html>

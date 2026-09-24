@@ -1,0 +1,12 @@
+120: 模型: a-very-long-model-name  权限 workspace-write  思考 high  Context: ~3k/128k (2%)  /workspace
+120: 模型: a-very-long-model-name  权限 danger-full-access  思考 high  Context: ~3k/128k (2%)  /workspace
+60: 模型: a-very-long-model-na…  权限 workspace-write  思考 high
+60: 模型: a-very-long-model…  权限 danger-full-access  思考 high
+40: 模型: …  权限 workspace-write  思考 high
+40: 模…   权限 danger-full-access  思考 high
+38: 模型…  权限 workspace-write  思考 high
+38: …   权限 danger-full-access  思考 high
+24: …   权限 workspace-write
+24: 权限 danger-full-access
+1: …
+1: …

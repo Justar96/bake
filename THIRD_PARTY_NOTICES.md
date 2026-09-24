@@ -218,6 +218,10 @@ Direct dependencies of the `pyproject.toml` manifests, plus `uv` as the developm
 | [`pytest`](https://github.com/pytest-dev/pytest) | MIT | test-only |
 | [`uv`](https://github.com/astral-sh/uv) | MIT / Apache-2.0 | development workflow tool |
 
+## Adapted designs
+
+Earlier terminal turn header revisions included a Braille port (`GLYPH_PULSE`) of the "Glyph Pulse" loader (`dotm-square-9`) from [dot-matrix](https://dotmatrix.zzzzshawn.cloud) ([source](https://github.com/zzzzshawn/matrix)), copyright (c) 2026 dot-matrix contributors, all rights reserved. That adaptation is covered by the project's custom license, which permits use in commercial and non-commercial products and prohibits, without written permission, publishing or distributing its components as standalone reusable components or as part of another component library, and selling or sublicensing them as a standalone offering. Bake's MIT license does not cover this adaptation; do not extract it into a reusable component or library.
+
 ## First-party native packages
 
 `@deepseek-ai/node-addon-system` (and its platform packages) is built and released from this repository under BSD 3-Clause. It is listed here for completeness; it is first-party, not third-party.

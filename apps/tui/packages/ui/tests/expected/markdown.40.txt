@@ -1,0 +1,25 @@
+
+  Check the formatter across widths and
+  streamed chunks.
+  +3 more lines
+
+< Result
+
+  Updated the snake_case helper with
+  中文 support.
+
+  1. Keep input intact.
+  2. Check docs
+  (https://example.com/docs).
+
+  > A quote with emphasis.
+
+  ts
+    const snake_case = "**literal**"
+      return snake_case
+
+  Check: Width
+  Result: wraps without losing text
+
+  Check: State
+  Result: ready

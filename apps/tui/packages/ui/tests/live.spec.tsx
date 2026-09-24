@@ -7,8 +7,11 @@ import { App, type AppProps } from '../src/app.tsx'
 import { dictionaries } from '../src/copy.ts'
 import { budgetFor, CHROME_ROWS, NOTICE_BUDGET, type WindowSize } from '../src/layout.ts'
 import { appendTranscript, emptyTranscript } from '../src/transcript.ts'
-import { SPINNER_MS, type Clock } from '../src/activity.ts'
+import { FRAME_MS, SPINNER_REST, THINKING_ROWS, type Clock } from '../src/activity.ts'
 import type { Row } from '../src/rows.ts'
+import { Beat } from '../src/beat.tsx'
+import { Rule } from '../src/line.tsx'
+import { PALETTE } from '../src/palette.ts'
 
 afterEach(cleanup)
 
@@ -60,19 +63,31 @@ describe('live region', () => {
     }
   })
 
-  it('returns the input to under the summary once the live output clears', () => {
+  it('holds its height when live output clears, until printed history takes the rows', () => {
     const state = props()
     const ui = render(<App {...state} />)
     const idle = heightOf(ui.lastFrame())
-    // The turn header is the one row a running turn adds before it speaks.
+    // The running label takes the rule's row, so a turn that has said
+    // nothing yet costs no row.
     ui.rerender(<App {...state} status="running" />)
-    expect(heightOf(ui.lastFrame())).toBe(idle + 1)
+    expect(heightOf(ui.lastFrame())).toBe(idle)
     ui.rerender(<App {...state} status="running" live={streamed(2)} />)
-    expect(heightOf(ui.lastFrame())).toBe(idle + 1 + 3)
-    // The header's row stays, holding the finished turn's summary, so the
-    // input does not move up when the turn ends.
-    ui.rerender(<App {...state} />)
-    expect(heightOf(ui.lastFrame())).toBe(idle + 1)
+    expect(heightOf(ui.lastFrame())).toBe(idle + 3)
+    // Cleared without printing: shorter, the frame would lift the composer
+    // off the bottom row, so the rows the answer left stay blank.
+    // The test renderer draws printed history above the frame, which here is
+    // the session heading's one row.
+    ui.rerender(<App {...state} status="running" />)
+    const held = ui.lastFrame()!.split('\n')
+    expect(held.length).toBe(idle + 3)
+    expect(held.slice(1, 4).every(line => line.trim() === ''), held.join('\n')).toBe(true)
+    // The answer commits: its three rows print into the rows the frame held,
+    // and nothing below them moves. The rule stays, holding the summary.
+    const committed = appendTranscript(state.committed, streamed(2))
+    ui.rerender(<App {...state} committed={committed} />)
+    const printed = ui.lastFrame()!.split('\n')
+    expect(printed.length).toBe(held.length)
+    expect(printed.slice(1, 4).map(line => line.trim())).toEqual(['', '< streamed line 0', 'streamed line 1'])
   })
 
   it('keeps the newest lines when the stream outgrows its budget', () => {
@@ -152,7 +167,7 @@ describe('live region', () => {
     // carries which field is `Chrome`'s business, tested in line.spec.tsx.
     const chrome = frame.split('\n').slice(-CHROME_ROWS).join('\n')
     expect(chrome).toContain(dictionaries.en.steering)
-    expect(chrome).toContain(dictionaries.en.working)
+    expect(chrome).toContain(`${dictionaries.en.model}: `)
     // The heading is written above the dynamic region, so it is the one row of
     // the frame the budget does not own.
     const heading = 1
@@ -182,6 +197,24 @@ describe('live region', () => {
     expect(frame.indexOf('Model set')).toBeLessThan(frame.indexOf(dictionaries.en.quit))
   })
 
+  it('dismisses the quit prompt on any other key, and leaves Ctrl-C to the runner', async () => {
+    const onInterrupt = vi.fn()
+    const onQuitDismiss = vi.fn()
+    const ui = render(<App {...props({ quitting: true, onInterrupt, onQuitDismiss })} />)
+    await act(async () => { ui.stdin.write('a') })
+    await vi.waitFor(() => expect(onQuitDismiss).toHaveBeenCalledTimes(1))
+    // The key still does its own work: dismissing the prompt does not eat it.
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('> a'))
+    await act(async () => { ui.stdin.write('\u0003') })
+    await vi.waitFor(() => expect(onInterrupt).toHaveBeenCalledTimes(1))
+    expect(onQuitDismiss).toHaveBeenCalledTimes(1)
+    // Not quitting, a key has no prompt to dismiss.
+    ui.rerender(<App {...props({ quitting: false, onInterrupt, onQuitDismiss })} />)
+    await act(async () => { ui.stdin.write('b') })
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('> ab'))
+    expect(onQuitDismiss).toHaveBeenCalledTimes(1)
+  })
+
   it('draws the chrome directly under the newest line, in exactly its charged rows', () => {
     // CHROME_ROWS is the denominator of every other budget, so it is measured
     // against the component rather than kept in step by hand. Nothing pads the
@@ -192,7 +225,7 @@ describe('live region', () => {
     expect(rows[0]).toContain('session-live')
     expect(rows[1]!.trim()).toBe('')
     expect(rows[3]).toContain('> ')
-    expect(rows[5]).toContain(dictionaries.en.ready)
+    expect(rows[5]).toContain(`${dictionaries.en.model}: `)
   })
 })
 
@@ -230,9 +263,11 @@ describe('live window under a streaming answer', () => {
 function fakeClock() {
   let time = 0
   const ticks = new Set<() => void>()
+  const intervals: number[] = []
   const clock: Clock = {
     now: () => time,
-    every: (_ms, tick) => {
+    every: (ms, tick) => {
+      intervals.push(ms)
       ticks.add(tick)
       return () => { ticks.delete(tick) }
     },
@@ -241,19 +276,48 @@ function fakeClock() {
     time += ms
     for (const tick of ticks) act(tick)
   }
-  return { clock, advance, active: () => ticks.size }
+  return { clock, advance, active: () => ticks.size, intervals }
 }
 
-/** The turn header row: rail glyph, then the word and its ellipsis. */
-const headerOf = (frame: string | undefined): string | undefined =>
-  (frame ?? '').split('\n').find(line => /^\S \S+…/.test(line))
+/** A rule row's label: the text between its lead glyph and the line after it. */
+const labelOf = (row: string): string => row.slice(2).replace(/ [─━]+$/, '')
+/** The rule row while work runs: its lead, then the glyph, the word and its ellipsis. */
+const RUNNING = /^─ ([\u2800-\u283f]{3}|>) \S+…/
+/** The rule's label while a turn runs. */
+const headerOf = (frame: string | undefined): string | undefined => {
+  const row = (frame ?? '').split('\n').find(line => RUNNING.test(line))
+  return row === undefined ? undefined : labelOf(row)
+}
 
-describe('turn header', () => {
+describe('turn rule', () => {
+  it('renders the lower wave and the light on one row through its full cycle, with a static screen-reader glyph', async () => {
+    const { clock, advance, active } = fakeClock()
+    const view = (compact = false) => <Beat clock={clock}>
+      <Rule columns={48} frame="round" clock={clock} compact={compact}
+        state={{ kind: 'running', word: 'Working', phase: 'thinking', startedAt: 0, color: PALETTE.running }} />
+    </Beat>
+    const ui = render(view())
+    const frames: string[] = []
+    for (let step = 0; step < 7; step++) {
+      frames.push(ui.lastFrame()!)
+      expect(heightOf(ui.lastFrame())).toBe(1)
+      expect(ui.lastFrame()!).toHaveLength(48)
+      advance(FRAME_MS * 2)
+    }
+    ui.rerender(view(true))
+    frames.push(ui.lastFrame()!)
+    // No motion for a screen reader: the glyph rests and the light stays off.
+    expect(ui.lastFrame()).toMatch(/^─ > Working…  thinking · 2s ─+$/)
+    await expect(frames.join('\n---\n') + '\n').toMatchFileSnapshot('./expected/arrow-wave.txt')
+    ui.unmount()
+    expect(active()).toBe(0)
+  })
+
   it('keeps one word through thinking, writing, a commit, and a running tool', () => {
     const state = props({ status: 'running', committed: appendTranscript(emptyTranscript, [{ kind: 'user', text: 'go' }]) })
     const ui = render(<App {...state} />)
     const word = headerOf(ui.lastFrame())!.split('…')[0]
-    expect(word).toMatch(/^✻ \S+$/)
+    expect(word).toMatch(new RegExp(`^${SPINNER_REST} \\S+$`))
     const call: Row = { kind: 'tool-call', callId: 'c1', tool: 'bash', input: 'ls' }
     const steps: [Partial<AppProps>, RegExp][] = [
       [{ live: [{ kind: 'reasoning', text: 'look at files' }] }, /… {2}thinking$/],
@@ -270,32 +334,34 @@ describe('turn header', () => {
     expect(headerOf(ui.lastFrame())).toBeUndefined()
   })
 
-  it('holds its height while reasoning streams, showing only the newest line', () => {
+  it('grows a thinking window to its rows, then holds its height while reasoning streams', () => {
     const state = props({ status: 'running' })
-    const ui = render(<App {...state} live={[{ kind: 'reasoning', text: 'line 1' }]} />)
-    const height = heightOf(ui.lastFrame())
-    for (let lines = 2; lines <= 30; lines++) {
+    const ui = render(<App {...state} />)
+    const idle = heightOf(ui.lastFrame())
+    for (let lines = 1; lines <= 30; lines++) {
       const text = Array.from({ length: lines }, (_, index) => `line ${index + 1}`).join('\n')
       ui.rerender(<App {...state} live={[{ kind: 'reasoning', text }]} />)
       const frame = ui.lastFrame()!
-      expect(heightOf(frame)).toBe(height)
-      expect(frame).toContain(`line ${lines}`)
-      expect(frame).not.toContain(`line ${lines - 1}\n`)
-      // Above the header, which is the row resting on the input.
+      const shown = Math.min(lines, THINKING_ROWS)
+      expect(heightOf(frame)).toBe(idle + shown)
+      // Above the rule, which is the row resting on the input, placed as
+      // reasoning is in the transcript: a paragraph at the rail, with no verb.
       const rows = frame.split('\n')
-      const header = rows.findIndex(line => /^\S \S+…/.test(line))
-      expect(rows[header - 1]).toBe(`  line ${lines}`)
-      expect(rows[header + 1]).toMatch(/^╭/)
+      const header = rows.findIndex(line => RUNNING.test(line))
+      expect(rows.slice(header - shown, header)).toEqual(Array.from({ length: shown }, (_, index) =>
+        `  line ${lines - shown + index + 1}`))
+      expect(rows[header + 1]).toMatch(/^> /)
     }
   })
 
   it('animates from the clock it is given and stops asking once the turn ends', () => {
-    const { clock, advance, active } = fakeClock()
+    const { clock, advance, active, intervals } = fakeClock()
     const state = props({ status: 'running', clock })
     const ui = render(<App {...state} />)
     expect(active()).toBe(1)
+    expect(intervals).toEqual([FRAME_MS])
     const before = headerOf(ui.lastFrame())!
-    advance(SPINNER_MS)
+    advance(FRAME_MS * 2)
     expect(headerOf(ui.lastFrame())![0]).not.toBe(before[0])
     advance(12_000)
     expect(headerOf(ui.lastFrame())).toMatch(/ {2}12s$/)
@@ -303,27 +369,69 @@ describe('turn header', () => {
     expect(active()).toBe(0)
   })
 
+  it('moves the rule and every running marker on one timer, drawing only the beats that change something', () => {
+    const { clock, advance, active, intervals } = fakeClock()
+    const live: Row[] = [
+      { kind: 'tool-call', callId: 'c1', tool: 'bash', input: 'ls' },
+      { kind: 'tool-call', callId: 'c2', tool: 'bash', input: 'pwd' },
+    ]
+    const state = props({ status: 'running', clock, live })
+    const ui = render(<App {...state} />)
+    expect(active()).toBe(1)
+    expect(intervals).toEqual([FRAME_MS])
+    // With a timer each, the rule's light drew every beat and each marker
+    // every 480 ms: 97 frames over these 9 seconds. On one beat they draw
+    // together, never more than once a beat, and a beat where the light
+    // rests draws only when the spinner or a marker moves.
+    const before = ui.frames.length
+    const beats = 60
+    for (let beat = 0; beat < beats; beat++) advance(FRAME_MS)
+    const drawn = ui.frames.length - before
+    const separate = beats + 2 * ((beats * FRAME_MS) / 480)
+    expect(drawn).toBeGreaterThan(beats / 2)
+    expect(drawn).toBeLessThanOrEqual(beats)
+    expect(drawn).toBeLessThan(separate * 0.7)
+    ui.rerender(<App {...state} status="idle" live={[]} />)
+    expect(active()).toBe(0)
+  })
+
+  it('draws a rule without motion once a second, and keeps no timer for one with nothing running', () => {
+    const { clock, advance, active } = fakeClock()
+    const ui = render(<App {...props({ status: 'running', clock, motion: false })} />)
+    const before = ui.frames.length
+    // 20 beats reach 3 s, crossing each second once.
+    for (let beat = 0; beat < 20; beat++) advance(FRAME_MS)
+    expect(ui.frames.length - before).toBe(3)
+    ui.unmount()
+    expect(active()).toBe(0)
+    render(<Beat clock={clock}><Rule columns={40} frame="round" clock={clock} /></Beat>)
+    expect(active()).toBe(0)
+  })
+
   it('stands still for a screen reader or without a clock', () => {
     const ui = render(<App {...props({ status: 'running' })} />)
-    expect(headerOf(ui.lastFrame())).toMatch(/^✻ \S+…$/)
+    expect(headerOf(ui.lastFrame())).toMatch(new RegExp(`^${SPINNER_REST} \\S+…$`))
   })
 
   it('counts seconds without motion, and leaves a running action unpulsed', () => {
-    const { clock, advance } = fakeClock()
+    const { clock, advance, intervals } = fakeClock()
     const live: Row[] = [{ kind: 'tool-call', callId: 'c1', tool: 'bash', input: 'ls' }]
     const ui = render(<App {...props({ status: 'running', clock, motion: false, live })} />)
+    expect(intervals).toEqual([FRAME_MS])
     const frames = new Set<string>()
-    for (let step = 0; step < 8; step++) { advance(SPINNER_MS); frames.add(ui.lastFrame()!.replace(/\d+s$/m, '')) }
+    for (let step = 0; step < 3; step++) { advance(FRAME_MS * 2); frames.add(ui.lastFrame()!.replace(/\d+s /, '')) }
     expect(frames.size).toBe(1)
-    expect(headerOf(ui.lastFrame())).toMatch(/^✻ \S+….* 0s$/)
+    expect(headerOf(ui.lastFrame())).toMatch(new RegExp(`^${SPINNER_REST} \\S+….* 0s$`))
     advance(2_000)
     expect(headerOf(ui.lastFrame())).toMatch(/ 2s$/)
   })
 })
 
-/** The row a finished turn leaves above the input: an outcome glyph, then its label. */
-const summaryOf = (frame: string | undefined): string | undefined =>
-  (frame ?? '').split('\n').find(line => /^[✓■✗] /.test(line))
+/** The rule's label once a turn ends: an outcome glyph, then its label. */
+const summaryOf = (frame: string | undefined): string | undefined => {
+  const row = (frame ?? '').split('\n').find(line => /^─ [✓■✗] /.test(line))
+  return row === undefined ? undefined : labelOf(row)
+}
 
 describe('turn summary', () => {
   const user: Row = { kind: 'user', text: 'go' }
@@ -334,7 +442,7 @@ describe('turn summary', () => {
     { kind: 'notice', placement: 'turn-end', tone: ok ? 'info' : 'error', text: ok ? 'Completed' : 'E: broke' },
   ]
 
-  it('replaces the header in place when the turn ends and holds until the next begins', () => {
+  it('replaces the running label in place when the turn ends and holds until the next begins', () => {
     const { clock, advance } = fakeClock()
     const start = appendTranscript(emptyTranscript, [user])
     const ui = render(<App {...props({ status: 'running', clock, committed: start })} />)

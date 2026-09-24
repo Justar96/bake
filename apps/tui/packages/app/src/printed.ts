@@ -1,23 +1,16 @@
 /**
- * Streamed text printed to the transcript as it completes, ahead of its commit.
+ * Settled Markdown blocks printed ahead of the message commit.
  *
- * A streaming answer drawn whole in the live region either outgrows the window
- * and is shown clipped, or grows the frame Ink rewrites on every token. Printed
- * a line at a time instead, it scrolls into the terminal's own history the way
- * the terminal would scroll it, and the frame keeps only the line still
- * arriving. That frame is small and nearly constant, so the composer under it
- * rests where it is.
- *
- * Printing is display, not record: the session log commits the message as it
- * always did, and {@link Printed.reconcile} drops from that commit whatever
- * already printed, so each line appears once. What printed from an attempt
- * that never commits stays in scrollback, which cannot be unwritten; the
- * controller follows it with a notice saying it was discarded.
+ * The live region retains the unfinished block because later deltas can change
+ * a paragraph into a heading or table, or extend a list or code fence. Settled
+ * blocks enter native scrollback once; reconcile removes their raw source
+ * prefix from the committed projection. The Session log retains the full text.
+ * An abandoned attempt stays in scrollback with the controller's discard notice.
  *
  * @module @dsh-tui/app/printed
  */
 
-import type { Row } from '@dsh-tui/ui'
+import { finishedMarkdown, type Row } from '@dsh-tui/ui'
 import type { KeyedRow } from './live.ts'
 
 /** Text printed from one block, in stream order. */
@@ -38,12 +31,12 @@ export class Printed {
   get any(): boolean { return this.prints.some(print => print.consumed > 0) }
 
   /**
-   * Split the attempt's rows into lines that are complete and lines still arriving.
+   * Split the attempt into settled Markdown and blocks still arriving.
    *
    * Every text or reasoning block followed by another block is complete. The
-   * last block is still streaming: an answer prints up to its last newline,
-   * and reasoning stays whole in the live region, where the header's ticker
-   * shows it. Nothing past the first tool call prints, because the call
+   * last block is still streaming: an answer prints only settled Markdown,
+   * and reasoning stays whole in the live region, where the header's
+   * thinking window shows it. Nothing past the first tool call prints, because the call
    * commits through its own event, and printing text after it would put that
    * text above the call.
    *
@@ -62,7 +55,7 @@ export class Printed {
       }
       const record = this.record(key, row.kind)
       const complete = index < rows.length - 1
-      const end = complete ? row.text.length : row.kind === 'assistant' ? row.text.lastIndexOf('\n') + 1 : 0
+      const end = complete ? row.text.length : row.kind === 'assistant' ? record.consumed + finishedMarkdown(row.text.slice(record.consumed)) : 0
       // A run of whitespace waits for the text after it, so a paragraph break
       // prints with the paragraph it opens rather than as a row of its own.
       if (end > record.consumed && row.text.slice(record.consumed, end).trim() !== '') {

@@ -2,9 +2,10 @@
   --------------------------------------
 ● Read both files, then summarize.
 
-● read   {"path":"notes.md"}  1 lines
-
-● read   {"path":"private.md"}
+● read 2 · 1 failed
+├ read   {"path":"notes.md"}
+│        Notes loaded.
+└ read   {"path":"private.md"}
          Permission denied
 
 < Read notes.md; private.md was

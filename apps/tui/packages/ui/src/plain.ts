@@ -15,15 +15,17 @@ const GUTTER: Record<Row['kind'], string> = {
   'assistant': ' ',
   'reasoning': '·',
   'tool-call': '⚙',
+  'tool-group': '⚙',
   'tool-result': '←',
   'notice': '!',
 }
 
 /**
- * Render one row as a single plain-text line, with no ANSI styling.
+ * Render one row as a single plain-text line, with no ANSI styling; a step's
+ * group of calls renders a line per call.
  *
  * @param row - the row to render.
- * @returns the line, without a trailing newline.
+ * @returns the line, or the group's lines, without a trailing newline.
  */
 export function formatRow(row: Row): string {
   const gutter = GUTTER[row.kind]
@@ -38,6 +40,8 @@ export function formatRow(row: Row): string {
       // One action, one line: the call, then how it ended.
       return `${call} ${GUTTER['tool-result']} ${outcomeText(row.result.ok, row.result.title, row.result.text, row.result.detail)}`.trimEnd()
     }
+    case 'tool-group':
+      return row.calls.map(formatRow).join('\n')
     case 'tool-result':
       // A card leaves `text` empty, so its title and lines are the whole
       // result here. This surface is one line already, so it needs no bound.

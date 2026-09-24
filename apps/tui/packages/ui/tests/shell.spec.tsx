@@ -5,7 +5,6 @@ import { cleanup, render } from '../../../tests/render.tsx'
 import { App, type AppProps } from '../src/app.tsx'
 import { appendTranscript, emptyTranscript } from '../src/transcript.ts'
 import { dictionaries } from '../src/copy.ts'
-import { questionAnswer } from '../src/interaction.tsx'
 
 
 
@@ -23,6 +22,44 @@ function props(overrides: Partial<AppProps> = {}): AppProps {
 }
 
 describe('terminal composer', () => {
+  it('submits a slash command typed one key at a time with its full name', async () => {
+    const state = props({ completion: { loading: false, error: undefined, entries: [
+      { name: 'compact', description: 'Compact history', kind: 'command' },
+    ] } })
+    const ui = render(<App {...state} />)
+    for (const [index, character] of [...'/compact'].entries()) {
+      ui.stdin.write(character)
+      await vi.waitFor(() => expect(ui.lastFrame()).toContain(`> ${'/compact'.slice(0, index + 1)}▌`))
+    }
+    ui.stdin.write('\r')
+    await vi.waitFor(() => expect(state.onSubmit).toHaveBeenCalledExactlyOnceWith('/compact'))
+  })
+
+  it('runs the selected slash command on Enter instead of submitting the slash prefix', async () => {
+    const state = props({ completion: { loading: false, error: undefined, entries: [
+      { name: 'compact', description: 'Compact history', kind: 'command' },
+    ] } })
+    const ui = render(<App {...state} />)
+    ui.stdin.write('/')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('▸ /compact'))
+    ui.stdin.write('\r')
+    await vi.waitFor(() => expect(state.onSubmit).toHaveBeenCalledExactlyOnceWith('/compact'))
+  })
+
+  it('inserts a selected skill on Enter and submits it when its full name is typed', async () => {
+    const state = props({ completion: { loading: false, error: undefined, entries: [
+      { name: 'review', description: 'Review a patch', kind: 'skill' },
+    ] } })
+    const ui = render(<App {...state} />)
+    ui.stdin.write('/rev')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('▸ /review'))
+    ui.stdin.write('\r')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('> /review▌'))
+    expect(state.onSubmit).not.toHaveBeenCalled()
+    ui.stdin.write('\r')
+    await vi.waitFor(() => expect(state.onSubmit).toHaveBeenCalledExactlyOnceWith('/review'))
+  })
+
   it.each(['en', 'zh'] as const)('completes a selected skill without submitting in %s', async locale => {
     const state = props({ copy: dictionaries[locale], completionLimit: 2, completion: { loading: false, error: undefined, entries: [
       { name: 'reset', description: 'Reset the view', kind: 'command' },
@@ -302,7 +339,7 @@ describe('terminal composer', () => {
   it('submits typing and Enter delivered in one input read', async () => {
     const state = props()
     const ui = render(<App {...state} />)
-    await vi.waitFor(() => expect(ui.lastFrame()).toContain('Ready'))
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain(dictionaries.en.prompt))
     ui.stdin.write('/select  item \r')
     await vi.waitFor(() => expect(state.onSubmit).toHaveBeenCalledExactlyOnceWith('/select  item '))
   })
@@ -310,7 +347,7 @@ describe('terminal composer', () => {
   it('keeps a fragmented multiline paste in the draft until Enter', async () => {
     const state = props()
     const ui = render(<App {...state} />)
-    await vi.waitFor(() => expect(ui.lastFrame()).toContain('Ready'))
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain(dictionaries.en.prompt))
     ui.stdin.write('\u001b[200~line one\n')
     ui.stdin.write('line two\u001b[201~')
     await vi.waitFor(() => expect(ui.lastFrame()).toContain('line two'))
@@ -365,15 +402,80 @@ describe('terminal composer', () => {
     const ui = render(<App {...state} />)
     await vi.waitFor(() => expect(ui.lastFrame()).toContain('Change the adapter'))
     ui.stdin.write('2')
-    await vi.waitFor(() => expect(ui.lastFrame()).toContain('> 2'))
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('▸ 2. Implement'))
     ui.stdin.write('\r')
     await vi.waitFor(() => expect(state.onAnswer).toHaveBeenCalledWith(3, { answers: [{ id: 'plan', selected: ['Implement'] }] }))
   })
 
-  it('encodes multiple choices and free text without changing question ids', () => {
-    const question = { id: 'choices', question: 'Choose', multiSelect: true, options: [{ label: 'A' }, { label: 'B' }] }
-    expect(questionAnswer(question, '2,1')).toEqual({ id: 'choices', selected: ['B', 'A'] })
-    expect(questionAnswer(question, 'Different approach')).toEqual({ id: 'choices', selected: [], custom: 'Different approach' })
+  it('keeps the Other draft visible while navigating selectable answers', async () => {
+    const state = props({ interaction: { id: 4, kind: 'questions', questions: [{
+      id: 'choice', question: 'Choose an approach', options: [{ label: 'A' }, { label: 'B' }],
+    }] } })
+    const ui = render(<App {...state} />)
+    ui.stdin.write('A different approach')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('Other answer: A different approach▌'))
+    ui.stdin.write('\u001b[A')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('▸ 2. B'))
+    expect(ui.lastFrame()).toContain('Other answer: A different approach')
+    expect(ui.lastFrame()).not.toContain('Other answer: A different approach▌')
+    ui.stdin.write('\u001b[B\r')
+    await vi.waitFor(() => expect(state.onAnswer).toHaveBeenCalledWith(4, { answers: [
+      { id: 'choice', selected: [], custom: 'A different approach' },
+    ] }))
+  })
+
+  it('submits toggled multi-select answers together with persistent custom text', async () => {
+    const state = props({ completionLimit: 2, interaction: { id: 5, kind: 'questions', questions: [{
+      id: 'choices', question: 'Choose several', multiSelect: true,
+      options: [{ label: 'A' }, { label: 'B' }, { label: 'C' }],
+    }] } })
+    const ui = render(<App {...state} />)
+    ui.stdin.write(' ')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('[x] 1. A'))
+    ui.stdin.write('\u001b[B ')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('[x] 2. B'))
+    ui.stdin.write('Additional context')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('Other answer: Additional context▌'))
+    ui.stdin.write('\u001b[A')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('▸ [ ] 3. C'))
+    expect(ui.lastFrame()).toContain('Other answer: Additional context')
+    ui.stdin.write('\r')
+    await vi.waitFor(() => expect(state.onAnswer).toHaveBeenCalledWith(5, { answers: [
+      { id: 'choices', selected: ['A', 'B'], custom: 'Additional context' },
+    ] }))
+  })
+
+  it('keeps an empty Other answer open, accepts paste, and advances through questions', async () => {
+    const state = props({ interaction: { id: 6, kind: 'questions', questions: [
+      { id: 'first', question: 'Choose one', options: [{ label: 'A' }] },
+      { id: 'second', question: 'Explain', options: [] },
+    ] } })
+    const ui = render(<App {...state} />)
+    ui.stdin.write('\u001b[B\r')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('Other answer: ▌'))
+    expect(state.onAnswer).not.toHaveBeenCalled()
+    ui.stdin.write('\u001b[200~Custom first\u001b[201~\r')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('Explain'))
+    expect(state.onAnswer).not.toHaveBeenCalled()
+    ui.stdin.write('Custom second')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('Other answer: Custom second▌'))
+    ui.stdin.write('\r')
+    await vi.waitFor(() => expect(state.onAnswer).toHaveBeenCalledExactlyOnceWith(6, { answers: [
+      { id: 'first', selected: [], custom: 'Custom first' },
+      { id: 'second', selected: [], custom: 'Custom second' },
+    ] }))
+  })
+
+  it('cancels a question without submitting its Other draft', async () => {
+    const state = props({ interaction: { id: 7, kind: 'questions', questions: [
+      { id: 'choice', question: 'Choose', options: [{ label: 'A' }] },
+    ] } })
+    const ui = render(<App {...state} />)
+    ui.stdin.write('Unsent answer')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('Other answer: Unsent answer▌'))
+    ui.stdin.write('\u001b')
+    await vi.waitFor(() => expect(state.onCancel).toHaveBeenCalledOnce())
+    expect(state.onAnswer).not.toHaveBeenCalled()
   })
 })
 
@@ -381,16 +483,25 @@ it.each(['en', 'zh'] as const)('renders a bounded session picker and returns the
   const copy = dictionaries[locale]
   const state = props({ copy, inputBlocked: true, completionLimit: 2,
     interaction: { kind: 'select', id: 10, title: copy.chooseSession, initial: 'session-first', choices: [
-      { value: '', label: copy.newSession },
-      { value: 'session-first', label: 'First conversation', current: true },
-      { value: 'session-second', label: 'Second conversation' },
+      { value: 'session-first', label: 'First conversation', role: 'session-current', description: `5${copy.ageMinutes} · 514e6406` },
+      { value: 'session-second', label: 'Second conversation', role: 'session-saved', description: `3${copy.ageDays} · a4182799` },
+      { value: '', label: copy.newSession, role: 'session-new', pinned: true },
     ] },
   })
   const ui = render(<App {...state} />)
   await vi.waitFor(() => expect(ui.lastFrame()).toContain(copy.chooseSession))
+  // Two rows: the scrolled list gives one up so the pinned action stays in view.
+  expect(ui.lastFrame()).toContain(`+ ${copy.newSession}`)
+  expect(ui.lastFrame()).not.toContain('Second conversation')
   await expect(ui.lastFrame() + '\n').toMatchFileSnapshot(`./expected/session-picker.${locale}.txt`)
+  ui.stdin.write('\u001b[B')
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain('▸ ○ Second conversation'))
+  expect(ui.lastFrame()).toContain(`+ ${copy.newSession}`)
+  ui.stdin.write('\u001b[B')
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain(`▸ + ${copy.newSession}`))
+  ui.stdin.write('\u001b[A')
   ui.stdin.write('\u001b[200~second\u001b[201~')
-  await vi.waitFor(() => expect(ui.lastFrame()).toContain('▸ Second conversation'))
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain('▸ ○ Second conversation'))
   expect(state.onAnswer).not.toHaveBeenCalled()
   ui.stdin.write('\r')
   await vi.waitFor(() => expect(state.onAnswer).toHaveBeenCalledExactlyOnceWith(10, 'session-second'))

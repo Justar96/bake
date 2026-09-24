@@ -8,7 +8,7 @@ import { dictionaries } from '../src/copy.ts'
 import { budgetFor } from '../src/layout.ts'
 import type { ResultBound } from '../src/present.ts'
 import { project, projector } from '../src/project.ts'
-import { Actions } from '../src/actions.ts'
+import { Actions, SETTLES } from '../src/actions.ts'
 
 /** Partial envelopes keep these presentation fixtures independent of persistence metadata. */
 const event = (value: unknown): SessionEvent => value as SessionEvent
@@ -29,16 +29,17 @@ describe('action transcript', () => {
   it.each(['en', 'zh'] as const)('pairs out-of-order results with their calls and separates turn outcomes (%s)', async locale => {
     const seam = projector(dictionaries[locale], () => undefined)
     const actions = new Actions()
-    const rows = events.flatMap(item => actions.fold(project(item, seam), item.type === 'assistant/message' || item.type === 'turn/end'))
+    const rows = events.flatMap(item => actions.fold(project(item, seam), SETTLES.has(item.type)))
     const budget = budgetFor({ columns: 40, rows: 24 })
     // The application's default preview.
-    const committed: ResultBound = { lines: 4, unit: dictionaries[locale].cardLines, more: dictionaries[locale].moreLines }
+    const committed: ResultBound = { lines: 4, unit: dictionaries[locale].cardLines, single: dictionaries[locale].cardLine, more: dictionaries[locale].moreLines, failures: dictionaries[locale].summaryFailures }
     const frame = renderToString(<>{rows.map((row, index) => <RowView key={index} row={row} budget={budget} result={committed} />)}</>, { columns: 40 })
     // Each result lands under its own call, and the calls keep the order the
-    // model made them, though c2 finished first.
+    // model made them, though c2 finished first, hung from one head.
     expect(frame.indexOf('notes.md')).toBeLessThan(frame.indexOf('private.md'))
     expect(frame.indexOf('private.md')).toBeLessThan(frame.indexOf('Permission denied'))
     expect(frame).not.toContain('[c1]')
+    expect(frame).toContain(`\u25cf read 2 \u00b7 1 ${dictionaries[locale].summaryFailures}`)
     // A completed turn says so on the summary row above the input instead.
     expect(frame).not.toContain(`- ${dictionaries[locale].turnCompleted}`)
     expect(frame).toContain(`- ${dictionaries[locale].cancelled}`)
