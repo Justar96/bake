@@ -32,7 +32,7 @@ bun run verify               # build + check + keyless terminal scenarios
 
 See the [development guide](CONTRIBUTING.md#choose-a-development-loop) for rebuild commands, scenario filters, and troubleshooting. `bun apps/tui/scripts/tui.ts help` lists individual test targets, fixture recording, and performance diagnostics.
 
-Direct download release preparation and local installer verification are documented in the [release guide](distribution/README.md). The Railway download service has not published a complete platform release yet.
+Direct download release preparation, available platforms, and local installer verification are documented in the [release guide](distribution/README.md). Check the [release manifest](https://bake.justar.dev/latest.json) for currently available downloads.
 
 ## Repository
 
