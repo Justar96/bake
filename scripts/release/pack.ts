@@ -47,7 +47,7 @@ const stage = mkdtempSync(join(tmpdir(), 'bake-pack-'))
 try {
   for (const pattern of root.workspaces) {
     for (const file of new Bun.Glob(`${pattern}/package.json`).scanSync({ cwd: ROOT, onlyFiles: true })) {
-      copyWorkspace(dirname(file), stage)
+      copyWorkspace(dirname(file).replaceAll('\\', '/'), stage)
     }
   }
   const rootManifest = structuredClone(root)

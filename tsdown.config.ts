@@ -5,7 +5,7 @@ import { defineConfig } from 'tsdown'
 import { typertPlugin } from './packages/typert/generator/lib/types/tsdown-plugin.js'
 
 export default defineConfig({
-  workspace: globSync(['vendor/*/package.json', 'packages/*/*/package.json', 'apps/cli/package.json']).map(dirname),
+  workspace: globSync(['vendor/*/package.json', 'packages/*/*/package.json', 'apps/cli/package.json']).map(file => dirname(file).replaceAll('\\', '/')),
   entry: ['lib/types/{index,invariant,startup}.js'],
   outDir: 'lib',
   format: ['esm'],
