@@ -16,11 +16,11 @@ bun run release:verify-local
 
 `release:pack` creates `.artifacts/bake-release/<Bake version>/bake-v<Bake version>-<platform>.tar.gz`. It requires the root and CLI versions to match, copies the declared package payload roots, licenses, changelog, and built files, then runs a frozen production Bun install in a temporary workspace and boots that staged CLI. `release:assemble` hashes every archive for the current Bake version and writes `distribution/host/public/latest.json` plus the versioned archives. The local check serves those exact files over HTTP, runs the platform installer into temporary directories, and boots the installed command. These generated paths are ignored by Git.
 
-Build every target on its own host: `darwin-arm64`, `darwin-x64`, `linux-arm64`, `linux-x64`, and `win32-x64`. Collect the archives in the same `.artifacts/bake-release/<Bake version>/` directory before assembling a public release, then run `bun run release:assemble --complete` to reject a missing target. A single host build proves only its own target; the Windows installer and native modules need a Windows run. The current Bake version is `0.1.0`.
+Build every target on its own host: `darwin-arm64`, `darwin-x64`, `linux-arm64`, `linux-x64`, and `win32-x64`. Verified platforms may be published independently; the current `0.1.0` payload contains Windows x64 only, and the download page states that macOS and Linux are not available yet. A single host build proves only its own target; the Windows installer and native modules need a Windows run. For a complete release, collect all archives in the same `.artifacts/bake-release/<Bake version>/` directory, run `bun run release:assemble --complete`, and run `node distribution/host/verify-manifest.mjs --complete`.
 
 ## Publish the checked release
 
-After the manifest contains every target and each archive has passed its native local check, deploy the download service from the repository root:
+After every archive listed in the manifest has passed its native local check, run `node distribution/host/verify-manifest.mjs` and deploy the download service from the repository root:
 
 ```sh
 railway up ./distribution/host --path-as-root --no-gitignore \
@@ -29,9 +29,9 @@ railway up ./distribution/host --path-as-root --no-gitignore \
   --detach --json -m "Bake CLI direct download release"
 ```
 
-The `--no-gitignore` flag includes the generated `public/` payload. The Docker build verifies all five archives and their hashes, so a partial local manifest cannot publish. Record the deployment ID, wait for that deployment to reach `SUCCESS`, then check `/health`, `/latest.json`, both installer routes, and a platform archive through the public domain. An upload response alone does not qualify the release.
+The `--no-gitignore` flag includes the generated `public/` payload. The Docker build rejects empty manifests, unsupported targets, invalid names, empty archives, and size or SHA-256 mismatches for every included archive. Use `--complete` for the optional five-platform gate. Record the deployment ID, wait for that deployment to reach `SUCCESS`, then check `/health`, `/latest.json`, both installer routes, and a platform archive through the public domain. An upload response alone does not qualify the release.
 
-Once published, users with Node 24 or newer can install with:
+Users with Node 24 or newer can install on a platform listed in the published manifest. Windows x64 is currently available; the Unix command requires the corresponding macOS or Linux archive to be published first:
 
 ```sh
 curl -fsSL https://bake.justar.dev/install.sh | sh

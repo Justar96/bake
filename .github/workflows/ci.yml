@@ -53,8 +53,9 @@ jobs:
         with:
           bun-version-file: package.json
       - run: bun install --frozen-lockfile
-      - run: bun test scripts/workspace.test.ts scripts/release/install-windows.test.ts apps/tui/packages/app/tests/build.test.ts apps/tui/packages/app/tests/release.test.ts
+      - run: bun test scripts/workspace.test.ts scripts/release apps/tui/packages/app/tests/build.test.ts apps/tui/packages/app/tests/release.test.ts
       - run: bun run build
       - run: bun run release:pack
       - run: bun run release:assemble
+      - run: node distribution/host/verify-manifest.mjs
       - run: bun run release:verify-local
