@@ -1,6 +1,6 @@
 /** Built JSX must execute with production React under Node. No Harness service runs on Bun. */
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { pathToFileURL } from 'node:url'
 import { afterEach, expect, it } from 'bun:test'
@@ -17,7 +17,7 @@ it('executes bundled JSX with external production React on Node', async () => {
   const entry = join(root, 'view.tsx')
   await writeFile(entry, 'export const view = <h1>Built</h1>; export const mode = process.env.NODE_ENV;\n')
   const artifacts = await bundle([entry], root)
-  const output = artifacts.find(artifact => artifact.path.endsWith('/view.js'))!
+  const output = artifacts.find(artifact => basename(artifact.path) === 'view.js')!
   const child = Bun.spawn([process.env.DSH_TUI_TEST_NODE ?? 'node', '--input-type=module', '-e',
     `const {view,mode}=await import(${JSON.stringify(pathToFileURL(output.path).href)}); console.log(view.type+":"+view.props.children+":"+mode);`],
   { env: { ...process.env, ...BUILT_ENV }, stdout: 'pipe', stderr: 'pipe', timeout: 10_000 })

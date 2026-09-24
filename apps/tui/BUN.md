@@ -2,7 +2,7 @@
 
 Bun builds the TUI, runs development tools, and drives real Node processes for qualification. The built application uses production React. The [performance report](packages/app/performance/README.md) owns measured startup, input, and memory results.
 
-Installed and exercised here: **Bun 1.4.3**. The [Bun bundler](https://bun.com/docs/bundler) and [terminal API](https://bun.com/docs/runtime/child-process#terminal-pty-support) document the APIs used below.
+The workspace pins stable **Bun 1.4.2** in `package.json`. The [Bun bundler](https://bun.com/docs/bundler) and [terminal API](https://bun.com/docs/runtime/child-process#terminal-pty-support) document the APIs used below.
 
 ## Runtime ownership
 

@@ -7,7 +7,7 @@ $binDir = if ($env:BAKE_BIN_DIR) { $env:BAKE_BIN_DIR } else { Join-Path $install
 if (-not [Environment]::Is64BitOperatingSystem -or $env:PROCESSOR_ARCHITECTURE -ne 'AMD64') {
   throw 'This Windows platform has no Bake release archive.'
 }
-try { $nodeMajor = [int]((& node -p 'process.versions.node.split(".")[0]').Trim()) }
+try { $nodeMajor = [int]((& node -p 'process.versions.node').Trim().Split('.')[0]) }
 catch { throw 'Bake install needs Node.js 24 or newer on PATH.' }
 if ($nodeMajor -lt 24) { throw 'Bake install needs Node.js 24 or newer on PATH.' }
 if (-not (Get-Command tar.exe -ErrorAction SilentlyContinue)) { throw 'Bake install needs Windows tar.exe.' }

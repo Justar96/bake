@@ -6,7 +6,7 @@ Railway 项目 `28ff3000-7240-4c57-81d1-7bd05445c1ee` 中的 `bake-downloads` �
 
 ## 在本机构建并检查一个平台
 
-使用装有 Bun 1.4.3、Node 24 或更新版本及本机原生构建依赖的干净检出。先运行 `bun install --frozen-lockfile` 和 `bun run build`，再运行：
+使用装有稳定版 Bun 1.4.2（固定在 `package.json` 中）、Node 24 或更新版本及本机原生构建依赖的干净检出。先运行 `bun install --frozen-lockfile` 和 `bun run build`，再运行：
 
 ```sh
 bun run release:pack

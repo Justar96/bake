@@ -1,6 +1,6 @@
 /** Generate the Node build's project list from Bake's installed workspace manifests. */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { join, posix, resolve } from 'node:path'
 
 /** Workspace manifest fields used for build discovery and dependency checks. */
 interface Manifest {
@@ -28,7 +28,7 @@ export function workspaceConfig(root: string): string {
     if (existsSync(join(root, file))) throw new Error(`Bun owns the workspace; remove root ${file}`)
   }
   const packages = [...new Set((manifest.workspaces ?? []).flatMap(pattern =>
-    [...new Bun.Glob(`${pattern}/package.json`).scanSync({ cwd: root })],
+    [...new Bun.Glob(`${pattern}/package.json`).scanSync({ cwd: root })].map(path => path.replaceAll('\\', '/')),
   ))].sort().map(path => ({
     path,
     manifest: JSON.parse(readFileSync(join(root, path), 'utf8')) as Manifest,
@@ -42,7 +42,7 @@ export function workspaceConfig(root: string): string {
     if (previous !== undefined) throw new Error(`Duplicate workspace package ${name}: ${previous} and ${pkg.path}`)
     names.set(name, pkg.path)
     for (const file of ['bun.lock', ...competingFiles]) {
-      const local = join(dirname(pkg.path), file)
+      const local = posix.join(posix.dirname(pkg.path), file)
       if (existsSync(join(root, local))) throw new Error(`${local}: workspace packages must use the root bun.lock`)
     }
   }
@@ -56,10 +56,10 @@ export function workspaceConfig(root: string): string {
     }
   }
   const references = packages.flatMap(({ path }) => {
-    const directory = dirname(path)
+    const directory = posix.dirname(path)
     if (directory.startsWith('apps/tui/')) return []
-    const host = join(directory, 'tsconfig.host.json')
-    const config = existsSync(join(root, host)) ? host : join(directory, 'tsconfig.json')
+    const host = posix.join(directory, 'tsconfig.host.json')
+    const config = existsSync(join(root, host)) ? host : posix.join(directory, 'tsconfig.json')
     return existsSync(join(root, config)) ? [{ path: `./${config}` }] : []
   })
   return JSON.stringify({ extends: './tsconfig.base.json', files: [], references }, null, 2) + '\n'

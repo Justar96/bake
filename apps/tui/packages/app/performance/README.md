@@ -21,7 +21,7 @@ Measure a fresh TUI process, resume mixed histories, and type during a paced res
 
 ## Run
 
-Use a checkout with built upstream libraries, Bun 1.4.3, Node, and macOS or Linux. See the [build prerequisites](../../../PLAN.md#132-build-from-a-clean-checkout). Run from the repository root, with other CPU-heavy validation stopped:
+Use a checkout with built upstream libraries, the Bun version pinned in the root `package.json`, Node, and macOS or Linux. See the [build prerequisites](../../../PLAN.md#132-build-from-a-clean-checkout). Run from the repository root, with other CPU-heavy validation stopped:
 
 ```sh
 ./tui/scripts/tui.ts perf --workload fresh --workload typical --samples 3 --output /tmp/bake-bun-native-production.json

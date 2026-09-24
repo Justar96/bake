@@ -6,7 +6,7 @@ The `bake-downloads` Railway service in project `28ff3000-7240-4c57-81d1-7bd0544
 
 ## Build and check one platform locally
 
-Use a clean checkout with Bun 1.4.3, Node 24 or newer, and the host native build prerequisites. Run `bun install --frozen-lockfile`, `bun run build`, then:
+Use a clean checkout with stable Bun 1.4.2 (pinned in `package.json`), Node 24 or newer, and the host native build prerequisites. Run `bun install --frozen-lockfile`, `bun run build`, then:
 
 ```sh
 bun run release:pack

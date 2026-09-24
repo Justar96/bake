@@ -4,6 +4,7 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { windowsPowerShellEnvironment } from './powershell.ts'
 
 const ROOT = resolve(import.meta.dir, '../..')
 const temporary = mkdtempSync(join(tmpdir(), 'bake-release-verify-'))
@@ -53,8 +54,9 @@ try {
   if (process.platform === 'win32') {
     const install = ['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
       'Invoke-RestMethod "$env:BAKE_RELEASE_BASE_URL/install.ps1" | Invoke-Expression']
-    await run(install, env)
-    await run(install, env)
+    const installEnv = windowsPowerShellEnvironment(env)
+    await run(install, installEnv)
+    await run(install, installEnv)
     const version = await run(['cmd.exe', '/c', join(binDir, 'bake.cmd'), '--version'], env)
     if (!version.includes(manifest.version)) throw new Error('Installed Windows command version mismatch')
     const config = await run(['cmd.exe', '/c', join(binDir, 'bake.cmd'), 'tui', '--dump-default-config'], env)

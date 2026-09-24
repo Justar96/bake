@@ -21,7 +21,7 @@ description: "使用合成历史测量构建后的 TUI 启动、长会话恢复�
 
 ## 运行
 
-需要已构建上游库的检出目录、Bun 1.4.3、Node，以及 macOS 或 Linux。参见[构建前提](../../../PLAN.md#132-build-from-a-clean-checkout)。在仓库根目录运行，并停止其他 CPU 密集型验证：
+需要已构建上游库的检出目录、根目录 `package.json` 固定版本的 Bun、Node，以及 macOS 或 Linux。参见[构建前提](../../../PLAN.md#132-build-from-a-clean-checkout)。在仓库根目录运行，并停止其他 CPU 密集型验证：
 
 ```sh
 ./tui/scripts/tui.ts perf --workload fresh --workload typical --samples 3 --output /tmp/bake-bun-native-production.json
