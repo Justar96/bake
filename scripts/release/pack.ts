@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /** Build one host-native, offline-installable Bake archive from built workspace output. */
 
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { windowsLauncher } from '../../packages/boot/updater/src/install.ts'
@@ -47,7 +47,9 @@ function copyWorkspace(relative: string, stage: string): void {
   }
 }
 
-const stage = mkdtempSync(join(tmpdir(), 'bake-pack-'))
+// GitHub's Windows TEMP is an 8.3 short path (RUNNER~1). Bun then matches no
+// staged workspace to the lockfile and re-resolves them, so use the long form.
+const stage = realpathSync.native(mkdtempSync(join(tmpdir(), 'bake-pack-')))
 try {
   for (const pattern of root.workspaces) {
     for (const file of new Bun.Glob(`${pattern}/package.json`).scanSync({ cwd: ROOT, onlyFiles: true })) {
@@ -80,7 +82,8 @@ try {
   } catch (error) {
     // Name what bun would change, so a host-specific lockfile drift is diagnosable from the log.
     const frozen = readFileSync(join(stage, 'bun.lock'), 'utf8').split('\n')
-    await run([...install, '--lockfile-only'], stage).catch(() => {})
+    // `--production` always freezes the lockfile, so the rerun resolves without it.
+    await run(['bun', 'install', '--lockfile-only'], stage).catch(() => {})
     const kept = new Set(frozen)
     const changed = readFileSync(join(stage, 'bun.lock'), 'utf8').split('\n')
     const added = changed.filter(line => !kept.has(line))

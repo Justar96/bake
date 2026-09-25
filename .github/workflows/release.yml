@@ -102,18 +102,31 @@ jobs:
       # signed with a throwaway key; the release key never reaches a build.
       - run: bun run release:assemble --ephemeral-key
       - run: bun run release:verify-local
+      # The bash tool runs in bubblewrap, which Ubuntu runners lack, and
+      # AppArmor there denies it the unprivileged user namespaces it needs.
+      - name: Enable the Linux sandbox
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       # The PTY driver needs a POSIX terminal.
       - name: Built-profile terminal scenarios
         if: runner.os != 'Windows'
+        timeout-minutes: 15
         run: bun run test:e2e --no-build
-      # The driver keeps a failed scenario's session logs and workspace.
+      # The driver keeps a failed scenario's session logs and workspace in the
+      # OS temporary directory, which is not /tmp on macOS.
+      - name: Collect kept terminal sessions
+        if: failure() && runner.os != 'Windows'
+        run: |
+          mkdir -p apps/tui/.smoke/sessions
+          cp -RP "$(node -p 'require("node:os").tmpdir()')"/dsh-tui-pty-* apps/tui/.smoke/sessions/ 2>/dev/null || true
       - uses: actions/upload-artifact@v4
         if: failure() && runner.os != 'Windows'
         with:
           name: terminal-failures-${{ matrix.target }}
-          path: |
-            /tmp/dsh-tui-pty-*
-            apps/tui/.smoke/
+          path: apps/tui/.smoke/
           if-no-files-found: ignore
           retention-days: 7
       - uses: actions/upload-artifact@v4

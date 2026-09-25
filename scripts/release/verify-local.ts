@@ -51,30 +51,33 @@ async function serve(host: string): Promise<string> {
 }
 
 /**
- * Publish a release one patch newer than `installed`, built from its files,
- * on a second host signed by a key of its own.
+ * Publish a release one patch newer than the staged `archive`, built from its
+ * files, on a second host signed by a key of its own.
  * @returns the host origin, the newer version, and the key to trust for it.
  */
-async function publishNewer(installed: string, target: string): Promise<{ base: string; version: string; key: string; directory: string }> {
+async function publishNewer(archive: string, target: string): Promise<{ base: string; version: string; key: string; directory: string }> {
   const [major = 0, minor = 0, patch = 0] = (stagedVersion.split('-')[0] ?? '').split('.').map(Number)
   const version = `${major}.${minor}.${patch + 1}`
   const tree = join(temporary, 'newer')
-  cpSync(installed, tree, { recursive: true, verbatimSymlinks: true })
+  const tar = process.platform === 'win32' ? 'tar.exe' : 'tar'
+  // Unpacked, not copied from the install: Bun's cpSync recreates Windows
+  // directory links as file links, which Node cannot resolve through.
+  mkdirSync(tree)
+  await run([tar, '-xzf', archive, '-C', tree], process.env)
   for (const manifest of ['package.json', 'apps/cli/package.json']) {
     const path = join(tree, manifest)
     writeFileSync(path, readFileSync(path, 'utf8').replace(`"version": "${stagedVersion}"`, `"version": "${version}"`))
   }
-  rmSync(join(tree, '.last-launch'), { force: true })
   const host = join(temporary, 'newer-host')
   mkdirSync(join(host, 'public/releases', version), { recursive: true })
   for (const file of ['server.mjs', 'index.html', 'install.sh', 'install.ps1']) cpSync(join(ROOT, 'distribution/host', file), join(host, file))
   const file = `bake-v${version}-${target}.tar.gz`
-  const archive = join(host, 'public/releases', version, file)
-  await run([process.platform === 'win32' ? 'tar.exe' : 'tar', '-czf', archive, '-C', tree, '.'], process.env)
-  const bytes = readFileSync(archive)
+  const newer = join(host, 'public/releases', version, file)
+  await run([tar, '-czf', newer, '-C', tree, '.'], process.env)
+  const bytes = readFileSync(newer)
   const pair = generateKeyPairSync('ed25519')
   const manifest = Buffer.from(`${JSON.stringify({ version, artifacts: { [target]: {
-    file, sha256: createHash('sha256').update(bytes).digest('hex'), size: statSync(archive).size,
+    file, sha256: createHash('sha256').update(bytes).digest('hex'), size: statSync(newer).size,
   } } }, null, 2)}\n`)
   writeFileSync(join(host, 'public/latest.json'), manifest)
   writeFileSync(join(host, 'public/latest.json.sig'), `${sign(null, manifest, pair.privateKey).toString('base64')}\n`)
@@ -93,7 +96,7 @@ try {
   }
   const manifest = await (await fetch(`${base}/latest.json`)).json() as {
     version: string
-    artifacts: Record<string, { sha256: string }>
+    artifacts: Record<string, { file: string; sha256: string }>
   }
   const installRoot = join(temporary, 'install')
   const binDir = join(temporary, 'bin')
@@ -147,7 +150,7 @@ try {
   console.log(`Verified local Bake ${manifest.version} install from ${base}`)
 
   // Update the install just made to a newer release, through its own command.
-  const newer = await publishNewer(installed, target)
+  const newer = await publishNewer(join(ROOT, 'distribution/host/public/releases', manifest.version, artifact.file), target)
   const updateEnv: NodeJS.ProcessEnv = { ...env, BAKE_RELEASE_BASE_URL: newer.base, BAKE_RELEASE_PUBLIC_KEY: newer.key }
   const bake = process.platform === 'win32' ? ['cmd.exe', '/c', join(binDir, 'bake.cmd')] : [join(binDir, 'bake')]
   const check = await run([...bake, 'update', '--check'], updateEnv, ROOT, 10)

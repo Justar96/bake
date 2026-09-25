@@ -86,15 +86,24 @@ function picked(name: string): RegExp {
 }
 
 const darwin = process.platform === 'darwin'
+/**
+ * `fcntl` and `ioctl` are variadic, and Apple arm64 passes variadic arguments
+ * on the stack rather than in registers. `bun:ffi` calls are never variadic,
+ * so six filler arguments use up the remaining argument registers and push the
+ * real third argument to the stack slot the callee reads.
+ */
+const VARIADIC_PAD: FFIType[] = darwin && process.arch === 'arm64' ? Array(6).fill(FFIType.i64) : []
+const pad = VARIADIC_PAD.map(() => 0)
 /** `openpty` lives in libutil on Linux and in libSystem on macOS. */
 const pty = dlopen(darwin ? 'libSystem.B.dylib' : 'libutil.so.1', {
   openpty: { args: [FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.int },
 })
 const libc = dlopen(darwin ? 'libSystem.B.dylib' : 'libc.so.6', {
-  fcntl: { args: [FFIType.int, FFIType.int, FFIType.int], returns: FFIType.int },
+  fcntl: { args: [FFIType.int, FFIType.int, ...VARIADIC_PAD, FFIType.i64], returns: FFIType.int },
   tcgetattr: { args: [FFIType.int, FFIType.ptr], returns: FFIType.int },
-  ioctl: { args: [FFIType.int, FFIType.u64, FFIType.ptr], returns: FFIType.int },
+  ioctl: { args: [FFIType.int, FFIType.u64, ...VARIADIC_PAD, FFIType.ptr], returns: FFIType.int },
 })
+const F_GETFL = 3
 const F_SETFL = 4
 const O_NONBLOCK = darwin ? 0x0004 : 0o4000
 /** Oversized and zeroed, so `struct termios` need not be sized per platform. */
@@ -166,8 +175,12 @@ class Terminal {
     }
     this.master = master[0]!
     this.slave = slave[0]!
-    // Without this a read blocks forever whenever the child has nothing to say.
-    libc.symbols.fcntl(this.master, F_SETFL, O_NONBLOCK)
+    // Without this a read blocks forever whenever the child has nothing to say,
+    // and no step timeout can fire, so a call that did not take is fatal here.
+    libc.symbols.fcntl(this.master, F_SETFL, ...pad, O_NONBLOCK)
+    if ((libc.symbols.fcntl(this.master, F_GETFL, ...pad, 0) & O_NONBLOCK) === 0) {
+      throw new Error('could not make the pty master non-blocking')
+    }
     this.modes = new Uint8Array(TERMIOS_BYTES)
     libc.symbols.tcgetattr(this.slave, ptr(this.modes))
     this.child = Bun.spawn(command, { cwd, env, stdin: this.slave, stdout: this.slave, stderr: this.slave })
@@ -302,15 +315,10 @@ class Terminal {
     writeSync(this.master, bytes)
   }
 
-  /** Trigger a process-local fixture after the interactive surface is ready. */
-  signal(name: 'SIGUSR2'): void {
-    this.child.kill(name)
-  }
-
   /** Resize the PTY and notify its Node renderer even without a controlling terminal. */
   resize(columns: number, rows: number): void {
     const size = new Uint16Array([rows, columns, 0, 0])
-    if (libc.symbols.ioctl(this.master, darwin ? 0x80087467 : 0x5414, ptr(size)) !== 0) throw new Error('TIOCSWINSZ failed')
+    if (libc.symbols.ioctl(this.master, darwin ? 0x80087467 : 0x5414, ...pad, ptr(size)) !== 0) throw new Error('TIOCSWINSZ failed')
     this.child.kill('SIGWINCH')
   }
 
@@ -1749,14 +1757,21 @@ scenario('cancel', 'skill and quoted-file completion, steering a running turn, i
 scenario('fatal-exception', 'an uncaught callback restores terminal modes before the launcher exits 1',
   { replayOnly: true },
   async run => {
+    // A timer polls for a trigger file rather than listening for a signal: a
+    // child of Bun on macOS can inherit a mask that blocks SIGUSR2, and Node
+    // unblocks only SIGINT, so a signal may never arrive.
     const preload = join(run.root, 'fatal-exception.mjs')
-    await Bun.write(preload,
-      "process.on('SIGUSR2', () => { throw Object.assign(new Error('PTY_FATAL_EXCEPTION'), { code: 'TUI_FATAL_TEST' }) })\n")
+    const trigger = join(run.root, 'fatal-exception.trigger')
+    await Bun.write(preload, `import { existsSync } from 'node:fs'
+setInterval(() => {
+  if (existsSync(${JSON.stringify(trigger)})) throw Object.assign(new Error('PTY_FATAL_EXCEPTION'), { code: 'TUI_FATAL_TEST' })
+}, 20).unref()
+`)
     const tty = new Terminal('fatal-exception', run.command([], ['--import', preload]),
       run.workspace, run.env, run.options)
     try {
       await tty.ready()
-      tty.signal('SIGUSR2')
+      await Bun.write(trigger, '')
       const output = await tty.exited(1, 'the uncaught exception')
       tty.check('the fatal exception to be reported', output.includes('fatal uncaught exception: Error: PTY_FATAL_EXCEPTION'))
       tty.check('the error code to be retained', output.includes("code: 'TUI_FATAL_TEST'"))

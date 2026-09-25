@@ -30,6 +30,14 @@ jobs:
         with:
           bun-version-file: package.json
       - run: bun install --frozen-lockfile
+      # The bash tool runs in bubblewrap, which Ubuntu runners lack, and
+      # AppArmor there denies it the unprivileged user namespaces it needs.
+      - name: Enable the Linux sandbox
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: bun run verify
       - run: bun run lint
       - name: Runtime profile regression tests
