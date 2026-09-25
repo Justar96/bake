@@ -86,7 +86,7 @@ export class SubagentCatalog {
     const outcomes = new Map<string, SubagentEntry['outcome']>()
     const query = this.ctx.get('sessionQuery')
     if (query !== undefined) {
-      // Sequential observations bound concurrent cold reads when a parent has many children.
+      // Observations run one at a time. A parent with many children must not open every cold read at once.
       for (const entry of entries) {
         if (entry.kind !== 'child') continue
         try {
@@ -94,7 +94,7 @@ export class SubagentCatalog {
           outcomes.set(entry.id, childOutcome(observation.events, observation.inheritedEventCount))
         } catch {
           signal.throwIfAborted()
-          // An unavailable outcome must not be presented as successful completion.
+          // An unavailable outcome must not be shown as a successful completion.
         }
       }
     }
@@ -137,7 +137,7 @@ export class SubagentCatalog {
 }
 
 
-/** Read the child's own latest turn boundary; inherited parent turns do not describe its result. */
+/** Read the child's own latest turn boundary. Inherited parent turns do not describe its result. */
 export function childOutcome(events: readonly SessionEvent[], inherited: number): SubagentEntry['outcome'] {
   for (let index = events.length - 1; index >= inherited; index--) {
     const event = events[index]!

@@ -2,7 +2,7 @@
  * Validate L1 and L2 against Ink's real render loop.
  *
  * `frames.mjs` and `stability.mjs` measure what Yoga lays out. This script
- * measures what Ink actually writes: it drives a live `render()` through a fake
+ * measures what Ink actually writes. It drives a live `render()` through a fake
  * TTY, captures every byte, and checks the claims that matter on screen.
  *
  *   1. a committed transcript row is written exactly once, however many times
@@ -144,8 +144,8 @@ const growing = report('growing live region', await runTurn(false))
 const reserved = report('reserved live region', await runTurn(true))
 
 // §1 says a dynamic region taller than the viewport makes Ink clear the screen
-// and replay the whole transcript every frame. Demonstrated rather than
-// asserted from source, so the cost of violating L1 stays visible.
+// and replay the whole transcript every frame. Demonstrated, not asserted
+// from source, so the cost of violating L1 stays visible.
 const overflowed = report(`overflowing live region (${ROWS + 6} lines in ${ROWS} rows)`, await runTurn(false, true))
 console.log(overflowed.clears > 0 && overflowed.committedWrites.some(count => count > 1)
   ? '  → L1 violation reproduced: screen cleared and transcript replayed per frame'

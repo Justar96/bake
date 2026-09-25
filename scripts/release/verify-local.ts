@@ -1,27 +1,40 @@
 #!/usr/bin/env bun
-/** Exercise the actual download server and installer against a temporary home. */
+/**
+ * Exercise the actual download server, installer, and updater against a
+ * temporary home: install the staged release, then publish a newer one built
+ * from it and update to that with `bake update`.
+ */
 
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { createHash, generateKeyPairSync, sign } from 'node:crypto'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { windowsPowerShellEnvironment } from './powershell.ts'
 
 const ROOT = resolve(import.meta.dir, '../..')
 const temporary = mkdtempSync(join(tmpdir(), 'bake-release-verify-'))
-const server = Bun.spawn(['node', 'distribution/host/server.mjs'], {
-  cwd: ROOT, env: { ...process.env, PORT: '0' }, stdout: 'pipe', stderr: 'inherit',
-})
+const stagedVersion = (JSON.parse(readFileSync(join(ROOT, 'apps/cli/package.json'), 'utf8')) as { version: string }).version
+// A release assembled with --ephemeral-key leaves the key a client must be told to trust.
+const ephemeral = join(ROOT, '.artifacts/bake-release', stagedVersion, 'ephemeral-release-key.pub')
+const trusted = existsSync(ephemeral) ? readFileSync(ephemeral, 'utf8').trim() : undefined
+const trust: NodeJS.ProcessEnv = trusted === undefined ? {} : { BAKE_RELEASE_PUBLIC_KEY: trusted }
+const servers: ReturnType<typeof Bun.spawn>[] = []
 
-async function run(argv: string[], env: NodeJS.ProcessEnv, cwd = ROOT): Promise<string> {
+async function run(argv: string[], env: NodeJS.ProcessEnv, cwd = ROOT, expected = 0): Promise<string> {
   const child = Bun.spawn(argv, { cwd, env, stdout: 'pipe', stderr: 'pipe' })
   const [stdout, stderr, code] = await Promise.all([
     new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited,
   ])
-  if (code !== 0) throw new Error(`${argv.join(' ')} exited ${code}: ${stderr}`)
+  if (code !== expected) throw new Error(`${argv.join(' ')} exited ${code}, not ${expected}: ${stderr}`)
   return stdout
 }
 
-try {
+/** Start the download server over `host`'s files, and return its origin. */
+async function serve(host: string): Promise<string> {
+  const server = Bun.spawn(['node', join(host, 'server.mjs')], {
+    cwd: host, env: { ...process.env, PORT: '0' }, stdout: 'pipe', stderr: 'inherit',
+  })
+  servers.push(server)
   const reader = server.stdout.getReader()
   const timer = setTimeout(() => server.kill(), 10_000)
   let output = ''
@@ -34,7 +47,44 @@ try {
   reader.releaseLock()
   const port = /^Bake downloads listening on (\d+)$/m.exec(output)?.[1]
   if (port === undefined) throw new Error(`Unexpected download server output: ${output}`)
-  const base = `http://127.0.0.1:${port}`
+  return `http://127.0.0.1:${port}`
+}
+
+/**
+ * Publish a release one patch newer than `installed`, built from its files,
+ * on a second host signed by a key of its own.
+ * @returns the host origin, the newer version, and the key to trust for it.
+ */
+async function publishNewer(installed: string, target: string): Promise<{ base: string; version: string; key: string; directory: string }> {
+  const [major = 0, minor = 0, patch = 0] = (stagedVersion.split('-')[0] ?? '').split('.').map(Number)
+  const version = `${major}.${minor}.${patch + 1}`
+  const tree = join(temporary, 'newer')
+  cpSync(installed, tree, { recursive: true, verbatimSymlinks: true })
+  for (const manifest of ['package.json', 'apps/cli/package.json']) {
+    const path = join(tree, manifest)
+    writeFileSync(path, readFileSync(path, 'utf8').replace(`"version": "${stagedVersion}"`, `"version": "${version}"`))
+  }
+  rmSync(join(tree, '.last-launch'), { force: true })
+  const host = join(temporary, 'newer-host')
+  mkdirSync(join(host, 'public/releases', version), { recursive: true })
+  for (const file of ['server.mjs', 'index.html', 'install.sh', 'install.ps1']) cpSync(join(ROOT, 'distribution/host', file), join(host, file))
+  const file = `bake-v${version}-${target}.tar.gz`
+  const archive = join(host, 'public/releases', version, file)
+  await run([process.platform === 'win32' ? 'tar.exe' : 'tar', '-czf', archive, '-C', tree, '.'], process.env)
+  const bytes = readFileSync(archive)
+  const pair = generateKeyPairSync('ed25519')
+  const manifest = Buffer.from(`${JSON.stringify({ version, artifacts: { [target]: {
+    file, sha256: createHash('sha256').update(bytes).digest('hex'), size: statSync(archive).size,
+  } } }, null, 2)}\n`)
+  writeFileSync(join(host, 'public/latest.json'), manifest)
+  writeFileSync(join(host, 'public/latest.json.sig'), `${sign(null, manifest, pair.privateKey).toString('base64')}\n`)
+  const directory = `${version}-${createHash('sha256').update(bytes).digest('hex').slice(0, 12)}`
+  return { base: await serve(host), version, key: pair.publicKey.export({ type: 'spki', format: 'der' }).toString('base64'), directory }
+}
+
+try {
+  await run(['node', 'distribution/host/verify-manifest.mjs'], { ...process.env, ...trust })
+  const base = await serve(join(ROOT, 'distribution/host'))
   const health = await fetch(`${base}/health`)
   if (health.status !== 200) throw new Error('Download server health check failed')
   const page = await fetch(base)
@@ -47,9 +97,9 @@ try {
   }
   const installRoot = join(temporary, 'install')
   const binDir = join(temporary, 'bin')
-  const env = {
-    ...process.env, BAKE_RELEASE_BASE_URL: base, BAKE_INSTALL_ROOT: installRoot,
-    BAKE_BIN_DIR: binDir, BAKE_SKIP_PATH_UPDATE: '1', DSH_HOME: join(temporary, 'home'),
+  const env: NodeJS.ProcessEnv = {
+    ...process.env, ...trust, BAKE_RELEASE_BASE_URL: base, BAKE_INSTALL_ROOT: installRoot,
+    BAKE_BIN_DIR: binDir, BAKE_SKIP_PATH_UPDATE: '1', DSH_HOME: join(temporary, 'home'), BAKE_NO_UPDATE_CHECK: '1',
   }
   if (process.platform === 'win32') {
     const install = ['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
@@ -95,8 +145,29 @@ try {
   const staged = JSON.parse(readFileSync(join(ROOT, 'distribution/host/public/latest.json'), 'utf8')) as { version: string }
   if (staged.version !== manifest.version) throw new Error('Served a different release manifest')
   console.log(`Verified local Bake ${manifest.version} install from ${base}`)
+
+  // Update the install just made to a newer release, through its own command.
+  const newer = await publishNewer(installed, target)
+  const updateEnv: NodeJS.ProcessEnv = { ...env, BAKE_RELEASE_BASE_URL: newer.base, BAKE_RELEASE_PUBLIC_KEY: newer.key }
+  const bake = process.platform === 'win32' ? ['cmd.exe', '/c', join(binDir, 'bake.cmd')] : [join(binDir, 'bake')]
+  const check = await run([...bake, 'update', '--check'], updateEnv, ROOT, 10)
+  if (!check.includes(`Bake ${newer.version} is available`)) throw new Error(`Unexpected update check: ${check}`)
+  // A manifest signed by a key the client was not told to trust is refused, and changes nothing.
+  await run([...bake, 'update'], { ...updateEnv, BAKE_RELEASE_PUBLIC_KEY: trusted ?? '' }, ROOT, 1)
+  const updated = await run([...bake, 'update'], updateEnv)
+  if (!updated.includes(`Updated Bake ${manifest.version} → ${newer.version}`)) throw new Error(`Unexpected update output: ${updated}`)
+  const upgraded = await run([...bake, '--version'], updateEnv)
+  if (!upgraded.includes(newer.version)) throw new Error(`The command still starts ${upgraded.trim()} after updating`)
+  const current = process.platform === 'win32'
+    ? readFileSync(join(installRoot, 'current.txt'), 'utf8').trim()
+    : readlinkSync(join(installRoot, 'current')).split(/[\\/]/).at(-1)
+  if (current !== newer.directory) throw new Error(`current names ${current}, not ${newer.directory}`)
+  if (!existsSync(join(installed, 'apps/cli/lib/bin.js'))) throw new Error('The update removed the release it replaced')
+  const again = await run([...bake, 'update'], updateEnv)
+  if (!again.includes(`Bake ${newer.version} is up to date`)) throw new Error(`Unexpected second update: ${again}`)
+  console.log(`Verified bake update ${manifest.version} → ${newer.version} from ${newer.base}`)
 } finally {
-  server.kill()
-  await server.exited
+  for (const server of servers) server.kill()
+  await Promise.all(servers.map(server => server.exited))
   rmSync(temporary, { recursive: true, force: true })
 }

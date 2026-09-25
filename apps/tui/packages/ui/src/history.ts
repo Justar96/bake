@@ -5,12 +5,12 @@ import type { Transcript } from './transcript.ts'
  * Visit human input newest first without rescanning or copying the complete transcript.
  *
  * Commands are recalled alongside prompts, rebuilt from the name and arguments
- * the row keeps apart, so the restored draft is the text the user typed and
+ * the row keeps apart. The restored draft is the text the user typed, and
  * Enter runs it again.
  *
  * @param transcript - the session's committed presentation snapshot.
  * @param pending - projected human inbox messages in display order.
- * @returns a lazy traversal; plugin context, assistant output, and unlogged secrets are absent.
+ * @returns a lazy traversal. Plugin context, assistant output, and unlogged secrets are absent.
  */
 export function* inputHistory(transcript: Transcript, pending: readonly { readonly text: string }[]): Generator<string> {
   for (let index = pending.length - 1; index >= 0; index--) {

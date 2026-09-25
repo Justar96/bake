@@ -1,5 +1,5 @@
 /**
- * Plain-text row rendering for surfaces without a component renderer: the
+ * Plain-text row rendering for surfaces without a component renderer. The
  * pre-render startup report, `--json`-free diagnostics, and test assertions.
  * Pure, so it runs under `bun test` alongside the projection.
  *
@@ -14,6 +14,7 @@ const GUTTER: Record<Row['kind'], string> = {
   'command': '/',
   'assistant': ' ',
   'reasoning': '·',
+  'rate': '~',
   'tool-call': '⚙',
   'tool-group': '⚙',
   'tool-result': '←',
@@ -21,7 +22,7 @@ const GUTTER: Record<Row['kind'], string> = {
 }
 
 /**
- * Render one row as a single plain-text line, with no ANSI styling; a step's
+ * Render one row as a single plain-text line, with no ANSI styling. A step's
  * group of calls renders a line per call.
  *
  * @param row - the row to render.
@@ -37,7 +38,7 @@ export function formatRow(row: Row): string {
     case 'tool-call': {
       const call = `${gutter} ${row.tool} [${row.callId}](${oneLine(row.input)})${cardText(row.detail)}`
       if (row.result === undefined) return call
-      // One action, one line: the call, then how it ended.
+      // One action, one line. The call, then how it ended.
       return `${call} ${GUTTER['tool-result']} ${outcomeText(row.result.ok, row.result.title, row.result.text, row.result.detail)}`.trimEnd()
     }
     case 'tool-group':

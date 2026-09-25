@@ -782,7 +782,6 @@ describe('toStreamChunks', () => {
       { type: 'tool-call-delta', index: 0, id: 'call-1', name: 'f', argumentsDelta: '{"a"' },
       { type: 'tool-call-delta', index: 0, id: 'call-1', name: 'f', argumentsDelta: ':1}' },
       { type: 'block-end', index: 0, block: { type: 'tool-call', id: 'call-1', name: 'f', arguments: '{"a":1}' } },
-      { type: 'usage', usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } },
       {
         type: 'finish',
         reason: { kind: 'tool-calls' },
@@ -808,6 +807,15 @@ describe('toStreamChunks', () => {
       { type: 'done', reason: 'stop', message: assistant() },
     )))
     expect(chunks[1]).toEqual({ type: 'tool-call-delta', index: 0, id: '', argumentsDelta: '{}' })
+  })
+
+  it('omits usage the provider never reported, rather than recording an empty prompt', async () => {
+    // pi-ai starts every message at zero; a stream without accounting leaves it there.
+    const done = assistant({ content: [{ type: 'text', text: 'hi' }] })
+    const chunks = await collect(toStreamChunks(feed({ type: 'done', reason: 'stop', message: done })))
+    expect(chunks.map(chunk => chunk.type)).toEqual(['finish'])
+    const failed = await collect(toStreamChunks(feed({ type: 'error', reason: 'error', error: assistant({ stopReason: 'error', errorMessage: 'boom' }) })))
+    expect(failed.map(chunk => chunk.type)).toEqual(['finish'])
   })
 
   it('maps error events to error finish chunks (in-stream error style)', async () => {

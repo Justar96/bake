@@ -89,16 +89,16 @@ export function eraseLast(text: string): string {
 /**
  * Columns between tab stops in the composer, counted from the start of a row.
  *
- * A tab reaches the terminal as spaces: `string-width` measures it as zero
- * columns and the terminal moves to its own tab stop, so a raw tab puts every
- * cell after it somewhere the layout did not, and moves over what was drawn
- * there before rather than erasing it.
+ * A raw tab cannot be laid out. `string-width` measures it as zero columns,
+ * and the terminal advances to its own tab stop. Every cell after that tab
+ * lands somewhere the layout did not reserve, and the cursor moves over what
+ * was already drawn there instead of erasing it. Expand tabs to spaces.
  */
 export const TAB_COLUMNS = 4
 
 /** A draft laid out in screen rows, with the caret drawn into its row. */
 export interface WrappedDraft {
-  /** Each row as displayed: tabs expanded, the caret inserted. */
+  /** Each row as displayed. Tabs are expanded, and the caret is inserted. */
   readonly rows: readonly string[]
   /** Index of the row holding the caret. */
   readonly caret: number
@@ -111,18 +111,18 @@ interface Cell {
 }
 
 /**
- * Wrap a draft the way an editor does, not the way a paragraph is wrapped.
+ * Wrap a draft the way an editor wraps, not the way a paragraph wraps.
  *
- * Rows break after whitespace, and whitespace at a break hangs past the row
- * rather than opening the next one, so a wrapped row never starts with a space
- * the user did not put there. Wide characters are break opportunities of their
- * own, since CJK text has no spaces to break at. A word longer than a row starts
- * a row of its own and is split where each row ends.
+ * Rows break after whitespace. Whitespace at a break hangs past the row
+ * instead of opening the next one, so a wrapped row never starts with a space
+ * the user did not type. Wide characters are their own break opportunities,
+ * because CJK text has no spaces to break on. A word longer than a row starts
+ * a row of its own and is split at each row boundary.
  *
  * The layout is computed without the caret and one column narrower than
- * `width`, and the caret is then drawn into the column that leaves: moving the
- * caret through a draft never reflows it, and a caret at the end of a full row
- * still fits on that row.
+ * `width`. The caret is then drawn into the column that remains. Moving the
+ * caret through a draft never reflows it, and a caret at the end of a full
+ * row still fits on that row.
  *
  * @param text - complete draft, as `composerText` leaves it.
  * @param cursor - UTF-16 offset of the caret, at a grapheme boundary.
@@ -147,8 +147,8 @@ export function wrapDraft(text: string, cursor: number, width: number, caret: st
       const first = graphemes[index]!
       if (first.segment === ' ' || first.segment === '\t') {
         const stop = first.segment === '\t' ? TAB_COLUMNS - column % TAB_COLUMNS : 1
-        // Past the row's end the whitespace hangs: it stays on this row, drawn
-        // as nothing, and the next word opens the row after it.
+        // Past the row's end the whitespace hangs. It stays on this row, drawn
+        // as nothing, and the next word opens the following row.
         const shown = Math.max(0, Math.min(stop, limit - column))
         place({ offset: first.index, text: ' '.repeat(shown), width: shown })
         index++
@@ -163,8 +163,8 @@ export function wrapDraft(text: string, cursor: number, width: number, caret: st
         word.push(cell)
       }
       const size = word.reduce((sum, cell) => sum + cell.width, 0)
-      // A word that does not fit opens a row even when it must then be split,
-      // so a pasted path or URL starts at the left edge instead of after a space.
+      // A word that does not fit opens a row even when it must then be split.
+      // A pasted path or URL starts at the left edge, not after a space.
       if (column > 0 && column + size > limit) open()
       for (const cell of word) {
         if (column > 0 && column + cell.width > limit) open()

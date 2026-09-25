@@ -22,7 +22,7 @@ const server = createServer((request, response) => {
   }
   const file = pathname === '/' || pathname === '/install.sh' || pathname === '/install.ps1'
     ? join(root, pathname === '/' ? 'index.html' : pathname.slice(1))
-    : pathname === '/latest.json' || /^\/releases\/[0-9A-Za-z.-]+\/bake-v[0-9A-Za-z.-]+-(?:darwin-(?:arm64|x64)|linux-(?:arm64|x64)|win32-x64)\.tar\.gz$/.test(pathname)
+    : pathname === '/latest.json' || pathname === '/latest.json.sig' || /^\/releases\/[0-9A-Za-z.-]+\/bake-v[0-9A-Za-z.-]+-(?:darwin-(?:arm64|x64)|linux-(?:arm64|x64)|win32-x64)\.tar\.gz$/.test(pathname)
       ? resolve(publicRoot, `.${pathname}`)
       : undefined
   if (file === undefined || (file !== publicRoot && !file.startsWith(`${publicRoot}${sep}`) && !file.startsWith(`${root}${sep}`))) {
@@ -39,7 +39,7 @@ const server = createServer((request, response) => {
     return
   }
   response.writeHead(200, {
-    'Content-Type': file.endsWith('.html') ? 'text/html; charset=utf-8' : file.endsWith('.json') ? 'application/json; charset=utf-8' : file.endsWith('.gz') ? 'application/gzip' : 'text/plain; charset=utf-8',
+    'Content-Type': file.endsWith('.html') ? 'text/html; charset=utf-8' : file.endsWith('.json') ? 'application/json; charset=utf-8' : file.endsWith('.sig') ? 'text/plain; charset=utf-8' : file.endsWith('.gz') ? 'application/gzip' : 'text/plain; charset=utf-8',
     'Content-Length': size,
     'Cache-Control': file.endsWith('.gz') ? 'public, max-age=31536000, immutable' : 'no-store',
     'X-Content-Type-Options': 'nosniff',

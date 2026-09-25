@@ -43,9 +43,10 @@ describe('welcome block', () => {
     expect(frame).toMatch(/\/changelog +\S/)
     // Inside the block, so the heading is not printed a second time above it.
     expect(frame.indexOf('BAKE')).toBeLessThan(frame.indexOf(`${copy.session}: session-test`))
-    // The block replaces the heading rather than preceding it: the chrome's one
-    // gap row is all that separates the card from the composer.
-    expect(gapUnderCard(frame)).toBe(1)
+    // The block replaces the heading instead of preceding it. The chrome's
+    // gap and the header's row, blank before any turn, are all that separate
+    // the card from the rule over the composer.
+    expect(gapUnderCard(frame)).toBe(2)
     await expect(frame + '\n').toMatchFileSnapshot(`./expected/welcome.${locale}.txt`)
   })
 

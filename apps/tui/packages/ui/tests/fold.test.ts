@@ -55,7 +55,7 @@ describe('actions', () => {
 
   it('draws a step\'s calls as one block from the moment they stream to the moment they print', () => {
     // Every stage the block passes through has the same calls in the same
-    // shape: a stage that dropped one, or split the group, would give up rows
+    // shape. A stage that dropped one, or split the group, would give up rows
     // the frame holds blank until history next prints.
     const actions = new Actions()
     const streamed = (callId: string): Row => ({ kind: 'tool-call', callId, tool: 'bash', input: PENDING_ARGUMENTS })

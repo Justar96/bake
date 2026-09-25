@@ -29,7 +29,7 @@ const at = argv.indexOf('--width')
  */
 const MEASURE = 88
 
-/** Text column for a row kind: prose is measured, output takes what it needs. */
+/** Text column for a row kind. Prose is measured, and output takes what it needs. */
 const measureFor = (width, kind) =>
   kind === 'output' ? width - 4 : Math.min(MEASURE, width - 2)
 
@@ -38,7 +38,7 @@ const Rail = ({ glyph, color, width = 2, children }) =>
     h(Box, { width, flexShrink: 0 }, h(Text, { color }, glyph)),
     h(Box, { flexShrink: 0 }, children))
 
-/** A user turn opens with a blank line: the eye's landing place when scrolling back. */
+/** A user turn opens with a blank line, so a long session can be scrolled by turn. */
 const UserTurn = ({ text, width }) =>
   h(Box, { flexDirection: 'column' },
     h(Text, null, ' '),
@@ -53,8 +53,8 @@ const Answer = ({ text, width }) =>
 /**
  * A call and its result are one zone.
  *
- * The result indents under the call rather than sitting beside it, so the group
- * reads as one unit without a separator row. Output keeps the full width.
+ * The result indents under the call instead of sitting beside it, so the group
+ * is one unit without a separator row. Output keeps the full width.
  */
 const ToolZone = ({ name, summary, output, failed, width }) =>
   h(Box, { flexDirection: 'column' },
@@ -64,8 +64,8 @@ const ToolZone = ({ name, summary, output, failed, width }) =>
       h(Box, { key: index, flexDirection: 'row' },
         h(Box, { width: 4, flexShrink: 0 }, h(Text, null, ' ')),
         h(Box, { width: measureFor(width, 'output') },
-          // Wrapped, never truncated: a result the user cannot finish reading is
-          // worse than a ragged one. Failed output is not dimmed - it is the
+          // Wrapped, never truncated. A result the user cannot finish reading is
+          // worse than a ragged one. Failed output is not dimmed. It is the
           // thing they need.
           h(Text, { dimColor: !failed, wrap: 'wrap' }, line)))))
 

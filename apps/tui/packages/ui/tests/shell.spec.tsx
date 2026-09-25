@@ -87,7 +87,7 @@ describe('terminal composer', () => {
     ui.stdin.write('/')
     await vi.waitFor(() => expect(ui.lastFrame()).toContain('▸ /help'))
     ui.stdin.write('\u001b')
-    // Wait on the menu's own rows: the panel has no title to disappear, and
+    // Wait on the menu's own rows. The panel has no title to disappear, and
     // waiting on something never rendered would pass before Esc was read.
     await vi.waitFor(() => expect(ui.lastFrame()).not.toContain('/help'))
     expect(state.onCancel).not.toHaveBeenCalled()
@@ -243,7 +243,7 @@ describe('terminal composer', () => {
     await vi.waitFor(() => expect(ui.lastFrame()).toContain('> first▌'))
     ui.stdin.write('\u001b[13;2u')
     // The composer's frame sits between the two draft rows in the frame text,
-    // so the rows are read separately rather than as one adjacent string.
+    // so the rows are read separately. Joining them would hide the frame between them.
     await vi.waitFor(() => {
       const rows = ui.lastFrame()!.split('\n')
       const first = rows.findIndex(row => row.includes('> first'))
@@ -490,7 +490,7 @@ it.each(['en', 'zh'] as const)('renders a bounded session picker and returns the
   })
   const ui = render(<App {...state} />)
   await vi.waitFor(() => expect(ui.lastFrame()).toContain(copy.chooseSession))
-  // Two rows: the scrolled list gives one up so the pinned action stays in view.
+  // Two rows. The scrolled list gives one up so the pinned action stays in view.
   expect(ui.lastFrame()).toContain(`+ ${copy.newSession}`)
   expect(ui.lastFrame()).not.toContain('Second conversation')
   await expect(ui.lastFrame() + '\n').toMatchFileSnapshot(`./expected/session-picker.${locale}.txt`)

@@ -56,6 +56,7 @@ jobs:
       - run: bun test scripts/workspace.test.ts scripts/release apps/tui/packages/app/tests/build.test.ts apps/tui/packages/app/tests/release.test.ts
       - run: bun run build
       - run: bun run release:pack
-      - run: bun run release:assemble
-      - run: node distribution/host/verify-manifest.mjs
+      # A throwaway key: CI never holds the release signing key. verify-local
+      # checks the manifest against it, then installs and updates through it.
+      - run: bun run release:assemble --ephemeral-key
       - run: bun run release:verify-local

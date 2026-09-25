@@ -1,6 +1,6 @@
 /**
  * The shipped plugin runs inside the dsh process, which is Node and cannot be
- * Bun: `app-boot` reaches V8 current-context symbols during host preparation,
+ * Bun. `app-boot` reaches V8 current-context symbols during host preparation,
  * and JavaScriptCore has none (tui/PLAN.md §2.2). A `bun:` import or a `Bun.*`
  * global in `packages/` would therefore make the plugin unloadable — at boot,
  * in the user's terminal, not here.

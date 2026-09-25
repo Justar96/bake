@@ -142,7 +142,7 @@ describe('context occupancy', () => {
   })
 
   it('shows nothing before the meter reports', () => {
-    // Both meter fields are optional: a session reports nothing until a request
+    // Both meter fields are optional. A session reports nothing until a request
     // measures it, and a model with no exact capacity never reports a window.
     // A fraction of an unknown whole would be worse than silence.
     const ui = render(<App {...props()} />)
@@ -227,4 +227,24 @@ it('opens a child from the shortcut, blocks child input, and preserves the paren
   expect(onSubmit).not.toHaveBeenCalled()
   ui.rerender(<App {...state} />)
   await vi.waitFor(() => expect(ui.lastFrame()).toContain('Unsent parent draft'))
+})
+
+it('steps thinking on Shift-Tab without touching the draft or a completion Tab would take', async () => {
+  const onCycleThinking = vi.fn()
+  const ui = render(<App {...props({ onCycleThinking })} />)
+  // An open completion menu, whose Tab would complete the draft.
+  ui.stdin.write('/mo')
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain(dictionaries.en.tabCompletes))
+  ui.stdin.write('\x1b[Z')
+  await vi.waitFor(() => expect(onCycleThinking).toHaveBeenCalledOnce())
+  expect(ui.lastFrame()).toMatch(/> \/mo▌/)
+})
+
+it('names an available update in the status line, after every reading of the session and before the path', () => {
+  const frame = render(<App {...props({ update: '0.2.0', usage: { input: 1200, output: 300 } })} />).lastFrame()!
+  const status = frame.split('\n').find(line => line.includes('Model:'))!
+  expect(status).toMatch(/update\s+v0\.2\.0 · bake update/)
+  // Last of the bounded fields, so it is the first a narrow line gives up.
+  expect(status.indexOf('out')).toBeLessThan(status.indexOf('update'))
+  expect(status.indexOf('update')).toBeLessThan(status.indexOf('/workspace'))
 })

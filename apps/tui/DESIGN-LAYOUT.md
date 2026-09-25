@@ -57,13 +57,15 @@ Six regions, top to bottom. Only the first is static.
 ┌───────────────────────────────────────────────┐
 │ transcript        <Static>, terminal-owned     │  unbounded, written once
 ├───────────────────────────────────────────────┤
-│ live region       current turn, streaming      │  <= 10 rows, elastic
-│ thinking window   newest reasoning rows        │  0-3 rows, while reasoning streams
+│ live region       current turn, streaming      │  10 rows, 40% of a tall one
+│ thinking window   newest reasoning rows        │  0-3 rows + 1 blank, while reasoning streams
 │ interaction       approval / prompt overlay    │  <= 8 rows, modal
 │ notice            command output, errors       │  <= 6 rows, dismissible
-│ rule              turn word, phase, light      │  1 row, fixed; the summary after
+│ header            turn, spinner, goal          │  1 row, fixed; the summary after
+│ rule              bare line over the input     │  1 row, fixed
 │ composer          input                        │  1-5 rows, elastic
-│ status            one line, under a blank      │  1 row, fixed
+│ base rule         bare line under the input    │  1 row, fixed
+│ status            one line, under the base rule│  1 row, fixed
 └───────────────────────────────────────────────┘
 ```
 
@@ -79,38 +81,40 @@ Committed rows go to `<Static>` and are never re-rendered. Consequences accepted
 
 ### 2.2 Live region — the only elastic tall element
 
-Holds the in-flight turn: streaming assistant text, running tool calls, step progress. Streaming reasoning is not drawn here; the thinking window over the rule carries it ([§2.2a](#22a-the-rule--one-steady-line-for-the-whole-turn)).
+Holds the in-flight turn: streaming assistant text, running tool calls, step progress. Streaming reasoning is not drawn here; the thinking window over the header carries it ([§2.2a](#22a-the-header--one-steady-row-for-the-whole-turn)).
 
-Streaming output is unbounded by nature, so the live region does not hold it. The application prints settled Markdown blocks of the answer to the transcript, and the live region draws the unfinished block and any call still streaming ([§8.1](#81-the-input-rests-on-the-bottom-row)). What remains is still **tail-windowed** to `N = min(10, rows - reserved)` rows, section by section. Only the newest section is cut, and an older one is shown whole or not at all.
+Streaming output is unbounded by nature, so the live region does not hold it. The application prints settled Markdown blocks of the answer to the transcript, and the live region draws the unfinished block and any call still streaming ([§8.1](#81-the-input-rests-on-the-bottom-row)). What remains is still **tail-windowed** to `N = min(max(10, 40% of rows), rows - reserved)` rows, section by section (`LIVE_BUDGET`, `LIVE_SHARE`): ten on an ordinary terminal, a growing share of a tall one, whose empty upper half otherwise folded a running step for no reason, and never more than the chrome leaves. Only the newest section is cut, and an older one is shown whole or not at all.
 
-### 2.2a The rule — one steady line for the whole turn
+### 2.2a The header — one steady row for the whole turn
 
-The row directly over the input is a rule, exactly the terminal's width. It separates the input from the conversation and says what the session is doing, so the question "is it still working?" is answered on the input itself rather than by a header of its own. While a turn runs, the rule names it, and a band of light sweeps along the line after the label:
+The input is framed by two bare rules, exactly the terminal's width, one over the draft and one under it. They only say where typing lands. What the session is doing has one row of its own, the header, directly over the upper rule: the turn's spinner, word, phase, and elapsed time at the draft's column, and the goal at the right edge. The question "is it still working?" and the question "what is it working toward?" are answered on one row next to the input, and the rules never change:
 
 ```
   so the loader has to resolve the home before it reads the profile, and
   the session store opens its journal after that
-─ ⠠⠞⠁ Kneading…  thinking · 12s ──────────━━━━━─────────────────────────
-> ▌Enter steers the next step                              esc interrupts
 
+  ⠠⠞⠁ Kneading…  thinking · 12s          ● Goal active  round 3/256 · Ship it
+────────────────────────────────────────────────────────────────────────────
+> ▌Enter steers the next step                                esc interrupts
+────────────────────────────────────────────────────────────────────────────
   Model: deepseek/chat  Context: ~15k/128k (12%)  ~/bake
 ```
 
-The word is drawn from the locale's `activityWords` when the turn starts, seeded by the session and its transcript length, and kept until the turn ends. It does not follow the phase, so the label reads as one thing that holds while the details beside it change. The phase comes from the newest live row: `thinking` while reasoning streams, `writing` while the answer streams, and `running <tool>` while a call streams or has committed without its result. `/stop` replaces the word with `Stopping` in red and puts the light out. Manual compaction takes the rule the same way, as `Compacting…` and its phase. The word is drawn in the running orange; the indicator is a six-column, three-row dot wave packed into three Braille characters beside it, shifting one dot column right every two 150 ms beats in a continuous 1.8-second loop. Screen readers use a static ASCII `>` in place of the wave, and no light.
+The word is drawn from the locale's `activityWords` when the turn starts, seeded by the session and its transcript length, and kept until the turn ends. It does not follow the phase, so the label stays one label while the details beside it change. The phase comes from the newest live row: `thinking` while reasoning streams, `writing` while the answer streams, and `running <tool>` while a call streams or has committed without its result. `/stop` replaces the word with `Stopping` in red. Manual compaction takes the header the same way, as `Compacting…` and its phase. The word is drawn in the running orange; the indicator is a six-column, three-row dot wave packed into three Braille characters beside it, shifting one dot column right every two 150 ms beats in a continuous 1.8-second loop. Screen readers use a static ASCII `>` in place of the wave.
 
-The light is the oven light: a five-cell band that rises through the accent ramp to the glint and falls again, drawn in the heavier line glyph (`━`, or `=` in ASCII) so it still moves under `NO_COLOR`. It enters from the left, crosses the line, and rests unlit for twelve beats before the next sweep. A wide rule is crossed in longer strides (`lightStride`: one cell a beat up to 32 cells, then two, then three), so the sweep keeps its pace however wide the terminal is without jumping gaps larger than the band. The row is redrawn only on beats where the glyph, the light, or the seconds change; without a clock, or with motion off, it holds still.
+The spinner and the seconds are the only things on the header that move, and the rules never move at all: a moving run the width of the terminal, directly over the input, would distract from the draft while saying nothing the spinner does not. The row is redrawn only on beats where the glyph or the seconds change; without a clock, or with motion off, it holds still.
 
-The label starts at the draft's column, one line glyph and a space in, so the label, the draft, and the status line read as one block. `ruleRoom` cuts the label before the line: a space and two cells of line always follow it, and a rule too narrow for that drops its label and is line from edge to edge. The rule's glyphs are the style resolved from the terminal ([§4](#the-frame-is-chosen-from-the-terminal-not-assumed)), because a full-width run of East Asian Ambiguous glyphs is the one place such a character accumulates error across a row.
+The label starts at the draft's column, so the label, the draft, and the status line form one block. The goal is right-aligned, apart from the turn, because the two answer different questions. `headerRoom` gives the turn its label first: the goal's details are cut from their end while a few cells of them still fit, then left out so `● Goal active` stands alone, and below that the goal is dropped whole rather than left as a fragment. With neither a turn nor a goal the header is a blank row: it keeps its place so the input never moves when either appears. The goal's states are `● Goal active` in orange with its round count while the goal may continue, `○ Goal on hold` or `○ Goal paused` in yellow while it waits on `/goal resume`, `✗ Goal blocked` in red with its reason, and `✓ Goal complete` in green, each followed by the objective. The rules' glyphs are the style resolved from the terminal ([§4](#the-frame-is-chosen-from-the-terminal-not-assumed)), because a full-width run of East Asian Ambiguous glyphs is the one place such a character accumulates error across a row.
 
-The rows above the rule are the thinking window: at most `THINKING_ROWS` (3) of the newest wrapped rows of the streaming reasoning, a dim italic paragraph at the rail as reasoning is in the transcript, with no verb, so they read as the same text the transcript will keep. `thinkingRows` in `packages/ui/src/activity.ts` uses the shared Markdown formatter, wraps its text to the available terminal columns, and keeps the newest rows. Completing Markdown syntax may reflow the live preview within its row limit. The window disappears once the answer or a call starts. Reasoning arrives faster than anyone reads it. Drawn whole, it grew the live region to its limit and then scrolled every row of it with each token. A single ticker line held its height but froze on a long line, since its newest line was the one being written past the edge, and showed raw `**` and backticks. The window grows to three rows and then holds, so the reader sees the thought moving at a height that does not change once it is full. It claims its rows after the live region, so on a short terminal it gives way to the output. An open interaction hides it and the rule, because the question is what the turn is waiting on.
+The rows above the header are the thinking window: at most `THINKING_ROWS` (3) of the newest wrapped rows of the streaming reasoning, a dim italic paragraph at the rail as reasoning is in the transcript, with no verb, so they are the same text the transcript will keep. One blank row (`THINKING_GAP`) separates the window from the header, so the turn's word, phase, and elapsed time read as their own row rather than the paragraph's last line; the blank belongs to the window, coming and going with it, and is the first row given up when only one is free. `thinkingRows` in `packages/ui/src/activity.ts` uses the shared Markdown formatter, wraps its text to the available terminal columns, and keeps the newest rows. Completing Markdown syntax may reflow the live preview within its row limit. The window disappears once the answer or a call starts. Reasoning arrives faster than anyone reads it. Drawn whole, it grew the live region to its limit and then scrolled every row of it with each token. A single ticker line held its height but froze on a long line, since its newest line was the one being written past the edge, and showed raw `**` and backticks. The window grows to three rows and then holds, so the reader sees the thought moving at a height that does not change once it is full. It claims its rows after the live region, so on a short terminal it gives way to the output. An open interaction hides it and the chrome, because the question is what the turn is waiting on.
 
-When the turn ends, the rule stays and says how the turn went:
+When the turn ends, the header stays and says how the turn went:
 
 ```
-─ ✓ Completed  42s · edited 1 · ran 2 · read 3 · 1 failed ─────────────
+  ✓ Completed  42s · edited 1 · ran 2 · read 3 · 1 failed
 ```
 
-The glyph and label follow the recorded turn end: a green `✓ Completed`, a yellow `■` followed by why the turn stopped (`Interrupted`, `Blocked`, `Output token limit reached`), and a red `✗ Failed` for an error, whose message can run to paragraphs and stays in the transcript. A completed turn draws no line of its own in the transcript; `- Completed` there repeated this row. The elapsed time is the rule's clock when the turn ended. The counts are the turn's committed calls grouped by past-tense verb, with edits first, followed by the number of calls that failed. They are read from the transcript rather than tallied as the turn ran, so they agree with the session log however results arrived. The running label and the summary are the same row, so the input never moves between them, and a turn that has not spoken yet costs no row at all. The summary holds until the next turn starts. A resumed session shows its newest ended turn the same way, without a time, because no clock watched it run; that turn is read from the transcript once, when the surface mounts, so later commits never read history again. Before any turn has ended, the rule is a bare dim line.
+The glyph and label follow the recorded turn end: a green `✓ Completed`, a yellow `■` followed by why the turn stopped (`Interrupted`, `Blocked`, `Output token limit reached`), and a red `✗ Failed` for an error, whose message can run to paragraphs and stays in the transcript. A completed turn draws no line of its own in the transcript; `- Completed` there repeated this row. The elapsed time is the header's clock when the turn ended. The counts are the turn's committed calls grouped by past-tense verb, with edits first, followed by the number of calls that failed. They are read from the transcript rather than tallied as the turn ran, so they agree with the session log however results arrived. The running label and the summary are the same row, so the input never moves between them, and a turn that has not spoken yet costs no row at all. The summary holds until the next turn starts. A resumed session shows its newest ended turn the same way, without a time, because no clock watched it run; that turn is read from the transcript once, when the surface mounts, so later commits never read history again. Before any turn has ended, the turn's side of the header is empty.
 
 ### 2.3 Interaction — modal, and it wins
 
@@ -128,11 +132,11 @@ Fields in display order; access and then thinking reserve their width before the
 Model: <name>  plan  Access workspace-write  Think high  context  in  out  cache hit  cwd
 ```
 
-There is no state word. The rule over the composer says what the session is doing, in colour and in words, and the composer's placeholder and hint say whether Enter starts a turn, steers one, or is refused; a third copy under the composer repeated them on every frame. The model leads because it is what the row exists to say, followed by plan mode while it is on or pending. The input, output, and cache-hit totals are the session's billed tokens, summed over every request. They appear once a provider has reported usage; cache hit is the share of billed input read from the provider's cache, rounded down, and appears only when the provider reports cache traffic, so a provider without a cache shows no false 0%. The model and context fields, labels and values alike, use the terminal's normal foreground. Plan mode, input/output totals, the cache-hit label, and cwd stay dim. The cache-hit percentage carries a semantic colour: it is green from 70%, yellow from 30%, and red below (`cacheTone` in `palette.ts`), beside a dim label, so the number alone still says it under `NO_COLOR`. The context and token fields are bounded and never cut mid-number, since `cache hi` or a clipped meter reads as a different number. When the full context reading does not fit, a complete `ctx ~N%` reading can take width from the model name while keeping its label and the access and thinking badges; at smaller widths it yields whole. The cwd is the one unbounded field, and it truncates from its start to keep the workspace's name.
+There is no state word. The header over the composer says what the session is doing, in colour and in words, and the composer's placeholder and hint say whether Enter starts a turn, steers one, or is refused; a third copy under the composer repeated them on every frame. The model leads because it is what the row exists to say, followed by plan mode while it is on or pending. The input, output, and cache-hit totals are the session's billed tokens, summed over every request. They appear once a provider has reported usage; cache hit is the share of billed input read from the provider's cache, rounded down, and appears only when the provider reports cache traffic, so a provider without a cache shows no false 0%. The model and context fields, labels and values alike, use the terminal's normal foreground. Plan mode, input/output totals, the cache-hit label, and cwd stay dim. The cache-hit percentage carries a semantic colour: it is green from 70%, yellow from 30%, and red below (`cacheTone` in `palette.ts`), beside a dim label, so the number alone still says it under `NO_COLOR`. The context and token fields are bounded and never cut mid-number, since `cache hi` or a clipped meter is a different number. When the full context reading does not fit, a complete `ctx ~N%` reading can take width from the model name while keeping its label and the access and thinking badges; at smaller widths it yields whole. The cwd is the one unbounded field, and it truncates from its start to keep the workspace's name.
 
 The access badge uses the session’s permission projection, retaining the full built-in mode name at 40 columns even when the model must truncate. Its label stays dim, while its value is blue for `read-only`, green for `workspace-write`, red for `danger-full-access`, and yellow for custom or automatic policies. Profiles without the projection omit it. The ocean blue `Think` badge shows an explicit model effort or the adapter's advertised default. A provider default without an advertised level is named as such; a model without reasoning metadata has no badge. At 40 columns, access and a short level such as `high` fit together; longer defaults yield as a whole so access remains visible and the row never wraps.
 
-Left-packed, two spaces apart, stopping where the fields stop — not justified to both edges, per [§6a](#chrome-separates-by-framing-the-input-not-by-aligning-the-status-line). It sits under the composer, behind one blank padding row, and starts at the draft's column, as the rule's label does. Never wraps to two lines; a wrapped status line silently costs a row of live region and can tip L1.
+Left-packed, two spaces apart, stopping where the fields stop — not justified to both edges, per [§6a](#chrome-separates-by-framing-the-input-not-by-aligning-the-status-line). It sits directly under the base rule, with no blank row between them, and starts at the draft's column, as the header's label does. Never wraps to two lines; a wrapped status line silently costs a row of live region and can tip L1.
 
 ### 2.6 Composer — a cursor-following window
 
@@ -140,7 +144,7 @@ The composer displays one to five physical rows under the rule, with the prompt 
 
 `wrapDraft` wraps the way an editor does. Rows break after whitespace, and the whitespace at a break hangs past the row instead of opening the next one, so no wrapped row starts with a space the user did not type. Wide characters are break opportunities of their own. A word longer than a row starts a new row and is split where each row ends. Tabs are drawn as spaces to the next four-column stop, because `string-width` measures a tab as zero columns while the terminal moves to its own stop, which leaves cells where the layout did not put them and stale text under them. The layout ignores the caret and is one column narrower than the row, and the caret is drawn into that column, so moving through the text never moves a word. Beside a hint, that column is the first of the two that separate the draft from it, so the hint costs no more than it did. The hint appears beside the caret, and `^` marks text above the window. Wide characters use terminal cell widths. IME candidate placement at the caret is not yet implemented.
 
-`chromeFor` accounts for the gap, the rule, the first draft row, the padding row, and the status line. On a short terminal the gap yields first, then the padding, then the status line, then the rule, which says whether a turn is running; the input row remains visible. At 40×4, the three available rows hold the rule, the input, and the status line. Every piece is one row at any width, so a width change never moves the input vertically. Additional draft rows are reserved before panels claim the remaining space.
+`chromeFor` accounts for the gap, the header, the rule, the first draft row, the base rule, and the status line. On a short terminal the gap yields first, then the base rule, then the rule, then the status line, then the header, which says whether a turn is running; the input row remains visible. At 40×4, the three available rows hold the header, the input, and the status line. Every piece is one row at any width, so a width change never moves the input vertically. Additional draft rows are reserved before panels claim the remaining space.
 
 ## 3. Priority and collapse
 
@@ -159,12 +163,12 @@ A window under ~10 rows cannot honor this. There, draw interaction-or-composer p
 ## 4. Width
 
 - **Minimum supported: 40 columns.** Below that, drop the gutter and render prose only.
-- **Gutter: 2 columns**, one glyph plus one space, giving every row kind a constant left rail so the eye tracks a single column.
+- **Gutter: 2 columns**, one glyph plus one space, giving every row kind a constant left rail so every row starts in the same column.
 - Text measurement is Ink's (`string-width`), which handles CJK wide cells and emoji correctly. Never use `.length` for layout arithmetic.
 
 ### The frame is chosen from the terminal, not assumed
 
-The composer's rule is a full-width run of box-drawing characters (`─`, with `━` for its light), and the welcome card is framed in them (`╭─╮`). Two kinds of terminal cannot draw them:
+The composer's rule is a full-width run of box-drawing characters (`─`), and the welcome card is framed in them (`╭─╮`). Two kinds of terminal cannot draw them:
 
 - One that is **not encoding UTF-8** writes the bytes through as mojibake, so the frame becomes punctuation on every row.
 - One configured to draw **East Asian Ambiguous** characters two cells wide draws a full-width horizontal run at twice the width Ink measured. The frame wraps, and Ink's own row arithmetic is wrong from then on — this is the damaging case. Every other Ambiguous character on this surface (the turn marker, the selection pointer, the caret) sits alone in a fixed-width rail, where a terminal that draws it wide shifts one row by one column; a border run accumulates that error across the whole line.
@@ -175,7 +179,7 @@ The ASCII fallback is laid out against the same widths and spends the same rows.
 
 ### The composer yields structure before it yields content
 
-The hint costs whatever its locale needs. It is structure around the one field on the surface the user is actually composing in, so it gives way before the draft does, at a named width rather than by shrinking; the rule's label is cut before its line is (§2.2a):
+The hint costs whatever its locale needs. It is structure around the one field on the surface the user is actually composing in, so it gives way before the draft does, at a named width rather than by shrinking; the header's goal is cut before its turn is (§2.2a):
 
 | Below | What goes | Why not shrink it |
 | --- | --- | --- |
@@ -187,35 +191,35 @@ Above that width the hint never shrinks, so the draft takes whatever is left and
 
 Symbol glyphs are a measurement risk before they are a style question. `string-width` reports `U+2699` as one cell and `U+2699 U+FE0F` as two, and a terminal with an emoji font may draw the bare codepoint double-width anyway. Ink measures with that same library, so when the terminal disagrees, every column after the glyph shifts and **nothing in the layout engine can detect it** — `renderToString` measures it the same wrong way. Characters below `0x80` cannot disagree.
 
-So the render vocabulary is a **verb column**: a named action, its argument, and any output aligned beneath it.
+So the render vocabulary is a **verb column**: a named row, its text, and any output aligned beneath it. An action is the exception, named by its tool as a call, `Bash(rg -n …)`, with its output hung from it on a `⎿` in the verb column ([a call and its result are one zone](#a-call-and-its-result-are-one-zone)).
 
 ```
 > Find where the session controller registers commands
   The registry is the list, so discovery should read it.
-  run    rg -n "commands.register" -g '*.ts'
-         packages/app/src/controller.ts:45
+● Bash(rg -n "commands.register" -g '*.ts')
+  ⎿      packages/app/src/controller.ts:45
          packages/app/src/controller.ts:52
-  read   packages/app/src/controller.ts
+● Read(packages/app/src/controller.ts)
   Two registrations, both through ctx.effect.
 > Ask anything, / for commands
 ready   deepseek/chat                       ctx 12%   turn 3   0f3a9c
 ```
 
-`run`, `read`, `plan`, `ask`, `error` read at a glance, survive every font and locale, and stay legible pasted into a bug report. Approvals join the same grammar instead of inventing their own marks, which is why `ask` is a verb rather than a symbol. Reasoning takes no verb: it is the model's prose rather than an action, so it is a paragraph at the rail like the answer, dim and italic, and the answer's `<` marks where the reply begins. A label on every block would make the chat read as a log of actions, and the output column would wrap the working-out narrower than the answer beside it.
+`run`, `read`, `plan`, `ask`, `error` read at a glance, survive every font and locale, and stay legible pasted into a bug report. Approvals join the same grammar instead of inventing their own marks, which is why `ask` is a verb rather than a symbol. Reasoning takes no verb: it is the model's prose rather than an action, so it is a paragraph at the rail like the answer, dim and italic, and the answer's `<` marks where the reply begins. A label on every block would make the chat a log of actions, and the output column would wrap the working-out narrower than the answer beside it.
 
 | Row kind | Marker | Columns | Color |
 | --- | --- | --- | --- |
 | user | `>` | text at 2 | default, bold |
 | assistant | none | text at 2 | default |
-| action | `●`, then a verb | verb at 2, argument at 9 | marker orange and pulsing while running, green when done, red on failure; verb bold |
-| action output | none | aligned at 9 | default, red on failure; green/red for diffs; `+N more lines` dim |
+| action | `●`, then `Tool(argument)` | head at 2 | marker orange and blinking on and off while running, green when done, red on failure; tool name bold |
+| action output | `⎿` on its first line, at 2 | aligned at 9 | `output` grey, red on failure; green/red for diffs; `+N more lines` and `⎿` dim |
 | reasoning | none | text at 2, wrapping at terminal width | dim, italic |
 | interaction | `ask` | as a verb row | yellow |
 | error | `error` or a red verb | as a verb row | red |
 | list selection | `*` | marker at 0 | ocean blue |
 | composer | `>` | text at 2 | ocean blue, bold |
 
-`*` marks a selection and a current value; `>` is the composer prompt and a user's own words. They are never swapped: two identical markers a row apart read as one list.
+`*` marks a selection and a current value; `>` is the composer prompt and a user's own words. They are never swapped: two identical markers a row apart look like one list.
 
 `prototype/ascii.mjs` renders the vocabulary and fails if any rendered character is above `0x80`.
 
@@ -231,10 +235,10 @@ This is the principled fix for `/help` and `/model`: a command's full output bel
 
 ## 6. Color, motion, accessibility
 
-- **Color is semantic only, from one palette**: `palette.ts` holds five saturated semantic tones and one glint, and every component names a role rather than a hue, so a marker, its verb, and the rule agree. Orange is `running`: the rule's word and its light (`ACCENT`, whose `ramp` mixes the orange toward the glint in even steps), a running action's marker, and manual compaction. Green is `done`: a finished action, a completed turn's summary, and an added line. Red is `failed`: a failure, an error, a removed line, and the word of a turn being stopped. Cyan is `asking`: the composer prompt, a selection, staged attachments, and an action in progress on the task list. Yellow is `waiting`: a question, an approval, a picker, queued input, a notice, and a turn that stopped rather than failed. Dim marks reasoning and secondary interface metadata such as line counts and a call's description, and tool arguments and output use normal brightness. Never decorative, and never the only carrier of a state: every tone is paired with a word, a glyph, or motion, so a 16-color or `NO_COLOR` terminal loses no meaning. Honor `NO_COLOR` and non-TTY.
-- **Code in a diff is the one exception**: syntax colour says what kind of token a run is, not what state anything is in, and it comes from a highlighting theme rather than the palette. It is laid over the side's tone and never replaces it: the sign, the line number, punctuation, and plain words keep green or red, so a line reads as added or removed however much of it is highlighted. [An edit shows what changed](#an-edit-shows-what-changed) has the rest.
-- **Weight carries structure**: an action's marker, verb, and tool name are bold, and so is `error`, so a scan down the left of the transcript lands on each action rather than on its arguments.
-- **Spinners only on a TTY** with color enabled. Under `useIsScreenReaderEnabled`, replace motion with discrete state transitions — a screen reader announcing a spinner frame-by-frame is unusable. The UI package reads no clock. `App` times and animates the rule only when the terminal owner passes a `clock` prop, and animates it only while `motion` is not false. The runner always passes the clock and turns motion off under `NO_COLOR`, so the rule's wave rests centered, its light stays off, a running action's `●` does not pulse, and only the elapsed seconds advance, once a second. Without a clock, or under a screen reader, the rule also leaves out the elapsed time and changes only when the phase does.
+- **Color is semantic only, from one palette**: `palette.ts` holds five saturated semantic tones and the two neutral tones of a result's preview zone, and every component names a role rather than a hue, so a marker, its verb, and the header agree. Orange is `running`: the header's word and spinner, a running action's marker, and manual compaction. Green is `done`: a finished action, a completed turn's summary, and an added line. Red is `failed`: a failure, an error, a removed line, and the word of a turn being stopped. Cyan is `asking`: the composer prompt, a selection, staged attachments, and an action in progress on the task list. Yellow is `waiting`: a question, an approval, a picker, queued input, a notice, and a turn that stopped rather than failed. Dim marks reasoning and secondary interface metadata such as line counts and a call's description, and tool arguments use normal brightness. A result's preview has no background: its plain text is in the `output` grey, which is quieter than an answer and brighter than dim, so output is supporting material without receding to the level of the working-out. The surface draws no background anywhere; failures, diffs, and syntax colour keep their own tones in the preview. Never decorative, and never the only carrier of a state: every tone is paired with a word, a glyph, or motion, so a 16-color or `NO_COLOR` terminal loses no meaning. Honor `NO_COLOR` and non-TTY.
+- **Code in a diff is the one exception**: syntax colour says what kind of token a run is, not what state anything is in, and it comes from a highlighting theme rather than the palette. It is laid over the side's tone and never replaces it: the sign, the line number, punctuation, and plain words keep green or red, so a line still shows as added or removed however much of it is highlighted. [An edit shows what changed](#an-edit-shows-what-changed) has the rest.
+- **Weight carries structure**: an action's marker and tool name are bold, and so is `error`, so a scan down the left of the transcript lands on each action rather than on its arguments.
+- **Spinners only on a TTY** with color enabled. Under `useIsScreenReaderEnabled`, replace motion with discrete state transitions — a screen reader announcing a spinner frame-by-frame is unusable. The UI package reads no clock. `App` times and animates the header only when the terminal owner passes a `clock` prop, and animates it only while `motion` is not false. The runner always passes the clock and turns motion off under `NO_COLOR`, so the header's wave rests centered, a running action's `●` does not blink, and only the elapsed seconds advance, once a second. Without a clock, or under a screen reader, the header also leaves out the elapsed time and changes only when the phase does.
 - **Resize** via `useWindowSize`, which re-renders on `SIGWINCH`. Recompute budgets from it; never cache `columns`/`rows`.
 - **Paste** via Ink's `usePaste`, which owns bracketed-paste mode and keeps pasted text off the `useInput` channel. Our `terminal.ts` enables paste mode for the pre-mount window; these must not fight over the same escape sequence — one owner, chosen explicitly.
 
@@ -265,7 +269,7 @@ A wrapped row never opens with a space. A word that ends exactly at the width le
 
 ### A call and its result are one zone
 
-A call and its result draw as one block, opened by a `●` at the rail. While the call runs, the marker pulses in the accent and the verb is present tense: `run`, `read`, `find`. When the result arrives, the same row changes in place: the marker turns green, or red on failure, and the verb becomes past tense: `ran`, `read`, `edited`, `found`, `got`. A task-list update is `plan` in both tenses, since rewriting the plan is not an edit to the workspace. A title's first word is dropped when it only names the verb again, as `Grep` does under `found` and `Read` under `read`; a command keeps every word, since under `ran` the command's first word is part of the command. No second row announces the outcome, and no call id is drawn; the id identified a result's row with its call, and there is no longer a separate row to identify. Output indents to the output column beneath the head, so no whitespace divides a call from what it produced.
+A call and its result draw as one block, opened by a `●` at the rail and headed as the call itself: the tool's name, its words capitalized and run together (`toolLabel`: `bash` is `Bash`, `read_file` is `ReadFile`), and its argument in parentheses, `Bash(cargo check --workspace 2>&1 | head -20)`. The argument is the tool presenter's title; a tool that declares no card is headed by the argument field it acts on (`command`, `file_path`, `path`, `pattern`, `url`, `query`), or its fields as `key: value`, never by raw JSON. While the call runs, the marker blinks: shown in orange, then hidden, a clean on and off with nothing at half brightness, and a space in its cell so the head never moves. When the result arrives the marker holds, green, or red on failure. A title's first word is dropped when it only names the tool's action again, as `Grep` does in `Grep(Grep TODO)`; a command keeps every word. No second row announces the outcome, and no call id is drawn; the id identified a result's row with its call, and there is no longer a separate row to identify. Output indents to the output column beneath the head, and its first line carries a dim `⎿` in the verb column that hangs it from the head, so no whitespace divides a call from what it produced. A changed line's number keeps the verb column instead, since the number is what reads against the code.
 
 `Actions` in `packages/ui/src/actions.ts` does the merge. It holds each call until its step ends (`step/end`, or the model's next message or the turn end in a log without one) and releases the step's calls together, in call order, so a fast second call cannot print above a slow first one. The live region draws the held calls in the shape they will print in; nothing is committed and later drawn again. The shape holds from the first streamed call: the calls the model is still streaming, the calls its committed message announced but the loop has not dispatched yet, and the calls running or finished are one block, so two streamed calls are already `run 2` with both branches, and the count never drops while the loop reaches each call in turn. A block that changed shape on the way would give up rows the frame holds blank until history next prints ([§8.1](#the-frame-never-rises)), and since reasoning prints nothing while it streams, those rows would stand as a gap between the step's block and the thinking window under it.
 
@@ -273,49 +277,51 @@ A step that made two or more calls prints them as one block, because they were o
 
 ```
 ● ran 2 · edited 1 · 1 failed
-├ ran    bun test tests/parser.test.ts  exit 1
-│        bun test v1.3.0
+├ Bash(bun test tests/parser.test.ts)  exit 1
+│ ⎿      bun test v1.3.0
 │        +4 more lines
 │         1 fail
-├ edited src/parser.ts  +1 −1
+├ Edit(src/parser.ts)  +1 −1
 │     14 - const parts = line.split(",")
 │     14 + const parts = splitQuoted(line, ",")
-└ ran    cat missing.txt
-         cat: missing.txt: No such file or directory
+└ Bash(cat missing.txt)
+  ⎿      cat: missing.txt: No such file or directory
 ```
 
-The head counts the calls by verb in the order they first appear, present tense while any runs and past tense after, then how many failed, in red. Its `●` is the step's state: pulsing while a call runs, then green, or red when one failed. Each call hangs from it on a branch in the rail, `├` and `└` for the last. The branch takes the place of the call's `●` and its colour: pulsing, green, or red. A dim `│` carries a call's lines down to the next call. Nothing moves out of its column, since the tree is drawn in the rail. No blank row separates the calls; the stem is what joins them. A step with one call draws it on its own, as before.
+The head counts the calls by verb in the order they first appear, present tense while any runs and past tense after, then how many failed, in red. Its `●` is the step's state: blinking while a call runs, then green, or red when one failed. Each call hangs from it on a branch in the rail, `├` and `└` for the last. The branch takes the place of the call's `●` and its colour, green or red, but holds still while its call runs: a blinking branch would open a gap in the tree, and the head already blinks for the step. A dim `│` carries a call's lines down to the next call. Nothing moves out of its column, since the tree is drawn in the rail. No blank row separates the calls; the stem is what joins them. A step with one call draws it on its own.
 
-Tool arguments and output use normal brightness. The marker and verb are bold; a call's description and a `+N more lines` count are dim. Failures retain red emphasis throughout, and diffs retain red/green emphasis, under their syntax colour. Among reasoning, actions, and answers, only reasoning is dimmed, and its text is italic as well, in the transcript and the thinking window alike. Dim alone put the working-out in the same weight as a call's description, one column away from it.
+A running step taller than the live region fits itself to the window rather than being cut from the top (`fittedGroup` in `packages/ui/src/present.ts`). Cut like prose, the block lost its head first, which is the line that says what the step is doing and the marker that says it is still running. Instead the block gives up detail oldest first: each finished call folds to its head line, the oldest first, so the output just read stays in view longest; once every finished call is one line, the oldest calls fold into a single dim `+N earlier calls` branch until the rest fit. The head, the newest calls, and every running call stay. On a window too short even for that, the block keeps what says the most per row, in order: the head, the newest call's head line, and the count of the rest, giving up its opening blank first. The window is measured in wrapped rows at the current width, so the same rules hold for a narrow split pane and a wide monitor, and they are re-applied on every resize. Nothing is lost: the step prints to history whole once it ends.
 
-A call's own lines sit under its head: the rest of a multi-line command, then the card's description and the input a card chose to show. They are bounded as output is, first and last lines around a count, and at least one line of each always shows, so a script the model wrote prints a few rows and a description survives `resultLines: 0`. An input the title already names, such as a search's pattern, is left out. A structured input is drawn a field or an item to a line, and an item of plain values reads as its values, as a task list's do. A card's fenced block is drawn as its code, since two lines of backticks around a failed command's error are the one piece of markdown this surface would otherwise print.
+Tool arguments use normal brightness, and a result's preview draws its plain text in the `output` grey, with no background ([§6](#6-color-motion-accessibility)). The marker and tool name are bold; a call's description and a `+N more lines` count are dim. Failures retain red emphasis throughout, and diffs retain red/green emphasis, under their syntax colour. Among reasoning, actions, and answers, only reasoning is dimmed, and its text is italic as well, in the transcript and the thinking window alike. Dim alone put the working-out in the same weight as a call's description, one column away from it.
+
+A call's own lines sit under its head: the rest of a multi-line command, then the card's description and the input a card chose to show. They are bounded as output is, first and last lines around a count, and at least one line of each always shows, so a script the model wrote prints a few rows and a description survives `resultLines: 0`. An input the title already names, such as a search's pattern, is left out. A structured input is drawn a field or an item to a line, and an item of plain values is shown as its values, as a task list's are. A card's fenced block is drawn as its code, since two lines of backticks around a failed command's error are the one piece of markdown this surface would otherwise print.
 
 ### Indentation separates columns; a blank row separates sections
 
 Within a turn the levels are: rail glyph at column 0, prose and reasoning at 2, tool output at 9. Indentation carries every separation it can, and it carries most of them — an answer at the rail is never confused with output under a verb.
 
-Two things it cannot carry. Two actions in a row share the verb column, so the second, drawn directly under the previous call's output, reads as more of it. And reasoning shares the rail with the answer that follows it: the answer stops being dim and gains its `<`, which under `NO_COLOR` is one marker and nothing else — the working-out and the conclusion would read as one paragraph.
+Two things it cannot carry. Two actions in a row share the verb column, so the second, drawn directly under the previous call's output, looks like more of that output. And reasoning shares the rail with the answer that follows it: the answer stops being dim and italic, which under `NO_COLOR` is the only difference left — the working-out and the conclusion would look like one paragraph. The answer carries no marker of its own; its full-brightness text at the rail, and the blank row that opens it, are what say the reply has begun. A final answer ends with one dim row of its own, `856 tokens · 42.3 tok/s`, directly under it and continuing its section: the provider's output tokens over the logged time from the first streamed token to the finish, so the rate is the generation speed and not the wait for the model to start. A step that ends in tool calls, an interrupted answer, and a log with no usage or no measurable time draw no rate rather than a guessed one.
 
 So **a blank row opens each section**: a reasoning block, a tool call or a step's group of them, a slash command, and the answer. Nothing else gets one. A result continues the call above it, and a command's outcome continues the command, so neither ever floats away from what produced it. A section with no content produces no blank either, since a blank belongs to the lines under it; an empty block is the everyday case while a turn is still streaming, and on its own it would be a reserved row spent on nothing.
 
-That is one blank per section rather than one per row. Separating every row would stripe the transcript, and striping reads as noise once a session is long — exactly when the transcript matters most. In scrollback the cost falls on an unbounded buffer; in the live region it is one row of a window capped at `LIVE_BUDGET` whatever it contains.
+That is one blank per section rather than one per row. Separating every row would stripe the transcript, and striping is noise once a session is long — exactly when the transcript matters most. In scrollback the cost falls on an unbounded buffer; in the live region it is one row of a window capped at `LIVE_BUDGET` whatever it contains.
 
 ```
 ● Use the bash tool to run exactly: echo TERMINAL_OK
 
   The user wants me to run a command and then reply.
 
-● ran    {"command": "echo TERMINAL_OK"}
-         TERMINAL_OK
+● Bash(echo TERMINAL_OK)
+  ⎿      TERMINAL_OK
 
   The command ran. I should reply with just "DONE".
 
-< DONE
+  DONE
 ```
 
 ## 6a. Separating the chat area, the status line, and the composer
 
-The three regions must read as three kinds of thing at a glance. A terminal offers few ways to say that, and they do not cost the same. `prototype/separation.mjs` renders the candidates with their row cost.
+The three regions must be three kinds of thing at a glance. A terminal offers few ways to say that, and they do not cost the same. `prototype/separation.mjs` renders the candidates with their row cost.
 
 ### Spacing is cheap above and expensive below
 
@@ -327,33 +333,36 @@ So: **spend rows on structure inside the chat area, spend none on chrome.**
 
 | Candidate | Chrome cost | Verdict |
 | --- | --- | --- |
-| status as one more sentence | 2 rows | reads as another chat row; its stray leading space looks like a mistake |
-| full-width rule | 3 rows | draws the eye to a line carrying no information |
+| status as one more sentence | 2 rows | looks like another chat row; its stray leading space looks like a mistake |
+| full-width rule | 3 rows | draws attention to a line carrying no information |
 | justified status bar | 2 rows | superseded: on a wide terminal the justification opens a gap the width of the screen between the model and the next field, and the row stops reading as one bar |
 | boxed composer alone | 4 rows | the box says where typing lands, but its top edge butts against the last line of the answer |
-| blank, status line, boxed composer | 5 rows | superseded: the status line stood between the answer and the input, so the eye crossed metadata on every return to the prompt |
+| blank, status line, boxed composer | 5 rows | superseded: the status line stood between the answer and the input, so returning to the prompt crossed metadata every time |
 | blank, boxed composer, status line | 5 rows | superseded: the box spent two rows on structure alone, and the turn header above it spent a third saying what the session was doing |
-| blank, solid padded surface, status line | 5 rows | superseded: a filled block reads as another tool's input bar, and says nothing about the session |
-| **blank, rule carrying the turn, composer, padding, status line** | **5 rows** | **adopted** |
+| blank, solid padded surface, status line | 5 rows | superseded: a filled block looks like another tool's input bar, and says nothing about the session |
+| blank, rule carrying the turn, composer, padding, status line | 5 rows | superseded: the padding row carried no information, and the goal had nowhere to show |
+| blank, rule carrying the turn, composer, rule carrying the goal, status line | 5 rows | superseded: two labelled rules look like two headers, one of them under the input |
+| **blank, header carrying the turn and the goal, rule, composer, rule, status line** | **6 rows** | **adopted** |
 
-A bare full-width rule was rejected because it draws the eye to a line carrying no information. The adopted rule carries the one piece of information the eye looks for on every return to the prompt — whether the agent is still working, and how the last turn went — so the row that separates the input is the turn header too ([§2.2a](#22a-the-rule--one-steady-line-for-the-whole-turn)):
+A bare full-width rule on its own draws attention to a line carrying no information. The adopted chrome gives the information its own row, the header, and lets two bare rules do the one thing a rule is good at: frame the draft, so the draft is one band between them ([§2.2a](#22a-the-header--one-steady-row-for-the-whole-turn)):
 
 ```
   DONE
 
-─ ✓ Completed  42s · ran 2 ─────────────────────────────────────────────
+  ✓ Completed  42s · ran 2                  ● Goal active  round 3/256 · Ship it
+──────────────────────────────────────────────────────────────────────────────
 > ▌Ask anything, / for commands
-
+──────────────────────────────────────────────────────────────────────────────
   Model: deepseek/chat  Context: ~15k/128k (12%)  in 42k  out 3.1k  cache hit 81%  ~/bake
 ```
 
-The rule is the separator, so the status line does not also have to be one. It says where typing lands without a box or a word of copy, and under `NO_COLOR` it is still a line, its light still a heavier run moving along it. The label, the draft, and the status line start at one column, so the three rows read as one block without an enclosing shape.
+The rules are the separator, so the status line does not also have to be one. They say where typing lands without a box or a word of copy, and under `NO_COLOR` they are still lines. The header's label, the draft, and the status line start at one column, so the rows form one block without an enclosing shape.
 
-The input is the row the eye returns to after reading an answer, so nothing but the blank and the rule stand between them. The status line is read far less often; one blank padding row keeps it clear of the draft, so it reads as a footer rather than a second line of input, and nothing below it can be mistaken for output.
+The input is the row the user returns to after reading an answer, and the header directly over its rule is the row checked on the way: whether the agent is still working, how the last turn went, and the goal it is working toward, all on one row. The base rule under the draft keeps the status line clear of it, so the status line sits directly under it as a footer, with no blank row between them, and nothing below it can be mistaken for output.
 
-The blank row above buys the one thing the rule cannot do: without it the rule sits directly under the last line of the answer and reads as part of it. Anything that belongs to the input rather than to the conversation — completion, a notice, queued input, quit feedback — is drawn between the blank and the rule, so the blank opens the whole stack instead of splitting it.
+The blank row above does the one thing the header cannot: without it the header sits directly under the last line of the answer and looks like part of that answer. Anything that belongs to the input rather than to the conversation — completion, a notice, queued input, quit feedback — is drawn between the blank and the header, so the blank opens the whole stack instead of splitting it. Before any turn has ended and without a goal, the header is blank too, and the two blank rows are the chrome's height holding still.
 
-Five rows is the largest chrome cost this document accepts, and `CHROME_ROWS` in `packages/ui/src/layout.ts` charges all five against every other region's budget. The rows the blank, the rule, and the padding add come off the live region on a window shorter than 16 rows and off nothing at all above that, because the live region is capped at `LIVE_BUDGET` first.
+Six rows is the largest chrome cost this document accepts, and `CHROME_ROWS` in `packages/ui/src/layout.ts` charges all six against every other region's budget. The rows the blank, the header, and the two rules add come off the live region on a window shorter than 17 rows and off nothing at all above that, because the live region is capped at `LIVE_BUDGET` first.
 
 ### The composer is the same family, one weight heavier
 
@@ -383,7 +392,7 @@ The composer's right edge can hold `↵ send`, `esc interrupt` while a turn runs
 
 ### Turn boundaries, not message boundaries
 
-One blank line opens each user turn inside the transcript. Separating every message would stripe the screen; separating turns gives the eye a place to land when scrolling back through a long session, which is the actual task.
+One blank line opens each user turn inside the transcript. Separating every message would stripe the screen. Separating turns marks each turn when scrolling back through a long session, which is the actual task.
 
 ## 7a. Overlays: completion and pickers
 
@@ -435,7 +444,7 @@ The reducer is pure and total, so all four are testable without a model.
 
 ### Reasoning is watched, not re-read
 
-Reasoning streams in the thinking window over the rule while it happens. When the step commits, the transcript keeps a preview, the way it keeps a result's: the first `resultLines` wrapped rows, a dim italic paragraph at the rail, then a dim `+N more lines`.
+Reasoning streams in the thinking window over the header while it happens. When the step commits, the transcript keeps a preview, the way it keeps a result's: the first `resultLines` wrapped rows, a dim italic paragraph at the rail, then a dim `+N more lines`.
 
 ```
   The user wants the loader to stop reading `DSH_HOME` twice. Let me think
@@ -457,14 +466,14 @@ The next design held the head of the output in the live region until the model a
 So the transcript commits the outcome and a preview together, once:
 
 ```
-● ran    bun test  exit 1
-         bun test v1.3.0
+● Bash(bun test)  exit 1
+  ⎿      bun test v1.3.0
          tests/parser.test.ts:
          +38 more lines
           11 pass
           1 fail
-● read   packages/ui/src/app.tsx  412 lines
-● found  splitFields in src  3 matches
+● Read(packages/ui/src/app.tsx)  412 lines
+● Grep(splitFields in src)  3 matches
 ```
 
 Command output, source reads, search and web results, edit diffs, and failures are previewed. Output shows its first lines and its last, `resultLines` in all, with a dim `+N more lines` between them, because what a command ends with, a test summary or the error it stopped on, is as often the news as what it opened with. Blank lines at either end of the output, or beside the count, are left out. A diff shows its first changed lines, counting only those, as a patch reads from the top. A count that would stand for one line is replaced by that line. At `resultLines: 0`, these results collapse to their headline and size. Source reads and search matches carry syntax colour without including line-number prefixes in the grammar; gaps between matches reset grammar state. Valid JSON and JSONL output use the JSON grammar, while plain logs colour diagnostic labels, file paths, and URLs. Failed output stays red. Colour does not change the displayed text or row count.
@@ -511,18 +520,18 @@ So the live region projects tool-call blocks alongside text and reasoning, in st
 
 ### Tool arguments: never render partial JSON
 
-`tool-call-delta` carries `argumentsDelta`, so arguments arrive character by character. Rendering them live shows the user `{"comm` and then `{"command": "rg -n \"comm`, which reads as a malfunction. A streaming call keeps its verb and its name and puts an ellipsis where the argument goes — and keeps the ellipsis after `block-end` too, because the complete arguments are raw JSON and the committed row presents them properly a moment later:
+`tool-call-delta` carries `argumentsDelta`, so arguments arrive character by character. Rendering them live shows the user `{"comm` and then `{"command": "rg -n \"comm`, which looks like a malfunction. A streaming call keeps its name and puts an ellipsis where the argument goes — and keeps the ellipsis after `block-end` too, because the complete arguments are raw JSON and the committed row presents them properly a moment later:
 
 ```
-● run    bash                    while the call streams
+● Bash(...)                      while the call streams
 
-● ran    echo TERMINAL_OK        committed, through the tool's presenter
-         TERMINAL_OK
+● Bash(echo TERMINAL_OK)         committed, through the tool's presenter
+  ⎿      TERMINAL_OK
 ```
 
 ### Each tool presents as its own summary
 
-A call reads as the thing it does: `bash` as its command, a search as its pattern, a file tool as its path. The fallback is an argument count, never a JSON dump. Presenters stay pure and live with the tool, matching the repository rule that every tool's UI presentation is designed up front.
+A call is shown as the thing it does: `bash` as its command, a search as its pattern, a file tool as its path. The fallback is an argument count, never a JSON dump. Presenters stay pure and live with the tool, matching the repository rule that every tool's UI presentation is designed up front.
 
 ## 8. Robust rendering: no flicker, no jumping
 
@@ -534,7 +543,7 @@ The composer rests on the terminal's bottom rows from the first frame. `frameOut
 
 An input that followed the newest line down the screen, as Claude Code places its prompt, moved on every printed line until history filled the screen, and moved again whenever the frame shrank. A tall terminal spent most of a session in that phase.
 
-> **Layout invariant L2.** The composer rests on the terminal's bottom rows, with the status line and Ink's cursor row beneath it, at every size and in every state. Above it are the rule, the thinking window, and input-owned panels (completion, notices, queued input, quit feedback), a blank row, and the newest transcript or live line. The blank is one row unless the frame is holding rows something above the input gave up; those rows are blank too, until printed history takes them.
+> **Layout invariant L2.** The composer rests on the terminal's bottom rows, with the status line and Ink's cursor row beneath it, at every size and in every state. Above it are the rule, the header, the thinking window, and input-owned panels (completion, notices, queued input, quit feedback), a blank row, and the newest transcript or live line. The blank is one row unless the frame is holding rows something above the input gave up; those rows are blank too, until printed history takes them.
 
 #### The frame never rises
 
@@ -556,7 +565,7 @@ Printing is display, not record. The session log commits the message as before, 
 
 #### What remains in the window
 
-Only the newest section is cut; an older one is shown whole or not at all. A cut section keeps its opening blank, drawn outside the clip, and gets back the verb or reply marker the cut removed. Answer prose fills the window exactly, with its oldest line clipped from the top the way a terminal scrolls. Stopping at whole lines would leave the window a row or two short whenever the next line wraps. Tool output keeps whole lines, so its verb stays on screen. The window claims its rows from the shared budget only while it has rows to draw: a turn that has not produced output yet leaves those rows to the panels.
+Only the newest section is cut; an older one is shown whole or not at all. A cut section keeps its opening blank, drawn outside the clip, and gets back the connector or reply marker the cut removed. Answer prose fills the window exactly, with its oldest line clipped from the top the way a terminal scrolls. Stopping at whole lines would leave the window a row or two short whenever the next line wraps. Tool output keeps whole lines. The window claims its rows from the shared budget only while it has rows to draw: a turn that has not produced output yet leaves those rows to the panels.
 
 Growth scrolls history up by the rows it adds, and nothing the frame gives up moves the input. Existing history is neither traversed nor reprinted during typing or streaming, and the frame stays under `rows - 1` (L1) because every region claims from one budget.
 
@@ -580,11 +589,11 @@ export function shouldSynchronize(stream, interactive) {
 }
 ```
 
-It also throttles with `leading: true, trailing: true`, so many state updates in one tick coalesce into one write. Both are automatic and neither needs configuration — but mode 2026 is terminal-dependent (kitty, WezTerm, iTerm2, Ghostty, Windows Terminal support it; Apple Terminal does not). On a terminal without it, the defense is to write less. The runner and the development harness render with Ink's `incrementalRendering`, so a frame rewrites only the lines that changed: a spinner tick or a step of the light rewrites the rule's row, and a streamed token rewrites its own line, not every row of the controls.
+It also throttles with `leading: true, trailing: true`, so many state updates in one tick coalesce into one write. Both are automatic and neither needs configuration — but mode 2026 is terminal-dependent (kitty, WezTerm, iTerm2, Ghostty, Windows Terminal support it; Apple Terminal does not). On a terminal without it, the defense is to write less. The runner and the development harness render with Ink's `incrementalRendering`, so a frame rewrites only the lines that changed: a spinner tick rewrites the header's row, and a streamed token rewrites its own line, not every row of the controls.
 
 Incremental rendering does not cover a frame that prints to `Static`. Ink erases the whole dynamic region, writes the new rows, and draws the region again, in separate writes. A streaming answer prints a row each time a line finishes ([§8.1](#a-streaming-answer-prints-as-it-completes)), so on a terminal without mode 2026 the rule, the composer, and the status line could be seen erased once per line: the input's frame blinked out and back as the answer streamed. `frameOutput` in `packages/app/src/output.ts` stands between Ink and the terminal. It holds every write Ink makes in one render and writes them as one. Within that write, the erase becomes a move to the region's top, each row is cleared as it is drawn over, and what is left of the old frame below the new one is cleared at the end. The screen it leaves is the one the erase would have left, and at no point is more than the row being drawn blank. Writes it does not recognize, including Ink's clear-and-replay on overflow, pass through unchanged, and stderr shares its queue so the two streams keep their order.
 
-Ink's incremental renderer rewrites a changed row followed by a newline, but steps over an unchanged row with Cursor Next Line (`CSI E`), which stops at the terminal's bottom row instead of scrolling. The frame rests on the bottom row, so when it grows by a row and an unchanged row falls past the old bottom — a blank, such as the padding row over the status line — that row is never added: the frame is drawn a row short, Ink's line count no longer matches the screen, and its next erase takes a row of history with it. `scrolling` in `frameOutput` writes each Cursor Next Line as a carriage return and newline, which is the same move everywhere above the bottom row and scrolls at it.
+Ink's incremental renderer rewrites a changed row followed by a newline, but steps over an unchanged row with Cursor Next Line (`CSI E`), which stops at the terminal's bottom row instead of scrolling. The frame rests on the bottom row, so when it grows by a row and an unchanged row falls past the old bottom — a blank row, such as the gap that opens the chrome — that row is never added: the frame is drawn a row short, Ink's line count no longer matches the screen, and its next erase takes a row of history with it. `scrolling` in `frameOutput` writes each Cursor Next Line as a carriage return and newline, which is the same move everywhere above the bottom row and scrolls at it.
 
 ### 8.3 Debris — someone else writes to the terminal
 
@@ -617,23 +626,23 @@ Layout claims are mechanically checkable and should be gated:
 | status never wraps | render at 40, 80, 200 columns, assert one line |
 | the status line cuts no bounded field | `packages/ui/tests/line.spec.tsx` narrows a full row and asserts the cache-hit field goes whole while the path keeps its tail |
 | billed tokens follow the provider | `packages/app/tests/context.spec.ts` reports no totals before a request, then input and output without a cache field, then a cache hit once the provider reports cache reads; `status.spec.tsx` draws them in English and Chinese; the PTY `fresh` scenario asserts the recorded turn's `in 5.9k  out 115  cache hit 48%` |
-| motion shares one beat and draws only what changes | `packages/ui/tests/live.spec.tsx` runs the rule and two running actions on one timer, draws at most once a beat and fewer than 70% of the frames their separate timers drew, draws a rule without motion once a second, and keeps no timer for a rule with nothing running; `activity.test.ts` pins the band's sweep, stride, and rest; `styles.spec.tsx` asserts the ramp's tones across the light and the cache-hit tones |
+| motion shares one beat and draws only what changes | `packages/ui/tests/live.spec.tsx` runs the header and two running actions on one timer, draws at most once a beat and fewer than 70% of the frames their separate timers drew, draws a header without motion once a second, and keeps no timer for a header with nothing running; `live.spec.tsx` also blinks a running action's marker between the orange `●` and a space; `styles.spec.tsx` asserts the rule under the running header stays one dim run and the cache-hit tones |
 | L2: the input rests on the bottom row | `packages/ui/tests/placement.spec.tsx` checks actual terminal rows across streaming, commits, idle transitions, menus, feedback, a full screen, and resizing; `live.spec.tsx` checks the frame grows a row per streamed row and no further than the live budget; `packages/app/tests/output.spec.tsx` runs a turn with its panels through `frameOutput` and asserts the input is on the bottom row from the first frame and after each resize replay; `output.test.ts` checks `anchor` byte for byte; the PTY `rendering` scenario asserts the built profile opens on and returns to the bottom rows |
 | the frame never rises | `packages/ui/tests/live.spec.tsx` clears live output without printing and asserts the frame keeps its height, blank above the controls, until committed rows take it; `placement.spec.tsx` closes menus, notices, queued input, and quit feedback without the input row moving, then prints history into the held rows; `output.spec.tsx` clears a notice and shrinks a task list mid-turn |
 | a running turn shows what it is doing | `packages/app/tests/live.spec.ts` streams reasoning, a call, and an answer through `LiveBlocks` and asserts all three appear, in order, with no arguments rendered |
-| a windowed section stays named | `packages/ui/tests/present.test.ts` cuts a long block below its verb line and asserts `tailLines` restores the verb onto what is left, shows an older section whole or not at all, and counts wrapped rows; `live.spec.tsx` asserts a wrapped answer keeps its blank and holds its height once full |
+| a windowed section stays named | `packages/ui/tests/present.test.ts` cuts a long block below its head and asserts `tailLines` restores the connector onto what is left, shows an older section whole or not at all, and counts wrapped rows; `live.spec.tsx` asserts a wrapped answer keeps its blank and holds its height once full |
 | a printed line never erases the controls | `packages/app/tests/output.test.ts` checks the rewrite byte for byte and passes through writes it does not recognize; `output.spec.tsx` streams an answer on a full screen, replays every render a row at a time in a terminal emulator, and asserts that written directly at least three rows go blank part-way, that through `frameOutput` at most one does, and that both end with identical scrollback |
 | a streaming answer prints once | `packages/app/tests/printed.spec.ts` prints settled blocks, keeps paragraph breaks across delta boundaries, compares streamed Markdown with replay, and reconciles the commit; `session.spec.ts` streams through the controller, resumes to one message, and marks an abandoned attempt's lines discarded; `placement.spec.tsx` holds the input row through twelve printed paragraphs on a full screen |
 | the composer cannot outgrow its budget | `packages/ui/tests/line.spec.tsx` renders a 4,000-character paste at several widths and asserts the row count against `COMPOSER_BUDGET`, with the caret on the last row |
-| a draft reflows only with its width | `packages/ui/tests/editor.test.ts` wraps drafts at every width from 4 to 29 and asserts no row exceeds it or opens with a hanging space, that no caret position moves a word, and that tabs expand; `line.spec.tsx` moves the caret over a wrapped draft beside a hint and asserts identical rows; `placement.spec.tsx` pastes a wrapped draft with a long path and a tab, resizes across 40 columns, and asserts every row stays between the rule and the padding row at the prompt column and no tab reaches the terminal |
-| the chrome fits every supported width | `packages/ui/tests/line.spec.tsx` renders `Chrome` from 1 to 200 columns bare, running, and ended, and asserts no row exceeds the width, the rule is exactly the width, its label is cut before its line, the height never changes with width alone, the rows yield gap, padding, status, then rule on short terminals, and the hint drops at its threshold; `ruleRoom` is checked cell for cell; `styles.spec.tsx` asserts in truecolour that the rule is dim and the draft keeps the terminal's foreground; `output.test.ts` checks `scrolling` byte for byte |
+| a draft reflows only with its width | `packages/ui/tests/editor.test.ts` wraps drafts at every width from 4 to 29 and asserts no row exceeds it or opens with a hanging space, that no caret position moves a word, and that tabs expand; `line.spec.tsx` moves the caret over a wrapped draft beside a hint and asserts identical rows; `placement.spec.tsx` pastes a wrapped draft with a long path and a tab, resizes across 40 columns, and asserts every row stays between the rule and the base rule at the prompt column and no tab reaches the terminal |
+| the chrome fits every supported width | `packages/ui/tests/line.spec.tsx` renders `Chrome` from 1 to 200 columns bare, running, and ended, and asserts no row exceeds the width, both rules are bare and exactly the width, the header puts the turn at the draft column and the goal at the right edge, cutting the goal before the turn, the height never changes with width alone, the rows yield gap, base rule, rule, status, then header on short terminals, and the hint drops at its threshold; `headerRoom` is checked cell for cell; `styles.spec.tsx` asserts in truecolour that the rules are dim and the draft keeps the terminal's foreground; `output.test.ts` checks `scrolling` byte for byte |
 | the rule and the frame match the terminal | `packages/app/tests/frame.test.ts` resolves every environment that cannot draw box characters; `line.spec.tsx` draws the rule in ASCII; `welcome.spec.tsx` draws both card styles |
-| the rule's label holds for the turn | `packages/ui/tests/live.spec.tsx` keeps one word through thinking, writing, a commit, and a running tool; grows a thinking window to its rows over the rule and then holds the frame height while reasoning streams; checks with a fake clock that the spinner and elapsed time advance and the interval is disposed when the turn ends; and checks that with motion off only the seconds change. `activity.test.ts` covers the pure pieces |
+| the header's label holds for the turn | `packages/ui/tests/live.spec.tsx` keeps one word through thinking, writing, a commit, and a running tool; grows a thinking window to its rows over the header and then holds the frame height while reasoning streams; checks with a fake clock that the spinner and elapsed time advance and the interval is disposed when the turn ends; and checks that with motion off only the seconds change. `activity.test.ts` covers the pure pieces |
 | the thinking window moves without jumping | `packages/ui/tests/activity.test.ts` keeps the newest rows across paragraphs without blank rows, strips markdown markers, and streams a thought a character at a time asserting each window either grew in place or scrolled by one row; `placement.spec.tsx` bounds the header at `1 + THINKING_ROWS` rows |
 | reasoning is previewed in scrollback | `packages/ui/tests/present.test.ts` keeps the first `resultLines` wrapped rows and counts the rest, ends the preview on text rather than a blank row, draws a block whole when the count would hide one row, and reduces to a size at `0` |
 | a wrapped row never opens with a space | `packages/ui/tests/present.test.ts` asserts `softBreaks` breaks at the space that would open a row while keeping the text length, and leaves fitting or tab-expanded text unchanged |
-| the rule holds the finished turn | `packages/ui/tests/live.spec.tsx` ends a clocked turn and asserts the summary takes the rule's label at the same frame height, survives a notice, reports failures, clears when the next turn starts, and summarizes a replayed session's last turn untimed; `activity.test.ts` covers the counts and outcomes |
-| a call and its result are one block | `packages/ui/tests/fold.test.ts` merges results into their calls, releases out-of-order results in call order, and settles held calls; `styles.spec.tsx` and `actions.spec.tsx` assert the running, done, and failed markers, past-tense verbs, and no call ids |
+| the header holds the finished turn | `packages/ui/tests/live.spec.tsx` ends a clocked turn and asserts the summary takes the header's label at the same frame height, survives a notice, reports failures, clears when the next turn starts, and summarizes a replayed session's last turn untimed; `activity.test.ts` covers the counts and outcomes |
+| a call and its result are one block | `packages/ui/tests/fold.test.ts` merges results into their calls, releases out-of-order results in call order, and settles held calls; `styles.spec.tsx` and `actions.spec.tsx` assert the running, done, and failed markers, `Tool(argument)` heads with a `⎿` connector, and no call ids |
 | an edit shows what changed | `packages/ui/tests/cards.test.ts` draws only changed lines, numbers each side past the other's insertions, separates joined changes and hunks with `⋯`, heads files only when there are several, draws no numbers without `oldStart`, and marks the words of an edited line but not a replaced one; `present.test.ts` puts `+N −M` on the head at `resultLines: 0`, numbers lines in the gutter, counts only changed lines against the preview and never ends it on a gap, reverses changed words, highlights one side's run at a time, and keeps a failure red; `styles.spec.tsx` pins the size, the gutter, and the reversed words in truecolour; `packages/app/tests/syntax.spec.ts` highlights a preloaded language before the first frame, leaves another plain until its grammar loads, and draws nothing once closed; `packages/fs/tool-fs/tests/diff.spec.ts` records and validates `oldStart` and `newStart` |
 | every indicator takes its colour from the palette | `packages/ui/tests/styles.spec.tsx` forces truecolour and pins a running, a finished, and a failed marker to their `PALETTE` tones; `present.test.ts` asserts `styleOf` returns the palette's done, failed, and asking tones, so no component can reintroduce a named colour |
 | quit feedback sits above the input | `packages/ui/tests/live.spec.tsx` checks one row of feedback above the input alongside command notices |

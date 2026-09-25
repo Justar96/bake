@@ -4,7 +4,7 @@ import { renderToString, Text } from 'ink'
 import { describe, expect, it } from 'vitest'
 import { budgetFor, CHROME_ROWS, chromeFor, COLUMN, COMPOSER_BUDGET, HINT_MIN_COLUMNS, isRenderable, MARKER, type FrameStyle } from '../src/layout.ts'
 import { present, type ResultBound } from '../src/present.ts'
-import { Chrome, Completion, Composer, Line, ruleRoom, StatusBar, type RuleState } from '../src/line.tsx'
+import { Chrome, Completion, Composer, headerRoom, Line, StatusBar, type ActivityState, type StandingState } from '../src/line.tsx'
 import { dictionaries } from '../src/copy.ts'
 import { PALETTE, permissionTone } from '../src/palette.ts'
 import { SPINNER_REST } from '../src/activity.ts'
@@ -30,17 +30,16 @@ describe('Line', () => {
     const output = show(present(result, shown)
       .map((line, index) => <Line key={index} line={line} budget={at80} />))
 
-    // A blank row opens the turn, so the eye has somewhere to land when
-    // scrolling back; scrollback pays for it, not the dynamic region.
+    // A blank row opens the turn. Scrollback pays for it, not the dynamic region.
     expect(said).toBe(`\n  ${'-'.repeat(at80.measure)}\n${MARKER.turn} hello`)
     expect(output.split('\n')[1]!.indexOf('result')).toBe(COLUMN.output)
   })
 
-  it('places a call verb in its own column, with the argument beside it', () => {
+  it('heads a call with its tool and the argument in parentheses', () => {
     const rendered = show(present({ kind: 'tool-call', callId: 'c', tool: 'bash', input: 'rg -n foo' }, shown)
       .map((line, index) => <Line key={index} line={line} budget={at80} />))
     // The blank that opens the call's zone renders as an empty first row.
-    expect(rendered).toBe(`\n${MARKER.action} run    rg -n foo`)
+    expect(rendered).toBe(`\n${MARKER.action} Bash(rg -n foo)`)
   })
 
   it('wraps prose against the current terminal width without a fixed measure', () => {
@@ -69,7 +68,7 @@ describe('Line', () => {
     const rendered = show(present({ kind: 'tool-result', callId: 'c', ok: true, text }, shown)
       .map((line, index) => <Line key={index} line={line} budget={budget} />), 300)
 
-    // The outcome, then one line: 200 characters fit after the verb.
+    // The outcome, then one line. 200 characters fit after the verb.
     expect(rendered.split('\n')).toHaveLength(2)
   })
 
@@ -85,7 +84,8 @@ describe('Line', () => {
       .map((line, index) => <Line key={index} line={line} budget={budget} />), columns)
     expect(rendered.split('\n').every(line => line.length <= columns)).toBe(true)
     expect(rendered).toContain(`  ${'-'.repeat(budget.measure)}`)
-    expect(rendered).toContain('< The configuration')
+    expect(rendered).toContain('\n  The configuration')
+    expect(rendered).not.toContain('< ')
     expect(rendered).not.toContain('Completed')
     expect(Math.max(...rendered.split('\n').map(line => line.length))).toBeLessThanOrEqual(columns)
   })
@@ -105,7 +105,7 @@ describe('Line', () => {
   })
 
   it('keeps failed output on the output column, like the result it is', () => {
-    // Colour is asserted in present.test.ts: renderToString emits no ANSI
+    // Colour is asserted in present.test.ts. renderToString emits no ANSI
     // outside a TTY, so a colour assertion here would pass for the wrong reason.
     const failed = { kind: 'tool-result' as const, callId: 'c', ok: false, text: 'boom' }
     const rendered = show(present(failed, shown)
@@ -154,7 +154,7 @@ describe('StatusBar', () => {
       <StatusBar left={['Model: deepseek/chat', 'plan']} right={['ctx 12%', 'turn 3']} columns={60} />,
       { columns: 60 }))
 
-    // The regression this guards: the row justified to both edges, which opened
+    // The regression this guards. The row justified to both edges, which opened
     // a gap the width of the terminal between the model and the next field.
     expect(rendered.trimEnd()).toBe('Model: deepseek/chat  plan  ctx 12%  turn 3')
   })
@@ -200,7 +200,7 @@ describe('StatusBar', () => {
   })
 
   it('yields the right cluster before the left, whatever the path costs', () => {
-    // The regression this guards: an unbounded right field starving the two
+    // The regression this guards. An unbounded right field starving the two
     // fields the row exists to show. A deep temp path is the everyday case.
     const path = '/private/var/folders/jg/zcyzdbb13bnfr5q882y_h8_r0000gn/T/dsh-tui-pty-1B3VG9/workspace'
     const rendered = strip(renderToString(
@@ -212,7 +212,7 @@ describe('StatusBar', () => {
     // The meter is bounded, so it is never shortened to fit the path.
     expect(rendered).toContain('Context: ~3k/128k (2%)')
     // The path is ordered last, so it is the field that gives up room, and it
-    // keeps the tail that names the workspace rather than the mount point.
+    // keeps the tail that names the workspace. The mount point is what is cut.
     expect(rendered.endsWith('workspace')).toBe(true)
     expect(rendered).not.toContain('/private/var/folders')
   })
@@ -227,7 +227,7 @@ describe('StatusBar', () => {
   })
 
   it('keeps a wide-character line on one row', () => {
-    // Each CJK cell is two columns: counting code points puts this past the edge.
+    // Each CJK cell is two columns. Counting code points puts this past the edge.
     const rendered = strip(renderToString(
       <StatusBar left={['\u6a21\u578b: model', '/workspace']} right={['\u4e0a\u4e0b\u6587: ~500/128k (0%)']} columns={60} />,
       { columns: 60 }))
@@ -239,76 +239,89 @@ describe('StatusBar', () => {
 
 describe('Chrome', () => {
   const hints = { send: 'enter to send', interrupt: 'esc interrupts', select: 'up/down to select', answer: 'y or n' }
-  // No `drafting` here: Chrome reads it from the draft, so the two cannot disagree.
+  // No `drafting` here. Chrome reads it from the draft, so the two cannot disagree.
   const idle = { running: false, asking: false, listing: false }
-  const working: RuleState = { kind: 'running', word: 'Kneading', phase: 'writing', startedAt: 0, color: PALETTE.running }
-  const ended: RuleState = { kind: 'ended', summary: { outcome: 'done', label: 'Completed', details: '9s · ran 1' } }
+  const working: ActivityState = { kind: 'running', word: 'Kneading', phase: 'writing', startedAt: 0, color: PALETTE.running }
+  const ended: ActivityState = { kind: 'ended', summary: { outcome: 'done', label: 'Completed', details: '9s · ran 1' } }
+  const goal: StandingState = { glyph: '\u25cf', label: 'Goal active', details: 'round 2/8 \u00b7 Ship it', color: PALETTE.running }
   const draw = (columns: number, options: {
     readonly text?: string, readonly state?: typeof idle, readonly frame?: FrameStyle
-    readonly light?: RuleState, readonly rows?: number, readonly children?: React.ReactNode
+    readonly activity?: ActivityState, readonly standing?: StandingState, readonly rows?: number, readonly children?: React.ReactNode
   } = {}): string[] => strip(renderToString(
     <Chrome
       left={['Model: deepseek/chat']} right={['ctx 12%']} columns={columns}
       state={options.state ?? idle} before={options.text ?? ''} after="" placeholder="Ask anything" hints={hints}
-      frame={options.frame ?? 'round'} light={options.light}
+      frame={options.frame ?? 'round'} activity={options.activity} standing={options.standing}
       {...options.rows === undefined ? {} : { layout: chromeFor(columns, options.rows) }}
     >{options.children}</Chrome>, { columns })).split('\n')
   const at = (columns: number, text = '', state = idle): string => draw(columns, { text, state }).join('\n')
   const render = (state: typeof idle, text = ''): string => at(60, text, state)
+  const line = (columns: number) => '\u2500'.repeat(columns)
 
-  it('spends a blank, the rule, the draft, a padding row, and the status line, and nothing else', () => {
+  it('spends a blank, the header, the framed draft, and the status line, and nothing else', () => {
     const rows = render(idle).split('\n')
     // CHROME_ROWS is charged against every other region's budget on every
-    // frame, so the floor is measured here rather than assumed.
+    // frame, so the floor is measured here instead of assumed.
     expect(rows).toHaveLength(CHROME_ROWS)
-    // A blank opens the chrome: without it the rule sits directly under the
-    // last line of the answer and reads as part of it.
+    // A blank opens the chrome. Without it the header sits directly under the
+    // last line of the answer and looks like part of that answer.
     expect(rows[0]).toBe('')
-    expect(rows[1]).toBe('\u2500'.repeat(60))
-    expect(rows[2]).toBe(`${MARKER.prompt} ${CARET}Ask anything`)
-    // Clean padding keeps the metadata clear of the draft.
-    expect(rows[3]).toBe('')
-    // The status line starts at the draft's column, as the rule's label does.
-    expect(rows[4]).toBe('  Model: deepseek/chat  ctx 12%')
-    expect(rows[2]!.indexOf(CARET)).toBe(rows[4]!.indexOf('Model:'))
+    // With nothing to say the header keeps its row, blank.
+    expect(rows[1]!.trim()).toBe('')
+    // Two bare rules frame the draft, and the status line sits directly under
+    // the lower one, with no blank row between them.
+    expect(rows[2]).toBe(line(60))
+    expect(rows[3]).toBe(`${MARKER.prompt} ${CARET}Ask anything`)
+    expect(rows[4]).toBe(line(60))
+    expect(rows[5]).toBe('  Model: deepseek/chat  ctx 12%')
+    expect(rows[3]!.indexOf(CARET)).toBe(rows[5]!.indexOf('Model:'))
   })
 
-  it('puts the running work and the last turn in the rule, at the draft column, edge to edge', () => {
-    const running = draw(60, { light: working, state: { ...idle, running: true } })
-    expect(running[1]).toMatch(new RegExp(`^\u2500 ${SPINNER_REST} Kneading…  writing \u2500+$`))
-    expect(running[1]).toHaveLength(60)
-    expect(running[1]!.indexOf(SPINNER_REST)).toBe(running[2]!.indexOf(CARET))
-    const done = draw(60, { light: ended })
-    expect(done[1]).toMatch(/^─ ✓ Completed {2}9s · ran 1 ─+$/)
-    expect(done[1]).toHaveLength(60)
+  it('puts the running work and the last turn in the header, at the draft column', () => {
+    const running = draw(60, { activity: working, state: { ...idle, running: true } })
+    expect(running[1]).toBe(`  ${SPINNER_REST} Kneading…  writing`)
+    expect(running[1]!.indexOf(SPINNER_REST)).toBe(running[3]!.indexOf(CARET))
+    const done = draw(60, { activity: ended })
+    expect(done[1]).toBe('  ✓ Completed  9s · ran 1')
+    // The rules stay bare whatever the header says.
+    for (const rows of [running, done]) expect([rows[2], rows[4]]).toEqual([line(60), line(60)])
     // One row whatever it says, so the input never moves between them.
     expect(running).toHaveLength(CHROME_ROWS)
     expect(done).toHaveLength(CHROME_ROWS)
   })
 
-  it('cuts the label before the line, and drops it rather than leave no line', () => {
-    for (const columns of [1, 2, 5, 6, 12, 24, 40]) {
-      const [rule] = draw(columns, { light: working }).slice(1)
-      expect(stringWidth(rule!), `${columns}`).toBe(columns)
-      // A label always leaves a space and two cells of line after it.
-      if (columns >= 6) expect(rule, `${columns}`).toMatch(/^─ \S.* ─{2,}$/)
-      else expect(rule, `${columns}`).toBe('\u2500'.repeat(columns))
+  it('puts the goal at the header\'s right edge, beside the turn', () => {
+    const alone = draw(60, { standing: goal })[1]!
+    expect(alone).toMatch(/^ +● Goal active {2}round 2\/8 · Ship it$/)
+    expect(stringWidth(alone)).toBe(60)
+    const both = draw(80, { activity: working, standing: goal })[1]!
+    expect(both).toMatch(new RegExp(`^ {2}${SPINNER_REST} Kneading… {2}writing +● Goal active {2}round 2/8 · Ship it$`))
+    expect(stringWidth(both)).toBe(80)
+  })
+
+  it('cuts the goal before the turn, and drops it rather than leave a fragment', () => {
+    // The goal's details go first, then the goal itself; the turn keeps its label.
+    expect(draw(52, { activity: working, standing: goal })[1]).toMatch(/Kneading… {2}writing {2}● Goal active {2}round/)
+    expect(draw(40, { activity: working, standing: goal })[1]).toMatch(new RegExp(`^ {2}${SPINNER_REST} Kneading… {2}writing {2,}● Goal active$`))
+    expect(draw(36, { activity: working, standing: goal })[1]).toBe(`  ${SPINNER_REST} Kneading…  writing`)
+    for (const columns of [1, 2, 5, 12, 24, 40, 80]) {
+      expect(stringWidth(draw(columns, { activity: working, standing: goal })[1]!), `${columns}`).toBeLessThanOrEqual(columns)
     }
-    expect(draw(24, { light: working })[1]).toMatch(/^─ ⠠⠞⠁ Kneading… {2}\S*… ──$/)
   })
 
-  it('draws the rule in ASCII where the terminal cannot draw box characters', () => {
-    const rows = draw(60, { frame: 'classic', light: working })
-    expect(rows[1]).toMatch(new RegExp(`^- ${SPINNER_REST} Kneading…  writing -+$`))
-    expect(isRenderable(draw(60, { frame: 'classic' })[1]!)).toBe(true)
+  it('draws the rules in ASCII where the terminal cannot draw box characters', () => {
+    const rows = draw(60, { frame: 'classic', activity: working })
+    expect([rows[2], rows[4]]).toEqual(['-'.repeat(60), '-'.repeat(60)])
+    expect(isRenderable(rows[2]!) && isRenderable(rows[4]!)).toBe(true)
   })
 
-  it('draws panels between the opening blank and the rule', () => {
-    const rows = draw(60, { children: <Text>notice</Text> })
+  it('draws panels between the opening blank and the header', () => {
+    const rows = draw(60, { children: <Text>notice</Text>, activity: ended })
     expect(rows[0]).toBe('')
     expect(rows[1]).toBe('notice')
-    expect(rows[2]).toBe('\u2500'.repeat(60))
-    expect(rows[3]!.startsWith(`${MARKER.prompt} `)).toBe(true)
+    expect(rows[2]).toMatch(/^ {2}✓ Completed/)
+    expect(rows[3]).toBe(line(60))
+    expect(rows[4]!.startsWith(`${MARKER.prompt} `)).toBe(true)
   })
 
   it('keeps its height when only the width changes', () => {
@@ -317,13 +330,17 @@ describe('Chrome', () => {
     expect(new Set(heights)).toEqual(new Set([CHROME_ROWS]))
   })
 
-  it('yields the gap, the padding, the status line, then the rule, and never the draft', () => {
-    const at = (rows: number): string[] => draw(60, { text: 'hello', rows, light: ended })
-    expect(at(5)).toHaveLength(5)
-    expect(at(4)).toEqual([expect.stringMatching(/^─ ✓/), expect.stringContaining('hello'), '', '  Model: deepseek/chat  ctx 12%'])
-    expect(at(3)).toEqual([expect.stringMatching(/^─ ✓/), expect.stringContaining('hello'), '  Model: deepseek/chat  ctx 12%'])
-    expect(at(2)).toEqual([expect.stringMatching(/^─ ✓/), expect.stringContaining('hello')])
-    expect(at(1)).toEqual([expect.stringContaining('hello')])
+  it('yields the gap, the base rule, the rule, the status line, then the header, and never the draft', () => {
+    const at = (rows: number): string[] => draw(60, { text: 'hello', rows, activity: ended })
+    const header = expect.stringMatching(/^ {2}✓/)
+    const draft = expect.stringContaining('hello')
+    const status = '  Model: deepseek/chat  ctx 12%'
+    expect(at(6)).toHaveLength(6)
+    expect(at(5)).toEqual([header, line(60), draft, line(60), status])
+    expect(at(4)).toEqual([header, line(60), draft, status])
+    expect(at(3)).toEqual([header, draft, status])
+    expect(at(2)).toEqual([header, draft])
+    expect(at(1)).toEqual([draft])
   })
 
   it('leaves the right slot empty until something applies', () => {
@@ -339,8 +356,8 @@ describe('Chrome', () => {
 
   it('fills the width it is given and never overruns it', () => {
     for (const columns of [1, 2, 3, 24, 40, 60, 80, 200]) {
-      for (const light of [undefined, working, ended]) {
-        for (const row of draw(columns, { text: 'hello', ...light === undefined ? {} : { light } })) {
+      for (const activity of [undefined, working, ended]) {
+        for (const row of draw(columns, { text: 'hello', standing: goal, ...activity === undefined ? {} : { activity } })) {
           expect(stringWidth(row), `${columns}`).toBeLessThanOrEqual(columns)
         }
       }
@@ -350,19 +367,22 @@ describe('Chrome', () => {
   it('drops the hint rather than truncating it to something that is not help', () => {
     expect(at(HINT_MIN_COLUMNS, 'hello')).toContain('enter to send')
     expect(at(HINT_MIN_COLUMNS - 1, 'hello')).not.toContain('enter to send')
-    // What is left is still the draft, whole: the hint yields, the input does not.
+    // What is left is still the draft, whole. The hint yields, the input does not.
     expect(at(HINT_MIN_COLUMNS - 1, 'hello')).toContain('hello')
   })
 })
 
-describe('ruleRoom', () => {
-  it('leaves a space and two cells of line after a label, and drops a label with no room', () => {
-    expect(ruleRoom(60, 20)).toEqual({ label: 20, tail: 37 })
-    expect(ruleRoom(20, 40)).toEqual({ label: 15, tail: 2 })
-    expect(ruleRoom(6, 40)).toEqual({ label: 1, tail: 2 })
-    expect(ruleRoom(5, 40)).toEqual({ label: 0, tail: 5 })
-    expect(ruleRoom(60, 0)).toEqual({ label: 0, tail: 60 })
-    expect(ruleRoom(0, 10)).toEqual({ label: 0, tail: 0 })
+describe('headerRoom', () => {
+  it('gives the turn its label first, cuts the standing state, and drops it below its label', () => {
+    expect(headerRoom(60, 20, 20, 10)).toEqual({ left: 20, right: 20 })
+    expect(headerRoom(40, 20, 20, 10)).toEqual({ left: 20, right: 16 })
+    // Too few cells for any details. The label alone, not a label and an ellipsis.
+    expect(headerRoom(37, 20, 20, 10)).toEqual({ left: 20, right: 10 })
+    expect(headerRoom(34, 20, 20, 10)).toEqual({ left: 20, right: 10 })
+    expect(headerRoom(33, 20, 20, 10)).toEqual({ left: 20, right: 0 })
+    expect(headerRoom(20, 30, 20, 10)).toEqual({ left: 18, right: 0 })
+    expect(headerRoom(30, 0, 20, 10)).toEqual({ left: 0, right: 20 })
+    expect(headerRoom(1, 10, 10, 5)).toEqual({ left: 0, right: 0 })
   })
 })
 
@@ -374,7 +394,7 @@ describe('Composer width and wrapping', () => {
     />, { columns })).split('\n')
 
   it('bounds a single pasted line that wraps to more rows than it is lines', () => {
-    // The regression this guards: `maxRows` counted lines, and a line is not a
+    // The regression this guards. `maxRows` counted lines, and a line is not a
     // row. One pasted paragraph is one line, so it passed the count and then
     // wrapped to thirty rows — taking the dynamic region with it and putting
     // Ink on the path where it clears the screen on every keystroke.
@@ -408,7 +428,7 @@ describe('Composer width and wrapping', () => {
   })
 
   it('lets the caret take the column before the hint when its row is full', () => {
-    // 40 columns: two of rail, thirteen of hint and its gap, so 25 of text and the caret.
+    // 40 columns. Two of rail, thirteen of hint and its gap, so 25 of text and the caret.
     const rows = draft('x'.repeat(25), 40)
     expect(rows).toEqual([`> ${'x'.repeat(25)}\u258c Enter sends`])
   })

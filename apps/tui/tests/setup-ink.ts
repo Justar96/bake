@@ -7,8 +7,8 @@
  * `Console` constructor, so `render()` throws `console.Console is not a
  * constructor` before any assertion runs.
  *
- * Restoring the real constructor fixes the environment rather than the product:
- * disabling Ink's console patching in the runner would let a stray log corrupt
+ * Restoring the real constructor fixes the environment, not the product.
+ * Disabling Ink's console patching in the runner would let a stray log corrupt
  * a live frame in production to satisfy a test runner.
  */
 

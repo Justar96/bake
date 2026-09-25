@@ -1,4 +1,4 @@
-/** Language hints and conservative colour for tool output; source text stays in the log. */
+/** Language hints and conservative colour for tool output. Source text stays in the log. */
 import stripAnsi from 'strip-ansi'
 import { PALETTE } from './palette.ts'
 import type { CardLine } from './rows.ts'
@@ -8,13 +8,13 @@ import type { Span } from './present.ts'
 export const toolText = (text: string): string => stripAnsi(text).replace(/\r\n?/g, '\n').replace(/\t/g, '    ')
   .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g, char => `\\x${char.charCodeAt(0).toString(16).padStart(2, '0')}`)
 
-/** Infer only valid structured JSON; command stdout is not shell source. */
+/** Infer only valid structured JSON. Command stdout is not shell source. */
 function jsonOutput(text: string): boolean {
   const value = (source: string): boolean => {
     if (!/^\s*[\[{]/.test(source)) return false
     try { JSON.parse(source); return true } catch { return false }
   }
-  // Inference is optional; very large output retains its readable plain form.
+  // Inference is optional. Very large output retains its readable plain form.
   if (text.length > 262_144) return false
   return value(text) || text.trim().split('\n').every(line => value(line))
 }
@@ -33,7 +33,7 @@ export function outputLines(raw: string, language?: string): readonly CardLine[]
 
 /**
  * Colour explicit diagnostic labels, URLs, and path-shaped tokens in plain
- * output. Ordinary words and numbers remain unstyled; labels keep their text
+ * output. Ordinary words and numbers remain unstyled. Labels keep their text
  * under NO_COLOR. Syntax-highlighted source bypasses these heuristics.
  */
 export function outputSpans(text: string): readonly Span[] | undefined {
@@ -44,8 +44,8 @@ export function outputSpans(text: string): readonly Span[] | undefined {
     const word = match[0]
     const start = match.index
     const label = /^(?:error|fatal|fail(?:ed)?|warn(?:ing)?|pass(?:ed)?|success|info|debug)$/i.test(word)
-    // Severity is a leading field, optionally after a timestamp or brackets;
-    // a sentence mentioning an error does not claim a new failure.
+    // Severity is a leading field, optionally after a timestamp or brackets.
+    // A sentence mentioning an error does not claim a new failure.
     if (label && !/^[\s\dT:.Z+\-/\[\]()]*$/.test(text.slice(0, start))) continue
     if (start > offset) spans.push({ length: start - offset, tone: 'plain' })
     const upper = word.toUpperCase()

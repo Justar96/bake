@@ -3,7 +3,8 @@
 Pending input
 Next step: Queued direction
 /clear-pending discards queued input
+
 ────────────────────────────────────────────────────────────────────────────────────────────────────
 > ▌Ask anything
-
+────────────────────────────────────────────────────────────────────────────────────────────────────
   Model: model  Context: ~12.3k/128k (9%)  /workspace

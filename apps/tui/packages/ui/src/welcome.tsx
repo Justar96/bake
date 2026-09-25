@@ -6,7 +6,7 @@ import type { TuiCopy } from './copy.ts'
 import { FRAME_MIN_COLUMNS, type FrameStyle } from './layout.ts'
 import { PALETTE } from './palette.ts'
 
-/** Widest the block draws, so it reads as a card rather than a rule across a wide terminal. */
+/** Widest the block draws. Wider than this it would be a rule across the terminal, not a card. */
 export const WELCOME_WIDTH = 64
 
 /** Commands the block offers as a start; each is registered by this surface in every profile. */
@@ -16,20 +16,20 @@ const EXAMPLES = [
 ] as const satisfies readonly { readonly name: string, readonly description: keyof TuiCopy }[]
 
 /**
- * Product name and version, the session line it carries, and example commands.
+ * Product name, version, the session line, and example commands.
  *
- * Printed once, as the first committed item of a session with no history, so
- * it scrolls away with the transcript like any other row and never costs the
- * dynamic region a row. It prints the session line itself, in the words the
- * heading uses when it prints alone, so a fresh session and a resumed one name
- * their id alike while only the fresh one is framed. The border follows the
+ * Printed once, as the first committed item of a session with no history.
+ * It scrolls away with the transcript and never costs the dynamic region a
+ * row. It prints the session line itself, in the same words the heading uses
+ * when it prints alone, so a fresh session and a resumed one name their id
+ * the same way. Only the fresh one is framed. The border follows the
  * composer's frame style and is dropped on the same narrow terminals, so a
- * terminal that cannot draw the rounded frame never sees it here either. It
- * adds no row of its own after the card: the chrome's gap is what separates
- * printed history from the input, and the session line inside the card gives
- * the block the row the heading would have taken. Box margins and columns own
- * spacing, not padded text. Every row truncates rather than wraps, keeping the
- * block's height fixed.
+ * terminal that cannot draw the rounded frame never sees it here either.
+ * The card adds no row of its own after it. The chrome's gap separates
+ * printed history from the input, and the session line inside the card takes
+ * the row the heading would have taken. Box margins and columns own spacing,
+ * not padded text. Every row truncates instead of wrapping, so the block's
+ * height stays fixed.
  *
  * @param props.version - the running Bake version, without a leading `v`.
  * @param props.heading - the session line, already localized and labeled.

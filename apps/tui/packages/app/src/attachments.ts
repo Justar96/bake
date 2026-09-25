@@ -18,7 +18,7 @@ interface Staged {
   readonly mediaType?: ImageMediaType
 }
 
-/** Source bytes staged for one session. The controller serializes mutations; Harness owns storage and normalization. */
+/** Source bytes staged for one session. The controller serializes mutations. Harness owns storage and normalization. */
 export class AttachmentDraft {
   private items: readonly Staged[] = []
 
@@ -41,7 +41,7 @@ export class AttachmentDraft {
   /**
    * Read one complete path through the scoped filesystem and validate raster sources.
    * @param path - the entire command remainder, including literal spaces.
-   * @param signal - command lifetime; late provider results never enter the draft.
+   * @param signal - command lifetime. A late provider result never enters the draft.
    */
   async add(path: string, signal: AbortSignal): Promise<void> {
     signal.throwIfAborted()
@@ -73,14 +73,14 @@ export class AttachmentDraft {
     this.items = this.items.filter((_item, offset) => offset !== index)
   }
 
-  /** Discard the draft; committed attachments remain owned by Harness storage. */
+  /** Discard the draft. Committed attachments remain owned by Harness storage. */
   clear(): void { this.items = [] }
 
   /**
    * Validate the current route and admit all images as one batch before returning ordered blocks.
    * @param selection - current Harness model selection, when installed.
-   * @param signal - prompt admission lifetime; storage calls without cancellation are drained.
-   * @returns durable blocks; the draft remains until the Agent accepts the message.
+   * @param signal - prompt admission lifetime. Storage calls without cancellation are drained.
+   * @returns durable blocks. The draft remains until the Agent accepts the message.
    */
   async admit(selection: ModelSelectionRef | undefined, signal: AbortSignal): Promise<readonly (ImageBlock | FileBlock)[]> {
     signal.throwIfAborted()

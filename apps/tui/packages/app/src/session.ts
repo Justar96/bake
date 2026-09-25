@@ -21,7 +21,7 @@ export interface SessionOptions {
  * @param options - requested identity and optional preset.
  * @param signal - application setup lifetime.
  * @param connect - install observers before the agent is published or driven.
- * @returns the owned agent handle; the caller must dispose it.
+ * @returns the owned agent handle. The caller must dispose it.
  */
 export async function openSession(
   ctx: Context, options: SessionOptions, signal: AbortSignal,
@@ -60,7 +60,7 @@ export async function openSession(
       }
     }
     const lastRequest = options.resume === undefined ? undefined : agent.session.requestHeader()
-    // Adapter-materialized efforts retain default semantics after resume.
+    // An effort the adapter materialized as a default stays a default after resume.
     const restored = lastRequest === undefined ? selection : {
       provider: lastRequest.config.provider, model: lastRequest.config.model,
       ...lastRequest.config.reasoningEffort === undefined || lastRequest.adapterDefaults?.reasoningEffort === true
@@ -91,7 +91,7 @@ export async function openSession(
       agentOptions: selection, signal, setup,
     })
   } catch (error) {
-    // Preset mounting has no abort parameter; retain its lifetime through rollback.
+    // Preset mounting has no abort parameter. Keep its lifetime through rollback.
     await setupWork?.catch(() => {})
     throw error
   }

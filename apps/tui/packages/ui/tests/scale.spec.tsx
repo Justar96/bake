@@ -1,4 +1,4 @@
-/** Transcript cost as history grows: the property `<Static>` exists to provide. */
+/** Transcript cost as history grows. The property `<Static>` exists to provide. */
 import React from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'ink'

@@ -23,7 +23,7 @@ describe('formatContext', () => {
   })
 
   it('rounds the percentage down', () => {
-    // A context that is merely close to full must not read as 100%: this is
+    // A context that is merely close to full must not be shown as 100%. This is
     // the number a user decides to compact on.
     expect(formatContext({ used: 999_999, window: 1_000_000 })).toBe('~1M/1M (99%)')
     expect(formatContext({ used: 1_000_000, window: 1_000_000 })).toBe('~1M/1M (100%)')

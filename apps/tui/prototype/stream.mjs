@@ -1,11 +1,11 @@
 /**
  * Reasoning stream and tool-use presentation.
  *
- * Models the real harness stream: `agent/assistant-stream` delivers
+ * Models the real harness stream. `agent/assistant-stream` delivers
  * `AssistantStreamFrame`s carrying `StreamChunk`s, which separate
  * `reasoning-delta` from `text-delta` and stream tool arguments as partial JSON
  * in `tool-call-delta`. Three properties of that stream decide the rendering,
- * and all three are the kind that bite late:
+ * and all three fail only after a frame has already been drawn.
  *
  *   1. `revision` restarts at 1 when a stream is replaced, so a retry must
  *      clear what the previous attempt drew instead of appending to it
@@ -32,8 +32,8 @@ const empty = () => ({ revision: 0, reasoning: '', text: '', calls: new Map(), c
 /**
  * Fold one stream frame into the live view.
  *
- * Pure and total: the same frames in the same order always give the same view,
- * which is what makes the retry and abandon paths testable without a model.
+ * Pure and total. The same frames in the same order always give the same view.
+ * That is what makes the retry and abandon paths testable without a model.
  *
  * @param view - current live view.
  * @param frame - one `AssistantStreamFrame`.
@@ -90,8 +90,8 @@ export function reduce(view, frame) {
 /**
  * One-line argument summary for a completed tool call.
  *
- * Presenters stay pure and tool-specific: `bash` reads as its command, a file
- * tool as its path. A generic JSON dump is the fallback, not the design.
+ * Presenters stay pure and tool-specific. `bash` is shown as its command, and
+ * a file tool as its path. A generic JSON dump is the fallback, not the design.
  *
  * @param block - the completed tool-call content block.
  * @returns a single display line, or undefined when nothing reads better than the name.
@@ -115,9 +115,9 @@ const summaryOf = view => ({
 /**
  * Rail plus content.
  *
- * `width` carries meaning: reasoning sits at column 4 and the answer at column
- * 2, so the two remain distinguishable when dim is unavailable. Relying on
- * `dimColor` alone would merge them under NO_COLOR and for a screen reader.
+ * `width` carries the distinction. Reasoning sits at column 4 and the answer
+ * at column 2, so the two remain distinguishable when dim is unavailable.
+ * Relying on `dimColor` alone would merge them under NO_COLOR and for a screen reader.
  */
 const Rail = ({ glyph, color, width = 2, children }) =>
   h(Box, { flexDirection: 'row' },
@@ -127,8 +127,8 @@ const Rail = ({ glyph, color, width = 2, children }) =>
 /**
  * The live region during a streaming step.
  *
- * Reasoning is dim and tail-windowed: it is worth watching while it happens and
- * not worth re-reading afterwards. The answer text below it is the thing the
+ * Reasoning is dim and tail-windowed. It is worth watching while it happens
+ * and not worth re-reading afterwards. The answer text below it is the thing the
  * user is waiting for, so it is undimmed and never clipped from the top.
  */
 const LiveStream = ({ view, reasoningRows }) => {
@@ -147,7 +147,7 @@ const LiveStream = ({ view, reasoningRows }) => {
             : `${call.name} \u00b7 ${call.summary ?? ''}`))))
 }
 
-/** What lands in scrollback: the answer, a reasoning summary, and each call. */
+/** What lands in scrollback. The answer, a reasoning summary, and each call. */
 const Committed = ({ entry, seconds }) =>
   h(Box, { flexDirection: 'column', width: WIDTH },
     entry.reasoningChars === 0 ? null : h(Rail, { glyph: '\u2234', color: 'gray', width: 4 },
@@ -169,7 +169,7 @@ const REASONING = [
   'Checking whether anything registers commands late.',
 ]
 
-// A normal step: reasoning, then answer text, then a tool call.
+// A normal step. Reasoning, then answer text, then a tool call.
 let view = reduce(empty(), { type: 'start', revision: 1 })
 for (const line of REASONING) view = reduce(view, chunk(1, { type: 'reasoning-delta', text: `${line}\n` }))
 view = reduce(view, chunk(1, { type: 'text-delta', text: 'Two plugins register commands. Checking for a third.' }))
@@ -184,7 +184,7 @@ view = reduce(view, chunk(1, {
 draw('arguments complete \u2014 the call reads as its command',
   h(LiveStream, { view, reasoningRows: 3 }))
 
-// Commit: the live copy goes, the transcript keeps a summary.
+// Commit. The live copy goes, and the transcript keeps a summary.
 const committedView = reduce(view, {
   type: 'end', revision: 1, outcome: { kind: 'committed', eventType: 'assistant/message', seq: 42 },
 })
@@ -201,7 +201,7 @@ record('reasoning is summarized, not replayed into the transcript',
   && !strip(renderToString(h(Committed, { entry: committedView.committed[0], seconds: 8 }), { columns: WIDTH }))
     .includes(REASONING[0]))
 
-// A retry: revision 2 replaces revision 1's text rather than appending.
+// A retry. Revision 2 replaces revision 1's text instead of appending to it.
 let retry = reduce(empty(), { type: 'start', revision: 1 })
 retry = reduce(retry, chunk(1, { type: 'text-delta', text: 'FIRST ATTEMPT TEXT' }))
 retry = reduce(retry, { type: 'start', revision: 2 })
@@ -210,7 +210,7 @@ record('a replacement stream clears the previous attempt', retry.text === 'Secon
 record('a stale-revision chunk is ignored',
   reduce(retry, chunk(1, { type: 'text-delta', text: ' STALE' })).text === 'Second attempt.')
 
-// Abandonment: nothing commits, nothing lingers.
+// Abandonment. Nothing commits, and nothing lingers.
 const abandoned = reduce(retry, { type: 'end', revision: 2, outcome: { kind: 'abandoned' } })
 record('an abandoned stream leaves nothing live and nothing committed',
   abandoned.text === '' && abandoned.committed.length === 0)

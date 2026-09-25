@@ -1,11 +1,11 @@
 /**
- * Signing in to providers. Two kinds of credential reach one surface:
+ * Signing in to providers. Two kinds of credential reach one surface.
  *
- * - **Key references** — a provider that reads a named key (`DEEPSEEK_API_KEY`)
- *   needs the value stored once through `ctx.credentials`.
- * - **Authorization flows** — a provider whose credential can only be obtained
- *   by talking to a human registers a flow, and any surface can run an attempt
- *   and render the notices and prompts it produces.
+ * A key reference is a provider that reads a named key, such as
+ * `DEEPSEEK_API_KEY`. The value is stored once through `ctx.credentials`.
+ * An authorization flow is a provider whose credential can only be obtained
+ * by talking to a human. The provider registers a flow, and any surface can
+ * run an attempt and render the notices and prompts it produces.
  *
  * This module knows about neither provider. It lists what the composition
  * offers and drives whichever kind the user picked, so a provider added by a
@@ -45,8 +45,8 @@ export interface LoginInteraction {
 /**
  * List everything this composition can sign in to.
  *
- * Key references come from configuration because only the composition knows
- * which providers it mounted; flows come from the authorization registry,
+ * Key references come from configuration, because only the composition knows
+ * which providers it mounted. Flows come from the authorization registry,
  * which already knows its own.
  *
  * @param ctx - the settled plugin context.
@@ -59,7 +59,7 @@ export async function listTargets(ctx: Context, refs: readonly string[]): Promis
   if (credentials !== undefined) {
     for (const ref of refs) {
       // `describe` reports whether a value exists and whether it can be
-      // changed; it never returns the value itself.
+      // changed. It never returns the value itself.
       const info = await credentials.describe(credentialRef(ref))
       targets.push({ id: ref, label: ref, configured: info.configured, writable: info.writable, kind: 'key' })
     }
@@ -72,8 +72,8 @@ export async function listTargets(ctx: Context, refs: readonly string[]): Promis
     targets.push({
       id: entry.key,
       label: entry.label,
-      // A flow's credential is known to the flow, not to this surface; an
-      // attempt that is already running is the one state worth reporting.
+      // A flow's credential is known to the flow, not to this surface. An
+      // attempt that is already running is the only state worth reporting.
       configured: false,
       writable: !entry.inFlight,
       kind: 'flow',
@@ -91,9 +91,9 @@ export type LoginResult =
 /**
  * Sign in to one target.
  *
- * A key reference is prompted as a secret and stored; a flow runs through the
+ * A key reference is prompted as a secret and stored. A flow runs through the
  * authorization seam, which reports `authorized` only after the record is
- * committed, so a success here always means the credential is really stored.
+ * committed. A success here always means the credential is stored.
  *
  * @param ctx - the settled plugin context.
  * @param targets - the targets listed for this session.
@@ -137,7 +137,7 @@ export async function login(
   if (target.kind === 'flow') {
     const authorization = ctx.get('authorization')
     if (authorization === undefined) return { kind: 'cancelled', target: id }
-    // A flow target's id was taken directly from authorization.list().
+    // A flow target's id was taken directly from `authorization.list()`.
     const outcome = await authorization.begin({ key: target.id as CredentialKey, interaction, signal })
     return outcome.status === 'authorized' ? { kind: 'stored', target: id } : { kind: 'cancelled', target: id }
   }
@@ -148,7 +148,7 @@ export async function login(
   try {
     value = await interaction.prompt({ kind: 'secret', message: `${copy.pasteCredential}: ${target.label}` })
   } catch (error) {
-    // Prompt rejection represents a declined authorization attempt.
+    // A rejected prompt is a declined authorization attempt.
     void error
     return { kind: 'cancelled', target: id }
   }

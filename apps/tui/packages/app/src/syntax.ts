@@ -2,18 +2,19 @@
  * Syntax colour for response code blocks, source reads, search matches, structured tool output, and diffs, from Shiki.
  *
  * The presentation layer asks for colour synchronously, a run of lines at a
- * time, and Shiki loads its grammars asynchronously. The two meet here: the
- * languages an agent edits most are loaded before the first frame, a file in
- * any other language loads its grammar the first time one is drawn, and until
- * a grammar is ready its lines draw in their side's tones, as they would with
- * no highlighter at all. A committed row prints once, so source drawn before
- * its grammar loaded stays uncoloured in scrollback; the next one is coloured.
+ * time, and Shiki loads its grammars asynchronously. This module is where
+ * those two meet. The languages an agent edits most are loaded before the
+ * first frame. A file in any other language loads its grammar the first time
+ * one is drawn. Until a grammar is ready, its lines draw in their side's
+ * tones, as they would with no highlighter at all. A committed row prints
+ * once, so source drawn before its grammar loaded stays uncoloured in
+ * scrollback. The next one is coloured.
  *
  * The theme is Solarized Dark because Solarized's accents are shared by its
- * light and dark variants, so they read on either terminal background. Its
- * base tones are the one part that assumes a background, so they are left
- * uncoloured, and the presentation layer draws them in the line's own tone,
- * comments dimmed.
+ * light and dark variants, so they stay readable on either terminal
+ * background. Its base tones are the one part that assumes a background, so
+ * they are left uncoloured. The presentation layer draws them in the line's
+ * own tone, and comments are dimmed.
  *
  * @module @dsh-tui/app/syntax
  */
@@ -23,7 +24,7 @@ import { createJavaScriptRegexEngine } from 'shiki/engine/javascript'
 import { bundledLanguages, bundledLanguagesInfo } from 'shiki/langs'
 import type { CodeToken, Highlight } from '@dsh-tui/ui'
 
-/** Languages loaded before the first frame: what an agent in a repository edits most. */
+/** Languages loaded before the first frame. These are what an agent in a repository edits most. */
 const PRELOADED = ['typescript', 'tsx', 'javascript', 'jsx', 'json', 'markdown', 'python', 'rust', 'go', 'yaml', 'shellscript', 'css', 'html', 'toml'] as const
 
 /** Extensions and file names whose language id is not the extension itself. */
@@ -52,7 +53,7 @@ const ITALIC = 1
 export interface Syntax {
   /** Colour for consecutive lines of one file, or undefined until its grammar is ready. */
   readonly highlight: Highlight
-  /** Settles when the preloaded languages are ready, or have failed; never rejects. */
+  /** Settles when the preloaded languages are ready, or have failed. Never rejects. */
   readonly ready: Promise<void>
   /** Await grammars still loading, then release the highlighter. */
   close(): Promise<void>
@@ -94,7 +95,7 @@ export function createSyntax(): Syntax {
     core = highlighter
     for (const language of highlighter.getLoadedLanguages()) loaded.add(language)
   }, () => {
-    // Plain diffs: see above.
+    // A load failure leaves the text in its semantic tone. See the module comment.
   })
 
   const load = (language: string): void => {

@@ -72,7 +72,7 @@ async function turn(wrapped: boolean): Promise<{ readonly deficit: number, reado
     await instance.waitUntilRenderFlush()
     const before = filled()
     const seen: number[] = []
-    // A row at a time: where a terminal that ignores mode 2026 may present
+    // A row at a time. Where a terminal that ignores mode 2026 may present
     // the screen. Every piece ends at a newline, so no escape is split.
     // Unwrapped writes still step over unchanged rows as the runner does, so
     // the two differ only in how a region is erased.
@@ -126,8 +126,8 @@ describe('frame output', () => {
   it('never shows the controls erased while a streamed answer prints', async () => {
     const raw = await turn(false)
     const framed = await turn(true)
-    // Unwrapped, each printed line erases the rule, the composer, and the
-    // status line before drawing them again.
+    // Without frameOutput, each printed line erases at least the rule, the
+    // composer, and the status line before drawing them again.
     expect(raw.deficit).toBeGreaterThanOrEqual(3)
     // Drawn over, at most the row being written is ever blank.
     expect(framed.deficit).toBeLessThanOrEqual(1)
@@ -207,13 +207,15 @@ const inputRow = (screen: readonly string[]): number => screen.findIndex(line =>
 describe('bottom anchoring', () => {
   it('rests the composer on the bottom row from the first frame, through a turn and its panels', async () => {
     const ui = await session(COLUMNS, ROWS)
-    // The padding row, the status line, and Ink's cursor row under it.
+    // The base rule, the status line, and Ink's cursor row under it.
     const bottom = ROWS - 4
     const rows: number[] = []
     const record = (screen: readonly string[]): void => { rows.push(inputRow(screen)) }
     const first = await ui.screen()
     record(first)
-    expect(first.findLastIndex(line => line.includes('Session: bottom'))).toBe(bottom - 3)
+    // Above the input, bottom to top. The upper rule, the header, and the
+    // gap that opens the chrome. The session heading is the row above that.
+    expect(first.findLastIndex(line => line.includes('Session: bottom'))).toBe(bottom - 4)
     let committed = appendTranscript(emptyTranscript, [{ kind: 'user', text: 'Fix the loader.' }])
     record(await ui.update({ committed, status: 'running', live: [{ kind: 'reasoning', text: 'Where is the home read?\nIn startup, then again in the launcher.' }] }))
     record(await ui.update({ todos: [
@@ -268,7 +270,7 @@ describe('bottom anchoring', () => {
       const screen = await ui.resize(columns, rows)
       const dump = `${columns}x${rows}:\n${screen.join('\n')}`
       expect(inputRow(screen), dump).toBe(rows - 4)
-      // One copy of the input: the replay left no rows of the old frame behind.
+      // One copy of the input. The replay left no rows of the old frame behind.
       expect(screen.filter(line => line.includes('▌')), dump).toHaveLength(1)
       expect(screen.findLastIndex(line => line.includes('One answer')), dump).toBeGreaterThan(0)
     }

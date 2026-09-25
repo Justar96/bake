@@ -46,7 +46,7 @@ it.each(['quit', 'dispose'] as const)('restores Ink modes and drains the agent o
   if (mode === 'quit') {
     input.write('\u0003')
     await vi.waitFor(() => expect(output.text).toContain('Press Ctrl-C again'))
-    // Another key ends the prompt, so the next Ctrl-C asks again rather than quitting.
+    // Another key ends the prompt, so the next Ctrl-C asks again. It does not quit.
     const asked = output.text.split('Press Ctrl-C again').length
     input.write('x')
     await new Promise(resolve => setTimeout(resolve, 50))

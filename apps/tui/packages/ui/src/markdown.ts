@@ -14,18 +14,19 @@ export interface MarkdownLine {
 }
 
 const parse = (source: string): Root => fromMarkdown(source, {
-  // References can be defined after their use. Keeping definitions literal
-  // prevents later chunks from restyling an already printed paragraph.
+  // References can be defined after their use. Keep definitions literal so a
+  // later chunk cannot restyle a paragraph that has already printed.
   extensions: [gfm(), { disable: { null: ['definition', 'gfmFootnoteDefinition', 'gfmFootnoteCall'] } }],
   mdastExtensions: [gfmFromMarkdown()],
 })
 
 /**
- * End of a prefix whose Markdown blocks cannot be extended by another delta.
- * The final block waits for a successor; a paragraph also settles after a blank
- * line. Lists, tables, and fences stay together, including their blank lines.
- * Reference syntax stays literal in the renderer, so a later definition cannot
- * change text already printed. Offsets refer to the original, unsanitized source.
+ * Offset where a prefix's Markdown blocks can no longer be extended by another delta.
+ *
+ * The final block waits for a successor. A paragraph also settles after a
+ * blank line. Lists, tables, and fences stay together, including their blank
+ * lines. Reference syntax stays literal, so a later definition cannot change
+ * text already printed. Offsets refer to the original, unsanitized source.
  */
 export function finishedMarkdown(source: string): number {
   const nodes = parse(source).children
@@ -38,8 +39,8 @@ export function finishedMarkdown(source: string): number {
   const node = settled ? last : nodes.at(-2)
   if (node === undefined) return 0
   const stop = node.position!.end.offset!
-  // Consume only the newline ending this block; paragraph spacing belongs to
-  // the next chunk, just as it does when the complete message is replayed.
+  // Consume only the newline that ends this block. Paragraph spacing belongs
+  // to the next chunk, as it does when the complete message is replayed.
   return stop + (source.slice(stop).startsWith('\r\n') ? 2 : source[stop] === '\n' ? 1 : 0)
 }
 
@@ -50,10 +51,12 @@ const safe = (text: string): string => text.replace(/\r\n?/g, '\n').replace(/\t/
 type Emphasis = Omit<Span, 'length'>
 
 /**
- * Render CommonMark and GFM without terminal escapes. Links retain their target,
- * HTML and references remain literal, and tables use stacked labeled cells so
- * wide values remain readable in a narrow terminal. Unfinished syntax remains
- * readable while the live region waits for the rest of its block.
+ * Render CommonMark and GFM without terminal escapes.
+ *
+ * Links keep their target. HTML and references stay literal. Tables use
+ * stacked labeled cells. A wide value stays readable in a narrow terminal.
+ * Unfinished syntax stays readable while the live region waits for the rest
+ * of its block.
  */
 export function markdownLines(source: string, tone: Tone = 'plain', code?: Highlight): readonly MarkdownLine[] {
   if (source.trim() === '') return []
@@ -112,7 +115,7 @@ export function markdownLines(source: string, tone: Tone = 'plain', code?: Highl
   const blocks = (nodes: readonly Nodes[], depth = 0): void => {
     let previous: Nodes | undefined
     for (const node of nodes) {
-      // Keep source paragraph spacing without decorating every block with a box.
+      // Keep the source's paragraph spacing. Do not draw a box around every block.
       if (previous !== undefined && node.position!.start.line > previous.position!.end.line + 1) lines.push({ text: '' })
       block(node, depth)
       previous = node
@@ -182,7 +185,7 @@ export function markdownLines(source: string, tone: Tone = 'plain', code?: Highl
       default: write(raw(node)); push()
     }
   }
-  // A continued chunk starts with the separator left by finishedMarkdown.
+  // A continued chunk starts with the separator `finishedMarkdown` left behind.
   if (/^(?:[ \t]*\r?\n)/.test(source)) lines.push({ text: '' })
   blocks(tree.children)
   return lines

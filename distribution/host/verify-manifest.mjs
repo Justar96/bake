@@ -1,8 +1,19 @@
-import { createHash } from 'node:crypto'
+import { createHash, createPublicKey, verify } from 'node:crypto'
 import { createReadStream, readFileSync, statSync } from 'node:fs'
 
 const publicRoot = new URL('./public/', import.meta.url)
-const manifest = JSON.parse(readFileSync(new URL('latest.json', publicRoot), 'utf8'))
+const bytes = readFileSync(new URL('latest.json', publicRoot))
+// The committed release key, plus one a local check names in the environment.
+// The service's image build sets no environment, so it accepts only the real key.
+const keys = [readFileSync(new URL('release-key.pub', import.meta.url), 'utf8').trim(), process.env.BAKE_RELEASE_PUBLIC_KEY?.trim()]
+  .filter(key => key !== undefined && key !== '')
+let signature
+try { signature = Buffer.from(readFileSync(new URL('latest.json.sig', publicRoot), 'utf8').trim(), 'base64') } catch { throw new Error('Missing release manifest signature') }
+const signed = signature.length === 64 && keys.some(key => {
+  try { return verify(null, bytes, createPublicKey({ key: Buffer.from(key, 'base64'), format: 'der', type: 'spki' }), signature) } catch { return false }
+})
+if (!signed) throw new Error('Release manifest signature does not verify')
+const manifest = JSON.parse(bytes.toString('utf8'))
 if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(manifest.version)) throw new Error('Invalid release version')
 const supported = ['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64', 'win32-x64']
 const artifacts = manifest.artifacts

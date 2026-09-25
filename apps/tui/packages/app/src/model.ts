@@ -11,8 +11,9 @@ export const routeOf = (selection: ModelSelection): string => `${selection.provi
 
 /**
  * Whether a catalog's display name only restates its route, as a catalog that
- * names models by id does: `deepseek-v4-flash` for `deepseek/deepseek-v4-flash`.
- * The picker drops such a name rather than print the model twice on a row.
+ * names models by id does. `deepseek-v4-flash` restates
+ * `deepseek/deepseek-v4-flash`. The picker drops such a name instead of
+ * printing the model twice on a row.
  * @param name - the catalog's display name.
  * @param route - the provider/model route.
  * @returns true when the name, ignoring case and separators, is the route or its model.
@@ -23,7 +24,7 @@ export function namesRoute(name: string, route: string): boolean {
   return plain(name) === '' || plain(name) === plain(route) || plain(name) === plain(model)
 }
 
-/** One advertised route; catalog membership is advisory. */
+/** One advertised route. Catalog membership is advisory. */
 export interface CatalogLine {
   readonly route: string
   readonly name: string
@@ -40,7 +41,7 @@ export interface ModelCatalog {
  * Discover advertised models, retaining a current route absent from advisory catalogs.
  * @param llm - Harness LLM service.
  * @param current - the session's live selection.
- * @param signal - stops publication and further reads; an active listModels call must settle before return.
+ * @param signal - stops publication and further reads. An active `listModels` call must settle before return.
  * @returns routes in provider order and explicit partial-discovery diagnostics.
  */
 export async function listRoutes(llm: LlmRuntime, current: ModelSelection, signal: AbortSignal): Promise<ModelCatalog> {
@@ -65,7 +66,7 @@ export async function listRoutes(llm: LlmRuntime, current: ModelSelection, signa
 }
 
 /**
- * Read capabilities for one exact route; provider/model ids can contain further slashes.
+ * Read capabilities for one exact route. Provider and model ids can contain further slashes.
  * @param llm - Harness LLM service.
  * @param route - provider/model text.
  * @param signal - cancellation for the exact-model lookup.
@@ -85,7 +86,7 @@ export async function resolveRoute(llm: LlmRuntime, route: string, signal: Abort
   }
 }
 
-/** A validated selection or the reason the requested route/effort was refused. */
+/** A validated selection, or the reason the requested route or effort was refused. */
 export type SelectionResult =
   | { readonly kind: 'selected'; readonly selection: ModelSelection; readonly reasoning?: LlmModelReasoningInfo }
   | { readonly kind: 'unknown-route'; readonly route: string }

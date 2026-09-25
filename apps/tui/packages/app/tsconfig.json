@@ -25,6 +25,12 @@
       "path": "../../../../packages/core/agent"
     },
     {
+      "path": "../../../../packages/boot/updater"
+    },
+    {
+      "path": "../../../../packages/util/home-paths"
+    },
+    {
       "path": "../../../../packages/core/session"
     },
     {
@@ -92,6 +98,9 @@
     },
     {
       "path": "../../../../packages/plan/plan-mode"
+    },
+    {
+      "path": "../../../../packages/goal/goal"
     },
     {
       "path": "../../../../packages/subagent/subagent"

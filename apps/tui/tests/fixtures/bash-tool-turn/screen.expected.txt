@@ -5,15 +5,15 @@
 
   The user wants me to run a simple bash command and then reply with "DONE".
 
-● ran    {"command": "echo TERMINAL_OK", "description": "Echo TERMINAL_OK to verify terminal
-         access"}
-         TERMINAL_OK
+● Bash(echo TERMINAL_OK)
+  ⎿      TERMINAL_OK
 
   The command ran successfully and output "TERMINAL_OK". I should now reply with just "DONE".
 
-< DONE
+  DONE
 
-─ ✓ Completed  ran 1 ───────────────────────────────────────────────────────────────────────────────
+  ✓ Completed  ran 1
+────────────────────────────────────────────────────────────────────────────────────────────────────
 > ▌Ask anything
-
+────────────────────────────────────────────────────────────────────────────────────────────────────
   Model: deepseek-v4-flash  /workspace

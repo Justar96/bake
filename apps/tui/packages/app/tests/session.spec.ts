@@ -247,7 +247,7 @@ describe('session wiring', () => {
       { kind: 'assistant', text: 'Line one.\n\nLine two.' }, { kind: 'assistant', text: '\nLine three.', continued: true },
     ])
     expect(controller.view.live).toEqual([])
-    // Printing is display only: the log holds one message, and a resume draws it whole.
+    // Printing is display only. The log holds one message, and a resume draws it whole.
     let resumed!: SessionController
     const id = handle.agent.id
     controller.close()

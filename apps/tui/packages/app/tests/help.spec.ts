@@ -32,7 +32,7 @@ describe('/help', () => {
     controller.submit('/help')
     await controller.drain()
 
-    // The transcript, not the notice region: the region is bounded by the
+    // The transcript, not the notice region. The region is bounded by the
     // terminal's height and would cut the catalog to fit, while scrollback
     // holds the whole list and can scroll it.
     expect(listed(controller)).toContain('/help — List available commands')

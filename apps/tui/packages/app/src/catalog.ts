@@ -1,4 +1,4 @@
-/** Session-scoped command and skill discovery; Harness providers own catalog contents. */
+/** Session-scoped command and skill discovery. Harness providers own catalog contents. */
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { isUserInvocable } from '@deepseek-ai/dsh-skill'
@@ -26,10 +26,10 @@ export class InputCatalog {
     this.off = [ctx.on('commands/change', () => this.refresh()), ctx.on('skills/change', () => this.refresh())]
   }
 
-  /** Current metadata; skill bodies are never loaded for completion. */
+  /** Current metadata. Skill bodies are never loaded for completion. */
   get view(): CompletionCatalog { return this.state }
 
-  /** Replace the current observation; superseded and closed reads cannot publish results. */
+  /** Replace the current observation. A superseded or closed read cannot publish results. */
   refresh(): void {
     if (this.closed) return
     this.abort?.abort()

@@ -2,20 +2,20 @@
   <ESC>[3m<ESC>[2mCheck the files.<ESC>[22m<ESC>[23m
   <ESC>[3m<ESC>[2mThen verify the change.<ESC>[22m<ESC>[23m
 
-<ESC>[1m<ESC>[38;2;34;197;94m●<ESC>[39m<ESC>[22m <ESC>[1mran<ESC>[22m    ls -a
-         <ESC>[2mList the directory<ESC>[22m
+<ESC>[1m<ESC>[38;2;34;197;94m●<ESC>[39m<ESC>[22m <ESC>[1mBash<ESC>[22m(ls -a)
+  <ESC>[2m⎿<ESC>[22m      <ESC>[2mList the directory<ESC>[22m
          <ESC>[38;2;96;165;250mone.ts<ESC>[39m
          <ESC>[38;2;96;165;250mtwo.ts<ESC>[39m
          <ESC>[38;2;96;165;250mthree.ts<ESC>[39m
          <ESC>[38;2;96;165;250mfour.ts<ESC>[39m
 
-<ESC>[1m<ESC>[38;2;34;197;94m●<ESC>[39m<ESC>[22m <ESC>[1medited<ESC>[22m one.ts<ESC>[38;2;34;197;94m  +1<ESC>[39m <ESC>[38;2;239;68;68m−1<ESC>[39m
+<ESC>[1m<ESC>[38;2;34;197;94m●<ESC>[39m<ESC>[22m <ESC>[1mStrReplaceEditor<ESC>[22m(one.ts)<ESC>[38;2;34;197;94m  +1<ESC>[39m <ESC>[38;2;239;68;68m−1<ESC>[39m
 <ESC>[38;2;239;68;68m <ESC>[39m <ESC>[38;2;239;68;68m     4 - const a = <ESC>[7mold<ESC>[39m<ESC>[27m
 <ESC>[38;2;34;197;94m <ESC>[39m <ESC>[38;2;34;197;94m     4 + const a = <ESC>[7mnew<ESC>[39m<ESC>[27m
 
-<ESC>[38;2;239;68;68m●<ESC>[39m <ESC>[1m<ESC>[38;2;239;68;68mread<ESC>[39m<ESC>[22m   secret.md
-<ESC>[38;2;239;68;68m <ESC>[39m        <ESC>[38;2;239;68;68mPermission denied<ESC>[39m
+<ESC>[38;2;239;68;68m●<ESC>[39m <ESC>[1mReadFile<ESC>[22m(secret.md)
+<ESC>[38;2;239;68;68m <ESC>[39m <ESC>[2m⎿<ESC>[22m      <ESC>[38;2;239;68;68mPermission denied<ESC>[39m
 
-<ESC>[1m<ESC>[38;2;249;115;22m●<ESC>[39m<ESC>[22m <ESC>[1mfind<ESC>[22m   TODO
+<ESC>[1m<ESC>[38;2;249;115;22m●<ESC>[39m<ESC>[22m <ESC>[1mGrep<ESC>[22m(TODO)
 
-< Updated one.ts.
+  Updated one.ts.

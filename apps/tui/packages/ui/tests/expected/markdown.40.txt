@@ -3,7 +3,7 @@
   streamed chunks.
   +3 more lines
 
-< Result
+  Result
 
   Updated the snake_case helper with
   中文 support.

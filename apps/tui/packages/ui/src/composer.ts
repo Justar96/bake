@@ -13,16 +13,17 @@ interface HistoryVisit {
 /**
  * Acceptance is synchronous for ordinary input and asynchronous for attachment admission.
  * @param text - the complete composer draft.
- * @returns false to retain the draft, or a promise that holds editing until acceptance.
+ * @returns false to keep the draft, or a promise that blocks editing until acceptance.
  */
 export type Submit = (text: string) => void | boolean | Promise<void | boolean>
 
 /**
- * Keep same-read edits available before React paints the next frame.
- * @param submit - explicit Enter action; false or rejection retains the complete draft and cursor.
- * @param history - optional lazy session input, newest first; omitted for secrets and questions.
+ * Keep edits from the same input read available before React paints the next frame.
+ *
+ * @param submit - explicit Enter action. False or rejection keeps the complete draft and cursor.
+ * @param history - optional lazy session input, newest first. Omitted for secrets and questions.
  * @param allowEmpty - permit Enter with only staged attachments.
- * @returns rendered text/cursor, synchronous values, editing actions, and history navigation.
+ * @returns rendered text and cursor, synchronous values, editing actions, and history navigation.
  */
 export function useComposer(submit: Submit, history?: () => Iterable<string>, allowEmpty = false) {
   const [draft, setDraft] = useState(() => draftAt(''))

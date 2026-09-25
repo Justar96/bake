@@ -1,27 +1,27 @@
 
-● read   src/app.ts
-         1  const title = "中文"
+● Read(src/app.ts)
+  ⎿      1  const title = "中文"
          2  // a comment stays readable
          3  export default title
 
-● found  title  1 match
-         src/app.ts
+● Grep(title)  1 match
+  ⎿      src/app.ts
            3  export default title
 
-● ran    inspect-json
-         {"ok":true,"count":3}
+● Bash(inspect-json)
+  ⎿      {"ok":true,"count":3}
 
-● ran    check
-         WARN src/app.ts:3
+● Bash(check)
+  ⎿      WARN src/app.ts:3
          PASS tests
          https://example.com/docs
 
-● ran    custom Snippet
-         def hello():
+● Custom(Snippet)
+  ⎿      def hello():
              return "ready"
 
-● ran    custom Unknown
-         keep **literal**
+● Custom(Unknown)
+  ⎿      keep **literal**
 
-● ran    failed-check  exit 1
-         ERROR src/app.ts:3
+● Bash(failed-check)  exit 1
+  ⎿      ERROR src/app.ts:3

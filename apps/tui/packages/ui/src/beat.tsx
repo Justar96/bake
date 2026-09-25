@@ -1,18 +1,18 @@
 /**
  * One animation beat for the whole surface.
  *
- * Every moving part — the turn header's spinner and shimmer, a running
- * action's pulse — reads its time from here rather than keeping a timer of
+ * Every moving part — the turn header's spinner, a running action's
+ * blinking marker — takes its time from here instead of keeping a timer of
  * its own. Separate timers fire at unrelated moments, and each firing is a
  * commit that lays out the whole live surface again, so two running actions
  * and a header cost three layouts where one would do. Here there is one
- * timer, and it commits only when a frame would draw something different:
- * each part says what it would show at a time as a short key, and a beat on
+ * timer, and it commits only when a frame would draw something different.
+ * Each part says what it would show at a time as a short key, and a beat on
  * which no key changed renders nothing. While nothing subscribes — no turn,
  * no running action, a header with no room to draw — there is no timer.
  *
  * The provider holds the time in state, so a beat that changes something is
- * one commit that re-renders only the parts reading it: its children are the
+ * one commit that re-renders only the parts reading it. Its children are the
  * same element on every beat, and React skips them.
  *
  * @module @dsh-tui/ui/beat
@@ -24,7 +24,7 @@ import { FRAME_MS, type Clock } from './activity.ts'
 /** What a moving part would draw at a time, as a key that differs when the drawing does. */
 export type View = (now: number) => string
 
-/** A subscription's handle: resynchronise its key after a render, or end it. */
+/** A subscription's handle. Resynchronise its key after a render, or end it. */
 interface Subscription {
   /** Record the key the part just drew, so the next beat compares against the screen. */
   readonly drawn: (key: string) => void
@@ -40,7 +40,7 @@ interface BeatValue {
 const BeatContext = createContext<BeatValue | undefined>(undefined)
 
 /**
- * The timer behind a provider: one `clock.every` while any part subscribes.
+ * The timer behind a provider. One `clock.every` while any part subscribes.
  *
  * @param clock - the time source.
  * @param publish - commits a new time; called at most once a beat.
@@ -121,8 +121,8 @@ export function useBeat(enabled: boolean, view: View): number | undefined {
       current.dispose()
       subscription.current = undefined
     }
-    // `now` is read once, for the key already drawn; later renders
-    // resynchronise below rather than resubscribing on every beat.
+    // `now` is read once, for the key already drawn. Later renders
+    // resynchronise below instead of resubscribing on every beat.
   }, [subscribe])
   // A render for any reason — a new beat, or new props that change the view —
   // is what is on screen now, so the next beat compares against it.

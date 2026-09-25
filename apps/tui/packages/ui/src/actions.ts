@@ -1,26 +1,26 @@
 /**
- * Calls and their results folded into one block per action, and a step's
- * calls into one block per step.
+ * Fold calls and their results into one block per action, and a step's calls
+ * into one block per step.
  *
- * The session log records a call and its result as two events, and projected
- * one row each they printed as two blocks: the call, and a few rows below it,
- * after any other call made alongside it, the outcome. This fold holds each
+ * The session log records a call and its result as two events. Projected as
+ * one row each, they print as two blocks. The call, then the outcome a few
+ * rows later, after any other call made alongside it. This fold holds each
  * call until its result arrives and releases the two together, in call order,
  * so each action prints once, finished, where the model made it.
  *
- * Calls are held until their step ends rather than released one by one, so
- * the calls one step made print together: two or more as a `tool-group`, one
- * head over all of them, which reads as the one decision the model made.
+ * Calls stay held until their step ends. They are not released one by one.
+ * The calls one step made print together. Two or more are a `tool-group`, with
+ * one head over all of them, because they were one model decision.
  *
- * The block is the same shape from the moment its calls stream to the moment
- * it prints: calls the model is still streaming, calls its message announced
- * but the loop has not dispatched, and calls running or finished are drawn as
- * one block, in the order the model made them. A block that changed shape on
- * the way — separate calls becoming one group, or a group losing the calls
- * not yet dispatched — would give up rows the frame holds blank until history
- * next prints, which leaves a gap over whatever the turn draws next.
+ * The block keeps the same shape from the first streaming call until it
+ * prints. That includes calls the model is still streaming, calls the message
+ * announced but the loop has not dispatched, and calls that are running or
+ * finished. They stay one block, in the order the model made them. A block
+ * that changed shape — separate calls becoming one group, or a group dropping
+ * calls not yet dispatched — would give up rows the frame holds blank until
+ * history next prints. That leaves a gap above whatever the turn draws next.
  *
- * Pure over the rows it is handed; the application feeds it every committed
+ * Pure over the rows it is handed. The application feeds it every committed
  * event's rows, live or replayed, so a resumed session prints the same blocks
  * a live one did.
  *
@@ -30,9 +30,10 @@
 import type { Row, ToolCallRow } from './rows.ts'
 
 /**
- * Events that release every held call: the end of the step that made them,
- * and, for a log that records no step boundary, the message or turn end that
- * follows them.
+ * Events that release every held call.
+ *
+ * That is the end of the step that made them. A log with no step boundary
+ * uses the following message or turn end instead.
  */
 export const SETTLES: ReadonlySet<string> = new Set(['step/end', 'assistant/message', 'turn/end'])
 
@@ -42,15 +43,15 @@ export class Actions {
   /** Calls the step's message made that the loop has not dispatched yet. */
   private announced: readonly ToolCallRow[] = []
 
-  /** Calls not yet released, in call order, as the block they will print as. */
+  /** Calls not yet released, in call order, in the block they will print as. */
   get pending(): readonly Row[] { return this.live() }
 
   /**
-   * The live region's rows: what is still streaming, then every call of the
+   * Rows for the live region. What is still streaming, then every call of the
    * step not yet released, as the one block they will print as.
    *
-   * @param stream - the rows of the attempt still streaming, whose calls join
-   *   the block and whose text stays ahead of it, as the message will order them.
+   * @param stream - rows of the attempt still streaming. Their calls join the
+   *   block. Their text stays ahead of it, in the order the message will use.
    * @returns the rows to draw live.
    */
   live(stream: readonly Row[] = []): readonly Row[] {
@@ -64,7 +65,7 @@ export class Actions {
   }
 
   /**
-   * Hold a place for the calls a committed message made, until each call's
+   * Reserve a place for the calls a committed message made, until each call's
    * own event replaces it or the step ends.
    * @param calls - the message's calls, as `announcedCalls` reads them.
    */
@@ -75,13 +76,13 @@ export class Actions {
   /**
    * Fold one event's rows.
    *
-   * A result matching a held call finishes it; a result with no held call
-   * passes through as its own row. Every other row passes through unchanged:
-   * a command's notice mid-turn prints above the actions still running.
+   * A result that matches a held call finishes that call. A result with no
+   * held call passes through as its own row. Every other row passes through
+   * unchanged. A command notice mid-turn prints above the actions still running.
    *
    * @param rows - one event's projected rows.
-   * @param settle - release every held call, finished or not, as the end of
-   *   a step requires: whatever follows them follows them all. See {@link SETTLES}.
+   * @param settle - release every held call, finished or not. A step end
+   *   requires this. Whatever follows the calls follows all of them. See {@link SETTLES}.
    * @returns the rows to commit, in order.
    */
   fold(rows: readonly Row[], settle = false): readonly Row[] {
@@ -104,7 +105,7 @@ export class Actions {
 }
 
 /**
- * Calls as the block they print as.
+ * The block one step's calls print as.
  * @param calls - one step's calls, in order.
  * @returns nothing, the call alone, or a group of them.
  */

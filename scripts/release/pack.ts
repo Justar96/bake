@@ -4,6 +4,10 @@
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
+import { windowsLauncher } from '../../packages/boot/updater/src/install.ts'
+
+/** Placeholder `install.ps1` replaces with the install root in the launcher template. */
+const LAUNCHER_ROOT = '@@BAKE_RELEASE_ROOT@@'
 
 const ROOT = resolve(import.meta.dir, '../..')
 const OUTPUT = join(ROOT, '.artifacts/bake-release')
@@ -66,6 +70,9 @@ try {
     const command = readFileSync(join(stage, 'bin/bake.cmd'), 'utf8')
     writeFileSync(join(stage, 'bin/bake.cmd'), command.replace(/\r?\n/g, '\r\n'))
   }
+  // The installed Windows command, with the install root left for install.ps1
+  // to fill in: the updater and the installer then write the same launcher.
+  writeFileSync(join(stage, 'bin/bake-launcher.cmd.template'), windowsLauncher(LAUNCHER_ROOT))
   chmodSync(join(stage, 'bin/bake'), 0o755)
   await run(['bun', 'install', '--production', '--frozen-lockfile', '--filter', '@deepseek-ai/dsh'], stage)
 

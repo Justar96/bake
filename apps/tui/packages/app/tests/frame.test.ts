@@ -30,7 +30,7 @@ describe('resolveFrame', () => {
   })
 
   test('falls back to ASCII where Ambiguous characters may be drawn two cells wide', () => {
-    // Not a capability, so it cannot be detected: a CJK character locale is
+    // Not a capability, so it cannot be detected. A CJK character locale is
     // the signal that the terminal may be configured that way. The cost of
     // being wrong is a frame at twice the width Ink measured, which wraps and
     // leaves Ink's row arithmetic wrong from then on.

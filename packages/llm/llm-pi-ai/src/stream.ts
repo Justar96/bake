@@ -31,6 +31,24 @@ export function mapUsage(usage: PiUsage): TokenUsage {
   }
 }
 
+/**
+ * The usage chunk for a terminal pi-ai message, or none when the provider
+ * reported no accounting.
+ *
+ * pi-ai starts every message at zero and fills in what the endpoint sends, so
+ * an all-zero count means the endpoint sent nothing; some proxies stream
+ * without usage. Every request carries at least its prompt, so zero is never
+ * a real reading, and recording it would read as an empty context rather than
+ * an unknown one.
+ *
+ * @param usage - cumulative usage from the terminal pi-ai event.
+ * @returns the chunks to yield before `finish`: one `usage`, or none.
+ */
+function usageChunks(usage: PiUsage): StreamChunk[] {
+  const reported = usage.input + usage.output + usage.cacheRead + usage.cacheWrite + usage.totalTokens > 0
+  return reported ? [{ type: 'usage', usage: mapUsage(usage) }] : []
+}
+
 // XXX(pi-ai upstream): pi-ai flattens the caught error to `error.message`
 // (api/anthropic-messages.js: `errorMessage = error instanceof Error ?
 // error.message : JSON.stringify(error)`), discarding the original Error and its
@@ -136,7 +154,8 @@ export function mapStopReason(message: AssistantMessage, contextWindow?: number)
  * @param callerSignal - caller cancellation state; an aborted caller makes any
  *   in-band terminal error an aborted finish.
  * @param requestedModel - request model identity recorded for durable replay.
- * @returns the harness chunks, ending with `usage` then `finish`; throws
+ * @returns the harness chunks, ending with `usage`, when the provider
+ *   reported any, then `finish`; throws
  *   `LlmError` (`STREAM_CLOSED`) if the source ends without a terminal event.
  */
 export async function* toStreamChunks(
@@ -206,7 +225,7 @@ export async function* toStreamChunks(
         }
         break
       case 'done':
-        yield { type: 'usage', usage: mapUsage(event.message.usage) }
+        yield* usageChunks(event.message.usage)
         yield {
           type: 'finish',
           reason: mapStopReason(event.message, contextWindow),
@@ -216,7 +235,7 @@ export async function* toStreamChunks(
       case 'error':
         // In-stream error delivery (pi-ai's style) → error finish chunk
         // (the harness's other sanctioned error path besides throwing).
-        yield { type: 'usage', usage: mapUsage(event.error.usage) }
+        yield* usageChunks(event.error.usage)
         yield {
           type: 'finish',
           reason: mapStopReason(

@@ -1,0 +1,174 @@
+name: Release
+
+# Push a tag `v<version>` to release: every platform is built and checked on
+# its own runner, then one job signs the manifest, drafts the GitHub release,
+# deploys the download service, checks what it serves, and publishes the
+# draft. Run it by hand for a dry run of the builds, which publishes nothing.
+#
+# The GitHub release carries everything a client needs, signed the same way,
+# so it is a release host of its own. Set the repository variable
+# BAKE_DOWNLOAD_SERVICE to `off` to publish there alone, without Railway.
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One release at a time, and never cancelled halfway through publishing.
+concurrency:
+  group: bake-release
+  cancel-in-progress: false
+
+env:
+  BAKE_RELEASE_BASE_URL: https://bake.justar.dev
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      # The tag names the workspace version, the changelog says what changed,
+      # and the version is newer than the one the host serves.
+      - id: check
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            bun scripts/release/preflight.ts --tag "$GITHUB_REF_NAME" --notes release-notes.md
+          else
+            bun scripts/release/preflight.ts --offline --notes release-notes.md
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: release-notes.md
+          retention-days: 7
+
+  build:
+    needs: preflight
+    strategy:
+      # Every platform reports, but publishing needs all of them.
+      fail-fast: false
+      matrix:
+        include:
+          - { target: linux-x64, os: ubuntu-24.04 }
+          - { target: linux-arm64, os: ubuntu-24.04-arm }
+          - { target: darwin-arm64, os: macos-15 }
+          - { target: darwin-x64, os: macos-15-intel }
+          - { target: win32-x64, os: windows-latest }
+    name: build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    env:
+      VERSION: ${{ needs.preflight.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      # Native modules are built for the runner, so the runner must be the target.
+      - name: Check the runner builds ${{ matrix.target }}
+        shell: bash
+        run: |
+          host="$(node -p 'process.platform + "-" + process.arch')"
+          [ "$host" = "${{ matrix.target }}" ] || { echo "Runner is $host, not ${{ matrix.target }}" >&2; exit 1; }
+      - run: bun run release:pack
+      # Install this archive with the real installer and update through it,
+      # signed with a throwaway key; the release key never reaches a build.
+      - run: bun run release:assemble --ephemeral-key
+      - run: bun run release:verify-local
+      # The PTY driver needs a POSIX terminal.
+      - name: Built-profile terminal scenarios
+        if: runner.os != 'Windows'
+        run: bun run test:e2e --no-build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: archive-${{ matrix.target }}
+          path: .artifacts/bake-release/${{ env.VERSION }}/bake-v${{ env.VERSION }}-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+  publish:
+    needs: [preflight, build]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # The environment holds the signing key and the deploy token, and can
+    # require an approval before either is used.
+    environment:
+      name: release
+      url: ${{ env.BAKE_RELEASE_BASE_URL }}
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.preflight.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: archive-*
+          path: .artifacts/bake-release/${{ env.VERSION }}
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+      - name: Sign the manifest
+        env:
+          BAKE_RELEASE_SIGNING_KEY: ${{ secrets.BAKE_RELEASE_SIGNING_KEY }}
+        run: |
+          [ -n "$BAKE_RELEASE_SIGNING_KEY" ] || { echo 'The release environment has no BAKE_RELEASE_SIGNING_KEY secret' >&2; exit 1; }
+          key="$RUNNER_TEMP/release-signing-key.pem"
+          trap 'rm -f "$key"' EXIT
+          ( umask 077; printf '%s\n' "$BAKE_RELEASE_SIGNING_KEY" > "$key" )
+          BAKE_RELEASE_SIGNING_KEY_FILE="$key" bun run release:assemble --complete
+      # The image build's own gate, run first: the committed key only.
+      - run: node distribution/host/verify-manifest.mjs --complete
+      - name: Draft the GitHub release
+        run: |
+          files=(distribution/host/public/releases/"$VERSION"/*.tar.gz distribution/host/public/latest.json distribution/host/public/latest.json.sig distribution/host/install.sh distribution/host/install.ps1)
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "${files[@]}" --draft --verify-tag \
+              --title "Bake $VERSION" --notes-file release-notes.md
+          fi
+      - name: Deploy the download service
+        if: vars.BAKE_DOWNLOAD_SERVICE != 'off'
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          [ -n "$RAILWAY_TOKEN" ] || { echo 'The release environment has no RAILWAY_TOKEN secret' >&2; exit 1; }
+          npm install --global @railway/cli@5.62.1
+          railway up ./distribution/host --path-as-root --no-gitignore --ci \
+            --project 28ff3000-7240-4c57-81d1-7bd05445c1ee \
+            --environment production --service bake-downloads \
+            -m "Bake $VERSION ($GITHUB_SHA)"
+      # A successful deploy is not a release until the public host serves it.
+      - if: vars.BAKE_DOWNLOAD_SERVICE != 'off'
+        run: bun run release:verify-live "$VERSION" --complete
+      - run: gh release edit "$GITHUB_REF_NAME" --draft=false --latest
+      # Its assets download without a login only from a public repository.
+      - name: Check the GitHub release as a client reads it
+        if: github.event.repository.visibility == 'public'
+        env:
+          BAKE_RELEASE_BASE_URL: https://github.com/${{ github.repository }}/releases/latest/download
+        run: bun run release:verify-live "$VERSION" --complete

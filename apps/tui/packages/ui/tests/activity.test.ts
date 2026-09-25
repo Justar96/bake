@@ -1,10 +1,10 @@
 /**
- * Turn header vocabulary. Runs under `bun test` because the module is pure:
- * the clock is a value the caller hands in.
+ * Turn header vocabulary. Runs under `bun test` because the module is pure.
+ * The clock is a value the caller hands in.
  */
 
 import { describe, expect, it } from 'bun:test'
-import { activityWord, FRAME_MS, formatElapsed, lastTurn, lightStride, phaseLabel, phaseOf, shimmer, shimmerStep, SHIMMER_LEVELS, SPINNER, SPINNER_REST, spinnerFrame, thinkingRows, turnSummary } from '../src/activity.ts'
+import { activityWord, FRAME_MS, formatElapsed, lastTurn, phaseLabel, phaseOf, SPINNER, SPINNER_REST, spinnerFrame, thinkingRows, turnSummary } from '../src/activity.ts'
 import { dictionaries } from '../src/copy.ts'
 import type { Row } from '../src/rows.ts'
 
@@ -45,42 +45,6 @@ describe('spinner', () => {
       const next = pixels[(step + 1) % pixels.length]!
       expect(next).toEqual(previous.map(row => [row.at(-1), ...row.slice(0, -1)]))
     }
-  })
-})
-
-describe('shimmer', () => {
-  const at = (length: number, step: number) => shimmer(length, step * FRAME_MS)
-
-  it('sweeps a soft band in from the left, one cell a beat, and out on the right', () => {
-    expect(Array.from({ length: 9 }, (_, step) => at(5, step).join(''))).toEqual([
-      '10000', '21000', '32100', '23210', '12321', '01232', '00123', '00012', '00001',
-    ])
-    // Brightest at the band's centre, and never brighter than the glint.
-    expect(Math.max(...at(5, 4))).toBe(SHIMMER_LEVELS)
-  })
-
-  it('rests unlit between sweeps, then starts again', () => {
-    // Nine beats cross five cells, then twelve rest.
-    const rest = Array.from({ length: 12 }, (_, index) => at(5, 9 + index))
-    expect(rest.every(levels => levels.every(level => level === 0))).toBe(true)
-    expect(at(5, 21)).toEqual(at(5, 0))
-    expect(shimmerStep(5, 9 * FRAME_MS)).toBeUndefined()
-    expect(shimmerStep(5, 21 * FRAME_MS)).toBe(0)
-  })
-
-  it('holds still within a beat, and before the turn started', () => {
-    expect(shimmer(5, FRAME_MS * 3 + FRAME_MS - 1)).toEqual(at(5, 3))
-    expect(shimmer(5, -100)).toEqual(at(5, 0))
-    expect(shimmer(0, FRAME_MS)).toEqual([])
-    expect(shimmerStep(0, FRAME_MS)).toBeUndefined()
-  })
-
-  it('crosses a wider rule in longer strides, so the sweep keeps its pace', () => {
-    expect([1, 32, 33, 64, 65, 200].map(lightStride)).toEqual([1, 1, 2, 2, 3, 3])
-    // Three cells a beat: 12 cells and a five-cell band take six beats, then rest.
-    expect(Array.from({ length: 7 }, (_, beat) => shimmerStep(12, beat * FRAME_MS, 3))).toEqual([0, 3, 6, 9, 12, 15, undefined])
-    expect(shimmer(12, FRAME_MS * 2, 3).join('')).toBe('001232100000')
-    expect(shimmerStep(12, 18 * FRAME_MS, 3)).toBe(0)
   })
 })
 

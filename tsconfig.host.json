@@ -36,6 +36,9 @@
       "path": "./packages/boot/plugin-manager/tsconfig.json"
     },
     {
+      "path": "./packages/boot/updater/tsconfig.json"
+    },
+    {
       "path": "./packages/bundle/base/tsconfig.json"
     },
     {

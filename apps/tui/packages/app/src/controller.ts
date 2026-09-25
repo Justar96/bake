@@ -23,15 +23,16 @@ import { SubagentInspection } from './inspection.ts'
 import { FileReferences } from './references.ts'
 import { listTargets, login } from './login.ts'
 import { bakeVersion, changelogFor } from './release.ts'
-import { contextFor, usageFor } from './status.ts'
+import { contextFor, goalFor, usageFor } from './status.ts'
 import { listRoutes, namesRoute, routeOf, resolveRoute, resolveSelection } from './model.ts'
 import type { ModelSelectionRef } from '@deepseek-ai/dsh-agent'
-// Empty type imports: each declaration-merges a key into the projection map
+// Empty type imports. Each declaration-merges a key into the projection map
 // (`contextPressure`, `todos`), and those keys are invisible here without them.
 import type {} from '@deepseek-ai/dsh-token-meter'
 import type {} from '@deepseek-ai/dsh-tool-todo/types'
 import type {} from '@deepseek-ai/dsh-plan-mode/types'
 import type {} from '@deepseek-ai/dsh-permission-presets/types'
+import type {} from '@deepseek-ai/dsh-goal'
 
 /** One terminal's presentation over a live Agent and its durable projections. */
 export class SessionController {
@@ -56,13 +57,13 @@ export class SessionController {
   /** Rows for the attempt currently streaming that have not printed yet. */
   private blocks: readonly Row[] = []
   /**
-   * Actions whose block has not printed, in call order: running, or finished
-   * behind one that is.
+   * Actions whose block has not printed, in call order. An action is running,
+   * or finished behind one that is.
    *
-   * A call and its result print together, once, as one block, so an action
-   * never appears as a call with its outcome stacked a few rows below it. In
-   * order, so parallel calls read in the order the model made them however
-   * they finish.
+   * A call and its result print together, once, as one block. An action never
+   * appears as a call with its outcome stacked a few rows below it. Order is
+   * preserved, so parallel calls appear in the order the model made them,
+   * however they finish.
    */
   private readonly actions = new Actions()
   private stream: { attemptId: string; blocks: LiveBlocks; printed: Printed } | undefined
@@ -90,9 +91,9 @@ export class SessionController {
     private readonly credentialRefs: readonly string[], private readonly changed: () => void,
     attachmentOptions: AttachmentOptions, private readonly selection?: ModelSelectionRef) {
     this.attachments = new AttachmentDraft(agent, attachmentOptions, copy)
-    // The tool registry is the lookup: a tool contributed by any plugin
-    // presents its own calls here without this surface knowing it exists, and
-    // a profile with no tools service renders every call at its raw arguments.
+    // The tool registry is the lookup. A tool contributed by any plugin
+    // presents its own calls here without this surface knowing it exists. A
+    // profile with no tools service renders every call at its raw arguments.
     const tools = agent.ctx.get('tools')
     this.projector = projector(copy, name => tools?.get(name))
     this.interactions = new Interactions(ctx, agent, () => this.repaint())
@@ -172,13 +173,13 @@ export class SessionController {
     this.off.push(agent.ctx.effect(() => commands.register({
       name: 'help', description: copy.listCommands, recordInput: false,
       handler: () => {
-        // The registry is the list: a command contributed by any plugin appears
-        // here without this surface knowing it exists.
+        // The registry is the list. A command contributed by any plugin
+        // appears here without this surface knowing it exists.
         //
-        // Returned rather than notified, so the catalog commits to the
-        // transcript. The notice region is bounded by the terminal's height and
-        // a list of every registered command does not fit it; scrollback has
-        // room for the whole thing and can scroll it.
+        // Returned, not notified. The catalog commits to the transcript. The
+        // notice region is bounded by the terminal's height, and a list of
+        // every registered command does not fit it. Scrollback has room for
+        // the whole list and can scroll it.
         return {
           kind: 'success',
           text: commands.list(this.agent)
@@ -191,7 +192,7 @@ export class SessionController {
       name: 'changelog', description: copy.changelogCommand, recordInput: false,
       handler: async ({ rawInput, signal }) => {
         if (rawInput.trim() !== '') return { kind: 'error', text: copy.changelogUsage }
-        // Returned, like /help, so the entry commits to scrollback instead of
+        // Returned, like `/help`, so the entry commits to scrollback instead of
         // being cut to the notice region's height.
         const entry = await changelogFor(bakeVersion(), signal)
         return entry === undefined ? { kind: 'error', text: copy.changelogUnavailable } : { kind: 'success', text: entry }
@@ -212,7 +213,8 @@ export class SessionController {
       if (this.buffered !== undefined) this.buffered.push(event)
       else this.append(event)
       // The rows the stream stood in for have committed. `turn/end` covers an
-      // interrupted turn, which reaches neither.
+      // interrupted turn, which reaches neither `assistant/message` nor
+      // `assistant/attempt`.
       if (event.type === 'assistant/message' || event.type === 'assistant/attempt' || event.type === 'turn/end') {
         this.blocks = []
       }
@@ -230,7 +232,13 @@ export class SessionController {
     if (projections === undefined) throw new Error('tui: sessionProjections is required')
     this.off.push(projections.onChanged((session, key) => {
       if (session !== agent.session) return
-      if (key === 'inbox' || key === 'contextPressure' || key === 'todos' || key === 'plan' || key === 'permissions') this.repaint()
+      if (key === 'inbox' || key === 'contextPressure' || key === 'todos' || key === 'plan' || key === 'permissions' || key === 'goal') this.repaint()
+    }))
+    // Activation is process-local and is not written to the goal projection.
+    // Create and resume arm the goal; pause disarms it. Those transitions
+    // arrive only on this event, so the header would stay stale without it.
+    this.off.push(ctx.on('goal/activation-changed', ({ sessionId }) => {
+      if (sessionId === agent.session.id) this.repaint()
     }))
     this.references = new FileReferences(agent, copy, () => this.repaint())
     this.catalog = new InputCatalog(ctx, agent, copy, () => this.repaint())
@@ -264,11 +272,12 @@ export class SessionController {
       .map(message => ({ id: message.id, target, text: message.content.flatMap(block => block.type === 'text' ? [block.text] : []).join(''), attachments: attachmentSummaries(message.content) })))
     const surface = projections?.snapshot(this.agent.session, ['contextPressure', 'plan', 'tokenUsage', 'permissions']).values
     const pressure = surface?.contextPressure
-    // The agent's list, not a log of writes to it: `todos` folds every
+    // The agent's current list, not a log of writes to it. `todos` folds every
     // `todo/write` to the latest whole list, which is the only version that
-    // is still true.
+    // is still current.
     const todos = projections?.stateOf(this.agent.session, 'todos')
     const plan = surface?.plan
+    const goal = this.goal()
     const children = this.subagents.view
     const subagents = subagentEntries(children, this.ctx, this.copy)
     const selected = this.selection?.current
@@ -288,6 +297,7 @@ export class SessionController {
       subagents,
       inspection: this.inspection?.view,
       ...plan === undefined ? {} : { plan },
+      ...goal === undefined ? {} : { goal },
       ...surface?.permissions === undefined ? {} : { permission: surface.permissions.currentValue },
       ...thinkingLevel === undefined ? {} : { thinkingLevel },
       completion: this.catalog.view, files: this.references.view, attachments: this.attachments.view,
@@ -295,6 +305,19 @@ export class SessionController {
       context: contextFor(pressure, model),
       ...usage === undefined ? {} : { usage },
     }
+  }
+
+  /**
+   * Live goal for this agent, including process-local activation.
+   *
+   * Returns undefined when the goal service is absent, and when this agent is
+   * no longer the live instance. A session switch can still observe an agent
+   * that is being retired, and the service rejects that read.
+   */
+  private goal() {
+    const goals = this.ctx.get('goals')
+    if (goals === undefined || this.ctx.get('agents')?.get(this.agent.id) !== this.agent) return undefined
+    return goalFor(goals.get(this.agent))
   }
 
   /**
@@ -384,6 +407,31 @@ export class SessionController {
     this.attachments.clear()
   }
 
+  /**
+   * Step the selected model's reasoning effort to the next it offers, after
+   * the last wrapping to the provider default: the Shift-Tab toggle.
+   *
+   * The efforts are the route's own, already loaded for the status line's
+   * `Think` badge, so the step is synchronous and needs no picker. A route
+   * whose reasoning is still loading, or that offers no efforts, says so
+   * instead. The selection is read each time a step enters prompt assembly,
+   * so a change during a turn takes effect from its next step.
+   */
+  cycleThinking(): void {
+    const current = this.selection?.current
+    if (current === undefined) { this.notify(this.copy.noModelSelection); return }
+    const route = routeOf(current)
+    const efforts = this.reasoning?.route === route ? this.reasoning.info?.efforts ?? [] : undefined
+    if (efforts === undefined) { this.notify(this.copy.thinkingLoading); return }
+    if (efforts.length === 0) { this.notify(`${this.copy.thinkingUnsupported}: ${route}`); return }
+    // Provider default first, then each effort in the adapter's order.
+    const steps = [undefined, ...efforts.map(effort => effort.id)]
+    const next = steps[(steps.indexOf(current.reasoningEffort) + 1) % steps.length]
+    this.selection!.current = { provider: current.provider, model: current.model, ...next === undefined ? {} : { reasoningEffort: next } }
+    const label = next === undefined ? this.copy.providerDefault : efforts.find(effort => effort.id === next)?.name ?? next
+    this.notify(`${this.copy.thinking}: ${label}${this.agent.status === 'running' ? ` \u00b7 ${this.copy.thinkingNextStep}` : ''}`)
+  }
+
   /** @returns after outstanding command and catalog work has settled. */
   async drain(): Promise<void> { await Promise.all([this.submission?.done, this.command?.done, this.reasoningLoad, this.catalog.drain(), this.subagents.drain(), this.references.drain()]) }
 
@@ -425,7 +473,7 @@ export class SessionController {
   }
 
   private repaint(): void {
-    // Parent approvals must remain reachable while its child is being inspected.
+    // Parent approvals must stay reachable while a child is being inspected.
     if (this.inspection !== undefined && this.interactions.current !== undefined) {
       this.inspection.close()
       this.inspection = undefined
@@ -442,26 +490,26 @@ export class SessionController {
     if (event.seq <= this.cursor) return []
     this.cursor = event.seq
     let rows = project(event, this.projector)
-    // The streaming attempt printed its finished lines already; the commit
+    // The streaming attempt already printed its finished lines. The commit
     // adds only what it has not.
     if (event.type === 'assistant/message' && this.stream !== undefined) {
       rows = this.stream.printed.reconcile(rows)
       this.stream.printed = new Printed()
     }
-    // A step's end follows every action it made, finished or not.
+    // A step end follows every action it made, finished or not.
     const out = this.actions.fold(rows, SETTLES.has(event.type))
-    // After the fold, since the message settles the step before it: its calls
-    // keep their places until the loop dispatches each.
+    // After the fold. The message settles the step before it, so its calls
+    // keep their places until the loop dispatches each one.
     if (event.type === 'assistant/message') this.actions.announce(announcedCalls(event))
     this.committed = appendTranscript(this.committed, out)
     return out
   }
 
   /**
-   * Close an attempt whose printed lines no commit will stand behind.
+   * Close an attempt whose printed lines no commit will replace.
    *
-   * Scrollback cannot be unwritten, so the lines stay; the notice says they
-   * were discarded, where a retry would otherwise read as the answer twice.
+   * Scrollback cannot be unwritten, so the lines stay. The notice says they
+   * were discarded. Without it, a retry would look like the answer twice.
    */
   private discard(): void {
     if (this.stream?.printed.any !== true) return
@@ -472,7 +520,7 @@ export class SessionController {
   /** Keep process-local frames in revision order; the log remains the commit source. */
   private streamFrame(frame: AssistantStreamFrame): void {
     if (frame.type === 'start') {
-      // Revisions are monotone across attempts; a delayed start cannot replace
+      // Revisions are monotone across attempts. A delayed start cannot replace
       // the current reply or restore an attempt whose end already arrived.
       if (frame.revision <= this.streamRevision) return
       this.discard()
@@ -488,7 +536,7 @@ export class SessionController {
       this.blocks = live
     } else if (frame.type === 'end') {
       // `end` is published once the assistant message has committed, so the
-      // rows these stood in for are already in the transcript; holding them a
+      // rows these stood in for are already in the transcript. Holding them a
       // frame longer would show every block twice. An attempt that committed
       // no message printed lines nothing will replace.
       if (frame.outcome.kind === 'abandoned' || frame.outcome.eventType !== 'assistant/message') this.discard()

@@ -28,3 +28,5 @@ Examples:
   dsh tui --resume <session>                arguments after the launcher flags reach the app
   dsh tui --help                            the terminal app's own flags and help
   dsh plugin --profile tui add <package>    install a plugin into the tui profile
+  dsh update                                install the newest Bake release
+  dsh update --check                        only report whether a newer release exists

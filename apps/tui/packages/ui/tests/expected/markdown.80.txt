@@ -4,7 +4,7 @@
   Then verify the output.
   And replay it.
 
-< Result
+  Result
 
   Updated the snake_case helper with 中文 support.
 

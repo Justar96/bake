@@ -72,9 +72,9 @@ describe('tool syntax', () => {
   })
 
   test('keeps a zero-line preview collapsed and reports omitted rows', () => {
-    expect(present(row(outputLines('one\ntwo\nthree')), { ...bound, lines: 0 }).map(line => line.text)).toEqual(['', 'file.ts  3 lines'])
+    expect(present(row(outputLines('one\ntwo\nthree')), { ...bound, lines: 0 }).map(line => line.text)).toEqual(['', 'Read(file.ts)  3 lines'])
     const lines = present(row(outputLines('one\ntwo\nthree\nfour\nfive')), { ...bound, lines: 2 })
-    expect(lines.map(line => line.text)).toEqual(['', 'file.ts', 'one', '+3 more lines', 'five'])
+    expect(lines.map(line => line.text)).toEqual(['', 'Read(file.ts)', 'one', '+3 more lines', 'five'])
   })
 })
 

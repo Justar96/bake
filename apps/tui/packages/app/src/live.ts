@@ -1,12 +1,12 @@
 /**
  * Stream chunks as the rows the live region draws while a turn is still running.
  *
- * Separate from `BlockAssembler.interruptedBlocks()`, which answers a different
- * question: what an interrupted attempt may safely finalize into a durable
- * message. That answer drops every tool call, because interruption precedes
- * dispatch and keeping one would need a fabricated result. Display has no such
- * obligation — nothing here is written anywhere — and dropping the calls is
- * what makes a turn look idle for as long as the model spends calling tools.
+ * Separate from `BlockAssembler.interruptedBlocks()`. That method decides
+ * what an interrupted attempt may safely finalize into a durable message.
+ * It drops every tool call, because interruption precedes dispatch and
+ * keeping one would need a fabricated result. Display has no such
+ * obligation. Nothing here is written anywhere. Keeping the calls is what
+ * shows the turn as busy while the model is calling tools.
  *
  * @module @dsh-tui/app/live
  */
@@ -36,8 +36,8 @@ export interface KeyedRow {
 /**
  * Live rows for one assistant attempt, rebuilt from the chunks it has streamed.
  *
- * One instance per attempt: it accumulates, and a second attempt's chunks would
- * append to the first attempt's blocks.
+ * One instance per attempt. It accumulates, and a second attempt's chunks
+ * would append to the first attempt's blocks.
  */
 export class LiveBlocks {
   private readonly order: number[] = []
@@ -46,7 +46,7 @@ export class LiveBlocks {
   /**
    * Feed one chunk into the display state.
    *
-   * Tolerant of delta-only protocols the same way the assembler is: a delta for
+   * Tolerant of delta-only protocols the same way the assembler is. A delta for
    * an index no `block-start` announced opens that block itself, so an adapter
    * that sends no block framing still shows its output.
    *
@@ -70,9 +70,9 @@ export class LiveBlocks {
         break
       }
       case 'block-end': {
-        // `block-end` is authoritative: an adapter may correct what its deltas
+        // `block-end` is authoritative. An adapter may correct what its deltas
         // implied, and only here is a tool call's name guaranteed to have
-        // arrived. Arguments are still not shown — the committed row carries
+        // arrived. Arguments are still not shown. The committed row carries
         // them, presented, a moment later.
         const block = this.open(chunk.index, chunk.block.type)
         block.type = chunk.block.type
@@ -81,7 +81,7 @@ export class LiveBlocks {
         break
       }
       default:
-        // `usage` and `finish` carry no displayable content, and a merge-extended
+        // `usage` and `finish` carry no displayable content. A merge-extended
         // chunk type this build does not know is not guessed at.
         break
     }
@@ -90,10 +90,10 @@ export class LiveBlocks {
   /**
    * The rows to draw for what has streamed so far.
    *
-   * Stream order, because that is the order the events happened in: reasoning
-   * before the call it led to, and the answer after the call it waited for. A
-   * block with nothing to show yet produces no row rather than an empty one,
-   * so a block that has only been announced costs no height.
+   * Stream order, because that is the order the events happened in. Reasoning
+   * comes before the call it led to, and the answer comes after the call it
+   * waited for. A block with nothing to show yet produces no row, not an
+   * empty one, so a block that has only been announced costs no height.
    *
    * @returns live rows in stream order, empty before anything displayable arrives.
    */
@@ -111,9 +111,9 @@ export class LiveBlocks {
       const block = this.blocks.get(index)!
       if (block.type === 'text') return block.text.trim() === '' ? [] : [{ key: index, row: { kind: 'assistant', text: block.text } }]
       if (block.type === 'reasoning') return block.text.trim() === '' ? [] : [{ key: index, row: { kind: 'reasoning', text: block.text } }]
-      // A call is shown from the moment its name is known and not before: the
-      // verb column is derived from the name, so a nameless call could only be
-      // drawn by guessing at what the agent is doing.
+      // A call is shown from the moment its name is known, and not before.
+      // The verb column is derived from the name, so a nameless call could
+      // only be drawn by guessing what the agent is doing.
       if (block.type === 'tool-call' && block.name !== undefined) {
         return [{ key: index, row: { kind: 'tool-call', callId: block.id ?? `live-${index}`, tool: block.name, input: PENDING_ARGUMENTS } }]
       }

@@ -33,7 +33,8 @@ import { basename, dirname, join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import xterm from '@xterm/headless'
 
-import { MARKER, VERB } from '../packages/ui/src/layout.ts'
+import { COLUMN, MARKER } from '../packages/ui/src/layout.ts'
+import { toolLabel } from '../packages/ui/src/present.ts'
 import { dictionaries } from '../packages/ui/src/copy.ts'
 
 const ROOT = resolve(import.meta.dir, '../../..')
@@ -41,15 +42,15 @@ const FIXTURE = join(ROOT, 'snapshots/session/bash-tool-turn/session.v3.jsonl')
 const ARTIFACTS = join(ROOT, 'apps/tui/.smoke')
 const ANSI = /\x1b\][^\x07]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]/g
 /**
- * What the surface draws, taken from the surface rather than copied.
+ * What the surface draws, taken from the surface instead of copied.
  *
- * `MARKER` and `VERB` are the rendering vocabulary itself, so a change there
+ * `MARKER` and `toolLabel` are the rendering vocabulary itself, so a change there
  * reaches these scenarios without editing them. The rest names a screen element
  * whose owning module exports no constant, so the next vocabulary change is one
  * edit here instead of sixty string literals.
  */
 const SCREEN = {
-  /** `line.tsx` draws the caret rather than using inverse video, which NO_COLOR would erase. */
+  /** `line.tsx` draws the caret instead of using inverse video, which `NO_COLOR` would erase. */
   caret: '\u258c',
   /**
    * The status line's first field, which names the model. It is drawn from
@@ -57,7 +58,7 @@ const SCREEN = {
    */
   status: `${dictionaries.en.model}: `,
   /**
-   * An idle session with an empty draft: the composer's placeholder. A running
+   * An idle session with an empty draft. The composer's placeholder. A running
    * turn replaces it with the steering hint and blocked input with the reason,
    * so its last appearance after a turn's output means the turn has ended.
    */
@@ -65,10 +66,11 @@ const SCREEN = {
   /** The composer's prompt rail. */
   prompt: `${MARKER.prompt} `,
   /**
-   * A started tool call: the verb followed by its arguments. The verb alone
-   * would match the recorded prompt, which asks the model to run a command.
+   * A started tool call. The tool's name with its arguments in parentheses.
+   * The name alone would match the recorded prompt, which asks the model to
+   * run a command.
    */
-  toolCall: new RegExp(`\\b${VERB.run}\\s+\\{`),
+  toolCall: new RegExp(`\\b${toolLabel('bash')}\\(`),
   /** The recorded tool's output, which the transcript indents under its verb. */
   toolResult: 'TERMINAL_OK',
 } as const
@@ -276,7 +278,7 @@ class Terminal {
   }
 
   /**
-   * Wait for a mounted app: the status line drawn and paste mode enabled.
+   * Wait for a mounted app. The status line is drawn and paste mode is enabled.
    *
    * Keys typed before Ink enables bracketed paste are swallowed by the terminal
    * and never reach `useInput`, so every scenario starts here.
@@ -435,7 +437,7 @@ interface Scenario {
   summary: string
   /** Scenarios whose state this one reads. */
   requires: readonly string[]
-  /** Whether it depends on the recorded fixture rather than a live model. */
+  /** Whether it depends on the recorded fixture. A live model is not required. */
   replayOnly: boolean
   /** The scenario itself. */
   body: (run: Run) => Promise<void>
@@ -589,12 +591,12 @@ function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
 }
 
-/** Compare two values the way the recorded fixtures are compared: by content. */
+/** Compare two values the way the recorded fixtures are compared. By content. */
 function same(left: unknown, right: unknown): boolean {
   return Bun.deepEquals(left, right)
 }
 
-const DONE_LINE = new RegExp(`\\n${MARKER.reply} DONE\\r?\\n`)
+const DONE_LINE = new RegExp(`\\n {${COLUMN.rail}}DONE\\r?\\n`)
 
 scenario('fresh', 'login, model and effort selection, paste, cursor editing, a bash tool turn, the context estimate, and billed tokens', {},
   async run => {
@@ -934,7 +936,7 @@ scenario('edit', 'a recorded edit draws only its changed lines, numbered, with c
       ] },
     ]))
     await run.writeOverlay(override)
-    // Colour on for this run alone: reversed words and syntax colour are
+    // Colour on for this run alone. Reversed words and syntax colour are
     // escape sequences, and `NO_COLOR` erases both.
     const colour = { NO_COLOR: run.env.NO_COLOR, FORCE_COLOR: run.env.FORCE_COLOR }
     delete run.env.NO_COLOR
@@ -944,13 +946,17 @@ scenario('edit', 'a recorded edit draws only its changed lines, numbered, with c
         const start = tty.mark()
         const from = tty.raw.length
         tty.send('Make the home configurable.\r', 'trigger the recorded read and edit')
-        await tty.expect('edited startup.ts  +1 −1', '13 -   const home = process.env.HOME ?? fallback()',
+        await tty.expect('startup.ts)  +1 −1', '13 -   const home = process.env.HOME ?? fallback()',
           '13 +   const home = resolvedHome ?? process.env.HOME ?? fallback()', 'Edited.', start)
         const shown = tty.text.slice(start)
         tty.check('the context lines around the change are not drawn', !shown.includes('line(12)') && !shown.includes('line(14)'))
         const raw = tty.raw.slice(from)
         tty.check('the words the edit added are reversed', raw.includes('\x1b[7mresolvedHome ?? '))
-        const removed = raw.slice(raw.indexOf('13 -'), raw.indexOf('\n', raw.indexOf('13 -')))
+        // The number and the code carry separate styles, so the removed line is
+        // found through the escapes between them.
+        const at = raw.search(/13(?:\x1b\[[0-9;]*m)* (?:\x1b\[[0-9;]*m)*- /)
+        tty.check('the removed line is drawn', at >= 0)
+        const removed = raw.slice(at, raw.indexOf('\n', at))
         const colours = new Set(removed.match(/\x1b\[38;(?:5;\d+|2;\d+;\d+;\d+)m/g) ?? [])
         tty.check('the removed line carries syntax colour beside its red', colours.size >= 2)
       })
@@ -1068,24 +1074,24 @@ scenario('arrow-wave', 'the single-line processing wave loops in place and yield
           tty.send('Show the processing wave.\r')
           await tty.wait('all six arrow frames at the same position', async () => {
             const rows = await capture()
-            const header = rows.findIndex(line => /^─ [\u2800-\u283f]{3} \S+…/.test(line))
+            const header = rows.findIndex(line => /^ {2}[\u2800-\u283f]{3} \S+…/.test(line))
             if (header < 1) return false
             // PTY reads may end mid-frame, before its final scroll anchors the controls.
-            // The rule rests on the input, then a padding row, then the status line.
-            if (header !== 35 || !rows[36]!.startsWith('> ') || rows[37]!.trim() !== ''
-              || !rows[38]!.includes(SCREEN.status)) return false
+            // Header, upper rule, input, base rule, then the status line.
+            if (header !== 34 || !rows[35]!.startsWith('\u2500') || !rows[36]!.startsWith('> ')
+              || !rows[37]!.startsWith('\u2500') || !rows[38]!.includes(SCREEN.status)) return false
             tty.check('there is no dot zone above the processing line', !rows.some(line => /^[\u2800-\u283f]{3}$/.test(line)))
             frames.add(rows[header]!.slice(2, 5))
             return frames.size === 6
           })
-          tty.check('the wave stays in the rule directly above the input', frames.size === 6)
+          tty.check('the wave stays in the header directly above the input', frames.size === 6)
           const mark = tty.raw.length
           screen.resize(40, 4)
           tty.resize(40, 4)
           await tty.wait('the short terminal keeps its input visible', async () => {
             const rows = await capture()
-            // Three rows: the rule, the input, and the status line.
-            return tty.raw.length > mark && rows[0]!.startsWith('─') && rows[1]!.includes('> ') && rows[2]!.includes(SCREEN.status)
+            // Three rows once the rules have yielded. The header, the input, and the status line.
+            return tty.raw.length > mark && !rows[0]!.startsWith('─') && rows[1]!.includes('> ') && rows[2]!.includes(SCREEN.status)
           })
           screen.resize(80, 24)
           tty.resize(80, 24)
@@ -1128,7 +1134,7 @@ scenario('markdown', 'streamed Markdown formats once, survives resize and resume
     await run.writeOverlay(override)
     const checkScreen = (screen: InstanceType<typeof xterm.Terminal>): void => {
       const lines = Array.from({ length: screen.buffer.active.length }, (_, row) => screen.buffer.active.getLine(row)?.translateToString(true) ?? '')
-      assert(lines.filter(line => line === '< Formatted response').length === 1, 'Markdown heading was lost or printed twice')
+      assert(lines.filter(line => line === '  Formatted response').length === 1, 'Markdown heading was lost or printed twice')
       const text = lines.join('\n')
       assert(text.includes('Review the formatter.') && text.includes('Check: Stream') && text.includes('State: ready'), 'reasoning or table was not formatted')
       assert(text.includes('const snake_case = "**literal**"') && !text.includes('```'), 'code was parsed as prose or retained its fences')
@@ -1254,7 +1260,7 @@ scenario('cliproxyapi', 'the built TUI configures a CLIProxyAPI URL and key and 
         tty.send('/model cliproxyapi/gpt-test\r', 'select the discovered model')
         await tty.expect('Model set for the next turn: cliproxyapi/gpt-test')
         tty.send('Say PROXY_OK\r', 'run one turn through the configured proxy')
-        await tty.expect('< PROXY_OK')
+        await tty.expect('  PROXY_OK')
         await tty.expect('✓ Completed')
       })
       assert(!transcript.includes('smoke-proxy-key'), 'CLIProxyAPI secret appeared on the terminal')
@@ -1379,6 +1385,8 @@ scenario('goal-compact', 'the built TUI exposes goal and compact commands and sh
         const goalStart = tty.mark()
         tty.send('/goal Complete this test task\r', 'create a goal')
         await tty.expect('Goal created', goalStart)
+        // The header names the goal once `/goal` arms it. The base rule is only a line.
+        await tty.expect('\u25cf Goal active', goalStart)
         const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
         try {
           await new Promise<void>(resolve => screen.write(tty.raw, resolve))
@@ -1487,9 +1495,9 @@ scenario('rendering', 'preserved scrollback after resize and a visible caret in 
         return mark
       }
       try {
-        await tty.wait('resumed answer in the terminal buffer', async () => (await capture()).some(line => line === '< DONE'))
+        await tty.wait('resumed answer in the terminal buffer', async () => (await capture()).some(line => line === '  DONE'))
         // The runner starts the frame on the bottom row, however short the
-        // history above it: the status line, then only Ink's cursor row.
+        // history above it. The status line, then only Ink's cursor row.
         await tty.wait('composer resting on the bottom rows', async () => {
           const visible = (await shown()).split('\n')
           return visible.length === 40 && visible[38]?.includes(SCREEN.status) === true && visible[39] === ''
@@ -1500,7 +1508,7 @@ scenario('rendering', 'preserved scrollback after resize and a visible caret in 
           return tty.raw.length > shrunk && visible[1]?.includes(`> ${SCREEN.caret}`) === true && visible[2]?.length === 40
         })
         const history = await capture()
-        assert(history.filter(line => line === '< DONE').length === 1, 'resize lost or duplicated the resumed answer')
+        assert(history.filter(line => line === '  DONE').length === 1, 'resize lost or duplicated the resumed answer')
         tty.send(`\x1b[200~START ${'word '.repeat(100)}END\x1b[201~`, 'a wrapped draft')
         await tty.wait('end of the wrapped draft', async () => (await shown()).includes(`END${SCREEN.caret}`))
         tty.send('\x1b[H', 'Home inside the wrapped draft')
@@ -1509,15 +1517,15 @@ scenario('rendering', 'preserved scrollback after resize and a visible caret in 
         await tty.wait('caret returns to the end', async () => (await shown()).includes(`END${SCREEN.caret}`))
         const expanded = await resize(120, 40)
         await tty.wait('expanded composer keeps its draft', async () => {
-          // The caret row, the padding row, then the status line,
-          // under the history the resize replayed and back on the bottom rows.
+          // The caret row, then the base rule, then the status line,
+          // under the history the resize replayed, back on the bottom rows.
           const visible = (await shown()).split('\n')
           const caret = visible.findIndex(line => line.includes(`END${SCREEN.caret}`))
-          return tty.raw.length > expanded && caret > visible.indexOf('< DONE')
-            && visible[caret + 1]?.trim() === '' && visible[caret + 2]?.includes(SCREEN.status) === true
+          return tty.raw.length > expanded && caret > visible.indexOf('  DONE')
+            && visible[caret + 1]?.startsWith('\u2500') === true && visible[caret + 2]?.includes(SCREEN.status) === true
             && caret + 2 === 38
         })
-        assert((await capture()).filter(line => line === '< DONE').length === 1, 'expanding the terminal lost or duplicated history')
+        assert((await capture()).filter(line => line === '  DONE').length === 1, 'expanding the terminal lost or duplicated history')
       } finally {
         await capture()
         screen.dispose()
@@ -1591,7 +1599,7 @@ scenario('navigate', 'session picker cancellation, a new session, and switching 
       tty.send('\r', 'Enter to start a new session')
       const created = await tty.search(/Session: (session-[a-f0-9-]+)/, start)
       assert(created[1] !== identity, 'new-session selection reused the current identity')
-      // The new footer names the new model, and its composer accepts input: a
+      // The new footer names the new model, and its composer accepts input. A
       // key sent while the old session retires is refused as navigation busy.
       await tty.expect(`${SCREEN.status}deepseek-v4-flash`, start)
       await tty.wait('the new session to accept input', text => {

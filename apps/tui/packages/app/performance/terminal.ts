@@ -1,4 +1,4 @@
-/** Bounded native PTY observations; Bun owns the terminal and Node runs the measured app. */
+/** Bounded native PTY observations. Bun owns the terminal, and Node runs the measured app. */
 import { existsSync, readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -6,7 +6,7 @@ import { dictionaries } from '../../ui/src/copy.ts'
 import type { Metrics } from './report.ts'
 const ANSI = /\x1b\][^\x07]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]/g
 
-/** Dedicated terminal observation with bounded capture; historical output is counted without retaining it all. */
+/** Dedicated terminal observation with bounded capture. Historical output is counted without retaining it all. */
 export class Terminal {
   private readonly child: Bun.Subprocess
   private readonly done: Promise<number>
@@ -20,12 +20,12 @@ export class Terminal {
   readonly markers = new Set<string>()
 
   /**
-   * Start one measured child; callers must await close even after failed observations.
+   * Start one measured child. Callers must await `close` even after a failed observation.
    * @param command - measured Node argv, including the metrics preload.
    * @param cwd - private workspace directory.
    * @param metrics - private sample file published by the preload.
    * @param env - environment for the measured process.
-   * @param signal - optional observation cancellation; close still drains the process.
+   * @param signal - optional observation cancellation. `close` still drains the process.
    */
   constructor(command: readonly string[], cwd: string, private readonly metrics: string, env: NodeJS.ProcessEnv, private readonly signal?: AbortSignal) {
     const decoder = new TextDecoder()
@@ -44,17 +44,17 @@ export class Terminal {
         this.markerTail = joined.slice(-20)
         this.text = (this.text + raw).slice(-131_072)
       },
-      // PTY status describes EOF/read failure, not the child process exit code.
+      // PTY status describes EOF or a read failure, not the child process exit code.
       exit: (_terminal, code) => { this.streamError = code !== 0 },
     } })
-    // Bun leaves exitCode null after a signal; exited settles for both exit forms.
+    // Bun leaves `exitCode` null after a signal. `exited` settles for both exit forms.
     this.done = this.child.exited.then(code => {
       this.exit = { code, signal: this.child.signalCode }
       return code
     })
   }
 
-  /** Measured Node process id; no shell or PTY helper process intervenes. */
+  /** Measured Node process id. No shell or PTY helper process intervenes. */
   get pid(): number { return this.child.pid }
 
   /**
@@ -112,7 +112,7 @@ export class Terminal {
 
   /**
    * Exercise normal terminal shutdown and require the measured Node process to exit cleanly.
-   * @returns after Node exits; close releases the terminal separately.
+   * @returns after Node exits. `close` releases the terminal separately.
    */
   async quit(): Promise<void> {
     this.text = ''
@@ -125,7 +125,7 @@ export class Terminal {
   }
 
   /**
-   * Kill remaining measured work, await its exit, and release the PTY; safe after normal exit.
+   * Kill remaining measured work, await its exit, and release the PTY. Safe after a normal exit.
    * @returns after Node has been reaped and the terminal is closed.
    */
   async close(): Promise<void> {

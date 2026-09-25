@@ -30,7 +30,7 @@ export class SessionNavigation {
     private readonly copy: TuiCopy, private readonly credentialRefs: readonly string[],
     private readonly changed: () => void) {}
 
-  /** The displayed session; unavailable until start resolves. */
+  /** The displayed session. Unavailable until `start` resolves. */
   get controller(): SessionController | undefined { return this.current?.controller }
   /** Navigation owns input until preparation or retirement has settled. */
   get busy(): boolean { return this.operation !== undefined }
@@ -46,7 +46,7 @@ export class SessionNavigation {
   /**
    * Send input to the displayed controller, refusing submissions during navigation.
    * @param text - composer submission.
-   * @returns acceptance; rejected or pending admission must retain the composer draft.
+   * @returns acceptance. A rejected or pending admission must keep the composer draft.
    */
   submit(text: string): boolean | Promise<boolean> {
     if (this.closed) return false
@@ -61,7 +61,7 @@ export class SessionNavigation {
     } else this.controller?.cancel()
   }
 
-  /** Close observers before terminal release; drain owns asynchronous disposal. */
+  /** Close observers before terminal release. `drain` owns asynchronous disposal. */
   close(): void {
     if (this.closed) return
     this.closed = true
@@ -115,7 +115,7 @@ export class SessionNavigation {
   private request(agent: Agent, newSession: boolean): void {
     if (this.closed || this.busy || agent !== this.controller?.agent) return
     const abort = new AbortController()
-    // The registry must finish command/done before its Session can be retired.
+    // The registry must finish `command/done` before its Session can be retired.
     const done = Promise.resolve().then(async () => {
       await this.controller?.drain()
       abort.signal.throwIfAborted()
@@ -162,7 +162,7 @@ export class SessionNavigation {
         : { resume: selected }, signal)
       signal.throwIfAborted()
       this.assertAvailable(agent)
-      // From this point the new controller owns input; Escape cannot undo retirement.
+      // From this point the new controller owns input. Escape cannot undo retirement.
       this.operation!.committed = true
       this.current = next
       next = undefined
@@ -201,8 +201,8 @@ export class SessionNavigation {
       choices: [
         ...[current, ...saved].map(record => {
           const name = names.get(record.header.id)
-          // An untitled session is labelled by its id, so the id is not repeated;
-          // the full id stays searchable either way through the choice's value.
+          // An untitled session is labelled by its id, so the id is not repeated.
+          // The full id stays searchable either way through the choice's value.
           const when = formatAge(record.header.createdAt, now, age)
           return {
             value: record.header.id, label: name ?? record.header.id,
@@ -210,7 +210,7 @@ export class SessionNavigation {
             role: record.header.id === agent.id ? 'session-current' as const : 'session-saved' as const,
           }
         }),
-        // Pinned, so a long history never scrolls the way to a fresh session out of view.
+        // Pinned. A long history must not scroll the way to a fresh session out of view.
         { value: '', label: this.copy.newSession, role: 'session-new' as const, pinned: true },
       ],
       ...titles.some(result => result.status === 'rejected') ? { warning: this.copy.sessionTitlesUnavailable } : {},
@@ -224,9 +224,10 @@ export class SessionNavigation {
 }
 
 /**
- * Enough of a session id to tell sessions apart: its first block of eight hex
- * digits, as a UUID's is. Any other id is short enough, or opaque enough, to
- * show whole.
+ * Enough of a session id to tell sessions apart.
+ *
+ * That is its first block of eight hex digits, as a UUID's is. Any other id
+ * is short enough, or opaque enough, to show whole.
  * @param id - the session id.
  * @returns the id's leading hex block, or the id.
  */

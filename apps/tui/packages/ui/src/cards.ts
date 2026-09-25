@@ -1,16 +1,15 @@
 /**
- * Tool render intents, correlated to their calls and mapped to card lines.
+ * Map tool render intents to card lines, correlated with their calls.
  *
- * `dsh-tools` lets a tool say how one call presents without knowing which
- * surface draws it: `presentCall`/`presentResult` return a `card`-tagged
- * intent, and each consumer maps the cards it understands. This module is the
- * terminal's half of that seam — the one place a `card` becomes display lines.
+ * `dsh-tools` lets a tool describe one call without knowing which surface
+ * draws it. `presentCall` and `presentResult` return a `card`-tagged intent,
+ * and each consumer maps the cards it understands. This module is the
+ * terminal's mapping. It is the only place a `card` becomes display lines.
  *
- * The presenters are pure over `args` and the durable result, so a replayed
- * session log reproduces the identical card. A tool the registry no longer
- * knows, one that declares no presenter, and a card this build does not
- * recognize all fall back to the raw arguments and result text, which is the
- * presentation every tool had before this seam existed.
+ * Presenters are pure over `args` and the durable result, so a replayed
+ * session log reproduces the same card. A tool the registry no longer knows,
+ * a tool with no presenter, and a card this build does not recognize all fall
+ * back to the raw arguments and result text.
  *
  * @module @dsh-tui/ui/cards
  */
@@ -35,7 +34,7 @@ export interface ToolPresenters {
 /** Resolve a tool's presenters by the name the session log recorded. */
 export type ToolLookup = (name: string) => ToolPresenters | undefined
 
-/** What one card contributes to a row: a headline, and lines under it. */
+/** What one card contributes to a row. A headline, and lines under it. */
 export interface Card {
   /** Replaces the row's headline — the tool's own words for what this call is. */
   readonly title: string
@@ -44,13 +43,12 @@ export interface Card {
 }
 
 /**
- * Calls retained while awaiting their result.
+ * Calls kept until their result arrives.
  *
- * A result names only its `callId`, so its arguments have to be held from the
- * call that produced them, and a tool's arguments can be as large as a file it
- * writes. An entry is released the moment its result arrives; this bound only
- * catches calls that never got one, which is what an interrupted turn leaves
- * behind.
+ * A result names only its `callId`, so the arguments have to be kept from
+ * the call. Those arguments can be as large as a file the tool writes. An
+ * entry is released when its result arrives. This bound only covers calls
+ * that never got one, which is what an interrupted turn leaves behind.
  */
 const RETAINED_CALLS = 64
 
@@ -112,18 +110,18 @@ function parseArguments(args: string): { readonly value: unknown } | undefined {
   try {
     return { value: JSON.parse(args) }
   } catch {
-    // Malformed model output. Nothing is lost by not reporting it: the raw
-    // string renders, so the reader sees exactly what the model sent.
+    // Malformed model output. The raw string still renders, so the transcript
+    // shows exactly what the model sent.
     return undefined
   }
 }
 
 /**
- * Call a presenter without letting it take the transcript down.
+ * Call a presenter without letting it fail the transcript.
  *
- * Presenters are declared pure, but they narrow arguments the model wrote and
- * are registered by plugins — including tools defined at runtime. A thrown
- * presenter costs its card, not the session.
+ * Presenters are declared pure, but they narrow arguments the model wrote
+ * and plugins register them, including tools defined at runtime. A thrown
+ * presenter loses its card, not the session.
  *
  * @param present - the presenter invocation.
  * @returns the view, or undefined when none was produced or it threw.
@@ -132,8 +130,8 @@ function attempt<T>(present: () => T | undefined): T | undefined {
   try {
     return present()
   } catch {
-    // A tool's own presentation failing is not the reader's problem, and this
-    // layer has nowhere to report it: the raw arguments and result text remain.
+    // A presenter's failure is not shown here. This layer has nowhere to
+    // report it. The raw arguments and result text remain.
     return undefined
   }
 }
@@ -158,9 +156,9 @@ function callCard(view: ToolCallView): Card {
       return { title: view.title, detail: [...blockLines(view.content), ...rawInputLines(view.rawInput, view.title)] }
 
     default:
-      // A card this build does not know: tools are registered by plugins, and
-      // one may declare an intent newer than this surface. The title is the
-      // part every card has, so it is the part that still renders.
+      // A card this build does not know. Plugins register tools, and one may
+      // declare an intent newer than this surface. Every card has a title, so
+      // that is the part that still renders.
       return { title: titleOf(view), detail: [] }
   }
 }
@@ -227,39 +225,41 @@ function resultCard(view: ToolResultView, copy: TuiCopy, called?: string): Card 
       return { title, detail: blockLines(view.content) }
 
     default:
-      // As for a call: an unknown card keeps whatever title it carries, and
+      // As for a call. An unknown card keeps whatever title it carries, and
       // the raw result text below it is unaffected.
       return { title: titleOf(view), detail: [] }
   }
 }
 
 /**
- * The sign and marker text of one change line, and the gap between two changes.
+ * Sign and marker text of one change line, and the gap between two changes.
  *
- * `⋯` stands for the unchanged lines between two hunks, or between two changes
- * inside one: they are what a reader skips to find the edit, and the line
- * numbers already say how far apart the changes are.
+ * `⋯` stands for the unchanged lines between two hunks, or between two
+ * changes inside one hunk. The line numbers already say how far apart the
+ * changes are.
  */
 const SIGN = { added: '+', removed: '-' } as const
 const GAP: CardLine = { text: '⋯', emphasis: 'gap' }
 
 /**
- * Longest pair of lines compared word by word. Past it, a line is marked
- * changed whole: a minified bundle rewritten in one edit costs a word diff
- * quadratic in its length, and nobody reads its words.
+ * Longest pair of lines compared word by word.
+ *
+ * Past this length a line is marked changed as a whole. A word diff of a
+ * minified bundle is quadratic in the line length, and the individual words
+ * are not useful at that size.
  */
 const WORD_DIFF_LIMIT = 2000
 
 /**
- * Lines for an edit: what changed, numbered, and nothing it only surrounds.
+ * Lines for an edit. The changed lines, numbered, without the surrounding context.
  *
- * The contract carries each hunk as a whole before and after text with its
- * context, which is what a patch needs and not what a reader of the
- * transcript does: the three lines above a change push the change itself
- * below the preview bound. Only changed lines are drawn, each numbered on its
- * own side, and `⋯` separates changes the context lines stood between. A path
- * heads each file's lines only when the edit touched more than one, since
- * the card's title names the file otherwise.
+ * The contract carries each hunk as whole before and after text, including
+ * context. A patch needs that context. The transcript does not. The three
+ * lines above a change push the change itself below the preview bound. Only
+ * changed lines are drawn, each numbered on its own side, and `⋯` separates
+ * changes that context lines stood between. A path heads each file's lines
+ * only when the edit touched more than one file. Otherwise the card title
+ * names the file.
  *
  * @param diffs - the applied hunks, in order, or a whole-file create.
  * @returns the change lines.
@@ -280,15 +280,15 @@ function diffLines(diffs: readonly FileDiff[]): readonly CardLine[] {
 }
 
 /**
- * One hunk's changed lines.
+ * Changed lines of one hunk.
  *
- * A hunk can hold several changes a few context lines apart, which a patch
- * joins into one hunk when their context overlaps, so its sides are diffed
- * line by line rather than trimmed at each end: trimming marked every line
- * between the first change and the last as rewritten.
+ * A hunk can hold several changes a few context lines apart. A patch joins
+ * them into one hunk when their context overlaps. The sides are diffed line
+ * by line, not trimmed at each end. Trimming would mark every line between
+ * the first change and the last as rewritten.
  *
  * @param diff - one applied hunk.
- * @returns its removed and added lines, `⋯` between separate changes.
+ * @returns its removed and added lines, with `⋯` between separate changes.
  */
 function hunkLines(diff: FileDiff): readonly CardLine[] {
   const after = textLines(diff.newText).map(line => line.text)
@@ -350,17 +350,16 @@ function changeLine(side: 'added' | 'removed', text: string, path: string, start
 }
 
 /**
- * Which words of an edited line changed, on each side.
+ * Changed words of an edited line, on each side.
  *
  * A removed line paired with the added line in its place is usually the same
- * line with a few words changed, and those words are the edit; marking them
- * lets the eye skip the rest. A pair that shares less than half of the
- * shorter line was replaced rather than edited, and marking nearly every word
- * says nothing the sign does not.
+ * line with a few words changed. Those words are the edit. A pair that shares
+ * less than half of the shorter line was replaced, not edited, and marking
+ * nearly every word adds nothing the sign does not already say.
  *
  * @param before - the removed line.
  * @param after - the added line in its place.
- * @returns the changed runs of each, or undefined when the pair is a replacement.
+ * @returns the changed runs of each side, or undefined when the pair is a replacement.
  */
 function wordRanges(before: string, after: string): { readonly removed: readonly (readonly [number, number])[], readonly added: readonly (readonly [number, number])[] } | undefined {
   if (before.length + after.length > WORD_DIFF_LIMIT) return undefined
@@ -417,16 +416,16 @@ function matchLines(files: readonly { path: string, matches: readonly { lineNumb
 }
 
 /**
- * The line reporting how much a search found, and whether it was capped.
+ * Line reporting how much a search found, and whether it was capped.
  *
- * A capped result must never read as a complete one, which is the whole reason
- * the presentation contract carries `truncated` beside the total.
+ * A capped result must not look complete. That is why the presentation
+ * contract carries `truncated` beside the total.
  *
  * @param total - items found before any cap.
- * @param noun - localized names for one of what was counted, and for several.
+ * @param noun - localized names for one item and for several.
  * @param truncated - whether the listed items are only the retained ones.
  * @param copy - localized labels.
- * @returns the count line, the card's summary.
+ * @returns the count line, which is the card's summary.
  */
 function countLine(total: number, noun: readonly [one: string, many: string], truncated: boolean, copy: TuiCopy): CardLine {
   return { text: `${total} ${noun[total === 1 ? 0 : 1]}${truncated ? ` (${copy.cardTruncated})` : ''}`, summary: 'count' }
@@ -435,10 +434,10 @@ function countLine(total: number, noun: readonly [one: string, many: string], tr
 /**
  * Text of a view's UI-facing content blocks.
  *
- * A block is markdown, and a presenter that shows output verbatim wraps it in
- * a fence, as a failed command's is. This surface draws output as it is
- * already, so the fence is the one piece of markdown it removes: drawn, it is
- * two lines of backticks around the error the reader came for.
+ * A block is markdown. A presenter that shows output verbatim wraps it in a
+ * fence, as a failed command's output is. This surface already draws output
+ * as text, so the fence is the only markdown it removes. Drawn, the fence
+ * would be two lines of backticks around the error.
  *
  * @param content - the blocks a presenter supplied, if any.
  * @returns one line per line of text across the blocks.
@@ -466,10 +465,9 @@ function unfenced(text: string): { readonly text: string, readonly language?: st
 /**
  * A card's salient raw input, as lines.
  *
- * A value the title already names, as a search's pattern is, is left out:
- * under its own title it is the same words again. A structured value is drawn
- * a field or an item to a line, compactly, rather than as indented JSON that
- * spends a row on every brace.
+ * A value the title already names, such as a search pattern, is omitted.
+ * Under its own title it would repeat the same words. A structured value is
+ * one field or item per line, not indented JSON that spends a row on every brace.
  *
  * @param rawInput - the value a generic view chose to show, if any.
  * @param title - the card's title.
@@ -486,9 +484,9 @@ function rawInputLines(rawInput: unknown, title: string): readonly CardLine[] {
 }
 
 /**
- * A value on one line: a string as itself, a record of plain values as its
- * values two spaces apart, as a task list's items read, and anything else as
- * compact JSON.
+ * A value on one line. A string is itself. A record of plain values is shown
+ * as its values two spaces apart, the way a task list's items are, and anything
+ * else is compact JSON.
  */
 function compact(value: unknown): string {
   const plain = (item: unknown): boolean => item === null || ['string', 'number', 'boolean'].includes(typeof item)

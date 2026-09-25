@@ -76,13 +76,14 @@ for (const locale of ['en', 'zh'] as const) test.skipIf(process.platform !== 'da
           screen.resize(cols!, rows!)
           child.terminal!.resize(cols!, rows!)
           child.kill('SIGWINCH')
-          // The rule over the input row, then the padding row when the height
-          // allows it, the status line, and Ink's cursor row.
+          // Above the input. The upper rule when the terminal is taller than 4
+          // rows, otherwise the header. Below it, when taller than 4 rows, the
+          // base rule, then the status line. Ink's cursor row is last.
           const lines = await painted(`repaint the composer at ${cols}x${rows}`, lines => {
             const input = lines.findIndex(line => line.includes('▌'))
             return output.length > beforeResize && input >= 1 && input <= rows! - 3
-              && lines[input - 1]!.startsWith('─')
-              && (rows! <= 4 || lines[input + 1] === '')
+              && lines[input - 1]!.startsWith('─') === rows! > 4
+              && (rows! <= 4 || (lines[input + 1]!.startsWith('─') && lines[input + 2] !== ''))
               && lines.filter(line => line.includes('▌')).length === 1
           })
           // The status line ends in the fixture's temporary path, so the rows

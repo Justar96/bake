@@ -11,7 +11,7 @@ export interface ContextUsage {
 /**
  * Tokens the provider reported for the session so far, summed across its requests.
  *
- * Only what the provider reports: a session that has made no request has no
+ * Only what the provider reports. A session that has made no request has no
  * totals, and a provider that reports no cache traffic has no `cached`, which
  * is not the same as a cache that missed.
  */
@@ -25,7 +25,7 @@ export interface TokenTotals {
 }
 
 /**
- * The session's token totals as status-line fields: input and output.
+ * The session's token totals as status-line fields. Input and output.
  *
  * @param totals - the provider-reported totals.
  * @param words - locale-owned labels for each field.
@@ -38,8 +38,8 @@ export function formatTotals(totals: TokenTotals, words: { readonly input: strin
 /**
  * The share of input the provider's cache served, in whole percent.
  *
- * Rounds down, as occupancy does, so a cache that missed once never reads as
- * a perfect one.
+ * Rounds down, as occupancy does, so a cache that missed once is never shown
+ * as a perfect one.
  *
  * @param totals - the provider-reported totals.
  * @returns 0 to 100, or undefined when the provider reports no cache traffic.
@@ -56,7 +56,7 @@ export function cacheHit(totals: TokenTotals): number | undefined {
  */
 export function formatTokens(tokens: number): string {
   if (tokens < 1_000) return String(tokens)
-  // Promote on the ROUNDED magnitude, not the raw one: 999,999 scales to
+  // Promote on the ROUNDED magnitude, not the raw one. 999,999 scales to
   // 999.999k, which one decimal place renders as the nonsensical `1000k`.
   const thousands = tokens / 1_000
   if (thousands < 999.95) return `${trim(thousands)}k`
@@ -66,8 +66,8 @@ export function formatTokens(tokens: number): string {
 /**
  * Render estimated context occupancy as `~used/window (percent)`.
  *
- * The percentage rounds down, so a context that is merely close to full never
- * reads as 100%: the one number a user acts on must not overstate itself.
+ * The percentage rounds down, so a context that is merely close to full is
+ * never shown as 100%. The one number a user acts on must not overstate itself.
  *
  * @param usage - the occupancy reported by the harness.
  * @returns the status-line fragment.
@@ -82,7 +82,7 @@ export function formatContext(usage: ContextUsage): string {
 }
 
 /**
- * Drop a trailing `.0` so whole magnitudes read as `2k` rather than `2.0k`.
+ * Drop a trailing `.0` so a whole magnitude is `2k`, not `2.0k`.
  * @param value - the scaled magnitude.
  * @returns one decimal place, without a redundant zero.
  */
@@ -94,13 +94,13 @@ function trim(value: number): string {
 /**
  * How long ago something happened, to the coarsest unit that is not zero.
  *
- * For telling sessions apart at a glance, where `3d ago` reads faster than a
- * timestamp and the exact time is one keypress away in the session itself.
+ * For telling sessions apart at a glance. `3d ago` is faster to scan than a
+ * timestamp, and the exact time is one keypress away in the session itself.
  *
  * @param then - epoch milliseconds of the event.
  * @param now - epoch milliseconds to measure from.
  * @param words - locale-owned unit suffixes.
- * @returns `just now`, `5m ago`, `2h ago`, or `3d ago`; a future time reads as now.
+ * @returns `just now`, `5m ago`, `2h ago`, or `3d ago`. A future time is shown as now.
  */
 export function formatAge(then: number, now: number, words: {
   readonly now: string, readonly minutes: string, readonly hours: string, readonly days: string

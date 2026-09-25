@@ -9,7 +9,7 @@ kind: "package-group"
 
 ## 概述
 
-boot 组负责启动 profile 应用并管理其已安装组合。`app-boot` 解析配置并启动 Loader，`cmdline` 提供应用参数，`plugin-manager` 提供与 CLI 共享的当前 profile 操作。各包 README 负责各自的细节。
+boot 组负责启动 profile 应用并管理其已安装组合。`app-boot` 解析配置并启动 Loader，`cmdline` 提供应用参数，`plugin-manager` 提供与 CLI 共享的当前 profile 操作，`updater` 用更新的已签名发行版替换受管理的安装。各包 README 负责各自的细节。
 
 ## 目录
 
@@ -26,6 +26,7 @@ boot 组负责启动 profile 应用并管理其已安装组合。`app-boot` 解�
 | [`cmdline`](cmdline/README.zh.md) | 让应用持有自己的 flag、`--help` 与退出码；启动器自身 flag 之后的一切原样传入 | `cmdlineArgs`、`appExit` |
 | [`hmr`](hmr/README.zh.md) | 协调模块与配置重载，并与包修改互斥执行 | `hmr` |
 | [`plugin-manager`](plugin-manager/README.zh.md) | 通过共享 CLI 操作管理当前 profile 插件与组合包 | `pluginManager` |
+| [`updater`](updater/README.zh.md) | 校验已签名的发行清单，并在正在运行的版本旁安装新版本，供 `bake update` 和更新提示使用 | （供 bin 使用的库） |
 
 <a id="related-documentation"></a>
 ## 相关文档

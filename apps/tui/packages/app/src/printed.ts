@@ -3,7 +3,7 @@
  *
  * The live region retains the unfinished block because later deltas can change
  * a paragraph into a heading or table, or extend a list or code fence. Settled
- * blocks enter native scrollback once; reconcile removes their raw source
+ * blocks enter native scrollback once. Reconcile removes their raw source
  * prefix from the committed projection. The Session log retains the full text.
  * An abandoned attempt stays in scrollback with the controller's discard notice.
  *
@@ -34,11 +34,11 @@ export class Printed {
    * Split the attempt into settled Markdown and blocks still arriving.
    *
    * Every text or reasoning block followed by another block is complete. The
-   * last block is still streaming: an answer prints only settled Markdown,
+   * last block is still streaming. An answer prints only settled Markdown,
    * and reasoning stays whole in the live region, where the header's
-   * thinking window shows it. Nothing past the first tool call prints, because the call
-   * commits through its own event, and printing text after it would put that
-   * text above the call.
+   * thinking window shows it. Nothing past the first tool call prints,
+   * because the call commits through its own event. Printing text after it
+   * would put that text above the call.
    *
    * @param rows - the attempt's rows, keyed by block, in stream order.
    * @returns rows to append to the transcript, and rows the live region draws.
@@ -56,8 +56,8 @@ export class Printed {
       const record = this.record(key, row.kind)
       const complete = index < rows.length - 1
       const end = complete ? row.text.length : row.kind === 'assistant' ? record.consumed + finishedMarkdown(row.text.slice(record.consumed)) : 0
-      // A run of whitespace waits for the text after it, so a paragraph break
-      // prints with the paragraph it opens rather than as a row of its own.
+      // A run of whitespace waits for the text after it. A paragraph break
+      // prints with the paragraph it opens, not as a row of its own.
       if (end > record.consumed && row.text.slice(record.consumed, end).trim() !== '') {
         print.push(this.take(record, row, end))
       } else if (complete) {
@@ -65,7 +65,7 @@ export class Printed {
       }
       const rest = row.text.slice(record.consumed)
       // The streaming answer keeps a row even while it holds no text, so the
-      // header still reads `writing` between one line and the next.
+      // header still says `writing` between one line and the next.
       if (!complete) live.push(record.consumed === 0 ? row : { ...row, text: rest, continued: true })
     }
     return { print, live }
@@ -75,7 +75,7 @@ export class Printed {
    * Drop from a committed message what already printed.
    *
    * Matched by kind and prefix, in order. A block the commit changed — an
-   * adapter's `block-end` may correct its deltas — prints again whole: once
+   * adapter's `block-end` may correct its deltas — prints again whole. Once
    * too often is the failure that stays readable.
    *
    * @param rows - the message's projected rows.
@@ -106,8 +106,8 @@ export class Printed {
   private take(record: Print, row: Row & { readonly kind: Print['kind'] }, end: number): Row {
     const first = record.consumed === 0
     // The newline ending a printed line is consumed with it, so what follows
-    // starts on the next line; a newline after it is a paragraph break, and
-    // is kept as the blank row it draws.
+    // starts on the next line. A newline after it is a paragraph break, and
+    // it is kept as the blank row it draws.
     const text = row.text.slice(record.consumed, row.text[end - 1] === '\n' ? end - 1 : end)
     record.consumed = end
     record.text = row.text.slice(0, end)

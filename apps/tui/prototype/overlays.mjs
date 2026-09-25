@@ -1,12 +1,12 @@
 /**
- * Overlay geometry: completion popups and choice pickers.
+ * Overlay geometry for completion popups and choice pickers.
  *
  * Both draw from unbounded sources — every registered command, every skill,
  * every file in the workspace — into the dynamic region, which L1 caps at
  * `rows - 1`. So the item limit is not a constant, it is a function of the
  * terminal height and of the chrome around the overlay. This script derives
- * that number, renders the result, and checks two things the eye would catch
- * late:
+ * that number, renders the result, and checks two defects that show up only
+ * after the overlay is drawn.
  *
  *   1. the overlay fits at every terminal height down to 10 rows  (L1)
  *   2. its height does not change as it moves through loading, loaded, empty
@@ -24,13 +24,13 @@ const React = (await import(pathToFileURL(require.resolve('react')).href)).defau
 const h = React.createElement
 const WIDTH = 80
 
-/** Rows the overlay cannot use: status, composer, and one line of breathing room. */
+/** Rows the overlay cannot use. Status, composer, and one line of breathing room. */
 const CHROME_ROWS = 3
 
 /**
  * Largest item count an overlay may show at this terminal height.
  *
- * Derived, never hardcoded: a constant that fits an 80x24 window overflows a
+ * Derived, never hardcoded. A constant that fits an 80x24 window overflows a
  * split pane, and overflow is the one failure that clears the user's screen.
  *
  * @param rows - terminal height.
@@ -41,7 +41,7 @@ export const itemLimit = (rows, hasHeader) =>
   Math.max(1, rows - CHROME_ROWS - (hasHeader ? 1 : 0) - 1)
 
 /**
- * One overlay row: selection marker, name, dim description.
+ * One overlay row. A selection marker, a name, and a dim description.
  *
  * A path truncates from the start, because its tail is what distinguishes it —
  * truncating the end of `packages/app/src/module-7.ts` hides the only part the
@@ -119,7 +119,7 @@ for (const rows of [10, 16, 24, 40, 60]) {
     + `   ${String(itemLimit(rows, true)).padStart(11)}`)
 }
 
-// L1: the overlay must fit at every height, including the smallest supported.
+// L1. The overlay must fit at every height, including the smallest supported.
 for (const rows of [10, 16, 24, 40]) {
   const limit = itemLimit(rows, true)
   const rendered = renderToString(
@@ -134,7 +134,7 @@ for (const rows of [10, 16, 24, 40]) {
 console.log(`\nL1: overlay fits within its budget at 10, 16, 24 and 40 rows \u2014 `
   + `${failures.length === 0 ? 'ok' : 'VIOLATED'}`)
 
-// L2: height must not move as the overlay changes state under the user.
+// L2. Height must not move as the overlay changes state under the user.
 const limit = itemLimit(24, true)
 const states = ['loading', 'loaded', 'empty', 'error']
 const measure = hold => states.map(state => heightOf(renderToString(
@@ -153,7 +153,7 @@ console.log('  (held to the last loaded row count, not to the limit)')
 /**
  * Draw a scene with the overlay below the composer.
  *
- * Anchoring it under the input is what keeps the caret still: results change on
+ * Anchoring it under the input is what keeps the caret still. Results change on
  * every keystroke, so an overlay above the composer would push the line the
  * user is typing into up and down as they type.
  */

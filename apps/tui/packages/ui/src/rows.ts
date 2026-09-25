@@ -1,6 +1,8 @@
 /**
- * The view vocabulary the terminal renders. One row is one visually distinct
- * line group; the renderer never inspects session events directly.
+ * The view vocabulary the terminal renders.
+ *
+ * One row is one visually distinct line group. The renderer never inspects
+ * session events directly.
  *
  * @module @dsh-tui/ui/rows
  */
@@ -44,39 +46,45 @@ export function formatAttachment(item: AttachmentSummary): string {
 export type Row =
   | { readonly kind: 'user', readonly text: string, readonly attachments?: readonly AttachmentSummary[] }
   /**
-   * A slash command the user ran. Separate from `user` because it addresses the
-   * surface rather than the model: it opens no turn, and its result is the
+   * A slash command the user ran. Separate from `user` because it addresses
+   * the surface, not the model. It opens no turn, and its result is the
    * notice under it. `name` and `args` stay apart so input recall can rebuild
    * the draft the user typed.
    */
   | { readonly kind: 'command', readonly name: string, readonly args: string }
   /**
    * Answer text. `continued` marks the rest of a block whose opening lines
-   * already printed: a streaming answer prints settled Markdown blocks, and
+   * already printed. A streaming answer prints settled Markdown blocks, and
    * what follows carries neither the section's blank nor its marker again.
    */
   | { readonly kind: 'assistant', readonly text: string, readonly continued?: boolean }
   /** Reasoning text; `continued` as for `assistant`. */
   | { readonly kind: 'reasoning', readonly text: string, readonly continued?: boolean }
+  /**
+   * Generation speed of a final answer, already formatted. Output tokens and
+   * tokens per second, from provider usage and logged stream timestamps.
+   * Drawn dim, directly under the answer it measures.
+   */
+  | { readonly kind: 'rate', readonly text: string }
   | ToolCallRow
   /**
-   * The calls one step made, two or more, drawn as one block: a head counting
-   * them by verb, and each call hanging from it in the order the model made
-   * them. Built by `Actions` once the step ends, so the block prints once
-   * with every call in it; until then the live region draws the same block
-   * as its calls run and finish.
+   * Two or more calls from one step, drawn as one block. The head counts them
+   * by verb. Each call hangs from it in the order the model made them.
+   * `Actions` builds the block once the step ends, so it prints once with
+   * every call in it. Until then the live region draws the same block as its
+   * calls run and finish.
    */
   | { readonly kind: 'tool-group', readonly calls: readonly ToolCallRow[] }
   /**
    * A tool result. Its call id and outcome precede the output, including when
-   * empty. `text` is the raw model-facing result, empty when the presenter
-   * supplied a card instead; `detail` is that card's lines. Failed results
-   * retain failure emphasis for both raw text and card lines.
+   * the output is empty. `text` is the raw model-facing result, empty when
+   * the presenter supplied a card instead. `detail` is that card's lines.
+   * Failed results keep failure emphasis for both raw text and card lines.
    *
    * `title` is the card's replacement headline, absent when the tool declared
-   * none. It is held apart from `detail` because it is the one line that
-   * survives a collapsed result: a surface that reports the body as a count
-   * still says which file was edited or which command was run.
+   * none. It is kept apart from `detail` because it is the line that survives
+   * a collapsed result. A surface that reports the body as a count still says
+   * which file was edited or which command was run.
    */
   | {
     readonly kind: 'tool-result'
@@ -91,22 +99,23 @@ export type Row =
     readonly tone: NoticeTone
     readonly text: string
     /**
-     * Where the notice belongs: a recorded turn outcome closes the turn's
-     * group, and a command's outcome hangs from the command it answers, which
-     * is the row before it. Absent, the notice stands on its own.
+     * Where the notice belongs. A recorded turn outcome closes the turn's
+     * group. A command's outcome hangs from the command it answers, which is
+     * the row before it. Absent, the notice stands on its own.
      */
     readonly placement?: 'turn-end' | 'command'
   }
 
 /**
- * A tool call, and once it has one, its outcome: one action, drawn as one
- * block. `input` is the presenter's title, or the raw arguments when it
- * declared none; `detail` carries the rest of its card, already localized.
- * The call id matches the result to its call and is not drawn.
+ * A tool call, and its outcome once it has one. One action, drawn as one block.
  *
- * A call without `result` is still running, and lives in the live region;
- * the application commits it once its step ends, so the block prints to
- * history once, finished, rather than as a call and a result stacked apart.
+ * `input` is the presenter's title, or the raw arguments when it declared
+ * none. `detail` carries the rest of its card, already localized. The call id
+ * matches the result to its call and is not drawn.
+ *
+ * A call without `result` is still running and lives in the live region. The
+ * application commits it once its step ends, so the block prints to history
+ * once, finished, instead of as a call and a result stacked apart.
  */
 export interface ToolCallRow {
   readonly kind: 'tool-call'
@@ -118,28 +127,28 @@ export interface ToolCallRow {
 }
 
 /**
- * The calls a row holds: itself for a call, its calls for a group.
+ * The calls a row holds. The row itself for a call, and its calls for a group.
  * @param row - any row.
- * @returns the calls, empty for a row that is neither.
+ * @returns the calls, empty when the row is neither.
  */
 export const callsOf = (row: Row): readonly ToolCallRow[] =>
   row.kind === 'tool-call' ? [row] : row.kind === 'tool-group' ? row.calls : []
 
-/** How a call ended: a `tool-result` row's fields, without its identity. */
+/** How a call ended. A `tool-result` row's fields, without its identity. */
 export type ToolOutcome = Omit<Extract<Row, { readonly kind: 'tool-result' }>, 'kind' | 'callId'>
 
 /**
  * One line of a tool card, already localized and placed in order.
  *
- * A card is the terminal's rendering of the render intent a tool declared, so
- * its lines arrive as text rather than as the tool's own types: by the time a
- * row exists, every decision about wording and ordering has been made.
+ * A card is the terminal's rendering of the render intent a tool declared.
+ * Its lines arrive as text, not as the tool's own types. By the time a row
+ * exists, wording and order are already decided.
  */
 export interface CardLine {
   /**
-   * The line's text, without a trailing newline. A line of a change opens
-   * with its sign and a space, `+ ` or `- `, and the rest is the source line,
-   * so a surface without colour still reads the change.
+   * The line's text, without a trailing newline. A change line opens with
+   * its sign and a space, `+ ` or `- `, and the rest is the source line, so
+   * a surface without colour still shows the change.
    */
   readonly text: string
   /** Diff emphasis, absent for an ordinary supporting line. */
@@ -153,15 +162,15 @@ export interface CardLine {
   /** Begin a separate grammar state, even when the preceding line has the same source. */
   readonly codeStart?: boolean
   /**
-   * The runs of `text` the change touched within a line that was edited
-   * rather than replaced, as `[start, end)` UTF-16 offsets in order.
+   * Runs of `text` the change touched inside a line that was edited, not
+   * replaced. `[start, end)` UTF-16 offsets, in order.
    */
   readonly changed?: readonly (readonly [number, number])[]
   /**
-   * The card's own measure of its result: a count, the window a read took, a
-   * status. A surface may draw it beside the headline rather than under it,
-   * where a preview bound would hide it; `failure` is a status that says the
-   * work did not succeed, such as a non-zero exit, even though the call did.
+   * The card's own measure of its result. A count, the window a read took,
+   * or a status. A surface may draw it beside the headline instead of under
+   * it, where a preview bound would hide it. `failure` means the work did not
+   * succeed, such as a non-zero exit, even though the call itself did.
    */
   readonly summary?: 'count' | 'failure'
 }
@@ -172,7 +181,7 @@ export interface CardLine {
  */
 export type CardEmphasis = 'added' | 'removed' | 'gap'
 
-/** How a notice reads: neutral progress, a recoverable problem, or a failure. */
+/** How a notice is classified. Neutral progress, a recoverable problem, or a failure. */
 export type NoticeTone = 'info' | 'warn' | 'error'
 
 /**

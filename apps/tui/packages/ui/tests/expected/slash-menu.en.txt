@@ -3,7 +3,8 @@
   /reset   Command  Reset the view
 ▸ /review  Skill  Review the current patch
   +1 more, keep typing to narrow
+
 ────────────────────────────────────────────────────────────────────────────────────────────────────
 > /r▌                                                                                  Tab completes
-
+────────────────────────────────────────────────────────────────────────────────────────────────────
   Model: model  /workspace

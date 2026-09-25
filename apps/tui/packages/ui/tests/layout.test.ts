@@ -1,7 +1,7 @@
 /** Region budgets and the render vocabulary. */
 import { describe, expect, test } from 'bun:test'
 import {
-  budgetFor, CHROME_ROWS, COLUMN, isRenderable, LIVE_BUDGET, MARKER, selectionWindow, tailOf, VERB, windowOf,
+  budgetFor, CHROME_ROWS, COLUMN, isRenderable, LIVE_BUDGET, LIVE_SHARE, MARKER, selectionWindow, tailOf, VERB, windowOf,
 } from '../src/layout.ts'
 
 describe('budgetFor', () => {
@@ -12,12 +12,15 @@ describe('budgetFor', () => {
   })
 
   test('shrinks the live region on a short window instead of overrunning', () => {
-    expect(budgetFor({ columns: 80, rows: 40 }).live).toBe(LIVE_BUDGET)
+    expect(budgetFor({ columns: 80, rows: 24 }).live).toBe(LIVE_BUDGET)
+    // A tall terminal grows the window with its height, never to all of it.
+    expect(budgetFor({ columns: 80, rows: 40 }).live).toBe(Math.floor(39 * LIVE_SHARE))
+    expect(budgetFor({ columns: 80, rows: 80 }).live).toBe(Math.floor(79 * LIVE_SHARE))
     expect(budgetFor({ columns: 80, rows: 12 }).live).toBe(12 - 1 - CHROME_ROWS)
     expect(budgetFor({ columns: 80, rows: CHROME_ROWS + 3 }).live).toBe(2)
     // Below the height where chrome and one live row both fit, the live region
     // is the one-row floor. DESIGN-LAYOUT.md §3 scopes the priority order to
-    // windows that can honour it and names the degraded mode for the rest:
+    // windows that can honour it and names the degraded mode for the rest.
     // interaction-or-composer plus status, and nothing else.
     expect(budgetFor({ columns: 80, rows: 3 }).live).toBe(1)
   })
@@ -25,7 +28,7 @@ describe('budgetFor', () => {
   test('leaves the chrome its rows, since a running turn reserves the whole live budget', () => {
     // The live region holds its budget for the length of every turn, so a live
     // budget that does not leave the chrome its rows is an L1 violation held
-    // for the length of every turn rather than a transient one. It holds from
+    // for the length of every turn instead of a transient one. It holds from
     // the smallest window that can seat the chrome and a row above it.
     for (const rows of [CHROME_ROWS + 2, 12, 24, 40, 120]) {
       const budget = budgetFor({ columns: 80, rows })
@@ -43,7 +46,7 @@ describe('budgetFor', () => {
   })
 
   test('derives the item limit from height, and charges a header a row', () => {
-    // Stated against the chrome floor rather than as a number: an overlay may
+    // Stated against the chrome floor, not as a number. An overlay may
     // use every row the viewport has left once chrome and its title are paid.
     const rowsLeft = (rows: number): number => rows - 1 - CHROME_ROWS
     expect(budgetFor({ columns: 80, rows: 24 }).items).toBe(rowsLeft(24))
@@ -73,7 +76,7 @@ describe('windowOf', () => {
   })
 
   test('reserves the footer row, so one item too many hides two', () => {
-    // The footer costs a row: four items in three rows shows two and hides two.
+    // The footer costs a row. Four items in three rows shows two and hides two.
     expect(windowOf(['a', 'b', 'c', 'd'], 3)).toEqual({ shown: ['a', 'b'], hidden: 2 })
   })
 
@@ -131,13 +134,13 @@ describe('vocabulary', () => {
   })
 
   test('every marker is a single cell as measured', () => {
-    // A marker may be non-ASCII: it sits alone in a fixed-width rail, so a
+    // A marker may be non-ASCII. It sits alone in a fixed-width rail, so a
     // terminal drawing it wider than measured shifts that row and no other.
     for (const marker of Object.values(MARKER)) expect([...marker]).toHaveLength(1)
   })
 
   test('the prompt and the selection marker stay distinct', () => {
-    // Two identical markers a row apart read as one list.
+    // Two identical markers a row apart look like one list.
     expect(MARKER.selected).not.toBe(MARKER.prompt)
   })
 

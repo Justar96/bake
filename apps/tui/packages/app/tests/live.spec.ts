@@ -2,8 +2,8 @@
 import { describe, expect, it } from 'vitest'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { StreamChunk } from '@deepseek-ai/dsh-llm'
-import { present, type ResultBound } from '@dsh-tui/ui/present.ts'
-import { VERB } from '@dsh-tui/ui/layout.ts'
+import { PENDING_ARGUMENTS, present, toolLabel, type ResultBound } from '@dsh-tui/ui/present.ts'
+import { MARKER } from '@dsh-tui/ui/layout.ts'
 import { LiveBlocks } from '../src/live.ts'
 
 /** Feed chunks in stream order and read back what the region would draw. */
@@ -17,14 +17,13 @@ function streamed(...chunks: readonly StreamChunk[]) {
 const live: ResultBound = { lines: 8, unit: 'lines', more: 'more lines' }
 
 /** The verbs of every line the rows present, so a section is named by what it says. */
-const verbs = (rows: readonly Parameters<typeof present>[0][]): string[] =>
-  rows.flatMap(row => present(row, live)).map(line => line.verb).filter(verb => verb !== '')
+const heads = (rows: readonly Parameters<typeof present>[0][]): string[] =>
+  rows.flatMap(row => present(row, live)).filter(line => line.marker === MARKER.action).map(line => line.text)
 
 describe('LiveBlocks', () => {
   it('shows the call the agent is making, not only what it said', () => {
-    // The regression this guards: a turn that reasons, then calls a tool, used
-    // to go blank for the whole call — the surface looked idle while the agent
-    // was at its busiest.
+    // Regression. A turn that reasons and then calls a tool used to go blank
+    // for the whole call. The surface looked idle while the agent was busiest.
     const rows = streamed(
       { type: 'block-start', index: 0, blockType: 'reasoning' },
       { type: 'reasoning-delta', index: 0, text: 'need the file' },
@@ -32,8 +31,8 @@ describe('LiveBlocks', () => {
       { type: 'tool-call-delta', index: 1, id: ToolCallId('c1'), name: 'read_file', argumentsDelta: '{"pa' },
     )
     expect(rows.map(row => row.kind)).toEqual(['reasoning', 'tool-call'])
-    // Reasoning is a paragraph with no verb; the call below it names its action.
-    expect(verbs(rows)).toEqual([VERB.read])
+    // Reasoning is a paragraph with no head. The call below it names its tool.
+    expect(heads(rows)).toEqual([`${toolLabel('read_file')}(${PENDING_ARGUMENTS})`])
   })
 
   it('keeps blocks in stream order, so reasoning stays above the call it led to', () => {
@@ -50,7 +49,7 @@ describe('LiveBlocks', () => {
 
   it('never shows the arguments, whether they are half sent or complete', () => {
     // Every prefix of a streamed JSON argument string is invalid JSON, and most
-    // end mid-token. The complete arguments are no better here: the committed
+    // end mid-token. The complete arguments are no better here. The committed
     // row presents them through the tool's own presenter a moment later.
     const half = streamed(
       { type: 'block-start', index: 0, blockType: 'tool-call' },
@@ -65,7 +64,7 @@ describe('LiveBlocks', () => {
       expect(rows).toHaveLength(1)
       const text = present(rows[0]!, live).map(line => line.text).join('\n')
       expect(text).not.toContain('command')
-      expect(text).toContain('bash')
+      expect(text).toContain(toolLabel('bash'))
     }
   })
 

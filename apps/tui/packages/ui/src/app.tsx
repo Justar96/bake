@@ -16,7 +16,7 @@ import { cacheTone, permissionTone, PALETTE } from './palette.ts'
 import { Subagents, type SubagentEntry } from './subagents.tsx'
 import { Beat } from './beat.tsx'
 import { Welcome } from './welcome.tsx'
-import { Chrome, Completion, Line, lineHeight, LiveRegion, Notice, Panel, Thinking, wrappedRows, type RuleState } from './line.tsx'
+import { Chrome, Completion, Line, lineHeight, LiveRegion, Notice, Panel, Thinking, THINKING_GAP, wrappedRows, type ActivityState, type StandingState } from './line.tsx'
 import { activityWord, phaseLabel, phaseOf, lastTurn, THINKING_ROWS, thinkingRows, turnSummary, type Clock } from './activity.ts'
 
 /** Display-only projection of one pending inbox message. */
@@ -31,11 +31,51 @@ export interface PendingInput {
  * Display-only projection of one entry in the agent's task list.
  *
  * The agent replaces the whole list on every write, so an entry needs no
- * identity: what it is and where it stands is all this surface shows.
+ * identity. This surface shows what the task is and where it stands.
  */
 export interface TaskEntry {
   readonly text: string
   readonly status: 'pending' | 'in_progress' | 'completed'
+}
+
+/**
+ * Display-only view of the session's current goal.
+ *
+ * `phase` is durable. `armed` is this process's permission to keep continuing
+ * the goal, so an active goal that is not armed is waiting on a human.
+ */
+export interface GoalEntry {
+  readonly objective: string
+  readonly phase: 'active' | 'paused' | 'blocked' | 'complete'
+  readonly armed: boolean
+  readonly rounds: number
+  readonly maxRounds: number
+  /** Why a blocked goal stopped; present only while blocked. */
+  readonly blocked?: string
+}
+
+/**
+ * Standing state the header draws for the goal, on the right.
+ *
+ * Each phase pairs a colour with a glyph, so `NO_COLOR` still distinguishes
+ * an armed goal from a held, blocked, or finished one.
+ *
+ * @param goal - the current goal, or undefined when none is set.
+ * @param copy - locale-owned labels.
+ * @returns the header's right-hand state, or undefined to leave that side empty.
+ */
+export function goalState(goal: GoalEntry | undefined, copy: TuiCopy): StandingState | undefined {
+  if (goal === undefined) return undefined
+  const rounds = `${copy.goalRound} ${goal.rounds}/${goal.maxRounds}`
+  const details = (...parts: (string | undefined)[]): string => parts.filter(part => part !== undefined && part !== '').join(' \u00b7 ')
+  switch (goal.phase) {
+    case 'active': return goal.armed
+      ? { glyph: MARKER.turn, label: copy.goalActive, details: details(rounds, goal.objective), color: PALETTE.running }
+      : { glyph: MARKER.waiting, label: copy.goalHeld, details: details(copy.goalResume, goal.objective), color: PALETTE.waiting }
+    case 'paused': return { glyph: MARKER.waiting, label: copy.goalPaused, details: details(copy.goalResume, goal.objective), color: PALETTE.waiting }
+    case 'blocked': return { glyph: '\u2717', label: copy.goalBlocked, details: details(goal.blocked, goal.objective), color: PALETTE.failed }
+    case 'complete': return { glyph: '\u2713', label: copy.goalComplete, details: details(rounds, goal.objective), color: PALETTE.done }
+  }
 }
 
 /** Application state and actions supplied by the terminal owner. */
@@ -55,9 +95,9 @@ export interface AppProps {
   /**
    * Whether an interrupt is armed, so a second one quits.
    *
-   * Separate from `notice` because it is key state rather than feedback about
-   * the session: it remains beside the composer, it must not be cleared
-   * by a command result, and it must not clear one.
+   * Separate from `notice`. This is key state, not feedback about the
+   * session. It stays beside the composer. A command result must not clear
+   * it, and it must not clear a command result.
    */
   readonly quitting: boolean
   readonly interaction: Interaction | undefined
@@ -80,8 +120,17 @@ export interface AppProps {
   } | undefined
   readonly inspectionParent?: string
   readonly onSubagents?: () => void
+  /**
+   * A newer Bake release this install can move to with `bake update`. Named in
+   * the status line, the bounded field that yields first. Absent, nothing is said.
+   */
+  readonly update?: string
+  /** Shift-Tab: step the selected model's reasoning effort. Absent, Shift-Tab does nothing. */
+  readonly onCycleThinking?: () => void
   /** Harness plan projection; absent when this profile has no plan mode. */
   readonly plan?: { readonly active: boolean; readonly pending: boolean }
+  /** Current goal from the Harness goal service; absent without one or before `/goal` sets it. */
+  readonly goal?: GoalEntry | undefined
   /** Effective permission preset from the session projection; absent without that service. */
   readonly permission?: string
   /** Selected reasoning effort, or the model's advertised default when known. */
@@ -90,9 +139,9 @@ export interface AppProps {
   readonly cwd: string
   readonly sessionId: string
   /**
-   * Running Bake version. Supplied, a session that mounts with no history
-   * opens with the welcome block, which carries its own session line; absent,
-   * it opens with the session heading alone.
+   * Running Bake version. When supplied, a session that mounts with no history
+   * opens with the welcome block, which carries its own session line. When
+   * absent, it opens with the session heading alone.
    */
   readonly version?: string | undefined
   /** Projected context occupancy from the harness meter, absent before a usage sample. */
@@ -108,8 +157,8 @@ export interface AppProps {
   /** Maximum visible completion and picker rows, supplied by application configuration. */
   readonly completionLimit: number
   /**
-   * Tool-result lines the transcript keeps under each outcome, the rest
-   * counted. The full text is in the session log, and an unbounded listing
+   * Tool-result lines the transcript keeps under each outcome. The rest are
+   * counted. The full text is in the session log. An unbounded listing
    * scrolls the answer out of view on every call it makes. Supplied by
    * application configuration.
    */
@@ -120,34 +169,36 @@ export interface AppProps {
    */
   readonly highlight?: Highlight
   /**
-   * Time source for the rule's spinner, light, and elapsed time.
+   * Clock for the header spinner and elapsed time.
    *
-   * Absent, the rule draws a resting glyph and no clock: the presentation
-   * layer reads no time of its own, so a test or a static preview renders the
-   * same frame every run. Ignored while a screen reader is active, which
-   * would announce every frame.
+   * When absent, the header draws a resting glyph and no elapsed time. This
+   * layer must not read the wall clock itself, so a test or a static preview
+   * renders the same frame on every run. Ignored while a screen reader is
+   * active, because each frame would be announced.
    */
   readonly clock?: Clock
   /**
-   * Whether the rule's glyph cycles, its light sweeps, and a running action's
-   * marker pulses; defaults to true. Off — `NO_COLOR` — the clock still counts
-   * the elapsed seconds, and nothing else on the surface moves by itself.
+   * Whether the header glyph cycles and a running action's marker blinks.
+   * Defaults to true.
+   *
+   * Off under `NO_COLOR`. Elapsed seconds still advance, but nothing else on
+   * the surface moves on its own.
    */
   readonly motion?: boolean
   readonly onSubmit: Submit
   readonly onCancel: () => void
   readonly onInterrupt: () => void
   /**
-   * Called for any key other than Ctrl-C while `quitting`: the user went on
-   * with something else, so the quit prompt should go rather than wait out
-   * its window, and a later Ctrl-C starts over instead of quitting.
+   * Called for any key other than Ctrl-C while `quitting`. The user went on
+   * with something else, so the quit prompt goes instead of waiting out
+   * its window. A later Ctrl-C starts over instead of quitting.
    */
   readonly onQuitDismiss?: () => void
   readonly onAnswer: (id: number, answer: InteractionAnswer) => void
 }
 
 /**
- * One dim line under the completion panel: what it is doing, or why it is empty.
+ * One dim line under the completion panel. What it is doing, or why it is empty.
  * @param props.text - locale-owned message.
  * @param props.tone - `error` to colour a failure.
  * @returns the message row, aligned with the panel's names.
@@ -178,27 +229,25 @@ function rowHeight(row: Row, budget: Budget, result: ResultBound): number {
 }
 
 /**
- * The agent's task list, as current state rather than as history.
+ * The agent's task list, as current state, not as history.
  *
- * Every write replaces the list, so the transcript would show the same plan
- * several times with a different tick each time. A panel shows the one version
- * that is still true, and costs its rows only while a list exists.
+ * Every write replaces the list. Printing each write in the transcript would
+ * repeat the same plan with a different tick. This panel shows the one version
+ * that is still current, and it costs rows only while a list exists.
  *
- * Drawn as a checklist rather than a tree, so it never reads as the subagent
- * panel beside it: a heading with a progress bar and a count, then each task
- * on its own row, indented under the heading, with a box that fills as the
- * agent works. The task in progress points in ocean blue, finished ones are ticked
- * green and struck through, and the ones still waiting hold an empty box, so
- * `NO_COLOR` still reads every state by shape. The bar is drawn in heavy and
- * light rules for the same reason.
+ * It is a checklist, not a tree, so it is distinct from the subagent panel
+ * beside it. A heading with a progress bar and a count, then each task on its
+ * own row, indented under the heading. The box fills as the agent works. The
+ * task in progress is ocean blue, finished tasks are ticked green and struck
+ * through, and waiting tasks hold an empty box, so `NO_COLOR` still shows
+ * every state by shape. The bar uses heavy and light rules for the same reason.
  *
  * The list keeps the agent's order, so a finished task stays where the plan
- * put it. When rows run short, finished tasks give up theirs first, oldest
- * first: they are what the reader has already watched happen, and the rows are
- * needed by the work that has not. The list is capped like every other panel,
- * because the dynamic region shares one budget and a long plan would spend
- * the live region's share of it; each task is one row, truncated, so the cap
- * is exact.
+ * put it. When rows run short, finished tasks yield first, oldest first. The
+ * remaining rows belong to work that has not happened yet. The list is capped
+ * like every other panel. The dynamic region shares one budget, and a long
+ * plan would spend the live region's share of it. Each task is one truncated
+ * row, so the cap is exact.
  *
  * @param props.todos - the current list, in the agent's own order.
  * @param props.copy - locale-owned labels.
@@ -212,8 +261,8 @@ export function Tasks({ todos, copy, limit }: {
 }): React.ReactElement | null {
   const done = todos.filter(item => item.status === 'completed').length
   if (done === todos.length || limit <= 0) return null
-  // The head and the overflow count are rows of the panel, not extras on top
-  // of it: counting only the entries makes every claim against this panel
+  // The head and the overflow count are rows of the panel, not extras.
+  // Counting only the entries makes every height claim against this panel
   // short, and two rows is the whole chrome.
   const room = limit - 1
   let shown = [...todos]
@@ -240,7 +289,7 @@ export function Tasks({ todos, copy, limit }: {
   </Box>
 }
 
-/** Cells of the task panel's progress bar: enough to move on every task of a short plan. */
+/** Cells of the task panel's progress bar. Enough to move on every task of a short plan. */
 const TASK_BAR = 12
 
 /** The task panel's own shapes, apart from the markers the subagent panel uses. */
@@ -252,7 +301,7 @@ const TASK_GLYPH = {
   empty: '\u2500',
 } as const
 
-/** One task: its box in the rail's width past the heading's indent, and its text truncated to one row. */
+/** One task. Its box is in the rail's width past the heading's indent, and its text is truncated to one row. */
 function Task({ status, text }: { readonly status: TaskEntry['status'], readonly text: string }): React.ReactElement {
   const glyph = status === 'completed' ? TASK_GLYPH.done : status === 'in_progress' ? TASK_GLYPH.active : TASK_GLYPH.pending
   const color = status === 'completed' ? PALETTE.done : status === 'in_progress' ? PALETTE.asking : undefined
@@ -265,15 +314,15 @@ function Task({ status, text }: { readonly status: TaskEntry['status'], readonly
   </Box>
 }
 
-/** The welcome block as the first committed item: the version and session it opens. */
+/** The welcome block as the first committed item. The version and session it opens. */
 interface Opening { readonly kind: 'welcome', readonly version: string, readonly heading: string }
 
 /**
  * Items `Static` prints ahead of the transcript.
  *
- * One either way: a session that opens with the welcome block folds the
- * session line into it, and one that opens with history prints the heading
- * alone, so the block never adds a row to the stream.
+ * Always one item. A session that opens with the welcome block folds the
+ * session line into it. A session that opens with history prints the heading
+ * alone. The lead never adds a row to the stream.
  */
 const LEAD_ITEMS = 1
 
@@ -290,13 +339,13 @@ const CommittedTranscript = memo(function CommittedTranscript({ transcript, head
 }): React.ReactElement {
   // Ink 7 Static consumes only length and slice(index). Adapt the persistent
   // transcript at this boundary so appends do not copy its entire prefix.
-  // Static must keep its identity: remounting clears Ink's saved history,
-  // leaving only the latest suffix when a terminal resize requires a replay.
+  // Static must keep its identity. Remounting clears Ink's saved history and
+  // leaves only the latest suffix when a resize requires a replay.
   const items = useMemo(() => ({
     length: transcript.length + LEAD_ITEMS,
     slice(start = 0): (Row | Opening)[] {
-      // The block is a whole item, not the first of several. At `start < 1` it
-      // still belongs to the suffix, so slice it as the one lead item it is.
+      // The lead is one item, not the first of several. While `start < 1` it
+      // still belongs to the suffix, so slice it as that one item.
       const suffix = transcriptRows(transcript, Math.max(0, start - LEAD_ITEMS))
       const head: (Row | Opening)[] = opening === undefined
         ? [{ kind: 'notice', tone: 'info', text: heading }]
@@ -314,17 +363,19 @@ const CommittedTranscript = memo(function CommittedTranscript({ transcript, head
 /**
  * Whether the terminal has just become narrower or taller than the last painted frame.
  *
- * Ink erases the previous frame by counting its lines, but a terminal that
- * reflows on resize has already re-wrapped each full-width row of it — the
- * composer surface's rows — onto two, so a narrowing leaves those rows on screen.
- * A terminal that grows taller adds its rows under the frame, unless it pulls
- * history down from scrollback, and leaves the composer off the bottom row.
- * Ink clears the terminal and replays history only for a frame that overflows
- * the viewport; the caller overflows for the one frame this returns true, and
- * the frame after it, overflowing no longer, is cleared and replayed too.
- * @param size - current terminal size.
- * Child inspection changes the mounted transcript and frame together; replay
+ * Ink erases the previous frame by counting its lines. A terminal that
+ * reflows on resize has already wrapped each full-width row of that frame —
+ * the composer surface's rows — onto two, so a narrowing leaves those rows
+ * on screen. A terminal that grows taller adds rows under the frame, unless
+ * it pulls history down from scrollback, and leaves the composer off the
+ * bottom row. Ink clears the terminal and replays history only for a frame
+ * that overflows the viewport. The caller overflows for the one frame this
+ * returns true. The next frame no longer overflows, and it is cleared and
+ * replayed too.
+ *
+ * Child inspection changes the mounted transcript and frame together. Replay
  * also reanchors that transition at the terminal bottom.
+ * @param size - current terminal size.
  * @param view - displayed parent or child identity.
  * @param openingChild - whether the first frame must reanchor after a parent.
  * @returns true for one render after a resize or inspection transition.
@@ -343,26 +394,26 @@ function useRepaint(size: WindowSize, view: string, openingChild: boolean): bool
 }
 
 /**
- * The height the dynamic frame holds, so the composer never rises off the bottom row.
+ * Minimum height the dynamic frame holds, so the composer never rises off the bottom row.
  *
  * The runner starts the frame on the terminal's bottom row. A frame drawn
  * there stays there while it and the history printed above it in the same
- * render fill at least the rows the previous frame did; a shorter one — a
- * menu closing, a notice clearing, a task finishing — would leave the
- * composer that many rows up. So the frame keeps its previous height less
- * what prints, and the rows its content does not fill stay blank above the
+ * render fill at least as many rows as the previous frame. A shorter frame —
+ * a menu closing, a notice clearing, a task finishing — would leave the
+ * composer that many rows up. The frame therefore keeps its previous height
+ * minus what prints. Rows its content does not fill stay blank above the
  * controls until printed history takes them.
  *
  * What prints is measured the way {@link RowView} draws it, before the render
- * that prints it, because a floor corrected after the frame was written would
- * already have moved the composer once.
+ * that prints it. A floor corrected after the frame was written would already
+ * have moved the composer once.
  *
  * @param committed - the transcript `Static` prints.
  * @param lead - items `Static` prints ahead of the transcript.
  * @param budget - budgets for the current terminal size.
  * @param result - the preview bound committed rows print with.
- * @param repainting - whether this render repaints the screen, which
- *   replays history and the frame together and so holds nothing.
+ * @param repainting - whether this render repaints the screen. A repaint
+ *   replays history and the frame together, so it holds nothing.
  * @returns the frame's minimum height, and the ref that measures the frame.
  */
 function useHeldHeight(committed: Transcript, lead: number, budget: Budget, result: ResultBound, repainting: boolean): {
@@ -433,6 +484,8 @@ function SessionView(props: AppProps): React.ReactElement {
     }
     if (interaction !== undefined || props.inputBlocked === true || props.inspection !== undefined || composer.blocked || key.meta) return
     if (key.ctrl && text === 'g' && (props.subagents?.length ?? 0) > 0) { props.onSubagents?.(); return }
+    // Before the menu and the composer, which both read a plain Tab.
+    if (key.tab && key.shift) { props.onCycleThinking?.(); return }
     if (key.ctrl && (text === 'p' || text === 'n')) {
       composer.recall(text === 'p' ? 'older' : 'newer'); updateMenu('', true); return
     }
@@ -483,11 +536,11 @@ function SessionView(props: AppProps): React.ReactElement {
   else compactStarted.current ??= clock?.now() ?? 0
   const running = props.status === 'running'
   const animate = props.motion === false ? undefined : clock
-  // Captured once when the turn starts and held until it ends, so the rule's
-  // word and clock do not change with every commit inside the turn.
+  // Captured once when the turn starts and held until it ends, so the header
+  // word and elapsed clock do not change on every commit inside the turn.
   const turn = useRef<{ readonly start: number, readonly startedAt: number, readonly word: string } | undefined>(undefined)
-  // The turn this surface last watched end, held until the next one starts:
-  // what the rule says once there is no turn left to describe.
+  // Last turn this surface watched end. Held until the next turn starts, and
+  // used as the header text once nothing is running.
   const finished = useRef<{ readonly start: number, readonly elapsed: number | undefined } | undefined>(undefined)
   if (!running) {
     if (turn.current !== undefined) finished.current = {
@@ -504,9 +557,9 @@ function SessionView(props: AppProps): React.ReactElement {
     }
   }
   const ended = finished.current
-  // A resumed session's newest ended turn, read once when the surface mounts:
-  // no clock watched it run, but the log says how it ended and what it did.
-  // Once, because reading history again on every commit is the cost §1 rules out.
+  // Newest ended turn of a resumed session, read once at mount. No clock
+  // watched it run; the log still records how it ended and what it did.
+  // Reading history again on every commit is the cost §1 rules out.
   const [replayed] = useState(() => running ? undefined : lastTurn(transcriptRows(props.committed)))
   // A turn this surface watched is read from where it started, and only its
   // newest ended turn when the stretch it watched recorded several.
@@ -518,17 +571,18 @@ function SessionView(props: AppProps): React.ReactElement {
   }, [running, ended, replayed, props.committed, copy])
   const lastCommitted = useMemo(
     () => transcriptRows(props.committed, Math.max(0, props.committed.length - 1)).at(-1), [props.committed])
-  // Reasoning is drawn by the thinking window over the rule instead: drawn row by
-  // row it arrives faster than it can be read and scrolls the surface with it.
+  // Reasoning is not part of the live region. The thinking window above the
+  // header draws it. Drawn row by row in the live region, it arrives faster
+  // than it can be read and scrolls the surface.
   const liveRows = useMemo(() => props.live.filter(row => row.kind !== 'reasoning'), [props.live])
   const thinking = useMemo(() => thinkingRows(props.live, budget.measure, THINKING_ROWS), [props.live, budget])
   const heading = props.inspectionParent === undefined ? `${copy.session}: ${props.sessionId}`
     : `${copy.subagentParent}: ${props.inspectionParent} > ${props.sessionId}`
   // Memoized so the committed transcript is not re-rendered on every frame.
   const result = useMemo<ResultBound>(
-    () => ({ lines: props.resultLines, unit: copy.cardLines, single: copy.cardLine, more: copy.moreLines, failures: copy.summaryFailures, ...props.highlight === undefined ? {} : { code: props.highlight } }),
+    () => ({ lines: props.resultLines, unit: copy.cardLines, single: copy.cardLine, more: copy.moreLines, failures: copy.summaryFailures, earlier: copy.earlierCalls, ...props.highlight === undefined ? {} : { code: props.highlight } }),
     [props.resultLines, props.highlight, copy])
-  // Decided once per mount: a session with no history when it opens gets the
+  // Decided once per mount. A session with no history when it opens gets the
   // block, and keeps it in the stream while its first turn commits.
   const [opening] = useState<Opening | undefined>(() => props.version === undefined
     || props.inspectionParent !== undefined || props.committed.length > 0
@@ -545,10 +599,10 @@ function SessionView(props: AppProps): React.ReactElement {
     return given
   }
   // An interaction replaces the chrome, so the blank that opens the chrome
-  // opens the interaction instead and is charged here rather than to it.
+  // opens the interaction instead and is charged here, not to the interaction.
   const openLimit = claim(interaction !== undefined && budget.chrome.gap ? 1 : 0)
   const interactionLimit = claim(interaction === undefined ? 0 : menuLimit)
-  // Claimed before anything but the interaction: it is the answer to a key the
+  // Claimed before anything but the interaction. It is the answer to a key the
   // user has already pressed, and the next press ends the session.
   const quitLimit = claim(props.quitting ? 1 : 0)
   const sendingLimit = claim(composer.submitting ? 1 : 0)
@@ -557,19 +611,19 @@ function SessionView(props: AppProps): React.ReactElement {
       + Number(visibleMenu?.loading === true) + Number(visibleMenu?.error !== undefined)
   const completionLimit = claim(matches === undefined ? 0 : Math.max(1,
     Math.min(matches.length, props.completionLimit) + Number(matches.length > props.completionLimit) + menuStatusRows))
-  // Only while it has rows to draw: an empty live region draws nothing, and
+  // Only while it has rows to draw. An empty live region draws nothing, and
   // reserving its window for a turn that has not spoken yet would starve the
   // panels below it of rows it never uses.
   const liveLimit = claim(liveRows.length > 0 ? liveWant : 0)
   // After the output it summarizes, which it cannot outrank on a short
-  // terminal; the rule already says the turn is running.
-  const thinkingLimit = claim(interaction !== undefined || !running ? 0 : thinking.length)
+  // terminal; the header already says the turn is running.
+  const thinkingLimit = claim(interaction !== undefined || !running || thinking.length === 0 ? 0 : thinking.length + THINKING_GAP)
   const taskLimit = claim(props.todos === undefined ? 0 : menuLimit)
   const subagentLimit = claim((props.subagents?.length ?? 0) === 0 ? 0 : Math.min(menuLimit, (props.subagents?.length ?? 0) + 2))
   const pendingLimit = claim(props.pending.length === 0 ? 0 : menuLimit)
   const attachmentLimit = claim((props.attachments?.length ?? 0) === 0 ? 0 : menuLimit)
   // One row, and the command itself may be long enough to wrap past it.
-  // Compaction's progress is the rule's to show, in place of the command.
+  // Compaction's progress is the header's to show, in place of the command.
   const commandLimit = claim(props.compactPhase === undefined && props.command !== undefined ? 1 : 0)
   const noticeLimit = claim(props.notice === undefined ? 0 : budget.notice)
   const menuRows = Math.max(0, completionLimit - menuStatusRows)
@@ -577,12 +631,12 @@ function SessionView(props: AppProps): React.ReactElement {
   const visibleMatches = menuWindow.shown
   const mixedKinds = new Set(visibleMatches.map(entry => entry.kind)).size > 1
   // Everything between the conversation and the input is one stack, opened by
-  // the chrome's blank row, so a notice or a list reads as part of the input
-  // rather than as one more line of the answer above it.
+  // the chrome's blank row. A notice or a list belongs to the input, not to
+  // one more line of the answer above it.
   const hit = props.usage === undefined ? undefined : cacheHit(props.usage)
-  // What the rule over the input says: compaction while it runs, else the
-  // turn while it runs, else how the last one ended.
-  const light: RuleState | undefined = props.compactPhase !== undefined
+  // Header text, in priority order. Compaction while it runs, otherwise the
+  // current turn, otherwise how the last turn ended.
+  const activity: ActivityState | undefined = props.compactPhase !== undefined
     ? {
       kind: 'running', word: copy.compacting, startedAt: compactStarted.current ?? 0, color: PALETTE.running,
       phase: { preparing: copy.compactPreparing, summarizing: copy.compactSummarizing, saving: copy.compactSaving }[props.compactPhase],
@@ -620,7 +674,7 @@ function SessionView(props: AppProps): React.ReactElement {
       {menuRows > 0 && <Completion
         items={visibleMatches.map(entry => ({
           name: entry.name,
-          // The kind is dropped when every visible row shares one: nine rows
+          // The kind is dropped when every visible row shares one. Nine rows
           // reading `Command` say nothing that the panel itself does not.
           description: [mixedKinds ? copy[entry.kind] : '', entry.description].filter(part => part !== '').join('  '),
         }))}
@@ -635,7 +689,7 @@ function SessionView(props: AppProps): React.ReactElement {
   </>
   if (props.inspection !== undefined) {
     const child = props.inspection
-    const { context: _context, usage: _usage, plan: _plan, permission: _permission, thinkingLevel: _thinkingLevel,
+    const { context: _context, usage: _usage, plan: _plan, goal: _goal, permission: _permission, thinkingLevel: _thinkingLevel,
       compactPhase: _compactPhase, ...childProps } = props
     return <SessionView {...childProps} {...child} key={child.sessionId} inspection={undefined}
       inspectionParent={props.sessionId} inputBlocked={true} stopping={false}
@@ -649,7 +703,7 @@ function SessionView(props: AppProps): React.ReactElement {
     {/* Above the controls, so the one overflowing frame leaves them at the
         bottom where the replayed history is about to put them. */}
     {repainting && <Box height={size.rows} flexShrink={0} />}
-    {/* One beat for everything that moves below: the rule and the
+    {/* One beat for everything that moves below: the header and the
         markers of running actions redraw together, and only when they change. */}
     <Beat clock={clock}>
       {/* Sized to its content or the height it holds, whichever is taller, so
@@ -664,8 +718,8 @@ function SessionView(props: AppProps): React.ReactElement {
         {interaction === undefined
           ? (
             <Chrome
-              // No state word: the rule says what the session is doing,
-              // and the composer's placeholder and hint say whether it is idle.
+              // No state word. The header says what the session is doing.
+              // The composer's placeholder and hint say whether it is idle.
               left={[{ text: `${copy.model}: ${compactModel(props.model)}` },
                 ...props.plan === undefined || (!props.plan.active && !props.plan.pending) ? []
                   : [props.plan.pending ? (props.plan.active ? copy.planExitPending : copy.planEntryPending) : copy.planActive]]}
@@ -676,15 +730,17 @@ function SessionView(props: AppProps): React.ReactElement {
                 label: copy.thinking, value: props.thinkingLevel, color: PALETTE.asking,
               } }}
               right={[
-                // In priority order, since narrowing drops them from the end:
-                // occupancy is what a user compacts on, the totals are what the
+                // In priority order, because narrowing drops them from the end.
+                // Occupancy is what a user compacts on. The totals are what the
                 // session cost. The path is last because it is the unbounded
-                // field: the one the status line shortens, keeping its tail,
-                // which names the workspace.
+                // field. The status line shortens it from the start and keeps
+                // the tail, which names the workspace.
                 ...props.context === undefined ? [] : [{ text: `${copy.context}: ${formatContext(props.context)}`,
                   short: `${copy.contextShort} ~${contextPercent(props.context)}%` }],
                 ...props.usage === undefined ? [] : formatTotals(props.usage, { input: copy.tokensIn, output: copy.tokensOut }),
                 ...hit === undefined ? [] : [{ label: copy.cacheHit, value: `${hit}%`, color: cacheTone(hit) }],
+                // Last of the bounded fields: it drops before any reading of the session.
+                ...props.update === undefined ? [] : [{ label: copy.updateLabel, value: `v${props.update} · bake update`, color: PALETTE.waiting }],
                 compactPath(props.cwd, process.env['HOME']),
               ]}
               columns={size.columns}
@@ -692,17 +748,18 @@ function SessionView(props: AppProps): React.ReactElement {
               before={composer.before}
               after={composer.after}
               // Idle invites a prompt. While a turn runs, Enter steers instead of
-              // sending, and the placeholder is the only text that says so; while
+              // sending, and the placeholder is the only text that says so. While
               // a session switch holds the input, it says why keys do nothing.
               placeholder={props.inspectionParent !== undefined ? copy.subagentBack : props.inputBlocked === true ? copy.sessionsBusy : props.compactPhase !== undefined ? copy.compactWait
                 : props.status === 'running' ? copy.steering : copy.prompt}
-              // The panel carries no key help of its own, so the slot names the one key
+              // The panel carries no key help of its own. The slot names the one key
               // that is not discoverable by pressing it.
               hints={{ send: copy.send, interrupt: copy.interrupt, select: copy.tabCompletes, answer: copy.send }}
               maxRows={budget.composer}
               layout={budget.chrome}
               frame={props.frame}
-              light={light}
+              activity={activity}
+              standing={goalState(props.goal, copy)}
               clock={clock}
               motion={animate !== undefined}
               compact={screenReader}

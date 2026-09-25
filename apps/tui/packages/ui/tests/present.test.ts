@@ -4,16 +4,23 @@ import { COLUMN, MARKER, TREE, VERB } from '../src/layout.ts'
 import type { CardLine, ToolCallRow } from '../src/rows.ts'
 import { PALETTE } from '../src/palette.ts'
 import wrapAnsi from 'wrap-ansi'
-import { compactModel, compactPath, hintFor, isBlank, present, softBreaks, styleOf, tailLines, verbFor, type Highlight, type PresentedLine, type ResultBound } from '../src/present.ts'
+import { compactModel, compactPath, CONNECTOR, fittedGroup, hintFor, isBlank, present, softBreaks, styleOf, tailLines, toolLabel, verbFor, type Highlight, type PresentedLine, type ResultBound } from '../src/present.ts'
 
 /** Every result line drawn, for the tests that are about placement, not bounds. */
 const shown: ResultBound = { lines: Number.MAX_SAFE_INTEGER, unit: 'lines', more: 'more lines' }
 /** A result with its whole body, outcome line first. */
 const both = (row: Parameters<typeof present>[0]) => present(row, shown)
-/** A preview bound: the outcome, the head of the output, and a count for the rest. */
+/** A preview bound. The outcome, the head of the output, and a count for the rest. */
 const live: ResultBound = { lines: 3, unit: 'lines', more: 'more lines' }
-/** A collapsed bound: the outcome, the card's headline, and the size. */
+/** A collapsed bound. The outcome, the card's headline, and the size. */
 const committed: ResultBound = { lines: 0, unit: 'lines', more: 'more lines' }
+
+describe('toolLabel', () => {
+  test('capitalizes each word of a tool name and runs them together', () => {
+    expect(['bash', 'read_file', 'str_replace_editor', 'web-fetch', 'Grep', '__'].map(toolLabel))
+      .toEqual(['Bash', 'ReadFile', 'StrReplaceEditor', 'WebFetch', 'Grep', '__'])
+  })
+})
 
 describe('verbFor', () => {
   test('names the action, not the implementation', () => {
@@ -91,9 +98,8 @@ describe('hintFor', () => {
 
 describe('present', () => {
   test('opens a turn with a blank and divider, then marks it once', () => {
-    // The blank is the transcript's only whitespace: it gives the eye somewhere
-    // to land when scrolling back, and scrollback pays for it rather than the
-    // dynamic region's budget.
+    // The blank is the transcript's only whitespace. Scrollback pays for it,
+    // not the dynamic region's budget.
     const lines = present({ kind: 'user', text: 'first\nsecond' }, shown)
     expect(lines.map(line => line.marker)).toEqual([MARKER.none, MARKER.none, MARKER.turn, MARKER.none])
     expect(lines[0]!.text).toBe('')
@@ -108,7 +114,7 @@ describe('present', () => {
   })
 
   test('draws a command as typed, from the rail, behind a blank', () => {
-    // A command addresses the surface, not the model: its slash takes the
+    // A command addresses the surface, not the model. Its slash takes the
     // first column, so the row is unmistakable without colour, and the name
     // is bold as an action's verb is.
     const [blank, line] = present({ kind: 'command', name: 'model', args: ' deepseek/chat high' }, shown)
@@ -138,10 +144,11 @@ describe('present', () => {
       kind: 'tool-call', callId: 'c1', tool: 'bash', input: 'ls -a',
       detail: [{ text: 'List the directory' }],
     }, shown)
-    // The head carries the verb and the title; the card continues under it,
-    // dim, so every card kind lands in one column whatever tool produced it.
+    // The head names the tool and its argument; the card hangs under it on
+    // the connector, dim, so every card kind lands in one column whatever
+    // tool produced it.
     expect(lines.map(line => [line.verb, line.text, line.column, line.tone]))
-      .toEqual([[VERB.run, 'ls -a', COLUMN.output, 'plain'], ['', 'List the directory', COLUMN.output, 'quiet']])
+      .toEqual([['', 'Bash(ls -a)', COLUMN.rail, 'plain'], [CONNECTOR, 'List the directory', COLUMN.output, 'quiet']])
   })
 
   test('colours the two sides of a change and keeps its context at normal brightness', () => {
@@ -150,7 +157,7 @@ describe('present', () => {
       detail: [{ text: '  keep' }, { text: '- old', emphasis: 'removed' }, { text: '+ new', emphasis: 'added' }],
     }, shown).slice(1)
     expect(lines.map(line => line.tone)).toEqual(['plain', 'removed', 'added'])
-    // A diff is read as a pair, so neither side recedes into supporting detail.
+    // A diff is a pair, so neither side recedes into supporting detail.
     expect(styleOf('added')).toEqual({ color: PALETTE.done, dim: false, bold: false })
     expect(styleOf('removed')).toEqual({ color: PALETTE.failed, dim: false, bold: false })
   })
@@ -160,10 +167,16 @@ describe('present', () => {
       .toEqual(['[c1]  2 lines', 'a', 'b'])
   })
 
-  test('marks the answer at the prose column', () => {
+  test('draws an answer\'s rate dim at the rail, continuing the answer rather than opening a section', () => {
+    expect(present({ kind: 'rate', text: '120 tokens \u00b7 40.0 tok/s' }, shown)).toEqual([
+      { marker: MARKER.none, verb: '', text: '120 tokens \u00b7 40.0 tok/s', column: COLUMN.rail, tone: 'quiet' },
+    ])
+  })
+
+  test('draws the answer at the prose column, with no marker', () => {
     const [, line] = present({ kind: 'assistant', text: 'Two registrations.' }, shown)
     expect(line).toEqual({
-      marker: MARKER.reply, verb: '', text: 'Two registrations.', column: COLUMN.rail, tone: 'plain',
+      marker: MARKER.none, verb: '', text: 'Two registrations.', column: COLUMN.rail, tone: 'plain',
     })
   })
 
@@ -175,39 +188,43 @@ describe('present', () => {
     expect(lines.every(line => line.tone === 'thought')).toBe(true)
   })
 
-  test('heads an action with its verb and title, and no call id', () => {
+  test('heads an action with its tool and argument, and no call id', () => {
     const [, line, ...rest] = present({ kind: 'tool-call', callId: 'c1', tool: 'bash', input: 'rg -n foo' }, shown)
-    expect(line).toMatchObject({ marker: MARKER.action, pulse: true, verb: VERB.run, text: 'rg -n foo' })
+    expect(line).toMatchObject({ marker: MARKER.action, pulse: true, verb: '', text: 'Bash(rg -n foo)',
+      spans: [{ length: 4, tone: 'strong' }, { length: 11, tone: 'plain' }] })
     expect(rest).toEqual([])
   })
 
-  test('drops a title\'s leading verb, and names a tool no verb family covers', () => {
+  test('drops a title\'s leading verb, and names every tool by itself', () => {
     const read = present({ kind: 'tool-call', callId: 'c1', tool: 'read_file', input: 'Read /x.md' }, shown)[1]!
-    expect([read.verb, read.text]).toEqual([VERB.read, '/x.md'])
+    expect(read.text).toBe('ReadFile(/x.md)')
     const other = present({ kind: 'tool-call', callId: 'c1', tool: 'deploy', input: 'three items' }, shown)[1]!
-    expect([other.verb, other.text, other.spans]).toEqual([VERB.run, 'deploy three items', [{ length: 6, tone: 'strong' }]])
+    expect([other.text, other.spans]).toEqual(['Deploy(three items)', [{ length: 6, tone: 'strong' }, { length: 13, tone: 'plain' }]])
+    const bare = present({ kind: 'tool-call', callId: 'c1', tool: 'status', input: '' }, shown)[1]!
+    expect([bare.text, bare.spans]).toEqual(['Status', [{ length: 6, tone: 'strong' }]])
     const streaming = present({ kind: 'tool-call', callId: 'c1', tool: 'bash', input: '...' }, shown)[1]!
-    expect(streaming.text).toBe('bash')
+    expect(streaming.text).toBe('Bash(...)')
   })
 
-  test('turns a finished action\'s verb past and its marker green, in the same block', () => {
+  test('turns a finished action\'s marker green, and hangs its output from the head', () => {
     const lines = present({ kind: 'tool-call', callId: 'c1', tool: 'bash', input: 'ls', result: { ok: true, text: 'a\nb\nc' } }, live)
-    expect(lines.map(line => line.text)).toEqual(['', 'ls', 'a', 'b', 'c'])
-    expect(lines[1]).toMatchObject({ verb: 'ran', markerTone: 'done' })
+    expect(lines.map(line => line.text)).toEqual(['', 'Bash(ls)', 'a', 'b', 'c'])
+    expect(lines[1]).toMatchObject({ verb: '', markerTone: 'done' })
     expect(lines[1]!.pulse).toBeUndefined()
-    expect(lines.filter(line => line.verb !== '')).toHaveLength(1)
+    // Only the first output line carries the connector.
+    expect(lines.map(line => line.verb)).toEqual(['', '', CONNECTOR, '', ''])
+    expect(lines[2]!.verbTone).toBe('quiet')
   })
 
   test('previews file reads within the configured result bound', () => {
     const lines = present({ kind: 'tool-call', callId: 'c1', tool: 'read', input: 'Read /x.md', result: { ok: true, text: 'one\ntwo' } }, live)
-    expect(lines.map(line => line.text)).toEqual(['', '/x.md', 'one', 'two'])
-    expect(lines[1]!.spans).toBeUndefined()
+    expect(lines.map(line => line.text)).toEqual(['', 'Read(/x.md)', 'one', 'two'])
   })
 
   test('previews a failure whatever the verb, in red', () => {
     const lines = present({ kind: 'tool-call', callId: 'c1', tool: 'read', input: 'Read /x', result: { ok: false, text: 'ENOENT' } }, live)
-    expect(lines.map(line => line.text)).toEqual(['', '/x', 'ENOENT'])
-    expect(lines[1]).toMatchObject({ markerTone: 'failed', verbTone: 'failed' })
+    expect(lines.map(line => line.text)).toEqual(['', 'Read(/x)', 'ENOENT'])
+    expect(lines[1]).toMatchObject({ markerTone: 'failed' })
     expect(lines[2]!.tone).toBe('failed')
   })
 
@@ -215,16 +232,15 @@ describe('present', () => {
     const lines = present({ kind: 'tool-call', callId: 'c1', tool: 'edit', input: 'Edit one.ts', result: {
       ok: true, text: '', title: 'Edit one.ts', detail: [{ text: '- a', emphasis: 'removed' }, { text: '+ b', emphasis: 'added' }],
     } }, live)
-    expect(lines.map(line => line.text)).toEqual(['', 'one.ts  +1 −1', '- a', '+ b'])
-    expect(lines[1]!.verb).toBe('edited')
+    expect(lines.map(line => line.text)).toEqual(['', 'Edit(one.ts)  +1 −1', '- a', '+ b'])
   })
 
   test('opens each section with a blank, and keeps a result against its call', () => {
     // Indentation separates an answer at the rail from output under a verb, but
-    // two actions share the verb column: a `think` directly under the previous
-    // call's output would read as more of that output. The answer needs the
-    // blank for the opposite reason — nothing at all separates it from the
-    // reasoning above it, so without one they read as a single paragraph.
+    // two actions share the verb column. A `think` directly under the previous
+    // call's output would look like more of that output. The answer needs the
+    // blank for the opposite reason. Nothing at all separates it from the
+    // reasoning above it, so without one they look like a single paragraph.
     const opens = (row: Parameters<typeof present>[0]) => present(row, shown)[0]!.text === ''
     expect(opens({ kind: 'reasoning', text: 'why' })).toBe(true)
     expect(opens({ kind: 'tool-call', callId: 'c1', tool: 'bash', input: 'ls' })).toBe(true)
@@ -272,12 +288,12 @@ describe('present', () => {
   })
 
   test('emits nothing for empty text rather than occupying a row it cannot fill', () => {
-    // Not even the opening blank: a blank belongs to the lines under it, and on
+    // Not even the opening blank. A blank belongs to the lines under it, and on
     // its own it is a row of the live budget spent on content never sent. An
     // empty block is the everyday case while a turn is still streaming.
     expect(present({ kind: 'assistant', text: '' }, shown)).toEqual([])
     expect(present({ kind: 'reasoning', text: '' }, shown)).toEqual([])
-    // A result is the exception: its outcome is the row, so it survives an
+    // A result is the exception. Its outcome is the row, so it survives an
     // empty body, with no size and no preview under it.
     expect(present({ kind: 'tool-result', callId: 'c1', ok: true, text: '' }, committed))
       .toEqual([{
@@ -314,7 +330,7 @@ describe('present, bounding a tool result', () => {
   })
 
   test('collapses a committed result to its outcome and its size', () => {
-    // The regression this guards: one `ls -la` used to commit seventy rows, so
+    // The regression this guards. One `ls -la` used to commit seventy rows, so
     // every tool call scrolled the answer off the screen. The output is in the
     // session log; what scrollback needs is that the call ran and how much it
     // returned.
@@ -338,15 +354,15 @@ describe('present, bounding a tool result', () => {
   test('previews the head under the outcome and counts the rest', () => {
     const lines = present(listing(70), live)
     expect(lines.map(line => line.text)).toEqual(['[c1]  70 lines', 'entry-0', 'entry-1', 'entry-2', '+67 more lines'])
-    // The preview continues the outcome line rather than reopening the
-    // section, footer included, and the count recedes as detail.
+    // The preview continues the outcome line instead of reopening the
+    // section, footer included, and the count is detail.
     expect(lines.slice(1).every(line => line.verb === '')).toBe(true)
     expect(lines.every(line => line.column === COLUMN.output)).toBe(true)
     expect(lines.at(-1)!.tone).toBe('quiet')
   })
 
   test('draws one outcome line per result', () => {
-    // An outcome line on two consecutive rows reads as two calls.
+    // An outcome line on two consecutive rows would look like two calls.
     expect(both(listing(70)).filter(line => line.verb !== '')).toHaveLength(1)
   })
 
@@ -388,46 +404,46 @@ describe('present, reporting an action', () => {
   const text = (lines: readonly PresentedLine[]) => lines.map(line => line.text)
 
   test('drops a leading word naming the verb, but never a command\'s own', () => {
-    expect(call('grep', 'Grep TODO in src')[0]!.text).toBe('TODO in src')
-    expect(call('write_file', 'Write a.ts')[0]!.text).toBe('a.ts')
-    expect(call('bash', 'grep -rn TODO src')[0]!.text).toBe('grep -rn TODO src')
-    expect(call('bash', 'exec ./deploy.sh')[0]!.text).toBe('exec ./deploy.sh')
+    expect(call('grep', 'Grep TODO in src')[0]!.text).toBe('Grep(TODO in src)')
+    expect(call('write_file', 'Write a.ts')[0]!.text).toBe('WriteFile(a.ts)')
+    expect(call('bash', 'grep -rn TODO src')[0]!.text).toBe('Bash(grep -rn TODO src)')
+    expect(call('bash', 'exec ./deploy.sh')[0]!.text).toBe('Bash(exec ./deploy.sh)')
   })
 
   test('puts the card\'s summary on the head, where no bound hides it', () => {
     // The exit status is the last line of a command's output, which is the
-    // part a preview cuts; on the head it is what the eye lands on.
+    // part a preview cuts. On the head it stays visible after the preview is cut.
     const run = call('bash', 'bun test', { ok: true, detail: [{ text: 'boom' }, { text: 'exit 1', summary: 'failure' }] })
-    expect(text(run)).toEqual(['bun test  exit 1', 'boom'])
+    expect(text(run)).toEqual(['Bash(bun test)  exit 1', 'boom'])
     expect(run[0]!.spans?.at(-1)).toEqual({ length: 'exit 1'.length + 2, tone: 'failed' })
     // A card's own count says more than how many lines it drew.
     const found = call('grep', 'Grep TODO', { ok: true, detail: [{ text: 'a.ts' }, { text: '  7  hit' }, { text: '1 match', summary: 'count' }] })
-    expect(text(found)).toEqual(['TODO  1 match', 'a.ts', '  7  hit'])
+    expect(text(found)).toEqual(['Grep(TODO)  1 match', 'a.ts', '  7  hit'])
     expect(found[0]!.spans?.at(-1)?.tone).toBe('quiet')
   })
 
   test('shows the first lines of a command\'s output and its last, without the blanks at either end', () => {
     const output = ['', ...Array.from({ length: 9 }, (_, index) => `line ${index}`), '', ''].join('\n')
-    expect(text(call('bash', 'make', { ok: true, text: output }))).toEqual(['make', 'line 0', 'line 1', '+6 more lines', 'line 8'])
+    expect(text(call('bash', 'make', { ok: true, text: output }))).toEqual(['Bash(make)', 'line 0', 'line 1', '+6 more lines', 'line 8'])
     // A count beside a blank would separate nothing, so the blank joins it.
     const padded = ['a', '', 'c', 'd', 'e', 'f', '', 'z'].join('\n')
-    expect(text(call('bash', 'make', { ok: true, text: padded }))).toEqual(['make', 'a', '+6 more lines', 'z'])
-    // Output one line over the bound is drawn whole: the count costs the row it saves.
-    expect(text(call('bash', 'make', { ok: true, text: 'a\nb\nc\nd' }))).toEqual(['make', 'a', 'b', 'c', 'd'])
+    expect(text(call('bash', 'make', { ok: true, text: padded }))).toEqual(['Bash(make)', 'a', '+6 more lines', 'z'])
+    // Output one line over the bound is drawn whole. The count costs the row it saves.
+    expect(text(call('bash', 'make', { ok: true, text: 'a\nb\nc\nd' }))).toEqual(['Bash(make)', 'a', 'b', 'c', 'd'])
   })
 
   test('bounds a long input under its head as it bounds output', () => {
     const script = Array.from({ length: 10 }, (_, index) => `step ${index}`).join('\n')
-    expect(text(call('bash', `sh <<EOF\n${script}\nEOF`))).toEqual(['sh <<EOF', 'step 0', 'step 1', '+8 more lines', 'EOF'])
+    expect(text(call('bash', `sh <<EOF\n${script}\nEOF`))).toEqual(['Bash(sh <<EOF)', 'step 0', 'step 1', '+8 more lines', 'EOF'])
     // A bound that collapses output still keeps a line of the description.
     const described = present({ kind: 'tool-call', callId: 'c1', tool: 'bash', input: 'ls', detail: [{ text: 'List files' }] }, committed)
-    expect(text(described.slice(1))).toEqual(['ls', 'List files'])
+    expect(text(described.slice(1))).toEqual(['Bash(ls)', 'List files'])
   })
 
   test('counts one line in the singular the locale supplied', () => {
     const read = present({ kind: 'tool-call', callId: 'c1', tool: 'read', input: 'Read a.md', result: { ok: true, text: 'only' } },
       { ...committed, single: 'line' })
-    expect(read[1]!.text).toBe('a.md  1 line')
+    expect(read[1]!.text).toBe('Read(a.md)  1 line')
   })
 })
 
@@ -445,9 +461,9 @@ describe('present, grouping a step\'s calls', () => {
     expect(lines[0]!.text).toBe('')
     expect(lines.slice(1).map(line => [line.marker, line.verb, line.text])).toEqual([
       [MARKER.action, '', 'ran 2 \u00b7 read 1 \u00b7 1 failed'],
-      ['\u251c', 'ran', 'make'], ['\u2502', '', 'one'], ['\u2502', '', 'two'],
-      ['\u251c', 'read', 'a.md'], ['\u2502', '', 'x'],
-      ['\u2514', 'ran', 'false'], [MARKER.none, '', 'boom'],
+      ['\u251c', '', 'Bash(make)'], ['\u2502', CONNECTOR, 'one'], ['\u2502', '', 'two'],
+      ['\u251c', '', 'Read(a.md)'], ['\u2502', CONNECTOR, 'x'],
+      ['\u2514', '', 'Bash(false)'], [MARKER.none, CONNECTOR, 'boom'],
     ])
     // The head carries the step's state, each branch its call's, and the stem recedes.
     expect([lines[1]!.markerTone, lines[2]!.markerTone, lines[3]!.markerTone, lines[7]!.markerTone]).toEqual(['failed', 'done', 'quiet', 'failed'])
@@ -456,12 +472,13 @@ describe('present, grouping a step\'s calls', () => {
     expect(lines.filter(isBlank)).toHaveLength(1)
   })
 
-  test('counts in the present tense and pulses while a call runs', () => {
+  test('counts in the present tense, and blinks only the head while a call runs', () => {
     const [, head, first, second] = present({ kind: 'tool-group', calls: [
       ran('a', 'make'), { kind: 'tool-call', callId: 'b', tool: 'bash', input: 'make test' },
     ] }, failures)
     expect([head!.text, head!.pulse]).toEqual(['run 2', true])
-    expect([first!.pulse, second!.pulse, second!.verb]).toEqual([undefined, true, VERB.run])
+    // A blinking branch would open a gap in the tree, so the branches hold still.
+    expect([first!.pulse, second!.pulse, second!.text]).toEqual([false, false, 'Bash(make test)'])
   })
 })
 
@@ -475,10 +492,10 @@ describe('present, drawing a change', () => {
 
   test('says how much changed on the head, even with no lines under it', () => {
     const [, head] = present(edit(detail), committed)
-    expect(head!.text).toBe('a.ts  +2 −2')
+    expect(head!.text).toBe('Edit(a.ts)  +2 −2')
     expect(head!.spans?.slice(-3)).toEqual([{ length: 4, tone: 'added' }, { length: 1, tone: 'plain' }, { length: 2, tone: 'removed' }])
     expect(present(edit(detail), committed)).toHaveLength(2)
-    expect(present(edit([change('added', 'new', 1)]), committed)[1]!.text).toBe('a.ts  +1')
+    expect(present(edit([change('added', 'new', 1)]), committed)[1]!.text).toBe('Edit(a.ts)  +1')
   })
 
   test('numbers each changed line in the gutter, and not the gap', () => {
@@ -487,7 +504,7 @@ describe('present, drawing a change', () => {
       ['3', '- one', 'removed'], ['3', '+ uno', 'added'], [undefined, '⋯', 'quiet'], ['9', '- two', 'removed'], ['9', '+ dos', 'added'],
     ])
     expect(lines.every(line => line.verb === '' && line.column === COLUMN.output)).toBe(true)
-    // A number too wide for the column is dropped rather than wrapped.
+    // A number too wide for the column is dropped. Wrapping it would break the gutter.
     expect(present(edit([change('added', 'x', 1234567)]), shown)[2]!.gutter).toBeUndefined()
   })
 
@@ -594,7 +611,7 @@ describe('tailLines', () => {
   const call = present({ kind: 'tool-call', callId: 'c1', tool: 'bash', input: 'ls\nwc -l\nsort' }, shown)
   const answer = (count: number) =>
     present({ kind: 'assistant', text: Array.from({ length: count }, (_, index) => `answer ${index}`).join('\n') }, shown)
-  /** A call whose script runs to `count` lines: a section under a verb at the output column. */
+  /** A call whose script runs to `count` lines. A section hanging from its head at the output column. */
   const script = (count: number) =>
     present({ kind: 'tool-call', callId: 'c2', tool: 'bash', input: Array.from({ length: count }, (_, index) => `line ${index}`).join('\n') }, shown)
 
@@ -605,12 +622,13 @@ describe('tailLines', () => {
     expect(lines.at(-1)!.text).toBe('line 19')
   })
 
-  test('carries the verb onto the first line a cut section left standing', () => {
+  test('carries the connector onto the first line a cut section left standing', () => {
     // Without this the window shows lines at the output column with nothing
     // saying which action they belong to — which is exactly what a long turn
     // looks like once it passes the budget.
     const lines = tailLines(script(20), 4)
-    expect(lines[1]!.verb).toBe(VERB.run)
+    expect(lines[1]!.verb).toBe(CONNECTOR)
+    expect(lines[1]!.verbTone).toBe('quiet')
     expect(lines[1]!.text).toBe('line 17')
     expect(lines.slice(2).every(line => line.verb === '')).toBe(true)
   })
@@ -621,31 +639,30 @@ describe('tailLines', () => {
     const lines = [...reasoning(3), ...call]
     expect(tailLines(lines, 9)).toEqual(lines)
     for (let budget = call.length; budget < lines.length; budget++) expect(tailLines(lines, budget)).toEqual(call)
-    expect(tailLines(lines, 2)[1]!.verb).toBe(VERB.run)
+    expect(tailLines(lines, 2)[1]!.verb).toBe(CONNECTOR)
     expect(tailLines(lines, 2)[1]!.text).toBe('sort')
   })
 
-  test('leaves a line that already carries a verb, and restores the reply marker', () => {
+  test('leaves a line that already carries a verb, and adds no marker to a cut answer', () => {
     expect(tailLines(answer(3), 3).map(line => line.text)).toEqual(['', 'answer 1', 'answer 2'])
-    expect(tailLines(answer(3), 3)[1]!.marker).toBe(MARKER.reply)
-    expect(tailLines(answer(3), 3).slice(2).every(line => line.marker === MARKER.none)).toBe(true)
+    expect(tailLines(answer(3), 3).every(line => line.marker === MARKER.none)).toBe(true)
     expect(tailLines(script(3), 4)[0]!.text).toBe('')
-    expect(tailLines(script(3), 4)[1]!.verb).toBe(VERB.run)
-    expect(tailLines(script(3), 3)[1]!.verb).toBe(VERB.run)
+    expect(tailLines(script(3), 4)[1]!.text).toBe('Bash(line 0)')
+    expect(tailLines(script(3), 4)[2]!.verb).toBe(CONNECTOR)
+    expect(tailLines(script(3), 3)[1]!.verb).toBe(CONNECTOR)
     expect(tailLines(script(3), 3)[1]!.text).toBe('line 1')
-    // Reasoning is not an answer: a cut paragraph of it gains no reply marker.
     expect(tailLines(reasoning(3), 3)[1]!.marker).toBe(MARKER.none)
   })
 
   test('counts wrapped rows, filling the window with prose but keeping output lines whole', () => {
-    // Every line two rows tall: whole lines alone would leave an odd window a
+    // Every line two rows tall. Whole lines alone would leave an odd window a
     // row short, and the composer would bob with each paragraph.
     const tall = () => 2
     const prose = tailLines(answer(6), 6, line => line.text === '' ? 1 : tall())
     expect(prose.map(line => line.text)).toEqual(['', 'answer 3', 'answer 4', 'answer 5'])
     const output = tailLines(script(6), 6, line => line.text === '' ? 1 : tall())
     expect(output.map(line => line.text)).toEqual(['', 'line 4', 'line 5'])
-    expect(output[1]!.verb).toBe(VERB.run)
+    expect(output[1]!.verb).toBe(CONNECTOR)
   })
 
   test('still shows one line taller than the window', () => {
@@ -657,5 +674,54 @@ describe('tailLines', () => {
     const lines = reasoning(3)
     expect(tailLines(lines, 10)).toEqual(lines)
     expect(tailLines(lines, 0)).toEqual([])
+  })
+})
+
+describe('fittedGroup', () => {
+  const bound: ResultBound = { lines: 8, unit: 'lines', more: 'more lines', earlier: 'earlier calls' }
+  /** A step of `count` calls; all but the last `running` have ten lines of output. */
+  const step = (count: number, running = 1): ToolCallRow[] => Array.from({ length: count }, (_, index) => ({
+    kind: 'tool-call', callId: `c${index}`, tool: 'read', input: `f${index}.ts`,
+    ...index >= count - running ? {} : { result: { ok: true, text: Array.from({ length: 10 }, (_, line) => `${index}:${line}`).join('\n') } },
+  }))
+  const texts = (lines: readonly PresentedLine[]): string[] => lines.map(line => line.text)
+
+  test('draws a step that fits exactly as present does', () => {
+    const calls = step(2)
+    expect(fittedGroup(calls, bound, 40)).toEqual(present({ kind: 'tool-group', calls }, bound))
+  })
+
+  test('folds finished calls oldest first, keeping the head and the newest output', () => {
+    // Whole. Blank, head, and 10 rows per finished call (head, 8 lines, count) plus the running call.
+    const lines = fittedGroup(step(3), bound, 14)
+    expect(lines.length).toBeLessThanOrEqual(14)
+    expect(isBlank(lines[0]!)).toBe(true)
+    expect(lines[1]!.text).toBe('read 3')
+    expect(texts(lines)).toContain('Read(f0.ts)')
+    expect(texts(lines)).not.toContain('0:0')
+    expect(texts(lines)).toContain('1:0')
+    expect(lines.at(-1)).toMatchObject({ text: 'Read(f2.ts)', marker: TREE.corner })
+  })
+
+  test('folds the oldest calls into one branch once every finished call is a head', () => {
+    const lines = fittedGroup(step(12), bound, 8)
+    expect(lines).toHaveLength(8)
+    expect(lines[1]!.text).toBe('read 12')
+    // Blank, head, and the summary leave five rows. The five newest calls.
+    expect(lines[2]).toMatchObject({ text: '+7 earlier calls', marker: TREE.branch, tone: 'quiet' })
+    expect(texts(lines.slice(3))).toEqual(['Read(f7.ts)', 'Read(f8.ts)', 'Read(f9.ts)', 'Read(f10.ts)', 'Read(f11.ts)'])
+  })
+
+  test('on a window too short for the summary and the newest call, keeps the head above all', () => {
+    const calls = step(12, 0)
+    expect(texts(fittedGroup(calls, bound, 4))).toEqual(['', 'read 12', '+11 earlier calls', 'Read(f11.ts)'])
+    expect(texts(fittedGroup(calls, bound, 3))).toEqual(['read 12', '+11 earlier calls', 'Read(f11.ts)'])
+    expect(texts(fittedGroup(calls, bound, 2))).toEqual(['read 12', 'Read(f11.ts)'])
+    expect(texts(fittedGroup(calls, bound, 1))).toEqual(['read 12'])
+  })
+
+  test('without the words for hidden calls, folds every call to its head and hides none', () => {
+    const lines = fittedGroup(step(12), { ...bound, earlier: undefined }, 8)
+    expect(lines).toHaveLength(14)
   })
 })

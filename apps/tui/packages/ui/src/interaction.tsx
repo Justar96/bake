@@ -61,7 +61,7 @@ function RequestView({ interaction, copy, onAnswer }: {
     if (key.shift && key.return) composer.paste('\n')
     else composer.type(key.return ? '\n' : text)
   })
-  // Every panel reads the same way down: what is asked, the answer, the keys.
+  // Every panel is ordered top to bottom. What is asked, the answer, then the keys.
   if (interaction.kind === 'approval') return <Box flexDirection="column" borderStyle="round" paddingX={1}>
     <Text bold color={PALETTE.waiting} wrap="truncate-end">
       {copy.approval}: {interaction.tool}{interaction.callId === undefined ? '' : <Text bold={false} dimColor>{` ${interaction.callId}`}</Text>}
@@ -102,7 +102,7 @@ function QuestionsView({ interaction, copy, limit, onAnswer }: {
     count={interaction.questions.length} copy={copy} limit={limit} onSubmit={accept} />
 }
 
-/** Keep option focus separate from the Other draft so browsing cannot erase it. */
+/** Keep option focus separate from the Other draft, so browsing cannot erase it. */
 function QuestionPage({ question, number, count, copy, limit, onSubmit }: {
   readonly question: AskUserQuestionItem
   readonly number: number

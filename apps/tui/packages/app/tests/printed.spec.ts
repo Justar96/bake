@@ -102,6 +102,13 @@ describe('reconciling the commit', () => {
     expect(printed.reconcile([{ kind: 'assistant', text: 'Done.\n' }])).toEqual([])
   })
 
+  test('keeps the answer\'s rate once the answer itself already printed', () => {
+    const printed = new Printed()
+    stream(printed, ['Done.\n\n'])
+    expect(printed.reconcile([{ kind: 'assistant', text: 'Done.' }, { kind: 'rate', text: '4 tokens \u00b7 10.0 tok/s' }]))
+      .toEqual([{ kind: 'rate', text: '4 tokens \u00b7 10.0 tok/s' }])
+  })
+
   test('drops printed reasoning and keeps the order of the rest', () => {
     const printed = new Printed()
     printed.split([reasoning('Why.'), answer('Because.\n\nSo')])

@@ -12,7 +12,7 @@ afterEach(cleanup)
 it('renders the shared bash recording in durable event order', async () => {
   const fixture = new URL('../../../../../snapshots/session/bash-tool-turn/session.v3.jsonl', import.meta.url)
   const events = parseSessionLog(await readFile(fixture, 'utf8'))
-  // No registry outside the application, so every tool keeps its raw arguments:
+  // No registry outside the application, so every tool keeps its raw arguments.
   // the fixture asserts durable event order, not a tool's own card.
   const seam = projector(dictionaries.en, () => undefined)
   // Folded as the controller folds them, so each action prints as one block.

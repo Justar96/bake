@@ -11,6 +11,6 @@ done
 root=$(CDPATH= cd -- "$(dirname -- "$source")/.." && pwd -P)
 if [ -z "${DSH_HOME+x}" ]; then DSH_HOME="$HOME/.bake"; export DSH_HOME; fi
 case ${1-} in
-  tui|headless|plugin|--profile) exec node "$root/apps/cli/lib/bin.js" "$@" ;;
+  tui|headless|plugin|update|--profile) exec node "$root/apps/cli/lib/bin.js" "$@" ;;
   *) exec node "$root/apps/cli/lib/bin.js" --profile tui "$@" ;;
 esac

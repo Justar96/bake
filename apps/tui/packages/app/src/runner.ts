@@ -12,7 +12,8 @@ import { createSyntax } from './syntax.ts'
 import type { SessionOptions } from './session.ts'
 import type { AttachmentOptions } from './attachments.ts'
 import { SessionNavigation } from './navigation.ts'
-import { bakeVersion } from './release.ts'
+import { bakeVersion, releaseRoot } from './release.ts'
+import { UpdateNotice } from './update.ts'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 
 /** Validated application options; no implicit defaults remain in the runner. */
@@ -45,7 +46,9 @@ export interface TuiIo {
 }
 
 /**
- * Require TTY streams and render interactively even under CI; release the terminal before asynchronous shutdown.
+ * Require TTY streams and render interactively even under CI.
+ *
+ * Release the terminal before asynchronous shutdown.
  * @param ctx - owning plugin context.
  * @param config - resolved invocation options.
  * @param io - terminal streams and launcher exit callback.
@@ -55,8 +58,8 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
   const abort = new AbortController()
   const done = Promise.withResolvers<void>()
   let ui: Instance | undefined
-  // One write per frame, drawn over the last: a terminal without synchronized
-  // output otherwise shows the controls erased each time a line prints.
+  // One write per frame, drawn over the previous frame. Without synchronized
+  // output, the controls would otherwise appear erased each time a line prints.
   // NO_COLOR suppresses text styling and animated indicators for this terminal.
   const motion = (process.env['NO_COLOR'] ?? '') === ''
   const output = frameOutput(io.out, io.err, motion)
@@ -70,7 +73,7 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
     navigation.close()
     clearTimeout(quitTimer)
     ui?.cleanup()
-    // Teardown restores the terminal now, before anything else writes to it.
+    // Restore the terminal now, before anything else writes to it.
     output.flush()
   }
   const stop = ctx.effect(() => () => {
@@ -79,19 +82,20 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
     done.resolve()
   }, 'tui terminal owner')
   const copy = dictionaries[config.locale]
-  // Read once: the release does not change for the life of the process.
+  // Read once. The release does not change for the life of the process.
   const version = bakeVersion()
-  // Loaded while the session starts, and awaited before the first frame: a
-  // resumed session prints its history once, so a diff in it drawn before the
-  // grammars were ready would stay uncoloured.
+  const updates = new UpdateNotice({ running: version, release: releaseRoot() })
+  // Loaded while the session starts, and awaited before the first frame.
+  // A resumed session prints its history once. A diff drawn before the
+  // grammars are ready would stay uncoloured.
   const syntax = createSyntax()
-  // Resolved once, before the first frame: the terminal it describes does not
-  // change for the life of the process, and the presentation layer takes the
-  // answer rather than reading the environment itself.
+  // Resolved once, before the first frame. The terminal it describes does not
+  // change for the life of the process. The presentation layer takes the
+  // result instead of reading the environment itself.
   const frame = resolveFrame({ configured: config.composerFrame, locale: config.locale, env: process.env })
-  // Runner state, not the controller's: the prompt outlives a session switch,
-  // and routing it through `notify` put it in the same slot as command
-  // feedback, where a command result cleared it and it cleared one back.
+  // Runner state, not the controller's. The prompt outlives a session switch.
+  // Routing it through `notify` put it in the same slot as command feedback,
+  // where a command result cleared it and it cleared one in return.
   const interrupt = (): void => {
     if (quitTimer !== undefined) { done.resolve(); return }
     quitTimer = setTimeout(() => {
@@ -112,10 +116,11 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
     return React.createElement(App, {
       ...active.view, key: active.agent.id, inputBlocked: navigation.busy, copy, frame, clock: systemClock, motion,
       quitting: quitTimer !== undefined, completionLimit: config.completionLimit, resultLines: config.resultLines,
-      highlight: syntax.highlight, version,
+      highlight: syntax.highlight, version, ...updates.version === undefined ? {} : { update: updates.version },
       cwd: active.agent.session.header.cwd ?? '', sessionId: active.agent.id,
       onReferenceQuery: query => active.references.search(query),
       onSubagents: () => { navigation.submit('/agents') },
+      onCycleThinking: () => { active.cycleThinking() },
       onSubmit: text => navigation.submit(text), onCancel: () => navigation.cancel(),
       onInterrupt: interrupt, onQuitDismiss: dismissQuit, onAnswer: (id, answer) => active.interactions.answer(id, answer),
     })
@@ -126,12 +131,14 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
     await ctx.get('loader')?.await()
     abort.signal.throwIfAborted()
     await navigation.start(abort.signal)
+    // Before the first frame, so a known update is named from it; the network
+    // request runs on behind it and never delays the session.
+    updates.start(abort.signal, repaint)
     await syntax.ready
     abort.signal.throwIfAborted()
-    // Incremental: a frame rewrites only the lines that changed, so a spinner
-    // tick or a streamed token repaints one row rather than every row of the
-    // controls, which is what reads as flicker on a terminal without
-    // synchronized output.
+    // Incremental rendering. A frame rewrites only the lines that changed.
+    // A spinner tick or a streamed token repaints one row, not every control
+    // row. That is the flicker on a terminal without synchronized output.
     ui = render(element(), {
       stdin: io.in, stdout: output.out, stderr: output.err, exitOnCtrlC: false, interactive: true, incrementalRendering: true,
     })
@@ -148,6 +155,7 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
     await stop()
     await navigation.drain()
     await startupReport
+    await updates.drain()
     await syntax.close()
   }
   if (completed) io.exit(0)

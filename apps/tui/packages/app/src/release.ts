@@ -1,5 +1,5 @@
 /**
- * The running Bake release: its version and its changelog entry.
+ * The running Bake release. Its version and its changelog entry.
  *
  * Both are read from the repository root, which sits the same five hops above
  * this module's directory in the source tree (`packages/app/src`) and in the build output
@@ -14,6 +14,15 @@ import { fileURLToPath } from 'node:url'
 
 /** The workspace root that owns `package.json` and `CHANGELOG.md`. */
 const ROOT = new URL('../../../../../', import.meta.url)
+
+/**
+ * The running release's root directory: a source checkout, or one version
+ * directory of a managed install.
+ * @returns its absolute path.
+ */
+export function releaseRoot(): string {
+  return fileURLToPath(ROOT)
+}
 
 /** Shown when the manifest cannot be read, so the welcome block still draws. */
 const UNKNOWN_VERSION = '0.0.0'

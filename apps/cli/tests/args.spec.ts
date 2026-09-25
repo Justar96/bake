@@ -70,6 +70,15 @@ describe('parseDshArgs', () => {
     }
   })
 
+  it('reserves leading update for the self-updater, with only its own --check', () => {
+    expect(parse(['update'])).toEqual({ mode: 'update', check: false })
+    expect(parse(['update', '--check'])).toEqual({ mode: 'update', check: true })
+    // A profile named update stays reachable by its full flag.
+    expect(parse(['--profile', 'update'])).toMatchObject({ mode: 'profile', profile: 'update' })
+    expect(exitCode(['update', '--force'])).toBe(1)
+    expect(exitCode(['update', 'now'])).toBe(1)
+  })
+
   it('reserves leading plugin for management and forwards later command names', () => {
     expect(parse(['--profile', 'plugin'])).toMatchObject({ mode: 'profile', profile: 'plugin' })
     expect(parse(['--profile', 'x', 'plugin', 'add', 'y']))

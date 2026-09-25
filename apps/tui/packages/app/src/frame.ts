@@ -1,10 +1,10 @@
 /**
  * Which frame the composer draws, decided from the terminal it will draw in.
  *
- * The rounded frame is box-drawing characters, and two properties of a terminal
- * decide whether they render as a frame or as damage. Both are resolved here,
- * once, at the package boundary — the presentation layer takes the answer as a
- * prop and stays free of `process`.
+ * The rounded frame is box-drawing characters. Two properties of a terminal
+ * decide whether they render as a frame or as broken glyphs. Both are resolved
+ * here, once, at the package boundary. The presentation layer takes the answer
+ * as a prop and does not read `process`.
  *
  * @module @dsh-tui/app/frame
  */
@@ -44,22 +44,22 @@ function ctypeOf(env: FrameRequest['env']): string | undefined {
 /**
  * Choose the composer's frame.
  *
- * Three terminals cannot draw the rounded frame, and each fails differently:
+ * Three terminals cannot draw the rounded frame, and each fails differently.
  *
- * - One that is not encoding text as UTF-8 writes the bytes through as
- *   mojibake, so the frame is replaced by punctuation on every row.
- * - `TERM=dumb` names a terminal with no rendering at all beyond text, which
- *   is also the value harnesses set when they are capturing output.
- * - One configured to draw East Asian Ambiguous characters two cells wide
- *   draws a full-width horizontal run at twice the width Ink measured, so the
- *   frame wraps and Ink's own row arithmetic is wrong from then on. This is
- *   the damaging case: every other Ambiguous character on this surface sits
- *   alone in a fixed-width rail and costs one row one column, while a border
- *   run accumulates the error across the whole line.
+ * A terminal that is not encoding text as UTF-8 writes the bytes through as
+ * mojibake, so the frame becomes punctuation on every row. `TERM=dumb` names
+ * a terminal with no rendering beyond text, which is also the value harnesses
+ * set when they capture output. A terminal configured to draw East Asian
+ * Ambiguous characters two cells wide draws a full-width horizontal run at
+ * twice the width Ink measured, so the frame wraps and Ink's row arithmetic
+ * is wrong from then on. That last case is the damaging one. Every other
+ * Ambiguous character on this surface sits alone in a fixed-width rail and
+ * costs one row one column. A border run accumulates the error across the
+ * whole line.
  *
- * The first two are read from the environment. The third cannot be detected —
- * it is a terminal preference, not a capability — so a CJK character locale
- * stands in for it, and the profile's own setting overrides the lot.
+ * The first two are read from the environment. The third cannot be detected.
+ * It is a terminal preference, not a capability, so a CJK character locale
+ * stands in for it. The profile's own setting overrides all three.
  *
  * @param request - the profile's choice and the environment to read.
  * @returns the frame style to draw.

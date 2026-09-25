@@ -34,6 +34,7 @@ export async function runCli(): Promise<void> {
   switch (invocation.mode) {
     case 'profile': {
       const { runProfile } = await import('./profile-boot.ts')
+      void import('./update.ts').then(update => update.recordLaunch()).catch(() => {})
       try {
         await runProfile({
           environment: loadLayeredEnv('dsh'),
@@ -52,6 +53,18 @@ export async function runCli(): Promise<void> {
     case 'plugin': {
       const { runPlugin } = await import('./plugin.ts')
       process.exit(await runPlugin(invocation.profile, invocation.args))
+      break
+    }
+    case 'update': {
+      const { runUpdate } = await import('./update.ts')
+      const abort = new AbortController()
+      const cancel = (): void => abort.abort()
+      process.once('SIGINT', cancel)
+      try {
+        process.exitCode = await runUpdate(invocation.check, version, { signal: abort.signal })
+      } finally {
+        process.off('SIGINT', cancel)
+      }
       break
     }
     case 'dump-config': {

@@ -66,7 +66,7 @@ describe('wrapDraft', () => {
   it('draws the caret where the next character goes, including after a full row', () => {
     expect(wrap('alpha beta', 10, 11)).toEqual({ rows: ['alpha beta|'], caret: 0 })
     expect(wrap('alpha beta gamma', 11, 11)).toEqual({ rows: ['alpha beta', '|gamma'], caret: 1 })
-    // Inside the hanging space: the end of the row it hangs from.
+    // Inside the hanging space. The end of the row it hangs from.
     expect(wrap('alpha beta gamma', 10, 11)).toEqual({ rows: ['alpha beta|', 'gamma'], caret: 0 })
     expect(wrap('one\n\nthree', 4, 20)).toEqual({ rows: ['one', '|', 'three'], caret: 1 })
     expect(wrap('', 0, 20)).toEqual({ rows: ['|'], caret: 0 })

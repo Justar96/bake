@@ -1,4 +1,4 @@
-/** Read-only child transcript observation; the subagent retains its own handle. */
+/** Read-only observation of a child transcript. The subagent keeps its own handle. */
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import type { ProjectionSnapshot } from '@deepseek-ai/dsh-session-projection'
@@ -9,7 +9,7 @@ import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
 import { LiveBlocks } from './live.ts'
 import { contextFor, usageFor } from './status.ts'
 
-/** Subscribe before replay so a child can keep running while its history opens. */
+/** Subscribe before replay, so a child can keep running while its history opens. */
 export class SubagentInspection {
   private committed = emptyTranscript
   private readonly actions = new Actions()
@@ -37,7 +37,7 @@ export class SubagentInspection {
       ctx.on('agent/status', ({ agent }) => { if (agent.id === id && !this.closed) changed() }),
       ctx.on('agent/assistant-stream', ({ agent, frame }) => {
         if (agent.id !== id || this.closed) return
-        // A visit can begin halfway through an attempt; show its arriving tail
+        // A visit can begin halfway through an attempt. Show the arriving tail
         // until the durable message supplies the complete response.
         if (frame.type === 'chunk' && this.stream === undefined) {
           this.stream = { attempt: frame.attemptId, revision: frame.revision - 1, blocks: new LiveBlocks() }
@@ -54,14 +54,14 @@ export class SubagentInspection {
     const projections = ctx.get('sessionProjections')
     const offProjection = projections?.onChanged((session, key) => {
       if (session.id !== id || !['permissions', 'contextPressure', 'tokenUsage'].includes(key) || this.closed) return
-      // Retain the last authoritative values if the live child is released.
+      // Keep the last authoritative values if the live child is released.
       this.savedSurface = projections.snapshot(session, ['permissions', 'contextPressure', 'tokenUsage'])
       changed()
     })
     if (offProjection !== undefined) this.off.push(offProjection)
   }
 
-  /** Read a consistent history cut, then join events received during the read. */
+  /** Read a consistent history cut, then join the events received during that read. */
   async replay(signal: AbortSignal): Promise<void> {
     const query = this.ctx.get('sessionQuery')
     if (query === undefined) throw new Error('tui: sessionQuery is required')
@@ -72,7 +72,7 @@ export class SubagentInspection {
     const surface = session === undefined ? observation.projections
       : this.ctx.get('sessionProjections')?.snapshot(session, ['permissions', 'contextPressure', 'tokenUsage'])
     if (surface !== undefined && (this.savedSurface === undefined || surface.asOfSeq >= this.savedSurface.asOfSeq)) {
-      // Prepared observations include unrelated projections; retain only status readings.
+      // Prepared observations include unrelated projections. Keep only status readings.
       const { permissions, contextPressure, tokenUsage } = surface.values
       this.savedSurface = { asOfSeq: surface.asOfSeq, values: {
         ...permissions === undefined ? {} : { permissions },

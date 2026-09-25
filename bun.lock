@@ -95,6 +95,7 @@
         "@deepseek-ai/dsh-tool-todo": "workspace:^",
         "@deepseek-ai/dsh-tool-web": "workspace:^",
         "@deepseek-ai/dsh-tool-workflow": "workspace:^",
+        "@deepseek-ai/dsh-updater": "workspace:^",
         "@deepseek-ai/dsh-webhook": "workspace:^",
         "@deepseek-ai/dsh-webhook-github": "workspace:^",
         "@deepseek-ai/dsh-workflow-ptc": "workspace:^",
@@ -161,6 +162,7 @@
         "@deepseek-ai/dsh-file-reference": "workspace:^",
         "@deepseek-ai/dsh-file-reference-local": "workspace:^",
         "@deepseek-ai/dsh-fs": "workspace:^",
+        "@deepseek-ai/dsh-home-paths": "workspace:^",
         "@deepseek-ai/dsh-llm": "workspace:^",
         "@deepseek-ai/dsh-permission-presets": "workspace:^",
         "@deepseek-ai/dsh-plan-mode": "workspace:^",
@@ -173,6 +175,7 @@
         "@deepseek-ai/dsh-subagent": "workspace:^",
         "@deepseek-ai/dsh-token-meter": "workspace:^",
         "@deepseek-ai/dsh-tool-subagent": "workspace:^",
+        "@deepseek-ai/dsh-updater": "workspace:^",
         "@deepseek-ai/dsh-user-approval": "workspace:^",
         "@deepseek-ai/dsh-user-questions": "workspace:^",
         "@deepseek-ai/dsh-util-values": "workspace:^",
@@ -491,6 +494,10 @@
         "@deepseek-ai/dsh-hmr",
         "@deepseek-ai/dsh-user-approval",
       ],
+    },
+    "packages/boot/updater": {
+      "name": "@deepseek-ai/dsh-updater",
+      "version": "0.1.0",
     },
     "packages/bundle/base": {
       "name": "@deepseek-ai/dsh-base",
@@ -5010,6 +5017,8 @@
     "@deepseek-ai/dsh-typert-protocol": ["@deepseek-ai/dsh-typert-protocol@workspace:packages/typert/protocol"],
 
     "@deepseek-ai/dsh-typert-registry": ["@deepseek-ai/dsh-typert-registry@workspace:packages/typert/registry"],
+
+    "@deepseek-ai/dsh-updater": ["@deepseek-ai/dsh-updater@workspace:packages/boot/updater"],
 
     "@deepseek-ai/dsh-user-approval": ["@deepseek-ai/dsh-user-approval@workspace:packages/interaction/user-approval"],
 

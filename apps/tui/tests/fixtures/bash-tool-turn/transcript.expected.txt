@@ -1,6 +1,6 @@
 > Use the bash tool to run exactly: echo TERMINAL_OK. Then reply with the single word DONE and stop.
 · The user wants me to run a simple bash command and then reply with "DONE".
-⚙ bash [call_00_fkbBRJsUrGKd1pWVc4Gn8233]({"command": "echo TERMINAL_OK", "description": "Echo TERMINAL_OK to verify terminal access"}) ← done TERMINAL_OK
+⚙ bash [call_00_fkbBRJsUrGKd1pWVc4Gn8233](echo TERMINAL_OK) ← done TERMINAL_OK
 · The command ran successfully and output "TERMINAL_OK". I should now reply with just "DONE".
   DONE
 ! Completed

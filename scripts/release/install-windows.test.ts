@@ -14,7 +14,7 @@ async function preflight(setup = ''): Promise<{ code: number; stdout: string; st
   roots.push(root)
   const driver = join(root, 'preflight.ps1')
   writeFileSync(driver, `${setup}
-function Invoke-RestMethod { Write-Output 'MANIFEST_REACHED'; exit 0 }
+function Invoke-WebRequest { Write-Output 'MANIFEST_REACHED'; exit 0 }
 & $args[0]
 `)
   const child = Bun.spawn(['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', driver,

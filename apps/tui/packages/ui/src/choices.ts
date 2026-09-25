@@ -1,8 +1,8 @@
 /**
- * What a picker shows for a query: which choices match, where in each label,
+ * What a picker shows for a query. Which choices match, where in each label,
  * and which of them fit the rows it has.
  *
- * Pure, so the picker's behaviour is testable without a terminal, and so the
+ * Pure, so the picker's behaviour is testable without a terminal, and the
  * same rules can serve any list a user filters by typing.
  *
  * @module @dsh-tui/ui/choices
@@ -25,10 +25,10 @@ export interface Match<T extends Searchable> {
  * Filter choices by every word of a query, in any order.
  *
  * A word matches anywhere in the label, the value, or the description, case
- * folded, so `v4 flash` finds `deepseek/deepseek-v4-flash` and an id typed in
- * full finds its session. The order is the caller's, never re-ranked: a list
- * sorted newest first stays that way while it narrows, so the row the user
- * was reaching for does not jump.
+ * folded. `v4 flash` finds `deepseek/deepseek-v4-flash`, and an id typed in
+ * full finds its session. The order is the caller's and is never re-ranked.
+ * A list sorted newest first stays that way while it narrows, so the row the
+ * user was reaching for does not jump.
  *
  * @param choices - candidates in display order.
  * @param query - what the user typed.
@@ -64,7 +64,7 @@ function merged(ranges: readonly (readonly [number, number])[]): readonly (reado
   return out
 }
 
-/** The rows of a scrolled list: the first item shown, how many, and what each edge hides. */
+/** The rows of a scrolled list. The first item shown, how many, and what each edge hides. */
 export interface Scroll {
   readonly top: number
   readonly count: number
@@ -77,11 +77,11 @@ export interface Scroll {
 /**
  * Scroll a list so the selection stays in view, moving as little as possible.
  *
- * The list scrolls only when the selection would leave it, so walking up and
+ * The list scrolls only when the selection would leave it, so moving up and
  * down inside the window leaves every row where it is. An edge that hides
- * items spends one of the rows saying how many, so the reader knows the list
- * goes on; at two rows or fewer there is no room for that, and the selection
- * alone is kept.
+ * items spends one of the rows saying how many, so the user knows the list
+ * continues. At two rows or fewer there is no room for that, and only the
+ * selection is kept.
  *
  * @param previous - the top the list was last drawn from.
  * @param selected - the selected index, or -1 for none.
@@ -96,8 +96,8 @@ export function scrollTo(previous: number, selected: number, total: number, rows
     const top = Math.min(Math.max(0, selected), total - room)
     return { top, count: room, above: 0, below: 0 }
   }
-  // Past `last`, the rest of the list fits under an "above" row with no
-  // "below" row; before it, a window away from the top has both.
+  // Past `last`, the rest of the list fits under an "above" row and needs no
+  // "below" row. Before it, a window away from the top has both.
   const last = total - room + 1
   const countAt = (top: number): number =>
     top >= last ? total - top : top === 0 ? room - 1 : room - 2

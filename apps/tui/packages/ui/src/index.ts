@@ -1,5 +1,5 @@
 /**
- * Terminal presentation for the dsh TUI. Everything exported here is pure:
+ * Terminal presentation for the dsh TUI. Everything exported here is pure.
  * props in, rows or strings out, with no Cordis, no Node built-ins, and no
  * clock — time reaches the turn header as an optional `clock` prop the
  * terminal owner supplies. That purity is what lets the component harness run under Bun with no
@@ -8,8 +8,8 @@
  * @module @dsh-tui/ui
  */
 
-export { App, RowView } from './app.tsx'
-export type { AppProps, PendingInput } from './app.tsx'
+export { App, goalState, RowView } from './app.tsx'
+export type { AppProps, GoalEntry, PendingInput } from './app.tsx'
 export { Welcome, WELCOME_WIDTH } from './welcome.tsx'
 export { announcedCalls, project, projector } from './project.ts'
 export { Actions, SETTLES } from './actions.ts'

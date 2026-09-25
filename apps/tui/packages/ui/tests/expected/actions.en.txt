@@ -3,12 +3,12 @@
 ● Read both files, then summarize.
 
 ● read 2 · 1 failed
-├ read   {"path":"notes.md"}
-│        Notes loaded.
-└ read   {"path":"private.md"}
-         Permission denied
+├ ReadFile(notes.md)
+│ ⎿      Notes loaded.
+└ ReadFile(private.md)
+  ⎿      Permission denied
 
-< Read notes.md; private.md was
+  Read notes.md; private.md was
   unavailable.
 
   --------------------------------------

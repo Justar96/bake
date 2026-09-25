@@ -34,7 +34,7 @@ export function subagentStatus(entry: SubagentEntry, copy: TuiCopy): string {
 /**
  * A bounded branch list that keeps settled children available for inspection.
  *
- * Drawn as the task list is: a head naming the block and counting how many
+ * Drawn as the task list is. A head names the block and counts how many
  * children are working, each child hanging from it on a branch with its
  * state's glyph and word, and the keys that open one under the tree. The head
  * is the row kept when rows run short, since it says what the block is; the
@@ -52,7 +52,7 @@ export function Subagents({ entries, copy, limit }: {
 }): React.ReactElement | null {
   if (entries.length === 0 || limit <= 0) return null
   const working = entries.filter(entry => entry.state === 'working').length
-  // The keys only once a child fits beside them: a hint for a list the panel
+  // The keys only once a child fits beside them. A hint for a list the panel
   // cannot show opens nothing the reader can see.
   const hint = limit >= 3 ? 1 : 0
   const room = Math.max(0, limit - 1 - hint)

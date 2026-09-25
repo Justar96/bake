@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { App, type AppProps } from '../src/app.tsx'
 import { dictionaries } from '../src/copy.ts'
 import { appendTranscript, emptyTranscript } from '../src/transcript.ts'
-import type { Row } from '../src/rows.ts'
+import type { Row, ToolCallRow } from '../src/rows.ts'
 import { SPINNER_REST, THINKING_ROWS } from '../src/activity.ts'
 
 class Input extends EventEmitter {
@@ -66,7 +66,7 @@ async function mount(columns: number, rows: number, overrides: Partial<AppProps>
   const instance = render(<App {...state} />, {
     stdout: stdout as unknown as NodeJS.WriteStream, stdin: stdin as unknown as NodeJS.ReadStream,
     stderr: stdout as unknown as NodeJS.WriteStream, patchConsole: false, exitOnCtrlC: false, interactive: true,
-    // As the runner renders: only changed lines are rewritten.
+    // As the runner renders. Only changed lines are rewritten.
     incrementalRendering: true,
   })
   disposers.push(() => { instance.unmount(); instance.cleanup() })
@@ -108,16 +108,16 @@ async function mount(columns: number, rows: number, overrides: Partial<AppProps>
 }
 
 const inputRow = (screen: readonly string[]): number => screen.findIndex(line => line.includes('> ') && line.includes('▌'))
-/** Last screen row containing `text`: the newest line the input should follow. */
+/** Last screen row containing `text`. The newest line the input should follow. */
 const lastRow = (screen: readonly string[], text: string): number => screen.findLastIndex(line => line.includes(text))
 
 /**
- * Assert the resting shape: the newest line, blank rows, the thinking window
- * while one streams, the rule — bare, naming the running turn, or holding its
- * summary — the input under it, a blank padding row, and the status line on
- * the terminal's last rows, over Ink's cursor row.
+ * Assert the resting shape. The newest line, blank rows, the thinking window
+ * while one streams, the header — blank, naming the running turn, or holding
+ * its summary — the bare rule, the input under it, the base rule, and the
+ * status line on the terminal's last rows, over Ink's cursor row.
  * @returns the blank rows between the newest line and what rests on the
- *   input: one, and more while the frame holds rows something above the
+ *   input. One, and more while the frame holds rows something above the
  *   input gave up.
  */
 function expectInputUnder(screen: readonly string[], text: string): number {
@@ -127,22 +127,62 @@ function expectInputUnder(screen: readonly string[], text: string): number {
   expect(newest, dump).toBeGreaterThanOrEqual(0)
   expect(screen[newest + 1], dump).toBe('')
   const rule = input - 1
-  expect(rule, dump).toBeGreaterThan(newest + 1)
-  expect(screen[rule], dump).toMatch(new RegExp(`^(─+|─ (> |${SPINNER_REST} )\\S+….*|─ [✓■✗] .*)$`))
-  let first = rule
+  expect(screen[rule], dump).toMatch(/^─+$/)
+  const header = rule - 1
+  expect(header, dump).toBeGreaterThan(newest + 1)
+  expect(screen[header], dump).toMatch(new RegExp(`^( {2}(> |${SPINNER_REST} )\\S+….*| {2}[✓■✗] .*|)$`))
+  // The thinking window while there is one, one blank row above the header.
+  // nothing else between.
+  let bottom = header
+  if (screen[header - 1] === '' && screen[header - 2] !== undefined && header - 2 > newest && screen[header - 2] !== '') bottom = header - 1
+  let first = bottom
   while (first > newest + 1 && screen[first - 1] !== '') first--
   expect(screen.slice(newest + 1, first).every(line => line === ''), dump).toBe(true)
-  // The thinking window while there is one, resting on the rule: nothing
-  // else between.
-  expect(rule - first, dump).toBeLessThanOrEqual(THINKING_ROWS)
+  expect(bottom - first, dump).toBeLessThanOrEqual(THINKING_ROWS)
   expect(screen[input]!.startsWith('> '), dump).toBe(true)
-  expect(screen[input + 1], dump).toBe('')
+  expect(screen[input + 1], dump).toMatch(/^─+$/)
   expect(screen[input + 2], dump).toMatch(/^ {2}Model: /)
   expect(input + 3, dump).toBe(screen.length - 1)
   return first - newest - 1
 }
 
 describe('composer placement', () => {
+  it('refits a running step to the new size when the terminal is resized mid-step', async () => {
+    const calls: ToolCallRow[] = Array.from({ length: 10 }, (_, index) => ({
+      kind: 'tool-call', callId: `c${index}`, tool: 'read', input: `src/file${index}.ts`,
+      ...index === 9 ? {} : { result: { ok: true, text: Array.from({ length: 20 }, (_, line) => `line ${line} of ${index}`).join('\n') } },
+    }))
+    const ui = await mount(120, 50, { status: 'running', live: [{ kind: 'tool-group', calls }] })
+    for (const [columns, rows] of [[120, 50], [50, 14], [30, 9], [90, 30]] as const) {
+      const screen = columns === 120 ? await ui.screen() : await ui.resize(columns, rows)
+      const dump = screen.join('\n')
+      const input = inputRow(screen)
+      expect(screen[input - 2], dump).toMatch(new RegExp(`^ {2}${SPINNER_REST} \\S+…`))
+      expect(screen.some(line => /^● read 10/.test(line)), dump).toBe(true)
+      // Nine rows leave the live region one. The step's head, which says the
+      // most. Every larger size also keeps the newest call.
+      expect(screen.some(line => line.includes('Read(src/file9.ts)')), dump).toBe(rows > 9)
+    }
+  })
+
+  it.each([[100, 30], [80, 24], [60, 16], [40, 12], [30, 10], [160, 60], [220, 20]])('keeps the header over a running step taller than its window at %ix%i', async (columns, rows) => {
+    const ui = await mount(columns, rows, { status: 'running' })
+    const calls: ToolCallRow[] = []
+    for (let index = 0; index < 12; index++) {
+      const call = { kind: 'tool-call', callId: `c${index}`, tool: index % 3 === 0 ? 'edit' : 'read', input: `src/file${index}.ts` } as const
+      for (const done of [false, true]) {
+        calls[index] = done ? { ...call, result: { ok: true, text: Array.from({ length: 20 }, (_, line) => `line ${line} of ${index}`).join('\n') } } : call
+        const screen = await ui.update({ live: [{ kind: 'tool-group', calls: [...calls] }] })
+        const dump = screen.join('\n')
+        const input = inputRow(screen)
+        expect(screen[input - 2], dump).toMatch(new RegExp(`^ {2}${SPINNER_REST} \\S+…`))
+        // The step's head stays too. The window folds detail, never the line
+        // that says what the step is doing.
+        expect(screen.some(line => /^● \S+ \d/.test(line)), dump).toBe(true)
+      }
+    }
+  })
+
   it.each([[80, 24], [40, 10], [24, 3]])('prints the welcome once without displacing input at %ix%i', async (columns, rows) => {
     const ui = await mount(columns, rows, { version: '1.2.3' })
     const first = await ui.screen()
@@ -178,11 +218,13 @@ describe('composer placement', () => {
     await vi.waitFor(async () => expect((await ui.screen()).join('\n')).toContain('fourth▌'))
     const screen = await ui.screen()
     // The prompt row has scrolled out of the one-row window, so the caret
-    // row carries `^` rather than the prompt marker.
+    // row carries `^`. The prompt marker is no longer on that row.
     const input = screen.findIndex(line => line.includes('fourth▌'))
     expect(input).toBeGreaterThanOrEqual(0)
-    // The rule is the last structure to yield, so it stays on the input.
-    expect(screen[input - 1]).toMatch(/^─+$/)
+    // The header yields last. The rule over the input yields just before it,
+    // so that rule is present whenever the height allows it.
+    if (rows > 4) expect(screen[input - 1]).toMatch(/^─+$/)
+    else expect(screen[input - 1]).not.toMatch(/─/)
     expect(screen[rows - 1]).toBe('')
     await expect(snapshotOf(screen)).toMatchFileSnapshot(`./expected/composer-short.${columns}x${rows}.txt`)
   })
@@ -209,8 +251,8 @@ describe('composer placement', () => {
         const text = Array.from({ length: count }, (_, index) => `Response ${turn} line ${index}`).join('\n')
         expectInputUnder(await ui.update({ live: [{ kind: 'assistant', text }] }), `Response ${turn} line ${count - 1}`)
       }
-      // One committed row for an answer the window drew at its full height:
-      // the frame holds the rows the answer gave up rather than rising.
+      // One committed row replaces an answer the window drew at full height.
+      // The frame keeps the rows that answer gave up, so the composer does not rise.
       committed = appendTranscript(committed, [{ kind: 'assistant', text: `Response ${turn} final` }])
       expectInputUnder(await ui.update({ committed, live: [], status: 'idle' }), `Response ${turn} final`)
     }
@@ -223,9 +265,10 @@ describe('composer placement', () => {
     const frame = await ui.update({ status: 'running', live: [{ kind: 'assistant', text: 'First response' }] })
     const heading = lastRow(frame, 'Session: screen')
     expect(lastRow(frame, 'First response')).toBe(heading + 2)
-    // Blank, then the rule naming the turn, resting on the input.
-    expect(frame[heading + 4]).toMatch(new RegExp(`^─ ${SPINNER_REST} \\S+…  writing ─+$`))
-    expect(inputRow(frame)).toBe(heading + 5)
+    // Blank, then the header naming the turn, sitting on the rule over the input.
+    expect(frame[heading + 4]).toMatch(new RegExp(`^ {2}${SPINNER_REST} \\S+…  writing$`))
+    expect(frame[heading + 5]).toMatch(/^─+$/)
+    expect(inputRow(frame)).toBe(heading + 6)
     expect(expectInputUnder(frame, 'First response')).toBe(1)
   })
 
@@ -341,12 +384,12 @@ describe('composer placement', () => {
       const screen = await ui.resize(columns, rows)
       const dump = `${columns}x${rows}:\n${screen.join('\n')}`
       expect(screen.filter(line => line.includes('▌')), dump).toHaveLength(1)
-      // Between the rule and the padding row, the draft's text starts at the
+      // Between the rule and the base rule, the draft's text starts at the
       // prompt column, and no row it wraps onto opens with a stray space.
       const caret = screen.findIndex(line => line.includes('▌'))
       let start = caret
       while (start > 0 && !screen[start - 1]!.startsWith('─')) start--
-      expect(screen[caret + 1], dump).toBe('')
+      expect(screen[caret + 1], dump).toMatch(/^─+$/)
       expect(screen[caret + 2], dump).toMatch(/^ {2}Model: /)
       const draft = screen.slice(start, caret + 1)
       expect(draft.length, dump).toBeGreaterThan(1)
@@ -378,9 +421,9 @@ describe('composer placement', () => {
     ui.stdin.write('/')
     await vi.waitFor(async () => expect((await ui.screen()).join('\n')).toContain('/command0'))
     let screen = await ui.screen()
-    // The blank opens the stack under the heading; the list sits on the rule.
+    // The blank opens the stack under the heading; the list sits on the header.
     expect(screen[lastRow(screen, 'Session: screen') + 1]).toBe('')
-    expect(lastRow(screen, 'more')).toBe(inputRow(screen) - 2)
+    expect(lastRow(screen, 'more')).toBe(inputRow(screen) - 3)
     expect(screen[inputRow(screen) + 2]).toMatch(/^ {2}Model: /)
     expect(inputRow(screen)).toBe(anchor)
     for (const notice of ['Short notice', 'Long notice\n'.repeat(30)]) {
@@ -393,14 +436,14 @@ describe('composer placement', () => {
     ui.stdin.write('\u001b')
     await vi.waitFor(async () => expect((await ui.screen()).join('\n')).not.toContain('/command0'))
     screen = await ui.update({ pending: [], quitting: true, status: 'idle' })
-    expect(lastRow(screen, dictionaries.en.quit)).toBe(inputRow(screen) - 2)
+    expect(lastRow(screen, dictionaries.en.quit)).toBe(inputRow(screen) - 3)
     expect(inputRow(screen)).toBe(anchor)
-    // Everything closed, the input stays where it was, under the rule that
+    // Everything closed, the input stays where it was, under the header that
     // holds the finished turn's summary, and the rows the panels gave up are
     // blank until printed history takes them.
     screen = await ui.update({ quitting: false })
     expect(inputRow(screen)).toBe(anchor)
-    expect(screen[anchor - 1]).toMatch(/^─ ✓ /)
+    expect(screen[anchor - 2]).toMatch(/^ {2}✓ /)
     expect(expectInputUnder(screen, 'Session: screen')).toBeGreaterThan(1)
     const committed = appendTranscript(emptyTranscript,
       Array.from({ length: 30 }, (_, index) => ({ kind: 'user' as const, text: `Prompt ${index}` })))
@@ -437,7 +480,7 @@ describe('composer placement', () => {
 })
 
 /**
- * A screen as a file snapshot, without the empty rows under the frame: the
+ * A screen as a file snapshot, without the empty rows under the frame. The
  * tests assert those rows directly, and a file ending in blank lines fails
  * the repository's whitespace check.
  */

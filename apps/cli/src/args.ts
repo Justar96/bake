@@ -11,7 +11,8 @@
  * and `dsh --profile tui -h` prints the terminal app's help, not this one's.
  *
  * `dsh <name>` abbreviates `dsh --profile <name>`; `plugin` manages a profile's
- * plugin dependencies by forwarding to pnpm.
+ * plugin dependencies by forwarding to pnpm, and `update` replaces a managed
+ * Bake install with the newest signed release.
  * @module @deepseek-ai/dsh/args
  */
 
@@ -48,8 +49,14 @@ interface PluginInvocation {
   args: string[]
 }
 
+/** Update a managed install, or with `check`, only report whether one is available. */
+interface UpdateInvocation {
+  mode: 'update'
+  check: boolean
+}
+
 /** The resolved `dsh` invocation. Help, version, and errors exit inside {@link parseDshArgs}. */
-export type DshInvocation = ProfileInvocation | DumpConfigInvocation | PluginInvocation
+export type DshInvocation = ProfileInvocation | DumpConfigInvocation | PluginInvocation | UpdateInvocation
 
 /** Launcher flags for profile boot and configuration dumps. */
 interface BootOptions {
@@ -81,6 +88,8 @@ Examples:
   dsh tui --resume <session>                arguments after the launcher flags reach the app
   dsh tui --help                            the terminal app's own flags and help
   dsh plugin --profile tui add <package>    install a plugin into the tui profile
+  dsh update                                install the newest Bake release
+  dsh update --check                        only report whether a newer release exists
 `
 
 /**
@@ -174,8 +183,15 @@ export function parseDshArgs(argv: readonly string[], version: string): DshInvoc
       })
   }
 
+  if (first === 'update') {
+    program.command('update')
+      .description('replace this Bake install with the newest signed release; the running sessions keep their version')
+      .option('--check', 'only report whether a newer release exists; exit 0 when up to date, 10 when one is available')
+      .action((options: { check?: boolean }) => { resolved = { mode: 'update', check: options.check === true } })
+  }
+
   try {
-    const expanded = first !== undefined && !first.startsWith('-') && first !== 'plugin'
+    const expanded = first !== undefined && !first.startsWith('-') && first !== 'plugin' && first !== 'update'
       ? ['--profile', ...argv]
       : argv
     program.parse(expanded, { from: 'user' })

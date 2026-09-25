@@ -1,14 +1,14 @@
 /**
  * Session-event recorder. Appends every committed event of every session to a
- * newline-delimited JSON file, so a real agent run becomes a fixture the
+ * newline-delimited JSON file. A real agent run then becomes a fixture the
  * component harness can replay with no harness runtime and no API key.
  *
- * Recording is deliberately raw: the fixture holds `SessionEvent` values
+ * Recording is raw on purpose. The fixture holds `SessionEvent` values
  * exactly as the log commits them, because that is what `project()` consumes.
  * A fixture of already-projected rows would test the renderer against the
  * renderer's own assumptions.
  *
- * Load it over any profile that runs a turn; `headless` needs no terminal:
+ * Load it over any profile that runs a turn. `headless` needs no terminal.
  *
  * ```sh
  * node --import tsx/esm apps/cli/src/bin.ts --profile headless \
@@ -48,7 +48,7 @@ export function apply(ctx: Context, config: Config): void {
   // Truncate on mount so a rerun replaces the fixture instead of growing it.
   writeFileSync(config.path, '')
   ctx.effect(() => ctx.on('session/event', (_session: Session, event: SessionEvent) => {
-    // Synchronous append: the process may exit immediately after the final
+    // Synchronous append. The process may exit immediately after the final
     // event, and a queued write would lose the end of the fixture.
     appendFileSync(config.path, `${JSON.stringify(event)}\n`)
   }), 'tui fixture recorder')

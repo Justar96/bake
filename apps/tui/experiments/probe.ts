@@ -1,5 +1,5 @@
 /**
- * Probe plugin: proves an out-of-tree `.ts` file mounts into a shipped profile
+ * Probe plugin. Proves an out-of-tree `.ts` file mounts into a shipped profile
  * through a `--patch` insert row under the tsx source launch, and reports which
  * services a TUI plugin can reach once the application has settled.
  *

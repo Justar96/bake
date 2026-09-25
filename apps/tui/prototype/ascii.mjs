@@ -8,8 +8,8 @@
  * shifts and nothing in the layout engine can see it. Characters below 0x80
  * cannot disagree.
  *
- * So actions are named rather than pictured: a fixed verb column, arguments and
- * output aligned under it, and spacing doing the work an icon would have done.
+ * Actions are named, not drawn as icons. A fixed verb column holds the name.
+ * Arguments and output align under it. Spacing does the work an icon would have done.
  *
  *   node tui/prototype/ascii.mjs
  */
@@ -27,10 +27,10 @@ const VERB = 7
 const PROSE = 2
 
 /**
- * One verb row: a named action, its argument, and any output beneath it.
+ * One verb row. A named action, its argument, and any output beneath it.
  *
- * The verb is the marker. `run`, `read`, `think`, `error` read at a glance and
- * survive every font, every locale setting, and a copy-paste into a bug report.
+ * The verb is the marker. `run`, `read`, `think`, and `error` are readable at
+ * a glance, and they survive every font, every locale, and a paste into a bug report.
  */
 const Verb = ({ verb, arg, output = [], tone }) =>
   h(Box, { flexDirection: 'column' },
@@ -55,7 +55,7 @@ const Answer = ({ text }) =>
     h(Box, { width: PROSE, flexShrink: 0 }, h(Text, null, ' ')),
     h(Box, { flexGrow: 1 }, h(Text, { wrap: 'wrap' }, text)))
 
-/** Left cluster and right cluster, separated by spacing rather than punctuation. */
+/** Left cluster and right cluster, separated by spacing, not by punctuation. */
 const StatusBar = ({ width, state, color }) => {
   const left = `${state}   deepseek/chat`
   const right = 'ctx 12%   turn 3   0f3a9c'
@@ -74,14 +74,14 @@ const Composer = ({ text, hint }) =>
 /**
  * One completion row.
  *
- * A list is not a verb row: the marker column holds the selection, and the name
+ * A list is not a verb row. The marker column holds the selection, and the name
  * column aligns the descriptions. Reusing the verb column here would indent
  * every item twice for no reason.
  */
 const Item = ({ name, description, selected }) =>
   h(Box, { flexDirection: 'row' },
-    // `*` marks the selection, never `>`: the composer prompt owns that glyph,
-    // and two identical markers a row apart read as one list.
+    // `*` marks the selection, never `>`. The composer prompt owns that glyph,
+    // and two identical markers a row apart look like one list.
     h(Box, { width: PROSE, flexShrink: 0 },
       h(Text, { color: 'cyan', bold: true }, selected === true ? '*' : ' ')),
     h(Box, { width: 10, flexShrink: 0 },

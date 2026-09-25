@@ -11,7 +11,7 @@
  * ```
  *
  * This runs under Bun while the product runs under Node. That is safe for
- * exactly one reason: everything it renders is pure over props. Terminal
+ * exactly one reason. Everything it renders is pure over props. Terminal
  * ownership, the agent, and every service live in `@dsh-tui/app`, which this
  * file never imports.
  *
@@ -29,8 +29,9 @@ import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
 import type { Clock } from '@dsh-tui/ui/activity.ts'
 
 /**
- * The turn header's clock, as the product supplies it: none without a
- * terminal or when colour is off, so a captured preview stays still.
+ * The turn header's clock, supplied the way the product supplies it. There
+ * is none without a terminal, and none when colour is off, so a captured
+ * preview stays still.
  */
 const clock: Clock | undefined = process.stdout.isTTY === true && (process.env['NO_COLOR'] ?? '') === ''
   ? { now: () => performance.now(), every: (ms, tick) => { const timer = setInterval(tick, ms); return () => { clearInterval(timer) } } }
@@ -39,10 +40,10 @@ const clock: Clock | undefined = process.stdout.isTTY === true && (process.env['
 /**
  * Read a recorded session and project it into transcript rows.
  *
- * The lookup finds no tool: there is no registry here, and resolving one would
- * mean booting the harness this loop exists to avoid. Every tool call
- * therefore renders at its raw arguments, which is the fallback a profile with
- * an unknown tool gets too.
+ * The lookup finds no tool. There is no registry here, and resolving one
+ * would mean booting the harness this loop exists to avoid. Every tool call
+ * therefore renders at its raw arguments. That is the same fallback a profile
+ * with an unknown tool gets.
  *
  * @param path - the fixture path, relative to this file's directory.
  * @param copy - the dictionary the replay is being read in.
@@ -76,8 +77,8 @@ function staticProps(copy: TuiCopy) {
     sessionId: 'session-harness',
     context: undefined,
     copy,
-    // The shipped look. `@dsh-tui/app` resolves this from the terminal, and
-    // this file never imports it, so a developer iterating on components sees
+    // The shipped frame. `@dsh-tui/app` resolves this from the terminal, and
+    // this file never imports it. A developer iterating on components sees
     // the frame the product draws wherever the environment allows it.
     frame: 'round' as const,
     quitting: false,

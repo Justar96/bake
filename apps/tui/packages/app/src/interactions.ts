@@ -21,7 +21,7 @@ export class Interactions {
   private readonly off: (() => void)[] = []
 
   /**
-   * Attach answerers for one exact agent; other agents retain their own answerers.
+   * Attach answerers for one exact agent. Other agents keep their own answerers.
    * @param ctx - owning plugin context.
    * @param agent - terminal-owned agent.
    * @param changed - repaint notification.
@@ -48,11 +48,11 @@ export class Interactions {
     agent.ctx.effect(() => () => this.dispose(), 'tui interactions')
   }
 
-  /** The oldest outstanding question; later requests cannot replace it. */
+  /** The oldest outstanding question. A later request cannot replace it. */
   get current(): Interaction | undefined { return this.queue[0]?.view }
 
   /**
-   * Settle the displayed request; stale callbacks cannot answer a later one.
+   * Settle the displayed request. A stale callback cannot answer a later one.
    * @param id - displayed request identity.
    * @param answer - the explicit human response.
    */
@@ -63,7 +63,7 @@ export class Interactions {
   /** Withdraw the displayed request without granting an approval. */
   cancel(): void { this.queue[0]?.cancel() }
 
-  /** Close all requests and reject subsequent attempts. Safe to repeat. */
+  /** Close all requests and reject subsequent attempts. Safe to call again. */
   dispose(): void {
     if (this.closed) return
     this.closed = true

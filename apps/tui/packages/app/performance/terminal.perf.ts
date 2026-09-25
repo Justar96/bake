@@ -107,8 +107,8 @@ try {
       const firstDeltaMs = performance.now() - continueStart
       const liveInputMs = await terminal.input('PERF_LIVE_DRAFT', 'PERF_LIVE_DRAFT')
       await terminal.wait('complete synthetic response', () => terminal!.clean.includes('PERF_STREAM_DONE'))
-      // The draft typed mid-stream is still there, so idle reads as the send
-      // hint taking the interrupt hint's place.
+      // The draft typed mid-stream is still there, so idle is the send hint
+      // taking the interrupt hint's place.
       await terminal.wait('idle after durable stream completion', () => {
         const clean = terminal!.clean
         const idle = clean.lastIndexOf(dictionaries.en.send)

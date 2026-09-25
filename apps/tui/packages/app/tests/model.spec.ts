@@ -273,3 +273,34 @@ describe('/model', () => {
     } finally { resolved.resolve(info('other')); release.resolve(); await handle.agent.whenIdle() }
   })
 })
+
+describe('Shift-Tab thinking toggle', () => {
+  it('steps through the route\'s efforts and wraps to the provider default, taken by the next request', async () => {
+    const { controller, selection, model, handle } = await connected()
+    await controller.drain()
+    expect(selection.current).toEqual({ provider: 'mock', model: 'model' })
+    const seen: (string | undefined)[] = []
+    for (let press = 0; press < 3; press++) {
+      controller.cycleThinking()
+      seen.push(selection.current?.reasoningEffort)
+    }
+    expect(seen).toEqual(['low', 'high', undefined])
+    expect(controller.view.notice).toBe(`${dictionaries.en.thinking}: ${dictionaries.en.providerDefault}`)
+    controller.cycleThinking()
+    controller.cycleThinking()
+    expect(controller.view.notice).toBe(`${dictionaries.en.thinking}: High`)
+    expect(controller.view.thinkingLevel).toBe('high')
+    controller.submit('Think hard')
+    await handle.agent.whenIdle()
+    expect(model.requests.at(-1)).toMatchObject({ provider: 'mock', model: 'model', reasoningEffort: 'high' })
+  })
+
+  it('says so for a route without efforts and changes nothing', async () => {
+    const { controller, selection } = await connected()
+    controller.submit('/model mock/plain')
+    await controller.drain()
+    controller.cycleThinking()
+    expect(selection.current).toEqual({ provider: 'mock', model: 'plain' })
+    expect(controller.view.notice).toBe(`${dictionaries.en.thinkingUnsupported}: mock/plain`)
+  })
+})

@@ -1,10 +1,10 @@
 /**
- * Filterable terminal choices; the application owns acceptance and cancellation.
+ * Filterable terminal choices. The application owns acceptance and cancellation.
  *
  * Every selection the application asks for — a model, a reasoning effort, a
  * session, a sign-in target — is this one panel, so one set of keys and one
- * layout serve them all. It reads top to bottom in the order it is used: what
- * is being chosen, the filter being typed, the choices, and the keys.
+ * layout serve them all. Top to bottom, in the order it is used. What is
+ * being chosen, the filter being typed, the choices, and the keys.
  *
  * @module @dsh-tui/ui/picker
  */
@@ -17,7 +17,7 @@ import { MARKER } from './layout.ts'
 import { PALETTE, type PaletteColor } from './palette.ts'
 import { composerText, eraseLast } from './editor.ts'
 
-/** A choice's standing, drawn in its own aligned column: `Current`, `Configured`. */
+/** A choice's standing, drawn in its own aligned column. `Current`, `Configured`. */
 export interface ChoiceStatus {
   readonly text: string
   /** Tone of the text; absent, it is dim. */
@@ -34,9 +34,9 @@ export interface Choice {
   readonly current?: boolean
   readonly status?: ChoiceStatus
   /**
-   * Kept on screen below the scrolled list, whatever the filter scrolls past:
-   * an action such as starting a new session, which a long history must not
-   * hide. It still has to match the filter to be shown.
+   * Kept on screen below the scrolled list, whatever the filter scrolls past.
+   * An action such as starting a new session must not be hidden by a long
+   * history. It still has to match the filter to be shown.
    */
   readonly pinned?: boolean
   /** Session-only presentation role; the selected value remains the session id. */
@@ -68,15 +68,15 @@ const TONES: Readonly<Record<NonNullable<ChoiceStatus['tone']>, PaletteColor>> =
  * Filter and choose a value without submitting text to the conversation.
  *
  * Typing filters by every word, anywhere in a choice, and the matched letters
- * are underlined. ↑↓ (or Ctrl-P/Ctrl-N) move one row, wrapping; PgUp/PgDn move
- * a page; Home/End jump to either end. The list scrolls only when the selection
- * would leave it, and an edge that hides choices says how many. Choices marked
- * `pinned` stay below the list however far it scrolls.
+ * are underlined. ↑↓, or Ctrl-P and Ctrl-N, move one row and wrap. PgUp and
+ * PgDn move a page. Home and End jump to either end. The list scrolls only
+ * when the selection would leave it, and an edge that hides choices says how
+ * many. Choices marked `pinned` stay below the list however far it scrolls.
  *
- * @param props - choices, localized labels, row limit, and explicit acceptance callback.
+ * @param props - choices, localized labels, row limit, and the acceptance callback.
  * @param props.limit - rows for the choices, including the rows that say how
- *   many are hidden; the title, filter, and key rows are outside it.
- * @returns a bounded keyboard picker; Escape remains owned by the application.
+ *   many are hidden. The title, filter, and key rows are outside it.
+ * @returns a bounded keyboard picker. Escape remains owned by the application.
  */
 export function Picker({ prompt, copy, limit, onSelect }: {
   readonly prompt: ChoicePrompt
@@ -91,7 +91,7 @@ export function Picker({ prompt, copy, limit, onSelect }: {
   const [query, setQuery] = useState('')
   const draft = useRef(query)
   const top = useRef(0)
-  // The display order: the scrolled list, then the pinned choices under it.
+  // Display order. The scrolled list, then the pinned choices under it.
   const ordered = (text: string): readonly Match<Choice>[] => {
     const matches = filterChoices(prompt.choices, text)
     return [...matches.filter(match => match.choice.pinned !== true), ...matches.filter(match => match.choice.pinned === true)]
@@ -141,7 +141,7 @@ export function Picker({ prompt, copy, limit, onSelect }: {
     }
   })
 
-  // Pinned rows come out of the list's rows, but the list keeps at least one.
+  // Pinned rows come out of the list's budget, but the list keeps at least one row.
   const rows = Math.max(1, limit - pinned.length)
   const scroll = scrollTo(top.current, selectedIndex < listed ? selectedIndex : -1, listed, rows)
   top.current = scroll.top
@@ -150,8 +150,8 @@ export function Picker({ prompt, copy, limit, onSelect }: {
     ...pinned.slice(0, Math.max(0, limit - scroll.count - (scroll.above > 0 ? 1 : 0) - (scroll.below > 0 ? 1 : 0)))
       .map((match, index) => ({ match, index: listed + index })),
   ]
-  // Sized over every choice rather than the visible ones, so the columns hold
-  // still while the list scrolls or narrows.
+  // Size columns over every choice, not only the visible ones, so the columns
+  // stay put while the list scrolls or narrows.
   const glyphs = prompt.choices.some(choice => choice.role !== undefined)
   const statusWidth = Math.max(0, ...prompt.choices.map(choice => stringWidth(statusOf(choice, copy)?.text ?? '')))
   const room = Math.max(8, columns - FRAME - MARKER_WIDTH - (glyphs ? MARKER_WIDTH : 0) - (statusWidth > 0 ? statusWidth + GAP : 0))
@@ -181,7 +181,7 @@ export function Picker({ prompt, copy, limit, onSelect }: {
 const MARKER_WIDTH = 2
 
 /**
- * The status a choice shows, if any: its own, or `Current` for the value in force.
+ * The status a choice shows, if any. Its own, or `Current` for the value in force.
  * @param choice - the choice.
  * @param copy - localized labels.
  * @returns the status to draw.
@@ -197,7 +197,7 @@ function Edge({ arrow, count, copy }: { readonly arrow: string, readonly count: 
 }
 
 /**
- * One choice: the pointer, the session glyph, the label with its matched
+ * One choice. The pointer, the session glyph, the label with its matched
  * letters underlined, the status, and the description.
  */
 function Row({ match, active, copy, glyphs, labelWidth, statusWidth }: {

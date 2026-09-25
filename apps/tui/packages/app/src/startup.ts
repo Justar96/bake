@@ -1,5 +1,5 @@
 /**
- * The TUI's command-line provider: it parses the terminal app's own flags and
+ * The TUI's command-line provider. It parses the terminal app's own flags and
  * publishes {@link TUI_STARTUP_SERVICE}. The runner is an ordinary consumer
  * whose lazy config waits for that service, so Loader resolves the runner's
  * `!!js` expressions only after the flags exist.
@@ -22,16 +22,16 @@ export const TUI_STARTUP_SERVICE = 'tuiStartup'
 
 /** What the runner row reads from {@link TUI_STARTUP_SERVICE}. */
 export interface TuiStartupValues {
-  /** Session identity to adopt and replay; absent starts a fresh session. */
+  /** Session identity to adopt and replay. Absent starts a fresh session. */
   resume: string | undefined
-  /** Agent preset to mount; absent leaves the profile's own composition in place. */
+  /** Agent preset to mount. Absent leaves the profile's own composition in place. */
   preset: string | undefined
 }
 
 /**
- * This app's command: its options and help text.
+ * This app's command, its options, and its help text.
  *
- * @returns a fresh program, so one process can parse more than once (tests).
+ * @returns a fresh program, so one process can parse more than once in tests.
  */
 function tuiCommand(): Command {
   return new Command()
@@ -57,8 +57,8 @@ export function apply(ctx: Context): void {
   const program = tuiCommand()
   program.action(() => {
     const options = program.opts<{ resume?: string, preset?: string }>()
-    // A SessionId is opaque, so whitespace belongs to the identity: reject an
-    // empty value but hand the runner the exact string it was given.
+    // A SessionId is opaque, so whitespace belongs to the identity. Reject an
+    // empty value, but hand the runner the exact string it was given.
     const resume = options.resume
     if (resume !== undefined && resume.trim() === '') {
       program.error('error: --resume requires a non-empty session id')

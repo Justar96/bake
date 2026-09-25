@@ -3,12 +3,12 @@
  *
  * A terminal has few ways to say "this is a different kind of thing", and each
  * costs something. A blank line and a rule each cost a row, which L1 charges
- * against the same budget the live region needs \u2014 on a 10-row window one
+ * against the same budget the live region needs. On a 10-row window one
  * separator row is a tenth of the screen. Color costs nothing but disappears
  * under NO_COLOR. Alignment and indentation cost nothing and survive both.
  *
- * This renders the candidates side by side with their row cost so the choice is
- * made on evidence rather than on taste alone.
+ * This renders the candidates side by side with their row cost, so the choice
+ * is made on the measured cost, not on taste alone.
  *
  *   node tui/prototype/separation.mjs
  */
@@ -37,15 +37,15 @@ const ChatRow = ({ glyph, text, dim }) =>
 const Chat = () => h(Box, { flexDirection: 'column' },
   CHAT.map(([glyph, text], index) => h(ChatRow, { key: index, glyph, text, dim: glyph === ' ' && index === 3 })))
 
-/** Status as a sentence: reads like one more line of conversation. */
+/** Status as a sentence. It looks like one more line of conversation. */
 const StatusSentence = () =>
   h(Text, { dimColor: true }, ' \u25b8 ready  \u00b7  deepseek/chat  \u00b7  ctx 12%  \u00b7  turn 3')
 
 /**
- * Status as a justified bar: a left cluster and a right cluster pushed apart.
+ * Status as a justified bar. A left cluster and a right cluster are pushed apart.
  *
- * Nothing in a transcript is right-aligned, so the eye reads a filled row as
- * chrome before it reads a single word of it. Costs no rows and no color.
+ * Nothing in a transcript is right-aligned, so a filled row is chrome before
+ * a single word of it is read. Costs no rows and no color.
  */
 const StatusBar = ({ width }) => {
   const left = '\u25b8 ready  \u00b7  deepseek/chat'
@@ -58,7 +58,7 @@ const StatusBar = ({ width }) => {
 }
 
 /**
- * Status left-packed: the fields stop where they stop.
+ * Status left-packed. The fields stop where they stop.
  *
  * Adopted with the boxed composer, which carries the separation the
  * justification used to. `classic` borders keep the frame ASCII, so a terminal
@@ -116,7 +116,7 @@ const VARIANTS = {
         h(Box, { flexShrink: 0 }, h(Text, { dimColor: true }, '\u21b5 send')))),
 
   // The two border rows are the only rows this document spends on structure
-  // alone, and they buy back the justification: with the frame separating the
+  // alone, and they replace the justification. With the frame separating the
   // chrome, the status line can pack left and close the gap a wide terminal
   // opened between the model and the next field. Superseded by H.
   'G \u2014 left-packed status above a boxed composer': ({ width }) =>
@@ -130,10 +130,10 @@ const VARIANTS = {
         h(Box, { flexGrow: 1 }, h(Text, { dimColor: true }, 'Ask anything, / for commands')),
         h(Box, { flexShrink: 0 }, h(Text, { dimColor: true }, 'Enter sends'))))),
 
-  // Adopted. G's rows in a different order: a blank, then the box directly
+  // Adopted. G's rows in a different order. A blank, then the box directly
   // under the newest line, then the status line as the box's footer, indented
-  // to the prompt. The input is the row the eye returns to, so it sits closest
-  // to what was just said, and the status reads as a caption on it.
+  // to the prompt. The input is the row the user returns to, so it sits closest
+  // to what was just said, and the status is a caption on it.
   'H \u2014 blank, boxed composer, status beneath': ({ width }) =>
     h(Box, { flexDirection: 'column', width },
       h(Chat), h(Text, null, ' '),

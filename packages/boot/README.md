@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-The boot group launches profile applications and manages their installed composition. `app-boot` resolves configuration and starts the Loader, `cmdline` supplies application arguments, and `plugin-manager` exposes current-profile operations shared with the CLI. Each package README owns its details.
+The boot group launches profile applications and manages their installed composition. `app-boot` resolves configuration and starts the Loader, `cmdline` supplies application arguments, `plugin-manager` exposes current-profile operations shared with the CLI, and `updater` replaces a managed install with a newer signed release. Each package README owns its details.
 
 ## Table of Contents
 
@@ -26,6 +26,7 @@ The boot group launches profile applications and manages their installed composi
 | [`cmdline`](cmdline/README.md) | Lets the app own its flags, `--help`, and exit code; passes everything after the launcher's flags through verbatim | `cmdlineArgs`, `appExit` |
 | [`hmr`](hmr/README.md) | Coordinates module and configuration reloads with package mutations | `hmr` |
 | [`plugin-manager`](plugin-manager/README.md) | Manages current-profile plugins and bundle packages through shared CLI operations | `pluginManager` |
+| [`updater`](updater/README.md) | Checks the signed release manifest and installs a newer release beside the running one, for `bake update` and the update notice | (library for the bins) |
 
 <a id="related-documentation"></a>
 ## Related documentation

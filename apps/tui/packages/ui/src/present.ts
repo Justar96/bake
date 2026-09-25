@@ -1,11 +1,11 @@
 /**
  * Presentation of a transcript row as positioned lines.
  *
- * Pure: a row in, display lines out, with no React and no terminal. The
+ * Pure. A row in, display lines out, with no React and no terminal. The
  * component layer turns these into Ink boxes, which keeps every placement rule
  * testable without rendering and without an Ink input channel.
  *
- * Placement follows `apps/tui/DESIGN-LAYOUT.md`: a marker column, a verb column
+ * Placement follows `apps/tui/DESIGN-LAYOUT.md`. A marker column, a verb column
  * naming what the agent did, and output aligned under the verb's argument.
  *
  * @module @dsh-tui/ui/present
@@ -26,9 +26,9 @@ export type Tone =
   | 'plain'
   /** Secondary interface metadata. */
   | 'quiet'
-  /** Reasoning: the model's working-out, which recedes as metadata does and reads as its own voice. */
+  /** Reasoning. Dim like metadata, and italic so it stays distinct from the answer. */
   | 'thought'
-  /** What names a section: an action's verb and its tool. */
+  /** What names a section. An action's verb and its tool. */
   | 'strong'
   /** An action that finished. */
   | 'done'
@@ -44,9 +44,8 @@ export type Tone =
 /**
  * Model name without its provider prefix.
  *
- * The provider is in `/model` when it is needed, which is when more than one is
- * configured. On the status line it is a word the user reads every frame and
- * acts on never.
+ * The provider is shown in `/model` when more than one is configured. The
+ * status line repeats every frame, so it keeps only the model name.
  *
  * @param route - `provider/model`, or a bare model name.
  * @returns the model name alone.
@@ -54,13 +53,13 @@ export type Tone =
 export const compactModel = (route: string): string => route.slice(route.lastIndexOf('/') + 1)
 
 /**
- * Working directory, shortened against home.
+ * Shorten a working directory against home.
  *
- * An absolute path spends most of its width on the part every path shares.
+ * An absolute path spends most of its width on a prefix every path shares.
  *
  * @param cwd - absolute working directory.
  * @param home - home directory, when one is known.
- * @returns a home-relative path, or the original when it lies outside home.
+ * @returns a `~`-relative path, or `cwd` when it is outside home.
  */
 export function compactPath(cwd: string, home: string | undefined): string {
   if (home === undefined || home === '' || !cwd.startsWith(home)) return cwd
@@ -84,12 +83,11 @@ export interface ComposerState {
 }
 
 /**
- * Hint for the composer's right slot.
+ * Hint key for the composer's right slot.
  *
- * Contextual, never permanent. A fixed hint row teaches nothing after the first
- * day, and on this surface it costs a row of the live region's budget on every
- * frame for the whole session. Returns a key rather than text, because copy is
- * locale-owned.
+ * The hint is contextual, never a permanent row. A fixed hint costs one row
+ * of the live region's budget on every frame. This returns a key, not text,
+ * because copy is locale-owned.
  *
  * @param state - what the surface is currently doing.
  * @returns the hint key, or undefined when the slot stays empty.
@@ -109,21 +107,20 @@ export interface LineStyle {
   readonly dim: boolean
   /** Whether the text carries the weight of the user's own words, or names a section. */
   readonly bold: boolean
-  /** Whether the text is the model thinking aloud rather than saying or doing. */
+  /** Whether the text is the model thinking, not speaking or acting. */
   readonly italic?: boolean
 }
 
 /**
- * Style for one tone.
+ * Colour and weight for one tone.
  *
- * Colour is semantic and never decorative: red is a failure or a removed line,
- * green is an added one or an action that finished, ocean blue is a question
- * awaiting an answer. `PALETTE` holds the tones; this function only says which
- * meaning a tone carries. A failure is never dimmed, because dim means
- * supporting detail and a failure is the thing the user needs to read. Weight
- * carries structure: the verb and tool that open an action are bold, so a scan
- * down the left of the transcript lands on each action rather than on its
- * arguments.
+ * Colour is semantic, never decorative. Red is a failure or a removed line,
+ * green is an added line or a finished action, and ocean blue is a question
+ * waiting for an answer. `PALETTE` owns the tones; this function only maps a
+ * tone to a meaning. A failure is never dimmed. Dim means supporting detail,
+ * and a failure is what the user has to read. Bold marks structure. The verb
+ * and tool that open an action are bold, so a scan down the left of the
+ * transcript lands on each action, not on its arguments.
  *
  * @param tone - emphasis carried by the line.
  * @returns colour and weight for the component layer.
@@ -133,15 +130,15 @@ export function styleOf(tone: Tone): LineStyle {
     case 'said': return { dim: false, bold: true }
     case 'plain': return { dim: false, bold: false }
     case 'quiet': return { dim: true, bold: false }
-    // Dim like metadata, and slanted, so a block of reasoning reads as the
-    // working-out and not as a tool's output in the same column.
+    // Dim, like metadata, and italic, so reasoning stays distinct from tool
+    // output in the same column.
     case 'thought': return { dim: true, bold: false, italic: true }
     case 'strong': return { dim: false, bold: true }
     case 'done': return { color: PALETTE.done, dim: false, bold: true }
     case 'failed': return { color: PALETTE.failed, dim: false, bold: false }
     case 'asking': return { color: PALETTE.asking, dim: false, bold: false }
-    // A diff is read as a pair, so both sides keep full weight: dimming the
-    // removed side would make a deletion look like supporting detail.
+    // Both sides of a diff keep full weight. Dimming the removed side would
+    // make a deletion look like supporting detail.
     case 'added': return { color: PALETTE.done, dim: false, bold: false }
     case 'removed': return { color: PALETTE.failed, dim: false, bold: false }
     default: return { dim: false, bold: false }
@@ -156,43 +153,48 @@ export interface PresentedLine {
   readonly divider?: boolean
   /** Limit indented prose to the reading measure instead of the tool-output width. */
   readonly prose?: boolean
-  /** Marker column content: a prompt, a selection mark, or a space. */
+  /** Marker column content. A prompt, a selection mark, or a space. */
   readonly marker: string
   /** Verb column content, empty for a line that continues one. */
   readonly verb: string
   /**
-   * What the verb column shows when the line has no verb: a changed line's
+   * What the verb column shows when the line has no verb. A changed line's
    * number, drawn right-aligned against the text in the line's tone.
    */
   readonly gutter?: string
   /** Emphasis for the verb when it differs from the text's, as an outcome's does. */
   readonly verbTone?: Tone
-  /** Emphasis for the marker when it differs from the text's: an action's state. */
+  /** Emphasis for the marker when it differs from the text's. An action's state. */
   readonly markerTone?: Tone
-  /** Whether the marker pulses, which it does while its action runs. */
+  /** Whether the marker blinks, which it does while its action runs. */
   readonly pulse?: boolean
+  /**
+   * Whether the line is part of a tool result's preview. Its plain text is
+   * drawn in the softer output grey.
+   */
+  readonly zone?: boolean
   /** Text for the remaining width. */
   readonly text: string
   /** Column the text starts at, which decides which budget bounds it. */
   readonly column: typeof COLUMN.rail | typeof COLUMN.output
   /**
-   * Whether the text starts in the rail rather than after it, taking the
-   * marker's columns: a command, whose slash is the first thing typed and the
-   * first thing on its row. `marker` is then not drawn.
+   * Whether the text starts in the rail instead of after it, taking the
+   * marker's columns. A command does this. Its slash is the first thing typed
+   * and the first thing on its row. `marker` is then not drawn.
    */
   readonly flush?: boolean
   /**
    * Whether text at the rail wraps at the full width, as tool output does,
-   * rather than at the prose measure: a command's outcome, which is often a
-   * table such as `/help` prints, and reads like output rather than prose.
+   * instead of at the prose measure. A command's outcome does this. It is
+   * often a table, such as `/help`, and it is output, not prose.
    */
   readonly wide?: boolean
   /** Emphasis for the component layer to colour. */
   readonly tone: Tone
   /**
    * Emphasis for consecutive runs of `text`, from its start; text past the
-   * last run takes `tone`. Kept beside the text rather than splitting it, so
-   * wrapping, measuring, and the plain-text form all read one string.
+   * last run takes `tone`. Kept beside the text instead of splitting it, so
+   * wrapping, measuring, and the plain-text form all use one string.
    */
   readonly spans?: readonly Span[]
 }
@@ -208,14 +210,14 @@ export interface Span {
   readonly bold?: boolean
   readonly underline?: boolean
   readonly strikethrough?: boolean
-  /** Drawn with foreground and background swapped: the words an edit changed. */
+  /** Drawn with foreground and background swapped. The words an edit changed. */
   readonly inverse?: boolean
 }
 
 /**
  * A run of highlighted code, as a {@link Highlight} reports it.
  *
- * Colour is the one thing on the surface that is not semantic: it comes from
+ * Colour is the one thing on the surface that is not semantic. It comes from
  * a highlighting theme, and says what kind of token the run is.
  */
 export interface CodeToken {
@@ -231,7 +233,7 @@ export interface CodeToken {
 /**
  * Syntax colour for consecutive lines of one file.
  *
- * Synchronous, because presentation is: a highlighter that does not know the
+ * Synchronous, because presentation is. A highlighter that does not know the
  * language, or is still loading its grammar, returns undefined, and the lines
  * draw in their side's tone as they would with no highlighter at all.
  *
@@ -260,12 +262,11 @@ function joined(parts: readonly (readonly [string | undefined, Tone])[], strong 
 }
 
 /**
- * Verb naming what a tool did.
+ * Verb for what a tool did.
  *
- * A tool's own name is used when it already reads as an action and fits the
- * column; otherwise the closest verb in the vocabulary stands in. Naming the
- * action rather than the implementation keeps `bash`, `shell` and `zsh` from
- * reading as three different kinds of event.
+ * Use the tool's own name when it already names an action and fits the
+ * column. Otherwise use the closest verb in the vocabulary. `bash`, `shell`,
+ * and `zsh` are one kind of event, so they share `run` instead of three names.
  *
  * @param tool - tool name from the session log.
  * @returns the verb to display.
@@ -277,7 +278,7 @@ export function verbFor(tool: string): Verb {
 /** The verb a tool's name implies, or undefined when it names none of the families. */
 function familyOf(tool: string): Verb | undefined {
   const name = tool.toLowerCase()
-  // Before `write`: a plan the agent rewrites is not an edit to the workspace.
+  // Checked before `write`. Rewriting a plan is not an edit to the workspace.
   if (name.includes('todo') || name.includes('plan')) return VERB.plan
   if (name.includes('bash') || name.includes('shell') || name.includes('exec')) return VERB.run
   if (name.includes('write') || name.includes('edit') || name.includes('patch')) return VERB.edit
@@ -302,36 +303,36 @@ const linesOf = (text: string): readonly string[] => {
 }
 
 /**
- * A deliberate empty row, as opposed to a row with nothing to put in it.
+ * A deliberate empty row, not a row that happens to be empty.
  *
- * It opens a zone: a user turn, and each action the agent took inside one.
- * Zones are otherwise marked by indentation alone, which separates an answer at
- * the rail from output under a verb but cannot separate two zones that share a
- * column — reasoning directly under an answer, or an action under the output
- * of the one before, reads as more of it. The blank is what tells those apart.
+ * It opens a zone. A user turn, and each action the agent took inside one.
+ * Indentation alone separates an answer at the rail from output under a verb.
+ * It cannot separate two zones that share a column. Reasoning directly under
+ * an answer, or an action under the previous action's output, would look like
+ * more of the same block. The blank is what separates them.
  *
- * A call's own result continues its zone and gets none, and neither does a
- * command's notice, so a result never floats away from what produced it.
+ * A call's own result continues its zone and gets no blank. A command's
+ * notice does not either, so a result stays attached to what produced it.
  */
 const BLANK: PresentedLine =
   { marker: MARKER.none, verb: '', text: '', column: COLUMN.rail, tone: 'plain' }
 
 /**
- * Argument slot for a call whose arguments have not finished streaming.
+ * Placeholder for a call whose arguments are still streaming.
  *
- * Arguments arrive as a JSON string built from deltas, so every prefix of one
- * is invalid JSON and most of them end mid-token. Showing the partial text
- * would put unparsed syntax in front of the user and redraw it on every chunk;
- * the verb already names the action, and the complete arguments arrive with the
- * committed row a moment later.
+ * Arguments arrive as a JSON string built from deltas. Every prefix is
+ * invalid JSON, and most prefixes end mid-token. Showing that partial text
+ * would put unparsed syntax on screen and redraw it on every chunk. The verb
+ * already names the action. The complete arguments arrive with the committed
+ * row a moment later.
  */
 export const PENDING_ARGUMENTS = '...'
 
 /**
- * Open a zone, unless the row turned out to have nothing to put in it.
+ * Open a zone, unless the row has nothing to put in it.
  *
  * A blank belongs to the lines under it. On its own it is an empty row charged
- * to the live region's budget for content that never arrived — which is what an
+ * to the live region's budget for content that never arrived, which is what an
  * empty text or reasoning block produces while a turn is still streaming.
  *
  * @param lines - the zone's lines, in order.
@@ -340,7 +341,7 @@ export const PENDING_ARGUMENTS = '...'
 const opening = (lines: readonly PresentedLine[]): readonly PresentedLine[] =>
   lines.length === 0 ? [] : [BLANK, ...lines]
 
-/** A continuation line: no marker, no verb, aligned under the argument. */
+/** A continuation line. No marker, no verb, aligned under the argument. */
 const continuation = (text: string, tone: Tone): PresentedLine =>
   ({ marker: MARKER.none, verb: '', text, column: COLUMN.output, tone })
 
@@ -431,12 +432,12 @@ function sourceSpans(line: CardLine, tokens: readonly CodeToken[]): readonly Spa
 }
 
 /**
- * The runs of one changed line: its sign, then its code.
+ * The runs of one changed line. Its sign, then its code.
  *
- * The side's tone is the line's colour, and syntax colour is laid over it:
- * the sign, punctuation, and plain words keep the tone, so a line reads as
- * added or removed however much of it is highlighted, and a token the theme
- * colours takes that colour. Code the edit changed is reversed in the tone.
+ * The side's tone is the line's colour, and syntax colour is laid over it.
+ * the sign, punctuation, and plain words keep the tone, so a highlighted line
+ * still shows as added or removed. A token the theme colours takes that
+ * colour. Code the edit changed is reversed in the tone.
  *
  * @param line - a changed line, its sign in the first two characters.
  * @param tone - its side's tone.
@@ -480,103 +481,221 @@ function changeSpans(line: CardLine, tone: Tone, tokens: readonly CodeToken[] | 
 }
 
 /**
- * One action as one block: its head, its arguments, and, once it has one, its outcome.
+ * Display form of a tool name. Each word is capitalized and concatenated.
+ * `bash` becomes `Bash`; `read_file` becomes `ReadFile`.
+ * @param tool - tool name from the session log.
+ * @returns the display name, or `tool` itself when it contains no words.
+ */
+export function toolLabel(tool: string): string {
+  const label = tool.split(/[^\p{L}\p{N}]+/u).filter(word => word !== '')
+    .map(word => word[0]!.toUpperCase() + word.slice(1)).join('')
+  return label === '' ? tool : label
+}
+
+/**
+ * Connector drawn in the verb column of the first output line, hanging that
+ * output from the action head.
+ */
+export const CONNECTOR = '\u23bf'
+
+/**
+ * Render one action as one block. The head, the arguments, and the outcome once it exists.
  *
- * The head carries the state. While the call runs its marker pulses and its
- * verb reads `run`; when it finishes the same line prints once, finished, with
- * `ran` and a green or red marker. A reader sees one block per action, not a
- * call and a separate result a few rows below it, and nothing names the call
- * id, which only matched the two.
+ * The head is a call. The tool name and argument are in parentheses, for example
+ * `Bash(cargo check --workspace)`. The marker carries state. It blinks while
+ * the call runs. When the call finishes, the same line is printed once with a
+ * green or red marker. Output hangs from the head on {@link CONNECTOR}, so
+ * the reader sees one block per action, not a call and a result stacked
+ * apart. The call id is not drawn. It only joins the two records.
  *
- * @param row - the call, with its outcome when it has one.
- * @param bound - how much of the outcome's output to preview.
- * @returns the block's lines, without its opening blank.
+ * @param row - the call, including its outcome when one exists.
+ * @param bound - how much of the outcome to preview.
+ * @returns the block's lines, without the opening blank.
  */
 function action(row: ToolCallRow, bound: ResultBound): readonly PresentedLine[] {
   const family = familyOf(row.tool)
   const verb = family ?? VERB.run
   const outcome = row.result
   const [first = '', ...rest] = linesOf(row.input)
-  const pending = first === PENDING_ARGUMENTS
   const title = bare(first, verb)
-  // A tool no verb family names is named by itself, so the head still says
-  // what ran; a call whose arguments are still streaming has only its name.
-  const named = family === undefined || pending
-  const text = named ? [row.tool, pending ? '' : title].filter(part => part !== '').join(' ') : title
+  // Arguments still streaming. Show `Name(...)` until the full argument arrives.
+  const name = toolLabel(row.tool)
+  const text = title === '' ? name : `${name}(${title})`
   const after = outcome === undefined ? undefined : outcomeLines(outcome, verb, bound, title)
-  // A count with nothing under it rides on the head, so a read is one row,
-  // and so does the size of a change, so an edit says how big it was.
-  const inline = after?.inline === undefined ? { text, spans: named ? [{ length: row.tool.length, tone: 'strong' as const }] : [] }
-    : beside(joined([[text, 'plain']], named ? row.tool.length : 0), after.inline)
+  // A count with no body rides on the head, so a read is one row. A change's
+  // size does the same, so an edit reports how large it was.
+  const named: Styled = { text, spans: [{ length: name.length, tone: 'strong' },
+    ...text.length === name.length ? [] : [{ length: text.length - name.length, tone: 'plain' as const }]] }
+  const inline = after?.inline === undefined ? named : beside(named, after.inline)
   const head: PresentedLine = {
     marker: MARKER.action,
     markerTone: outcome === undefined ? 'strong' : outcome.ok ? 'done' : 'failed',
     ...outcome === undefined ? { pulse: true } : {},
-    verb: outcome === undefined ? verb : PAST[verb],
-    verbTone: outcome?.ok === false ? 'failed' : 'strong',
-    text: inline.text, column: COLUMN.output, tone: 'plain',
+    verb: '', text: inline.text, column: COLUMN.rail, wide: true, tone: 'plain',
     ...inline.spans.length === 0 ? {} : { spans: inline.spans },
   }
-  // The card's own lines describe the call, as its description does; they
-  // recede under the head unless they carry a diff's colour. Both they and
-  // the rest of a multi-line input are bounded as output is: a script the
-  // model wrote can be as long as a file, and it prints under the head once
-  // for every call. A line of each always shows, so a description survives
-  // a bound that collapses output.
+  // Card lines describe the call, the way its description does. They stay
+  // quiet under the head unless they carry diff colour. They and any extra
+  // input lines share the output bound. A script the model wrote can be as
+  // long as a file, and it is printed under the head on every call. At least
+  // one line of each is always shown, so a description survives a bound that
+  // collapses the output.
   const limit = Math.max(1, bound.lines)
   const described = cardLines(row.detail).map(line => line.tone === 'plain' ? { ...line, tone: 'quiet' as const } : line)
-  const lines = [head,
+  const body = [
     ...excerpt(rest.map(text => continuation(text, 'plain')), limit, bound, 'plain', false).lines,
-    ...excerpt(described, limit, bound, 'quiet', false).lines]
-  return after === undefined ? lines : [...lines, ...after.lines]
+    ...excerpt(described, limit, bound, 'quiet', false).lines,
+    ...after?.lines ?? []]
+  return [head, ...connected(body)]
 }
 
 /**
- * A step's calls as one block: a head counting them, and each call hanging
- * from it, joined by the tree in the rail.
+ * Hang a block's body from its head. The first line takes the connector in
+ * its verb column, unless that column already holds a changed line's number.
+ * @param body - the lines under a head.
+ * @returns the same lines, the first connected.
+ */
+function connected(body: readonly PresentedLine[]): readonly PresentedLine[] {
+  const [first, ...rest] = body
+  if (first === undefined || first.verb !== '' || first.gutter !== undefined) return body
+  return [{ ...first, verb: CONNECTOR, verbTone: 'quiet' }, ...rest]
+}
+
+/**
+ * Render one step's calls as one block. A head counts them, then each
+ * call hangs from it, joined by the tree in the rail.
  *
- * The rail already carries an action's state in its marker, so each call's
- * branch takes that marker's place and colour — pulsing while the call runs,
- * green or red once it ends — and the verb, its argument, and its output keep
- * their columns. The head's marker is the step's state: running while any
- * call is, red when one failed. No blank row separates the calls, because
- * they were one decision the model made, and the stem is what reads as that.
+ * The rail already shows an action's state in its marker, so each call's
+ * branch takes that marker's place and colour. It pulses while the call runs
+ * and turns green or red when the call ends. The verb, argument, and output
+ * keep their columns. The head's marker is the step's state. It is running while
+ * any call is running, red when one failed. Calls are not separated by a
+ * blank row. They were one model decision, and the tree stem is what shows that.
  *
  * @param calls - the step's calls, in the order the model made them.
- * @param bound - how much of each outcome's output to preview.
- * @returns the block's lines, without its opening blank.
+ * @param bound - how much of each outcome to preview.
+ * @returns the block's lines, without the opening blank.
  */
 function group(calls: readonly ToolCallRow[], bound: ResultBound): readonly PresentedLine[] {
+  return [groupHead(calls, bound), ...hang(calls.map(call => action(call, bound)))]
+}
+
+/**
+ * The head of a step's block. Its calls are counted by verb, in the step's tense.
+ * @param calls - the step's calls, in the order the model made them.
+ * @param bound - the locale's words for failures.
+ * @returns the head line, its marker the step's state.
+ */
+function groupHead(calls: readonly ToolCallRow[], bound: ResultBound): PresentedLine {
   const running = calls.some(call => call.result === undefined)
   const failed = calls.filter(call => call.result?.ok === false).length
-  // Counted in the order the verbs first appear, in the tense of the step.
+  // Count verbs in the order they first appear, in the step's tense.
   const counts = new Map<Verb, number>()
   for (const call of calls) counts.set(verbFor(call.tool), (counts.get(verbFor(call.tool)) ?? 0) + 1)
   const tally = [...counts].map(([verb, count]) => `${running ? verb : PAST[verb]} ${count}`).join(' \u00b7 ')
   const failures = failed === 0 || running || bound.failures === undefined ? undefined : ` \u00b7 ${failed} ${bound.failures}`
-  const head: PresentedLine = {
+  return {
     marker: MARKER.action,
     markerTone: running ? 'strong' : failed > 0 ? 'failed' : 'done',
     ...running ? { pulse: true } : {},
     verb: '', text: `${tally}${failures ?? ''}`, column: COLUMN.rail, tone: 'strong',
     ...failures === undefined ? {} : { spans: [{ length: tally.length, tone: 'strong' as const }, { length: failures.length, tone: 'failed' as const }] },
   }
-  return [head, ...calls.flatMap((call, index) => {
-    const last = index === calls.length - 1
-    return action(call, bound).map((line, row) => row === 0
-      ? { ...line, marker: last ? TREE.corner : TREE.branch }
-      : { ...line, marker: last ? MARKER.none : TREE.stem, markerTone: 'quiet' as const })
-  })]
 }
 
 /**
- * A title without a leading word naming its own verb, as `Grep` does under
- * `find` and `Read` under `read`: the second copy is noise. A command keeps
- * its words unless the first is `run` itself, since under `run` `bash
- * deploy.sh` is the command and not a name for it.
+ * Hang each call's lines from the block's head on the tree in the rail.
+ * @param bodies - each call's lines, head first, in order.
+ * @returns the lines, each call's head on a branch and the last on the corner.
+ */
+function hang(bodies: readonly (readonly PresentedLine[])[]): readonly PresentedLine[] {
+  return bodies.flatMap((lines, index) => {
+    const last = index === bodies.length - 1
+    // Only the step's head blinks. A blinking branch would open a gap in the tree.
+    return lines.map((line, row) => row === 0
+      ? { ...line, marker: last ? TREE.corner : TREE.branch, pulse: false }
+      : { ...line, marker: last ? MARKER.none : TREE.stem, markerTone: 'quiet' as const })
+  })
+}
+
+/**
+ * A step's block while it runs, fitted to the rows the live region has.
+ *
+ * Cut from the top like prose, a block taller than the window lost its head
+ * first. That line says what the step is doing, and its marker says
+ * that it is still running. Instead the block gives up detail oldest first,
+ * and keeps its head.
+ *
+ * 1. Each finished call, oldest first, folds to its head line alone. The
+ *    newest output stays in view longest, since it is the output just read.
+ * 2. With every finished call folded, the oldest calls fold into one
+ *    `+N earlier calls` branch, until the rest fit.
+ *
+ * Nothing is lost. Once the step ends, the block prints to history whole.
+ *
+ * @param calls - the step's calls, in the order the model made them.
+ * @param bound - how much of each outcome to preview, and the locale's words.
+ * @param rows - rows the live region may draw.
+ * @param height - rows one line occupies once wrapped.
+ * @returns the block's lines, at most `rows` tall unless even the head alone
+ *   wraps past them; the head is always the first line or the one after the
+ *   opening blank.
+ */
+export function fittedGroup(
+  calls: readonly ToolCallRow[],
+  bound: ResultBound,
+  rows: number,
+  height: (line: PresentedLine) => number = () => 1,
+): readonly PresentedLine[] {
+  const head = groupHead(calls, bound)
+  const bodies = calls.map(call => action(call, bound))
+  const whole = opening([head, ...hang(bodies)])
+  const size = (lines: readonly PresentedLine[]): number => lines.reduce((sum, line) => sum + height(line), 0)
+  if (rows <= 0 || size(whole) <= rows) return whole
+  // Heights ignore the rail's marker, which never changes a line's width, so
+  // each call is measured once however it ends up folded.
+  const full = bodies.map(size)
+  const folded = bodies.map((lines, index) => calls[index]!.result === undefined ? full[index]! : height(lines[0]!))
+  const fixed = height(BLANK) + height(head)
+  const fold = (lines: readonly PresentedLine[], index: number, count: number): readonly PresentedLine[] =>
+    index < count && calls[index]!.result !== undefined ? lines.slice(0, 1) : lines
+  for (let count = 1; count <= calls.length; count++) {
+    const used = fixed + bodies.reduce((sum, _, index) => sum + (index < count ? folded[index]! : full[index]!), 0)
+    if (used <= rows) return [BLANK, head, ...hang(bodies.map((lines, index) => fold(lines, index, count)))]
+  }
+  if (bound.earlier === undefined) return [BLANK, head, ...hang(bodies.map(lines => lines.slice(0, 1)))]
+  // The summary is a branch of its own, so the tree is still one step.
+  const summary = (hidden: number): PresentedLine => ({
+    marker: MARKER.none, verb: '', text: `+${hidden} ${bound.earlier}`, column: COLUMN.rail, tone: 'quiet',
+  })
+  let hidden = 1
+  while (hidden < calls.length - 1
+    && fixed + height(summary(hidden)) + folded.slice(hidden).reduce((sum, rows) => sum + rows, 0) > rows) hidden++
+  const kept = bodies.slice(hidden).map((lines, index) => fold(lines, index + hidden, calls.length))
+  const least = [BLANK, head, ...hang([[summary(hidden)], ...kept])]
+  if (size(least) <= rows) return least
+  // A window too short for even that keeps what says the most per row. The
+  // step's head, then the newest call's own head line, then the count of the
+  // rest, and gives up the blank that opens the block before any of them.
+  const newest = bodies.at(-1)!.slice(0, 1)
+  const ladder = [
+    [BLANK, head, ...hang([[summary(calls.length - 1)], newest])],
+    [head, ...hang([[summary(calls.length - 1)], newest])],
+    [head, ...hang([newest])],
+  ]
+  return ladder.find(lines => size(lines) <= rows) ?? [head]
+}
+
+/**
+ * Drop a title's leading word when it repeats the verb.
+ *
+ * `Grep` under `find`, and `Read` under `read`, would print the action twice.
+ * A command keeps its words unless the first word is `run` itself. Under
+ * `run`, `bash deploy.sh` is the command, not a second name for it.
+ *
  * @param title - the head's first line.
- * @param verb - the verb it is drawn under.
- * @returns the title, its redundant first word removed.
+ * @param verb - the verb the title is drawn under.
+ * @returns the title, with a redundant first word removed.
  */
 function bare(title: string, verb: Verb): string {
   const space = title.indexOf(' ')
@@ -599,19 +718,18 @@ function beside(base: Styled, extra: Styled): Styled {
 }
 
 /**
- * What a finished action reports: its headline and size, or a preview.
+ * What a finished action reports. A headline and a size on the head, or a preview under it.
  *
- * A card's summary — a search's count, a read's window, a command's exit
- * status — rides on the head, where no preview bound can hide it: a failing
- * test run's `exit 1` is the line that matters, and it is the last line of
- * the output.
+ * A card summary — a search count, a read window, a command exit status —
+ * stays on the head, where the preview bound cannot hide it. A failing run's
+ * `exit 1` is the line that matters, and it is the last line of the output.
  *
  * @param outcome - how the call ended.
  * @param verb - the action's verb, which decides whether output is previewed.
  * @param bound - preview length and the words for a count.
- * @param title - the head's text, which a headline repeating it adds nothing to.
- * @returns a size, a summary, or both for the head line, and the lines under
- *   the head at the output column.
+ * @param title - the head's text. A headline that repeats it is omitted.
+ * @returns an optional size or summary for the head, and the lines under the
+ *   head at the output column.
  */
 function outcomeLines(outcome: ToolOutcome, verb: Verb, bound: ResultBound, title: string): {
   readonly inline?: Styled
@@ -643,15 +761,22 @@ function outcomeLines(outcome: ToolOutcome, verb: Verb, bound: ResultBound, titl
   const heading = headline === undefined && !failed ? undefined : joined([[headline, tone], [size, failed ? tone : 'quiet']])
   return {
     ...inline === undefined ? {} : { inline },
-    lines: [
+    lines: zoned([
       ...heading === undefined || heading.text === '' ? [] : [{ ...continuation(heading.text, tone), spans: heading.spans }],
       ...shown,
-    ],
+    ]),
   }
 }
 
 /**
- * A count in the bound's words: `1 line`, `70 lines`.
+ * Place lines in a result's preview zone.
+ * @param lines - a result's preview, headline and count included.
+ * @returns the same lines, each marked as zone.
+ */
+const zoned = (lines: readonly PresentedLine[]): readonly PresentedLine[] => lines.map(line => ({ ...line, zone: true }))
+
+/**
+ * A count in the bound's words. `1 line`, `70 lines`.
  * @param count - how many lines.
  * @param bound - the locale-owned nouns.
  * @returns the count and its noun.
@@ -705,11 +830,11 @@ function preview(body: readonly PresentedLine[], limit: number): { readonly show
 /**
  * A preview of a body, with a count of what it left out.
  *
- * Output shows its first lines and its last, the count between them: what a
- * command ends with — a test summary, the error it stopped on — is as often
+ * Output shows its first lines and its last, the count between them. What a
+ * command ends with, a test summary or the error it stopped on, is as often
  * the news as what it opened with. The blank lines a command pads its output
  * with are dropped from either end. A change shows its first changed lines,
- * as a patch reads from the top. A count that would stand for a single line
+ * the way a patch is read from the top. A count that would stand for a single line
  * costs the row it saves, so that line is drawn instead.
  *
  * @param body - the lines under a head.
@@ -758,7 +883,7 @@ function sameWords(headline: string, title: string, verb: Verb): boolean {
  * How much of a tool result a surface draws, and the words it reports the rest
  * with.
  *
- * Required rather than defaulted: how much output belongs in scrollback is a
+ * Required, not defaulted. How much output belongs in scrollback is a
  * deployment's choice, and a hidden default here is how an unbounded `ls` gets
  * back into it.
  */
@@ -781,10 +906,16 @@ export interface ResultBound {
   readonly code?: Highlight
   /** Locale-owned word for a step's failed calls, as in `1 failed`; absent, the head leaves the count to the calls' red. */
   readonly failures?: string
+  /**
+   * Locale-owned phrase for a running step's calls folded out of view, as in
+   * `+3 earlier calls`; absent, a step taller than its window folds each
+   * finished call to its head but hides none.
+   */
+  readonly earlier?: string
 }
 
 /**
- * Reasoning as scrollback keeps it: its first rows, and a count of the rest.
+ * Reasoning as scrollback keeps its first rows, and a count of the rest.
  *
  * Reasoning is watched while it streams and rarely read again, and printed
  * whole it buries the answer under the working-out. The bound is the one tool
@@ -812,7 +943,7 @@ function reasoningPreview(lines: readonly PresentedLine[], result: ResultBound, 
   })
   const shown = Math.max(0, result.lines)
   if (rows.length <= shown + 1) return lines
-  // Nothing of the text: the count, slanted as the reasoning it stands for.
+  // Nothing of the text. The count, slanted as the reasoning it stands for.
   if (shown === 0) {
     const { spans: _spans, ...first } = rows[0]!
     return [{ ...first, text: `${rows.length} ${result.unit}` }]
@@ -827,7 +958,7 @@ function reasoningPreview(lines: readonly PresentedLine[], result: ResultBound, 
  * Where a line's wrapping would open a row with a space, break at the space.
  *
  * Ink wraps `Text` keeping whitespace, so when a word ends exactly at the
- * width, the space after it cannot hang on that row and opens the next one:
+ * width, the space after it cannot hang on that row and opens the next one.
  * the continuation sits a column right of its paragraph. Replacing that space
  * with the break draws the row where it belongs. The text keeps its length,
  * so styled runs measured against it still line up. Text the wrapper rewrites
@@ -858,7 +989,7 @@ export function softBreaks(text: string, width: number): string {
 /**
  * Present one row as the lines that display it.
  *
- * A row may produce several lines: multi-line text keeps its own breaks, and
+ * A row may produce several lines. Multi-line text keeps its own breaks, and
  * tool output is aligned under the call it came from. A row with nothing to say
  * produces no lines, so nothing occupies a row it cannot fill; the blank rows
  * that open a turn and each action inside it are the deliberate exception.
@@ -879,8 +1010,8 @@ export function present(row: Row, result: ResultBound, wrap?: (line: PresentedLi
         marker: index === 0 ? MARKER.turn : MARKER.none,
         verb: '', text, column: COLUMN.rail, tone: 'said' as const,
       }))
-      // Attachment metadata is about the prompt rather than part of it, so it
-      // recedes instead of carrying the weight of the user's own words.
+      // Attachment metadata is about the prompt, not part of it. It stays dim
+      // instead of carrying the weight of the user's own words.
       const staged = (row.attachments ?? []).map(formatAttachment).map(text => ({
         marker: MARKER.none, verb: '', text, column: COLUMN.rail, tone: 'quiet' as const,
       }))
@@ -888,29 +1019,35 @@ export function present(row: Row, result: ResultBound, wrap?: (line: PresentedLi
     }
 
     case 'command':
-      // As typed, from the rail: the slash is the first column, so a command
+      // As typed, from the rail. The slash is the first column, so a command
       // breaks the left edge the way it breaks the conversation, and its
       // outcome hangs from it on a branch as a step's calls hang from their
-      // head. The name is bold, as the verb opening an action is, so it reads
-      // without colour; the arguments are what the user wrote, at full weight.
+      // head. The name is bold, as the verb opening an action is, so it stays
+      // readable without colour. The arguments are what the user wrote, at
+      // full weight.
       return opening([{
         marker: MARKER.none, verb: '', text: `/${row.name}${row.args}`, column: COLUMN.rail, flush: true,
         tone: 'plain', spans: [{ length: row.name.length + 1, tone: 'said' }],
       }])
 
     case 'assistant': {
-      const lines = markdownLines(row.text, 'plain', result.code).map((line, index) => ({
+      const lines = markdownLines(row.text, 'plain', result.code).map(line => ({
         ...line,
-        marker: index === 0 && row.continued !== true ? MARKER.reply : MARKER.none,
+        marker: MARKER.none,
         verb: '', column: COLUMN.rail, tone: 'plain' as const,
       }))
       return row.continued === true ? lines : opening(lines)
     }
 
+    case 'rate':
+      // Dim, at the rail, directly under the answer. It continues the answer's
+      // section instead of opening one, and it is metadata about that answer.
+      return [{ marker: MARKER.none, verb: '', text: row.text, column: COLUMN.rail, tone: 'quiet' }]
+
     case 'reasoning': {
-      // A paragraph at the rail, as the answer is, without a verb: dim and
-      // slanted, it reads as the working-out, and the answer's `<` says where
-      // the reply begins.
+      // A paragraph at the rail, as the answer is, without a verb. Dim and
+      // italic, it is the working-out. The blank that opens the answer, at
+      // full brightness, marks where the reply begins.
       const lines = markdownLines(row.text, 'thought', result.code).map(line => ({
         ...line, marker: MARKER.none, verb: '', column: COLUMN.rail, tone: 'thought' as const, prose: true,
       }))
@@ -932,21 +1069,21 @@ export function present(row: Row, result: ResultBound, wrap?: (line: PresentedLi
         ...cardLines(outputLines(row.text), !row.ok, result.code),
         ...cardLines(row.detail, !row.ok, result.code),
       ]
-      // Calls may finish out of order, so the result names its own call
-      // rather than the nearest preceding row. An empty result still
+      // Calls may finish out of order, so the result names its own call.
+      // The nearest preceding row may belong to a different call. An empty result still
       // acknowledges completion, with no size to report.
       const size = body.length === 0 ? undefined : `${body.length} ${result.unit}`
-      // A success reads as its outcome and headline, with the id and size as
-      // detail; a failure stays red throughout, the whole line being news.
+      // A success is its outcome and headline, with the id and size as detail.
+      // A failure stays red throughout, because the whole line is the news.
       const outcome = joined([[`[${row.callId}]`, 'quiet'], [row.title, 'plain'], [size, 'quiet']])
       const head: PresentedLine = {
         marker: MARKER.none, verb: row.ok ? VERB.done : VERB.error, verbTone: row.ok ? 'done' : 'failed',
         text: outcome.text, column: COLUMN.output, tone, ...row.ok ? { spans: outcome.spans } : {},
       }
-      // The head of the output prints once, under the outcome, and stays: shown
+      // The head of the output prints once, under the outcome, and stays. Shown
       // for a moment and then removed, it was the rows the composer jumped by.
       const { shown, hidden } = preview(body, result.lines)
-      return [head, ...shown, ...hidden === 0 || shown.length === 0 ? [] : [continuation(`+${hidden} ${result.more}`, row.ok ? 'quiet' : tone)]]
+      return [head, ...zoned([...shown, ...hidden === 0 || shown.length === 0 ? [] : [continuation(`+${hidden} ${result.more}`, row.ok ? 'quiet' : tone)]])]
     }
 
     case 'notice': {
@@ -958,7 +1095,7 @@ export function present(row: Row, result: ResultBound, wrap?: (line: PresentedLi
         marker: index === 0 ? '-' : MARKER.none, verb: '', text, column: COLUMN.rail, tone,
       })))
       // A command's outcome continues its command, on the branch that closes
-      // it: the reader reads the two as one exchange, and no verb repeats
+      // it. The two are one exchange, and no verb repeats
       // what the command's name already says.
       if (row.placement === 'command') return linesOf(row.text).map((text, index) => ({
         marker: index === 0 ? TREE.corner : MARKER.none, markerTone: row.tone === 'error' ? 'failed' : 'quiet',
@@ -971,8 +1108,8 @@ export function present(row: Row, result: ResultBound, wrap?: (line: PresentedLi
     }
 
     default:
-      // A build that does not know this row kind renders nothing rather than
-      // guessing: the session log may carry events newer than this surface.
+      // A build that does not know this row kind renders nothing instead of
+      // guessing. The session log may carry events newer than this surface.
       return []
   }
 }
@@ -984,16 +1121,17 @@ export function present(row: Row, result: ResultBound, wrap?: (line: PresentedLi
  * Only the newest section is ever cut. It is the one still arriving, so its
  * newest lines are what the reader is watching. An older section is shown
  * whole or not at all. Cut from the top, a tool's output lost a line per
- * streamed line of the answer below it until only its footer was left, and the
- * eye read that as the surface shredding. Dropped whole, it leaves once.
- * Nothing is lost either way: the transcript already holds each section's
+ * streamed line of the answer below it until only its footer was left, which
+ * looked like the surface shredding the output. Dropped whole, it leaves once.
+ * Nothing is lost either way. The transcript already holds each section's
  * committed row.
  *
- * A plain tail window also cuts a long block below the line carrying its
- * verb, and what is left is continuation lines at the output column with
- * nothing saying whether they are reasoning or a tool's output. Restoring the
- * verb onto the first surviving line costs no row and keeps the section named
- * for as long as any of it is on screen.
+ * A plain tail window also cuts a long block below its head, and what is
+ * left is continuation lines at the output column with nothing saying
+ * whether they are reasoning or a tool's output. Restoring the verb column's
+ * mark — an action's {@link CONNECTOR} — onto the first surviving line costs
+ * no row and keeps the section hanging from something for as long as any of
+ * it is on screen.
  *
  * @param lines - every line the live rows produced, in order.
  * @param budget - rows the live region may draw.
@@ -1014,7 +1152,7 @@ export function tailLines(
   while (start > 0 && !opens(start)) start--
   const newest = rows.slice(start).reduce((sum, count) => sum + count, 0)
   if (newest > budget) {
-    // The cut falls inside the section, below its opening blank, which stays:
+    // The cut falls inside the section, below its opening blank, which stays.
     // without it the section's first surviving line runs into whatever the
     // transcript printed last.
     const blank = opens(start) && budget > 1
@@ -1024,7 +1162,7 @@ export function tailLines(
     let from = lines.length
     while (from > floor && used + rows[from - 1]! <= room) used += rows[--from]!
     // Prose fills the window exactly, its oldest line clipped from the top the
-    // way a terminal scrolls: stopping at whole lines would leave the window a
+    // way a terminal scrolls. Stopping at whole lines would leave the window a
     // row or two short whenever the next line wraps, and the composer below
     // would bob with every paragraph. Output keeps whole lines, so its verb
     // stays on screen. One line taller than the window always shows.
@@ -1045,12 +1183,12 @@ export function tailLines(
   return lines.slice(from)
 }
 
-/** A row that opens a section: nothing in it, at the rail. */
+/** A row that opens a section. Nothing in it, at the rail. */
 export const isBlank = (line: PresentedLine): boolean =>
   line.text === '' && line.verb === '' && line.column === COLUMN.rail && line.marker === MARKER.none && line.divider !== true
 
 /**
- * Cut `lines` at `from`, restoring the marker or verb the cut removed.
+ * Cut `lines` at `from`, restoring the verb-column mark the cut removed.
  * @param lines - every line, in order.
  * @param from - index of the first line kept.
  * @returns the kept lines, the first of them named.
@@ -1058,20 +1196,13 @@ export const isBlank = (line: PresentedLine): boolean =>
 function named(lines: readonly PresentedLine[], from: number): readonly PresentedLine[] {
   const shown = lines.slice(from)
   const first = shown[0]
-  if (first?.column === COLUMN.rail && first.tone === 'plain' && first.text !== '' && first.marker === MARKER.none) {
-    for (let index = from - 1; index >= 0; index--) {
-      const line = lines[index]!
-      if (line.column !== COLUMN.rail || line.tone !== 'plain') break
-      if (line.marker === MARKER.reply) return [{ ...first, marker: MARKER.reply }, ...shown.slice(1)]
-    }
-  }
   if (first === undefined || first.verb !== '' || first.column !== COLUMN.output) return shown
   for (let index = from - 1; index >= 0; index--) {
     const line = lines[index]!
     // A line outside the output column ends the section, so there is no verb
     // above this one to restore.
     if (line.column !== COLUMN.output) break
-    if (line.verb !== '') return [{ ...first, verb: line.verb }, ...shown.slice(1)]
+    if (line.verb !== '') return [{ ...first, verb: line.verb, ...line.verbTone === undefined ? {} : { verbTone: line.verbTone } }, ...shown.slice(1)]
   }
   return shown
 }

@@ -1,4 +1,4 @@
-/** Shiki highlighting as the presentation layer calls it: synchronous, and plain until a grammar is ready. */
+/** Shiki highlighting as the presentation layer calls it. Synchronous, and plain until a grammar is ready. */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createSyntax, languageOf, type Syntax } from '../src/syntax.ts'
 

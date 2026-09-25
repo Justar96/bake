@@ -1,2 +1,2 @@
-─ ✓ Completed  ran 1 ───────────────────
+  ✓ Completed  ran 1
 > ▌Try the composer

@@ -2,11 +2,11 @@
  * Visual prototype for the TUI layout.
  *
  * Renders every planned state to a string with Ink's own layout engine, so the
- * frames below are what the terminal would actually draw rather than hand-drawn
+ * frames below are what the terminal would actually draw, not hand-drawn
  * mockups. Each scene is also measured against invariant L1 from
- * DESIGN-LAYOUT.md: the dynamic region must fit in `rows - 1` lines.
+ * DESIGN-LAYOUT.md. The dynamic region must fit in `rows - 1` lines.
  *
- * Standalone by design — it resolves Ink and React out of packages/ui so it can
+ * Standalone by design. It resolves Ink and React out of packages/ui so it can
  * run while that package is being edited, and it imports no fork source.
  *
  *   node tui/prototype/frames.mjs [--width 80] [--rows 24] [--plain]
@@ -28,7 +28,7 @@ const WIDTH = flag('width', 80)
 const ROWS = flag('rows', 24)
 const PLAIN = argv.includes('--plain')
 
-/** Left rail: one glyph plus one space, constant across row kinds (DESIGN-LAYOUT §4). */
+/** Left rail. One glyph plus one space, constant across row kinds (DESIGN-LAYOUT §4). */
 const GUTTER = {
   user: { glyph: '\u203a', color: undefined, bold: true },
   assistant: { glyph: ' ', color: undefined },
@@ -60,7 +60,7 @@ const Transcript = ({ rows }) =>
   h(Static, { items: rows }, (row, index) => h(Row, { key: index, ...row }))
 
 /**
- * In-flight turn, tail-windowed: clipped lines are not lost, they land in the
+ * In-flight turn, tail-windowed. Clipped lines are not lost. They land in the
  * transcript when the turn commits (DESIGN-LAYOUT §2.2).
  */
 const Live = ({ rows, budget }) => {
@@ -88,7 +88,7 @@ const Notice = ({ lines, budget, tone }) => {
   const fits = lines.length <= budget
   const shown = fits ? lines : lines.slice(0, budget - 1)
   const rest = lines.length - shown.length
-  // One block, so the glyph marks its start rather than repeating per line.
+  // One block. The glyph marks its start and does not repeat on every line.
   return h(Box, { flexDirection: 'column' },
     shown.map((line, index) =>
       h(Row, { key: index, kind: tone ?? 'notice', text: line, ...index === 0 ? {} : { glyph: ' ' } })),

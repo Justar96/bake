@@ -18,7 +18,9 @@ From the repository root, `bun run build` builds the runtime and terminal bundle
 
 `bun run dsh` runs the built launcher with Bake's `~/.bake` home, shared with `bun run start`; an explicit `DSH_HOME` overrides it. The raw shared-runtime launcher retains its upstream home defaults. Use the Bun commands for Bake, and rebuild after launcher changes.
 
-The [direct download archive](../../distribution/README.md) installs a `bake` wrapper around this launcher. It opens the `tui` profile by default, forwards `bake tui`, `bake headless`, `bake plugin`, and `bake --profile` to the profile CLI, and selects `~/.bake` unless `DSH_HOME` is set.
+The [direct download archive](../../distribution/README.md) installs a `bake` wrapper around this launcher. It opens the `tui` profile by default, forwards `bake tui`, `bake headless`, `bake plugin`, `bake update`, and `bake --profile` to the profile CLI, and selects `~/.bake` unless `DSH_HOME` is set. `dsh update` replaces that install with the newest signed release, and `dsh update --check` only reports, exiting 10 when a newer release is available; a leading `update` is reserved for this, as `plugin` is, so a profile named `update` is reached with `--profile update`. See [Updating an install](../../distribution/README.md#updating-an-install).
+
+Interactive updates show an ASCII bakery animation on stderr and clear it before the result or an error. `BAKE_NO_ANIMATION=1` disables motion; `NO_COLOR=1` disables color. Checks, redirected output, CI, and dumb terminals keep plain reports.
 
 ## External plugins
 

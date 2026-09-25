@@ -38,8 +38,8 @@ async function must(command: string[], options: { cwd?: string; env?: NodeJS.Pro
 /**
  * Bundle the plugin and the recorder to Node ESM.
  *
- * Tools do not work under the tsx source launch: `dsh-tools` keys its scheduler
- * with `Symbol('…')` rather than `Symbol.for('…')`, and the source launch ends
+ * Tools do not work under the tsx source launch. `dsh-tools` keys its scheduler
+ * with `Symbol('…')`, not `Symbol.for('…')`. The source launch then ends
  * up with two module instances of that package, so the lookup misses. Upstream
  * `headless` fails identically from source and works from `lib/`. The recorder
  * builds too, because fixtures worth having contain tool events.
@@ -82,15 +82,15 @@ const CHECKS: Check[] = [
   {
     name: 'unit',
     summary: 'pure modules and Bun tooling under bun test',
-    // Filter by suffix rather than naming files: `bun test` matches `.spec.`
-    // too, and those need Node, while an explicit list silently omits every
+    // Filter by suffix, not by naming files. `bun test` matches `.spec.`
+    // too, and those need Node. An explicit list silently omits every
     // pure test added later.
     run: () => must(['bun', 'test', '.test.ts'], { cwd: join(ROOT, 'apps/tui') }),
   },
   {
     name: 'spec',
     summary: 'component and integration specs under Node and vitest',
-    // On Node: these mount real Cordis trees and Ink's real input channels, and
+    // On Node. These mount real Cordis trees and Ink's real input channels, and
     // testing those on a runtime we cannot ship to is how drift starts.
     run: () => must(['node', 'node_modules/vitest/vitest.mjs', 'run', '--config', 'apps/tui/vitest.config.ts']),
   },

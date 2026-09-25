@@ -1,4 +1,4 @@
 
   <ESC>[2m<ESC>[3m<ESC>[1mBold<ESC>[22m and italic with <ESC>[9mold<ESC>[29m and <ESC>[4mdocs<ESC>[24m (https://example.com).<ESC>[23m<ESC>[22m
 
-< <ESC>[1mBold<ESC>[22m and <ESC>[3mitalic<ESC>[23m with <ESC>[9mold<ESC>[29m and <ESC>[4m<ESC>[38;2;96;165;250mdocs<ESC>[24m (https://example.com)<ESC>[39m.
+  <ESC>[1mBold<ESC>[22m and <ESC>[3mitalic<ESC>[23m with <ESC>[9mold<ESC>[29m and <ESC>[4m<ESC>[38;2;96;165;250mdocs<ESC>[24m (https://example.com)<ESC>[39m.

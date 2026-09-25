@@ -13,7 +13,7 @@ it('recalls pending human input and committed user rows, newest first', () => {
 
 it('rebuilds a recalled command into the draft the user typed', () => {
   // The row keeps the name and arguments apart, so recall restores the slash
-  // the transcript renders in the rail rather than losing it.
+  // the transcript renders in the rail instead of losing it.
   const transcript = appendTranscript(emptyTranscript, [
     { kind: 'command', name: 'model', args: ' deepseek/chat high' },
     { kind: 'command', name: 'help', args: '' },
