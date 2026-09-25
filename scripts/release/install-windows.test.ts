@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path'
 import { windowsPowerShellEnvironment } from './powershell.ts'
 
 const roots: string[] = []
+const PREFLIGHT_TEST_TIMEOUT = 15_000
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
 
 /** Mock the download boundary while exercising the actual PowerShell installer preflight. */
@@ -33,26 +34,26 @@ describe.skipIf(process.platform !== 'win32')('Windows installer Node preflight'
     expect(result.stderr).toBe('')
     expect(result.code).toBe(0)
     expect(result.stdout.trim()).toBe('MANIFEST_REACHED')
-  })
+  }, PREFLIGHT_TEST_TIMEOUT)
 
   test('loads Windows PowerShell utility functions with inherited Core module paths', async () => {
     const result = await preflight('Get-Command Get-FileHash -ErrorAction Stop | Out-Null')
     expect(result.stderr).toBe('')
     expect(result.code).toBe(0)
     expect(result.stdout.trim()).toBe('MANIFEST_REACHED')
-  })
+  }, PREFLIGHT_TEST_TIMEOUT)
 
   test.each(['22.19.0', '23.0.0'])('rejects unsupported Node %s before downloading', async (version) => {
     const result = await preflight(`function node { '${version}' }`)
     expect(result.code).not.toBe(0)
     expect(result.stderr).toContain('Bake install needs Node.js 24 or newer on PATH.')
     expect(result.stdout).not.toContain('MANIFEST_REACHED')
-  })
+  }, PREFLIGHT_TEST_TIMEOUT)
 
   test('reports a missing Node executable before downloading', async () => {
     const result = await preflight("function node { throw 'Node unavailable' }")
     expect(result.code).not.toBe(0)
     expect(result.stderr).toContain('Bake install needs Node.js 24 or newer on PATH.')
     expect(result.stdout).not.toContain('MANIFEST_REACHED')
-  })
+  }, PREFLIGHT_TEST_TIMEOUT)
 })
