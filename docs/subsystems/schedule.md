@@ -177,12 +177,6 @@ type ScheduleView = ScheduleRecord & {
 
 The generated [tool catalog](../tool-catalog.md#deepseek-aidsh-schedule) owns the argument and result schemas for `schedule_create`, `schedule_list`, and `schedule_delete`. Management calls serialize with due work in one Agent-scoped queue. Every read or decision first waits for the shared Session persistence barrier; create and an actual delete wait again after appending. A barrier failure reports `persistence_uncertain` instead of guessing whether an eager write committed. The other stable error codes are `invalid_prompt`, `invalid_selector`, `invalid_rule`, `invalid_time_zone`, `not_future`, `time_out_of_range`, `frequency_too_high`, `corrupt_schedule_log`, and `internal_error`.
 
-## Read-only Web catalog
-
-When the optional Session projection registry is present, Schedule registers the client-visible `schedule` key whose value is the complete active `ScheduleRecord[]`. Live, cache, history, and detached reads use the same header-aware strict fold; malformed authoritative input fails the existing read path instead of publishing a partial value.
-
-The shipped Web bundle keeps `ui-schedule` disabled by default, while the explicit Schedule overlay enables it together with the Host capability. [`dsh-client-ui-schedule`](../../packages/client/ui-schedule/README.md) owns the header interaction, [`dsh-client-ui-workspace`](../../packages/client/ui-workspace/README.md) owns list-row presentation, and the durable Schedule Agent Note owns their shared active-state boundary. The shared value represents current active state, never delivery history or a receipt; due reminders still appear through the ordinary Assistant output described below.
-
 ## Live delivery
 
 The process-local owner derives its earliest timer from the durable fold and rereads the wall clock after every bounded wait. Cold Sessions do no work; reopening one reconstructs timers and makes past targets overdue. Due one-shots take priority and enter one later turn at a time. When no one-shot is due, all overdue Every records form the single batch described above.

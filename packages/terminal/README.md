@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-The `terminal/` family lets agents keep interactive shell and REPL sessions alive across tool calls, including the working directory, environment variables, and running child processes. Use `terminal/` for owner-isolated session management, `terminal-bash/` for sandboxed interactive bash or pwsh sessions, and `tool-terminal/` for six model-facing terminal operations with bounded results. Choose this family when a task needs interactive input or state that a one-shot bash command cannot retain. Sessions remain local to one harness process and do not survive a restart.
+The `terminal/` family keeps interactive shell sessions alive across calls, including their working directory, environment, and running child processes. `terminal/` manages owner-isolated sessions and `terminal-bash/` supplies a sandboxed bash or pwsh backend. Sessions remain local to one process.
 
 ## Table of Contents
 
@@ -28,7 +28,6 @@ The family is one session service, one shell backend, and one set of model-facin
 |---|---|---|
 | [`terminal/`](terminal/README.md) | Session service: owner-scoped sessions with opaque ids, exact-owner fencing, and awaited cleanup | `ctx.terminals` |
 | [`terminal-bash/`](terminal-bash/README.md) | Shell backend: interactive bash or pwsh under the shared sandbox policy, with readiness detection and bounded output | registers a backend on `ctx.terminals` |
-| [`tool-terminal/`](tool-terminal/README.md) | Six model-facing tools with owner isolation and optional background sends | registers on `ctx.tools` |
 
 -----
 

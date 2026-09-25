@@ -109,7 +109,6 @@ The parse path is one small family with two owners: `provideCmdline` freezes the
 Read these pages when the package-level contract is not enough. They move from the handoff mechanism to the apps that consume it.
 
 - [dsh-app-boot](../app-boot/README.md) — the boot sequence that provides these launcher values.
-- [dsh-web-app bundle](../../bundle/web-app/README.md) — an app that owns the Web flag family through this package.
 - [dsh-headless bundle](../../bundle/headless/README.md) — the one-shot runner that reads its task from the command line.
 
 -----

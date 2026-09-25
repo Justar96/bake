@@ -34,7 +34,6 @@ The schedule group lets an agent create, list, and cancel reminders for the curr
 - [Session-local Schedule subsystem](../../docs/subsystems/schedule.md) — durable record, transition, view, and delivery contracts.
 - [Generated tool catalog](../../docs/tool-catalog.md#deepseek-aidsh-schedule) — the `schedule_create`/`schedule_list`/`schedule_delete` schemas the model receives.
 - [Schedule user guide](../../docs/user/guide/schedule.md) — the official configuration path for mounting the package.
-- [Web Schedule catalog](../client/ui-schedule/README.md) — the optional read-only browser presentation of active records.
 
 -----
 

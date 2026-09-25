@@ -46,7 +46,7 @@ Set `compression: 'gzip'` to wrap eligible socket-backed responses without chang
 
 ### The fallback seat
 
-`registerFallback(handler)` claims the one handler for every request no named route matches. A second registration throws; while no fallback is registered the server answers 404. In the shipped Web composition the [SPA dist server](../frontend-static/README.md) owns the seat and calls `renderIndex` on every index response it renders.
+`registerFallback(handler)` claims the one handler for every request no named route matches. A second registration throws; while no fallback is registered the server answers 404.
 
 Index startup inputs are two layers. `collectIndexInjections()` gathers a fresh injection table — one `webserver/index-inject` emit per call, each subscriber pushing its current rows — and `renderIndex(html)` renders those rows into the index.html body before applying the raw `tapIndex(transform)` transforms in registration order. A `script-preload` row renders an advisory classic-script preload link. Static deployments carry the same rows in their boot payload. `applyIndexTaps(html)` applies only the raw transforms; it is the escape hatch for markup no row expresses.
 
@@ -88,7 +88,6 @@ The package is a plain route registry with no harness vocabulary: `WebServer` ex
 Read these when the server contract is not enough: the subsystem reference, then the fallback owner and the layering decision behind who registers which route.
 
 - [HTTP server subsystem](../../../docs/subsystems/web-server.md) — routes, matching order, and the config the server accepts.
-- [SPA dist server](../frontend-static/README.md) — the shipped owner of the fallback seat.
 - [Web config-tree boot and transport layering](../../../.agents/notes/implemented/architecture/2026-07-24-web-config-tree-boot-and-transport-layering.md) — why feature plugins own every route.
 - [Generated configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-host-webserver) — every accepted config field and its source declaration.
 

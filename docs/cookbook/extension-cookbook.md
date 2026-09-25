@@ -34,7 +34,7 @@ This waterfall is the reorderable policy layer. Use `ctx.tools.guard()` when an 
 
 ## A UI plugin
 
-A UI plugin combines durable `session/event` records (Assistant settlements, turn/step boundaries, and tool activity) with transient `agent/assistant-stream` frames for live token presentation, and drives input back in via `agent.followup()` / `agent.steer()`. A browser plugin contributing a business row to the built-in Web Client instead registers a `ConversationNodeDefinition` and keyed Chat renderer; follow the [Conversation subsystem reference](../subsystems/conversation.md).
+A terminal UI consumer renders durable `session/event` records alongside transient `agent/assistant-stream` frames and sends input through `agent.followup()` or `agent.steer()`.
 
 ```ts
 import type { Context } from '@deepseek-ai/cordis'
@@ -65,7 +65,6 @@ export function apply(ctx: Context) {
 
 A *protocol driver* adapts a wire peer to `ctx.agents`; it may serve a UI or an automation client. A stdio driver owns stdout, creates or resumes agents through the factory, and maps protocol requests to `followup()` or `cancel()`. A low-level prompt request returns its durable enqueue receipt; it does not acquire a result by correlating `MessageId` with `turn/end`. Publish whole-agent status separately. An automation method may wait from its receipt through the next idle and summarize that explicitly owned interval, while a UI normally keeps observing the open-ended event stream. Tear agents down with `AgentHandle.dispose()` so disposal reaches quiescence.
 
-[`packages/acp/acp`](../../packages/acp/acp) is the automation-only worked example: it exposes fresh text sessions over Agent Client Protocol JSON-RPC stdio, emits committed assistant text, and registers a one-shot machine permission answerer for agents it owns. Its [README](../../packages/acp/acp/README.md) defines the exact methods, event order, and lifecycle contract.
 
 ```ts
 import type { Context } from '@deepseek-ai/cordis'
@@ -120,7 +119,7 @@ Every product feature maps to a listener on a documented extension point — the
 | Subprocess sandbox (landlock / sandbox-exec) | use a `ctx.sandbox` backend through `dsh-bash-sandbox`; use `tools/pre-execute` for capability-level denial |
 | Permission system / AskUserQuestion | return `ask` from `tools/pre-execute` and answer through `ctx.approval`; register a separate model-facing ask tool for ordinary user questions |
 | Plan mode | [`@deepseek-ai/dsh-plan-mode`](../../packages/plan/plan-mode/README.md) — logged `plan/mode` state, the `plan:policy` guidance section, `/plan [message]` entry, `/plan off` direct exit, and the user-reviewed `exit_plan_mode` exit; enforcement stays on the independent sandbox/approval axes |
-| Sub-agent delegation | the `ctx.subagents` provider registry (`dsh-subagent-spawn-in-process`/`dsh-subagent-fork-in-process`/`dsh-subagent-acp`/`dsh-subagent-codex`/`dsh-subagent-claude-code`/`dsh-subagent-dsh-sdk`) + `dsh-tool-subagent` exposing one configured provider to the model |
+| Sub-agent delegation | the `ctx.subagents` provider registry (`dsh-subagent-spawn-in-process`/`dsh-subagent-fork-in-process`) + `dsh-tool-subagent` exposing one configured provider to the model |
 | MCP | one plugin per server: discover tools → `ctx.tools.register()` |
 | Skills | section + tool registration; `inject()` skill content on invocation |
 | Memory | section provider + tool |

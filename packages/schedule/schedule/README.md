@@ -104,7 +104,7 @@ A normal Session folds its complete event stream. A fork folds only `session.own
 
 The optional `schedule` projection checkpoints `{ inheritedEventCount, active, seenIds }` as strict plain JSON and publishes only the complete `active` array. Its schema reuses the durable Schedule decoder, rejects duplicate or inconsistent ids, and propagates corrupt durable events through the existing Session read failure instead of publishing a partial catalog. Live lazy build, event-driven build, cold restore, history reads, and detached Subagent reads all use the exact Session cut and the same owned-suffix transition.
 
-The projection carries durable records only. It does not persist or transmit scheduled-versus-overdue status, localized text, relative time, browser-local time, sorting state, popover state, runtime liveness, or delivery receipts. [`dsh-client-ui-schedule`](../../client/ui-schedule/README.md) derives catalog presentation from the complete array and the viewing browser's clock. [`dsh-client-ui-workspace`](../../client/ui-workspace/README.md) derives only whether the list value is a non-empty array, so ordinary and search rows may briefly omit or retain the alarm when the durable projection cache is missing or stale.
+The projection carries durable records only. It does not persist or transmit scheduled-versus-overdue status, localized text, relative time, browser-local time, sorting state, runtime liveness, or delivery receipts.
 
 ### Time validation
 

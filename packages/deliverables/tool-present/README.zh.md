@@ -63,7 +63,6 @@ kind: "package-reference"
 ## 进一步探索
 
 - [文件系统子系统](../../../docs/subsystems/filesystem.zh.md)——提供方路径与错误。
-- [Web 交付](../../client/ui-deliverables/README.zh.md)——源文件打开与卡片。
 - [交付决策](../../../.agents/notes/implemented/feature/2026-09-08-present-workspace-source-files.zh.md)——Session 归属与读取端必须识别的事件。
 
 <a id="model-experience"></a>

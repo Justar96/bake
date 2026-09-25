@@ -25,7 +25,7 @@ kind: "package-library"
 <a id="use-this-package"></a>
 ## 使用本包
 
-作为部署方，通过[首消息](../session-title-first-prompt-llm/README.zh.md)或[全消息](../session-title-all-prompts-llm/README.zh.md)提供方插件配置此策略。作为提供方作者，通过共享辅助函数注册，而不是手写生成逻辑。
+部署方通过[首消息提供方](../session-title-first-prompt-llm/README.zh.md)配置此策略。提供方作者通过共享辅助函数注册，不自行实现生成逻辑。
 
 ### 注册提供方
 
@@ -86,7 +86,6 @@ kind: "package-library"
 - [会话标题服务](../session-title/README.zh.md)——标题服务、回退行为与提供方注册约定。
 - [会话标题子系统](../../../docs/subsystems/session-title.zh.md)——持久标题状态与辅助请求记录。
 - [首消息标题提供方](../session-title-first-prompt-llm/README.zh.md)——根据第一条符合条件的用户消息生成标题。
-- [全消息标题提供方](../session-title-all-prompts-llm/README.zh.md)——根据所有符合条件的用户消息生成标题。
 - [会话包映射](../README.zh.md)——相邻的持久化、投影、标题与遥测包。
 
 -----

@@ -87,7 +87,7 @@ The [todo_write tool Agent Note](../../../.agents/notes/archived/feature/2026-06
 
 ### Export shape
 
-The plugin is a function/namespace plugin: it exports `name` / `inject` / `apply` and no default export. A stray `export default` would make the Loader's `unwrapExports` collapse the module and drop `inject` (see [postmortem 0001](../../../docs/postmortem/0001-acp-default-export-drops-inject.md)).
+The plugin is a function/namespace plugin: it exports `name` / `inject` / `apply` and no default export. A stray `export default` would make the Loader's `unwrapExports` collapse the module and drop `inject`.
 
 ### Session projection
 
