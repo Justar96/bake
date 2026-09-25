@@ -12,6 +12,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { CommandDefinitionId } from '@deepseek-ai/dsh-commands/brand'
 import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 import type { Session } from '@deepseek-ai/dsh-session'
+import type { SessionTelemetrySharingStatus } from '@deepseek-ai/dsh-session-telemetry'
 import { getOrCreateAnonymousUserId } from '@deepseek-ai/dsh-anonymous-user-id'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import type {
@@ -42,6 +43,19 @@ export const inject = ['commands']
 
 const USAGE = 'Usage: /feedback <text>'
 
+/**
+ * How the deployment treats this feedback, stated in the acknowledgement so
+ * the user learns that recording feedback may share the session.
+ * @param sharing - the telemetry backend's sharing mode, or undefined when
+ * no backend is mounted.
+ * @returns one line naming where the session history goes.
+ */
+export function sharingNotice(sharing: SessionTelemetrySharingStatus | undefined): string {
+  return sharing === undefined || sharing === 'disabled'
+    ? 'Telemetry is off; this feedback stays in the local session log.'
+    : 'This session’s history up to now is shared through telemetry with this feedback. Set DSH_TELEMETRY_DISABLED=1 to keep feedback local.'
+}
+
 declare module '@deepseek-ai/cordis' {
   interface Context {
     sessionFeedback: SessionFeedbackService
@@ -66,18 +80,20 @@ export function recordFeedback(session: Session, entry: FeedbackRecord): void {
 /**
  * Validate, record, and acknowledge one feedback entry. Returning an error
  * leaves no `feedback/record` event.
+ * @param ctx - Host context; its telemetry backend, if any, decides the sharing notice.
  * @param invocation - receiving agent, raw command input, and UI cancellation.
  * @returns an acknowledgement containing the receiving session and anonymous
- * user ids, or a usage error when no feedback text was supplied.
+ * user ids and where the session history goes, or a usage error when no
+ * feedback text was supplied.
  */
-function executeFeedbackCommand(invocation: CommandInvocation): CommandResult {
+function executeFeedbackCommand(ctx: Context, invocation: CommandInvocation): CommandResult {
   if (invocation.rawInput.trim().length === 0) {
     return { kind: 'error', text: USAGE }
   }
   recordFeedback(invocation.agent.session, { text: invocation.rawInput })
   return {
     kind: 'success',
-    text: `Feedback recorded for session ${invocation.agent.session.id}\nAnonymous user: ${getOrCreateAnonymousUserId()}.`,
+    text: `Feedback recorded for session ${invocation.agent.session.id}\nAnonymous user: ${getOrCreateAnonymousUserId()}.\n${sharingNotice(ctx.get('sessionTelemetry')?.sharing)}`,
   }
 }
 
@@ -122,6 +138,6 @@ export function apply(ctx: Context): void {
     description: 'Record feedback about this session',
     input: { hint: '<text>' },
     recordInput: false,
-    handler: executeFeedbackCommand,
+    handler: invocation => executeFeedbackCommand(ctx, invocation),
   })
 }
