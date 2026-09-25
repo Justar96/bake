@@ -1,6 +1,6 @@
 {
   "name": "bake",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A terminal coding agent built on Cordis and the DeepSeek Harness runtime",
   "license": "MIT",
   "private": true,
