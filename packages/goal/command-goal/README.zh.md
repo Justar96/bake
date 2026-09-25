@@ -25,6 +25,8 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
+`/goal` 命令把 `clear`、`edit`、`pause` 和 `resume` 作为参数选项提供。自由输入的目标仍然有效；语法和状态由处理器校验。
+
 在挂载了命令适配器的交互式部署中使用 `dsh-command-goal`——随附的 Web 客户端是参考实现。它让用户无需模型轮次即可直接控制 goal 生命周期：命令在 UI 命令平面执行，适配器直接渲染其结果。
 
 ### 命令参考

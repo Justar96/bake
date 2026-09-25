@@ -25,6 +25,8 @@ Offer named permission modes that set sandbox and approval together while each e
 <a id="use-this-package"></a>
 ## Use this package
 
+The `/permission` command advertises the currently configured preset names as argument choices. The provider reads the live preset list, including Auto when available; the command still validates a submitted name.
+
 Choose this service when a deployment wants to offer users one Permissions selector instead of separate sandbox and approval controls. It bundles the knobs; execution and approval keep their own values, so removing the package later leaves the last selection in effect.
 
 ### Configuring presets
@@ -53,7 +55,7 @@ The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-a
 
 ### Switching presets
 
-Switching to Auto first runs its synchronous admission check; every preset switch then changes only the knobs whose effective value differs, and selecting the preset already in effect changes nothing. The current value resolves as the still-matching last recorded selection, else the first matching configured entry, else `custom`. Users switch through the `/permission` command: a bare invocation reports the current preset and every available entry, and a preset argument switches to it.
+Switching to Auto first runs its synchronous admission check; every preset switch then changes only the knobs whose effective value differs, and selecting the preset already in effect changes nothing. The current value resolves as the still-matching last recorded selection, else the first matching configured entry, else `custom`. The command advertises `/permission [preset]`: a bare invocation reports the current preset and every available entry, and a preset argument switches to it. An unknown name returns `Usage: /permission [preset]` followed by the unknown name and available entries.
 
 ### What users see
 

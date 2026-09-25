@@ -236,7 +236,7 @@ describe('/feedback human command', () => {
     const test = await harness()
     const expected = {
       kind: 'error',
-      text: 'Feedback text is required. Usage: /feedback <text>',
+      text: 'Usage: /feedback <text>',
     }
     await expect(run(test)).resolves.toEqual(expected)
     await expect(run(test, '   \n\t ')).resolves.toEqual(expected)

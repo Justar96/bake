@@ -227,11 +227,11 @@ export class PlanModeController extends Service {
         definitionId: brandString<CommandDefinitionId>('@deepseek-ai/dsh-plan-mode'),
         name: 'plan',
         description: 'Enter or leave plan mode',
-        input: { hint: '[off|message]', attachments: true },
+        input: { hint: '[off|message]', attachments: true, choices: ['off'] },
         handler: ({ agent, rawInput, attachments }) => {
           const message = rawInput.trim()
           if (message === 'off' && attachments.length > 0) {
-            return { kind: 'error', text: 'Attachments cannot accompany /plan off.' }
+            return { kind: 'error', text: 'Attachments cannot accompany /plan off.\nUsage: /plan [off|message]' }
           }
           if (message === 'off') {
             switch (this.set(agent, false)) {

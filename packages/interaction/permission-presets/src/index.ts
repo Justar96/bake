@@ -267,7 +267,7 @@ export class PermissionPresetService extends TypertRemoteService {
         definitionId: CommandDefinitionId('@deepseek-ai/dsh-permission-presets'),
         name: 'permission',
         description: 'Switch the permission preset (sandbox mode + approval policy)',
-        input: { hint: '<preset>' },
+        input: { hint: '[preset]', choices: (_agent, _partial, signal) => { signal.throwIfAborted(); return this.names } },
         // No settlement text labels its value with this command's own name: a
         // surface that renders `name · text` (the web command row) would
         // otherwise read `permission · Permission preset: workspace-write.`
@@ -277,7 +277,7 @@ export class PermissionPresetService extends TypertRemoteService {
             return { kind: 'success', text: `current preset ${this.current(agent.session)} (available: ${this.names.join(', ')})` }
           }
           if (!this.names.includes(name)) {
-            return { kind: 'error', text: `unknown preset "${name}" (available: ${this.names.join(', ')})` }
+            return { kind: 'error', text: `Usage: /permission [preset]\nUnknown preset "${name}" (available: ${this.names.join(', ')})` }
           }
           this.apply(agent.session, name, (policy) => { this.ctx.approval.setPolicy(agent, policy) })
           return { kind: 'success', text: `preset ${name}` }

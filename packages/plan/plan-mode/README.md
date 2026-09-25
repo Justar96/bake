@@ -25,6 +25,8 @@ Plan mode asks an agent to explore and design before execution, then presents th
 <a id="use-this-package"></a>
 ## Use this package
 
+The `/plan` command advertises `off` as an argument choice. Free-form plan messages remain valid and are checked by the command handler.
+
 When plan mode is active, the agent works under your instructions and presents its plan for review instead of executing right away. The common path: configure the guidance text, enter plan mode with `/plan`, and review the finished plan when the agent calls `exit_plan_mode`.
 
 ### When to choose it
@@ -54,7 +56,7 @@ The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-a
 
 Type `/plan` to enter plan mode, or `/plan <message>` to enter with an instruction — the message becomes your next request under plan guidance. Type `/plan off` to leave plan mode directly; it also cancels a plan-mode entry that has not taken effect yet.
 
-You can attach images and generic files to a `/plan` message, and they are included with your instruction in selection order. `/plan off` with attachments is rejected before the mode changes, so the draft and cards remain available. The `/plan` command is available wherever slash commands are supported, such as the Web client.
+You can attach images and generic files to a `/plan` message, and they are included with your instruction in selection order. The command advertises `/plan [off|message]`. `/plan off` with attachments returns an error and `Usage: /plan [off|message]` before the mode changes, so the draft and cards remain available. The `/plan` command is available wherever slash commands are supported, such as the Web client.
 
 ### The reviewed exit
 

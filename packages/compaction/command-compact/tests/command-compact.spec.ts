@@ -199,7 +199,7 @@ describe('/compact human command', () => {
     const rejected = await run(test, ' now')
     expect(rejected.result).toEqual({
       kind: 'error',
-      text: 'Usage: /compact (no arguments)',
+      text: 'Usage: /compact',
     })
     expect(rejected.commandId).toBe(expectLastLifecycle(test, ' now', rejected.result))
     expect(test.compact.calls).toHaveLength(1)

@@ -43,7 +43,7 @@ ctx.commands.register({
 })
 ```
 
-The handler returns `success` or `error` plus optional UI text that the adapter renders. `recordInput` defaults to true; a command whose own authoritative domain event already carries the payload sets it to false so the session log does not duplicate the input. Registering the same name twice in one scope throws.
+The handler returns `success` or `error` plus optional UI text that the adapter renders. `input.choices` may be a static list or a provider `(agent, partialInput, signal)` returning a list, synchronously or asynchronously. A choice is a string or `{ value, requiresInput: true }` when further text is needed, as for `/goal edit <objective>`. The provider receives the text after the command separator and must honor cancellation; choices only guide the UI, while the handler still validates input. `list(agent)` exposes frozen static choices or `true` for a dynamic provider, never the provider function. A UI calls `choices(agent, name, partialInput, signal)` to resolve the effective scoped command. `recordInput` defaults to true; a command whose own authoritative domain event already carries the payload sets it to false so the session log does not duplicate the input. Registering the same name twice in one scope throws.
 
 ### Command syntax
 
@@ -136,7 +136,7 @@ Registry metadata, command input, and direct output never enter a model request 
 
 These limits define what the registry does not offer. They are current package constraints, not a UI backlog.
 
-- **Only unstructured text input** — forms, completion schemas, and typed arguments remain command-owned parsing concerns.
+- **Only unstructured text input** — choices are advisory; forms and typed arguments remain command-owned parsing concerns.
 - **Cooperative side-effect cancellation** — dispatch stops awaiting on abort; handlers must honor the signal to stop work that has already escaped into external systems.
 
 <a id="dev-note"></a>

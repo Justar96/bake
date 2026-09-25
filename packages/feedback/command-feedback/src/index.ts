@@ -72,7 +72,7 @@ export function recordFeedback(session: Session, entry: FeedbackRecord): void {
  */
 function executeFeedbackCommand(invocation: CommandInvocation): CommandResult {
   if (invocation.rawInput.trim().length === 0) {
-    return { kind: 'error', text: `Feedback text is required. ${USAGE}` }
+    return { kind: 'error', text: USAGE }
   }
   recordFeedback(invocation.agent.session, { text: invocation.rawInput })
   return {

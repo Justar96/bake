@@ -34,7 +34,7 @@ kind: "package-reference"
 | 输入 | 结果 |
 |---|---|
 | `/feedback the diff view is unreadable` | 记录评价并以两行确认：`Feedback recorded for session {sessionId}` 和 `Anonymous user: {userId}.` |
-| `/feedback` | 用法错误：`Feedback text is required. Usage: /feedback <text>`。仅含空白的输入视为空输入。 |
+| `/feedback` | 用法错误：`Usage: /feedback <text>`。命令补全和帮助中会显示必填的 `<text>` 提示。仅含空白的输入视为空输入。 |
 
 前后空白会被去除，但除此之外，评价会按输入原样保留：不进行截断、大小写折叠或命令解析——`/feedback /plan felt slow` 记录的就是这段字面文本。每次执行命令都会记录自己的条目；不会发生合并或替换。
 

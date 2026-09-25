@@ -43,7 +43,7 @@ ctx.commands.register({
 })
 ```
 
-处理器返回 `success` 或 `error`，并可附带由适配器渲染的 UI 文本。`recordInput` 默认为 true；若载荷由命令自己的权威领域事件持有，命令会将 `recordInput` 设为 false，避免会话日志重复记录该输入。同一作用域内重复注册同名命令会抛出异常。
+处理器返回 `success` 或 `error`，并可附带由适配器渲染的 UI 文本。`input.choices` 可以是静态列表，也可以是接收 `(agent, partialInput, signal)` 并同步或异步返回列表的提供器。选项可以是字符串；若还需要后续文字，例如 `/goal edit <objective>`，则使用 `{ value, requiresInput: true }`。提供器接收命令分隔符之后的文字，且必须遵守取消信号；选项只用于引导 UI，输入仍由处理器校验。`list(agent)` 返回冻结的静态选项，动态提供器则标为 `true`，不会暴露提供器函数。UI 通过 `choices(agent, name, partialInput, signal)` 解析当前 agent 作用域内的命令。`recordInput` 默认为 true；若载荷由命令自己的权威领域事件持有，命令会将 `recordInput` 设为 false，避免会话日志重复记录该输入。同一作用域内重复注册同名命令会抛出异常。
 
 ### 命令语法
 
@@ -136,7 +136,7 @@ ctx.commands.register({
 
 这些限制说明注册表不提供什么。它们是当前包约束，不是 UI 积压事项。
 
-- **仅支持非结构化文本输入**：表单、补全 schema 和类型化参数仍由各命令自行解析。
+- **仅支持非结构化文本输入**：选项只用于提示；表单和类型化参数仍由各命令自行解析。
 - **副作用采用协作式取消**：中止后，分发会停止等待；处理器必须遵循信号，才能停止已经进入外部系统的工作。
 
 <a id="dev-note"></a>

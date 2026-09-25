@@ -25,6 +25,8 @@ English | [中文](README.zh.md)
 <a id="use-this-package"></a>
 ## Use this package
 
+The `/goal` command advertises `clear`, `edit`, `pause`, and `resume` as argument choices. A free-form objective remains valid; the handler owns the grammar and state checks.
+
 Use `dsh-command-goal` in interactive deployments that mount a command adapter — the shipped Web client is the reference. It gives users direct control over the goal lifecycle without a model turn: commands execute in the UI command plane and the adapter renders their results directly.
 
 ### Command reference

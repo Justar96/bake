@@ -626,7 +626,7 @@ describe('/plan', () => {
     const plainSteer = vi.fn()
     ;(plainAgent as unknown as { steer: typeof plainSteer }).steer = plainSteer
     expect(ctx.commands.list(plainAgent)).toEqual([
-      { definitionId: '@deepseek-ai/dsh-plan-mode', name: 'plan', description: 'Enter or leave plan mode', input: { hint: '[off|message]', attachments: true } },
+      { definitionId: '@deepseek-ai/dsh-plan-mode', name: 'plan', description: 'Enter or leave plan mode', input: { hint: '[off|message]', attachments: true, choices: ['off'] } },
     ])
 
     const signal = new AbortController().signal
@@ -787,7 +787,7 @@ describe('/plan', () => {
     const offSteer = vi.fn()
     ;(activeAgent as unknown as { steer: typeof offSteer }).steer = offSteer
     expect((await ctx.commands.execute(activeAgent, '/plan off', attachments, signal))?.result)
-      .toEqual({ kind: 'error', text: 'Attachments cannot accompany /plan off.' })
+      .toEqual({ kind: 'error', text: 'Attachments cannot accompany /plan off.\nUsage: /plan [off|message]' })
     expect(offSteer).not.toHaveBeenCalled()
     expect(ctx.planMode.get(activeAgent)).toEqual({ active: true })
   })

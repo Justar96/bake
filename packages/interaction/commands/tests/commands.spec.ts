@@ -54,6 +54,28 @@ describe('parseCommand()', () => {
 })
 
 describe('CommandRuntime', () => {
+  it('advertises static and dynamic choices without exposing provider functions to clients', async () => {
+    const ctx = await mount()
+    const { agent } = await mintAgentScope(ctx, 'choices-agent')
+    const provider = vi.fn(async (_agent: Agent, partial: string, signal: AbortSignal) => {
+      signal.throwIfAborted()
+      return [partial + 'one']
+    })
+    ctx.commands.register({ ...command('static'), input: { hint: '<value>', choices: ['one', { value: 'two', requiresInput: true }] } })
+    ctx.commands.register({ ...command('dynamic'), input: { hint: '<value>', choices: provider } })
+    expect(ctx.commands.list(agent).find(item => item.name === 'static')?.input?.choices).toEqual(['one', { value: 'two', requiresInput: true }])
+    expect(ctx.commands.list(agent).find(item => item.name === 'dynamic')?.input?.choices).toBe(true)
+    const signal = new AbortController().signal
+    expect(await ctx.commands.choices(agent, 'static', 'o', signal)).toEqual(['one', { value: 'two', requiresInput: true }])
+    expect(await ctx.commands.choices(agent, 'dynamic', 'x', signal)).toEqual(['xone'])
+    expect(provider).toHaveBeenCalledWith(agent, 'x', signal)
+    expect(await ctx.commands.choices(agent, 'missing', '', signal)).toEqual([])
+    const abort = new AbortController()
+    abort.abort()
+    await expect(ctx.commands.choices(agent, 'dynamic', '', abort.signal)).rejects.toThrow()
+    expect(provider).toHaveBeenCalledTimes(1)
+  })
+
   it('lists immutable global descriptors with input metadata', async () => {
     const ctx = await mount()
     const { agent } = await mintAgentScope(ctx, 'a')
