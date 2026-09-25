@@ -2,140 +2,129 @@
 
 [English](development.md) | 中文
 
-搭建教程引导新贡献者从准备前置条件开始，直到检出目录通过检查。后面的贡献者参考介绍仓库布局、日常工作流和 CI 组织方式。设计依据与实现细节属于链接的 Agent Note 和脚本。
+本指南介绍如何从源码构建 Bake、日常开发循环、变更合入前应运行的检查，以及代码的组织方式。[`CONTRIBUTING.zh.md`](../CONTRIBUTING.zh.md) 说明变更如何评审、上游 DeepSeek Harness 修复如何移植。[`AGENTS.md`](../AGENTS.md) 列出每个变更都要遵循的工程规则。
 
-<a id="setup-tutorial"></a>
+<a id="prerequisites"></a>
 
-## 搭建教程
+## 前置条件
 
-### 前置条件
+- **Bun**，版本以 [`package.json`](../package.json) 中的 `packageManager` 为准。Bun 负责依赖安装、`bun.lock`、工作区脚本、构建与 Git hook。不要添加 pnpm 或 npm 锁文件。
+- **Node.js 24 或更新版本。** Agent 本身运行在 Node 上，因为其启动加载器依赖 Bun 引擎所缺少的 V8 内部接口。切勿用 `bun --bun` 代替 Node 进程。
+- **带 Node 头文件的 C/C++ 工具链**，用于构建原生模块。
+- **终端场景测试需要 Linux 或 macOS。** 构建、类型检查和单元测试也能在 Windows 上运行，但 PTY 场景（`bun run test:e2e`）需要 Linux 或 macOS。可以使用 WSL 2；请把检出目录放在 Linux 文件系统中，并在其中单独安装依赖。
 
-- Node.js 支持 22.19+ 与 24+。CI 覆盖 22.19、24 和 26；见 [Node 引擎下限 Agent Note](../.agents/notes/implemented/process/2026-07-06-node-engine-floor.zh.md)。
-- 启用了 Corepack 的 pnpm。仓库在 `package.json` 中固定使用 `pnpm@11.7.0`；如果 `pnpm --version` 无法通过 Corepack 解析，请先运行 `corepack enable`。
-- Git 2.26 或更高版本；钩子设置会启用 Git 的 worktree 专属配置扩展。
-- 可选：一个 DeepSeek API key，用于 Web、headless 和 ACP（Agent Client Protocol）自动化 agent（智能体）演示以及真实 API 的 e2e 测试。
+<a id="first-build"></a>
 
-### Windows 与 WSL 2
+## 首次构建
 
-在 Windows 上，可以使用原生工具开发，也可以通过 WSL 2 使用 Linux 环境。WSL 2 既可用于验证 Linux 行为，也可在原生依赖编译或文件系统权限阻碍 Windows 开发时提供使用 Linux 工具链的途径。每种环境都需要准备相应的运行时、编译工具和权限；WSL 是可选项。
-
-将检出目录、已安装的依赖和工具链放在同一操作系统环境中。使用 WSL 2 时，将检出目录放在 Linux 文件系统中；使用 Windows 原生工具时，则使用 Windows 文件系统。跨两种文件系统访问会给 Git、依赖安装和构建等 I/O 密集型操作增加开销。参见微软的[文件存储与性能指南](https://learn.microsoft.com/en-us/windows/wsl/filesystems#file-storage-and-performance-across-file-systems)。
-
-在每种环境中分别安装依赖，因为不同操作系统使用的原生二进制和链接可能不同。测试结果适用于执行测试的环境；Windows 特有行为仍需在原生 Windows 上验证。
-
-### 首次搭建
-
-在仓库根目录安装依赖：
+在仓库根目录执行：
 
 ```sh
-pnpm install
+bun install --frozen-lockfile
+bun run build
+bun run start
 ```
 
-安装过程还会通过 `scripts/install-lefthook.mjs` 配置 worktree 本地的 Lefthook 钩子和 `dsh-translation-pairing` Git 合并驱动。[worktree 本地钩子 Agent Note](../.agents/notes/implemented/process/2026-07-27-worktree-local-lefthook.zh.md) 负责钩子路径的安全约定；[自动配对合并 Agent Note](../.agents/notes/implemented/process/2026-08-08-automatic-translation-pairing-merges.zh.md) 负责合并驱动。
+`bun install` 同时会安装 Lefthook Git hook。`start` 直接运行已有构建产物而不重新构建，需要交互式终端。`bun run start --help` 打印 TUI 参数而不启动会话。
 
-如果依赖是从缓存恢复或 `postinstall` 被跳过而导致任一集成缺失，请手动安装：
+源码运行与已安装的 `bake` 使用同一个主目录：`~/.bake`，或 `DSH_HOME` 指定的目录。覆盖后会选用该目录中已有的配置与会话，而不仅仅是其中的凭据。已有的 `~/.dsh` 数据不会被移动或修改。
+
+发起真实模型请求时，使用 `/login` 登录，或在环境变量或仓库根目录下被 git 忽略的 `.env` 中设置 `DEEPSEEK_API_KEY`。`DEEPSEEK_BASE_URL` 可选，用于覆盖 API 地址。切勿提交密钥或 `.env`。
+
+<a id="development-loops"></a>
+
+## 开发循环
+
+| 工作内容 | 命令 | 行为 |
+|---|---|---|
+| Ink 组件 | `bun run dev` | 热重载录制好的组件预览；不需要 Agent、网络或模型密钥。 |
+| 流式预览 | `bun run dev --replay` | 将录制的行回放到预览中。 |
+| 中文文案 | `bun run dev --locale zh` | 使用中文组件词典。 |
+| 完整 Agent | `bun run dev:tui` | 构建运行时和 TUI，然后启动 Node Agent；不会自动重启。 |
+| 仅改 TUI | `bun run build:tui && bun run start` | 重新打包终端代码；需要已有的运行时构建。 |
+| 改共享运行时 | `bun run build && bun run start` | 重新构建运行时包和终端代码。 |
+
+预览接受输入以便测试布局，但不会提交任务。在预览中按一次 Ctrl-C 即退出；真实 Agent 需要按两次。重新构建前请先停止真实 Agent。
+
+`bun run dsh --help` 以同一 Bake 主目录提供构建好的配置与插件启动器。外部配置插件的安装与 Bun 的源码工作区相互独立。
+
+<a id="checks"></a>
+
+## 检查
+
+只运行覆盖本次变更的检查，而不是默认运行全部套件。任何终端行为变更还需要运行 PTY 场景。
 
 ```sh
-node scripts/install-lefthook.mjs
+bun run check          # workspace, tsconfig paths, TUI types, tests, peer identity, layout, docs
+bun run test           # TUI unit and spec tests
+bun run test:runtime <file-or-dir>   # focused shared-runtime tests (Vitest on Node)
+bun run test:e2e       # keyless PTY scenarios against the built profile
+bun run verify         # build + check + PTY scenarios
+bun run lint           # Oxlint over apps/tui and scripts
 ```
 
-如果包装脚本拒绝现有 Git 配置或报告陈旧锁，请遵循其诊断和所链接的 Agent Note，不要凭猜测编辑 worktree 元数据。移动检出目录后，请重新运行包装脚本以重新生成自有路径。
+PTY 场景回放录制的模型响应，同时运行真实工具，再检查持久化的会话、屏幕内容和终端恢复情况。它们不需要模型密钥，也不会改动你的 Bake 主目录。
 
-新克隆后请先运行一次类型检查：
+运行时构建完成后，可用以下命令缩短迭代：
 
 ```sh
-pnpm run typecheck
+bun run test:e2e --list
+bun run test:e2e --only rendering
+bun run test:e2e --no-build
+bun apps/tui/scripts/tui.ts spec packages/ui/tests/placement.spec.tsx
+bun run test:runtime apps/cli/tests/args.spec.ts
 ```
 
-`pnpm run typecheck` 成功退出即表示搭建完成。
+`--only` 会包含场景的前置场景。E2E 通常只重新构建 TUI，不重建共享运行时；`--no-build` 原样使用已有产物。失败的场景会报告其等待条件，并把记录保留在 `apps/tui/.smoke/`。`bun apps/tui/scripts/tui.ts help` 列出监视模式、夹具录制和性能诊断选项。
 
-## 贡献者参考
+使用 Cordis 或 Ink 的测试运行在 Node 上；纯模块和工具测试运行在 Bun 上。检查失败不是刷新所有快照或绕过 hook 的理由。请审阅预期输出的变化，保持 CI 检测不变，并且切勿覆盖 `snapshots/` 下已录制的会话代。
 
-<a id="typescript-project-layout"></a>
+### Git hook
 
-### TypeScript 项目布局
+[`lefthook.yml`](../lefthook.yml) 让 hook 保持快速：
 
-共享 Node 运行时使用 `tsconfig.host.json`。TUI 类型由 `bun apps/tui/scripts/tui.ts check types` 检查。包级 `tsconfig.json` 引用工作区依赖；根目录 `tsconfig.json` 是编辑器与 Project Reference 的入口。
+- `pre-commit` 用 Oxlint 检查暂存的 TypeScript 和 JavaScript（并应用修复），拒绝空白错误，并检查 `vendor/*/src` 下的变更是否同步更新了 [`vendor/README.md`](../vendor/README.md)。
+- `pre-push` 运行 `bun run verify-workspace` 和 `bun run typecheck`。
 
-`bun run verify-tsconfig-paths` 检查生成的源码路径映射。新增或删除包时，同时检查 package 引用、聚合配置与工作区清单。
+hook 不运行测试或构建；请自行运行相关检查。未经维护者同意，切勿跳过 hook。
 
-### 环境变量
+### CI
 
-真实的 DeepSeek 适配器和需要密钥的 agent 演示从环境变量或仓库根目录一个被 gitignore 的 `.env` 文件读取凭证：
+[`ci.yml`](../.github/workflows/ci.yml) 在推送到 `main` 以及拉取请求时运行无密钥检查。[`release.yml`](../.github/workflows/release.yml) 构建、签名并发布发行归档；流程见[发行指南](../distribution/README.zh.md)。
 
-```sh
-DEEPSEEK_API_KEY=sk-...
-DEEPSEEK_BASE_URL=https://... # optional
-```
+## 仓库结构
 
-`DEEPSEEK_BASE_URL` 可选，默认为公开 API。请勿提交真实凭证。未设置 `DEEPSEEK_API_KEY` 时，真实 API 的 e2e 套件会自动跳过。
+| 路径 | 内容 |
+|---|---|
+| [`apps/tui/`](../apps/tui/DESIGN.md) | 终端应用：`packages/app`（配置组合、Agent 控制、终端生命周期）、`packages/ui`（无副作用的 Ink 组件、投影、布局、本地化文案）、`packages/harness`（组件开发与录制）、夹具和开发工具。 |
+| [`apps/cli/`](../apps/cli/README.zh.md) | `tui` 与 `headless` 配置的 Node 启动器，以及外部插件管理。 |
+| [`packages/`](../packages/README.zh.md) | 共享 Agent 运行时：Agent 循环、会话、模型、工具、沙箱和插件服务。修改前请阅读[架构说明](architecture.zh.md)。 |
+| [`native/`](../native/README.zh.md)、[`vendor/`](../vendor/README.md) | 原生支持与固定版本的 Cordis 源码。请保留其许可证和上游署名。 |
+| [`distribution/`](../distribution/README.zh.md) | 发行打包、签名与下载服务。 |
+| [`snapshots/`](../snapshots/AGENTS.md) | 录制的会话证据，包括保留的历史代。 |
 
-### Git 集成
+在运行时中工作时有用的参考：
 
-当两种语言的文件都使用 Git 默认文本策略且能干净合并时，配对合并驱动会根据已确认的祖先、当前和另一侧的配对文档 blob，推导出发生冲突的 `.i18n.yaml` 记录。配对文档发生冲突、存在非文本合并配置或记录无效时，它会拒绝处理并保留冲突；如果合并已经因冲突而停止，请运行 `pnpm run resolve-translation-pairing-conflicts`，该命令会暂存每份可安全生成的配对记录；如果其他配对冲突仍需手工处理，则以非零状态退出。[双语文档约定](i18n/README.zh.md#the-pairing-contract)列出该驱动接受的确切文件和状态。
+- [Cordis 入门](cordis-primer.zh.md)：插件、服务与事件。
+- [防御性模式](defensive-patterns.zh.md)：涉及生命周期或并发的工作前请先阅读。
+- [会话格式状态](session-format-status.zh.md)：任何持久化变更前请先阅读。
 
-安装脚本在发布 worktree 配置前，会探测确切的 Node/tsx 驱动入口点。如果该运行时之后变得不可用，不依赖 Node 的启动器会写入 Git 的普通文本合并结果、让伴随文件保持未解决状态，并打印恢复路径；请恢复依赖后运行 `pnpm run resolve-translation-pairing-conflicts`，或运行 `git merge --abort`。如果 `pre-merge-commit` 拒绝原本能干净完成的合并，Git 会把完整结果留在暂存区但不创建提交；请修复失败后运行 `git commit`，或中止合并。确切的索引与 `MERGE_HEAD` 状态由[自动配对合并 Agent Note](../.agents/notes/implemented/process/2026-08-08-automatic-translation-pairing-merges.zh.md#failure-contract)负责记录。
+## 约定
 
-lefthook 在 `lefthook.yml` 中配置，作为快速的本地检查点：
+- 全程使用 ESM 与严格 TypeScript。本地相对导入使用 `.ts` 后缀；跨包导入使用声明的包名。运行时包保留 `@deepseek-ai/*` 名称，以便顺利移植上游修复。
+- 共享 Node 运行时通过 `tsconfig.host.json` 构建；各包的 `tsconfig.json` 引用其工作区依赖。增删包时，请更新其引用，并运行 `bun run gen-workspace` 和 `bun run gen-tsconfig-paths`。
+- TUI 中显示的产品文案位于 [`apps/tui/packages/ui/src/copy.ts`](../apps/tui/packages/ui/src/copy.ts)，同时提供英文和中文。
+- 文档描述当前行为。随代码一起更新所属的 README 或 JSDoc，并保持中英文页面一致。
+- 按紧急程度标记已知问题：`FIXME` 会阻止发布，`TODO` 应尽快修复，`XXX` 留待日后。
 
-- `pre-commit` 对照暂存的配对文档 blob 校验暂存的配对记录，使用不加载项目的 `.oxlintrc.staged.json` 配置验证暂存文件，并通过一次有界重试应用 Oxlint 修复，在暂存文件属于 `THIRD_PARTY_NOTICES.md` 的输入时重新生成该文件，然后检查暂存 diff 中的空白错误，并运行 vendor manifest（元数据清单）守卫；
-- `pre-merge-commit` 在 Git 创建自动合并提交前执行同样以索引为准的配对检查；
-- `pre-push` 运行 `pnpm run typecheck`；该命令会先完成包含 Typert 约定生成的完整 Host lib 阶段，再运行 Client TypeScript 检查。
+<a id="documenting-types-verbatim"></a>
 
-vendor manifest 守卫检查 `vendor/*/src` 下的改动是否连同对应的 `vendor/README.md` manifest 更新一起暂存。请在编辑 vendor 代码前先阅读 `vendor/README.md`。
+### 逐字记录类型
 
-除限定范围的暂存记录校验外，这些钩子有意不运行测试、快照、文档检查、构建或 `hygiene`。贡献者只运行一次[与改动行为相关的检查](../AGENTS.md#run-relevant-checks-locally)；CI 负责全量覆盖率门禁、构建产物冒烟测试，以及 Node 22.19、24 和 26 兼容性矩阵。
-
-贡献者可以选择运行 `pnpm run check:all`，执行全面的本地门禁集。该命令独立于 Git 钩子，也不是对 agent 的指令。
-
-### CI 门禁
-
-keyless [CI 工作流](../.github/workflows/ci.yml) 将独立门禁分组到若干宽粒度 lane，并在受支持的 Node 版本上运行一组较小的兼容性检查。产物消费方在各自 lane 内等待一次 build。必需 benchmark 在标准 GitHub 托管 Linux 上独立运行；[benchmark 运行器决策](../.agents/notes/implemented/testing/2026-09-06-standard-hosted-benchmark-runner.zh.md)拥有路由及 job 超时。单独的真实 API 工作流按其配置的 worker 上限运行 `pnpm run test:e2e`。当前门禁和 job 清单以 [scripts/run-gates.ts](../scripts/run-gates.ts) 和工作流文件为准。
-
-不带凭据的 dsh 依赖布局检查与 dsh/vendor 打包演练仅在 `DSH_CI_FAILOVER_LINUX=selfhosted`，且事件为受信任的 master 推送或同仓库、非 fork、非 Dependabot 拉取请求时使用现有 Linux 自托管池。其余情况（包括手动触发）均使用 `ubuntu-24.04`；手动发布仍使用托管运行器。持久化存储隔离与回退限制见[发布演练运行器决策](../.agents/notes/implemented/process/2026-09-06-release-rehearsal-selfhosted.zh.md)。
-
-### 日常命令
-
-根目录的[贡献者说明](../AGENTS.md#commands)概述常用命令，[`package.json`](../package.json) 与 [scripts/run-gates.ts](../scripts/run-gates.ts) 则负责当前脚本和门禁清单。请选择覆盖变更表面的最小检查集。文档变更使用 `pnpm run doc-sync`；包公开行为变更还需更新所属 README 或 JSDoc，而基于构建产物的检查需要先运行 `pnpm run build`。
-
-### Profile 运行
-
-从源码 checkout 运行这些演示前，请单独执行仓库构建：
-
-```sh
-pnpm run build
-```
-
-单次运行的 Headless coding agent 需要环境变量或仓库根目录 `.env` 中的 `DEEPSEEK_API_KEY`：
-
-```sh
-pnpm dsh --profile headless "summarize this workspace"
-```
-
-PTC mode 演示启用代码式工具展示，并运行同一个 headless profile：
-
-```sh
-pnpm run demo:ptc -- "summarize this workspace"
-```
-
-### TODO 标记
-
-请使用以下三种注释标签之一标记代码中的已知问题，按紧急程度排序：
-
-- `FIXME`：应当阻塞新版本发布的问题。除非评审者明确同意该更改可以合并，否则发布版本不应包含未解决的 `FIXME`；
-- `TODO`：应当尽快修复的问题，等资源到位即可处理；
-- `XXX`：也许某天会修复的问题，优先级最低，不作承诺。
-
-请选择与紧急程度匹配的标签，让浏览代码的人一眼分清「发布阻塞」和「有空再说」。
-
-<a id="documenting-types-verbatim-ts-type-equiv"></a>
-
-### 逐字记录类型定义（`ts type-equiv`）
-
-[子系统](subsystems/README.zh.md)页面会把与源码等价的声明及其原始 JSDoc 一并粘贴，让读者看到确切类型定义和源码约定。为防止粘贴内容在源码变化时漂移，请将其围栏为 ` ```ts type-equiv `（而不是 ` ```ts `），并在 `scripts/type-equiv.manifest.json` 中登记它镜像的源文件和符号：
+[子系统页面](subsystems/README.zh.md)按源码原样粘贴声明及其 JSDoc。此类粘贴使用 ` ```ts type-equiv ` (or ` ```ts public-api ` for a class shown without implementation bodies) and register it in [`scripts/type-equiv.manifest.json`](../scripts/type-equiv.manifest.json) with its source file and symbol:
 
 ```json
 { "doc": "docs/subsystems/session.md", "symbol": "SessionEvent", "source": "packages/core/session/src/types.ts" }
 ```
 
-`pnpm run verify-type-equiv`（`doc-sync` 的一环）随后通过 TypeScript 解析器从源码提取该符号的声明及其附带的 JSDoc，并断言代码块同时匹配两者。对于不应把实现体写进目录的类，请使用 ` ```ts public-api ` 并设置 `"projection": "public-api"`；门禁检查的投影会保留公共字段、构造函数、访问器、方法以及类和成员的原始 JSDoc，同时省略实现体和私有或受保护成员。比对会忽略空白和非 JSDoc 注释，但要求保留每条原始 JSDoc（包括成员文档），让读者同时看到源码约定和确切类型定义。该门禁按文档、符号和投影，在主块与 manifest 条目之间强制 1:1 对应；只有当配对 `.zh.md` 块的完整受跟踪围栏序列与其无后缀兄弟文件按字节一致且顺序相同时，才会复用后者的条目。`doc-typecheck` 对可编译围栏应用同一派生规则，同时跳过两种源码等价围栏的编译，并将其排除在 opt-out 比例的计算之外。当你改动一个已记录的类型声明或其 JSDoc 时，门禁会失败直到你更新粘贴内容；当你增删一个主块时，请在同一个变更里更新 manifest。
+`bun run verify-type-equiv` 会把每个代码块及其中文对应块与源码声明比对。修改被记录的声明时，请同时更新两种语言的粘贴内容，然后重新运行该检查。

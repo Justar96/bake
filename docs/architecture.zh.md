@@ -51,4 +51,4 @@ TUI 从 `agent.status` 读取活动状态，从 inbox 投影读取待处理输�
 
 ## 采用上游变更
 
-Bake 保留共享运行时包名称和会话验证数据，以支持选择性移植上游修复。[贡献指南](../CONTRIBUTING.zh.md#上游发布) 定义发布评估流程。上游的 Web、Desktop、SDK 和发布工作流不是 Bake 应用的要求。
+Bake 保留共享运行时包名称和会话验证数据，以支持选择性移植上游修复。[贡献指南](../CONTRIBUTING.zh.md#upstream-deepseek-harness) 定义发布评估流程。上游的 Web、Desktop、SDK 和发布工作流不是 Bake 应用的要求。
