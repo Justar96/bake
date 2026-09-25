@@ -1084,14 +1084,14 @@ scenario('arrow-wave', 'the single-line processing wave loops in place and yield
           tty.send('Show the processing wave.\r')
           await tty.wait('all six arrow frames at the same position', async () => {
             const rows = await capture()
-            const header = rows.findIndex(line => /^ {2}[\u2800-\u283f]{3} \S+…/.test(line))
+            const header = rows.findIndex(line => /^[\u2800-\u283f]{3} \S+…/.test(line))
             if (header < 1) return false
             // PTY reads may end mid-frame, before its final scroll anchors the controls.
             // Header, upper rule, input, base rule, then the status line.
             if (header !== 34 || !rows[35]!.startsWith('\u2500') || !rows[36]!.startsWith('> ')
               || !rows[37]!.startsWith('\u2500') || !rows[38]!.includes(SCREEN.status)) return false
             tty.check('there is no dot zone above the processing line', !rows.some(line => /^[\u2800-\u283f]{3}$/.test(line)))
-            frames.add(rows[header]!.slice(2, 5))
+            frames.add(rows[header]!.slice(0, 3))
             return frames.size === 6
           })
           tty.check('the wave stays in the header directly above the input', frames.size === 6)
