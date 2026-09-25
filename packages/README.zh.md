@@ -88,7 +88,7 @@ Bake 使用 `packages/` 下的共享包来实现会话、agent 执行、工具�
 <a id="dependencies"></a>
 ## 依赖
 
-依赖图由工具生成：[docs/module-graph.md](../docs/module-graph.zh.md)（`pnpm run gen-module-graph`，CI 中有新鲜度门禁）。
+依赖图由工具生成：[docs/module-graph.md](../docs/module-graph.zh.md)（`bun run gen-module-graph`；`bun run verify-module-graph` 检查新鲜度）。
 
 **扩展插件依赖 Service Definition，绝不依赖具体提供方。** `dsh-agent-loop` 可替换；UI、钩子和工具插件使用 `dsh-agent`。组合包可以依赖主干插件。能力在需要独立演进时分离 Service Definition／Service Provider／Consumer 角色；详见[能力 seam](../.agents/notes/implemented/architecture/2026-06-13-capability-seams.zh.md)。
 

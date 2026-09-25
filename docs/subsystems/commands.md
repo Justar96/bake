@@ -8,13 +8,15 @@ Source: [`packages/interaction/commands/src/index.ts`](../../packages/interactio
 
 ## Input metadata
 
-The service exposes one optional unstructured-input descriptor: a hint plus an attachment-acceptance flag. Command availability follows plugin composition: every adapter consuming the registry sees every effective definition.
+The service exposes one optional unstructured-input descriptor: a hint, optional advertised argument choices, and an attachment-acceptance flag. Choices are advisory: a definition supplies a static list or a cancellable provider that `commands.choices()` resolves, and the handler still validates its input. Command availability follows plugin composition: every adapter consuming the registry sees every effective definition.
 
 ```ts type-equiv
 /** Immutable metadata for a command's optional unstructured input. */
 interface CommandInputDescriptor {
   /** Placeholder shown before the user supplies free-form input. */
   readonly hint: string
+  /** Advertised argument choices. `true` means the host resolves a dynamic provider through `commands.choices()`. */
+  readonly choices?: readonly CommandArgumentChoice[] | true
   /**
    * Whether composer attachments may accompany an invocation. Absent or
    * false = the executor rejects an invocation carrying attachments and capable
@@ -40,7 +42,10 @@ interface CommandDefinition {
   /** Human-readable summary used in discovery UI. */
   readonly description: string
   /** Optional free-form input hint advertised to capable clients. */
-  readonly input?: CommandInputDescriptor
+  readonly input?: Omit<CommandInputDescriptor, 'choices'> & {
+    /** Static choices, or a cancellable provider for the current argument text. Choices are advisory; handlers validate input. */
+    readonly choices?: readonly CommandArgumentChoice[] | CommandChoiceProvider
+  }
   /**
    * Whether `command/run` records `rawInput`. Defaults to true. A command
    * whose domain event owns the payload sets this false to avoid duplicating
@@ -155,6 +160,18 @@ registerFileReceiptResolver(resolver: CommandFileReceiptResolver): () => void
  * @returns name-sorted descriptors after scoped shadowing.
  */
 @Remote list(agent: Agent): readonly CommandDescriptor[]
+
+/**
+ * Resolve advisory argument choices from the effective scoped command. A
+ * caller owns cancellation and awaits provider settlement.
+ * @param agent - exact receiving agent and scoped-layer key.
+ * @param name - command name without the leading slash.
+ * @param partialInput - argument text typed so far.
+ * @param signal - cancels a dynamic provider.
+ * @returns the validated choices, or an empty list when the command
+ * advertises none.
+ */
+@Remote async choices(agent: Agent, name: string, partialInput: string, signal: AbortSignal): Promise<readonly CommandArgumentChoice[]>
 
 /**
  * Resolve one effective command definition.

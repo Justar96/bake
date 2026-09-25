@@ -352,7 +352,16 @@ export class CommandRuntime extends TypertRemoteService {
       .sort((left, right) => left.name < right.name ? -1 : 1))
   }
 
-  /** Resolve advisory argument choices from the effective scoped command. A caller owns cancellation and awaits provider settlement. */
+  /**
+   * Resolve advisory argument choices from the effective scoped command. A
+   * caller owns cancellation and awaits provider settlement.
+   * @param agent - exact receiving agent and scoped-layer key.
+   * @param name - command name without the leading slash.
+   * @param partialInput - argument text typed so far.
+   * @param signal - cancels a dynamic provider.
+   * @returns the validated choices, or an empty list when the command
+   * advertises none.
+   */
   @Remote
   async choices(agent: Agent, name: string, partialInput: string, signal: AbortSignal): Promise<readonly CommandArgumentChoice[]> {
     signal.throwIfAborted()
