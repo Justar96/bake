@@ -15,6 +15,7 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
+import type { ModelSelection } from '@deepseek-ai/dsh-agent'
 import { credentialRef, type CredentialKey } from '@deepseek-ai/dsh-credentials'
 import type { AuthorizationNotice, AuthorizationPrompt } from '@deepseek-ai/dsh-authorization/types'
 import { CLIPROXYAPI_ID, CLIPROXYAPI_KEY, configureCliProxyApi } from './cliproxyapi.ts'
@@ -80,6 +81,26 @@ export async function listTargets(ctx: Context, refs: readonly string[]): Promis
     })
   }
   return targets
+}
+
+/**
+ * The model a fresh session starts on. The profile's default provider reads
+ * the listed key references; when none of them holds a value and CLIProxyAPI
+ * is set up, the session starts on CLIProxyAPI's first model instead of a
+ * provider that cannot answer.
+ * @param ctx - the settled plugin context.
+ * @param refs - credential reference names the default provider reads.
+ * @param selection - the configured default selection.
+ * @returns the configured selection, or the CLIProxyAPI fallback.
+ */
+export async function availableSelection(ctx: Context, refs: readonly string[], selection: ModelSelection): Promise<ModelSelection> {
+  if (refs.length === 0 || selection.provider === CLIPROXYAPI_ID) return selection
+  const targets = await listTargets(ctx, refs)
+  if (targets.some(target => target.kind === 'key' && target.configured)) return selection
+  if (!targets.some(target => target.kind === 'cliproxyapi' && target.configured)) return selection
+  // A catalog that cannot be read leaves the configured default in place.
+  const model = (await ctx.get('llm')?.listModels(CLIPROXYAPI_ID).catch(() => undefined))?.[0]
+  return model === undefined ? selection : { provider: CLIPROXYAPI_ID, model: model.id }
 }
 
 /** What one `/login` attempt did. */

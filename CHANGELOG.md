@@ -7,6 +7,7 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 - Slash commands complete their arguments: `/goal`, `/plan`, and `/permission` offer their choices, `/login` offers sign-in targets, and `/model` offers models.
 - Enter on a command that needs input fills it in instead of running it, and its usage line stays visible while you type the arguments.
 - An unknown slash command keeps your draft and suggests the nearest command.
+- A new session starts on CLIProxyAPI when it is set up and no DeepSeek key is, and the "no credential" notice appears only when no provider is configured.
 - `/help` lists commands in columns, and `/help <command>` explains one.
 - Usage errors from `/compact`, `/feedback`, `/permission`, and `/plan` show the expected form, with the reason on the next line.
 - `/feedback` now says where the session history goes: shared through telemetry, or kept in the local session log when telemetry is off.

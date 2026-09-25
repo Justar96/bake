@@ -101,7 +101,7 @@ export class SessionNavigation {
         controller = new SessionController(this.ctx, agent, this.copy, this.credentialRefs,
           () => { if (this.controller === controller && !this.closed) this.changed() }, this.options, selection)
         this.candidate = controller
-      })
+      }, this.credentialRefs)
       if (controller === undefined) throw new Error('tui: agent setup did not connect the session')
       await controller.replay(signal)
       signal.throwIfAborted()

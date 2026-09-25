@@ -458,12 +458,13 @@ export class SessionController {
   }
 
   /**
-   * Report missing configured provider keys without reading their values.
+   * Report that no provider can answer, without reading credential values.
+   * One configured key or a configured CLIProxyAPI is enough to start.
    * @returns after credential metadata has been inspected.
    */
   async reportCredentials(): Promise<void> {
     const targets = await listTargets(this.ctx, this.credentialRefs)
-    if (targets.some(target => target.kind === 'key' && !target.configured)) this.notify(this.copy.noCredentials)
+    if (targets.some(target => target.kind === 'key') && !targets.some(target => target.configured)) this.notify(this.copy.noCredentials)
   }
 
   /** Stop observers and settle human requests synchronously before terminal release. */
