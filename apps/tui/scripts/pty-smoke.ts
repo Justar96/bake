@@ -1575,6 +1575,7 @@ scenario('navigate', 'session picker cancellation, a new session, and switching 
     run.env.FORCE_COLOR = '3'
     let text: string
     try { text = await run.terminal('navigate', ['--resume', identity], async tty => {
+      await tty.follows(SCREEN.idle, SCREEN.toolResult)
       const hints = tty.mark()
       tty.send('/', 'open the frequent slash commands')
       const menu = await tty.expect('/model', '/resume', '/new', '/clear', hints)
