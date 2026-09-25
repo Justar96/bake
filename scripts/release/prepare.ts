@@ -10,7 +10,7 @@
 
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { CHANGELOG_PLACEHOLDER, changelogSection, compareVersions, isReleaseVersion, VERSIONED_MANIFESTS, workspaceVersion } from './version.ts'
+import { CHANGELOG_PLACEHOLDER, changelogSection, compareVersions, isPublishableVersion, VERSIONED_MANIFESTS, workspaceVersion } from './version.ts'
 
 /** What {@link prepareRelease} changed, for the summary it prints. */
 export interface Prepared {
@@ -28,20 +28,23 @@ export interface Prepared {
  * @returns what changed; the lockfile is the caller's to refresh.
  */
 export function prepareRelease(root: string, version: string, today: string): Prepared {
-  if (!isReleaseVersion(version)) throw new Error(`Not a release version: ${version}`)
+  if (!isPublishableVersion(version)) throw new Error(`Not a stable release version: ${version}`)
+  const date = new Date(`${today}T00:00:00Z`)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(today) || Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== today) throw new Error(`Invalid release date: ${today}`)
   const from = workspaceVersion(root)
   if (compareVersions(version, from) <= 0) throw new Error(`${version} is not newer than the current ${from}`)
   const path = join(root, 'CHANGELOG.md')
   const changelog = readFileSync(path, 'utf8')
   if (changelogSection(changelog, version) !== undefined) throw new Error(`CHANGELOG.md already has a ${version} section`)
-  // Edit the text, not a re-serialization, so the manifests keep their layout.
-  for (const file of VERSIONED_MANIFESTS) {
+  // Validate every edit before writing any file, so a malformed manifest does
+  // not leave the workspace with different versions.
+  const manifests = VERSIONED_MANIFESTS.map((file) => {
     const manifest = join(root, file)
     const text = readFileSync(manifest, 'utf8')
     const field = `"version": "${from}"`
     if (!text.includes(field)) throw new Error(`${file} has no ${field}`)
-    writeFileSync(manifest, text.replace(field, `"version": "${version}"`))
-  }
+    return { manifest, text: text.replace(field, `"version": "${version}"`) }
+  })
   const heading = `## [${version}] - ${today}`
   const unreleased = /^## \[Unreleased\][^\n]*\n([\s\S]*?)(?=^## |(?![\s\S]))/m.exec(changelog)
   let next: string
@@ -57,6 +60,7 @@ export function prepareRelease(root: string, version: string, today: string): Pr
       ? changelog.replace(unreleased[0], `## [Unreleased]\n\n${section}`)
       : first === null ? `${changelog.trimEnd()}\n\n${section}` : `${changelog.slice(0, first.index)}${section}${changelog.slice(first.index)}`
   }
+  for (const { manifest, text } of manifests) writeFileSync(manifest, text)
   writeFileSync(path, `${next.trimEnd()}\n`)
   return { from, to: version, placeholder }
 }

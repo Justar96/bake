@@ -50,6 +50,17 @@ test('waits for the new deployment, then verifies every archive it lists', async
   expect(manifest.version).toBe('0.1.1')
 })
 
+test('waits for an archive that appears after its manifest', async () => {
+  const served = host(committedKey(), ['0.1.1'])
+  let attempts = 0
+  const fetch = (async (url: string) => {
+    if (String(url).endsWith('.tar.gz') && attempts++ === 0) return new Response('', { status: 404 })
+    return served.fetch(url)
+  }) as unknown as typeof globalThis.fetch
+  await expect(verifyLive({ base: 'https://releases.test', version: '0.1.1', fetch, sleep: noWait })).resolves.toMatchObject({ version: '0.1.1' })
+  expect(attempts).toBe(2)
+})
+
 test('refuses a manifest no committed key signed, however long it waits', async () => {
   committedKey()
   const { fetch } = host(generateKeyPairSync('ed25519').privateKey, ['0.1.1'])

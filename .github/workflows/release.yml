@@ -1,6 +1,6 @@
 name: Release
 
-# Push a tag `v<version>` to release: every platform is built and checked on
+# Push a tag `v<version>` from the default branch to release: every platform is built and checked on
 # its own runner, then one job signs the manifest, drafts the GitHub release,
 # deploys the download service, checks what it serves, and publishes the
 # draft. Run it by hand for a dry run of the builds, which publishes nothing.
@@ -16,10 +16,10 @@ on:
 permissions:
   contents: read
 
-# One release at a time, and never cancelled halfway through publishing.
+# Queue every release; the default single-pending behavior can discard a tag.
 concurrency:
   group: bake-release
-  cancel-in-progress: false
+  queue: max
 
 env:
   BAKE_RELEASE_BASE_URL: https://bake.justar.dev
@@ -30,17 +30,31 @@ jobs:
     timeout-minutes: 5
     outputs:
       version: ${{ steps.check.outputs.version }}
+    env:
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      DOWNLOAD_SERVICE: ${{ vars.BAKE_DOWNLOAD_SERVICE }}
+      REPOSITORY_VISIBILITY: ${{ github.event.repository.visibility }}
+      GITHUB_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
-      # The tag names the workspace version, the changelog says what changed,
-      # and the version is newer than the one the host serves.
+      # A manual run always checks builds only, including when started on a tag.
+      # A pushed tag must be on the default branch and name a new release.
       - id: check
         run: |
-          if [ "$GITHUB_REF_TYPE" = tag ]; then
-            bun scripts/release/preflight.ts --tag "$GITHUB_REF_NAME" --notes release-notes.md
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            git merge-base --is-ancestor HEAD "origin/$DEFAULT_BRANCH" || { echo "The release tag must point to a commit on $DEFAULT_BRANCH" >&2; exit 1; }
+            args=(--tag "$GITHUB_REF_NAME" --notes release-notes.md)
+            if [ "$GITHUB_RUN_ATTEMPT" -gt 1 ]; then args+=(--retry); fi
+            if [ "$DOWNLOAD_SERVICE" = off ]; then
+              [ "$REPOSITORY_VISIBILITY" = public ] || { echo 'GitHub-only releases require a public repository' >&2; exit 1; }
+              args+=(--offline --github-repository "$GITHUB_REPOSITORY")
+            fi
+            bun scripts/release/preflight.ts "${args[@]}"
           else
             bun scripts/release/preflight.ts --offline --notes release-notes.md
           fi
@@ -92,6 +106,16 @@ jobs:
       - name: Built-profile terminal scenarios
         if: runner.os != 'Windows'
         run: bun run test:e2e --no-build
+      # The driver keeps a failed scenario's session logs and workspace.
+      - uses: actions/upload-artifact@v4
+        if: failure() && runner.os != 'Windows'
+        with:
+          name: terminal-failures-${{ matrix.target }}
+          path: |
+            /tmp/dsh-tui-pty-*
+            apps/tui/.smoke/
+          if-no-files-found: ignore
+          retention-days: 7
       - uses: actions/upload-artifact@v4
         with:
           name: archive-${{ matrix.target }}
@@ -102,7 +126,7 @@ jobs:
 
   publish:
     needs: [preflight, build]
-    if: github.ref_type == 'tag'
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # The environment holds the signing key and the deploy token, and can
@@ -142,15 +166,29 @@ jobs:
           BAKE_RELEASE_SIGNING_KEY_FILE="$key" bun run release:assemble --complete
       # The image build's own gate, run first: the committed key only.
       - run: node distribution/host/verify-manifest.mjs --complete
+      # A retry may follow a successful deploy. Never replace the archives of
+      # an already served version with different bytes.
+      - name: Check the current release before publishing
+        if: vars.BAKE_DOWNLOAD_SERVICE != 'off'
+        run: bun run release:preflight --tag "$GITHUB_REF_NAME" --retry --expected-manifest distribution/host/public/latest.json
       - name: Draft the GitHub release
         run: |
           files=(distribution/host/public/releases/"$VERSION"/*.tar.gz distribution/host/public/latest.json distribution/host/public/latest.json.sig distribution/host/install.sh distribution/host/install.ps1)
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            [ "$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft)" = true ] || { echo "GitHub release $GITHUB_REF_NAME is already published; refusing to replace its assets" >&2; exit 1; }
             gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
           else
             gh release create "$GITHUB_REF_NAME" "${files[@]}" --draft --verify-tag \
               --title "Bake $VERSION" --notes-file release-notes.md
           fi
+      - name: Check the draft's uploaded assets
+        run: |
+          downloaded="$RUNNER_TEMP/bake-release-assets"
+          mkdir -p "$downloaded"
+          gh release download "$GITHUB_REF_NAME" --dir "$downloaded"
+          files=(distribution/host/public/releases/"$VERSION"/*.tar.gz distribution/host/public/latest.json distribution/host/public/latest.json.sig distribution/host/install.sh distribution/host/install.ps1)
+          for file in "${files[@]}"; do cmp "$file" "$downloaded/$(basename "$file")"; done
+          [ "$(find "$downloaded" -maxdepth 1 -type f | wc -l)" -eq "${#files[@]}" ] || { echo 'The draft has unexpected release assets' >&2; exit 1; }
       - name: Deploy the download service
         if: vars.BAKE_DOWNLOAD_SERVICE != 'off'
         env:

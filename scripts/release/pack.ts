@@ -74,7 +74,20 @@ try {
   // to fill in: the updater and the installer then write the same launcher.
   writeFileSync(join(stage, 'bin/bake-launcher.cmd.template'), windowsLauncher(LAUNCHER_ROOT))
   chmodSync(join(stage, 'bin/bake'), 0o755)
-  await run(['bun', 'install', '--production', '--frozen-lockfile', '--filter', '@deepseek-ai/dsh'], stage)
+  const install = ['bun', 'install', '--production', '--filter', '@deepseek-ai/dsh']
+  try {
+    await run([...install, '--frozen-lockfile'], stage)
+  } catch (error) {
+    // Name what bun would change, so a host-specific lockfile drift is diagnosable from the log.
+    const frozen = readFileSync(join(stage, 'bun.lock'), 'utf8').split('\n')
+    await run([...install, '--lockfile-only'], stage).catch(() => {})
+    const kept = new Set(frozen)
+    const changed = readFileSync(join(stage, 'bun.lock'), 'utf8').split('\n')
+    const added = changed.filter(line => !kept.has(line))
+    const removed = frozen.filter(line => !new Set(changed).has(line))
+    console.error(['The staged lockfile differs on this host:', ...removed.map(line => `- ${line}`), ...added.map(line => `+ ${line}`)].slice(0, 80).join('\n'))
+    throw error
+  }
 
   const home = mkdtempSync(join(tmpdir(), 'bake-pack-home-'))
   try {

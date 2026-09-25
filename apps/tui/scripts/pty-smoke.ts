@@ -668,7 +668,9 @@ scenario('fresh', 'login, model and effort selection, paste, cursor editing, a b
     const results = log.filter(e => e.type === 'tool/result' && e.surfaceOp === 'append').map(e => e.data.message.content)
     const expectedResults = run.recorded.filter(e => e.type === 'tool/result' && e.surfaceOp === 'append')
       .map(e => e.data.message.content)
-    assert(same(resultText(results), resultText(expectedResults)), 'real tool output disagrees with the recording')
+    assert(same(resultText(results), resultText(expectedResults)),
+           `real tool output disagrees with the recording: ${JSON.stringify(resultText(results)).slice(0, 2000)}`
+           + ` instead of ${JSON.stringify(resultText(expectedResults)).slice(0, 500)}`)
     Object.assign(run.state, { log: path, id: log[0].id, model, headers })
   })
 

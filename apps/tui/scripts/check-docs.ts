@@ -11,8 +11,9 @@ const entryDocs = [
   'packages/boot/plugin-manager/README.md', 'packages/boot/plugin-manager/README.zh.md',
   'native/system/README.md', 'native/system/README.zh.md',
 ]
-const files = [...entryDocs, ...execFileSync('rg', ['--files', 'apps/tui', '-g', '*.md'], { cwd: root, encoding: 'utf8' })
-  .trim().split('\n')].map(file => resolve(root, file))
+// Git, not ripgrep: every checkout has it, and it applies the same ignore rules.
+const files = [...entryDocs, ...execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '--', 'apps/tui/*.md'],
+  { cwd: root, encoding: 'utf8' }).trim().split('\n')].map(file => resolve(root, file))
 const anchors = anchorCache()
 const errors = files.flatMap(file => findViolations(file, anchors, root))
 if (errors.length > 0) {
