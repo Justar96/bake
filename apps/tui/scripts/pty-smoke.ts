@@ -1209,7 +1209,7 @@ scenario('usage', 'the built TUI reads DeepSeek remaining credit through /usage 
     try {
       await run.terminal('usage', [], async tty => {
         tty.send('/help\r', 'discover composed commands')
-        await tty.expect('/usage — Show remaining DeepSeek API credit')
+        await tty.search(/\/usage\b.* {2}Show remaining DeepSeek API credit/u)
         const start = tty.mark()
         tty.send('/usage\r', 'read DeepSeek account balance')
         await tty.expect('USD: 7.50 remaining (2.00 granted, 5.50 topped up)', start)
@@ -1303,7 +1303,7 @@ scenario('agents', 'the built TUI exposes the Harness subagent catalog through /
     const before = await run.logs()
     await run.terminal('agents', [], async tty => {
       tty.send('/help\r', 'discover the subagent command')
-      await tty.expect('/agents — List delegated agents')
+      await tty.search(/\/agents\b.* {2}List delegated agents/u)
       const start = tty.mark()
       tty.send('/agents\r', 'list this session’s children')
       await tty.expect('No subagents in this session', start)
@@ -1363,8 +1363,8 @@ scenario('goal-compact', 'the built TUI exposes goal and compact commands and sh
     try {
       await run.terminal('goal-compact', [], async tty => {
         tty.send('/help\r', 'list composed commands')
-        await tty.expect('/goal — Set or view the goal for a long-running task')
-        await tty.expect('/compact — Compact older conversation history')
+        await tty.search(/\/goal\b.* {2}Set or view the goal for a long-running task/u)
+        await tty.search(/\/compact\b.* {2}Compact older conversation history/u)
         tty.send('/goal\r', 'inspect the current goal')
         await tty.expect('No goal is currently set.')
         for (const [index, character] of [...'/compact'].entries()) {
@@ -1588,7 +1588,7 @@ scenario('navigate', 'session picker cancellation, a new session, and switching 
       tty.send('\x7f', 'remove the slash draft')
       await tty.expect(`> ${SCREEN.caret}`)
       tty.send('/help\r', 'list session commands')
-      await tty.expect('/resume — Browse sessions or start a new one')
+      await tty.search(/\/resume\b.* {2}Browse sessions or start a new one/u)
       let start = tty.mark()
       tty.send('/sessions\r')
       await tty.expect('Choose session', '● ', 'Current', '+ New session', start)
