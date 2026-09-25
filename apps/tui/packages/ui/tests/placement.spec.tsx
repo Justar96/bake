@@ -130,7 +130,7 @@ function expectInputUnder(screen: readonly string[], text: string): number {
   expect(screen[rule], dump).toMatch(/^─+$/)
   const header = rule - 1
   expect(header, dump).toBeGreaterThan(newest + 1)
-  expect(screen[header], dump).toMatch(new RegExp(`^( {2}(> |${SPINNER_REST} )\\S+….*| {2}[✓■✗] .*|)$`))
+  expect(screen[header], dump).toMatch(new RegExp(`^((> |${SPINNER_REST} )\\S+….*|[✓■✗] .*|)$`))
   // The thinking window while there is one, one blank row above the header.
   // nothing else between.
   let bottom = header
@@ -157,7 +157,7 @@ describe('composer placement', () => {
       const screen = columns === 120 ? await ui.screen() : await ui.resize(columns, rows)
       const dump = screen.join('\n')
       const input = inputRow(screen)
-      expect(screen[input - 2], dump).toMatch(new RegExp(`^ {2}${SPINNER_REST} \\S+…`))
+      expect(screen[input - 2], dump).toMatch(new RegExp(`^${SPINNER_REST} \\S+…`))
       expect(screen.some(line => /^● read 10/.test(line)), dump).toBe(true)
       // Nine rows leave the live region one. The step's head, which says the
       // most. Every larger size also keeps the newest call.
@@ -175,7 +175,7 @@ describe('composer placement', () => {
         const screen = await ui.update({ live: [{ kind: 'tool-group', calls: [...calls] }] })
         const dump = screen.join('\n')
         const input = inputRow(screen)
-        expect(screen[input - 2], dump).toMatch(new RegExp(`^ {2}${SPINNER_REST} \\S+…`))
+        expect(screen[input - 2], dump).toMatch(new RegExp(`^${SPINNER_REST} \\S+…`))
         // The step's head stays too. The window folds detail, never the line
         // that says what the step is doing.
         expect(screen.some(line => /^● \S+ \d/.test(line)), dump).toBe(true)
@@ -266,7 +266,7 @@ describe('composer placement', () => {
     const heading = lastRow(frame, 'Session: screen')
     expect(lastRow(frame, 'First response')).toBe(heading + 2)
     // Blank, then the header naming the turn, sitting on the rule over the input.
-    expect(frame[heading + 4]).toMatch(new RegExp(`^ {2}${SPINNER_REST} \\S+…  writing$`))
+    expect(frame[heading + 4]).toMatch(new RegExp(`^${SPINNER_REST} \\S+…  writing$`))
     expect(frame[heading + 5]).toMatch(/^─+$/)
     expect(inputRow(frame)).toBe(heading + 6)
     expect(expectInputUnder(frame, 'First response')).toBe(1)
@@ -443,7 +443,7 @@ describe('composer placement', () => {
     // blank until printed history takes them.
     screen = await ui.update({ quitting: false })
     expect(inputRow(screen)).toBe(anchor)
-    expect(screen[anchor - 2]).toMatch(/^ {2}✓ /)
+    expect(screen[anchor - 2]).toMatch(/^✓ /)
     expect(expectInputUnder(screen, 'Session: screen')).toBeGreaterThan(1)
     const committed = appendTranscript(emptyTranscript,
       Array.from({ length: 30 }, (_, index) => ({ kind: 'user' as const, text: `Prompt ${index}` })))

@@ -176,7 +176,8 @@ export function project(event: SessionEvent, projector: Projector): Projection {
     }
 
     case 'command/run':
-      return [{ kind: 'command', name: event.data.name, args: event.data.args ?? '' }]
+      return [{ kind: 'command', name: event.data.name, args: event.data.args ?? '',
+        ...event.data.args === undefined ? { inputOmitted: true } : {} }]
 
     case 'command/done':
       return event.data.text === undefined ? NONE

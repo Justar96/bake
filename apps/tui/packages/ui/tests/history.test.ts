@@ -21,6 +21,16 @@ it('rebuilds a recalled command into the draft the user typed', () => {
   expect([...inputHistory(transcript, [])]).toEqual(['/help', '/model deepseek/chat high'])
 })
 
+it('recalls local redacted lines but skips redacted entries without one', () => {
+  const transcript = appendTranscript(emptyTranscript, [
+    { kind: 'command', name: 'model', args: '', inputOmitted: true },
+    { kind: 'command', name: 'attach', args: '', inputOmitted: true, recall: '/attach notes with spaces.bin' },
+    { kind: 'command', name: 'login', args: '', inputOmitted: true },
+    { kind: 'command', name: 'agents', args: '', inputOmitted: true, recall: '/agents' },
+  ])
+  expect([...inputHistory(transcript, [])]).toEqual(['/agents', '/attach notes with spaces.bin'])
+})
+
 it('does not read earlier batches to recall the latest prompt', () => {
   const earlier: Transcript = { length: 10_000, get rows() { throw new Error('Earlier history read') } }
   const latest = appendTranscript(earlier, [{ kind: 'user', text: 'Latest' }])

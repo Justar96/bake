@@ -35,8 +35,10 @@ describe('/help', () => {
     // The transcript, not the notice region. The region is bounded by the
     // terminal's height and would cut the catalog to fit, while scrollback
     // holds the whole list and can scroll it.
-    expect(listed(controller)).toContain('/help — List available commands')
-    expect(listed(controller)).toContain('/login — Sign in or set up CLIProxyAPI')
+    expect(listed(controller)).toMatch(/\/help \[command\] +List available commands/u)
+    expect(listed(controller)).toMatch(/\/login \[target\] +Sign in or set up CLIProxyAPI/u)
+    expect(listed(controller)).toMatch(/\/attach <path> +Stage a file for the next prompt/u)
+    expect(listed(controller)).toContain(dictionaries.en.helpFooter)
     expect(controller.view.notice).toBeUndefined()
   })
 
@@ -52,10 +54,59 @@ describe('/help', () => {
     try {
       controller.submit('/help')
       await controller.drain()
-      expect(listed(controller)).toContain('/elsewhere — Contributed by another plugin')
+      expect(listed(controller)).toMatch(/\/elsewhere +Contributed by another plugin/u)
     } finally {
       void dispose()
     }
+  })
+})
+
+describe('/help <command>', () => {
+  it('shows one command’s usage, with or without its slash', async () => {
+    const { controller } = await connected()
+    controller.submit('/help model')
+    await controller.drain()
+    // One notice, usage over description; the plain surface joins its lines.
+    expect(listed(controller)).toContain(`Usage: /model ${dictionaries.en.modelHint} ${dictionaries.en.selectModel}`)
+    controller.submit('/help /attach')
+    await controller.drain()
+    expect(listed(controller)).toContain(`Usage: /attach ${dictionaries.en.attachHint}`)
+  })
+
+  it('suggests the nearest name for an unknown one', async () => {
+    const { controller } = await connected()
+    controller.submit('/help modle')
+    await controller.drain()
+    expect(listed(controller)).toContain('Unknown command: /modle · did you mean /model?')
+  })
+})
+
+describe('unknown slash names', () => {
+  it('keeps a mistyped command out of the model and suggests the command', async () => {
+    const { controller, model } = await connected()
+    await controller.drain()
+    expect(controller.submit('/modle')).toBe(false)
+    expect(controller.view.notice).toContain('Unknown command: /modle · did you mean /model?')
+    expect(controller.view.notice).toContain(dictionaries.en.unknownCommandHint)
+    expect(model.requests).toHaveLength(0)
+  })
+
+  it('runs a capitalized registered name as that command', async () => {
+    const { controller, model } = await connected()
+    await controller.drain()
+    expect(controller.submit('/Help')).toBe(true)
+    await controller.drain()
+    expect(listed(controller)).toContain(dictionaries.en.helpFooter)
+    expect(model.requests).toHaveLength(0)
+  })
+
+  it('reports a thrown handler failure once, in the transcript', async () => {
+    const { controller } = await connected()
+    await controller.drain()
+    controller.submit('/attach')
+    await controller.drain()
+    expect(listed(controller)).toContain(dictionaries.en.attachUsage)
+    expect(controller.view.notice).toBeUndefined()
   })
 })
 
@@ -72,7 +123,7 @@ describe('/changelog', () => {
     const { controller } = await connected()
     controller.submit('/help')
     await controller.drain()
-    expect(listed(controller)).toContain('/changelog — Show what changed in this Bake version')
+    expect(listed(controller)).toMatch(/\/changelog +Show what changed in this Bake version/u)
     controller.submit('/changelog extra')
     await controller.drain()
     expect(listed(controller)).toContain('Usage: /changelog')

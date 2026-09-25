@@ -93,7 +93,7 @@ The input is framed by two bare rules, exactly the terminal's width, one over th
   so the loader has to resolve the home before it reads the profile, and
   the session store opens its journal after that
 
-  ⠠⠞⠁ Kneading…  thinking · 12s          ● Goal active  round 3/256 · Ship it
+⠠⠞⠁ Kneading…  thinking · 12s            ● Goal active  round 3/256 · Ship it
 ────────────────────────────────────────────────────────────────────────────
 > ▌Enter steers the next step                                esc interrupts
 ────────────────────────────────────────────────────────────────────────────
@@ -104,14 +104,23 @@ The word is drawn from the locale's `activityWords` when the turn starts, seeded
 
 The spinner and the seconds are the only things on the header that move, and the rules never move at all: a moving run the width of the terminal, directly over the input, would distract from the draft while saying nothing the spinner does not. The row is redrawn only on beats where the glyph or the seconds change; without a clock, or with motion off, it holds still.
 
-The label starts at the draft's column, so the label, the draft, and the status line form one block. The goal is right-aligned, apart from the turn, because the two answer different questions. `headerRoom` gives the turn its label first: the goal's details are cut from their end while a few cells of them still fit, then left out so `● Goal active` stands alone, and below that the goal is dropped whole rather than left as a fragment. With neither a turn nor a goal the header is a blank row: it keeps its place so the input never moves when either appears. The goal's states are `● Goal active` in orange with its round count while the goal may continue, `○ Goal on hold` or `○ Goal paused` in yellow while it waits on `/goal resume`, `✗ Goal blocked` in red with its reason, and `✓ Goal complete` in green, each followed by the objective. The rules' glyphs are the style resolved from the terminal ([§4](#the-frame-is-chosen-from-the-terminal-not-assumed)), because a full-width run of East Asian Ambiguous glyphs is the one place such a character accumulates error across a row.
+The glyph takes the rail's first column, the column where an action's marker and the goal block's head sit, so the turn reads as the head of the work above it, level with the tool calls it is running. The draft and the status line start two columns in, at the rail's width. The goal is right-aligned, apart from the turn, because the two answer different questions. `headerRoom` gives the turn its label first: the goal's details are cut from their end while a few cells of them still fit, then left out so `● Goal active` stands alone, and below that the goal is dropped whole rather than left as a fragment. With neither a turn nor a goal the header is a blank row: it keeps its place so the input never moves when either appears. The goal's states are `● Goal active` in orange with its round count while the goal may continue, `○ Goal on hold` or `○ Goal paused` in yellow while it waits on `/goal resume`, `✗ Goal blocked` in red with its reason, and `✓ Goal complete` in green, each followed by the objective. The header carries the goal only as a fallback, though. While a goal is set, `Goal` in `packages/ui/src/goal.tsx` holds it as a block among the panels above the header, drawn as the task list is, and the header's right side stays empty:
+
+```
+● Goal active  round 3/32
+└ Port the release pipeline to signed bundles for every platform and verify each
+  checksum before publishing anything
+  /goal pause holds · /goal edit <objective> changes · /goal clear ends
+```
+
+The head is the phase's glyph and word in its colour, with the rounds while the goal is active or complete. The objective hangs from it, wrapped to at most two rows and cut with an ellipsis after that, since a paragraph belongs to `/goal`, not to the chrome. A blocked goal's reason takes a branch above the objective in red. Under the tree, a dim row names the `/goal` actions that apply in this phase. The block claims its rows (`goalRows`) after the thinking window and before the task list, because the goal is what the tasks work toward and a human set it. When rows run short it gives up the actions first, then the objective's second row, then the reason, keeping the head and the objective's first row. Only when it gets no row at all does the goal return to the header's right edge, cut as described above. The rules' glyphs are the style resolved from the terminal ([§4](#the-frame-is-chosen-from-the-terminal-not-assumed)), because a full-width run of East Asian Ambiguous glyphs is the one place such a character accumulates error across a row.
 
 The rows above the header are the thinking window: at most `THINKING_ROWS` (3) of the newest wrapped rows of the streaming reasoning, a dim italic paragraph at the rail as reasoning is in the transcript, with no verb, so they are the same text the transcript will keep. One blank row (`THINKING_GAP`) separates the window from the header, so the turn's word, phase, and elapsed time read as their own row rather than the paragraph's last line; the blank belongs to the window, coming and going with it, and is the first row given up when only one is free. `thinkingRows` in `packages/ui/src/activity.ts` uses the shared Markdown formatter, wraps its text to the available terminal columns, and keeps the newest rows. Completing Markdown syntax may reflow the live preview within its row limit. The window disappears once the answer or a call starts. Reasoning arrives faster than anyone reads it. Drawn whole, it grew the live region to its limit and then scrolled every row of it with each token. A single ticker line held its height but froze on a long line, since its newest line was the one being written past the edge, and showed raw `**` and backticks. The window grows to three rows and then holds, so the reader sees the thought moving at a height that does not change once it is full. It claims its rows after the live region, so on a short terminal it gives way to the output. An open interaction hides it and the chrome, because the question is what the turn is waiting on.
 
 When the turn ends, the header stays and says how the turn went:
 
 ```
-  ✓ Completed  42s · edited 1 · ran 2 · read 3 · 1 failed
+✓ Completed  42s · edited 1 · ran 2 · read 3 · 1 failed
 ```
 
 The glyph and label follow the recorded turn end: a green `✓ Completed`, a yellow `■` followed by why the turn stopped (`Interrupted`, `Blocked`, `Output token limit reached`), and a red `✗ Failed` for an error, whose message can run to paragraphs and stays in the transcript. A completed turn draws no line of its own in the transcript; `- Completed` there repeated this row. The elapsed time is the header's clock when the turn ended. The counts are the turn's committed calls grouped by past-tense verb, with edits first, followed by the number of calls that failed. They are read from the transcript rather than tallied as the turn ran, so they agree with the session log however results arrived. The running label and the summary are the same row, so the input never moves between them, and a turn that has not spoken yet costs no row at all. The summary holds until the next turn starts. A resumed session shows its newest ended turn the same way, without a time, because no clock watched it run; that turn is read from the transcript once, when the surface mounts, so later commits never read history again. Before any turn has ended, the turn's side of the header is empty.
@@ -229,7 +238,7 @@ Any dynamic region rendering a list of harness-owned length needs the same treat
 
 > Render at most `budget` lines. When more exist, render `budget - 1` and a final `+N more` line. When the full list matters, commit it to the **transcript** — static, scrollable, free — instead of holding it in the dynamic region.
 
-This is the principled fix for `/help` and `/model`: a command's full output belongs in scrollback, where the terminal can scroll it, not in a dynamic overlay that is capped by L1. The notice region is for *short* feedback — "model set for the next turn" — not for catalogs.
+This is the principled fix for `/help` and `/model`: a command's full output belongs in scrollback, where the terminal can scroll it, not in a dynamic overlay that is capped by L1. The notice region is for *short*, transient feedback — "loading models…", a sign-in URL — not for catalogs, and not for a command's outcome, which commits under the command row.
 
 "Free" is about the buffer, not about the reader. A row costs the transcript nothing to keep and costs the reader a scroll to get past, so the escape hatch holds for content a user asked to see — they typed `/help` — and fails for content that arrives whether or not they wanted it. Tool output is the second kind, and [§7b](#a-results-output-is-previewed-not-replayed) bounds it.
 
@@ -349,14 +358,14 @@ A bare full-width rule on its own draws attention to a line carrying no informat
 ```
   DONE
 
-  ✓ Completed  42s · ran 2                  ● Goal active  round 3/256 · Ship it
+✓ Completed  42s · ran 2                    ● Goal active  round 3/256 · Ship it
 ──────────────────────────────────────────────────────────────────────────────
 > ▌Ask anything, / for commands
 ──────────────────────────────────────────────────────────────────────────────
   Model: deepseek/chat  Context: ~15k/128k (12%)  in 42k  out 3.1k  cache hit 81%  ~/bake
 ```
 
-The rules are the separator, so the status line does not also have to be one. They say where typing lands without a box or a word of copy, and under `NO_COLOR` they are still lines. The header's label, the draft, and the status line start at one column, so the rows form one block without an enclosing shape.
+The rules are the separator, so the status line does not also have to be one. They say where typing lands without a box or a word of copy, and under `NO_COLOR` they are still lines. The draft and the status line start at one column, so the input and its footer form one block without an enclosing shape; the header's glyph stands a rail to the left of them, with the markers of the work it heads.
 
 The input is the row the user returns to after reading an answer, and the header directly over its rule is the row checked on the way: whether the agent is still working, how the last turn went, and the goal it is working toward, all on one row. The base rule under the draft keeps the status line clear of it, so the status line sits directly under it as a footer, with no blank row between them, and nothing below it can be mistaken for output.
 

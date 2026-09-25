@@ -4,13 +4,13 @@ import type { Agent, AssistantStreamFrame } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { LlmModelReasoningInfo } from '@deepseek-ai/dsh-llm'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
-import { parseCommand } from '@deepseek-ai/dsh-commands'
+import { parseCommand, type CommandResult } from '@deepseek-ai/dsh-commands'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-query'
 import type {} from '@deepseek-ai/dsh-compaction'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import { attachmentSummaries } from '@dsh-tui/ui/rows.ts'
-import { Actions, announcedCalls, appendTranscript, emptyTranscript, project, projector, SETTLES, type Projector, type Row } from '@dsh-tui/ui'
+import { Actions, announcedCalls, appendTranscript, emptyTranscript, project, projector, SETTLES, suggestCommand, type Projector, type Row } from '@dsh-tui/ui'
 import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
 import { AttachmentDraft, type AttachmentOptions } from './attachments.ts'
 import { LiveBlocks } from './live.ts'
@@ -70,7 +70,7 @@ export class SessionController {
   private streamRevision = -1
   private stopping = false
   private command: {
-    text: string; abort: AbortController; done: Promise<void>
+    text: string; submitted: string; abort: AbortController; done: Promise<void>
     commandId?: string; compactPhase?: 'preparing' | 'summarizing' | 'saving'
   } | undefined
   private notice: string | undefined
@@ -99,30 +99,49 @@ export class SessionController {
     this.interactions = new Interactions(ctx, agent, () => this.repaint())
     const commands = agent.ctx.get('commands')
     if (commands === undefined) throw new Error('tui: commands service is required')
-    for (const definition of [
-      { name: 'attach', description: copy.attachFile, handler: async ({ rawInput, signal }: { rawInput: string; signal: AbortSignal }) => { await this.attachments.add(rawInput.trim(), signal) } },
-      { name: 'remove-attachment', description: copy.removeAttachment, handler: ({ rawInput }: { rawInput: string }) => { this.attachments.remove(rawInput.trim()) } },
-      { name: 'clear-attachments', description: copy.clearAttachments, handler: ({ rawInput }: { rawInput: string }) => {
-        if (rawInput.trim() !== '') throw new Error(copy.clearAttachmentsUsage)
+    this.off.push(agent.ctx.effect(() => commands.register({
+      name: 'attach', description: copy.attachFile, input: { hint: copy.attachHint }, recordInput: false,
+      handler: async ({ rawInput, signal }) => {
+        await this.attachments.add(rawInput.trim(), signal)
+        this.repaint()
+        return { kind: 'success', text: `${copy.attachmentStaged} ${this.attachments.view.at(-1)!.name} (${this.attachmentCount()})` }
+      },
+    })))
+    this.off.push(agent.ctx.effect(() => commands.register({
+      name: 'remove-attachment', description: copy.removeAttachment, input: { hint: copy.removeAttachmentHint }, recordInput: false,
+      handler: ({ rawInput }) => {
+        const position = rawInput.trim()
+        const name = this.attachments.view[Number(position) - 1]?.name
+        this.attachments.remove(position)
+        this.repaint()
+        return { kind: 'success', text: `${copy.attachmentRemoved} ${name!} (${this.attachmentCount()})` }
+      },
+    })))
+    this.off.push(agent.ctx.effect(() => commands.register({
+      name: 'clear-attachments', description: copy.clearAttachments, recordInput: false,
+      handler: ({ rawInput }) => {
+        if (rawInput.trim() !== '') return { kind: 'error', text: copy.clearAttachmentsUsage }
+        const count = this.attachments.view.length
         this.attachments.clear()
-      } },
-    ]) this.off.push(agent.ctx.effect(() => commands.register({
-      ...definition, recordInput: false,
-      handler: async invocation => { await definition.handler(invocation); this.repaint(); return { kind: 'success' } },
-    })))
-    this.off.push(agent.ctx.effect(() => commands.register({
-      name: 'login', description: copy.signIn, recordInput: false,
-      handler: async ({ rawInput, signal }) => {
-        await this.runLogin(rawInput.trim(), signal)
-        return { kind: 'success' }
+        this.repaint()
+        return { kind: 'success', text: `${copy.attachmentsCleared} ${count} ${count === 1 ? copy.attachmentCountOne : copy.attachmentCountMany}` }
       },
     })))
     this.off.push(agent.ctx.effect(() => commands.register({
-      name: 'model', description: copy.selectModel, recordInput: false,
-      handler: async ({ rawInput, signal }) => {
-        await this.runModel(rawInput.trim(), signal)
-        return { kind: 'success' }
-      },
+      name: 'login', description: copy.signIn, input: { hint: copy.loginHint,
+        choices: async (_agent, _partial, signal) => { const targets = await listTargets(this.ctx, this.credentialRefs); signal.throwIfAborted(); return targets.map(target => target.id) } }, recordInput: false,
+      handler: ({ rawInput, signal }) => this.runLogin(rawInput.trim(), signal),
+    })))
+    this.off.push(agent.ctx.effect(() => commands.register({
+      name: 'model', description: copy.selectModel, input: { hint: copy.modelHint,
+        choices: async (_agent, _partial, signal) => {
+          const llm = this.agent.ctx.get('llm')
+          if (llm === undefined) return []
+          const current = this.selection?.current
+          if (current === undefined) return []
+          return (await listRoutes(llm, current, signal)).entries.map(entry => entry.route)
+        } }, recordInput: false,
+      handler: ({ rawInput, signal }) => this.runModel(rawInput.trim(), signal),
     })))
     this.off.push(agent.ctx.effect(() => commands.register({
       name: 'agents', description: copy.listSubagents, recordInput: false,
@@ -171,8 +190,8 @@ export class SessionController {
       },
     })))
     this.off.push(agent.ctx.effect(() => commands.register({
-      name: 'help', description: copy.listCommands, recordInput: false,
-      handler: () => {
+      name: 'help', description: copy.listCommands, input: { hint: copy.helpHint }, recordInput: false,
+      handler: ({ rawInput }) => {
         // The registry is the list. A command contributed by any plugin
         // appears here without this surface knowing it exists.
         //
@@ -180,11 +199,25 @@ export class SessionController {
         // notice region is bounded by the terminal's height, and a list of
         // every registered command does not fit it. Scrollback has room for
         // the whole list and can scroll it.
+        const listed = commands.list(this.agent)
+        const usage = (command: typeof listed[number]): string =>
+          `/${command.name}${command.input === undefined ? '' : ` ${command.input.hint}`}`
+        const asked = rawInput.trim().replace(/^\//u, '').toLowerCase()
+        if (asked !== '') {
+          const command = listed.find(entry => entry.name === asked)
+          if (command === undefined) return { kind: 'error', text: this.unknownText(asked, listed.map(entry => entry.name)) }
+          return { kind: 'success', text: `${copy.usage}: ${usage(command)}\n${command.description}` }
+        }
+        // One column of names; scrollback is monospaced.
+        const width = Math.min(36, Math.max(...listed.map(command => usage(command).length)))
+        const skills = this.catalog.view.entries.filter(entry => entry.kind === 'skill').map(entry => `/${entry.name}`)
         return {
           kind: 'success',
-          text: commands.list(this.agent)
-            .map(command => `/${command.name} — ${command.description}`)
-            .join('\n'),
+          text: [
+            ...listed.map(command => `${usage(command).padEnd(width)}  ${command.description}`),
+            ...skills.length === 0 ? [] : ['', `${copy.skill}: ${skills.join(' ')}`],
+            '', copy.helpFooter,
+          ].join('\n'),
         }
       },
     })))
@@ -307,6 +340,9 @@ export class SessionController {
     }
   }
 
+  /** Update cancellable argument discovery for the composer cursor. */
+  argumentQuery(query: { name: string; partial: string } | undefined): void { this.catalog.searchArgument(query) }
+
   /**
    * Live goal for this agent, including process-local activation.
    *
@@ -334,8 +370,22 @@ export class SessionController {
   submit(text: string): boolean | Promise<boolean> {
     if (this.closed || this.submission !== undefined || this.inspection !== undefined) return false
     this.notice = undefined
+    const submitted = text
+    const commands = this.ctx.get('commands')
+    // The menu matches names case-insensitively, so `/Model` runs /model
+    // instead of reaching the model as a message.
+    const typed = /^\/([A-Za-z][A-Za-z0-9_-]*)(?=$|[\t\n\r ])/u.exec(text)?.[1]
+    if (typed !== undefined && typed !== typed.toLowerCase() && commands?.find(this.agent, typed.toLowerCase()) !== undefined) {
+      text = `/${typed.toLowerCase()}${text.slice(typed.length + 1)}`
+    }
     const parsed = parseCommand(text)
-    if (parsed === undefined || this.ctx.get('commands')?.find(this.agent, parsed.name) === undefined) {
+    // A mistyped name would otherwise go to the model as a prompt. The draft
+    // stays in the composer to be corrected.
+    if (typed !== undefined && commands?.find(this.agent, typed.toLowerCase()) === undefined && this.unknownName(typed)) {
+      this.notify(`${this.unknownText(typed, this.catalog.view.entries.map(entry => entry.name))} · ${this.copy.unknownCommandHint}`)
+      return false
+    }
+    if (parsed === undefined || commands?.find(this.agent, parsed.name) === undefined) {
       if (this.command?.compactPhase !== undefined) { this.notify(this.copy.compactBusy); return false }
       if (this.command !== undefined && parseCommand(this.command.text)?.name === 'attach') { this.notify(this.copy.commandBusy); return false }
       if (this.attachments.pending) {
@@ -349,22 +399,47 @@ export class SessionController {
       this.repaint()
       return true
     }
-    if (this.attachments.pending && !['attach', 'remove-attachment', 'clear-attachments', 'model', 'login', 'help', 'changelog', 'agents', 'clear-pending', 'sessions', 'resume', 'new', 'clear'].includes(parsed.name)) {
+    // A command that declares attachment input may consume a draft. This TUI
+    // reserves staged files for the next ordinary prompt, so it refuses those
+    // commands. All other registered commands leave the draft untouched.
+    if (this.attachments.pending && commands.find(this.agent, parsed.name)?.input?.attachments === true) {
       this.notify(this.copy.attachmentCommandsUnsupported); return false
     }
     if (this.command !== undefined) { this.notify(this.copy.commandBusy); return false }
     const abort = new AbortController()
     const done = Promise.resolve().then(async () => {
-      const commands = this.ctx.get('commands')
       if (commands === undefined) throw new Error('tui: commands service is required')
       const result = await commands.execute(this.agent, text, [], abort.signal)
       if (result === undefined) this.notify(`${this.copy.unknownCommand}: /${parsed.name}`)
-    }).catch((error: unknown) => {
-      this.notify(abort.signal.aborted ? this.copy.cancelled : error instanceof Error ? error.message : String(error))
+    }).catch(() => {
+      // A thrown handler failure is already in the transcript: the registry
+      // records it as the command's `command/done`. Only cancellation is not.
+      if (abort.signal.aborted) this.notify(this.copy.cancelled)
     }).finally(() => { this.command = undefined; this.repaint() })
-    this.command = { text, abort, done, ...(parsed.name === 'compact' ? { compactPhase: 'preparing' as const } : {}) }
+    this.command = { text, submitted, abort, done, ...(parsed.name === 'compact' ? { compactPhase: 'preparing' as const } : {}) }
     this.repaint()
     return true
+  }
+
+  /**
+   * Whether a slash name is certainly neither a command nor a skill. While the
+   * skill catalog is loading or incomplete, a name it may yet hold passes.
+   * @param typed - the name as submitted, without its slash.
+   */
+  private unknownName(typed: string): boolean {
+    const catalog = this.catalog.view
+    if (catalog.loading || catalog.error !== undefined) return false
+    return !catalog.entries.some(entry => entry.name === typed || entry.name === typed.toLowerCase())
+  }
+
+  /**
+   * @param typed - an unregistered name, without its slash.
+   * @param names - the names it may have meant.
+   * @returns the unknown-command message, with the nearest name when one is close.
+   */
+  private unknownText(typed: string, names: readonly string[]): string {
+    const suggestion = suggestCommand(names, typed)
+    return `${this.copy.unknownCommand}: /${typed}${suggestion === undefined ? '' : ` · ${this.copy.didYouMean} /${suggestion}?`}`
   }
 
   /** Cancel the nearest interaction or command; otherwise interrupt while retaining visible pending work. */
@@ -472,6 +547,12 @@ export class SessionController {
     return done
   }
 
+  /** Localized count for a staged draft after an attachment command. */
+  private attachmentCount(): string {
+    const count = this.attachments.view.length
+    return `${count} ${count === 1 ? this.copy.attachmentCountOne : this.copy.attachmentCountMany}`
+  }
+
   private repaint(): void {
     // Parent approvals must stay reachable while a child is being inspected.
     if (this.inspection !== undefined && this.interactions.current !== undefined) {
@@ -490,6 +571,15 @@ export class SessionController {
     if (event.seq <= this.cursor) return []
     this.cursor = event.seq
     let rows = project(event, this.projector)
+    if (event.type === 'command/run' && event.data.args === undefined && this.buffered === undefined) {
+      const command = this.command
+      const parsed = command === undefined ? undefined : parseCommand(command.text)
+      if (command !== undefined && parsed?.name === event.data.name && (parsed.name !== 'login' || parsed.rawInput.trim() === '')) {
+        // A local recall line never enters the Session log. Redacted commands
+        // replayed from disk have no recoverable arguments and stay out of recall.
+        rows = rows.map(row => row.kind === 'command' ? { ...row, recall: command.submitted } : row)
+      }
+    }
     // The streaming attempt already printed its finished lines. The commit
     // adds only what it has not.
     if (event.type === 'assistant/message' && this.stream !== undefined) {
@@ -551,13 +641,13 @@ export class SessionController {
    * @param input - optional provider/model and reasoning-effort arguments.
    * @param commandSignal - owning command lifetime.
    */
-  private async runModel(input: string, commandSignal: AbortSignal): Promise<void> {
+  private async runModel(input: string, commandSignal: AbortSignal): Promise<CommandResult> {
     const llm = this.agent.ctx.get('llm')
     const selection = this.selection
-    if (llm === undefined || selection?.current === undefined) { this.notify(this.copy.noModelSelection); return }
-    if (this.agent.status === 'running') { this.notify(this.copy.modelBusy); return }
+    if (llm === undefined || selection?.current === undefined) return { kind: 'error', text: this.copy.noModelSelection }
+    if (this.agent.status === 'running') return { kind: 'error', text: this.copy.modelBusy }
     const args = input.split(/\s+/).filter(part => part !== '')
-    if (args.length > 2) { this.notify(this.copy.modelUsage); return }
+    if (args.length > 2) return { kind: 'error', text: this.copy.modelUsage }
     const current = selection.current
     const busy = new AbortController()
     const signal = AbortSignal.any([commandSignal, busy.signal])
@@ -578,9 +668,9 @@ export class SessionController {
           ...catalog.unavailable.length === 0 ? {} : { warning: `${this.copy.modelCatalogError}: ${catalog.unavailable.join(', ')}` },
         }, signal)
         signal.throwIfAborted()
-        if (route === undefined) { this.notify(this.copy.modelCancelled); return }
+        if (route === undefined) return { kind: 'success', text: this.copy.modelCancelled }
         const info = await resolveRoute(llm, route, signal)
-        if (info === undefined) { this.notify(`${this.copy.unknownModel}: ${route}`); return }
+        if (info === undefined) return { kind: 'error', text: `${this.copy.unknownModel}: ${route}` }
         if ((info.reasoning?.efforts.length ?? 0) > 0) {
           const sameRoute = route === routeOf(current)
           const picked = await this.interactions.choose({
@@ -596,7 +686,7 @@ export class SessionController {
             ],
           }, signal)
           signal.throwIfAborted()
-          if (picked === undefined) { this.notify(this.copy.modelCancelled); return }
+          if (picked === undefined) return { kind: 'success', text: this.copy.modelCancelled }
           effort = picked === '' ? undefined : picked
         }
       }
@@ -607,19 +697,22 @@ export class SessionController {
           this.reasoningRevision += 1
           this.reasoning = { route: routeOf(result.selection), info: result.reasoning }
           selection.current = result.selection
-          this.notify(`${this.copy.modelSelected}: ${routeOf(result.selection)}${result.selection.reasoningEffort === undefined ? '' : ` (${result.selection.reasoningEffort})`}`)
-          return
-        case 'unknown-effort': this.notify(`${this.copy.unknownEffort}: ${result.offered.join(' ')}`); return
-        case 'unknown-route': this.notify(`${this.copy.unknownModel}: ${result.route} (${routeOf(current)})`); return
+          return { kind: 'success', text: `${this.copy.modelSelected}: ${routeOf(result.selection)}${result.selection.reasoningEffort === undefined ? '' : ` (${result.selection.reasoningEffort})`}` }
+        case 'unknown-effort': return { kind: 'error', text: `${this.copy.unknownEffort}: ${result.offered.join(' ')}` }
+        case 'unknown-route': return { kind: 'error', text: `${this.copy.unknownModel}: ${result.route} (${routeOf(current)})` }
         default: return assertNever(result)
       }
-    } finally { off() }
+    } finally {
+      off()
+      // A failed catalog read leaves no result that would replace it.
+      if (this.notice === this.copy.modelsLoading) this.notify(undefined)
+    }
   }
 
-  private async runLogin(id: string, signal: AbortSignal): Promise<void> {
+  private async runLogin(id: string, signal: AbortSignal): Promise<CommandResult> {
     const targets = await listTargets(this.ctx, this.credentialRefs)
     signal.throwIfAborted()
-    if (targets.length === 0) { this.notify(this.copy.noTargets); return }
+    if (targets.length === 0) return { kind: 'error', text: this.copy.noTargets }
     const chosen = id === '' ? await this.interactions.choose({
       title: this.copy.chooseLogin,
       initial: targets.find(target => target.id === 'cliproxyapi' && !target.configured)?.id ?? targets[0]!.id,
@@ -632,13 +725,19 @@ export class SessionController {
       })),
     }, signal) : id
     signal.throwIfAborted()
-    if (chosen === undefined) { this.notify(this.copy.loginCancelled); return }
+    if (chosen === undefined) return { kind: 'success', text: this.copy.loginCancelled }
     const result = await login(this.ctx, targets, chosen, {
       notify: notice => this.notify([notice.message, notice.url, notice.code].filter(value => value !== undefined).join(' ')),
       prompt: prompt => this.interactions.prompt(prompt, signal),
     }, signal, this.copy)
-    this.notify(result.kind === 'stored' ? result.models === undefined
-      ? `${result.target}: ${this.copy.stored}` : `${result.target}: ${result.models} ${result.models === 1 ? this.copy.cliProxyReadyOne : this.copy.cliProxyReady}`
-      : result.kind === 'cancelled' ? this.copy.loginCancelled : `${this.copy.unknownTarget}: ${result.id}`)
+    // Progress notices (a device code, a URL) have served their purpose.
+    this.notify(undefined)
+    if (result.kind === 'cancelled') return { kind: 'success', text: this.copy.loginCancelled }
+    if (result.kind !== 'stored') {
+      const known = targets.map(target => target.id)
+      return { kind: 'error', text: `${this.copy.unknownTarget} (${known.join(', ')})` }
+    }
+    return { kind: 'success', text: result.models === undefined
+      ? `${result.target}: ${this.copy.stored}` : `${result.target}: ${result.models} ${result.models === 1 ? this.copy.cliProxyReadyOne : this.copy.cliProxyReady}` }
   }
 }

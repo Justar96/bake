@@ -282,9 +282,9 @@ function fakeClock() {
 }
 
 /** A header row's turn label. The text after its lead. */
-const labelOf = (row: string): string => row.slice(2).trimEnd()
-/** The header row while work runs. Its lead, then the glyph, the word and its ellipsis. */
-const RUNNING = /^ {2}([\u2800-\u283f]{3}|>) \S+…/
+const labelOf = (row: string): string => row.trimEnd()
+/** The header row while work runs. The glyph at the first column, the word and its ellipsis. */
+const RUNNING = /^([\u2800-\u283f]{3}|>) \S+…/
 /** The header's label while a turn runs. */
 const headerOf = (frame: string | undefined): string | undefined => {
   const row = (frame ?? '').split('\n').find(line => RUNNING.test(line))
@@ -310,24 +310,28 @@ describe('turn header', () => {
     ui.rerender(view(true))
     frames.push(ui.lastFrame()!)
     // No motion for a screen reader. The glyph rests.
-    expect(ui.lastFrame()!.trimEnd()).toBe('  > Working…  thinking · 2s')
+    expect(ui.lastFrame()!.trimEnd()).toBe('> Working…  thinking · 2s')
     await expect(frames.join('\n---\n') + '\n').toMatchFileSnapshot('./expected/arrow-wave.txt')
     ui.unmount()
     expect(active()).toBe(0)
   })
 
-  it('shows the goal on the header\'s row beside the turn, and keeps both rules bare', () => {
+  it('holds the goal in its own block above the header, and keeps both rules bare', () => {
     const goal = { objective: 'Ship it', phase: 'active' as const, armed: true, rounds: 2, maxRounds: 8 }
     const ui = render(<App {...props({ status: 'running', goal })} />)
     const rows = ui.lastFrame()!.split('\n')
     const header = rows.findIndex(line => RUNNING.test(line))
-    expect(rows[header]).toMatch(new RegExp(`${dictionaries.en.goalActive} {2}${dictionaries.en.goalRound} 2/8 · Ship it$`))
+    // The block says it, so the header's row carries only the turn.
+    expect(rows[header]).not.toContain(dictionaries.en.goalActive)
+    expect(rows[header - 3]!.trimEnd()).toBe(`● ${dictionaries.en.goalActive}  ${dictionaries.en.goalRound} 2/8`)
+    expect(rows[header - 2]!.trimEnd()).toBe('└ Ship it')
+    expect(rows[header - 1]).toContain(dictionaries.en.goalKeysActive)
     expect(rows[header + 1]).toMatch(/^─+$/)
     expect(rows[header + 2]).toMatch(/^> /)
     expect(rows[header + 3]).toMatch(/^─+$/)
-    // With the turn over and no summary to hold, the goal keeps the row alone.
+    // Idle, the block stays where it was.
     const idle = render(<App {...props({ goal })} />).lastFrame()!.split('\n')
-    expect(idle.find(line => line.includes(dictionaries.en.goalActive))).toMatch(/^ {3,}● /)
+    expect(idle.find(line => line.includes(dictionaries.en.goalActive))).toMatch(/^● /)
   })
 
   it('keeps one word through thinking, writing, a commit, and a running tool', () => {
@@ -464,7 +468,7 @@ describe('running action marker', () => {
 
 /** The header's label once a turn ends. An outcome glyph, then its label. */
 const summaryOf = (frame: string | undefined): string | undefined => {
-  const row = (frame ?? '').split('\n').find(line => /^ {2}[✓■✗] /.test(line))
+  const row = (frame ?? '').split('\n').find(line => /^[✓■✗] /.test(line))
   return row === undefined ? undefined : labelOf(row)
 }
 

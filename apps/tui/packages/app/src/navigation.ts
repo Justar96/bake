@@ -85,14 +85,15 @@ export class SessionNavigation {
         if (this.closed) throw new Error(this.copy.sessionsCancelled)
         const commands = agent.ctx.get('commands')
         if (commands === undefined) throw new Error('tui: commands service is required')
+        // Two commands, each under a second name. The aliases say whose they
+        // are, so the menu and /help do not read as four features.
         for (const [name, description] of [
-          ['sessions', this.copy.chooseSession], ['resume', this.copy.resumeSession],
-          ['new', this.copy.newSessionCommand], ['clear', this.copy.clearSessionCommand],
+          ['resume', this.copy.resumeSession], ['sessions', `${this.copy.aliasOf} /resume`],
+          ['new', this.copy.newSessionCommand], ['clear', `${this.copy.aliasOf} /new`],
         ] as const) agent.ctx.effect(() => commands.register({
           name, description, recordInput: false,
           handler: ({ rawInput }) => {
-            if (rawInput.trim() !== '') return { kind: 'error', text: name === 'new' || name === 'clear'
-              ? this.copy.newSessionUsage : this.copy.sessionsUsage }
+            if (rawInput.trim() !== '') return { kind: 'error', text: `${this.copy.usage}: /${name}` }
             this.request(agent, name === 'new' || name === 'clear')
             return { kind: 'success' }
           },

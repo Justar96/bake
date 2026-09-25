@@ -48,10 +48,12 @@ export type Row =
   /**
    * A slash command the user ran. Separate from `user` because it addresses
    * the surface, not the model. It opens no turn, and its result is the
-   * notice under it. `name` and `args` stay apart so input recall can rebuild
-   * the draft the user typed.
+   * notice under it. `name` and `args` stay apart for logged input recall.
+   * `inputOmitted` marks a redacted log entry; `recall` is a process-local
+   * submitted line and must never be written to the Session log.
    */
-  | { readonly kind: 'command', readonly name: string, readonly args: string }
+  | { readonly kind: 'command', readonly name: string, readonly args: string,
+    readonly inputOmitted?: true, readonly recall?: string }
   /**
    * Answer text. `continued` marks the rest of a block whose opening lines
    * already printed. A streaming answer prints settled Markdown blocks, and

@@ -7,16 +7,17 @@ import { transcriptRows, type Transcript } from './transcript.ts'
 import type { TuiCopy } from './copy.ts'
 import { cacheHit, contextPercent, formatContext, formatTotals, type ContextUsage, type TokenTotals } from './format.ts'
 import { useComposer, type Submit } from './composer.ts'
-import { completionMenu, type CompletionCatalog, type CompletionChoice, type FileCatalog } from './completion.ts'
+import { argumentQuery, commandUsage, completionMenu, requiresInput, type CompletionCatalog, type CompletionChoice, type FileCatalog } from './completion.ts'
 import { inputHistory } from './history.ts'
 import { InteractionView, type Interaction, type InteractionAnswer } from './interaction.tsx'
 import { budgetFor, COLUMN, MARKER, selectionWindow, type Budget, type FrameStyle, type WindowSize } from './layout.ts'
 import { compactModel, compactPath, present, type Highlight, type ResultBound } from './present.ts'
 import { cacheTone, permissionTone, PALETTE } from './palette.ts'
 import { Subagents, type SubagentEntry } from './subagents.tsx'
+import { Goal, goalRows, goalState, type GoalEntry } from './goal.tsx'
 import { Beat } from './beat.tsx'
 import { Welcome } from './welcome.tsx'
-import { Chrome, Completion, Line, lineHeight, LiveRegion, Notice, Panel, Thinking, THINKING_GAP, wrappedRows, type ActivityState, type StandingState } from './line.tsx'
+import { Chrome, Completion, Line, lineHeight, LiveRegion, Notice, Panel, Thinking, THINKING_GAP, wrappedRows, type ActivityState } from './line.tsx'
 import { activityWord, phaseLabel, phaseOf, lastTurn, THINKING_ROWS, thinkingRows, turnSummary, type Clock } from './activity.ts'
 
 /** Display-only projection of one pending inbox message. */
@@ -38,45 +39,7 @@ export interface TaskEntry {
   readonly status: 'pending' | 'in_progress' | 'completed'
 }
 
-/**
- * Display-only view of the session's current goal.
- *
- * `phase` is durable. `armed` is this process's permission to keep continuing
- * the goal, so an active goal that is not armed is waiting on a human.
- */
-export interface GoalEntry {
-  readonly objective: string
-  readonly phase: 'active' | 'paused' | 'blocked' | 'complete'
-  readonly armed: boolean
-  readonly rounds: number
-  readonly maxRounds: number
-  /** Why a blocked goal stopped; present only while blocked. */
-  readonly blocked?: string
-}
-
-/**
- * Standing state the header draws for the goal, on the right.
- *
- * Each phase pairs a colour with a glyph, so `NO_COLOR` still distinguishes
- * an armed goal from a held, blocked, or finished one.
- *
- * @param goal - the current goal, or undefined when none is set.
- * @param copy - locale-owned labels.
- * @returns the header's right-hand state, or undefined to leave that side empty.
- */
-export function goalState(goal: GoalEntry | undefined, copy: TuiCopy): StandingState | undefined {
-  if (goal === undefined) return undefined
-  const rounds = `${copy.goalRound} ${goal.rounds}/${goal.maxRounds}`
-  const details = (...parts: (string | undefined)[]): string => parts.filter(part => part !== undefined && part !== '').join(' \u00b7 ')
-  switch (goal.phase) {
-    case 'active': return goal.armed
-      ? { glyph: MARKER.turn, label: copy.goalActive, details: details(rounds, goal.objective), color: PALETTE.running }
-      : { glyph: MARKER.waiting, label: copy.goalHeld, details: details(copy.goalResume, goal.objective), color: PALETTE.waiting }
-    case 'paused': return { glyph: MARKER.waiting, label: copy.goalPaused, details: details(copy.goalResume, goal.objective), color: PALETTE.waiting }
-    case 'blocked': return { glyph: '\u2717', label: copy.goalBlocked, details: details(goal.blocked, goal.objective), color: PALETTE.failed }
-    case 'complete': return { glyph: '\u2713', label: copy.goalComplete, details: details(rounds, goal.objective), color: PALETTE.done }
-  }
-}
+export { goalState, type GoalEntry } from './goal.tsx'
 
 /** Application state and actions supplied by the terminal owner. */
 export interface AppProps {
@@ -154,6 +117,8 @@ export interface AppProps {
   readonly completion: CompletionCatalog
   readonly files: FileCatalog
   readonly onReferenceQuery: (query: string | undefined) => void
+  /** Observe the first argument of a command advertising choices; undefined closes its menu session. */
+  readonly onArgumentQuery?: (query: { name: string; partial: string } | undefined) => void
   /** Maximum visible completion and picker rows, supplied by application configuration. */
   readonly completionLimit: number
   /**
@@ -206,7 +171,7 @@ export interface AppProps {
 function Status({ text, tone }: { readonly text: string, readonly tone?: 'error' }): React.ReactElement {
   return <Box flexDirection="row">
     <Box width={2} flexShrink={0}><Text> </Text></Box>
-    <Text dimColor={tone === undefined} {...tone === 'error' ? { color: PALETTE.failed } : {}}>{text}</Text>
+    <Text wrap="truncate-end" dimColor={tone === undefined} {...tone === 'error' ? { color: PALETTE.failed } : {}}>{text}</Text>
   </Box>
 }
 
@@ -470,6 +435,10 @@ function SessionView(props: AppProps): React.ReactElement {
   const matches = visibleMenu?.entries
   const query = visibleMenu?.query
   useEffect(() => { props.onReferenceQuery(query) }, [props.onReferenceQuery, query])
+  const argument = interaction === undefined && props.inputBlocked !== true && props.inspection === undefined && !composer.blocked
+    ? argumentQuery(props.completion.entries, composer.text, composer.cursor) : undefined
+  useEffect(() => { props.onArgumentQuery?.(argument === undefined ? undefined : { name: argument.name, partial: argument.partial }) },
+    [props.onArgumentQuery, argument?.name, argument?.partial])
   const selected = matches === undefined ? 0 : selectedIndex(matches, composer.text, composer.cursor)
   usePaste(composer.paste, { isActive: interaction === undefined && props.inputBlocked !== true && props.inspection === undefined && !composer.submitting })
   useInput((text, key) => {
@@ -502,12 +471,23 @@ function SessionView(props: AppProps): React.ReactElement {
       composer.recall(key.upArrow ? 'older' : 'newer'); updateMenu('', true); return
     }
     if (key.shift && key.return) { composer.paste('\n'); return }
+    if (key.return && inputMenu?.kind === 'argument') {
+      const choice = choices?.[selectedIndex(choices, composer.value, composer.position)]
+      if (choice === undefined) { composer.type('\n'); return }
+      if (choice.argumentRequiresInput !== true && argument?.partial === choice.name
+        && composer.value.slice(argument.end).trim() === '') { composer.type('\n'); return }
+      composer.replace(choice.draft, choice.cursor)
+      return
+    }
     if (key.return && inputMenu?.kind === 'slash') {
       const choice = choices?.[selectedIndex(choices, composer.value, composer.position)]
       if (choice === undefined) {
         if (composer.value !== '/') composer.type('\n')
         return
       }
+      // A command that cannot run bare is filled in with its separator, and
+      // its usage line takes the menu's place until the arguments are typed.
+      if (requiresInput(choice)) { composer.replace(choice.draft, choice.cursor); return }
       const exact = composer.value === choice.name
       if (!exact) composer.replace(choice.draft.trimEnd())
       if (choice.kind === 'command' || exact) composer.type('\n')
@@ -611,6 +591,10 @@ function SessionView(props: AppProps): React.ReactElement {
       + Number(visibleMenu?.loading === true) + Number(visibleMenu?.error !== undefined)
   const completionLimit = claim(matches === undefined ? 0 : Math.max(1,
     Math.min(matches.length, props.completionLimit) + Number(matches.length > props.completionLimit) + menuStatusRows))
+  // Usage stays visible while the command has no matching choices.
+  const usage = matches !== undefined || interaction !== undefined || props.inputBlocked === true
+    || props.inspection !== undefined || composer.blocked ? undefined : commandUsage(props.completion.entries, composer.text)
+  const usageLimit = claim(usage === undefined ? 0 : 1)
   // Only while it has rows to draw. An empty live region draws nothing, and
   // reserving its window for a turn that has not spoken yet would starve the
   // panels below it of rows it never uses.
@@ -618,6 +602,9 @@ function SessionView(props: AppProps): React.ReactElement {
   // After the output it summarizes, which it cannot outrank on a short
   // terminal; the header already says the turn is running.
   const thinkingLimit = claim(interaction !== undefined || !running || thinking.length === 0 ? 0 : thinking.length + THINKING_GAP)
+  // Before the tasks: the goal is what they work toward, and a human set
+  // it, where the list is the agent's.
+  const goalLimit = claim(Math.min(menuLimit, goalRows(props.goal, copy, size.columns)))
   const taskLimit = claim(props.todos === undefined ? 0 : menuLimit)
   const subagentLimit = claim((props.subagents?.length ?? 0) === 0 ? 0 : Math.min(menuLimit, (props.subagents?.length ?? 0) + 2))
   const pendingLimit = claim(props.pending.length === 0 ? 0 : menuLimit)
@@ -650,6 +637,7 @@ function SessionView(props: AppProps): React.ReactElement {
       : summary === undefined ? undefined : { kind: 'ended', summary }
   const panels = <>
     {turn.current !== undefined && interaction === undefined && <Thinking rows={thinking} limit={thinkingLimit} />}
+    <Goal goal={props.goal} copy={copy} columns={size.columns} limit={goalLimit} />
     {props.todos !== undefined && <Tasks todos={props.todos} copy={copy} limit={taskLimit} />}
     <Subagents entries={props.subagents ?? []} copy={copy} limit={subagentLimit} />
     <Panel
@@ -676,7 +664,7 @@ function SessionView(props: AppProps): React.ReactElement {
           name: entry.name,
           // The kind is dropped when every visible row shares one. Nine rows
           // reading `Command` say nothing that the panel itself does not.
-          description: [mixedKinds ? copy[entry.kind] : '', entry.description].filter(part => part !== '').join('  '),
+          description: [mixedKinds ? copy[entry.kind] : '', entry.hint ?? '', entry.description].filter(part => part !== '').join('  '),
         }))}
         selected={menuWindow.selected}
         hidden={menuRows > 1 ? menuWindow.hidden : 0}
@@ -686,6 +674,7 @@ function SessionView(props: AppProps): React.ReactElement {
       {visibleMenu?.loading === true && <Status text={visibleMenu?.kind === 'file' ? copy.filesLoading : copy.catalogLoading} />}
       {visibleMenu?.error !== undefined && <Status text={`${visibleMenu?.kind === 'file' ? copy.filesError : copy.catalogError}: ${visibleMenu.error}`} tone="error" />}
     </Box>}
+    {usage !== undefined && usageLimit > 0 && <Status text={`/${usage.name} ${usage.hint}  ${usage.description}`} />}
   </>
   if (props.inspection !== undefined) {
     const child = props.inspection
@@ -759,7 +748,9 @@ function SessionView(props: AppProps): React.ReactElement {
               layout={budget.chrome}
               frame={props.frame}
               activity={activity}
-              standing={goalState(props.goal, copy)}
+              // The block holds the goal when it has room. Only a terminal
+              // too short for it keeps the goal on the header's row.
+              standing={goalLimit > 0 ? undefined : goalState(props.goal, copy)}
               clock={clock}
               motion={animate !== undefined}
               compact={screenReader}

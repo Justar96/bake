@@ -6,6 +6,7 @@ import { brandString } from '@deepseek-ai/dsh-brand'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { transcriptRows } from '@dsh-tui/ui'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'
+import { inputHistory } from '@dsh-tui/ui/history.ts'
 import { openSession } from '../src/session.ts'
 import { SessionController } from '../src/controller.ts'
 import { harness, textResponse } from './harness.ts'
@@ -102,10 +103,39 @@ describe('session wiring', () => {
       { kind: 'command', name: 'select', args: '  item\nnext' },
       { kind: 'notice', placement: 'command', tone: 'info', text: 'Selected:  item\nnext' },
     ])
-    controller.submit('/missing')
+    // An unregistered name stays in the composer instead of becoming a
+    // prompt; a leading space is the way to send it as one.
+    expect(controller.submit('/missing')).toBe(false)
+    expect(controller.view.notice).toContain(`${dictionaries.en.unknownCommand}: /missing`)
+    expect(model.requests).toHaveLength(0)
+    controller.submit(' /missing')
     await handle.agent.whenIdle()
     expect(model.requests).toHaveLength(1)
     expect(JSON.stringify(model.requests[0]?.messages)).toContain('/missing')
+  })
+
+  it('recalls local redacted commands without retaining login arguments', async () => {
+    const { ctx, controller } = await connected()
+    expect(controller.submit('/Model mock/model')).toBe(true)
+    await controller.drain()
+    expect(controller.submit('/agents extra')).toBe(true)
+    await controller.drain()
+    expect(controller.submit('/login private-credential')).toBe(true)
+    await controller.drain()
+    const rows = transcriptRows(controller.view.committed).filter(row => row.kind === 'command')
+    expect(rows).toEqual([
+      { kind: 'command', name: 'model', args: '', inputOmitted: true, recall: '/Model mock/model' },
+      { kind: 'command', name: 'agents', args: '', inputOmitted: true, recall: '/agents extra' },
+      { kind: 'command', name: 'login', args: '', inputOmitted: true },
+    ])
+    expect([...inputHistory(controller.view.committed, [])]).toEqual(['/agents extra', '/Model mock/model'])
+    using observation = await ctx.sessionQuery.observeSession(controller.agent.id, { projectionMode: 'none' })
+    expect(observation.events.filter(event => event.type === 'command/run').map(event => event.data)).toEqual([
+      expect.objectContaining({ name: 'model' }),
+      expect.objectContaining({ name: 'agents' }),
+      expect.objectContaining({ name: 'login' }),
+    ])
+    expect(JSON.stringify(observation.events)).not.toContain('private-credential')
   })
 
   it('serializes commands and records cancellation before releasing the session', async () => {

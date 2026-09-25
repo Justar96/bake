@@ -150,3 +150,41 @@ it('aborts an active catalog read before draining terminal shutdown', async () =
     expect(changed).toHaveBeenCalledTimes(notifications)
   } finally { late.resolve([]) }
 })
+
+it('supersedes argument choices and drains an in-flight provider on close', async () => {
+  const { ctx, controller, changed } = await connected()
+  const started = Promise.withResolvers<AbortSignal>()
+  const stale = Promise.withResolvers<readonly string[]>()
+  ctx.commands.register({ name: 'choices', description: 'Choose', input: { hint: '<value>',
+    choices: (_agent, partial, signal) => {
+      if (partial === 'a') { started.resolve(signal); return stale.promise }
+      return ['bee']
+    } }, handler: () => ({ kind: 'success' }) })
+  controller.argumentQuery({ name: 'choices', partial: 'a' })
+  const signal = await started.promise
+  controller.argumentQuery({ name: 'choices', partial: 'b' })
+  await vi.waitFor(() => expect(controller.view.completion.argument?.entries).toEqual(['bee']))
+  expect(signal.aborted).toBe(true)
+  controller.close()
+  const notifications = changed.mock.calls.length
+  stale.resolve(['stale'])
+  await controller.drain()
+  expect(changed).toHaveBeenCalledTimes(notifications)
+  expect(controller.view.completion.argument?.entries).toEqual(['bee'])
+})
+
+it('reuses a completed argument list until the menu closes', async () => {
+  const { ctx, controller } = await connected()
+  const choices = vi.fn(() => ['alpha', 'beta'])
+  ctx.commands.register({ name: 'cached', description: 'Cached', input: { hint: '<value>', choices },
+    handler: () => ({ kind: 'success' }) })
+  controller.argumentQuery({ name: 'cached', partial: 'a' })
+  await controller.drain()
+  controller.argumentQuery({ name: 'cached', partial: 'b' })
+  await controller.drain()
+  expect(choices).toHaveBeenCalledTimes(1)
+  controller.argumentQuery(undefined)
+  controller.argumentQuery({ name: 'cached', partial: 'b' })
+  await controller.drain()
+  expect(choices).toHaveBeenCalledTimes(2)
+})

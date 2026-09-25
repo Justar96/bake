@@ -2,12 +2,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 import { ReasoningEffortId, type LlmResolvedModelInfo } from '@deepseek-ai/dsh-llm'
+import { formatRow, transcriptRows } from '@dsh-tui/ui'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'
 import { openSession } from '../src/session.ts'
 import { SessionController } from '../src/controller.ts'
 import { harness, ScriptedModel, textResponse } from './harness.ts'
 
 const cleanup: (() => Promise<void>)[] = []
+/** The last command outcome, which commits under its command row. */
+const outcome = (controller: SessionController): string | undefined => {
+  const row = transcriptRows(controller.view.committed).at(-1)
+  return row === undefined ? undefined : formatRow(row)
+}
 afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await dispose() })
 
 const info = (model: string): LlmResolvedModelInfo => ({
@@ -45,6 +51,18 @@ async function connected() {
 }
 
 describe('/model', () => {
+  it('offers advertised routes once per active argument menu', async () => {
+    const { controller, model } = await connected()
+    controller.argumentQuery({ name: 'model', partial: 'mock/o' })
+    await controller.drain()
+    expect(controller.view.completion.argument?.entries).toContain('mock/other')
+    const reads = vi.mocked(model.listModels).mock.calls.length
+    controller.argumentQuery({ name: 'model', partial: 'mock/p' })
+    await controller.drain()
+    expect(controller.view.completion.argument?.entries).toContain('mock/plain')
+    expect(vi.mocked(model.listModels).mock.calls).toHaveLength(reads)
+  })
+
   it('cancels the initial default lookup when the session closes', async () => {
     const fixture = await harness()
     const began = Promise.withResolvers<void>()
@@ -120,7 +138,7 @@ describe('/model', () => {
     controller.cancel()
     await controller.drain()
     expect(controller.view.interaction).toBeUndefined()
-    expect(controller.view.notice).toBe(dictionaries.en.modelCancelled)
+    expect(outcome(controller)).toContain(dictionaries.en.modelCancelled)
     expect(selection.current).toEqual(before)
     expect(model.requests).toHaveLength(0)
   })
@@ -214,7 +232,7 @@ describe('/model', () => {
     ]) {
       controller.submit(command!)
       await controller.drain()
-      expect(controller.view.notice).toContain(message!)
+      expect(outcome(controller)).toContain(message!)
       expect(selection.current).toEqual(before)
     }
   })
@@ -264,12 +282,12 @@ describe('/model', () => {
       expect(signal?.aborted).toBe(true)
       resolved.resolve(info('other'))
       await controller.drain()
-      expect(controller.view.notice).toBe(dictionaries.en.modelBusy)
+      expect(outcome(controller)).toContain(dictionaries.en.modelBusy)
       expect(selection.current?.model).toBe('model')
       controller.submit('/model')
       await controller.drain()
       expect(controller.view.interaction).toBeUndefined()
-      expect(controller.view.notice).toBe(dictionaries.en.modelBusy)
+      expect(outcome(controller)).toContain(dictionaries.en.modelBusy)
     } finally { resolved.resolve(info('other')); release.resolve(); await handle.agent.whenIdle() }
   })
 })

@@ -6,6 +6,7 @@ import Attachments, { type Config as StoreConfig } from '@deepseek-ai/dsh-attach
 import FileSystem from '@deepseek-ai/dsh-fs-local'
 import { formatRow, transcriptRows } from '@dsh-tui/ui'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'
+import { inputHistory } from '@dsh-tui/ui/history.ts'
 import type { AttachmentOptions } from '../src/attachments.ts'
 import { SessionNavigation } from '../src/navigation.ts'
 import { harness, textResponse } from './harness.ts'
@@ -46,17 +47,25 @@ it('stages literal paths, removes and clears drafts without storing or sending b
   const save = vi.spyOn(ctx.attachments, 'saveFile')
   await stage()
   expect(controller.view.attachments).toEqual([{ name: 'notes with spaces.bin', bytes: 4 }])
+  expect(transcriptRows(controller.view.committed).at(-1)).toMatchObject({ kind: 'notice', text: 'Staged notes with spaces.bin (1 attachment)' })
   await stage('pixel.png')
   expect(controller.view.attachments).toHaveLength(2)
+  expect(transcriptRows(controller.view.committed).at(-1)).toMatchObject({ kind: 'notice', text: 'Staged pixel.png (2 attachments)' })
   controller.submit('/remove-attachment 0')
   await controller.drain()
   expect(controller.view.attachments).toHaveLength(2)
   controller.submit('/remove-attachment 1')
   await controller.drain()
   expect(controller.view.attachments[0]?.name).toBe('pixel.png')
+  expect(transcriptRows(controller.view.committed).at(-1)).toMatchObject({ kind: 'notice', text: 'Removed notes with spaces.bin (1 attachment)' })
   controller.submit('/clear-attachments')
   await controller.drain()
   expect(controller.view.attachments).toEqual([])
+  expect(transcriptRows(controller.view.committed).at(-1)).toMatchObject({ kind: 'notice', text: 'Cleared 1 attachment' })
+  expect([...inputHistory(controller.view.committed, [])]).toEqual([
+    '/clear-attachments', '/remove-attachment 1', '/remove-attachment 0',
+    '/attach pixel.png', '/attach notes with spaces.bin',
+  ])
   expect(save).not.toHaveBeenCalled()
   expect(model.requests).toEqual([])
 })
@@ -103,7 +112,9 @@ it('logs file and image references in order and resumes their metadata and exact
   const resumed = new SessionNavigation(ctx, { ...options, resume: id }, copy, [], () => {})
   cleanup.push(async () => { resumed.close(); await resumed.drain() })
   await resumed.start(new AbortController().signal)
-  expect(transcriptRows(resumed.controller!.view.committed)).toEqual(rows)
+  expect(transcriptRows(resumed.controller!.view.committed)).toEqual(rows.map(row => row.kind === 'command'
+    ? { kind: row.kind, name: row.name, args: row.args, inputOmitted: row.inputOmitted } : row))
+  expect([...inputHistory(resumed.controller!.view.committed, [])]).toEqual(['Inspect these'])
   expect(resumed.controller!.view.attachments).toEqual([])
   expect(model.requests).toHaveLength(1)
 })
@@ -124,14 +135,25 @@ it('retains staged images on a text-only model and on Harness aggregate-image ad
   expect(model.requests).toEqual([])
 })
 
-it('rejects unsupported commands and navigation while attachments remain staged', async () => {
+it('uses command attachment metadata to protect the staged draft', async () => {
   const { ctx, navigation, controller, stage } = await connected()
-  const command = vi.fn(() => ({ kind: 'success' as const }))
-  cleanup.push(controller.agent.ctx.effect(() => ctx.commands.register({ name: 'external', description: 'External', handler: command })))
+  const harmless = vi.fn(() => ({ kind: 'success' as const }))
+  const withInput = vi.fn(() => ({ kind: 'success' as const }))
+  const consuming = vi.fn(() => ({ kind: 'success' as const }))
+  cleanup.push(controller.agent.ctx.effect(() => ctx.commands.register({ name: 'usage', description: 'Usage', handler: harmless })))
+  cleanup.push(controller.agent.ctx.effect(() => ctx.commands.register({ name: 'permission', description: 'Permission', input: { hint: '<preset>' }, handler: withInput })))
+  cleanup.push(controller.agent.ctx.effect(() => ctx.commands.register({ name: 'plan', description: 'Plan', input: { hint: '[message]', attachments: true }, handler: consuming })))
   await stage()
-  expect(controller.submit('/external')).toBe(false)
+  expect(controller.submit('/usage')).toBe(true)
+  await controller.drain()
+  expect(harmless).toHaveBeenCalledOnce()
+  expect(controller.submit('/permission workspace-write')).toBe(true)
+  await controller.drain()
+  expect(withInput).toHaveBeenCalledOnce()
+  expect(controller.view.attachments).toHaveLength(1)
+  expect(controller.submit('/plan')).toBe(false)
   expect(controller.view.notice).toBe(copy.attachmentCommandsUnsupported)
-  expect(command).not.toHaveBeenCalled()
+  expect(consuming).not.toHaveBeenCalled()
   navigation.submit('/sessions')
   await controller.drain()
   expect(controller.view.interaction).toBeUndefined()
