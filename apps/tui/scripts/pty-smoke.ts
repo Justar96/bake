@@ -1583,14 +1583,11 @@ scenario('navigate', 'session picker cancellation, a new session, and switching 
       tty.check('frequent commands lead the slash menu', ['/model', '/resume', '/new', '/clear']
         .map(name => shown.indexOf(name)).every((position, index, positions) => position >= 0
           && (index === 0 || position > positions[index - 1]!)))
-      const closed = tty.mark()
-      tty.send('\x1b', 'close slash hints')
-      await tty.expect(`> /${SCREEN.caret}`, closed)
-      const emptyDraft = tty.mark()
-      tty.send('\x7f', 'remove the slash draft')
-      await tty.expect(`> ${SCREEN.caret}`, emptyDraft)
+      const composed = tty.mark()
+      tty.send('help', 'complete /help in the slash draft')
+      await tty.expect(`> /help${SCREEN.caret}`, composed)
       const help = tty.mark()
-      tty.send('/help\r', 'list session commands')
+      tty.send('\r', 'list session commands')
       await tty.search(/\/resume\b.* {2}Browse sessions or start a new one/u, help)
       await tty.follows(SCREEN.idle, 'Command: /help')
       let start = tty.mark()
