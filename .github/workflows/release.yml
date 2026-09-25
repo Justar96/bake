@@ -184,42 +184,56 @@ jobs:
       - name: Check the current release before publishing
         if: vars.BAKE_DOWNLOAD_SERVICE != 'off'
         run: bun run release:preflight --tag "$GITHUB_REF_NAME" --retry --expected-manifest distribution/host/public/latest.json
+      # A rerun may follow a published GitHub release whose deploy failed: it
+      # keeps those assets, and the next step proves they are this build's.
       - name: Draft the GitHub release
         run: |
           files=(distribution/host/public/releases/"$VERSION"/*.tar.gz distribution/host/public/latest.json distribution/host/public/latest.json.sig distribution/host/install.sh distribution/host/install.ps1)
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            [ "$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft)" = true ] || { echo "GitHub release $GITHUB_REF_NAME is already published; refusing to replace its assets" >&2; exit 1; }
-            gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
+            if [ "$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft)" = true ]; then
+              gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
+            else
+              echo "GitHub release $GITHUB_REF_NAME is already published; checking its assets instead of replacing them"
+            fi
           else
             gh release create "$GITHUB_REF_NAME" "${files[@]}" --draft --verify-tag \
               --title "Bake $VERSION" --notes-file release-notes.md
           fi
-      - name: Check the draft's uploaded assets
+      - name: Check the release's uploaded assets
         run: |
           downloaded="$RUNNER_TEMP/bake-release-assets"
           mkdir -p "$downloaded"
           gh release download "$GITHUB_REF_NAME" --dir "$downloaded"
           files=(distribution/host/public/releases/"$VERSION"/*.tar.gz distribution/host/public/latest.json distribution/host/public/latest.json.sig distribution/host/install.sh distribution/host/install.ps1)
           for file in "${files[@]}"; do cmp "$file" "$downloaded/$(basename "$file")"; done
-          [ "$(find "$downloaded" -maxdepth 1 -type f | wc -l)" -eq "${#files[@]}" ] || { echo 'The draft has unexpected release assets' >&2; exit 1; }
-      - name: Deploy the download service
-        if: vars.BAKE_DOWNLOAD_SERVICE != 'off'
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-        run: |
-          [ -n "$RAILWAY_TOKEN" ] || { echo 'The release environment has no RAILWAY_TOKEN secret' >&2; exit 1; }
-          npm install --global @railway/cli@5.62.1
-          railway up ./distribution/host --path-as-root --no-gitignore --ci \
-            --project 28ff3000-7240-4c57-81d1-7bd05445c1ee \
-            --environment production --service bake-downloads \
-            -m "Bake $VERSION ($GITHUB_SHA)"
-      # A successful deploy is not a release until the public host serves it.
-      - if: vars.BAKE_DOWNLOAD_SERVICE != 'off'
-        run: bun run release:verify-live "$VERSION" --complete
+          [ "$(find "$downloaded" -maxdepth 1 -type f | wc -l)" -eq "${#files[@]}" ] || { echo 'The release has unexpected assets' >&2; exit 1; }
+      # The download service redirects every archive to this release, so it
+      # is published and checked first.
       - run: gh release edit "$GITHUB_REF_NAME" --draft=false --latest
       # Its assets download without a login only from a public repository.
       - name: Check the GitHub release as a client reads it
         if: github.event.repository.visibility == 'public'
         env:
           BAKE_RELEASE_BASE_URL: https://github.com/${{ github.repository }}/releases/latest/download
+        run: bun run release:verify-live "$VERSION" --complete
+      # Five archives exceed Railway's upload limit, so the service carries the
+      # signed manifest and installers alone.
+      - name: Deploy the download service
+        if: vars.BAKE_DOWNLOAD_SERVICE != 'off'
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          REPOSITORY_VISIBILITY: ${{ github.event.repository.visibility }}
+        run: |
+          [ -n "$RAILWAY_TOKEN" ] || { echo 'The release environment has no RAILWAY_TOKEN secret' >&2; exit 1; }
+          [ "$REPOSITORY_VISIBILITY" = public ] || { echo 'The download service redirects to GitHub release assets, which need a public repository' >&2; exit 1; }
+          host="$RUNNER_TEMP/bake-downloads"
+          cp -R distribution/host "$host"
+          rm -rf "$host/public/releases"
+          npm install --global @railway/cli@5.62.1
+          railway up "$host" --path-as-root --no-gitignore --ci \
+            --project 28ff3000-7240-4c57-81d1-7bd05445c1ee \
+            --environment production --service bake-downloads \
+            -m "Bake $VERSION ($GITHUB_SHA)"
+      # A successful deploy is not a release until the public host serves it.
+      - if: vars.BAKE_DOWNLOAD_SERVICE != 'off'
         run: bun run release:verify-live "$VERSION" --complete

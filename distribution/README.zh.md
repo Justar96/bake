@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-Railway 项目 `28ff3000-7240-4c57-81d1-7bd05445c1ee` 中的 `bake-downloads` 服务在 `https://bake.justar.dev` 提供发行清单、安装脚本和版本化平台归档。服务已经创建，但只有在归档完成构建、检查和部署后，发行版才可下载。Bake 仍在 Node 上运行；Bun 负责构建工作区，并把生产依赖安装到每个平台归档中。
+Railway 项目 `28ff3000-7240-4c57-81d1-7bd05445c1ee` 中的 `bake-downloads` 服务在 `https://bake.justar.dev` 提供发行清单和安装脚本，并把每个版本化平台归档重定向到该版本 GitHub 发行版中的同名资源。服务已经创建，但只有在归档完成构建、检查和部署后，发行版才可下载。Bake 仍在 Node 上运行；Bun 负责构建工作区，并把生产依赖安装到每个平台归档中。
 
 ## 在本机构建并检查一个平台
 
@@ -42,7 +42,7 @@ git push --atomic origin HEAD "v$NEXT"
 
 1. **preflight**（`release:preflight`）检查标签是否指向默认分支上的提交、是否与工作区版本一致，以及更新日志章节是否已写好。它将版本与带签名的下载清单比较；关闭下载服务时则与 GitHub 最新已发布版本比较。已部署且未签名的 `0.1.0` 清单是首次过渡时唯一允许的例外。
 2. **build** 为每个目标使用一台运行器——`ubuntu-24.04`、`ubuntu-24.04-arm`、`macos-15`、`macos-15-intel` 和 `windows-latest`——因为原生模块按宿主编译。每台运行器先确认自己构建的是对应目标，然后打包归档，用真实安装脚本安装，并通过 `bake update` 更新（`release:verify-local`，以临时密钥签名）；非 Windows 平台还会运行已构建配置的终端场景。即使某个平台失败，其余平台也会继续报告结果，而发布需要全部五个平台通过。
-3. **publish** 在 `release` 环境中运行，签名密钥和部署令牌只存在于此。它对清单签名（`release:assemble --complete`），运行镜像的签名检查，并确认重试不会更改此版本已对外提供的归档。然后它把归档、清单、签名和安装脚本上传到 GitHub 发行版草稿，再下载并逐字节比较。随后它部署下载服务，等待清单和每个归档均可获取，最后发布草稿。它拒绝覆盖已经发布的 GitHub 发行版。
+3. **publish** 在 `release` 环境中运行，签名密钥和部署令牌只存在于此。它对清单签名（`release:assemble --complete`），运行镜像的签名检查，并确认重试不会更改此版本已对外提供的归档。然后它把归档、清单、签名和安装脚本上传到 GitHub 发行版草稿，再下载并逐字节比较。由于下载服务把归档重定向到 GitHub 发行版，它先发布草稿并按客户端的方式验证。随后它部署不含归档的下载服务（全部归档超出 Railway 的上传上限），并等待清单和每个归档都能经由该服务获取。重新运行时会保留已发布 GitHub 发行版的资源，只证明它们与本次构建一致。
 
 在 Actions 页面手动运行工作流即为试运行：它会构建并检查全部五个平台，但不发布任何内容，即使从标签启动也一样。若标签运行在发布前失败，可重新运行；同一次运行已部署的相同版本可以继续，但归档字节不同会被拒绝。若 GitHub 发行版公开后才失败，请运行 `bun run release:verify-live <版本> --complete` 检查主机，并查看失败步骤，再开始新版本。
 
@@ -57,16 +57,18 @@ GitHub 发行版本身也是一个发行主机：它在归档旁附带已签名�
 
 ## 手动发布已检查的发行版
 
-清单中列出的每个归档通过对应宿主机的本机检查后，运行 `node distribution/host/verify-manifest.mjs`，再在仓库根目录部署下载服务：
+清单中列出的每个归档通过对应宿主机的本机检查并已发布到该版本的 GitHub 发行版后，运行 `node distribution/host/verify-manifest.mjs`，再在仓库根目录部署下载服务：
 
 ```sh
-railway up ./distribution/host --path-as-root --no-gitignore \
+host="$(mktemp -d)/bake-downloads"
+cp -R distribution/host "$host" && rm -rf "$host/public/releases"
+railway up "$host" --path-as-root --no-gitignore \
   --project 28ff3000-7240-4c57-81d1-7bd05445c1ee \
   --environment production --service bake-downloads \
   --detach --json -m "Bake CLI direct download release"
 ```
 
-`--no-gitignore` 会包含生成的 `public/` 载荷。Docker 构建会拒绝未签名或并非由已提交密钥签名的清单、空清单、不支持的目标、无效文件名、空归档，以及任何已包含归档的大小或 SHA-256 不匹配。使用 `--complete` 可额外要求全部五个平台。记录部署 ID，等待该部署达到 `SUCCESS`，然后通过公开域名检查 `/health`、`/latest.json`、`/latest.json.sig`、两个安装脚本路径和本次新增的每个平台归档。上传完成本身不能证明发行成功。清单列出当前可用的平台；安装脚本在不支持的平台上会明确报错。
+`--no-gitignore` 会包含生成的清单和签名，复制时去掉的归档由服务重定向到 `https://github.com/Justar96/bake/releases/download/v<版本>/`。Docker 构建（`verify-manifest.mjs --allow-missing-archives`）会拒绝未签名或并非由已提交密钥签名的清单、空清单、不支持的目标、无效文件名、空归档，以及镜像中实际包含的任何归档的大小或 SHA-256 不匹配。使用 `--complete` 可额外要求全部五个平台。记录部署 ID，等待该部署达到 `SUCCESS`，然后通过公开域名检查 `/health`、`/latest.json`、`/latest.json.sig`、两个安装脚本路径和本次新增的每个平台归档。上传完成本身不能证明发行成功。清单列出当前可用的平台；安装脚本在不支持的平台上会明确报错。
 
 安装了 Node 24 或更新版本的用户可在已发布清单列出的平台上安装。Unix 命令需要先发布对应的 macOS 或 Linux 归档：
 

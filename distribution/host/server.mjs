@@ -5,6 +5,11 @@ import { join, resolve, sep } from 'node:path'
 const root = resolve(import.meta.dirname)
 const publicRoot = join(root, 'public')
 if (!existsSync(join(publicRoot, 'latest.json'))) throw new Error('Missing public/latest.json; assemble a release first')
+// Archives this image does not hold are served by the GitHub release of their
+// version. Clients check every archive against the signed manifest, so the
+// redirect grants that host no trust.
+const archiveRedirect = process.env.BAKE_ARCHIVE_REDIRECT?.trim().replace(/\/+$/, '') || undefined
+const archivePath = /^\/releases\/([0-9A-Za-z.-]+)\/(bake-v[0-9A-Za-z.-]+-(?:darwin-(?:arm64|x64)|linux-(?:arm64|x64)|win32-x64)\.tar\.gz)$/
 const port = Number(process.env.PORT ?? '8080')
 if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('Invalid PORT')
 
@@ -22,7 +27,7 @@ const server = createServer((request, response) => {
   }
   const file = pathname === '/' || pathname === '/install.sh' || pathname === '/install.ps1'
     ? join(root, pathname === '/' ? 'index.html' : pathname.slice(1))
-    : pathname === '/latest.json' || pathname === '/latest.json.sig' || /^\/releases\/[0-9A-Za-z.-]+\/bake-v[0-9A-Za-z.-]+-(?:darwin-(?:arm64|x64)|linux-(?:arm64|x64)|win32-x64)\.tar\.gz$/.test(pathname)
+    : pathname === '/latest.json' || pathname === '/latest.json.sig' || archivePath.test(pathname)
       ? resolve(publicRoot, `.${pathname}`)
       : undefined
   if (file === undefined || (file !== publicRoot && !file.startsWith(`${publicRoot}${sep}`) && !file.startsWith(`${root}${sep}`))) {
@@ -35,6 +40,11 @@ const server = createServer((request, response) => {
     if (!stat.isFile()) throw new Error('Not a file')
     size = stat.size
   } catch {
+    const archive = archiveRedirect === undefined ? null : archivePath.exec(pathname)
+    if (archive !== null) {
+      response.writeHead(302, { Location: `${archiveRedirect}/v${archive[1]}/${archive[2]}`, 'Cache-Control': 'public, max-age=3600' }).end()
+      return
+    }
     response.writeHead(404).end()
     return
   }

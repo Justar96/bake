@@ -1,5 +1,5 @@
 import { createHash, createPublicKey, verify } from 'node:crypto'
-import { createReadStream, readFileSync, statSync } from 'node:fs'
+import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs'
 
 const publicRoot = new URL('./public/', import.meta.url)
 const bytes = readFileSync(new URL('latest.json', publicRoot))
@@ -24,15 +24,22 @@ for (const target of available) {
   if (!supported.includes(target)) throw new Error(`Unsupported release target: ${target}`)
 }
 const targets = process.argv.includes('--complete') ? supported : available
+// The service image holds no archives; its server redirects to the GitHub release.
+const allowMissing = process.argv.includes('--allow-missing-archives')
+const missing = []
 for (const target of targets) {
   const artifact = artifacts[target]
   if (artifact?.file !== `bake-v${manifest.version}-${target}.tar.gz`
     || !/^[a-f0-9]{64}$/.test(artifact.sha256)) throw new Error(`Missing or invalid ${target} artifact`)
   if (!Number.isSafeInteger(artifact.size) || artifact.size <= 0) throw new Error(`Invalid archive size for ${target}`)
   const file = new URL(`releases/${manifest.version}/${artifact.file}`, publicRoot)
+  if (allowMissing && !existsSync(file)) {
+    missing.push(target)
+    continue
+  }
   if (statSync(file).size !== artifact.size) throw new Error(`Size mismatch for ${target}`)
   const hash = createHash('sha256')
   for await (const chunk of createReadStream(file)) hash.update(chunk)
   if (hash.digest('hex') !== artifact.sha256) throw new Error(`SHA-256 mismatch for ${target}`)
 }
-console.log(`Verified Bake ${manifest.version} release: ${targets.join(', ')}`)
+console.log(`Verified Bake ${manifest.version} release: ${targets.join(', ')}${missing.length > 0 ? `; archives held elsewhere: ${missing.join(', ')}` : ''}`)

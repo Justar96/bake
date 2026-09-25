@@ -38,9 +38,9 @@ function fixture(platforms = ['win32-x64'], payload = 'verified release bytes'):
   return { root, manifest }
 }
 
-function verify(root: string, complete = false, trusted: string | null = testKey): { code: number; stderr: string } {
+function verify(root: string, complete = false, trusted: string | null = testKey, flags: string[] = []): { code: number; stderr: string } {
   const env = { ...process.env, BAKE_RELEASE_PUBLIC_KEY: trusted ?? '' }
-  const child = Bun.spawnSync(['node', join(root, 'verify-manifest.mjs'), ...(complete ? ['--complete'] : [])], {
+  const child = Bun.spawnSync(['node', join(root, 'verify-manifest.mjs'), ...(complete ? ['--complete'] : []), ...flags], {
     stdout: 'pipe', stderr: 'pipe', timeout: 10_000, env,
   })
   return { code: child.exitCode, stderr: child.stderr.toString() }
@@ -58,6 +58,20 @@ test('complete mode rejects missing platforms', () => {
   const result = verify(fixture().root, true)
   expect(result.code).not.toBe(0)
   expect(result.stderr).toContain('Missing or invalid darwin-arm64 artifact')
+})
+
+test('a missing archive fails unless the archives are held elsewhere', () => {
+  const { root } = fixture(targets)
+  rmSync(join(root, 'public/releases/0.1.0/bake-v0.1.0-linux-x64.tar.gz'))
+  expect(verify(root, true).code).not.toBe(0)
+  expect(verify(root, true, testKey, ['--allow-missing-archives'])).toEqual({ code: 0, stderr: '' })
+})
+
+test('an archive present beside an image is still checked when others are held elsewhere', () => {
+  const { root } = fixture(targets)
+  rmSync(join(root, 'public/releases/0.1.0/bake-v0.1.0-linux-x64.tar.gz'))
+  writeFileSync(join(root, 'public/releases/0.1.0/bake-v0.1.0-win32-x64.tar.gz'), 'verified release bytez')
+  expect(verify(root, true, testKey, ['--allow-missing-archives']).stderr).toContain('SHA-256 mismatch for win32-x64')
 })
 
 test('rejects an empty manifest', () => {

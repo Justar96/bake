@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-The `bake-downloads` Railway service in project `28ff3000-7240-4c57-81d1-7bd05445c1ee` serves a release manifest, installers, and versioned platform archives at `https://bake.justar.dev`. The service exists, but a release is available only after its archives are built, checked, and deployed. Bake still runs on Node; Bun builds the workspace and installs the production dependency graph into each archive.
+The `bake-downloads` Railway service in project `28ff3000-7240-4c57-81d1-7bd05445c1ee` serves a release manifest and installers at `https://bake.justar.dev`, and redirects each versioned platform archive to the asset of the same name on that version's GitHub release. The service exists, but a release is available only after its archives are built, checked, and deployed. Bake still runs on Node; Bun builds the workspace and installs the production dependency graph into each archive.
 
 ## Build and check one platform locally
 
@@ -42,7 +42,7 @@ Run these commands on the default branch after its normal checks pass. `release:
 
 1. **preflight** (`release:preflight`) checks that the tag points to a commit on the default branch, names the workspace version, and has a written changelog section. It compares the version with the signed download manifest, or with GitHub's latest published release when the download service is off. The deployed unsigned `0.1.0` manifest is the sole signing exception for the first transition.
 2. **build** runs on one runner per target — `ubuntu-24.04`, `ubuntu-24.04-arm`, `macos-15`, `macos-15-intel`, and `windows-latest` — because the native modules are compiled for the host. Each runner checks it builds its target, packs the archive, installs it with the real installer and updates through it with `bake update` (`release:verify-local`, signed with a throwaway key), and, outside Windows, runs the built-profile terminal scenarios. Every platform reports even when one fails, and publishing needs all five.
-3. **publish** runs in the `release` environment, the only place the signing key and deploy token exist. It signs the manifest (`release:assemble --complete`), runs the image's signature gate, and checks that a retry does not change any archive already served under this version. It uploads the archives, manifest, signature, and installers to a GitHub release draft and downloads them again to compare every byte. It deploys the download service, waits for the manifest and every archive to become available, and only then publishes the draft. It refuses to overwrite an already published GitHub release.
+3. **publish** runs in the `release` environment, the only place the signing key and deploy token exist. It signs the manifest (`release:assemble --complete`), runs the image's signature gate, and checks that a retry does not change any archive already served under this version. It uploads the archives, manifest, signature, and installers to a GitHub release draft and downloads them again to compare every byte. It publishes the draft and verifies it as a client reads it, because the download service redirects its archives there. It then deploys the download service without the archives, which together exceed Railway's upload limit, and waits for the manifest and every archive to become available through it. A rerun keeps an already published GitHub release's assets and only proves they match this build.
 
 Run the workflow by hand from the Actions tab for a dry run: it builds and checks all five platforms and publishes nothing, even when started from a tag. If a tagged run fails before publication, rerun it; a matching version already deployed by that run is allowed, but different archive bytes are refused. If it fails after the GitHub release is public, check the hosts with `bun run release:verify-live <version> --complete` and inspect the failed step before starting a new version.
 
@@ -57,16 +57,18 @@ The GitHub release is a release host of its own: it carries the signed manifest 
 
 ## Publish a checked release by hand
 
-After every archive listed in the manifest has passed its native local check, run `node distribution/host/verify-manifest.mjs` and deploy the download service from the repository root:
+After every archive listed in the manifest has passed its native local check and is published on the version's GitHub release, run `node distribution/host/verify-manifest.mjs` and deploy the download service from the repository root:
 
 ```sh
-railway up ./distribution/host --path-as-root --no-gitignore \
+host="$(mktemp -d)/bake-downloads"
+cp -R distribution/host "$host" && rm -rf "$host/public/releases"
+railway up "$host" --path-as-root --no-gitignore \
   --project 28ff3000-7240-4c57-81d1-7bd05445c1ee \
   --environment production --service bake-downloads \
   --detach --json -m "Bake CLI direct download release"
 ```
 
-The `--no-gitignore` flag includes the generated `public/` payload. The Docker build rejects an unsigned manifest or one the committed key did not sign, empty manifests, unsupported targets, invalid names, empty archives, and size or SHA-256 mismatches for every included archive. Use `--complete` for the optional five-platform gate. Record the deployment ID, wait for that deployment to reach `SUCCESS`, then check `/health`, `/latest.json`, `/latest.json.sig`, both installer routes, and each newly published platform archive through the public domain. An upload response alone does not qualify the release. The manifest lists the platforms currently available; the installers fail clearly on an unavailable platform.
+The `--no-gitignore` flag includes the generated manifest and signature, and the copy leaves out the archives, which the service redirects to `https://github.com/Justar96/bake/releases/download/v<version>/`. The Docker build (`verify-manifest.mjs --allow-missing-archives`) rejects an unsigned manifest or one the committed key did not sign, empty manifests, unsupported targets, invalid names, empty archives, and size or SHA-256 mismatches for any archive it does hold. Use `--complete` for the optional five-platform gate. Record the deployment ID, wait for that deployment to reach `SUCCESS`, then check `/health`, `/latest.json`, `/latest.json.sig`, both installer routes, and each newly published platform archive through the public domain. An upload response alone does not qualify the release. The manifest lists the platforms currently available; the installers fail clearly on an unavailable platform.
 
 Users with Node 24 or newer can install on a platform listed in the published manifest. The Unix command requires the corresponding macOS or Linux archive to be published first:
 
