@@ -1589,6 +1589,7 @@ scenario('navigate', 'session picker cancellation, a new session, and switching 
       await tty.expect(`> ${SCREEN.caret}`)
       tty.send('/help\r', 'list session commands')
       await tty.search(/\/resume\b.* {2}Browse sessions or start a new one/u)
+      await tty.follows(SCREEN.idle, 'Command: /help')
       let start = tty.mark()
       tty.send('/sessions\r')
       await tty.expect('Choose session', '● ', 'Current', '+ New session', start)
@@ -1625,11 +1626,14 @@ scenario('navigate', 'session picker cancellation, a new session, and switching 
       await tty.expect(`> ${identity}${SCREEN.caret}`, start)
       tty.send('\r', 'Enter to switch back')
       await tty.expect(SCREEN.toolResult, `${SCREEN.status}tui-picked-model  Access workspace-write  Think high`, start)
-      await tty.follows(SCREEN.idle, SCREEN.toolResult)
+      await tty.wait('the resumed session to accept input', text => {
+        const shown = text.slice(start)
+        return shown.lastIndexOf(SCREEN.idle) > Math.max(shown.lastIndexOf(SCREEN.toolResult), shown.lastIndexOf(dictionaries.en.sessionsBusy))
+      })
 
       start = tty.mark()
-      tty.send('\x1b[A', 'Up, recalling the last command')
-      await tty.expect(`> /sessions${SCREEN.caret}`, start)
+      tty.send('\x1b[A', 'Up, recalling the last saved prompt')
+      await tty.expect(`> ${run.prompt}${SCREEN.caret}`, start)
       tty.send('\x1b[B', 'Down, back to an empty composer')
       await tty.expect(`> ${SCREEN.caret}`, start)
 

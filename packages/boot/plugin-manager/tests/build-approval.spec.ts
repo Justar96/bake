@@ -39,6 +39,19 @@ it('preserves pnpm file dependency selectors verbatim', async () => {
   expect(parse(readFileSync(filename, 'utf8'))).toEqual({ allowBuilds: { [name]: true } })
 })
 
+it('approves selectors recorded by newer pnpm without workspace placeholders', async () => {
+  const name = '@scope/addon@file:../local addon'
+  const { dir, filename } = fixture('allowBuilds:\n  denied: false\n  "@other/*": false\n')
+  mkdirSync(join(dir, 'node_modules'))
+  writeFileSync(join(dir, 'node_modules', '.modules.yaml'), JSON.stringify({
+    ignoredBuilds: [name, 'denied@1.0.0', '@other/addon@file:../addon'],
+  }))
+  expect(await readPendingBuilds(dir)).toEqual([name])
+  await approveBuilds(dir, [name])
+  expect(parse(readFileSync(filename, 'utf8'))).toEqual({ allowBuilds: { [name]: true, denied: false, '@other/*': false } })
+  expect(await readPendingBuilds(dir)).toEqual([])
+})
+
 it.each([undefined, '{}\n', 'nodeLinker: hoisted\n', 'allowBuilds: {}\n'])('has no pending approval without pnpm placeholders: %s', async (text) => {
   const { dir } = fixture(text)
   expect(await readPendingBuilds(dir)).toEqual([])

@@ -359,7 +359,7 @@ export class PluginManager extends TypertRemoteService {
         result.packageResult = await this.runPnpm(['add', spec], control.abort.signal, requestId)
         if (stopped()) throw new InstallCancelledError()
         if (result.packageResult.exitCode !== 0) {
-          // pnpm-workspace.yaml is not restored, so the names pnpm left undecided there can be offered for approval.
+          // pnpm workspace settings and ignored-build metadata survive manifest cleanup.
           try { result.pendingBuilds = await readPendingBuilds(this.profile.dir) }
           catch (error) {
             this.ownerContext.logger.warn('Could not read pending build approvals after pnpm failed', error)

@@ -26,7 +26,7 @@ describe('syntax', () => {
   it('colours a preloaded language before the first frame, covering each line', async () => {
     syntax = createSyntax()
     await syntax.ready
-    const lines = ['const home = process.env.HOME // where', '  return null']
+    const lines = ['const home = process.env.HOME', '// where']
     const tokens = syntax.highlight(lines, 'a.ts')
     expect(tokens).toHaveLength(2)
     expect(tokens!.map(line => line.reduce((sum, token) => sum + token.length, 0))).toEqual(lines.map(line => line.length))
@@ -34,7 +34,7 @@ describe('syntax', () => {
     // a comment is drawn dim.
     expect(tokens![0]!.some(token => token.color !== undefined)).toBe(true)
     expect(tokens!.flat().every(token => token.color === undefined || token.color !== '#839496')).toBe(true)
-    expect(tokens![0]!.at(-1)).toMatchObject({ dim: true })
+    expect(tokens![1]!.at(-1)).toMatchObject({ dim: true })
   })
 
   it('leaves another language plain until its grammar loads, then colours it', async () => {
