@@ -474,6 +474,11 @@ function SessionView(props: AppProps): React.ReactElement {
     if (key.return && inputMenu?.kind === 'argument') {
       const choice = choices?.[selectedIndex(choices, composer.value, composer.position)]
       if (choice === undefined) { composer.type('\n'); return }
+      // A bare command with an optional argument runs as typed; choices are
+      // offered, not forced, until the user starts typing one.
+      const command = props.completion.entries.find(item => item.kind === 'command' && item.name === argument?.name)
+      if (argument?.partial === '' && composer.value.slice(argument.end).trim() === ''
+        && command !== undefined && !requiresInput(command)) { composer.type('\n'); return }
       if (choice.argumentRequiresInput !== true && argument?.partial === choice.name
         && composer.value.slice(argument.end).trim() === '') { composer.type('\n'); return }
       composer.replace(choice.draft, choice.cursor)

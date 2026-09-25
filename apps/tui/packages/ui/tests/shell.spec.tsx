@@ -111,6 +111,18 @@ describe('terminal composer', () => {
     await vi.waitFor(() => expect(state.onSubmit).toHaveBeenCalledExactlyOnceWith('/goal edit Update docs'))
   })
 
+  it('runs a command with an optional argument on Enter before a choice is typed', async () => {
+    const state = props({ completion: { loading: false, error: undefined,
+      entries: [{ name: 'login', description: 'Sign in', kind: 'command', hint: '[target]', choices: true }],
+      argument: { name: 'login', partial: '', entries: ['deepseek', 'openai'], loading: false, error: undefined },
+    } })
+    const ui = render(<App {...state} />)
+    ui.stdin.write('/login ')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('▸ deepseek'))
+    ui.stdin.write('\r')
+    await vi.waitFor(() => expect(state.onSubmit).toHaveBeenCalledExactlyOnceWith('/login '))
+  })
+
   it('submits an exact complete argument choice on Enter', async () => {
     const state = props({ completion: { loading: false, error: undefined,
       entries: [{ name: 'plan', description: 'Plan mode', kind: 'command', hint: '[off|message]', choices: true }],
