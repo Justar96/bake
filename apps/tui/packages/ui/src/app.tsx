@@ -1,6 +1,6 @@
 /** Terminal view over committed history, live presentation, and harness-owned state. */
-import React, { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Box, measureElement, Static, Text, useInput, useIsScreenReaderEnabled, usePaste, useWindowSize, type DOMElement } from 'ink'
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Box, Text, useInput, useIsScreenReaderEnabled, usePaste, useWindowSize } from 'ink'
 import type { AgentStatus } from '@deepseek-ai/dsh-agent'
 import { formatAttachment, type AttachmentSummary, type Row } from './rows.ts'
 import { transcriptRows, type Transcript } from './transcript.ts'
@@ -10,14 +10,16 @@ import { useComposer, type Submit } from './composer.ts'
 import { argumentQuery, commandUsage, completionMenu, requiresInput, type CompletionCatalog, type CompletionChoice, type FileCatalog } from './completion.ts'
 import { inputHistory } from './history.ts'
 import { InteractionView, type Interaction, type InteractionAnswer } from './interaction.tsx'
-import { budgetFor, COLUMN, MARKER, selectionWindow, type Budget, type FrameStyle, type WindowSize } from './layout.ts'
+import { budgetFor, selectionWindow, type Budget, type FrameStyle, type WindowSize } from './layout.ts'
 import { compactModel, compactPath, present, type Highlight, type ResultBound } from './present.ts'
-import { cacheTone, permissionTone, PALETTE } from './palette.ts'
-import { Subagents, type SubagentEntry } from './subagents.tsx'
-import { Goal, goalRows, goalState, type GoalEntry } from './goal.tsx'
+import { cacheTone, permissionTone, PALETTE, type PaletteColor } from './palette.ts'
+import type { SubagentEntry } from './subagents.tsx'
+import { goalSheet, goalState, type GoalEntry } from './goal.ts'
+import { Sheet, sheetPage, sheetRows, type SheetLine } from './sheet.tsx'
+import { Tasks, taskSheet, taskSheetTitle, tasksOpen, type TaskEntry } from './tasks.tsx'
 import { Beat } from './beat.tsx'
-import { Welcome } from './welcome.tsx'
-import { Chrome, Completion, Line, lineHeight, LiveRegion, Notice, Panel, Thinking, THINKING_GAP, wrappedRows, type ActivityState } from './line.tsx'
+import { Scrollback, type Opening } from './scrollback.tsx'
+import { Chrome, Completion, Line, LiveRegion, Notice, Panel, Thinking, THINKING_GAP, wrappedRows, type ActivityState } from './line.tsx'
 import { activityWord, phaseLabel, phaseOf, lastTurn, THINKING_ROWS, thinkingRows, turnSummary, type Clock } from './activity.ts'
 
 /** Display-only projection of one pending inbox message. */
@@ -28,18 +30,9 @@ export interface PendingInput {
   readonly attachments?: readonly AttachmentSummary[]
 }
 
-/**
- * Display-only projection of one entry in the agent's task list.
- *
- * The agent replaces the whole list on every write, so an entry needs no
- * identity. This surface shows what the task is and where it stands.
- */
-export interface TaskEntry {
-  readonly text: string
-  readonly status: 'pending' | 'in_progress' | 'completed'
-}
+export type { TaskEntry } from './tasks.tsx'
 
-export { goalState, type GoalEntry } from './goal.tsx'
+export { goalState, type GoalEntry } from './goal.ts'
 
 /** Application state and actions supplied by the terminal owner. */
 export interface AppProps {
@@ -84,10 +77,11 @@ export interface AppProps {
   readonly inspectionParent?: string
   readonly onSubagents?: () => void
   /**
-   * A newer Bake release this install can move to with `bake update`. Named in
+   * A newer Bake release for this install. `installed` means `current` already
+   * names it, so a restart runs it; otherwise `/update` installs it. Named in
    * the status line, the bounded field that yields first. Absent, nothing is said.
    */
-  readonly update?: string
+  readonly update?: { readonly version: string; readonly installed: boolean }
   /** Shift-Tab: step the selected model's reasoning effort. Absent, Shift-Tab does nothing. */
   readonly onCycleThinking?: () => void
   /** Harness plan projection; absent when this profile has no plan mode. */
@@ -188,143 +182,6 @@ export function RowView({ row, budget, result }: {
   return <>{present(row, result, line => wrappedRows(line, budget)).map((line, index) => <Line key={index} line={line} budget={budget} />)}</>
 }
 
-/** Terminal rows a committed row prints, measured as {@link RowView} draws it. */
-function rowHeight(row: Row, budget: Budget, result: ResultBound): number {
-  return present(row, result, line => wrappedRows(line, budget)).reduce((rows, line) => rows + lineHeight(line, budget), 0)
-}
-
-/**
- * The agent's task list, as current state, not as history.
- *
- * Every write replaces the list. Printing each write in the transcript would
- * repeat the same plan with a different tick. This panel shows the one version
- * that is still current, and it costs rows only while a list exists.
- *
- * It is a checklist, not a tree, so it is distinct from the subagent panel
- * beside it. A heading with a progress bar and a count, then each task on its
- * own row, indented under the heading. The box fills as the agent works. The
- * task in progress is ocean blue, finished tasks are ticked green and struck
- * through, and waiting tasks hold an empty box, so `NO_COLOR` still shows
- * every state by shape. The bar uses heavy and light rules for the same reason.
- *
- * The list keeps the agent's order, so a finished task stays where the plan
- * put it. When rows run short, finished tasks yield first, oldest first. The
- * remaining rows belong to work that has not happened yet. The list is capped
- * like every other panel. The dynamic region shares one budget, and a long
- * plan would spend the live region's share of it. Each task is one truncated
- * row, so the cap is exact.
- *
- * @param props.todos - the current list, in the agent's own order.
- * @param props.copy - locale-owned labels.
- * @param props.limit - rows the panel may draw, head and overflow included.
- * @returns the panel, or null when nothing is left to do or there is no room.
- */
-export function Tasks({ todos, copy, limit }: {
-  readonly todos: readonly TaskEntry[]
-  readonly copy: TuiCopy
-  readonly limit: number
-}): React.ReactElement | null {
-  const done = todos.filter(item => item.status === 'completed').length
-  if (done === todos.length || limit <= 0) return null
-  // The head and the overflow count are rows of the panel, not extras.
-  // Counting only the entries makes every height claim against this panel
-  // short, and two rows is the whole chrome.
-  const room = limit - 1
-  let shown = [...todos]
-  while (shown.length > room) {
-    const finished = shown.findIndex(item => item.status === 'completed')
-    if (finished < 0) break
-    shown.splice(finished, 1)
-  }
-  if (shown.length > room) shown = shown.slice(0, Math.max(0, room - 1))
-  const hidden = todos.length - done - shown.filter(item => item.status !== 'completed').length
-  const filled = Math.round(TASK_BAR * done / todos.length)
-  return <Box flexDirection="column" flexShrink={0} maxHeight={limit} overflowY="hidden">
-    <Text wrap="truncate-end">
-      <Text bold>{copy.todoTitle}</Text>
-      {'  '}
-      <Text color={PALETTE.asking}>{TASK_GLYPH.filled.repeat(filled)}</Text>
-      <Text dimColor>{TASK_GLYPH.empty.repeat(TASK_BAR - filled)}</Text>
-      <Text dimColor>{`  ${done}/${todos.length} ${copy.todoDone}`}</Text>
-    </Text>
-    {shown.map((item, index) => <Task key={index} status={item.status} text={item.text} />)}
-    {hidden > 0 && room > 0 && <Box paddingLeft={COLUMN.rail + 2} flexShrink={0}>
-      <Text dimColor wrap="truncate-end">+{hidden} {copy.todoPending}</Text>
-    </Box>}
-  </Box>
-}
-
-/** Cells of the task panel's progress bar. Enough to move on every task of a short plan. */
-const TASK_BAR = 12
-
-/** The task panel's own shapes, apart from the markers the subagent panel uses. */
-const TASK_GLYPH = {
-  done: '\u2713',
-  active: MARKER.selected,
-  pending: '\u25a1',
-  filled: '\u2501',
-  empty: '\u2500',
-} as const
-
-/** One task. Its box is in the rail's width past the heading's indent, and its text is truncated to one row. */
-function Task({ status, text }: { readonly status: TaskEntry['status'], readonly text: string }): React.ReactElement {
-  const glyph = status === 'completed' ? TASK_GLYPH.done : status === 'in_progress' ? TASK_GLYPH.active : TASK_GLYPH.pending
-  const color = status === 'completed' ? PALETTE.done : status === 'in_progress' ? PALETTE.asking : undefined
-  return <Box flexDirection="row" flexShrink={0} paddingLeft={COLUMN.rail}>
-    <Box width={2} flexShrink={0}>
-      <Text bold={color !== undefined} {...color === undefined ? { dimColor: true } : { color }}>{glyph}</Text>
-    </Box>
-    <Text wrap="truncate-end" bold={status === 'in_progress'} dimColor={status !== 'in_progress'}
-      strikethrough={status === 'completed'}>{text}</Text>
-  </Box>
-}
-
-/** The welcome block as the first committed item. The version and session it opens. */
-interface Opening { readonly kind: 'welcome', readonly version: string, readonly heading: string }
-
-/**
- * Items `Static` prints ahead of the transcript.
- *
- * Always one item. A session that opens with the welcome block folds the
- * session line into it. A session that opens with history prints the heading
- * alone. The lead never adds a row to the stream.
- */
-const LEAD_ITEMS = 1
-
-/** Print each suffix once, retaining Ink's accumulated scrollback across resize. */
-const CommittedTranscript = memo(function CommittedTranscript({ transcript, heading, opening, budget, result, copy, frame, columns }: {
-  readonly transcript: Transcript
-  readonly heading: string
-  readonly opening: Opening | undefined
-  readonly budget: Budget
-  readonly result: ResultBound
-  readonly copy: TuiCopy
-  readonly frame: FrameStyle
-  readonly columns: number
-}): React.ReactElement {
-  // Ink 7 Static consumes only length and slice(index). Adapt the persistent
-  // transcript at this boundary so appends do not copy its entire prefix.
-  // Static must keep its identity. Remounting clears Ink's saved history and
-  // leaves only the latest suffix when a resize requires a replay.
-  const items = useMemo(() => ({
-    length: transcript.length + LEAD_ITEMS,
-    slice(start = 0): (Row | Opening)[] {
-      // The lead is one item, not the first of several. While `start < 1` it
-      // still belongs to the suffix, so slice it as that one item.
-      const suffix = transcriptRows(transcript, Math.max(0, start - LEAD_ITEMS))
-      const head: (Row | Opening)[] = opening === undefined
-        ? [{ kind: 'notice', tone: 'info', text: heading }]
-        : [opening]
-      return start === 0 ? [...head, ...suffix] : start < LEAD_ITEMS ? [...head.slice(start), ...suffix] : suffix
-    },
-  }) as (Row | Opening)[], [transcript, heading, opening])
-  return <Static items={items}>
-    {(item, index) => item.kind === 'welcome'
-      ? <Welcome key={index} version={item.version} heading={item.heading} copy={copy} frame={frame} columns={columns} />
-      : <RowView key={index} row={item} budget={budget} result={result} />}
-  </Static>
-})
-
 /**
  * Whether the terminal has just become narrower or taller than the last painted frame.
  *
@@ -359,55 +216,6 @@ function useRepaint(size: WindowSize, view: string, openingChild: boolean): bool
 }
 
 /**
- * Minimum height the dynamic frame holds, so the composer never rises off the bottom row.
- *
- * The runner starts the frame on the terminal's bottom row. A frame drawn
- * there stays there while it and the history printed above it in the same
- * render fill at least as many rows as the previous frame. A shorter frame —
- * a menu closing, a notice clearing, a task finishing — would leave the
- * composer that many rows up. The frame therefore keeps its previous height
- * minus what prints. Rows its content does not fill stay blank above the
- * controls until printed history takes them.
- *
- * What prints is measured the way {@link RowView} draws it, before the render
- * that prints it. A floor corrected after the frame was written would already
- * have moved the composer once.
- *
- * @param committed - the transcript `Static` prints.
- * @param lead - items `Static` prints ahead of the transcript.
- * @param budget - budgets for the current terminal size.
- * @param result - the preview bound committed rows print with.
- * @param repainting - whether this render repaints the screen. A repaint
- *   replays history and the frame together, so it holds nothing.
- * @returns the frame's minimum height, and the ref that measures the frame.
- */
-function useHeldHeight(committed: Transcript, lead: number, budget: Budget, result: ResultBound, repainting: boolean): {
-  readonly floor: number
-  readonly frame: React.RefObject<DOMElement | null>
-} {
-  const frame = useRef<DOMElement>(null)
-  // Items `Static` has printed, counting the session line whether it prints
-  // alone or inside the welcome block, and the frame's height as last laid out.
-  const held = useRef({ printed: 0, height: 0 })
-  const items = committed.length + lead
-  let floor = 0
-  if (!repainting && held.current.height > 0) {
-    let remaining = held.current.height
-    if (held.current.printed < items) {
-      for (const row of transcriptRows(committed, Math.max(0, held.current.printed - lead))) {
-        remaining -= rowHeight(row, budget, result)
-        if (remaining <= 0) break
-      }
-    }
-    floor = Math.min(budget.dynamic, Math.max(0, remaining))
-  }
-  useLayoutEffect(() => {
-    held.current = { printed: items, height: repainting || frame.current === null ? 0 : measureElement(frame.current).height }
-  })
-  return { floor, frame }
-}
-
-/**
  * Render the terminal session. Ink owns key decoding and bracketed-paste mode.
  * @param props - harness state, localized copy, and application callbacks.
  * @returns transcript, active interaction, status, and composer.
@@ -416,9 +224,44 @@ export function App(props: AppProps): React.ReactElement {
   return <SessionView key={props.sessionId} {...props} />
 }
 
+/** A row around the composer that arrow keys can select. */
+type Focus = 'tasks' | 'goal' | 'subagents'
+
+/** What an open sheet shows in full. */
+type SheetKind = 'goal' | 'tasks'
+
 function SessionView(props: AppProps): React.ReactElement {
   const composer = useComposer(props.onSubmit, () => inputHistory(props.committed, props.pending), (props.attachments?.length ?? 0) > 0)
   const { copy, interaction } = props
+  // One arrow-key focus across the rows around the composer: the task row
+  // and the goal above it, the subagents field below. Refs, because keys
+  // decoded in one read see the focus before React renders it.
+  const [focus, setFocus] = useState<Focus | undefined>(undefined)
+  const focusRef = useRef<Focus | undefined>(undefined)
+  const focusOn = (next: Focus | undefined): void => {
+    focusRef.current = next
+    setFocus(next)
+  }
+  const [sheet, setSheet] = useState<SheetKind | undefined>(undefined)
+  const sheetRef = useRef<SheetKind | undefined>(undefined)
+  const [sheetScroll, setSheetScroll] = useState(0)
+  const openSheet = (next: SheetKind | undefined): void => {
+    sheetRef.current = next
+    setSheet(next)
+    setSheetScroll(0)
+  }
+  const tasksShown = tasksOpen(props.todos)
+  const hasTasks = (props.todos?.length ?? 0) > 0
+  const hasSubagents = (props.subagents?.length ?? 0) > 0
+  const available = (target: Focus): boolean =>
+    target === 'goal' ? props.goal !== undefined : target === 'tasks' ? tasksShown : hasSubagents
+  const inert = interaction !== undefined || props.inputBlocked === true || props.inspection !== undefined
+  useEffect(() => {
+    if (focusRef.current !== undefined && (inert || !available(focusRef.current))) focusOn(undefined)
+  }, [inert, props.goal === undefined, tasksShown, hasSubagents])
+  useEffect(() => {
+    if (sheetRef.current !== undefined && (inert || (sheetRef.current === 'goal' ? props.goal === undefined : !hasTasks))) openSheet(undefined)
+  }, [inert, props.goal === undefined, hasTasks])
   const [menu, setMenu] = useState({ draft: '', cursor: 0, selected: '', dismissed: false })
   const currentMenu = useRef(menu)
   const updateMenu = (selected: string, dismissed: boolean): void => {
@@ -440,19 +283,52 @@ function SessionView(props: AppProps): React.ReactElement {
   useEffect(() => { props.onArgumentQuery?.(argument === undefined ? undefined : { name: argument.name, partial: argument.partial }) },
     [props.onArgumentQuery, argument?.name, argument?.partial])
   const selected = matches === undefined ? 0 : selectedIndex(matches, composer.text, composer.cursor)
-  usePaste(composer.paste, { isActive: interaction === undefined && props.inputBlocked !== true && props.inspection === undefined && !composer.submitting })
+  usePaste(composer.paste, { isActive: sheet === undefined && interaction === undefined && props.inputBlocked !== true && props.inspection === undefined && !composer.submitting })
   useInput((text, key) => {
     if (props.inspection !== undefined) return
     if (key.ctrl && text === 'c') { props.onInterrupt(); return }
+    if (sheetRef.current !== undefined) {
+      if (key.escape || key.return) { openSheet(undefined); return }
+      if (key.upArrow || (key.ctrl && text === 'p')) setSheetScroll(current => Math.max(0, Math.min(current, sheetMaxScroll) - 1))
+      if (key.downArrow || (key.ctrl && text === 'n')) setSheetScroll(current => Math.min(sheetMaxScroll, current + 1))
+      if (key.pageUp) setSheetScroll(current => Math.max(0, Math.min(current, sheetMaxScroll) - sheetRowsShown))
+      if (key.pageDown) setSheetScroll(current => Math.min(sheetMaxScroll, current + sheetRowsShown))
+      if (key.home) setSheetScroll(0)
+      if (key.end) setSheetScroll(Number.MAX_SAFE_INTEGER)
+      return
+    }
     if (props.quitting) props.onQuitDismiss?.()
     const inputMenu = matchesFor(composer.value, composer.position)
     const choices = inputMenu?.entries
     if (key.escape) {
+      if (focusRef.current !== undefined) { focusOn(undefined); return }
       if (choices !== undefined) { updateMenu('', true); return }
       props.onCancel(); return
     }
     if (interaction !== undefined || props.inputBlocked === true || props.inspection !== undefined || composer.blocked || key.meta) return
-    if (key.ctrl && text === 'g' && (props.subagents?.length ?? 0) > 0) { props.onSubagents?.(); return }
+    if (key.ctrl && text === 'o' && props.goal !== undefined) { focusOn(undefined); openSheet('goal'); return }
+    if (key.ctrl && text === 't' && hasTasks) { focusOn(undefined); openSheet('tasks'); return }
+    if (key.ctrl && text === 'g' && hasSubagents) { focusOn(undefined); props.onSubagents?.(); return }
+    const focused = focusRef.current
+    if (focused !== undefined && available(focused)) {
+      if (focused === 'subagents') {
+        if (key.upArrow || key.leftArrow) { focusOn(undefined); return }
+        if (key.downArrow || key.rightArrow) return
+        if (key.return) { focusOn(undefined); props.onSubagents?.(); return }
+      } else {
+        // Above the composer the task row sits over the goal's header.
+        if (key.upArrow) { if (focused === 'goal' && tasksShown) focusOn('tasks'); return }
+        if (key.downArrow) { focusOn(focused === 'tasks' && props.goal !== undefined ? 'goal' : undefined); return }
+        if (key.leftArrow) { focusOn(undefined); return }
+        if (key.rightArrow) return
+        if (key.return) { focusOn(undefined); openSheet(focused); return }
+      }
+      // Any other key belongs to the composer again.
+      focusOn(undefined)
+    }
+    if (key.downArrow && composer.value === '' && choices === undefined && hasSubagents) {
+      focusOn('subagents'); return
+    }
     // Before the menu and the composer, which both read a plain Tab.
     if (key.tab && key.shift) { props.onCycleThinking?.(); return }
     if (key.ctrl && (text === 'p' || text === 'n')) {
@@ -468,7 +344,15 @@ function SessionView(props: AppProps): React.ReactElement {
       return
     }
     if (key.upArrow || key.downArrow) {
-      composer.recall(key.upArrow ? 'older' : 'newer'); updateMenu('', true); return
+      // Up walks back through history first; only past its oldest entry does
+      // it reach the goal on the header, or the task row when there is no
+      // goal. Leaving history restores the unsent draft rather than a stale
+      // entry one Enter would rerun.
+      const above = props.goal !== undefined ? 'goal' : tasksShown ? 'tasks' : undefined
+      if (!composer.recall(key.upArrow ? 'older' : 'newer') && key.upArrow && above !== undefined) {
+        composer.leave(); focusOn(above)
+      }
+      updateMenu('', true); return
     }
     if (key.shift && key.return) { composer.paste('\n'); return }
     if (key.return && inputMenu?.kind === 'argument') {
@@ -573,7 +457,6 @@ function SessionView(props: AppProps): React.ReactElement {
     || props.inspectionParent !== undefined || props.committed.length > 0
     ? undefined
     : { kind: 'welcome', version: props.version, heading: `${copy.session}: ${props.sessionId}` })
-  const held = useHeldHeight(props.committed, LEAD_ITEMS, budget, result, repainting)
   const menuLimit = Math.min(props.completionLimit, budget.items)
   const liveWant = interaction === undefined ? budget.live : 1
   const controls = interaction === undefined ? budget.chrome.rows + budget.composer - 1 : 0
@@ -587,6 +470,20 @@ function SessionView(props: AppProps): React.ReactElement {
   // opens the interaction instead and is charged here, not to the interaction.
   const openLimit = claim(interaction !== undefined && budget.chrome.gap ? 1 : 0)
   const interactionLimit = claim(interaction === undefined ? 0 : menuLimit)
+  // An open sheet takes every row the interaction leaves. Below five it
+  // replaces the whole region, composer included, so it can still be read.
+  const sheetView: { readonly title: string, readonly color: PaletteColor, readonly lines: readonly SheetLine[] } | undefined =
+    sheet === 'goal' && props.goal !== undefined
+      ? { title: copy.goalTitle, color: goalState(props.goal, copy)!.color, lines: goalSheet(props.goal, copy) }
+      : sheet === 'tasks' && props.todos !== undefined && hasTasks
+        ? { title: taskSheetTitle(props.todos, copy), color: PALETTE.asking, lines: taskSheet(props.todos) }
+        : undefined
+  const sheetLimit = claim(sheetView === undefined ? 0 : unclaimed)
+  const sheetStandalone = sheetView !== undefined && sheetLimit < 5
+  const sheetViewLimit = sheetStandalone ? budget.dynamic : sheetLimit
+  const sheetRowsShown = sheetPage(sheetViewLimit, size.columns)
+  const sheetMaxScroll = sheetView === undefined ? 0
+    : Math.max(0, sheetRows(sheetView.lines, sheetViewLimit, size.columns).length - sheetRowsShown)
   // Claimed before anything but the interaction. It is the answer to a key the
   // user has already pressed, and the next press ends the session.
   const quitLimit = claim(props.quitting ? 1 : 0)
@@ -607,11 +504,7 @@ function SessionView(props: AppProps): React.ReactElement {
   // After the output it summarizes, which it cannot outrank on a short
   // terminal; the header already says the turn is running.
   const thinkingLimit = claim(interaction !== undefined || !running || thinking.length === 0 ? 0 : thinking.length + THINKING_GAP)
-  // Before the tasks: the goal is what they work toward, and a human set
-  // it, where the list is the agent's.
-  const goalLimit = claim(Math.min(menuLimit, goalRows(props.goal, copy, size.columns)))
-  const taskLimit = claim(props.todos === undefined ? 0 : menuLimit)
-  const subagentLimit = claim((props.subagents?.length ?? 0) === 0 ? 0 : Math.min(menuLimit, (props.subagents?.length ?? 0) + 2))
+  const taskLimit = claim(tasksShown ? 1 : 0)
   const pendingLimit = claim(props.pending.length === 0 ? 0 : menuLimit)
   const attachmentLimit = claim((props.attachments?.length ?? 0) === 0 ? 0 : menuLimit)
   // One row, and the command itself may be long enough to wrap past it.
@@ -640,11 +533,14 @@ function SessionView(props: AppProps): React.ReactElement {
         color: props.stopping ? PALETTE.failed : PALETTE.running,
       }
       : summary === undefined ? undefined : { kind: 'ended', summary }
-  const panels = <>
+  const goalStanding = goalState(props.goal, copy)
+  const working = props.subagents?.filter(entry => entry.state === 'working').length ?? 0
+  const sheetBlock = sheetView === undefined ? null : <Sheet {...sheetView} copy={copy} columns={size.columns}
+    limit={sheetViewLimit} offset={sheetScroll} frame={props.frame} />
+  const panels = sheetView !== undefined && !sheetStandalone ? sheetBlock : <>
     {turn.current !== undefined && interaction === undefined && <Thinking rows={thinking} limit={thinkingLimit} />}
-    <Goal goal={props.goal} copy={copy} columns={size.columns} limit={goalLimit} />
-    {props.todos !== undefined && <Tasks todos={props.todos} copy={copy} limit={taskLimit} />}
-    <Subagents entries={props.subagents ?? []} copy={copy} limit={subagentLimit} />
+    {props.todos !== undefined && taskLimit > 0 && <Tasks todos={props.todos} copy={copy} columns={size.columns}
+      focused={focus === 'tasks'} hint={copy.todoKey} />}
     <Panel
       title={copy.pending} color={PALETTE.waiting} limit={pendingLimit} more={copy.moreLines}
       items={props.pending.map(message => `${message.target === 'next-step' ? copy.nextStep : copy.nextTurn}: ${[message.text, ...(message.attachments ?? []).map(formatAttachment)].filter(Boolean).join('\n')}`)}
@@ -680,7 +576,7 @@ function SessionView(props: AppProps): React.ReactElement {
       {visibleMenu?.error !== undefined && <Status text={`${visibleMenu?.kind === 'file' ? copy.filesError : copy.catalogError}: ${visibleMenu.error}`} tone="error" />}
     </Box>}
     {usage !== undefined && usageLimit > 0 && <Status text={`/${usage.name} ${usage.hint}  ${usage.description}`} />}
-  </>
+    </>
   if (props.inspection !== undefined) {
     const child = props.inspection
     const { context: _context, usage: _usage, plan: _plan, goal: _goal, permission: _permission, thinkingLevel: _thinkingLevel,
@@ -691,21 +587,11 @@ function SessionView(props: AppProps): React.ReactElement {
       interaction={undefined} command={undefined}
       notice={`${child.label} · ${copy.subagentBack}`} />
   }
-  return <Box flexDirection="column">
-    <CommittedTranscript transcript={props.committed} heading={heading} opening={opening} budget={budget} result={result}
-      copy={copy} frame={props.frame} columns={size.columns} />
-    {/* Above the controls, so the one overflowing frame leaves them at the
-        bottom where the replayed history is about to put them. */}
-    {repainting && <Box height={size.rows} flexShrink={0} />}
-    {/* One beat for everything that moves below: the header and the
-        markers of running actions redraw together, and only when they change. */}
+  return <Scrollback transcript={props.committed} heading={heading} opening={opening} budget={budget} result={result}
+    copy={copy} frame={props.frame} size={size} repainting={repainting} recording={sheet === undefined}>
     <Beat clock={clock}>
-      {/* Sized to its content or the height it holds, whichever is taller, so
-          the composer stays on the bottom row the runner started it on.
-          Capped because the claims above are what keep Ink off its
-          screen-clearing path, and this is the guard if one of them is wrong. */}
-      <Box ref={held.frame} flexDirection="column" flexShrink={0} minHeight={held.floor} maxHeight={budget.dynamic} overflowY="hidden">
-        <LiveRegion rows={liveRows} budget={budget} limit={liveLimit} result={result} clock={animate} />
+        {sheetStandalone ? sheetBlock : <>
+        {sheet === undefined && <LiveRegion rows={liveRows} budget={budget} limit={liveLimit} result={result} clock={animate} />}
         {/* The held rows: under the output, so what streams stays against the
             history it continues, and over the controls, which stay together. */}
         <Box flexGrow={1} />
@@ -725,6 +611,11 @@ function SessionView(props: AppProps): React.ReactElement {
               } }}
               right={[
                 // In priority order, because narrowing drops them from the end.
+                ...(props.subagents?.length ?? 0) === 0 ? [] : [{
+                  text: `${focus === 'subagents' ? '> ' : '↓ '}${copy.subagentsTitle}: ${props.subagents!.length}${working === 0 ? '' : ` · ${working} ${copy.subagentWorking}`}${focus === 'subagents' ? ` · ${copy.subagentsOpen}` : ''}`,
+                  short: `${focus === 'subagents' ? '>' : '↓'} ${props.subagents!.length}`,
+                  selected: focus === 'subagents',
+                }],
                 // Occupancy is what a user compacts on. The totals are what the
                 // session cost. The path is last because it is the unbounded
                 // field. The status line shortens it from the start and keeps
@@ -734,7 +625,10 @@ function SessionView(props: AppProps): React.ReactElement {
                 ...props.usage === undefined ? [] : formatTotals(props.usage, { input: copy.tokensIn, output: copy.tokensOut }),
                 ...hit === undefined ? [] : [{ label: copy.cacheHit, value: `${hit}%`, color: cacheTone(hit) }],
                 // Last of the bounded fields: it drops before any reading of the session.
-                ...props.update === undefined ? [] : [{ label: copy.updateLabel, value: `v${props.update} · bake update`, color: PALETTE.waiting }],
+                ...props.update === undefined ? [] : [{
+                  label: copy.updateLabel, color: PALETTE.waiting,
+                  value: `v${props.update.version} · ${props.update.installed ? copy.updateRestart : '/update'}`,
+                }],
                 compactPath(props.cwd, process.env['HOME']),
               ]}
               columns={size.columns}
@@ -753,9 +647,10 @@ function SessionView(props: AppProps): React.ReactElement {
               layout={budget.chrome}
               frame={props.frame}
               activity={activity}
-              // The block holds the goal when it has room. Only a terminal
-              // too short for it keeps the goal on the header's row.
-              standing={goalLimit > 0 ? undefined : goalState(props.goal, copy)}
+              standing={goalStanding === undefined ? undefined : focus === 'goal'
+                ? { ...goalStanding, details: `${copy.goalOpen} · ${goalStanding.details}` }
+                : { ...goalStanding, key: copy.goalKey }}
+              standingFocused={focus === 'goal'}
               clock={clock}
               motion={animate !== undefined}
               compact={screenReader}
@@ -769,7 +664,7 @@ function SessionView(props: AppProps): React.ReactElement {
               {panels}
             </Box>
             )}
-      </Box>
+        </>}
     </Beat>
-  </Box>
+  </Scrollback>
 }

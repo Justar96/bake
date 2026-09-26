@@ -311,6 +311,7 @@ describe('loadProfile', () => {
     expect(PROFILE_TEMPLATES).toEqual({
       tui: { bundles: ['@deepseek-ai/dsh-base', '@dsh-tui/app'] },
       headless: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-headless'] },
+      desktop: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-desktop'] },
     })
     const shippedAnchor = stageInstallation({
       '@deepseek-ai/dsh-base': { patch: '[]\n' },

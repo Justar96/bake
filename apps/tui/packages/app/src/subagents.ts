@@ -41,6 +41,11 @@ export function subagentEntries(view: SubagentView, ctx: Context, copy: TuiCopy)
 export class SubagentCatalog {
   private state: SubagentView = { entries: [], activeRuns: [], error: undefined, outcomes: new Map() }
   private readonly runs = new Map<string, SubagentRunInfo>()
+  /**
+   * Each child's outcome, once known. A child's own turn events keep it
+   * current, so its log is read once rather than on every turn of every child.
+   */
+  private readonly outcomes = new Map<string, SubagentEntry['outcome']>()
   private abort: AbortController | undefined
   private revision = 0
   private closed = false
@@ -64,8 +69,9 @@ export class SubagentCatalog {
         refresh()
       }),
       ctx.on('session/event', (session, event) => {
-        if (session.header.parentSession === agent.id
-          && (event.type === 'subagent/descriptor' || event.type === 'turn/start' || event.type === 'turn/end')) refresh()
+        if (session.header.parentSession !== agent.id) return
+        if (event.type === 'turn/start' || event.type === 'turn/end') this.outcomes.set(session.header.id, childOutcome([event], 0))
+        if (event.type === 'subagent/descriptor' || event.type === 'turn/start' || event.type === 'turn/end') refresh()
       }),
       ctx.on('session/disposed', session => {
         if (session.header.parentSession === agent.id) refresh()
@@ -83,15 +89,15 @@ export class SubagentCatalog {
     const revision = ++this.revision
     const entries = await service.listChildren(this.agent.id, signal)
     signal.throwIfAborted()
-    const outcomes = new Map<string, SubagentEntry['outcome']>()
     const query = this.ctx.get('sessionQuery')
     if (query !== undefined) {
       // Observations run one at a time. A parent with many children must not open every cold read at once.
       for (const entry of entries) {
-        if (entry.kind !== 'child') continue
+        if (entry.kind !== 'child' || this.outcomes.has(entry.id)) continue
         try {
           using observation = await query.observeSession(entry.id, { signal, projectionMode: 'none' })
-          outcomes.set(entry.id, childOutcome(observation.events, observation.inheritedEventCount))
+          // A turn event that arrived during the read is newer than the log it read.
+          if (!this.outcomes.has(entry.id)) this.outcomes.set(entry.id, childOutcome(observation.events, observation.inheritedEventCount))
         } catch {
           signal.throwIfAborted()
           // An unavailable outcome must not be shown as a successful completion.
@@ -99,6 +105,9 @@ export class SubagentCatalog {
       }
     }
     signal.throwIfAborted()
+    const listed = new Set<string>(entries.map(entry => entry.id))
+    for (const id of this.outcomes.keys()) if (!listed.has(id)) this.outcomes.delete(id)
+    const outcomes = new Map([...this.outcomes].filter(([, outcome]) => outcome !== undefined))
     if (!this.closed && revision === this.revision) {
       this.state = { entries, activeRuns: [...this.runs.values()], error: undefined, outcomes }
       this.changed()

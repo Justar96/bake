@@ -99,3 +99,13 @@ export function currentOf(root: string): string | undefined {
     return undefined
   }
 }
+
+/**
+ * The release version `current` names under `root`: what the next launch runs.
+ * @param root - the install root.
+ * @returns the version, or undefined when there is no valid pointer.
+ */
+export function currentVersion(root: string): string | undefined {
+  const name = currentOf(root)
+  return name === undefined ? undefined : versionDirectory(name)?.version
+}

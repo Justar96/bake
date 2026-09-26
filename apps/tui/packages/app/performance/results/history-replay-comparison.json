@@ -1,0 +1,682 @@
+{
+  "procedure": "Serial unprofiled built-profile PTY comparison, three samples per each of six workloads. Baseline and candidate bundled from one frozen source map; only baseline app.tsx replay and line.tsx geometry override differ. Both use the existing Ink cache patch.",
+  "commands": [
+    "bun /tmp/bake-history-replay/build-paired.ts",
+    "bun apps/tui/scripts/tui.ts perf --app-artifacts /tmp/bake-history-replay/paired-baseline-app --workload fresh --workload small --workload typical --workload tail --workload tools --workload large-output --samples 3 --output /tmp/bake-history-replay/paired-before.json",
+    "bun /tmp/bake-history-replay/hash-paired-runtime.ts between",
+    "bun apps/tui/scripts/tui.ts perf --app-artifacts /tmp/bake-history-replay/paired-candidate-app --workload fresh --workload small --workload typical --workload tail --workload tools --workload large-output --samples 3 --output /tmp/bake-history-replay/paired-after.json",
+    "bun /tmp/bake-history-replay/hash-paired-runtime.ts after"
+  ],
+  "reports": {
+    "paired-before.json": "65a45428c821b0c273a17f2be7de175196e6186f6201e230927511c680637241",
+    "paired-after.json": "f3b5b2fae4e72600df56aa5ca70cd15d5f8569adbdedc20d7b7feaccc799d7de",
+    "paired-runtime-between.json": "c065c436d8e6033e2bf7b0c1b7ae2aefa4517e1f4c26834e9b975700bb42410a",
+    "paired-runtime-after.json": "43261cbc6becd729ff2724cf5255b0f29d06c1bb6e9e9d9d08e9b85dd02f7782"
+  },
+  "matchingMetadata": {
+    "node": "v26.7.0",
+    "bun": "1.4.2",
+    "mode": "production",
+    "platform": "linux",
+    "arch": "x64",
+    "viewport": {
+      "columns": 120,
+      "rows": 40
+    },
+    "lockSha256": "703de5a653f133447ace7634a2c6166d826b807506b41127eca015e9da8ccb23",
+    "compositionSha256": "f59ef59a72ffcc3a11e42719f14b7ca8c0e8eace01f79e16645768f4b06c6b5f",
+    "heapLimitMiB": 1024,
+    "terminalDriver": "Bun.Terminal",
+    "samples": 3,
+    "workloads": [
+      "fresh",
+      "small",
+      "typical",
+      "tail",
+      "tools",
+      "large-output"
+    ],
+    "workloadSpecifications": {
+      "fresh": {
+        "turns": 0
+      },
+      "small": {
+        "turns": 50
+      },
+      "typical": {
+        "turns": 500
+      },
+      "tail": {
+        "turns": 2000
+      },
+      "tools": {
+        "turns": 500,
+        "toolEvery": 1,
+        "toolsPerTurn": 4
+      },
+      "large-output": {
+        "turns": 12,
+        "assistantTextBytes": 65536
+      }
+    },
+    "cpuProfile": false
+  },
+  "matchingArtifacts": {
+    "startup.js": "6cf696aa399882aa1efba24c751c63bd86958601c8765209195312dae627327d",
+    "seed.js": "dd9b9ccbeb5cc27874ecce7ed90658bd1695e230153cb1b6d8622294ce1e1a95",
+    "metrics.mjs": "04dbc557eb5253e3d8b86f97b908bbfa89a0b14cfc74f48dcbb681d74033c35e"
+  },
+  "frozenSource": {
+    "frozenAt": "2026-09-26T11:25:20.693Z",
+    "directory": "/tmp/bake-history-replay/paired-frozen-source",
+    "files": 55,
+    "manifestSha256": "f7f1460344aefb799a77898ee89a1d331675b65817cb8b710f791527ef7d4434"
+  },
+  "sourceDifferences": [
+    "apps/tui/packages/ui/src/app.tsx",
+    "apps/tui/packages/ui/src/line.tsx"
+  ],
+  "overrides": [
+    {
+      "file": "apps/tui/packages/ui/src/app.tsx",
+      "from": "/tmp/bake-history-replay/baseline-source/apps/tui/packages/ui/src/app.tsx",
+      "capturedSha256": "746508b6f2cfdceff603083c4829336b62a2932044ccb0b06d73c0679e2ed383",
+      "effectiveSha256": "c8ec5ca24e0b49d1f2ad5399356e310abade97069838a95ea1206e4c8fd44229",
+      "operation": "Use captured pre-Scrollback app.tsx with only usePrintedLength replaced to return committed.length. The current transcriptRows ignores the old third end argument; all rows are admitted, so it produces the same suffix."
+    },
+    {
+      "file": "apps/tui/packages/ui/src/line.tsx",
+      "from": "89ef77f8edb28273c5dcda6e4868d501d343026e:apps/tui/packages/ui/src/line.tsx",
+      "headSha256": "d4648c62b210d0b4b1ff4055feac1dfeb1320e0c5485dfea8fa49e0f7773e665",
+      "frozenSha256": "a61b698fababc44298904cfc40d65fdb94006b8e8e67f4719c3238eb3f4bd01b",
+      "effectiveSha256": "f1f4c65ec1642a9170dee3cfee8d331ab24d5fd5e3351eb02fccf31bf83ebd6f",
+      "operation": "Restore only Line placement destructuring/text computation and the placement/wrappedRows geometry section from HEAD, removing the placement WeakMap optimization. Preserve every other frozen line.tsx change, including header UI edits."
+    }
+  ],
+  "buildScriptSha256": "a28badc950b4235ea5806e06750939fe07a863a1a55af087073a91a51800b3dd",
+  "buildProcedureSha256": "20eaf5ecc5e8fe358709ee2ea8b9aaa576e99842612221558cdf02e2f90e7ec5",
+  "applicationArtifacts": {
+    "before": "fa78d9d1fce335abc08f9355454c3f078190d34a0732e0bca8b8d90e51db3a70",
+    "after": "54d9db1458a4cd6506f1dd78f5b20c77a924dc7c87f739b33cd13fa6e20bf0f3"
+  },
+  "runtimeLibraries": {
+    "count": 988,
+    "bytes": 12871404,
+    "contentManifestSha256": "0aaee40c8e4471078bd85c99989a2885f5ed32eacca8fdce18574f1ef9641ee4",
+    "hashTiming": "One full content hash between baseline and candidate, one after candidate; no library hashing during timed samples. Both reads found no file mtime/ctime later than frozen-source capture.",
+    "firstObservedAt": "2026-09-26T11:27:45.623Z",
+    "lastObservedAt": "2026-09-26T11:30:00.642Z"
+  },
+  "verdict": {
+    "baselinePassed": 18,
+    "candidatePassed": 18,
+    "failed": 0,
+    "identitiesMatched": true
+  },
+  "measurements": [
+    {
+      "workload": "fresh",
+      "dimensions": {
+        "turns": 0,
+        "events": 0,
+        "deltaCount": 0,
+        "compactRecordCount": 0,
+        "toolCount": 0,
+        "assistantMarkerCount": 0,
+        "historyMarkerCount": 0,
+        "userTextBytes": 0,
+        "assistantTextBytes": 0,
+        "reasoningBytes": 0,
+        "toolOutputBytes": 0,
+        "maxAssistantTextBytes": 0,
+        "fileBytes": 0,
+        "sessionId": "tui-perf-session"
+      },
+      "before": {
+        "workload": "fresh",
+        "completed": 3,
+        "failed": 0,
+        "initialInputMs": 55.614457999996375,
+        "firstInputMs": 777.280995000001,
+        "readyMs": 777.2982699999993,
+        "maxIdleInputMs": 37.18372299999828,
+        "liveInputMs": 39.57864700000209,
+        "firstDeltaMs": 78.53331000000003,
+        "streamMs": 1440.105245,
+        "retainedHeapMiB": 54.62799835205078,
+        "settledRetainedHeapMiB": 57.73066711425781,
+        "peakRssMiB": 220.10546875,
+        "initialBytes": 1766,
+        "idleBytes": 830,
+        "streamBytes": 32461
+      },
+      "after": {
+        "workload": "fresh",
+        "completed": 3,
+        "failed": 0,
+        "initialInputMs": 53.53430800000001,
+        "firstInputMs": 756.1021629999959,
+        "readyMs": 756.1047409999956,
+        "maxIdleInputMs": 37.037186000001384,
+        "liveInputMs": 39.059301000000005,
+        "firstDeltaMs": 102.98014199999989,
+        "streamMs": 1379.049854,
+        "retainedHeapMiB": 54.66133117675781,
+        "settledRetainedHeapMiB": 57.778297424316406,
+        "peakRssMiB": 221.1875,
+        "initialBytes": 1766,
+        "idleBytes": 830,
+        "streamBytes": 33867
+      },
+      "changePercent": {
+        "initialInputMs": -3.740304364732816,
+        "firstInputMs": -2.724733029141546,
+        "readyMs": -2.7265632535119044,
+        "maxIdleInputMs": -0.39408910182797685,
+        "liveInputMs": -1.312187351937677,
+        "firstDeltaMs": 31.129252033308987,
+        "streamMs": -4.239647846015582,
+        "retainedHeapMiB": 0.061017840141630586,
+        "settledRetainedHeapMiB": 0.08250434723771072,
+        "peakRssMiB": 0.49159671322343,
+        "initialBytes": 0,
+        "idleBytes": 0,
+        "streamBytes": 4.331351467915345
+      },
+      "historyMarkersAtFirstInput": {
+        "before": [
+          0,
+          0,
+          0
+        ],
+        "after": [
+          0,
+          0,
+          0
+        ]
+      },
+      "historyMarkerOccurrences": {
+        "before": [
+          0,
+          0,
+          0
+        ],
+        "after": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "workload": "small",
+      "dimensions": {
+        "turns": 50,
+        "events": 325,
+        "deltaCount": 2050,
+        "compactRecordCount": 374,
+        "toolCount": 12,
+        "assistantMarkerCount": 50,
+        "historyMarkerCount": 50,
+        "userTextBytes": 11041,
+        "assistantTextBytes": 33550,
+        "reasoningBytes": 15600,
+        "toolOutputBytes": 95232,
+        "maxAssistantTextBytes": 671,
+        "fileBytes": 351213,
+        "sessionId": "tui-perf-session"
+      },
+      "before": {
+        "workload": "small",
+        "completed": 3,
+        "failed": 0,
+        "initialInputMs": 6.221023000000059,
+        "firstInputMs": 937.645188,
+        "readyMs": 937.6688899999999,
+        "maxIdleInputMs": 37.0715409999998,
+        "liveInputMs": 37.231464999999844,
+        "firstDeltaMs": 86.82097500000236,
+        "streamMs": 1438.840663,
+        "retainedHeapMiB": 57.03430938720703,
+        "settledRetainedHeapMiB": 59.173858642578125,
+        "peakRssMiB": 230.52734375,
+        "initialBytes": 74004,
+        "idleBytes": 830,
+        "streamBytes": 31200
+      },
+      "after": {
+        "workload": "small",
+        "completed": 3,
+        "failed": 0,
+        "initialInputMs": 6.194195000000036,
+        "firstInputMs": 879.181193999997,
+        "readyMs": 879.1832460000005,
+        "maxIdleInputMs": 37.043768999999884,
+        "liveInputMs": 37.12370499999997,
+        "firstDeltaMs": 92.79189300000007,
+        "streamMs": 1377.8059400000002,
+        "retainedHeapMiB": 57.370765686035156,
+        "settledRetainedHeapMiB": 59.23109436035156,
+        "peakRssMiB": 236.45703125,
+        "initialBytes": 74004,
+        "idleBytes": 830,
+        "streamBytes": 32747
+      },
+      "changePercent": {
+        "initialInputMs": -0.43124740095034086,
+        "firstInputMs": -6.235193733005417,
+        "readyMs": -6.237345039782582,
+        "maxIdleInputMs": -0.07491460902560032,
+        "liveInputMs": -0.28943260760722067,
+        "firstDeltaMs": 6.877275911722425,
+        "streamMs": -4.241937593891853,
+        "retainedHeapMiB": 0.5899191248971203,
+        "settledRetainedHeapMiB": 0.09672466708510186,
+        "peakRssMiB": 2.572227399813598,
+        "initialBytes": 0,
+        "idleBytes": 0,
+        "streamBytes": 4.958333333333331
+      },
+      "historyMarkersAtFirstInput": {
+        "before": [
+          50,
+          50,
+          50
+        ],
+        "after": [
+          50,
+          50,
+          50
+        ]
+      },
+      "historyMarkerOccurrences": {
+        "before": [
+          50,
+          50,
+          50
+        ],
+        "after": [
+          50,
+          50,
+          50
+        ]
+      }
+    },
+    {
+      "workload": "typical",
+      "dimensions": {
+        "turns": 500,
+        "events": 3251,
+        "deltaCount": 20500,
+        "compactRecordCount": 3750,
+        "toolCount": 125,
+        "assistantMarkerCount": 500,
+        "historyMarkerCount": 501,
+        "userTextBytes": 110892,
+        "assistantTextBytes": 335500,
+        "reasoningBytes": 156000,
+        "toolOutputBytes": 992011,
+        "maxAssistantTextBytes": 671,
+        "fileBytes": 3561460,
+        "sessionId": "tui-perf-session"
+      },
+      "before": {
+        "workload": "typical",
+        "completed": 3,
+        "failed": 0,
+        "initialInputMs": 8.265018999998574,
+        "firstInputMs": 1932.9872219999997,
+        "readyMs": 1933.022613,
+        "maxIdleInputMs": 37.223197999999684,
+        "liveInputMs": 37.09296300000278,
+        "firstDeltaMs": 78.4329259999995,
+        "streamMs": 1444.2551329999997,
+        "retainedHeapMiB": 65.02400207519531,
+        "settledRetainedHeapMiB": 66.14910125732422,
+        "peakRssMiB": 428.9296875,
+        "initialBytes": 732550,
+        "idleBytes": 830,
+        "streamBytes": 31356
+      },
+      "after": {
+        "workload": "typical",
+        "completed": 3,
+        "failed": 0,
+        "initialInputMs": 132.72250299999996,
+        "firstInputMs": 1049.6981499999993,
+        "readyMs": 1888.4652789999964,
+        "maxIdleInputMs": 37.074797000001126,
+        "liveInputMs": 37.03407199999856,
+        "firstDeltaMs": 95.11269600000014,
+        "streamMs": 1364.3610370000024,
+        "retainedHeapMiB": 64.96475982666016,
+        "settledRetainedHeapMiB": 66.1969223022461,
+        "peakRssMiB": 331.44921875,
+        "initialBytes": 765207,
+        "idleBytes": 830,
+        "streamBytes": 32763
+      },
+      "changePercent": {
+        "initialInputMs": 1505.8342152634236,
+        "firstInputMs": -45.69554635162512,
+        "readyMs": -2.305060152961791,
+        "maxIdleInputMs": -0.39867880239241593,
+        "liveInputMs": -0.15876596324811976,
+        "firstDeltaMs": 21.26628553931642,
+        "streamMs": -5.531854737745789,
+        "retainedHeapMiB": -0.09110827793503695,
+        "settledRetainedHeapMiB": 0.07229281125959997,
+        "peakRssMiB": -22.726444820865886,
+        "initialBytes": 4.4579892157532,
+        "idleBytes": 0,
+        "streamBytes": 4.487179487179493
+      },
+      "historyMarkersAtFirstInput": {
+        "before": [
+          501,
+          501,
+          501
+        ],
+        "after": [
+          105,
+          105,
+          105
+        ]
+      },
+      "historyMarkerOccurrences": {
+        "before": [
+          501,
+          501,
+          501
+        ],
+        "after": [
+          501,
+          501,
+          501
+        ]
+      }
+    },
+    {
+      "workload": "tail",
+      "dimensions": {
+        "turns": 2000,
+        "events": 13001,
+        "deltaCount": 82000,
+        "compactRecordCount": 15000,
+        "toolCount": 500,
+        "assistantMarkerCount": 2000,
+        "historyMarkerCount": 2001,
+        "userTextBytes": 444893,
+        "assistantTextBytes": 1342000,
+        "reasoningBytes": 624000,
+        "toolOutputBytes": 3968011,
+        "maxAssistantTextBytes": 671,
+        "fileBytes": 14264343,
+        "sessionId": "tui-perf-session"
+      },
+      "before": {
+        "workload": "tail",
+        "completed": 3,
+        "failed": 0,
+        "initialInputMs": 6.378547000000253,
+        "firstInputMs": 5306.027038999999,
+        "readyMs": 5306.039524,
+        "maxIdleInputMs": 41.177638000001025,
+        "liveInputMs": 37.03365499999927,
+        "firstDeltaMs": 115.51213899999857,
+        "streamMs": 1427.0807569999888,
+        "retainedHeapMiB": 87.36573791503906,
+        "settledRetainedHeapMiB": 85.02362060546875,
+        "peakRssMiB": 986.8125,
+        "initialBytes": 2928426,
+        "idleBytes": 830,
+        "streamBytes": 32747
+      },
+      "after": {
+        "workload": "tail",
+        "completed": 3,
+        "failed": 0,
+        "initialInputMs": 115.26508200000535,
+        "firstInputMs": 1206.8091249999998,
+        "readyMs": 4888.652188,
+        "maxIdleInputMs": 39.07809400000406,
+        "liveInputMs": 36.936868000004324,
+        "firstDeltaMs": 117.16655799999717,
+        "streamMs": 1371.7270539999954,
+        "retainedHeapMiB": 81.75297546386719,
+        "settledRetainedHeapMiB": 83.08290100097656,
+        "peakRssMiB": 377.4921875,
+        "initialBytes": 3069929,
+        "idleBytes": 830,
+        "streamBytes": 32747
+      },
+      "changePercent": {
+        "initialInputMs": 1707.0742756932066,
+        "firstInputMs": -77.25588060275996,
+        "readyMs": -7.866268883073624,
+        "maxIdleInputMs": -5.098748014630939,
+        "liveInputMs": -0.2613487650488411,
+        "firstDeltaMs": 1.4322468740697536,
+        "streamMs": -3.878806628740339,
+        "retainedHeapMiB": -6.4244434776366655,
+        "settledRetainedHeapMiB": -2.282565233839684,
+        "peakRssMiB": -61.74631072265502,
+        "initialBytes": 4.832049708614794,
+        "idleBytes": 0,
+        "streamBytes": 0
+      },
+      "historyMarkersAtFirstInput": {
+        "before": [
+          2001,
+          2001,
+          2001
+        ],
+        "after": [
+          105,
+          105,
+          105
+        ]
+      },
+      "historyMarkerOccurrences": {
+        "before": [
+          2001,
+          2001,
+          2001
+        ],
+        "after": [
+          2001,
+          2001,
+          2001
+        ]
+      }
+    },
+    {
+      "workload": "tools",
+      "dimensions": {
+        "turns": 500,
+        "events": 7001,
+        "deltaCount": 20500,
+        "compactRecordCount": 7500,
+        "toolCount": 2000,
+        "assistantMarkerCount": 500,
+        "historyMarkerCount": 501,
+        "userTextBytes": 110892,
+        "assistantTextBytes": 335500,
+        "reasoningBytes": 156000,
+        "toolOutputBytes": 15872011,
+        "maxAssistantTextBytes": 671,
+        "fileBytes": 20444187,
+        "sessionId": "tui-perf-session"
+      },
+      "before": {
+        "workload": "tools",
+        "completed": 3,
+        "failed": 0,
+        "initialInputMs": 6.1998339999991,
+        "firstInputMs": 4114.703625999999,
+        "readyMs": 4114.7183479999985,
+        "maxIdleInputMs": 41.17079200000444,
+        "liveInputMs": 37.1020239999998,
+        "firstDeltaMs": 113.37646999999924,
+        "streamMs": 1418.7185119999995,
+        "retainedHeapMiB": 84.63394165039062,
+        "settledRetainedHeapMiB": 85.0535659790039,
+        "peakRssMiB": 804.74609375,
+        "initialBytes": 1411925,
+        "idleBytes": 830,
+        "streamBytes": 32763
+      },
+      "after": {
+        "workload": "tools",
+        "completed": 3,
+        "failed": 0,
+        "initialInputMs": 103.55452299999888,
+        "firstInputMs": 1163.873939000001,
+        "readyMs": 3951.350874999989,
+        "maxIdleInputMs": 39.00975499999913,
+        "liveInputMs": 37.021968000000925,
+        "firstDeltaMs": 115.24300999999832,
+        "streamMs": 1382.8255189999982,
+        "retainedHeapMiB": 81.82376861572266,
+        "settledRetainedHeapMiB": 83.22413635253906,
+        "peakRssMiB": 365.890625,
+        "initialBytes": 1505830,
+        "idleBytes": 830,
+        "streamBytes": 32763
+      },
+      "changePercent": {
+        "initialInputMs": 1570.2789623079248,
+        "firstInputMs": -71.71427046055732,
+        "readyMs": -3.9703196958648657,
+        "maxIdleInputMs": -5.2489565904029085,
+        "liveInputMs": -0.21577259504461654,
+        "firstDeltaMs": 1.6463204402104692,
+        "streamMs": -2.529958740680849,
+        "retainedHeapMiB": -3.320385391331937,
+        "settledRetainedHeapMiB": -2.150914668194459,
+        "peakRssMiB": -54.533407761570764,
+        "initialBytes": 6.6508490181844016,
+        "idleBytes": 0,
+        "streamBytes": 0
+      },
+      "historyMarkersAtFirstInput": {
+        "before": [
+          501,
+          501,
+          501
+        ],
+        "after": [
+          30,
+          30,
+          30
+        ]
+      },
+      "historyMarkerOccurrences": {
+        "before": [
+          501,
+          501,
+          501
+        ],
+        "after": [
+          501,
+          501,
+          501
+        ]
+      }
+    },
+    {
+      "workload": "large-output",
+      "dimensions": {
+        "turns": 12,
+        "events": 79,
+        "deltaCount": 32928,
+        "compactRecordCount": 90,
+        "toolCount": 3,
+        "assistantMarkerCount": 192,
+        "historyMarkerCount": 193,
+        "userTextBytes": 2643,
+        "assistantTextBytes": 786432,
+        "reasoningBytes": 3744,
+        "toolOutputBytes": 23819,
+        "maxAssistantTextBytes": 65536,
+        "fileBytes": 2584005,
+        "sessionId": "tui-perf-session"
+      },
+      "before": {
+        "workload": "large-output",
+        "completed": 3,
+        "failed": 0,
+        "initialInputMs": 6.209467999997287,
+        "firstInputMs": 1273.8051039999991,
+        "readyMs": 1273.8128790000046,
+        "maxIdleInputMs": 39.1617640000004,
+        "liveInputMs": 37.00149300000339,
+        "firstDeltaMs": 81.3271820000009,
+        "streamMs": 1441.3807280000037,
+        "retainedHeapMiB": 61.237091064453125,
+        "settledRetainedHeapMiB": 63.24896240234375,
+        "peakRssMiB": 324.53515625,
+        "initialBytes": 818587,
+        "idleBytes": 830,
+        "streamBytes": 31200
+      },
+      "after": {
+        "workload": "large-output",
+        "completed": 3,
+        "failed": 0,
+        "initialInputMs": 86.81645300000673,
+        "firstInputMs": 926.2750440000018,
+        "readyMs": 1280.5734770000017,
+        "maxIdleInputMs": 37.03639000000112,
+        "liveInputMs": 35.70156300000235,
+        "firstDeltaMs": 78.14205199999924,
+        "streamMs": 1368.1096470000048,
+        "retainedHeapMiB": 61.67510223388672,
+        "settledRetainedHeapMiB": 63.390586853027344,
+        "peakRssMiB": 270.8125,
+        "initialBytes": 844671,
+        "idleBytes": 830,
+        "streamBytes": 31200
+      },
+      "changePercent": {
+        "initialInputMs": 1298.1302907116144,
+        "firstInputMs": -27.28282834702769,
+        "readyMs": 0.5307371366275238,
+        "maxIdleInputMs": -5.427166151144935,
+        "liveInputMs": -3.5131825626628643,
+        "firstDeltaMs": -3.9164396474497654,
+        "streamMs": -5.083395356733167,
+        "retainedHeapMiB": 0.7152710258111039,
+        "settledRetainedHeapMiB": 0.22391584826748634,
+        "peakRssMiB": -16.553724678325977,
+        "initialBytes": 3.1864664354552374,
+        "idleBytes": 0,
+        "streamBytes": 0
+      },
+      "historyMarkersAtFirstInput": {
+        "before": [
+          193,
+          193,
+          193
+        ],
+        "after": [
+          52,
+          52,
+          52
+        ]
+      },
+      "historyMarkerOccurrences": {
+        "before": [
+          193,
+          193,
+          193
+        ],
+        "after": [
+          193,
+          193,
+          193
+        ]
+      }
+    }
+  ]
+}

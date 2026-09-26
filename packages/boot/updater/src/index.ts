@@ -15,12 +15,13 @@ export {
   type ReleaseArtifact, type ReleaseManifest, type ReleaseSource, type ReleaseTarget,
 } from './manifest.ts'
 export { DEFAULT_RELEASE_BASE_URL, GITHUB_RELEASE_BASE_URL, RELEASE_PUBLIC_KEYS, releaseSource } from './keys.ts'
-export { CURRENT_POINTER, currentOf, detectInstall, directoryFor, versionDirectory, type InstallLayout, type ManagedInstall } from './layout.ts'
+export { CURRENT_POINTER, currentOf, currentVersion, detectInstall, directoryFor, versionDirectory, type InstallLayout, type ManagedInstall } from './layout.ts'
 export {
   acquireLock, installRelease, LAUNCH_MARKER, markLaunched, pointAt, PRUNE_AFTER_MS, windowsLauncher,
-  type InstallOptions, type InstallResult,
+  type InstallOptions, type InstallProgress, type InstallResult,
 } from './install.ts'
 export {
-  cachedUpdate, CHECK_CACHE, CHECK_INTERVAL_MS, checksDisabled, hostTarget, refreshCheck, statusOf,
-  type RefreshOptions, type ReleaseStatus,
+  cachedUpdate, CHECK_CACHE, CHECK_INTERVAL_MS, checksDisabled, FAILED_CHECK_RETRY_MS, hostTarget, recordCheck, refreshCheck,
+  statusOf, type RefreshOptions, type ReleaseStatus,
 } from './check.ts'
+export { selfUpdate, type SelfUpdateOptions, type UpdateOutcome } from './update.ts'

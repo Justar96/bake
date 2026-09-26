@@ -7,7 +7,7 @@
  * @module @dsh-tui/app/startup
  */
 
-import { Command } from 'commander'
+import { Command, Option } from 'commander'
 import type { Context } from '@deepseek-ai/cordis'
 import { parseCmdline } from '@deepseek-ai/dsh-cmdline'
 
@@ -38,7 +38,9 @@ function tuiCommand(): Command {
     .name('dsh --profile tui')
     .description('Work with the agent in an interactive terminal session.')
     .helpOption('-h, --help', 'show this help')
-    .option('--resume <id>', 'adopt and replay the persisted Session with this id')
+    .option('--resume <id>', 'adopt and replay the persisted Session with this id (alias: --session-id)')
+    // The headless profile's spelling, so one flag resumes a Session in either app.
+    .addOption(new Option('--session-id <id>').hideHelp())
     .option('--preset <name>', 'mount this agent preset instead of the profile default')
     .addHelpText('after', `
 Examples:
@@ -56,10 +58,13 @@ Examples:
 export function apply(ctx: Context): void {
   const program = tuiCommand()
   program.action(() => {
-    const options = program.opts<{ resume?: string, preset?: string }>()
+    const options = program.opts<{ resume?: string, sessionId?: string, preset?: string }>()
+    if (options.resume !== undefined && options.sessionId !== undefined) {
+      program.error('error: --resume and --session-id name the same thing; pass one')
+    }
     // A SessionId is opaque, so whitespace belongs to the identity. Reject an
     // empty value, but hand the runner the exact string it was given.
-    const resume = options.resume
+    const resume = options.resume ?? options.sessionId
     if (resume !== undefined && resume.trim() === '') {
       program.error('error: --resume requires a non-empty session id')
     }

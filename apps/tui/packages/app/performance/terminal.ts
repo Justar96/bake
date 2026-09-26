@@ -17,6 +17,8 @@ export class Terminal {
   text = ''
   bytes = 0
   markerOccurrences = 0
+  /** Paste-mode registration survives output-tail eviction during large history replay. */
+  inputReady = false
   readonly markers = new Set<string>()
 
   /**
@@ -35,6 +37,7 @@ export class Terminal {
         this.bytes += chunk.length
         const raw = decoder.decode(chunk, { stream: true })
         const joined = this.markerTail + raw
+        this.inputReady ||= joined.includes('\x1b[?2004h')
         for (const match of joined.matchAll(/H\d{5}_END/g)) {
           if (match.index + match[0].length > this.markerTail.length) {
             this.markerOccurrences++
@@ -44,8 +47,13 @@ export class Terminal {
         this.markerTail = joined.slice(-20)
         this.text = (this.text + raw).slice(-131_072)
       },
-      // PTY status describes EOF or a read failure, not the child process exit code.
-      exit: (_terminal, code) => { this.streamError = code !== 0 },
+      exit: (_terminal, code) => {
+        // Bun 1.4.2 reports Linux's EIO on last slave close as status 1.
+        // Its child exit status is already available when that final read runs.
+        const cleanLinuxExit = process.platform === 'linux' && code === 1
+          && this.child.exitCode === 0 && this.child.signalCode === null
+        this.streamError = code !== 0 && !cleanLinuxExit
+      },
     } })
     // Bun leaves `exitCode` null after a signal. `exited` settles for both exit forms.
     this.done = this.child.exited.then(code => {

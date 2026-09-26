@@ -41,6 +41,20 @@ describe.skipIf(process.platform === 'win32')('installRelease', () => {
     expect(existsSync(join(root, 'update.lock'))).toBe(false)
   })
 
+  it('reports the download as it streams, then unpacking and the start check', async () => {
+    const { install, manifest } = setup()
+    const seen: string[] = []
+    let last = { received: 0, total: 0 }
+    await install({ onProgress: (progress) => {
+      if (progress.phase !== 'download') { seen.push(progress.phase); return }
+      if (seen.at(-1) !== 'download') seen.push('download')
+      expect(progress.received).toBeGreaterThanOrEqual(last.received)
+      last = progress
+    } })
+    expect(seen).toEqual(['download', 'unpack', 'verify'])
+    expect(last).toEqual({ phase: 'download', received: manifest.artifacts['linux-x64']!.size, total: manifest.artifacts['linux-x64']!.size })
+  })
+
   it('installs from GitHub releases, fetching the manifest from latest and the archive from its tag', async () => {
     const { install, root, host, manifest } = setup()
     const base = 'https://github.com/owner/bake/releases/latest/download'

@@ -2,7 +2,7 @@
  * @deepseek-ai/dsh-headless — one-shot direct Agent driver. The bundle patch
  * rides over dsh-base without Host, HTTP, or browser plugins; this runner
  * creates one Agent through the core registry (or adopts the exact Session a
- * `--session-id` names), drives the task to quiescence, streams provider
+ * `--resume` names), drives the task to quiescence, streams provider
  * reasoning to stderr, flushes its Session, prints the final assistant text to
  * stdout, and exits. With `--json` it projects the run as newline-delimited
  * events instead of the final text.
@@ -254,13 +254,13 @@ async function resolveAgent(
   // durable log the run would succeed, print the id, and still lose the whole
   // history at exit, so a miscomposed profile fails loud before the resume.
   if (ctx.get('sessionPersistence') === undefined) {
-    throw new Error('headless --session-id requires the sessionPersistence service; the Session would not survive this process')
+    throw new Error('headless --resume requires the sessionPersistence service; the Session would not survive this process')
   }
   // A later process holds no live Agent and has to find the id through the
-  // query service, so every --session-id run requires it.
+  // query service, so every --resume run requires it.
   const query = ctx.get('sessionQuery')
   if (query === undefined) {
-    throw new Error('headless --session-id requires the sessionQuery service; dsh-base provides it')
+    throw new Error('headless --resume requires the sessionQuery service; dsh-base provides it')
   }
   const live = agents.get(sessionId)
   if (live !== undefined) {
@@ -284,11 +284,11 @@ async function resolveAgent(
     return agent
   } catch (error: unknown) {
     if (!(error instanceof SessionQueryError) || error.code !== 'SESSION_QUERY_SESSION_NOT_FOUND') throw error
-    // --session-id resumes a conversation that already exists; starting a new
+    // --resume adopts a conversation that already exists; starting a new
     // one is the no-id path, which generates its own identity and reports it in
     // the `session` event. Creating the requested id here would turn a typo
     // into a brand-new empty history the caller believes it is continuing.
-    throw new Error(`session "${sessionId}" does not exist; omit --session-id to start a new Session`)
+    throw new Error(`session "${sessionId}" does not exist; omit --resume to start a new Session`)
   }
 }
 

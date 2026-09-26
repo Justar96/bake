@@ -1,0 +1,24 @@
+# The dsh-desktop bundle patch: a long-lived protocol bridge over dsh-base for
+# the Bake Desktop app. It mounts no Host, HTTP server, or browser plugin. The
+# desktop launches the process with the workspace as its working directory,
+# speaks the protocol over the Electron utility-process message port (or
+# stdio under plain Node), and answers every approval the bridge forwards.
+
+- id: system-prompt
+  config:
+    personaSuffix: Your working directory is {{cwd}}.
+    personaPrefix: >-
+      You are a coding agent powered by the {{model}} model, working for a
+      user in the Bake Desktop app. Some tool calls wait for the user's
+      approval before they run.
+
+- id: tools
+  config:
+    mode: !!js process.env.DSH_TOOLS_MODE
+
+- insert:
+    - id: desktop-bridge
+      name: '@deepseek-ai/dsh-desktop'
+
+- id: hmr
+  disabled: true

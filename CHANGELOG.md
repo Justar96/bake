@@ -2,6 +2,19 @@
 
 Notable changes to Bake. `/changelog` in the terminal prints the section for the running version, so each release heading must match the root `package.json` version.
 
+## [Unreleased]
+
+## [0.1.3] - 2026-09-26
+
+- `/update` installs the newest release from inside the terminal, with download progress; the status line then asks for a restart.
+- A new release is noticed within the hour, a failed check is retried after ten minutes, and an open terminal keeps checking.
+- `bake update` shows download progress.
+- `--resume <id>` resumes a Session in both the terminal and headless profiles; `--session-id` remains an alias.
+- Subagents fold into one status-line field with their count and how many are working; Down selects it and Enter opens the child picker.
+- The goal moves back to the header row. Up past the oldest history entry selects it and restores your unsent draft, and Enter or Ctrl+O opens a scrollable view of the full goal.
+- The task list folds into one row above the header with its progress and the current task; Ctrl+T, or Enter on the selected row, opens the full checklist.
+- Large tool results, long reasoning, and parents with many subagents no longer slow the terminal: a 20,000-line read previews in milliseconds instead of seconds.
+
 ## [0.1.2] - 2026-09-25
 
 - Slash commands complete their arguments: `/goal`, `/plan`, and `/permission` offer their choices, `/login` offers sign-in targets, and `/model` offers models.

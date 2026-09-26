@@ -4,12 +4,14 @@ import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import Persistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import { history, reply } from './history.ts'
+import { WORKLOADS } from './report.ts'
 
-const [root, size] = process.argv.slice(2)
-if (root === undefined || size === undefined) throw new Error('seed requires private root and turn count')
+const [root, name] = process.argv.slice(2)
+if (root === undefined || name === undefined || !Object.hasOwn(WORKLOADS, name)) throw new Error('seed requires private root and known workload name')
+const { turns, ...options } = WORKLOADS[name as keyof typeof WORKLOADS]
 const cwd = join(root, 'workspace')
 await mkdir(cwd, { recursive: true })
-const { header, events, dimensions } = history(Number(size), cwd)
+const { header, events, dimensions } = history(turns, cwd, options)
 const ctx = new Context()
 let fileBytes = 0
 try {

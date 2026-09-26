@@ -357,11 +357,12 @@ const continuation = (text: string, tone: Tone): PresentedLine =>
  * @param detail - the card's lines, absent when the tool declared no card.
  * @param failed - whether the entire result must remain visibly failed.
  * @param code - colours code by the file it is from.
+ * @param keep - which lines the highlighter sees; the rest keep plain tones.
  * @returns continuation lines in order, empty when there is no card.
  */
-function cardLines(detail: readonly CardLine[] | undefined, failed = false, code?: Highlight): readonly PresentedLine[] {
+function cardLines(detail: readonly CardLine[] | undefined, failed = false, code?: Highlight, keep: (index: number) => boolean = () => true): readonly PresentedLine[] {
   const lines = detail ?? []
-  const tokens = failed || code === undefined ? [] : highlighted(lines, code)
+  const tokens = failed || code === undefined ? [] : highlighted(lines, code, keep)
   return lines.map((line, index) => {
     const tone: Tone = failed ? 'failed' : line.emphasis === 'gap' ? 'quiet' : line.emphasis ?? 'plain'
     const changed = line.emphasis === 'added' || line.emphasis === 'removed'
@@ -392,17 +393,18 @@ function cardLines(detail: readonly CardLine[] | undefined, failed = false, code
  *
  * @param lines - a card's lines.
  * @param code - the highlighter.
- * @returns tokens by line index, absent where the line is not code or the
- *   highlighter declined.
+ * @param keep - which lines to highlight; a run ends at a line left out.
+ * @returns tokens by line index, absent where the line is not code, was left
+ *   out, or the highlighter declined.
  */
-function highlighted(lines: readonly CardLine[], code: Highlight): readonly (readonly CodeToken[] | undefined)[] {
+function highlighted(lines: readonly CardLine[], code: Highlight, keep: (index: number) => boolean): readonly (readonly CodeToken[] | undefined)[] {
   const tokens: (readonly CodeToken[] | undefined)[] = []
   let from = 0
   while (from < lines.length) {
     const first = lines[from]!
     let to = from + 1
-    if (first.source !== undefined) {
-      while (to < lines.length && lines[to]!.source === first.source && lines[to]!.emphasis === first.emphasis
+    if (first.source !== undefined && keep(from)) {
+      while (to < lines.length && keep(to) && lines[to]!.source === first.source && lines[to]!.emphasis === first.emphasis
         && lines[to]!.codeStart !== true
         && (lines[to - 1]!.number === undefined || lines[to]!.number === lines[to - 1]!.number! + 1)) to++
       const run = code(lines.slice(from, to).map(line => {
@@ -414,6 +416,36 @@ function highlighted(lines: readonly CardLine[], code: Highlight): readonly (rea
     from = to
   }
   return tokens
+}
+
+/**
+ * A result's body, with syntax colour only on the lines a preview draws.
+ *
+ * A read can return a whole file and a command a megabyte of JSON, and the
+ * preview draws a few lines of either. Highlighting is the costly step, so
+ * the body is laid out plain, the preview picks its lines, and only those
+ * reach the grammar. A tail run starts its grammar at its own first line.
+ *
+ * @param groups - card line groups, each highlighted on its own as before.
+ * @param failed - whether the result stays red throughout.
+ * @param code - the highlighter, absent for none.
+ * @param drawn - the lines of a plain body the preview draws. It must return
+ *   the body's own line objects, and may add lines of its own.
+ * @returns the body in order, highlighted where drawn.
+ */
+function drawnBody(
+  groups: readonly (readonly CardLine[] | undefined)[],
+  failed: boolean,
+  code: Highlight | undefined,
+  drawn: (body: readonly PresentedLine[]) => readonly PresentedLine[],
+): readonly PresentedLine[] {
+  const plain = groups.map(group => cardLines(group, failed))
+  if (failed || code === undefined) return plain.flat()
+  const shown = new Set(drawn(plain.flat()))
+  return groups.flatMap((group, at) => {
+    const lines = plain[at]!
+    return lines.some(line => shown.has(line)) ? cardLines(group, failed, code, index => shown.has(lines[index]!)) : lines
+  })
 }
 
 /** Display prefixes are never passed to the syntax grammar. */
@@ -739,11 +771,11 @@ function outcomeLines(outcome: ToolOutcome, verb: Verb, bound: ResultBound, titl
   const tone: Tone = failed ? 'failed' : 'plain'
   const card = outcome.detail ?? []
   const summaries = card.filter(line => line.summary !== undefined)
-  const body = [...cardLines(outputLines(outcome.text), failed, bound.code),
-    ...cardLines(card.filter(line => line.summary === undefined), failed, bound.code)]
   const stat = failed ? undefined : changeSize(outcome.detail)
   // A failure is always news, and a diff is what an edit did.
   const previewed = failed || PREVIEWED.has(verb) || stat !== undefined
+  const body = drawnBody([outputLines(outcome.text), card.filter(line => line.summary === undefined)], failed, bound.code,
+    plain => previewed ? excerpt(plain, bound.lines, bound, tone, failed).lines : [])
   const { lines: shown, hidden } = previewed ? excerpt(body, bound.lines, bound, tone, failed) : { lines: [], hidden: body.length }
   // Previewed output counts what it left out below it; a count alone says how
   // much there was beside the headline. A change's size, or the card's own
@@ -1065,10 +1097,7 @@ export function present(row: Row, result: ResultBound, wrap?: (line: PresentedLi
       const tone: Tone = row.ok ? 'plain' : 'failed'
       // A card leaves `text` empty and a tool without one leaves `detail`
       // absent, so exactly one of these carries the body.
-      const body = [
-        ...cardLines(outputLines(row.text), !row.ok, result.code),
-        ...cardLines(row.detail, !row.ok, result.code),
-      ]
+      const body = drawnBody([outputLines(row.text), row.detail], !row.ok, result.code, plain => preview(plain, result.lines).shown)
       // Calls may finish out of order, so the result names its own call.
       // The nearest preceding row may belong to a different call. An empty result still
       // acknowledges completion, with no size to report.

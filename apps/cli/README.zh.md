@@ -2,11 +2,11 @@
 
 [English](README.md) | 中文
 
-`@deepseek-ai/dsh` 包通过命名 Cordis profile 启动 Bake 的 Node 进程。`tui` 启动终端 Agent；`headless` 执行单个任务后退出。两者都在首次使用时初始化。包标识和 `dsh` 命令保持与共享运行时的包解析兼容。
+`@deepseek-ai/dsh` 包通过命名 Cordis profile 启动 Bake 的 Node 进程。`tui` 启动终端 Agent；`headless` 执行单个任务后退出；`desktop` 是 Bake Desktop 应用启动的长驻桥接。每个 profile 都在首次使用时初始化。包标识和 `dsh` 命令保持与共享运行时的包解析兼容。
 
 ## Profile
 
-每个 `$DSH_HOME/profiles/<name>` 包含列出有序组合包的包清单，以及可选的用户 `cordis.patch.yml`。终端模板选择 `@deepseek-ai/dsh-base` 和 `@dsh-tui/app`；headless 模板选择 base 和 `@deepseek-ai/dsh-headless`。
+每个 `$DSH_HOME/profiles/<name>` 包含列出有序组合包的包清单，以及可选的用户 `cordis.patch.yml`。终端模板选择 `@deepseek-ai/dsh-base` 和 `@dsh-tui/app`；headless 模板选择 base 和 `@deepseek-ai/dsh-headless`，desktop 模板选择 base 和 `@deepseek-ai/dsh-desktop`。
 
 配置层依次应用：组合包补丁、profile 补丁、home 补丁、调用时的 `--patch` 文件。缺少组合包会明确失败。现有用户 profile 保留其组合包选择；启动不会将其重写为模板内容。
 

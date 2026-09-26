@@ -30,7 +30,7 @@ interface Script {
   afterPrompt(session: Session, message: UserMessage, agent: Agent): Promise<void> | void
 }
 
-/** Observation stub returned by the `--session-id` query path. */
+/** Observation stub returned by the `--resume` query path. */
 interface ObservationStub {
   header: { cwd?: string; origin?: string; parentSession?: string; agentPreset?: string }
   events: readonly { type: string; data: unknown }[]
@@ -545,7 +545,7 @@ describe('headless runner', () => {
     await test.ctx.fiber.dispose()
   })
 
-  it('rejects --session-id when the query reports the id missing', async () => {
+  it('rejects --resume when the query reports the id missing', async () => {
     const seen: string[] = []
     const test = await bench({
       afterPrompt(session, message) {
@@ -558,13 +558,13 @@ describe('headless runner', () => {
     })
     const result = await test.run()
     expect(result.code).toBe(1)
-    expect(result.err).toContain('session "session-exact" does not exist; omit --session-id to start a new Session')
+    expect(result.err).toContain('session "session-exact" does not exist; omit --resume to start a new Session')
     expect(result.out).toBe('')
     expect(seen).toEqual([])
     await test.ctx.fiber.dispose()
   })
 
-  it('rejects --session-id when persistence is not mounted', async () => {
+  it('rejects --resume when persistence is not mounted', async () => {
     const test = await bench({
       afterPrompt(session, message) { appendTurn(session, 1, message, 'created', true) },
     }, {

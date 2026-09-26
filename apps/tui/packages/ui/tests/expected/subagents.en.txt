@@ -1,13 +1,7 @@
   note   Session: session-test
 
-● Subagents  4 · 1 Working
-├ ● Review tests  Working
-├ ✓ Check types  Completed · Saved
-├ ✗ Review security  Failed · Saved
-└ ■ Review docs  Stopped · Saved
-  Ctrl+G /agents · choose a child · Enter to open
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────
 > ▌Ask anything
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-  Model: model  /workspace
+  Model: model  ↓ Subagents: 4 · 1 Working  /workspace

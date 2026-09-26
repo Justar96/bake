@@ -1,6 +1,6 @@
 /**
- * Whether a newer release exists: answered from a daily cache so a launch
- * never waits on the network, and refreshed in the background.
+ * Whether a newer release exists: answered from a cache so a launch never
+ * waits on the network, and refreshed in the background.
  * @module @deepseek-ai/dsh-updater/check
  */
 
@@ -11,8 +11,15 @@ import { dirname, join } from 'node:path'
 import { fetchRelease, RELEASE_TARGETS, type ReleaseArtifact, type ReleaseManifest, type ReleaseSource, type ReleaseTarget } from './manifest.ts'
 import { compareVersions, isReleaseVersion } from './version.ts'
 
-/** How long one answer stands before the next launch asks again. */
-export const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000
+/** How long a successful answer stands before the next check asks again. */
+export const CHECK_INTERVAL_MS = 60 * 60 * 1000
+
+/**
+ * How long a failed answer stands. Shorter than {@link CHECK_INTERVAL_MS}
+ * because a release that is still publishing, with a new `latest.json` beside
+ * the old signature, fails exactly when an update has just appeared.
+ */
+export const FAILED_CHECK_RETRY_MS = 10 * 60 * 1000
 
 /** The cache file, under the Bake home. */
 export const CHECK_CACHE = 'update-check.json'
@@ -22,6 +29,8 @@ interface CheckCache {
   readonly checkedAt: number
   /** The newest release with an archive for this platform, when the check succeeded. */
   readonly version?: string
+  /** The check did not reach a verified manifest. */
+  readonly failed?: true
 }
 
 /** How a release compares with the running one, for this platform. */
@@ -87,9 +96,9 @@ export interface RefreshOptions extends ReleaseSource {
  * Ask the release host again, unless the last answer is still fresh.
  *
  * A failed check is recorded too, without a version, so a host that is down
- * is asked once a day rather than on every launch. Only a verified manifest
- * with an archive for this platform records a version, so the notice never
- * offers an update this host cannot install.
+ * is asked every {@link FAILED_CHECK_RETRY_MS} rather than on every launch.
+ * Only a verified manifest with an archive for this platform records a
+ * version, so the notice never offers an update this host cannot install.
  *
  * @param options - the release source, the cache's home, and the running version.
  * @returns the newer version, or undefined when there is none or the check failed.
@@ -97,25 +106,41 @@ export interface RefreshOptions extends ReleaseSource {
 export async function refreshCheck(options: RefreshOptions): Promise<string | undefined> {
   const now = (options.now ?? Date.now)()
   const cache = readCache(options.home)
-  if (cache !== undefined && now - cache.checkedAt < CHECK_INTERVAL_MS && now >= cache.checkedAt) {
+  const interval = cache?.failed === true ? FAILED_CHECK_RETRY_MS : CHECK_INTERVAL_MS
+  if (cache !== undefined && now - cache.checkedAt < interval && now >= cache.checkedAt) {
     return cache.version !== undefined && compareVersions(cache.version, options.running) > 0 ? cache.version : undefined
   }
-  let version: string | undefined
+  let status: ReleaseStatus | undefined
   try {
-    const status = statusOf(await fetchRelease(options), options.running, options.target)
-    version = status.kind === 'newer' ? status.manifest.version : undefined
+    status = statusOf(await fetchRelease(options), options.running, options.target)
   } catch (error) {
     if (options.signal?.aborted === true) throw error
   }
-  await writeCache(options.home, { checkedAt: now, ...version === undefined ? {} : { version } })
-  return version
+  await recordCheck(options.home, status, now)
+  return status?.kind === 'newer' ? status.manifest.version : undefined
+}
+
+/**
+ * Record a check's answer, so a later {@link refreshCheck} or
+ * {@link cachedUpdate} need not ask again.
+ * @param home - the Bake home.
+ * @param status - what the verified manifest said, or undefined when the check failed.
+ * @param now - when the check ran.
+ */
+export async function recordCheck(home: string, status: ReleaseStatus | undefined, now: number = Date.now()): Promise<void> {
+  await writeCache(home, status === undefined ? { checkedAt: now, failed: true }
+    : { checkedAt: now, ...status.kind === 'newer' ? { version: status.manifest.version } : {} })
 }
 
 function readCache(home: string): CheckCache | undefined {
   try {
-    const value = JSON.parse(readFileSync(join(home, CHECK_CACHE), 'utf8')) as { checkedAt?: unknown; version?: unknown }
+    const value = JSON.parse(readFileSync(join(home, CHECK_CACHE), 'utf8')) as { checkedAt?: unknown; version?: unknown; failed?: unknown }
     if (typeof value.checkedAt !== 'number') return undefined
-    return { checkedAt: value.checkedAt, ...isReleaseVersion(value.version) ? { version: value.version } : {} }
+    return {
+      checkedAt: value.checkedAt,
+      ...isReleaseVersion(value.version) ? { version: value.version } : {},
+      ...value.failed === true ? { failed: true } : {},
+    }
   } catch {
     return undefined
   }

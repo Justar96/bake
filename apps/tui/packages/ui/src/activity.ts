@@ -136,14 +136,47 @@ export const THINKING_ROWS = 3
 export function thinkingRows(live: readonly Row[], width: number, count: number): readonly string[] {
   const last = live.at(-1)
   if (last?.kind !== 'reasoning' || count <= 0) return []
-  const paragraphs = markdownLines(last.text, 'thought').map(line => line.text.replace(/\s+/g, ' ').trim()).filter(line => line !== '')
+  // Parsing the whole block on every delta is quadratic in a long thought,
+  // and the window draws its last rows only. Parse the newest paragraphs,
+  // and more of them only while they draw fewer rows than the window holds.
+  for (let paragraphs = count; ; paragraphs *= 2) {
+    const start = paragraphStart(last.text, paragraphs)
+    const rows = windowRows(last.text.slice(start), width, count)
+    if (rows.length >= count || start === 0) return rows
+  }
+}
+
+/** The newest `count` rows of a Markdown thought, wrapping only those it draws. */
+function windowRows(text: string, width: number, count: number): string[] {
+  const paragraphs = markdownLines(text, 'thought').map(line => line.text.replace(/\s+/g, ' ').trim()).filter(line => line !== '')
   const rows: string[] = []
-  // Parsing reads the current block. Wrapping visits only its visible tail.
   for (let index = paragraphs.length - 1; index >= 0 && rows.length < count; index--) {
     const wrapped = wrapAnsi(paragraphs[index]!, Math.max(1, width), { hard: true, trim: true }).split('\n')
     rows.unshift(...wrapped.slice(-(count - rows.length)))
   }
   return rows
+}
+
+/** A line that opens or closes a fenced code block. */
+const FENCE = /^ {0,3}(?:`{3,}|~{3,})/gmu
+
+/**
+ * Where the `count`th paragraph from the end starts, so the text after it
+ * parses as it does within the whole. A paragraph starts after a blank line;
+ * a start inside a fenced block moves back to the fence that opened it.
+ * @returns 0 when the text has no more paragraphs than that.
+ */
+function paragraphStart(text: string, count: number): number {
+  let start = text.length
+  for (let found = 0; found < count; found++) {
+    // A blank line at the very start has no paragraph before it.
+    const blank = start < 1 ? -1 : text.lastIndexOf('\n\n', start - 1)
+    if (blank <= 0) return 0
+    start = blank
+  }
+  start += 2
+  const fences = [...text.slice(0, start).matchAll(FENCE)]
+  return fences.length % 2 === 0 ? start : fences.at(-1)!.index
 }
 
 /**

@@ -139,6 +139,9 @@ export const PROFILE_TEMPLATES: Record<string, ProfileTemplate> = {
   headless: {
     bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-headless'],
   },
+  desktop: {
+    bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-desktop'],
+  },
 }
 
 /** The bundle list a `dsh plugin` init uses for a name with no shipped template. */

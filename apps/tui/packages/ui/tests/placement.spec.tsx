@@ -277,7 +277,9 @@ describe('composer placement', () => {
     await ui.screen()
     const committed = appendTranscript(emptyTranscript,
       Array.from({ length: 30 }, (_, index) => ({ kind: 'user' as const, text: `Prompt ${index}` })))
-    const screen = await ui.update({ committed })
+    await ui.update({ committed })
+    await vi.waitFor(async () => expect((await ui.screen()).join('\n')).toContain('Prompt 29'))
+    const screen = await ui.screen()
     expectInputUnder(screen, 'Prompt 29')
     // Frame, status line, and Ink's cursor row below it.
     expect(inputRow(screen)).toBe(24 - 4)
@@ -448,6 +450,8 @@ describe('composer placement', () => {
     const committed = appendTranscript(emptyTranscript,
       Array.from({ length: 30 }, (_, index) => ({ kind: 'user' as const, text: `Prompt ${index}` })))
     screen = await ui.update({ committed })
+    await vi.waitFor(async () => expect((await ui.screen()).join('\n')).toContain('Prompt 29'))
+    screen = await ui.screen()
     expect(inputRow(screen)).toBe(anchor)
     expect(expectInputUnder(screen, 'Prompt 29')).toBe(1)
     expect(stdoutClears(ui.stdout)).toBe(false)

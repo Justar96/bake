@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { detectInstall, hostTarget } from '@deepseek-ai/dsh-updater'
-import { runUpdate, UPDATE_AVAILABLE_EXIT } from '../src/update.ts'
+import { progressLabel, runUpdate, UPDATE_AVAILABLE_EXIT } from '../src/update.ts'
 
 const roots: string[] = []
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
@@ -38,11 +38,12 @@ function fixture(version: string) {
   const running = join(install, 'versions', '0.1.0-aaaaaaaaaaaa')
   mkdirSync(running, { recursive: true })
   symlinkSync(running, join(install, 'current'))
-  const env = { BAKE_RELEASE_BASE_URL: 'https://releases.test', BAKE_RELEASE_PUBLIC_KEY: pair.publicKey.export({ type: 'spki', format: 'der' }).toString('base64') }
+  // The update records its answer in the Bake home, which the test owns.
+  const env = { DSH_HOME: join(root, 'home'), BAKE_RELEASE_BASE_URL: 'https://releases.test', BAKE_RELEASE_PUBLIC_KEY: pair.publicKey.export({ type: 'spki', format: 'der' }).toString('base64') }
   const lines: string[] = []
   const run = (check: boolean, layout = detectInstall(running)) =>
     runUpdate(check, '0.1.0', { env, fetch, layout, out: line => lines.push(line), err: line => lines.push(line) })
-  return { install, running, sha256, run, lines }
+  return { root, install, running, sha256, run, lines }
 }
 
 describe.skipIf(process.platform === 'win32')('runUpdate', () => {
@@ -58,6 +59,19 @@ describe.skipIf(process.platform === 'win32')('runUpdate', () => {
     await expect(run(false)).resolves.toBe(0)
     expect(readlinkSync(join(install, 'current'))).toBe(join(install, 'versions', `0.2.0-${sha256.slice(0, 12)}`))
     expect(lines.at(-1)).toBe('Updated Bake 0.1.0 → 0.2.0. New sessions start 0.2.0; sessions already open keep 0.1.0.')
+  })
+
+  it('records what it found, so an open terminal names the same release', async () => {
+    const { run, root } = fixture('0.2.0')
+    await run(true)
+    expect(JSON.parse(readFileSync(join(root, 'home/update-check.json'), 'utf8'))).toMatchObject({ version: '0.2.0' })
+  })
+
+  it('labels each install step for the progress row', () => {
+    expect(progressLabel('0.2.0', { phase: 'download', received: 1_500_000, total: 3_000_000 }))
+      .toBe('Downloading Bake 0.2.0… 50% (1.5 / 3.0 MB)')
+    expect(progressLabel('0.2.0', { phase: 'unpack' })).toBe('Unpacking Bake 0.2.0…')
+    expect(progressLabel('0.2.0', { phase: 'verify' })).toBe('Checking Bake 0.2.0 starts…')
   })
 
   it('says so when up to date', async () => {

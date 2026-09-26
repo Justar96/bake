@@ -3,13 +3,11 @@
  * @module @deepseek-ai/dsh/update
  */
 
-import { existsSync } from 'node:fs'
-import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { startBakery } from './bakery.ts'
 import {
-  detectInstall, fetchRelease, hostTarget, installRelease, markLaunched, releaseSource, statusOf, UpdateError,
-  type InstallLayout,
+  detectInstall, markLaunched, selfUpdate, UpdateError, type InstallLayout, type InstallProgress,
 } from '@deepseek-ai/dsh-updater'
 
 /** `--check` exit status when a newer release is available, so a script can tell it from "up to date" (0) and failure (1). */
@@ -35,6 +33,27 @@ export async function recordLaunch(): Promise<void> {
 }
 
 /**
+ * The spinner's label for an install step.
+ * @param version - the release being installed.
+ * @param progress - the step.
+ * @returns one line, without a trailing newline.
+ */
+export function progressLabel(version: string, progress: InstallProgress): string {
+  switch (progress.phase) {
+    case 'download': {
+      const percent = progress.total === 0 ? 100 : Math.floor(progress.received * 100 / progress.total)
+      return `Downloading Bake ${version}… ${percent}% (${megabytes(progress.received)} / ${megabytes(progress.total)} MB)`
+    }
+    case 'unpack': return `Unpacking Bake ${version}…`
+    case 'verify': return `Checking Bake ${version} starts…`
+  }
+}
+
+function megabytes(bytes: number): string {
+  return (bytes / 1_000_000).toFixed(1)
+}
+
+/**
  * Run `bake update`.
  * @param check - only report; never install.
  * @param running - the running Bake version.
@@ -54,40 +73,44 @@ export async function runUpdate(check: boolean, running: string, io: {
   const err = io.err ?? (line => process.stderr.write(`${line}\n`))
   const env = io.env ?? process.env
   const layout = io.layout ?? detectInstall(releaseRoot())
-  if (!check && layout.kind === 'unmanaged') {
-    err(`This Bake runs from ${layout.running}, which the updater does not manage.`)
-    err('A source checkout updates with: git pull && bun install --frozen-lockfile && bun run build')
-    err('Any other copy updates by installing again: curl -fsSL https://bake.justar.dev/install.sh | sh')
-    return 1
-  }
-  const target = hostTarget()
-  if (target === undefined) {
-    err(`Bake publishes no release for ${process.platform}-${process.arch}.`)
-    return 1
-  }
-  const source = {
-    ...releaseSource(env),
-    ...io.signal === undefined ? {} : { signal: io.signal },
-    ...io.fetch === undefined ? {} : { fetch: io.fetch },
-  }
   let bakery: ReturnType<typeof startBakery> | undefined
+  let found = ''
   try {
-    const status = statusOf(await fetchRelease(source), running, target)
-    if (status.kind === 'current') { out(`Bake ${running} is up to date.`); return 0 }
-    if (status.kind === 'unavailable') { out(`Bake ${status.version} is published, but not yet for ${target}; ${running} stays.`); return 0 }
-    const next = status.manifest.version
-    if (check) { out(`Bake ${next} is available (running ${running}). Run: bake update`); return UPDATE_AVAILABLE_EXIT }
-    if (layout.kind === 'unmanaged') return 1
-    out(`Downloading Bake ${next} for ${target}…`)
-    bakery = startBakery(io.out === undefined && io.err === undefined ? process.stderr : { write() {} }, env, 'Baking your update...')
-    const result = await installRelease({
-      ...source, layout, manifest: status.manifest, artifact: status.artifact, launcher: windowsLauncherPath(layout.root, env),
+    const outcome = await selfUpdate({
+      running, layout, check, env, home: resolveDshHome(undefined, env),
+      ...io.signal === undefined ? {} : { signal: io.signal },
+      ...io.fetch === undefined ? {} : { fetch: io.fetch },
+      onFound: (version) => {
+        found = version
+        out(`Downloading Bake ${version}…`)
+        bakery = startBakery(io.out === undefined && io.err === undefined ? process.stderr : { write() {} }, env, 'Baking your update...')
+      },
+      onProgress: (progress) => { bakery?.stage(progressLabel(found, progress)) },
     })
-    bakery.finish(true)
-    out(`Updated Bake ${running} → ${next}. New sessions start ${next}; sessions already open keep ${running}.`)
-    if (result.launcherPending) out('The bake command switches over once this window\'s bake exits.')
-    if (result.pruned.length > 0) out(`Removed releases unused for a week: ${result.pruned.join(', ')}`)
-    return 0
+    switch (outcome.kind) {
+      case 'unmanaged':
+        err(`This Bake runs from ${outcome.running}, which the updater does not manage.`)
+        err('A source checkout updates with: git pull && bun install --frozen-lockfile && bun run build')
+        err('Any other copy updates by installing again: curl -fsSL https://bake.justar.dev/install.sh | sh')
+        return 1
+      case 'unsupported': err(`Bake publishes no release for ${outcome.platform}.`); return 1
+      case 'current': out(`Bake ${running} is up to date.`); return 0
+      case 'unavailable': out(`Bake ${outcome.version} is published, but not yet for ${outcome.target}; ${running} stays.`); return 0
+      case 'available':
+        out(`Bake ${outcome.version} is available (running ${running}). Run: bake update`)
+        return UPDATE_AVAILABLE_EXIT
+      case 'installed': {
+        bakery?.finish(true)
+        const next = outcome.version
+        out(`Updated Bake ${running} → ${next}. New sessions start ${next}; sessions already open keep ${running}.`)
+        if (outcome.result.launcherPending) out('The bake command switches over once this window\'s bake exits.')
+        if (outcome.result.pruned.length > 0) out(`Removed releases unused for a week: ${outcome.result.pruned.join(', ')}`)
+        return 0
+      }
+      default:
+        outcome satisfies never
+        throw new Error(`bake update: unhandled outcome ${JSON.stringify(outcome)}`)
+    }
   } catch (error) {
     bakery?.finish()
     if (io.signal?.aborted === true) { err('Update cancelled; the install is unchanged.'); return 1 }
@@ -96,18 +119,4 @@ export async function runUpdate(check: boolean, running: string, io: {
   } finally {
     bakery?.finish()
   }
-}
-
-/**
- * The Windows `bake.cmd` that started this process.
- *
- * The pointer-form launcher names itself in `BAKE_LAUNCHER`. An older one
- * does not, and sits where the installer puts it by default.
- */
-function windowsLauncherPath(root: string, env: Record<string, string | undefined>): string | undefined {
-  if (process.platform !== 'win32') return undefined
-  const named = env['BAKE_LAUNCHER']
-  if (named !== undefined && named !== '') return named
-  const fallback = join(env['BAKE_BIN_DIR'] ?? join(root, 'bin'), 'bake.cmd')
-  return existsSync(fallback) ? fallback : undefined
 }

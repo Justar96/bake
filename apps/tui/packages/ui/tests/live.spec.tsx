@@ -316,22 +316,19 @@ describe('turn header', () => {
     expect(active()).toBe(0)
   })
 
-  it('holds the goal in its own block above the header, and keeps both rules bare', () => {
+  it('keeps the goal beside processing on the header, with both rules bare', () => {
     const goal = { objective: 'Ship it', phase: 'active' as const, armed: true, rounds: 2, maxRounds: 8 }
     const ui = render(<App {...props({ status: 'running', goal })} />)
     const rows = ui.lastFrame()!.split('\n')
     const header = rows.findIndex(line => RUNNING.test(line))
-    // The block says it, so the header's row carries only the turn.
-    expect(rows[header]).not.toContain(dictionaries.en.goalActive)
-    expect(rows[header - 3]!.trimEnd()).toBe(`● ${dictionaries.en.goalActive}  ${dictionaries.en.goalRound} 2/8`)
-    expect(rows[header - 2]!.trimEnd()).toBe('└ Ship it')
-    expect(rows[header - 1]).toContain(dictionaries.en.goalKeysActive)
+    expect(rows[header]).toContain(`● ${dictionaries.en.goalActive}  ${dictionaries.en.goalRound} 2/8 · Ship it`)
+    expect(rows.filter(line => line.includes(dictionaries.en.goalActive))).toHaveLength(1)
     expect(rows[header + 1]).toMatch(/^─+$/)
     expect(rows[header + 2]).toMatch(/^> /)
     expect(rows[header + 3]).toMatch(/^─+$/)
-    // Idle, the block stays where it was.
+    // Idle keeps the goal on the same header row.
     const idle = render(<App {...props({ goal })} />).lastFrame()!.split('\n')
-    expect(idle.find(line => line.includes(dictionaries.en.goalActive))).toMatch(/^● /)
+    expect(idle.find(line => line.includes(dictionaries.en.goalActive))).toMatch(/^ +Ctrl\+O ● /)
   })
 
   it('keeps one word through thinking, writing, a commit, and a running tool', () => {
