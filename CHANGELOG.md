@@ -4,6 +4,8 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-09-26
+
 - Each tool call opens with an icon for its kind: `$` a command, `≡` a read, `✎` an edit, `⌕` a search, `↳` a subagent started, `→` a message sent to one, and more; a batch of calls carries the icon on its header only.
 - Ctrl+T cycles the task, subagent, and goal views and closes after the last; Tab and Shift-Tab move between them, and a tab strip names every view.
 - The task view adds a progress bar, counts by state, and numbered tasks; the goal view adds a rounds bar and labels its objective and reason.
