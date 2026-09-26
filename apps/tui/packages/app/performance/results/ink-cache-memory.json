@@ -1,0 +1,190 @@
+{
+  "date": "2026-09-26",
+  "command": "NODE_ENV=production node --expose-gc --max-old-space-size=192 apps/tui/packages/ui/tests/fixtures/ink-memory.mjs",
+  "fixtureSha256": "143a14a13271390ffb5e4aa8ebfbe88edc86d07a3f34c5efb2cc7f528c72a977",
+  "patchSha256": "394262df01814cbfdc9700fc2ac505f482ad178c62c53b7797ee4b02c34aa559",
+  "dimensions": {
+    "frames": 3000,
+    "textCodeUnits": 16384,
+    "marker": "frame-<number>:",
+    "columns": 100,
+    "rows": 24,
+    "retainedOutputTail": 1024
+  },
+  "measurements": [
+    {
+      "revision": "89ef77f8ed with existing workspace edits",
+      "node": "v26.7.0",
+      "platform": "linux-x64",
+      "ink": "7.1.1",
+      "mode": "unpatched",
+      "results": [
+        {
+          "samples": [
+            {
+              "frames": 0,
+              "heapUsed": 14752048
+            },
+            {
+              "frames": 1000,
+              "heapUsed": 52188048
+            },
+            {
+              "frames": 2000,
+              "heapUsed": 85941904
+            },
+            {
+              "frames": 3000,
+              "heapUsed": 121284544
+            },
+            {
+              "frames": 3001,
+              "heapUsed": 121232640
+            }
+          ],
+          "bytes": 402175,
+          "elapsedMs": 1711.990571
+        },
+        {
+          "samples": [
+            {
+              "frames": 0,
+              "heapUsed": 14749488
+            },
+            {
+              "frames": 1000,
+              "heapUsed": 52185464
+            },
+            {
+              "frames": 2000,
+              "heapUsed": 85937864
+            },
+            {
+              "frames": 3000,
+              "heapUsed": 121282144
+            },
+            {
+              "frames": 3001,
+              "heapUsed": 121230552
+            }
+          ],
+          "bytes": 402175,
+          "elapsedMs": 1848.9141060000002
+        },
+        {
+          "samples": [
+            {
+              "frames": 0,
+              "heapUsed": 14754160
+            },
+            {
+              "frames": 1000,
+              "heapUsed": 52186832
+            },
+            {
+              "frames": 2000,
+              "heapUsed": 85939928
+            },
+            {
+              "frames": 3000,
+              "heapUsed": 121282872
+            },
+            {
+              "frames": 3001,
+              "heapUsed": 121231184
+            }
+          ],
+          "bytes": 402175,
+          "elapsedMs": 1783.1553940000001
+        }
+      ]
+    },
+    {
+      "revision": "89ef77f8ed with existing workspace edits",
+      "node": "v26.7.0",
+      "platform": "linux-x64",
+      "ink": "7.1.1",
+      "mode": "patched",
+      "results": [
+        {
+          "samples": [
+            {
+              "frames": 0,
+              "heapUsed": 14761488
+            },
+            {
+              "frames": 1000,
+              "heapUsed": 17483152
+            },
+            {
+              "frames": 2000,
+              "heapUsed": 17379448
+            },
+            {
+              "frames": 3000,
+              "heapUsed": 17399520
+            },
+            {
+              "frames": 3001,
+              "heapUsed": 17347784
+            }
+          ],
+          "bytes": 402175,
+          "elapsedMs": 1458.343608
+        },
+        {
+          "samples": [
+            {
+              "frames": 0,
+              "heapUsed": 14762048
+            },
+            {
+              "frames": 1000,
+              "heapUsed": 17565088
+            },
+            {
+              "frames": 2000,
+              "heapUsed": 17383576
+            },
+            {
+              "frames": 3000,
+              "heapUsed": 17402000
+            },
+            {
+              "frames": 3001,
+              "heapUsed": 17350248
+            }
+          ],
+          "bytes": 402175,
+          "elapsedMs": 1427.5886
+        },
+        {
+          "samples": [
+            {
+              "frames": 0,
+              "heapUsed": 14764344
+            },
+            {
+              "frames": 1000,
+              "heapUsed": 17572096
+            },
+            {
+              "frames": 2000,
+              "heapUsed": 17383664
+            },
+            {
+              "frames": 3000,
+              "heapUsed": 17401696
+            },
+            {
+              "frames": 3001,
+              "heapUsed": 17350344
+            }
+          ],
+          "bytes": 402175,
+          "elapsedMs": 1413.865876
+        }
+      ]
+    }
+  ]
+}

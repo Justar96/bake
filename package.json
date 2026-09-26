@@ -19,7 +19,8 @@
     "apps/tui/packages/*"
   ],
   "patchedDependencies": {
-    "node-pty@1.2.0-beta.15": "patches/node-pty@1.2.0-beta.15.patch"
+    "node-pty@1.2.0-beta.15": "patches/node-pty@1.2.0-beta.15.patch",
+    "ink@7.1.1": "patches/ink@7.1.1.patch"
   },
   "trustedDependencies": [
     "@deepseek-ai/dsh-subprocess-local",

@@ -6,7 +6,7 @@ This reference records the APIs used by the TUI and their documentation sources,
 
 | Dependency | Used version | Documentation and applied behavior |
 |---|---|---|
-| Ink | 7.1.1, npm latest | [Versioned API](https://github.com/vadimdemedes/ink/tree/v7.1.1#readme): `usePaste` manages bracketed paste separately from `useInput`; `Static` receives immutable rows; `cleanup` releases an instance; `waitUntilExit` reports renderer failures. |
+| Ink | 7.1.1, patched | [Versioned API](https://github.com/vadimdemedes/ink/tree/v7.1.1#readme): `usePaste` manages bracketed paste separately from `useInput`; `Static` receives immutable rows; `cleanup` releases an instance; `waitUntilExit` reports renderer failures. Bake's [patch](../../patches/ink@7.1.1.patch) bounds process-wide text caches; the [regression](packages/ui/tests/memory.spec.ts) exercises the installed renderer. |
 | React | 19.3.0, npm latest | [TypeScript](https://react.dev/learn/typescript), [useRef](https://react.dev/reference/react/useRef), [useState](https://react.dev/reference/react/useState): typed props and same-read draft refs; effects and state are owned by React components. |
 | `@types/react` | 19.3.0, npm latest | [React types](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/react): declared by both TUI packages, including the application’s React imports. |
 | Commander | 15.0.0, npm latest | [Versioned API](https://github.com/tj/commander.js/tree/v15.0.0#readme): `Command`, typed `opts`, `option`, and `error`; harness `parseCmdline` owns launch integration. |

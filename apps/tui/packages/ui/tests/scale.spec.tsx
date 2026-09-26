@@ -77,6 +77,7 @@ afterEach(() => {
 async function mounted(count: number): Promise<{
   stdout: NodeJS.WriteStream & { chunks: string[] }
   append: (rows: readonly Row[]) => Promise<string>
+  unmount: () => void
 }> {
   const stdout = fakeStdout()
   let transcript = appendTranscript(emptyTranscript, rowsUpTo(count))
@@ -84,14 +85,19 @@ async function mounted(count: number): Promise<{
     stdout, stdin: fakeStdin(), patchConsole: false, exitOnCtrlC: false, interactive: true,
   })
   instances.push(instance)
+  if (count > 0) await vi.waitFor(() => expect(stdout.chunks.join('')).toContain(`row-${count - 1}-marker`), { timeout: 20_000 })
   await instance.waitUntilRenderFlush()
   return {
     stdout,
+    unmount: () => instance.unmount(),
     async append(rows: readonly Row[]): Promise<string> {
       stdout.chunks.length = 0
       transcript = appendTranscript(transcript, rows)
       instance.rerender(<App {...props(transcript)} />)
       await instance.waitUntilRenderFlush()
+      for (const row of rows) {
+        if (row.kind === 'assistant') await vi.waitFor(() => expect(stdout.chunks.join('')).toContain(row.text))
+      }
       return stdout.chunks.join('')
     },
   }
@@ -112,6 +118,7 @@ describe('transcript cost', () => {
       stdout, stdin: fakeStdin(), patchConsole: false, exitOnCtrlC: false, interactive: true,
     })
     instances.push(instance)
+    await vi.waitFor(() => expect(stdout.chunks.join('')).toContain(`row-${count - 1}-marker`), { timeout: 20_000 })
     await instance.waitUntilRenderFlush()
     reads = 0
     instance.rerender(<App {...props(committed, { live: [{ kind: 'assistant', text: 'stream-marker' }] })} />)
@@ -157,10 +164,12 @@ describe('transcript cost', () => {
 
   it('emits bounded terminal output when appending at 50 and 2000 rows', async () => {
     const short = await mounted(50)
-    const long = await mounted(2000)
-
     const row = { kind: 'assistant', text: 'appended-marker' } as const
     const afterShort = await short.append([row])
+    // Ink's Static dirty-node pointer is process-global. Own one renderer at
+    // a time, as the CLI does, so a second root cannot steal the first's flush.
+    short.unmount()
+    const long = await mounted(2000)
     const afterLong = await long.append([row])
 
     expect(afterShort).toContain('appended-marker')

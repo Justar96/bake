@@ -1,4 +1,6 @@
 /** Fixed workload sizes and aggregates for local, uncalibrated terminal diagnostics. */
+import type { HistoryDimensions, HistoryOptions } from './history.ts'
+
 /** One explicit main-process sample with live session state still reachable. */
 export interface Metrics {
   sequence: number
@@ -8,14 +10,27 @@ export interface Metrics {
   cpu: NodeJS.CpuUsage
 }
 
-/** Completed turns per workload; each fourth turn includes a tool result. */
-export const WORKLOADS = { fresh: 0, small: 50, typical: 500, tail: 2000 } as const
+/** Turn counts, tool density, and large-message size vary independently. */
+export const WORKLOADS = {
+  fresh: { turns: 0 },
+  small: { turns: 50 },
+  typical: { turns: 500 },
+  tail: { turns: 2000 },
+  tools: { turns: 500, toolEvery: 1, toolsPerTurn: 4 },
+  'large-output': { turns: 12, assistantTextBytes: 64 * 1024 },
+} as const satisfies Record<string, HistoryOptions & { turns: number }>
 
 /** One fully observed session, including its final delta and clean process exit. */
 export interface Sample {
   workload: string
   iteration: number
-  dimensions: { turns: number; events: number; deltaCount: number; toolCount: number; fileBytes: number; sessionId: string }
+  dimensions: HistoryDimensions & { fileBytes: number; sessionId: string }
+  /** First probe write through composer echo, before waiting for the replay tail. */
+  initialInputMs: number
+  /** Spawn through the first observed composer echo, even while history is arriving. */
+  firstInputMs: number
+  historyMarkersAtFirstInput: number
+  /** Spawn through the first composer echo and every historical marker, including trailing tools. */
   readyMs: number
   idleInputMs: number[]
   idleBytes: number
@@ -53,13 +68,19 @@ export function summarize(results: readonly (Sample | Failure)[]) {
     const matching = results.filter(result => result.workload === workload)
     const completed = matching.filter((result): result is Sample => !('error' in result))
     return { workload, completed: completed.length, failed: matching.length - completed.length,
+      initialInputMs: median(completed.map(sample => sample.initialInputMs)),
+      firstInputMs: median(completed.map(sample => sample.firstInputMs)),
       readyMs: median(completed.map(sample => sample.readyMs)),
       maxIdleInputMs: median(completed.map(sample => Math.max(...sample.idleInputMs))),
       liveInputMs: median(completed.map(sample => sample.liveInputMs)),
       firstDeltaMs: median(completed.map(sample => sample.firstDeltaMs)),
       streamMs: median(completed.map(sample => sample.streamMs)),
       retainedHeapMiB: median(completed.map(sample => sample.readyMemory.afterGc.heapUsed / 1048576)),
+      settledRetainedHeapMiB: median(completed.map(sample => sample.settledMemory.afterGc.heapUsed / 1048576)),
       peakRssMiB: median(completed.map(sample => sample.settledMemory.resources.maxRSS / 1024)),
+      initialBytes: median(completed.map(sample => sample.initialBytes)),
+      idleBytes: median(completed.map(sample => sample.idleBytes)),
+      streamBytes: median(completed.map(sample => sample.streamBytes)),
     }
   })
 }
