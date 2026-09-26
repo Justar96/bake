@@ -46,6 +46,13 @@ const SUPPORTING = '#586e75'
 /** Highlighted runs kept for re-rendered rows, keyed by language and text. */
 const CACHED = 128
 
+/**
+ * Code units of cached text, keys summed. Each run's tokens grow with its
+ * text, so this bounds both. A streaming fence adds a near-copy of itself on
+ * every delta; a count alone would let a few large ones hold megabytes.
+ */
+const CACHED_TEXT = 1024 * 1024
+
 /** Shiki's `FontStyle.Italic`, a bit flag. */
 const ITALIC = 1
 
@@ -75,14 +82,17 @@ export function languageOf(path: string): string | undefined {
  *
  * A load failure leaves text in its semantic tone and reports no diagnostic.
  *
+ * @param limits - how many highlighted runs to keep, and how much text they may hold.
  * @returns the highlighter, usable at once.
  */
-export function createSyntax(): Syntax {
+export function createSyntax(limits: { readonly runs: number, readonly text: number } = { runs: CACHED, text: CACHED_TEXT }): Syntax {
   let core: HighlighterCore | undefined
   let closed = false
   const loaded = new Set<string>()
   const loading = new Map<string, Promise<void>>()
+  // Least recently used first: a hit moves its entry to the end.
   const cache = new Map<string, readonly (readonly CodeToken[])[]>()
+  let cachedText = 0
   const creating = createHighlighterCore({
     themes: [import('shiki/themes/solarized-dark.mjs')],
     langs: PRELOADED.map(language => bundledLanguages[language] as LanguageInput),
@@ -115,19 +125,31 @@ export function createSyntax(): Syntax {
       load(language)
       return undefined
     }
-    const key = `${language}\0${lines.join('\n')}`
+    const text = lines.join('\n')
+    const key = `${language}\0${text}`
     const hit = cache.get(key)
-    if (hit !== undefined) return hit
+    if (hit !== undefined) {
+      cache.delete(key)
+      cache.set(key, hit)
+      return hit
+    }
     let tokens: readonly (readonly CodeToken[])[]
     try {
-      tokens = core.codeToTokensBase(lines.join('\n'), { lang: language, theme: 'solarized-dark' })
+      tokens = core.codeToTokensBase(text, { lang: language, theme: 'solarized-dark' })
         .map(line => line.map(token => codeToken(token.content.length, token.color, token.fontStyle)))
     } catch {
       // A grammar the regex engine cannot run leaves these lines plain.
       return undefined
     }
-    if (cache.size >= CACHED) cache.delete(cache.keys().next().value!)
+    // A run larger than the whole budget is drawn but not kept.
+    if (key.length > limits.text) return tokens
+    while (cache.size > 0 && (cache.size >= limits.runs || cachedText + key.length > limits.text)) {
+      const oldest = cache.keys().next().value!
+      cache.delete(oldest)
+      cachedText -= oldest.length
+    }
     cache.set(key, tokens)
+    cachedText += key.length
     return tokens
   }
 
@@ -140,6 +162,8 @@ export function createSyntax(): Syntax {
       await Promise.all(loading.values())
       core?.dispose()
       core = undefined
+      cache.clear()
+      cachedText = 0
     },
   }
 }

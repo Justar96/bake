@@ -179,6 +179,7 @@ it('shows each saved child outcome and clears it when another turn starts', asyn
       meta: { parentSession: handle.agent.id, origin: 'subagent' },
     })
     child.append('subagent/descriptor', { version: SUBAGENT_DESCRIPTOR_VERSION, mode: 'continuable', provider: 'spawn', label: 'Review' })
+    const observe = vi.spyOn(fixture.ctx.sessionQuery, 'observeSession')
     const reasons = [
       { kind: 'completed' } as const,
       { kind: 'error', error: { code: 'TRANSPORT', message: 'lost stream' } } as const,
@@ -195,6 +196,8 @@ it('shows each saved child outcome and clears it when another turn starts', asyn
       await controller!.drain()
       expect(controller!.view.subagents[0]?.outcome).toBe(reason.kind === 'completed' ? 'completed' : reason.kind === 'error' ? 'failed' : 'stopped')
     }
+    // The child's own turn events keep its outcome; its log is not reread on each.
+    expect(observe.mock.calls.filter(([id]) => id === child.id).length).toBeLessThanOrEqual(1)
     const events = child.snapshotEvents()
     expect(childOutcome(events, events.length)).toBeUndefined()
     controller!.close()

@@ -536,6 +536,30 @@ describe('present, drawing a change', () => {
     expect(present(edit([change('added', 'uno', 1)]), { ...shown, code: () => undefined })[2]!.spans).toEqual([{ length: 5, tone: 'added' }])
   })
 
+  test('highlights only the lines a preview draws', () => {
+    const seen: string[] = []
+    const highlight: Highlight = lines => {
+      seen.push(...lines)
+      return lines.map(text => [{ length: text.length, color: '#268bd2' }])
+    }
+    const file = Array.from({ length: 5000 }, (_, index): CardLine => ({ text: `line ${index + 1}`, source: 'a.ts', number: index + 1 }))
+    const read = { kind: 'tool-call' as const, callId: 'c1', tool: 'read', input: 'Read a.ts', result: { ok: true, text: '', detail: file } }
+    const lines = present(read, { ...live, code: highlight }).slice(2)
+    // The head and the tail of the output, and nothing the count stands for.
+    expect(seen).toEqual(['line 1', 'line 2', 'line 5000'])
+    expect(lines.map(line => [line.text, line.spans?.[0]?.color])).toEqual([
+      ['line 1', '#268bd2'], ['line 2', '#268bd2'], ['+4997 more lines', undefined], ['line 5000', '#268bd2'],
+    ])
+    // A collapsed result draws no lines, so none reach the grammar.
+    seen.length = 0
+    present(read, { ...committed, code: highlight })
+    expect(seen).toEqual([])
+    // A result row previews its head.
+    seen.length = 0
+    present({ kind: 'tool-result', callId: 'c1', ok: true, text: '', detail: file }, { ...live, code: highlight })
+    expect(seen).toEqual(['line 1', 'line 2', 'line 3'])
+  })
+
   test('keeps a failed change red throughout', () => {
     const failed = { ...edit(detail), result: { ok: false, text: '', detail } }
     const lines = present(failed, shown, undefined).slice(2)

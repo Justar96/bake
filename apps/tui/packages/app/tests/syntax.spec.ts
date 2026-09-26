@@ -37,6 +37,24 @@ describe('syntax', () => {
     expect(tokens![1]!.at(-1)).toMatchObject({ dim: true })
   })
 
+  it('keeps recently drawn runs within its count and text, and never a run larger than all of it', async () => {
+    syntax = createSyntax({ runs: 4, text: 120 })
+    await syntax.ready
+    const first = syntax.highlight(['const first = 1'], 'a.ts')
+    for (const name of ['a', 'b']) syntax.highlight([`const ${name} = 0`], 'a.ts')
+    // Drawn again, it becomes the newest; the next runs evict the oldest instead.
+    expect(syntax.highlight(['const first = 1'], 'a.ts')).toBe(first)
+    for (const name of ['c', 'd']) syntax.highlight([`const ${name} = 0`], 'a.ts')
+    expect(syntax.highlight(['const first = 1'], 'a.ts')).toBe(first)
+    // Text evicts before the count does: two long runs leave no room for the first.
+    for (const name of ['e', 'f']) syntax.highlight([`const ${name} = '${'x'.repeat(40)}'`], 'a.ts')
+    expect(syntax.highlight(['const first = 1'], 'a.ts')).not.toBe(first)
+    const huge = [`const text = '${'x'.repeat(200)}'`]
+    const drawn = syntax.highlight(huge, 'a.ts')
+    expect(drawn).toHaveLength(1)
+    expect(syntax.highlight(huge, 'a.ts')).not.toBe(drawn)
+  })
+
   it('leaves another language plain until its grammar loads, then colours it', async () => {
     syntax = createSyntax()
     await syntax.ready
