@@ -1470,18 +1470,26 @@ scenario('goal-compact', 'the built TUI exposes goal and compact commands and sh
         await tty.expect('Goal created', goalStart)
         // The goal shares the processing header once `/goal` arms it.
         await tty.expect('\u25cf Goal active', goalStart)
-        const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
-        try {
-          await new Promise<void>(resolve => screen.write(tty.raw, resolve))
-          const lines = Array.from({ length: 40 }, (_, row) =>
-            screen.buffer.active.getLine(screen.buffer.active.viewportY + row)?.translateToString(true) ?? '')
-          const visible = lines.join('\n')
-          assert(visible.includes('Goal created'), 'goal result is absent from the current terminal viewport')
-          const goalRow = lines.findIndex(line => line.includes('Goal active'))
-          assert(goalRow >= 0 && /^─+$/u.test(lines[goalRow + 1]?.trim() ?? ''),
-            'goal is not on the processing header above the composer rule')
-          assert(!lines[goalRow]!.includes('FULL_GOAL_END'), 'the long goal was not truncated in the header')
-        } finally { screen.dispose() }
+        // The raw stream can end inside a frame: a macOS PTY hands one render
+        // over in small reads. The header is checked once the viewport draws it.
+        const viewport = async (): Promise<readonly string[]> => {
+          const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
+          try {
+            await new Promise<void>(resolve => screen.write(tty.raw, resolve))
+            return Array.from({ length: 40 }, (_, row) =>
+              screen.buffer.active.getLine(screen.buffer.active.viewportY + row)?.translateToString(true) ?? '')
+          } finally { screen.dispose() }
+        }
+        const headed = (lines: readonly string[]): number => {
+          const row = lines.findIndex(line => line.includes('Goal active'))
+          return row >= 0 && /^─+$/u.test(lines[row + 1]?.trim() ?? '') ? row : -1
+        }
+        let lines: readonly string[] = []
+        await tty.wait('the goal result, and the goal on the processing header above the composer rule', async () => {
+          lines = await viewport()
+          return lines.join('\n').includes('Goal created') && headed(lines) >= 0
+        })
+        assert(!lines[headed(lines)]!.includes('FULL_GOAL_END'), 'the long goal was not truncated in the header')
         // Up walks back through the commands above before it reaches the goal.
         // Repeated entries draw no new frame, and further Ups keep the goal
         // selected, so the walk is sent at once. The one-round goal may
@@ -1498,14 +1506,9 @@ scenario('goal-compact', 'the built TUI exposes goal and compact commands and sh
         // next key waits for the view to leave the viewport. The raw stream
         // cannot say so: a spinner beat may redraw the view after the key.
         await tty.wait('the goal view to close over the restored empty draft', async () => {
-          const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
-          try {
-            await new Promise<void>(resolve => screen.write(tty.raw, resolve))
-            const visible = Array.from({ length: 40 }, (_, row) =>
-              screen.buffer.active.getLine(screen.buffer.active.viewportY + row)?.translateToString(true) ?? '').join('\n')
-            // The empty draft, not the oldest command the walk passed.
-            return visible.includes(`${SCREEN.prompt}${SCREEN.caret}`) && !visible.includes('Esc closes')
-          } finally { screen.dispose() }
+          const visible = (await viewport()).join('\n')
+          // The empty draft, not the oldest command the walk passed.
+          return visible.includes(`${SCREEN.prompt}${SCREEN.caret}`) && !visible.includes('Esc closes')
         })
         await tty.wait('the goal driver to run its first round', text => DONE_LINE.test(text.slice(goalStart)))
       })
