@@ -33,6 +33,14 @@ export const LAUNCH_MARKER = '.last-launch'
 /** Bound on starting the unpacked command to read its version. */
 const SMOKE_TIMEOUT_MS = 60_000
 
+/** Where an install has got to, for a surface that shows it. */
+export type InstallProgress =
+  /** Archive bytes received so far, out of the manifest's stated size. */
+  | { readonly phase: 'download'; readonly received: number; readonly total: number }
+  | { readonly phase: 'unpack' }
+  /** Starting the unpacked command to check its version. */
+  | { readonly phase: 'verify' }
+
 /** Everything one install needs, injected so tests own every effect. */
 export interface InstallOptions extends ReleaseSource {
   readonly layout: ManagedInstall
@@ -46,6 +54,8 @@ export interface InstallOptions extends ReleaseSource {
   readonly platform?: NodeJS.Platform
   /** Windows: the `bake.cmd` that launched this process, to bring onto the pointer form. */
   readonly launcher?: string | undefined
+  /** Called as the install moves on, and for each downloaded chunk; the caller throttles what it draws. */
+  readonly onProgress?: ((progress: InstallProgress) => void) | undefined
 }
 
 /** What an install changed. */
@@ -85,7 +95,9 @@ export async function installRelease(options: InstallOptions): Promise<InstallRe
       await downloadArchive(options, archive)
       const unpacked = join(work, 'unpacked')
       await mkdir(unpacked)
+      options.onProgress?.({ phase: 'unpack' })
       await run(platform === 'win32' ? 'tar.exe' : 'tar', ['-xzf', archive, '-C', unpacked], options.signal)
+      options.onProgress?.({ phase: 'verify' })
       if (!await starts(node, unpacked, manifest.version)) {
         throw new UpdateError(`The downloaded Bake ${manifest.version} did not start; the current install is unchanged`)
       }
@@ -168,10 +180,12 @@ async function downloadArchive(options: InstallOptions, path: string): Promise<v
   const out = createWriteStream(path, { flags: 'wx', mode: 0o600 })
   const closed = new Promise<void>((resolve, reject) => { out.on('close', resolve); out.on('error', reject) })
   let size = 0
+  options.onProgress?.({ phase: 'download', received: 0, total: artifact.size })
   try {
     for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
       size += chunk.byteLength
       if (size > artifact.size) throw new UpdateError(`${artifact.file} is larger than the release manifest says`)
+      options.onProgress?.({ phase: 'download', received: size, total: artifact.size })
       hash.update(chunk)
       if (!out.write(chunk)) await new Promise<void>(resolve => out.once('drain', () => resolve()))
     }

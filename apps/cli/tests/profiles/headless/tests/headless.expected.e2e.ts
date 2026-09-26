@@ -297,7 +297,7 @@ describe('headless stream-json snapshots', () => {
     expect(result.stderr).toBe('')
   }, LOADER_SMOKE_TEST_TIMEOUT_MS)
 
-  it('fails the JSON run when --session-id names no stored Session', async () => {
+  it('fails the JSON run when --resume names no stored Session', async () => {
     const result = await runLoaderSmoke({
       label: 'product headless profile unknown session',
       tempDirPrefix: 'headless-snapshot-profile-unknown-session-',
@@ -305,7 +305,7 @@ describe('headless stream-json snapshots', () => {
       configPath: headlessOverlayPath,
       binArgs: [
         '--profile', 'headless', '--patch', headlessOverlayPath,
-        '--json', '--session-id', 'headless-unknown-session', 'Continue the conversation.',
+        '--json', '--resume', 'headless-unknown-session', 'Continue the conversation.',
       ],
       tsconfigPath,
       expectedExitCode: 1,
@@ -318,9 +318,9 @@ describe('headless stream-json snapshots', () => {
     const events = result.stdout.trim().split('\n').map(line => JSON.parse(line) as JsonObject)
     expect(events).toEqual([{
       type: 'error',
-      message: 'session "headless-unknown-session" does not exist; omit --session-id to start a new Session',
+      message: 'session "headless-unknown-session" does not exist; omit --resume to start a new Session',
     }])
-    expect(result.stderr).toContain('omit --session-id to start a new Session')
+    expect(result.stderr).toContain('omit --resume to start a new Session')
   }, LOADER_SMOKE_TEST_TIMEOUT_MS)
 
   it('resumes one persisted Session across two real --session-id wakes', async () => {

@@ -1,12 +1,12 @@
 /**
  * The one-shot app's command-line provider: it parses the task positional,
- * `--session-id`, `--json`, and `--help`, then publishes
+ * `--resume` (alias `--session-id`), `--json`, and `--help`, then publishes
  * {@link HEADLESS_STARTUP_SERVICE}. The runner is an ordinary consumer whose
  * lazy config waits for that service.
  * @module @deepseek-ai/dsh-headless/startup
  */
 
-import { Command, CommanderError } from 'commander'
+import { Command, CommanderError, Option } from 'commander'
 import type { Context } from '@deepseek-ai/cordis'
 import { parseCmdline } from '@deepseek-ai/dsh-cmdline'
 import { boundJsonLine } from './json-stream.ts'
@@ -41,21 +41,24 @@ function headlessCommand(): Command {
     .description('Answer one task and exit; the answer goes to stdout and diagnostics to stderr.')
     .helpOption('-h, --help', 'show this help')
     .option('--json', 'write newline-delimited run events to stdout instead of the final message')
-    .option('--session-id <id>', 'adopt the persisted Session with this id; an unknown id is an error')
+    .option('--resume <id>', 'adopt the persisted Session with this id; an unknown id is an error (alias: --session-id)')
+    // The earlier spelling, kept so existing scripts go on resuming.
+    .addOption(new Option('--session-id <id>').hideHelp())
     .argument('[task...]', 'the task text; multiple words are joined by spaces, and `-` reads stdin')
     .addHelpText('after', `
 Examples:
   dsh --profile headless "run the tests"          answer one task and exit
   echo "run the tests" | dsh --profile headless   read the task from stdin
   dsh --profile headless --json "run the tests"   emit machine-readable run events
-  dsh --profile headless --session-id session-… "continue"   resume an existing Session
+  dsh --profile headless --resume session-… "continue"   resume an existing Session
 `)
 }
 
 /**
  * Whether the raw invocation asks for the machine-readable stream. The scan
- * stops at `--` and skips a `--session-id` value, so a literal `--json` used as
- * an option value or a positional never installs the JSON error override.
+ * stops at `--` and skips a `--resume` or `--session-id` value, so a literal
+ * `--json` used as an option value or a positional never installs the JSON
+ * error override.
  * @param argv - the invocation's raw arguments.
  * @returns whether `--json` is a real flag of this invocation.
  */
@@ -64,7 +67,7 @@ function jsonRequested(argv: readonly string[]): boolean {
     const argument = argv[index]
     if (argument === '--') return false
     if (argument === '--json') return true
-    if (argument === '--session-id') index += 1
+    if (argument === '--resume' || argument === '--session-id') index += 1
   }
   return false
 }
@@ -104,12 +107,15 @@ export function apply(ctx: Context): void {
     if (task === undefined && internals.stdinIsTty()) {
       program.error('error: a task is required, for example: dsh --profile headless "run the tests"')
     }
-    const options = program.opts<{ json?: boolean; sessionId?: string }>()
+    const options = program.opts<{ json?: boolean; resume?: string; sessionId?: string }>()
+    if (options.resume !== undefined && options.sessionId !== undefined) {
+      program.error('error: --resume and --session-id name the same thing; pass one')
+    }
     // A SessionId is opaque, so whitespace is part of the identity: validate
     // emptiness on the trimmed value but hand the runner the exact string.
-    const sessionId = options.sessionId
+    const sessionId = options.resume ?? options.sessionId
     if (sessionId !== undefined && sessionId.trim() === '') {
-      program.error('error: --session-id requires a non-empty session id')
+      program.error('error: --resume requires a non-empty session id')
     }
     ctx.provide(HEADLESS_STARTUP_SERVICE, {
       task,

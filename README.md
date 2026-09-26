@@ -65,7 +65,7 @@ Bake keeps sessions, credentials, and profiles in `~/.bake`. Set `DSH_HOME` to u
 bake update
 ```
 
-`bake update` downloads the latest release, verifies it the same way the installer does, and switches only after the new version starts. The previous version stays on disk. `bake update --check` only reports: it exits 0 when current, 10 when a newer release exists, and 1 on failure. The status line also shows when an update is available; set `BAKE_NO_UPDATE_CHECK=1` to turn that check off.
+`bake update` downloads the latest release, verifies it the same way the installer does, and switches only after the new version starts. The previous version stays on disk. `bake update --check` only reports: it exits 0 when current, 10 when a newer release exists, and 1 on failure. The status line also shows when an update is available, checking hourly and again ten minutes after a failed check; run `/update` in the terminal to install it without leaving the session. Set `BAKE_NO_UPDATE_CHECK=1` to turn the check off.
 
 Installs of 0.1.0 have no `bake update`; run the installer once more to move to the updatable layout.
 

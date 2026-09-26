@@ -122,9 +122,21 @@ describe('headless command-line provider', () => {
   })
 
   it('publishes the machine-readable output mode and the exact Session identity', async () => {
-    const { task, observed } = await bootStartup(['--json', '--session-id', 'session-exact', 'do', 'it'])
+    const { task, observed } = await bootStartup(['--json', '--resume', 'session-exact', 'do', 'it'])
     expect(task).toEqual({ task: 'do it', sessionId: 'session-exact', json: true })
     expect(observed.runnerConfig).toMatchObject({ task: 'do it', sessionId: 'session-exact', json: true })
+  })
+
+  it('accepts --session-id as an alias of --resume', async () => {
+    const { task } = await bootStartup(['--session-id', 'session-exact', 'do', 'it'])
+    expect(task).toEqual({ task: 'do it', sessionId: 'session-exact', json: false })
+  })
+
+  it('rejects --resume together with --session-id', async () => {
+    const { task, observed } = await bootStartup(['--resume', 'session-a', '--session-id', 'session-b', 'do', 'it'])
+    expect(observed.out).toContain('--resume and --session-id name the same thing; pass one')
+    expect(task).toBeUndefined()
+    expect(observed.exits).toEqual([1])
   })
 
   it('keeps the stdin marker as the task so the runner reads the pipe', async () => {
@@ -147,14 +159,14 @@ describe('headless command-line provider', () => {
   })
 
   it('rejects an explicitly empty Session identity', async () => {
-    const { task, observed } = await bootStartup(['--session-id', '', 'do', 'it'])
-    expect(observed.out).toContain('--session-id requires a non-empty session id')
+    const { task, observed } = await bootStartup(['--resume', '', 'do', 'it'])
+    expect(observed.out).toContain('--resume requires a non-empty session id')
     expect(task).toBeUndefined()
     expect(observed.exits).toEqual([1])
   })
 
   it('keeps the caller-provided exact Session identity verbatim', async () => {
-    const { task } = await bootStartup(['--session-id', ' session-x ', 'do', 'it'])
+    const { task } = await bootStartup(['--resume', ' session-x ', 'do', 'it'])
     expect(task).toEqual({ task: 'do it', sessionId: ' session-x ', json: false })
   })
 
@@ -181,7 +193,7 @@ describe('headless command-line provider', () => {
     const { observed } = await bootStartup(['--json', '--session-id', '', 'do', 'it'])
     const first = JSON.parse(observed.out.trim().split('\n')[0] ?? '{}') as { type: string; message: string }
     expect(first.type).toBe('error')
-    expect(first.message).toContain('--session-id requires a non-empty session id')
+    expect(first.message).toContain('--resume requires a non-empty session id')
     expect(observed.err).toBe('')
     expect(observed.exits).toEqual([1])
   })
@@ -195,8 +207,8 @@ describe('headless command-line provider', () => {
     expect(observed.exits).toEqual([1])
   })
 
-  it('does not install the JSON error override for a --json option value', async () => {
-    const { observed } = await bootStartup(['--session-id', '--json'], { stdinIsTty: true })
+  it.each(['--resume', '--session-id'])('does not install the JSON error override for a --json %s value', async (flag) => {
+    const { observed } = await bootStartup([flag, '--json'], { stdinIsTty: true })
     expect(observed.out).toContain('a task is required')
     expect(observed.out).not.toContain('"type":"error"')
     expect(observed.exits).toEqual([1])
@@ -234,7 +246,7 @@ describe('headless command-line provider', () => {
     const { task, observed } = await bootStartup(['--help'])
     expect(observed.out).toContain('dsh --profile headless')
     expect(observed.out).toContain('the answer goes to stdout and diagnostics to stderr')
-    expect(observed.out).toContain('--session-id')
+    expect(observed.out).toContain('--resume <id>')
     expect(task).toBeUndefined()
     expect(observed.runnerConfig).toBeUndefined()
     expect(observed.exits).toEqual([0])

@@ -13,7 +13,7 @@ import type { SessionOptions } from './session.ts'
 import type { AttachmentOptions } from './attachments.ts'
 import { SessionNavigation } from './navigation.ts'
 import { bakeVersion, releaseRoot } from './release.ts'
-import { UpdateNotice } from './update.ts'
+import { Updates } from './update.ts'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 
 /** Validated application options; no implicit defaults remain in the runner. */
@@ -84,7 +84,7 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
   const copy = dictionaries[config.locale]
   // Read once. The release does not change for the life of the process.
   const version = bakeVersion()
-  const updates = new UpdateNotice({ running: version, release: releaseRoot() })
+  const updates = new Updates({ running: version, release: releaseRoot() })
   // Loaded while the session starts, and awaited before the first frame.
   // A resumed session prints its history once. A diff drawn before the
   // grammars are ready would stay uncoloured.
@@ -116,7 +116,7 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
     return React.createElement(App, {
       ...active.view, key: active.agent.id, inputBlocked: navigation.busy, copy, frame, clock: systemClock, motion,
       quitting: quitTimer !== undefined, completionLimit: config.completionLimit, resultLines: config.resultLines,
-      highlight: syntax.highlight, version, ...updates.version === undefined ? {} : { update: updates.version },
+      highlight: syntax.highlight, version, ...updates.state === undefined ? {} : { update: updates.state },
       cwd: active.agent.session.header.cwd ?? '', sessionId: active.agent.id,
       onReferenceQuery: query => active.references.search(query),
       onArgumentQuery: query => active.argumentQuery(query),
@@ -127,7 +127,7 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
     })
   }
   const repaint = (): void => { if (!terminalReleased) ui?.rerender(element()) }
-  const navigation = new SessionNavigation(ctx, config, copy, config.credentialRefs, repaint)
+  const navigation = new SessionNavigation(ctx, config, copy, config.credentialRefs, repaint, updates)
   try {
     await ctx.get('loader')?.await()
     abort.signal.throwIfAborted()

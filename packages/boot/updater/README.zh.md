@@ -1,5 +1,5 @@
 ---
-description: "Bake 的自更新程序：校验已签名的发行清单，在正在运行的版本旁安装新版本，并以每日缓存回答更新提示。"
+description: "Bake 的自更新程序：校验已签名的发行清单，在正在运行的版本旁安装新版本，并以每小时缓存回答更新提示。"
 kind: "package-library"
 ---
 
@@ -9,7 +9,7 @@ kind: "package-library"
 
 ## 摘要
 
-`@deepseek-ai/dsh-updater` 是 `bake update` 和终端更新提示背后的代码。只有已知的 Ed25519 密钥签署了发行清单的原始字节，它才信任该清单；它把新版本安装到正在运行版本旁边的独立版本目录，并在最后一步才移动安装的 `current` 指针，因此中断的更新会保留旧版本。它只更新由安装脚本布局的安装；源码检出保持不变。请将其作为直接库依赖使用，而不是通过 `cordis.yml`。
+`@deepseek-ai/dsh-updater` 是 `bake update`、终端 `/update` 及其更新提示背后的代码。只有已知的 Ed25519 密钥签署了发行清单的原始字节，它才信任该清单；它把新版本安装到正在运行版本旁边的独立版本目录，并在最后一步才移动安装的 `current` 指针，因此中断的更新会保留旧版本。它只更新由安装脚本布局的安装；源码检出保持不变。请将其作为直接库依赖使用，而不是通过 `cordis.yml`。
 
 ## 目录
 
@@ -23,9 +23,9 @@ kind: "package-library"
 <a id="use-this-package"></a>
 ## 使用本包
 
-`detectInstall(release)` 判断本进程运行所在的发行目录是否受管理：它直接位于 `<root>/versions/` 下，名称为 `<版本>-<归档 SHA-256 的前 12 位十六进制>`。`fetchRelease(source)` 获取 `latest.json` 和 `latest.json.sig`，只有受信任的密钥验证签名通过时才返回清单；`releaseSource(env)` 给出当前环境的发行主机和密钥。`statusOf(manifest, running, target)` 将结果与本主机 `hostTarget()` 上正在运行的版本比较，报告 `newer`、`current`，或在发行版未提供本平台归档时报告 `unavailable`。`installRelease(options)` 安装 `newer` 结果。
+`detectInstall(release)` 判断本进程运行所在的发行目录是否受管理：它直接位于 `<root>/versions/` 下，名称为 `<版本>-<归档 SHA-256 的前 12 位十六进制>`。`fetchRelease(source)` 获取 `latest.json` 和 `latest.json.sig`，只有受信任的密钥验证签名通过时才返回清单；`releaseSource(env)` 给出当前环境的发行主机和密钥。`statusOf(manifest, running, target)` 将结果与本主机 `hostTarget()` 上正在运行的版本比较，报告 `newer`、`current`，或在发行版未提供本平台归档时报告 `unavailable`。`installRelease(options)` 安装 `newer` 结果，并通过 `onProgress` 报告每一步：下载已接收与总字节数，然后是 `unpack` 和 `verify`。`selfUpdate(options)` 是两个命令共用的完整流程：它在询问主机之前拒绝不受管理的安装（`check` 运行仍可询问），然后检查、记录结果并安装，返回由各表层自行措辞的 `UpdateOutcome`。`currentVersion(root)` 给出下次启动将运行的版本，使提示能区分已安装的更新与可用的更新。
 
-`cachedUpdate(home, running)` 同步读取 `<Bake 主目录>/update-check.json` 中的上次结果，供首帧显示提示。`refreshCheck(options)` 只在该结果已满一天时再次询问主机，失败的检查也会记录，因此停机的主机每天只被询问一次。只有已验证且包含本平台归档的清单才会记录版本。当 `BAKE_NO_UPDATE_CHECK` 设为空、`0` 或 `false` 以外的任何值时，`checksDisabled(env)` 为真。
+`cachedUpdate(home, running)` 同步读取 `<Bake 主目录>/update-check.json` 中的上次结果，供首帧显示提示。`refreshCheck(options)` 只在该结果已满一小时（`CHECK_INTERVAL_MS`）时再次询问主机；失败的检查也会记录，并在十分钟后重试（`FAILED_CHECK_RETRY_MS`）。较短的重试在发版刚结束时最重要：发布期间，新的 `latest.json` 可能与旧签名并存，此时检查会失败。`recordCheck(home, status)` 写入其他命令得到的结果，使 `bake update` 与提示保持一致。只有已验证且包含本平台归档的清单才会记录版本。当 `BAKE_NO_UPDATE_CHECK` 设为空、`0` 或 `false` 以外的任何值时，`checksDisabled(env)` 为真。
 
 | 变量 | 作用 |
 |---|---|
@@ -55,7 +55,7 @@ kind: "package-library"
 <a id="known-limitations-and-deferred-work"></a>
 ## 已知限制与延后工作
 
-- 提示只告知有可用更新；不会在后台自动安装。
+- 提示只告知有可用更新；不运行 `bake update` 或 `/update` 就不会安装。
 - 没有发行渠道：所有安装都跟随 `latest.json`。
 - 除启动标记外，清理无法得知其他进程是否仍在使用某个版本；在 Unix 上，一个从两次更新之前的版本启动、且保持打开超过一周的会话可能会丢失其文件。
 

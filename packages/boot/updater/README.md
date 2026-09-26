@@ -1,5 +1,5 @@
 ---
-description: "Bake's self-updater: verify the signed release manifest, install a newer release beside the running one, and answer the update notice from a daily cache."
+description: "Bake's self-updater: verify the signed release manifest, install a newer release beside the running one, and answer the update notice from an hourly cache."
 kind: "package-library"
 ---
 
@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`@deepseek-ai/dsh-updater` is the code behind `bake update` and the terminal's update notice. It trusts a release manifest only when a known Ed25519 key signed its exact bytes, installs a newer release into its own version directory beside the running one, and moves the install's `current` pointer as its last step, so an interrupted update leaves the old release in place. It updates only an install the installers laid out; a source checkout is left alone. Use it as a direct library dependency, not through `cordis.yml`.
+`@deepseek-ai/dsh-updater` is the code behind `bake update`, the terminal's `/update`, and its update notice. It trusts a release manifest only when a known Ed25519 key signed its exact bytes, installs a newer release into its own version directory beside the running one, and moves the install's `current` pointer as its last step, so an interrupted update leaves the old release in place. It updates only an install the installers laid out; a source checkout is left alone. Use it as a direct library dependency, not through `cordis.yml`.
 
 ## Table of Contents
 
@@ -23,9 +23,9 @@ English | [中文](README.zh.md)
 <a id="use-this-package"></a>
 ## Use this package
 
-`detectInstall(release)` says whether the release directory this process runs from is managed: it sits directly in `<root>/versions/` under the name `<version>-<first 12 hex digits of its archive SHA-256>`. `fetchRelease(source)` fetches `latest.json` and `latest.json.sig` and returns the manifest only when a trusted key verifies the signature; `releaseSource(env)` gives the host and keys for this environment. `statusOf(manifest, running, target)` compares the result with the running version for this host's `hostTarget()`, reporting `newer`, `current`, or `unavailable` for a release published without an archive for this platform. `installRelease(options)` installs a `newer` result.
+`detectInstall(release)` says whether the release directory this process runs from is managed: it sits directly in `<root>/versions/` under the name `<version>-<first 12 hex digits of its archive SHA-256>`. `fetchRelease(source)` fetches `latest.json` and `latest.json.sig` and returns the manifest only when a trusted key verifies the signature; `releaseSource(env)` gives the host and keys for this environment. `statusOf(manifest, running, target)` compares the result with the running version for this host's `hostTarget()`, reporting `newer`, `current`, or `unavailable` for a release published without an archive for this platform. `installRelease(options)` installs a `newer` result, reporting each step through `onProgress`: the download's received and total bytes, then `unpack` and `verify`. `selfUpdate(options)` is the whole run both commands share: it refuses an unmanaged install before asking the host (a `check` run may still ask), checks, records the answer, and installs, returning an `UpdateOutcome` each surface words itself. `currentVersion(root)` names the release the next launch runs, so a notice can tell an installed update from an available one.
 
-`cachedUpdate(home, running)` reads the last answer from `<Bake home>/update-check.json` synchronously, for a notice on the first frame. `refreshCheck(options)` asks the host again only when that answer is a day old, and records a failed check too, so a host that is down is asked once a day. Only a verified manifest with an archive for this platform records a version. `checksDisabled(env)` is true when `BAKE_NO_UPDATE_CHECK` is set to anything but empty, `0`, or `false`.
+`cachedUpdate(home, running)` reads the last answer from `<Bake home>/update-check.json` synchronously, for a notice on the first frame. `refreshCheck(options)` asks the host again only when that answer is an hour old (`CHECK_INTERVAL_MS`), and records a failed check too, retried after ten minutes (`FAILED_CHECK_RETRY_MS`). The short retry matters most just after a release: while it publishes, a new `latest.json` can sit beside the old signature, and that check fails. `recordCheck(home, status)` writes an answer another command found, so `bake update` and the notices agree. Only a verified manifest with an archive for this platform records a version. `checksDisabled(env)` is true when `BAKE_NO_UPDATE_CHECK` is set to anything but empty, `0`, or `false`.
 
 | Variable | Effect |
 |---|---|
@@ -55,7 +55,7 @@ The release signing key's private half never enters the repository. `release:ass
 <a id="known-limitations-and-deferred-work"></a>
 ## Known Limitations and Deferred Work
 
-- The notice names an update; nothing installs one in the background.
+- The notice names an update; nothing installs one without `bake update` or `/update`.
 - There is no release channel: every install follows `latest.json`.
 - Pruning cannot see a release another process runs from beyond its launch marker; a session left open for more than a week from a release two updates old can lose its files on Unix.
 

@@ -6,6 +6,7 @@ import { formatAge } from '@dsh-tui/ui/format.ts'
 import type { AttachmentOptions } from './attachments.ts'
 import { SessionController } from './controller.ts'
 import { openSession, type SessionOptions } from './session.ts'
+import type { Updates } from './update.ts'
 
 interface ConnectedSession {
   readonly handle: AgentHandle
@@ -25,10 +26,11 @@ export class SessionNavigation {
    * @param copy - locale-owned application labels.
    * @param credentialRefs - configured login targets.
    * @param changed - renderer notification.
+   * @param updates - the process's updater, registered as `/update` in every session. Absent, there is no `/update`.
    */
   constructor(private readonly ctx: Context, private readonly options: SessionOptions & AttachmentOptions,
     private readonly copy: TuiCopy, private readonly credentialRefs: readonly string[],
-    private readonly changed: () => void) {}
+    private readonly changed: () => void, private readonly updates?: Updates) {}
 
   /** The displayed session. Unavailable until `start` resolves. */
   get controller(): SessionController | undefined { return this.current?.controller }
@@ -98,6 +100,13 @@ export class SessionNavigation {
             return { kind: 'success' }
           },
         }))
+        const updates = this.updates
+        if (updates !== undefined) agent.ctx.effect(() => commands.register({
+          name: 'update', description: this.copy.updateCommand, recordInput: false,
+          handler: ({ rawInput, signal }) => rawInput.trim() !== ''
+            ? { kind: 'error', text: this.copy.updateUsage }
+            : updates.update(this.copy, text => { controller?.notify(text) }, signal),
+        }))
         controller = new SessionController(this.ctx, agent, this.copy, this.credentialRefs,
           () => { if (this.controller === controller && !this.closed) this.changed() }, this.options, selection)
         this.candidate = controller
@@ -144,9 +153,9 @@ export class SessionNavigation {
     const recheck = (): void => {
       try { this.assertAvailable(agent) } catch (error) { changed.abort(error) }
     }
-    const offStatus = this.ctx.on('agent/status', payload => { if (payload.agent === agent) recheck() })
     const projections = this.ctx.get('sessionProjections')
     if (projections === undefined) throw new Error('tui: sessionProjections is required')
+    const offStatus = this.ctx.on('agent/status', payload => { if (payload.agent === agent) recheck() })
     const offInbox = projections.onChanged((session, key) => {
       if (session === agent.session && key === 'inbox') recheck()
     })
