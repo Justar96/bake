@@ -5,8 +5,9 @@ import { useWindowSize } from 'ink'
 import { cleanup, render } from '../../../tests/render.tsx'
 import { App, type AppProps } from '../src/app.tsx'
 import { dictionaries } from '../src/copy.ts'
-import { budgetFor, CHROME_ROWS, MARKER, NOTICE_BUDGET, type WindowSize } from '../src/layout.ts'
+import { budgetFor, CHROME_ROWS, NOTICE_BUDGET, type WindowSize } from '../src/layout.ts'
 import { appendTranscript, emptyTranscript } from '../src/transcript.ts'
+import { ICON } from '../src/icons.ts'
 import { FRAME_MS, SPINNER_REST, THINKING_ROWS, type Clock } from '../src/activity.ts'
 import type { Row } from '../src/rows.ts'
 import { Beat } from '../src/beat.tsx'
@@ -454,12 +455,12 @@ describe('running action marker', () => {
     const live: Row[] = [{ kind: 'tool-call', callId: 'c1', tool: 'bash', input: 'ls' }]
     const ui = render(<App {...props({ status: 'running', clock, live })} />)
     const head = () => ui.lastFrame()!.split('\n').find(line => line.endsWith('Bash(ls)'))
-    expect(head()).toBe(`${MARKER.action} Bash(ls)`)
+    expect(head()).toBe(`${ICON.run} Bash(ls)`)
     advance(PULSE_MS)
     // Hidden, the marker's cell is a space, so the head does not move.
     expect(head()).toBe('  Bash(ls)')
     advance(PULSE_MS)
-    expect(head()).toBe(`${MARKER.action} Bash(ls)`)
+    expect(head()).toBe(`${ICON.run} Bash(ls)`)
   })
 })
 

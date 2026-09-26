@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { StreamChunk } from '@deepseek-ai/dsh-llm'
 import { PENDING_ARGUMENTS, present, toolLabel, type ResultBound } from '@dsh-tui/ui/present.ts'
-import { MARKER } from '@dsh-tui/ui/layout.ts'
+import { iconFor } from '@dsh-tui/ui/icons.ts'
 import { LiveBlocks } from '../src/live.ts'
 
 /** Feed chunks in stream order and read back what the region would draw. */
@@ -18,7 +18,7 @@ const live: ResultBound = { lines: 8, unit: 'lines', more: 'more lines' }
 
 /** The verbs of every line the rows present, so a section is named by what it says. */
 const heads = (rows: readonly Parameters<typeof present>[0][]): string[] =>
-  rows.flatMap(row => present(row, live)).filter(line => line.marker === MARKER.action).map(line => line.text)
+  rows.flatMap(row => [...row.kind === 'tool-call' ? present(row, live).filter(line => line.marker === iconFor(row.tool)) : []]).map(line => line.text)
 
 describe('LiveBlocks', () => {
   it('shows the call the agent is making, not only what it said', () => {

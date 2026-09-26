@@ -43,7 +43,7 @@ export function prepareRelease(root: string, version: string, today: string): Pr
     const text = readFileSync(manifest, 'utf8')
     const field = `"version": "${from}"`
     if (!text.includes(field)) throw new Error(`${file} has no ${field}`)
-    return { manifest, text: text.replace(field, `"version": "${version}"`) }
+    return { manifest, text: text.replace(field, () => `"version": "${version}"`) }
   })
   const heading = `## [${version}] - ${today}`
   const unreleased = /^## \[Unreleased\][^\n]*\n([\s\S]*?)(?=^## |(?![\s\S]))/m.exec(changelog)
@@ -51,13 +51,14 @@ export function prepareRelease(root: string, version: string, today: string): Pr
   let placeholder = false
   const pending = unreleased?.[1]?.trim() ?? ''
   if (unreleased !== null && pending !== '') {
-    next = changelog.replace(unreleased[0], `## [Unreleased]\n\n${heading}\n\n${pending}\n\n`)
+    // A replacer function, so a `$` in an entry is not read as a pattern.
+    next = changelog.replace(unreleased[0], () => `## [Unreleased]\n\n${heading}\n\n${pending}\n\n`)
   } else {
     placeholder = true
     const first = /^## /m.exec(changelog)
     const section = `${heading}\n\n${CHANGELOG_PLACEHOLDER}\n\n`
     next = unreleased !== null
-      ? changelog.replace(unreleased[0], `## [Unreleased]\n\n${section}`)
+      ? changelog.replace(unreleased[0], () => `## [Unreleased]\n\n${section}`)
       : first === null ? `${changelog.trimEnd()}\n\n${section}` : `${changelog.slice(0, first.index)}${section}${changelog.slice(first.index)}`
   }
   for (const { manifest, text } of manifests) writeFileSync(manifest, text)

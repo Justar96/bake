@@ -91,7 +91,8 @@ try {
         ] },
       ]))
       const metricsFile = join(root, 'metrics.json')
-      const env: NodeJS.ProcessEnv = { ...process.env, NODE_ENV: values.mode, DSH_HOME: home, DSH_AGENTS_HOME: join(root, 'agents'), DSH_TUI_PERF_METRICS: metricsFile, TERM: 'xterm-256color', NO_COLOR: '1' }
+      // The CLI loads React's production build unless DSH_RENDERER names the development one.
+      const env: NodeJS.ProcessEnv = { ...process.env, NODE_ENV: values.mode, ...values.mode === 'development' ? { DSH_RENDERER: 'development' } : {}, DSH_HOME: home, DSH_AGENTS_HOME: join(root, 'agents'), DSH_TUI_PERF_METRICS: metricsFile, TERM: 'xterm-256color', NO_COLOR: '1' }
       delete env.CI
       delete env.NODE_OPTIONS
       delete env.DEEPSEEK_API_KEY

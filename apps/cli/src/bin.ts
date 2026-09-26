@@ -24,6 +24,34 @@ function readVersion(): string {
 }
 
 /**
+ * Holds the caller's own `NODE_ENV` once the renderer's build is chosen:
+ * `=` and the value, or `-` when it was unset. The subprocess scrub reads it
+ * back, so a command the agent runs sees the user's value rather than the
+ * renderer's.
+ */
+export const INHERITED_NODE_ENV = 'DSH_INHERITED_NODE_ENV'
+
+/**
+ * Load React's production build for this process, whatever `NODE_ENV` the
+ * caller exported.
+ *
+ * React and its reconciler pick a build from `NODE_ENV` when first loaded,
+ * and they are external to Bake's bundle, so the choice is made at run time.
+ * The development build records a `performance.measure` entry for nearly
+ * every component render, and Node keeps each entry until someone clears
+ * them. A session that redraws for hours holds millions, and the heap runs
+ * out. `DSH_RENDERER=development` keeps the development build on purpose,
+ * as the performance baseline does.
+ *
+ * Must run before anything imports `react` or `ink`.
+ * @param env - the process environment to update.
+ */
+export function selectRendererBuild(env: NodeJS.ProcessEnv = process.env): void {
+  if (env[INHERITED_NODE_ENV] === undefined) env[INHERITED_NODE_ENV] = env.NODE_ENV === undefined ? '-' : `=${env.NODE_ENV}`
+  env.NODE_ENV = env.DSH_RENDERER === 'development' ? 'development' : 'production'
+}
+
+/**
  * Run the public dsh command-line interface.
  * @returns a promise that settles when the selected command mode finishes.
  */
@@ -33,11 +61,15 @@ export async function runCli(): Promise<void> {
 
   switch (invocation.mode) {
     case 'profile': {
+      // After the `.env` layers, which may name NODE_ENV for the agent's
+      // commands, and before the profile loads the renderer.
+      const environment = loadLayeredEnv('dsh')
+      selectRendererBuild()
       const { runProfile } = await import('./profile-boot.ts')
       void import('./update.ts').then(update => update.recordLaunch()).catch(() => {})
       try {
         await runProfile({
-          environment: loadLayeredEnv('dsh'),
+          environment,
           profile: invocation.profile,
           fromDefaultProfile: invocation.fromDefaultProfile,
           patchFiles: invocation.patches,

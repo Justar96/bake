@@ -58,8 +58,9 @@ it('selects the task row from the composer and opens the full list', async () =>
   ui.stdin.write('\x1b[A')
   await vi.waitFor(() => expect(ui.lastFrame()).toMatch(/> Tasks .* Enter opens/))
   ui.stdin.write('\r')
-  await vi.waitFor(() => expect(ui.lastFrame()).toContain('Tasks  1/3 done'))
-  for (const task of ['✓ Read startup', '▸ Thread the home', '□ Test it']) expect(ui.lastFrame()).toContain(task)
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain(' Tasks 1/3 '))
+  expect(ui.lastFrame()).toMatch(/━+─+ {2}1\/3 done · 1 in progress · 1 left/)
+  for (const task of ['✓ 1 Read startup', '▸ 2 Thread the home', '□ 3 Test it']) expect(ui.lastFrame()).toContain(task)
   ui.stdin.write('\x1b')
   await vi.waitFor(() => expect(ui.lastFrame()).not.toContain(dictionaries.en.sheetClose))
   expect(ui.lastFrame()).toMatch(/^Tasks .*Ctrl\+T$/m)
@@ -81,7 +82,7 @@ it('walks Up from the goal to the task row, Down back, and opens the list with C
   ui.stdin.write('Unsent draft')
   await vi.waitFor(() => expect(ui.lastFrame()).toContain('> Unsent draft▌'))
   ui.stdin.write('\x14')
-  await vi.waitFor(() => expect(ui.lastFrame()).toContain('Tasks  1/3 done'))
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain('1/3 done'))
   ui.stdin.write('\x1b')
   await vi.waitFor(() => expect(ui.lastFrame()).not.toContain(dictionaries.en.sheetClose))
   expect(ui.lastFrame()).toContain('> Unsent draft▌')
@@ -224,18 +225,22 @@ describe('model and billed tokens', () => {
 })
 
 
-it('opens a child from the shortcut, blocks child input, and preserves the parent draft', async () => {
-  const onSubagents = vi.fn()
+const child = { id: 'child', label: 'Review', state: 'working', detail: 'Continuable', inspectable: true } as const
+
+it('opens the agents sheet from the shortcut, inspects the child, and preserves the parent draft', async () => {
+  const onInspectSubagent = vi.fn()
   const onCancel = vi.fn()
   const onSubmit = vi.fn()
-  const state = props({ onSubagents, onCancel, onSubmit, subagents: [
-    { id: 'child', label: 'Review', state: 'working', detail: 'Continuable', inspectable: true },
-  ] })
+  const state = props({ onInspectSubagent, onCancel, onSubmit, subagents: [child] })
   const ui = render(<App {...state} />)
   ui.stdin.write('Unsent parent draft')
   await vi.waitFor(() => expect(ui.lastFrame()).toContain('Unsent parent draft'))
   ui.stdin.write('\x07')
-  await vi.waitFor(() => expect(onSubagents).toHaveBeenCalledOnce())
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain(' Subagents 1 · 1 Working '))
+  expect(ui.lastFrame()).toContain('▸ ● Review  Working')
+  expect(ui.lastFrame()).toContain('Continuable · child')
+  ui.stdin.write('\r')
+  await vi.waitFor(() => expect(onInspectSubagent).toHaveBeenCalledWith('child'))
   ui.rerender(<App {...state} inspection={{ sessionId: 'child', label: 'Review', committed: emptyTranscript,
     live: [{ kind: 'assistant', text: 'Checking the child session' }], status: 'running', model: 'mock/child' }} />)
   await vi.waitFor(() => expect(ui.lastFrame()).toContain(dictionaries.en.subagentBack))
@@ -247,32 +252,71 @@ it('opens a child from the shortcut, blocks child input, and preserves the paren
   await vi.waitFor(() => expect(ui.lastFrame()).toContain('Unsent parent draft'))
 })
 
-it('selects the status-line subagents entry with Down and opens its picker with Enter', async () => {
-  const onSubagents = vi.fn()
+it('selects the status-line subagents entry with Down, and moves the pointer past a child with no transcript', async () => {
+  const onInspectSubagent = vi.fn()
   const onSubmit = vi.fn()
-  const state = props({ onSubagents, onSubmit, subagents: [
-    { id: 'child', label: 'Review', state: 'working', detail: 'Continuable', inspectable: true },
-  ] })
-  const ui = render(<App {...state} />)
+  const remote = { id: 'run-1', label: 'remote', state: 'working', detail: 'Remote run', inspectable: false } as const
+  const saved = { id: 'old', label: 'Earlier', state: 'saved', outcome: 'completed', detail: 'One-shot', inspectable: true } as const
+  const ui = render(<App {...props({ onInspectSubagent, onSubmit, subagents: [remote, saved] })} />)
   ui.stdin.write('\x1b[B')
-  await vi.waitFor(() => expect(statusRow(ui.lastFrame())).toContain('> Subagents: 1 · 1 Working · Enter opens'))
-  ui.stdin.write('\x1b[A')
-  await vi.waitFor(() => expect(statusRow(ui.lastFrame())).toContain('↓ Subagents: 1'))
-  ui.stdin.write('\x1b[B')
+  await vi.waitFor(() => expect(statusRow(ui.lastFrame())).toContain('> Subagents: 2 · 1 Working · Enter opens'))
   ui.stdin.write('\r')
-  await vi.waitFor(() => expect(onSubagents).toHaveBeenCalledOnce())
+  // The pointer starts on the first child it can open.
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain('▸ ○ Earlier  Completed · Saved'))
+  expect(ui.lastFrame()).toContain('Remote run · run-1 · No local transcript available')
+  ui.stdin.write('\x1b[A')
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain('▸ ● remote'))
+  // Enter on a child it cannot open keeps the sheet.
+  ui.stdin.write('\r')
+  await new Promise(resolve => setTimeout(resolve, 20))
+  expect(onInspectSubagent).not.toHaveBeenCalled()
+  ui.stdin.write('\x1b[B\r')
+  await vi.waitFor(() => expect(onInspectSubagent).toHaveBeenCalledWith('old'))
   expect(onSubmit).not.toHaveBeenCalled()
 })
 
+it('cycles tasks, agents, and the goal on Ctrl+T and closes after the last; Tab wraps both ways', async () => {
+  const goal = { objective: 'Ship it', phase: 'active' as const, armed: true, rounds: 2, maxRounds: 8 }
+  const ui = render(<App {...props({ todos: plan, goal, subagents: [child] })} />)
+  const current = (): string | undefined => {
+    const frame = ui.lastFrame()!
+    if (!frame.includes(dictionaries.en.sheetClose)) return undefined
+    return frame.includes('Ctrl+T next') && frame.includes('1/3 done') ? 'tasks'
+      : frame.includes('Review  Working') ? 'agents' : frame.includes('Objective') ? 'goal' : 'unknown'
+  }
+  ui.stdin.write('\x14')
+  await vi.waitFor(() => expect(current()).toBe('tasks'))
+  // Every view is named on the strip, the open one included.
+  expect(ui.lastFrame()).toMatch(/ Tasks 1\/3 {3}Subagents 1 · 1 Working {3}Goal /)
+  ui.stdin.write('\x14')
+  await vi.waitFor(() => expect(current()).toBe('agents'))
+  ui.stdin.write('\x14')
+  await vi.waitFor(() => expect(current()).toBe('goal'))
+  expect(ui.lastFrame()).toMatch(/━+─+ {2}round 2\/8/)
+  ui.stdin.write('\x14')
+  await vi.waitFor(() => expect(current()).toBeUndefined())
+  ui.stdin.write('\x14')
+  await vi.waitFor(() => expect(current()).toBe('tasks'))
+  ui.stdin.write('\x1b[Z')
+  await vi.waitFor(() => expect(current()).toBe('goal'))
+  ui.stdin.write('\t')
+  await vi.waitFor(() => expect(current()).toBe('tasks'))
+  // A view's own key closes it when it is the one open.
+  ui.stdin.write('\x0f')
+  await vi.waitFor(() => expect(current()).toBe('goal'))
+  ui.stdin.write('\x0f')
+  await vi.waitFor(() => expect(current()).toBeUndefined())
+})
+
 it('keeps Down in the composer while drafting', async () => {
-  const onSubagents = vi.fn()
-  const ui = render(<App {...props({ onSubagents, subagents: [
+  const onInspectSubagent = vi.fn()
+  const ui = render(<App {...props({ onInspectSubagent, subagents: [
     { id: 'child', label: 'Review', state: 'saved', detail: 'Continuable', inspectable: true },
   ] })} />)
   ui.stdin.write('draft\x1b[B')
   await vi.waitFor(() => expect(ui.lastFrame()).toContain('draft'))
   expect(statusRow(ui.lastFrame())).toContain('↓ Subagents: 1')
-  expect(onSubagents).not.toHaveBeenCalled()
+  expect(ui.lastFrame()).not.toContain(dictionaries.en.sheetClose)
 })
 
 it('counts working children only while some are working', () => {

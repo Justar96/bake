@@ -14,6 +14,7 @@
 import wrapAnsi from 'wrap-ansi'
 import { markdownLines, sliceSpans } from './markdown.ts'
 import { outputLines, outputSpans, toolText } from './tool-output.ts'
+import { iconFor, ICON } from './icons.ts'
 import { COLUMN, MARKER, PAST, TREE, VERB, type Verb } from './layout.ts'
 import { PALETTE, type PaletteColor } from './palette.ts'
 import { formatAttachment, type CardLine, type Row, type ToolCallRow, type ToolOutcome } from './rows.ts'
@@ -560,7 +561,7 @@ function action(row: ToolCallRow, bound: ResultBound): readonly PresentedLine[] 
     ...text.length === name.length ? [] : [{ length: text.length - name.length, tone: 'plain' as const }]] }
   const inline = after?.inline === undefined ? named : beside(named, after.inline)
   const head: PresentedLine = {
-    marker: MARKER.action,
+    marker: iconFor(row.tool),
     markerTone: outcome === undefined ? 'strong' : outcome.ok ? 'done' : 'failed',
     ...outcome === undefined ? { pulse: true } : {},
     verb: '', text: inline.text, column: COLUMN.rail, wide: true, tone: 'plain',
@@ -626,8 +627,10 @@ function groupHead(calls: readonly ToolCallRow[], bound: ResultBound): Presented
   for (const call of calls) counts.set(verbFor(call.tool), (counts.get(verbFor(call.tool)) ?? 0) + 1)
   const tally = [...counts].map(([verb, count]) => `${running ? verb : PAST[verb]} ${count}`).join(' \u00b7 ')
   const failures = failed === 0 || running || bound.failures === undefined ? undefined : ` \u00b7 ${failed} ${bound.failures}`
+  // One kind of call throughout takes that kind's icon. A mix is just an action.
+  const icons = new Set(calls.map(call => iconFor(call.tool)))
   return {
-    marker: MARKER.action,
+    marker: icons.size === 1 ? [...icons][0]! : ICON.other,
     markerTone: running ? 'strong' : failed > 0 ? 'failed' : 'done',
     ...running ? { pulse: true } : {},
     verb: '', text: `${tally}${failures ?? ''}`, column: COLUMN.rail, tone: 'strong',
@@ -644,6 +647,7 @@ function hang(bodies: readonly (readonly PresentedLine[])[]): readonly Presented
   return bodies.flatMap((lines, index) => {
     const last = index === bodies.length - 1
     // Only the step's head blinks. A blinking branch would open a gap in the tree.
+    // In a batch only the head carries an icon; each branch is the tree alone.
     return lines.map((line, row) => row === 0
       ? { ...line, marker: last ? TREE.corner : TREE.branch, pulse: false }
       : { ...line, marker: last ? MARKER.none : TREE.stem, markerTone: 'quiet' as const })

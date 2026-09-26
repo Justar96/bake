@@ -3,6 +3,7 @@ import React from 'react'
 import { renderToString, Text } from 'ink'
 import { describe, expect, it } from 'vitest'
 import { budgetFor, CHROME_ROWS, chromeFor, COLUMN, COMPOSER_BUDGET, HINT_MIN_COLUMNS, isRenderable, MARKER, type FrameStyle } from '../src/layout.ts'
+import { ICON } from '../src/icons.ts'
 import { present, type PresentedLine, type ResultBound } from '../src/present.ts'
 import { Chrome, Completion, Composer, headerRoom, Line, StatusBar, wrappedRows, type ActivityState, type StandingState } from '../src/line.tsx'
 import { dictionaries } from '../src/copy.ts'
@@ -46,7 +47,7 @@ describe('Line', () => {
     const rendered = show(present({ kind: 'tool-call', callId: 'c', tool: 'bash', input: 'rg -n foo' }, shown)
       .map((line, index) => <Line key={index} line={line} budget={at80} />))
     // The blank that opens the call's zone renders as an empty first row.
-    expect(rendered).toBe(`\n${MARKER.action} Bash(rg -n foo)`)
+    expect(rendered).toBe(`\n${ICON.run} Bash(rg -n foo)`)
   })
 
   it('wraps prose against the current terminal width without a fixed measure', () => {

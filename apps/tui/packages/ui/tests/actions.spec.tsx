@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import { RowView } from '../src/app.tsx'
 import { dictionaries } from '../src/copy.ts'
+import { ICON } from '../src/icons.ts'
 import { budgetFor } from '../src/layout.ts'
 import type { ResultBound } from '../src/present.ts'
 import { project, projector } from '../src/project.ts'
@@ -39,7 +40,7 @@ describe('action transcript', () => {
     expect(frame.indexOf('notes.md')).toBeLessThan(frame.indexOf('private.md'))
     expect(frame.indexOf('private.md')).toBeLessThan(frame.indexOf('Permission denied'))
     expect(frame).not.toContain('[c1]')
-    expect(frame).toContain(`\u25cf read 2 \u00b7 1 ${dictionaries[locale].summaryFailures}`)
+    expect(frame).toContain(`${ICON.read} read 2 \u00b7 1 ${dictionaries[locale].summaryFailures}`)
     // A completed turn says so on the summary row above the input instead.
     expect(frame).not.toContain(`- ${dictionaries[locale].turnCompleted}`)
     expect(frame).toContain(`- ${dictionaries[locale].cancelled}`)

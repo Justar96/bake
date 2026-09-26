@@ -146,12 +146,15 @@ export class SessionController {
     this.off.push(agent.ctx.effect(() => commands.register({
       name: 'agents', description: copy.listSubagents, recordInput: false,
       handler: async ({ rawInput, signal }) => {
-        if (rawInput.trim() !== '') return { kind: 'error', text: copy.agentsUsage }
+        const requested = rawInput.trim()
+        if (/\s/.test(requested)) return { kind: 'error', text: copy.agentsUsage }
         const entries = await this.subagents.list(signal)
         if (entries === undefined) return { kind: 'error', text: copy.subagentsUnavailable }
         const children = subagentEntries(this.subagents.view, ctx, copy)
         if (children.length === 0) return { kind: 'success', text: copy.noSubagents }
-        const selected = await this.interactions.choose({
+        // An id opens that child directly, as the agents sheet's Enter does.
+        if (requested !== '' && !children.some(child => child.id === requested)) return { kind: 'error', text: copy.agentsUsage }
+        const selected = requested !== '' ? requested : await this.interactions.choose({
           title: copy.subagentsTitle, initial: children.find(child => child.inspectable)?.id ?? children[0]!.id,
           choices: children.map(child => ({ value: child.id, label: child.label,
             description: `${child.detail} · ${child.id}`,

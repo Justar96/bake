@@ -2,7 +2,7 @@
   --------------------------------------
 ● Read both files, then summarize.
 
-● read 2 · 1 项失败
+≡ read 2 · 1 项失败
 ├ ReadFile(notes.md)
 │ ⎿      Notes loaded.
 └ ReadFile(private.md)

@@ -3,7 +3,7 @@ import type { TuiCopy } from './copy.ts'
 import { MARKER } from './layout.ts'
 import { PALETTE } from './palette.ts'
 import type { StandingState } from './line.tsx'
-import type { SheetLine } from './sheet.tsx'
+import { sheetBar, type SheetLine } from './sheet.tsx'
 
 /**
  * Display-only view of the session's current goal.
@@ -46,17 +46,27 @@ export function goalState(goal: GoalEntry | undefined, copy: TuiCopy): StandingS
   }
 }
 
+/** Cells of the goal sheet's round bar. */
+const ROUND_BAR = 24
+
 /**
- * The goal's sheet: its state and rounds, the whole objective, and a blocked
- * goal's reason, where the header has room for a line of it at most.
+ * The goal's sheet: its state in its colour, a bar of the rounds spent against
+ * the limit, what continues a held goal, then the whole objective and a
+ * blocked goal's reason under their own names, where the header has room for
+ * a line of either at most.
  */
 export function goalSheet(goal: GoalEntry, copy: TuiCopy): readonly SheetLine[] {
   const state = goalState(goal, copy)!
   const held = goal.phase === 'paused' || (goal.phase === 'active' && !goal.armed)
   return [
-    { text: `${state.glyph} ${state.label} · ${copy.goalRound} ${goal.rounds}/${goal.maxRounds}${held ? ` · ${copy.goalResume}` : ''}`, color: state.color },
+    { text: state.label, glyph: state.glyph, glyphColor: state.color, color: state.color, bold: true },
+    { text: '', parts: [...sheetBar(goal.rounds, goal.maxRounds, ROUND_BAR, state.color),
+      { text: `  ${copy.goalRound} ${goal.rounds}/${goal.maxRounds}`, dim: true }] },
+    ...held ? [{ text: copy.goalResume, dim: true }] : [],
     { text: '' },
+    { text: copy.goalObjective, dim: true, bold: true },
     { text: goal.objective },
-    ...goal.blocked === undefined ? [] : [{ text: '' }, { text: `${copy.goalReason}: ${goal.blocked}` }],
+    ...goal.blocked === undefined ? [] : [{ text: '' }, { text: copy.goalReason, color: PALETTE.failed, bold: true },
+      { text: goal.blocked, color: PALETTE.failed }],
   ]
 }

@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { expect, it } from 'vitest'
 import type { Row } from '../src/rows.ts'
 import { PALETTE } from '../src/palette.ts'
+import { ICON } from '../src/icons.ts'
 
 it('draws the rule dim and leaves the draft in the terminal\'s own foreground at every width', () => {
   const env: NodeJS.ProcessEnv = { ...process.env, FORCE_COLOR: '3', COLORTERM: 'truecolor' }
@@ -77,9 +78,9 @@ it('dims reasoning and metadata, and gives actions and outcomes their palette we
   // the output from the head.
   expect(frame).toContain('\u001b[1mBash\u001b[22m(ls -a)')
   expect(frame).toContain('\u001b[2m\u23bf\u001b[22m')
-  expect(frame).toContain('\u001b[1m\u001b[38;2;34;197;94m\u25cf')
-  expect(frame).toContain('\u001b[38;2;239;68;68m\u25cf')
-  expect(frame).toContain('\u001b[1m\u001b[38;2;249;115;22m\u25cf')
+  expect(frame).toContain(`\u001b[1m\u001b[38;2;34;197;94m${ICON.run}`)
+  expect(frame).toContain(`\u001b[38;2;239;68;68m${ICON.read}`)
+  expect(frame).toContain(`\u001b[1m\u001b[38;2;249;115;22m${ICON.find}`)
   expect(frame).not.toContain('\u001b[2mBash')
   // An edit says its size in each side's tone, numbers its lines in the
   // gutter, and reverses the words it changed.

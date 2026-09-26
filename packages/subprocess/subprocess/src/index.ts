@@ -47,6 +47,12 @@ export type {
 export const SENSITIVE_ENV_PATTERN = /KEY|PASSWORD|SECRET|TOKEN/i
 
 /**
+ * Where the CLI keeps the caller's own `NODE_ENV` after choosing the
+ * renderer's build; see `selectRendererBuild` in `@deepseek-ai/dsh`.
+ */
+export const INHERITED_NODE_ENV = 'DSH_INHERITED_NODE_ENV'
+
+/**
  * The ambient parent environment minus credential-shaped names and minus all
  * `DSH_*` names — the canonical base every harness child starts from. `PATH`,
  * `HOME`, locale, and proxy variables survive, so child CLIs run normally;
@@ -67,6 +73,15 @@ export function scrubbedParentEnv(): Record<string, string> {
   const env: Record<string, string> = {}
   for (const [key, value] of Object.entries(process.env)) {
     if (value !== undefined && !SENSITIVE_ENV_PATTERN.test(key) && !key.toUpperCase().startsWith(DSH_ENV_PREFIX)) env[key] = value
+  }
+  // The CLI loads its renderer's production build by setting NODE_ENV, and
+  // records the caller's own value first (`=` and the value, `-` for unset).
+  // A child gets the caller's value back, so `npm install` in a user's shell
+  // still installs dev dependencies.
+  const inherited = process.env[INHERITED_NODE_ENV]
+  if (inherited !== undefined) {
+    if (inherited.startsWith('=')) env.NODE_ENV = inherited.slice(1)
+    else Reflect.deleteProperty(env, 'NODE_ENV')
   }
   // A child Node ignores the inherited proxy variables unless the flag this adds is set, so an MCP
   // stdio server or subagent CLI would connect directly while its parent proxies. The same overlay

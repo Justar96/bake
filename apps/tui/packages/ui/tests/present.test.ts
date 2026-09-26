@@ -1,5 +1,6 @@
 /** Placement of transcript rows into display lines. */
 import { describe, expect, test } from 'bun:test'
+import { ICON } from '../src/icons.ts'
 import { COLUMN, MARKER, TREE, VERB } from '../src/layout.ts'
 import type { CardLine, ToolCallRow } from '../src/rows.ts'
 import { PALETTE } from '../src/palette.ts'
@@ -190,7 +191,7 @@ describe('present', () => {
 
   test('heads an action with its tool and argument, and no call id', () => {
     const [, line, ...rest] = present({ kind: 'tool-call', callId: 'c1', tool: 'bash', input: 'rg -n foo' }, shown)
-    expect(line).toMatchObject({ marker: MARKER.action, pulse: true, verb: '', text: 'Bash(rg -n foo)',
+    expect(line).toMatchObject({ marker: ICON.run, pulse: true, verb: '', text: 'Bash(rg -n foo)',
       spans: [{ length: 4, tone: 'strong' }, { length: 11, tone: 'plain' }] })
     expect(rest).toEqual([])
   })
@@ -479,6 +480,8 @@ describe('present, grouping a step\'s calls', () => {
     expect([head!.text, head!.pulse]).toEqual(['run 2', true])
     // A blinking branch would open a gap in the tree, so the branches hold still.
     expect([first!.pulse, second!.pulse, second!.text]).toEqual([false, false, 'Bash(make test)'])
+    // Calls of one kind give the head that kind's icon.
+    expect(head!.marker).toBe(ICON.run)
   })
 })
 
@@ -709,6 +712,8 @@ describe('fittedGroup', () => {
     ...index >= count - running ? {} : { result: { ok: true, text: Array.from({ length: 10 }, (_, line) => `${index}:${line}`).join('\n') } },
   }))
   const texts = (lines: readonly PresentedLine[]): string[] => lines.map(line => line.text)
+  /** A call's head as its branch draws it, with no icon of its own. */
+  const read = (index: number): string => `Read(f${index}.ts)`
 
   test('draws a step that fits exactly as present does', () => {
     const calls = step(2)
@@ -721,10 +726,11 @@ describe('fittedGroup', () => {
     expect(lines.length).toBeLessThanOrEqual(14)
     expect(isBlank(lines[0]!)).toBe(true)
     expect(lines[1]!.text).toBe('read 3')
-    expect(texts(lines)).toContain('Read(f0.ts)')
+    expect(lines[1]!.marker).toBe(ICON.read)
+    expect(texts(lines)).toContain(read(0))
     expect(texts(lines)).not.toContain('0:0')
     expect(texts(lines)).toContain('1:0')
-    expect(lines.at(-1)).toMatchObject({ text: 'Read(f2.ts)', marker: TREE.corner })
+    expect(lines.at(-1)).toMatchObject({ text: read(2), marker: TREE.corner })
   })
 
   test('folds the oldest calls into one branch once every finished call is a head', () => {
@@ -733,14 +739,14 @@ describe('fittedGroup', () => {
     expect(lines[1]!.text).toBe('read 12')
     // Blank, head, and the summary leave five rows. The five newest calls.
     expect(lines[2]).toMatchObject({ text: '+7 earlier calls', marker: TREE.branch, tone: 'quiet' })
-    expect(texts(lines.slice(3))).toEqual(['Read(f7.ts)', 'Read(f8.ts)', 'Read(f9.ts)', 'Read(f10.ts)', 'Read(f11.ts)'])
+    expect(texts(lines.slice(3))).toEqual([7, 8, 9, 10, 11].map(read))
   })
 
   test('on a window too short for the summary and the newest call, keeps the head above all', () => {
     const calls = step(12, 0)
-    expect(texts(fittedGroup(calls, bound, 4))).toEqual(['', 'read 12', '+11 earlier calls', 'Read(f11.ts)'])
-    expect(texts(fittedGroup(calls, bound, 3))).toEqual(['read 12', '+11 earlier calls', 'Read(f11.ts)'])
-    expect(texts(fittedGroup(calls, bound, 2))).toEqual(['read 12', 'Read(f11.ts)'])
+    expect(texts(fittedGroup(calls, bound, 4))).toEqual(['', 'read 12', '+11 earlier calls', read(11)])
+    expect(texts(fittedGroup(calls, bound, 3))).toEqual(['read 12', '+11 earlier calls', read(11)])
+    expect(texts(fittedGroup(calls, bound, 2))).toEqual(['read 12', read(11)])
     expect(texts(fittedGroup(calls, bound, 1))).toEqual(['read 12'])
   })
 
