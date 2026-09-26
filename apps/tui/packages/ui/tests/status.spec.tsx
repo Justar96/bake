@@ -2,69 +2,89 @@
 import React from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render } from '../../../tests/render.tsx'
-import { App, Tasks, type AppProps } from '../src/app.tsx'
+import { App, type AppProps } from '../src/app.tsx'
+import { Tasks } from '../src/tasks.tsx'
 import { emptyTranscript } from '../src/transcript.ts'
 import { dictionaries } from '../src/copy.ts'
-import { Subagents } from '../src/subagents.tsx'
 import { renderToString } from 'ink'
+import stringWidth from 'string-width'
 
 afterEach(cleanup)
 
-it.each(['en', 'zh'] as const)('shows connected subagents with inspection keys in %s', async locale => {
+const statusRow = (frame: string | undefined) => (frame ?? '').split('\n').findLast(line => line.startsWith('  ')) ?? ''
+
+it.each(['en', 'zh'] as const)('shows the subagent entry on the status line in %s', async locale => {
   const ui = render(<App {...props({ copy: dictionaries[locale], subagents: [
     { id: 'child-1', label: 'Review tests', state: 'working', detail: 'Continuable', inspectable: true },
     { id: 'child-2', label: 'Check types', state: 'saved', outcome: 'completed', detail: 'One-shot', inspectable: true },
     { id: 'child-3', label: 'Review security', state: 'saved', outcome: 'failed', detail: 'Continuable', inspectable: true },
     { id: 'child-4', label: 'Review docs', state: 'saved', outcome: 'stopped', detail: 'Continuable', inspectable: true },
   ] })} />)
-  expect(ui.lastFrame()).toContain(`\u25cf ${dictionaries[locale].subagentsTitle}  4 \u00b7 1 ${dictionaries[locale].subagentWorking}`)
-  expect(ui.lastFrame()).toContain('\u251c \u25cf Review tests')
-  expect(ui.lastFrame()).toContain('├ ✓ Check types')
-  expect(ui.lastFrame()).toContain('├ ✗ Review security')
-  expect(ui.lastFrame()).toContain('└ ■ Review docs')
-  expect(ui.lastFrame()).toContain('Ctrl+G /agents')
+  expect(statusRow(ui.lastFrame())).toContain(`↓ ${dictionaries[locale].subagentsTitle}: 4 · 1 ${dictionaries[locale].subagentWorking}`)
+  expect(ui.lastFrame()).not.toContain('Review tests')
   await expect(ui.lastFrame() + '\n').toMatchFileSnapshot(`./expected/subagents.${locale}.txt`)
 })
 
-it('lists tasks as a checklist under a heading with a progress bar', () => {
-  const ui = render(<App {...props({ todos: [
-    { text: 'Read startup', status: 'completed' },
-    { text: 'Thread the home', status: 'in_progress' },
-    { text: 'Test it', status: 'pending' },
-  ] })} />)
-  const frame = ui.lastFrame() ?? ''
-  expect(frame).toContain('Tasks  \u2501\u2501\u2501\u2501\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500  1/3 done\n'
-    + '  \u2713 Read startup\n  \u25b8 Thread the home\n  \u25a1 Test it')
-  expect(frame).not.toContain('\u251c')
+const plan = [
+  { text: 'Read startup', status: 'completed' },
+  { text: 'Thread the home', status: 'in_progress' },
+  { text: 'Test it', status: 'pending' },
+] as const
+
+it('folds the task list into one row with progress, the current task, and its key', () => {
+  const frame = render(<App {...props({ todos: plan })} />).lastFrame() ?? ''
+  const row = frame.split('\n').find(line => line.startsWith('Tasks'))!
+  expect(row).toMatch(/^Tasks {2}━━━━──────── {2}1\/3 · ▸ Thread the home +Ctrl\+T$/)
+  expect(frame).not.toContain('Read startup')
+  expect(frame).not.toContain('Test it')
 })
 
-it('gives up finished tasks first, oldest first, when rows run short', () => {
-  const todos = [
-    { text: 'Read startup', status: 'completed' },
-    { text: 'Trace the home', status: 'completed' },
-    { text: 'Thread the home', status: 'in_progress' },
-    { text: 'Test it', status: 'pending' },
-    { text: 'Document it', status: 'pending' },
-  ] as const
-  const draw = (limit: number) => renderToString(<Tasks todos={todos} copy={dictionaries.en} limit={limit} />, { columns: 60 })
-    .split('\n').slice(1).map(line => line.trim())
-  expect(draw(6)).toHaveLength(5)
-  expect(draw(5)).toEqual(['\u2713 Trace the home', '\u25b8 Thread the home', '\u25a1 Test it', '\u25a1 Document it'])
-  expect(draw(4)).toEqual(['\u25b8 Thread the home', '\u25a1 Test it', '\u25a1 Document it'])
-  expect(draw(3)).toEqual(['\u25b8 Thread the home', '+2 next'])
-  expect(draw(1)).toEqual([])
+it('names the next open task when none is in progress, and leaves once all are done', () => {
+  const draw = (todos: Parameters<typeof Tasks>[0]['todos'], columns = 60) =>
+    renderToString(<Tasks todos={todos} copy={dictionaries.en} columns={columns} hint="Ctrl+T" />, { columns })
+  expect(draw([{ text: 'Read startup', status: 'completed' }, { text: 'Test it', status: 'pending' }]))
+    .toMatch(/1\/2 · □ Test it +Ctrl\+T$/)
+  expect(draw(plan.map(item => ({ ...item, status: 'completed' as const })))).toBe('')
+  // The key gives way before the task is cut below a few cells.
+  expect(draw(plan, 44)).toBe('Tasks  ━━━━────────  1/3 · ▸ Thread…  Ctrl+T')
+  expect(draw(plan, 40)).not.toContain('Ctrl+T')
+  expect(draw(plan, 40)).toContain('▸ Thread')
+  for (const columns of [1, 12, 24, 40]) expect(stringWidth(draw(plan, columns)), `${columns}`).toBeLessThanOrEqual(columns)
 })
 
-it('keeps the subagents head when rows run short, and the keys only beside a child', () => {
-  const entries = [
-    { id: 'a', label: 'Review tests', state: 'working', detail: '', inspectable: true },
-    { id: 'b', label: 'Check types', state: 'saved', detail: '', inspectable: true },
-  ] as const
-  const draw = (limit: number) => renderToString(<Subagents entries={entries} copy={dictionaries.en} limit={limit} />, { columns: 60 }).split('\n')
-  expect(draw(1)).toEqual(['\u25cf Subagents  2 \u00b7 1 Working'])
-  expect(draw(2)).toEqual(['\u25cf Subagents  2 \u00b7 1 Working', '\u2514 +2 more'])
-  expect(draw(3).at(-1)).toBe('  Ctrl+G /agents \u00b7 choose a child \u00b7 Enter to open')
-  expect(draw(4)).toHaveLength(4)
+it('selects the task row from the composer and opens the full list', async () => {
+  const onSubmit = vi.fn()
+  const ui = render(<App {...props({ todos: plan, onSubmit })} />)
+  ui.stdin.write('\x1b[A')
+  await vi.waitFor(() => expect(ui.lastFrame()).toMatch(/> Tasks .* Enter opens/))
+  ui.stdin.write('\r')
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain('Tasks  1/3 done'))
+  for (const task of ['✓ Read startup', '▸ Thread the home', '□ Test it']) expect(ui.lastFrame()).toContain(task)
+  ui.stdin.write('\x1b')
+  await vi.waitFor(() => expect(ui.lastFrame()).not.toContain(dictionaries.en.sheetClose))
+  expect(ui.lastFrame()).toMatch(/^Tasks .*Ctrl\+T$/m)
+  expect(onSubmit).not.toHaveBeenCalled()
+})
+
+it('walks Up from the goal to the task row, Down back, and opens the list with Ctrl+T over a draft', async () => {
+  const goal = { objective: 'Ship it', phase: 'active' as const, armed: true, rounds: 2, maxRounds: 8 }
+  const ui = render(<App {...props({ todos: plan, goal })} />)
+  ui.stdin.write('\x1b[A')
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain('> ● Goal active'))
+  ui.stdin.write('\x1b[A')
+  await vi.waitFor(() => expect(ui.lastFrame()).toMatch(/> Tasks /))
+  expect(ui.lastFrame()).not.toContain('> ● Goal active')
+  ui.stdin.write('\x1b[B')
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain('> ● Goal active'))
+  ui.stdin.write('\x1b[B')
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain('Ctrl+O ● Goal active'))
+  ui.stdin.write('Unsent draft')
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain('> Unsent draft▌'))
+  ui.stdin.write('\x14')
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain('Tasks  1/3 done'))
+  ui.stdin.write('\x1b')
+  await vi.waitFor(() => expect(ui.lastFrame()).not.toContain(dictionaries.en.sheetClose))
+  expect(ui.lastFrame()).toContain('> Unsent draft▌')
 })
 
 function props(overrides: Partial<AppProps> = {}): AppProps {
@@ -180,8 +200,6 @@ it('omits the plan indicator when the profile has no plan projection', () => {
 })
 
 describe('model and billed tokens', () => {
-  const statusRow = (frame: string | undefined) => (frame ?? '').split('\n').findLast(line => line.startsWith('  ')) ?? ''
-
   it('names the model where the state word was, and no token fields before a request reports', () => {
     const ui = render(<App {...props({ status: 'running' })} />)
     const row = statusRow(ui.lastFrame())
@@ -229,6 +247,43 @@ it('opens a child from the shortcut, blocks child input, and preserves the paren
   await vi.waitFor(() => expect(ui.lastFrame()).toContain('Unsent parent draft'))
 })
 
+it('selects the status-line subagents entry with Down and opens its picker with Enter', async () => {
+  const onSubagents = vi.fn()
+  const onSubmit = vi.fn()
+  const state = props({ onSubagents, onSubmit, subagents: [
+    { id: 'child', label: 'Review', state: 'working', detail: 'Continuable', inspectable: true },
+  ] })
+  const ui = render(<App {...state} />)
+  ui.stdin.write('\x1b[B')
+  await vi.waitFor(() => expect(statusRow(ui.lastFrame())).toContain('> Subagents: 1 · 1 Working · Enter opens'))
+  ui.stdin.write('\x1b[A')
+  await vi.waitFor(() => expect(statusRow(ui.lastFrame())).toContain('↓ Subagents: 1'))
+  ui.stdin.write('\x1b[B')
+  ui.stdin.write('\r')
+  await vi.waitFor(() => expect(onSubagents).toHaveBeenCalledOnce())
+  expect(onSubmit).not.toHaveBeenCalled()
+})
+
+it('keeps Down in the composer while drafting', async () => {
+  const onSubagents = vi.fn()
+  const ui = render(<App {...props({ onSubagents, subagents: [
+    { id: 'child', label: 'Review', state: 'saved', detail: 'Continuable', inspectable: true },
+  ] })} />)
+  ui.stdin.write('draft\x1b[B')
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain('draft'))
+  expect(statusRow(ui.lastFrame())).toContain('↓ Subagents: 1')
+  expect(onSubagents).not.toHaveBeenCalled()
+})
+
+it('counts working children only while some are working', () => {
+  const ui = render(<App {...props({ subagents: [
+    { id: 'a', label: 'Review', state: 'saved', outcome: 'completed', detail: 'One-shot', inspectable: true },
+    { id: 'b', label: 'Check', state: 'live', detail: 'Continuable', inspectable: true },
+  ] })} />)
+  expect(statusRow(ui.lastFrame())).toContain('↓ Subagents: 2  ')
+  expect(statusRow(ui.lastFrame())).not.toContain('Working')
+})
+
 it('steps thinking on Shift-Tab without touching the draft or a completion Tab would take', async () => {
   const onCycleThinking = vi.fn()
   const ui = render(<App {...props({ onCycleThinking })} />)
@@ -241,10 +296,16 @@ it('steps thinking on Shift-Tab without touching the draft or a completion Tab w
 })
 
 it('names an available update in the status line, after every reading of the session and before the path', () => {
-  const frame = render(<App {...props({ update: '0.2.0', usage: { input: 1200, output: 300 } })} />).lastFrame()!
+  const frame = render(<App {...props({ update: { version: '0.2.0', installed: false }, usage: { input: 1200, output: 300 } })} />).lastFrame()!
   const status = frame.split('\n').find(line => line.includes('Model:'))!
-  expect(status).toMatch(/update\s+v0\.2\.0 · bake update/)
+  expect(status).toMatch(/update\s+v0\.2\.0 · \/update/)
   // Last of the bounded fields, so it is the first a narrow line gives up.
   expect(status.indexOf('out')).toBeLessThan(status.indexOf('update'))
   expect(status.indexOf('update')).toBeLessThan(status.indexOf('/workspace'))
+})
+
+it('asks for a restart once the newer release is installed', () => {
+  const frame = render(<App {...props({ update: { version: '0.2.0', installed: true } })} />).lastFrame()!
+  const status = frame.split('\n').find(line => line.includes('Model:'))!
+  expect(status).toContain(`v0.2.0 · ${dictionaries.en.updateRestart}`)
 })

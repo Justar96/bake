@@ -3,8 +3,8 @@ import React from 'react'
 import { renderToString, Text } from 'ink'
 import { describe, expect, it } from 'vitest'
 import { budgetFor, CHROME_ROWS, chromeFor, COLUMN, COMPOSER_BUDGET, HINT_MIN_COLUMNS, isRenderable, MARKER, type FrameStyle } from '../src/layout.ts'
-import { present, type ResultBound } from '../src/present.ts'
-import { Chrome, Completion, Composer, headerRoom, Line, StatusBar, type ActivityState, type StandingState } from '../src/line.tsx'
+import { present, type PresentedLine, type ResultBound } from '../src/present.ts'
+import { Chrome, Completion, Composer, headerRoom, Line, StatusBar, wrappedRows, type ActivityState, type StandingState } from '../src/line.tsx'
 import { dictionaries } from '../src/copy.ts'
 import { PALETTE, permissionTone } from '../src/palette.ts'
 import { SPINNER_REST } from '../src/activity.ts'
@@ -16,6 +16,13 @@ const CARET = '\u258c'
 const at80 = budgetFor({ columns: 80, rows: 24 })
 /** Every result line drawn, so these tests assert placement and nothing else. */
 const shown: ResultBound = { lines: Number.MAX_SAFE_INTEGER, unit: 'lines', more: 'more lines' }
+
+it('keeps a selected status action visible when the model yields width', () => {
+  const row = renderToString(<StatusBar columns={40} left={[{ text: 'Model: example-model' }]}
+    badge={{ label: 'Access', value: 'workspace-write', color: PALETTE.done }}
+    right={[{ text: '> Subagents: 12 · 2 Working', short: '> 12', selected: true }, '/workspace']} />, { columns: 40 })
+  expect(strip(row)).toContain('> 12')
+})
 
 /** Render placed lines the way the transcript would. */
 const show = (rows: readonly React.ReactElement[], columns = 80): string =>
@@ -70,6 +77,38 @@ describe('Line', () => {
 
     // The outcome, then one line. 200 characters fit after the verb.
     expect(rendered.split('\n')).toHaveLength(2)
+  })
+
+  it('remeasures the same line when its verb moves into and out of the body', () => {
+    const line: PresentedLine = {
+      marker: MARKER.none, verb: 'note', text: 'abcdefgh', column: COLUMN.output, tone: 'plain',
+      spans: [{ length: 4, tone: 'strong' }],
+    }
+    // Both layouts leave four text columns; only the narrow one puts the verb in them.
+    for (const columns of [13, 6, 13]) {
+      const budget = budgetFor({ columns, rows: 24 })
+      const measured = wrappedRows(line, budget)
+      expect(measured).toEqual(columns === 6 ? ['note', 'abcd', 'efgh'] : ['abcd', 'efgh'])
+      const rendered = show([<Line key="reused" line={line} budget={budget} />], columns)
+      expect(rendered).toBe(columns === 6 ? '  note\n  abcd\n  efgh' : '  note   abcd\n         efgh')
+      const offset = columns === 6 ? COLUMN.rail : COLUMN.output
+      expect(rendered.split('\n').map(row => row.slice(offset))).toEqual(measured)
+    }
+  })
+
+  it('remeasures the same prose line when only its reading measure changes', () => {
+    const line: PresentedLine = {
+      marker: MARKER.none, verb: '', text: 'abcd efgh', column: COLUMN.rail, tone: 'plain',
+      spans: [{ length: 4, tone: 'strong' }],
+    }
+    for (const measure of [9, 4, 9]) {
+      const budget = { ...budgetFor({ columns: 20, rows: 24 }), measure }
+      const measured = wrappedRows(line, budget)
+      expect(measured).toEqual(measure === 4 ? ['abcd', 'efgh'] : ['abcd efgh'])
+      const rendered = show([<Line key="reused" line={line} budget={budget} />], budget.columns)
+      expect(rendered).toBe(measure === 4 ? '  abcd\n  efgh' : '  abcd efgh')
+      expect(rendered.split('\n').map(row => row.slice(COLUMN.rail))).toEqual(measured)
+    }
   })
 
   it.each([24, 40, 80, 160])('bounds turn dividers and reasoning at %i columns', columns => {
@@ -280,7 +319,7 @@ describe('Chrome', () => {
   it('puts the running work and the last turn in the header, from the rail’s first column', () => {
     const running = draw(60, { activity: working, state: { ...idle, running: true } })
     expect(running[1]).toBe(`${SPINNER_REST} Kneading…  writing`)
-    // Where an action's marker and the goal block's head sit, not the draft's column.
+    // Level with an action's marker, not the draft's column.
     expect(running[1]!.indexOf(SPINNER_REST)).toBe(0)
     const done = draw(60, { activity: ended })
     expect(done[1]).toBe('✓ Completed  9s · ran 1')
@@ -308,6 +347,14 @@ describe('Chrome', () => {
     for (const columns of [1, 2, 5, 12, 24, 40, 80]) {
       expect(stringWidth(draw(columns, { activity: working, standing: goal })[1]!), `${columns}`).toBeLessThanOrEqual(columns)
     }
+  })
+
+  it('gives up the goal\'s shortcut after its details and before its label', () => {
+    const keyed = { ...goal, key: 'Ctrl+O' }
+    expect(draw(80, { activity: working, standing: keyed })[1]).toMatch(/writing +Ctrl\+O ● Goal active {2}round 2\/8 · Ship it$/)
+    expect(draw(52, { activity: working, standing: keyed })[1]).toMatch(/writing {2}Ctrl\+O ● Goal active {2}r/)
+    expect(draw(44, { activity: working, standing: keyed })[1]).toMatch(/writing {2}Ctrl\+O ● Goal active$/)
+    expect(draw(40, { activity: working, standing: keyed })[1]).toMatch(/writing {2,}● Goal active$/)
   })
 
   it('draws the rules in ASCII where the terminal cannot draw box characters', () => {

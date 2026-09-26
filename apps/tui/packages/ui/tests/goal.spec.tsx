@@ -1,64 +1,128 @@
-/** The goal block: its phases, its wrapping, and what it drops when rows run short. */
+/** Goal state projected into the shared turn header. */
 import React from 'react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { useStdout } from 'ink'
+import { render as renderInk } from 'ink-testing-library'
+import { afterEach, expect, it, vi } from 'vitest'
 import { cleanup, render } from '../../../tests/render.tsx'
-import { Goal, goalRows, type GoalEntry } from '../src/goal.tsx'
+import { App, type AppProps } from '../src/app.tsx'
+import { goalState, type GoalEntry } from '../src/goal.ts'
+import { appendTranscript, emptyTranscript } from '../src/transcript.ts'
 import { dictionaries } from '../src/copy.ts'
-
-afterEach(cleanup)
 
 const copy = dictionaries.en
 const active: GoalEntry = { objective: 'Ship it', phase: 'active', armed: true, rounds: 2, maxRounds: 8 }
-const draw = (goal: GoalEntry, limit: number, columns = 60): string[] =>
-  render(<Goal goal={goal} copy={copy} columns={columns} limit={limit} />).lastFrame()!.split('\n').map(row => row.trimEnd())
 
-describe('goal block', () => {
-  it('names the phase with its rounds, hangs the objective, and lists the actions that apply', () => {
-    expect(draw(active, 4)).toEqual([
-      `● ${copy.goalActive}  ${copy.goalRound} 2/8`,
-      '└ Ship it',
-      `  ${copy.goalKeysActive}`,
-    ])
-    expect(goalRows(active, copy, 60)).toBe(3)
-  })
+afterEach(cleanup)
 
-  it('offers resume for a held or paused goal', () => {
-    // Held is still active, so it keeps counting rounds; paused does not.
-    expect(draw({ ...active, armed: false }, 4, 100)[0]).toBe(`○ ${copy.goalHeld}  ${copy.goalRound} 2/8`)
-    expect(draw({ ...active, phase: 'paused' }, 4, 100)[0]).toBe(`○ ${copy.goalPaused}`)
-    for (const goal of [{ ...active, armed: false }, { ...active, phase: 'paused' as const }]) {
-      expect(draw(goal, 4, 100)[2]).toBe(`  ${copy.goalKeysHeld}`)
-    }
-  })
+function props(goal: GoalEntry, status: AppProps['status'] = 'idle'): AppProps {
+  return {
+    files: { query: undefined, entries: [], loading: false, error: undefined }, onReferenceQuery: () => {},
+    completion: { entries: [], loading: false, error: undefined }, completionLimit: 8, resultLines: 8,
+    committed: emptyTranscript, live: [], pending: [], status, stopping: false,
+    command: undefined, notice: undefined, interaction: undefined, todos: undefined,
+    model: 'mock/model', cwd: '/workspace', sessionId: 'session-goal', copy, frame: 'round', quitting: false, context: undefined,
+    goal, onSubmit: () => {}, onCancel: () => {}, onInterrupt: () => {}, onAnswer: () => {},
+  }
+}
 
-  it('says why a blocked goal stopped above the objective', () => {
-    const rows = draw({ ...active, phase: 'blocked', blocked: 'Round limit reached' }, 5, 100)
-    expect(rows).toEqual([
-      `✗ ${copy.goalBlocked}`,
-      '├ Round limit reached',
-      '└ Ship it',
-      `  ${copy.goalKeysBlocked}`,
-    ])
-  })
+it('keeps the goal beside turn status on one header row', () => {
+  const ui = render(<App {...props(active, 'running')} />)
+  const rows = ui.lastFrame()!.split('\n')
+  const goalRows = rows.filter(row => row.includes(copy.goalActive))
+  expect(goalRows).toHaveLength(1)
+  expect(goalRows[0]).toContain('round 2/8 · Ship it')
+  expect(goalRows[0]).toMatch(/….*● Goal active/)
+  expect(rows).not.toContain('└ Ship it')
+  ui.rerender(<App {...props(active)} />)
+  expect(ui.lastFrame()!.split('\n').filter(row => row.includes(copy.goalActive))).toHaveLength(1)
+})
 
-  it('wraps a long objective to two rows and marks what it cut', () => {
-    const goal = { ...active, objective: 'Port the release pipeline to signed bundles for every platform and verify each checksum twice before publishing anything' }
-    const rows = draw(goal, 6, 40)
-    expect(rows).toHaveLength(4)
-    expect(rows[1]!.startsWith('└ Port the release')).toBe(true)
-    expect(rows[2]!.startsWith('  ')).toBe(true)
-    expect(rows[2]!.endsWith('…')).toBe(true)
-    expect(goalRows(goal, copy, 40)).toBe(4)
+it('projects the goal phases and their useful details', () => {
+  expect(goalState(active, copy)).toMatchObject({ glyph: '●', label: copy.goalActive, details: 'round 2/8 · Ship it' })
+  expect(goalState({ ...active, armed: false }, copy)).toMatchObject({ glyph: '○', label: copy.goalHeld,
+    details: `${copy.goalResume} · Ship it` })
+  expect(goalState({ ...active, phase: 'paused' }, copy)).toMatchObject({ glyph: '○', label: copy.goalPaused })
+  expect(goalState({ ...active, phase: 'blocked', blocked: 'Round limit reached' }, copy)).toMatchObject({
+    glyph: '✗', label: copy.goalBlocked, details: 'Round limit reached · Ship it',
   })
+  expect(goalState({ ...active, phase: 'complete' }, copy)).toMatchObject({ glyph: '✓', label: copy.goalComplete,
+    details: 'round 2/8 · Ship it' })
+  expect(goalState(undefined, copy)).toBeUndefined()
+})
 
-  it('drops the actions, then the second objective row, before the head', () => {
-    const goal = { ...active, objective: 'a '.repeat(40).trim() }
-    expect(draw(goal, 3, 40)).toHaveLength(3)
-    expect(draw(goal, 3, 40).at(-1)).not.toContain('/goal')
-    const two = draw(goal, 2, 40)
-    expect(two[0]).toContain(copy.goalActive)
-    expect(two[1]!.endsWith('…')).toBe(true)
-    expect(draw(goal, 1, 40)).toEqual([`● ${copy.goalActive}  ${copy.goalRound} 2/8`])
-    expect(render(<Goal goal={goal} copy={copy} columns={40} limit={0} />).lastFrame()).toBe('')
-  })
+it('truncates a long header goal and opens its complete text with Up and Enter', async () => {
+  const objective = Array.from({ length: 40 }, (_, index) => `Goal line ${index}`).join('\n')
+  const ui = render(<App {...props({ ...active, objective })} />)
+  const initialHeight = ui.lastFrame()!.split('\n').length
+  const header = ui.lastFrame()!.split('\n').find(row => row.includes(copy.goalActive))!
+  expect(header).toContain('Ctrl+O ● Goal active')
+  expect(header).not.toContain('Goal line 39')
+  ui.stdin.write('\x1b[A')
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain('> ● Goal active'))
+  ui.stdin.write('\r')
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain(`${copy.sheetScroll} · ${copy.sheetClose}`))
+  expect(ui.lastFrame()).toContain('Goal line 0')
+  expect(ui.lastFrame()).not.toContain('Goal line 39')
+  ui.stdin.write('\x1b[F')
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain('Goal line 39'))
+  ui.stdin.write('\x1b')
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain('Ctrl+O ● Goal active'))
+  await vi.waitFor(() => expect(ui.lastFrame()!.split('\n')).toHaveLength(initialHeight))
+})
+
+it('recalls input history with Up before selecting the goal, then restores the unsent draft', async () => {
+  const committed = appendTranscript(emptyTranscript, [{ kind: 'user', text: 'Earlier prompt' }])
+  const ui = render(<App {...props(active)} committed={committed} />)
+  ui.stdin.write('Unsent draft')
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain('> Unsent draft▌'))
+  ui.stdin.write('\x1b[A')
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain('> Earlier prompt▌'))
+  expect(ui.lastFrame()).not.toContain('> ● Goal active')
+  // Past the oldest entry the goal is selected, and the composer holds the
+  // draft again rather than a stale entry one Enter would rerun.
+  ui.stdin.write('\x1b[A')
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain('> ● Goal active'))
+  expect(ui.lastFrame()).toContain('> Unsent draft▌')
+  ui.stdin.write('\r')
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain(copy.sheetClose))
+  ui.stdin.write('\x1b')
+  await vi.waitFor(() => expect(ui.lastFrame()).not.toContain(copy.sheetClose))
+  expect(ui.lastFrame()).toContain('Ctrl+O ● Goal active')
+  expect(ui.lastFrame()).toContain('> Unsent draft▌')
+  // History starts again from the newest entry.
+  ui.stdin.write('\x1b[A')
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain('> Earlier prompt▌'))
+})
+
+it('opens from a draft with Ctrl+O, shows blocked status and reason, and keeps the draft', async () => {
+  const onSubmit = vi.fn()
+  const onCancel = vi.fn()
+  const goal = { ...active, phase: 'blocked' as const, blocked: 'Round limit reached' }
+  const ui = render(<App {...props(goal)} onSubmit={onSubmit} onCancel={onCancel} />)
+  ui.stdin.write('Unsent draft')
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain('Unsent draft'))
+  ui.stdin.write('\x0f')
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain(`${copy.sheetScroll} · ${copy.sheetClose}`))
+  expect(ui.lastFrame()).toContain('✗ Goal blocked')
+  expect(ui.lastFrame()).toContain('Round limit reached')
+  ui.stdin.write('ignored\r')
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain('Unsent draft'))
+  expect(onSubmit).not.toHaveBeenCalled()
+  expect(onCancel).not.toHaveBeenCalled()
+})
+
+it('shows the full goal on a short terminal where the composer leaves no room for the panel', async () => {
+  function SmallTerminal({ children }: { readonly children: React.ReactNode }): React.ReactElement {
+    const { stdout } = useStdout()
+    Object.defineProperties(stdout, { columns: { value: 40, configurable: true }, rows: { value: 8, configurable: true } })
+    return <>{children}</>
+  }
+  const goal = { ...active, objective: `${'long goal '.repeat(30)}END_OF_GOAL` }
+  const ui = renderInk(<SmallTerminal><App {...props(goal)} /></SmallTerminal>)
+  ui.stdin.write('\x1b[A\r')
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain(copy.sheetScroll))
+  ui.stdin.write('\x1b[F')
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain('END_OF_GOAL'))
+  ui.stdin.write('\x1b')
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain('Ctrl+O ● Goal active'))
 })

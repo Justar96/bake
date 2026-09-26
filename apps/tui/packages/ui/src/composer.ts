@@ -54,23 +54,31 @@ export function useComposer(submit: Submit, history?: () => Iterable<string>, al
       else return false
       return true
     },
-    recall: (direction: 'older' | 'newer'): void => {
-      if (pending.current || history === undefined) return
+    /** Stop browsing history and restore the draft the browse started from. */
+    leave: (): void => {
+      if (visit.current === undefined) return
+      update(visit.current.scratch)
+      visit.current = undefined
+    },
+    /** Step through input history. @returns false when there was nothing further to show. */
+    recall: (direction: 'older' | 'newer'): boolean => {
+      if (pending.current || history === undefined) return false
       if (visit.current === undefined) {
-        if (direction === 'newer') return
+        if (direction === 'newer') return false
         visit.current = { iterator: history()[Symbol.iterator](), scratch: current.current, entries: [], index: -1 }
       }
       const active = visit.current
       if (active.index >= 0) active.entries[active.index] = current.current
       const next = active.index + (direction === 'older' ? 1 : -1)
-      if (next < 0) { update(active.scratch); visit.current = undefined; return }
+      if (next < 0) { update(active.scratch); visit.current = undefined; return true }
       if (next === active.entries.length) {
         const item = active.iterator.next()
-        if (item.done === true) { if (active.entries.length === 0) visit.current = undefined; return }
+        if (item.done === true) { if (active.entries.length === 0) visit.current = undefined; return false }
         active.entries.push(draftAt(composerText(item.value)))
       }
       active.index = next
       update(active.entries[next]!)
+      return true
     },
     type: (value: string): void => {
       if (pending.current) return

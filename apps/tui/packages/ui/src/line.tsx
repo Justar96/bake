@@ -49,8 +49,7 @@ export function Line({ line, budget, clock }: {
   // their own tones.
   const zone = line.zone === true
   const colored = colorOf(style, zone)
-  const { rail, verb: verbWidth, width, content } = placement(line, budget)
-  const text = content.literal === true ? content.text : softBreaks(content.text, width)
+  const { rail, verb: verbWidth, width, content, text } = placement(line, budget)
   return (
     // `flexShrink={0}`. Inside a region held at a fixed height, a shrinkable
     // line lets Yoga squash every line a little instead of pushing the oldest
@@ -143,26 +142,41 @@ function Pulse({ glyph, clock }: { readonly glyph: string, readonly clock: Clock
     : <Text>{' '.repeat(stringWidth(glyph))}</Text>
 }
 
-/** Place both the rendered line and its height measurement against the same width. */
-function placement(line: PresentedLine, budget: Budget): {
+interface Placement {
   readonly rail: number
   readonly verb: number
   readonly width: number
   readonly content: PresentedLine
-} {
+  readonly text: string
+  readonly columns: number
+  readonly measure: number
+  rows?: readonly string[]
+}
+
+// Measurement and rendering share one wrap per immutable presentation line.
+// Weak keys release it with that line; resizing replaces its sole cached width.
+const placements = new WeakMap<PresentedLine, Placement>()
+
+/** Place both the rendered line and its height measurement against the same width. */
+function placement(line: PresentedLine, budget: Budget): Placement {
+  const cached = placements.get(line)
+  if (cached?.columns === budget.columns && cached.measure === budget.measure) return cached
   const rail = line.flush === true ? 0 : Math.min(COLUMN.rail, Math.max(0, budget.columns - 1))
   const indented = line.column === COLUMN.output
   const verb = indented && budget.columns - rail > COLUMN.verb ? COLUMN.verb : 0
   const available = Math.max(1, budget.columns - rail - verb)
   const width = line.flush === true || line.wide === true || (indented && line.prose !== true) ? available : Math.min(available, budget.measure)
-  if (!indented || verb > 0 || (line.verb === '' && line.gutter === undefined)) return { rail, verb, width, content: line }
   // A narrow window has no room for the verb column. Put its label in the
   // body instead of dropping it or letting a fixed-width gutter push text off screen.
   const prefix = `${line.verb || line.gutter} `
-  const content: PresentedLine = { ...line, text: prefix + line.text,
+  const content: PresentedLine = !indented || verb > 0 || (line.verb === '' && line.gutter === undefined) ? line : { ...line, text: prefix + line.text,
     spans: [{ length: prefix.length, tone: line.verbTone ?? line.tone, bold: line.verb !== '' }, ...(line.spans ?? [])],
   }
-  return { rail, verb, width, content }
+  const placed: Placement = { rail, verb, width, content,
+    text: content.literal === true ? content.text : softBreaks(content.text, width),
+    columns: budget.columns, measure: budget.measure }
+  placements.set(line, placed)
+  return placed
 }
 
 /**
@@ -173,9 +187,10 @@ function placement(line: PresentedLine, budget: Budget): {
  * @returns at least one row.
  */
 export function wrappedRows(line: PresentedLine, budget: Budget): readonly string[] {
-  const { width, content } = placement(line, budget)
-  if (line.divider === true || content.text === '') return [line.divider === true ? '-'.repeat(width) : content.text]
-  return wrapAnsi(content.literal === true ? content.text : softBreaks(content.text, width), width, { hard: true, trim: false }).split('\n')
+  const placed = placement(line, budget)
+  return placed.rows ??= line.divider === true || placed.text === ''
+    ? [line.divider === true ? '-'.repeat(placed.width) : placed.text]
+    : wrapAnsi(placed.text, placed.width, { hard: true, trim: false }).split('\n')
 }
 
 /**
@@ -303,12 +318,14 @@ export interface StandingState {
   /** Dim text after the label; truncated first. */
   readonly details: string
   readonly color: PaletteColor
+  /** Dim shortcut drawn before the glyph. A tight row gives it up after the details, before the label. */
+  readonly key?: string
 }
 
 /**
  * Columns before the header's glyph. None: the glyph takes the rail's first
- * column, as an action's marker and the goal block's head do, so the turn
- * reads as the head of the work above it rather than as part of the draft.
+ * column, as an action's marker does, so the turn reads as the head of the
+ * work above it rather than as part of the draft.
  */
 const HEADER_LEAD = 0
 
@@ -365,14 +382,16 @@ export function headerRoom(columns: number, left: number, right: number, rightMi
  * @param props.columns - terminal width; the row takes all of it.
  * @param props.state - what the turn is doing, or how it ended.
  * @param props.standing - the session's standing state, drawn at the right.
+ * @param props.standingFocused - whether arrow-key focus is on that state.
  * @param props.clock - time source; absent disables motion and the elapsed time.
  * @param props.motion - whether the glyph cycles; defaults to true.
  * @param props.compact - use a static ASCII chevron for screen readers.
  */
-export function Header({ columns, state, standing, clock, motion = true, compact = false }: {
+export function Header({ columns, state, standing, standingFocused = false, clock, motion = true, compact = false }: {
   readonly columns: number
   readonly state?: ActivityState | undefined
   readonly standing?: StandingState | undefined
+  readonly standingFocused?: boolean
   readonly clock?: Clock | undefined
   readonly motion?: boolean
   readonly compact?: boolean
@@ -399,9 +418,12 @@ export function Header({ columns, state, standing, clock, motion = true, compact
   const leftText = running !== undefined
     ? `${glyphAt(elapsed)} ${title}${details === '' ? '' : `  ${details}`}`
     : ended === undefined ? '' : `${OUTCOME[ended.outcome].glyph} ${ended.label}${ended.details === '' ? '' : `  ${ended.details}`}`
-  const rightHead = standing === undefined ? '' : `${standing.glyph} ${standing.label}`
-  const rightText = standing === undefined ? '' : `${rightHead}${standing.details === '' ? '' : `  ${standing.details}`}`
-  const room = headerRoom(columns, stringWidth(leftText), stringWidth(rightText), stringWidth(rightHead))
+  const rightHead = standing === undefined ? '' : `${standingFocused ? '> ' : ''}${standing.glyph} ${standing.label}`
+  const rightTail = standing === undefined || standing.details === '' ? '' : `  ${standing.details}`
+  const hint = standing?.key === undefined || standingFocused ? '' : `${standing.key} `
+  const hinted = headerRoom(columns, stringWidth(leftText), stringWidth(hint + rightHead + rightTail), stringWidth(hint + rightHead))
+  const key = hint !== '' && hinted.right > 0 ? hint : ''
+  const room = key !== '' ? hinted : headerRoom(columns, stringWidth(leftText), stringWidth(rightHead + rightTail), stringWidth(rightHead))
   const left = running !== undefined
     ? <>
       <Text color={running.color}>{glyphAt(elapsed)}</Text>{' '}
@@ -420,8 +442,9 @@ export function Header({ columns, state, standing, clock, motion = true, compact
       <Box flexGrow={1} />
       {room.right > 0 && standing !== undefined && <Box width={room.right} flexShrink={0}>
         <Text wrap="truncate-end">
-          <Text color={standing.color} bold>{rightHead}</Text>
-          {standing.details === '' || room.right <= stringWidth(rightHead) ? null : <Text dimColor>{`  ${standing.details}`}</Text>}
+          {key === '' ? null : <Text dimColor>{key}</Text>}
+          <Text color={standing.color} bold inverse={standingFocused}>{rightHead}</Text>
+          {standing.details === '' || room.right <= stringWidth(key + rightHead) ? null : <Text dimColor>{rightTail}</Text>}
         </Text>
       </Box>}
     </Box>
@@ -494,7 +517,7 @@ export function Panel({ title, color, items, footer, limit, more }: {
 }
 
 /**
- * Head of a block of held state, such as the task list or the subagents.
+ * Head of a block of held state, such as the task list.
  *
  * A marker in the rail, the block's name in bold, and a dim count after it.
  * The same shape heads a step's calls in the transcript, so a block with a
@@ -603,6 +626,8 @@ export interface MeasuredField {
 export interface PrimaryField {
   readonly text: string
   readonly short?: string
+  /** Highlight the currently keyboard-selected status action. */
+  readonly selected?: boolean
 }
 
 /** One status-line field. Dim supporting text, primary text, or a measured reading. */
@@ -710,7 +735,7 @@ export function StatusBar({ left, right, badge, secondaryBadge, columns }: {
           {typeof field === 'string'
             ? <Text dimColor wrap={index === last ? 'truncate-start' : 'truncate-end'}>{field}</Text>
             : 'text' in field
-              ? <Text wrap={index === last ? 'truncate-start' : 'truncate-end'}>{field.text}</Text>
+              ? <Text wrap={index === last ? 'truncate-start' : 'truncate-end'} inverse={field.selected === true}>{field.text}</Text>
               : <Text wrap="truncate-end"><Text dimColor>{`${field.label} `}</Text><Text color={field.color}>{field.value}</Text></Text>}
         </Box>
       ))}
@@ -741,7 +766,7 @@ function fitting(right: readonly StatusField[], room: number, after: boolean): r
     if (used + gap + stringWidth(textOf(chosen)) > room) {
       if (typeof field === 'string' || !('short' in field) || field.short === undefined
         || used + gap + stringWidth(field.short) > room) break
-      chosen = { text: field.short }
+      chosen = { text: field.short, selected: field.selected === true }
     }
     kept.push(chosen)
     used += gap + stringWidth(textOf(chosen))
@@ -796,6 +821,7 @@ function fitting(right: readonly StatusField[], room: number, after: boolean): r
  * @param props.frame - line glyphs this terminal can draw.
  * @param props.activity - what the turn is doing, or how it ended; see {@link Header}.
  * @param props.standing - the session's standing state, the goal, at the header's right.
+ * @param props.standingFocused - whether the goal is selected for Enter.
  * @param props.clock - time source for the header's motion.
  * @param props.motion - whether the header's glyph cycles.
  * @param props.compact - draw the header's glyph for a screen reader.
@@ -803,7 +829,7 @@ function fitting(right: readonly StatusField[], room: number, after: boolean): r
  * @param props.children - panels drawn above the header, each within its own
  *   claimed rows; they are not counted in `layout.rows`.
  */
-export function Chrome({ left, right, badge, secondaryBadge, columns, state, before, after, placeholder, hints, maxRows, frame, activity, standing, clock, motion, compact, layout = chromeFor(columns), children }: {
+export function Chrome({ left, right, badge, secondaryBadge, columns, state, before, after, placeholder, hints, maxRows, frame, activity, standing, standingFocused, clock, motion, compact, layout = chromeFor(columns), children }: {
   readonly left: readonly (string | PrimaryField)[]
   readonly right: readonly StatusField[]
   readonly badge?: MeasuredField
@@ -818,6 +844,7 @@ export function Chrome({ left, right, badge, secondaryBadge, columns, state, bef
   readonly frame: FrameStyle
   readonly activity?: ActivityState | undefined
   readonly standing?: StandingState | undefined
+  readonly standingFocused?: boolean
   readonly clock?: Clock | undefined
   readonly motion?: boolean
   readonly compact?: boolean
@@ -834,6 +861,7 @@ export function Chrome({ left, right, badge, secondaryBadge, columns, state, bef
       {layout.gap && <Text> </Text>}
       {children}
       {layout.header && <Header columns={columns} state={activity} standing={standing} clock={clock}
+        {...standingFocused === undefined ? {} : { standingFocused }}
         {...motion === undefined ? {} : { motion }} {...compact === undefined ? {} : { compact }} />}
       {layout.rule && <Rule columns={columns} frame={frame} />}
       <Composer

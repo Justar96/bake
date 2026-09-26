@@ -615,6 +615,8 @@ scenario('fresh', 'login, model and effort selection, paste, cursor editing, a b
       await tty.search(picked('/login'))
       tty.send('\t', 'Tab to complete it')
       await tty.expect(`> /login ${SCREEN.caret}`)
+      tty.send('\x7f', 'remove the optional target separator')
+      await tty.expect(`> /login${SCREEN.caret}`)
       tty.send('\r', 'Enter')
       await tty.expect('Choose a sign-in target')
       tty.send('\x1b', 'dismiss the login picker')
@@ -917,6 +919,69 @@ scenario('questions', 'a real ask_user_question tool call offers choices and ret
     assert(typeof answerText === 'string', 'question tool result has no answer text')
     assert(same(JSON.parse(answerText), { answers: [{ id: 'method', selected: ['Alpha'], custom: 'A custom method' }] }),
       'selected and custom answers were not both returned by the tool')
+  })
+
+scenario('tasks', 'a real todo_write call folds into one row above the header that opens the full checklist',
+  { replayOnly: true },
+  async run => {
+    const override = join(run.root, 'tasks-replay.json')
+    const args = JSON.stringify({ todos: [
+      { content: 'Read startup', status: 'completed' },
+      { content: 'Thread the home', status: 'in_progress' },
+      { content: 'Test it', status: 'pending' },
+    ] })
+    const call = { type: 'tool-call' as const, id: 'call-todo-1', name: 'todo_write', arguments: args }
+    await Bun.write(override, JSON.stringify([
+      { kind: 'chunks', chunks: [
+        { type: 'block-start', index: 0, blockType: 'tool-call' },
+        { type: 'tool-call-delta', index: 0, id: call.id, name: call.name, argumentsDelta: args },
+        { type: 'block-end', index: 0, block: call },
+        { type: 'finish', reason: { kind: 'tool-calls' } },
+      ] },
+      { kind: 'chunks', chunks: [
+        { type: 'block-start', index: 0, blockType: 'text' },
+        { type: 'text-delta', index: 0, text: 'Planned.' },
+        { type: 'block-end', index: 0, block: { type: 'text', text: 'Planned.' } },
+        { type: 'finish', reason: { kind: 'stop' } },
+      ] },
+    ]))
+    await run.writeOverlay(override)
+    try {
+      await run.terminal('tasks', [], async tty => {
+        tty.send('Plan the work.\r', 'trigger the recorded todo_write call')
+        await tty.follows(SCREEN.idle, 'Planned.')
+        await tty.search(/Tasks {2}━{4}─{8} {2}1\/3 · ▸ Thread the home +Ctrl\+T/u)
+        // The row is the whole list's cost: the other tasks get no rows of
+        // their own. The call's card above still lists them in the transcript.
+        const viewport = async (): Promise<string> => {
+          const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
+          try {
+            await new Promise<void>(resolve => screen.write(tty.raw, resolve))
+            return Array.from({ length: 40 }, (_, row) =>
+              screen.buffer.active.getLine(screen.buffer.active.viewportY + row)?.translateToString(true) ?? '').join('\n')
+          } finally { screen.dispose() }
+        }
+        assert(!/^\s*□ Test it/mu.test(await viewport()), 'the task row drew more than the current task')
+        // Up walks back through the one prompt, then selects the row.
+        const walk = tty.mark()
+        tty.send('\x1b[A'.repeat(4), 'walk up through history to the task row')
+        await tty.expect('> Tasks', walk)
+        const opened = tty.mark()
+        tty.send('\r', 'open the full checklist')
+        await tty.expect('Tasks  1/3 done', '✓ Read startup', '▸ Thread the home', '□ Test it', opened)
+        tty.send('\x1b', 'close the checklist')
+        // A lone Escape decodes only once no sequence follows it.
+        await tty.wait('the checklist to close over the empty draft', async () => {
+          const visible = await viewport()
+          return visible.includes(`${SCREEN.prompt}${SCREEN.caret}`) && !visible.includes('Esc closes')
+        })
+        const shortcut = tty.mark()
+        tty.send('\x14', 'open the checklist with Ctrl+T')
+        await tty.expect('Tasks  1/3 done', shortcut)
+        tty.send('\x1b', 'close it again')
+        await tty.wait('the checklist to close', async () => !(await viewport()).includes('Esc closes'))
+      })
+    } finally { await run.writeOverlay() }
   })
 
 scenario('edit', 'a recorded edit draws only its changed lines, numbered, with changed words reversed and code highlighted',
@@ -1332,10 +1397,17 @@ scenario('inspect-agent', 'select a saved child, read its session, and return wi
     const recorded = child.map(event => JSON.stringify(event)).join('\n') + '\n'
     await Bun.write(path, recorded)
     await run.terminal('inspect-agent', ['--resume', parentId], async tty => {
-      await tty.expect('Review terminal output', 'Completed · Saved', 'Ctrl+G /agents')
+      await tty.expect('↓ Subagents: 1')
+      tty.send('\x1b[B', 'select subagents from the status line')
+      await tty.expect('> Subagents: 1')
+      tty.send('\r', 'open the child picker from the status line')
+      await tty.expect('Select a child to view its session', 'Review terminal output')
+      let start = tty.mark()
+      tty.send('\x1b', 'close the picker')
+      await tty.expect(`> ${SCREEN.caret}Ask anything`, start)
       tty.send('Keep this parent draft', 'write a draft before inspecting a child')
       await tty.expect(`> Keep this parent draft${SCREEN.caret}`)
-      let start = tty.mark()
+      start = tty.mark()
       tty.send('\x07', 'Ctrl+G opens the child picker')
       await tty.expect('Select a child to view its session', 'Review terminal output', start)
       tty.send('\r', 'open the selected child session')
@@ -1393,17 +1465,48 @@ scenario('goal-compact', 'the built TUI exposes goal and compact commands and sh
         tty.send('\r', 'run /compact from the slash menu')
         await tty.expect('No compactable history yet.', selection)
         const goalStart = tty.mark()
-        tty.send('/goal Complete this test task\r', 'create a goal')
+        const objective = `${'Complete this test task and inspect the terminal goal. '.repeat(5)}FULL_GOAL_END`
+        tty.send(`/goal ${objective}\r`, 'create a long goal')
         await tty.expect('Goal created', goalStart)
-        // The header names the goal once `/goal` arms it. The base rule is only a line.
+        // The goal shares the processing header once `/goal` arms it.
         await tty.expect('\u25cf Goal active', goalStart)
         const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
         try {
           await new Promise<void>(resolve => screen.write(tty.raw, resolve))
-          const visible = Array.from({ length: 40 }, (_, row) =>
-            screen.buffer.active.getLine(screen.buffer.active.viewportY + row)?.translateToString(true) ?? '').join('\n')
+          const lines = Array.from({ length: 40 }, (_, row) =>
+            screen.buffer.active.getLine(screen.buffer.active.viewportY + row)?.translateToString(true) ?? '')
+          const visible = lines.join('\n')
           assert(visible.includes('Goal created'), 'goal result is absent from the current terminal viewport')
+          const goalRow = lines.findIndex(line => line.includes('Goal active'))
+          assert(goalRow >= 0 && /^─+$/u.test(lines[goalRow + 1]?.trim() ?? ''),
+            'goal is not on the processing header above the composer rule')
+          assert(!lines[goalRow]!.includes('FULL_GOAL_END'), 'the long goal was not truncated in the header')
         } finally { screen.dispose() }
+        // Up walks back through the commands above before it reaches the goal.
+        // Repeated entries draw no new frame, and further Ups keep the goal
+        // selected, so the walk is sent at once. The one-round goal may
+        // finish its round meanwhile, so any phase counts.
+        const walkUp = tty.mark()
+        tty.send('\x1b[A'.repeat(12), 'walk up through history to the goal')
+        await tty.wait('Up past the oldest history entry to select the goal', text => /> [●○✗✓] Goal /u.test(text.slice(walkUp)))
+        const opened = tty.mark()
+        tty.send('\r', 'open the full goal')
+        await tty.expect('FULL_GOAL_END', opened)
+        await tty.expect('↑↓ scroll · Esc closes', opened)
+        tty.send('\x1b', 'close the goal view')
+        // A lone Escape is only decoded once no sequence follows it, so the
+        // next key waits for the view to leave the viewport. The raw stream
+        // cannot say so: a spinner beat may redraw the view after the key.
+        await tty.wait('the goal view to close over the restored empty draft', async () => {
+          const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
+          try {
+            await new Promise<void>(resolve => screen.write(tty.raw, resolve))
+            const visible = Array.from({ length: 40 }, (_, row) =>
+              screen.buffer.active.getLine(screen.buffer.active.viewportY + row)?.translateToString(true) ?? '').join('\n')
+            // The empty draft, not the oldest command the walk passed.
+            return visible.includes(`${SCREEN.prompt}${SCREEN.caret}`) && !visible.includes('Esc closes')
+          } finally { screen.dispose() }
+        })
         await tty.wait('the goal driver to run its first round', text => DONE_LINE.test(text.slice(goalStart)))
       })
     } finally { await run.writeOverlay() }
