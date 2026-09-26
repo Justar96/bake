@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { PassThrough } from 'node:stream'
 import { Context } from '@deepseek-ai/cordis'
-import { scrubbedParentEnv, SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
+import { INHERITED_NODE_ENV, scrubbedParentEnv, SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
 import type {
   SubprocessHandle,
   SubprocessOutputRead,
@@ -98,6 +98,25 @@ describe('SubprocessRuntime seam', () => {
       delete process.env.SCRUB_PROBE_TOKEN
       delete process.env.SCRUB_PROBE_PASSWORD
       delete process.env.SCRUB_PROBE_PLAIN
+    }
+  })
+
+  it('scrubbedParentEnv gives a child the caller\'s NODE_ENV, not the one the CLI set for its renderer', () => {
+    const saved = { node: process.env.NODE_ENV, inherited: process.env[INHERITED_NODE_ENV] }
+    try {
+      process.env.NODE_ENV = 'production'
+      process.env[INHERITED_NODE_ENV] = '=development'
+      expect(scrubbedParentEnv().NODE_ENV).toBe('development')
+      process.env[INHERITED_NODE_ENV] = '-'
+      expect('NODE_ENV' in scrubbedParentEnv()).toBe(false)
+      // Without the record, NODE_ENV passes through as any other name does.
+      Reflect.deleteProperty(process.env, INHERITED_NODE_ENV)
+      expect(scrubbedParentEnv().NODE_ENV).toBe('production')
+    } finally {
+      if (saved.node === undefined) delete process.env.NODE_ENV
+      else process.env.NODE_ENV = saved.node
+      if (saved.inherited === undefined) Reflect.deleteProperty(process.env, INHERITED_NODE_ENV)
+      else process.env[INHERITED_NODE_ENV] = saved.inherited
     }
   })
 })

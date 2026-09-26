@@ -9,6 +9,7 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 - The task view adds a progress bar, counts by state, and numbered tasks; the goal view adds a rounds bar and labels its objective and reason.
 - Questions from the agent read more clearly: numbered options with aligned descriptions, `[✓]` boxes for multi-select, a step indicator across several questions, an Other row that stays in view with a hint, and a note when Enter has nothing to submit.
 - The subagent view opens in place of the picker: Up and Down choose a child and Enter opens its session. `/agents <id>` opens a child directly.
+- Long sessions no longer run out of memory. Bake now loads React's production build, which does not record a performance entry for every render; commands Bake runs still see your own `NODE_ENV`.
 
 ## [0.1.3] - 2026-09-26
 
