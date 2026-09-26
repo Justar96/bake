@@ -33,7 +33,7 @@ kind: "package-reference"
 |---|---|
 | `/compact` | 即使未达到自动压力，也压缩一段有效、平衡的较早范围，然后报告被替换的历史项数量与估算 token 数。 |
 | `/compact`，但没有可压缩历史 | `No compactable history yet.`——不会有任何改变。 |
-| `/compact <anything>` | `Usage: /compact (no arguments)`——该命令不接受参数。 |
+| `/compact <anything>` | `Usage: /compact`——该命令不接受参数。 |
 
 ### 你会看到什么
 

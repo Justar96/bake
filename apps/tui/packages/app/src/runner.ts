@@ -119,6 +119,7 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
       highlight: syntax.highlight, version, ...updates.version === undefined ? {} : { update: updates.version },
       cwd: active.agent.session.header.cwd ?? '', sessionId: active.agent.id,
       onReferenceQuery: query => active.references.search(query),
+      onArgumentQuery: query => active.argumentQuery(query),
       onSubagents: () => { navigation.submit('/agents') },
       onCycleThinking: () => { active.cycleThinking() },
       onSubmit: text => navigation.submit(text), onCancel: () => navigation.cancel(),

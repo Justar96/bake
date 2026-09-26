@@ -2,9 +2,9 @@
 
 [English](skills.md) | 中文
 
-[skill（技能）能力族](../../packages/skill) 包含 Service Definition（[dsh-skill](../../packages/skill/skill)，`ctx.skills`）、本地 Service Provider（[dsh-skill-filesystem](../../packages/skill/skill-filesystem)）、可选的随包提供方（[dsh-skill-badge](../../packages/skill/skill-badge) 与 [dsh-skill-office](../../packages/skill/skill-office)）和 Consumer（[dsh-tool-skill](../../packages/skill/tool-skill)）。注册表在其宿主层与各 scope 层之间合并各提供方的目录；提供方贡献本地或随包 skill；Consumer 拥有初始目录和替换目录，以及面向模型的 `skill` 工具。skill 是可选的指令而非会话事件，因此其词汇定义在此处而非 [core.md](core.zh.md)。
+[skill 能力系列](../../packages/skill)包含服务定义 [dsh-skill](../../packages/skill/skill)、本地提供方 [dsh-skill-filesystem](../../packages/skill/skill-filesystem)、可选的 [dsh-skill-badge](../../packages/skill/skill-badge)，以及面向模型的 [dsh-tool-skill](../../packages/skill/tool-skill)。注册表合并提供方目录，工具按需加载完整指令。
 
-源码：[`packages/skill/skill/src/index.ts`](../../packages/skill/skill/src/index.ts)、[`packages/skill/skill-filesystem/src/index.ts`](../../packages/skill/skill-filesystem/src/index.ts)、[`packages/skill/skill-badge/src/index.ts`](../../packages/skill/skill-badge/src/index.ts)、[`packages/skill/skill-office/src/index.ts`](../../packages/skill/skill-office/src/index.ts) 与 [`packages/skill/tool-skill/src/index.ts`](../../packages/skill/tool-skill/src/index.ts)。
+源码：[`packages/skill/skill/src/index.ts`](../../packages/skill/skill/src/index.ts)、[`packages/skill/skill-filesystem/src/index.ts`](../../packages/skill/skill-filesystem/src/index.ts)、[`packages/skill/skill-badge/src/index.ts`](../../packages/skill/skill-badge/src/index.ts) 与 [`packages/skill/tool-skill/src/index.ts`](../../packages/skill/tool-skill/src/index.ts)。
 
 ## 提供方注册表
 
@@ -232,10 +232,6 @@ interface Config {
 
 面向模型的 `skill({ name })` 工具校验 kebab-case 名称，在与调用策略无关的目录中查找摘要，并在加载前通过 `isModelInvocable` 拒绝无权访问的 skill；随后它根据调用方 agent 的 cwd 重新读取完整定义，并在返回内容前再次检查策略。该工具将无法解析的 skill 报告为未知或已不可用，并返回包含 `<skill_content name="...">`、`<skill_resources>` 和 `<skill_instructions>` 的工具结果。`resourceBase` 仅按需解析显式引用的脚本、参考资料和资产；加载结果不枚举 skill 目录。因此，仅修改正文会改变后续工具调用，而不会生成目录消息或改写先前工具结果。
 
-## 浏览器 Session 目录
-
-`SkillListRequest` 通过 `sessionId` 指定一个 Session；`SkillListValue` 返回允许用户调用的条目，其中包含名称、描述、可选使用提示与模型调用可用性。`SessionSkillCatalog` 在不激活 Agent 的前提下读取 Session cwd 与记录的 preset。live Agent 可以提供其作用域 registry，冷 Session 则使用 preset 的 standing scope。
-
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
 <a id="cordis-surface"></a>
@@ -243,25 +239,6 @@ interface Config {
 ## Cordis API
 
 Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — the language sides differ only in locale-specific paired document paths. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.zh.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
-
-<a id="ctxsessionskillcatalog--sessionskillcatalog"></a>
-
-### `ctx.sessionSkillCatalog` — `SessionSkillCatalog`
-
-Host service backing `ctx.remote.skills` without activating a cold Agent.
-
-```ts cordis-catalog
-/**
- * List the user-invocable skills visible to one Session composition.
- * @param request - Session identity whose cwd and preset select the catalog view.
- * @param signal - caller lifetime carried by the Remote transport; admitted catalog reads retain their existing completion semantics.
- * @returns user-invocable skill metadata without loading skill bodies.
- * @throws RemoteError when the Session cannot be inspected or no registry can serve it.
- */
-@Remote async list(request: SkillListRequest, signal: AbortSignal): Promise<SkillListValue>
-```
-
-Source: [`packages/api/session-controller/src/skill-catalog.ts`](../../packages/api/session-controller/src/skill-catalog.ts)
 
 <a id="ctxskills--skillregistry"></a>
 

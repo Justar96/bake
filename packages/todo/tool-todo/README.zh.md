@@ -87,7 +87,7 @@ agent 每次更新都发送完整列表；新列表替换旧列表，因此没�
 
 ### 导出形状
 
-本插件是函数／命名空间插件：导出 `name`、`inject`、`apply`，没有默认导出。多余的 `export default` 会让 Loader 的 `unwrapExports` 折叠模块并丢弃 `inject`（参见 [postmortem 0001](../../../docs/postmortem/0001-acp-default-export-drops-inject.zh.md)）。
+本插件是函数／命名空间插件：导出 `name`、`inject`、`apply`，没有默认导出。多余的 `export default` 会让 Loader 的 `unwrapExports` 折叠模块并丢弃 `inject`。
 
 ### 会话投影
 

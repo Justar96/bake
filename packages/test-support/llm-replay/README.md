@@ -120,7 +120,6 @@ The [committed-corpus test](tests/session-format-corpus.spec.ts) restores each v
 
 Read these pages when the package-level contract is not enough. They move from the replay adapter to the harness that records fixtures and the loop that consumes streams.
 
-- [session-snapshot](../session-snapshot/README.md) — the snapshot support that records fixtures and drives replay, record, and refresh modes.
 - [LLM package](../../llm/llm/README.md) — the provider stream contract and adapter registry replay implements.
 - [Testing policy](../../../docs/testing.md) — the keyless snapshot tier and when it is required.
 - [Test-support group map](../README.md) — sibling harnesses and support packages.

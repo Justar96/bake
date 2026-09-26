@@ -1,6 +1,6 @@
 /** Bounded native PTY observations. Bun owns the terminal, and Node runs the measured app. */
 import { existsSync, readFileSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
+import { readFile, rename, writeFile } from 'node:fs/promises'
 import { setTimeout as delay } from 'node:timers/promises'
 import { dictionaries } from '../../ui/src/copy.ts'
 import type { Metrics } from './report.ts'
@@ -100,12 +100,14 @@ export class Terminal {
   }
 
   /**
-   * Request an explicit GC sample while the session remains reachable.
+   * Request an explicit GC sample while the session remains reachable, through
+   * the request file `metrics.mjs` polls.
    * @returns memory and cumulative resource counters from the measured main process.
    */
   async sample(): Promise<Metrics> {
-    this.child.kill('SIGUSR2')
     const number = ++this.sampleNumber
+    await writeFile(`${this.metrics}.request.tmp`, String(number))
+    await rename(`${this.metrics}.request.tmp`, `${this.metrics}.request`)
     await this.wait('memory sample', () => existsSync(this.metrics) && (JSON.parse(readFileSync(this.metrics, 'utf8')) as Metrics).sequence === number)
     return JSON.parse(await readFile(this.metrics, 'utf8')) as Metrics
   }

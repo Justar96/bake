@@ -43,8 +43,6 @@ session 组让对话持久保存，恢复已发布的日志格式，并使已提
 |---|---|---|
 | [`session-projection/`](session-projection/README.zh.md) | 定义并驱动把已提交事件折叠为完整当前值的投影单元 | `ctx.sessionProjections` |
 | [`session-projection-cache/`](session-projection-cache/README.zh.md) | 持久化投影检查点，使冷读跳过全量日志加载 | `ctx.sessionProjectionCache` |
-| [`session-stats/`](session-stats/README.zh.md) | 通过 `sessionStats` 单元提供全日志会话计数与墙钟时间 | 注册到 `ctx.sessionProjections` |
-| [`session-turn-outline/`](session-turn-outline/README.zh.md) | 通过 `turnOutline` 单元提供全日志轮次大纲（轮次、`turn/start` seq、提示词预览） | 注册到 `ctx.sessionProjections` |
 
 ### 标题
 
@@ -53,7 +51,6 @@ session 组让对话持久保存，恢复已发布的日志格式，并使已提
 | [`session-title/`](session-title/README.zh.md) | 基于日志的会话标题，带确定性回退与一个可选提供方 | `ctx.sessionTitle` |
 | [`session-title-llm/`](session-title-llm/README.zh.md) | 供提供方包共享的模型标题生成策略 | 库，不使用 ctx key |
 | [`session-title-first-prompt-llm/`](session-title-first-prompt-llm/README.zh.md) | 根据第一条合格的人类消息为会话生成标题 | 注册到 `ctx.sessionTitle` |
-| [`session-title-all-prompts-llm/`](session-title-all-prompts-llm/README.zh.md) | 根据所有合格的人类消息为会话生成标题 | 注册到 `ctx.sessionTitle` |
 
 ### 遥测
 

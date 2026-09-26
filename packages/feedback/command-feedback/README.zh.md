@@ -29,12 +29,12 @@ kind: "package-reference"
 
 ### `/feedback` 命令
 
-输入 `/feedback` 加你的评价并发送。成功时会以接收会话 id 与匿名用户 id 确认：
+输入 `/feedback` 加你的评价并发送。成功时会以接收会话 id、匿名用户 id 以及会话历史的去向确认：
 
 | 输入 | 结果 |
 |---|---|
-| `/feedback the diff view is unreadable` | 记录评价并以两行确认：`Feedback recorded for session {sessionId}` 和 `Anonymous user: {userId}.` |
-| `/feedback` | 用法错误：`Feedback text is required. Usage: /feedback <text>`。仅含空白的输入视为空输入。 |
+| `/feedback the diff view is unreadable` | 记录评价并以三行确认：`Feedback recorded for session {sessionId}`、`Anonymous user: {userId}.` 以及一行共享说明。若遥测后端会上传反馈（`sessionTelemetry.sharing` 不为 `disabled`），该行说明截至此刻的会话历史会被共享，并给出 `DSH_TELEMETRY_DISABLED=1`；否则说明反馈只保留在本地会话日志中。 |
+| `/feedback` | 用法错误：`Usage: /feedback <text>`。命令补全和帮助中会显示必填的 `<text>` 提示。仅含空白的输入视为空输入。 |
 
 前后空白会被去除，但除此之外，评价会按输入原样保留：不进行截断、大小写折叠或命令解析——`/feedback /plan felt slow` 记录的就是这段字面文本。每次执行命令都会记录自己的条目；不会发生合并或替换。
 
@@ -106,7 +106,6 @@ Web 客户端随附该命令。无头模式、ACP 自动化和 JSON-RPC 不提�
 - [dsh-commands](../../interaction/commands/README.zh.md)——发现全局命令并定义 `recordInput` 语义的注册表。
 - [会话持久化子系统](../../../docs/subsystems/persistence.zh.md)——追加事件如何持久化、flush 屏障的含义。
 - [匿名用户身份](../../identity/anonymous-user-id/README.zh.md)——确认文本报告的 id。
-- [ui-message-feedback](../../client/ui-message-feedback/README.zh.md)——通过 `sessionFeedback` Remote 记录的 Web 反馈弹窗。
 - [反馈包索引](../README.zh.md)——展示仅写入日志的采集与逐消息反馈在包中的并列位置。
 
 -----

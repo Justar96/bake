@@ -29,7 +29,7 @@
     },
     "apps/cli": {
       "name": "@deepseek-ai/dsh",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "bin": {
         "dsh": "lib/bin.js",
       },
@@ -1326,6 +1326,7 @@
         "@deepseek-ai/dsh-commands": "workspace:^",
         "@deepseek-ai/dsh-llm": "workspace:^",
         "@deepseek-ai/dsh-session": "workspace:^",
+        "@deepseek-ai/dsh-session-telemetry": "workspace:^",
         "@deepseek-ai/dsh-typert-protocol": "workspace:^",
       },
       "peerDependencies": {

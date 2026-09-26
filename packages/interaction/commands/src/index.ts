@@ -17,6 +17,7 @@ import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import { CommandId } from './brand.ts'
 import type { CommandDefinitionId } from './brand.ts'
 import type {
+  CommandArgumentChoice,
   CommandDescriptor,
   CommandExecution,
   CommandInputDescriptor,
@@ -57,6 +58,10 @@ export interface CommandInvocation {
   readonly signal: AbortSignal
 }
 
+/** Resolve choices for the argument text typed so far. It must honour `signal`. */
+export type CommandChoiceProvider = (agent: Agent, partialInput: string, signal: AbortSignal)
+=> readonly CommandArgumentChoice[] | Promise<readonly CommandArgumentChoice[]>
+
 /** Plugin-owned command registration. */
 export interface CommandDefinition {
   /** Stable plugin-owned identity; absent for definitions without identity-based client behavior. */
@@ -66,7 +71,10 @@ export interface CommandDefinition {
   /** Human-readable summary used in discovery UI. */
   readonly description: string
   /** Optional free-form input hint advertised to capable clients. */
-  readonly input?: CommandInputDescriptor
+  readonly input?: Omit<CommandInputDescriptor, 'choices'> & {
+    /** Static choices, or a cancellable provider for the current argument text. Choices are advisory; handlers validate input. */
+    readonly choices?: readonly CommandArgumentChoice[] | CommandChoiceProvider
+  }
   /**
    * Whether `command/run` records `rawInput`. Defaults to true. A command
    * whose domain event owns the payload sets this false to avoid duplicating
@@ -175,6 +183,21 @@ function withAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   })
 }
 
+/** Validate and detach advisory choices before they cross a client boundary. */
+function normalizeChoices(name: string, value: unknown): readonly CommandArgumentChoice[] {
+  if (!Array.isArray(value)) throw new TypeError(`command "${name}" choices must be a list`)
+  return Object.freeze(value.map((choice: unknown) => {
+    if (typeof choice === 'string' && choice.trim() !== '') return choice
+    if (typeof choice === 'object' && choice !== null && 'value' in choice
+      && typeof choice.value === 'string' && choice.value.trim() !== ''
+      && (!('requiresInput' in choice) || typeof choice.requiresInput === 'boolean')) {
+      return Object.freeze({ value: choice.value,
+        ...'requiresInput' in choice && choice.requiresInput === true ? { requiresInput: true } : {} })
+    }
+    throw new TypeError(`command "${name}" choices must contain non-empty values`)
+  }))
+}
+
 /** Reject invalid command metadata before it can reach a UI protocol. */
 function normalizeDefinition(definition: CommandDefinition): RegisteredCommand {
   if (!COMMAND_NAME.test(definition.name)) {
@@ -190,7 +213,8 @@ function normalizeDefinition(definition: CommandDefinition): RegisteredCommand {
     throw new TypeError(`command "${definition.name}" handler must be a function`)
   }
   const rawInput: unknown = definition.input
-  let input: CommandInputDescriptor | undefined
+  let input: CommandDefinition['input']
+  let descriptorInput: CommandInputDescriptor | undefined
   if (rawInput !== undefined) {
     if (typeof rawInput !== 'object' || rawInput === null || !('hint' in rawInput)
       || typeof rawInput.hint !== 'string') {
@@ -202,9 +226,18 @@ function normalizeDefinition(definition: CommandDefinition): RegisteredCommand {
     if ('attachments' in rawInput && rawInput.attachments !== undefined && typeof rawInput.attachments !== 'boolean') {
       throw new TypeError(`command "${definition.name}" input attachments flag must be a boolean`)
     }
+    const candidate = rawInput as NonNullable<CommandDefinition['input']>
+    const choices = candidate.choices === undefined || typeof candidate.choices === 'function'
+      ? candidate.choices : normalizeChoices(definition.name, candidate.choices)
     input = Object.freeze({
-      hint: rawInput.hint,
-      ...('attachments' in rawInput && rawInput.attachments === true) ? { attachments: true } : {},
+      hint: candidate.hint,
+      ...candidate.attachments === true ? { attachments: true } : {},
+      ...choices === undefined ? {} : { choices },
+    })
+    descriptorInput = Object.freeze({
+      hint: candidate.hint,
+      ...candidate.attachments === true ? { attachments: true } : {},
+      ...choices === undefined ? {} : { choices: typeof choices === 'function' ? true : choices },
     })
   }
   const normalized = Object.freeze({
@@ -219,7 +252,7 @@ function normalizeDefinition(definition: CommandDefinition): RegisteredCommand {
     ...normalized.definitionId === undefined ? {} : { definitionId: normalized.definitionId },
     name: normalized.name,
     description: normalized.description,
-    ...normalized.input === undefined ? {} : { input: normalized.input },
+    ...descriptorInput === undefined ? {} : { input: descriptorInput },
   })
   return { definition: normalized, descriptor }
 }
@@ -317,6 +350,26 @@ export class CommandRuntime extends TypertRemoteService {
       .map(command => command.descriptor)
       // Names are unique in the effective view, so equality is impossible.
       .sort((left, right) => left.name < right.name ? -1 : 1))
+  }
+
+  /**
+   * Resolve advisory argument choices from the effective scoped command. A
+   * caller owns cancellation and awaits provider settlement.
+   * @param agent - exact receiving agent and scoped-layer key.
+   * @param name - command name without the leading slash.
+   * @param partialInput - argument text typed so far.
+   * @param signal - cancels a dynamic provider.
+   * @returns the validated choices, or an empty list when the command
+   * advertises none.
+   */
+  @Remote
+  async choices(agent: Agent, name: string, partialInput: string, signal: AbortSignal): Promise<readonly CommandArgumentChoice[]> {
+    signal.throwIfAborted()
+    const source = this.view(agent).get(name)?.definition.input?.choices
+    if (source === undefined) return []
+    const values = typeof source === 'function' ? await source(agent, partialInput, signal) : source
+    signal.throwIfAborted()
+    return normalizeChoices(name, values)
   }
 
   /**

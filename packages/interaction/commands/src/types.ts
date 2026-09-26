@@ -16,10 +16,15 @@ export type CommandSubmitAttachment =
   | ({ readonly type: 'image' } & EncodedImageAttachment)
   | { readonly type: 'file'; readonly receiptId: string }
 
+/** An advisory argument value. `requiresInput` leaves the composer open after insertion. */
+export type CommandArgumentChoice = string | { readonly value: string; readonly requiresInput?: boolean }
+
 /** Immutable metadata for a command's optional unstructured input. */
 export interface CommandInputDescriptor {
   /** Placeholder shown before the user supplies free-form input. */
   readonly hint: string
+  /** Advertised argument choices. `true` means the host resolves a dynamic provider through `commands.choices()`. */
+  readonly choices?: readonly CommandArgumentChoice[] | true
   /**
    * Whether composer attachments may accompany an invocation. Absent or
    * false = the executor rejects an invocation carrying attachments and capable

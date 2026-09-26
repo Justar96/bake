@@ -2,7 +2,7 @@
 
 English | [中文](session-projection.zh.md)
 
-The session-projection seam — a [capability seam](../capability-seams.md) through which domain host plugins serve whole current values of log-derived per-session state to client carriers: the Service Definition and registry ([dsh-session-projection](../../packages/session/session-projection), `ctx.sessionProjections`), domain contributors (each registering one pure unit), and carriers ([dsh-session-controller](../../packages/api/session-controller)'s history tail page and `session/projection` push frame). It is one optional capability, not part of the agent-loop spine. The framework drives, the domain computes: the registry subscribes to `session/event` once and folds every committed event through every unit; domains hold no subscriptions and clients never fold domain events — they receive finished values. Design authority: the [session-projection RFC](../../.agents/notes/proposed/architecture/2026-07-27-session-projection-and-command-log.md); drive/cache/feed contracts: the [package README](../../packages/session/session-projection/README.md).
+The session-projection seam provides complete log-derived per-session values through [dsh-session-projection](../../packages/session/session-projection) (`ctx.sessionProjections`). Its registry subscribes to committed `session/event` records and folds them through pure projection units; domain packages need no separate subscription. The [package README](../../packages/session/session-projection/README.md) owns drive, cache, and change-feed contracts.
 
 Source: [`packages/session/session-projection/src/index.ts`](../../packages/session/session-projection/src/index.ts)
 

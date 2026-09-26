@@ -29,12 +29,12 @@ Users can record feedback from the Web client out of the box: the `/feedback` co
 
 ### The `/feedback` command
 
-Type `/feedback` followed by your remark and send it. A successful entry is acknowledged with the receiving session id and the anonymous user id:
+Type `/feedback` followed by your remark and send it. A successful entry is acknowledged with the receiving session id, the anonymous user id, and where the session history goes:
 
 | Input | Result |
 |---|---|
-| `/feedback the diff view is unreadable` | Record the remark and acknowledge with two lines: `Feedback recorded for session {sessionId}` and `Anonymous user: {userId}.` |
-| `/feedback` | A usage error: `Feedback text is required. Usage: /feedback <text>`. Whitespace-only input counts as empty. |
+| `/feedback the diff view is unreadable` | Record the remark and acknowledge with three lines: `Feedback recorded for session {sessionId}`, `Anonymous user: {userId}.`, and a sharing line. When a telemetry backend uploads feedback (`sessionTelemetry.sharing` is not `disabled`), it says the session history up to now is shared and names `DSH_TELEMETRY_DISABLED=1`; otherwise it says the feedback stays in the local session log. |
+| `/feedback` | A usage error: `Usage: /feedback <text>`. The required `<text>` hint is shown in command completion and help. Whitespace-only input counts as empty. |
 
 Surrounding whitespace is trimmed, but the remark is otherwise kept exactly as typed: no truncation, case folding, or command parsing — `/feedback /plan felt slow` records that literal text. Each command records its own entry; nothing is merged or replaced.
 
@@ -106,7 +106,6 @@ Read these pages when the package-level contract is not enough. They cover the c
 - [dsh-commands](../../interaction/commands/README.md) — the registry that discovers the global command and its `recordInput` semantics.
 - [Session persistence subsystem](../../../docs/subsystems/persistence.md) — how appended events become durable and what a flush barrier means.
 - [Anonymous user identity](../../identity/anonymous-user-id/README.md) — the id the acknowledgement reports.
-- [ui-message-feedback](../../client/ui-message-feedback/README.md) — the Web feedback dialog that records through the `sessionFeedback` Remote.
 - [Feedback package map](../README.md) — where log-only capture sits next to per-message feedback.
 
 -----

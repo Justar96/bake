@@ -101,6 +101,8 @@ describe('project', () => {
   it('keeps a command apart from the words the user sent the model', () => {
     expect(project(event({ type: 'command/run', data: { name: 'model', args: ' deepseek/chat' } }), bare()))
       .toEqual([{ kind: 'command', name: 'model', args: ' deepseek/chat' }])
+    expect(project(event({ type: 'command/run', data: { name: 'model' } }), bare()))
+      .toEqual([{ kind: 'command', name: 'model', args: '', inputOmitted: true }])
   })
 
   it('presents a call through the tool that declared how it reads', () => {

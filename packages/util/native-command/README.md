@@ -81,8 +81,6 @@ The command runner is a thin wrapper over Node's `execFile`. The path opener sel
 
 Read these pages when you need the consumers or the general subprocess capability this utility deliberately is not.
 
-- [Native directory picker](../../host/directory-picker-native/README.md) — the OS chooser commands this runner executes.
-- [Session Controller](../../api/session-controller/README.md) — resolves Session-relative workspace paths before opening them.
 - [Settings Controller](../../api/settings-controller/README.md) — selects settings documents and agent-preset directories.
 - [Subprocess capability](../../subprocess/subprocess/README.md) — the general subprocess seam, of which this package is not a part.
 

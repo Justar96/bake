@@ -28,9 +28,9 @@ bun run release:verify-local
 
 ```sh
 git switch main && git pull --ff-only
-NEXT=0.1.2                           # 选择高于当前版本的稳定版本
-bun run release:prepare "$NEXT"       # 两个清单、bun.lock 以及 CHANGELOG.md 中的一个章节
-# 写好新章节后：
+NEXT=0.1.2                           # choose a stable version newer than the current one
+bun run release:prepare "$NEXT"       # both manifests, bun.lock, and a CHANGELOG.md section
+# write the new section in CHANGELOG.md, then:
 bun run release:preflight --offline --tag "v$NEXT"
 git add package.json apps/cli/package.json bun.lock CHANGELOG.md
 git commit -m "release: $NEXT"
@@ -83,6 +83,8 @@ irm https://bake.justar.dev/install.ps1 | iex
 安装脚本验证清单签名，按宿主平台选择归档，对照清单验证 SHA-256，并在用户主目录下安装 `bake`。它们不会读取或迁移 `~/.dsh`；除非设置 `DSH_HOME`，命令使用 Bake 的 `~/.bake` 目录。Unix 需要 `curl`、`tar`，以及 `shasum` 或 `sha256sum`；Windows 需要 `tar.exe`。下载服务只提供发行文件，不保存 API 密钥。
 
 交互式安装和 `bake update` 会在操作期间显示琥珀色 ASCII 烤箱，成功后留下刚出炉的面包。重定向输出、CI 和 `TERM=dumb` 使用纯文本。设置 `BAKE_NO_ANIMATION=1` 可关闭动画，设置 `NO_COLOR=1` 可关闭颜色。安装脚本内嵌 CLI 渲染器；修改 `apps/cli/src/bakery.ts` 或 `scripts/release/installer-animation.ts` 后，运行 `bun scripts/release/embed-animation.ts`，再用 `bun scripts/release/embed-animation.ts --check` 验证。
+
+<a id="updating-an-install"></a>
 
 ## 更新安装
 

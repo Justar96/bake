@@ -2,176 +2,119 @@
 
 English | [中文](development.zh.md)
 
-The setup tutorial takes a new contributor from prerequisites to a checked checkout. The contributor reference that follows covers repository layout, daily workflow, and CI organization. Design rationale and implementation details belong to the linked Agent Notes and scripts.
+This guide covers building Bake from source, the day-to-day development loops, the checks to run before a change lands, and where code lives. [`CONTRIBUTING.md`](../CONTRIBUTING.md) covers how changes are reviewed and how upstream DeepSeek Harness fixes are ported. [`AGENTS.md`](../AGENTS.md) holds the engineering rules every change follows.
 
-## Setup tutorial
+## Prerequisites
 
-### Prerequisites
+- **Bun**, at the version pinned in [`package.json`](../package.json) (`packageManager`). Bun owns dependency installation, `bun.lock`, workspace scripts, builds, and Git hooks. Do not add a pnpm or npm lockfile.
+- **Node.js 24 or newer.** The agent itself runs on Node, because its boot loader depends on V8 internals that Bun's engine lacks. Never substitute `bun --bun` for the Node process.
+- **A C/C++ toolchain with Node headers** for the native modules.
+- **Linux or macOS for the terminal scenarios.** Builds, type checks, and unit tests also run on Windows, but the PTY scenarios (`bun run test:e2e`) need Linux or macOS. WSL 2 works; keep the checkout inside the Linux filesystem and install dependencies separately there.
 
-- Node.js supports 22.19+ and 24+. CI covers 22.19, 24, and 26; see the [Node engine floor Agent Note](../.agents/notes/implemented/process/2026-07-06-node-engine-floor.md).
-- Corepack-enabled pnpm. The repo pins `pnpm@11.7.0` in `package.json`; run `corepack enable` if `pnpm --version` does not resolve through Corepack.
-- Git 2.26 or newer; hook setup enables Git's worktree-specific configuration extension.
-- Optional: a DeepSeek API key for the Web, headless, and ACP automation demos and real-API e2e tests.
+## First build
 
-### Windows and WSL 2
-
-On Windows, you can develop with native tools or use WSL 2 for a Linux environment. WSL 2 is useful for verifying Linux behavior and for using Linux toolchains when native dependency compilation or filesystem permissions obstruct Windows development. Each environment needs its own runtime, build tools, and permissions; WSL is optional.
-
-Keep the checkout, installed dependencies, and toolchain in the same operating system environment. For WSL 2, store the checkout in the Linux filesystem; for native Windows tools, use the Windows filesystem. Accessing files across the two filesystems adds overhead to I/O-intensive operations such as Git, dependency installation, and builds. See Microsoft's [file storage and performance guidance](https://learn.microsoft.com/en-us/windows/wsl/filesystems#file-storage-and-performance-across-file-systems).
-
-Install dependencies separately in each environment because native binaries and links can differ between operating systems. Test results apply to the environment where the tests ran; Windows-specific behavior still needs native Windows validation.
-
-### First-time setup
-
-Install dependencies from the repo root:
+From the repository root:
 
 ```sh
-pnpm install
+bun install --frozen-lockfile
+bun run build
+bun run start
 ```
 
-The install also configures worktree-local Lefthook hooks and the `dsh-translation-pairing` Git merge driver through `scripts/install-lefthook.mjs`. The [worktree-local hooks Agent Note](../.agents/notes/implemented/process/2026-07-27-worktree-local-lefthook.md) owns the hook-path safety contract; the [automatic pairing merges Agent Note](../.agents/notes/implemented/process/2026-08-08-automatic-translation-pairing-merges.md) owns the merge driver.
+`bun install` also installs the Lefthook Git hooks. `start` runs the existing build output without rebuilding; it needs an interactive terminal. `bun run start --help` prints the TUI flags without starting a session.
 
-If either integration is missing because dependencies were restored from cache or `postinstall` was skipped, install them manually:
+Source runs use the same home as an installed `bake`: `~/.bake`, or the directory in `DSH_HOME`. An override selects that directory's existing profiles and sessions, not only its credentials. Existing `~/.dsh` data is never moved or changed.
 
-```sh
-node scripts/install-lefthook.mjs
-```
+For real model requests, sign in with `/login` or set `DEEPSEEK_API_KEY` in the environment or in a gitignored `.env` at the repository root. `DEEPSEEK_BASE_URL` optionally overrides the API endpoint. Never commit keys or `.env`.
 
-If the wrapper rejects existing Git configuration or reports a stale lock, follow its diagnostic and the linked Agent Note rather than editing worktree metadata speculatively. After moving a checkout, rerun the wrapper to regenerate the owned path.
+## Development loops
 
-Run typecheck once after a fresh clone:
-
-```sh
-pnpm run typecheck
-```
-
-Setup is complete when `pnpm run typecheck` exits successfully.
-
-## Contributor reference
-
-### TypeScript project layout
-
-The repository uses isolated Host and Client aggregates. An ordinary package is registered in exactly one aggregate: Host packages in `tsconfig.host.json` and Client packages in `tsconfig.client.json`; three packages (`host/webserver`, `compaction/compaction`, `typert/registry`) are referenced by both aggregates as shared leaves so each side type-checks the same source.
-
-| File | Role | Forms a program? |
+| Work | Command | Behavior |
 |---|---|---|
-| `tsconfig.json` | Solution root: `extends` base, `files: []`, and references to the two aggregates. It is the tsserver discovery entry and the entry for explicitly running the complete Project Reference graph; through the inherited `paths`, it is also the resolution config for tsx running `scripts/`. | No |
-| `tsconfig.host.json` | Host aggregate: Host packages, examples, tests, scripts, website, and the exceptional Host project of `api/remotes`. | Yes |
-| `tsconfig.client.json` | Client aggregate: `packages/client/*` packages and their tests, `apps/web`, and the exceptional Client project of `api/remotes`. | Yes |
-| `tsconfig.base.json` | Shared compilerOptions and the source `paths` map. Also the resolution facade the vitest configs point vite-tsconfig-paths at: it has no `include`, so its `paths` apply to every importer. | No |
-| `tsconfig.base.client.json` | Browser compiler settings (`jsx`, DOM libs, `types: []`) extended by the Client aggregate and every `packages/client/*` package. | No |
+| Ink components | `bun run dev` | Hot-reloads a recorded component preview; no agent, network, or model key. |
+| Streaming preview | `bun run dev --replay` | Plays recorded rows into the preview. |
+| Chinese copy | `bun run dev --locale zh` | Uses the Chinese component dictionary. |
+| Full agent | `bun run dev:tui` | Builds the runtime and TUI, then starts the Node agent; no automatic restart. |
+| TUI-only edits | `bun run build:tui && bun run start` | Rebundles terminal code; needs an existing runtime build. |
+| Shared runtime edits | `bun run build && bun run start` | Rebuilds runtime packages and terminal code. |
 
-Host and Client stay two aggregate programs because both sides declaration-merge the cordis `Context` interface under the same keys with different services; one program seeing both merges reports a collision. The collision exists only inside a `ts.Program` — module resolution never triggers it — which is why the solution may reference both aggregates and one paths facade may span both sides. Three disciplines follow:
+The preview accepts input for layout testing but does not submit tasks. Ctrl-C exits the preview; the real agent needs two Ctrl-C presses to quit. Stop the real agent before rebuilding its files.
 
-- `tsconfig.base.json` never gains `include` or `files`: they would leak into every extending package project and narrow the facade's match-all scope.
-- A script that builds a repo-wide `ts.Program` seeds `tsconfig.host.json` or `tsconfig.client.json` explicitly — never the root solution, because flattening both aggregates into one program collides the `Context` merges.
-- A new package is registered in exactly one aggregate; only the split packages above carry both leaf configs, and the shared leaves are registered in both aggregates because each side must type-check the same source. Having both a Node loader entry and a browser entry is not a reason to split a package; an ordinary Client plugin produces both runtime artifacts during the Client build phase.
+`bun run dsh --help` exposes the built profile and plugin launcher with the same Bake home. External profile-plugin installation stays separate from Bun's source workspace.
 
-Six packages split Host and Client tsconfigs: `api/remotes`, `api/gateway`, `api/session-controller`, `api/workspace-controller`, `client/connection`, and `session-query/session-log-export`. `api/remotes`' Host entry participates in the Host Typert graph while its Client entry imports generated `/remote` declarations; `session-log-export` keeps Node archive production out of its browser controller. Each split package-root `tsconfig.json` is therefore only a solution, and the two aggregates and direct consumers reference `tsconfig.host.json` or `tsconfig.client.json` respectively. The workspace `constraints` gate walks the reachable Project Reference graph and checks each referencing project's own compiler face: a single-config target remains valid from either face, while a split target must name the matching leaf rather than its solution root or opposite leaf; it discovers split packages from the presence of both leaf configs, so a new split joins the gate automatically. The [`api-remotes` README](../packages/api/remotes/README.md) and [`session-log-export` README](../packages/session-query/session-log-export/README.md) explain their splits.
+## Checks
 
-The root build follows the generated dependency order:
-
-```sh
-tsc -b tsconfig.host.json
-tsdown --env.DSH_BUILD_FACE host
-tsc -b tsconfig.client.json
-tsdown --env.DSH_BUILD_FACE client
-pnpm run build:web
-```
-
-Both tsdown passes use the same complete workspace match. They neither scan build artifacts to discover Client packages nor maintain a Host/Client package filter list. Package-local tsdown configs select entries for the current phase through `DSH_BUILD_FACE`: an ordinary Client plugin produces both its Node loader and browser bundle during the Client phase; `api-remotes` uses `hostPhase: true` to produce its Host entry early and only its browser bundle during the Client phase. Tsdown consumes only the JavaScript emitted to `lib/types` by the preceding tsc phase.
-
-Typert runs only during Host tsdown, seeded by `tsconfig.host.json`. It analyzes Host types and generates both Host reflection artifacts and the Host-for-Client Remote projection; Client tsdown does not start Typert. Consequently, `pnpm run typecheck` runs the complete Host lib phase before Client tsc, while `pnpm run build` continues through Client tsdown and the Web build.
-
-`pnpm run build` embeds the root package version, the seven-character source commit, and a dirty marker when Git reports local changes; it also inherits other caller-supplied `DSH_CLIENT_*` values. `pnpm run build:official` is the cross-platform local equivalent of the CI and release artifact build and omits the local dirty marker. Each successful complete build writes a gitignored record that binds the exact public values to the Vite output and dynamic client bundles; release packing and built Web tests reject a missing record or artifacts changed by a later partial build. `pnpm run dev:web` still requires the artifact tree from a prior complete build, but it samples the current version and Git state once at startup and shares that environment across every watcher stage for the session; it does not validate the complete-build record because the watcher stages rewrite its recorded artifacts.
-
-Static analysis and tests resolve workspace imports through the base `paths` map to `src` and must pass on a clean tree; gates that consume built `lib/` output declare that dependency explicitly. Generated Host-for-Client Remote declarations are the deliberate exception: the public `typecheck`, `lint`, and `doc-typecheck` commands generate them first, while internal `*:contracts-ready` scripts assume that an invoking public command or scheduler gate already depends on the Typert contract-generation pass or the complete build. See the [ts-build-config note](../.agents/notes/implemented/process/2026-06-17-ts-build-config.md) for tsc-first emit ownership and the [Typert Remote note](../.agents/notes/implemented/architecture/2026-08-02-typert-remote-method-calls.md) for the gate-preparation contract.
-
-Business services declare callable methods on the Host with `@Remote` or `@RemoteScope`; the Host build generates Host-for-Client types and runtime contributions, and the Client's `api-remotes` composition loads those contributions under `ctx.remote` and scoped `agentCtx.remote` namespaces. See [API Gateway](api-gateway.md) for the generated artifacts on both sides, their assembly relationships, the SRC development fallback, and the Web build order.
-
-If a relevant local check consumes built package output, build once first:
+Run the checks that cover your change rather than the whole suite by default. Any terminal behavior change also needs the PTY scenarios.
 
 ```sh
-pnpm run build
+bun run check          # workspace, tsconfig paths, TUI types, tests, peer identity, layout, docs
+bun run test           # TUI unit and spec tests
+bun run test:runtime <file-or-dir>   # focused shared-runtime tests (Vitest on Node)
+bun run test:e2e       # keyless PTY scenarios against the built profile
+bun run verify         # build + check + PTY scenarios
+bun run lint           # Oxlint over apps/tui and scripts
 ```
 
-`pnpm run hygiene` includes `publint`, which validates package entrypoints against the built `lib/*.js` files, and `verify-node-next-types`, which validates built declarations against a temporary NodeNext consumer. A fresh worktree has no bundled JS or declarations until `pnpm run build` runs; ordinary commits and pushes do not require that build unless their selected checks consume it.
+The PTY scenarios replay recorded model responses while running real tools, then check persisted sessions, screen contents, and terminal restoration. They need no model key and do not touch your Bake home.
 
-### Environment variables
-
-The real DeepSeek adapter and key-backed agent demos read credentials from the environment or from a gitignored `.env` at the repo root:
+For shorter iterations after a runtime build:
 
 ```sh
-DEEPSEEK_API_KEY=sk-...
-DEEPSEEK_BASE_URL=https://... # optional
+bun run test:e2e --list
+bun run test:e2e --only rendering
+bun run test:e2e --no-build
+bun apps/tui/scripts/tui.ts spec packages/ui/tests/placement.spec.tsx
+bun run test:runtime apps/cli/tests/args.spec.ts
 ```
 
-`DEEPSEEK_BASE_URL` is optional and defaults to the public API. Never commit real credentials. The real-API e2e suites self-skip when `DEEPSEEK_API_KEY` is not set.
+`--only` includes a scenario's prerequisites. E2E normally rebuilds the TUI, not the shared runtime; `--no-build` uses existing artifacts unchanged. Failed scenarios report their wait condition and keep transcripts in `apps/tui/.smoke/`. `bun apps/tui/scripts/tui.ts help` lists watch modes, fixture recording, and performance diagnostics.
 
-### Git integrations
+Tests that use Cordis or Ink run on Node; pure modules and tooling tests run on Bun. A failing check is not a reason to refresh every snapshot or bypass hooks. Review expected-output changes, keep CI detection intact, and never overwrite recorded session generations under `snapshots/`.
 
-The pairing merge driver derives a conflicted `.i18n.yaml` record from the confirmed ancestor, current, and other owner blobs when both language files use Git's default text strategy and merge cleanly. It fails closed on owner conflicts, non-text merge configuration, or invalid records; after an already-stopped merge, run `pnpm run resolve-translation-pairing-conflicts`, which stages every safe pairing record and exits unsuccessfully if other pairing conflicts still need manual work. See the [bilingual documentation contract](i18n/README.md#the-pairing-contract) for the exact files and states the driver accepts.
+### Git hooks
 
-The installer probes the exact Node/tsx driver entrypoint before publishing its worktree configuration. If that runtime later becomes unavailable, the Node-independent launcher writes Git's ordinary text result, leaves the sidecar unresolved, and prints the recovery path; restore dependencies and run `pnpm run resolve-translation-pairing-conflicts`, or run `git merge --abort`. If `pre-merge-commit` rejects an otherwise clean merge, Git leaves the complete result staged without a commit; repair the failure and run `git commit`, or abort. The [automatic pairing merges Agent Note](../.agents/notes/implemented/process/2026-08-08-automatic-translation-pairing-merges.md#failure-contract) owns the exact index and `MERGE_HEAD` states.
+[`lefthook.yml`](../lefthook.yml) keeps the hooks fast:
 
-lefthook is configured in `lefthook.yml` as a fast local checkpoint:
+- `pre-commit` lints staged TypeScript and JavaScript with Oxlint (applying fixes), rejects whitespace errors, and checks that changes under `vendor/*/src` update [`vendor/README.md`](../vendor/README.md).
+- `pre-push` runs `bun run verify-workspace` and `bun run typecheck`.
 
-- `pre-commit` verifies staged pairing records against the staged owner blobs, validates staged files with the project-free `.oxlintrc.staged.json` profile and applies Oxlint fixes with one bounded retry, regenerates `THIRD_PARTY_NOTICES.md` when a staged file is one of its inputs, checks the staged diff for whitespace errors, and runs the vendor manifest guard.
-- `pre-merge-commit` performs the same index-backed pairing check before Git creates an automatic merge commit.
-- `pre-push` runs `pnpm run typecheck`, which completes the Host lib phase, including generated Typert contracts, before the Client TypeScript check.
+The hooks do not run tests or builds; run the relevant checks yourself. Never skip hooks without the maintainer's agreement.
 
-The vendor manifest guard checks that changes under `vendor/*/src` are staged with the matching `vendor/README.md` manifest update. See `vendor/README.md` before editing vendored code.
+### CI
 
-Apart from the scoped staged-record verification, the hooks intentionally do not run tests, snapshots, documentation checks, builds, or hygiene. Contributors run the [checks relevant to the changed behavior](../AGENTS.md#run-relevant-checks-locally) once; CI owns exhaustive coverage, built-artifact smokes, and the Node 22.19, 24, and 26 compatibility matrix.
+[`ci.yml`](../.github/workflows/ci.yml) runs the keyless checks on pushes to `main` and on pull requests. [`release.yml`](../.github/workflows/release.yml) builds, signs, and publishes release archives; the [release guide](../distribution/README.md) covers the process.
 
-Contributors can opt into the comprehensive local gate set with `pnpm run check:all`. The command is independent of the Git hooks and is not an agent instruction.
+## Repository layout
 
-### CI gates
+| Path | Contents |
+|---|---|
+| [`apps/tui/`](../apps/tui/DESIGN.md) | The terminal application: `packages/app` (profile composition, agent control, terminal lifecycle), `packages/ui` (side-effect-free Ink components, projection, layout, localized copy), `packages/harness` (component development and recording), fixtures, and dev tools. |
+| [`apps/cli/`](../apps/cli/README.md) | Node launcher for the `tui` and `headless` profiles, and external-plugin management. |
+| [`packages/`](../packages/README.md) | The shared agent runtime: agent loop, sessions, models, tools, sandbox, and plugin services. Read the [architecture](architecture.md) before changing it. |
+| [`native/`](../native/README.md), [`vendor/`](../vendor/README.md) | Native support and pinned Cordis sources. Preserve their licenses and upstream attribution. |
+| [`distribution/`](../distribution/README.md) | Release packaging, signing, and the download service. |
+| [`snapshots/`](../snapshots/AGENTS.md) | Recorded session evidence, including retained historical generations. |
 
-The keyless [CI workflow](../.github/workflows/ci.yml) groups independent gates into broad lanes and runs a smaller compatibility signal across supported Node versions. Artifact consumers wait for one build within their lane. Required benchmarks run separately on standard GitHub-hosted Linux; the [benchmark runner decision](../.agents/notes/implemented/testing/2026-09-06-standard-hosted-benchmark-runner.md) owns routing and the job timeout. The separate real-API workflow runs `pnpm run test:e2e` with its configured worker bound. See [scripts/run-gates.ts](../scripts/run-gates.ts) and the workflow files for the current gate and job inventory.
+Useful references while working in the runtime:
 
-The credential-free dsh dependency-layout and dsh/vendor pack rehearsals use the existing Linux self-hosted pool only when `DSH_CI_FAILOVER_LINUX=selfhosted` and the event is a trusted master push or same-repository, non-fork, non-Dependabot pull request. All other cases, including manual dispatch, use `ubuntu-24.04`; manual publication stays hosted. See the [release rehearsal runner decision](../.agents/notes/implemented/process/2026-09-06-release-rehearsal-selfhosted.md) for persistent-store isolation and fallback limits.
+- [Cordis primer](cordis-primer.md): plugins, services, and events.
+- [Defensive patterns](defensive-patterns.md): read before lifecycle or concurrency work.
+- [Session format status](session-format-status.md): read before any persistence change.
 
-### Daily commands
+## Conventions
 
-The root [contributor instructions](../AGENTS.md#commands) summarize common commands, while [`package.json`](../package.json) and [scripts/run-gates.ts](../scripts/run-gates.ts) own the current script and gate inventories. Select the smallest checks that cover the changed surface. Documentation changes use `pnpm run doc-sync`; package-public behavior changes also update the owning README or JSDoc, and built-artifact checks require `pnpm run build` first.
+- ESM and strict TypeScript throughout. Local relative imports use `.ts`; cross-package imports use declared package names. Runtime packages keep their `@deepseek-ai/*` names so upstream fixes port cleanly.
+- The shared Node runtime builds through `tsconfig.host.json`; package `tsconfig.json` files reference their workspace dependencies. When you add or remove a package, update its references and run `bun run gen-workspace` and `bun run gen-tsconfig-paths`.
+- Product text shown in the TUI lives in [`apps/tui/packages/ui/src/copy.ts`](../apps/tui/packages/ui/src/copy.ts), in English and Chinese.
+- Documentation describes current behavior. Update the owning README or JSDoc with the code, and keep English and Chinese pages aligned.
+- Mark known issues by urgency: `FIXME` blocks a release, `TODO` should be fixed soon, and `XXX` is a someday item.
 
-### Profile runs
+### Documenting types verbatim
 
-Run the repository build separately before using these source-checkout demos:
-
-```sh
-pnpm run build
-```
-
-The one-shot Headless coding agent needs `DEEPSEEK_API_KEY` in the environment or repo-root `.env`:
-
-```sh
-pnpm dsh --profile headless "summarize this workspace"
-```
-
-The PTC mode demo runs the same headless profile with code presentation enabled:
-
-```sh
-pnpm run demo:ptc -- "summarize this workspace"
-```
-
-### TODO markers
-
-Use one of three comment tags to flag known issues in the code, ordered by urgency:
-
-- `FIXME` — an issue that should block a new release. A release should not ship with an open `FIXME` unless reviewers explicitly agree the change can be merged anyway.
-- `TODO` — an issue that should be fixed soon, once we have the resources.
-- `XXX` — an issue that we may fix someday; lowest priority, no commitment.
-
-Pick the tag that matches the urgency so anyone scanning the code can tell a release blocker from a someday-maybe.
-
-### Documenting types verbatim (`ts type-equiv`)
-
-The [subsystems](subsystems/README.md) pages paste source-equivalent declarations together with their original JSDoc so a reader sees the exact type definition and source contract. To keep a paste from drifting when source changes, fence it as ` ```ts type-equiv ` (instead of ` ```ts `) and register it in `scripts/type-equiv.manifest.json` with the source file and symbol it mirrors:
+[Subsystem pages](subsystems/README.md) paste declarations exactly as they appear in source, with their JSDoc. Fence such a paste as ` ```ts type-equiv ` (or ` ```ts public-api ` for a class shown without implementation bodies) and register it in [`scripts/type-equiv.manifest.json`](../scripts/type-equiv.manifest.json) with its source file and symbol:
 
 ```json
 { "doc": "docs/subsystems/session.md", "symbol": "SessionEvent", "source": "packages/core/session/src/types.ts" }
 ```
 
-`pnpm run verify-type-equiv` (part of `doc-sync`) then extracts that symbol's declaration and attached JSDoc from source via the TypeScript parser and asserts the block matches both. For a class whose implementation bodies do not belong in the catalog, use ` ```ts public-api ` and set `"projection": "public-api"`; the checked projection retains the public fields, constructor, accessors, methods, and original class/member JSDoc while omitting bodies and private or protected members. Comparison ignores whitespace and non-JSDoc comments but requires every original JSDoc comment, including member documentation, so readers see the source contract beside the exact type definition. The gate enforces a 1:1 correspondence by document, symbol, and projection between primary blocks and manifest entries; a paired `.zh.md` block reuses its unsuffixed sibling's entry only when the whole tracked fence sequence is byte-identical and ordered identically. `doc-typecheck` applies the same derivative rule to compilable fences, while skipping both source-equivalence fence kinds from compilation and its opt-out ratio. When you change a documented declaration or its JSDoc, the gate fails until you update the paste; when you add or remove a primary block, update the manifest in the same change.
+`bun run verify-type-equiv` compares each block, and its Chinese counterpart, with the source declaration. When you change a documented declaration, update the paste in both languages and rerun the check.

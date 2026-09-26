@@ -59,7 +59,7 @@ agent 会完成该任务，把提供方的每个非空推理（reasoning）增�
 
 ### 何时使用
 
-在脚本化或自动化的 dsh 运行中使用 headless——CI 步骤、批处理任务、从终端快速获取答案。当需要多轮交互会话或 GUI 时请避免它；浏览器表层（[dsh-web-app](../web-app/README.zh.md)）负责这类场景。进程只为本次运行而存活，不打开监听端口，并且自行退出，因此适合等待进程结束的流水线。当监督进程需要进度而不只是答案时，`--json` 提供事件流，`--session-id` 则让后续调用继续同一段对话。
+在脚本化或自动化的 dsh 运行中使用 headless，例如 CI 步骤、批处理任务或从终端快速获取答案。进程只为本次运行而存活，不打开监听端口，并且自行退出，因此适合等待进程结束的流水线。当监督进程需要进度而不只是答案时，`--json` 提供事件流，`--session-id` 则让后续调用继续同一段对话。
 
 ### 帮助与任务错误
 
@@ -115,7 +115,6 @@ patch 叠加在 `dsh-base` 之上：继承投影缓存与共享 PTC 运行时，
 
 - [组合包索引](../README.zh.md)——基于同一核心构建的表层。
 - [dsh-base](../base/README.zh.md)——headless 运行其上的共享核心。
-- [dsh-web-app](../web-app/README.zh.md)——用于多轮工作的同级交互式浏览器入口。
 - [dsh-cmdline](../../boot/cmdline/README.zh.md)——启动器如何把命令行交给应用。
 - [生成配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-headless)——每个受支持配置字段及其源声明。
 

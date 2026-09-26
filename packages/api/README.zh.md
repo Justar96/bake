@@ -9,7 +9,7 @@ kind: "package-group"
 
 ## 概述
 
-`api/` 组提供应用的 Remote 层：Client 环境可以调用运行在 Host 上的业务能力——管理目标、运行命令、查看插件清单、发现文件与会话引用——调用方式是类型化方法，并接收结果或转发的 Host 事件。`remotes` 决定暴露哪些能力、以及每次调用如何到达正确会话的 agent；`gateway` 在 Client 与 Host 之间承载调用及其结果。技术栈运行在应用共享的 Connection 之上；流式会话数据刻意不在其中。
+`api/` 组包含 Typert Gateway 和设置控制器。Gateway 在 Client 与 Host 之间传送类型化调用及事件；设置控制器负责配置的读取与写入。各包 README 说明其现有约定。
 
 ## 目录
 
@@ -26,13 +26,8 @@ kind: "package-group"
 
 | 包 | 职责 | ctx key |
 |---|---|---|
-| [`remotes/`](remotes/README.zh.md) | 决定 Client 可以消费哪些 Host 能力与事件。 | — |
 | [`gateway/`](gateway/README.zh.md) | 承载类型化一元调用、多路复用流与转发的 Host 事件。 | `ctx.typertGateway` / `ctx.remote` |
-| [`session-controller/`](session-controller/README.zh.md) | 拥有会话命令、历史记录流、实时控制状态与 Agent/Session 身份策略。 | `ctx.sessionController` / `ctx.remote.session` |
 | [`settings-controller/`](settings-controller/README.zh.md) | 拥有 settings 域各 seam 之上的配置界面读写。 | `ctx.settingsController`、`ctx.credentialsController` / `ctx.remote.settings`、`ctx.remote.credentials` |
-| [`workspace-controller/`](workspace-controller/README.zh.md) | 拥有 Workspace 变更与完整 Client Workspace 投影。 | `ctx.workspaceController` / `ctx.remote.workspace` |
-| [`terminal-controller/`](terminal-controller/README.zh.md) | Session 拥有的交互式 shell、屏幕恢复和浏览器终端控制。 | `ctx.terminalController` / `ctx.remote.terminal` |
-| [`workspace-files/`](workspace-files/README.zh.md) | 拥有有界的工作区文件访问——`stat`、分页 `read`、`list` 与已埋点操作的 `changes` 流——以及其上的 Client `file` 资源提供方。 | `ctx.workspaceFiles` / `ctx.remote.workspaceFiles` |
 
 Remote 调用沿 Client → Host 方向运行在应用共享的 Connection 之上。API Gateway 拥有 Remote 传输，各控制器包分别拥有 Session、配置界面与 Workspace 行为。流式下载等不适合 Remote 调用的响应由功能包注册精确的 Connection Fetch 路由。
 

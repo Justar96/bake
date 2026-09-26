@@ -46,6 +46,95 @@ describe('terminal composer', () => {
     await vi.waitFor(() => expect(state.onSubmit).toHaveBeenCalledExactlyOnceWith('/compact'))
   })
 
+  it('fills a command that needs arguments on Enter and keeps its usage in view', async () => {
+    const state = props({ completion: { loading: false, error: undefined, entries: [
+      { name: 'attach', description: 'Stage a file', kind: 'command', hint: '<path>' },
+    ] } })
+    const ui = render(<App {...state} />)
+    ui.stdin.write('/att')
+    await vi.waitFor(() => expect(ui.lastFrame()).toMatch(/▸ \/attach +<path> {2}Stage a file/u))
+    ui.stdin.write('\r')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('> /attach ▌'))
+    expect(state.onSubmit).not.toHaveBeenCalled()
+    expect(ui.lastFrame()).toContain('/attach <path>  Stage a file')
+    ui.stdin.write('notes.md')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('> /attach notes.md▌'))
+    expect(ui.lastFrame()).toContain('/attach <path>  Stage a file')
+    ui.stdin.write('\r')
+    await vi.waitFor(() => expect(state.onSubmit).toHaveBeenCalledExactlyOnceWith('/attach notes.md'))
+  })
+
+  it('inserts an argument choice, then submits an exact complete line', async () => {
+    const onArgumentQuery = vi.fn()
+    const state = props({ onArgumentQuery, completion: { loading: false, error: undefined, entries: [
+      { name: 'goal', description: 'Set a goal', kind: 'command', hint: '[objective|clear]', choices: true },
+    ] } })
+    const ui = render(<App {...state} />)
+    ui.stdin.write('/goal cl')
+    await vi.waitFor(() => expect(onArgumentQuery).toHaveBeenCalledWith({ name: 'goal', partial: 'cl' }))
+    ui.rerender(<App {...state} completion={{ ...state.completion,
+      argument: { name: 'goal', partial: 'cl', entries: ['clear', 'edit'], loading: false, error: undefined },
+    }} />)
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('▸ clear'))
+    ui.stdin.write('\t')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('> /goal clear ▌'))
+    expect(state.onSubmit).not.toHaveBeenCalled()
+    ui.stdin.write('\r')
+    await vi.waitFor(() => expect(state.onSubmit).toHaveBeenCalledExactlyOnceWith('/goal clear '))
+  })
+
+  it('shows usage when an argument has no matching choices', async () => {
+    const state = props({ completion: { loading: false, error: undefined,
+      entries: [{ name: 'plan', description: 'Plan mode', kind: 'command', hint: '[off|message]', choices: true }],
+      argument: { name: 'plan', partial: 'hello', entries: ['off'], loading: false, error: undefined },
+    } })
+    const ui = render(<App {...state} />)
+    ui.stdin.write('/plan hello')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('/plan [off|message]  Plan mode'))
+    ui.stdin.write('\r')
+    await vi.waitFor(() => expect(state.onSubmit).toHaveBeenCalledExactlyOnceWith('/plan hello'))
+  })
+
+  it('keeps an incomplete argument choice open for more text', async () => {
+    const state = props({ completion: { loading: false, error: undefined,
+      entries: [{ name: 'goal', description: 'Set a goal', kind: 'command', hint: '[objective|edit <objective>]', choices: true }],
+      argument: { name: 'goal', partial: 'edit', entries: [{ value: 'edit', requiresInput: true }], loading: false, error: undefined },
+    } })
+    const ui = render(<App {...state} />)
+    ui.stdin.write('/goal edit')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('▸ edit'))
+    ui.stdin.write('\r')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('> /goal edit ▌'))
+    expect(state.onSubmit).not.toHaveBeenCalled()
+    ui.stdin.write('Update docs')
+    ui.stdin.write('\r')
+    await vi.waitFor(() => expect(state.onSubmit).toHaveBeenCalledExactlyOnceWith('/goal edit Update docs'))
+  })
+
+  it('runs a command with an optional argument on Enter before a choice is typed', async () => {
+    const state = props({ completion: { loading: false, error: undefined,
+      entries: [{ name: 'login', description: 'Sign in', kind: 'command', hint: '[target]', choices: true }],
+      argument: { name: 'login', partial: '', entries: ['deepseek', 'openai'], loading: false, error: undefined },
+    } })
+    const ui = render(<App {...state} />)
+    ui.stdin.write('/login ')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('▸ deepseek'))
+    ui.stdin.write('\r')
+    await vi.waitFor(() => expect(state.onSubmit).toHaveBeenCalledExactlyOnceWith('/login '))
+  })
+
+  it('submits an exact complete argument choice on Enter', async () => {
+    const state = props({ completion: { loading: false, error: undefined,
+      entries: [{ name: 'plan', description: 'Plan mode', kind: 'command', hint: '[off|message]', choices: true }],
+      argument: { name: 'plan', partial: 'off', entries: ['off'], loading: false, error: undefined },
+    } })
+    const ui = render(<App {...state} />)
+    ui.stdin.write('/plan off')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('▸ off'))
+    ui.stdin.write('\r')
+    await vi.waitFor(() => expect(state.onSubmit).toHaveBeenCalledExactlyOnceWith('/plan off'))
+  })
+
   it('inserts a selected skill on Enter and submits it when its full name is typed', async () => {
     const state = props({ completion: { loading: false, error: undefined, entries: [
       { name: 'review', description: 'Review a patch', kind: 'skill' },

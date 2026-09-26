@@ -305,8 +305,12 @@ export interface StandingState {
   readonly color: PaletteColor
 }
 
-/** Columns before the header's label, so it starts at the draft's column. */
-const HEADER_LEAD = COLUMN.rail
+/**
+ * Columns before the header's glyph. None: the glyph takes the rail's first
+ * column, as an action's marker and the goal block's head do, so the turn
+ * reads as the head of the work above it rather than as part of the draft.
+ */
+const HEADER_LEAD = 0
 
 /** Cells between the turn's label and the standing state's. */
 const HEADER_GAP = 2
@@ -411,7 +415,7 @@ export function Header({ columns, state, standing, clock, motion = true, compact
       </>
   return (
     <Box width={columns} height={1} flexDirection="row" flexShrink={0} overflowX="hidden">
-      <Box width={HEADER_LEAD} flexShrink={0}><Text> </Text></Box>
+      {HEADER_LEAD > 0 && <Box width={HEADER_LEAD} flexShrink={0}><Text> </Text></Box>}
       {room.left > 0 && <Box width={room.left} flexShrink={0}><Text wrap="truncate-end">{left}</Text></Box>}
       <Box flexGrow={1} />
       {room.right > 0 && standing !== undefined && <Box width={room.right} flexShrink={0}>
@@ -767,9 +771,9 @@ function fitting(right: readonly StatusField[], room: number, after: boolean): r
  * terminal's rows alone, and the header holds its row while it has nothing to
  * say, so the input never moves when a turn starts or a goal is set. Both
  * rules are exactly the terminal's width; a narrowing reflows them, which the
- * application answers by repainting (see `useRepaint`). The header's label,
- * the draft, and the status line all start at the rail's column, so the rows
- * form one block. On a short terminal, yield the gap, then the base rule,
+ * application answers by repainting (see `useRepaint`). The header's glyph
+ * sits in the rail's first column, as the markers of actions and held blocks
+ * above it do; the draft and the status line start at the rail's column. On a short terminal, yield the gap, then the base rule,
  * then the upper rule, then the status line, and the header last, so the
  * input row stays visible.
  *

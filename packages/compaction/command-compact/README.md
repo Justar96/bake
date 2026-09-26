@@ -33,7 +33,7 @@ Type `/compact` in a chat UI when the conversation has grown long and you want t
 |---|---|
 | `/compact` | Condense one useful balanced older span even below automatic pressure, then report the replaced history-item count and estimated tokens. |
 | `/compact` with no compactable history | `No compactable history yet.` — nothing changes. |
-| `/compact <anything>` | `Usage: /compact (no arguments)` — the command takes no arguments. |
+| `/compact <anything>` | `Usage: /compact` — the command takes no arguments. |
 
 ### What you see
 

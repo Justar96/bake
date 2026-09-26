@@ -130,8 +130,6 @@ kind: "package-reference"
 - [Subagent 能力 seam](../../../.agents/notes/implemented/feature/2026-06-21-subagent-capability-seam.zh.md)——委派能力家族的设计记录。
 - [可继续的 subagent](../../../.agents/notes/implemented/feature/2026-07-28-continuable-subagent-conversations.zh.md)——接受后续轮次的持久子级。
 - [进程内 spawn 后端](../subagent-spawn-in-process/README.zh.md)——最容易组合的提供方。
-- [Auto review](../../experimental/auto-review/README.zh.md)——只有进程内 DSH 子级继承的当前会话授权模式。
-- [进程外 ACP 后端](../subagent-acp/README.zh.md)——经 Agent Client Protocol 拥有自有运行时的子级。
 - [tool-subagent-control README](../tool-subagent-control/README.zh.md)——后续消息、中断与列举面。
 
 -----

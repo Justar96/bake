@@ -11,7 +11,7 @@ import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands
 export const name = 'command-compact'
 export const inject = ['commands', 'compaction']
 
-const USAGE = 'Usage: /compact (no arguments)'
+const USAGE = 'Usage: /compact'
 
 /** Fail loudly if a locally closed union gains an unhandled member. */
 /* v8 ignore start -- closed-union backstop is unreachable without violating the TypeScript contract */

@@ -127,7 +127,7 @@ it('colours the running header\'s word, leaves the rule bare, and colours a cach
   // The header's glyph and word carry the running orange, at the draft's
   // column; the rule under it is one dim run and says nothing.
   const [header, rule] = frame.split('\n')
-  expect(header!.replace(/\u001b\[[0-9;]*m/g, '').trimEnd()).toMatch(/^ {2}[\u2800-\u283f]{3} Working… {2}0s$/)
+  expect(header!.replace(/\u001b\[[0-9;]*m/g, '').trimEnd()).toMatch(/^[\u2800-\u283f]{3} Working… {2}0s$/)
   expect(header).toContain(`${rgb(PALETTE.running)}Working…`)
   expect(rule).toBe(`\u001b[2m${'─'.repeat(100)}\u001b[22m`)
   // Primary fields use plain foreground; secondary fields retain dim styling.

@@ -21,6 +21,9 @@
       "path": "../../core/session"
     },
     {
+      "path": "../../session/session-telemetry"
+    },
+    {
       "path": "../../identity/anonymous-user-id"
     },
     {

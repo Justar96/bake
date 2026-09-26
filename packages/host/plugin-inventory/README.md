@@ -74,9 +74,7 @@ Typert generates the Host and Client Remote artifacts exposed by `./typert` and 
 
 Read these when the inventory contract is not enough: how the Remote reaches clients, then the Loader it projects and the surface that renders it.
 
-- [Remote assembly](../../api/remotes/README.md) — how clients consume `pluginInventory/list` without importing the Host implementation.
 - [Cordis plugin loader](../../../vendor/loader/README.md) — the Loader whose entries this package projects.
-- [Plugin inventory settings surface](../../client/ui-settings-plugin-inventory/README.md) — the browser-side projection that renders the inventory.
 
 -----
 

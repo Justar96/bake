@@ -8,6 +8,7 @@ import type {} from '@deepseek-ai/dsh-agent-presets'
 import type {} from '@deepseek-ai/dsh-session-persistence'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import type {} from '@deepseek-ai/dsh-fs'
+import { availableSelection } from './login.ts'
 
 /** Explicit session choices resolved before the renderer mounts. */
 export interface SessionOptions {
@@ -21,11 +22,12 @@ export interface SessionOptions {
  * @param options - requested identity and optional preset.
  * @param signal - application setup lifetime.
  * @param connect - install observers before the agent is published or driven.
+ * @param credentialRefs - keys the default provider reads; a fresh session without them starts on CLIProxyAPI when it is set up.
  * @returns the owned agent handle. The caller must dispose it.
  */
 export async function openSession(
   ctx: Context, options: SessionOptions, signal: AbortSignal,
-  connect: (agent: Agent, selection: ModelSelectionRef) => void,
+  connect: (agent: Agent, selection: ModelSelectionRef) => void, credentialRefs: readonly string[] = [],
 ): Promise<AgentHandle> {
   const agents = ctx.get('agents')
   const defaults = ctx.get('agentDefaultModel')
@@ -40,7 +42,9 @@ export async function openSession(
   if (options.preset !== undefined && presets === undefined) throw new Error('tui: --preset requires agentPresets')
   const fs = ctx.get('fs')
   const cwd = fs === undefined ? process.cwd() : fs.processPath(await fs.resolve('.'))
-  const selection = defaults.currentSelection()
+  const selection = options.resume === undefined
+    ? await availableSelection(ctx, credentialRefs, defaults.currentSelection()) : defaults.currentSelection()
+  signal.throwIfAborted()
   const initialPreset = presets === undefined || (options.resume !== undefined && options.preset === undefined)
     ? undefined : (await presets.resolve(options.preset)).id
   let setupWork: Promise<void> | undefined

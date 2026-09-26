@@ -8,13 +8,15 @@
 
 ## 输入元数据
 
-该服务公开一个可选的非结构化输入描述符：提示文本加附件接受标志。命令的可用性由插件组合决定：每个消费注册表的适配器都会看到全部生效定义。
+该服务公开一个可选的非结构化输入描述符：提示文本、可选的参数候选项和附件接受标志。候选项仅作提示：定义可提供静态列表，或由 `commands.choices()` 解析的可取消提供方，处理函数仍需自行校验输入。命令的可用性由插件组合决定：每个消费注册表的适配器都会看到全部生效定义。
 
 ```ts type-equiv
 /** Immutable metadata for a command's optional unstructured input. */
 interface CommandInputDescriptor {
   /** Placeholder shown before the user supplies free-form input. */
   readonly hint: string
+  /** Advertised argument choices. `true` means the host resolves a dynamic provider through `commands.choices()`. */
+  readonly choices?: readonly CommandArgumentChoice[] | true
   /**
    * Whether composer attachments may accompany an invocation. Absent or
    * false = the executor rejects an invocation carrying attachments and capable
@@ -40,7 +42,10 @@ interface CommandDefinition {
   /** Human-readable summary used in discovery UI. */
   readonly description: string
   /** Optional free-form input hint advertised to capable clients. */
-  readonly input?: CommandInputDescriptor
+  readonly input?: Omit<CommandInputDescriptor, 'choices'> & {
+    /** Static choices, or a cancellable provider for the current argument text. Choices are advisory; handlers validate input. */
+    readonly choices?: readonly CommandArgumentChoice[] | CommandChoiceProvider
+  }
   /**
    * Whether `command/run` records `rawInput`. Defaults to true. A command
    * whose domain event owns the payload sets this false to avoid duplicating
@@ -155,6 +160,18 @@ registerFileReceiptResolver(resolver: CommandFileReceiptResolver): () => void
  * @returns name-sorted descriptors after scoped shadowing.
  */
 @Remote list(agent: Agent): readonly CommandDescriptor[]
+
+/**
+ * Resolve advisory argument choices from the effective scoped command. A
+ * caller owns cancellation and awaits provider settlement.
+ * @param agent - exact receiving agent and scoped-layer key.
+ * @param name - command name without the leading slash.
+ * @param partialInput - argument text typed so far.
+ * @param signal - cancels a dynamic provider.
+ * @returns the validated choices, or an empty list when the command
+ * advertises none.
+ */
+@Remote async choices(agent: Agent, name: string, partialInput: string, signal: AbortSignal): Promise<readonly CommandArgumentChoice[]>
 
 /**
  * Resolve one effective command definition.

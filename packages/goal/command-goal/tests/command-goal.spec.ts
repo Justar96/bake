@@ -101,7 +101,8 @@ describe('@deepseek-ai/dsh-command-goal registration', () => {
       definitionId: '@deepseek-ai/dsh-command-goal',
       name: 'goal',
       description: 'Set or view the goal for a long-running task',
-      input: { hint: '[<objective>|clear|edit <objective>|pause|resume]', attachments: true },
+      input: { hint: '[<objective>|clear|edit <objective>|pause|resume]', attachments: true,
+        choices: ['clear', { value: 'edit', requiresInput: true }, 'pause', 'resume'] },
     })
     expect(test.ctx.commands.find(test.agent, 'goal')).toBeDefined()
 

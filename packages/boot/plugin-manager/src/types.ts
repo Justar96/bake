@@ -90,7 +90,7 @@ export interface ChangeResult {
   packageResult?: PackageResult
   /** The bundle an installation added, once pnpm and the bundle check accepted it. */
   bundle?: string
-  /** Exact package names awaiting explicit script approval in the profile's pnpm settings, read after a failed run. */
+  /** Exact package selectors awaiting script approval in the profile's pnpm settings or ignored-build metadata. */
   pendingBuilds?: string[]
   /** Package script permissions saved before this installation attempt. */
   approvedBuilds?: string[]
@@ -103,7 +103,7 @@ export type PluginInstallRequestId = Branded<'PluginInstallRequestId'>
 export interface InstallBundleOptions {
   enabled?: boolean
   requestId?: PluginInstallRequestId
-  /** Explicitly allow these pending packages' scripts for this profile, then install; a name no longer pending refuses the call. */
+  /** Explicitly allow these pending selectors' scripts for this profile, then install; a selector no longer pending refuses the call. */
   approvedBuilds?: string[]
 }
 

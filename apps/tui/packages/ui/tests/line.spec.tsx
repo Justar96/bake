@@ -277,12 +277,13 @@ describe('Chrome', () => {
     expect(rows[3]!.indexOf(CARET)).toBe(rows[5]!.indexOf('Model:'))
   })
 
-  it('puts the running work and the last turn in the header, at the draft column', () => {
+  it('puts the running work and the last turn in the header, from the rail’s first column', () => {
     const running = draw(60, { activity: working, state: { ...idle, running: true } })
-    expect(running[1]).toBe(`  ${SPINNER_REST} Kneading…  writing`)
-    expect(running[1]!.indexOf(SPINNER_REST)).toBe(running[3]!.indexOf(CARET))
+    expect(running[1]).toBe(`${SPINNER_REST} Kneading…  writing`)
+    // Where an action's marker and the goal block's head sit, not the draft's column.
+    expect(running[1]!.indexOf(SPINNER_REST)).toBe(0)
     const done = draw(60, { activity: ended })
-    expect(done[1]).toBe('  ✓ Completed  9s · ran 1')
+    expect(done[1]).toBe('✓ Completed  9s · ran 1')
     // The rules stay bare whatever the header says.
     for (const rows of [running, done]) expect([rows[2], rows[4]]).toEqual([line(60), line(60)])
     // One row whatever it says, so the input never moves between them.
@@ -295,15 +296,15 @@ describe('Chrome', () => {
     expect(alone).toMatch(/^ +● Goal active {2}round 2\/8 · Ship it$/)
     expect(stringWidth(alone)).toBe(60)
     const both = draw(80, { activity: working, standing: goal })[1]!
-    expect(both).toMatch(new RegExp(`^ {2}${SPINNER_REST} Kneading… {2}writing +● Goal active {2}round 2/8 · Ship it$`))
+    expect(both).toMatch(new RegExp(`^${SPINNER_REST} Kneading… {2}writing +● Goal active {2}round 2/8 · Ship it$`))
     expect(stringWidth(both)).toBe(80)
   })
 
   it('cuts the goal before the turn, and drops it rather than leave a fragment', () => {
     // The goal's details go first, then the goal itself; the turn keeps its label.
     expect(draw(52, { activity: working, standing: goal })[1]).toMatch(/Kneading… {2}writing {2}● Goal active {2}round/)
-    expect(draw(40, { activity: working, standing: goal })[1]).toMatch(new RegExp(`^ {2}${SPINNER_REST} Kneading… {2}writing {2,}● Goal active$`))
-    expect(draw(36, { activity: working, standing: goal })[1]).toBe(`  ${SPINNER_REST} Kneading…  writing`)
+    expect(draw(40, { activity: working, standing: goal })[1]).toMatch(new RegExp(`^${SPINNER_REST} Kneading… {2}writing {2,}● Goal active$`))
+    expect(draw(36, { activity: working, standing: goal })[1]).toBe(`${SPINNER_REST} Kneading…  writing`)
     for (const columns of [1, 2, 5, 12, 24, 40, 80]) {
       expect(stringWidth(draw(columns, { activity: working, standing: goal })[1]!), `${columns}`).toBeLessThanOrEqual(columns)
     }
@@ -319,7 +320,7 @@ describe('Chrome', () => {
     const rows = draw(60, { children: <Text>notice</Text>, activity: ended })
     expect(rows[0]).toBe('')
     expect(rows[1]).toBe('notice')
-    expect(rows[2]).toMatch(/^ {2}✓ Completed/)
+    expect(rows[2]).toMatch(/^✓ Completed/)
     expect(rows[3]).toBe(line(60))
     expect(rows[4]!.startsWith(`${MARKER.prompt} `)).toBe(true)
   })
@@ -332,7 +333,7 @@ describe('Chrome', () => {
 
   it('yields the gap, the base rule, the rule, the status line, then the header, and never the draft', () => {
     const at = (rows: number): string[] => draw(60, { text: 'hello', rows, activity: ended })
-    const header = expect.stringMatching(/^ {2}✓/)
+    const header = expect.stringMatching(/^✓/)
     const draft = expect.stringContaining('hello')
     const status = '  Model: deepseek/chat  ctx 12%'
     expect(at(6)).toHaveLength(6)
@@ -374,15 +375,15 @@ describe('Chrome', () => {
 
 describe('headerRoom', () => {
   it('gives the turn its label first, cuts the standing state, and drops it below its label', () => {
-    expect(headerRoom(60, 20, 20, 10)).toEqual({ left: 20, right: 20 })
-    expect(headerRoom(40, 20, 20, 10)).toEqual({ left: 20, right: 16 })
+    expect(headerRoom(58, 20, 20, 10)).toEqual({ left: 20, right: 20 })
+    expect(headerRoom(38, 20, 20, 10)).toEqual({ left: 20, right: 16 })
     // Too few cells for any details. The label alone, not a label and an ellipsis.
-    expect(headerRoom(37, 20, 20, 10)).toEqual({ left: 20, right: 10 })
-    expect(headerRoom(34, 20, 20, 10)).toEqual({ left: 20, right: 10 })
-    expect(headerRoom(33, 20, 20, 10)).toEqual({ left: 20, right: 0 })
-    expect(headerRoom(20, 30, 20, 10)).toEqual({ left: 18, right: 0 })
-    expect(headerRoom(30, 0, 20, 10)).toEqual({ left: 0, right: 20 })
-    expect(headerRoom(1, 10, 10, 5)).toEqual({ left: 0, right: 0 })
+    expect(headerRoom(35, 20, 20, 10)).toEqual({ left: 20, right: 10 })
+    expect(headerRoom(32, 20, 20, 10)).toEqual({ left: 20, right: 10 })
+    expect(headerRoom(31, 20, 20, 10)).toEqual({ left: 20, right: 0 })
+    expect(headerRoom(18, 30, 20, 10)).toEqual({ left: 18, right: 0 })
+    expect(headerRoom(28, 0, 20, 10)).toEqual({ left: 0, right: 20 })
+    expect(headerRoom(0, 10, 10, 5)).toEqual({ left: 0, right: 0 })
   })
 })
 

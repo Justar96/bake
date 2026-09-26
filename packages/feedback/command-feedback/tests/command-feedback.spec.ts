@@ -15,6 +15,8 @@ const { USER_ID, getOrCreateAnonymousUserId } = vi.hoisted(() => {
   return { USER_ID, getOrCreateAnonymousUserId: vi.fn(() => USER_ID) }
 })
 
+const LOCAL = commandFeedback.sharingNotice(undefined)
+
 vi.mock('@deepseek-ai/dsh-anonymous-user-id', () => ({
   getOrCreateAnonymousUserId,
 }))
@@ -141,6 +143,20 @@ describe('sessionFeedback Host Remote', () => {
     expect(test.session.snapshotEvents()).toEqual([])
   })
 
+  it('says the session is shared when a telemetry backend uploads feedback', async () => {
+    const test = await harness()
+    test.ctx.provide('sessionTelemetry')
+    test.ctx.set('sessionTelemetry', { sharing: 'feedback-only' })
+    const settled = await run(test, ' slow')
+    expect(settled.text?.split('\n').at(-1)).toBe(commandFeedback.sharingNotice('feedback-only'))
+    expect(settled.text).toContain('DSH_TELEMETRY_DISABLED=1')
+  })
+
+  it('says feedback stays local when telemetry is disabled or absent', () => {
+    expect(commandFeedback.sharingNotice('disabled')).toBe(LOCAL)
+    expect(LOCAL).toMatch(/local session log/u)
+  })
+
   it('is mounted and unmounted with the plugin', async () => {
     const test = await harness()
     expect(test.ctx.get('sessionFeedback')).toBeDefined()
@@ -154,7 +170,7 @@ describe('/feedback human command', () => {
     const test = await harness()
     await expect(run(test, ' the diff view is unreadable')).resolves.toEqual({
       kind: 'success',
-      text: `Feedback recorded for session ${test.session.id}\nAnonymous user: ${USER_ID}.`,
+      text: `Feedback recorded for session ${test.session.id}\nAnonymous user: ${USER_ID}.\n${LOCAL}`,
     })
     expect(feedbackTexts(test.session)).toEqual(['the diff view is unreadable'])
     const commandRun = test.session.snapshotEvents().find(event => event.type === 'command/run')
@@ -214,8 +230,8 @@ describe('/feedback human command', () => {
       test.ctx.commands.execute(test.agent, '/feedback second', [], signal),
     ])
     expect(settled.map(item => item?.result)).toEqual([
-      { kind: 'success', text: `Feedback recorded for session ${test.session.id}\nAnonymous user: ${USER_ID}.` },
-      { kind: 'success', text: `Feedback recorded for session ${test.session.id}\nAnonymous user: ${USER_ID}.` },
+      { kind: 'success', text: `Feedback recorded for session ${test.session.id}\nAnonymous user: ${USER_ID}.\n${LOCAL}` },
+      { kind: 'success', text: `Feedback recorded for session ${test.session.id}\nAnonymous user: ${USER_ID}.\n${LOCAL}` },
     ])
     expect(feedbackTexts(test.session)).toEqual(['first', 'second'])
   })
@@ -236,7 +252,7 @@ describe('/feedback human command', () => {
     const test = await harness()
     const expected = {
       kind: 'error',
-      text: 'Feedback text is required. Usage: /feedback <text>',
+      text: 'Usage: /feedback <text>',
     }
     await expect(run(test)).resolves.toEqual(expected)
     await expect(run(test, '   \n\t ')).resolves.toEqual(expected)

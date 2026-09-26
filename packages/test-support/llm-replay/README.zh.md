@@ -120,7 +120,6 @@ parent agent 委托给进程内 subagent 的场景会为每个 Session 记录一
 
 当包级约定不够用时阅读以下页面。它们从回放适配器逐步进入录制 fixture 的 harness 与消费流的 loop。
 
-- [session-snapshot](../session-snapshot/README.zh.md)——录制 fixture 并驱动回放、录制与刷新模式的快照支持。
 - [LLM 包](../../llm/llm/README.zh.md)——回放实现的提供方流约定与适配器注册表。
 - [测试策略](../../../docs/testing.zh.md)——无密钥快照层及其适用时机。
 - [test-support 组地图](../README.zh.md)——兄弟 harness 与支持包。

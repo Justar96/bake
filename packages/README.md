@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-The harness is assembled from npm packages under `packages/`, grouped by capability family: sessions and the agent loop, model-facing tools, shell and filesystem execution, web access, subagents, and the rest. Use this page as the top-level map: find the owning group, then open its README for the package list. Every package is scoped `@deepseek-ai/dsh-*` and lives in exactly one group; each group README is the authoritative package map for its family.
+Bake uses the shared packages under `packages/` for sessions, agent execution, tools, persistence, and supporting services. Use this map to find a package group and its current members.
 
 ## Table of Contents
 
@@ -29,7 +29,7 @@ Every package lives in exactly one group; new packages join existing groups, and
 | Group | Role |
 |---|---|
 | [`core/`](core/README.md) | Product API spine: sessions, prompts, tools, agent services, and the concrete loop |
-| [`api/`](api/README.md) | Remote BFF assembly and Typert RPC gateway |
+| [`api/`](api/README.md) | Typert Gateway and settings controller |
 | [`typert/`](typert/README.md) | Type graph generation, artifact loading, and runtime registry |
 | [`goal/`](goal/README.md) | Same-session goal persistence and lifecycle |
 | [`schedule/`](schedule/README.md) | Session-local scheduled follow-ups |
@@ -37,16 +37,12 @@ Every package lives in exactly one group; new packages join existing groups, and
 | [`identity/`](identity/README.md) | Shared anonymous identity |
 | [`llm/`](llm/README.md) | LLM capability family: abstract service + provider adapters |
 | [`subprocess/`](subprocess/README.md) | Subprocess capability family: Service Definition + local process-tree provider |
-| [`ssh/`](ssh/README.md) | POSIX remote connection with paired filesystem, subprocess and sandbox providers |
 | [`shell/`](shell/README.md) | Bash capability family: executor seam, local impl, model-facing tools |
 | [`terminal/`](terminal/README.md) | Persistent PTY capability family: owner-scoped sessions, local implementation, model-facing tools |
 | [`ptc-runtime/`](ptc-runtime/README.md) | PTC execution capability family: Service Definition + sandboxed Node provider + PTC mode Consumer |
-| [`computer-use/`](computer-use/README.md) | Exclusive named desktop-provider registration |
-| [`browser-use/`](browser-use/README.md) | Exclusive named browser-provider registration |
 | [`sandbox/`](sandbox/README.md) | Process-confinement seam; bwrap/Landlock/Seatbelt backends |
-| [`deliverables/`](deliverables/README.md) | Turn deliverables: explicit file delivery and recorded workspace changes |
+| [`deliverables/`](deliverables/README.md) | Explicit file delivery tool |
 | [`fs/`](fs/README.md) | Filesystem capability family: seam, local impl, model-facing file tools, discovery tools |
-| [`lsp/`](lsp/README.md) | LSP capability family: seam, generic stdio provider, and the `lsp` tool |
 | [`skill/`](skill/README.md) | Skill capability family: provider registry, local provider, model-facing catalog/loader |
 | [`compaction/`](compaction/README.md) | Compaction capability family: Service Definition + basic provider + command Consumer |
 | [`context/`](context/README.md) | Model-visible request context: workspace instructions, time context, references |
@@ -56,7 +52,6 @@ Every package lives in exactly one group; new packages join existing groups, and
 | [`workflow/`](workflow/README.md) | Workflow seam, PTC process engine, and model-facing `workflow`/`ralph` tools |
 | [`webhook/`](webhook/README.md) | Verified external events, trusted rules, and fire-and-forget Workspace Sessions |
 | [`web/`](web/README.md) | Web capability family: seam, search/fetch providers, model-facing web tools |
-| [`document/`](document/README.md) | Shared Host Office-to-PDF conversion |
 | [`attachment/`](attachment/README.md) | Durable attachment identity, validation, local content-addressed storage |
 | [`spill/`](spill/README.md) | Spill capability family: storage seam, local impl, tool-result spill policy |
 | [`todo/`](todo/README.md) | The model-facing `todo_write` tool |
@@ -73,12 +68,10 @@ Every package lives in exactly one group; new packages join existing groups, and
 | [`credentials/`](credentials/README.md) | Credential-reference and credential-record seam + env-over-`.env` provider + authorization flows that ask a human |
 | [`storage/`](storage/README.md) | Non-session storage hub + backends + domain form |
 | [`workspace/`](workspace/README.md) | Workspace entity |
-| [`sdk/`](sdk/README.md) | Out-of-process SDK: JSON-RPC protocol and TypeScript client/server |
-| [`acp/`](acp/README.md) | Automation-only Agent Client Protocol server |
 | [`interaction/`](interaction/README.md) | Human-collaboration plane: approval/interaction seams, permission preset, commands, ask-user tool |
 | [`boot/`](boot/README.md) | Shared app-bin boot glue |
-| [`host/`](host/README.md) | Web-GUI host half: API gateway + HTTP route server |
-| [`client/`](client/README.md) | Web-GUI browser half: shell, wire, object services, slots, `ui-*` plugins |
+| [`host/`](host/README.md) | HTTP web server and read-only plugin inventory |
+| [`client/`](client/README.md) | Shared Client-to-Host Connection |
 | [`test-support/`](test-support/README.md) | Test infrastructure (testkits, replay, Loader smokes) |
 | [`runtime-diagnostics/`](runtime-diagnostics/README.md) | Runtime diagnostics: package-owned invariant checks and reports |
 | [`util/`](util/README.md) | Low-level zero-dependency utilities shared across groups (`Branded<B>`, home/path helpers, timeout, retention) |
@@ -95,7 +88,7 @@ Most groups are product — stable API. The exceptions: `experimental/` publishe
 <a id="dependencies"></a>
 ## Dependencies
 
-The dependency graph is generated: [docs/module-graph.md](../docs/module-graph.md) (`pnpm run gen-module-graph`, freshness-gated in CI).
+The dependency graph is generated: [docs/module-graph.md](../docs/module-graph.md) (`bun run gen-module-graph`; `bun run verify-module-graph` checks freshness).
 
 **Extension plugins depend on Service Definitions, never concrete providers.** `dsh-agent-loop` is swappable; UI, hook, and tool plugins use `dsh-agent`. Composition bundles may depend on spine plugins. Capabilities separate Service Definition / Service Provider / Consumer roles when they evolve independently; see [capability seams](../.agents/notes/implemented/architecture/2026-06-13-capability-seams.md).
 

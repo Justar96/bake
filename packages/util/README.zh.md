@@ -38,7 +38,6 @@ kind: "package-group"
 | [`atomic-write/`](atomic-write/README.zh.md) | 原子文件替换与跨进程写锁 |
 | [`lazy-require/`](lazy-require/README.zh.md) | 在首次使用时按调用方位置加载兼容 CommonJS 的 Host 依赖 |
 | [`native-command/`](native-command/README.zh.md) | 直接运行宿主原生命令，绝不拼 shell 字符串 |
-| [`workspace-path/`](workspace-path/README.zh.md) | 提供浏览器安全的 Workspace 路径与显示辅助函数 |
 | [`output-retention/`](output-retention/README.zh.md) | 限制面向模型的输出并报告精确的省略元数据 |
 | [`time/`](time/README.zh.md) | 校验并规范化调用方所报的 IANA 时区 |
 | [`timeout/`](timeout/README.zh.md) | 截止时间运算、信号融合与超时和取消分类 |

@@ -43,8 +43,6 @@ The group splits into four families: durable storage (persistence seam, backends
 |---|---|---|
 | [`session-projection/`](session-projection/README.md) | Defines and drives projection units that fold committed events into whole current values | `ctx.sessionProjections` |
 | [`session-projection-cache/`](session-projection-cache/README.md) | Persists projection checkpoints so cold reads skip full log loads | `ctx.sessionProjectionCache` |
-| [`session-stats/`](session-stats/README.md) | Serves whole-log conversation counts and wall times through the `sessionStats` unit | registers on `ctx.sessionProjections` |
-| [`session-turn-outline/`](session-turn-outline/README.md) | Serves the whole-log turn outline (turn, `turn/start` seq, prompt preview) through the `turnOutline` unit | registers on `ctx.sessionProjections` |
 
 ### Titles
 
@@ -53,7 +51,6 @@ The group splits into four families: durable storage (persistence seam, backends
 | [`session-title/`](session-title/README.md) | Log-backed session titles with a deterministic fallback and one optional provider | `ctx.sessionTitle` |
 | [`session-title-llm/`](session-title-llm/README.md) | Shared model-backed title-generation policy for the provider packages | library — no ctx key |
 | [`session-title-first-prompt-llm/`](session-title-first-prompt-llm/README.md) | Titles a session from its first eligible human message | registers on `ctx.sessionTitle` |
-| [`session-title-all-prompts-llm/`](session-title-all-prompts-llm/README.md) | Titles a session from all eligible human messages | registers on `ctx.sessionTitle` |
 
 ### Telemetry
 

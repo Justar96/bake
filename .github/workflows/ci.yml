@@ -40,6 +40,10 @@ jobs:
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: bun run verify
       - run: bun run lint
+      # The plugin manager installs external profile plugins with pnpm, separate
+      # from Bun's workspace, and one regression test runs a real pnpm install.
+      - name: Install pnpm for the plugin manager
+        run: npm install --global pnpm@11
       - name: Runtime profile regression tests
         run: bun run test:runtime apps/cli/tests/args.spec.ts packages/boot/app-boot/tests/profile.spec.ts packages/boot/app-boot/tests/profile-sanitize.spec.ts packages/boot/plugin-manager/tests/manager.spec.ts
       - uses: actions/upload-artifact@v4

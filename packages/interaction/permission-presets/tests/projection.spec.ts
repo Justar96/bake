@@ -144,6 +144,9 @@ describe('/permission command', () => {
     const { ctx, session } = await harness()
     await mountAuto(ctx)
     const { agent } = await agentFor(ctx, session)
+    expect(ctx.commands.list(agent).find(command => command.name === 'permission')?.input?.choices).toBe(true)
+    expect(await ctx.commands.choices(agent, 'permission', 'a', new AbortController().signal))
+      .toEqual(['workspace-write', 'danger-full-access', 'auto'])
     const listed = await ctx.commands.execute(agent, '/permission', [], new AbortController().signal)
     expect(listed?.result).toEqual({
       kind: 'success',
@@ -173,6 +176,7 @@ describe('/permission command', () => {
   it('reports the current preset and the table on bare invocation', async () => {
     const { ctx, session } = await harness()
     const { agent } = await agentFor(ctx, session)
+    expect(ctx.commands.find(agent, 'permission')?.input?.hint).toBe('[preset]')
     const execution = await ctx.commands.execute(agent, '/permission', [], new AbortController().signal)
     expect(execution?.result).toEqual({
       kind: 'success',
@@ -187,12 +191,9 @@ describe('/permission command', () => {
     const before = session.snapshotEvents().filter(event =>
       event.type !== 'command/run' && event.type !== 'command/done')
     const execution = await ctx.commands.execute(agent, '/permission yolo', [], new AbortController().signal)
-    // The error text carries the same no-self-labelling rule as the success
-    // texts: `permission · unknown preset "yolo" (…)`, not `unknown permission
-    // preset`, which the row's own title already says.
     expect(execution?.result).toEqual({
       kind: 'error',
-      text: 'unknown preset "yolo" (available: workspace-write, danger-full-access)',
+      text: 'Usage: /permission [preset]\nUnknown preset "yolo" (available: workspace-write, danger-full-access)',
     })
     expect(session.snapshotEvents().filter(event =>
       event.type !== 'command/run' && event.type !== 'command/done')).toEqual(before)

@@ -328,26 +328,6 @@
       "source": "packages/schedule/schedule/src/types.ts"
     },
     {
-      "doc": "docs/subsystems/agent-team.md",
-      "symbol": "TeamMemberSnapshot",
-      "source": "packages/experimental/agent-team/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/agent-team.md",
-      "symbol": "TeamMessageSnapshot",
-      "source": "packages/experimental/agent-team/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/agent-team.md",
-      "symbol": "TeamMessageSource",
-      "source": "packages/experimental/agent-team/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/agent-team.md",
-      "symbol": "TeamTaskSnapshot",
-      "source": "packages/experimental/agent-team/src/types.ts"
-    },
-    {
       "doc": "docs/subsystems/commands.md",
       "symbol": "CommandInputDescriptor",
       "source": "packages/interaction/commands/src/types.ts"
@@ -1507,56 +1487,6 @@
       "source": "packages/workflow/workflow/src/runtime-types.ts"
     },
     {
-      "doc": "docs/subsystems/lsp.md",
-      "symbol": "LspOperation",
-      "source": "packages/lsp/lsp/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/lsp.md",
-      "symbol": "LspPosition",
-      "source": "packages/lsp/lsp/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/lsp.md",
-      "symbol": "LspRange",
-      "source": "packages/lsp/lsp/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/lsp.md",
-      "symbol": "LspQueryRequest",
-      "source": "packages/lsp/lsp/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/lsp.md",
-      "symbol": "LspProviderQuery",
-      "source": "packages/lsp/lsp/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/lsp.md",
-      "symbol": "LspLocation",
-      "source": "packages/lsp/lsp/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/lsp.md",
-      "symbol": "LspHover",
-      "source": "packages/lsp/lsp/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/lsp.md",
-      "symbol": "LspQueryResult",
-      "source": "packages/lsp/lsp/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/lsp.md",
-      "symbol": "LspProvider",
-      "source": "packages/lsp/lsp/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/lsp.md",
-      "symbol": "LspService",
-      "source": "packages/lsp/lsp/src/types.ts"
-    },
-    {
       "doc": "docs/subsystems/persistence.md",
       "symbol": "SessionPersistenceRevision",
       "source": "packages/session/session-persistence/src/revision.ts"
@@ -1820,31 +1750,6 @@
       "doc": "docs/subsystems/workspace.md",
       "symbol": "Workspace",
       "source": "packages/workspace/workspace/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/client-modules.md",
-      "symbol": "WebBootEntry",
-      "source": "packages/client/modules/src/client/manifest.ts"
-    },
-    {
-      "doc": "docs/subsystems/client-modules.md",
-      "symbol": "WebBootBatchPhase",
-      "source": "packages/client/modules/src/client/manifest.ts"
-    },
-    {
-      "doc": "docs/subsystems/client-modules.md",
-      "symbol": "WebBootBatch",
-      "source": "packages/client/modules/src/client/manifest.ts"
-    },
-    {
-      "doc": "docs/subsystems/client-modules.md",
-      "symbol": "WebBootGraph",
-      "source": "packages/client/modules/src/client/manifest.ts"
-    },
-    {
-      "doc": "docs/subsystems/client-modules.md",
-      "symbol": "ClientArtifactBaseline",
-      "source": "packages/client/modules/src/index.ts"
     },
     {
       "doc": "docs/subsystems/session-telemetry.md",
@@ -2117,11 +2022,6 @@
       "source": "packages/feedback/command-feedback/src/types.ts"
     },
     {
-      "doc": "packages/client/ui-conversation/README.md",
-      "symbol": "ComposerChainProps",
-      "source": "packages/client/ui-conversation/src/client/contract/slots.ts"
-    },
-    {
       "doc": "docs/subsystems/session.md",
       "symbol": "SessionMessageProjection",
       "source": "packages/core/session/src/surface.ts"
@@ -2142,17 +2042,6 @@
       "source": "packages/ptc-runtime/ptc-runtime/src/types.ts"
     },
     {
-      "doc": "docs/subsystems/ssh.md",
-      "symbol": "Config",
-      "source": "packages/ssh/ssh/src/index.ts"
-    },
-    {
-      "doc": "docs/subsystems/ssh.md",
-      "symbol": "SshConnection",
-      "source": "packages/ssh/ssh/src/index.ts",
-      "projection": "public-api"
-    },
-    {
       "doc": "docs/subsystems/mcp.md",
       "symbol": "McpResourceRequest",
       "source": "packages/mcp/mcp-resources/src/index.ts"
@@ -2166,31 +2055,6 @@
       "doc": "docs/subsystems/deliverables.md",
       "symbol": "PresentedFile",
       "source": "packages/deliverables/tool-present/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/deliverables.md",
-      "symbol": "WorkspaceChangedFile",
-      "source": "packages/deliverables/workspace-changes/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/deliverables.md",
-      "symbol": "WorkspaceChangesSummary",
-      "source": "packages/deliverables/workspace-changes/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/deliverables.md",
-      "symbol": "WorkspaceDiffHunk",
-      "source": "packages/deliverables/workspace-changes/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/deliverables.md",
-      "symbol": "WorkspaceFileDiff",
-      "source": "packages/deliverables/workspace-changes/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/deliverables.md",
-      "symbol": "WorkspaceChanges",
-      "source": "packages/deliverables/workspace-changes/src/types.ts"
     }
   ]
 }

@@ -1084,14 +1084,14 @@ scenario('arrow-wave', 'the single-line processing wave loops in place and yield
           tty.send('Show the processing wave.\r')
           await tty.wait('all six arrow frames at the same position', async () => {
             const rows = await capture()
-            const header = rows.findIndex(line => /^ {2}[\u2800-\u283f]{3} \S+…/.test(line))
+            const header = rows.findIndex(line => /^[\u2800-\u283f]{3} \S+…/.test(line))
             if (header < 1) return false
             // PTY reads may end mid-frame, before its final scroll anchors the controls.
             // Header, upper rule, input, base rule, then the status line.
             if (header !== 34 || !rows[35]!.startsWith('\u2500') || !rows[36]!.startsWith('> ')
               || !rows[37]!.startsWith('\u2500') || !rows[38]!.includes(SCREEN.status)) return false
             tty.check('there is no dot zone above the processing line', !rows.some(line => /^[\u2800-\u283f]{3}$/.test(line)))
-            frames.add(rows[header]!.slice(2, 5))
+            frames.add(rows[header]!.slice(0, 3))
             return frames.size === 6
           })
           tty.check('the wave stays in the header directly above the input', frames.size === 6)
@@ -1209,7 +1209,7 @@ scenario('usage', 'the built TUI reads DeepSeek remaining credit through /usage 
     try {
       await run.terminal('usage', [], async tty => {
         tty.send('/help\r', 'discover composed commands')
-        await tty.expect('/usage — Show remaining DeepSeek API credit')
+        await tty.search(/\/usage\b.* {2}Show remaining DeepSeek API credit/u)
         const start = tty.mark()
         tty.send('/usage\r', 'read DeepSeek account balance')
         await tty.expect('USD: 7.50 remaining (2.00 granted, 5.50 topped up)', start)
@@ -1303,7 +1303,7 @@ scenario('agents', 'the built TUI exposes the Harness subagent catalog through /
     const before = await run.logs()
     await run.terminal('agents', [], async tty => {
       tty.send('/help\r', 'discover the subagent command')
-      await tty.expect('/agents — List delegated agents')
+      await tty.search(/\/agents\b.* {2}List delegated agents/u)
       const start = tty.mark()
       tty.send('/agents\r', 'list this session’s children')
       await tty.expect('No subagents in this session', start)
@@ -1363,8 +1363,8 @@ scenario('goal-compact', 'the built TUI exposes goal and compact commands and sh
     try {
       await run.terminal('goal-compact', [], async tty => {
         tty.send('/help\r', 'list composed commands')
-        await tty.expect('/goal — Set or view the goal for a long-running task')
-        await tty.expect('/compact — Compact older conversation history')
+        await tty.search(/\/goal\b.* {2}Set or view the goal for a long-running task/u)
+        await tty.search(/\/compact\b.* {2}Compact older conversation history/u)
         tty.send('/goal\r', 'inspect the current goal')
         await tty.expect('No goal is currently set.')
         for (const [index, character] of [...'/compact'].entries()) {
@@ -1575,6 +1575,7 @@ scenario('navigate', 'session picker cancellation, a new session, and switching 
     run.env.FORCE_COLOR = '3'
     let text: string
     try { text = await run.terminal('navigate', ['--resume', identity], async tty => {
+      await tty.follows(SCREEN.idle, SCREEN.toolResult)
       const hints = tty.mark()
       tty.send('/', 'open the frequent slash commands')
       const menu = await tty.expect('/model', '/resume', '/new', '/clear', hints)
@@ -1582,13 +1583,13 @@ scenario('navigate', 'session picker cancellation, a new session, and switching 
       tty.check('frequent commands lead the slash menu', ['/model', '/resume', '/new', '/clear']
         .map(name => shown.indexOf(name)).every((position, index, positions) => position >= 0
           && (index === 0 || position > positions[index - 1]!)))
-      const closed = tty.mark()
-      tty.send('\x1b', 'close slash hints')
-      await tty.expect(`> /${SCREEN.caret}`, closed)
-      tty.send('\x7f', 'remove the slash draft')
-      await tty.expect(`> ${SCREEN.caret}`)
-      tty.send('/help\r', 'list session commands')
-      await tty.expect('/resume — Browse sessions or start a new one')
+      const composed = tty.mark()
+      tty.send('help', 'complete /help in the slash draft')
+      await tty.expect(`> /help${SCREEN.caret}`, composed)
+      const help = tty.mark()
+      tty.send('\r', 'list session commands')
+      await tty.search(/\/resume\b.* {2}Browse sessions or start a new one/u, help)
+      await tty.follows(SCREEN.idle, 'Command: /help')
       let start = tty.mark()
       tty.send('/sessions\r')
       await tty.expect('Choose session', '● ', 'Current', '+ New session', start)
@@ -1625,11 +1626,14 @@ scenario('navigate', 'session picker cancellation, a new session, and switching 
       await tty.expect(`> ${identity}${SCREEN.caret}`, start)
       tty.send('\r', 'Enter to switch back')
       await tty.expect(SCREEN.toolResult, `${SCREEN.status}tui-picked-model  Access workspace-write  Think high`, start)
-      await tty.follows(SCREEN.idle, SCREEN.toolResult)
+      await tty.wait('the resumed session to accept input', text => {
+        const shown = text.slice(start)
+        return shown.lastIndexOf(SCREEN.idle) > Math.max(shown.lastIndexOf(SCREEN.toolResult), shown.lastIndexOf(dictionaries.en.sessionsBusy))
+      })
 
       start = tty.mark()
-      tty.send('\x1b[A', 'Up, recalling the last command')
-      await tty.expect(`> /sessions${SCREEN.caret}`, start)
+      tty.send('\x1b[A', 'Up, recalling the last saved prompt')
+      await tty.expect(`> ${run.prompt}${SCREEN.caret}`, start)
       tty.send('\x1b[B', 'Down, back to an empty composer')
       await tty.expect(`> ${SCREEN.caret}`, start)
 

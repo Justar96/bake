@@ -93,8 +93,6 @@ The runner is built on two separations. **Registry and sandbox are one service.*
 Read these pages when the package-level contract is not enough. They move from the runner to the tools that call it, the browser half that answers it, and the generated surface.
 
 - [Tool package](../tool-cordis/README.md) — the read-only tools that use its inspection registry.
-- [Client runner](../cordis-client-runner/README.md) — the browser half that answers run requests and loads browser-half code.
-- [UI package](../ui-cordis/README.md) — the panel users approve and operate runs with.
 - [Generated configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-cordis-host-runner) — every accepted config field.
 - [Extensions subsystem](../../../docs/subsystems/extensions.md) — the generated `ctx.cordisInspect` and `ctx.dynamicCordisRunner` API and `cordis/*` events.
 - [Self-referential Cordis toolset Agent Note](../../../.agents/notes/implemented/feature/2026-07-08-self-referential-cordis-toolset.md) — sandbox semantics, lifecycle, and composition rationale.

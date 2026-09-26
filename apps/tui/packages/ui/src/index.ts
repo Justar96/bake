@@ -25,4 +25,5 @@ export type { CardEmphasis, CardLine, NoticeTone, Row, ToolCallRow, ToolOutcome 
 export { appendTranscript, emptyTranscript, transcriptRows } from './transcript.ts'
 export type { Transcript } from './transcript.ts'
 export type { Completion, CompletionCatalog, FileCatalog } from './completion.ts'
+export { commandUsage, requiresInput, suggestCommand } from './completion.ts'
 export type { CodeToken, Highlight } from './present.ts'
