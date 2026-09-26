@@ -4,6 +4,8 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-09-26
+
 - `/update` installs the newest release from inside the terminal, with download progress; the status line then asks for a restart.
 - A new release is noticed within the hour, a failed check is retried after ten minutes, and an open terminal keeps checking.
 - `bake update` shows download progress.
