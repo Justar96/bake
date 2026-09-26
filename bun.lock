@@ -48,6 +48,7 @@
         "@deepseek-ai/dsh-command-goal": "workspace:^",
         "@deepseek-ai/dsh-compaction-basic": "workspace:^",
         "@deepseek-ai/dsh-compaction-tool-result-pruner": "workspace:^",
+        "@deepseek-ai/dsh-desktop": "workspace:^",
         "@deepseek-ai/dsh-fs-local": "workspace:^",
         "@deepseek-ai/dsh-goal": "workspace:^",
         "@deepseek-ai/dsh-goal-round-driver": "workspace:^",
@@ -597,6 +598,40 @@
       },
       "peerDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
+      },
+    },
+    "packages/bundle/desktop": {
+      "name": "@deepseek-ai/dsh-desktop",
+      "version": "0.1.6-alpha.2",
+      "dependencies": {
+        "@deepseek-ai/dsh-brand": "workspace:^",
+        "@deepseek-ai/dsh-cmdline": "workspace:^",
+      },
+      "devDependencies": {
+        "@deepseek-ai/cordis": "workspace:^",
+        "@deepseek-ai/cordis-plugin-loader": "workspace:^",
+        "@deepseek-ai/dsh-agent": "workspace:^",
+        "@deepseek-ai/dsh-agent-default-model": "workspace:^",
+        "@deepseek-ai/dsh-fs": "workspace:^",
+        "@deepseek-ai/dsh-llm": "workspace:^",
+        "@deepseek-ai/dsh-llm-mock-server": "workspace:^",
+        "@deepseek-ai/dsh-loader-smoke": "workspace:^",
+        "@deepseek-ai/dsh-permission-presets": "workspace:^",
+        "@deepseek-ai/dsh-session": "workspace:^",
+        "@deepseek-ai/dsh-tools": "workspace:^",
+        "@deepseek-ai/dsh-user-approval": "workspace:^",
+      },
+      "peerDependencies": {
+        "@deepseek-ai/cordis": "workspace:^",
+        "@deepseek-ai/cordis-plugin-loader": "workspace:^",
+        "@deepseek-ai/dsh-agent": "workspace:^",
+        "@deepseek-ai/dsh-agent-default-model": "workspace:^",
+        "@deepseek-ai/dsh-fs": "workspace:^",
+        "@deepseek-ai/dsh-llm": "workspace:^",
+        "@deepseek-ai/dsh-permission-presets": "workspace:^",
+        "@deepseek-ai/dsh-session": "workspace:^",
+        "@deepseek-ai/dsh-tools": "workspace:^",
+        "@deepseek-ai/dsh-user-approval": "workspace:^",
       },
     },
     "packages/bundle/headless": {
@@ -4770,6 +4805,8 @@
     "@deepseek-ai/dsh-deepseek-llm-api-extensions": ["@deepseek-ai/dsh-deepseek-llm-api-extensions@workspace:packages/llm/deepseek-llm-api-extensions"],
 
     "@deepseek-ai/dsh-deque": ["@deepseek-ai/dsh-deque@workspace:packages/util/deque"],
+
+    "@deepseek-ai/dsh-desktop": ["@deepseek-ai/dsh-desktop@workspace:packages/bundle/desktop"],
 
     "@deepseek-ai/dsh-experimental-ptc-runtime-python": ["@deepseek-ai/dsh-experimental-ptc-runtime-python@workspace:packages/experimental/ptc-runtime-python"],
 
