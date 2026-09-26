@@ -295,9 +295,10 @@ export const MARKER = {
   /** Something held that has not started. A pending task, or a child at rest. */
   waiting: '\u25cb',
   /**
-   * Opens an action. It pulses while the action runs, turns green when it
-   * succeeds, and turns red when it fails. The shape is the same in every
-   * state, so `NO_COLOR` still shows each action as one block.
+   * Opens an action whose tool has no icon of its own in `ICON`. It pulses
+   * while the action runs, turns green when it succeeds, and turns red when
+   * it fails. The shape is the same in every state, so `NO_COLOR` still shows
+   * each action as one block.
    */
   action: '\u25cf',
   /** An unmarked row. Assistant prose, and unselected list rows. */

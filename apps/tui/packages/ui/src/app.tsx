@@ -13,10 +13,10 @@ import { InteractionView, type Interaction, type InteractionAnswer } from './int
 import { budgetFor, selectionWindow, type Budget, type FrameStyle, type WindowSize } from './layout.ts'
 import { compactModel, compactPath, present, type Highlight, type ResultBound } from './present.ts'
 import { cacheTone, permissionTone, PALETTE, type PaletteColor } from './palette.ts'
-import type { SubagentEntry } from './subagents.tsx'
+import { subagentLine, subagentSheet, subagentTab, type SubagentEntry } from './subagents.tsx'
 import { goalSheet, goalState, type GoalEntry } from './goal.ts'
-import { Sheet, sheetPage, sheetRows, type SheetLine } from './sheet.tsx'
-import { Tasks, taskSheet, taskSheetTitle, tasksOpen, type TaskEntry } from './tasks.tsx'
+import { Sheet, sheetPage, sheetRows, type SheetLine, type SheetTab } from './sheet.tsx'
+import { Tasks, taskSheet, taskTab, tasksOpen, type TaskEntry } from './tasks.tsx'
 import { Beat } from './beat.tsx'
 import { Scrollback, type Opening } from './scrollback.tsx'
 import { Chrome, Completion, Line, LiveRegion, Notice, Panel, Thinking, THINKING_GAP, wrappedRows, type ActivityState } from './line.tsx'
@@ -75,7 +75,8 @@ export interface AppProps {
     readonly thinkingLevel?: string
   } | undefined
   readonly inspectionParent?: string
-  readonly onSubagents?: () => void
+  /** Open a child's session read-only, as `/agents <id>` does. */
+  readonly onInspectSubagent?: (id: string) => void
   /**
    * A newer Bake release for this install. `installed` means `current` already
    * names it, so a restart runs it; otherwise `/update` installs it. Named in
@@ -228,7 +229,10 @@ export function App(props: AppProps): React.ReactElement {
 type Focus = 'tasks' | 'goal' | 'subagents'
 
 /** What an open sheet shows in full. */
-type SheetKind = 'goal' | 'tasks'
+type SheetKind = 'tasks' | 'agents' | 'goal'
+
+/** The order the cycle key visits the sheets in, skipping any with nothing to show. */
+const SHEETS: readonly SheetKind[] = ['tasks', 'agents', 'goal']
 
 function SessionView(props: AppProps): React.ReactElement {
   const composer = useComposer(props.onSubmit, () => inputHistory(props.committed, props.pending), (props.attachments?.length ?? 0) > 0)
@@ -250,18 +254,54 @@ function SessionView(props: AppProps): React.ReactElement {
     setSheet(next)
     setSheetScroll(0)
   }
+  // The child under the agents sheet's pointer. A ref, as focus is.
+  const [agentIndex, setAgentIndex] = useState(0)
+  const agentRef = useRef(0)
+  const pointAt = (index: number): void => {
+    agentRef.current = index
+    setAgentIndex(index)
+  }
   const tasksShown = tasksOpen(props.todos)
   const hasTasks = (props.todos?.length ?? 0) > 0
   const hasSubagents = (props.subagents?.length ?? 0) > 0
   const available = (target: Focus): boolean =>
     target === 'goal' ? props.goal !== undefined : target === 'tasks' ? tasksShown : hasSubagents
+  const showable = (kind: SheetKind): boolean =>
+    kind === 'goal' ? props.goal !== undefined : kind === 'tasks' ? hasTasks : hasSubagents
+  const showing = SHEETS.filter(showable)
+  /**
+   * The sheet `step` places away from the open one, among those with something
+   * to show. From no sheet, forward is the first. With `closing`, a step past
+   * either end closes instead of wrapping, so one key opens, cycles, and closes.
+   */
+  const stepSheet = (step: 1 | -1, closing: boolean): SheetKind | undefined => {
+    const shown = SHEETS.filter(showable)
+    if (shown.length === 0) return undefined
+    const at = sheetRef.current === undefined ? -1 : shown.indexOf(sheetRef.current)
+    if (at < 0) return step === 1 ? shown[0] : shown.at(-1)
+    const next = at + step
+    if (next >= 0 && next < shown.length) return shown[next]
+    return closing ? undefined : shown[(next + shown.length) % shown.length]
+  }
+  const showSheet = (next: SheetKind | undefined): void => {
+    focusOn(undefined)
+    if (next === 'agents') pointAt(Math.max(0, props.subagents?.findIndex(entry => entry.inspectable) ?? 0))
+    openSheet(next)
+  }
+  /** A sheet's own key opens it, or closes it when it is the one open. */
+  const toggleSheet = (kind: SheetKind): void => { showSheet(sheetRef.current === kind ? undefined : kind) }
   const inert = interaction !== undefined || props.inputBlocked === true || props.inspection !== undefined
   useEffect(() => {
     if (focusRef.current !== undefined && (inert || !available(focusRef.current))) focusOn(undefined)
   }, [inert, props.goal === undefined, tasksShown, hasSubagents])
   useEffect(() => {
-    if (sheetRef.current !== undefined && (inert || (sheetRef.current === 'goal' ? props.goal === undefined : !hasTasks))) openSheet(undefined)
-  }, [inert, props.goal === undefined, hasTasks])
+    if (sheetRef.current !== undefined && (inert || !showable(sheetRef.current))) openSheet(undefined)
+  }, [inert, props.goal === undefined, hasTasks, hasSubagents])
+  // Children come and go while the list is open; the pointer stays on one.
+  useEffect(() => {
+    const last = Math.max(0, (props.subagents?.length ?? 0) - 1)
+    if (agentRef.current > last) pointAt(last)
+  }, [props.subagents?.length])
   const [menu, setMenu] = useState({ draft: '', cursor: 0, selected: '', dismissed: false })
   const currentMenu = useRef(menu)
   const updateMenu = (selected: string, dismissed: boolean): void => {
@@ -288,7 +328,22 @@ function SessionView(props: AppProps): React.ReactElement {
     if (props.inspection !== undefined) return
     if (key.ctrl && text === 'c') { props.onInterrupt(); return }
     if (sheetRef.current !== undefined) {
-      if (key.escape || key.return) { openSheet(undefined); return }
+      if (key.escape) { openSheet(undefined); return }
+      if (key.ctrl && text === 't') { showSheet(stepSheet(1, true)); return }
+      if (key.tab) { showSheet(stepSheet(key.shift ? -1 : 1, false)); return }
+      if (key.ctrl && text === 'o' && props.goal !== undefined) { toggleSheet('goal'); return }
+      if (key.ctrl && text === 'g' && hasSubagents) { toggleSheet('agents'); return }
+      if (sheetRef.current === 'agents') {
+        const children = props.subagents ?? []
+        if (key.upArrow || (key.ctrl && text === 'p')) pointAt(Math.max(0, agentRef.current - 1))
+        if (key.downArrow || (key.ctrl && text === 'n')) pointAt(Math.min(children.length - 1, agentRef.current + 1))
+        if (key.home) pointAt(0)
+        if (key.end) pointAt(Math.max(0, children.length - 1))
+        const child = children[agentRef.current]
+        if (key.return && child?.inspectable === true) { openSheet(undefined); props.onInspectSubagent?.(child.id) }
+        return
+      }
+      if (key.return) { openSheet(undefined); return }
       if (key.upArrow || (key.ctrl && text === 'p')) setSheetScroll(current => Math.max(0, Math.min(current, sheetMaxScroll) - 1))
       if (key.downArrow || (key.ctrl && text === 'n')) setSheetScroll(current => Math.min(sheetMaxScroll, current + 1))
       if (key.pageUp) setSheetScroll(current => Math.max(0, Math.min(current, sheetMaxScroll) - sheetRowsShown))
@@ -306,22 +361,22 @@ function SessionView(props: AppProps): React.ReactElement {
       props.onCancel(); return
     }
     if (interaction !== undefined || props.inputBlocked === true || props.inspection !== undefined || composer.blocked || key.meta) return
-    if (key.ctrl && text === 'o' && props.goal !== undefined) { focusOn(undefined); openSheet('goal'); return }
-    if (key.ctrl && text === 't' && hasTasks) { focusOn(undefined); openSheet('tasks'); return }
-    if (key.ctrl && text === 'g' && hasSubagents) { focusOn(undefined); props.onSubagents?.(); return }
+    if (key.ctrl && text === 'o' && props.goal !== undefined) { toggleSheet('goal'); return }
+    if (key.ctrl && text === 't' && showing.length > 0) { showSheet(stepSheet(1, true)); return }
+    if (key.ctrl && text === 'g' && hasSubagents) { toggleSheet('agents'); return }
     const focused = focusRef.current
     if (focused !== undefined && available(focused)) {
       if (focused === 'subagents') {
         if (key.upArrow || key.leftArrow) { focusOn(undefined); return }
         if (key.downArrow || key.rightArrow) return
-        if (key.return) { focusOn(undefined); props.onSubagents?.(); return }
+        if (key.return) { showSheet('agents'); return }
       } else {
         // Above the composer the task row sits over the goal's header.
         if (key.upArrow) { if (focused === 'goal' && tasksShown) focusOn('tasks'); return }
         if (key.downArrow) { focusOn(focused === 'tasks' && props.goal !== undefined ? 'goal' : undefined); return }
         if (key.leftArrow) { focusOn(undefined); return }
         if (key.rightArrow) return
-        if (key.return) { focusOn(undefined); openSheet(focused); return }
+        if (key.return) { showSheet(focused); return }
       }
       // Any other key belongs to the composer again.
       focusOn(undefined)
@@ -472,12 +527,28 @@ function SessionView(props: AppProps): React.ReactElement {
   const interactionLimit = claim(interaction === undefined ? 0 : menuLimit)
   // An open sheet takes every row the interaction leaves. Below five it
   // replaces the whole region, composer included, so it can still be read.
-  const sheetView: { readonly title: string, readonly color: PaletteColor, readonly lines: readonly SheetLine[] } | undefined =
-    sheet === 'goal' && props.goal !== undefined
-      ? { title: copy.goalTitle, color: goalState(props.goal, copy)!.color, lines: goalSheet(props.goal, copy) }
-      : sheet === 'tasks' && props.todos !== undefined && hasTasks
-        ? { title: taskSheetTitle(props.todos, copy), color: PALETTE.asking, lines: taskSheet(props.todos) }
-        : undefined
+  const sheetColor = (kind: SheetKind): PaletteColor =>
+    kind === 'goal' ? goalState(props.goal, copy)?.color ?? PALETTE.asking
+      : kind === 'agents' && props.subagents?.some(entry => entry.state === 'working') === true ? PALETTE.running : PALETTE.asking
+  const tabs: readonly SheetTab[] = showing.map(kind => ({
+    label: kind === 'goal' ? copy.goalTitle : kind === 'tasks' ? taskTab(props.todos ?? [], copy) : subagentTab(props.subagents ?? [], copy),
+    color: sheetColor(kind), current: kind === sheet,
+  }))
+  // The footer names what the keys do here. Cycling is named only when there is somewhere to go.
+  const sheetKeys = (kind: SheetKind): string => [
+    kind === 'agents' ? copy.sheetSelect : copy.sheetScroll,
+    ...kind === 'agents' ? [copy.subagentsOpen] : [],
+    ...showing.length > 1 ? [copy.sheetCycle] : [],
+    copy.sheetClose,
+  ].join(' \u00b7 ')
+  const sheetView: { readonly color: PaletteColor, readonly lines: readonly SheetLine[], readonly keys: string, readonly follow?: number } | undefined =
+    sheet === undefined || !showable(sheet) ? undefined
+      : {
+        color: sheetColor(sheet), keys: sheetKeys(sheet),
+        ...sheet === 'goal' ? { lines: goalSheet(props.goal!, copy) }
+          : sheet === 'tasks' ? { lines: taskSheet(props.todos!, copy) }
+          : { lines: subagentSheet(props.subagents!, agentIndex, copy), follow: subagentLine(agentIndex) },
+      }
   const sheetLimit = claim(sheetView === undefined ? 0 : unclaimed)
   const sheetStandalone = sheetView !== undefined && sheetLimit < 5
   const sheetViewLimit = sheetStandalone ? budget.dynamic : sheetLimit
@@ -535,7 +606,7 @@ function SessionView(props: AppProps): React.ReactElement {
       : summary === undefined ? undefined : { kind: 'ended', summary }
   const goalStanding = goalState(props.goal, copy)
   const working = props.subagents?.filter(entry => entry.state === 'working').length ?? 0
-  const sheetBlock = sheetView === undefined ? null : <Sheet {...sheetView} copy={copy} columns={size.columns}
+  const sheetBlock = sheetView === undefined ? null : <Sheet {...sheetView} tabs={tabs} columns={size.columns}
     limit={sheetViewLimit} offset={sheetScroll} frame={props.frame} />
   const panels = sheetView !== undefined && !sheetStandalone ? sheetBlock : <>
     {turn.current !== undefined && interaction === undefined && <Thinking rows={thinking} limit={thinkingLimit} />}

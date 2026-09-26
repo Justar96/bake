@@ -5,7 +5,7 @@ import stringWidth from 'string-width'
 import type { TuiCopy } from './copy.ts'
 import { MARKER } from './layout.ts'
 import { PALETTE } from './palette.ts'
-import type { SheetLine } from './sheet.tsx'
+import { sheetBar, type SheetLine } from './sheet.tsx'
 
 export interface TaskEntry {
   readonly text: string
@@ -89,22 +89,37 @@ export function Tasks({ todos, copy, columns, focused = false, hint }: {
   </Box>
 }
 
-/** The sheet's title: the list's name and how much of it is done. */
-export function taskSheetTitle(todos: readonly TaskEntry[], copy: TuiCopy): string {
-  return `${copy.todoTitle}  ${todos.filter(item => item.status === 'completed').length}/${todos.length} ${copy.todoDone}`
+/** The list's tab: its name and how much of it is done. */
+export function taskTab(todos: readonly TaskEntry[], copy: TuiCopy): string {
+  return `${copy.todoTitle} ${todos.filter(item => item.status === 'completed').length}/${todos.length}`
 }
 
+/** Cells of the sheet's progress bar, wider than the row's since the sheet has the room. */
+const SHEET_BAR = 24
+
 /**
- * Every task in the agent's order, wrapped rather than truncated: finished
- * ones ticked and struck through, the current one bold, the rest open boxes.
+ * The complete checklist. A progress bar and the counts by state, then every
+ * task in the agent's order, numbered and wrapped rather than truncated:
+ * finished ones ticked and struck through, the current one bold, the rest
+ * open boxes.
  */
-export function taskSheet(todos: readonly TaskEntry[]): readonly SheetLine[] {
-  return todos.map(item => {
-    const color = colorOf(item.status)
-    return {
-      text: item.text, glyph: glyphOf(item.status),
-      ...color === undefined ? {} : { glyphColor: color },
-      bold: item.status === 'in_progress', dim: item.status !== 'in_progress', strikethrough: item.status === 'completed',
-    }
-  })
+export function taskSheet(todos: readonly TaskEntry[], copy: TuiCopy): readonly SheetLine[] {
+  const done = todos.filter(item => item.status === 'completed').length
+  const active = todos.filter(item => item.status === 'in_progress').length
+  const left = todos.length - done - active
+  const counts = [`${done}/${todos.length} ${copy.todoDone}`,
+    ...active === 0 ? [] : [`${active} ${copy.todoActive}`], ...left === 0 ? [] : [`${left} ${copy.todoLeft}`]].join(' \u00b7 ')
+  const digits = String(todos.length).length
+  return [
+    { text: '', parts: [...sheetBar(done, todos.length, SHEET_BAR, PALETTE.asking), { text: `  ${counts}`, dim: true }] },
+    { text: '' },
+    ...todos.map((item, index): SheetLine => {
+      const color = colorOf(item.status)
+      return {
+        text: item.text, glyph: `${glyphOf(item.status)} ${String(index + 1).padStart(digits)}`,
+        ...color === undefined ? {} : { glyphColor: color },
+        bold: item.status === 'in_progress', dim: item.status !== 'in_progress', strikethrough: item.status === 'completed',
+      }
+    }),
+  ]
 }

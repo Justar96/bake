@@ -520,9 +520,9 @@ describe('terminal composer', () => {
     }] } })
     const ui = render(<App {...state} />)
     ui.stdin.write(' ')
-    await vi.waitFor(() => expect(ui.lastFrame()).toContain('[x] 1. A'))
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('[✓] 1. A'))
     ui.stdin.write('\u001b[B ')
-    await vi.waitFor(() => expect(ui.lastFrame()).toContain('[x] 2. B'))
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('[✓] 2. B'))
     ui.stdin.write('Additional context')
     await vi.waitFor(() => expect(ui.lastFrame()).toContain('Other answer: Additional context▌'))
     ui.stdin.write('\u001b[A')
@@ -553,6 +553,35 @@ describe('terminal composer', () => {
       { id: 'first', selected: [], custom: 'Custom first' },
       { id: 'second', selected: [], custom: 'Custom second' },
     ] }))
+  })
+
+  it('says why an empty Enter did nothing, reaches Other by its number, and ticks it once it has text', async () => {
+    const copy = dictionaries.en
+    const state = props({ interaction: { id: 8, kind: 'questions', questions: [
+      { id: 'first', header: 'Checks', question: 'Which checks?', multiSelect: true,
+        options: [{ label: 'Types', description: 'tsc -b' }, { label: 'Unit tests' }] },
+      { id: 'second', question: 'Anything else?', options: [] },
+    ] } })
+    const ui = render(<App {...state} />)
+    await vi.waitFor(() => expect(ui.lastFrame()).toMatch(/Answer required {2}Checks .*●○ {2}1\/2/))
+    // Descriptions line up in a column after the longest described label.
+    expect(ui.lastFrame()).toContain('[ ] 1. Types  tsc -b')
+    ui.stdin.write('\r')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain(copy.questionChooseOne))
+    expect(state.onAnswer).not.toHaveBeenCalled()
+    ui.stdin.write('3')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain(`▸ [ ] 3. ${copy.customAnswer}: ▌${copy.customAnswerHint}`))
+    expect(ui.lastFrame()).not.toContain(copy.questionChooseOne)
+    ui.stdin.write('lint')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain(`▸ [✓] 3. ${copy.customAnswer}: lint▌`))
+    expect(ui.lastFrame()).toContain(`1 ${copy.questionSelected}`)
+    ui.stdin.write('\r')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('Anything else?'))
+    // The finished step turns green and the next one is current.
+    expect(ui.lastFrame()).toMatch(/●● {2}2\/2/)
+    ui.stdin.write('\r')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain(copy.questionTypeFirst))
+    expect(state.onAnswer).not.toHaveBeenCalled()
   })
 
   it('cancels a question without submitting its Other draft', async () => {

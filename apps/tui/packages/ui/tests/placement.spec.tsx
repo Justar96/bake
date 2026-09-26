@@ -158,7 +158,7 @@ describe('composer placement', () => {
       const dump = screen.join('\n')
       const input = inputRow(screen)
       expect(screen[input - 2], dump).toMatch(new RegExp(`^${SPINNER_REST} \\S+…`))
-      expect(screen.some(line => /^● read 10/.test(line)), dump).toBe(true)
+      expect(screen.some(line => /^≡ read 10/.test(line)), dump).toBe(true)
       // Nine rows leave the live region one. The step's head, which says the
       // most. Every larger size also keeps the newest call.
       expect(screen.some(line => line.includes('Read(src/file9.ts)')), dump).toBe(rows > 9)
@@ -177,8 +177,8 @@ describe('composer placement', () => {
         const input = inputRow(screen)
         expect(screen[input - 2], dump).toMatch(new RegExp(`^${SPINNER_REST} \\S+…`))
         // The step's head stays too. The window folds detail, never the line
-        // that says what the step is doing.
-        expect(screen.some(line => /^● \S+ \d/.test(line)), dump).toBe(true)
+        // that says what the step is doing. Mixed edits and reads take the plain marker.
+        expect(screen.some(line => /^[●≡✎] \S+ \d/.test(line)), dump).toBe(true)
       }
     }
   })

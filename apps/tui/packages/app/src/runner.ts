@@ -120,7 +120,7 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
       cwd: active.agent.session.header.cwd ?? '', sessionId: active.agent.id,
       onReferenceQuery: query => active.references.search(query),
       onArgumentQuery: query => active.argumentQuery(query),
-      onSubagents: () => { navigation.submit('/agents') },
+      onInspectSubagent: id => { navigation.submit(`/agents ${id}`) },
       onCycleThinking: () => { active.cycleThinking() },
       onSubmit: text => navigation.submit(text), onCancel: () => navigation.cancel(),
       onInterrupt: interrupt, onQuitDismiss: dismissQuit, onAnswer: (id, answer) => active.interactions.answer(id, answer),
