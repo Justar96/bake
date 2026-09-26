@@ -46,6 +46,14 @@ describe('prepareRelease', () => {
       .toBe(`${HEADER}## [Unreleased]\n\n## [0.1.1] - 2026-09-25\n\n- Added bake update.\n\n## [0.1.0]\n\n- First.\n`)
   })
 
+  test('keeps an entry that quotes a dollar sign as written', () => {
+    const entry = "- A command opens with `$`, and `$&` or `$'` stay as typed."
+    const root = workspace('0.1.0', `${HEADER}## [Unreleased]\n\n${entry}\n\n## [0.1.0]\n\n- First.\n`)
+    prepareRelease(root, '0.1.1', '2026-09-25')
+    expect(readFileSync(join(root, 'CHANGELOG.md'), 'utf8'))
+      .toBe(`${HEADER}## [Unreleased]\n\n## [0.1.1] - 2026-09-25\n\n${entry}\n\n## [0.1.0]\n\n- First.\n`)
+  })
+
   test('marks where to write the section when nothing is waiting under Unreleased', () => {
     const root = workspace('0.1.0', `${HEADER}## [0.1.0]\n\n- First.\n`)
     expect(prepareRelease(root, '0.2.0', '2026-09-25').placeholder).toBe(true)
