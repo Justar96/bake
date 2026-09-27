@@ -1,6 +1,10 @@
 # The terminal bundle applied after dsh-base by the shipped tui profile.
 # Build with `bun run build` before starting the Node launcher.
 
+# Presets mount their own `tool-jobs`; the host row would notify twice.
+- id: tool-jobs
+  disabled: true
+
 - insert:
     - id: file-reference-local
       name: '@deepseek-ai/dsh-file-reference-local'

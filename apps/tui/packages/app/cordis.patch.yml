@@ -12,6 +12,14 @@
 - id: headless-startup
   disabled: true
 
+# Every terminal session is composed from an agent preset, and each preset
+# that offers background jobs mounts its own `tool-jobs`. The base row would
+# add a host-scope completion listener that reaches every preset agent too,
+# so each finished job would notify the model twice, and it would let a preset
+# without job controls start background work.
+- id: tool-jobs
+  disabled: true
+
 - insert:
     - id: file-reference-local
       name: '@deepseek-ai/dsh-file-reference-local'
