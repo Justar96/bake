@@ -4,6 +4,8 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-09-27
+
 - `--screen fullscreen` opens a scrollable transcript with the input pinned at the bottom. PgUp/PgDn scroll, Ctrl+Home goes to the start, and Ctrl+End follows new output. Exit restores the shell; inline mode remains the default.
 - Closing the task, subagent, or goal view no longer lifts the prompt to the middle of the screen: the rows the view took stay blank above the prompt until new output fills them.
 - An Escape that arrives together with the next key, as on a slow terminal, still closes an open view, and the typed characters go to the prompt.
