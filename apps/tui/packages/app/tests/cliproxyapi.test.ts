@@ -36,6 +36,18 @@ describe('CLIProxyAPI models', () => {
     expect(cliProxyModels({ data: [{ id: 'model-a' }] })).toEqual([{ id: 'model-a', name: 'model-a' }])
   })
 
+  it('serves chat-only upstream families over Chat Completions and the rest over the route protocol', () => {
+    const apis = cliProxyModels({ data: ['kimi-k3', 'moonshotai/kimi-k3-256k', 'glm-5.3-flash', 'qwen3-coder-plus',
+      'deepseek-v4-pro', 'MiniMax-M3', 'gpt-6-sol', 'claude-opus-5-5', 'gemini-3.8-flash-high', 'grok-4.7']
+      .map(id => ({ id })) }).map(model => [model.id, model.api])
+    expect(apis).toEqual([
+      ['kimi-k3', 'openai-completions'], ['moonshotai/kimi-k3-256k', 'openai-completions'],
+      ['glm-5.3-flash', 'openai-completions'], ['qwen3-coder-plus', 'openai-completions'],
+      ['deepseek-v4-pro', 'openai-completions'], ['MiniMax-M3', 'openai-completions'],
+      ['gpt-6-sol', undefined], ['claude-opus-5-5', undefined], ['gemini-3.8-flash-high', undefined], ['grok-4.7', undefined],
+    ])
+  })
+
   it('validates the model response before setup proceeds', async () => {
     const abort = new AbortController()
     const fetcher = (async (_url: string, init: RequestInit) => {

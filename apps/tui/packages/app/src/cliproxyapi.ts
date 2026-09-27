@@ -13,6 +13,8 @@ const MAX_CATALOG_BYTES = 4 * 1024 * 1024
 /** Fields the pi-ai settings route can persist for one discovered model. */
 export interface CliProxyModel {
   readonly id: string
+  /** Set only where the route's `openai-responses` would be relayed through the proxy's own translator. */
+  readonly api?: 'openai-completions'
   readonly name: string
   readonly contextWindow?: number
   readonly maxTokens?: number
@@ -48,6 +50,17 @@ interface CatalogModel {
   readonly supported_reasoning_levels?: unknown
 }
 
+/**
+ * Families whose upstreams speak Chat Completions only. CPA serves them on
+ * /v1/responses by translating to chat itself, and a strict upstream rejects
+ * shapes that translation produces — Kimi answers two parallel tool calls with
+ * `tool_call_ids did not have response messages` — so these models skip the
+ * translation. OpenAI, Claude, Gemini, and Grok stay on Responses, which
+ * carries their signed reasoning across turns. An optional `vendor/` or
+ * `vendor:` namespace precedes the family, as in `moonshotai/kimi-k3`.
+ */
+const CHAT_COMPLETIONS_FAMILY = /^(?:[\w.-]+[/:])?(?:kimi-|moonshot-|glm-|qwen|qwq-|deepseek-|minimax-)/i
+
 const positiveInteger = (...values: readonly unknown[]): number | undefined =>
   values.find(value => typeof value === 'number' && Number.isInteger(value) && value > 0) as number | undefined
 
@@ -76,7 +89,9 @@ export function cliProxyModels(payload: unknown): CliProxyModel[] {
         .filter((level): level is string => typeof level === 'string' && ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(level)) : []
     const reasoningEfforts = Object.fromEntries([...new Set(efforts)].map(level => [level, level]))
     models.set(id, {
-      id, name,
+      id,
+      ...CHAT_COMPLETIONS_FAMILY.test(id) ? { api: 'openai-completions' as const } : {},
+      name,
       ...contextWindow === undefined ? {} : { contextWindow },
       ...maxTokens === undefined ? {} : { maxTokens },
       ...input.length === 0 ? {} : { input: input.includes('text') ? input : ['text', ...input] as ('text' | 'image')[] },
