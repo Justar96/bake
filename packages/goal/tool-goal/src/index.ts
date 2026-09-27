@@ -140,6 +140,37 @@ function hasRoundCap(value: number | undefined): value is number {
   return value !== undefined && value !== 0
 }
 
+/** The fields `update_goal` limits to one action, with the strict-schema filler each accepts. */
+const ACTION_FIELDS = [
+  { name: 'objective', action: 'edit', filler: '""' },
+  { name: 'max_goal_rounds', action: 'edit', filler: '0' },
+  { name: 'blocked_reason', action: 'blocked', filler: '""' },
+] as const
+
+/**
+ * Reject meaningful values in fields the selected action does not use. The
+ * message names each such field and its filler, because a model that copies
+ * values from `get_goal` otherwise retries the same arguments.
+ */
+function rejectUnusedFields(action: string, args: {
+  objective?: string | undefined
+  max_goal_rounds?: number | undefined
+  blocked_reason?: string | undefined
+}): void {
+  const unused = ACTION_FIELDS.filter(field => field.action !== action && (field.name === 'max_goal_rounds'
+    ? hasRoundCap(args.max_goal_rounds)
+    : hasText(args[field.name])))
+  if (unused.length === 0) return
+  const names = unused.map(field => field.name).join(' and ')
+  const fillers = unused.map(field => `${field.name}: ${field.filler}`).join(', ')
+  throw new HarnessError(
+    `${names} ${unused.length === 1 ? 'is' : 'are'} not used by action ${action}; `
+      + `omit ${unused.length === 1 ? 'it' : 'them'} or send ${fillers}. `
+      + 'objective and max_goal_rounds apply only to action edit; blocked_reason applies only to action blocked.',
+    'GOAL_TOOL_INVALID_UPDATE',
+  )
+}
+
 /** Build the exact compare-and-set ref from model arguments. */
 function goalRef(goalId: string, revision: number): GoalRef {
   if (goalId.length === 0 || goalId !== goalId.trim()
@@ -262,20 +293,13 @@ export function apply(ctx: Context, config: Config): void {
       }
       if (args.action === 'edit') {
         requireDirectHuman(ctx, execution)
-        if (hasText(args.blocked_reason)) {
-          throw new HarnessError('blocked_reason is valid only with action blocked', 'GOAL_TOOL_INVALID_UPDATE')
-        }
+        rejectUnusedFields(args.action, args)
         const goal = ctx.goals.edit(execution.agent, ref, replacements)
         return Promise.resolve(goalValue(goal))
       }
       if (args.action === 'pause' || args.action === 'resume') {
         requireDirectHuman(ctx, execution)
-        if (hasText(args.objective) || hasRoundCap(args.max_goal_rounds) || hasText(args.blocked_reason)) {
-          throw new HarnessError(
-            'objective and max_goal_rounds are valid only with action edit; blocked_reason is valid only with action blocked',
-            'GOAL_TOOL_INVALID_UPDATE',
-          )
-        }
+        rejectUnusedFields(args.action, args)
         const current = ctx.goals.get(execution.agent)
         if (args.action === 'resume' && current?.id === ref.id && current.revision === ref.revision
           && current.phase === 'paused') {
@@ -290,15 +314,7 @@ export function apply(ctx: Context, config: Config): void {
         return Promise.resolve(goalValue(goal))
       }
       const authority = completionAuthority(ctx, execution)
-      if (hasText(args.objective) || hasRoundCap(args.max_goal_rounds)) {
-        throw new HarnessError(
-          'objective and max_goal_rounds are valid only with action edit',
-          'GOAL_TOOL_INVALID_UPDATE',
-        )
-      }
-      if (args.action === 'complete' && hasText(args.blocked_reason)) {
-        throw new HarnessError('blocked_reason is valid only with action blocked', 'GOAL_TOOL_INVALID_UPDATE')
-      }
+      rejectUnusedFields(args.action, args)
       if (args.action === 'blocked'
         && (args.blocked_reason === undefined || args.blocked_reason.trim().length === 0)) {
         throw new HarnessError('blocked_reason is required with action blocked', 'GOAL_TOOL_INVALID_UPDATE')
