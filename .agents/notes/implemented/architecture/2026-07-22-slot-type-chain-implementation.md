@@ -4,7 +4,7 @@ Status: implemented
 
 English | [中文](2026-07-22-slot-type-chain-implementation.zh.md)
 
-> Scope: the definitive slot-system design for the web client — how UI plugins compose the page, where render authority lives, how component props are typed, and where business live-data goes. The [web client architecture RFC](2026-07-19-gui-web-client-architecture.md) owns the surrounding context (loading chain, object layer, services) and defers its slot sections here.
+> Scope: the definitive slot-system design for the web client — how UI plugins compose the page, where render authority lives, how component props are typed, and where business live-data goes. The web client architecture RFC owns the surrounding context (loading chain, object layer, services) and defers its slot sections here.
 
 ## Problem
 
@@ -12,7 +12,7 @@ The page is composed at runtime from independently loaded plugins, so the UI nee
 
 ## Decision
 
-Global main-panel selection and its root lifetime are defined by the [global main-panels decision](2026-09-08-global-main-panels.md).
+Global main-panel selection and its root lifetime are defined by the global main-panels decision.
 
 One sentence: **the ui-renderer renders only `'root'`; a plugin composes UI through a single `register` call that simultaneously occupies a slot, declares+authorizes its child slots, declares its store, and injects its business face; components are pure functions whose props arrive in four shares, each auto-derived from its single source of truth.**
 

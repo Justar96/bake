@@ -33,7 +33,7 @@ kind: "package-group"
 
 - [产出物子系统](../../docs/subsystems/deliverables.zh.md)——`PresentedFile` 与 `WorkspaceChangesSummary` 的词汇、两个持久事件和摘要服务。
 - [present 声明工作区源文件](../../.agents/notes/implemented/feature/2026-09-08-present-workspace-source-files.zh.md)——交付决策。
-- [本轮改动文件卡片](../../.agents/notes/implemented/feature/2026-09-11-turn-changed-files-card.zh.md)——快照设计与覆盖规则。
+- 本轮改动文件卡片——快照设计与覆盖规则。
 
 -----
 

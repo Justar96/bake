@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-11-incremental-terminal-retention.md
-2026-09-11-incremental-terminal-retention.md: 7e2507775bc39ed2599c2af1173f949bbf352145
-2026-09-11-incremental-terminal-retention.zh.md: 6c6fb95fa0c593ae2b7abb0007d5e7c6fc9f4e7d
+2026-09-11-incremental-terminal-retention.md: 5db3e86d43d69f24d7bd8b5c70b255b48089e1de
+2026-09-11-incremental-terminal-retention.zh.md: 6390a30c577299eb6c7a1e0a6cba1a87d222c01f

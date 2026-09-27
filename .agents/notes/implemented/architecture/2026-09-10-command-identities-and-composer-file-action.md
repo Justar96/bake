@@ -16,7 +16,7 @@ The client command directory resolves input through its private `resolution.ts`.
 
 Conversation registers the File action through the injected command service and owns its localized label. The mounted input binds its file-dialog opener and one live availability query. Both menu filtering and invocation use that query, so lock, unmount, subagent, and submission state apply consistently. The binding and dispatch remain package-internal callbacks; no cross-plugin pick-files event is needed. The assembly uses a narrow structural action-registration face because command UI consumes Conversation's input types; a reverse compiler-project dependency would form a cycle. Its registration test checks against the command plugin's contribution type.
 
-This note supersedes only identity matching, input-resolution placement, and File-action ownership in the [composer menu decision](../feature/2026-09-08-composer-menu-sections-and-localized-rows.md). That note retains the menu, scrolling, claim-retention, and composition-timing decisions.
+This note supersedes only identity matching, input-resolution placement, and File-action ownership in the composer menu decision. That note retains the menu, scrolling, claim-retention, and composition-timing decisions.
 
 ## Alternatives considered
 

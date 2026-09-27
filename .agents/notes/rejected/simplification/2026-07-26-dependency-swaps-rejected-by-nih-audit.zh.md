@@ -62,7 +62,7 @@ Status: rejected — 下列每一项替换在证据上都未达到净简化门�
 
 **仓库工具链：**
 
-- **以 `wireit` 替换 `run-gates.ts`**：它能表达 `needs:` 图，但 allowFailure 观测支路和按模式设置的并发上限没有等价物，对一个正确性门禁运行器来说缓存必须防御性禁用，而且每一处 CI 工作流调用都要重构。[并行门禁决策](../../implemented/process/2026-07-06-parallel-pre-push-gates.zh.md)把自研调度器认作代价；保留是站得住的。
+- **以 `wireit` 替换 `run-gates.ts`**：它能表达 `needs:` 图，但 allowFailure 观测支路和按模式设置的并发上限没有等价物，对一个正确性门禁运行器来说缓存必须防御性禁用，而且每一处 CI 工作流调用都要重构。并行门禁决策把自研调度器认作代价；保留是站得住的。
 - **以 `@arethetypeswrong/cli` 替换 `verify-node-next-types`**：attw 按包运行（100+ 次调用对一次快速的全工作区编译），而且不检查仓库特有的显式 `.ts` 说明符不变式，因此扫描的那一半无论如何都得保留。记录为已考虑；保留脚本。
 - **以 `syncpack`/`manypkg` 替换 `check-workspace-constraints.ts`**：它们只覆盖约 20 行的版本范围对齐；承重的 200+ 行（计算生成的 `files` 列表、cordis peer=dev 配对、层级形状）是仓库政策，没有通用引擎能表达。
 - **以 `remark-validate-links` 替换 `verify-md-links.ts`**：该门禁搭载仓库共享的 mdast 工具链；采用 remark-cli 等于为删掉一个小文件而增加第二套 markdown 技术栈。

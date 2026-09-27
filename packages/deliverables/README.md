@@ -33,7 +33,7 @@ The `deliverables/` group contains `tool-present`, which lets an agent identify 
 
 - [Deliverables subsystem](../../docs/subsystems/deliverables.md) — the `PresentedFile` and `WorkspaceChangesSummary` vocabulary, the two durable events, and the summary service.
 - [Present declares workspace source files](../../.agents/notes/implemented/feature/2026-09-08-present-workspace-source-files.md) — the delivery decision.
-- [Turn changed-files card](../../.agents/notes/implemented/feature/2026-09-11-turn-changed-files-card.md) — the snapshot design and coverage rules.
+- Turn changed-files card — the snapshot design and coverage rules.
 
 -----
 

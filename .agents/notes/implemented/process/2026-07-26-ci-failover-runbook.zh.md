@@ -6,7 +6,7 @@ Status: implemented
 
 ## 问题
 
-[CI](../../../../.github/workflows/ci.yml) 中三个必需的 Linux 工作作业（`node 24 / static`、`node 24 / coverage`、`node 24 / snapshots and artifacts`）运行在托管的企业级 32 核池上；聚合它们的必需判定作业（`all checks passed`）运行在标准 `ubuntu-latest` 上；[原生 Windows 作业](2026-08-08-native-windows-pull-request-ci.zh.md)运行在托管的 `dsh-windows-2025-16core` 大型运行器上。当企业池发生故障——作业无限排队或企业标签消失——所有开启的拉取请求都无法合并，而"合并一个修复"这一常规恢复手段本身正被那些无法运行的必需检查死锁。**适用范围：两个独立开关，每个平台一个。**`DSH_CI_FAILOVER_LINUX` 恢复企业级 Linux 池故障（三个必需的 Linux 工作作业加 `all checks passed` 判定作业）；`DSH_CI_FAILOVER_WINDOWS` 恢复托管 Windows 池故障（原生 Windows 作业）。Linux 池故障无需重定向 Windows 作业，反之亦然。[Node 兼容性作业](2026-09-06-node-compatibility-selfhosted.zh.md)也通过隔离设置跟随 Linux 开关；判定作业的 `node-24-bench`、`python-sdk` 和 `python-runtime` 依赖仍留在标准托管运行器上；若更大范围的 GitHub 托管容量故障连标准池一并击倒，这些依赖仍会阻塞 `all checks passed`。因此故障需要一个任何具备仓库写权限的响应者都能在不合并任何代码的情况下触发的开关。
+[CI](../../../../.github/workflows/ci.yml) 中三个必需的 Linux 工作作业（`node 24 / static`、`node 24 / coverage`、`node 24 / snapshots and artifacts`）运行在托管的企业级 32 核池上；聚合它们的必需判定作业（`all checks passed`）运行在标准 `ubuntu-latest` 上；原生 Windows 作业运行在托管的 `dsh-windows-2025-16core` 大型运行器上。当企业池发生故障——作业无限排队或企业标签消失——所有开启的拉取请求都无法合并，而"合并一个修复"这一常规恢复手段本身正被那些无法运行的必需检查死锁。**适用范围：两个独立开关，每个平台一个。**`DSH_CI_FAILOVER_LINUX` 恢复企业级 Linux 池故障（三个必需的 Linux 工作作业加 `all checks passed` 判定作业）；`DSH_CI_FAILOVER_WINDOWS` 恢复托管 Windows 池故障（原生 Windows 作业）。Linux 池故障无需重定向 Windows 作业，反之亦然。Node 兼容性作业也通过隔离设置跟随 Linux 开关；判定作业的 `node-24-bench`、`python-sdk` 和 `python-runtime` 依赖仍留在标准托管运行器上；若更大范围的 GitHub 托管容量故障连标准池一并击倒，这些依赖仍会阻塞 `all checks passed`。因此故障需要一个任何具备仓库写权限的响应者都能在不合并任何代码的情况下触发的开关。
 
 ## 决策
 
@@ -16,7 +16,7 @@ Status: implemented
 
 ### 发布演练共用 Linux 开关
 
-`DSH_CI_FAILOVER_LINUX=selfhosted` 还会将符合条件的同仓库 PR 和 master 推送中的无凭据依赖布局作业与 dsh/vendor 两个打包作业路由到 `vm-backup`。[发布演练决策](2026-09-06-release-rehearsal-selfhosted.zh.md) 负责更严格的事件准入规则及保留托管的手动触发。这种耦合是有意的：持续设置变量来节省发布分钟，也会让符合条件的主 CI Linux 作业持续使用自托管。清除变量会让两类负载的后续运行返回各自的托管目标；发布操作始终保留托管。
+`DSH_CI_FAILOVER_LINUX=selfhosted` 还会将符合条件的同仓库 PR 和 master 推送中的无凭据依赖布局作业与 dsh/vendor 两个打包作业路由到 `vm-backup`。发布演练决策 负责更严格的事件准入规则及保留托管的手动触发。这种耦合是有意的：持续设置变量来节省发布分钟，也会让符合条件的主 CI Linux 作业持续使用自托管。清除变量会让两类负载的后续运行返回各自的托管目标；发布操作始终保留托管。
 
 ### 自有池是什么
 

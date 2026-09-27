@@ -62,7 +62,7 @@ Adopt the following dependency swaps. Rejected — per-item evidence below; a fu
 
 **Repo tooling:**
 
-- **`wireit` for `run-gates.ts`**: could express the `needs:` graph, but allowFailure observational legs and mode-specific concurrency caps have no equivalent, caching must be defensively disabled for a correctness gate runner, and every CI workflow invocation would restructure. The [parallel-gates note](../../implemented/process/2026-07-06-parallel-pre-push-gates.md) accepts a custom scheduler as the cost; keep is defensible.
+- **`wireit` for `run-gates.ts`**: could express the `needs:` graph, but allowFailure observational legs and mode-specific concurrency caps have no equivalent, caching must be defensively disabled for a correctness gate runner, and every CI workflow invocation would restructure. The parallel-gates note accepts a custom scheduler as the cost; keep is defensible.
 - **`@arethetypeswrong/cli` for `verify-node-next-types`**: attw is per-package (100+ invocations vs one fast whole-workspace compile) and does not check the repo-specific explicit-`.ts`-specifier invariant, so the scan half stays regardless. Recorded as considered; keep the script.
 - **`syncpack`/`manypkg` for `check-workspace-constraints.ts`**: they cover ~20 lines of range alignment; the load-bearing 200+ lines (computed `files` lists, cordis peer=dev pairing, hierarchy shape) are repo policy no generic engine expresses.
 - **`remark-validate-links` for `verify-md-links.ts`**: the gate rides the repo's shared mdast toolchain; adopting remark-cli adds a second markdown stack to delete one small file.

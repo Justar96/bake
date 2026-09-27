@@ -14,7 +14,7 @@ Every model dispatch checks complete message content for files, including nested
 
 ## Measurement evidence
 
-Apple M4 Pro, Node 24.19.0: nine alternating original/candidate pairs run the unchanged [request-history worker](../../../../benchmarks/agent-continuation/agent-continuation.worker.ts) in fresh plain-Node processes. Each process receives a copy of one native-V3 seed. Only the built LLM entry changes; every sample completes 40 requests, zero live tools, and 13,925 events. All totals below are milliseconds, in pair order.
+Apple M4 Pro, Node 24.19.0: nine alternating original/candidate pairs run the unchanged request-history worker in fresh plain-Node processes. Each process receives a copy of one native-V3 seed. Only the built LLM entry changes; every sample completes 40 requests, zero live tools, and 13,925 events. All totals below are milliseconds, in pair order.
 
 | Variant | Raw totals | Median |
 |---|---|---:|
@@ -29,4 +29,4 @@ A weak negative-result cache needs proof that every relevant descendant is immut
 
 ## Consequences
 
-The scan remains linear in visited blocks and rereads mutable nested content on each call. [Content tests](../../../../packages/llm/llm/tests/content.spec.ts) cover empty, frozen, nested, and subsequently mutated arrays; service tests preserve file-handle projection, and request-freeze, reconstruction, and resume tests preserve native-history semantics. No model-visible text or Session format changes. The freeze-evidence and [backend-baseline](../testing/2026-09-06-backend-continuation-performance.md) notes retain independent ownership; neither is superseded.
+The scan remains linear in visited blocks and rereads mutable nested content on each call. [Content tests](../../../../packages/llm/llm/tests/content.spec.ts) cover empty, frozen, nested, and subsequently mutated arrays; service tests preserve file-handle projection, and request-freeze, reconstruction, and resume tests preserve native-history semantics. No model-visible text or Session format changes. The freeze-evidence and backend-baseline notes retain independent ownership; neither is superseded.

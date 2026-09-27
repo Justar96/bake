@@ -14,7 +14,7 @@
   - **`rejected/`**：提案经过讨论后被否决。仅当其决策依据仍能避免一种诱人且影响重大的错误时保留；否则删除完整的英文、中文和伴随记录三文件组。
 - **类别**（嵌套文件夹）是决策的*种类*——见下方[分类](#classification)。
 
-文件名中的日期是该主题**首次提出**的时间（以 git 历史为准）。Agent Note 之间的交叉引用使用相对 Markdown 链接（`[topic](../../implemented/architecture/2026-…-….md)`），从不使用纯文字或编号，这样既可机械检查，也能在文件夹间移动时保持有效。
+文件名中的日期是该主题**首次提出**的时间（以 git 历史为准）。Agent Note 之间的交叉引用使用相对 Markdown 链接（`topic`），从不使用纯文字或编号，这样既可机械检查，也能在文件夹间移动时保持有效。
 
 活跃生命周期目录树就是工作清单：浏览其生命周期/类别文件夹，或搜索仓库即可。请勿添加集中式 `INDEX.md`；设计理由见[不设索引的 Agent Note](implemented/process/2026-07-19-remove-generated-agent-note-index.zh.md)。未来指导价值较低的已实施记录会移至下文所述、单独冻结的 [`archived/`](archived/AGENTS.md) 目录树。
 
@@ -22,7 +22,7 @@
 
 ## 分类
 
-每份 Agent Note 属于 `scripts/agent-note-tree.ts` 中封闭集合里的一个路径编码类别；分类门禁拒绝其他文件夹。新增类别需要同时更新规范集合与本节。
+每份 Agent Note 属于本节封闭集合里的一个路径编码类别；不使用其他文件夹。新增类别需要更新本节。
 
 | 类别 | 覆盖范围 |
 |---|---|
@@ -41,7 +41,7 @@
 
 归档路径编码为 `archived/{class}/yyyy-mm-dd-topic-title.md`；其中有意省略 `implemented`，因为只有 implemented Agent Note 可以进入归档。归档变更会移动完整的英文、中文和伴随记录三个文件，保留 `Status: implemented`，在两种语言的文件中紧接该状态行插入相同的 `Archived: YYYY-MM-DD` 行，重新记录伴随记录，并修复或删除入站链接。归档时只允许对内容做这些更改。
 
-封存后，每组归档文件都永久冻结。禁止编辑、翻译、重新格式化、更新、移动或删除，也不得将其视为当前行为的权威依据。文档门禁会跳过归档源文件，包括其中的出站链接；当活跃文档有意引用历史时，仍可链接到归档 Agent Note。[`verify-archived-agent-notes`](../../scripts/verify-archived-agent-notes.ts) 强制执行封闭的类别目录树、完整的三文件配对、归档元数据、伴随记录 hash，以及仅追加的冻结内容 manifest（元数据清单）。[归档政策 Agent Note](implemented/process/2026-07-26-frozen-agent-note-archive.zh.md) 记录了设计依据。
+封存后，每组归档文件都永久冻结。禁止编辑、翻译、重新格式化、更新、移动或删除，也不得将其视为当前行为的权威依据。文档门禁会跳过归档源文件，包括其中的出站链接；当活跃文档有意引用历史时，仍可链接到归档 Agent Note。[归档政策 Agent Note](implemented/process/2026-07-26-frozen-agent-note-archive.zh.md) 记录了设计依据。
 
 <a id="when-to-write-one"></a>
 
@@ -59,7 +59,7 @@
 
 ## 文件格式
 
-每份活跃 Agent Note 遵循统一的文件内格式，由 `pnpm run verify-agent-note-format`（[scripts/verify-agent-note-format.ts](../../scripts/verify-agent-note-format.ts)，`doc-sync`（文档同步门禁）的一环）强制执行；该格式的设计动机及其否决的替代方案见[统一格式 Agent Note](implemented/process/2026-07-05-uniform-agent-note-format.zh.md)。归档记录保留封存时的格式，并增加上述归档日期行。
+每份活跃 Agent Note 遵循统一的文件内格式，在评审中检查；该格式的设计动机及其否决的替代方案见[统一格式 Agent Note](implemented/process/2026-07-05-uniform-agent-note-format.zh.md)。归档记录保留封存时的格式，并增加上述归档日期行。
 
 ### 头部块
 

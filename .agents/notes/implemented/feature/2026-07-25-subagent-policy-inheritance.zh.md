@@ -22,7 +22,7 @@ Auto review 不会把这条继承的 preset 事件变成授权回执。每次 ch
 
 受限子 agent 会得到普通拒绝标记，升级请求则被子 agent 钉定的 `'never'` 策略确定性拒绝；`subagent:delegation` 运行时上下文声明告知子 agent 上报限制而不是重试，由控制器持有的父 agent 可以放宽自己的会话后重新委派（[审批钉定决策](2026-08-10-subagent-approval-pinned-never.zh.md)）。
 
-[Auto review 决策](2026-08-28-auto-review.zh.md)为共享 Auto／Full access 旋钮组合扩展此继承规则；本文仍拥有委派时权限捕获的决策。
+Auto review 决策为共享 Auto／Full access 旋钮组合扩展此继承规则；本文仍拥有委派时权限捕获的决策。
 
 ## 考虑过的替代方案
 

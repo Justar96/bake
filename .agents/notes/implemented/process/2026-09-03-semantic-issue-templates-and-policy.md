@@ -22,7 +22,7 @@ Issue policy does not inspect `details` presentation, visible-body length, title
 
 ## Verification
 
-[Issue-management tests](../../../../.github/issue-management/policy.test.mjs) pin the template inventory and headings, the pull-request testing structure, and acceptance of titles, bodies, and assignee states that differ only in presentation.
+Issue-management tests pin the template inventory and headings, the pull-request testing structure, and acceptance of titles, bodies, and assignee states that differ only in presentation.
 
 ## Alternatives considered
 

@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-09-14-independent-libreoffice-kit.md
-2026-09-14-independent-libreoffice-kit.md: 13efc41e56a4810273fbb6d9314eeda6053dbe92
-2026-09-14-independent-libreoffice-kit.zh.md: 720ca2ba3f57546825ae14b5b5f0b086fbb7f287
+2026-09-14-independent-libreoffice-kit.md: 954300cf58d53df0cd152797e8be682485cad659
+2026-09-14-independent-libreoffice-kit.zh.md: 147848a401b48ce4fb887ba3dcfd92d57cc12c02

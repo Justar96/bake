@@ -30,7 +30,7 @@ Rank candidates by observed user latency, CPU/allocations, retained memory, occu
 
 ## Build realistic synthetic benchmarks first
 
-Follow [benchmarks/AGENTS.md](../../../benchmarks/AGENTS.md) and the [performance-gate decision](../../notes/implemented/testing/2026-09-04-session-open-performance-gate.md). Extend the existing required lane rather than creating competing calibration or reporting infrastructure. Package-local diagnostics remain beside their owner; cross-package required cases live under the measured user path in `benchmarks/`.
+Follow benchmarks/AGENTS.md and the performance-gate decision. Extend the existing required lane rather than creating competing calibration or reporting infrastructure. Package-local diagnostics remain beside their owner; cross-package required cases live under the measured user path in `benchmarks/`.
 
 If the user authorizes local corpus inspection, extract only aggregate workload characteristics. Never copy prompts, outputs, paths, identities, IDs, credentials, recordings, or recognizable snippets into fixtures, logs, screenshots, PRs, or artifacts. Generate fixed inputs from reviewed constants; no benchmark depends on the user’s home, ambient repository, network service, or private data.
 
@@ -77,7 +77,7 @@ Change one causal factor at a time. Re-run both the focused scenario and its end
 
 Performance measurements complement functional evidence; they do not replace it. Run or add the narrow owning tests for output, ordering, paging, stream indexes, errors, cancellation, concurrency, and disposal as applicable. Preserve model-visible/logged equivalence, released-generation immutability, atomic publication, required validation, and writable readiness. Do not silently truncate history, skip tool results, disable invariants, or change lifecycle semantics to reach a number.
 
-State any deliberate minor visible difference and verify it through the owning keyless snapshot. For a product-visible GUI change, include the required browser evidence/GIF. Keep functional expectations independent of benchmark internals; benchmark assertions need enough evidence to reach the real endpoint, not a second semantic test suite.
+State any deliberate minor visible difference and verify it through the owning keyless snapshot. Keep functional expectations independent of benchmark internals; benchmark assertions need enough evidence to reach the real endpoint, not a second semantic test suite.
 
 Reject an optimization when gains disappear end-to-end, a typical workload regresses materially, complexity outweighs a small gain, or cancellation/retention/durability cannot be explained and tested. Record the rejected hypothesis briefly instead of expanding scope to justify it.
 

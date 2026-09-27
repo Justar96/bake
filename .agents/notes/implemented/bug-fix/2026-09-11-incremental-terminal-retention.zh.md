@@ -47,7 +47,7 @@ Status: implemented
 
 真实 PTY 诊断通过构建后的本地子进程提供方运行 `node -e 'process.stdout.write("x".repeat(5*1024*1024))'`。一次基线样本耗时 106962.523 ms；一次最终候选样本耗时 249.007 ms。计时从 PTY/进程 spawn 前开始，到 `session_exit` 和有界读取完成后结束。两个样本均以代码 0 退出，无信号，viewport/read 载荷均为已截断的 256 KiB。这包括原生 PTY 传输与 Node 启动，不包括交互式 shell 及提示符就绪往返。
 
-[必需基准](../../../../benchmarks/terminal-io/terminal-io.bench.ts)对参考预期值应用共享 CI 系数与余量：稳态接收 20 ms、稳态完成 50 ms、完整发送完成 120 ms，对应限制为 50/125/300 ms。容量扩展的中位数比值必须低于 4×；最大保留堆为 16 MiB。比值与内存限制不缩放。替换为原始编译后会话 worker 时，两个计时场景都失败：容量比值 18.977 超过 4，完整发送完成时间 5066.719 ms 超过 300 ms。最终 worker 的四个场景均通过。本地命令为 `pnpm exec vitest run --config vitest.bench.config.ts benchmarks/terminal-io/terminal-io.bench.ts`，在基准构建完成后执行。
+必需基准对参考预期值应用共享 CI 系数与余量：稳态接收 20 ms、稳态完成 50 ms、完整发送完成 120 ms，对应限制为 50/125/300 ms。容量扩展的中位数比值必须低于 4×；最大保留堆为 16 MiB。比值与内存限制不缩放。替换为原始编译后会话 worker 时，两个计时场景都失败：容量比值 18.977 超过 4，完整发送完成时间 5066.719 ms 超过 300 ms。最终 worker 的四个场景均通过。本地命令为 `pnpm exec vitest run --config vitest.bench.config.ts benchmarks/terminal-io/terminal-io.bench.ts`，在基准构建完成后执行。
 
 ## 考虑过的替代方案
 

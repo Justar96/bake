@@ -2,6 +2,15 @@
 
 Bake is an independent terminal coding agent. `origin` is Bake's own repository. `upstream` is a read-only reference: review its DeepSeek Harness releases there, then port changes selectively. Never merge from or push to `upstream` automatically.
 
+## Porting from upstream
+
+Bake removed upstream's web client, desktop app, ACP, Python SDK, docs website, benchmarks, and upstream CI and review automation, along with their Agent Notes and docs. When porting:
+
+- A modify/delete conflict on a removed note or doc keeps the deletion (`git rm <file>`). Do not restore docs for removed products.
+- `packages/session/session-format-catalog/src/retired-vocabulary.ts` keeps event types that released Session logs carry but no plugin writes, so those logs still open. Remove an entry only with a Session-format version bump and migration; regenerate with `bun run gen-persistence-catalog` and confirm no persistence digest moves.
+- Leave `.agents/notes/archived/`, `docs/persistence-changes/historical-formats/`, and `snapshots/` as they are: they are frozen history, and their links may point at removed code.
+- Some docs still describe upstream gates Bake does not ship, including the Agent Note format, archive, and classification verifiers named in `.agents/notes/README.md` and the `dsh-archive-agent-notes` skill. Trust `package.json` scripts over prose; fix the wording when you touch it.
+
 ## Workspace
 
 Bun is the single toolchain for this workspace: it owns dependency installation, `bun.lock`, workspace scripts, builds, hooks, and CI. Reproduce a checkout with `bun install --frozen-lockfile`, and do not add a root pnpm or npm lockfile. The agent process itself runs on Node, with Bun building and launching it. The runtime's external-profile package manager is a separate concern and does not belong to this workspace. Bake launch commands default to `~/.bake`; setting `DSH_HOME` selects a different home instead, without migrating upstream data.

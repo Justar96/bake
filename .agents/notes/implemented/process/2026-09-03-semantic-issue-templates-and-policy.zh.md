@@ -22,7 +22,7 @@ Issue policy 不检查 `details` 展示形式、可见正文长度、标题语�
 
 ## 验证
 
-[Issue 管理测试](../../../../.github/issue-management/policy.test.mjs)固定 template 清单与标题、PR 测试结构，并验证仅展示形式不同的标题、正文和 assignee 状态可以通过。
+Issue 管理测试固定 template 清单与标题、PR 测试结构，并验证仅展示形式不同的标题、正文和 assignee 状态可以通过。
 
 ## 考虑过的替代方案
 

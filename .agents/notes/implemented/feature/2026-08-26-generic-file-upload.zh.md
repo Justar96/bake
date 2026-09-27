@@ -51,4 +51,4 @@ Status: implemented
 
 ## 相关记录
 
-[Trajectory 附件展示决定](../bug-fix/2026-09-15-trajectory-attachment-presentation.zh.md)负责列表计数与详情面板附件布局。
+Trajectory 附件展示决定负责列表计数与详情面板附件布局。

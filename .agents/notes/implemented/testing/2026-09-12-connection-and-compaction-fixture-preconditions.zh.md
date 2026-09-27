@@ -10,7 +10,7 @@ Status: implemented
 
 ## Decision
 
-[连接恢复测试](../../../../apps/web/tests/lifecycle-chrome.e2e.ts) 从独立元素读取警告颜色 token，再轮询指示器计算后的前景色与背景色，直到两者都等于相应 token。浏览器 CSS 过渡与被模拟的 JavaScript 重试计时器使用不同的时钟。这遵循[夹具完成条件决策](2026-09-08-ci-completion-observations.zh.md)：中间视觉状态不能满足最终断言。
+连接恢复测试 从独立元素读取警告颜色 token，再轮询指示器计算后的前景色与背景色，直到两者都等于相应 token。浏览器 CSS 过渡与被模拟的 JavaScript 重试计时器使用不同的时钟。这遵循[夹具完成条件决策](2026-09-08-ci-completion-observations.zh.md)：中间视觉状态不能满足最终断言。
 
 [压缩冒烟测试](../../../../apps/cli/tests/profiles/headless/tests/compaction.e2e.ts) 完成每一轮文件读取后才提交下一轮。每个文件将包含编号的句子重复 200 次，共 4,600 个字符。8,000 token 的合成上下文窗口在用量达到 50% 时触发压缩，因此压力阈值为 4,000 token。一次夹具测量中，完成一次读取后的请求用了 2,738 token，其中 1,274 token 位于对话 surface 之外。一次失败的校准运行选中了约 60 token 的初始指令，却生成了包含格式在内的 475 token 检查点；运行时正确拒绝了这个更大的替换。分开的已完成轮次避免四次读取全部成为一个被保留的工具组。失败输出包含已记录的压缩错误，同时测试仍要求产生摘要、替换历史并给出最终回答。
 

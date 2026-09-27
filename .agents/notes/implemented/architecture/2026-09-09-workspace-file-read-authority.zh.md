@@ -16,7 +16,7 @@ Workspace Files 同时提供文件内容与工作区导航。对所有操作应�
 
 `readRelated` 从基准文件所在目录解析相对路径。因此，只要 Session 后端允许，`..` 路径就可以读取工作区外的 JavaScript 或 CSS。Document Preview 把有界、静态声明的本地脚本与样式表打包进带 `sandbox="allow-scripts"` 的 HTML Blob iframe；不透明源阻止访问父应用，但浏览器保留正常网络访问。这种暴露是为渲染静态生成 HTML 而有意接受的安全取舍。
 
-[Workspace Files 服务](2026-09-05-workspace-files-service.zh.md)负责分页、文件检查、列举和观察。[Document Preview](2026-09-08-document-preview-operations.zh.md)负责选择要打包的关联文件及 iframe sandbox。
+Workspace Files 服务负责分页、文件检查、列举和观察。Document Preview负责选择要打包的关联文件及 iframe sandbox。
 
 ## Alternatives considered
 
