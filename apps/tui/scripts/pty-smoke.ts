@@ -1422,17 +1422,30 @@ scenario('inspect-agent', 'select a saved child, read its session, and return wi
     const recorded = child.map(event => JSON.stringify(event)).join('\n') + '\n'
     await Bun.write(path, recorded)
     await run.terminal('inspect-agent', ['--resume', parentId], async tty => {
+      const viewport = async (): Promise<string> => {
+        const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
+        try {
+          await new Promise<void>(resolve => screen.write(tty.raw, resolve))
+          return Array.from({ length: 40 }, (_, row) =>
+            screen.buffer.active.getLine(screen.buffer.active.viewportY + row)?.translateToString(true) ?? '').join('\n')
+        } finally { screen.dispose() }
+      }
       await tty.expect('↓ Subagents: 1')
       tty.send('\x1b[B', 'select subagents from the status line')
       await tty.expect('> Subagents: 1')
       tty.send('\r', 'open the subagent sheet from the status line')
       await tty.expect('Select a child to view its session', 'Review terminal output')
-      let start = tty.mark()
       tty.send('\x1b', 'close the sheet')
-      await tty.expect(`> ${SCREEN.caret}Ask anything`, start)
+      // A lone Escape decodes only once no sequence follows it, and the prompt
+      // is drawn under an open sheet too, so typing waits for the sheet to leave
+      // the viewport; otherwise Escape and the draft arrive as one Meta key.
+      await tty.wait('the sheet to close over the empty prompt', async () => {
+        const visible = await viewport()
+        return visible.includes(`> ${SCREEN.caret}Ask anything`) && !visible.includes('Esc closes')
+      })
       tty.send('Keep this parent draft', 'write a draft before inspecting a child')
       await tty.expect(`> Keep this parent draft${SCREEN.caret}`)
-      start = tty.mark()
+      let start = tty.mark()
       tty.send('\x07', 'Ctrl+G opens the subagent sheet')
       await tty.expect('Select a child to view its session', 'Review terminal output', start)
       tty.send('\r', 'open the selected child session')
