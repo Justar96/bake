@@ -4,6 +4,12 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-09-27
+
+- A background job that finishes after its turn wakes the agent with one completion notice instead of two.
+- When `update_goal` rejects a field the chosen action does not use, the error names the field and the empty value to send instead, so the agent stops retrying the same call.
+- Resuming a long session replays its history sooner and allocates less than half the memory while drawing it.
+
 ## [0.1.5] - 2026-09-27
 
 - The rows around the prompt stay compact when tasks, a goal, and subagents are all showing: the goal drops its round count, and the status line shows context as `ctx ~N%` instead of token totals. Context turns yellow from 70% and red from 90%.

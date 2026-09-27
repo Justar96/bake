@@ -504,6 +504,35 @@ describe('goal tool state transitions', () => {
     expect(malformedRef.error?.info?.code).toBe('GOAL_TOOL_INVALID_UPDATE')
   })
 
+  it('names each unused field and its filler when rejecting an update', async () => {
+    const { ctx, root } = await harness()
+    openTurn(root, { kind: 'user' })
+    const created = ctx.goals.create(root.agent, { objective: 'valid', maxGoalRounds: 12 })
+    // The shape a model sends after copying the cap from get_goal.
+    const copiedCap = await execute(ctx, 'update_goal', {
+      goal_id: created.id,
+      revision: created.revision,
+      action: 'resume',
+      objective: '',
+      max_goal_rounds: 12,
+      blocked_reason: '',
+    }, root.agent)
+    expect(copiedCap.error?.info?.code).toBe('GOAL_TOOL_INVALID_UPDATE')
+    expect(copiedCap.error?.message).toBe('max_goal_rounds is not used by action resume; omit it or send '
+      + 'max_goal_rounds: 0. objective and max_goal_rounds apply only to action edit; '
+      + 'blocked_reason applies only to action blocked.')
+    const several = await execute(ctx, 'update_goal', {
+      goal_id: created.id,
+      revision: created.revision,
+      action: 'complete',
+      objective: 'not valid for complete',
+      blocked_reason: 'Not a blocker.',
+    }, root.agent)
+    expect(several.error?.message).toMatch(
+      /^objective and blocked_reason are not used by action complete; omit them or send objective: "", blocked_reason: ""\./,
+    )
+  })
+
   it('accepts only empty fillers in fields unused by the selected action', async () => {
     const { ctx, root } = await harness()
     openTurn(root, { kind: 'user' })

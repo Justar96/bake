@@ -10,6 +10,101 @@ index 6934dc529bf94feed37afdf95633e4f36c6aad32..2406398835410afdcf91e06095ea0a25
  const measureText = (text) => {
      if (text.length === 0) {
          return {
+diff --git a/build/output.js b/build/output.js
+index c763b7763c5fc133c7fbb53c54c466cdf51c282b..cec1de89b8fd850e75e17b2522e0aaf2c95bc316 100644
+--- a/build/output.js
++++ b/build/output.js
+@@ -1,6 +1,7 @@
+ import sliceAnsi from 'slice-ansi';
+ import stringWidth from 'string-width';
+-import { styledCharsFromTokens, styledCharsToString, tokenize, } from '@alcalzone/ansi-tokenize';
++import { styledCharsFromTokens, tokenize, } from '@alcalzone/ansi-tokenize';
++import { blankCell, styledCharsToString } from './styled-line.js';
+ class OutputCaches {
+     widths = new Map();
+     blockWidths = new Map();
+@@ -74,12 +75,7 @@ export default class Output {
+         for (let y = 0; y < this.height; y++) {
+             const row = [];
+             for (let x = 0; x < this.width; x++) {
+-                row.push({
+-                    type: 'char',
+-                    value: ' ',
+-                    fullWidth: false,
+-                    styles: [],
+-                });
++                row.push(blankCell);
+             }
+             output.push(row);
+         }
+@@ -151,12 +147,7 @@ export default class Output {
+                         offsetY++;
+                         continue;
+                     }
+-                    const spaceCell = {
+-                        type: 'char',
+-                        value: ' ',
+-                        fullWidth: false,
+-                        styles: [],
+-                    };
++                    const spaceCell = blankCell;
+                     // Wide characters (e.g. CJK) occupy two cells: a leading
+                     // cell with the character and a trailing placeholder with
+                     // value ''. When an overlapping write lands in the middle
+diff --git a/build/styled-line.js b/build/styled-line.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..1cb0569ec042206fff6674e140e77095ffa5b84f
+--- /dev/null
++++ b/build/styled-line.js
+@@ -0,0 +1,48 @@
++// Serialize Output rows without allocating per cell. ansi-tokenize's
++// styledCharsToString diffs every neighbouring pair of cells with fresh Sets
++// and arrays, so a resumed transcript's full-height frames churned gigabytes.
++import { ansiCodesToString, diffAnsiCodes } from '@alcalzone/ansi-tokenize';
++/** Output replaces cells and never mutates them, so every blank cell shares this one. */
++export const blankCell = {
++    type: 'char',
++    value: ' ',
++    fullWidth: false,
++    styles: [],
++};
++const sameStyles = (from, to) => {
++    if (from === to) {
++        return true;
++    }
++    if (from.length !== to.length) {
++        return false;
++    }
++    for (let index = 0; index < from.length; index++) {
++        if (from[index].code !== to[index].code || from[index].endCode !== to[index].endCode) {
++            return false;
++        }
++    }
++    return true;
++};
++/**
++ * The same string as ansi-tokenize's styledCharsToString: equal styles diff
++ * to no codes, so only style changes pay for a diff.
++ */
++export const styledCharsToString = (chars) => {
++    let ret = '';
++    for (let index = 0; index < chars.length; index++) {
++        const char = chars[index];
++        if (index === 0) {
++            if (char.styles.length > 0) {
++                ret += ansiCodesToString(char.styles);
++            }
++        }
++        else if (!sameStyles(chars[index - 1].styles, char.styles)) {
++            ret += ansiCodesToString(diffAnsiCodes(chars[index - 1].styles, char.styles));
++        }
++        ret += char.value;
++        if (index === chars.length - 1 && char.styles.length > 0) {
++            ret += ansiCodesToString(diffAnsiCodes(char.styles, []));
++        }
++    }
++    return ret;
++};
 diff --git a/node_modules/ink/build/text-cache.js b/build/text-cache.js
 new file mode 100644
 index 0000000000000000000000000000000000000000..9bec8c5dcd0f4b06fac2967ff247908c29694f14

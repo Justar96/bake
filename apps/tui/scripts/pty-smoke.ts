@@ -1141,6 +1141,42 @@ scenario('tool-colour', 'real read, search, and shell results retain syntax colo
     })
   })
 
+scenario('background-job', 'a background bash job that settles after the turn wakes the agent with exactly one completion notice',
+  { replayOnly: true }, async run => {
+    // The sleep outlasts the recorded turn, so the notice takes the idle-wake path.
+    const args = JSON.stringify({ command: 'sleep 1; printf done', description: 'Finish later', run_in_background: true })
+    const call = { type: 'tool-call' as const, id: 'call-job-1', name: 'bash', arguments: args }
+    const text = (value: string) => ({ kind: 'chunks', chunks: [
+      { type: 'block-start', index: 0, blockType: 'text' },
+      { type: 'text-delta', index: 0, text: value },
+      { type: 'block-end', index: 0, block: { type: 'text', text: value } },
+      { type: 'finish', reason: { kind: 'stop' } },
+    ] })
+    const override = join(run.root, 'background-job-replay.json')
+    await Bun.write(override, JSON.stringify([
+      { kind: 'chunks', chunks: [
+        { type: 'block-start', index: 0, blockType: 'tool-call' },
+        { type: 'tool-call-delta', index: 0, id: call.id, name: call.name, argumentsDelta: args },
+        { type: 'block-end', index: 0, block: call },
+        { type: 'finish', reason: { kind: 'tool-calls' } },
+      ] },
+      text('JOB_STARTED'),
+      text('JOB_NOTICED'),
+    ]))
+    const before = await run.logs()
+    await run.writeOverlay(override)
+    try {
+      await run.terminal('background-job', [], async tty => {
+        tty.send('Start the job in the background.\r', 'trigger the recorded background bash call')
+        await tty.follows(SCREEN.idle, 'JOB_STARTED')
+        await tty.follows(SCREEN.idle, 'JOB_NOTICED')
+      })
+    } finally { await run.writeOverlay() }
+    const log = await events(await run.created(before, 'background job'))
+    const notices = log.filter(event => event.type === 'user/message' && event.data.source?.plugin === 'tool-jobs')
+    assert(notices.length === 1, `expected one job completion notice, the model saw ${notices.length}`)
+  })
+
 scenario('arrow-wave', 'the single-line processing wave loops in place and yields to a short composer',
   { replayOnly: true }, async run => {
     const override = join(run.root, 'arrow-wave-replay.json')
