@@ -1,6 +1,7 @@
 import { brandNumber, brandString, type Branded, type BrandedNumber } from '@deepseek-ai/dsh-brand'
 import type {
   AssistantMessage,
+  MessageId,
   AssistantStreamRecord,
   ToolCallId,
   LlmCallConfig,
@@ -372,6 +373,19 @@ export interface SessionEventMap {
     reason: RequestHeaderReason
     /** A changed header also begins a distinct model-message series. */
     startsSeries?: true
+  }
+  /**
+   * Required, log-only tool changes for native provider projection. The referenced
+   * latest header owns the added definitions; afterMessageId fixes their position
+   * after the current user/tool-result message. Older readers must refuse this
+   * vocabulary rather than silently lose model-visible changes. Surface roles and
+   * stored messages are unchanged.
+   */
+  'request/tool-update': {
+    headerSeq: SessionSeq
+    afterMessageId: MessageId
+    additions: string[]
+    removals: string[]
   }
   /**
    * Route metadata for the next request, logged only when the route, capacity,

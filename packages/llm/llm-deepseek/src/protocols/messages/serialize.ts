@@ -73,6 +73,14 @@ export function serialize(
   const messages: WireMessage[] = []
   let historySystem: string | undefined
   const systemUpdates: WireMessage[] = []
+  const updates = new Map<string, WireBlock[]>()
+  for (const update of options.toolUpdates ?? []) {
+    const content: WireBlock[] = [
+      ...update.additions.map(name => ({ type: 'tool_addition' as const, tool: { type: 'tool_reference' as const, name } })),
+      ...update.removals.map(name => ({ type: 'tool_removal' as const, tool: { type: 'tool_reference' as const, name } })),
+    ]
+    updates.set(update.afterMessageId, [...updates.get(update.afterMessageId) ?? [], ...content])
+  }
   // Harness admits system updates before user input. Messages places the same
   // update after that user/tool-result turn and before the next assistant.
   const flushSystemUpdates = () => {
@@ -101,7 +109,14 @@ export function serialize(
     const previous = messages.at(-1)
     if (previous?.role === message.role) previous.content.push(...content)
     else messages.push({ role: message.role, content })
+    const changes = updates.get(message.id)
+    if (changes !== undefined) {
+      if (message.role !== 'user') return unsupported('tool update without a preceding user or tool-result turn')
+      systemUpdates.push({ role: 'system', content: changes })
+      updates.delete(message.id)
+    }
   }
+  if (updates.size > 0) return unsupported('tool update whose message is absent')
   flushSystemUpdates()
   let pending = new Set<string>()
   for (const message of messages) {
@@ -133,7 +148,10 @@ export function serialize(
     ...options.temperature === undefined ? {} : { temperature: options.temperature },
     ...options.stop === undefined ? {} : { stop_sequences: options.stop },
     ...options.tools === undefined ? {} : {
-      tools: options.tools.map(tool => ({ name: tool.name, description: tool.description, input_schema: tool.parameters })),
+      tools: options.tools.map(tool => ({
+        name: tool.name, description: tool.description, input_schema: tool.parameters,
+        ...tool.deferLoading === true ? { defer_loading: true as const } : {},
+      })),
     },
   }
 }

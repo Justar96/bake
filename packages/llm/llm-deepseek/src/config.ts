@@ -75,6 +75,7 @@ const catalogModel: z<DeepSeekCatalogModel> = z.object({
   imagePixelBudget: z.union([z.number().step(1).min(1), 'low']),
   imageMaxBytes: z.number().step(1).min(1),
   systemPromptUpdate: z.const('in-history'),
+  toolUpdate: z.union(['in-history', 'addition-only']),
 })
 
 export const Config: z<Config> = z.object({
@@ -170,6 +171,10 @@ function resolveModels(models: readonly DeepSeekCatalogModel[] | undefined): Dee
     if (systemPromptUpdate !== undefined && systemPromptUpdate !== 'in-history') {
       throw new Error(`llm-deepseek: catalog model "${model.id}" systemPromptUpdate must be "in-history" when present`)
     }
+    const toolUpdate: string | undefined = model.toolUpdate
+    if (toolUpdate !== undefined && toolUpdate !== 'in-history' && toolUpdate !== 'addition-only') {
+      throw new Error(`llm-deepseek: catalog model "${model.id}" toolUpdate must be "in-history" or "addition-only" when present`)
+    }
     if (seen.has(model.id)) throw new Error(`llm-deepseek: duplicate catalog model "${model.id}"`)
     seen.add(model.id)
     return {
@@ -179,6 +184,7 @@ function resolveModels(models: readonly DeepSeekCatalogModel[] | undefined): Dee
       ...model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow },
       ...model.maxTokens === undefined ? {} : { maxTokens: model.maxTokens },
       ...model.systemPromptUpdate === undefined ? {} : { systemPromptUpdate: model.systemPromptUpdate },
+      ...model.toolUpdate === undefined ? {} : { toolUpdate: model.toolUpdate },
       inputModalities: [...inputModalities],
       ...hasImage
         ? {

@@ -23,6 +23,7 @@ import type {
   ModelModality,
   StreamChunk,
   SystemPromptUpdate,
+  ToolUpdate,
 } from './types.ts'
 import { freezeMessage, type Message } from './message.ts'
 import { resolveRetryPolicy } from './retry-policy.ts'
@@ -37,6 +38,7 @@ import {
   contentHasFile, contentHasImage, fileHandleText, projectFilesToText, projectImagesForTextModel,
 } from './content.ts'
 import type { FileAttachmentRef } from '@deepseek-ai/dsh-attachment'
+import { projectToolUpdates } from './tool-updates.ts'
 
 export * from './attribution.ts'
 export * from './brand.ts'
@@ -44,6 +46,7 @@ export * from './error.ts'
 export * from './api-key.ts'
 export * from './types.ts'
 export * from './content.ts'
+export * from './tool-updates.ts'
 export * from './assistant-stream.ts'
 export * from './message.ts'
 export * from './retry-policy.ts'
@@ -174,6 +177,8 @@ export interface PreparedLlmCall {
   readonly inputModalities?: readonly ModelModality[]
   /** Exact model system prompt update mode captured with the adapter dispatch generation. */
   readonly systemPromptUpdate?: SystemPromptUpdate
+  /** Exact model tool update mode captured with the adapter dispatch generation. */
+  readonly toolUpdate?: ToolUpdate
   /** Config fields materialized by the captured adapter rather than proposed by the caller. */
   readonly adapterDefaults: LlmCallConfigAdapterDefaults
   /**
@@ -787,6 +792,13 @@ export class LlmRuntime extends TypertRemoteService {
       )
     }
     const defaultMaxTokens = resolved.defaultMaxTokens
+    const toolUpdate: string | undefined = resolved.toolUpdate
+    if (toolUpdate !== undefined && toolUpdate !== 'in-history' && toolUpdate !== 'addition-only') {
+      throw new LlmError(
+        `adapter returned invalid tool update mode for provider "${provider}" model "${model}"`,
+        'INVALID_MODEL_INFO',
+      )
+    }
     if (defaultMaxTokens !== undefined
       && (!Number.isSafeInteger(defaultMaxTokens) || defaultMaxTokens <= 0)) {
       throw new LlmError(
@@ -803,6 +815,7 @@ export class LlmRuntime extends TypertRemoteService {
       ...context === undefined ? {} : { context: { contextWindow: context.contextWindow } },
       ...defaultMaxTokens === undefined ? {} : { defaultMaxTokens },
       ...resolved.systemPromptUpdate === undefined ? {} : { systemPromptUpdate: resolved.systemPromptUpdate },
+      ...resolved.toolUpdate === undefined ? {} : { toolUpdate: resolved.toolUpdate },
     }
     const reasoning = resolved.reasoning
     if (reasoning === undefined) return info
@@ -944,6 +957,7 @@ export class LlmRuntime extends TypertRemoteService {
         ? {}
         : { inputModalities: Object.freeze([...modelInfo.inputModalities]) },
       ...modelInfo.systemPromptUpdate === undefined ? {} : { systemPromptUpdate: modelInfo.systemPromptUpdate },
+      ...modelInfo.toolUpdate === undefined ? {} : { toolUpdate: modelInfo.toolUpdate },
       stream: (options: GenerateOptions): AsyncIterable<StreamChunk> => {
         if (dispatched) {
           throw new LlmError('a prepared LLM call can only be dispatched once', 'INVALID_PREPARED_CALL')
@@ -1054,11 +1068,22 @@ export class LlmRuntime extends TypertRemoteService {
         && projectedMessages.some(message => contentHasImage(message.content))) {
         projectedMessages = projectImagesForTextModel(projectedMessages)
       }
+      const projectedTools = projectToolUpdates(
+        projectedMessages, resolvedOptions.tools, modelInfo.toolUpdate, resolvedOptions.toolHistory,
+      )
+      const { tools: _tools, toolUpdates: _updates, ...withoutTools } = resolvedOptions
+      const projected = {
+        ...withoutTools,
+        messages: projectedMessages as Message[],
+        ...projectedTools.tools === undefined ? {} : { tools: projectedTools.tools },
+        ...projectedTools.toolUpdates === undefined ? {} : { toolUpdates: projectedTools.toolUpdates },
+      }
       const projectedOptions = projectedMessages === resolvedOptions.messages
+        && projectedTools.tools === resolvedOptions.tools && projectedTools.toolUpdates === resolvedOptions.toolUpdates
         ? resolvedOptions
         : Object.isFrozen(resolvedOptions)
-          ? deepFreeze({ ...resolvedOptions, messages: projectedMessages as Message[] })
-          : { ...resolvedOptions, messages: projectedMessages as Message[] }
+          ? deepFreeze(projected)
+          : projected
       const stream = dispatch(this.forAdapter(projectedOptions, adapter))
       iterator = stream[Symbol.asyncIterator]()
     } catch (error: unknown) {

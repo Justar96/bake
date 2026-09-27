@@ -89,6 +89,8 @@ kind: "package-reference"
 
 Messages 以内容块发送文本、思考、工具调用和工具结果，以 `output_config.effort` 发送推理强度，并以 Files 引用或内联 base64 发送图片。声明 `systemPromptUpdate: in-history` 的模型保留初始顶层 system，在对应 user/tool-result 轮次之后发送新的 system 快照；未声明能力时，使用最新快照作为顶层 system。回放元数据记录 Messages 格式、模型和签名；Chat 请求只序列化持久化内容，不发送这些签名。无效的 Messages 回放元数据产生警告并省略签名，不丢弃文本或工具历史。
 
+Messages 模型可声明 `toolUpdate: in-history` 或 `addition-only`；默认 `deepseek-flash` 声明 `in-history`。支持的路由以 system 角色块发送 `tool_addition`／`tool_removal` 引用，并对新定义设置 `defer_loading: true`。携带变化的请求包含 `anthropic-beta: mid-conversation-tool-changes-2026-07-01`，需要时与 Files beta 合并。Chat Completions 及未声明此能力的模型始终接收完整当前工具列表。自定义端点必须支持所声明模式；本地测试验证协议格式及重启行为，不证明在线提供方的缓存收益。
+
 ### 带 thinking 与图片的流式调用
 
 支持图片的路由为每个持久引用选定请求目标，再把它解析为确定性请求版本。省略 `imagePixelBudget` 时按官方公布的视觉 token 网格定目标，即 14 px patch、3:1 降采样、单图最多 1024 token，因此正方形图片最多保留 1302×1302 像素，16:9 图片以 1708×961 发送、对应提供方 1708×966 的网格；正整数会用总像素预算取代网格，`low` 使用总计 512×512 像素。每张请求图片单边最多 4096 像素，这是提供方对包含 15 张及以上图片的请求的限制；`imageMaxBytes` 默认为 2 MiB。带 alpha 的图片使用 effort 0 的 WebP，不透明图片使用 JPEG，并采用 85/75/60 质量阶梯；全部候选都超过目标时保留最小输出。每张保留图片前都有文本，注明完整附件 id 与实际请求尺寸。当前文件系统可以映射附件提供方的宿主对象时，该文本还携带只读执行世界路径与可写副本使用的扩展名。纯文本与未列出路由接收稳定附件占位符，而持久历史继续保留图片引用。

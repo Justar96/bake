@@ -6,7 +6,7 @@
 
 import type { Branded } from '@deepseek-ai/dsh-brand'
 import type { FileAttachmentRef, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
-import type { ToolCallId, ProviderRequestId, ReasoningEffortId } from './brand.ts'
+import type { MessageId, ToolCallId, ProviderRequestId, ReasoningEffortId } from './brand.ts'
 import type { Message } from './message.ts'
 
 declare module '@deepseek-ai/cordis' {
@@ -382,6 +382,9 @@ export interface LlmModelReasoningInfo {
  */
 export type SystemPromptUpdate = 'in-history'
 
+/** Native mid-conversation tool additions, optionally including removals; absence sends full current declarations. */
+export type ToolUpdate = 'in-history' | 'addition-only'
+
 /** Exact-route model metadata resolved by its owning adapter. */
 export interface LlmResolvedModelInfo extends LlmModelInfo {
   /** Provider-owned context capacity when known. */
@@ -392,6 +395,8 @@ export interface LlmResolvedModelInfo extends LlmModelInfo {
   reasoning?: LlmModelReasoningInfo
   /** Declared mid-conversation system prompt handling; absent means only a leading system message is read. */
   systemPromptUpdate?: SystemPromptUpdate
+  /** Native tool changes supported by this exact route. */
+  toolUpdate?: ToolUpdate
 }
 
 /**
@@ -451,6 +456,31 @@ export interface ToolSchema {
   parameters: Record<string, unknown>
 }
 
+/** Provider declaration; deferred loading is a request projection, never a stored tool definition. */
+export interface ToolDeclaration extends ToolSchema {
+  /** Keep the definition dormant until its recorded addition. */
+  deferLoading?: true
+}
+
+/** Route-projected tool changes placed after one identified conversation message. */
+export interface ToolUpdateNotice {
+  readonly afterMessageId: MessageId
+  readonly additions: readonly string[]
+  readonly removals: readonly string[]
+}
+
+/** Immutable declarations and changes reconstructed from required Session records. */
+export interface ToolHistory {
+  /** Active definitions at the beginning of this declaration series. */
+  readonly tools: readonly ToolSchema[]
+  /** Changes in log order, with definitions resolved from historical request headers. */
+  readonly updates: readonly {
+    readonly afterMessageId: MessageId
+    readonly additions: readonly ToolSchema[]
+    readonly removals: readonly string[]
+  }[]
+}
+
 /** A single model request, fully assembled. */
 export interface GenerateOptions {
   /** Registered provider route selecting the adapter instance. */
@@ -471,7 +501,11 @@ export interface GenerateOptions {
    */
   system?: string
   /** Tool schemas (adapters map to the provider's `tools` field). */
-  tools?: ToolSchema[]
+  tools?: ToolDeclaration[]
+  /** Session-folded tool history; omission sends complete current declarations. */
+  toolHistory?: ToolHistory
+  /** Adapter-boundary projection of toolHistory, consumed only by capable routes. */
+  toolUpdates?: readonly ToolUpdateNotice[]
   temperature?: number
   maxTokens?: number
   /**

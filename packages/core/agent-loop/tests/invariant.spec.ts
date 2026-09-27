@@ -18,8 +18,9 @@ function dispatch(ctx: Context, options: unknown): void {
 }
 
 function loopRequest<T extends object>(options: T): Readonly<T> {
-  markAgentLoopRequest(options as GenerateOptions)
-  return Object.freeze(options)
+  const request = { toolHistory: { tools: [], updates: [] }, ...options }
+  markAgentLoopRequest(request as GenerateOptions)
+  return Object.freeze(request)
 }
 
 async function requestSetup() {
@@ -76,6 +77,22 @@ describe('request-reconstruction invariant', () => {
     // The system prompt is surface node 0 inside `messages`; a `system` field is an unlogged prefix.
     expect(() => { dispatch(ctx, loopRequest({ model: 'm', system: 'unlogged', messages: Object.freeze(boundary), sessionId: session.id })) })
       .toThrow(/diverges from the folded request header/)
+  })
+
+  it('rejects a loop request whose tool history is not reconstructed from the session log', async () => {
+    const { ctx, session, boundary } = await requestSetup()
+    const history = session.toolHistory()
+    expect(() => {
+      dispatch(ctx, loopRequest({
+        model: 'm', messages: Object.freeze(boundary), sessionId: session.id, toolHistory: history,
+      }))
+    }).not.toThrow()
+    expect(() => {
+      dispatch(ctx, loopRequest({
+        model: 'm', messages: Object.freeze(boundary), sessionId: session.id,
+        toolHistory: { tools: [{ name: 'forged', description: '', parameters: {} }], updates: [] },
+      }))
+    }).toThrow(/diverges from the folded request header/)
   })
 
   it('rejects loop requests with no boundary or header', async () => {

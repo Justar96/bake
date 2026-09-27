@@ -47,7 +47,7 @@ session.append('user/message', { role: 'user', content: [{ type: 'text', text: '
 session.deriveMessages()         // the derived model history
 ```
 
-Surface events (`system/message`, `user/message`, `assistant/message`, `tool/result`) require `surfaceOp` in both typed events and append input. A replacement uses exactly `{ op: 'replace', startSeq, endSeq }`, with inclusive `SessionSeq` endpoints in current surface order. An Assistant message embeds its exact compact provider stream and forbids `sourceEventSeqs`. Known log-only events forbid both metadata fields and never produce a message.
+Surface events (`system/message`, `user/message`, `assistant/message`, `tool/result`) require `surfaceOp` in both typed events and append input. A replacement uses exactly `{ op: 'replace', startSeq, endSeq }`, with inclusive `SessionSeq` endpoints in current surface order. An Assistant message embeds its exact compact provider stream and forbids `sourceEventSeqs`. Log-only events carry neither surface field; required tool updates contribute to provider request projection through `toolHistory()`.
 
 Plugins declare content-changing events with `@messageProjection` and register a pure definition through `ctx.sessions.registerMessageProjection()`. Session calls the definition before accepting an event and caches its immutable message updates. Missing definitions reject append and restore; unloading a used definition also blocks cached reads. Detached constructors and `foldSurface(events, projections)` require explicit definitions. Reconstructors pass the fold's `projectedMessages` to `deriveEventMessage()`; live instance methods apply the same projections automatically. [Plugin-owned message projections](../../../.agents/notes/implemented/architecture/2026-09-11-plugin-owned-message-projections.md) defines ownership and offline assembly.
 
@@ -112,6 +112,8 @@ Every append uses the shared iterative `snapshotJsonValue()` pass, which reads, 
 ### The request header
 
 The loop logs a full canonical `request/header` snapshot (call config, adapter defaults, assembled tool schemas — the rendered system prompt is a `system/message` surface node, not header state) at each loop-instance boundary and on change; `foldRequestHeader(events)` reconstructs it by selecting the latest snapshot, making every conversation request a pure function of the log. Route metadata (`request/context`) is separate logged state appended only when the provider, model, capacity, or `systemPromptUpdate` mode differs; it records the actual prepared call's mode after prompt and user admission, rather than supplying that admission decision.
+
+`session.toolHistory()` reconstructs immutable tool declarations and ordered additions/removals from headers and required `request/tool-update` records. Each update references the latest header and a preceding user/tool-result message. Append and restore validate those references and the exact name changes. The four surface event types and stored message grammar stay unchanged; older readers refuse the new required vocabulary. Changed definitions and explicit request-series boundaries reset the declaration baseline. Logs without complete updates use the full active tool list.
 
 </details>
 

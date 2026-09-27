@@ -1,5 +1,5 @@
 /** Shared catalog and request-local dependencies for DeepSeek protocols. */
-import type { ModelModality, SystemPromptUpdate, ResolvedRetryPolicy, ImageAttachmentAccess } from '@deepseek-ai/dsh-llm'
+import type { ModelModality, SystemPromptUpdate, ToolUpdate, ResolvedRetryPolicy, ImageAttachmentAccess } from '@deepseek-ai/dsh-llm'
 import type { AttachmentStore, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import type { CredentialRef } from '@deepseek-ai/dsh-credentials'
 import type { AnonymousUserId } from '@deepseek-ai/dsh-anonymous-user-id'
@@ -37,6 +37,8 @@ export interface DeepSeekCatalogModel {
    * system prompt; omission means only a leading system message is read.
    */
   systemPromptUpdate?: SystemPromptUpdate
+  /** Native tool changes for Messages; Chat Completions always sends the complete active list. */
+  toolUpdate?: ToolUpdate
 }
 
 /**

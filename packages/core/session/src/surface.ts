@@ -9,6 +9,7 @@
  */
 
 import type { Message } from '@deepseek-ai/dsh-llm'
+import { validateToolUpdateData } from './tool-history.ts'
 import { SessionLogOffset, SessionSeq } from './types.ts'
 import { KNOWN_SESSION_EVENT_TYPES, MESSAGE_PROJECTION_EVENT_TYPES } from './known-event-types.ts'
 import type {
@@ -174,6 +175,7 @@ export function validateSessionEventData(
   subject: string,
 ): void {
   const data: unknown = event.data
+  if (event.type === 'request/tool-update') validateToolUpdateData(data, subject)
   if (event.type === 'request/header') {
     if (!isRecord(data)) throw new Error(`${subject} data must be an object`)
     const header = data['header']

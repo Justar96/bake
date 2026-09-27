@@ -49,6 +49,7 @@ const install: InvariantInstaller = Object.assign((ctx: Context, fail: Invariant
       && options.maxTokens === header.config.maxTokens
       && JSON.stringify(options.stop) === JSON.stringify(header.config.stop)
       && JSON.stringify(options.tools ?? []) === JSON.stringify(header.tools ?? [])
+      && JSON.stringify(options.toolHistory) === JSON.stringify(session.toolHistory())
     if (!headerMatches) {
       fail(`llm request for session "${String(session.id)}" diverges from the folded request header`)
     }
