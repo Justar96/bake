@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import LlmRuntime, { createUserMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { createMessage, createToolResultMessage, createUserMessage, ReasoningEffortId, ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { StreamChunk } from '@deepseek-ai/dsh-llm'
 import FileSettingsProvider from '@deepseek-ai/dsh-settings-file'
 import * as LlmPiAi from '@deepseek-ai/dsh-llm-pi-ai'
@@ -329,7 +329,7 @@ describe('hand-declared providers', () => {
       'acme-gateway': { baseURL: 'https://acme.test', models: [{ id: '111' }] },
     }, 'deferred').get('acme-gateway')!
     const failure = 'llm-pi-ai: provider "acme-gateway" model "111" needs an api; '
-      + 'the installed catalog does not describe it, so set the route\'s api to the wire protocol its endpoint speaks'
+      + 'the installed catalog does not describe it, so set the route\'s api, or this model\'s, to the wire protocol its endpoint speaks'
 
     expect(profile.catalogError).toBe(failure)
     expect(profile.modelErrors.get('111')).toBe(failure)
@@ -630,6 +630,75 @@ describe('catalog routes with per-model configuration', () => {
     // trade a truthful refusal for an endpoint's 401.
     const resolved = resolveProfiles({ 'openai-codex': {} })
     expect(resolved.get('openai-codex')?.piProvider?.auth.apiKey).toBeUndefined()
+  })
+})
+
+describe('per-model protocols', () => {
+  /** One gateway route whose models speak different protocols, as a CLIProxyAPI login writes it. */
+  function mixedGateway(baseURL: string): LlmPiAi.Config {
+    return gateway(baseURL, {
+      api: 'openai-responses',
+      models: [{ id: 'gpt-large' }, { id: 'kimi-large', api: 'openai-completions' }],
+    })
+  }
+
+  it('sends each model over its own protocol while the rest keep the route’s', async () => {
+    const failure = { status: 401, body: JSON.stringify({ error: { message: 'expected mock failure' } }) }
+    const server = await mockServer([failure, { events: textEvents }])
+    const ctx = await harness(mixedGateway(`${server.url}/v1`))
+
+    await assemble(ctx, { provider: 'acme-gateway', model: 'gpt-large', messages: [] })
+    const result = await assemble(ctx, { provider: 'acme-gateway', model: 'kimi-large', messages: [] })
+
+    expect(server.paths).toEqual(['/v1/responses', '/v1/chat/completions'])
+    expect(result.message.content).toEqual([{ type: 'text', text: 'hello' }])
+    // One credential serves both protocols.
+    expect(server.headers.map(header => header.authorization)).toEqual(['Bearer test-key', 'Bearer test-key'])
+  })
+
+  it('keeps parallel tool calls in one assistant turn with each result right after it', async () => {
+    const server = await mockServer([{ events: textEvents }])
+    const ctx = await harness(mixedGateway(`${server.url}/v1`))
+    const [first, second] = [ToolCallId('call-a'), ToolCallId('call-b')]
+    const source = { kind: 'plugin', plugin: 'test' } as const
+
+    await assemble(ctx, {
+      provider: 'acme-gateway',
+      model: 'kimi-large',
+      tools: [{ name: 'bash', description: 'run', parameters: { type: 'object' } }],
+      messages: [
+        createUserMessage({ content: [{ type: 'text', text: 'look' }], source }),
+        createMessage({ role: 'assistant', source, content: [
+          { type: 'text', text: 'Checking both.' },
+          { type: 'tool-call', id: first, name: 'bash', arguments: '{"command":"ls"}' },
+          { type: 'tool-call', id: second, name: 'bash', arguments: '{"command":"pwd"}' },
+        ] }),
+        createToolResultMessage({ callId: first, content: [{ type: 'text', text: 'a' }], isError: false }),
+        createToolResultMessage({ callId: second, content: [{ type: 'text', text: 'b' }], isError: false }),
+      ],
+    })
+
+    // The shape a strict Chat Completions upstream requires: both calls on one
+    // assistant message, answered by the tool messages that immediately follow.
+    const body = server.requests[0] as { messages: { role: string; tool_calls?: { id: string }[]; tool_call_id?: string }[] }
+    const turn = body.messages.slice(body.messages.findIndex(message => message.role === 'assistant'))
+    expect(turn.map(message => [message.role, message.tool_calls?.map(call => call.id) ?? message.tool_call_id]))
+      .toEqual([['assistant', ['call-a', 'call-b']], ['tool', 'call-a'], ['tool', 'call-b']])
+  })
+
+  it('moves one catalog model to another protocol without repointing its siblings', () => {
+    const resolved = resolveProfiles({ openai: { modelOverrides: { 'gpt-4.1': { api: 'openai-completions' } } } })
+    const models = resolved.get('openai')?.piProvider?.getModels() ?? []
+    expect(models.find(model => model.id === 'gpt-4.1')?.api).toBe('openai-completions')
+    expect(models.filter(model => model.id !== 'gpt-4.1').every(model => model.api === 'openai-responses')).toBe(true)
+  })
+
+  it('rejects a model protocol this build cannot serve', () => {
+    const [model] = getBuiltinModels('deepseek')
+    if (model === undefined) throw new Error('the installed catalog ships no deepseek model')
+    const spec = { provider: 'acme-gateway', displayName: 'Acme Gateway', namesCredential: true, namesModelApi: true }
+    expect(() => buildProvider({ ...spec, api: 'openai-completions', models: [{ ...model, api: 'quantum-telepathy' }] }))
+      .toThrow(/names api "quantum-telepathy", which this build cannot serve/)
   })
 })
 

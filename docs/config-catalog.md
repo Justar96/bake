@@ -937,6 +937,14 @@ export interface PiAiProviderProfile {
 export interface PiAiModelProfile {
   /** Model id sent to the provider and accepted by {@link GenerateOptions.model}. */
   id: string
+  /**
+   * Wire protocol for this model alone, winning over the route's `api` and the
+   * installed catalog entry's. A gateway that fronts several upstreams can
+   * serve each model over the protocol it translates cleanly — an OpenAI model
+   * over Responses beside a Kimi model over Chat Completions — under one route
+   * key and one credential.
+   */
+  api?: string
   /** Display name for selectors; defaults to the catalog name, then the id. */
   name?: string
   /** Maximum combined request and response context in tokens. */

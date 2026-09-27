@@ -10,6 +10,7 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 - Closing the task, subagent, or goal view no longer lifts the prompt to the middle of the screen: the rows the view took stay blank above the prompt until new output fills them.
 - An Escape that arrives together with the next key, as on a slow terminal, still closes an open view, and the typed characters go to the prompt.
 - The subagents row counts the children and how many are working instead of listing their names, which the Ctrl+G view still shows. With tasks, a goal, and subagents all showing, the goal on the header drops its objective as well as its round count.
+- A model in a pi-ai provider profile can set its own `api`, so one route and credential can serve models over different wire protocols.
 
 ## [0.1.6] - 2026-09-27
 
