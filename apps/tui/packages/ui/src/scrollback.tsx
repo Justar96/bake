@@ -31,8 +31,6 @@ interface ScrollbackProps {
   readonly frame: FrameStyle
   readonly size: WindowSize
   readonly repainting: boolean
-  /** Sheets must not make the composer retain their expanded height. */
-  readonly recording: boolean
   readonly children: React.ReactNode
 }
 
@@ -107,7 +105,7 @@ export function Scrollback(props: ScrollbackProps): React.ReactElement {
     }).catch((error: unknown) => { if (active) exit(error) })
     return () => { active = false }
   }, [replay, waitUntilRenderFlush, exit])
-  const held = useHeldHeight(replay.batch, budget, props.repainting, props.recording)
+  const held = useHeldHeight(replay.batch, budget, props.repainting)
   return <Box flexDirection="column">
     <Committed batch={replay.batch} heading={props.heading} opening={props.opening} budget={budget} result={result}
       copy={props.copy} frame={props.frame} columns={props.size.columns} />
@@ -118,8 +116,14 @@ export function Scrollback(props: ScrollbackProps): React.ReactElement {
   </Box>
 }
 
-/** Subtract only newly printed rows before layout, keeping shrinking controls anchored. */
-function useHeldHeight(batch: ReplayBatch, budget: Budget, repainting: boolean, recording: boolean): {
+/**
+ * Subtract only newly printed rows before layout, keeping shrinking controls anchored.
+ *
+ * Every frame is recorded, an open sheet's included. Growing the frame scrolls
+ * history above it into the terminal's scrollback, which cannot be drawn back
+ * down, so a frame that shrinks would lift the composer off the bottom rows.
+ */
+function useHeldHeight(batch: ReplayBatch, budget: Budget, repainting: boolean): {
   readonly floor: number
   readonly frame: React.RefObject<DOMElement | null>
 } {
@@ -136,7 +140,7 @@ function useHeldHeight(batch: ReplayBatch, budget: Budget, repainting: boolean, 
   remaining = Math.max(0, remaining)
   const floor = repainting ? 0 : Math.min(budget.dynamic, remaining)
   useLayoutEffect(() => {
-    held.current = { printed, height: repainting ? 0 : recording && frame.current !== null
+    held.current = { printed, height: repainting ? 0 : frame.current !== null
       ? measureElement(frame.current).height : remaining }
   })
   return { floor, frame }

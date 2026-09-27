@@ -327,6 +327,14 @@ function SessionView(props: AppProps): React.ReactElement {
     if (key.ctrl && text === 'c') { props.onInterrupt(); return }
     if (sheetRef.current !== undefined) {
       if (key.escape) { openSheet(undefined); return }
+      // Escape and the next key read together decode as one Meta key. No sheet
+      // takes a Meta key, so it closes as the Escape would have, and a printed
+      // character goes to the composer, as the rest of the same read does.
+      if (key.meta) {
+        openSheet(undefined)
+        if (!key.ctrl && [...text].length === 1 && !/\p{Cc}/u.test(text)) composer.type(text)
+        return
+      }
       if (key.ctrl && text === 't' && hasTasks) { toggleSheet('tasks'); return }
       if (key.tab) { showSheet(stepSheet(key.shift ? -1 : 1)); return }
       if (key.ctrl && text === 'o' && props.goal !== undefined) { toggleSheet('goal'); return }
@@ -671,7 +679,7 @@ function SessionView(props: AppProps): React.ReactElement {
       notice={`${child.label} · ${copy.subagentBack}`} />
   }
   return <Scrollback transcript={props.committed} heading={heading} opening={opening} budget={budget} result={result}
-    copy={copy} frame={props.frame} size={size} repainting={repainting} recording={sheet === undefined}>
+    copy={copy} frame={props.frame} size={size} repainting={repainting}>
     <Beat clock={clock}>
         {sheetStandalone ? sheetBlock : <>
         {sheet === undefined && <LiveRegion rows={liveRows} budget={budget} limit={liveLimit} result={result} clock={animate} />}

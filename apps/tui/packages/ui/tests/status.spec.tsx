@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render } from '../../../tests/render.tsx'
 import { App, type AppProps } from '../src/app.tsx'
 import { Tasks } from '../src/tasks.tsx'
+import { SubagentRow } from '../src/subagents.tsx'
 import { emptyTranscript } from '../src/transcript.ts'
 import { dictionaries } from '../src/copy.ts'
 import { renderToString } from 'ink'
@@ -15,14 +16,17 @@ const statusRow = (frame: string | undefined) => (frame ?? '').split('\n').findL
 /** The subagents' row, under the input's base rule and over the status line. */
 const agentRow = (frame: string | undefined) => (frame ?? '').split('\n').find(line => /^ {2}[↓>] /.test(line)) ?? ''
 
-it.each(['en', 'zh'] as const)('names every child on one row under the input in %s', async locale => {
+it.each(['en', 'zh'] as const)('counts the children on one row under the input in %s', async locale => {
   const ui = render(<App {...props({ copy: dictionaries[locale], subagents: [
     { id: 'child-1', label: 'Review tests', state: 'working', detail: 'Continuable', inspectable: true },
     { id: 'child-2', label: 'Check types', state: 'saved', outcome: 'completed', detail: 'One-shot', inspectable: true },
     { id: 'child-3', label: 'Review security', state: 'saved', outcome: 'failed', detail: 'Continuable', inspectable: true },
     { id: 'child-4', label: 'Review docs', state: 'saved', outcome: 'stopped', detail: 'Continuable', inspectable: true },
+    { id: 'child-5', label: 'Lost', state: 'issue', detail: 'Unreadable', inspectable: false },
   ] })} />)
-  expect(agentRow(ui.lastFrame())).toBe(`  ↓ ${dictionaries[locale].subagentsTitle}: 4 · ● Review tests  ○ Check types  ○ Review security  ○ Review docs`)
+  const copy = dictionaries[locale]
+  // Names are the sheet's; the row counts what is working and what cannot be read.
+  expect(agentRow(ui.lastFrame())).toBe(`  ↓ ${copy.subagentsTitle}: 5 · 1 ${copy.subagentWorking} · 1 ${copy.subagentUnreadable}`)
   expect(statusRow(ui.lastFrame())).not.toContain(dictionaries[locale].subagentsTitle)
   // The row sits between the base rule and the status line.
   const lines = (ui.lastFrame() ?? '').split('\n')
@@ -84,8 +88,8 @@ it('walks Up from the goal to the task row, Down back, and opens the list with C
   ui.stdin.write('\x1b[B')
   await vi.waitFor(() => expect(ui.lastFrame()).toContain('> ● Goal active'))
   ui.stdin.write('\x1b[B')
-  // Beside the task row the goal drops its own key; Tab reaches its sheet from any other.
-  await vi.waitFor(() => expect(ui.lastFrame()).toMatch(/ ● Goal active {2}Ship it$/m))
+  // Beside the task row the goal drops its own key and details; Tab reaches its sheet from any other.
+  await vi.waitFor(() => expect(ui.lastFrame()).toMatch(/ ● Goal active$/m))
   expect(ui.lastFrame()).not.toContain('> ● Goal active')
   ui.stdin.write('Unsent draft')
   await vi.waitFor(() => expect(ui.lastFrame()).toContain('> Unsent draft▌'))
@@ -106,9 +110,10 @@ it('thins the rows around the composer once tasks, a goal, and subagents are all
   const header = frame.split('\n').find(line => line.includes('Goal active'))!
   expect(header).not.toContain('Ctrl+O')
   expect(header).not.toContain('round 3/256')
-  expect(header).toContain('● Goal active  Ship it')
+  expect(header).not.toContain('Ship it')
+  expect(header).toMatch(/● Goal active$/)
   const status = statusRow(frame)
-  expect(agentRow(frame)).toContain('↓ Subagents: 1 · ● Review tests')
+  expect(agentRow(frame)).toBe('  ↓ Subagents: 1 · 1 Working')
   expect(status).toContain('ctx ~35%')
   for (const cost of ['Context:', 'in 1.2M', 'out 30.5k', 'cache hit']) expect(status).not.toContain(cost)
   expect(frame).toMatch(/^Tasks .*Ctrl\+T$/m)
@@ -290,7 +295,7 @@ it('selects the subagents row with Down, and moves the pointer past a child with
   const saved = { id: 'old', label: 'Earlier', state: 'saved', outcome: 'completed', detail: 'One-shot', inspectable: true } as const
   const ui = render(<App {...props({ onInspectSubagent, onSubmit, subagents: [remote, saved] })} />)
   ui.stdin.write('\x1b[B')
-  await vi.waitFor(() => expect(agentRow(ui.lastFrame())).toContain('> Subagents: 2 · Enter opens · ● remote  ○ Earlier'))
+  await vi.waitFor(() => expect(agentRow(ui.lastFrame())).toBe('  > Subagents: 2 · Enter opens'))
   ui.stdin.write('\r')
   // The pointer starts on the first child it can open.
   await vi.waitFor(() => expect(ui.lastFrame()).toContain('▸ ○ Earlier  Completed · Saved'))
@@ -368,14 +373,18 @@ it('keeps Down in the composer while drafting', async () => {
   expect(ui.lastFrame()).not.toContain(dictionaries.en.sheetClose)
 })
 
-it('keeps the subagents on one row however many there are, cutting names from the end', () => {
+it('keeps the subagents on one row however many there are, and at any width', () => {
   const subagents = Array.from({ length: 12 }, (_, index) => ({
-    id: `c${index}`, label: `Child number ${index}`, state: 'live' as const, detail: 'Continuable', inspectable: true }))
+    id: `c${index}`, label: `Child number ${index}`, state: index < 7 ? 'working' as const : 'live' as const,
+    detail: 'Continuable', inspectable: true }))
   const frame = render(<App {...props({ subagents })} />).lastFrame() ?? ''
-  const row = agentRow(frame)
-  expect(row).toMatch(/^ {2}↓ Subagents: 12 · ● Child number 0 .*…$/)
-  expect(stringWidth(row)).toBeLessThanOrEqual(100)
-  expect(frame.split('\n').filter(line => line.includes('Child number'))).toHaveLength(1)
+  expect(agentRow(frame)).toBe('  ↓ Subagents: 12 · 7 Working')
+  expect(frame).not.toContain('Child number')
+  for (const columns of [8, 20, 40]) {
+    const row = renderToString(<SubagentRow entries={subagents} copy={dictionaries.en} columns={columns} />, { columns })
+    expect(row.split('\n'), `${columns}`).toHaveLength(1)
+    expect(stringWidth(row), `${columns}`).toBeLessThanOrEqual(columns)
+  }
 })
 
 it('steps thinking on Shift-Tab without touching the draft or a completion Tab would take', async () => {

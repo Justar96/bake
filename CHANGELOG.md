@@ -4,6 +4,10 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 ## [Unreleased]
 
+- Closing the task, subagent, or goal view no longer lifts the prompt to the middle of the screen: the rows the view took stay blank above the prompt until new output fills them.
+- An Escape that arrives together with the next key, as on a slow terminal, still closes an open view, and the typed characters go to the prompt.
+- The subagents row counts the children and how many are working instead of listing their names, which the Ctrl+G view still shows. With tasks, a goal, and subagents all showing, the goal on the header drops its objective as well as its round count.
+
 ## [0.1.6] - 2026-09-27
 
 - A background job that finishes after its turn wakes the agent with one completion notice instead of two.

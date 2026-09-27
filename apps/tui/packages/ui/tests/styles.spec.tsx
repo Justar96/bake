@@ -4,6 +4,8 @@ import { expect, it } from 'vitest'
 import type { Row } from '../src/rows.ts'
 import { AGENT_TONES, PALETTE } from '../src/palette.ts'
 import { ICON } from '../src/icons.ts'
+import { subagentSheet } from '../src/subagents.tsx'
+import { dictionaries } from '../src/copy.ts'
 
 it('draws the rule dim and leaves the draft in the terminal\'s own foreground at every width', () => {
   const env: NodeJS.ProcessEnv = { ...process.env, FORCE_COLOR: '3', COLORTERM: 'truecolor' }
@@ -170,7 +172,7 @@ it('colours the permission boundary beside a dim label without relying on colour
   expect(frame).toContain('\u001b[2mThink \u001b[22m\u001b[38;2;14;165;233mhigh')
 })
 
-it('dims the subagents row and draws each child in its own tone', () => {
+it('dims the subagents row and draws each child in its own tone on the sheet', () => {
   const env: NodeJS.ProcessEnv = { ...process.env, FORCE_COLOR: '3', COLORTERM: 'truecolor' }
   delete env.NO_COLOR
   const frame = execFileSync(process.execPath, ['--import', 'tsx/esm', '--input-type=module', '--eval', `
@@ -183,11 +185,13 @@ it('dims the subagents row and draws each child in its own tone', () => {
     process.stdout.write(renderToString(React.createElement(SubagentRow, { entries, copy: dictionaries.en, columns: 100 }), { columns: 100 }));
   `], { cwd: new URL('../../../../../', import.meta.url), env, encoding: 'utf8', timeout: 20_000 })
   const rgb = (hex: string) => `\u001b[38;2;${[1, 3, 5].map(index => Number.parseInt(hex.slice(index, index + 2), 16)).join(';')}m`
-  // Dim from the first cell, with every child's glyph and name in its identity tone.
+  // Dim from the first cell, a count with no identity tone; names are the sheet's.
   expect(frame.startsWith('\u001b[2m')).toBe(true)
-  for (const [index, name] of ['● Review', '○ Check', '○ Audit'].entries()) {
-    expect(frame).toContain(`${rgb(AGENT_TONES[index]!)}${name}`)
-  }
+  for (const tone of AGENT_TONES) expect(frame).not.toContain(rgb(tone))
+  const entries = ['Review', 'Check', 'Audit'].map((label, index) =>
+    ({ id: label, label, state: index === 0 ? 'working' as const : 'saved' as const, detail: '', inspectable: true }))
+  const names = subagentSheet(entries, 0, dictionaries.en).flatMap(line => line.parts?.slice(0, 1) ?? [])
+  expect(names.map(part => [part.text, part.color])).toEqual(entries.map((entry, index) => [entry.label, AGENT_TONES[index]]))
   expect(new Set(AGENT_TONES).size).toBe(AGENT_TONES.length)
   for (const tone of AGENT_TONES) expect(Object.values(PALETTE)).not.toContain(tone)
 })

@@ -50,15 +50,14 @@ export function subagentTab(entries: readonly SubagentEntry[], copy: TuiCopy): s
 }
 
 /**
- * The session's children as one dim row under the input, above the status line.
+ * The session's children as one compact row under the input, above the status line.
  *
  * It sits below the composer because Down from an empty composer selects it.
- * The count, then every child as its activity's glyph and its name, both in
- * the child's own identity tone ({@link agentTone}), which the sheet shares.
- * The glyph's shape carries the activity, so the colour is free to say which
- * child it is. Dim, so it stays supporting material beside the draft; the
- * names that do not fit are cut from the end. Focused, the row is drawn at
- * full strength and says what Enter does.
+ * The total, then how many children are working and how many cannot be read,
+ * when any are. Names are left to the subagent sheet, so the row stays short
+ * however many children there are. Dim, so it stays supporting material
+ * beside the draft. Focused, it is drawn at full strength and says what Enter
+ * does in place of the counts.
  *
  * @param props.entries - the children, in the catalog's order.
  * @param props.columns - row width.
@@ -72,14 +71,14 @@ export function SubagentRow({ entries, copy, columns, focused = false }: {
   readonly focused?: boolean
 }): React.ReactElement | null {
   if (entries.length === 0 || columns <= 0) return null
+  const working = entries.filter(entry => entry.state === 'working').length
+  const issues = entries.filter(entry => entry.state === 'issue').length
+  const summary = [working > 0 ? `${working} ${copy.subagentWorking}` : '',
+    issues > 0 ? `${issues} ${copy.subagentUnreadable}` : ''].filter(Boolean).join(' · ')
   return <Box width={columns} height={1} flexShrink={0} overflowX="hidden">
     <Text wrap="truncate-end" dimColor={!focused}>
       <Text inverse={focused}>{`${focused ? '>' : '↓'} ${copy.subagentsTitle}: ${entries.length}`}</Text>
-      {focused ? ` · ${copy.subagentsOpen}` : ''}
-      {entries.map((entry, index) => <React.Fragment key={entry.id}>
-        {index === 0 ? ' · ' : '  '}
-        <Text color={agentTone(index)}>{`${GLYPH[entry.state].glyph} ${entry.label}`}</Text>
-      </React.Fragment>)}
+      {focused ? ` · ${copy.subagentsOpen}` : summary !== '' ? ` · ${summary}` : ''}
     </Text>
   </Box>
 }
