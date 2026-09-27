@@ -12,8 +12,8 @@ import { inputHistory } from './history.ts'
 import { InteractionView, type Interaction, type InteractionAnswer } from './interaction.tsx'
 import { budgetFor, selectionWindow, type Budget, type FrameStyle, type WindowSize } from './layout.ts'
 import { compactModel, compactPath, present, type Highlight, type ResultBound } from './present.ts'
-import { cacheTone, permissionTone, PALETTE, type PaletteColor } from './palette.ts'
-import { subagentLine, subagentSheet, subagentTab, type SubagentEntry } from './subagents.tsx'
+import { cacheTone, contextTone, PALETTE, type PaletteColor } from './palette.ts'
+import { SubagentRow, subagentLine, subagentSheet, subagentTab, type SubagentEntry } from './subagents.tsx'
 import { goalSheet, goalState, type GoalEntry } from './goal.ts'
 import { Sheet, sheetPage, sheetRows, type SheetLine, type SheetTab } from './sheet.tsx'
 import { Tasks, taskSheet, taskTab, tasksOpen, type TaskEntry } from './tasks.tsx'
@@ -271,17 +271,15 @@ function SessionView(props: AppProps): React.ReactElement {
   const showing = SHEETS.filter(showable)
   /**
    * The sheet `step` places away from the open one, among those with something
-   * to show. From no sheet, forward is the first. With `closing`, a step past
-   * either end closes instead of wrapping, so one key opens, cycles, and closes.
+   * to show, wrapping past either end. Tab's step inside a sheet; each sheet's
+   * own key opens and closes it.
    */
-  const stepSheet = (step: 1 | -1, closing: boolean): SheetKind | undefined => {
+  const stepSheet = (step: 1 | -1): SheetKind | undefined => {
     const shown = SHEETS.filter(showable)
     if (shown.length === 0) return undefined
     const at = sheetRef.current === undefined ? -1 : shown.indexOf(sheetRef.current)
     if (at < 0) return step === 1 ? shown[0] : shown.at(-1)
-    const next = at + step
-    if (next >= 0 && next < shown.length) return shown[next]
-    return closing ? undefined : shown[(next + shown.length) % shown.length]
+    return shown[(at + step + shown.length) % shown.length]
   }
   const showSheet = (next: SheetKind | undefined): void => {
     focusOn(undefined)
@@ -329,8 +327,8 @@ function SessionView(props: AppProps): React.ReactElement {
     if (key.ctrl && text === 'c') { props.onInterrupt(); return }
     if (sheetRef.current !== undefined) {
       if (key.escape) { openSheet(undefined); return }
-      if (key.ctrl && text === 't') { showSheet(stepSheet(1, true)); return }
-      if (key.tab) { showSheet(stepSheet(key.shift ? -1 : 1, false)); return }
+      if (key.ctrl && text === 't' && hasTasks) { toggleSheet('tasks'); return }
+      if (key.tab) { showSheet(stepSheet(key.shift ? -1 : 1)); return }
       if (key.ctrl && text === 'o' && props.goal !== undefined) { toggleSheet('goal'); return }
       if (key.ctrl && text === 'g' && hasSubagents) { toggleSheet('agents'); return }
       if (sheetRef.current === 'agents') {
@@ -362,7 +360,7 @@ function SessionView(props: AppProps): React.ReactElement {
     }
     if (interaction !== undefined || props.inputBlocked === true || props.inspection !== undefined || composer.blocked || key.meta) return
     if (key.ctrl && text === 'o' && props.goal !== undefined) { toggleSheet('goal'); return }
-    if (key.ctrl && text === 't' && showing.length > 0) { showSheet(stepSheet(1, true)); return }
+    if (key.ctrl && text === 't' && hasTasks) { toggleSheet('tasks'); return }
     if (key.ctrl && text === 'g' && hasSubagents) { toggleSheet('agents'); return }
     const focused = focusRef.current
     if (focused !== undefined && available(focused)) {
@@ -500,8 +498,11 @@ function SessionView(props: AppProps): React.ReactElement {
   // than it can be read and scrolls the surface.
   const liveRows = useMemo(() => props.live.filter(row => row.kind !== 'reasoning'), [props.live])
   const thinking = useMemo(() => thinkingRows(props.live, budget.measure, THINKING_ROWS), [props.live, budget])
-  const heading = props.inspectionParent === undefined ? `${copy.session}: ${props.sessionId}`
-    : `${copy.subagentParent}: ${props.inspectionParent} > ${props.sessionId}`
+  // The access boundary is read where the session opens, not on every frame.
+  // A session without the welcome block names it on its heading instead.
+  const access = props.permission === undefined ? '' : ` · ${copy.permission} ${props.permission}`
+  const heading = props.inspectionParent === undefined ? `${copy.session}: ${props.sessionId}${access}`
+    : `${copy.subagentParent}: ${props.inspectionParent} > ${props.sessionId}${access}`
   // Memoized so the committed transcript is not re-rendered on every frame.
   const result = useMemo<ResultBound>(
     () => ({ lines: props.resultLines, unit: copy.cardLines, single: copy.cardLine, more: copy.moreLines, failures: copy.summaryFailures, earlier: copy.earlierCalls, ...props.highlight === undefined ? {} : { code: props.highlight } }),
@@ -511,7 +512,7 @@ function SessionView(props: AppProps): React.ReactElement {
   const [opening] = useState<Opening | undefined>(() => props.version === undefined
     || props.inspectionParent !== undefined || props.committed.length > 0
     ? undefined
-    : { kind: 'welcome', version: props.version, heading: `${copy.session}: ${props.sessionId}` })
+    : { kind: 'welcome', version: props.version, heading: `${copy.session}: ${props.sessionId}`, access: props.permission })
   const menuLimit = Math.min(props.completionLimit, budget.items)
   const liveWant = interaction === undefined ? budget.live : 1
   const controls = interaction === undefined ? budget.chrome.rows + budget.composer - 1 : 0
@@ -525,6 +526,10 @@ function SessionView(props: AppProps): React.ReactElement {
   // opens the interaction instead and is charged here, not to the interaction.
   const openLimit = claim(interaction !== undefined && budget.chrome.gap ? 1 : 0)
   const interactionLimit = claim(interaction === undefined ? 0 : menuLimit)
+  // Under the input, with the chrome; an interaction replaces both. Claimed
+  // before anything above the input, so the input's row never depends on
+  // what streams over it.
+  const subagentLimit = claim(hasSubagents && interaction === undefined ? 1 : 0)
   // An open sheet takes every row the interaction leaves. Below five it
   // replaces the whole region, composer included, so it can still be read.
   const sheetColor = (kind: SheetKind): PaletteColor =>
@@ -604,8 +609,13 @@ function SessionView(props: AppProps): React.ReactElement {
         color: props.stopping ? PALETTE.failed : PALETTE.running,
       }
       : summary === undefined ? undefined : { kind: 'ended', summary }
-  const goalStanding = goalState(props.goal, copy)
-  const working = props.subagents?.filter(entry => entry.state === 'working').length ?? 0
+  // With two or more of the task row, the goal, and the subagents on screen,
+  // the rows around the composer carry what the session is doing, and
+  // cost readings and repeated shortcuts make them hard to scan. Each view's
+  // sheet still holds what is left out here; any open sheet reaches the rest with Tab.
+  const dense = [tasksShown, props.goal !== undefined, hasSubagents].filter(Boolean).length >= 2
+  const goalStanding = goalState(props.goal, copy, dense)
+  const occupancy = props.context === undefined ? undefined : contextPercent(props.context)
   const sheetBlock = sheetView === undefined ? null : <Sheet {...sheetView} tabs={tabs} columns={size.columns}
     limit={sheetViewLimit} offset={sheetScroll} frame={props.frame} />
   const panels = sheetView !== undefined && !sheetStandalone ? sheetBlock : <>
@@ -654,7 +664,9 @@ function SessionView(props: AppProps): React.ReactElement {
       compactPhase: _compactPhase, ...childProps } = props
     return <SessionView {...childProps} {...child} key={child.sessionId} inspection={undefined}
       inspectionParent={props.sessionId} inputBlocked={true} stopping={false}
-      pending={[]} todos={undefined} subagents={[]} attachments={[]} context={child.context}
+      // The parent's children stay listed under the input, inert here, so the
+      // input keeps its row while a child is open and after it closes.
+      pending={[]} todos={undefined} subagents={props.subagents ?? []} attachments={[]} context={child.context}
       interaction={undefined} command={undefined}
       notice={`${child.label} · ${copy.subagentBack}`} />
   }
@@ -674,27 +686,22 @@ function SessionView(props: AppProps): React.ReactElement {
               left={[{ text: `${copy.model}: ${compactModel(props.model)}` },
                 ...props.plan === undefined || (!props.plan.active && !props.plan.pending) ? []
                   : [props.plan.pending ? (props.plan.active ? copy.planExitPending : copy.planEntryPending) : copy.planActive]]}
-              {...props.permission === undefined ? {} : { badge: {
-                label: copy.permission, value: props.permission, color: permissionTone(props.permission),
-              } }}
-              {...props.thinkingLevel === undefined ? {} : { secondaryBadge: {
+              {...props.thinkingLevel === undefined ? {} : { badge: {
                 label: copy.thinking, value: props.thinkingLevel, color: PALETTE.asking,
               } }}
               right={[
                 // In priority order, because narrowing drops them from the end.
-                ...(props.subagents?.length ?? 0) === 0 ? [] : [{
-                  text: `${focus === 'subagents' ? '> ' : '↓ '}${copy.subagentsTitle}: ${props.subagents!.length}${working === 0 ? '' : ` · ${working} ${copy.subagentWorking}`}${focus === 'subagents' ? ` · ${copy.subagentsOpen}` : ''}`,
-                  short: `${focus === 'subagents' ? '>' : '↓'} ${props.subagents!.length}`,
-                  selected: focus === 'subagents',
-                }],
                 // Occupancy is what a user compacts on. The totals are what the
                 // session cost. The path is last because it is the unbounded
                 // field. The status line shortens it from the start and keeps
                 // the tail, which names the workspace.
-                ...props.context === undefined ? [] : [{ text: `${copy.context}: ${formatContext(props.context)}`,
-                  short: `${copy.contextShort} ~${contextPercent(props.context)}%` }],
-                ...props.usage === undefined ? [] : formatTotals(props.usage, { input: copy.tokensIn, output: copy.tokensOut }),
-                ...hit === undefined ? [] : [{ label: copy.cacheHit, value: `${hit}%`, color: cacheTone(hit) }],
+                // Dense, the meter keeps only the percentage a user compacts
+                // on, and the session's cost readings give way.
+                ...props.context === undefined || occupancy === undefined ? [] : [{
+                  text: dense ? `${copy.contextShort} ~${occupancy}%` : `${copy.context}: ${formatContext(props.context)}`,
+                  short: `${copy.contextShort} ~${occupancy}%`, color: contextTone(occupancy) }],
+                ...props.usage === undefined || dense ? [] : formatTotals(props.usage, { input: copy.tokensIn, output: copy.tokensOut }),
+                ...hit === undefined || dense ? [] : [{ label: copy.cacheHit, value: `${hit}%`, color: cacheTone(hit) }],
                 // Last of the bounded fields: it drops before any reading of the session.
                 ...props.update === undefined ? [] : [{
                   label: copy.updateLabel, color: PALETTE.waiting,
@@ -720,11 +727,13 @@ function SessionView(props: AppProps): React.ReactElement {
               activity={activity}
               standing={goalStanding === undefined ? undefined : focus === 'goal'
                 ? { ...goalStanding, details: `${copy.goalOpen} · ${goalStanding.details}` }
-                : { ...goalStanding, key: copy.goalKey }}
+                : dense ? goalStanding : { ...goalStanding, key: copy.goalKey }}
               standingFocused={focus === 'goal'}
               clock={clock}
               motion={animate !== undefined}
               compact={screenReader}
+              {...subagentLimit === 0 ? {} : { footer: (columns: number) =>
+                <SubagentRow entries={props.subagents ?? []} copy={copy} columns={columns} focused={focus === 'subagents'} /> }}
             >
               {panels}
             </Chrome>

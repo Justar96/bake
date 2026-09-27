@@ -632,7 +632,7 @@ scenario('fresh', 'login, model and effort selection, paste, cursor editing, a b
         await tty.search(picked('high'))
         tty.send('\r', 'Enter to pick the effort')
         await tty.expect('Model set for the next turn: deepseek-official/tui-picked-model (high)')
-        await tty.expect(`${SCREEN.status}tui-picked-model  Access workspace-write  Think high`)
+        await tty.expect(`${SCREEN.status}tui-picked-model  Think high`)
       }
       tty.send(`\x1b[200~X${prompt}Z\x1b[201~`, 'a bracketed paste padded with X and Z')
       await tty.expect(`> X${prompt}Z${SCREEN.caret}`)
@@ -738,12 +738,12 @@ scenario('status-colour', 'model and context use normal foreground while support
           })
           screen.resize(60, 40)
           tty.resize(60, 40)
-          await tty.wait('the compact context reading beside access at 60 columns', async () => {
+          await tty.wait('a context reading beside the model at 60 columns, with no access mode', async () => {
             const raw = tty.raw
             await new Promise<void>(resolve => screen.write(raw.slice(consumed), resolve))
             consumed = raw.length
             const line = screen.buffer.active.getLine(screen.buffer.active.viewportY + screen.rows - 2)?.translateToString(true) ?? ''
-            return line.includes('Access workspace-write') && /ctx ~\d+%/.test(line)
+            return line.includes(SCREEN.status) && !line.includes(dictionaries.en.permission) && /(ctx ~\d+%|Context: ~)/.test(line)
           })
         } finally { screen.dispose() }
       })
@@ -761,9 +761,18 @@ scenario('plan', 'plan-mode status follows the logged Harness projection', { rep
     await run.terminal('plan', [], async tty => {
       tty.send('/plan\r', 'enter plan mode')
       await tty.expect(`${SCREEN.status}deepseek-v4-flash  Plan  `)
-      const after = tty.mark()
-      tty.send('/plan off\r', 'leave plan mode')
-      await tty.expect(`${SCREEN.status}deepseek-v4-flash  Access workspace-write`, after)
+      const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
+      let consumed = 0
+      try {
+        tty.send('/plan off\r', 'leave plan mode')
+        await tty.wait('the status row without plan mode', async () => {
+          const raw = tty.raw
+          await new Promise<void>(resolve => screen.write(raw.slice(consumed), resolve))
+          consumed = raw.length
+          const line = screen.buffer.active.getLine(screen.buffer.active.viewportY + screen.rows - 2)?.translateToString(true) ?? ''
+          return line.includes(`${SCREEN.status}deepseek-v4-flash`) && !line.includes('Plan')
+        })
+      } finally { screen.dispose() }
     })
     const log = await events(await run.created(before, 'persisted'))
     const modes = log.filter(e => e.type === 'plan/mode').map(e => e.data.active)
@@ -791,16 +800,16 @@ scenario('thinking', 'selected and provider-default thinking levels follow model
           line.includes('Model: deepseek-v4-flash') && !line.includes('Think'))
         tty.send('/model deepseek-official/tui-picked-model high\r')
         await footer('explicit high thinking level', line =>
-          line.includes('Model: tui-picked-model  Access workspace-write  Think high'))
+          line.includes('Model: tui-picked-model  Think high'))
         screen.resize(40, 12)
         tty.resize(40, 12)
-        await footer('full access and thinking indicators at 40 columns', line =>
-          line.includes('Access workspace-write  Think high') && !line.includes('tui-picked-model (high)'))
+        await footer('full thinking indicator at 40 columns', line =>
+          line.includes('Think high') && !line.includes('tui-picked-model (high)'))
         screen.resize(120, 40)
         tty.resize(120, 40)
         tty.send('/model deepseek-official/tui-picked-model\r')
         await footer('advertised provider default low', line =>
-          line.includes('Model: tui-picked-model  Access workspace-write  Think low'))
+          line.includes('Model: tui-picked-model  Think low'))
         tty.send('/model deepseek-official/deepseek-v4-flash\r')
         await footer('unsupported thinking level omitted after switching models', line =>
           line.includes('Model: deepseek-v4-flash') && !line.includes('Think'))
@@ -810,38 +819,52 @@ scenario('thinking', 'selected and provider-default thinking levels follow model
     assert(!log.some(e => e.type === 'request/header'), '/model commands unexpectedly called the model')
   })
 
-scenario('permissions', 'workspace-write default, live permission status at narrow widths, and durable session selection', { replayOnly: true },
+scenario('permissions', 'workspace-write default, the access mode where a session opens, command feedback at narrow widths, and durable session selection', { replayOnly: true },
   async run => {
     const override = run.env.DSH_PERMISSION_MODE
     delete run.env.DSH_PERMISSION_MODE
-    const inspect = async (tty: Terminal, drive: (footer: (mode: string) => Promise<void>, resize: () => void) => Promise<void>) => {
+    const access = dictionaries.en.permission
+    /**
+     * Drive one terminal. `opened` finds the mode where the session opens, in
+     * the welcome block or on the heading; `set` switches it and waits for the
+     * command's result. Both check that the footer is one row and names no mode.
+     */
+    const inspect = async (tty: Terminal, drive: (tools: {
+      readonly opened: (mode: string, after?: number) => Promise<void>
+      readonly set: (mode: string) => Promise<void>
+      readonly resize: () => void
+    }) => Promise<void>) => {
       const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
       let consumed = 0
-      const footer = async (mode: string) => {
-        await tty.wait(`current footer shows ${mode}`, async () => {
+      const footer = async () => {
+        await tty.wait('a one-row footer without the access mode', async () => {
           const raw = tty.raw
           await new Promise<void>(resolve => screen.write(raw.slice(consumed), resolve))
           consumed = raw.length
           const buffer = screen.buffer.active
-          return buffer.getLine(buffer.viewportY + screen.rows - 2)?.translateToString(true).includes(`Access ${mode}`) === true
+          const line = buffer.getLine(buffer.viewportY + screen.rows - 2)?.translateToString(true) ?? ''
+          return line.includes(SCREEN.status) && !line.includes(access)
             && buffer.getLine(buffer.viewportY + screen.rows - 1)?.translateToString(true) === ''
         })
       }
-      try { await drive(footer, () => { screen.resize(40, 12); tty.resize(40, 12) }) }
+      const opened = async (mode: string, after = 0) => { await tty.expect(`${access} ${mode}`, after); await footer() }
+      const set = async (mode: string) => {
+        const after = tty.mark()
+        tty.send(`/permission ${mode}\r`)
+        await tty.expect(`preset ${mode}`, after)
+        await footer()
+      }
+      try { await drive({ opened, set, resize: () => { screen.resize(40, 12); tty.resize(40, 12) } }) }
       finally { screen.dispose() }
     }
     try {
       const before = await run.logs()
-      await run.terminal('permissions', [], tty => inspect(tty, async (footer, resize) => {
-        await footer('workspace-write')
-        tty.send('/permission read-only\r')
-        await footer('read-only')
-        tty.send('/permission danger-full-access\r')
-        await footer('danger-full-access')
+      await run.terminal('permissions', [], tty => inspect(tty, async ({ opened, set, resize }) => {
+        await opened('workspace-write')
+        await set('read-only')
+        await set('danger-full-access')
         resize()
-        await footer('danger-full-access')
-        tty.send('/permission read-only\r')
-        await footer('read-only')
+        await set('read-only')
       }))
       const path = await run.created(before, 'permission')
       const log = await events(path)
@@ -850,10 +873,12 @@ scenario('permissions', 'workspace-write default, live permission status at narr
       assert(log.find(e => e.type === 'sandbox/mode')?.data.mode === 'workspace-write', 'new session sandbox was not workspace-write')
       assert(log.find(e => e.type === 'approval/policy')?.data.policy === 'ask', 'new session approval policy was not ask')
       const beforeNew = await run.logs()
-      await run.terminal('permissions-resume', ['--resume', log[0].id], tty => inspect(tty, async footer => {
-        await footer('read-only')
+      await run.terminal('permissions-resume', ['--resume', log[0].id], tty => inspect(tty, async ({ opened }) => {
+        // A resumed session opens with the mode it was left in, on its heading.
+        await opened('read-only')
+        const after = tty.mark()
         tty.send('/new\r')
-        await footer('workspace-write')
+        await opened('workspace-write', after)
       }))
       const fresh = await events(await run.created(beforeNew, 'new permission'))
       assert(fresh.find(e => e.type === 'permission/preset')?.data.preset === 'workspace-write', '/new did not use the configured default')
@@ -861,8 +886,8 @@ scenario('permissions', 'workspace-write default, live permission status at narr
         assert(!record.some(e => e.type === 'request/header'), 'permission commands unexpectedly called the model')
       }
       run.env.DSH_PERMISSION_MODE = 'read-only'
-      await run.terminal('permissions-override', [], tty => inspect(tty, async footer => {
-        await footer('read-only')
+      await run.terminal('permissions-override', [], tty => inspect(tty, async ({ opened }) => {
+        await opened('read-only')
       }))
     } finally {
       if (override === undefined) delete run.env.DSH_PERMISSION_MODE
@@ -1653,7 +1678,7 @@ scenario('resume', 'exact replay of committed history, the restored draft, and h
   async run => {
     const text = await run.terminal('resume', ['--resume', run.state.id], async tty => {
       await tty.expect(SCREEN.toolResult, SCREEN.idle)
-      if (!run.live) await tty.expect(`${SCREEN.status}tui-picked-model  Access workspace-write  Think high`)
+      if (!run.live) await tty.expect(`${SCREEN.status}tui-picked-model  Think high`)
       tty.send('Unsent draft')
       await tty.expect(`> Unsent draft${SCREEN.caret}`)
       tty.send('\x1b[D', 'Left')
@@ -1731,7 +1756,7 @@ scenario('navigate', 'session picker cancellation, a new session, and switching 
       tty.send(identity, 'the original session id')
       await tty.expect(`> ${identity}${SCREEN.caret}`, start)
       tty.send('\r', 'Enter to switch back')
-      await tty.expect(SCREEN.toolResult, `${SCREEN.status}tui-picked-model  Access workspace-write  Think high`, start)
+      await tty.expect(SCREEN.toolResult, `${SCREEN.status}tui-picked-model  Think high`, start)
       await tty.wait('the resumed session to accept input', text => {
         const shown = text.slice(start)
         return shown.lastIndexOf(SCREEN.idle) > Math.max(shown.lastIndexOf(SCREEN.toolResult), shown.lastIndexOf(dictionaries.en.sessionsBusy))

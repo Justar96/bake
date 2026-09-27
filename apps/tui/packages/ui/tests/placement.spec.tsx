@@ -503,14 +503,17 @@ it.each([[80, 24], [40, 10], [40, 4]])('bounds child branches and inspection at 
     state: 'working' as const, detail: 'Continuable', inspectable: true }))
   let screen = await terminal.update({ subagents })
   expect(inputRow(screen), screen.join('\n')).toBeGreaterThanOrEqual(0)
-  if (rows! >= 10) expect(inputRow(screen), screen.join('\n')).toBe(rows! - 4)
+  // The subagents' row sits between the base rule and the status line.
+  if (rows! >= 10) expect(inputRow(screen), screen.join('\n')).toBe(rows! - 5)
   screen = await terminal.update({ inspection: { sessionId: 'child-0', label: 'Review child 0',
     committed: appendTranscript(emptyTranscript, [{ kind: 'assistant', text: 'Child history' }]),
     live: [{ kind: 'assistant', text: 'Child is still reviewing' }], status: 'running', model: 'mock/child' } })
   expect(inputRow(screen), screen.join('\n')).toBeGreaterThanOrEqual(0)
-  if (rows! >= 10) expect(inputRow(screen), screen.join('\n')).toBe(rows! - 4)
+  // The subagents' row sits between the base rule and the status line.
+  if (rows! >= 10) expect(inputRow(screen), screen.join('\n')).toBe(rows! - 5)
   screen = await terminal.update({ inspection: undefined })
   expect(inputRow(screen), screen.join('\n')).toBeGreaterThanOrEqual(0)
-  if (rows! >= 10) expect(inputRow(screen), screen.join('\n')).toBe(rows! - 4)
+  // The subagents' row sits between the base rule and the status line.
+  if (rows! >= 10) expect(inputRow(screen), screen.join('\n')).toBe(rows! - 5)
   expect(screen.join('\n')).not.toContain('Session navigation')
 })

@@ -589,6 +589,9 @@ describe('session-query exact reads', () => {
     ])
     expect(results[0]).toMatchObject({ value: { session: second, title: { title: 'Second title' } } })
     expect(results[1]).toMatchObject({ value: { session: first, title: { title: 'First title' } } })
+    // The newest event's time rides along from the same read, for recency ordering.
+    expect(results[0]).toMatchObject({ value: { lastEventAt: 20 } })
+    expect(results[1]).toMatchObject({ value: { lastEventAt: 10 } })
     expect(TestPersistence.listCalls).toBe(1)
     expect(TestPersistence.readCalls).toEqual([second.id, first.id])
     expect(TestPersistence.listSignals).toEqual([signal])

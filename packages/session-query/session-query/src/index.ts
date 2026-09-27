@@ -254,9 +254,12 @@ export abstract class SessionQueryEngine extends Service {
   ): Promise<SessionTitleObservationResult[]> {
     return this._corpus.projectMany(sessionIds, (source): SessionTitleObservation => {
       const title = foldSessionTitle(source.events)
+      // From the same log as the title, so a picker orders by recent use without a second read.
+      const lastEventAt = source.events.at(-1)?.time
       return {
         session: structuredClone(source.header),
         ...title === undefined ? {} : { title },
+        ...lastEventAt === undefined ? {} : { lastEventAt },
       }
     }, signal)
   }

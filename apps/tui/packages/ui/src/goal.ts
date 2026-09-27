@@ -30,11 +30,12 @@ export interface GoalEntry {
  *
  * @param goal - the current goal, or undefined when none is set.
  * @param copy - locale-owned labels.
+ * @param brief - leave out the round count, which the goal's sheet still shows.
  * @returns the goal's state, or undefined when there is no goal.
  */
-export function goalState(goal: GoalEntry | undefined, copy: TuiCopy): StandingState | undefined {
+export function goalState(goal: GoalEntry | undefined, copy: TuiCopy, brief = false): StandingState | undefined {
   if (goal === undefined) return undefined
-  const rounds = `${copy.goalRound} ${goal.rounds}/${goal.maxRounds}`
+  const rounds = brief ? undefined : `${copy.goalRound} ${goal.rounds}/${goal.maxRounds}`
   const details = (...parts: (string | undefined)[]): string => parts.filter(part => part !== undefined && part !== '').join(' · ')
   switch (goal.phase) {
     case 'active': return goal.armed

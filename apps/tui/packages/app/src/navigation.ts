@@ -198,8 +198,15 @@ export class SessionNavigation {
     signal.throwIfAborted()
     const names = new Map(titles.flatMap(result => result.status === 'fulfilled'
       && result.value.title !== undefined ? [[result.sessionId, result.value.title.title] as const] : []))
+    // Last use, from the newest logged event, so a session reopened today lists
+    // above one merely created later. A log the query could not read falls back
+    // to its creation time.
+    const used = new Map(titles.flatMap(result => result.status === 'fulfilled'
+      && result.value.lastEventAt !== undefined ? [[result.sessionId, result.value.lastEventAt] as const] : []))
+    const usedAt = (record: Pick<typeof records[number], 'header'>): number =>
+      used.get(record.header.id) ?? record.header.createdAt
     const saved = records.filter(record => record.header.id !== agent.id)
-      .sort((left, right) => right.header.createdAt - left.header.createdAt
+      .sort((left, right) => usedAt(right) - usedAt(left)
         || left.header.id.localeCompare(right.header.id))
     const current = records.find(record => record.header.id === agent.id) ?? { header: agent.session.header }
     previous.controller.notify(undefined)
@@ -207,16 +214,17 @@ export class SessionNavigation {
     const age = { now: this.copy.ageNow, minutes: this.copy.ageMinutes, hours: this.copy.ageHours, days: this.copy.ageDays }
     return previous.controller.interactions.choose({
       title: this.copy.chooseSession,
-      initial: agent.id,
+      // The pointer starts on the most recently used other session, so the
+      // picker's Enter goes back to it; choosing the open one does nothing.
+      initial: saved[0]?.header.id ?? agent.id,
       choices: [
         ...[current, ...saved].map(record => {
-          const name = names.get(record.header.id)
-          // An untitled session is labelled by its id, so the id is not repeated.
-          // The full id stays searchable either way through the choice's value.
-          const when = formatAge(record.header.createdAt, now, age)
+          // An untitled session reads as one, not as its id. The short id tells
+          // two apart, and the full id stays searchable through the choice's value.
+          const when = formatAge(usedAt(record), now, age)
           return {
-            value: record.header.id, label: name ?? record.header.id,
-            description: name === undefined ? when : `${when} · ${shortId(record.header.id)}`,
+            value: record.header.id, label: names.get(record.header.id) ?? this.copy.untitledSession,
+            description: `${when} · ${shortId(record.header.id)}`,
             role: record.header.id === agent.id ? 'session-current' as const : 'session-saved' as const,
           }
         }),

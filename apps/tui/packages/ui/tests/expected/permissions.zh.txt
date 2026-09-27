@@ -3,7 +3,7 @@
 120: 模型: a-very-long-model-name (high)  权限 danger-full-access  Context: ~3k/128k (2%)  /workspace
 120: 模型: a-very-long-model-name (high)  权限 custom  Context: ~3k/128k (2%)  /workspace
 60: 模型: a-very-long-model-name (high)  权限 read-only  …kspace
-60: 模型: a-very-long-model-name (high)  权限 workspace-write  …
+60: 模型: a-very-long-model-name (high)  权限 workspace-write
 60: 模型: a-very-long-model-name (high)  权限 danger-full-access
 60: 模型: a-very-long-model-name (high)  权限 custom  /workspace
 38: 模型: a-very-long-mod…  权限 read-only

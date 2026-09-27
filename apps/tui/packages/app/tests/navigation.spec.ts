@@ -121,31 +121,55 @@ it('keeps the current controller on dismissal or current selection and rejects c
   expect(model.requests).toEqual([])
 })
 
-it('pins the active session before saved history ordered by creation time', async () => {
+it('pins the active session before saved history ordered by last use, pointing at the newest', async () => {
   const { ctx, navigation } = await connected()
   const active = navigation.controller!.agent.id
-  for (const id of ['older', 'newer']) {
+  for (const id of ['older', 'newer', 'blank']) {
     const handle = await ctx.agents.create({
       sessionId: brandString<SessionId>(`session-${id}`),
       meta: { cwd: process.cwd() },
       agentOptions: { provider: 'mock', model: 'model' },
     })
-    handle.agent.session.append('session/title', { title: id, messageSeqs: [], source: { kind: 'user' } })
+    // A logged prompt, so the session persists, but no title for it.
+    if (id === 'blank') handle.agent.session.append('user/message', user('No title yet'), { surfaceOp: 'append' })
+    else handle.agent.session.append('session/title', { title: id, messageSeqs: [], source: { kind: 'user' } })
     await handle.dispose()
   }
+  // Created older, blank, newer; used older last, so it leads despite its age.
+  const created: Record<string, number> = { 'session-older': 100, 'session-blank': 150, 'session-newer': 200 }
   const filter = ctx.sessionQuery.filterSessions.bind(ctx.sessionQuery)
   vi.spyOn(ctx.sessionQuery, 'filterSessions').mockImplementation(async (filters, signal) => {
     const records = await filter(filters, signal)
     return records.map(record => ({ ...record, header: { ...record.header,
-      createdAt: record.header.id === 'session-older' ? 100
-        : record.header.id === 'session-newer' ? 200 : record.header.createdAt,
-    } })).reverse()
+      createdAt: created[record.header.id] ?? record.header.createdAt } })).reverse()
   })
+  const read = ctx.sessionQuery.readTitleSnapshots.bind(ctx.sessionQuery)
+  // Pinned for every saved session: the real reads report each log's newest event, which is now.
+  const used: Record<string, number> = { 'session-older': 900, 'session-blank': 500, 'session-newer': 300 }
+  vi.spyOn(ctx.sessionQuery, 'readTitleSnapshots').mockImplementation(async (ids, signal) =>
+    (await read(ids, signal)).map(result => result.status !== 'fulfilled' || used[result.sessionId] === undefined ? result
+      : { ...result, value: { ...result.value, lastEventAt: used[result.sessionId]! } }))
   const prompt = await picker(navigation)
-  expect(prompt.choices.map(choice => choice.value)).toEqual([active, 'session-newer', 'session-older', ''])
+  expect(prompt.choices.map(choice => choice.value)).toEqual([active, 'session-older', 'session-blank', 'session-newer', ''])
   expect(prompt.choices.map(choice => choice.role)).toEqual([
-    'session-current', 'session-saved', 'session-saved', 'session-new',
+    'session-current', 'session-saved', 'session-saved', 'session-saved', 'session-new',
   ])
+  // Enter goes back to the session used last, not the one already open.
+  expect(prompt.initial).toBe('session-older')
+  // An untitled session is named as one, with a short id beside its age, rather than by its id.
+  const blank = prompt.choices.find(choice => choice.value === 'session-blank')!
+  expect(blank.label).toBe(copy.untitledSession)
+  expect(blank.description).toMatch(/ · session-blank$/)
+  expect(prompt.choices.find(choice => choice.value === 'session-older')!.label).toBe('older')
+})
+
+it('points at the open session when there is no other', async () => {
+  const { navigation } = await connected()
+  const prompt = await picker(navigation)
+  expect(prompt.initial).toBe(navigation.controller!.agent.id)
+  expect(prompt.choices[0]).toMatchObject({ role: 'session-current', label: copy.untitledSession })
+  navigation.cancel()
+  await vi.waitFor(() => expect(navigation.busy).toBe(false))
 })
 
 it('filters other workspaces, subagents, and live owners while retaining sessions with unreadable titles', async () => {
