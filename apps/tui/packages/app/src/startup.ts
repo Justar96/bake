@@ -26,6 +26,8 @@ export interface TuiStartupValues {
   resume: string | undefined
   /** Agent preset to mount. Absent leaves the profile's own composition in place. */
   preset: string | undefined
+  /** Terminal renderer override; absent uses the profile's default. */
+  screen?: 'inline' | 'fullscreen'
 }
 
 /**
@@ -42,6 +44,7 @@ function tuiCommand(): Command {
     // The headless profile's spelling, so one flag resumes a Session in either app.
     .addOption(new Option('--session-id <id>').hideHelp())
     .option('--preset <name>', 'mount this agent preset instead of the profile default')
+    .addOption(new Option('--screen <mode>', 'terminal renderer (default: inline)').choices(['inline', 'fullscreen']))
     .addHelpText('after', `
 Examples:
   dsh tui                        start a new session
@@ -58,7 +61,7 @@ Examples:
 export function apply(ctx: Context): void {
   const program = tuiCommand()
   program.action(() => {
-    const options = program.opts<{ resume?: string, sessionId?: string, preset?: string }>()
+    const options = program.opts<{ resume?: string, sessionId?: string, preset?: string, screen?: 'inline' | 'fullscreen' }>()
     if (options.resume !== undefined && options.sessionId !== undefined) {
       program.error('error: --resume and --session-id name the same thing; pass one')
     }
@@ -72,7 +75,7 @@ export function apply(ctx: Context): void {
     if (preset !== undefined && preset.trim() === '') {
       program.error('error: --preset requires a non-empty preset name')
     }
-    ctx.provide(TUI_STARTUP_SERVICE, { resume, preset } satisfies TuiStartupValues)
+    ctx.provide(TUI_STARTUP_SERVICE, { resume, preset, ...options.screen === undefined ? {} : { screen: options.screen } } satisfies TuiStartupValues)
   })
   parseCmdline(ctx, program)
 }

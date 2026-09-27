@@ -4,54 +4,34 @@ How the terminal surface is composed, and the measured constraints that decide i
 
 Ink version in this fork: **7.1.1**.
 
-## 1. The constraint everything else follows from
+## 1. Frame height and screen ownership
 
-Ink 7 writes a frame one of two ways, chosen by the height of the **dynamic** (non-`<Static>`) region:
+Bake defaults to inline output. `--screen fullscreen` opts into Ink's alternate screen with a fixed transcript viewport and bottom controls. Both modes use the same session projections and presentation rules.
 
-| Dynamic height vs. viewport rows | What Ink writes per frame |
+Ink 7.1.1's `shouldClearTerminalForFrame` distinguishes a frame that exactly fills the viewport from one that overflows:
+
+| Dynamic frame | Ink 7.1.1 behavior |
 | --- | --- |
-| `< rows` | erase the previous dynamic region, rewrite it |
-| `>= rows` | `clearTerminal` + **the entire accumulated static output** + the dynamic region |
+| Below viewport height | Incremental updates; new `Static` output prints above the frame |
+| Exactly viewport height on non-Windows terminals | Incremental updates without a trailing newline |
+| Overflow, shrink from full height, or teardown from full height | Full-clear fallback; accumulated static output is replayed |
+| Full height on Windows consoles | Full-clear fallback to avoid bottom-right-cell scrolling |
 
-The second path is in `build/ink.js`:
+Inline output retains Ink's accumulated `fullStaticOutput`, so a full-clear fallback can replay the whole session. Fullscreen mounts no `Static` tree; even a fallback redraw contains only the visible viewport and controls.
 
-```js
-// renderInteractiveFrame
-const isFullscreen = isTty && outputHeight >= viewportRows;
-...
-this.options.stdout.write(ansiEscapes.clearTerminal + this.fullStaticOutput + outputToRender);
-```
+> **Layout invariant L1.** Inline controls stay within `max(1, rows - 1)` rows, reserving Ink's cursor row. Fullscreen's root occupies exactly `rows` rows, with overflow clipped and input retained on a one-row terminal. A complete transcript must never become a dynamic Ink tree.
 
-`fullStaticOutput` is every transcript row ever emitted, concatenated in memory (`this.fullStaticOutput += staticOutput`). So the moment the dynamic region reaches terminal height, per-frame cost stops being O(1) and becomes O(whole transcript) — the exact failure `packages/ui/tests/scale.spec.tsx` exists to prevent. `<Static>` alone does not buy the guarantee; **`<Static>` plus a bounded dynamic region** does.
-
-`prototype/realloop.mjs` drives Ink's real `render()` through a fake TTY and captures every byte. One identical turn, 24-row viewport:
-
-| | transcript row draws | full-screen clears |
-| --- | --- | --- |
-| dynamic region within budget | 1, 1 | 0 |
-| dynamic region 30 lines | 8, 8 | 7 |
-
-The cost scales with history, not with the turn — bytes written for the same turn:
-
-| transcript rows | compliant | overflowing | ratio |
-| --- | --- | --- | --- |
-| 2 | 1,433 | 5,373 | 3.7× |
-| 50 | 2,143 | 11,053 | 5.2× |
-| 200 | 4,491 | 29,837 | 6.6× |
-
-A long session is exactly where the penalty is worst, which is the opposite of what a user expects and why this is an invariant rather than a guideline.
-
-> **Layout invariant L1.** The dynamic region renders at most `rows - 1` lines at every width, for every state, with no exceptions. Every component below is specified as a height budget because of this.
-
-L1 is not a performance nicety. Crossing it clears the user's screen and replays the transcript on each keystroke, destroying native scrollback position mid-turn.
+The inline resize repaint deliberately requests an overflowing frame to reanchor terminal scrollback. Fullscreen resizes its fixed rectangle and remeasures the visible transcript without this replay path.
 
 ### Committed history survives resize
 
-One `Static` instance owns the entire displayed session. Ink clears its accumulated static output when that instance changes, so remounting it for every appended row loses earlier history on a resize that requires a screen replay. The adapter supplies `length` and `slice(index)` for admitted presentation lines, matching Ink 7's consumption of its items. `length` includes only the admitted prefix: exposing the full source length would advance Static past rows it has never printed. The forward cursor admits at most 512 display lines, 1024 wrapped terminal rows, and 128 Ki UTF-16 text units per batch, and awaits a render flush before continuing a backlog. A single oversized display line is admitted alone. The cursor retains only the unfinished presentation of its current source row; the static node stays mounted until the displayed session changes. Child inspection unmounts the parent output, so returning starts a complete parent replay while its composer draft stays mounted.
+In inline mode, one `Static` instance owns the displayed session. Ink clears its accumulated static output when that instance changes, so remounting it for every appended row loses earlier history on a resize that requires a screen replay. The adapter supplies `length` and `slice(index)` for admitted presentation lines. A forward cursor admits at most 512 display lines, 1024 wrapped terminal rows, and 128 Ki UTF-16 text units per batch, then awaits a render flush before continuing a backlog. A single oversized display line is admitted alone. Child inspection unmounts the parent output; returning replays the parent while preserving its composer draft.
+
+Fullscreen's `Viewport` indexes row references from those same immutable batches and presents only visited rows. Its cache retains at most 32 source-row presentations and invalidates on width or presentation-policy changes. `Line` slices wrapped text and styles before creating Ink nodes. A single large message still needs its full text parsed, but its offscreen lines do not enter the Ink tree.
 
 ## 2. Region model
 
-Six regions, top to bottom. Only the first is static.
+Inline mode uses the following regions, top to bottom. Only the transcript is static. Fullscreen replaces the static transcript and live region with the viewport described below.
 
 ```
 ┌───────────────────────────────────────────────┐
@@ -73,13 +53,21 @@ Budgets sum to 25 at maximum, which exceeds a 24-row window — deliberately. Th
 
 ### 2.1 Transcript — the terminal owns scrolling
 
-Committed rows go to `<Static>` and are never re-rendered. Consequences accepted on purpose:
+In inline mode, committed rows go to `<Static>` and are not redrawn during normal updates:
 
-- **No scrollable pane, no alt-screen.** Native scrollback, terminal search, mouse selection, and copy all keep working. A custom pager would break every one of them to gain nothing a terminal does not already do well.
-- **No retroactive edit.** A row is final once written. Compaction rewrites therefore append a notice rather than mutating history (`DESIGN.md` §4.3, Option A).
-- **Wrapping is baked at emit width.** A row wrapped at 100 columns keeps those breaks after a resize to 60. Ink cannot reflow what it has already released, and the alternative — keeping the transcript dynamic so it can reflow — violates L1 immediately. Emit-time wrapping is the cost of native scrollback.
+- **Native scrolling.** Terminal scrollback, search, mouse selection, and copy remain available.
+- **No retroactive edit.** A row is final once written. Compaction appends a notice rather than mutating displayed history (`DESIGN.md` §4.3).
+- **Wrapping is baked at emit width.** A row wrapped at 100 columns keeps those breaks after a resize to 60. Ink cannot reflow text already released into native scrollback.
 
-### 2.2 Live region — the only elastic tall element
+### 2.1a Fullscreen transcript
+
+`Fullscreen` fills the terminal rectangle. Bottom controls keep their natural, budgeted height; the transcript takes the remaining space, with a one-row keyboard hint when space permits. The viewport joins committed rows and the controller's uncommitted live rows, so the existing `Printed` reconciliation prevents duplicate streamed prefixes. Reasoning keeps its separate thinking preview.
+
+PgUp/PgDn move half a viewport. Ctrl+Home goes to the beginning; Ctrl+End or paging to the bottom resumes following new output. Paging up holds a reading anchor while output arrives. The anchor tracks a character through width changes and rebases when a live row becomes committed fragments. Open sheets and interactions receive their navigation keys first. Session switches and child inspection reset the viewport to the newest output.
+
+A fresh session shows the welcome block until conversation content arrives, then retains the session heading at the start of its transcript. Closing a panel returns space to the transcript while the input stays at the bottom. Ink owns alternate-screen entry and release; exit restores the previous shell screen. Native terminal scrollback does not contain the fullscreen conversation. Saved sessions reopen through `/resume`; mouse scrolling and transcript search are not implemented. `INK_SCREEN_READER=true` selects inline mode.
+
+### 2.2 Live region — inline streaming
 
 Holds the in-flight turn: streaming assistant text, running tool calls, step progress. Streaming reasoning is not drawn here; the thinking window over the header carries it ([§2.2a](#22a-the-header--one-steady-row-for-the-whole-turn)).
 
@@ -251,8 +239,6 @@ This is the principled fix for `/help` and `/model`: a command's full output bel
 Recorded so the questions do not get relitigated:
 
 - **Split panes / sidebars.** Every column spent on chrome is taken from prose and tool output, which are the product. A terminal is not a window manager.
-- **A scrollable transcript pane.** §2.1.
-- **Full-screen alt-screen mode.** It discards scrollback on exit, so the session vanishes when the program does. The transcript surviving exit is the point.
 - **Progress bars for model output.** Token counts are not a denominator; there is no total to divide by.
 
 ## 6. Spacing and zones inside the chat area
@@ -543,13 +529,15 @@ Two distinct failures, two distinct causes. Neither is fixed by drawing faster.
 
 ### 8.1 The input rests on the bottom row
 
-The composer rests on the terminal's bottom rows from the first frame. `frameOutput` in `packages/app/src/output.ts` moves the cursor to the bottom row before Ink draws, so the first frame grows upward from there and whatever the shell printed scrolls up above the session line. Committed history prints through `Static` above the frame, the live region follows it, and the chrome follows the live region with one blank row between. A fresh session keeps its session line directly above the input on the bottom rows. When optional `AppProps.version` is supplied and the session surface mounts with an empty committed transcript outside child inspection, a `BAKE v<root version>` welcome card prints once through `Static` in place of that heading, carrying the same session line inside it, so the block costs no row beyond the one the heading takes; resumed history has no banner and prints the heading alone. The card is at most 64 columns wide, draws the line style resolved from the terminal, and drops its border below `FRAME_MIN_COLUMNS` (40). It belongs to terminal scrollback, not the dynamic region, and each line that prints scrolls history up by its rows rather than moving the input down.
+The composer rests on the terminal's bottom rows from the first frame. In inline mode, `frameOutput` in `packages/app/src/output.ts` moves the cursor to the bottom row before Ink draws, so the first frame grows upward from there and whatever the shell printed scrolls up above the session line. Committed history prints through `Static` above the frame, the live region follows it, and the chrome follows the live region with one blank row between. A fresh session keeps its session line directly above the input on the bottom rows. When optional `AppProps.version` is supplied and the session surface mounts with an empty committed transcript outside child inspection, a `BAKE v<root version>` welcome card prints once through `Static` in place of that heading, carrying the same session line inside it, so the block costs no row beyond the one the heading takes; resumed history has no banner and prints the heading alone. The card is at most 64 columns wide, draws the line style resolved from the terminal, and drops its border below `FRAME_MIN_COLUMNS` (40). It belongs to terminal scrollback, not the dynamic region, and each line that prints scrolls history up by its rows rather than moving the input down.
 
 An input that followed the newest line down the screen, as Claude Code places its prompt, moved on every printed line until history filled the screen, and moved again whenever the frame shrank. A tall terminal spent most of a session in that phase.
 
-> **Layout invariant L2.** The composer rests on the terminal's bottom rows, with the subagents row while there are children, the status line, and Ink's cursor row beneath it, at every size and in every state. Above it are the rule, the header, the thinking window, and input-owned panels (completion, notices, queued input, quit feedback), a blank row, and the newest transcript or live line. The blank is one row unless the frame is holding rows something above the input gave up; those rows are blank too, until printed history takes them.
+> **Layout invariant L2.** The composer rests on the terminal's bottom rows, with the subagents row while there are children, the status line, and (in inline mode) Ink's cursor row beneath it, at every size and in every state. Above it are the rule, the header, the thinking window, and input-owned panels (completion, notices, queued input, quit feedback), a blank row, and the newest transcript or live line. The blank is one row unless the frame is holding rows something above the input gave up; those rows are blank too, until printed history takes them.
 
 #### The frame never rises
+
+The held-height and replay rules in this section apply to inline output. Fullscreen uses a fixed-height root and gives any space released by panels back to its transcript viewport.
 
 A frame drawn on the bottom row stays there while it and the history printed above it in the same render fill at least the rows the previous frame did. Most shrinking is made up that way: an answer's line leaves the live region as it prints, a step's calls leave it as they commit when the step ends, and reasoning leaves the thinking window as its preview prints. What is not made up — a completion menu or picker closing, a sheet closing, a notice clearing, a task finishing, a queued message leaving the panel — would lift the composer by the rows it gave up and drop it back as the next lines printed. A sheet is the largest case: opening it scrolls the history above the frame into the terminal's scrollback, which cannot be drawn back down, so closing it leaves its rows blank over the controls rather than lifting the input to the middle of the screen.
 
@@ -599,6 +587,8 @@ Incremental rendering does not cover a frame that prints to `Static`. Ink erases
 
 Ink's incremental renderer rewrites a changed row followed by a newline, but steps over an unchanged row with Cursor Next Line (`CSI E`), which stops at the terminal's bottom row instead of scrolling. The frame rests on the bottom row, so when it grows by a row and an unchanged row falls past the old bottom — a blank row, such as the gap that opens the chrome — that row is never added: the frame is drawn a row short, Ink's line count no longer matches the screen, and its next erase takes a row of history with it. `scrolling` in `frameOutput` writes each Cursor Next Line as a carriage return and newline, which is the same move everywhere above the bottom row and scrolls at it.
 
+Fullscreen shares the batched output queue and `NO_COLOR` filtering, but skips the inline overwrite, bottom-anchor, and newline transformations. After Ink enters the alternate buffer, the wrapper clears and homes that buffer without moving the saved shell cursor. It removes `CSI 3J` so resize and cleanup do not erase primary scrollback. Ink's cleanup leaves the alternate screen through the same runner release path as normal quit and fatal failure.
+
 ### 8.3 Debris — someone else writes to the terminal
 
 The hazard specific to an agent TUI. Ink tracks its own cursor position to know what to erase. Any write it did not make invalidates that arithmetic, and the display corrupts from then on: doubled lines, orphaned fragments, a status line drifting up the screen.
@@ -624,7 +614,8 @@ Layout claims are mechanically checkable and should be gated:
 
 | Claim | How it is proven |
 | --- | --- |
-| L1 holds in every state | render each state at 80×24 and 40×10, assert dynamic height `<= rows - 1` |
+| L1 holds in inline mode | render each state at 80×24 and 40×10, assert dynamic height `<= rows - 1` |
+| Fullscreen renders a bounded viewport and restores the shell | `packages/app/tests/fullscreen.spec.tsx` checks English/Chinese output, paging, append/commit anchors, resize, large history, tiny terminals, sheets, inspection, and shell restoration; the PTY `fullscreen` scenario exercises fresh and resumed built profiles, and `fatal-exception` checks alternate-screen release |
 | append cost is O(1) | `packages/ui/tests/scale.spec.tsx` (raw stdout capture, not `frames`) |
 | no full-clear in a normal turn | assert `ansiEscapes.clearTerminal` never appears in captured stdout for a scripted turn |
 | status never wraps | render at 40, 80, 200 columns, assert one line |

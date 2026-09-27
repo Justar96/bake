@@ -1,0 +1,18 @@
+00 |  note   History 69|
+01 |  note   History 70|
+02 |  note   History 71|
+03 |  note   History 72|
+04 |  note   History 73|
+05 |  note   History 74|
+06 |  note   History 75|
+07 |  note   History 76|
+08 |  note   History 77|
+09 |  note   History 78|
+10 |  note   History 79|
+11 |PgUp/PgDn 滚动 · Ctrl+Home 开头 · Ctrl+End 最新|
+12 ||
+13 ||
+14 |────────────────────────────────────────────────────────────|
+15 |> ▌问点什么|
+16 |────────────────────────────────────────────────────────────|
+17 |  模型: model  /workspace|

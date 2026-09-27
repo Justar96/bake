@@ -23,6 +23,9 @@
  * keeps it there by never drawing a frame shorter than the history printed
  * above it can fill.
  *
+ * Fullscreen shares batching and style filtering, but retains Ink's positioned
+ * updates. Its alternate buffer starts at home and never erases shell scrollback.
+ *
  * @module @dsh-tui/app/output
  */
 
@@ -157,9 +160,11 @@ export interface FrameOutput {
  * @param err - the terminal's stderr, which shares the screen with it.
  * @param styles - retain SGR styling. False implements `NO_COLOR` for rendered
  *   text without changing cursor, erase, paste, or synchronization controls.
+ * @param screen - fullscreen batches writes without moving the shell cursor or
+ *   converting positioned updates into terminal scrolling.
  * @returns the wrapped streams and a synchronous flush.
  */
-export function frameOutput(out: NodeJS.WriteStream, err: NodeJS.WriteStream, styles = true): FrameOutput {
+export function frameOutput(out: NodeJS.WriteStream, err: NodeJS.WriteStream, styles = true, screen: 'inline' | 'fullscreen' = 'inline'): FrameOutput {
   const queue: { stream: NodeJS.WriteStream, chunk: string | Uint8Array, callback?: Callback }[] = []
   let scheduled = false
   let started = false
@@ -181,10 +186,15 @@ export function frameOutput(out: NodeJS.WriteStream, err: NodeJS.WriteStream, st
       const chunks = run.map(entry => entry.chunk as string)
       const callbacks = run.flatMap(entry => entry.callback === undefined ? [] : [entry.callback])
       let text = chunks.join('')
-      if (stream === out) {
+      if (stream === out && screen === 'inline') {
         text = scrolling(anchor(overwrite(chunks), out.rows))
         if (!started) text = toBottom(out.rows) + text
         started = true
+      } else if (stream === out) {
+        // The alternate buffer can inherit the shell's cursor column. Home
+        // only after entering it; never move the saved primary-screen cursor.
+        text = text.replaceAll(`${CSI}?1049h`, `${CSI}?1049h${CSI}2J${CSI}H`)
+          .replaceAll(`${CSI}3J`, '')
       }
       // Ink's Chalk version does not honor NO_COLOR on a TTY. Filter only
       // text styling here. Stripping all ANSI would break terminal ownership.

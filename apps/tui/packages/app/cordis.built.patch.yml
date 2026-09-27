@@ -27,5 +27,6 @@
       config:
         resume: !!js ctx.tuiStartup.resume
         preset: !!js ctx.tuiStartup.preset
+        screen: !!js ctx.tuiStartup.screen
         credentialRefs:
           - DEEPSEEK_API_KEY

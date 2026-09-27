@@ -17,6 +17,7 @@ export const Config: z<Config> = z.object({
   resume: z.string(),
   preset: z.string(),
   locale: z.union(['en', 'zh']).default('en'),
+  screen: z.union(['inline', 'fullscreen']).default('inline'),
   // `auto` reads the terminal. See `resolveFrame`. The explicit values are for
   // a terminal the environment describes wrongly, which is the case no
   // detection can cover.

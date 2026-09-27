@@ -28,6 +28,8 @@ export const dictionaries = {
     goalComplete: 'Goal complete', goalRound: 'round', goalResume: '/goal resume continues',
     goalTitle: 'Goal', goalReason: 'Reason', goalKey: 'Ctrl+O', goalOpen: 'Enter opens',
     sheetClose: 'Esc closes', sheetScroll: '↑↓ scroll', sheetCycle: 'Tab next', sheetSelect: '↑↓ select',
+    transcriptScroll: 'PgUp/PgDn scroll · Ctrl+Home first · Ctrl+End latest',
+    transcriptPaused: 'History · PgUp/PgDn scroll · Ctrl+End follows output',
     goalObjective: 'Objective', todoActive: 'in progress', todoLeft: 'left',
     // One word is chosen per turn. The words are `|`-separated so the dictionary stays flat strings.
     activityWords: 'Baking|Kneading|Proofing|Whisking|Simmering|Folding|Glazing|Rising|Preheating|Sifting|Toasting|Caramelizing',
@@ -145,6 +147,8 @@ export const dictionaries = {
     goalComplete: '目标已完成', goalRound: '轮次', goalResume: '/goal resume 继续',
     goalTitle: '目标', goalReason: '原因', goalKey: 'Ctrl+O', goalOpen: 'Enter 打开',
     sheetClose: 'Esc 关闭', sheetScroll: '↑↓ 滚动', sheetCycle: 'Tab 下一个', sheetSelect: '↑↓ 选择',
+    transcriptScroll: 'PgUp/PgDn 滚动 · Ctrl+Home 开头 · Ctrl+End 最新',
+    transcriptPaused: '历史 · PgUp/PgDn 滚动 · Ctrl+End 跟随输出',
     goalObjective: '目标内容', todoActive: '进行中', todoLeft: '待办',
     activityWords: '烘焙中|揉面中|发酵中|打发中|慢炖中|折叠中|上釉中|醒面中|预热中|过筛中|烘烤中|焦糖化中',
     summaryFailed: '失败', summaryFailures: '项失败',

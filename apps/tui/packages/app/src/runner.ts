@@ -19,6 +19,8 @@ import type {} from '@deepseek-ai/cordis-plugin-loader'
 /** Validated application options; no implicit defaults remain in the runner. */
 export interface RunnerOptions extends SessionOptions, AttachmentOptions {
   readonly locale: Locale
+  /** Inline terminal scrollback or an application-owned alternate screen. */
+  readonly screen: 'inline' | 'fullscreen'
   /** Profile's composer frame choice, or `auto` to read it from the terminal. */
   readonly composerFrame: FrameStyle | 'auto'
   readonly doubleInterruptMs: number
@@ -62,7 +64,8 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
   // output, the controls would otherwise appear erased each time a line prints.
   // NO_COLOR suppresses text styling and animated indicators for this terminal.
   const motion = (process.env['NO_COLOR'] ?? '') === ''
-  const output = frameOutput(io.out, io.err, motion)
+  const screen = process.env['INK_SCREEN_READER'] === 'true' ? 'inline' : config.screen
+  const output = frameOutput(io.out, io.err, motion, screen)
   let quitTimer: ReturnType<typeof setTimeout> | undefined
   let terminalReleased = false
   let completed = false
@@ -114,7 +117,7 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
     const active = navigation.controller
     if (active === undefined) throw new Error('tui: session is not connected')
     return React.createElement(App, {
-      ...active.view, key: active.agent.id, inputBlocked: navigation.busy, copy, frame, clock: systemClock, motion,
+      ...active.view, key: active.agent.id, inputBlocked: navigation.busy, copy, frame, clock: systemClock, motion, screen,
       quitting: quitTimer !== undefined, completionLimit: config.completionLimit, resultLines: config.resultLines,
       highlight: syntax.highlight, version, ...updates.state === undefined ? {} : { update: updates.state },
       cwd: active.agent.session.header.cwd ?? '', sessionId: active.agent.id,
@@ -142,6 +145,7 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
     // row. That is the flicker on a terminal without synchronized output.
     ui = render(element(), {
       stdin: io.in, stdout: output.out, stderr: output.err, exitOnCtrlC: false, interactive: true, incrementalRendering: true,
+      alternateScreen: screen === 'fullscreen',
     })
     const initial = navigation.controller!
     startupReport = initial.reportCredentials().catch((error: unknown) => {

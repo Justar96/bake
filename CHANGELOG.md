@@ -4,6 +4,7 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 ## [Unreleased]
 
+- `--screen fullscreen` opens a scrollable transcript with the input pinned at the bottom. PgUp/PgDn scroll, Ctrl+Home goes to the start, and Ctrl+End follows new output. Exit restores the shell; inline mode remains the default.
 - Closing the task, subagent, or goal view no longer lifts the prompt to the middle of the screen: the rows the view took stay blank above the prompt until new output fills them.
 - An Escape that arrives together with the next key, as on a slow terminal, still closes an open view, and the typed characters go to the prompt.
 - The subagents row counts the children and how many are working instead of listing their names, which the Ctrl+G view still shows. With tasks, a goal, and subagents all showing, the goal on the header drops its objective as well as its round count.
