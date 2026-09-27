@@ -1557,6 +1557,7 @@
         "@deepseek-ai/dsh-fs-observation-policy": "workspace:^",
         "@deepseek-ai/dsh-fs-sandbox": "workspace:^",
         "@deepseek-ai/dsh-llm": "workspace:^",
+        "@deepseek-ai/dsh-output-retention": "workspace:^",
         "@deepseek-ai/dsh-sandbox": "workspace:^",
         "@deepseek-ai/dsh-sandbox-policy": "workspace:^",
         "@deepseek-ai/dsh-session": "workspace:^",
@@ -1567,6 +1568,7 @@
       "peerDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
         "@deepseek-ai/dsh-fs": "workspace:^",
+        "@deepseek-ai/dsh-output-retention": "workspace:^",
         "@deepseek-ai/dsh-sandbox": "workspace:^",
         "@deepseek-ai/dsh-sandbox-policy": "workspace:^",
         "@deepseek-ai/dsh-tools": "workspace:^",
@@ -3240,6 +3242,7 @@
         "@deepseek-ai/dsh-agent": "workspace:^",
         "@deepseek-ai/dsh-agent-loop-testkit": "workspace:^",
         "@deepseek-ai/dsh-llm": "workspace:^",
+        "@deepseek-ai/dsh-output-retention": "workspace:^",
         "@deepseek-ai/dsh-sandbox": "workspace:^",
         "@deepseek-ai/dsh-sandbox-policy": "workspace:^",
         "@deepseek-ai/dsh-session": "workspace:^",
@@ -3254,6 +3257,7 @@
       "peerDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
         "@deepseek-ai/dsh-agent": "workspace:^",
+        "@deepseek-ai/dsh-output-retention": "workspace:^",
         "@deepseek-ai/dsh-terminal": "workspace:^",
         "@deepseek-ai/dsh-timeout": "workspace:^",
         "@deepseek-ai/dsh-tools": "workspace:^",
@@ -3313,6 +3317,7 @@
         "@deepseek-ai/dsh-agent": "workspace:^",
         "@deepseek-ai/dsh-agent-loop-testkit": "workspace:^",
         "@deepseek-ai/dsh-llm": "workspace:^",
+        "@deepseek-ai/dsh-output-retention": "workspace:^",
         "@deepseek-ai/dsh-pwsh-local": "workspace:^",
         "@deepseek-ai/dsh-sandbox": "workspace:^",
         "@deepseek-ai/dsh-sandbox-policy": "workspace:^",
@@ -3328,6 +3333,7 @@
       "peerDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
         "@deepseek-ai/dsh-agent": "workspace:^",
+        "@deepseek-ai/dsh-output-retention": "workspace:^",
         "@deepseek-ai/dsh-terminal": "workspace:^",
         "@deepseek-ai/dsh-timeout": "workspace:^",
         "@deepseek-ai/dsh-tools": "workspace:^",

@@ -41,7 +41,7 @@ kind: "package-reference"
 
 | 键 | 默认值 | 含义 |
 |---|---|---|
-| `maxOutputChars` | `16000` | 文件和目录查看结果保留的前缀字符数 |
+| `maxOutputChars` | `16000` | 保留文本的最大 UTF-16 代码单元数；截断不拆分代理对，固定诊断文本随后追加 |
 | `description` | `Custom editing tool for viewing, creating and editing files`（多行） | 面向模型的工具描述 |
 
 ### 命令

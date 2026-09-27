@@ -41,7 +41,7 @@ A backend, optionally the policy plugin, then the tool; the editor composes with
 
 | Key | Default | Meaning |
 |---|---|---|
-| `maxOutputChars` | `16000` | Prefix characters retained for file and directory views |
+| `maxOutputChars` | `16000` | Maximum retained UTF-16 code units; truncation preserves surrogate pairs and fixed diagnostics are added afterward |
 | `description` | `Custom editing tool for viewing, creating and editing files` (multi-line) | Model-facing tool description |
 
 ### The commands
