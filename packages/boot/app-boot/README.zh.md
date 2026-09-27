@@ -47,7 +47,7 @@ const ctx = await boot('dsh', resolveConfigPath(argv[2], process.env.DSH_SNAPSHO
 
 Profile 与组合包的声明类型从 [`@deepseek-ai/dsh-package-manifest`](../../util/package-manifest/README.zh.md) 导入。App-boot 将 `DshPackageManifest` 适配为包身份可选的 `ProfileManifest`，因为本地 profile 无需发布版本。App-boot 负责 profile 加载、JSON 校验和解析后的运行时数据。
 
-Bake 随附 `tui` 和 `headless` profile 模板。每个 profile 位于 `$DSH_HOME/profiles/<name>`，由有序组合包和自身 `cordis.patch.yml` 组成；YAML 控制 HMR。`tui` 选择 base 和 `@dsh-tui/app`，headless 选择 base 和单次任务运行器。`dsh --profile <name> --from-default-profile <template>` 从随附模板初始化新的自定义 profile。现有 profile 的组合包列表保持不变。缺少组合包或未声明补丁时，启动明确失败。`loadProfileDirectory` 直接加载已初始化的目录。
+Bake 随附 `tui` 和 `headless` profile 模板。每个 profile 位于 `$DSH_HOME/profiles/<name>`，由有序组合包和自身 `cordis.patch.yml` 组成；YAML 控制 HMR。`tui` 选择 base 和 `@dsh-tui/app`，headless 选择 base 和单次任务运行器。`dsh --profile <name> --from-default-profile <template>` 从随附模板初始化新的自定义 profile。组合包的 `dsh.bundle.patch` 接受相对于包根目录的单一路径或有序路径列表，各文件的补丁列表按顺序应用。现有 profile 的组合包列表保持不变。缺少组合包或未声明补丁时，启动明确失败。`loadProfileDirectory` 直接加载已初始化的目录。
 
 你的机器本地偏好同样位于 harness home 中：
 
@@ -65,6 +65,14 @@ Bake 随附 `tui` 和 `headless` profile 模板。每个 profile 位于 `$DSH_HO
 ### 预览生效配置
 
 启动前，你可以打印应用将挂载的确切配置：dump 会以 `!!js` 表达式原样展示组合后的条目列表，并按注释分组标明每个源文件及其 patch 层，输出是一份可加载的 YAML 文档。未匹配到任何行的 patch 会连同其层标签一起报告；配置缺失、无法解析或字段无效都会使 dump 失败。
+
+### 检查插件配置 schema
+
+`generateConfigSchema` 接收用于诊断的 bin 名称、已准备好的磁盘 profile、有序 patch 列表和安装锚点，返回 `ConfigSchemaDump`。App-boot 负责组合、运行时解析和收集诊断。调用方负责 profile 准备、home/argv 层选择、进程流及退出策略。`createConfigProjector`、`isNativeConfigSchema` 与 `LOADER_EXPRESSION_SCHEMA` 供不经 profile 收集、只投影单个运行中插件 Config 的调用方使用；投影后的取值位置会引用 `#/$defs/loaderExpression`，外层文档必须定义它。
+
+生成的 JSON Schema 2020-12 描述组合后的 entry list，以 `$defs.patchList` 描述根树 overlay，并从插件 Config 图投影共享定义。它包含禁用项、原生 group 和字面量 YAML/JSON include；内置与规范原生包导出按每棵树的模块解析基准匹配，包括 profile 本地副本。不会根据 config 字段猜测自定义承载插件。include 缺失但有字面量 `initial` 条目时，只在内存中展开，不写文件。发现和投影诊断保留在 `x-cordis` 中，包括未知 Config 和部分约束。[CLI schema dump 参考](../../../apps/cli/reference/README.zh.md#config-schema-dump)负责说明输出字段和编辑语义。
+
+投影器使用 Ajv 根据生成的 schema 检查字面量默认值，以保留原生省略行为，不执行原生验证器或 transform 回调。正则兼容性检查、不支持的情况及递归默认值分析会产生显式限制说明。不透明的输入转换和 lazy 元数据副作用会放宽验证，而不是重放原生修改。非 JSON 默认值或展示注释会被省略并附上限制说明，不丢弃结构 schema；无法表示的默认值使省略接受性保持未知，必填字段除外。这些依赖仅在收集运行时加载。导入、Config getter 和 lazy builder 仍会执行可信代码；收集不是沙箱。profile 解析拦截不得重叠。收集器返回前释放自己的拦截，而 Node 仍缓存导入的模块；运行时创建的插件和 Agent preset 实例不在发现范围内。
 
 <a id="startup-and-reload-failures"></a>
 ### 启动与重载失败
@@ -135,6 +143,7 @@ Loader 结算后，app-boot 在仅 optional 条目未激活时输出警告。如
 | [`src/profile.ts`](src/profile.ts) | profile 发现、初始化、组合包解析、模块后备机制 |
 | [`src/profile-plugins.ts`](src/profile-plugins.ts) | 已安装依赖、bundle 启用策略与 manifest 更新 |
 | [`src/profile-sanitize.ts`](src/profile-sanitize.ts) | profile patch 备份与恢复 bundle 启用状态 |
+| [`src/config-schema/`](src/config-schema/) | Profile schema 生成、发现、原生投影与结果类型 |
 | [`src/profile-resolution/`](src/profile-resolution/) | 运行时 resolver、package metadata 服务与构建后 Worker bootstrap |
 | — | 不发布运行时不变式伴生入口；每个 resolver generation 只有一个 registration 所有，dual 模式在解析时比较独立物化的结果。 |
 
@@ -187,8 +196,8 @@ Loader 结算后，app-boot 在仅 optional 条目未激活时输出警告。如
 
 本开发备注是维护者的工作上下文：开放设计问题与尚未决定的探索方向。它明确不具权威性——已交付的行为、限制与既定理由以上文、包代码和相关 Agent Note 为准。
 
-#### 待定：配置 dump 稳定性
+#### 待定：YAML 配置 dump 稳定性
 
-`renderConfigDump` 的输出是一份可加载的 YAML 文档，其 `# ==` 来源注释与 `!!js` 原样渲染服务于 `--dump-config` 诊断。任何内容都不承诺跨包版本的字节稳定性；在程序化消费该输出之前，请决定 dump 是否成为序列化约定。
+`renderConfigDump` 的输出是一份可加载的 YAML 文档，其 `# ==` 来源注释与 `!!js` 原样渲染服务于 `--dump-config` 诊断。任何内容都不承诺跨包版本的字节稳定性；在程序化消费该输出之前，请决定 dump 是否成为序列化约定。JSON Schema 输出遵循单独的 [pre-stable 兼容性规则](../../../apps/cli/reference/README.zh.md#config-schema-dump)。
 
 </details>

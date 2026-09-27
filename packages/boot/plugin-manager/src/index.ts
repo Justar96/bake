@@ -11,7 +11,8 @@ import z from '@deepseek-ai/schemastery'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import { pluginEntryId, readPluginInventory } from '@deepseek-ai/dsh-host-plugin-inventory'
 import {
-  readProfileManifest, resolveBundleDir, loadOverlayPatches, composeEntries, reconcileProfilePatches, readProfilePatches, PROFILE_TEMPLATES,
+  readProfileManifest, resolveBundleDir, loadOverlayPatches, composeEntries,
+  reconcileProfilePatches, readProfilePatches, PROFILE_TEMPLATES, bundlePatchPaths,
 } from '@deepseek-ai/dsh-app-boot'
 import type {} from '@deepseek-ai/dsh-hmr'
 import type { ProfileContext, ProfileManifest } from '@deepseek-ai/dsh-app-boot'
@@ -375,8 +376,8 @@ export class PluginManager extends TypertRemoteService {
         name = target
         const dir = resolveBundleDir('dsh', name, this.profile.installAnchor, this.profile.dir)
         const manifest = bundleManifest(name, this.profile.dir, this.profile.installAnchor)
-        if (manifest?.dsh?.bundle?.patch === undefined) throw new ManagementFailure('not-bundle')
-        loadOverlayPatches('dsh', join(dir, manifest.dsh.bundle.patch))
+        if (manifest?.dsh?.bundle === undefined) throw new ManagementFailure('not-bundle')
+        for (const file of bundlePatchPaths(dir, manifest.dsh.bundle)) loadOverlayPatches('dsh', file)
       } catch (error) {
         // pnpm has exited by now, so the files it rewrote go back as they were.
         await this.restoreFiles(files)
@@ -446,11 +447,11 @@ export class PluginManager extends TypertRemoteService {
 
   /** The rows a bundle's patch inserts and the existing rows it changes; an unreadable patch throws. */
   private declaredRows(name: string, info: ProfileManifest): Pick<BundleInfo, 'rows' | 'overrides'> {
-    const patch = info.dsh?.bundle?.patch
+    const bundle = info.dsh?.bundle
     /* v8 ignore next -- bundleManifest answers only manifests that declare a patch */
-    if (patch === undefined) return { rows: [], overrides: [] }
+    if (bundle === undefined) return { rows: [], overrides: [] }
     const dir = resolveBundleDir('dsh', name, this.profile.installAnchor, this.profile.dir)
-    const patches: PatchOptions[] = loadOverlayPatches('dsh', join(dir, patch))
+    const patches: PatchOptions[] = bundlePatchPaths(dir, bundle).flatMap(file => loadOverlayPatches('dsh', file))
     // One entry per row id: the Loader keeps a single entry for an id, whichever layer declared it last.
     const live = new Map<string, PluginEntryId>()
     for (const entry of this.ctx.loader.entries()) {
@@ -537,7 +538,7 @@ export class PluginManager extends TypertRemoteService {
     const info = bundleManifest(name, this.profile.dir, this.profile.installAnchor)
     if (info?.dsh?.bundle === undefined) return []
     const dir = resolveBundleDir('dsh', name, this.profile.installAnchor, this.profile.dir)
-    return flatten(composeEntries([loadOverlayPatches('dsh', join(dir, info.dsh.bundle.patch))]))
+    return flatten(composeEntries([bundlePatchPaths(dir, info.dsh.bundle).flatMap(file => loadOverlayPatches('dsh', file))]))
   }
 
   private protectsManager(name: string): boolean {

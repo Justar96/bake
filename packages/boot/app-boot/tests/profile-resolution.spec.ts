@@ -246,12 +246,12 @@ describe('profile resolution generation', { concurrent: false }, () => {
     f.profile.layers.push({
       packageName: 'test-bundle',
       packageDir: bundleDir,
-      patchPath: join(bundleDir, 'cordis.patch.yml'),
+      patchPaths: [join(bundleDir, 'cordis.patch.yml')],
       patches: [],
     }, {
       packageName: 'later-bundle',
       packageDir: laterBundle,
-      patchPath: join(laterBundle, 'cordis.patch.yml'),
+      patchPaths: [join(laterBundle, 'cordis.patch.yml')],
       patches: [],
     })
 
@@ -932,7 +932,7 @@ describe('profile resolution generation', { concurrent: false }, () => {
     f.profile.layers.push({
       packageName: 'test-bundle',
       packageDir: bundleDir,
-      patchPath: join(bundleDir, 'cordis.patch.yml'),
+      patchPaths: [join(bundleDir, 'cordis.patch.yml')],
       patches: [],
     })
     const registration = installProfileResolution(await generationOf(f))

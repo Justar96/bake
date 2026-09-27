@@ -25,7 +25,7 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
-创造模式包含这组工具。其他组合需要同时挂载 `@deepseek-ai/dsh-tool-cordis` 和提供 `cordisInspect` 的 host runner。调用 `cordis_inspect_list` 发现 provider，再用 `cordis_inspect_query` 查询其具体方法和类型。通过 [Plugin Manager](../../boot/plugin-manager/README.zh.md) 安装包含插件代码或 MCP 配置的组合包。
+创造模式包含这组工具。其他组合需要同时挂载 `@deepseek-ai/dsh-tool-cordis` 和提供 `cordisInspect` 的 host runner。调用 `cordis_inspect_list` 发现 provider，再用 `cordis_inspect_query` 查询其具体方法和类型。Host `Config.listConfigs` 提供方分页列出实时 Loader 条目（`offset`、最大为 100 的 `limit`，以及可选的精确插件 `name`），并将指定条目的原生 Config 投影为 JSON Schema。结果区分 schema、absent、unsupported、tree 和 inactive 状态；目录返回 `total` 与 `nextOffset`。通过 [Plugin Manager](../../boot/plugin-manager/README.zh.md) 安装包含插件代码或 MCP 配置的组合包。
 
 -----
 
@@ -35,7 +35,7 @@ kind: "package-reference"
 <details>
 <summary>实现细节 — 点击展开</summary>
 
-Host provider 结合生成的 Service/Event 目录与请求 agent 的工具注册表。Client provider 通过现有检查注册表同步清单，并从已连接页面回答查询。工具插件通过 Cordis effect 持有注册；释放时移除工具和提示词贡献。检查直接读取 provider，不维护独立运行时投影，因此不发布不变式配套插件。
+Host provider 结合生成的 Service/Event 目录、实时 Loader Config schema 与请求 agent 的工具注册表。Client provider 通过现有检查注册表同步清单，并从已连接页面回答查询。工具插件通过 Cordis effect 持有注册；释放时移除工具和提示词贡献。检查直接读取 provider，不维护独立运行时投影，因此不发布不变式配套插件。
 
 </details>
 
@@ -69,6 +69,7 @@ Host provider 结合生成的 Service/Event 目录与请求 agent 的工具注�
 <a id="known-limitations-and-deferred-work"></a>
 
 - Client 查询等待页面响应或取消。检查不能调用服务方法、配置插件或执行生成代码。
+- `Config.listConfigs` 只遍历 profile 的 Loader 树。Agent preset 的 `plugins` 列表挂载在独立的 preset 树中，所以只出现在 preset 声明里的插件不会被列出，除非 profile 树也挂载了它。
 
 <a id="dev-note"></a>
 ### 开发备注

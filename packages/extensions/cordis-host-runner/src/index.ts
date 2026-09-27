@@ -39,7 +39,6 @@ export type {
 } from './registry.ts'
 export { CordisInspectRegistryService } from './inspect-registry.ts'
 export type { HostCordisInspectProviderRegistration } from './inspect-registry.ts'
-export { HOST_BUILTIN_INSPECTION } from './sandbox.ts'
 
 /**
  * Brand a Host-minted Plugin ID.

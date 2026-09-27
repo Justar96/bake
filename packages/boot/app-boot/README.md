@@ -47,7 +47,7 @@ const ctx = await boot('dsh', resolveConfigPath(argv[2], process.env.DSH_SNAPSHO
 
 Import profile and bundle declaration types from [`@deepseek-ai/dsh-package-manifest`](../../util/package-manifest/README.md). App-boot adapts `DshPackageManifest` to `ProfileManifest` with optional package identity because local profiles need no published version. App-boot owns profile loading, JSON validation, and resolved runtime data.
 
-Bake ships `tui` and `headless` profile templates. Each profile lives at `$DSH_HOME/profiles/<name>` and combines ordered bundles with its own `cordis.patch.yml`; YAML controls HMR. `tui` selects base and `@dsh-tui/app`, while headless selects base and its one-shot runner. `dsh --profile <name> --from-default-profile <template>` initializes a new custom profile from a shipped template. Existing profile bundle lists remain unchanged. A missing bundle or one without a patch declaration fails startup loudly. `loadProfileDirectory` loads an already initialized directory directly.
+Bake ships `tui` and `headless` profile templates. Each profile lives at `$DSH_HOME/profiles/<name>` and combines ordered bundles with its own `cordis.patch.yml`; YAML controls HMR. `tui` selects base and `@dsh-tui/app`, while headless selects base and its one-shot runner. `dsh --profile <name> --from-default-profile <template>` initializes a new custom profile from a shipped template. A bundle's `dsh.bundle.patch` accepts one path or an ordered list of paths, relative to its package root. Each file's patch list is applied in order. Existing profile bundle lists remain unchanged. A missing bundle or one without a patch declaration fails startup loudly. `loadProfileDirectory` loads an already initialized directory directly.
 
 Your machine-local preferences also live in the Harness home:
 
@@ -65,6 +65,14 @@ Before mounting profile rows, the `dsh` launcher computes one immutable package-
 ### Previewing the effective configuration
 
 Before you boot, you can print the exact configuration the app will mount: the dump shows the composed entry list with `!!js` expressions verbatim, grouped under comments naming each source file and the patch layers that changed it, as one loadable YAML document. Patches that match no row are reported with their layer label; a missing, unparsable, or invalid config fails the dump.
+
+### Inspecting plugin configuration schemas
+
+`generateConfigSchema` takes a diagnostic bin name, a prepared on-disk profile, ordered patch lists, and an installation anchor, and returns `ConfigSchemaDump`. App-boot owns composition, runtime resolution, and collection diagnostics. The caller owns profile preparation, home/argv layer selection, process streams, and exit policy. `createConfigProjector`, `isNativeConfigSchema`, and `LOADER_EXPRESSION_SCHEMA` are exported for callers that project one live plugin Config without profile collection; projected value positions reference `#/$defs/loaderExpression`, so the enclosing document must define it.
+
+The generated JSON Schema 2020-12 describes the composed entry list, with `$defs.patchList` for root-tree overlays and shared definitions projected from plugin Config graphs. It includes disabled entries, native groups, and literal YAML/JSON includes; builtin and canonical native package exports are matched using each tree's module-resolution base, including profile-local copies. Custom carriers are not inferred from their config fields. A missing include with literal `initial` entries is expanded in memory without writes. Discovery and projection diagnostics remain in `x-cordis`, including unknown Configs and partial constraints. The [CLI schema-dump reference](../../../apps/cli/reference/README.md#config-schema-dump) owns the output fields and editing semantics.
+
+The projector preserves native omission behavior by checking literal defaults against generated schemas with Ajv, without executing native validators or transform callbacks. Regex compatibility checks and unsupported or recursive-default cases produce explicit limitations. Opaque input adaptations and lazy metadata effects widen validation rather than replaying native mutation. Non-JSON default/presentation annotations are omitted with limitations without losing the structural schema; an unrepresentable default leaves omission acceptance unknown unless the field is required. These dependencies load only when collection runs. Imports, Config getters, and lazy builders still execute trusted code; collection is not a sandbox. Do not overlap profile-resolution interceptions. The collector releases its interception before returning, while Node retains imported modules; runtime-created plugins and Agent preset instances remain outside discovery.
 
 <a id="startup-and-reload-failures"></a>
 ### Startup and reload failures
@@ -135,6 +143,7 @@ The exports each own one stage of the boot: config resolution and snapshot repla
 | [`src/profile.ts`](src/profile.ts) | Profile discovery, initialization, bundle resolution, module fallback |
 | [`src/profile-plugins.ts`](src/profile-plugins.ts) | Installed dependencies, bundle activation policy, and manifest updates |
 | [`src/profile-sanitize.ts`](src/profile-sanitize.ts) | Profile patch backup and recovery bundle activation |
+| [`src/config-schema/`](src/config-schema/) | Profile schema generation, discovery, native projection, and result types |
 | [`src/profile-resolution/`](src/profile-resolution/) | Runtime resolver, package-metadata service, and built Worker bootstrap |
 | — | No runtime invariant companion is published; one registration owns each resolver generation, and dual mode compares the independently materialized result at resolution time. |
 
@@ -187,8 +196,8 @@ These limits describe when this boot library is a poor fit or needs special care
 
 This Dev Note is working context for maintainers: open design questions and directions that are not decided. It is explicitly non-authoritative — shipped behavior, limits, and accepted rationale live in the sections above, the package code, and the linked Agent Notes.
 
-#### Open: config dump stability
+#### Open: YAML config dump stability
 
-`renderConfigDump` output is a loadable YAML document whose `# ==` source comments and `!!js`-verbatim rendering serve the `--dump-config` diagnostic. Nothing promises byte stability across package versions; decide whether the dump becomes a serialization contract before anything consumes it programmatically.
+`renderConfigDump` output is a loadable YAML document whose `# ==` source comments and `!!js`-verbatim rendering serve the `--dump-config` diagnostic. Nothing promises byte stability across package versions; decide whether the dump becomes a serialization contract before anything consumes it programmatically. JSON Schema output follows the separate [pre-stable compatibility policy](../../../apps/cli/reference/README.md#config-schema-dump).
 
 </details>

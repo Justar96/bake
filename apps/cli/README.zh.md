@@ -12,6 +12,8 @@
 
 `--from-default-profile <template>` 从随附模板创建新名称的自定义 profile。`--dump-default-config` 和 `--dump-config` 在不启动 Agent 的情况下检查组合。启动器原样转发自身选项之后的应用参数，不解释其含义。
 
+使用 `--dump-default-config` 和 `--dump-config` 可在不启动的情况下检查组合后的配置树。`--dump-config-schema` 会导入组合树中插件声明的 schema，并打印描述 entry 与 patch 的 JSON Schema，而不是配置值；检查不受信任的插件前，请阅读 [schema dump 的安全性与范围](reference/README.zh.md#config-schema-dump)。
+
 ## 开发
 
 在仓库根目录运行 `bun run build` 构建运行时和终端包。`bun run start` 使用生产版 React 启动终端；`bun run start --help` 显示选项。使用 `bun apps/tui/scripts/tui.ts e2e` 通过真实 PTY 进行无密钥录制重放验证。

@@ -11,6 +11,7 @@ import {
 import { tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { withFileLock } from '@deepseek-ai/dsh-atomic-write'
 import { afterAll, describe, expect, it } from 'vitest'
 import {
@@ -84,7 +85,7 @@ function stageProfile(home: string, name: string, bundleAnchor: string): Profile
     layers: [{
       packageName,
       packageDir: join(bundleAnchor, '..'),
-      patchPath: join(bundleAnchor, '..', 'cordis.patch.yml'),
+      patchPaths: [join(bundleAnchor, '..', 'cordis.patch.yml')],
       patches: [],
     }],
     patchPath: join(dir, PROFILE_PATCH_FILENAME),
@@ -303,6 +304,37 @@ describe('loadProfile', () => {
     expect(bare.layers).toEqual([])
   })
 
+  it('applies a dsh.bundle.patch list in order, anchoring inserted paths beside each file', () => {
+    const anchor = stageInstallation({ 'multi': { patch: '[]\n' }, 'broken': { patch: '[]\n' } })
+    const bundleDir = join(anchor, '..', 'node_modules', 'multi')
+    mkdirSync(join(bundleDir, 'layers'), { recursive: true })
+    writeFileSync(join(bundleDir, 'package.json'), JSON.stringify({
+      name: 'multi', version: '0.0.0', type: 'module', main: './index.js',
+      dsh: { bundle: { patch: ['./first.patch.yml', './layers/second.patch.yml'] } },
+    }))
+    writeFileSync(join(bundleDir, 'first.patch.yml'), '- insert:\n    - id: a\n      name: ./local.js\n      config: { v: 1 }\n')
+    writeFileSync(join(bundleDir, 'layers', 'second.patch.yml'), '- id: a\n  config: { v: 2 }\n- insert:\n    - id: b\n      name: ./local.js\n')
+    const brokenManifest = join(anchor, '..', 'node_modules', 'broken', 'package.json')
+    writeFileSync(brokenManifest, JSON.stringify({ name: 'broken', version: '0.0.0', dsh: { bundle: { patch: [1] } } }))
+    const home = tmp()
+    const dir = resolveProfileDir('demo', home)
+    initProfile(dir, ['multi'])
+
+    const profile = loadProfile('t', 'demo', anchor, home)
+    expect(profile.layers.map(layer => ({ ...layer, patches: layer.patches.length }))).toEqual([{
+      packageName: 'multi',
+      packageDir: bundleDir,
+      patchPaths: [join(bundleDir, 'first.patch.yml'), join(bundleDir, 'layers', 'second.patch.yml')],
+      patches: 3,
+    }])
+    expect(composeEntries(profile.layers.map(layer => layer.patches))).toEqual([
+      { id: 'a', name: pathToFileURL(join(bundleDir, 'local.js')).href, config: { v: 2 } },
+      { id: 'b', name: pathToFileURL(join(bundleDir, 'layers', 'local.js')).href },
+    ])
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ dsh: { profile: { bundles: ['broken'] } } }))
+    expect(() => loadProfile('t', 'demo', anchor, home)).toThrow('dsh.bundle.patch must be a file path or a list of file paths')
+  })
+
   it('auto-initializes only shipped templates and fails loud otherwise', () => {
     const anchor = stageInstallation({})
     const home = tmp()
@@ -470,7 +502,7 @@ describe('healProfilesModuleFallback', () => {
       layers: [{
         packageName: 'selected-bundle',
         packageDir: bundleLink,
-        patchPath: join(bundleLink, 'cordis.patch.yml'),
+        patchPaths: [join(bundleLink, 'cordis.patch.yml')],
         patches: [],
       }],
       patchPath: join(dir, PROFILE_PATCH_FILENAME),
@@ -514,7 +546,7 @@ describe('healProfilesModuleFallback', () => {
       layers: ([['bundle-a', bundleA], ['bundle-b', bundleB]] as const).map(([packageName, packageDir]) => ({
         packageName,
         packageDir,
-        patchPath: join(packageDir, 'cordis.patch.yml'),
+        patchPaths: [join(packageDir, 'cordis.patch.yml')],
         patches: [],
       })),
       patchPath: join(dir, PROFILE_PATCH_FILENAME),
@@ -553,7 +585,7 @@ describe('healProfilesModuleFallback', () => {
       layers: ([['bundle-a', bundleA], ['bundle-b', bundleB]] as const).map(([packageName, packageDir]) => ({
         packageDir,
         packageName,
-        patchPath: join(packageDir, 'cordis.patch.yml'),
+        patchPaths: [join(packageDir, 'cordis.patch.yml')],
         patches: [],
       })),
       patchPath: join(dir, PROFILE_PATCH_FILENAME),

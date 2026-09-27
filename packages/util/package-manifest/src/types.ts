@@ -50,8 +50,8 @@ export interface DshEnginesManifest {
 
 /** The configuration layer exported by a bundle package. */
 export interface DshBundleManifest {
-  /** Patch file path relative to the declaring package root. */
-  patch: string
+  /** One patch file path, or an ordered list applied in sequence, each relative to the declaring package root. */
+  patch: string | string[]
 }
 
 /** The bundle composition declared by a profile directory. */

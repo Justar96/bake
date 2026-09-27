@@ -134,7 +134,7 @@ describe('runProfile with an application-owned profile', () => {
       name: 'desktop', dir: home, patchPath: profilePatch,
       patches: [{ id: 'target', config: { profile: true, priority: 'profile' } }],
       layers: [{
-        packageName: 'test-bundle', packageDir: home, patchPath: join(home, 'bundle.yml'),
+        packageName: 'test-bundle', packageDir: home, patchPaths: [join(home, 'bundle.yml')],
         patches: [{ insert: [
           { id: 'target', name: 'target', config: { bundle: true, priority: 'bundle' } },
           { id: 'session-telemetry-otel', name: 'telemetry' },
