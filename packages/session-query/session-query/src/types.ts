@@ -164,6 +164,8 @@ export interface SessionTitleObservation {
   session: SessionHeader
   /** Latest title snapshot, absent when the observed log has no title. */
   title?: SessionTitleSnapshot
+  /** Unix epoch milliseconds of the observed log's newest event, absent for an empty log. */
+  lastEventAt?: number
 }
 
 /** One ordered result from a batch title observation. */

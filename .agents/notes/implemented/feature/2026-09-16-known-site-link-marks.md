@@ -6,7 +6,7 @@ English | [中文](2026-09-16-known-site-link-marks.zh.md)
 
 ## Problem
 
-Every transcribed anchor led with the same globe, so a transcript full of GitHub, npm, and documentation links gave no signal about where a link goes until the reader parsed its label. The [clickable-link vocabulary](2026-09-04-web-clickable-link-styles.md) reserved that leading seat for one category glyph and left per-site marks as a possible later extension of the `url` category.
+Every transcribed anchor led with the same globe, so a transcript full of GitHub, npm, and documentation links gave no signal about where a link goes until the reader parsed its label. The clickable-link vocabulary reserved that leading seat for one category glyph and left per-site marks as a possible later extension of the `url` category.
 
 ## Decision
 

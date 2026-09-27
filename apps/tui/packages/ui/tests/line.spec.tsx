@@ -237,6 +237,8 @@ describe('StatusBar', () => {
     // The path is the one field kept at any width, cut from its head.
     expect(at(40)).toBe('Model: deepseek-v4-flash  ~/workspace')
     expect(at(34)).toBe('Model: deepseek-v4-flash  …rkspace')
+    // A tail too short to name the workspace is left out, not drawn as `…e`.
+    expect(at(30)).toBe('Model: deepseek-v4-flash')
   })
 
   it('yields the right cluster before the left, whatever the path costs', () => {

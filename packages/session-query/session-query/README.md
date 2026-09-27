@@ -35,7 +35,7 @@ Use `ctx.sessionQuery` from application code when you need to read or search ses
 | `readSession(id)` | The complete replay-validated raw event log, without making the session live |
 | `filterSessions(filters)` | Sessions matching ANDed metadata and availability predicates |
 | `filterEvents(id, filters)` | Semantic event documents matching metadata and literal-text predicates |
-| `readTitleSnapshots(ids)` | The latest folded title per session, bound to its source header |
+| `readTitleSnapshots(ids)` | The latest folded title per session, bound to its source header, with the newest event's time as `lastEventAt` |
 | `listEvents(id)` / `readSurface(id)` | Lightweight per-event records, or the complete current model surface |
 | `readEvent(request)` | One full event plus a bounded raw-log window around it |
 | `traceSession(id)` | The known ancestor chain and recursive descendant trees |

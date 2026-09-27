@@ -10,13 +10,13 @@ Status: implemented
 
 ## 决策
 
-验证优先保留各工作流/引用组内最新的运行。[CI](../../../../.github/workflows/ci.yml)、[CI master](../../../../.github/workflows/ci-master.yml)、[真实 API e2e](../../../../.github/workflows/e2e.yml)，以及无凭据的 [dsh](../../../../.github/workflows/release.yml) 和 [vendor](../../../../.github/workflows/release-vendor.yml) 打包验证，均在 `${{ github.workflow }}-${{ github.ref }}` 组中使用 `cancel-in-progress: true`。不同 PR 引用和不同工作流不会相互取消。事件类型不参与分组：CI master 中的 master 推送与手动基准测试可以相互取代，e2e 的推送、定时运行和手动运行也可以在同一引用上相互取代。
+验证优先保留各工作流/引用组内最新的运行。[CI](../../../../.github/workflows/ci.yml)、CI master、真实 API e2e，以及无凭据的 [dsh](../../../../.github/workflows/release.yml) 和 vendor 打包验证，均在 `${{ github.workflow }}-${{ github.ref }}` 组中使用 `cancel-in-progress: true`。不同 PR 引用和不同工作流不会相互取消。事件类型不参与分组：CI master 中的 master 推送与手动基准测试可以相互取代，e2e 的推送、定时运行和手动运行也可以在同一引用上相互取代。
 
-[可复用 Python 运行时构建器](../../../../.github/workflows/build-exe-for-python-sdk.yml)使用 `${{ !inputs.release }}`。其 `build-single-exe-${{ github.workflow }}-${{ github.ref }}` 组与调用方的组保持区分，调用方工作流名称将普通 CI 与发布所属的构建隔离。发布所属的构建获得豁免，因为它们属于一次有意发起的发布事务。发布、部署和元数据工作流保留各自的策略；本决策不会不加区分地对所有工作流应用取消。
+可复用 Python 运行时构建器使用 `${{ !inputs.release }}`。其 `build-single-exe-${{ github.workflow }}-${{ github.ref }}` 组与调用方的组保持区分，调用方工作流名称将普通 CI 与发布所属的构建隔离。发布所属的构建获得豁免，因为它们属于一次有意发起的发布事务。发布、部署和元数据工作流保留各自的策略；本决策不会不加区分地对所有工作流应用取消。
 
 PR 聚合使用 `${{ !cancelled() && github.event_name == 'pull_request' }}`。显式状态函数使其在依赖失败或跳过后仍然求值，而非采用 GitHub 默认的仅成功条件。当工作流本身未被取消时，聚合仍会因任意依赖失败、取消或跳过而失败；整个工作流被取消时则抑制其已失去用途的判定。覆盖率耗时历史也使用 `!cancelled()`：覆盖率失败时仍可保存有用的测量数据，但被取消的覆盖率运行不上传。Wine 的 `always()` 清理仍是必要的资源清理，而非可选记账任务。
 
-本决策推翻[故障切换手册](2026-07-26-ci-failover-runbook.zh.md)、[仅 master 执行的平台 CI](2026-09-06-master-only-platform-ci.zh.md) 和[真实 API e2e 决策](../testing/2026-06-19-real-api-e2e-ci.zh.md)中的取消豁免。这些记录对运行器池信任与切换、平台覆盖和密钥暴露仍有独立价值。[发布演练决策](2026-09-06-release-rehearsal-selfhosted.zh.md)仍负责运行器选择与隔离。没有记录被完全取代或归档。
+本决策推翻[故障切换手册](2026-07-26-ci-failover-runbook.zh.md)、仅 master 执行的平台 CI 和真实 API e2e 决策中的取消豁免。这些记录对运行器池信任与切换、平台覆盖和密钥暴露仍有独立价值。发布演练决策仍负责运行器选择与隔离。没有记录被完全取代或归档。
 
 ## 曾考虑的替代方案
 
@@ -36,4 +36,4 @@ master 快速更新可能反复取消耗时更长的热备演练，使其无法�
 
 ## 验证
 
-[工作流回归测试](../../../../scripts/ci-workflow.spec.ts)固定工作流/引用隔离、发布所属构建豁免、聚合状态条件、覆盖率历史取消及保留的 Wine 清理。[平台路由回归测试](../../../../scripts/tests/ci-master-platforms.spec.ts)保留 master/PR 目标划分与发布矩阵；[发布演练回归测试](../../../../scripts/tests/ci-release-selfhosted.spec.ts)在验证取消策略的同时保留运行器准入与发布隔离。这些配置检查不重现 GitHub 调度或运行器停止过程。真实运行取代行为与已完成热备证据仍由 CI 负责验证。
+工作流回归测试固定工作流/引用隔离、发布所属构建豁免、聚合状态条件、覆盖率历史取消及保留的 Wine 清理。平台路由回归测试保留 master/PR 目标划分与发布矩阵；发布演练回归测试在验证取消策略的同时保留运行器准入与发布隔离。这些配置检查不重现 GitHub 调度或运行器停止过程。真实运行取代行为与已完成热备证据仍由 CI 负责验证。

@@ -14,7 +14,7 @@ The [dsh-speed-up-perf skill](../../../skills/dsh-speed-up-perf/SKILL.md) guides
 
 The workflow requires behavior evidence independently of timing: model-visible logs, durable generation and publication rules, stream ordering, cancellation, and disposal remain obligations. Authorized private corpus inspection yields only aggregate workload inspiration; committed inputs and published artifacts contain synthetic material. Optimization PRs carry their tighter budgets, while a preceding benchmark layer can protect the measured baseline and remain independently mergeable.
 
-The [Session-opening performance-gate decision](../testing/2026-09-04-session-open-performance-gate.md) retains ownership of lane mechanics and calibration. The [simplification skill](../../../skills/dsh-find-simplifications/SKILL.md) retains ownership of deletion-oriented surveys. Neither is superseded: this workflow adds performance-specific candidate selection, measurement comparability, and stopping criteria rather than replacing their decisions.
+The Session-opening performance-gate decision retains ownership of lane mechanics and calibration. The [simplification skill](../../../skills/dsh-find-simplifications/SKILL.md) retains ownership of deletion-oriented surveys. Neither is superseded: this workflow adds performance-specific candidate selection, measurement comparability, and stopping criteria rather than replacing their decisions.
 
 ## Historical evidence
 

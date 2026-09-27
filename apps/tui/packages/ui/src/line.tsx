@@ -628,6 +628,8 @@ export interface PrimaryField {
   readonly short?: string
   /** Highlight the currently keyboard-selected status action. */
   readonly selected?: boolean
+  /** Semantic tone for a reading that needs attention, such as a nearly full context. */
+  readonly color?: PaletteColor | undefined
 }
 
 /** One status-line field. Dim supporting text, primary text, or a measured reading. */
@@ -735,7 +737,8 @@ export function StatusBar({ left, right, badge, secondaryBadge, columns }: {
           {typeof field === 'string'
             ? <Text dimColor wrap={index === last ? 'truncate-start' : 'truncate-end'}>{field}</Text>
             : 'text' in field
-              ? <Text wrap={index === last ? 'truncate-start' : 'truncate-end'} inverse={field.selected === true}>{field.text}</Text>
+              ? <Text wrap={index === last ? 'truncate-start' : 'truncate-end'} inverse={field.selected === true}
+                {...field.color === undefined ? {} : { color: field.color }}>{field.text}</Text>
               : <Text wrap="truncate-end"><Text dimColor>{`${field.label} `}</Text><Text color={field.color}>{field.value}</Text></Text>}
         </Box>
       ))}
@@ -746,8 +749,9 @@ export function StatusBar({ left, right, badge, secondaryBadge, columns }: {
 /**
  * The right fields that fit beside the left cluster.
  *
- * The last field is unbounded and truncates into whatever room is left, so it
- * is kept however little room there is; the bounded fields before it are kept
+ * The last field is unbounded and truncates into whatever room is left. It is
+ * kept while at least {@link UNBOUNDED_MIN} cells of it fit, since a shorter
+ * tail such as `…ake` names nothing; the bounded fields before it are kept
  * whole while they fit, highest priority first.
  *
  * @param right - the right fields, the unbounded one last.
@@ -766,19 +770,26 @@ function fitting(right: readonly StatusField[], room: number, after: boolean): r
     if (used + gap + stringWidth(textOf(chosen)) > room) {
       if (typeof field === 'string' || !('short' in field) || field.short === undefined
         || used + gap + stringWidth(field.short) > room) break
-      chosen = { text: field.short, selected: field.selected === true }
+      chosen = { text: field.short, selected: field.selected === true,
+        ...'color' in field && field.color !== undefined ? { color: field.color } : {} }
     }
     kept.push(chosen)
     used += gap + stringWidth(textOf(chosen))
   }
-  return unbounded === undefined ? kept : [...kept, unbounded]
+  if (unbounded === undefined) return kept
+  const left = room - used - (kept.length > 0 || after ? FIELD_GAP.length : 0)
+  return left >= Math.min(UNBOUNDED_MIN, stringWidth(textOf(unbounded))) ? [...kept, unbounded] : kept
 }
+
+/** Fewest cells of the unbounded field worth drawing. */
+const UNBOUNDED_MIN = 6
 
 /**
  * The header, the framed composer under it, and the status line beneath them.
  *
  * Up to six rows. A blank, the header, the rule, the composer's first row,
- * the base rule, then the status line. The header ({@link Header}) is the one
+ * the base rule, then the status line. A caller's `footer`, such as the
+ * subagents row, goes between the base rule and the status line. The header ({@link Header}) is the one
  * row that says what the session is doing — the turn's spinner and word, or
  * how it ended, and the goal at the right edge — so the two rules can be bare
  * lines that only frame the input. The draft is one band between them. The
@@ -828,8 +839,10 @@ function fitting(right: readonly StatusField[], room: number, after: boolean): r
  * @param props.layout - structure that fits in the available terminal height.
  * @param props.children - panels drawn above the header, each within its own
  *   claimed rows; they are not counted in `layout.rows`.
+ * @param props.footer - one row drawn under the base rule, above the status
+ *   line, at the draft's column; claimed by the caller like `children`.
  */
-export function Chrome({ left, right, badge, secondaryBadge, columns, state, before, after, placeholder, hints, maxRows, frame, activity, standing, standingFocused, clock, motion, compact, layout = chromeFor(columns), children }: {
+export function Chrome({ left, right, badge, secondaryBadge, columns, state, before, after, placeholder, hints, maxRows, frame, activity, standing, standingFocused, clock, motion, compact, layout = chromeFor(columns), children, footer }: {
   readonly left: readonly (string | PrimaryField)[]
   readonly right: readonly StatusField[]
   readonly badge?: MeasuredField
@@ -850,6 +863,7 @@ export function Chrome({ left, right, badge, secondaryBadge, columns, state, bef
   readonly compact?: boolean
   readonly layout?: ChromeLayout
   readonly children?: React.ReactNode
+  readonly footer?: (columns: number) => React.ReactNode
 }): React.ReactElement {
   const hint = hintFor({ ...state, drafting: `${before}${after}` !== '' })
   // The draft's column, which the status line lines up with.
@@ -874,6 +888,7 @@ export function Chrome({ left, right, badge, secondaryBadge, columns, state, bef
         {...hint === undefined || columns < HINT_MIN_COLUMNS ? {} : { hint: hints[hint] }}
       />
       {layout.base && <Rule columns={columns} frame={frame} />}
+      {footer !== undefined && <Box paddingLeft={inset} flexShrink={0}>{footer(Math.max(1, columns - inset))}</Box>}
       {layout.status && <Box paddingLeft={inset} flexShrink={0}>
         <StatusBar left={left} right={right} {...badge === undefined ? {} : { badge }}
           {...secondaryBadge === undefined ? {} : { secondaryBadge }} columns={Math.max(1, columns - inset)} />

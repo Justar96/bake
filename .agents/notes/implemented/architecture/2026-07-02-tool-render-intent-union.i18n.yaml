@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-07-02-tool-render-intent-union.md
-2026-07-02-tool-render-intent-union.md: 52626d3d9200146df95aee7836d37bbaf7e6a9ec
-2026-07-02-tool-render-intent-union.zh.md: bc91b89c53c3c43b6c483dc0d4876a00f5a936b7
+2026-07-02-tool-render-intent-union.md: 4ae9fee2981c4fa57f5928737b268bd7df0daf45
+2026-07-02-tool-render-intent-union.zh.md: 76c914239e26f694b2eba9f51dcac6d5f8ffa326

@@ -9,8 +9,17 @@ import { ReplayCursor, type ReplayBatch } from './replay.ts'
 import type { Transcript } from './transcript.ts'
 import { Welcome } from './welcome.tsx'
 
-/** Welcome and session heading captured when a fresh session mounts. */
-export interface Opening { readonly kind: 'welcome', readonly version: string, readonly heading: string }
+/**
+ * Welcome and session heading captured when a fresh session mounts. `access`
+ * is the permission preset in effect then; the block prints once and does not
+ * follow a later change.
+ */
+export interface Opening {
+  readonly kind: 'welcome'
+  readonly version: string
+  readonly heading: string
+  readonly access?: string | undefined
+}
 
 interface ScrollbackProps {
   readonly transcript: Transcript
@@ -54,7 +63,7 @@ const Committed = memo(function Committed({ batch, heading, opening, budget, res
   return <Static items={items}>
     {(item, index) => 'kind' in item
       ? item.kind === 'welcome'
-        ? <Welcome key={index} version={item.version} heading={item.heading} copy={copy} frame={frame} columns={columns} />
+        ? <Welcome key={index} version={item.version} heading={item.heading} access={item.access} copy={copy} frame={frame} columns={columns} />
         : <React.Fragment key={index}>{present({ kind: 'notice', tone: 'info', text: item.text }, result)
             .map((line, part) => <Line key={part} line={line} budget={budget} />)}</React.Fragment>
       : <Line key={index} line={item} budget={budget} />}

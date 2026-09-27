@@ -14,7 +14,7 @@ The local npm baseline publisher and the public dsh release family discover expe
 
 Every experimental directory outside the denylist is public by default. Workspace constraints require public packages to omit `private` and set `publishConfig.access: public`; all experimental packages retain the `@deepseek-ai/dsh-experimental-*` npm prefix. Adding a private prototype requires a denylist entry as well as its private manifest.
 
-This decision supersedes the private publication default in the [Agent Teams package decision](../architecture/2026-08-18-experimental-agent-teams-packages.md). Its dependency isolation, opt-in composition, engineering requirements, and promotion rules remain active. Publication grants neither stability nor a support promise.
+This decision supersedes the private publication default in the Agent Teams package decision. Its dependency isolation, opt-in composition, engineering requirements, and promotion rules remain active. Publication grants neither stability nor a support promise.
 
 ## Alternatives considered
 

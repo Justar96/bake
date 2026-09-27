@@ -19,6 +19,9 @@ import { dshHomePath, resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { createLaunchEnvironmentSnapshot, type LaunchEnvironmentSnapshot } from '@deepseek-ai/dsh-launch-environment'
 export { readProfilePatches, resolveTelemetryPatch, type ProfileContext, type ProfilePnpmInvocation } from './profile-context.ts'
 export { sanitizeProfile } from './profile-sanitize.ts'
+export { generateConfigSchema, type ConfigSchemaDump, type NativeConfigSchema } from './config-schema/index.ts'
+export { createConfigProjector, LOADER_EXPRESSION_SCHEMA, type ConfigProjection } from './config-schema/projector.ts'
+export { isNativeConfigSchema } from './config-schema/native.ts'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 
 export {
@@ -34,6 +37,8 @@ declare module '@deepseek-ai/cordis' {
 }
 
 export {
+  bundlePatchFiles,
+  bundlePatchPaths,
   composeEntries,
   createProfileResolutionGeneration,
   DEFAULT_PROFILE_BUNDLES,

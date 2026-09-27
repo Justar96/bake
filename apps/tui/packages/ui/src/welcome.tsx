@@ -4,7 +4,7 @@ import { Box, Text } from 'ink'
 import stringWidth from 'string-width'
 import type { TuiCopy } from './copy.ts'
 import { FRAME_MIN_COLUMNS, type FrameStyle } from './layout.ts'
-import { PALETTE } from './palette.ts'
+import { PALETTE, permissionTone } from './palette.ts'
 
 /** Widest the block draws. Wider than this it would be a rule across the terminal, not a card. */
 export const WELCOME_WIDTH = 64
@@ -16,7 +16,7 @@ const EXAMPLES = [
 ] as const satisfies readonly { readonly name: string, readonly description: keyof TuiCopy }[]
 
 /**
- * Product name, version, the session line, and example commands.
+ * Product name, version, the session line, the access boundary, and example commands.
  *
  * Printed once, as the first committed item of a session with no history.
  * It scrolls away with the transcript and never costs the dynamic region a
@@ -33,14 +33,17 @@ const EXAMPLES = [
  *
  * @param props.version - the running Bake version, without a leading `v`.
  * @param props.heading - the session line, already localized and labeled.
+ * @param props.access - the permission preset in effect when the session
+ *   opened, as a dim label and a value in its tone; absent, no row.
  * @param props.copy - locale-owned labels.
  * @param props.frame - border style this terminal can draw.
  * @param props.columns - terminal width.
  * @returns the block.
  */
-export function Welcome({ version, heading, copy, frame, columns }: {
+export function Welcome({ version, heading, access, copy, frame, columns }: {
   readonly version: string
   readonly heading: string
+  readonly access?: string | undefined
   readonly copy: TuiCopy
   readonly frame: FrameStyle
   readonly columns: number
@@ -65,6 +68,9 @@ export function Welcome({ version, heading, copy, frame, columns }: {
           </Box>}
         </Box>
         <Text dimColor wrap="truncate-end">{heading}</Text>
+        {access !== undefined && <Text wrap="truncate-end">
+          <Text dimColor>{`${copy.permission} `}</Text><Text color={permissionTone(access)}>{access}</Text>
+        </Text>}
       </Box>
       <Box flexDirection="column" marginTop={1} flexShrink={0}>
         {EXAMPLES.map(example => (

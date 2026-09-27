@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/process/2026-09-12-maintained-repository-references.md
-2026-09-12-maintained-repository-references.md: b2bc750100e1aaf2ff63ffc773bbd54997fdf355
-2026-09-12-maintained-repository-references.zh.md: 99216e8105af9d159f6f371c9e31fec6d75a0e75
+2026-09-12-maintained-repository-references.md: b3a22b4a32cfc3032b63d88da835a6436768e66c
+2026-09-12-maintained-repository-references.zh.md: 173bd2ac8294da2e4fe524854b6c15935f7a6373

@@ -2,7 +2,7 @@
 import { execFileSync } from 'node:child_process'
 import { expect, it } from 'vitest'
 import type { Row } from '../src/rows.ts'
-import { PALETTE } from '../src/palette.ts'
+import { AGENT_TONES, PALETTE } from '../src/palette.ts'
 import { ICON } from '../src/icons.ts'
 
 it('draws the rule dim and leaves the draft in the terminal\'s own foreground at every width', () => {
@@ -121,7 +121,9 @@ it('colours the running header\'s word, leaves the rule bare, and colours a cach
       React.createElement(Rule, { columns: 100, frame: 'round' }),
       ...[85, 48, 12].map(hit => React.createElement(StatusBar, { key: hit,
         left: [{ text: 'Model: m' }, 'plan'],
-        right: [{ text: 'Context: ~500/128k (0%)' }, 'in 1k', 'out 100', field(hit), '/w'], columns: 100 }))),
+        right: [{ text: 'Context: ~500/128k (0%)' }, 'in 1k', 'out 100', field(hit), '/w'], columns: 100 })),
+      React.createElement(StatusBar, { left: [{ text: 'Model: m' }],
+        right: [{ text: 'ctx ~75%', color: PALETTE.waiting }, { text: 'ctx ~92%', color: PALETTE.failed }, '/w'], columns: 100 })),
       { columns: 100 }));
   `], { cwd: new URL('../../../../../', import.meta.url), env, encoding: 'utf8', timeout: 20_000 })
   const rgb = (hex: string) => `\u001b[38;2;${[1, 3, 5].map(index => Number.parseInt(hex.slice(index, index + 2), 16)).join(';')}m`
@@ -140,6 +142,9 @@ it('colours the running header\'s word, leaves the rule bare, and colours a cach
   expect(frame).toContain(`\u001b[2mcache hit \u001b[22m${rgb('#22c55e')}85%`)
   expect(frame).toContain(`${rgb('#eab308')}48%`)
   expect(frame).toContain(`${rgb('#ef4444')}12%`)
+  // A primary field that needs attention carries its tone on the whole text.
+  expect(frame).toContain(`${rgb(PALETTE.waiting)}ctx ~75%`)
+  expect(frame).toContain(`${rgb(PALETTE.failed)}ctx ~92%`)
 })
 
 it('colours the permission boundary beside a dim label without relying on colour for its name', () => {
@@ -163,4 +168,26 @@ it('colours the permission boundary beside a dim label without relying on colour
     expect(frame).toContain(`Model: m  \u001b[2mAccess \u001b[22m\u001b[38;2;${rgb}m${mode}`)
   }
   expect(frame).toContain('\u001b[2mThink \u001b[22m\u001b[38;2;14;165;233mhigh')
+})
+
+it('dims the subagents row and draws each child in its own tone', () => {
+  const env: NodeJS.ProcessEnv = { ...process.env, FORCE_COLOR: '3', COLORTERM: 'truecolor' }
+  delete env.NO_COLOR
+  const frame = execFileSync(process.execPath, ['--import', 'tsx/esm', '--input-type=module', '--eval', `
+    import React from 'react';
+    import { renderToString } from 'ink';
+    import { SubagentRow } from ${JSON.stringify(new URL('../src/subagents.tsx', import.meta.url).href)};
+    import { dictionaries } from ${JSON.stringify(new URL('../src/copy.ts', import.meta.url).href)};
+    const entries = ['Review', 'Check', 'Audit'].map((label, index) =>
+      ({ id: label, label, state: index === 0 ? 'working' : 'saved', detail: '', inspectable: true }));
+    process.stdout.write(renderToString(React.createElement(SubagentRow, { entries, copy: dictionaries.en, columns: 100 }), { columns: 100 }));
+  `], { cwd: new URL('../../../../../', import.meta.url), env, encoding: 'utf8', timeout: 20_000 })
+  const rgb = (hex: string) => `\u001b[38;2;${[1, 3, 5].map(index => Number.parseInt(hex.slice(index, index + 2), 16)).join(';')}m`
+  // Dim from the first cell, with every child's glyph and name in its identity tone.
+  expect(frame.startsWith('\u001b[2m')).toBe(true)
+  for (const [index, name] of ['● Review', '○ Check', '○ Audit'].entries()) {
+    expect(frame).toContain(`${rgb(AGENT_TONES[index]!)}${name}`)
+  }
+  expect(new Set(AGENT_TONES).size).toBe(AGENT_TONES.length)
+  for (const tone of AGENT_TONES) expect(Object.values(PALETTE)).not.toContain(tone)
 })

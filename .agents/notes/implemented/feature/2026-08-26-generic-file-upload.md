@@ -51,4 +51,4 @@ Unit and integration coverage pins verbatim and streamed storage, name sanitizat
 
 ## Related
 
-The [Trajectory attachment presentation decision](../bug-fix/2026-09-15-trajectory-attachment-presentation.md) owns ledger counts and inspector attachment layouts.
+The Trajectory attachment presentation decision owns ledger counts and inspector attachment layouts.

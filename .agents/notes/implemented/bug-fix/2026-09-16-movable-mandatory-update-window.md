@@ -10,7 +10,7 @@ The Windows mandatory-update page used a frameless modal overlay sized to the pr
 
 ## Decision
 
-On Windows, mandatory policy uses a separate native framed modal with move, resize, and maximize controls. The parent remains disabled while policy blocks interaction. Closing the modal requests normal application shutdown; it never dismisses policy and resumes the product window. Other platforms retain the existing overlay presentation. The [mandatory-update decision](../feature/2026-09-11-desktop-mandatory-update-client.md) still owns policy and installation authorization.
+On Windows, mandatory policy uses a separate native framed modal with move, resize, and maximize controls. The parent remains disabled while policy blocks interaction. Closing the modal requests normal application shutdown; it never dismisses policy and resumes the product window. Other platforms retain the existing overlay presentation. The mandatory-update decision still owns policy and installation authorization.
 
 ## Alternatives considered
 

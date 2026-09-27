@@ -6,7 +6,7 @@ Status: implemented
 
 ## 问题
 
-长工具对话在构造请求时反复遍历不可变历史。[后端续跑基线](../testing/2026-09-06-backend-continuation-performance.zh.md)在一次 211.300 ms 的请求历史操作中，将 132.876 ms 的采样 CPU 自耗时归因于 `buildRequest` 的 `deepFreeze`。跳过所有已冻结根对象并不安全：恢复操作会接管独立拥有的对象图而不冻结它们，浅冻结消息仍可能包含可变内容。
+长工具对话在构造请求时反复遍历不可变历史。后端续跑基线在一次 211.300 ms 的请求历史操作中，将 132.876 ms 的采样 CPU 自耗时归因于 `buildRequest` 的 `deepFreeze`。跳过所有已冻结根对象并不安全：恢复操作会接管独立拥有的对象图而不冻结它们，浅冻结消息仍可能包含可变内容。
 
 ## 决策
 
@@ -70,7 +70,7 @@ Apple M4 Pro、macOS arm64、Node 24.19.0；worktree 使用独立依赖和构建
 
 请求构造仍扫描消息身份并分配新数组，但避免递归遍历已证明的历史。每个循环都为恢复历史支付一次完整遍历成本。本地 header 仍是每次请求的成本。消息值、请求标记、先前请求快照、取消及 SDK 序列化输出保持现有行为。
 
-[聚焦测试](../../../../packages/core/agent-loop/tests/request-freeze.spec.ts)覆盖具有可变后代的浅冻结恢复根对象、包装对象身份与可变性、仅成功遍历的证明、重复请求、同 id 压缩替换、新循环、嵌套工具 schema、适配器与 `NO_ADAPTER` stop 数组、持有的旧请求以及实时取消。重建与取消测试集覆盖相邻循环语义。性能测量采用不变的[续跑工作负载](../../../../benchmarks/agent-continuation/workload.ts)，而非缩小的合成微基准。
+[聚焦测试](../../../../packages/core/agent-loop/tests/request-freeze.spec.ts)覆盖具有可变后代的浅冻结恢复根对象、包装对象身份与可变性、仅成功遍历的证明、重复请求、同 id 压缩替换、新循环、嵌套工具 schema、适配器与 `NO_ADAPTER` stop 数组、持有的旧请求以及实时取消。重建与取消测试集覆盖相邻循环语义。性能测量采用不变的续跑工作负载，而非缩小的合成微基准。
 
 验证运行了 646 个 agent loop 与 LLM 测试，agent.ts 的语句、分支、函数和行覆盖率均为 100%。无密钥 TypeScript SDK bash-tool 与 multi-turn 快照通过重新构建的库执行并通过。Python sdk-minimal 与 sdk-snapshot 检查使用独立打包的 node24-macos-arm64 可执行文件并通过。两个 SDK 均无需修改期望输出。打包部署暂时移除了工作区依赖链接；执行冻结 lockfile 安装可在源码检查前恢复它们，无需修改受版本管理的依赖文件。
 

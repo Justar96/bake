@@ -1,6 +1,6 @@
 # AGENTS.md — Experimental packages
 
-These rules supplement the [package rules](../AGENTS.md). The [experimental publication decision](../../.agents/notes/implemented/process/2026-09-12-experimental-publication-denylist.md) owns the publication policy; the [Agent Teams package decision](../../.agents/notes/implemented/architecture/2026-08-18-experimental-agent-teams-packages.md) owns dependency isolation and promotion rationale.
+These rules supplement the [package rules](../AGENTS.md). The [experimental publication decision](../../.agents/notes/implemented/process/2026-09-12-experimental-publication-denylist.md) owns the publication policy; the Agent Teams package decision owns dependency isolation and promotion rationale.
 
 - A package belongs here only when its complete public contract is experimental or internal-only. An experimental option inside a release package stays with its owning product role.
 - Every package here uses the `@deepseek-ai/dsh-experimental-*` npm prefix and joins the dsh release family by default: omit `private` and set `publishConfig.access: public`. Only directories in `PRIVATE_EXPERIMENTAL_PACKAGE_DIRECTORIES` in [the publication policy](../../scripts/experimental-package-policy.ts) stay private: set `private: true` and omit `publishConfig`.

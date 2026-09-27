@@ -22,7 +22,7 @@ Ordinary session appends validate the inherited events before publication, and p
 
 A confined child gets the ordinary denial marker, and an escalation request is rejected deterministically by the child's pinned `'never'` policy; the `subagent:delegation` runtime-context statement tells the child to report the limitation instead of retrying, and a controller-owned parent may widen its own session and delegate again ([approvals-pinned decision](2026-08-10-subagent-approval-pinned-never.md)).
 
-The [Auto review decision](2026-08-28-auto-review.md) extends this inheritance rule for the shared Auto/Full access bundle; this note remains the owner of delegation-time policy capture.
+The Auto review decision extends this inheritance rule for the shared Auto/Full access bundle; this note remains the owner of delegation-time policy capture.
 
 ## Alternatives considered
 

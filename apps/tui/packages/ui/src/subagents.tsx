@@ -1,7 +1,9 @@
-/** Connected child identities and activity come from the application; the list's sheet is drawn here. */
+/** Connected child identities and activity come from the application; their row and sheet are drawn here. */
+import React from 'react'
+import { Box, Text } from 'ink'
 import type { TuiCopy } from './copy.ts'
 import { MARKER } from './layout.ts'
-import { PALETTE, type PaletteColor } from './palette.ts'
+import { agentTone, PALETTE, type PaletteColor } from './palette.ts'
 import type { SheetLine } from './sheet.tsx'
 
 export interface SubagentEntry {
@@ -47,6 +49,41 @@ export function subagentTab(entries: readonly SubagentEntry[], copy: TuiCopy): s
   return `${copy.subagentsTitle} ${entries.length}${working === 0 ? '' : ` · ${working} ${copy.subagentWorking}`}`
 }
 
+/**
+ * The session's children as one dim row under the input, above the status line.
+ *
+ * It sits below the composer because Down from an empty composer selects it.
+ * The count, then every child as its activity's glyph and its name, both in
+ * the child's own identity tone ({@link agentTone}), which the sheet shares.
+ * The glyph's shape carries the activity, so the colour is free to say which
+ * child it is. Dim, so it stays supporting material beside the draft; the
+ * names that do not fit are cut from the end. Focused, the row is drawn at
+ * full strength and says what Enter does.
+ *
+ * @param props.entries - the children, in the catalog's order.
+ * @param props.columns - row width.
+ * @param props.focused - whether arrow-key focus is on the row.
+ * @returns the row, or null when there are no children.
+ */
+export function SubagentRow({ entries, copy, columns, focused = false }: {
+  readonly entries: readonly SubagentEntry[]
+  readonly copy: TuiCopy
+  readonly columns: number
+  readonly focused?: boolean
+}): React.ReactElement | null {
+  if (entries.length === 0 || columns <= 0) return null
+  return <Box width={columns} height={1} flexShrink={0} overflowX="hidden">
+    <Text wrap="truncate-end" dimColor={!focused}>
+      <Text inverse={focused}>{`${focused ? '>' : '↓'} ${copy.subagentsTitle}: ${entries.length}`}</Text>
+      {focused ? ` · ${copy.subagentsOpen}` : ''}
+      {entries.map((entry, index) => <React.Fragment key={entry.id}>
+        {index === 0 ? ' · ' : '  '}
+        <Text color={agentTone(index)}>{`${GLYPH[entry.state].glyph} ${entry.label}`}</Text>
+      </React.Fragment>)}
+    </Text>
+  </Box>
+}
+
 /** Lines before the first child in {@link subagentSheet}. */
 const SUBAGENT_LEAD = 2
 
@@ -74,7 +111,7 @@ export function subagentSheet(entries: readonly SubagentEntry[], selected: numbe
       const color = statusColor(entry)
       return [
         { text: '', selected: index === selected, glyph: shape.glyph, ...'color' in shape ? { glyphColor: shape.color } : {},
-          parts: [{ text: entry.label, bold: entry.inspectable, dim: !entry.inspectable },
+          parts: [{ text: entry.label, bold: entry.inspectable, dim: !entry.inspectable, color: agentTone(index) },
             { text: `  ${subagentStatus(entry, copy)}`, ...color === undefined ? { dim: true } : { color } }] },
         { text: `${entry.detail} · ${entry.id}${entry.inspectable ? '' : ` · ${copy.subagentNoTranscript}`}`,
           selected: false, glyph: ' ', dim: true },

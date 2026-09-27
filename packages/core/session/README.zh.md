@@ -47,7 +47,7 @@ session.append('user/message', { role: 'user', content: [{ type: 'text', text: '
 session.deriveMessages()         // the derived model history
 ```
 
-表层事件（`system/message`、`user/message`、`assistant/message`、`tool/result`）在类型化事件与追加输入中都必须带有 `surfaceOp`。替换操作仅接受 `{ op: 'replace', startSeq, endSeq }`，端点为包含边界的 `SessionSeq`，按当前 surface 顺序解释。assistant 消息会嵌入精确、紧凑的提供方流，并禁止 `sourceEventSeqs`。已知仅日志事件禁止这两个元数据字段，且从不产生消息。
+表层事件（`system/message`、`user/message`、`assistant/message`、`tool/result`）在类型化事件与追加输入中都要求 `surfaceOp`。替换使用 `{ op: 'replace', startSeq, endSeq }`，端点为当前表层顺序中的含边界 `SessionSeq`。Assistant 消息内嵌精确紧凑提供方流，禁止 `sourceEventSeqs`。仅日志事件不携带这两个表层字段；必读工具更新通过 `toolHistory()` 参与提供方请求投影。
 
 插件用 `@messageProjection` 声明修改内容的事件，并通过 `ctx.sessions.registerMessageProjection()` 注册纯处理器。Session 在接受事件前调用处理器，并缓存其不可变消息更新。缺少处理器时拒绝追加和恢复，卸载已经使用的处理器后也会拒绝读取缓存。独立构造函数和 `foldSurface(events, projections)` 必须显式接收处理器。重建函数将折叠结果的 `projectedMessages` 传给 `deriveEventMessage()`，实时实例方法自动应用相同的投影。[插件拥有消息投影](../../../.agents/notes/implemented/architecture/2026-09-11-plugin-owned-message-projections.zh.md)说明职责划分和离线装配。
 
@@ -112,6 +112,8 @@ session.deriveMessages()         // the derived model history
 ### 请求头
 
 循环在每个循环实例边界及变更时记录完整规范 `request/header` 快照（调用配置、适配器默认值、组装后的工具 schema——渲染后的系统提示词是 `system/message` surface 节点，不是 header 状态）；`foldRequestHeader(events)` 通过选择最新快照来重建它，使每个对话请求都成为日志的纯函数。路由元数据（`request/context`）是独立的已记录状态，仅在提供方、模型、容量或 `systemPromptUpdate` 模式变化时追加；它在提示词与用户消息准入之后记录实际已准备调用的模式，而非提供准入决策。
+
+`session.toolHistory()` 从 header 和必读的 `request/tool-update` 记录重建不可变工具声明及有序增删。每条更新引用最新 header 和前一条用户／工具结果消息。追加与恢复会校验这些引用以及精确的名称变化。四种表层事件类型与存储消息语法保持不变；旧读取器会拒绝新的必读词汇。定义变化与显式请求序列边界会重置声明基线。缺少完整更新的日志使用全部活动工具列表。
 
 </details>
 

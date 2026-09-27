@@ -6,7 +6,7 @@ import { object } from '../../src/protocols/messages/replay.ts'
 import { BlockAssembler, createAssistantMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { resolveAdapterOptions } from '../../src/index.ts'
-import { DeepSeekMessagesAdapter } from '../../src/protocols/messages/adapter.ts'
+import { DeepSeekMessagesAdapter, type AdapterDependencies } from '../../src/protocols/messages/adapter.ts'
 import type { Config } from '../../src/config.ts'
 import { DeepSeekFileStore } from '../../src/common/file-store.ts'
 
@@ -38,9 +38,9 @@ export async function assemble(stream: AsyncIterable<StreamChunk>, model = MODEL
   const message = createAssistantMessage({ content: assembler.blocks(), source: { provider: 'deepseek-official', model, ...assembler.replayState === undefined ? {} : { replayState: assembler.replayState } } })
   return { output, message, assembler }
 }
-export function adapter(config: Config = {}) {
+export function adapter(config: Config = {}, dependencies: Partial<AdapterDependencies> = {}) {
   const files = new DeepSeekFileStore()
-  return new DeepSeekMessagesAdapter({ connection: () => resolveAdapterOptions(config), apiKey: () => Promise.resolve('test-key'), userId: () => 'test-user', attachments: () => undefined, imageAccess: () => undefined, files: () => files, prepareExtensions })
+  return new DeepSeekMessagesAdapter({ connection: () => resolveAdapterOptions(config), apiKey: () => Promise.resolve('test-key'), userId: () => 'test-user', attachments: () => undefined, imageAccess: () => undefined, files: () => files, prepareExtensions, ...dependencies })
 }
 export async function server(reply: (response: ServerResponse, count: number) => void = response => response.end(sse(textEvents))) {
   const requests: { path: string; headers: IncomingHttpHeaders; body: Record<string, unknown> }[] = []

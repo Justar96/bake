@@ -49,11 +49,6 @@ const LINK_MAP: Record<string, string> = {
   SessionTitleModelIdentity: 'subsystems/session-title.md',
   SessionTitleProviderId: 'subsystems/session-title.md',
   SessionTitleSource: 'subsystems/session-title.md',
-  TeamId: 'subsystems/agent-team.md',
-  TeamMemberSnapshot: 'subsystems/agent-team.md',
-  TeamMessageId: 'subsystems/agent-team.md',
-  TeamMessageSnapshot: 'subsystems/agent-team.md',
-  TeamTaskSnapshot: 'subsystems/agent-team.md',
 }
 
 /** Render the cross-link "Types:" line for a payload, or '' if none apply. */

@@ -25,7 +25,7 @@ Inspect Host and Client runtime APIs before writing plugin code. Creator mode pr
 <a id="use-this-package"></a>
 ## Use this package
 
-Creator mode includes this toolset. Other compositions mount `@deepseek-ai/dsh-tool-cordis` alongside the host runner that provides `cordisInspect`. Call `cordis_inspect_list` to discover providers, then `cordis_inspect_query` for a provider's exact methods and types. Use [Plugin Manager](../../boot/plugin-manager/README.md) to install bundles containing plugin code or MCP configuration.
+Creator mode includes this toolset. Other compositions mount `@deepseek-ai/dsh-tool-cordis` alongside the host runner that provides `cordisInspect`. Call `cordis_inspect_list` to discover providers, then `cordis_inspect_query` for a provider's exact methods and types. The Host `Config.listConfigs` provider lists live Loader entries with pagination (`offset`, `limit` up to 100, optional exact plugin `name`) and projects a selected entry’s native Config to JSON Schema. Results distinguish schema, absent, unsupported, tree, and inactive entries; the directory returns `total` and `nextOffset`. Use [Plugin Manager](../../boot/plugin-manager/README.md) to install bundles containing plugin code or MCP configuration.
 
 -----
 
@@ -35,7 +35,7 @@ Creator mode includes this toolset. Other compositions mount `@deepseek-ai/dsh-t
 <details>
 <summary>Implementation internals — click to expand</summary>
 
-Host providers combine generated Service/Event catalogs and the requesting agent's tool registry. Client providers synchronize their manifests through the existing inspection registry and answer queries from a connected page. The tool plugin owns its registrations through Cordis effects; disposal removes both tools and prompt contributions. No invariant companion is published because inspection reads its providers directly and maintains no independent runtime projection.
+Host providers combine generated Service/Event catalogs, the live Loader Config schemas, and the requesting agent's tool registry. Client providers synchronize their manifests through the existing inspection registry and answer queries from a connected page. The tool plugin owns its registrations through Cordis effects; disposal removes both tools and prompt contributions. No invariant companion is published because inspection reads its providers directly and maintains no independent runtime projection.
 
 </details>
 
@@ -69,6 +69,7 @@ Unchanged schemas and guidance remain prefix-stable. Query results append to his
 <a id="known-limitations-and-deferred-work"></a>
 
 - Client queries wait for a responding page or cancellation. Inspection cannot invoke service methods, configure plugins, or execute generated code.
+- `Config.listConfigs` walks the profile Loader tree only. Agent preset `plugins` lists mount in detached preset trees, so a plugin present only inside a preset declaration is not listed unless the profile tree also mounts it.
 
 <a id="dev-note"></a>
 ### Dev Note

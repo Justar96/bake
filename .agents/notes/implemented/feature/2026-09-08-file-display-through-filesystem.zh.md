@@ -10,7 +10,7 @@ Status: implemented
 
 ## Decision
 
-鉴权 `/api/file` 路由通过 `ctx.fs` 读取普通文件。鉴权和所组合提供方的读取策略决定访问权限；目录与 MIME 白名单不参与准入。这取代了[本地媒体展示记录](2026-09-07-session-prose-local-media-display.zh.md)中的文件服务策略；该记录保留渲染器归属及其理由。
+鉴权 `/api/file` 路由通过 `ctx.fs` 读取普通文件。鉴权和所组合提供方的读取策略决定访问权限；目录与 MIME 白名单不参与准入。这取代了本地媒体展示记录中的文件服务策略；该记录保留渲染器归属及其理由。
 
 GET 调用现有 `readBytes(target, signal, maxBytes)`：提供方在内容 I/O 前拒绝已知超限文件，并在读取过程中执行上限。HEAD 使用元数据，不读取内容。`FS_TOO_LARGE` 转换为 413。MIME 查询提供响应元数据，不嗅探文件内容；未知扩展名使用 `application/octet-stream`。sandbox CSP 阻止直接打开的 HTML/SVG 以鉴权 API 源身份执行脚本。
 

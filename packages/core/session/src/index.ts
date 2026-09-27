@@ -12,13 +12,14 @@ import { brandString } from '@deepseek-ai/dsh-brand'
 import { assertNever, deepFreeze, snapshotJsonValue } from '@deepseek-ai/dsh-util-values'
 import { scopeOf, scopeTarget } from '@deepseek-ai/dsh-scope'
 import type { Scoped } from '@deepseek-ai/dsh-scope'
-import type { Message } from '@deepseek-ai/dsh-llm'
+import type { Message, ToolHistory } from '@deepseek-ai/dsh-llm'
 import { SESSION_FORMAT_VERSION, SessionLogOffset, SessionSeq } from './types.ts'
 import type { TypertLookup } from '@deepseek-ai/dsh-typert-protocol'
 import type { CreateSessionOptions, EpochHeader, PrepareSessionOptions, RequestContext, SessionEvent, SessionEventMap, SessionEventType, SessionHeader, SessionId, SessionSeedEventState, SurfaceIntent, SurfaceEventType } from './types.ts'
 import { SurfaceManager, validateSessionEventData, validateSurfaceMetadata } from './surface.ts'
 import type { SessionSurface, SessionMessageProjection } from './surface.ts'
 import { foldRequestHeader } from './request-header.ts'
+import { ToolHistoryProjection, validateToolUpdate } from './tool-history.ts'
 
 export * from './types.ts'
 export { SessionPreparation } from './preparation.ts'
@@ -584,6 +585,7 @@ export class Session {
         // enters `log`, so a failure cannot partially mutate the surface.
         try {
           this.surfaceManager.validateNext(snapshot)
+          validateToolUpdate(snapshot, this.log, this.surfaceManager)
         } catch (error: unknown) {
           throw new Error(`invalid seed event at index ${index}: ${error instanceof Error ? error.message : 'invalid surface metadata'}`)
         }
@@ -747,6 +749,7 @@ export class Session {
     } as unknown as SessionEvent<T>)
     validateSessionEventData(event, `session event "${type}" at seq ${event.seq}`)
     this.surfaceManager.validateNext(event as SessionEvent)
+    validateToolUpdate(event as SessionEvent, this.log, this.surfaceManager)
 
     if (entry !== undefined) entry.appending = true
     try {
@@ -792,6 +795,22 @@ export class Session {
       this.headerFoldSeq = this.log.length
     }
     return this.headerFold
+  }
+
+  /** Cached fold of declaration series and required tool updates. */
+  private readonly toolHistoryFold = new ToolHistoryProjection()
+  private toolHistoryFoldSeq = 0
+
+  /**
+   * Read immutable historical declarations and ordered changes for provider projection.
+   * @returns the current declaration series, reconstructed incrementally from committed events.
+   */
+  toolHistory(): ToolHistory {
+    while (this.toolHistoryFoldSeq < this.log.length) {
+      const event = this.log[this.toolHistoryFoldSeq++]
+      if (event !== undefined) this.toolHistoryFold.apply(event)
+    }
+    return this.toolHistoryFold.snapshot()
   }
 
   /** Cached fold of `request/context` events. */

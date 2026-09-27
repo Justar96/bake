@@ -105,6 +105,8 @@ A request is validated against its exact model's capability — context window, 
 
 File detection reads current content, including nested tool results, on every request without caching message identities or freeze state. The [file-scan decision](../../../.agents/notes/implemented/simplification/2026-09-07-file-content-scan.md) records the measured traversal cost.
 
+`projectToolUpdates()` maps `GenerateOptions.toolHistory` to declarations and ordered notices for the prepared route. `addition-only` activates deferred tools but omits removals; `in-history` also retains removed definitions until a series reset. Unsupported routes, incomplete message prefixes, and mismatched current definitions use the complete active list. The projection preserves durable messages and strips unsupported deferred-loading flags.
+
 ### Invariants
 
 - **Model-visible ⟺ logged** — anything that reaches a provider request is reconstructable from the session log; loop-built requests are deep-frozen and never rewritten.
@@ -137,11 +139,13 @@ Read these pages when the package-level contract is not enough. They move from t
 <a id="model-experience"></a>
 ## Model Experience
 
-None, as the LLM service adds no content; adapters choose when to add the shared image descriptors and per-image placeholders exported by this package.
+The runtime projects logged tool history into native additions/removals and deferred declarations on capable routes. Other routes receive the complete current tool list. Adapters also apply the shared image descriptors and placeholders.
 
 #### KV Cache effect
 
 Reasoning-effort materialization preserves the assembled request prefix. Image identity and request-preview text are deterministic, while an optional execution-world path is resolved for each request; a changed path or an offload decision can prevent reuse from that image.
+
+Native tool updates can preserve earlier request prefixes, but retained declarations and notices still contribute provider-dependent input cost. Definition changes or incomplete history use full declarations. Request token estimates currently price the active header tools and do not separately account for retained/deferred declarations or native update notices.
 
 ## Known Limitations and Deferred Work
 

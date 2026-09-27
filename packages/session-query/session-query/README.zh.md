@@ -35,7 +35,7 @@ kind: "package-reference"
 | `readSession(id)` | 经过回放校验的完整原始事件日志，且不会让该会话变为实时 |
 | `filterSessions(filters)` | 匹配 AND 连接的元数据与可用性谓词的会话 |
 | `filterEvents(id, filters)` | 匹配元数据与字面文本谓词的语义事件文档 |
-| `readTitleSnapshots(ids)` | 每个会话的最新折叠标题，绑定到其来源 header |
+| `readTitleSnapshots(ids)` | 每个会话的最新折叠标题，绑定到其来源 header，并以 `lastEventAt` 给出最新事件的时间 |
 | `listEvents(id)` / `readSurface(id)` | 轻量逐事件记录，或完整的当前模型表层 |
 | `readEvent(request)` | 一个完整事件加其周围有界的原始日志窗口 |
 | `traceSession(id)` | 已知祖先链与递归后代树 |

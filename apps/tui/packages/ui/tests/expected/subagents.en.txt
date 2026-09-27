@@ -4,4 +4,5 @@
 ────────────────────────────────────────────────────────────────────────────────────────────────────
 > ▌Ask anything
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-  Model: model  ↓ Subagents: 4 · 1 Working  /workspace
+  ↓ Subagents: 4 · ● Review tests  ○ Check types  ○ Review security  ○ Review docs
+  Model: model  /workspace

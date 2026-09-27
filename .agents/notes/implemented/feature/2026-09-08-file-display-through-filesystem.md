@@ -10,7 +10,7 @@ Session prose can reference screenshots in temporary directories or files stored
 
 ## Decision
 
-The authenticated `/api/file` route reads ordinary files through `ctx.fs`. Authentication and the composed provider's read policy govern access; directory and MIME allowlists do not. This supersedes the serving policy in [the local-media display note](2026-09-07-session-prose-local-media-display.md), which retains renderer ownership and its rationale.
+The authenticated `/api/file` route reads ordinary files through `ctx.fs`. Authentication and the composed provider's read policy govern access; directory and MIME allowlists do not. This supersedes the serving policy in the local-media display note, which retains renderer ownership and its rationale.
 
 GET calls the existing `readBytes(target, signal, maxBytes)`: providers reject known oversized files before content I/O and enforce the limit while reading. HEAD uses metadata without reading content. `FS_TOO_LARGE` becomes 413. MIME lookup supplies response metadata without sniffing file contents; unknown extensions use `application/octet-stream`. A sandbox CSP prevents directly opened HTML/SVG from executing with the authenticated API origin.
 

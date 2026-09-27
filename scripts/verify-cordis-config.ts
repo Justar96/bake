@@ -14,6 +14,8 @@ import { globSync, readFileSync } from 'node:fs'
 import { dirname, relative, resolve } from 'node:path'
 import { Script } from 'node:vm'
 import ts from 'typescript'
+import type { DshBundleManifest } from '../packages/util/package-manifest/src/types.ts'
+import { bundlePatchPaths } from '../packages/boot/app-boot/src/profile.ts'
 import { cordisConfigFiles } from './cordis-config-files.ts'
 import { isCordisGroupEntry, isJsExpr, loadCordisYaml } from './cordis-yaml.ts'
 
@@ -22,7 +24,7 @@ export interface PackageManifest {
   dependencies?: Record<string, string>
   devDependencies?: Record<string, string>
   optionalDependencies?: Record<string, string>
-  dsh?: { bundle?: { patch?: string } }
+  dsh?: { bundle?: DshBundleManifest }
 }
 
 export interface PluginReference {
@@ -257,10 +259,11 @@ function validateAppResolution(): string[] {
   for (const manifestPath of bundleManifests) {
     const bundleDir = manifestPath.replace(/\/package\.json$/, '')
     const manifest = readManifest(manifestPath)
-    const patch = manifest.dsh?.bundle?.patch
-    if (typeof patch !== 'string') continue
-    const patchFile = relative(root, resolve(root, bundleDir, patch)).replaceAll('\\', '/')
-    const references = pluginReferences.filter(reference => reference.file === patchFile)
+    const bundle = manifest.dsh?.bundle
+    if (bundle === undefined) continue
+    const patchFiles = new Set(bundlePatchPaths(resolve(root, bundleDir), bundle)
+      .map(file => relative(root, file).replaceAll('\\', '/')))
+    const references = pluginReferences.filter(reference => patchFiles.has(reference.file))
     violations.push(...bundlePluginDependencyErrors(manifestPath, manifest, references))
   }
   return violations
@@ -362,7 +365,7 @@ function packageTestManifestPath(file: string): string | undefined {
  */
 export function bundleManifestPaths(repoRoot: string = root): string[] {
   return globSync('packages/*/*/package.json', { cwd: repoRoot })
-    .filter(path => typeof readManifest(path, repoRoot).dsh?.bundle?.patch === 'string')
+    .filter(path => readManifest(path, repoRoot).dsh?.bundle?.patch !== undefined)
     .map(path => path.replaceAll('\\', '/'))
     .sort()
 }

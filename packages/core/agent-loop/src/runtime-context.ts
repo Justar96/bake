@@ -38,7 +38,7 @@ export interface SystemPromptDecisionInput {
   /**
    * Whether this step's request starts a new model-message series: a pre-step
    * listener declared one, the surface was replaced since the last request, or
-   * the assembled tool schemas differ from the logged header.
+   * the assembled tools changed on a route without native tool updates.
    */
   startsSeries: boolean
 }

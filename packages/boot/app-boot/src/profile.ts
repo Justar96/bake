@@ -7,10 +7,11 @@
  * `dsh.profile` with its ordered `bundles` list) and a `cordis.patch.yml`
  * (the user's own patch layer, applied after every bundle layer). Bundles are
  * npm packages whose manifest declares
- * `"dsh": { "bundle": { "patch": "./cordis.patch.yml" } }`; the tree is
- * composed by applying each bundle's patch list in `dsh.profile.bundles` order over
- * an empty entry list, then the profile's own patches, then any launcher
- * layers (`--patch` files and flag-derived patches).
+ * `"dsh": { "bundle": { "patch": "./cordis.patch.yml" } }` (one file, or an
+ * ordered list of files); the tree is composed by applying each bundle's patch
+ * lists in `dsh.profile.bundles` order over an empty entry list, then the
+ * profile's own patches, then any launcher layers (`--patch` files and
+ * flag-derived patches).
  *
  * Module resolution is two-anchor by construction: a bundle name resolves
  * first from the dsh installation (the launcher's own package), then from the
@@ -34,7 +35,7 @@ import { withFileLock } from '@deepseek-ai/dsh-atomic-write'
 import type { EntryOptions } from '@deepseek-ai/cordis-plugin-loader'
 import { applyEntryPatches, type PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
-import type { DshPackageManifest } from '@deepseek-ai/dsh-package-manifest'
+import type { DshBundleManifest, DshPackageManifest } from '@deepseek-ai/dsh-package-manifest'
 import { resolve as resolvePackage, type Package as ResolvePackageManifest } from 'resolve.exports'
 import { loadOverlayPatches } from './index.ts'
 import {
@@ -61,15 +62,41 @@ export interface ProfileTemplate {
 /** Package metadata accepted by the profile reader; local profiles need no published identity. */
 export type ProfileManifest = Partial<DshPackageManifest>
 
+/**
+ * The patch files a bundle declares, as written: one file for a string
+ * `patch`, the listed files in order for an array.
+ * @param bundle - the bundle's `dsh.bundle` declaration, as read from package.json.
+ * @returns the package-relative patch file paths in application order.
+ * @throws {Error} when `patch` is neither a string nor a list of strings.
+ */
+export function bundlePatchFiles(bundle: DshBundleManifest): string[] {
+  const declared = typeof bundle.patch === 'string' ? [bundle.patch] : bundle.patch
+  if (!Array.isArray(declared) || !declared.every(file => typeof file === 'string')) {
+    throw new Error('dsh.bundle.patch must be a file path or a list of file paths')
+  }
+  return declared
+}
+
+/**
+ * Resolve a bundle declaration to its ordered absolute patch files.
+ * @param packageDir - absolute directory of the bundle package.
+ * @param bundle - the bundle's `dsh.bundle` declaration, as read from package.json.
+ * @returns the absolute patch file paths in application order.
+ * @throws {Error} when `patch` is neither a string nor a list of strings.
+ */
+export function bundlePatchPaths(packageDir: string, bundle: DshBundleManifest): string[] {
+  return bundlePatchFiles(bundle).map(file => join(packageDir, file))
+}
+
 /** One resolved bundle layer of a profile. */
 export interface ProfileLayer {
   /** The bundle's package name, as listed in `dsh.profile.bundles`. */
   packageName: string
   /** Absolute directory of the resolved bundle package. */
   packageDir: string
-  /** Absolute path of the bundle's patch file. */
-  patchPath: string
-  /** The parsed patch list. */
+  /** Absolute paths of the bundle's patch files, in application order. */
+  patchPaths: readonly string[]
+  /** The parsed patch lists of every file, concatenated in application order. */
   patches: PatchOptions[]
 }
 
@@ -835,12 +862,12 @@ export function loadProfileDirectory(
   const layers = bundles.map((packageName): ProfileLayer => {
     const packageDir = resolveBundleDir(binName, packageName, installAnchor, dir)
     const bundleManifest = JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8')) as ProfileManifest
-    const declared = bundleManifest.dsh?.bundle?.patch
-    if (declared === undefined) {
+    const bundle = bundleManifest.dsh?.bundle
+    if (bundle === undefined) {
       throw new Error(`${binName}: profile bundle ${JSON.stringify(packageName)} declares no dsh.bundle in its package.json`)
     }
-    const patchPath = join(packageDir, declared)
-    return { packageName, packageDir, patchPath, patches: loadOverlayPatches(binName, patchPath) }
+    const patchPaths = bundlePatchPaths(packageDir, bundle)
+    return { packageName, packageDir, patchPaths, patches: patchPaths.flatMap(file => loadOverlayPatches(binName, file)) }
   })
   const patchPath = join(dir, PROFILE_PATCH_FILENAME)
   const patches = options.userLayer !== false && existsSync(patchPath)

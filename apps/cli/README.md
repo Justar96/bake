@@ -12,6 +12,8 @@ Layers apply in order: bundle patches, profile patch, home patch, then invocatio
 
 `--from-default-profile <template>` creates a custom profile at a new name from one shipped template. `--dump-default-config` and `--dump-config` inspect composition without booting the agent. The launcher forwards application arguments after its own flags without interpreting them.
 
+Use `--dump-default-config` and `--dump-config` to inspect the composed tree without booting it. `--dump-config-schema` imports the composed tree's declared plugin schemas and prints JSON Schema for entries and patches instead of configuration values; read the [schema-dump safety and scope](reference/README.md#config-schema-dump) before inspecting untrusted plugins.
+
 ## Development
 
 From the repository root, `bun run build` builds the runtime and terminal bundle. `bun run start` runs the terminal with production React. `bun run start --help` shows its options. Use `bun apps/tui/scripts/tui.ts e2e` for recorded, keyless verification through a real PTY.

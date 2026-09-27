@@ -118,6 +118,19 @@ describe('validateStoredEvents', () => {
     expect(validateStoredEvents(m, events)).toBe(events)
   })
 
+  it('adopts released records that no mounted plugin writes any more', () => {
+    // Written by the retired web controller, Agent Teams, and workspace-change
+    // summaries; a log carrying one must open, not read as a newer harness's.
+    const m = meta('retired-vocabulary')
+    const events = [
+      { type: 'model/selection', seq: 0, time: 1, data: { provider: 'mock', model: 'mock' } },
+      { type: 'team/task', seq: 1, time: 2, data: { version: 2, teamId: 't', task: {
+        id: 'k', revision: 1, subject: 's', description: 'd', status: 'pending', blockedBy: [], writeScopes: [] } } },
+      { type: 'workspace/changes', seq: 2, time: 3, data: { turn: 1 } },
+    ] as unknown as SessionEvent[]
+    expect(validateStoredEvents(m, events)).toBe(events)
+  })
+
   it('refuses an unknown event type before adopting anything', () => {
     const m = meta('unknown-type')
     const events = [

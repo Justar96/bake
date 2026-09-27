@@ -2,7 +2,7 @@
 120: Model: a-very-long-model-name (high)  Access workspace-write  Context: ~3k/128k (2%)  /workspace
 120: Model: a-very-long-model-name (high)  Access danger-full-access  Context: ~3k/128k (2%)  /workspace
 120: Model: a-very-long-model-name (high)  Access custom  Context: ~3k/128k (2%)  /workspace
-60: Model: a-very-long-model-name (high)  Access read-only  …ace
+60: Model: a-very-long-model-name (high)  Access read-only
 60: Model: a-very-long-model-name (high)  Access workspace-write
 60: Model: a-very-long-model-name (h…  Access danger-full-access
 60: Model: a-very-long-model-name (high)  Access custom  …kspace

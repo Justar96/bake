@@ -50,6 +50,25 @@ describe('welcome block', () => {
     await expect(frame + '\n').toMatchFileSnapshot(`./expected/welcome.${locale}.txt`)
   })
 
+  it.each(['en', 'zh'] as const)('names the access boundary under the session line in %s', async locale => {
+    const copy = dictionaries[locale]
+    const frame = render(<App {...props({ copy, permission: 'workspace-write' })} />).lastFrame() ?? ''
+    const rows = frame.split('\n')
+    const session = rows.findIndex(row => row.includes(`${copy.session}: session-test`))
+    expect(rows[session + 1]).toMatch(new RegExp(`^│ ${copy.permission} workspace-write +│$`))
+    // Once, in the block; not also on the status line or the session line.
+    expect(frame.split(`${copy.permission} workspace-write`).length - 1).toBe(1)
+    await expect(frame + '\n').toMatchFileSnapshot(`./expected/welcome-access.${locale}.txt`)
+  })
+
+  it('keeps every row of the access line inside the border at every width', () => {
+    for (const columns of [8, 24, 40, 64, 100]) {
+      const frame = renderToString(<Welcome version="1.2.3" heading="Session: session-test" access="danger-full-access"
+        copy={dictionaries.en} frame="round" columns={columns} />, { columns })
+      for (const line of frame.split('\n')) expect(stringWidth(line), `${columns}`).toBeLessThanOrEqual(Math.min(columns, WELCOME_WIDTH))
+    }
+  })
+
   it('stays out of a session that opens with history', () => {
     const committed = appendTranscript(emptyTranscript, [{ kind: 'user', text: 'Earlier prompt' }])
     const frame = render(<App {...props({ committed })} />).lastFrame() ?? ''

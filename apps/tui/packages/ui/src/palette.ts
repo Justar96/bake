@@ -59,8 +59,26 @@ export const PALETTE = {
   output: '#b4b8bf',
 } as const
 
+/**
+ * Identity tones for subagents. They are not states: each tells one child
+ * apart from its siblings, so the row under the input and the sheet read the
+ * same child in the same colour. Hues none of {@link PALETTE}'s states use,
+ * so a child's colour is never mistaken for running, done, or failed.
+ */
+export const AGENT_TONES = ['#a78bfa', '#f472b6', '#2dd4bf', '#a3e635', '#818cf8', '#e879f9'] as const
+
 /** A colour from the palette, for props that carry one. */
-export type PaletteColor = typeof PALETTE[keyof typeof PALETTE]
+export type PaletteColor = typeof PALETTE[keyof typeof PALETTE] | typeof AGENT_TONES[number]
+
+/**
+ * A child's identity tone, by its place in the catalog. The catalog appends
+ * children, so a child keeps its colour for the session.
+ * @param index - the child's index in catalog order.
+ * @returns its tone; the tones repeat past the sixth child.
+ */
+export function agentTone(index: number): PaletteColor {
+  return AGENT_TONES[((index % AGENT_TONES.length) + AGENT_TONES.length) % AGENT_TONES.length]!
+}
 
 /** Cache hits from here up are good, and from {@link CACHE_FAIR} up fair. */
 export const CACHE_GOOD = 70
@@ -78,6 +96,25 @@ export const CACHE_FAIR = 30
  */
 export function cacheTone(hit: number): PaletteColor {
   return hit >= CACHE_GOOD ? PALETTE.done : hit >= CACHE_FAIR ? PALETTE.waiting : PALETTE.failed
+}
+
+/** Context occupancy from here up is worth compacting soon. */
+export const CONTEXT_WARN = 70
+/** Context occupancy from here up is close to the model's limit. */
+export const CONTEXT_FULL = 90
+
+/**
+ * Tone for a context-occupancy percentage.
+ *
+ * No tone while there is room, so the meter stays in the terminal's own
+ * foreground for most of a session. `waiting` once compacting is worth
+ * considering and `failed` near the limit. The percentage says the same
+ * thing without colour.
+ * @param percent - whole-percent occupancy.
+ * @returns the palette tone, or undefined for the normal foreground.
+ */
+export function contextTone(percent: number): PaletteColor | undefined {
+  return percent >= CONTEXT_FULL ? PALETTE.failed : percent >= CONTEXT_WARN ? PALETTE.waiting : undefined
 }
 
 /**

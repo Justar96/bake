@@ -78,6 +78,8 @@ interface GenericSkip {
 const GENERIC_SKIPS: readonly GenericSkip[] = [
   // `Symbol.for('schemastery')` and the `vendor:` metadata field are upstream identifiers.
   { file: 'vendor/schemastery/src/index.ts', upstream: ['schemastery'] },
+  // Narrows a Standard Schema by the same upstream `vendor:` identifier.
+  { file: 'vendor/loader/src/config/diff.ts', upstream: ['schemastery'] },
   // Asserts the vendored-manifest table, which gains an upstream-name column.
   { file: 'scripts/gen-third-party-notices.spec.ts', upstream: RENAMES.map(rename => rename.upstream) },
   // `cordis` is also an agent-preset id — the directory name under
@@ -171,6 +173,13 @@ const POSTCONDITIONS: readonly PostCondition[] = [
  * quote a neighbouring line the generic pass would rewrite.
  */
 const EXACT_EDITS: readonly ExactEdit[] = [
+  {
+    id: 'loader-diff-schemastery-import',
+    file: 'vendor/loader/src/config/diff.ts',
+    find: "import type Schema from 'schemastery'",
+    replace: "import type Schema from '@deepseek-ai/schemastery'",
+    expect: 1,
+  },
   {
     id: 'cordis-walk-merge-head',
     file: 'scripts/cordis-walk.ts',
