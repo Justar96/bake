@@ -421,6 +421,9 @@ class Terminal {
     this.check('bracketed paste to be released',
                this.raw.includes('\x1b[?2004h') && this.raw.includes('\x1b[?2004l'),
                'paste mode was enabled but never released')
+    if (this.raw.includes('\x1b[?1049h')) {
+      this.check('the alternate screen to be released', this.raw.lastIndexOf('\x1b[?1049l') > this.raw.lastIndexOf('\x1b[?1049h'))
+    }
     return this.text
   }
 
@@ -1246,6 +1249,75 @@ scenario('arrow-wave', 'the single-line processing wave loops in place and yield
     }
   })
 
+scenario('fullscreen', 'alternate-screen scrolling, pinned input, resize, replay, and shell restoration',
+  { replayOnly: true }, async run => {
+    const answer = Array.from({ length: 100 }, (_, index) => `Fullscreen paragraph ${index}.`).join('\n\n') + '\n\nFULLSCREEN_DONE'
+    const override = join(run.root, 'fullscreen-replay.json')
+    await Bun.write(override, JSON.stringify([{ kind: 'chunks', chunks: [
+      { type: 'block-start', index: 0, blockType: 'text' },
+      ...answer.split(/(?<=\n\n)/).map(text => ({ type: 'text-delta', index: 0, text })),
+      { type: 'block-end', index: 0, block: { type: 'text', text: answer } },
+      { type: 'finish', reason: { kind: 'stop' } },
+    ] }]))
+    const before = await run.logs()
+    await run.writeOverlay(override, { paceMs: 1 })
+    try {
+      const drive = async (label: string, resume?: string): Promise<void> => {
+        const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
+        await new Promise<void>(resolve => screen.write('shell before Bake\r\n$ ', resolve))
+        let consumed = 0
+        const capture = async (raw: string): Promise<string[]> => {
+          await new Promise<void>(resolve => screen.write(raw.slice(consumed), resolve))
+          consumed = raw.length
+          const buffer = screen.buffer.active
+          return Array.from({ length: screen.rows }, (_, row) => buffer.getLine(buffer.viewportY + row)?.translateToString(true) ?? '')
+        }
+        let tty: Terminal | undefined
+        try {
+          await run.terminal(label, ['--screen', 'fullscreen', ...resume === undefined ? [] : ['--resume', resume]], async terminal => {
+            tty = terminal
+            if (resume === undefined) {
+              await terminal.expect('BAKE')
+              terminal.send('Show the fullscreen transcript.\r')
+            }
+            await terminal.wait('the fullscreen response and bottom status', async () => {
+              const rows = await capture(terminal.raw)
+              return screen.buffer.active.type === 'alternate' && rows.some(line => line.includes('FULLSCREEN_DONE'))
+                && rows.at(-1)?.includes(SCREEN.status) === true
+            })
+            terminal.send('\x1b[5~', 'PageUp pauses transcript following')
+            await terminal.wait('older output with the input pinned', async () => {
+              const rows = await capture(terminal.raw)
+              return rows.some(line => line.includes(dictionaries.en.transcriptPaused))
+                && !rows.some(line => line.includes('FULLSCREEN_DONE')) && rows.at(-3)?.includes(SCREEN.caret) === true
+            })
+            terminal.send('\x1b[1;5H', 'Ctrl+Home reaches the opening prompt')
+            await terminal.wait('the first prompt in the viewport', async () => (await capture(terminal.raw)).some(line => line.includes('Show the fullscreen transcript.')))
+            terminal.send('\x1b[1;5F', 'Ctrl+End resumes following')
+            await terminal.wait('the newest output again', async () => (await capture(terminal.raw)).some(line => line.includes('FULLSCREEN_DONE')))
+            screen.resize(40,12)
+            terminal.resize(40,12)
+            await terminal.wait('the resized fullscreen keeps its last answer and composer', async () => {
+              const rows = await capture(terminal.raw)
+              return rows.some(line => line.includes('FULLSCREEN_DONE')) && rows.at(-1)?.includes(SCREEN.status) === true
+            })
+            terminal.send('\x1b[200~saved draft\x1b[201~', 'paste while viewing fullscreen history')
+            await terminal.wait('the pasted draft stays above status', async () => (await capture(terminal.raw)).at(-3)?.includes('saved draft') === true)
+          })
+          await capture(tty!.raw)
+          assert(screen.buffer.active.type === 'normal', 'fullscreen did not restore the primary screen')
+          assert(screen.buffer.active.getLine(0)?.translateToString(true) === 'shell before Bake', 'fullscreen erased shell history')
+          assert(screen.buffer.active.cursorY === 1 && screen.buffer.active.cursorX === 2, 'fullscreen moved the saved shell cursor')
+        } finally { screen.dispose() }
+      }
+      await drive('fullscreen')
+      const log = await events(await run.created(before, 'fullscreen'))
+      const texts = log.filter(e => e.type === 'assistant/message').flatMap(e => e.data.message.content.filter((block: any) => block.type === 'text').map((block: any) => block.text))
+      assert(texts.includes(answer), 'fullscreen changed the persisted assistant answer')
+      await drive('fullscreen-resume', log[0].id)
+    } finally { await run.writeOverlay() }
+  })
+
 scenario('markdown', 'streamed Markdown formats once, survives resize and resume, and preserves the logged source',
   { replayOnly: true }, async run => {
     const reasoning = '**Review** the formatter.'
@@ -1951,7 +2023,7 @@ setInterval(() => {
   if (existsSync(${JSON.stringify(trigger)})) throw Object.assign(new Error('PTY_FATAL_EXCEPTION'), { code: 'TUI_FATAL_TEST' })
 }, 20).unref()
 `)
-    const tty = new Terminal('fatal-exception', run.command([], ['--import', preload]),
+    const tty = new Terminal('fatal-exception', run.command(['--screen', 'fullscreen'], ['--import', preload]),
       run.workspace, run.env, run.options)
     try {
       await tty.ready()

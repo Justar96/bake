@@ -54,7 +54,7 @@ The TUI stores only presentation state: draft text, transient output, the displa
 
 The controller subscribes before Agent publication and buffers events while obtaining a query observation. The observation's events and the buffered tail pass through one sequence cursor, so history/live overlap cannot duplicate committed rows. Notices from application setup stay outside the durable conversation.
 
-Committed rows render through Ink `Static`. Assistant chunks render separately until the corresponding durable message or attempt settles. Frame revisions increase across publications; attempt identity and increasing revision order determine which chunks belong to the visible response. Text and reasoning come from the harness `BlockAssembler`.
+Inline mode renders committed rows through Ink `Static`. Fullscreen reads the same committed batches and uncommitted live rows into a bounded viewport. Assistant chunks remain separate until the corresponding durable message or attempt settles. Frame revisions increase across publications; attempt identity and increasing revision order determine which chunks belong to the visible response. Text and reasoning come from the harness `BlockAssembler`.
 
 ### 4.3. The rewrite problem
 
@@ -76,11 +76,13 @@ A capped search reports its total and says it was capped. A card that quietly li
 
 ### 4.6. The task list
 
-`todo/write` replaces the whole list, so the transcript would carry the same plan several times with a different tick each time. The `todos` projection folds the writes to the one version still true, and one row above the header shows it: a progress bar, the count, and the task in progress, or the next open one. A plan of any length costs that one row, because the dynamic region shares one budget and the plan's other entries are not what a reader checks mid-turn. The row leaves once every task is done. The complete checklist is a sheet, opened by Enter on the selected row or by Ctrl+T: a progress bar and the counts by state, then the tasks numbered in the agent's order, each with a box that is ticked, pointed at, or empty, wrapped rather than truncated. Each full view has its own key that opens and closes it: Ctrl+T for the tasks, Ctrl+G for the subagents, and Ctrl+O for the goal. Inside an open view, Tab and Shift-Tab step through the views that have something to show, under a tab strip naming them, and wrap. It does not take the branch shape of a step's calls: those describe work that ran or is running, while the plan lists work to do. Child activity appears on one dim row under the input, above the status line, naming each child in its own identity tone, and opens the subagent sheet on selection.
+`todo/write` replaces the whole list, so the transcript would carry the same plan several times with a different tick each time. The `todos` projection folds the writes to the one version still true, and one row above the header shows it: a progress bar, the count, and the task in progress, or the next open one. A plan of any length costs that one row, because the dynamic region shares one budget and the plan's other entries are not what a reader checks mid-turn. The row leaves once every task is done. The complete checklist is a sheet, opened by Enter on the selected row or by Ctrl+T: a progress bar and the counts by state, then the tasks numbered in the agent's order, each with a box that is ticked, pointed at, or empty, wrapped rather than truncated. Each full view has its own key that opens and closes it: Ctrl+T for the tasks, Ctrl+G for the subagents, and Ctrl+O for the goal. Inside an open view, Tab and Shift-Tab step through the views that have something to show, under a tab strip naming them, and wrap. It does not take the branch shape of a step's calls: those describe work that ran or is running, while the plan lists work to do. Child activity appears on one dim row under the input, above the status line, counting the children and those working, and opens the subagent sheet on selection.
 
 ### 4.7. Measured transcript cost
 
 Committed history uses immutable linked batches. Appending a batch shares the preceding snapshot without reading or copying its rows. `ReplayCursor` walks captured batches forward, presents each row once, and admits bounded groups of display lines to one Ink `Static`. Backlog admission waits for the previous render to flush to stdout, yielding to input between batches. Small live appends replace their previews in the same React flush. Initial replay reads the complete history; session records and Ink’s saved output still grow with transcript size.
+
+Fullscreen uses `Viewport` to index source-row references, present only visited rows, and retain at most 32 measured presentations. Wrapped line slices enter the Ink tree only when visible. Appends index only new batches; width changes invalidate measurements. A reading anchor holds the viewed passage while output arrives or text rewraps, and rebases when streamed text becomes committed fragments. `packages/app/tests/fullscreen.spec.tsx` checks these transitions and bounded presentation with 10,000 source rows. Parsing one large source message still requires its full text.
 
 `packages/ui/tests/scale.spec.tsx` waits for complete replay, then counts history reads at 50 and 10,000 rows and compares append bytes at 50 and 2000 rows. `replay.test.ts` checks cursor ordering, linear traversal, and admission bounds. `scrollback.spec.tsx` uses real Ink with controlled stdout backpressure to check input, appends, large multiline answers, exit, resize, session switches, and child inspection with draft restoration.
 
@@ -120,7 +122,7 @@ The subagents row under the input derives identities from `subagents.listChildre
 
 Navigation requires the displayed Agent to be idle with both inbox targets empty, including plugin input. Status and inbox changes abort preparation, and the application refuses composer submissions until navigation settles. The previous controller stays displayed while the replacement mounts and replays; failure or cancellation disposes the candidate. Handoff changes the displayed controller synchronously, then closes and drains the previous controller and handle. Escape cancels preparation before handoff; handle retirement completes once handoff is accepted. Preset mounting has no cancellation parameter, so rollback waits for that work to settle before returning.
 
-The session id keys presentation lifetime. Switching resets the draft, cursor, completion, and recall visit and prints the selected history beneath a localized session heading. Existing terminal scrollback remains, with one history replay per visit. No TUI session store or model-request lifecycle is introduced.
+The session id keys presentation lifetime. Switching resets the draft, cursor, completion, and recall visit and opens the selected history beneath a localized session heading. Inline mode retains earlier terminal scrollback, with one history replay per visit. Fullscreen replaces the viewport and follows the selected session's newest output. No TUI session store or model-request lifecycle is introduced.
 
 ## 6c. Provider login
 
@@ -138,7 +140,7 @@ One idempotent `releaseTerminal` cancels navigation and closes observers and hum
 
 Model catalog reads use the upstream `listModels` API, which has no cancellation parameter. Canceled commands suppress later UI updates and drain an active catalog call after terminal release.
 
-Ink owns raw mode, bracketed paste, and cursor restoration. The application does not issue a second manual paste-mode lease. Node integration tests exercise ordinary quit and context disposal; the PTY smoke additionally checks actual terminal attributes, exit status, and paste-mode release.
+Ink owns raw mode, bracketed paste, cursor restoration, and the optional alternate screen. The application does not issue a second manual paste-mode lease. Node integration tests exercise both screen modes, startup failure, and the screen-reader fallback; the PTY smoke additionally checks actual terminal attributes, exit status, and alternate-screen release after normal and fatal exits.
 
 ## 8. Configuration
 
@@ -147,6 +149,7 @@ Ink owns raw mode, bracketed paste, and cursor restoration. The application does
 | `resume` | absent | Exact persisted session id |
 | `preset` | roster default for a fresh session | Fresh composition, or explicit legacy-session composition |
 | `locale` | `en` | `en` or `zh` labels |
+| `screen` | `inline` | `inline` for native scrollback or `fullscreen` for an alternate-screen transcript; overridden by `--screen <mode>`, with `INK_SCREEN_READER=true` forcing inline |
 | `composerFrame` | `auto` | line glyphs for the composer's rule and the welcome card: `round`, `classic`, or `auto` to read the terminal's encoding, `TERM`, and character locale ([why](DESIGN-LAYOUT.md#the-frame-is-chosen-from-the-terminal-not-assumed)) |
 | `doubleInterruptMs` | `2000` | How long the quit prompt waits for a second Ctrl-C; any other key dismisses it sooner |
 | `completionLimit` | `8` | Positive integer limiting visible completion, picker, and staged-attachment rows |
@@ -156,6 +159,8 @@ Ink owns raw mode, bracketed paste, and cursor restoration. The application does
 | `credentialRefs` | `[]` | Provider key references offered by `/login`; the supplied patch names `DEEPSEEK_API_KEY` |
 
 Schemastery validates and defaults configuration before the runner receives it. Locale dictionaries own application text; model output, tool results, and provider-owned diagnostics remain verbatim.
+
+Fullscreen supports PgUp/PgDn to scroll half a viewport, Ctrl+Home to reach its beginning, and Ctrl+End to follow new output. Scrolling up pauses following; paging to the bottom resumes it. Open sheets and interactions keep their own keys. The runner enables Ink's `alternateScreen`, and `frameOutput` batches writes without applying inline bottom anchoring or newline conversions. On entry it homes the alternate buffer; on resize and cleanup it removes scrollback-erasure controls to preserve the primary shell buffer.
 
 ## 9. Validation
 
@@ -167,4 +172,4 @@ Its `check` command owns six individually selectable targets: React instance ide
 
 ## 10. Limits
 
-The goal service's live view supplies the goal at the right edge of the processing header: its phase and rounds, objective, and blocked reason. `/goal` shows the complete goal and its available actions. Workspace changes and scheduled follow-ups reach the log but not the screen: their events are dropped. Subagents appear on one row under the input, with a picker and read-only session inspection. Plan mode appears in the status line and the task list has a row with a full sheet. Navigation supports one displayed session in the current workspace. The picker reads matching records and titles in full while bounding visible rows. Inline scrollback has no virtualized transcript, and long-history performance qualification remains incomplete. Clipboard images and inline attachment previews are deferred. Source launch is unsuitable for qualifying tool execution on this checkout; use the built profile and the runbook in [PLAN.md](PLAN.md#132-build-from-a-clean-checkout).
+The goal service's live view supplies the goal at the right edge of the processing header: its phase and rounds, objective, and blocked reason. `/goal` shows the complete goal and its available actions. Workspace changes and scheduled follow-ups reach the log but not the screen: their events are dropped. Subagents appear on one row under the input, with a picker and read-only session inspection. Plan mode appears in the status line and the task list has a row with a full sheet. Navigation supports one displayed session in the current workspace. The picker reads matching records and titles in full while bounding visible rows. Inline scrollback has no virtualized transcript. Fullscreen virtualizes visible output but has no mouse scrolling or transcript search; whole-process performance qualification remains incomplete. Clipboard images and inline attachment previews are deferred. Source launch is unsuitable for qualifying tool execution on this checkout; use the built profile and the runbook in [PLAN.md](PLAN.md#132-build-from-a-clean-checkout).

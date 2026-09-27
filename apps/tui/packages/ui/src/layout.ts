@@ -205,10 +205,11 @@ export function chromeFor(_columns: number, available = CHROME_ROWS): ChromeLayo
  *
  * @param size - current terminal size.
  * @param options.header - whether an overlay draws a title line.
+ * @param options.fullscreen - use every row in Ink's alternate screen.
  * @returns budgets for every region, each at least one row or column.
  */
-export function budgetFor(size: WindowSize, options: { readonly header?: boolean } = {}): Budget {
-  const dynamic = Math.max(1, size.rows - 1)
+export function budgetFor(size: WindowSize, options: { readonly header?: boolean, readonly fullscreen?: boolean } = {}): Budget {
+  const dynamic = Math.max(1, size.rows - (options.fullscreen === true ? 0 : 1))
   const chrome = chromeFor(size.columns, dynamic)
   const live = Math.max(1, Math.min(Math.max(LIVE_BUDGET, Math.floor(dynamic * LIVE_SHARE)), dynamic - chrome.rows))
   const composer = Math.max(1, Math.min(COMPOSER_BUDGET, dynamic - chrome.rows))

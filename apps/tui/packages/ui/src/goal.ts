@@ -30,20 +30,22 @@ export interface GoalEntry {
  *
  * @param goal - the current goal, or undefined when none is set.
  * @param copy - locale-owned labels.
- * @param brief - leave out the round count, which the goal's sheet still shows.
+ * @param brief - leave out the round count and the objective, which the goal's
+ *   sheet still shows, so a long objective cannot crowd the turn's label.
  * @returns the goal's state, or undefined when there is no goal.
  */
 export function goalState(goal: GoalEntry | undefined, copy: TuiCopy, brief = false): StandingState | undefined {
   if (goal === undefined) return undefined
   const rounds = brief ? undefined : `${copy.goalRound} ${goal.rounds}/${goal.maxRounds}`
+  const objective = brief ? undefined : goal.objective
   const details = (...parts: (string | undefined)[]): string => parts.filter(part => part !== undefined && part !== '').join(' · ')
   switch (goal.phase) {
     case 'active': return goal.armed
-      ? { glyph: MARKER.turn, label: copy.goalActive, details: details(rounds, goal.objective), color: PALETTE.running }
-      : { glyph: MARKER.waiting, label: copy.goalHeld, details: details(copy.goalResume, goal.objective), color: PALETTE.waiting }
-    case 'paused': return { glyph: MARKER.waiting, label: copy.goalPaused, details: details(copy.goalResume, goal.objective), color: PALETTE.waiting }
-    case 'blocked': return { glyph: '✗', label: copy.goalBlocked, details: details(goal.blocked, goal.objective), color: PALETTE.failed }
-    case 'complete': return { glyph: '✓', label: copy.goalComplete, details: details(rounds, goal.objective), color: PALETTE.done }
+      ? { glyph: MARKER.turn, label: copy.goalActive, details: details(rounds, objective), color: PALETTE.running }
+      : { glyph: MARKER.waiting, label: copy.goalHeld, details: details(copy.goalResume, objective), color: PALETTE.waiting }
+    case 'paused': return { glyph: MARKER.waiting, label: copy.goalPaused, details: details(copy.goalResume, objective), color: PALETTE.waiting }
+    case 'blocked': return { glyph: '✗', label: copy.goalBlocked, details: details(goal.blocked, objective), color: PALETTE.failed }
+    case 'complete': return { glyph: '✓', label: copy.goalComplete, details: details(rounds, objective), color: PALETTE.done }
   }
 }
 

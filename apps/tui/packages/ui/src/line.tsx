@@ -14,9 +14,10 @@ import { Box, Text } from 'ink'
 import stringWidth from 'string-width'
 import wrapAnsi from 'wrap-ansi'
 import { wrapDraft } from './editor.ts'
+import { sliceSpans } from './markdown.ts'
 import { chromeFor, COLUMN, COMPOSER_BUDGET, HINT_MIN_COLUMNS, MARKER, RULE, TREE, windowOf, type Budget, type ChromeLayout, type FrameStyle } from './layout.ts'
 import { PALETTE, type PaletteColor } from './palette.ts'
-import { fittedGroup, hintFor, isBlank, present, softBreaks, styleOf, tailLines, type ComposerState, type Hint, type LineStyle, type PresentedLine, type ResultBound } from './present.ts'
+import { fittedGroup, hintFor, isBlank, present, softBreaks, styleOf, tailLines, type ComposerState, type Hint, type LineStyle, type PresentedLine, type ResultBound, type Span } from './present.ts'
 import type { Row } from './rows.ts'
 import { FRAME_MS, formatElapsed, SPINNER_REST, spinnerFrame, type Clock, type Outcome, type TurnSummary } from './activity.ts'
 import { useBeat } from './beat.tsx'
@@ -32,11 +33,13 @@ import { useBeat } from './beat.tsx'
  * @param props.line - the placed line.
  * @param props.budget - budgets for the current terminal size.
  */
-export function Line({ line, budget, clock }: {
+export function Line({ line, budget, clock, window }: {
   readonly line: PresentedLine
   readonly budget: Budget
   /** Clock for a blinking marker. Absent, the marker stays lit. */
   readonly clock?: Clock | undefined
+  /** Physical rows to render when a fullscreen viewport intersects this line. */
+  readonly window?: { readonly offset: number, readonly height: number }
 }): React.ReactElement {
   const style = styleOf(line.tone)
   const marker = styleOf(line.markerTone ?? line.tone)
@@ -49,14 +52,18 @@ export function Line({ line, budget, clock }: {
   // their own tones.
   const zone = line.zone === true
   const colored = colorOf(style, zone)
-  const { rail, verb: verbWidth, width, content, text } = placement(line, budget)
+  const placed = placement(line, budget)
+  const { rail, verb: verbWidth, width } = placed
+  const content = window === undefined ? placed.content : windowContent(line, budget, window.offset, window.height)
+  const text = window === undefined ? placed.text : content.text
+  const first = window === undefined || window.offset === 0
   return (
     // `flexShrink={0}`. Inside a region held at a fixed height, a shrinkable
     // line lets Yoga squash every line a little instead of pushing the oldest
     // ones off the top, which drops lines out of the middle of the stream.
     <Box flexDirection="row" flexShrink={0}>
       {rail === 0 ? null : <Box width={rail} flexShrink={0}>
-        {line.pulse === true
+        {!first ? null : line.pulse === true
           ? <Pulse glyph={line.marker} clock={clock} />
           : line.markerTone === undefined
             ? <Text bold={style.bold} {...colorOf(style)}>{line.marker}</Text>
@@ -65,7 +72,7 @@ export function Line({ line, budget, clock }: {
       {indented && verbWidth > 0
         ? (
           <Box width={verbWidth} flexShrink={0}>
-            {line.verb === '' && line.gutter !== undefined
+            {!first ? null : line.verb === '' && line.gutter !== undefined
               // Right-align the line number against the code, one space short of it.
               ? <Text dimColor={style.dim} {...colorOf(style)}>{`${line.gutter.padStart(COLUMN.verb - 1)} `}</Text>
               // A verb with its own tone is bold, except the quiet connector.
@@ -151,6 +158,7 @@ interface Placement {
   readonly columns: number
   readonly measure: number
   rows?: readonly string[]
+  starts?: readonly number[]
 }
 
 // Measurement and rendering share one wrap per immutable presentation line.
@@ -191,6 +199,39 @@ export function wrappedRows(line: PresentedLine, budget: Budget): readonly strin
   return placed.rows ??= line.divider === true || placed.text === ''
     ? [line.divider === true ? '-'.repeat(placed.width) : placed.text]
     : wrapAnsi(placed.text, placed.width, { hard: true, trim: false }).split('\n')
+}
+
+/** UTF-16 starts in the placed source text, for styles and resize anchors. */
+export function wrappedStarts(line: PresentedLine, budget: Budget): readonly number[] {
+  const placed = placement(line, budget)
+  if (placed.starts !== undefined) return placed.starts
+  let offset = 0
+  return placed.starts = wrappedRows(line, budget).map(row => {
+    const start = offset
+    offset += row.length
+    if (placed.content.text[offset] === '\n'
+      || (placed.content.literal !== true && placed.content.text[offset] === ' ' && !row.endsWith(' '))) offset++
+    return start
+  })
+}
+
+/** Slice wrapped text and its styles before handing a long paragraph to Ink. */
+function windowContent(line: PresentedLine, budget: Budget, from: number, count: number): PresentedLine {
+  const { content } = placement(line, budget)
+  const rows = wrappedRows(line, budget)
+  const text = rows.slice(from, from + count).join('\n')
+  if (content.spans === undefined) return { ...content, text }
+  const starts = wrappedStarts(line, budget)
+  const spans: Span[] = []
+  for (let index = from; index < Math.min(rows.length, from + count); index++) {
+    const row = rows[index]!
+    if (index > from) spans.push({ length: 1, tone: content.tone })
+    const sliced = sliceSpans(content.spans, starts[index]!, starts[index]! + row.length)
+    spans.push(...sliced)
+    const rest = row.length - sliced.reduce((sum, span) => sum + span.length, 0)
+    if (rest > 0) spans.push({ length: rest, tone: content.tone })
+  }
+  return { ...content, text, spans }
 }
 
 /**

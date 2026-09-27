@@ -297,6 +297,7 @@ const reasoningEfforts = z.dict(
 
 /** The fields a `models` entry and a `modelOverrides` value share; only the id's home differs. */
 const modelFields = {
+  api: z.union(supportedProtocols()),
   name: z.string(),
   contextWindow: z.number().step(1).min(1),
   maxTokens: z.number().step(1).min(1),
@@ -477,6 +478,8 @@ export function resolveProfiles(
         ...source.api === undefined ? {} : { api: source.api },
         ...source.baseURL === undefined ? {} : { baseURL: source.baseURL },
         models: catalog.models,
+        namesModelApi: [...source.models ?? [], ...Object.values(source.modelOverrides ?? {})]
+          .some(entry => entry.api !== undefined),
         namesCredential: source.apiKeyEnv !== undefined,
       })
     } catch (error) {

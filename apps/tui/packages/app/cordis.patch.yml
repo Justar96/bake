@@ -54,6 +54,7 @@
       config:
         resume: !!js ctx.tuiStartup.resume
         preset: !!js ctx.tuiStartup.preset
+        screen: !!js ctx.tuiStartup.screen
         # The composition knows which providers it mounted; the surface does
         # not. `llm-deepseek` reads this reference (its `apiKeyEnv` default),
         # so `/login` can set it. A patch adding another provider adds its

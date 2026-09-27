@@ -5,7 +5,10 @@ import { run, type TuiIo } from '../src/runner.ts'
 import { harness } from './harness.ts'
 
 const cleanup: (() => Promise<void>)[] = []
-afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await dispose() })
+afterEach(async () => {
+  try { for (const dispose of cleanup.splice(0).reverse()) await dispose() }
+  finally { vi.unstubAllEnvs() }
+})
 
 class Input extends EventEmitter {
   isTTY = true
@@ -29,7 +32,11 @@ class Output extends EventEmitter {
   get text() { return this.frames.join('') }
 }
 
-it.each(['quit', 'dispose'] as const)('restores Ink modes and drains the agent on %s', async mode => {
+it.each([
+  ['inline', 'quit'], ['inline', 'dispose'], ['fullscreen', 'quit'], ['fullscreen', 'dispose'],
+  ['fullscreen', 'screen-reader'],
+] as const)('restores %s Ink modes and drains the agent (%s)', async (screen, mode) => {
+  vi.stubEnv('INK_SCREEN_READER', mode === 'screen-reader' ? 'true' : 'false')
   const fixture = await harness()
   cleanup.push(fixture.dispose)
   const input = new Input()
@@ -38,7 +45,7 @@ it.each(['quit', 'dispose'] as const)('restores Ink modes and drains the agent o
   const exit = vi.fn()
   // These streams implement exactly the terminal methods Ink consumes.
   const io = { in: input, out: output, err: error, exit } as unknown as TuiIo
-  const finished = run(fixture.ctx, { locale: 'en', composerFrame: 'auto', completionLimit: 8, resultLines: 8, attachmentMaxBytes: 1048576, attachmentLimit: 8, doubleInterruptMs: 500, credentialRefs: [] }, io)
+  const finished = run(fixture.ctx, { screen, locale: 'en', composerFrame: 'auto', completionLimit: 8, resultLines: 8, attachmentMaxBytes: 1048576, attachmentLimit: 8, doubleInterruptMs: 500, credentialRefs: [] }, io)
   cleanup.push(async () => { await fixture.ctx.fiber.dispose(); await finished })
   await Promise.race([finished, vi.waitFor(() => expect(output.text).toContain('Model: '))])
   expect(input.isRaw).toBe(true)
@@ -61,9 +68,26 @@ it.each(['quit', 'dispose'] as const)('restores Ink modes and drains the agent o
   await finished
   expect(input.isRaw).toBe(false)
   expect(output.text).toContain('\u001b[?2004l')
+  expect(output.text.includes('\u001b[?1049h')).toBe(screen === 'fullscreen' && mode !== 'screen-reader')
+  expect(output.text.includes('\u001b[?1049l')).toBe(screen === 'fullscreen' && mode !== 'screen-reader')
   expect(input.listenerCount('readable')).toBe(0)
   if (mode === 'quit') expect(exit).toHaveBeenCalledExactlyOnceWith(0)
   else expect(exit).not.toHaveBeenCalled()
+})
+
+it('leaves terminal modes untouched when fullscreen startup fails', async () => {
+  const fixture = await harness()
+  cleanup.push(fixture.dispose)
+  const input = new Input()
+  const output = new Output()
+  const exit = vi.fn()
+  await expect(run(fixture.ctx, { screen: 'fullscreen', resume: 'missing-session', locale: 'en', composerFrame: 'auto', completionLimit: 8, resultLines: 8, attachmentMaxBytes: 1048576, attachmentLimit: 8, doubleInterruptMs: 500, credentialRefs: [] }, {
+    in: input, out: output, err: output, exit,
+  } as unknown as TuiIo)).rejects.toThrow('missing-session')
+  expect(input.isRaw).toBe(false)
+  expect(input.listenerCount('readable')).toBe(0)
+  expect(output.frames).toEqual([])
+  expect(exit).not.toHaveBeenCalled()
 })
 
 it.each(['stdin', 'stdout'])('refuses piped %s before acquiring terminal modes', async stream => {
@@ -73,7 +97,7 @@ it.each(['stdin', 'stdout'])('refuses piped %s before acquiring terminal modes',
   input.isTTY = stream !== 'stdin'
   const output = new Output()
   output.isTTY = stream !== 'stdout'
-  await expect(run(fixture.ctx, { locale: 'en', composerFrame: 'auto', completionLimit: 8, resultLines: 8, attachmentMaxBytes: 1048576, attachmentLimit: 8, doubleInterruptMs: 500, credentialRefs: [] }, {
+  await expect(run(fixture.ctx, { screen: 'fullscreen', locale: 'en', composerFrame: 'auto', completionLimit: 8, resultLines: 8, attachmentMaxBytes: 1048576, attachmentLimit: 8, doubleInterruptMs: 500, credentialRefs: [] }, {
     in: input, out: output, err: output, exit: vi.fn(),
   } as unknown as TuiIo)).rejects.toThrow('interactive terminal')
   expect(input.isRaw).toBe(false)

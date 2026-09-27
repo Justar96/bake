@@ -8,8 +8,9 @@
  * package cannot reconstruct (Bedrock loads its Smithy module through a
  * separate entry point), so rebuilding it from parts would silently narrow
  * which providers work. Every other route — one pi-ai has never heard of, or a
- * catalog route pointed at a different protocol — is built by `createProvider`
- * over the protocol table below.
+ * catalog route pointed at a different protocol, whole or per model — is built
+ * by `createProvider` over the protocol table below, dispatching each model to
+ * the implementation of its own protocol.
  *
  * Credentials never reach this module's storage: the harness resolves a route's
  * key through `ctx.credentials` before the request enters pi-ai and hands it
@@ -97,6 +98,12 @@ export interface ProviderSpec {
   /** The route's materialized models, in configuration order. */
   models: readonly Model<Api>[]
   /**
+   * Whether a model entry or override names its own `api`. Such a model may
+   * speak a protocol its catalog provider does not implement, so the route is
+   * built from the protocol table even when the route itself names none.
+   */
+  namesModelApi?: boolean
+  /**
    * Whether the profile names a credential, which it does through `apiKeyEnv`
    * alone: configuration carries the reference, never the secret. Only that
    * decides whether {@link routeAuth} adds the harness's own api-key method to
@@ -169,24 +176,34 @@ export function buildProvider(spec: ProviderSpec): Provider {
   // A catalog route keeping its catalog protocol reuses the catalog provider;
   // an explicit protocol means the deployment is repointing the route at a
   // different wire format, which only the protocol table can serve.
-  if (catalog !== undefined && spec.api === undefined) return reuseCatalogProvider(catalog, spec)
-
-  // Every model on this path carries the route's protocol: model resolution
-  // requires one for a route the catalog cannot default, and an explicit one
-  // replaces each catalog model's own. So the route has a single API.
-  const factory = spec.api === undefined ? undefined : PROTOCOLS[spec.api]
-  if (factory === undefined) {
-    throw new PiAiCatalogError(
-      `llm-pi-ai: provider "${spec.provider}" names api "${spec.api}", which this build cannot serve;`
-      + ` supported protocols are ${supportedProtocols().join(', ')}`,
-    )
+  if (catalog !== undefined && spec.api === undefined && spec.namesModelApi !== true) {
+    return reuseCatalogProvider(catalog, spec)
   }
+
+  // Every model on this path carries a resolved protocol — its own, else the
+  // route's, else its catalog entry's — and each distinct one needs its
+  // implementation. The route's own protocol is checked even when no model
+  // uses it, so a misspelled route api cannot hide behind per-model ones.
+  const apis = new Set<string | undefined>(spec.models.map(model => model.api))
+  if (spec.api !== undefined || apis.size === 0) apis.add(spec.api)
+  const streams: Record<string, ProviderStreams> = {}
+  for (const api of apis) {
+    const factory = api === undefined ? undefined : PROTOCOLS[api]
+    if (api === undefined || factory === undefined) {
+      throw new PiAiCatalogError(
+        `llm-pi-ai: provider "${spec.provider}" names api "${api}", which this build cannot serve;`
+        + ` supported protocols are ${supportedProtocols().join(', ')}`,
+      )
+    }
+    streams[api] = factory()
+  }
+  const [only, ...others] = Object.values(streams)
   return createProvider({
     id: spec.provider,
     name: spec.displayName,
     ...spec.baseURL === undefined ? {} : { baseUrl: spec.baseURL },
     auth: routeAuth(spec, catalog),
     models: spec.models,
-    api: factory(),
+    api: only !== undefined && others.length === 0 ? only : streams,
   })
 }

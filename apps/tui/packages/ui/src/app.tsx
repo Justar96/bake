@@ -19,6 +19,7 @@ import { Sheet, sheetPage, sheetRows, type SheetLine, type SheetTab } from './sh
 import { Tasks, taskSheet, taskTab, tasksOpen, type TaskEntry } from './tasks.tsx'
 import { Beat } from './beat.tsx'
 import { Scrollback, type Opening } from './scrollback.tsx'
+import { Fullscreen, type TranscriptScroll } from './fullscreen.tsx'
 import { Chrome, Completion, Line, LiveRegion, Notice, Panel, Thinking, THINKING_GAP, wrappedRows, type ActivityState } from './line.tsx'
 import { activityWord, phaseLabel, phaseOf, lastTurn, THINKING_ROWS, thinkingRows, turnSummary, type Clock } from './activity.ts'
 
@@ -36,6 +37,8 @@ export { goalState, type GoalEntry } from './goal.ts'
 
 /** Application state and actions supplied by the terminal owner. */
 export interface AppProps {
+  /** Inline scrollback by default; fullscreen owns a scrollable transcript. */
+  readonly screen?: 'inline' | 'fullscreen'
   /** Suppress composer edits while the application prepares a session handoff. */
   readonly inputBlocked?: boolean
   readonly attachments?: readonly AttachmentSummary[]
@@ -201,13 +204,14 @@ export function RowView({ row, budget, result }: {
  * @param size - current terminal size.
  * @param view - displayed parent or child identity.
  * @param openingChild - whether the first frame must reanchor after a parent.
+ * @param enabled - whether the renderer uses inline scrollback.
  * @returns true for one render after a resize or inspection transition.
  */
-function useRepaint(size: WindowSize, view: string, openingChild: boolean): boolean {
+function useRepaint(size: WindowSize, view: string, openingChild: boolean, enabled: boolean): boolean {
   const painted = useRef(size)
   const paintedView = useRef<string | undefined>(openingChild ? undefined : view)
   const [, repaint] = useState(0)
-  const repainting = view !== paintedView.current || size.columns < painted.current.columns || size.rows > painted.current.rows
+  const repainting = enabled && (view !== paintedView.current || size.columns < painted.current.columns || size.rows > painted.current.rows)
   useLayoutEffect(() => {
     painted.current = size
     paintedView.current = view
@@ -235,6 +239,8 @@ type SheetKind = 'tasks' | 'agents' | 'goal'
 const SHEETS: readonly SheetKind[] = ['tasks', 'agents', 'goal']
 
 function SessionView(props: AppProps): React.ReactElement {
+  const scroll = useRef<TranscriptScroll>(null)
+  const fullscreen = props.screen === 'fullscreen'
   const composer = useComposer(props.onSubmit, () => inputHistory(props.committed, props.pending), (props.attachments?.length ?? 0) > 0)
   const { copy, interaction } = props
   // One arrow-key focus across the rows around the composer: the task row
@@ -327,6 +333,14 @@ function SessionView(props: AppProps): React.ReactElement {
     if (key.ctrl && text === 'c') { props.onInterrupt(); return }
     if (sheetRef.current !== undefined) {
       if (key.escape) { openSheet(undefined); return }
+      // Escape and the next key read together decode as one Meta key. No sheet
+      // takes a Meta key, so it closes as the Escape would have, and a printed
+      // character goes to the composer, as the rest of the same read does.
+      if (key.meta) {
+        openSheet(undefined)
+        if (!key.ctrl && [...text].length === 1 && !/\p{Cc}/u.test(text)) composer.type(text)
+        return
+      }
       if (key.ctrl && text === 't' && hasTasks) { toggleSheet('tasks'); return }
       if (key.tab) { showSheet(stepSheet(key.shift ? -1 : 1)); return }
       if (key.ctrl && text === 'o' && props.goal !== undefined) { toggleSheet('goal'); return }
@@ -357,6 +371,11 @@ function SessionView(props: AppProps): React.ReactElement {
       if (focusRef.current !== undefined) { focusOn(undefined); return }
       if (choices !== undefined) { updateMenu('', true); return }
       props.onCancel(); return
+    }
+    if (fullscreen && interaction === undefined && (!props.inputBlocked || props.inspectionParent !== undefined)
+      && !composer.blocked && (key.pageUp || key.pageDown || (key.ctrl && (key.home || key.end)))) {
+      scroll.current?.move(key.pageUp ? 'up' : key.pageDown ? 'down' : key.home ? 'start' : 'end')
+      return
     }
     if (interaction !== undefined || props.inputBlocked === true || props.inspection !== undefined || composer.blocked || key.meta) return
     if (key.ctrl && text === 'o' && props.goal !== undefined) { toggleSheet('goal'); return }
@@ -449,8 +468,8 @@ function SessionView(props: AppProps): React.ReactElement {
     }
   })
   const size = useWindowSize()
-  const budget = useMemo(() => budgetFor(size), [size.columns, size.rows])
-  const repainting = useRepaint(size, props.inspection?.sessionId ?? props.sessionId, props.inspectionParent !== undefined)
+  const budget = useMemo(() => budgetFor(size, { fullscreen }), [size.columns, size.rows, fullscreen])
+  const repainting = useRepaint(size, props.inspection?.sessionId ?? props.sessionId, props.inspectionParent !== undefined, !fullscreen)
   const screenReader = useIsScreenReaderEnabled()
   const clock = screenReader ? undefined : props.clock
   const compactStarted = useRef<number | undefined>(undefined)
@@ -576,7 +595,7 @@ function SessionView(props: AppProps): React.ReactElement {
   // Only while it has rows to draw. An empty live region draws nothing, and
   // reserving its window for a turn that has not spoken yet would starve the
   // panels below it of rows it never uses.
-  const liveLimit = claim(liveRows.length > 0 ? liveWant : 0)
+  const liveLimit = claim(!fullscreen && liveRows.length > 0 ? liveWant : 0)
   // After the output it summarizes, which it cannot outrank on a short
   // terminal; the header already says the turn is running.
   const thinkingLimit = claim(interaction !== undefined || !running || thinking.length === 0 ? 0 : thinking.length + THINKING_GAP)
@@ -670,14 +689,11 @@ function SessionView(props: AppProps): React.ReactElement {
       interaction={undefined} command={undefined}
       notice={`${child.label} · ${copy.subagentBack}`} />
   }
-  return <Scrollback transcript={props.committed} heading={heading} opening={opening} budget={budget} result={result}
-    copy={copy} frame={props.frame} size={size} repainting={repainting} recording={sheet === undefined}>
-    <Beat clock={clock}>
-        {sheetStandalone ? sheetBlock : <>
-        {sheet === undefined && <LiveRegion rows={liveRows} budget={budget} limit={liveLimit} result={result} clock={animate} />}
+  const controlsView = sheetStandalone ? sheetBlock : <>
+        {!fullscreen && sheet === undefined && <LiveRegion rows={liveRows} budget={budget} limit={liveLimit} result={result} clock={animate} />}
         {/* The held rows: under the output, so what streams stays against the
             history it continues, and over the controls, which stay together. */}
-        <Box flexGrow={1} />
+        {!fullscreen && <Box flexGrow={1} />}
         {interaction === undefined
           ? (
             <Chrome
@@ -744,7 +760,11 @@ function SessionView(props: AppProps): React.ReactElement {
               {panels}
             </Box>
             )}
-        </>}
-    </Beat>
-  </Scrollback>
+        </>
+  return <Beat clock={clock}>{fullscreen
+    ? <Fullscreen ref={scroll} transcript={props.committed} live={liveRows} heading={heading} opening={opening}
+        budget={budget} result={result} copy={copy} frame={props.frame} size={size} clock={animate}>{controlsView}</Fullscreen>
+    : <Scrollback transcript={props.committed} heading={heading} opening={opening} budget={budget} result={result}
+        copy={copy} frame={props.frame} size={size} repainting={repainting}>{controlsView}</Scrollback>}
+  </Beat>
 }

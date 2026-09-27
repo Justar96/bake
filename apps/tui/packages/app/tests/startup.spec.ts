@@ -24,6 +24,17 @@ function boot(args: string[]): { values: TuiStartupValues | undefined; out: stri
 }
 
 describe('tui command-line provider', () => {
+  it.each(['inline', 'fullscreen'])('selects the %s renderer', screen => {
+    expect(boot(['--screen', screen]).values).toEqual({ resume: undefined, preset: undefined, screen })
+  })
+
+  it('rejects unknown renderers', () => {
+    const result = boot(['--screen', 'other'])
+    expect(result.values).toBeUndefined()
+    expect(result.exits).toEqual([1])
+    expect(result.out).toContain('Allowed choices are inline, fullscreen')
+  })
+
   it.each(['--resume', '--session-id'])('adopts the Session %s names, verbatim', (flag) => {
     expect(boot([flag, ' session-x ']).values).toEqual({ resume: ' session-x ', preset: undefined })
   })

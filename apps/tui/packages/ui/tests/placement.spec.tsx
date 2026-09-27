@@ -457,6 +457,42 @@ describe('composer placement', () => {
     expect(stdoutClears(ui.stdout)).toBe(false)
   })
 
+  it.each([[80, 24], [40, 12], [80, 7]])('opens and closes a sheet over history without lifting the input at %ix%i', async (columns, rows) => {
+    const committed = appendTranscript(emptyTranscript,
+      Array.from({ length: 30 }, (_, index) => ({ kind: 'user' as const, text: `Prompt ${index}` })))
+    const todos = Array.from({ length: 8 }, (_, index) => ({ text: `Task ${index}`,
+      status: index === 0 ? 'completed' as const : index === 1 ? 'in_progress' as const : 'pending' as const }))
+    const ui = await mount(columns, rows, { committed, todos })
+    await vi.waitFor(async () => expect((await ui.history()).join('\n')).toContain('Prompt 29'))
+    const anchor = inputRow(await ui.screen())
+    expect(anchor).toBeGreaterThanOrEqual(0)
+    for (const [open, close] of [['\x14', '\u001b'], ['\x14', '\x14'], ['\x14', '\u001bdraft']] as const) {
+      ui.stdin.write(open)
+      await vi.waitFor(async () => expect((await ui.screen()).join('\n')).toContain(dictionaries.en.sheetClose))
+      let screen = await ui.screen()
+      // Under the newest line, over the controls when there is room for both.
+      expect(screen.join('\n')).toContain(' Tasks 1/8 ')
+      if (inputRow(screen) >= 0) expect(inputRow(screen), screen.join('\n')).toBe(anchor)
+      ui.stdin.write(close)
+      await vi.waitFor(async () => expect((await ui.screen()).join('\n')).not.toContain(dictionaries.en.sheetClose))
+      screen = await ui.screen()
+      // The rows the sheet took stay blank over the controls; the input does not rise.
+      expect(screen.findIndex(line => line.startsWith('> ')), screen.join('\n')).toBe(anchor)
+    }
+    // Escape read together with the next keys closes the sheet and types them.
+    await vi.waitFor(async () => expect((await ui.screen())[anchor]).toContain('draft▌'))
+    // History printed next takes the held rows, and nothing was replayed.
+    await ui.update({ committed: appendTranscript(committed,
+      Array.from({ length: rows }, (_, index) => ({ kind: 'user' as const, text: `Later ${index}` }))) })
+    await vi.waitFor(async () => expect((await ui.history()).join('\n')).toContain(`Later ${rows - 1}`))
+    const screen = await ui.screen()
+    expect(screen.findIndex(line => line.startsWith('> ')), screen.join('\n')).toBe(anchor)
+    if (rows >= 12) expect(screen[lastRow(screen, `Later ${rows - 1}`) + 1]).toBe('')
+    expect(stdoutClears(ui.stdout)).toBe(false)
+    const history = (await ui.history()).join('\n')
+    for (const text of ['Prompt 0', 'Prompt 29', 'Later 0']) expect(history.split(text), text).toHaveLength(2)
+  })
+
   it('keeps compaction progress above the draft without moving the composer off short screens', async () => {
     const ui = await mount(80, 8)
     ui.stdin.write('keep this draft')

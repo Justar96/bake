@@ -4,6 +4,15 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-09-27
+
+- `--screen fullscreen` opens a scrollable transcript with the input pinned at the bottom. PgUp/PgDn scroll, Ctrl+Home goes to the start, and Ctrl+End follows new output. Exit restores the shell; inline mode remains the default.
+- Closing the task, subagent, or goal view no longer lifts the prompt to the middle of the screen: the rows the view took stay blank above the prompt until new output fills them.
+- An Escape that arrives together with the next key, as on a slow terminal, still closes an open view, and the typed characters go to the prompt.
+- The subagents row counts the children and how many are working instead of listing their names, which the Ctrl+G view still shows. With tasks, a goal, and subagents all showing, the goal on the header drops its objective as well as its round count.
+- Kimi, Moonshot, GLM, Qwen, DeepSeek, and MiniMax models added by `/login cliproxyapi` use Chat Completions. A Kimi turn after parallel tool calls no longer fails with `tool_call_ids did not have response messages`. Run the login again to update an existing CLIProxyAPI route.
+- A model in a pi-ai provider profile can set its own `api`, so one route and credential can serve models over different wire protocols.
+
 ## [0.1.6] - 2026-09-27
 
 - A background job that finishes after its turn wakes the agent with one completion notice instead of two.
