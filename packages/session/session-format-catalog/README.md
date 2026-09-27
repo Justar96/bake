@@ -56,6 +56,8 @@ The catalog contains all supported historical readers directly. A profile cannot
 
 [`src/generated.ts`](src/generated.ts) is the static owner of codec and edge ordering. [`src/current.ts`](src/current.ts) delegates final header, envelope, message, surface, seed, and current request-header validation to the installed Session semantics. The low-level constructor rejects duplicate codecs, duplicate edges, gaps, and entries beyond the current version before any Session read can begin.
 
+[`src/retired-vocabulary.ts`](src/retired-vocabulary.ts) declares the event types and message sources that released logs carry but no mounted plugin writes: `model/selection`, `team/*`, `workspace/changes`, and the `user-rpc` and `team-message` sources. The known-event set is generated from declarations, and the storage contract refuses an unknown event that is not ignorable, so these declarations keep such logs readable. They keep the released resolved types, so the persistence digests do not move; remove one only with the format version bump and migration that retires its records.
+
 </details>
 
 -----

@@ -14959,7 +14959,7 @@
         "event:team/message/delivered.data"
       ],
       "sources": [
-        "packages/experimental/agent-team/src/types.ts:227"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:111"
       ]
     },
     {
@@ -15322,7 +15322,7 @@
         "event:team/message/queued.data"
       ],
       "sources": [
-        "packages/experimental/agent-team/src/types.ts:225"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:109"
       ]
     },
     {
@@ -20014,10 +20014,10 @@
         ]
       },
       "names": [
-        "packages/experimental/agent-team/src/types.ts#TeamMessageSource"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts#RetiredTeamMessageSource"
       ],
       "sources": [
-        "packages/experimental/agent-team/src/types.ts:115"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:83"
       ]
     },
     {
@@ -23553,7 +23553,7 @@
         ]
       },
       "names": [
-        "event:agent/inbox/spliced.data.inserted[0].source[16].changes"
+        "event:agent/inbox/spliced.data.inserted[0].source[12].changes"
       ],
       "sources": []
     },
@@ -32088,13 +32088,9 @@
         ]
       },
       "names": [
-        "packages/api/session-controller/src/types.ts#SessionRequestId",
         "packages/attachment/attachment/src/brand.ts#AttachmentId",
         "packages/compaction/compaction/src/brand.ts#CompactionId",
         "packages/core/session/src/types.ts#SessionId",
-        "packages/experimental/agent-team/src/types.ts#TeamId",
-        "packages/experimental/agent-team/src/types.ts#TeamMessageId",
-        "packages/experimental/agent-team/src/types.ts#TeamTaskId",
         "packages/feedback/message-feedback/src/types.ts#MessageFeedbackVersion",
         "packages/goal/goal/src/types.ts#GoalId",
         "packages/interaction/commands/src/brand.ts#CommandId",
@@ -32105,6 +32101,10 @@
         "packages/llm/llm/src/brand.ts#ReasoningEffortId",
         "packages/llm/llm/src/brand.ts#ToolCallId",
         "packages/schedule/schedule/src/types.ts#ScheduleId",
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts#RetiredSessionRequestId",
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts#RetiredTeamId",
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts#RetiredTeamMessageId",
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts#RetiredTeamTaskId",
         "packages/session/session-title/src/index.ts#SessionTitleProviderId",
         "packages/session/session-title/src/types.ts#SessionTitleProviderId",
         "packages/webhook/webhook/src/brand.ts#WebhookDeliveryId",
@@ -32113,13 +32113,9 @@
         "packages/workflow/workflow/src/types.ts#WorkflowRunId"
       ],
       "sources": [
-        "packages/api/session-controller/src/types.ts:376",
         "packages/attachment/attachment/src/brand.ts:6",
         "packages/compaction/compaction/src/brand.ts:4",
         "packages/core/session/src/types.ts:19",
-        "packages/experimental/agent-team/src/types.ts:20",
-        "packages/experimental/agent-team/src/types.ts:32",
-        "packages/experimental/agent-team/src/types.ts:8",
         "packages/feedback/message-feedback/src/types.ts:14",
         "packages/goal/goal/src/types.ts:17",
         "packages/interaction/commands/src/brand.ts:31",
@@ -32130,6 +32126,10 @@
         "packages/llm/llm/src/brand.ts:43",
         "packages/llm/llm/src/brand.ts:67",
         "packages/schedule/schedule/src/types.ts:10",
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:33",
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:36",
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:39",
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:42",
         "packages/session/session-title/src/index.ts:42",
         "packages/session/session-title/src/types.ts:17",
         "packages/webhook/webhook/src/brand.ts:12",
@@ -33826,10 +33826,10 @@
         ]
       },
       "names": [
-        "packages/experimental/agent-team/src/types.ts#TeamTaskSnapshot"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts#RetiredTeamTaskSnapshot"
       ],
       "sources": [
-        "packages/experimental/agent-team/src/types.ts:74"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:62"
       ]
     },
     {
@@ -34907,10 +34907,10 @@
         ]
       },
       "names": [
-        "packages/experimental/agent-team/src/types.ts#TeamMessageSnapshot"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts#RetiredTeamMessageSnapshot"
       ],
       "sources": [
-        "packages/experimental/agent-team/src/types.ts:106"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:74"
       ]
     },
     {
@@ -34973,7 +34973,7 @@
         "event:command/done.data"
       ],
       "sources": [
-        "packages/interaction/commands/src/types.ts:112"
+        "packages/interaction/commands/src/types.ts:117"
       ]
     },
     {
@@ -37062,10 +37062,10 @@
         ]
       },
       "names": [
-        "packages/experimental/agent-team/src/types.ts#TeamMemberSnapshot"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts#RetiredTeamMemberSnapshot"
       ],
       "sources": [
-        "packages/experimental/agent-team/src/types.ts:47"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:48"
       ]
     },
     {
@@ -38044,10 +38044,10 @@
         ]
       },
       "names": [
-        "event:agent/inbox/spliced.data.inserted[0].source[11]"
+        "event:agent/inbox/spliced.data.inserted[0].source[10]"
       ],
       "sources": [
-        "packages/api/session-controller/src/types.ts:381"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:94"
       ]
     },
     {
@@ -41035,7 +41035,7 @@
         ]
       },
       "names": [
-        "event:agent/inbox/spliced.data.inserted[0].source[17].entries[0]"
+        "event:agent/inbox/spliced.data.inserted[0].source[18].entries[0]"
       ],
       "sources": [
         "packages/skill/tool-skill/src/index.ts:40"
@@ -43669,7 +43669,7 @@
         ]
       },
       "names": [
-        "event:agent/inbox/spliced.data.inserted[0].source[16].changes[0].action"
+        "event:agent/inbox/spliced.data.inserted[0].source[12].changes[0].action"
       ],
       "sources": []
     },
@@ -46905,7 +46905,7 @@
         "event:team/task.data"
       ],
       "sources": [
-        "packages/experimental/agent-team/src/types.ts:223"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:107"
       ]
     },
     {
@@ -48610,7 +48610,7 @@
         "event:command/run.data"
       ],
       "sources": [
-        "packages/interaction/commands/src/types.ts:105"
+        "packages/interaction/commands/src/types.ts:110"
       ]
     },
     {
@@ -48972,7 +48972,7 @@
         ]
       },
       "names": [
-        "event:agent/inbox/spliced.data.inserted[0].source[17].entries"
+        "event:agent/inbox/spliced.data.inserted[0].source[18].entries"
       ],
       "sources": []
     },
@@ -49080,8 +49080,8 @@
       ],
       "sources": [
         "packages/core/session/src/types.ts:189",
-        "packages/interaction/commands/src/types.ts:75",
-        "packages/interaction/commands/src/types.ts:79",
+        "packages/interaction/commands/src/types.ts:80",
+        "packages/interaction/commands/src/types.ts:84",
         "packages/llm/llm/src/message.ts:103",
         "packages/session/session-title/src/types.ts:35"
       ]
@@ -49670,7 +49670,7 @@
         "event:team/member.data"
       ],
       "sources": [
-        "packages/experimental/agent-team/src/types.ts:221"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:105"
       ]
     },
     {
@@ -49810,10 +49810,10 @@
         ]
       },
       "names": [
-        "packages/experimental/agent-team/src/types.ts#TeamTaskStatus"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts#RetiredTeamTaskStatus"
       ],
       "sources": [
-        "packages/experimental/agent-team/src/types.ts:71"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:59"
       ]
     },
     {
@@ -56916,10 +56916,10 @@
         ]
       },
       "names": [
-        "packages/experimental/agent-team/src/types.ts#TeamMemberPhase"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts#RetiredTeamMemberPhase"
       ],
       "sources": [
-        "packages/experimental/agent-team/src/types.ts:44"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:45"
       ]
     },
     {
@@ -59740,10 +59740,10 @@
         ]
       },
       "names": [
-        "packages/api/session-controller/src/types.ts#ModelSelection"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts#RetiredModelSelection"
       ],
       "sources": [
-        "packages/api/session-controller/src/types.ts:86"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:26"
       ]
     },
     {
@@ -60698,7 +60698,7 @@
       ],
       "sources": [
         "packages/core/session/src/types.ts:276",
-        "packages/deliverables/workspace-changes/src/types.ts:106"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:118"
       ]
     },
     {

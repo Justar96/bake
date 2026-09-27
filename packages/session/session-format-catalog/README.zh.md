@@ -56,6 +56,8 @@ Production 历史读取使用 `{ recovery: 'recoverable', validation: 'transform
 
 [`src/generated.ts`](src/generated.ts) 是编解码器与迁移边顺序的静态所有者。[`src/current.ts`](src/current.ts) 把最终标头、事件信封、消息、表面、种子和当前请求标头校验委托给已安装的 Session 语义。底层构造函数会在开始读取任何 Session 之前拒绝重复编解码器、重复迁移边、缺口，以及超过当前版本的条目。
 
+[`src/retired-vocabulary.ts`](src/retired-vocabulary.ts) 声明已发布日志中仍会出现、但已没有挂载插件写入的事件类型和消息来源：`model/selection`、`team/*`、`workspace/changes`，以及 `user-rpc` 和 `team-message` 来源。已知事件集合由声明生成，而存储契约会拒绝未标记为可忽略的未知事件，因此这些声明使此类日志仍可读取。它们保留发布时的解析类型，持久化摘要不会变化；只有在配合格式版本升级和淘汰相应记录的迁移时才可删除其中条目。
+
 </details>
 
 -----
