@@ -4,6 +4,20 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-09-27
+
+- The rows around the prompt stay compact when tasks, a goal, and subagents are all showing: the goal drops its round count, and the status line shows context as `ctx ~N%` instead of token totals. Context turns yellow from 70% and red from 90%.
+- Subagents have their own dim row above the status line, each child named in its own colour; Down selects it and Enter opens the picker.
+- Ctrl+T, Ctrl+G, and Ctrl+O each open and close their own view, and Tab and Shift-Tab move between open views.
+- The access mode is shown when a session opens, in the welcome block or after a resumed session's heading, instead of on the status line.
+- `/resume` lists sessions by last use, starts on the most recently used one, and names sessions without a title "Untitled session" beside their short id.
+- Profiles can apply several bundle patches in order, and `--dump-config-schema` prints JSON Schema for the composed configuration so editors can validate and complete it.
+- Plugin settings marked as live change without restarting the plugin, and the agent can inspect the live configuration of each plugin.
+- Tools can be added and removed during a conversation; sessions that record such a change need this version or newer to open.
+- Sessions from releases that used Agent Teams or model selection still open.
+- Long tool previews no longer split an emoji or other surrogate pair, session-log uploads are bounded, and a request whose optional extensions cannot be sent falls back to the base request.
+- A shell command without wider sandbox access may give an empty reason.
+
 ## [0.1.4] - 2026-09-26
 
 - Each tool call opens with an icon for its kind: `$` a command, `≡` a read, `✎` an edit, `⌕` a search, `↳` a subagent started, `→` a message sent to one, and more; a batch of calls carries the icon on its header only.
