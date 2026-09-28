@@ -27,6 +27,9 @@
       "path": "../../packages/boot/updater"
     },
     {
+      "path": "../tui/packages/ui"
+    },
+    {
       "path": "../../packages/bundle/base"
     },
     {

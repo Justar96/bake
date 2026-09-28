@@ -5,6 +5,7 @@
 
 import { fileURLToPath } from 'node:url'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import { bakeLevel } from '@dsh-tui/ui/loaf.ts'
 import { startBakery } from './bakery.ts'
 import {
   detectInstall, markLaunched, selfUpdate, UpdateError, type InstallLayout, type InstallProgress,
@@ -85,7 +86,7 @@ export async function runUpdate(check: boolean, running: string, io: {
         out(`Downloading Bake ${version}…`)
         bakery = startBakery(io.out === undefined && io.err === undefined ? process.stderr : { write() {} }, env, 'Baking your update...')
       },
-      onProgress: (progress) => { bakery?.stage(progressLabel(found, progress)) },
+      onProgress: (progress) => { bakery?.stage(progressLabel(found, progress), bakeLevel(progress)) },
     })
     switch (outcome.kind) {
       case 'unmanaged':

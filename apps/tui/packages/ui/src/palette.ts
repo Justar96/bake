@@ -60,6 +60,13 @@ export const PALETTE = {
 } as const
 
 /**
+ * How far a release has baked while Bake installs it, from pale dough to dark
+ * crust. The loaf takes the tone for its progress, so colour reads as how
+ * much is done, and the percentage beside it carries the same under `NO_COLOR`.
+ */
+export const CRUST: readonly string[] = ['#f5e6c4', '#f0d49a', '#e8ba68', '#dc9c3f', '#c97f2a', '#ab621f', '#8b4a17']
+
+/**
  * Identity tones for subagents. They are not states: each tells one child
  * apart from its siblings, so the row under the input and the sheet read the
  * same child in the same colour. Hues none of {@link PALETTE}'s states use,

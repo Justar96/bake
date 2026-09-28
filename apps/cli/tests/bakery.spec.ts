@@ -1,5 +1,6 @@
 /** Terminal progress owns its clock and leaves diagnostics on a cleared row. */
 import { afterEach, expect, it, vi } from 'vitest'
+import { LOAF_FRAME_MS } from '@dsh-tui/ui/loaf.ts'
 import { startBakery } from '../src/bakery.ts'
 
 afterEach(() => vi.useRealTimers())
@@ -59,4 +60,23 @@ it('draws at a default width when the terminal reports zero columns', () => {
   startBakery({ isTTY: true, columns: 0, write: text => writes.push(text) }, { NO_COLOR: '1' }, 'Baking...').finish(true)
   expect(writes[0]).toContain('Baking...')
   expect(writes.at(-1)).toContain('Freshly baked.')
+})
+
+it('browns the loaf with each stage\'s progress and draws Unicode only on a UTF-8 terminal', () => {
+  vi.useFakeTimers()
+  const writes: string[] = []
+  const bakery = startBakery({ isTTY: true, columns: 80, write: text => writes.push(text) },
+    { LANG: 'en_US.UTF-8', TERM: 'xterm-256color' }, 'Checking...')
+  const tone = (text: string | undefined): string | undefined => /\x1b\[38;5;(\d+)m/.exec(text ?? '')?.[1]
+  const dough = tone(writes.at(-1))
+  expect(writes.at(-1)).toContain('\u2584\u2586\u2588\u2588\u2588\u2586\u2584')
+  bakery.stage('Downloading... 100%', 1)
+  vi.advanceTimersByTime(LOAF_FRAME_MS)
+  expect(tone(writes.at(-1))).not.toBe(dough)
+  bakery.finish(true)
+  expect(writes.at(-1)).toMatch(/\u2584\u2586\u2588\u2588\u2588\u2586\u2584.*Freshly baked\.\n$/u)
+  const plain: string[] = []
+  startBakery({ isTTY: true, columns: 80, write: text => plain.push(text) }, { NO_COLOR: '1' }, 'Baking...').finish(true)
+  expect(plain.join('')).toContain('(#####)  Freshly baked.')
+  expect(plain.join('')).toMatch(/^[\x00-\x7f]*$/u)
 })

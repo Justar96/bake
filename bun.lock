@@ -141,6 +141,7 @@
         "@deepseek-ai/dsh-system-prompt": "workspace:^",
         "@deepseek-ai/dsh-tools": "workspace:^",
         "@deepseek-ai/dsh-user-approval": "workspace:^",
+        "@dsh-tui/ui": "workspace:^",
         "@types/js-yaml": "^4.0.9",
         "@types/ws": "8.18.1",
         "ajv": "^8.20.0",

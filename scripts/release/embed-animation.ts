@@ -11,7 +11,14 @@ export async function installerAnimation(): Promise<string> {
   if (!result.success) throw new AggregateError(result.logs, 'Could not bundle installer animation')
   const output = result.outputs[0]
   if (!output) throw new Error('Missing installer animation bundle')
-  return (await output.text()).trim()
+  // The minifier writes escaped glyphs back as characters. Windows PowerShell
+  // reads a script without a BOM in the ANSI code page, so the payload stays
+  // ASCII: every other character, all in the BMP here, returns to an escape.
+  return (await output.text()).trim().replace(/[^\x00-\x7f]/gu, (character) => {
+    const code = character.codePointAt(0) ?? 0
+    if (code > 0xffff) throw new Error(`installer animation: ${character} is outside the BMP`)
+    return `\\u${code.toString(16).padStart(4, '0')}`
+  })
 }
 
 if (import.meta.main) {
