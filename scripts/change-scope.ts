@@ -1,6 +1,5 @@
 /** Report the explicit committed and worktree scope of a repository change. */
 
-import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
 import { parseArgs, TextDecoder } from 'node:util'
@@ -59,15 +58,18 @@ function executeGit(cwd: string, args: string[], context: string): GitCommandRes
 }
 
 function executeGitBytes(cwd: string, args: string[]): GitBytesCommandResult {
-  const result = spawnSync('git', ['-C', cwd, '-c', 'core.fsmonitor=false', ...args], {
-    env: { ...process.env, GIT_OPTIONAL_LOCKS: '0', LANG: 'C', LC_ALL: 'C' },
-    maxBuffer: MAX_GIT_OUTPUT,
-  })
-  return {
-    status: result.status,
-    stdout: result.stdout,
-    stderr: result.stderr,
-    error: result.error,
+  try {
+    const result = Bun.spawnSync(['git', '-C', cwd, '-c', 'core.fsmonitor=false', ...args], {
+      env: { ...process.env, GIT_OPTIONAL_LOCKS: '0', LANG: 'C', LC_ALL: 'C' },
+      maxBuffer: MAX_GIT_OUTPUT,
+    })
+    // Bun leaves `exitCode` null when a signal, including the maxBuffer kill, ends Git.
+    const overflow = result.exitedDueToMaxBuffer === true ? new Error(`Git output exceeded ${String(MAX_GIT_OUTPUT)} bytes`) : undefined
+    return { status: result.exitCode, stdout: result.stdout, stderr: result.stderr, error: overflow }
+  } catch (error) {
+    // Bun throws when Git cannot start at all.
+    const empty = Buffer.alloc(0)
+    return { status: null, stdout: empty, stderr: empty, error: error instanceof Error ? error : new Error(String(error)) }
   }
 }
 

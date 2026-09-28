@@ -48,11 +48,11 @@ interface EventRelation {
   listeners: Set<string>
 }
 
-/** One scanned package source file and its owning package short name. */
+/** One scanned runtime source file and its owning package or app short name. */
 export interface PackageSource {
   /** Repository-relative path. */
   rel: string
-  /** Package short name from the `packages/<group>/<pkg>/src` path. */
+  /** Package or app short name from the source path. */
   pkg: string
   /** The bound program source file. */
   sourceFile: ts.SourceFile
@@ -662,7 +662,9 @@ function sourceLink(source: string, up = '..'): string {
 }
 
 function pkgLink(pkg: Pkg | undefined, fallback: string, up = '..'): string {
-  return pkg ? repoLink(pkg.rel, `\`${pkg.short}\``, up) : `\`${fallback}\``
+  if (pkg) return repoLink(pkg.rel, `\`${pkg.short}\``, up)
+  if (fallback === 'cli') return repoLink('apps/cli', '`cli`', up)
+  return `\`${fallback}\``
 }
 
 function pkgList(names: string[] | undefined, pkgsByShort: Map<string, Pkg>): string {
@@ -1007,7 +1009,9 @@ export class EventRelationCollector {
 
   /** Classify a receiver using assignability to the repository's actual event API types. */
   private receiverKind(receiver: ts.Expression): EventReceiverKind | undefined {
-    const type = this.project.checker.getTypeAtLocation(receiver)
+    // Optional service roots can dispatch before unload while their context is
+    // present; the optional-chain receiver still has a real Context type.
+    const type = this.project.checker.getNonNullableType(this.project.checker.getTypeAtLocation(receiver))
     if (type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown | ts.TypeFlags.Never)) return undefined
     if (this.project.checker.isTypeAssignableTo(type, this.eventsServiceType)) return 'events-service'
     if (this.project.checker.isTypeAssignableTo(type, this.contextType)) return 'context'
@@ -1185,15 +1189,16 @@ function unionSets<T>(left: ReadonlySet<T>, right: ReadonlySet<T>): Set<T> {
 }
 
 /**
- * Select the package source files of one project in deterministic order.
+ * Select package and CLI launcher source files of one project in deterministic order.
  * @param project - the loaded repository TypeScript project.
- * @returns `packages/<group>/<pkg>/src` files tagged with their package name.
+ * @returns Source files tagged with their package or CLI owner.
  */
 export function collectPackageSources(project: TypeScriptProject): PackageSource[] {
   return project.sourceFiles().flatMap((sourceFile): PackageSource[] => {
     const rel = project.relativePath(sourceFile)
     const match = /^packages\/[^/]+\/([^/]+)\/src\/.+\.ts$/.exec(rel)
-    return match?.[1] ? [{ rel, pkg: match[1], sourceFile }] : []
+    if (match?.[1]) return [{ rel, pkg: match[1], sourceFile }]
+    return /^apps\/cli\/src\/.+\.ts$/.test(rel) ? [{ rel, pkg: 'cli', sourceFile }] : []
   }).sort((left, right) => left.rel.localeCompare(right.rel))
 }
 

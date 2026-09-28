@@ -9,8 +9,7 @@
  * step writes its output to `.preflight/<step>.log`; a failing step's tail is
  * printed with the summary. The same step table drives CI through `--only`.
  */
-import { spawn } from 'node:child_process'
-import { createWriteStream, mkdirSync, readdirSync, readFileSync } from 'node:fs'
+import { closeSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs'
 import { availableParallelism } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -109,9 +108,10 @@ export function vitestFailures(log: string): VitestFailures {
 }
 
 /** The Bun-run tests under a directory, as `./`-prefixed paths `bun test` reads as files. */
-function bunTests(directory: string): string[] {
-  return readdirSync(join(ROOT, directory), { recursive: true, encoding: 'utf8' })
-    .filter(path => path.endsWith('.test.ts') && !path.split('/').includes('node_modules'))
+export function bunTests(directory: string): string[] {
+  return [...new Bun.Glob('**/*.test.ts').scanSync({ cwd: join(ROOT, directory) })]
+    .map(path => path.replaceAll('\\', '/'))
+    .filter(path => !path.split('/').includes('node_modules'))
     .map(path => `./${directory}/${path}`).sort()
 }
 const node = (...args: string[]): readonly string[] => ['node', ...args]
@@ -176,6 +176,11 @@ export const STEPS: readonly Step[] = [
     command: (_options, scope) => scope.mergeBase === undefined ? { skip: 'no merge base' } : ['git', 'diff', '--check', scope.mergeBase],
   },
   {
+    name: 'rescope-vendor', phase: 'static', group: 'hygiene',
+    summary: 'vendored Cordis names and exact edits stay scoped',
+    command: () => bun('scripts/rescope-vendor.ts', '--check'),
+  },
+  {
     name: 'changelog', phase: 'static', group: 'hygiene',
     summary: 'a shipped change comes with a CHANGELOG [Unreleased] entry',
     inline: async (_options, scope) => {
@@ -192,8 +197,11 @@ export const STEPS: readonly Step[] = [
     ['cordis-catalog', 'Cordis API catalog matches the services'],
     ['doc-graphs', 'event and dependency graphs in docs match the source'],
     ['module-graph', 'module graph artifacts match the source'],
+    ['persistence-catalog', 'persistence catalog and schema match the persisted types'],
     ['translation-pairing', 'English and Chinese docs are paired'],
     ['type-equiv', 'types pasted in docs match their declarations'],
+    ['cordis-config', 'Loader rows keep static metadata and resolve from their owner'],
+    ['package-invariants', 'invariant companions are wired, or their omission is explained'],
   ] as const).map(([name, summary]): Step => ({
     name: `verify-${name}`, phase: 'static', group: 'generated', summary,
     command: () => bun('run', `verify-${name}`),
@@ -209,10 +217,16 @@ export const STEPS: readonly Step[] = [
     command: () => bun('run', 'lint'),
   },
   {
+    name: 'actionlint', phase: 'static', group: 'lint',
+    summary: 'GitHub workflow syntax and expressions',
+    command: () => Bun.which('actionlint') === null ? { skip: 'actionlint 1.7.12+ is not on PATH' } : ['actionlint', '-no-color'],
+  },
+  {
     name: 'scripts-unit', phase: 'static', group: 'unit',
-    summary: 'workspace and release tooling under bun test',
+    summary: 'workspace, generator, and release tooling tests under bun test',
     // Named files: a `bun test` filter also matches `.spec.` files, which run on Node.
-    command: () => bun('test', ...bunTests('scripts')),
+    // `--parallel` gives each file its own global; the timeout is the Vitest budget these tests had.
+    command: () => bun('test', '--parallel', '--timeout=30000', ...bunTests('scripts')),
   },
   {
     name: 'build', phase: 'build', group: 'build', needsBuild: true,
@@ -297,30 +311,29 @@ Run every gate CI runs and report all of them. Exit 1 if any failed.
 Logs: .preflight/<step>.log`
 
 /** Run a command and return its stdout; reject when it fails. */
-function capture(argv: readonly string[]): Promise<string> {
-  return new Promise((resolvePromise, reject) => {
-    const [command = '', ...args] = argv
-    const child = spawn(command, args, { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] })
-    let out = '', err = ''
-    child.stdout.on('data', (chunk: Buffer) => { out += chunk.toString() })
-    child.stderr.on('data', (chunk: Buffer) => { err += chunk.toString() })
-    child.on('error', reject)
-    child.on('close', code => code === 0 ? resolvePromise(out) : reject(new Error(`${argv.join(' ')}: ${err.trim()}`)))
-  })
+async function capture(argv: readonly string[]): Promise<string> {
+  const child = Bun.spawn([...argv], { cwd: ROOT, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' })
+  const [out, err, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
+  if (code !== 0) throw new Error(`${argv.join(' ')}: ${err.trim()}`)
+  return out
 }
 
 /** Run a command with its output written to a log file; resolve with its exit code. */
-function logged(argv: readonly string[], log: string): Promise<number> {
-  return new Promise((resolvePromise) => {
-    const file = createWriteStream(log)
-    file.write(`$ ${argv.join(' ')}\n`)
-    const [command = '', ...args] = argv
-    const child = spawn(command, args, { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, FORCE_COLOR: '0' } })
-    child.stdout.pipe(file, { end: false })
-    child.stderr.pipe(file, { end: false })
-    child.on('error', (error) => { file.end(`\n${String(error)}\n`, () => resolvePromise(127)) })
-    child.on('close', (code) => { file.end(() => resolvePromise(code ?? 1)) })
-  })
+async function logged(argv: readonly string[], log: string): Promise<number> {
+  writeFileSync(log, `$ ${argv.join(' ')}\n`)
+  // One append descriptor for both streams keeps them interleaved as the command wrote them.
+  const file = openSync(log, 'a')
+  try {
+    const env = { ...process.env, FORCE_COLOR: '0' }
+    const child = Bun.spawn([...argv], { cwd: ROOT, stdin: 'ignore', stdout: file, stderr: file, env })
+    await child.exited
+    return child.exitCode ?? 1
+  } catch (error) {
+    writeFileSync(file, `\n${String(error)}\n`)
+    return 127
+  } finally {
+    closeSync(file)
+  }
 }
 
 async function resolveScope(options: Options): Promise<Scope> {

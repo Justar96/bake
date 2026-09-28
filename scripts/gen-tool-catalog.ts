@@ -262,7 +262,7 @@ const TOOL_PACKAGES: ToolPackage[] = [
     pkg: '@deepseek-ai/dsh-tool-bash',
     dir: 'tool-bash',
     source: 'packages/shell/tool-bash/src/index.ts',
-    requires: ['ctx.tools', 'ctx.shell', 'ctx.systemPrompt', 'ctx.shellEnv', 'ctx.jobs at call time for run_in_background'],
+    requires: ['ctx.tools', 'ctx.shell', 'ctx.shellEnv', 'ctx.jobs at call time for run_in_background'],
     writes: ['tool/call', 'tool/result'],
     async mount(ctx) {
       await ctx.plugin(LocalSubprocessRuntime)
@@ -289,7 +289,7 @@ const TOOL_PACKAGES: ToolPackage[] = [
     pkg: '@deepseek-ai/dsh-tool-pwsh',
     dir: 'tool-pwsh',
     source: 'packages/shell/tool-pwsh/src/index.ts',
-    requires: ['ctx.tools', 'ctx.shell', 'ctx.systemPrompt', 'ctx.shellEnv', 'ctx.jobs at call time for run_in_background'],
+    requires: ['ctx.tools', 'ctx.shell', 'ctx.shellEnv', 'ctx.jobs at call time for run_in_background'],
     writes: ['tool/call', 'tool/result'],
     async mount(ctx) {
       // The pwsh tool consumes the bash executor seam; the schema harvest
@@ -359,7 +359,7 @@ const TOOL_PACKAGES: ToolPackage[] = [
     pkg: '@deepseek-ai/dsh-tool-fs',
     dir: 'tool-fs',
     source: 'packages/fs/tool-fs/src/index.ts',
-    requires: ['ctx.tools', 'ctx.fs', 'ctx.systemPrompt', 'ctx.attachments (image-tool registration)', 'ctx.llm + an image-capable route (image-tool execution)'],
+    requires: ['ctx.tools', 'ctx.fs', 'ctx.attachments (image-tool registration)', 'ctx.llm + an image-capable route (image-tool execution)'],
     writes: ['tool/call', 'fs/write-intent or fs/edit-intent for mutations', 'fs/observed after read presence/absence or successful file operation', 'durable attachment (read_image)', 'tool/result'],
     async mount(ctx) {
       // The tool needs `fs`; the bare provider is sufficient because policy
@@ -376,7 +376,7 @@ const TOOL_PACKAGES: ToolPackage[] = [
     pkg: '@deepseek-ai/dsh-tool-fs-search',
     dir: 'tool-fs-search',
     source: 'packages/fs/tool-fs-search/src/index.ts',
-    requires: ['ctx.tools', 'ctx.subprocess', 'ctx.systemPrompt'],
+    requires: ['ctx.tools', 'ctx.subprocess'],
     writes: ['tool/call', 'tool/result'],
     async mount(ctx) {
       // The tools inject `subprocess` (search spawns the packaged ripgrep
@@ -394,7 +394,7 @@ const TOOL_PACKAGES: ToolPackage[] = [
     pkg: '@deepseek-ai/dsh-tool-goal',
     dir: 'tool-goal',
     source: 'packages/goal/tool-goal/src/index.ts',
-    requires: ['ctx.tools', 'ctx.agents', 'ctx.goals', 'ctx.systemPrompt', 'a calling Agent in an authorized open turn'],
+    requires: ['ctx.tools', 'ctx.agents', 'ctx.goals', 'a calling Agent in an authorized open turn'],
     writes: ['tool/call', 'goal/change for mutations', 'tool/result'],
     async mount(ctx) {
       await ctx.plugin(AgentRegistry)
@@ -463,7 +463,7 @@ const TOOL_PACKAGES: ToolPackage[] = [
       list_subagent_models: 'packages/subagent/tool-subagent/src/list-models.ts',
       subagent: 'packages/subagent/tool-subagent/src/index.ts',
     },
-    requires: ['ctx.tools', 'ctx.subagents', 'ctx.systemPrompt', 'ctx.llm for model discovery and selected-route validation'],
+    requires: ['ctx.tools', 'ctx.subagents', 'ctx.llm for model discovery and selected-route validation'],
     writes: ['tool/call', 'tool/result', 'child session events through the chosen provider'],
     shippedNames: ['subagent', 'subagent_fork'],
     async mount(ctx) {
@@ -501,7 +501,7 @@ const TOOL_PACKAGES: ToolPackage[] = [
     pkg: '@deepseek-ai/dsh-tool-jobs',
     dir: 'tool-jobs',
     source: 'packages/jobs/tool-jobs/src/index.ts',
-    requires: ['ctx.tools', 'ctx.jobs', 'ctx.systemPrompt'],
+    requires: ['ctx.tools', 'ctx.jobs'],
     writes: ['tool/call', 'tool/result', 'user/message via agent.inject() for background completion notices'],
     async mount(ctx) {
       await ctx.plugin(LocalJobRegistry)
@@ -526,7 +526,7 @@ const TOOL_PACKAGES: ToolPackage[] = [
     pkg: '@deepseek-ai/dsh-tool-workflow',
     dir: 'tool-workflow',
     source: 'packages/workflow/tool-workflow/src/index.ts',
-    requires: ['ctx.tools', 'ctx.workflowEngine', 'ctx.systemPrompt', 'a calling Agent (exec.agent parents the script children)'],
+    requires: ['ctx.tools', 'ctx.workflowEngine', 'a calling Agent (exec.agent parents the script children)'],
     writes: ['tool/call', 'tool/result'],
     async mount(ctx) {
       await ctx.plugin(SubagentRuntime)
@@ -539,7 +539,7 @@ const TOOL_PACKAGES: ToolPackage[] = [
     pkg: '@deepseek-ai/dsh-tool-web',
     dir: 'tool-web',
     source: 'packages/web/tool-web/src/index.ts',
-    requires: ['ctx.tools', 'ctx.web', 'ctx.systemPrompt'],
+    requires: ['ctx.tools', 'ctx.web'],
     writes: ['tool/call', 'tool/result'],
     async mount(ctx) {
       // Mount search and fetch providers so both tools register. Their schemas

@@ -6,6 +6,7 @@ import { standardDecoratorPlugin, vitestExecArgv } from './vitest.shared.ts'
 export default defineConfig({
   plugins: [standardDecoratorPlugin(), tsconfigPaths({ projects: ['./tsconfig.base.json'] })],
   test: {
+    // Script specs here load Cordis, the Node resolver, or built output; other script tests are `.test.ts` under `bun test`.
     include: ['packages/*/*/tests/**/*.spec.ts', 'apps/cli/tests/**/*.spec.ts', 'scripts/**/*.spec.ts'],
     exclude: ['**/node_modules/**', '**/lib/**', '**/*.client.spec.ts'],
     pool: 'forks',

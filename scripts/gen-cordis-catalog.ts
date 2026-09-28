@@ -158,6 +158,7 @@ export const SERVICE_WALK_EXEMPTIONS: Record<string, string> = {
  * {@link EVENT_WALK_EXEMPTIONS} names each one with its documentation owner.
  */
 export const EVENT_SCOPE_PAGE: Record<string, string> = {
+  app: 'boot.md',
   hmr: 'boot.md',
   'plugin-manager': 'boot.md',
   'agent': 'core.md',

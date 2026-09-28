@@ -261,6 +261,9 @@
       "path": "./packages/runtime-diagnostics/invariants/tsconfig.json"
     },
     {
+      "path": "./packages/runtime-diagnostics/runtime-watchdog/tsconfig.json"
+    },
+    {
       "path": "./packages/sandbox/sandbox-local/tsconfig.json"
     },
     {

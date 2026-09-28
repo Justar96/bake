@@ -6,23 +6,23 @@
       "name": "@deepseek-ai/dsh-root",
       "devDependencies": {
         "@stylistic/eslint-plugin": "^5.10.0",
-        "@types/bun": "1.4.2",
-        "@types/js-yaml": "^4.0.9",
-        "@types/mdast": "^4.0.4",
-        "@types/node": "^22.20.0",
+        "@types/bun": "catalog:",
+        "@types/js-yaml": "catalog:",
+        "@types/mdast": "catalog:",
+        "@types/node": "catalog:",
         "@vitest/coverage-v8": "^4.1.8",
         "eslint-plugin-sonarjs": "^4.1.0",
         "fast-check": "^4.8.0",
-        "js-yaml": "^4.2.0",
+        "js-yaml": "catalog:",
         "lefthook": "^2.1.9",
-        "mdast-util-from-markdown": "^2.0.3",
-        "mdast-util-gfm": "^3.1.0",
-        "micromark-extension-gfm": "^3.0.0",
+        "mdast-util-from-markdown": "catalog:",
+        "mdast-util-gfm": "catalog:",
+        "micromark-extension-gfm": "catalog:",
         "oxlint": "1.76.0",
         "oxlint-tsgolint": "7.0.2001",
         "tsdown": "^0.22.2",
-        "tsx": "^4.22.4",
-        "typescript": "^6.0.3",
+        "tsx": "catalog:",
+        "typescript": "catalog:",
         "vite-tsconfig-paths": "^6.1.1",
         "vitest": "^4.1.8",
       },
@@ -57,6 +57,7 @@
         "@deepseek-ai/dsh-home-paths": "workspace:^",
         "@deepseek-ai/dsh-hooks-claude-code": "workspace:^",
         "@deepseek-ai/dsh-hooks-codex": "workspace:^",
+        "@deepseek-ai/dsh-host-webserver": "workspace:^",
         "@deepseek-ai/dsh-http-proxy": "workspace:^",
         "@deepseek-ai/dsh-jobs-local": "workspace:^",
         "@deepseek-ai/dsh-launch-environment": "workspace:^",
@@ -102,9 +103,9 @@
         "@deepseek-ai/dsh-workflow-ptc": "workspace:^",
         "@deepseek-ai/schemastery": "workspace:^",
         "@dsh-tui/app": "workspace:^",
-        "commander": "^15.0.0",
-        "js-yaml": "^4.2.0",
-        "node-addon-require-builtin": "^0.1.6",
+        "commander": "catalog:",
+        "js-yaml": "catalog:",
+        "node-addon-require-builtin": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/dsh-agent": "workspace:^",
@@ -142,11 +143,11 @@
         "@deepseek-ai/dsh-tools": "workspace:^",
         "@deepseek-ai/dsh-user-approval": "workspace:^",
         "@dsh-tui/ui": "workspace:^",
-        "@types/js-yaml": "^4.0.9",
-        "@types/ws": "8.18.1",
-        "ajv": "^8.20.0",
-        "execa": "^10.0.0",
-        "ws": "8.21.0",
+        "@types/js-yaml": "catalog:",
+        "@types/ws": "catalog:",
+        "ajv": "catalog:",
+        "execa": "catalog:",
+        "ws": "catalog:",
       },
     },
     "apps/tui/packages/app": {
@@ -156,12 +157,14 @@
         "@deepseek-ai/dsh-agent": "workspace:^",
         "@deepseek-ai/dsh-agent-default-model": "workspace:^",
         "@deepseek-ai/dsh-agent-presets": "workspace:^",
+        "@deepseek-ai/dsh-atomic-write": "workspace:^",
         "@deepseek-ai/dsh-attachment": "workspace:^",
         "@deepseek-ai/dsh-authorization": "workspace:^",
         "@deepseek-ai/dsh-brand": "workspace:^",
         "@deepseek-ai/dsh-cmdline": "workspace:^",
         "@deepseek-ai/dsh-commands": "workspace:^",
         "@deepseek-ai/dsh-compaction": "workspace:^",
+        "@deepseek-ai/dsh-cordis-host-runner": "workspace:^",
         "@deepseek-ai/dsh-credentials": "workspace:^",
         "@deepseek-ai/dsh-file-reference": "workspace:^",
         "@deepseek-ai/dsh-file-reference-local": "workspace:^",
@@ -185,9 +188,9 @@
         "@deepseek-ai/dsh-util-values": "workspace:^",
         "@deepseek-ai/schemastery": "workspace:^",
         "@dsh-tui/ui": "workspace:^",
-        "commander": "^15.0.0",
-        "ink": "^7.1.1",
-        "react": "^19.3.0",
+        "commander": "catalog:",
+        "ink": "catalog:",
+        "react": "catalog:",
         "shiki": "^4.4.3",
       },
       "devDependencies": {
@@ -197,15 +200,17 @@
         "@deepseek-ai/dsh-agent-loop": "workspace:^",
         "@deepseek-ai/dsh-agent-loop-testkit": "workspace:^",
         "@deepseek-ai/dsh-attachment-local": "workspace:^",
+        "@deepseek-ai/dsh-command-compact": "workspace:^",
         "@deepseek-ai/dsh-command-goal": "workspace:^",
+        "@deepseek-ai/dsh-compaction-basic": "workspace:^",
         "@deepseek-ai/dsh-fs-local": "workspace:^",
         "@deepseek-ai/dsh-goal": "workspace:^",
         "@deepseek-ai/dsh-llm-replay": "workspace:^",
         "@deepseek-ai/dsh-session-persistence-jsonl": "workspace:^",
         "@deepseek-ai/dsh-tool-skill": "workspace:^",
         "@deepseek-ai/dsh-tool-todo": "workspace:^",
-        "@types/bun": "1.4.2",
-        "@types/react": "^19.3.0",
+        "@types/bun": "catalog:",
+        "@types/react": "catalog:",
       },
       "peerDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -216,13 +221,13 @@
       "version": "0.0.0",
       "dependencies": {
         "@dsh-tui/ui": "workspace:^",
-        "ink": "^7.1.1",
-        "react": "^19.3.0",
+        "ink": "catalog:",
+        "react": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/dsh-session": "workspace:^",
         "@deepseek-ai/schemastery": "workspace:^",
-        "@types/react": "^19.2.0",
+        "@types/react": "catalog:",
       },
       "peerDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -234,12 +239,12 @@
       "dependencies": {
         "@deepseek-ai/dsh-file-reference": "workspace:^",
         "@deepseek-ai/dsh-util-values": "workspace:^",
-        "diff": "^9.0.0",
-        "ink": "^7.1.1",
-        "mdast-util-from-markdown": "^2.0.3",
-        "mdast-util-gfm": "^3.1.0",
-        "micromark-extension-gfm": "^3.0.0",
-        "react": "^19.3.0",
+        "diff": "catalog:",
+        "ink": "catalog:",
+        "mdast-util-from-markdown": "catalog:",
+        "mdast-util-gfm": "catalog:",
+        "micromark-extension-gfm": "catalog:",
+        "react": "catalog:",
         "string-width": "^8.2.2",
         "strip-ansi": "^7.2.0",
         "wrap-ansi": "^10.0.1",
@@ -251,9 +256,9 @@
         "@deepseek-ai/dsh-session": "workspace:^",
         "@deepseek-ai/dsh-tools": "workspace:^",
         "@deepseek-ai/dsh-user-questions": "workspace:^",
-        "@types/mdast": "^4.0.4",
-        "@types/react": "^19.3.0",
-        "@xterm/headless": "^6.0.0",
+        "@types/mdast": "catalog:",
+        "@types/react": "catalog:",
+        "@xterm/headless": "catalog:",
         "ink-testing-library": "^4.0.0",
       },
     },
@@ -262,9 +267,9 @@
       "version": "0.1.2",
       "devDependencies": {
         "@deepseek-ai/node-addon-system": "workspace:*",
-        "@types/node": "^26.0.1",
-        "tsx": "^4.20.6",
-        "typescript": "^6.0.3",
+        "@types/node": "catalog:",
+        "tsx": "catalog:",
+        "typescript": "catalog:",
       },
     },
     "native/system/packages/darwin-arm64": {
@@ -301,7 +306,7 @@
         "@deepseek-ai/dsh-timeout": "workspace:^",
         "@deepseek-ai/dsh-typert-protocol": "workspace:^",
         "@deepseek-ai/schemastery": "workspace:^",
-        "ws": "^8.21.0",
+        "ws": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -311,8 +316,8 @@
         "@deepseek-ai/dsh-remote-mock": "workspace:^",
         "@deepseek-ai/dsh-typert-registry": "workspace:^",
         "@deepseek-ai/dsh-util-crypto": "workspace:^",
-        "@types/ws": "^8.18.1",
-        "zod": "^4.4.3",
+        "@types/ws": "catalog:",
+        "zod": "catalog:",
       },
       "peerDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -323,7 +328,7 @@
       "version": "0.1.6-alpha.2",
       "dependencies": {
         "@deepseek-ai/schemastery": "workspace:^",
-        "zod": "^4.4.3",
+        "zod": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -382,9 +387,9 @@
         "@deepseek-ai/dsh-atomic-write": "workspace:^",
         "@deepseek-ai/dsh-package-manifest": "workspace:^",
         "@eslint-community/regexpp": "^4.12.2",
-        "ajv": "^8.20.0",
-        "js-yaml": "^4.2.0",
-        "node-addon-require-builtin": "^0.1.6",
+        "ajv": "catalog:",
+        "js-yaml": "catalog:",
+        "node-addon-require-builtin": "catalog:",
         "resolve.exports": "^2.0.3",
       },
       "devDependencies": {
@@ -397,7 +402,7 @@
         "@deepseek-ai/dsh-launch-environment": "workspace:^",
         "@deepseek-ai/dsh-system-prompt": "workspace:^",
         "@deepseek-ai/schemastery": "workspace:^",
-        "@types/js-yaml": "^4.0.9",
+        "@types/js-yaml": "catalog:",
       },
       "peerDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -416,7 +421,7 @@
         "@deepseek-ai/cordis": "workspace:^",
         "@deepseek-ai/cordis-plugin-include": "workspace:^",
         "@deepseek-ai/cordis-plugin-loader": "workspace:^",
-        "commander": "^15.0.0",
+        "commander": "catalog:",
       },
       "peerDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -429,7 +434,7 @@
       "dependencies": {
         "@babel/code-frame": "^7.29.0",
         "@deepseek-ai/schemastery": "workspace:^",
-        "chokidar": "^4.0.3",
+        "chokidar": "catalog:",
         "picomatch": "^4.0.3",
       },
       "devDependencies": {
@@ -461,9 +466,9 @@
         "@deepseek-ai/dsh-atomic-write": "workspace:^",
         "@deepseek-ai/dsh-util-values": "workspace:^",
         "@deepseek-ai/schemastery": "workspace:^",
-        "execa": "^10.0.0",
-        "yaml": "^2.9.0",
-        "zod": "^4.4.3",
+        "execa": "catalog:",
+        "yaml": "catalog:",
+        "zod": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -545,6 +550,7 @@
         "@deepseek-ai/dsh-ptc-runtime-node": "workspace:^",
         "@deepseek-ai/dsh-pwsh-sandbox": "workspace:^",
         "@deepseek-ai/dsh-repeat-tool-reminder": "workspace:^",
+        "@deepseek-ai/dsh-runtime-watchdog": "workspace:^",
         "@deepseek-ai/dsh-sandbox-local": "workspace:^",
         "@deepseek-ai/dsh-sandbox-policy": "workspace:^",
         "@deepseek-ai/dsh-session": "workspace:^",
@@ -647,7 +653,7 @@
         "@deepseek-ai/dsh-cmdline": "workspace:^",
         "@deepseek-ai/dsh-util-values": "workspace:^",
         "@deepseek-ai/schemastery": "workspace:^",
-        "commander": "^15.0.0",
+        "commander": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -659,6 +665,7 @@
         "@deepseek-ai/dsh-fs": "workspace:^",
         "@deepseek-ai/dsh-llm": "workspace:^",
         "@deepseek-ai/dsh-session": "workspace:^",
+        "@deepseek-ai/dsh-session-persistence": "workspace:^",
         "@deepseek-ai/dsh-session-query": "workspace:^",
       },
       "peerDependencies": {
@@ -669,6 +676,7 @@
         "@deepseek-ai/dsh-fs": "workspace:^",
         "@deepseek-ai/dsh-llm": "workspace:^",
         "@deepseek-ai/dsh-session": "workspace:^",
+        "@deepseek-ai/dsh-session-persistence": "workspace:^",
         "@deepseek-ai/dsh-session-query": "workspace:^",
       },
     },
@@ -678,7 +686,7 @@
       "dependencies": {
         "@deepseek-ai/dsh-credentials": "workspace:^",
         "@deepseek-ai/schemastery": "workspace:^",
-        "zod": "^4.4.3",
+        "zod": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -901,7 +909,7 @@
         "@deepseek-ai/dsh-brand": "workspace:^",
         "@deepseek-ai/dsh-util-values": "workspace:^",
         "@deepseek-ai/schemastery": "workspace:^",
-        "zod": "^4.4.3",
+        "zod": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -953,7 +961,7 @@
       "dependencies": {
         "@deepseek-ai/dsh-util-values": "workspace:^",
         "@deepseek-ai/schemastery": "workspace:^",
-        "zod": "^4.4.3",
+        "zod": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -987,7 +995,7 @@
       "version": "0.1.6-alpha.2",
       "dependencies": {
         "@deepseek-ai/schemastery": "workspace:^",
-        "zod": "^4.4.3",
+        "zod": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -1060,7 +1068,7 @@
         "@deepseek-ai/dsh-brand": "workspace:^",
         "@deepseek-ai/dsh-util-values": "workspace:^",
         "@deepseek-ai/schemastery": "workspace:^",
-        "zod": "^4.4.3",
+        "zod": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -1234,8 +1242,8 @@
       "version": "0.1.6-alpha.2",
       "dependencies": {
         "@deepseek-ai/schemastery": "workspace:^",
-        "chokidar": "^4.0.3",
-        "yaml": "^2.9.0",
+        "chokidar": "catalog:",
+        "yaml": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -1307,7 +1315,7 @@
       "dependencies": {
         "@deepseek-ai/dsh-util-values": "workspace:^",
         "@deepseek-ai/schemastery": "workspace:^",
-        "zod": "^4.4.3",
+        "zod": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -1359,7 +1367,7 @@
       "name": "@deepseek-ai/dsh-command-feedback",
       "version": "0.1.6-alpha.2",
       "dependencies": {
-        "zod": "^4.4.3",
+        "zod": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -1387,7 +1395,7 @@
       "version": "0.1.6-alpha.2",
       "dependencies": {
         "@deepseek-ai/schemastery": "workspace:^",
-        "zod": "^4.4.3",
+        "zod": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -1434,7 +1442,7 @@
       "version": "0.1.6-alpha.2",
       "dependencies": {
         "@deepseek-ai/schemastery": "workspace:^",
-        "koffi": "^3.1.0",
+        "koffi": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -1483,7 +1491,7 @@
       "version": "0.1.6-alpha.2",
       "dependencies": {
         "@deepseek-ai/schemastery": "workspace:^",
-        "diff": "^9.0.0",
+        "diff": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -1514,7 +1522,6 @@
         "@deepseek-ai/dsh-sandbox": "workspace:^",
         "@deepseek-ai/dsh-sandbox-policy": "workspace:^",
         "@deepseek-ai/dsh-session": "workspace:^",
-        "@deepseek-ai/dsh-system-prompt": "workspace:^",
         "@deepseek-ai/dsh-tools": "workspace:^",
         "@deepseek-ai/dsh-user-approval": "workspace:^",
       },
@@ -1547,7 +1554,6 @@
         "@deepseek-ai/dsh-session": "workspace:^",
         "@deepseek-ai/dsh-spill": "workspace:^",
         "@deepseek-ai/dsh-subprocess": "workspace:^",
-        "@deepseek-ai/dsh-system-prompt": "workspace:^",
         "@deepseek-ai/dsh-timeout": "workspace:^",
         "@deepseek-ai/dsh-tools": "workspace:^",
       },
@@ -1611,7 +1617,7 @@
       "version": "0.1.6-alpha.2",
       "dependencies": {
         "@deepseek-ai/schemastery": "workspace:^",
-        "zod": "^4.4.3",
+        "zod": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -1694,7 +1700,6 @@
         "@deepseek-ai/dsh-llm": "workspace:^",
         "@deepseek-ai/dsh-session": "workspace:^",
         "@deepseek-ai/dsh-session-projection": "workspace:^",
-        "@deepseek-ai/dsh-system-prompt": "workspace:^",
         "@deepseek-ai/dsh-tools": "workspace:^",
       },
     },
@@ -1820,7 +1825,7 @@
       "name": "@deepseek-ai/dsh-host-plugin-inventory",
       "version": "0.1.6-alpha.2",
       "dependencies": {
-        "zod": "^4.4.3",
+        "zod": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -1876,7 +1881,7 @@
       "version": "0.1.6-alpha.2",
       "dependencies": {
         "@deepseek-ai/dsh-util-crypto": "workspace:^",
-        "zod": "^4.4.3",
+        "zod": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -1906,7 +1911,7 @@
       "version": "0.1.6-alpha.2",
       "dependencies": {
         "@deepseek-ai/schemastery": "workspace:^",
-        "zod": "^4.4.3",
+        "zod": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -2063,7 +2068,6 @@
         "@deepseek-ai/dsh-jobs": "workspace:^",
         "@deepseek-ai/dsh-llm": "workspace:^",
         "@deepseek-ai/dsh-output-retention": "workspace:^",
-        "@deepseek-ai/dsh-system-prompt": "workspace:^",
         "@deepseek-ai/dsh-tools": "workspace:^",
       },
     },
@@ -2087,7 +2091,7 @@
         "@deepseek-ai/dsh-util-crypto": "workspace:^",
         "@deepseek-ai/dsh-util-values": "workspace:^",
         "@deepseek-ai/schemastery": "workspace:^",
-        "zod": "^4.4.3",
+        "zod": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -2106,7 +2110,7 @@
         "@deepseek-ai/dsh-commands": "workspace:^",
         "@deepseek-ai/dsh-util-values": "workspace:^",
         "@deepseek-ai/schemastery": "workspace:^",
-        "eventsource-parser": "^3.1.0",
+        "eventsource-parser": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -2159,7 +2163,7 @@
         "@deepseek-ai/dsh-util-values": "workspace:^",
         "@deepseek-ai/schemastery": "workspace:^",
         "@earendil-works/pi-ai": "^0.85.1",
-        "eventsource-parser": "^3.1.1",
+        "eventsource-parser": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -2191,7 +2195,7 @@
       "version": "0.1.6-alpha.2",
       "dependencies": {
         "@deepseek-ai/schemastery": "workspace:^",
-        "zod": "^4.4.3",
+        "zod": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -2260,7 +2264,7 @@
       "dependencies": {
         "@deepseek-ai/dsh-util-values": "workspace:^",
         "@deepseek-ai/schemastery": "workspace:^",
-        "zod": "^4.4.3",
+        "zod": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -2305,7 +2309,7 @@
         "@modelcontextprotocol/server": "2.0.0",
         "@modelcontextprotocol/server-everything": "^2026.7.4",
         "@modelcontextprotocol/server-filesystem": "^2026.7.4",
-        "zod": "^4.4.3",
+        "zod": "catalog:",
       },
       "peerDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -2354,7 +2358,7 @@
       "version": "0.1.6-alpha.2",
       "dependencies": {
         "@deepseek-ai/dsh-brand": "workspace:^",
-        "zod": "^4.4.3",
+        "zod": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -2391,8 +2395,8 @@
       "version": "0.1.6-alpha.2",
       "dependencies": {
         "@deepseek-ai/schemastery": "workspace:^",
-        "js-yaml": "^4.1.0",
-        "zod": "^4.4.3",
+        "js-yaml": "catalog:",
+        "zod": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -2505,6 +2509,20 @@
         "@deepseek-ai/cordis": "workspace:^",
       },
     },
+    "packages/runtime-diagnostics/runtime-watchdog": {
+      "name": "@deepseek-ai/dsh-runtime-watchdog",
+      "version": "0.1.6-alpha.2",
+      "dependencies": {
+        "@deepseek-ai/schemastery": "workspace:^",
+      },
+      "devDependencies": {
+        "@deepseek-ai/cordis": "workspace:^",
+        "@deepseek-ai/dsh-app-boot": "workspace:^",
+      },
+      "peerDependencies": {
+        "@deepseek-ai/cordis": "workspace:^",
+      },
+    },
     "packages/sandbox/sandbox": {
       "name": "@deepseek-ai/dsh-sandbox",
       "version": "0.1.6-alpha.2",
@@ -2549,7 +2567,7 @@
       "version": "0.1.6-alpha.2",
       "dependencies": {
         "@deepseek-ai/schemastery": "workspace:^",
-        "zod": "^4.4.3",
+        "zod": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -2576,7 +2594,7 @@
       "dependencies": {
         "@deepseek-ai/dsh-lazy-require": "workspace:^",
         "@deepseek-ai/dsh-win32-process": "workspace:^",
-        "koffi": "^3.1.0",
+        "koffi": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -2594,7 +2612,7 @@
       "name": "@deepseek-ai/dsh-schedule",
       "version": "0.1.6-alpha.2",
       "dependencies": {
-        "zod": "^4.4.3",
+        "zod": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -2851,7 +2869,7 @@
         "@deepseek-ai/dsh-session-format-v2-to-v3": "workspace:^",
         "@deepseek-ai/node-addon-system": "workspace:^",
         "@deepseek-ai/schemastery": "workspace:^",
-        "koffi": "^3.1.0",
+        "koffi": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -2869,7 +2887,7 @@
       "name": "@deepseek-ai/dsh-session-projection",
       "version": "0.1.6-alpha.2",
       "dependencies": {
-        "zod": "^4.4.3",
+        "zod": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -2886,7 +2904,7 @@
       "dependencies": {
         "@deepseek-ai/dsh-util-values": "workspace:^",
         "@deepseek-ai/schemastery": "workspace:^",
-        "zod": "^4.4.3",
+        "zod": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -2963,7 +2981,7 @@
       "dependencies": {
         "@deepseek-ai/dsh-util-values": "workspace:^",
         "@deepseek-ai/schemastery": "workspace:^",
-        "zod": "^4.4.3",
+        "zod": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -3061,8 +3079,8 @@
       "dependencies": {
         "@deepseek-ai/dsh-util-values": "workspace:^",
         "@deepseek-ai/schemastery": "workspace:^",
-        "chokidar": "^4.0.3",
-        "yaml": "^2.9.0",
+        "chokidar": "catalog:",
+        "yaml": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -3238,7 +3256,6 @@
         "@deepseek-ai/dsh-sandbox-policy": "workspace:^",
         "@deepseek-ai/dsh-shell": "workspace:^",
         "@deepseek-ai/dsh-shell-env": "workspace:^",
-        "@deepseek-ai/dsh-system-prompt": "workspace:^",
         "@deepseek-ai/dsh-tools": "workspace:^",
         "@deepseek-ai/dsh-user-approval": "workspace:^",
       },
@@ -3313,7 +3330,6 @@
         "@deepseek-ai/dsh-sandbox-policy": "workspace:^",
         "@deepseek-ai/dsh-shell": "workspace:^",
         "@deepseek-ai/dsh-shell-env": "workspace:^",
-        "@deepseek-ai/dsh-system-prompt": "workspace:^",
         "@deepseek-ai/dsh-tools": "workspace:^",
         "@deepseek-ai/dsh-user-approval": "workspace:^",
       },
@@ -3388,8 +3404,8 @@
       "version": "0.1.6-alpha.2",
       "dependencies": {
         "@deepseek-ai/schemastery": "workspace:^",
-        "chokidar": "^5.0.0",
-        "yaml": "^2.4.2",
+        "chokidar": "catalog:",
+        "yaml": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -3510,7 +3526,7 @@
       "version": "0.1.6-alpha.2",
       "dependencies": {
         "@deepseek-ai/schemastery": "workspace:^",
-        "zod": "^4.4.3",
+        "zod": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -3546,7 +3562,7 @@
         "@deepseek-ai/dsh-chunked-list": "workspace:^",
         "@deepseek-ai/dsh-util-values": "workspace:^",
         "@deepseek-ai/schemastery": "workspace:^",
-        "zod": "^4.4.3",
+        "zod": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -3713,7 +3729,7 @@
       "version": "0.1.6-alpha.2",
       "dependencies": {
         "@deepseek-ai/schemastery": "workspace:^",
-        "zod": "^4.4.3",
+        "zod": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -3746,7 +3762,6 @@
         "@deepseek-ai/dsh-session-projection": "workspace:^",
         "@deepseek-ai/dsh-settings": "workspace:^",
         "@deepseek-ai/dsh-subagent": "workspace:^",
-        "@deepseek-ai/dsh-system-prompt": "workspace:^",
         "@deepseek-ai/dsh-tools": "workspace:^",
       },
     },
@@ -3800,7 +3815,7 @@
       "dependencies": {
         "@deepseek-ai/dsh-lazy-require": "workspace:^",
         "@deepseek-ai/dsh-win32-process": "workspace:^",
-        "koffi": "^3.1.0",
+        "koffi": "catalog:",
         "node-pty": "1.2.0-beta.15",
       },
       "devDependencies": {
@@ -3820,7 +3835,7 @@
       "version": "0.1.6-alpha.2",
       "dependencies": {
         "@deepseek-ai/dsh-lazy-require": "workspace:^",
-        "koffi": "^3.1.0",
+        "koffi": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -3852,7 +3867,7 @@
         "@deepseek-ai/dsh-lazy-require": "workspace:^",
         "@deepseek-ai/dsh-pwsh-local": "workspace:^",
         "@deepseek-ai/schemastery": "workspace:^",
-        "@xterm/headless": "^6.0.0",
+        "@xterm/headless": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -3939,8 +3954,8 @@
       "name": "@deepseek-ai/dsh-loader-smoke",
       "version": "0.1.6-alpha.2",
       "dependencies": {
-        "execa": "^10.0.0",
-        "tsx": "^4.22.4",
+        "execa": "catalog:",
+        "tsx": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -3969,7 +3984,7 @@
         "@deepseek-ai/dsh-api-settings-controller": "workspace:^",
         "@deepseek-ai/dsh-client-connection": "workspace:^",
         "@deepseek-ai/dsh-typert-protocol": "workspace:^",
-        "typescript": "^6.0.3",
+        "typescript": "catalog:",
       },
       "peerDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -3980,7 +3995,7 @@
       "version": "0.1.6-alpha.2",
       "dependencies": {
         "@deepseek-ai/schemastery": "workspace:^",
-        "zod": "^4.4.3",
+        "zod": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -4011,13 +4026,13 @@
       "version": "0.1.6-alpha.2",
       "dependencies": {
         "@jridgewell/gen-mapping": "^0.3.13",
-        "typescript": "^6.0.3",
+        "typescript": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
         "@deepseek-ai/dsh-tool-cordis": "workspace:^",
         "@deepseek-ai/dsh-typert-registry": "workspace:^",
-        "zod": "^4.4.3",
+        "zod": "catalog:",
       },
       "peerDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -4034,7 +4049,7 @@
         "@deepseek-ai/cordis-plugin-loader": "workspace:^",
         "@deepseek-ai/dsh-app-boot": "workspace:^",
         "@deepseek-ai/dsh-typert-registry": "workspace:^",
-        "zod": "^4.4.3",
+        "zod": "catalog:",
       },
       "peerDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -4056,7 +4071,7 @@
       "name": "@deepseek-ai/dsh-typert-registry",
       "version": "0.1.6-alpha.2",
       "dependencies": {
-        "zod": "^4.4.3",
+        "zod": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -4069,6 +4084,9 @@
     "packages/util/atomic-write": {
       "name": "@deepseek-ai/dsh-atomic-write",
       "version": "0.1.6-alpha.2",
+      "dependencies": {
+        "@deepseek-ai/node-addon-system": "workspace:^",
+      },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
       },
@@ -4090,7 +4108,7 @@
       "name": "@deepseek-ai/dsh-chunked-list",
       "version": "0.1.6-alpha.2",
       "dependencies": {
-        "zod": "^4.4.3",
+        "zod": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -4133,7 +4151,7 @@
       "name": "@deepseek-ai/dsh-http-proxy",
       "version": "0.1.6-alpha.2",
       "dependencies": {
-        "undici": "^8.10.0",
+        "undici": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -4251,7 +4269,6 @@
       "peerDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
         "@deepseek-ai/dsh-llm": "workspace:^",
-        "@deepseek-ai/dsh-system-prompt": "workspace:^",
         "@deepseek-ai/dsh-tools": "workspace:^",
         "@deepseek-ai/dsh-web": "workspace:^",
       },
@@ -4277,7 +4294,7 @@
       "dependencies": {
         "@deepseek-ai/schemastery": "workspace:^",
         "ipaddr.js": "^2.5.0",
-        "undici": "^8.10.0",
+        "undici": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -4454,7 +4471,6 @@
         "@deepseek-ai/dsh-invariants": "workspace:^",
         "@deepseek-ai/dsh-llm": "workspace:^",
         "@deepseek-ai/dsh-session": "workspace:^",
-        "@deepseek-ai/dsh-system-prompt": "workspace:^",
         "@deepseek-ai/dsh-tools": "workspace:^",
         "@deepseek-ai/dsh-workflow": "workspace:^",
       },
@@ -4530,7 +4546,7 @@
       "version": "0.1.6-alpha.2",
       "dependencies": {
         "@deepseek-ai/dsh-brand": "workspace:^",
-        "zod": "^4.4.3",
+        "zod": "catalog:",
       },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
@@ -4668,6 +4684,35 @@
   "patchedDependencies": {
     "ink@7.1.1": "patches/ink@7.1.1.patch",
     "node-pty@1.2.0-beta.15": "patches/node-pty@1.2.0-beta.15.patch",
+  },
+  "catalog": {
+    "@types/bun": "1.4.2",
+    "@types/js-yaml": "^4.0.9",
+    "@types/mdast": "^4.0.4",
+    "@types/node": "^22.20.0",
+    "@types/react": "^19.3.0",
+    "@types/ws": "^8.18.1",
+    "@xterm/headless": "^6.0.0",
+    "ajv": "^8.20.0",
+    "chokidar": "^4.0.3",
+    "commander": "^15.0.0",
+    "diff": "^9.0.0",
+    "eventsource-parser": "^3.1.1",
+    "execa": "^10.0.0",
+    "ink": "^7.1.1",
+    "js-yaml": "^4.2.0",
+    "koffi": "^3.1.0",
+    "mdast-util-from-markdown": "^2.0.3",
+    "mdast-util-gfm": "^3.1.0",
+    "micromark-extension-gfm": "^3.0.0",
+    "node-addon-require-builtin": "^0.1.6",
+    "react": "^19.3.0",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3",
+    "undici": "^8.10.0",
+    "ws": "^8.21.0",
+    "yaml": "^2.9.0",
+    "zod": "^4.4.3",
   },
   "packages": {
     "@alcalzone/ansi-tokenize": ["@alcalzone/ansi-tokenize@0.3.1", "", { "dependencies": { "ansi-styles": "^6.2.1", "is-fullwidth-code-point": "^5.0.0" } }, "sha512-cUD0PT0YX+rImRhfn7BfMRduP/tX/Zqt/N0dHlAyn2RlcJssCb5KsCJkhln61eh9vuJDkH8wKn3L8zJzzWXPFg=="],
@@ -4923,6 +4968,8 @@
     "@deepseek-ai/dsh-remote-mock": ["@deepseek-ai/dsh-remote-mock@workspace:packages/test-support/remote-mock"],
 
     "@deepseek-ai/dsh-repeat-tool-reminder": ["@deepseek-ai/dsh-repeat-tool-reminder@workspace:packages/guard/repeat-tool-reminder"],
+
+    "@deepseek-ai/dsh-runtime-watchdog": ["@deepseek-ai/dsh-runtime-watchdog@workspace:packages/runtime-diagnostics/runtime-watchdog"],
 
     "@deepseek-ai/dsh-sandbox": ["@deepseek-ai/dsh-sandbox@workspace:packages/sandbox/sandbox"],
 
@@ -6614,10 +6661,6 @@
 
     "@aws-sdk/nested-clients/@smithy/node-http-handler": ["@smithy/node-http-handler@4.12.1", "", { "dependencies": { "@smithy/core": "^3.33.3", "@smithy/types": "^4.18.0", "tslib": "^2.6.2" } }, "sha512-ThMkboGeONWXAelq9FvGsuJC4rOi+qyC4/zhUF58xYpxUg5sQKx2VXZYJmtNjr4dSuBJ1HeJXETQILCz3wOHvw=="],
 
-    "@deepseek-ai/dsh-skill-filesystem/chokidar": ["chokidar@5.0.0", "", { "dependencies": { "readdirp": "^5.0.0" } }, "sha512-TQMmc3w+5AxjpL8iIiwebF73dRDF4fBIieAqGn9RGCWaEVwQ6Fb2cGe31Yns0RRIzii5goJ1Y7xbMwo1TxMplw=="],
-
-    "@deepseek-ai/node-addon-system-workspace/@types/node": ["@types/node@26.6.2", "", { "dependencies": { "undici-types": "~8.9.0" } }, "sha512-X1P21scMv4zGKLYqjdGjaKa7COa0RKVYYZZN/NfvLQ1JegxFhdhpZG/Lyn8AXx6CDUavKAd11v6BvfpkDByK8g=="],
-
     "@eslint-community/eslint-utils/eslint-visitor-keys": ["eslint-visitor-keys@3.4.3", "", {}, "sha512-wpc+LXeiyiisxPlEkUzU6svyS1frIO3Mgxj1fdy7Pm8Ygzguax2N3Fa/D/ag1WqbOprdI+uY6wMUl8/a2G+iag=="],
 
     "@modelcontextprotocol/sdk/@hono/node-server": ["@hono/node-server@2.1.1", "", { "peerDependencies": { "hono": "^4" } }, "sha512-ELuehkj5VCBdgEw9zs+ivkKwyzzUCSQuE96YmiPvn1ECBoZCczbFXJLeEGMTYjphP6gydh4pHMqEYPVMYUVgQg=="],
@@ -6636,23 +6679,7 @@
 
     "@opentelemetry/sdk-trace/@opentelemetry/resources": ["@opentelemetry/resources@2.9.0", "", { "dependencies": { "@opentelemetry/core": "2.9.0", "@opentelemetry/semantic-conventions": "^1.29.0" }, "peerDependencies": { "@opentelemetry/api": ">=1.3.0 <1.10.0" } }, "sha512-jyA5MBLQ+Dkl3+JsZkUoUvL7yHvU64kLsvpXKarWm6347Sl1t1bXFTFykUePNpT5WH5pm9a2Qtt03iIYQhZ1Fg=="],
 
-    "@types/body-parser/@types/node": ["@types/node@26.6.2", "", { "dependencies": { "undici-types": "~8.9.0" } }, "sha512-X1P21scMv4zGKLYqjdGjaKa7COa0RKVYYZZN/NfvLQ1JegxFhdhpZG/Lyn8AXx6CDUavKAd11v6BvfpkDByK8g=="],
-
-    "@types/compression/@types/node": ["@types/node@26.6.2", "", { "dependencies": { "undici-types": "~8.9.0" } }, "sha512-X1P21scMv4zGKLYqjdGjaKa7COa0RKVYYZZN/NfvLQ1JegxFhdhpZG/Lyn8AXx6CDUavKAd11v6BvfpkDByK8g=="],
-
-    "@types/connect/@types/node": ["@types/node@26.6.2", "", { "dependencies": { "undici-types": "~8.9.0" } }, "sha512-X1P21scMv4zGKLYqjdGjaKa7COa0RKVYYZZN/NfvLQ1JegxFhdhpZG/Lyn8AXx6CDUavKAd11v6BvfpkDByK8g=="],
-
-    "@types/express-serve-static-core/@types/node": ["@types/node@26.6.2", "", { "dependencies": { "undici-types": "~8.9.0" } }, "sha512-X1P21scMv4zGKLYqjdGjaKa7COa0RKVYYZZN/NfvLQ1JegxFhdhpZG/Lyn8AXx6CDUavKAd11v6BvfpkDByK8g=="],
-
-    "@types/send/@types/node": ["@types/node@26.6.2", "", { "dependencies": { "undici-types": "~8.9.0" } }, "sha512-X1P21scMv4zGKLYqjdGjaKa7COa0RKVYYZZN/NfvLQ1JegxFhdhpZG/Lyn8AXx6CDUavKAd11v6BvfpkDByK8g=="],
-
-    "@types/serve-static/@types/node": ["@types/node@26.6.2", "", { "dependencies": { "undici-types": "~8.9.0" } }, "sha512-X1P21scMv4zGKLYqjdGjaKa7COa0RKVYYZZN/NfvLQ1JegxFhdhpZG/Lyn8AXx6CDUavKAd11v6BvfpkDByK8g=="],
-
-    "@types/ws/@types/node": ["@types/node@26.6.2", "", { "dependencies": { "undici-types": "~8.9.0" } }, "sha512-X1P21scMv4zGKLYqjdGjaKa7COa0RKVYYZZN/NfvLQ1JegxFhdhpZG/Lyn8AXx6CDUavKAd11v6BvfpkDByK8g=="],
-
     "ast-v8-to-istanbul/js-tokens": ["js-tokens@10.0.0", "", {}, "sha512-lM/UBzQmfJRo9ABXbPWemivdCW8V2G8FHaHdypQaIy523snUjog0W71ayWXTjiR+ixeMyVHN2XcpnTd/liPg/Q=="],
-
-    "bun-types/@types/node": ["@types/node@26.6.2", "", { "dependencies": { "undici-types": "~8.9.0" } }, "sha512-X1P21scMv4zGKLYqjdGjaKa7COa0RKVYYZZN/NfvLQ1JegxFhdhpZG/Lyn8AXx6CDUavKAd11v6BvfpkDByK8g=="],
 
     "compression/debug": ["debug@2.6.9", "", { "dependencies": { "ms": "2.0.0" } }, "sha512-bC7ElrdJaJnPbAP+1EotYvqZsb3ecl5wi6Bfi6BJTUcNowp6cvspg0jXznRTKDjm/E7AdgFBVeAPVMNcKGsHMA=="],
 
@@ -6674,8 +6701,6 @@
 
     "mdast-util-find-and-replace/escape-string-regexp": ["escape-string-regexp@5.0.0", "", {}, "sha512-/veY75JbMK4j1yjvuUxuVsiS/hr/4iHs9FTT6cgTexxdE0Ly/glccBAkloH/DofkjRbZU3bnoj38mOmhkZ0lHw=="],
 
-    "protobufjs/@types/node": ["@types/node@26.6.2", "", { "dependencies": { "undici-types": "~8.9.0" } }, "sha512-X1P21scMv4zGKLYqjdGjaKa7COa0RKVYYZZN/NfvLQ1JegxFhdhpZG/Lyn8AXx6CDUavKAd11v6BvfpkDByK8g=="],
-
     "proxy-addr/ipaddr.js": ["ipaddr.js@1.9.1", "", {}, "sha512-0KI/607xoxSToH7GjN1FfSbLoU0+btTicjsQSWQlh/hZykN8KpmMf7uYwPW3R+akZ6R/w18ZlXSHBYXiYUPO3g=="],
 
     "qified/hookified": ["hookified@2.2.0", "", {}, "sha512-p/LgFzRN5FeoD3DLS6bkUapeye6E4SI6yJs6KetENd18S+FBthqYq2amJUWpt5z0EQwwHemidjY5OqJGEKm5uA=="],
@@ -6692,31 +6717,9 @@
 
     "vitest/vite": ["vite@8.3.0", "", { "dependencies": { "lightningcss": "^1.33.0", "picomatch": "^4.0.7", "postcss": "^8.5.28", "rolldown": "~1.2.6", "tinyglobby": "^0.2.17" }, "optionalDependencies": { "fsevents": "~2.3.3" }, "peerDependencies": { "@types/node": "^20.19.0 || >=22.12.0", "@vitejs/devtools": "^0.7.1", "esbuild": "^0.27.0 || ^0.28.0", "jiti": ">=1.21.0", "less": "^4.0.0", "sass": "^1.70.0", "sass-embedded": "^1.70.0", "stylus": ">=0.54.8", "sugarss": "^5.0.0", "terser": "^5.16.0", "tsx": "^4.8.1", "yaml": "^2.4.2" }, "optionalPeers": ["@types/node", "@vitejs/devtools", "esbuild", "jiti", "less", "sass", "sass-embedded", "stylus", "sugarss", "terser", "tsx", "yaml"], "bin": { "vite": "bin/vite.js" } }, "sha512-lhZBVvEHefgE+HQZC9O7EBJgCU/nVzFNl7vkS4RE0APtWLP02/8QVIkQtzBxPquh7lq5/78NHipTj7ODQ6XuyQ=="],
 
-    "@deepseek-ai/dsh-skill-filesystem/chokidar/readdirp": ["readdirp@5.1.1", "", {}, "sha512-Kko+Y5XQ6fM+Ce3dq3m9YGxnacYZYl9cA1wZjaF3Vbry2L3i1qVg8+CAgNPsXRArPMUMCaOR7oa9Nqntc43JKA=="],
-
-    "@deepseek-ai/node-addon-system-workspace/@types/node/undici-types": ["undici-types@8.9.0", "", {}, "sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg=="],
-
-    "@types/body-parser/@types/node/undici-types": ["undici-types@8.9.0", "", {}, "sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg=="],
-
-    "@types/compression/@types/node/undici-types": ["undici-types@8.9.0", "", {}, "sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg=="],
-
-    "@types/connect/@types/node/undici-types": ["undici-types@8.9.0", "", {}, "sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg=="],
-
-    "@types/express-serve-static-core/@types/node/undici-types": ["undici-types@8.9.0", "", {}, "sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg=="],
-
-    "@types/send/@types/node/undici-types": ["undici-types@8.9.0", "", {}, "sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg=="],
-
-    "@types/serve-static/@types/node/undici-types": ["undici-types@8.9.0", "", {}, "sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg=="],
-
-    "@types/ws/@types/node/undici-types": ["undici-types@8.9.0", "", {}, "sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg=="],
-
-    "bun-types/@types/node/undici-types": ["undici-types@8.9.0", "", {}, "sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg=="],
-
     "compression/debug/ms": ["ms@2.0.0", "", {}, "sha512-Tpp60P6IUJDTuOq/5Z8cdskzJujfwqfOTkrwIwj7IRISpnkJnT6SyJ4PCPnGMoFjC9ddhal5KVIYtAt97ix05A=="],
 
     "eslint/ajv/json-schema-traverse": ["json-schema-traverse@0.4.1", "", {}, "sha512-xbbCH5dCYU5T8LcEhhuh7HJ88HXuW3qsI3Y0zOZFKfZEHcpWiHU/Jxzk629Brsab/mMiHQti9wMP+845RPe3Vg=="],
-
-    "protobufjs/@types/node/undici-types": ["undici-types@8.9.0", "", {}, "sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg=="],
 
     "vite/esbuild/@esbuild/aix-ppc64": ["@esbuild/aix-ppc64@0.25.12", "", { "os": "aix", "cpu": "ppc64" }, "sha512-Hhmwd6CInZ3dwpuGTF8fJG6yoWmsToE+vYgD4nytZVxcu1ulHpUQRAB1UJ8+N1Am3Mz4+xOByoQoSZf4D+CpkA=="],
 

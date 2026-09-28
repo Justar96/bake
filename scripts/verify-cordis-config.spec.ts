@@ -14,6 +14,9 @@ import {
   metadataExpressionErrors,
   packageTestFixtureDependencyErrors,
   packageTestPluginDependencyErrors,
+  planeSeparationErrors,
+  presetPlaneOverlaps,
+  SHARED_PLANE_ROWS,
 } from './verify-cordis-config.ts'
 
 describe('verify-cordis-config metadata expressions', () => {
@@ -151,5 +154,90 @@ describe('package-owned Loader test dependency closures', () => {
     } finally {
       rmSync(fixture, { recursive: true, force: true })
     }
+  })
+})
+
+describe('preset plane overlaps across the profiles that mount the roster', () => {
+  /** Write a bundle package whose manifest declares one patch file. */
+  const bundle = (fixture: string, dir: string, name: string, patch: string): void => {
+    mkdirSync(join(fixture, dir), { recursive: true })
+    writeFileSync(join(fixture, dir, 'package.json'), JSON.stringify({ name, dsh: { bundle: { patch: './cordis.patch.yml' } } }))
+    writeFileSync(join(fixture, dir, 'cordis.patch.yml'), patch)
+  }
+  const preset = (fixture: string, id: string, body: string): void => {
+    mkdirSync(join(fixture, 'packages/preset/agent-presets/presets', id), { recursive: true })
+    writeFileSync(join(fixture, 'packages/preset/agent-presets/presets', id, 'agent.cordis.yml'), body)
+  }
+
+  it('reports each preset\'s rows, disabled or not, that a preset-hosting profile still runs after every layer\'s disables', () => {
+    const fixture = mkdtempSync(join(tmpdir(), 'dsh-preset-plane-'))
+    try {
+      bundle(fixture, 'packages/bundle/base', '@example/base', [
+        '- insert:',
+        '    - { id: shared, name: shared-plugin }',
+        '    - { id: taken-back, name: taken-back-plugin }',
+        '    - { id: off, name: off-plugin, disabled: true }',
+        '    - { id: gated, name: gated-plugin, disabled: !!js "process.platform === \'win32\'" }',
+        '',
+      ].join('\n'))
+      // The app layer mounts the roster and takes one base row back out.
+      bundle(fixture, 'apps/tui/packages/app', '@example/app', [
+        '- { id: taken-back, disabled: true }',
+        '- insert:',
+        "    - { id: agent-presets, name: '@deepseek-ai/dsh-agent-presets' }",
+        '',
+      ].join('\n'))
+      bundle(fixture, 'packages/bundle/plain', '@example/plain', '- insert:\n    - { id: plain-only, name: plain-plugin }\n')
+      preset(fixture, 'full', [
+        '- { id: shared, name: shared-plugin }',
+        '- { id: taken-back, name: taken-back-plugin }',
+        '- { id: off, name: off-plugin }',
+        '- id: realm',
+        '  name: cordis:group',
+        '  config:',
+        '    - { id: gated, name: gated-plugin }',
+        '    - { id: plain-only, name: plain-plugin }',
+        '',
+      ].join('\n'))
+      // A preset that turns a row off still receives the host's copy.
+      preset(fixture, 'quiet', '- { id: shared, name: shared-plugin, disabled: true }\n')
+      preset(fixture, 'unrelated', '- { id: taken-back, name: taken-back-plugin }\n')
+
+      expect(presetPlaneOverlaps(fixture, {
+        hosted: { bundles: ['@example/base', '@example/app'] },
+        plain: { bundles: ['@example/base', '@example/plain'] },
+      })).toEqual([
+        { profile: 'hosted', file: 'packages/preset/agent-presets/presets/full/agent.cordis.yml', ids: ['shared', 'gated'] },
+        { profile: 'hosted', file: 'packages/preset/agent-presets/presets/quiet/agent.cordis.yml', ids: ['shared'] },
+      ])
+      expect(() => presetPlaneOverlaps(fixture, { plain: { bundles: ['@example/base', '@example/plain'] } }))
+        .toThrow('no shipped profile mounts @deepseek-ai/dsh-agent-presets')
+      expect(() => presetPlaneOverlaps(fixture, { missing: { bundles: ['@example/absent'] } }))
+        .toThrow('profile template "missing" names bundle @example/absent, which no workspace manifest declares')
+    } finally {
+      rmSync(fixture, { recursive: true, force: true })
+    }
+  })
+
+  it('fails every shared row the allowlist does not name, and every allowlist entry nothing shares', () => {
+    const overlaps = [
+      { profile: 'hosted', file: 'presets/full/agent.cordis.yml', ids: ['meant', 'leaked', 'doubled'] },
+      { profile: 'hosted', file: 'presets/quiet/agent.cordis.yml', ids: ['meant'] },
+    ]
+    const shared = { meant: 'harmless on both planes', stale: 'once shared' }
+    expect(planeSeparationErrors(overlaps, shared)).toEqual([
+      'presets/full/agent.cordis.yml: "leaked", "doubled" also active in the hosted profile\'s host composition; '
+      + 'a row belongs to exactly one plane, so disable the host copy or list it in SHARED_PLANE_ROWS with the '
+      + 'reason both copies are harmless',
+      'SHARED_PLANE_ROWS lists "stale", which no preset shares with a preset-hosting profile any more; remove it',
+    ])
+    expect(planeSeparationErrors(overlaps.slice(1), { meant: 'harmless on both planes' })).toEqual([])
+  })
+
+  it('leaves the shipped terminal profile sharing only the compaction rows it keeps for /compact', () => {
+    const overlaps = presetPlaneOverlaps()
+    expect(new Set(overlaps.flatMap(overlap => overlap.ids))).toEqual(new Set(Object.keys(SHARED_PLANE_ROWS)))
+    expect(Object.keys(SHARED_PLANE_ROWS).sort()).toEqual(['command-compact', 'compaction-basic', 'tool-result-pruner'])
+    expect(planeSeparationErrors(overlaps)).toEqual([])
   })
 })
