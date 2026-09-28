@@ -932,6 +932,28 @@ describe('mapStopReason / mapUsage', () => {
     }))).toMatchObject({ kind: 'error', failure: { code: 'PI_AI_ERROR' } })
   })
 
+  // Bodies recorded from a CliRelay gateway once every credential for the model cooled down.
+  it('carries a gateway credential-cooldown hint as the provider retry delay', () => {
+    const cooldown = '429 {"error":{"code":"model_cooldown","message":"All credentials for model claude-opus-5-5 '
+      + 'are cooling down","model":"claude-opus-5-5","reset_seconds":42,"reset_time":"42s"}}'
+    expect(mapStopReason(assistant({ stopReason: 'error', errorMessage: cooldown })))
+      .toEqual({ kind: 'error', failure: { message: cooldown, code: 'RATE_LIMIT', providerRetryAfterMs: 42_000 } })
+    const unavailable = 'OpenAI API error (503): {"code":"model_unavailable","message":"All credentials for model '
+      + 'glm-5.3-flash are temporarily unavailable","model":"glm-5.3-flash","reset_seconds":1.5,"reset_time":"2s"}'
+    expect(mapStopReason(assistant({ stopReason: 'error', errorMessage: unavailable })))
+      .toMatchObject({ failure: { code: 'SERVER', providerRetryAfterMs: 1_500 } })
+  })
+
+  it.each([
+    ['a non-retryable code', 'HTTP 401: {"reset_seconds":5}'],
+    ['a zero wait', '429 {"reset_seconds":0}'],
+    ['an implausibly long wait', '429 {"reset_seconds":86400}'],
+    ['no hint', '429 {"error":{"code":"model_cooldown"}}'],
+  ])('offers no provider retry delay for %s', (_label, errorMessage) => {
+    const reason = mapStopReason(assistant({ stopReason: 'error', errorMessage }))
+    expect(reason.kind === 'error' ? reason.failure : undefined).not.toHaveProperty('providerRetryAfterMs')
+  })
+
   it.each([
     'other side closed',
     'HTTP2 request did not get a response',
