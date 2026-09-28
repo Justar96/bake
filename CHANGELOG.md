@@ -4,6 +4,8 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-09-28
+
 - The goal on the header shows its state and round count without the objective, which Ctrl+O still opens. On a narrow terminal it gives up its parts one at a time instead of being clipped at the right edge, and keeps `● 3/256` where its label no longer fits.
 - The header's spinner is now a round ball of dough being kneaded: squashed, pressed into a dome, folded from one side, rounded up, and folded from the other. It keeps its three-cell width and running orange.
 - Installs and updates bake a loaf instead of the old ASCII oven: steam rises over it and it browns from dough to crust as the download and install advance. The installers, `bake update`, and `/update` in the terminal now draw the same row; `/update` shows it above the prompt instead of as notice text. Terminals that are not UTF-8, and CJK locales, get an ASCII loaf.
