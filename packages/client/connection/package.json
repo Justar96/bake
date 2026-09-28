@@ -36,7 +36,7 @@
   "dependencies": {
     "@deepseek-ai/dsh-credentials": "workspace:^",
     "@deepseek-ai/schemastery": "workspace:^",
-    "zod": "^4.4.3"
+    "zod": "catalog:"
   },
   "files": [
     "lib/index.js",
