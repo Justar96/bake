@@ -132,6 +132,19 @@ interface SessionEventMap {
     startsSeries?: true
   }
   /**
+   * Required, log-only tool changes for native provider projection. The referenced
+   * latest header owns the added definitions; afterMessageId fixes their position
+   * after the current user/tool-result message. Older readers must refuse this
+   * vocabulary rather than silently lose model-visible changes. Surface roles and
+   * stored messages are unchanged.
+   */
+  'request/tool-update': {
+    headerSeq: SessionSeq
+    afterMessageId: MessageId
+    additions: string[]
+    removals: string[]
+  }
+  /**
    * Route metadata for the next request, logged only when the route, capacity,
    * or system prompt update mode changes. It does not participate in request
    * reconstruction or header equality. Prompt admission uses the bound prepared
@@ -190,6 +203,12 @@ interface EpochHeader {
 ```
 
 当前事件接纳要求 `request/header.header` 为规范形式：禁止任何 `system` 字段，必须省略 `tools: []` 与 `adapterDefaults: {}`。仅含空白的系统消息内容、`config.stop: []` 与嵌套扩展保持不变。seed、append 与当前持久化读取拒绝非规范 header，而不会静默规范化；[V3 信封决策](../../.agents/notes/implemented/architecture/2026-09-06-v3-canonical-session-envelopes.zh.md)负责历史转换。包含旧版 `request/header-delta` 事件或完整快照原因为 `fallback` 的旧版 v0 日志，会被拒绝，而不会以不完整方式回放。
+
+<a id="the-tool-update-event-requesttool-update"></a>
+
+### 工具更新事件：`request/tool-update`
+
+当新的 `request/header` 快照中的工具名称与上一个快照不同时，只要最新的非系统消息是用户消息或工具结果消息，agent loop 就会在该快照之后追加一条 `request/tool-update`。`headerSeq` 引用这个最新且尚未被任何更新使用过的请求头；`additions` 与 `removals` 必须等于它与上一个请求头的工具名称差集；`afterMessageId` 指明该变更所跟随的当前用户或工具结果消息。append 与 restore 都会校验这些引用。该事件在读取时是必需的，因此旧版读取器会拒绝该日志，而不会静默丢失模型可见的变更。与 `request/header` 一样，它不是 `SurfaceEventType`，不产生 LLM 消息，也不改变已存储的消息。`session.toolHistory()` 以增量方式把请求头与更新归并为 `ToolHistory`：即该序列的基线声明加上有序的新增与移除，其定义从被引用的请求头中解析。新的请求序列或定义变化会重置基线；若日志中的更新无法解释当前活跃工具，则得到不含更新的完整活跃列表。agent loop 把该历史作为 `GenerateOptions.toolHistory` 传入；[LLM 运行时](llm-streaming.zh.md#the-model-request-and-result)只为声明了 `toolUpdate` 的路由投影它，其他路由收到完整的活跃工具列表。
 
 ### 路由容量事件：`request/context`
 
@@ -527,7 +546,7 @@ declare class Session {
   /**
    * Return the immutable event stored at one exact sequence number.
    * @deprecated Existing logic may remain unmigrated for now, but new calls are prohibited.
-   * See the Agent Note.
+   * See the [Agent Note](../../../../.agents/notes/implemented/architecture/2026-09-09-deprecate-synchronous-session-event-reads.md).
    * @param seq - event sequence number.
    * @returns the accepted event, or undefined when the log does not contain it.
    */
@@ -537,7 +556,7 @@ declare class Session {
    * A full current snapshot is reused until the next append; every previously
    * returned snapshot remains stable after later appends.
    * @deprecated Existing logic may remain unmigrated for now, but new calls are prohibited.
-   * See the Agent Note.
+   * See the [Agent Note](../../../../.agents/notes/implemented/architecture/2026-09-09-deprecate-synchronous-session-event-reads.md).
    * @param fromSeq - non-negative inclusive sequence number; defaults to the log start.
    * @param toSeqExclusive - non-negative exclusive sequence number; defaults to the current end.
    * @returns a frozen array of the selected deeply frozen events.
@@ -549,7 +568,7 @@ declare class Session {
   /**
    * Return this Session's events after its fork-inherited prefix.
    * @deprecated Existing logic may remain unmigrated for now, but new calls are prohibited.
-   * See the Agent Note.
+   * See the [Agent Note](../../../../.agents/notes/implemented/architecture/2026-09-09-deprecate-synchronous-session-event-reads.md).
    * @returns a fresh array containing child-owned events in log order.
    */
   ownEvents(): readonly SessionEvent[];
@@ -612,6 +631,11 @@ declare class Session {
    * @returns the folded header, or undefined when no header event exists yet.
    */
   requestHeader(): EpochHeader | undefined;
+  /**
+   * Read immutable historical declarations and ordered changes for provider projection.
+   * @returns the current declaration series, reconstructed incrementally from committed events.
+   */
+  toolHistory(): ToolHistory;
   /**
    * Return the latest resolved route metadata, or `undefined` before the first
    * `request/context` event. Each event is folded once.

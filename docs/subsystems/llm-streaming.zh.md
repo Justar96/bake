@@ -580,6 +580,8 @@ interface LlmResolvedModelInfo extends LlmModelInfo {
   reasoning?: LlmModelReasoningInfo
   /** Declared mid-conversation system prompt handling; absent means only a leading system message is read. */
   systemPromptUpdate?: SystemPromptUpdate
+  /** Native tool changes supported by this exact route. */
+  toolUpdate?: ToolUpdate
 }
 ```
 
@@ -604,7 +606,11 @@ interface GenerateOptions {
    */
   system?: string
   /** Tool schemas (adapters map to the provider's `tools` field). */
-  tools?: ToolSchema[]
+  tools?: ToolDeclaration[]
+  /** Session-folded tool history; omission sends complete current declarations. */
+  toolHistory?: ToolHistory
+  /** Adapter-boundary projection of toolHistory, consumed only by capable routes. */
+  toolUpdates?: readonly ToolUpdateNotice[]
   temperature?: number
   maxTokens?: number
   /**
@@ -646,7 +652,7 @@ interface FinishReasonMap {
 
 `FinishReason = FinishReasonMap[keyof FinishReasonMap]`。`TokenUsage`（逐调用计量，含不相交的缓存字段）详见[下文](#tokenusage)。
 
-`GenerateOptions.tools` 携带 `ToolSchema`——工具的 JSON Schema 描述，发送给模型。它声明在 dsh-llm（而非 dsh-tools）中，正是因为它是循环每一步组装请求的一部分：
+`GenerateOptions.tools` 携带 `ToolDeclaration`：即一个 `ToolSchema`（工具的 JSON Schema 描述，发送给模型），外加可选的 `deferLoading: true`；该标记只由运行时的请求投影设置，存储的工具定义从不携带它。`ToolSchema` 声明在 dsh-llm（而非 dsh-tools）中，正是因为它是循环每一步组装请求的一部分：
 
 ```ts type-equiv
 /**
@@ -665,6 +671,8 @@ interface ToolSchema {
 ```
 
 面向模型的 `ToolSchema` 是协议类型；产出它的已注册 `ToolDefinition`（schema + `execute`）在 [tools.md](tools.zh.md) 中。
+
+循环构建的请求还携带 `toolHistory`，即 `session.toolHistory()` 从已记录的 `request/header` 与 [`request/tool-update`](session.zh.md#the-tool-update-event-requesttool-update) 事件归并出的声明，以及有序的新增与移除。派发时，运行时按确切路由的 `toolUpdate` 模式投影该历史，并用投影结果替换请求的 `tools` 与 `toolUpdates`，因此调用方提供的 `toolUpdates` 永远不会到达适配器；工具投影不会改动 `messages`。`addition-only` 把序列中新增的工具作为带 `deferLoading` 的声明发送，并在各自锚定的用户或工具结果消息之后附上指明每项新增的通知。`in-history` 还会保留已移除的声明并发送移除通知。当路由未声明 `toolUpdate` 模式、请求没有 `toolHistory`、某个锚点不在所选消息中，或历史未终止于当前活跃定义时，适配器会收到完整的活跃列表，既不带通知，也不带 `deferLoading` 标记。
 
 界面正在起草的提供方既没有路由也没有 catalog，因此询问被单独描述：请求携带用户正在编辑的草稿，回复是界面可以采纳的候选，而不是它必须服务的 catalog。
 
@@ -776,6 +784,8 @@ interface PreparedLlmCall {
   readonly inputModalities?: readonly ModelModality[]
   /** Exact model system prompt update mode captured with the adapter dispatch generation. */
   readonly systemPromptUpdate?: SystemPromptUpdate
+  /** Exact model tool update mode captured with the adapter dispatch generation. */
+  readonly toolUpdate?: ToolUpdate
   /** Config fields materialized by the captured adapter rather than proposed by the caller. */
   readonly adapterDefaults: LlmCallConfigAdapterDefaults
   /**

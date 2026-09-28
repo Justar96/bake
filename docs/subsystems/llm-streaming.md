@@ -574,6 +574,8 @@ interface LlmResolvedModelInfo extends LlmModelInfo {
   reasoning?: LlmModelReasoningInfo
   /** Declared mid-conversation system prompt handling; absent means only a leading system message is read. */
   systemPromptUpdate?: SystemPromptUpdate
+  /** Native tool changes supported by this exact route. */
+  toolUpdate?: ToolUpdate
 }
 ```
 
@@ -598,7 +600,11 @@ interface GenerateOptions {
    */
   system?: string
   /** Tool schemas (adapters map to the provider's `tools` field). */
-  tools?: ToolSchema[]
+  tools?: ToolDeclaration[]
+  /** Session-folded tool history; omission sends complete current declarations. */
+  toolHistory?: ToolHistory
+  /** Adapter-boundary projection of toolHistory, consumed only by capable routes. */
+  toolUpdates?: readonly ToolUpdateNotice[]
   temperature?: number
   maxTokens?: number
   /**
@@ -640,7 +646,7 @@ interface FinishReasonMap {
 
 `FinishReason = FinishReasonMap[keyof FinishReasonMap]`. `TokenUsage` (per-call accounting with disjoint cache fields) is detailed [below](#tokenusage).
 
-`GenerateOptions.tools` carries `ToolSchema` — the JSON-schema description of a tool, as sent to the model. It is declared in dsh-llm (not dsh-tools) precisely because it is part of the request the loop assembles every step:
+`GenerateOptions.tools` carries `ToolDeclaration`: a `ToolSchema`, the JSON-schema description of a tool as sent to the model, plus an optional `deferLoading: true` that only the runtime's request projection sets; stored tool definitions never carry it. `ToolSchema` is declared in dsh-llm (not dsh-tools) precisely because it is part of the request the loop assembles every step:
 
 ```ts type-equiv
 /**
@@ -659,6 +665,8 @@ interface ToolSchema {
 ```
 
 The model-facing `ToolSchema` is the wire type; the registered `ToolDefinition` that produces it (schema + `execute`) is on [tools.md](tools.md).
+
+A loop-built request also carries `toolHistory`, the declarations and ordered additions and removals that `session.toolHistory()` folds from logged `request/header` and [`request/tool-update`](session.md#the-tool-update-event-requesttool-update) events. At dispatch the runtime projects that history for the exact route's `toolUpdate` mode and replaces the request's `tools` and `toolUpdates` with the result, so a caller-supplied `toolUpdates` never reaches the adapter; the tool projection does not alter `messages`. `addition-only` sends tools added during the series as `deferLoading` declarations plus notices naming each addition after its anchoring user or tool-result message. `in-history` also keeps removed declarations and sends removal notices. When the route declares no `toolUpdate` mode, the request has no `toolHistory`, an anchor is missing from the selected messages, or the history does not end at the current active definitions, the adapter receives the complete active list with no notices and no `deferLoading` flags.
 
 A provider a surface is still drafting has no route and no catalog, so interrogation is described separately: the request carries the draft the user is editing, and the reply is candidates a surface may adopt rather than a catalog it must serve.
 
@@ -770,6 +778,8 @@ interface PreparedLlmCall {
   readonly inputModalities?: readonly ModelModality[]
   /** Exact model system prompt update mode captured with the adapter dispatch generation. */
   readonly systemPromptUpdate?: SystemPromptUpdate
+  /** Exact model tool update mode captured with the adapter dispatch generation. */
+  readonly toolUpdate?: ToolUpdate
   /** Config fields materialized by the captured adapter rather than proposed by the caller. */
   readonly adapterDefaults: LlmCallConfigAdapterDefaults
   /**
