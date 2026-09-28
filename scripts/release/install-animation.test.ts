@@ -52,7 +52,12 @@ test.skipIf(process.platform === 'win32')('installer clears progress on success 
       try {
         const [code, stdout, stderr] = await Promise.all([child.exited,
           child.stdout ? new Response(child.stdout).text() : '', child.stderr ? new Response(child.stderr).text() : ''])
-        if (mode !== 'pipe') await terminalClosed.promise
+        if (mode !== 'pipe') {
+          // Linux ends the PTY stream when the child exits; macOS may not while
+          // the terminal is still open here, so drain briefly, then close it.
+          const drained = await Promise.race([terminalClosed.promise.then(() => true), Bun.sleep(1_000).then(() => false)])
+          if (!drained) child.terminal?.close()
+        }
         expect(child.signalCode).toBeNull()
         const output = terminalOutput + stdout + stderr
         if (mode === 'failure') {
