@@ -1,5 +1,5 @@
 ---
-description: "The runtime-diagnostics group map: package-owned runtime invariant checks for live compositions, for users and maintainers navigating the group."
+description: "The runtime-diagnostics group map: package-owned runtime invariant checks and process health records for live compositions, for users and maintainers navigating the group."
 kind: "package-group"
 ---
 
@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-The runtime-diagnostics group provides runtime self-checking for DeepSeek Harness compositions: one package, `invariants`, runs package-owned checks that verify each package's durable event and data relationships while the composition is live. A violation surfaces as an error attributed to the package that owns the relationship; a global switch and package-name filters control which checks run. Use this group's package when a composition should verify its own runtime contracts as part of normal operation.
+The runtime-diagnostics group provides runtime self-checking for DeepSeek Harness compositions. `invariants` runs package-owned checks that verify each package's durable event and data relationships while the composition is live. A violation surfaces as an error attributed to the package that owns the relationship; a global switch and package-name filters control which checks run. `runtime-watchdog` watches the process itself: it records sustained event-loop delay and heap use near V8's limit, and arms Node's fatal-error report, in a directory under the Harness home. Use this group's packages when a composition should verify its own runtime contracts or leave evidence of its health as part of normal operation.
 
 ## Table of Contents
 
@@ -25,6 +25,7 @@ The runtime-diagnostics group provides runtime self-checking for DeepSeek Harnes
 | Package | Role | ctx key |
 |---|---|---|
 | [`invariants`](invariants/README.md) | Runs package-owned runtime checks and reports each failure by owning package | registers on `ctx.invariants` |
+| [`runtime-watchdog`](runtime-watchdog/README.md) | Records process health and arms fatal-error reports under the Harness home | none |
 
 -----
 
