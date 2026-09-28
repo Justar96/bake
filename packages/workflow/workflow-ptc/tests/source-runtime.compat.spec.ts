@@ -6,7 +6,7 @@ import { Context } from '@deepseek-ai/cordis'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import PtcWorkflowEngine from '../src/index.ts'
-import { fakeParent, mountPtcRuntime } from './setup.ts'
+import { confinedCheckoutUnavailable, fakeParent, mountPtcRuntime } from './setup.ts'
 
 async function setup(mode: SandboxMode) {
   const ctx = new Context()
@@ -36,7 +36,11 @@ it('runs the default workflow config through the source PTC runtime', async () =
   } finally { await run.dispose() }
 })
 
-it.each(['read-only', 'workspace-write'] as const)('enforces the Session file policy %s for direct Node writes', async (mode) => {
+it.for(['read-only', 'workspace-write'] as const)('enforces the Session file policy %s for direct Node writes', async (mode, { skip }) => {
+  if (mode === 'workspace-write') {
+    const unavailable = await confinedCheckoutUnavailable()
+    if (unavailable !== undefined) skip(unavailable)
+  }
   const { ctx, parent, root, cwd } = await setup(mode)
   const outside = join(root, 'outside.txt')
   const inside = join(cwd, 'inside.txt')

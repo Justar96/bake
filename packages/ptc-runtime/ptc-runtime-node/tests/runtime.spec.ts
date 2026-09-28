@@ -8,7 +8,7 @@ import { SandboxUnavailableError } from '@deepseek-ai/dsh-sandbox'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { PtcBindingFunction, PtcBindingNamespace, PtcRunRequest } from '@deepseek-ai/dsh-ptc-runtime'
 import type { Config } from '../src/index.ts'
-import { mountRuntime } from './setup.ts'
+import { confinedCheckoutUnavailable, mountRuntime } from './setup.ts'
 
 /** Probe the sandbox independently so Node-runtime launch failures cannot skip enforcement tests. */
 const sandboxUsable = await (async () => {
@@ -279,7 +279,9 @@ describe('Node program process', () => {
     }
   })
 
-  it.skipIf(!sandboxUsable)('permits workspace writes and denies a symlink to a sibling outside it', async () => {
+  it.skipIf(!sandboxUsable)('permits workspace writes and denies a symlink to a sibling outside it', async ({ skip }) => {
+    const unavailable = await confinedCheckoutUnavailable()
+    if (unavailable !== undefined) skip(unavailable)
     const { run, cwd, root } = await setup({}, 'workspace-write')
     const target = join(cwd, 'allowed.txt')
     expect((await run({ program: `await (await import('node:fs/promises')).writeFile(${JSON.stringify(target)}, 'allowed'); return true`, bindings: [] })).value).toBe(true)
