@@ -87,7 +87,7 @@ bun run verify             # every CI gate with the whole runtime suite (preflig
 - **types**, **lint**, and the Bun-run tooling tests.
 - **build**, then the TUI check targets, the runtime suite, and the PTY scenarios against what it built. The runtime step runs the specs the change reaches through the import graph (`vitest --changed`), the whole suite when a workspace or config file changed, and nothing when no runtime source changed. `--full` always runs the whole suite.
 
-Every gate runs even after one fails, and the summary lists each result. A failing gate's output is in `.preflight/<step>.log`, and its last lines are printed at the end. `--only` and `--skip` take step or group names; `--list` prints them. Fix what fails, or say in the pull request which gate failed and why it is unrelated to the change.
+When a Vitest step fails, the files that failed are run again on their own. Files that pass alone make the step a `WARN` naming them, since real-process tests can miss a deadline on a busy machine; any that fail again make it a `FAIL`. Every gate runs even after one fails, and the summary lists each result. A failing gate's output is in `.preflight/<step>.log`, and its last lines are printed at the end. `--only` and `--skip` take step or group names; `--list` prints them. Fix what fails, or say in the pull request which gate failed and why it is unrelated to the change.
 
 ### Git hooks
 

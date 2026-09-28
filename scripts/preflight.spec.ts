@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { changelogGap, parseOptions, runtimeArgs, selectSteps, STEPS, strayBuildOutput, type Scope } from './preflight.ts'
+import { changelogGap, failedVitestFiles, parseOptions, runtimeArgs, selectSteps, STEPS, strayBuildOutput, type Scope } from './preflight.ts'
 
 const scope = (files: readonly string[], mergeBase: string | undefined = 'abc123'): Scope => ({ base: 'origin/develop', mergeBase, files })
 const selected = (argv: readonly string[]): string[] => selectSteps(parseOptions(argv))
@@ -59,5 +59,29 @@ describe('preflight', () => {
     expect(changelogGap(['apps/tui/packages/ui/src/app.tsx'])).toEqual(['apps/tui/packages/ui/src/app.tsx'])
     expect(changelogGap(['packages/goal/tool-goal/src/index.ts', 'CHANGELOG.md'])).toEqual([])
     expect(changelogGap(['packages/goal/tool-goal/tests/tool-goal.spec.ts', 'docs/development.md', 'scripts/preflight.ts'])).toEqual([])
+  })
+
+  it('reads the files a Vitest run failed in or blamed for an unhandled error', () => {
+    const log = [
+      ' ✓ packages/core/agent/tests/agent.spec.ts (12 tests) 80ms',
+      ' FAIL  packages/terminal/terminal-bash/tests/local.spec.ts > terminal-bash real shell > recognizes a foreground read',
+      ' FAIL  packages/terminal/terminal-bash/tests/local.spec.ts > terminal-bash real shell > another case',
+      ' FAIL  packages/ui/tests/placement.spec.tsx [ packages/ui/tests/placement.spec.tsx ]',
+      'This error originated in "packages/subagent/tool-subagent-control/tests/tool-subagent-control.spec.ts" test file.',
+      '   FAIL  not/a/test.ts > indented differently',
+    ].join('\n')
+    expect(failedVitestFiles(log)).toEqual([
+      'packages/subagent/tool-subagent-control/tests/tool-subagent-control.spec.ts',
+      'packages/terminal/terminal-bash/tests/local.spec.ts',
+      'packages/ui/tests/placement.spec.tsx',
+    ])
+    expect(failedVitestFiles(' Test Files  1 failed\nError: worker crashed')).toEqual([])
+  })
+
+  it('reruns failed files only for the Vitest steps', () => {
+    const rerunnable = STEPS.filter(step => step.rerun !== undefined).map(step => step.name)
+    expect(rerunnable).toEqual(['tui-spec', 'runtime'])
+    const runtime = STEPS.find(step => step.name === 'runtime')
+    expect(runtime?.rerun?.(['a.spec.ts'])).toEqual(['node', 'node_modules/vitest/vitest.mjs', 'run', '--maxWorkers=1', 'a.spec.ts'])
   })
 })

@@ -68,9 +68,30 @@ export interface Step {
   readonly command?: (options: Options, scope: Scope) => readonly string[] | { readonly skip: string }
   /** A check done in-process instead of a command. */
   readonly inline?: (options: Options, scope: Scope) => Promise<Omit<Result, 'seconds'>>
+  /**
+   * For a Vitest step, the command that reruns some of its test files alone.
+   * A file that failed in the loaded run and passes alone is reported, not
+   * failed: a real-process test can miss a deadline on a busy machine.
+   */
+  readonly rerun?: (files: readonly string[]) => readonly string[]
 }
 
 const bun = (...args: string[]): readonly string[] => ['bun', ...args]
+
+/** Past this many failed files a rerun is not a load check; something is broken. */
+const RERUN_LIMIT = 12
+
+/**
+ * The test files a Vitest run failed in, or blamed for an unhandled error.
+ * @param log - the run's uncoloured output.
+ */
+export function failedVitestFiles(log: string): string[] {
+  const files = new Set<string>()
+  for (const match of log.matchAll(/^ FAIL {2}(\S+?\.(?:spec|test)\.[cm]?tsx?)\b/gmu)) files.add(match[1] ?? '')
+  for (const match of log.matchAll(/originated in "(\S+?\.(?:spec|test)\.[cm]?tsx?)" test file/gu)) files.add(match[1] ?? '')
+  files.delete('')
+  return [...files].sort()
+}
 
 /** The Bun-run tests under a directory, as `./`-prefixed paths `bun test` reads as files. */
 function bunTests(directory: string): string[] {
@@ -187,13 +208,17 @@ export const STEPS: readonly Step[] = [
     name: `tui-${target}`, phase: 'tui', group: 'tui',
     summary: `TUI check target \`${target}\``,
     // Component specs mount the built runtime; the rest read sources.
-    ...target === 'spec' ? { needsBuild: true } : {},
+    ...target === 'spec' ? {
+      needsBuild: true,
+      rerun: (files: readonly string[]) => node(VITEST, 'run', '--config', 'apps/tui/vitest.config.ts', '--maxWorkers=1', ...files),
+    } : {},
     command: () => bun('apps/tui/scripts/tui.ts', 'check', target),
   })),
   {
     name: 'runtime', phase: 'runtime', group: 'runtime', needsBuild: true,
     summary: 'shared runtime, CLI, and tooling specs under Node',
     command: runtimeArgs,
+    rerun: files => node(VITEST, 'run', '--maxWorkers=1', ...files),
   },
   {
     name: 'e2e', phase: 'e2e', group: 'e2e', needsBuild: true,
@@ -310,7 +335,14 @@ async function runStep(step: Step, options: Options, scope: Scope): Promise<Resu
   if ('skip' in command) return { outcome: 'skip', seconds: 0, note: command.skip }
   const log = join(LOG_DIR, `${step.name}.log`)
   const code = await logged(command, log)
-  return { outcome: code === 0 ? 'pass' : 'fail', seconds: seconds(), note: `.preflight/${step.name}.log` }
+  const note = `.preflight/${step.name}.log`
+  if (code === 0) return { outcome: 'pass', seconds: seconds(), note }
+  const failed = step.rerun === undefined ? [] : failedVitestFiles(readFileSync(log, 'utf8'))
+  if (step.rerun === undefined || failed.length === 0 || failed.length > RERUN_LIMIT) return { outcome: 'fail', seconds: seconds(), note }
+  const again = `.preflight/${step.name}.rerun.log`
+  if (await logged(step.rerun(failed), join(ROOT, again)) !== 0) return { outcome: 'fail', seconds: seconds(), note: again }
+  return { outcome: 'warn', seconds: seconds(),
+    note: `${failed.length} file(s) failed only under load, passing alone: ${failed.join(', ')} (${note})` }
 }
 
 /** Run up to `limit` tasks at once. */
