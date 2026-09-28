@@ -10,6 +10,8 @@ export default defineConfig({
     exclude: ['**/node_modules/**', '**/lib/**', '**/*.client.spec.ts'],
     pool: 'forks',
     execArgv: vitestExecArgv,
+    // Every suite starts without the machine's proxy variables.
+    setupFiles: ['./scripts/test-proxy-environment.ts'],
     testTimeout: 30_000,
     hookTimeout: 30_000,
   },
