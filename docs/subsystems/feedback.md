@@ -290,7 +290,7 @@ Successful message-feedback mutations await canonical persistence: live operatio
 
 Plugin disposal closes operation admission and drains accepted per-Session queue work.
 
-By default, [`session-log-deepseek`](../../packages/session/session-log-deepseek/README.md) carries feedback as part of the ordinary `dsh_session_log` suffix on subsequent eligible DeepSeek requests; a composition disables it with `enabled: false`. Recording feedback does not trigger an LLM request or a separate `dsh_feedback` upload. For non-DeepSeek routes, the [OTel backend](../../packages/session/session-telemetry-otel/README.md) can release the canonical prefix through recorded feedback. The command acknowledgement confirms recording and identifies the Session and anonymous user; it reports neither telemetry policy nor delivery.
+By default, feedback stays in the local session log. Bake's shipped profiles mount [`session-log-deepseek`](../../packages/session/session-log-deepseek/README.md) with `enabled: false`; a composition that opts in with `enabled: true` carries feedback as part of the ordinary `dsh_session_log` suffix on subsequent eligible DeepSeek requests. Recording feedback does not trigger an LLM request or a separate `dsh_feedback` upload. The [OTel backend](../../packages/session/session-telemetry-otel/README.md) has no default endpoint; once `DSH_TELEMETRY_OTLP_URL` names a collector, it releases the canonical prefix through recorded feedback to that collector, for every provider. The command acknowledgement confirms recording, identifies the Session and anonymous user, and states whether the telemetry backend uploads the session history or the feedback stays local; it does not report delivery.
 
 ## Boundaries and limitations
 

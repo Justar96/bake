@@ -4514,7 +4514,7 @@ Sources: [`packages/compaction/compaction-image-offload/src/projection.ts:9`](..
 
 SHA-256: `83da72c6857601c75da11212ef847f57d457b9c99f0a82246dcdff3e26700239`
 
-Sources: [`packages/context/agent-instructions/src/render.ts:47`](../packages/context/agent-instructions/src/render.ts)
+Sources: [`packages/context/agent-instructions/src/render.ts:45`](../packages/context/agent-instructions/src/render.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -4683,7 +4683,7 @@ One of:
 
 SHA-256: `3cfc3a56502da1f8c6153c2c56657bab4b749056968634dd0991d325ec1c919f`
 
-Sources: [`packages/core/tools/src/index.ts:682`](../packages/core/tools/src/index.ts)
+Sources: [`packages/core/tools/src/index.ts:683`](../packages/core/tools/src/index.ts)
 
 | Property | Presence | Type |
 |---|---|---|

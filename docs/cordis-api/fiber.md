@@ -15,7 +15,9 @@ A fiber is one loaded plugin instance: its lifecycle state, validated config, an
  * run (in reverse order) either when the returned disposer is called or
  * when the fiber unloads, whichever comes first. Calling the disposer twice
  * is a no-op. Throws `CordisError('INACTIVE_EFFECT')` if the fiber is
- * already disposed, and `TypeError` if `execute` returns an invalid shape.
+ * already disposed, or currently `UNLOADING` (mid-teardown effects would
+ * escape the unload snapshot), and `TypeError` if `execute` returns an
+ * invalid shape.
  *
  * @param execute — the effect body; see {@link Effect} for accepted shapes.
  * @param label — effect label shown in `getEffects()` diagnostics.
@@ -27,14 +29,14 @@ effect(execute: () => Effect, label?: string): AsyncDisposable<Promise<void>>
 
 Register a cleanup-aware effect on this fiber.
 
-`execute` runs immediately; the disposers it produces are collected and run (in reverse order) either when the returned disposer is called or when the fiber unloads, whichever comes first. Calling the disposer twice is a no-op. Throws `CordisError('INACTIVE_EFFECT')` if the fiber is already disposed, and `TypeError` if `execute` returns an invalid shape.
+`execute` runs immediately; the disposers it produces are collected and run (in reverse order) either when the returned disposer is called or when the fiber unloads, whichever comes first. Calling the disposer twice is a no-op. Throws `CordisError('INACTIVE_EFFECT')` if the fiber is already disposed, or currently `UNLOADING` (mid-teardown effects would escape the unload snapshot), and `TypeError` if `execute` returns an invalid shape.
 
 - `execute` — the effect body; see `Effect` for accepted shapes.
 - `label` — effect label shown in `getEffects()` diagnostics.
 
 **Returns** a disposer that tears the effect down and settles once done.
 
-[Source](../../vendor/cordis/src/fiber.ts#L415)
+[Source](../../vendor/cordis/src/fiber.ts#L419)
 
 ### ctx.fiber
 
@@ -53,7 +55,7 @@ Runtime instance of one plugin application.
 
 A fiber tracks dependency state, validated config, lifecycle effects, and cleanup for the plugin context returned by `ctx.plugin()`.
 
-[Source](../../vendor/cordis/src/fiber.ts#L184)
+[Source](../../vendor/cordis/src/fiber.ts#L186)
 
 ### fiber.uid
 
@@ -64,7 +66,7 @@ public uid: number | null
 
 Unique id within the registry; 0 for the root fiber, `null` once disposed.
 
-[Source](../../vendor/cordis/src/fiber.ts#L186)
+[Source](../../vendor/cordis/src/fiber.ts#L188)
 
 ### fiber.ctx
 
@@ -75,7 +77,7 @@ public readonly ctx: Context
 
 The context this fiber's plugin runs in (extends the parent context).
 
-[Source](../../vendor/cordis/src/fiber.ts#L188)
+[Source](../../vendor/cordis/src/fiber.ts#L190)
 
 ### fiber.config
 
@@ -86,7 +88,7 @@ public config: any
 
 The validated plugin config (updated by `update()`).
 
-[Source](../../vendor/cordis/src/fiber.ts#L190)
+[Source](../../vendor/cordis/src/fiber.ts#L192)
 
 ### fiber.state
 
@@ -97,7 +99,7 @@ public state
 
 Current lifecycle state; transitions emit `internal/status`.
 
-[Source](../../vendor/cordis/src/fiber.ts#L194)
+[Source](../../vendor/cordis/src/fiber.ts#L196)
 
 ### fiber.dispose
 
@@ -108,7 +110,7 @@ public readonly dispose: () => Promise<void>
 
 Dispose this fiber: unload the plugin, then settle once cleanup finished.
 
-[Source](../../vendor/cordis/src/fiber.ts#L196)
+[Source](../../vendor/cordis/src/fiber.ts#L198)
 
 ### fiber.store
 
@@ -119,7 +121,7 @@ public store: Dict<Impl> | undefined
 
 Snapshot of required service implementations while loaded; `undefined` otherwise.
 
-[Source](../../vendor/cordis/src/fiber.ts#L198)
+[Source](../../vendor/cordis/src/fiber.ts#L200)
 
 ### fiber.inertia
 
@@ -130,7 +132,7 @@ public inertia: Promise<void> | undefined
 
 The in-flight load/unload transition, if one is currently running.
 
-[Source](../../vendor/cordis/src/fiber.ts#L200)
+[Source](../../vendor/cordis/src/fiber.ts#L202)
 
 ### fiber.name
 
@@ -141,7 +143,7 @@ get name()
 
 The plugin's display name, inherited from the nearest named ancestor, else `'root'`.
 
-[Source](../../vendor/cordis/src/fiber.ts#L336)
+[Source](../../vendor/cordis/src/fiber.ts#L338)
 
 ### fiber.assertActive()
 
@@ -159,7 +161,7 @@ Throw if the fiber has already been disposed.
 
 **Returns** nothing when the fiber is still active.
 
-[Source](../../vendor/cordis/src/fiber.ts#L351)
+[Source](../../vendor/cordis/src/fiber.ts#L353)
 
 ### fiber.effect(execute, label?)
 
@@ -171,7 +173,9 @@ Throw if the fiber has already been disposed.
  * run (in reverse order) either when the returned disposer is called or
  * when the fiber unloads, whichever comes first. Calling the disposer twice
  * is a no-op. Throws `CordisError('INACTIVE_EFFECT')` if the fiber is
- * already disposed, and `TypeError` if `execute` returns an invalid shape.
+ * already disposed, or currently `UNLOADING` (mid-teardown effects would
+ * escape the unload snapshot), and `TypeError` if `execute` returns an
+ * invalid shape.
  *
  * @param execute — the effect body; see {@link Effect} for accepted shapes.
  * @param label — effect label shown in `getEffects()` diagnostics.
@@ -183,14 +187,14 @@ effect(execute: () => Effect, label?: string): AsyncDisposable<Promise<void>>
 
 Register a cleanup-aware effect on this fiber.
 
-`execute` runs immediately; the disposers it produces are collected and run (in reverse order) either when the returned disposer is called or when the fiber unloads, whichever comes first. Calling the disposer twice is a no-op. Throws `CordisError('INACTIVE_EFFECT')` if the fiber is already disposed, and `TypeError` if `execute` returns an invalid shape.
+`execute` runs immediately; the disposers it produces are collected and run (in reverse order) either when the returned disposer is called or when the fiber unloads, whichever comes first. Calling the disposer twice is a no-op. Throws `CordisError('INACTIVE_EFFECT')` if the fiber is already disposed, or currently `UNLOADING` (mid-teardown effects would escape the unload snapshot), and `TypeError` if `execute` returns an invalid shape.
 
 - `execute` — the effect body; see `Effect` for accepted shapes.
 - `label` — effect label shown in `getEffects()` diagnostics.
 
 **Returns** a disposer that tears the effect down and settles once done.
 
-[Source](../../vendor/cordis/src/fiber.ts#L415)
+[Source](../../vendor/cordis/src/fiber.ts#L419)
 
 ### fiber.getEffects()
 
@@ -207,7 +211,7 @@ Return metadata for currently registered effects.
 
 **Returns** one `EffectMeta` tree per labeled live effect.
 
-[Source](../../vendor/cordis/src/fiber.ts#L568)
+[Source](../../vendor/cordis/src/fiber.ts#L572)
 
 ### fiber.await()
 
@@ -225,7 +229,7 @@ Wait for current lifecycle work and rethrow startup errors.
 
 **Returns** this fiber, once it has settled into a stable state.
 
-[Source](../../vendor/cordis/src/fiber.ts#L704)
+[Source](../../vendor/cordis/src/fiber.ts#L708)
 
 ### fiber.restart()
 
@@ -243,7 +247,7 @@ Dispose and immediately reload this plugin with its current config.
 
 **Returns** a promise resolving once the reload settled.
 
-[Source](../../vendor/cordis/src/fiber.ts#L718)
+[Source](../../vendor/cordis/src/fiber.ts#L722)
 
 ### fiber.update(config, noSave?)
 
@@ -271,7 +275,7 @@ Runs the `internal/update` waterfall first, so update hooks (and HMR) can veto o
 
 **Returns** nothing; the restart runs behind the `internal/update` waterfall.
 
-[Source](../../vendor/cordis/src/fiber.ts#L736)
+[Source](../../vendor/cordis/src/fiber.ts#L740)
 
 ## Effect
 
@@ -292,25 +296,27 @@ type Effect<T = any> =
   | AsyncEffect<T>
 ```
 
-[Source](../../vendor/cordis/src/fiber.ts#L83)
+[Source](../../vendor/cordis/src/fiber.ts#L85)
 
 ## Disposable
 
 Function returned by an effect to release resources during disposal.
 
-Disposers run in reverse registration order when the owning fiber unloads; they may be async, in which case unloading awaits them.
+Disposers nested inside one effect run in reverse registration order, chained sequentially; a fiber's own top-level effects instead unload concurrently (`Promise.all`) when the fiber unloads, not sequentially. Disposers may be async, in which case unloading awaits them.
 
 ```ts cordis-catalog
 /**
  * Function returned by an effect to release resources during disposal.
  *
- * Disposers run in reverse registration order when the owning fiber unloads;
- * they may be async, in which case unloading awaits them.
+ * Disposers nested inside one effect run in reverse registration order,
+ * chained sequentially; a fiber's own top-level effects instead unload
+ * concurrently (`Promise.all`) when the fiber unloads, not sequentially.
+ * Disposers may be async, in which case unloading awaits them.
  */
 type Disposable<T = any> = () => T
 ```
 
-[Source](../../vendor/cordis/src/fiber.ts#L74)
+[Source](../../vendor/cordis/src/fiber.ts#L76)
 
 ## EffectMeta
 
@@ -326,7 +332,7 @@ interface EffectMeta {
 }
 ```
 
-[Source](../../vendor/cordis/src/fiber.ts#L96)
+[Source](../../vendor/cordis/src/fiber.ts#L98)
 
 ## CordisError
 
@@ -352,7 +358,7 @@ namespace CordisError {
 }
 ```
 
-[Source](../../vendor/cordis/src/fiber.ts#L157)
+[Source](../../vendor/cordis/src/fiber.ts#L159)
 
 ## ValidationError
 

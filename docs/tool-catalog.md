@@ -20,25 +20,25 @@ This table connects model-visible tool names to the plugin package and service s
 | `@deepseek-ai/dsh-tool-ask-user` | `ask_user_question` | `ctx.tools`, `ctx.userQuestions` | `tool/call`, `tool/result after a UI/provider answers the question` | - | ask_user_question pauses the tool call until the active UI provider returns a human answer. |
 | `@deepseek-ai/dsh-tools` | `run_code` | `ctx.tools`, `ctx.ptcRuntime (execution time)`, `ctx.systemPrompt` | `tool/call`, `one tool/ptc-dispatch-start + tool/ptc-dispatch pair per bridged sub-call`, `tool/result` | - | Owned by the tool registry as a reserved transport outside filterable capability layers under `mode: ptc` / `mode: both` (see the PTC mode Agent Note). Under `ptc` it is the registry's only wire contribution; the other visible capabilities are declared in a generated SDK section in the loaded runtime's language, and a program calls them through bindings scheduled under the native concurrency contract (submission-ordered starts and policy; concurrency-safe bodies overlap up to `maxParallelSubCalls`) that re-enter the complete guarded tool pipeline and link each nested execution to this outer result. |
 | `@deepseek-ai/dsh-plan-mode` | `exit_plan_mode` | `ctx.tools`, `ctx.systemPrompt`, `ctx.userQuestions (execution time, opportunistic)` | `tool/call`, `plan/mode inactive on an approved review`, `tool/result` | - | exit_plan_mode stays in the model-facing schema while planning is inactive so transitions add no tool-catalog churn on top of the plan-policy change. Its execute path rejects calls outside plan mode; in plan mode it presents the plan over the user-questions seam (approve / keep planning with feedback), and approval logs plan mode inactive at the step boundary. |
-| `@deepseek-ai/dsh-tool-bash` | `bash` | `ctx.tools`, `ctx.shell`, `ctx.systemPrompt`, `ctx.shellEnv`, `ctx.jobs at call time for run_in_background` | `tool/call`, `tool/result` | - | The bash tool is the model-facing consumer of the bash executor seam. A `run_in_background` run registers with the generic `ctx.jobs` runtime and is collected/stopped through the `job_*` tools from `@deepseek-ai/dsh-tool-jobs`; the `enableRunInBackground` config (default true) removes the parameter entirely when disabled. |
+| `@deepseek-ai/dsh-tool-bash` | `bash` | `ctx.tools`, `ctx.shell`, `ctx.shellEnv`, `ctx.jobs at call time for run_in_background` | `tool/call`, `tool/result` | - | The bash tool is the model-facing consumer of the bash executor seam. A `run_in_background` run registers with the generic `ctx.jobs` runtime and is collected/stopped through the `job_*` tools from `@deepseek-ai/dsh-tool-jobs`; the `enableRunInBackground` config (default true) removes the parameter entirely when disabled. |
 | `@deepseek-ai/dsh-tool-present` | `present` | `ctx.tools`, `ctx.fs`, `ctx.sessionProjections` | `tool/call`, `deliverables/presented after a successful final result`, `tool/result` | - | Deliveries belong to the calling Session; Web ui-deliverables supplies source-file opening and cards. |
-| `@deepseek-ai/dsh-tool-pwsh` | `pwsh` | `ctx.tools`, `ctx.shell`, `ctx.systemPrompt`, `ctx.shellEnv`, `ctx.jobs at call time for run_in_background` | `tool/call`, `tool/result` | - | The pwsh tool is the PowerShell-dialect consumer of the bash executor seam for Windows compositions (a PowerShell executor such as `@deepseek-ai/dsh-pwsh-local` backs `ctx.shell`); it mirrors the bash tool call-for-call minus sandbox controls — `run_in_background` runs register with the generic `ctx.jobs` runtime and are collected/stopped through the `job_*` tools, and the managed `DSH_*` environment comes from `@deepseek-ai/dsh-shell-env`. Each call runs in a fresh process (no persistent PTY session), with native `C:\...` paths and `$env:NAME` variables. |
+| `@deepseek-ai/dsh-tool-pwsh` | `pwsh` | `ctx.tools`, `ctx.shell`, `ctx.shellEnv`, `ctx.jobs at call time for run_in_background` | `tool/call`, `tool/result` | - | The pwsh tool is the PowerShell-dialect consumer of the bash executor seam for Windows compositions (a PowerShell executor such as `@deepseek-ai/dsh-pwsh-local` backs `ctx.shell`); it mirrors the bash tool call-for-call minus sandbox controls — `run_in_background` runs register with the generic `ctx.jobs` runtime and are collected/stopped through the `job_*` tools, and the managed `DSH_*` environment comes from `@deepseek-ai/dsh-shell-env`. Each call runs in a fresh process (no persistent PTY session), with native `C:\...` paths and `$env:NAME` variables. |
 | `@deepseek-ai/dsh-tool-cordis` | `cordis_inspect_list`, `cordis_inspect_query` | `ctx.tools`, `ctx.cordisInspect` | `tool/call`, `tool/result` | - | Creator mode provides two read-only runtime inspection tools. The Cordis host runner supplies the inspection registry; Client queries require a connected page. Author persistent changes as bundles and install them with plugin_manager. |
 | `@deepseek-ai/dsh-tool-bash-persistent` | `bash` | `ctx.tools`, `ctx.terminals`, `an owning Agent at execution time` | `tool/call`, `PTY shell state`, `tool/result` | - | One owner-isolated persistent bash tool; deployment composition supplies the PTY backend and may override the model-facing environment description. |
 | `@deepseek-ai/dsh-tool-pwsh-persistent` | `pwsh` | `ctx.tools`, `ctx.terminals`, `an owning Agent at execution time` | `tool/call`, `PTY shell state`, `tool/result` | - | One owner-isolated persistent pwsh tool, the Windows counterpart of the persistent bash tool; deployment composition supplies a pwsh-dialect PTY backend and may override the model-facing environment description. |
 | `@deepseek-ai/dsh-tool-str-replace-editor` | `str_replace_editor` | `ctx.tools`, `ctx.fs` | `tool/call`, `fs/observed after view presence/absence, edit absence, or successful mutation`, `tool/result` | - | Standalone view/create/unique literal replace/line insert tool over the filesystem seam; it composes with any shell or terminal API. |
-| `@deepseek-ai/dsh-tool-fs` | `edit`, `read`, `read_image`, `write` | `ctx.tools`, `ctx.fs`, `ctx.systemPrompt`, `ctx.attachments (image-tool registration)`, `ctx.llm + an image-capable route (image-tool execution)` | `tool/call`, `fs/write-intent or fs/edit-intent for mutations`, `fs/observed after read presence/absence or successful file operation`, `durable attachment (read_image)`, `tool/result` | - | The read-before-write/edit policy is added by `@deepseek-ai/dsh-fs-observation-policy` (an `fs/*` event-gate plugin, no schema change); a deployment that loads these tools is expected to also load it. The image tool is not registered without `ctx.attachments`; its schema is route-independent, and execution refuses unless the exact routed model declares image input. |
-| `@deepseek-ai/dsh-tool-fs-search` | `glob`, `grep` | `ctx.tools`, `ctx.subprocess`, `ctx.systemPrompt` | `tool/call`, `tool/result` | - | glob and grep are unconditional discovery tools that spawn the packaged ripgrep binary (`@vscode/ripgrep`) through ctx.subprocess as ordinary foreground calls (never background jobs) — no host `rg` install and no shell layer. The catalog uses `sampleOverCapGlobResults: true`; deployments must choose that behavior explicitly. Capped results save the complete formatted list through the optional ctx.spillStore backend; returned locators are follow-up-readable/searchable when the backend exposes local paths in co-located deployments. |
-| `@deepseek-ai/dsh-tool-goal` | `create_goal`, `get_goal`, `update_goal` | `ctx.tools`, `ctx.agents`, `ctx.goals`, `ctx.systemPrompt`, `a calling Agent in an authorized open turn` | `tool/call`, `goal/change for mutations`, `tool/result` | - | create, edit, pause, and resume require direct-human root authority; complete and blocked also accept the exact current goal round. The default blocked lower bound is three admitted rounds. |
+| `@deepseek-ai/dsh-tool-fs` | `edit`, `read`, `read_image`, `write` | `ctx.tools`, `ctx.fs`, `ctx.attachments (image-tool registration)`, `ctx.llm + an image-capable route (image-tool execution)` | `tool/call`, `fs/write-intent or fs/edit-intent for mutations`, `fs/observed after read presence/absence or successful file operation`, `durable attachment (read_image)`, `tool/result` | - | The read-before-write/edit policy is added by `@deepseek-ai/dsh-fs-observation-policy` (an `fs/*` event-gate plugin, no schema change); a deployment that loads these tools is expected to also load it. The image tool is not registered without `ctx.attachments`; its schema is route-independent, and execution refuses unless the exact routed model declares image input. |
+| `@deepseek-ai/dsh-tool-fs-search` | `glob`, `grep` | `ctx.tools`, `ctx.subprocess` | `tool/call`, `tool/result` | - | glob and grep are unconditional discovery tools that spawn the packaged ripgrep binary (`@vscode/ripgrep`) through ctx.subprocess as ordinary foreground calls (never background jobs) — no host `rg` install and no shell layer. The catalog uses `sampleOverCapGlobResults: true`; deployments must choose that behavior explicitly. Capped results save the complete formatted list through the optional ctx.spillStore backend; returned locators are follow-up-readable/searchable when the backend exposes local paths in co-located deployments. |
+| `@deepseek-ai/dsh-tool-goal` | `create_goal`, `get_goal`, `update_goal` | `ctx.tools`, `ctx.agents`, `ctx.goals`, `a calling Agent in an authorized open turn` | `tool/call`, `goal/change for mutations`, `tool/result` | - | create, edit, pause, and resume require direct-human root authority; complete and blocked also accept the exact current goal round. The default blocked lower bound is three admitted rounds. |
 | `@deepseek-ai/dsh-schedule` | `schedule_create`, `schedule_delete`, `schedule_list` | `ctx.tools`, `ctx.sessions`, `Session persistence`, `a future live root Agent` | `tool/call`, `schedule/change create or delete`, `tool/result` | - | Registered only inside live root Agent scopes created after the opt-in Schedule plugin loads. Version 1 accepts after_seconds, explicit absolute at, and bounded fixed-rate every_seconds, and discloses session-local delivery; management reads and mutations require the shared Session persistence barrier. |
 | `@deepseek-ai/dsh-tool-ralph` | `ralph` | `ctx.tools`, `ctx.workflowEngine`, `ctx.subagents`, `ctx.systemPrompt`, `a calling Agent (exec.agent parents every fresh round)` | `tool/call`, `tool/result`, `workflow and child session events during execution` | - | A fixed foreground workflow starts one fresh structured child per round; the model selects only the immutable objective and an optional round cap. |
 | `@deepseek-ai/dsh-tool-skill` | `skill` | `ctx.tools`, `ctx.agents`, `ctx.skills` | `tool/call`, `tool/result`, `user/message replacement catalogs via agent.inject()` | - | - |
-| `@deepseek-ai/dsh-tool-subagent` | `list_subagent_models`, `subagent` | `ctx.tools`, `ctx.subagents`, `ctx.systemPrompt`, `ctx.llm for model discovery and selected-route validation` | `tool/call`, `tool/result`, `child session events through the chosen provider` | `subagent`, `subagent_fork` | The registered delegation name is the load-time `toolName` config (default `subagent`); the default schema above has model selection off, while the discovery schema is shown as the fixed companion available in an enabled Session. Web presets sample the Plugins preference for each new top-level Session and preserve that decision for its child Sessions; `subagent_fork` remains fixed-route. Each instance independently controls whether it reads model-selection settings and its background behavior through `modelSelectionSettings`, `backgroundMode`, and `enableRunInBackground`. |
+| `@deepseek-ai/dsh-tool-subagent` | `list_subagent_models`, `subagent` | `ctx.tools`, `ctx.subagents`, `ctx.llm for model discovery and selected-route validation` | `tool/call`, `tool/result`, `child session events through the chosen provider` | `subagent`, `subagent_fork` | The registered delegation name is the load-time `toolName` config (default `subagent`); the default schema above has model selection off, while the discovery schema is shown as the fixed companion available in an enabled Session. Web presets sample the Plugins preference for each new top-level Session and preserve that decision for its child Sessions; `subagent_fork` remains fixed-route. Each instance independently controls whether it reads model-selection settings and its background behavior through `modelSelectionSettings`, `backgroundMode`, and `enableRunInBackground`. |
 | `@deepseek-ai/dsh-tool-subagent-control` | `interrupt_agent`, `list_agents`, `send_message` | `ctx.tools`, `ctx.subagents`, `ctx.agents and ctx.sessionProjections (list_agents only)` | `tool/call`, `tool/result`, `child session events through ctx.subagents` | - | The globally named control tools over continuable background subagents: provider-bound `tool-subagent` instances register distinct delegation tools, while this package registers `send_message` and `interrupt_agent` once, plus `list_agents` from its separately loaded `/list-agents` plugin (whose catalog rows use the sessionProjections and live Agent registries). |
-| `@deepseek-ai/dsh-tool-jobs` | `job_kill`, `job_list`, `job_output` | `ctx.tools`, `ctx.jobs`, `ctx.systemPrompt` | `tool/call`, `tool/result`, `user/message via agent.inject() for background completion notices` | - | The kind-agnostic background-job controller: background bash commands, PTY sends, and subagents are read, listed, and killed through the same three tools. Loading the plugin attaches the controller that arms producers' `ctx.jobs.start()`. |
+| `@deepseek-ai/dsh-tool-jobs` | `job_kill`, `job_list`, `job_output` | `ctx.tools`, `ctx.jobs` | `tool/call`, `tool/result`, `user/message via agent.inject() for background completion notices` | - | The kind-agnostic background-job controller: background bash commands, PTY sends, and subagents are read, listed, and killed through the same three tools. Loading the plugin attaches the controller that arms producers' `ctx.jobs.start()`. |
 | `@deepseek-ai/dsh-tool-todo` | `todo_write` | `ctx.tools`, `owning Agent session` | `tool/call`, `todo/write`, `tool/result` | - | todo_write is session-owned state; UIs render the latest todo/write event as a checklist. `allowParallelInProgress` is required with no default, so the catalog states its choice: `true`, whose description invites several `in_progress` items. A deployment choosing `false` receives the same tool with a description asking for exactly one active task. |
-| `@deepseek-ai/dsh-tool-workflow` | `workflow` | `ctx.tools`, `ctx.workflowEngine`, `ctx.systemPrompt`, `a calling Agent (exec.agent parents the script children)` | `tool/call`, `tool/result` | - | - |
-| `@deepseek-ai/dsh-tool-web` | `web_fetch`, `web_search` | `ctx.tools`, `ctx.web`, `ctx.systemPrompt` | `tool/call`, `tool/result` | - | web_search and web_fetch keep provider selection behind ctx.web so model-visible schemas stay stable across backend swaps. |
+| `@deepseek-ai/dsh-tool-workflow` | `workflow` | `ctx.tools`, `ctx.workflowEngine`, `a calling Agent (exec.agent parents the script children)` | `tool/call`, `tool/result` | - | - |
+| `@deepseek-ai/dsh-tool-web` | `web_fetch`, `web_search` | `ctx.tools`, `ctx.web` | `tool/call`, `tool/result` | - | web_search and web_fetch keep provider selection behind ctx.web so model-visible schemas stay stable across backend swaps. |
 
 <a id="deepseek-aidsh-plugin-manager"></a>
 
@@ -201,11 +201,11 @@ Ask the user a concise question when you need confirmation, a choice, or missing
           },
           "question": {
             "type": "string",
-            "description": "The specific question to ask the user."
+            "description": "The question to ask, as one short sentence ending with a question mark."
           },
           "header": {
             "type": "string",
-            "description": "Optional short heading for the question, such as \"Confirm\" or \"Choose Mode\"."
+            "description": "Optional heading of at most about 12 characters, such as \"Confirm\" or \"Choose Mode\"."
           },
           "options": {
             "type": "array",
@@ -216,11 +216,11 @@ Ask the user a concise question when you need confirmation, a choice, or missing
               "properties": {
                 "label": {
                   "type": "string",
-                  "description": "Short user-facing option label."
+                  "description": "User-facing option label of 1-5 words."
                 },
                 "description": {
                   "type": "string",
-                  "description": "One sentence explaining the tradeoff or impact."
+                  "description": "One short sentence explaining the tradeoff or impact."
                 }
               },
               "required": [
@@ -304,7 +304,7 @@ Owned by the tool registry as a reserved transport outside filterable capability
 
 ### `exit_plan_mode`
 
-Use only in plan mode. Present your plan for the user's review and, on approval, leave plan mode. Send the COMPLETE plan as markdown, starting with a # heading that names it. The user may approve (carry out the plan from your next step) or keep planning — their feedback comes back in the tool result; revise and present again.
+Use only in plan mode. Submit your complete plan for the user's review. If the user approves, plan mode ends and you carry out the plan from your next step. If they keep planning, the result carries any feedback; revise the plan and submit it again.
 
 ```json
 {
@@ -312,7 +312,7 @@ Use only in plan mode. Present your plan for the user's review and, on approval,
   "properties": {
     "plan": {
       "type": "string",
-      "description": "The complete plan, as markdown, starting with a # heading that names it."
+      "description": "The complete plan in markdown, starting with a # heading that names it."
     }
   },
   "required": [
@@ -331,7 +331,7 @@ exit_plan_mode stays in the model-facing schema while planning is inactive so tr
 
 ### `bash`
 
-Execute a bash command (`bash -c`) and return its stdout/stderr. Each call runs in a fresh shell: no state (cwd, variables, functions) persists between calls — pass `workdir` instead of using `cd`. Non-zero exits are reported as `[exit code: N]`. Current harness environment facts are exposed through managed `$DSH_*` variables; inspect them when needed. Commands may run under a file sandbox; a blocked file operation is reported as `[sandbox: file access denied under <mode> mode]` — a policy denial, not a bug in the command; do not retry another way. Long output is truncated to its tail; the full output is saved to a file whose path is reported when available. Set `run_in_background: true` for long-running commands: the call returns a job id immediately; read its output with `job_output` and stop it with `job_kill`.
+Run a command with `bash -c` and return its stdout and stderr. Each call starts a fresh shell, so directory changes and variables do not carry over to later calls. A non-zero exit is reported in the result as `[exit code: N]`, not as a tool error. Long output is truncated to its tail, and the full output is saved to a file named in the result when possible. `$DSH_HOME` is the harness home directory and `$DSH_SESSION_ID` is this session's id. A command run with `run_in_background` returns a job id right away; read its output with `job_output` and stop it with `job_kill`.
 
 ```json
 {
@@ -343,19 +343,19 @@ Execute a bash command (`bash -c`) and return its stdout/stderr. Each call runs 
     },
     "description": {
       "type": "string",
-      "description": "Clear, concise description of what this command does in active voice, 5-10 words (shown in the UI). Examples: \"ls\" → \"List files in current directory\"; \"git status\" → \"Show working tree status\"; \"npm install\" → \"Install package dependencies\"."
+      "description": "Short summary of what the command does, shown to the user."
     },
     "timeoutMs": {
       "type": "number",
-      "description": "Timeout in milliseconds. The executor applies its configured default and cap, and kills the command on expiry."
+      "description": "Timeout in milliseconds, capped at the maximum; the command is killed when it expires."
     },
     "workdir": {
       "type": "string",
-      "description": "Working directory for this command. Defaults to the session workspace; a relative path is resolved against it."
+      "description": "Directory to run this command in. Defaults to your working directory; a relative path resolves against it."
     },
     "run_in_background": {
       "type": "boolean",
-      "description": "Run in the background and return a job id immediately (collect with job_output, stop with job_kill). No timeout applies."
+      "description": "Run in the background, with no timeout."
     }
   },
   "required": [
@@ -375,7 +375,7 @@ The bash tool is the model-facing consumer of the bash executor seam. A `run_in_
 
 ### `present`
 
-Declare existing files accessible through the Session filesystem as final deliverables. When a file you create or update is an output the user asked to receive, you must call present after writing it and before your final response, including files created through Bash or code execution. Mentioning its path in your reply does not replace this call. The files must already exist. The user opens the current source files; their contents are not copied or preserved.
+Deliver files the user asked to receive. After creating or updating such a file, however you made it, call present before your final reply; mentioning its path is not enough. The files must already exist where your file tools can see them. The user opens them in place, so leave them there.
 
 ```json
 {
@@ -389,7 +389,7 @@ Declare existing files accessible through the Session filesystem as final delive
         "properties": {
           "path": {
             "type": "string",
-            "description": "Path of an existing regular file. Relative paths use the Session working directory."
+            "description": "Path of an existing regular file, absolute or relative to the working directory."
           },
           "description": {
             "type": "string",
@@ -418,7 +418,7 @@ Deliveries belong to the calling Session; Web ui-deliverables supplies source-fi
 
 ### `pwsh`
 
-Execute a PowerShell command (`pwsh -Command`) and return its stdout/stderr. Each call runs in a fresh pwsh process: no state (cwd, variables, functions) persists between calls — pass `workdir` instead of using `cd`. Paths use native Windows form (`C:\...`); read environment variables with `$env:NAME`. Non-zero exits are reported as `[exit code: N]`. Current harness environment facts are exposed through managed `$env:DSH_*` variables; inspect them when needed. Commands may run under a file sandbox; a blocked file operation is reported as `[sandbox: file access denied under <mode> mode]` — a policy denial, not a bug in the command; do not retry another way. Long output is truncated to its tail; the full output is saved to a file whose path is reported when available. On Windows a force-killed command settles as `[exit code: 1]` without a signal marker — treat it as an interruption, not a command failure. Set `run_in_background: true` for long-running commands: the call returns a job id immediately; read its output with `job_output` and stop it with `job_kill`.
+Run a PowerShell command with `pwsh -Command` and return its stdout and stderr. Each call starts a fresh pwsh process, so directory changes and variables do not carry over to later calls. Paths use native Windows form (`C:\...`), and environment variables are read as `$env:NAME`. A non-zero exit is reported in the result as `[exit code: N]`, not as a tool error. On Windows a force-killed command also ends with `[exit code: 1]` and no signal marker, so after an interruption that exit means termination, not a command failure. Long output is truncated to its tail, and the full output is saved to a file named in the result when possible. `$env:DSH_HOME` is the harness home directory and `$env:DSH_SESSION_ID` is this session's id. A command run with `run_in_background` returns a job id right away; read its output with `job_output` and stop it with `job_kill`.
 
 ```json
 {
@@ -430,19 +430,19 @@ Execute a PowerShell command (`pwsh -Command`) and return its stdout/stderr. Eac
     },
     "description": {
       "type": "string",
-      "description": "Clear, concise description of what this command does in active voice, 5-10 words (shown in the UI). Examples: \"ls\" → \"List files in current directory\"; \"git status\" → \"Show working tree status\"; \"Get-Process\" → \"List running processes\"."
+      "description": "Short summary of what the command does, shown to the user."
     },
     "timeoutMs": {
       "type": "number",
-      "description": "Timeout in milliseconds. The executor applies its configured default and cap, and kills the command on expiry."
+      "description": "Timeout in milliseconds, capped at the maximum; the command is killed when it expires."
     },
     "workdir": {
       "type": "string",
-      "description": "Working directory for this command. Defaults to the session workspace; a relative path is resolved against it."
+      "description": "Directory to run this command in. Defaults to your working directory; a relative path resolves against it."
     },
     "run_in_background": {
       "type": "boolean",
-      "description": "Run in the background and return a job id immediately (collect with job_output, stop with job_kill). No timeout applies."
+      "description": "Run in the background, with no timeout."
     }
   },
   "required": [
@@ -679,7 +679,7 @@ Standalone view/create/unique literal replace/line insert tool over the filesyst
 
 ### `edit`
 
-Edit an existing UTF-8 text file by replacing literal text.
+Replace literal text in an existing UTF-8 text file. The edit is refused unless you have read, written, or edited the file in this session and it has not changed since.
 
 ```json
 {
@@ -687,11 +687,11 @@ Edit an existing UTF-8 text file by replacing literal text.
   "properties": {
     "file_path": {
       "type": "string",
-      "description": "Path to edit, resolved by the filesystem backend."
+      "description": "Absolute path, or relative to the working directory."
     },
     "old_string": {
       "type": "string",
-      "description": "Literal text to replace. Must match exactly."
+      "description": "Text to replace, matching the file exactly, including whitespace but without the line numbers read adds. It must occur exactly once unless replace_all is true."
     },
     "new_string": {
       "type": "string",
@@ -699,7 +699,7 @@ Edit an existing UTF-8 text file by replacing literal text.
     },
     "replace_all": {
       "type": "boolean",
-      "description": "Replace all matches. Defaults to false; when false, old_string must appear exactly once."
+      "description": "Replace every occurrence. Defaults to false."
     }
   },
   "required": [
@@ -714,7 +714,7 @@ Source: [`packages/fs/tool-fs/src/index.ts`](../packages/fs/tool-fs/src/index.ts
 
 ### `read`
 
-Read a UTF-8 text file and return line-numbered content.
+Read a UTF-8 text file as numbered lines, paged for long files. Unlike cat, head, or tail in a shell, this counts as reading the file for later write and edit calls.
 
 ```json
 {
@@ -722,7 +722,7 @@ Read a UTF-8 text file and return line-numbered content.
   "properties": {
     "file_path": {
       "type": "string",
-      "description": "Path to read, resolved by the filesystem backend."
+      "description": "Absolute path, or relative to the working directory."
     },
     "offset": {
       "type": "number",
@@ -743,7 +743,7 @@ Source: [`packages/fs/tool-fs/src/index.ts`](../packages/fs/tool-fs/src/index.ts
 
 ### `read_image`
 
-Read a PNG/JPEG/WebP/GIF file and return the image itself. A path without a file extension is accepted; the format is detected from the file content, so normalized attachment paths can be passed directly without copying or renaming. Harness validates and downscales large supported images before the next model request, so use this tool directly instead of installing image libraries or creating thumbnails merely to inspect an image. Independent files may be read concurrently in small batches. Requires the current model to accept image input.
+Read a PNG, JPEG, WebP, or GIF file and return the image. A path without an extension works; its format is detected from the content. Large images are downscaled automatically, so do not install image tools or make thumbnails just to view one. Requires a model that accepts image input.
 
 ```json
 {
@@ -751,7 +751,7 @@ Read a PNG/JPEG/WebP/GIF file and return the image itself. A path without a file
   "properties": {
     "file_path": {
       "type": "string",
-      "description": "Path to the image file, resolved by the filesystem backend."
+      "description": "Absolute path, or relative to the working directory."
     }
   },
   "required": [
@@ -764,7 +764,7 @@ Source: [`packages/fs/tool-fs/src/index.ts`](../packages/fs/tool-fs/src/index.ts
 
 ### `write`
 
-Create or fully replace a UTF-8 text file.
+Create a UTF-8 text file or replace all of its content. Replacing an existing file is refused unless you have read, written, or edited it in this session and it has not changed since. For a partial change, edit avoids resending the whole file.
 
 ```json
 {
@@ -772,7 +772,7 @@ Create or fully replace a UTF-8 text file.
   "properties": {
     "file_path": {
       "type": "string",
-      "description": "Path to write, resolved by the filesystem backend."
+      "description": "Absolute path, or relative to the working directory."
     },
     "content": {
       "type": "string",
@@ -796,7 +796,7 @@ The read-before-write/edit policy is added by `@deepseek-ai/dsh-fs-observation-p
 
 ### `glob`
 
-Find files whose paths match a glob pattern. Returns matching file paths — never directories — including hidden and ignored files (VCS metadata directories are excluded). Up to 100 paths come back in modification-time order; a larger result instead returns 100 paths sampled across top-level entries, says so, and reports where the complete sorted list was saved. This tool does not enumerate directory entries.
+Find files, not directories, whose paths match a glob pattern. It is a bounded, newest-first alternative to find in a shell: hidden and ignored files are included, but VCS metadata is not. A result over 100 paths shows 100 sampled across top-level entries, says so, and reports where the full list was saved.
 
 ```json
 {
@@ -804,11 +804,11 @@ Find files whose paths match a glob pattern. Returns matching file paths — nev
   "properties": {
     "pattern": {
       "type": "string",
-      "description": "Glob pattern to match file paths against (e.g. \"**/*.ts\", \"src/**/*.test.js\"). A pattern with no \"/\" matches the basename at any depth, so \"*\" and \"*.ts\" both search the whole tree; include a separator to anchor the depth."
+      "description": "Glob pattern, e.g. \"**/*.ts\" or \"src/**/*.test.js\". A pattern without \"/\" matches file names at any depth, so \"*.ts\" searches the whole tree."
     },
     "path": {
       "type": "string",
-      "description": "Directory to search in. Defaults to the session workspace; a relative path resolves against it."
+      "description": "Directory to search. Defaults to the working directory; relative paths resolve against it."
     }
   },
   "required": [
@@ -821,7 +821,7 @@ Source: [`packages/fs/tool-fs-search/src/index.ts`](../packages/fs/tool-fs-searc
 
 ### `grep`
 
-Search file contents with a ripgrep regular expression. Returns matching lines with line numbers, grouped by file. Returns the first 250 matches inline; a capped result reports where the complete match list was saved. Use read on a matched file for surrounding context.
+Search file contents with a ripgrep regular expression, as a bounded alternative to grep or rg in a shell. Hidden and ignored files are skipped unless path points at them. Returns only the matching lines, numbered and grouped by file; read a matched file for surrounding context. Up to 250 matches are shown; a larger result says so and reports where the full list was saved.
 
 ```json
 {
@@ -833,7 +833,7 @@ Search file contents with a ripgrep regular expression. Returns matching lines w
     },
     "path": {
       "type": "string",
-      "description": "File or directory to search. Defaults to the session workspace; a relative path resolves against it."
+      "description": "File or directory to search. Defaults to the working directory; relative paths resolve against it."
     },
     "include": {
       "type": "string",
@@ -856,7 +856,7 @@ glob and grep are unconditional discovery tools that spawn the packaged ripgrep 
 
 ### `create_goal`
 
-Create one persisted same-session completion goal when the current direct human request is a long-running objective that should continue across autonomous goal rounds. You may infer that intent without requiring the user to say "create a goal". Do not use this for trivial single-turn work. Execution rejects non-human and subagent authority.
+Create the session's goal: a long-running objective that keeps going across automatic rounds until it is done. Call it only when the user explicitly asks for a goal in the current turn; never create one on your own initiative. A session has one goal at a time, and subagents cannot create goals.
 
 ```json
 {
@@ -864,11 +864,11 @@ Create one persisted same-session completion goal when the current direct human 
   "properties": {
     "objective": {
       "type": "string",
-      "description": "The concrete completion objective inferred from the direct human request."
+      "description": "The concrete objective, taken from the user's request."
     },
     "max_goal_rounds": {
       "type": "number",
-      "description": "Optional positive safe-integer limit on automatic continuation rounds."
+      "description": "Optional limit on automatic rounds, as a positive integer."
     }
   },
   "required": [
@@ -881,7 +881,7 @@ Source: [`packages/goal/tool-goal/src/index.ts`](../packages/goal/tool-goal/src/
 
 ### `get_goal`
 
-Read the current same-session goal, including its exact id/revision, objective, phase, completed continuation rounds, round limit, blocker reason when present, and whether another continuation is armed. Call this before updating a goal.
+Return the session's current goal, or null: its id, revision, objective, phase, rounds started, round limit, any blocker, and whether it will continue automatically.
 
 ```json
 {
@@ -894,7 +894,7 @@ Source: [`packages/goal/tool-goal/src/index.ts`](../packages/goal/tool-goal/src/
 
 ### `update_goal`
 
-Update the exact current goal revision. edit, pause, and resume require a direct top-level human request. During an automatic continuation of the current goal, complete and blocked are also allowed. blocked is rejected before the configured minimum round count; the model remains responsible for judging that the same condition persisted across those rounds and must explain it in blocked_reason.
+Change the current goal. First call get_goal and pass its exact goal_id and revision. edit, pause, and resume need a request from the user in the current turn; complete and blocked also work during an automatic goal round. When a session is reopened or forked, its goal stops running automatic rounds until the user asks to continue; then resume it. Mark the goal complete only when its objective is met. Mark it blocked only when the same concrete obstacle has persisted for at least 3 consecutive goal rounds; difficulty or remaining work is not an obstacle.
 
 ```json
 {
@@ -902,15 +902,15 @@ Update the exact current goal revision. edit, pause, and resume require a direct
   "properties": {
     "goal_id": {
       "type": "string",
-      "description": "Exact id returned by get_goal."
+      "description": "The current goal's id."
     },
     "revision": {
       "type": "number",
-      "description": "Exact positive revision returned by get_goal."
+      "description": "The current goal's revision."
     },
     "action": {
       "type": "string",
-      "description": "edit | pause | resume | complete | blocked",
+      "description": "edit the objective or round limit, pause or resume automatic rounds, or mark the goal complete or blocked.",
       "enum": [
         "edit",
         "pause",
@@ -921,15 +921,15 @@ Update the exact current goal revision. edit, pause, and resume require a direct
     },
     "objective": {
       "type": "string",
-      "description": "Replacement objective; valid only with action edit."
+      "description": "The new objective; used only with action edit."
     },
     "max_goal_rounds": {
       "type": "number",
-      "description": "Replacement cap; valid only with action edit."
+      "description": "The new round limit; used only with action edit."
     },
     "blocked_reason": {
       "type": "string",
-      "description": "Concrete blocking condition; required only with action blocked."
+      "description": "The concrete obstacle; required with action blocked and unused otherwise."
     }
   },
   "required": [
@@ -1103,7 +1103,7 @@ Source: [`packages/skill/tool-skill/src/index.ts`](../packages/skill/tool-skill/
 
 ### `list_subagent_models`
 
-Discover LLM routes for subagents without changing the current Agent. Call with no arguments to list registered providers, with `provider` to list its advertised models, or with `provider` and `model` to inspect that exact model and its reasoning efforts. Catalog membership is advisory: an adapter may accept an unlisted model id. Use the returned ids with a delegation tool's `provider`, `model`, and `reasoning_effort` fields.
+Look up the models available to subagents; this does not change your own model. Call it with no arguments to list providers, with `provider` to list that provider's models, or with `provider` and `model` to see that model and its reasoning efforts. The lists are advisory: an allowed model id may work even if it is not listed. Pass the returned ids as a delegation tool's `provider`, `model`, and `reasoning_effort`.
 
 ```json
 {
@@ -1111,11 +1111,11 @@ Discover LLM routes for subagents without changing the current Agent. Call with 
   "properties": {
     "provider": {
       "type": "string",
-      "description": "Registered LLM provider id. Omit to list providers."
+      "description": "LLM provider id. Omit to list providers."
     },
     "model": {
       "type": "string",
-      "description": "Exact model id to inspect. Requires provider; omit to list that provider's advertised models."
+      "description": "Exact model id to inspect. Requires provider; omit to list that provider's models."
     }
   }
 }
@@ -1125,7 +1125,7 @@ Source: [`packages/subagent/tool-subagent/src/list-models.ts`](../packages/subag
 
 ### `subagent`
 
-Delegate a self-contained task to a subagent (a separate agent that works in its own context) to offload focused, independent work — research, a scoped implementation, an analysis — so it does not consume this conversation's context. The subagent returns its result, not its intermediate steps. Give it a complete, standalone prompt: it does not see this conversation. This call waits for the result by default. Set `run_in_background: true` to return a job id; collect with `job_output` and stop with `job_kill`.
+Delegate a self-contained task, such as research, a scoped implementation, or an analysis, to a subagent that works in its own context, so the work does not fill this conversation. You get its result, not its intermediate steps. It does not see this conversation, so give it a complete, standalone prompt. This call waits for the result by default. Set `run_in_background: true` to return a job id; collect with `job_output` and stop with `job_kill`.
 
 ```json
 {
@@ -1137,11 +1137,11 @@ Delegate a self-contained task to a subagent (a separate agent that works in its
     },
     "prompt": {
       "type": "string",
-      "description": "The complete, self-contained task for the subagent. It does not share this conversation's context, so include everything it needs."
+      "description": "The complete, self-contained task. The subagent does not see this conversation, so include everything it needs."
     },
     "run_in_background": {
       "type": "boolean",
-      "description": "Whether to run as a background job and return its id. Defaults to false; collect with job_output or stop with job_kill."
+      "description": "Run as a background job and return its job id. Defaults to false; collect with job_output or stop with job_kill."
     }
   },
   "required": [
@@ -1161,7 +1161,7 @@ The registered delegation name is the load-time `toolName` config (default `suba
 
 ### `interrupt_agent`
 
-Request cancellation of a background agent's current turn by its agent id. The target may be your direct child or a deeper agent created under you. Only the current turn stops: messages already queued for the agent stay parked until a later send_message, agents it started keep running, and the agent itself stays available for follow-ups. This call returns as soon as the stop request is accepted, so the target may keep running briefly; interrupting an agent that already finished is an accepted no-op.
+Stop the current turn of a continuable subagent below you, whether a direct child or deeper, by its agent id. Messages already queued for it wait for a later send_message, subagents it started keep running, and it stays available for follow-ups. The call returns once the stop is requested, so the subagent may keep running briefly; interrupting one that has already finished does nothing.
 
 ```json
 {
@@ -1169,7 +1169,7 @@ Request cancellation of a background agent's current turn by its agent id. The t
   "properties": {
     "agent_id": {
       "type": "string",
-      "description": "The agent id of the running agent to interrupt."
+      "description": "The agent id of the subagent to interrupt."
     }
   },
   "required": [
@@ -1182,7 +1182,7 @@ Source: [`packages/subagent/tool-subagent-control/src/index.ts`](../packages/sub
 
 ### `list_agents`
 
-List your continuable background subagents by durable id and label. Use it to recall which ones you started, not to poll for completion — you are told when one finishes. Status comes from the live registry: running means the agent is working right now, idle means it is loaded but between turns (it may be waiting on agents it started), and ready means it exists only in storage — resumable, not terminal, and not a result waiting to be collected; a `send_message` steers a running child at its nearest step boundary or starts a turn for an idle or ready child, and a direct child remains a `send_message` candidate in every status. The snapshot is not a delivery promise — `send_message` performs the authoritative check and may still fail. Children that could not be read are reported as diagnostics instead of being silently dropped. Scope `descendants` walks the whole tree below you in stable pre-order, annotating each entry with its durable direct-parent session id and depth. You may use `send_message` only for depth-1 entries; deeper entries are candidates for `interrupt_agent` only.
+List the continuable subagents you started, with each one's agent id, label, and status: running (working now), idle (between turns, possibly waiting on its own subagents), or ready (saved and inactive; it can be resumed and is not a result to collect). A `send_message` steers a running subagent at its next step and starts a new turn for an idle or ready one. Use this to look up ids, not to poll: you are notified when one finishes. Subagents that cannot be read appear as diagnostics. Scope `descendants` also lists the subagents below them, each with its parent's agent id and depth. You can message only depth-1 entries, your direct subagents, but you can stop any entry's current turn with `interrupt_agent`.
 
 ```json
 {
@@ -1190,7 +1190,7 @@ List your continuable background subagents by durable id and label. Use it to re
   "properties": {
     "scope": {
       "type": "string",
-      "description": "children (default) lists direct children only; descendants walks the complete tree below you.",
+      "description": "children (default) lists your direct subagents; descendants lists every subagent below you.",
       "enum": [
         "children",
         "descendants"
@@ -1204,7 +1204,7 @@ Source: [`packages/subagent/tool-subagent-control/src/list-agents.ts`](../packag
 
 ### `send_message`
 
-Send a message to a direct continuable child by its agent id. If you are a resident continuable child, you may also target your direct parent. If the target is still working, the message steers its nearest step; if it is idle, the message starts a turn. This call returns no answer from the agent — only confirmation that the message was delivered. A failure means the message was NOT delivered.
+Send a message to one of your direct continuable subagents by its agent id. If you are a continuable subagent, you can also message your parent. A working target reads the message at its next step; otherwise the message starts a new turn. You get delivery confirmation, not a reply, and an error means the message was not delivered.
 
 ```json
 {
@@ -1212,11 +1212,11 @@ Send a message to a direct continuable child by its agent id. If you are a resid
   "properties": {
     "agent_id": {
       "type": "string",
-      "description": "The agent id of your direct continuable child, or your direct parent when you are a resident continuable child."
+      "description": "The agent id of a direct continuable subagent, or of your parent if you are a continuable subagent."
     },
     "message": {
       "type": "string",
-      "description": "The message to deliver to the agent."
+      "description": "The message to send."
     }
   },
   "required": [
@@ -1236,7 +1236,7 @@ The globally named control tools over continuable background subagents: provider
 
 ### `job_kill`
 
-Request cancellation of a running background job by job id. Returns immediately; the job settles as killed once its work actually stops.
+Stop a running background job. Jobs otherwise keep running after your turn ends, until they finish. Returns immediately; the job's status becomes `killed` once its work has stopped.
 
 ```json
 {
@@ -1244,11 +1244,11 @@ Request cancellation of a running background job by job id. Returns immediately;
   "properties": {
     "job_id": {
       "type": "string",
-      "description": "Job id returned by the tool that started the background work."
+      "description": "The id returned when the job started."
     },
     "reason": {
       "type": "string",
-      "description": "Optional short reason, recorded in the log and forwarded to the job."
+      "description": "Optional short reason for stopping the job."
     }
   },
   "required": [
@@ -1261,7 +1261,7 @@ Source: [`packages/jobs/tool-jobs/src/index.ts`](../packages/jobs/tool-jobs/src/
 
 ### `job_list`
 
-List your background jobs (running and finished) with their ids, kinds, and statuses.
+List your background jobs, running and finished, with their ids, kinds, statuses, and labels.
 
 ```json
 {
@@ -1274,7 +1274,7 @@ Source: [`packages/jobs/tool-jobs/src/index.ts`](../packages/jobs/tool-jobs/src/
 
 ### `job_output`
 
-Read a background job. Stream jobs return only output since the previous read; final-output jobs return their result after settlement. Every response ends with `[status: ...]`. Reads are non-blocking unless `wait: true`, which waits up to the configured cap.
+Read a background job's output. You receive a notice when a job finishes, so there is no need to poll or sleep while it runs. Jobs that stream output return what is new since your last read; other jobs return their result once they finish. Every reply ends with `[status: ...]`. Returns immediately unless `wait: true`.
 
 ```json
 {
@@ -1282,15 +1282,15 @@ Read a background job. Stream jobs return only output since the previous read; f
   "properties": {
     "job_id": {
       "type": "string",
-      "description": "Job id returned by the tool that started the background work."
+      "description": "The id returned when the job started."
     },
     "wait": {
       "type": "boolean",
-      "description": "Block until the job reaches a terminal status or the timeout expires. A timed-out wait returns [status: running] and leaves the job alive."
+      "description": "Wait until the job finishes or the timeout passes, for when you cannot continue without the result. A timed-out wait returns `[status: running]` and leaves the job running."
     },
     "timeout_ms": {
       "type": "number",
-      "description": "Max wait in milliseconds (only meaningful with wait: true). Defaults to the configured wait timeout; capped by the configured maximum."
+      "description": "Maximum wait in milliseconds when wait is true (default 30000, at most 600000)."
     }
   },
   "required": [
@@ -1309,7 +1309,7 @@ The kind-agnostic background-job controller: background bash commands, PTY sends
 
 ### `todo_write`
 
-Record and update a structured task list for the current work. Send the ENTIRE list every call — it REPLACES the previous list (there are no partial updates, no per-item edits). Use it to plan multi-step work and show progress: add one todo per concrete step before you start. Mark every todo being actively worked on `in_progress` — several at once when work genuinely runs in parallel (e.g. concurrent subagents or background commands), one for sequential work; while work remains, at least one task should be `in_progress`. Mark a todo `completed` the moment it is done (do not batch completions), and allow no `in_progress` item only once all work is complete. Skip the list for trivial single-step tasks. Statuses: `pending` (not started), `in_progress` (being worked on now), `completed` (finished).
+Create and update the task list the user sees for multi-step work. Each call replaces the whole list, so send every item. Several items can be `in_progress` at once when work runs in parallel.
 
 ```json
 {
@@ -1317,18 +1317,16 @@ Record and update a structured task list for the current work. Send the ENTIRE l
   "properties": {
     "todos": {
       "type": "array",
-      "description": "The COMPLETE task list, replacing any previous list.",
       "items": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
           "content": {
             "type": "string",
-            "description": "What the task is — a short imperative line."
+            "description": "The task, as a short imperative line."
           },
           "status": {
             "type": "string",
-            "description": "pending (not started) | in_progress (now) | completed (done).",
             "enum": [
               "pending",
               "in_progress",
@@ -1359,19 +1357,15 @@ todo_write is session-owned state; UIs render the latest todo/write event as a c
 
 ### `workflow`
 
-Run a JavaScript workflow script that orchestrates subagents at scale. Use this for work that fans out across many independent pieces — an audit over many files, a migration, multi-angle research, adversarial verification of findings — where you write the orchestration as a script instead of delegating turn by turn.
+Run a JavaScript workflow script that coordinates many subagents, and return the script's result. Use it only when the user explicitly asks for a workflow or for large-scale multi-agent orchestration, because one run can start many subagents; for one or two delegations, use a plain subagent call. The call blocks until the script finishes.
 
-The workflow's identity rides the `meta` parameter as JSON: required `name` (short kebab-case) and `description` strings, optional `whenToUse` string and `phases` array (`{title, detail?, provider?, model?}`). The `script` parameter is the plain JavaScript body ONLY (NOT TypeScript, and NO `export const meta` statement — meta is a parameter, not code), running with top-level await; end with `return <value>` — the value must be JSON-serializable and is this tool's result.
+The script can call these globals:
+- `agent(prompt, opts?)` runs one subagent to completion. It resolves to the subagent's final text, to an object validated against `opts.schema` when one is given, or to `null` if the subagent fails. `opts.schema` must be an object-rooted JSON Schema that uses only type, properties, required, additionalProperties, items, enum, const, oneOf, and annotations such as description; pattern, format, and numeric bounds are rejected. The other options are `label` (display name), `phase` (progress group, defaulting to the current phase), and `provider` and `model` (route overrides, usable separately). Any other option is an error.
+- `pipeline(items, ...stages)` runs each item through the stages independently, with no barrier between stages, and resolves to the final values in item order. Each stage is called as `stage(prev, item, index)`, where `prev` is the previous stage's result, or the item itself for the first stage. A stage that throws turns that item into `null` and skips its remaining stages.
+- `parallel(thunks)` runs zero-argument functions concurrently, waits for all of them, and resolves to their results in order; a thunk that throws yields `null`.
+- `phase(title)` starts a progress phase, and `log(message)` reports progress.
 
-Script-body hooks:
-- `agent(prompt, opts?): Promise<any>` — run one subagent to completion. Without `opts.schema` it resolves to the child's final text; with `opts.schema` (an object-rooted JSON Schema using ONLY type/properties/required/additionalProperties/items/enum/const/oneOf — no pattern/format/numeric bounds) it resolves to the validated object. Resolves `null` when the child fails (filter with `.filter(Boolean)`). Other opts: `label` (display), `phase` (progress group), and independent `provider`/`model` LLM target overrides (either may be provided alone). Anything else (`effort`/`isolation`/`agentType`) is rejected loudly.
-- `pipeline(items, ...stages): Promise<any[]>` — run each item through the stages independently with NO barrier between stages (prefer this for multi-stage work). Each stage receives `(prev, item, index)`. An ordinary stage throw drops that ITEM to `null` and skips its remaining stages.
-- `parallel(thunks): Promise<any[]>` — run zero-argument functions concurrently and await ALL of them (a barrier; use only when a stage genuinely needs every prior result together). A throwing thunk resolves to `null`.
-- `phase(title)` — start a progress phase; `log(message)` — narrate progress; `args` — the tool call's `args` input, verbatim.
-
-Misused hooks (bad arguments, unknown options, unsupported schemas, tripped caps) throw errors that ALWAYS kill the script — they never dissolve into a per-item `null`.
-
-Constraints: concurrency and total-agent caps apply; no filesystem, network, timers, or Node.js APIs are provided — the agents do the work, the script only coordinates them. The run executes in the foreground: this call returns when the whole script finishes.
+Misusing a hook (bad arguments, unknown options, unsupported schemas, exceeded caps) or a subagent that cannot start throws an error that `pipeline` and `parallel` pass through instead of turning into `null`; if nothing catches it, the run fails and returns only the error. Caps limit concurrent subagents (extra `agent()` calls wait for a slot), total subagents per run, and items per `pipeline()` or `parallel()` call. The script has no filesystem, network, timers, or Node.js APIs; the subagents do the work.
 
 ```json
 {
@@ -1379,11 +1373,11 @@ Constraints: concurrency and total-agent caps apply; no filesystem, network, tim
   "properties": {
     "script": {
       "type": "string",
-      "description": "The plain-JS workflow script body (top-level await allowed; NO `export const meta` statement; end with `return <json-value>`)."
+      "description": "Body of an async JavaScript function, so `await` works at the top level. Plain JavaScript only: no TypeScript and no import or export statements. Its return value, which must be JSON-serializable, becomes the tool result; results longer than 50000 characters are truncated."
     },
     "meta": {
       "type": "object",
-      "description": "The workflow identity block (plain JSON — never code).",
+      "description": "The workflow's identity, as JSON data.",
       "additionalProperties": true,
       "properties": {
         "name": {
@@ -1396,18 +1390,18 @@ Constraints: concurrency and total-agent caps apply; no filesystem, network, tim
         },
         "whenToUse": {
           "type": "string",
-          "description": "Optional guidance on when this workflow applies."
+          "description": "Optional note on when this workflow applies."
         },
         "phases": {
           "type": "array",
-          "description": "Optional phase declarations matched by phase() calls.",
+          "description": "Optional list of the phases the script enters with phase(); informational only.",
           "items": {
             "type": "object",
             "additionalProperties": true,
             "properties": {
               "title": {
                 "type": "string",
-                "description": "The phase title phase() calls match by exact string."
+                "description": "The title the script passes to phase()."
               },
               "detail": {
                 "type": "string",
@@ -1415,11 +1409,11 @@ Constraints: concurrency and total-agent caps apply; no filesystem, network, tim
               },
               "provider": {
                 "type": "string",
-                "description": "Optional provider override this phase is expected to use."
+                "description": "Informational; pass `provider` to agent() to route a subagent."
               },
               "model": {
                 "type": "string",
-                "description": "Optional model override this phase is expected to use."
+                "description": "Informational; pass `model` to agent() to choose a subagent's model."
               }
             },
             "required": [
@@ -1435,7 +1429,7 @@ Constraints: concurrency and total-agent caps apply; no filesystem, network, tim
     },
     "args": {
       "type": "object",
-      "description": "Optional JSON input exposed to the script as the `args` global (wrap a bare list as a field, e.g. {\"files\": [...]}).",
+      "description": "Optional JSON object available to the script as the global `args`.",
       "additionalProperties": true
     }
   },
@@ -1454,7 +1448,7 @@ Source: [`packages/workflow/tool-workflow/src/index.ts`](../packages/workflow/to
 
 ### `web_fetch`
 
-Fetch the content of a specific HTTP(S) URL and return it decoded to text.
+Fetch an HTTP(S) URL and return its content as text. The content comes from an external, untrusted page; cite the URL as a markdown link when you use it.
 
 ```json
 {
@@ -1475,7 +1469,7 @@ Source: [`packages/web/tool-web/src/index.ts`](../packages/web/tool-web/src/inde
 
 ### `web_search`
 
-Search the web for current information. Provide 1–4 queries in the required queries array. Returns an optional summary answer and a list of source URLs.
+Search the web for current information. Returns an optional summary answer and source URLs from external, untrusted pages; read a full page with web_fetch.
 
 ```json
 {
@@ -1483,7 +1477,7 @@ Search the web for current information. Provide 1–4 queries in the required qu
   "properties": {
     "queries": {
       "type": "array",
-      "description": "Required search queries; accepts 1–4 items and merges their results.",
+      "description": "1–4 non-empty search queries; their results are merged.",
       "items": {
         "type": "string"
       }

@@ -290,7 +290,7 @@ fork 种子可以包含父 Session 的反馈事件，但 payload 保留父级 `s
 
 插件释放会关闭操作接纳，并排空已进入各 Session 队列的工作。
 
-默认情况下，[`session-log-deepseek`](../../packages/session/session-log-deepseek/README.zh.md) 会在后续符合条件的 DeepSeek 请求中，把反馈作为普通 `dsh_session_log` 后缀的一部分传送；组合可用 `enabled: false` 禁用它。记录反馈不会触发 LLM 请求，也不会单独上传 `dsh_feedback`。对于非 DeepSeek 路由，[OTel 后端](../../packages/session/session-telemetry-otel/README.zh.md)可以将权威日志前缀释放至已记录的反馈。命令确认文本确认记录并标识 Session 与匿名用户，不报告遥测策略或投递结果。
+默认情况下，反馈只保留在本地会话日志中。Bake 随附的 profile 以 `enabled: false` 挂载 [`session-log-deepseek`](../../packages/session/session-log-deepseek/README.zh.md)；以 `enabled: true` 选择启用的组合会在后续符合条件的 DeepSeek 请求中，把反馈作为普通 `dsh_session_log` 后缀的一部分传送。记录反馈不会触发 LLM 请求，也不会单独上传 `dsh_feedback`。[OTel 后端](../../packages/session/session-telemetry-otel/README.zh.md)没有默认端点；一旦 `DSH_TELEMETRY_OTLP_URL` 指定了 collector，它就会把截至已记录反馈的权威日志前缀释放到该 collector，适用于所有提供方。命令确认文本确认记录、标识 Session 与匿名用户，并说明遥测后端会上传会话历史还是反馈只保留在本地；它不报告投递结果。
 
 ## 边界与限制
 

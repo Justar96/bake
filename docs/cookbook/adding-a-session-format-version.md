@@ -88,12 +88,12 @@ Keep deliberate historical cases explicit through `snapshot.yml`'s `sessionForma
 Run from the repository root. These commands check catalog declarations, Stage composition, the released V2→V3 edge, and generation selection. They are a baseline; add focused coverage for the new edge:
 
 ```sh
-pnpm run verify-session-format-catalog
-pnpm exec vitest run scripts/gen-session-format-catalog.spec.ts packages/session/session-format/tests packages/session/session-format-v2-to-v3/tests packages/session/session-format-catalog/tests
-pnpm run test:snapshot scripts/session-snapshot-corpus.corpus.ts
+bun scripts/gen-session-format-catalog.ts --check
+bun test ./scripts/gen-session-format-catalog.test.ts
+bun run test:runtime packages/session/session-format/tests packages/session/session-format-v2-to-v3/tests packages/session/session-format-catalog/tests
 ```
 
-After implementing the new edge, add its actual test path to the focused Vitest run. Add the changed JSONL, replay, projection, and SDK tests selected by the actual diff, plus the built publication-Worker smoke when that path changes. Require successful strict migration, identity preservation for the skeleton, malformed and unknown-required-event refusal, deterministic repeated restores, independent concurrent stage state, seeded multi-hop cuts, unchanged predecessors, and no fallback. Report exact commands and failures, not an inferred full-suite result.
+After implementing the new edge, add its actual test path to the focused `test:runtime` run. Add the changed JSONL, replay, projection, and SDK tests selected by the actual diff, plus the built publication-Worker smoke when that path changes. Require successful strict migration, identity preservation for the skeleton, malformed and unknown-required-event refusal, deterministic repeated restores, independent concurrent stage state, seeded multi-hop cuts, unchanged predecessors, and no fallback. Report exact commands and failures, not an inferred full-suite result.
 
 Update the [owning Agent Note](../../.agents/notes/implemented/architecture/2026-08-31-released-session-format-migrations.md) rather than adding a redundant decision record. Keep the [release record](../session-format-status.md#updating-the-record) unchanged until publication; after publication, update it with verified release evidence. Audit related active notes for supersession; retain independent rationale and leave archived notes frozen. Update bilingual prose together, re-record each changed pair with the repository tool, then run documentation checks:
 

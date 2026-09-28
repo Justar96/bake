@@ -87,7 +87,7 @@ export interface Config {
 
 Depends on: [`AgentOptions`](subsystems/core.md) · [`SessionId`](subsystems/core.md)
 
-Source: [`packages/core/agent-loop/src/index.ts:318`](../packages/core/agent-loop/src/index.ts)
+Source: [`packages/core/agent-loop/src/index.ts:330`](../packages/core/agent-loop/src/index.ts)
 
 <a id="deepseek-aidsh-agent-presets"></a>
 
@@ -578,7 +578,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/bundle/headless/src/index.ts:42`](../packages/bundle/headless/src/index.ts)
+Source: [`packages/bundle/headless/src/index.ts:43`](../packages/bundle/headless/src/index.ts)
 
 <a id="deepseek-aidsh-hmr"></a>
 
@@ -925,6 +925,15 @@ export interface PiAiProviderProfile {
   /** Total-pixel budget for each deterministic inline request version. */
   requestImagePixelBudget?: number
   /**
+   * Long-edge cap in pixels for each deterministic inline request version,
+   * applied after the pixel budget. Omission caps a model speaking
+   * `anthropic-messages` at 2000 px, Anthropic's per-side limit for requests
+   * with more than 20 images, and leaves other protocols to the pixel budget
+   * alone. A value applies to every model on the route. A route serving Claude
+   * over another protocol sets 2000 here.
+   */
+  requestImageMaxDimension?: number
+  /**
    * Raw encoded-byte target for each deterministic inline request version;
    * the smallest quality-ladder output is used when no quality fits.
    */
@@ -1121,7 +1130,7 @@ export type PiAiThinkingTokenBudgetField = NonNullable<OpenAICompletionsCompat['
 
 Depends on: `Api` (`@earendil-works/pi-ai`) · `CacheRetention` (`@earendil-works/pi-ai`) · `Model` (`@earendil-works/pi-ai`) · `ModelThinkingLevel` (`@earendil-works/pi-ai`) · `OpenAICompletionsCompat` (`@earendil-works/pi-ai`) · [`RetryPolicyConfig`](../packages/llm/llm/src/index.ts) · `ThinkingBudgets` (`@earendil-works/pi-ai`) · `Transport` (`@earendil-works/pi-ai`)
 
-Source: [`packages/llm/llm-pi-ai/src/config.ts:221`](../packages/llm/llm-pi-ai/src/config.ts)
+Source: [`packages/llm/llm-pi-ai/src/config.ts:246`](../packages/llm/llm-pi-ai/src/config.ts)
 
 <a id="deepseek-aidsh-llm-replay"></a>
 
@@ -1557,6 +1566,43 @@ export interface Config {
 ```
 
 Source: [`packages/guard/repeat-tool-reminder/src/index.ts:28`](../packages/guard/repeat-tool-reminder/src/index.ts)
+
+<a id="deepseek-aidsh-runtime-watchdog"></a>
+
+## `@deepseek-ai/dsh-runtime-watchdog`
+
+```ts config-catalog
+/** Plugin config. Every field except `directory` has a schema default. */
+export interface Config {
+  /** Absolute directory for watchdog records, fatal-error reports, and heap snapshots; created with mode 0700. */
+  directory: string
+  /** Milliseconds between samples; each sample closes one event-loop delay window. */
+  intervalMs?: number
+  /** A window whose 99th-percentile event-loop delay reaches this many milliseconds counts as delayed. */
+  eventLoopDelayMs?: number
+  /** Milliseconds of consecutive delayed windows, or of one continuous stall, before a delay is recorded. */
+  sustainedMs?: number
+  /** Heap use at or above this fraction of V8's heap size limit is recorded. */
+  heapFraction?: number
+  /** Minimum milliseconds between two records of the same kind; crossings in between are counted. */
+  recordIntervalMs?: number
+  /**
+   * Write Node's diagnostic report into `directory` on a fatal error such as
+   * running out of heap. A fatal error raised outside JavaScript ignores the
+   * runtime `process.report.excludeEnv`, so reports are armed only when the
+   * process started with `--report-exclude-env`.
+   */
+  fatalErrorReport?: boolean
+  /**
+   * Heap snapshots V8 may write as the heap nears its limit; 0 disables them.
+   * Node writes them to its `--diagnostic-dir`, so they are armed only when
+   * the process started with `--diagnostic-dir` set to `directory`.
+   */
+  heapSnapshots?: number
+}
+```
+
+Source: [`packages/runtime-diagnostics/runtime-watchdog/src/index.ts:22`](../packages/runtime-diagnostics/runtime-watchdog/src/index.ts)
 
 <a id="deepseek-aidsh-sandbox-local"></a>
 
@@ -2097,7 +2143,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/core/system-prompt/src/index.ts:248`](../packages/core/system-prompt/src/index.ts)
+Source: [`packages/core/system-prompt/src/index.ts:235`](../packages/core/system-prompt/src/index.ts)
 
 <a id="deepseek-aidsh-terminal-bash"></a>
 
@@ -2200,7 +2246,7 @@ Source: [`packages/llm/token-meter/src/types.ts:13`](../packages/llm/token-meter
 
 ## `@deepseek-ai/dsh-tool-bash`
 
-Requires: `tools` · `shell` · `systemPrompt` · `shellEnv`
+Requires: `tools` · `shell` · `shellEnv`
 
 ```ts config-catalog
 /** Configuration for the bash tool. */
@@ -2238,7 +2284,7 @@ Source: [`packages/shell/tool-bash-persistent/src/index.ts:436`](../packages/she
 
 ## `@deepseek-ai/dsh-tool-fs`
 
-Requires: `tools` · `fs` · `systemPrompt`
+Requires: `tools` · `fs`
 
 ```ts config-catalog
 /** Plugin config (all optional — `Config` supplies the defaults). */
@@ -2260,12 +2306,12 @@ Source: [`packages/fs/tool-fs/src/index.ts:25`](../packages/fs/tool-fs/src/index
 
 ## `@deepseek-ai/dsh-tool-fs-search`
 
-Requires: `tools` · `systemPrompt` · `subprocess`
+Requires: `tools` · `subprocess`
 
 ```ts config-catalog
 /** Plugin config; over-cap glob sampling is an explicit deployment choice and the remaining fields have defaults. */
 export interface Config {
-  /** Whether an over-cap `glob` page is sampled across top-level entries instead of taking the modification-time head. */
+  /** Whether an over-cap `glob` page is sampled across top-level entries instead of taking the newest paths. */
   sampleOverCapGlobResults: boolean
   /** Max paths one `glob` call retains inline; later paths go to the formatted spill file. */
   globMaxResults?: number
@@ -2295,7 +2341,7 @@ Source: [`packages/fs/tool-fs-search/src/index.ts:73`](../packages/fs/tool-fs-se
 
 ## `@deepseek-ai/dsh-tool-goal`
 
-Requires: `agents` · `goals` · `tools` · `systemPrompt` · `sessionProjections`
+Requires: `agents` · `goals` · `tools` · `sessionProjections`
 
 ```ts config-catalog
 /** Model policy and hard lower bounds for goal-state updates. */
@@ -2305,13 +2351,13 @@ export interface Config {
 }
 ```
 
-Source: [`packages/goal/tool-goal/src/index.ts:25`](../packages/goal/tool-goal/src/index.ts)
+Source: [`packages/goal/tool-goal/src/index.ts:26`](../packages/goal/tool-goal/src/index.ts)
 
 <a id="deepseek-aidsh-tool-jobs"></a>
 
 ## `@deepseek-ai/dsh-tool-jobs`
 
-Requires: `tools` · `jobs` · `systemPrompt`
+Requires: `tools` · `jobs`
 
 ```ts config-catalog
 /** Configures bounded `job_output` waits and completion-notice delivery. */
@@ -2355,13 +2401,13 @@ export interface Config {
 }
 ```
 
-Source: [`packages/deliverables/tool-present/src/index.ts:15`](../packages/deliverables/tool-present/src/index.ts)
+Source: [`packages/deliverables/tool-present/src/index.ts:16`](../packages/deliverables/tool-present/src/index.ts)
 
 <a id="deepseek-aidsh-tool-pwsh"></a>
 
 ## `@deepseek-ai/dsh-tool-pwsh`
 
-Requires: `tools` · `shell` · `systemPrompt` · `shellEnv`
+Requires: `tools` · `shell` · `shellEnv`
 
 ```ts config-catalog
 /** Configuration for the pwsh tool. */
@@ -2455,7 +2501,7 @@ Source: [`packages/fs/tool-str-replace-editor/src/index.ts:506`](../packages/fs/
 
 ## `@deepseek-ai/dsh-tool-subagent`
 
-Requires: `tools` · `subagents` · `systemPrompt` · `sessionProjections`
+Requires: `tools` · `subagents` · `sessionProjections`
 
 ```ts config-catalog
 /** Config: which registered provider this tool delegates to, plus child defaults. */
@@ -2520,7 +2566,7 @@ export interface Config {
 
 Depends on: [`AgentOptions`](subsystems/core.md)
 
-Source: [`packages/subagent/tool-subagent/src/index.ts:48`](../packages/subagent/tool-subagent/src/index.ts)
+Source: [`packages/subagent/tool-subagent/src/index.ts:49`](../packages/subagent/tool-subagent/src/index.ts)
 
 <a id="deepseek-aidsh-tool-todo"></a>
 
@@ -2534,9 +2580,9 @@ export interface Config {
   /**
    * Required deployment choice for whether several todos may be `in_progress` at once. True suits
    * agents that run work concurrently — subagents, background commands, workflow fan-out — and the
-   * description then instructs the model to mark every actively worked task. False restores the
-   * single-active discipline: the description asks for exactly one, and a call marking more is
-   * rejected.
+   * description then says several items may be `in_progress` when work runs in parallel. False
+   * restores the single-active discipline: the description says only one may be, and a call marking
+   * more is rejected.
    */
   allowParallelInProgress: boolean
 }
@@ -2548,7 +2594,7 @@ Source: [`packages/todo/tool-todo/src/index.ts:29`](../packages/todo/tool-todo/s
 
 ## `@deepseek-ai/dsh-tool-web`
 
-Requires: `tools` · `web` · `systemPrompt`
+Requires: `tools` · `web`
 
 ```ts config-catalog
 /** Plugin config: which web tools to register, search bounds, per-tool budgets, and the fetch output cap. */
@@ -2576,7 +2622,7 @@ Source: [`packages/web/tool-web/src/index.ts:37`](../packages/web/tool-web/src/i
 
 ## `@deepseek-ai/dsh-tool-workflow`
 
-Requires: `tools` · `workflowEngine` · `systemPrompt`
+Requires: `tools` · `workflowEngine`
 
 ```ts config-catalog
 /** Config: the model-facing tool name plus result rendering caps. */
@@ -2624,7 +2670,7 @@ export interface Config {
 export type ToolPresentationMode = 'native' | 'ptc' | 'both'
 ```
 
-Source: [`packages/core/tools/src/index.ts:656`](../packages/core/tools/src/index.ts)
+Source: [`packages/core/tools/src/index.ts:657`](../packages/core/tools/src/index.ts)
 
 <a id="deepseek-aidsh-typert-loader"></a>
 
