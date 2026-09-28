@@ -1,6 +1,6 @@
 /** Terminal view over committed history, live presentation, and harness-owned state. */
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Box, Text, useInput, useIsScreenReaderEnabled, usePaste, useWindowSize } from 'ink'
+import { Box, Text, useApp, useInput, useIsScreenReaderEnabled, usePaste, useWindowSize } from 'ink'
 import type { AgentStatus } from '@deepseek-ai/dsh-agent'
 import { formatAttachment, type AttachmentSummary, type Row } from './rows.ts'
 import { transcriptRows, type Transcript } from './transcript.ts'
@@ -212,29 +212,53 @@ export function RowView({ row, budget, result }: {
  * on screen. A terminal that grows taller adds rows under the frame, unless
  * it pulls history down from scrollback, and leaves the composer off the
  * bottom row. Ink clears the terminal and replays history only for a frame
- * that overflows the viewport. The caller overflows for the one frame this
- * returns true. The next frame no longer overflows, and it is cleared and
- * replayed too.
+ * that overflows the viewport. The caller overflows while this returns true.
+ * The next frame no longer overflows, and it is cleared and replayed too.
+ *
+ * Ink throttles its writes, so a commit that is replaced within one throttle
+ * window is never written. The overflow is held until Ink has flushed it:
+ * dropped in the same flush, it would coalesce away and nothing would be
+ * cleared.
  *
  * Child inspection changes the mounted transcript and frame together. Replay
  * also reanchors that transition at the terminal bottom.
+ *
+ * Closing a sheet does too. Opening one grows the frame and scrolls the
+ * history above it into the terminal's scrollback, which cannot be drawn back
+ * down; held, the frame would leave the sheet's rows as a blank gap over the
+ * composer until enough new history printed to fill it. Replay brings the
+ * history back down against the controls instead.
  * @param size - current terminal size.
  * @param view - displayed parent or child identity.
  * @param openingChild - whether the first frame must reanchor after a parent.
+ * @param sheetOpen - whether a sheet is open over the controls.
  * @param enabled - whether the renderer uses inline scrollback.
- * @returns true for one render after a resize or inspection transition.
+ * @returns true from a resize, inspection, or sheet-closing transition until
+ *   Ink has written the overflowing frame.
  */
-function useRepaint(size: WindowSize, view: string, openingChild: boolean, enabled: boolean): boolean {
+function useRepaint(size: WindowSize, view: string, openingChild: boolean, sheetOpen: boolean, enabled: boolean): boolean {
+  const { waitUntilRenderFlush } = useApp()
   const painted = useRef(size)
   const paintedView = useRef<string | undefined>(openingChild ? undefined : view)
-  const [, repaint] = useState(0)
-  const repainting = enabled && (view !== paintedView.current || size.columns < painted.current.columns || size.rows > painted.current.rows)
+  const paintedSheet = useRef(sheetOpen)
+  const [overflowing, setOverflowing] = useState(false)
+  const transition = enabled && (view !== paintedView.current || size.columns < painted.current.columns || size.rows > painted.current.rows
+    || (paintedSheet.current && !sheetOpen))
   useLayoutEffect(() => {
     painted.current = size
     paintedView.current = view
-    if (repainting) repaint(count => count + 1)
+    paintedSheet.current = sheetOpen
+    if (transition) setOverflowing(true)
   })
-  return repainting
+  useEffect(() => {
+    if (!overflowing) return
+    let active = true
+    // A failed flush is the renderer's to report; the frame still stops overflowing.
+    const settle = (): void => { if (active) setOverflowing(false) }
+    void waitUntilRenderFlush().then(settle, settle)
+    return () => { active = false }
+  }, [overflowing, waitUntilRenderFlush])
+  return transition || (enabled && overflowing)
 }
 
 /**
@@ -486,7 +510,8 @@ function SessionView(props: AppProps): React.ReactElement {
   })
   const size = useWindowSize()
   const budget = useMemo(() => budgetFor(size, { fullscreen }), [size.columns, size.rows, fullscreen])
-  const repainting = useRepaint(size, props.inspection?.sessionId ?? props.sessionId, props.inspectionParent !== undefined, !fullscreen)
+  const repainting = useRepaint(size, props.inspection?.sessionId ?? props.sessionId, props.inspectionParent !== undefined,
+    sheet !== undefined, !fullscreen)
   const screenReader = useIsScreenReaderEnabled()
   const clock = screenReader ? undefined : props.clock
   const compactStarted = useRef<number | undefined>(undefined)
@@ -648,7 +673,7 @@ function SessionView(props: AppProps): React.ReactElement {
       : summary === undefined ? undefined : { kind: 'ended', summary }
   // With two or more of the task row, the goal, and the subagents on screen,
   // the rows around the composer carry what the session is doing, and
-  // cost readings and repeated shortcuts make them hard to scan. Each view's
+  // token totals and repeated shortcuts make them hard to scan. Each view's
   // sheet still holds what is left out here; any open sheet reaches the rest with Tab.
   const dense = [tasksShown, props.goal !== undefined, hasSubagents].filter(Boolean).length >= 2
   const goalFull = goalState(props.goal, copy, { objective: props.goalObjective === true && !dense })
@@ -734,7 +759,10 @@ function SessionView(props: AppProps): React.ReactElement {
                 // field. The status line shortens it from the start and keeps
                 // the tail, which names the workspace.
                 // Dense, the meter keeps only the percentage a user compacts
-                // on, and the session's cost readings give way.
+                // on, and the input and output totals give way. The cache hit
+                // stays: it is one short field, and spawning subagents is
+                // exactly when a user watches whether the parent still reuses
+                // its prompt cache.
                 ...props.context === undefined || occupancy === undefined ? [] : [{
                   text: dense ? `${copy.contextShort} ~${occupancy}%` : `${copy.context}: ${formatContext(props.context)}`,
                   short: `${copy.contextShort} ~${occupancy}%`, color: contextTone(occupancy) }],
@@ -742,7 +770,7 @@ function SessionView(props: AppProps): React.ReactElement {
                 // before it gives way, and it outlasts the cost readings.
                 ...props.git === undefined ? [] : [gitField(props.git, props.frame === 'classic' ? 'ascii' : 'unicode')],
                 ...props.usage === undefined || dense ? [] : formatTotals(props.usage, { input: copy.tokensIn, output: copy.tokensOut }),
-                ...hit === undefined || dense ? [] : [{ label: copy.cacheHit, value: `${hit}%`, color: cacheTone(hit) }],
+                ...hit === undefined ? [] : [{ label: copy.cacheHit, value: `${hit}%`, color: cacheTone(hit) }],
                 // Last of the bounded fields: it drops before any reading of the session.
                 ...props.update === undefined ? [] : [{
                   label: copy.updateLabel, color: PALETTE.waiting,

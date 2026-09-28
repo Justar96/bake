@@ -116,7 +116,11 @@ it('thins the rows around the composer once tasks, a goal, and subagents are all
   const status = statusRow(frame)
   expect(agentRow(frame)).toBe('  ↓ Subagents: 1 · 1 Working')
   expect(status).toContain('ctx ~35%')
-  for (const cost of ['Context:', 'in 1.2M', 'out 30.5k', 'cache hit']) expect(status).not.toContain(cost)
+  for (const cost of ['Context:', 'in 1.2M', 'out 30.5k']) expect(status).not.toContain(cost)
+  // The parent's cache hit outlasts the thinning: spawning children is when it is watched.
+  expect(status).toContain('cache hit 81%')
+  const spawned = render(<App {...props({ ...busy, goal: undefined })} />).lastFrame() ?? ''
+  expect(statusRow(spawned)).toContain('ctx ~35%  cache hit 81%')
   expect(frame).toMatch(/^Tasks .*Ctrl\+T$/m)
   // One of them alone keeps every reading.
   const alone = render(<App {...props({ ...busy, todos: undefined, subagents: [] })} />).lastFrame() ?? ''

@@ -1078,11 +1078,21 @@ scenario('tasks', 'a real todo_write call folds into one row above the header th
           const visible = await viewport()
           return visible.includes(`${SCREEN.prompt}${SCREEN.caret}`) && !visible.includes('Esc closes')
         })
+        // Closing replays the history the sheet pushed up back down: the answer
+        // sits over the task row again, not over a block of the sheet's blank rows.
+        const reanchored = async (): Promise<boolean> => {
+          const rows = (await viewport()).split('\n')
+          const answer = rows.findLastIndex(row => row.includes('Planned.'))
+          const task = rows.findLastIndex(row => row.startsWith('Tasks '))
+          return answer >= 0 && task > answer && rows.slice(answer + 1, task).filter(row => row.trim() === '').length <= 1
+        }
+        await tty.wait('the history to come back down against the controls', reanchored)
         const shortcut = tty.mark()
         tty.send('\x14', 'open the checklist with Ctrl+T')
         await tty.expect('1/3 done', shortcut)
         tty.send('\x1b', 'close it again')
         await tty.wait('the checklist to close', async () => !(await viewport()).includes('Esc closes'))
+        await tty.wait('the history to come back down after Ctrl+T', reanchored)
       })
     } finally { await run.writeOverlay() }
   })

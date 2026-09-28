@@ -76,10 +76,11 @@ it('truncates a long header goal and opens its complete text with Up and Enter',
   expect(openHeight).toBeGreaterThan(initialHeight)
   ui.stdin.write('\x1b')
   await vi.waitFor(() => expect(ui.lastFrame()).toContain('Ctrl+O ● Goal active'))
-  // The frame keeps the sheet's rows, so the input stays on the bottom rows
-  // until printed history takes them; placement.spec.tsx checks the screen.
+  // Closing repaints: the history the sheet pushed up is replayed back down,
+  // so the frame keeps none of the sheet's rows as a gap over the input.
+  // placement.spec.tsx checks the screen.
   await vi.waitFor(() => expect(ui.lastFrame()).not.toContain(copy.sheetClose))
-  expect(ui.lastFrame()!.split('\n')).toHaveLength(openHeight)
+  await vi.waitFor(() => expect(ui.lastFrame()!.split('\n')).toHaveLength(initialHeight))
 })
 
 it('recalls input history with Up before selecting the goal, then restores the unsent draft', async () => {

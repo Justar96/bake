@@ -79,8 +79,18 @@ async function mount(columns: number, rows: number, overrides: Partial<AppProps>
     if (bytes !== '') await new Promise<void>(resolve => terminal.write(bytes, resolve))
     return Array.from({ length: stdout.rows }, (_, row) => terminal.buffer.active.getLine(terminal.buffer.active.viewportY + row)?.translateToString(true) ?? '')
   }
+  /** A repaint writes over two frames, a throttle window apart; read the screen once it settles. */
+  async function settle(): Promise<string[]> {
+    let written = -1
+    while (written !== stdout.chunks.length) {
+      written = stdout.chunks.length
+      await screen()
+      await new Promise(resolve => setTimeout(resolve, 50))
+    }
+    return screen()
+  }
   return {
-    stdin, stdout, screen,
+    stdin, stdout, screen, settle,
     async history(): Promise<string[]> {
       await screen()
       return Array.from({ length: terminal.buffer.active.length }, (_, row) => terminal.buffer.active.getLine(row)?.translateToString(true) ?? '')
@@ -90,14 +100,7 @@ async function mount(columns: number, rows: number, overrides: Partial<AppProps>
       stdout.columns = columns
       stdout.rows = rows
       stdout.emit('resize')
-      // A narrowing repaints over two frames; read the screen once it settles.
-      let written = -1
-      while (written !== stdout.chunks.length) {
-        written = stdout.chunks.length
-        await screen()
-        await new Promise(resolve => setTimeout(resolve, 50))
-      }
-      return screen()
+      return settle()
     },
     async update(patch: Partial<AppProps>): Promise<string[]> {
       state = { ...state, ...patch }
@@ -466,29 +469,38 @@ describe('composer placement', () => {
     await vi.waitFor(async () => expect((await ui.history()).join('\n')).toContain('Prompt 29'))
     const anchor = inputRow(await ui.screen())
     expect(anchor).toBeGreaterThanOrEqual(0)
+    // The screen with the input's row left out, which the last case types into.
+    const around = (screen: readonly string[]): string => screen.filter((_, row) => row !== anchor).join('\n')
     for (const [open, close] of [['\x14', '\u001b'], ['\x14', '\x14'], ['\x14', '\u001bdraft']] as const) {
+      const before = await ui.screen()
+      const opened = ui.stdout.chunks.length
       ui.stdin.write(open)
       await vi.waitFor(async () => expect((await ui.screen()).join('\n')).toContain(dictionaries.en.sheetClose))
       let screen = await ui.screen()
       // Under the newest line, over the controls when there is room for both.
       expect(screen.join('\n')).toContain(' Tasks 1/8 ')
       if (inputRow(screen) >= 0) expect(inputRow(screen), screen.join('\n')).toBe(anchor)
+      // Opening only grows the frame; the history it pushes up is not replayed.
+      expect(ui.stdout.chunks.slice(opened).join('')).not.toContain('\u001b[2J')
       ui.stdin.write(close)
       await vi.waitFor(async () => expect((await ui.screen()).join('\n')).not.toContain(dictionaries.en.sheetClose))
+      await vi.waitFor(async () => expect(around(await ui.screen())).toBe(around(before)))
       screen = await ui.screen()
-      // The rows the sheet took stay blank over the controls; the input does not rise.
+      // Closing replays the history back down against the controls: no rows
+      // the sheet took are left blank over the input, which does not rise.
       expect(screen.findIndex(line => line.startsWith('> ')), screen.join('\n')).toBe(anchor)
     }
     // Escape read together with the next keys closes the sheet and types them.
     await vi.waitFor(async () => expect((await ui.screen())[anchor]).toContain('draft▌'))
-    // History printed next takes the held rows, and nothing was replayed.
+    expect(stdoutClears(ui.stdout)).toBe(true)
+    // History printed next follows the input as it did before any sheet opened.
     await ui.update({ committed: appendTranscript(committed,
       Array.from({ length: rows }, (_, index) => ({ kind: 'user' as const, text: `Later ${index}` }))) })
     await vi.waitFor(async () => expect((await ui.history()).join('\n')).toContain(`Later ${rows - 1}`))
     const screen = await ui.screen()
     expect(screen.findIndex(line => line.startsWith('> ')), screen.join('\n')).toBe(anchor)
     if (rows >= 12) expect(screen[lastRow(screen, `Later ${rows - 1}`) + 1]).toBe('')
-    expect(stdoutClears(ui.stdout)).toBe(false)
+    // The replay rebuilt the scrollback it cleared: every line once.
     const history = (await ui.history()).join('\n')
     for (const text of ['Prompt 0', 'Prompt 29', 'Later 0']) expect(history.split(text), text).toHaveLength(2)
   })
@@ -544,10 +556,13 @@ it.each([[80, 24], [40, 10], [40, 4]])('bounds child branches and inspection at 
   screen = await terminal.update({ inspection: { sessionId: 'child-0', label: 'Review child 0',
     committed: appendTranscript(emptyTranscript, [{ kind: 'assistant', text: 'Child history' }]),
     live: [{ kind: 'assistant', text: 'Child is still reviewing' }], status: 'running', model: 'mock/child' } })
+  // Opening and leaving a child replays history; the input rests once it has.
+  screen = await terminal.settle()
   expect(inputRow(screen), screen.join('\n')).toBeGreaterThanOrEqual(0)
   // The subagents' row sits between the base rule and the status line.
   if (rows! >= 10) expect(inputRow(screen), screen.join('\n')).toBe(rows! - 5)
-  screen = await terminal.update({ inspection: undefined })
+  await terminal.update({ inspection: undefined })
+  screen = await terminal.settle()
   expect(inputRow(screen), screen.join('\n')).toBeGreaterThanOrEqual(0)
   // The subagents' row sits between the base rule and the status line.
   if (rows! >= 10) expect(inputRow(screen), screen.join('\n')).toBe(rows! - 5)
