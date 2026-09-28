@@ -26,7 +26,7 @@
  * @module tui-pty-smoke
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
@@ -2605,7 +2605,9 @@ scenario('session-in-use', 'a session another Bake process has open: --resume ex
     const heldRoot = join(run.root, 'held-sessions')
     const held = 'session-held-headless'
     await run.writeOverlay(undefined, { root: heldRoot })
-    const holder = Bun.spawn([run.node, '--input-type=module', '-e', LOCK_HOLDER, heldRoot, held, run.workspace],
+    // Recorded as Bake records it, from the resolved working directory: macOS's
+    // temporary directory sits behind the /var -> /private/var symlink.
+    const holder = Bun.spawn([run.node, '--input-type=module', '-e', LOCK_HOLDER, heldRoot, held, realpathSync(run.workspace)],
                              { cwd: ROOT, stdin: 'pipe', stdout: 'pipe', stderr: 'inherit' })
     try {
       const reader = holder.stdout.getReader()
