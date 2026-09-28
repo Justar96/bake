@@ -267,17 +267,28 @@ async function renameRetrying(from: string, to: string): Promise<void> {
  * from the pointer on every run, so an update never has to rewrite this file.
  * That matters because `cmd.exe` reads a batch file a line at a time, by
  * offset, while it runs: rewritten under a running command, it would go on
- * executing the new file from the old file's offset.
+ * executing the new file from the old file's offset. A changed launcher text
+ * reaches an existing install through {@link migrateLauncher}, run by the
+ * updater of a release that already writes that text.
+ *
+ * Node starts with `--report-exclude-env --report-exclude-network` and
+ * `--diagnostic-dir=%DSH_HOME%\diagnostics`, which the launcher creates: the
+ * runtime watchdog arms fatal-error reports only when environment variables
+ * are excluded from them on the command line, and heap snapshots only when
+ * the diagnostic directory is its own. They are Node arguments rather than
+ * `NODE_OPTIONS`, which the agent's subprocesses would inherit.
  *
  * @param root - the install root.
  * @returns the file's content, CRLF-terminated.
  */
 export function windowsLauncher(root: string): string {
   const literal = root.replaceAll('%', '%%')
+  const node = 'node --report-exclude-env --report-exclude-network "--diagnostic-dir=%DSH_HOME%\\diagnostics" "%BAKE_CLI%"'
   return [
     '@echo off',
     'setlocal',
     'if not defined DSH_HOME set "DSH_HOME=%USERPROFILE%\\.bake"',
+    'if not exist "%DSH_HOME%\\diagnostics\\" mkdir "%DSH_HOME%\\diagnostics" 2>nul',
     `set "BAKE_RELEASE_ROOT=${literal}"`,
     'set "BAKE_CURRENT="',
     `set /p BAKE_CURRENT=<"%BAKE_RELEASE_ROOT%\\${CURRENT_POINTER}"`,
@@ -289,10 +300,10 @@ export function windowsLauncher(root: string): string {
     'if /I "%~1"=="plugin" goto raw',
     'if /I "%~1"=="update" goto raw',
     'if /I "%~1"=="--profile" goto raw',
-    'node "%BAKE_CLI%" --profile tui %*',
+    `${node} --profile tui %*`,
     'exit /b %ERRORLEVEL%',
     ':raw',
-    'node "%BAKE_CLI%" %*',
+    `${node} %*`,
     'exit /b %ERRORLEVEL%',
     '',
   ].join('\r\n')

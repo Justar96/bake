@@ -39,6 +39,8 @@ An app launched with no arguments sees an empty list — that is the honest answ
 
 `exitOnStdinEnd(ctx, label)` binds a successfully started stdio application's EOF to `ctx.appExit(0)`. It never reads or resumes stdin, so a protocol transport receives bytes buffered before it mounts; startup rejection wins over a racing EOF, and the owning fiber removes both pending listeners.
 
+`SESSION_IN_USE_EXIT` (75, sysexits' `EX_TEMPFAIL`) is the status an app passes to `ctx.appExit` when the session its command line names is open in another process, because the same command succeeds once that process lets the session go. An app that refuses such a launch throws `SessionInUseError(message, cause)` with the line it prints and the persistence refusal as `cause`, and maps that class to the status where it reports failures. The terminal and headless profiles both refuse `--resume` this way. Only the app knows whether a write refusal means another process, so each app decides when to throw it.
+
 ### Parsing your flags
 
 You bring your own commander program: declare your flags and your actions, and the package runs it against the inner arguments. Your action is the only place validation happens, and it publishes whatever your rows need. The plugin's Loader row carries no special marker:
@@ -96,7 +98,7 @@ The parse path is one small family with two owners: `provideCmdline` freezes the
 
 | File | Role |
 |---|---|
-| [`src/index.ts`](src/index.ts) | `CmdlineArgs`/`AppExit` types, `provideCmdline`, `parseCmdline`, commander exit/output routing |
+| [`src/index.ts`](src/index.ts) | `CmdlineArgs`/`AppExit` types, `SESSION_IN_USE_EXIT` and `SessionInUseError`, `provideCmdline`, `parseCmdline`, commander exit/output routing |
 | — | No runtime invariant companion is published; `cmdlineArgs` is an immutable launcher fact that any number of ordinary plugins may read. App-owned providers and consumers use normal Cordis service injection, whose missing dependencies are already reported by Loader settlement. |
 
 </details>

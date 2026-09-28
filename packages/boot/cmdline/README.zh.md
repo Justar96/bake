@@ -39,6 +39,8 @@ kind: "package-library"
 
 `exitOnStdinEnd(ctx, label)` 把已成功启动的 stdio 应用 EOF 绑定到 `ctx.appExit(0)`。它绝不读取或恢复 stdin，因此协议传输会收到挂载前已缓冲的字节；启动拒绝优先于竞态 EOF，所属 fiber 会移除两个待处理的监听器。
 
+`SESSION_IN_USE_EXIT`（75，即 sysexits 的 `EX_TEMPFAIL`）是命令行指定的会话已在另一个进程中打开时，应用传给 `ctx.appExit` 的状态，因为那个进程释放该会话后同一命令即可成功。拒绝此类启动的应用抛出 `SessionInUseError(message, cause)`，其中带有它要打印的那一行，并以持久化层的拒绝作为 `cause`；应用在报告失败的位置把该类映射为这个状态。终端与 headless profile 都以这种方式拒绝 `--resume`。只有应用知道写入拒绝是否意味着另一个进程，因此由各应用决定何时抛出它。
+
 ### 解析你的 flag
 
 你自带自己的 commander program：声明你的 flag 与 action，本包会针对内层参数运行它。校验只发生在你的 action 中，并由它发布你的行所需的任何值。插件的 Loader 行不携带特殊标记：
@@ -96,7 +98,7 @@ kind: "package-library"
 
 | 文件 | 职责 |
 |---|---|
-| [`src/index.ts`](src/index.ts) | `CmdlineArgs`/`AppExit` 类型、`provideCmdline`、`parseCmdline`、commander 退出／输出路由 |
+| [`src/index.ts`](src/index.ts) | `CmdlineArgs`/`AppExit` 类型、`SESSION_IN_USE_EXIT` 与 `SessionInUseError`、`provideCmdline`、`parseCmdline`、commander 退出／输出路由 |
 | — | 不发布运行时不变式配套条目；`cmdlineArgs` 是不可变的启动器事实，任意数量的普通插件都可以读取它。应用自有提供方与消费方使用普通 Cordis 服务注入；Loader 结算已会报告缺失的依赖。 |
 
 </details>

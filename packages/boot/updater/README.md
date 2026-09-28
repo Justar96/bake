@@ -50,7 +50,11 @@ Each launch touches `.last-launch` in its version directory (`markLaunched`). Af
 
 On Windows, `cmd.exe` reads a batch file a line at a time, by offset, while it runs, so rewriting the running `bake.cmd` would make it execute the new file from the old file's offset. `windowsLauncher(root)` therefore writes a launcher that reads `current.txt` on every run and never needs rewriting; the release archive ships the same text as `bin/bake-launcher.cmd.template` for `install.ps1`. An older `bake.cmd` that named one release directly is replaced by a detached helper once the `cmd.exe` running it has exited.
 
+This launcher, like the release's `bin/bake.cmd` and Unix `bin/bake`, creates `<Bake home>/diagnostics` and starts Node with `--report-exclude-env --report-exclude-network --diagnostic-dir=<Bake home>/diagnostics`. The runtime watchdog arms fatal-error reports only when environment variables are excluded on Node's command line; `NODE_OPTIONS` would pass the flags to the agent's subprocesses as well. An installed `bake.cmd` whose text differs is replaced by that same helper, but only when the updater running is one that already writes the new text, so a changed launcher reaches Windows installs one update later.
+
 The release signing key's private half never enters the repository. `release:assemble` reads it from `BAKE_RELEASE_SIGNING_KEY_FILE` and signs the manifest's bytes as written. `RELEASE_PUBLIC_KEYS` may hold more than one key, so a new key can be trusted before the old one stops signing; `distribution/host/release-key.pub` and both installers carry the first, and a release test holds every copy to it.
+
+No runtime invariant companion is published because the package is a library that never mounts in a Cordis tree: it emits no events and keeps no in-process relation a companion could observe. What it guards lives on disk and across processes, and each install step checks its own result as it goes: the manifest signature, the archive's size and SHA-256, and the unpacked command's `--version`.
 
 <a id="known-limitations-and-deferred-work"></a>
 ## Known Limitations and Deferred Work

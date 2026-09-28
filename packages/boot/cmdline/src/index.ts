@@ -41,6 +41,30 @@ export interface AppExit {
   (code: number): void
 }
 
+/**
+ * The {@link AppExit} status of a launch refused because another process has
+ * the session its command line names open: sysexits' `EX_TEMPFAIL`, because
+ * the same command succeeds once that process lets the session go.
+ */
+export const SESSION_IN_USE_EXIT = 75
+
+/**
+ * A launch refused because another process has the session its command line
+ * names open. The app that throws it prints the message as one stderr line and
+ * requests {@link SESSION_IN_USE_EXIT}; whether a write refusal means another
+ * process depends on what the app composes, so each app decides when to throw it.
+ */
+export class SessionInUseError extends Error {
+  /**
+   * @param message - the refusal the app prints, in the app's own words and locale.
+   * @param cause - the persistence refusal.
+   */
+  constructor(message: string, cause: Error) {
+    super(message, { cause })
+    this.name = 'SessionInUseError'
+  }
+}
+
 /** Successful application-startup signal owned by the launcher. */
 export interface AppReady {
   /**
