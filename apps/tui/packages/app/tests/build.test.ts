@@ -1,10 +1,10 @@
 /** Built JSX must execute with production React under Node. No Harness service runs on Bun. */
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { pathToFileURL } from 'node:url'
 import { afterEach, expect, it } from 'bun:test'
-import { bundle, BUILT_ENV, profileEnvironment, requireBuilt } from '../../../scripts/build.ts'
+import { bundle, BUILT_ENV, diagnosticArguments, profileEnvironment, requireBuilt } from '../../../scripts/build.ts'
 
 const roots: string[] = []
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }) })
@@ -39,6 +39,18 @@ it('isolates Bake profiles from upstream and respects an explicit data directory
   expect(profileEnvironment(home, env)).toEqual({ NODE_ENV: 'production', DSH_HOME: custom })
   expect(env).toEqual({ DSH_HOME: custom, NODE_ENV: 'development' })
   expect(() => profileEnvironment(home, { DSH_HOME: '' })).toThrow('DSH_HOME must name a directory or be unset')
+})
+
+it('starts Node with the release launchers\' diagnostic flags under a created Bake-home directory', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bake diagnostics '))
+  roots.push(root)
+  const home = join(root, 'user home', '.bake')
+  const directory = join(home, 'diagnostics')
+  expect(diagnosticArguments(home)).toEqual(['--report-exclude-env', '--report-exclude-network', `--diagnostic-dir=${directory}`])
+  expect((await stat(directory)).isDirectory()).toBe(true)
+  if (process.platform !== 'win32') expect((await stat(directory)).mode & 0o777).toBe(0o700)
+  // The next launch finds the directory already there.
+  expect(() => diagnosticArguments(home)).not.toThrow()
 })
 
 it('requires every built entry and gives a clean checkout its build command', async () => {

@@ -5,7 +5,7 @@ import { installModelSelection, type Agent, type AgentHandle, type ModelSelectio
 import { brandString } from '@deepseek-ai/dsh-brand'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-agent-presets'
-import type {} from '@deepseek-ai/dsh-session-persistence'
+import { SessionAlreadyOwnedError } from '@deepseek-ai/dsh-session-persistence'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import type {} from '@deepseek-ai/dsh-fs'
 import { availableSelection } from './login.ts'
@@ -17,6 +17,46 @@ export interface SessionOptions {
 }
 
 /**
+ * Whether opening a session failed because another Bake process has it open.
+ *
+ * `openSession` refuses a live Agent of this process before the open, and the
+ * terminal composes no other session writer, so the persistence refusal that
+ * remains is the kernel lock another process holds. That lock records no
+ * owner, so there is no process id to name.
+ * @param error - an `openSession` failure.
+ * @returns whether the session's write lock is held elsewhere.
+ */
+export function openElsewhere(error: unknown): error is SessionAlreadyOwnedError {
+  return error instanceof SessionAlreadyOwnedError
+}
+
+/**
+ * Thrown resuming a session recorded before `agentPresets` existed, or created
+ * without one, when the caller supplied no `--preset` to restore it with.
+ *
+ * Only the command line can supply the missing preset, so a `/resume` picker
+ * that reaches this session cannot recover it either; {@link openSession}'s
+ * caller decides whether to word that for the reader or filter the session
+ * out beforehand.
+ */
+export class SessionNeedsPresetError extends Error {
+  constructor(message: string, readonly sessionId: SessionId) {
+    super(message)
+    this.name = 'SessionNeedsPresetError'
+  }
+}
+
+/**
+ * Whether resuming a session failed because it has no recorded preset and
+ * none was supplied to restore its composition.
+ * @param error - an `openSession` failure.
+ * @returns whether {@link SessionNeedsPresetError} names the session.
+ */
+export function needsPreset(error: unknown): error is SessionNeedsPresetError {
+  return error instanceof SessionNeedsPresetError
+}
+
+/**
  * Create a fresh session or resume the exact recorded composition and workspace.
  * @param ctx - settled application services.
  * @param options - requested identity and optional preset.
@@ -24,6 +64,7 @@ export interface SessionOptions {
  * @param connect - install observers before the agent is published or driven.
  * @param credentialRefs - keys the default provider reads; a fresh session without them starts on CLIProxyAPI when it is set up.
  * @returns the owned agent handle. The caller must dispose it.
+ * @throws {SessionAlreadyOwnedError} when another process has the resumed session open; see {@link openElsewhere}.
  */
 export async function openSession(
   ctx: Context, options: SessionOptions, signal: AbortSignal,
@@ -56,7 +97,9 @@ export async function openSession(
       if (presets !== undefined) {
         const recorded = projections.stateOf(agent.session, 'agentPreset')
         if (recorded === undefined) throw new Error('tui: agentPreset projection is required to resume')
-        if (recorded === null && options.preset === undefined) throw new Error('tui: session has no recorded preset; specify --preset to restore its composition')
+        if (recorded === null && options.preset === undefined) {
+          throw new SessionNeedsPresetError('tui: session has no recorded preset; specify --preset to restore its composition', agent.id)
+        }
         if (recorded !== null && options.preset !== undefined && recorded !== options.preset) throw new Error(`tui: session uses preset ${recorded}; --preset cannot change it during resume`)
         preset = recorded ?? initialPreset
       } else if (agent.session.header.agentPreset !== undefined) {

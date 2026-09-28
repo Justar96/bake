@@ -98,6 +98,13 @@ it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')('retain
   expect(tty.inputReady).toBe(true)
 })
 
+it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')('observes text without styles or hyperlink targets', async () => {
+  const styled = '\x1b[1mBOLD\x1b[22m \x1b]8;;https://example.com\x1b\\LINK\x1b]8;;\x1b\\ \x1b]8;;https://example.com\x07BEL\x1b]8;;\x07 DONE'
+  const { tty } = await terminal(`process.stdout.write(${JSON.stringify(styled)}); setInterval(() => {}, 1000)`)
+  await tty.wait('styled output', () => tty.clean.endsWith('DONE'))
+  expect(tty.clean).toBe('BOLD LINK BEL DONE')
+})
+
 it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')('reports the actual failed Node exit', async () => {
   const { tty } = await terminal('process.exit(7)')
   await expect(tty.wait('ready', () => tty.clean.includes('NEVER_READY'))).rejects.toThrow('Node exited {"code":7')

@@ -7,7 +7,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 import { transcriptRows } from '@dsh-tui/ui'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'
 import { inputHistory } from '@dsh-tui/ui/history.ts'
-import { openSession } from '../src/session.ts'
+import { needsPreset, openSession } from '../src/session.ts'
 import { SessionController } from '../src/controller.ts'
 import { harness, textResponse } from './harness.ts'
 
@@ -86,7 +86,9 @@ describe('session wiring', () => {
     await expect(openSession(ctx, { resume: 'foreign', preset: 'audit' }, signal, () => {})).rejects.toThrow('workspace')
     const legacy = await create('legacy', process.cwd())
     await legacy.dispose()
-    await expect(openSession(ctx, { resume: 'legacy' }, signal, () => {})).rejects.toThrow('no recorded preset')
+    const failure = await openSession(ctx, { resume: 'legacy' }, signal, () => {}).catch((error: unknown) => error)
+    expect(needsPreset(failure)).toBe(true)
+    expect(failure).toHaveProperty('sessionId', brandString<SessionId>('legacy'))
     const restored = await openSession(ctx, { resume: 'legacy', preset: 'audit' }, signal, () => {})
     cleanup.push(() => restored.dispose())
     expect(ctx.sessionProjections.stateOf(restored.agent.session, 'agentPreset')).toBe('audit')

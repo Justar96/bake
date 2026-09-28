@@ -1,11 +1,12 @@
 /** Terminal session navigation over Harness query, setup, and handle ownership. */
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent'
+import { SessionInUseError } from '@deepseek-ai/dsh-cmdline'
 import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
 import { formatAge } from '@dsh-tui/ui/format.ts'
 import type { AttachmentOptions } from './attachments.ts'
 import { SessionController } from './controller.ts'
-import { openSession, type SessionOptions } from './session.ts'
+import { needsPreset, openElsewhere, openSession, type SessionOptions } from './session.ts'
 import type { Updates } from './update.ts'
 import type { Preferences } from './preferences.ts'
 
@@ -43,9 +44,16 @@ export class SessionNavigation {
   /**
    * Open the startup session and replay its history.
    * @param signal - application startup lifetime.
+   * @throws {SessionInUseError} when another Bake process has the `--resume` session open.
    */
   async start(signal: AbortSignal): Promise<void> {
-    this.current = await this.connect(this.options, signal)
+    try {
+      this.current = await this.connect(this.options, signal)
+    } catch (error) {
+      // Refused before the first frame, so the launcher reports it on stderr.
+      if (openElsewhere(error)) throw new SessionInUseError(`${error.sessionId}: ${this.copy.sessionInUseLaunch}`, error)
+      throw error
+    }
   }
 
   /**
@@ -145,11 +153,23 @@ export class SessionNavigation {
       abort.signal.throwIfAborted()
       await this.navigate(abort.signal, newSession)
     }).catch((error: unknown) => {
-      this.controller?.notify(abort.signal.aborted ? this.copy.sessionsCancelled
-        : `${this.copy.sessionsError}: ${error instanceof Error ? error.message : String(error)}`)
+      this.controller?.notify(this.failure(error, abort.signal))
     }).finally(() => { this.operation = undefined; if (!this.closed) this.changed() })
     this.operation = { abort, done, committed: false }
     this.changed()
+  }
+
+  /**
+   * Word a navigation failure for the displayed session's notice line.
+   * @param error - why preparation stopped.
+   * @param signal - the navigation's own cancellation.
+   * @returns the localized notice.
+   */
+  private failure(error: unknown, signal: AbortSignal): string {
+    if (signal.aborted) return this.copy.sessionsCancelled
+    if (openElsewhere(error)) return this.copy.sessionInUse
+    if (needsPreset(error)) return this.copy.sessionNeedsPreset
+    return `${this.copy.sessionsError}: ${error instanceof Error ? error.message : String(error)}`
   }
 
   private assertAvailable(agent: Agent): void {

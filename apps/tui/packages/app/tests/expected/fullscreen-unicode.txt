@@ -3,10 +3,10 @@
 02 |  你好 world 🌟 你好 world 🌟|
 03 |  你好 world 🌟 你好 world 🌟|
 04 |  DONE|
-05 |PgUp/PgDn scroll · Ctrl+Home …|
+05 |Wheel/PgUp/PgDn scroll · Ctrl…|
 06 ||
 07 ||
 08 |──────────────────────────────|
 09 |> ▌Ask anything|
 10 |──────────────────────────────|
-11 |  Model: model  /workspace|
+11 |  model  /workspace|

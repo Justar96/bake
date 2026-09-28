@@ -4,7 +4,6 @@ import { readFile, rename, writeFile } from 'node:fs/promises'
 import { setTimeout as delay } from 'node:timers/promises'
 import { dictionaries } from '../../ui/src/copy.ts'
 import type { Metrics } from './report.ts'
-const ANSI = /\x1b\][^\x07]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]/g
 
 /** Dedicated terminal observation with bounded capture. Historical output is counted without retaining it all. */
 export class Terminal {
@@ -85,7 +84,7 @@ export class Terminal {
   }
 
   /** Bounded output tail with terminal escape sequences removed. */
-  get clean(): string { return this.text.replace(ANSI, '') }
+  get clean(): string { return Bun.stripANSI(this.text) }
 
   /**
    * Write terminal input without awaiting a frame.

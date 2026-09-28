@@ -5,9 +5,68 @@
 - id: tool-jobs
   disabled: true
 
+# Presets mount their own `compaction-basic`; the host row's automatic
+# listeners would reach every preset agent, `minimal` included. It stays
+# manual-only for the host `/compact`.
+- id: compaction-basic
+  config:
+    auto: false
+
+# Presets mount the agent's own rows. A host copy would reach every preset
+# agent: doubled where the preset mounts the row too (the skill catalog and
+# `/skill` bodies), leaked where it leaves the row out (`ptc`'s `workflow`,
+# every tool here for the shell-only `minimal`). Their services stay on the
+# host, as does the compaction trio for `/compact`.
+- id: agent-instructions
+  disabled: true
+- id: tool-bash
+  disabled: true
+- id: tool-pwsh
+  disabled: true
+- id: tool-fs
+  disabled: true
+- id: tool-fs-search
+  disabled: true
+- id: skill-filesystem
+  disabled: true
+- id: tool-skill
+  disabled: true
+- id: command-goal
+  disabled: true
+- id: tool-goal
+  disabled: true
+- id: plan-mode
+  disabled: true
+- id: tool-subagent-control
+  disabled: true
+- id: tool-subagent-list-agents
+  disabled: true
+- id: tool-subagent
+  disabled: true
+- id: tool-subagent-fork
+  disabled: true
+- id: workflow-ptc
+  disabled: true
+- id: tool-workflow
+  disabled: true
+- id: tool-todo
+  disabled: true
+- id: tool-web
+  disabled: true
+
+# Bake's preset persona owns the identity, so the harness opener stays out.
+- id: system-prompt
+  config:
+    personaPrefix: ''
+    includeHarnessIdentity: false
+
 - insert:
     - id: file-reference-local
       name: '@deepseek-ai/dsh-file-reference-local'
+
+    # The process-wide `cordisInspect` registry the `cordis` preset's tools use.
+    - id: cordis-host-runner
+      name: '@deepseek-ai/dsh-cordis-host-runner'
 
     - id: agent-presets
       name: '@deepseek-ai/dsh-agent-presets'

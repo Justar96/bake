@@ -39,6 +39,9 @@ describe('/help', () => {
     expect(listed(controller)).toMatch(/\/login \[target\] +Sign in or set up CLIProxyAPI/u)
     expect(listed(controller)).toMatch(/\/attach <path> +Stage a file for the next prompt/u)
     expect(listed(controller)).toContain(dictionaries.en.helpFooter)
+    // The composer's keys, line breaks included, close the list.
+    expect(listed(controller)).toContain(dictionaries.en.editHelp)
+    expect(listed(controller).trimEnd().endsWith(dictionaries.en.editHelp)).toBe(true)
     expect(controller.view.notice).toBeUndefined()
   })
 

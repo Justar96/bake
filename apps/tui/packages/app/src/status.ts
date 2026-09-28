@@ -3,6 +3,7 @@ import type { ContextPressureProjection, TokenUsageProjection } from '@deepseek-
 import type { ContextUsage, TokenTotals } from '@dsh-tui/ui/format.ts'
 import type { GoalEntry } from '@dsh-tui/ui/app.tsx'
 import type { GoalView } from '@deepseek-ai/dsh-goal'
+import type { CompactionEngine } from '@deepseek-ai/dsh-compaction'
 
 /**
  * Map the goal service view onto the header's display entry.
@@ -19,14 +20,25 @@ export function goalFor(goal: GoalView | undefined): GoalEntry | undefined {
   }
 }
 
-/** Never pair an earlier model's usage with the selected model or a newer request's capacity. */
-export function contextFor(pressure: ContextPressureProjection | undefined, model: string): ContextUsage | undefined {
+/**
+ * Never pair an earlier model's usage with the selected model or a newer request's capacity.
+ *
+ * `engines` are the compaction backends whose automatic listeners reach the
+ * agent. Each checks pressure before every step, so the lowest threshold any
+ * of them reports for the displayed route and capacity is where compaction
+ * starts. With none reported, `compactAt` stays absent rather than guessed.
+ */
+export function contextFor(pressure: ContextPressureProjection | undefined, model: string,
+  engines: readonly (Pick<CompactionEngine, 'pressureThreshold'> | undefined)[] = []): ContextUsage | undefined {
   if (pressure?.projectedTokens === undefined || pressure.contextWindow === undefined
     || pressure.contextWindow !== pressure.sampledContextWindow) return undefined
-  const matches = (route: ContextPressureProjection['sampledRoute']) => route !== undefined
+  const matches = (route: ContextPressureProjection['sampledRoute']): route is NonNullable<typeof route> => route !== undefined
     && `${route.provider}/${route.model}` === model
   if (!matches(pressure.sampledRoute) || !matches(pressure.requestRoute)) return undefined
-  return { used: pressure.projectedTokens, window: pressure.contextWindow }
+  const route = pressure.requestRoute
+  const window = pressure.contextWindow
+  const thresholds = engines.flatMap(engine => engine?.pressureThreshold(route, window) ?? [])
+  return { used: pressure.projectedTokens, window, ...thresholds.length === 0 ? {} : { compactAt: Math.min(...thresholds) } }
 }
 
 /** Session totals are cumulative, not a reading of the last request or model. */

@@ -9,10 +9,10 @@
 08 |  note   History 77|
 09 |  note   History 78|
 10 |  note   History 79|
-11 |PgUp/PgDn scroll · Ctrl+Home first · Ctrl+End latest|
+11 |Wheel/PgUp/PgDn scroll · Ctrl+Home first · Ctrl+End latest|
 12 ||
 13 ||
 14 |────────────────────────────────────────────────────────────|
-15 |> ▌Ask anything|
+15 |> ▌Ask anything · / commands · @ files|
 16 |────────────────────────────────────────────────────────────|
-17 |  Model: model  /workspace|
+17 |  model  /workspace|

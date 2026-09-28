@@ -1,8 +1,8 @@
 /** Cordis entry point for the interactive terminal profile. */
 import type { Context } from '@deepseek-ai/cordis'
+import { SESSION_IN_USE_EXIT, SessionInUseError } from '@deepseek-ai/dsh-cmdline'
 import z from '@deepseek-ai/schemastery'
 import { run, type RunnerOptions, type TuiIo } from './runner.ts'
-import type {} from '@deepseek-ai/dsh-cmdline'
 
 /** Stable Cordis plugin name. */
 export const name = 'tui-runner'
@@ -47,8 +47,10 @@ export function apply(ctx: Context, config: Config): void {
   const exit = ctx.get('appExit')
   if (exit === undefined) throw new Error('tui-runner: the launcher must provide ctx.appExit')
   const io: TuiIo = { in: process.stdin, out: process.stdout, err: process.stderr, exit }
+  // `run` already reported this error on stderr as soon as it was caught,
+  // before its own drains ran; this handler only picks the exit code once
+  // the whole disposal that error triggered has settled.
   void run(ctx, config, io).catch((error: unknown) => {
-    io.err.write(`dsh: ${error instanceof Error ? error.message : String(error)}\n`)
-    io.exit(1)
+    io.exit(error instanceof SessionInUseError ? SESSION_IN_USE_EXIT : 1)
   })
 }

@@ -1,0 +1,11 @@
+  note   Session: session-current
+
+/resume
+
+This session is open in another Bake process; close it there to continue it here, or start a new
+session with /new
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+> ▌Ask anything · / commands · @ files
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  model  /workspace

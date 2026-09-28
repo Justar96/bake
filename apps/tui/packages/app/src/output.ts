@@ -37,6 +37,14 @@ const CLEAR_BELOW = `${CSI}J`
 const CLEAR_TERMINAL = `${CSI}2J${CSI}3J${CSI}H`
 /** End of a synchronized update. What it presents must already be complete. */
 const END_SYNC = `${CSI}?2026l`
+/**
+ * Report button presses and the wheel (1000) in SGR encoding (1006), which
+ * has no coordinate limit. Motion stays unreported. Terminals keep native
+ * selection on Shift-drag, or Option-drag on macOS.
+ */
+const MOUSE_ON = `${CSI}?1000h${CSI}?1006h`
+const MOUSE_OFF = `${CSI}?1006l${CSI}?1000l`
+
 /** `ansi-escapes` `cursorNextLine`. Down one row to its first column, without scrolling. */
 const NEXT_LINE = `${CSI}E`
 
@@ -161,7 +169,8 @@ export interface FrameOutput {
  * @param styles - retain SGR styling. False implements `NO_COLOR` for rendered
  *   text without changing cursor, erase, paste, or synchronization controls.
  * @param screen - fullscreen batches writes without moving the shell cursor or
- *   converting positioned updates into terminal scrolling.
+ *   converting positioned updates into terminal scrolling, and reports the
+ *   mouse while the alternate buffer is shown.
  * @returns the wrapped streams and a synchronous flush.
  */
 export function frameOutput(out: NodeJS.WriteStream, err: NodeJS.WriteStream, styles = true, screen: 'inline' | 'fullscreen' = 'inline'): FrameOutput {
@@ -193,7 +202,10 @@ export function frameOutput(out: NodeJS.WriteStream, err: NodeJS.WriteStream, st
       } else if (stream === out) {
         // The alternate buffer can inherit the shell's cursor column. Home
         // only after entering it; never move the saved primary-screen cursor.
-        text = text.replaceAll(`${CSI}?1049h`, `${CSI}?1049h${CSI}2J${CSI}H`)
+        // Mouse reports live exactly as long as the alternate buffer, so every
+        // path that restores the shell screen also returns the mouse to it.
+        text = text.replaceAll(`${CSI}?1049h`, `${CSI}?1049h${CSI}2J${CSI}H${MOUSE_ON}`)
+          .replaceAll(`${CSI}?1049l`, `${MOUSE_OFF}${CSI}?1049l`)
           .replaceAll(`${CSI}3J`, '')
       }
       // Ink's Chalk version does not honor NO_COLOR on a TTY. Filter only

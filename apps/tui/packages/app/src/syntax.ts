@@ -83,9 +83,13 @@ export function languageOf(path: string): string | undefined {
  * A load failure leaves text in its semantic tone and reports no diagnostic.
  *
  * @param limits - how many highlighted runs to keep, and how much text they may hold.
+ * @param options - optional Shiki tokenization limit override for deterministic fixtures.
  * @returns the highlighter, usable at once.
  */
-export function createSyntax(limits: { readonly runs: number, readonly text: number } = { runs: CACHED, text: CACHED_TEXT }): Syntax {
+export function createSyntax(
+  limits: { readonly runs: number, readonly text: number } = { runs: CACHED, text: CACHED_TEXT },
+  options: { readonly tokenizeTimeLimit?: number } = {},
+): Syntax {
   let core: HighlighterCore | undefined
   let closed = false
   const loaded = new Set<string>()
@@ -135,7 +139,7 @@ export function createSyntax(limits: { readonly runs: number, readonly text: num
     }
     let tokens: readonly (readonly CodeToken[])[]
     try {
-      tokens = core.codeToTokensBase(text, { lang: language, theme: 'solarized-dark' })
+      tokens = core.codeToTokensBase(text, { lang: language, theme: 'solarized-dark', ...options })
         .map(line => line.map(token => codeToken(token.content.length, token.color, token.fontStyle)))
     } catch {
       // A grammar the regex engine cannot run leaves these lines plain.

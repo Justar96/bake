@@ -8,6 +8,7 @@ import { parseCommand, type CommandResult } from '@deepseek-ai/dsh-commands'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-query'
 import type {} from '@deepseek-ai/dsh-compaction'
+import type {} from '@deepseek-ai/dsh-agent-presets'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import { attachmentSummaries } from '@dsh-tui/ui/rows.ts'
 import { Actions, announcedCalls, appendTranscript, emptyTranscript, project, projector, SETTLES, suggestCommand, type Projector, type Row } from '@dsh-tui/ui'
@@ -24,6 +25,7 @@ import { FileReferences } from './references.ts'
 import { listTargets, login } from './login.ts'
 import { bakeVersion, changelogFor } from './release.ts'
 import { contextFor, goalFor, usageFor } from './status.ts'
+import { processHost, terminalSetup, type TerminalHost } from './terminal-setup.ts'
 import { listRoutes, namesRoute, routeOf, resolveRoute, resolveSelection } from './model.ts'
 import type { ModelSelection, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
@@ -34,6 +36,12 @@ import type {} from '@deepseek-ai/dsh-tool-todo/types'
 import type {} from '@deepseek-ai/dsh-plan-mode/types'
 import type {} from '@deepseek-ai/dsh-permission-presets/types'
 import type {} from '@deepseek-ai/dsh-goal'
+
+/** The one command this terminal runs at a time. */
+interface CommandActivity {
+  text: string; submitted: string; abort: AbortController; done: Promise<void>
+  commandId?: string; compactPhase?: 'preparing' | 'summarizing' | 'saving'
+}
 
 /** One terminal's presentation over a live Agent and its durable projections. */
 export class SessionController {
@@ -72,10 +80,13 @@ export class SessionController {
   private stream: { attemptId: string; blocks: LiveBlocks; printed: Printed } | undefined
   private streamRevision = -1
   private stopping = false
-  private command: {
-    text: string; submitted: string; abort: AbortController; done: Promise<void>
-    commandId?: string; compactPhase?: 'preparing' | 'summarizing' | 'saving'
-  } | undefined
+  private command: CommandActivity | undefined
+  /**
+   * Whether the running turn is compacting its own context: from a live
+   * `compaction/start` owned by a turn until its `compaction/end`, the turn's
+   * end, or idle. Live events only; a replayed start was not watched.
+   */
+  private autoCompacting = false
   private notice: string | undefined
   private closed = false
   private readonly off: (() => void)[] = []
@@ -87,18 +98,21 @@ export class SessionController {
    * @param copy - localized labels.
    * @param credentialRefs - profile-owned credential names used by /login.
    * @param changed - renderer notification; ignored after closure.
-   * @param attachmentOptions - validated draft byte and count limits.
+   * @param attachmentOptions - validated draft byte and count limits, and, for
+   *   tests, the environment and home `/terminal-setup` reads instead of this process's.
    * @param selection - harness reference for the active model selection, when available.
    */
   constructor(private readonly ctx: Context, readonly agent: Agent, private readonly copy: TuiCopy,
     private readonly credentialRefs: readonly string[], private readonly changed: () => void,
-    attachmentOptions: AttachmentOptions, private readonly selection?: ModelSelectionRef) {
+    attachmentOptions: AttachmentOptions & { readonly terminal?: TerminalHost }, private readonly selection?: ModelSelectionRef) {
     this.attachments = new AttachmentDraft(agent, attachmentOptions, copy)
     // The tool registry is the lookup. A tool contributed by any plugin
     // presents its own calls here without this surface knowing it exists. A
     // profile with no tools service renders every call at its raw arguments.
+    // The lookup is this agent's view: presets mount tools in the agent's own
+    // layer, which the unscoped global view cannot see.
     const tools = agent.ctx.get('tools')
-    this.projector = projector(copy, name => tools?.get(name))
+    this.projector = projector(copy, name => tools?.get(name, agent))
     this.interactions = new Interactions(ctx, agent, () => this.repaint())
     const commands = agent.ctx.get('commands')
     if (commands === undefined) throw new Error('tui: commands service is required')
@@ -222,7 +236,9 @@ export class SessionController {
           text: [
             ...listed.map(command => `${usage(command).padEnd(width)}  ${command.description}`),
             ...skills.length === 0 ? [] : ['', `${copy.skill}: ${skills.join(' ')}`],
-            '', copy.helpFooter,
+            // The composer's keys close the list: the one place they are all
+            // named, since the composer itself carries no standing hint.
+            '', copy.helpFooter, copy.editHelp,
           ].join('\n'),
         }
       },
@@ -237,6 +253,15 @@ export class SessionController {
         return entry === undefined ? { kind: 'error', text: copy.changelogUnavailable } : { kind: 'success', text: entry }
       },
     })))
+    this.off.push(agent.ctx.effect(() => commands.register({
+      name: 'terminal-setup', description: copy.terminalSetupCommand, recordInput: false,
+      // Returned, like `/help`: the report names files and an undo command
+      // the user may need after the notice region has moved on.
+      handler: ({ rawInput, signal }) => rawInput.trim() !== ''
+        ? { kind: 'error', text: copy.terminalSetupUsage }
+        : terminalSetup(attachmentOptions.terminal ?? processHost(),
+          (prompt, asked) => this.interactions.choose(prompt, asked), copy, signal),
+    })))
     this.off.push(ctx.on('session/event', (session, event) => {
       if (session !== agent.session) return
       const command = this.command
@@ -249,6 +274,10 @@ export class SessionController {
           command.compactPhase = 'saving'
         }
       }
+      // Automatic compaction runs inside a turn, which owns its brackets.
+      // `/compact` runs between turns, and its own phases above say so.
+      if (event.type === 'compaction/start') this.autoCompacting = event.data.turn !== null
+      else if (event.type === 'compaction/end' || event.type === 'turn/end') this.autoCompacting = false
       if (this.buffered !== undefined) this.buffered.push(event)
       else this.append(event)
       // The rows the stream stood in for have committed. `turn/end` covers an
@@ -261,7 +290,7 @@ export class SessionController {
     }))
     this.off.push(ctx.on('agent/status', payload => {
       if (payload.agent !== agent) return
-      if (payload.status === 'idle') this.stopping = false
+      if (payload.status === 'idle') { this.stopping = false; this.autoCompacting = false }
       this.repaint()
     }))
     this.off.push(ctx.on('agent/assistant-stream', payload => {
@@ -278,6 +307,11 @@ export class SessionController {
     // arrive only on this event, so the header would stay stale without it.
     this.off.push(ctx.on('goal/activation-changed', ({ sessionId }) => {
       if (sessionId === agent.session.id) this.repaint()
+    }))
+    // A profile reload replaces the host compaction engine and can move where
+    // compaction starts without any session event, so repaint on the swap.
+    this.off.push(ctx.on('internal/service', name => {
+      if (name === 'compaction') this.repaint()
     }))
     this.references = new FileReferences(agent, copy, () => this.repaint())
     this.catalog = new InputCatalog(ctx, agent, copy, () => this.repaint())
@@ -329,6 +363,7 @@ export class SessionController {
       committed: this.committed, live: this.actions.live(this.blocks), pending, status: this.agent.status,
       stopping: this.stopping, command: this.command?.text,
       ...(this.command?.compactPhase === undefined ? {} : { compactPhase: this.command.compactPhase }),
+      ...(this.autoCompacting ? { autoCompacting: true } : {}),
       notice: this.notice,
       interaction: this.interactions.current,
       todos: todos === undefined || todos === null ? undefined
@@ -341,7 +376,7 @@ export class SessionController {
       ...thinkingLevel === undefined ? {} : { thinkingLevel },
       completion: this.catalog.view, files: this.references.view, attachments: this.attachments.view,
       model,
-      context: contextFor(pressure, model),
+      context: contextFor(pressure, model, this.compactionEngines()),
       ...usage === undefined ? {} : { usage },
     }
   }
@@ -360,6 +395,17 @@ export class SessionController {
     const goals = this.ctx.get('goals')
     if (goals === undefined || this.ctx.get('agents')?.get(this.agent.id) !== this.agent) return undefined
     return goalFor(goals.get(this.agent))
+  }
+
+  /**
+   * Compaction engines whose automatic listeners can reach this agent. A host
+   * engine listens untagged, so it reaches every agent, including one whose
+   * preset mounts no engine; the shipped bundle sets it to `auto: false`,
+   * where it installs no listener and reports no threshold. A preset's own
+   * engine sits behind an `isolate` realm that only the roster can see into.
+   */
+  private compactionEngines() {
+    return [this.ctx.get('compaction'), this.ctx.get('agentPresets')?.serviceFor(this.agent, 'compaction')]
   }
 
   /**
@@ -392,14 +438,19 @@ export class SessionController {
       return false
     }
     if (parsed === undefined || commands?.find(this.agent, parsed.name) === undefined) {
-      if (this.command?.compactPhase !== undefined) { this.notify(this.copy.compactBusy); return false }
       if (this.command !== undefined && parseCommand(this.command.text)?.name === 'attach') { this.notify(this.copy.commandBusy); return false }
       if (this.attachments.pending) {
-        if (this.command !== undefined) { this.notify(this.copy.commandBusy); return false }
+        // Compaction leaves the draft alone, so staged files may queue behind it.
+        if (this.command !== undefined && this.command.compactPhase === undefined) { this.notify(this.copy.commandBusy); return false }
         return this.submitAttachments(text)
       }
       if (text.trim() === '') return false
       const message = createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } })
+      // During `/compact` the agent reports idle, so this is a follow-up. The
+      // compaction already holds the agent's next-turn admission (see the
+      // command dispatch below), so the inbox keeps the message, the pending
+      // panel shows it, and its turn starts once the compaction settles,
+      // whether it succeeded, found nothing, failed, or was cancelled.
       if (this.agent.status === 'running') this.agent.steer(message)
       else this.agent.followup(message)
       this.repaint()
@@ -413,16 +464,26 @@ export class SessionController {
     }
     if (this.command !== undefined) { this.notify(this.copy.commandBusy); return false }
     const abort = new AbortController()
-    const done = Promise.resolve().then(async () => {
-      if (commands === undefined) throw new Error('tui: commands service is required')
-      const result = await commands.execute(this.agent, text, [], abort.signal)
+    // Published before dispatch: the `command/run` the registry appends names
+    // this command, and the event listener correlates it and its compaction.
+    const command: CommandActivity = {
+      text, submitted, abort, done: Promise.resolve(), ...(parsed.name === 'compact' ? { compactPhase: 'preparing' as const } : {}),
+    }
+    this.command = command
+    // Dispatched in the submitting turn, not a later one. Without attachments
+    // the registry reaches the handler synchronously, and `/compact` claims
+    // the agent there: `compactNow` enters `Agent.runMaintenance` before it
+    // first awaits. So no prompt the user sends after this can wake the agent
+    // first and leave compaction busy; it waits in the inbox for the
+    // maintenance to settle instead, and is neither lost nor sent twice.
+    const execution = (async () => commands.execute(this.agent, text, [], abort.signal))()
+    command.done = execution.then(result => {
       if (result === undefined) this.notify(`${this.copy.unknownCommand}: /${parsed.name}`)
     }).catch(() => {
       // A thrown handler failure is already in the transcript: the registry
       // records it as the command's `command/done`. Only cancellation is not.
       if (abort.signal.aborted) this.notify(this.copy.cancelled)
     }).finally(() => { this.command = undefined; this.repaint() })
-    this.command = { text, submitted, abort, done, ...(parsed.name === 'compact' ? { compactPhase: 'preparing' as const } : {}) }
     this.repaint()
     return true
   }

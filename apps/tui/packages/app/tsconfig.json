@@ -43,6 +43,9 @@
       "path": "../../../../packages/util/brand"
     },
     {
+      "path": "../../../../packages/util/atomic-write"
+    },
+    {
       "path": "../../../../packages/boot/cmdline"
     },
     {

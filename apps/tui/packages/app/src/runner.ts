@@ -3,6 +3,7 @@ import React from 'react'
 import { render, type Instance } from 'ink'
 import type { Context } from '@deepseek-ai/cordis'
 import { App } from '@dsh-tui/ui/app.tsx'
+import { compactPath } from '@dsh-tui/ui/present.ts'
 import { dictionaries, type Locale, type TuiCopy } from '@dsh-tui/ui/copy.ts'
 import type { FrameStyle } from '@dsh-tui/ui/layout.ts'
 import type { Clock } from '@dsh-tui/ui/activity.ts'
@@ -93,10 +94,17 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
     // Restore the terminal now, before anything else writes to it.
     output?.flush()
   }
+  // Settled only once `run`'s own `finally` has drained every owned background
+  // task below. A root or fiber disposal invokes this disposer first and
+  // awaits its return, so that path blocks on the same drains `finally` runs;
+  // `finally`'s own `await stop()` comes after it resolves `drained`, so the
+  // ordinary quit path never waits on itself.
+  const drained = Promise.withResolvers<void>()
   const stop = ctx.effect(() => () => {
     abort.abort()
     releaseTerminal()
     done.resolve()
+    return drained.promise
   }, 'tui terminal owner')
   const preferences = new Preferences(ctx, {
     screen: config.screen ?? 'inline', locale: config.locale, composerFrame: config.composerFrame,
@@ -153,7 +161,8 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
       goalObjective: settings.goalObjective,
       highlight: syntax.highlight, version, ...updates.state === undefined ? {} : { update: updates.state },
       ...updates.baking === undefined ? {} : { baking: updates.baking },
-      cwd: cwd ?? '', ...branch === undefined ? {} : { git: branch }, sessionId: active.agent.id,
+      // Shortened against home here: the presentation layer reads no environment.
+      cwd: cwd === undefined ? '' : compactPath(cwd, process.env['HOME']), ...branch === undefined ? {} : { git: branch }, sessionId: active.agent.id,
       onReferenceQuery: query => active.references.search(query),
       onArgumentQuery: query => active.argumentQuery(query),
       onInspectSubagent: id => { navigation?.submit(`/agents ${id}`) },
@@ -208,15 +217,29 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
     await Promise.race([done.promise, ui.waitUntilExit()])
     completed = !abort.signal.aborted
   } catch (error) {
-    if (!abort.signal.aborted) throw error
+    if (!abort.signal.aborted) {
+      // Reported immediately, before the drains below: a hung drain must not
+      // swallow the message a caller needs to explain the exit.
+      io.err.write(`dsh: ${error instanceof Error ? error.message : String(error)}\n`)
+      throw error
+    }
   } finally {
+    // Abort before draining: `updates`/`git` background loops and navigation's
+    // owned operations only stop once this signal fires, so it must land
+    // before anything below awaits them, whether or not `stop()` already ran.
+    abort.abort()
     releaseTerminal()
+    try {
+      await navigation?.drain()
+      await startupReport
+      await updates.drain()
+      await git.drain()
+      await syntax.close()
+    } finally {
+      // A failed drain must still release a disposal waiting on this gate.
+      drained.resolve()
+    }
     await stop()
-    await navigation?.drain()
-    await startupReport
-    await updates.drain()
-    await git.drain()
-    await syntax.close()
   }
   if (completed) io.exit(0)
 }

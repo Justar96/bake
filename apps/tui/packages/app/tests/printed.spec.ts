@@ -102,11 +102,11 @@ describe('reconciling the commit', () => {
     expect(printed.reconcile([{ kind: 'assistant', text: 'Done.\n' }])).toEqual([])
   })
 
-  test('keeps the answer\'s rate once the answer itself already printed', () => {
+  test('keeps the answer\'s rate once the answer itself already printed, for the turn\'s summary', () => {
     const printed = new Printed()
     stream(printed, ['Done.\n\n'])
-    expect(printed.reconcile([{ kind: 'assistant', text: 'Done.' }, { kind: 'rate', text: '4 tokens \u00b7 10.0 tok/s' }]))
-      .toEqual([{ kind: 'rate', text: '4 tokens \u00b7 10.0 tok/s' }])
+    expect(printed.reconcile([{ kind: 'assistant', text: 'Done.' }, { kind: 'rate', tokens: 4, ms: 400 }]))
+      .toEqual([{ kind: 'rate', tokens: 4, ms: 400 }])
   })
 
   test('drops printed reasoning and keeps the order of the rest', () => {
