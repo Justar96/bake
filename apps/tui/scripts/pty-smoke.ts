@@ -1445,7 +1445,7 @@ scenario('cliproxyapi', 'the built TUI configures a CLIProxyAPI URL and key and 
   { replayOnly: true },
   async run => {
     const before = await run.logs()
-    const requests: Array<{ path: string, query: string, authorization: string | null, model?: string }> = []
+    const requests: Array<{ path: string, query: string, authorization: string | null, model?: string, cached?: boolean }> = []
     const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
       const url = new URL(request.url)
       if (url.pathname === '/v1/responses') {
@@ -1466,8 +1466,28 @@ scenario('cliproxyapi', 'the built TUI configures a CLIProxyAPI URL and key and 
         return new Response(wire,
           { headers: { 'content-type': 'text/event-stream' } })
       }
+      if (url.pathname === '/v1/messages') {
+        const body = await request.json() as { model: string, system?: { cache_control?: unknown }[] }
+        requests.push({ path: url.pathname, query: url.search, authorization: request.headers.get('x-api-key'), model: body.model,
+          cached: body.system?.some(block => block.cache_control !== undefined) ?? false })
+        const events = [
+          ['message_start', { type: 'message_start', message: { id: 'msg_claude', type: 'message', role: 'assistant', model: body.model,
+            content: [], stop_reason: null, usage: { input_tokens: 4, output_tokens: 0, cache_read_input_tokens: 0 } } }],
+          ['content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }],
+          ['content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'CLAUDE_OK' } }],
+          ['content_block_stop', { type: 'content_block_stop', index: 0 }],
+          ['message_delta', { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 2 } }],
+          ['message_stop', { type: 'message_stop' }],
+        ] as const
+        return new Response(events.map(([name, data]) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`).join(''),
+          { headers: { 'content-type': 'text/event-stream' } })
+      }
       requests.push({ path: url.pathname, query: url.search, authorization: request.headers.get('authorization') })
-      return Response.json({ models: [{ slug: 'gpt-test', display_name: 'GPT Test', context_window: 128000 }] })
+      return Response.json({ models: [
+        { slug: 'gpt-test', display_name: 'GPT Test', context_window: 128000 },
+        { slug: 'claude-test', display_name: 'Claude Test', owned_by: 'anthropic', context_window: 200000 },
+        { slug: 'image-test', output_modalities: ['image'] },
+      ] })
     } })
     await run.writeOverlay(undefined, { cliProxyApi: true })
     try {
@@ -1480,12 +1500,17 @@ scenario('cliproxyapi', 'the built TUI configures a CLIProxyAPI URL and key and 
         tty.send(`${server.url.toString()}\r`, 'set the proxy URL')
         await tty.expect('2/2 · CLIProxyAPI API key')
         tty.send('smoke-proxy-key\r', 'store the proxy key')
-        await tty.expect('cliproxyapi: 1 model ready; choose it with /model')
+        await tty.expect('cliproxyapi: 2 models ready; choose one with /model')
         tty.send('/model cliproxyapi/gpt-test\r', 'select the discovered model')
         await tty.expect('Model set for the next turn: cliproxyapi/gpt-test')
         tty.send('Say PROXY_OK\r', 'run one turn through the configured proxy')
         await tty.expect('  PROXY_OK')
         await tty.expect('✓ Completed')
+        const claude = tty.mark()
+        tty.send('/model cliproxyapi/claude-test\r', 'select the Claude model')
+        await tty.expect('Model set for the next turn: cliproxyapi/claude-test', claude)
+        tty.send('Say CLAUDE_OK\r', 'run one turn over Anthropic Messages')
+        await tty.expect('  CLAUDE_OK')
       })
       assert(!transcript.includes('smoke-proxy-key'), 'CLIProxyAPI secret appeared on the terminal')
       assert(!transcript.includes('Could not parse message into JSON'), 'empty SSE framing leaked an SDK parse error')
@@ -1497,16 +1522,19 @@ scenario('cliproxyapi', 'the built TUI configures a CLIProxyAPI URL and key and 
       { path: '/v1/models', query: '?client_version=pi', authorization: 'Bearer smoke-proxy-key' },
       { path: '/v1/responses', query: '', authorization: 'Bearer smoke-proxy-key', model: 'gpt-test' },
       { path: '/v1/responses', query: '', authorization: 'Bearer smoke-proxy-key', model: 'gpt-test' },
-    ]), 'CLIProxyAPI did not validate the catalog and send the selected model to the entered proxy')
+      // Claude goes to the proxy root over Messages, with a cache breakpoint on the system prompt.
+      { path: '/v1/messages', query: '?beta=true', authorization: 'smoke-proxy-key', model: 'claude-test', cached: true },
+    ]), `CLIProxyAPI did not validate the catalog and send each model to the entered proxy: ${JSON.stringify(requests)}`)
     assert(!(await Bun.file(join(run.home, 'settings.yaml')).text()).includes('smoke-proxy-key'),
       'CLIProxyAPI secret was saved in model settings')
     const log = await events(await run.created(before, 'proxy retry'))
-    assert(log.filter(event => event.type === 'user/message' && event.data.source.kind === 'user').length === 1,
+    // One prompt per model: the retry must not add a third.
+    assert(log.filter(event => event.type === 'user/message' && event.data.source.kind === 'user').length === 2,
       'proxy retry duplicated user input')
     const retries = log.filter(event => event.type === 'llm/retry')
     assert(retries.length === 1 && retries[0]!.data.failure.code === 'TRANSPORT',
       'missing SSE completion did not produce exactly one transport retry')
-    assert(log.filter(event => event.type === 'assistant/message').length === 1, 'proxy retry persisted an extra assistant message')
+    assert(log.filter(event => event.type === 'assistant/message').length === 2, 'proxy retry persisted an extra assistant message')
     assert(log.some(event => event.type === 'turn/end' && event.data.reason.kind === 'completed'),
       'proxy recovery did not complete the turn')
   })

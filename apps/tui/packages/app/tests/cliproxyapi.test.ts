@@ -1,7 +1,7 @@
 /** CLIProxyAPI setup and model mapping without network or credential fixtures. */
 import { describe, expect, it } from 'bun:test'
 import type { Context } from '@deepseek-ai/cordis'
-import { cliProxyEndpoints, cliProxyModels, configureCliProxyApi, fetchCliProxyModels } from '../src/cliproxyapi.ts'
+import { cliProxyApi, cliProxyEndpoints, cliProxyModels, configureCliProxyApi, fetchCliProxyModels } from '../src/cliproxyapi.ts'
 
 const labels = { url: 'CLIProxyAPI base URL', key: 'CLIProxyAPI API key' }
 
@@ -36,16 +36,43 @@ describe('CLIProxyAPI models', () => {
     expect(cliProxyModels({ data: [{ id: 'model-a' }] })).toEqual([{ id: 'model-a', name: 'model-a' }])
   })
 
-  it('serves chat-only upstream families over Chat Completions and the rest over the route protocol', () => {
+  it('serves each family over the protocol it relays cleanly', () => {
     const apis = cliProxyModels({ data: ['kimi-k3', 'moonshotai/kimi-k3-256k', 'glm-5.3-flash', 'qwen3-coder-plus',
-      'deepseek-v4-pro', 'MiniMax-M3', 'gpt-6-sol', 'claude-opus-5-5', 'gemini-3.8-flash-high', 'grok-4.7']
+      'deepseek-v4-pro', 'MiniMax-M3', 'gpt-6-sol', 'claude-opus-5-5', 'anthropic/claude-sonnet-5', 'gemini-3.8-flash-high', 'grok-4.7']
       .map(id => ({ id })) }).map(model => [model.id, model.api])
     expect(apis).toEqual([
       ['kimi-k3', 'openai-completions'], ['moonshotai/kimi-k3-256k', 'openai-completions'],
       ['glm-5.3-flash', 'openai-completions'], ['qwen3-coder-plus', 'openai-completions'],
       ['deepseek-v4-pro', 'openai-completions'], ['MiniMax-M3', 'openai-completions'],
-      ['gpt-6-sol', undefined], ['claude-opus-5-5', undefined], ['gemini-3.8-flash-high', undefined], ['grok-4.7', undefined],
+      ['gpt-6-sol', undefined], ['claude-opus-5-5', 'anthropic-messages'], ['anthropic/claude-sonnet-5', 'anthropic-messages'],
+      ['gemini-3.8-flash-high', undefined], ['grok-4.7', undefined],
     ])
+    // The listing's owner decides for an id that does not name its family.
+    expect(cliProxyApi('house-model', 'Anthropic')).toBe('anthropic-messages')
+    expect(cliProxyApi('house-model', 'openai')).toBe('openai-responses')
+  })
+
+  it('sends Claude to the proxy root, with adaptive thinking only where it takes an effort level', () => {
+    const models = cliProxyModels({ data: [
+      { id: 'claude-opus-5-5', owned_by: 'anthropic', supported_reasoning_levels: ['none', 'low', 'high', 'xhigh', 'max'] },
+      { id: 'claude-opus-4-5-20251101', owned_by: 'anthropic', supported_reasoning_levels: ['none', 'low', 'high'] },
+      { id: 'gpt-6-sol', owned_by: 'openai', supported_reasoning_levels: ['low', 'high'] },
+    ] }, 'https://proxy.example')
+    expect(models).toEqual([
+      { id: 'claude-opus-5-5', api: 'anthropic-messages', baseURL: 'https://proxy.example', name: 'claude-opus-5-5',
+        reasoningEfforts: { low: 'low', high: 'high', xhigh: 'xhigh', max: 'max' }, compat: { forceAdaptiveThinking: true } },
+      { id: 'claude-opus-4-5-20251101', api: 'anthropic-messages', baseURL: 'https://proxy.example', name: 'claude-opus-4-5-20251101',
+        reasoningEfforts: { low: 'low', high: 'high' } },
+      { id: 'gpt-6-sol', name: 'gpt-6-sol', reasoningEfforts: { low: 'low', high: 'high' } },
+    ])
+  })
+
+  it('leaves out models that cannot answer in text', () => {
+    expect(cliProxyModels({ data: [
+      { id: 'gpt-image-2', output_modalities: ['image'] },
+      { id: 'gpt-6-sol', output_modalities: ['text'] },
+      { id: 'unlabelled' },
+    ] }).map(model => model.id)).toEqual(['gpt-6-sol', 'unlabelled'])
   })
 
   it('validates the model response before setup proceeds', async () => {
@@ -75,14 +102,18 @@ it('saves a validated URL and model route without placing the key in settings', 
   const prompts = ['https://proxy.example/v1', 'test-key']
   const fetcher = (async (url: string) => {
     expect(url).toBe('https://proxy.example/v1/models?client_version=pi')
-    return Response.json({ models: [{ slug: 'gpt-test' }] })
+    return Response.json({ models: [{ slug: 'gpt-test' }, { slug: 'claude-test', owned_by: 'anthropic' }] })
   }) as typeof fetch
   const questions: string[] = []
   const count = await configureCliProxyApi(ctx, async question => {
     questions.push(question.message)
     return prompts.shift()!
   }, new AbortController().signal, labels, fetcher)
-  expect(count).toBe(1)
+  expect(count).toBe(2)
+  const [op] = (writes[1] as [string, { value: { baseURL: string, models: { id: string, api?: string, baseURL?: string }[] } }[]])[1]
+  expect(op!.value.baseURL).toBe('https://proxy.example/v1')
+  expect(op!.value.models).toMatchObject([{ id: 'gpt-test' },
+    { id: 'claude-test', api: 'anthropic-messages', baseURL: 'https://proxy.example' }])
   expect(questions).toEqual([
     '1/2 · CLIProxyAPI base URL [http://127.0.0.1:8317]',
     '2/2 · CLIProxyAPI API key',
