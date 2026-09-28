@@ -152,8 +152,9 @@ try {
   }
   const installed = join(installRoot, 'versions', `${manifest.version}-${artifact.sha256.slice(0, 12)}`)
   // Installed with the workspace's bunfig.toml, a release resolves modules through the layout development does.
+  // Windows packs with Bun's default layout instead; see pack.ts.
   const isolated = (tree: string): boolean => existsSync(join(tree, 'node_modules/.bun'))
-  if (isolated(installed) !== isolated(ROOT)) {
+  if (process.platform !== 'win32' && isolated(installed) !== isolated(ROOT)) {
     throw new Error(`The release node_modules is ${isolated(installed) ? 'isolated' : 'hoisted'}, unlike the workspace's`)
   }
   const installedVersion = (JSON.parse(readFileSync(join(installed, 'package.json'), 'utf8')) as { version: string }).version

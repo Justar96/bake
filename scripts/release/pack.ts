@@ -69,9 +69,14 @@ try {
   // install, whose devDependencies satisfy each workspace peer, but this
   // production install of one workspace needs those peers installed. The file
   // ships beside bun.lock, the rest of the install input.
-  const settings = Bun.TOML.parse(readFileSync(join(ROOT, 'bunfig.toml'), 'utf8')) as { install?: { linker?: unknown } }
-  if (typeof settings.install?.linker !== 'string') throw new Error('bunfig.toml sets no install.linker')
-  writeFileSync(join(stage, 'bunfig.toml'), `[install]\nlinker = ${JSON.stringify(settings.install.linker)}\n`)
+  // Windows keeps Bun's default layout: the hoisted linker links workspace
+  // packages there with junctions, whose absolute targets point into this
+  // staging directory, so the unpacked archive could not resolve them.
+  if (process.platform !== 'win32') {
+    const settings = Bun.TOML.parse(readFileSync(join(ROOT, 'bunfig.toml'), 'utf8')) as { install?: { linker?: unknown } }
+    if (typeof settings.install?.linker !== 'string') throw new Error('bunfig.toml sets no install.linker')
+    writeFileSync(join(stage, 'bunfig.toml'), `[install]\nlinker = ${JSON.stringify(settings.install.linker)}\n`)
+  }
   cpSync(join(ROOT, 'patches'), join(stage, 'patches'), { recursive: true })
   cpSync(join(ROOT, 'LICENSE'), join(stage, 'LICENSE'))
   cpSync(join(ROOT, 'THIRD_PARTY_NOTICES.md'), join(stage, 'THIRD_PARTY_NOTICES.md'))
