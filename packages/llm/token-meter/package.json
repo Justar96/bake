@@ -43,7 +43,7 @@
   "dependencies": {
     "@deepseek-ai/dsh-util-values": "workspace:^",
     "@deepseek-ai/schemastery": "workspace:^",
-    "zod": "^4.4.3"
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
