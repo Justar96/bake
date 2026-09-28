@@ -33,7 +33,7 @@ Type `/feedback` followed by your remark and send it. A successful entry is ackn
 
 | Input | Result |
 |---|---|
-| `/feedback the diff view is unreadable` | Record the remark and acknowledge with three lines: `Feedback recorded for session {sessionId}`, `Anonymous user: {userId}.`, and a sharing line. When a telemetry backend uploads feedback (`sessionTelemetry.sharing` is not `disabled`), it says the session history up to now is shared and names `DSH_TELEMETRY_DISABLED=1`; otherwise it says the feedback stays in the local session log. |
+| `/feedback the diff view is unreadable` | Record the remark and acknowledge with three lines: `Feedback recorded for session {sessionId}`, `Anonymous user: {userId}.`, and a sharing line. By default it reads `Telemetry is off; this feedback stays in the local session log.`: Bake's shipped profiles configure no telemetry collector. When a telemetry backend uploads feedback (`sessionTelemetry.sharing` is not `disabled`, as after you set `DSH_TELEMETRY_OTLP_URL`), it says the session history up to now is uploaded to the configured telemetry collector and names `DSH_TELEMETRY_DISABLED=1`. |
 | `/feedback` | A usage error: `Usage: /feedback <text>`. The required `<text>` hint is shown in command completion and help. Whitespace-only input counts as empty. |
 
 Surrounding whitespace is trimmed, but the remark is otherwise kept exactly as typed: no truncation, case folding, or command parsing — `/feedback /plan felt slow` records that literal text. Each command records its own entry; nothing is merged or replaced.
@@ -138,6 +138,7 @@ These limits define where session feedback is a poor fit or behaves differently 
 - **Category and text only** — an entry carries at most one category and one free-text string, with no severity or referenced-event link.
 - **Live Sessions only through the Remote** — `sessionFeedback.record` answers `session-not-found` for a Session no live owner carries; the Web dialog reports that failure when its Session retires while it is open.
 - **No amend or withdraw** — the session log is append-only and this package adds no tombstone, so a mistaken entry stays recorded and can only be superseded by a later one.
+- **The sharing line covers the telemetry backend only** — a composition that opts back into [`session-log-deepseek`](../../session/session-log-deepseek/README.md) also sends the log, this feedback included, with later official DeepSeek requests; the acknowledgement does not report that path.
 - **No explicit durability barrier** — the acknowledgement follows the append, not a flush, so an entry recorded immediately before a crash can be lost with any other unflushed tail. A consumer that needs a barrier awaits `ctx.sessions.flush(session)`.
 - **No visible acknowledgement on a fresh session** — the web transcript renders command rows only once a session is active, so a typed `/feedback <text>` on a still-blank session records the event but shows no acknowledgement row; the dialog's toast does not depend on the transcript.
 - **Web only among the shipped entry points** — headless mode, ACP automation, and JSON-RPC provide no command adapter, so `/feedback` is unavailable there.

@@ -51,6 +51,8 @@ The file-count limit is validated at mount. The tool requires an agent Session w
 
 The tool resolves paths through the configured filesystem provider and checks regular-file metadata without reading contents. Successful final `tools/result` notifications append `deliverables/presented`, including nested calls. A later enclosing program failure does not revoke an already completed declaration. Blocked results publish none. Each plugin instance records only calls it executed; scoped tools with the same name cannot publish through another instance.
 
+A UI titles a call by its file names through the pure `presentCall` in `src/presentation.ts`: `report.md, notes.md`, naming the first three and counting the rest as `+N`, cut at 80 characters. The full paths stay in the result text, one `Presented <path>` line each, which keeps the UI's generic rendering because the tool declares no `presentResult`. Obsolete logged arguments keep generic rendering for the call as well.
+
 The pure `./types` entry declares `PresentedFile` and the Session event without importing Host runtime code. The Web consumer validates persisted declarations before displaying or opening them. The event stores no Session ID, so forked history resolves relative paths against the viewed Session's workspace.
 
 **Runtime invariant:** No companion is published. Tool and event registrations are effect-owned, and the Session log owns file declarations; the plugin maintains no independent file-content store.
@@ -72,7 +74,7 @@ The pure `./types` entry declares `PresentedFile` and the Session event without 
 
 #### What the model sees
 
-The [present schema](../../../docs/tool-catalog.md#present) asks for existing accessible files: “Declare existing files accessible through the Session filesystem as final deliverables. When a file you create or update is an output the user asked to receive, you must call present after writing it and before your final response, including files created through Bash or code execution. Mentioning its path in your reply does not replace this call. The files must already exist. The user opens the current source files; their contents are not copied or preserved.” Results report `Presented <path>` for each file; the program result and durable event contain paths and optional descriptions.
+The [present schema](../../../docs/tool-catalog.md#present) asks for existing accessible files: “Deliver files the user asked to receive. After creating or updating such a file, however you made it, call present before your final reply; mentioning its path is not enough. The files must already exist where your file tools can see them. The user opens them in place, so leave them there.” Each `path` is an existing regular file, absolute or relative to the working directory. Results report `Presented <path>` for each file; the program result and durable event contain paths and optional descriptions.
 
 #### Token effect
 

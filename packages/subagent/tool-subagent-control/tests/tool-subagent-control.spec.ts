@@ -118,12 +118,35 @@ describe('dsh-tool-subagent-control', () => {
     // The continuable path has no Task, so the schema must not promise one.
     expect(schemas[0]!.description).not.toContain('job_output')
     expect(schemas[0]!.description).not.toContain('job id')
-    expect(schemas[0]!.description).toContain('nearest step')
-    expect(schemas[0]!.description).toContain('direct continuable child')
-    expect(schemas[0]!.description).toContain('If you are a resident continuable child')
+    expect(schemas[0]!.description).toBe(
+      'Send a message to one of your direct continuable subagents by its agent id. If you are a continuable '
+      + 'subagent, you can also message your parent. A working target reads the message at its next step; '
+      + 'otherwise the message starts a new turn. You get delivery confirmation, not a reply, and an error '
+      + 'means the message was not delivered.',
+    )
     expect(props.agent_id).toMatchObject({
-      description: 'The agent id of your direct continuable child, or your direct parent when you are a resident continuable child.',
+      description: 'The agent id of a direct continuable subagent, or of your parent if you are a continuable subagent.',
     })
+    expect(props.message).toMatchObject({ description: 'The message to send.' })
+  })
+
+  it('titles a message by its target and first line, and an interrupt by its target', async () => {
+    const { ctx } = await setup([])
+    const send = ctx.tools.get('send_message')!
+    const id = 'session-a382bf6a-a89d-48aa-babd-18fa894e64ed'
+    expect(send.presentCall?.({ agent_id: id, message: 'Also check the lockfile.' }))
+      .toEqual({ card: 'generic', title: `${id}: Also check the lockfile.`, kind: 'other' })
+    // Later lines and a long first line are marked as left out, never shown.
+    expect(send.presentCall?.({ agent_id: 'a1', message: '\n  Also check\tthe lockfile.\n\nThen the tests.' }))
+      .toEqual({ card: 'generic', title: 'a1: Also check the lockfile. \u2026', kind: 'other' })
+    expect(send.presentCall?.({ agent_id: 'a1', message: `${'word '.repeat(30)}\nmore` }))
+      .toEqual({ card: 'generic', title: `a1: ${'word '.repeat(10).slice(0, 47).trimEnd()}\u2026`, kind: 'other' })
+    expect(send.presentCall?.({ agent_id: 'a1', message: ' ' })).toEqual({ card: 'generic', title: 'a1', kind: 'other' })
+    expect(ctx.tools.get('interrupt_agent')?.presentCall?.({ agent_id: 'a1' }))
+      .toEqual({ card: 'generic', title: 'Interrupt a1', kind: 'execute' })
+    // Obsolete or invalid logged arguments keep the generic rendering.
+    expect(send.presentCall?.({ target: 'a1', message: 'hi' })).toBeUndefined()
+    expect(ctx.tools.get('interrupt_agent')?.presentCall?.({ agent_id: 1 })).toBeUndefined()
   })
 
   it('keeps the send_message definition and ordering byte-identical in a fork child', async () => {
@@ -361,8 +384,13 @@ describe('dsh-tool-subagent-control interrupt_agent', () => {
     expect(schemas).toHaveLength(1)
     const props = (schemas[0]!.parameters as { properties?: Record<string, unknown> }).properties ?? {}
     expect(Object.keys(props)).toEqual(['agent_id'])
-    expect(schemas[0]!.description).toContain('current turn')
-    expect(schemas[0]!.description).toContain('send_message')
+    expect(schemas[0]!.description).toBe(
+      'Stop the current turn of a continuable subagent below you, whether a direct child or deeper, by its '
+      + 'agent id. Messages already queued for it wait for a later send_message, subagents it started keep '
+      + 'running, and it stays available for follow-ups. The call returns once the stop is requested, so the '
+      + 'subagent may keep running briefly; interrupting one that has already finished does nothing.',
+    )
+    expect(props.agent_id).toMatchObject({ description: 'The agent id of the subagent to interrupt.' })
   })
 
   it('interrupts a running direct child with the parent cause, parking its queue', async () => {

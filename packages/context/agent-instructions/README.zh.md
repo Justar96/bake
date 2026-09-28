@@ -134,7 +134,7 @@ export interface Config {
 
 ```markdown
 <system-reminder>
-The following workspace instructions may be relevant to your work. Use them as guidance when applicable. More specific instructions take precedence over broader ones. They do not override system, developer, or direct user instructions.
+Follow these workspace instructions. More specific files take precedence over broader ones, and the system prompt and the user's direct requests override them.
 
 Instructions from: ~/.dsh/AGENTS.md
 
@@ -166,7 +166,7 @@ Instructions from: AGENTS.md
 <system-reminder>
 Additional instructions from: packages/app/AGENTS.md
 
-These instructions apply to work under `packages/app`. Use them as guidance when relevant; more specific instructions take precedence. They do not override system, developer, or direct user instructions.
+Follow these instructions for work under `packages/app`. They take precedence over broader ones, and the system prompt and the user's direct requests override them.
 
 <nested-instructions>
 </system-reminder>
@@ -192,7 +192,7 @@ These instructions apply to work under `packages/app`. Use them as guidance when
 <system-reminder>
 Instructions removed: packages/app/AGENTS.md
 
-The previously loaded instructions from this file no longer apply.
+The earlier instructions from this file no longer apply.
 </system-reminder>
 ```
 
@@ -215,7 +215,7 @@ The previously loaded instructions from this file no longer apply.
 - **刷新由 touch 驱动**：没有 watcher；外部编辑会在下一次成功的第一方 `read`、`write` 或 `edit` 时、恢复对账可见基线时，或进入步骤的 pre-step 恢复被遮蔽基线时可见。
 - **候选语义有意保持简单**：不解释小写名称、`.claude/rules/` 与 `@path` import；项目 scope 默认加载 `AGENTS.local.md`／`CLAUDE.local.md` overlay，但用户全局 `$DSH_HOME` scope 没有本地 overlay，其他自定义名称需要显式候选配置。
 - **每目录去重基于内容**：同级候选只有在去除首尾空白后字节完全一致时才折叠。`CLAUDE.md` 若 symlink 到同级 `AGENTS.md`，会解析为相同内容并像任何重复项一样折叠；从 `AGENTS.md` 漂移的独立副本则会与它一起完整加载。
-- **Symlink 指令文件会跨越信任边界跟随**：最终组件是 symlink 的候选文件会被解析并加载其目标，因此克隆仓库可以将树外文件内容呈现为较低优先级的工作区指引（它绝不覆盖 system、developer 或用户直接下达的指令）。加载不受信任仓库时，请用文件系统策略门禁或 OS 沙箱限制 `ctx.fs`。
+- **Symlink 指令文件会跨越信任边界跟随**：最终组件是 symlink 的候选文件会被解析并加载其目标，因此克隆仓库可以将树外文件内容呈现为较低优先级的工作区指令（系统提示词与用户的直接请求仍会覆盖它们）。加载不受信任仓库时，请用文件系统策略门禁或 OS 沙箱限制 `ctx.fs`。
 - **指令内容受限但不会被摘要**：超出预算的宽泛文件会被省略，最具体文件可能被截断；该插件绝不请求模型压缩指令文本。
 
 <a id="dev-note"></a>

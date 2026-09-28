@@ -30,9 +30,9 @@ export interface Config {
   /**
    * Required deployment choice for whether several todos may be `in_progress` at once. True suits
    * agents that run work concurrently — subagents, background commands, workflow fan-out — and the
-   * description then instructs the model to mark every actively worked task. False restores the
-   * single-active discipline: the description asks for exactly one, and a call marking more is
-   * rejected.
+   * description then says several items may be `in_progress` when work runs in parallel. False
+   * restores the single-active discipline: the description says only one may be, and a call marking
+   * more is rejected.
    */
   allowParallelInProgress: boolean
 }
@@ -43,38 +43,23 @@ export const Config: z<Config> = z.object({
 })
 
 const DESCRIPTION_HEAD =
-  'Record and update a structured task list for the current work. Send the ENTIRE '
-  + 'list every call — it REPLACES the previous list (there are no partial updates, '
-  + 'no per-item edits). Use it to plan multi-step work and show progress: add one '
-  + 'todo per concrete step before you start. '
+  'Create and update the task list the user sees for multi-step work. Each call replaces the whole '
+  + 'list, so send every item. '
 
 const DESCRIPTION_PARALLEL =
-  'Mark every todo being actively worked '
-  + 'on `in_progress` — several at once when work genuinely runs in parallel (e.g. '
-  + 'concurrent subagents or background commands), one for sequential work; while '
-  + 'work remains, at least one task should be `in_progress`. '
+  'Several items can be `in_progress` at once when work runs in parallel.'
 
 const DESCRIPTION_SINGLE =
-  'Keep AT MOST ONE todo `in_progress` at a '
-  + 'time; while work remains, exactly one active task should be `in_progress`. '
-
-const DESCRIPTION_TAIL =
-  'Mark a todo '
-  + '`completed` the moment it is done (do not batch completions), and allow no '
-  + '`in_progress` item only once all work is complete. Skip the list for trivial '
-  + 'single-step tasks. Statuses: `pending` (not started), `in_progress` (being '
-  + 'worked on now), `completed` (finished).'
+  'Only one item can be `in_progress` at a time.'
 
 /**
- * The model-facing description for one activation. The active-status clause is the only part that
- * varies, because it is the only instruction the parallel policy changes.
+ * The model-facing description for one activation. The `in_progress` sentence is the only part that
+ * varies, because it is the only rule the parallel policy changes; the status enum carries the rest.
  * @param allowParallel - whether several todos may be `in_progress` at once.
  * @returns the composed tool description.
  */
 function describe(allowParallel: boolean): string {
-  return DESCRIPTION_HEAD
-    + (allowParallel ? DESCRIPTION_PARALLEL : DESCRIPTION_SINGLE)
-    + DESCRIPTION_TAIL
+  return DESCRIPTION_HEAD + (allowParallel ? DESCRIPTION_PARALLEL : DESCRIPTION_SINGLE)
 }
 
 /**
@@ -147,21 +132,16 @@ export function apply(ctx: Context, config: Config): void {
     name: 'todo_write',
     description: describe(allowParallel),
     parameters: {
+      // Replacement is stated once, in the description; the status enum names its own meaning.
       todos: {
         type: 'array',
         required: true,
-        description: 'The COMPLETE task list, replacing any previous list.',
         items: {
           type: 'object',
           additionalProperties: false,
           properties: {
-            content: { type: 'string', required: true, description: 'What the task is — a short imperative line.' },
-            status: {
-              type: 'string',
-              required: true,
-              enum: [...STATUSES],
-              description: 'pending (not started) | in_progress (now) | completed (done).',
-            },
+            content: { type: 'string', required: true, description: 'The task, as a short imperative line.' },
+            status: { type: 'string', required: true, enum: [...STATUSES] },
           },
         },
       },

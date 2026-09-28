@@ -143,18 +143,25 @@ describe('sessionFeedback Host Remote', () => {
     expect(test.session.snapshotEvents()).toEqual([])
   })
 
-  it('says the session is shared when a telemetry backend uploads feedback', async () => {
+  it('says the session is uploaded when a configured telemetry backend uploads feedback', async () => {
     const test = await harness()
     test.ctx.provide('sessionTelemetry')
     test.ctx.set('sessionTelemetry', { sharing: 'feedback-only' })
     const settled = await run(test, ' slow')
-    expect(settled.text?.split('\n').at(-1)).toBe(commandFeedback.sharingNotice('feedback-only'))
-    expect(settled.text).toContain('DSH_TELEMETRY_DISABLED=1')
+    expect(settled.text?.split('\n').at(-1)).toBe(
+      'This session’s history up to now is uploaded with this feedback to the configured telemetry collector. '
+      + 'Set DSH_TELEMETRY_DISABLED=1 to keep feedback local.',
+    )
   })
 
-  it('says feedback stays local when telemetry is disabled or absent', () => {
+  it('says feedback stays local when telemetry is disabled or absent', async () => {
+    expect(LOCAL).toBe('Telemetry is off; this feedback stays in the local session log.')
     expect(commandFeedback.sharingNotice('disabled')).toBe(LOCAL)
-    expect(LOCAL).toMatch(/local session log/u)
+    const test = await harness()
+    test.ctx.provide('sessionTelemetry')
+    test.ctx.set('sessionTelemetry', { sharing: 'disabled' })
+    const settled = await run(test, ' slow')
+    expect(settled.text?.split('\n').at(-1)).toBe(LOCAL)
   })
 
   it('is mounted and unmounted with the plugin', async () => {

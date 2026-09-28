@@ -29,7 +29,7 @@ Compose this plugin wherever the model should be able to pause for a human decis
 
 ### When to call the tool
 
-The model calls `ask_user_question` when it needs confirmation, a choice, or missing information before proceeding. Send one or more questions, each with a stable `id` that is echoed in the answer; a recommended option goes first with `(Recommended)` appended to its label.
+The model calls `ask_user_question` when it needs confirmation, a choice, or missing information before proceeding. Send one or more questions, each with a stable `id` that is echoed in the answer; a recommended option goes first with `(Recommended)` appended to its label. The schema asks for brevity: a question is one short sentence ending with a question mark, a header is about 12 characters at most, an option label is 1-5 words, and an option description is one short sentence. This is guidance only; longer text is accepted and shown as sent.
 
 ```json
 {
@@ -55,6 +55,10 @@ The tool returns one answer object per question: `selected` holds the chosen opt
 { "answers": [{ "id": "cleanup", "selected": ["Yes, delete them (Recommended)"] }] }
 ```
 
+### How a UI shows the call
+
+The tool declares its own presentation, so a UI such as the terminal transcript draws the call compactly instead of dumping its arguments. The pending call is titled by the question headers, or by a question's own words when it has none: `Ask: Choose scope`, or `Ask 2 questions: Choose scope, Runtime fixes`. The completed call shows each answer on its own line, the chosen labels and then any free-form answer in quotes, `scope → Tooling swaps, Shared versions, "skip CI for now"`, with `—` for a question left unanswered. The question card the user answers comes from the interaction surface itself. A failed call, and a result that is not the canonical answers JSON, keep the UI's generic rendering of the raw result.
+
 ### When the call fails
 
 The tool call blocks until the human answers and cancels only through the turn's signal. No accepting answerer, an aborted call, or a caller that is not the exact live runtime root each settles as an error the model sees in the tool result — most notably, a live child agent owned by another agent is rejected (`DELEGATED_CALLER`) and must include the unresolved question or decision in its final result.
@@ -74,6 +78,7 @@ The observable behavior is covered in [Use this package](#use-this-package); thi
 | File | Role |
 |---|---|
 | [`src/index.ts`](src/index.ts) | Tool registration: `ask_user_question` schema, execute path, result render |
+| [`src/presentation.ts`](src/presentation.ts) | Pure `presentCall` / `presentResult` views: the question-header title and one answer line per question |
 | — | No runtime invariant companion is published; this model-facing adapter has no independent lifecycle stream; execution relations are owned by the capability seam it calls. |
 
 ### Consumer role
@@ -83,6 +88,10 @@ The plugin registers one `defineTool` entry on `ctx.tools` with injects `['tools
 ### Result rendering
 
 The `render` output projects the structured value to a single text block via `JSON.stringify`, which is why the model-facing result is compact JSON rather than a richer content-block vocabulary.
+
+### UI presentation
+
+`presentCall` and `presentResult` live in `src/presentation.ts` and are pure. `defineTool` validates logged arguments softly before calling them, so obsolete arguments fall back to generic rendering. `presentResult` reads the answers back from the model-facing JSON text rather than from `presentationMeta`, which leaves the result text and the persisted `tool/result` event unchanged; any text it cannot narrow to the canonical shape, and every failure, returns no view. Titles are cut at 80 characters, a question standing in for a missing header at 48, and a free-form answer at 160, counted in code points; a UI measures display width itself.
 
 </details>
 
@@ -107,7 +116,7 @@ Read these pages when the package-level contract is not enough. They move from t
 
 #### What the model sees
 
-The model sees the generated [`ask_user_question` schema](../../../docs/tool-catalog.md#deepseek-aidsh-tool-ask-user), including question ids, prompts, headings, options, and multi-select flags.
+The model sees the generated [`ask_user_question` schema](../../../docs/tool-catalog.md#deepseek-aidsh-tool-ask-user), including question ids, prompts, headings, options, and multi-select flags. The field descriptions ask for a one-sentence question ending with a question mark, a header of about 12 characters, 1-5 word option labels, and one-sentence option descriptions. The text is static, so it does not vary between requests.
 
 #### Token effect
 
@@ -140,7 +149,8 @@ These limits define when the tool is a poor fit. They are current package constr
 
 - **A pending question blocks the tool call until the human answers** — the tool declares no `timeout-policy` budget; cancellation rides the turn's `exec.signal` only.
 - **Runtime-owned subagents cannot ask the user** — `ask_user_question` rejects a live child owned by another agent with `DELEGATED_CALLER`; the child must include the unresolved question or decision in its final result. Durable lineage does not decide this boundary, so a lineage-bearing session resumed as a runtime root may ask normally.
-- **Native answers render as JSON text** — the canonical value remains structured, but the model-facing result uses compact JSON rather than a richer content-block vocabulary.
+- **Native answers render as JSON text** — the canonical value remains structured, but the model-facing result uses compact JSON rather than a richer content-block vocabulary. Only a UI's presentation reformats it, one answer per line.
+- **Brevity is guidance, not validation** — the schema describes short questions, headers, and labels, but the tool rejects none for length, so a long question still reaches the user whole.
 
 <a id="dev-note"></a>
 ### Dev Note

@@ -43,13 +43,13 @@ Choose it when one agent session should own the task list and whole-list updates
 
 | Field | Default | Meaning |
 |---|---|---|
-| `allowParallelInProgress` | required | Whether several todos may be `in_progress` at once; also selects the active-status clause of the model description |
+| `allowParallelInProgress` | required | Whether several todos may be `in_progress` at once; also selects the `in_progress` sentence of the model description |
 
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-tool-todo) is the exhaustive source for the accepted field.
 
 ### What each call does
 
-The agent sends the ENTIRE list on every update; the new list replaces the previous one, so there are no partial updates or per-item edits. Each item is a short task description plus a status of `pending`, `in_progress`, or `completed`. A successful update returns the new counts — `Updated todo list: <pending> pending, <inProgress> in progress, <completed> completed.` — and the UI shows the new plan. Updates fail visibly when a task description is empty or duplicated, when an item carries fields beyond the description and status, or — when parallel work is disabled — when more than one task is marked in progress.
+The agent sends the entire list on every update; the new list replaces the previous one, so there are no partial updates or per-item edits. Each item is a short task description plus a status of `pending`, `in_progress`, or `completed`. A successful update returns the new counts — `Updated todo list: <pending> pending, <inProgress> in progress, <completed> completed.` — and the UI shows the new plan. Updates fail visibly when a task description is empty or duplicated, when an item carries fields beyond the description and status, or — when parallel work is disabled — when more than one task is marked in progress.
 
 ### Single owner
 
@@ -126,7 +126,7 @@ Read these pages when the package-level contract is not enough. They move from t
 
 #### What the model sees
 
-The model sees the generated [`todo_write` schema](../../../docs/tool-catalog.md#deepseek-aidsh-tool-todo): an object with one required `todos` array of `{ content, status }` items, where `status` is `pending`, `in_progress`, or `completed`. The description is the composed whole-list instruction whose active-status clause follows `allowParallelInProgress`.
+The model sees the generated [`todo_write` schema](../../../docs/tool-catalog.md#deepseek-aidsh-tool-todo): an object with one required `todos` array of `{ content, status }` items, where the undescribed `status` enum `pending`, `in_progress`, or `completed` names its own meaning. The description states whole-list replacement once and ends with one `in_progress` sentence that follows `allowParallelInProgress`: several items may be in progress when work runs in parallel, or only one at a time.
 
 #### Token effect
 

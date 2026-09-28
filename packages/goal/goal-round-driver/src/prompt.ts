@@ -20,7 +20,7 @@ export function renderGoalRoundPrompt(goal: GoalView, round: number): ContentBlo
       + 'earlier narration is still current. Make concrete progress and verify the result. Before '
       + 'claiming completion, gather evidence that the whole objective is achieved, read the current '
       + 'goal, and mark it complete. If work remains, leave the goal active for the next round. Follow '
-      + 'the configured goal-tool policy before reporting a blocker.\n'
+      + 'update_goal\'s rules before reporting a blocker.\n'
       + '</goal_round>',
   }]
 }

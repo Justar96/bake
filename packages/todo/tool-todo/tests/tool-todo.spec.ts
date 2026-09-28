@@ -174,15 +174,27 @@ describe('dsh-tool-todo', () => {
       expect(result.isError).toBe(false)
     })
 
-    it('instructs the model to keep at most one active, while true instructs parallel', async () => {
+    it('describes a single in_progress item when false and parallel ones when true', async () => {
+      const head = 'Create and update the task list the user sees for multi-step work. Each call replaces the whole '
+        + 'list, so send every item. '
       const single = await setup(false)
       const singleDesc = single.tools.schemas().find(s => s.name === 'todo_write')!.description
-      expect(singleDesc).toContain('Keep AT MOST ONE todo `in_progress`')
-      expect(singleDesc).not.toContain('several at once')
+      expect(singleDesc).toBe(`${head}Only one item can be \`in_progress\` at a time.`)
 
       const parallelDesc = (await setup(true)).tools.schemas().find(s => s.name === 'todo_write')!.description
-      expect(parallelDesc).toContain('several at once when work genuinely runs in parallel')
-      expect(parallelDesc).not.toContain('AT MOST ONE')
+      expect(parallelDesc).toBe(`${head}Several items can be \`in_progress\` at once when work runs in parallel.`)
+    })
+
+    it('pins the parameter guidance: the status enum carries its own meaning', async () => {
+      const schema = (await setup(true)).tools.schemas().find(s => s.name === 'todo_write')!
+      const todos = (schema.parameters['properties'] as Record<string, {
+        description?: string
+        items: { properties: Record<string, { description?: string; enum?: string[] }> }
+      }>)['todos']!
+      expect(todos.description).toBeUndefined()
+      expect(todos.items.properties['content']?.description).toBe('The task, as a short imperative line.')
+      expect(todos.items.properties['status']?.description).toBeUndefined()
+      expect(todos.items.properties['status']?.enum).toEqual(['pending', 'in_progress', 'completed'])
     })
   })
 

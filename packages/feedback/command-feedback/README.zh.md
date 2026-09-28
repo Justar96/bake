@@ -33,7 +33,7 @@ kind: "package-reference"
 
 | 输入 | 结果 |
 |---|---|
-| `/feedback the diff view is unreadable` | 记录评价并以三行确认：`Feedback recorded for session {sessionId}`、`Anonymous user: {userId}.` 以及一行共享说明。若遥测后端会上传反馈（`sessionTelemetry.sharing` 不为 `disabled`），该行说明截至此刻的会话历史会被共享，并给出 `DSH_TELEMETRY_DISABLED=1`；否则说明反馈只保留在本地会话日志中。 |
+| `/feedback the diff view is unreadable` | 记录评价并以三行确认：`Feedback recorded for session {sessionId}`、`Anonymous user: {userId}.` 以及一行共享说明。默认情况下该行为 `Telemetry is off; this feedback stays in the local session log.`：Bake 随附的 profile 不配置任何遥测 collector。若遥测后端会上传反馈（`sessionTelemetry.sharing` 不为 `disabled`，例如在你设置 `DSH_TELEMETRY_OTLP_URL` 之后），该行说明截至此刻的会话历史会上传到所配置的遥测 collector，并给出 `DSH_TELEMETRY_DISABLED=1`。 |
 | `/feedback` | 用法错误：`Usage: /feedback <text>`。命令补全和帮助中会显示必填的 `<text>` 提示。仅含空白的输入视为空输入。 |
 
 前后空白会被去除，但除此之外，评价会按输入原样保留：不进行截断、大小写折叠或命令解析——`/feedback /plan felt slow` 记录的就是这段字面文本。每次执行命令都会记录自己的条目；不会发生合并或替换。
@@ -138,6 +138,7 @@ Web 客户端随附该命令。无头模式、ACP 自动化和 JSON-RPC 不提�
 - **只有分类与文本**——一条条目至多携带一个分类和一个自由文本字符串，没有严重程度或关联事件链接。
 - **Remote 只服务 live Session**——没有 live 持有者的 Session，`sessionFeedback.record` 回答 `session-not-found`；弹窗打开期间 Session 退役时，Web 弹窗会报告该失败。
 - **不支持修改或撤回**——会话日志是仅追加的，本包也不新增 tombstone，因此错误的条目会一直保留在记录中，只能由后续条目取代。
+- **共享说明只涵盖遥测后端**——重新选择启用 [`session-log-deepseek`](../../session/session-log-deepseek/README.zh.md) 的组合还会在后续官方 DeepSeek 请求中发送日志（包括这条反馈）；确认文本不报告这条路径。
 - **没有显式持久化屏障**——确认文本紧随追加而非 flush，因此紧临崩溃前记录的条目可能与其他未 flush 的尾部一同丢失。需要该保证的消费方可自行等待 `ctx.sessions.flush(session)`。
 - **新会话上没有可见的确认**——Web transcript（文本记录）只在会话激活后渲染命令行，因此在仍为空白的新会话上输入 `/feedback <text>` 会记录事件但不会显示确认行；弹窗的 toast 不依赖文本记录。
 - **随附的产品入口中只有 Web 使用此命令**——无头模式、ACP 自动化和 JSON-RPC 不提供命令适配器，因此 `/feedback` 在那里不可用。

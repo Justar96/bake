@@ -99,7 +99,7 @@ function isMatchingGoalRound(execution: GoalToolExecution, goal: GoalView): bool
  */
 export function requireDirectHuman(ctx: Context, execution: GoalToolExecution): void {
   if (hasDirectHumanInput(ctx, execution)) return
-  reject('this goal operation requires a direct human turn on a top-level agent')
+  reject('this goal operation requires a request from the user in the current turn of a top-level agent')
 }
 
 /**
@@ -114,5 +114,5 @@ export function completionAuthority(ctx: Context, execution: GoalToolExecution):
   if (goal !== undefined && isMatchingGoalRound(execution, goal)) {
     return { kind: 'goal-round', goal }
   }
-  return reject('complete and blocked require a direct human turn or the current goal round')
+  return reject('complete and blocked require a request from the user in the current turn, or the current goal round')
 }

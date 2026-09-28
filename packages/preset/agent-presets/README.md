@@ -27,11 +27,13 @@ Use `dsh-agent-presets` to give each session the tools, prompt sections, and ski
 
 Mount this package in a composition that should give each agent session its own tools, prompt sections, and skills from a preset file. Every session names a preset — explicitly or through the configured default — and is composed from it; without the package, sessions fall back to whatever the host composition mounts.
 
-The shipped `standard`, `ptc`, and `cordis` presets support explicit file delivery. The `minimal` preset keeps its fixed two-tool training configuration.
+The shipped `standard`, `ptc`, and `cordis` presets support explicit file delivery. The `minimal` preset gives its agent a fixed persona and one persistent shell (`bash`, or `pwsh` on Windows), and nothing else. The `cordis` preset's inspection tools need the `cordisInspect` registry from `dsh-cordis-host-runner` in the host composition; the terminal profile mounts it.
 
 ### What a preset gives a session
 
 A session composed from a preset runs the plugins that preset's `agent.cordis.yml` names: its tools, prompt sections, and skills. Sessions joined to the same preset share one installed composition, and each session's state stays separate. A child agent (subagent) joins its parent's composition, so it sees the same tools and prompt sections as the agent that spawned it.
+
+An agent also sees what the host composition registers globally. A host that mounts a row a preset also mounts runs it twice for that preset's agents, and a host row a preset leaves out or disables still reaches its agents. A deployment that mounts this package therefore leaves agent rows, such as tools, instructions, and skill discovery, to its presets; the terminal profile disables the base bundle's copies, so `minimal` gets only its shell.
 
 The presets you can choose from come from three sources: the presets shipped inside this package under `presets/`, configured roots, and your own presets under `<dshHome>/.agent-presets`. The picker shows each preset's display name and description; a preset whose composition cannot load is listed with the reason rather than hidden, so you can see what to fix or delete.
 
@@ -159,6 +161,8 @@ Read these pages when the package-level contract is not enough; they move from t
 ## Model Experience
 
 Indirectly, through the plugins a preset's standing composition installs, which own every tool schema, prompt section, and skill the preset makes visible to the agents joined to it.
+
+The shipped `standard` and `ptc` presets share one persona and one plan-mode section. The persona introduces the agent as Bake, working in the user's terminal on the selected model, where the user sees its tool calls and Markdown replies, followed by one paragraph of working guidance: inspect before changing, verify with the covering checks, write code that matches the surrounding code, ask only about decisions the workspace cannot settle, commit or push only on request, keep changes the agent did not make, and report checks accurately. Each preset's `agent.cordis.yml` holds the exact text, which adds a few hundred characters to the system prompt.
 
 #### KV Cache effect
 

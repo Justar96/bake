@@ -134,7 +134,7 @@ At the first request, derived history contains one durable user-role message wit
 
 ```markdown
 <system-reminder>
-The following workspace instructions may be relevant to your work. Use them as guidance when applicable. More specific instructions take precedence over broader ones. They do not override system, developer, or direct user instructions.
+Follow these workspace instructions. More specific files take precedence over broader ones, and the system prompt and the user's direct requests override them.
 
 Instructions from: ~/.dsh/AGENTS.md
 
@@ -166,7 +166,7 @@ After a successful first-party filesystem call reaches a deeper directory, the n
 <system-reminder>
 Additional instructions from: packages/app/AGENTS.md
 
-These instructions apply to work under `packages/app`. Use them as guidance when relevant; more specific instructions take precedence. They do not override system, developer, or direct user instructions.
+Follow these instructions for work under `packages/app`. They take precedence over broader ones, and the system prompt and the user's direct requests override them.
 
 <nested-instructions>
 </system-reminder>
@@ -192,7 +192,7 @@ A changed file produces `Updated instructions from: <path>` plus its replacement
 <system-reminder>
 Instructions removed: packages/app/AGENTS.md
 
-The previously loaded instructions from this file no longer apply.
+The earlier instructions from this file no longer apply.
 </system-reminder>
 ```
 
@@ -215,7 +215,7 @@ These limits define when instruction loading is a poor fit or needs operational 
 - **Refresh is touch-driven** — there is no watcher; external edits become visible on the next successful first-party `read`, `write`, or `edit`, when resume reconciles a visible baseline, or when an entering pre-step restores a shadowed baseline.
 - **Candidate semantics stay intentionally small** — lowercase names, `.claude/rules/`, and `@path` imports are not interpreted; project scopes load `AGENTS.local.md`/`CLAUDE.local.md` overlays by default, but the user-global `$DSH_HOME` scope has no local overlay and other custom names require explicit candidate configuration.
 - **Per-directory dedup is content-based** — sibling candidates collapse only when byte-identical after trimming leading and trailing whitespace; a `CLAUDE.md` that symlinks its sibling `AGENTS.md` resolves to the same content and collapses like any duplicate, while a distinct real copy that has drifted from `AGENTS.md` loads in full alongside it.
-- **Symlinked instruction files are followed across the trust boundary** — a candidate whose final component is a symlink is resolved and its target loaded, so a cloned repository can surface off-tree file content as lower-authority workspace guidance (it never overrides system, developer, or direct user instructions). Confine `ctx.fs` with the filesystem policy gate or an OS sandbox when loading untrusted repositories.
+- **Symlinked instruction files are followed across the trust boundary** — a candidate whose final component is a symlink is resolved and its target loaded, so a cloned repository can surface off-tree file content as lower-authority workspace instructions (the system prompt and the user's direct requests still override them). Confine `ctx.fs` with the filesystem policy gate or an OS sandbox when loading untrusted repositories.
 - **Instruction content is bounded, not summarized** — over-budget broad files are omitted and the most-specific file may be truncated; the plugin never asks a model to compress instruction prose.
 
 <a id="dev-note"></a>

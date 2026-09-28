@@ -153,6 +153,39 @@ describe('the shipped preset root', () => {
     }
   })
 
+  it('introduces Bake with the same persona and plan guidance in standard and PTC', async () => {
+    const [standard, ptc] = await Promise.all([shippedEntries('standard'), shippedEntries('ptc')])
+    expect(findEntry(standard, 'persona')?.config).toEqual({
+      suffix: 'Your working directory is {{cwd}}.',
+      prefix: 'You are Bake, a coding agent working in the user\'s terminal, running on the {{model}} model. '
+        + 'The user sees your tool calls as they run and your replies rendered as Markdown.\n\n'
+        + 'Inspect the code before you change it, then verify the change with the checks that cover it. '
+        + 'Write code that reads like the surrounding code: match its comment density, naming, and idiom. '
+        + 'Ask the user only about decisions that reading the workspace cannot settle. '
+        + 'Commit or push only when the user asks, and do not discard changes you did not make unless asked. '
+        + 'Keep replies short and concrete, and report checks accurately: what you ran, what failed, and what you skipped.',
+    })
+    expect(findEntry(ptc, 'persona')?.config).toEqual(findEntry(standard, 'persona')?.config)
+    expect(findEntry(ptc, 'plan-mode')?.config).toEqual(findEntry(standard, 'plan-mode')?.config)
+  })
+
+  it('directs the cordis preset to terminal tools, commands, and preset selection', async () => {
+    const entries = await shippedEntries('cordis')
+    const persona = findEntry(entries, 'persona')?.config as { prefix?: string } | undefined
+    expect(persona?.prefix).toContain('model-facing tools, terminal commands, or both')
+    expect(persona?.prefix).not.toContain('Harness Web UI')
+
+    const skillRoot = join(SHIPPED_PRESET_ROOT, 'cordis', 'skills')
+    const [pluginSkill, compositionSkill] = await Promise.all([
+      readFile(join(skillRoot, 'cordis-plugin-development', 'SKILL.md'), 'utf8'),
+      readFile(join(skillRoot, 'editing-cordis-compositions', 'SKILL.md'), 'utf8'),
+    ])
+    expect(pluginSkill).toContain('ctx.tools.register(defineTool(')
+    expect(pluginSkill).toContain('ctx.commands.register(')
+    expect(compositionSkill).toContain('Start Bake with `--preset <new-id>`')
+    expect(`${pluginSkill}\n${compositionSkill}`).not.toMatch(/Harness Web UI|connected page|Web picker/u)
+  })
+
   it('disables the ralph tool in every shipped preset that carries it', async () => {
     for (const id of ['cordis', 'ptc', 'standard']) {
       expect(findEntry(await shippedEntries(id), 'tool-ralph')?.disabled, id).toBe(true)

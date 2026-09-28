@@ -840,8 +840,11 @@ describe('exit_plan_mode', () => {
   it('registers the tool with one required plan argument', async () => {
     const ctx = await setup()
     const schema = ctx.tools.schemas().find(entry => entry.name === EXIT_PLAN_MODE)
-    const parameters = schema?.parameters as { required?: string[]; properties?: Record<string, unknown> }
-    expect(schema?.description).toMatch(/^Use only in plan mode\./)
+    const parameters = schema?.parameters as { required?: string[]; properties?: Record<string, { description?: string }> }
+    expect(schema?.description).toBe('Use only in plan mode. Submit your complete plan for the user\'s review. '
+      + 'If the user approves, plan mode ends and you carry out the plan from your next step. '
+      + 'If they keep planning, the result carries any feedback; revise the plan and submit it again.')
+    expect(parameters.properties?.plan?.description).toBe('The complete plan in markdown, starting with a # heading that names it.')
     expect(Object.keys(parameters.properties ?? {})).toEqual(['plan'])
     expect(parameters.required).toEqual(['plan'])
   })

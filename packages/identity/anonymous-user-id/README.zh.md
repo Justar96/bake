@@ -31,7 +31,7 @@ DeepSeek Harness 为每个 harness home 使用一个匿名标识符，以关联�
 
 你的安装外发的三类内容携带同一个 id，因此记录在它们之间可以相互对应：
 
-- **会话遥测**——你的遥测导出会以 `user.id` Resource 属性携带该 id，采集器因此可以按安装分组记录。
+- **会话遥测**——当你用 `DSH_TELEMETRY_OTLP_URL` 配置采集器后，其遥测导出会以 `user.id` Resource 属性携带该 id，采集器因此可以按安装分组记录。Bake 默认不配置任何采集器。
 - **反馈**——每条反馈确认都会标明记录该反馈的匿名安装。
 - **DeepSeek 请求**——每次提供方请求都会携带 `x-deepseek-harness-user-id` 标头，因此可以按安装归因用量。
 

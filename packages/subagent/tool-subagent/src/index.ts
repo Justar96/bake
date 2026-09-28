@@ -34,6 +34,7 @@ import {
 } from './model-selection.ts'
 import type { DelegationModelRequest, ModelSelectionPolicy } from './model-selection.ts'
 import { registerListSubagentModels } from './list-models.ts'
+import { presentDelegationCall } from './presentation.ts'
 import type {} from './model-selection-settings.ts'
 import {
   recordSubagentModelSelection,
@@ -42,7 +43,7 @@ import {
 } from './model-selection-state.ts'
 
 export const name = 'tool-subagent'
-export const inject = ['tools', 'subagents', 'systemPrompt', 'sessionProjections']
+export const inject = ['tools', 'subagents', 'sessionProjections']
 
 /** Config: which registered provider this tool delegates to, plus child defaults. */
 export interface Config {
@@ -253,26 +254,23 @@ function providerWording(inheritsConversation: boolean): { description: string; 
   if (inheritsConversation) {
     return {
       description:
-        'Delegate a task to a subagent that inherits this conversation: a child agent seeded with all '
-        + 'completed turns so far (it does not see the current in-flight turn). Use this when the subtask '
-        + 'builds on this conversation\'s context — a follow-up analysis, '
-        + 'a review, a continuation — without consuming this conversation\'s context for the work itself. '
-        + 'You receive its result, not its intermediate steps.',
+        'Delegate a task to a subagent that inherits this conversation\'s completed turns, but not the '
+        + 'current one. Use it for work that builds on this context, such as a follow-up analysis, a review, '
+        + 'or a continuation, without filling this conversation with the work. You get its result, not its '
+        + 'intermediate steps.',
       promptDescription:
-        'The task for the subagent. It already sees this conversation\'s completed turns, so build on them '
-        + 'freely and state only what is new.',
+        'The task. The subagent already sees this conversation\'s completed turns, so state only what is new.',
     }
   }
   return {
     description:
-      'Delegate a self-contained task to a subagent (a separate agent that works in its own context) '
-      + 'to offload focused, independent work — research, a scoped '
-      + 'implementation, an analysis — so it does not consume this conversation\'s context. The subagent '
-      + 'returns its result, not its intermediate steps. Give it a '
-      + 'complete, standalone prompt: it does not see this conversation.',
+      'Delegate a self-contained task, such as research, a scoped implementation, or an analysis, to a '
+      + 'subagent that works in its own context, so the work does not fill this conversation. You get its '
+      + 'result, not its intermediate steps. It does not see this conversation, so give it a complete, '
+      + 'standalone prompt.',
     promptDescription:
-      'The complete, self-contained task for the subagent. It does not share this '
-      + 'conversation\'s context, so include everything it needs.',
+      'The complete, self-contained task. The subagent does not see this conversation, so include '
+      + 'everything it needs.',
   }
 }
 
@@ -368,23 +366,26 @@ export function apply(ctx: Context, config: Config, session?: Session): void {
       assertSubagentProviderConfiguration(subagentProvider)
       const wording = providerWording(subagentProvider.inheritsParentContext)
       const providerRouteDefaults = subagentProvider.agentRouteDefaults
-      const selectionDescription = providerRouteDefaults !== undefined
-        ? ' Child LLM selection is optional. Omit `provider`, `model`, and `reasoning_effort` to use configured child defaults and this provider\'s route defaults. Supply `provider` and `model` together after using `list_subagent_models` to inspect advertised routes and efforts. Changing the effective route without naming an effort uses the selected model\'s default effort.'
-        : ' Child LLM selection is optional. Omit `provider`, `model`, and `reasoning_effort` to use configured child defaults and inherit compatible missing values from the parent Agent. Supply `provider` and `model` together after using `list_subagent_models` to inspect advertised routes and efforts. Changing the effective route without naming an effort uses the selected model\'s default effort.'
+      const defaultsDescription = providerRouteDefaults !== undefined
+        ? 'the configured subagent defaults and this tool\'s default route'
+        : 'the configured subagent defaults, filling gaps from your own route where compatible'
       const choiceDescription = !modelSelectionEnabled
         ? ''
-        : selectionDescription
+        : ` Model choice is optional: omit \`provider\`, \`model\`, and \`reasoning_effort\` to use ${defaultsDescription}. To choose, look up routes and efforts with \`list_subagent_models\`, then pass \`provider\` and \`model\` together. If you change the route without \`reasoning_effort\`, the new model's default effort applies.`
           + (subagentProvider.inheritsParentContext
-            ? ' Changing the route can prevent provider-side reuse of the inherited conversation prefix.'
+            ? ' Changing the route may prevent cache reuse of the inherited conversation.'
             : '')
       const disposeTool = runtimeCtx.tools.register(defineTool({
         name: toolName,
+        // The description is the one home for delegation guidance: this plugin
+        // registers no system-prompt section, so the policy travels with the
+        // schema into every scope where the tool is visible.
         description: wording.description + (backgroundEnabled
           // The completion notice is the continuation service's own behavior, not
           // a separately installed capability, so this promise holds whenever the
           // continuable background path is reachable at all.
           ? continuable
-            ? ' This tool runs in the background by default, immediately returns a durable subagent id, and keeps the child conversation available for later turns. When that run settles, the runtime sends the parent a notice containing its outcome and any final assistant message; `send_message` steers the child\'s nearest step while it is running and starts a turn while it is idle. Set `run_in_background: false` only when your next action depends on receiving the result.'
+            ? ' It runs in the background by default and returns its agent id right away. Start independent subagents in the same message and keep working while they run. When one finishes, you get a notice with its outcome and closing message. It stays available afterward: `send_message` steers it while it is running and otherwise starts a new turn. Set `run_in_background: false` only when your next step needs the result.'
             : ' This call waits for the result by default. Set `run_in_background: true` to return a job id; collect with `job_output` and stop with `job_kill`.'
           : ' This call waits for the subagent and returns its result.') + choiceDescription,
         parameters: {
@@ -402,28 +403,28 @@ export function apply(ctx: Context, config: Config, session?: Session): void {
             provider: {
               type: 'string' as const,
               description: providerRouteDefaults !== undefined
-                ? 'LLM provider route for the child. Supply together with model; omit both to use configured child defaults or this provider\'s route defaults.'
-                : 'LLM provider route for the child. Supply together with model; omit both to use configured child defaults or inherit the parent route.',
+                ? 'LLM provider for the subagent. Pass it with model; omit both to use the configured defaults or this tool\'s default route.'
+                : 'LLM provider for the subagent. Pass it with model; omit both to use the configured defaults or your own route.',
             },
             model: {
               type: 'string' as const,
               description: providerRouteDefaults !== undefined
-                ? 'Model id interpreted by provider. Supply together with provider; omit both to use configured child defaults or this provider\'s route defaults.'
-                : 'Model id interpreted by provider. Supply together with provider; omit both to use configured child defaults or inherit the parent route.',
+                ? 'Model id for that provider. Pass it with provider; omit both to use the configured defaults or this tool\'s default route.'
+                : 'Model id for that provider. Pass it with provider; omit both to use the configured defaults or your own route.',
             },
             reasoning_effort: {
               type: 'string' as const,
               description: providerRouteDefaults !== undefined
-                ? 'Adapter-owned reasoning effort for the effective child route. Omit to use a compatible configured effort or the selected model\'s default.'
-                : 'Adapter-owned reasoning effort for the effective child route. Omit to inherit a compatible configured/parent effort or use a newly selected model\'s default.',
+                ? 'Reasoning effort for the subagent\'s model. Omit to use a compatible configured effort or the model\'s default.'
+                : 'Reasoning effort for the subagent\'s model. Omit to use a compatible configured or inherited effort, or the new model\'s default after a route change.',
             },
           } : {},
           ...backgroundEnabled ? {
             run_in_background: {
               type: 'boolean' as const,
               description: continuable
-                ? 'Whether to run in the background and return a durable subagent id immediately. Defaults to true. Set false to wait for the result when your next action depends on it.'
-                : 'Whether to run as a background job and return its id. Defaults to false; collect with job_output or stop with job_kill.',
+                ? 'Run in the background and return the agent id right away. Defaults to true; set false to wait for the result when your next step needs it.'
+                : 'Run as a background job and return its job id. Defaults to false; collect with job_output or stop with job_kill.',
             },
           } : {},
         },
@@ -567,16 +568,18 @@ export function apply(ctx: Context, config: Config, session?: Session): void {
           })
           return settleForegroundRun(run)
         },
+        // Named by its short description; the prompt is the child's own
+        // first message, not a headline. The result keeps generic rendering.
+        presentCall: args => presentDelegationCall(args),
       }))
       mounted = { subagentProvider, disposeTool }
     }
 
     // Register listeners before checking presence so no synchronous change is missed.
-    // TODO(subagent-dup-toolname): two waiting one-shot fibers configured with the
-    // same toolName collide when their provider appears, and the duplicate-name
-    // throw rolls back the provider registration. Continuable instances reserve
-    // their prompt-section name during apply() and fail earlier. Add an intent
-    // registry if the late one-shot collision occurs in a shipped composition.
+    // TODO(subagent-dup-toolname): two waiting fibers configured with the same
+    // toolName collide when their provider appears, and the duplicate-name throw
+    // rolls back the provider registration. Add an intent registry if the late
+    // collision occurs in a shipped composition.
     runtimeCtx.on('subagent/provider-added', (subagentProvider) => {
       if (subagentProvider.name === config.provider && mounted === undefined) mount(subagentProvider)
     })
@@ -591,18 +594,6 @@ export function apply(ctx: Context, config: Config, session?: Session): void {
     } else {
       // A backend fiber may activate later; a misspelled provider remains visible in this log.
       runtimeCtx.logger.info(`subagent provider "${config.provider}" not registered yet; the "${config.toolName ?? 'subagent'}" tool will register when it appears`)
-    }
-    if (backgroundEnabled && continuable) {
-      // The section follows provider availability without its own manual
-      // lifecycle: empty text is omitted from rendered prompts while the tool is
-      // absent, and the registration itself stays owned by this plugin fiber.
-      runtimeCtx.systemPrompt.section({
-        name: `tool:${toolName}`,
-        order: runtimeCtx.systemPrompt.getSectionOrder('TOOL_SUBAGENT'),
-        text: context => mounted === undefined || runtimeCtx.tools.get(toolName, context.scope) === undefined
-          ? ''
-          : `Use ${toolName} in the background by default. Start independent delegations together in one assistant message and continue useful work while they run. Set \`run_in_background: false\` only when your next action depends on that subagent's result. When a background run settles, the runtime sends you a notice containing its outcome and any final assistant message.`,
-      })
     }
   }
 
@@ -673,7 +664,7 @@ export function apply(ctx: Context, config: Config, session?: Session): void {
     let fiber: ReturnType<Context['inject']>
     try {
       const policy = selectForSession(candidate.session)
-      fiber = candidate.ctx.inject(['tools', 'subagents', 'systemPrompt'], (runtimeCtx) => {
+      fiber = candidate.ctx.inject(['tools', 'subagents'], (runtimeCtx) => {
         install(runtimeCtx, policy)
       })
     } finally {

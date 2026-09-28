@@ -27,11 +27,13 @@ kind: "package-reference"
 
 在需要让每个 agent 会话从 preset 文件获得自己的工具、提示词段落与 skill 的组装中挂载本包。每个会话都会命名一个 preset——显式指定或通过配置的默认值——并据此组装；没有本包时，会话只能回退到宿主组装挂载的内容。
 
-随附的 `standard`、`ptc` 与 `cordis` preset 支持显式文件交付。`minimal` preset 保留固定的双工具训练配置。
+随附的 `standard`、`ptc` 与 `cordis` preset 支持显式文件交付。`minimal` preset 只为 agent 提供固定的 persona 和一个持久 shell（`bash`，Windows 上为 `pwsh`），别无其他。`cordis` preset 的检查工具需要宿主组装中由 `dsh-cordis-host-runner` 提供的 `cordisInspect` 注册表；终端 profile 会挂载它。
 
 ### preset 给会话带来什么
 
 从 preset 组装的会话会运行该 preset `agent.cordis.yml` 所列插件：它的工具、提示词段落与 skill。加入同一 preset 的会话共享一份已安装的组装，且各会话的状态彼此隔离。subagent 会加入其父方的组装，因此它看到的工具与提示词段落和创建它的 agent 相同。
+
+agent 也能看到宿主组装全局注册的内容。宿主若挂载了 preset 同样挂载的行，就会为该 preset 的 agent 运行两次；preset 省略或禁用的宿主行仍会触及它的 agent。因此挂载本包的部署应把工具、指令和 skill 发现等 agent 行留给 preset；终端 profile 禁用了基础组合包中的这些副本，所以 `minimal` 只有它的 shell。
 
 可选的 preset 来自三类来源：本包 `presets/` 下随包交付的 preset、已配置的根目录，以及你自己放在 `<dshHome>/.agent-presets` 下的 preset。选择器会展示每个 preset 的显示名与描述；组装无法加载的 preset 会连同原因一起列出而不是被隐藏，因此你能看到该修什么或删什么。
 
@@ -159,6 +161,8 @@ agent-presets:
 ## 模型体验
 
 间接地，经由 preset 常驻组装安装的插件：这些插件拥有该 preset 向加入它的 agent 呈现的每个工具 schema、提示词段落与 skill。
+
+随附的 `standard` 与 `ptc` preset 共用同一个 persona 和同一段计划模式指引。persona 把 agent 介绍为在用户终端中、基于所选模型工作的 Bake，用户会看到它的工具调用和以 Markdown 渲染的回复；随后是一段工作指引：先检查再修改，用覆盖该修改的检查验证，编写与周边代码风格一致的代码，只就读取工作区无法确定的决策询问用户，仅在用户要求时提交或推送，保留并非由 agent 做出的修改，并如实报告检查结果。确切文本见各 preset 的 `agent.cordis.yml`，它为系统提示词增加数百个字符。
 
 #### KV Cache 影响
 
