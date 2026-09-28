@@ -52,6 +52,7 @@
     "@deepseek-ai/dsh-home-paths": "workspace:^",
     "@deepseek-ai/dsh-hooks-claude-code": "workspace:^",
     "@deepseek-ai/dsh-hooks-codex": "workspace:^",
+    "@deepseek-ai/dsh-host-webserver": "workspace:^",
     "@deepseek-ai/dsh-jobs-local": "workspace:^",
     "@deepseek-ai/dsh-launch-environment": "workspace:^",
     "@deepseek-ai/dsh-mcp-client": "workspace:^",
@@ -93,9 +94,9 @@
     "@deepseek-ai/dsh-webhook-github": "workspace:^",
     "@deepseek-ai/dsh-workflow-ptc": "workspace:^",
     "@deepseek-ai/schemastery": "workspace:^",
-    "commander": "^15.0.0",
-    "js-yaml": "^4.2.0",
-    "node-addon-require-builtin": "^0.1.6",
+    "commander": "catalog:",
+    "js-yaml": "catalog:",
+    "node-addon-require-builtin": "catalog:",
     "@deepseek-ai/dsh-http-proxy": "workspace:^",
     "@deepseek-ai/dsh-mcp-resources": "workspace:^",
     "@deepseek-ai/dsh-plugin-manager": "workspace:^",
@@ -137,11 +138,11 @@
     "@deepseek-ai/dsh-tools": "workspace:^",
     "@deepseek-ai/dsh-user-approval": "workspace:^",
     "@dsh-tui/ui": "workspace:^",
-    "@types/js-yaml": "^4.0.9",
-    "@types/ws": "8.18.1",
-    "ajv": "^8.20.0",
-    "execa": "^10.0.0",
-    "ws": "8.21.0"
+    "@types/js-yaml": "catalog:",
+    "@types/ws": "catalog:",
+    "ajv": "catalog:",
+    "execa": "catalog:",
+    "ws": "catalog:"
   },
   "exports": {
     "./profile-boot": {
