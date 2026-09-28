@@ -626,6 +626,23 @@ it.each(['en', 'zh'] as const)('renders a bounded session picker and returns the
   expect(state.onSubmit).not.toHaveBeenCalled()
 })
 
+it('lists a search-only choice only once the filter has text, and returns it', async () => {
+  const state = props({ inputBlocked: true, interaction: { kind: 'select', id: 11, title: 'Settings', initial: 'section:shell', choices: [
+    { value: 'section:terminal', label: 'Terminal', description: 'Inline' },
+    { value: 'section:shell', label: 'Shell', description: '2m' },
+    { value: 'setting:shell/timeout', label: 'Shell › Command timeout', description: '2m', searchOnly: true },
+  ] } })
+  const ui = render(<App {...state} />)
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain('▸ Shell'))
+  expect(ui.lastFrame()).not.toContain('Command timeout')
+  expect(ui.lastFrame()).toContain('2/2')
+  ui.stdin.write('timeout')
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain('▸ Shell › Command timeout'))
+  expect(ui.lastFrame()).toContain('1/1')
+  ui.stdin.write('\r')
+  await vi.waitFor(() => expect(state.onAnswer).toHaveBeenCalledExactlyOnceWith(11, 'setting:shell/timeout'))
+})
+
 it('resets draft, cursor, recall, and printed history when the displayed session changes', async () => {
   const state = props({ committed: appendTranscript(emptyTranscript, [{ kind: 'user', text: 'First saved input' }]) })
   const ui = render(<App {...state} />)

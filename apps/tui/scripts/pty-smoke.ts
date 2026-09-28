@@ -1614,7 +1614,7 @@ scenario('agents', 'the built TUI exposes the Harness subagent catalog through /
     assert(!log.some(event => event.type === 'user/message'), '/agents entered model input')
   })
 
-scenario('settings', 'a /settings choice is saved to the settings file, and a saved fullscreen screen opens at the next launch',
+scenario('settings', 'a /settings choice is saved to the settings file, plugin settings are found by search, and a saved fullscreen screen opens at the next launch',
   { replayOnly: true },
   async run => {
     const copy = dictionaries.en
@@ -1626,9 +1626,23 @@ scenario('settings', 'a /settings choice is saved to the settings file, and a sa
       await run.terminal('settings', [], async tty => {
         const start = tty.mark()
         tty.send('/settings\r', 'open the settings panel')
-        await tty.expect(copy.settingsScreenInline, start)
-        await tty.expect(copy.settingsModel, 'deepseek-official/deepseek-v4-flash', copy.settingsNewSessions)
-        await tty.wait('the screen row to be selected', text => picked(copy.settingsScreen).test(text.slice(start)))
+        // Sections, each read by its values; the running composition fills the plugin ones.
+        await tty.expect(copy.settingsSession, 'deepseek-official/deepseek-v4-flash', copy.settingsTerminal, copy.settingsScreenInline,
+          copy.settingsAgent, copy.settingsAdvanced, start)
+        await tty.wait('the session section to be selected', text => picked(copy.settingsSession).test(text.slice(start)))
+        // The top page searches the settings inside every section.
+        const search = tty.mark()
+        tty.send('parallel', 'search for a plugin setting')
+        await tty.wait('the agent loop setting found from the top', text =>
+          picked(`${copy.settingsAgent} › ${copy.settingsParallelTools}`).test(text.slice(search)))
+        const cleared = tty.mark()
+        tty.send('\x7f'.repeat('parallel'.length), 'clear the search')
+        await tty.wait('the session section to be selected again', text => picked(copy.settingsSession).test(text.slice(cleared)))
+        const terminal = tty.mark()
+        tty.send('\x1b[B', 'point at the terminal section')
+        await tty.wait('the terminal section to be selected', text => picked(copy.settingsTerminal).test(text.slice(terminal)))
+        tty.send('\r', 'open the terminal section')
+        await tty.wait('the screen row to be selected', text => picked(copy.settingsScreen).test(text.slice(terminal)))
         const values = tty.mark()
         tty.send('\r', 'open the screen values')
         await tty.wait('the inline value to be selected', text => picked(copy.settingsScreenInline).test(text.slice(values)))
@@ -1639,6 +1653,9 @@ scenario('settings', 'a /settings choice is saved to the settings file, and a sa
         const chosen = tty.mark()
         tty.send('\r', 'choose fullscreen')
         await tty.expect(copy.settingsNextLaunch, chosen)
+        const up = tty.mark()
+        tty.send('\x1b', 'return to the sections')
+        await tty.wait('the terminal section under the pointer again', text => picked(copy.settingsTerminal).test(text.slice(up)))
         const closed = tty.mark()
         tty.send('\x1b', 'close the panel')
         await tty.expect(`${SCREEN.prompt}${SCREEN.caret}`, closed)
