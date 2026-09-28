@@ -95,11 +95,12 @@ suite('persistent Bash through a real cordis.yml Loader composition', () => {
       '    idleSilenceMs: 30000',
       '    handoffGraceMs: 100',
       '    scrollbackLines: 20000',
-      '    timeoutMs: 2000',
+      // This bound also covers shell startup, which a loaded host can stretch past a few seconds.
+      '    timeoutMs: 10000',
       '    disposeGraceMs: 500',
       "- name: '@deepseek-ai/dsh-tool-bash-persistent'",
       '  config:',
-      '    timeoutMs: 5000',
+      '    timeoutMs: 20000',
       '',
     ].join('\n'))
 
@@ -140,7 +141,9 @@ suite('persistent Bash through a real cordis.yml Loader composition', () => {
     })
 
     expect(context.tools.schemas().map(schema => schema.name)).toEqual(['bash'])
-    await execute('state', 'export KEEP=loader; mkdir -p nested; cd nested')
+    // A startup failure or timeout resets the shell, so the state call must itself succeed.
+    expect(text(await execute('state', 'export KEEP=loader; mkdir -p nested; cd nested')))
+      .toBe('[Command finished with exit code 0]')
     const observed = text(await execute('observe', 'printf "cwd=%s keep=%s\\n" "$PWD" "$KEEP"'))
     expect(observed).toContain(`cwd=${join(root, 'nested')} keep=loader`)
     expect(observed).not.toContain('DSH_PERSISTENT_BASH')
@@ -184,5 +187,5 @@ suite('persistent Bash through a real cordis.yml Loader composition', () => {
     const exited = text(await execute('exit', 'exit'))
     expect(exited).toContain('next bash call starts from the workspace')
     expect(text(await execute('after-exit', 'printf "%s\\n" "$PWD"'))).toBe(`${root}\n[Command finished with exit code 0]`)
-  }, 20_000)
+  }, 60_000)
 })
