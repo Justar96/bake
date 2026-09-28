@@ -8,7 +8,7 @@ import { dictionaries } from '../src/copy.ts'
 import { budgetFor, CHROME_ROWS, NOTICE_BUDGET, type WindowSize } from '../src/layout.ts'
 import { appendTranscript, emptyTranscript } from '../src/transcript.ts'
 import { ICON } from '../src/icons.ts'
-import { FRAME_MS, SPINNER_REST, THINKING_ROWS, type Clock } from '../src/activity.ts'
+import { FRAME_MS, SPINNER, SPINNER_REST, THINKING_ROWS, type Clock } from '../src/activity.ts'
 import type { Row } from '../src/rows.ts'
 import { Beat } from '../src/beat.tsx'
 import { Header, PULSE_MS, THINKING_GAP } from '../src/line.tsx'
@@ -285,7 +285,7 @@ function fakeClock() {
 /** A header row's turn label. The text after its lead. */
 const labelOf = (row: string): string => row.trimEnd()
 /** The header row while work runs. The glyph at the first column, the word and its ellipsis. */
-const RUNNING = /^([\u2800-\u283f]{3}|>) \S+…/
+const RUNNING = /^([\u2800-\u28ff]{3}|>) \S+…/
 /** The header's label while a turn runs. */
 const headerOf = (frame: string | undefined): string | undefined => {
   const row = (frame ?? '').split('\n').find(line => RUNNING.test(line))
@@ -293,7 +293,7 @@ const headerOf = (frame: string | undefined): string | undefined => {
 }
 
 describe('turn header', () => {
-  it('renders the lower wave on one row through its full cycle, with a static screen-reader glyph', async () => {
+  it('kneads the dough on one row through its full cycle, with a static screen-reader glyph', async () => {
     const { clock, advance, active } = fakeClock()
     const view = (compact = false) => <Beat clock={clock}>
       <Header columns={48} clock={clock} compact={compact}
@@ -301,18 +301,18 @@ describe('turn header', () => {
     </Beat>
     const ui = render(view())
     const frames: string[] = []
-    for (let step = 0; step < 7; step++) {
+    for (let step = 0; step <= SPINNER.length; step++) {
       frames.push(ui.lastFrame()!)
       // Only the glyph and the seconds move.
       expect(ui.lastFrame()!).toMatch(RUNNING)
       expect(heightOf(ui.lastFrame())).toBe(1)
-      advance(FRAME_MS * 2)
+      advance(FRAME_MS)
     }
     ui.rerender(view(true))
     frames.push(ui.lastFrame()!)
     // No motion for a screen reader. The glyph rests.
-    expect(ui.lastFrame()!.trimEnd()).toBe('> Working…  thinking · 2s')
-    await expect(frames.join('\n---\n') + '\n').toMatchFileSnapshot('./expected/arrow-wave.txt')
+    expect(ui.lastFrame()!.trimEnd()).toBe('> Working…  thinking · 1s')
+    await expect(frames.join('\n---\n') + '\n').toMatchFileSnapshot('./expected/kneading.txt')
     ui.unmount()
     expect(active()).toBe(0)
   })
@@ -322,7 +322,7 @@ describe('turn header', () => {
     const ui = render(<App {...props({ status: 'running', goal })} />)
     const rows = ui.lastFrame()!.split('\n')
     const header = rows.findIndex(line => RUNNING.test(line))
-    expect(rows[header]).toContain(`● ${dictionaries.en.goalActive}  ${dictionaries.en.goalRound} 2/8 · Ship it`)
+    expect(rows[header]).toMatch(new RegExp(`● ${dictionaries.en.goalActive}  ${dictionaries.en.goalRound} 2/8$`))
     expect(rows.filter(line => line.includes(dictionaries.en.goalActive))).toHaveLength(1)
     expect(rows[header + 1]).toMatch(/^─+$/)
     expect(rows[header + 2]).toMatch(/^> /)

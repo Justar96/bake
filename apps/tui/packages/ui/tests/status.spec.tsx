@@ -119,7 +119,8 @@ it('thins the rows around the composer once tasks, a goal, and subagents are all
   expect(frame).toMatch(/^Tasks .*Ctrl\+T$/m)
   // One of them alone keeps every reading.
   const alone = render(<App {...props({ ...busy, todos: undefined, subagents: [] })} />).lastFrame() ?? ''
-  expect(alone).toContain('Ctrl+O ● Goal active  round 3/256 · Ship it')
+  expect(alone).toMatch(/Ctrl\+O ● Goal active  round 3\/256$/m)
+  expect(alone).not.toContain('Ship it')
   expect(statusRow(alone)).toContain('Context: ~45k/128k (35%)  in 1.2M  out 30.5k  cache hit 81%')
 })
 

@@ -11,3 +11,7 @@ test('both installer payloads match the maintained Node renderer', async () => {
     expect(source.split('// # BEGIN BAKERY\n')[1]?.split('// # END BAKERY')[0]?.trim()).toBe(code)
   }
 })
+
+test('the installer payload is ASCII, which Windows PowerShell reads the same in any code page', async () => {
+  expect(await installerAnimation()).toMatch(/^[\x00-\x7f]*$/u)
+})

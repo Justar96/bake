@@ -29,7 +29,7 @@
     },
     "apps/cli": {
       "name": "@deepseek-ai/dsh",
-      "version": "0.1.7",
+      "version": "0.1.8",
       "bin": {
         "dsh": "lib/bin.js",
       },
@@ -141,6 +141,7 @@
         "@deepseek-ai/dsh-system-prompt": "workspace:^",
         "@deepseek-ai/dsh-tools": "workspace:^",
         "@deepseek-ai/dsh-user-approval": "workspace:^",
+        "@dsh-tui/ui": "workspace:^",
         "@types/js-yaml": "^4.0.9",
         "@types/ws": "8.18.1",
         "ajv": "^8.20.0",
@@ -153,6 +154,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@deepseek-ai/dsh-agent": "workspace:^",
+        "@deepseek-ai/dsh-agent-default-model": "workspace:^",
         "@deepseek-ai/dsh-agent-presets": "workspace:^",
         "@deepseek-ai/dsh-attachment": "workspace:^",
         "@deepseek-ai/dsh-authorization": "workspace:^",
@@ -192,7 +194,6 @@
         "@deepseek-ai/cordis": "workspace:^",
         "@deepseek-ai/cordis-plugin-include": "workspace:^",
         "@deepseek-ai/cordis-plugin-loader": "workspace:^",
-        "@deepseek-ai/dsh-agent-default-model": "workspace:^",
         "@deepseek-ai/dsh-agent-loop": "workspace:^",
         "@deepseek-ai/dsh-agent-loop-testkit": "workspace:^",
         "@deepseek-ai/dsh-attachment-local": "workspace:^",

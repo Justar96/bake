@@ -25,7 +25,8 @@ import { listTargets, login } from './login.ts'
 import { bakeVersion, changelogFor } from './release.ts'
 import { contextFor, goalFor, usageFor } from './status.ts'
 import { listRoutes, namesRoute, routeOf, resolveRoute, resolveSelection } from './model.ts'
-import type { ModelSelectionRef } from '@deepseek-ai/dsh-agent'
+import type { ModelSelection, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
+import type {} from '@deepseek-ai/dsh-agent-default-model'
 // Empty type imports. Each declaration-merges a key into the projection map
 // (`contextPressure`, `todos`), and those keys are invisible here without them.
 import type {} from '@deepseek-ai/dsh-token-meter'
@@ -54,6 +55,8 @@ export class SessionController {
   private reasoningRevision = 0
   private readonly reasoningAbort = new AbortController()
   private reasoningLoad: Promise<void> | undefined
+  /** Queued saves of the chosen model as the new-session default. */
+  private remembering: Promise<void> | undefined
   /** Rows for the attempt currently streaming that have not printed yet. */
   private blocks: readonly Row[] = []
   /**
@@ -507,12 +510,42 @@ export class SessionController {
     const steps = [undefined, ...efforts.map(effort => effort.id)]
     const next = steps[(steps.indexOf(current.reasoningEffort) + 1) % steps.length]
     this.selection!.current = { provider: current.provider, model: current.model, ...next === undefined ? {} : { reasoningEffort: next } }
+    this.rememberSelection(this.selection!.current)
     const label = next === undefined ? this.copy.providerDefault : efforts.find(effort => effort.id === next)?.name ?? next
     this.notify(`${this.copy.thinking}: ${label}${this.agent.status === 'running' ? ` \u00b7 ${this.copy.thinkingNextStep}` : ''}`)
   }
 
-  /** @returns after outstanding command and catalog work has settled. */
-  async drain(): Promise<void> { await Promise.all([this.submission?.done, this.command?.done, this.reasoningLoad, this.catalog.drain(), this.subagents.drain(), this.references.drain()]) }
+  /**
+   * Open the model picker from another command, such as `/settings`, and
+   * wait until the choice is saved as the new-session default.
+   * @param signal - the calling command's lifetime.
+   * @returns the model command's outcome.
+   */
+  async chooseModel(signal: AbortSignal): Promise<CommandResult> {
+    const result = await this.runModel('', signal)
+    await this.remembering
+    return result
+  }
+
+  /** @returns after outstanding command, catalog, and default-model work has settled. */
+  async drain(): Promise<void> {
+    await Promise.all([this.submission?.done, this.command?.done, this.reasoningLoad, this.remembering,
+      this.catalog.drain(), this.subagents.drain(), this.references.drain()])
+  }
+
+  /**
+   * Save a chosen model and effort as the default for new sessions, so the
+   * next launch and `/new` start where the user left off. Writes queue in
+   * order, so rapid Shift-Tab presses leave the last choice on disk. A
+   * profile without a settings document keeps its configured default.
+   */
+  private rememberSelection(selection: ModelSelection): void {
+    const defaults = this.ctx.get('agentDefaultModel')
+    if (defaults === undefined) return
+    this.remembering = (this.remembering ?? Promise.resolve()).then(() => defaults.saveSelection(selection)).catch((error: unknown) => {
+      if (!this.closed) this.notify(`${this.copy.settingsFailed}: ${error instanceof Error ? error.message : String(error)}`)
+    })
+  }
 
   /** Read only the selected route's advertised default; explicit efforts need no lookup. */
   private async loadReasoning(): Promise<void> {
@@ -701,6 +734,7 @@ export class SessionController {
           this.reasoningRevision += 1
           this.reasoning = { route: routeOf(result.selection), info: result.reasoning }
           selection.current = result.selection
+          this.rememberSelection(result.selection)
           return { kind: 'success', text: `${this.copy.modelSelected}: ${routeOf(result.selection)}${result.selection.reasoningEffort === undefined ? '' : ` (${result.selection.reasoningEffort})`}` }
         case 'unknown-effort': return { kind: 'error', text: `${this.copy.unknownEffort}: ${result.offered.join(' ')}` }
         case 'unknown-route': return { kind: 'error', text: `${this.copy.unknownModel}: ${result.route} (${routeOf(current)})` }

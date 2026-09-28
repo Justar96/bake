@@ -22,7 +22,7 @@
 
 [直接下载归档](../../distribution/README.zh.md) 会在此启动器外安装 `bake` 包装命令。默认启动 `tui` profile；`bake tui`、`bake headless`、`bake plugin`、`bake update` 和 `bake --profile` 会转交给 profile CLI。除非设置 `DSH_HOME`，该命令使用 `~/.bake`。`dsh update` 用最新的已签名发行版替换该安装，`dsh update --check` 只报告结果，有更新版本时退出码为 10；与 `plugin` 一样，开头的 `update` 保留给此用途，名为 `update` 的 profile 需用 `--profile update` 访问。参见[更新安装](../../distribution/README.zh.md#updating-an-install)。
 
-交互式更新在 stderr 上显示 ASCII 烘焙动画，并在结果或错误前清除动画。`BAKE_NO_ANIMATION=1` 关闭动画，`NO_COLOR=1` 关闭颜色。仅检查、重定向输出、CI 和不支持控制序列的终端保留纯文本报告。
+交互式更新在 stderr 的一行上烘焙面包，面包随下载和安装进度变色，并在结果或错误前清除。`BAKE_NO_ANIMATION=1` 关闭动画，`NO_COLOR=1` 关闭颜色。仅检查、重定向输出、CI 和不支持控制序列的终端保留纯文本报告。
 
 ## 外部插件
 

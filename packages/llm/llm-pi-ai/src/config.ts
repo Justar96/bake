@@ -298,6 +298,7 @@ const reasoningEfforts = z.dict(
 /** The fields a `models` entry and a `modelOverrides` value share; only the id's home differs. */
 const modelFields = {
   api: z.union(supportedProtocols()),
+  baseURL: z.string(),
   name: z.string(),
   contextWindow: z.number().step(1).min(1),
   maxTokens: z.number().step(1).min(1),

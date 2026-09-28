@@ -535,6 +535,18 @@ class Run {
   }
 
   /**
+   * Drop the remembered `/model` choice. Every scenario shares this home, and
+   * each expects a new session on the overlay's default model.
+   */
+  async forgetDefaultModel(): Promise<void> {
+    const path = join(this.home, 'settings.yaml')
+    if (!existsSync(path)) return
+    const text = await Bun.file(path).text()
+    const kept = text.replace(/^agent-default-model:\n(?:[ \t]+.*(?:\n|$)|\n)*/mu, '')
+    if (kept !== text) await Bun.write(path, kept)
+  }
+
+  /**
    * Build the CLI invocation for one terminal.
    *
    * @param extra - arguments appended after the profile patches.
@@ -670,6 +682,10 @@ scenario('fresh', 'login, model and effort selection, paste, cursor editing, a b
       assert(headers.length > 0 && headers.every(h => h.config.model === 'tui-picked-model'
                                                  && h.config.reasoningEffort === 'high'),
              'picker selection did not reach recorded requests')
+      // The pick is also the default a new session starts on.
+      const saved = await Bun.file(join(run.home, 'settings.yaml')).text()
+      assert(/^agent-default-model:\n(?:\s+.*\n)*?\s+model: tui-picked-model\n(?:\s+.*\n)*?\s+reasoningEffort: high$/mu.test(saved),
+             `the picked model was not saved as the new-session default:\n${saved}`)
     }
     const model = log.filter(e => e.type === 'assistant/message').map(e => e.data.message.content)
     const expectedModel = run.recorded.filter(e => e.type === 'assistant/message').map(e => e.data.message.content)
@@ -1180,7 +1196,7 @@ scenario('background-job', 'a background bash job that settles after the turn wa
     assert(notices.length === 1, `expected one job completion notice, the model saw ${notices.length}`)
   })
 
-scenario('arrow-wave', 'the single-line processing wave loops in place and yields to a short composer',
+scenario('arrow-wave', 'the single-line kneading spinner loops in place and yields to a short composer',
   { replayOnly: true }, async run => {
     const override = join(run.root, 'arrow-wave-replay.json')
     const reasoning = 'Checking the processing indicator. '.repeat(80)
@@ -1211,19 +1227,19 @@ scenario('arrow-wave', 'the single-line processing wave loops in place and yield
         try {
           const frames = new Set<string>()
           tty.send('Show the processing wave.\r')
-          await tty.wait('all six arrow frames at the same position', async () => {
+          await tty.wait('six kneading frames at the same position', async () => {
             const rows = await capture()
-            const header = rows.findIndex(line => /^[\u2800-\u283f]{3} \S+…/.test(line))
+            const header = rows.findIndex(line => /^[\u2800-\u28ff]{3} \S+…/.test(line))
             if (header < 1) return false
             // PTY reads may end mid-frame, before its final scroll anchors the controls.
             // Header, upper rule, input, base rule, then the status line.
             if (header !== 34 || !rows[35]!.startsWith('\u2500') || !rows[36]!.startsWith('> ')
               || !rows[37]!.startsWith('\u2500') || !rows[38]!.includes(SCREEN.status)) return false
-            tty.check('there is no dot zone above the processing line', !rows.some(line => /^[\u2800-\u283f]{3}$/.test(line)))
+            tty.check('there is no dot zone above the processing line', !rows.some(line => /^[\u2800-\u28ff]{3}$/.test(line)))
             frames.add(rows[header]!.slice(0, 3))
             return frames.size === 6
           })
-          tty.check('the wave stays in the header directly above the input', frames.size === 6)
+          tty.check('the spinner stays in the header directly above the input', frames.size === 6)
           const mark = tty.raw.length
           screen.resize(40, 4)
           tty.resize(40, 4)
@@ -1236,7 +1252,7 @@ scenario('arrow-wave', 'the single-line processing wave loops in place and yield
           tty.resize(80, 24)
           await tty.follows(SCREEN.idle, 'WAVE_DONE')
           const rows = await capture()
-          tty.check('completion removes the dot field', !rows.some(line => /[\u2800-\u283f]/.test(line)))
+          tty.check('completion removes the dot field', !rows.some(line => /[\u2800-\u28ff]/.test(line)))
           tty.check('the completed composer stays at the bottom', rows[22]!.includes(SCREEN.status))
         } finally { screen.dispose() }
       })
@@ -1429,7 +1445,7 @@ scenario('cliproxyapi', 'the built TUI configures a CLIProxyAPI URL and key and 
   { replayOnly: true },
   async run => {
     const before = await run.logs()
-    const requests: Array<{ path: string, query: string, authorization: string | null, model?: string }> = []
+    const requests: Array<{ path: string, query: string, authorization: string | null, model?: string, cached?: boolean }> = []
     const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
       const url = new URL(request.url)
       if (url.pathname === '/v1/responses') {
@@ -1450,8 +1466,28 @@ scenario('cliproxyapi', 'the built TUI configures a CLIProxyAPI URL and key and 
         return new Response(wire,
           { headers: { 'content-type': 'text/event-stream' } })
       }
+      if (url.pathname === '/v1/messages') {
+        const body = await request.json() as { model: string, system?: { cache_control?: unknown }[] }
+        requests.push({ path: url.pathname, query: url.search, authorization: request.headers.get('x-api-key'), model: body.model,
+          cached: body.system?.some(block => block.cache_control !== undefined) ?? false })
+        const events = [
+          ['message_start', { type: 'message_start', message: { id: 'msg_claude', type: 'message', role: 'assistant', model: body.model,
+            content: [], stop_reason: null, usage: { input_tokens: 4, output_tokens: 0, cache_read_input_tokens: 0 } } }],
+          ['content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }],
+          ['content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'CLAUDE_OK' } }],
+          ['content_block_stop', { type: 'content_block_stop', index: 0 }],
+          ['message_delta', { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 2 } }],
+          ['message_stop', { type: 'message_stop' }],
+        ] as const
+        return new Response(events.map(([name, data]) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`).join(''),
+          { headers: { 'content-type': 'text/event-stream' } })
+      }
       requests.push({ path: url.pathname, query: url.search, authorization: request.headers.get('authorization') })
-      return Response.json({ models: [{ slug: 'gpt-test', display_name: 'GPT Test', context_window: 128000 }] })
+      return Response.json({ models: [
+        { slug: 'gpt-test', display_name: 'GPT Test', context_window: 128000 },
+        { slug: 'claude-test', display_name: 'Claude Test', owned_by: 'anthropic', context_window: 200000 },
+        { slug: 'image-test', output_modalities: ['image'] },
+      ] })
     } })
     await run.writeOverlay(undefined, { cliProxyApi: true })
     try {
@@ -1464,12 +1500,17 @@ scenario('cliproxyapi', 'the built TUI configures a CLIProxyAPI URL and key and 
         tty.send(`${server.url.toString()}\r`, 'set the proxy URL')
         await tty.expect('2/2 · CLIProxyAPI API key')
         tty.send('smoke-proxy-key\r', 'store the proxy key')
-        await tty.expect('cliproxyapi: 1 model ready; choose it with /model')
+        await tty.expect('cliproxyapi: 2 models ready; choose one with /model')
         tty.send('/model cliproxyapi/gpt-test\r', 'select the discovered model')
         await tty.expect('Model set for the next turn: cliproxyapi/gpt-test')
         tty.send('Say PROXY_OK\r', 'run one turn through the configured proxy')
         await tty.expect('  PROXY_OK')
         await tty.expect('✓ Completed')
+        const claude = tty.mark()
+        tty.send('/model cliproxyapi/claude-test\r', 'select the Claude model')
+        await tty.expect('Model set for the next turn: cliproxyapi/claude-test', claude)
+        tty.send('Say CLAUDE_OK\r', 'run one turn over Anthropic Messages')
+        await tty.expect('  CLAUDE_OK')
       })
       assert(!transcript.includes('smoke-proxy-key'), 'CLIProxyAPI secret appeared on the terminal')
       assert(!transcript.includes('Could not parse message into JSON'), 'empty SSE framing leaked an SDK parse error')
@@ -1481,16 +1522,19 @@ scenario('cliproxyapi', 'the built TUI configures a CLIProxyAPI URL and key and 
       { path: '/v1/models', query: '?client_version=pi', authorization: 'Bearer smoke-proxy-key' },
       { path: '/v1/responses', query: '', authorization: 'Bearer smoke-proxy-key', model: 'gpt-test' },
       { path: '/v1/responses', query: '', authorization: 'Bearer smoke-proxy-key', model: 'gpt-test' },
-    ]), 'CLIProxyAPI did not validate the catalog and send the selected model to the entered proxy')
+      // Claude goes to the proxy root over Messages, with a cache breakpoint on the system prompt.
+      { path: '/v1/messages', query: '?beta=true', authorization: 'smoke-proxy-key', model: 'claude-test', cached: true },
+    ]), `CLIProxyAPI did not validate the catalog and send each model to the entered proxy: ${JSON.stringify(requests)}`)
     assert(!(await Bun.file(join(run.home, 'settings.yaml')).text()).includes('smoke-proxy-key'),
       'CLIProxyAPI secret was saved in model settings')
     const log = await events(await run.created(before, 'proxy retry'))
-    assert(log.filter(event => event.type === 'user/message' && event.data.source.kind === 'user').length === 1,
+    // One prompt per model: the retry must not add a third.
+    assert(log.filter(event => event.type === 'user/message' && event.data.source.kind === 'user').length === 2,
       'proxy retry duplicated user input')
     const retries = log.filter(event => event.type === 'llm/retry')
     assert(retries.length === 1 && retries[0]!.data.failure.code === 'TRANSPORT',
       'missing SSE completion did not produce exactly one transport retry')
-    assert(log.filter(event => event.type === 'assistant/message').length === 1, 'proxy retry persisted an extra assistant message')
+    assert(log.filter(event => event.type === 'assistant/message').length === 2, 'proxy retry persisted an extra assistant message')
     assert(log.some(event => event.type === 'turn/end' && event.data.reason.kind === 'completed'),
       'proxy recovery did not complete the turn')
   })
@@ -1509,6 +1553,56 @@ scenario('agents', 'the built TUI exposes the Harness subagent catalog through /
     const path = await run.created(before, 'agents')
     const log = await events(path)
     assert(!log.some(event => event.type === 'user/message'), '/agents entered model input')
+  })
+
+scenario('settings', 'a /settings choice is saved to the settings file, and a saved fullscreen screen opens at the next launch',
+  { replayOnly: true },
+  async run => {
+    const copy = dictionaries.en
+    // Every scenario shares this home. The saved screen must not outlive this one.
+    const settingsPath = join(run.home, 'settings.yaml')
+    const original = existsSync(settingsPath) ? await Bun.file(settingsPath).text() : undefined
+    try {
+      const before = await run.logs()
+      await run.terminal('settings', [], async tty => {
+        const start = tty.mark()
+        tty.send('/settings\r', 'open the settings panel')
+        await tty.expect(copy.settingsScreenInline, start)
+        await tty.expect(copy.settingsModel, 'deepseek-official/deepseek-v4-flash', copy.settingsNewSessions)
+        await tty.wait('the screen row to be selected', text => picked(copy.settingsScreen).test(text.slice(start)))
+        const values = tty.mark()
+        tty.send('\r', 'open the screen values')
+        await tty.wait('the inline value to be selected', text => picked(copy.settingsScreenInline).test(text.slice(values)))
+        await tty.expect(copy.settingsDefault, values)
+        const down = tty.mark()
+        tty.send('\x1b[B', 'point at fullscreen')
+        await tty.wait('the fullscreen value to be selected', text => picked(copy.settingsScreenFullscreen).test(text.slice(down)))
+        const chosen = tty.mark()
+        tty.send('\r', 'choose fullscreen')
+        await tty.expect(copy.settingsNextLaunch, chosen)
+        const closed = tty.mark()
+        tty.send('\x1b', 'close the panel')
+        await tty.expect(`${SCREEN.prompt}${SCREEN.caret}`, closed)
+        await tty.expect(`${copy.settingsSaved} `, closed)
+        // The running process keeps its inline screen.
+        tty.check('the running process stayed inline', !tty.raw.includes('\u001b[?1049h'))
+      })
+      const saved = await Bun.file(join(run.home, 'settings.yaml')).text()
+      assert(/^tui:\n\s+screen: fullscreen$/mu.test(saved), `the screen choice was not saved:\n${saved}`)
+      const log = await events(await run.created(before, 'settings'))
+      assert(!log.some(event => event.type === 'user/message'), '/settings entered model input')
+      await run.terminal('settings-fullscreen', [], async tty => {
+        await tty.wait('the saved fullscreen screen at launch', text => text.includes('BAKE') && tty.raw.includes('\u001b[?1049h'))
+      })
+      // A flag still wins over the saved screen.
+      await run.terminal('settings-flag', ['--screen', 'inline'], async tty => {
+        await tty.expect('BAKE')
+        tty.check('--screen inline overrode the saved screen', !tty.raw.includes('\u001b[?1049h'))
+      })
+    } finally {
+      if (original === undefined) rmSync(settingsPath, { force: true })
+      else await Bun.write(settingsPath, original)
+    }
   })
 
 scenario('inspect-agent', 'select a saved child, read its session, and return with the parent draft intact',
@@ -2193,6 +2287,7 @@ async function main(): Promise<void> {
       current = item
       const step = performance.now()
       await item.body(run)
+      await run.forgetDefaultModel()
       process.stdout.write(`PASS ${item.name} (${((performance.now() - step) / 1000).toFixed(1)}s): ${item.summary}\n`)
     }
     process.stdout.write(`PASS ${node} (${mode}): ${chosen.length} scenario(s)`

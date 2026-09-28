@@ -10,16 +10,23 @@ export const CLIPROXYAPI_KEY = 'CLIPROXYAPI_API_KEY'
 export const CLIPROXYAPI_DEFAULT_URL = 'http://127.0.0.1:8317'
 const MAX_CATALOG_BYTES = 4 * 1024 * 1024
 
+/** The wire protocols a login assigns; the route's own is `openai-responses`. */
+export type CliProxyApi = 'openai-responses' | 'openai-completions' | 'anthropic-messages'
+
 /** Fields the pi-ai settings route can persist for one discovered model. */
 export interface CliProxyModel {
   readonly id: string
-  /** Set only where the route's `openai-responses` would be relayed through the proxy's own translator. */
-  readonly api?: 'openai-completions'
+  /** Set only where the model leaves the route's `openai-responses`. */
+  readonly api?: Exclude<CliProxyApi, 'openai-responses'>
+  /** Set with `anthropic-messages`, which joins `/v1/messages` onto the proxy root instead of the route's `/v1`. */
+  readonly baseURL?: string
   readonly name: string
   readonly contextWindow?: number
   readonly maxTokens?: number
   readonly input?: ('text' | 'image')[]
   readonly reasoningEfforts?: Record<string, string>
+  /** Set on Claude models that take adaptive thinking with an effort level. */
+  readonly compat?: { readonly forceAdaptiveThinking: true }
 }
 
 /** The proxy accepts a root URL, a /v1 URL, or its native /backend-api URL. */
@@ -40,6 +47,7 @@ interface CatalogModel {
   readonly id?: unknown
   readonly display_name?: unknown
   readonly name?: unknown
+  readonly owned_by?: unknown
   readonly visibility?: unknown
   readonly context_window?: unknown
   readonly max_context_window?: unknown
@@ -47,6 +55,7 @@ interface CatalogModel {
   readonly max_output_tokens?: unknown
   readonly max_completion_tokens?: unknown
   readonly input_modalities?: unknown
+  readonly output_modalities?: unknown
   readonly supported_reasoning_levels?: unknown
 }
 
@@ -55,17 +64,43 @@ interface CatalogModel {
  * /v1/responses by translating to chat itself, and a strict upstream rejects
  * shapes that translation produces — Kimi answers two parallel tool calls with
  * `tool_call_ids did not have response messages` — so these models skip the
- * translation. OpenAI, Claude, Gemini, and Grok stay on Responses, which
- * carries their signed reasoning across turns. An optional `vendor/` or
- * `vendor:` namespace precedes the family, as in `moonshotai/kimi-k3`.
+ * translation. An optional `vendor/` or `vendor:` namespace precedes the
+ * family, as in `moonshotai/kimi-k3`.
  */
 const CHAT_COMPLETIONS_FAMILY = /^(?:[\w.-]+[/:])?(?:kimi-|moonshot-|glm-|qwen|qwq-|deepseek-|minimax-)/i
+
+/**
+ * Claude, by id wherever it is hosted. Claude caches a prompt only at the
+ * `cache_control` breakpoints a request marks, and CPA's Responses translator
+ * carries none, so over Responses every turn re-reads the whole context at
+ * full price. Over Anthropic Messages the adapter marks the system prompt,
+ * the last tool, and the last user message, and the proxy passes them on.
+ */
+const ANTHROPIC_FAMILY = /^(?:[\w.-]+[/:])?claude-/i
+
+/**
+ * The wire protocol one listed model is served over. OpenAI, Gemini, and Grok
+ * stay on Responses, which carries their signed reasoning across turns and
+ * which their upstreams cache from `prompt_cache_key` alone.
+ * @param id - the model id the proxy lists.
+ * @param ownedBy - the listing's `owned_by`, when it names one.
+ */
+export function cliProxyApi(id: string, ownedBy?: string): CliProxyApi {
+  if (ownedBy?.toLowerCase() === 'anthropic' || ANTHROPIC_FAMILY.test(id)) return 'anthropic-messages'
+  if (CHAT_COMPLETIONS_FAMILY.test(id)) return 'openai-completions'
+  return 'openai-responses'
+}
 
 const positiveInteger = (...values: readonly unknown[]): number | undefined =>
   values.find(value => typeof value === 'number' && Number.isInteger(value) && value > 0) as number | undefined
 
-/** Turn CPA's model listing into the explicit models required by a custom pi-ai route. */
-export function cliProxyModels(payload: unknown): CliProxyModel[] {
+/**
+ * Turn CPA's model listing into the explicit models required by a custom pi-ai route.
+ * @param payload - the parsed `/v1/models` reply.
+ * @param root - the proxy root, which an Anthropic Messages model is sent to.
+ * @returns the chat models, each with the protocol it is served over.
+ */
+export function cliProxyModels(payload: unknown, root?: string): CliProxyModel[] {
   const record = payload !== null && typeof payload === 'object' && !Array.isArray(payload)
     ? payload as { models?: unknown, data?: unknown } : undefined
   const entries = Array.isArray(payload) ? payload : Array.isArray(record?.models) ? record.models : record?.data
@@ -77,6 +112,8 @@ export function cliProxyModels(payload: unknown): CliProxyModel[] {
     const id = typeof entry.slug === 'string' && entry.slug.trim() !== '' ? entry.slug.trim()
       : typeof entry.id === 'string' ? entry.id.trim() : ''
     if (id === '' || (typeof entry.visibility === 'string' && entry.visibility.toLowerCase() === 'hide')) continue
+    // An image or video generator cannot answer a chat turn.
+    if (Array.isArray(entry.output_modalities) && !entry.output_modalities.includes('text')) continue
     const name = typeof entry.display_name === 'string' && entry.display_name.trim() !== '' ? entry.display_name.trim()
       : typeof entry.name === 'string' && entry.name.trim() !== '' ? entry.name.trim() : id
     const contextWindow = positiveInteger(entry.context_window, entry.max_context_window)
@@ -88,14 +125,21 @@ export function cliProxyModels(payload: unknown): CliProxyModel[] {
         : level !== null && typeof level === 'object' ? (level as { effort?: unknown }).effort : undefined)
         .filter((level): level is string => typeof level === 'string' && ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(level)) : []
     const reasoningEfforts = Object.fromEntries([...new Set(efforts)].map(level => [level, level]))
+    const api = cliProxyApi(id, typeof entry.owned_by === 'string' ? entry.owned_by : undefined)
+    // Adaptive thinking is what takes an effort level. The Claude models that
+    // list `xhigh` or `max` accept it; older ones answer it with HTTP 400 and
+    // keep budget thinking.
+    const adaptive = api === 'anthropic-messages' && efforts.some(level => level === 'xhigh' || level === 'max')
     models.set(id, {
       id,
-      ...CHAT_COMPLETIONS_FAMILY.test(id) ? { api: 'openai-completions' as const } : {},
+      ...api === 'openai-responses' ? {} : { api },
+      ...api === 'anthropic-messages' && root !== undefined ? { baseURL: root } : {},
       name,
       ...contextWindow === undefined ? {} : { contextWindow },
       ...maxTokens === undefined ? {} : { maxTokens },
       ...input.length === 0 ? {} : { input: input.includes('text') ? input : ['text', ...input] as ('text' | 'image')[] },
       ...efforts.length === 0 ? {} : { reasoningEfforts },
+      ...adaptive ? { compat: { forceAdaptiveThinking: true as const } } : {},
     })
   }
   return [...models.values()]
@@ -103,7 +147,7 @@ export function cliProxyModels(payload: unknown): CliProxyModel[] {
 
 /** Validate a connection before changing either credentials or provider settings. */
 export async function fetchCliProxyModels(url: string, apiKey: string, signal: AbortSignal,
-  fetcher: typeof fetch = fetch): Promise<CliProxyModel[]> {
+  fetcher: typeof fetch = fetch, root?: string): Promise<CliProxyModel[]> {
   const response = await fetcher(url, {
     headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
     redirect: 'error',
@@ -136,7 +180,7 @@ export async function fetchCliProxyModels(url: string, apiKey: string, signal: A
   let payload: unknown
   try { payload = JSON.parse(new TextDecoder().decode(body)) as unknown }
   catch { throw new Error('CLIProxyAPI returned invalid model JSON') }
-  const models = cliProxyModels(payload)
+  const models = cliProxyModels(payload, root)
   if (models.length === 0) throw new Error('CLIProxyAPI returned no selectable models')
   return models
 }
@@ -158,7 +202,7 @@ export async function configureCliProxyApi(ctx: Context, prompt: (question: Auth
   signal.throwIfAborted()
   if (apiKey === '') throw new Error('CLIProxyAPI API key is empty')
   const validKey = assertUsableApiKey(apiKey, CLIPROXYAPI_ID, CLIPROXYAPI_KEY)
-  const models = await fetchCliProxyModels(endpoints.models, validKey, signal, fetcher)
+  const models = await fetchCliProxyModels(endpoints.models, validKey, signal, fetcher, endpoints.root)
   signal.throwIfAborted()
   const ref = credentialRef(CLIPROXYAPI_KEY)
   const previous = await credentials.resolve(ref)

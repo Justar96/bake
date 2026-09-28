@@ -3,11 +3,12 @@ import React from 'react'
 import { render, type Instance } from 'ink'
 import type { Context } from '@deepseek-ai/cordis'
 import { App } from '@dsh-tui/ui/app.tsx'
-import { dictionaries, type Locale } from '@dsh-tui/ui/copy.ts'
+import { dictionaries, type Locale, type TuiCopy } from '@dsh-tui/ui/copy.ts'
 import type { FrameStyle } from '@dsh-tui/ui/layout.ts'
 import type { Clock } from '@dsh-tui/ui/activity.ts'
 import { resolveFrame } from './frame.ts'
-import { frameOutput } from './output.ts'
+import { frameOutput, type FrameOutput } from './output.ts'
+import { Preferences } from './preferences.ts'
 import { createSyntax } from './syntax.ts'
 import type { SessionOptions } from './session.ts'
 import type { AttachmentOptions } from './attachments.ts'
@@ -16,11 +17,20 @@ import { bakeVersion, releaseRoot } from './release.ts'
 import { Updates } from './update.ts'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 
-/** Validated application options; no implicit defaults remain in the runner. */
+/**
+ * Validated application options; no implicit defaults remain in the runner.
+ *
+ * Everything but the session choices and `credentialRefs` is the base layer
+ * of the `tui` settings namespace, which the user's settings override.
+ */
 export interface RunnerOptions extends SessionOptions, AttachmentOptions {
   readonly locale: Locale
-  /** Inline terminal scrollback or an application-owned alternate screen. */
-  readonly screen: 'inline' | 'fullscreen'
+  /**
+   * Inline terminal scrollback or an application-owned alternate screen.
+   * Set by `--screen` or the profile, it wins over the user's setting;
+   * absent, the setting decides, and inline is the default.
+   */
+  readonly screen?: 'inline' | 'fullscreen' | null
   /** Profile's composer frame choice, or `auto` to read it from the terminal. */
   readonly composerFrame: FrameStyle | 'auto'
   readonly doubleInterruptMs: number
@@ -28,6 +38,8 @@ export interface RunnerOptions extends SessionOptions, AttachmentOptions {
   readonly completionLimit: number
   /** Maximum tool-result preview lines; zero keeps only the headline and size. */
   readonly resultLines: number
+  /** Whether the header names the goal's objective; off leaves it to the goal's sheet. */
+  readonly goalObjective?: boolean
 }
 
 /** Wall-clock time and intervals for the turn header's animation and elapsed time. */
@@ -60,12 +72,12 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
   const abort = new AbortController()
   const done = Promise.withResolvers<void>()
   let ui: Instance | undefined
-  // One write per frame, drawn over the previous frame. Without synchronized
-  // output, the controls would otherwise appear erased each time a line prints.
   // NO_COLOR suppresses text styling and animated indicators for this terminal.
   const motion = (process.env['NO_COLOR'] ?? '') === ''
-  const screen = process.env['INK_SCREEN_READER'] === 'true' ? 'inline' : config.screen
-  const output = frameOutput(io.out, io.err, motion, screen)
+  // Settled once the loader has, when the settings document has been read.
+  let screen: 'inline' | 'fullscreen' = 'inline'
+  let output: FrameOutput | undefined
+  let navigation: SessionNavigation | undefined
   let quitTimer: ReturnType<typeof setTimeout> | undefined
   let terminalReleased = false
   let completed = false
@@ -73,18 +85,23 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
   const releaseTerminal = (): void => {
     if (terminalReleased) return
     terminalReleased = true
-    navigation.close()
+    navigation?.close()
     clearTimeout(quitTimer)
     ui?.cleanup()
     // Restore the terminal now, before anything else writes to it.
-    output.flush()
+    output?.flush()
   }
   const stop = ctx.effect(() => () => {
     abort.abort()
     releaseTerminal()
     done.resolve()
   }, 'tui terminal owner')
-  const copy = dictionaries[config.locale]
+  const preferences = new Preferences(ctx, {
+    screen: config.screen ?? 'inline', locale: config.locale, composerFrame: config.composerFrame,
+    goalObjective: config.goalObjective ?? false, resultLines: config.resultLines,
+    completionLimit: config.completionLimit, doubleInterruptMs: config.doubleInterruptMs,
+  }, config.screen ?? undefined, () => { repaint() })
+  let copy: TuiCopy = dictionaries[config.locale]
   // Read once. The release does not change for the life of the process.
   const version = bakeVersion()
   const updates = new Updates({ running: version, release: releaseRoot() })
@@ -92,10 +109,17 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
   // A resumed session prints its history once. A diff drawn before the
   // grammars are ready would stay uncoloured.
   const syntax = createSyntax()
-  // Resolved once, before the first frame. The terminal it describes does not
+  // Resolved once per configured choice. The terminal it describes does not
   // change for the life of the process. The presentation layer takes the
   // result instead of reading the environment itself.
-  const frame = resolveFrame({ configured: config.composerFrame, locale: config.locale, env: process.env })
+  let resolved: { readonly configured: FrameStyle | 'auto', readonly frame: FrameStyle } | undefined
+  const frame = (): FrameStyle => {
+    const configured = preferences.value.composerFrame
+    if (resolved?.configured !== configured) {
+      resolved = { configured, frame: resolveFrame({ configured, locale: preferences.launch.locale, env: process.env }) }
+    }
+    return resolved.frame
+  }
   // Runner state, not the controller's. The prompt outlives a session switch.
   // Routing it through `notify` put it in the same slot as command feedback,
   // where a command result cleared it and it cleared one in return.
@@ -104,7 +128,7 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
     quitTimer = setTimeout(() => {
       quitTimer = undefined
       repaint()
-    }, config.doubleInterruptMs)
+    }, preferences.value.doubleInterruptMs)
     repaint()
   }
   const dismissQuit = (): void => {
@@ -114,26 +138,36 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
     repaint()
   }
   const element = (): React.ReactElement => {
-    const active = navigation.controller
-    if (active === undefined) throw new Error('tui: session is not connected')
+    const active = navigation?.controller
+    if (navigation === undefined || active === undefined) throw new Error('tui: session is not connected')
+    const settings = preferences.value
     return React.createElement(App, {
-      ...active.view, key: active.agent.id, inputBlocked: navigation.busy, copy, frame, clock: systemClock, motion, screen,
-      quitting: quitTimer !== undefined, completionLimit: config.completionLimit, resultLines: config.resultLines,
+      ...active.view, key: active.agent.id, inputBlocked: navigation.busy, copy, frame: frame(), clock: systemClock, motion, screen,
+      quitting: quitTimer !== undefined, completionLimit: settings.completionLimit, resultLines: settings.resultLines,
+      goalObjective: settings.goalObjective,
       highlight: syntax.highlight, version, ...updates.state === undefined ? {} : { update: updates.state },
+      ...updates.baking === undefined ? {} : { baking: updates.baking },
       cwd: active.agent.session.header.cwd ?? '', sessionId: active.agent.id,
       onReferenceQuery: query => active.references.search(query),
       onArgumentQuery: query => active.argumentQuery(query),
-      onInspectSubagent: id => { navigation.submit(`/agents ${id}`) },
+      onInspectSubagent: id => { navigation?.submit(`/agents ${id}`) },
       onCycleThinking: () => { active.cycleThinking() },
-      onSubmit: text => navigation.submit(text), onCancel: () => navigation.cancel(),
+      onSubmit: text => navigation?.submit(text) ?? false, onCancel: () => navigation?.cancel(),
       onInterrupt: interrupt, onQuitDismiss: dismissQuit, onAnswer: (id, answer) => active.interactions.answer(id, answer),
     })
   }
   const repaint = (): void => { if (!terminalReleased) ui?.rerender(element()) }
-  const navigation = new SessionNavigation(ctx, config, copy, config.credentialRefs, repaint, updates)
   try {
     await ctx.get('loader')?.await()
     abort.signal.throwIfAborted()
+    // The screen and the language hold for the life of the process; a change
+    // to either in `/settings` is read at the next launch.
+    screen = process.env['INK_SCREEN_READER'] === 'true' ? 'inline' : preferences.screen
+    copy = dictionaries[preferences.launch.locale]
+    // One write per frame, drawn over the previous frame. Without synchronized
+    // output, the controls would otherwise appear erased each time a line prints.
+    output = frameOutput(io.out, io.err, motion, screen)
+    navigation = new SessionNavigation(ctx, config, copy, config.credentialRefs, repaint, updates, preferences)
     await navigation.start(abort.signal)
     // Before the first frame, so a known update is named from it; the network
     // request runs on behind it and never delays the session.
@@ -158,7 +192,7 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
   } finally {
     releaseTerminal()
     await stop()
-    await navigation.drain()
+    await navigation?.drain()
     await startupReport
     await updates.drain()
     await syntax.close()

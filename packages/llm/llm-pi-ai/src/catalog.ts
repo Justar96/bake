@@ -582,6 +582,14 @@ export interface PiAiModelProfile {
    * key and one credential.
    */
   api?: string
+  /**
+   * Endpoint for this model alone, winning over the route's `baseURL`. The
+   * protocols join different paths onto it — OpenAI's append `/responses` or
+   * `/chat/completions` to a `/v1` base, Anthropic's appends `/v1/messages`
+   * to the server root — so a model moved to another protocol by {@link api}
+   * may need its own spelling of the same gateway.
+   */
+  baseURL?: string
   /** Display name for selectors; defaults to the catalog name, then the id. */
   name?: string
   /** Maximum combined request and response context in tokens. */
@@ -898,7 +906,10 @@ export function resolveRouteModels(
       invalid(provider, `model "${entry.id}" needs an api; the installed catalog does not describe it, so set the`
         + ' route\'s api, or this model\'s, to the wire protocol its endpoint speaks')
     }
-    const baseUrl = request.baseURL ?? base?.baseUrl ?? providerBaseUrl
+    if (entry.baseURL !== undefined && entry.baseURL.length === 0) {
+      invalid(provider, `model "${entry.id}" has an empty baseURL`)
+    }
+    const baseUrl = entry.baseURL ?? request.baseURL ?? base?.baseUrl ?? providerBaseUrl
     if (baseUrl === undefined) {
       invalid(provider, `model "${entry.id}" needs a baseURL; the installed catalog does not describe this route`)
     }

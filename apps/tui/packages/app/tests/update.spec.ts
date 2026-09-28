@@ -11,7 +11,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CHECK_CACHE, CHECK_INTERVAL_MS, hostTarget } from '@deepseek-ai/dsh-updater'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'
-import { progressText, Updates } from '../src/update.ts'
+import { progressText, Updates, type Baking } from '../src/update.ts'
 
 const copy = dictionaries.en
 const roots: string[] = []
@@ -128,16 +128,22 @@ describe.skipIf(process.platform === 'win32')('Updates', () => {
     const { root, release, env, fetch } = fixture('0.2.0')
     const abort = new AbortController()
     const updates = new Updates({ running: '0.1.0', release, env, fetch })
-    const changed = vi.fn()
+    // Each change is read as the renderer reads it, through the change callback.
+    const baked: (Baking | undefined)[] = []
+    const changed = vi.fn(() => { baked.push(updates.baking) })
     updates.start(abort.signal, changed)
-    const notices: (string | undefined)[] = []
-    const result = await updates.update(copy, text => { notices.push(text) }, new AbortController().signal)
+    const result = await updates.update(copy, new AbortController().signal)
     expect(result).toEqual({ kind: 'success', text: `${copy.updateInstalled}: v0.1.0 → v0.2.0` })
     expect(readlinkSync(join(root, 'install/current'))).toContain('/versions/0.2.0-')
-    expect(notices[0]).toBe(copy.updateChecking)
-    expect(notices).toContain(`${copy.updateUnpacking} v0.2.0…`)
-    expect(notices.filter(text => text?.startsWith(copy.updateDownloading)).length).toBeLessThanOrEqual(101)
-    expect(notices.at(-1)).toBeUndefined()
+    expect(baked[0]).toEqual({ label: copy.updateChecking, level: 0 })
+    const steps = baked.filter((step): step is Baking => step !== undefined)
+    expect(steps.map(step => step.label)).toContain(`${copy.updateUnpacking} v0.2.0…`)
+    expect(steps.filter(step => step.label.startsWith(copy.updateDownloading)).length).toBeLessThanOrEqual(101)
+    // The loaf only ever browns, and the row goes when the command ends.
+    expect(steps.every((step, index) => index === 0 || step.level >= steps[index - 1]!.level)).toBe(true)
+    expect(steps.at(-1)!.level).toBeGreaterThan(0.8)
+    expect(baked.at(-1)).toBeUndefined()
+    expect(updates.baking).toBeUndefined()
     expect(updates.state).toEqual({ version: '0.2.0', installed: true })
     expect(changed).toHaveBeenCalled()
     abort.abort()
@@ -147,7 +153,7 @@ describe.skipIf(process.platform === 'win32')('Updates', () => {
   it('reports that the running release is current', async () => {
     const { release, env, fetch } = fixture('0.1.0')
     const updates = new Updates({ running: '0.1.0', release, env, fetch })
-    await expect(updates.update(copy, () => {}, new AbortController().signal))
+    await expect(updates.update(copy, new AbortController().signal))
       .resolves.toEqual({ kind: 'success', text: `${copy.updateCurrent}: v0.1.0` })
   })
 
@@ -155,7 +161,7 @@ describe.skipIf(process.platform === 'win32')('Updates', () => {
     const { root, env, fetch } = fixture('0.2.0')
     mkdirSync(join(root, 'checkout'))
     const updates = new Updates({ running: '0.1.0', release: join(root, 'checkout'), env, fetch })
-    const result = await updates.update(copy, () => {}, new AbortController().signal)
+    const result = await updates.update(copy, new AbortController().signal)
     expect(result).toMatchObject({ kind: 'error' })
     expect(result.kind === 'error' && result.text).toContain(copy.updateUnmanaged)
     expect(fetch).not.toHaveBeenCalled()

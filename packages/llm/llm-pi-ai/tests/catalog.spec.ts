@@ -686,6 +686,29 @@ describe('per-model protocols', () => {
       .toEqual([['assistant', ['call-a', 'call-b']], ['tool', 'call-a'], ['tool', 'call-b']])
   })
 
+  it('sends a model over Anthropic Messages to its own endpoint, with prompt-cache markers', async () => {
+    const failure = { status: 401, body: JSON.stringify({ error: { message: 'expected mock failure' } }) }
+    const server = await mockServer([failure, failure])
+    const ctx = await harness(gateway(`${server.url}/v1`, {
+      api: 'openai-responses',
+      models: [{ id: 'gpt-large' }, { id: 'claude-large', api: 'anthropic-messages', baseURL: server.url }],
+    }))
+
+    await assemble(ctx, { provider: 'acme-gateway', model: 'gpt-large', messages: [] })
+    await assemble(ctx, { provider: 'acme-gateway', model: 'claude-large', system: 'Stable instructions.',
+      messages: [createUserMessage({ content: [{ type: 'text', text: 'hi' }], source: { kind: 'user' } })] })
+
+    // Anthropic joins /v1/messages onto the root; the route's /v1 base would have doubled it.
+    expect(server.paths.map(path => path.split('?')[0])).toEqual(['/v1/responses', '/v1/messages'])
+    expect(server.headers[1]?.['x-api-key']).toBe('test-key')
+    expect(JSON.stringify(server.requests[1])).toContain('"cache_control":{"type":"ephemeral"}')
+  })
+
+  it('refuses an empty model endpoint', () => {
+    expect(() => resolveProfiles(gateway('https://acme.test/v1', { models: [{ id: 'acme-large', baseURL: '' }] }).providers))
+      .toThrow(/model "acme-large" has an empty baseURL/)
+  })
+
   it('moves one catalog model to another protocol without repointing its siblings', () => {
     const resolved = resolveProfiles({ openai: { modelOverrides: { 'gpt-4.1': { api: 'openai-completions' } } } })
     const models = resolved.get('openai')?.piProvider?.getModels() ?? []
