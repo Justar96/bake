@@ -167,22 +167,26 @@ export class NodePtcRuntime extends PtcRuntime {
       settled = true
       clearTimeout(wallTimer)
       signal.removeEventListener('abort', onAbort)
-      channel?.close()
+      // The control channel stays readable until the process stops: frames the program wrote before
+      // this outcome may still be unread, and the receiver admits only their output once settled.
       void (async () => {
         if (handle !== undefined) {
           try {
             handle.terminate()
             await Promise.all([handle.done.catch(() => {}), handle.waitForExit()])
-            const drained = await Promise.all([
+            const [stdoutClosed, stderrClosed] = await Promise.all([
               drainOutput(handle.stdout, this.config.graceMs),
               drainOutput(handle.stderr, this.config.graceMs),
+              // Unread log frames are program output; a descriptor held past the grace is only abandoned.
+              drainOutput(handle.control, this.config.graceMs),
             ])
-            if (drained.includes(false) && failure === undefined) {
+            if ((!stdoutClosed || !stderrClosed) && failure === undefined) {
               failure = { kind: 'worker-exit', message: 'Node process output did not close cleanly' }
             }
           } catch (error: unknown) {
             failure = { kind: 'worker-exit', message: `managed process cleanup failed: ${messageOf(error)}` }
           } finally {
+            channel?.close()
             handle.stdout?.destroy()
             handle.stderr?.destroy()
           }
@@ -279,6 +283,14 @@ export class NodePtcRuntime extends PtcRuntime {
           : { kind: 'worker-exit', message: `Node process exited before completing (${String(outcome.exitCode)})${stderr ? `: ${stderr}` : ''}` })
       }
       const transport: JsonChannel = new JsonChannel(launched.control, this.config.maxMessageBytes, (raw, bytes) => {
+        if (settled) {
+          // After the outcome is selected, retain output the program emitted before it stopped;
+          // late calls, completions and malformed traffic stay silent.
+          if (!ready || !record(raw)) return
+          if (raw.type === 'log' && typeof raw.text === 'string') admit(raw.text)
+          else if (raw.type === 'output-limit') outputOverflow = true
+          return
+        }
         if (!record(raw)) { protocolFailure('invalid control frame'); return }
         if (!ready) {
           if (raw.type !== 'ready') { protocolFailure('program frame arrived before bootstrap readiness'); return }

@@ -18,6 +18,7 @@ const NO_INITIAL_FRAME = Symbol('no initial frame')
 async function setup(config: Config = {}, mode: 'read-only' | 'danger-full-access' = 'danger-full-access') {
   const ctx = new Context()
   const runtime = await mountRuntime(ctx, config, { mode, workspaceRoot: process.cwd() })
+  let childClosed = false
   const control = new Duplex({
     read() {},
     write(chunk: Buffer, _encoding, callback) {
@@ -29,11 +30,17 @@ async function setup(config: Config = {}, mode: 'read-only' | 'danger-full-acces
   const childControl = new Duplex({
     read() {},
     write(chunk: Buffer, _encoding, callback) {
-      if (control.destroyed) { callback(new Error('peer closed')); return }
+      if (control.destroyed || childClosed) { callback(new Error('peer closed')); return }
       control.push(chunk)
       callback()
     },
   })
+  // A stopped child closes its end of the control channel; the host then reads EOF after queued frames.
+  const closeChildControl = (): void => {
+    if (childClosed) return
+    childClosed = true
+    control.push(null)
+  }
   const stdout = new PassThrough()
   const stderr = new PassThrough()
   const direct = Promise.withResolvers<SubprocessOutcome>()
@@ -41,6 +48,7 @@ async function setup(config: Config = {}, mode: 'read-only' | 'danger-full-acces
   const terminate = vi.fn(() => {
     stdout.end()
     stderr.end()
+    closeChildControl()
     direct.resolve({ exitCode: 0, signal: null })
   })
   const waitForExit = vi.fn(async () => true)
@@ -85,7 +93,7 @@ async function setup(config: Config = {}, mode: 'read-only' | 'danger-full-acces
     }
   }
   return {
-    ctx, runtime, handle, terminate, waitForExit, direct, stdout, stderr, control, peer, messages,
+    ctx, runtime, handle, terminate, waitForExit, direct, stdout, stderr, control, closeChildControl, peer, messages,
     spawn, resolveExecutable, emit, start, onBoot,
     receive: (callback: typeof receive) => { receive = callback },
   }
@@ -265,7 +273,7 @@ describe('Node runtime host failures', () => {
     const h = await setup()
     h.spawn.mockImplementation(() => {
       queueMicrotask(() => {
-        h.control.push(null)
+        h.closeChildControl()
         h.direct.resolve({ exitCode: 7, signal: null })
       })
       return h.handle
@@ -375,6 +383,57 @@ describe('Node runtime host failures', () => {
     expect(h.control.destroyed).toBe(true)
   })
 
+  it.each(['timeout', 'abort'] as const)('reads program output left in the control channel at a %s until the process stops', async (kind) => {
+    const h = await setup({ timeoutMs: 20 })
+    const controller = new AbortController()
+    const binding = vi.fn(async () => null)
+    if (kind === 'abort') h.onBoot(() => { controller.abort('stop') })
+    vi.mocked(h.terminate).mockImplementation(() => {
+      // Frames the child wrote before it stopped reach the host only after the outcome is selected.
+      h.emit({ type: 'log', text: 'before stop' })
+      h.emit(call(1))
+      h.emit({ type: 'done', value: encodePtcJsonWire(42) })
+      h.stdout.end()
+      h.stderr.end()
+      h.closeChildControl()
+      h.direct.resolve({ exitCode: null, signal: 'SIGTERM' })
+    })
+    const result = await h.start({ ...withBinding(binding), signal: controller.signal })
+    expect(result.error?.kind).toBe(kind)
+    expect(result.logs).toEqual(['before stop'])
+    expect(result.value).toBeUndefined()
+    expect(binding).not.toHaveBeenCalled()
+    expect(h.messages).not.toContainEqual(expect.objectContaining({ type: 'reply' }))
+    expect(h.control.destroyed).toBe(true)
+  })
+
+  it('applies the output limit to control output read after the process stops', async () => {
+    const h = await setup({ timeoutMs: 20 })
+    vi.mocked(h.terminate).mockImplementation(() => {
+      h.emit({ type: 'log', text: 'fitting prefix' })
+      h.emit({ type: 'output-limit' })
+      h.stdout.end()
+      h.stderr.end()
+      h.closeChildControl()
+      h.direct.resolve({ exitCode: null, signal: 'SIGTERM' })
+    })
+    const result = await h.start()
+    expect(result.error?.kind).toBe('output-limit')
+    expect(result.logs).toEqual(['fitting prefix'])
+  })
+
+  it('stops reading a control channel that stays open past the grace after the process stops', async () => {
+    const h = await setup({ timeoutMs: 20, graceMs: 20 })
+    vi.mocked(h.terminate).mockImplementation(() => {
+      h.stdout.end()
+      h.stderr.end()
+      h.direct.resolve({ exitCode: null, signal: 'SIGTERM' })
+    })
+    const result = await h.start()
+    expect(result.error?.kind).toBe('timeout')
+    expect(h.control.destroyed).toBe(true)
+  })
+
   it('reports failed managed cleanup even when the program returns successfully', async () => {
     const h = await setup()
     vi.mocked(h.waitForExit).mockRejectedValue(new Error('range cannot be observed'))
@@ -445,6 +504,7 @@ describe('Node runtime host failures', () => {
     vi.mocked(h.terminate).mockImplementation(() => {
       h.stderr.end('later output')
       h.stdout.end()
+      h.closeChildControl()
       h.direct.resolve({ exitCode: 0, signal: null })
     })
     h.onBoot(() => { h.stdout.write('x'.repeat(1024)) })

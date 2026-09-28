@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { mkdtemp, mkdir, readFile, readdir, rm, symlink } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { createServer, type Socket } from 'node:net'
@@ -156,6 +157,29 @@ describe('Node program process', () => {
     const { run } = await setup({ timeoutMs: 1000, graceMs: 50 })
     const result = await run({ program: 'console.log("before hot loop"); for (;;) {}', bindings: [] })
     expect(result.error?.kind).toBe('timeout')
+    expect(result.logs).toEqual(['before hot loop'])
+  })
+
+  it('retains console output that the host had not yet read when execution stops', async () => {
+    const { run, cwd } = await setup()
+    const witness = join(cwd, 'logged')
+    const controller = new AbortController()
+    const hold = async () => {
+      // Block the host loop after the reply is written, so the child's log frame is still unread at the stop.
+      setImmediate(() => {
+        const limit = performance.now() + 20_000
+        while (!existsSync(witness) && performance.now() < limit) { /* the child runs in another process */ }
+        controller.abort('stop after log')
+      })
+      return null
+    }
+    const result = await run({
+      program: `const fs = process.getBuiltinModule("node:fs"); await tools.hold({}); console.log("before hot loop"); fs.writeFileSync(${JSON.stringify(witness)}, ""); for (;;) {}`,
+      signal: controller.signal,
+      bindings: bindings({ hold }),
+    })
+    expect(existsSync(witness)).toBe(true)
+    expect(result.error).toEqual({ kind: 'abort', message: 'stop after log' })
     expect(result.logs).toEqual(['before hot loop'])
   })
 
