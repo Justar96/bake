@@ -373,6 +373,8 @@ async function main(argv: readonly string[]): Promise<number> {
         report(entry.step, { outcome: 'skip', seconds: 0, note: 'the build failed' })
         return
       }
+      // A step run alone can take minutes; say what is running meanwhile.
+      if (phase !== 'static' && phase !== 'tui') console.log(`  ....  ${entry.step.name}`)
       report(entry.step, await runStep(entry.step, options, scope))
     })
     await pooled(tasks, phase === 'static' || phase === 'tui' ? width : 1)
