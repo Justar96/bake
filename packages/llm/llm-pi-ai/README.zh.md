@@ -191,7 +191,7 @@ Settings 写入会在合并组合层与用户层后严格校验每个新增或�
 
 #### KV Cache 影响
 
-转换保持逻辑请求顺序，图片句柄与卸载占位符则会添加模型可见文本。即使附件身份与请求字节保持稳定，执行世界路径变化也会改写历史句柄，并可能从该图片起阻止复用。更换适配器实例、提供方、模型或其他上游 token 具有相同的后缀影响。提供方复用哪段前缀取决于协议格式：OpenAI 系端点自动缓存，并以 `prompt_cache_key` 接收会话 id；Anthropic Messages 只在 pi-ai 标记于系统提示、最后一个工具和最后一条用户消息上的 `cache_control` 断点处缓存。因此网关经转换后的 OpenAI 协议提供的 Claude 模型不会获得提示缓存。一次省略决策会把较早图片换成占位文本，因此复用在该消息处结束；省略永不回退，此后前缀保持稳定。
+转换保持逻辑请求顺序，图片句柄与卸载占位符则会添加模型可见文本。即使附件身份与请求字节保持稳定，执行世界路径变化也会改写历史句柄，并可能从该图片起阻止复用。更换适配器实例、提供方、模型或其他上游 token 具有相同的后缀影响。提供方复用哪段前缀取决于协议格式：OpenAI 系端点自动缓存，并以 `prompt_cache_key` 接收会话 id；Anthropic Messages 只在 pi-ai 标记于系统提示、最后一个工具和最后一条用户消息上的 `cache_control` 断点处缓存。因此网关经转换后的 OpenAI 协议提供的 Claude 模型不会获得提示缓存。提供方缓存还按上游凭据隔离，因此在多个凭据间轮询的网关，只要相邻步骤落到不同凭据，就会重新预填整段前缀。在 Anthropic Messages 或 Chat Completions 路由上设置 `compat.sendSessionAffinityHeaders: true`，会把会话 id 作为 `x-session-affinity` 发送；启用粘性路由的网关（CLIProxyAPI 的 `routing.session-affinity`）据此让同一会话始终使用同一凭据。Responses 路由无需此开关，因为 `prompt_cache_key` 已携带该 id。一次省略决策会把较早图片换成占位文本，因此复用在该消息处结束；省略永不回退，此后前缀保持稳定。
 
 ### 提供方响应
 

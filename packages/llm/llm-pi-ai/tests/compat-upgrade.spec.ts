@@ -50,6 +50,15 @@ describe('pi-ai gateway compatibility declarations', () => {
     expect(() => resolved(compat, 'anthropic-messages')).toThrow(/compat/)
   })
 
+  it.each(['openai-completions', 'anthropic-messages'])('preserves gateway session affinity on %s', (api) => {
+    expect(resolved({ sendSessionAffinityHeaders: true }, api))
+      .toMatchObject({ sendSessionAffinityHeaders: true })
+  })
+
+  it('rejects session affinity on Responses, which already keys the cache by session', () => {
+    expect(() => resolved({ sendSessionAffinityHeaders: true }, 'openai-responses')).toThrow(/compat/)
+  })
+
   it.each(['supportsMidConvoEffort', 'allowedFallbackModels'])('withholds catalog-owned %s', (field) => {
     expect(() => resolved({ [field]: true }, 'anthropic-messages'))
       .toThrow(/which is not configurable here/)
