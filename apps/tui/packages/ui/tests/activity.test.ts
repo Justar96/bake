@@ -14,38 +14,40 @@ const copy = dictionaries.en
 const call: Row = { kind: 'tool-call', callId: 'c1', tool: 'bash', input: 'ls' }
 
 describe('spinner', () => {
-  it('moves the lower dot wave one column every two beats and loops without a blank', () => {
-    const frames = ['⠠⠞⠁', '⠀⠴⠋', '⠁⠠⠞', '⠋⠀⠴', '⠞⠁⠠', '⠴⠋⠀']
+  /** A frame's dots as four rows of six, top to bottom. */
+  const pixels = (frame: string): string[] => {
+    const bits = [[0x01, 0x02, 0x04, 0x40], [0x08, 0x10, 0x20, 0x80]]
+    return Array.from({ length: 4 }, (_, row) => [...frame].map(cell => {
+      const dots = cell.codePointAt(0)! - 0x2800
+      return bits.map(column => dots & column[row]! ? '#' : '.').join('')
+    }).join(''))
+  }
+
+  it('kneads a round ball of dough one frame a beat, folding from each side in turn', () => {
+    const frames = ['⠰⣿⠆', '⢴⣶⡦', '⣠⣤⣄', '⣰⣤⣄', '⣰⣦⣄', '⢠⣶⡄', '⠰⣿⠆', '⢴⣶⡦', '⣠⣤⣄', '⣠⣤⣆', '⣠⣴⣆', '⢠⣶⡄']
     expect(SPINNER).toEqual(frames)
-    for (let step = 0; step < 24; step++) {
-      expect(spinnerFrame(step * FRAME_MS)).toBe(frames[Math.floor(step / 2) % 6])
+    for (let step = 0; step < 36; step++) expect(spinnerFrame(step * FRAME_MS)).toBe(frames[step % 12])
+    for (let step = 0; step < 6; step++) {
+      expect(pixels(SPINNER[step + 6]!)).toEqual(pixels(SPINNER[step]!).map(row => [...row].reverse().join('')))
     }
   })
 
-  it('holds the centered wave before the turn starts and when motion is disabled', () => {
-    expect(SPINNER_REST).toBe('⠠⠞⠁')
+  it('holds the ball before the turn starts and when motion is disabled', () => {
+    expect(SPINNER_REST).toBe('⠰⣿⠆')
+    expect(pixels(SPINNER_REST)).toEqual(['..##..', '.####.', '.####.', '..##..'])
     expect(spinnerFrame(-500)).toBe(SPINNER_REST)
-    expect(spinnerFrame(FRAME_MS * 2 - 1)).toBe(SPINNER_REST)
+    expect(spinnerFrame(FRAME_MS - 1)).toBe(SPINNER_REST)
   })
 
-  it('packs exactly six by three dots and preserves a right-moving shape across the seam', () => {
-    for (const frame of SPINNER) expect(frame).not.toContain('\n')
-    const pixels = SPINNER.map(frame => frame.split('\n').flatMap(line => {
-      expect(line).toHaveLength(3)
-      return Array.from({ length: 3 }, (_, row) => [...line].flatMap(cell => {
-        const dots = cell.codePointAt(0)! - 0x2800
-        expect(dots).toBeGreaterThanOrEqual(0)
-        expect(dots).toBeLessThan(0x40)
-        return [dots >> row & 1, dots >> (row + 3) & 1]
-      }))
-    }))
-    expect(pixels[0]!.map(row => row.join(''))).toEqual([
-      '000110', '001100', '011000',
-    ])
-    for (let step = 0; step < pixels.length; step++) {
-      const previous = pixels[step]!
-      const next = pixels[(step + 1) % pixels.length]!
-      expect(next).toEqual(previous.map(row => [row.at(-1), ...row.slice(0, -1)]))
+  it('draws round dough in three Braille cells, resting on the bottom rows', () => {
+    for (const frame of SPINNER) {
+      expect([...frame]).toHaveLength(3)
+      for (const cell of frame) expect(cell.codePointAt(0)! >> 8).toBe(0x28)
+      const rows = pixels(frame).filter(row => row.includes('#'))
+      expect(pixels(frame)[3]).toMatch(/#{2}/u)
+      // Rounded, never a block: the top of the dough is narrower than its widest row.
+      const width = (row: string): number => row.replaceAll('.', '').length
+      expect(width(rows[0]!)).toBeLessThan(Math.max(...rows.map(width)))
     }
   })
 })

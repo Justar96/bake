@@ -1180,7 +1180,7 @@ scenario('background-job', 'a background bash job that settles after the turn wa
     assert(notices.length === 1, `expected one job completion notice, the model saw ${notices.length}`)
   })
 
-scenario('arrow-wave', 'the single-line processing wave loops in place and yields to a short composer',
+scenario('arrow-wave', 'the single-line kneading spinner loops in place and yields to a short composer',
   { replayOnly: true }, async run => {
     const override = join(run.root, 'arrow-wave-replay.json')
     const reasoning = 'Checking the processing indicator. '.repeat(80)
@@ -1211,19 +1211,19 @@ scenario('arrow-wave', 'the single-line processing wave loops in place and yield
         try {
           const frames = new Set<string>()
           tty.send('Show the processing wave.\r')
-          await tty.wait('all six arrow frames at the same position', async () => {
+          await tty.wait('six kneading frames at the same position', async () => {
             const rows = await capture()
-            const header = rows.findIndex(line => /^[\u2800-\u283f]{3} \S+…/.test(line))
+            const header = rows.findIndex(line => /^[\u2800-\u28ff]{3} \S+…/.test(line))
             if (header < 1) return false
             // PTY reads may end mid-frame, before its final scroll anchors the controls.
             // Header, upper rule, input, base rule, then the status line.
             if (header !== 34 || !rows[35]!.startsWith('\u2500') || !rows[36]!.startsWith('> ')
               || !rows[37]!.startsWith('\u2500') || !rows[38]!.includes(SCREEN.status)) return false
-            tty.check('there is no dot zone above the processing line', !rows.some(line => /^[\u2800-\u283f]{3}$/.test(line)))
+            tty.check('there is no dot zone above the processing line', !rows.some(line => /^[\u2800-\u28ff]{3}$/.test(line)))
             frames.add(rows[header]!.slice(0, 3))
             return frames.size === 6
           })
-          tty.check('the wave stays in the header directly above the input', frames.size === 6)
+          tty.check('the spinner stays in the header directly above the input', frames.size === 6)
           const mark = tty.raw.length
           screen.resize(40, 4)
           tty.resize(40, 4)
@@ -1236,7 +1236,7 @@ scenario('arrow-wave', 'the single-line processing wave loops in place and yield
           tty.resize(80, 24)
           await tty.follows(SCREEN.idle, 'WAVE_DONE')
           const rows = await capture()
-          tty.check('completion removes the dot field', !rows.some(line => /[\u2800-\u283f]/.test(line)))
+          tty.check('completion removes the dot field', !rows.some(line => /[\u2800-\u28ff]/.test(line)))
           tty.check('the completed composer stays at the bottom', rows[22]!.includes(SCREEN.status))
         } finally { screen.dispose() }
       })

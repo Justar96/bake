@@ -356,10 +356,17 @@ export interface StandingState {
   readonly glyph: string
   /** Bold word in the state's colour. */
   readonly label: string
-  /** Dim text after the label; truncated first. */
+  /** Short dim reading after the label, such as `round 3/256`. Drawn whole or not at all. */
   readonly details: string
+  /**
+   * Longer dim text after the details, such as an objective or a blocked
+   * goal's reason. The only part cut with an ellipsis, and the first to go.
+   */
+  readonly note?: string
+  /** A few cells drawn beside the glyph once the label no longer fits, such as `3/256`. */
+  readonly compact?: string
   readonly color: PaletteColor
-  /** Dim shortcut drawn before the glyph. A tight row gives it up after the details, before the label. */
+  /** Dim shortcut drawn before the glyph. A tight row gives it up after the note, before the details. */
   readonly key?: string
 }
 
@@ -373,34 +380,123 @@ const HEADER_LEAD = 0
 /** Cells between the turn's label and the standing state's. */
 const HEADER_GAP = 2
 
-/** Fewest cells of the standing state's details worth drawing before an ellipsis. */
-const HEADER_DETAIL_MIN = 4
+/** Fewest cells of the standing state's note worth drawing before an ellipsis. */
+const HEADER_NOTE_MIN = 8
+
+/** Which parts of the standing state a header row draws. */
+export interface StandingFit {
+  readonly key: boolean
+  readonly label: boolean
+  /** Without the label, whether the glyph carries `compact`. */
+  readonly compact: boolean
+  readonly details: boolean
+  /** Whether the note is drawn; it is cut to the fit's width when `cut`. */
+  readonly note: boolean
+  readonly cut: boolean
+  /** Cells the drawn parts take. */
+  readonly width: number
+}
+
+/** Separators the header draws between the standing state's parts. */
+const DETAILS_SEP = '  '
+const NOTE_SEP = ' \u00b7 '
 
 /**
- * Split the header row between the turn label and the standing state.
+ * The standing state's text parts, as the header draws them.
+ * @param standing - the state.
+ * @param focused - whether arrow-key focus is on it, which marks the head.
+ * @param fit - the parts to draw.
+ * @returns the key, head, details, and note strings, empty where not drawn.
+ */
+function standingParts(standing: StandingState, focused: boolean, fit: Omit<StandingFit, 'width' | 'cut'>): {
+  readonly key: string, readonly head: string, readonly details: string, readonly note: string
+} {
+  const name = fit.label ? standing.label : fit.compact ? standing.compact ?? '' : ''
+  return {
+    key: fit.key && standing.key !== undefined && !focused ? `${standing.key} ` : '',
+    head: `${focused ? '> ' : ''}${standing.glyph}${name === '' ? '' : ` ${name}`}`,
+    details: fit.details && standing.details !== '' ? `${DETAILS_SEP}${standing.details}` : '',
+    note: fit.note && standing.note !== undefined && standing.note !== ''
+      ? `${standing.details !== '' && fit.details ? NOTE_SEP : DETAILS_SEP}${standing.note}` : '',
+  }
+}
+
+/**
+ * The most of the standing state that fits in `room` cells, never a fragment.
  *
- * The turn label is allocated first. It is what a returning reader checks.
- * The standing state is right-aligned in what remains. Its details are
- * truncated from the end while a few cells of them still fit, then omitted
- * so the glyph and label remain. Below that the whole state is dropped,
- * not drawn as a fragment.
+ * In order, the state gives up: the end of its note, cut with an ellipsis
+ * while a few cells remain, then the note, the shortcut, the details, and
+ * the label, keeping the glyph and its compact reading. Below the glyph it is
+ * dropped whole.
+ *
+ * @param room - cells available at the right of the header.
+ * @param standing - the state to fit.
+ * @param focused - whether arrow-key focus is on it.
+ * @returns the parts to draw, or undefined when not even the glyph fits.
+ */
+export function fitStanding(room: number, standing: StandingState, focused = false): StandingFit | undefined {
+  const width = (fit: Omit<StandingFit, 'width' | 'cut'>): number => {
+    const parts = standingParts(standing, focused, fit)
+    return stringWidth(parts.key + parts.head + parts.details + parts.note)
+  }
+  const hasNote = standing.note !== undefined && standing.note !== ''
+  const shapes: readonly Omit<StandingFit, 'width' | 'cut'>[] = [
+    { key: true, label: true, compact: false, details: true, note: true },
+    { key: true, label: true, compact: false, details: true, note: false },
+    { key: false, label: true, compact: false, details: true, note: false },
+    { key: false, label: true, compact: false, details: false, note: false },
+    { key: false, label: false, compact: true, details: false, note: false },
+  ]
+  for (const [index, shape] of shapes.entries()) {
+    if (index === 0 && !hasNote) continue
+    const full = width(shape)
+    if (full <= room) return { ...shape, cut: false, width: full }
+    // A note is cut rather than dropped while enough of it would still read.
+    if (index === 0 && room - width({ ...shape, note: false }) >= NOTE_SEP.length + HEADER_NOTE_MIN) {
+      return { ...shape, cut: true, width: room }
+    }
+  }
+  // The glyph alone, when even its compact reading does not fit.
+  const glyph = stringWidth(`${focused ? '> ' : ''}${standing.glyph}`)
+  return glyph <= room && standing.compact !== undefined
+    ? { key: false, label: false, compact: false, details: false, note: false, cut: false, width: glyph }
+    : undefined
+}
+
+/**
+ * Split the header row between the turn and the standing state.
+ *
+ * The turn's glyph and word come first; they are what a returning reader
+ * checks. The standing state is right-aligned in what remains, fitted by
+ * {@link fitStanding}. Its label outranks the turn's phase and elapsed time,
+ * which give way before the state is reduced to its glyph.
  *
  * @param columns - row width.
- * @param left - full width of the turn label, in cells; 0 when there is none.
- * @param right - full width of the standing state, in cells; 0 when there is none.
- * @param rightMin - width of the standing state's glyph and label, the minimum worth drawing.
- * @returns the widths actually drawn on each side.
+ * @param left - full width of the turn's text, in cells; 0 when there is none.
+ * @param leftHead - width of the turn's glyph and word alone.
+ * @param standing - the state, when there is one.
+ * @param focused - whether arrow-key focus is on it.
+ * @returns the width drawn for the turn, whether it keeps its details, and the state's fit.
  */
-export function headerRoom(columns: number, left: number, right: number, rightMin: number): { readonly left: number, readonly right: number } {
+export function headerLayout(columns: number, left: number, leftHead: number, standing: StandingState | undefined, focused = false): {
+  readonly left: number, readonly leftDetails: boolean, readonly right: StandingFit | undefined
+} {
   const room = Math.max(0, columns - HEADER_LEAD)
-  const shownLeft = Math.min(left, room)
-  if (right <= 0) return { left: shownLeft, right: 0 }
-  const gap = left > 0 ? HEADER_GAP : 0
-  if (left + gap + right <= room) return { left, right }
-  const cut = room - left - gap
-  if (cut >= rightMin + HEADER_GAP + HEADER_DETAIL_MIN) return { left, right: cut }
-  if (cut >= rightMin) return { left, right: Math.min(rightMin, right) }
-  return { left: shownLeft, right: 0 }
+  const alone = { left: Math.min(left, room), leftDetails: true, right: undefined }
+  if (standing === undefined) return alone
+  const fit = (used: number): StandingFit | undefined => fitStanding(room - used - (used > 0 ? HEADER_GAP : 0), standing, focused)
+  const full = fit(left)
+  if (full !== undefined && full.label) return { left, leftDetails: true, right: full }
+  if (leftHead < left) {
+    const short = fit(leftHead)
+    if (short !== undefined && short.label) return { left: leftHead, leftDetails: false, right: short }
+  }
+  if (full !== undefined) return { left, leftDetails: true, right: full }
+  if (leftHead < left) {
+    const short = fit(leftHead)
+    if (short !== undefined) return { left: leftHead, leftDetails: false, right: short }
+  }
+  return alone
 }
 
 /**
@@ -408,7 +504,8 @@ export function headerRoom(columns: number, left: number, right: number, rightMi
  *
  * One row answers both "is it still working?" and "what is it working toward?",
  * directly above the rule that frames the input.
- * `  ⠠⠞⠁ Kneading…  writing · 12s            ● Goal active  round 3/256 · Ship it`.
+ * `⠰⣿⠆ Kneading…  writing · 12s                  Ctrl+O ● Goal active  round 3/256`.
+ * Narrowing never clips the state mid-word; see {@link headerLayout}.
  * While a turn runs, the spinner, word, phase, and elapsed time lead the row.
  * When the turn ends, those cells hold the outcome until the next turn starts.
  * The standing state, currently the goal, sits at the right edge. With neither,
@@ -456,36 +553,36 @@ export function Header({ columns, state, standing, standingFocused = false, cloc
   const elapsed = running === undefined ? 0 : Math.max(0, now - running.startedAt)
   const details = detailsAt(elapsed)
   const ended = state?.kind === 'ended' ? state.summary : undefined
-  const leftText = running !== undefined
-    ? `${glyphAt(elapsed)} ${title}${details === '' ? '' : `  ${details}`}`
-    : ended === undefined ? '' : `${OUTCOME[ended.outcome].glyph} ${ended.label}${ended.details === '' ? '' : `  ${ended.details}`}`
-  const rightHead = standing === undefined ? '' : `${standingFocused ? '> ' : ''}${standing.glyph} ${standing.label}`
-  const rightTail = standing === undefined || standing.details === '' ? '' : `  ${standing.details}`
-  const hint = standing?.key === undefined || standingFocused ? '' : `${standing.key} `
-  const hinted = headerRoom(columns, stringWidth(leftText), stringWidth(hint + rightHead + rightTail), stringWidth(hint + rightHead))
-  const key = hint !== '' && hinted.right > 0 ? hint : ''
-  const room = key !== '' ? hinted : headerRoom(columns, stringWidth(leftText), stringWidth(rightHead + rightTail), stringWidth(rightHead))
+  const leftHead = running !== undefined ? `${glyphAt(elapsed)} ${title}`
+    : ended === undefined ? '' : `${OUTCOME[ended.outcome].glyph} ${ended.label}`
+  const leftTail = running !== undefined ? details : ended?.details ?? ''
+  const leftText = `${leftHead}${leftTail === '' ? '' : `  ${leftTail}`}`
+  const room = headerLayout(columns, stringWidth(leftText), stringWidth(leftHead), standing, standingFocused)
+  const leftDetails = room.leftDetails && leftTail !== ''
   const left = running !== undefined
     ? <>
       <Text color={running.color}>{glyphAt(elapsed)}</Text>{' '}
       <Text color={running.color} bold>{title}</Text>
-      {details === '' ? null : <Text dimColor>{`  ${details}`}</Text>}
+      {leftDetails ? <Text dimColor>{`  ${details}`}</Text> : null}
     </>
     : ended === undefined ? null
       : <>
         <Text color={OUTCOME[ended.outcome].color} bold>{`${OUTCOME[ended.outcome].glyph} ${ended.label}`}</Text>
-        {ended.details === '' ? null : <Text dimColor>{`  ${ended.details}`}</Text>}
+        {leftDetails ? <Text dimColor>{`  ${ended.details}`}</Text> : null}
       </>
+  const fit = room.right
+  const parts = standing === undefined || fit === undefined ? undefined : standingParts(standing, standingFocused, fit)
   return (
     <Box width={columns} height={1} flexDirection="row" flexShrink={0} overflowX="hidden">
       {HEADER_LEAD > 0 && <Box width={HEADER_LEAD} flexShrink={0}><Text> </Text></Box>}
       {room.left > 0 && <Box width={room.left} flexShrink={0}><Text wrap="truncate-end">{left}</Text></Box>}
       <Box flexGrow={1} />
-      {room.right > 0 && standing !== undefined && <Box width={room.right} flexShrink={0}>
+      {parts !== undefined && fit !== undefined && fit.width > 0 && <Box width={fit.width} flexShrink={0}>
         <Text wrap="truncate-end">
-          {key === '' ? null : <Text dimColor>{key}</Text>}
-          <Text color={standing.color} bold inverse={standingFocused}>{rightHead}</Text>
-          {standing.details === '' || room.right <= stringWidth(key + rightHead) ? null : <Text dimColor>{rightTail}</Text>}
+          {parts.key === '' ? null : <Text dimColor>{parts.key}</Text>}
+          <Text color={standing!.color} bold inverse={standingFocused}>{parts.head}</Text>
+          {parts.details === '' ? null : <Text dimColor>{parts.details}</Text>}
+          {parts.note === '' ? null : <Text dimColor>{parts.note}</Text>}
         </Text>
       </Box>}
     </Box>

@@ -28,24 +28,31 @@ export interface GoalEntry {
  * an armed goal from a held, blocked, or finished one. The header keeps the
  * turn's label first, then fits the goal at the right edge.
  *
+ * The objective is left to the goal's sheet unless `objective` asks for it:
+ * a sentence of it at the row's edge reads as clipped text, not as state.
+ * A blocked goal's reason is its note either way, the one part cut to fit.
+ *
  * @param goal - the current goal, or undefined when none is set.
  * @param copy - locale-owned labels.
- * @param brief - leave out the round count and the objective, which the goal's
- *   sheet still shows, so a long objective cannot crowd the turn's label.
+ * @param options.objective - add the objective after the details.
  * @returns the goal's state, or undefined when there is no goal.
  */
-export function goalState(goal: GoalEntry | undefined, copy: TuiCopy, brief = false): StandingState | undefined {
+export function goalState(goal: GoalEntry | undefined, copy: TuiCopy, options: { readonly objective?: boolean } = {}): StandingState | undefined {
   if (goal === undefined) return undefined
-  const rounds = brief ? undefined : `${copy.goalRound} ${goal.rounds}/${goal.maxRounds}`
-  const objective = brief ? undefined : goal.objective
-  const details = (...parts: (string | undefined)[]): string => parts.filter(part => part !== undefined && part !== '').join(' · ')
+  const count = `${goal.rounds}/${goal.maxRounds}`
+  const rounds = `${copy.goalRound} ${count}`
+  const note = (...parts: (string | undefined)[]): { note?: string } => {
+    const text = [...parts, options.objective === true ? goal.objective : undefined]
+      .filter(part => part !== undefined && part !== '').join(' · ')
+    return text === '' ? {} : { note: text }
+  }
   switch (goal.phase) {
     case 'active': return goal.armed
-      ? { glyph: MARKER.turn, label: copy.goalActive, details: details(rounds, objective), color: PALETTE.running }
-      : { glyph: MARKER.waiting, label: copy.goalHeld, details: details(copy.goalResume, objective), color: PALETTE.waiting }
-    case 'paused': return { glyph: MARKER.waiting, label: copy.goalPaused, details: details(copy.goalResume, objective), color: PALETTE.waiting }
-    case 'blocked': return { glyph: '✗', label: copy.goalBlocked, details: details(goal.blocked, objective), color: PALETTE.failed }
-    case 'complete': return { glyph: '✓', label: copy.goalComplete, details: details(rounds, objective), color: PALETTE.done }
+      ? { glyph: MARKER.turn, label: copy.goalActive, details: rounds, compact: count, ...note(), color: PALETTE.running }
+      : { glyph: MARKER.waiting, label: copy.goalHeld, details: copy.goalResume, ...note(), color: PALETTE.waiting }
+    case 'paused': return { glyph: MARKER.waiting, label: copy.goalPaused, details: copy.goalResume, ...note(), color: PALETTE.waiting }
+    case 'blocked': return { glyph: '✗', label: copy.goalBlocked, details: '', ...note(goal.blocked), color: PALETTE.failed }
+    case 'complete': return { glyph: '✓', label: copy.goalComplete, details: rounds, compact: count, ...note(), color: PALETTE.done }
   }
 }
 

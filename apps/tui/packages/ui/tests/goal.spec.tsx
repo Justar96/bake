@@ -30,23 +30,30 @@ it('keeps the goal beside turn status on one header row', () => {
   const rows = ui.lastFrame()!.split('\n')
   const goalRows = rows.filter(row => row.includes(copy.goalActive))
   expect(goalRows).toHaveLength(1)
-  expect(goalRows[0]).toContain('round 2/8 · Ship it')
+  expect(goalRows[0]).toMatch(/Ctrl\+O ● Goal active {2}round 2\/8$/)
   expect(goalRows[0]).toMatch(/….*● Goal active/)
-  expect(rows).not.toContain('└ Ship it')
+  // The objective is the sheet's; the header carries the goal's state.
+  expect(ui.lastFrame()).not.toContain('Ship it')
   ui.rerender(<App {...props(active)} />)
   expect(ui.lastFrame()!.split('\n').filter(row => row.includes(copy.goalActive))).toHaveLength(1)
 })
 
+it('names the objective on the header only when asked to', () => {
+  const ui = render(<App {...props(active, 'running')} goalObjective />)
+  expect(ui.lastFrame()!.split('\n').find(row => row.includes(copy.goalActive))).toContain('round 2/8 · Ship it')
+})
+
 it('projects the goal phases and their useful details', () => {
-  expect(goalState(active, copy)).toMatchObject({ glyph: '●', label: copy.goalActive, details: 'round 2/8 · Ship it' })
+  expect(goalState(active, copy)).toEqual({ glyph: '●', label: copy.goalActive, details: 'round 2/8', compact: '2/8', color: expect.any(String) })
+  expect(goalState(active, copy, { objective: true })).toMatchObject({ details: 'round 2/8', note: 'Ship it' })
   expect(goalState({ ...active, armed: false }, copy)).toMatchObject({ glyph: '○', label: copy.goalHeld,
-    details: `${copy.goalResume} · Ship it` })
+    details: copy.goalResume })
   expect(goalState({ ...active, phase: 'paused' }, copy)).toMatchObject({ glyph: '○', label: copy.goalPaused })
   expect(goalState({ ...active, phase: 'blocked', blocked: 'Round limit reached' }, copy)).toMatchObject({
-    glyph: '✗', label: copy.goalBlocked, details: 'Round limit reached · Ship it',
+    glyph: '✗', label: copy.goalBlocked, details: '', note: 'Round limit reached',
   })
   expect(goalState({ ...active, phase: 'complete' }, copy)).toMatchObject({ glyph: '✓', label: copy.goalComplete,
-    details: 'round 2/8 · Ship it' })
+    details: 'round 2/8' })
   expect(goalState(undefined, copy)).toBeUndefined()
 })
 

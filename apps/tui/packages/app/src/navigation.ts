@@ -105,7 +105,7 @@ export class SessionNavigation {
           name: 'update', description: this.copy.updateCommand, recordInput: false,
           handler: ({ rawInput, signal }) => rawInput.trim() !== ''
             ? { kind: 'error', text: this.copy.updateUsage }
-            : updates.update(this.copy, text => { controller?.notify(text) }, signal),
+            : updates.update(this.copy, signal),
         }))
         controller = new SessionController(this.ctx, agent, this.copy, this.credentialRefs,
           () => { if (this.controller === controller && !this.closed) this.changed() }, this.options, selection)

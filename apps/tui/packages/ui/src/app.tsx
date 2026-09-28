@@ -18,6 +18,7 @@ import { goalSheet, goalState, type GoalEntry } from './goal.ts'
 import { Sheet, sheetPage, sheetRows, type SheetLine, type SheetTab } from './sheet.tsx'
 import { Tasks, taskSheet, taskTab, tasksOpen, type TaskEntry } from './tasks.tsx'
 import { Beat } from './beat.tsx'
+import { Baking } from './baking.tsx'
 import { Scrollback, type Opening } from './scrollback.tsx'
 import { Fullscreen, type TranscriptScroll } from './fullscreen.tsx'
 import { Chrome, Completion, Line, LiveRegion, Notice, Panel, Thinking, THINKING_GAP, wrappedRows, type ActivityState } from './line.tsx'
@@ -86,12 +87,22 @@ export interface AppProps {
    * the status line, the bounded field that yields first. Absent, nothing is said.
    */
   readonly update?: { readonly version: string; readonly installed: boolean }
+  /**
+   * The install `/update` is running: what it is doing and how far, from 0 to
+   * 1. Drawn as a loaf that browns above the composer; absent, no row.
+   */
+  readonly baking?: { readonly label: string; readonly level: number }
   /** Shift-Tab: step the selected model's reasoning effort. Absent, Shift-Tab does nothing. */
   readonly onCycleThinking?: () => void
   /** Harness plan projection; absent when this profile has no plan mode. */
   readonly plan?: { readonly active: boolean; readonly pending: boolean }
   /** Current goal from the Harness goal service; absent without one or before `/goal` sets it. */
   readonly goal?: GoalEntry | undefined
+  /**
+   * Also name the goal's objective on the header, cut to fit. Off by default:
+   * the header carries the goal's state, and Ctrl+O opens the whole objective.
+   */
+  readonly goalObjective?: boolean
   /** Effective permission preset from the session projection; absent without that service. */
   readonly permission?: string
   /** Selected reasoning effort, or the model's advertised default when known. */
@@ -606,6 +617,7 @@ function SessionView(props: AppProps): React.ReactElement {
   // Compaction's progress is the header's to show, in place of the command.
   const commandLimit = claim(props.compactPhase === undefined && props.command !== undefined ? 1 : 0)
   const noticeLimit = claim(props.notice === undefined ? 0 : budget.notice)
+  const bakingLimit = claim(props.baking === undefined ? 0 : 1)
   const menuRows = Math.max(0, completionLimit - menuStatusRows)
   const menuWindow = selectionWindow(matches ?? [], selected, menuRows, props.completionLimit)
   const visibleMatches = menuWindow.shown
@@ -633,7 +645,9 @@ function SessionView(props: AppProps): React.ReactElement {
   // cost readings and repeated shortcuts make them hard to scan. Each view's
   // sheet still holds what is left out here; any open sheet reaches the rest with Tab.
   const dense = [tasksShown, props.goal !== undefined, hasSubagents].filter(Boolean).length >= 2
-  const goalStanding = goalState(props.goal, copy, dense)
+  const goalFull = goalState(props.goal, copy, { objective: props.goalObjective === true && !dense })
+  // Dense, the goal keeps its compact count but gives its details to the sheet.
+  const goalStanding = goalFull === undefined || !dense ? goalFull : { ...goalFull, details: '' }
   const occupancy = props.context === undefined ? undefined : contextPercent(props.context)
   const sheetBlock = sheetView === undefined ? null : <Sheet {...sheetView} tabs={tabs} columns={size.columns}
     limit={sheetViewLimit} offset={sheetScroll} frame={props.frame} />
@@ -658,6 +672,8 @@ function SessionView(props: AppProps): React.ReactElement {
       <Text wrap="truncate-end">{copy.command}: {props.command}</Text>
     </Box>}
     {props.notice !== undefined && <Notice text={props.notice} limit={noticeLimit} more={copy.moreLines} />}
+    {props.baking !== undefined && bakingLimit > 0 && <Baking label={props.baking.label} level={props.baking.level}
+      glyphs={props.frame === 'classic' ? 'ascii' : 'unicode'} clock={animate} />}
     {props.quitting && quitLimit > 0 && <Text color={PALETTE.waiting} wrap="truncate-end">{copy.quit}</Text>}
     {matches !== undefined && interaction === undefined && completionLimit > 0 && <Box flexDirection="column" flexShrink={0} height={completionLimit} overflowY="hidden">
       {menuRows > 0 && <Completion
@@ -742,7 +758,7 @@ function SessionView(props: AppProps): React.ReactElement {
               frame={props.frame}
               activity={activity}
               standing={goalStanding === undefined ? undefined : focus === 'goal'
-                ? { ...goalStanding, details: `${copy.goalOpen} · ${goalStanding.details}` }
+                ? { ...goalStanding, details: [copy.goalOpen, goalStanding.details].filter(part => part !== '').join(' · ') }
                 : dense ? goalStanding : { ...goalStanding, key: copy.goalKey }}
               standingFocused={focus === 'goal'}
               clock={clock}

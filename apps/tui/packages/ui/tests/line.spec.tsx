@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { budgetFor, CHROME_ROWS, chromeFor, COLUMN, COMPOSER_BUDGET, HINT_MIN_COLUMNS, isRenderable, MARKER, type FrameStyle } from '../src/layout.ts'
 import { ICON } from '../src/icons.ts'
 import { present, type PresentedLine, type ResultBound } from '../src/present.ts'
-import { Chrome, Completion, Composer, headerRoom, Line, StatusBar, wrappedRows, type ActivityState, type StandingState } from '../src/line.tsx'
+import { Chrome, Completion, Composer, fitStanding, headerLayout, Line, StatusBar, wrappedRows, type ActivityState, type StandingState } from '../src/line.tsx'
 import { dictionaries } from '../src/copy.ts'
 import { PALETTE, permissionTone } from '../src/palette.ts'
 import { SPINNER_REST } from '../src/activity.ts'
@@ -285,7 +285,7 @@ describe('Chrome', () => {
   const idle = { running: false, asking: false, listing: false }
   const working: ActivityState = { kind: 'running', word: 'Kneading', phase: 'writing', startedAt: 0, color: PALETTE.running }
   const ended: ActivityState = { kind: 'ended', summary: { outcome: 'done', label: 'Completed', details: '9s · ran 1' } }
-  const goal: StandingState = { glyph: '\u25cf', label: 'Goal active', details: 'round 2/8 \u00b7 Ship it', color: PALETTE.running }
+  const goal: StandingState = { glyph: '\u25cf', label: 'Goal active', details: 'round 2/8', compact: '2/8', note: 'Ship it', color: PALETTE.running }
   const draw = (columns: number, options: {
     readonly text?: string, readonly state?: typeof idle, readonly frame?: FrameStyle
     readonly activity?: ActivityState, readonly standing?: StandingState, readonly rows?: number, readonly children?: React.ReactNode
@@ -342,22 +342,28 @@ describe('Chrome', () => {
     expect(stringWidth(both)).toBe(80)
   })
 
-  it('cuts the goal before the turn, and drops it rather than leave a fragment', () => {
-    // The goal's details go first, then the goal itself; the turn keeps its label.
-    expect(draw(52, { activity: working, standing: goal })[1]).toMatch(/Kneading… {2}writing {2}● Goal active {2}round/)
-    expect(draw(40, { activity: working, standing: goal })[1]).toMatch(new RegExp(`^${SPINNER_REST} Kneading… {2}writing {2,}● Goal active$`))
-    expect(draw(36, { activity: working, standing: goal })[1]).toBe(`${SPINNER_REST} Kneading…  writing`)
-    for (const columns of [1, 2, 5, 12, 24, 40, 80]) {
-      expect(stringWidth(draw(columns, { activity: working, standing: goal })[1]!), `${columns}`).toBeLessThanOrEqual(columns)
+  it('narrows the goal part by part, never mid-word, before the turn\'s word', () => {
+    const long = { ...goal, note: 'Refactor the persistence layer' }
+    // Only the note is cut with an ellipsis.
+    expect(draw(60, { activity: working, standing: long })[1]).toMatch(/writing {2}● Goal active {2}round 2\/8 · Refactor.*…$/)
+    expect(draw(52, { activity: working, standing: long })[1]).toMatch(/writing +● Goal active {2}round 2\/8$/)
+    expect(draw(44, { activity: working, standing: goal })[1]).toMatch(/writing +● Goal active$/)
+    // The turn's phase yields before the goal loses its label.
+    expect(draw(30, { activity: working, standing: goal })[1]).toMatch(new RegExp(`^${SPINNER_REST} Kneading… +● Goal active$`))
+    expect(draw(22, { activity: working, standing: goal })[1]).toMatch(new RegExp(`^${SPINNER_REST} Kneading… +● 2/8$`))
+    expect(draw(16, { activity: working, standing: goal })[1]).toMatch(new RegExp(`^${SPINNER_REST} Kneading… +●$`))
+    for (const columns of [1, 2, 5, 12, 16, 24, 40, 80]) {
+      expect(stringWidth(draw(columns, { activity: working, standing: long })[1]!), `${columns}`).toBeLessThanOrEqual(columns)
     }
   })
 
-  it('gives up the goal\'s shortcut after its details and before its label', () => {
+  it('gives up the goal\'s shortcut after its note and before its details', () => {
     const keyed = { ...goal, key: 'Ctrl+O' }
     expect(draw(80, { activity: working, standing: keyed })[1]).toMatch(/writing +Ctrl\+O ● Goal active {2}round 2\/8 · Ship it$/)
-    expect(draw(52, { activity: working, standing: keyed })[1]).toMatch(/writing {2}Ctrl\+O ● Goal active {2}r/)
-    expect(draw(44, { activity: working, standing: keyed })[1]).toMatch(/writing {2}Ctrl\+O ● Goal active$/)
-    expect(draw(40, { activity: working, standing: keyed })[1]).toMatch(/writing {2,}● Goal active$/)
+    expect(draw(72, { activity: working, standing: { ...keyed, note: 'Refactor the persistence layer' } })[1])
+      .toMatch(/writing {2}Ctrl\+O ● Goal active {2}round 2\/8 · Refactor .*…$/)
+    expect(draw(56, { activity: working, standing: keyed })[1]).toMatch(/writing {2,}Ctrl\+O ● Goal active {2}round 2\/8$/)
+    expect(draw(52, { activity: working, standing: keyed })[1]).toMatch(/writing {2,}● Goal active {2}round 2\/8$/)
   })
 
   it('draws the rules in ASCII where the terminal cannot draw box characters', () => {
@@ -423,17 +429,32 @@ describe('Chrome', () => {
   })
 })
 
-describe('headerRoom', () => {
-  it('gives the turn its label first, cuts the standing state, and drops it below its label', () => {
-    expect(headerRoom(58, 20, 20, 10)).toEqual({ left: 20, right: 20 })
-    expect(headerRoom(38, 20, 20, 10)).toEqual({ left: 20, right: 16 })
-    // Too few cells for any details. The label alone, not a label and an ellipsis.
-    expect(headerRoom(35, 20, 20, 10)).toEqual({ left: 20, right: 10 })
-    expect(headerRoom(32, 20, 20, 10)).toEqual({ left: 20, right: 10 })
-    expect(headerRoom(31, 20, 20, 10)).toEqual({ left: 20, right: 0 })
-    expect(headerRoom(18, 30, 20, 10)).toEqual({ left: 18, right: 0 })
-    expect(headerRoom(28, 0, 20, 10)).toEqual({ left: 0, right: 20 })
-    expect(headerRoom(0, 10, 10, 5)).toEqual({ left: 0, right: 0 })
+describe('header fitting', () => {
+  // `● Goal` is 6 cells, `  round 1/2` 11, ` · objective text` 17, `K ` 2.
+  const state: StandingState = { glyph: '●', label: 'Goal', details: 'round 1/2', compact: '1/2', note: 'objective text', color: PALETTE.running, key: 'K' }
+  const shape = (room: number) => {
+    const fit = fitStanding(room, state)
+    return fit === undefined ? undefined : [fit.key, fit.label, fit.compact, fit.details, fit.note, fit.width]
+  }
+
+  it('drops the standing state\'s parts in order and never leaves a fragment', () => {
+    expect(shape(36)).toEqual([true, true, false, true, true, 36])
+    // Cut while enough of the note would still read.
+    expect(shape(30)).toEqual([true, true, false, true, true, 30])
+    expect(shape(28)).toEqual([true, true, false, true, false, 19])
+    expect(shape(18)).toEqual([false, true, false, true, false, 17])
+    expect(shape(16)).toEqual([false, true, false, false, false, 6])
+    expect(shape(5)).toEqual([false, false, true, false, false, 5])
+    expect(shape(1)).toEqual([false, false, false, false, false, 1])
+    expect(shape(0)).toBeUndefined()
+  })
+
+  it('keeps the turn\'s word first and gives its details up before the state\'s label', () => {
+    expect(headerLayout(40, 20, 10, undefined)).toEqual({ left: 20, leftDetails: true, right: undefined })
+    expect(headerLayout(40, 20, 10, state).right?.details).toBe(true)
+    const short = headerLayout(20, 20, 10, state)
+    expect([short.left, short.leftDetails, short.right?.label]).toEqual([10, false, true])
+    expect(headerLayout(8, 20, 10, state)).toEqual({ left: 8, leftDetails: true, right: undefined })
   })
 })
 

@@ -120,6 +120,7 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
       ...active.view, key: active.agent.id, inputBlocked: navigation.busy, copy, frame, clock: systemClock, motion, screen,
       quitting: quitTimer !== undefined, completionLimit: config.completionLimit, resultLines: config.resultLines,
       highlight: syntax.highlight, version, ...updates.state === undefined ? {} : { update: updates.state },
+      ...updates.baking === undefined ? {} : { baking: updates.baking },
       cwd: active.agent.session.header.cwd ?? '', sessionId: active.agent.id,
       onReferenceQuery: query => active.references.search(query),
       onArgumentQuery: query => active.argumentQuery(query),

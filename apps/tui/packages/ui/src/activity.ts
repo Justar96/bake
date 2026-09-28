@@ -39,36 +39,61 @@ export type Phase =
 /** Milliseconds per shared animation beat. Moving parts advance together. */
 export const FRAME_MS = 150
 
-/**
- * Six frames of a six-column, three-row dot wave moving right.
- *
- * Six-dot Braille packs two columns per cell. The fourth dot row is unused.
- * Each step wraps one dot column across the edge, so the diagonal continues
- * through the seam.
- */
-export const SPINNER: readonly string[] = Array.from({ length: 6 }, (_, step) =>
-  Array.from({ length: 3 }, (_, cell) => {
-    let dots = 0
-    for (let row = 0; row < 3; row++) {
-      const edge = 3 - row
-      for (let column = 0; column < 2; column++) {
-        const x = (cell * 2 + column - step + 6) % 6
-        if (x === edge || x === edge + 1) dots |= 1 << (row + column * 3)
-      }
-    }
-    return String.fromCodePoint(0x2800 + dots)
-  }).join(''))
+/** Braille dot bits by row, top to bottom, in a cell's left and right columns. */
+const BRAILLE = [[0x01, 0x02, 0x04, 0x40], [0x08, 0x10, 0x20, 0x80]] as const
 
-/** Centered wave, used when motion is off or no clock is supplied. */
+/**
+ * Draw a six-by-four dot picture as three Braille cells.
+ * @param picture - four rows of six `#` or `.`, joined by `/`.
+ */
+function braille(picture: string): string {
+  const rows = picture.split('/')
+  return Array.from({ length: 3 }, (_, cell) => {
+    let dots = 0
+    rows.forEach((row, y) => {
+      for (let x = 0; x < 2; x++) if (row[cell * 2 + x] === '#') dots |= BRAILLE[x]![y]!
+    })
+    return String.fromCodePoint(0x2800 + dots)
+  }).join('')
+}
+
+/**
+ * Half a kneading stroke: a round ball squashed to an oval, pressed into a
+ * low dome, its left edge lifted and folded over, then rounded up again.
+ * No frame has a square corner, so the dough always reads as soft.
+ */
+const STROKE = [
+  '..##../.####./.####./..##..',
+  '....../.####./######/.####.',
+  '....../....../.####./######',
+  '....../.#..../.####./######',
+  '....../.##.../.####./######',
+  '....../..##../.####./.####.',
+] as const
+
+/**
+ * Twelve frames of dough being kneaded, three Braille cells wide.
+ *
+ * The second stroke folds from the right, as a baker turns the dough
+ * between folds, so the loop never repeats a half in the same direction.
+ * The dough stays centred in its cells and on the bottom rows, so the shape
+ * morphs in place and the word beside it never moves.
+ */
+export const SPINNER: readonly string[] = [
+  ...STROKE,
+  ...STROKE.map(picture => picture.split('/').map(row => [...row].reverse().join('')).join('/')),
+].map(braille)
+
+/** The ball of dough, used when motion is off or no clock is supplied. */
 export const SPINNER_REST = SPINNER[0]!
 
 /**
- * Dot-wave frame for an elapsed time. Each column step holds two beats.
+ * Kneading frame for an elapsed time. Each frame holds one beat.
  * @param elapsed - milliseconds since the turn started.
  * @returns three Braille cells for that moment.
  */
 export function spinnerFrame(elapsed: number): string {
-  return SPINNER[Math.floor(Math.max(0, elapsed) / (FRAME_MS * 2)) % SPINNER.length]!
+  return SPINNER[Math.floor(Math.max(0, elapsed) / FRAME_MS) % SPINNER.length]!
 }
 
 /**

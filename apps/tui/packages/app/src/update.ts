@@ -14,6 +14,7 @@ import {
 } from '@deepseek-ai/dsh-updater'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
 import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
+import { bakeLevel } from '@dsh-tui/ui/loaf.ts'
 
 /** What the check reads besides the network; injected so tests own it. */
 export interface UpdatesOptions {
@@ -30,6 +31,13 @@ export interface UpdatesOptions {
    * multiply the requests.
    */
   readonly pollMs?: number
+}
+
+/** What `/update` is doing, for the loaf row above the composer. */
+export interface Baking {
+  readonly label: string
+  /** How brown the loaf is, from 0 to 1. */
+  readonly level: number
 }
 
 /** The newer release the status line names. */
@@ -49,6 +57,8 @@ export interface UpdateState {
 export class Updates {
   /** The newer release, or undefined when there is none or it is not known yet. */
   state: UpdateState | undefined
+  /** The install `/update` is running, or undefined when none is. */
+  baking: Baking | undefined
   private work: Promise<void> | undefined
   private changed: () => void = () => {}
 
@@ -88,17 +98,18 @@ export class Updates {
 
   /**
    * Run `/update`: check, and install a newer release beside the running one.
+   * Progress is {@link baking}, announced through the change callback `start` took.
    * @param copy - localized labels.
-   * @param notify - shows progress in the notice region; undefined clears it.
    * @param signal - command cancellation. An interrupted install leaves `current` as it was.
    * @returns the command's result, committed to the transcript.
    */
-  async update(copy: TuiCopy, notify: (text: string | undefined) => void, signal: AbortSignal): Promise<CommandResult> {
+  async update(copy: TuiCopy, signal: AbortSignal): Promise<CommandResult> {
     const env = this.options.env ?? process.env
     const layout = detectInstall(this.options.release)
     let found = ''
     let step = ''
-    notify(copy.updateChecking)
+    const bake = (next: Baking | undefined): void => { this.baking = next; this.changed() }
+    bake({ label: copy.updateChecking, level: bakeLevel({ phase: 'check' }) })
     try {
       const outcome = await selfUpdate({
         running: this.options.running, layout, env, signal, home: resolveDshHome(undefined, env),
@@ -107,7 +118,7 @@ export class Updates {
         onProgress: (progress) => {
           // Keyed by percent, not bytes, so a download repaints about a hundred times.
           const next = progress.phase === 'download' ? `download ${percentOf(progress)}` : progress.phase
-          if (next !== step) { step = next; notify(progressText(copy, found, progress)) }
+          if (next !== step) { step = next; bake({ label: progressText(copy, found, progress), level: bakeLevel(progress) }) }
         },
       })
       switch (outcome.kind) {
@@ -127,7 +138,7 @@ export class Updates {
       if (error instanceof UpdateError) return { kind: 'error', text: `${copy.updateFailed}: ${error.message}` }
       throw error
     } finally {
-      notify(undefined)
+      bake(undefined)
     }
   }
 
