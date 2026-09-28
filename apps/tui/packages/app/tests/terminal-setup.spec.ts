@@ -4,7 +4,7 @@
  * answer writes them after a backup, a second run changes nothing, and
  * cancelling leaves every file as it was.
  */
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -23,7 +23,9 @@ afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await
 
 /** A controller whose `/terminal-setup` sees only `env` and a home it owns. */
 async function connected(env: Record<string, string>) {
-  const home = await mkdtemp(join(tmpdir(), 'bake-terminal-setup-'))
+  // Resolved, as the command resolves the file it backs up: macOS's temporary
+  // directory sits behind the /var -> /private/var symlink.
+  const home = await realpath(await mkdtemp(join(tmpdir(), 'bake-terminal-setup-')))
   cleanup.push(() => rm(home, { recursive: true, force: true }))
   const fixture = await harness()
   cleanup.push(fixture.dispose)

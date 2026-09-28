@@ -919,7 +919,10 @@ scenario('terminal-setup', '/terminal-setup in VS Code shows the file and bindin
     const copy = dictionaries.en
     // A home of its own: the command must never read or write the developer's editor settings.
     const home = join(run.root, 'terminal-setup-home')
-    const file = join(home, '.config', 'Code', 'User', 'keybindings.json')
+    // Where VS Code keeps user settings on this platform, as the command resolves it.
+    const settings = process.platform === 'darwin' ? ['Library', 'Application Support'] : ['.config']
+    const file = join(home, ...settings, 'Code', 'User', 'keybindings.json')
+    const shown = `~/${[...settings, 'Code', 'User', 'keybindings.json'].join('/')}`
     const original = '// mine\n[\n]\n'
     mkdirSync(dirname(file), { recursive: true })
     await Bun.write(file, original)
@@ -933,7 +936,7 @@ scenario('terminal-setup', '/terminal-setup in VS Code shows the file and bindin
       await run.terminal('terminal-setup', [], async tty => {
         const start = tty.mark()
         tty.send('/terminal-setup\r', 'run the terminal setup')
-        await tty.expect(`${copy.terminalSetupTitle} · VS Code`, `${copy.terminalSetupAdds} ~/.config/Code/User/keybindings.json`,
+        await tty.expect(`${copy.terminalSetupTitle} · VS Code`, `${copy.terminalSetupAdds} ${shown}`,
           '"command": "workbench.action.terminal.sendSequence",', start)
         await tty.wait('the write choice to be selected', text => picked(copy.terminalSetupWrite).test(text.slice(start)))
         tty.check('nothing is written before the answer', readFileSync(file, 'utf8') === original)

@@ -1,7 +1,7 @@
 /** Real release archives, a signing key, and a release host held in memory, all owned by one test. */
 import { createHash, generateKeyPairSync, sign } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ReleaseManifest, ReleaseTarget } from '../src/index.ts'
@@ -18,7 +18,9 @@ export function signingKey(): { readonly publicKey: string; readonly sign: (byte
 
 /** A temporary directory removed by {@link Scratch.dispose}. */
 export class Scratch {
-  readonly root = mkdtempSync(join(tmpdir(), 'bake-updater-test-'))
+  // Resolved, as the installer resolves its root: macOS's temporary directory
+  // sits behind the /var -> /private/var symlink.
+  readonly root = realpathSync(mkdtempSync(join(tmpdir(), 'bake-updater-test-')))
   dispose(): void { rmSync(this.root, { recursive: true, force: true }) }
 }
 
