@@ -3,11 +3,11 @@
  * platform on its own rows (`disabled: !!js process.platform`), so exactly
  * one shell stack mounts per host and no separate platform layer exists —
  * the launcher applies nothing beyond the bundle layers. The spec composes
- * the REAL shipped bundle layers (dsh-base + dsh-web-app resolved from the
- * app installation anchor) through the boot's patch algorithm and pins the
- * effective per-platform roster, the preset-level gates that keep tool-bash
- * out of win32 sessions and tool-pwsh out of POSIX sessions, and the
- * cold-start resolution closure for the pwsh rows' bare plugin names.
+ * the REAL shipped bundle layers of every shipped profile template (resolved
+ * from the app installation anchor) through the boot's patch algorithm and
+ * pins the effective per-platform roster, the preset-level gates that keep
+ * tool-bash out of win32 sessions and tool-pwsh out of POSIX sessions, and
+ * the cold-start resolution closure for the pwsh rows' bare plugin names.
  */
 
 import { afterEach, describe, expect, it } from 'vitest'
@@ -19,7 +19,7 @@ import yaml from 'js-yaml'
 import { entryListSchema } from '@deepseek-ai/cordis-plugin-include'
 import { evaluate } from '@deepseek-ai/cordis-plugin-loader'
 import { SHIPPED_PRESET_ROOT } from '@deepseek-ai/dsh-agent-presets'
-import { composeEntries, initProfile, loadProfile, PROFILES_DIR } from '@deepseek-ai/dsh-app-boot'
+import { composeEntries, initProfile, loadProfile, PROFILE_TEMPLATES, PROFILES_DIR } from '@deepseek-ai/dsh-app-boot'
 
 /**
  * The effective disabled state of one row on one platform: a `!!js` expression
@@ -37,47 +37,54 @@ describe('the shipped shell composition (real bundle layers)', () => {
   let home: string
   afterEach(() => { if (home !== undefined) rmSync(home, { recursive: true, force: true }) })
   // The app installation anchor, mirroring profile-boot.ts: the bundle layers
-  // resolve from the REAL dsh-base/dsh-web-app packages through it, so this
-  // suite composes the shipped patch files, not test fixtures.
+  // resolve from the REAL shipped bundle packages through it, so this suite
+  // composes the shipped patch files, not test fixtures.
   const anchor = fileURLToPath(new URL('../package.json', import.meta.url))
 
-  it('composes the confined pwsh roster on win32 and the bash roster on POSIX from the same rows', () => {
-    home = mkdtempSync(join(tmpdir(), 'dsh-windows-home-'))
-    initProfile(join(home, PROFILES_DIR, 'web'), ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'])
-    const profile = loadProfile('dsh', 'web', anchor, home)
-    const warnings: string[] = []
-    const rows = composeEntries(
-      profile.layers.map(layer => layer.patches),
-      message => warnings.push(message),
-    )
-    const byId = new Map(rows.map(row => [row.id, row]))
-    // One shared patch set, two rosters: the shell stacks gate themselves.
-    for (const id of ['bash-sandbox', 'pwsh-sandbox', 'tool-bash', 'tool-pwsh']) {
-      expect(byId.has(id), `row ${id}`).toBe(true)
-    }
-    expect(disabledOn(byId.get('bash-sandbox')!, 'win32'), 'bash-sandbox on win32').toBe(true)
-    expect(disabledOn(byId.get('bash-sandbox')!, 'linux'), 'bash-sandbox on linux').toBe(false)
-    expect(disabledOn(byId.get('pwsh-sandbox')!, 'win32'), 'pwsh-sandbox on win32').toBe(false)
-    expect(disabledOn(byId.get('pwsh-sandbox')!, 'linux'), 'pwsh-sandbox on linux').toBe(true)
-    // Host shell-tool rows are disabled on every platform; sessions mount
-    // their own rows instead.
-    expect(byId.get('tool-bash')?.disabled).toBe(true)
-    expect(byId.get('tool-pwsh')?.disabled).toBe(true)
-    // The permission surface never moves: the sandbox/policy rows, the
-    // permission switcher, fs-sandbox, and the approval service stay enabled
-    // exactly as on POSIX — the confined pwsh executor is what changes.
-    for (const id of ['permission', 'ui-permission', 'sandbox', 'sandbox-policy', 'fs-sandbox', 'approval']) {
-      expect(byId.get(id)?.disabled, `row ${id}`).not.toBe(true)
-    }
-    // The launcher's cold-start module fallback BFS-links the apps/cli
-    // dependency closure into the profile's node_modules, so every bare
-    // plugin name in the base patch must resolve from there.
-    const cliManifest = JSON.parse(readFileSync(anchor, 'utf8')) as { dependencies?: Record<string, string> }
-    for (const name of ['@deepseek-ai/dsh-pwsh-sandbox', '@deepseek-ai/dsh-tool-pwsh']) {
-      expect(cliManifest.dependencies?.[name], `cold-start closure must reach ${name}`).toBeDefined()
-    }
-    expect(warnings).toEqual([])
+  it('ships the tui, headless, and desktop profile templates', () => {
+    // Guards the roster below: a template added without shell coverage fails here.
+    expect(Object.keys(PROFILE_TEMPLATES).sort()).toEqual(['desktop', 'headless', 'tui'])
   })
+
+  it.each(Object.keys(PROFILE_TEMPLATES))(
+    'composes the confined pwsh roster on win32 and the bash roster on POSIX from the same rows (%s)',
+    (name) => {
+      home = mkdtempSync(join(tmpdir(), 'dsh-windows-home-'))
+      initProfile(join(home, PROFILES_DIR, name), [...PROFILE_TEMPLATES[name]!.bundles])
+      const profile = loadProfile('dsh', name, anchor, home)
+      const warnings: string[] = []
+      const rows = composeEntries(
+        profile.layers.map(layer => layer.patches),
+        message => warnings.push(message),
+      )
+      const byId = new Map(rows.map(row => [row.id, row]))
+      // One shared patch set, two rosters: the shell stacks gate themselves,
+      // and no surface layer overrides that gating.
+      for (const [id, win32] of [
+        ['bash-sandbox', true], ['tool-bash', true], ['pwsh-sandbox', false], ['tool-pwsh', false],
+      ] as const) {
+        const row = byId.get(id)
+        if (row === undefined) throw new TypeError(`profile ${name} must compose ${id}`)
+        expect(disabledOn(row, 'win32'), `${id} on win32`).toBe(win32)
+        expect(disabledOn(row, 'linux'), `${id} on linux`).toBe(!win32)
+      }
+      // The permission surface never moves: the sandbox/policy rows,
+      // fs-sandbox, and the approval service stay enabled exactly as on
+      // POSIX — the confined pwsh executor is what changes.
+      for (const id of ['permission', 'sandbox', 'sandbox-policy', 'fs-sandbox', 'approval']) {
+        expect(byId.has(id), `row ${id}`).toBe(true)
+        expect(byId.get(id)?.disabled, `row ${id}`).not.toBe(true)
+      }
+      // The launcher's cold-start module fallback BFS-links the apps/cli
+      // dependency closure into the profile's node_modules, so every bare
+      // plugin name in the base patch must resolve from there.
+      const cliManifest = JSON.parse(readFileSync(anchor, 'utf8')) as { dependencies?: Record<string, string> }
+      for (const bundle of [...PROFILE_TEMPLATES[name]!.bundles, '@deepseek-ai/dsh-pwsh-sandbox', '@deepseek-ai/dsh-tool-pwsh']) {
+        expect(cliManifest.dependencies?.[bundle], `cold-start closure must reach ${bundle}`).toBeDefined()
+      }
+      expect(warnings).toEqual([])
+    },
+  )
 
   it('base-only profiles carry both stacks with the same platform gating', () => {
     home = mkdtempSync(join(tmpdir(), 'dsh-windows-home-'))
@@ -92,7 +99,7 @@ describe('the shipped shell composition (real bundle layers)', () => {
     for (const id of ['bash-sandbox', 'tool-bash', 'pwsh-sandbox', 'tool-pwsh']) {
       expect(byId.has(id), `row ${id}`).toBe(true)
     }
-    // No web overlay: the tool rows keep their own gating too.
+    // No surface overlay: the tool rows keep their own gating too.
     expect(disabledOn(byId.get('tool-bash')!, 'win32'), 'tool-bash on win32').toBe(true)
     expect(disabledOn(byId.get('tool-bash')!, 'linux'), 'tool-bash on linux').toBe(false)
     expect(disabledOn(byId.get('tool-pwsh')!, 'win32'), 'tool-pwsh on win32').toBe(false)
