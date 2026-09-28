@@ -81,16 +81,31 @@ const bun = (...args: string[]): readonly string[] => ['bun', ...args]
 /** Past this many failed files a rerun is not a load check; something is broken. */
 const RERUN_LIMIT = 12
 
+/** What a failed Vitest run blames. */
+export interface VitestFailures {
+  /** Test files that failed, could not start, or were blamed for an unhandled error. */
+  readonly files: readonly string[]
+  /** Unhandled errors Vitest could not tie to a test file, which no rerun can clear. */
+  readonly unattributed: number
+}
+
+const TEST_FILE = String.raw`\S+?\.(?:spec|test)\.[cm]?tsx?`
+
 /**
- * The test files a Vitest run failed in, or blamed for an unhandled error.
- * @param log - the run's uncoloured output.
+ * What a Vitest run failed on, read from its uncoloured output.
+ * @param log - the run's output.
  */
-export function failedVitestFiles(log: string): string[] {
+export function vitestFailures(log: string): VitestFailures {
   const files = new Set<string>()
-  for (const match of log.matchAll(/^ FAIL {2}(\S+?\.(?:spec|test)\.[cm]?tsx?)\b/gmu)) files.add(match[1] ?? '')
-  for (const match of log.matchAll(/originated in "(\S+?\.(?:spec|test)\.[cm]?tsx?)" test file/gu)) files.add(match[1] ?? '')
-  files.delete('')
-  return [...files].sort()
+  const add = (pattern: RegExp) => { for (const match of log.matchAll(pattern)) if (match[1] !== undefined) files.add(match[1]) }
+  add(new RegExp(String.raw`^ FAIL {2}(${TEST_FILE})\b`, 'gmu'))
+  add(new RegExp(String.raw`originated in "(${TEST_FILE})" test file`, 'gu'))
+  add(new RegExp(String.raw`Failed to start \w+ worker for test files (${TEST_FILE})`, 'gu'))
+  // Each unhandled error is a block under its own rule; a block naming no test file is unattributed.
+  const blocks = log.split(/^⎯+ (?:Unhandled Errors?|Uncaught Exception|Unhandled Rejection) ⎯+$/mu).slice(1)
+  const unattributed = blocks.filter(block => !/originated in "|Failed to start \w+ worker for test files/u.test(block)
+    && /\S/u.test(block.replace(/^\s*Vitest caught \d+ unhandled errors?[^\n]*\n(?:[^\n]*\n)?/u, ''))).length
+  return { files: [...files].sort(), unattributed }
 }
 
 /** The Bun-run tests under a directory, as `./`-prefixed paths `bun test` reads as files. */
@@ -337,8 +352,10 @@ async function runStep(step: Step, options: Options, scope: Scope): Promise<Resu
   const code = await logged(command, log)
   const note = `.preflight/${step.name}.log`
   if (code === 0) return { outcome: 'pass', seconds: seconds(), note }
-  const failed = step.rerun === undefined ? [] : failedVitestFiles(readFileSync(log, 'utf8'))
-  if (step.rerun === undefined || failed.length === 0 || failed.length > RERUN_LIMIT) return { outcome: 'fail', seconds: seconds(), note }
+  if (step.rerun === undefined) return { outcome: 'fail', seconds: seconds(), note }
+  const { files: failed, unattributed } = vitestFailures(readFileSync(log, 'utf8'))
+  // A rerun of the named files cannot clear an error no file was blamed for.
+  if (unattributed > 0 || failed.length === 0 || failed.length > RERUN_LIMIT) return { outcome: 'fail', seconds: seconds(), note }
   const again = `.preflight/${step.name}.rerun.log`
   if (await logged(step.rerun(failed), join(ROOT, again)) !== 0) return { outcome: 'fail', seconds: seconds(), note: again }
   return { outcome: 'warn', seconds: seconds(),

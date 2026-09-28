@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { changelogGap, failedVitestFiles, parseOptions, runtimeArgs, selectSteps, STEPS, strayBuildOutput, type Scope } from './preflight.ts'
+import { changelogGap, parseOptions, runtimeArgs, selectSteps, STEPS, strayBuildOutput, vitestFailures, type Scope } from './preflight.ts'
 
 const scope = (files: readonly string[], mergeBase: string | undefined = 'abc123'): Scope => ({ base: 'origin/develop', mergeBase, files })
 const selected = (argv: readonly string[]): string[] => selectSteps(parseOptions(argv))
@@ -61,21 +61,37 @@ describe('preflight', () => {
     expect(changelogGap(['packages/goal/tool-goal/tests/tool-goal.spec.ts', 'docs/development.md', 'scripts/preflight.ts'])).toEqual([])
   })
 
-  it('reads the files a Vitest run failed in or blamed for an unhandled error', () => {
+  it('reads the files a Vitest run failed in, could not start, or blamed for an unhandled error', () => {
+    const rule = (title: string) => `⎯⎯⎯⎯⎯ ${title} ⎯⎯⎯⎯⎯`
     const log = [
       ' ✓ packages/core/agent/tests/agent.spec.ts (12 tests) 80ms',
       ' FAIL  packages/terminal/terminal-bash/tests/local.spec.ts > terminal-bash real shell > recognizes a foreground read',
       ' FAIL  packages/terminal/terminal-bash/tests/local.spec.ts > terminal-bash real shell > another case',
       ' FAIL  packages/ui/tests/placement.spec.tsx [ packages/ui/tests/placement.spec.tsx ]',
-      'This error originated in "packages/subagent/tool-subagent-control/tests/tool-subagent-control.spec.ts" test file.',
       '   FAIL  not/a/test.ts > indented differently',
+      rule('Unhandled Errors'),
+      '',
+      'Vitest caught 2 unhandled errors during the test run.',
+      'This might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.',
+      rule('Uncaught Exception'),
+      'Error: A FileHandle object was closed during garbage collection.',
+      'This error originated in "packages/subagent/tool-subagent-control/tests/tool-subagent-control.spec.ts" test file.',
+      rule('Unhandled Error'),
+      'Error: [vitest-pool]: Failed to start forks worker for test files /repo/scripts/vitest-environment.compat.spec.ts.',
+      ' Test Files  1 failed',
     ].join('\n')
-    expect(failedVitestFiles(log)).toEqual([
+    expect(vitestFailures(log)).toEqual({ unattributed: 0, files: [
+      '/repo/scripts/vitest-environment.compat.spec.ts',
       'packages/subagent/tool-subagent-control/tests/tool-subagent-control.spec.ts',
       'packages/terminal/terminal-bash/tests/local.spec.ts',
       'packages/ui/tests/placement.spec.tsx',
-    ])
-    expect(failedVitestFiles(' Test Files  1 failed\nError: worker crashed')).toEqual([])
+    ] })
+  })
+
+  it('counts an unhandled error no test file was blamed for, which a rerun cannot clear', () => {
+    const log = ['⎯⎯⎯ Unhandled Rejection ⎯⎯⎯', 'Error: socket hang up', ' Test Files  700 passed'].join('\n')
+    expect(vitestFailures(log)).toEqual({ files: [], unattributed: 1 })
+    expect(vitestFailures(' Test Files  1 failed\nError: worker crashed')).toEqual({ files: [], unattributed: 0 })
   })
 
   it('reruns failed files only for the Vitest steps', () => {
