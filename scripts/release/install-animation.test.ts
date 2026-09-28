@@ -36,7 +36,7 @@ test.skipIf(process.platform === 'win32')('installer clears progress on success 
       reject = mode === 'failure'
       const install = join(root, mode)
       let terminalOutput = ''
-      const terminalClosed = Promise.withResolvers<void>()
+      const terminalClosed = Promise.withResolvers<undefined>()
       const child = Bun.spawn(['sh', resolve(import.meta.dir, '../../distribution/host/install.sh')], {
         env: { ...process.env, TERM: 'xterm-256color', CI: '', BAKE_NO_ANIMATION: '', NO_COLOR: '1',
           BAKE_RELEASE_BASE_URL: server.url.toString().replace(/\/$/, ''),
@@ -45,7 +45,7 @@ test.skipIf(process.platform === 'win32')('installer clears progress on success 
         ...(mode === 'pipe' ? { stdout: 'pipe' as const, stderr: 'pipe' as const }
           : { terminal: { cols: 80, rows: 24,
             data: (_terminal, bytes) => { terminalOutput += Buffer.from(bytes).toString() },
-            exit: () => terminalClosed.resolve(),
+            exit: () => terminalClosed.resolve(undefined),
           } }),
         timeout: 20_000,
       })

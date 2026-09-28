@@ -5,6 +5,8 @@ import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, re
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { windowsLauncher } from '../../packages/boot/updater/src/install.ts'
+import { restrictSharedWrite } from './permissions.ts'
+import { isReleaseVersion } from './version.ts'
 
 /** Placeholder `install.ps1` replaces with the install root in the launcher template. */
 const LAUNCHER_ROOT = '@@BAKE_RELEASE_ROOT@@'
@@ -17,7 +19,7 @@ if (cli.version !== root.version) throw new Error(`Bake and CLI versions differ:
 const target = `${process.platform}-${process.arch}`
 const supported = new Set(['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64', 'win32-x64'])
 if (!supported.has(target)) throw new Error(`Unsupported release target: ${target}`)
-if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(cli.version)) throw new Error('CLI version is not a release version')
+if (!isReleaseVersion(cli.version)) throw new Error('CLI version is not a release version')
 
 async function run(argv: string[], cwd: string): Promise<void> {
   const child = Bun.spawn(argv, { cwd, stdin: 'inherit', stdout: 'inherit', stderr: 'inherit' })
@@ -61,6 +63,15 @@ try {
   delete rootManifest.scripts.postinstall
   writeFileSync(join(stage, 'package.json'), `${JSON.stringify(rootManifest, null, 2)}\n`)
   cpSync(join(ROOT, 'bun.lock'), join(stage, 'bun.lock'))
+  // The workspace's linker, so the release gets the node_modules layout that
+  // development and CI resolve through, not Bun's default isolated one. Only
+  // the linker carries over: `peer = false` suits the full development
+  // install, whose devDependencies satisfy each workspace peer, but this
+  // production install of one workspace needs those peers installed. The file
+  // ships beside bun.lock, the rest of the install input.
+  const settings = Bun.TOML.parse(readFileSync(join(ROOT, 'bunfig.toml'), 'utf8')) as { install?: { linker?: unknown } }
+  if (typeof settings.install?.linker !== 'string') throw new Error('bunfig.toml sets no install.linker')
+  writeFileSync(join(stage, 'bunfig.toml'), `[install]\nlinker = ${JSON.stringify(settings.install.linker)}\n`)
   cpSync(join(ROOT, 'patches'), join(stage, 'patches'), { recursive: true })
   cpSync(join(ROOT, 'LICENSE'), join(stage, 'LICENSE'))
   cpSync(join(ROOT, 'THIRD_PARTY_NOTICES.md'), join(stage, 'THIRD_PARTY_NOTICES.md'))
@@ -107,6 +118,12 @@ try {
   mkdirSync(directory, { recursive: true })
   const name = `bake-v${cli.version}-${target}.tar.gz`
   const archive = join(directory, name)
+  // tar records modes as staged, and Bun's installer can leave package bins
+  // world-writable; `release:verify-local` rejects any such entry.
+  const restricted = restrictSharedWrite(stage)
+  if (restricted.length > 0) console.log(`Cleared group/other write on ${restricted.length} staged path(s), e.g. ${restricted[0]}`)
+  // System tar, not Bun.Archive: that writes every entry as a 0644 file, so the
+  // install would lose its symlinked node_modules and its executables.
   await run(['tar', '-czf', archive, '-C', stage, '.'], ROOT)
   console.log(archive)
 } finally {

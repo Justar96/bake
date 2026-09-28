@@ -14,7 +14,7 @@ BAKE_RELEASE_SIGNING_KEY_FILE=~/.config/bake/release-signing-key.pem bun run rel
 bun run release:verify-local
 ```
 
-`release:pack` 创建 `.artifacts/bake-release/<Bake 版本>/bake-v<Bake 版本>-<平台>.tar.gz`。它要求根目录与 CLI 的版本一致，复制包声明的载荷根目录、许可证、更新日志和已构建文件，然后在临时工作区执行冻结的 Bun 生产依赖安装，并启动暂存的 CLI。`release:assemble` 为当前 Bake 版本的每个归档计算哈希，写入 `distribution/host/public/latest.json` 和版本化归档，并对清单的原始字节签名，写入 `latest.json.sig`。本机检查先验证该签名，再通过 HTTP 提供这些文件，把对应平台的安装脚本安装到临时目录，并启动安装后的命令。随后它基于已安装的文件发布一个高一个补丁号、以独立密钥签名的发行版，并用 `bake update` 更新到该版本：依次检查 `bake update --check`、在不信任新清单密钥时被拒绝的更新、更新本身、`bake --version`、`current` 的指向，以及被替换的版本仍保留在磁盘上。这些生成目录已被 Git 忽略。
+`release:pack` 创建 `.artifacts/bake-release/<Bake 版本>/bake-v<Bake 版本>-<平台>.tar.gz`。它要求根目录与 CLI 的版本一致，复制包声明的载荷根目录、许可证、更新日志和已构建文件，然后在临时工作区执行冻结的 Bun 生产依赖安装，并启动暂存的 CLI。该安装使用根目录 `bunfig.toml` 设定的链接器，因此归档中的 `node_modules` 与开发和 CI 解析所用的一样是提升（hoisted）布局；在系统 `tar` 记录之前，暂存目录中所有条目的组和其他用户写权限都会被清除。安装脚本和 `bake update` 只解包归档，不会在用户机器上安装依赖。`release:assemble` 为当前 Bake 版本的每个归档计算哈希，写入 `distribution/host/public/latest.json` 和版本化归档，并对清单的原始字节签名，写入 `latest.json.sig`。本机检查先验证该签名，拒绝含有任何组或其他用户可写条目（符号链接除外）的归档，再通过 HTTP 提供这些文件，把对应平台的安装脚本安装到临时目录，检查安装后的 `node_modules` 与工作区布局一致，并启动安装后的命令。Windows 归档不做权限检查：`tar.exe` 在那里把每个条目都记录为所有人可写，而 Windows 解包时会忽略这些权限位。随后它基于已安装的文件发布一个高一个补丁号、以独立密钥签名的发行版，并用 `bake update` 更新到该版本：依次检查 `bake update --check`、在不信任新清单密钥时被拒绝的更新、更新本身、`bake --version`、`current` 的指向，以及被替换的版本仍保留在磁盘上。这些生成目录已被 Git 忽略。
 
 ### 发行签名密钥
 

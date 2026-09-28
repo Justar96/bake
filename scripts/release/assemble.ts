@@ -11,8 +11,8 @@
  * `BAKE_RELEASE_PUBLIC_KEY`, and the download service's build refuses it.
  */
 
-import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign, type KeyObject } from 'node:crypto'
-import { createReadStream, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { createPrivateKey, createPublicKey, generateKeyPairSync, sign, type KeyObject } from 'node:crypto'
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 const ROOT = resolve(import.meta.dir, '../..')
@@ -55,10 +55,11 @@ for (const file of readdirSync(source).sort()) {
   const target = pattern.exec(file)?.[1]
   if (target === undefined) throw new Error(`Unexpected release file: ${file}`)
   const path = join(source, file)
-  const size = statSync(path).size
+  const archive = Bun.file(path)
+  const size = archive.size
   if (size === 0) throw new Error(`Empty release archive: ${file}`)
-  const hash = createHash('sha256')
-  for await (const chunk of createReadStream(path)) hash.update(chunk)
+  const hash = new Bun.CryptoHasher('sha256')
+  for await (const chunk of archive.stream()) hash.update(chunk)
   cpSync(path, join(destination, file))
   artifacts[target] = { file, sha256: hash.digest('hex'), size }
 }

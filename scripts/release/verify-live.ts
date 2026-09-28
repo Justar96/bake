@@ -10,7 +10,6 @@
  * passes.
  */
 
-import { createHash } from 'node:crypto'
 import { archiveUrl, fetchRelease, RELEASE_PUBLIC_KEYS, RELEASE_TARGETS, type ReleaseManifest } from '../../packages/boot/updater/src/index.ts'
 
 /** What {@link verifyLive} needs, injected so tests own the network and the clock. */
@@ -75,7 +74,9 @@ export async function verifyLive(options: LiveOptions): Promise<ReleaseManifest>
     const url = archiveUrl(options.base, manifest.version, artifact.file)
     const bytes = await available(url)
     if (bytes.byteLength !== artifact.size) throw new Error(`${target}: served ${bytes.byteLength} bytes, not ${artifact.size}`)
-    if (createHash('sha256').update(bytes).digest('hex') !== artifact.sha256) throw new Error(`${target}: served bytes do not match the manifest`)
+    if (Bun.CryptoHasher.hash('sha256', bytes, 'hex') !== artifact.sha256) {
+      throw new Error(`${target}: served bytes do not match the manifest`)
+    }
   }
   // The download service also serves the installers; a GitHub release does not.
   for (const path of options.base.startsWith('https://github.com/') ? [] : ['health', 'install.sh', 'install.ps1']) {
