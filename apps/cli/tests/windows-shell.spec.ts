@@ -7,7 +7,9 @@
  * from the app installation anchor) through the boot's patch algorithm and
  * pins the effective per-platform roster, the preset-level gates that keep
  * tool-bash out of win32 sessions and tool-pwsh out of POSIX sessions, and
- * the cold-start resolution closure for the pwsh rows' bare plugin names.
+ * the cold-start resolution closure for the pwsh rows' bare plugin names. A
+ * profile that mounts agent presets leaves both shell tool rows to them, so
+ * its host plane keeps only the executors, gated the same way.
  */
 
 import { afterEach, describe, expect, it } from 'vitest'
@@ -58,6 +60,11 @@ describe('the shipped shell composition (real bundle layers)', () => {
         message => warnings.push(message),
       )
       const byId = new Map(rows.map(row => [row.id, row]))
+      // The terminal profile composes every session from an agent preset, and
+      // the presets mount the shell tools, gated as below; its host copies stay off.
+      const roster = byId.get('agent-presets')
+      const presetHosted = roster !== undefined && roster.disabled !== true
+      expect(presetHosted, 'mounts agent presets').toBe(name === 'tui')
       // One shared patch set, two rosters: the shell stacks gate themselves,
       // and no surface layer overrides that gating.
       for (const [id, win32] of [
@@ -65,8 +72,9 @@ describe('the shipped shell composition (real bundle layers)', () => {
       ] as const) {
         const row = byId.get(id)
         if (row === undefined) throw new TypeError(`profile ${name} must compose ${id}`)
-        expect(disabledOn(row, 'win32'), `${id} on win32`).toBe(win32)
-        expect(disabledOn(row, 'linux'), `${id} on linux`).toBe(!win32)
+        const presetOwned = presetHosted && id.startsWith('tool-')
+        expect(disabledOn(row, 'win32'), `${id} on win32`).toBe(presetOwned || win32)
+        expect(disabledOn(row, 'linux'), `${id} on linux`).toBe(presetOwned || !win32)
       }
       // The permission surface never moves: the sandbox/policy rows,
       // fs-sandbox, and the approval service stay enabled exactly as on
