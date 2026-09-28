@@ -1,18 +1,23 @@
 /**
- * Zero-dependency atomic file replacement and writer coordination.
+ * Atomic file replacement and writer coordination.
  * `writeFileAtomic` writes a random-suffix sibling with exclusive create and
  * the caller's permission bits, then renames it over the target, so readers
  * observe either the old or the new complete content and a replaced file ends
  * up with exactly the stated mode. `withFileLock` serializes cross-process
- * writers of one file through a `wx`-created `<file>.lock` sibling, so a
- * read-modify-write cycle can never resurrect a state another writer just
- * replaced; readers stay lock-free because the rename commit is atomic.
+ * writers of one file through a `wx`-created `<file>.lock` sibling, held
+ * under a kernel `flock` where the host supports one, so a read-modify-write
+ * cycle can never resurrect a state another writer just replaced and a writer
+ * that dies holding the lock never blocks the next one; readers stay
+ * lock-free because the rename commit is atomic.
  * @module @deepseek-ai/dsh-atomic-write
  */
 
 import { randomBytes } from 'node:crypto'
-import { lstat, mkdir, rename, rm, writeFile } from 'node:fs/promises'
+import { constants, lstat, mkdir, open, rename, rm, writeFile } from 'node:fs/promises'
+import type { FileHandle } from 'node:fs/promises'
+import { hostname } from 'node:os'
 import { dirname } from 'node:path'
+import { tryLockExclusive } from '@deepseek-ai/node-addon-system/flock'
 
 const WINDOWS_TRANSIENT_RENAME_ERRORS: ReadonlySet<string> = new Set(['EACCES', 'EBUSY', 'EPERM'])
 const WINDOWS_RENAME_RETRY_INITIAL_MS = 20
@@ -92,9 +97,14 @@ export async function writeFileAtomic(filename: string, content: string, options
   }
 }
 
+/** Error code of a failed filesystem or lock call. */
+function errorCode(error: unknown): string | undefined {
+  return (error as NodeJS.ErrnoException | null)?.code
+}
+
 /** Whether an exclusive create found an existing lock. */
 async function isLockContention(error: unknown, lockPath: string): Promise<boolean> {
-  const code = (error as NodeJS.ErrnoException | null)?.code
+  const code = errorCode(error)
   if (code === 'EEXIST') return true
   if (code !== 'EPERM') return false
   try {
@@ -117,13 +127,220 @@ const LOCK_RETRY_MAX_MS = 200
 /**
  * How long a contender waits when the caller states no limit — sized for the
  * render-and-rename cycle every call site had when this package was written.
- * Expiry fails the contender rather than guessing whether the existing lock
- * still has an owner. How long is *worth* waiting is a property of the
- * operation the lock holder runs, which is why {@link FileLockOptions.waitMs}
- * exists; the value here is the floor for an operation that does file work
- * alone.
+ * Expiry fails the contender; a lock is only ever removed when its owner is
+ * proven gone, never for its age. How long is *worth* waiting is a property
+ * of the operation the lock holder runs, which is why
+ * {@link FileLockOptions.waitMs} exists; the value here is the floor for an
+ * operation that does file work alone.
  */
 const DEFAULT_LOCK_WAIT_MS = 2_000
+
+/** Lock content of the created-file protocol: the holder's PID and a newline. */
+const PID_RECORD = /^([1-9]\d*)\n$/
+
+/**
+ * Lock content of the kernel-held protocol. The holder writes it only while
+ * holding the file's `flock` and keeps that `flock` until it unlinks the
+ * file, so a same-host record whose `flock` a contender can take has no
+ * living holder.
+ */
+interface KernelLockRecord {
+  flock: true
+  pid: number
+  host: string
+}
+
+/** Render this process's kernel-held lock record. */
+function kernelLockRecord(): string {
+  const record: KernelLockRecord = { flock: true, pid: process.pid, host: hostname() }
+  return `${JSON.stringify(record)}\n`
+}
+
+/** Whether a PID names no process on this host; a signal-permission refusal still proves one exists. */
+function processGone(pid: number): boolean {
+  if (!Number.isSafeInteger(pid)) return false
+  try {
+    process.kill(pid, 0)
+    return false
+  } catch (error) {
+    return errorCode(error) === 'ESRCH'
+  }
+}
+
+/**
+ * Whether the content of a lock file whose `flock` the caller holds proves
+ * its owner stopped. A kernel-held record from this host does; one from
+ * another host does not, because that host's `flock` may not reach this one.
+ * A PID record does only when no process has that PID. Any other content,
+ * including an empty or partly written record, names no owner and never does.
+ */
+function isAbandoned(content: string): boolean {
+  const pid = PID_RECORD.exec(content)?.[1]
+  if (pid !== undefined) return processGone(Number(pid))
+  let record: unknown
+  try {
+    record = JSON.parse(content)
+  } catch {
+    // Unparsable content names no owner, so the lock stays in place.
+    return false
+  }
+  const { flock, host } = (record ?? {}) as Partial<KernelLockRecord>
+  return flock === true && host === hostname()
+}
+
+/** Whether a descriptor's file is still the one `path` names. */
+async function isAtPath(handle: FileHandle, path: string): Promise<boolean> {
+  const held = await handle.stat({ bigint: true })
+  const current = await lstat(path, { bigint: true }).catch((error: unknown) => {
+    if (errorCode(error) === 'ENOENT') return undefined
+    throw error
+  })
+  return current !== undefined && current.ino === held.ino && current.dev === held.dev
+}
+
+/** The failure every protocol reports when the deadline passes under contention. */
+function lockTimeout(lockPath: string): Error {
+  return new Error(`atomic-write: timed out waiting for the writer lock at ${lockPath}`)
+}
+
+/** Whether a flock refusal means another descriptor holds the lock. */
+function isFlockContention(error: unknown): boolean {
+  const code = errorCode(error)
+  // flock(2) reports EAGAIN; some libcs spell it EWOULDBLOCK.
+  return code === 'EAGAIN' || code === 'EWOULDBLOCK'
+}
+
+/** A held writer lock: kernel-held through its open descriptor, or the created file alone. */
+type HeldLock =
+  | { readonly kind: 'kernel'; readonly handle: FileHandle }
+  | { readonly kind: 'created' }
+
+/**
+ * Take the `flock` of a lock file this process just created. Only a
+ * contender inspecting the PID record can hold it meanwhile, and only while
+ * it reads, so contention is retried at a short interval.
+ * @returns whether the flock is held; false when no kernel lock can serve or the deadline passed.
+ */
+async function lockCreatedFile(handle: FileHandle, deadline: number): Promise<boolean> {
+  let delay = 1
+  for (;;) {
+    try {
+      await tryLockExclusive(handle.fd)
+      return true
+    } catch (error) {
+      // A missing or unloadable binding, or a filesystem without flock, leaves the created file as the lock.
+      if (!isFlockContention(error) || Date.now() >= deadline) return false
+    }
+    await new Promise(resolve => setTimeout(resolve, delay))
+    delay = Math.min(delay * 2, LOCK_RETRY_INITIAL_MS)
+  }
+}
+
+/**
+ * Unlink the lock path while it still names this descriptor's file, then
+ * close the descriptor, which drops any `flock` on it. Unlinking first keeps
+ * a contender from finding the path unlocked while this holder lives, and
+ * the identity check never removes a lock another writer published.
+ */
+async function removeOwnLock(lockPath: string, handle: FileHandle): Promise<void> {
+  try {
+    if (await isAtPath(handle, lockPath)) await rm(lockPath, { force: true })
+  } finally {
+    await handle.close()
+  }
+}
+
+/**
+ * Fill a lock file this process just created. The PID record goes in first,
+ * so a contender that inspects the file before the `flock` is taken judges
+ * it by PID; the kernel-held record then replaces it under the `flock`,
+ * where no contender reads. A failure removes the file again.
+ * @returns the held lock, or undefined when a contender removed the file before it was locked.
+ */
+async function claimCreatedFile(handle: FileHandle, lockPath: string, deadline: number): Promise<HeldLock | undefined> {
+  let locked = false
+  try {
+    await handle.writeFile(`${process.pid}\n`)
+    // The native binding has no Windows build, so Windows keeps the created-file protocol.
+    locked = process.platform !== 'win32' && await lockCreatedFile(handle, deadline)
+    if (locked && await isAtPath(handle, lockPath)) {
+      // Longer than the PID record, so this positional write replaces it whole.
+      await handle.write(kernelLockRecord(), 0)
+      return { kind: 'kernel', handle }
+    }
+  } catch (error) {
+    await removeOwnLock(lockPath, handle)
+    throw error
+  }
+  await handle.close()
+  return locked ? undefined : { kind: 'created' }
+}
+
+/**
+ * Inspect the lock file at `lockPath` and remove it when its owner is proven
+ * gone. The inspector holds the file's `flock` while it confirms the path
+ * still names that file, reads the record, and unlinks it, so two inspectors
+ * never both remove one lock and none removes a file that replaced the one
+ * it locked. A symlink is never followed.
+ * @returns whether the lock path is now free, because its holder released it or the inspector removed it.
+ */
+async function releasedOrRecovered(lockPath: string): Promise<boolean> {
+  let handle: FileHandle
+  try {
+    handle = await open(lockPath, constants.O_RDWR | constants.O_NOFOLLOW)
+  } catch (error) {
+    // Only absence frees the path; a symlink, directory, or unreadable file proves no owner gone.
+    return errorCode(error) === 'ENOENT'
+  }
+  try {
+    try {
+      await tryLockExclusive(handle.fd)
+    } catch {
+      // Contention means a live kernel holder; any other refusal proves no owner gone.
+      return false
+    }
+    if (!await isAtPath(handle, lockPath) || !isAbandoned(await handle.readFile('utf8'))) return false
+    await rm(lockPath, { force: true })
+    return true
+  } finally {
+    await handle.close()
+  }
+}
+
+/**
+ * Acquire the writer lock at `lockPath` by exclusive create. A contender
+ * inspects the existing lock between backoff intervals and retries at once
+ * when the path frees; the inspection needs the native `flock`, so it never
+ * runs on Windows.
+ * @throws when the deadline passes while a live or unproven holder keeps the lock, or on a non-contention failure.
+ */
+async function acquireLock(lockPath: string, deadline: number): Promise<HeldLock> {
+  let delay = LOCK_RETRY_INITIAL_MS
+  let retriedUnconfirmedPermissionError = false
+  for (;;) {
+    let handle: FileHandle | undefined
+    try {
+      handle = await open(lockPath, 'wx', 0o600)
+    } catch (error) {
+      if (!await isLockContention(error, lockPath)) {
+        // Windows can release the competing lock between exclusive create and lstat.
+        if (process.platform !== 'win32'
+          || errorCode(error) !== 'EPERM'
+          || retriedUnconfirmedPermissionError) throw error
+        retriedUnconfirmedPermissionError = true
+      }
+    }
+    if (handle !== undefined) {
+      const held = await claimCreatedFile(handle, lockPath, deadline)
+      if (held !== undefined) return held
+      continue
+    }
+    if (process.platform !== 'win32' && await releasedOrRecovered(lockPath)) continue
+    if (Date.now() >= deadline) throw lockTimeout(lockPath)
+    await new Promise(resolve => setTimeout(resolve, delay))
+    delay = Math.min(delay * 2, LOCK_RETRY_MAX_MS)
+  }
+}
 
 /** Options for one {@link withFileLock} acquisition. */
 export interface FileLockOptions {
@@ -140,16 +357,28 @@ export interface FileLockOptions {
 
 /**
  * Hold the cross-process writer lock for `filename` around one operation. The
- * lock is a `wx`-created sibling (`<filename>.lock`); paired with the
+ * lock is a `wx`-created `<filename>.lock` sibling; paired with the
  * rename-based commit of {@link writeFileAtomic}, readers stay lock-free and
  * only writers contend. `EEXIST` is contention directly; an `EPERM` is
  * contention only when a fresh `lstat` confirms the lock path exists, covering
  * Windows exclusive-create behavior. Windows retries one unconfirmed EPERM
  * because the holder can release before the probe; a repeated unconfirmed
- * permission error is rethrown. Contention backs off exponentially and times out
- * after the deadline. The contender never removes an existing lock because
- * file age cannot prove that its owner stopped; orphan recovery is an operator
- * action. The parent directory must exist.
+ * permission error is rethrown. Contention backs off exponentially and fails
+ * once the deadline passes; a live holder is never displaced, however long it
+ * runs. The parent directory must exist.
+ *
+ * The holder writes its `<pid>\n` record into the created file, as earlier
+ * releases did. Where the native `flock` binding is available (Linux and
+ * macOS), it then takes the file's `flock` and replaces the record with one
+ * naming its PID and host, keeping the `flock` until it unlinks the file on
+ * release. A contender that finds the lock takes its `flock`: contention
+ * means a live holder. Otherwise the kernel has released any holder's
+ * `flock`, so the contender removes a same-host kernel-held record and
+ * retries at once. It removes a `<pid>\n` record only when no process has
+ * that PID, and it never removes other content or a record from another host.
+ * Windows, an unavailable binding, and a filesystem without `flock` keep the
+ * `<pid>\n` record and never remove another writer's lock. Holders of either
+ * form exclude each other because each keeps the lock path occupied.
  * @param filename - the file whose writers this lock serializes.
  * @param operation - the read-render-commit cycle to run while holding the lock.
  * @param options - acquisition options; omitted waits {@link DEFAULT_LOCK_WAIT_MS}.
@@ -161,31 +390,11 @@ export async function withFileLock<T>(
   options?: FileLockOptions,
 ): Promise<T> {
   const lockPath = `${filename}.lock`
-  const deadline = Date.now() + (options?.waitMs ?? DEFAULT_LOCK_WAIT_MS)
-  let delay = LOCK_RETRY_INITIAL_MS
-  let retriedUnconfirmedPermissionError = false
-  for (;;) {
-    try {
-      await writeFile(lockPath, `${process.pid}\n`, { mode: 0o600, flag: 'wx' })
-      break
-    } catch (error) {
-      if (!await isLockContention(error, lockPath)) {
-        // Windows can release the competing lock between exclusive create and lstat.
-        if (process.platform !== 'win32'
-          || (error as NodeJS.ErrnoException | null)?.code !== 'EPERM'
-          || retriedUnconfirmedPermissionError) throw error
-        retriedUnconfirmedPermissionError = true
-      }
-    }
-    if (Date.now() >= deadline) {
-      throw new Error(`atomic-write: timed out waiting for the writer lock at ${lockPath}`)
-    }
-    await new Promise(resolve => setTimeout(resolve, delay))
-    delay = Math.min(delay * 2, LOCK_RETRY_MAX_MS)
-  }
+  const held = await acquireLock(lockPath, Date.now() + (options?.waitMs ?? DEFAULT_LOCK_WAIT_MS))
   try {
     return await operation()
   } finally {
-    await rm(lockPath, { force: true })
+    if (held.kind === 'kernel') await removeOwnLock(lockPath, held.handle)
+    else await rm(lockPath, { force: true })
   }
 }
