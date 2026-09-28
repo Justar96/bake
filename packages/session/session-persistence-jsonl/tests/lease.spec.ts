@@ -18,16 +18,16 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { SESSION_FORMAT_VERSION, SessionId, SessionSeq } from '@deepseek-ai/dsh-session'
-import type { SessionHeader } from '@deepseek-ai/dsh-session'
+import type { Session, SessionHeader } from '@deepseek-ai/dsh-session'
 import {
   SessionAlreadyExistsError,
   SessionAlreadyOwnedError,
   SessionPersistenceNotFoundError,
 } from '@deepseek-ai/dsh-session-persistence'
-import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
+import type { SessionHandle, SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import JsonlSessionPersistence from '../src/index.ts'
 import { LEASE_FILENAME, SessionWriteLease } from '../src/lease.ts'
-import type { JsonlSessionHandle } from '../src/storage.ts'
+import { LIVE_WRITE_BATCH_MAX_DELAY_MS, type JsonlSessionHandle } from '../src/storage.ts'
 import { sessionDir } from '../src/format.ts'
 
 // The lock's base name, duplicated for the hoisted mock factories: they run
@@ -401,6 +401,73 @@ describe('cross-process write lock', () => {
     // Both failures reported, and the id is still not wedged.
     const reopened = await backend.open(SessionId('drain-and-release-fail'), 'write')
     await reopened.close()
+  })
+
+  describe('an event routed while close releases the lock', () => {
+    /**
+     * Mount a backend and publish one live event for `id` through the real
+     * `session/event` route at the last moment the handle is still routed:
+     * after close drained and released the lock, just before it unbinds.
+     */
+    async function mountWithLateEvent(root: string, id: string, seq: number) {
+      const backend = await mount(root)
+      const ctx = contexts.at(-1)!
+      const storage = backend as unknown as { releaseHandle: (handle: JsonlSessionHandle, materialized: boolean) => void }
+      const unbind = storage.releaseHandle.bind(storage)
+      vi.spyOn(storage, 'releaseHandle').mockImplementationOnce((handle, materialized) => {
+        ctx.emit('session/event', { id: SessionId(id) } as Session, { type: 'turn/start', seq: SessionSeq(seq), time: 9, data: { turn: 9 } })
+        unbind(handle, materialized)
+      })
+      return backend
+    }
+
+    /** Let a batch timer armed during close fire, then join the drain it started. */
+    async function settleLateDrain(handle: SessionHandle): Promise<void> {
+      await vi.advanceTimersByTimeAsync(LIVE_WRITE_BATCH_MAX_DELAY_MS)
+      await (handle as JsonlSessionHandle).drainLive()
+    }
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('never materializes or locks a created session after close', async () => {
+      const root = await freshRoot()
+      const backend = await mountWithLateEvent(root, 'late-created', 0)
+      const creator = await backend.create(meta('late-created'))
+
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      await creator.close()
+      await settleLateDrain(creator)
+      vi.useRealTimers()
+
+      // A closed creator that never materialized leaves nothing behind: a
+      // post-close drain would acquire a lock no owner ever releases.
+      expect(existsSync(join(lockPath(root, 'late-created'), '..'))).toBe(false)
+      await expect(backend.stat(SessionId('late-created'))).resolves.toBeUndefined()
+      const successor = await (await mount(root)).create(meta('late-created'))
+      await successor.append([...EVENTS])
+      await successor.close()
+    })
+
+    it('never writes a materialized session after its lock is released', async () => {
+      const root = await freshRoot()
+      const backend = await mountWithLateEvent(root, 'late-held', 2)
+      const holder = await backend.create(meta('late-held'))
+      await holder.append([...EVENTS])
+
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      await holder.close()
+      await settleLateDrain(holder)
+      vi.useRealTimers()
+
+      // The successor owns the log exclusively: the closed holder appended
+      // nothing after releasing the lock.
+      const successor = await (await mount(root)).open(SessionId('late-held'), 'write')
+      expect((await successor.read()).events.map(event => event.seq)).toEqual([0, 1])
+      await successor.append([{ type: 'turn/start', seq: SessionSeq(2), time: 3, data: { turn: 2 } }])
+      await successor.close()
+    })
   })
 
   it.skipIf(process.platform === 'win32')('release is idempotent and never removes the lock file', async () => {
