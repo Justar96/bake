@@ -530,7 +530,10 @@ describe('GoalService mutations', () => {
     })
   })
 
-  it('rejects a corrupt append while preserving the valid prefix', async () => {
+  // The registry drive never throws, so a foreign append of a malformed change
+  // commits; the projection retains the first failure, host goal access then
+  // rejects every read, and the client view stays on the last valid goal.
+  it('fails host access after a corrupt append while the client view keeps the valid prefix', async () => {
     const { ctx, agent, session } = await harness()
     expect(ctx.goals.get(agent)).toBeUndefined()
     const change: GoalSnapshotChangeMeta = {
@@ -549,11 +552,13 @@ describe('GoalService mutations', () => {
       updatedAt: 12,
     }
     session.append('goal/change', change)
-    expect(() => {
-      session.append('goal/change', { ...change, operation: 'edit', extra: true } as never)
-    }).toThrow('snapshot change must have exactly')
-
     expect(ctx.goals.get(agent)).toMatchObject({ id: change.goal.id, objective: 'valid prefix' })
+    session.append('goal/change', { ...change, operation: 'edit', extra: true } as never)
+
+    expect(() => ctx.goals.get(agent))
+      .toThrow('goal replay failed at session event 1: goal snapshot change must have exactly')
+    expect(ctx.sessionProjections.stateOf(session, 'goal')?.current)
+      .toMatchObject({ goal: { id: change.goal.id, objective: 'valid prefix' } })
   })
 })
 
