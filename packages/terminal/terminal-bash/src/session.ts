@@ -162,6 +162,7 @@ class LocalSendOperation implements TerminalSendOperation {
   private cancellationRequested = false
   private initialForegroundLeftWait: boolean
   private initialForegroundPgid: number | undefined
+  private stdinWaitAt: number | undefined
 
   constructor(
     maxBytes: number,
@@ -216,6 +217,24 @@ class LocalSendOperation implements TerminalSendOperation {
     this.initialForegroundLeftWait = foreground?.inputWaiting !== true
   }
 
+  /**
+   * Confirm exact stdin-wait evidence across two polls with no PTY output delivered in between.
+   * A process can print and block in `read` before its output crosses the PTY and the event loop;
+   * the second observation lets that output reach this operation before it settles.
+   * @param outputSequence - count of PTY chunks delivered so far.
+   * @returns whether the same wait was already observed at this output position.
+   */
+  confirmStdinWait(outputSequence: number): boolean {
+    if (this.stdinWaitAt === outputSequence) return true
+    this.stdinWaitAt = outputSequence
+    return false
+  }
+
+  /** Discard unconfirmed stdin-wait evidence once the wait is no longer observed. */
+  clearStdinWait(): void {
+    this.stdinWaitAt = undefined
+  }
+
   acceptsStdinWait(pgid: number, waiting: boolean): boolean {
     // The same group may still expose the wait that existed before terminal.write.
     // Observe every poll so a departure before the exact-settlement threshold
@@ -264,6 +283,8 @@ export class LocalPtySession implements TerminalBackendSession {
   private shellPgid: number | undefined
   private initializing = false
   private lastOutputAt = Date.now()
+  /** PTY chunks delivered so far; orders stdin-wait observations against output. */
+  private outputSequence = 0
   private closing = false
   private closePromise: Promise<void> | undefined
   private transportFailure: Error | undefined
@@ -475,6 +496,7 @@ export class LocalPtySession implements TerminalBackendSession {
 
   private readonly onTerminalData = (chunk: Buffer | Uint8Array | string): void => {
     const bytes = typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : chunk
+    this.outputSequence += 1
     const data = this.decoder.decode(bytes, { stream: true })
     this.queueEmulatorData(data)
     this.onData(data)
@@ -576,8 +598,12 @@ export class LocalPtySession implements TerminalBackendSession {
       const acceptsStdinWait = startupHasOutput && foreground !== undefined
         && operation.acceptsStdinWait(foreground.processGroupId, foreground.inputWaiting)
       if (elapsed >= this.config.exactProbeAfterMs && acceptsStdinWait) {
-        this.settleActive('stdin_read')
-        return
+        if (operation.confirmStdinWait(this.outputSequence)) {
+          this.settleActive('stdin_read')
+          return
+        }
+      } else {
+        operation.clearStdinWait()
       }
       // A prompt candidate can race bash's foreground handoff, but an interactive
       // child also inherits PROMPT_COMMAND. Silence therefore remains the bound
