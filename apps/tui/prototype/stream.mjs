@@ -14,7 +14,7 @@
  *   3. `end.outcome.kind === 'abandoned'` commits nothing, so the live copy
  *      must go and nothing may reach the transcript
  *
- *   node tui/prototype/stream.mjs
+ *   bun apps/tui/prototype/stream.mjs
  */
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
@@ -157,10 +157,9 @@ const Committed = ({ entry, seconds }) =>
       h(Rail, { key: index, glyph: '\u2699', color: 'gray' },
         h(Text, { dimColor: true }, `${call.name} \u00b7 ${call.summary ?? ''}`))))
 
-const strip = text => text.replace(/\u001B\[[0-9;]*m/g, '')
 const draw = (label, node) => {
   console.log(`\n\u250c\u2500 ${label} ${'\u2500'.repeat(Math.max(0, WIDTH - label.length - 4))}`)
-  console.log(strip(renderToString(node, { columns: WIDTH })).replace(/^/gm, '\u2502 '))
+  console.log(Bun.stripANSI(renderToString(node, { columns: WIDTH })).replace(/^/gm, '\u2502 '))
 }
 
 const chunk = (revision, body) => ({ type: 'chunk', revision, chunk: body })
@@ -198,7 +197,7 @@ record('committed text appears once, not in both live and transcript',
   committedView.text === '' && committedView.committed[0].text !== '')
 record('reasoning is summarized, not replayed into the transcript',
   committedView.committed[0].reasoningChars > 0
-  && !strip(renderToString(h(Committed, { entry: committedView.committed[0], seconds: 8 }), { columns: WIDTH }))
+  && !Bun.stripANSI(renderToString(h(Committed, { entry: committedView.committed[0], seconds: 8 }), { columns: WIDTH }))
     .includes(REASONING[0]))
 
 // A retry. Revision 2 replaces revision 1's text instead of appending to it.

@@ -9,7 +9,7 @@
  * Standalone by design. It resolves Ink and React out of packages/ui so it can
  * run while that package is being edited, and it imports no fork source.
  *
- *   node tui/prototype/frames.mjs [--width 80] [--rows 24] [--plain]
+ *   bun apps/tui/prototype/frames.mjs [--width 80] [--rows 24] [--plain]
  */
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
@@ -99,7 +99,7 @@ const Notice = ({ lines, budget, tone }) => {
 const Status = ({ fields, width }) => {
   const kept = [...fields]
   const render = () => kept.map(field => field.text).join('  \u00b7  ')
-  while (kept.length > 1 && render().length + 2 > width) kept.pop()
+  while (kept.length > 1 && Bun.stringWidth(render()) + 2 > width) kept.pop()
   return h(Box, { flexDirection: 'row' },
     h(Text, { color: kept[0].color ?? 'green' }, ` ${kept[0].text}`),
     kept.slice(1).map((field, index) =>
@@ -211,8 +211,7 @@ const SCENES = [
 
 const NARROW = { name: 'narrow \u2014 40 columns, status drops fields', width: 40, ...SCENES[1] }
 
-const strip = text => text.replace(/\u001B\[[0-9;]*m/g, '')
-const heightOf = text => (text === '' ? 0 : strip(text).split('\n').length)
+const heightOf = text => (text === '' ? 0 : Bun.stripANSI(text).split('\n').length)
 
 let failures = 0
 for (const scene of [...SCENES, NARROW]) {
@@ -234,7 +233,7 @@ for (const scene of [...SCENES, NARROW]) {
   console.log(`  ${scene.name}`)
   console.log(`  ${width} cols \u00b7 dynamic ${dynamicHeight}/${budget} rows \u00b7 L1 ${ok ? 'ok' : 'VIOLATED'}`)
   console.log(`\u251c${rule}\u2524`)
-  console.log(PLAIN ? strip(full) : full)
+  console.log(PLAIN ? Bun.stripANSI(full) : full)
   console.log(`\u2514${rule}\u2518`)
 }
 

@@ -10,7 +10,7 @@
  * This renders the candidates side by side with their row cost, so the choice
  * is made on the measured cost, not on taste alone.
  *
- *   node tui/prototype/separation.mjs
+ *   bun apps/tui/prototype/separation.mjs
  */
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
@@ -147,15 +147,14 @@ const VARIANTS = {
       h(Box, { paddingLeft: 2 }, h(StatusPacked))),
 }
 
-const strip = text => text.replace(/\u001B\[[0-9;]*m/g, '')
-const heightOf = text => strip(text).split('\n').length
+const heightOf = text => Bun.stripANSI(text).split('\n').length
 const baseline = heightOf(renderToString(h(Chat), { columns: WIDTH }))
 
 for (const [name, Variant] of Object.entries(VARIANTS)) {
   const rendered = renderToString(h(Variant, { width: WIDTH }), { columns: WIDTH })
   const rows = heightOf(rendered)
   console.log(`\n\u250c\u2500 ${name} ${'\u2500'.repeat(Math.max(0, WIDTH - name.length - 4))}`)
-  console.log(strip(rendered).replace(/^/gm, '\u2502 '))
+  console.log(Bun.stripANSI(rendered).replace(/^/gm, '\u2502 '))
   console.log(`\u2514\u2500 chrome cost: ${rows - baseline} rows beyond the chat area`)
 }
 

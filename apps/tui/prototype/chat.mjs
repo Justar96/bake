@@ -8,7 +8,7 @@
  * result are one zone, so they indent together and are not separated by
  * whitespace.
  *
- *   node tui/prototype/chat.mjs [--width 100]
+ *   bun apps/tui/prototype/chat.mjs [--width 100]
  */
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
@@ -90,13 +90,11 @@ const Turn = ({ width }) =>
     }),
     h(Answer, { text: 'Two registrations, both through ctx.effect.', width }))
 
-const strip = text => text.replace(/\u001B\[[0-9;]*m/g, '')
-
 for (const width of at === -1 ? [80, 160] : [Number(argv[at + 1])]) {
-  const rendered = strip(renderToString(h(Turn, { width }), { columns: width }))
+  const rendered = Bun.stripANSI(renderToString(h(Turn, { width }), { columns: width }))
   const lines = rendered.split('\n')
   const prose = lines.filter(line => /^[\u203a ] {0,1}\S/.test(line) && !line.startsWith('\u2699'))
-  const longest = Math.max(...prose.map(line => line.trimEnd().length))
+  const longest = Math.max(...prose.map(line => Bun.stringWidth(line.trimEnd())))
   console.log(`\n\u250c\u2500 ${width} columns ${'\u2500'.repeat(Math.max(0, width - 16))}`)
   console.log(rendered.replace(/^/gm, '\u2502 '))
   // The rail occupies two columns before the text box, so a full prose line is

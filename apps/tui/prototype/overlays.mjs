@@ -12,7 +12,7 @@
  *   2. its height does not change as it moves through loading, loaded, empty
  *      and error states  (L2)
  *
- *   node tui/prototype/overlays.mjs
+ *   bun apps/tui/prototype/overlays.mjs
  */
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
@@ -106,8 +106,7 @@ const FILES = Array.from({ length: 40 }, (_, index) => ({
   name: `packages/app/src/module-${index}.ts`, description: 'workspace file',
 }))
 
-const strip = text => text.replace(/\u001B\[[0-9;]*m/g, '')
-const heightOf = text => (text === '' ? 0 : strip(text).split('\n').length)
+const heightOf = text => (text === '' ? 0 : Bun.stripANSI(text).split('\n').length)
 
 const failures = []
 
@@ -162,7 +161,7 @@ const show = (label, props) => {
   console.log(`\n\u250c\u2500 ${label} ${'\u2500'.repeat(Math.max(0, WIDTH - label.length - 4))}`)
   console.log('\u2502 \u25b8 ready  \u00b7  deepseek/chat  \u00b7  ctx 12%')
   console.log(`\u2502 \u203a ${props.draft ?? '/mo'}\u2588`)
-  console.log(strip(rendered).replace(/^/gm, '\u2502 '))
+  console.log(Bun.stripANSI(rendered).replace(/^/gm, '\u2502 '))
 }
 
 show('command completion \u2014 typed "/mo"', {

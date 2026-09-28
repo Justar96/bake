@@ -9,7 +9,7 @@
     "typeRoots": ["./packages/app/node_modules/@types", "../../node_modules/@types"],
     "types": ["node", "bun"]
   },
-  "include": ["scripts/build.ts", "scripts/tui.ts", "packages/app/tests/*.test.ts", "../../scripts/gen-workspace.ts", "../../scripts/workspace.test.ts", "../../scripts/preflight.ts", "../../scripts/preflight.spec.ts"],
+  "include": ["scripts/build.ts", "scripts/tui.ts", "scripts/pty-smoke.ts", "packages/app/tests/*.test.ts", "../../scripts/gen-workspace.ts", "../../scripts/workspace.test.ts", "../../scripts/preflight.ts", "../../scripts/preflight.test.ts", "../../scripts/release/**/*.ts"],
   "references": [
     { "path": "packages/app" },
     { "path": "packages/ui" }

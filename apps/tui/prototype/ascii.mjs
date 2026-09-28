@@ -11,7 +11,7 @@
  * Actions are named, not drawn as icons. A fixed verb column holds the name.
  * Arguments and output align under it. Spacing does the work an icon would have done.
  *
- *   node tui/prototype/ascii.mjs
+ *   bun apps/tui/prototype/ascii.mjs
  */
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
@@ -130,11 +130,10 @@ const scenes = {
       h(More, { text: '+6 more, keep typing to narrow' })),
 }
 
-const strip = text => text.replace(/\u001B\[[0-9;]*m/g, '')
 let nonAscii = []
 
 for (const [name, Scene] of Object.entries(scenes)) {
-  const rendered = strip(renderToString(h(Scene, { width: WIDTH }), { columns: WIDTH }))
+  const rendered = Bun.stripANSI(renderToString(h(Scene, { width: WIDTH }), { columns: WIDTH }))
   console.log(`\n+- ${name} ${'-'.repeat(Math.max(0, WIDTH - name.length - 4))}`)
   console.log(rendered.replace(/^/gm, '| '))
   for (const char of rendered) {

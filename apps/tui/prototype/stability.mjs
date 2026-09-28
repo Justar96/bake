@@ -10,7 +10,7 @@
  * region keeping a constant height while a turn runs. This script renders the
  * same streaming sequence twice and counts the movement.
  *
- *   node tui/prototype/stability.mjs
+ *   bun apps/tui/prototype/stability.mjs
  */
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
@@ -54,7 +54,7 @@ const Frame = ({ rows, reserve }) => {
       h(Text, { color: 'cyan' }, '\u203a '), h(Text, { dimColor: true }, 'esc to interrupt')))
 }
 
-const heightOf = text => text.replace(/\u001B\[[0-9;]*m/g, '').split('\n').length
+const heightOf = text => Bun.stripANSI(text).split('\n').length
 
 /** Render the turn frame by frame and report how much the frame height moves. */
 function measure(reserve) {

@@ -27,6 +27,7 @@ import type { Row } from '@dsh-tui/ui'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'
 import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
 import type { Clock } from '@dsh-tui/ui/activity.ts'
+import { compactPath } from '@dsh-tui/ui/present.ts'
 
 /**
  * The turn header's clock, supplied the way the product supplies it. There
@@ -73,7 +74,7 @@ function staticProps(copy: TuiCopy) {
     interaction: undefined,
     todos: undefined,
     model: 'harness/replay',
-    cwd: process.cwd(),
+    cwd: compactPath(process.cwd(), process.env['HOME']),
     sessionId: 'session-harness',
     context: undefined,
     copy,

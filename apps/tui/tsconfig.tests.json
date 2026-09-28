@@ -44,6 +44,12 @@
       "path": "../../packages/goal/command-goal"
     },
     {
+      "path": "../../packages/compaction/compaction-basic"
+    },
+    {
+      "path": "../../packages/compaction/command-compact"
+    },
+    {
       "path": "../../packages/plan/plan-mode"
     },
     {
