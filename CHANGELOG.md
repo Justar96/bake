@@ -4,6 +4,8 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-09-28
+
 - Closing Bake between logging a tool call and starting it records a cancelled turn. Source and built tool runtimes also share their scheduler identity, preventing the `Cannot read properties of undefined (reading 'prepare')` failure.
 - On Windows, Bake locks each session's `session.lock` file across desktop and SSH login sessions, so two Bake processes cannot write the same log at once. A crashed process releases the lock; a live holder still blocks a second writer.
 - The `cordis` preset now teaches plugin authors to add tools and terminal slash commands, verify them in Bake, and choose a copied preset with `--preset`. It no longer sends drawing and widget requests to a Web UI Bake does not ship.

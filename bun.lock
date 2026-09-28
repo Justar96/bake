@@ -29,7 +29,7 @@
     },
     "apps/cli": {
       "name": "@deepseek-ai/dsh",
-      "version": "0.1.8",
+      "version": "0.1.9",
       "bin": {
         "dsh": "lib/bin.js",
       },
