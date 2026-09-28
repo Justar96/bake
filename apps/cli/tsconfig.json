@@ -39,6 +39,9 @@
       "path": "../../packages/core/session"
     },
     {
+      "path": "../../packages/core/agent-loop"
+    },
+    {
       "path": "../../packages/core/system-prompt"
     },
     {

@@ -18,11 +18,21 @@ Use `--dump-default-config` and `--dump-config` to inspect the composed tree wit
 
 From the repository root, `bun run build` builds the runtime and terminal bundle. `bun run start` runs the terminal with production React. `bun run start --help` shows its options. Use `bun apps/tui/scripts/tui.ts e2e` for recorded, keyless verification through a real PTY.
 
-`bun run dsh` runs the built launcher with Bake's `~/.bake` home, shared with `bun run start`; an explicit `DSH_HOME` overrides it. The raw shared-runtime launcher retains its upstream home defaults. Use the Bun commands for Bake, and rebuild after launcher changes.
+`bun run dsh` runs the built launcher with Bake's `~/.bake` home, shared with `bun run start`; an explicit `DSH_HOME` overrides it. The npm `dsh` entry and direct `node apps/cli/lib/bin.js` launches use the same default home. Rebuild after launcher changes.
 
 The [direct download archive](../../distribution/README.md) installs a `bake` wrapper around this launcher. It opens the `tui` profile by default, forwards `bake tui`, `bake headless`, `bake plugin`, `bake update`, and `bake --profile` to the profile CLI, and selects `~/.bake` unless `DSH_HOME` is set. `dsh update` replaces that install with the newest signed release, and `dsh update --check` only reports, exiting 10 when a newer release is available; a leading `update` is reserved for this, as `plugin` is, so a profile named `update` is reached with `--profile update`. See [Updating an install](../../distribution/README.md#updating-an-install).
 
 Interactive updates bake a loaf on one stderr row, browning with the download and install, and clear it before the result or an error. `BAKE_NO_ANIMATION=1` disables motion; `NO_COLOR=1` disables color. Checks, redirected output, CI, and dumb terminals keep plain reports.
+
+## Startup and shutdown
+
+The npm `dsh` entry restarts Node with `--report-exclude-env --report-exclude-network --diagnostic-dir=<Bake home>/diagnostics` before loading the application. It creates the diagnostics directory owner-only when possible. On POSIX, replacement preserves the process ID and terminal signal delivery; on Windows, the parent and child share console events, and the parent waits for the child’s exit status. Release and development launchers already supply these arguments and run directly. The arguments are not added to `NODE_OPTIONS`, so commands started by the agent do not inherit them. The runtime watchdog enables fatal-error reports; heap snapshots remain opt-in.
+
+The entry turns on Node's module compile cache before it loads the application, so later launches reuse the compiled code of the launcher and the profile's modules. The cache is Node's default `<tmpdir>/node-compile-cache`, used only when the current user owns it and no other user can write to it. Node keys each entry by its version, the user, and the file's path and content. The launcher writes the cache once the profile has booted, and Node adds modules loaded later when the process exits. `NODE_DISABLE_COMPILE_CACHE=1` turns the cache off, and a `NODE_COMPILE_CACHE` directory replaces the default. The processes Bake starts do not inherit the cache. A missing or unwritable cache never stops startup.
+
+Each launch restores the profile's root `cordis.yml` to an empty entry list. An unchanged file is left alone. A changed one is replaced atomically, so a concurrent launch of the same profile never reads a partial file.
+
+`SIGINT` exits 130 and `SIGTERM` exits 0, each after disposing the application: disposal flushes the session and stops managed subprocesses. Before unloading the plugin tree, the launcher awaits `app/shutdown` so active agents can cancel and write their closing events while session persistence is still mounted. Disposal is bounded at 5 seconds, and a second signal forces exit. `SIGHUP`, which arrives when the terminal closes (on Windows, when the console closes), runs the same disposal and exits 129. Writes to the lost terminal fail, so from then on the launcher ignores stdio errors. A repeated `SIGHUP` waits for the running disposal instead of forcing exit.
 
 ## External plugins
 

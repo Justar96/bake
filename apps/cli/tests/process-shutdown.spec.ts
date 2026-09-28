@@ -21,6 +21,10 @@ afterEach(() => {
 
 describe('process shutdown', () => {
   it('completes naturally after disposal resolves and forces exit when it rejects', async () => {
+    // Successful disposal still arms one more (unref'd) forced-exit timer in
+    // case a handle outlives it; fake timers keep that from lingering as a
+    // real 5s timeout past this test.
+    vi.useFakeTimers()
     const resolvedExit = vi.fn()
     const resolvedComplete = vi.fn()
     const resolved = createProcessShutdown(() => Promise.resolve(), resolvedExit, resolvedComplete)
@@ -43,6 +47,7 @@ describe('process shutdown', () => {
   })
 
   it('uses process.exitCode for default normal completion', async () => {
+    vi.useFakeTimers()
     const exit = vi.spyOn(process, 'exit').mockImplementation(_code => undefined as never)
     const originalExitCode = process.exitCode
     process.exitCode = undefined
@@ -56,6 +61,24 @@ describe('process shutdown', () => {
     } finally {
       process.exitCode = originalExitCode
     }
+  })
+
+  it('bounds natural completion so a handle disposal did not close cannot hang the process', async () => {
+    vi.useFakeTimers()
+    const exit = vi.fn()
+    const complete = vi.fn()
+    // Disposal resolves cleanly, but nothing here ever clears the handle
+    // event-loop keeps alive; only the rearmed timer can end the process.
+    const shutdown = createProcessShutdown(() => Promise.resolve(), exit, complete)
+
+    await shutdown.shutdown(0)
+    expect(complete).toHaveBeenCalledExactlyOnceWith(0)
+    expect(exit).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(PROCESS_SHUTDOWN_TIMEOUT_MS - 1)
+    expect(exit).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(exit).toHaveBeenCalledExactlyOnceWith(0)
   })
 
   it('forces exit when graceful disposal reaches its bound', async () => {
@@ -147,6 +170,7 @@ describe('process shutdown', () => {
   })
 
   it('coalesces normal shutdown calls without treating them as escalation', async () => {
+    vi.useFakeTimers()
     const disposal = deferred()
     const exit = vi.fn()
     const complete = vi.fn()
@@ -162,6 +186,89 @@ describe('process shutdown', () => {
     expect(complete).toHaveBeenCalledOnce()
     expect(complete).toHaveBeenCalledWith(0)
     expect(exit).not.toHaveBeenCalled()
+  })
+
+  it('drains on a hangup and exits with its code once disposal settles', async () => {
+    const disposal = deferred()
+    const dispose = vi.fn(() => disposal.promise)
+    const exit = vi.fn()
+    const complete = vi.fn()
+    const shutdown = createProcessShutdown(dispose, exit, complete)
+
+    shutdown.hangup(129)
+    await Promise.resolve()
+    expect(dispose).toHaveBeenCalledOnce()
+    expect(exit).not.toHaveBeenCalled()
+
+    disposal.resolve()
+    await shutdown.shutdown(0)
+    expect(exit).toHaveBeenCalledOnce()
+    expect(exit).toHaveBeenCalledWith(129)
+    expect(complete).not.toHaveBeenCalled()
+  })
+
+  it('does not let a repeated hangup cut short the disposal the first one started', async () => {
+    vi.useFakeTimers()
+    const disposal = deferred()
+    const dispose = vi.fn(() => disposal.promise)
+    const exit = vi.fn()
+    const shutdown = createProcessShutdown(dispose, exit, vi.fn())
+
+    shutdown.hangup(129)
+    shutdown.hangup(129)
+    await vi.advanceTimersByTimeAsync(PROCESS_SHUTDOWN_TIMEOUT_MS - 1)
+    shutdown.hangup(129)
+    expect(dispose).toHaveBeenCalledOnce()
+    expect(exit).not.toHaveBeenCalled()
+
+    // The bound still applies to a disposal that never settles.
+    await vi.advanceTimersByTimeAsync(1)
+    expect(exit).toHaveBeenCalledOnce()
+    expect(exit).toHaveBeenCalledWith(129)
+    disposal.resolve()
+  })
+
+  it('joins a shutdown already draining when the terminal hangs up, keeping its code', async () => {
+    vi.useFakeTimers()
+    const disposal = deferred()
+    const exit = vi.fn()
+    const complete = vi.fn()
+    const interrupted = createProcessShutdown(() => disposal.promise, exit, complete)
+
+    interrupted.interrupt(130)
+    interrupted.hangup(129)
+    expect(exit).not.toHaveBeenCalled()
+    disposal.resolve()
+    await interrupted.shutdown(0)
+    expect(exit).toHaveBeenCalledOnce()
+    expect(exit).toHaveBeenCalledWith(130)
+
+    const normal = deferred()
+    const normalExit = vi.fn()
+    const normalComplete = vi.fn()
+    const finishing = createProcessShutdown(() => normal.promise, normalExit, normalComplete)
+    const pending = finishing.shutdown(0)
+    finishing.hangup(129)
+    expect(normalExit).not.toHaveBeenCalled()
+    normal.resolve()
+    await pending
+    expect(normalComplete).toHaveBeenCalledWith(0)
+    expect(normalExit).not.toHaveBeenCalled()
+  })
+
+  it('forces the exit that natural completion still waits on after a hangup', async () => {
+    const exit = vi.fn()
+    const complete = vi.fn()
+    const shutdown = createProcessShutdown(() => Promise.resolve(), exit, complete)
+
+    await shutdown.shutdown(0)
+    shutdown.hangup(129)
+    shutdown.hangup(129)
+
+    expect(complete).toHaveBeenCalledOnce()
+    expect(complete).toHaveBeenCalledWith(0)
+    expect(exit).toHaveBeenCalledOnce()
+    expect(exit).toHaveBeenCalledWith(129)
   })
 
   it('lets a signal force exit while natural completion drains remaining handles', async () => {
