@@ -17,7 +17,9 @@ export const Config: z<Config> = z.object({
   resume: z.string(),
   preset: z.string(),
   locale: z.union(['en', 'zh']).default('en'),
-  screen: z.union(['inline', 'fullscreen']).default('inline'),
+  // No default: set, it overrides the user's `/settings` choice, which
+  // otherwise decides and starts inline.
+  screen: z.union(['inline', 'fullscreen']),
   // `auto` reads the terminal. See `resolveFrame`. The explicit values are for
   // a terminal the environment describes wrongly, which is the case no
   // detection can cover.
@@ -31,6 +33,7 @@ export const Config: z<Config> = z.object({
   // keeps output out of the terminal entirely. That is what a deployment
   // wants when it reads transcripts from a log instead of the screen.
   resultLines: z.number().min(0).step(1).default(4),
+  goalObjective: z.boolean().default(false),
   attachmentMaxBytes: z.number().min(1).step(1).default(16 * 1024 * 1024),
   attachmentLimit: z.number().min(1).step(1).default(8),
 })

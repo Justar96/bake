@@ -313,6 +313,20 @@ describe('Shift-Tab thinking toggle', () => {
     expect(model.requests.at(-1)).toMatchObject({ provider: 'mock', model: 'model', reasoningEffort: 'high' })
   })
 
+  it('saves /model picks and each step as the new-session default, in order', async () => {
+    const { ctx, controller } = await connected()
+    await controller.drain()
+    const saved = vi.spyOn(ctx.agentDefaultModel, 'saveSelection')
+    controller.submit('/model mock/other high')
+    await controller.drain()
+    controller.cycleThinking()
+    await controller.drain()
+    expect(saved.mock.calls.map(([selection]) => selection)).toEqual([
+      { provider: 'mock', model: 'other', reasoningEffort: 'high' },
+      { provider: 'mock', model: 'other' },
+    ])
+  })
+
   it('says so for a route without efforts and changes nothing', async () => {
     const { controller, selection } = await connected()
     controller.submit('/model mock/plain')

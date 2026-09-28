@@ -535,6 +535,18 @@ class Run {
   }
 
   /**
+   * Drop the remembered `/model` choice. Every scenario shares this home, and
+   * each expects a new session on the overlay's default model.
+   */
+  async forgetDefaultModel(): Promise<void> {
+    const path = join(this.home, 'settings.yaml')
+    if (!existsSync(path)) return
+    const text = await Bun.file(path).text()
+    const kept = text.replace(/^agent-default-model:\n(?:[ \t]+.*(?:\n|$)|\n)*/mu, '')
+    if (kept !== text) await Bun.write(path, kept)
+  }
+
+  /**
    * Build the CLI invocation for one terminal.
    *
    * @param extra - arguments appended after the profile patches.
@@ -670,6 +682,10 @@ scenario('fresh', 'login, model and effort selection, paste, cursor editing, a b
       assert(headers.length > 0 && headers.every(h => h.config.model === 'tui-picked-model'
                                                  && h.config.reasoningEffort === 'high'),
              'picker selection did not reach recorded requests')
+      // The pick is also the default a new session starts on.
+      const saved = await Bun.file(join(run.home, 'settings.yaml')).text()
+      assert(/^agent-default-model:\n(?:\s+.*\n)*?\s+model: tui-picked-model\n(?:\s+.*\n)*?\s+reasoningEffort: high$/mu.test(saved),
+             `the picked model was not saved as the new-session default:\n${saved}`)
     }
     const model = log.filter(e => e.type === 'assistant/message').map(e => e.data.message.content)
     const expectedModel = run.recorded.filter(e => e.type === 'assistant/message').map(e => e.data.message.content)
@@ -1511,6 +1527,56 @@ scenario('agents', 'the built TUI exposes the Harness subagent catalog through /
     assert(!log.some(event => event.type === 'user/message'), '/agents entered model input')
   })
 
+scenario('settings', 'a /settings choice is saved to the settings file, and a saved fullscreen screen opens at the next launch',
+  { replayOnly: true },
+  async run => {
+    const copy = dictionaries.en
+    // Every scenario shares this home. The saved screen must not outlive this one.
+    const settingsPath = join(run.home, 'settings.yaml')
+    const original = existsSync(settingsPath) ? await Bun.file(settingsPath).text() : undefined
+    try {
+      const before = await run.logs()
+      await run.terminal('settings', [], async tty => {
+        const start = tty.mark()
+        tty.send('/settings\r', 'open the settings panel')
+        await tty.expect(copy.settingsScreenInline, start)
+        await tty.expect(copy.settingsModel, 'deepseek-official/deepseek-v4-flash', copy.settingsNewSessions)
+        await tty.wait('the screen row to be selected', text => picked(copy.settingsScreen).test(text.slice(start)))
+        const values = tty.mark()
+        tty.send('\r', 'open the screen values')
+        await tty.wait('the inline value to be selected', text => picked(copy.settingsScreenInline).test(text.slice(values)))
+        await tty.expect(copy.settingsDefault, values)
+        const down = tty.mark()
+        tty.send('\x1b[B', 'point at fullscreen')
+        await tty.wait('the fullscreen value to be selected', text => picked(copy.settingsScreenFullscreen).test(text.slice(down)))
+        const chosen = tty.mark()
+        tty.send('\r', 'choose fullscreen')
+        await tty.expect(copy.settingsNextLaunch, chosen)
+        const closed = tty.mark()
+        tty.send('\x1b', 'close the panel')
+        await tty.expect(`${SCREEN.prompt}${SCREEN.caret}`, closed)
+        await tty.expect(`${copy.settingsSaved} `, closed)
+        // The running process keeps its inline screen.
+        tty.check('the running process stayed inline', !tty.raw.includes('\u001b[?1049h'))
+      })
+      const saved = await Bun.file(join(run.home, 'settings.yaml')).text()
+      assert(/^tui:\n\s+screen: fullscreen$/mu.test(saved), `the screen choice was not saved:\n${saved}`)
+      const log = await events(await run.created(before, 'settings'))
+      assert(!log.some(event => event.type === 'user/message'), '/settings entered model input')
+      await run.terminal('settings-fullscreen', [], async tty => {
+        await tty.wait('the saved fullscreen screen at launch', text => text.includes('BAKE') && tty.raw.includes('\u001b[?1049h'))
+      })
+      // A flag still wins over the saved screen.
+      await run.terminal('settings-flag', ['--screen', 'inline'], async tty => {
+        await tty.expect('BAKE')
+        tty.check('--screen inline overrode the saved screen', !tty.raw.includes('\u001b[?1049h'))
+      })
+    } finally {
+      if (original === undefined) rmSync(settingsPath, { force: true })
+      else await Bun.write(settingsPath, original)
+    }
+  })
+
 scenario('inspect-agent', 'select a saved child, read its session, and return with the parent draft intact',
   { requires: ['fresh'], replayOnly: true },
   async run => {
@@ -2193,6 +2259,7 @@ async function main(): Promise<void> {
       current = item
       const step = performance.now()
       await item.body(run)
+      await run.forgetDefaultModel()
       process.stdout.write(`PASS ${item.name} (${((performance.now() - step) / 1000).toFixed(1)}s): ${item.summary}\n`)
     }
     process.stdout.write(`PASS ${node} (${mode}): ${chosen.length} scenario(s)`

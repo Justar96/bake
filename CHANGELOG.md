@@ -4,6 +4,12 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 ## [Unreleased]
 
+- The goal on the header shows its state and round count without the objective, which Ctrl+O still opens. On a narrow terminal it gives up its parts one at a time instead of being clipped at the right edge, and keeps `● 3/256` where its label no longer fits.
+- The header's spinner is now a round ball of dough being kneaded: squashed, pressed into a dome, folded from one side, rounded up, and folded from the other. It keeps its three-cell width and running orange.
+- Installs and updates bake a loaf instead of the old ASCII oven: steam rises over it and it browns from dough to crust as the download and install advance. The installers, `bake update`, and `/update` in the terminal now draw the same row; `/update` shows it above the prompt instead of as notice text. Terminals that are not UTF-8, and CJK locales, get an ASCII loaf.
+- `/settings` opens a panel of terminal settings saved to the settings file: screen mode (inline, the default, or fullscreen), language, borders, whether the header names the goal's objective, tool output lines, menu rows, the Ctrl+C quit window, and the default model and access for new sessions. Screen mode and language apply at the next launch; `--screen` still overrides the saved screen. Each value list marks the profile's `Default`, a pinned row resets the terminal settings after a confirmation, and a failed save keeps the panel open with its reason.
+- The model and reasoning effort chosen with `/model` or Shift-Tab are remembered: the next launch and `/new` start on them. Resumed sessions keep the model they recorded.
+
 ## [0.1.7] - 2026-09-27
 
 - `--screen fullscreen` opens a scrollable transcript with the input pinned at the bottom. PgUp/PgDn scroll, Ctrl+Home goes to the start, and Ctrl+End follows new output. Exit restores the shell; inline mode remains the default.

@@ -154,6 +154,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@deepseek-ai/dsh-agent": "workspace:^",
+        "@deepseek-ai/dsh-agent-default-model": "workspace:^",
         "@deepseek-ai/dsh-agent-presets": "workspace:^",
         "@deepseek-ai/dsh-attachment": "workspace:^",
         "@deepseek-ai/dsh-authorization": "workspace:^",
@@ -193,7 +194,6 @@
         "@deepseek-ai/cordis": "workspace:^",
         "@deepseek-ai/cordis-plugin-include": "workspace:^",
         "@deepseek-ai/cordis-plugin-loader": "workspace:^",
-        "@deepseek-ai/dsh-agent-default-model": "workspace:^",
         "@deepseek-ai/dsh-agent-loop": "workspace:^",
         "@deepseek-ai/dsh-agent-loop-testkit": "workspace:^",
         "@deepseek-ai/dsh-attachment-local": "workspace:^",

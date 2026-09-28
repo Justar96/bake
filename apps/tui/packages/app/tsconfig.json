@@ -25,6 +25,9 @@
       "path": "../../../../packages/core/agent"
     },
     {
+      "path": "../../../../packages/core/agent-default-model"
+    },
+    {
       "path": "../../../../packages/boot/updater"
     },
     {
