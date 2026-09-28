@@ -1,22 +1,19 @@
 /**
- * Gate for the invariant `FALLBACK_LOCALE` rests on: every shipped dictionary
- * declares the same keys in `zh` and `en`.
+ * Gate for locale symmetry: every shipped dictionary declares the same keys in
+ * `zh` and `en`.
  *
- * The locale runtime resolves a key through the active locale, then through
- * the single fallback locale (`en`), then surfaces the key itself. With
- * symmetric dictionaries that middle step always resolves, so one constant can
- * serve as both the opening locale and the dictionary fallback. A key added to
- * only one side breaks that: a reader of the other language sees a bare key
- * such as `list.aria` instead of text. This gate fails on the asymmetry rather
- * than waiting for the bare key to reach a UI.
+ * The terminal selects one dictionary by the configured locale and reads every
+ * label from it, with no per-key fallback. A key added to only one side leaves
+ * the other language's reader with a missing label instead of text. This gate
+ * fails on the asymmetry rather than waiting for the gap to reach a UI.
  *
  * Discovery is deliberately broad, because a gate that silently narrows is
- * worse than no gate. It sweeps every workspace package (not just
- * `packages/client`), reads dictionaries wherever they are declared —
- * `locales.ts`, a `locales/` directory, or inline in the plugin body — and
- * pairs `zh`/`en` across sibling files as well as within one module. A `zh`
- * dictionary whose `en` counterpart cannot be found anywhere is an error, not
- * a skip.
+ * worse than no gate. It sweeps the source of every workspace package and
+ * application, reads dictionaries wherever they are declared — `locales.ts`, a
+ * `locales/` directory, an `{ en, zh }` table such as the TUI's `copy.ts`, or
+ * inline in the plugin body — and pairs `zh`/`en` across sibling files as well
+ * as within one module. A `zh` dictionary whose `en` counterpart cannot be
+ * found anywhere is an error, not a skip.
  */
 
 import type { Dirent } from 'node:fs'
@@ -33,13 +30,25 @@ function relative(file: string): string {
   return file.slice(root.length).replaceAll('\\', '/')
 }
 
-/** Every `.ts` source file under each workspace package's `src`, excluding declarations. */
+/**
+ * Every `.ts`/`.tsx` source file, excluding declarations, under the `src` of
+ * each shared runtime package (`packages/<group>/<name>`), each application
+ * (`apps/<name>`), and each application workspace package
+ * (`apps/<name>/packages/<name>`).
+ */
 function sourceFiles(): string[] {
   const files: string[] = []
   const packagesRoot = resolve(root, 'packages')
   for (const group of directories(packagesRoot)) {
     for (const pkg of directories(resolve(packagesRoot, group))) {
       walk(resolve(packagesRoot, group, pkg, 'src'), files)
+    }
+  }
+  const appsRoot = resolve(root, 'apps')
+  for (const app of directories(appsRoot)) {
+    walk(resolve(appsRoot, app, 'src'), files)
+    for (const pkg of directories(resolve(appsRoot, app, 'packages'))) {
+      walk(resolve(appsRoot, app, 'packages', pkg, 'src'), files)
     }
   }
   return files.sort()
@@ -70,7 +79,7 @@ function walk(dir: string, out: string[]): void {
   for (const entry of readEntries(dir)) {
     const full = resolve(dir, entry.name)
     if (entry.isDirectory()) walk(full, out)
-    else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.d.ts')) out.push(full)
+    else if (/\.tsx?$/.test(entry.name) && !entry.name.endsWith('.d.ts')) out.push(full)
   }
 }
 
@@ -86,8 +95,10 @@ interface Dictionary {
 
 /**
  * Keys of every top-level `export const <name> = { ... }` object literal whose
- * name identifies a locale dictionary, plus inline `register(ns, locale, {...})`
- * literals. Read from the AST so the gate never executes package code.
+ * name identifies a locale dictionary, every `zh`/`en` object-literal member of
+ * an exported `{ en: {...}, zh: {...} }` table, plus inline
+ * `register(ns, locale, {...})` literals. Read from the AST so the gate never
+ * executes package code.
  * @param file - absolute path of a candidate module.
  * @returns discovered dictionaries, keyed by locale-bearing name.
  */
@@ -124,8 +135,23 @@ function dictionariesIn(file: string): Dictionary[] {
       if (!ts.isIdentifier(decl.name)) continue
       const literal = unwrap(decl.initializer)
       if (literal === undefined || !ts.isObjectLiteralExpression(literal)) continue
-      if (localeOf(decl.name.text) === undefined) continue
-      found.push({ file: rel, name: decl.name.text, keys: keysOf(literal) })
+      if (localeOf(decl.name.text) !== undefined) {
+        found.push({ file: rel, name: decl.name.text, keys: keysOf(literal) })
+        continue
+      }
+      // A locale table: `export const dictionaries = { en: {...}, zh: {...} }`.
+      // The table's name is the pair key, so its members meet each other.
+      for (const member of literal.properties) {
+        if (!ts.isPropertyAssignment(member)) continue
+        if (!ts.isIdentifier(member.name) && !ts.isStringLiteral(member.name)) continue
+        const tag = member.name.text
+        if (tag !== 'zh' && tag !== 'en') continue
+        const dictionary = unwrap(member.initializer)
+        if (dictionary === undefined || !ts.isObjectLiteralExpression(dictionary)) {
+          throw new Error(`cannot verify ${decl.name.text}.${tag} in ${rel}: the member is not an object literal`)
+        }
+        found.push({ file: rel, name: `${tag}@member:${decl.name.text}`, keys: keysOf(dictionary) })
+      }
     }
   }
 
@@ -300,9 +326,10 @@ describe('shipped locale dictionaries', () => {
       if (enOnly.length > 0) problems.push(`${en.file} ${en.name} has keys absent from ${zh.name}: ${enOnly.join(', ')}`)
     }
 
-    // The shipped dictionary count only grows; a collapse means discovery or
-    // pairing broke, which would hide real asymmetry.
-    expect(comparedPairs).toBeGreaterThan(25)
+    // The terminal's own copy table must always be among the compared pairs; a
+    // miss means discovery or pairing broke, which would hide real asymmetry.
+    expect(groups.get('apps/tui/packages/ui/src/copy.ts:::dictionaries')?.size).toBe(2)
+    expect(comparedPairs).toBeGreaterThanOrEqual(1)
     expect(problems).toEqual([])
   })
 })

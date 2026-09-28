@@ -49,16 +49,21 @@ describe('Oxlint executable contract', () => {
   it('discovers the owning TypeScript project for every file class', async () => {
     const suffix = randomUUID()
     const configPath = await writeContractConfig(suffix)
-    const probes = [
+    // Source classes that a TypeScript project owns by include glob. Tests and
+    // tooling scripts belong to no project in Bake (`tsconfig.host.json` is a
+    // references-only solution), so they are probed below for rules only.
+    const owned = [
       ['host package source', 'packages/fs/fs-observation-policy/src', 'packages/fs/fs-observation-policy/tsconfig.json'],
-      ['host package test', 'packages/fs/fs-observation-policy/tests', 'tsconfig.host.json'],
-      ['client package source', 'packages/client/ui-primitives/src', 'packages/client/ui-primitives/tsconfig.json'],
-      // A test under packages/client states its face in the filename, so the
-      // probe carries the Client suffix to reach the Client aggregate.
-      ['client package test', 'packages/client/ui-trajectory/tests', 'tsconfig.client.json', '.client.ts'],
-      ['CLI profile test', 'apps/cli/tests/profiles/headless/tests', 'tsconfig.host.json'],
-      ['website', 'website', 'tsconfig.host.json'],
+      ['CLI source', 'apps/cli/src', 'apps/cli/tsconfig.json'],
+      ['client-face package source', 'packages/test-support/remote-mock/src', 'packages/test-support/remote-mock/tsconfig.json'],
     ] as const
+    const projectless = [
+      ['host package test', 'packages/fs/fs-observation-policy/tests'],
+      ['CLI test', 'apps/cli/tests'],
+      ['CLI profile test', 'apps/cli/tests/profiles/headless/tests'],
+      ['repository script', 'scripts'],
+    ] as const
+    const parents = [...owned, ...projectless].map(([, parent]) => parent)
     const source = `export function probePromise(): Promise<void> {
   return Promise.resolve()
 }
@@ -67,41 +72,39 @@ probePromise()
 `
 
     try {
-      const paths: Array<readonly [label: string, path: string, tsconfig: string]> = []
-      for (const [label, parent, tsconfig, extension = '.ts'] of probes) {
-        const path = join(repositoryRoot, parent, `oxlint-contract-${suffix}${extension}`)
+      const paths = new Map<string, string>()
+      for (const [label, parent] of [...owned, ...projectless]) {
+        const path = join(repositoryRoot, parent, `oxlint-contract-${suffix}.ts`)
         await writeFile(path, source)
-        paths.push([label, relative(repositoryRoot, path), tsconfig])
+        paths.set(label, relative(repositoryRoot, path).replaceAll('\\', '/'))
       }
-      const clientScript = 'scripts/client-bundle-purity.spec.ts'
 
       const result = runOxlint([
         '--config',
         relative(repositoryRoot, configPath),
         '--format',
         'unix',
-        ...paths.map(([, path]) => path),
-        clientScript,
+        ...paths.values(),
       ], { OXC_LOG: 'debug' })
       const output = normalizedOutput(result)
 
       expect(result.error).toBeUndefined()
       expect(result.status, output).toBe(1)
-      for (const [label, path, tsconfig] of paths) {
-        expect(output, label).toContain(`${path.replaceAll('\\', '/')}:5:1: Promises must be awaited`)
-        expect(output, `${label} project`).toContain(
-          `Got tsconfig for file ${join(repositoryRoot, path).replaceAll('\\', '/')}: ${join(repositoryRoot, tsconfig).replaceAll('\\', '/')}`,
-        )
+      // Every class still runs the type-aware rules.
+      for (const [label, path] of paths) {
+        expect(output, label).toContain(`${path}:5:1: Promises must be awaited`)
       }
-      expect(output.match(/typescript\(no-floating-promises\)/g)).toHaveLength(probes.length)
-      expect(output, 'client aggregate script project').toContain(
-        `Got tsconfig for file ${join(repositoryRoot, clientScript).replaceAll('\\', '/')}: ${join(repositoryRoot, 'tsconfig.client.json').replaceAll('\\', '/')}`,
-      )
-      expect(output).not.toContain('Unmatched file:')
+      expect(output.match(/typescript\(no-floating-promises\)/g)).toHaveLength(paths.size)
+      for (const [label, parent, tsconfig] of owned) {
+        const path = join(repositoryRoot, parent, `oxlint-contract-${suffix}.ts`).replaceAll('\\', '/')
+        expect(output, `${label} project`).toContain(
+          `Got tsconfig for file ${path}: ${join(repositoryRoot, tsconfig).replaceAll('\\', '/')}`,
+        )
+        expect(output, `${label} project`).not.toContain(`Unmatched file: ${path}`)
+      }
     } finally {
       await Promise.all([
-        ...probes.map(([, parent, , extension = '.ts']) =>
-          rm(join(repositoryRoot, parent, `oxlint-contract-${suffix}${extension}`), { force: true })),
+        ...parents.map(parent => rm(join(repositoryRoot, parent, `oxlint-contract-${suffix}.ts`), { force: true })),
         rm(configPath, { force: true }),
       ])
     }
@@ -213,13 +216,27 @@ export const longProbe = 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 +
       throw new Error('package.json must contain scripts and devDependencies objects')
     }
 
-    expect(packageJson.scripts['lint:contracts-ready']).toBe('tsx scripts/run-oxlint.ts .')
-    expect(packageJson.scripts['lint:fix:contracts-ready']).toBe(
-      'tsx scripts/run-oxlint.ts --config .oxlintrc.staged.json packages/typert/generator/tests/fixtures/type-model --fix && tsx scripts/run-oxlint.ts . --fix',
-    )
-    expect(packageJson.devDependencies).not.toHaveProperty('eslint')
-    expect(packageJson.devDependencies).not.toHaveProperty('@typescript-eslint/parser')
-    expect(existsSync(join(repositoryRoot, 'eslint.format.config.mjs'))).toBe(false)
+    // `bun run lint` is the repository-wide Oxlint pass: the wrapper, the
+    // staged configuration, and every source root Bake ships.
+    const lint = packageJson.scripts.lint
+    if (typeof lint !== 'string') throw new Error('package.json must declare a lint script')
+    const [runtime, wrapper, ...lintArgs] = lint.split(/\s+/)
+    expect([runtime, wrapper]).toEqual(['bun', 'scripts/run-oxlint.ts'])
+    const configFlag = lintArgs.indexOf('--config')
+    expect(configFlag, lint).toBeGreaterThanOrEqual(0)
+    expect(lintArgs[configFlag + 1]).toBe('.oxlintrc.staged.json')
+    const lintRoots = lintArgs.filter((argument, index) => !argument.startsWith('-') && index !== configFlag + 1)
+    expect(lintRoots.sort(), lint).toEqual(['apps', 'packages', 'scripts'])
+    expect(lint).not.toMatch(/\beslint\b/)
+
+    for (const dependencies of [packageJson.dependencies, packageJson.devDependencies]) {
+      if (!isRecord(dependencies)) continue
+      expect(dependencies).not.toHaveProperty('eslint')
+      expect(dependencies).not.toHaveProperty('@typescript-eslint/parser')
+    }
+    for (const config of ['eslint.config.js', 'eslint.config.mjs', 'eslint.config.ts', 'eslint.format.config.mjs', '.eslintrc.json']) {
+      expect(existsSync(join(repositoryRoot, config)), config).toBe(false)
+    }
 
     const lefthook = await readFile(join(repositoryRoot, 'lefthook.yml'), 'utf8')
     expect(lefthook).toContain('scripts/run-oxlint.ts --config .oxlintrc.staged.json --fix')
