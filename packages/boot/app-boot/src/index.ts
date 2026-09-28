@@ -11,7 +11,7 @@ import { readFileSync } from 'node:fs'
 import { inspect, parseEnv } from 'node:util'
 import { basename, dirname, isAbsolute, resolve } from 'node:path'
 import * as yaml from 'js-yaml'
-import { Context, type FiberState } from '@deepseek-ai/cordis'
+import { Context, FiberState } from '@deepseek-ai/cordis'
 import Loader, { type Entry, type EntryOptions } from '@deepseek-ai/cordis-plugin-loader'
 import Include, { applyEntryPatches, entryListSchema, type PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 import Group from '@deepseek-ai/cordis-plugin-group'
@@ -262,7 +262,7 @@ export async function reconcileProfilePatches(
   }))
   // Removed entries leave the Loader store before their async disposers finish.
   const previousFibers = [...ctx.loader.entries()].flatMap(row => row.fiber === undefined ? [] : [{
-    fiber: row.fiber, failed: row.fiber.state === FIBER_FAILED || row.fiber.state === FIBER_DISPOSED,
+    fiber: row.fiber, failed: row.fiber.state === FiberState.FAILED || row.fiber.state === FiberState.DISPOSED,
   }])
   const { patches: _previous, ...includeConfig } = entry.options.config as Include.Config
   await entry.update({ config: { ...includeConfig, patches } })
@@ -618,7 +618,7 @@ export const FAIL_LOUD_RELEASE_TIMEOUT_MS = 2_000
  * a listener that threw mid-update (a stream `'data'` handler, a half-applied
  * registry write) leaves silently wrong results behind if it were resumed. The
  * event loop keeps running only until the release hook settles or times out.
- * Stdout remains untouched for ACP; the returned function removes both handlers.
+ * Stdout remains untouched; the returned function removes both handlers.
  *
  * The diagnostic is `util.inspect(err)`, not `err.stack`: a `node:fs` error's
  * `code`, `syscall`, and `path` and any `cause` chain are enumerable properties
@@ -700,31 +700,19 @@ export function installFailLoud(
 }
 
 /**
- * Value mirrors used because Cordis's const enum has no runtime object to import.
- * Keep aligned with the vendored Cordis FiberState declaration.
- */
-const FIBER_PENDING = 0 as FiberState.PENDING
-const FIBER_ACTIVE = 2 as FiberState.ACTIVE
-const FIBER_FAILED = 3 as FiberState.FAILED
-const FIBER_DISPOSED = 4 as FiberState.DISPOSED
-
-/**
  * Entry ids whose presence defines a usable DSH application.
  *
  * The list is global rather than profile metadata. Missing or disabled ids do
  * not affect startup; an enabled listed entry must activate. The list covers
- * shared Agent execution, application endpoints, and Web bootstrap/transport.
+ * shared Agent execution and the TUI, headless, and module-connection surfaces.
  */
 const requiredStartupEntryIds = new Set<string>([
   'agent-loop',
   'tui-startup',
   'tui-runner',
-  'webserver',
   'modules',
   'connection',
   'headless-runner',
-  'acp',
-  'sdk-jsonrpc-server',
 ])
 
 /** Render plugin stacks, nested causes, and aggregate member failures once per error. */
@@ -811,8 +799,8 @@ async function inactiveEntries(ctx: Context): Promise<InactiveEntry[]> {
       continue
     }
     const state = fiber.state
-    if (state === FIBER_ACTIVE) continue
-    if (state === FIBER_FAILED) {
+    if (state === FiberState.ACTIVE) continue
+    if (state === FiberState.FAILED) {
       try {
         await fiber.await()
       } catch (error) {
@@ -821,7 +809,7 @@ async function inactiveEntries(ctx: Context): Promise<InactiveEntry[]> {
       }
       continue
     }
-    if (state === FIBER_PENDING) {
+    if (state === FiberState.PENDING) {
       const missing = Object.keys(fiber.inject).filter(service => fiber.ctx.get(service) === undefined)
       failures.push({
         entry,
