@@ -38,10 +38,10 @@ it('preserves presentation and cumulative positions across transcript batches an
     count += batch.lines.length
   }
   expect(cursor.next(transcript, budget, result)).toBeUndefined()
-  const invisible = appendTranscript(transcript, [{ kind: 'notice', tone: 'info', placement: 'turn-end', text: 'Completed' }])
+  const invisible = appendTranscript(transcript, [{ kind: 'rate', tokens: 120, ms: 3000 }, { kind: 'notice', tone: 'info', placement: 'turn-end', text: 'Completed' }])
   expect(cursor.next(invisible, budget, result)).toBeUndefined()
-  const appended = appendTranscript(invisible, [{ kind: 'rate', text: '42 tokens/s' }])
-  expect(cursor.next(appended, budget, result)).toMatchObject({ start: count, height: 1, lines: [{ text: '42 tokens/s' }] })
+  const appended = appendTranscript(invisible, [{ kind: 'notice', tone: 'info', text: 'Context compacted' }])
+  expect(cursor.next(appended, budget, result)).toMatchObject({ start: count, height: 1, lines: [{ text: 'Context compacted' }] })
 })
 
 it('finishes a captured snapshot before scanning appends and never rereads old rows', () => {
@@ -52,7 +52,7 @@ it('finishes a captured snapshot before scanning appends and never rereads old r
   for (let index = 0; index < 1500; index++) {
     const text = `row-${index}`
     expected.push(text)
-    const rows = new Proxy<Row[]>([{ kind: 'rate', text }], {
+    const rows = new Proxy<Row[]>([{ kind: 'notice', tone: 'info', text }], {
       get(target, property, receiver) {
         if (property === '0') reads++
         return Reflect.get(target, property, receiver)
@@ -64,7 +64,7 @@ it('finishes a captured snapshot before scanning appends and never rereads old r
   const first = cursor.next(transcript, budget, result)!
   expect(first.lines).toHaveLength(512)
   expect(cursor.caughtUp).toBe(false)
-  const tail = new Proxy(appendTranscript(transcript, [{ kind: 'rate', text: 'appended' }]), {
+  const tail = new Proxy(appendTranscript(transcript, [{ kind: 'notice', tone: 'info', text: 'appended' }]), {
     get(target, property, receiver) {
       if (property === 'previous') tailReads++
       return Reflect.get(target, property, receiver)
@@ -94,7 +94,7 @@ it('replays a thousand-line answer in bounded batches and presents its code once
   const transcript = appendTranscript(emptyTranscript, [row])
   const cursor = new ReplayCursor()
   const lines: PresentedLine[] = []
-  const appended = appendTranscript(transcript, [{ kind: 'rate', text: 'after the answer' }])
+  const appended = appendTranscript(transcript, [{ kind: 'notice', tone: 'info', text: 'after the answer' }])
   for (let batch = cursor.next(transcript, budget, highlighted); batch !== undefined; batch = cursor.next(appended, budget, highlighted)) {
     expect(batch.start).toBe(lines.length)
     expect(batch.lines.length).toBeGreaterThan(0)

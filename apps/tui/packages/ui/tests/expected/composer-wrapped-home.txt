@@ -4,6 +4,6 @@
 ────────────────────────────────────────
 > ▌START 你好 word 你好 word 你好 word
   你好 word 你好 word 你好 word 你好
-  word 你好 word 你好 word 你好 word 你
+v word 你好 word 你好 word 你好 word 你
 ────────────────────────────────────────
-  Model: model  /workspace
+  model  /workspace

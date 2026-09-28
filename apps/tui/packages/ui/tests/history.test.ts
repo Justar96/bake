@@ -1,6 +1,6 @@
 /** Input recall traverses authoritative presentation snapshots only when requested. */
 import { expect, it } from 'bun:test'
-import { inputHistory } from '../src/history.ts'
+import { inputHistory, recallCursor } from '../src/history.ts'
 import { appendTranscript, emptyTranscript, type Transcript } from '../src/transcript.ts'
 
 it('recalls pending human input and committed user rows, newest first', () => {
@@ -43,4 +43,20 @@ it('skips attachment-only input without recalling generated file metadata', () =
     { kind: 'user', text: '', attachments: [{ name: 'private.bin', bytes: 4 }] },
   ])
   expect([...inputHistory(history, [{ text: '' }])]).toEqual(['Inspect'])
+})
+
+it('recalls a multi-line prompt whole, as one entry', () => {
+  const history = appendTranscript(emptyTranscript, [{ kind: 'user', text: 'First line\nsecond line' }])
+  expect([...inputHistory(history, [])]).toEqual(['First line\nsecond line'])
+})
+
+it('opens an entry of several rows on the row the next press leaves from', () => {
+  const entry = { text: 'one\ntwo', cursor: 5 }
+  // The next Up keeps walking back rather than climbing the entry row by row.
+  expect(recallCursor(entry, 'older', 2)).toBe(0)
+  // The next Down keeps walking forward from its last row.
+  expect(recallCursor(entry, 'newer', 2)).toBe(7)
+  // One row is both first and last, so its caret stays: at the end where it was loaded, or where a visit left it.
+  expect(recallCursor({ text: 'single', cursor: 6 }, 'older', 1)).toBe(6)
+  expect(recallCursor({ text: 'single', cursor: 2 }, 'newer', 1)).toBe(2)
 })

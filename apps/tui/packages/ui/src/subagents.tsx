@@ -1,8 +1,10 @@
 /** Connected child identities and activity come from the application; their row and sheet are drawn here. */
 import React from 'react'
 import { Box, Text } from 'ink'
+import stringWidth from 'string-width'
 import type { TuiCopy } from './copy.ts'
-import { MARKER } from './layout.ts'
+import { ICON } from './icons.ts'
+import { COLUMN, HINT_MIN_COLUMNS, MARKER } from './layout.ts'
 import { agentTone, PALETTE, type PaletteColor } from './palette.ts'
 import type { SheetLine } from './sheet.tsx'
 
@@ -46,40 +48,55 @@ function statusColor(entry: SubagentEntry): PaletteColor | undefined {
 /** The list's tab: its name, the number of children, and how many are working. */
 export function subagentTab(entries: readonly SubagentEntry[], copy: TuiCopy): string {
   const working = entries.filter(entry => entry.state === 'working').length
-  return `${copy.subagentsTitle} ${entries.length}${working === 0 ? '' : ` · ${working} ${copy.subagentWorking}`}`
+  return `${copy.subagentsTitle} ${entries.length}${working === 0 ? '' : ` · ${working} ${copy.subagentCountWorking}`}`
 }
 
 /**
  * The session's children as one compact row under the input, above the status line.
  *
  * It sits below the composer because Down from an empty composer selects it.
- * The total, then how many children are working and how many cannot be read,
- * when any are. Names are left to the subagent sheet, so the row stays short
- * however many children there are. Dim, so it stays supporting material
- * beside the draft. Focused, it is drawn at full strength and says what Enter
- * does in place of the counts.
+ * It shares the grammar of every standing row: the transcript's `↳` in the
+ * rail, the name and the total, then how many children are working and how
+ * many cannot be read, when any are, in lowercase: `↳ Subagents 3 · 2 working`.
+ * Names are left to the subagent sheet, so the row stays short however many
+ * children there are. Dim, so it stays supporting material beside the draft.
+ * `hint` names the key that opens the sheet at the right edge, given up below
+ * {@link HINT_MIN_COLUMNS} as the composer's hint is. Focused, the rail holds
+ * `>`, the row is drawn at full strength, and the hint says what Enter does.
  *
  * @param props.entries - the children, in the catalog's order.
  * @param props.columns - row width.
  * @param props.focused - whether arrow-key focus is on the row.
+ * @param props.hint - the key that opens the sheet.
  * @returns the row, or null when there are no children.
  */
-export function SubagentRow({ entries, copy, columns, focused = false }: {
+export function SubagentRow({ entries, copy, columns, focused = false, hint }: {
   readonly entries: readonly SubagentEntry[]
   readonly copy: TuiCopy
   readonly columns: number
   readonly focused?: boolean
+  readonly hint?: string | undefined
 }): React.ReactElement | null {
   if (entries.length === 0 || columns <= 0) return null
   const working = entries.filter(entry => entry.state === 'working').length
   const issues = entries.filter(entry => entry.state === 'issue').length
-  const summary = [working > 0 ? `${working} ${copy.subagentWorking}` : '',
+  const summary = [working > 0 ? `${working} ${copy.subagentCountWorking}` : '',
     issues > 0 ? `${issues} ${copy.subagentUnreadable}` : ''].filter(Boolean).join(' · ')
-  return <Box width={columns} height={1} flexShrink={0} overflowX="hidden">
-    <Text wrap="truncate-end" dimColor={!focused}>
-      <Text inverse={focused}>{`${focused ? '>' : '↓'} ${copy.subagentsTitle}: ${entries.length}`}</Text>
-      {focused ? ` · ${copy.subagentsOpen}` : summary !== '' ? ` · ${summary}` : ''}
-    </Text>
+  const rail = Math.min(COLUMN.rail, columns)
+  const head = `${copy.subagentsTitle} ${entries.length}`
+  const tail = focused ? copy.subagentsOpen : hint
+  // The key goes before the head or the counts would be cut.
+  const text = `${head}${summary === '' ? '' : ` · ${summary}`}`
+  const showTail = tail !== undefined && columns >= HINT_MIN_COLUMNS && rail + stringWidth(text) + 2 + stringWidth(tail) <= columns
+  return <Box width={columns} height={1} flexDirection="row" flexShrink={0} overflowX="hidden">
+    <Box width={rail} flexShrink={0}><Text bold={focused} dimColor={!focused}>{focused ? '>' : ICON.spawn}</Text></Box>
+    <Box flexGrow={1} flexShrink={1}>
+      <Text wrap="truncate-end" dimColor={!focused}>
+        <Text inverse={focused}>{head}</Text>
+        {summary === '' ? '' : ` · ${summary}`}
+      </Text>
+    </Box>
+    {showTail && <Box flexShrink={0} marginLeft={2}><Text dimColor>{tail}</Text></Box>}
   </Box>
 }
 

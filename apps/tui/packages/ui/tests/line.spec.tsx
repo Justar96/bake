@@ -1,15 +1,17 @@
 /** Column placement and wrapping of the layout components. */
 import React from 'react'
 import { renderToString, Text } from 'ink'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { render } from '../../../tests/render.tsx'
 import { budgetFor, CHROME_ROWS, chromeFor, COLUMN, COMPOSER_BUDGET, HINT_MIN_COLUMNS, isRenderable, MARKER, type FrameStyle } from '../src/layout.ts'
 import { ICON } from '../src/icons.ts'
 import { present, type PresentedLine, type ResultBound } from '../src/present.ts'
 import { Chrome, Completion, Composer, fitStanding, headerLayout, Line, StatusBar, wrappedRows, type ActivityState, type StandingState } from '../src/line.tsx'
 import { dictionaries } from '../src/copy.ts'
-import { gitField } from '../src/git.ts'
-import { PALETTE, permissionTone } from '../src/palette.ts'
-import { SPINNER_REST } from '../src/activity.ts'
+import type { GitState } from '../src/git.ts'
+import { PALETTE } from '../src/palette.ts'
+import { statusFields, type StatusInput } from '../src/status-line.ts'
+import { FOLD_REST, SPINNER_REST } from '../src/activity.ts'
 import stringWidth from 'string-width'
 
 const strip = (text: string): string => text.replace(/\u001B\[[0-9;]*m/g, '')
@@ -18,13 +20,6 @@ const CARET = '\u258c'
 const at80 = budgetFor({ columns: 80, rows: 24 })
 /** Every result line drawn, so these tests assert placement and nothing else. */
 const shown: ResultBound = { lines: Number.MAX_SAFE_INTEGER, unit: 'lines', more: 'more lines' }
-
-it('keeps a selected status action visible when the model yields width', () => {
-  const row = renderToString(<StatusBar columns={40} left={[{ text: 'Model: example-model' }]}
-    badge={{ label: 'Access', value: 'workspace-write', color: PALETTE.done }}
-    right={[{ text: '> Subagents: 12 · 2 Working', short: '> 12', selected: true }, '/workspace']} />, { columns: 40 })
-  expect(strip(row)).toContain('> 12')
-})
 
 /** Render placed lines the way the transcript would. */
 const show = (rows: readonly React.ReactElement[], columns = 80): string =>
@@ -157,140 +152,127 @@ describe('Line', () => {
 })
 
 describe('StatusBar', () => {
-  it.each(['en', 'zh'] as const)('keeps access and an explicit thinking level on one row in %s', async locale => {
-    const copy = dictionaries[locale]
-    const frames = [120, 60, 40, 38, 24, 1].flatMap(columns =>
-      ['workspace-write', 'danger-full-access'].map(permission => {
-        const frame = strip(renderToString(<StatusBar
-          left={[{ text: `${copy.model}: a-very-long-model-name` }]}
-          badge={{ label: copy.permission, value: permission, color: permissionTone(permission) }}
-          secondaryBadge={{ label: copy.thinking, value: 'high', color: PALETTE.asking }}
-          right={['Context: ~3k/128k (2%)', '/workspace']} columns={columns} />, { columns }))
-        expect(frame.split('\n')).toHaveLength(1)
-        if (columns >= 38) {
-          expect(frame).toContain(`${copy.permission} ${permission}`)
-          expect(frame).toContain(`${copy.thinking} high`)
-        }
-        return `${columns}: ${frame}`
-      }))
-    await expect(frames.join('\n') + '\n').toMatchFileSnapshot(`./expected/thinking-status.${locale}.txt`)
+  const git: GitState = { branch: 'main', detached: false, ahead: 1, behind: 0, staged: 2, modified: 3, untracked: 1, conflicted: 0 }
+  /** The report's session: a model with its level, a context reading, a dirty branch, billed totals with a cache hit, and a path. */
+  const session = (overrides: Partial<StatusInput> = {}): StatusInput => ({
+    model: 'deepseek-official/deepseek-v4-flash', thinkingLevel: 'high', context: { used: 15_200, window: 128_000 }, git,
+    usage: { input: 42_300, output: 3_100, cached: 34_500 }, cwd: '~/bake', glyphs: 'unicode', ...overrides,
+  })
+  /** The row as the chrome draws it: at the draft's column, two cells in. */
+  const at = (columns: number, input: StatusInput = session(), locale: 'en' | 'zh' = 'en'): string => strip(renderToString(
+    <StatusBar fields={statusFields(input, dictionaries[locale])} columns={columns - 2} />, { columns: columns - 2 })).trimEnd()
+
+  it('names the model without a label, and reads each field as a lowercase word beside its value', () => {
+    expect(at(120)).toBe('deepseek-v4-flash  think high  ctx ~11% (15.2k/128k)  \u2387 main +2 ~3 ?1 \u21911  in 42.3k  out 3.1k  cache hit 81%  ~/bake')
+    // Chinese uses its own words, and no colon, ASCII or full-width.
+    const zh = at(140, session(), 'zh')
+    expect(zh).toContain('思考 high  上下文 ~11% (15.2k/128k)')
+    expect(zh).toContain('输入 42.3k  输出 3.1k  缓存命中 81%')
+    expect(zh).not.toMatch(/[:：]/u)
   })
 
-  it.each(['en', 'zh'] as const)('retains the permission boundary before a long model at narrow widths in %s', async locale => {
-    const frames = [120, 60, 38, 24, 12, 1].flatMap(columns =>
-      ['read-only', 'workspace-write', 'danger-full-access', 'custom'].map(value => {
-        const frame = strip(renderToString(<StatusBar
-          left={[{ text: `${dictionaries[locale].model}: a-very-long-model-name (high)` }]}
-          badge={{ label: dictionaries[locale].permission, value, color: permissionTone(value) }}
-          right={['Context: ~3k/128k (2%)', '/workspace']} columns={columns} />, { columns }))
-        expect(frame.split('\n')).toHaveLength(1)
-        if (columns >= 38) expect(frame).toContain(`${dictionaries[locale].permission} ${value}`)
-        return `${columns}: ${frame}`
-      }))
-    await expect(frames.join('\n') + '\n').toMatchFileSnapshot(`./expected/permissions.${locale}.txt`)
+  it('gives way in its own order: the absolute count, the totals, the path, then the git counts', () => {
+    // The report's rows at 80 and 60 columns: the cache hit outlasts the totals.
+    expect(at(80)).toBe('deepseek-v4-flash  think high  ctx ~11%  \u2387 main +2 ~3 ?1 \u21911  cache hit 81%')
+    expect(at(60)).toBe('deepseek-v4-flash  think high  ctx ~11%  \u2387 main  ~/bake')
+    // Then the cache hit, the branch, and the thinking level; the model is cut last, and never below eight cells.
+    expect(at(44)).toBe('deepseek-v4-flash  think high  ctx ~11%')
+    expect(at(33)).toBe('deepseek-v4-flash  ctx ~11%')
+    expect(at(22)).toBe('deepseek-\u2026  ctx ~11%')
+    expect(at(20)).toBe('deepsee\u2026  ctx ~11%')
+    for (const columns of [200, 120, 100, 80, 60, 44, 40, 33, 22, 12, 3]) {
+      const row = at(columns)
+      expect(row.split('\n'), `${columns}`).toHaveLength(1)
+      expect(stringWidth(row), `${columns}`).toBeLessThanOrEqual(columns - 2)
+    }
   })
 
-  it('packs every field to the left, two spaces apart', () => {
-    const rendered = strip(renderToString(
-      <StatusBar left={['Model: deepseek/chat', 'plan']} right={['ctx 12%', 'turn 3']} columns={60} />,
-      { columns: 60 }))
-
-    // The regression this guards. The row justified to both edges, which opened
-    // a gap the width of the terminal between the model and the next field.
-    expect(rendered.trimEnd()).toBe('Model: deepseek/chat  plan  ctx 12%  turn 3')
+  it('keeps a filling context\'s absolute count, and from 90% takes cells from the model for it', () => {
+    const warm = session({ context: { used: 99_000, window: 128_000 } })
+    // At 77% the count holds past the git counts and the cache hit.
+    expect(at(80, warm)).toBe('deepseek-v4-flash  think high  ctx ~77% (99k/128k)  \u2387 main  cache hit 81%')
+    expect(at(46, warm)).toBe('deepseek-v4-flash  ctx ~77% (99k/128k)')
+    const full = session({ context: { used: 121_400, window: 128_000 } })
+    expect(at(80, full)).toBe('deepseek-v4-flash  think high  ctx ~94% (121.4k/128k)  \u2387 main  cache hit 81%')
+    // The model is cut, as far as its floor, before the count goes.
+    expect(at(38, full)).toBe('deepseek-v4\u2026  ctx ~94% (121.4k/128k)')
+    expect(at(34, full)).toBe('deepsee\u2026  ctx ~94% (121.4k/128k)')
+    expect(at(33, full)).toBe('deepseek-v4-flash  ctx ~94%')
   })
 
-  it.each(['en', 'zh'] as const)('keeps a complete compact context reading beside access at 60 cells in %s', locale => {
-    const copy = dictionaries[locale]
-    const draw = (columns: number) => strip(renderToString(<StatusBar
-      left={[{ text: `${copy.model}: a-very-long-model-name` }]}
-      badge={{ label: copy.permission, value: 'workspace-write', color: permissionTone('workspace-write') }}
-      secondaryBadge={{ label: copy.thinking, value: 'high', color: PALETTE.asking }}
-      right={[{ text: `${copy.context}: ~3k/128k (2%)`, short: `${copy.contextShort} ~2%` }, '/workspace']}
-      columns={columns} />, { columns }))
-    expect(draw(120)).toContain(`${copy.context}: ~3k/128k (2%)`)
-    expect(draw(60)).toContain(`${copy.contextShort} ~2%`)
-    expect(draw(60)).toContain(`${copy.permission} workspace-write`)
-    expect(draw(60)).toContain(`${copy.model}:`)
-    expect(draw(60).split('\n')).toHaveLength(1)
+  it('marks where automatic compaction starts, narrowing the mark before dropping it', () => {
+    const marked = session({ context: { used: 79_000, window: 128_000, compactAt: 102_400 } })
+    expect(at(140, marked)).toBe('deepseek-v4-flash  think high  ctx ~61% (79k/128k) \u00b7 compacts at 80%  \u2387 main +2 ~3 ?1 \u21911  in 42.3k  out 3.1k  cache hit 81%  ~/bake')
+    // The absolute count, then the totals go before the mark's words do.
+    expect(at(120, marked)).toBe('deepseek-v4-flash  think high  ctx ~61% \u00b7 compacts at 80%  \u2387 main +2 ~3 ?1 \u21911  cache hit 81%  ~/bake')
+    expect(at(80, marked)).toBe('deepseek-v4-flash  think high  ctx ~61% \u25b880%  \u2387 main  cache hit 81%  ~/bake')
+    expect(at(60, marked)).toBe('deepseek-v4-flash  think high  ctx ~61% \u25b880%  \u2387 main')
+    expect(at(50, marked)).toBe('deepseek-v4-flash  think high  ctx ~61%  \u2387 main')
+    // Past the mark, the next request compacts first.
+    expect(at(140, session({ context: { used: 104_000, window: 128_000, compactAt: 102_400 } })))
+      .toContain('ctx ~81% (104k/128k) \u00b7 compacts next')
+    expect(at(140, session({ context: { used: 104_000, window: 128_000, compactAt: 102_400 } }), 'zh'))
+      .toContain('上下文 ~81% (104k/128k) \u00b7 即将压缩')
+    expect(at(140, marked, 'zh')).toContain('上下文 ~61% (79k/128k) \u00b7 压缩于 80%')
+    // Without a threshold there is no mark.
+    expect(at(140)).not.toContain('\u25b8')
   })
 
-  it('truncates rather than wrapping to a second row', () => {
-    const rendered = strip(renderToString(
-      <StatusBar left={['Model: deepseek/chat']} right={['ctx 12%', 'turn 3', '0f3a9c']} columns={34} />,
-      { columns: 34 }))
-
-    expect(rendered.split('\n')).toHaveLength(1)
-    expect(rendered).toContain('Model: deepseek/chat')
+  it('lets the totals go whole when the provider reports no cache traffic', () => {
+    const uncached = session({ usage: { input: 900, output: 100 } })
+    expect(at(120, uncached)).toBe('deepseek-v4-flash  think high  ctx ~11% (15.2k/128k)  \u2387 main +2 ~3 ?1 \u21911  in 900  out 100  ~/bake')
+    expect(at(80, uncached)).not.toContain(' in ')
   })
 
-  it('drops a bounded field whole, from the end, rather than cutting it', () => {
-    const fields = [{ text: 'Context: ~3k/128k (2%)' }, 'in 12.3k', 'out 1.2k', 'cache hit 85%', '~/workspace']
-    const at = (columns: number) => strip(renderToString(
-      <StatusBar left={[{ text: 'Model: deepseek-v4-flash' }]} right={fields} columns={columns} />, { columns })).trimEnd()
-    expect(at(120)).toBe('Model: deepseek-v4-flash  Context: ~3k/128k (2%)  in 12.3k  out 1.2k  cache hit 85%  ~/workspace')
-    // `cache hit 85%` no longer fits beside the others, so it goes whole and
-    // the path takes what is left.
-    const narrow = at(80)
-    expect(narrow).toContain('out 1.2k')
-    expect(narrow).not.toContain('cache')
-    expect(narrow.endsWith('workspace')).toBe(true)
-    // The path is the one field kept at any width, cut from its head.
-    expect(at(40)).toBe('Model: deepseek-v4-flash  ~/workspace')
-    expect(at(34)).toBe('Model: deepseek-v4-flash  …rkspace')
-    // A tail too short to name the workspace is left out, not drawn as `…e`.
-    expect(at(30)).toBe('Model: deepseek-v4-flash')
+  it.each(['en', 'zh'] as const)('keeps one row whatever the width in %s', async locale => {
+    const scenes: readonly [string, StatusInput][] = [
+      ['idle', session()],
+      ['plan', session({ plan: { active: true, pending: false }, update: { version: '0.2.0', installed: false } })],
+      ['filling', session({ context: { used: 99_000, window: 128_000, compactAt: 102_400 } })],
+      ['full', session({ context: { used: 121_400, window: 128_000 } })],
+      ['fresh', { model: 'deepseek-official/deepseek-v4-flash', thinkingLevel: 'high', cwd: '/tmp/bake-ui-audit/ws', glyphs: 'unicode' }],
+    ]
+    const frames = scenes.flatMap(([name, input]) => [120, 80, 60, 40, 24, 12].map(columns => {
+      const row = at(columns, input, locale)
+      expect(row.split('\n'), `${name} ${columns}`).toHaveLength(1)
+      expect(stringWidth(row), `${name} ${columns}`).toBeLessThanOrEqual(columns - 2)
+      return `${name} ${columns}: ${row}`
+    }))
+    await expect(frames.join('\n') + '\n').toMatchFileSnapshot(`./expected/status.${locale}.txt`)
+  })
+
+  it('fills what is left with the path, cut from its start to keep the workspace, and leaves out a tail too short to name it', () => {
+    const path = '/private/var/folders/jg/zcyzdbb13bnfr5q882y_h8_r0000gn/T/dsh-tui-pty-1B3VG9/workspace'
+    const input = session({ git: undefined, usage: undefined, cwd: path })
+    const wide = at(120, input)
+    expect(wide.endsWith('workspace')).toBe(true)
+    expect(wide).not.toContain('/private/var/folders')
+    // A deep path costs nothing else while a few cells of it fit: it is cut instead.
+    expect(wide).toMatch(/^deepseek-v4-flash {2}think high {2}ctx ~11% \(15\.2k\/128k\) {2}\u2026/)
+    expect(at(70, input)).toBe('deepseek-v4-flash  think high  ctx ~11% (15.2k/128k)  \u2026VG9/workspace')
+    // Below that, the readings ranked before it give way to keep its few cells, then it goes.
+    expect(at(48, input)).toBe('deepseek-v4-flash  think high  ctx ~11%')
+    expect(at(50, input)).toBe('deepseek-v4-flash  think high  ctx ~11%  \u2026kspace')
   })
 
   it('narrows the git field to its branch before dropping it, and never cuts it', () => {
-    const git = gitField({ branch: 'feature/status', detached: false, ahead: 1, behind: 0, staged: 2, modified: 3, untracked: 1, conflicted: 0 }, 'unicode')
-    const at = (columns: number) => strip(renderToString(
-      <StatusBar left={[{ text: 'Model: deepseek-v4-flash' }]} right={[git, 'in 12.3k', '~/workspace']} columns={columns} />, { columns })).trimEnd()
-    expect(at(100)).toBe('Model: deepseek-v4-flash  \u2387 feature/status +2 ~3 ?1 \u21911  in 12.3k  ~/workspace')
-    // The counts qualify the branch, so they go first, together.
-    // The cost reading goes before the counts do.
-    expect(at(63)).toBe('Model: deepseek-v4-flash  \u2387 feature/status +2 ~3 ?1 \u21911  \u2026kspace')
-    // The counts qualify the branch, so they go together, and the branch stays.
-    expect(at(52)).toBe('Model: deepseek-v4-flash  \u2387 feature/status  in 12.3k')
-    expect(at(48)).toBe('Model: deepseek-v4-flash  \u2387 feature/status')
-    for (const columns of [100, 63, 52, 48, 40, 20]) expect(stringWidth(at(columns)), `${columns}`).toBeLessThanOrEqual(columns)
-  })
-
-  it('yields the right cluster before the left, whatever the path costs', () => {
-    // The regression this guards. An unbounded right field starving the two
-    // fields the row exists to show. A deep temp path is the everyday case.
-    const path = '/private/var/folders/jg/zcyzdbb13bnfr5q882y_h8_r0000gn/T/dsh-tui-pty-1B3VG9/workspace'
-    const rendered = strip(renderToString(
-      <StatusBar left={['Model: tui-picked-model (high)']} right={['Context: ~3k/128k (2%)', path]} columns={120} />,
-      { columns: 120 }))
-
-    expect(rendered.split('\n')).toHaveLength(1)
-    expect(rendered).toContain('Model: tui-picked-model (high)')
-    // The meter is bounded, so it is never shortened to fit the path.
-    expect(rendered).toContain('Context: ~3k/128k (2%)')
-    // The path is ordered last, so it is the field that gives up room, and it
-    // keeps the tail that names the workspace. The mount point is what is cut.
-    expect(rendered.endsWith('workspace')).toBe(true)
-    expect(rendered).not.toContain('/private/var/folders')
-  })
-
-  it('clips rather than wrapping once the left cluster alone overruns', () => {
-    const rendered = strip(renderToString(
-      <StatusBar left={['Model: a-very-long-model-name-indeed']} right={['/deep/path']} columns={12} />,
-      { columns: 12 }))
-
-    expect(rendered.split('\n')).toHaveLength(1)
-    expect(rendered.startsWith('Model: a-ve')).toBe(true)
+    const branch = { ...git, branch: 'feature/status' }
+    const input = session({ git: branch, thinkingLevel: undefined, context: undefined, usage: undefined, cwd: '~/workspace' })
+    expect(at(80, input)).toBe('deepseek-v4-flash  \u2387 feature/status +2 ~3 ?1 \u21911  ~/workspace')
+    // The path is a filler once it yields: cut from its start into what is left.
+    expect(at(60, input)).toBe('deepseek-v4-flash  \u2387 feature/status +2 ~3 ?1 \u21911  \u2026orkspace')
+    expect(at(50, input)).toBe('deepseek-v4-flash  \u2387 feature/status +2 ~3 ?1 \u21911')
+    // The counts qualify the branch, so they go first, together, and the branch stays.
+    expect(at(44, input)).toBe('deepseek-v4-flash  \u2387 feature/status')
+    expect(at(30, input)).toBe('deepseek-v4-flash  \u2026orkspace')
   })
 
   it('keeps a wide-character line on one row', () => {
     // Each CJK cell is two columns. Counting code points puts this past the edge.
-    const rendered = strip(renderToString(
-      <StatusBar left={['\u6a21\u578b: model', '/workspace']} right={['\u4e0a\u4e0b\u6587: ~500/128k (0%)']} columns={60} />,
-      { columns: 60 }))
-
-    expect(rendered.split('\n')).toHaveLength(1)
-    expect(rendered).toContain('\u4e0a\u4e0b\u6587: ~500/128k (0%)')
+    const row = at(40, session({ git: undefined, usage: undefined }), 'zh')
+    expect(row.split('\n')).toHaveLength(1)
+    expect(stringWidth(row)).toBeLessThanOrEqual(38)
+    expect(row).toContain('上下文 ~11%')
   })
 })
 
@@ -299,14 +281,14 @@ describe('Chrome', () => {
   // No `drafting` here. Chrome reads it from the draft, so the two cannot disagree.
   const idle = { running: false, asking: false, listing: false }
   const working: ActivityState = { kind: 'running', word: 'Kneading', phase: 'writing', startedAt: 0, color: PALETTE.running }
-  const ended: ActivityState = { kind: 'ended', summary: { outcome: 'done', label: 'Completed', details: '9s · ran 1' } }
-  const goal: StandingState = { glyph: '\u25cf', label: 'Goal active', details: 'round 2/8', compact: '2/8', note: 'Ship it', color: PALETTE.running }
+  const ended: ActivityState = { kind: 'ended', summary: { outcome: 'done', label: 'Completed', details: '9s · ran 1', brief: '9s' } }
+  const goal: StandingState = { glyph: '\u25cf', label: 'Goal', count: '2/8', details: '', compact: '2/8', note: 'Ship it', color: PALETTE.running }
   const draw = (columns: number, options: {
     readonly text?: string, readonly state?: typeof idle, readonly frame?: FrameStyle
     readonly activity?: ActivityState, readonly standing?: StandingState, readonly rows?: number, readonly children?: React.ReactNode
   } = {}): string[] => strip(renderToString(
     <Chrome
-      left={['Model: deepseek/chat']} right={['ctx 12%']} columns={columns}
+      status={statusFields({ model: 'deepseek/chat', context: { used: 15_360, window: 128_000 }, cwd: '', glyphs: 'unicode' }, dictionaries.en)} columns={columns}
       state={options.state ?? idle} before={options.text ?? ''} after="" placeholder="Ask anything" hints={hints}
       frame={options.frame ?? 'round'} activity={options.activity} standing={options.standing}
       {...options.rows === undefined ? {} : { layout: chromeFor(columns, options.rows) }}
@@ -330,8 +312,8 @@ describe('Chrome', () => {
     expect(rows[2]).toBe(line(60))
     expect(rows[3]).toBe(`${MARKER.prompt} ${CARET}Ask anything`)
     expect(rows[4]).toBe(line(60))
-    expect(rows[5]).toBe('  Model: deepseek/chat  ctx 12%')
-    expect(rows[3]!.indexOf(CARET)).toBe(rows[5]!.indexOf('Model:'))
+    expect(rows[5]).toBe('  chat  ctx ~12% (15.4k/128k)')
+    expect(rows[3]!.indexOf(CARET)).toBe(rows[5]!.indexOf('chat'))
   })
 
   it('puts the running work and the last turn in the header, from the rail’s first column', () => {
@@ -348,23 +330,38 @@ describe('Chrome', () => {
     expect(done).toHaveLength(CHROME_ROWS)
   })
 
+  it('puts compaction in the same cells, resting on its folded block instead of the kneaded ball', () => {
+    const compacting: ActivityState = {
+      kind: 'running', word: 'Compacting history', phase: 'summarizing', startedAt: 0, color: PALETTE.compacting, spinner: 'fold',
+    }
+    const rows = draw(60, { activity: compacting, state: { ...idle, running: true } })
+    expect(rows[1]).toBe(`${FOLD_REST} Compacting history…  summarizing`)
+    expect(rows[1]!.indexOf(FOLD_REST)).toBe(0)
+    // The word starts where the turn's does, so neither moves when one replaces the other.
+    const turn = draw(60, { activity: working, state: { ...idle, running: true } })[1]!
+    expect(rows[1]!.indexOf('Compacting')).toBe(turn.indexOf('Kneading'))
+    expect(rows).toHaveLength(CHROME_ROWS)
+    // A state that names no dough kneads.
+    expect(draw(60, { activity: { kind: 'running', word: 'Compacting history', phase: undefined, startedAt: 0, color: PALETTE.compacting } })[1])
+      .toMatch(new RegExp(`^${SPINNER_REST} `))
+  })
+
   it('puts the goal at the header\'s right edge, beside the turn', () => {
     const alone = draw(60, { standing: goal })[1]!
-    expect(alone).toMatch(/^ +● Goal active {2}round 2\/8 · Ship it$/)
+    expect(alone).toMatch(/^ +● Goal 2\/8 {2}Ship it$/)
     expect(stringWidth(alone)).toBe(60)
     const both = draw(80, { activity: working, standing: goal })[1]!
-    expect(both).toMatch(new RegExp(`^${SPINNER_REST} Kneading… {2}writing +● Goal active {2}round 2/8 · Ship it$`))
+    expect(both).toMatch(new RegExp(`^${SPINNER_REST} Kneading… {2}writing +● Goal 2/8 {2}Ship it$`))
     expect(stringWidth(both)).toBe(80)
   })
 
   it('narrows the goal part by part, never mid-word, before the turn\'s word', () => {
     const long = { ...goal, note: 'Refactor the persistence layer' }
     // Only the note is cut with an ellipsis.
-    expect(draw(60, { activity: working, standing: long })[1]).toMatch(/writing {2}● Goal active {2}round 2\/8 · Refactor.*…$/)
-    expect(draw(52, { activity: working, standing: long })[1]).toMatch(/writing +● Goal active {2}round 2\/8$/)
-    expect(draw(44, { activity: working, standing: goal })[1]).toMatch(/writing +● Goal active$/)
-    // The turn's phase yields before the goal loses its label.
-    expect(draw(30, { activity: working, standing: goal })[1]).toMatch(new RegExp(`^${SPINNER_REST} Kneading… +● Goal active$`))
+    expect(draw(60, { activity: working, standing: long })[1]).toMatch(/writing {2}● Goal 2\/8 {2}Refactor.*…$/)
+    expect(draw(44, { activity: working, standing: long })[1]).toMatch(/writing +● Goal 2\/8$/)
+    // The turn's phase yields before the goal loses its label; the count stays with the label.
+    expect(draw(30, { activity: working, standing: goal })[1]).toMatch(new RegExp(`^${SPINNER_REST} Kneading… +● Goal 2/8$`))
     expect(draw(22, { activity: working, standing: goal })[1]).toMatch(new RegExp(`^${SPINNER_REST} Kneading… +● 2/8$`))
     expect(draw(16, { activity: working, standing: goal })[1]).toMatch(new RegExp(`^${SPINNER_REST} Kneading… +●$`))
     for (const columns of [1, 2, 5, 12, 16, 24, 40, 80]) {
@@ -372,13 +369,38 @@ describe('Chrome', () => {
     }
   })
 
-  it('gives up the goal\'s shortcut after its note and before its details', () => {
+  it('gives up the goal\'s shortcut after its note and before the turn\'s phase, and below 60 columns', () => {
     const keyed = { ...goal, key: 'Ctrl+O' }
-    expect(draw(80, { activity: working, standing: keyed })[1]).toMatch(/writing +Ctrl\+O ● Goal active {2}round 2\/8 · Ship it$/)
+    expect(draw(80, { activity: working, standing: keyed })[1]).toMatch(/writing +Ctrl\+O ● Goal 2\/8 {2}Ship it$/)
     expect(draw(72, { activity: working, standing: { ...keyed, note: 'Refactor the persistence layer' } })[1])
-      .toMatch(/writing {2}Ctrl\+O ● Goal active {2}round 2\/8 · Refactor .*…$/)
-    expect(draw(56, { activity: working, standing: keyed })[1]).toMatch(/writing {2,}Ctrl\+O ● Goal active {2}round 2\/8$/)
-    expect(draw(52, { activity: working, standing: keyed })[1]).toMatch(/writing {2,}● Goal active {2}round 2\/8$/)
+      .toMatch(/writing {2}Ctrl\+O ● Goal 2\/8 {2}Refactor .*…$/)
+    const long: ActivityState = { ...working, phase: 'running a-rather-long-tool-name' }
+    expect(draw(66, { activity: long, standing: keyed })[1]).toMatch(/a-rather-long-tool-name {2,}Ctrl\+O ● Goal 2\/8$/)
+    expect(draw(62, { activity: long, standing: keyed })[1]).toMatch(/a-rather-long-tool-name {2,}● Goal 2\/8$/)
+    // Below the composer hint's width the key goes whatever room is left, as every standing row's does.
+    expect(draw(60, { activity: working, standing: keyed })[1]).toContain('Ctrl+O')
+    expect(draw(59, { activity: working, standing: keyed })[1]).toMatch(/writing +● Goal 2\/8 {2}Ship it$/)
+  })
+
+  it('gives up an ended turn\'s counts and rate first, and its time before the goal\'s name', () => {
+    const summary: ActivityState = { kind: 'ended', summary: {
+      outcome: 'done', label: 'Completed', details: '1m 12s · edited 2 · ran 3 · read 4 · 1 failed · 42 tok/s', brief: '1m 12s' } }
+    const { note: _note, ...quiet } = goal
+    const keyed = { ...quiet, key: 'Ctrl+O' }
+    const header = (columns: number): string => draw(columns, { activity: summary, standing: keyed })[1]!
+    expect(header(90)).toMatch(/^✓ Completed {2}1m 12s · edited 2 · ran 3 · read 4 · 1 failed · 42 tok\/s +Ctrl\+O ● Goal 2\/8$/)
+    expect(header(80)).toMatch(/^✓ Completed {2}1m 12s +Ctrl\+O ● Goal 2\/8$/)
+    expect(header(31)).toMatch(/^✓ Completed {2}1m 12s +● Goal 2\/8$/)
+    expect(header(30)).toMatch(/^✓ Completed +● Goal 2\/8$/)
+    expect(header(20)).toMatch(/^✓ Completed +● 2\/8$/)
+    expect(header(14)).toBe('✓ Completed  ●')
+    // A held goal has no count to keep, so its words go before it does.
+    const held: StandingState = { glyph: '○', label: 'Goal on hold', details: '/goal resume continues', color: PALETTE.waiting, key: 'Ctrl+O' }
+    const waiting = (columns: number): string => draw(columns, { activity: summary, standing: held })[1]!
+    expect(waiting(70)).toMatch(/^✓ Completed {2}1m 12s +Ctrl\+O ○ Goal on hold {2}\/goal resume continues$/)
+    expect(waiting(40)).toMatch(/^✓ Completed +○ Goal on hold$/)
+    // Too narrow for its name, the held goal goes whole and the turn takes the row.
+    expect(waiting(24)).toBe('✓ Completed  1m 12s · e…')
   })
 
   it('draws the rules in ASCII where the terminal cannot draw box characters', () => {
@@ -406,7 +428,7 @@ describe('Chrome', () => {
     const at = (rows: number): string[] => draw(60, { text: 'hello', rows, activity: ended })
     const header = expect.stringMatching(/^✓/)
     const draft = expect.stringContaining('hello')
-    const status = '  Model: deepseek/chat  ctx 12%'
+    const status = '  chat  ctx ~12% (15.4k/128k)'
     expect(at(6)).toHaveLength(6)
     expect(at(5)).toEqual([header, line(60), draft, line(60), status])
     expect(at(4)).toEqual([header, line(60), draft, status])
@@ -445,31 +467,43 @@ describe('Chrome', () => {
 })
 
 describe('header fitting', () => {
-  // `● Goal` is 6 cells, `  round 1/2` 11, ` · objective text` 17, `K ` 2.
-  const state: StandingState = { glyph: '●', label: 'Goal', details: 'round 1/2', compact: '1/2', note: 'objective text', color: PALETTE.running, key: 'K' }
-  const shape = (room: number) => {
-    const fit = fitStanding(room, state)
+  // `K ` is 2 cells, `● Goal` 6, ` 1/2` 4, `  objective text` 16.
+  const state: StandingState = { glyph: '●', label: 'Goal', count: '1/2', details: '', compact: '1/2', note: 'objective text', color: PALETTE.running, key: 'K' }
+  const shape = (room: number, standing = state) => {
+    const fit = fitStanding(room, standing)
     return fit === undefined ? undefined : [fit.key, fit.label, fit.compact, fit.details, fit.note, fit.width]
   }
 
   it('drops the standing state\'s parts in order and never leaves a fragment', () => {
-    expect(shape(36)).toEqual([true, true, false, true, true, 36])
+    expect(shape(28)).toEqual([true, true, false, true, true, 28])
     // Cut while enough of the note would still read.
-    expect(shape(30)).toEqual([true, true, false, true, true, 30])
-    expect(shape(28)).toEqual([true, true, false, true, false, 19])
-    expect(shape(18)).toEqual([false, true, false, true, false, 17])
-    expect(shape(16)).toEqual([false, true, false, false, false, 6])
-    expect(shape(5)).toEqual([false, false, true, false, false, 5])
-    expect(shape(1)).toEqual([false, false, false, false, false, 1])
+    expect(shape(23)).toEqual([true, true, false, true, true, 23])
+    expect(shape(22)).toEqual([true, true, false, true, false, 12])
+    // The count goes with the label, never before it.
+    expect(shape(11)).toEqual([false, true, false, true, false, 10])
+    expect(shape(9)).toEqual([false, false, true, false, false, 5])
+    expect(shape(4)).toEqual([false, false, false, false, false, 1])
     expect(shape(0)).toBeUndefined()
+    // A state with words but no count keeps its name, then goes whole.
+    const held: StandingState = { glyph: '○', label: 'Held', details: 'resume', color: PALETTE.waiting }
+    expect(shape(14, held)).toEqual([true, true, false, true, false, 14])
+    expect(shape(13, held)).toEqual([false, true, false, false, false, 6])
+    expect(shape(5, held)).toBeUndefined()
   })
 
-  it('keeps the turn\'s word first and gives its details up before the state\'s label', () => {
-    expect(headerLayout(40, 20, 10, undefined)).toEqual({ left: 20, leftDetails: true, right: undefined })
-    expect(headerLayout(40, 20, 10, state).right?.details).toBe(true)
-    const short = headerLayout(20, 20, 10, state)
-    expect([short.left, short.leftDetails, short.right?.label]).toEqual([10, false, true])
-    expect(headerLayout(8, 20, 10, state)).toEqual({ left: 8, leftDetails: true, right: undefined })
+  it('keeps the turn\'s word first, giving up its counts before the shortcut and its phase before the label', () => {
+    const turn = { full: 20, brief: 15, head: 10 }
+    expect(headerLayout(40, turn, undefined)).toEqual({ left: 20, level: 'full', right: undefined })
+    const at = (columns: number) => {
+      const layout = headerLayout(columns, turn, state)
+      return [layout.left, layout.level, layout.right?.key, layout.right?.label, layout.right?.compact]
+    }
+    expect(at(40)).toEqual([20, 'full', true, true, false])
+    expect(at(30)).toEqual([15, 'brief', true, true, false])
+    expect(at(26)).toEqual([10, 'head', false, true, false])
+    expect(at(17)).toEqual([10, 'head', false, false, true])
+    expect(at(16)).toEqual([10, 'head', false, false, false])
+    expect(headerLayout(8, turn, state)).toEqual({ left: 8, level: 'full', right: undefined })
   })
 })
 
@@ -611,5 +645,92 @@ describe('Composer placeholder', () => {
 
     expect(without.trimEnd()).toBe('> y\u258c')
     expect(with_).toContain('enter to send')
+  })
+})
+
+describe('Composer window markers', () => {
+  const overflow = { above: 'above', below: 'below' }
+  const text = Array.from({ length: 12 }, (_, index) => `line ${index}`).join('\n')
+  const draw = (cursor: number, columns = 80, hint: string | null = 'Enter sends'): string[] => strip(renderToString(
+    <Composer columns={columns} marker={MARKER.prompt} before={text.slice(0, cursor)} after={text.slice(cursor)}
+      placeholder="Ask" maxRows={5} overflow={overflow} {...hint === null ? {} : { hint }} />, { columns })).split('\n')
+
+  it('marks rows hidden above with ^ and counts them where the hint is not', () => {
+    const rows = draw(text.length)
+    expect(rows).toHaveLength(5)
+    expect(rows[0]).toMatch(/^\^ line 7 +\+7 above$/)
+    // The caret's row carries the hint, and nothing is hidden below it.
+    expect(rows.at(-1)).toMatch(/^ {2}line 11▌ +Enter sends$/)
+    // The count ends where the hint does.
+    expect(stringWidth(rows[0]!)).toBe(80)
+    expect(rows.some(row => row.startsWith('v'))).toBe(false)
+  })
+
+  it('marks rows hidden below with v, and counts them where the hint is not', () => {
+    const top = draw(0)
+    expect(top[0]).toMatch(/^> ▌line 0 +Enter sends$/)
+    expect(top.at(-1)).toMatch(/^v line 4 +\+7 below$/)
+    for (const row of top) expect(stringWidth(row)).toBeLessThanOrEqual(80)
+  })
+
+  it('moves the window only when the caret would leave it', async () => {
+    const at = (cursor: number) => <Composer columns={80} marker={MARKER.prompt} before={text.slice(0, cursor)}
+      after={text.slice(cursor)} placeholder="Ask" maxRows={5} overflow={overflow} hint="Enter sends" />
+    const ui = render(at(text.length))
+    const rows = () => strip(ui.lastFrame() ?? '').split('\n')
+    expect(rows()[0]).toMatch(/^\^ line 7 /)
+    // Up to line 9 stays inside the window, which holds still.
+    ui.rerender(at(text.indexOf('line 9')))
+    await vi.waitFor(() => expect(rows()[2]).toMatch(/^ {2}▌line 9 +Enter sends$/))
+    expect(rows()[0]).toMatch(/^\^ line 7 +\+7 above$/)
+    // Past its top the window follows, and now hides rows both ways.
+    ui.rerender(at(text.indexOf('line 5')))
+    await vi.waitFor(() => expect(rows()[0]).toMatch(/^\^ ▌line 5 +Enter sends$/))
+    expect(rows().at(-1)).toMatch(/^v line 9 +\+2 below$/)
+    ui.unmount()
+  })
+
+  it('keeps the rail markers and leaves out a count that does not fit the slot', () => {
+    // The Chrome drops the hint below HINT_MIN_COLUMNS, and the counts go with its slot.
+    const bare = draw(0, 40, null)
+    expect(bare[0]).toBe('> ▌line 0')
+    expect(bare.at(-1)).toBe('v line 4')
+    expect(draw(text.length, 40, null)[0]).toBe('^ line 7')
+    // A count wider than the hint would push the row past the terminal's width.
+    const narrow = draw(text.length, 80, 'go')
+    expect(narrow[0]).toBe('^ line 7')
+    expect(narrow.at(-1)).toMatch(/^ {2}line 11▌ +go$/)
+  })
+
+  it('counts rows of a wrapped paragraph, not lines', () => {
+    const paragraph = 'word '.repeat(120).trim()
+    const rows = strip(renderToString(<Composer columns={60} marker={MARKER.prompt} before="" after={paragraph}
+      placeholder="Ask" hint="Enter sends" overflow={overflow} />, { columns: 60 })).split('\n')
+    expect(rows).toHaveLength(COMPOSER_BUDGET)
+    expect(rows[0]!.startsWith(`${MARKER.prompt} ${CARET}word`)).toBe(true)
+    expect(rows.at(-1)).toMatch(/^v word.* \+\d+ below$/)
+  })
+})
+
+describe('Composer placeholder parts', () => {
+  const parts = [dictionaries.en.prompt, dictionaries.en.promptCommands, dictionaries.en.promptFiles]
+  const empty = (columns: number, placeholder: string | readonly string[] = parts): string => strip(renderToString(
+    <Composer columns={columns} marker={MARKER.prompt} before="" after="" placeholder={placeholder} />, { columns })).trimEnd()
+
+  it('names commands and files beside the prompt on an ordinary terminal', () => {
+    expect(empty(80)).toBe(`${MARKER.prompt} ${CARET}Ask anything · / commands · @ files`)
+    expect(empty(HINT_MIN_COLUMNS)).toBe(`${MARKER.prompt} ${CARET}Ask anything · / commands · @ files`)
+    const zh = [dictionaries.zh.prompt, dictionaries.zh.promptCommands, dictionaries.zh.promptFiles]
+    expect(empty(80, zh)).toBe(`${MARKER.prompt} ${CARET}问点什么 · / 命令 · @ 文件`)
+  })
+
+  it('drops the later parts whole below the hint threshold, or where they do not fit', () => {
+    expect(empty(HINT_MIN_COLUMNS - 1)).toBe(`${MARKER.prompt} ${CARET}Ask anything`)
+    expect(empty(40)).toBe(`${MARKER.prompt} ${CARET}Ask anything`)
+    // 77 cells are free after the rail and the caret; the second part would take 78.
+    expect(empty(80, ['Ask', 'x'.repeat(72), 'short'])).toBe(`${MARKER.prompt} ${CARET}Ask`)
+    expect(empty(80, ['Ask', 'x'.repeat(71)])).toBe(`${MARKER.prompt} ${CARET}Ask · ${'x'.repeat(71)}`)
+    // A plain string is drawn as it is, as the running and blocked placeholders are.
+    expect(empty(80, 'Enter steers the next step')).toBe(`${MARKER.prompt} ${CARET}Enter steers the next step`)
   })
 })

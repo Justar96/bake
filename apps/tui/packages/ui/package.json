@@ -12,27 +12,27 @@
   "dependencies": {
     "@deepseek-ai/dsh-file-reference": "workspace:^",
     "@deepseek-ai/dsh-util-values": "workspace:^",
-    "diff": "^9.0.0",
-    "ink": "^7.1.1",
-    "react": "^19.3.0",
+    "diff": "catalog:",
+    "ink": "catalog:",
+    "react": "catalog:",
     "string-width": "^8.2.2",
     "wrap-ansi": "^10.0.1",
-    "mdast-util-from-markdown": "^2.0.3",
-    "mdast-util-gfm": "^3.1.0",
-    "micromark-extension-gfm": "^3.0.0",
+    "mdast-util-from-markdown": "catalog:",
+    "mdast-util-gfm": "catalog:",
+    "micromark-extension-gfm": "catalog:",
     "strip-ansi": "^7.2.0"
   },
   "devDependencies": {
-    "@xterm/headless": "^6.0.0",
+    "@xterm/headless": "catalog:",
     "@deepseek-ai/dsh-agent": "workspace:^",
     "@deepseek-ai/dsh-commands": "workspace:^",
     "@deepseek-ai/dsh-compaction": "workspace:^",
     "@deepseek-ai/dsh-session": "workspace:^",
     "@deepseek-ai/dsh-tools": "workspace:^",
     "@deepseek-ai/dsh-user-questions": "workspace:^",
-    "@types/react": "^19.3.0",
+    "@types/react": "catalog:",
     "ink-testing-library": "^4.0.0",
-    "@types/mdast": "^4.0.4"
+    "@types/mdast": "catalog:"
   },
   "scripts": {
     "typecheck": "tsc -b"

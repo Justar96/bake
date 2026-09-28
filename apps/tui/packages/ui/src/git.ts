@@ -3,8 +3,8 @@
  * @module @dsh-tui/ui/git
  */
 
-import type { PartsField, StatusPart } from './line.tsx'
 import { PALETTE } from './palette.ts'
+import { RANK, type StatusField, type StatusPart } from './status-line.ts'
 
 /** The working tree's branch and its changes, read by the application from `git status`. */
 export interface GitState {
@@ -39,13 +39,14 @@ const GLYPHS = {
  * yellow, since they wait on the user, and conflicts red. Untracked paths and
  * the distance from the upstream stay dim: neither is work in progress on a
  * tracked file. A clean tree shows the branch alone. When the whole field
- * does not fit, it narrows to the branch, which is what the counts qualify.
+ * does not fit, it narrows to the branch, which is what the counts qualify,
+ * at {@link RANK}'s `gitCounts`, and the branch goes at its `branch`.
  *
  * @param state - the working tree, as the application last read it.
  * @param glyphs - `ascii` where the terminal draws the classic frame.
  * @returns the status field.
  */
-export function gitField(state: GitState, glyphs: 'unicode' | 'ascii'): PartsField {
+export function gitField(state: GitState, glyphs: 'unicode' | 'ascii'): StatusField {
   const glyph = GLYPHS[glyphs]
   const branch: StatusPart[] = [
     ...glyph.branch === '' ? [] : [{ text: glyph.branch, dim: true }],
@@ -59,6 +60,6 @@ export function gitField(state: GitState, glyphs: 'unicode' | 'ascii'): PartsFie
     ...state.ahead === 0 ? [] : [{ text: `${glyph.ahead}${state.ahead}`, dim: true }],
     ...state.behind === 0 ? [] : [{ text: `${glyph.behind}${state.behind}`, dim: true }],
   ]
-  if (counts.length === 0) return { parts: branch }
-  return { parts: [...branch, ...counts.map(part => ({ ...part, text: ` ${part.text}` }))], narrow: branch }
+  if (counts.length === 0) return { forms: [branch], yields: [RANK.branch] }
+  return { forms: [[...branch, ...counts.map(part => ({ ...part, text: ` ${part.text}` }))], branch], yields: [RANK.gitCounts, RANK.branch] }
 }

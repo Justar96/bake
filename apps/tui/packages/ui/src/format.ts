@@ -6,6 +6,12 @@ export interface ContextUsage {
   readonly used: number
   /** The exact model's context capacity. */
   readonly window: number
+  /**
+   * Tokens at which automatic compaction starts for the current route.
+   * Absent when compaction is not composed or its threshold is unknown, and
+   * then the status line names no compaction mark.
+   */
+  readonly compactAt?: number
 }
 
 /**
@@ -25,10 +31,10 @@ export interface TokenTotals {
 }
 
 /**
- * The session's token totals as status-line fields. Input and output.
+ * The session's token totals as the status line reads them. Input and output.
  *
  * @param totals - the provider-reported totals.
- * @param words - locale-owned labels for each field.
+ * @param words - locale-owned labels for each reading.
  * @returns `in 12.3k` and `out 1.2k`.
  */
 export function formatTotals(totals: TokenTotals, words: { readonly input: string, readonly output: string }): readonly string[] {
@@ -64,21 +70,36 @@ export function formatTokens(tokens: number): string {
 }
 
 /**
- * Render estimated context occupancy as `~used/window (percent)`.
+ * Whole-percent occupancy, rounded down.
  *
- * The percentage rounds down, so a context that is merely close to full is
- * never shown as 100%. The one number a user acts on must not overstate itself.
+ * A context that is merely close to full is never shown as 100%. The one
+ * number a user acts on must not overstate itself.
  *
  * @param usage - the occupancy reported by the harness.
- * @returns the status-line fragment.
+ * @returns 0 or more; past 100 only when the estimate overruns the window.
  */
-/** Whole-percent occupancy, rounded down for both full and compact readings. */
 export function contextPercent(usage: ContextUsage): number {
   return usage.window === 0 ? 0 : Math.floor((usage.used / usage.window) * 100)
 }
 
+/**
+ * The occupancy at which automatic compaction starts, in whole percent of the window.
+ * @param usage - the occupancy reported by the harness.
+ * @returns the rounded percentage, or undefined when no threshold is known.
+ */
+export function compactPercent(usage: ContextUsage): number | undefined {
+  if (usage.compactAt === undefined || usage.window <= 0) return undefined
+  return Math.round((usage.compactAt / usage.window) * 100)
+}
+
+/**
+ * The context's absolute count, `15.2k/128k`, which the status line brackets
+ * after the percentage.
+ * @param usage - the occupancy reported by the harness.
+ * @returns used and capacity, abbreviated.
+ */
 export function formatContext(usage: ContextUsage): string {
-  return `~${formatTokens(usage.used)}/${formatTokens(usage.window)} (${contextPercent(usage)}%)`
+  return `${formatTokens(usage.used)}/${formatTokens(usage.window)}`
 }
 
 /**

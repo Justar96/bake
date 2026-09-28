@@ -197,9 +197,25 @@ describe('result cards', () => {
   })
 
   it('releases a call once its result arrives, so a retry presents nothing twice', () => {
-    const cards = seam({ presentResult: () => ({ card: 'generic', title: 'done' }) })
+    const cards = seam({ presentResult: () => ({ card: 'generic', title: 'done', content: [{ type: 'text', text: 'ok' }] }) })
     cards.call('c1', 'tool', '{}')
-    expect(cards.result('c1', ok)).toEqual({ title: 'done', detail: [] })
+    expect(cards.result('c1', ok)).toEqual({ title: 'done', detail: [{ text: 'ok' }] })
     expect(cards.result('c1', ok)).toBeUndefined()
+  })
+
+  it('keeps the raw result under a generic card that omits its content, and not under one that empties it', () => {
+    // The contract: an omitted `content` renders the raw result content.
+    expect(round({ presentResult: () => ({ card: 'generic' }) }, '{}', ok).result)
+      .toEqual({ title: '', detail: [], raw: true })
+    expect(round({ presentResult: () => ({ card: 'generic', title: 'Done' }) }, '{}', ok).result)
+      .toEqual({ title: 'Done', detail: [], raw: true })
+    // An empty list is the presenter's choice to show nothing.
+    expect(round({ presentResult: () => ({ card: 'generic', content: [] }) }, '{}', ok).result)
+      .toEqual({ title: '', detail: [] })
+  })
+
+  it('keeps the raw result under a card kind this build does not know', () => {
+    expect(round({ presentResult: () => ({ card: 'hologram', title: 'Projected' } as never) }, '{}', ok).result)
+      .toEqual({ title: 'Projected', detail: [], raw: true })
   })
 })

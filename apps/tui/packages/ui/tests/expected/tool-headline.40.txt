@@ -1,0 +1,36 @@
+
+● McpAsk(questions: [scope, +1])
+  ⎿      {"answers":[{"id":"scope","sele
+         cted":["Tooling swaps","Shared
+         versions"],"custom":"skip CI
+         for now"},{"id":"fixes","select
+         ed":["Separate commit"]}]}
+
+● AskUserQuestion(Ask 2 questions:
+  Choose scope, Runtime fixes)
+  ⎿      scope → Tooling swaps, Shared
+         versions, "skip CI for now"
+         fixes → Separate commit
+
+● McpLookup(callers of the session
+  reader and its helpers and its helpers
+  and its helpers and its helpers a…)
+  ⎿      [{"id":0,"name":"record-0","tag
+         s":["a","b"]},{"id":1,"name":"r
+         ecord-1","tags":["a","b"]},{"id
+         ":2,"name":"record-2","tags":["
+         a","b"]},{"id":3,"name":"record
+         -3","tags":["a","b"]},{"id":4,"
+         name":"record-4","tags":["a","b
+         "]},{"id":5,"name":"re…
+
+● McpNote(title: 中文标题中文标题中文标
+  题中文标题中文标…, body: ééééééééééééé
+  éééééééééééééééééééééééééé…)
+  ⎿      ok
+
+● McpBroken({"items": "entry", "entry",
+  "entry", "entry", "entry", "entry",
+  "entry", "entry", "entry", "ent…)
+  ⎿      invalid arguments: unexpected
+         end of JSON input

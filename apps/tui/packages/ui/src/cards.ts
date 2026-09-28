@@ -9,7 +9,8 @@
  * Presenters are pure over `args` and the durable result, so a replayed
  * session log reproduces the same card. A tool the registry no longer knows,
  * a tool with no presenter, and a card this build does not recognize all fall
- * back to the raw arguments and result text.
+ * back to the raw arguments and result text. So does a generic result that
+ * omits its `content`, which the contract defines as "render the raw result".
  *
  * @module @dsh-tui/ui/cards
  */
@@ -40,6 +41,12 @@ export interface Card {
   readonly title: string
   /** Lines shown under the headline, in display order. */
   readonly detail: readonly CardLine[]
+  /**
+   * Whether the result's model-facing text still renders under the card, cut
+   * as a result without a card is. Set by a result that reformats nothing: a
+   * generic view that omits `content`, and a card this build does not know.
+   */
+  readonly raw?: true
 }
 
 /**
@@ -85,7 +92,8 @@ export class ToolCards {
    *
    * @param callId - the identifier the result carries back from its call.
    * @param result - the durable result projection, including any tool `meta`.
-   * @returns the card, or undefined to keep the raw result text.
+   * @returns the card, or undefined to keep the raw result text; a card
+   *   marked `raw` keeps that text too.
    */
   result(callId: string, result: ToolResult): Card | undefined {
     const call = this.pending.get(callId)
@@ -222,12 +230,14 @@ function resultCard(view: ToolResultView, copy: TuiCopy, called?: string): Card 
           ] }
 
     case 'generic':
-      return { title, detail: blockLines(view.content) }
+      // Omitted content means the raw result, as the contract words it; an
+      // empty list is a presenter choosing to show nothing.
+      return view.content === undefined ? { title, detail: [], raw: true } : { title, detail: blockLines(view.content) }
 
     default:
       // As for a call. An unknown card keeps whatever title it carries, and
-      // the raw result text below it is unaffected.
-      return { title: titleOf(view), detail: [] }
+      // the raw result text still renders below it.
+      return { title: titleOf(view), detail: [], raw: true }
   }
 }
 

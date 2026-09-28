@@ -8,7 +8,7 @@ import { App, type AppProps } from '../src/app.tsx'
 import { dictionaries } from '../src/copy.ts'
 import { appendTranscript, emptyTranscript } from '../src/transcript.ts'
 import type { Row, ToolCallRow } from '../src/rows.ts'
-import { SPINNER_REST, THINKING_ROWS } from '../src/activity.ts'
+import { FOLD_REST, SPINNER_REST, THINKING_ROWS } from '../src/activity.ts'
 
 class Input extends EventEmitter {
   isTTY = true
@@ -144,7 +144,7 @@ function expectInputUnder(screen: readonly string[], text: string): number {
   expect(bottom - first, dump).toBeLessThanOrEqual(THINKING_ROWS)
   expect(screen[input]!.startsWith('> '), dump).toBe(true)
   expect(screen[input + 1], dump).toMatch(/^─+$/)
-  expect(screen[input + 2], dump).toMatch(/^ {2}Model: /)
+  expect(screen[input + 2], dump).toMatch(/^ {2}model {2}/)
   expect(input + 3, dump).toBe(screen.length - 1)
   return first - newest - 1
 }
@@ -240,7 +240,7 @@ describe('composer placement', () => {
     expect(screen.slice(0, lastRow(screen, 'Session: screen')).every(line => line === '')).toBe(true)
     expect(expectInputUnder(screen, 'Session: screen')).toBe(1)
     expect(inputRow(screen)).toBe(24 - 4)
-    expect(screen[22]).toBe('  Model: model  /workspace')
+    expect(screen[22]).toBe('  model  /workspace')
   })
 
   it.each([[80, 24], [40, 10], [120, 40]])('holds the input on the bottom row through streaming and commits at %ix%i', async (columns, rows) => {
@@ -369,7 +369,7 @@ describe('composer placement', () => {
     for (const [columns, rows] of [[60, 24], [45, 24], [100, 24], [40, 10]] as const) {
       const screen = await ui.resize(columns, rows)
       const dump = `${columns}x${rows}:\n${screen.join('\n')}`
-      expect(screen.filter(line => line.includes('Model: ')), dump).toHaveLength(1)
+      expect(screen.filter(line => /^ {2}model {2}/.test(line)), dump).toHaveLength(1)
       expect(screen.filter(line => line.includes('▌')), dump).toHaveLength(1)
       expectInputUnder(screen, 'Answer one')
     }
@@ -395,7 +395,7 @@ describe('composer placement', () => {
       let start = caret
       while (start > 0 && !screen[start - 1]!.startsWith('─')) start--
       expect(screen[caret + 1], dump).toMatch(/^─+$/)
-      expect(screen[caret + 2], dump).toMatch(/^ {2}Model: /)
+      expect(screen[caret + 2], dump).toMatch(/^ {2}model {2}/)
       const draft = screen.slice(start, caret + 1)
       expect(draft.length, dump).toBeGreaterThan(1)
       for (const line of draft) expect(line, dump).toMatch(/^(> |\^ | {2})\S/)
@@ -429,7 +429,7 @@ describe('composer placement', () => {
     // The blank opens the stack under the heading; the list sits on the header.
     expect(screen[lastRow(screen, 'Session: screen') + 1]).toBe('')
     expect(lastRow(screen, 'more')).toBe(inputRow(screen) - 3)
-    expect(screen[inputRow(screen) + 2]).toMatch(/^ {2}Model: /)
+    expect(screen[inputRow(screen) + 2]).toMatch(/^ {2}model {2}/)
     expect(inputRow(screen)).toBe(anchor)
     for (const notice of ['Short notice', 'Long notice\n'.repeat(30)]) {
       screen = await ui.update({ notice, pending: [{ id: 'queued', target: 'next-step', text: 'Next instruction' }] })
@@ -517,8 +517,10 @@ describe('composer placement', () => {
       const screen = await ui.update({ command: '/compact', compactPhase })
       expect(screen.join('\n')).toContain('Compacting history…')
       expect(screen.join('\n')).toContain(label)
+      // The header's row, directly over the rule, led by the folded dough.
+      expect(screen[inputRow(screen) - 2]).toMatch(new RegExp(`^${FOLD_REST} Compacting history…  ${label}$`))
       // The progress is the turn's to say; the status row still names the model.
-      expect(screen[inputRow(screen) + 2]).toMatch(/^ {2}Model: /)
+      expect(screen[inputRow(screen) + 2]).toMatch(/^ {2}model {2}/)
       expect(screen.join('\n')).toContain('keep this draft▌')
       expect(lastRow(screen, 'Compacting history…')).toBeLessThan(inputRow(screen))
     }

@@ -28,3 +28,24 @@ export function* inputHistory(transcript: Transcript, pending: readonly { readon
     }
   }
 }
+
+/**
+ * Where the caret lands in an entry recall has just shown.
+ *
+ * Inside a draft of several rows, Up and Down first move the caret between
+ * rows, and recall only from the first or the last row. An older entry opens
+ * with the caret at its start, on its first row, so the next Up keeps walking
+ * back instead of climbing through the entry. A newer one opens at its end, on
+ * its last row, for the next Down. A one-row entry is both, so its caret stays
+ * where it was: at the end, where typing appends, unless an earlier visit in
+ * the same browse moved it.
+ *
+ * @param entry - the recalled text and the caret it was loaded or left with.
+ * @param direction - older for Up, newer for Down.
+ * @param rows - screen rows the entry occupies in the composer.
+ * @returns the caret's UTF-16 offset in the entry's text.
+ */
+export function recallCursor(entry: { readonly text: string, readonly cursor: number }, direction: 'older' | 'newer', rows: number): number {
+  if (rows <= 1) return entry.cursor
+  return direction === 'older' ? 0 : entry.text.length
+}

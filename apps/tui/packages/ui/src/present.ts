@@ -13,7 +13,7 @@
 
 import wrapAnsi from 'wrap-ansi'
 import { markdownLines, sliceSpans } from './markdown.ts'
-import { outputLines, outputSpans, toolText } from './tool-output.ts'
+import { clipCells, outputLines, outputSpans, toolText } from './tool-output.ts'
 import { iconFor, ICON } from './icons.ts'
 import { COLUMN, MARKER, PAST, TREE, VERB, type Verb } from './layout.ts'
 import { PALETTE, type PaletteColor } from './palette.ts'
@@ -41,6 +41,8 @@ export type Tone =
   | 'added'
   /** A line a change took away. */
   | 'removed'
+  /** Where history was compacted. */
+  | 'compacting'
 
 /**
  * Model name without its provider prefix.
@@ -142,6 +144,8 @@ export function styleOf(tone: Tone): LineStyle {
     // make a deletion look like supporting detail.
     case 'added': return { color: PALETTE.done, dim: false, bold: false }
     case 'removed': return { color: PALETTE.failed, dim: false, bold: false }
+    // The blue the header wears while compaction runs, left where it happened.
+    case 'compacting': return { color: PALETTE.compacting, dim: false, bold: false }
     default: return { dim: false, bold: false }
   }
 }
@@ -296,6 +300,31 @@ function familyOf(tool: string): Verb | undefined {
  * output and edits; plan updates retain their dedicated presentation.
  */
 const PREVIEWED: ReadonlySet<Verb> = new Set([VERB.run, VERB.edit, VERB.read, VERB.find, VERB.fetch])
+
+/**
+ * Cells one line of a result without a card may take before it is cut.
+ *
+ * The preview bound counts lines, and a tool that answers in one line of
+ * compact JSON draws a screenful under a preview of four. Three rows of an
+ * 80-column terminal still read as a sentence or two of a prose answer.
+ */
+export const RAW_LINE_CELLS = 240
+
+/**
+ * Lines of a result's model-facing text, for a tool that declared no card.
+ *
+ * Each successful line is cut at {@link RAW_LINE_CELLS} with an ellipsis; the
+ * whole text is in the session log. A failure keeps its whole lines, because
+ * the failure is what the reader has to read.
+ *
+ * @param text - the result text, empty when a card replaced it.
+ * @param failed - whether the call failed.
+ * @returns the card lines to preview.
+ */
+function rawLines(text: string, failed: boolean): readonly CardLine[] {
+  const lines = outputLines(text)
+  return failed ? lines : lines.map(line => ({ ...line, text: clipCells(line.text, RAW_LINE_CELLS) }))
+}
 
 /** Split text into lines, dropping a trailing newline's empty line. */
 const linesOf = (text: string): readonly string[] => {
@@ -598,9 +627,9 @@ function connected(body: readonly PresentedLine[]): readonly PresentedLine[] {
  * Render one step's calls as one block. A head counts them, then each
  * call hangs from it, joined by the tree in the rail.
  *
- * The rail already shows an action's state in its marker, so each call's
- * branch takes that marker's place and colour. It pulses while the call runs
- * and turns green or red when the call ends. The verb, argument, and output
+ * Each call's branch takes its marker's place in the rail. The tree is
+ * structure, so every branch, stem, and connector is quiet and holds still;
+ * a failed call's head turns red instead. The verb, argument, and output
  * keep their columns. The head's marker is the step's state. It is running while
  * any call is running, red when one failed. Calls are not separated by a
  * blank row. They were one model decision, and the tree stem is what shows that.
@@ -647,11 +676,30 @@ function hang(bodies: readonly (readonly PresentedLine[])[]): readonly Presented
   return bodies.flatMap((lines, index) => {
     const last = index === bodies.length - 1
     // Only the step's head blinks. A blinking branch would open a gap in the tree.
-    // In a batch only the head carries an icon; each branch is the tree alone.
+    // In a batch only the head carries an icon; each branch is the tree alone,
+    // and the tree is structure, so every glyph of it is quiet.
     return lines.map((line, row) => row === 0
-      ? { ...line, marker: last ? TREE.corner : TREE.branch, pulse: false }
+      ? { ...line.markerTone === 'failed' ? failedHead(line) : line, marker: last ? TREE.corner : TREE.branch, markerTone: 'quiet' as const, pulse: false }
       : { ...line, marker: last ? MARKER.none : TREE.stem, markerTone: 'quiet' as const })
   })
+}
+
+/**
+ * A failed call's head line in the failed tone, its tool's name still bold.
+ *
+ * On its own a call says it failed with its marker. In a step's block the
+ * branch takes the marker's place and stays quiet, so the head carries the
+ * failure instead; its output may be folded away, or empty.
+ *
+ * @param line - the call's head line.
+ * @returns the same line, its plain and strong runs failed.
+ */
+function failedHead(line: PresentedLine): PresentedLine {
+  return {
+    ...line, tone: 'failed',
+    ...line.spans === undefined ? {} : { spans: line.spans.map(span => span.tone === 'strong' ? { ...span, tone: 'failed' as const, bold: true }
+      : span.tone === 'plain' ? { ...span, tone: 'failed' as const } : span) },
+  }
 }
 
 /**
@@ -778,7 +826,7 @@ function outcomeLines(outcome: ToolOutcome, verb: Verb, bound: ResultBound, titl
   const stat = failed ? undefined : changeSize(outcome.detail)
   // A failure is always news, and a diff is what an edit did.
   const previewed = failed || PREVIEWED.has(verb) || stat !== undefined
-  const body = drawnBody([outputLines(outcome.text), card.filter(line => line.summary === undefined)], failed, bound.code,
+  const body = drawnBody([rawLines(outcome.text, failed), card.filter(line => line.summary === undefined)], failed, bound.code,
     plain => previewed ? excerpt(plain, bound.lines, bound, tone, failed).lines : [])
   const { lines: shown, hidden } = previewed ? excerpt(body, bound.lines, bound, tone, failed) : { lines: [], hidden: body.length }
   // Previewed output counts what it left out below it; a count alone says how
@@ -1076,9 +1124,9 @@ export function present(row: Row, result: ResultBound, wrap?: (line: PresentedLi
     }
 
     case 'rate':
-      // Dim, at the rail, directly under the answer. It continues the answer's
-      // section instead of opening one, and it is metadata about that answer.
-      return [{ marker: MARKER.none, verb: '', text: row.text, column: COLUMN.rail, tone: 'quiet' }]
+      // Nothing. A row of its own under the answer split one turn's numbers
+      // across two rows; the ended turn's summary on the header reports it.
+      return []
 
     case 'reasoning': {
       // A paragraph at the rail, as the answer is, without a verb. Dim and
@@ -1099,9 +1147,9 @@ export function present(row: Row, result: ResultBound, wrap?: (line: PresentedLi
 
     case 'tool-result': {
       const tone: Tone = row.ok ? 'plain' : 'failed'
-      // A card leaves `text` empty and a tool without one leaves `detail`
-      // absent, so exactly one of these carries the body.
-      const body = drawnBody([outputLines(row.text), row.detail], !row.ok, result.code, plain => preview(plain, result.lines).shown)
+      // A card that reformats the result leaves `text` empty, and a result
+      // shown raw leaves `detail` absent, so exactly one carries the body.
+      const body = drawnBody([rawLines(row.text, !row.ok), row.detail], !row.ok, result.code, plain => preview(plain, result.lines).shown)
       // Calls may finish out of order, so the result names its own call.
       // The nearest preceding row may belong to a different call. An empty result still
       // acknowledges completion, with no size to report.
@@ -1120,7 +1168,7 @@ export function present(row: Row, result: ResultBound, wrap?: (line: PresentedLi
     }
 
     case 'notice': {
-      const tone: Tone = row.tone === 'error' ? 'failed' : 'quiet'
+      const tone: Tone = row.tone === 'error' ? 'failed' : row.compaction === true ? 'compacting' : 'quiet'
       // A completed turn says so on the summary row above the input instead,
       // with its time and what it did; a line here as well repeated it.
       if (row.placement === 'turn-end' && row.tone === 'info') return []
@@ -1129,9 +1177,10 @@ export function present(row: Row, result: ResultBound, wrap?: (line: PresentedLi
       })))
       // A command's outcome continues its command, on the branch that closes
       // it. The two are one exchange, and no verb repeats
-      // what the command's name already says.
+      // what the command's name already says. The branch is structure and
+      // stays quiet; a failed command's text is what turns red.
       if (row.placement === 'command') return linesOf(row.text).map((text, index) => ({
-        marker: index === 0 ? TREE.corner : MARKER.none, markerTone: row.tone === 'error' ? 'failed' : 'quiet',
+        marker: index === 0 ? TREE.corner : MARKER.none, markerTone: 'quiet' as const,
         verb: '', text, column: COLUMN.rail, wide: true, tone: row.tone === 'error' ? 'failed' : 'plain',
       }))
       const verb = row.tone === 'error' ? VERB.error : VERB.note

@@ -5,7 +5,7 @@ import { COLUMN, MARKER, TREE, VERB } from '../src/layout.ts'
 import type { CardLine, ToolCallRow } from '../src/rows.ts'
 import { PALETTE } from '../src/palette.ts'
 import wrapAnsi from 'wrap-ansi'
-import { compactModel, compactPath, CONNECTOR, fittedGroup, hintFor, isBlank, present, softBreaks, styleOf, tailLines, toolLabel, verbFor, type Highlight, type PresentedLine, type ResultBound } from '../src/present.ts'
+import { compactModel, compactPath, CONNECTOR, fittedGroup, hintFor, isBlank, present, RAW_LINE_CELLS, softBreaks, styleOf, tailLines, toolLabel, verbFor, type Highlight, type PresentedLine, type ResultBound } from '../src/present.ts'
 
 /** Every result line drawn, for the tests that are about placement, not bounds. */
 const shown: ResultBound = { lines: Number.MAX_SAFE_INTEGER, unit: 'lines', more: 'more lines' }
@@ -126,7 +126,7 @@ describe('present', () => {
     })
   })
 
-  test('hangs a command\'s outcome from it on a branch, red when it failed', () => {
+  test('hangs a command\'s outcome from it on a quiet branch, its text red when it failed', () => {
     const lines = present({ kind: 'notice', placement: 'command', tone: 'info', text: 'Model set\nfor the next turn' }, shown)
     expect(lines.map(line => [line.marker, line.text, line.column, line.tone])).toEqual([
       [TREE.corner, 'Model set', COLUMN.rail, 'plain'], [MARKER.none, 'for the next turn', COLUMN.rail, 'plain'],
@@ -135,7 +135,8 @@ describe('present', () => {
     // An outcome is often a table, such as `/help` prints: it wraps at the full width, as output does.
     expect(lines.every(line => line.wide === true)).toBe(true)
     const [failed] = present({ kind: 'notice', placement: 'command', tone: 'error', text: 'Unknown command: /foo' }, shown)
-    expect([failed!.marker, failed!.markerTone, failed!.tone]).toEqual([TREE.corner, 'failed', 'failed'])
+    // The branch is structure and stays quiet; the failure is in the text.
+    expect([failed!.marker, failed!.markerTone, failed!.tone]).toEqual([TREE.corner, 'quiet', 'failed'])
     // A notice no command produced keeps its verb.
     expect(present({ kind: 'notice', tone: 'info', text: 'Compacting' }, shown)[0]!.verb).toBe(VERB.note)
   })
@@ -168,10 +169,8 @@ describe('present', () => {
       .toEqual(['[c1]  2 lines', 'a', 'b'])
   })
 
-  test('draws an answer\'s rate dim at the rail, continuing the answer rather than opening a section', () => {
-    expect(present({ kind: 'rate', text: '120 tokens \u00b7 40.0 tok/s' }, shown)).toEqual([
-      { marker: MARKER.none, verb: '', text: '120 tokens \u00b7 40.0 tok/s', column: COLUMN.rail, tone: 'quiet' },
-    ])
+  test('draws no row for an answer\'s rate, which the turn\'s summary reports', () => {
+    expect(present({ kind: 'rate', tokens: 120, ms: 3000 }, shown)).toEqual([])
   })
 
   test('draws the answer at the prose column, with no marker', () => {
@@ -282,6 +281,13 @@ describe('present', () => {
     expect(error.tone).toBe('failed')
   })
 
+  test('draws the compaction notice in the compaction tone, and a plain one quiet', () => {
+    const [compacted] = present({ kind: 'notice', tone: 'info', text: 'Context compacted', compaction: true }, shown)
+    expect(compacted).toMatchObject({ verb: VERB.note, text: 'Context compacted', tone: 'compacting' })
+    expect(styleOf('compacting')).toEqual({ color: PALETTE.compacting, dim: false, bold: false })
+    expect(present({ kind: 'notice', tone: 'info', text: 'saved' }, shown)[0]!.tone).toBe('quiet')
+  })
+
   test('separates turn outcomes from answers without a notice verb', () => {
     const [blank, footer] = present({ kind: 'notice', placement: 'turn-end', tone: 'error', text: 'failed' }, shown)
     expect(blank?.text).toBe('')
@@ -390,6 +396,20 @@ describe('present, bounding a tool result', () => {
     expect(lines.at(-1)!.text).toBe('+6 more lines')
   })
 
+  test('cuts a long line of a result without a card, but not of a failure or a card', () => {
+    // One line of compact JSON is one line to the preview bound, and would
+    // otherwise wrap into a screenful under it.
+    const json = JSON.stringify({ items: Array.from({ length: 200 }, (_, index) => ({ id: index, name: `item-${index}` })) })
+    const cut = `${json.slice(0, RAW_LINE_CELLS - 1)}\u2026`
+    expect(present({ kind: 'tool-result', callId: 'c4', ok: true, text: json }, live).map(line => line.text))
+      .toEqual(['[c4]  1 lines', cut])
+    const call = present({ kind: 'tool-call', callId: 'c5', tool: 'mcp_tool', input: 'q', result: { ok: true, text: json } }, live)
+    expect(call.at(-1)!.text).toBe(cut)
+    // A failure is what the reader has to read, and a card chose its own lines.
+    expect(present({ kind: 'tool-result', callId: 'c6', ok: false, text: json }, live)[1]!.text).toBe(json)
+    expect(present({ kind: 'tool-result', callId: 'c7', ok: true, text: '', detail: [{ text: json }] }, live)[1]!.text).toBe(json)
+  })
+
   test('reports the size in the words the locale supplied', () => {
     const zh: ResultBound = { lines: 0, unit: '\u884c', more: '\u884c\u672a\u663e\u793a' }
     expect(present(listing(70), zh)[0]!.text).toBe('[c1]  70 \u884c')
@@ -466,9 +486,14 @@ describe('present, grouping a step\'s calls', () => {
       ['\u251c', '', 'Read(a.md)'], ['\u2502', CONNECTOR, 'x'],
       ['\u2514', '', 'Bash(false)'], [MARKER.none, CONNECTOR, 'boom'],
     ])
-    // The head carries the step's state, each branch its call's, and the stem recedes.
-    expect([lines[1]!.markerTone, lines[2]!.markerTone, lines[3]!.markerTone, lines[7]!.markerTone]).toEqual(['failed', 'done', 'quiet', 'failed'])
+    // The head carries the step's state; the tree is quiet throughout, branch,
+    // stem, corner, and connector alike.
+    expect([lines[1]!.markerTone, lines[2]!.markerTone, lines[3]!.markerTone, lines[7]!.markerTone]).toEqual(['failed', 'quiet', 'quiet', 'quiet'])
+    expect(lines.filter(line => line.verb === CONNECTOR).every(line => line.verbTone === 'quiet')).toBe(true)
     expect(lines[1]!.spans?.at(-1)).toEqual({ length: ' \u00b7 1 failed'.length, tone: 'failed' })
+    // Without a coloured branch, the failed call says so in its own head, its name still bold.
+    expect([lines[7]!.tone, lines[7]!.spans]).toEqual(['failed', [{ length: 4, tone: 'failed', bold: true }, { length: 7, tone: 'failed' }]])
+    expect([lines[2]!.tone, lines[2]!.spans]).toEqual(['plain', [{ length: 4, tone: 'strong' }, { length: 6, tone: 'plain' }]])
     // One blank opens the block; none separates its calls.
     expect(lines.filter(isBlank)).toHaveLength(1)
   })
@@ -731,6 +756,15 @@ describe('fittedGroup', () => {
     expect(texts(lines)).not.toContain('0:0')
     expect(texts(lines)).toContain('1:0')
     expect(lines.at(-1)).toMatchObject({ text: read(2), marker: TREE.corner })
+  })
+
+  test('keeps a folded call\'s failure in its head, on a quiet branch', () => {
+    const calls = step(3)
+    const failed = { ...calls[0]!, result: { ok: false, text: Array.from({ length: 10 }, (_, line) => `err ${line}`).join('\n') } }
+    const lines = fittedGroup([failed, ...calls.slice(1)], bound, 14)
+    // Folded to its head, the output that said it failed is gone; the head says it.
+    expect(texts(lines)).not.toContain('err 0')
+    expect(lines.find(line => line.text === read(0))).toMatchObject({ marker: TREE.branch, markerTone: 'quiet', tone: 'failed' })
   })
 
   test('folds the oldest calls into one branch once every finished call is a head', () => {

@@ -131,6 +131,84 @@ interface Cell {
  * @returns the rows, each at most `width` columns, and the caret's row.
  */
 export function wrapDraft(text: string, cursor: number, width: number, caret: string): WrappedDraft {
+  const { rows, ends } = layoutDraft(text, width)
+  let caretRow = ends.find(end => end.offset === cursor)?.row ?? 0
+  let caretCell = Number.POSITIVE_INFINITY
+  rows.forEach((row, index) => {
+    const at = row.findIndex(cell => cell.offset === cursor)
+    if (at !== -1) { caretRow = index; caretCell = at }
+  })
+  return {
+    rows: rows.map((row, index) => {
+      const cells = row.map(cell => cell.text)
+      if (index === caretRow) cells.splice(Math.min(caretCell, cells.length), 0, caret)
+      return cells.join('')
+    }),
+    caret: caretRow,
+  }
+}
+
+/**
+ * Screen rows a draft occupies at a width, as {@link wrapDraft} draws it.
+ * @param text - complete draft.
+ * @param width - columns available to each row, caret included.
+ * @returns at least one.
+ */
+export function draftRows(text: string, width: number): number {
+  return layoutDraft(text, width).rows.length
+}
+
+/**
+ * Move the caret to the screen row above or below, keeping its column.
+ *
+ * Rows are the ones {@link wrapDraft} draws at the same width, so the caret
+ * moves between what the user sees, not between logical lines. The column is
+ * counted in terminal cells, and the caret lands on the last place in the row
+ * that is not right of it, so a wide character is never split. A wrapped
+ * row's end is the start of the next row, so its last place is before its
+ * last grapheme; only a logical line's last row has a place after its text.
+ *
+ * @param draft - text and a cursor at a grapheme boundary.
+ * @param width - columns available to each row, caret included.
+ * @param direction - the row to move to.
+ * @param goal - the column a run of vertical moves keeps to, so crossing a
+ *   short row does not pull the caret left for good; the caret's own column
+ *   when absent.
+ * @returns the moved draft and the column it kept, or undefined when the caret
+ *   is already on the first row (up) or the last row (down).
+ */
+export function moveVertically(draft: Draft, width: number, direction: 'up' | 'down', goal?: number):
+  { readonly draft: Draft, readonly goal: number } | undefined {
+  const { rows, ends } = layoutDraft(draft.text, width)
+  const places = rows.map((row, index) => {
+    let column = 0
+    const stops = row.map(cell => {
+      const stop = { offset: cell.offset, column }
+      column += cell.width
+      return stop
+    })
+    const end = ends.find(line => line.row === index)
+    return end === undefined ? stops : [...stops, { offset: end.offset, column }]
+  })
+  const from = places.findIndex(stops => stops.some(stop => stop.offset === draft.cursor))
+  const to = from + (direction === 'up' ? -1 : 1)
+  if (from < 0 || to < 0 || to >= places.length) return undefined
+  const column = goal ?? places[from]!.find(stop => stop.offset === draft.cursor)!.column
+  let landing = places[to]![0]!
+  for (const stop of places[to]!) if (stop.column <= column) landing = stop
+  return { draft: { text: draft.text, cursor: landing.offset }, goal: column }
+}
+
+/**
+ * Lay a draft out in rows of graphemes, without a caret.
+ * @param text - complete draft.
+ * @param width - columns available to each row, caret included.
+ * @returns each row's cells, and the row each logical line ends on.
+ */
+function layoutDraft(text: string, width: number): {
+  readonly rows: readonly (readonly Cell[])[]
+  readonly ends: readonly { readonly offset: number, readonly row: number }[]
+} {
   const limit = Math.max(1, width - 1)
   const rows: Cell[][] = []
   // Where each logical line's rows end, for a caret after its last grapheme.
@@ -174,18 +252,5 @@ export function wrapDraft(text: string, cursor: number, width: number, caret: st
     offset += line.length + 1
     ends.push({ offset: offset - 1, row: rows.length - 1 })
   }
-  let caretRow = ends.find(end => end.offset === cursor)?.row ?? 0
-  let caretCell = Number.POSITIVE_INFINITY
-  rows.forEach((row, index) => {
-    const at = row.findIndex(cell => cell.offset === cursor)
-    if (at !== -1) { caretRow = index; caretCell = at }
-  })
-  return {
-    rows: rows.map((row, index) => {
-      const cells = row.map(cell => cell.text)
-      if (index === caretRow) cells.splice(Math.min(caretCell, cells.length), 0, caret)
-      return cells.join('')
-    }),
-    caret: caretRow,
-  }
+  return { rows, ends }
 }

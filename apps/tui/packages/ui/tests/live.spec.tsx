@@ -8,7 +8,7 @@ import { dictionaries } from '../src/copy.ts'
 import { budgetFor, CHROME_ROWS, NOTICE_BUDGET, type WindowSize } from '../src/layout.ts'
 import { appendTranscript, emptyTranscript } from '../src/transcript.ts'
 import { ICON } from '../src/icons.ts'
-import { FRAME_MS, SPINNER, SPINNER_REST, THINKING_ROWS, type Clock } from '../src/activity.ts'
+import { FOLD_REST, FOLD_SPINNER, FRAME_MS, SPINNER, SPINNER_REST, THINKING_ROWS, type Clock } from '../src/activity.ts'
 import type { Row } from '../src/rows.ts'
 import { Beat } from '../src/beat.tsx'
 import { Header, PULSE_MS, THINKING_GAP } from '../src/line.tsx'
@@ -168,7 +168,7 @@ describe('live region', () => {
     // carries which field is `Chrome`'s business, tested in line.spec.tsx.
     const chrome = frame.split('\n').slice(-CHROME_ROWS).join('\n')
     expect(chrome).toContain(dictionaries.en.steering)
-    expect(chrome).toContain(`${dictionaries.en.model}: `)
+    expect(chrome).toMatch(/^ {2}model {2}\/workspace$/m)
     // The heading is written above the dynamic region, so it is the one row of
     // the frame the budget does not own.
     const heading = 1
@@ -228,7 +228,7 @@ describe('live region', () => {
     expect(rows[2]!.trim()).toBe('')
     expect(rows[3]).toMatch(/^─+$/)
     expect(rows[4]).toContain('> ')
-    expect(rows[6]).toContain(`${dictionaries.en.model}: `)
+    expect(rows[6]).toBe('  model  /workspace')
   })
 })
 
@@ -317,19 +317,74 @@ describe('turn header', () => {
     expect(active()).toBe(0)
   })
 
+  it('laminates the dough for compaction on the same row and beat, with the same screen-reader glyph', async () => {
+    const { clock, advance, active } = fakeClock()
+    const view = (compact = false) => <Beat clock={clock}>
+      <Header columns={48} clock={clock} compact={compact}
+        state={{ kind: 'running', word: 'Compacting history', phase: 'summarizing', startedAt: 0, color: PALETTE.compacting, spinner: 'fold' }} />
+    </Beat>
+    const ui = render(view())
+    const frames: string[] = []
+    for (let step = 0; step <= FOLD_SPINNER.length; step++) {
+      frames.push(ui.lastFrame()!)
+      expect(ui.lastFrame()!.startsWith(`${FOLD_SPINNER[step % FOLD_SPINNER.length]} Compacting history…`)).toBe(true)
+      expect(heightOf(ui.lastFrame())).toBe(1)
+      advance(FRAME_MS)
+    }
+    ui.rerender(view(true))
+    frames.push(ui.lastFrame()!)
+    expect(ui.lastFrame()!.trimEnd()).toBe('> Compacting history…  summarizing · 1s')
+    await expect(frames.join('\n---\n') + '\n').toMatchFileSnapshot('./expected/folding.txt')
+    ui.unmount()
+    expect(active()).toBe(0)
+  })
+
+  /** The header row while compaction runs, found by its folded dough. */
+  const compactionOf = (frame: string | undefined): string | undefined =>
+    (frame ?? '').split('\n').find(line => line.startsWith(`${FOLD_REST} `))?.trimEnd()
+  const compaction = `${FOLD_REST} ${dictionaries.en.compacting}…  ${dictionaries.en.compactSummarizing}`
+  const inputOf = (frame: string | undefined): string | undefined => (frame ?? '').split('\n').find(line => line.startsWith('> '))
+
+  it('shows /compact on the header with its folded dough, and says Enter queues behind it', () => {
+    const ui = render(<App {...props({ command: '/compact', compactPhase: 'summarizing' })} />)
+    expect(compactionOf(ui.lastFrame())).toBe(compaction)
+    expect(inputOf(ui.lastFrame())).toBe(`> ▌${dictionaries.en.compactWait}`)
+    // The command's own row gives way to the header.
+    expect(ui.lastFrame()).not.toContain(`${dictionaries.en.command}: /compact`)
+  })
+
+  it('shows a turn compacting its own context the same way, then its own word again, while Enter still steers', () => {
+    const state = props({ status: 'running' })
+    const ui = render(<App {...state} />)
+    const turn = headerOf(ui.lastFrame())!
+    expect(turn).toMatch(new RegExp(`^${SPINNER_REST} `))
+    ui.rerender(<App {...state} autoCompacting={true} />)
+    expect(compactionOf(ui.lastFrame())).toBe(compaction)
+    expect(inputOf(ui.lastFrame())).toMatch(new RegExp(`^> ▌${dictionaries.en.steering}`))
+    ui.rerender(<App {...state} />)
+    expect(headerOf(ui.lastFrame())).toBe(turn)
+    expect(compactionOf(ui.lastFrame())).toBeUndefined()
+    // Stopping outranks it, and an idle agent has no turn to compact inside.
+    ui.rerender(<App {...state} autoCompacting={true} stopping={true} />)
+    expect(compactionOf(ui.lastFrame())).toBeUndefined()
+    expect(headerOf(ui.lastFrame())).toMatch(new RegExp(`^${SPINNER_REST} ${dictionaries.en.stopping}…`))
+    ui.rerender(<App {...state} status="idle" autoCompacting={true} />)
+    expect(compactionOf(ui.lastFrame())).toBeUndefined()
+  })
+
   it('keeps the goal beside processing on the header, with both rules bare', () => {
     const goal = { objective: 'Ship it', phase: 'active' as const, armed: true, rounds: 2, maxRounds: 8 }
     const ui = render(<App {...props({ status: 'running', goal })} />)
     const rows = ui.lastFrame()!.split('\n')
     const header = rows.findIndex(line => RUNNING.test(line))
-    expect(rows[header]).toMatch(new RegExp(`● ${dictionaries.en.goalActive}  ${dictionaries.en.goalRound} 2/8$`))
-    expect(rows.filter(line => line.includes(dictionaries.en.goalActive))).toHaveLength(1)
+    expect(rows[header]).toMatch(new RegExp(`Ctrl\\+O ● ${dictionaries.en.goalTitle} 2/8$`))
+    expect(rows.filter(line => line.includes(`● ${dictionaries.en.goalTitle} 2/8`))).toHaveLength(1)
     expect(rows[header + 1]).toMatch(/^─+$/)
     expect(rows[header + 2]).toMatch(/^> /)
     expect(rows[header + 3]).toMatch(/^─+$/)
     // Idle keeps the goal on the same header row.
     const idle = render(<App {...props({ goal })} />).lastFrame()!.split('\n')
-    expect(idle.find(line => line.includes(dictionaries.en.goalActive))).toMatch(/^ +Ctrl\+O ● /)
+    expect(idle.find(line => line.includes(`● ${dictionaries.en.goalTitle} 2/8`))).toMatch(/^ +Ctrl\+O ● /)
   })
 
   it('keeps one word through thinking, writing, a commit, and a running tool', () => {

@@ -63,11 +63,12 @@ export type Row =
   /** Reasoning text; `continued` as for `assistant`. */
   | { readonly kind: 'reasoning', readonly text: string, readonly continued?: boolean }
   /**
-   * Generation speed of a final answer, already formatted. Output tokens and
-   * tokens per second, from provider usage and logged stream timestamps.
-   * Drawn dim, directly under the answer it measures.
+   * Generation speed of a final answer: the provider's output tokens and the
+   * logged milliseconds from the first streamed token to the finish. The
+   * transcript draws nothing for it; the ended turn's summary on the header
+   * reads it, and reports it only for a sample long enough to mean something.
    */
-  | { readonly kind: 'rate', readonly text: string }
+  | { readonly kind: 'rate', readonly tokens: number, readonly ms: number }
   | ToolCallRow
   /**
    * Two or more calls from one step, drawn as one block. The head counts them
@@ -106,6 +107,8 @@ export type Row =
      * the row before it. Absent, the notice stands on its own.
      */
     readonly placement?: 'turn-end' | 'command'
+    /** Marks where history was compacted, drawn in the compaction tone the header uses while it runs. */
+    readonly compaction?: true
   }
 
 /**
@@ -193,5 +196,5 @@ export type NoticeTone = 'info' | 'warn' | 'error'
  * @returns whether `row` has a `text` field.
  */
 export function hasText(row: Row): row is Extract<Row, { text: string }> {
-  return row.kind !== 'tool-call' && row.kind !== 'tool-group' && row.kind !== 'command'
+  return row.kind !== 'tool-call' && row.kind !== 'tool-group' && row.kind !== 'command' && row.kind !== 'rate'
 }

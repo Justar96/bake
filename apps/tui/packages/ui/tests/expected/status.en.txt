@@ -1,0 +1,30 @@
+idle 120: deepseek-v4-flash  think high  ctx ~11% (15.2k/128k)  ⎇ main +2 ~3 ?1 ↑1  in 42.3k  out 3.1k  cache hit 81%  ~/bake
+idle 80: deepseek-v4-flash  think high  ctx ~11%  ⎇ main +2 ~3 ?1 ↑1  cache hit 81%
+idle 60: deepseek-v4-flash  think high  ctx ~11%  ⎇ main  ~/bake
+idle 40: deepseek-v4-flash  ctx ~11%  ~/bake
+idle 24: deepseek-v4…  ctx ~11%
+idle 12: ctx ~11%
+plan 120: deepseek-v4-flash  Plan  think high  ctx ~11%  ⎇ main +2 ~3 ?1 ↑1  cache hit 81%  update v0.2.0 · /update  ~/bake
+plan 80: deepseek-v4-flash  Plan  think high  ctx ~11%  ⎇ main  cache hit 81%  ~/bake
+plan 60: deepseek-v4-flash  Plan  think high  ctx ~11%  ⎇ main
+plan 40: deepseek-v4-flash  Plan  ctx ~11%
+plan 24: deepseek-v4…  ctx ~11%
+plan 12: ctx ~11%
+filling 120: deepseek-v4-flash  think high  ctx ~77% (99k/128k) · compacts at 80%  ⎇ main +2 ~3 ?1 ↑1  cache hit 81%  ~/bake
+filling 80: deepseek-v4-flash  think high  ctx ~77% (99k/128k) ▸80%  ⎇ main  cache hit 81%
+filling 60: deepseek-v4-flash  think high  ctx ~77% (99k/128k)  ⎇ main
+filling 40: deepseek-v4-flash  ctx ~77% (99k/128k)
+filling 24: deepseek-v4…  ctx ~77%
+filling 12: ctx ~77%
+full 120: deepseek-v4-flash  think high  ctx ~94% (121.4k/128k)  ⎇ main +2 ~3 ?1 ↑1  in 42.3k  out 3.1k  cache hit 81%  ~/bake
+full 80: deepseek-v4-flash  think high  ctx ~94% (121.4k/128k)  ⎇ main  cache hit 81%
+full 60: deepseek-v4-flash  think high  ctx ~94% (121.4k/128k)
+full 40: deepseek-v4-f…  ctx ~94% (121.4k/128k)
+full 24: deepseek-v4…  ctx ~94%
+full 12: ctx ~94%
+fresh 120: deepseek-v4-flash  think high  /tmp/bake-ui-audit/ws
+fresh 80: deepseek-v4-flash  think high  /tmp/bake-ui-audit/ws
+fresh 60: deepseek-v4-flash  think high  /tmp/bake-ui-audit/ws
+fresh 40: deepseek-v4-flash  think high  …dit/ws
+fresh 24: deepseek-v4-flash
+fresh 12: deepseek-…

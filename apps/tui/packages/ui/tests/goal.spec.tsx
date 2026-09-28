@@ -28,24 +28,25 @@ function props(goal: GoalEntry, status: AppProps['status'] = 'idle'): AppProps {
 it('keeps the goal beside turn status on one header row', () => {
   const ui = render(<App {...props(active, 'running')} />)
   const rows = ui.lastFrame()!.split('\n')
-  const goalRows = rows.filter(row => row.includes(copy.goalActive))
+  const goalRows = rows.filter(row => row.includes('● Goal 2/8'))
   expect(goalRows).toHaveLength(1)
-  expect(goalRows[0]).toMatch(/Ctrl\+O ● Goal active {2}round 2\/8$/)
-  expect(goalRows[0]).toMatch(/….*● Goal active/)
+  // The glyph and the round count, the goal's one number, in one reading.
+  expect(goalRows[0]).toMatch(/Ctrl\+O ● Goal 2\/8$/)
+  expect(goalRows[0]).toMatch(/….*● Goal 2\/8/)
   // The objective is the sheet's; the header carries the goal's state.
   expect(ui.lastFrame()).not.toContain('Ship it')
   ui.rerender(<App {...props(active)} />)
-  expect(ui.lastFrame()!.split('\n').filter(row => row.includes(copy.goalActive))).toHaveLength(1)
+  expect(ui.lastFrame()!.split('\n').filter(row => row.includes('● Goal 2/8'))).toHaveLength(1)
 })
 
 it('names the objective on the header only when asked to', () => {
   const ui = render(<App {...props(active, 'running')} goalObjective />)
-  expect(ui.lastFrame()!.split('\n').find(row => row.includes(copy.goalActive))).toContain('round 2/8 · Ship it')
+  expect(ui.lastFrame()!.split('\n').find(row => row.includes('● Goal 2/8'))).toContain('● Goal 2/8  Ship it')
 })
 
 it('projects the goal phases and their useful details', () => {
-  expect(goalState(active, copy)).toEqual({ glyph: '●', label: copy.goalActive, details: 'round 2/8', compact: '2/8', color: expect.any(String) })
-  expect(goalState(active, copy, { objective: true })).toMatchObject({ details: 'round 2/8', note: 'Ship it' })
+  expect(goalState(active, copy)).toEqual({ glyph: '●', label: copy.goalTitle, count: '2/8', details: '', compact: '2/8', color: expect.any(String) })
+  expect(goalState(active, copy, { objective: true })).toMatchObject({ count: '2/8', note: 'Ship it' })
   expect(goalState({ ...active, armed: false }, copy)).toMatchObject({ glyph: '○', label: copy.goalHeld,
     details: copy.goalResume })
   expect(goalState({ ...active, phase: 'paused' }, copy)).toMatchObject({ glyph: '○', label: copy.goalPaused })
@@ -53,7 +54,7 @@ it('projects the goal phases and their useful details', () => {
     glyph: '✗', label: copy.goalBlocked, details: '', note: 'Round limit reached',
   })
   expect(goalState({ ...active, phase: 'complete' }, copy)).toMatchObject({ glyph: '✓', label: copy.goalComplete,
-    details: 'round 2/8' })
+    count: '2/8', compact: '2/8' })
   expect(goalState(undefined, copy)).toBeUndefined()
 })
 
@@ -61,11 +62,11 @@ it('truncates a long header goal and opens its complete text with Up and Enter',
   const objective = Array.from({ length: 40 }, (_, index) => `Goal line ${index}`).join('\n')
   const ui = render(<App {...props({ ...active, objective })} />)
   const initialHeight = ui.lastFrame()!.split('\n').length
-  const header = ui.lastFrame()!.split('\n').find(row => row.includes(copy.goalActive))!
-  expect(header).toContain('Ctrl+O ● Goal active')
+  const header = ui.lastFrame()!.split('\n').find(row => row.includes('● Goal 2/8'))!
+  expect(header).toContain('Ctrl+O ● Goal 2/8')
   expect(header).not.toContain('Goal line 39')
   ui.stdin.write('\x1b[A')
-  await vi.waitFor(() => expect(ui.lastFrame()).toContain('> ● Goal active'))
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain('> ● Goal 2/8'))
   ui.stdin.write('\r')
   await vi.waitFor(() => expect(ui.lastFrame()).toContain(`${copy.sheetScroll} · ${copy.sheetClose}`))
   expect(ui.lastFrame()).toContain('Goal line 0')
@@ -75,7 +76,7 @@ it('truncates a long header goal and opens its complete text with Up and Enter',
   const openHeight = ui.lastFrame()!.split('\n').length
   expect(openHeight).toBeGreaterThan(initialHeight)
   ui.stdin.write('\x1b')
-  await vi.waitFor(() => expect(ui.lastFrame()).toContain('Ctrl+O ● Goal active'))
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain('Ctrl+O ● Goal 2/8'))
   // Closing repaints: the history the sheet pushed up is replayed back down,
   // so the frame keeps none of the sheet's rows as a gap over the input.
   // placement.spec.tsx checks the screen.
@@ -90,17 +91,17 @@ it('recalls input history with Up before selecting the goal, then restores the u
   await vi.waitFor(() => expect(ui.lastFrame()).toContain('> Unsent draft▌'))
   ui.stdin.write('\x1b[A')
   await vi.waitFor(() => expect(ui.lastFrame()).toContain('> Earlier prompt▌'))
-  expect(ui.lastFrame()).not.toContain('> ● Goal active')
+  expect(ui.lastFrame()).not.toContain('> ● Goal 2/8')
   // Past the oldest entry the goal is selected, and the composer holds the
   // draft again rather than a stale entry one Enter would rerun.
   ui.stdin.write('\x1b[A')
-  await vi.waitFor(() => expect(ui.lastFrame()).toContain('> ● Goal active'))
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain('> ● Goal 2/8'))
   expect(ui.lastFrame()).toContain('> Unsent draft▌')
   ui.stdin.write('\r')
   await vi.waitFor(() => expect(ui.lastFrame()).toContain(copy.sheetClose))
   ui.stdin.write('\x1b')
   await vi.waitFor(() => expect(ui.lastFrame()).not.toContain(copy.sheetClose))
-  expect(ui.lastFrame()).toContain('Ctrl+O ● Goal active')
+  expect(ui.lastFrame()).toContain('Ctrl+O ● Goal 2/8')
   expect(ui.lastFrame()).toContain('> Unsent draft▌')
   // History starts again from the newest entry.
   ui.stdin.write('\x1b[A')
@@ -137,5 +138,7 @@ it('shows the full goal on a short terminal where the composer leaves no room fo
   ui.stdin.write('\x1b[F')
   await vi.waitFor(() => expect(ui.lastFrame()).toContain('END_OF_GOAL'))
   ui.stdin.write('\x1b')
-  await vi.waitFor(() => expect(ui.lastFrame()).toContain('Ctrl+O ● Goal active'))
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain('● Goal 2/8'))
+  // Below 60 columns the goal's key goes, as every standing row's does.
+  expect(ui.lastFrame()).not.toContain('Ctrl+O')
 })

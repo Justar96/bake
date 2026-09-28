@@ -16,7 +16,15 @@ const EXAMPLES = [
 ] as const satisfies readonly { readonly name: string, readonly description: keyof TuiCopy }[]
 
 /**
- * Product name, version, the session line, the access boundary, and example commands.
+ * Product name, version, the session line, the access boundary, example
+ * commands, and the key that breaks a line in the prompt.
+ *
+ * The line-break key is taught here once, rather than as a standing hint on
+ * the composer, which the user looks at hundreds of times a day. Enter
+ * submits, and in most terminals Shift-Enter sends the same byte as Enter, so
+ * the key a first multi-line prompt needs is the one thing here that pressing
+ * around would not reveal. It is named in the terminal's foreground, not the
+ * commands' blue, since it is pressed rather than typed.
  *
  * Printed once, as the first committed item of a session with no history.
  * It scrolls away with the transcript and never costs the dynamic region a
@@ -51,7 +59,11 @@ export function Welcome({ version, heading, access, copy, frame, columns }: {
   const bordered = columns >= FRAME_MIN_COLUMNS
   const width = Math.max(1, Math.min(columns, WELCOME_WIDTH))
   const contentWidth = width - (bordered ? 4 : 0)
-  const nameWidth = Math.min(contentWidth, Math.max(...EXAMPLES.map(example => stringWidth(example.name))))
+  const rows = [
+    ...EXAMPLES.map(example => ({ name: example.name, description: copy[example.description], command: true })),
+    { name: copy.newlineKey, description: copy.welcomeNewline, command: false },
+  ]
+  const nameWidth = Math.min(contentWidth, Math.max(...rows.map(row => stringWidth(row.name))))
   const descriptionWidth = Math.max(0, contentWidth - nameWidth - 2)
   return (
     <Box
@@ -73,13 +85,13 @@ export function Welcome({ version, heading, access, copy, frame, columns }: {
         </Text>}
       </Box>
       <Box flexDirection="column" marginTop={1} flexShrink={0}>
-        {EXAMPLES.map(example => (
-          <Box key={example.name} columnGap={2} flexShrink={0}>
+        {rows.map(row => (
+          <Box key={row.name} columnGap={2} flexShrink={0}>
             <Box width={nameWidth} flexShrink={0}>
-              <Text color={PALETTE.asking} wrap="truncate-end">{example.name}</Text>
+              <Text {...row.command ? { color: PALETTE.asking } : {}} wrap="truncate-end">{row.name}</Text>
             </Box>
             {descriptionWidth > 0 && <Box width={descriptionWidth} minWidth={0}>
-              <Text dimColor wrap="truncate-end">{copy[example.description]}</Text>
+              <Text dimColor wrap="truncate-end">{row.description}</Text>
             </Box>}
           </Box>
         ))}

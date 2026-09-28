@@ -5,10 +5,11 @@
 │                                                              │
 │ /help       list available commands                          │
 │ /changelog  see what changed in this version                 │
+│ Ctrl+J      new line · Shift+Enter: /terminal-setup          │
 ╰──────────────────────────────────────────────────────────────╯
 
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-> ▌Ask anything
+> ▌Ask anything · / commands · @ files
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-  Model: model  /workspace
+  model  /workspace

@@ -1,7 +1,8 @@
 /** Cursor editing and reversible history browsing for Ink's separate input channels. */
 import { useEffect, useRef, useState } from 'react'
 import type { Key } from 'ink'
-import { composerText, draftAt, eraseAtCursor, insertText, moveCursor, type Draft } from './editor.ts'
+import { composerText, draftAt, eraseAtCursor, insertText, moveCursor, moveVertically, type Draft } from './editor.ts'
+import { recallCursor } from './history.ts'
 
 interface HistoryVisit {
   readonly iterator: Iterator<string>
@@ -16,6 +17,27 @@ interface HistoryVisit {
  * @returns false to keep the draft, or a promise that blocks editing until acceptance.
  */
 export type Submit = (text: string) => void | boolean | Promise<void | boolean>
+
+/**
+ * Whether a key inserts a line break instead of submitting.
+ *
+ * Most terminals send Shift-Enter as the same carriage return as Enter, so
+ * Shift-Enter breaks a line only where the terminal reports it as CSI-u. Two
+ * keys break one everywhere. Ctrl-J sends a line feed, which arrives as a read
+ * of its own. Alt-Enter, or Option-Enter where Option acts as Meta, sends
+ * Escape and a carriage return, which Ink decodes as a Meta Return. A terminal
+ * that reports Ctrl-J as CSI-u sends its letter with Ctrl instead. A line feed
+ * that ends other text in the same read is typing followed by Enter, so it
+ * still submits.
+ *
+ * @param text - the text Ink decoded from one read.
+ * @param key - the key Ink decoded from it.
+ * @returns true for Shift-, Alt-, or Meta-Enter, and a read of line feeds or Ctrl-J alone.
+ */
+export function isNewline(text: string, key: Key): boolean {
+  if (key.return) return key.shift || key.meta
+  return /^\n+$/u.test(text) || (key.ctrl && !key.meta && text === 'j')
+}
 
 /**
  * Keep edits from the same input read available before React paints the next frame.
@@ -33,7 +55,10 @@ export function useComposer(submit: Submit, history?: () => Iterable<string>, al
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const current = useRef(draft)
   const visit = useRef<HistoryVisit | undefined>(undefined)
-  const update = (value: Draft): void => { current.current = value; setDraft(value) }
+  // The column a run of Up and Down presses keeps to. Any other change ends the run.
+  const goal = useRef<number | undefined>(undefined)
+  const show = (value: Draft): void => { current.current = value; setDraft(value) }
+  const update = (value: Draft): void => { goal.current = undefined; show(value) }
   return {
     submitting,
     get blocked(): boolean { return pending.current },
@@ -60,8 +85,28 @@ export function useComposer(submit: Submit, history?: () => Iterable<string>, al
       update(visit.current.scratch)
       visit.current = undefined
     },
-    /** Step through input history. @returns false when there was nothing further to show. */
-    recall: (direction: 'older' | 'newer'): boolean => {
+    /**
+     * Move the caret to the screen row above or below, keeping its column over a run of presses.
+     * @param direction - the row to move to.
+     * @param width - columns the composer wraps each row at.
+     * @returns false on the first row (up) or the last row (down), where recall takes over.
+     */
+    vertical: (direction: 'up' | 'down', width: number): boolean => {
+      if (pending.current) return false
+      const moved = moveVertically(current.current, width, direction, goal.current)
+      if (moved === undefined) return false
+      show(moved.draft)
+      goal.current = moved.goal
+      return true
+    },
+    /**
+     * Step through input history.
+     * @param direction - older for Up, newer for Down.
+     * @param rows - screen rows an entry occupies. Given, an entry of several
+     *   rows opens with the caret on the row the next press leaves from.
+     * @returns false when there was nothing further to show.
+     */
+    recall: (direction: 'older' | 'newer', rows?: (text: string) => number): boolean => {
       if (pending.current || history === undefined) return false
       if (visit.current === undefined) {
         if (direction === 'newer') return false
@@ -77,7 +122,8 @@ export function useComposer(submit: Submit, history?: () => Iterable<string>, al
         active.entries.push(draftAt(composerText(item.value)))
       }
       active.index = next
-      update(active.entries[next]!)
+      const entry = active.entries[next]!
+      update(rows === undefined ? entry : draftAt(entry.text, recallCursor(entry, direction, rows(entry.text))))
       return true
     },
     type: (value: string): void => {

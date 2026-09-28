@@ -5,6 +5,6 @@ Next step: Queued direction
 /clear-pending discards queued input
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-> ▌Ask anything
+> ▌Ask anything · / commands · @ files
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-  Model: model  Context: ~12.3k/128k (9%)  /workspace
+  model  ctx ~9% (12.3k/128k)  /workspace
