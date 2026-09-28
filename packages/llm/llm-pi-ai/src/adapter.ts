@@ -57,10 +57,11 @@ import type {
 } from '@deepseek-ai/dsh-llm'
 import type { AttachmentStore, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import { idleWatchdog, timeoutOf } from '@deepseek-ai/dsh-timeout'
+import { requestImageMaxDimensionFor } from './config.ts'
 import type { ResolvedPiAiProviderProfile } from './config.ts'
 import { toPiContext } from './context.ts'
 import { createModels, getSupportedThinkingLevels } from './models.ts'
-import { fetchOpenAiSse } from './sse.ts'
+import { fetchAnthropicSse, fetchOpenAiSse } from './sse.ts'
 import { toStreamChunks } from './stream.ts'
 
 /** One resolution's frozen view: the profiles and the collection built from them. */
@@ -391,6 +392,8 @@ export class PiAiAdapter extends LlmAdapter {
       const onReplayDegrade = (reason: string): void => {
         this.config.onReplayDegrade?.({ provider: options.provider, model: options.model, reason })
       }
+      // The model's own protocol, not the route's, selects the default: one route may mix them.
+      const maxDimension = requestImageMaxDimensionFor(profile, model.api)
       const context = attachments === undefined
         ? toPiContext(options, undefined, onReplayDegrade)
         : await toPiContext({ ...options, signal: watchdog.signal }, {
@@ -399,6 +402,7 @@ export class PiAiAdapter extends LlmAdapter {
           maxRequestImageBytes: profile.maxRequestImageBytes,
           requestImagePolicy: {
             maxPixels: profile.requestImagePixelBudget,
+            ...maxDimension === undefined ? {} : { maxDimension },
             maxBytes: profile.requestImageMaxBytes,
           },
         }, onReplayDegrade)
@@ -408,7 +412,9 @@ export class PiAiAdapter extends LlmAdapter {
         ...options.maxTokens === undefined ? {} : { maxTokens: options.maxTokens },
         ...options.sessionId === undefined ? {} : { sessionId: String(options.sessionId) },
         signal: watchdog.signal,
-        ...model.api === 'openai-responses' || model.api === 'openai-completions' ? { fetch: fetchOpenAiSse } : {},
+        // Proxy heartbeats can empty or split SSE events before pi-ai's parsers read them.
+        ...model.api === 'openai-responses' || model.api === 'openai-completions' ? { fetch: fetchOpenAiSse }
+          : model.api === 'anthropic-messages' ? { fetch: fetchAnthropicSse } : {},
         // Profile headers are deployment-owned; attribution and session
         // names are Harness-owned and therefore win collisions.
         headers: requestHeaders(profile.headers, options.sessionId === undefined ? undefined : String(options.sessionId)),

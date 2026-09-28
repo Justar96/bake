@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { assertServiceable, Config, resolveProfiles } from '../src/config.ts'
+import {
+  assertServiceable,
+  Config,
+  DEFAULT_ANTHROPIC_REQUEST_IMAGE_MAX_DIMENSION,
+  requestImageMaxDimensionFor,
+  resolveProfiles,
+} from '../src/config.ts'
 
 /** Validate one hand-declared route, with the caller's fields layered onto it. */
 const routeWith = (profile: Record<string, unknown>): (() => unknown) =>
@@ -91,6 +97,11 @@ describe('request image policy bounds', () => {
     ['requestImagePixelBudget', Number.MAX_SAFE_INTEGER + 1, /requestImagePixelBudget must be a positive safe integer/],
     ['requestImageMaxBytes', 0, /requestImageMaxBytes must be a positive safe integer/],
     ['requestImageMaxBytes', 1.5, /requestImageMaxBytes must be a positive safe integer/],
+    ['requestImageMaxDimension', 0, /requestImageMaxDimension must be a positive safe integer/],
+    ['requestImageMaxDimension', -2000, /requestImageMaxDimension must be a positive safe integer/],
+    ['requestImageMaxDimension', 1999.5, /requestImageMaxDimension must be a positive safe integer/],
+    ['requestImageMaxDimension', Number.MAX_SAFE_INTEGER + 1, /requestImageMaxDimension must be a positive safe integer/],
+    ['requestImageMaxDimension', Number.NaN, /requestImageMaxDimension must be a positive safe integer/],
   ] as const)('rejects %s=%s at service resolution', (field, value, message) => {
     const programmatic = {
       providers: {
@@ -105,5 +116,35 @@ describe('request image policy bounds', () => {
     expect(() => {
       assertServiceable(programmatic)
     }).toThrow(message)
+  })
+
+  it.each([0, 1.5, -1, 'wide'])('refuses requestImageMaxDimension=%s at the schema that settings writes run', (value) => {
+    expect(routeWith({ requestImageMaxDimension: value })).toThrow()
+  })
+
+  it('materializes no long-edge cap, so the dispatching protocol selects the default', () => {
+    const absent = routeWith({})() as { providers: Record<string, { requestImageMaxDimension?: unknown }> }
+    expect(absent.providers['acme-gateway']?.requestImageMaxDimension).toBeUndefined()
+    const resolved = resolveProfiles(absent.providers as Config['providers']).get('acme-gateway')
+    expect(resolved).not.toHaveProperty('requestImageMaxDimension')
+    expect(requestImageMaxDimensionFor(resolved!, 'anthropic-messages')).toBe(DEFAULT_ANTHROPIC_REQUEST_IMAGE_MAX_DIMENSION)
+    expect(DEFAULT_ANTHROPIC_REQUEST_IMAGE_MAX_DIMENSION).toBe(2000)
+    for (const api of ['openai-completions', 'openai-responses', 'bedrock-converse-stream', 'google-generative-ai']) {
+      expect(requestImageMaxDimensionFor(resolved!, api)).toBeUndefined()
+    }
+  })
+
+  it('applies a configured long-edge cap to every protocol on the route, above or below the default', () => {
+    for (const configured of [1, 1568, 2576]) {
+      const resolved = resolveProfiles({ 'acme-gateway': {
+        api: 'openai-completions',
+        baseURL: 'https://acme.test',
+        models: [{ id: 'm' }],
+        requestImageMaxDimension: configured,
+      } }).get('acme-gateway')
+      expect(resolved?.requestImageMaxDimension).toBe(configured)
+      expect(requestImageMaxDimensionFor(resolved!, 'anthropic-messages')).toBe(configured)
+      expect(requestImageMaxDimensionFor(resolved!, 'openai-responses')).toBe(configured)
+    }
   })
 })

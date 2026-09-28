@@ -16,12 +16,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
+import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
+import LocalAttachments from '@deepseek-ai/dsh-attachment-local'
 import LlmRuntime, { createMessage, createUserMessage, userAgent } from '@deepseek-ai/dsh-llm'
 import LocalCredentialProvider from '@deepseek-ai/dsh-credentials-local'
 import FileSettingsProvider from '@deepseek-ai/dsh-settings-file'
 import * as LlmPiAi from '@deepseek-ai/dsh-llm-pi-ai'
 import { assemble } from './assemble.ts'
-import { closeMockServers, mockServer, textEvents } from './mock-server.ts'
+import { encodedDimensions, solidPng, wireImages } from './image-fixtures.ts'
+import { anthropicTextWire, closeMockServers, mockServer, textEvents } from './mock-server.ts'
 
 /** One text block, then a tool call truncated by the output-token ceiling. */
 const truncatedToolCallEvents = [
@@ -67,6 +70,10 @@ async function loadComposition(): Promise<{ ctx: Context; settingsPath: string }
     '    debounceMs: 10',
     '- id: llm-pi-ai',
     "  name: '@deepseek-ai/dsh-llm-pi-ai'",
+    '- id: attachment-local',
+    "  name: '@deepseek-ai/dsh-attachment-local'",
+    '  config:',
+    `    dshHome: ${JSON.stringify(join(root, 'home'))}`,
     '',
   ].join('\n'))
 
@@ -80,6 +87,7 @@ async function loadComposition(): Promise<{ ctx: Context; settingsPath: string }
     ['@deepseek-ai/dsh-settings-file', FileSettingsProvider],
     ['@deepseek-ai/dsh-credentials-local', LocalCredentialProvider],
     ['@deepseek-ai/dsh-llm-pi-ai', LlmPiAi],
+    ['@deepseek-ai/dsh-attachment-local', LocalAttachments],
   ])
   ctx.loader.internal = {
     version: 'v2',
@@ -220,6 +228,72 @@ describe('llm-pi-ai real dormant composition', () => {
     })
     const followup = server.requests[1] as { messages?: unknown[] }
     expect(followup.messages?.[0]).not.toHaveProperty('tool_calls')
+  })
+
+  it('re-projects a stored 21-image history within Anthropic\'s many-image limit and follows a live cap change', async () => {
+    vi.stubEnv('PI_COMPOSITION_KEY', '')
+    const server = await mockServer([{ wire: anthropicTextWire }, { wire: anthropicTextWire }])
+    const { ctx, settingsPath } = await loadComposition()
+    // The shape of a gateway route serving Claude over Anthropic Messages beside GPT over Responses.
+    const route = [
+      'llm-pi-ai:',
+      '  providers:',
+      '    cliproxyapi:',
+      '      apiKeyEnv: PI_COMPOSITION_KEY',
+      '      api: openai-responses',
+      `      baseURL: ${server.url}/v1`,
+      '      models:',
+      '        - id: gpt-large',
+      '          input: [text, image]',
+      '        - id: claude-opus-4-7',
+      '          api: anthropic-messages',
+      `          baseURL: ${server.url}`,
+      '          input: [text, image]',
+    ]
+    await writeFile(settingsPath, [...route, ''].join('\n'))
+    await vi.waitFor(() => {
+      expect(ctx.llm.listProviders().map(provider => provider.id)).toEqual(['cliproxyapi'])
+    }, { timeout: 5000 })
+
+    // Durable attachments as an existing session holds them: normalized, with long edges above 2000 px.
+    const sources = [[4000, 1000], [2048, 2048], [1000, 4000]] as const
+    const refs: ImageAttachmentRef[] = []
+    for (const [index, [width, height]] of sources.entries()) {
+      refs.push(await ctx.attachments.saveImage({ data: solidPng(width, height, [200, 40 * index, 90]), mediaType: 'image/png' }))
+    }
+    expect(refs.map(ref => [ref.width, ref.height])).toEqual(sources)
+    const history = Array.from({ length: 7 }, (_, turn) => [
+      createUserMessage({
+        content: [{ type: 'text', text: `screens ${turn}` }, ...refs.map(attachment => ({ type: 'image' as const, attachment }))],
+        source: { kind: 'user' },
+      }),
+      createMessage({ role: 'assistant', content: [{ type: 'text', text: 'noted' }], source: { kind: 'plugin', plugin: 'test' } }),
+    ]).flat().slice(0, -1)
+
+    const defaulted = await assemble(ctx, { provider: 'cliproxyapi', model: 'claude-opus-4-7', messages: history })
+    expect(defaulted.finish).toEqual({ kind: 'stop' })
+    expect(defaulted.message.content).toEqual([{ type: 'text', text: 'hello' }])
+    const defaultedImages = wireImages(server.requests[0]).map(encodedDimensions)
+    expect(defaultedImages).toHaveLength(21)
+    expect(defaultedImages.every(({ width, height }) => width <= 2000 && height <= 2000)).toBe(true)
+    expect(JSON.stringify(server.requests[0])).toContain('request preview 2000x500px')
+
+    // A configured cap reaches the next request and re-projects the same stored originals.
+    await writeFile(settingsPath, [...route.slice(0, 5), '      requestImageMaxDimension: 1000', ...route.slice(5), ''].join('\n'))
+    await vi.waitFor(() => {
+      expect(ctx.settings.describe().find(section => section.ns === 'llm-pi-ai')?.value)
+        .toMatchObject({ providers: { cliproxyapi: { requestImageMaxDimension: 1000 } } })
+    }, { timeout: 5000 })
+    const configured = await assemble(ctx, { provider: 'cliproxyapi', model: 'claude-opus-4-7', messages: history })
+    expect(configured.finish).toEqual({ kind: 'stop' })
+    const configuredImages = wireImages(server.requests[1]).map(encodedDimensions)
+    expect(configuredImages).toHaveLength(21)
+    expect(configuredImages.slice(0, 3)).toEqual([
+      { width: 1000, height: 250 },
+      { width: 1000, height: 1000 },
+      { width: 250, height: 1000 },
+    ])
+    expect(configuredImages.every(({ width, height }) => width <= 1000 && height <= 1000)).toBe(true)
   })
 
   it('continues a legacy session whose stored replay state no longer matches its content', async () => {

@@ -82,6 +82,7 @@ kind: "package-reference"
 | `defaultContextWindow` | `262,144` | 未描述模型的容量回退 |
 | `defaultMaxTokens` | `32,768` | 未描述模型的输出上限回退 |
 | `requestImagePixelBudget` | `4,194,304` | 每张确定性请求图片的总像素预算 |
+| `requestImageMaxDimension` | `anthropic-messages` 模型为 `2000`，其他协议不设 | 每张请求图片在像素预算之后应用的长边上限；显式设置后作用于路由上的每个模型 |
 | `requestImageMaxBytes` | `1 MiB` | 每张请求图片在 base64 扩展前的编码字节目标 |
 | `maxRequestImageBytes` | `20 MiB` | base64 图片载荷总上限，保留图片超过时请求以 `IMAGE_OFFLOAD_REQUIRED` 失败 |
 | `retryPolicy` | normal，5 次重试 | 由 `dsh-llm-retry` 执行的提供方自有重试策略 |
@@ -112,7 +113,7 @@ profile 通过可选 settings seam 每次操作重新读取：base 与用户的 
 
 ### 失败与恢复
 
-OpenAI Responses 和 Chat Completions 的 HTTP 流会忽略空 SSE 事件，包括仅带代理心跳的具名事件。非空事件数据仍由 SDK 校验；格式错误的 JSON 仍会失败。Responses 流在缺少终止载荷时结束会产生 `TRANSPORT`，可按配置的重试策略恢复，而不会被视为成功的空回复。取消和生成空闲超时仍然有效；心跳不算模型进展。此归一化不适用于其他协议或 WebSocket 传输。
+OpenAI Responses、Chat Completions 和 Anthropic Messages 的 HTTP 流在 pi-ai 解析前会针对代理心跳做归一化：空 SSE 事件会被忽略，包括 `data:` 行被心跳截断的具名事件。网关的心跳定时器（如 CLIProxyAPI 的 `streaming.keepalive-seconds`）可能落在事件的 `event:` 行与 `data:` 行之间，使数据成为一个未命名事件。在 Anthropic Messages 上，未命名事件或使用 SSE 默认名称 `message` 的事件，若其数据是 `type` 为 Anthropic 流事件（`message_start`、`content_block_delta`、`error` 等）的 JSON 对象，会以该名称投递，因此其文本不会丢失，`error` 会以提供方的消息使本轮失败。具名事件保留原名，不是此类对象的未命名数据仍保持未命名。非空事件数据绝不会被捏造或改写，仍由 pi-ai 校验；格式错误的 JSON 仍会失败。Responses 流在缺少终止载荷时结束会产生 `TRANSPORT`，可按配置的重试策略恢复，而不会被视为成功的空回复。取消和生成空闲超时仍然有效；心跳不算模型进展。此归一化不适用于其他协议或 WebSocket 传输。
 
 pi-ai 不提供的路由需要 `api`、`baseURL` 与非空 `models` 列表；无法服务的 profile 会在写入处被拒绝，并点名路由与模型。失败携带稳定 code：无法使用的凭据以 `INVALID_CREDENTIAL` 失败并点名路由与引用，`apiKeyEnv` 引用解析为空的路由以 `MISSING_CREDENTIAL` 失败，未配置模型以 `UNKNOWN_MODEL` 失败，终止性提供方失败则区分 `QUOTA` 与暂时性 `RATE_LIMIT`。当 `RATE_LIMIT` 或 `SERVER` 失败的响应体携带网关凭据冷却提示（`"reset_seconds": N`，CLIProxyAPI 与 CliRelay 在该模型的全部凭据冷却时发送）时，该等待会作为提供方重试延迟上报：若不超过 `retryPolicy.maxDelayMs`，重试策略恰好等待这么久，否则立即结束本轮，而不是在冷却期内耗尽重试次数。在网关路由上调高 `maxDelayMs` 即可等过冷却期。`GenerateOptions.stop` 以 `UNSUPPORTED_OPTION` 被拒绝，因为 pi-ai 的通用流式 UI 无法跨提供方保证它。
 
@@ -183,15 +184,15 @@ Settings 写入会在合并组合层与用户层后严格校验每个新增或�
 
 #### 模型看到什么
 
-所选目录模型会收到一条系统提示词（`GenerateOptions.system`，否则取历史中首条 `system` 消息的文本；首条 system 消息文本为空时不发送系统提示词）、其余历史、工具与 pi-ai 通用流式 API 支持的采样字段。每张保留图片前都会有文本，注明其完整附件 id 与实际请求尺寸。当前执行文件系统可以映射附件提供方的宿主对象时，该文本还会携带只读规范化对象路径，并警告规范化或请求投影可能缩放或重新编码上传内容。日志中的图片省略决策选中的每个出现位置都会在替换文本中保留自己的身份与当前已解析访问方式，其规范化附件不会读取或变换。当保留的出现位置按精确 base64 载荷仍超过路由的 `maxRequestImageBytes` 时，调用以 `IMAGE_OFFLOAD_REQUIRED` 失败，由 `dsh-compaction-image-offload` 用 `image/offload` 事件记录所选位置并重试步骤。提供方原生回放元数据只在适配器针对历史内容校验通过后恢复。
+所选目录模型会收到一条系统提示词（`GenerateOptions.system`，否则取历史中首条 `system` 消息的文本；首条 system 消息文本为空时不发送系统提示词）、其余历史、工具与 pi-ai 通用流式 API 支持的采样字段。每张保留图片前都会有文本，注明其完整附件 id 与实际请求尺寸。其请求版本在构建请求时从已存储的规范化附件派生：先应用路由的 `requestImagePixelBudget`，再应用其 `requestImageMaxDimension` 长边上限。使用 `anthropic-messages` 的模型默认上限为 2000 px，即 Anthropic 对携带 20 张以上图片的请求规定的单边上限，因此较长的图片历史仍会被接受。当前执行文件系统可以映射附件提供方的宿主对象时，该文本还会携带只读规范化对象路径，并警告规范化或请求投影可能缩放或重新编码上传内容。日志中的图片省略决策选中的每个出现位置都会在替换文本中保留自己的身份与当前已解析访问方式，其规范化附件不会读取或变换。当保留的出现位置按精确 base64 载荷仍超过路由的 `maxRequestImageBytes` 时，调用以 `IMAGE_OFFLOAD_REQUIRED` 失败，由 `dsh-compaction-image-offload` 用 `image/offload` 事件记录所选位置并重试步骤。提供方原生回放元数据只在适配器针对历史内容校验通过后恢复。
 
 #### Token 影响
 
-提供方分词决定精确输入。保留图片会添加稳定的附件与坐标描述符；卸载占位符会替代省略图片的视觉 token。回放元数据可能让原生 API 复用提供方侧状态。
+提供方分词决定精确输入。保留图片会添加稳定的附件与坐标描述符；卸载占位符会替代省略图片的视觉 token。较低的像素预算或长边上限会减少图片的视觉 token。Claude 标准档本就会把长边超过 1568 px 的图片缩小，因此 2000 px 默认值对它没有损失；Claude 4.7 及之后模型的高分辨率档最高 2576 px，默认只会收到最多 2000 px。回放元数据可能让原生 API 复用提供方侧状态。
 
 #### KV Cache 影响
 
-转换保持逻辑请求顺序，图片句柄与卸载占位符则会添加模型可见文本。即使附件身份与请求字节保持稳定，执行世界路径变化也会改写历史句柄，并可能从该图片起阻止复用。更换适配器实例、提供方、模型或其他上游 token 具有相同的后缀影响。提供方复用哪段前缀取决于协议格式：OpenAI 系端点自动缓存，并以 `prompt_cache_key` 接收会话 id；Anthropic Messages 只在 pi-ai 标记于系统提示、最后一个工具和最后一条用户消息上的 `cache_control` 断点处缓存。因此网关经转换后的 OpenAI 协议提供的 Claude 模型不会获得提示缓存。提供方缓存还按上游凭据隔离，因此在多个凭据间轮询的网关，只要相邻步骤落到不同凭据，就会重新预填整段前缀。因此，每个属于某会话的请求都会以 `x-deepseek-harness-session-id` 携带该会话 id，这与 DeepSeek 适配器发送的标头相同，CliRelay 的 `session-sticky` 路由据此绑定凭据；配置档标头无法覆盖或伪造它。对于按其他标头分流的网关，可在 Anthropic Messages 或 Chat Completions 路由上设置 `compat.sendSessionAffinityHeaders: true`，会把会话 id 作为 `x-session-affinity` 发送；启用粘性路由的网关（CLIProxyAPI 的 `routing.session-affinity`）据此让同一会话始终使用同一凭据。Responses 路由无需此开关，因为 `prompt_cache_key` 已携带该 id。一次省略决策会把较早图片换成占位文本，因此复用在该消息处结束；省略永不回退，此后前缀保持稳定。
+转换保持逻辑请求顺序，图片句柄与卸载占位符则会添加模型可见文本。每张图片的请求目标只取决于其已存储尺寸、路由的图片设置与发送模型的协议，从不取决于请求携带多少张图片，因此第 21 张图片不会改变任何更早图片的字节，也不会破坏经由它们缓存的前缀。更改 `requestImagePixelBudget`、`requestImageMaxDimension` 或 `requestImageMaxBytes` 会重新投影每张保留图片，因此复用在第一张图片处结束。引入 Anthropic Messages 2000 px 默认值的升级，对历史中含有更大图片的会话也有同样的一次性影响；之后的请求会重新稳定。即使附件身份与请求字节保持稳定，执行世界路径变化也会改写历史句柄，并可能从该图片起阻止复用。更换适配器实例、提供方、模型或其他上游 token 具有相同的后缀影响。提供方复用哪段前缀取决于协议格式：OpenAI 系端点自动缓存，并以 `prompt_cache_key` 接收会话 id；Anthropic Messages 只在 pi-ai 标记于系统提示、最后一个工具和最后一条用户消息上的 `cache_control` 断点处缓存。因此网关经转换后的 OpenAI 协议提供的 Claude 模型不会获得提示缓存。提供方缓存还按上游凭据隔离，因此在多个凭据间轮询的网关，只要相邻步骤落到不同凭据，就会重新预填整段前缀。因此，每个属于某会话的请求都会以 `x-deepseek-harness-session-id` 携带该会话 id，这与 DeepSeek 适配器发送的标头相同，CliRelay 的 `session-sticky` 路由据此绑定凭据；配置档标头无法覆盖或伪造它。对于按其他标头分流的网关，可在 Anthropic Messages 或 Chat Completions 路由上设置 `compat.sendSessionAffinityHeaders: true`，会把会话 id 作为 `x-session-affinity` 发送；启用粘性路由的网关（CLIProxyAPI 的 `routing.session-affinity`）据此让同一会话始终使用同一凭据。Responses 路由无需此开关，因为 `prompt_cache_key` 已携带该 id。一次省略决策会把较早图片换成占位文本，因此复用在该消息处结束；省略永不回退，此后前缀保持稳定。
 
 ### 提供方响应
 
@@ -215,6 +216,7 @@ pi-ai 事件变成 harness 的推理、文本、工具调用、用量与 finish 
 这些限制说明适配器在哪里停止、由未来工作接续。它们是当前包约束，不是通用 pi-ai 对比或任务积压。
 
 - **`maxRequestImageBytes` 只计算 base64 图片载荷**，文本、工具、描述符与 JSON 结构在该上限之外，因此它必须留有余量地低于网关请求体上限。
+- **默认长边上限按协议格式而非上游模型决定**——经 `openai-completions` 或 `openai-responses` 提供的 Claude（如 OpenRouter 目录与做协议转换的网关）没有默认上限，因此携带 20 张以上图片且有一边超过 2000 px 的请求会以 Anthropic 的多图错误失败；请在该路由上设置 `requestImageMaxDimension: 2000`。该值作用于路由上的每个模型。在 Anthropic Messages 路由上为 Claude 2576 px 高分辨率档把上限提高到 2000 px 以上，一旦历史中超过 20 张图片也会以同样方式失败。
 - **登录只存在于发起它的进程中**——授权尝试不持久，因此登录中途刷新页面会放弃它，用户需要重新开始。退出登录是对已存储记录执行 `deleteRecord`，只在本地忘记它，不会告知签发方。
 - **提供方原生发现经本插件的 ambient context 回答**——不点名凭据的路由交由目录提供方自身解析，它会询问环境值（`AZURE_OPENAI_API_KEY`、`AWS_PROFILE` 及各提供方自有集合）与本地凭据文件。两个问题都在这里得到回答：凭据 seam 先于进程环境被查询，文件存在性则针对宿主进程的文件系统以 `~` 展开后检查。它做不到的是*读取*凭据文件内容——自行解析 `~/.aws/credentials` 的提供方会直接读取，不经该 seam。
 - **设置可以新增或覆盖路由，不能移除组合路由**——用户层覆盖组合 base，因此删除 `cordis.yml` 提供的提供方属于组合变更。

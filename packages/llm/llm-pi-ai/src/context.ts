@@ -16,7 +16,7 @@ import type {
 } from '@deepseek-ai/dsh-attachment'
 import type { Context as PiContext, ImageContent, Message as PiMessage, TextContent, Tool as PiTool } from '@earendil-works/pi-ai'
 import { toPiAssistant } from './replay.ts'
-import { requestImageDimensions } from '@deepseek-ai/dsh-attachment'
+import { longEdgeDimensions, requestImageDimensions } from '@deepseek-ai/dsh-attachment'
 import { DEFAULT_REQUEST_IMAGE_MAX_BYTES, DEFAULT_REQUEST_IMAGE_PIXEL_BUDGET } from './config.ts'
 
 /** Join the text blocks of a harness message. */
@@ -225,7 +225,7 @@ export interface PiImageRequestContext {
   resolveImageAccess: ImageAttachmentAccessResolver
   /** Request-level bound on the base64-encoded payload of retained images; omission leaves the bound unchecked. */
   maxRequestImageBytes?: number
-  /** Route pixel and raw encoded-byte budgets. */
+  /** Route pixel, long-edge, and raw encoded-byte budgets; omission applies the default budgets without a long-edge cap. */
   requestImagePolicy?: PiImageRequestBudget
 }
 
@@ -233,13 +233,33 @@ export interface PiImageRequestContext {
 export interface PiImageRequestBudget {
   /** Total-pixel budget; larger sources are downscaled proportionally. */
   maxPixels: number
+  /** Long-edge cap in pixels applied after the pixel budget; omission applies the pixel budget alone. */
+  maxDimension?: number
   /** Encoded-byte target for one request image. */
   maxBytes: number
 }
 
-/** Deterministic request target for one source under the route budgets. */
-function requestImageTarget(ref: ImageAttachmentRef, budget: PiImageRequestBudget): ImageRequestTarget {
-  return { ...requestImageDimensions(ref.width, ref.height, budget.maxPixels), maxBytes: budget.maxBytes }
+/**
+ * Deterministic request target for one source under the route budgets. The
+ * pixel budget applies first; a long edge still above the cap is then
+ * recomputed from the source dimensions, so the short edge rounds once, as the
+ * attachment provider's long-edge-only resize derives it, and the result stays
+ * inside both bounds. The target depends only on the source dimensions and the
+ * budgets, never on the other images in the request, so an image's request
+ * bytes do not change as history grows.
+ * @param source - intrinsic dimensions of the normalized attachment.
+ * @param budget - the dispatching model's pixel budget, long-edge cap, and byte target.
+ * @returns aspect-preserving dimensions of at least 1 px per side, never enlarged, beside the byte target.
+ */
+export function requestImageTarget(
+  source: Pick<ImageAttachmentRef, 'width' | 'height'>,
+  budget: PiImageRequestBudget,
+): ImageRequestTarget {
+  const budgeted = requestImageDimensions(source.width, source.height, budget.maxPixels)
+  const dimensions = budget.maxDimension !== undefined && Math.max(budgeted.width, budgeted.height) > budget.maxDimension
+    ? longEdgeDimensions(source.width, source.height, budget.maxDimension)
+    : budgeted
+  return { ...dimensions, maxBytes: budget.maxBytes }
 }
 
 /**

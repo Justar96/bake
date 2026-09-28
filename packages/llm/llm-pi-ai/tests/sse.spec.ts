@@ -1,7 +1,7 @@
 /** Proxy framing through the installed parser, SDK, and Harness adapter. */
 import { afterEach, describe, expect, it } from 'vitest'
 import { createUserMessage, type StreamChunk } from '@deepseek-ai/dsh-llm'
-import { normalizeOpenAiSse } from '../src/sse.ts'
+import { normalizeAnthropicSse, normalizeOpenAiSse } from '../src/sse.ts'
 import { PiAiAdapter } from '../src/adapter.ts'
 import { resolveProfiles } from '../src/config.ts'
 import { memoryAuth } from './auth-double.ts'
@@ -155,5 +155,119 @@ describe('OpenAI SDK protocol outcomes', () => {
     }
     await server.responseClosed
     expect(server.closedResponses).toBe(1)
+  })
+})
+
+const heartbeat = ': keep-alive\n\n'
+const anthropicDelta = { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: '你好🌱' } }
+const anthropicError = { type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } }
+const anthropicEvents = [
+  { type: 'message_start', message: { id: 'msg_1', type: 'message', role: 'assistant', model: 'model', content: [],
+    stop_reason: null, stop_sequence: null, usage: { input_tokens: 3, output_tokens: 0 } } },
+  { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+  { type: 'ping' },
+  { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'hello ' } },
+  { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'world' } },
+  { type: 'content_block_stop', index: 0 },
+  { type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 2 } },
+  { type: 'message_stop' },
+]
+const named = (event: { type: string }) => `event: ${event.type}\n${data(event)}`
+/** CLIProxyAPI's timer heartbeat landing between an event's `event:` and `data:` lines. */
+const split = (event: { type: string }) => `event: ${event.type}\n${heartbeat}${data(event)}`
+const chunkings = {
+  whole: (bytes: Uint8Array) => [bytes],
+  bytes: (bytes: Uint8Array) => Array.from(bytes, byte => Uint8Array.of(byte)),
+}
+const normalizedAnthropic = (wire: string, chunking: keyof typeof chunkings = 'whole') =>
+  normalizeAnthropicSse(response(chunkings[chunking](new TextEncoder().encode(wire)))).text()
+
+describe('Anthropic SSE framing', () => {
+  it.each(['\n', '\r\n', '\r'].flatMap(ending => (['whole', 'bytes'] as const)
+    .map(chunking => ({ ending, label: JSON.stringify(ending), chunking }))))(
+    'rejoins a heartbeat-split event as one named event with $label endings in $chunking chunks',
+    async ({ ending, chunking }) => {
+      // The exact failing sequence; byte chunks split every line and every CR/LF pair.
+      const wire = split(anthropicDelta).replaceAll('\n', ending)
+      const failing = 'event: content_block_delta\n: keep-alive\n\ndata: {"type":"content_block_delta",'.replaceAll('\n', ending)
+      expect(wire.startsWith(failing)).toBe(true)
+      expect(await normalizedAnthropic(wire, chunking)).toBe(named(anthropicDelta))
+    },
+  )
+
+  it('drops heartbeats, comments, and empty events between events and keeps named events unchanged', async () => {
+    const wire = heartbeat + named(anthropicEvents[0]!) + heartbeat + heartbeat
+      + 'id: 1\nretry: 1000\n: comment\n\n' + 'event: content_block_stop\ndata:\n\n' + split(anthropicError)
+      // A name that disagrees with its JSON `type`, and a non-Anthropic name, pass through as sent.
+      + 'event: content_block_delta\ndata: {"type":"ping"}\n\n' + 'event: done\ndata: [DONE]\n\n' + heartbeat
+    expect(await normalizedAnthropic(wire, 'bytes')).toBe(named(anthropicEvents[0]!) + named(anthropicError)
+      + 'event: content_block_delta\ndata: {"type":"ping"}\n\n' + 'event: done\ndata: [DONE]\n\n')
+  })
+
+  it('names data-only Anthropic events and default `message` events from their JSON type', async () => {
+    const wire = data({ type: 'ping' }) + 'event: message\ndata: {"type":"message_stop"}\n\n' + data(anthropicError)
+      + 'data: {"type":\ndata: "content_block_stop","index":0}\n\n'
+    expect(await normalizedAnthropic(wire)).toBe(named({ type: 'ping' }) + 'event: message_stop\ndata: {"type":"message_stop"}\n\n'
+      + named(anthropicError) + 'event: content_block_stop\ndata: {"type":\ndata: "content_block_stop","index":0}\n\n')
+  })
+
+  it('leaves non-JSON and unknown-type data-only events as sent', async () => {
+    const wire = 'data: [DONE]\n\ndata: {broken\n\n' + data({ type: 'response.completed' }) + data(['message_stop'])
+      + data({ type: 5 }) + data('ping') + 'event: message\ndata: {"type":"done"}\n\n'
+    expect(await normalizedAnthropic(wire)).toBe(wire)
+  })
+
+  it('never renames a data-only event in the OpenAI framing', async () => {
+    expect(await normalizeOpenAiSse(response([new TextEncoder().encode(split(anthropicDelta))])).text()).toBe(data(anthropicDelta))
+  })
+
+  it.each([
+    new Response('denied', { status: 401, headers: { 'content-type': 'text/event-stream' } }),
+    Response.json({ type: 'message', content: [] }),
+  ])('preserves HTTP failures and non-SSE responses', (original) => {
+    expect(normalizeAnthropicSse(original)).toBe(original)
+  })
+})
+
+describe('Anthropic Messages protocol outcomes', () => {
+  const text = (chunks: readonly StreamChunk[]) =>
+    chunks.flatMap(chunk => chunk.type === 'text-delta' ? [chunk.text] : []).join('')
+
+  it.each(['\n', '\r\n', '\r'])('keeps every delta, usage, and stop when heartbeats split events with %j endings', async (ending) => {
+    const wire = [heartbeat, ...anthropicEvents.flatMap(event => [split(event), heartbeat])]
+      .map(part => part.replaceAll('\n', ending))
+    const server = await mockServer([{ wire }])
+    const chunks = await collect(adapter(server.url, 'anthropic-messages').stream(request))
+    expect(chunks.filter(chunk => chunk.type === 'finish')).toMatchObject([{ type: 'finish', reason: { kind: 'stop' } }])
+    expect(text(chunks)).toBe('hello world')
+    expect(chunks).toContainEqual({ type: 'usage', usage: { inputTokens: 3, outputTokens: 2, totalTokens: 5 } })
+    expect(server.paths).toEqual(['/v1/messages?beta=true'])
+  })
+
+  it('serves a proxy that never names its events', async () => {
+    const server = await mockServer([{ wire: anthropicEvents.map(data) }])
+    const chunks = await collect(adapter(server.url, 'anthropic-messages').stream(request))
+    expect(finish(chunks)).toMatchObject({ type: 'finish', reason: { kind: 'stop' } })
+    expect(text(chunks)).toBe('hello world')
+  })
+
+  it.each([['named', named], ['heartbeat-split', split], ['data-only', data]] as const)(
+    'surfaces a %s provider error event instead of a truncated stream',
+    async (_shape, frame) => {
+      const server = await mockServer([{ wire: [...anthropicEvents.slice(0, 4).map(split), frame(anthropicError)] }])
+      const chunks = await collect(adapter(server.url, 'anthropic-messages').stream(request))
+      expect(text(chunks)).toBe('hello ')
+      expect(finish(chunks)).toMatchObject({
+        type: 'finish', reason: { kind: 'error', failure: { message: expect.stringContaining('Overloaded') } },
+      })
+    },
+  )
+
+  it('does not let heartbeats or heartbeat-emptied events turn a stalled generation into an active one', async () => {
+    const stalled = 'event: content_block_delta\n: keep-alive\n\n'
+    const wire = [named(anthropicEvents[0]!), ...Array.from({ length: 100 }, (_, index) => index % 2 === 0 ? heartbeat : stalled)]
+    const server = await mockServer([{ wire, delayMs: 5, holdOpen: true }])
+    await expect(collect(adapter(server.url, 'anthropic-messages', 40).stream(request))).rejects.toMatchObject({ code: 'TIMEOUT' })
+    await server.responseClosed
   })
 })
