@@ -8,8 +8,9 @@ Thanks for helping improve Bake. The [development guide](docs/development.md) co
 
 1. Branch from `develop` and keep each change focused on one behavior.
 2. Update the owning README or JSDoc with the code, and keep English and Chinese pages aligned. Product text shown in the TUI belongs in [`copy.ts`](apps/tui/packages/ui/src/copy.ts), in both languages.
-3. Run the checks that cover the change (see [Checks](docs/development.md#checks)). Terminal behavior changes also need the PTY scenarios. Report what you ran, including failures and anything skipped.
-4. Open a pull request against `develop` describing the behavior change and how you verified it.
+3. Run the checks that cover the change while you work (see [Checks](docs/development.md#checks)). Terminal behavior changes also need the PTY scenarios.
+4. Before opening the pull request, run `bun run preflight` ([Before a pull request](docs/development.md#before-a-pull-request)). It runs every gate CI runs and lists each result. Report what it said, including failures and anything skipped.
+5. Open a pull request against `develop` describing the behavior change and how you verified it; the pull request template lists what to include.
 
 Never commit credentials or `.env`, never overwrite recorded session generations under `snapshots/`, and do not bypass Git hooks. If a check fails, fix the cause rather than refreshing every snapshot.
 

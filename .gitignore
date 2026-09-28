@@ -71,3 +71,6 @@ apps/tui/**/src/**/*.d.ts
 
 # A failing PTY run keeps its transcript here.
 apps/tui/.smoke/
+
+# bun run preflight logs
+.preflight/

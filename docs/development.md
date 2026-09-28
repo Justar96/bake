@@ -44,16 +44,17 @@ The preview accepts input for layout testing but does not submit tasks. Ctrl-C e
 
 ## Checks
 
-Run the checks that cover your change rather than the whole suite by default. Any terminal behavior change also needs the PTY scenarios.
+While you work, run the checks that cover your change rather than the whole suite. Any terminal behavior change also needs the PTY scenarios.
 
 ```sh
 bun run check          # workspace, tsconfig paths, TUI types, tests, peer identity, layout, docs
 bun run test           # TUI unit and spec tests
 bun run test:runtime <file-or-dir>   # focused shared-runtime tests (Vitest on Node)
 bun run test:e2e       # keyless PTY scenarios against the built profile
-bun run verify         # build + check + PTY scenarios
-bun run lint           # Oxlint over apps/tui and scripts
+bun run lint           # Oxlint over apps, packages, and scripts
 ```
+
+`bun run check` runs every target it is given and lists the ones that failed, rather than stopping at the first.
 
 The PTY scenarios replay recorded model responses while running real tools, then check persisted sessions, screen contents, and terminal restoration. They need no model key and do not touch your Bake home.
 
@@ -71,18 +72,35 @@ bun run test:runtime apps/cli/tests/args.spec.ts
 
 Tests that use Cordis or Ink run on Node; pure modules and tooling tests run on Bun. A failing check is not a reason to refresh every snapshot or bypass hooks. Review expected-output changes, keep CI detection intact, and never overwrite recorded session generations under `snapshots/`.
 
+### Before a pull request
+
+```sh
+bun run preflight          # every CI gate, runtime tests limited to what the change reaches
+bun run preflight --fast   # the static half, about 20 seconds: no build, Node suites, or PTY
+bun run verify             # every CI gate with the whole runtime suite (preflight --full)
+```
+
+`bun run preflight` is what CI runs. It measures the change from `origin/develop` (or `develop`; `--base <ref>` picks another), including uncommitted and untracked files, and runs each gate in turn:
+
+- **hygiene**: no compiled `.js` or `.d.ts` left under a `src/` directory, where it would load instead of the `.ts` beside it; no whitespace errors in the change; and a warning when shipped source changed without a `CHANGELOG.md` entry.
+- **generated**: every `verify-*` script, so the workspace manifests, tsconfig paths, config, tool, and Cordis catalogs, doc graphs, module graph, translation pairing, and pasted types match their sources.
+- **types**, **lint**, and the Bun-run tooling tests.
+- **build**, then the TUI check targets, the runtime suite, and the PTY scenarios against what it built. The runtime step runs the specs the change reaches through the import graph (`vitest --changed`), the whole suite when a workspace or config file changed, and nothing when no runtime source changed. `--full` always runs the whole suite.
+
+Every gate runs even after one fails, and the summary lists each result. A failing gate's output is in `.preflight/<step>.log`, and its last lines are printed at the end. `--only` and `--skip` take step or group names; `--list` prints them. Fix what fails, or say in the pull request which gate failed and why it is unrelated to the change.
+
 ### Git hooks
 
 [`lefthook.yml`](../lefthook.yml) keeps the hooks fast:
 
 - `pre-commit` lints staged TypeScript and JavaScript with Oxlint (applying fixes), rejects whitespace errors, and checks that changes under `vendor/*/src` update [`vendor/README.md`](../vendor/README.md).
-- `pre-push` runs `bun run verify-workspace` and `bun run typecheck`.
+- `pre-push` runs `bun run preflight --fast`: the generated-artifact checks, types, lint, and the unit, layout, and docs targets.
 
-The hooks do not run tests or builds; run the relevant checks yourself. Never skip hooks without the maintainer's agreement.
+The hooks do not run the build, the Node suites, or the PTY scenarios; run `bun run preflight` before opening a pull request. Never skip hooks without the maintainer's agreement.
 
 ### CI
 
-[`ci.yml`](../.github/workflows/ci.yml) runs the keyless checks on pull requests and on direct pushes to `main`. It skips a pull request's merge commit on `main`, which its pull request run already checked. `main` takes changes only through merge-commit pull requests from `develop`: its ruleset requires the `develop only` check from [`main-source.yml`](../.github/workflows/main-source.yml), which fails a pull request from any other branch. [`release.yml`](../.github/workflows/release.yml) builds, signs, and publishes release archives; the [release guide](../distribution/README.md) covers the process.
+[`ci.yml`](../.github/workflows/ci.yml) runs `bun run preflight --full` on Linux and macOS for pull requests and direct pushes to `main`, in two jobs per system: the whole runtime suite, and every other gate. It skips a pull request's merge commit on `main`, which its pull request run already checked. `main` takes changes only through merge-commit pull requests from `develop`: its ruleset requires the `develop only` check from [`main-source.yml`](../.github/workflows/main-source.yml), which fails a pull request from any other branch. [`release.yml`](../.github/workflows/release.yml) builds, signs, and publishes release archives; the [release guide](../distribution/README.md) covers the process.
 
 ## Repository layout
 

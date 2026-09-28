@@ -10,6 +10,7 @@
     "**/.sessions/**",
     ".claude/**",
     "**/.doc-typecheck-*/**",
+    "**/.generated-model-*/**",
     "**/.node-next-types-*/**",
     "website/.generated/**",
     "vendor/**",

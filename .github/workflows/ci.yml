@@ -17,14 +17,22 @@ concurrency:
 # tag pushed alongside it builds and tests every platform again, so its merge
 # commit on main is skipped. Direct pushes to main still run.
 jobs:
-  terminal:
+  # Both jobs run `bun run preflight`, the command contributors run before a
+  # pull request, split so the whole runtime suite runs beside the rest.
+  preflight:
     if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Merge pull request ')
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
+        part:
+          - name: checks
+            args: --full --skip runtime
+          - name: runtime
+            args: --full --only build,runtime
+    name: ${{ matrix.part.name }} (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -42,19 +50,19 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq bubblewrap
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      - run: bun run verify
-      - run: bun run lint
       # The plugin manager installs external profile plugins with pnpm, separate
       # from Bun's workspace, and one regression test runs a real pnpm install.
       - name: Install pnpm for the plugin manager
+        if: matrix.part.name == 'runtime'
         run: npm install --global pnpm@11
-      - name: Runtime profile regression tests
-        run: bun run test:runtime apps/cli/tests/args.spec.ts packages/boot/app-boot/tests/profile.spec.ts packages/boot/app-boot/tests/profile-sanitize.spec.ts packages/boot/plugin-manager/tests/manager.spec.ts
+      - run: bun run preflight ${{ matrix.part.args }}
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: terminal-failures-${{ matrix.os }}
-          path: apps/tui/.smoke/
+          name: ${{ matrix.part.name }}-failures-${{ matrix.os }}
+          path: |
+            .preflight/
+            apps/tui/.smoke/
           if-no-files-found: ignore
 
   windows-release:

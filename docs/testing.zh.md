@@ -10,7 +10,7 @@ Bake 在能够观察到行为的层级测试共享运行时、终端应用与构
 - 使用 `bun run test` 运行共享的纯模块与 Node 集成套件。
 - 使用 `bun apps/tui/scripts/tui.ts check docs` 检查终端文档，使用 `bun apps/tui/scripts/tui.ts check types` 检查 TUI 类型。
 - 终端行为变更时，使用 `bun run test:e2e` 运行无需密钥的构建后 Profile PTY 场景。
-- 需要完整构建、检查与 PTY 路径时，使用 `bun run verify`。
+- 发起拉取请求前运行 `bun run preflight`：CI 的每道关卡，以及变更能触及的运行时 spec。`bun run verify` 运行相同的关卡，并运行整个运行时套件。
 
 报告实际运行的检查，包括失败与跳过的工作。未经明确批准，不要绕过钩子。
 

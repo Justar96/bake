@@ -13,7 +13,8 @@ pre-commit:
       run: scripts/check-vendor-manifest.sh
 pre-push:
   jobs:
-    - name: workspace
-      run: bun run verify-workspace
-    - name: typecheck
-      run: bun run typecheck
+    # The static half of `bun run preflight`: generated artifacts, types, lint,
+    # and the unit and layout targets, in about 20 seconds. The build, the Node
+    # suites, and the PTY scenarios are left to `bun run preflight` before a PR.
+    - name: preflight (fast)
+      run: bun scripts/preflight.ts --fast
