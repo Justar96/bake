@@ -129,43 +129,11 @@ kind: "package-reference"
 <a id="model-experience"></a>
 ## 模型体验
 
-### 系统提示词
-
-#### 模型看到的内容
-
-组装时，每个指导段落通过 `ctx.tools.get(name, scope)` 检查对应工具，仅在该 agent 可见时输出。write 段落仅在 edit 可见时推荐 edit。三个工具都可用时，下方原文保持不变；限制的施加、解除和工具注册变化在下次组装时生效。同一检查适用于直接限制 agent 和 subagent 的 `toolFilter`，也适用于通过 `run_code` 暴露的 PTC 能力。 write/edit 中的先读后改句子描述观察策略，并非要求调用名为 `read` 的工具。隐藏 `read` 时仍保留这些句子：策略继续保护修改操作，其他产生观察记录的操作（例如 `str_replace_editor` 的 `command: view`）也能建立同一文件观察记录。工具可见性不会禁用该前置条件。
-
-##### Read 指导
-
-```markdown
-Use the read tool — not shell commands like cat — to inspect text files. Results include line numbers. Use offset and limit to continue reading large files.
-```
-
-##### Write 指导
-
-```markdown
-Use the write tool to create files or completely replace file contents. Existing files are overwritten, so read an existing file first (the default fs-observation-policy requires it) and prefer edit for targeted changes.
-```
-
-##### Edit 指导
-
-```markdown
-Use the edit tool for targeted changes to existing UTF-8 text files. It replaces literal old_string with new_string; by default old_string must appear exactly once. If old_string appears multiple times, provide a more specific old_string or set replace_all to true. Read the file first (the default fs-observation-policy requires it), unless you just created or edited it in this session.
-```
-
-#### Token 影响
-
-指导成本取决于可见工具及其适用的跨工具推荐。
-
-#### KV Cache 影响
-
-可见工具集合、插件作用域和指导文本不变时，前缀保持稳定。限制或插件生命周期变化可能从首个变化的段落开始使复用失效。
-
 ### 工具 schema
 
 #### 模型看到的内容
 
-模型会看到已生成的 [`read`、`read_image`、`write` 和 `edit` schema](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-fs)，参数使用 snake_case。图片工具只在持久附件存储已挂载时出现；schema 本身与路由无关，严格门禁在执行时拒绝。作用域工具限制可以为某个 agent 移除任一定义。
+模型会看到已生成的 [`read`、`read_image`、`write` 和 `edit` schema](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-fs)，参数使用 snake_case。本包不添加系统提示词段落：各工具的描述和参数就是它唯一的指导，同时也是 PTC 模式下 `run_code` 背后的 SDK 文档。`read` 的描述说明，与 shell 中的 `cat` 不同，一次读取会计入之后的 `write` 和 `edit` 调用。`write` 和 `edit` 的描述写明观察策略的保护：修改本会话中未读取、未写入或未编辑过的文件，或此后已变化的文件，会被拒绝。`edit` 的 `old_string` 承载“恰好匹配一次”的规则，并说明不要包含 `read` 添加的行号。描述是注册时的文本，因此即使某个作用域隐藏了 `edit`，`write` 仍会提到 `edit`。每个 `file_path` 都被描述为绝对路径或相对于工作目录（即调用会话的 cwd）的路径。图片工具只在持久附件存储已挂载时出现；schema 本身与路由无关，严格门禁在执行时拒绝。作用域工具限制可以为某个 agent 移除任一定义。
 
 #### Token 影响
 
@@ -245,6 +213,7 @@ Use the edit tool for targeted changes to existing UTF-8 text files. It replaces
 - **内嵌图像预览依赖 UI 组合**：工具结果卡片经由浏览器的 `tool.call.images` 槽位渲染图像，由附件呈现插件填充；未组合该插件的 UI 改为显示结果的信封文本。
 - **没有附件区域工具**：agent 在拥有文件系统路径时可以通过其他可用工具裁剪图片；没有路径的粘贴或拖入图片无法按更高分辨率重新读取。
 - **没有超时接口**：`read`/`write`/`edit` 不接受超时参数，也不声明超时预算；取消只通过 `exec.signal` 传递（见[提供方理由](../README.zh.md)）。
+- **描述以观察策略为前提**：`read`、`write` 和 `edit` 的描述写明了先读后写/改的保护，而只有 `dsh-fs-observation-policy` 会强制执行它。未挂载该插件的组合仍会显示这一说明，因此模型可能在本可直接修改之前先读取；但它永远不会被告知受保护的修改是安全的。
 
 <a id="dev-note"></a>
 ### 开发备注

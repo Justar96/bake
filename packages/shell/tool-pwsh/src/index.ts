@@ -45,7 +45,7 @@ declare module '@deepseek-ai/dsh-jobs' {
 }
 
 export const name = 'tool-pwsh'
-export const inject = ['tools', 'shell', 'systemPrompt', 'shellEnv']
+export const inject = ['tools', 'shell', 'shellEnv']
 
 /** Configuration for the pwsh tool. */
 export interface Config {
@@ -99,18 +99,26 @@ function validatePwshArgs(args: PwshToolArgs): void {
 }
 /* jscpd:ignore-end */
 
+/**
+ * Model-facing `pwsh` description, mirroring the bash tool's: it is the only
+ * place the tool's guidance lives, it varies only with plugin config and
+ * executor capability, the sandbox paragraph appears only with a confining
+ * executor, and the approval policy's runtime context, not this description,
+ * says whether approval can be requested.
+ */
 function pwshDescription(backgroundEnabled: boolean, escalationModes: readonly SandboxMode[]): string {
   const background = backgroundEnabled
-    ? 'Set `run_in_background: true` for long-running commands: the call returns a job id immediately; read its output with `job_output` and stop it with `job_kill`.'
-    : 'Background execution is not available; long-running commands must finish within the timeout.'
-  const base = 'Execute a PowerShell command (`pwsh -Command`) and return its stdout/stderr. '
-    + 'Each call runs in a fresh pwsh process: no state (cwd, variables, functions) persists between calls — '
-    + 'pass `workdir` instead of using `cd`. Paths use native Windows form (`C:\\...`); read environment '
-    + 'variables with `$env:NAME`. Non-zero exits are reported as `[exit code: N]`. '
-    + 'Current harness environment facts are exposed through managed `$env:DSH_*` variables; inspect them when needed. '
-    + 'Commands may run under a file sandbox; a blocked file operation is reported as `[sandbox: file access denied under <mode> mode]` — a policy denial, not a bug in the command; do not retry another way. '
-    + 'Long output is truncated to its tail; the full output is saved to a file whose path is reported when available. '
-    + 'On Windows a force-killed command settles as `[exit code: 1]` without a signal marker — treat it as an interruption, not a command failure. '
+    ? 'A command run with `run_in_background` returns a job id right away; read its output with `job_output` and stop it with `job_kill`.'
+    : 'Background execution is not available, so a command must finish within its timeout.'
+  // The registry's built-ins; DSH_SHELL=1 only marks the process and tells the model nothing.
+  const base = 'Run a PowerShell command with `pwsh -Command` and return its stdout and stderr. '
+    + 'Each call starts a fresh pwsh process, so directory changes and variables do not carry over to later calls. '
+    + 'Paths use native Windows form (`C:\\...`), and environment variables are read as `$env:NAME`. '
+    + 'A non-zero exit is reported in the result as `[exit code: N]`, not as a tool error. '
+    + 'On Windows a force-killed command also ends with `[exit code: 1]` and no signal marker, '
+    + 'so after an interruption that exit means termination, not a command failure. '
+    + 'Long output is truncated to its tail, and the full output is saved to a file named in the result when possible. '
+    + '`$env:DSH_HOME` is the harness home directory and `$env:DSH_SESSION_ID` is this session\'s id. '
     + background
   if (escalationModes.length === 0) return base
   // The language-mode and named-pipe contracts below are Windows-restricted-token
@@ -119,27 +127,22 @@ function pwshDescription(backgroundEnabled: boolean, escalationModes: readonly S
   // with a confining executor is win32-only, so the gate is equivalent. A POSIX
   // pwsh-sandbox composition must gate both sentences on the platform instead
   // (tracked in the pwsh-tool-and-executor Agent Note).
-  return base + ' Under the Windows sandbox, read-only pwsh runs in PowerShell ConstrainedLanguage mode, while '
-    + 'workspace-write stays in FullLanguage unless host policy says otherwise. In read-only, prefer cmdlets and core types (`[string]`, `[datetime]`, `[regex]`, `[guid]`); '
+  return base + ' Commands may run in a file sandbox; trying one it might block is safe. '
+    + 'A blocked file operation reports `[sandbox: file access denied under <mode> mode]`: '
+    + 'a policy denial, not a bug in the command, so do not work around it. '
+    + 'Under the Windows sandbox, read-only runs PowerShell in ConstrainedLanguage mode: cmdlets, core types '
+    + '(`[string]`, `[datetime]`, `[regex]`, `[guid]`), `-f` formatting, and property access work, while '
     + '.NET static calls (`[System.IO.*]::`, `[math]::`), `Add-Type`, COM objects, and reflection fail '
-    + 'with "only core types" errors. `-f` formatting, property access, and core cmdlets work. '
-    + 'In both confined modes, programs cannot open named pipes, so a command that captures another '
-    + 'program\'s output through piped stdio (Node.js `child_process.spawn`/`exec` with the default '
-    + '`stdio: \'pipe\'`) fails with EPERM, while `stdio: \'inherit\'` and `stdio: \'ignore\'` spawns '
-    + 'work and PowerShell\'s own pipelines are unaffected. That EPERM is the documented boundary: '
-    + 'do not retry the command another way — escalate the exact command once or restructure it to '
-    + 'avoid capturing output. '
-    + 'Attempting a command the sandbox may deny is safe and expected: run it and read the '
-    + 'marker rather than assuming the denial. When a command is denied and a wider mode would let it '
-    + 'succeed, escalate immediately in the same turn — the one sanctioned exception to a denial: retry '
-    + 'the exact same command once with `sandbox_permissions` (the narrowest wider mode that suffices) '
-    + 'plus a one-sentence `justification`. Do not detour through chat to ask permission first — the '
-    + 'approval prompt raised by that retry is how the user consents. If the session states approval '
-    + 'prompts are disabled, there is no exception: a denial is final — do not set `sandbox_permissions`. '
-    + 'Never escalate speculatively: ground the request in a real denial — normally the one this command '
-    + 'just hit; escalating up front is fine only when this session already denied the same access. '
-    + 'A rejected escalation is final for that command — stop and explain, never work around '
-    + 'it — but it does not forbid attempting or escalating other commands later.'
+    + 'with "only core types" errors. Workspace-write stays in FullLanguage unless host policy says otherwise. '
+    + 'In both confined modes programs cannot open named pipes, so capturing another program\'s output '
+    + 'through piped stdio (Node.js `child_process.spawn` or `exec` with the default `stdio: \'pipe\'`) '
+    + 'fails with EPERM, while `stdio: \'inherit\'`, `stdio: \'ignore\'`, and PowerShell\'s own pipelines work. '
+    + 'Treat that EPERM as a sandbox denial, or restructure the command so it does not capture output. '
+    + 'When a wider mode would let a denied command succeed, retry that same command once in the same turn '
+    + 'with the narrowest sufficient `sandbox_permissions` and a `justification`. '
+    + 'That retry itself asks the user for approval, so there is no need to ask in chat first. '
+    + 'Request a wider mode up front only when this session already denied the same access. '
+    + 'A rejection is final for that command: stop and explain. Other commands can still run or escalate.'
 }
 
 /**
@@ -240,13 +243,6 @@ export function apply(ctx: Context, config: Config = {}): void {
   }
   /* jscpd:ignore-end */
 
-  ctx.systemPrompt.section({
-    name: 'tool:pwsh',
-    order: ctx.systemPrompt.getSectionOrder('TOOL_PWSH'),
-    text: 'Non-zero exits are reported as `[exit code: N]` markers; investigate failures before moving on. '
-      + 'On Windows a killed process settles as `[exit code: 1]` without a signal marker; treat a bare exit 1 after an interruption as a termination, not a command failure.',
-  })
-
   ctx.tools.register(defineTool({
     name: 'pwsh',
     description: pwshDescription(backgroundEnabled, escalationModes),
@@ -256,24 +252,22 @@ export function apply(ctx: Context, config: Config = {}): void {
       description: {
         type: 'string',
         required: true,
-        description: 'Clear, concise description of what this command does in active voice, '
-          + '5-10 words (shown in the UI). Examples: "ls" → "List files in current directory"; '
-          + '"git status" → "Show working tree status"; "Get-Process" → "List running processes".',
+        description: 'Short summary of what the command does, shown to the user.',
       },
-      timeoutMs: { type: 'number', description: 'Timeout in milliseconds. The executor applies its configured default and cap, and kills the command on expiry.' },
-      workdir: { type: 'string', description: 'Working directory for this command. Defaults to the session workspace; a relative path is resolved against it.' },
+      timeoutMs: { type: 'number', description: 'Timeout in milliseconds, capped at the maximum; the command is killed when it expires.' },
+      workdir: { type: 'string', description: 'Directory to run this command in. Defaults to your working directory; a relative path resolves against it.' },
       ...backgroundEnabled ? {
-        run_in_background: { type: 'boolean' as const, description: 'Run in the background and return a job id immediately (collect with job_output, stop with job_kill). No timeout applies.' },
+        run_in_background: { type: 'boolean' as const, description: 'Run in the background, with no timeout.' },
       } : {},
       ...escalationModes.length > 0 ? {
         sandbox_permissions: {
           type: 'string' as const,
           enum: [...escalationModes],
-          description: 'The wider sandbox mode this command needs. Only valid as a one-shot retry of a command the sandbox just denied; requires justification and user approval.',
+          description: 'Wider sandbox mode for retrying a denied command.',
         },
         justification: {
           type: 'string' as const,
-          description: 'Required with sandbox_permissions: one sentence for the user explaining why this exact command needs the wider access.',
+          description: 'One sentence telling the user why this command needs wider access.',
         },
       } : {},
     },

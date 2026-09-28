@@ -114,19 +114,19 @@ kind: "package-reference"
 ##### 只读
 
 ```markdown
-Current DSH file policy: read-only. Any available operation enforced by the DSH file sandbox cannot modify files in the standing mode. Do not refuse a required modification from this policy alone: try an available tool normally and follow any denial and escalation guidance it returns.
+File sandbox: read-only. Sandboxed tools cannot modify files. Still attempt required changes normally, and follow the guidance any denial returns.
 ```
 
 ##### 工作区写入
 
 ```markdown
-Current DSH file policy: workspace-write. Any available operation enforced by the DSH file sandbox may modify files under the session workspace: "<workspace root>". Some platform temporary areas may also be writable.
+File sandbox: workspace-write. Sandboxed tools can modify files under "<workspace root>", and possibly in some temporary directories.
 ```
 
 ##### 完全访问
 
 ```markdown
-Current DSH file policy: danger-full-access. The DSH file sandbox does not restrict file modifications by available operations.
+File sandbox: danger-full-access. File changes are not restricted.
 ```
 
 #### Token 影响

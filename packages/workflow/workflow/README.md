@@ -25,7 +25,7 @@ Run a plain-JavaScript orchestration script that fans work out to subagents and 
 <a id="use-this-package"></a>
 ## Use this package
 
-Run a workflow when a task decomposes into many independent pieces that one script should coordinate — an audit across many files, a migration, multi-angle research — and the model explicitly asks for workflow-style orchestration. For one or two delegations, prefer a plain subagent call.
+Run a workflow when a task decomposes into many independent pieces that one script should coordinate — an audit across many files, a migration, multi-angle research — and the user explicitly asks for workflow-style orchestration. For one or two delegations, prefer a plain subagent call.
 
 ### The model-facing path
 

@@ -3,7 +3,8 @@
  * tool-pwsh Loader fixture as a subprocess through the same app/boot path a
  * deployment uses, execute real foreground and background pwsh commands
  * through the tool registry, and assert the assembled model-visible surface:
- * schema, prompt section, and rendered results. Self-skips when no `pwsh`
+ * schema and description, the absence of a prompt section, and rendered
+ * results. Self-skips when no `pwsh`
  * executable exists (a CI accommodation for hosts without PowerShell).
  */
 
@@ -31,7 +32,8 @@ const repoTsconfig = fileURLToPath(new URL('../../../../tsconfig.json', import.m
 
 interface PwshLoaderReport {
   schemaHasRunInBackground: boolean
-  promptHasMarkerSection: boolean
+  description: string
+  promptSection: string | null
   foregroundText: string
   backgroundText: string
 }
@@ -60,8 +62,11 @@ describe.skipIf(!hasPwsh)('tool-pwsh through a real Loader composition', () => {
     expect(report).toBeDefined()
     expect(report).toMatchObject({
       schemaHasRunInBackground: true,
-      promptHasMarkerSection: true,
+      promptSection: null,
     })
+    // The unconfined executor gets the exit-marker fact but no sandbox paragraph.
+    expect(report?.description).toContain('A non-zero exit is reported in the result as `[exit code: N]`, not as a tool error.')
+    expect(report?.description).not.toContain('[sandbox:')
     expect(report?.foregroundText).toBe('loader-ok\n')
     expect(report?.backgroundText).toContain('loader-bg-ok')
     expect(report?.backgroundText).toContain('[status: completed, exit code: 0]')

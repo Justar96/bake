@@ -30,9 +30,6 @@
       "path": "../../core/tools"
     },
     {
-      "path": "../../core/system-prompt"
-    },
-    {
       "path": "../workflow"
     },
     {

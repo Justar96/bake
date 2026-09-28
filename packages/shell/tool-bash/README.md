@@ -25,7 +25,7 @@ English | [中文](README.zh.md)
 <a id="use-this-package"></a>
 ## Use this package
 
-Load this plugin in any composition where the agent should run bash commands: it registers the `bash` tool once an executor provider and the `dsh-shell-env` registry are mounted, and stays pending until the `tools`, `shell`, `systemPrompt`, and `shellEnv` services exist.
+Load this plugin in any composition where the agent should run bash commands: it registers the `bash` tool once an executor provider and the `dsh-shell-env` registry are mounted, and stays pending until the `tools`, `shell`, and `shellEnv` services exist.
 
 ### Minimal configuration
 
@@ -51,7 +51,7 @@ The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-a
 
 ### Running a command
 
-The tool executes `bash -c <command>` and returns the combined output. Commands run in a fresh shell every call, so state never persists — pass `workdir` instead of `cd`. A non-zero exit is reported as `[exit code: N]` for the agent to interpret, not surfaced as a tool error. A `description` in active voice (5–10 words) labels the call in the UI; `timeoutMs` overrides the executor's default and cap. Output beyond the executor's stream caps is truncated to its tail, with the full output saved to a spill file whose path is reported.
+The tool executes `bash -c <command>` and returns the combined output. Commands run in a fresh shell every call, so directory changes and variables never carry over; `workdir` sets where a command runs, and a relative `workdir` resolves against the session's working directory. A non-zero exit is reported as `[exit code: N]` for the agent to interpret, not surfaced as a tool error. A short `description` labels the call for the user; `timeoutMs` replaces the executor's default timeout and is capped at its maximum. Output beyond the executor's stream caps is truncated to its tail, with the full output saved to a spill file whose path is reported. The tool description names `$DSH_HOME` and `$DSH_SESSION_ID` from the managed environment; `DSH_SHELL=1` is set too but only marks the process.
 
 <a id="running-long-commands-in-the-background"></a>
 ### Running long commands in the background
@@ -60,7 +60,7 @@ Passing `run_in_background: true` admits a job and returns its id immediately; c
 
 ### Sandboxed execution and escalation
 
-When the mounted executor confines commands (for example `dsh-bash-sandbox`), a blocked file operation is reported as `[sandbox: file access denied under <mode> mode]` — a policy denial, not a command failure. The model may then retry the exact same command once in the same turn with `sandbox_permissions` (the narrowest wider mode that suffices) and a one-sentence `justification`; the approval prompt raised by that retry is how the user consents. Request wider access only after a real denial; a rejected escalation is final for that command. Repeating the current mode runs without approval, while a narrower target fails before execution. Without `sandbox_permissions`, `justification` may be omitted, empty, or whitespace-only; a non-empty reason without a mode is rejected. Repeating the effective mode also permits an omitted or blank reason. A different requested mode requires a non-empty reason; widening still requires approval.
+When the mounted executor confines commands (for example `dsh-bash-sandbox`), a blocked file operation is reported as `[sandbox: file access denied under <mode> mode]` — a policy denial, not a command failure. The model may then retry the exact same command once in the same turn with `sandbox_permissions` (the narrowest wider mode that suffices) and a one-sentence `justification`; the approval prompt raised by that retry is how the user consents. Request wider access only after a real denial, or up front when the session already denied the same access; a rejected escalation is final for that command, while other commands may still run or escalate. Whether the session can request approval at all is stated by the approval policy's runtime context, so the tool description does not repeat it. Repeating the current mode runs without approval, while a narrower target fails before execution. Without `sandbox_permissions`, `justification` may be omitted, empty, or whitespace-only; a non-empty reason without a mode is rejected. Repeating the effective mode also permits an omitted or blank reason. A different requested mode requires a non-empty reason; widening still requires approval.
 
 ### What can go wrong
 
@@ -87,7 +87,7 @@ This section explains the design decisions behind the tool and points at the cod
 
 | File | Role |
 |---|---|
-| [`src/index.ts`](src/index.ts) | Plugin entry: tool registration, prompt section, arg validation, escalation, request assembly |
+| [`src/index.ts`](src/index.ts) | Plugin entry: tool registration and description, arg validation, escalation, request assembly |
 | [`src/background.ts`](src/background.ts) | Own asynchronous shell preparation and map process settlement onto job outcomes |
 | [`src/render.ts`](src/render.ts) | Model-facing result text: streams, markers, truncation notices |
 | — | No runtime invariant companion is published; the environment registry validates ownership and collected values at each mutation/read; it publishes no independent snapshot that a companion could cross-check. |
@@ -122,35 +122,15 @@ Read these pages when the package-level contract is not enough. They move from t
 <a id="model-experience"></a>
 ## Model Experience
 
-### System prompt
-
-#### What the model sees
-
-Every request in this plugin's registration scope contains the bash guidance below at first-party order 1000. The policy owner contributes current sandbox state through its cache-safe runtime context rather than changing this section. Scoped tool restrictions can hide the schema without removing this independently registered section.
-
-##### Bash guidance
-
-```markdown
-Check the [exit code: N] marker on every bash result; investigate failures before moving on.
-```
-
-#### Token effect
-
-Small fixed input cost per request while the plugin is active, unchanged by sandbox mode or mode switches.
-
-#### KV Cache effect
-
-Prefix-stable while the registration scope and prompt text are unchanged. Plugin activation or disposal may invalidate reuse from this prompt section; sandbox mode switches do not.
-
 ### Tool schemas
 
 #### What the model sees
 
-The model sees the generated [`bash` schema](../../../docs/tool-catalog.md#deepseek-aidsh-tool-bash). `run_in_background` appears only when this producer enables it; `sandbox_permissions` and `justification` appear only when the mounted executor advertises sandboxing. Agent-scoped tool restrictions can remove the definition for that agent.
+The model sees the generated [`bash` schema](../../../docs/tool-catalog.md#deepseek-aidsh-tool-bash). Its description is the tool's only guidance: this plugin contributes no system-prompt section, so an agent whose tool restriction hides `bash` sees nothing about it, and in PTC tools mode the same text documents the generated SDK function. `run_in_background` appears only when this producer enables it; `sandbox_permissions`, `justification`, and the description's sandbox paragraph (denial marker and escalation rules) appear only when the mounted executor advertises sandboxing, because only a confining executor can report a denial. The policy owner states the current sandbox mode and approval policy through its runtime context rather than changing this description. Agent-scoped tool restrictions can remove the definition for that agent.
 
 #### Token effect
 
-Fixed schema cost on every request where the tools are visible; sandbox support adds the escalation fields and its conditional description paragraph.
+Fixed schema cost on every request where the tools are visible; sandbox support adds the escalation fields and the conditional sandbox paragraph.
 
 #### KV Cache effect
 

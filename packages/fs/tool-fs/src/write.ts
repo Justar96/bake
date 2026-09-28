@@ -54,26 +54,23 @@ interface WriteToolArgs {
 }
 
 /**
- * Register the `write` tool and its scope-aware system-prompt guidance.
+ * Register the `write` tool. Its description carries all of its model-facing
+ * guidance; the tool contributes no system-prompt section.
  * @param ctx - the plugin context; registrations are effects scoped to it, and execution uses its `fs` service.
  * @param sandbox - the shared sandbox-escalation API (advertisement, mode stamping, denial mapping).
  */
 export function applyWriteTool(ctx: Context, sandbox: FsSandboxController): void {
-  ctx.systemPrompt.section({
-    name: 'tool:write',
-    order: ctx.systemPrompt.getSectionOrder('TOOL_WRITE'),
-    text: ({ scope }) => ctx.tools.get('write', scope) === undefined
-      ? ''
-      : 'Use the write tool to create files or completely replace file contents. Existing files are overwritten, so read an existing file first (the default fs-observation-policy requires it)'
-        + (ctx.tools.get('edit', scope) === undefined ? '' : ' and prefer edit for targeted changes')
-        + '.',
-  })
-
   ctx.tools.register(defineTool({
     name: 'write',
-    description: 'Create or fully replace a UTF-8 text file.',
+    // The refusal sentence states the fs-observation-policy guard that every
+    // shipped composition mounts (see the README's read-before-write contract).
+    // Descriptions are registration-time text, so the edit pointer stays even
+    // where a scope hides edit; it remains true there.
+    description: 'Create a UTF-8 text file or replace all of its content. '
+      + 'Replacing an existing file is refused unless you have read, written, or edited it in this session and it has not changed since. '
+      + 'For a partial change, edit avoids resending the whole file.',
     parameters: {
-      file_path: { type: 'string', required: true, description: 'Path to write, resolved by the filesystem backend.' },
+      file_path: { type: 'string', required: true, description: 'Absolute path, or relative to the working directory.' },
       content: { type: 'string', required: true, description: 'Full UTF-8 text content to write.' },
       ...sandbox.escalationModes.length > 0 ? sandbox.schemaFields() : {},
     },

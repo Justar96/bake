@@ -91,6 +91,17 @@ async function setup(config?: { toolName?: string; maxResultChars?: number }) {
 const SCRIPT = 'return 1'
 const META = { name: 'audit', description: 'd' }
 
+/** The exact authoring contract the model reads; parameter texts are pinned beside it. */
+const WORKFLOW_DESCRIPTION = `Run a JavaScript workflow script that coordinates many subagents, and return the script's result. Use it only when the user explicitly asks for a workflow or for large-scale multi-agent orchestration, because one run can start many subagents; for one or two delegations, use a plain subagent call. The call blocks until the script finishes.
+
+The script can call these globals:
+- \`agent(prompt, opts?)\` runs one subagent to completion. It resolves to the subagent's final text, to an object validated against \`opts.schema\` when one is given, or to \`null\` if the subagent fails. \`opts.schema\` must be an object-rooted JSON Schema that uses only type, properties, required, additionalProperties, items, enum, const, oneOf, and annotations such as description; pattern, format, and numeric bounds are rejected. The other options are \`label\` (display name), \`phase\` (progress group, defaulting to the current phase), and \`provider\` and \`model\` (route overrides, usable separately). Any other option is an error.
+- \`pipeline(items, ...stages)\` runs each item through the stages independently, with no barrier between stages, and resolves to the final values in item order. Each stage is called as \`stage(prev, item, index)\`, where \`prev\` is the previous stage's result, or the item itself for the first stage. A stage that throws turns that item into \`null\` and skips its remaining stages.
+- \`parallel(thunks)\` runs zero-argument functions concurrently, waits for all of them, and resolves to their results in order; a thunk that throws yields \`null\`.
+- \`phase(title)\` starts a progress phase, and \`log(message)\` reports progress.
+
+Misusing a hook (bad arguments, unknown options, unsupported schemas, exceeded caps) or a subagent that cannot start throws an error that \`pipeline\` and \`parallel\` pass through instead of turning into \`null\`; if nothing catches it, the run fails and returns only the error. Caps limit concurrent subagents (extra \`agent()\` calls wait for a slot), total subagents per run, and items per \`pipeline()\` or \`parallel()\` call. The script has no filesystem, network, timers, or Node.js APIs; the subagents do the work.`
+
 function execute(ctx: Context, args: unknown, extra?: {
   agent?: Agent
   signal?: AbortSignal
@@ -372,23 +383,50 @@ describe('dsh-tool-workflow', () => {
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
     await ctx.plugin(StubEngine)
+    const bareSections = (await ctx.systemPrompt.assemble()).sections
     const fiber = await ctx.plugin(toolWorkflow, { toolName: 'orchestrate' })
     expect(ctx.tools.get('orchestrate')).toBeDefined()
     expect(ctx.tools.get('workflow')).toBeUndefined()
-    // The usage-policy prompt section rides the same registration: present
-    // under the CONFIGURED name (its guidance names the tool it describes)…
-    const sections = (await ctx.systemPrompt.assemble()).sections
-    const section = sections.find(s => s.name === 'tool:orchestrate')
-    expect(section?.text).toContain('orchestrate')
-    expect(sections.some(s => s.name === 'tool:workflow')).toBe(false)
-    ctx.systemPrompt.section({ name: 'tool:cordis-order-probe', order: 115.5, text: 'Cordis' })
-    expect((await ctx.systemPrompt.assemble()).sections
-      .filter(s => s.name === 'tool:cordis-order-probe' || s.name === 'tool:orchestrate')
-      .map(s => s.name)).toEqual(['tool:cordis-order-probe', 'tool:orchestrate'])
+    // The tool carries its usage policy in its description, so the plugin
+    // adds no prompt section under any name.
+    expect((await ctx.systemPrompt.assemble()).sections).toEqual(bareSections)
     await fiber.dispose()
     expect(ctx.tools.get('orchestrate')).toBeUndefined()
-    // …and gone with the fiber — a reload must not leak a stale section.
-    expect((await ctx.systemPrompt.assemble()).sections.some(s => s.name === 'tool:orchestrate')).toBe(false)
+    expect((await ctx.systemPrompt.assemble()).sections).toEqual(bareSections)
+  })
+
+  it('pins the model-facing description and parameter descriptions', async () => {
+    const { ctx } = await setup({ maxResultChars: 1234 })
+    const schema = ctx.tools.schemas().find(s => s.name === 'workflow')!
+    expect(schema.description).toBe(WORKFLOW_DESCRIPTION)
+    type Field = {
+      description: string
+      items?: { properties: Record<string, { description: string }> }
+    }
+    const parameters = schema.parameters as {
+      properties: Record<string, { description: string; properties?: Record<string, Field> }>
+    }
+    const { script, meta, args } = parameters.properties
+    // The result cap is plugin config, so it is the only variable text.
+    expect(script!.description).toBe('Body of an async JavaScript function, so `await` works at the top level. Plain JavaScript only: no TypeScript and no import or export statements. Its return value, which must be JSON-serializable, becomes the tool result; results longer than 1234 characters are truncated.')
+    expect(meta!.description).toBe('The workflow\'s identity, as JSON data.')
+    expect(args!.description).toBe('Optional JSON object available to the script as the global `args`.')
+    const metaFields = meta!.properties!
+    expect(Object.fromEntries(Object.entries(metaFields).map(([name, field]) => [name, field.description]))).toEqual({
+      name: 'Short kebab-case workflow name.',
+      description: 'One-line description of what the workflow does.',
+      whenToUse: 'Optional note on when this workflow applies.',
+      phases: 'Optional list of the phases the script enters with phase(); informational only.',
+    })
+    const phaseFields = metaFields.phases!.items!.properties
+    expect(Object.fromEntries(Object.entries(phaseFields).map(([name, field]) => [name, field.description]))).toEqual({
+      title: 'The title the script passes to phase().',
+      detail: 'Optional one-line description of the phase.',
+      provider: 'Informational; pass `provider` to agent() to route a subagent.',
+      model: 'Informational; pass `model` to agent() to choose a subagent\'s model.',
+    })
+    expect((JSON.stringify(schema).match(/\b[A-Z]{3,}\b/g) ?? []).filter(word => word !== 'JSON')).toEqual([])
+    expect((await ctx.systemPrompt.assemble()).sections.some(s => s.name.startsWith('tool:'))).toBe(false)
   })
 
   it('presents a generic pending card titled by the meta name, with the script as rawInput', async () => {
@@ -412,7 +450,7 @@ describe('dsh-tool-workflow', () => {
   it('has the namespace-plugin export shape (no stray default)', () => {
     expect('default' in toolWorkflow).toBe(false)
     expect(toolWorkflow.name).toBe('tool-workflow')
-    expect(toolWorkflow.inject).toEqual(['tools', 'workflowEngine', 'systemPrompt'])
+    expect(toolWorkflow.inject).toEqual(['tools', 'workflowEngine'])
     const loader = Object.create(Loader.prototype) as Loader
     const unwrapped = loader.unwrapExports(toolWorkflow) as Record<string, unknown>
     expect(unwrapped).toBe(toolWorkflow)

@@ -18,7 +18,7 @@ import type { JobSnapshot } from '@deepseek-ai/dsh-jobs'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 
 export const name = 'tool-jobs'
-export const inject = ['tools', 'jobs', 'systemPrompt']
+export const inject = ['tools', 'jobs']
 
 /**
  * How an unreported completion reaches an owner that is already idle: `wakeup`
@@ -61,6 +61,9 @@ export interface PublicJobSnapshot {
   startedAt: number
   finishedAt?: number
 }
+
+/** Where the model finds the id both job-addressing tools take. */
+const JOB_ID_DESCRIPTION = 'The id returned when the job started.'
 
 /** Shared schema for job-control outputs. */
 const PUBLIC_JOB_SCHEMA = {
@@ -258,13 +261,6 @@ export function apply(ctx: Context, config: Config): void {
   // Producers may start work only while a controller is attached.
   ctx.jobs.attachController('tool-jobs')
 
-  // Cross-call guidance follows the filesystem sections and precedes product sections.
-  ctx.systemPrompt.section({
-    name: 'tool:jobs',
-    order: ctx.systemPrompt.getSectionOrder('TOOL_JOBS'),
-    text: 'Track every background job id you start. You are notified in-session when a job finishes — do not busy-poll or sleep on one; keep working on independent steps and do not duplicate a running job\'s work. Before giving a final answer, collect every still-relevant job with job_output (set wait: true only when you are genuinely blocked on it), and job_kill jobs that stopped mattering.',
-  })
-
   // Use the exact lifecycle owner; reusable ids could resolve to a replacement.
   // A busy owner is injected: the notice waits in its next-step inbox, which
   // the turn cannot close over, so jobs settling together cost one step. An
@@ -300,15 +296,18 @@ export function apply(ctx: Context, config: Config): void {
 
   ctx.tools.register(defineTool({
     name: 'job_output',
-    description: 'Read a background job. Stream jobs return only output since the previous read; '
-      + 'final-output jobs return their result after settlement. Every response ends with '
-      + '`[status: ...]`. Reads are non-blocking unless `wait: true`, which waits up to the configured cap.',
+    // The completion notice below is this plugin's own delivery, so the
+    // description can promise it whenever the tool is registered.
+    description: 'Read a background job\'s output. You receive a notice when a job finishes, so there is '
+      + 'no need to poll or sleep while it runs. Jobs that stream output return what is new since your '
+      + 'last read; other jobs return their result once they finish. Every reply ends with '
+      + '`[status: ...]`. Returns immediately unless `wait: true`.',
     // A timed-out wait returns job state rather than a TOOL_TIMEOUT error, so
     // this tool owns its deadline instead of using ToolDefinition.timeoutMs.
     parameters: {
-      job_id: { type: 'string', required: true, description: 'Job id returned by the tool that started the background work.' },
-      wait: { type: 'boolean', description: 'Block until the job reaches a terminal status or the timeout expires. A timed-out wait returns [status: running] and leaves the job alive.' },
-      timeout_ms: { type: 'number', description: 'Max wait in milliseconds (only meaningful with wait: true). Defaults to the configured wait timeout; capped by the configured maximum.' },
+      job_id: { type: 'string', required: true, description: JOB_ID_DESCRIPTION },
+      wait: { type: 'boolean', description: 'Wait until the job finishes or the timeout passes, for when you cannot continue without the result. A timed-out wait returns `[status: running]` and leaves the job running.' },
+      timeout_ms: { type: 'number', description: `Maximum wait in milliseconds when wait is true (default ${waitDefault}, at most ${waitCap}).` },
     },
     finalizeContent: finalizeJobContent,
     output: {
@@ -340,7 +339,7 @@ export function apply(ctx: Context, config: Config): void {
 
   ctx.tools.register(defineTool({
     name: 'job_list',
-    description: 'List your background jobs (running and finished) with their ids, kinds, and statuses.',
+    description: 'List your background jobs, running and finished, with their ids, kinds, statuses, and labels.',
     parameters: {},
     output: {
       schema: { type: 'array', items: PUBLIC_JOB_SCHEMA },
@@ -360,10 +359,12 @@ export function apply(ctx: Context, config: Config): void {
 
   ctx.tools.register(defineTool({
     name: 'job_kill',
-    description: 'Request cancellation of a running background job by job id. Returns immediately; the job settles as killed once its work actually stops.',
+    // Jobs end only by finishing, this kill, or owner disposal; a turn ending leaves them running.
+    description: 'Stop a running background job. Jobs otherwise keep running after your turn ends, until '
+      + 'they finish. Returns immediately; the job\'s status becomes `killed` once its work has stopped.',
     parameters: {
-      job_id: { type: 'string', required: true, description: 'Job id returned by the tool that started the background work.' },
-      reason: { type: 'string', description: 'Optional short reason, recorded in the log and forwarded to the job.' },
+      job_id: { type: 'string', required: true, description: JOB_ID_DESCRIPTION },
+      reason: { type: 'string', description: 'Optional short reason for stopping the job.' },
     },
     finalizeContent: finalizeJobContent,
     output: {

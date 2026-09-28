@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`dsh-tool-workflow` lets a model run a JavaScript orchestration script that delegates work to many subagents and returns the script's final JSON value. Use it only when the user explicitly requests a workflow or large multi-agent orchestration; use plain subagent calls for one or two delegations. The parent turn waits until every delegated task settles, and cancellation or abnormal completion returns an error rather than partial success. Deployments can rename the tool and cap rendered result text through `toolName` and `maxResultChars`.
+`dsh-tool-workflow` lets a model run a JavaScript orchestration script that delegates work to many subagents and returns the script's final JSON value. Use it only when the user explicitly requests a workflow or large-scale multi-agent orchestration; use plain subagent calls for one or two delegations. The parent turn waits until every delegated task settles, and cancellation or abnormal completion returns an error rather than partial success. Deployments can rename the tool and cap rendered result text through `toolName` and `maxResultChars`.
 
 ## Table of Contents
 
@@ -25,11 +25,11 @@ English | [中文](README.zh.md)
 <a id="use-this-package"></a>
 ## Use this package
 
-The `workflow` tool runs a model-authored orchestration script that fans work out across many subagents and returns the script's final JSON value. Use it only when the user explicitly asks for a workflow or for large multi-agent orchestration — an audit over many files, a migration, multi-angle research; for one or two delegations, prefer plain subagent calls.
+The `workflow` tool runs a model-authored orchestration script that fans work out across many subagents and returns the script's final JSON value. Use it only when the user explicitly asks for a workflow or for large-scale multi-agent orchestration — an audit over many files, a migration, multi-angle research — because one run can start many subagents; for one or two delegations, prefer plain subagent calls.
 
 ### Calling the tool
 
-The model submits three parameters: `meta` (required identity data: `name`, `description`, and optional `whenToUse` and `phases`), `script` (required plain JavaScript body — no `export const meta` statement; the tool description carries the complete authoring contract), and `args` (optional JSON object exposed to the script as the `args` global; wrap a bare list in a field so the wire schema stays honest).
+The model submits three parameters: `meta` (required identity data: `name`, `description`, and optional `whenToUse` and `phases`), `script` (required body of an async JavaScript function — no TypeScript and no import or export statements, so no `export const meta` header; the tool description carries the complete authoring contract), and `args` (optional JSON object exposed to the script as the `args` global; wrap a bare list in a field so the wire schema stays honest).
 
 Success returns the canonical envelope `{ runId, agentsStarted, result }`, rendered to the model as `workflow "<name>" completed (<count> agent<optional-s>).` followed by `Return value:` and the pretty-printed JSON. A workflow that cannot start — a script parse or meta validation failure — returns an error the model can correct from. Cancellation and execution failures return `Error: workflow run was cancelled` or `Error: workflow run failed: <error>`; partial output is never reported as success.
 
@@ -58,7 +58,7 @@ This section explains how the consumer is split from the engine and how the run 
 
 ### Design concept
 
-The consumer owns the model-facing schema, the `tool:<toolName>` system-prompt guidance, and the result envelope; script parsing, execution, caps, and cancellation live behind `ctx.workflowEngine`, while the PTC engine shares Node process confinement with `run_code`. Usage guidance ships with the tool plugin as a prompt section, never in the deployment persona.
+The consumer owns the model-facing schema, including the explicit-request usage policy in the tool description, and the result envelope; script parsing, execution, caps, and cancellation live behind `ctx.workflowEngine`, while the PTC engine shares Node process confinement with `run_code`. The plugin contributes no system-prompt section, and its usage policy never lives in the deployment persona.
 
 ### Run lifecycle
 
@@ -101,31 +101,11 @@ Read these pages when the tool-level contract is not enough. They move from the 
 <a id="model-experience"></a>
 ## Model Experience
 
-### System prompt
-
-#### What the model sees
-
-Every parent request in this plugin's registration scope receives the workflow guidance below. A scoped tool restriction can hide the schema without removing this independently registered guidance.
-
-##### Workflow guidance
-
-```markdown
-Use the <toolName> tool ONLY when the user explicitly asks for a workflow or for large multi-agent orchestration: you write a JavaScript script (the tool description documents the exact format) that fans work out across many subagents with phases and structured results. For one or two delegations, prefer plain subagent calls.
-```
-
-#### Token effect
-
-Small fixed guidance cost per request while the plugin is active.
-
-#### KV Cache effect
-
-Prefix-stable while the plugin scope and guidance text are unchanged. Activation or disposal may invalidate reuse from this prompt section.
-
 ### Tool schema
 
 #### What the model sees
 
-When visible, the generated default [`workflow` schema](../../../docs/tool-catalog.md#deepseek-aidsh-tool-workflow) carries the complete JavaScript hook and metadata contract; `toolName` can rename the definition, and the model submits script, metadata, and optional args.
+When visible, the generated default [`workflow` schema](../../../docs/tool-catalog.md#deepseek-aidsh-tool-workflow) carries the usage policy and the complete JavaScript hook and metadata contract; the plugin adds no system-prompt section, so a scoped restriction that hides the tool leaves nothing behind. The description allows a run only when the user explicitly asks for a workflow or large-scale multi-agent orchestration, because one run can start many subagents. The `script` parameter description states the configured `maxResultChars` bound, and the `meta.phases` `provider` and `model` fields are marked informational because only `agent()` options route subagents. `toolName` can rename the definition, and the model submits script, metadata, and optional args.
 
 #### Token effect
 
@@ -133,7 +113,7 @@ Substantial fixed schema cost on each request where the tool is visible.
 
 #### KV Cache effect
 
-Prefix-stable while `toolName`, definition, and visibility are unchanged. Renaming, plugin lifecycle, or scoped restrictions may invalidate reuse from this schema.
+Prefix-stable while `toolName`, `maxResultChars`, definition, and visibility are unchanged. Renaming, changing `maxResultChars`, plugin lifecycle, or scoped restrictions may invalidate reuse from this schema.
 
 ### Tool-call history and result
 

@@ -6,7 +6,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import { ShellExecutor } from '@deepseek-ai/dsh-shell'
 import type { ShellExecRequest, ShellExecSpec, ShellProcess, ShellProcessRead, ShellRunResult } from '@deepseek-ai/dsh-shell'
-import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
+import SystemPrompt, { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime, { TOOL_ABORTED, TOOL_ABORTED_BEFORE_DISPATCH } from '@deepseek-ai/dsh-tools'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -26,6 +26,46 @@ import { processOutcome } from '../src/background.ts'
 import { renderProcessRead, renderResult } from '../src/render.ts'
 
 const testToolSignal = new AbortController().signal
+
+// Pinned model-visible text. The description is one run-in paragraph built
+// from these pieces and is the tool's only guidance (no system-prompt section);
+// the sandbox paragraph appears only with a confining executor.
+const BASH_DESCRIPTION_BASE = 'Run a command with `bash -c` and return its stdout and stderr. '
+  + 'Each call starts a fresh shell, so directory changes and variables do not carry over to later calls. '
+  + 'A non-zero exit is reported in the result as `[exit code: N]`, not as a tool error. '
+  + 'Long output is truncated to its tail, and the full output is saved to a file named in the result when possible. '
+  + '`$DSH_HOME` is the harness home directory and `$DSH_SESSION_ID` is this session\'s id. '
+const BASH_DESCRIPTION_BACKGROUND = 'A command run with `run_in_background` returns a job id right away; '
+  + 'read its output with `job_output` and stop it with `job_kill`.'
+const BASH_DESCRIPTION_NO_BACKGROUND = 'Background execution is not available, so a command must finish within its timeout.'
+const BASH_DESCRIPTION_SANDBOX = ' Commands may run in a file sandbox; trying one it might block is safe. '
+  + 'A blocked file operation reports `[sandbox: file access denied under <mode> mode]`: '
+  + 'a policy denial, not a bug in the command, so do not work around it. '
+  + 'When a wider mode would let a denied command succeed, retry that same command once in the same turn '
+  + 'with the narrowest sufficient `sandbox_permissions` and a `justification`. '
+  + 'That retry itself asks the user for approval, so there is no need to ask in chat first. '
+  + 'Request a wider mode up front only when this session already denied the same access. '
+  + 'A rejection is final for that command: stop and explain. Other commands can still run or escalate.'
+const BASH_PARAMETER_DESCRIPTIONS = {
+  command: 'The bash command to execute.',
+  description: 'Short summary of what the command does, shown to the user.',
+  timeoutMs: 'Timeout in milliseconds, capped at the maximum; the command is killed when it expires.',
+  workdir: 'Directory to run this command in. Defaults to your working directory; a relative path resolves against it.',
+  run_in_background: 'Run in the background, with no timeout.',
+  sandbox_permissions: 'Wider sandbox mode for retrying a denied command.',
+  justification: 'One sentence telling the user why this command needs wider access.',
+}
+
+/** Every parameter description of one schema, keyed by parameter name. */
+function parameterDescriptions(schema: { parameters: { properties?: unknown } }): Record<string, string | undefined> {
+  const properties = schema.parameters.properties as Record<string, { description?: string }>
+  return Object.fromEntries(Object.entries(properties).map(([name, property]) => [name, property.description]))
+}
+
+/** The pinned descriptions of the named parameters. */
+function pinnedParameters(...names: Array<keyof typeof BASH_PARAMETER_DESCRIPTIONS>): Record<string, string> {
+  return Object.fromEntries(names.map(name => [name, BASH_PARAMETER_DESCRIPTIONS[name]]))
+}
 
 const spillDir = mkdtempSync(join(tmpdir(), 'dsh-tool-bash-spec-'))
 
@@ -186,7 +226,7 @@ class CountingStartExecutor extends ShellExecutor {
   }
 }
 
-async function setupSandboxed(withApproval = false) {
+async function setupSandboxed(withApproval = false, toolConfig: ToolBash.Config = {}) {
   const ctx = new Context()
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
@@ -199,7 +239,7 @@ async function setupSandboxed(withApproval = false) {
   await ctx.plugin(RecordingSandboxExecutor)
   if (withApproval) await ctx.plugin(ApprovalService)
   await ctx.plugin(BashEnvPlugin)
-  await ctx.plugin(ToolBash)
+  await ctx.plugin(ToolBash, toolConfig)
   return { ctx, bash: ctx.shell as RecordingSandboxExecutor }
 }
 
@@ -381,32 +421,20 @@ describe('bash tool', () => {
     })
     expect(Object.keys(bashSchema.parameters.properties as Record<string, unknown>))
       .toContain('run_in_background')
-    expect(bashSchema.description).toContain('job_output')
+    expect(bashSchema.description).toBe(BASH_DESCRIPTION_BASE + BASH_DESCRIPTION_BACKGROUND)
+    expect(parameterDescriptions(bashSchema)).toEqual(
+      pinnedParameters('command', 'description', 'timeoutMs', 'workdir', 'run_in_background'),
+    )
+    // Without a confining executor no denial can occur, so no escalation fields appear.
+    expect(bashSchema.parameters.properties).not.toHaveProperty('sandbox_permissions')
   })
 
-  it('contributes the exit-code habit as its prompt section (guidance the descriptions cannot carry)', async () => {
+  it('teaches through its description alone: no system-prompt section', async () => {
     const ctx = await setup()
-    ctx.systemPrompt.section({
-      name: 'test:before-bash',
-      order: ctx.systemPrompt.getSectionOrder('TOOL_BASH') - 10,
-      text: 'before',
-    })
-    ctx.systemPrompt.section({
-      name: 'test:after-bash',
-      order: ctx.systemPrompt.getSectionOrder('TOOL_BASH') + 10,
-      text: 'after',
-    })
     const assembly = await ctx.systemPrompt.assemble()
-    const section = assembly.sections.find(s => s.name === 'tool:bash')
-    expect(assembly.sections.map(s => s.name)).toEqual([
-      'harness:identity',
-      'deployment:persona-prefix',
-      'test:before-bash',
-      'tool:bash',
-      'test:after-bash',
-      'deployment:persona-suffix',
-    ])
-    expect(section?.text).toContain('[exit code: N]')
+    // Only the system-prompt plugin's own built-in sections are present.
+    expect(assembly.sections.map(s => s.name)).toEqual(['harness:identity', 'deployment:persona-prefix', 'deployment:persona-suffix'])
+    expect(renderPrompt(assembly)).not.toContain('bash')
   })
 
   it('unregisters everything when the plugin fiber is disposed (HMR safety)', async () => {
@@ -418,11 +446,8 @@ describe('bash tool', () => {
     await ctx.plugin(BashEnvPlugin)
     const fiber = await ctx.plugin(ToolBash)
     expect(ctx.tools.schemas()).toHaveLength(1)
-    expect((await ctx.systemPrompt.assemble()).sections.map(s => s.name)).toEqual(['harness:identity', 'deployment:persona-prefix', 'tool:bash', 'deployment:persona-suffix'])
     await fiber.dispose()
     expect(ctx.tools.schemas()).toHaveLength(0)
-    // Only the system-prompt plugin's own built-in sections remain.
-    expect((await ctx.systemPrompt.assemble()).sections.map(s => s.name)).toEqual(['harness:identity', 'deployment:persona-prefix', 'deployment:persona-suffix'])
   })
 
   it('tools depend on the executor: no registration without ctx.shell', async () => {
@@ -571,8 +596,9 @@ describe('background execution through the job runtime', () => {
     const schema = ctx.tools.schemas().find(s => s.name === 'bash')!
     expect(Object.keys(schema.parameters.properties as Record<string, unknown>))
       .toEqual(['command', 'description', 'timeoutMs', 'workdir'])
-    expect(schema.description).toContain('Background execution is not available')
+    expect(schema.description).toBe(BASH_DESCRIPTION_BASE + BASH_DESCRIPTION_NO_BACKGROUND)
     expect(schema.description).not.toContain('run_in_background')
+    expect(parameterDescriptions(schema)).toEqual(pinnedParameters('command', 'description', 'timeoutMs', 'workdir'))
     // The registry-held definition agrees (schema and capability never disagree).
     const parameters = ctx.tools.get('bash')!.parameters as { properties: Record<string, unknown> }
     expect('run_in_background' in parameters.properties).toBe(false)
@@ -608,7 +634,11 @@ describe('sandbox escalation through the generic task producer', () => {
     const schema = ctx.tools.schemas().find(item => item.name === 'bash')!
     const properties = schema.parameters.properties as Record<string, { enum?: string[] }>
     expect(properties['sandbox_permissions']?.enum).toEqual(['workspace-write', 'danger-full-access'])
-    expect(schema.description).toContain('approval prompt')
+    // The approval policy's runtime context, not this description, says when approvals are off.
+    expect(schema.description).toBe(BASH_DESCRIPTION_BASE + BASH_DESCRIPTION_BACKGROUND + BASH_DESCRIPTION_SANDBOX)
+    expect(parameterDescriptions(schema)).toEqual(pinnedParameters(
+      'command', 'description', 'timeoutMs', 'workdir', 'run_in_background', 'sandbox_permissions', 'justification',
+    ))
 
     for (const args of [
       { command: 'true', description: 'd', sandbox_permissions: 'workspace-write' },
@@ -616,6 +646,19 @@ describe('sandbox escalation through the generic task producer', () => {
       { command: 'true', description: 'd', sandbox_permissions: 'workspace-write', justification: ' ' },
     ]) {
       expect((await call(ctx, 'bash', args)).isError).toBe(true)
+    }
+  })
+
+  it('keeps the sandbox paragraph after the no-background sentence when background is disabled', async () => {
+    const { ctx } = await setupSandboxed(false, { enableRunInBackground: false })
+    try {
+      const schema = ctx.tools.schemas().find(item => item.name === 'bash')!
+      expect(schema.description).toBe(BASH_DESCRIPTION_BASE + BASH_DESCRIPTION_NO_BACKGROUND + BASH_DESCRIPTION_SANDBOX)
+      expect(parameterDescriptions(schema)).toEqual(pinnedParameters(
+        'command', 'description', 'timeoutMs', 'workdir', 'sandbox_permissions', 'justification',
+      ))
+    } finally {
+      await ctx.fiber.dispose()
     }
   })
 
@@ -1190,10 +1233,12 @@ describe('the model-facing bash tool builds its request from named args only (no
     return { ctx, bash: ctx.shell as RecordingBashExecutor }
   }
 
-  it('describes the managed harness environment namespace to the model', async () => {
+  it('names the harness environment variables useful to the model', async () => {
     const { ctx } = await setupRecording()
     const description = ctx.tools.get('bash')?.description ?? ''
-    expect(description).toContain('$DSH_*')
+    expect(description).toContain('`$DSH_HOME` is the harness home directory and `$DSH_SESSION_ID` is this session\'s id.')
+    // DSH_SHELL=1 only marks the process, so it is not described.
+    expect(description).not.toContain('DSH_SHELL')
   })
 
   it('injects built-ins and the stable session id into a foreground request', async () => {

@@ -1,6 +1,6 @@
 /**
  * Model-facing `web_search` and `web_fetch` tools over `ctx.web`. This package owns schemas,
- * validation, prompt guidance, limits, and presentation, never concrete providers. Enablement
+ * descriptions, validation, limits, and presentation, never concrete providers. Enablement
  * controls tool registration; an enabled tool remains visible when its provider is unavailable
  * and fails with a structured error at execution time.
  * @module @deepseek-ai/dsh-tool-web
@@ -21,7 +21,7 @@ export type { WebFetchMeta } from './fetch.ts'
 export const name = 'tool-web'
 
 /** Services required by the web tool suite. */
-export const inject = ['tools', 'web', 'systemPrompt']
+export const inject = ['tools', 'web']
 
 /** Default cooperative tool-call timeout budget (ms) for the web tools. */
 export const DEFAULT_WEB_TOOL_TIMEOUT_MS = 30_000
@@ -73,12 +73,14 @@ function assertPositiveInteger(name: string, value: number): void {
 
 /**
  * Register the enabled web tools. `search`/`fetch` default to true; a product
- * that wants only one disables the other in config. Each tool's cooperative
- * timeout budget (`fetchTimeoutMs`/`searchTimeoutMs`, default 30000) is resolved
- * here and attached to the tool as `ToolDefinition.timeoutMs` for
- * `@deepseek-ai/dsh-tool-call-timeout-policy` to enforce. The tools' disposers are
- * fiber-scoped (the effect-based registries clean up on dispose), so no manual
- * teardown is needed.
+ * that wants only one disables the other in config. The tools carry their
+ * whole model-facing contract in their descriptions and contribute no
+ * system-prompt section, so their text varies only with this config. Each
+ * tool's cooperative timeout budget (`fetchTimeoutMs`/`searchTimeoutMs`,
+ * default 30000) is resolved here and attached to the tool as
+ * `ToolDefinition.timeoutMs` for `@deepseek-ai/dsh-tool-call-timeout-policy` to
+ * enforce. The registrations are fiber-scoped effects that the registry removes
+ * on dispose, so no manual teardown is needed.
  */
 export function apply(ctx: Context, config: Config): void {
   // schemastery (Config) has already filled every defaulted field.

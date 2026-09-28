@@ -6,7 +6,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { PtcRuntime } from '@deepseek-ai/dsh-ptc-runtime'
-import { createScope, type Scope } from '@deepseek-ai/dsh-scope'
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
@@ -132,6 +131,17 @@ function text(result: { content: { type: string; text?: string }[] }): string {
   return result.content.filter(b => b.type === 'text').map(b => b.text).join('')
 }
 
+/** The exact model-facing descriptions; they are the tools' only guidance. */
+const fsDescriptions = {
+  read: 'Read a UTF-8 text file as numbered lines, paged for long files. '
+    + 'Unlike cat, head, or tail in a shell, this counts as reading the file for later write and edit calls.',
+  write: 'Create a UTF-8 text file or replace all of its content. '
+    + 'Replacing an existing file is refused unless you have read, written, or edited it in this session and it has not changed since. '
+    + 'For a partial change, edit avoids resending the whole file.',
+  edit: 'Replace literal text in an existing UTF-8 text file. '
+    + 'The edit is refused unless you have read, written, or edited the file in this session and it has not changed since.',
+} as const
+
 describe('session cwd resolution', () => {
   const execution = (cwd?: string) => cwd === undefined
     ? {}
@@ -163,6 +173,14 @@ describe('registration', () => {
     expect(ctx.tools.schemas().map(s => s.name).sort()).toEqual(['edit', 'read', 'write'])
   })
 
+  it('describes file_path by how a relative path resolves', async () => {
+    const { ctx } = await setup()
+    for (const schema of ctx.tools.schemas()) {
+      const props = (schema.parameters as { properties: Record<string, { description?: string }> }).properties
+      expect(props['file_path']?.description).toBe('Absolute path, or relative to the working directory.')
+    }
+  })
+
   it('declares read parallel-safe while write/edit remain exclusive', async () => {
     const { ctx } = await setup()
     expect(ctx.tools.executionMode({ signal: testToolSignal, callId: ToolCallId('read-safe'), name: 'read', arguments: { file_path: 'a.txt' } }))
@@ -173,12 +191,29 @@ describe('registration', () => {
       .toEqual({ kind: 'exclusive' })
   })
 
-  it('registers prompt sections for each tool', async () => {
+  it('pins the model-facing descriptions verbatim', async () => {
     const { ctx } = await setup()
-    const prompt = renderPrompt(await ctx.systemPrompt.assemble())
-    expect(prompt).toContain('Use the read tool')
-    expect(prompt).toContain('Use the write tool')
-    expect(prompt).toContain('Use the edit tool')
+    const schema = (name: string) => ctx.tools.schemas().find(candidate => candidate.name === name)
+    const props = (name: string) => (schema(name)?.parameters as { properties: Record<string, { description?: string }> }).properties
+    for (const name of ['read', 'write', 'edit'] as const) {
+      expect(schema(name)?.description).toBe(fsDescriptions[name])
+    }
+    expect(props('edit')['old_string']?.description).toBe('Text to replace, matching the file exactly, including whitespace but without the line numbers read adds. '
+      + 'It must occur exactly once unless replace_all is true.')
+    expect(props('edit')['new_string']?.description).toBe('Literal replacement text. Use an empty string to delete the match.')
+    expect(props('edit')['replace_all']?.description).toBe('Replace every occurrence. Defaults to false.')
+  })
+
+  it('contributes no system-prompt section', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    const baseline = renderPrompt(await ctx.systemPrompt.assemble())
+    await ctx.plugin(FakeFs)
+    await ctx.plugin(FsPolicy)
+    await ctx.plugin(ToolFs)
+    expect(ctx.tools.schemas()).toHaveLength(3)
+    expect(renderPrompt(await ctx.systemPrompt.assemble())).toBe(baseline)
   })
 
   it('stays pending until ctx.fs exists (inject)', async () => {
@@ -196,15 +231,9 @@ describe('registration', () => {
     await ctx.plugin(FakeFs)
     await ctx.plugin(FsPolicy)
     const fiber = await ctx.plugin(ToolFs)
-    // Each tool contributes BOTH a schema and a prompt section; disposal must
-    // withdraw both, not just the schemas.
     expect(ctx.tools.schemas()).toHaveLength(3)
-    const sectionNames = (a: { sections: { name: string }[] }) => a.sections.map(s => s.name).sort()
-    expect(sectionNames(await ctx.systemPrompt.assemble())).toEqual(['deployment:persona-prefix', 'deployment:persona-suffix', 'harness:identity', 'tool:edit', 'tool:read', 'tool:write'])
     await fiber.dispose()
     expect(ctx.tools.schemas()).toHaveLength(0)
-    // Only the system-prompt plugin's own built-in sections remain.
-    expect(sectionNames(await ctx.systemPrompt.assemble())).toEqual(['deployment:persona-prefix', 'deployment:persona-suffix', 'harness:identity'])
   })
 })
 
@@ -857,7 +886,7 @@ describe('sandbox escalation API (write/edit)', () => {
   function fsSchema(ctx: Context, name: 'write' | 'edit') {
     const schema = ctx.tools.schemas().find(s => s.name === name)
     if (!schema) throw new Error(`${name} tool not registered`)
-    return schema as unknown as { parameters: { properties: Record<string, { enum?: string[] }> } }
+    return schema as unknown as { parameters: { properties: Record<string, { enum?: string[]; description?: string }> } }
   }
 
   it('fails load when a confining filesystem has no shared sandbox-policy resolver', async () => {
@@ -883,7 +912,10 @@ describe('sandbox escalation API (write/edit)', () => {
     for (const name of ['write', 'edit'] as const) {
       const props = fsSchema(ctx, name).parameters.properties
       expect(props['sandbox_permissions']?.enum).toEqual(['workspace-write', 'danger-full-access'])
-      expect(props['justification']).toBeDefined()
+      expect(props['sandbox_permissions']?.description).toBe(
+        'Wider sandbox mode for one retry after the sandbox denied this operation; needs a justification and the user\'s approval.')
+      expect(props['justification']?.description).toBe(
+        'Required with sandbox_permissions: one sentence telling the user why this operation needs wider access.')
     }
   })
 
@@ -993,73 +1025,8 @@ describe('sandbox escalation API (write/edit)', () => {
   })
 })
 
-/** Create a real per-agent scope over the mounted tool plugins. */
-async function guidanceScope(ctx: Context) {
-  const key = {}
-  let scope!: Scope
-  await ctx.plugin(Object.assign((inner: Context) => { scope = createScope(inner, key) },
-    { inject: ['tools', 'systemPrompt'] }))
-  return { key, scope }
-}
-
-const originalGuidance = {
-  read: 'Use the read tool — not shell commands like cat — to inspect text files. Results include line numbers. Use offset and limit to continue reading large files.',
-  write: 'Use the write tool to create files or completely replace file contents. Existing files are overwritten, so read an existing file first (the default fs-observation-policy requires it) and prefer edit for targeted changes.',
-  edit: 'Use the edit tool for targeted changes to existing UTF-8 text files. It replaces literal old_string with new_string; by default old_string must appear exactly once. If old_string appears multiple times, provide a more specific old_string or set replace_all to true. Read the file first (the default fs-observation-policy requires it), unless you just created or edited it in this session.',
-}
-
-describe('scope-aware filesystem guidance', () => {
-  it.each(Array.from({ length: 8 }, (_, mask) => mask))('preserves exact text for visible tools (mask %i)', async (mask) => {
-    const { ctx } = await setup()
-    const { key, scope } = await guidanceScope(ctx)
-    const names = ['read', 'write', 'edit'] as const
-    const allow = names.filter((_, index) => (mask & (1 << index)) !== 0)
-    const baseline = withPersona(...names.map(name => originalGuidance[name]))
-    expect(renderPrompt(await ctx.systemPrompt.assemble())).toBe(baseline)
-    const release = scope.ctx.tools.restrict({ allow })
-    try {
-      const assembly = await ctx.systemPrompt.assemble({ scope: key })
-      expect(assembly.tools.map(tool => tool.name)).toEqual([...allow].sort())
-      const expected = withPersona(...allow.map(name => name === 'write' && !allow.includes('edit')
-        ? originalGuidance.write.replace(' and prefer edit for targeted changes', '')
-        : originalGuidance[name]))
-      expect(renderPrompt(assembly)).toBe(expected)
-      expect(renderPrompt(await ctx.systemPrompt.assemble())).toBe(baseline)
-      release()
-      expect(renderPrompt(await ctx.systemPrompt.assemble({ scope: key }))).toBe(baseline)
-    } finally {
-      await scope.dispose()
-    }
-  })
-
-  it('honors deny filters and the existing exemption for own-scope tools', async () => {
-    const { ctx } = await setup()
-    const { key, scope } = await guidanceScope(ctx)
-    const write = ctx.tools.get('write')!
-    scope.ctx.tools.restrict({ deny: ['write', 'edit'] })
-    try {
-      expect(renderPrompt(await ctx.systemPrompt.assemble({ scope: key }))).toBe(withPersona(originalGuidance.read))
-      const denied = await call(ctx, 'write', { file_path: '/blocked', content: 'blocked' }, key)
-      expect(denied.isError).toBe(true)
-      expect(text(denied)).toContain('unknown tool "write"')
-      scope.ctx.tools.register(write)
-      const assembly = await ctx.systemPrompt.assemble({ scope: key })
-      expect(assembly.tools.map(tool => tool.name)).toEqual(['read', 'write'])
-      expect(renderPrompt(assembly)).toBe(withPersona(originalGuidance.read,
-        originalGuidance.write.replace(' and prefer edit for targeted changes', '')))
-    } finally {
-      await scope.dispose()
-    }
-  })
-})
-
-/** Preserve the default persona and exact section separators in the oracle. */
-function withPersona(...sections: string[]): string {
-  return ['You are an AI agent powered by DeepSeek Harness.', ...sections].join('\n\n')
-}
-
 /** Schema assembly only: these cases never execute user code. */
-class GuidancePtcRuntime extends PtcRuntime {
+class SchemaOnlyPtcRuntime extends PtcRuntime {
   resolve(request: import('@deepseek-ai/dsh-ptc-runtime').PtcRunRequest): import('@deepseek-ai/dsh-ptc-runtime').PtcRunSpec { return { ...request, cwd: request.cwd ?? process.cwd(), timeoutMs: request.timeoutMs ?? 120_000 } }
 
   readonly language = 'typescript'
@@ -1067,29 +1034,22 @@ class GuidancePtcRuntime extends PtcRuntime {
   run() { return Promise.resolve({ logs: [] }) }
 }
 
-describe('scope-aware PTC guidance', () => {
-  it.each(['ptc', 'both'] as const)('uses capability visibility in %s mode', async (mode) => {
+describe('PTC SDK documentation', () => {
+  it.each(['ptc', 'both'] as const)('documents each binding with its tool description in %s mode', async (mode) => {
     const ctx = new Context()
     await ctx.plugin(SystemPrompt)
-    await ctx.plugin(GuidancePtcRuntime)
+    await ctx.plugin(SchemaOnlyPtcRuntime)
     await ctx.plugin(ToolRuntime, { mode })
+    const sectionNames = async () => (await ctx.systemPrompt.assemble()).sections.map(section => section.name)
+    const baseline = await sectionNames()
     await ctx.plugin(FakeFs)
     await ctx.plugin(ToolFs)
-    const { key, scope } = await guidanceScope(ctx)
-    try {
-      const baseline = renderPrompt(await ctx.systemPrompt.assemble({ scope: key }))
-      const release = scope.ctx.tools.restrict({ allow: ['read'] })
-      const assembly = await ctx.systemPrompt.assemble({ scope: key })
-      expect(assembly.tools.map(tool => tool.name)).toEqual(mode === 'ptc' ? ['run_code'] : ['read', 'run_code'])
-      expect(assembly.sections.filter(section => ['tool:read', 'tool:write', 'tool:edit'].includes(section.name))
-        .map(section => section.text).filter(Boolean)).toEqual([originalGuidance.read])
-      expect(renderPrompt(assembly)).toContain(originalGuidance.read)
-      expect(renderPrompt(assembly)).not.toContain(originalGuidance.write)
-      expect(renderPrompt(assembly)).not.toContain(originalGuidance.edit)
-      release()
-      expect(renderPrompt(await ctx.systemPrompt.assemble({ scope: key }))).toBe(baseline)
-    } finally {
-      await scope.dispose()
+    // The descriptions are the only guidance: no fs section joins the prompt,
+    // and each generated binding carries its tool's description as its doc.
+    expect(await sectionNames()).toEqual(baseline)
+    const sdk = (await ctx.systemPrompt.assemble()).sections.find(section => section.name === 'tools:sdk')?.text ?? ''
+    for (const name of ['read', 'write', 'edit'] as const) {
+      expect(sdk).toContain(`/** ${fsDescriptions[name]} */`)
     }
   })
 })

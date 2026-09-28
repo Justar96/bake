@@ -27,7 +27,7 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "diff": "^9.0.0",
+    "diff": "catalog:",
     "@deepseek-ai/schemastery": "workspace:^"
   },
   "peerDependencies": {
@@ -37,7 +37,6 @@
     "@deepseek-ai/dsh-sandbox": "workspace:^",
     "@deepseek-ai/dsh-sandbox-policy": "workspace:^",
     "@deepseek-ai/dsh-session": "workspace:^",
-    "@deepseek-ai/dsh-system-prompt": "workspace:^",
     "@deepseek-ai/dsh-tools": "workspace:^",
     "@deepseek-ai/dsh-user-approval": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"

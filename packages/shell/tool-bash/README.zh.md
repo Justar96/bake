@@ -25,7 +25,7 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
-在 agent 需要运行 bash 命令的任何组合中加载本插件：一旦挂载执行器提供方与 `dsh-shell-env` 注册表，它就注册 `bash` 工具，并在 `tools`、`shell`、`systemPrompt` 与 `shellEnv` 服务就绪之前保持等待。
+在 agent 需要运行 bash 命令的任何组合中加载本插件：一旦挂载执行器提供方与 `dsh-shell-env` 注册表，它就注册 `bash` 工具，并在 `tools`、`shell` 与 `shellEnv` 服务就绪之前保持等待。
 
 ### 最小配置
 
@@ -51,7 +51,7 @@ kind: "package-reference"
 
 ### 运行命令
 
-工具执行 `bash -c <command>` 并返回合并后的输出。命令每次调用都运行在全新 shell 中，因此状态从不保留——请传 `workdir` 而不是 `cd`。非零退出以 `[exit code: N]` 报告给 agent 解读，而不是作为工具错误抛出。主动语态的 `description`（5–10 个词）在 UI 中标注该调用；`timeoutMs` 覆盖执行器的默认值与上限。超出执行器流上限的输出会被截断为尾部，完整输出保存到 spill 文件并报告其路径。
+工具执行 `bash -c <command>` 并返回合并后的输出。命令每次调用都运行在全新 shell 中，因此目录切换与变量都不会延续；`workdir` 设定命令的运行目录，相对的 `workdir` 相对会话工作目录解析。非零退出以 `[exit code: N]` 报告给 agent 解读，而不是作为工具错误抛出。简短的 `description` 向用户标注该调用；`timeoutMs` 取代执行器的默认超时，并被限制在其上限之内。超出执行器流上限的输出会被截断为尾部，完整输出保存到 spill 文件并报告其路径。工具说明会点名受管环境中的 `$DSH_HOME` 与 `$DSH_SESSION_ID`；`DSH_SHELL=1` 同样会设置，但只用于标记进程。
 
 <a id="running-long-commands-in-the-background"></a>
 ### 后台运行长时间命令
@@ -60,7 +60,7 @@ kind: "package-reference"
 
 ### 沙箱执行与升权
 
-当已挂载的执行器约束命令（例如 `dsh-bash-sandbox`）时，被阻止的文件操作会报告为 `[sandbox: file access denied under <mode> mode]`——这是策略拒绝，不是命令失败。模型随后可以在同一轮次中用 `sandbox_permissions`（满足需要的最窄更宽模式）与一句 `justification` 重试完全相同的命令一次；该重试引发的审批提示就是用户同意的方式。只有发生真实拒绝后才请求更宽权限；被拒绝的升权对该命令即为最终结果。重复当前模式无需审批即可执行，更窄目标则在执行前失败。未提供 `sandbox_permissions` 时，`justification` 可以省略、为空字符串或仅含空白；未指定模式却提供非空理由会被拒绝。重复当前生效模式时也可省略理由或提供空白理由。请求不同模式时必须提供非空理由；升权仍需审批。
+当已挂载的执行器约束命令（例如 `dsh-bash-sandbox`）时，被阻止的文件操作会报告为 `[sandbox: file access denied under <mode> mode]`——这是策略拒绝，不是命令失败。模型随后可以在同一轮次中用 `sandbox_permissions`（满足需要的最窄更宽模式）与一句 `justification` 重试完全相同的命令一次；该重试引发的审批提示就是用户同意的方式。只有发生真实拒绝后才请求更宽权限，或在会话已拒绝过同一访问时预先请求；被拒绝的升权对该命令即为最终结果，其他命令仍可运行或升权。会话能否请求审批由审批策略的运行时上下文说明，因此工具说明不再重复。重复当前模式无需审批即可执行，更窄目标则在执行前失败。未提供 `sandbox_permissions` 时，`justification` 可以省略、为空字符串或仅含空白；未指定模式却提供非空理由会被拒绝。重复当前生效模式时也可省略理由或提供空白理由。请求不同模式时必须提供非空理由；升权仍需审批。
 
 ### 可能出什么问题
 
@@ -87,7 +87,7 @@ kind: "package-reference"
 
 | 文件 | 职责 |
 |---|---|
-| [`src/index.ts`](src/index.ts) | 插件入口：工具注册、提示词区段、参数校验、升权、请求组装 |
+| [`src/index.ts`](src/index.ts) | 插件入口：工具注册与说明、参数校验、升权、请求组装 |
 | [`src/background.ts`](src/background.ts) | 管理异步 shell 准备，并将进程结算映射为任务结果 |
 | [`src/render.ts`](src/render.ts) | 模型侧结果文本：流、标记、截断通知 |
 | — | 不发布运行时不变式伴生入口；环境注册表在每次变更和读取时校验所有权及收集值，且不发布可供伴生入口交叉核对的独立快照；执行关系由能力 seam 负责。 |
@@ -122,35 +122,15 @@ kind: "package-reference"
 <a id="model-experience"></a>
 ## 模型体验
 
-### 系统提示词
-
-#### 模型看到什么
-
-以下 bash 指引会以第一方顺序值 1000 出现在该插件注册作用域内的每次请求中。策略归属方通过其缓存安全的运行时上下文贡献当前沙箱状态，而不修改本区段。按作用域实施的工具限制可以隐藏 schema，却不会移除这个独立注册的区段。
-
-##### Bash 指引
-
-```markdown
-Check the [exit code: N] marker on every bash result; investigate failures before moving on.
-```
-
-#### Token 影响
-
-插件激活期间，每次请求都会产生少量固定的输入 token 开销，不随沙箱模式或模式切换而变。
-
-#### KV Cache 影响
-
-只要注册作用域与提示词文本不变，前缀就保持稳定。插件激活或释放可能使从该提示词区段起的复用失效；沙箱模式切换不会。
-
 ### 工具 schema
 
 #### 模型看到什么
 
-模型会看到生成的 [`bash` schema](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-bash)。仅当本生产方启用 `run_in_background` 时，该字段才会出现；仅当已挂载执行器声明支持沙箱时，`sandbox_permissions` 和 `justification` 才会出现。按 agent 作用域限制工具可以移除该 agent 的定义。
+模型会看到生成的 [`bash` schema](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-bash)。其说明是该工具唯一的指引：本插件不贡献任何系统提示词区段，因此工具限制隐藏了 `bash` 的 agent 不会看到任何相关内容；在 PTC 工具模式下，同一段文本也用作生成的 SDK 函数的文档。仅当本生产方启用 `run_in_background` 时，该字段才会出现；仅当已挂载执行器声明支持沙箱时，`sandbox_permissions`、`justification` 以及说明中的沙箱段落（拒绝标记与升权规则）才会出现，因为只有约束型执行器会报告拒绝。策略归属方通过其运行时上下文说明当前沙箱模式与审批策略，而不修改本说明。按 agent 作用域限制工具可以移除该 agent 的定义。
 
 #### Token 影响
 
-工具可见的每个请求都会产生固定 schema 开销；沙箱支持会增加升权字段及其条件说明段落。
+工具可见的每个请求都会产生固定 schema 开销；沙箱支持会增加升权字段及条件沙箱段落。
 
 #### KV Cache 影响
 

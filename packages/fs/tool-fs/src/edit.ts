@@ -68,27 +68,28 @@ export function formatEditOutput(displayPath: string, replaceAll: boolean): stri
 }
 
 /**
- * Register the `edit` tool and its scope-aware system-prompt guidance.
+ * Register the `edit` tool. Its description and parameters carry all of its
+ * model-facing guidance; the tool contributes no system-prompt section.
  * @param ctx - the plugin context; registrations are effects scoped to it, and execution uses its `fs` service.
  * @param sandbox - the shared sandbox-escalation API (advertisement, mode stamping, denial mapping).
  */
 export function applyEditTool(ctx: Context, sandbox: FsSandboxController): void {
-  ctx.systemPrompt.section({
-    name: 'tool:edit',
-    order: ctx.systemPrompt.getSectionOrder('TOOL_EDIT'),
-    text: ({ scope }) => ctx.tools.get('edit', scope) === undefined
-      ? ''
-      : 'Use the edit tool for targeted changes to existing UTF-8 text files. It replaces literal old_string with new_string; by default old_string must appear exactly once. If old_string appears multiple times, provide a more specific old_string or set replace_all to true. Read the file first (the default fs-observation-policy requires it), unless you just created or edited it in this session.',
-  })
-
   ctx.tools.register(defineTool({
     name: 'edit',
-    description: 'Edit an existing UTF-8 text file by replacing literal text.',
+    // The refusal sentence states the fs-observation-policy guard that every
+    // shipped composition mounts; the uniqueness rule lives only on old_string.
+    description: 'Replace literal text in an existing UTF-8 text file. '
+      + 'The edit is refused unless you have read, written, or edited the file in this session and it has not changed since.',
     parameters: {
-      file_path: { type: 'string', required: true, description: 'Path to edit, resolved by the filesystem backend.' },
-      old_string: { type: 'string', required: true, description: 'Literal text to replace. Must match exactly.' },
+      file_path: { type: 'string', required: true, description: 'Absolute path, or relative to the working directory.' },
+      old_string: {
+        type: 'string',
+        required: true,
+        description: 'Text to replace, matching the file exactly, including whitespace but without the line numbers read adds. '
+          + 'It must occur exactly once unless replace_all is true.',
+      },
       new_string: { type: 'string', required: true, description: 'Literal replacement text. Use an empty string to delete the match.' },
-      replace_all: { type: 'boolean', description: 'Replace all matches. Defaults to false; when false, old_string must appear exactly once.' },
+      replace_all: { type: 'boolean', description: 'Replace every occurrence. Defaults to false.' },
       ...sandbox.escalationModes.length > 0 ? sandbox.schemaFields() : {},
     },
     output: {

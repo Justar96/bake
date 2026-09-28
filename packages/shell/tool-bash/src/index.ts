@@ -27,7 +27,7 @@ import { processJob } from './background.ts'
 import { parseExitStatus, renderProcessRead, renderResult } from './render.ts'
 
 export const name = 'tool-bash'
-export const inject = ['tools', 'shell', 'systemPrompt', 'shellEnv']
+export const inject = ['tools', 'shell', 'shellEnv']
 
 /** Configuration for the bash tool. */
 export interface Config {
@@ -69,29 +69,34 @@ function validateBashArgs(args: BashToolArgs, effectiveMode: SandboxMode | undef
   validateEscalationArgs(args.sandbox_permissions, justification)
 }
 
+/**
+ * Model-facing `bash` description, the only place the tool's guidance lives:
+ * no system-prompt section repeats it. It varies only with plugin config and
+ * executor capability, never per turn, so the request prefix stays cacheable.
+ * The sandbox paragraph appears only with a confining executor, the only kind
+ * that can report a denial; whether this session may request approval at all
+ * is stated by the approval policy's runtime context.
+ */
 function bashDescription(backgroundEnabled: boolean, escalationModes: readonly SandboxMode[]): string {
   const background = backgroundEnabled
-    ? 'Set `run_in_background: true` for long-running commands: the call returns a job id immediately; read its output with `job_output` and stop it with `job_kill`.'
-    : 'Background execution is not available; long-running commands must finish within the timeout.'
-  const base = 'Execute a bash command (`bash -c`) and return its stdout/stderr. '
-    + 'Each call runs in a fresh shell: no state (cwd, variables, functions) persists between calls — '
-    + 'pass `workdir` instead of using `cd`. Non-zero exits are reported as `[exit code: N]`. '
-    + `Current harness environment facts are exposed through managed \`$${DSH_ENV_PREFIX}*\` variables; inspect them when needed. `
-    + 'Commands may run under a file sandbox; a blocked file operation is reported as `[sandbox: file access denied under <mode> mode]` — a policy denial, not a bug in the command; do not retry another way. '
-    + 'Long output is truncated to its tail; the full output is saved to a file whose path is reported when available. '
+    ? 'A command run with `run_in_background` returns a job id right away; read its output with `job_output` and stop it with `job_kill`.'
+    : 'Background execution is not available, so a command must finish within its timeout.'
+  // The registry's built-ins; DSH_SHELL=1 only marks the process and tells the model nothing.
+  const base = 'Run a command with `bash -c` and return its stdout and stderr. '
+    + 'Each call starts a fresh shell, so directory changes and variables do not carry over to later calls. '
+    + 'A non-zero exit is reported in the result as `[exit code: N]`, not as a tool error. '
+    + 'Long output is truncated to its tail, and the full output is saved to a file named in the result when possible. '
+    + `\`$${DSH_ENV_PREFIX}HOME\` is the harness home directory and \`$${DSH_ENV_PREFIX}SESSION_ID\` is this session's id. `
     + background
   if (escalationModes.length === 0) return base
-  return base + ' Attempting a command the sandbox may deny is safe and expected: run it and read the '
-    + 'marker rather than assuming the denial. When a command is denied and a wider mode would let it '
-    + 'succeed, escalate immediately in the same turn — the one sanctioned exception to a denial: retry '
-    + 'the exact same command once with `sandbox_permissions` (the narrowest wider mode that suffices) '
-    + 'plus a one-sentence `justification`. Do not detour through chat to ask permission first — the '
-    + 'approval prompt raised by that retry is how the user consents. If the session states approval '
-    + 'prompts are disabled, there is no exception: a denial is final — do not set `sandbox_permissions`. '
-    + 'Never escalate speculatively: ground the request in a real denial — normally the one this command '
-    + 'just hit; escalating up front is fine only when this session already denied the same access. '
-    + 'A rejected escalation is final for that command — stop and explain, never work around '
-    + 'it — but it does not forbid attempting or escalating other commands later.'
+  return base + ' Commands may run in a file sandbox; trying one it might block is safe. '
+    + 'A blocked file operation reports `[sandbox: file access denied under <mode> mode]`: '
+    + 'a policy denial, not a bug in the command, so do not work around it. '
+    + 'When a wider mode would let a denied command succeed, retry that same command once in the same turn '
+    + 'with the narrowest sufficient `sandbox_permissions` and a `justification`. '
+    + 'That retry itself asks the user for approval, so there is no need to ask in chat first. '
+    + 'Request a wider mode up front only when this session already denied the same access. '
+    + 'A rejection is final for that command: stop and explain. Other commands can still run or escalate.'
 }
 
 /**
@@ -234,13 +239,6 @@ export function apply(ctx: Context, config: Config = {}): void {
     )
   }
 
-  // Cross-call guidance belongs in the prompt rather than one-call schema prose.
-  ctx.systemPrompt.section({
-    name: 'tool:bash',
-    order: ctx.systemPrompt.getSectionOrder('TOOL_BASH'),
-    text: 'Check the [exit code: N] marker on every bash result; investigate failures before moving on.',
-  })
-
   ctx.tools.register(defineTool({
     name: 'bash',
     description: bashDescription(backgroundEnabled, escalationModes),
@@ -249,24 +247,22 @@ export function apply(ctx: Context, config: Config = {}): void {
       description: {
         type: 'string',
         required: true,
-        description: 'Clear, concise description of what this command does in active voice, '
-          + '5-10 words (shown in the UI). Examples: "ls" → "List files in current directory"; '
-          + '"git status" → "Show working tree status"; "npm install" → "Install package dependencies".',
+        description: 'Short summary of what the command does, shown to the user.',
       },
-      timeoutMs: { type: 'number', description: 'Timeout in milliseconds. The executor applies its configured default and cap, and kills the command on expiry.' },
-      workdir: { type: 'string', description: 'Working directory for this command. Defaults to the session workspace; a relative path is resolved against it.' },
+      timeoutMs: { type: 'number', description: 'Timeout in milliseconds, capped at the maximum; the command is killed when it expires.' },
+      workdir: { type: 'string', description: 'Directory to run this command in. Defaults to your working directory; a relative path resolves against it.' },
       ...backgroundEnabled ? {
-        run_in_background: { type: 'boolean' as const, description: 'Run in the background and return a job id immediately (collect with job_output, stop with job_kill). No timeout applies.' },
+        run_in_background: { type: 'boolean' as const, description: 'Run in the background, with no timeout.' },
       } : {},
       ...escalationModes.length > 0 ? {
         sandbox_permissions: {
           type: 'string' as const,
           enum: [...escalationModes],
-          description: 'The wider sandbox mode this command needs. Only valid as a one-shot retry of a command the sandbox just denied; requires justification and user approval.',
+          description: 'Wider sandbox mode for retrying a denied command.',
         },
         justification: {
           type: 'string' as const,
-          description: 'Required with sandbox_permissions: one sentence for the user explaining why this exact command needs the wider access.',
+          description: 'One sentence telling the user why this command needs wider access.',
         },
       } : {},
     },

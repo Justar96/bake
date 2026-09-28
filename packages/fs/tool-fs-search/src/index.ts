@@ -14,8 +14,8 @@
  * {@link module:@deepseek-ai/dsh-tool-fs-search/grep}), result parsing,
  * retention, formatted-result spill, and timeout declaration; the subprocess
  * seam owns spawn execution, process-tree termination, environment scrubbing,
- * and raw output capture. The package injects `tools`, `systemPrompt`, and
- * `subprocess` — deliberately NOT `fs`, and `ctx.spillStore` is read
+ * and raw output capture. The package injects `tools` and `subprocess` —
+ * deliberately NOT `fs`, and `ctx.spillStore` is read
  * opportunistically with `ctx.get()` because formatted-result spill is optional.
  *
  * Returned paths are displayed relative to the resolved workdir and are
@@ -67,11 +67,11 @@ export type { GrepMatch, RipgrepRun, SearchErrorCode } from './search-core.ts'
 export const name = 'tool-fs-search'
 
 /** Services required by the search tool suite (`spillStore` is optional, read via `ctx.get()`). */
-export const inject = ['tools', 'systemPrompt', 'subprocess']
+export const inject = ['tools', 'subprocess']
 
 /** Plugin config; over-cap glob sampling is an explicit deployment choice and the remaining fields have defaults. */
 export interface Config {
-  /** Whether an over-cap `glob` page is sampled across top-level entries instead of taking the modification-time head. */
+  /** Whether an over-cap `glob` page is sampled across top-level entries instead of taking the newest paths. */
   sampleOverCapGlobResults: boolean
   /** Max paths one `glob` call retains inline; later paths go to the formatted spill file. */
   globMaxResults?: number

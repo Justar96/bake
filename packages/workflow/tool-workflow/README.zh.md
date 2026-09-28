@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-`dsh-tool-workflow` 让模型运行 JavaScript 编排脚本，把工作委派给多个 subagent，并返回脚本的最终 JSON 值。仅当用户明确要求工作流或大型多 agent（智能体）编排时使用；一两项委派应使用普通 subagent 调用。父级轮次会等待所有委派任务结束；取消或异常完成会返回错误，而不是部分成功。部署方可以通过 `toolName` 重命名工具，并通过 `maxResultChars` 限制渲染结果文本。
+`dsh-tool-workflow` 让模型运行 JavaScript 编排脚本，把工作委派给多个 subagent，并返回脚本的最终 JSON 值。仅当用户明确要求工作流或大规模多 agent（智能体）编排时使用；一两项委派应使用普通 subagent 调用。父级轮次会等待所有委派任务结束；取消或异常完成会返回错误，而不是部分成功。部署方可以通过 `toolName` 重命名工具，并通过 `maxResultChars` 限制渲染结果文本。
 
 ## 目录
 
@@ -25,11 +25,11 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
-`workflow` 工具运行由模型编写的编排脚本，把工作扇出到多个 subagent，并返回脚本的最终 JSON 值。仅当用户明确要求工作流或大型多 agent 编排时使用——例如跨多个文件的审计、一次迁移、多角度研究；一两项委派时优先使用普通 subagent 调用。
+`workflow` 工具运行由模型编写的编排脚本，把工作扇出到多个 subagent，并返回脚本的最终 JSON 值。仅当用户明确要求工作流或大规模多 agent 编排时使用——例如跨多个文件的审计、一次迁移、多角度研究——因为一次运行可能启动许多 subagent；一两项委派时优先使用普通 subagent 调用。
 
 ### 调用工具
 
-模型提交三个参数：`meta`（必需的身份数据：`name`、`description`，以及可选的 `whenToUse` 与 `phases`）、`script`（必需的纯 JavaScript 脚本体——不含 `export const meta` 语句；工具描述携带完整的编写约定）与 `args`（可选 JSON 对象，作为全局变量 `args` 向脚本公开；裸列表应包装到字段中，使协议 schema 如实表达形态）。
+模型提交三个参数：`meta`（必需的身份数据：`name`、`description`，以及可选的 `whenToUse` 与 `phases`）、`script`（必需的 async JavaScript 函数体——不支持 TypeScript，也不含 import 或 export 语句，因此不含 `export const meta` 头部；工具描述携带完整的编写约定）与 `args`（可选 JSON 对象，作为全局变量 `args` 向脚本公开；裸列表应包装到字段中，使协议 schema 如实表达形态）。
 
 成功返回规范包络 `{ runId, agentsStarted, result }`，向模型渲染为 `workflow "<name>" completed (<count> agent<optional-s>).`，后接 `Return value:` 与美化打印的 JSON。无法启动的工作流——脚本解析或 meta 校验失败——返回模型可以修正的错误。取消与执行失败返回 `Error: workflow run was cancelled` 或 `Error: workflow run failed: <error>`；部分输出绝不会被报告为成功。
 
@@ -58,7 +58,7 @@ kind: "package-reference"
 
 ### 设计理念
 
-消费方拥有模型侧 schema、`tool:<toolName>` 系统提示词指导与结果包络；脚本解析、执行、上限与取消位于 `ctx.workflowEngine` 之后，PTC 引擎与 `run_code` 共享 Node 进程约束。使用指导以提示词段的形式随工具插件交付，绝不放入部署 persona。
+消费方拥有模型侧 schema（包括工具描述中仅限明确请求的使用策略）与结果包络；脚本解析、执行、上限与取消位于 `ctx.workflowEngine` 之后，PTC 引擎与 `run_code` 共享 Node 进程约束。本插件不贡献系统提示词段，其使用策略也绝不放入部署 persona。
 
 ### 运行生命周期
 
@@ -101,31 +101,11 @@ kind: "package-reference"
 <a id="model-experience"></a>
 ## 模型体验
 
-### 系统提示词
-
-#### 模型看到什么
-
-在该插件的注册作用域内，每个父级请求都会收到下方的工作流指导。作用域工具限制可以隐藏 schema，而不移除这段独立注册的指导。
-
-##### 工作流指导
-
-```markdown
-Use the <toolName> tool ONLY when the user explicitly asks for a workflow or for large multi-agent orchestration: you write a JavaScript script (the tool description documents the exact format) that fans work out across many subagents with phases and structured results. For one or two delegations, prefer plain subagent calls.
-```
-
-#### Token 影响
-
-插件启用期间，每个请求都会产生少量固定的指导 token 开销。
-
-#### KV Cache 影响
-
-只要插件作用域与指导文本不变，前缀就保持稳定。启用或 dispose 可能会使从该提示词段起的缓存复用失效。
-
 ### 工具 schema
 
 #### 模型看到什么
 
-工具可见时，已生成的默认 [`workflow` schema](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-workflow) 包含完整的 JavaScript 钩子与元数据约定；`toolName` 可以重命名该定义，模型会提交脚本、元数据与可选 args。
+工具可见时，已生成的默认 [`workflow` schema](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-workflow) 包含使用策略以及完整的 JavaScript 钩子与元数据约定；本插件不添加系统提示词段，因此隐藏该工具的作用域限制不会留下任何内容。描述只允许在用户明确要求工作流或大规模多 agent 编排时运行，因为一次运行可能启动许多 subagent。`script` 参数描述写明所配置的 `maxResultChars` 上限，`meta.phases` 的 `provider` 与 `model` 字段被标为仅供参考，因为只有 `agent()` 选项才会路由 subagent。`toolName` 可以重命名该定义，模型会提交脚本、元数据与可选 args。
 
 #### Token 影响
 
@@ -133,7 +113,7 @@ Use the <toolName> tool ONLY when the user explicitly asks for a workflow or for
 
 #### KV Cache 影响
 
-只要 `toolName`、定义与可见性不变，前缀就保持稳定。重命名、插件生命周期或作用域限制可能会使从该 schema 起的缓存复用失效。
+只要 `toolName`、`maxResultChars`、定义与可见性不变，前缀就保持稳定。重命名、更改 `maxResultChars`、插件生命周期或作用域限制可能会使从该 schema 起的缓存复用失效。
 
 ### 工具调用历史与结果
 

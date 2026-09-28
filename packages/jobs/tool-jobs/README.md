@@ -25,13 +25,13 @@ Use `dsh-tool-jobs` to inspect and control background commands, PTY work, and su
 <a id="use-this-package"></a>
 ## Use this package
 
-Load this plugin in any composition where the agent should start, observe, and stop background jobs: it registers the three tools, attaches the controller producers need, and delivers completion notices. It requires the `ctx.tools`, `ctx.jobs`, and `ctx.systemPrompt` services from the composed harness.
+Load this plugin in any composition where the agent should start, observe, and stop background jobs: it registers the three tools, attaches the controller producers need, and delivers completion notices. It requires the `ctx.tools` and `ctx.jobs` services from the composed harness.
 
 ### The three tools
 
-- `job_output(job_id, wait?, timeout_ms?)` — Read a job's output. Stream jobs return only the output since the previous read; final-output jobs return their result after settlement. Every response ends with `[status: ...]`. Reads are non-blocking unless `wait: true`, which waits up to the configured cap and leaves a still-running job alive on timeout.
-- `job_list()` — List your background jobs with their ids, kinds, and statuses, one per line: `<id> [<kind>] <status> — <label>`.
-- `job_kill(job_id, reason?)` — Request cancellation of a running job immediately; the job settles as `killed` once its work actually stops. A terminal job returns its current snapshot, and the optional reason is recorded and forwarded to the job.
+- `job_output(job_id, wait?, timeout_ms?)` — Read a job's output. Stream jobs return only the output since the previous read; final-output jobs return their result after settlement. Every response ends with `[status: ...]`. Reads are non-blocking unless `wait: true`, which waits up to the configured cap and leaves a still-running job alive on timeout. The description tells the model that a completion notice arrives on its own, so it need not poll or sleep, and the `timeout_ms` description states the configured default wait and cap.
+- `job_list()` — List your background jobs with their ids, kinds, statuses, and labels, one per line: `<id> [<kind>] <status> — <label>`.
+- `job_kill(job_id, reason?)` — Request cancellation of a running job immediately; the job settles as `killed` once its work actually stops. A terminal job returns its current snapshot, and the optional reason is recorded and forwarded to the job. The description tells the model that jobs otherwise keep running after its turn ends, because only completion, a kill, or owner disposal ends them.
 
 The three tools return `{ text, job }`, `PublicJobSnapshot[]`, and `{ outcome: 'cancellation-requested' | 'already-finished', job }` respectively. A public snapshot carries id, kind, label, status/detail, and start/finish times and omits ownership and notification bookkeeping. All three render through generic UI cards: `read` for output and list, `execute` for kill.
 
@@ -82,7 +82,7 @@ This section explains the design decisions behind the tools and points at the co
 
 | File | Role |
 |---|---|
-| [`src/index.ts`](src/index.ts) | Plugin entry: tool registrations, completion listener, prompt section, output capping |
+| [`src/index.ts`](src/index.ts) | Plugin entry: tool registrations, completion listener, output capping |
 | — | No runtime invariant companion is published; this model-facing adapter has no independent lifecycle stream; execution relations are owned by the capability seam it calls. |
 
 ### Output capping
@@ -115,31 +115,11 @@ Read these pages when the package-level contract is not enough. They move from t
 <a id="model-experience"></a>
 ## Model Experience
 
-### System prompt
-
-#### What the model sees
-
-Every request in this plugin's registration scope contains this guidance. Agent-scoped tool filtering may hide the tools without removing the independently registered prompt section.
-
-##### Background-job guidance
-
-```markdown
-Track every background job id you start. You are notified in-session when a job finishes — do not busy-poll or sleep on one; keep working on independent steps and do not duplicate a running job's work. Before giving a final answer, collect every still-relevant job with job_output (set wait: true only when you are genuinely blocked on it), and job_kill jobs that stopped mattering.
-```
-
-#### Token effect
-
-Small fixed input cost per request while active.
-
-#### KV Cache effect
-
-Prefix-stable while the plugin scope and guidance text are unchanged. Activation or disposal may invalidate reuse from this prompt section.
-
 ### Tool schemas
 
 #### What the model sees
 
-The generated [`job_output`, `job_list`, and `job_kill` schemas](../../../docs/tool-catalog.md#deepseek-aidsh-tool-jobs) while this tool set is visible.
+The generated [`job_output`, `job_list`, and `job_kill` schemas](../../../docs/tool-catalog.md#deepseek-aidsh-tool-jobs) while this tool set is visible; the package adds no system-prompt text, so tool filtering hides the job guidance together with the tools. The catalog shows the default wait bounds, and the `timeout_ms` description names the configured ones instead.
 
 #### Token effect
 
@@ -147,7 +127,7 @@ Fixed schema cost on each request where the tools are visible.
 
 #### KV Cache effect
 
-Prefix-stable while tool definitions and visibility are unchanged. Registration lifecycle or scoped restrictions may invalidate reuse from the first changed schema token.
+Prefix-stable while tool definitions, the configured wait bounds, and visibility are unchanged. Registration lifecycle, a wait-bound change, or scoped restrictions may invalidate reuse from the first changed schema token.
 
 ### Results and notices
 
