@@ -86,7 +86,7 @@ With `dsh-command-compact` mounted, type `/compact` in a chat UI to condense imm
 
 ### Trimming oversized tool outputs
 
-Mount `dsh-compaction-tool-result-pruner` before this package to trim oversized tool results as part of condensation. Trimming makes no model call and can remove the need to summarize at all: when the trimmed conversation fits within the threshold, condensation skips the summary. Trimming only runs after a condensation trigger qualifies — a below-pressure conversation is never touched.
+Mount `dsh-compaction-tool-result-pruner` before this package to trim oversized tool results as part of condensation. Trimming makes no model call and can remove the need to summarize at all: when the trimmed conversation lands below the prune-only ceiling, halfway between the retained tail and the threshold, condensation skips the summary. A trim that clears the threshold by less still summarizes in the same pass, because each rewrite invalidates the provider's prompt cache and a barely-sufficient trim would trigger another rewrite a few steps later. Trimming only runs after a condensation trigger qualifies — a below-pressure conversation is never touched.
 
 -----
 
@@ -179,7 +179,7 @@ Model-free pruning can avoid the auxiliary call entirely; otherwise it reduces t
 
 #### KV Cache effect
 
-Replacing rather than append-only. Each checkpoint invalidates reuse from the first replaced history token; the unchanged request prefix before that range remains reusable.
+Replacing rather than append-only. Each checkpoint or pruned tool result invalidates reuse from the first replaced history token; the unchanged request prefix before that range remains reusable. The prune-only ceiling exists to bound how often that happens: a pass either frees at least half a summary's headroom or also summarizes, so pressure settles with one cache rebuild instead of a rebuild every few steps near the threshold.
 
 ### Auxiliary summarizer request
 

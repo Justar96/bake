@@ -862,6 +862,43 @@ describe('optional model-free tool-result pruning', () => {
     expect(session.surface.replaceGeneration).toBe(1)
   })
 
+  // The three-turn fixture prices 6627 tokens before pruning and 4656 after;
+  // the threshold is 6000, so pruning alone clears it and only the prune-only
+  // ceiling (halfway between retained tail and threshold) decides whether the
+  // same pass continues to a summary.
+  it('summarizes in the same pass when pruning clears pressure without real headroom', async () => {
+    const ctx = createContext(10_000)
+    void new ToolResultPruner(ctx, pruneConfig)
+    const compact = new TestCompactionEngine(ctx, {
+      auto: false,
+      thresholdRatio: 0.6,
+      retainTokens: 50,
+    })
+    const session = toolConversation()
+
+    expect(ctx.tokenMeter.measure(session).totalTokens).toBeGreaterThanOrEqual(6_000)
+    expect(await compactIfNeeded(compact, session)).not.toBeNull()
+    expect(compact.calls).toHaveLength(1)
+    expect(summarizedText(compact.calls[0].input)).toContain('tool result middle pruned')
+    expect(ctx.tokenMeter.measure(session).totalTokens).toBeLessThan(3_025)
+  })
+
+  it('settles on the prune alone when it lands below the prune-only ceiling', async () => {
+    const ctx = createContext(10_000)
+    void new ToolResultPruner(ctx, pruneConfig)
+    const compact = new TestCompactionEngine(ctx, {
+      auto: false,
+      thresholdRatio: 0.6,
+      retainTokens: 4_000,
+    })
+    const session = toolConversation()
+
+    expect(await compactIfNeeded(compact, session)).toBeNull()
+    expect(compact.calls).toHaveLength(0)
+    expect(ctx.tokenMeter.measure(session).totalTokens).toBeLessThan(5_000)
+    expect(session.surface.replaceGeneration).toBeGreaterThan(0)
+  })
+
   it('summarizes the pruned surface when pruning is insufficient', async () => {
     const ctx = createContext(2_000)
     void new ToolResultPruner(ctx, pruneConfig)
