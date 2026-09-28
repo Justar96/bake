@@ -183,6 +183,28 @@ export abstract class CompactionEngine extends Service {
     agent: CompactionAgentContext,
     signal?: AbortSignal,
   ): Promise<CompactionResult>
+
+  /**
+   * Report the request size at which this backend's automatic `pressure`
+   * policy compacts one routed model, so a consumer can show it beside that
+   * route's occupancy. Answer synchronously from policy alone, without I/O or
+   * session state. The default declares no threshold: a backend without
+   * automatic pressure policy, or with it disabled, keeps this answer, and a
+   * backend that has one must override it with the exact value its trigger
+   * compares against, never an approximation.
+   *
+   * @param _route - provider/model route whose policy applies.
+   * @param _contextWindow - that route's context capacity in tokens.
+   * @returns positive tokens at or above which pressure compaction runs before
+   * the next step, or `undefined` when no automatic pressure trigger applies to
+   * that route and capacity.
+   */
+  pressureThreshold(
+    _route: { readonly provider: string; readonly model: string },
+    _contextWindow: number,
+  ): number | undefined {
+    return undefined
+  }
 }
 
 export default CompactionEngine

@@ -496,6 +496,44 @@ describe('compact configuration and defaults', () => {
 
 })
 
+describe('reported pressure threshold', () => {
+  const route = { provider: MODEL, model: MODEL }
+
+  it('scales the default ratio and follows exact-route overrides', () => {
+    expect(service({}).pressureThreshold(route, 128_000)).toBe(102_400)
+    const compact = service({
+      thresholdRatio: 0.7,
+      modelPolicies: [{ provider: 'small-provider', model: 'shared-id', thresholdRatio: 0.5 }],
+    })
+    expect(compact.pressureThreshold({ provider: 'small-provider', model: 'shared-id' }, 1_000)).toBe(500)
+    expect(compact.pressureThreshold({ provider: 'large-provider', model: 'shared-id' }, 1_000)).toBe(700)
+    expect(compact.pressureThreshold({ provider: 'large-provider', model: 'shared-id' }, 999)).toBe(699)
+  })
+
+  it('reports nothing where automatic pressure cannot compact', () => {
+    expect(service({ auto: false }).pressureThreshold(route, 1_000)).toBeUndefined()
+    const compact = service({})
+    expect(compact.pressureThreshold({ provider: '', model: MODEL }, 1_000)).toBeUndefined()
+    expect(compact.pressureThreshold({ provider: MODEL, model: '' }, 1_000)).toBeUndefined()
+    for (const contextWindow of [0, -1, 1.5, Number.NaN]) {
+      expect(compact.pressureThreshold(route, contextWindow)).toBeUndefined()
+    }
+    // The listener warns instead of compacting when absolute retention reaches the threshold.
+    const retained = service({ retainTokens: 900 })
+    expect(retained.pressureThreshold(route, 1_000)).toBeUndefined()
+    expect(retained.pressureThreshold(route, 2_000)).toBe(1_600)
+  })
+
+  it('is exactly the measured size at which pressure compaction starts', async () => {
+    const measured = createContext().tokenMeter.measure(conversation(4)).totalTokens
+    for (const [contextWindow, compacts] of [[measured * 2, true], [(measured + 1) * 2, false]] as const) {
+      const compact = service({ thresholdRatio: 0.5, retainTokens: 0 }, createContext(contextWindow))
+      expect(compact.pressureThreshold(route, contextWindow)).toBe(compacts ? measured : measured + 1)
+      expect(await compactIfNeeded(compact, conversation(4)) !== null).toBe(compacts)
+    }
+  })
+})
+
 describe('pressure measurement and retention', () => {
   const compactConfig: BasicCompactionConfig = {
     auto: false,

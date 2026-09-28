@@ -76,6 +76,8 @@ All settings are optional. The defaults start condensing at 80% of the routed mo
 
 Misconfiguration fails fast: an unknown setting, a duplicate per-model override, both retention forms together, or a ratio retention that is not below the threshold all reject the plugin at load. An absolute `retainTokens` budget — top-level or per-model — that is not below its threshold fails when that model is first used, because the comparison needs the model's context size.
 
+Interfaces can ask where condensation starts for a route. `pressureThreshold(route, contextWindow)` returns `floor(contextWindow × thresholdRatio)` after the exact route's `modelPolicies` override, the same figure the automatic check compares with the token meter's measurement. It returns `undefined` with `auto: false`, for an empty provider or model, and for a capacity or `retainTokens` budget the automatic check would reject with a warning instead of condensing. The TUI shows this value beside context occupancy.
+
 ### What happens when condensation runs
 
 The oldest balanced span is replaced by one summary message and the recent tail stays verbatim; the conversation continues from the summary. The operation reports how many history items were condensed and the estimated tokens freed. If nothing can be condensed safely — for example the whole conversation is one indivisible unit — nothing changes and nothing is written to the session log. If no model is available to write the summary (no configured target and no routed request yet), condensation fails with a clear error telling you to configure the summarization provider and model or route one request.

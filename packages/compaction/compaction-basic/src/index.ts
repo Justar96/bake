@@ -434,6 +434,30 @@ export class BasicCompactionEngine extends CompactionEngine {
     }
   }
 
+  /**
+   * Resolve the exact route's merged policy the way the `agent/pre-step`
+   * listener does: `floor(contextWindow × thresholdRatio)`, the figure it
+   * compares with the token meter's measurement. `auto: false` installs no
+   * listener, and an empty route is never compacted, so both answer
+   * `undefined`. So does a capacity or absolute retention that the listener
+   * would reject with a once-per-target warning instead of compacting.
+   * @param route - exact provider/model whose override, if any, applies.
+   * @param contextWindow - that route's adapter-owned capacity in tokens.
+   * @returns the pressure threshold in tokens, or `undefined` when automatic pressure cannot compact that route.
+   */
+  override pressureThreshold(
+    route: { readonly provider: string; readonly model: string },
+    contextWindow: number,
+  ): number | undefined {
+    if (!this.config.auto || route.provider.length === 0 || route.model.length === 0) return undefined
+    try {
+      return resolveCompactSpec(resolveTargetPolicy(this.config, route), contextWindow).thresholdTokens
+    } catch (error: unknown) {
+      if (error instanceof TargetPressureConfigError) return undefined
+      throw error
+    }
+  }
+
   /** Bind the effective token meter and dynamically dispatched summarizer hook. */
   private regionDependencies(): Parameters<typeof compactSurfaceRegion>[0] {
     return {
