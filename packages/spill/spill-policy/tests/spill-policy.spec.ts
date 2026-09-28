@@ -339,10 +339,13 @@ describe('the durable dispatch-log arm', () => {
       return realSave(input)
     }
     const events: { type: string; data: unknown }[] = []
-    const agent = observedAgent(ctx, 'dispatch-slow-spill', (type: string, data: unknown) => { events.push({ type, data }) })
+    const smallStarted = Promise.withResolvers<undefined>()
+    const agent = observedAgent(ctx, 'dispatch-slow-spill', (type: string, data: unknown) => {
+      events.push({ type, data })
+      if (type === 'tool/ptc-dispatch-start' && (data as { name: string }).name === 'small_read') smallStarted.resolve(undefined)
+    })
     ctx.tools.register(textTool('huge_read', 'H'.repeat(2_000)))
     ctx.tools.register(textTool('small_read', 'tiny'))
-    let smallAfterHuge = false
     const runPromise = ctx.tools.execute({
       signal: testToolSignal,
       callId: ToolCallId('parent-3'),
@@ -355,26 +358,26 @@ describe('the durable dispatch-log arm', () => {
         description: 'Prove log shaping is off the program path',
       },
       agent: agent as never,
-    }).then((result) => {
-      return result
     })
     // The run cannot COMPLETE while the settle append is gated (drain waits
     // for logWork), but the program itself already ran both calls; release
     // the backend and observe the settle events land inside the turn.
-    await vi.waitFor(() => {
-      // The second dispatch STARTED while the first one's spill hung.
-      smallAfterHuge = events.some(event => event.type === 'tool/ptc-dispatch-start'
-        && (event.data as { name: string }).name === 'small_read')
-      if (!smallAfterHuge) throw new Error('small_read not started yet')
-    })
-    releaseSave()
-    const result = await runPromise
-    expect(result.isError).toBe(false)
-    if (result.isError) throw new Error('expected success')
-    expect(result.value).toMatchObject({ result: 2_004 })
-    const settles = events.filter(event => event.type === 'tool/ptc-dispatch')
-    expect(settles).toHaveLength(2)
-    expect(smallAfterHuge).toBe(true)
+    // The second dispatch STARTED while the first one's spill hung.
+    try {
+      await smallStarted.promise
+      releaseSave()
+      const result = await runPromise
+      expect(result.isError).toBe(false)
+      if (result.isError) throw new Error('expected success')
+      expect(result.value).toMatchObject({ result: 2_004 })
+      const settles = events.filter(event => event.type === 'tool/ptc-dispatch')
+      expect(settles).toHaveLength(2)
+      expect(events.some(event => event.type === 'tool/ptc-dispatch-start'
+        && (event.data as { name: string }).name === 'small_read')).toBe(true)
+    } finally {
+      releaseSave()
+      await runPromise.catch(() => {})
+    }
   })
 
   it('a sustained slow backend backpressures the run instead of accumulating unbounded log tasks', async () => {
@@ -390,9 +393,23 @@ describe('the durable dispatch-log arm', () => {
     await mountRuntime(ctx, {})
     const store = ctx.spillStore as StubStore
     const releases: (() => void)[] = []
-    store.gate = () => new Promise<void>((resolve) => { releases.push(resolve) })
+    const secondSave = Promise.withResolvers<undefined>()
+    const thirdSave = Promise.withResolvers<undefined>()
+    let saveCount = 0
+    store.gate = () => new Promise<void>((resolve) => {
+      releases.push(resolve)
+      saveCount += 1
+      if (saveCount === 2) secondSave.resolve(undefined)
+      if (saveCount === 3) thirdSave.resolve(undefined)
+    })
     const events: { type: string; data: unknown }[] = []
-    const agent = observedAgent(ctx, 'dispatch-spill-bound', (type: string, data: unknown) => { events.push({ type, data }) })
+    const thirdStarted = Promise.withResolvers<undefined>()
+    const settled = Promise.withResolvers<undefined>()
+    const agent = observedAgent(ctx, 'dispatch-spill-bound', (type: string, data: unknown) => {
+      events.push({ type, data })
+      if (type === 'tool/ptc-dispatch-start' && (data as { subCallId: string }).subCallId.endsWith(':ptc:3')) thirdStarted.resolve(undefined)
+      if (type === 'tool/ptc-dispatch' && events.filter(event => event.type === 'tool/ptc-dispatch').length === 3) settled.resolve(undefined)
+    })
     ctx.tools.register(textTool('huge_read', 'H'.repeat(2_000)))
     const started = (n: number): boolean => events.some(event => event.type === 'tool/ptc-dispatch-start'
       && (event.data as { subCallId: string }).subCallId.endsWith(`:ptc:${n}`))
@@ -408,25 +425,23 @@ describe('the durable dispatch-log arm', () => {
     })
     // Two hung saves = backlog above the cap: the lane must hold before
     // starting dispatch 3.
-    await vi.waitFor(() => {
-      if (releases.length < 2) throw new Error('second hung save not reached yet')
-    })
-    expect(started(2)).toBe(true)
-    expect(started(3)).toBe(false)
-    releases.shift()!()
-    // Draining one pending save releases the lane; dispatch 3 starts.
-    await vi.waitFor(() => {
-      if (!started(3)) throw new Error('third dispatch not started yet')
-    })
-    while (releases.length > 0) releases.shift()!()
-    const result = await runPromise
-    expect(result.isError).toBe(false)
-    await vi.waitFor(() => {
-      if (releases.length > 0) { while (releases.length > 0) releases.shift()!() }
-      if (events.filter(event => event.type === 'tool/ptc-dispatch').length !== 3) {
-        throw new Error('settle events still pending')
-      }
-    })
+    try {
+      await secondSave.promise
+      expect(started(2)).toBe(true)
+      expect(started(3)).toBe(false)
+      releases.shift()!()
+      // Draining one pending save releases the lane; dispatch 3 starts.
+      await thirdStarted.promise
+      await thirdSave.promise
+      while (releases.length > 0) releases.shift()!()
+      const result = await runPromise
+      expect(result.isError).toBe(false)
+      await settled.promise
+    } finally {
+      store.gate = undefined
+      while (releases.length > 0) releases.shift()!()
+      await runPromise.catch(() => {})
+    }
   })
 
   it('a saveText failure keeps the complete content in the durable log (best-effort)', async () => {

@@ -1,7 +1,7 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { LocalBashExecutor } from '@deepseek-ai/dsh-bash-local'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
@@ -165,14 +165,25 @@ describe('LocalBashExecutor.run', () => {
 
 describe('LocalBashExecutor.start (background process handles)', () => {
   it('start returns immediately with a running handle that settles as completed', async () => {
-    const { bash } = await setup()
-    const before = Date.now()
-    const proc = await bash.start(bash.resolve({ command: 'sleep 0.2; echo done' }))
-    expect(Date.now() - before).toBeLessThan(150)
-    expect(proc.status).toBe('running')
-    await proc.done
-    expect(proc.status).toBe('completed')
-    expect(proc.exitCode).toBe(0)
+    const { ctx, bash } = await setup()
+    const root = mkdtempSync(join(tmpdir(), 'dsh-bash-start-'))
+    const release = join(root, 'release')
+    let proc: ShellProcess | undefined
+    onTestFinished(async () => {
+      writeFileSync(release, '')
+      await proc?.done
+      await ctx.fiber.dispose()
+      rmSync(root, { recursive: true, force: true })
+    })
+    try {
+      proc = await bash.start(bash.resolve({ command: `while [ ! -e '${release}' ]; do sleep 0.01; done; echo done` }))
+      expect(proc.status).toBe('running')
+      writeFileSync(release, '')
+      await proc.done
+      expect(proc.status).toBe('completed')
+      expect(proc.exitCode).toBe(0)
+      expect(proc.readOutput().delta).toBe('done\n')
+    } finally { writeFileSync(release, '') }
   })
 
   it('threads stdin and extra env into a background process', async () => {
