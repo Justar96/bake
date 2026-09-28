@@ -193,7 +193,14 @@ export class Loader extends EntryTree {
     }
   }
 
-  /** Hook for hosts that can restart the process on full-reload requests. */
+  /**
+   * Hook for hosts that can restart the process on full-reload requests.
+   *
+   * The base implementation is a no-op: a host that wants an actual "full
+   * reload" (e.g. on an external file change HMR cannot hot-swap) must
+   * override this method itself. Calling it here neither restarts the
+   * process nor throws.
+   */
   exit() {
   }
 

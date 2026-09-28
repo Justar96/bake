@@ -1,7 +1,8 @@
 import { EntryGroup, EntryTree, isJsExpr, type EntryOptions } from '@deepseek-ai/cordis-plugin-loader'
 import { Context, Service } from '@deepseek-ai/cordis'
-import { extname } from 'node:path'
-import { access, constants, readFile, rename, writeFile } from 'node:fs/promises'
+import { randomBytes } from 'node:crypto'
+import { basename, dirname, extname, join } from 'node:path'
+import { access, constants, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import * as yaml from 'js-yaml'
@@ -295,15 +296,24 @@ export class Include extends EntryTree {
     } else if (this.type === 'application/json') {
       this.content = JSON.stringify(config, null, 2)
     }
-    await writeFile(this.filename + '.tmp', this.content!)
-    for (let retry = 0; ; retry++) {
-      try {
-        await rename(this.filename + '.tmp', this.filename)
-        return
-      } catch (error) {
-        if (!retryableWriteError(error) || retry >= WRITE_RETRY_LIMIT) throw error
-        await delay((retry + 1) * WRITE_RETRY_DELAY_MS)
+    // Another process can write the same file at once, so each write stages
+    // under its own name in the same directory and renames it into place.
+    const temp = join(dirname(this.filename), `.${basename(this.filename)}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`)
+    try {
+      await writeFile(temp, this.content!, { flag: 'wx' })
+      for (let retry = 0; ; retry++) {
+        try {
+          await rename(temp, this.filename)
+          return
+        } catch (error) {
+          if (!retryableWriteError(error) || retry >= WRITE_RETRY_LIMIT) throw error
+          await delay((retry + 1) * WRITE_RETRY_DELAY_MS)
+        }
       }
+    } catch (error) {
+      // Best effort: the write's own failure is the one to report.
+      await rm(temp, { force: true }).catch(() => {})
+      throw error
     }
   }
 

@@ -68,8 +68,10 @@ interface AsyncDisposable<T extends Awaitable<void> = Awaitable<void>> extends P
 /**
  * Function returned by an effect to release resources during disposal.
  *
- * Disposers run in reverse registration order when the owning fiber unloads;
- * they may be async, in which case unloading awaits them.
+ * Disposers nested inside one effect run in reverse registration order,
+ * chained sequentially; a fiber's own top-level effects instead unload
+ * concurrently (`Promise.all`) when the fiber unloads, not sequentially.
+ * Disposers may be async, in which case unloading awaits them.
  */
 export type Disposable<T = any> = () => T
 
@@ -406,7 +408,9 @@ export class Fiber {
    * run (in reverse order) either when the returned disposer is called or
    * when the fiber unloads, whichever comes first. Calling the disposer twice
    * is a no-op. Throws `CordisError('INACTIVE_EFFECT')` if the fiber is
-   * already disposed, and `TypeError` if `execute` returns an invalid shape.
+   * already disposed, or currently `UNLOADING` (mid-teardown effects would
+   * escape the unload snapshot), and `TypeError` if `execute` returns an
+   * invalid shape.
    *
    * @param execute — the effect body; see {@link Effect} for accepted shapes.
    * @param label — effect label shown in `getEffects()` diagnostics.

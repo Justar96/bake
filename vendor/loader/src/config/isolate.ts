@@ -153,7 +153,7 @@ export default function isolate(ctx: Context) {
   })
 
   ctx.on('loader/partial-dispose', (entry, legacy, active) => {
-    for (const [name, label] of Object.entries(legacy.isolate ?? {})) {
+    names: for (const [name, label] of Object.entries(legacy.isolate ?? {})) {
       if (label === true) continue
       if (active && entry.options.isolate?.[name] === label) continue
       const realm = realms[label]
@@ -161,8 +161,8 @@ export default function isolate(ctx: Context) {
 
       // realm garbage collection
       for (const entry of ctx.loader.entries()) {
-        // has reference to this realm
-        if (entry.options.isolate?.[name] === realm.label) return
+        // has reference to this realm: keep it, but still check the other names
+        if (entry.options.isolate?.[name] === realm.label) continue names
       }
       realm.delete(name)
       if (!realm.size) {

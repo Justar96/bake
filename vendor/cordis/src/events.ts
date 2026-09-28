@@ -141,7 +141,10 @@ export class EventsService {
       if (name === 'internal/update' && !options.global) {
         const hooks = this.fiber._hooks['internal/update'] ??= new DisposableList()
         const method = options.prepend ? 'unshift' : 'push'
-        return hooks[method](listener)
+        // Register as a fiber effect (not a bare DisposableList remover) so this
+        // hook is torn down with the fiber; otherwise it outlives unload and a
+        // stale hook from a previous instance can veto a later reload.
+        return this.fiber.effect(() => hooks[method](listener), 'ctx.on("internal/update")')
       }
     })
 
@@ -181,7 +184,7 @@ export class EventsService {
    * @returns a promise resolving once every listener has settled.
    */
   async parallel(...args: any[]) {
-    const results = await Promise.allSettled(this.dispatch('emit', args).map(async cb => cb(...args)))
+    const results = await Promise.allSettled(this.dispatch('parallel', args).map(async cb => cb(...args)))
     const errors = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected')
     if (errors.length) throw new AggregateError(errors.map(error => error.reason))
   }
@@ -346,7 +349,7 @@ export interface Events {
   /** Waterfall: a service is being written through the context proxy. */
   'internal/set'(ctx: Context, name: string, value: any, error: Error, next: () => boolean): boolean
   /** Bail: a listener is being registered; a non-null result replaces registration. */
-  'internal/listener'(this: Context, name: string, listener: any, prepend: boolean): void
+  'internal/listener'(this: Context, name: string, listener: any, options: EventOptions): void
   /** An event is being dispatched to listeners (fired for non-internal events only). */
   'internal/dispatch'(mode: DispatchMode, name: string, args: any[], thisArg: any): void
 }
