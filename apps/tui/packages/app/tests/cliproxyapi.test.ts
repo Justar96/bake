@@ -119,6 +119,11 @@ it('saves a validated URL and model route without placing the key in settings', 
     '2/2 · CLIProxyAPI API key',
   ])
   expect(writes[0]).toEqual(['credential', 'test-key'])
+  // The multi-credential gateway defaults: wait out a credential cooldown, keep a session on one credential.
+  expect(op!.value).toMatchObject({
+    retryPolicy: { mode: 'normal', backoff: { maxDelayMs: 60_000 } },
+    compat: { sendSessionAffinityHeaders: true },
+  })
   expect(JSON.stringify(writes[1])).toContain('https://proxy.example/v1')
   expect(JSON.stringify(writes[1])).toContain('openai-responses')
   expect(JSON.stringify(writes[1])).not.toContain('test-key')

@@ -91,6 +91,27 @@ export function cliProxyApi(id: string, ownedBy?: string): CliProxyApi {
   return 'openai-responses'
 }
 
+/**
+ * Route defaults for a proxy that balances several upstream credentials.
+ *
+ * - `retryPolicy.backoff.maxDelayMs`: once every credential for a model is cooling
+ *   down, CPA and CliRelay answer `429 model_cooldown` with a `reset_seconds`
+ *   hint, commonly 30 to 60 seconds. A retry delay capped at the 10-second
+ *   default would end the turn instead of waiting it out. Local backoff never
+ *   reaches this cap within the default five retries, so only a wait the proxy
+ *   asks for gets longer.
+ * - `compat.sendSessionAffinityHeaders`: provider prompt caches are per
+ *   credential, so a session must stay on one. CPA's sticky routing keys on
+ *   `x-session-affinity`, which this sends on the Anthropic Messages and Chat
+ *   Completions models; Responses models already carry the session as
+ *   `prompt_cache_key`, and CliRelay reads the `x-deepseek-harness-session-id`
+ *   every pi-ai request carries.
+ */
+export const CLIPROXYAPI_ROUTE_DEFAULTS = {
+  retryPolicy: { mode: 'normal', backoff: { maxDelayMs: 60_000 } },
+  compat: { sendSessionAffinityHeaders: true },
+} as const
+
 const positiveInteger = (...values: readonly unknown[]): number | undefined =>
   values.find(value => typeof value === 'number' && Number.isInteger(value) && value > 0) as number | undefined
 
@@ -211,6 +232,7 @@ export async function configureCliProxyApi(ctx: Context, prompt: (question: Auth
     await settings.mutate('llm-pi-ai', [{ op: 'set', path: ['providers', CLIPROXYAPI_ID], value: {
       displayName: 'CLIProxyAPI', apiKeyEnv: CLIPROXYAPI_KEY,
       api: 'openai-responses', baseURL: endpoints.inference, models,
+      ...CLIPROXYAPI_ROUTE_DEFAULTS,
     } }])
   } catch (error) {
     try {

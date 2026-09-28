@@ -4,6 +4,13 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 ## [Unreleased]
 
+- Every request to a pi-ai route names its session in `x-deepseek-harness-session-id`, so a proxy that balances several upstream accounts, such as CliRelay with `session-sticky` routing, keeps a session on one account. Prompt caches belong to one account, so a session that hopped between them re-sent its whole context at full price on most steps.
+- `/login cliproxyapi` writes two defaults for multi-account proxies: a retry delay of up to 60 seconds, and session affinity (`x-session-affinity`) on its Claude and Chat Completions models. Run the login again to add them to an existing route.
+- When a proxy answers `429` or `503` with `reset_seconds` because every account for a model is cooling down, Bake waits that long before retrying if it fits the route's `retryPolicy.backoff.maxDelayMs`, and otherwise ends the turn at once instead of spending its retries inside the cooldown.
+- A pi-ai route or model can set `compat.sendSessionAffinityHeaders` to send the session as `x-session-affinity` on Anthropic Messages and Chat Completions.
+- Automatic compaction no longer trims old tool results just below the context threshold over and over. A trim alone must free at least half the room a summary would; otherwise the same pass also summarizes. Each rewrite invalidates the provider's prompt cache, and one long session had re-sent about 200k tokens after trims that saved 2k.
+- `update_goal` accepts an objective or round cap copied unchanged from `get_goal` in an action that does not use it, instead of rejecting the call.
+
 ## [0.1.8] - 2026-09-28
 
 - The goal on the header shows its state and round count without the objective, which Ctrl+O still opens. On a narrow terminal it gives up its parts one at a time instead of being clipped at the right edge, and keeps `● 3/256` where its label no longer fits.
