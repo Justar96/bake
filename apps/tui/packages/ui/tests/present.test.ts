@@ -191,7 +191,7 @@ describe('present', () => {
 
   test('heads an action with its tool and argument, and no call id', () => {
     const [, line, ...rest] = present({ kind: 'tool-call', callId: 'c1', tool: 'bash', input: 'rg -n foo' }, shown)
-    expect(line).toMatchObject({ marker: ICON.run, pulse: true, verb: '', text: 'Bash(rg -n foo)',
+    expect(line).toMatchObject({ marker: ICON.other, pulse: true, verb: '', text: 'Bash(rg -n foo)',
       spans: [{ length: 4, tone: 'strong' }, { length: 11, tone: 'plain' }] })
     expect(rest).toEqual([])
   })
@@ -481,7 +481,7 @@ describe('present, grouping a step\'s calls', () => {
     // A blinking branch would open a gap in the tree, so the branches hold still.
     expect([first!.pulse, second!.pulse, second!.text]).toEqual([false, false, 'Bash(make test)'])
     // Calls of one kind give the head that kind's icon.
-    expect(head!.marker).toBe(ICON.run)
+    expect(head!.marker).toBe(ICON.other)
   })
 })
 
@@ -726,7 +726,7 @@ describe('fittedGroup', () => {
     expect(lines.length).toBeLessThanOrEqual(14)
     expect(isBlank(lines[0]!)).toBe(true)
     expect(lines[1]!.text).toBe('read 3')
-    expect(lines[1]!.marker).toBe(ICON.read)
+    expect(lines[1]!.marker).toBe(ICON.other)
     expect(texts(lines)).toContain(read(0))
     expect(texts(lines)).not.toContain('0:0')
     expect(texts(lines)).toContain('1:0')

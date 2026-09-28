@@ -15,6 +15,7 @@ import { compactModel, compactPath, present, type Highlight, type ResultBound } 
 import { cacheTone, contextTone, PALETTE, type PaletteColor } from './palette.ts'
 import { SubagentRow, subagentLine, subagentSheet, subagentTab, type SubagentEntry } from './subagents.tsx'
 import { goalSheet, goalState, type GoalEntry } from './goal.ts'
+import { gitField, type GitState } from './git.ts'
 import { Sheet, sheetPage, sheetRows, type SheetLine, type SheetTab } from './sheet.tsx'
 import { Tasks, taskSheet, taskTab, tasksOpen, type TaskEntry } from './tasks.tsx'
 import { Beat } from './beat.tsx'
@@ -109,6 +110,11 @@ export interface AppProps {
   readonly thinkingLevel?: string
   readonly model: string
   readonly cwd: string
+  /**
+   * The workspace's branch and uncommitted changes, read by the application.
+   * Absent outside a git repository or before the first read: no field.
+   */
+  readonly git?: GitState | undefined
   readonly sessionId: string
   /**
    * Running Bake version. When supplied, a session that mounts with no history
@@ -723,8 +729,8 @@ function SessionView(props: AppProps): React.ReactElement {
               } }}
               right={[
                 // In priority order, because narrowing drops them from the end.
-                // Occupancy is what a user compacts on. The totals are what the
-                // session cost. The path is last because it is the unbounded
+                // Occupancy is what a user compacts on. The branch is where
+                // the work lands. The totals are what the session cost. The path is last because it is the unbounded
                 // field. The status line shortens it from the start and keeps
                 // the tail, which names the workspace.
                 // Dense, the meter keeps only the percentage a user compacts
@@ -732,6 +738,9 @@ function SessionView(props: AppProps): React.ReactElement {
                 ...props.context === undefined || occupancy === undefined ? [] : [{
                   text: dense ? `${copy.contextShort} ~${occupancy}%` : `${copy.context}: ${formatContext(props.context)}`,
                   short: `${copy.contextShort} ~${occupancy}%`, color: contextTone(occupancy) }],
+                // The branch and its changes. It narrows to the branch alone
+                // before it gives way, and it outlasts the cost readings.
+                ...props.git === undefined ? [] : [gitField(props.git, props.frame === 'classic' ? 'ascii' : 'unicode')],
                 ...props.usage === undefined || dense ? [] : formatTotals(props.usage, { input: copy.tokensIn, output: copy.tokensOut }),
                 ...hit === undefined || dense ? [] : [{ label: copy.cacheHit, value: `${hit}%`, color: cacheTone(hit) }],
                 // Last of the bounded fields: it drops before any reading of the session.

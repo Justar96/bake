@@ -7,6 +7,7 @@ import { ICON } from '../src/icons.ts'
 import { present, type PresentedLine, type ResultBound } from '../src/present.ts'
 import { Chrome, Completion, Composer, fitStanding, headerLayout, Line, StatusBar, wrappedRows, type ActivityState, type StandingState } from '../src/line.tsx'
 import { dictionaries } from '../src/copy.ts'
+import { gitField } from '../src/git.ts'
 import { PALETTE, permissionTone } from '../src/palette.ts'
 import { SPINNER_REST } from '../src/activity.ts'
 import stringWidth from 'string-width'
@@ -47,7 +48,7 @@ describe('Line', () => {
     const rendered = show(present({ kind: 'tool-call', callId: 'c', tool: 'bash', input: 'rg -n foo' }, shown)
       .map((line, index) => <Line key={index} line={line} budget={at80} />))
     // The blank that opens the call's zone renders as an empty first row.
-    expect(rendered).toBe(`\n${ICON.run} Bash(rg -n foo)`)
+    expect(rendered).toBe(`\n${ICON.other} Bash(rg -n foo)`)
   })
 
   it('wraps prose against the current terminal width without a fixed measure', () => {
@@ -239,6 +240,20 @@ describe('StatusBar', () => {
     expect(at(34)).toBe('Model: deepseek-v4-flash  …rkspace')
     // A tail too short to name the workspace is left out, not drawn as `…e`.
     expect(at(30)).toBe('Model: deepseek-v4-flash')
+  })
+
+  it('narrows the git field to its branch before dropping it, and never cuts it', () => {
+    const git = gitField({ branch: 'feature/status', detached: false, ahead: 1, behind: 0, staged: 2, modified: 3, untracked: 1, conflicted: 0 }, 'unicode')
+    const at = (columns: number) => strip(renderToString(
+      <StatusBar left={[{ text: 'Model: deepseek-v4-flash' }]} right={[git, 'in 12.3k', '~/workspace']} columns={columns} />, { columns })).trimEnd()
+    expect(at(100)).toBe('Model: deepseek-v4-flash  \u2387 feature/status +2 ~3 ?1 \u21911  in 12.3k  ~/workspace')
+    // The counts qualify the branch, so they go first, together.
+    // The cost reading goes before the counts do.
+    expect(at(63)).toBe('Model: deepseek-v4-flash  \u2387 feature/status +2 ~3 ?1 \u21911  \u2026kspace')
+    // The counts qualify the branch, so they go together, and the branch stays.
+    expect(at(52)).toBe('Model: deepseek-v4-flash  \u2387 feature/status  in 12.3k')
+    expect(at(48)).toBe('Model: deepseek-v4-flash  \u2387 feature/status')
+    for (const columns of [100, 63, 52, 48, 40, 20]) expect(stringWidth(at(columns)), `${columns}`).toBeLessThanOrEqual(columns)
   })
 
   it('yields the right cluster before the left, whatever the path costs', () => {

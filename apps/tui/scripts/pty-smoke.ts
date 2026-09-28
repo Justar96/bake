@@ -774,6 +774,65 @@ scenario('status-colour', 'model and context use normal foreground while support
     }
   })
 
+scenario('git-status', 'the status line names the workspace branch and its changes, and follows them while the terminal runs', { replayOnly: true },
+  async run => {
+    // The commands that set the tree up read no developer config, and no
+    // variable a hook exports points them at another repository.
+    const env: Record<string, string> = Object.fromEntries(Object.entries(run.env).filter(([key]) => !key.startsWith('GIT_')))
+    Object.assign(env, { GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: join(run.root, 'gitconfig'), GIT_CEILING_DIRECTORIES: run.root })
+    const git = (...args: string[]): void => {
+      const done = Bun.spawnSync(['git', '-c', 'user.name=Bake', '-c', 'user.email=bake@example.test', ...args], { cwd: run.workspace, env })
+      assert(done.exitCode === 0, `git ${args.join(' ')} failed: ${done.stderr.toString()}`)
+    }
+    const files = ['tracked.txt', 'untracked.txt'].map(name => join(run.workspace, name))
+    // The workspace every scenario shares becomes a repository only for this one.
+    const saved = { ...run.env }
+    Object.keys(run.env).filter(key => key.startsWith('GIT_')).forEach(key => { delete run.env[key] })
+    try {
+      git('init', '-q', '-b', 'main')
+      await Bun.write(files[0]!, 'one\n')
+      git('add', '-A')
+      git('commit', '-q', '-m', 'seed')
+      await Bun.write(files[0]!, 'two\n')
+      await Bun.write(files[1]!, 'new\n')
+      await run.terminal('git-status', [], async tty => {
+        const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
+        let consumed = 0
+        // The status row as the terminal shows it now, not as the stream wrote it.
+        const status = async (): Promise<string> => {
+          const raw = tty.raw
+          await new Promise<void>(resolve => screen.write(raw.slice(consumed), resolve))
+          consumed = raw.length
+          const buffer = screen.buffer.active
+          for (let row = buffer.length - 1; row >= 0; row--) {
+            const text = buffer.getLine(row)?.translateToString(true) ?? ''
+            if (text.includes(SCREEN.status)) return text
+          }
+          return ''
+        }
+        try {
+          // The branch glyph is drawn only where the terminal draws the round frame.
+          await tty.wait('the branch, its unstaged change, and its untracked path on the status line',
+            async () => /(\u2387 )?main ~1 \?1 {2}/.test(await status()))
+          git('switch', '-q', '-c', 'topic')
+          git('add', 'untracked.txt')
+          await tty.wait('the new branch and its staged path, read while the terminal runs',
+            async () => /(\u2387 )?topic \+1 ~1 {2}/.test(await status()))
+          git('add', '-A')
+          git('commit', '-q', '-m', 'clean')
+          await tty.wait('a clean tree as the branch alone', async () => {
+            const row = await status()
+            return /(\u2387 )?topic {2}/.test(row) && !/topic [+~?]/.test(row)
+          })
+        } finally { screen.dispose() }
+      })
+    } finally {
+      Object.assign(run.env, saved)
+      rmSync(join(run.workspace, '.git'), { recursive: true, force: true })
+      for (const file of files) rmSync(file, { force: true })
+    }
+  })
+
 scenario('plan', 'plan-mode status follows the logged Harness projection', { replayOnly: true },
   async run => {
     const before = await run.logs()

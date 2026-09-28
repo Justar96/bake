@@ -15,6 +15,7 @@ import type { AttachmentOptions } from './attachments.ts'
 import { SessionNavigation } from './navigation.ts'
 import { bakeVersion, releaseRoot } from './release.ts'
 import { Updates } from './update.ts'
+import { WorkspaceGit } from './git.ts'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 
 /**
@@ -105,6 +106,8 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
   // Read once. The release does not change for the life of the process.
   const version = bakeVersion()
   const updates = new Updates({ running: version, release: releaseRoot() })
+  // The status line's branch and changes, for whichever workspace is displayed.
+  const git = new WorkspaceGit()
   // Loaded while the session starts, and awaited before the first frame.
   // A resumed session prints its history once. A diff drawn before the
   // grammars are ready would stay uncoloured.
@@ -141,13 +144,15 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
     const active = navigation?.controller
     if (navigation === undefined || active === undefined) throw new Error('tui: session is not connected')
     const settings = preferences.value
+    const cwd = active.agent.session.header.cwd
+    const branch = cwd === undefined ? undefined : git.follow(cwd)
     return React.createElement(App, {
       ...active.view, key: active.agent.id, inputBlocked: navigation.busy, copy, frame: frame(), clock: systemClock, motion, screen,
       quitting: quitTimer !== undefined, completionLimit: settings.completionLimit, resultLines: settings.resultLines,
       goalObjective: settings.goalObjective,
       highlight: syntax.highlight, version, ...updates.state === undefined ? {} : { update: updates.state },
       ...updates.baking === undefined ? {} : { baking: updates.baking },
-      cwd: active.agent.session.header.cwd ?? '', sessionId: active.agent.id,
+      cwd: cwd ?? '', ...branch === undefined ? {} : { git: branch }, sessionId: active.agent.id,
       onReferenceQuery: query => active.references.search(query),
       onArgumentQuery: query => active.argumentQuery(query),
       onInspectSubagent: id => { navigation?.submit(`/agents ${id}`) },
@@ -172,6 +177,7 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
     // Before the first frame, so a known update is named from it; the network
     // request runs on behind it and never delays the session.
     updates.start(abort.signal, repaint)
+    git.start(abort.signal, repaint)
     await syntax.ready
     abort.signal.throwIfAborted()
     // Incremental rendering. A frame rewrites only the lines that changed.
@@ -195,6 +201,7 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
     await navigation?.drain()
     await startupReport
     await updates.drain()
+    await git.drain()
     await syntax.close()
   }
   if (completed) io.exit(0)

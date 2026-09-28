@@ -80,9 +80,9 @@ it('dims reasoning and metadata, and gives actions and outcomes their palette we
   // the output from the head.
   expect(frame).toContain('\u001b[1mBash\u001b[22m(ls -a)')
   expect(frame).toContain('\u001b[2m\u23bf\u001b[22m')
-  expect(frame).toContain(`\u001b[1m\u001b[38;2;34;197;94m${ICON.run}`)
-  expect(frame).toContain(`\u001b[38;2;239;68;68m${ICON.read}`)
-  expect(frame).toContain(`\u001b[1m\u001b[38;2;249;115;22m${ICON.find}`)
+  expect(frame).toContain(`\u001b[1m\u001b[38;2;34;197;94m${ICON.other}`)
+  expect(frame).toContain(`\u001b[38;2;239;68;68m${ICON.other}`)
+  expect(frame).toContain(`\u001b[1m\u001b[38;2;249;115;22m${ICON.other}`)
   expect(frame).not.toContain('\u001b[2mBash')
   // An edit says its size in each side's tone, numbers its lines in the
   // gutter, and reverses the words it changed.
@@ -194,4 +194,25 @@ it('dims the subagents row and draws each child in its own tone on the sheet', (
   expect(names.map(part => [part.text, part.color])).toEqual(entries.map((entry, index) => [entry.label, AGENT_TONES[index]]))
   expect(new Set(AGENT_TONES).size).toBe(AGENT_TONES.length)
   for (const tone of AGENT_TONES) expect(Object.values(PALETTE)).not.toContain(tone)
+})
+
+it('colours the git field\'s staged paths green, unstaged yellow, and conflicts red, and leaves the rest dim', () => {
+  // A child for its own colour environment, as above.
+  const env: NodeJS.ProcessEnv = { ...process.env, FORCE_COLOR: '3', COLORTERM: 'truecolor' }
+  delete env.NO_COLOR
+  const frame = execFileSync(process.execPath, ['--import', 'tsx/esm', '--input-type=module', '--eval', `
+    import React from 'react';
+    import { renderToString } from 'ink';
+    import { StatusBar } from ${JSON.stringify(new URL('../src/line.tsx', import.meta.url).href)};
+    import { gitField } from ${JSON.stringify(new URL('../src/git.ts', import.meta.url).href)};
+    const git = gitField({ branch: 'main', detached: false, ahead: 1, behind: 0, staged: 2, modified: 3, untracked: 4, conflicted: 5 }, 'unicode');
+    process.stdout.write(renderToString(React.createElement(StatusBar, { left: [{ text: 'Model: m' }], right: [git, '/w'], columns: 100 }), { columns: 100 }));
+  `], { cwd: new URL('../../../../../', import.meta.url), env, encoding: 'utf8', timeout: 20_000 })
+  const rgb = (hex: string) => `\u001b[38;2;${[1, 3, 5].map(index => Number.parseInt(hex.slice(index, index + 2), 16)).join(';')}m`
+  expect(frame).toContain(`\u001b[2m\u2387 \u001b[22mmain`)
+  expect(frame).toContain(`${rgb(PALETTE.failed)} !5`)
+  expect(frame).toContain(`${rgb(PALETTE.done)} +2`)
+  expect(frame).toContain(`${rgb(PALETTE.waiting)} ~3`)
+  // Untracked paths and the distance from the upstream share one dim run.
+  expect(frame).toContain('\u001b[2m ?4 \u21911\u001b[22m')
 })

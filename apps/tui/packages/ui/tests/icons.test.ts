@@ -20,21 +20,29 @@ describe('ICON', () => {
 })
 
 describe('iconFor', () => {
-  test('names the tools Bake registers', () => {
-    expect(iconFor('bash')).toBe(ICON.run)
-    expect(iconFor('read')).toBe(ICON.read)
-    expect(iconFor('edit')).toBe(ICON.edit)
-    expect(iconFor('grep')).toBe(ICON.find)
-    expect(iconFor('web_fetch')).toBe(ICON.fetch)
+  test('gives skills, subagents, messages to them, and the task list their own shape', () => {
+    expect(iconFor('skill')).toBe(ICON.skill)
     expect(iconFor('subagent')).toBe(ICON.spawn)
+    expect(iconFor('subagent_fork')).toBe(ICON.spawn)
     expect(iconFor('send_message')).toBe(ICON.send)
-    expect(iconFor('job_output')).toBe(ICON.receive)
-    expect(iconFor('interrupt_agent')).toBe(ICON.stop)
+    expect(iconFor('todo_write')).toBe(ICON.todo)
   })
 
-  test('guesses a plugin tool from its name, and falls back to the action marker', () => {
-    expect(iconFor('mcp__github__search_issues')).toBe(ICON.mcp)
-    expect(iconFor('ReadFile')).toBe(ICON.read)
-    expect(iconFor('frobnicate')).toBe(MARKER.action)
+  test('keeps the plain dot for every other tool Bake registers', () => {
+    for (const tool of ['bash', 'pwsh', 'read', 'edit', 'write', 'grep', 'glob', 'web_fetch', 'web_search', 'job_output',
+      'job_kill', 'interrupt_agent', 'list_agents', 'workflow', 'exit_plan_mode', 'ask_user_question', 'get_goal', 'present']) {
+      expect(iconFor(tool)).toBe(MARKER.action)
+    }
+  })
+
+  test('guesses a plugin tool from whole words of its name, and falls back to the action marker', () => {
+    expect(iconFor('SpawnWorker')).toBe(ICON.spawn)
+    expect(iconFor('message_agent')).toBe(ICON.send)
+    expect(iconFor('load_skill')).toBe(ICON.skill)
+    expect(iconFor('update_todos')).toBe(ICON.todo)
+    // One word of a family is not enough, and neither is part of a word.
+    expect(iconFor('send_email')).toBe(MARKER.action)
+    expect(iconFor('skillet')).toBe(MARKER.action)
+    expect(iconFor('mcp__github__search_issues')).toBe(MARKER.action)
   })
 })

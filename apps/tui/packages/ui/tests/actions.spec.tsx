@@ -40,7 +40,7 @@ describe('action transcript', () => {
     expect(frame.indexOf('notes.md')).toBeLessThan(frame.indexOf('private.md'))
     expect(frame.indexOf('private.md')).toBeLessThan(frame.indexOf('Permission denied'))
     expect(frame).not.toContain('[c1]')
-    expect(frame).toContain(`${ICON.read} read 2 \u00b7 1 ${dictionaries[locale].summaryFailures}`)
+    expect(frame).toContain(`${ICON.other} read 2 \u00b7 1 ${dictionaries[locale].summaryFailures}`)
     // A completed turn says so on the summary row above the input instead.
     expect(frame).not.toContain(`- ${dictionaries[locale].turnCompleted}`)
     expect(frame).toContain(`- ${dictionaries[locale].cancelled}`)

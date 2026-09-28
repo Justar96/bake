@@ -770,12 +770,44 @@ export interface PrimaryField {
   readonly color?: PaletteColor | undefined
 }
 
-/** One status-line field. Dim supporting text, primary text, or a measured reading. */
-export type StatusField = string | PrimaryField | MeasuredField
+/** One run of a {@link PartsField} in its own tone. */
+export interface StatusPart {
+  readonly text: string
+  /** Semantic tone; absent, the part is in the normal foreground unless `dim`. */
+  readonly color?: PaletteColor | undefined
+  /** Supporting text, drawn dim. */
+  readonly dim?: boolean
+}
+
+/**
+ * A bounded field made of runs in different tones, such as a branch and its
+ * change counts. It is kept whole or narrowed to `narrow`, never cut.
+ */
+export interface PartsField {
+  readonly parts: readonly StatusPart[]
+  /** The complete narrower reading to keep when `parts` do not fit. */
+  readonly narrow?: readonly StatusPart[]
+}
+
+/** One status-line field. Dim supporting text, primary text, a measured reading, or toned parts. */
+export type StatusField = string | PrimaryField | MeasuredField | PartsField
 
 /** A field's text as drawn, for measuring independently of emphasis. */
 const textOf = (field: StatusField): string => typeof field === 'string' ? field
-  : 'text' in field ? field.text : `${field.label} ${field.value}`
+  : 'parts' in field ? field.parts.map(part => part.text).join('')
+    : 'text' in field ? field.text : `${field.label} ${field.value}`
+
+/**
+ * A bounded field's complete narrower reading, if it has one.
+ * @param field - the field that does not fit whole.
+ * @returns the field to draw instead, or undefined to drop it.
+ */
+function narrowOf(field: StatusField): StatusField | undefined {
+  if (typeof field === 'string') return undefined
+  if ('parts' in field) return field.narrow === undefined ? undefined : { parts: field.narrow }
+  if (!('short' in field) || field.short === undefined) return undefined
+  return { text: field.short, selected: field.selected === true, ...field.color === undefined ? {} : { color: field.color } }
+}
 
 /**
  * The status line. One left-packed list of fields below the composer.
@@ -799,7 +831,8 @@ const textOf = (field: StatusField): string => typeof field === 'string' ? field
  * priority order, not shared. The last right field is the unbounded one, a
  * deep working directory. It yields first, truncating from the start so it
  * keeps the workspace name. The other right fields are bounded, and a bounded
- * field is dropped whole, not cut. `cache hi` is a different number,
+ * field is narrowed to a complete shorter reading when it has one, such as
+ * the git branch without its counts, or dropped whole, not cut. `cache hi` is a different number,
  * and a clipped context meter is a smaller one. A first field with a short
  * reading may take cells from the model instead. It keeps the model label and
  * the access and thinking badges. Other fields drop from the end, so the
@@ -874,6 +907,9 @@ export function StatusBar({ left, right, badge, secondaryBadge, columns }: {
       >
           {typeof field === 'string'
             ? <Text dimColor wrap={index === last ? 'truncate-start' : 'truncate-end'}>{field}</Text>
+            : 'parts' in field
+              ? <Text wrap="truncate-end">{field.parts.map((part, at) => <Text key={at} dimColor={part.dim === true}
+                {...part.color === undefined ? {} : { color: part.color }}>{part.text}</Text>)}</Text>
             : 'text' in field
               ? <Text wrap={index === last ? 'truncate-start' : 'truncate-end'} inverse={field.selected === true}
                 {...field.color === undefined ? {} : { color: field.color }}>{field.text}</Text>
@@ -906,10 +942,9 @@ function fitting(right: readonly StatusField[], room: number, after: boolean): r
     const gap = kept.length > 0 || after ? FIELD_GAP.length : 0
     let chosen = field
     if (used + gap + stringWidth(textOf(chosen)) > room) {
-      if (typeof field === 'string' || !('short' in field) || field.short === undefined
-        || used + gap + stringWidth(field.short) > room) break
-      chosen = { text: field.short, selected: field.selected === true,
-        ...'color' in field && field.color !== undefined ? { color: field.color } : {} }
+      const narrow = narrowOf(field)
+      if (narrow === undefined || used + gap + stringWidth(textOf(narrow)) > room) break
+      chosen = narrow
     }
     kept.push(chosen)
     used += gap + stringWidth(textOf(chosen))

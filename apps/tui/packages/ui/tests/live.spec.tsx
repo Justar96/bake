@@ -455,12 +455,12 @@ describe('running action marker', () => {
     const live: Row[] = [{ kind: 'tool-call', callId: 'c1', tool: 'bash', input: 'ls' }]
     const ui = render(<App {...props({ status: 'running', clock, live })} />)
     const head = () => ui.lastFrame()!.split('\n').find(line => line.endsWith('Bash(ls)'))
-    expect(head()).toBe(`${ICON.run} Bash(ls)`)
+    expect(head()).toBe(`${ICON.other} Bash(ls)`)
     advance(PULSE_MS)
     // Hidden, the marker's cell is a space, so the head does not move.
     expect(head()).toBe('  Bash(ls)')
     advance(PULSE_MS)
-    expect(head()).toBe(`${ICON.run} Bash(ls)`)
+    expect(head()).toBe(`${ICON.other} Bash(ls)`)
   })
 })
 

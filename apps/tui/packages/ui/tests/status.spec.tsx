@@ -7,6 +7,7 @@ import { Tasks } from '../src/tasks.tsx'
 import { SubagentRow } from '../src/subagents.tsx'
 import { emptyTranscript } from '../src/transcript.ts'
 import { dictionaries } from '../src/copy.ts'
+import type { GitState } from '../src/git.ts'
 import { renderToString } from 'ink'
 import stringWidth from 'string-width'
 
@@ -412,4 +413,32 @@ it('asks for a restart once the newer release is installed', () => {
   const frame = render(<App {...props({ update: { version: '0.2.0', installed: true } })} />).lastFrame()!
   const status = frame.split('\n').find(line => line.includes('Model:'))!
   expect(status).toContain(`v0.2.0 · ${dictionaries.en.updateRestart}`)
+})
+
+const clean: GitState = { branch: 'main', detached: false, ahead: 0, behind: 0, staged: 0, modified: 0, untracked: 0, conflicted: 0 }
+
+describe('git field', () => {
+  const status = (overrides: Partial<AppProps>) =>
+    render(<App {...props(overrides)} />).lastFrame()!.split('\n').find(line => line.includes('Model:'))!
+
+  it('names the branch after the context reading and before the cost readings', () => {
+    const row = status({ git: { ...clean, staged: 1, modified: 2, untracked: 3, ahead: 4, behind: 5 },
+      context: { used: 3_000, window: 128_000 }, usage: { input: 1200, output: 300 } })
+    expect(row).toContain('\u2387 main +1 ~2 ?3 \u21914 \u21935')
+    expect(row.indexOf(dictionaries.en.context)).toBeLessThan(row.indexOf('\u2387 main'))
+    expect(row.indexOf('\u2387 main')).toBeLessThan(row.indexOf(dictionaries.en.tokensIn))
+    expect(row.indexOf('\u2387 main')).toBeLessThan(row.indexOf('/workspace'))
+  })
+
+  it('shows a clean tree as the branch alone, a detached HEAD by its commit, and nothing outside a repository', () => {
+    expect(status({ git: clean })).toMatch(/\u2387 main {2}\/workspace$/)
+    expect(status({ git: { ...clean, branch: '0123456', detached: true } })).toContain('\u2387 (0123456)')
+    expect(status({})).not.toContain('\u2387')
+  })
+
+  it('draws ASCII where the terminal draws the classic frame', () => {
+    const row = status({ frame: 'classic', git: { ...clean, modified: 1, ahead: 2, behind: 3 } })
+    expect(row).toContain('main ~1 ^2 v3  /workspace')
+    expect(row).not.toContain('\u2387')
+  })
 })
