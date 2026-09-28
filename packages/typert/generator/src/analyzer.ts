@@ -822,7 +822,7 @@ class FaceAnalyzer {
           }))
         for (const exported of exports) {
           if (!publicSymbols.has(exported.symbol)) continue
-          const name = this.packageExportName(module, exported.symbol, toFace, exported.requestedName)
+          const name = this.packageExportName(module, exported.symbol, toFace, exported.requestedName, exported.site)
           if (name === undefined) {
             this.fail(
               exported.site,
@@ -2487,7 +2487,7 @@ class FaceAnalyzer {
         if (imported === undefined) {
           this.fail(site, `reference to ${symbol.name} crosses a package without an explicit package import`)
         }
-        if (this.packageExportName(imported.module, symbol, owner.face, imported.name) === undefined) {
+        if (this.packageExportName(imported.module, symbol, owner.face, imported.name, site) === undefined) {
           this.fail(
             site,
             `package reference ${imported.name} is not exported by ${imported.module.package} at ${imported.module.subpath}`,
@@ -2509,7 +2509,7 @@ class FaceAnalyzer {
     const otherFace = packageFaces.find(face => face !== this.face)
     if (otherFace !== undefined && imported !== undefined) {
       const { module } = imported
-      const exportName = this.packageExportName(module, symbol, otherFace, imported.name)
+      const exportName = this.packageExportName(module, symbol, otherFace, imported.name, site)
       if (exportName === undefined) {
         this.fail(site, `cross-face reference ${imported.name} is not exported by ${module.package} at ${module.subpath}`)
       }
@@ -2575,6 +2575,7 @@ class FaceAnalyzer {
     symbol: ts.Symbol,
     face: TypertFace,
     requestedName: string,
+    site: ts.Node,
   ): string | undefined {
     const registration = this.allRegistrations.find(candidate =>
       candidate.face === face && candidate.name === module.package)
@@ -2582,7 +2583,19 @@ class FaceAnalyzer {
     const target = packageExportTargets(registration.manifest)
       .find(([subpath]) => subpath === module.subpath)?.[1]
     if (target === undefined) return undefined
-    const sourceFile = this.sourceFiles.get(realPath(sourcePathForExport(registration.root, target))) as ts.SourceFile
+    const sourcePath = sourcePathForExport(registration.root, target)
+    const sourceFile = this.sourceFiles.get(realPath(sourcePath))
+    // Export names are read from the package's source entry. When this face's
+    // aggregate resolves the specifier elsewhere (for example to built
+    // declarations, because it lacks the source `paths`), the entry never
+    // enters the program and no symbol identity could match.
+    if (sourceFile === undefined) {
+      this.fail(
+        site,
+        `${module.package} at ${module.subpath} does not resolve to its source entry ${slash(relative(this.root, sourcePath))}; `
+        + `the ${this.face} aggregate tsconfig must resolve workspace packages to source`,
+      )
+    }
     const moduleSymbol = this.checker.getSymbolAtLocation(sourceFile) as ts.Symbol
     const exported = this.checker.getExportsOfModule(moduleSymbol)
       .find(candidate => candidate.name === requestedName && this.resolveSymbol(candidate) === symbol)

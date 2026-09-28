@@ -754,6 +754,50 @@ describe('WorkspaceAnalyzer', { timeout: 60_000 }, () => {
       })
     })
 
+    it('rejects a cross-face package that the face aggregate resolves to built declarations', () => {
+      const root = copyFixture('typert-cross-face-built-')
+      // Build the host package's declarations, then point the client aggregate
+      // at them instead of at source, as an aggregate without the source
+      // `paths` resolves a workspace package through its manifest.
+      const hostConfig = ts.getParsedCommandLineOfConfigFile(
+        join(root, 'packages/host/tsconfig.json'),
+        {},
+        parseConfigHost,
+      ) as ts.ParsedCommandLine
+      const emitted = ts.createProgram({
+        rootNames: hostConfig.fileNames,
+        options: {
+          ...hostConfig.options,
+          noEmit: false,
+          declaration: true,
+          emitDeclarationOnly: true,
+          composite: false,
+          incremental: false,
+        },
+      }).emit()
+      expect(emitted.emitSkipped).toBe(false)
+      const base = JSON.parse(readFileSync(join(root, 'tsconfig.base.json'), 'utf8')) as {
+        compilerOptions: { paths: Record<string, string[]> }
+      }
+      writeFileSync(join(root, 'tsconfig.client.json'), `${JSON.stringify({
+        extends: './tsconfig.base.json',
+        compilerOptions: {
+          paths: {
+            ...base.compilerOptions.paths,
+            '@fixture/host': ['./packages/host/lib/types/index.d.ts'],
+            '@fixture/host/*': ['./packages/host/lib/types/*'],
+          },
+        },
+        files: [],
+        references: [{ path: './packages/client' }],
+      }, null, 2)}\n`)
+
+      expect(() => new WorkspaceAnalyzer({ root }).analyze()).toThrow(
+        '@fixture/host at . does not resolve to its source entry packages/host/src/index.ts; '
+        + 'the client aggregate tsconfig must resolve workspace packages to source',
+      )
+    })
+
     it('prefers an explicit re-export over a star edge that loops back', () => {
       const root = copyFixture('typert-forward-cycle-explicit-')
       addSameFacePackage(root, './outer.ts', 'Payload', {
