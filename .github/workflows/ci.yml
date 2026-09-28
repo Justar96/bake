@@ -13,8 +13,12 @@ concurrency:
   group: bake-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# A merged pull request was already checked on its merge ref, and the release
+# tag pushed alongside it builds and tests every platform again, so its merge
+# commit on main is skipped. Direct pushes to main still run.
 jobs:
   terminal:
+    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Merge pull request ')
     strategy:
       fail-fast: false
       matrix:
@@ -54,6 +58,7 @@ jobs:
           if-no-files-found: ignore
 
   windows-release:
+    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Merge pull request ')
     runs-on: windows-latest
     timeout-minutes: 20
     steps:

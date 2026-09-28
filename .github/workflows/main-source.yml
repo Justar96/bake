@@ -1,0 +1,28 @@
+name: Main source
+
+# main takes changes only through pull requests from this repository's develop
+# branch. Rulesets can require a pull request but not its source branch, so the
+# main ruleset requires this check. `edited` reruns it when a pull request is
+# retargeted to main.
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, edited]
+
+permissions: {}
+
+jobs:
+  develop-only:
+    name: develop only
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      # Branch names are untrusted input, so they reach the shell as variables.
+      - env:
+          HEAD_REF: ${{ github.head_ref }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          if [ "$HEAD_REPOSITORY" != "$GITHUB_REPOSITORY" ] || [ "$HEAD_REF" != develop ]; then
+            echo "::error::Pull requests into main must come from $GITHUB_REPOSITORY:develop, not $HEAD_REPOSITORY:$HEAD_REF" >&2
+            exit 1
+          fi
