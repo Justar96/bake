@@ -16,6 +16,7 @@ import { SessionNavigation } from './navigation.ts'
 import { bakeVersion, releaseRoot } from './release.ts'
 import { Updates } from './update.ts'
 import { WorkspaceGit } from './git.ts'
+import { cliProxyUpgradeNotice, upgradeCliProxyRoute } from './cliproxyapi.ts'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 
 /**
@@ -172,6 +173,17 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
     // One write per frame, drawn over the previous frame. Without synchronized
     // output, the controls would otherwise appear erased each time a line prints.
     output = frameOutput(io.out, io.err, motion, screen)
+    // Before the session starts, so its first request already uses the
+    // upgraded route. A route an earlier release wrote is brought up to what
+    // the current login writes; one that cannot be is named for a new login.
+    // Neither outcome may keep the terminal from opening.
+    const routeNotice = cliProxyUpgradeNotice(
+      await upgradeCliProxyRoute(ctx).catch((error: unknown) => {
+        ctx.logger.warn('tui: CLIProxyAPI route upgrade failed: %o', error)
+        return { kind: 'current' as const }
+      }),
+      copy,
+    )
     navigation = new SessionNavigation(ctx, config, copy, config.credentialRefs, repaint, updates, preferences)
     await navigation.start(abort.signal)
     // Before the first frame, so a known update is named from it; the network
@@ -188,6 +200,8 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
       alternateScreen: screen === 'fullscreen',
     })
     const initial = navigation.controller!
+    // Shown first, so a missing credential, which blocks every turn, replaces it.
+    if (routeNotice !== undefined) initial.notify(routeNotice)
     startupReport = initial.reportCredentials().catch((error: unknown) => {
       initial.notify(error instanceof Error ? error.message : String(error))
     })

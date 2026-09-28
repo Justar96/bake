@@ -4,6 +4,7 @@ import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import { assertUsableApiKey } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-settings'
 import type { AuthorizationPrompt } from '@deepseek-ai/dsh-authorization/types'
+import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
 
 export const CLIPROXYAPI_ID = 'cliproxyapi'
 export const CLIPROXYAPI_KEY = 'CLIPROXYAPI_API_KEY'
@@ -164,6 +165,126 @@ export function cliProxyModels(payload: unknown, root?: string): CliProxyModel[]
     })
   }
   return [...models.values()]
+}
+
+/** One thing an in-place upgrade changed on a route an earlier login wrote. */
+export type CliProxyRouteChange = 'protocols' | 'adaptive-thinking' | 'retry' | 'affinity'
+
+/** A route upgrade as path edits for the `llm-pi-ai` settings namespace. */
+export interface CliProxyRouteUpgradePlan {
+  readonly changes: readonly CliProxyRouteChange[]
+  readonly ops: readonly { readonly op: 'set', readonly path: readonly string[], readonly value: unknown }[]
+}
+
+const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value)
+
+/**
+ * Bring a route an earlier `/login cliproxyapi` wrote up to what the current
+ * login writes, from the saved route alone: no network and no key.
+ *
+ * Every field an older login lacked is derivable from what it saved. A model's
+ * protocol follows from its id, Claude's endpoint from the route's URL,
+ * adaptive thinking from the efforts the model lists, and the route defaults
+ * are constants. Only absent fields are filled; a value the user set, even
+ * `false`, is kept, which is also how a default is opted out of. A route whose
+ * credential or protocol was changed by hand is not a login's and is left alone.
+ * @param saved - the resolved `llm-pi-ai` provider entry for `cliproxyapi`.
+ * @returns the edits and what they change, or undefined when nothing needs changing.
+ */
+export function planCliProxyRouteUpgrade(saved: unknown): CliProxyRouteUpgradePlan | undefined {
+  if (!isRecord(saved) || saved['apiKeyEnv'] !== CLIPROXYAPI_KEY || typeof saved['baseURL'] !== 'string'
+    || !Array.isArray(saved['models']) || (saved['api'] !== undefined && saved['api'] !== 'openai-responses')) return undefined
+  let root: string
+  try { root = cliProxyEndpoints(saved['baseURL']).root } catch { return undefined }
+  const changes = new Set<CliProxyRouteChange>()
+  const models = (saved['models'] as readonly unknown[]).map((entry) => {
+    if (!isRecord(entry) || typeof entry['id'] !== 'string') return entry
+    let model: Readonly<Record<string, unknown>> = entry
+    if (model['api'] === undefined) {
+      const api = cliProxyApi(entry['id'])
+      if (api !== 'openai-responses') { model = { ...model, api }; changes.add('protocols') }
+    }
+    if (model['api'] === 'anthropic-messages' && model['baseURL'] === undefined) {
+      model = { ...model, baseURL: root }
+      changes.add('protocols')
+    }
+    const efforts = isRecord(model['reasoningEfforts']) ? Object.keys(model['reasoningEfforts']) : []
+    const compat = isRecord(model['compat']) ? model['compat'] : undefined
+    if (model['api'] === 'anthropic-messages' && efforts.some(level => level === 'xhigh' || level === 'max')
+      && compat?.['forceAdaptiveThinking'] === undefined) {
+      model = { ...model, compat: { ...compat, forceAdaptiveThinking: true } }
+      changes.add('adaptive-thinking')
+    }
+    return model
+  })
+  const route = ['providers', CLIPROXYAPI_ID]
+  const ops: { op: 'set', path: readonly string[], value: unknown }[] = []
+  if (changes.size > 0) ops.push({ op: 'set', path: [...route, 'models'], value: models })
+  if (saved['retryPolicy'] === undefined) {
+    ops.push({ op: 'set', path: [...route, 'retryPolicy'], value: CLIPROXYAPI_ROUTE_DEFAULTS.retryPolicy })
+    changes.add('retry')
+  }
+  const compat = isRecord(saved['compat']) ? saved['compat'] : undefined
+  if (compat?.['sendSessionAffinityHeaders'] === undefined) {
+    ops.push({ op: 'set', path: [...route, 'compat', 'sendSessionAffinityHeaders'],
+      value: CLIPROXYAPI_ROUTE_DEFAULTS.compat.sendSessionAffinityHeaders })
+    changes.add('affinity')
+  }
+  return ops.length === 0 ? undefined : { changes: [...changes], ops }
+}
+
+/** What startup did with a route an earlier login wrote. */
+export type CliProxyRouteUpgrade =
+  | { readonly kind: 'current' }
+  | { readonly kind: 'upgraded', readonly changes: readonly CliProxyRouteChange[] }
+  /** The route needs the changes but could not take them in place; a new `/login cliproxyapi` writes them. */
+  | { readonly kind: 'relogin', readonly changes: readonly CliProxyRouteChange[], readonly reason: string }
+
+/**
+ * Upgrade a saved CLIProxyAPI route in place through the settings service, so
+ * an update reaches it without the user signing in again. A settings file that
+ * cannot be written, or a write it refuses, leaves the route as it was and
+ * reports that the login must be repeated.
+ * @param ctx - the settled plugin context.
+ * @returns whether the route was already current, was upgraded, or needs a new login.
+ */
+export async function upgradeCliProxyRoute(ctx: Context): Promise<CliProxyRouteUpgrade> {
+  const settings = ctx.get('settings')
+  if (settings === undefined) return { kind: 'current' }
+  const section = settings.get('llm-pi-ai') as { providers?: Readonly<Record<string, unknown>> } | undefined
+  const plan = planCliProxyRouteUpgrade(section?.providers?.[CLIPROXYAPI_ID])
+  if (plan === undefined) return { kind: 'current' }
+  if (!settings.writable) return { kind: 'relogin', changes: plan.changes, reason: 'the settings file is read-only' }
+  try {
+    await settings.mutate('llm-pi-ai', plan.ops)
+  } catch (error) {
+    return { kind: 'relogin', changes: plan.changes, reason: error instanceof Error ? error.message : String(error) }
+  }
+  return { kind: 'upgraded', changes: plan.changes }
+}
+
+/** The localized labels a route-upgrade notice is built from. */
+export type CliProxyUpgradeCopy = Pick<TuiCopy, 'cliProxyUpgraded' | 'cliProxyRelogin' | 'cliProxyChangeSeparator'
+  | 'cliProxyChangeProtocols' | 'cliProxyChangeAdaptive' | 'cliProxyChangeRetry' | 'cliProxyChangeAffinity'>
+
+/**
+ * The startup notice for a route upgrade, naming what changed, or what a new
+ * login would change when the route could not be upgraded in place.
+ * @param result - what startup did with the saved route.
+ * @param copy - localized labels.
+ * @returns the notice text, or undefined when the route was already current.
+ */
+export function cliProxyUpgradeNotice(result: CliProxyRouteUpgrade, copy: CliProxyUpgradeCopy): string | undefined {
+  if (result.kind === 'current') return undefined
+  const labels: Readonly<Record<CliProxyRouteChange, string>> = {
+    'protocols': copy.cliProxyChangeProtocols,
+    'adaptive-thinking': copy.cliProxyChangeAdaptive,
+    'retry': copy.cliProxyChangeRetry,
+    'affinity': copy.cliProxyChangeAffinity,
+  }
+  const changes = result.changes.map(change => labels[change]).join(copy.cliProxyChangeSeparator)
+  return `${result.kind === 'upgraded' ? copy.cliProxyUpgraded : copy.cliProxyRelogin}${changes}`
 }
 
 /** Validate a connection before changing either credentials or provider settings. */

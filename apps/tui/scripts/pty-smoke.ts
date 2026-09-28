@@ -1598,6 +1598,65 @@ scenario('cliproxyapi', 'the built TUI configures a CLIProxyAPI URL and key and 
       'proxy recovery did not complete the turn')
   })
 
+scenario('cliproxyapi-upgrade', 'a CLIProxyAPI route an earlier release wrote is upgraded at launch, announced, and served',
+  { replayOnly: true },
+  async run => {
+    const requests: Array<{ path: string, affinity: string | null, session: string | null }> = []
+    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
+      const url = new URL(request.url)
+      requests.push({ path: url.pathname, affinity: request.headers.get('x-session-affinity'),
+        session: request.headers.get('x-deepseek-harness-session-id') })
+      const body = await request.json() as { model: string }
+      const events = [
+        ['message_start', { type: 'message_start', message: { id: 'msg_upgrade', type: 'message', role: 'assistant', model: body.model,
+          content: [], stop_reason: null, usage: { input_tokens: 4, output_tokens: 0 } } }],
+        ['content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }],
+        ['content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'UPGRADED_OK' } }],
+        ['content_block_stop', { type: 'content_block_stop', index: 0 }],
+        ['message_delta', { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 2 } }],
+        ['message_stop', { type: 'message_stop' }],
+      ] as const
+      return new Response(events.map(([name, data]) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`).join(''),
+        { headers: { 'content-type': 'text/event-stream' } })
+    } })
+    // The route `/login cliproxyapi` wrote before 0.1.7: Claude on the route's
+    // Responses protocol and no multi-account defaults. JSON is valid YAML.
+    const settingsPath = join(run.home, 'settings.yaml')
+    const saved = existsSync(settingsPath) ? await Bun.file(settingsPath).text() : undefined
+    await Bun.write(settingsPath, JSON.stringify({ 'llm-pi-ai': { providers: { cliproxyapi: {
+      displayName: 'CLIProxyAPI', apiKeyEnv: 'CLIPROXYAPI_API_KEY', api: 'openai-responses',
+      baseURL: `${server.url.origin}/v1`,
+      models: [{ id: 'gpt-test', name: 'GPT Test' }, { id: 'claude-test', name: 'Claude Test' }],
+    } } } }))
+    run.env['CLIPROXYAPI_API_KEY'] = 'smoke-upgrade-key'
+    await run.writeOverlay(undefined, { cliProxyApi: true })
+    let upgraded: string
+    try {
+      await run.terminal('cliproxyapi-upgrade', [], async tty => {
+        await tty.expect('Updated the CLIProxyAPI route for this version')
+        tty.send('/model cliproxyapi/claude-test\r', 'select the upgraded Claude model')
+        await tty.expect('Model set for the next turn: cliproxyapi/claude-test')
+        tty.send('Say UPGRADED_OK\r', 'run one turn over the upgraded route')
+        await tty.expect('  UPGRADED_OK')
+      })
+      upgraded = await Bun.file(settingsPath).text()
+    } finally {
+      delete run.env['CLIPROXYAPI_API_KEY']
+      await run.writeOverlay()
+      if (saved === undefined) rmSync(settingsPath, { force: true })
+      else await Bun.write(settingsPath, saved)
+      server.stop(true)
+    }
+    // The upgrade was persisted, so the next launch starts current and says nothing.
+    for (const fragment of ['anthropic-messages', 'maxDelayMs: 60000', 'sendSessionAffinityHeaders: true']) {
+      assert(upgraded.includes(fragment), `upgraded settings lack ${fragment}:\n${upgraded}`)
+    }
+    // Claude moved to Anthropic Messages at the proxy root, carrying the session on both headers.
+    assert(requests.length === 1 && requests[0]!.path === '/v1/messages'
+      && requests[0]!.session !== null && requests[0]!.affinity === requests[0]!.session,
+    `the upgraded Claude turn did not reach Messages with its session headers: ${JSON.stringify(requests)}`)
+  })
+
 scenario('agents', 'the built TUI exposes the Harness subagent catalog through /agents',
   { replayOnly: true },
   async run => {
