@@ -56,7 +56,7 @@ The document is a YAML or JSON mapping of namespace to user section. Users can e
 
 Writes through `ctx.settings` never lose concurrent changes: an external edit still in flight, a change the watcher missed, or another process's write is merged into the document before the write lands. YAML edits are leaf-level diffs: only changed values are set and only removed keys deleted, so comments, anchors, and formatting survive on every untouched node and on the key of every changed pair; a changed array or other non-map value replaces wholesale. JSON documents re-serialize without comments. If the on-disk document turned invalid, the write fails loud instead of overwriting the user's manual edit.
 
-The lock has a 2-second acquisition deadline with exponential backoff; a contender that times out leaves the existing lock in place, because lock age cannot distinguish a crashed owner from a paused live writer — orphan lock recovery is an operator action. The document is created `0600` under an owner-only `0700` directory and replaced atomically through a random-suffix temp sibling that never follows a planted symlink.
+The lock has a 2-second acquisition deadline with exponential backoff, and a live holder is never displaced. On Linux and macOS, a lock left by a writer that died holding it is recovered by the next writer, because the lock is held under a kernel `flock`. A lock whose owner cannot be proven gone stays in place however old it is, because lock age cannot distinguish a crashed owner from a paused live writer; a contender that times out leaves it untouched. On Windows, where the kernel-held protocol is unavailable, orphan lock recovery remains an operator action; [atomic write](../../util/atomic-write/README.md) owns the protocol. The document is created `0600` under an owner-only `0700` directory and replaced atomically through a random-suffix temp sibling that never follows a planted symlink.
 
 ### Failures and recovery
 
@@ -80,7 +80,7 @@ This section explains the design decisions behind the provider and points at the
 - **One explicit defaulting step.** `resolveSpec(config)` resolves the filename, format, watch flag, and debounce window in one step, so programmatic construction that bypasses Schemastery normalization gets the same defaults.
 - **Boot fails loud, reload keeps last good.** An existing-but-invalid document fails plugin load; once live, an unreadable or unparsable edit warns and keeps the last good sections.
 - **Every write is a read-modify-write.** A persist first reconciles from disk and publishes any difference into the seam, then renders against that fresh text, so a write can never resurrect a stale document or drop an unobserved sibling section.
-- **Writes hold a cross-process writer lock.** The read-render-rename cycle runs under a `wx`-created `<file>.lock` sibling with exponential backoff and a 2-second acquisition deadline; readers never take the lock because the rename commit is atomic.
+- **Writes hold a cross-process writer lock.** The read-render-rename cycle runs under the `wx`-created `<file>.lock` sibling of [`withFileLock`](../../util/atomic-write/README.md), with exponential backoff and a 2-second acquisition deadline; readers never take the lock because the rename commit is atomic.
 - **YAML edits are leaf-level diffs.** Only changed values are set and only removed keys deleted, preserving comments, anchors, and formatting on untouched nodes.
 - **Reloads and writes share one operation chain.** Watcher refreshes and persists from every namespace queue run one at a time in queue order; each render sees the text the previous operation committed.
 - **Self-write suppression by content.** The provider caches the last good text; a watcher event whose content equals the cache — its own write included — is a no-op.
@@ -145,6 +145,6 @@ These limits define when the provider is a poor fit or needs special operational
 <details>
 <summary>Working context for maintainers — click to expand</summary>
 
-This Dev Note is working context for maintainers: deferred directions that are not decided. It is explicitly non-authoritative — shipped behavior, limits, and accepted rationale live in the sections above and the package code. Deferred directions: `${env:VAR}`-style value indirection is a seam-level feature — it belongs with the settings service contract when it lands, not with this provider. Orphan lock recovery remains an operator action by design, because lock age cannot distinguish a crashed owner from a paused live writer.
+This Dev Note is working context for maintainers: deferred directions that are not decided. It is explicitly non-authoritative — shipped behavior, limits, and accepted rationale live in the sections above and the package code. Deferred directions: `${env:VAR}`-style value indirection is a seam-level feature — it belongs with the settings service contract when it lands, not with this provider.
 
 </details>

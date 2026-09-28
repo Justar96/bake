@@ -73,7 +73,7 @@ Every package lives in exactly one group; new packages join existing groups, and
 | [`host/`](host/README.md) | HTTP web server and read-only plugin inventory |
 | [`client/`](client/README.md) | Shared Client-to-Host Connection |
 | [`test-support/`](test-support/README.md) | Test infrastructure (testkits, replay, Loader smokes) |
-| [`runtime-diagnostics/`](runtime-diagnostics/README.md) | Runtime diagnostics: package-owned invariant checks and reports |
+| [`runtime-diagnostics/`](runtime-diagnostics/README.md) | Runtime diagnostics: package-owned invariant checks and reports, and process health records |
 | [`util/`](util/README.md) | Low-level zero-dependency utilities shared across groups (`Branded<B>`, home/path helpers, timeout, retention) |
 
 -----
