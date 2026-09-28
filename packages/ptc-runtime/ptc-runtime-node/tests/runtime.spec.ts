@@ -154,11 +154,22 @@ describe('Node program process', () => {
   })
 
   it('retains console output emitted immediately before a non-yielding program', async () => {
-    const { run } = await setup({ timeoutMs: 1000, graceMs: 50 })
-    const result = await run({ program: 'console.log("before hot loop"); for (;;) {}', bindings: [] })
+    const { run, cwd } = await setup({ graceMs: 50 })
+    const witness = join(cwd, 'logged')
+    const program = `const fs = process.getBuiltinModule("node:fs"); console.log("before hot loop"); fs.writeFileSync(${JSON.stringify(witness)}, ""); for (;;) {}`
+    // The deadline also covers process startup, which a loaded host can stretch past any fixed budget.
+    // The file written after the log proves the log preceded the deadline; until it exists, double the budget.
+    let timeoutMs = 1000
+    let result = await run({ program, bindings: [], timeoutMs })
+    while (!existsSync(witness) && timeoutMs < 32_000) {
+      expect(result.error?.kind).toBe('timeout')
+      timeoutMs *= 2
+      result = await run({ program, bindings: [], timeoutMs })
+    }
+    expect(existsSync(witness)).toBe(true)
     expect(result.error?.kind).toBe('timeout')
     expect(result.logs).toEqual(['before hot loop'])
-  })
+  }, 120_000)
 
   it('retains console output that the host had not yet read when execution stops', async () => {
     const { run, cwd } = await setup()
