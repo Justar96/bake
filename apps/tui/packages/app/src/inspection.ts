@@ -25,7 +25,13 @@ export class SubagentInspection {
 
   constructor(private readonly ctx: Context, readonly id: SessionId, readonly label: string,
     copy: TuiCopy, changed: () => void) {
-    this.projection = projector(copy, name => ctx.get('agents')?.get(id)?.ctx.get('tools')?.get(name))
+    // The child's own view, as the parent's controller reads its agent's: its
+    // preset tools live in its layer. Resolved per lookup, since a saved child
+    // can come back live while it is being inspected.
+    this.projection = projector(copy, name => {
+      const child = ctx.get('agents')?.get(id)
+      return child?.ctx.get('tools')?.get(name, child)
+    })
     this.off = [
       ctx.on('session/event', (session, event) => {
         if (session.id !== id || this.closed) return

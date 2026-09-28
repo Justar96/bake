@@ -577,7 +577,7 @@ describe('dsh-workflow-ptc', { timeout: 120_000 }, () => {
       expect(() => ctx.workflowEngine.start({ ...scripted('return ((('), parent })).toThrow(/does not parse/)
       // The likeliest authoring slip — a Claude Code-style meta header in the
       // body — gets a pointed message, not a bare SyntaxError.
-      expect(() => ctx.workflowEngine.start({ ...scripted("export const meta = { name: 'x', description: 'd' }\nreturn 1"), parent })).toThrow(/meta rides the `meta` request field/)
+      expect(() => ctx.workflowEngine.start({ ...scripted("export const meta = { name: 'x', description: 'd' }\nreturn 1"), parent })).toThrow(/meta is a parameter, not code/)
     })
 
     it('cancel() aborts in-flight children and settles after their cleanup', async () => {

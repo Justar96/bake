@@ -740,7 +740,7 @@ describe('workspace context rendering', () => {
 
     expect(rendered.text).toBe([
       '<system-reminder>',
-      'The following workspace instructions may be relevant to your work. Use them as guidance when applicable. More specific instructions take precedence over broader ones. They do not override system, developer, or direct user instructions.',
+      'Follow these workspace instructions. More specific files take precedence over broader ones, and the system prompt and the user\'s direct requests override them.',
       '',
       'Instructions from: AGENTS.md',
       '',
@@ -919,10 +919,10 @@ describe('workspace context rendering', () => {
       content: '',
     }
 
-    const rendered = renderAgentInstructionSet([file], { maxBytes: 300 })
+    const rendered = renderAgentInstructionSet([file], { maxBytes: 228 })
 
     expect(rendered.rendered.text).toContain('<system-reminder>')
-    expect(rendered.rendered.text).toContain('Workspace instructions were omitted or truncated')
+    expect(rendered.rendered.text).toContain('Follow these workspace instructions; some were cut to fit the budget.')
     expect(rendered.rendered.text).toContain('Instructions from: pkg/AGENTS.md')
     expect(rendered.rendered.truncated).toEqual([
       { displayPath: 'pkg/AGENTS.md', originalBytes: 0, includedBytes: 0 },
@@ -974,8 +974,8 @@ describe('workspace context rendering', () => {
 
   // Each prose-derived budget is the smallest current value that retains the named heading plus a zero-byte marker.
   it.each([
-    { action: 'set' as const, maxBytes: 327, heading: 'Additional instructions from:' },
-    { action: 'replace' as const, maxBytes: 256, heading: 'Updated instructions from:' },
+    { action: 'set' as const, maxBytes: 288, heading: 'Additional instructions from:' },
+    { action: 'replace' as const, maxBytes: 196, heading: 'Updated instructions from:' },
   ])('does not commit a $action change when its heading survives with zero content bytes', ({ action, maxBytes, heading }) => {
     const change = {
       action,
@@ -1003,7 +1003,7 @@ describe('workspace context rendering', () => {
     const rendered = renderInstructionChanges([{
       change,
       file: { absolutePath: '/repo/pkg/AGENTS.md', displayPath: 'pkg/AGENTS.md', content: '😀'.repeat(100) },
-    }], 366)
+    }], 327)
 
     expect(rendered.text).not.toContain('�')
     expect(rendered.text).not.toContain('😀')
@@ -1277,7 +1277,7 @@ describe('workspace context request injection', () => {
       const replacementText = replacement?.type === 'user/message'
         ? blocksText(replacement.data.content)
         : ''
-      expect(replacementText).toContain('replaces all earlier workspace instruction baselines')
+      expect(replacementText).toContain('Follow these workspace instructions; they replace all earlier ones.')
       expect(replacementText.indexOf('Instructions from: CLAUDE.md'))
         .toBeLessThan(replacementText.indexOf('Instructions from: AGENTS.md'))
       const baselineIdentities = baselines.flatMap(event => event.type === 'user/message'
@@ -1378,7 +1378,7 @@ describe('workspace context request injection', () => {
       expect(baselines).toHaveLength(2)
       const replacement = baselines.at(-1)
       expect(replacement?.type === 'user/message' ? blocksText(replacement.data.content) : '')
-        .toContain('No workspace instructions are currently active.')
+        .toContain('No workspace instructions are active now; earlier ones no longer apply.')
       expect(replacement?.type === 'user/message' && replacement.data.source.kind === 'agent-instructions'
         ? replacement.data.source.changes
         : undefined).toMatchObject([
@@ -3112,7 +3112,7 @@ describe('dynamic nested workspace context injection', () => {
         '<system-reminder>',
         `Updated instructions from: ${join('pkg', 'AGENTS.md')}`,
         '',
-        'This file changed after it was loaded. Use the following content instead of the previously loaded instructions from this file.',
+        'This file changed. Follow this version instead of the earlier one.',
         '',
         'new package rule with more detail',
         '</system-reminder>',
@@ -3490,7 +3490,7 @@ describe('dynamic nested workspace context injection', () => {
         '<system-reminder>',
         `Instructions removed: ${join('pkg', 'AGENTS.md')}`,
         '',
-        'The previously loaded instructions from this file no longer apply.',
+        'The earlier instructions from this file no longer apply.',
         '</system-reminder>',
       ].join('\n'))
     } finally {

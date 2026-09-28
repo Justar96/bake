@@ -43,6 +43,8 @@ export function formatRow(row: Row): string {
     }
     case 'tool-group':
       return row.calls.map(formatRow).join('\n')
+    case 'rate':
+      return `${gutter} ${row.tokens} tokens · ${row.ms} ms`
     case 'tool-result':
       // A card leaves `text` empty, so its title and lines are the whole
       // result here. This surface is one line already, so it needs no bound.

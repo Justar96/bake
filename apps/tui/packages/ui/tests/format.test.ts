@@ -1,7 +1,7 @@
 /** Status-line number formatting. */
 
 import { describe, expect, it } from 'bun:test'
-import { cacheHit, formatAge, formatContext, formatTokens, formatTotals } from '../src/format.ts'
+import { cacheHit, compactPercent, contextPercent, formatAge, formatContext, formatTokens, formatTotals } from '../src/format.ts'
 
 describe('formatTokens', () => {
   it('keeps small counts exact', () => {
@@ -17,20 +17,29 @@ describe('formatTokens', () => {
   })
 })
 
-describe('formatContext', () => {
-  it('reports occupancy as used, capacity, and percent', () => {
-    expect(formatContext({ used: 12_340, window: 1_000_000 })).toBe('~12.3k/1M (1%)')
+describe('context readings', () => {
+  it('reports the absolute count as used over capacity', () => {
+    expect(formatContext({ used: 12_340, window: 1_000_000 })).toBe('12.3k/1M')
+    expect(contextPercent({ used: 12_340, window: 1_000_000 })).toBe(1)
   })
 
   it('rounds the percentage down', () => {
     // A context that is merely close to full must not be shown as 100%. This is
     // the number a user decides to compact on.
-    expect(formatContext({ used: 999_999, window: 1_000_000 })).toBe('~1M/1M (99%)')
-    expect(formatContext({ used: 1_000_000, window: 1_000_000 })).toBe('~1M/1M (100%)')
+    expect(contextPercent({ used: 999_999, window: 1_000_000 })).toBe(99)
+    expect(contextPercent({ used: 1_000_000, window: 1_000_000 })).toBe(100)
   })
 
   it('reports an unknown capacity as zero percent rather than dividing by it', () => {
-    expect(formatContext({ used: 10, window: 0 })).toBe('~10/0 (0%)')
+    expect(contextPercent({ used: 10, window: 0 })).toBe(0)
+    expect(formatContext({ used: 10, window: 0 })).toBe('10/0')
+  })
+
+  it('names where automatic compaction starts as a share of the window, and nothing without a threshold', () => {
+    expect(compactPercent({ used: 10, window: 128_000, compactAt: 102_400 })).toBe(80)
+    expect(compactPercent({ used: 10, window: 200_000, compactAt: 169_999 })).toBe(85)
+    expect(compactPercent({ used: 10, window: 128_000 })).toBeUndefined()
+    expect(compactPercent({ used: 10, window: 0, compactAt: 5 })).toBeUndefined()
   })
 })
 

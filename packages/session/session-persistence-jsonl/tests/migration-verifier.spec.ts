@@ -1,5 +1,6 @@
+import { getHeapStatistics } from 'node:v8'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { verifyCurrentGenerationInWorker } from '../src/migration-verifier.ts'
+import { verifierResourceLimits, verifyCurrentGenerationInWorker } from '../src/migration-verifier.ts'
 
 const state = vi.hoisted(() => ({ workers: [] as unknown[] }))
 
@@ -25,7 +26,7 @@ vi.mock('node:worker_threads', () => ({
 
 interface FakeWorker {
   readonly entry: string | URL
-  readonly options: { readonly workerData: unknown }
+  readonly options: { readonly workerData: unknown; readonly resourceLimits?: unknown }
   readonly terminate: ReturnType<typeof vi.fn<() => Promise<number>>>
   emit(event: string, value: unknown): void
 }
@@ -59,6 +60,23 @@ describe('migration verifier Worker lifecycle', () => {
 
     await expect(verification).resolves.toEqual(result)
     expect(instance.terminate).toHaveBeenCalledOnce()
+  })
+
+  it('gives each Worker an equal share of the parent heap limit', async () => {
+    const verification = verifyCurrentGenerationInWorker('/stage', 'none', 'session', 0)
+    const parentMb = Math.floor(getHeapStatistics().heap_size_limit / (1024 * 1024))
+    expect(worker().options.resourceLimits).toEqual({ maxOldGenerationSizeMb: Math.floor(parentMb / 2) })
+    worker().emit('message', { ok: true, result })
+    await verification
+  })
+
+  it.each([
+    [4192, 2096],
+    [352, 176],
+    [3, 1],
+    [1, 1],
+  ])('splits a %i MiB parent heap limit into %i MiB per verifier', (parentMb, expected) => {
+    expect(verifierResourceLimits(parentMb * 1024 * 1024)).toEqual({ maxOldGenerationSizeMb: expected })
   })
 
   it('reconstructs a Worker-reported error', async () => {

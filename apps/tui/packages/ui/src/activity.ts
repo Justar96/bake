@@ -93,7 +93,50 @@ export const SPINNER_REST = SPINNER[0]!
  * @returns three Braille cells for that moment.
  */
 export function spinnerFrame(elapsed: number): string {
-  return SPINNER[Math.floor(Math.max(0, elapsed) / FRAME_MS) % SPINNER.length]!
+  return frameAt(SPINNER, elapsed)
+}
+
+/**
+ * Nine frames of dough being laminated, the way compaction folds history
+ * into a summary, three Braille cells wide.
+ *
+ * A flat sheet lifts its ends, stands them up, and folds them over to meet
+ * in the middle: three layers in a compact block. The block is pressed and
+ * rolled out flat again for the next fold. Both ends move together, so every
+ * frame is its own mirror image and stays on the bottom rows, and the word
+ * beside it never moves. Symmetric and square where the kneading is lopsided
+ * and round, so the two never read as one another.
+ */
+export const FOLD_SPINNER: readonly string[] = [
+  '....../....../....../######',
+  '....../....../#....#/.####.',
+  '....../#....#/.#..#./..##..',
+  '....../.#..#./.#..#./..##..',
+  '....../..##../.#..#./..##..',
+  '....../..##../..##../..##..',
+  '....../..##../..##../.####.',
+  '....../....../.####./.####.',
+  '....../....../..##../######',
+].map(braille)
+
+/** The folded block, pressed square, used when motion is off or no clock is supplied. */
+export const FOLD_REST = FOLD_SPINNER[7]!
+
+/**
+ * Laminating frame for an elapsed time, on the kneading's beat.
+ * @param elapsed - milliseconds since compaction started.
+ * @returns three Braille cells for that moment.
+ */
+export function foldFrame(elapsed: number): string {
+  return frameAt(FOLD_SPINNER, elapsed)
+}
+
+/** Which dough a running header works: kneading for a turn, laminating for compaction. */
+export type Spinner = 'knead' | 'fold'
+
+/** The frame of a loop that holds for `elapsed`, one frame a beat. */
+function frameAt(frames: readonly string[], elapsed: number): string {
+  return frames[Math.floor(Math.max(0, elapsed) / FRAME_MS) % frames.length]!
 }
 
 /**
@@ -236,8 +279,10 @@ export interface TurnSummary {
   readonly outcome: Outcome
   /** Locale-owned word for the outcome. */
   readonly label: string
-  /** Elapsed time and action counts, already joined; empty for a turn with neither. */
+  /** Elapsed time, action counts, and the answer's rate, already joined; empty for a turn with none of them. */
   readonly details: string
+  /** The part of `details` a narrow header keeps once the counts and rate give way: the elapsed time, or empty. */
+  readonly brief: string
 }
 
 /**
@@ -267,18 +312,21 @@ const COUNTED: readonly Verb[] = [VERB.edit, VERB.run, VERB.read, VERB.find, VER
  *
  * Counts come from the transcript, not from a tally kept while the turn ran.
  * A call the log holds is counted once however its result arrived, and the
- * outcome is the recorded turn end.
+ * outcome is the recorded turn end. The final answer's generation speed
+ * closes the details, `· 42 tok/s`, when its sample means something
+ * ({@link rateLabel}); one summary row carries the turn's numbers.
  *
  * @param rows - rows the turn committed, in order.
  * @param copy - locale-owned labels.
  * @param elapsed - the turn's wall time, absent when no clock measured it.
- * @returns the outcome, its label, and the joined details.
+ * @returns the outcome, its label, the joined details, and the brief form a narrow header keeps.
  */
 export function turnSummary(rows: readonly Row[], copy: TuiCopy, elapsed: number | undefined): TurnSummary {
   const counts = new Map<Verb, number>()
   let failed = 0
   let outcome: Outcome = 'done'
   let reason: string | undefined
+  let rate: string | undefined
   for (const row of rows) {
     for (const call of callsOf(row)) {
       const verb = verbFor(call.tool)
@@ -286,6 +334,7 @@ export function turnSummary(rows: readonly Row[], copy: TuiCopy, elapsed: number
       if (call.result?.ok === false) failed++
     }
     if (row.kind === 'tool-result' && !row.ok) failed++
+    else if (row.kind === 'rate') rate = rateLabel(row, copy)
     else if (row.kind === 'notice' && row.placement === 'turn-end') {
       outcome = row.tone === 'error' ? 'failed' : row.tone === 'warn' ? 'stopped' : 'done'
       reason = row.text.split('\n')[0]
@@ -299,6 +348,33 @@ export function turnSummary(rows: readonly Row[], copy: TuiCopy, elapsed: number
     ...elapsed === undefined ? [] : [formatElapsed(elapsed)],
     ...COUNTED.flatMap(verb => counts.has(verb) ? [`${PAST[verb]} ${counts.get(verb)!}`] : []),
     ...failed === 0 ? [] : [`${failed} ${copy.summaryFailures}`],
+    ...rate === undefined ? [] : [rate],
   ]
-  return { outcome, label, details: parts.join(' \u00b7 ') }
+  return { outcome, label, details: parts.join(' \u00b7 '), brief: elapsed === undefined ? '' : formatElapsed(elapsed) }
+}
+
+/** Fewest milliseconds a final answer's rate is measured over before the summary reports it. */
+export const RATE_MIN_MS = 1000
+
+/** Fewest output tokens a final answer's rate is measured over before the summary reports it. */
+export const RATE_MIN_TOKENS = 64
+
+/**
+ * A final answer's generation speed as the turn's summary reports it, `42 tok/s`.
+ *
+ * A short answer's first and last tokens can arrive in one network read, and
+ * four tokens over 74 ms is not a speed anyone can act on. A sample under
+ * {@link RATE_MIN_MS} or {@link RATE_MIN_TOKENS}, or one without finite
+ * numbers, reports nothing; the log
+ * keeps the numbers either way.
+ *
+ * @param rate - output tokens and the milliseconds they took.
+ * @param copy - locale-owned unit.
+ * @returns the rate in whole tokens a second, or undefined for a sample too small.
+ */
+export function rateLabel(rate: { readonly tokens: number, readonly ms: number }, copy: TuiCopy): string | undefined {
+  // A row from an older build or a malformed log can carry no numbers; `NaN tok/s` says nothing either.
+  if (!Number.isFinite(rate.tokens) || !Number.isFinite(rate.ms) || rate.ms < RATE_MIN_MS || rate.tokens < RATE_MIN_TOKENS) return undefined
+  const perSecond = Math.round(rate.tokens / (rate.ms / 1000))
+  return Number.isFinite(perSecond) ? `${perSecond} ${copy.rateUnit}` : undefined
 }

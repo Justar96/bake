@@ -85,6 +85,27 @@ function classifyPiAiError(message: string): string {
   return 'PI_AI_ERROR'
 }
 
+/** Longest credential cooldown a gateway hint may request, in seconds. */
+const MAX_GATEWAY_RESET_SECONDS = 3600
+
+/**
+ * Read the credential-cooldown hint a multi-credential gateway puts in its
+ * error body. CLIProxyAPI and CliRelay answer `429 model_cooldown` and
+ * `503 model_unavailable` with `"reset_seconds": N` once every credential for
+ * the model is cooling down; pi-ai keeps the body in the error message but
+ * drops the response headers, so the body is the only place the wait survives.
+ * Without it the retry policy spends its attempts before the cooldown ends.
+ * @param message - pi-ai's flattened error text, status and body included.
+ * @returns the advertised wait in milliseconds, or `undefined` when absent or implausible.
+ */
+function gatewayResetMs(message: string): number | undefined {
+  const match = /"reset_seconds"\s*:\s*(\d+(?:\.\d+)?)/.exec(message)
+  if (match === null) return undefined
+  const seconds = Number(match[1])
+  if (!Number.isFinite(seconds) || seconds <= 0 || seconds > MAX_GATEWAY_RESET_SECONDS) return undefined
+  return Math.ceil(seconds * 1000)
+}
+
 /**
  * Map a terminal pi-ai event to the harness finish reason.
  * @param message - the assistant message carried by the `done` or `error` event.
@@ -140,7 +161,12 @@ export function mapStopReason(message: AssistantMessage, contextWindow?: number)
     }
     case 'error': {
       const text = message.errorMessage ?? 'pi-ai stream error'
-      return { kind: 'error', failure: { message: text, code: classifyPiAiError(text) } }
+      const code = classifyPiAiError(text)
+      const retryAfterMs = code === 'RATE_LIMIT' || code === 'SERVER' ? gatewayResetMs(text) : undefined
+      return {
+        kind: 'error',
+        failure: { message: text, code, ...retryAfterMs === undefined ? {} : { providerRetryAfterMs: retryAfterMs } },
+      }
     }
   }
 }

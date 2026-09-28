@@ -31,6 +31,6 @@ Tests synchronize through IPC or flushed line protocols and await process exit b
 
 ## Limits
 
-Locks belong to open file descriptions and follow the host filesystem's flock semantics. Removing or replacing a pathname does not transfer a lock to the replacement inode; the JSONL backend separately checks inode identity. Network filesystems can have different or unsupported lock semantics. Windows does not use this API and retains its existing semaphore implementation.
+Locks belong to open file descriptions and follow the host filesystem's flock semantics. Removing or replacing a pathname does not transfer a lock to the replacement inode; the JSONL backend separately checks inode identity. Network filesystems can have different or unsupported lock semantics. Windows does not use this API; it locks the same `session.lock` file through `LockFileEx`.
 
 Node-API compatibility tests reuse the same platform addon under different Node versions. They complement these syscall tests; loading a binary alone does not prove correct locking behavior.

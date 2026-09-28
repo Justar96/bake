@@ -51,6 +51,8 @@ kind: "package-reference"
 
 工具通过配置的文件系统提供方解析路径，检查普通文件元数据，不读取内容。成功的最终 `tools/result` 通知追加 `deliverables/presented`，嵌套调用也适用。外层程序随后失败不会撤销已完成的声明。被阻止的结果不发布声明。每个插件实例只记录其实际执行的调用；同名作用域工具不能通过其他实例发布交付。
 
+UI 通过 `src/presentation.ts` 中的纯函数 `presentCall` 以文件名为调用命名：`report.md, notes.md`，最多列出前三个文件，其余以 `+N` 计数，并截断为 80 个字符。完整路径保留在结果文本中，每个文件一行 `Presented <path>`；由于工具不声明 `presentResult`，结果保留 UI 的通用渲染。过时的记录参数也会让调用回退到通用渲染。
+
 纯 `./types` 入口声明 `PresentedFile` 与 Session 事件，不导入 Host 运行时代码。Web 消费方在展示或打开文件前校验持久声明。事件不保存 Session ID，因此 fork 历史中的相对路径按当前查看的 Session 工作区解析。
 
 **运行时不变式：** 不发布伴生入口。工具与事件注册归 effect 所有，Session 日志拥有文件声明；插件不维护独立的文件内容存储。
@@ -72,7 +74,7 @@ kind: "package-reference"
 
 #### 模型看到的内容
 
-[present schema](../../../docs/tool-catalog.zh.md#present)要求已有且可访问的文件：“Declare existing files accessible through the Session filesystem as final deliverables. When a file you create or update is an output the user asked to receive, you must call present after writing it and before your final response, including files created through Bash or code execution. Mentioning its path in your reply does not replace this call. The files must already exist. The user opens the current source files; their contents are not copied or preserved.” 每个文件的结果为 `Presented <path>`；程序结果和持久事件包含路径及可选说明。
+[present schema](../../../docs/tool-catalog.zh.md#present)要求已有且可访问的文件：“Deliver files the user asked to receive. After creating or updating such a file, however you made it, call present before your final reply; mentioning its path is not enough. The files must already exist where your file tools can see them. The user opens them in place, so leave them there.” 每个 `path` 都是已有的普通文件，可以是绝对路径，也可以是相对于工作目录的路径。每个文件的结果为 `Presented <path>`；程序结果和持久事件包含路径及可选说明。
 
 #### Token 影响
 

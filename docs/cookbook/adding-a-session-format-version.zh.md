@@ -88,12 +88,12 @@ pnpm run test:snapshot snapshots/sdk/sdk.snapshot.ts -t text-turn
 从仓库根目录运行。以下命令检查 catalog 声明、Stage 组合、已发布的 V2→V3 迁移边与代际选择。它们是基线检查；需为新迁移边添加聚焦覆盖：
 
 ```sh
-pnpm run verify-session-format-catalog
-pnpm exec vitest run scripts/gen-session-format-catalog.spec.ts packages/session/session-format/tests packages/session/session-format-v2-to-v3/tests packages/session/session-format-catalog/tests
-pnpm run test:snapshot scripts/session-snapshot-corpus.corpus.ts
+bun scripts/gen-session-format-catalog.ts --check
+bun test ./scripts/gen-session-format-catalog.test.ts
+bun run test:runtime packages/session/session-format/tests packages/session/session-format-v2-to-v3/tests packages/session/session-format-catalog/tests
 ```
 
-实现新迁移边后，将其实际测试路径加入聚焦的 Vitest 命令。根据实际 diff 添加受影响的 JSONL、回放、投影与 SDK 测试；发布 Worker 路径变化时还需构建产物冒烟测试。要求严格迁移成功、骨架保持恒等、拒绝格式错误与未知必需事件、重复恢复确定、并发 Stage 状态独立、有种子的多跳截点正确、前代不变且无回退。报告确切命令与失败，不要推断整个测试套件的结果。
+实现新迁移边后，将其实际测试路径加入聚焦的 `test:runtime` 命令。根据实际 diff 添加受影响的 JSONL、回放、投影与 SDK 测试；发布 Worker 路径变化时还需构建产物冒烟测试。要求严格迁移成功、骨架保持恒等、拒绝格式错误与未知必需事件、重复恢复确定、并发 Stage 状态独立、有种子的多跳截点正确、前代不变且无回退。报告确切命令与失败，不要推断整个测试套件的结果。
 
 更新[所属 Agent Note](../../.agents/notes/implemented/architecture/2026-08-31-released-session-format-migrations.zh.md)，而非添加重复决策记录。发布前保持[发布记录](../session-format-status.zh.md#updating-the-record)不变；发布后，使用已核实的发布证据更新它。审计相关活跃记录的取代关系；保留独立理由，并保持归档记录冻结。一起更新双语正文，通过仓库工具重新记录每个变更的配对，然后运行文档检查：
 

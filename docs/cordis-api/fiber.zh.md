@@ -17,7 +17,9 @@ fiber 是一个已加载的插件实例，包含其生命周期状态、经过�
  * run (in reverse order) either when the returned disposer is called or
  * when the fiber unloads, whichever comes first. Calling the disposer twice
  * is a no-op. Throws `CordisError('INACTIVE_EFFECT')` if the fiber is
- * already disposed, and `TypeError` if `execute` returns an invalid shape.
+ * already disposed, or currently `UNLOADING` (mid-teardown effects would
+ * escape the unload snapshot), and `TypeError` if `execute` returns an
+ * invalid shape.
  *
  * @param execute — the effect body; see {@link Effect} for accepted shapes.
  * @param label — effect label shown in `getEffects()` diagnostics.
@@ -29,14 +31,14 @@ effect(execute: () => Effect, label?: string): AsyncDisposable<Promise<void>>
 
 在此 fiber 上注册一个支持清理的作用。
 
-`execute` 会立即运行；它产生的清理函数将被收集，并在调用返回的清理函数或卸载 fiber 时按相反顺序运行，以先发生者为准。重复调用清理函数不会产生任何效果。如果 fiber 已经 dispose（资源释放），则抛出 `CordisError('INACTIVE_EFFECT')`；如果结构无效，则抛出 `TypeError`，表示 `execute` 返回了不受支持的结果。
+`execute` 会立即运行；它产生的清理函数将被收集，并在调用返回的清理函数或卸载 fiber 时按相反顺序运行，以先发生者为准。重复调用清理函数不会产生任何效果。如果 fiber 已经 dispose（资源释放）或正处于 `UNLOADING`（卸载过程中创建的作用会逃过本次清理），则抛出 `CordisError('INACTIVE_EFFECT')`；如果结构无效，则抛出 `TypeError`，表示 `execute` 返回了不受支持的结果。
 
 - `execute`：作用主体；可接受的结构见 `Effect`。
 - `label`：在 `getEffects()` 诊断信息中显示的作用标签。
 
 **返回**一个用于撤销该作用的清理函数，并在清理完成后结算。
 
-[源码](../../vendor/cordis/src/fiber.ts#L415)
+[源码](../../vendor/cordis/src/fiber.ts#L419)
 
 ### ctx.fiber
 
@@ -55,7 +57,7 @@ fiber: Fiber
 
 fiber 会跟踪 `ctx.plugin()` 返回的插件上下文所对应的依赖状态、经过校验的配置、生命周期作用和清理操作。
 
-[源码](../../vendor/cordis/src/fiber.ts#L184)
+[源码](../../vendor/cordis/src/fiber.ts#L186)
 
 ### fiber.uid
 
@@ -66,7 +68,7 @@ public uid: number | null
 
 在注册表中的唯一 id；根 fiber 的 id 为 0，dispose 后为 `null`。
 
-[源码](../../vendor/cordis/src/fiber.ts#L186)
+[源码](../../vendor/cordis/src/fiber.ts#L188)
 
 ### fiber.ctx
 
@@ -77,7 +79,7 @@ public readonly ctx: Context
 
 此 fiber 的插件运行所在的上下文（扩展自父上下文）。
 
-[源码](../../vendor/cordis/src/fiber.ts#L188)
+[源码](../../vendor/cordis/src/fiber.ts#L190)
 
 ### fiber.config
 
@@ -88,7 +90,7 @@ public config: any
 
 经过校验的插件配置（由 `update()` 更新）。
 
-[源码](../../vendor/cordis/src/fiber.ts#L190)
+[源码](../../vendor/cordis/src/fiber.ts#L192)
 
 ### fiber.state
 
@@ -99,7 +101,7 @@ public state
 
 当前生命周期状态；状态转换会发出 `internal/status`。
 
-[源码](../../vendor/cordis/src/fiber.ts#L194)
+[源码](../../vendor/cordis/src/fiber.ts#L196)
 
 ### fiber.dispose
 
@@ -110,7 +112,7 @@ public readonly dispose: () => Promise<void>
 
 dispose 此 fiber：卸载插件，并在清理完成后结算。
 
-[源码](../../vendor/cordis/src/fiber.ts#L196)
+[源码](../../vendor/cordis/src/fiber.ts#L198)
 
 ### fiber.store
 
@@ -121,7 +123,7 @@ public store: Dict<Impl> | undefined
 
 加载期间所需服务实现的快照；其他情况下为 `undefined`。
 
-[源码](../../vendor/cordis/src/fiber.ts#L198)
+[源码](../../vendor/cordis/src/fiber.ts#L200)
 
 ### fiber.inertia
 
@@ -132,7 +134,7 @@ public inertia: Promise<void> | undefined
 
 当前正在进行的加载或卸载转换；如果没有此类转换，则为 undefined。
 
-[源码](../../vendor/cordis/src/fiber.ts#L200)
+[源码](../../vendor/cordis/src/fiber.ts#L202)
 
 ### fiber.name
 
@@ -143,7 +145,7 @@ get name()
 
 插件的显示名称，继承自最近的具名祖先；如果不存在，则为 `'root'`。
 
-[源码](../../vendor/cordis/src/fiber.ts#L336)
+[源码](../../vendor/cordis/src/fiber.ts#L338)
 
 ### fiber.assertActive()
 
@@ -161,7 +163,7 @@ assertActive()
 
 **返回**：fiber 仍处于活动状态时不返回任何内容。
 
-[源码](../../vendor/cordis/src/fiber.ts#L351)
+[源码](../../vendor/cordis/src/fiber.ts#L353)
 
 ### fiber.effect(execute, label?)
 
@@ -173,7 +175,9 @@ assertActive()
  * run (in reverse order) either when the returned disposer is called or
  * when the fiber unloads, whichever comes first. Calling the disposer twice
  * is a no-op. Throws `CordisError('INACTIVE_EFFECT')` if the fiber is
- * already disposed, and `TypeError` if `execute` returns an invalid shape.
+ * already disposed, or currently `UNLOADING` (mid-teardown effects would
+ * escape the unload snapshot), and `TypeError` if `execute` returns an
+ * invalid shape.
  *
  * @param execute — the effect body; see {@link Effect} for accepted shapes.
  * @param label — effect label shown in `getEffects()` diagnostics.
@@ -185,14 +189,14 @@ effect(execute: () => Effect, label?: string): AsyncDisposable<Promise<void>>
 
 在此 fiber 上注册一个支持清理的作用。
 
-`execute` 会立即运行；它产生的清理函数将被收集，并在调用返回的清理函数或卸载 fiber 时按相反顺序运行，以先发生者为准。重复调用清理函数不会产生任何效果。如果 fiber 已经 dispose，则抛出 `CordisError('INACTIVE_EFFECT')`；如果结构无效，则抛出 `TypeError`，表示 `execute` 返回了不受支持的结果。
+`execute` 会立即运行；它产生的清理函数将被收集，并在调用返回的清理函数或卸载 fiber 时按相反顺序运行，以先发生者为准。重复调用清理函数不会产生任何效果。如果 fiber 已经 dispose（资源释放）或正处于 `UNLOADING`（卸载过程中创建的作用会逃过本次清理），则抛出 `CordisError('INACTIVE_EFFECT')`；如果结构无效，则抛出 `TypeError`，表示 `execute` 返回了不受支持的结果。
 
 - `execute`：作用主体；可接受的结构见 `Effect`。
 - `label`：在 `getEffects()` 诊断信息中显示的作用标签。
 
 **返回**一个用于撤销该作用的清理函数，并在清理完成后结算。
 
-[源码](../../vendor/cordis/src/fiber.ts#L415)
+[源码](../../vendor/cordis/src/fiber.ts#L419)
 
 ### fiber.getEffects()
 
@@ -209,7 +213,7 @@ getEffects()
 
 **返回**：每个带标签的活动作用对应一棵 `EffectMeta` 树。
 
-[源码](../../vendor/cordis/src/fiber.ts#L568)
+[源码](../../vendor/cordis/src/fiber.ts#L572)
 
 ### fiber.await()
 
@@ -227,7 +231,7 @@ async await()
 
 **返回**：进入稳定状态后的此 fiber。
 
-[源码](../../vendor/cordis/src/fiber.ts#L704)
+[源码](../../vendor/cordis/src/fiber.ts#L708)
 
 ### fiber.restart()
 
@@ -245,7 +249,7 @@ dispose 此插件，并立即使用其当前配置重新加载。
 
 **返回**一个在重新加载完成后兑现的 promise。
 
-[源码](../../vendor/cordis/src/fiber.ts#L718)
+[源码](../../vendor/cordis/src/fiber.ts#L722)
 
 ### fiber.update(config, noSave?)
 
@@ -273,7 +277,7 @@ update(config: any, noSave = false)
 
 **返回**无返回值；重启由 `internal/update` waterfall 执行。
 
-[源码](../../vendor/cordis/src/fiber.ts#L736)
+[源码](../../vendor/cordis/src/fiber.ts#L740)
 
 ## Effect
 
@@ -294,25 +298,27 @@ type Effect<T = any> =
   | AsyncEffect<T>
 ```
 
-[源码](../../vendor/cordis/src/fiber.ts#L83)
+[源码](../../vendor/cordis/src/fiber.ts#L85)
 
 ## Disposable
 
 作用返回的函数，用于在资源释放期间释放资源。
 
-拥有该函数的 fiber 卸载时，清理函数会按注册的相反顺序运行；清理函数可以是异步的，此时卸载过程会等待其完成。
+同一个作用中嵌套的清理函数按注册的相反顺序依次运行；fiber 自身顶层的作用在卸载时则并发清理（`Promise.all`），不会依次运行。清理函数可以是异步的，卸载过程会等待其完成。
 
 ```ts cordis-catalog
 /**
  * Function returned by an effect to release resources during disposal.
  *
- * Disposers run in reverse registration order when the owning fiber unloads;
- * they may be async, in which case unloading awaits them.
+ * Disposers nested inside one effect run in reverse registration order,
+ * chained sequentially; a fiber's own top-level effects instead unload
+ * concurrently (`Promise.all`) when the fiber unloads, not sequentially.
+ * Disposers may be async, in which case unloading awaits them.
  */
 type Disposable<T = any> = () => T
 ```
 
-[源码](../../vendor/cordis/src/fiber.ts#L74)
+[源码](../../vendor/cordis/src/fiber.ts#L76)
 
 ## EffectMeta
 
@@ -328,7 +334,7 @@ interface EffectMeta {
 }
 ```
 
-[源码](../../vendor/cordis/src/fiber.ts#L96)
+[源码](../../vendor/cordis/src/fiber.ts#L98)
 
 ## CordisError
 
@@ -354,7 +360,7 @@ namespace CordisError {
 }
 ```
 
-[源码](../../vendor/cordis/src/fiber.ts#L157)
+[源码](../../vendor/cordis/src/fiber.ts#L159)
 
 ## ValidationError
 

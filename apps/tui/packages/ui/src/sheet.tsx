@@ -66,11 +66,11 @@ const POINTER = { on: '\u25b8 ', off: '  ' } as const
  * @param done - how much is done.
  * @param total - how much there is; zero draws an empty bar.
  * @param cells - the bar's width.
- * @param color - the filled part's colour.
+ * @param color - the filled part's colour; absent, the terminal's own foreground.
  */
-export function sheetBar(done: number, total: number, cells: number, color: PaletteColor): readonly SheetPart[] {
+export function sheetBar(done: number, total: number, cells: number, color?: PaletteColor): readonly SheetPart[] {
   const filled = total <= 0 ? 0 : Math.max(0, Math.min(cells, Math.round(cells * done / total)))
-  return [{ text: '\u2501'.repeat(filled), color }, { text: '\u2500'.repeat(cells - filled), dim: true }]
+  return [{ text: '\u2501'.repeat(filled), ...color === undefined ? {} : { color } }, { text: '\u2500'.repeat(cells - filled), dim: true }]
 }
 
 /** Widest a sheet grows. Past this, wrapped prose is harder to read than to scroll. */
@@ -122,6 +122,10 @@ function pageStart(rows: readonly SheetRow[], page: number, offset: number, foll
 /**
  * A sheet under its tab strip. The caller owns the scroll position, the
  * selection, and keyboard focus.
+ *
+ * The frame is dim, like the welcome card's and the input's rules: it only
+ * bounds the view. The view's colour stays on the open tab and the pointer,
+ * where it says which view this is and what is selected.
  * @param props.tabs - every view the cycle key reaches, the open one current.
  * @param props.keys - what the keys do in this view, for its footer.
  * @param props.offset - first content row shown; clamped to the last page.
@@ -142,7 +146,7 @@ export function Sheet({ tabs, color, lines, keys, columns, limit, offset, follow
   const page = sheetPage(limit, columns)
   const start = pageStart(rows, page, offset, follow)
   return <Box width={Math.min(columns, SHEET_WIDTH)} maxHeight={limit} flexDirection="column" flexShrink={0}
-    {...framed(limit, columns) ? { borderStyle: frame, borderColor: color, paddingX: 1 } : {}}
+    {...framed(limit, columns) ? { borderStyle: frame, borderDimColor: true, paddingX: 1 } : {}}
     overflowY="hidden">
     {limit >= 3 && <Text wrap="truncate-end">
       {tabs.map((tab, index) => <React.Fragment key={tab.label}>

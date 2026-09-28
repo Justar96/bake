@@ -1,7 +1,11 @@
 /** CLIProxyAPI setup and model mapping without network or credential fixtures. */
 import { describe, expect, it } from 'bun:test'
 import type { Context } from '@deepseek-ai/cordis'
-import { cliProxyApi, cliProxyEndpoints, cliProxyModels, configureCliProxyApi, fetchCliProxyModels } from '../src/cliproxyapi.ts'
+import { dictionaries } from '@dsh-tui/ui/copy.ts'
+import {
+  cliProxyApi, cliProxyEndpoints, cliProxyModels, cliProxyUpgradeNotice, configureCliProxyApi, fetchCliProxyModels,
+  planCliProxyRouteUpgrade, upgradeCliProxyRoute,
+} from '../src/cliproxyapi.ts'
 
 const labels = { url: 'CLIProxyAPI base URL', key: 'CLIProxyAPI API key' }
 
@@ -119,6 +123,11 @@ it('saves a validated URL and model route without placing the key in settings', 
     '2/2 · CLIProxyAPI API key',
   ])
   expect(writes[0]).toEqual(['credential', 'test-key'])
+  // The multi-credential gateway defaults: wait out a credential cooldown, keep a session on one credential.
+  expect(op!.value).toMatchObject({
+    retryPolicy: { mode: 'normal', backoff: { maxDelayMs: 60_000 } },
+    compat: { sendSessionAffinityHeaders: true },
+  })
   expect(JSON.stringify(writes[1])).toContain('https://proxy.example/v1')
   expect(JSON.stringify(writes[1])).toContain('openai-responses')
   expect(JSON.stringify(writes[1])).not.toContain('test-key')
@@ -165,4 +174,110 @@ it('uses the saved connection URL when refreshing models', async () => {
     return question.kind === 'text' ? '' : 'new-key'
   }, new AbortController().signal, labels, fetcher)
   expect(questions[0]).toBe('1/2 · CLIProxyAPI base URL [https://proxy.example/prefix]')
+})
+
+describe('upgrading a route an earlier login wrote', () => {
+  // The route `/login cliproxyapi` wrote before 0.1.7: every model on the
+  // route's Responses protocol, and no multi-account defaults.
+  const legacy = {
+    displayName: 'CLIProxyAPI', apiKeyEnv: 'CLIPROXYAPI_API_KEY', api: 'openai-responses',
+    baseURL: 'https://proxy.example/v1',
+    models: [
+      { id: 'gpt-test', name: 'GPT' },
+      { id: 'claude-test', name: 'Claude', reasoningEfforts: { high: 'high', max: 'max' } },
+      { id: 'glm-test', name: 'GLM' },
+    ],
+  }
+
+  it('fills exactly what the current login writes, from the saved route alone', () => {
+    const plan = planCliProxyRouteUpgrade(legacy)
+    expect(plan?.changes).toEqual(['protocols', 'adaptive-thinking', 'retry', 'affinity'])
+    expect(plan?.ops).toEqual([
+      { op: 'set', path: ['providers', 'cliproxyapi', 'models'], value: [
+        { id: 'gpt-test', name: 'GPT' },
+        { id: 'claude-test', name: 'Claude', reasoningEfforts: { high: 'high', max: 'max' },
+          api: 'anthropic-messages', baseURL: 'https://proxy.example', compat: { forceAdaptiveThinking: true } },
+        { id: 'glm-test', name: 'GLM', api: 'openai-completions' },
+      ] },
+      { op: 'set', path: ['providers', 'cliproxyapi', 'retryPolicy'], value: { mode: 'normal', backoff: { maxDelayMs: 60_000 } } },
+      { op: 'set', path: ['providers', 'cliproxyapi', 'compat', 'sendSessionAffinityHeaders'], value: true },
+    ])
+  })
+
+  it('finds nothing to change on the route the current login writes', async () => {
+    let written: unknown
+    const ctx = {
+      get(name: string) {
+        if (name === 'credentials') return { resolve: async () => undefined, set: async () => {} }
+        if (name === 'settings') return { get: () => undefined,
+          mutate: async (_ns: string, ops: { value: unknown }[]) => { written = ops[0]!.value } }
+        return undefined
+      },
+    } as unknown as Context
+    const fetcher = (async (_url: string) => Response.json({ models: [{ slug: 'gpt-test' },
+      { slug: 'claude-test', supported_reasoning_levels: ['high', 'max'] }, { slug: 'kimi-test' }] })) as typeof fetch
+    const answers = ['https://proxy.example/v1', 'test-key']
+    await configureCliProxyApi(ctx, async () => answers.shift()!, new AbortController().signal, labels, fetcher)
+    expect(written).toBeDefined()
+    expect(planCliProxyRouteUpgrade(written)).toBeUndefined()
+  })
+
+  it('keeps every value the user set, including an explicit opt-out', () => {
+    const plan = planCliProxyRouteUpgrade({
+      ...legacy,
+      models: [{ id: 'claude-test', api: 'openai-responses' }],
+      retryPolicy: { mode: 'normal' },
+      compat: { sendSessionAffinityHeaders: false },
+    })
+    expect(plan).toBeUndefined()
+  })
+
+  it('leaves a route that is not a login\'s alone', () => {
+    expect(planCliProxyRouteUpgrade(undefined)).toBeUndefined()
+    expect(planCliProxyRouteUpgrade({ ...legacy, apiKeyEnv: 'OTHER_KEY' })).toBeUndefined()
+    expect(planCliProxyRouteUpgrade({ ...legacy, api: 'openai-completions' })).toBeUndefined()
+    expect(planCliProxyRouteUpgrade({ ...legacy, baseURL: 42 })).toBeUndefined()
+    expect(planCliProxyRouteUpgrade({ ...legacy, models: 'gpt-test' })).toBeUndefined()
+  })
+
+  function settingsContext(settings: object | undefined): Context {
+    return { get: (name: string) => name === 'settings' ? settings : undefined } as unknown as Context
+  }
+
+  it('writes the upgrade through settings and reports what changed', async () => {
+    const writes: unknown[] = []
+    const result = await upgradeCliProxyRoute(settingsContext({
+      writable: true,
+      get: () => ({ providers: { cliproxyapi: legacy } }),
+      mutate: async (ns: string, ops: unknown) => { writes.push([ns, ops]) },
+    }))
+    expect(result).toEqual({ kind: 'upgraded', changes: ['protocols', 'adaptive-thinking', 'retry', 'affinity'] })
+    expect(writes).toEqual([['llm-pi-ai', planCliProxyRouteUpgrade(legacy)!.ops]])
+  })
+
+  it('asks for a new login when settings cannot take the upgrade', async () => {
+    const readOnly = await upgradeCliProxyRoute(settingsContext({
+      writable: false, get: () => ({ providers: { cliproxyapi: legacy } }),
+      mutate: async () => { throw new Error('unreachable') },
+    }))
+    expect(readOnly).toMatchObject({ kind: 'relogin', reason: 'the settings file is read-only' })
+    const refused = await upgradeCliProxyRoute(settingsContext({
+      writable: true, get: () => ({ providers: { cliproxyapi: legacy } }),
+      mutate: async () => { throw new Error('settings rejected') },
+    }))
+    expect(refused).toMatchObject({ kind: 'relogin', reason: 'settings rejected' })
+    expect(await upgradeCliProxyRoute(settingsContext(undefined))).toEqual({ kind: 'current' })
+  })
+
+  it('names the changes in the startup notice, in each locale', () => {
+    const changes = ['retry', 'affinity'] as const
+    expect(cliProxyUpgradeNotice({ kind: 'current' }, dictionaries.en)).toBeUndefined()
+    expect(cliProxyUpgradeNotice({ kind: 'upgraded', changes }, dictionaries.en))
+      .toBe('Updated the CLIProxyAPI route for this version: waiting out account cooldowns, one account per session')
+    expect(cliProxyUpgradeNotice({ kind: 'relogin', changes, reason: 'read-only' }, dictionaries.en))
+      .toBe('The CLIProxyAPI route is from an earlier version and could not be updated; '
+        + 'run /login cliproxyapi for: waiting out account cooldowns, one account per session')
+    expect(cliProxyUpgradeNotice({ kind: 'upgraded', changes }, dictionaries.zh))
+      .toBe('已为此版本更新 CLIProxyAPI 路由：等待账号冷却结束、每个会话固定一个账号')
+  })
 })

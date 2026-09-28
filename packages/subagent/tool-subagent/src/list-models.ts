@@ -5,6 +5,7 @@ import type LlmRuntime from '@deepseek-ai/dsh-llm'
 import type { LlmProviderInfo } from '@deepseek-ai/dsh-llm'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ModelSelectionPolicy } from './model-selection.ts'
+import { presentModelListCall } from './presentation.ts'
 
 interface ListSubagentModelsRequest {
   readonly provider?: string
@@ -87,19 +88,19 @@ export function registerListSubagentModels(ctx: Context, policy: ModelSelectionP
   ctx.tools.register(defineTool({
     name: 'list_subagent_models',
     description:
-      'Discover LLM routes for subagents without changing the current Agent. Call with no arguments to list '
-      + 'registered providers, with `provider` to list its advertised models, or with `provider` and `model` '
-      + 'to inspect that exact model and its reasoning efforts. Catalog membership is advisory: an adapter may '
-      + 'accept an unlisted model id. Use the returned ids with a delegation tool\'s `provider`, `model`, and '
-      + '`reasoning_effort` fields.',
+      'Look up the models available to subagents; this does not change your own model. Call it with no '
+      + 'arguments to list providers, with `provider` to list that provider\'s models, or with `provider` and '
+      + '`model` to see that model and its reasoning efforts. The lists are advisory: an allowed model id may '
+      + 'work even if it is not listed. Pass the returned ids as a delegation tool\'s `provider`, `model`, and '
+      + '`reasoning_effort`.',
     parameters: {
       provider: {
         type: 'string',
-        description: 'Registered LLM provider id. Omit to list providers.',
+        description: 'LLM provider id. Omit to list providers.',
       },
       model: {
         type: 'string',
-        description: 'Exact model id to inspect. Requires provider; omit to list that provider\'s advertised models.',
+        description: 'Exact model id to inspect. Requires provider; omit to list that provider\'s models.',
       },
     },
     output: {
@@ -109,5 +110,6 @@ export function registerListSubagentModels(ctx: Context, policy: ModelSelectionP
     execute(args, exec) {
       return listSubagentModels(ctx, policy, args, exec.signal)
     },
+    presentCall: args => presentModelListCall(args),
   }))
 }

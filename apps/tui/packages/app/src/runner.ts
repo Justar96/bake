@@ -3,6 +3,7 @@ import React from 'react'
 import { render, type Instance } from 'ink'
 import type { Context } from '@deepseek-ai/cordis'
 import { App } from '@dsh-tui/ui/app.tsx'
+import { compactPath } from '@dsh-tui/ui/present.ts'
 import { dictionaries, type Locale, type TuiCopy } from '@dsh-tui/ui/copy.ts'
 import type { FrameStyle } from '@dsh-tui/ui/layout.ts'
 import type { Clock } from '@dsh-tui/ui/activity.ts'
@@ -15,6 +16,8 @@ import type { AttachmentOptions } from './attachments.ts'
 import { SessionNavigation } from './navigation.ts'
 import { bakeVersion, releaseRoot } from './release.ts'
 import { Updates } from './update.ts'
+import { WorkspaceGit } from './git.ts'
+import { cliProxyUpgradeNotice, upgradeCliProxyRoute } from './cliproxyapi.ts'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 
 /**
@@ -91,10 +94,17 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
     // Restore the terminal now, before anything else writes to it.
     output?.flush()
   }
+  // Settled only once `run`'s own `finally` has drained every owned background
+  // task below. A root or fiber disposal invokes this disposer first and
+  // awaits its return, so that path blocks on the same drains `finally` runs;
+  // `finally`'s own `await stop()` comes after it resolves `drained`, so the
+  // ordinary quit path never waits on itself.
+  const drained = Promise.withResolvers<void>()
   const stop = ctx.effect(() => () => {
     abort.abort()
     releaseTerminal()
     done.resolve()
+    return drained.promise
   }, 'tui terminal owner')
   const preferences = new Preferences(ctx, {
     screen: config.screen ?? 'inline', locale: config.locale, composerFrame: config.composerFrame,
@@ -105,6 +115,8 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
   // Read once. The release does not change for the life of the process.
   const version = bakeVersion()
   const updates = new Updates({ running: version, release: releaseRoot() })
+  // The status line's branch and changes, for whichever workspace is displayed.
+  const git = new WorkspaceGit()
   // Loaded while the session starts, and awaited before the first frame.
   // A resumed session prints its history once. A diff drawn before the
   // grammars are ready would stay uncoloured.
@@ -141,13 +153,16 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
     const active = navigation?.controller
     if (navigation === undefined || active === undefined) throw new Error('tui: session is not connected')
     const settings = preferences.value
+    const cwd = active.agent.session.header.cwd
+    const branch = cwd === undefined ? undefined : git.follow(cwd)
     return React.createElement(App, {
       ...active.view, key: active.agent.id, inputBlocked: navigation.busy, copy, frame: frame(), clock: systemClock, motion, screen,
       quitting: quitTimer !== undefined, completionLimit: settings.completionLimit, resultLines: settings.resultLines,
       goalObjective: settings.goalObjective,
       highlight: syntax.highlight, version, ...updates.state === undefined ? {} : { update: updates.state },
       ...updates.baking === undefined ? {} : { baking: updates.baking },
-      cwd: active.agent.session.header.cwd ?? '', sessionId: active.agent.id,
+      // Shortened against home here: the presentation layer reads no environment.
+      cwd: cwd === undefined ? '' : compactPath(cwd, process.env['HOME']), ...branch === undefined ? {} : { git: branch }, sessionId: active.agent.id,
       onReferenceQuery: query => active.references.search(query),
       onArgumentQuery: query => active.argumentQuery(query),
       onInspectSubagent: id => { navigation?.submit(`/agents ${id}`) },
@@ -167,11 +182,23 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
     // One write per frame, drawn over the previous frame. Without synchronized
     // output, the controls would otherwise appear erased each time a line prints.
     output = frameOutput(io.out, io.err, motion, screen)
+    // Before the session starts, so its first request already uses the
+    // upgraded route. A route an earlier release wrote is brought up to what
+    // the current login writes; one that cannot be is named for a new login.
+    // Neither outcome may keep the terminal from opening.
+    const routeNotice = cliProxyUpgradeNotice(
+      await upgradeCliProxyRoute(ctx).catch((error: unknown) => {
+        ctx.logger.warn('tui: CLIProxyAPI route upgrade failed: %o', error)
+        return { kind: 'current' as const }
+      }),
+      copy,
+    )
     navigation = new SessionNavigation(ctx, config, copy, config.credentialRefs, repaint, updates, preferences)
     await navigation.start(abort.signal)
     // Before the first frame, so a known update is named from it; the network
     // request runs on behind it and never delays the session.
     updates.start(abort.signal, repaint)
+    git.start(abort.signal, repaint)
     await syntax.ready
     abort.signal.throwIfAborted()
     // Incremental rendering. A frame rewrites only the lines that changed.
@@ -182,20 +209,37 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
       alternateScreen: screen === 'fullscreen',
     })
     const initial = navigation.controller!
+    // Shown first, so a missing credential, which blocks every turn, replaces it.
+    if (routeNotice !== undefined) initial.notify(routeNotice)
     startupReport = initial.reportCredentials().catch((error: unknown) => {
       initial.notify(error instanceof Error ? error.message : String(error))
     })
     await Promise.race([done.promise, ui.waitUntilExit()])
     completed = !abort.signal.aborted
   } catch (error) {
-    if (!abort.signal.aborted) throw error
+    if (!abort.signal.aborted) {
+      // Reported immediately, before the drains below: a hung drain must not
+      // swallow the message a caller needs to explain the exit.
+      io.err.write(`dsh: ${error instanceof Error ? error.message : String(error)}\n`)
+      throw error
+    }
   } finally {
+    // Abort before draining: `updates`/`git` background loops and navigation's
+    // owned operations only stop once this signal fires, so it must land
+    // before anything below awaits them, whether or not `stop()` already ran.
+    abort.abort()
     releaseTerminal()
+    try {
+      await navigation?.drain()
+      await startupReport
+      await updates.drain()
+      await git.drain()
+      await syntax.close()
+    } finally {
+      // A failed drain must still release a disposal waiting on this gate.
+      drained.resolve()
+    }
     await stop()
-    await navigation?.drain()
-    await startupReport
-    await updates.drain()
-    await syntax.close()
   }
   if (completed) io.exit(0)
 }

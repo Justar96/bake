@@ -693,7 +693,7 @@ describe('agent loop', () => {
     expect(contextEvents()).toHaveLength(1)
     expect(contextEvents()[0]?.data.content).toEqual([{
       type: 'text',
-      text: 'Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nMode: read-only.',
+      text: 'Runtime context (replaces any earlier snapshot):\n\nMode: read-only.',
     }])
 
     send(agent, 'unchanged')
@@ -715,7 +715,7 @@ describe('agent loop', () => {
     expect(contextEvents()).toHaveLength(3)
     expect(contextEvents()[2]?.data.content).toEqual([{
       type: 'text',
-      text: 'Current runtime context: none. Earlier runtime-context snapshots no longer apply.',
+      text: 'Runtime context: none. Earlier snapshots no longer apply.',
     }])
 
     send(agent, 'still clear')
@@ -792,7 +792,7 @@ describe('agent loop', () => {
       && message.source.plugin === '@deepseek-ai/dsh-system-prompt')
     expect(clearing?.content).toEqual([{
       type: 'text',
-      text: 'Current runtime context: none. Earlier runtime-context snapshots no longer apply.',
+      text: 'Runtime context: none. Earlier snapshots no longer apply.',
     }])
   })
 
@@ -841,7 +841,7 @@ describe('agent loop', () => {
     expect(runtimeContexts).toHaveLength(2)
     expect(runtimeContexts[1]?.data.content).toEqual([{
       type: 'text',
-      text: 'Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nMode: read-only.',
+      text: 'Runtime context (replaces any earlier snapshot):\n\nMode: read-only.',
     }])
   })
 

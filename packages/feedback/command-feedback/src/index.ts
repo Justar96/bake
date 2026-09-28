@@ -45,7 +45,8 @@ const USAGE = 'Usage: /feedback <text>'
 
 /**
  * How the deployment treats this feedback, stated in the acknowledgement so
- * the user learns that recording feedback may share the session.
+ * the user learns whether recording feedback uploads the session. Only a
+ * configured telemetry backend uploads; none is the local default.
  * @param sharing - the telemetry backend's sharing mode, or undefined when
  * no backend is mounted.
  * @returns one line naming where the session history goes.
@@ -53,7 +54,7 @@ const USAGE = 'Usage: /feedback <text>'
 export function sharingNotice(sharing: SessionTelemetrySharingStatus | undefined): string {
   return sharing === undefined || sharing === 'disabled'
     ? 'Telemetry is off; this feedback stays in the local session log.'
-    : 'This session’s history up to now is shared through telemetry with this feedback. Set DSH_TELEMETRY_DISABLED=1 to keep feedback local.'
+    : 'This session’s history up to now is uploaded with this feedback to the configured telemetry collector. Set DSH_TELEMETRY_DISABLED=1 to keep feedback local.'
 }
 
 declare module '@deepseek-ai/cordis' {

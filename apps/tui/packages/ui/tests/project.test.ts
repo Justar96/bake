@@ -5,8 +5,11 @@
 
 import { describe, expect, it } from 'bun:test'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
-import { announcedCalls, argumentsTitle, formatRate, outputRate, project, projector, type Projector } from '../src/project.ts'
-import { PENDING_ARGUMENTS } from '../src/present.ts'
+import stringWidth from 'string-width'
+import {
+  announcedCalls, argumentsTitle, HEADLINE_CELLS, outputRate, project, projector, type Projector,
+} from '../src/project.ts'
+import { PENDING_ARGUMENTS, present, RAW_LINE_CELLS } from '../src/present.ts'
 import { dictionaries } from '../src/copy.ts'
 
 /** Build a session event literal without restating the durable envelope. */
@@ -78,7 +81,7 @@ describe('project', () => {
     expect(project(event({ type: 'turn/end', data: { turn: 1, reason: { kind: 'interrupted' } } }), bare()))
       .toEqual([{ kind: 'notice', placement: 'turn-end', tone: 'warn', text: dictionaries.en.cancelled }])
     expect(project(event({ type: 'compaction/summary', data: {} }), projector(dictionaries.zh, () => undefined)))
-      .toEqual([{ kind: 'notice', tone: 'info', text: dictionaries.zh.compacted }])
+      .toEqual([{ kind: 'notice', tone: 'info', text: dictionaries.zh.compacted, compaction: true }])
   })
 
   it.each(['en', 'zh'] as const)('renders each turn ending without treating it as agent idle (%s)', locale => {
@@ -132,6 +135,60 @@ describe('project', () => {
     for (const raw of ['{"pa', '[1,2]', '"text"']) expect(argumentsTitle(raw)).toBe(raw)
   })
 
+  it('summarizes a nested list by its first item and a count, never as a JSON dump', () => {
+    const questions = Array.from({ length: 3 }, (_, index) => ({
+      id: `q${index}`, header: 'Choose scope', question: 'Which parts should I include? '.repeat(10),
+      options: [{ label: 'Tooling swaps', description: 'Replace the remaining invocations. '.repeat(8) }],
+    }))
+    const title = argumentsTitle(JSON.stringify({ questions }))
+    expect(title).toBe('questions: [q0, +2]')
+    expect(title).not.toContain('{')
+    // A list of plain values that fits stays JSON; one that does not is summarized.
+    expect(argumentsTitle(JSON.stringify({ tags: ['a', 'b'], words: Array.from({ length: 30 }, () => 'word') })))
+      .toBe('tags: ["a","b"], words: [word, +29]')
+    expect(argumentsTitle(JSON.stringify({ empty: '', none: null, list: [], record: {}, flags: { dry: true, n: 2 } })))
+      .toBe('empty: "", none: null, list: [], record: {}, flags: {dry: true, n: 2}')
+    expect(argumentsTitle(JSON.stringify({ meta: { name: 'build', notes: 'x'.repeat(80) } }))).toMatch(/^meta: \{name: build, …\}$/u)
+  })
+
+  it('cuts a long value at its field bound and the headline at its own, with an ellipsis', () => {
+    const title = argumentsTitle(JSON.stringify({ prompt: 'Read the module.\n\nThen explain '.repeat(20), description: 'Short' }))
+    // Each field keeps room for the next, on one line.
+    expect(title).toMatch(/^prompt: Read the module\. Then explain .*…, description: Short$/u)
+    expect(title).not.toContain('\n')
+    const fields = Object.fromEntries(Array.from({ length: 20 }, (_, index) => [`field${index}`, 'value '.repeat(10)]))
+    const many = argumentsTitle(JSON.stringify(fields))
+    expect(stringWidth(many)).toBe(HEADLINE_CELLS)
+    expect(many.endsWith('\u2026')).toBe(true)
+  })
+
+  it('bounds a primary field and malformed arguments on their first line only', () => {
+    const query = 'x'.repeat(300)
+    expect(argumentsTitle(JSON.stringify({ query }))).toBe(`${'x'.repeat(HEADLINE_CELLS - 1)}\u2026`)
+    // Further lines stay under the head, where the output bound applies.
+    expect(argumentsTitle(JSON.stringify({ command: `echo ${'y'.repeat(200)}\necho two` })).split('\n'))
+      .toEqual([`echo ${'y'.repeat(HEADLINE_CELLS - 6)}\u2026`, 'echo two'])
+    const malformed = `{"broken": ${'"x", '.repeat(100)}`
+    expect(argumentsTitle(malformed)).toBe(`${malformed.slice(0, HEADLINE_CELLS - 1).trimEnd()}\u2026`)
+  })
+
+  it('measures wide and combined characters in cells, and never splits one', () => {
+    // Nineteen two-cell characters and the ellipsis fill 39 of the field's 40
+    // cells; a twentieth would overrun it by one.
+    const wide = argumentsTitle(JSON.stringify({ title: '\u4e2d\u6587\u6807\u9898'.repeat(40) }))
+    expect(wide).toBe(`title: ${'\u4e2d\u6587\u6807\u9898'.repeat(4)}\u4e2d\u6587\u6807\u2026`)
+    expect(stringWidth(wide)).toBe('title: '.length + 39)
+    const family = '\u{1f469}\u200d\u{1f469}\u200d\u{1f467}'
+    const joined = argumentsTitle(JSON.stringify({ query: family.repeat(80) }))
+    expect(stringWidth(joined)).toBeLessThanOrEqual(HEADLINE_CELLS)
+    expect(joined.slice(0, -1).split(family).every(part => part === '')).toBe(true)
+  })
+
+  it('strips escape sequences and shows control characters in a headline', () => {
+    expect(argumentsTitle(JSON.stringify({ note: '\u001b[31mred\u001b[0m\tand\nnext\u0007' }))).toBe('note: red and next\\x07')
+    expect(argumentsTitle(JSON.stringify({ path: '\u001b[2Ja.ts' }))).toBe('a.ts')
+  })
+
   it('renders a result card in place of the model-facing text', () => {
     const seam = projector(dictionaries.en, () => ({
       presentCall: () => ({ card: 'generic' as const, title: 'Read notes.md' }),
@@ -147,6 +204,28 @@ describe('project', () => {
       detail: [{ text: '1  first', source: 'notes.md', codeOffset: 3, number: 1, codeStart: true },
         { text: '2  second', source: 'notes.md', codeOffset: 3, number: 2 }],
     }])
+  })
+
+  it('keeps the model-facing text under a generic result that omits its content, cut as a raw result is', () => {
+    // The workflow tool's presenters as it declares them: a call titled by
+    // the workflow's name, and a result card that reformats nothing.
+    const seam = projector(dictionaries.en, name => name === 'workflow' ? {
+      presentCall: (args: unknown) => ({ card: 'generic' as const, title: `workflow: ${(args as { meta: { name: string } }).meta.name}` }),
+      presentResult: () => ({ card: 'generic' as const }),
+    } : undefined)
+    project(event({ type: 'tool/call', data: { callId: 'w1', name: 'workflow', arguments: '{"script":"return 1","meta":{"name":"audit"}}' } }), seam)
+    const summary = 'finding '.repeat(40).trim()
+    const text = `workflow "audit" completed (2 agents).\nReturn value:\n${JSON.stringify({ summary }, null, 2)}`
+    const rows = project(event({
+      type: 'tool/result',
+      data: { message: { content: [{ toolCallId: 'w1', isError: false, content: text }] } },
+    }), seam)
+    expect(rows).toEqual([{ kind: 'tool-result', callId: 'w1', ok: true, text }])
+    const long = `  "summary": "${summary}"`
+    expect(present(rows[0]!, { lines: 8, unit: 'lines', more: 'more lines' }).map(line => line.text)).toEqual([
+      '[w1]  5 lines', 'workflow "audit" completed (2 agents).', 'Return value:', '{',
+      `${long.slice(0, RAW_LINE_CELLS - 1).trimEnd()}\u2026`, '}',
+    ])
   })
 
   it('survives a tool whose presenter throws', () => {
@@ -180,9 +259,6 @@ describe('outputRate', () => {
   it('divides the reported output tokens by the time from the first token to the finish', () => {
     // The wait before the first token, from 400, is not generation time.
     expect(outputRate(answer())).toEqual({ tokens: 120, ms: 3000 })
-    expect(formatRate({ tokens: 120, ms: 3000 }, dictionaries.en)).toBe('120 tokens \u00b7 40.0 tok/s')
-    expect(formatRate({ tokens: 4200, ms: 20_000 }, dictionaries.en)).toBe('4.2k tokens \u00b7 210 tok/s')
-    expect(formatRate({ tokens: 120, ms: 3000 }, dictionaries.zh)).toBe('120 token \u00b7 40.0 token/\u79d2')
   })
 
   it('reports nothing for a step that is not a whole final answer', () => {
@@ -192,11 +268,11 @@ describe('outputRate', () => {
     expect(outputRate(answer({ at: 1000 }))).toBeUndefined()
   })
 
-  it('puts the rate under the answer it measures, and only under an answer', () => {
-    expect(project(event({ type: 'assistant/message', data: answer() }), bare())).toEqual([
-      { kind: 'assistant', text: 'Done.' },
-      { kind: 'rate', text: '120 tokens \u00b7 40.0 tok/s' },
-    ])
+  it('keeps the rate after the answer it measures, and only after an answer, and draws nothing for it', () => {
+    const rows = project(event({ type: 'assistant/message', data: answer() }), bare())
+    expect(rows).toEqual([{ kind: 'assistant', text: 'Done.' }, { kind: 'rate', tokens: 120, ms: 3000 }])
+    // The turn's summary reports it; a row of its own under the answer split the turn's numbers.
+    expect(present(rows[1]!, { lines: 4, unit: 'lines', more: 'more lines' })).toEqual([])
     const silent = { ...(answer() as object), message: { role: 'assistant', content: [{ type: 'reasoning', text: 'Hmm' }] } }
     expect(project(event({ type: 'assistant/message', data: silent }), bare())).toEqual([{ kind: 'reasoning', text: 'Hmm' }])
   })

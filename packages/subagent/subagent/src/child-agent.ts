@@ -170,10 +170,9 @@ export interface ChildComposition {
  * deployment's system prompt stays uniform across parents and children.
  */
 export const SUBAGENT_DELEGATION_CONTEXT
-  = 'You are a delegated subagent: your permission scope was fixed when you were started and cannot be '
-    + 'widened from inside this session — operations that require approval are rejected automatically. '
-    + 'When the task needs access beyond that scope, do not retry the denied operation; state the '
-    + 'limitation in your reply so the delegating agent can handle it.'
+  = 'You are a subagent. Your permissions were fixed when you started and cannot be widened, so actions '
+    + 'that need approval are rejected automatically. Do not retry a denied action; say in your reply what '
+    + 'access is missing so the agent that delegated to you can handle it.'
 
 /**
  * Compose one child inside its creation window: join its parent's preset,

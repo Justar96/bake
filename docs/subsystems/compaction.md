@@ -81,7 +81,7 @@ Automatic callers state why policy is running; implementations may treat confirm
 type CompactionTrigger = 'pressure' | 'context-overflow'
 ```
 
-`CompactionEngine` exposes `compactIfNeeded(agent, trigger, signal)` for automatic `pressure` or `context-overflow` policy, `compactNow(agent, signal)` for one useful idle-session reduction even below pressure, and `compactRegion(...)` for an explicit inclusive surface range. `compactNow()` runs as agent maintenance between turns, returns `null` without writing when no useful range exists, records a standalone `turn: null` bracket before summarization, and flushes a closed attempt before later queued prompts may derive from the new surface. Every backend creates its replacement `user/message` source with `compactCheckpointSource(compactionId, sourceCommandId?)`; client and wire consumers import that constructor, `CompactionCheckpointSource`, and `isCompactCheckpointSource()` from the cordis-free `@deepseek-ai/dsh-compaction/checkpoint` subpath, while the package root re-exports them for host consumers. The required transaction identity correlates the replacement checkpoint, while the predicate keeps recognition independent of any one backend. Implementations must forward the supplied signal to summarization. The seam owns no pricing API: the singleton [`ctx.tokenMeter`](token-meter.md) directly owns estimation and replay, while `dsh-compaction-basic` owns retention, event sequencing, routed summarization calls, and their configuration.
+`CompactionEngine` exposes `compactIfNeeded(agent, trigger, signal)` for automatic `pressure` or `context-overflow` policy, `compactNow(agent, signal)` for one useful idle-session reduction even below pressure, and `compactRegion(...)` for an explicit inclusive surface range. The non-abstract, synchronous `pressureThreshold(route, contextWindow)` reports the tokens at which automatic `pressure` policy compacts that route at that capacity; the base returns `undefined`, and a backend with a threshold returns the exact figure its trigger compares against. `compactNow()` runs as agent maintenance between turns, returns `null` without writing when no useful range exists, records a standalone `turn: null` bracket before summarization, and flushes a closed attempt before later queued prompts may derive from the new surface. Every backend creates its replacement `user/message` source with `compactCheckpointSource(compactionId, sourceCommandId?)`; client and wire consumers import that constructor, `CompactionCheckpointSource`, and `isCompactCheckpointSource()` from the cordis-free `@deepseek-ai/dsh-compaction/checkpoint` subpath, while the package root re-exports them for host consumers. The required transaction identity correlates the replacement checkpoint, while the predicate keeps recognition independent of any one backend. Implementations must forward the supplied signal to summarization. The seam owns no pricing API: the singleton [`ctx.tokenMeter`](token-meter.md) directly owns estimation and replay, while `dsh-compaction-basic` owns retention, event sequencing, routed summarization calls, and their configuration.
 
 Expected manual failures use `ManualCompactionErrorCode`:
 
@@ -203,6 +203,23 @@ abstract compactNow( agent: ManualCompactAgentContext, signal: AbortSignal, sour
  * @returns the appended event seqs, summary, replaced range, and token accounting.
  */
 abstract compactRegion( start: SessionSeq, end: SessionSeq, agent: CompactionAgentContext, signal?: AbortSignal, ): Promise<CompactionResult>
+
+/**
+ * Report the request size at which this backend's automatic `pressure`
+ * policy compacts one routed model, so a consumer can show it beside that
+ * route's occupancy. Answer synchronously from policy alone, without I/O or
+ * session state. The default declares no threshold: a backend without
+ * automatic pressure policy, or with it disabled, keeps this answer, and a
+ * backend that has one must override it with the exact value its trigger
+ * compares against, never an approximation.
+ *
+ * @param _route - provider/model route whose policy applies.
+ * @param _contextWindow - that route's context capacity in tokens.
+ * @returns positive tokens at or above which pressure compaction runs before
+ * the next step, or `undefined` when no automatic pressure trigger applies to
+ * that route and capacity.
+ */
+pressureThreshold( _route: { readonly provider: string; readonly model: string }, _contextWindow: number, ): number | undefined
 ```
 
 Types: [CommandId](commands.md) · [SessionSeq](session.md)

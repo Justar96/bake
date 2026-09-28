@@ -16,7 +16,7 @@ function committedKey(): KeyObject {
 
 /** A host serving `versions` in turn, one per manifest request, each signed by `key`. */
 function host(key: KeyObject, versions: string[], archive = Buffer.from('release bytes')) {
-  const files = new Map<string, Uint8Array>([['health', Buffer.from('ok')], ['install.sh', Buffer.from('')], ['install.ps1', Buffer.from('')]])
+  const files = new Map<string, Uint8Array<ArrayBuffer>>([['health', Buffer.from('ok')], ['install.sh', Buffer.from('')], ['install.ps1', Buffer.from('')]])
   const publish = (version: string): void => {
     const manifest = Buffer.from(JSON.stringify({ version, artifacts: { 'linux-x64': {
       file: `bake-v${version}-linux-x64.tar.gz`, sha256: createHash('sha256').update(archive).digest('hex'), size: archive.byteLength,

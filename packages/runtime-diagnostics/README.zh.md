@@ -1,5 +1,5 @@
 ---
-description: "runtime-diagnostics 组地图：针对运行中组合的包自有运行时不变式检查，供浏览本组的用户与维护者参考。"
+description: "runtime-diagnostics 组地图：针对运行中组合的包自有运行时不变式检查与进程健康记录，供浏览本组的用户与维护者参考。"
 kind: "package-group"
 ---
 
@@ -9,7 +9,7 @@ kind: "package-group"
 
 ## 概述
 
-runtime-diagnostics 组为 DeepSeek Harness 组合提供运行时自检：一个包 `invariants` 在组合运行期间运行包自有检查，验证每个包的持久化事件与数据关系。违规会以归因到拥有该关系的包的错误呈现；全局开关与包名过滤器控制运行哪些检查。当组合需要在正常运行中验证自身运行时约定时，请使用本组的包。
+runtime-diagnostics 组为 DeepSeek Harness 组合提供运行时自检。`invariants` 在组合运行期间运行包自有检查，验证每个包的持久化事件与数据关系。违规会以归因到拥有该关系的包的错误呈现；全局开关与包名过滤器控制运行哪些检查。`runtime-watchdog` 监视进程本身：它把持续的事件循环延迟和接近 V8 上限的堆占用记录到 Harness 主目录下的一个目录，并在同一目录启用 Node 的致命错误报告。当组合需要在正常运行中验证自身运行时约定，或留下自身健康状况的证据时，请使用本组的包。
 
 ## 目录
 
@@ -25,6 +25,7 @@ runtime-diagnostics 组为 DeepSeek Harness 组合提供运行时自检：一个
 | 包 | 职责 | ctx 键 |
 |---|---|---|
 | [`invariants`](invariants/README.zh.md) | 运行包自有运行时检查，并按所属包报告每次失败 | 注册到 `ctx.invariants` |
+| [`runtime-watchdog`](runtime-watchdog/README.zh.md) | 在 Harness 主目录下记录进程健康状况并启用致命错误报告 | 无 |
 
 -----
 

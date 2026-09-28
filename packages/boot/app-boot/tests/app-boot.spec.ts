@@ -559,12 +559,9 @@ describe('auditStartupEntries', () => {
     'agent-loop',
     'tui-startup',
     'tui-runner',
-    'webserver',
     'modules',
     'connection',
     'headless-runner',
-    'acp',
-    'sdk-jsonrpc-server',
   ]
 
   interface FakeEntry {
@@ -630,7 +627,7 @@ describe('auditStartupEntries', () => {
 
   it.each([
     { id: 'tool-todo', required: false },
-    { id: 'webserver', required: true },
+    { id: 'agent-loop', required: true },
   ])('reports a throwing disabled expression on $id (required: $required)', async ({ id, required }) => {
     const error = new Error('disabled evaluation failed')
     const warn = vi.fn()
@@ -778,7 +775,7 @@ describe('auditStartupEntries', () => {
     const aggregate = new AggregateError([leaf, 'plain failure'], 'activation failed', { cause: leaf })
     aggregate.stack = 'AggregateError: activation failed\n    at plugin.mjs:3:4'
     const error = await auditStartupEntries(ctxWith([
-      { fiber: fiber(3, aggregate), options: { id: 'webserver', name: './plugin.mjs' } },
+      { fiber: fiber(3, aggregate), options: { id: 'agent-loop', name: './plugin.mjs' } },
     ]), NAME, vi.fn()).catch((error: unknown) => error)
     expect((error as Error).message).toContain('AggregateError: activation failed')
     expect((error as Error).message).toContain('    Error: leaf failure\n        at plugin.mjs:1:2')
@@ -793,7 +790,7 @@ describe('auditStartupEntries', () => {
     const warn = vi.fn()
     const error = await auditStartupEntries(ctxWith([
       { fiber: fiber(0, undefined, { webServer: {} }), options: { id: 'web-runtime', name: './web.mjs' } },
-      { fiber: fiber(3, original), options: { id: 'webserver', name: '@deepseek-ai/dsh-host-webserver' } },
+      { fiber: fiber(3, original), options: { id: 'agent-loop', name: '@deepseek-ai/dsh-agent-loop' } },
       { fiber: fiber(0, undefined, { webRuntime: {} }), options: { id: 'connection', name: './connection.mjs' } },
       { fiber: fiber(0), options: { id: 'unknown', name: './unknown.mjs' } },
     ]), NAME, warn).catch((error: unknown) => error)
@@ -802,8 +799,8 @@ describe('auditStartupEntries', () => {
       "dsh-test-bin: startup failed: 2 required plugins did not activate
 
       Failed plugins (1):
-        webserver (required)
-          Package: @deepseek-ai/dsh-host-webserver
+        agent-loop (required)
+          Package: @deepseek-ai/dsh-agent-loop
           Error: listen EADDRINUSE: address already in use 127.0.0.1:3080
               at Server.listen (node:net:1:2)
 
@@ -849,12 +846,12 @@ describe('boot', () => {
   it('retains import errors and inactive-entry metadata after disposing the startup tree', async () => {
     const dir = tmp()
     const config = join(dir, 'cordis.yml')
-    writeFileSync(config, '- id: webserver\n  name: ./missing.mjs\n')
+    writeFileSync(config, '- id: agent-loop\n  name: ./missing.mjs\n')
     const failure = await boot(NAME, config).catch((error: unknown) => error)
     expect(failure).toBeInstanceOf(StartupError)
     const error = failure as StartupError
     expect(error.entries).toEqual([{
-      id: 'webserver', module: './missing.mjs', required: true, fiberState: undefined,
+      id: 'agent-loop', module: './missing.mjs', required: true, fiberState: undefined,
       outcome: { kind: 'failed', error: 'failed to import' },
     }])
     expect(error.startup?.configurationPath).toBe(config)
@@ -876,7 +873,7 @@ describe('boot', () => {
       }
     `)
     const config = join(dir, 'cordis.yml')
-    writeFileSync(config, '- id: cleanup\n  name: ./cleanup.mjs\n- id: webserver\n  name: ./missing.mjs\n')
+    writeFileSync(config, '- id: cleanup\n  name: ./cleanup.mjs\n- id: agent-loop\n  name: ./missing.mjs\n')
     let root!: Context
     const failure = await boot(NAME, config, undefined, (ctx) => {
       root = ctx
@@ -1171,7 +1168,7 @@ describe('boot', () => {
   ])('disposes startup after a required %s failure', async (_kind, source, config, message) => {
     const dir = tmp()
     if (source !== undefined) writeFileSync(join(dir, 'required.mjs'), source)
-    writeFileSync(join(dir, 'cordis.yml'), `- id: webserver\n  name: ./required.mjs\n${config}`)
+    writeFileSync(join(dir, 'cordis.yml'), `- id: agent-loop\n  name: ./required.mjs\n${config}`)
     let disposed = false
     await expect(boot(NAME, join(dir, 'cordis.yml'), undefined, (ctx) => {
       ctx.effect(() => () => { disposed = true })
@@ -1193,14 +1190,14 @@ describe('boot', () => {
     writeFileSync(join(dir, 'cordis.yml'), [
       '- id: good',
       '  name: ./good.mjs',
-      '- id: webserver',
+      '- id: agent-loop',
       '  name: ./required-failure.mjs',
       '',
     ].join('\n'))
 
     await expect(boot(NAME, join(dir, 'cordis.yml'))).rejects.toThrow(new RegExp([
       'startup failed: 1 required plugin did not activate',
-      String.raw`webserver \(required\)`,
+      String.raw`agent-loop \(required\)`,
       'required apply failure',
     ].join(String.raw`[\s\S]*`)))
     disposed = (globalThis as { __DSH_REQUIRED_TEST_DISPOSED__?: boolean }).__DSH_REQUIRED_TEST_DISPOSED__ ?? false

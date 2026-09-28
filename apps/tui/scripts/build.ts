@@ -1,5 +1,5 @@
 /** Bun-only bundling shared by the product launcher and performance diagnostics. */
-import { existsSync } from 'node:fs'
+import { existsSync, mkdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 /**
@@ -30,6 +30,22 @@ export const BUILT_ENV = { NODE_ENV: BUILD_MODE } as const
 export function profileEnvironment(home: string, env: NodeJS.ProcessEnv): typeof BUILT_ENV & { DSH_HOME: string } {
   if (env.DSH_HOME !== undefined && env.DSH_HOME.trim() === '') throw new Error('DSH_HOME must name a directory or be unset')
   return { ...BUILT_ENV, DSH_HOME: env.DSH_HOME ?? join(home, '.bake') }
+}
+
+/**
+ * Start Node as the release launchers do, so the runtime watchdog can arm
+ * fatal-error reports and heap snapshots: reports without environment
+ * variables or network interfaces, and Node's diagnostic files in
+ * `<home>/diagnostics`, created owner-only here. Node arguments rather than
+ * `NODE_OPTIONS`, which the agent's subprocesses would inherit.
+ * @param home - the Bake home of the launch, its DSH_HOME.
+ * @returns Node arguments to place before the entry script.
+ */
+export function diagnosticArguments(home: string): string[] {
+  const directory = resolve(home, 'diagnostics')
+  mkdirSync(resolve(home), { recursive: true })
+  mkdirSync(directory, { recursive: true, mode: 0o700 })
+  return ['--report-exclude-env', '--report-exclude-network', `--diagnostic-dir=${directory}`]
 }
 
 /**

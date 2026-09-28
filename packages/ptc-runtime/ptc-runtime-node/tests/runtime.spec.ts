@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { mkdtemp, mkdir, readFile, readdir, rm, symlink } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { createServer, type Socket } from 'node:net'
@@ -8,7 +9,7 @@ import { SandboxUnavailableError } from '@deepseek-ai/dsh-sandbox'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { PtcBindingFunction, PtcBindingNamespace, PtcRunRequest } from '@deepseek-ai/dsh-ptc-runtime'
 import type { Config } from '../src/index.ts'
-import { mountRuntime } from './setup.ts'
+import { confinedCheckoutUnavailable, mountRuntime } from './setup.ts'
 
 /** Probe the sandbox independently so Node-runtime launch failures cannot skip enforcement tests. */
 const sandboxUsable = await (async () => {
@@ -153,9 +154,43 @@ describe('Node program process', () => {
   })
 
   it('retains console output emitted immediately before a non-yielding program', async () => {
-    const { run } = await setup({ timeoutMs: 1000, graceMs: 50 })
-    const result = await run({ program: 'console.log("before hot loop"); for (;;) {}', bindings: [] })
+    const { run, cwd } = await setup({ graceMs: 50 })
+    const witness = join(cwd, 'logged')
+    const program = `const fs = process.getBuiltinModule("node:fs"); console.log("before hot loop"); fs.writeFileSync(${JSON.stringify(witness)}, ""); for (;;) {}`
+    // The deadline also covers process startup, which a loaded host can stretch past any fixed budget.
+    // The file written after the log proves the log preceded the deadline; until it exists, double the budget.
+    let timeoutMs = 1000
+    let result = await run({ program, bindings: [], timeoutMs })
+    while (!existsSync(witness) && timeoutMs < 32_000) {
+      expect(result.error?.kind).toBe('timeout')
+      timeoutMs *= 2
+      result = await run({ program, bindings: [], timeoutMs })
+    }
+    expect(existsSync(witness)).toBe(true)
     expect(result.error?.kind).toBe('timeout')
+    expect(result.logs).toEqual(['before hot loop'])
+  }, 120_000)
+
+  it('retains console output that the host had not yet read when execution stops', async () => {
+    const { run, cwd } = await setup()
+    const witness = join(cwd, 'logged')
+    const controller = new AbortController()
+    const hold = async () => {
+      // Block the host loop after the reply is written, so the child's log frame is still unread at the stop.
+      setImmediate(() => {
+        const limit = performance.now() + 20_000
+        while (!existsSync(witness) && performance.now() < limit) { /* the child runs in another process */ }
+        controller.abort('stop after log')
+      })
+      return null
+    }
+    const result = await run({
+      program: `const fs = process.getBuiltinModule("node:fs"); await tools.hold({}); console.log("before hot loop"); fs.writeFileSync(${JSON.stringify(witness)}, ""); for (;;) {}`,
+      signal: controller.signal,
+      bindings: bindings({ hold }),
+    })
+    expect(existsSync(witness)).toBe(true)
+    expect(result.error).toEqual({ kind: 'abort', message: 'stop after log' })
     expect(result.logs).toEqual(['before hot loop'])
   })
 
@@ -279,7 +314,9 @@ describe('Node program process', () => {
     }
   })
 
-  it.skipIf(!sandboxUsable)('permits workspace writes and denies a symlink to a sibling outside it', async () => {
+  it.skipIf(!sandboxUsable)('permits workspace writes and denies a symlink to a sibling outside it', async ({ skip }) => {
+    const unavailable = await confinedCheckoutUnavailable()
+    if (unavailable !== undefined) skip(unavailable)
     const { run, cwd, root } = await setup({}, 'workspace-write')
     const target = join(cwd, 'allowed.txt')
     expect((await run({ program: `await (await import('node:fs/promises')).writeFile(${JSON.stringify(target)}, 'allowed'); return true`, bindings: [] })).value).toBe(true)

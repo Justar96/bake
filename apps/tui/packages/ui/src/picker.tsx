@@ -39,6 +39,11 @@ export interface Choice {
    * history. It still has to match the filter to be shown.
    */
   readonly pinned?: boolean
+  /**
+   * Listed only while the filter has text. A panel of sections can offer
+   * every setting inside them to a search without listing them all at once.
+   */
+  readonly searchOnly?: boolean
   /** Session-only presentation role; the selected value remains the session id. */
   readonly role?: 'session-new' | 'session-current' | 'session-saved'
 }
@@ -72,6 +77,7 @@ const TONES: Readonly<Record<NonNullable<ChoiceStatus['tone']>, PaletteColor>> =
  * PgDn move a page. Home and End jump to either end. The list scrolls only
  * when the selection would leave it, and an edge that hides choices says how
  * many. Choices marked `pinned` stay below the list however far it scrolls.
+ * Choices marked `searchOnly` are listed only once the filter has text.
  *
  * @param props - choices, localized labels, row limit, and the acceptance callback.
  * @param props.limit - rows for the choices, including the rows that say how
@@ -93,7 +99,7 @@ export function Picker({ prompt, copy, limit, onSelect }: {
   const top = useRef(0)
   // Display order. The scrolled list, then the pinned choices under it.
   const ordered = (text: string): readonly Match<Choice>[] => {
-    const matches = filterChoices(prompt.choices, text)
+    const matches = filterChoices(visible(prompt.choices, text), text)
     return [...matches.filter(match => match.choice.pinned !== true), ...matches.filter(match => match.choice.pinned === true)]
   }
   const indexOf = (matches: readonly Match<Choice>[]) => Math.max(0, matches.findIndex(match => match.choice.value === cursor.current))
@@ -150,13 +156,14 @@ export function Picker({ prompt, copy, limit, onSelect }: {
     ...pinned.slice(0, Math.max(0, limit - scroll.count - (scroll.above > 0 ? 1 : 0) - (scroll.below > 0 ? 1 : 0)))
       .map((match, index) => ({ match, index: listed + index })),
   ]
-  // Size columns over every choice, not only the visible ones, so the columns
-  // stay put while the list scrolls or narrows.
-  const glyphs = prompt.choices.some(choice => choice.role !== undefined)
-  const statusWidth = Math.max(0, ...prompt.choices.map(choice => stringWidth(statusOf(choice, copy)?.text ?? '')))
+  // Size columns over every choice a filter may show, not only the visible
+  // ones, so the columns stay put while the list scrolls or narrows.
+  const sized = visible(prompt.choices, query)
+  const glyphs = sized.some(choice => choice.role !== undefined)
+  const statusWidth = Math.max(0, ...sized.map(choice => stringWidth(statusOf(choice, copy)?.text ?? '')))
   const room = Math.max(8, columns - FRAME - MARKER_WIDTH - (glyphs ? MARKER_WIDTH : 0) - (statusWidth > 0 ? statusWidth + GAP : 0))
-  const labelWidth = Math.min(Math.floor(room * LABEL_SHARE), Math.max(1, ...prompt.choices.map(choice => stringWidth(choice.label)))) + GAP
-  const hasDescription = prompt.choices.some(choice => choice.description !== undefined && choice.description !== '')
+  const labelWidth = Math.min(Math.floor(room * LABEL_SHARE), Math.max(1, ...sized.map(choice => stringWidth(choice.label)))) + GAP
+  const hasDescription = sized.some(choice => choice.description !== undefined && choice.description !== '')
 
   return <Box flexDirection="column" borderStyle="round" paddingX={1}>
     <Text bold color={PALETTE.waiting} wrap="truncate-end">{prompt.title}</Text>
@@ -175,6 +182,14 @@ export function Picker({ prompt, copy, limit, onSelect }: {
       {matches.length > 0 && <Box flexShrink={0} marginLeft={GAP}><Text dimColor>{`${selectedIndex + 1}/${matches.length}`}</Text></Box>}
     </Box>
   </Box>
+}
+
+/**
+ * The choices a filter may match: all of them once it has text, and only
+ * those not kept for a search before.
+ */
+function visible(choices: readonly Choice[], query: string): readonly Choice[] {
+  return query.trim() === '' ? choices.filter(choice => choice.searchOnly !== true) : choices
 }
 
 /** Columns of the pointer rail and the session glyph rail. */

@@ -73,7 +73,7 @@ Bake 使用 `packages/` 下的共享包来实现会话、agent 执行、工具�
 | [`host/`](host/README.zh.md) | HTTP Web 服务器与只读插件清单 |
 | [`client/`](client/README.zh.md) | 共享 Client-to-Host Connection |
 | [`test-support/`](test-support/README.zh.md) | 测试基础设施（testkit、回放、Loader 冒烟测试） |
-| [`runtime-diagnostics/`](runtime-diagnostics/README.zh.md) | 运行时诊断：按包归属的运行时不变式检查与报告 |
+| [`runtime-diagnostics/`](runtime-diagnostics/README.zh.md) | 运行时诊断：按包归属的运行时不变式检查与报告，以及进程健康记录 |
 | [`util/`](util/README.zh.md) | 组间共享的低层零依赖工具（`Branded<B>`、home／路径辅助函数、超时、留存） |
 
 -----

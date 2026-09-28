@@ -92,6 +92,13 @@ export class JsonlSessionHandle implements SessionHandle {
   /** Set when a drain failed; the automatic timer stays quiet until the next drain. */
   private drainPaused = false
   private draining: Promise<void> | undefined
+  /**
+   * Set by close once its final drain pass leaves the routed buffer empty.
+   * From then on the handle is leaving the router and giving up its lock, so
+   * it accepts no more routed events and drains nothing: a later drain would
+   * write after the lock release, or acquire a lock that no owner releases.
+   */
+  private sealed = false
 
   constructor(
     private readonly storage: JsonlHandleStorage,
@@ -215,9 +222,11 @@ export class JsonlSessionHandle implements SessionHandle {
    * Release the handle; see the seam contract. Idempotent and uncancellable.
    * A write handle first drains its routed live buffer through the still-open
    * storage, so backend teardown loses nothing regardless of which fiber
-   * unwinds first; a drain or lock-release failure still frees the in-process
-   * claim, then rejects — both failures together reject as one
-   * `AggregateError`.
+   * unwinds first. Once that drain leaves the buffer empty the handle is
+   * sealed: later routed events persist nothing, and nothing writes or takes
+   * the lock after it is released. A drain or lock-release failure still
+   * frees the in-process claim, then rejects — both failures together reject
+   * as one `AggregateError`.
    * @returns settlement of the release.
    */
   close(): Promise<void> {
@@ -237,6 +246,17 @@ export class JsonlSessionHandle implements SessionHandle {
         }
         await this.chain
         if (this.buffered.length === 0) break
+      }
+      // Seal in the same turn as the final empty check, so no routed event
+      // lands between the last drain and the router unbinding in
+      // releaseHandle: later events are dropped exactly like events routed
+      // after close, and a batch timer armed by an already drained event
+      // never fires. After a drain failure the retained batch stays
+      // unwritten and close rejects with that failure.
+      this.sealed = true
+      if (this.batchTimer !== undefined) {
+        clearTimeout(this.batchTimer)
+        this.batchTimer = undefined
       }
       // After a drain failure the chain may still hold in-flight mutations.
       await this.chain
@@ -272,6 +292,7 @@ export class JsonlSessionHandle implements SessionHandle {
    *   (the events stay buffered; the next {@link drainLive} retries loudly).
    */
   enqueueLive(event: SessionEvent, reportBackgroundFailure: (error: unknown) => void): void {
+    if (this.sealed) return
     this.buffered.push(structuredClone(event))
     if (this.batchTimer !== undefined || this.drainPaused) return
     this.batchTimer = setTimeout(() => {
@@ -292,6 +313,9 @@ export class JsonlSessionHandle implements SessionHandle {
   }
 
   private async drainBuffered(): Promise<void> {
+    // A sealed handle may still carry a batch its failed final drain
+    // retained; that batch is reported by close, never written unlocked.
+    if (this.sealed) return
     if (this.batchTimer !== undefined) {
       clearTimeout(this.batchTimer)
       this.batchTimer = undefined

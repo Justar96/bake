@@ -4,7 +4,7 @@ import { Box, Text, useInput, usePaste } from 'ink'
 import stringWidth from 'string-width'
 import type { AskUserQuestionAnswer, AskUserQuestionAnswerItem, AskUserQuestionItem } from '@deepseek-ai/dsh-user-questions'
 import type { TuiCopy } from './copy.ts'
-import { useComposer } from './composer.ts'
+import { isNewline, useComposer } from './composer.ts'
 import { MARKER } from './layout.ts'
 import { PALETTE } from './palette.ts'
 import { Picker, type ChoicePrompt } from './picker.tsx'
@@ -51,16 +51,18 @@ function RequestView({ interaction, copy, onAnswer }: {
     if (interaction.kind !== 'approval') composer.paste(text)
   })
   useInput((text, key) => {
-    if (key.meta || key.escape) return
+    const newline = isNewline(text, key)
+    if ((key.meta && !newline) || key.escape) return
     if (interaction.kind === 'approval') {
       if (key.ctrl) return
       if (text.trim().toLowerCase() === 'y') onAnswer(interaction.id, 'allowed-once')
       else if (text.trim().toLowerCase() === 'n') onAnswer(interaction.id, 'rejected')
       return
     }
+    // Before the Ctrl guard, which a CSI-u Ctrl-J would otherwise stop at.
+    if (newline) { composer.paste(text.startsWith('\n') ? text : '\n'); return }
     if (composer.editKey(text, key) || key.ctrl) return
-    if (key.shift && key.return) composer.paste('\n')
-    else composer.type(key.return ? '\n' : text)
+    composer.type(key.return ? '\n' : text)
   })
   // Every panel is ordered top to bottom. What is asked, the answer, then the keys.
   if (interaction.kind === 'approval') return <Box flexDirection="column" borderStyle="round" paddingX={1}>
@@ -162,14 +164,15 @@ function QuestionPage({ question, number, count, copy, limit, onSubmit }: {
   }
   usePaste(text => { setNudged(false); focus(other); composer.paste(text) })
   useInput((text, key) => {
-    if (key.meta || key.escape) return
-    if (key.return && !key.shift) { submit(); return }
+    const newline = isNewline(text, key)
+    if ((key.meta && !newline) || key.escape) return
+    if (key.return && !newline) { submit(); return }
     setNudged(false)
     if (key.upArrow || key.downArrow || key.tab) {
       focus((cursor.current + (key.upArrow || (key.tab && key.shift) ? -1 : 1) + other + 1) % (other + 1))
       return
     }
-    if (key.shift && key.return) { focus(other); composer.paste('\n'); return }
+    if (newline) { focus(other); composer.paste(text.startsWith('\n') ? text : '\n'); return }
     if (multi && cursor.current < other && text === ' ') { toggle(cursor.current); return }
     if (cursor.current < other && /^[1-9]$/.test(text) && Number(text) <= other + 1) {
       focus(Number(text) - 1)
@@ -197,7 +200,9 @@ function QuestionPage({ question, number, count, copy, limit, onSubmit }: {
   const status = multi
     ? `${selected.length + (custom.trim() === '' ? 0 : 1)} ${copy.questionSelected}`
     : `${focused + 1}/${rows}`
-  return <Box flexDirection="column" borderStyle="round" borderColor={PALETTE.waiting} paddingX={1}>
+  // A neutral frame, like the approval and input panels. The yellow title says
+  // it is waiting on the user; a yellow frame around it said so twice.
+  return <Box flexDirection="column" borderStyle="round" paddingX={1}>
     <Box flexDirection="row">
       <Box flexGrow={1} flexShrink={1}>
         <Text wrap="truncate-end">

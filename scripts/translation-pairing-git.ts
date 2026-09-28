@@ -1,8 +1,5 @@
 /** Git-blob operations owned by the bilingual pairing workflow. */
 
-import { spawnSync } from 'node:child_process'
-import { createHash } from 'node:crypto'
-
 const SNAPSHOT_REF_PREFIX = 'refs/dsh/translation-pairing/snapshots'
 
 /** Maximum buffered stdout or stderr for repository-owned Git subprocesses. */
@@ -10,10 +7,7 @@ export const GIT_COMMAND_MAX_BUFFER = 1 << 26
 
 /** Full SHA-1 Git blob hash (the 40-hex format used by pairing records). */
 export function gitBlobHash(content: Buffer): string {
-  const hash = createHash('sha1')
-  hash.update(`blob ${content.byteLength}\0`)
-  hash.update(content)
-  return hash.digest('hex')
+  return new Bun.CryptoHasher('sha1').update(`blob ${content.byteLength}\0`).update(content).digest('hex')
 }
 
 /**
@@ -27,15 +21,18 @@ export function gitBlobHash(content: Buffer): string {
  * @throws Error when Git cannot start or exits unsuccessfully.
  */
 export function runGit(root: string, args: string[], operation: string, input?: Buffer): Buffer {
-  const result = spawnSync('git', ['-C', root, ...args], {
-    input,
-    maxBuffer: GIT_COMMAND_MAX_BUFFER,
-  })
-  if (result.error) {
-    throw new Error(`${operation} failed: ${result.error.message}`, { cause: result.error })
+  let result: Bun.SyncSubprocess<'pipe', 'pipe'>
+  try {
+    result = Bun.spawnSync(['git', '-C', root, ...args], { stdin: input, maxBuffer: GIT_COMMAND_MAX_BUFFER })
+  } catch (error) {
+    throw new Error(`${operation} failed: ${error instanceof Error ? error.message : String(error)}`, { cause: error })
   }
-  if (result.status !== 0) {
-    throw new Error(`${operation} failed with status ${String(result.status)}: ${result.stderr.toString('utf8').trim()}`)
+  if (result.exitedDueToMaxBuffer === true) {
+    throw new Error(`${operation} failed: output exceeded ${String(GIT_COMMAND_MAX_BUFFER)} bytes`)
+  }
+  if (!result.success) {
+    // Bun leaves `exitCode` null when a signal ends Git.
+    throw new Error(`${operation} failed with status ${String(result.exitCode)}: ${result.stderr.toString('utf8').trim()}`)
   }
   return result.stdout
 }

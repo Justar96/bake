@@ -3,12 +3,12 @@
 Turns `DESIGN-LAYOUT.md` into staged work. The visual reference is `prototype/frames.mjs`, which renders every state through Ink's own layout engine and fails if any dynamic region exceeds `rows - 1`.
 
 ```sh
-node tui/prototype/frames.mjs            # all scenes, 80 cols, with color
-node tui/prototype/frames.mjs --plain    # no ANSI, for docs and diffs
-node tui/prototype/frames.mjs --rows 10  # prove the collapse order on a short window
-node tui/prototype/stability.mjs         # measure screen movement across a streaming turn
-node tui/prototype/realloop.mjs          # same claims against Ink's real render loop
-node tui/prototype/overlays.mjs          # completion and picker geometry
+bun apps/tui/prototype/frames.mjs            # all scenes, 80 cols, with color
+bun apps/tui/prototype/frames.mjs --plain    # no ANSI, for docs and diffs
+bun apps/tui/prototype/frames.mjs --rows 10  # prove the collapse order on a short window
+bun apps/tui/prototype/stability.mjs         # measure screen movement across a streaming turn
+bun apps/tui/prototype/realloop.mjs          # same claims against Ink's real render loop
+bun apps/tui/prototype/overlays.mjs          # completion and picker geometry
 ```
 
 `realloop.mjs` is the one that settles arguments: it drives a live `render()` through a fake TTY, captures every byte, and reproduces the L1 violation on demand. All three exit non-zero on failure and are safe to wire into `check.sh`.

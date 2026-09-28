@@ -433,6 +433,134 @@ describe('terminal composer', () => {
     await vi.waitFor(() => expect(state.onSubmit).toHaveBeenCalledExactlyOnceWith('/select  item '))
   })
 
+  // Shift-Enter reaches Ink as CSI-u only where the terminal reports it so;
+  // these are the keys that break a line in every terminal, as Ink decodes them.
+  it.each([
+    ['Ctrl-J, a line feed read alone', '\n'],
+    ['Alt-Enter, Escape then a carriage return', '\u001b\r'],
+    ['Ctrl-J reported as CSI-u', '\u001b[106;5u'],
+    ['Alt-Enter reported as CSI-u', '\u001b[13;3u'],
+  ])('breaks the line on %s without submitting', async (_name, keys) => {
+    const state = props()
+    const ui = render(<App {...state} />)
+    ui.stdin.write('first')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('> first▌'))
+    ui.stdin.write(keys)
+    await vi.waitFor(() => {
+      const rows = ui.lastFrame()!.split('\n')
+      const first = rows.findIndex(row => row.includes('> first'))
+      expect(first).toBeGreaterThanOrEqual(0)
+      expect(rows[first + 1]).toMatch(/^ {2}▌/)
+    })
+    ui.stdin.write('last')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('last▌'))
+    expect(state.onSubmit).not.toHaveBeenCalled()
+    ui.stdin.write('\r')
+    await vi.waitFor(() => expect(state.onSubmit).toHaveBeenCalledExactlyOnceWith('first\nlast'))
+  })
+
+  it('submits text and a line feed that arrive in one read, as it submits text and Enter', async () => {
+    const state = props()
+    const ui = render(<App {...state} />)
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain(dictionaries.en.prompt))
+    ui.stdin.write('typed ahead\n')
+    await vi.waitFor(() => expect(state.onSubmit).toHaveBeenCalledExactlyOnceWith('typed ahead'))
+  })
+
+  it('breaks lines in the sign-in and question inputs too', async () => {
+    const login = props({ interaction: { kind: 'login', id: 3, message: 'Base URL', secret: false } })
+    const ui = render(<App {...login} />)
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('Base URL'))
+    ui.stdin.write('a')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('a▌'))
+    ui.stdin.write('\u001b\r')
+    ui.stdin.write('b')
+    ui.stdin.write('\n')
+    ui.stdin.write('c')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('c▌'))
+    expect(login.onAnswer).not.toHaveBeenCalled()
+    ui.stdin.write('\r')
+    await vi.waitFor(() => expect(login.onAnswer).toHaveBeenCalledExactlyOnceWith(3, 'a\nb\nc'))
+    ui.unmount()
+    const asked = props({ interaction: { kind: 'questions', id: 4, questions: [
+      { id: 'q', question: 'Which?', options: [{ label: 'One' }] },
+    ] } })
+    const view = render(<App {...asked} />)
+    await vi.waitFor(() => expect(view.lastFrame()).toContain('Which?'))
+    view.stdin.write('x')
+    await vi.waitFor(() => expect(view.lastFrame()).toContain('x▌'))
+    view.stdin.write('\u001b\r')
+    view.stdin.write('y')
+    await vi.waitFor(() => expect(view.lastFrame()).toContain('y▌'))
+    expect(asked.onAnswer).not.toHaveBeenCalled()
+    view.stdin.write('\r')
+    await vi.waitFor(() => expect(asked.onAnswer).toHaveBeenCalledExactlyOnceWith(4,
+      { answers: [{ id: 'q', selected: [], custom: 'x\ny' }] }))
+  })
+
+  it('moves between the rows of a draft before it recalls history', async () => {
+    const committed = appendTranscript(emptyTranscript, [{ kind: 'user', text: 'Older prompt' }])
+    const state = props({ committed })
+    const ui = render(<App {...state} />)
+    // Each key waits for its echo. Written before Ink listens, a key is lost,
+    // and the test stream keeps only the newest unread chunk.
+    ui.stdin.write('one')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('> one▌'))
+    ui.stdin.write('\n')
+    await vi.waitFor(() => expect(ui.lastFrame()).toMatch(/\n {2}▌/u))
+    ui.stdin.write('second')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('  second▌'))
+    // The column is kept by cells: after the third, which is past the end of `one`.
+    ui.stdin.write('\u001b[D')
+    ui.stdin.write('\u001b[D')
+    ui.stdin.write('\u001b[D')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('  sec▌ond'))
+    ui.stdin.write('\u001b[A')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('> one▌'))
+    expect(ui.lastFrame()).not.toContain('Older prompt▌')
+    // From the first row, Up recalls, and Down from the recalled entry restores the draft and its caret.
+    ui.stdin.write('\u001b[A')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('> Older prompt▌'))
+    ui.stdin.write('\u001b[B')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('> one▌'))
+    expect(ui.lastFrame()).toContain('  second')
+    ui.stdin.write('\u001b[B')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('  sec▌ond'))
+    // The last row is the end of the draft. Down there has nothing newer to recall.
+    ui.stdin.write('\u001b[B')
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(ui.lastFrame()).toContain('  sec▌ond')
+    ui.stdin.write('\r')
+    await vi.waitFor(() => expect(state.onSubmit).toHaveBeenCalledExactlyOnceWith('one\nsecond'))
+  })
+
+  it('opens an older entry of several rows at its start, so the next Up keeps walking back', async () => {
+    const committed = appendTranscript(emptyTranscript, [
+      { kind: 'user', text: 'Oldest' }, { kind: 'user', text: 'First line\nsecond line' }, { kind: 'user', text: 'Latest' },
+    ])
+    const goal = { objective: 'Ship it', phase: 'active', armed: true, rounds: 1, maxRounds: 4 } as const
+    const state = props({ committed, goal })
+    const ui = render(<App {...state} />)
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain(dictionaries.en.prompt))
+    ui.stdin.write('\u001b[A')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('> Latest▌'))
+    ui.stdin.write('\u001b[A')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('> ▌First line'))
+    ui.stdin.write('\u001b[A')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('> Oldest▌'))
+    // Going newer, the two-row entry opens on its last row, so the next Down moves on.
+    ui.stdin.write('\u001b[B')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('  second line▌'))
+    ui.stdin.write('\u001b[B')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('> Latest▌'))
+    ui.stdin.write('\u001b[B')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain(`> ▌${dictionaries.en.prompt}`))
+    // Past the oldest entry, Up still reaches the goal on the header.
+    for (let press = 0; press < 4; press++) ui.stdin.write('\u001b[A')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain(dictionaries.en.goalOpen))
+    expect(state.onSubmit).not.toHaveBeenCalled()
+  })
+
   it('keeps a fragmented multiline paste in the draft until Enter', async () => {
     const state = props()
     const ui = render(<App {...state} />)
@@ -624,6 +752,23 @@ it.each(['en', 'zh'] as const)('renders a bounded session picker and returns the
   ui.stdin.write('\r')
   await vi.waitFor(() => expect(state.onAnswer).toHaveBeenCalledExactlyOnceWith(10, 'session-second'))
   expect(state.onSubmit).not.toHaveBeenCalled()
+})
+
+it('lists a search-only choice only once the filter has text, and returns it', async () => {
+  const state = props({ inputBlocked: true, interaction: { kind: 'select', id: 11, title: 'Settings', initial: 'section:shell', choices: [
+    { value: 'section:terminal', label: 'Terminal', description: 'Inline' },
+    { value: 'section:shell', label: 'Shell', description: '2m' },
+    { value: 'setting:shell/timeout', label: 'Shell › Command timeout', description: '2m', searchOnly: true },
+  ] } })
+  const ui = render(<App {...state} />)
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain('▸ Shell'))
+  expect(ui.lastFrame()).not.toContain('Command timeout')
+  expect(ui.lastFrame()).toContain('2/2')
+  ui.stdin.write('timeout')
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain('▸ Shell › Command timeout'))
+  expect(ui.lastFrame()).toContain('1/1')
+  ui.stdin.write('\r')
+  await vi.waitFor(() => expect(state.onAnswer).toHaveBeenCalledExactlyOnceWith(11, 'setting:shell/timeout'))
 })
 
 it('resets draft, cursor, recall, and printed history when the displayed session changes', async () => {

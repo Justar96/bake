@@ -101,7 +101,7 @@ it.each(['en', 'zh'] as const)('pages history without moving the composer, holds
   const initial = await view.check(lines => expect(lines.join('\n')).toContain('History 79'))
   expect(view.terminal.buffer.active.type).toBe('alternate')
   expect(caret(initial)).toBe(15)
-  expect(initial.at(-1)).toBe(`  ${copy.model}: model  /workspace`)
+  expect(initial.at(-1)).toBe('  model  /workspace')
   await expect(snapshot(initial)).toMatchFileSnapshot(`./expected/fullscreen.${locale}.txt`)
   view.input.send('saved draft')
   await view.check(lines => expect(lines.join('\n')).toContain('saved draft▌'))
@@ -122,6 +122,76 @@ it.each(['en', 'zh'] as const)('pages history without moving the composer, holds
   await view.check(lines => expect(lines.join('\n')).toContain(`${copy.session}: fullscreen`))
   view.input.send('\x1b[6~')
   await view.check(lines => expect(lines.join('\n')).not.toContain(`${copy.session}: fullscreen`))
+})
+
+const wheel = (direction: 'up' | 'down', column = 5, row = 5) => `\x1b[<${direction === 'up' ? 64 : 65};${column};${row}M`
+
+it('scrolls by wheel rows without typing reports into the draft, and resumes following at the bottom', async () => {
+  const copy = dictionaries.en
+  const view = await mount({ committed: history(80) })
+  const initial = await view.check(lines => expect(lines.join('\n')).toContain('History 79'))
+  view.input.send('draft')
+  await view.check(lines => expect(lines.join('\n')).toContain('draft▌'))
+  view.input.send(wheel('up'))
+  const scrolled = await view.check(lines => {
+    expect(lines.join('\n')).toContain(copy.transcriptPaused)
+    expect(lines.join('\n')).toContain(copy.transcriptLatest)
+  })
+  // One notch is three rows, not a page: the view moved by exactly that.
+  expect(scrolled.slice(3, 10)).toEqual(initial.slice(0, 7))
+  expect(caret(scrolled)).toBe(15)
+  // A Shift-modified notch and a click's press and release are reports too.
+  view.input.send('\x1b[<68;5;5M')
+  view.input.send('\x1b[<0;5;5M')
+  view.input.send('\x1b[<0;5;5m')
+  await view.check(lines => expect(lines.slice(6, 10)).toEqual(initial.slice(0, 4)))
+  view.input.send(wheel('down'))
+  view.input.send(wheel('down'))
+  await view.check(lines => {
+    expect(lines.join('\n')).toContain('History 79')
+    expect(lines.join('\n')).toContain(copy.transcriptScroll)
+    expect(lines.join('\n')).toContain('draft▌')
+    expect(lines.join('\n')).not.toContain('[<')
+  })
+})
+
+it.each(['en', 'zh'] as const)('offers the way back to the latest output and marks output that arrived below (%s)', async locale => {
+  const copy = dictionaries[locale]
+  let committed = history(80)
+  const view = await mount({ committed, copy })
+  await view.check(lines => expect(lines.join('\n')).toContain('History 79'))
+  view.input.send('\x1b[5~')
+  const paused = await view.check(lines => {
+    expect(lines.join('\n')).toContain(copy.transcriptPaused)
+    expect(lines.join('\n')).toContain(copy.transcriptLatest)
+  })
+  // A rerender without new output leaves the offer as it is.
+  view.update({ notice: 'unrelated' })
+  await view.check(lines => { expect(lines[0]).toBe(paused[0]); expect(lines.join('\n')).toContain(copy.transcriptLatest) })
+  view.update({ live: [{ kind: 'assistant', text: 'streaming below' }], status: 'running' })
+  const unseen = await view.check(lines => {
+    expect(lines[0]).toBe(paused[0])
+    expect(lines.join('\n')).toContain(copy.transcriptUnseen)
+    expect(lines.join('\n')).not.toContain('streaming below')
+  })
+  const row = unseen.findIndex(line => line.includes(copy.transcriptUnseen))
+  // A click on another row does nothing; on the offer it follows output again.
+  view.input.send('\x1b[<0;5;1M')
+  await view.check(lines => expect(lines.join('\n')).toContain(copy.transcriptUnseen))
+  view.input.send(`\x1b[<0;5;${row + 1}M`)
+  await view.check(lines => {
+    expect(lines.join('\n')).toContain('streaming below')
+    expect(lines.join('\n')).toContain(copy.transcriptScroll)
+  })
+  // Reading history again starts from what is now on screen.
+  committed = appendTranscript(committed, [{ kind: 'notice', tone: 'info', text: 'settled' }])
+  view.update({ committed, live: [], status: 'idle' })
+  await view.check(lines => expect(lines.join('\n')).toContain('settled'))
+  view.input.send(wheel('up'))
+  await view.check(lines => {
+    expect(lines.join('\n')).toContain(copy.transcriptLatest)
+    expect(lines.join('\n')).not.toContain(copy.transcriptUnseen)
+  })
 })
 
 it('keeps the same passage visible when a paused paragraph rewraps repeatedly', async () => {
@@ -190,7 +260,7 @@ it('reflows history, keeps a reading anchor, and preserves input on tiny termina
     await view.check(lines => {
       expect(caret(lines)).toBeGreaterThanOrEqual(0)
       expect(lines.filter(line => line.includes('▌'))).toHaveLength(1)
-      if (rows > 4) expect(lines.at(-1)).toContain('Model:')
+      if (rows > 4) expect(lines.at(-1)).toMatch(/^ {2}model/)
     })
   }
 })
@@ -248,6 +318,8 @@ it('gives sheets and approvals their keys and retains the parent draft after ins
   await view.check(lines => expect(lines.join('\n')).toContain(dictionaries.en.sheetClose))
   view.input.send('\x1b[6~')
   await view.check(lines => expect(lines.join('\n')).toContain('Task 2'))
+  view.input.send(wheel('down'))
+  await view.check(lines => expect(lines.join('\n')).toContain('Task 5'))
   view.input.send('\x1b')
   await view.check(lines => { expect(lines.join('\n')).not.toContain(dictionaries.en.sheetClose); expect(lines.join('\n')).toContain('draft▌') })
   view.update({ inspection: { sessionId: 'child', label: 'Child', committed: history(100), live: [], status: 'idle', model: 'mock/model' } })
@@ -277,4 +349,7 @@ it('restores the primary screen, its cursor, paste, and raw mode on exit', async
   const bytes = view.stdout.chunks.join('')
   expect(bytes).toContain('\x1b[?1049l')
   expect(bytes).toContain('\x1b[?2004l')
+  // The mouse is reported only while the alternate buffer is shown.
+  expect(bytes.indexOf('\x1b[?1000h\x1b[?1006h')).toBeGreaterThan(bytes.indexOf('\x1b[?1049h'))
+  expect(bytes.lastIndexOf('\x1b[?1006l\x1b[?1000l')).toBe(bytes.lastIndexOf('\x1b[?1049l') - '\x1b[?1006l\x1b[?1000l'.length)
 })

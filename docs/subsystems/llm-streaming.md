@@ -574,6 +574,8 @@ interface LlmResolvedModelInfo extends LlmModelInfo {
   reasoning?: LlmModelReasoningInfo
   /** Declared mid-conversation system prompt handling; absent means only a leading system message is read. */
   systemPromptUpdate?: SystemPromptUpdate
+  /** Native tool changes supported by this exact route. */
+  toolUpdate?: ToolUpdate
 }
 ```
 
@@ -598,7 +600,11 @@ interface GenerateOptions {
    */
   system?: string
   /** Tool schemas (adapters map to the provider's `tools` field). */
-  tools?: ToolSchema[]
+  tools?: ToolDeclaration[]
+  /** Session-folded tool history; omission sends complete current declarations. */
+  toolHistory?: ToolHistory
+  /** Adapter-boundary projection of toolHistory, consumed only by capable routes. */
+  toolUpdates?: readonly ToolUpdateNotice[]
   temperature?: number
   maxTokens?: number
   /**
@@ -640,7 +646,7 @@ interface FinishReasonMap {
 
 `FinishReason = FinishReasonMap[keyof FinishReasonMap]`. `TokenUsage` (per-call accounting with disjoint cache fields) is detailed [below](#tokenusage).
 
-`GenerateOptions.tools` carries `ToolSchema` — the JSON-schema description of a tool, as sent to the model. It is declared in dsh-llm (not dsh-tools) precisely because it is part of the request the loop assembles every step:
+`GenerateOptions.tools` carries `ToolDeclaration`: a `ToolSchema`, the JSON-schema description of a tool as sent to the model, plus an optional `deferLoading: true` that only the runtime's request projection sets; stored tool definitions never carry it. `ToolSchema` is declared in dsh-llm (not dsh-tools) precisely because it is part of the request the loop assembles every step:
 
 ```ts type-equiv
 /**
@@ -659,6 +665,8 @@ interface ToolSchema {
 ```
 
 The model-facing `ToolSchema` is the wire type; the registered `ToolDefinition` that produces it (schema + `execute`) is on [tools.md](tools.md).
+
+A loop-built request also carries `toolHistory`, the declarations and ordered additions and removals that `session.toolHistory()` folds from logged `request/header` and [`request/tool-update`](session.md#the-tool-update-event-requesttool-update) events. At dispatch the runtime projects that history for the exact route's `toolUpdate` mode and replaces the request's `tools` and `toolUpdates` with the result, so a caller-supplied `toolUpdates` never reaches the adapter; the tool projection does not alter `messages`. `addition-only` sends tools added during the series as `deferLoading` declarations plus notices naming each addition after its anchoring user or tool-result message. `in-history` also keeps removed declarations and sends removal notices. When the route declares no `toolUpdate` mode, the request has no `toolHistory`, an anchor is missing from the selected messages, or the history does not end at the current active definitions, the adapter receives the complete active list with no notices and no `deferLoading` flags.
 
 A provider a surface is still drafting has no route and no catalog, so interrogation is described separately: the request carries the draft the user is editing, and the reply is candidates a surface may adopt rather than a catalog it must serve.
 
@@ -751,7 +759,7 @@ interface LlmCallConfigAdapterDefaults {
 
 `ctx.deepseekLlmApiExtensions` is the provider-specific registry for additive top-level fields on `deepseek-official` requests. Contributor plugins use `register(field, provider)` to claim one field; the adapter calls `prepare(request)` after serializing its base body and merges the returned fields before HTTP. The prepared `accept()` transaction runs after 2xx, so a contributor can commit delivery state without treating a transport or provider rejection as acceptance. Preparation, collision, and acceptance failures use `REQUEST_EXTENSION` and fail the model request. A merged body that fails to serialize is sent without extension fields; acceptance is skipped and the provider plugin logs the omitted field names.
 
-The [wire reference](../deepseek-llm-api-wire-extensions.md) defines the exact request headers, extension transaction, field versions, and receiver obligations. The shipped composition registers [`dsh_session_log`](../../packages/session/session-log-deepseek/README.md) as a lossless incremental canonical-log suffix and [`dsh_plugin_packages`](../../packages/llm/plugin-package-inventory-deepseek/README.md) as the complete active Loader-backed package set. These fields remain outside model messages and are absent from the pi-ai adapter path.
+The [wire reference](../deepseek-llm-api-wire-extensions.md) defines the exact request headers, extension transaction, field versions, and receiver obligations. The shipped composition registers [`dsh_plugin_packages`](../../packages/llm/plugin-package-inventory-deepseek/README.md) as the complete active Loader-backed package set. It mounts [`dsh_session_log`](../../packages/session/session-log-deepseek/README.md), a lossless incremental canonical-log suffix, with `enabled: false`, so the field is sent only after a composition opts in. These fields remain outside model messages and are absent from the pi-ai adapter path.
 
 ## Service and provider contracts
 
@@ -770,6 +778,8 @@ interface PreparedLlmCall {
   readonly inputModalities?: readonly ModelModality[]
   /** Exact model system prompt update mode captured with the adapter dispatch generation. */
   readonly systemPromptUpdate?: SystemPromptUpdate
+  /** Exact model tool update mode captured with the adapter dispatch generation. */
+  readonly toolUpdate?: ToolUpdate
   /** Config fields materialized by the captured adapter rather than proposed by the caller. */
   readonly adapterDefaults: LlmCallConfigAdapterDefaults
   /**

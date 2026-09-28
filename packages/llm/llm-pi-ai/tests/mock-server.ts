@@ -28,6 +28,22 @@ export const textEvents = [
   '[DONE]',
 ]
 
+/** A minimal complete text generation in Anthropic Messages' named-event SSE shape, for a `wire` behavior. */
+export const anthropicTextWire = [
+  ['message_start', {
+    type: 'message_start',
+    message: {
+      id: 'msg_1', type: 'message', role: 'assistant', model: 'claude-large', content: [],
+      stop_reason: null, stop_sequence: null, usage: { input_tokens: 3, output_tokens: 0 },
+    },
+  }],
+  ['content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }],
+  ['content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'hello' } }],
+  ['content_block_stop', { type: 'content_block_stop', index: 0 }],
+  ['message_delta', { type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 1 } }],
+  ['message_stop', { type: 'message_stop' }],
+].map(([event, data]) => `event: ${event as string}\ndata: ${JSON.stringify(data)}\n\n`)
+
 /** Local provider stand-in: replays scripted behaviors per request. */
 export async function mockServer(script: {
   status?: number

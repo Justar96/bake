@@ -9,10 +9,10 @@
 08 |  note   History 77|
 09 |  note   History 78|
 10 |  note   History 79|
-11 |PgUp/PgDn 滚动 · Ctrl+Home 开头 · Ctrl+End 最新|
+11 |滚轮/PgUp/PgDn 滚动 · Ctrl+Home 开头 · Ctrl+End 最新|
 12 ||
 13 ||
 14 |────────────────────────────────────────────────────────────|
-15 |> ▌问点什么|
+15 |> ▌问点什么 · / 命令 · @ 文件|
 16 |────────────────────────────────────────────────────────────|
-17 |  模型: model  /workspace|
+17 |  model  /workspace|

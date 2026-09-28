@@ -59,7 +59,7 @@ interface SessionTelemetryRecord {
 
 ## 共享披露
 
-每个后端都通过 `ctx.sessionTelemetry` 上必需的抽象 `sharing` 成员暴露其部署级模式（[Service Definition README](../../packages/session/session-telemetry/README.zh.md#the-sharing-disclosure)）。它既不是逐 Session 的接纳决定，也不是投递回执。`/feedback` 确认文本不查询它。
+每个后端都通过 `ctx.sessionTelemetry` 上必需的抽象 `sharing` 成员暴露其部署级模式（[Service Definition README](../../packages/session/session-telemetry/README.zh.md#the-sharing-disclosure)）。它既不是逐 Session 的接纳决定，也不是投递回执。`/feedback` 确认文本读取它，以说明会话历史会被上传，还是只保留在本地会话日志中。Bake 随附的 profile 不配置任何 collector，因此在设置 `DSH_TELEMETRY_OTLP_URL` 之前，OTel 后端报告 `disabled`。
 
 ```ts type-equiv
 /**

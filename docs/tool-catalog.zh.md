@@ -24,25 +24,25 @@
 | `@deepseek-ai/dsh-tool-ask-user` | `ask_user_question` | `ctx.tools`、`ctx.userQuestions` | `tool/call`、`tool/result after a UI/provider answers the question` | - | ask_user_question 会暂停工具调用，直到当前 UI 提供方返回人类答案。 |
 | `@deepseek-ai/dsh-tools` | `run_code` | `ctx.tools`、`ctx.ptcRuntime (execution time)`、`ctx.systemPrompt` | `tool/call`、`one tool/ptc-dispatch-start + tool/ptc-dispatch pair per bridged sub-call`、`tool/result` | - | 在 `mode: ptc`／`mode: both` 下，它由工具注册表所有，作为可过滤能力层之外的保留传输机制（参见 PTC mode Agent Note）。在 `ptc` 下，它是注册表对协议格式（wire format）的唯一贡献；其他可见能力在使用已加载运行时语言生成的 SDK 章节中声明。程序通过 binding 调用这些能力，调用按照原生并发约定调度：启动顺序和策略遵循提交顺序，并发安全的函数体最多重叠执行 `maxParallelSubCalls` 个。调用会重新进入完整且受守卫保护的工具流水线，并将每个嵌套执行关联到此外层结果。 |
 | `@deepseek-ai/dsh-plan-mode` | `exit_plan_mode` | `ctx.tools`、`ctx.systemPrompt`、`ctx.userQuestions (execution time, opportunistic)` | `tool/call`、`plan/mode inactive on an approved review`、`tool/result` | - | 规划未激活时，exit_plan_mode 仍保留在面向模型的 schema 中，这样状态转换不会在规划策略变更之外额外造成工具目录变动。其执行路径会拒绝规划模式之外的调用；在规划模式下，它通过用户交互 seam 提交计划（批准／根据反馈继续规划），批准后会在步骤边界记录规划模式已停用。 |
-| `@deepseek-ai/dsh-tool-bash` | `bash` | `ctx.tools`、`ctx.shell`、`ctx.systemPrompt`、`ctx.shellEnv`、`ctx.jobs at call time for run_in_background` | `tool/call`、`tool/result` | - | bash 工具是 bash 执行器 seam 面向模型的消费方。使用 `run_in_background` 的运行会注册到通用 `ctx.jobs` 运行时，并通过 `job_*` 工具（来自 `@deepseek-ai/dsh-tool-jobs`）收集／停止；禁用 `enableRunInBackground` 配置（默认为 true）后，该参数会被完全移除。 |
+| `@deepseek-ai/dsh-tool-bash` | `bash` | `ctx.tools`、`ctx.shell`、`ctx.shellEnv`、`ctx.jobs at call time for run_in_background` | `tool/call`、`tool/result` | - | bash 工具是 bash 执行器 seam 面向模型的消费方。使用 `run_in_background` 的运行会注册到通用 `ctx.jobs` 运行时，并通过 `job_*` 工具（来自 `@deepseek-ai/dsh-tool-jobs`）收集／停止；禁用 `enableRunInBackground` 配置（默认为 true）后，该参数会被完全移除。 |
 | `@deepseek-ai/dsh-tool-present` | `present` | `ctx.tools`, `ctx.fs`, `ctx.sessionProjections` | `tool/call`, `deliverables/presented 在成功的最终结果之后`, `tool/result` | - | 交付归调用方 Session 所有；Web ui-deliverables 提供源文件打开与卡片。 |
-| `@deepseek-ai/dsh-tool-pwsh` | `pwsh` | `ctx.tools`、`ctx.shell`、`ctx.systemPrompt`、`ctx.shellEnv`、`ctx.jobs at call time for run_in_background` | `tool/call`、`tool/result` | - | pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费方（由 `@deepseek-ai/dsh-pwsh-local` 等 PowerShell 执行器为 `ctx.shell` 提供后端）；除沙箱接口外，它逐项对应 bash 工具调用。使用 `run_in_background` 的运行会注册到通用 `ctx.jobs` 运行时，并通过 `job_*` 工具收集／停止；托管的 `DSH_*` 环境来自 `@deepseek-ai/dsh-shell-env`。每次调用都在新进程中运行，不使用持久 PTY 会话。路径采用原生 `C:\...` 形式，变量采用 `$env:NAME`。 |
+| `@deepseek-ai/dsh-tool-pwsh` | `pwsh` | `ctx.tools`、`ctx.shell`、`ctx.shellEnv`、`ctx.jobs at call time for run_in_background` | `tool/call`、`tool/result` | - | pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费方（由 `@deepseek-ai/dsh-pwsh-local` 等 PowerShell 执行器为 `ctx.shell` 提供后端）；除沙箱接口外，它逐项对应 bash 工具调用。使用 `run_in_background` 的运行会注册到通用 `ctx.jobs` 运行时，并通过 `job_*` 工具收集／停止；托管的 `DSH_*` 环境来自 `@deepseek-ai/dsh-shell-env`。每次调用都在新进程中运行，不使用持久 PTY 会话。路径采用原生 `C:\...` 形式，变量采用 `$env:NAME`。 |
 | `@deepseek-ai/dsh-tool-cordis` | `cordis_inspect_list`, `cordis_inspect_query` | `ctx.tools`, `ctx.cordisInspect` | `tool/call`, `tool/result` | - | 创造模式提供两个只读运行时检查工具。Cordis host runner 提供检查注册表；Client 查询需要已连接页面。持久化变更编写为组合包，再通过 plugin_manager 安装。 |
 | `@deepseek-ai/dsh-tool-bash-persistent` | `bash` | `ctx.tools`、`ctx.terminals`、`an owning Agent at execution time` | `tool/call`、`PTY shell state`、`tool/result` | - | 一个按所有者隔离的持久 bash 工具；部署组合提供 PTY 后端，并可覆盖面向模型的环境描述。 |
 | `@deepseek-ai/dsh-tool-pwsh-persistent` | `pwsh` | `ctx.tools`、`ctx.terminals`、`an owning Agent at execution time` | `tool/call`、`PTY shell state`、`tool/result` | - | 一个按所有者隔离的持久 pwsh 工具，持久 bash 工具的 Windows 对应物；部署组合提供 pwsh 方言的 PTY 后端，并可覆盖面向模型的环境描述。 |
 | `@deepseek-ai/dsh-tool-str-replace-editor` | `str_replace_editor` | `ctx.tools`、`ctx.fs` | `tool/call`、`fs/observed after view presence/absence, edit absence, or successful mutation`、`tool/result` | - | 基于文件系统 seam 的独立查看／创建／唯一字面量替换／按行插入工具；可与任何 shell 或终端接口组合。 |
-| `@deepseek-ai/dsh-tool-fs` | `edit`、`read`、`read_image`、`write` | `ctx.tools`、`ctx.fs`、`ctx.systemPrompt`、`ctx.attachments (image-tool registration)`、`ctx.llm + an image-capable route (image-tool execution)` | `tool/call`、`fs/write-intent or fs/edit-intent for mutations`、`fs/observed after read presence/absence or successful file operation`、`durable attachment (read_image)`、`tool/result` | - | 先读后写／编辑策略由 `@deepseek-ai/dsh-fs-observation-policy` 添加；它是一个 `fs/*` 事件门禁插件，不会改变 schema。加载这些工具的部署按预期也应加载该插件。没有 `ctx.attachments` 时图片工具不会注册；其 schema 与路由无关，执行时除非确切路由的模型声明图片输入，否则拒绝。 |
-| `@deepseek-ai/dsh-tool-fs-search` | `glob`、`grep` | `ctx.tools`、`ctx.subprocess`、`ctx.systemPrompt` | `tool/call`、`tool/result` | - | glob 和 grep 是无条件可用的发现工具，通过 ctx.subprocess spawn 随包提供的 ripgrep 二进制文件（`@vscode/ripgrep`），并作为普通前台调用运行，绝不作为后台任务；无需在宿主机安装 `rg`，也不经过 shell 层。本目录使用 `sampleOverCapGlobResults: true`；部署必须显式选择该行为。结果超过上限时，会通过可选的 ctx.spillStore 后端保存完整的格式化列表；在共置部署中，如果后端公开本地路径，返回的定位信息可供后续读取／搜索。 |
-| `@deepseek-ai/dsh-tool-goal` | `create_goal`、`get_goal`、`update_goal` | `ctx.tools`、`ctx.agents`、`ctx.goals`、`ctx.systemPrompt`、`a calling Agent in an authorized open turn` | `tool/call`、`goal/change for mutations`、`tool/result` | - | create、edit、pause 和 resume 要求直接来自人类的根权限；complete 和 blocked 也接受确切的当前 Goal Round。blocked 的默认下限是 3 个获准的 Round。 |
+| `@deepseek-ai/dsh-tool-fs` | `edit`、`read`、`read_image`、`write` | `ctx.tools`、`ctx.fs`、`ctx.attachments (image-tool registration)`、`ctx.llm + an image-capable route (image-tool execution)` | `tool/call`、`fs/write-intent or fs/edit-intent for mutations`、`fs/observed after read presence/absence or successful file operation`、`durable attachment (read_image)`、`tool/result` | - | 先读后写／编辑策略由 `@deepseek-ai/dsh-fs-observation-policy` 添加；它是一个 `fs/*` 事件门禁插件，不会改变 schema。加载这些工具的部署按预期也应加载该插件。没有 `ctx.attachments` 时图片工具不会注册；其 schema 与路由无关，执行时除非确切路由的模型声明图片输入，否则拒绝。 |
+| `@deepseek-ai/dsh-tool-fs-search` | `glob`、`grep` | `ctx.tools`、`ctx.subprocess` | `tool/call`、`tool/result` | - | glob 和 grep 是无条件可用的发现工具，通过 ctx.subprocess spawn 随包提供的 ripgrep 二进制文件（`@vscode/ripgrep`），并作为普通前台调用运行，绝不作为后台任务；无需在宿主机安装 `rg`，也不经过 shell 层。本目录使用 `sampleOverCapGlobResults: true`；部署必须显式选择该行为。结果超过上限时，会通过可选的 ctx.spillStore 后端保存完整的格式化列表；在共置部署中，如果后端公开本地路径，返回的定位信息可供后续读取／搜索。 |
+| `@deepseek-ai/dsh-tool-goal` | `create_goal`、`get_goal`、`update_goal` | `ctx.tools`、`ctx.agents`、`ctx.goals`、`a calling Agent in an authorized open turn` | `tool/call`、`goal/change for mutations`、`tool/result` | - | create、edit、pause 和 resume 要求直接来自人类的根权限；complete 和 blocked 也接受确切的当前 Goal Round。blocked 的默认下限是 3 个获准的 Round。 |
 | `@deepseek-ai/dsh-schedule` | `schedule_create`、`schedule_delete`、`schedule_list` | `ctx.tools`、`ctx.sessions`、Session 持久化、未来创建的 live 根 Agent | `tool/call`、`schedule/change create or delete`、`tool/result` | - | 仅在选择启用的 Schedule 插件加载后创建的 live 根 Agent scope 内注册。版本 1 接受 after_seconds、显式绝对 at 和有界固定速率 every_seconds，并披露 session-local 交付；管理读取与变更必须通过共享的 Session 持久化 barrier。 |
 | `@deepseek-ai/dsh-tool-ralph` | `ralph` | `ctx.tools`、`ctx.workflowEngine`、`ctx.subagents`、`ctx.systemPrompt`、`a calling Agent (exec.agent parents every fresh round)` | `tool/call`、`tool/result`、`workflow and child session events during execution` | - | 固定的前台工作流会在每个 Round 启动一个全新的结构化子级；模型只能选择不可变目标和可选的 Round 上限。 |
 | `@deepseek-ai/dsh-tool-skill` | `skill` | `ctx.tools`、`ctx.agents`、`ctx.skills` | `tool/call`、`tool/result`、`user/message replacement catalogs via agent.inject()` | - | - |
-| `@deepseek-ai/dsh-tool-subagent` | `list_subagent_models`、`subagent` | `ctx.tools`、`ctx.subagents`、`ctx.systemPrompt`、`用于模型发现和所选路由校验的 ctx.llm` | `tool/call`、`tool/result`、`child session events through the chosen provider` | `subagent`、`subagent_fork` | 注册的委派工具名称取决于加载时 `toolName` 配置（默认为 `subagent`）；上述默认 schema 关闭模型选择，而发现 schema 则展示为已启用 Session 中可用的固定配套工具。Web preset 会在每个新顶层 Session 创建时读取插件页偏好，并为其子 Session 保留该决定；`subagent_fork` 始终使用固定路由。每个实例通过 `modelSelectionSettings`、`backgroundMode` 与 `enableRunInBackground` 独立控制是否读取模型选择设置及其后台行为。 |
+| `@deepseek-ai/dsh-tool-subagent` | `list_subagent_models`、`subagent` | `ctx.tools`、`ctx.subagents`、`用于模型发现和所选路由校验的 ctx.llm` | `tool/call`、`tool/result`、`child session events through the chosen provider` | `subagent`、`subagent_fork` | 注册的委派工具名称取决于加载时 `toolName` 配置（默认为 `subagent`）；上述默认 schema 关闭模型选择，而发现 schema 则展示为已启用 Session 中可用的固定配套工具。Web preset 会在每个新顶层 Session 创建时读取插件页偏好，并为其子 Session 保留该决定；`subagent_fork` 始终使用固定路由。每个实例通过 `modelSelectionSettings`、`backgroundMode` 与 `enableRunInBackground` 独立控制是否读取模型选择设置及其后台行为。 |
 | `@deepseek-ai/dsh-tool-subagent-control` | `interrupt_agent`、`list_agents`、`send_message` | `ctx.tools`、`ctx.subagents`、`ctx.agents and ctx.sessionProjections (list_agents only)` | `tool/call`、`tool/result`、`child session events through ctx.subagents` | - | 这些是控制可继续后台 subagent 的全局命名工具：绑定提供方的 `tool-subagent` 实例注册不同的委派工具；本包注册一次 `send_message` 和 `interrupt_agent`，另由 `list_agents` 通过单独加载的 `/list-agents` 插件提供，其目录行使用 sessionProjections 和实时 Agent 注册表。 |
-| `@deepseek-ai/dsh-tool-jobs` | `job_kill`、`job_list`、`job_output` | `ctx.tools`、`ctx.jobs`、`ctx.systemPrompt` | `tool/call`、`tool/result`、`user/message via agent.inject() for background completion notices` | - | 与任务种类无关的后台任务控制器：后台 bash 命令、PTY 发送和 subagent 都通过相同的 3 个工具读取、列出和终止。加载该插件会挂接控制器，从而启用生产方的 `ctx.jobs.start()`。 |
+| `@deepseek-ai/dsh-tool-jobs` | `job_kill`、`job_list`、`job_output` | `ctx.tools`、`ctx.jobs` | `tool/call`、`tool/result`、`user/message via agent.inject() for background completion notices` | - | 与任务种类无关的后台任务控制器：后台 bash 命令、PTY 发送和 subagent 都通过相同的 3 个工具读取、列出和终止。加载该插件会挂接控制器，从而启用生产方的 `ctx.jobs.start()`。 |
 | `@deepseek-ai/dsh-tool-todo` | `todo_write` | `ctx.tools`、`owning Agent session` | `tool/call`、`todo/write`、`tool/result` | - | todo_write 是会话所有的状态；UI 将最新的 todo/write 事件渲染为检查清单。`allowParallelInProgress` 是没有默认值的必填项，因此本目录明确选择 `true`，对应描述允许同时存在多个 `in_progress` 项。选择 `false` 的部署会获得同一工具，但描述会要求只能有 1 个活动任务。 |
-| `@deepseek-ai/dsh-tool-workflow` | `workflow` | `ctx.tools`、`ctx.workflowEngine`、`ctx.systemPrompt`、`a calling Agent (exec.agent parents the script children)` | `tool/call`、`tool/result` | - | - |
-| `@deepseek-ai/dsh-tool-web` | `web_fetch`、`web_search` | `ctx.tools`、`ctx.web`、`ctx.systemPrompt` | `tool/call`、`tool/result` | - | web_search 和 web_fetch 将提供方选择置于 ctx.web 之后，使模型可见 schema 在更换后端时保持稳定。 |
+| `@deepseek-ai/dsh-tool-workflow` | `workflow` | `ctx.tools`、`ctx.workflowEngine`、`a calling Agent (exec.agent parents the script children)` | `tool/call`、`tool/result` | - | - |
+| `@deepseek-ai/dsh-tool-web` | `web_fetch`、`web_search` | `ctx.tools`、`ctx.web` | `tool/call`、`tool/result` | - | web_search 和 web_fetch 将提供方选择置于 ctx.web 之后，使模型可见 schema 在更换后端时保持稳定。 |
 
 <a id="deepseek-aidsh-plugin-manager"></a>
 
@@ -203,11 +203,11 @@
           },
           "question": {
             "type": "string",
-            "description": "The specific question to ask the user."
+            "description": "The question to ask, as one short sentence ending with a question mark."
           },
           "header": {
             "type": "string",
-            "description": "Optional short heading for the question, such as \"Confirm\" or \"Choose Mode\"."
+            "description": "Optional heading of at most about 12 characters, such as \"Confirm\" or \"Choose Mode\"."
           },
           "options": {
             "type": "array",
@@ -218,11 +218,11 @@
               "properties": {
                 "label": {
                   "type": "string",
-                  "description": "Short user-facing option label."
+                  "description": "User-facing option label of 1-5 words."
                 },
                 "description": {
                   "type": "string",
-                  "description": "One sentence explaining the tradeoff or impact."
+                  "description": "One short sentence explaining the tradeoff or impact."
                 }
               },
               "required": [
@@ -306,7 +306,7 @@ ask_user_question 会暂停工具调用，直到当前 UI 提供方返回人类�
 
 ### `exit_plan_mode`
 
-仅在规划模式下使用。提交计划供用户评审，并在获批后退出规划模式。发送**完整的** Markdown 计划，以一个为计划命名的 # 标题开头。用户可以批准（从你的下一步骤起执行计划），也可以要求继续规划；其反馈会通过工具结果返回，请修改后再次提交。
+仅在规划模式下使用。提交完整计划供用户评审。如果用户批准，规划模式随即结束，你从下一步骤起执行计划。如果用户选择继续规划，结果会附带其反馈（如有）；请修改计划后再次提交。
 
 ```json
 {
@@ -314,7 +314,7 @@ ask_user_question 会暂停工具调用，直到当前 UI 提供方返回人类�
   "properties": {
     "plan": {
       "type": "string",
-      "description": "The complete plan, as markdown, starting with a # heading that names it."
+      "description": "The complete plan in markdown, starting with a # heading that names it."
     }
   },
   "required": [
@@ -333,7 +333,7 @@ ask_user_question 会暂停工具调用，直到当前 UI 提供方返回人类�
 
 ### `bash`
 
-执行 bash 命令（`bash -c`）并返回 stdout/stderr。每次调用都在新 shell 中运行：调用之间不保留任何状态（cwd、变量、函数），请传入 `workdir`，不要使用 `cd`。非零退出会报告为 `[exit code: N]`。当前 harness 环境信息通过托管的 `$DSH_*` 变量公开，需要时请检查这些变量。命令可能在文件沙箱中运行；被阻止的文件操作报告为 `[sandbox: file access denied under <mode> mode]`，这是策略拒绝，而不是命令缺陷，请勿换一种方式重试。较长的输出会截断，只保留尾部；如可用，完整输出会保存到文件并报告其路径。对于长时间运行的命令，请设置 `run_in_background: true`：调用会立即返回 job id；使用 `job_output` 读取输出，使用 `job_kill` 停止任务。
+使用 `bash -c` 运行命令，并返回其 stdout 和 stderr。每次调用都会启动新 shell，因此目录切换和变量不会延续到后续调用。非零退出会在结果中报告为 `[exit code: N]`，而不是作为工具错误。较长的输出会截断为尾部；如有可能，完整输出会保存到结果中注明的文件。`$DSH_HOME` 是 harness 主目录，`$DSH_SESSION_ID` 是本会话的 id。使用 `run_in_background` 运行的命令会立即返回 job id；使用 `job_output` 读取其输出，使用 `job_kill` 停止它。
 
 ```json
 {
@@ -345,19 +345,19 @@ ask_user_question 会暂停工具调用，直到当前 UI 提供方返回人类�
     },
     "description": {
       "type": "string",
-      "description": "Clear, concise description of what this command does in active voice, 5-10 words (shown in the UI). Examples: \"ls\" → \"List files in current directory\"; \"git status\" → \"Show working tree status\"; \"npm install\" → \"Install package dependencies\"."
+      "description": "Short summary of what the command does, shown to the user."
     },
     "timeoutMs": {
       "type": "number",
-      "description": "Timeout in milliseconds. The executor applies its configured default and cap, and kills the command on expiry."
+      "description": "Timeout in milliseconds, capped at the maximum; the command is killed when it expires."
     },
     "workdir": {
       "type": "string",
-      "description": "Working directory for this command. Defaults to the session workspace; a relative path is resolved against it."
+      "description": "Directory to run this command in. Defaults to your working directory; a relative path resolves against it."
     },
     "run_in_background": {
       "type": "boolean",
-      "description": "Run in the background and return a job id immediately (collect with job_output, stop with job_kill). No timeout applies."
+      "description": "Run in the background, with no timeout."
     }
   },
   "required": [
@@ -377,7 +377,7 @@ bash 工具是 bash 执行器 seam 面向模型的消费方。使用 `run_in_bac
 
 ### `present`
 
-声明交付 Session 文件系统可访问的已有文件。如果你创建或更新的文件是用户要求接收的成果，则必须在写入完成后、最终回复前调用 present，包括通过 Bash 或代码执行创建的文件。在回复中提到文件路径不能替代这次调用。文件必须已存在。用户打开当前源文件；不复制或保存其内容。
+交付用户要求接收的文件。创建或更新此类文件后，无论以何种方式生成，都要在最终回复前调用 present；仅提到其路径是不够的。文件必须已存在于你的文件工具能够访问的位置。用户会在原位置打开这些文件，因此请将它们留在原处。
 
 ```json
 {
@@ -391,7 +391,7 @@ bash 工具是 bash 执行器 seam 面向模型的消费方。使用 `run_in_bac
         "properties": {
           "path": {
             "type": "string",
-            "description": "Path of an existing regular file. Relative paths use the Session working directory."
+            "description": "Path of an existing regular file, absolute or relative to the working directory."
           },
           "description": {
             "type": "string",
@@ -420,7 +420,7 @@ bash 工具是 bash 执行器 seam 面向模型的消费方。使用 `run_in_bac
 
 ### `pwsh`
 
-执行 PowerShell 命令（`pwsh -Command`）并返回 stdout/stderr。每次调用都在新的 pwsh 进程中运行：调用之间不保留任何状态（cwd、变量、函数），请传入 `workdir`，不要使用 `cd`。路径采用 Windows 原生形式（`C:\...`）；使用 `$env:NAME` 读取环境变量。非零退出会报告为 `[exit code: N]`。当前 harness 环境信息通过托管的 `$env:DSH_*` 变量公开，需要时请检查这些变量。命令可能在文件沙箱中运行；被阻止的文件操作报告为 `[sandbox: file access denied under <mode> mode]`，这是策略拒绝，而不是命令缺陷，请勿换一种方式重试。较长的输出会截断，只保留尾部；如可用，完整输出会保存到文件并报告其路径。在 Windows 上，被强制终止的命令会以 `[exit code: 1]` 结算且不带信号标记，请将其视为中断，而不是命令失败。对于长时间运行的命令，请设置 `run_in_background: true`：调用会立即返回 job id；使用 `job_output` 读取输出，使用 `job_kill` 停止任务。
+使用 `pwsh -Command` 运行 PowerShell 命令，并返回其 stdout 和 stderr。每次调用都会启动新的 pwsh 进程，因此目录切换和变量不会延续到后续调用。路径采用 Windows 原生形式（`C:\...`），环境变量通过 `$env:NAME` 读取。非零退出会在结果中报告为 `[exit code: N]`，而不是作为工具错误。在 Windows 上，被强制终止的命令同样以 `[exit code: 1]` 结尾，且不带信号标记，因此中断后出现的这种退出表示终止，而不是命令失败。较长的输出会截断为尾部；如有可能，完整输出会保存到结果中注明的文件。`$env:DSH_HOME` 是 harness 主目录，`$env:DSH_SESSION_ID` 是本会话的 id。使用 `run_in_background` 运行的命令会立即返回 job id；使用 `job_output` 读取其输出，使用 `job_kill` 停止它。
 
 ```json
 {
@@ -432,19 +432,19 @@ bash 工具是 bash 执行器 seam 面向模型的消费方。使用 `run_in_bac
     },
     "description": {
       "type": "string",
-      "description": "Clear, concise description of what this command does in active voice, 5-10 words (shown in the UI). Examples: \"ls\" → \"List files in current directory\"; \"git status\" → \"Show working tree status\"; \"Get-Process\" → \"List running processes\"."
+      "description": "Short summary of what the command does, shown to the user."
     },
     "timeoutMs": {
       "type": "number",
-      "description": "Timeout in milliseconds. The executor applies its configured default and cap, and kills the command on expiry."
+      "description": "Timeout in milliseconds, capped at the maximum; the command is killed when it expires."
     },
     "workdir": {
       "type": "string",
-      "description": "Working directory for this command. Defaults to the session workspace; a relative path is resolved against it."
+      "description": "Directory to run this command in. Defaults to your working directory; a relative path resolves against it."
     },
     "run_in_background": {
       "type": "boolean",
-      "description": "Run in the background and return a job id immediately (collect with job_output, stop with job_kill). No timeout applies."
+      "description": "Run in the background, with no timeout."
     }
   },
   "required": [
@@ -683,7 +683,7 @@ pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费
 
 ### `edit`
 
-通过替换字面量文本来编辑现有 UTF-8 文本文件。
+替换现有 UTF-8 文本文件中的字面量文本。除非你已在本会话中读取、写入或编辑过该文件，且此后它未发生变化，否则编辑会被拒绝。
 
 ```json
 {
@@ -691,11 +691,11 @@ pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费
   "properties": {
     "file_path": {
       "type": "string",
-      "description": "Path to edit, resolved by the filesystem backend."
+      "description": "Absolute path, or relative to the working directory."
     },
     "old_string": {
       "type": "string",
-      "description": "Literal text to replace. Must match exactly."
+      "description": "Text to replace, matching the file exactly, including whitespace but without the line numbers read adds. It must occur exactly once unless replace_all is true."
     },
     "new_string": {
       "type": "string",
@@ -703,7 +703,7 @@ pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费
     },
     "replace_all": {
       "type": "boolean",
-      "description": "Replace all matches. Defaults to false; when false, old_string must appear exactly once."
+      "description": "Replace every occurrence. Defaults to false."
     }
   },
   "required": [
@@ -718,7 +718,7 @@ pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费
 
 ### `read`
 
-读取 UTF-8 文本文件，并返回带行号的内容。
+以带行号的形式读取 UTF-8 文本文件，长文件会分页返回。与在 shell 中使用 cat、head 或 tail 不同，用它读取的文件在后续 write 和 edit 调用中会被视为已读取。
 
 ```json
 {
@@ -726,7 +726,7 @@ pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费
   "properties": {
     "file_path": {
       "type": "string",
-      "description": "Path to read, resolved by the filesystem backend."
+      "description": "Absolute path, or relative to the working directory."
     },
     "offset": {
       "type": "number",
@@ -747,7 +747,7 @@ pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费
 
 ### `read_image`
 
-读取 PNG/JPEG/WebP/GIF 文件并返回图像本身。无扩展名的路径同样被接受；格式按文件内容检测，因此规范化附件路径可以直接传入，无需复制或重命名。Harness 会在下一次模型请求前校验并缩小受支持的大图，因此仅为查看图片时应直接使用此工具，无需安装图片库或创建缩略图。可以用小批次并发读取彼此独立的文件。要求当前模型接受图像输入。
+读取 PNG、JPEG、WebP 或 GIF 文件并返回图像。无扩展名的路径也可以使用；其格式按文件内容检测。大图会自动缩小，因此不要仅为查看图片而安装图片工具或创建缩略图。要求使用接受图像输入的模型。
 
 ```json
 {
@@ -755,7 +755,7 @@ pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费
   "properties": {
     "file_path": {
       "type": "string",
-      "description": "Path to the image file, resolved by the filesystem backend."
+      "description": "Absolute path, or relative to the working directory."
     }
   },
   "required": [
@@ -768,7 +768,7 @@ pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费
 
 ### `write`
 
-创建或完全替换 UTF-8 文本文件。
+创建 UTF-8 文本文件，或替换其全部内容。替换现有文件时，除非你已在本会话中读取、写入或编辑过该文件，且此后它未发生变化，否则会被拒绝。只做局部修改时，使用 edit 可避免重新发送整个文件。
 
 ```json
 {
@@ -776,7 +776,7 @@ pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费
   "properties": {
     "file_path": {
       "type": "string",
-      "description": "Path to write, resolved by the filesystem backend."
+      "description": "Absolute path, or relative to the working directory."
     },
     "content": {
       "type": "string",
@@ -800,7 +800,7 @@ pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费
 
 ### `glob`
 
-查找路径匹配 glob 模式的文件。只返回匹配的文件路径，绝不返回目录；包括隐藏文件和被忽略的文件，但排除 VCS 元数据目录。最多按修改时间顺序返回 100 条路径；如果结果更多，则改为返回从顶层条目中抽样的 100 条路径，说明已抽样，并报告完整排序列表的保存位置。该工具不枚举目录条目。
+查找路径匹配 glob 模式的文件，不包括目录。它是 shell 中 find 的有界替代方案，结果按最新优先排序：包括隐藏文件和被忽略的文件，但不包括 VCS 元数据。如果结果超过 100 条路径，则显示从顶层条目中抽样的 100 条，说明已抽样，并报告完整列表的保存位置。
 
 ```json
 {
@@ -808,11 +808,11 @@ pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费
   "properties": {
     "pattern": {
       "type": "string",
-      "description": "Glob pattern to match file paths against (e.g. \"**/*.ts\", \"src/**/*.test.js\"). A pattern with no \"/\" matches the basename at any depth, so \"*\" and \"*.ts\" both search the whole tree; include a separator to anchor the depth."
+      "description": "Glob pattern, e.g. \"**/*.ts\" or \"src/**/*.test.js\". A pattern without \"/\" matches file names at any depth, so \"*.ts\" searches the whole tree."
     },
     "path": {
       "type": "string",
-      "description": "Directory to search in. Defaults to the session workspace; a relative path resolves against it."
+      "description": "Directory to search. Defaults to the working directory; relative paths resolve against it."
     }
   },
   "required": [
@@ -825,7 +825,7 @@ pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费
 
 ### `grep`
 
-使用 ripgrep 正则表达式搜索文件内容。返回带行号的匹配行，并按文件分组。前 250 条匹配会直接返回；结果达到上限时会报告完整匹配列表的保存位置。如需周边上下文，请对匹配的文件使用 read。
+使用 ripgrep 正则表达式搜索文件内容，可作为 shell 中 grep 或 rg 的有界替代方案。会跳过隐藏文件和被忽略的文件，除非 path 指向它们。只返回匹配行，带行号并按文件分组；如需上下文，请读取匹配的文件。最多显示 250 条匹配；如果结果更多，会予以说明，并报告完整列表的保存位置。
 
 ```json
 {
@@ -837,7 +837,7 @@ pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费
     },
     "path": {
       "type": "string",
-      "description": "File or directory to search. Defaults to the session workspace; a relative path resolves against it."
+      "description": "File or directory to search. Defaults to the working directory; relative paths resolve against it."
     },
     "include": {
       "type": "string",
@@ -858,7 +858,7 @@ glob 和 grep 是无条件可用的发现工具，通过 ctx.subprocess spawn �
 
 ### `create_goal`
 
-当当前直接人类请求是需要跨自主 Goal Round 持续推进的长期目标时，创建一个持久化的同会话完成目标。即使用户没有明确说「创建目标」，你也可以推断其意图。不要用于简单的单轮工作。执行时会拒绝非人类权限和 subagent 权限。
+创建本会话的目标：一个跨多个自动 Round 持续推进、直至完成的长期目标。仅当用户在当前轮次中明确要求设定目标时才调用它；绝不要主动创建目标。一个会话同一时间只有一个目标，subagent 不能创建目标。
 
 ```json
 {
@@ -866,11 +866,11 @@ glob 和 grep 是无条件可用的发现工具，通过 ctx.subprocess spawn �
   "properties": {
     "objective": {
       "type": "string",
-      "description": "The concrete completion objective inferred from the direct human request."
+      "description": "The concrete objective, taken from the user's request."
     },
     "max_goal_rounds": {
       "type": "number",
-      "description": "Optional positive safe-integer limit on automatic continuation rounds."
+      "description": "Optional limit on automatic rounds, as a positive integer."
     }
   },
   "required": [
@@ -883,7 +883,7 @@ glob 和 grep 是无条件可用的发现工具，通过 ctx.subprocess spawn �
 
 ### `get_goal`
 
-读取当前的同会话目标，包括确切的 id／revision、目标、阶段、已完成的延续 Round 数、Round 上限、存在时的阻塞原因，以及是否已准备下一次延续。更新目标前请先调用此工具。
+返回本会话的当前目标（没有则返回 null），包括其 id、revision、目标、阶段、已开始的 Round 数、Round 上限、阻塞原因（如有），以及是否会自动继续。
 
 ```json
 {
@@ -896,7 +896,7 @@ glob 和 grep 是无条件可用的发现工具，通过 ctx.subprocess spawn �
 
 ### `update_goal`
 
-更新确切的当前目标 revision。edit、pause 和 resume 要求直接的顶层人类请求。在自动延续当前目标期间，也允许 complete 和 blocked。在达到配置的最小 Round 数之前会拒绝 blocked；模型仍须判断相同条件是否在这些 Round 中持续存在，并在 blocked_reason 中予以说明。
+更改当前目标。请先调用 get_goal，并传入其返回的确切 goal_id 和 revision。edit、pause 和 resume 需要用户在当前轮次中提出请求；在自动 Goal Round 期间，complete 和 blocked 也可使用。会话被重新打开或 fork 后，其目标会停止运行自动 Round，直到用户要求继续；届时请使用 resume 恢复它。仅当目标已达成时才将其标记为 complete。仅当同一个具体阻碍已连续持续至少 3 个 Goal Round 时才将其标记为 blocked；遇到困难或仍有剩余工作都不算阻碍。
 
 ```json
 {
@@ -904,15 +904,15 @@ glob 和 grep 是无条件可用的发现工具，通过 ctx.subprocess spawn �
   "properties": {
     "goal_id": {
       "type": "string",
-      "description": "Exact id returned by get_goal."
+      "description": "The current goal's id."
     },
     "revision": {
       "type": "number",
-      "description": "Exact positive revision returned by get_goal."
+      "description": "The current goal's revision."
     },
     "action": {
       "type": "string",
-      "description": "edit | pause | resume | complete | blocked",
+      "description": "edit the objective or round limit, pause or resume automatic rounds, or mark the goal complete or blocked.",
       "enum": [
         "edit",
         "pause",
@@ -923,15 +923,15 @@ glob 和 grep 是无条件可用的发现工具，通过 ctx.subprocess spawn �
     },
     "objective": {
       "type": "string",
-      "description": "Replacement objective; valid only with action edit."
+      "description": "The new objective; used only with action edit."
     },
     "max_goal_rounds": {
       "type": "number",
-      "description": "Replacement cap; valid only with action edit."
+      "description": "The new round limit; used only with action edit."
     },
     "blocked_reason": {
       "type": "string",
-      "description": "Concrete blocking condition; required only with action blocked."
+      "description": "The concrete obstacle; required with action blocked and unused otherwise."
     }
   },
   "required": [
@@ -1101,7 +1101,7 @@ create、edit、pause 和 resume 要求直接来自人类的根权限；complete
 
 ### `list_subagent_models`
 
-发现 subagent 可用的 LLM 路由，不更改当前 Agent。无参数调用会列出已注册提供方；提供 `provider` 时会列出其公布的模型；同时提供 `provider` 和 `model` 时会检查该精确模型及其推理强度。目录条目只提供建议：adapter 可能接受未列出的模型 id。把返回的 id 用于委派工具的 `provider`、`model` 与 `reasoning_effort` 字段。
+查询 subagent 可用的模型；这不会更改你自己的模型。无参数调用会列出提供方；提供 `provider` 时会列出该提供方的模型；同时提供 `provider` 和 `model` 时会查看该模型及其推理强度。这些列表只作参考：允许使用的模型 id 即使未列出也可能可用。把返回的 id 作为委派工具的 `provider`、`model` 与 `reasoning_effort` 传入。
 
 ```json
 {
@@ -1109,11 +1109,11 @@ create、edit、pause 和 resume 要求直接来自人类的根权限；complete
   "properties": {
     "provider": {
       "type": "string",
-      "description": "Registered LLM provider id. Omit to list providers."
+      "description": "LLM provider id. Omit to list providers."
     },
     "model": {
       "type": "string",
-      "description": "Exact model id to inspect. Requires provider; omit to list that provider's advertised models."
+      "description": "Exact model id to inspect. Requires provider; omit to list that provider's models."
     }
   }
 }
@@ -1123,7 +1123,7 @@ create、edit、pause 和 resume 要求直接来自人类的根权限；complete
 
 ### `subagent`
 
-将一项自包含任务委派给 subagent（在自身上下文中工作的独立 agent），用它卸载聚焦且独立的工作，例如研究、限定范围的实现或分析，以免消耗当前对话的上下文。subagent 会返回结果，但不会返回中间步骤。请提供完整、独立的提示词，因为它看不到当前对话。此调用默认等待结果。设置 `run_in_background: true` 可返回 job id；使用 `job_output` 收集结果，使用 `job_kill` 停止任务。
+将一项自包含任务（例如研究、限定范围的实现或分析）委派给在自身上下文中工作的 subagent，使这些工作不会占满当前对话。你会得到它的结果，而不是其中间步骤。它看不到当前对话，因此请提供完整、独立的提示词。此调用默认等待结果。设置 `run_in_background: true` 可返回 job id；使用 `job_output` 收集结果，使用 `job_kill` 停止任务。
 
 ```json
 {
@@ -1135,11 +1135,11 @@ create、edit、pause 和 resume 要求直接来自人类的根权限；complete
     },
     "prompt": {
       "type": "string",
-      "description": "The complete, self-contained task for the subagent. It does not share this conversation's context, so include everything it needs."
+      "description": "The complete, self-contained task. The subagent does not see this conversation, so include everything it needs."
     },
     "run_in_background": {
       "type": "boolean",
-      "description": "Whether to run as a background job and return its id. Defaults to false; collect with job_output or stop with job_kill."
+      "description": "Run as a background job and return its job id. Defaults to false; collect with job_output or stop with job_kill."
     }
   },
   "required": [
@@ -1159,7 +1159,7 @@ create、edit、pause 和 resume 要求直接来自人类的根权限；complete
 
 ### `interrupt_agent`
 
-根据 agent id 请求取消后台 agent 的当前轮次。目标可以是你的直接子级，也可以是在你下方创建的更深层 agent。只有当前轮次会停止：已经排队发给该 agent 的消息会一直搁置到后续的 send_message；它启动的 agent 会继续运行；该 agent 本身仍可接受后续操作。停止请求被接受后，此调用立即返回，因此目标可能还会短暂运行；中断一个已经完成的 agent 是可接受的空操作。
+根据 agent id 停止你下方某个可继续 subagent 的当前轮次，无论它是直接子级还是更深层级。已经排队发给它的消息会等待后续的 send_message；它启动的 subagent 会继续运行；它本身仍可接受后续操作。停止请求发出后，此调用即返回，因此该 subagent 可能还会短暂运行；中断一个已经完成的 subagent 不会产生任何效果。
 
 ```json
 {
@@ -1167,7 +1167,7 @@ create、edit、pause 和 resume 要求直接来自人类的根权限；complete
   "properties": {
     "agent_id": {
       "type": "string",
-      "description": "The agent id of the running agent to interrupt."
+      "description": "The agent id of the subagent to interrupt."
     }
   },
   "required": [
@@ -1180,7 +1180,7 @@ create、edit、pause 和 resume 要求直接来自人类的根权限；complete
 
 ### `list_agents`
 
-按持久 id 和标签列出你的可继续后台 subagent。用它回忆你启动过哪些 subagent，而不是轮询完成情况——subagent 完成时你会被告知。状态来自实时注册表：running 表示 agent 此刻正在工作；idle 表示已加载但处于轮次之间，可能正在等待它启动的 agent；ready 表示它只存在于存储中——可恢复而非终态，也不表示有结果等待收集；`send_message` 会在运行中 child 的最近 step 边界 steer 消息，或为 idle、ready child 启动轮次，且无论处于哪种状态，直接子级都仍可作为 `send_message` 的目标。该快照并非投递承诺；`send_message` 会执行权威检查，仍可能失败。无法读取的子级会作为诊断信息报告，而不会被静默丢弃。`descendants` 作用域会按稳定的前序顺序遍历你下方的整棵树，并为每个条目标注其持久的直接父会话 id 和深度。只有深度为 1 的条目可以使用 `send_message`；更深的条目只能作为 `interrupt_agent` 的候选目标。
+列出你启动的可继续 subagent，以及每个 subagent 的 agent id、标签和状态：running（正在工作）、idle（处于轮次之间，可能正在等待它自己的 subagent）或 ready（已保存且未激活；可以恢复，也不是待收集的结果）。`send_message` 会在运行中 subagent 的下一个 step steer 它，并为 idle 或 ready 的 subagent 启动新轮次。用它查找 id，而不是轮询：subagent 完成时你会收到通知。无法读取的 subagent 会显示为诊断信息。`descendants` 作用域还会列出它们下方的 subagent，并为每个条目标注其父级的 agent id 和深度。你只能向深度为 1 的条目（即你的直接 subagent）发送消息，但可以使用 `interrupt_agent` 停止任一条目的当前轮次。
 
 ```json
 {
@@ -1188,7 +1188,7 @@ create、edit、pause 和 resume 要求直接来自人类的根权限；complete
   "properties": {
     "scope": {
       "type": "string",
-      "description": "children (default) lists direct children only; descendants walks the complete tree below you.",
+      "description": "children (default) lists your direct subagents; descendants lists every subagent below you.",
       "enum": [
         "children",
         "descendants"
@@ -1202,7 +1202,7 @@ create、edit、pause 和 resume 要求直接来自人类的根权限；complete
 
 ### `send_message`
 
-根据 agent id 向直接可继续 child 发送消息。如果你是驻留的可继续 child，也可以把自己的直接 parent 作为目标。如果目标仍在工作，消息会 steer 其最近的 step；如果目标处于 idle，消息会启动一个轮次。此调用不会返回该 agent 的答案，只会确认消息已投递。调用失败表示消息**未**投递。
+根据 agent id 向你的某个直接可继续 subagent 发送消息。如果你本身是可继续 subagent，也可以向你的父级发送消息。正在工作的目标会在其下一个 step 读取消息；否则，消息会启动一个新轮次。你会收到投递确认，而不是回复；出现错误表示消息未投递。
 
 ```json
 {
@@ -1210,11 +1210,11 @@ create、edit、pause 和 resume 要求直接来自人类的根权限；complete
   "properties": {
     "agent_id": {
       "type": "string",
-      "description": "The agent id of your direct continuable child, or your direct parent when you are a resident continuable child."
+      "description": "The agent id of a direct continuable subagent, or of your parent if you are a continuable subagent."
     },
     "message": {
       "type": "string",
-      "description": "The message to deliver to the agent."
+      "description": "The message to send."
     }
   },
   "required": [
@@ -1234,7 +1234,7 @@ create、edit、pause 和 resume 要求直接来自人类的根权限；complete
 
 ### `job_kill`
 
-根据 job id 请求取消正在运行的后台任务。此调用立即返回；任务的工作真正停止后，会以 killed 状态结算。
+停止正在运行的后台任务。否则，任务在你的轮次结束后仍会继续运行，直至完成。此调用立即返回；任务的工作停止后，其状态会变为 `killed`。
 
 ```json
 {
@@ -1242,11 +1242,11 @@ create、edit、pause 和 resume 要求直接来自人类的根权限；complete
   "properties": {
     "job_id": {
       "type": "string",
-      "description": "Job id returned by the tool that started the background work."
+      "description": "The id returned when the job started."
     },
     "reason": {
       "type": "string",
-      "description": "Optional short reason, recorded in the log and forwarded to the job."
+      "description": "Optional short reason for stopping the job."
     }
   },
   "required": [
@@ -1259,7 +1259,7 @@ create、edit、pause 和 resume 要求直接来自人类的根权限；complete
 
 ### `job_list`
 
-列出你的后台任务（包括正在运行和已完成的任务）及其 id、种类和状态。
+列出你的后台任务（包括正在运行和已完成的任务）及其 id、种类、状态和标签。
 
 ```json
 {
@@ -1272,7 +1272,7 @@ create、edit、pause 和 resume 要求直接来自人类的根权限；complete
 
 ### `job_output`
 
-读取后台任务。流式任务只返回自上次读取以来的输出；最终输出任务会在结算后返回结果。每个响应都以 `[status: ...]` 结尾。读取默认不阻塞；设置 `wait: true` 后，最长等待到配置的上限。
+读取后台任务的输出。任务完成时你会收到通知，因此在它运行期间无需轮询或 sleep。流式输出的任务会返回自你上次读取以来的新内容；其他任务会在完成后返回结果。每个回复都以 `[status: ...]` 结尾。除非设置 `wait: true`，否则立即返回。
 
 ```json
 {
@@ -1280,15 +1280,15 @@ create、edit、pause 和 resume 要求直接来自人类的根权限；complete
   "properties": {
     "job_id": {
       "type": "string",
-      "description": "Job id returned by the tool that started the background work."
+      "description": "The id returned when the job started."
     },
     "wait": {
       "type": "boolean",
-      "description": "Block until the job reaches a terminal status or the timeout expires. A timed-out wait returns [status: running] and leaves the job alive."
+      "description": "Wait until the job finishes or the timeout passes, for when you cannot continue without the result. A timed-out wait returns `[status: running]` and leaves the job running."
     },
     "timeout_ms": {
       "type": "number",
-      "description": "Max wait in milliseconds (only meaningful with wait: true). Defaults to the configured wait timeout; capped by the configured maximum."
+      "description": "Maximum wait in milliseconds when wait is true (default 30000, at most 600000)."
     }
   },
   "required": [
@@ -1305,7 +1305,7 @@ create、edit、pause 和 resume 要求直接来自人类的根权限；complete
 
 ### `todo_write`
 
-记录并更新当前工作的结构化任务列表。每次调用都要发送**完整列表**，它会**替换**之前的列表，不支持局部更新或逐项编辑。请用它规划多步骤工作并展示进度：开始前为每个具体步骤添加一项 todo。将当前正在处理的每项 todo 标记为 `in_progress`；确实并行运行时（例如并发 subagent 或后台命令）可同时标记多项，顺序工作则标记 1 项。只要工作尚未完成，就应至少有一项任务为 `in_progress`。某项 todo 完成后立即标记为 `completed`，不要批量标记完成；只有全部工作完成后，才可以没有 `in_progress` 项。简单的单步骤任务无需使用列表。状态：`pending`（未开始）、`in_progress`（正在处理）、`completed`（已完成）。
+为多步骤工作创建并更新用户可见的任务列表。每次调用都会替换整个列表，因此请发送所有条目。工作并行进行时，可以同时有多项处于 `in_progress`。
 
 ```json
 {
@@ -1313,18 +1313,16 @@ create、edit、pause 和 resume 要求直接来自人类的根权限；complete
   "properties": {
     "todos": {
       "type": "array",
-      "description": "The COMPLETE task list, replacing any previous list.",
       "items": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
           "content": {
             "type": "string",
-            "description": "What the task is — a short imperative line."
+            "description": "The task, as a short imperative line."
           },
           "status": {
             "type": "string",
-            "description": "pending (not started) | in_progress (now) | completed (done).",
             "enum": [
               "pending",
               "in_progress",
@@ -1355,20 +1353,16 @@ todo_write 是会话所有的状态；UI 将最新的 todo/write 事件渲染为
 
 ### `workflow`
 
-运行用于大规模编排 subagent 的 JavaScript 工作流脚本。当工作会分散到许多相互独立的部分时，请使用此工具，例如审查大量文件、执行迁移、开展多角度研究或对发现进行对抗式验证；此时应将编排写成脚本，而不是逐轮委派。
+运行一个协调许多 subagent 的 JavaScript 工作流脚本，并返回脚本的结果。仅当用户明确要求使用工作流或进行大规模多 agent 编排时才使用它，因为一次运行可能启动许多 subagent；只需一两次委派时，请使用普通的 subagent 调用。此调用会阻塞，直至脚本完成。
 
-工作流的身份通过 `meta` 参数以 JSON 形式传入：必填的 `name`（简短 kebab-case）和 `description` 字符串，以及可选的 `whenToUse` 字符串和 `phases` 数组（`{title, detail?, provider?, model?}`）。`script` 参数只能是纯 JavaScript **函数体**，不能是 TypeScript，也不能包含 `export const meta` 语句；meta 是参数而非代码。脚本支持顶层 await；请以 `return <value>` 结尾，该值必须可以 JSON 序列化，并作为此工具的结果。
+脚本可以调用以下全局函数：
 
-脚本函数体提供以下钩子：
+- `agent(prompt, opts?)`：运行一个 subagent 直至完成。它解析为该 subagent 的最终文本；提供 `opts.schema` 时，解析为通过该 schema 校验的对象；subagent 失败时解析为 `null`。`opts.schema` 必须是以对象为根的 JSON Schema，只能使用 type、properties、required、additionalProperties、items、enum、const、oneOf 以及 description 等注解；pattern、format 和数值边界会被拒绝。其他选项包括 `label`（显示名称）、`phase`（进度组，默认为当前进度阶段），以及 `provider` 和 `model`（路由覆盖，可分别使用）。任何其他选项都会报错。
+- `pipeline(items, ...stages)`：让每个条目独立经过各阶段，阶段之间没有屏障，并按条目顺序解析为各条目的最终值。每个阶段以 `stage(prev, item, index)` 的形式调用，其中 `prev` 是上一阶段的结果；对第一个阶段而言则是条目本身。抛出异常的阶段会将该条目变为 `null`，并跳过它的剩余阶段。
+- `parallel(thunks)`：并发运行零参数函数，等待全部完成，并按顺序解析为它们的结果；抛出异常的 thunk 产生 `null`。
+- `phase(title)`：开始一个进度阶段；`log(message)`：报告进度。
 
-- `agent(prompt, opts?): Promise<any>`：运行一个 subagent 直至完成。不提供 `opts.schema` 时，解析为子级最终文本；提供 `opts.schema` 时，它必须是以对象为根、且**只能**使用 type/properties/required/additionalProperties/items/enum/const/oneOf 的 JSON Schema，不支持 pattern/format/数值边界，此时解析为通过校验的对象。子级失败时解析为 `null`，可使用 `.filter(Boolean)` 过滤。其他选项包括 `label`（显示名称）、`phase`（进度组），以及相互独立的 `provider`／`model` LLM（大语言模型）目标覆盖项，两者可单独提供。其他任何选项（`effort`／`isolation`／`agentType`）都会明确报错。
-- `pipeline(items, ...stages): Promise<any[]>`：让每个条目分别经过各阶段，阶段之间**没有**屏障；多阶段工作优先使用它。每个阶段接收 `(prev, item, index)`。普通的阶段异常会将该**条目**变为 `null`，并跳过它的剩余阶段。
-- `parallel(thunks): Promise<any[]>`：并发运行零参数函数并等待**全部**完成。它会形成屏障，仅当某个阶段确实需要汇总全部先前结果时使用。抛出异常的 thunk 解析为 `null`。
-- `phase(title)`：开始一个进度阶段；`log(message)`：说明进度；`args`：工具调用的 `args` 输入，原样提供。
-
-如果误用钩子（参数错误、未知选项、不受支持的 schema、触发上限），抛出的错误**总会**终止脚本，绝不会退化为单个条目的 `null`。
-
-约束：并发上限和 agent 总数上限均会生效；不提供文件系统、网络、定时器或 Node.js API。具体工作由 agent 完成，脚本只负责编排。该运行在前台执行：整个脚本完成后，调用才会返回。
+误用钩子（参数错误、未知选项、不受支持的 schema、超出上限）或 subagent 无法启动时会抛出错误，`pipeline` 和 `parallel` 会将其原样传出，而不会转为 `null`；如果没有代码捕获它，本次运行会失败，并且只返回该错误。上限会限制并发 subagent 数（多出的 `agent()` 调用会等待空闲槽位）、每次运行的 subagent 总数，以及每次 `pipeline()` 或 `parallel()` 调用的条目数。脚本没有文件系统、网络、定时器或 Node.js API；具体工作由 subagent 完成。
 
 ```json
 {
@@ -1376,11 +1370,11 @@ todo_write 是会话所有的状态；UI 将最新的 todo/write 事件渲染为
   "properties": {
     "script": {
       "type": "string",
-      "description": "The plain-JS workflow script body (top-level await allowed; NO `export const meta` statement; end with `return <json-value>`)."
+      "description": "Body of an async JavaScript function, so `await` works at the top level. Plain JavaScript only: no TypeScript and no import or export statements. Its return value, which must be JSON-serializable, becomes the tool result; results longer than 50000 characters are truncated."
     },
     "meta": {
       "type": "object",
-      "description": "The workflow identity block (plain JSON — never code).",
+      "description": "The workflow's identity, as JSON data.",
       "additionalProperties": true,
       "properties": {
         "name": {
@@ -1393,18 +1387,18 @@ todo_write 是会话所有的状态；UI 将最新的 todo/write 事件渲染为
         },
         "whenToUse": {
           "type": "string",
-          "description": "Optional guidance on when this workflow applies."
+          "description": "Optional note on when this workflow applies."
         },
         "phases": {
           "type": "array",
-          "description": "Optional phase declarations matched by phase() calls.",
+          "description": "Optional list of the phases the script enters with phase(); informational only.",
           "items": {
             "type": "object",
             "additionalProperties": true,
             "properties": {
               "title": {
                 "type": "string",
-                "description": "The phase title phase() calls match by exact string."
+                "description": "The title the script passes to phase()."
               },
               "detail": {
                 "type": "string",
@@ -1412,11 +1406,11 @@ todo_write 是会话所有的状态；UI 将最新的 todo/write 事件渲染为
               },
               "provider": {
                 "type": "string",
-                "description": "Optional provider override this phase is expected to use."
+                "description": "Informational; pass `provider` to agent() to route a subagent."
               },
               "model": {
                 "type": "string",
-                "description": "Optional model override this phase is expected to use."
+                "description": "Informational; pass `model` to agent() to choose a subagent's model."
               }
             },
             "required": [
@@ -1432,7 +1426,7 @@ todo_write 是会话所有的状态；UI 将最新的 todo/write 事件渲染为
     },
     "args": {
       "type": "object",
-      "description": "Optional JSON input exposed to the script as the `args` global (wrap a bare list as a field, e.g. {\"files\": [...]}).",
+      "description": "Optional JSON object available to the script as the global `args`.",
       "additionalProperties": true
     }
   },
@@ -1451,7 +1445,7 @@ todo_write 是会话所有的状态；UI 将最新的 todo/write 事件渲染为
 
 ### `web_fetch`
 
-获取指定 HTTP(S) URL 的内容，并将其解码为文本后返回。
+获取 HTTP(S) URL，并以文本形式返回其内容。这些内容来自外部的不可信页面；使用时请以 markdown 链接形式引用该 URL。
 
 ```json
 {
@@ -1472,7 +1466,7 @@ todo_write 是会话所有的状态；UI 将最新的 todo/write 事件渲染为
 
 ### `web_search`
 
-在 Web 上搜索最新信息。在必填的 `queries` 数组中提供 1–4 个查询。返回可选的摘要答案和来源 URL 列表。
+在 Web 上搜索最新信息。返回可选的摘要答案，以及来自外部不可信页面的来源 URL；如需阅读完整页面，请使用 web_fetch。
 
 ```json
 {
@@ -1480,7 +1474,7 @@ todo_write 是会话所有的状态；UI 将最新的 todo/write 事件渲染为
   "properties": {
     "queries": {
       "type": "array",
-      "description": "Required search queries; accepts 1–4 items and merges their results.",
+      "description": "1–4 non-empty search queries; their results are merged.",
       "items": {
         "type": "string"
       }

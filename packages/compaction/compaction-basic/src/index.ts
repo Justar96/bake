@@ -32,6 +32,7 @@ import type { SummarizationInput, SummaryResult } from './summarizer.ts'
 import type {
   BasicCompactionConfig,
   ModelCompactPolicyConfig,
+  ResolvedCompactSpec,
   ResolvedConfig,
 } from './types.ts'
 
@@ -54,6 +55,18 @@ function routedTarget(
     return undefined
   }
   return { provider: config.provider, model: config.model }
+}
+
+/**
+ * Highest post-prune size that settles pressure without a summary: halfway
+ * between the retained tail and the threshold. A summary lands near the
+ * retained tail, so this demands at least half of a summary's headroom from
+ * a prune before it may stand alone.
+ * @param spec - pressure and retention budgets for the routed model.
+ * @returns the exclusive token ceiling for a prune-only pass.
+ */
+function pruneOnlyCeiling(spec: Pick<ResolvedCompactSpec, 'thresholdTokens' | 'retainTokens'>): number {
+  return spec.retainTokens + Math.floor((spec.thresholdTokens - spec.retainTokens) / 2)
 }
 
 /** Resolve the conversation target used to select an optional policy override. */
@@ -306,7 +319,12 @@ export class BasicCompactionEngine extends CompactionEngine {
       prune.pruneSession(agent.session)
       measurement = meter.measure(agent.session)
     }
-    if (measurement.totalTokens < spec.thresholdTokens) return null
+    // Any surface rewrite invalidates the provider's prompt cache from the
+    // first rewritten node onward, so a prune that only just clears the
+    // threshold buys a few steps before the next pass rewrites history again.
+    // A prune-only pass must therefore leave real headroom; otherwise the
+    // summary lands in this same pass and the cache is rebuilt once.
+    if (measurement.totalTokens < pruneOnlyCeiling(spec)) return null
 
     let result: CompactionResult | null = null
     for (let attempt = 0; attempt <= spec.compactionRetries; attempt += 1) {
@@ -413,6 +431,30 @@ export class BasicCompactionEngine extends CompactionEngine {
         'manual compaction requires an idle agent with no waking queued work',
         { cause: error },
       )
+    }
+  }
+
+  /**
+   * Resolve the exact route's merged policy the way the `agent/pre-step`
+   * listener does: `floor(contextWindow × thresholdRatio)`, the figure it
+   * compares with the token meter's measurement. `auto: false` installs no
+   * listener, and an empty route is never compacted, so both answer
+   * `undefined`. So does a capacity or absolute retention that the listener
+   * would reject with a once-per-target warning instead of compacting.
+   * @param route - exact provider/model whose override, if any, applies.
+   * @param contextWindow - that route's adapter-owned capacity in tokens.
+   * @returns the pressure threshold in tokens, or `undefined` when automatic pressure cannot compact that route.
+   */
+  override pressureThreshold(
+    route: { readonly provider: string; readonly model: string },
+    contextWindow: number,
+  ): number | undefined {
+    if (!this.config.auto || route.provider.length === 0 || route.model.length === 0) return undefined
+    try {
+      return resolveCompactSpec(resolveTargetPolicy(this.config, route), contextWindow).thresholdTokens
+    } catch (error: unknown) {
+      if (error instanceof TargetPressureConfigError) return undefined
+      throw error
     }
   }
 

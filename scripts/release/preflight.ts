@@ -32,10 +32,10 @@ export interface PreflightOptions {
   /** A retry may see the version this run already deployed. */
   readonly retry?: boolean
   /** On a retry, the already published version must have these exact artifacts. */
-  readonly expectedManifest?: ReleaseManifest
+  readonly expectedManifest?: ReleaseManifest | undefined
   /** Check GitHub's latest published release when Railway is disabled. */
-  readonly githubRepository?: string
-  readonly githubToken?: string
+  readonly githubRepository?: string | undefined
+  readonly githubToken?: string | undefined
 }
 
 function sameArtifacts(left: ReleaseManifest, right: ReleaseManifest): boolean {

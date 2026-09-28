@@ -32,12 +32,24 @@ class Output extends Writable {
   private historyStarted = false
   private callback: (() => void) | undefined
   get waiting(): boolean { return this.callback !== undefined }
+  waitUntil(predicate: () => boolean): Promise<void> {
+    if (predicate()) return Promise.resolve()
+    return new Promise(resolve => {
+      const check = () => {
+        if (!predicate()) return
+        this.off('chunk', check)
+        resolve()
+      }
+      this.on('chunk', check)
+    })
+  }
   override _write(chunk: Buffer, _encoding: BufferEncoding, callback: () => void): void {
     this.chunks.push(chunk.toString())
     this.historyStarted ||= chunk.includes('history-')
     // Ink uses an empty write callback to observe delivery of preceding output.
     if (chunk.length === 0 && this.blocked && this.historyStarted) this.callback = callback
     else callback()
+    this.emit('chunk')
   }
   release(): void {
     this.blocked = false
@@ -87,7 +99,7 @@ function mount(state: AppProps) {
 it('waits for output before admitting more history, accepting input and ordered appends meanwhile', async () => {
   const state = props(history(800))
   const { ui, input, output } = mount(state)
-  await vi.waitFor(() => expect(output.waiting).toBe(true))
+  await output.waitUntil(() => output.waiting)
   const first = markers(output.chunks.join(''))
   expect(first.length).toBeGreaterThan(0)
   expect(first.length).toBeLessThan(800)
@@ -97,24 +109,24 @@ it('waits for output before admitting more history, accepting input and ordered 
   ui.rerender(<App {...state} committed={committed} />)
   expect(markers(output.chunks.join(''))).toEqual(first)
   output.release()
-  await vi.waitFor(() => expect(output.chunks.join('')).toContain('history-800-end'))
+  await output.waitUntil(() => output.chunks.join('').includes('history-800-end'))
   expect(markers(output.chunks.join(''))).toEqual(Array.from({ length: 801 }, (_, index) => `history-${index}-end`))
 })
 
 it('bounds one large multiline answer across flushes without dropping or repeating lines', async () => {
   const lines = Array.from({ length: 1000 }, (_, index) => `history-${index}-end`)
   const { output } = mount(props(appendTranscript(emptyTranscript, [{ kind: 'assistant', text: ['```text', ...lines, '```'].join('\n') }])))
-  await vi.waitFor(() => expect(output.waiting).toBe(true))
+  await output.waitUntil(() => output.waiting)
   expect(markers(output.chunks.join('')).length).toBeLessThan(1000)
   output.release()
-  await vi.waitFor(() => expect(output.chunks.join('')).toContain(lines.at(-1)!))
+  await output.waitUntil(() => output.chunks.join('').includes(lines.at(-1)!))
   expect(markers(output.chunks.join(''))).toEqual(lines)
   expect(Math.max(...output.chunks.map(chunk => markers(chunk).length))).toBeLessThanOrEqual(512)
 })
 
 it('cancels pending admission on exit and restores raw mode', async () => {
   const { ui, input, output } = mount(props(history(800)))
-  await vi.waitFor(() => expect(output.waiting).toBe(true))
+  await output.waitUntil(() => output.waiting)
   const first = markers(output.chunks.join(''))
   ui.unmount()
   output.release()
@@ -127,17 +139,17 @@ it('cancels pending admission on exit and restores raw mode', async () => {
 it('restarts parent replay after child inspection and retains the composer draft', async () => {
   const state = props(history(800))
   const { ui, input, output } = mount(state)
-  await vi.waitFor(() => expect(output.waiting).toBe(true))
+  await output.waitUntil(() => output.waiting)
   input.send('saved draft')
   ui.rerender(<App {...state} inspection={{ sessionId: 'replay-child', label: 'Child',
     committed: appendTranscript(emptyTranscript, [{ kind: 'assistant', text: 'child-complete' }]),
     live: [], status: 'idle', model: 'mock/model' }} />)
   output.release()
-  await vi.waitFor(() => expect(output.chunks.join('')).toContain('child-complete'))
+  await output.waitUntil(() => output.chunks.join('').includes('child-complete'))
   expect(output.chunks.join('')).not.toContain('history-799-end')
   output.chunks.length = 0
   ui.rerender(<App {...state} />)
-  await vi.waitFor(() => expect(output.chunks.join('')).toContain('history-799-end'))
+  await output.waitUntil(() => output.chunks.join('').includes('history-799-end'))
   expect(output.chunks.join('')).toContain('saved draft')
   // Inspection causes a terminal repaint; the final replay must still contain
   // every parent row in order, even when the first prefix is repainted too.
@@ -147,14 +159,14 @@ it('restarts parent replay after child inspection and retains the composer draft
 it('abandons a pending session on navigation and completes replay after a resize', async () => {
   const state = props(history(800))
   const { ui, output } = mount(state)
-  await vi.waitFor(() => expect(output.waiting).toBe(true))
+  await output.waitUntil(() => output.waiting)
   ui.rerender(<App {...state} sessionId="replacement" committed={appendTranscript(emptyTranscript,
     Array.from({ length: 800 }, (_, index): Row => ({ kind: 'assistant', text: `replacement-${index}-end` })))} />)
   output.columns = 40
   output.rows = 10
   output.emit('resize')
   output.release()
-  await vi.waitFor(() => expect(output.chunks.join('')).toContain('replacement-799-end'))
+  await output.waitUntil(() => output.chunks.join('').includes('replacement-799-end'))
   const text = output.chunks.join('')
   expect(text).not.toContain('history-799-end')
   const replacement = text.match(/replacement-\d+-end/g) ?? []

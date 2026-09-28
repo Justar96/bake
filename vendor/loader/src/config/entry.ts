@@ -228,6 +228,12 @@ export class Entry {
     } finally {
       this._initTask = undefined
     }
+    // `update()`/`EntryGroup.remove()` can only dispose `this.fiber`, which does
+    // not exist yet while this import is in flight — disabling or removing the
+    // entry during that window is otherwise a no-op. Re-check both before
+    // mounting so a stale import cannot activate a plugin the caller already
+    // tore down.
+    if (this.disabled || this.parent.tree.store[this.options.id] !== this) return
     const plugin = this.loader.unwrapExports(exports)
     this._patchContext([])
     this.loader.showLog(this, 'apply')

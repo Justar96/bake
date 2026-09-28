@@ -1,6 +1,6 @@
 /** Generate the build-static Session format catalog from edge package metadata. */
 
-import { globSync, readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
@@ -84,7 +84,8 @@ export function collectSessionFormatMigrations(
   currentVersion: number = readCurrentSessionFormatVersion(scanRoot),
 ): SessionFormatMigrationManifest[] {
   const declarations: SessionFormatMigrationManifest[] = []
-  for (const discovered of globSync('packages/session/session-format-v*-to-v*/package.json', { cwd: scanRoot }).sort()) {
+  const manifests = new Bun.Glob('packages/session/session-format-v*-to-v*/package.json').scanSync({ cwd: scanRoot })
+  for (const discovered of [...manifests].sort()) {
     const rel = discovered.replaceAll('\\', '/')
     const manifest = readJson(resolve(scanRoot, rel))
     const metadata = manifest.dsh?.sessionFormatMigration

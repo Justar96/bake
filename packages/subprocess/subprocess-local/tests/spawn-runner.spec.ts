@@ -388,77 +388,85 @@ describe('runner launch inputs', () => {
   })
 
   it('resolves Windows executables with target-cwd and PATH search semantics', () => {
-    const probed: string[] = []
-    const exists = (candidate: string): boolean => {
-      probed.push(candidate)
-      return candidate === 'C:\\tools\\git\\bin\\bash.exe'
+    // The default search policy reads the runner environment; a host that sets
+    // this, as WSL can by inheriting it from Windows, would skip the cwd root.
+    vi.stubEnv('NoDefaultCurrentDirectoryInExePath', undefined)
+    vi.stubEnv('NODEFAULTCURRENTDIRECTORYINEXEPATH', undefined)
+    try {
+      const probed: string[] = []
+      const exists = (candidate: string): boolean => {
+        probed.push(candidate)
+        return candidate === 'C:\\tools\\git\\bin\\bash.exe'
+      }
+      expect(resolveWindowsExecutable('bash', 'C:\\target', {
+        Path: 'relative;"C:\\semi;colon";"C:\\tools\\git\\bin";C:\\later',
+      }, exists)).toBe('C:\\tools\\git\\bin\\bash.exe')
+      expect(probed).toEqual([
+        'C:\\target\\bash.com',
+        'C:\\target\\bash.exe',
+        'C:\\target\\relative\\bash.com',
+        'C:\\target\\relative\\bash.exe',
+        'C:\\semi;colon\\bash.com',
+        'C:\\semi;colon\\bash.exe',
+        'C:\\tools\\git\\bin\\bash.com',
+        'C:\\tools\\git\\bin\\bash.exe',
+      ])
+
+      expect(resolveWindowsExecutable('local.exe', 'C:\\target', {}, candidate =>
+        candidate === 'C:\\target\\local.exe')).toBe('C:\\target\\local.exe')
+      expect(resolveWindowsExecutable('tool', 'C:\\target', {
+        PATH: 'C:\\bin',
+      }, candidate => candidate === 'C:\\bin\\tool.com', {
+        NoDefaultCurrentDirectoryInExePath: '1',
+      })).toBe('C:\\bin\\tool.com')
+      expect(resolveWindowsExecutable('tool', 'C:\\target', {
+        PATH: 'D:relative',
+      }, candidate => candidate === 'D:relative\\tool.exe')).toBe('D:relative\\tool.exe')
+      expect(resolveWindowsExecutable('tool.', 'C:\\target', {}, candidate =>
+        candidate === 'C:\\target\\tool.exe')).toBe('C:\\target\\tool.exe')
+      expect(resolveWindowsExecutable('.\\missing', 'C:\\target', {}, () => false))
+        .toBeUndefined()
+
+      expect(resolveWindowsExecutable('tool', 'C:\\target', {
+        PATH: ';;C:\\bin',
+      }, candidate => candidate === 'C:\\bin\\tool.exe')).toBe('C:\\bin\\tool.exe')
+      expect(resolveWindowsExecutable('tool', 'C:\\target', {
+        PATH: '"";C:\\bin',
+      }, candidate => candidate === 'C:\\bin\\tool.exe')).toBe('C:\\bin\\tool.exe')
+      expect(resolveWindowsExecutable('tool', 'C:\\target', {
+        PATH: '"unterminated',
+      }, candidate => candidate === 'C:\\target\\unterminated\\tool.exe'))
+        .toBe('C:\\target\\unterminated\\tool.exe')
+      expect(resolveWindowsExecutable('\\\\server\\share\\tool', 'C:\\target', {}, candidate =>
+        candidate === '\\\\server\\share\\tool.exe')).toBe('\\\\server\\share\\tool.exe')
+      expect(resolveWindowsExecutable('\\tools\\tool', 'C:\\target', {}, candidate =>
+        candidate === 'C:\\tools\\tool.exe')).toBe('C:\\tools\\tool.exe')
+      expect(resolveWindowsExecutable('C:tools\\tool', 'C:\\target', {}, candidate =>
+        candidate === 'C:\\target\\tools\\tool.exe')).toBe('C:\\target\\tools\\tool.exe')
+
+      const noSearchEnvironment = { NoDefaultCurrentDirectoryInExePath: '1' }
+      expect(resolveWindowsExecutable('missing', 'C:\\target', {}, () => false, noSearchEnvironment))
+        .toBeUndefined()
+      expect(resolveWindowsExecutable('missing.cmd', 'C:\\target', {}, () => false, noSearchEnvironment))
+        .toBeUndefined()
+
+      const directory = mkdtempSync(join(tmpdir(), 'dsh-windows-resolver-'))
+      scratch.push(directory)
+      const executable = join(directory, 'direct.exe')
+      const directoryCandidate = join(directory, 'directory')
+      const missingExecutable = join(directory, 'missing.exe')
+      const danglingAlias = join(directory, 'alias.exe')
+      writeFileSync(executable, '')
+      mkdirSync(`${directoryCandidate}.com`)
+      writeFileSync(`${directoryCandidate}.exe`, '')
+      symlinkSync(missingExecutable, danglingAlias, 'file')
+      expect(resolveWindowsExecutable(executable, '', {})).toBe(executable)
+      expect(resolveWindowsExecutable(directoryCandidate, '', {})).toBe(`${directoryCandidate}.exe`)
+      expect(resolveWindowsExecutable(danglingAlias, '', {})).toBe(danglingAlias)
+      expect(resolveWindowsExecutable(missingExecutable, '', {})).toBeUndefined()
+    } finally {
+      vi.unstubAllEnvs()
     }
-    expect(resolveWindowsExecutable('bash', 'C:\\target', {
-      Path: 'relative;"C:\\semi;colon";"C:\\tools\\git\\bin";C:\\later',
-    }, exists)).toBe('C:\\tools\\git\\bin\\bash.exe')
-    expect(probed).toEqual([
-      'C:\\target\\bash.com',
-      'C:\\target\\bash.exe',
-      'C:\\target\\relative\\bash.com',
-      'C:\\target\\relative\\bash.exe',
-      'C:\\semi;colon\\bash.com',
-      'C:\\semi;colon\\bash.exe',
-      'C:\\tools\\git\\bin\\bash.com',
-      'C:\\tools\\git\\bin\\bash.exe',
-    ])
-
-    expect(resolveWindowsExecutable('local.exe', 'C:\\target', {}, candidate =>
-      candidate === 'C:\\target\\local.exe')).toBe('C:\\target\\local.exe')
-    expect(resolveWindowsExecutable('tool', 'C:\\target', {
-      PATH: 'C:\\bin',
-    }, candidate => candidate === 'C:\\bin\\tool.com', {
-      NoDefaultCurrentDirectoryInExePath: '1',
-    })).toBe('C:\\bin\\tool.com')
-    expect(resolveWindowsExecutable('tool', 'C:\\target', {
-      PATH: 'D:relative',
-    }, candidate => candidate === 'D:relative\\tool.exe')).toBe('D:relative\\tool.exe')
-    expect(resolveWindowsExecutable('tool.', 'C:\\target', {}, candidate =>
-      candidate === 'C:\\target\\tool.exe')).toBe('C:\\target\\tool.exe')
-    expect(resolveWindowsExecutable('.\\missing', 'C:\\target', {}, () => false))
-      .toBeUndefined()
-
-    expect(resolveWindowsExecutable('tool', 'C:\\target', {
-      PATH: ';;C:\\bin',
-    }, candidate => candidate === 'C:\\bin\\tool.exe')).toBe('C:\\bin\\tool.exe')
-    expect(resolveWindowsExecutable('tool', 'C:\\target', {
-      PATH: '"";C:\\bin',
-    }, candidate => candidate === 'C:\\bin\\tool.exe')).toBe('C:\\bin\\tool.exe')
-    expect(resolveWindowsExecutable('tool', 'C:\\target', {
-      PATH: '"unterminated',
-    }, candidate => candidate === 'C:\\target\\unterminated\\tool.exe'))
-      .toBe('C:\\target\\unterminated\\tool.exe')
-    expect(resolveWindowsExecutable('\\\\server\\share\\tool', 'C:\\target', {}, candidate =>
-      candidate === '\\\\server\\share\\tool.exe')).toBe('\\\\server\\share\\tool.exe')
-    expect(resolveWindowsExecutable('\\tools\\tool', 'C:\\target', {}, candidate =>
-      candidate === 'C:\\tools\\tool.exe')).toBe('C:\\tools\\tool.exe')
-    expect(resolveWindowsExecutable('C:tools\\tool', 'C:\\target', {}, candidate =>
-      candidate === 'C:\\target\\tools\\tool.exe')).toBe('C:\\target\\tools\\tool.exe')
-
-    const noSearchEnvironment = { NoDefaultCurrentDirectoryInExePath: '1' }
-    expect(resolveWindowsExecutable('missing', 'C:\\target', {}, () => false, noSearchEnvironment))
-      .toBeUndefined()
-    expect(resolveWindowsExecutable('missing.cmd', 'C:\\target', {}, () => false, noSearchEnvironment))
-      .toBeUndefined()
-
-    const directory = mkdtempSync(join(tmpdir(), 'dsh-windows-resolver-'))
-    scratch.push(directory)
-    const executable = join(directory, 'direct.exe')
-    const directoryCandidate = join(directory, 'directory')
-    const missingExecutable = join(directory, 'missing.exe')
-    const danglingAlias = join(directory, 'alias.exe')
-    writeFileSync(executable, '')
-    mkdirSync(`${directoryCandidate}.com`)
-    writeFileSync(`${directoryCandidate}.exe`, '')
-    symlinkSync(missingExecutable, danglingAlias, 'file')
-    expect(resolveWindowsExecutable(executable, '', {})).toBe(executable)
-    expect(resolveWindowsExecutable(directoryCandidate, '', {})).toBe(`${directoryCandidate}.exe`)
-    expect(resolveWindowsExecutable(danglingAlias, '', {})).toBe(danglingAlias)
-    expect(resolveWindowsExecutable(missingExecutable, '', {})).toBeUndefined()
   })
 })
 

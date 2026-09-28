@@ -944,13 +944,17 @@ describe('SubagentRuntime.listChildren', () => {
     }]
     // No stored row at all for a foreign child this process never ran.
     const inspect = vi.spyOn(ctx.sessionPersistence, 'open')
+    const prepare = vi.spyOn(ctx.sessionQuery, 'observeSession')
     await expect(ctx.subagents.listChildren(parent.id)).resolves.toEqual(expected)
+    expect(prepare).toHaveBeenCalledTimes(1)
     expect(inspect).toHaveBeenCalledTimes(1)
     // A stored row whose cut predates the descriptor: the subagent key is
-    // absent from the served values, and preparation still rules.
+    // absent from the served values, and preparation still rules. The
+    // unchanged log's retained preparation serves that rung without a reread.
     ctx.sessionProjectionCache.cachedSnapshot = () => ({ asOfSeq: SessionSeq(0), values: {} })
     await expect(ctx.subagents.listChildren(parent.id)).resolves.toEqual(expected)
-    expect(inspect).toHaveBeenCalledTimes(2)
+    expect(prepare).toHaveBeenCalledTimes(2)
+    expect(inspect).toHaveBeenCalledTimes(1)
   })
 
   it('takes the preparation rung directly when no projection cache is mounted', async () => {

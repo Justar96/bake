@@ -20,13 +20,88 @@
 - id: tool-jobs
   disabled: true
 
+# Each preset that compacts mounts its own `compaction-basic`. The base row's
+# automatic listeners, the between-step pressure check and context-overflow
+# recovery, reach every preset agent too, so two engines would check each step
+# and the lower threshold would win, and `minimal`, whose preset leaves
+# compaction out, would compact anyway. `auto: false` removes both listeners
+# and keeps the engine for the host `/compact`, which serves a preset without
+# its own command. A later layer that configures this row replaces this config,
+# so it must keep `auto: false`.
+- id: compaction-basic
+  config:
+    auto: false
+
+# The agent's own rows belong to its preset: instructions, the shells, file
+# tools, skills, goal controls, plan mode, delegation, workflows, tasks, and
+# web tools. The base copies would run on the host plane, where their global
+# tools and untagged listeners reach every preset agent as well. A preset that
+# mounts the same row then runs it twice: the host `tool-skill` finds none of
+# the preset's skills, strips the preset's catalog, and injects each `/skill`
+# body a second time. A preset that leaves a row out gets the host copy
+# anyway: `ptc` disables both workflow rows yet would still offer `workflow`,
+# and the shell-only `minimal` would receive every tool here, AGENTS.md, and
+# the skill catalog. The services behind these tools stay on the host: the
+# `skill` registry, the `goal` service and its round driver, and the
+# `subagent` registry and backends. The compaction rows above stay too, for
+# the host `/compact`.
+- id: agent-instructions
+  disabled: true
+- id: tool-bash
+  disabled: true
+- id: tool-pwsh
+  disabled: true
+- id: tool-fs
+  disabled: true
+- id: tool-fs-search
+  disabled: true
+- id: skill-filesystem
+  disabled: true
+- id: tool-skill
+  disabled: true
+- id: command-goal
+  disabled: true
+- id: tool-goal
+  disabled: true
+- id: plan-mode
+  disabled: true
+- id: tool-subagent-control
+  disabled: true
+- id: tool-subagent-list-agents
+  disabled: true
+- id: tool-subagent
+  disabled: true
+- id: tool-subagent-fork
+  disabled: true
+- id: workflow-ptc
+  disabled: true
+- id: tool-workflow
+  disabled: true
+- id: tool-todo
+  disabled: true
+- id: tool-web
+  disabled: true
+
+# Bake's preset persona owns the identity, so the harness opener stays out.
+- id: system-prompt
+  config:
+    personaPrefix: ''
+    includeHarnessIdentity: false
+
 - insert:
     - id: file-reference-local
       name: '@deepseek-ai/dsh-file-reference-local'
 
-    # Agent presets, so the session mounts `standard` — the roster the web
-    # surface ships. Not a base row. `default` names the preset the runner
-    # mounts when --preset is absent; the runner reads it as `presets.defaultId`
+    # The `cordisInspect` registry that the `cordis` preset's inspection tools
+    # register into and query. It is one registry for the whole process, so it
+    # sits on the host plane rather than in the preset. It adds no tool or
+    # prompt, so other presets see nothing of it.
+    - id: cordis-host-runner
+      name: '@deepseek-ai/dsh-cordis-host-runner'
+
+    # Agent presets, so the session mounts `standard` — this profile's own
+    # roster. Not a base row. `default` names the preset the runner mounts
+    # when --preset is absent; the runner reads it as `presets.defaultId`
     # rather than repeating the name.
     #
     # `cmdlineArgs` needs no row: the launcher provides it, which is why the
@@ -36,8 +111,8 @@
       config:
         default: standard
 
-    # The `standard` preset's subagent row requires this settings plugin in the
-    # Host scope; the web bundle inserts the same row for the same reason.
+    # The `standard` preset's subagent row requires this settings plugin in
+    # the Host scope.
     - id: subagent-model-selection-settings
       name: '@deepseek-ai/dsh-tool-subagent/model-selection-settings'
 

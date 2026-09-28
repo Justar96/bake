@@ -7,7 +7,9 @@
  * metadata field stays static, so an expression there remains truthy data and
  * silently changes composition. Shipped and test-only dsh overlays resolve
  * named plugins from the CLI application's owning manifest; package-owned
- * Loader fixtures resolve from their package manifest.
+ * Loader fixtures resolve from their package manifest. A row an agent preset
+ * shares with the host plane of a shipped profile that mounts presets fails
+ * the check unless {@link SHARED_PLANE_ROWS} names it with its reason.
  */
 
 import { globSync, readFileSync } from 'node:fs'
@@ -15,7 +17,7 @@ import { dirname, relative, resolve } from 'node:path'
 import { Script } from 'node:vm'
 import ts from 'typescript'
 import type { DshBundleManifest } from '../packages/util/package-manifest/src/types.ts'
-import { bundlePatchPaths } from '../packages/boot/app-boot/src/profile.ts'
+import { bundlePatchPaths, PROFILE_TEMPLATES, type ProfileTemplate } from '../packages/boot/app-boot/src/profile.ts'
 import { cordisConfigFiles } from './cordis-config-files.ts'
 import { isCordisGroupEntry, isJsExpr, loadCordisYaml } from './cordis-yaml.ts'
 
@@ -56,6 +58,23 @@ const CHOOSER_BACKEND_PACKAGES = [
   '@deepseek-ai/dsh-client-ui-directory-picker-browse',
   '@deepseek-ai/dsh-client-ui-directory-picker-native',
 ]
+/** The package whose row mounts the agent preset roster. */
+const PRESETS_PACKAGE = '@deepseek-ai/dsh-agent-presets'
+
+/**
+ * Rows a preset-hosting profile deliberately runs on its host plane while
+ * presets mount them too, each with the reason the second copy is harmless.
+ * Every other shared row fails the plane check, and an entry that no longer
+ * matches a shared row fails it too, so the list cannot outlive its reason.
+ */
+export const SHARED_PLANE_ROWS: Readonly<Record<string, string>> = {
+  'compaction-basic': 'the tui patch sets `auto: false`, which installs no listener, so only a preset\'s own engine '
+    + 'compacts on its own; the host engine is kept for the host `/compact`',
+  'command-compact': 'the host `/compact` serves a preset without its own, such as `minimal`; a preset\'s own command '
+    + 'shadows it by name',
+  'tool-result-pruner': 'only the host engine calls the host pruner; a preset\'s engine resolves the pruner in its own '
+    + 'realm, so no result is pruned twice',
+}
 const errors: string[] = []
 const pluginReferences: PluginReference[] = []
 
@@ -77,8 +96,12 @@ if (import.meta.main) {
   errors.push(...validatePackageTestResolution())
   errors.push(...packageTestFixtureDependencyErrors())
   errors.push(...validateSourcePlaneResolution())
-  errors.push(...validatePresetPlaneSeparation())
   errors.push(...validateClientHalvesDeclared())
+  try {
+    errors.push(...planeSeparationErrors(presetPlaneOverlaps()))
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : String(error))
+  }
 
   if (errors.length > 0) {
     console.error('verify-cordis-config: invalid Loader metadata or plugin package resolution:')
@@ -133,60 +156,164 @@ function validateClientHalvesDeclared(): string[] {
  * registered again for every live session until the second registration threw.
  * Neither changes a tool catalog, so no catalog assertion can see them — and the
  * shipped presets are near-copies of each other, so a fix applied to three of
- * four is the normal failure.
- * @returns one diagnostic per preset row that is also active on the host plane.
+ * four is the normal failure. A host row's untagged listeners also reach every
+ * preset agent: the terminal profile's host `tool-skill` once stripped its
+ * presets' skill catalogs and injected each `/skill` body twice.
+ *
+ * A preset's row counts whether or not the preset disables it. A preset that
+ * turns a row off still receives the host's copy, as `ptc` once received the
+ * host `workflow` tool its own disabled rows leave out.
+ *
+ * The host compositions are the shipped profiles that mount the preset roster.
+ * @param repoRoot Repository root to scan.
+ * @param templates Profile templates by name, as `dsh --profile <name>` initializes them.
+ * @returns each preset's rows that a preset-hosting profile also runs, one entry per profile and preset with any.
+ * @throws when no shipped profile mounts the roster, or a profile names a bundle no workspace manifest declares.
  */
-function validatePresetPlaneSeparation(): string[] {
-  const problems: string[] = []
-  // The shipped Web surface is two bundle patch layers over an empty root.
-  const hostFile = 'packages/bundle/base/cordis.patch.yml'
-  const overlayFile = 'packages/bundle/web-app/cordis.patch.yml'
-  const hostRows = rowIds(hostFile)
-  const overlay = loadEntries(overlayFile)
-  const disabled = new Set<string>()
-  for (const entry of overlay) {
-    if (!isRecord(entry)) continue
-    if (entry.disabled === true && typeof entry.id === 'string') disabled.add(entry.id)
-  }
-  // The overlay's own inserts are host-plane too; its disables take them back out.
-  const active = new Set([...hostRows, ...rowIds(overlayFile)].filter(id => !disabled.has(id)))
-  for (const file of globSync('packages/preset/agent-presets/presets/*/agent.cordis.yml', { cwd: root })) {
-    for (const id of rowIds(file)) {
-      if (!active.has(id)) continue
-      problems.push(
-        `${file}: row "${id}" is also active in the host composition; `
-        + 'a row belongs to exactly one plane',
-      )
+export function presetPlaneOverlaps(
+  repoRoot: string = root,
+  templates: Readonly<Record<string, ProfileTemplate>> = PROFILE_TEMPLATES,
+): PlaneOverlap[] {
+  const hosts = presetHostProfiles(repoRoot, templates)
+  if (hosts.length === 0) throw new Error(`no shipped profile mounts ${PRESETS_PACKAGE}, so the preset plane check has nothing to compare`)
+  const presets = globSync('packages/preset/agent-presets/presets/*/agent.cordis.yml', { cwd: repoRoot })
+    .map(file => file.replaceAll('\\', '/')).sort()
+  return hosts.flatMap((host) => {
+    const active = activeRowIds(host.files, repoRoot)
+    return presets.flatMap((file) => {
+      const ids = [...rowIds(file, repoRoot)].filter(id => active.has(id))
+      return ids.length === 0 ? [] : [{ profile: host.profile, file, ids }]
+    })
+  })
+}
+
+/**
+ * Turn plane overlaps into failures, except the rows an allowlist shares on
+ * purpose, and fail an allowlist entry that no overlap uses any more.
+ * @param overlaps Every preset row a preset-hosting profile also runs, from {@link presetPlaneOverlaps}.
+ * @param shared Row ids both planes may run, each with the reason that is harmless.
+ * @returns one diagnostic per preset and profile with unshared rows, and one per stale allowlist entry.
+ */
+export function planeSeparationErrors(
+  overlaps: readonly PlaneOverlap[],
+  shared: Readonly<Record<string, string>> = SHARED_PLANE_ROWS,
+): string[] {
+  const used = new Set(overlaps.flatMap(overlap => overlap.ids))
+  return [
+    ...overlaps.flatMap((overlap) => {
+      const ids = overlap.ids.filter(id => !Object.hasOwn(shared, id))
+      return ids.length === 0 ? [] : [
+        `${overlap.file}: ${ids.map(id => `"${id}"`).join(', ')} also active in the ${overlap.profile} profile's host `
+        + 'composition; a row belongs to exactly one plane, so disable the host copy or list it in SHARED_PLANE_ROWS '
+        + 'with the reason both copies are harmless',
+      ]
+    }),
+    ...Object.keys(shared).filter(id => !used.has(id)).map(id =>
+      `SHARED_PLANE_ROWS lists "${id}", which no preset shares with a preset-hosting profile any more; remove it`),
+  ]
+}
+
+/** One preset's rows that a preset-hosting profile also runs on its host plane. */
+export interface PlaneOverlap {
+  /** The shipped profile whose composition runs the rows. */
+  readonly profile: string
+  /** Repository-relative preset composition file. */
+  readonly file: string
+  /** The shared row ids, in the preset's declaration order. */
+  readonly ids: readonly string[]
+}
+
+/**
+ * Profile templates whose bundle layers mount the preset roster, each with its
+ * layers' patch files in application order over the empty root.
+ * @param repoRoot Repository root to scan.
+ * @param templates Profile templates by name.
+ * @returns one entry per preset-hosting profile.
+ */
+function presetHostProfiles(
+  repoRoot: string,
+  templates: Readonly<Record<string, ProfileTemplate>>,
+): { profile: string; files: string[] }[] {
+  const bundles = new Map(bundleManifestPaths(repoRoot).flatMap((manifestPath) => {
+    const manifest = readManifest(manifestPath, repoRoot)
+    const bundle = manifest.dsh?.bundle
+    return manifest.name === undefined || bundle === undefined ? [] : [[manifest.name, { manifestPath, bundle }] as const]
+  }))
+  return Object.entries(templates).flatMap(([profile, template]) => {
+    const files = template.bundles.flatMap((name) => {
+      const found = bundles.get(name)
+      if (found === undefined) throw new Error(`profile template "${profile}" names bundle ${name}, which no workspace manifest declares`)
+      return bundlePatchPaths(resolve(repoRoot, dirname(found.manifestPath)), found.bundle)
+        .map(file => relative(repoRoot, file).replaceAll('\\', '/'))
+    })
+    const mountsPresets = files.some(file => rowNames(file, repoRoot).has(PRESETS_PACKAGE))
+    return mountsPresets ? [{ profile, files }] : []
+  })
+}
+
+/**
+ * Row ids a stack of patch layers leaves active. Each layer declares rows,
+ * active unless declared `disabled: true`, then its top-level patches take an
+ * id out with `disabled: true` or put a declared one back with `disabled: false`.
+ * A `!!js` gate counts as active, since some host evaluates it that way.
+ * @param files Repository-relative patch files in application order.
+ * @param repoRoot Repository root the paths are relative to.
+ * @returns the ids the composed tree mounts.
+ */
+function activeRowIds(files: readonly string[], repoRoot: string): Set<string> {
+  const declared = new Set<string>()
+  const active = new Set<string>()
+  for (const file of files) {
+    for (const row of rows(file, repoRoot)) {
+      declared.add(row.id)
+      if (row.disabled) active.delete(row.id)
+      else active.add(row.id)
+    }
+    for (const entry of loadEntries(file, repoRoot)) {
+      if (!isRecord(entry) || typeof entry.id !== 'string' || typeof entry.name === 'string') continue
+      if (entry.disabled === true) active.delete(entry.id)
+      else if (entry.disabled === false && declared.has(entry.id)) active.add(entry.id)
     }
   }
-  return problems
+  return active
 }
 
 /** Every entry of one config file, or an empty list when it is not an entry array. */
-function loadEntries(file: string): unknown[] {
-  const document = loadCordisYaml(readFileSync(resolve(root, file), 'utf8'))
+function loadEntries(file: string, repoRoot: string = root): unknown[] {
+  const document = loadCordisYaml(readFileSync(resolve(repoRoot, file), 'utf8'))
   return isUnknownArray(document) ? document : []
 }
 
 /**
- * Row ids declared anywhere in one config file, including inside group `config`
+ * Rows declared anywhere in one config file, including inside group `config`
  * lists — a preset nests most of its rows in `isolate` groups.
  * @param file - repository-relative config path.
- * @returns the declared ids.
+ * @param repoRoot - repository root the path is relative to.
+ * @returns each declared row's id, plugin name, and whether it is declared with a literal `disabled: true`.
  */
-function rowIds(file: string): Set<string> {
-  const ids = new Set<string>()
+function rows(file: string, repoRoot: string): { id: string; name: string; disabled: boolean }[] {
+  const found: { id: string; name: string; disabled: boolean }[] = []
   const walk = (value: unknown): void => {
     if (isUnknownArray(value)) {
       for (const item of value) walk(item)
       return
     }
     if (!isRecord(value)) return
-    if (typeof value.id === 'string' && typeof value.name === 'string') ids.add(value.id)
+    if (typeof value.id === 'string' && typeof value.name === 'string') found.push({ id: value.id, name: value.name, disabled: value.disabled === true })
     for (const child of Object.values(value)) walk(child)
   }
-  walk(loadEntries(file))
-  return ids
+  walk(loadEntries(file, repoRoot))
+  return found
+}
+
+/** Ids of every row one config file declares, disabled or not. */
+function rowIds(file: string, repoRoot: string): Set<string> {
+  return new Set(rows(file, repoRoot).map(row => row.id))
+}
+
+/** Plugin names of every row one config file declares. */
+function rowNames(file: string, repoRoot: string): Set<string> {
+  return new Set(rows(file, repoRoot).map(row => row.name))
 }
 
 function validateEntry(value: unknown, file: string, path: string): void {
@@ -359,12 +486,14 @@ function packageTestManifestPath(file: string): string | undefined {
 }
 
 /**
- * Discover workspace Bundle packages from their manifest declaration.
+ * Discover workspace Bundle packages from their manifest declaration: the
+ * shared runtime's, and the terminal app's, which the `tui` profile layers
+ * over `dsh-base`.
  * @param repoRoot Repository root to scan.
  * @returns Sorted slash-normalized repository-relative package manifest paths.
  */
 export function bundleManifestPaths(repoRoot: string = root): string[] {
-  return globSync('packages/*/*/package.json', { cwd: repoRoot })
+  return globSync(['packages/*/*/package.json', 'apps/tui/packages/*/package.json'], { cwd: repoRoot })
     .filter(path => readManifest(path, repoRoot).dsh?.bundle?.patch !== undefined)
     .map(path => path.replaceAll('\\', '/'))
     .sort()

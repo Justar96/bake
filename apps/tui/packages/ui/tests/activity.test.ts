@@ -4,7 +4,10 @@
  */
 
 import { describe, expect, it } from 'bun:test'
-import { activityWord, FRAME_MS, formatElapsed, lastTurn, phaseLabel, phaseOf, SPINNER, SPINNER_REST, spinnerFrame, thinkingRows, turnSummary } from '../src/activity.ts'
+import {
+  activityWord, FOLD_REST, FOLD_SPINNER, foldFrame, FRAME_MS, formatElapsed, lastTurn, phaseLabel, phaseOf, SPINNER, SPINNER_REST, spinnerFrame,
+  RATE_MIN_MS, RATE_MIN_TOKENS, rateLabel, thinkingRows, turnSummary,
+} from '../src/activity.ts'
 import { dictionaries } from '../src/copy.ts'
 import { markdownLines } from '../src/markdown.ts'
 import wrapAnsi from 'wrap-ansi'
@@ -48,6 +51,50 @@ describe('spinner', () => {
       // Rounded, never a block: the top of the dough is narrower than its widest row.
       const width = (row: string): number => row.replaceAll('.', '').length
       expect(width(rows[0]!)).toBeLessThan(Math.max(...rows.map(width)))
+    }
+  })
+
+  it('laminates a sheet of dough for compaction: ends folded in to a block, pressed, and rolled out', () => {
+    const frames = ['⣀⣀⣀', '⢄⣀⡠', '⠢⣀⠔', '⠰⣀⠆', '⠠⣒⠄', '⠀⣶⠀', '⢀⣶⡀', '⢠⣤⡄', '⣀⣤⣀']
+    expect(FOLD_SPINNER).toEqual(frames)
+    expect(FOLD_SPINNER.map(pixels)).toEqual([
+      // A flat sheet on the bench.
+      ['......', '......', '......', '######'],
+      // Its ends lift, swing up, stand, and fold over to meet in the middle.
+      ['......', '......', '#....#', '.####.'],
+      ['......', '#....#', '.#..#.', '..##..'],
+      ['......', '.#..#.', '.#..#.', '..##..'],
+      ['......', '..##..', '.#..#.', '..##..'],
+      // Three layers in a compact block.
+      ['......', '..##..', '..##..', '..##..'],
+      // Pressed down.
+      ['......', '..##..', '..##..', '.####.'],
+      ['......', '......', '.####.', '.####.'],
+      // Rolled out from the middle, back to the sheet.
+      ['......', '......', '..##..', '######'],
+    ])
+    // The kneading's beat, looping.
+    for (let step = 0; step < 27; step++) expect(foldFrame(step * FRAME_MS)).toBe(frames[step % frames.length])
+    expect(foldFrame(-500)).toBe(frames[0])
+    // Never a kneading frame, so the two animations cannot be mistaken.
+    for (const frame of FOLD_SPINNER) expect(SPINNER).not.toContain(frame)
+  })
+
+  it('holds the folded block when motion is disabled, square where the kneading ball is round', () => {
+    expect(FOLD_REST).toBe('⢠⣤⡄')
+    expect(pixels(FOLD_REST)).toEqual(['......', '......', '.####.', '.####.'])
+    expect(FOLD_SPINNER).toContain(FOLD_REST)
+    expect(FOLD_REST).not.toBe(SPINNER_REST)
+  })
+
+  it('folds both ends at once, so every frame is centred in three cells on the bottom row', () => {
+    for (const frame of FOLD_SPINNER) {
+      expect([...frame]).toHaveLength(3)
+      for (const cell of frame) expect(cell.codePointAt(0)! >> 8).toBe(0x28)
+      const rows = pixels(frame)
+      expect(rows[3]).toMatch(/#{2}/u)
+      // Its own mirror image: the dough never drifts to one side.
+      expect(rows).toEqual(rows.map(row => [...row].reverse().join('')))
     }
   })
 })
@@ -189,7 +236,7 @@ describe('turn summary', () => {
     const rows: Row[] = [
       { kind: 'user', text: 'go' }, ran('a', 'read_file'), ran('b', 'bash'), ran('c', 'read_file', false), ran('d', 'apply_patch'), end('info'),
     ]
-    expect(turnSummary(rows, copy, 65_000)).toEqual({ outcome: 'done', label: 'Completed', details: '1m 05s · edited 1 · ran 1 · read 2 · 1 failed' })
+    expect(turnSummary(rows, copy, 65_000)).toEqual({ outcome: 'done', label: 'Completed', details: '1m 05s · edited 1 · ran 1 · read 2 · 1 failed', brief: '1m 05s' })
   })
 
   it('counts the calls inside a step\'s group', () => {
@@ -198,8 +245,29 @@ describe('turn summary', () => {
   })
 
   it('reads the outcome from the recorded turn end', () => {
-    expect(turnSummary([end('warn', 'Blocked')], copy, 3_000)).toEqual({ outcome: 'stopped', label: 'Blocked', details: '3s' })
-    expect(turnSummary([end('error')], dictionaries.zh, undefined)).toEqual({ outcome: 'failed', label: '失败', details: '' })
+    expect(turnSummary([end('warn', 'Blocked')], copy, 3_000)).toEqual({ outcome: 'stopped', label: 'Blocked', details: '3s', brief: '3s' })
+    expect(turnSummary([end('error')], dictionaries.zh, undefined)).toEqual({ outcome: 'failed', label: '失败', details: '', brief: '' })
+  })
+
+  it('closes the details with the final answer\'s rate, only for a sample long enough to mean something', () => {
+    const answer = (tokens: number, ms: number): Row[] => [ran('a', 'bash'), { kind: 'assistant', text: 'Done.' }, { kind: 'rate', tokens, ms }, end('info')]
+    expect(turnSummary(answer(856, 20_240), copy, 72_000).details).toBe('1m 12s · ran 1 · 42 tok/s')
+    expect(turnSummary(answer(856, 20_240), dictionaries.zh, undefined).details).toBe('ran 1 · 42 token/秒')
+    // Four tokens over 74 ms, or a second of a handful of tokens, is not a speed.
+    expect(turnSummary(answer(4, 74), copy, undefined).details).toBe('ran 1')
+    expect(turnSummary(answer(RATE_MIN_TOKENS - 1, 5_000), copy, undefined).details).toBe('ran 1')
+    expect(turnSummary(answer(500, RATE_MIN_MS - 1), copy, undefined).details).toBe('ran 1')
+    expect(rateLabel({ tokens: RATE_MIN_TOKENS, ms: RATE_MIN_MS }, copy)).toBe('64 tok/s')
+    // A rate without finite numbers, such as a row from an older build, reports nothing rather than `NaN tok/s`.
+    for (const broken of [{ tokens: Number.NaN, ms: 5_000 }, { tokens: 500, ms: Number.NaN }, { tokens: Number.POSITIVE_INFINITY, ms: 5_000 },
+      { tokens: 500, ms: Number.POSITIVE_INFINITY }]) expect(rateLabel(broken, copy)).toBeUndefined()
+    const legacy = { kind: 'rate', text: '4 tokens · 54.1 tok/s' } as unknown as Row
+    expect(turnSummary([ran('a', 'bash'), legacy, end('info')], copy, undefined).details).toBe('ran 1')
+    // A failed turn still reports the answer it gave before the failure.
+    expect(turnSummary([{ kind: 'rate', tokens: 300, ms: 2_000 }, end('error')], copy, undefined))
+      .toEqual({ outcome: 'failed', label: 'Failed', details: '150 tok/s', brief: '' })
+    // A narrow header keeps the elapsed time once the counts and the rate give way.
+    expect(turnSummary(answer(856, 20_240), copy, 72_000).brief).toBe('1m 12s')
   })
 
   it('counts a standalone failed result', () => {

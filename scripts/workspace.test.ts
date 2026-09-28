@@ -1,4 +1,4 @@
-/** Workspace discovery rejects dangling package edges and keeps compiler faces explicit. */
+/** Workspace discovery rejects dangling package edges, keeps compiler faces explicit, and shares external ranges via the catalog. */
 import { afterEach, expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -11,10 +11,10 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
 
-function fixture(): string {
+function fixture(rootFields: Record<string, unknown> = {}): string {
   const root = mkdtempSync(join(tmpdir(), 'bake-workspace-'))
   roots.push(root)
-  put(root, 'package.json', { name: 'bake', packageManager: 'bun@1.4.3', workspaces: ['packages/*', 'apps/tui/*'] })
+  put(root, 'package.json', { name: 'bake', packageManager: 'bun@1.4.3', workspaces: ['packages/*', 'apps/tui/*'], ...rootFields })
   return root
 }
 
@@ -102,4 +102,73 @@ test('discovers each manifest once when workspace globs overlap', () => {
 
 test('rejects an empty workspace', () => {
   expect(() => workspaceConfig(fixture())).toThrow('No workspace packages found')
+})
+
+test('requires the root catalog for an external dependency two manifests declare', () => {
+  const root = fixture()
+  put(root, 'packages/a/package.json', { name: 'a', dependencies: { zod: '^4.4.3' } })
+  put(root, 'packages/b/package.json', { name: 'b', devDependencies: { zod: '^4.4.3' } })
+  expect(() => workspaceConfig(root)).toThrow('zod is declared by 2 workspace manifests; set its range once in the root catalog and use '
+    + '"catalog:" in packages/a/package.json (dependencies), packages/b/package.json (devDependencies)')
+})
+
+test('counts the root manifest and names only the literal declarations', () => {
+  const root = fixture({ catalog: { zod: '^4.4.3' }, devDependencies: { zod: '^4.4.3' } })
+  put(root, 'packages/a/package.json', { name: 'a', dependencies: { zod: 'catalog:' } })
+  expect(() => workspaceConfig(root)).toThrow('zod is declared by 2 workspace manifests; set its range once in the root catalog and use '
+    + '"catalog:" in package.json (devDependencies)')
+})
+
+test('keeps a catalog entry while one reference remains and rejects it once the last is removed', () => {
+  const root = fixture({ catalog: { zod: '^4.4.3' } })
+  put(root, 'packages/a/package.json', { name: 'a', dependencies: { zod: 'catalog:' } })
+  put(root, 'packages/b/package.json', { name: 'b', devDependencies: { zod: 'catalog:' } })
+  expect(() => workspaceConfig(root)).not.toThrow()
+  put(root, 'packages/b/package.json', { name: 'b' })
+  expect(() => workspaceConfig(root)).not.toThrow()
+  put(root, 'packages/a/package.json', { name: 'a' })
+  expect(() => workspaceConfig(root)).toThrow('package.json: catalog.zod is unused; remove the entry')
+})
+
+test.each(['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'])(
+  'rejects a catalog reference without an entry in %s', (field) => {
+    const root = fixture({ catalog: { zod: '^4.4.3' } })
+    put(root, 'packages/a/package.json', { name: 'a', dependencies: { zod: 'catalog:' }, [field]: { yaml: 'catalog:' } })
+    expect(() => workspaceConfig(root))
+      .toThrow(`packages/a/package.json: ${field}.yaml uses catalog:, but the root catalog has no yaml entry`)
+  },
+)
+
+test('resolves named catalogs and rejects their missing and unused entries', () => {
+  const root = fixture({ catalogs: { legacy: { chokidar: '^4.0.3' } } })
+  put(root, 'packages/a/package.json', { name: 'a', dependencies: { chokidar: 'catalog:legacy' } })
+  put(root, 'packages/b/package.json', { name: 'b', dependencies: { chokidar: 'catalog:legacy' } })
+  expect(() => workspaceConfig(root)).not.toThrow()
+  put(root, 'packages/b/package.json', { name: 'b', dependencies: { chokidar: 'catalog:next' } })
+  expect(() => workspaceConfig(root))
+    .toThrow('packages/b/package.json: dependencies.chokidar uses catalog:next, but the root catalogs.next has no chokidar entry')
+  put(root, 'packages/a/package.json', { name: 'a' })
+  put(root, 'packages/b/package.json', { name: 'b' })
+  expect(() => workspaceConfig(root)).toThrow('package.json: catalogs.legacy.chokidar is unused; remove the entry')
+})
+
+test('leaves vendor manifests, peer ranges, and workspace packages outside the sharing rule', () => {
+  const root = fixture({ workspaces: ['vendor/*', 'packages/*'] })
+  put(root, 'vendor/upstream/package.json', { name: 'upstream', dependencies: { chokidar: '^4.0.3' } })
+  const peers = { peerDependencies: { react: '>=19' } }
+  put(root, 'packages/a/package.json', { name: 'a', dependencies: { chokidar: '^4.0.3', c: 'workspace:^' }, ...peers })
+  put(root, 'packages/b/package.json', { name: 'b', dependencies: { c: 'workspace:^' }, ...peers })
+  put(root, 'packages/c/package.json', { name: 'c' })
+  expect(() => workspaceConfig(root)).not.toThrow()
+})
+
+test('accepts an allowlisted literal range only while it has a reason and is still shared', () => {
+  const root = fixture()
+  put(root, 'packages/a/package.json', { name: 'a', devDependencies: { '@types/node': '^22.20.0' } })
+  put(root, 'packages/b/package.json', { name: 'b', devDependencies: { '@types/node': '^26.0.1' } })
+  expect(() => workspaceConfig(root, { '@types/node': 'b targets a newer Node' })).not.toThrow()
+  expect(() => workspaceConfig(root, { '@types/node': ' ' })).toThrow('Catalog exception @types/node needs a reason')
+  put(root, 'packages/b/package.json', { name: 'b' })
+  expect(() => workspaceConfig(root, { '@types/node': 'b targets a newer Node' }))
+    .toThrow('Catalog exception @types/node is stale: no two workspace manifests declare it with a literal range')
 })

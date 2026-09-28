@@ -10,7 +10,8 @@
  * @module @deepseek-ai/dsh/profile-boot
  */
 
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { randomBytes } from 'node:crypto'
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { FiberState, type Context } from '@deepseek-ai/cordis'
@@ -37,8 +38,10 @@ import {
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { installProxyFromEnvironment } from '@deepseek-ai/dsh-http-proxy'
 import { DSH_LAUNCH_ENVIRONMENT_KEY, type LaunchEnvironmentSnapshot } from '@deepseek-ai/dsh-launch-environment'
+import type {} from '@deepseek-ai/dsh-agent-loop'
 import { provideCmdline, type AppReady } from '@deepseek-ai/dsh-cmdline'
 import { createProcessShutdown, type ProcessShutdown } from './process-shutdown.ts'
+import { tolerateLostTerminal } from './terminal-hangup.ts'
 
 const NAME = 'dsh'
 
@@ -88,6 +91,41 @@ const PROFILE_ROOT_CONFIG = `# dsh profile root — an empty entry list. The tre
 
 /** Root config filename inside a profile directory. */
 export const PROFILE_ROOT_FILENAME = 'cordis.yml'
+
+/** Whether `path` already holds exactly the empty root config. */
+function holdsProfileRootConfig(path: string): boolean {
+  try {
+    return readFileSync(path, 'utf8') === PROFILE_ROOT_CONFIG
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Make the profile's `cordis.yml` the empty root config without a reader ever
+ * seeing part of a file. Every launch calls this while another launch of the
+ * same profile may be reading the file, and the Include root rejects empty
+ * content, so an in-place rewrite, which truncates first, can fail that boot.
+ * An unchanged file is left alone. Otherwise the content goes to a
+ * random-suffix sibling created exclusively, which is renamed over the target.
+ * @param dir - the profile directory.
+ * @throws when the replacement fails and the file still holds other content.
+ */
+export function writeProfileRootConfig(dir: string): void {
+  const path = join(dir, PROFILE_ROOT_FILENAME)
+  if (holdsProfileRootConfig(path)) return
+  const temp = `${path}.${randomBytes(6).toString('hex')}.tmp`
+  try {
+    writeFileSync(temp, PROFILE_ROOT_CONFIG, { flag: 'wx' })
+    renameSync(temp, path)
+  } catch (error) {
+    rmSync(temp, { force: true })
+    // Windows can refuse to replace a file another process holds open. A
+    // concurrent launch that already wrote the same content leaves nothing to do.
+    if (holdsProfileRootConfig(path)) return
+    throw error
+  }
+}
 
 /**
  * Initialize a missing profile from one shipped template. This copies only
@@ -152,8 +190,8 @@ export function initializeProfileFromDefault(
   }
 }
 /**
- * Load a resolved profile for `name` and (re)write the empty root config. The
- * root is always rewritten: the whole composition is patch layers, and the
+ * Load a resolved profile for `name` and restore the empty root config. The
+ * root is checked on every load: the whole composition is patch layers, and the
  * vendored Loader's tree write-back (a plugin self-disposing persists the
  * current tree) can bake composed rows into this file — which would duplicate
  * every bundle insert on the next boot. The file exists on disk only because
@@ -169,7 +207,7 @@ export function initializeProfileFromDefault(
 export function prepareProfile(name: string, userLayer = true, fromDefaultProfile?: string): Profile {
   if (fromDefaultProfile !== undefined) initializeProfileFromDefault(name, fromDefaultProfile)
   const profile = loadProfile(NAME, name, INSTALL_ANCHOR, undefined, { userLayer })
-  writeFileSync(join(profile.dir, PROFILE_ROOT_FILENAME), PROFILE_ROOT_CONFIG)
+  writeProfileRootConfig(profile.dir)
   return profile
 }
 
@@ -204,7 +242,7 @@ async function composeProfile(
   resolvedProfile?: ResolvedProfileRuntime,
 ): Promise<ComposedProfile> {
   const profile = resolvedProfile?.profile ?? prepareProfile(name, true, fromDefaultProfile)
-  if (resolvedProfile !== undefined) writeFileSync(join(profile.dir, PROFILE_ROOT_FILENAME), PROFILE_ROOT_CONFIG)
+  if (resolvedProfile !== undefined) writeProfileRootConfig(profile.dir)
   const resolutionOptions = { installAnchor: resolvedProfile?.installAnchor ?? INSTALL_ANCHOR, profile }
   if (resolvedProfile !== undefined && resolutionMode !== 'runtime') healIsolatedProfileModuleFallback(resolvedProfile)
   const resolution = resolutionMode === 'runtime' || resolvedProfile !== undefined
@@ -265,7 +303,11 @@ export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Con
   let disposal: Promise<void> | undefined
   const dispose = (): Promise<void> => disposal ??= (async () => {
     const failures: unknown[] = []
-    for (const release of [() => app.current?.fiber.dispose(), disposeProxy]) {
+    for (const release of [
+      async () => { await app.current?.parallel('app/shutdown') },
+      () => app.current?.fiber.dispose(),
+      disposeProxy,
+    ]) {
       try { await release() } catch (error) { failures.push(error) }
     }
     if (failures.length === 1) throw failures[0]
@@ -289,8 +331,19 @@ export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Con
     // complete; SIGINT is a user interrupt and reports 130.
     process.on('SIGTERM', () => { interrupt(0) })
     process.on('SIGINT', () => { interrupt(130) })
+    // SIGHUP means the terminal is gone (on Windows, its console closed): the
+    // same bounded disposal, reporting 129. Without this listener Node dies of
+    // the signal and skips disposal and the exit phase, which flush the session
+    // and stop managed subprocesses. Writes to the lost terminal now fail, so
+    // stdio errors are dropped before disposal writes anything. A repeated
+    // SIGHUP joins the running disposal instead of forcing exit.
+    process.on('SIGHUP', () => {
+      tolerateLostTerminal()
+      signalShutdown.abort()
+      shutdown.hangup(129)
+    })
     installFailLoud(NAME, process, async () => {
-      await app.current?.fiber.dispose()
+      await dispose()
     })
 
     const rootConfig = join(composed.profile.dir, PROFILE_ROOT_FILENAME)

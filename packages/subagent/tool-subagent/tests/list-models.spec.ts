@@ -121,6 +121,34 @@ describe('list_subagent_models', () => {
     expect(text(result)).toContain('`llm` service is unavailable')
   })
 
+  it('pins the discovery schema text', async () => {
+    const ctx = await setupListTool()
+    const schema = ctx.tools.schemas().find(entry => entry.name === 'list_subagent_models')!
+    expect(schema.description).toBe(
+      'Look up the models available to subagents; this does not change your own model. Call it with no '
+      + 'arguments to list providers, with `provider` to list that provider\'s models, or with `provider` and '
+      + '`model` to see that model and its reasoning efforts. The lists are advisory: an allowed model id may '
+      + 'work even if it is not listed. Pass the returned ids as a delegation tool\'s `provider`, `model`, and '
+      + '`reasoning_effort`.',
+    )
+    const props = (schema.parameters as { properties: Record<string, { description: string }> }).properties
+    expect(props['provider']!.description).toBe('LLM provider id. Omit to list providers.')
+    expect(props['model']!.description).toBe(
+      'Exact model id to inspect. Requires provider; omit to list that provider\'s models.',
+    )
+  })
+
+  it('titles a discovery call by what it looks up', async () => {
+    const definition = (await setupListTool()).tools.get('list_subagent_models')!
+    expect(definition.presentCall?.({})).toEqual({ card: 'generic', title: 'List subagent providers', kind: 'read' })
+    expect(definition.presentCall?.({ provider: 'alpha' })).toEqual({ card: 'generic', title: 'List alpha models', kind: 'read' })
+    expect(definition.presentCall?.({ provider: 'alpha', model: 'fast' }))
+      .toEqual({ card: 'generic', title: 'Show alpha/fast', kind: 'read' })
+    expect(definition.presentCall?.({ model: 'fast' })).toEqual({ card: 'generic', title: 'Show fast', kind: 'read' })
+    // Obsolete or invalid logged arguments keep the generic rendering.
+    expect(definition.presentCall?.({ provider: 7 })).toBeUndefined()
+  })
+
   it('rejects two discovery-owning instances in one tool scope', async () => {
     const ctx = await setupListTool()
     expect(() => {

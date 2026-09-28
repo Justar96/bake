@@ -1,6 +1,6 @@
 /** File reload and overlay behavior through the booted Include tree. */
 
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
@@ -255,6 +255,46 @@ describe('best-effort config failure recovery', () => {
       expect(entry.fiber?.config).toEqual({ value: 2 })
       expect(ctx.get('validatedValue')).toBe(2)
     } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+})
+
+describe('include write-back', () => {
+  /** Write entries through the Include's own write path, the one its debounced writer and `initial` use. */
+  const writeEntries = (include: Include, value: number): Promise<void> =>
+    (include as unknown as { _writeFile(entries: unknown[]): Promise<void> })
+      ._writeFile([{ id: 'noop', name: './noop.mjs', config: { value } }])
+  const temporary = (dir: string): string[] => readdirSync(dir).filter(name => name.endsWith('.tmp'))
+
+  it('lets two trees write one config at once, each through its own temporary file', async () => {
+    const first = await bootTree('- id: noop\n  name: ./noop.mjs\n  config:\n    value: 0\n')
+    // Another process's tree over the same file: its own write queue, the same path.
+    const second = await boot(NAME, join(first.dir, 'cordis.yml'))
+    try {
+      const other = [...second.loader.entries()].find(candidate => candidate.subtree !== undefined)!.subtree as Include
+      const values = Array.from({ length: 8 }, (_, index) => index + 1)
+      await Promise.all([first.include, other].flatMap(include => values.map(value => writeEntries(include, value))))
+      expect(temporary(first.dir)).toEqual([])
+      // Whole: the file holds exactly one write, never a mix or a truncation.
+      const written = /^- id: noop\n {2}name: \.\/noop\.mjs\n {2}config:\n {4}value: (\d+)\n$/.exec(readFileSync(join(first.dir, 'cordis.yml'), 'utf8'))
+      expect(values).toContain(Number(written?.[1]))
+    } finally {
+      await second.fiber.dispose()
+      await first.ctx.fiber.dispose()
+    }
+  })
+
+  it.skipIf(process.platform === 'win32')('removes its temporary file when the write fails', async () => {
+    const { ctx, dir, include } = await bootTree('- id: noop\n  name: ./noop.mjs\n')
+    try {
+      // A non-empty directory in the config's place refuses the rename for good.
+      rmSync(join(dir, 'cordis.yml'))
+      mkdirSync(join(dir, 'cordis.yml', 'occupied'), { recursive: true })
+      await expect(writeEntries(include, 1)).rejects.toMatchObject({ code: expect.stringMatching(/^(EISDIR|ENOTEMPTY|EEXIST)$/) })
+      expect(temporary(dir)).toEqual([])
+    } finally {
+      rmSync(join(dir, 'cordis.yml'), { recursive: true, force: true })
       await ctx.fiber.dispose()
     }
   })

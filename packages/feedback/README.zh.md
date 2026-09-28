@@ -25,9 +25,9 @@ feedback 组收集用户对 harness 工作成果的意见：用户可以提交�
 | [`command-feedback`](command-feedback/README.zh.md) | 会话级反馈：`/feedback` 命令、Web 弹窗背后的 `sessionFeedback` Remote，以及固定分类表，均无需模型轮次 |
 | [`message-feedback`](message-feedback/README.zh.md) | 逐消息评分、分类与备注，通过 `messageFeedback` 服务提供给产品界面 |
 
-会话评价是单向信号：在对话的任何时刻记录它都是安全的，且绝不会改变模型看到的内容。在 feedback-gated 共享策略下，记录会话评价会触发放行，使该会话可供共享。
+会话评价是单向信号：在对话的任何时刻记录它都是安全的，且绝不会改变模型看到的内容。在 feedback-gated 共享策略下，记录会话评价会触发放行，使该会话可供共享。Bake 不随附任何共享目的地，因此在你用 `DSH_TELEMETRY_OTLP_URL` 配置遥测 collector 之前，反馈只保留在本地会话日志中。
 
-逐消息评分与备注与会话一起保存，重启后依然存在，并且绝不会出现在模型历史或遥测中。
+逐消息评分与备注与会话一起保存，重启后依然存在，并且绝不会出现在模型历史中。它们只会作为反馈授权的会话前缀的一部分，通过你配置的 collector 进入遥测。
 
 <a id="related-documentation"></a>
 ## 相关文档

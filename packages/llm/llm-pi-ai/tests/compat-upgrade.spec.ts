@@ -50,6 +50,37 @@ describe('pi-ai gateway compatibility declarations', () => {
     expect(() => resolved(compat, 'anthropic-messages')).toThrow(/compat/)
   })
 
+  it.each(['openai-completions', 'anthropic-messages'])('preserves gateway session affinity on %s', (api) => {
+    expect(resolved({ sendSessionAffinityHeaders: true }, api))
+      .toMatchObject({ sendSessionAffinityHeaders: true })
+  })
+
+  it('applies route-level session affinity to each model whose protocol takes it', () => {
+    // The shape `/login cliproxyapi` writes: a Responses route whose Claude and
+    // Kimi models move to Anthropic Messages and Chat Completions.
+    const route = Config({ providers: { gateway: {
+      api: 'openai-responses',
+      baseURL: 'https://gateway.test/v1',
+      compat: { sendSessionAffinityHeaders: true },
+      retryPolicy: { mode: 'normal', backoff: { maxDelayMs: 60_000 } },
+      models: [
+        { id: 'gpt-large' },
+        { id: 'claude-large', api: 'anthropic-messages', baseURL: 'https://gateway.test' },
+        { id: 'kimi-large', api: 'openai-completions' },
+      ],
+    } } })
+    const profile = resolveProfiles(route.providers).get('gateway')
+    const compat = Object.fromEntries((profile?.piProvider?.getModels() ?? []).map(model => [model.id, model.compat]))
+    expect(compat['gpt-large'] ?? {}).not.toHaveProperty('sendSessionAffinityHeaders')
+    expect(compat['claude-large']).toMatchObject({ sendSessionAffinityHeaders: true })
+    expect(compat['kimi-large']).toMatchObject({ sendSessionAffinityHeaders: true })
+    expect(profile?.retryPolicy).toMatchObject({ mode: 'normal', maxDelayMs: 60_000, maxRetries: 5 })
+  })
+
+  it('rejects session affinity on Responses, which already keys the cache by session', () => {
+    expect(() => resolved({ sendSessionAffinityHeaders: true }, 'openai-responses')).toThrow(/compat/)
+  })
+
   it.each(['supportsMidConvoEffort', 'allowedFallbackModels'])('withholds catalog-owned %s', (field) => {
     expect(() => resolved({ [field]: true }, 'anthropic-messages'))
       .toThrow(/which is not configurable here/)

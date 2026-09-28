@@ -16,10 +16,11 @@ import {
   goalToolExecution,
   requireDirectHuman,
 } from './authority.ts'
+import { presentCreateResult, presentGetResult, presentUpdateResult } from './presentation.ts'
 import { renderWrapupContext } from './wrapup.ts'
 
 export const name = 'tool-goal'
-export const inject = ['agents', 'goals', 'tools', 'systemPrompt', 'sessionProjections']
+export const inject = ['agents', 'goals', 'tools', 'sessionProjections']
 
 /** Model policy and hard lower bounds for goal-state updates. */
 export interface Config {
@@ -41,16 +42,30 @@ type UpdateAction = 'edit' | 'pause' | 'resume' | 'complete' | 'blocked'
 
 const UPDATE_ACTIONS: UpdateAction[] = ['edit', 'pause', 'resume', 'complete', 'blocked']
 
+/** The user owns the decision to start a goal; execution can only check that the user spoke this turn. */
 const CREATE_DESCRIPTION =
-  'Create one persisted same-session completion goal when the current direct human request '
-  + 'is a long-running objective that should continue across autonomous goal rounds. You may '
-  + 'infer that intent without requiring the user to say "create a goal". Do not use this for '
-  + 'trivial single-turn work. Execution rejects non-human and subagent authority.'
+  'Create the session\'s goal: a long-running objective that keeps going across automatic rounds '
+  + 'until it is done. Call it only when the user explicitly asks for a goal in the current turn; never '
+  + 'create one on your own initiative. A session has one goal at a time, and subagents cannot create goals.'
 
 const GET_DESCRIPTION =
-  'Read the current same-session goal, including its exact id/revision, objective, phase, completed '
-  + 'continuation rounds, round limit, blocker reason when present, and whether another continuation is armed. '
-  + 'Call this before updating a goal.'
+  'Return the session\'s current goal, or null: its id, revision, objective, phase, rounds started, '
+  + 'round limit, any blocker, and whether it will continue automatically.'
+
+/**
+ * The `update_goal` description, carrying the whole goal policy with its deployment-selected blocked
+ * threshold, so the rules travel with the tool that applies them.
+ * @param blockedAfter - consecutive goal rounds required before `blocked` is accepted.
+ * @returns the composed description.
+ */
+function updateDescription(blockedAfter: number): string {
+  return 'Change the current goal. First call get_goal and pass its exact goal_id and revision. edit, pause, '
+    + 'and resume need a request from the user in the current turn; complete and blocked also work during '
+    + 'an automatic goal round. When a session is reopened or forked, its goal stops running automatic '
+    + 'rounds until the user asks to continue; then resume it. Mark the goal complete only when its '
+    + 'objective is met. Mark it blocked only when the same concrete obstacle has persisted for at least '
+    + `${blockedAfter} consecutive goal rounds; difficulty or remaining work is not an obstacle.`
+}
 
 /** Canonical goal-tool output, matching the existing compact Native JSON. */
 type GoalToolValue =
@@ -108,19 +123,6 @@ const GOAL_VALUE_SCHEMA = {
   ],
 } as const
 
-/** Render policy guidance with its deployment-selected blocked threshold. */
-function guidance(blockedAfter: number): string {
-  return 'Use goal tools for one long-running completion objective in the current session. '
-    + 'create_goal may infer goal intent from a direct human request in any language; do not '
-    + 'create a goal for routine single-turn work. Call get_goal before update_goal and copy its '
-    + 'exact goal_id and revision. After session resume or fork, an active goal is disarmed: when '
-    + 'a human asks to continue or resume in any wording or language, use update_goal action '
-    + 'resume to rearm it. Mark complete only when the objective is actually achieved. Mark '
-    + `blocked only after the same blocking condition persists for at least ${blockedAfter} `
-    + 'consecutive goal rounds, and report that concrete condition in blocked_reason; difficulty, uncertainty, '
-    + 'or useful remaining work is not blocked.'
-}
-
 /** Validate config even when apply is called directly outside Loader normalization. */
 function resolveConfig(config: Config): ResolvedConfig {
   const blockedAfter = config.blockedAfterConsecutiveRounds ?? 3
@@ -151,15 +153,29 @@ const ACTION_FIELDS = [
  * Reject meaningful values in fields the selected action does not use. The
  * message names each such field and its filler, because a model that copies
  * values from `get_goal` otherwise retries the same arguments.
+ *
+ * A strict-schema model must send every field, and the value it most often
+ * has at hand is the one `get_goal` just returned. An `objective` or
+ * `max_goal_rounds` equal to the addressed goal's current value changes
+ * nothing, so it counts as a filler rather than costing a rejected step;
+ * any other value is still rejected.
+ * @param action - the selected update action.
+ * @param args - the raw model arguments.
+ * @param echo - the addressed goal's current values, when the ref names the current goal.
  */
 function rejectUnusedFields(action: string, args: {
   objective?: string | undefined
   max_goal_rounds?: number | undefined
   blocked_reason?: string | undefined
-}): void {
-  const unused = ACTION_FIELDS.filter(field => field.action !== action && (field.name === 'max_goal_rounds'
-    ? hasRoundCap(args.max_goal_rounds)
-    : hasText(args[field.name])))
+}, echo?: Pick<GoalView, 'objective' | 'maxGoalRounds'>): void {
+  const unused = ACTION_FIELDS.filter((field) => {
+    if (field.action === action) return false
+    if (field.name === 'max_goal_rounds') {
+      return hasRoundCap(args.max_goal_rounds) && args.max_goal_rounds !== echo?.maxGoalRounds
+    }
+    if (field.name === 'objective') return hasText(args.objective) && args.objective !== echo?.objective
+    return hasText(args[field.name])
+  })
   if (unused.length === 0) return
   const names = unused.map(field => field.name).join(' and ')
   const fillers = unused.map(field => `${field.name}: ${field.filler}`).join(', ')
@@ -213,14 +229,9 @@ function present(title: string, kind: 'read' | 'other', rawInput?: unknown): Gen
   return { card: 'generic', title, kind, ...rawInput === undefined ? {} : { rawInput } }
 }
 
-/** Register the three Codex-shaped goal tools and their shared policy section. */
+/** Register the three Codex-shaped goal tools; their descriptions carry the whole goal policy. */
 export function apply(ctx: Context, config: Config): void {
   const resolved = resolveConfig(config)
-  ctx.systemPrompt.section({
-    name: 'tool:goal',
-    order: ctx.systemPrompt.getSectionOrder('TOOL_GOAL'),
-    text: guidance(resolved.blockedAfterConsecutiveRounds),
-  })
 
   ctx.tools.register(defineTool({
     name: 'get_goal',
@@ -232,6 +243,7 @@ export function apply(ctx: Context, config: Config): void {
       return Promise.resolve(goalValue(ctx.goals.get(execution.agent)))
     },
     presentCall: () => present('Read current goal', 'read'),
+    presentResult: (_args, result) => presentGetResult(result),
   }))
 
   ctx.tools.register(defineTool({
@@ -241,11 +253,11 @@ export function apply(ctx: Context, config: Config): void {
       objective: {
         type: 'string',
         required: true,
-        description: 'The concrete completion objective inferred from the direct human request.',
+        description: 'The concrete objective, taken from the user\'s request.',
       },
       max_goal_rounds: {
         type: 'number',
-        description: 'Optional positive safe-integer limit on automatic continuation rounds.',
+        description: 'Optional limit on automatic rounds, as a positive integer.',
       },
     },
     output: GOAL_OUTPUT,
@@ -259,34 +271,34 @@ export function apply(ctx: Context, config: Config): void {
       return Promise.resolve(goalValue(goal))
     },
     presentCall: args => present('Create goal', 'other', args.objective),
+    presentResult: (_args, result) => presentCreateResult(result),
   }))
 
   ctx.tools.register(defineTool({
     name: 'update_goal',
-    description: 'Update the exact current goal revision. edit, pause, and resume require a direct '
-      + 'top-level human request. During an automatic continuation of the current goal, complete '
-      + 'and blocked are also allowed. blocked is rejected before the configured minimum round count; the model remains '
-      + 'responsible for judging that the same condition persisted across those rounds and must explain it in blocked_reason.',
+    description: updateDescription(resolved.blockedAfterConsecutiveRounds),
     parameters: {
-      goal_id: { type: 'string', required: true, description: 'Exact id returned by get_goal.' },
-      revision: { type: 'number', required: true, description: 'Exact positive revision returned by get_goal.' },
+      goal_id: { type: 'string', required: true, description: 'The current goal\'s id.' },
+      revision: { type: 'number', required: true, description: 'The current goal\'s revision.' },
       action: {
         type: 'string',
         required: true,
         enum: UPDATE_ACTIONS,
-        description: 'edit | pause | resume | complete | blocked',
+        description: 'edit the objective or round limit, pause or resume automatic rounds, or mark the goal complete or blocked.',
       },
-      objective: { type: 'string', description: 'Replacement objective; valid only with action edit.' },
-      max_goal_rounds: { type: 'number', description: 'Replacement cap; valid only with action edit.' },
+      objective: { type: 'string', description: 'The new objective; used only with action edit.' },
+      max_goal_rounds: { type: 'number', description: 'The new round limit; used only with action edit.' },
       blocked_reason: {
         type: 'string',
-        description: 'Concrete blocking condition; required only with action blocked.',
+        description: 'The concrete obstacle; required with action blocked and unused otherwise.',
       },
     },
     output: GOAL_OUTPUT,
     execute(args, exec) {
       const execution = goalToolExecution(ctx, exec)
       const ref = goalRef(args.goal_id, args.revision)
+      const addressed = ctx.goals.get(execution.agent)
+      const echo = addressed?.id === ref.id ? addressed : undefined
       const replacements = {
         ...hasText(args.objective) ? { objective: args.objective } : {},
         ...hasRoundCap(args.max_goal_rounds) ? { maxGoalRounds: args.max_goal_rounds } : {},
@@ -299,12 +311,12 @@ export function apply(ctx: Context, config: Config): void {
       }
       if (args.action === 'pause' || args.action === 'resume') {
         requireDirectHuman(ctx, execution)
-        rejectUnusedFields(args.action, args)
-        const current = ctx.goals.get(execution.agent)
+        rejectUnusedFields(args.action, args, echo)
+        const current = addressed
         if (args.action === 'resume' && current?.id === ref.id && current.revision === ref.revision
           && current.phase === 'paused') {
           throw new HarnessError(
-            'the model cannot resume a paused goal; the user must resume it',
+            'only the user can resume a paused goal',
             'GOAL_TOOL_RESUME_PAUSED',
           )
         }
@@ -314,7 +326,7 @@ export function apply(ctx: Context, config: Config): void {
         return Promise.resolve(goalValue(goal))
       }
       const authority = completionAuthority(ctx, execution)
-      rejectUnusedFields(args.action, args)
+      rejectUnusedFields(args.action, args, echo)
       if (args.action === 'blocked'
         && (args.blocked_reason === undefined || args.blocked_reason.trim().length === 0)) {
         throw new HarnessError('blocked_reason is required with action blocked', 'GOAL_TOOL_INVALID_UPDATE')
@@ -357,5 +369,6 @@ export function apply(ctx: Context, config: Config): void {
           ? args.objective
           : hasRoundCap(args.max_goal_rounds) ? args.max_goal_rounds : args.goal_id,
     ),
+    presentResult: (args, result) => presentUpdateResult(args.action, result),
   }))
 }

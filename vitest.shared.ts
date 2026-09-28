@@ -3,7 +3,8 @@ import ts from 'typescript'
 const decoratorSyntax = /^\s*@[A-Za-z_$][\w$]*/m
 
 /**
- * Worker arguments that keep process-wide Web Storage from shadowing jsdom storage.
+ * Worker arguments that keep Node's process-wide Web Storage out of test workers, so no
+ * test reads or writes storage shared by the whole run.
  * Node lists the positive spelling in `allowedNodeEnvironmentFlags` for this negatable flag.
  */
 export const vitestExecArgv = process.allowedNodeEnvironmentFlags.has('--webstorage') ? ['--no-webstorage'] : []

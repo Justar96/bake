@@ -182,7 +182,7 @@ describe('mode-aware wire contribution', () => {
     // saying how it is reached.
     ctx.systemPrompt.section({
       name: 'tool:echo',
-      order: ctx.systemPrompt.getSectionOrder('TOOL_READ'),
+      order: ctx.systemPrompt.getSectionOrder('PTC_ONLY') + 100,
       text: 'Use the echo tool.',
     })
 

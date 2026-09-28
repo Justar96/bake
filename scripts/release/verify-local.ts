@@ -5,11 +5,13 @@
  * from it and update to that with `bake update`.
  */
 
-import { createHash, generateKeyPairSync, sign } from 'node:crypto'
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { generateKeyPairSync, sign } from 'node:crypto'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { sharedWritableEntries } from './permissions.ts'
 import { windowsPowerShellEnvironment } from './powershell.ts'
+import { VERSIONED_MANIFESTS } from './version.ts'
 
 const ROOT = resolve(import.meta.dir, '../..')
 const temporary = mkdtempSync(join(tmpdir(), 'bake-release-verify-'))
@@ -61,10 +63,12 @@ async function publishNewer(archive: string, target: string): Promise<{ base: st
   const tree = join(temporary, 'newer')
   const tar = process.platform === 'win32' ? 'tar.exe' : 'tar'
   // Unpacked, not copied from the install: Bun's cpSync recreates Windows
-  // directory links as file links, which Node cannot resolve through.
+  // directory links as file links, which Node cannot resolve through. For the
+  // same links, Windows unpacks with tar.exe: Bun.Archive skips them there.
   mkdirSync(tree)
-  await run([tar, '-xzf', archive, '-C', tree], process.env)
-  for (const manifest of ['package.json', 'apps/cli/package.json']) {
+  if (process.platform === 'win32') await run([tar, '-xzf', archive, '-C', tree], process.env)
+  else await new Bun.Archive(await Bun.file(archive).bytes()).extract(tree)
+  for (const manifest of VERSIONED_MANIFESTS) {
     const path = join(tree, manifest)
     writeFileSync(path, readFileSync(path, 'utf8').replace(`"version": "${stagedVersion}"`, `"version": "${version}"`))
   }
@@ -73,15 +77,16 @@ async function publishNewer(archive: string, target: string): Promise<{ base: st
   for (const file of ['server.mjs', 'index.html', 'install.sh', 'install.ps1']) cpSync(join(ROOT, 'distribution/host', file), join(host, file))
   const file = `bake-v${version}-${target}.tar.gz`
   const newer = join(host, 'public/releases', version, file)
+  // Bun.Archive cannot write symlinks or file modes, which the release needs.
   await run([tar, '-czf', newer, '-C', tree, '.'], process.env)
-  const bytes = readFileSync(newer)
+  const bytes = await Bun.file(newer).bytes()
+  const sha256 = Bun.CryptoHasher.hash('sha256', bytes, 'hex')
   const pair = generateKeyPairSync('ed25519')
-  const manifest = Buffer.from(`${JSON.stringify({ version, artifacts: { [target]: {
-    file, sha256: createHash('sha256').update(bytes).digest('hex'), size: statSync(newer).size,
-  } } }, null, 2)}\n`)
+  const artifact = { file, sha256, size: bytes.byteLength }
+  const manifest = Buffer.from(`${JSON.stringify({ version, artifacts: { [target]: artifact } }, null, 2)}\n`)
   writeFileSync(join(host, 'public/latest.json'), manifest)
   writeFileSync(join(host, 'public/latest.json.sig'), `${sign(null, manifest, pair.privateKey).toString('base64')}\n`)
-  const directory = `${version}-${createHash('sha256').update(bytes).digest('hex').slice(0, 12)}`
+  const directory = `${version}-${sha256.slice(0, 12)}`
   return { base: await serve(host), version, key: pair.publicKey.export({ type: 'spki', format: 'der' }).toString('base64'), directory }
 }
 
@@ -137,7 +142,21 @@ try {
   const target = `${process.platform}-${process.arch}`
   const artifact = manifest.artifacts[target]
   if (artifact === undefined) throw new Error(`No release artifact for ${target}`)
+  // Windows tar.exe records every entry as 0666 or 0777, bits Windows ignores when it unpacks.
+  if (process.platform !== 'win32') {
+    const writable = await sharedWritableEntries(join(ROOT, 'distribution/host/public/releases', manifest.version, artifact.file))
+    if (writable.length > 0) {
+      const listed = writable.slice(0, 10).map(entry => `  ${entry.mode.toString(8).padStart(4, '0')} ${entry.path}`)
+      throw new Error([`${artifact.file} has ${writable.length} group- or world-writable entries:`, ...listed].join('\n'))
+    }
+  }
   const installed = join(installRoot, 'versions', `${manifest.version}-${artifact.sha256.slice(0, 12)}`)
+  // Installed with the workspace's bunfig.toml, a release resolves modules through the layout development does.
+  // Windows packs with Bun's default layout instead; see pack.ts.
+  const isolated = (tree: string): boolean => existsSync(join(tree, 'node_modules/.bun'))
+  if (process.platform !== 'win32' && isolated(installed) !== isolated(ROOT)) {
+    throw new Error(`The release node_modules is ${isolated(installed) ? 'isolated' : 'hoisted'}, unlike the workspace's`)
+  }
   const installedVersion = (JSON.parse(readFileSync(join(installed, 'package.json'), 'utf8')) as { version: string }).version
   if (installedVersion !== manifest.version) throw new Error('Installed Bake root version mismatch')
   if (!readFileSync(join(installed, 'CHANGELOG.md'), 'utf8').includes(`## [${manifest.version}]`)) {

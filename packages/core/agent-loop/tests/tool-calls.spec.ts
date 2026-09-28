@@ -3,7 +3,7 @@
  * ACP expected outputs own transcript-facing coverage.
  */
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, onTestFinished } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { createUserMessage, ToolCallId, StreamChunk  } from '@deepseek-ai/dsh-llm'
 import SessionStore, { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
@@ -13,7 +13,7 @@ import ToolRuntime, { defineContentToolFixture, TOOL_ABORTED_BEFORE_DISPATCH, TO
 import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
 import AgentLoop, { DEFAULT_MAX_PARALLEL_TOOL_CALLS } from '@deepseek-ai/dsh-agent-loop'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import { MockAdapter, textResponse } from './mock-adapter.ts'
+import { MockAdapter, textResponse, toolCallResponse } from './mock-adapter.ts'
 import { PtcRuntime } from '@deepseek-ai/dsh-ptc-runtime'
 import type { PtcRunRequest, PtcRunResult } from '@deepseek-ai/dsh-ptc-runtime'
 
@@ -472,6 +472,58 @@ describe('tool-call scheduler: ordered middleware and additional contexts', () =
 })
 
 describe('tool-call scheduler: abort handling', () => {
+  it('uses the scheduler identity shared by source and built tool runtimes', () => {
+    expect(TOOL_RUNTIME_SCHEDULER).toBe(Symbol.for('@deepseek-ai/dsh-tools.scheduler'))
+  })
+
+  it('records cancellation when tools deactivate after logging a tool call', async () => {
+    const adapter = new MockAdapter([toolCallResponse('shutdown-race', 'shutdown-race', {})])
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(SessionProjectionRegistry)
+    await ctx.plugin(SystemPrompt, { personaPrefix: '' })
+    const toolsFiber = await ctx.plugin(ToolRuntime)
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(AgentLoop, { agents: [] })
+    ctx.llm.registerAdapter(['mock'], adapter)
+    let toolsDisposal: Promise<void> | undefined
+    onTestFinished(async () => {
+      try { await toolsDisposal } finally { await ctx.fiber.dispose() }
+    })
+    const tool = defineContentToolFixture({
+      name: 'shutdown-race',
+      description: 'shutdown race',
+      parameters: {},
+      execute: async () => [{ type: 'text', text: 'ran' }],
+    })
+    ctx.tools.register(tool)
+    const agent = await ctx.agentLoop.create(SessionId('shutdown-race'), { provider: 'mock', model: 'mock' })
+    const errors: unknown[] = []
+    let toolsUnavailable = false
+    ctx.on('agent/error', ({ error }) => { errors.push(error) })
+    ctx.on('session/event', (session, event) => {
+      if (session === agent.session && event.type === 'tool/call') {
+        agent.cancel({ kind: 'disposed' })
+        // Dependency teardown removes the service before append returns.
+        toolsDisposal = toolsFiber.dispose()
+        toolsUnavailable = ctx.get('tools') === undefined
+      }
+    })
+
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
+    await agent.whenIdle()
+
+    expect(toolsUnavailable).toBe(true)
+    expect(errors).toEqual([])
+    expect(agent.session.snapshotEvents().find(event => event.type === 'tool/result')).toMatchObject({
+      data: { error: { name: 'AbortError', code: TOOL_ABORTED_BEFORE_DISPATCH } },
+    })
+    expect(agent.session.snapshotEvents().findLast(event => event.type === 'turn/end')).toMatchObject({
+      data: { reason: { kind: 'aborted', reason: { kind: 'disposed' } } },
+    })
+  })
+
   it('starts no calls when the signal is already aborted before a parallel group', async () => {
     const adapter = new MockAdapter([
       multiCall([{ id: 'c1', name: 'p', args: { id: '1' } }, { id: 'c2', name: 'p', args: { id: '2' } }]),

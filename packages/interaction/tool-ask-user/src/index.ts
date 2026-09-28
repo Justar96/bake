@@ -9,6 +9,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import '@deepseek-ai/dsh-user-questions'
+import { presentAskCall, presentAskResult } from './presentation.ts'
 
 export const name = 'tool-ask-user'
 export const inject = ['tools', 'userQuestions']
@@ -30,10 +31,14 @@ export function apply(ctx: Context): void {
           additionalProperties: true,
           properties: {
             id: { type: 'string', required: true, description: 'Stable id for this question; echoed in the answer.' },
-            question: { type: 'string', required: true, description: 'The specific question to ask the user.' },
+            question: {
+              type: 'string',
+              required: true,
+              description: 'The question to ask, as one short sentence ending with a question mark.',
+            },
             header: {
               type: 'string',
-              description: 'Optional short heading for the question, such as "Confirm" or "Choose Mode".',
+              description: 'Optional heading of at most about 12 characters, such as "Confirm" or "Choose Mode".',
             },
             options: {
               type: 'array',
@@ -42,8 +47,8 @@ export function apply(ctx: Context): void {
                 type: 'object',
                 additionalProperties: true,
                 properties: {
-                  label: { type: 'string', required: true, description: 'Short user-facing option label.' },
-                  description: { type: 'string', description: 'One sentence explaining the tradeoff or impact.' },
+                  label: { type: 'string', required: true, description: 'User-facing option label of 1-5 words.' },
+                  description: { type: 'string', description: 'One short sentence explaining the tradeoff or impact.' },
                 },
               },
             },
@@ -75,6 +80,8 @@ export function apply(ctx: Context): void {
           },
         },
       },
+      // The canonical answers stay compact JSON for the model; `presentResult`
+      // reads them back for a UI without changing this text.
       render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }],
     },
     async execute(args, exec) {
@@ -97,5 +104,7 @@ export function apply(ctx: Context): void {
         })),
       }
     },
+    presentCall: args => presentAskCall(args.questions),
+    presentResult: (_args, result) => presentAskResult(result),
   }))
 }

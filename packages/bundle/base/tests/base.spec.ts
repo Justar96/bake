@@ -11,6 +11,24 @@ import * as yaml from 'js-yaml'
 import { entryListSchema } from '@deepseek-ai/cordis-plugin-include'
 import { evaluate } from '@deepseek-ai/cordis-plugin-loader'
 
+interface BaseRow {
+  id?: string
+  name?: string
+  config?: Record<string, unknown>
+  disabled?: boolean
+}
+
+function root(): string {
+  return fileURLToPath(new URL('..', import.meta.url))
+}
+
+/** The rows of the base layer's single insert list. */
+function baseRows(): BaseRow[] {
+  const parsed = yaml.load(readFileSync(resolve(root(), 'cordis.patch.yml'), 'utf8'), { schema: entryListSchema })
+  if (!Array.isArray(parsed)) throw new TypeError('base patch must parse to a patch list')
+  return (parsed as { insert?: BaseRow[] }[]).flatMap(patch => patch.insert ?? [])
+}
+
 describe('dsh-base bundle', () => {
   it('declares a parseable patch list through the dsh.bundle.patch manifest field', () => {
     const root = fileURLToPath(new URL('..', import.meta.url))
@@ -33,9 +51,6 @@ describe('dsh-base bundle', () => {
     expect(rows.length).toBeGreaterThan(50)
     expect(rows.some(row => row.id === 'agent-loop')).toBe(true)
     expect(rows.find(row => row.id === 'session-telemetry-otel')?.disabled).toBeUndefined()
-    expect(rows.find(row => row.id === 'session-telemetry-otel')?.config?.['mode']).toEqual({
-      __jsExpr: "process.env.DSH_TELEMETRY_MODE || 'FEEDBACK_ONLY'",
-    })
     expect(rows.find(row => row.id === 'hmr')).toMatchObject({
       config: { root: [] },
     })
@@ -47,6 +62,38 @@ describe('dsh-base bundle', () => {
     expect(manifest.dependencies).not.toHaveProperty('@deepseek-ai/dsh-subagent-codex')
     expect(manifest.dependencies).not.toHaveProperty('@deepseek-ai/dsh-subagent-claude-code')
     expect(manifest.dependencies).toHaveProperty('@deepseek-ai/dsh-web-fetch-http')
+  })
+
+  it('uploads sessions only to an OTLP endpoint the user configures', () => {
+    const text = readFileSync(resolve(root(), 'cordis.patch.yml'), 'utf8')
+    expect(text).not.toMatch(/deepseeksvc|harness-telemetry/u)
+    expect(text).toContain("# TODO(bake): Bake's own OTLP logs endpoint goes here")
+    const row = baseRows().find(candidate => candidate.id === 'session-telemetry-otel')
+    const config = row?.config as { mode?: { __jsExpr?: string }; exporter?: { url?: { __jsExpr?: string } } } | undefined
+    const mode = config?.mode?.__jsExpr
+    const url = config?.exporter?.url?.__jsExpr
+    if (mode === undefined || url === undefined) throw new Error('the telemetry row must derive mode and url from the environment')
+    const resolveWith = (env: Record<string, string>) => ({
+      mode: evaluate({ process: { env } }, mode) as unknown,
+      url: evaluate({ process: { env } }, url) as unknown,
+    })
+    // No endpoint: nothing to upload to, whatever mode was asked for.
+    expect(resolveWith({})).toEqual({ mode: 'DISABLED', url: '' })
+    expect(resolveWith({ DSH_TELEMETRY_OTLP_URL: '' })).toEqual({ mode: 'DISABLED', url: '' })
+    expect(resolveWith({ DSH_TELEMETRY_MODE: 'FEEDBACK_ONLY' })).toEqual({ mode: 'DISABLED', url: '' })
+    // A configured endpoint enables upload to exactly that URL, in the requested mode.
+    const endpoint = 'http://127.0.0.1:4318/v1/logs'
+    expect(resolveWith({ DSH_TELEMETRY_OTLP_URL: endpoint })).toEqual({ mode: 'FEEDBACK_ONLY', url: endpoint })
+    expect(resolveWith({ DSH_TELEMETRY_OTLP_URL: endpoint, DSH_TELEMETRY_MODE: 'DISABLED' }))
+      .toEqual({ mode: 'DISABLED', url: endpoint })
+  })
+
+  it('keeps the DeepSeek session-log upload mounted but off', () => {
+    expect(baseRows().find(row => row.id === 'session-log-deepseek')).toEqual({
+      id: 'session-log-deepseek',
+      name: '@deepseek-ai/dsh-session-log-deepseek',
+      config: { enabled: false },
+    })
   })
 
   it('gates each shell stack by platform with a symmetric disabled expression', () => {

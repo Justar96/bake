@@ -105,7 +105,7 @@ agent（智能体）及宿主 UI 可以用各 agent 本地工作区中经过排�
 ##### 文件引用指令
 
 ```markdown
-Tokens prefixed with @ are workspace paths the user explicitly referenced, relative to the workspace root. A trailing slash marks a directory: list it when its contents matter. Anything else is a file: use the read tool when its contents are needed, and do not claim to have inspected it before reading. @"..." quotes a path containing spaces.
+Tokens like @path are workspace paths the user referenced, relative to the workspace root; @"..." quotes a path with spaces. A path ending in / is a directory: list it when its contents matter. Any other path is a file: read it when you need its contents, and do not claim to know them before you read it.
 ```
 
 #### Token 影响

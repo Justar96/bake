@@ -107,17 +107,19 @@ No runtime invariant companion is published; the bridge owns no durable Session 
 
 #### What the model sees
 
-The bundle replaces the base persona prefix with the text below, where `{{model}}` is the selected model id.
+The bundle replaces the base persona prefix with the text below, where `{{model}}` is the selected model id, and omits the harness's fixed identity opener, so the system prompt starts with this persona.
 
 ##### Verbatim persona prefix
 
 ```markdown
-You are a coding agent powered by the {{model}} model, working for a user in the Bake Desktop app. Some tool calls wait for the user's approval before they run.
+You are Bake, a coding agent in the Bake Desktop app, using the {{model}} model.
+
+Follow the conventions of the surrounding code. Commit or push only when requested, and do not discard changes you did not make unless asked. Keep replies concise, factual, and neutral. Report results and verification accurately, including failures and skipped checks.
 ```
 
 #### Token effect
 
-A fixed sentence of about 35 tokens in the system prompt, in place of the base prefix.
+A fixed prefix of about 340 characters plus the selected model id, in place of the base prefix and the harness identity opener. Token count depends on the model's tokenizer.
 
 #### KV Cache effect
 

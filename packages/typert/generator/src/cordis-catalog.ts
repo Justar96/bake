@@ -244,8 +244,8 @@ export class CordisCatalogProjector {
    * belongs to that same package.
    *
    * Interfaces qualify beside classes, because an interface-typed key
-   * (`lsp: LspService`) has its Service Definition — and, by repository
-   * convention, its member documentation — on the interface; requiring a class
+   * (`connection: HostConnectionHandle`) has its Service Definition — and, by
+   * repository convention, its member documentation — on the interface; requiring a class
    * would drop a real injectable service from every catalog. The declaration may
    * live in any file of the package (`types.ts` is the usual home), while a
    * declaration from ANOTHER package is not this package's surface to document.

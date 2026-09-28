@@ -142,21 +142,22 @@ function resultGoal(result: ToolExecutionResult): Record<string, unknown> {
 }
 
 describe('goal tool registration and presentation', () => {
-  it('registers three exclusive tools plus configured guidance and disposes all contributions', async () => {
+  it('registers three exclusive tools with the configured threshold and no prompt section, then disposes them', async () => {
     const { ctx, fiber } = await harness({ blockedAfterConsecutiveRounds: 5 })
+    const sectionsBefore = (await ctx.systemPrompt.assemble()).sections.map(section => section.name)
     expect(['create_goal', 'get_goal', 'update_goal'].map(name => ctx.tools.get(name)?.name))
       .toEqual(['create_goal', 'get_goal', 'update_goal'])
     for (const name of ['create_goal', 'get_goal', 'update_goal']) {
       expect(ctx.tools.executionMode({ signal: testToolSignal, callId: ToolCallId(name), name, arguments: {} }))
         .toEqual({ kind: 'exclusive' })
     }
-    const section = (await ctx.systemPrompt.assemble()).sections.find(item => item.name === 'tool:goal')
-    expect(section?.text).toContain('infer goal intent')
-    expect(section?.text).toContain('at least 5 consecutive goal rounds')
+    expect(ctx.tools.get('update_goal')?.description).toBe(updateGoalDescription(5))
 
     await fiber.dispose()
     expect(ctx.tools.get('get_goal')).toBeUndefined()
-    expect((await ctx.systemPrompt.assemble()).sections.some(item => item.name === 'tool:goal')).toBe(false)
+    expect(ctx.tools.get('update_goal')).toBeUndefined()
+    // The goal policy lives in the tool descriptions, so neither the mount nor its disposal touches the prompt.
+    expect((await ctx.systemPrompt.assemble()).sections.map(section => section.name)).toEqual(sectionsBefore)
   })
 
   it('uses args-only generic render intent and soft-fails malformed replay args', async () => {
@@ -188,7 +189,7 @@ describe('goal tool registration and presentation', () => {
   it('has the Loader-safe namespace export shape', () => {
     expect('default' in toolGoal).toBe(false)
     expect(toolGoal.name).toBe('tool-goal')
-    expect(toolGoal.inject).toEqual(['agents', 'goals', 'tools', 'systemPrompt', 'sessionProjections'])
+    expect(toolGoal.inject).toEqual(['agents', 'goals', 'tools', 'sessionProjections'])
     const loader = Object.create(Loader.prototype) as Loader
     expect(loader.unwrapExports(toolGoal)).toBe(toolGoal)
   })
@@ -214,15 +215,55 @@ describe('goal tool registration and presentation', () => {
     await ctx.plugin(ToolRuntime)
     await ctx.plugin(GoalService)
     toolGoal.apply(ctx, {})
-    const section = (await ctx.systemPrompt.assemble()).sections.find(item => item.name === 'tool:goal')
-    expect(section?.text).toContain('at least 3 consecutive goal rounds')
+    expect(ctx.tools.get('update_goal')?.description).toBe(updateGoalDescription(3))
+  })
+
+  it('pins the model-facing tool descriptions and parameter guidance', async () => {
+    const { ctx } = await harness()
+    const schemas = new Map(ctx.tools.schemas().map(schema => [schema.name, schema]))
+    expect(schemas.get('get_goal')?.description).toBe(
+      'Return the session\'s current goal, or null: its id, revision, objective, phase, rounds started, '
+      + 'round limit, any blocker, and whether it will continue automatically.',
+    )
+    expect(schemas.get('create_goal')?.description).toBe(
+      'Create the session\'s goal: a long-running objective that keeps going across automatic rounds '
+      + 'until it is done. Call it only when the user explicitly asks for a goal in the current turn; never '
+      + 'create one on your own initiative. A session has one goal at a time, and subagents cannot create goals.',
+    )
+    expect(schemas.get('update_goal')?.description).toBe(updateGoalDescription(3))
+    const descriptions = (name: string): Record<string, unknown> => Object.fromEntries(
+      Object.entries((schemas.get(name)?.parameters['properties'] ?? {}) as Record<string, { description?: string }>)
+        .map(([key, value]) => [key, value.description]),
+    )
+    expect(descriptions('create_goal')).toEqual({
+      objective: 'The concrete objective, taken from the user\'s request.',
+      max_goal_rounds: 'Optional limit on automatic rounds, as a positive integer.',
+    })
+    expect(descriptions('update_goal')).toEqual({
+      goal_id: 'The current goal\'s id.',
+      revision: 'The current goal\'s revision.',
+      action: 'edit the objective or round limit, pause or resume automatic rounds, or mark the goal complete or blocked.',
+      objective: 'The new objective; used only with action edit.',
+      max_goal_rounds: 'The new round limit; used only with action edit.',
+      blocked_reason: 'The concrete obstacle; required with action blocked and unused otherwise.',
+    })
   })
 })
 
+/** The exact `update_goal` description, which carries the goal policy, for one configured blocked threshold. */
+function updateGoalDescription(blockedAfter: number): string {
+  return 'Change the current goal. First call get_goal and pass its exact goal_id and revision. edit, pause, '
+    + 'and resume need a request from the user in the current turn; complete and blocked also work during '
+    + 'an automatic goal round. When a session is reopened or forked, its goal stops running automatic '
+    + 'rounds until the user asks to continue; then resume it. Mark the goal complete only when its '
+    + 'objective is met. Mark it blocked only when the same concrete obstacle has persisted for at least '
+    + `${blockedAfter} consecutive goal rounds; difficulty or remaining work is not an obstacle.`
+}
+
 describe('goal tool execution authority', () => {
-  it('lets a root model infer create intent from its accepted human turn', async () => {
+  it('lets a root agent create the goal its current user turn asks for', async () => {
     const { ctx, root } = await harness()
-    openTurn(root, { kind: 'user' }, '请持续工作直到这个功能完成')
+    openTurn(root, { kind: 'user' }, '请设定一个目标：完成这个功能')
     const result = await execute(ctx, 'create_goal', {
       objective: 'Finish the feature', max_goal_rounds: 9,
     }, root.agent)
@@ -508,17 +549,16 @@ describe('goal tool state transitions', () => {
     const { ctx, root } = await harness()
     openTurn(root, { kind: 'user' })
     const created = ctx.goals.create(root.agent, { objective: 'valid', maxGoalRounds: 12 })
-    // The shape a model sends after copying the cap from get_goal.
-    const copiedCap = await execute(ctx, 'update_goal', {
+    const changedCap = await execute(ctx, 'update_goal', {
       goal_id: created.id,
       revision: created.revision,
       action: 'resume',
       objective: '',
-      max_goal_rounds: 12,
+      max_goal_rounds: 20,
       blocked_reason: '',
     }, root.agent)
-    expect(copiedCap.error?.info?.code).toBe('GOAL_TOOL_INVALID_UPDATE')
-    expect(copiedCap.error?.message).toBe('max_goal_rounds is not used by action resume; omit it or send '
+    expect(changedCap.error?.info?.code).toBe('GOAL_TOOL_INVALID_UPDATE')
+    expect(changedCap.error?.message).toBe('max_goal_rounds is not used by action resume; omit it or send '
       + 'max_goal_rounds: 0. objective and max_goal_rounds apply only to action edit; '
       + 'blocked_reason applies only to action blocked.')
     const several = await execute(ctx, 'update_goal', {
@@ -531,6 +571,33 @@ describe('goal tool state transitions', () => {
     expect(several.error?.message).toMatch(
       /^objective and blocked_reason are not used by action complete; omit them or send objective: "", blocked_reason: ""\./,
     )
+  })
+
+  it('accepts values echoed from get_goal as fillers, but only for the addressed goal', async () => {
+    const { ctx, root } = await harness()
+    openTurn(root, { kind: 'user' })
+    const created = ctx.goals.create(root.agent, { objective: 'valid', maxGoalRounds: 12 })
+    // The shape a strict-schema model sends after copying every field from get_goal.
+    const echoed = await execute(ctx, 'update_goal', {
+      goal_id: created.id,
+      revision: created.revision,
+      action: 'pause',
+      objective: 'valid',
+      max_goal_rounds: 12,
+      blocked_reason: '',
+    }, root.agent)
+    expect(resultGoal(echoed)).toMatchObject({ phase: 'paused', objective: 'valid', maxGoalRounds: 12 })
+
+    const paused = ctx.goals.get(root.agent)!
+    const wrongGoal = await execute(ctx, 'update_goal', {
+      goal_id: 'goal-other',
+      revision: paused.revision,
+      action: 'pause',
+      objective: '',
+      max_goal_rounds: 12,
+      blocked_reason: '',
+    }, root.agent)
+    expect(wrongGoal.error?.message).toMatch(/^max_goal_rounds is not used by action pause/)
   })
 
   it('accepts only empty fillers in fields unused by the selected action', async () => {
@@ -682,5 +749,113 @@ describe('goal tool state transitions', () => {
     })
     expect(blocked.concludesTurn).toBeUndefined()
     expect(blocked.additionalContexts).toBeUndefined()
+  })
+})
+
+describe('goal tool result presentation', () => {
+  /** Present one executed result through its tool, as a UI does from the logged arguments and result. */
+  function presented(ctx: Context, name: string, args: unknown, result: { content: ToolExecutionResult['content']; isError: boolean }) {
+    return ctx.tools.get(name)?.presentResult?.(args, { content: result.content, isError: result.isError })
+  }
+
+  /** The generic card a summary presenter returns. */
+  const card = (text: string) => ({ card: 'generic', content: [{ type: 'text', text }] })
+
+  /** The exact model-facing text of one result. */
+  function textOf(result: ToolExecutionResult): string {
+    const block = result.content[0]
+    if (result.content.length !== 1 || block?.type !== 'text') throw new Error('expected one text block')
+    return block.text
+  }
+
+  /** The canonical compact JSON the model receives for one goal, spelled out byte for byte. */
+  const goalJson = (id: string, revision: number, objective: string, phase: string, rounds: number, activation: string) =>
+    `{"goal":{"id":"${id}","revision":${revision},"objective":"${objective}","phase":"${phase}",`
+    + `"roundsStarted":0,"maxGoalRounds":${rounds}},"activation":"${activation}"}`
+
+  it('summarizes each result without repeating the call, over byte-identical model JSON', async () => {
+    const { ctx, root } = await harness()
+    openTurn(root, { kind: 'user' })
+    const none = await execute(ctx, 'get_goal', {}, root.agent)
+    expect(textOf(none)).toBe('{"goal":null}')
+    expect(presented(ctx, 'get_goal', {}, none)).toEqual(card('No goal'))
+
+    const createArgs = { objective: 'Ship the parser', max_goal_rounds: 8 }
+    const created = await execute(ctx, 'create_goal', createArgs, root.agent)
+    const id = resultGoal(created)['id'] as string
+    expect(textOf(created)).toBe(goalJson(id, 1, 'Ship the parser', 'active', 8, 'armed'))
+    // The objective is on the call's card, so the result card does not repeat it.
+    expect(presented(ctx, 'create_goal', createArgs, created)).toEqual(card('Goal created \u00b7 0/8 rounds'))
+
+    const read = await execute(ctx, 'get_goal', {}, root.agent)
+    expect(textOf(read)).toBe(goalJson(id, 1, 'Ship the parser', 'active', 8, 'armed'))
+    expect(presented(ctx, 'get_goal', {}, read)).toEqual(card('active \u00b7 round 0/8 \u00b7 Ship the parser'))
+
+    const editArgs = { goal_id: id, revision: 1, action: 'edit', objective: '', max_goal_rounds: 12, blocked_reason: '' }
+    const edited = await execute(ctx, 'update_goal', editArgs, root.agent)
+    expect(textOf(edited)).toBe(goalJson(id, 2, 'Ship the parser', 'active', 12, 'armed'))
+    expect(presented(ctx, 'update_goal', editArgs, edited)).toEqual(card('edited \u00b7 0/12 rounds'))
+
+    const pauseArgs = { goal_id: id, revision: 2, action: 'pause' }
+    const paused = await execute(ctx, 'update_goal', pauseArgs, root.agent)
+    expect(textOf(paused)).toBe(goalJson(id, 3, 'Ship the parser', 'paused', 12, 'disarmed'))
+    expect(presented(ctx, 'update_goal', pauseArgs, paused)).toEqual(card('paused'))
+  })
+
+  it('words a resume and a completion, and bounds the objective a read shows', async () => {
+    const { ctx, root } = await harness()
+    let turn = openTurn(root, { kind: 'user' })
+    const objective = 'Migrate every package to the new build pipeline and remove the old scripts'
+    const created = ctx.goals.create(root.agent, { objective, maxGoalRounds: 5 })
+    closeTurn(root, turn)
+    await agentEvents(ctx, root.agent).serial('agent/created', { source: 'resume' })
+    turn = openTurn(root, { kind: 'user' }, 'continue')
+    const read = await execute(ctx, 'get_goal', {}, root.agent)
+    expect(textOf(read)).toBe(goalJson(created.id, 1, objective, 'active', 5, 'disarmed'))
+    expect(presented(ctx, 'get_goal', {}, read))
+      .toEqual(card('active \u00b7 round 0/5 \u00b7 Migrate every package to the new build pipeline and remove\u2026'))
+
+    const resumeArgs = { goal_id: created.id, revision: 1, action: 'resume' }
+    const resumed = await execute(ctx, 'update_goal', resumeArgs, root.agent)
+    expect(textOf(resumed)).toBe(goalJson(created.id, 2, objective, 'active', 5, 'armed'))
+    expect(presented(ctx, 'update_goal', resumeArgs, resumed)).toEqual(card('resumed'))
+
+    const completeArgs = { goal_id: created.id, revision: 2, action: 'complete' }
+    const complete = await execute(ctx, 'update_goal', completeArgs, root.agent)
+    expect(textOf(complete)).toBe(goalJson(created.id, 3, objective, 'complete', 5, 'disarmed'))
+    expect(presented(ctx, 'update_goal', completeArgs, complete)).toEqual(card('completed'))
+    closeTurn(root, turn)
+  })
+
+  it('shows a blocked goal\'s reason on a read, and only the state on the update that set it', async () => {
+    const { ctx, root } = await harness()
+    openTurn(root, { kind: 'user' })
+    const created = ctx.goals.create(root.agent, { objective: 'human stop', maxGoalRounds: 3 })
+    const blockArgs = { goal_id: created.id, revision: 1, action: 'blocked', blocked_reason: 'Waiting for\n the API key.' }
+    const blocked = await execute(ctx, 'update_goal', blockArgs, root.agent)
+    expect(presented(ctx, 'update_goal', blockArgs, blocked)).toEqual(card('blocked'))
+    const read = await execute(ctx, 'get_goal', {}, root.agent)
+    expect(presented(ctx, 'get_goal', {}, read)).toEqual(card('blocked \u00b7 round 0/3 \u00b7 human stop\nWaiting for the API key.'))
+  })
+
+  it('keeps the generic rendering for a failure and for text that is not the canonical goal JSON', async () => {
+    const { ctx, root } = await harness()
+    openTurn(root, { kind: 'user' })
+    const failed = await execute(ctx, 'create_goal', { objective: ' ' }, root.agent)
+    expect(failed.isError).toBe(true)
+    expect(presented(ctx, 'create_goal', { objective: ' ' }, failed)).toBeUndefined()
+    const text = (value: string) => ({ content: [{ type: 'text' as const, text: value }], isError: false })
+    const updateArgs = { goal_id: 'goal-1', revision: 1, action: 'pause' }
+    for (const raw of ['not json', '{"goal":{"objective":"x","phase":"lost","roundsStarted":0,"maxGoalRounds":1}}',
+      '{"goal":{"objective":"x","phase":"active","roundsStarted":-1,"maxGoalRounds":1}}', '[]', 'null']) {
+      expect(presented(ctx, 'get_goal', {}, text(raw))).toBeUndefined()
+      expect(presented(ctx, 'create_goal', { objective: 'x' }, text(raw))).toBeUndefined()
+      expect(presented(ctx, 'update_goal', updateArgs, text(raw))).toBeUndefined()
+    }
+    // Only a read reports that there is no goal; a mutation always returns one.
+    expect(presented(ctx, 'create_goal', { objective: 'x' }, text('{"goal":null}'))).toBeUndefined()
+    expect(presented(ctx, 'update_goal', updateArgs, text('{"goal":null}'))).toBeUndefined()
+    // Arguments a replayed log no longer validates fall back as well.
+    expect(presented(ctx, 'update_goal', { wrong: true }, text('{"goal":null}'))).toBeUndefined()
   })
 })

@@ -1,7 +1,7 @@
 /** `bake update` reports through its exit status and changes only an install the updater manages. */
 import { createHash, generateKeyPairSync, sign } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -15,7 +15,9 @@ const target = hostTarget()!
 
 /** A release host serving `version`, signed by a throwaway key, and a managed 0.1.0 install. */
 function fixture(version: string) {
-  const root = mkdtempSync(join(tmpdir(), 'bake-cli-update-'))
+  // Resolved, as the installer resolves its root: macOS's temporary directory
+  // sits behind the /var -> /private/var symlink.
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'bake-cli-update-')))
   roots.push(root)
   const pair = generateKeyPairSync('ed25519')
   const tree = join(root, 'tree')

@@ -22,11 +22,15 @@ export interface GoalEntry {
 }
 
 /**
- * Standing state for the goal: the glyph, word, and colour of its phase.
+ * Standing state for the goal: the glyph and colour of its phase, and its words.
  *
- * Each phase pairs a colour with a glyph, so `NO_COLOR` still distinguishes
- * an armed goal from a held, blocked, or finished one. The header keeps the
- * turn's label first, then fits the goal at the right edge.
+ * An armed goal reads `● Goal 3/256`: the glyph in the running orange, the
+ * name and its round count in the terminal's own foreground, the count kept
+ * whenever the name is and beside the glyph once the name no longer fits.
+ * A held, paused, blocked, or finished goal keeps `○`, `✗`, or `✓` and the
+ * words for its phase. Each phase pairs a colour with a glyph, so `NO_COLOR`
+ * still distinguishes an armed goal from a held, blocked, or finished one.
+ * The header keeps the turn's label first, then fits the goal at the right edge.
  *
  * The objective is left to the goal's sheet unless `objective` asks for it:
  * a sentence of it at the row's edge reads as clipped text, not as state.
@@ -40,7 +44,6 @@ export interface GoalEntry {
 export function goalState(goal: GoalEntry | undefined, copy: TuiCopy, options: { readonly objective?: boolean } = {}): StandingState | undefined {
   if (goal === undefined) return undefined
   const count = `${goal.rounds}/${goal.maxRounds}`
-  const rounds = `${copy.goalRound} ${count}`
   const note = (...parts: (string | undefined)[]): { note?: string } => {
     const text = [...parts, options.objective === true ? goal.objective : undefined]
       .filter(part => part !== undefined && part !== '').join(' · ')
@@ -48,11 +51,11 @@ export function goalState(goal: GoalEntry | undefined, copy: TuiCopy, options: {
   }
   switch (goal.phase) {
     case 'active': return goal.armed
-      ? { glyph: MARKER.turn, label: copy.goalActive, details: rounds, compact: count, ...note(), color: PALETTE.running }
+      ? { glyph: MARKER.turn, label: copy.goalTitle, count, details: '', compact: count, ...note(), color: PALETTE.running }
       : { glyph: MARKER.waiting, label: copy.goalHeld, details: copy.goalResume, ...note(), color: PALETTE.waiting }
     case 'paused': return { glyph: MARKER.waiting, label: copy.goalPaused, details: copy.goalResume, ...note(), color: PALETTE.waiting }
     case 'blocked': return { glyph: '✗', label: copy.goalBlocked, details: '', ...note(goal.blocked), color: PALETTE.failed }
-    case 'complete': return { glyph: '✓', label: copy.goalComplete, details: rounds, compact: count, ...note(), color: PALETTE.done }
+    case 'complete': return { glyph: '✓', label: copy.goalComplete, count, details: '', compact: count, ...note(), color: PALETTE.done }
   }
 }
 
@@ -68,8 +71,10 @@ const ROUND_BAR = 24
 export function goalSheet(goal: GoalEntry, copy: TuiCopy): readonly SheetLine[] {
   const state = goalState(goal, copy)!
   const held = goal.phase === 'paused' || (goal.phase === 'active' && !goal.armed)
+  // The header's short `Goal` stands beside its count; the sheet names the phase.
+  const label = goal.phase === 'active' && goal.armed ? copy.goalActive : state.label
   return [
-    { text: state.label, glyph: state.glyph, glyphColor: state.color, color: state.color, bold: true },
+    { text: label, glyph: state.glyph, glyphColor: state.color, color: state.color, bold: true },
     { text: '', parts: [...sheetBar(goal.rounds, goal.maxRounds, ROUND_BAR, state.color),
       { text: `  ${copy.goalRound} ${goal.rounds}/${goal.maxRounds}`, dim: true }] },
     ...held ? [{ text: copy.goalResume, dim: true }] : [],

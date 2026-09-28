@@ -4,6 +4,7 @@ import { realpath } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { pathToFileURL } from 'node:url'
+import { execaSync } from 'execa'
 import type { Context } from '@deepseek-ai/cordis'
 import { expect, it, onTestFinished, vi } from 'vitest'
 import {
@@ -219,8 +220,24 @@ it('retains approved policy and reports it as changed when the registry fails be
   expect(parse(readFileSync(join(dir, 'pnpm-workspace.yaml'), 'utf8'))).toEqual({ allowBuilds: { native: true } })
 })
 
-it('runs a real pnpm dependency script only after approval and retry', async () => {
+/**
+ * Why this host cannot run the real pnpm 11 build-approval flow, or undefined when it can.
+ * @param cwd - a directory without a foreign `packageManager` pin, so pnpm answers its own version.
+ * @returns a precise skip reason when the pnpm 11 binary is absent; other probe failures throw.
+ */
+function pnpm11Unavailable(cwd: string): string | undefined {
+  const probe = execaSync('pnpm', ['--version'], { cwd, reject: false })
+  if (probe.failed && probe.code === 'ENOENT') return 'requires pnpm 11 on PATH (CI installs pnpm@11); pnpm was not found'
+  if (probe.failed) throw new Error(`pnpm --version failed: ${probe.message}`)
+  const version = probe.stdout.trim()
+  // The manager targets pnpm 11's build-approval records; pnpm 12 prereleases reject a bare `add file:<path>`.
+  return version.split('.')[0] === '11' ? undefined : `requires pnpm 11 on PATH (CI installs pnpm@11); found pnpm ${version}`
+}
+
+it('runs a real pnpm dependency script only after approval and retry', async ({ skip }) => {
   const { manager, dir, profile } = await fixture('startup')
+  const unavailable = pnpm11Unavailable(profile.cwd)
+  if (unavailable !== undefined) skip(unavailable)
   const addon = join(profile.cwd, 'addon')
   mkdirSync(addon)
   writeFileSync(join(addon, 'package.json'), JSON.stringify({ name: 'approval-fixture-addon', version: '1.0.0',

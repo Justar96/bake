@@ -128,6 +128,23 @@ Current profile facts; scheduling and mutation belong to their callers.
 
 Source: [`packages/boot/app-boot/src/profile-context.ts`](../../packages/boot/app-boot/src/profile-context.ts)
 
+<a id="app-events"></a>
+
+### `app/*` events
+
+<a id="appshutdown--parallel"></a>
+
+#### `app/shutdown` — parallel
+
+Drain plugin-owned work before the launcher unloads root services. @mode parallel
+
+```ts cordis-catalog
+/** Drain plugin-owned work before the launcher unloads root services. @mode parallel */
+'app/shutdown'(): Promise<void> | void
+```
+
+Source: [`packages/core/agent-loop/src/index.ts`](../../packages/core/agent-loop/src/index.ts)
+
 <a id="hmr-events"></a>
 
 ### `hmr/*` events

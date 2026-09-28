@@ -7,14 +7,15 @@ import { Tasks } from '../src/tasks.tsx'
 import { SubagentRow } from '../src/subagents.tsx'
 import { emptyTranscript } from '../src/transcript.ts'
 import { dictionaries } from '../src/copy.ts'
+import type { GitState } from '../src/git.ts'
 import { renderToString } from 'ink'
 import stringWidth from 'string-width'
 
 afterEach(cleanup)
 
 const statusRow = (frame: string | undefined) => (frame ?? '').split('\n').findLast(line => line.startsWith('  ')) ?? ''
-/** The subagents' row, under the input's base rule and over the status line. */
-const agentRow = (frame: string | undefined) => (frame ?? '').split('\n').find(line => /^ {2}[↓>] /.test(line)) ?? ''
+/** The subagents' row, under the input's base rule and over the status line, its icon in the rail. */
+const agentRow = (frame: string | undefined) => (frame ?? '').split('\n').find(line => /^[↳>] (?:Subagents|子代理) /u.test(line)) ?? ''
 
 it.each(['en', 'zh'] as const)('counts the children on one row under the input in %s', async locale => {
   const ui = render(<App {...props({ copy: dictionaries[locale], subagents: [
@@ -25,8 +26,10 @@ it.each(['en', 'zh'] as const)('counts the children on one row under the input i
     { id: 'child-5', label: 'Lost', state: 'issue', detail: 'Unreadable', inspectable: false },
   ] })} />)
   const copy = dictionaries[locale]
-  // Names are the sheet's; the row counts what is working and what cannot be read.
-  expect(agentRow(ui.lastFrame())).toBe(`  ↓ ${copy.subagentsTitle}: 5 · 1 ${copy.subagentWorking} · 1 ${copy.subagentUnreadable}`)
+  // Names are the sheet's; the row counts what is working and what cannot be read,
+  // in lowercase and without a colon, and names its key at the right edge.
+  expect(agentRow(ui.lastFrame())).toMatch(new RegExp(
+    `^↳ ${copy.subagentsTitle} 5 · 1 ${copy.subagentCountWorking} · 1 ${copy.subagentUnreadable} +Ctrl\\+G$`, 'u'))
   expect(statusRow(ui.lastFrame())).not.toContain(dictionaries[locale].subagentsTitle)
   // The row sits between the base rule and the status line.
   const lines = (ui.lastFrame() ?? '').split('\n')
@@ -41,10 +44,10 @@ const plan = [
   { text: 'Test it', status: 'pending' },
 ] as const
 
-it('folds the task list into one row with progress, the current task, and its key', () => {
+it('folds the task list into one row with its icon, count, progress, the current task, and its key', () => {
   const frame = render(<App {...props({ todos: plan })} />).lastFrame() ?? ''
-  const row = frame.split('\n').find(line => line.startsWith('Tasks'))!
-  expect(row).toMatch(/^Tasks {2}━━━━──────── {2}1\/3 · ▸ Thread the home +Ctrl\+T$/)
+  const row = frame.split('\n').find(line => line.startsWith('☐ Tasks'))!
+  expect(row).toMatch(/^☐ Tasks 1\/3 {2}━━━━──────── {2}▸ Thread the home +Ctrl\+T$/)
   expect(frame).not.toContain('Read startup')
   expect(frame).not.toContain('Test it')
 })
@@ -53,10 +56,14 @@ it('names the next open task when none is in progress, and leaves once all are d
   const draw = (todos: Parameters<typeof Tasks>[0]['todos'], columns = 60) =>
     renderToString(<Tasks todos={todos} copy={dictionaries.en} columns={columns} hint="Ctrl+T" />, { columns })
   expect(draw([{ text: 'Read startup', status: 'completed' }, { text: 'Test it', status: 'pending' }]))
-    .toMatch(/1\/2 · □ Test it +Ctrl\+T$/)
+    .toMatch(/^☐ Tasks 1\/2 {2}━━━━━━────── {2}□ Test it +Ctrl\+T$/)
   expect(draw(plan.map(item => ({ ...item, status: 'completed' as const })))).toBe('')
-  // The key gives way before the task is cut below a few cells.
-  expect(draw(plan, 44)).toBe('Tasks  ━━━━────────  1/3 · ▸ Thread…  Ctrl+T')
+  // Below 60 columns the key goes, as the composer's hint does.
+  expect(draw(plan, 59)).toBe('☐ Tasks 1/3  ━━━━────────  ▸ Thread the home')
+  // Above it, the key gives way before the task is cut below a few cells.
+  const long = [{ text: 'Thread the resolved home through startup and the session store', status: 'in_progress' as const }]
+  expect(draw(long, 60)).toMatch(/^☐ Tasks 0\/1 {2}─{12} {2}▸ Thread the resolved \S*… {2}Ctrl\+T$/)
+  expect(stringWidth(draw(long, 60))).toBe(60)
   expect(draw(plan, 40)).not.toContain('Ctrl+T')
   expect(draw(plan, 40)).toContain('▸ Thread')
   for (const columns of [1, 12, 24, 40]) expect(stringWidth(draw(plan, columns)), `${columns}`).toBeLessThanOrEqual(columns)
@@ -73,7 +80,7 @@ it('selects the task row from the composer and opens the full list', async () =>
   for (const task of ['✓ 1 Read startup', '▸ 2 Thread the home', '□ 3 Test it']) expect(ui.lastFrame()).toContain(task)
   ui.stdin.write('\x1b')
   await vi.waitFor(() => expect(ui.lastFrame()).not.toContain(dictionaries.en.sheetClose))
-  expect(ui.lastFrame()).toMatch(/^Tasks .*Ctrl\+T$/m)
+  expect(ui.lastFrame()).toMatch(/^☐ Tasks .*Ctrl\+T$/m)
   expect(onSubmit).not.toHaveBeenCalled()
 })
 
@@ -81,16 +88,16 @@ it('walks Up from the goal to the task row, Down back, and opens the list with C
   const goal = { objective: 'Ship it', phase: 'active' as const, armed: true, rounds: 2, maxRounds: 8 }
   const ui = render(<App {...props({ todos: plan, goal })} />)
   ui.stdin.write('\x1b[A')
-  await vi.waitFor(() => expect(ui.lastFrame()).toContain('> ● Goal active'))
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain('> ● Goal 2/8'))
   ui.stdin.write('\x1b[A')
   await vi.waitFor(() => expect(ui.lastFrame()).toMatch(/> Tasks /))
-  expect(ui.lastFrame()).not.toContain('> ● Goal active')
+  expect(ui.lastFrame()).not.toContain('> ● Goal 2/8')
   ui.stdin.write('\x1b[B')
-  await vi.waitFor(() => expect(ui.lastFrame()).toContain('> ● Goal active'))
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain('> ● Goal 2/8'))
   ui.stdin.write('\x1b[B')
-  // Beside the task row the goal drops its own key and details; Tab reaches its sheet from any other.
-  await vi.waitFor(() => expect(ui.lastFrame()).toMatch(/ ● Goal active$/m))
-  expect(ui.lastFrame()).not.toContain('> ● Goal active')
+  // Beside the task row the goal keeps its key and its count.
+  await vi.waitFor(() => expect(ui.lastFrame()).toMatch(/ Ctrl\+O ● Goal 2\/8$/m))
+  expect(ui.lastFrame()).not.toContain('> ● Goal 2/8')
   ui.stdin.write('Unsent draft')
   await vi.waitFor(() => expect(ui.lastFrame()).toContain('> Unsent draft▌'))
   ui.stdin.write('\x14')
@@ -100,28 +107,28 @@ it('walks Up from the goal to the task row, Down back, and opens the list with C
   expect(ui.lastFrame()).toContain('> Unsent draft▌')
 })
 
-it('thins the rows around the composer once tasks, a goal, and subagents are all shown', () => {
+it('keeps one grammar around the composer once tasks, a goal, and subagents are all shown', () => {
   const busy = {
     todos: plan, goal: { objective: 'Ship it', phase: 'active' as const, armed: true, rounds: 3, maxRounds: 256 },
     subagents: [{ id: 'child-1', label: 'Review tests', state: 'working' as const, detail: 'Continuable', inspectable: true }],
     context: { used: 45_000, window: 128_000 }, usage: { input: 1_234_000, output: 30_500, cached: 1_000_000 },
   }
   const frame = render(<App {...props(busy)} />).lastFrame() ?? ''
-  const header = frame.split('\n').find(line => line.includes('Goal active'))!
-  expect(header).not.toContain('Ctrl+O')
-  expect(header).not.toContain('round 3/256')
+  // No mode thins the goal: it keeps its key and its count beside the other rows.
+  const header = frame.split('\n').find(line => line.includes('● Goal 3/256'))!
+  expect(header).toMatch(/Ctrl\+O ● Goal 3\/256$/)
   expect(header).not.toContain('Ship it')
-  expect(header).toMatch(/● Goal active$/)
-  const status = statusRow(frame)
-  expect(agentRow(frame)).toBe('  ↓ Subagents: 1 · 1 Working')
-  expect(status).toContain('ctx ~35%')
-  for (const cost of ['Context:', 'in 1.2M', 'out 30.5k', 'cache hit']) expect(status).not.toContain(cost)
-  expect(frame).toMatch(/^Tasks .*Ctrl\+T$/m)
-  // One of them alone keeps every reading.
+  expect(agentRow(frame)).toMatch(/^↳ Subagents 1 · 1 working +Ctrl\+G$/)
+  expect(frame).toMatch(/^☐ Tasks .*Ctrl\+T$/m)
+  // The status line is one layout in every mode: every reading that fits stays.
+  const status = '  model  ctx ~35% (45k/128k)  in 1.2M  out 30.5k  cache hit 81%  /workspace'
+  expect(statusRow(frame)).toBe(status)
+  expect(statusRow(render(<App {...props({ ...busy, goal: undefined })} />).lastFrame())).toBe(status)
+  // One of them alone reads the same.
   const alone = render(<App {...props({ ...busy, todos: undefined, subagents: [] })} />).lastFrame() ?? ''
-  expect(alone).toMatch(/Ctrl\+O ● Goal active  round 3\/256$/m)
+  expect(alone).toMatch(/Ctrl\+O ● Goal 3\/256$/m)
   expect(alone).not.toContain('Ship it')
-  expect(statusRow(alone)).toContain('Context: ~45k/128k (35%)  in 1.2M  out 30.5k  cache hit 81%')
+  expect(statusRow(alone)).toBe(status)
 })
 
 function props(overrides: Partial<AppProps> = {}): AppProps {
@@ -156,11 +163,11 @@ describe('permission boundary', () => {
       live: [], status: 'idle' as const, model: 'mock/child-model' }
     const bare = render(<App {...props({ permission: 'danger-full-access', thinkingLevel: 'high', inspection })} />).lastFrame() ?? ''
     expect(bare).not.toContain('Access')
-    expect(bare).not.toContain('Think high')
+    expect(bare).not.toContain('think high')
     const own = render(<App {...props({ permission: 'danger-full-access', thinkingLevel: 'high',
       inspection: { ...inspection, permission: 'custom', thinkingLevel: 'low' } })} />).lastFrame() ?? ''
     expect(own).toContain('Parent: session-test > child · Access custom')
-    expect(own).toContain('Think low')
+    expect(own).toContain('think low')
     expect(own).not.toContain('danger-full-access')
   })
 })
@@ -170,33 +177,34 @@ it('shows only the inspected child’s context and usage, then restores the pare
   const child = { sessionId: 'child', label: 'Review', committed: emptyTranscript,
     live: [], status: 'idle' as const, model: 'mock/child-model' }
   const ui = render(<App {...parent} inspection={child} />)
-  expect(ui.lastFrame()).not.toContain('Context:')
+  expect(ui.lastFrame()).not.toContain('ctx ~')
   expect(ui.lastFrame()).not.toContain('in 9k')
   ui.rerender(<App {...parent} inspection={{ ...child, context: { used: 750, window: 8192 },
     usage: { input: 700, output: 50 } }} />)
-  expect(ui.lastFrame()).toContain('Context: ~750/8.2k (9%)')
+  expect(ui.lastFrame()).toContain('ctx ~9% (750/8.2k)')
   expect(ui.lastFrame()).toContain('in 700  out 50')
-  expect(ui.lastFrame()).not.toContain('Context: ~9k/128k')
+  expect(ui.lastFrame()).not.toContain('ctx ~7% (9k/128k)')
   ui.rerender(<App {...parent} />)
-  expect(ui.lastFrame()).toContain('Context: ~9k/128k (7%)')
+  expect(ui.lastFrame()).toContain('ctx ~7% (9k/128k)')
 })
 
 describe('thinking level', () => {
   it.each(['en', 'zh'] as const)('labels a selected effort in %s and omits unknown levels', locale => {
     const copy = dictionaries[locale]
     const ui = render(<App {...props({ copy, permission: 'workspace-write' })} />)
-    expect(ui.lastFrame()).not.toContain(copy.thinking)
+    expect(statusRow(ui.lastFrame())).not.toContain(copy.think)
     ui.rerender(<App {...props({ copy, permission: 'workspace-write', thinkingLevel: 'high' })} />)
-    expect(ui.lastFrame()).toContain(`${copy.thinking} high`)
+    expect(statusRow(ui.lastFrame())).toContain(`${copy.think} high`)
     ui.rerender(<App {...props({ copy, permission: 'workspace-write', thinkingLevel: copy.providerDefault })} />)
-    expect(ui.lastFrame()).toContain(`${copy.thinking} ${copy.providerDefault}`)
+    expect(statusRow(ui.lastFrame())).toContain(`${copy.think} ${copy.providerDefault}`)
   })
 })
 
 describe('context occupancy', () => {
   it('reports used, capacity, and percent once the meter has measured a request', () => {
     const ui = render(<App {...props({ context: { used: 12_340, window: 1_000_000 } })} />)
-    expect(ui.lastFrame()).toContain('Context: ~12.3k/1M (1%)')
+    // The percentage leads; the absolute count follows it in brackets.
+    expect(statusRow(ui.lastFrame())).toContain('ctx ~1% (12.3k/1M)')
   })
 
   it('shows nothing before the meter reports', () => {
@@ -204,12 +212,12 @@ describe('context occupancy', () => {
     // measures it, and a model with no exact capacity never reports a window.
     // A fraction of an unknown whole would be worse than silence.
     const ui = render(<App {...props()} />)
-    expect(ui.lastFrame()).not.toContain('Context')
+    expect(statusRow(ui.lastFrame())).toBe('  model  /workspace')
   })
 
   it('labels the figure in the active locale', () => {
     const ui = render(<App {...props({ copy: dictionaries.zh, context: { used: 500, window: 128_000 } })} />)
-    expect(ui.lastFrame()).toContain('上下文: ~500/128k (0%)')
+    expect(statusRow(ui.lastFrame())).toContain('上下文 ~0% (500/128k)')
   })
 
   it.each(['en', 'zh'] as const)('shows the discard action beside retained input in %s', async locale => {
@@ -238,10 +246,10 @@ it('omits the plan indicator when the profile has no plan projection', () => {
 })
 
 describe('model and billed tokens', () => {
-  it('names the model where the state word was, and no token fields before a request reports', () => {
+  it('names the model where the state word was, without a label, and no token fields before a request reports', () => {
     const ui = render(<App {...props({ status: 'running' })} />)
     const row = statusRow(ui.lastFrame())
-    expect(row).toMatch(/^ {2}Model: model {2}/)
+    expect(row).toBe('  model  /workspace')
     expect(row).not.toContain(dictionaries.en.working)
     expect(row).not.toContain(' in ')
   })
@@ -249,8 +257,8 @@ describe('model and billed tokens', () => {
   it.each(['en', 'zh'] as const)('reports input, output, and the cache hit the provider reported in %s', locale => {
     const copy = dictionaries[locale]
     const ui = render(<App {...props({ copy, context: { used: 500, window: 128_000 }, usage: { input: 12_340, output: 1_200, cached: 10_000 } })} />)
-    expect(statusRow(ui.lastFrame())).toContain(
-      `${copy.model}: model  ${locale === 'en' ? 'Context' : '上下文'}: ~500/128k (0%)  ${copy.tokensIn} 12.3k  ${copy.tokensOut} 1.2k  ${copy.cacheHit} 81%  /workspace`)
+    expect(statusRow(ui.lastFrame())).toBe(
+      `  model  ${copy.context} ~0% (500/128k)  ${copy.tokensIn} 12.3k  ${copy.tokensOut} 1.2k  ${copy.cacheHit} 81%  /workspace`)
   })
 
   it('leaves the cache field out for a provider that reports no cache traffic', () => {
@@ -273,7 +281,7 @@ it('opens the agents sheet from the shortcut, inspects the child, and preserves 
   ui.stdin.write('Unsent parent draft')
   await vi.waitFor(() => expect(ui.lastFrame()).toContain('Unsent parent draft'))
   ui.stdin.write('\x07')
-  await vi.waitFor(() => expect(ui.lastFrame()).toContain(' Subagents 1 · 1 Working '))
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain(' Subagents 1 · 1 working '))
   expect(ui.lastFrame()).toContain('▸ ● Review  Working')
   expect(ui.lastFrame()).toContain('Continuable · child')
   ui.stdin.write('\r')
@@ -296,7 +304,7 @@ it('selects the subagents row with Down, and moves the pointer past a child with
   const saved = { id: 'old', label: 'Earlier', state: 'saved', outcome: 'completed', detail: 'One-shot', inspectable: true } as const
   const ui = render(<App {...props({ onInspectSubagent, onSubmit, subagents: [remote, saved] })} />)
   ui.stdin.write('\x1b[B')
-  await vi.waitFor(() => expect(agentRow(ui.lastFrame())).toBe('  > Subagents: 2 · Enter opens'))
+  await vi.waitFor(() => expect(agentRow(ui.lastFrame())).toMatch(/^> Subagents 2 · 1 working +Enter opens$/))
   ui.stdin.write('\r')
   // The pointer starts on the first child it can open.
   await vi.waitFor(() => expect(ui.lastFrame()).toContain('▸ ○ Earlier  Completed · Saved'))
@@ -325,7 +333,7 @@ it('toggles each sheet on its own key and cycles the open one with Tab both ways
   ui.stdin.write('\x14')
   await vi.waitFor(() => expect(current()).toBe('tasks'))
   // Every view is named on the strip, the open one included, and Tab is named as the way between them.
-  expect(ui.lastFrame()).toMatch(/ Tasks 1\/3 {3}Subagents 1 · 1 Working {3}Goal /)
+  expect(ui.lastFrame()).toMatch(/ Tasks 1\/3 {3}Subagents 1 · 1 working {3}Goal /)
   expect(ui.lastFrame()).toContain('Tab next')
   ui.stdin.write('\x14')
   await vi.waitFor(() => expect(current()).toBeUndefined())
@@ -370,7 +378,7 @@ it('keeps Down in the composer while drafting', async () => {
   ] })} />)
   ui.stdin.write('draft\x1b[B')
   await vi.waitFor(() => expect(ui.lastFrame()).toContain('draft'))
-  expect(agentRow(ui.lastFrame())).toContain('↓ Subagents: 1')
+  expect(agentRow(ui.lastFrame())).toMatch(/^↳ Subagents 1 +Ctrl\+G$/)
   expect(ui.lastFrame()).not.toContain(dictionaries.en.sheetClose)
 })
 
@@ -379,12 +387,14 @@ it('keeps the subagents on one row however many there are, and at any width', ()
     id: `c${index}`, label: `Child number ${index}`, state: index < 7 ? 'working' as const : 'live' as const,
     detail: 'Continuable', inspectable: true }))
   const frame = render(<App {...props({ subagents })} />).lastFrame() ?? ''
-  expect(agentRow(frame)).toBe('  ↓ Subagents: 12 · 7 Working')
+  expect(agentRow(frame)).toMatch(/^↳ Subagents 12 · 7 working +Ctrl\+G$/)
   expect(frame).not.toContain('Child number')
-  for (const columns of [8, 20, 40]) {
-    const row = renderToString(<SubagentRow entries={subagents} copy={dictionaries.en} columns={columns} />, { columns })
+  for (const columns of [8, 20, 40, 59, 60, 80]) {
+    const row = renderToString(<SubagentRow entries={subagents} copy={dictionaries.en} columns={columns} hint="Ctrl+G" />, { columns })
     expect(row.split('\n'), `${columns}`).toHaveLength(1)
     expect(stringWidth(row), `${columns}`).toBeLessThanOrEqual(columns)
+    // Below 60 columns the key goes, as the composer's hint does.
+    expect(row.includes('Ctrl+G'), `${columns}`).toBe(columns >= 60)
   }
 })
 
@@ -401,7 +411,7 @@ it('steps thinking on Shift-Tab without touching the draft or a completion Tab w
 
 it('names an available update in the status line, after every reading of the session and before the path', () => {
   const frame = render(<App {...props({ update: { version: '0.2.0', installed: false }, usage: { input: 1200, output: 300 } })} />).lastFrame()!
-  const status = frame.split('\n').find(line => line.includes('Model:'))!
+  const status = statusRow(frame)
   expect(status).toMatch(/update\s+v0\.2\.0 · \/update/)
   // Last of the bounded fields, so it is the first a narrow line gives up.
   expect(status.indexOf('out')).toBeLessThan(status.indexOf('update'))
@@ -410,6 +420,34 @@ it('names an available update in the status line, after every reading of the ses
 
 it('asks for a restart once the newer release is installed', () => {
   const frame = render(<App {...props({ update: { version: '0.2.0', installed: true } })} />).lastFrame()!
-  const status = frame.split('\n').find(line => line.includes('Model:'))!
+  const status = statusRow(frame)
   expect(status).toContain(`v0.2.0 · ${dictionaries.en.updateRestart}`)
+})
+
+const clean: GitState = { branch: 'main', detached: false, ahead: 0, behind: 0, staged: 0, modified: 0, untracked: 0, conflicted: 0 }
+
+describe('git field', () => {
+  const status = (overrides: Partial<AppProps>) =>
+    statusRow(render(<App {...props(overrides)} />).lastFrame())
+
+  it('names the branch after the context reading and before the cost readings', () => {
+    const row = status({ git: { ...clean, staged: 1, modified: 2, untracked: 3, ahead: 4, behind: 5 },
+      context: { used: 3_000, window: 128_000 }, usage: { input: 1200, output: 300 } })
+    expect(row).toContain('\u2387 main +1 ~2 ?3 \u21914 \u21935')
+    expect(row.indexOf(dictionaries.en.context)).toBeLessThan(row.indexOf('\u2387 main'))
+    expect(row.indexOf('\u2387 main')).toBeLessThan(row.indexOf(dictionaries.en.tokensIn))
+    expect(row.indexOf('\u2387 main')).toBeLessThan(row.indexOf('/workspace'))
+  })
+
+  it('shows a clean tree as the branch alone, a detached HEAD by its commit, and nothing outside a repository', () => {
+    expect(status({ git: clean })).toMatch(/\u2387 main {2}\/workspace$/)
+    expect(status({ git: { ...clean, branch: '0123456', detached: true } })).toContain('\u2387 (0123456)')
+    expect(status({})).not.toContain('\u2387')
+  })
+
+  it('draws ASCII where the terminal draws the classic frame', () => {
+    const row = status({ frame: 'classic', git: { ...clean, modified: 1, ahead: 2, behind: 3 } })
+    expect(row).toContain('main ~1 ^2 v3  /workspace')
+    expect(row).not.toContain('\u2387')
+  })
 })

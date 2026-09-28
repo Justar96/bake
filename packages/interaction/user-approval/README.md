@@ -108,18 +108,18 @@ Read these pages when the package-level contract is not enough. They move from t
 
 #### What the model sees
 
-The first request and each effective policy change append a full runtime-context snapshot after retained history. Under `ask`, the approval contribution states that configured answerers may be consulted and absence fails closed. Under `never`, it states the deterministic rejection and non-escalation consequence. Unchanged requests retain the earlier snapshot without adding another message.
+The first request and each effective policy change append a full runtime-context snapshot after retained history. Under `ask`, the approval contribution states that actions needing approval request it before running and fail when no one can answer. Under `never`, it states the deterministic rejection and non-escalation consequence. Unchanged requests retain the earlier snapshot without adding another message.
 
 ##### Ask-policy contribution
 
 ```markdown
-Approval policy: ask. Operations that require approval may ask through the configured answerers; without an available answerer, the request fails closed.
+Approval prompts: enabled. Actions that need approval request it before running, and fail if no one can answer.
 ```
 
 ##### Never-policy contribution
 
 ```markdown
-Approval prompts are disabled in this session: actions that require approval are rejected automatically — do not request sandbox escalation (do not set `sandbox_permissions`).
+Approval prompts: disabled. Actions that need approval are rejected automatically, so do not request sandbox escalation with `sandbox_permissions`.
 ```
 
 #### Token effect

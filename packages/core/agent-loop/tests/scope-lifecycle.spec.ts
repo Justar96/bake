@@ -1001,6 +1001,20 @@ describe('agent scope lifecycle', () => {
     expect(() => handle.agent.ctx.on('agent/status', () => {})).toThrow(/inactive context/)
   })
 
+  it('a listener on agent.ctx cannot observe its own agent/disposed: the scope already unwound', async () => {
+    const ctx = await harness()
+    const handle = await ctx.agents.create({ sessionId: SessionId('s1'), agentOptions: { provider: 'mock', model: 'mock' } })
+    const heardOnAgentCtx: string[] = []
+    const heardOnHost: string[] = []
+    handle.agent.ctx.on('agent/disposed', ({ agent }) => void heardOnAgentCtx.push(agent.id))
+    ctx.on('agent/disposed', ({ agent }) => void heardOnHost.push(agent.id))
+
+    await handle.dispose()
+
+    expect(heardOnAgentCtx).toEqual([])
+    expect(heardOnHost).toEqual(['s1'])
+  })
+
   it('agentEvents fuses carrier and subject for custom drivers', async () => {
     const ctx = await harness()
     const agent = await ctx.agentLoop.create(SessionId('a1'), { provider: 'mock', model: 'mock' })

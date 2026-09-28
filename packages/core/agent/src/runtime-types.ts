@@ -262,7 +262,14 @@ declare module '@deepseek-ai/cordis' {
     /**
      * An agent left the registry; AgentLoop emits this after driver quiescence
      * and scoped-registration unwind, but before session detachment. Custom
-     * registry users own their driver-ordering contract.
+     * registry users own their driver-ordering contract. Because the agent's
+     * scope has already unwound, a listener registered on `agent.ctx` cannot
+     * observe this event — register on a host or registry-owning context
+     * instead (scope-filtered dispatch still targets such a listener to this
+     * agent by identity). A session event appended from this listener, or
+     * from a `session/disposed` listener reached during the same disposal,
+     * is not persisted: the session's write handle is already closed by then,
+     * so the append is silently dropped rather than durably written.
      * @param payload.agent - the exact agent removed from the registry.
      * Scope-filtered dispatch (`@deepseek-ai/dsh-scope`): agent-scoped listeners receive only that agent.
      * @mode emit

@@ -33,7 +33,7 @@
     "@deepseek-ai/dsh-api-settings-controller": "workspace:^",
     "@deepseek-ai/dsh-client-connection": "workspace:^",
     "@deepseek-ai/dsh-typert-protocol": "workspace:^",
-    "typescript": "^6.0.3"
+    "typescript": "catalog:"
   },
   "files": [
     "lib/index.js",

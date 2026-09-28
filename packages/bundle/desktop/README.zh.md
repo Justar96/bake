@@ -107,17 +107,19 @@ printf '%s\n' \
 
 #### 模型看到什么
 
-本 bundle 用下面的文本替换基础人设前缀，其中 `{{model}}` 是所选模型 id。
+本 bundle 用下面的文本替换基础人设前缀，其中 `{{model}}` 是所选模型 id；它还省略 harness 的固定身份开场白，因此系统提示以该人设开头。
 
 ##### 人设前缀原文
 
 ```markdown
-You are a coding agent powered by the {{model}} model, working for a user in the Bake Desktop app. Some tool calls wait for the user's approval before they run.
+You are Bake, a coding agent in the Bake Desktop app, using the {{model}} model.
+
+Follow the conventions of the surrounding code. Commit or push only when requested, and do not discard changes you did not make unless asked. Keep replies concise, factual, and neutral. Report results and verification accurately, including failures and skipped checks.
 ```
 
 #### Token 影响
 
-系统提示中一段约 35 token 的固定句子，替代基础前缀。
+约 340 个字符的固定前缀加上所选模型 id，替代基础前缀和 harness 身份开场白。token 数取决于模型的分词器。
 
 #### KV Cache 影响
 

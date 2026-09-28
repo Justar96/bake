@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { describe, expect, it } from 'vitest'
-import { INHERITED_NODE_ENV, selectRendererBuild } from '../src/bin.ts'
+import { INHERITED_NODE_ENV, selectRendererBuild } from '../src/cli.ts'
 
 describe('selectRendererBuild', () => {
   it('loads the production renderer whatever the caller exported, and records what it was', () => {

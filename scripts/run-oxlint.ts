@@ -1,4 +1,3 @@
-import { spawnSync } from 'node:child_process'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -48,50 +47,48 @@ export function resolveOxlintInvocation(args: readonly string[], env: NodeJS.Pro
   }
 }
 
-function completeFrom(result: { readonly signal: NodeJS.Signals | null; readonly status: number | null }): void {
-  if (result.signal !== null) {
-    process.kill(process.pid, result.signal)
+/** Run Oxlint with the invocation, its output either shown or captured. */
+function oxlint(invocation: OxlintInvocation, output: 'inherit' | 'pipe'): Bun.SyncSubprocess {
+  const result = Bun.spawnSync([process.execPath, oxlintCli, ...invocation.args], {
+    env: invocation.env,
+    stdio: output === 'inherit' ? ['inherit', 'inherit', 'inherit'] : ['ignore', 'pipe', 'pipe'],
+    ...output === 'pipe' ? { maxBuffer: MAX_CAPTURED_OUTPUT_BYTES } : {},
+  })
+  if (result.exitedDueToMaxBuffer === true) {
+    throw new Error(`run-oxlint: Oxlint output exceeded ${String(MAX_CAPTURED_OUTPUT_BYTES)} bytes.`)
+  }
+  return result
+}
+
+function completeFrom(result: Bun.SyncSubprocess): void {
+  if (result.signalCode !== undefined) {
+    process.kill(process.pid, result.signalCode)
     return
   }
-  process.exitCode = result.status ?? 1
+  process.exitCode = result.exitCode
 }
 
 function main(): void {
   const invocation = resolveOxlintInvocation(process.argv.slice(2), process.env)
   if (!isFixInvocation(invocation.args)) {
-    const result = spawnSync(process.execPath, [oxlintCli, ...invocation.args], {
-      env: invocation.env,
-      stdio: 'inherit',
-    })
-    if (result.error !== undefined) throw result.error
-    completeFrom(result)
+    completeFrom(oxlint(invocation, 'inherit'))
     return
   }
 
-  const first = spawnSync(process.execPath, [oxlintCli, ...invocation.args], {
-    encoding: 'utf8',
-    env: invocation.env,
-    maxBuffer: MAX_CAPTURED_OUTPUT_BYTES,
-  })
-  if (first.error !== undefined) throw first.error
-  if (first.signal !== null) {
+  const first = oxlint(invocation, 'pipe')
+  if (first.signalCode !== undefined) {
     completeFrom(first)
     return
   }
-  if (first.status === 0) {
-    process.stdout.write(first.stdout)
-    process.stderr.write(first.stderr)
+  if (first.exitCode === 0) {
+    process.stdout.write(first.stdout ?? '')
+    process.stderr.write(first.stderr ?? '')
     process.exitCode = 0
     return
   }
 
   // Overlapping JS-plugin fixes can expose one more fixable diagnostic after the first pass.
-  const second = spawnSync(process.execPath, [oxlintCli, ...invocation.args], {
-    env: invocation.env,
-    stdio: 'inherit',
-  })
-  if (second.error !== undefined) throw second.error
-  completeFrom(second)
+  completeFrom(oxlint(invocation, 'inherit'))
 }
 
 const entrypoint = process.argv[1]

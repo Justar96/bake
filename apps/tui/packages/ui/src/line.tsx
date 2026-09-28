@@ -19,8 +19,9 @@ import { chromeFor, COLUMN, COMPOSER_BUDGET, HINT_MIN_COLUMNS, MARKER, RULE, TRE
 import { PALETTE, type PaletteColor } from './palette.ts'
 import { fittedGroup, hintFor, isBlank, present, softBreaks, styleOf, tailLines, type ComposerState, type Hint, type LineStyle, type PresentedLine, type ResultBound, type Span } from './present.ts'
 import type { Row } from './rows.ts'
-import { FRAME_MS, formatElapsed, SPINNER_REST, spinnerFrame, type Clock, type Outcome, type TurnSummary } from './activity.ts'
+import { FOLD_REST, foldFrame, FRAME_MS, formatElapsed, SPINNER_REST, spinnerFrame, type Clock, type Outcome, type Spinner, type TurnSummary } from './activity.ts'
 import { useBeat } from './beat.tsx'
+import { FIELD_GAP, fitStatus, type StatusField } from './status-line.ts'
 
 /**
  * One display line.
@@ -347,16 +348,20 @@ export type ActivityState =
     readonly startedAt: number
     /** Colour for the glyph and word. */
     readonly color: PaletteColor
+    /** The dough the glyph works: `knead` for a turn, the default, and `fold` for compaction. */
+    readonly spinner?: Spinner
   }
   | { readonly kind: 'ended', readonly summary: TurnSummary }
 
 /** A standing session state the header shows beside the turn's, such as the goal. */
 export interface StandingState {
-  /** One-cell shape that carries the state under `NO_COLOR`. */
+  /** One-cell shape that carries the state under `NO_COLOR`, drawn in the state's colour. */
   readonly glyph: string
-  /** Bold word in the state's colour. */
+  /** Bold name in the terminal's own foreground: `Goal`, `Goal on hold`. */
   readonly label: string
-  /** Short dim reading after the label, such as `round 3/256`. Drawn whole or not at all. */
+  /** The state's one number, drawn beside the label whenever the label is: `3/256`. */
+  readonly count?: string
+  /** Short dim reading after the label, such as `/goal resume continues`. Drawn whole or not at all. */
   readonly details: string
   /**
    * Longer dim text after the details, such as an objective or a blocked
@@ -365,8 +370,9 @@ export interface StandingState {
   readonly note?: string
   /** A few cells drawn beside the glyph once the label no longer fits, such as `3/256`. */
   readonly compact?: string
+  /** The glyph's colour; the words stay in the normal foreground. */
   readonly color: PaletteColor
-  /** Dim shortcut drawn before the glyph. A tight row gives it up after the note, before the details. */
+  /** Dim shortcut drawn before the glyph. A tight row gives it up after the note and the turn's counts. */
   readonly key?: string
 }
 
@@ -386,6 +392,7 @@ const HEADER_NOTE_MIN = 8
 /** Which parts of the standing state a header row draws. */
 export interface StandingFit {
   readonly key: boolean
+  /** Whether the label is drawn, and its count with it. */
   readonly label: boolean
   /** Without the label, whether the glyph carries `compact`. */
   readonly compact: boolean
@@ -402,19 +409,34 @@ const DETAILS_SEP = '  '
 const NOTE_SEP = ' \u00b7 '
 
 /**
+ * The standing state's readings, widest first. Each is complete; the header
+ * steps down them as the row narrows ({@link headerLayout}).
+ */
+const SHAPES: readonly Omit<StandingFit, 'width' | 'cut'>[] = [
+  { key: true, label: true, compact: false, details: true, note: true },
+  { key: true, label: true, compact: false, details: true, note: false },
+  { key: false, label: true, compact: false, details: true, note: false },
+  { key: false, label: true, compact: false, details: false, note: false },
+  { key: false, label: false, compact: true, details: false, note: false },
+  { key: false, label: false, compact: false, details: false, note: false },
+]
+
+/**
  * The standing state's text parts, as the header draws them.
  * @param standing - the state.
  * @param focused - whether arrow-key focus is on it, which marks the head.
  * @param fit - the parts to draw.
- * @returns the key, head, details, and note strings, empty where not drawn.
+ * @returns the key, the glyph and its focus mark, the name, and the details and note, empty where not drawn.
  */
 function standingParts(standing: StandingState, focused: boolean, fit: Omit<StandingFit, 'width' | 'cut'>): {
-  readonly key: string, readonly head: string, readonly details: string, readonly note: string
+  readonly key: string, readonly glyph: string, readonly label: string, readonly count: string, readonly details: string, readonly note: string
 } {
-  const name = fit.label ? standing.label : fit.compact ? standing.compact ?? '' : ''
+  const count = fit.label ? standing.count ?? '' : fit.compact ? standing.compact ?? '' : ''
   return {
     key: fit.key && standing.key !== undefined && !focused ? `${standing.key} ` : '',
-    head: `${focused ? '> ' : ''}${standing.glyph}${name === '' ? '' : ` ${name}`}`,
+    glyph: `${focused ? '> ' : ''}${standing.glyph}`,
+    label: fit.label ? ` ${standing.label}` : '',
+    count: count === '' ? '' : ` ${count}`,
     details: fit.details && standing.details !== '' ? `${DETAILS_SEP}${standing.details}` : '',
     note: fit.note && standing.note !== undefined && standing.note !== ''
       ? `${standing.details !== '' && fit.details ? NOTE_SEP : DETAILS_SEP}${standing.note}` : '',
@@ -422,12 +444,43 @@ function standingParts(standing: StandingState, focused: boolean, fit: Omit<Stan
 }
 
 /**
+ * One of the standing state's readings ({@link SHAPES}), if it fits in `room`.
+ *
+ * A reading that would draw the same as a wider one does not apply: the full
+ * reading without a note, the label alone without details, and a glyph with
+ * no compact reading beside it, since the glyph alone would be a fragment.
+ * The note is cut rather than dropped while a few cells of it still read.
+ *
+ * @param room - cells available at the right of the header.
+ * @param standing - the state to fit.
+ * @param focused - whether arrow-key focus is on it.
+ * @param index - which of {@link SHAPES}.
+ * @returns the fit, or undefined when that reading does not apply or fit.
+ */
+function fitShape(room: number, standing: StandingState, focused: boolean, index: number): StandingFit | undefined {
+  const width = (fit: Omit<StandingFit, 'width' | 'cut'>): number => {
+    const parts = standingParts(standing, focused, fit)
+    return stringWidth(parts.key + parts.glyph + parts.label + parts.count + parts.details + parts.note)
+  }
+  if (index === 0 && (standing.note === undefined || standing.note === '')) return undefined
+  if (index === 3 && standing.details === '') return undefined
+  if (index >= 4 && standing.compact === undefined) return undefined
+  const shape = SHAPES[index]!
+  const full = width(shape)
+  if (full <= room) return { ...shape, cut: false, width: full }
+  if (index === 0 && room - width({ ...shape, note: false }) >= NOTE_SEP.length + HEADER_NOTE_MIN) {
+    return { ...shape, cut: true, width: room }
+  }
+  return undefined
+}
+
+/**
  * The most of the standing state that fits in `room` cells, never a fragment.
  *
  * In order, the state gives up: the end of its note, cut with an ellipsis
  * while a few cells remain, then the note, the shortcut, the details, and
- * the label, keeping the glyph and its compact reading. Below the glyph it is
- * dropped whole.
+ * the label with its count, keeping the glyph and its compact reading, then
+ * that reading. Below the glyph it is dropped whole.
  *
  * @param room - cells available at the right of the header.
  * @param standing - the state to fit.
@@ -435,68 +488,63 @@ function standingParts(standing: StandingState, focused: boolean, fit: Omit<Stan
  * @returns the parts to draw, or undefined when not even the glyph fits.
  */
 export function fitStanding(room: number, standing: StandingState, focused = false): StandingFit | undefined {
-  const width = (fit: Omit<StandingFit, 'width' | 'cut'>): number => {
-    const parts = standingParts(standing, focused, fit)
-    return stringWidth(parts.key + parts.head + parts.details + parts.note)
+  for (let index = 0; index < SHAPES.length; index++) {
+    const fit = fitShape(room, standing, focused, index)
+    if (fit !== undefined) return fit
   }
-  const hasNote = standing.note !== undefined && standing.note !== ''
-  const shapes: readonly Omit<StandingFit, 'width' | 'cut'>[] = [
-    { key: true, label: true, compact: false, details: true, note: true },
-    { key: true, label: true, compact: false, details: true, note: false },
-    { key: false, label: true, compact: false, details: true, note: false },
-    { key: false, label: true, compact: false, details: false, note: false },
-    { key: false, label: false, compact: true, details: false, note: false },
-  ]
-  for (const [index, shape] of shapes.entries()) {
-    if (index === 0 && !hasNote) continue
-    const full = width(shape)
-    if (full <= room) return { ...shape, cut: false, width: full }
-    // A note is cut rather than dropped while enough of it would still read.
-    if (index === 0 && room - width({ ...shape, note: false }) >= NOTE_SEP.length + HEADER_NOTE_MIN) {
-      return { ...shape, cut: true, width: room }
-    }
-  }
-  // The glyph alone, when even its compact reading does not fit.
-  const glyph = stringWidth(`${focused ? '> ' : ''}${standing.glyph}`)
-  return glyph <= room && standing.compact !== undefined
-    ? { key: false, label: false, compact: false, details: false, note: false, cut: false, width: glyph }
-    : undefined
+  return undefined
 }
+
+/**
+ * How much of the turn's text a header row draws: all of it, all but its
+ * counts and rate, or its glyph and word alone.
+ */
+export type TurnLevel = 'full' | 'brief' | 'head'
+
+/** The turn's text's cells at each {@link TurnLevel}; 0 when there is no turn to show. */
+export type TurnWidths = Readonly<Record<TurnLevel, number>>
+
+/**
+ * The order the header row gives way in: which turn level beside which
+ * standing reading ({@link SHAPES}), first to try first.
+ */
+const LADDER: readonly (readonly [TurnLevel, number])[] = [
+  ['full', 0], ['full', 1], ['brief', 1], ['brief', 2], ['head', 2], ['head', 3], ['head', 4], ['head', 5],
+]
 
 /**
  * Split the header row between the turn and the standing state.
  *
  * The turn's glyph and word come first; they are what a returning reader
- * checks. The standing state is right-aligned in what remains, fitted by
- * {@link fitStanding}. Its label outranks the turn's phase and elapsed time,
- * which give way before the state is reduced to its glyph.
+ * checks. The standing state is right-aligned in what remains. As the row
+ * narrows, first to give way first: the goal's note, cut and then dropped;
+ * the turn's counts and rate; the goal's `Ctrl+O`; the turn's phase and
+ * elapsed time; the goal's label, leaving its glyph and count (`● 3/256`);
+ * the count, leaving the glyph; and last the goal itself.
  *
  * @param columns - row width.
- * @param left - full width of the turn's text, in cells; 0 when there is none.
- * @param leftHead - width of the turn's glyph and word alone.
+ * @param turn - the turn's text's cells at each level.
  * @param standing - the state, when there is one.
  * @param focused - whether arrow-key focus is on it.
- * @returns the width drawn for the turn, whether it keeps its details, and the state's fit.
+ * @returns the cells drawn for the turn, the level it is drawn at, and the state's fit.
  */
-export function headerLayout(columns: number, left: number, leftHead: number, standing: StandingState | undefined, focused = false): {
-  readonly left: number, readonly leftDetails: boolean, readonly right: StandingFit | undefined
+export function headerLayout(columns: number, turn: TurnWidths, standing: StandingState | undefined, focused = false): {
+  readonly left: number, readonly level: TurnLevel, readonly right: StandingFit | undefined
 } {
   const room = Math.max(0, columns - HEADER_LEAD)
-  const alone = { left: Math.min(left, room), leftDetails: true, right: undefined }
+  const alone = { left: Math.min(turn.full, room), level: 'full' as const, right: undefined }
   if (standing === undefined) return alone
-  const fit = (used: number): StandingFit | undefined => fitStanding(room - used - (used > 0 ? HEADER_GAP : 0), standing, focused)
-  const full = fit(left)
-  if (full !== undefined && full.label) return { left, leftDetails: true, right: full }
-  if (leftHead < left) {
-    const short = fit(leftHead)
-    if (short !== undefined && short.label) return { left: leftHead, leftDetails: false, right: short }
-  }
-  if (full !== undefined) return { left, leftDetails: true, right: full }
-  if (leftHead < left) {
-    const short = fit(leftHead)
-    if (short !== undefined) return { left: leftHead, leftDetails: false, right: short }
+  for (const [level, index] of LADDER) {
+    const used = turn[level]
+    const fit = fitShape(room - used - (used > 0 ? HEADER_GAP : 0), standing, focused, index)
+    if (fit !== undefined) return { left: used, level, right: fit }
   }
   return alone
+}
+
+/** A standing state without its shortcut. */
+function withoutKey({ key: _key, ...rest }: StandingState): StandingState {
+  return rest
 }
 
 /**
@@ -504,12 +552,15 @@ export function headerLayout(columns: number, left: number, leftHead: number, st
  *
  * One row answers both "is it still working?" and "what is it working toward?",
  * directly above the rule that frames the input.
- * `⠰⣿⠆ Kneading…  writing · 12s                  Ctrl+O ● Goal active  round 3/256`.
+ * `⠰⣿⠆ Kneading…  writing · 12s                             Ctrl+O ● Goal 3/256`.
  * Narrowing never clips the state mid-word; see {@link headerLayout}.
  * While a turn runs, the spinner, word, phase, and elapsed time lead the row.
+ * Compaction takes the same cells with its own dough, `⢠⣤⡄ Compacting history…`,
+ * the state's `spinner` choosing which one the glyph works.
  * When the turn ends, those cells hold the outcome until the next turn starts.
- * The standing state, currently the goal, sits at the right edge. With neither,
- * the row stays blank so the input does not move when either appears.
+ * The standing state, currently the goal, sits at the right edge: its glyph
+ * in the state's colour, its words in the terminal's own foreground. With
+ * neither, the row stays blank so the input does not move when either appears.
  *
  * Motion uses the surface's shared beat, and only when a clock is supplied.
  * Without a clock — a screen reader or a test — the glyph rests and elapsed
@@ -519,13 +570,14 @@ export function headerLayout(columns: number, left: number, leftHead: number, st
  *
  * @param props.columns - terminal width; the row takes all of it.
  * @param props.state - what the turn is doing, or how it ended.
- * @param props.standing - the session's standing state, drawn at the right.
+ * @param props.standing - the session's standing state, drawn at the right; its key is left
+ *   out below {@link HINT_MIN_COLUMNS}, as every standing row's is.
  * @param props.standingFocused - whether arrow-key focus is on that state.
  * @param props.clock - time source; absent disables motion and the elapsed time.
  * @param props.motion - whether the glyph cycles; defaults to true.
  * @param props.compact - use a static ASCII chevron for screen readers.
  */
-export function Header({ columns, state, standing, standingFocused = false, clock, motion = true, compact = false }: {
+export function Header({ columns, state, standing: given, standingFocused = false, clock, motion = true, compact = false }: {
   readonly columns: number
   readonly state?: ActivityState | undefined
   readonly standing?: StandingState | undefined
@@ -534,13 +586,17 @@ export function Header({ columns, state, standing, standingFocused = false, cloc
   readonly motion?: boolean
   readonly compact?: boolean
 }): React.ReactElement {
+  // Below the composer hint's width every standing row gives up its key, and so does the goal.
+  const standing = given?.key === undefined || columns >= HINT_MIN_COLUMNS ? given : withoutKey(given)
   const running = state?.kind === 'running' ? state : undefined
   const moving = running !== undefined && !compact && motion && clock !== undefined
   const title = running === undefined ? '' : `${running.word}\u2026`
   const detailsAt = (elapsed: number): string => running === undefined ? ''
     : [running.phase, clock === undefined ? undefined : formatElapsed(elapsed)]
       .filter((part): part is string => part !== undefined).join(' \u00b7 ')
-  const glyphAt = (elapsed: number): string => compact ? '>' : moving ? spinnerFrame(elapsed) : SPINNER_REST
+  const fold = running?.spinner === 'fold'
+  const frameAt = (elapsed: number): string => fold ? foldFrame(elapsed) : spinnerFrame(elapsed)
+  const glyphAt = (elapsed: number): string => compact ? '>' : moving ? frameAt(elapsed) : fold ? FOLD_REST : SPINNER_REST
   // Subscription key. Elapsed seconds, plus the glyph while it is moving.
   // Dropped when the work ends, so no beat outlives it. The render that ends
   // the work still reads the key once before unsubscribe, which keeps a key
@@ -548,27 +604,33 @@ export function Header({ columns, state, standing, standingFocused = false, cloc
   const now = useBeat(running !== undefined && clock !== undefined, time => {
     if (running === undefined) return ''
     const elapsed = time - running.startedAt
-    return `${formatElapsed(elapsed)}${moving ? `|${spinnerFrame(elapsed)}` : ''}`
+    return `${formatElapsed(elapsed)}${moving ? `|${frameAt(elapsed)}` : ''}`
   }) ?? clock?.now() ?? running?.startedAt ?? 0
   const elapsed = running === undefined ? 0 : Math.max(0, now - running.startedAt)
   const details = detailsAt(elapsed)
   const ended = state?.kind === 'ended' ? state.summary : undefined
   const leftHead = running !== undefined ? `${glyphAt(elapsed)} ${title}`
     : ended === undefined ? '' : `${OUTCOME[ended.outcome].glyph} ${ended.label}`
-  const leftTail = running !== undefined ? details : ended?.details ?? ''
-  const leftText = `${leftHead}${leftTail === '' ? '' : `  ${leftTail}`}`
-  const room = headerLayout(columns, stringWidth(leftText), stringWidth(leftHead), standing, standingFocused)
-  const leftDetails = room.leftDetails && leftTail !== ''
+  // What follows the word at each level. A running turn has no counts yet,
+  // so its brief text is its whole text.
+  const tails: Readonly<Record<TurnLevel, string>> = running !== undefined
+    ? { full: details, brief: details, head: '' }
+    : { full: ended?.details ?? '', brief: ended?.brief ?? '', head: '' }
+  const textAt = (level: TurnLevel): string => `${leftHead}${tails[level] === '' ? '' : `  ${tails[level]}`}`
+  const room = headerLayout(columns, {
+    full: stringWidth(textAt('full')), brief: stringWidth(textAt('brief')), head: stringWidth(leftHead),
+  }, standing, standingFocused)
+  const tail = tails[room.level]
   const left = running !== undefined
     ? <>
       <Text color={running.color}>{glyphAt(elapsed)}</Text>{' '}
       <Text color={running.color} bold>{title}</Text>
-      {leftDetails ? <Text dimColor>{`  ${details}`}</Text> : null}
+      {tail === '' ? null : <Text dimColor>{`  ${tail}`}</Text>}
     </>
     : ended === undefined ? null
       : <>
         <Text color={OUTCOME[ended.outcome].color} bold>{`${OUTCOME[ended.outcome].glyph} ${ended.label}`}</Text>
-        {leftDetails ? <Text dimColor>{`  ${ended.details}`}</Text> : null}
+        {tail === '' ? null : <Text dimColor>{`  ${tail}`}</Text>}
       </>
   const fit = room.right
   const parts = standing === undefined || fit === undefined ? undefined : standingParts(standing, standingFocused, fit)
@@ -580,7 +642,9 @@ export function Header({ columns, state, standing, standingFocused = false, cloc
       {parts !== undefined && fit !== undefined && fit.width > 0 && <Box width={fit.width} flexShrink={0}>
         <Text wrap="truncate-end">
           {parts.key === '' ? null : <Text dimColor>{parts.key}</Text>}
-          <Text color={standing!.color} bold inverse={standingFocused}>{parts.head}</Text>
+          <Text color={standing!.color} bold inverse={standingFocused}>{parts.glyph}</Text>
+          {parts.label === '' ? null : <Text bold inverse={standingFocused}>{parts.label}</Text>}
+          {parts.count === '' ? null : <Text inverse={standingFocused}>{parts.count}</Text>}
           {parts.details === '' ? null : <Text dimColor>{parts.details}</Text>}
           {parts.note === '' ? null : <Text dimColor>{parts.note}</Text>}
         </Text>
@@ -713,9 +777,6 @@ export function Branch({ last, glyph, color, children }: {
   )
 }
 
-/** Two spaces between status fields. A separator glyph would be another width to measure. */
-const FIELD_GAP = '  '
-
 /**
  * Transient feedback between the conversation and the chrome.
  *
@@ -752,175 +813,57 @@ export function Notice({ text, limit, more }: {
 }
 
 /**
- * A status value in its semantic tone beside a dim label. Never the unbounded field.
- */
-export interface MeasuredField {
-  readonly label: string
-  readonly value: string
-  readonly color: PaletteColor
-}
-
-/** Primary status text, with an optional complete narrow reading. */
-export interface PrimaryField {
-  readonly text: string
-  readonly short?: string
-  /** Highlight the currently keyboard-selected status action. */
-  readonly selected?: boolean
-  /** Semantic tone for a reading that needs attention, such as a nearly full context. */
-  readonly color?: PaletteColor | undefined
-}
-
-/** One status-line field. Dim supporting text, primary text, or a measured reading. */
-export type StatusField = string | PrimaryField | MeasuredField
-
-/** A field's text as drawn, for measuring independently of emphasis. */
-const textOf = (field: StatusField): string => typeof field === 'string' ? field
-  : 'text' in field ? field.text : `${field.label} ${field.value}`
-
-/**
  * The status line. One left-packed list of fields below the composer.
  *
- * Fields sit two spaces apart in priority order and stop where they end.
+ * Fields sit two spaces apart in their fixed order and stop where they end.
  * The composer's rule already separates the chrome from the transcript, so
  * this row does not. Justifying it to both edges would open a gap the width
  * of the terminal between the model and the context meter, which would look
  * like two rows instead of one bar.
  *
- * Model and context fields use the normal foreground. Supporting fields stay
- * dim. The turn header, above the frame, is what says what the session is
- * doing, in colour and in words. A second coloured state word here would
- * repeat that on every frame. Colouring the model or the path would make them
- * change colour for reasons that have nothing to do with them. A
- * {@link MeasuredField} is the exception. Its value is a reading or an access
- * boundary, and its colour follows that value.
+ * Values use the normal foreground and labels are dim. The turn header,
+ * above the frame, is what says what the session is doing, in colour and in
+ * words. A second coloured state word here would repeat that on every frame.
+ * Colour is left to a reading that needs attention: a filling context, a
+ * poor cache hit, an update, and the git counts.
  *
  * The line never wraps. A wrapped status line silently spends a row of the
- * live region's budget. Once the fields reach the edge, width is yielded in
- * priority order, not shared. The last right field is the unbounded one, a
- * deep working directory. It yields first, truncating from the start so it
- * keeps the workspace name. The other right fields are bounded, and a bounded
- * field is dropped whole, not cut. `cache hi` is a different number,
- * and a clipped context meter is a smaller one. A first field with a short
- * reading may take cells from the model instead. It keeps the model label and
- * the access and thinking badges. Other fields drop from the end, so the
- * caller orders them by priority. The left cluster truncates from the end
- * within its remaining space. Widths are measured in terminal cells, so a
- * CJK field is not laid out by code-point length.
+ * live region's budget. Once the fields reach the edge, they give way in the
+ * order {@link fitStatus} applies, each whole or to a shorter complete
+ * reading, never cut mid-number: `cache hi` is a different number, and a
+ * clipped context meter is a smaller one. Only the model is cut from its end,
+ * and last, and the working directory, the row's filler, is cut from its start
+ * so it keeps the workspace's name. Widths are measured in terminal cells, so
+ * a CJK field is not laid out by code-point length.
  *
- * @param props.left - fields that identify the session, highest priority first.
- * @param props.badge - labelled value whose width takes priority over every other field.
- * @param props.secondaryBadge - second labelled value, retained if it fits beside the first.
- * @param props.right - supporting fields, highest priority first, except the
- *   unbounded field, which goes last. It is the one that yields room, and it
- *   keeps its tail, not its head.
+ * @param props.fields - the fields in display order, each with the ranks it
+ *   gives way at; see {@link statusFields}.
  * @param props.columns - terminal width.
  */
-export function StatusBar({ left, right, badge, secondaryBadge, columns }: {
-  readonly left: readonly (string | PrimaryField)[]
-  readonly right: readonly StatusField[]
-  readonly badge?: MeasuredField
-  readonly secondaryBadge?: MeasuredField
+export function StatusBar({ fields, columns }: {
+  readonly fields: readonly StatusField[]
   readonly columns: number
 }): React.ReactElement {
-  const head = left.map(textOf).join(FIELD_GAP)
-  const badges: { field: MeasuredField; width: number }[] = []
-  let badgesWidth = 0
-  for (const field of [badge, secondaryBadge]) {
-    if (field === undefined) continue
-    const width = stringWidth(textOf(field))
-    const gap = badges.length > 0 ? FIELD_GAP.length : 0
-    if (badges.length > 0 && badgesWidth + gap + width > columns) break
-    badges.push({ field, width: Math.min(columns, width) })
-    badgesWidth += gap + Math.min(columns, width)
-  }
-  const availableHead = Math.max(0, columns - badgesWidth - (badges.length === 0 ? 0 : FIELD_GAP.length))
-  let headWidth = Math.min(stringWidth(head), availableHead)
-  const first = right[0]
-  if (first !== undefined && typeof first !== 'string' && 'short' in first && first.short !== undefined) {
-    const reserve = FIELD_GAP.length + stringWidth(first.short)
-    const labelEnd = head.indexOf(':')
-    const labelWidth = labelEnd < 0 ? 0 : stringWidth(head.slice(0, labelEnd + 2))
-    if (availableHead >= labelWidth + reserve && headWidth + reserve > availableHead) {
-      headWidth = Math.min(headWidth, availableHead - reserve)
-    }
-  }
-  const used = headWidth + badgesWidth + (badges.length > 0 && headWidth > 0 ? FIELD_GAP.length : 0)
-  const kept = used >= columns ? [] : fitting(right, columns - used, used > 0)
-  const last = kept.length - 1
+  const fitted = fitStatus(fields, columns)
   return (
     // `overflowX`. The last guard against a wrapped status line. Below the
-    // width the left cluster alone needs, there is no room left to yield, and
-    // clipping costs a few characters where wrapping costs a row of the live
-    // region on every frame.
+    // width every field's narrowest reading needs, clipping costs a few
+    // characters where wrapping costs a row of the live region on every frame.
     <Box width={columns} flexDirection="row" overflowX="hidden">
-      {headWidth > 0 && <Box width={headWidth} flexShrink={0}>
-        <Text wrap="truncate-end">{left.map((field, index) => <Text key={index} dimColor={typeof field === 'string'}>
-          {`${index === 0 ? '' : FIELD_GAP}${textOf(field)}`}
-        </Text>)}</Text>
-      </Box>}
-      {badges.map(({ field, width }, index) => <Box key={index} width={width} flexShrink={0}
-        marginLeft={index > 0 || headWidth > 0 ? FIELD_GAP.length : 0}>
-        <Text wrap="truncate-end"><Text dimColor>{`${field.label} `}</Text><Text color={field.color}>{field.value}</Text></Text>
-      </Box>)}
-      {/* One box per field, and only the last may shrink: shrinking the
-          cluster as a whole cuts from wherever the join happens to fall. The
-          gap is a margin, not text, so truncating a field's head cannot
-          eat the separator that tells it apart from the one before. */}
-      {kept.map((field, index) => (
-        <Box
-          key={index}
-          flexShrink={index === last ? 1 : 0}
-          marginLeft={index === 0 && used === 0 ? 0 : FIELD_GAP.length}
-      >
-          {typeof field === 'string'
-            ? <Text dimColor wrap={index === last ? 'truncate-start' : 'truncate-end'}>{field}</Text>
-            : 'text' in field
-              ? <Text wrap={index === last ? 'truncate-start' : 'truncate-end'} inverse={field.selected === true}
-                {...field.color === undefined ? {} : { color: field.color }}>{field.text}</Text>
-              : <Text wrap="truncate-end"><Text dimColor>{`${field.label} `}</Text><Text color={field.color}>{field.value}</Text></Text>}
+      {/* One box per field, each exactly as wide as its fit. The gap is a
+          margin, not text, so cutting a field cannot eat the separator that
+          tells it apart from the one before. */}
+      {fitted.map((field, index) => (
+        <Box key={index} width={field.width} flexShrink={0} marginLeft={index === 0 ? 0 : FIELD_GAP}>
+          <Text wrap={field.cut === 'start' ? 'truncate-start' : 'truncate-end'}>
+            {field.parts.map((part, at) => <Text key={at} dimColor={part.dim === true}
+              {...part.color === undefined ? {} : { color: part.color }}>{part.text}</Text>)}
+          </Text>
         </Box>
       ))}
     </Box>
   )
 }
-
-/**
- * The right fields that fit beside the left cluster.
- *
- * The last field is unbounded and truncates into whatever room is left. It is
- * kept while at least {@link UNBOUNDED_MIN} cells of it fit, since a shorter
- * tail such as `…ake` names nothing; the bounded fields before it are kept
- * whole while they fit, highest priority first.
- *
- * @param right - the right fields, the unbounded one last.
- * @param room - cells left beside the left cluster.
- * @param after - whether a left cluster precedes them, and so a gap.
- * @returns the fields to draw, in order.
- */
-function fitting(right: readonly StatusField[], room: number, after: boolean): readonly StatusField[] {
-  const bounded = right.slice(0, -1)
-  const unbounded = right.at(-1)
-  const kept: StatusField[] = []
-  let used = 0
-  for (const field of bounded) {
-    const gap = kept.length > 0 || after ? FIELD_GAP.length : 0
-    let chosen = field
-    if (used + gap + stringWidth(textOf(chosen)) > room) {
-      if (typeof field === 'string' || !('short' in field) || field.short === undefined
-        || used + gap + stringWidth(field.short) > room) break
-      chosen = { text: field.short, selected: field.selected === true,
-        ...'color' in field && field.color !== undefined ? { color: field.color } : {} }
-    }
-    kept.push(chosen)
-    used += gap + stringWidth(textOf(chosen))
-  }
-  if (unbounded === undefined) return kept
-  const left = room - used - (kept.length > 0 || after ? FIELD_GAP.length : 0)
-  return left >= Math.min(UNBOUNDED_MIN, stringWidth(textOf(unbounded))) ? [...kept, unbounded] : kept
-}
-
-/** Fewest cells of the unbounded field worth drawing. */
-const UNBOUNDED_MIN = 6
 
 /**
  * The header, the framed composer under it, and the status line beneath them.
@@ -954,18 +897,15 @@ const UNBOUNDED_MIN = 6
  * Hint text appears in the composer's right slot only while that key applies.
  * A permanent hint row would spend a row on text the user has already read.
  *
- * @param props.left - fields that identify the session, highest priority first.
- * @param props.badge - access indicator retained when other status fields yield.
- * @param props.secondaryBadge - thinking level retained when it fits beside access.
- * @param props.right - supporting fields, highest priority first and the
- *   unbounded one last; see {@link StatusBar}.
+ * @param props.status - the status line's fields in display order; see {@link StatusBar}.
  * @param props.columns - terminal width.
  * @param props.state - what the surface is doing, apart from the draft, which
  *   is read from the draft text so the two cannot disagree.
  * @param props.before - draft text before the caret.
  * @param props.after - draft text after the caret.
- * @param props.placeholder - locale-owned prompt text.
+ * @param props.placeholder - locale-owned prompt text, or its parts; see {@link Composer}.
  * @param props.hints - locale-owned text for each hint key.
+ * @param props.overflow - locale-owned words for rows of the draft hidden above and below.
  * @param props.maxRows - rows a draft may occupy, from `budget.composer`.
  * @param props.frame - line glyphs this terminal can draw.
  * @param props.activity - what the turn is doing, or how it ended; see {@link Header}.
@@ -978,19 +918,18 @@ const UNBOUNDED_MIN = 6
  * @param props.children - panels drawn above the header, each within its own
  *   claimed rows; they are not counted in `layout.rows`.
  * @param props.footer - one row drawn under the base rule, above the status
- *   line, at the draft's column; claimed by the caller like `children`.
+ *   line, from the rail's first column as the header is, so a standing row's
+ *   icon sits in the rail; claimed by the caller like `children`.
  */
-export function Chrome({ left, right, badge, secondaryBadge, columns, state, before, after, placeholder, hints, maxRows, frame, activity, standing, standingFocused, clock, motion, compact, layout = chromeFor(columns), children, footer }: {
-  readonly left: readonly (string | PrimaryField)[]
-  readonly right: readonly StatusField[]
-  readonly badge?: MeasuredField
-  readonly secondaryBadge?: MeasuredField
+export function Chrome({ status, columns, state, before, after, placeholder, hints, overflow, maxRows, frame, activity, standing, standingFocused, clock, motion, compact, layout = chromeFor(columns), children, footer }: {
+  readonly status: readonly StatusField[]
   readonly columns: number
   readonly state: Omit<ComposerState, 'drafting'>
   readonly before: string
   readonly after: string
-  readonly placeholder: string
+  readonly placeholder: string | readonly string[]
   readonly hints: Readonly<Record<Exclude<Hint, undefined>, string>>
+  readonly overflow?: { readonly above: string, readonly below: string }
   readonly maxRows?: number
   readonly frame: FrameStyle
   readonly activity?: ActivityState | undefined
@@ -1003,7 +942,7 @@ export function Chrome({ left, right, badge, secondaryBadge, columns, state, bef
   readonly children?: React.ReactNode
   readonly footer?: (columns: number) => React.ReactNode
 }): React.ReactElement {
-  const hint = hintFor({ ...state, drafting: `${before}${after}` !== '' })
+  const hint = composerHint(columns, { ...state, drafting: `${before}${after}` !== '' }, hints)
   // The draft's column, which the status line lines up with.
   const inset = columns > COLUMN.rail * 2 ? COLUMN.rail : 0
   return (
@@ -1023,13 +962,13 @@ export function Chrome({ left, right, badge, secondaryBadge, columns, state, bef
         after={after}
         placeholder={placeholder}
         {...maxRows === undefined ? {} : { maxRows }}
-        {...hint === undefined || columns < HINT_MIN_COLUMNS ? {} : { hint: hints[hint] }}
+        {...hint === undefined ? {} : { hint }}
+        {...overflow === undefined ? {} : { overflow }}
       />
       {layout.base && <Rule columns={columns} frame={frame} />}
-      {footer !== undefined && <Box paddingLeft={inset} flexShrink={0}>{footer(Math.max(1, columns - inset))}</Box>}
+      {footer !== undefined && <Box flexShrink={0}>{footer(Math.max(1, columns))}</Box>}
       {layout.status && <Box paddingLeft={inset} flexShrink={0}>
-        <StatusBar left={left} right={right} {...badge === undefined ? {} : { badge }}
-          {...secondaryBadge === undefined ? {} : { secondaryBadge }} columns={Math.max(1, columns - inset)} />
+        <StatusBar fields={status} columns={Math.max(1, columns - inset)} />
       </Box>}
     </Box>
   )
@@ -1043,56 +982,144 @@ export function Chrome({ left, right, badge, secondaryBadge, columns, state, bef
  * The caret is laid out around the draft, not inside it, so moving through
  * the text leaves every row in place.
  *
+ * A draft taller than the window marks what it hides. `^` in the rail of the
+ * first visible row says rows are hidden above, and `v` in the rail of the
+ * last says rows are hidden below. Where that row does not carry the hint, a
+ * dim `+N above` or `+N below` counts them in the hint's slot. A count wider
+ * than the slot, or on a terminal too narrow for the slot, is left out whole.
+ *
+ * An idle placeholder can name more than the prompt. Its later parts are
+ * dropped whole, never cut, below `HINT_MIN_COLUMNS` or where they do not fit.
+ *
  * @param props.columns - available width.
  * @param props.marker - prompt marker.
  * @param props.before - draft text before the caret.
  * @param props.after - draft text after the caret.
- * @param props.placeholder - locale-owned prompt text.
+ * @param props.placeholder - locale-owned prompt text, or its parts in the
+ *   order they yield, last first.
  * @param props.hint - contextual key hint.
  * @param props.maxRows - maximum physical rows of the draft to display.
+ * @param props.overflow - locale-owned words after the counts of rows hidden
+ *   above and below; absent, the rail marks them without a count.
  */
-export function Composer({ columns, marker, before, after, placeholder, hint, maxRows = COMPOSER_BUDGET }: {
+export function Composer({ columns, marker, before, after, placeholder, hint, maxRows = COMPOSER_BUDGET, overflow }: {
   readonly columns: number
   readonly marker: string
   readonly before: string
   readonly after: string
-  readonly placeholder: string
+  readonly placeholder: string | readonly string[]
   readonly hint?: string
   readonly maxRows?: number
+  readonly overflow?: { readonly above: string, readonly below: string }
 }): React.ReactElement {
   const empty = before === '' && after === ''
   const rail = Math.min(COLUMN.rail, Math.max(0, columns - 1))
   const slot = hint === undefined || hint === '' ? 0 : stringWidth(hint) + 2
   const showHint = slot > 0 && columns - rail - slot >= 1
-  // `wrapDraft` keeps its last column for the caret. Beside a hint, that is
-  // the first of the two columns separating the draft from it.
-  const width = Math.max(1, columns - rail - (showHint ? slot - 1 : 0))
+  const width = draftWidth(columns, hint)
   const { rows: lines, caret: caretRow } = wrapDraft(`${before}${after}`, before.length, width, CARET)
   const height = Math.max(1, maxRows)
-  const start = Math.max(0, Math.min(caretRow - height + 1, lines.length - height))
+  // The window moves only when the caret would leave it, so Up inside a tall
+  // draft moves the caret, not the text under it. Typing at the end still
+  // keeps the caret on the bottom row.
+  const shown = React.useRef(0)
+  const start = Math.max(0, Math.min(Math.max(caretRow - height + 1, Math.min(shown.current, caretRow)), lines.length - height))
+  shown.current = start
   const visible = lines.slice(start, start + height)
+  const above = start
+  const below = lines.length - start - visible.length
+  // The caret takes the empty row's first column.
+  const prompt = empty ? placeholderText(placeholder, columns, width - 1) : ''
+  // A count stands in the hint's slot, so it may be no wider than the hint,
+  // and it ends where the hint ends.
+  const count = (hidden: number, word: string | undefined): string | undefined => {
+    const text = word === undefined ? undefined : `+${hidden} ${word}`
+    const room = slot - 2
+    return text === undefined || stringWidth(text) > room ? undefined : text.padStart(text.length + room - stringWidth(text))
+  }
   return <Box flexDirection="column" width={columns} flexShrink={0}>
     {visible.map((line, index) => {
       const absolute = start + index
       const promptLine = absolute === 0
-      const overflow = index === 0 && start > 0
+      const hiddenAbove = index === 0 && above > 0
+      const hiddenBelow = !hiddenAbove && index === visible.length - 1 && below > 0
+      const side = !showHint ? undefined : absolute === caretRow ? hint
+        : hiddenAbove ? count(above, overflow?.above)
+        : index === visible.length - 1 && below > 0 ? count(below, overflow?.below) : undefined
       return <Box key={absolute} flexDirection="row" flexShrink={0}>
         {rail > 0 && <Box width={rail} flexShrink={0}>
-          <Text bold={promptLine} dimColor={overflow} {...promptLine ? { color: PALETTE.asking } : {}}>
-            {promptLine ? marker : overflow ? '^' : MARKER.none}
+          <Text bold={promptLine} dimColor={!promptLine && (hiddenAbove || hiddenBelow)} {...promptLine ? { color: PALETTE.asking } : {}}>
+            {promptLine ? marker : hiddenAbove ? '^' : hiddenBelow ? 'v' : MARKER.none}
           </Text>
         </Box>}
         <Box width={width} flexShrink={0}>
           <Text wrap="truncate-end">
-            {line}{empty && <Text dimColor>{placeholder}</Text>}
+            {line}{empty && <Text dimColor>{prompt}</Text>}
           </Text>
         </Box>
-        {showHint && absolute === caretRow && <Box marginLeft={1} flexShrink={0}>
-          <Text dimColor>{hint}</Text>
+        {side !== undefined && <Box marginLeft={1} flexShrink={0}>
+          <Text dimColor>{side}</Text>
         </Box>}
       </Box>
     })}
   </Box>
+}
+
+/** Between the parts of a placeholder. */
+const PLACEHOLDER_SEP = ' \u00b7 '
+
+/**
+ * The placeholder's parts that fit, joined.
+ * @param placeholder - the text, or its parts, the first of which always shows.
+ * @param columns - terminal width; below `HINT_MIN_COLUMNS` only the first part shows.
+ * @param room - cells the placeholder may take.
+ * @returns the first part and every later part that fits whole after it.
+ */
+function placeholderText(placeholder: string | readonly string[], columns: number, room: number): string {
+  if (typeof placeholder === 'string') return placeholder
+  let text = placeholder[0] ?? ''
+  if (columns < HINT_MIN_COLUMNS) return text
+  for (const part of placeholder.slice(1)) {
+    const next = `${text}${PLACEHOLDER_SEP}${part}`
+    if (stringWidth(next) > room) break
+    text = next
+  }
+  return text
+}
+
+/**
+ * The hint the composer's right slot shows, or undefined.
+ *
+ * Below `HINT_MIN_COLUMNS` the slot is empty. A hint cut to fit has stopped
+ * being help, and the key it names still works unnamed.
+ *
+ * @param columns - terminal width.
+ * @param state - what the surface is doing, the draft included.
+ * @param hints - locale-owned text for each hint key.
+ * @returns the text for the slot, or undefined when it stays empty.
+ */
+export function composerHint(columns: number, state: ComposerState,
+  hints: Readonly<Record<Exclude<Hint, undefined>, string>>): string | undefined {
+  const hint = hintFor(state)
+  return hint === undefined || columns < HINT_MIN_COLUMNS ? undefined : hints[hint]
+}
+
+/**
+ * Columns each draft row is wrapped at, the caret's included.
+ *
+ * `wrapDraft` keeps its last column for the caret. Beside a hint, that is the
+ * first of the two columns separating the draft from it. The input handler
+ * moves the caret between rows at this same width.
+ *
+ * @param columns - terminal width.
+ * @param hint - the text in the composer's right slot, if any.
+ * @returns at least one.
+ */
+export function draftWidth(columns: number, hint: string | undefined): number {
+  const rail = Math.min(COLUMN.rail, Math.max(0, columns - 1))
+  const slot = hint === undefined || hint === '' ? 0 : stringWidth(hint) + 2
+  const showHint = slot > 0 && columns - rail - slot >= 1
+  return Math.max(1, columns - rail - (showHint ? slot - 1 : 0))
 }
 
 /**

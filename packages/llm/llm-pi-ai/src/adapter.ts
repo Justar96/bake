@@ -57,10 +57,11 @@ import type {
 } from '@deepseek-ai/dsh-llm'
 import type { AttachmentStore, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import { idleWatchdog, timeoutOf } from '@deepseek-ai/dsh-timeout'
+import { requestImageMaxDimensionFor } from './config.ts'
 import type { ResolvedPiAiProviderProfile } from './config.ts'
 import { toPiContext } from './context.ts'
 import { createModels, getSupportedThinkingLevels } from './models.ts'
-import { fetchOpenAiSse } from './sse.ts'
+import { fetchAnthropicSse, fetchOpenAiSse } from './sse.ts'
 import { toStreamChunks } from './stream.ts'
 
 /** One resolution's frozen view: the profiles and the collection built from them. */
@@ -202,10 +203,34 @@ function reasoningInfo(
   }
 }
 
-/** Merge deployment headers while removing case-insensitive attribution collisions. */
-function requestHeaders(headers: Readonly<Record<string, string>> | undefined): Record<string, string> {
-  const attribution = attributionHeaders()
-  const reserved = new Set(Object.keys(attribution).map(name => name.toLowerCase()))
+/**
+ * Header carrying the Harness session id, spelled as the DeepSeek adapter
+ * sends it. Gateways that balance one route over several upstream credentials
+ * (CliRelay's `session-sticky` routing) key their per-session credential
+ * binding on it. Provider prompt caches are per credential, so without a
+ * stable key each step of a conversation can land on a different account and
+ * re-prefill its whole prefix.
+ */
+const SESSION_HEADER = 'x-deepseek-harness-session-id'
+
+/**
+ * Merge deployment headers while removing case-insensitive collisions with
+ * the Harness-owned attribution and session headers. The session name stays
+ * reserved even for a request outside any session, so a deployment header
+ * can never bind unrelated requests to one gateway credential.
+ * @param headers - deployment-owned profile headers.
+ * @param sessionId - the calling session, when the request belongs to one.
+ * @returns the complete request header set.
+ */
+function requestHeaders(
+  headers: Readonly<Record<string, string>> | undefined,
+  sessionId: string | undefined,
+): Record<string, string> {
+  const attribution = {
+    ...attributionHeaders(),
+    ...sessionId === undefined ? {} : { [SESSION_HEADER]: sessionId },
+  }
+  const reserved = new Set([...Object.keys(attribution), SESSION_HEADER].map(name => name.toLowerCase()))
   return {
     ...Object.fromEntries(Object.entries(headers ?? {}).filter(([name]) => !reserved.has(name.toLowerCase()))),
     ...attribution,
@@ -367,6 +392,8 @@ export class PiAiAdapter extends LlmAdapter {
       const onReplayDegrade = (reason: string): void => {
         this.config.onReplayDegrade?.({ provider: options.provider, model: options.model, reason })
       }
+      // The model's own protocol, not the route's, selects the default: one route may mix them.
+      const maxDimension = requestImageMaxDimensionFor(profile, model.api)
       const context = attachments === undefined
         ? toPiContext(options, undefined, onReplayDegrade)
         : await toPiContext({ ...options, signal: watchdog.signal }, {
@@ -375,6 +402,7 @@ export class PiAiAdapter extends LlmAdapter {
           maxRequestImageBytes: profile.maxRequestImageBytes,
           requestImagePolicy: {
             maxPixels: profile.requestImagePixelBudget,
+            ...maxDimension === undefined ? {} : { maxDimension },
             maxBytes: profile.requestImageMaxBytes,
           },
         }, onReplayDegrade)
@@ -384,10 +412,12 @@ export class PiAiAdapter extends LlmAdapter {
         ...options.maxTokens === undefined ? {} : { maxTokens: options.maxTokens },
         ...options.sessionId === undefined ? {} : { sessionId: String(options.sessionId) },
         signal: watchdog.signal,
-        ...model.api === 'openai-responses' || model.api === 'openai-completions' ? { fetch: fetchOpenAiSse } : {},
-        // Profile headers are deployment-owned; attribution names are
-        // Harness-owned and therefore win collisions.
-        headers: requestHeaders(profile.headers),
+        // Proxy heartbeats can empty or split SSE events before pi-ai's parsers read them.
+        ...model.api === 'openai-responses' || model.api === 'openai-completions' ? { fetch: fetchOpenAiSse }
+          : model.api === 'anthropic-messages' ? { fetch: fetchAnthropicSse } : {},
+        // Profile headers are deployment-owned; attribution and session
+        // names are Harness-owned and therefore win collisions.
+        headers: requestHeaders(profile.headers, options.sessionId === undefined ? undefined : String(options.sessionId)),
       })
       const iterator = toStreamChunks(events, model.contextWindow, options.signal, model.id)[Symbol.asyncIterator]()
       let exhausted = false

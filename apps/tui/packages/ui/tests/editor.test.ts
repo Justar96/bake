@@ -1,7 +1,7 @@
 /** Text transformations are independent of terminal and harness state. */
 import { describe, expect, it } from 'bun:test'
 import stringWidth from 'string-width'
-import { composerText, eraseLast, draftAt, insertText, moveCursor, eraseAtCursor, TAB_COLUMNS, wrapDraft } from '../src/editor.ts'
+import { composerText, draftRows, eraseLast, draftAt, insertText, moveCursor, moveVertically, eraseAtCursor, TAB_COLUMNS, wrapDraft } from '../src/editor.ts'
 
 it('keeps pasted lines and tabs while removing terminal controls', () => {
   expect(composerText('a\r\nb\rc\t\u0003\u0000')).toBe('a\nb\nc\t')
@@ -85,5 +85,67 @@ describe('wrapDraft', () => {
     expect(wrap('\tx', 3, 20).rows).toEqual([`${' '.repeat(TAB_COLUMNS)}x|`])
     expect(wrap('ab\tx', 4, 20).rows).toEqual([`ab${' '.repeat(TAB_COLUMNS - 2)}x|`])
     expect(wrap('abc\tx', 0, 5).rows).toEqual(['|abc ', 'x'])
+  })
+})
+
+describe('moveVertically', () => {
+  // The caret's row and its offset within it, drawn as wrapDraft draws them.
+  const shown = (text: string, cursor: number, width: number) => {
+    const { rows, caret } = wrapDraft(text, cursor, width, '|')
+    return `${caret}:${rows[caret]}`
+  }
+  const move = (text: string, cursor: number, width: number, direction: 'up' | 'down', goal?: number) =>
+    moveVertically(draftAt(text, cursor), width, direction, goal)
+
+  it('moves between logical lines and keeps the column', () => {
+    const text = 'first line\nsecond line'
+    const down = move(text, 3, 40, 'down')!
+    expect(shown(text, down.draft.cursor, 40)).toBe('1:sec|ond line')
+    expect(shown(text, move(text, down.draft.cursor, 40, 'up')!.draft.cursor, 40)).toBe('0:fir|st line')
+  })
+
+  it('moves between the rows of one wrapped line', () => {
+    // 'alpha beta' then 'gamma', as wrapDraft draws it at 11 columns.
+    const text = 'alpha beta gamma'
+    expect(shown(text, move(text, 2, 11, 'down')!.draft.cursor, 11)).toBe('1:ga|mma')
+    // Past the end of the last row, the caret goes after its text.
+    expect(shown(text, move(text, 9, 11, 'down')!.draft.cursor, 11)).toBe('1:gamma|')
+    expect(shown(text, move(text, text.length, 11, 'up')!.draft.cursor, 11)).toBe('0:alpha| beta')
+    // A wrapped row's end is the next row's start, so its last place is before the hanging space.
+    expect(shown(text, move(text, text.length, 11, 'up', 30)!.draft.cursor, 11)).toBe('0:alpha beta|')
+  })
+
+  it('reports the first and last rows, where history takes over', () => {
+    expect(move('one\ntwo', 2, 40, 'up')).toBeUndefined()
+    expect(move('one\ntwo', 6, 40, 'down')).toBeUndefined()
+    expect(move('', 0, 40, 'up')).toBeUndefined()
+    expect(move('one\ntwo', 6, 40, 'up')).toBeDefined()
+  })
+
+  it('never splits a wide character or a grapheme', () => {
+    // Column 3 falls in the middle of 好, so the caret stops before it.
+    const text = 'abcd\n你好'
+    expect(shown(text, move(text, 3, 40, 'down')!.draft.cursor, 40)).toBe('1:你|好')
+    const family = 'x👩🏽‍💻y\nabcdef'
+    const up = move(family, family.length - 3, 40, 'up')!
+    expect(up.draft.cursor % 1).toBe(0)
+    expect(draftAt(family, up.draft.cursor)).toEqual(up.draft)
+  })
+
+  it('keeps the goal column across a shorter row', () => {
+    const text = 'long line here\nab\nanother long line'
+    const middle = move(text, 10, 40, 'down')!
+    expect(shown(text, middle.draft.cursor, 40)).toBe('1:ab|')
+    const last = move(text, middle.draft.cursor, 40, 'down', middle.goal)!
+    expect(shown(text, last.draft.cursor, 40)).toBe('2:another lo|ng line')
+    expect(last.goal).toBe(10)
+  })
+
+  it('lands on empty lines and counts rows as they are drawn', () => {
+    const text = 'one\n\nthree'
+    expect(shown(text, move(text, 2, 40, 'down')!.draft.cursor, 40)).toBe('1:|')
+    expect(draftRows(text, 40)).toBe(3)
+    expect(draftRows('alpha beta gamma', 11)).toBe(2)
+    expect(draftRows('', 11)).toBe(1)
   })
 })

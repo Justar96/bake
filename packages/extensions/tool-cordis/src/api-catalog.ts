@@ -571,6 +571,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the appended event seqs, summary, replaced range, and token accounting.',
         throws: ['when compaction is active or the range is missing, reversed, or unbalanced.'],
       },
+      {
+        signature: 'pressureThreshold( _route: { readonly provider: string; readonly model: string }, _contextWindow: number, ): number | undefined',
+        description: 'Report the request size at which this backend\'s automatic `pressure` policy compacts one routed model, so a consumer can show it beside that route\'s occupancy. Answer synchronously from policy alone, without I/O or session state. The default declares no threshold: a backend without automatic pressure policy, or with it disabled, keeps this answer, and a backend that has one must override it with the exact value its trigger compares against, never an approximation.',
+        parameters: [{ name: '_route', description: 'provider/model route whose policy applies.' }, { name: '_contextWindow', description: 'that route\'s context capacity in tokens.' }],
+        returns: 'positive tokens at or above which pressure compaction runs before the next step, or `undefined` when no automatic pressure trigger applies to that route and capacity.',
+      },
     ],
   },
   {
@@ -2751,7 +2757,7 @@ export const EVENT_API: readonly EventApiEntry[] = [
     mode: 'emit',
     signature: '\'agent/disposed\'(this: Scoped<Agent>, payload: { agent: Agent }): void',
     summary: 'An agent left the registry; AgentLoop emits this after driver quiescence and scoped-registration unwind, but before session detachment.',
-    description: 'An agent left the registry; AgentLoop emits this after driver quiescence and scoped-registration unwind, but before session detachment. Custom registry users own their driver-ordering contract.',
+    description: 'An agent left the registry; AgentLoop emits this after driver quiescence and scoped-registration unwind, but before session detachment. Custom registry users own their driver-ordering contract. Because the agent\'s scope has already unwound, a listener registered on `agent.ctx` cannot observe this event — register on a host or registry-owning context instead (scope-filtered dispatch still targets such a listener to this agent by identity). A session event appended from this listener, or from a `session/disposed` listener reached during the same disposal, is not persisted: the session\'s write handle is already closed by then, so the append is silently dropped rather than durably written.',
     parameters: [{ name: 'payload', description: '.agent - the exact agent removed from the registry. Scope-filtered dispatch (`@deepseek-ai/dsh-scope`): agent-scoped listeners receive only that agent.' }],
   },
   {
@@ -2825,6 +2831,14 @@ export const EVENT_API: readonly EventApiEntry[] = [
     summary: 'The turn is about to close: the model owes no response (no live tool calls, no fresh steering).',
     description: 'The turn is about to close: the model owes no response (no live tool calls, no fresh steering). Awaited before the boundary commits — a listener that objects steers (`agent.steer(...)`) and the machine re-reads its inbox: fresh steering runs another step, none closes the turn. Data decides, so listener order cannot change the outcome. The inverse control (stop a tool loop early) is data too: a tool result carrying `concludesTurn` ends the turn at its step. The conclusion never short-circuits already-submitted next-step work: same-step `additionalContexts` or racing steering still runs, and the turn closes only when that inbox drains.',
     parameters: [{ name: 'payload', description: '.signal - the current turn\'s explicit abort signal. Scope-filtered dispatch (`@deepseek-ai/dsh-scope`): agent-scoped listeners receive only that agent.' }],
+  },
+  {
+    name: 'app/shutdown',
+    mode: 'parallel',
+    signature: '\'app/shutdown\'(): Promise<void> | void',
+    summary: 'Drain plugin-owned work before the launcher unloads root services.',
+    description: 'Drain plugin-owned work before the launcher unloads root services. @mode parallel',
+    parameters: [],
   },
   {
     name: 'approval/request',

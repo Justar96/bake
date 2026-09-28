@@ -4,7 +4,7 @@ Bake is an independent terminal coding agent. `origin` is Bake's own repository.
 
 ## Porting from upstream
 
-Bake removed upstream's web client, desktop app, ACP, Python SDK, docs website, benchmarks, and upstream CI and review automation, along with their Agent Notes and docs. When porting:
+Bake removed upstream's web client, desktop app, ACP, Python SDK, docs website, benchmarks, and upstream CI and review automation, along with their Agent Notes and docs. The `desktop` profile bundle in `packages/bundle/desktop` is Bake's own: the separate Bake Desktop app launches it with `dsh --profile desktop`, so keep it and its tests. When porting:
 
 - A modify/delete conflict on a removed note or doc keeps the deletion (`git rm <file>`). Do not restore docs for removed products.
 - `packages/session/session-format-catalog/src/retired-vocabulary.ts` keeps event types that released Session logs carry but no plugin writes, so those logs still open. Remove an entry only with a Session-format version bump and migration; regenerate with `bun run gen-persistence-catalog` and confirm no persistence digest moves.
@@ -35,10 +35,12 @@ bun run check             # TUI types, tests, layout, peer identity, and docs
 bun run test              # pure and Node integration tests
 bun run test:runtime <file>  # focused shared-runtime tests
 bun run test:e2e           # keyless built-profile PTY scenarios
-bun run verify            # build, check, and keyless PTY scenarios
+bun run lint              # Oxlint over apps, packages, and scripts
+bun run preflight         # every CI gate before a PR; --fast for the static half
+bun run verify            # preflight with the whole runtime suite
 ```
 
-Run the checks relevant to your change rather than the full suite by default. Any terminal behavior change also requires the built-profile PTY scenarios. Tests that use Cordis or Ink run on Node; pure modules and tooling tests run on Bun. Report only what you actually ran, including failures and skipped checks. Never bypass hooks without explicit approval.
+Run the checks relevant to your change while you work, and `bun run preflight` before a PR; it reports every gate instead of stopping at the first failure. Any terminal behavior change also requires the built-profile PTY scenarios. Tests that use Cordis or Ink run on Node; pure modules and tooling tests run on Bun. Report only what you actually ran, including failures and skipped checks. Never bypass hooks without explicit approval.
 
 ## Engineering
 

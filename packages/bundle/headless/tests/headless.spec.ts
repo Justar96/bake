@@ -17,6 +17,8 @@ import { LlmAttemptId, ToolCallId, createAssistantMessage, createToolResultMessa
 import SessionStore from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import type { Session, SessionId, UserMessage } from '@deepseek-ai/dsh-session'
+import { SESSION_IN_USE_EXIT } from '@deepseek-ai/dsh-cmdline'
+import { SessionAlreadyOwnedError } from '@deepseek-ai/dsh-session-persistence'
 import { SessionQueryError } from '@deepseek-ai/dsh-session-query'
 import { createInboxStub } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { apply, Config } from '../src/index.ts'
@@ -57,6 +59,8 @@ interface BenchOptions {
   preliveMeta?: { cwd?: string; origin?: 'subagent'; agentPreset?: string }
   /** Run when the runner awaits idle, e.g. to append to the attached log. */
   onWhenIdle?: (agent: Agent) => void
+  /** Reject the factory's resume with this failure, as persistence does when its write open is refused. */
+  resumeError?: () => Error
 }
 
 const frameStates = new WeakMap<Agent, { attemptId: ReturnType<typeof LlmAttemptId>; revision: number; index: number }>()
@@ -183,6 +187,7 @@ async function bench(script: Script, options: BenchOptions = {}): Promise<{
       return { agent, dispose: () => Promise.resolve() }
     },
     async resume(ownerCtx: Context, resumeOptions: ResumeAgentOptions): Promise<AgentHandle> {
+      if (options.resumeError !== undefined) throw options.resumeError()
       const session = ctx.sessions.get(resumeOptions.resumeSessionId)
       if (session === undefined) throw new Error(`no attached Session ${resumeOptions.resumeSessionId}`)
       const agent = await mount(ownerCtx, session, resumeOptions)
@@ -629,6 +634,45 @@ describe('headless runner', () => {
     expect(result.code).toBe(1)
     expect(result.err).toContain('was recorded in "/somewhere/else"')
     await test.ctx.fiber.dispose()
+  })
+
+  describe('a persisted Session another process has open', () => {
+    const IN_USE = 'session-held: open in another Bake process; close it there and run this command again, '
+      + 'or leave out --resume to start a new session'
+    const observe = () => Promise.resolve({ header: { cwd: process.cwd() }, events: [], [Symbol.dispose]() {} })
+    const held = (json?: boolean) => bench({ afterPrompt: () => { throw new Error('the task must not run') } }, {
+      sessionId: 'session-held',
+      ...json === undefined ? {} : { json },
+      observe,
+      resumeError: () => new SessionAlreadyOwnedError(brandString<SessionId>('session-held')),
+    })
+
+    it('prints one stderr line and exits with the in-use status', async () => {
+      const test = await held()
+      expect(await test.run()).toMatchObject({ code: SESSION_IN_USE_EXIT, out: '', err: `dsh: ${IN_USE}\n` })
+      expect(SESSION_IN_USE_EXIT).toBe(75)
+      await test.ctx.fiber.dispose()
+    })
+
+    it('also ends the --json stream with the refusal as its error event', async () => {
+      const test = await held(true)
+      const result = await test.run()
+      expect(result.code).toBe(SESSION_IN_USE_EXIT)
+      const events = result.out.split('\n').filter(Boolean).map(line => JSON.parse(line) as unknown)
+      expect(events).toEqual([{ type: 'error', message: IN_USE }])
+      expect(result.err).toBe(`dsh: ${IN_USE}\n`)
+      await test.ctx.fiber.dispose()
+    })
+
+    it('keeps exit 1 for any other resume failure', async () => {
+      const test = await bench({ afterPrompt: () => {} }, {
+        sessionId: 'session-held',
+        observe,
+        resumeError: () => new Error('log unreadable'),
+      })
+      expect(await test.run()).toMatchObject({ code: 1, out: '', err: 'dsh: log unreadable\n' })
+      await test.ctx.fiber.dispose()
+    })
   })
 
   it('rejects a persisted Session created under an agent preset', async () => {

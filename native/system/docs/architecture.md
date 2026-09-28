@@ -16,7 +16,7 @@ The `./landlock-run` entry owns Landlock path resolution, grant argv, and the fu
 
 The descriptor belongs to the caller and must stay open through completion. The binding neither opens nor closes it; closing the final descriptor for its open file description releases the lock.
 
-The JSONL backend retains its inode check, materialization timing, and close lifecycle. Windows uses its existing koffi semaphore and never calls this POSIX binding. The browser worker supplies a single-process replacement for the flock entry, while running the Landlock JavaScript API unchanged.
+The JSONL backend retains its inode check, materialization timing, and close lifecycle. The atomic-write file lock also holds its `<file>.lock` under this binding, so a lock whose holder died can be recovered. Windows uses a Koffi `LockFileEx` file lock and never calls this POSIX binding.
 
 ## Builds and release
 

@@ -25,9 +25,9 @@ The feedback group collects human opinions about the harness's work: users can s
 | [`command-feedback`](command-feedback/README.md) | Session-level feedback: the `/feedback` command, the `sessionFeedback` Remote behind the Web dialog, and the fixed category taxonomy, all without a model turn |
 | [`message-feedback`](message-feedback/README.md) | Per-message ratings, categories, and notes, served to product surfaces through the `messageFeedback` service |
 
-Session remarks are a one-way signal: recording one is safe at any point in a conversation and never changes what the model sees. With a feedback-gated sharing policy, recording a session remark is what releases the session for sharing.
+Session remarks are a one-way signal: recording one is safe at any point in a conversation and never changes what the model sees. With a feedback-gated sharing policy, recording a session remark is what releases the session for sharing. Bake ships no sharing destination, so feedback stays in the local session log until you configure a telemetry collector with `DSH_TELEMETRY_OTLP_URL`.
 
-Per-message ratings and notes are stored with the session, survive restarts, and never appear in model history or telemetry.
+Per-message ratings and notes are stored with the session, survive restarts, and never appear in model history. They reach telemetry only through a collector you configure, as part of the feedback-authorized session prefix.
 
 <a id="related-documentation"></a>
 ## Related documentation

@@ -105,11 +105,19 @@ export class TimerService extends Service {
 
   private _schedule(label: string, trigger: (args: any[], isDisposed: boolean) => any, isDisposed = false) {
     let timer: number | NodeJS.Timeout | undefined
+    // `disposed` is distinct from the `isDisposed` trigger argument: the latter
+    // doubles as throttle's initial `noTrailing` flag, so it can already be
+    // `true` on a fiber that is very much alive. `disposed` tracks only real
+    // fiber teardown, so a call after that point is a complete no-op instead
+    // of still running a throttled call's leading edge.
+    let disposed = false
     const dispose = this.ctx.effect(() => () => {
+      disposed = true
       isDisposed = true
       clearTimeout(timer)
     }, label)
     const wrapper: any = (...args: any[]) => {
+      if (disposed) return
       clearTimeout(timer)
       timer = trigger(args, isDisposed)
     }

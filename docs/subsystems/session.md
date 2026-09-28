@@ -132,6 +132,19 @@ interface SessionEventMap {
     startsSeries?: true
   }
   /**
+   * Required, log-only tool changes for native provider projection. The referenced
+   * latest header owns the added definitions; afterMessageId fixes their position
+   * after the current user/tool-result message. Older readers must refuse this
+   * vocabulary rather than silently lose model-visible changes. Surface roles and
+   * stored messages are unchanged.
+   */
+  'request/tool-update': {
+    headerSeq: SessionSeq
+    afterMessageId: MessageId
+    additions: string[]
+    removals: string[]
+  }
+  /**
    * Route metadata for the next request, logged only when the route, capacity,
    * or system prompt update mode changes. It does not participate in request
    * reconstruction or header equality. Prompt admission uses the bound prepared
@@ -190,6 +203,12 @@ interface EpochHeader {
 ```
 
 Current event acceptance requires canonical `request/header.header`: any `system` field is forbidden, and `tools: []` and `adapterDefaults: {}` must be omitted. Whitespace-only system-message content, `config.stop: []`, and nested extensions remain unchanged. Seed, append, and current persistence reads reject noncanonical headers rather than silently normalizing them; [the V3 envelope decision](../../.agents/notes/implemented/architecture/2026-09-06-v3-canonical-session-envelopes.md) owns historical conversion. Legacy v0 logs containing `request/header-delta` or its full-snapshot `fallback` reason are rejected rather than replayed incompletely.
+
+<a id="the-tool-update-event-requesttool-update"></a>
+
+### The tool update event: `request/tool-update`
+
+When the tool names in a new `request/header` snapshot differ from the previous snapshot's, the agent loop appends a `request/tool-update` after it, provided the latest non-system message is a user or tool-result message. `headerSeq` references that latest header, which no earlier update has used; `additions` and `removals` must equal the name difference from the previous header's tools; and `afterMessageId` names the current user or tool-result message the change follows. Append and restore validate these references. The event is required on read, so an older reader refuses the log instead of silently losing model-visible changes. Like `request/header`, it is not a `SurfaceEventType`, produces no LLM message, and leaves stored messages unchanged. `session.toolHistory()` folds headers and updates incrementally into a `ToolHistory`: the series' baseline declarations plus ordered additions and removals, with definitions resolved from the referenced headers. A new request series or a changed definition resets the baseline, and a log whose updates do not account for the active tools yields the complete active list with no updates. The agent loop passes the history as `GenerateOptions.toolHistory`; the [LLM runtime](llm-streaming.md#the-model-request-and-result) projects it only for routes that declare `toolUpdate`, and other routes receive the complete active tool list.
 
 ### The route capacity event: `request/context`
 
@@ -525,7 +544,7 @@ declare class Session {
   /**
    * Return the immutable event stored at one exact sequence number.
    * @deprecated Existing logic may remain unmigrated for now, but new calls are prohibited.
-   * See the Agent Note.
+   * See the [Agent Note](../../../../.agents/notes/implemented/architecture/2026-09-09-deprecate-synchronous-session-event-reads.md).
    * @param seq - event sequence number.
    * @returns the accepted event, or undefined when the log does not contain it.
    */
@@ -535,7 +554,7 @@ declare class Session {
    * A full current snapshot is reused until the next append; every previously
    * returned snapshot remains stable after later appends.
    * @deprecated Existing logic may remain unmigrated for now, but new calls are prohibited.
-   * See the Agent Note.
+   * See the [Agent Note](../../../../.agents/notes/implemented/architecture/2026-09-09-deprecate-synchronous-session-event-reads.md).
    * @param fromSeq - non-negative inclusive sequence number; defaults to the log start.
    * @param toSeqExclusive - non-negative exclusive sequence number; defaults to the current end.
    * @returns a frozen array of the selected deeply frozen events.
@@ -547,7 +566,7 @@ declare class Session {
   /**
    * Return this Session's events after its fork-inherited prefix.
    * @deprecated Existing logic may remain unmigrated for now, but new calls are prohibited.
-   * See the Agent Note.
+   * See the [Agent Note](../../../../.agents/notes/implemented/architecture/2026-09-09-deprecate-synchronous-session-event-reads.md).
    * @returns a fresh array containing child-owned events in log order.
    */
   ownEvents(): readonly SessionEvent[];
@@ -610,6 +629,11 @@ declare class Session {
    * @returns the folded header, or undefined when no header event exists yet.
    */
   requestHeader(): EpochHeader | undefined;
+  /**
+   * Read immutable historical declarations and ordered changes for provider projection.
+   * @returns the current declaration series, reconstructed incrementally from committed events.
+   */
+  toolHistory(): ToolHistory;
   /**
    * Return the latest resolved route metadata, or `undefined` before the first
    * `request/context` event. Each event is folded once.

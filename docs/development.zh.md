@@ -52,16 +52,17 @@ bun run start
 
 ## 检查
 
-只运行覆盖本次变更的检查，而不是默认运行全部套件。任何终端行为变更还需要运行 PTY 场景。
+开发过程中，只运行覆盖本次变更的检查，而不是运行全部套件。任何终端行为变更还需要运行 PTY 场景。
 
 ```sh
 bun run check          # workspace, tsconfig paths, TUI types, tests, peer identity, layout, docs
 bun run test           # TUI unit and spec tests
 bun run test:runtime <file-or-dir>   # focused shared-runtime tests (Vitest on Node)
 bun run test:e2e       # keyless PTY scenarios against the built profile
-bun run verify         # build + check + PTY scenarios
-bun run lint           # Oxlint over apps/tui and scripts
+bun run lint           # Oxlint over apps, packages, and scripts
 ```
+
+`bun run check` 会运行给定的每个目标，并列出失败的目标，而不是在第一个失败处停止。
 
 PTY 场景回放录制的模型响应，同时运行真实工具，再检查持久化的会话、屏幕内容和终端恢复情况。它们不需要模型密钥，也不会改动你的 Bake 主目录。
 
@@ -79,18 +80,37 @@ bun run test:runtime apps/cli/tests/args.spec.ts
 
 使用 Cordis 或 Ink 的测试运行在 Node 上；纯模块和工具测试运行在 Bun 上。检查失败不是刷新所有快照或绕过 hook 的理由。请审阅预期输出的变化，保持 CI 检测不变，并且切勿覆盖 `snapshots/` 下已录制的会话代。
 
+<a id="before-a-pull-request"></a>
+
+### 发起拉取请求之前
+
+```sh
+bun run preflight          # every CI gate, runtime tests limited to what the change reaches
+bun run preflight --fast   # the static half, about 20 seconds: no build, Node suites, or PTY
+bun run verify             # every CI gate with the whole runtime suite (preflight --full)
+```
+
+`bun run preflight` 就是 CI 运行的命令。它以 `origin/develop`（或 `develop`；可用 `--base <ref>` 指定其他基准）衡量变更，包括未提交和未跟踪的文件，并依次运行每道关卡：
+
+- **hygiene**：`src/` 目录下没有遗留的编译产物 `.js` 或 `.d.ts`（它们会取代旁边的 `.ts` 被加载）；变更中没有空白错误；改动了发布的源码却没有 `CHANGELOG.md` 条目时给出警告。
+- **generated**：所有 `verify-*` 脚本，确保 workspace 清单、tsconfig 路径、配置、工具和 Cordis 目录、文档图、模块图、翻译配对以及文档中粘贴的类型都与来源一致。`verify-cordis-config` 还要求 Loader 行的元数据保持静态，并要求每个具名插件都能从拥有该行的清单解析；挂载 agent preset 的 profile 若在宿主平面也运行某个 preset 行（无论该 preset 启用还是禁用这一行），检查即失败，除非脚本的 `SHARED_PLANE_ROWS` 列出该行并说明两份副本为何无害。`verify-package-invariants` 要求每个包的不变式配套条目接线完整，或在包 README 中说明省略原因。
+- **types**、**lint**（Oxlint，以及 `PATH` 上有 actionlint 时对工作流运行的 actionlint）以及由 Bun 运行的工具测试。
+- **build**，然后针对构建产物运行 TUI 检查目标、运行时套件和 PTY 场景。运行时步骤通过导入图运行变更能触及的 spec（`vitest --changed`）；workspace 或配置文件变更时运行整个套件；没有运行时源码变更时不运行。`--full` 总是运行整个套件。
+
+Vitest 步骤失败时，失败的测试文件会单独重新运行一次。单独运行能通过的文件会使该步骤显示为 `WARN` 并列出这些文件，因为真实进程测试在繁忙的机器上可能错过时限；再次失败的文件则使其显示为 `FAIL`；Vitest 无法归属到某个测试文件的未处理错误同样会导致 `FAIL`，因为重新运行无法排除它。即使某道关卡失败，其余关卡也会继续运行，最后的汇总列出每项结果。失败关卡的输出保存在 `.preflight/<step>.log`，其末尾几行会在最后打印。`--only` 和 `--skip` 接受步骤名或分组名；`--list` 会列出它们。请修复失败项，或在拉取请求中说明哪道关卡失败以及为何与本次变更无关。
+
 ### Git hook
 
 [`lefthook.yml`](../lefthook.yml) 让 hook 保持快速：
 
 - `pre-commit` 用 Oxlint 检查暂存的 TypeScript 和 JavaScript（并应用修复），拒绝空白错误，并检查 `vendor/*/src` 下的变更是否同步更新了 [`vendor/README.md`](../vendor/README.md)。
-- `pre-push` 运行 `bun run verify-workspace` 和 `bun run typecheck`。
+- `pre-push` 运行 `bun run preflight --fast`：生成产物检查、类型、lint，以及 unit、layout 和 docs 目标。
 
-hook 不运行测试或构建；请自行运行相关检查。未经维护者同意，切勿跳过 hook。
+hook 不运行构建、Node 套件或 PTY 场景；请在发起拉取请求前运行 `bun run preflight`。未经维护者同意，切勿跳过 hook。
 
 ### CI
 
-[`ci.yml`](../.github/workflows/ci.yml) 在拉取请求以及直接推送到 `main` 时运行无密钥检查。拉取请求在 `main` 上的合并提交会被跳过，因为该拉取请求的运行已经检查过它。`main` 只通过来自 `develop` 的合并提交式拉取请求接收变更：其规则集要求 [`main-source.yml`](../.github/workflows/main-source.yml) 中的 `develop only` 检查通过，来自其他分支的拉取请求会使该检查失败。[`release.yml`](../.github/workflows/release.yml) 构建、签名并发布发行归档；流程见[发行指南](../distribution/README.zh.md)。
+[`ci.yml`](../.github/workflows/ci.yml) 在拉取请求以及直接推送到 `main` 时，于 Linux 和 macOS 上运行 `bun run preflight --full`，每个系统分为两个作业：整个运行时套件，以及其余所有关卡。拉取请求在 `main` 上的合并提交会被跳过，因为该拉取请求的运行已经检查过它。`main` 只通过来自 `develop` 的合并提交式拉取请求接收变更：其规则集要求 [`main-source.yml`](../.github/workflows/main-source.yml) 中的 `develop only` 检查通过，来自其他分支的拉取请求会使该检查失败。[`release.yml`](../.github/workflows/release.yml) 构建、签名并发布发行归档；流程见[发行指南](../distribution/README.zh.md)。
 
 ## 仓库结构
 
@@ -113,6 +133,7 @@ hook 不运行测试或构建；请自行运行相关检查。未经维护者同
 
 - 全程使用 ESM 与严格 TypeScript。本地相对导入使用 `.ts` 后缀；跨包导入使用声明的包名。运行时包保留 `@deepseek-ai/*` 名称，以便顺利移植上游修复。
 - 共享 Node 运行时通过 `tsconfig.host.json` 构建；各包的 `tsconfig.json` 引用其工作区依赖。增删包时，请更新其引用，并运行 `bun run gen-workspace` 和 `bun run gen-tsconfig-paths`。
+- 两个及以上清单共用的外部依赖版本只在根 `package.json` 的 `catalog` 中声明一次，各清单以 `"catalog:"` 引用。新增或升级此类依赖时，请修改 catalog 条目并运行 `bun install`，再连同 `bun.lock` 一起提交；`bun run verify-workspace` 会拒绝共用的字面版本范围、缺失的条目和未使用的条目。`vendor/` 清单与 peer 版本范围保留字面范围。
 - TUI 中显示的产品文案位于 [`apps/tui/packages/ui/src/copy.ts`](../apps/tui/packages/ui/src/copy.ts)，同时提供英文和中文。
 - 文档描述当前行为。随代码一起更新所属的 README 或 JSDoc，并保持中英文页面一致。
 - 按紧急程度标记已知问题：`FIXME` 会阻止发布，`TODO` 应尽快修复，`XXX` 留待日后。

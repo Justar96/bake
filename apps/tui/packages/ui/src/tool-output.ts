@@ -1,4 +1,5 @@
-/** Language hints and conservative colour for tool output. Source text stays in the log. */
+/** Language hints, conservative colour, and width bounds for tool output. Source text stays in the log. */
+import stringWidth from 'string-width'
 import stripAnsi from 'strip-ansi'
 import { PALETTE } from './palette.ts'
 import type { CardLine } from './rows.ts'
@@ -7,6 +8,37 @@ import type { Span } from './present.ts'
 /** Strip terminal escape sequences and make remaining controls visible before measuring text. */
 export const toolText = (text: string): string => stripAnsi(text).replace(/\r\n?/g, '\n').replace(/\t/g, '    ')
   .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g, char => `\\x${char.charCodeAt(0).toString(16).padStart(2, '0')}`)
+
+/** Grapheme boundaries, so a cut never splits what a terminal draws as one character. */
+const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+
+/**
+ * Cut one line of display text to a number of terminal cells, marking the cut.
+ *
+ * Measured in cells as Ink measures them, not in code units: a CJK character
+ * takes two, a combining mark none. The ellipsis takes the last cell, so the
+ * result is never wider than `cells`, and space before the cut is dropped so
+ * the ellipsis stays against the text it ends.
+ *
+ * @param text - one line, already passed through {@link toolText}.
+ * @param cells - the widest the line may be drawn; below 1 leaves only the ellipsis.
+ * @returns the line itself when it fits, or its leading graphemes and `…`.
+ */
+export function clipCells(text: string, cells: number): string {
+  // Two cells per code unit is the widest a line can measure, so a short
+  // line needs no measuring at all.
+  if (text.length * 2 <= cells || stringWidth(text) <= cells) return text
+  const room = Math.max(0, cells - 1)
+  let kept = ''
+  let used = 0
+  for (const { segment } of graphemes.segment(text)) {
+    const width = stringWidth(segment)
+    if (used + width > room) break
+    kept += segment
+    used += width
+  }
+  return `${kept.trimEnd()}\u2026`
+}
 
 /** Infer only valid structured JSON. Command stdout is not shell source. */
 function jsonOutput(text: string): boolean {

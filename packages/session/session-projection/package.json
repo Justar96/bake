@@ -32,7 +32,7 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "zod": "^4.4.3"
+    "zod": "catalog:"
   },
   "peerDependencies": {
     "@deepseek-ai/dsh-session": "workspace:^",

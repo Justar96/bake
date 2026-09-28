@@ -21,7 +21,7 @@ describe('dsh-tool-web real-load-path guard', () => {
     const unwrapped = loader.unwrapExports(toolWeb) as Record<string, unknown>
     expect(unwrapped).toBe(toolWeb)
     expect(unwrapped.name).toBe('tool-web')
-    expect(unwrapped.inject).toEqual(['tools', 'web', 'systemPrompt'])
+    expect(unwrapped.inject).toEqual(['tools', 'web'])
     expect(typeof unwrapped.apply).toBe('function')
   })
 

@@ -17,9 +17,6 @@
  * application or a corporate profile actually exports — the eight below — are fully handled, because
  * only this repository's own resolver reads them and it runs after this.
  *
- * Real-API e2e is cleared too. Before proxy support existed every request connected directly and
- * that suite passed, so a direct connection is the environment it is known to work in; leaving the
- * ambient proxy in place would newly stake it on the proxy reaching the provider.
  * @module
  */
 
@@ -34,9 +31,9 @@ const NODE_PROXY_FLAG = 'NODE_USE_ENV_PROXY'
 export const TEST_PROXY_SETUP_FILE = './scripts/test-proxy-environment.ts'
 
 /**
- * Every Vitest configuration in the repository, discovered rather than listed: the web suites carry
- * no `setupFiles` today, and a hand-written list would let one of them gain a setup without gaining
- * this one. The wiring test asserts only over the configurations that declare a setup at all.
+ * Every root Vitest configuration, discovered rather than listed: a hand-written list would let a
+ * new configuration gain a setup without gaining this one. The wiring test asserts only over the
+ * configurations that declare a setup at all.
  *
  * @returns repository-relative config paths, sorted.
  */

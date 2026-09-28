@@ -129,43 +129,11 @@ Read these pages when the package-level contract is not enough. They move from t
 <a id="model-experience"></a>
 ## Model Experience
 
-### System prompt
-
-#### What the model sees
-
-At assembly time, each guidance section checks `ctx.tools.get(name, scope)` and renders only while its tool is visible to that agent. The write paragraph recommends edit only while edit is visible. The text below is unchanged when all three tools are available; restrictions, their removal, and tool registration changes take effect on the next assembly. The same check works for direct agent restrictions and subagent `toolFilter`, including PTC capabilities behind `run_code`. The read-before-mutation sentences in write/edit describe the observation policy, not a requirement to invoke the tool named `read`. They remain when `read` is hidden: the policy still guards mutations, and another observing operation, such as `str_replace_editor` with `command: view`, can establish the same file observation. Tool visibility does not disable that precondition.
-
-##### Read guidance
-
-```markdown
-Use the read tool — not shell commands like cat — to inspect text files. Results include line numbers. Use offset and limit to continue reading large files.
-```
-
-##### Write guidance
-
-```markdown
-Use the write tool to create files or completely replace file contents. Existing files are overwritten, so read an existing file first (the default fs-observation-policy requires it) and prefer edit for targeted changes.
-```
-
-##### Edit guidance
-
-```markdown
-Use the edit tool for targeted changes to existing UTF-8 text files. It replaces literal old_string with new_string; by default old_string must appear exactly once. If old_string appears multiple times, provide a more specific old_string or set replace_all to true. Read the file first (the default fs-observation-policy requires it), unless you just created or edited it in this session.
-```
-
-#### Token effect
-
-Guidance cost follows the visible tools and their applicable cross-tool recommendations.
-
-#### KV Cache effect
-
-Prefix-stable while the visible tool set, plugin scope, and guidance text are unchanged. Restrictions or plugin lifecycle changes may invalidate reuse from the first changed section.
-
 ### Tool schemas
 
 #### What the model sees
 
-The model sees the generated [`read`, `read_image`, `write`, and `edit` schemas](../../../docs/tool-catalog.md#deepseek-aidsh-tool-fs), with snake_case arguments. The image tool appears only while a durable attachment store is mounted; its schema is route-independent, and the strict gate refuses at execution. Scoped tool restrictions can remove any definition for one agent.
+The model sees the generated [`read`, `read_image`, `write`, and `edit` schemas](../../../docs/tool-catalog.md#deepseek-aidsh-tool-fs), with snake_case arguments. The package adds no system-prompt section: each tool's description and parameters are its only guidance, and they are also the SDK documentation behind `run_code` in PTC mode. The `read` description says that, unlike a shell `cat`, a read counts for later `write` and `edit` calls. The `write` and `edit` descriptions state the observation-policy guard: changing a file you have not read, written, or edited in this session, or one that changed since, is refused. `edit`'s `old_string` carries the exact-once rule and says to leave out the line numbers `read` adds. Descriptions are registration-time text, so `write` still points at `edit` where a scope hides `edit`. Every `file_path` is described as an absolute path or one relative to the working directory, which is the calling session's cwd. The image tool appears only while a durable attachment store is mounted; its schema is route-independent, and the strict gate refuses at execution. Scoped tool restrictions can remove any definition for one agent.
 
 #### Token effect
 
@@ -245,6 +213,7 @@ These limits define when the tool suite is a poor fit or needs special operation
 - **Inline image preview rides the UI composition** — the tool-result card renders the image through the browser's `tool.call.images` slot, which the attachment presentation plugin fills; a UI without that plugin shows the result's envelope text instead.
 - **No attachment-region tool** — an agent may crop an image through another available tool when it has a filesystem path; a pasted or dragged image without a path cannot be re-read at higher resolution.
 - **No timeout surface** — `read`/`write`/`edit` take no timeout argument and declare no timeout budget; cancellation rides `exec.signal` only ([provider rationale](../README.md)).
+- **Descriptions assume the observation policy** — the `read`, `write`, and `edit` descriptions state the read-before-write/edit guard, which only `dsh-fs-observation-policy` enforces. A composition without that plugin still shows the statement, so the model may read before a mutation it could have made directly; it is never told a guarded change is safe.
 
 <a id="dev-note"></a>
 ### Dev Note

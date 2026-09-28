@@ -34,15 +34,17 @@ export class EntryGroup {
     if (index >= 0) config.splice(index, 1)
   }
 
+  /** Stop and drop an entry; returns its fiber disposal promise, if any, so a caller can await quiescence. */
   remove(id: string, isDispose = false) {
     const entry = this.tree.store[id]
     if (!entry) return
-    entry.fiber?.dispose()
+    const disposed = entry.fiber?.dispose()
     if (!isDispose) {
       this.unlink(entry.options)
     }
     delete this.tree.store[id]
     this.context.emit('loader/partial-dispose', entry, entry.options, false)
+    return disposed
   }
 
   async update(config: EntryOptions[]) {
@@ -59,15 +61,13 @@ export class EntryGroup {
           this.ctx.logger.error(error)
         })
       } else {
-        this.remove(id)
+        await this.remove(id)
       }
     }))
   }
 
   stop() {
-    for (const options of this.data) {
-      this.remove(options.id, true)
-    }
+    return Promise.all(this.data.map(options => this.remove(options.id, true)))
   }
 }
 

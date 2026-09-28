@@ -9,6 +9,6 @@ Staged attachments: 1
 Enter sends · /remove-attachment <number> removes · /clear-attachments clears
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-> ▌Ask anything
+> ▌Ask anything · / commands · @ files
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-  Model: model  /workspace
+  model  /workspace

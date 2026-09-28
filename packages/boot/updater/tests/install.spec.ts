@@ -194,4 +194,16 @@ describe('the Windows pointer', () => {
     expect(text).toContain('if /I "%~1"=="update" goto raw')
     expect(text).not.toMatch(/versions\\\d/)
   })
+
+  it('starts Node with report and diagnostic flags, after creating the diagnostics directory', () => {
+    const lines = windowsLauncher('C:\\Program Files\\Bake').split('\r\n')
+    const flags = 'node --report-exclude-env --report-exclude-network "--diagnostic-dir=%DSH_HOME%\\diagnostics" "%BAKE_CLI%"'
+    expect(lines.filter(line => line.startsWith('node '))).toEqual([`${flags} --profile tui %*`, `${flags} %*`])
+    const home = lines.indexOf('if not defined DSH_HOME set "DSH_HOME=%USERPROFILE%\\.bake"')
+    const create = lines.indexOf('if not exist "%DSH_HOME%\\diagnostics\\" mkdir "%DSH_HOME%\\diagnostics" 2>nul')
+    expect(home).toBeGreaterThan(-1)
+    expect(create).toBeGreaterThan(home)
+    expect(lines.findIndex(line => line.startsWith('node '))).toBeGreaterThan(create)
+    expect(lines.some(line => line.includes('NODE_OPTIONS'))).toBe(false)
+  })
 })

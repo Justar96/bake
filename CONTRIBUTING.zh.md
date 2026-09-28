@@ -8,8 +8,9 @@
 
 1. 从 `develop` 创建分支，每个变更只聚焦一种行为。
 2. 随代码一起更新所属的 README 或 JSDoc，并保持中英文页面一致。TUI 中显示的产品文案放在 [`copy.ts`](apps/tui/packages/ui/src/copy.ts) 中，同时提供两种语言。
-3. 运行覆盖本次变更的检查（参见[检查](docs/development.zh.md#checks)）。终端行为变更还需要运行 PTY 场景。如实报告运行了什么，包括失败和跳过的项目。
-4. 向 `develop` 发起拉取请求，说明行为变化以及你的验证方式。
+3. 开发过程中运行覆盖本次变更的检查（参见[检查](docs/development.zh.md#checks)）。终端行为变更还需要运行 PTY 场景。
+4. 发起拉取请求前，运行 `bun run preflight`（参见[发起拉取请求之前](docs/development.zh.md#before-a-pull-request)）。它会运行 CI 运行的每道关卡，并列出每项结果。如实报告它的输出，包括失败和跳过的项目。
+5. 向 `develop` 发起拉取请求，说明行为变化以及你的验证方式；拉取请求模板列出了需要包含的内容。
 
 切勿提交凭据或 `.env`，切勿覆盖 `snapshots/` 下已录制的会话代，也不要绕过 Git hook。检查失败时请修复根因，而不是刷新所有快照。
 

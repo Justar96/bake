@@ -10,7 +10,7 @@
  *   2. no full-screen clear during an ordinary turn  (L1)
  *   3. frame height never changes while a turn runs  (L2)
  *
- *   node tui/prototype/realloop.mjs
+ *   bun apps/tui/prototype/realloop.mjs
  */
 import { EventEmitter } from 'node:events'
 import { createRequire } from 'node:module'

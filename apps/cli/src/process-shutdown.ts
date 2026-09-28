@@ -9,6 +9,13 @@ export interface ProcessShutdown {
   shutdown(code: number): Promise<void>
   /** Start graceful disposal followed by exit, or force exit when shutdown is already running. */
   interrupt(code: number): void
+  /**
+   * Start graceful disposal followed by exit, or join a disposal already running without
+   * escalating: one terminal close can deliver several SIGHUPs, and a repeat must not cut
+   * short the flush the first one started. After disposal has settled, force the exit that
+   * natural completion may still be waiting on, since no user remains to interrupt it.
+   */
+  hangup(code: number): void
 }
 
 /**
@@ -27,6 +34,7 @@ export function createProcessShutdown(
 ): ProcessShutdown {
   let pending: Promise<void> | undefined
   let timeout: ReturnType<typeof setTimeout> | undefined
+  let disposed = false
   let completed = false
   let forceExited = false
 
@@ -54,10 +62,30 @@ export function createProcessShutdown(
     timeout = setTimeout(() => { forceExitOnce(code) }, timeoutMs)
     pending = Promise.resolve().then(dispose).then(
       () => {
-        if (forceAfterDispose) forceExitOnce(code)
-        else completeOnce(code)
+        disposed = true
+        if (forceAfterDispose) {
+          forceExitOnce(code)
+        } else {
+          completeOnce(code)
+          // Natural completion only sets `exitCode`; it still depends on the
+          // event loop draining on its own. A handle disposal did not close
+          // would otherwise hang the process forever with no bound left
+          // armed, so rearm one more forced exit, unref'd so a normal drain
+          // still exits immediately rather than waiting out the grace period.
+          // Skip it when a concurrent interrupt/hangup already forced the
+          // exit: `completeOnce` was then already a no-op, and this would
+          // otherwise leave an unnecessary timer running past a process that
+          // is already tearing down.
+          if (!forceExited) {
+            timeout = setTimeout(() => { forceExitOnce(code) }, timeoutMs)
+            timeout.unref()
+          }
+        }
       },
-      () => { forceExitOnce(code) },
+      () => {
+        disposed = true
+        forceExitOnce(code)
+      },
     )
     return pending
   }
@@ -72,6 +100,10 @@ export function createProcessShutdown(
         return
       }
       void start(code, true)
+    },
+    hangup(code) {
+      if (pending === undefined) void start(code, true)
+      else if (disposed) forceExitOnce(code)
     },
   }
 }

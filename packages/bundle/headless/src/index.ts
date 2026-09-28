@@ -22,12 +22,13 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
 import { SessionSeq } from '@deepseek-ai/dsh-session'
 import type { Session, SessionEvent, SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
+import { SessionAlreadyOwnedError } from '@deepseek-ai/dsh-session-persistence'
 import { SessionQueryError } from '@deepseek-ai/dsh-session-query'
-// Empty type imports carry the loader Context merge for the settlement await,
-// the cmdline Context merge for the appExit host value, and the sessionQuery
-// Context merge for exact Session adoption.
+// The cmdline import also carries the Context merge for the appExit host value.
+import { SESSION_IN_USE_EXIT, SessionInUseError } from '@deepseek-ai/dsh-cmdline'
+// Empty type imports carry the loader Context merge for the settlement await
+// and the sessionQuery Context merge for exact Session adoption.
 import type {} from '@deepseek-ai/cordis-plugin-loader'
-import type {} from '@deepseek-ai/dsh-cmdline'
 import type {} from '@deepseek-ai/dsh-session-query'
 import { internals } from './runner-internals.ts'
 import { projectJsonRun, boundJsonLine } from './json-stream.ts'
@@ -53,6 +54,13 @@ export const Config: z<Config> = z.object({
   sessionId: z.string(),
   json: z.boolean(),
 })
+
+/**
+ * What follows the Session id when another process has the `--resume` Session
+ * open. It is the terminal profile's English launch refusal, so both profiles
+ * print the same line; the PTY `session-in-use` scenario compares the two.
+ */
+const SESSION_IN_USE_REFUSAL = 'open in another Bake process; close it there and run this command again, or leave out --resume to start a new session'
 
 /** Outcome of one owned run interval. */
 interface RunOutcome {
@@ -283,6 +291,10 @@ async function resolveAgent(
     assertAdoptable(agent.session.header, liveEvents(agent.session), sessionId, cwd)
     return agent
   } catch (error: unknown) {
+    // No Agent of this process holds the id (checked above), and nothing else
+    // this composition mounts opens a Session for write, so a write refusal
+    // here is the kernel lock another process holds.
+    if (error instanceof SessionAlreadyOwnedError) throw new SessionInUseError(`${sessionId}: ${SESSION_IN_USE_REFUSAL}`, error)
     if (!(error instanceof SessionQueryError) || error.code !== 'SESSION_QUERY_SESSION_NOT_FOUND') throw error
     // --resume adopts a conversation that already exists; starting a new
     // one is the no-id path, which generates its own identity and reports it in
@@ -292,12 +304,15 @@ async function resolveAgent(
   }
 }
 
-/** Report an unexpected direct-driver failure and request a failing exit. */
+/**
+ * Report an unexpected direct-driver failure and request a failing exit: the
+ * in-use status for a `--resume` Session another process has open, 1 otherwise.
+ */
 function fail(io: HeadlessIo, error: unknown, json: boolean): void {
   const message = error instanceof Error ? error.message : String(error)
   if (json) io.stdout.write(`${boundJsonLine({ type: 'error', message })}\n`)
   io.stderr.write(`dsh: ${message}\n`)
-  io.exit(1)
+  io.exit(error instanceof SessionInUseError ? SESSION_IN_USE_EXIT : 1)
 }
 
 /**

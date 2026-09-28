@@ -185,12 +185,26 @@ describe('workflow guest callbacks', () => {
   })
 
   it('ends an initial synchronous loop at the VM timeout after emitting its progress', async () => {
-    const test = fixture('log("before loop"); while (true) {}', {}, { syncTimeoutMs: 20 })
-    const result = await runWorkflowGuest(test.host)
-    expect(result.stopReason).toBe('error')
-    expect(result.error).toContain('Script execution timed out')
-    expect(test.events).toEqual([{ type: 'log', message: 'before loop' }])
-  })
+    // The VM watchdog starts before the script's first statement, so a loaded host can expire any budget
+    // before log() runs. The in-realm witness set after log() proves the order; until it is set, double the budget.
+    const attempt = async (syncTimeoutMs: number) => {
+      const witness = { reached: false }
+      const test = fixture('log("before loop"); args.witness.reached = true; while (true) {}', {}, { syncTimeoutMs })
+      test.init.args = { witness }
+      return { witness, events: test.events, result: await runWorkflowGuest(test.host) }
+    }
+    let syncTimeoutMs = 100
+    let run = await attempt(syncTimeoutMs)
+    while (!run.witness.reached && syncTimeoutMs < 10_000) {
+      expect(run.result.error).toContain('Script execution timed out')
+      syncTimeoutMs *= 2
+      run = await attempt(syncTimeoutMs)
+    }
+    expect(run.witness.reached).toBe(true)
+    expect(run.result.stopReason).toBe('error')
+    expect(run.result.error).toContain('Script execution timed out')
+    expect(run.events).toEqual([{ type: 'log', message: 'before loop' }])
+  }, 60_000)
 
   it('rejects non-JSON completion values with the workflow diagnostic', async () => {
     const result = await runWorkflowGuest(fixture('return { date: new Date(0) }').host)

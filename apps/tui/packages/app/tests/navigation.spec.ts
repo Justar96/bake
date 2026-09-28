@@ -121,6 +121,22 @@ it('keeps the current controller on dismissal or current selection and rejects c
   expect(model.requests).toEqual([])
 })
 
+it('shows a localized, actionable notice for a session recorded before agentPresets existed', async () => {
+  const { ctx, navigation } = await connected()
+  const first = navigation.controller!
+  const legacy = await ctx.agents.create({
+    sessionId: brandString<SessionId>('legacy'), meta: { cwd: process.cwd() }, agentOptions: { provider: 'mock', model: 'model' },
+  })
+  legacy.agent.followup(user('Persist'))
+  await legacy.agent.whenIdle()
+  await legacy.dispose()
+  await select(navigation, 'legacy')
+  // Rolled back to the still-current session, same as any other open failure,
+  // with the localized notice rather than `openSession`'s raw error text.
+  expect(navigation.controller).toBe(first)
+  expect(first.view.notice).toBe(copy.sessionNeedsPreset)
+})
+
 it('pins the active session before saved history ordered by last use, pointing at the newest', async () => {
   const { ctx, navigation } = await connected()
   const active = navigation.controller!.agent.id

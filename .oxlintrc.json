@@ -197,7 +197,8 @@
         "packages/*/*/tests/**/*.{ts,tsx}",
         "apps/cli/tests/**/*.{ts,tsx}",
         "examples/*/tests/**/*.{ts,tsx}",
-        "scripts/**/*.spec.{ts,tsx}"
+        "scripts/**/*.spec.{ts,tsx}",
+        "scripts/**/*.test.{ts,tsx}"
       ],
       "rules": {
         // Session assertions inspect the log; other deprecated APIs remain errors.

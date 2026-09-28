@@ -4,7 +4,7 @@
  * before anything loads React; `inherit` leaves the caller's NODE_ENV.
  */
 import { PassThrough, Writable } from 'node:stream'
-import { selectRendererBuild } from '../../src/bin.ts'
+import { selectRendererBuild } from '../../src/cli.ts'
 
 if (process.argv[2] === 'select') selectRendererBuild()
 const React = (await import('react')).default

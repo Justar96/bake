@@ -59,6 +59,17 @@ export const DEFAULT_MAX_REQUEST_IMAGE_BYTES = 20 * 1024 * 1024
 export const DEFAULT_REQUEST_IMAGE_PIXEL_BUDGET = 2048 * 2048
 /** Default raw encoded-byte target before inline base64 expansion; the smallest quality-ladder output is used when no quality fits. */
 export const DEFAULT_REQUEST_IMAGE_MAX_BYTES = 1024 * 1024
+/**
+ * Default request-image long edge for a model speaking `anthropic-messages`.
+ * Anthropic rejects the whole request when it carries more than 20 images and
+ * any side exceeds 2000 px, and history re-sends every image on every step, so
+ * a longer edge eventually fails every later turn. Applying the many-image
+ * limit to every image keeps each target independent of the image count.
+ * Other protocols keep only the pixel budget: OpenAI Responses models read
+ * pi-ai's `detail: "auto"` as original detail up to 6000 px on gpt-5.5, so
+ * capping them would discard detail no failure calls for.
+ */
+export const DEFAULT_ANTHROPIC_REQUEST_IMAGE_MAX_DIMENSION = 2000
 
 /** Context capacity assumed for a model neither configuration nor the catalog sizes. */
 export const DEFAULT_CONTEXT_WINDOW = 262_144
@@ -173,6 +184,15 @@ export interface PiAiProviderProfile {
   /** Total-pixel budget for each deterministic inline request version. */
   requestImagePixelBudget?: number
   /**
+   * Long-edge cap in pixels for each deterministic inline request version,
+   * applied after the pixel budget. Omission caps a model speaking
+   * `anthropic-messages` at 2000 px, Anthropic's per-side limit for requests
+   * with more than 20 images, and leaves other protocols to the pixel budget
+   * alone. A value applies to every model on the route. A route serving Claude
+   * over another protocol sets 2000 here.
+   */
+  requestImageMaxDimension?: number
+  /**
    * Raw encoded-byte target for each deterministic inline request version;
    * the smallest quality-ladder output is used when no quality fits.
    */
@@ -196,6 +216,11 @@ export interface ResolvedPiAiProviderProfile
   maxRequestImageBytes: number
   /** Positive total-pixel request-version budget after defaulting. */
   requestImagePixelBudget: number
+  /**
+   * Configured positive long-edge cap. Absent here means the per-protocol
+   * default, which {@link requestImageMaxDimensionFor} resolves per model.
+   */
+  requestImageMaxDimension?: number
   /** Positive raw request-version byte target after defaulting; the smallest quality-ladder output is used when no quality fits. */
   requestImageMaxBytes: number
   /** Immutable retry policy captured with this provider route. */
@@ -278,6 +303,7 @@ const compatProfile: z<PiAiCompatProfile> = z.object({
   forceAdaptiveThinking: z.boolean(),
   allowEmptySignature: z.boolean(),
   supportsStrictTools: z.boolean(),
+  sendSessionAffinityHeaders: z.boolean(),
 })
 
 /**
@@ -342,6 +368,8 @@ const profile = z.object({
   streamIdleTimeoutMs: z.number().min(Number.MIN_VALUE).max(MAX_TIMER_DELAY_MS).default(DEFAULT_STREAM_IDLE_TIMEOUT_MS),
   maxRequestImageBytes: z.number().step(1).min(1).default(DEFAULT_MAX_REQUEST_IMAGE_BYTES),
   requestImagePixelBudget: z.number().step(1).min(1).default(DEFAULT_REQUEST_IMAGE_PIXEL_BUDGET),
+  // No materialized default: omission resolves per model protocol at dispatch.
+  requestImageMaxDimension: z.number().step(1).min(1),
   requestImageMaxBytes: z.number().step(1).min(1).default(DEFAULT_REQUEST_IMAGE_MAX_BYTES),
   retryPolicy: RetryPolicySchema,
 })
@@ -350,6 +378,23 @@ const profile = z.object({
 export const Config: z<Config> = z.object({
   providers: z.dict(profile).default({}),
 })
+
+/**
+ * Resolve the request-image long-edge cap for one model on a resolved route.
+ * The route's configured value wins for every model; otherwise the model's
+ * own wire protocol selects the default, so a route mixing protocols caps
+ * only its `anthropic-messages` models.
+ * @param profile - the resolved route profile.
+ * @param api - the dispatching model's own wire protocol.
+ * @returns the cap in pixels, or `undefined` when only the pixel budget applies.
+ */
+export function requestImageMaxDimensionFor(
+  profile: Pick<ResolvedPiAiProviderProfile, 'requestImageMaxDimension'>,
+  api: string,
+): number | undefined {
+  if (profile.requestImageMaxDimension !== undefined) return profile.requestImageMaxDimension
+  return api === 'anthropic-messages' ? DEFAULT_ANTHROPIC_REQUEST_IMAGE_MAX_DIMENSION : undefined
+}
 
 /**
  * Reject new or changed provider profiles that cannot be served. Unchanged
@@ -440,6 +485,11 @@ export function resolveProfiles(
     if (!Number.isSafeInteger(requestImagePixelBudget) || requestImagePixelBudget <= 0) {
       throw new Error(`llm-pi-ai: provider "${provider}" requestImagePixelBudget must be a positive safe integer`)
     }
+    const requestImageMaxDimension = source.requestImageMaxDimension
+    if (requestImageMaxDimension !== undefined
+      && (!Number.isSafeInteger(requestImageMaxDimension) || requestImageMaxDimension <= 0)) {
+      throw new Error(`llm-pi-ai: provider "${provider}" requestImageMaxDimension must be a positive safe integer`)
+    }
     const requestImageMaxBytes = source.requestImageMaxBytes ?? DEFAULT_REQUEST_IMAGE_MAX_BYTES
     if (!Number.isSafeInteger(requestImageMaxBytes) || requestImageMaxBytes <= 0) {
       throw new Error(`llm-pi-ai: provider "${provider}" requestImageMaxBytes must be a positive safe integer`)
@@ -487,7 +537,14 @@ export function resolveProfiles(
       if (validation === 'strict' || !(error instanceof PiAiCatalogError)) throw error
       catalogError ??= error.message
     }
-    const { apiKeyEnv, retryPolicy, models: _models, displayName: _displayName, ...rest } = source
+    const {
+      apiKeyEnv,
+      retryPolicy,
+      models: _models,
+      displayName: _displayName,
+      requestImageMaxDimension: _requestImageMaxDimension,
+      ...rest
+    } = source
     resolved.set(provider, {
       ...rest,
       provider,
@@ -496,6 +553,7 @@ export function resolveProfiles(
       streamIdleTimeoutMs,
       maxRequestImageBytes,
       requestImagePixelBudget,
+      ...requestImageMaxDimension === undefined ? {} : { requestImageMaxDimension },
       requestImageMaxBytes,
       retryPolicy: resolveRetryPolicy(retryPolicy, `llm-pi-ai: provider "${provider}" retryPolicy`),
       ...rest.headers === undefined ? {} : { headers: { ...rest.headers } },

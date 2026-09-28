@@ -3,7 +3,8 @@ import React from 'react'
 import { Box, Text } from 'ink'
 import stringWidth from 'string-width'
 import type { TuiCopy } from './copy.ts'
-import { MARKER } from './layout.ts'
+import { ICON } from './icons.ts'
+import { COLUMN, HINT_MIN_COLUMNS, MARKER } from './layout.ts'
 import { PALETTE } from './palette.ts'
 import { sheetBar, type SheetLine } from './sheet.tsx'
 
@@ -42,13 +43,19 @@ export function tasksOpen(todos: readonly TaskEntry[] | undefined): boolean {
  *
  * Every write replaces the list, so the transcript would repeat the plan
  * with a different tick each time. The row shows the one version still
- * true: a progress bar of heavy and light rules, the count, and the task in
- * progress, or the next open one when none is. It costs one row while work
- * remains and none once it is done. The complete checklist is a sheet away.
+ * true, in the grammar every standing row shares: the transcript's `☐` in the
+ * rail, the name and its count, then a progress bar of heavy and light rules
+ * and the task in progress, or the next open one when none is:
+ * `☐ Tasks 1/4  ━━━─────────  ▸ Thread the home`. It costs one row while
+ * work remains and none once it is done. The complete checklist is a sheet away.
  *
- * `hint` names the key that opens the sheet, at the row's right edge; the
- * row gives it up before it cuts the task below a few cells. Focused, the
- * head is marked and the hint says what Enter does.
+ * `hint` names the key that opens the sheet, dim at the row's right edge; the
+ * row gives it up below {@link HINT_MIN_COLUMNS}, as the composer does its
+ * hint, and before it cuts the task below a few cells. Focused, the rail
+ * holds `>`, the name is marked, and the hint says what Enter does.
+ *
+ * Neutral but for its marker: the bar fills in the terminal's own
+ * foreground, and only the `▸` of a task in progress keeps its colour.
  *
  * @param props.todos - the current list, in the agent's own order.
  * @param props.columns - row width.
@@ -65,22 +72,24 @@ export function Tasks({ todos, copy, columns, focused = false, hint }: {
   const current = todos.find(item => item.status === 'in_progress') ?? todos.find(item => item.status !== 'completed')
   if (current === undefined || columns <= 0) return null
   const filled = Math.round(TASK_BAR * done / todos.length)
-  const head = `${focused ? '> ' : ''}${copy.todoTitle}`
-  const count = `  ${done}/${todos.length}`
-  const task = ` · ${glyphOf(current.status)} ${current.text}`
+  const rail = Math.min(COLUMN.rail, columns)
+  const count = ` ${done}/${todos.length}`
+  const task = `${glyphOf(current.status)} ${current.text}`
   const tail = focused ? copy.todoOpen : hint
-  const fixed = stringWidth(head) + 2 + TASK_BAR + stringWidth(count)
-  const showTail = tail !== undefined && fixed + Math.min(stringWidth(task), TASK_TEXT_MIN) + 2 + stringWidth(tail) <= columns
+  const fixed = rail + stringWidth(copy.todoTitle) + stringWidth(count) + 2 + TASK_BAR + 2
+  const showTail = tail !== undefined && columns >= HINT_MIN_COLUMNS
+    && fixed + Math.min(stringWidth(task), TASK_TEXT_MIN) + 2 + stringWidth(tail) <= columns
   const color = colorOf(current.status)
   return <Box width={columns} height={1} flexDirection="row" flexShrink={0} overflowX="hidden">
-    <Box width={showTail ? columns - 2 - stringWidth(tail) : columns} flexShrink={0}>
+    <Box width={rail} flexShrink={0}><Text bold={focused} dimColor={!focused}>{focused ? '>' : ICON.todo}</Text></Box>
+    <Box width={Math.max(0, (showTail ? columns - 2 - stringWidth(tail) : columns) - rail)} flexShrink={0}>
       <Text wrap="truncate-end">
-        <Text bold inverse={focused}>{head}</Text>
-        {'  '}
-        <Text color={PALETTE.asking}>{TASK_GLYPH.filled.repeat(filled)}</Text>
-        <Text dimColor>{TASK_GLYPH.empty.repeat(TASK_BAR - filled)}</Text>
+        <Text bold inverse={focused}>{copy.todoTitle}</Text>
         <Text dimColor>{count}</Text>
-        <Text dimColor>{' · '}</Text>
+        {'  '}
+        <Text>{TASK_GLYPH.filled.repeat(filled)}</Text>
+        <Text dimColor>{TASK_GLYPH.empty.repeat(TASK_BAR - filled)}</Text>
+        {'  '}
         <Text bold={color !== undefined} {...color === undefined ? { dimColor: true } : { color }}>{glyphOf(current.status)}</Text>
         <Text bold={current.status === 'in_progress'} dimColor={current.status !== 'in_progress'}>{` ${current.text}`}</Text>
       </Text>
@@ -111,7 +120,7 @@ export function taskSheet(todos: readonly TaskEntry[], copy: TuiCopy): readonly 
     ...active === 0 ? [] : [`${active} ${copy.todoActive}`], ...left === 0 ? [] : [`${left} ${copy.todoLeft}`]].join(' \u00b7 ')
   const digits = String(todos.length).length
   return [
-    { text: '', parts: [...sheetBar(done, todos.length, SHEET_BAR, PALETTE.asking), { text: `  ${counts}`, dim: true }] },
+    { text: '', parts: [...sheetBar(done, todos.length, SHEET_BAR), { text: `  ${counts}`, dim: true }] },
     { text: '' },
     ...todos.map((item, index): SheetLine => {
       const color = colorOf(item.status)

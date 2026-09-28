@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-`dsh-tool-subagent-control` 为可继续子级添加全局控制工具：`send_message` 在直接父级与子级之间进行 steering（中途引导），`interrupt_agent` 停止子级当前轮次但保留其收件箱与后代，`list_agents`（来自可单独加载的 `list-agents` 插件）按持久化 ID 与标签列出可继续子级。父级与可继续子级继承相同的 `send_message` 定义和顺序，因此模型通信不会增加子级专属工具 schema。是否加载这些工具不会决定委派工具是否启动可继续工作。
+`dsh-tool-subagent-control` 为可继续子级添加全局控制工具：`send_message` 在直接父级与子级之间进行 steering（中途引导），`interrupt_agent` 停止子级当前轮次但保留其收件箱与后代，`list_agents`（来自可单独加载的 `list-agents` 插件）按 agent id 与标签列出可继续子级。父级与可继续子级继承相同的 `send_message` 定义和顺序，因此模型通信不会增加子级专属工具 schema。是否加载这些工具不会决定委派工具是否启动可继续工作。
 
 ## 目录
 
@@ -54,7 +54,7 @@ kind: "package-reference"
 
 ### list_agents
 
-列出调用方 agent 下方的可继续子级：`children`（默认）只显示直接子级，`descendants` 按稳定前序遍历整棵树，并为每个条目标注其持久化直接父级会话 ID 与深度。状态来自在线 Agent 注册表——`running`、`idle` 或 `ready`。一次性子级因无法接受 `send_message` 而被有意排除，无法读取的候选项以诊断信息呈现。
+列出调用方 agent 下方的可继续子级：`children`（默认）只显示直接子级，`descendants` 按稳定前序遍历整棵树，并为每个条目标注其直接父级的 agent id 与深度。状态来自在线 Agent 注册表——`running`、`idle` 或 `ready`。一次性子级因无法接受 `send_message` 而被有意排除，无法读取的候选项以诊断信息呈现。
 
 -----
 
@@ -78,12 +78,17 @@ kind: "package-reference"
 
 `list_agents` 从调用 agent 推导根 id，不使用 cursor 读取服务目录，通过在线 Agent 注册表细化每个候选的状态，并省略无法接受 `send_message` 的一次性子级。diagnostic 在 descendants scope 中保留其位置，且绝不暴露描述符内容。
 
+### UI 呈现
+
+每个工具都声明一个纯函数 `presentCall`，因此 UI 为调用显示标题，而不是打印其参数。`send_message` 显示目标 id 与消息的第一行，截断为 48 个字符，有内容被省略时以 `…` 结尾：`<agent-id>: Also check the lockfile …`。`interrupt_agent` 显示 `Interrupt <agent-id>`，`list_agents` 显示 `List subagents`，descendants scope 下显示 `List all subagents below`。三个工具都不声明 `presentResult`；它们简短的结果文本保留 UI 的通用渲染，过时的记录参数也会让调用回退到通用渲染。
+
 ### 源码地图
 
 | 文件 | 职责 |
 |---|---|
 | [`src/index.ts`](src/index.ts) | `send_message` 与 `interrupt_agent` 注册 |
 | [`src/list-agents.ts`](src/list-agents.ts) | `list_agents` 注册：作用域、状态细化、投影 |
+| [`src/presentation.ts`](src/presentation.ts) | 三个控制工具的纯函数调用标题 |
 | — | 不发布运行时不变式伴生入口；这个面向模型的适配器没有独立的生命周期流；投递与激活关系由其调用的 subagent 服务负责。 |
 
 </details>
@@ -108,7 +113,7 @@ kind: "package-reference"
 
 #### 模型看到什么
 
-已生成的 [schema](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-subagent-control)：`send_message` 接受 `agent_id` 与 `message`；`interrupt_agent` 接受 `agent_id`；`list_agents` 接受可选的 `scope` 枚举。
+已生成的 [schema](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-subagent-control)：`send_message` 接受 `agent_id` 与 `message`；`interrupt_agent` 接受 `agent_id`；`list_agents` 接受可选的 `scope` 枚举。三个工具都用同一个 agent id 指代 agent：它由可继续委派返回，并出现在结算通知与 `list_agents` 行中；job id 只属于一次性后台任务。这些描述不使用服务内部词汇，只陈述面向模型的约定：各状态及消息对每种状态的作用、仅确认送达、只能向直接子 agent 发消息，以及可中断任一可继续后代的当前轮次。
 
 #### Token 影响
 

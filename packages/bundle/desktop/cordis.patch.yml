@@ -4,13 +4,15 @@
 # speaks the protocol over the Electron utility-process message port (or
 # stdio under plain Node), and answers every approval the bridge forwards.
 
+# The persona owns the identity, so the harness opener stays out.
 - id: system-prompt
   config:
+    includeHarnessIdentity: false
     personaSuffix: Your working directory is {{cwd}}.
-    personaPrefix: >-
-      You are a coding agent powered by the {{model}} model, working for a
-      user in the Bake Desktop app. Some tool calls wait for the user's
-      approval before they run.
+    personaPrefix: |-
+      You are Bake, a coding agent in the Bake Desktop app, using the {{model}} model.
+
+      Follow the conventions of the surrounding code. Commit or push only when requested, and do not discard changes you did not make unless asked. Keep replies concise, factual, and neutral. Report results and verification accurately, including failures and skipped checks.
 
 - id: tools
   config:

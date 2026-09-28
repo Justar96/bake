@@ -572,3 +572,90 @@ describe('Schedule persistence failure boundaries', () => {
     stop()
   })
 })
+
+describe('Schedule tool result presentation', () => {
+  /** Present one executed result through its tool, as a UI does from the logged arguments and result. */
+  function presented(test: ToolHarness, name: string, args: unknown, result: { content: ToolExecutionResult['content']; isError: boolean }) {
+    return test.ctx.tools.get(name)?.presentResult?.(args, { content: result.content, isError: result.isError })
+  }
+
+  /** The generic card a summary presenter returns. */
+  const card = (text: string) => ({ card: 'generic', content: [{ type: 'text', text }] })
+
+  /** The exact model-facing text of one result. */
+  function textOf(result: ToolExecutionResult): string {
+    const block = result.content[0]
+    if (result.content.length !== 1 || block?.type !== 'text') throw new Error('expected one text block')
+    return block.text
+  }
+
+  it('summarizes each reminder by id and target without repeating the call, over byte-identical model JSON', async () => {
+    const test = await harness()
+    const empty = await execute(test, 'schedule_list', {})
+    expect(textOf(empty)).toBe('[]')
+    expect(presented(test, 'schedule_list', {}, empty)).toEqual(card('No reminders'))
+
+    const afterArgs = { prompt: 'check logs', after_seconds: 30 }
+    const after = await execute(test, 'schedule_create', afterArgs)
+    expect(textOf(after)).toBe('{"id":"schedule-1","kind":"after","prompt":"check logs","afterSeconds":30,'
+      + '"scheduledAt":"2026-08-05T12:00:30.000Z","state":"scheduled","deliveryMode":"session-local"}')
+    // The prompt is on the call's card, so the result card leaves it out.
+    expect(presented(test, 'schedule_create', afterArgs, after))
+      .toEqual(card('schedule-1 \u00b7 after 30s \u00b7 due 2026-08-05 12:00:30 UTC'))
+
+    const everyArgs = { prompt: 'check metrics', every_seconds: 3600 }
+    const every = await execute(test, 'schedule_create', everyArgs)
+    expect(textOf(every)).toBe('{"id":"schedule-2","kind":"every","prompt":"check metrics","everySeconds":3600,'
+      + '"scheduledAt":"2026-08-05T13:00:00.000Z","state":"scheduled","deliveryMode":"session-local"}')
+    expect(presented(test, 'schedule_create', everyArgs, every))
+      .toEqual(card('schedule-2 \u00b7 every 1h \u00b7 next 2026-08-05 13:00:00 UTC'))
+
+    const atArgs = { prompt: `join the planning meeting ${'and bring the notes '.repeat(4)}`, at: '2026-08-06T09:00:00.250+08:00' }
+    const at = await execute(test, 'schedule_create', atArgs)
+    expect(textOf(at)).toBe(`{"id":"schedule-3","kind":"at","prompt":${JSON.stringify(atArgs.prompt.trim())},`
+      + '"scheduledAt":"2026-08-06T01:00:00.250Z","state":"scheduled","deliveryMode":"session-local"}')
+    expect(presented(test, 'schedule_create', atArgs, at)).toEqual(card('schedule-3 \u00b7 at 2026-08-06 01:00:00.250 UTC'))
+
+    vi.setSystemTime(new Date('2026-08-05T12:00:31.000Z'))
+    const listed = await execute(test, 'schedule_list', {})
+    expect(JSON.parse(textOf(listed))).toEqual(listed.value)
+    // The list call sends nothing, so each line carries its prompt, bounded.
+    expect(presented(test, 'schedule_list', {}, listed)).toEqual(card([
+      'schedule-1 \u00b7 after 30s \u00b7 due 2026-08-05 12:00:30 UTC \u00b7 overdue \u00b7 check logs',
+      'schedule-2 \u00b7 every 1h \u00b7 next 2026-08-05 13:00:00 UTC \u00b7 check metrics',
+      'schedule-3 \u00b7 at 2026-08-06 01:00:00.250 UTC \u00b7 join the planning meeting and bring the notes and bring the\u2026',
+    ].join('\n')))
+
+    const deleted = await execute(test, 'schedule_delete', { id: 'schedule-1' })
+    expect(textOf(deleted)).toBe('{"id":"schedule-1","deleted":true}')
+    expect(presented(test, 'schedule_delete', { id: 'schedule-1' }, deleted)).toEqual(card('deleted'))
+    const missing = await execute(test, 'schedule_delete', { id: 'schedule-1' })
+    expect(textOf(missing)).toBe('{"id":"schedule-1","deleted":false,"code":"schedule_not_found"}')
+    expect(presented(test, 'schedule_delete', { id: 'schedule-1' }, missing)).toEqual(card('not found'))
+  })
+
+  it('keeps the generic rendering for stable errors, failures, and text that is not a canonical value', async () => {
+    const test = await harness(false)
+    const uncertain = await execute(test, 'schedule_create', { prompt: 'x', after_seconds: 1 })
+    expect(value(uncertain)).toMatchObject({ code: 'persistence_uncertain' })
+    expect(presented(test, 'schedule_create', { prompt: 'x', after_seconds: 1 }, uncertain)).toBeUndefined()
+    const listUncertain = await execute(test, 'schedule_list', {})
+    expect(presented(test, 'schedule_list', {}, listUncertain)).toBeUndefined()
+    const deleteUncertain = await execute(test, 'schedule_delete', { id: 'schedule-1' })
+    expect(value(deleteUncertain)).toMatchObject({ code: 'persistence_uncertain', id: 'schedule-1' })
+    expect(presented(test, 'schedule_delete', { id: 'schedule-1' }, deleteUncertain)).toBeUndefined()
+    const invalid = await execute(test, 'schedule_create', { prompt: ' ', after_seconds: 1 })
+    expect(presented(test, 'schedule_create', { prompt: ' ', after_seconds: 1 }, invalid)).toBeUndefined()
+
+    const text = (raw: string, isError = false) => ({ content: [{ type: 'text' as const, text: raw }], isError })
+    const view = '{"id":"schedule-1","kind":"after","prompt":"x","afterSeconds":1,"scheduledAt":"2026-08-05T12:00:01.000Z",'
+      + '"state":"scheduled","deliveryMode":"session-local"}'
+    expect(presented(test, 'schedule_create', { prompt: 'x', after_seconds: 1 }, text(view, true))).toBeUndefined()
+    for (const raw of ['not json', 'null', '{"id":"schedule-1","kind":"after","prompt":"x","scheduledAt":"t","state":"scheduled"}',
+      '{"id":"schedule-1","kind":"cron","prompt":"x","scheduledAt":"t","state":"scheduled"}']) {
+      expect(presented(test, 'schedule_create', { prompt: 'x', after_seconds: 1 }, text(raw))).toBeUndefined()
+      expect(presented(test, 'schedule_list', {}, text(`[${raw}]`))).toBeUndefined()
+      expect(presented(test, 'schedule_delete', { id: 'schedule-1' }, text(raw))).toBeUndefined()
+    }
+  })
+})

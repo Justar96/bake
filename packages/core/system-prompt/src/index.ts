@@ -129,24 +129,11 @@ const SECTION_ORDERS = {
   TEAM_POLICY: 600,
   PTC_ONLY: 800,
   FILE_REFERENCE: 900,
-  TOOL_BASH: 1000,
-  TOOL_PWSH: 1010,
-  TOOL_READ: 1100,
-  TOOL_WRITE: 1200,
-  TOOL_EDIT: 1300,
-  TOOL_GLOB: 1400,
-  TOOL_GREP: 1500,
-  TOOL_JOBS: 1600,
   TOOL_PTY: 1700,
-  TOOL_WEB_SEARCH: 2000,
-  TOOL_WEB_FETCH: 2100,
   TOOL_LSP: 2200,
   TOOL_SESSION_QUERY: 2300,
-  TOOL_GOAL: 2400,
   TOOL_CORDIS: 2500,
-  TOOL_WORKFLOW: 2600,
   TOOL_RALPH: 2700,
-  TOOL_SUBAGENT: 2800,
   TOOL_REPORT: 2900,
   TOOL_COMPUTER_USE: 3000,
   MCP_SERVERS: 3100,
@@ -304,7 +291,7 @@ export function renderContextSnapshot(assembly: PromptAssembly): string {
 export function joinContextSections(sections: readonly ContextSnapshotSection[]): string {
   const body = sections.map(section => section.text).join('\n\n')
   if (body.length === 0) return ''
-  return `Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\n${body}`
+  return `Runtime context (replaces any earlier snapshot):\n\n${body}`
 }
 
 /**

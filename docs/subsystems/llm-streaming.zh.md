@@ -580,6 +580,8 @@ interface LlmResolvedModelInfo extends LlmModelInfo {
   reasoning?: LlmModelReasoningInfo
   /** Declared mid-conversation system prompt handling; absent means only a leading system message is read. */
   systemPromptUpdate?: SystemPromptUpdate
+  /** Native tool changes supported by this exact route. */
+  toolUpdate?: ToolUpdate
 }
 ```
 
@@ -604,7 +606,11 @@ interface GenerateOptions {
    */
   system?: string
   /** Tool schemas (adapters map to the provider's `tools` field). */
-  tools?: ToolSchema[]
+  tools?: ToolDeclaration[]
+  /** Session-folded tool history; omission sends complete current declarations. */
+  toolHistory?: ToolHistory
+  /** Adapter-boundary projection of toolHistory, consumed only by capable routes. */
+  toolUpdates?: readonly ToolUpdateNotice[]
   temperature?: number
   maxTokens?: number
   /**
@@ -646,7 +652,7 @@ interface FinishReasonMap {
 
 `FinishReason = FinishReasonMap[keyof FinishReasonMap]`。`TokenUsage`（逐调用计量，含不相交的缓存字段）详见[下文](#tokenusage)。
 
-`GenerateOptions.tools` 携带 `ToolSchema`——工具的 JSON Schema 描述，发送给模型。它声明在 dsh-llm（而非 dsh-tools）中，正是因为它是循环每一步组装请求的一部分：
+`GenerateOptions.tools` 携带 `ToolDeclaration`：即一个 `ToolSchema`（工具的 JSON Schema 描述，发送给模型），外加可选的 `deferLoading: true`；该标记只由运行时的请求投影设置，存储的工具定义从不携带它。`ToolSchema` 声明在 dsh-llm（而非 dsh-tools）中，正是因为它是循环每一步组装请求的一部分：
 
 ```ts type-equiv
 /**
@@ -665,6 +671,8 @@ interface ToolSchema {
 ```
 
 面向模型的 `ToolSchema` 是协议类型；产出它的已注册 `ToolDefinition`（schema + `execute`）在 [tools.md](tools.zh.md) 中。
+
+循环构建的请求还携带 `toolHistory`，即 `session.toolHistory()` 从已记录的 `request/header` 与 [`request/tool-update`](session.zh.md#the-tool-update-event-requesttool-update) 事件归并出的声明，以及有序的新增与移除。派发时，运行时按确切路由的 `toolUpdate` 模式投影该历史，并用投影结果替换请求的 `tools` 与 `toolUpdates`，因此调用方提供的 `toolUpdates` 永远不会到达适配器；工具投影不会改动 `messages`。`addition-only` 把序列中新增的工具作为带 `deferLoading` 的声明发送，并在各自锚定的用户或工具结果消息之后附上指明每项新增的通知。`in-history` 还会保留已移除的声明并发送移除通知。当路由未声明 `toolUpdate` 模式、请求没有 `toolHistory`、某个锚点不在所选消息中，或历史未终止于当前活跃定义时，适配器会收到完整的活跃列表，既不带通知，也不带 `deferLoading` 标记。
 
 界面正在起草的提供方既没有路由也没有 catalog，因此询问被单独描述：请求携带用户正在编辑的草稿，回复是界面可以采纳的候选，而不是它必须服务的 catalog。
 
@@ -757,7 +765,7 @@ interface LlmCallConfigAdapterDefaults {
 
 `ctx.deepseekLlmApiExtensions` 是用于向 `deepseek-official` 请求添加顶层字段的提供方特定注册表。贡献插件通过 `register(field, provider)` 认领一个字段；适配器在序列化基础正文后调用 `prepare(request)`，并在 HTTP 前合并返回字段。已准备的 `accept()` 事务会在 2xx 后运行，因此贡献方可以提交交付状态，而不会把传输失败或提供方拒绝当作接受。准备、冲突与接受失败会使用 `REQUEST_EXTENSION`，并使模型请求失败。合并后的正文无法序列化时，请求不带扩展字段发出，跳过接受，并由提供方插件记录被省略的字段名。
 
-[协议参考](../deepseek-llm-api-wire-extensions.zh.md)定义确切的请求标头、扩展事务、字段版本和接收方义务。随附组合会将 [`dsh_session_log`](../../packages/session/session-log-deepseek/README.zh.md) 注册为无损增量权威日志后缀，并将 [`dsh_plugin_packages`](../../packages/llm/plugin-package-inventory-deepseek/README.zh.md) 注册为完整存活 Loader 包集合。这些字段仍位于模型消息之外，也不会进入 pi-ai 适配器路径。
+[协议参考](../deepseek-llm-api-wire-extensions.zh.md)定义确切的请求标头、扩展事务、字段版本和接收方义务。随附组合会将 [`dsh_plugin_packages`](../../packages/llm/plugin-package-inventory-deepseek/README.zh.md) 注册为完整存活 Loader 包集合。它以 `enabled: false` 挂载无损增量权威日志后缀 [`dsh_session_log`](../../packages/session/session-log-deepseek/README.zh.md)，因此只有在组合选择启用后才会发送该字段。这些字段仍位于模型消息之外，也不会进入 pi-ai 适配器路径。
 
 ## 服务与提供方约定
 
@@ -776,6 +784,8 @@ interface PreparedLlmCall {
   readonly inputModalities?: readonly ModelModality[]
   /** Exact model system prompt update mode captured with the adapter dispatch generation. */
   readonly systemPromptUpdate?: SystemPromptUpdate
+  /** Exact model tool update mode captured with the adapter dispatch generation. */
+  readonly toolUpdate?: ToolUpdate
   /** Config fields materialized by the captured adapter rather than proposed by the caller. */
   readonly adapterDefaults: LlmCallConfigAdapterDefaults
   /**

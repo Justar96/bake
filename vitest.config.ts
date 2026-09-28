@@ -6,10 +6,13 @@ import { standardDecoratorPlugin, vitestExecArgv } from './vitest.shared.ts'
 export default defineConfig({
   plugins: [standardDecoratorPlugin(), tsconfigPaths({ projects: ['./tsconfig.base.json'] })],
   test: {
+    // Script specs here load Cordis, the Node resolver, or built output; other script tests are `.test.ts` under `bun test`.
     include: ['packages/*/*/tests/**/*.spec.ts', 'apps/cli/tests/**/*.spec.ts', 'scripts/**/*.spec.ts'],
     exclude: ['**/node_modules/**', '**/lib/**', '**/*.client.spec.ts'],
     pool: 'forks',
     execArgv: vitestExecArgv,
+    // Every suite starts without the machine's proxy variables.
+    setupFiles: ['./scripts/test-proxy-environment.ts'],
     testTimeout: 30_000,
     hookTimeout: 30_000,
   },

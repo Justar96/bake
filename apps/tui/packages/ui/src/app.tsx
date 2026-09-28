@@ -1,27 +1,30 @@
 /** Terminal view over committed history, live presentation, and harness-owned state. */
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Box, Text, useInput, useIsScreenReaderEnabled, usePaste, useWindowSize } from 'ink'
+import { Box, Text, useApp, useInput, useIsScreenReaderEnabled, usePaste, useWindowSize } from 'ink'
 import type { AgentStatus } from '@deepseek-ai/dsh-agent'
 import { formatAttachment, type AttachmentSummary, type Row } from './rows.ts'
 import { transcriptRows, type Transcript } from './transcript.ts'
 import type { TuiCopy } from './copy.ts'
-import { cacheHit, contextPercent, formatContext, formatTotals, type ContextUsage, type TokenTotals } from './format.ts'
-import { useComposer, type Submit } from './composer.ts'
+import type { ContextUsage, TokenTotals } from './format.ts'
+import { isNewline, useComposer, type Submit } from './composer.ts'
+import { draftRows } from './editor.ts'
 import { argumentQuery, commandUsage, completionMenu, requiresInput, type CompletionCatalog, type CompletionChoice, type FileCatalog } from './completion.ts'
 import { inputHistory } from './history.ts'
 import { InteractionView, type Interaction, type InteractionAnswer } from './interaction.tsx'
 import { budgetFor, selectionWindow, type Budget, type FrameStyle, type WindowSize } from './layout.ts'
-import { compactModel, compactPath, present, type Highlight, type ResultBound } from './present.ts'
-import { cacheTone, contextTone, PALETTE, type PaletteColor } from './palette.ts'
+import { present, type Highlight, type ResultBound } from './present.ts'
+import { PALETTE, type PaletteColor } from './palette.ts'
 import { SubagentRow, subagentLine, subagentSheet, subagentTab, type SubagentEntry } from './subagents.tsx'
 import { goalSheet, goalState, type GoalEntry } from './goal.ts'
+import type { GitState } from './git.ts'
 import { Sheet, sheetPage, sheetRows, type SheetLine, type SheetTab } from './sheet.tsx'
 import { Tasks, taskSheet, taskTab, tasksOpen, type TaskEntry } from './tasks.tsx'
 import { Beat } from './beat.tsx'
+import { statusFields } from './status-line.ts'
 import { Baking } from './baking.tsx'
 import { Scrollback, type Opening } from './scrollback.tsx'
-import { Fullscreen, type TranscriptScroll } from './fullscreen.tsx'
-import { Chrome, Completion, Line, LiveRegion, Notice, Panel, Thinking, THINKING_GAP, wrappedRows, type ActivityState } from './line.tsx'
+import { Fullscreen, WHEEL_ROWS, type TranscriptScroll } from './fullscreen.tsx'
+import { Chrome, Completion, composerHint, draftWidth, Line, LiveRegion, Notice, Panel, Thinking, THINKING_GAP, wrappedRows, type ActivityState } from './line.tsx'
 import { activityWord, phaseLabel, phaseOf, lastTurn, THINKING_ROWS, thinkingRows, turnSummary, type Clock } from './activity.ts'
 
 /** Display-only projection of one pending inbox message. */
@@ -49,8 +52,17 @@ export interface AppProps {
   readonly status: AgentStatus
   readonly stopping: boolean
   readonly command: string | undefined
-  /** Manual compaction progress from the matching command and session lifecycle events. */
+  /**
+   * Manual compaction progress from the matching command and session lifecycle
+   * events. The header shows it; Enter queues a prompt behind it.
+   */
   readonly compactPhase?: 'preparing' | 'summarizing' | 'saving'
+  /**
+   * Whether the running turn is compacting its context automatically, from
+   * the live `compaction/start` to its end. The header shows it as it shows
+   * `/compact`; Enter still steers the turn.
+   */
+  readonly autoCompacting?: boolean
   readonly notice: string | undefined
   /**
    * Whether an interrupt is armed, so a second one quits.
@@ -108,7 +120,16 @@ export interface AppProps {
   /** Selected reasoning effort, or the model's advertised default when known. */
   readonly thinkingLevel?: string
   readonly model: string
+  /**
+   * The working directory as the status line reads it, already shortened
+   * against home by the application: this layer reads no environment.
+   */
   readonly cwd: string
+  /**
+   * The workspace's branch and uncommitted changes, read by the application.
+   * Absent outside a git repository or before the first read: no field.
+   */
+  readonly git?: GitState | undefined
   readonly sessionId: string
   /**
    * Running Bake version. When supplied, a session that mounts with no history
@@ -206,29 +227,53 @@ export function RowView({ row, budget, result }: {
  * on screen. A terminal that grows taller adds rows under the frame, unless
  * it pulls history down from scrollback, and leaves the composer off the
  * bottom row. Ink clears the terminal and replays history only for a frame
- * that overflows the viewport. The caller overflows for the one frame this
- * returns true. The next frame no longer overflows, and it is cleared and
- * replayed too.
+ * that overflows the viewport. The caller overflows while this returns true.
+ * The next frame no longer overflows, and it is cleared and replayed too.
+ *
+ * Ink throttles its writes, so a commit that is replaced within one throttle
+ * window is never written. The overflow is held until Ink has flushed it:
+ * dropped in the same flush, it would coalesce away and nothing would be
+ * cleared.
  *
  * Child inspection changes the mounted transcript and frame together. Replay
  * also reanchors that transition at the terminal bottom.
+ *
+ * Closing a sheet does too. Opening one grows the frame and scrolls the
+ * history above it into the terminal's scrollback, which cannot be drawn back
+ * down; held, the frame would leave the sheet's rows as a blank gap over the
+ * composer until enough new history printed to fill it. Replay brings the
+ * history back down against the controls instead.
  * @param size - current terminal size.
  * @param view - displayed parent or child identity.
  * @param openingChild - whether the first frame must reanchor after a parent.
+ * @param sheetOpen - whether a sheet is open over the controls.
  * @param enabled - whether the renderer uses inline scrollback.
- * @returns true for one render after a resize or inspection transition.
+ * @returns true from a resize, inspection, or sheet-closing transition until
+ *   Ink has written the overflowing frame.
  */
-function useRepaint(size: WindowSize, view: string, openingChild: boolean, enabled: boolean): boolean {
+function useRepaint(size: WindowSize, view: string, openingChild: boolean, sheetOpen: boolean, enabled: boolean): boolean {
+  const { waitUntilRenderFlush } = useApp()
   const painted = useRef(size)
   const paintedView = useRef<string | undefined>(openingChild ? undefined : view)
-  const [, repaint] = useState(0)
-  const repainting = enabled && (view !== paintedView.current || size.columns < painted.current.columns || size.rows > painted.current.rows)
+  const paintedSheet = useRef(sheetOpen)
+  const [overflowing, setOverflowing] = useState(false)
+  const transition = enabled && (view !== paintedView.current || size.columns < painted.current.columns || size.rows > painted.current.rows
+    || (paintedSheet.current && !sheetOpen))
   useLayoutEffect(() => {
     painted.current = size
     paintedView.current = view
-    if (repainting) repaint(count => count + 1)
+    paintedSheet.current = sheetOpen
+    if (transition) setOverflowing(true)
   })
-  return repainting
+  useEffect(() => {
+    if (!overflowing) return
+    let active = true
+    // A failed flush is the renderer's to report; the frame still stops overflowing.
+    const settle = (): void => { if (active) setOverflowing(false) }
+    void waitUntilRenderFlush().then(settle, settle)
+    return () => { active = false }
+  }, [overflowing, waitUntilRenderFlush])
+  return transition || (enabled && overflowing)
 }
 
 /**
@@ -248,6 +293,13 @@ type SheetKind = 'tasks' | 'agents' | 'goal'
 
 /** The order the cycle key visits the sheets in, skipping any with nothing to show. */
 const SHEETS: readonly SheetKind[] = ['tasks', 'agents', 'goal']
+
+/** An SGR mouse report: button code, column, row, then `M` for a press or `m` for a release. */
+const MOUSE_REPORT = /^\[<(\d+);(\d+);(\d+)([Mm])$/
+/** The Shift, Meta, and Ctrl bits a report adds to its button code. */
+const MOUSE_MODIFIERS = 4 | 8 | 16
+const WHEEL_UP = 64
+const WHEEL_DOWN = 65
 
 function SessionView(props: AppProps): React.ReactElement {
   const scroll = useRef<TranscriptScroll>(null)
@@ -338,9 +390,37 @@ function SessionView(props: AppProps): React.ReactElement {
   useEffect(() => { props.onArgumentQuery?.(argument === undefined ? undefined : { name: argument.name, partial: argument.partial }) },
     [props.onArgumentQuery, argument?.name, argument?.partial])
   const selected = matches === undefined ? 0 : selectedIndex(matches, composer.text, composer.cursor)
+  // The right slot's words, which also set how wide the draft wraps.
+  const hints = { send: copy.send, interrupt: copy.interrupt, select: copy.tabCompletes, answer: copy.send }
+  // The width the composer wraps a draft at, so Up and Down move between the
+  // rows it draws. Arrows reach it only with the menu closed.
+  const rowWidth = (draft: string): number => draftWidth(size.columns, composerHint(size.columns, {
+    running: props.inspectionParent === undefined && props.status === 'running', asking: false, listing: false, drafting: draft !== '',
+  }, hints))
+  const entryRows = (entry: string): number => draftRows(entry, rowWidth(entry))
+  // A wheel scrolls what the arrows would: an open sheet, else the transcript,
+  // which it also scrolls under an interaction, since the wheel takes none of
+  // an interaction's keys. A click only reaches the jump-to-latest row.
+  const pointer = (code: number, row: number, pressed: boolean): void => {
+    const button = code & ~MOUSE_MODIFIERS
+    const sheetOpen = sheetRef.current !== undefined
+    if (button === WHEEL_UP || button === WHEEL_DOWN) {
+      const rows = (button === WHEEL_UP ? -1 : 1) * WHEEL_ROWS
+      if (sheetOpen) {
+        if (sheetRef.current !== 'agents') setSheetScroll(current => Math.max(0, Math.min(sheetMaxScroll, Math.min(current, sheetMaxScroll) + rows)))
+      } else if ((!props.inputBlocked || props.inspectionParent !== undefined) && !composer.blocked) scroll.current?.scroll(rows)
+    } else if (button === 0 && pressed && !sheetOpen && interaction === undefined) scroll.current?.press(row)
+  }
   usePaste(composer.paste, { isActive: sheet === undefined && interaction === undefined && props.inputBlocked !== true && props.inspection === undefined && !composer.submitting })
   useInput((text, key) => {
     if (props.inspection !== undefined) return
+    // Fullscreen turns on SGR mouse reports, which Ink passes on as unknown
+    // text without their Escape. None may reach the composer.
+    const mouse = MOUSE_REPORT.exec(text)
+    if (mouse !== null) {
+      if (fullscreen) pointer(Number(mouse[1]), Number(mouse[3]) - 1, mouse[4] === 'M')
+      return
+    }
     if (key.ctrl && text === 'c') { props.onInterrupt(); return }
     if (sheetRef.current !== undefined) {
       if (key.escape) { openSheet(undefined); return }
@@ -378,6 +458,7 @@ function SessionView(props: AppProps): React.ReactElement {
     if (props.quitting) props.onQuitDismiss?.()
     const inputMenu = matchesFor(composer.value, composer.position)
     const choices = inputMenu?.entries
+    const newline = isNewline(text, key)
     if (key.escape) {
       if (focusRef.current !== undefined) { focusOn(undefined); return }
       if (choices !== undefined) { updateMenu('', true); return }
@@ -388,7 +469,9 @@ function SessionView(props: AppProps): React.ReactElement {
       scroll.current?.move(key.pageUp ? 'up' : key.pageDown ? 'down' : key.home ? 'start' : 'end')
       return
     }
-    if (interaction !== undefined || props.inputBlocked === true || props.inspection !== undefined || composer.blocked || key.meta) return
+    // Alt-Enter is the one Meta key the composer takes: a line break.
+    if (interaction !== undefined || props.inputBlocked === true || props.inspection !== undefined || composer.blocked
+      || (key.meta && !newline)) return
     if (key.ctrl && text === 'o' && props.goal !== undefined) { toggleSheet('goal'); return }
     if (key.ctrl && text === 't' && hasTasks) { toggleSheet('tasks'); return }
     if (key.ctrl && text === 'g' && hasSubagents) { toggleSheet('agents'); return }
@@ -397,14 +480,14 @@ function SessionView(props: AppProps): React.ReactElement {
       if (focused === 'subagents') {
         if (key.upArrow || key.leftArrow) { focusOn(undefined); return }
         if (key.downArrow || key.rightArrow) return
-        if (key.return) { showSheet('agents'); return }
+        if (key.return && !newline) { showSheet('agents'); return }
       } else {
         // Above the composer the task row sits over the goal's header.
         if (key.upArrow) { if (focused === 'goal' && tasksShown) focusOn('tasks'); return }
         if (key.downArrow) { focusOn(focused === 'tasks' && props.goal !== undefined ? 'goal' : undefined); return }
         if (key.leftArrow) { focusOn(undefined); return }
         if (key.rightArrow) return
-        if (key.return) { showSheet(focused); return }
+        if (key.return && !newline) { showSheet(focused); return }
       }
       // Any other key belongs to the composer again.
       focusOn(undefined)
@@ -415,8 +498,11 @@ function SessionView(props: AppProps): React.ReactElement {
     // Before the menu and the composer, which both read a plain Tab.
     if (key.tab && key.shift) { props.onCycleThinking?.(); return }
     if (key.ctrl && (text === 'p' || text === 'n')) {
-      composer.recall(text === 'p' ? 'older' : 'newer'); updateMenu('', true); return
+      composer.recall(text === 'p' ? 'older' : 'newer', entryRows); updateMenu('', true); return
     }
+    // Before the Ctrl guard, which a CSI-u Ctrl-J would otherwise stop at. A
+    // read of line feeds is Ctrl-J pressed, once or more.
+    if (newline) { composer.paste(text.startsWith('\n') ? text : '\n'); return }
     if (composer.editKey(text, key)) return
     if (key.ctrl) return
     if (choices !== undefined && (key.upArrow || key.downArrow || key.tab)) {
@@ -427,17 +513,19 @@ function SessionView(props: AppProps): React.ReactElement {
       return
     }
     if (key.upArrow || key.downArrow) {
-      // Up walks back through history first; only past its oldest entry does
-      // it reach the goal on the header, or the task row when there is no
-      // goal. Leaving history restores the unsent draft rather than a stale
-      // entry one Enter would rerun.
+      // Inside a draft of several rows the caret moves between the rows it
+      // shows. From the first row Up walks back through history, and from the
+      // last row Down walks forward; only past history's oldest entry does Up
+      // reach the goal on the header, or the task row when there is no goal.
+      // Leaving history restores the unsent draft rather than a stale entry
+      // one Enter would rerun.
+      if (composer.vertical(key.upArrow ? 'up' : 'down', rowWidth(composer.value))) return
       const above = props.goal !== undefined ? 'goal' : tasksShown ? 'tasks' : undefined
-      if (!composer.recall(key.upArrow ? 'older' : 'newer') && key.upArrow && above !== undefined) {
+      if (!composer.recall(key.upArrow ? 'older' : 'newer', entryRows) && key.upArrow && above !== undefined) {
         composer.leave(); focusOn(above)
       }
       updateMenu('', true); return
     }
-    if (key.shift && key.return) { composer.paste('\n'); return }
     if (key.return && inputMenu?.kind === 'argument') {
       const choice = choices?.[selectedIndex(choices, composer.value, composer.position)]
       if (choice === undefined) { composer.type('\n'); return }
@@ -480,13 +568,18 @@ function SessionView(props: AppProps): React.ReactElement {
   })
   const size = useWindowSize()
   const budget = useMemo(() => budgetFor(size, { fullscreen }), [size.columns, size.rows, fullscreen])
-  const repainting = useRepaint(size, props.inspection?.sessionId ?? props.sessionId, props.inspectionParent !== undefined, !fullscreen)
+  const repainting = useRepaint(size, props.inspection?.sessionId ?? props.sessionId, props.inspectionParent !== undefined,
+    sheet !== undefined, !fullscreen)
   const screenReader = useIsScreenReaderEnabled()
   const clock = screenReader ? undefined : props.clock
-  const compactStarted = useRef<number | undefined>(undefined)
-  if (props.compactPhase === undefined) compactStarted.current = undefined
-  else compactStarted.current ??= clock?.now() ?? 0
   const running = props.status === 'running'
+  // `/compact`, or the running turn compacting its own context. A turn being
+  // stopped says so instead.
+  const compacting = props.compactPhase
+    ?? (running && !props.stopping && props.autoCompacting === true ? 'summarizing' : undefined)
+  const compactStarted = useRef<number | undefined>(undefined)
+  if (compacting === undefined) compactStarted.current = undefined
+  else compactStarted.current ??= clock?.now() ?? 0
   const animate = props.motion === false ? undefined : clock
   // Captured once when the turn starts and held until it ends, so the header
   // word and elapsed clock do not change on every commit inside the turn.
@@ -625,13 +718,12 @@ function SessionView(props: AppProps): React.ReactElement {
   // Everything between the conversation and the input is one stack, opened by
   // the chrome's blank row. A notice or a list belongs to the input, not to
   // one more line of the answer above it.
-  const hit = props.usage === undefined ? undefined : cacheHit(props.usage)
-  // Header text, in priority order. Compaction while it runs, otherwise the
-  // current turn, otherwise how the last turn ended.
-  const activity: ActivityState | undefined = props.compactPhase !== undefined
+  // Header text, in priority order. Compaction while it runs, in its own blue
+  // and dough, otherwise the current turn, otherwise how the last turn ended.
+  const activity: ActivityState | undefined = compacting !== undefined
     ? {
-      kind: 'running', word: copy.compacting, startedAt: compactStarted.current ?? 0, color: PALETTE.running,
-      phase: { preparing: copy.compactPreparing, summarizing: copy.compactSummarizing, saving: copy.compactSaving }[props.compactPhase],
+      kind: 'running', word: copy.compacting, startedAt: compactStarted.current ?? 0, color: PALETTE.compacting, spinner: 'fold',
+      phase: { preparing: copy.compactPreparing, summarizing: copy.compactSummarizing, saving: copy.compactSaving }[compacting],
     }
     : turn.current !== undefined
       ? {
@@ -640,15 +732,10 @@ function SessionView(props: AppProps): React.ReactElement {
         color: props.stopping ? PALETTE.failed : PALETTE.running,
       }
       : summary === undefined ? undefined : { kind: 'ended', summary }
-  // With two or more of the task row, the goal, and the subagents on screen,
-  // the rows around the composer carry what the session is doing, and
-  // cost readings and repeated shortcuts make them hard to scan. Each view's
-  // sheet still holds what is left out here; any open sheet reaches the rest with Tab.
-  const dense = [tasksShown, props.goal !== undefined, hasSubagents].filter(Boolean).length >= 2
-  const goalFull = goalState(props.goal, copy, { objective: props.goalObjective === true && !dense })
-  // Dense, the goal keeps its compact count but gives its details to the sheet.
-  const goalStanding = goalFull === undefined || !dense ? goalFull : { ...goalFull, details: '' }
-  const occupancy = props.context === undefined ? undefined : contextPercent(props.context)
+  // One grammar in every mode: the goal keeps its count and names its key
+  // whatever else stands around the composer, and gives parts up only as
+  // the header's width runs out.
+  const goalStanding = goalState(props.goal, copy, { objective: props.goalObjective === true })
   const sheetBlock = sheetView === undefined ? null : <Sheet {...sheetView} tabs={tabs} columns={size.columns}
     limit={sheetViewLimit} offset={sheetScroll} frame={props.frame} />
   const panels = sheetView !== undefined && !sheetStandalone ? sheetBlock : <>
@@ -696,7 +783,7 @@ function SessionView(props: AppProps): React.ReactElement {
   if (props.inspection !== undefined) {
     const child = props.inspection
     const { context: _context, usage: _usage, plan: _plan, goal: _goal, permission: _permission, thinkingLevel: _thinkingLevel,
-      compactPhase: _compactPhase, ...childProps } = props
+      compactPhase: _compactPhase, autoCompacting: _autoCompacting, ...childProps } = props
     return <SessionView {...childProps} {...child} key={child.sessionId} inspection={undefined}
       inspectionParent={props.sessionId} inputBlocked={true} stopping={false}
       // The parent's children stay listed under the input, inert here, so the
@@ -715,57 +802,41 @@ function SessionView(props: AppProps): React.ReactElement {
             <Chrome
               // No state word. The header says what the session is doing.
               // The composer's placeholder and hint say whether it is idle.
-              left={[{ text: `${copy.model}: ${compactModel(props.model)}` },
-                ...props.plan === undefined || (!props.plan.active && !props.plan.pending) ? []
-                  : [props.plan.pending ? (props.plan.active ? copy.planExitPending : copy.planEntryPending) : copy.planActive]]}
-              {...props.thinkingLevel === undefined ? {} : { badge: {
-                label: copy.thinking, value: props.thinkingLevel, color: PALETTE.asking,
-              } }}
-              right={[
-                // In priority order, because narrowing drops them from the end.
-                // Occupancy is what a user compacts on. The totals are what the
-                // session cost. The path is last because it is the unbounded
-                // field. The status line shortens it from the start and keeps
-                // the tail, which names the workspace.
-                // Dense, the meter keeps only the percentage a user compacts
-                // on, and the session's cost readings give way.
-                ...props.context === undefined || occupancy === undefined ? [] : [{
-                  text: dense ? `${copy.contextShort} ~${occupancy}%` : `${copy.context}: ${formatContext(props.context)}`,
-                  short: `${copy.contextShort} ~${occupancy}%`, color: contextTone(occupancy) }],
-                ...props.usage === undefined || dense ? [] : formatTotals(props.usage, { input: copy.tokensIn, output: copy.tokensOut }),
-                ...hit === undefined || dense ? [] : [{ label: copy.cacheHit, value: `${hit}%`, color: cacheTone(hit) }],
-                // Last of the bounded fields: it drops before any reading of the session.
-                ...props.update === undefined ? [] : [{
-                  label: copy.updateLabel, color: PALETTE.waiting,
-                  value: `v${props.update.version} · ${props.update.installed ? copy.updateRestart : '/update'}`,
-                }],
-                compactPath(props.cwd, process.env['HOME']),
-              ]}
+              // One layout in every mode; the fields give way in their own
+              // order as the row narrows (`status-line.ts`).
+              status={statusFields({
+                model: props.model, plan: props.plan, thinkingLevel: props.thinkingLevel, context: props.context,
+                git: props.git, usage: props.usage, update: props.update, cwd: props.cwd,
+                glyphs: props.frame === 'classic' ? 'ascii' : 'unicode',
+              }, copy)}
               columns={size.columns}
               state={{ running: props.inspectionParent === undefined && props.status === 'running', asking: false, listing: matches !== undefined }}
               before={composer.before}
               after={composer.after}
               // Idle invites a prompt. While a turn runs, Enter steers instead of
               // sending, and the placeholder is the only text that says so. While
-              // a session switch holds the input, it says why keys do nothing.
+              // `/compact` runs, Enter queues a prompt to run once it is done.
+              // While a session switch holds the input, it says why keys do nothing.
               placeholder={props.inspectionParent !== undefined ? copy.subagentBack : props.inputBlocked === true ? copy.sessionsBusy : props.compactPhase !== undefined ? copy.compactWait
-                : props.status === 'running' ? copy.steering : copy.prompt}
+                : props.status === 'running' ? copy.steering : [copy.prompt, copy.promptCommands, copy.promptFiles]}
               // The panel carries no key help of its own. The slot names the one key
               // that is not discoverable by pressing it.
-              hints={{ send: copy.send, interrupt: copy.interrupt, select: copy.tabCompletes, answer: copy.send }}
+              hints={hints}
+              overflow={{ above: copy.composerAbove, below: copy.composerBelow }}
               maxRows={budget.composer}
               layout={budget.chrome}
               frame={props.frame}
               activity={activity}
               standing={goalStanding === undefined ? undefined : focus === 'goal'
                 ? { ...goalStanding, details: [copy.goalOpen, goalStanding.details].filter(part => part !== '').join(' · ') }
-                : dense ? goalStanding : { ...goalStanding, key: copy.goalKey }}
+                : { ...goalStanding, key: copy.goalKey }}
               standingFocused={focus === 'goal'}
               clock={clock}
               motion={animate !== undefined}
               compact={screenReader}
               {...subagentLimit === 0 ? {} : { footer: (columns: number) =>
-                <SubagentRow entries={props.subagents ?? []} copy={copy} columns={columns} focused={focus === 'subagents'} /> }}
+                <SubagentRow entries={props.subagents ?? []} copy={copy} columns={columns} focused={focus === 'subagents'}
+                  hint={copy.subagentsKey} /> }}
             >
               {panels}
             </Chrome>

@@ -18,11 +18,12 @@ import type { SessionEvent } from '@deepseek-ai/dsh-session'
 // `SessionEventMap`, and those arms are invisible here without them.
 import type {} from '@deepseek-ai/dsh-commands'
 import type {} from '@deepseek-ai/dsh-compaction'
+import stringWidth from 'string-width'
 import { ToolCards, type ToolLookup } from './cards.ts'
 import type { TuiCopy } from './copy.ts'
 import { PENDING_ARGUMENTS } from './present.ts'
-import { formatTokens } from './format.ts'
 import { attachmentSummaries, type Row, type ToolCallRow } from './rows.ts'
+import { clipCells, toolText } from './tool-output.ts'
 
 /** Rows for one event; empty when the event has no terminal presentation. */
 export type Projection = readonly Row[]
@@ -68,41 +69,129 @@ export function outputRate(data: AssistantMessageData): { readonly tokens: numbe
   return { tokens, ms: finish - first }
 }
 
-/**
- * Format an answer's rate for the dim footer. `856 tokens · 42.3 tok/s`.
- * @param rate - output tokens and the milliseconds they took.
- * @param copy - locale-owned unit labels.
- * @returns the footer text.
- */
-export function formatRate(rate: { readonly tokens: number, readonly ms: number }, copy: TuiCopy): string {
-  const perSecond = rate.tokens / (rate.ms / 1000)
-  return `${formatTokens(rate.tokens)} ${copy.rateTokens} \u00b7 ${perSecond < 100 ? perSecond.toFixed(1) : Math.round(perSecond)} ${copy.rateUnit}`
-}
-
 /** Argument fields that name what a call acts on, in the order one is chosen as its headline. */
 const PRIMARY_ARGUMENTS = ['command', 'cmd', 'file_path', 'path', 'pattern', 'url', 'query'] as const
+
+/**
+ * Cells a headline read from raw arguments may take, beside the tool's name.
+ *
+ * About one row of a wide terminal and two of a narrow one. Arguments longer
+ * than that are a body, not a name: the head is the line a reader scans the
+ * transcript by, and a tool that wants its input read declares a card.
+ */
+export const HEADLINE_CELLS = 96
+
+/**
+ * Cells one field may take in a `key: value` headline, so a long first field
+ * leaves the next ones room to be named.
+ */
+const FIELD_CELLS = 40
 
 /**
  * A call's headline from its raw arguments, for a tool that declared no card.
  *
  * The field that names what the call acts on, when it has one. Otherwise its
- * fields, as `key: value`. Text that is not a JSON object is the model's
- * own malformed output, and it stays exactly as sent.
+ * fields, as `key: value`, each value on one line: text with its whitespace
+ * folded, a short list of plain values as JSON, and any other list or record
+ * by what it holds first, `questions: [scope, +1]`, never as a JSON dump.
+ * Text that is not a JSON object is the model's own malformed output, and it
+ * stays as sent. Whichever it is, its first line is the headline, cut at
+ * {@link HEADLINE_CELLS} with an ellipsis; any further lines of a primary
+ * field or of malformed text stay under the head, bounded as output is.
+ * Escape sequences are stripped and control characters shown, as in output.
  *
  * @param args - the raw arguments string from `tool/call`.
- * @returns one readable line of the arguments.
+ * @returns the headline, bounded in cells on its first line.
  */
 export function argumentsTitle(args: string): string {
   let value: unknown
-  try { value = JSON.parse(args) } catch { return args }
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return args
+  try { value = JSON.parse(args) } catch { return headline(args) }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return headline(args)
   const fields = value as Record<string, unknown>
   for (const key of PRIMARY_ARGUMENTS) {
     const primary = fields[key]
-    if (typeof primary === 'string' && primary.trim() !== '') return primary
+    if (typeof primary === 'string' && primary.trim() !== '') return headline(primary)
   }
-  return Object.entries(fields)
-    .map(([key, field]) => `${key}: ${typeof field === 'string' ? field : JSON.stringify(field)}`).join(', ')
+  let title = ''
+  for (const [key, field] of Object.entries(fields)) {
+    // Past the bound, the remaining fields could only be cut away.
+    if (stringWidth(title) > HEADLINE_CELLS) break
+    title += `${title === '' ? '' : ', '}${oneLine(key)}: ${summary(field, FIELD_CELLS)}`
+  }
+  return clipCells(title, HEADLINE_CELLS)
+}
+
+/**
+ * Text as a headline: its first line bounded, any further lines kept for the
+ * rows under the head.
+ * @param text - a primary field or unparsed arguments.
+ * @returns the text with a first line of at most {@link HEADLINE_CELLS} cells.
+ */
+function headline(text: string): string {
+  const shown = toolText(text)
+  const end = shown.indexOf('\n')
+  return end === -1 ? clipCells(shown, HEADLINE_CELLS) : `${clipCells(shown.slice(0, end), HEADLINE_CELLS)}${shown.slice(end)}`
+}
+
+/**
+ * Text on one line: escape sequences stripped, control characters shown, and
+ * each run of whitespace, line breaks included, folded to one space.
+ */
+const oneLine = (text: string): string => toolText(text).replace(/\s+/g, ' ').trim()
+
+/** Whether a value has no fields of its own. */
+const plain = (value: unknown): boolean => value === null || typeof value !== 'object'
+
+/**
+ * One argument value, in at most `cells` cells.
+ *
+ * Text is itself on one line, an empty string `""`. A list of plain values
+ * that fits is its JSON, `[1,2]`. Any other list is its first item and a
+ * count of the rest, `[scope, +1]`, an item that is a record standing for the
+ * first text it holds. A record is its first field, `{name: build, …}`, or all
+ * of them when they are plain and fit.
+ *
+ * @param value - a parsed JSON value.
+ * @param cells - the widest the summary may be.
+ * @returns the summary, never wider than `cells`.
+ */
+function summary(value: unknown, cells: number): string {
+  if (cells < 4) return '\u2026'
+  if (typeof value === 'string') return value.trim() === '' ? '""' : clipCells(oneLine(value), cells)
+  if (plain(value)) return String(value)
+  if (Array.isArray(value)) {
+    if (value.length === 0) return '[]'
+    // Each item takes a cell and a comma at least, so a longer list cannot fit.
+    if (value.length * 2 + 1 <= cells && value.every(plain)) {
+      const json = oneLine(JSON.stringify(value))
+      if (stringWidth(json) <= cells) return json
+    }
+    const rest = value.length === 1 ? '' : `, +${value.length - 1}`
+    return `[${summary(firstText(value[0]), cells - rest.length - 2)}${rest}]`
+  }
+  const entries = Object.entries(value as Record<string, unknown>)
+  if (entries.length === 0) return '{}'
+  if (entries.every(([, field]) => plain(field))) {
+    const all = `{${entries.map(([key, field]) => `${oneLine(key)}: ${typeof field === 'string' ? oneLine(field) : String(field)}`)
+      .join(', ')}}`
+    if (stringWidth(all) <= cells) return all
+  }
+  const [key, field] = entries[0]!
+  const more = entries.length === 1 ? '' : ', \u2026'
+  const name = `${clipCells(oneLine(key), Math.floor(cells / 2))}: `
+  return `{${name}${summary(field, cells - stringWidth(name) - more.length - 2)}${more}}`
+}
+
+/**
+ * What stands for a list's first item: a record by the first text it holds,
+ * since that is usually its name, id, or path; anything else as itself.
+ * @param item - the list's first item.
+ * @returns the value to summarize in the item's place.
+ */
+function firstText(item: unknown): unknown {
+  if (plain(item) || Array.isArray(item)) return item
+  const text = Object.values(item as Record<string, unknown>).find(field => typeof field === 'string' && field.trim() !== '')
+  return text ?? item
 }
 
 /**
@@ -169,9 +258,10 @@ export function project(event: SessionEvent, projector: Projector): Projection {
         if (block.type === 'reasoning' && block.text !== '') rows.push({ kind: 'reasoning', text: block.text })
         else if (block.type === 'text' && block.text !== '') rows.push({ kind: 'assistant', text: block.text })
       }
-      // The final answer's speed, under the answer it measures.
+      // The final answer's speed. The transcript draws nothing for it; the
+      // ended turn's summary reads it from the turn's rows.
       const rate = rows.some(row => row.kind === 'assistant') ? outputRate(event.data) : undefined
-      if (rate !== undefined) rows.push({ kind: 'rate', text: formatRate(rate, projector.copy) })
+      if (rate !== undefined) rows.push({ kind: 'rate', tokens: rate.tokens, ms: rate.ms })
       return rows
     }
 
@@ -213,8 +303,10 @@ export function project(event: SessionEvent, projector: Projector): Projection {
         callId,
         ok: !isError,
         // A card reformats the result for a reader; showing the model-facing
-        // text under it would print the same outcome twice.
-        text: card === undefined ? text : '',
+        // text under it would print the same outcome twice. A card that
+        // reformats nothing, such as a generic result with no `content`,
+        // keeps the text, which the preview cuts as it cuts any raw result.
+        text: card === undefined || card.raw === true ? text : '',
         // The title stays out of `detail` so a bound that reports the body as a
         // count keeps it. `Edit packages/ui/src/app.tsx` is the part of an
         // applied diff a reader needs after the hunks have scrolled away.
@@ -248,7 +340,7 @@ export function project(event: SessionEvent, projector: Projector): Projection {
     case 'compaction/summary':
       // The summary itself is context for the model, not for the reader. What
       // the reader needs to know is that history behind this point was folded.
-      return [{ kind: 'notice', tone: 'info', text: projector.copy.compacted }]
+      return [{ kind: 'notice', tone: 'info', text: projector.copy.compacted, compaction: true }]
 
     default:
       // Events without terminal presentation contribute no rows.

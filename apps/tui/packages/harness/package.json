@@ -7,13 +7,13 @@
   "license": "MIT",
   "dependencies": {
     "@dsh-tui/ui": "workspace:^",
-    "ink": "^7.1.1",
-    "react": "^19.3.0"
+    "ink": "catalog:",
+    "react": "catalog:"
   },
   "devDependencies": {
     "@deepseek-ai/dsh-session": "workspace:^",
     "@deepseek-ai/schemastery": "workspace:^",
-    "@types/react": "^19.2.0"
+    "@types/react": "catalog:"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "workspace:^"

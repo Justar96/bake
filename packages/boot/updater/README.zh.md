@@ -50,7 +50,11 @@ kind: "package-library"
 
 在 Windows 上，`cmd.exe` 运行批处理文件时按偏移逐行读取，因此改写正在运行的 `bake.cmd` 会让它从旧文件的偏移处继续执行新文件。所以 `windowsLauncher(root)` 写出的启动器每次运行都读取 `current.txt`，从不需要改写；发行归档以 `bin/bake-launcher.cmd.template` 提供同样的文本供 `install.ps1` 使用。直接指定某个版本的旧版 `bake.cmd`，会在运行它的 `cmd.exe` 退出后由一个分离的辅助进程替换。
 
+该启动器与发行版的 `bin/bake.cmd` 和 Unix `bin/bake` 一样，会创建 `<Bake 主目录>/diagnostics`，并以 `--report-exclude-env --report-exclude-network --diagnostic-dir=<Bake 主目录>/diagnostics` 启动 Node。只有当 Node 命令行排除了环境变量时，运行时看门狗才会启用致命错误报告；若改用 `NODE_OPTIONS`，这些参数也会传给智能体的子进程。文本不同的已安装 `bake.cmd` 同样由该辅助进程替换，但前提是运行中的更新程序已经会写出新文本，因此启动器的变更要晚一次更新才会到达 Windows 安装。
+
 发行签名密钥的私钥部分从不进入仓库。`release:assemble` 从 `BAKE_RELEASE_SIGNING_KEY_FILE` 读取私钥，并对清单写出的字节签名。`RELEASE_PUBLIC_KEYS` 可以包含多个密钥，因此新密钥可在旧密钥停止签名前先获得信任；`distribution/host/release-key.pub` 和两个安装脚本携带第一个密钥，并由一项发行测试保证所有副本一致。
+
+本包不发布运行时不变式配套条目，因为它是从不挂载到 Cordis 树中的库：它不发出事件，也不保有配套条目可观察的进程内关系。它所守护的状态位于磁盘上并跨越进程，每个安装步骤都会随即检查自己的结果：清单签名、归档的大小与 SHA-256，以及解包后命令的 `--version`。
 
 <a id="known-limitations-and-deferred-work"></a>
 ## 已知限制与延后工作

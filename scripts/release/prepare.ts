@@ -37,7 +37,8 @@ export function prepareRelease(root: string, version: string, today: string): Pr
   const changelog = readFileSync(path, 'utf8')
   if (changelogSection(changelog, version) !== undefined) throw new Error(`CHANGELOG.md already has a ${version} section`)
   // Validate every edit before writing any file, so a malformed manifest does
-  // not leave the workspace with different versions.
+  // not leave the workspace with different versions. A text edit, not `bun pm
+  // version`: that writes each manifest at once and re-serializes all of it.
   const manifests = VERSIONED_MANIFESTS.map((file) => {
     const manifest = join(root, file)
     const text = readFileSync(manifest, 'utf8')

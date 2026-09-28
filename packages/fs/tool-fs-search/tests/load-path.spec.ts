@@ -30,7 +30,7 @@ describe('dsh-tool-fs-search real-load-path guard', () => {
     const unwrapped = loader.unwrapExports(toolFsSearch) as Record<string, unknown>
     expect(unwrapped).toBe(toolFsSearch)
     expect(unwrapped.name).toBe('tool-fs-search')
-    expect(unwrapped.inject).toEqual(['tools', 'systemPrompt', 'subprocess'])
+    expect(unwrapped.inject).toEqual(['tools', 'subprocess'])
     expect(typeof unwrapped.Config).toBe('function')
     expect(typeof unwrapped.apply).toBe('function')
   })

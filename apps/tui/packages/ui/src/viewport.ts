@@ -72,6 +72,9 @@ export class Viewport {
   /** The end sentinel is also the starting point for following the newest output. */
   get end(): Position { return { row: this.rows.length + this.live.length, offset: 0 } }
 
+  /** The newest source row. A new reference means output arrived, including a streamed chunk. */
+  get latest(): Row | undefined { return this.rowAt(this.end.row - 1) }
+
   /** Change width or presentation policy before measuring or moving. */
   configure(budget: Budget, result: ResultBound): void {
     if (budget.columns !== this.columns || result !== this.result) this.cache.clear()

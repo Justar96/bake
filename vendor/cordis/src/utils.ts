@@ -18,6 +18,17 @@ export class DisposableList<T extends WeakKey> {
     return () => this.map.delete(sn)
   }
 
+  /** Insert a value before every currently stored value, preserving their relative order. */
+  unshift(value: T) {
+    const sn = ++this.sn
+    const entries = [...this.map]
+    this.map.clear()
+    this.map.set(sn, value)
+    for (const [key, existing] of entries) this.map.set(key, existing)
+    this.weak.set(value, sn)
+    return () => this.map.delete(sn)
+  }
+
   delete(value: T) {
     const sn = this.weak.get(value)
     if (!sn) return false

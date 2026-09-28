@@ -12,7 +12,6 @@
 
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { createScope, type Scope } from '@deepseek-ai/dsh-scope'
 import { join, sep } from 'node:path'
 import { createUserMessage, ToolCallId } from '@deepseek-ai/dsh-llm'
 import SystemPrompt, { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
@@ -234,19 +233,17 @@ function matchLine(path: string, lineNumber: number, lineText: string): string {
 }
 
 describe('registration', () => {
-  it('registers glob and grep unconditionally with their prompt sections', async () => {
+  it('registers glob and grep unconditionally without a system-prompt section', async () => {
     const { ctx, subprocess } = await setup()
     // Registration performs NO load-time probe: the packaged binary is always
     // available, so nothing spawns until a tool call.
     expect(subprocess.spawns).toHaveLength(0)
     expect(ctx.tools.schemas().map(s => s.name).sort()).toEqual(['glob', 'grep'])
-    const prompt = renderPrompt(await ctx.systemPrompt.assemble())
-    expect(prompt).toContain('Use the glob tool')
-    expect(prompt).toContain('Use the grep tool')
-    expect(prompt).toContain('sampled across top-level entries')
-    expect(prompt).not.toContain('sampled across top-level directories')
+    // The descriptions are the tools' only guidance.
+    expect(renderPrompt(await ctx.systemPrompt.assemble())).toBe(await barePrompt())
     const glob = ctx.tools.schemas().find(schema => schema.name === 'glob')
-    expect(glob?.description).toContain('sampled across top-level entries')
+    expect(glob?.description).toBe(globDescription('shows 100 sampled across top-level entries'))
+    expect(glob?.description).not.toContain('sampled across top-level directories')
   })
 
   it('stays pending until ctx.subprocess exists (inject)', async () => {
@@ -262,9 +259,6 @@ describe('registration', () => {
     expect(ctx.tools.schemas()).toHaveLength(2)
     await fiber.dispose()
     expect(ctx.tools.schemas()).toHaveLength(0)
-    const sections = (await ctx.systemPrompt.assemble()).sections.map(s => s.name)
-    expect(sections).not.toContain('tool:glob')
-    expect(sections).not.toContain('tool:grep')
   })
 
   it('attaches the configured timeoutMs to both tool definitions', async () => {
@@ -279,16 +273,41 @@ describe('registration', () => {
     expect(ctx.tools.get('grep')?.timeoutMs).toBe(30_000)
   })
 
-  it('describes the modification-time head when over-cap sampling is disabled', async () => {
+  it('describes the newest head when over-cap sampling is disabled', async () => {
     const { ctx } = await setup({ config: { sampleOverCapGlobResults: false } })
-    const prompt = renderPrompt(await ctx.systemPrompt.assemble())
-    expect(prompt).toContain('a larger one keeps the modification-time-ordered head')
-    expect(prompt).not.toContain('sampled across top-level entries')
+    // The sampling choice changes only this clause of the glob description.
     const glob = ctx.tools.schemas().find(schema => schema.name === 'glob')
-    expect(glob?.description).toContain('a larger result returns the first 100 paths in modification-time order')
-    expect(glob?.description).not.toContain('sampled across top-level entries')
+    expect(glob?.description).toBe(globDescription('shows the newest 100'))
+  })
+
+  it('pins the remaining search schema text', async () => {
+    const { ctx } = await setup()
+    const schema = (name: string) => ctx.tools.schemas().find(candidate => candidate.name === name)
+    const props = (name: string) => (schema(name)?.parameters as { properties: Record<string, { description?: string }> }).properties
+    expect(props('glob')['pattern']?.description).toBe('Glob pattern, e.g. "**/*.ts" or "src/**/*.test.js". '
+      + 'A pattern without "/" matches file names at any depth, so "*.ts" searches the whole tree.')
+    expect(props('glob')['path']?.description).toBe('Directory to search. Defaults to the working directory; relative paths resolve against it.')
+    expect(schema('grep')?.description).toBe('Search file contents with a ripgrep regular expression, as a bounded alternative to grep or rg in a shell. '
+      + 'Hidden and ignored files are skipped unless path points at them. '
+      + 'Returns only the matching lines, numbered and grouped by file; read a matched file for surrounding context. '
+      + 'Up to 250 matches are shown; a larger result says so and reports where the full list was saved.')
+    expect(props('grep')['path']?.description).toBe('File or directory to search. Defaults to the working directory; relative paths resolve against it.')
   })
 })
+
+/** The glob description for one over-cap behavior clause. */
+function globDescription(overCap: string): string {
+  return 'Find files, not directories, whose paths match a glob pattern. '
+    + 'It is a bounded, newest-first alternative to find in a shell: hidden and ignored files are included, but VCS metadata is not. '
+    + `A result over 100 paths ${overCap}, says so, and reports where the full list was saved.`
+}
+
+/** The prompt a bare system-prompt service renders, proving the tools add no section. */
+async function barePrompt(): Promise<string> {
+  const ctx = new Context()
+  await ctx.plugin(SystemPrompt)
+  return renderPrompt(await ctx.systemPrompt.assemble())
+}
 
 describe('config validation', () => {
   it('requires an explicit over-cap glob sampling choice', () => {
@@ -332,7 +351,7 @@ describe('command construction (plain argv)', () => {
     expect(buildGlobCommand({ pattern: '**/*.ts' })).toEqual([
       '--files',
       '--glob=**/*.ts',
-      '--sort=modified',
+      '--sortr=modified',
       '--no-ignore',
       '--hidden',
       '--glob=!**/.git', '--glob=!**/.git/**',
@@ -345,7 +364,7 @@ describe('command construction (plain argv)', () => {
   })
 
   it('glob: the search root rides behind -- as a plain element', () => {
-    expect(buildGlobCommand({ pattern: '*.md', path: 'docs dir' })).toEqual(['--files', '--glob=*.md', '--sort=modified', '--no-ignore', '--hidden',
+    expect(buildGlobCommand({ pattern: '*.md', path: 'docs dir' })).toEqual(['--files', '--glob=*.md', '--sortr=modified', '--no-ignore', '--hidden',
       '--glob=!**/.git', '--glob=!**/.git/**',
       '--glob=!**/.svn', '--glob=!**/.svn/**',
       '--glob=!**/.hg', '--glob=!**/.hg/**',
@@ -682,7 +701,7 @@ describe('cross-directory sampling', () => {
       .toEqual({ items: ['/out/a', '/away/c'].map(w), shown: 2, total: 2 })
   })
 
-  it('reproduces the modification-time-ordered head for a flat result', () => {
+  it('reproduces the newest-first head for a flat result', () => {
     expect(sampleAcrossTopLevel(['a.ts', 'b.ts', 'c.ts'], 2)).toEqual({ items: ['a.ts', 'b.ts'], shown: 2, total: 3 })
   })
 
@@ -750,7 +769,7 @@ describe('glob results', () => {
     subprocess.handler = () => runResult('sub/a.ts\n')
     const result = await call(ctx, 'glob', { pattern: '*.ts', path: 'sub' })
     expect(result.isError).toBe(false)
-    expect(subprocess.spawns[0]?.argv).toEqual([rgPath, '--no-config', '--files', '--glob=*.ts', '--sort=modified', '--no-ignore', '--hidden',
+    expect(subprocess.spawns[0]?.argv).toEqual([rgPath, '--no-config', '--files', '--glob=*.ts', '--sortr=modified', '--no-ignore', '--hidden',
       '--glob=!**/.git', '--glob=!**/.git/**',
       '--glob=!**/.svn', '--glob=!**/.svn/**',
       '--glob=!**/.hg', '--glob=!**/.hg/**',
@@ -787,19 +806,19 @@ describe('glob results', () => {
   })
 
   it('samples an over-cap result across top-level entries instead of taking its head', async () => {
-    // The shipped failure: `*` matches the whole tree, mtime order puts one
-    // freshly-unpacked subtree first, and a head-of-3 reads like the entire
+    // The shipped failure: `*` matches the whole tree, newest-first order puts
+    // one freshly-unpacked subtree first, and a head-of-3 reads like the entire
     // workspace. The sample reaches every top-level entry instead.
     const { ctx, subprocess } = await setup({ config: { globMaxResults: 3 } })
     subprocess.handler = () => runResult(['vendor/a.ts', 'vendor/b.ts', 'vendor/c.ts', 'src/d.ts', 'guide/e.md', 'top.txt'].map(w).join('\n'))
     const result = await call(ctx, 'glob', { pattern: '*' }, { agent: agent('/w') })
     expect(text(result)).toBe(['vendor/a.ts', 'src/d.ts', 'guide/e.md'].map(w).join('\n') + '\n\n'
       + '(Showing 3 of 6 paths, sampled across 3 of the 4 top-level entries this pattern matched '
-      + 'instead of taken in modification-time order. Narrow path to inspect a specific subtree. '
+      + 'instead of taken newest first. Narrow path to inspect a specific subtree. '
       + 'The complete result could not be saved; narrow pattern or path to see more.)')
   })
 
-  it('keeps the modification-time head when over-cap sampling is disabled', async () => {
+  it('keeps the newest head when over-cap sampling is disabled', async () => {
     const { ctx, subprocess } = await setup({
       config: { globMaxResults: 3, sampleOverCapGlobResults: false },
     })
@@ -841,18 +860,18 @@ describe('glob results', () => {
     expect(text(await call(ctx, 'glob', { pattern: '*' }, { agent: agent('/w') })))
       .toBe(['vendor/a.ts', 'vendor/b.ts', 'src/d.ts'].map(w).join('\n') + '\n\n'
         + '(Showing 3 of 4 paths, sampled across 2 of the 2 top-level entries this pattern matched '
-        + 'instead of taken in modification-time order. '
+        + 'instead of taken newest first. '
         + 'The complete result could not be saved; narrow pattern or path to see more.)')
   })
 
-  it('keeps modification-time order untouched when the whole result fits', async () => {
+  it('keeps newest-first order untouched when the whole result fits', async () => {
     const { ctx, subprocess } = await setup({ config: { globMaxResults: 4 } })
     subprocess.handler = () => runResult('vendor/a.ts\nvendor/b.ts\nsrc/c.ts\n')
     expect(text(await call(ctx, 'glob', { pattern: '*' }, { agent: agent('/w') })))
       .toBe('vendor/a.ts\nvendor/b.ts\nsrc/c.ts')
   })
 
-  it('keeps the plain footer for a flat result, where the sample is the modification-time head', async () => {
+  it('keeps the plain footer for a flat result, where the sample is the newest head', async () => {
     const { ctx, subprocess } = await setup({ config: { globMaxResults: 2 } })
     subprocess.handler = () => runResult('a.ts\nb.ts\nc.ts\n')
     expect(text(await call(ctx, 'glob', { pattern: '*' }, { agent: agent('/w') })))
@@ -1210,59 +1229,3 @@ describe('helpers', () => {
     expect(grouped).toBe('b.ts\nLine 2: x\nLine 5: z\n\na.ts\nLine 1: y')
   })
 })
-
-/** Create a real per-agent scope over the mounted tool plugins. */
-async function guidanceScope(ctx: Context) {
-  const key = {}
-  let scope!: Scope
-  await ctx.plugin(Object.assign((inner: Context) => { scope = createScope(inner, key) },
-    { inject: ['tools', 'systemPrompt'] }))
-  return { key, scope }
-}
-
-const originalSearchGuidance = {
-  glob: 'Use the glob tool — not shell find — to discover files by path pattern. A pattern with no "/" matches basenames at any depth, so "*" matches every file in the tree rather than its top level. '
-      + 'Results are files only, never directories, and include hidden and ignored files: a result that fits comes back in modification-time order, while a larger one is sampled across top-level entries, so it spans the tree instead of one subtree.',
-  grep: 'Use the grep tool — not shell grep or rg — to search file contents. Use read on a matched file when you need surrounding context.',
-}
-
-describe('scope-aware search guidance', () => {
-  it.each([[], ['glob'], ['grep'], ['glob', 'grep']].map(allow => ({ allow })))('renders only visible search guidance: $allow', async ({ allow }) => {
-    const { ctx } = await setup()
-    const { key, scope } = await guidanceScope(ctx)
-    scope.ctx.tools.restrict({ allow })
-    try {
-      const assembly = await ctx.systemPrompt.assemble({ scope: key })
-      expect(assembly.tools.map(tool => tool.name)).toEqual([...allow].sort())
-      expect(renderPrompt(assembly)).toBe(withPersona(...allow.map(name => name === 'glob'
-        ? originalSearchGuidance.glob
-        : originalSearchGuidance.grep.replace(' Use read on a matched file when you need surrounding context.', ''))))
-    } finally {
-      await scope.dispose()
-    }
-  })
-
-  it('reuses the unchanged grep paragraph when read is visible', async () => {
-    const { ctx } = await setup()
-    ctx.tools.register({
-      name: 'read', description: 'read fixture', parameters: {},
-      output: { schema: { type: 'string' }, render: () => [{ type: 'text', text: '' }] },
-      execute: () => Promise.resolve(''),
-    })
-    const { key, scope } = await guidanceScope(ctx)
-    try {
-      expect(renderPrompt(await ctx.systemPrompt.assemble({ scope: key })))
-        .toBe(withPersona(originalSearchGuidance.glob, originalSearchGuidance.grep))
-      scope.ctx.tools.restrict({ deny: ['read'] })
-      expect(renderPrompt(await ctx.systemPrompt.assemble({ scope: key })))
-        .toBe(withPersona(originalSearchGuidance.glob, originalSearchGuidance.grep.split(' Use read')[0]!))
-    } finally {
-      await scope.dispose()
-    }
-  })
-})
-
-/** Preserve the default persona and exact section separators in the oracle. */
-function withPersona(...sections: string[]): string {
-  return ['You are an AI agent powered by DeepSeek Harness.', ...sections].join('\n\n')
-}

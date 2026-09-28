@@ -10,7 +10,7 @@ Bake tests the shared runtime, terminal application, and built profile at the la
 - Run `bun run test` for the shared pure and Node integration suites.
 - Run `bun apps/tui/scripts/tui.ts check docs` for terminal documentation and `bun apps/tui/scripts/tui.ts check types` for TUI types.
 - Run `bun run test:e2e` for keyless built-profile PTY scenarios when terminal behavior changes.
-- Run `bun run verify` when the complete build, check, and PTY path is required.
+- Run `bun run preflight` before a pull request: every CI gate, with the runtime specs the change reaches. `bun run verify` runs the same gates with the whole runtime suite.
 
 Report checks that actually ran, including failures and skipped work. Do not bypass hooks without explicit approval.
 

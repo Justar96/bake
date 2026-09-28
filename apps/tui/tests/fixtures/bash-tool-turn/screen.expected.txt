@@ -5,7 +5,7 @@
 
   The user wants me to run a simple bash command and then reply with "DONE".
 
-$ Bash(echo TERMINAL_OK)
+● Bash(echo TERMINAL_OK)
   ⎿      TERMINAL_OK
 
   The command ran successfully and output "TERMINAL_OK". I should now reply with just "DONE".
@@ -14,6 +14,6 @@ $ Bash(echo TERMINAL_OK)
 
 ✓ Completed  ran 1
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-> ▌Ask anything
+> ▌Ask anything · / commands · @ files
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-  Model: deepseek-v4-flash  /workspace
+  deepseek-v4-flash  /workspace

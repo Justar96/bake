@@ -47,12 +47,17 @@ class GatedAdapter extends LlmAdapter {
 const testToolSignal = new AbortController().signal
 
 const roots: string[] = []
-afterEach(() => {
+const contexts: Context[] = []
+afterEach(async () => {
+  // Dispose first: the persistence teardown closes every session handle and
+  // releases its session.lock before the root disappears.
+  for (const ctx of contexts.splice(0).reverse()) await ctx.fiber.dispose()
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
 
 async function setupWith(adapter: MockAdapter | GatedAdapter) {
   const ctx = new Context()
+  contexts.push(ctx)
   await mountAgentLoopTestDependencies(ctx)
   const root = mkdtempSync(join(tmpdir(), 'dsh-tool-list-agents-'))
   roots.push(root)
@@ -112,10 +117,29 @@ describe('dsh-tool-subagent-control/list-agents', () => {
     expect(Object.keys(parameters.properties ?? {})).toEqual(['scope'])
     expect(parameters.properties?.scope?.enum).toEqual(['children', 'descendants'])
     expect(parameters.required ?? []).toEqual([])
-    expect(schemas[0]!.description).toContain('send_message')
-    expect(schemas[0]!.description).toContain('steers a running child at its nearest step boundary')
-    expect(schemas[0]!.description).not.toContain('send_message` starts a new turn')
-    expect(schemas[0]!.description).toContain('interrupt_agent')
+    expect(schemas[0]!.description).toBe(
+      'List the continuable subagents you started, with each one\'s agent id, label, and status: running '
+      + '(working now), idle (between turns, possibly waiting on its own subagents), or ready (saved and '
+      + 'inactive; it can be resumed and is not a result to collect). A `send_message` steers a running '
+      + 'subagent at its next step and starts a new turn for an idle or ready one. Use this to look up ids, '
+      + 'not to poll: you are notified when one finishes. Subagents that cannot be read appear as diagnostics. '
+      + 'Scope `descendants` also lists the subagents below them, each with its parent\'s agent id and depth. '
+      + 'You can message only depth-1 entries, your direct subagents, but you can stop any entry\'s current '
+      + 'turn with `interrupt_agent`.',
+    )
+    expect(parameters.properties?.scope).toMatchObject({
+      description: 'children (default) lists your direct subagents; descendants lists every subagent below you.',
+    })
+  })
+
+  it('titles a listing by its scope', async () => {
+    const { ctx } = await setup([])
+    const list = ctx.tools.get('list_agents')!
+    expect(list.presentCall?.({})).toEqual({ card: 'generic', title: 'List subagents', kind: 'read' })
+    expect(list.presentCall?.({ scope: 'children' })).toEqual({ card: 'generic', title: 'List subagents', kind: 'read' })
+    expect(list.presentCall?.({ scope: 'descendants' })).toEqual({ card: 'generic', title: 'List all subagents below', kind: 'read' })
+    // An obsolete scope keeps the generic rendering.
+    expect(list.presentCall?.({ scope: 'all' })).toBeUndefined()
   })
 
   it('renders the empty result as (no subagents)', async () => {
@@ -229,8 +253,8 @@ describe('dsh-tool-subagent-control/list-agents', () => {
     const schema = ctx.tools.schemas().find(candidate => candidate.name === 'list_agents')
     // Completion reaches the parent through its notice; listing is discovery,
     // so its inactive status must not send the model looking for a result.
-    expect(schema?.description).toContain('you are told when one finishes')
-    expect(schema?.description).toContain('resumable, not terminal')
+    expect(schema?.description).toContain('you are notified when one finishes')
+    expect(schema?.description).toContain('it can be resumed and is not a result to collect')
     // The enum is the closed vocabulary the model renders, so pin it rather than
     // scanning prose that legitimately reads "not to poll for completion".
     const variants = ctx.tools.get('list_agents')?.output.schema.items?.oneOf ?? []
@@ -247,6 +271,7 @@ describe('dsh-tool-subagent-control/list-agents', () => {
 
   it('unregisters with its plugin fiber (HMR safety)', async () => {
     const ctx = new Context()
+    contexts.push(ctx)
     await mountAgentLoopTestDependencies(ctx)
     await ctx.plugin(AgentLoop, { agents: [] })
     await ctx.plugin(SubagentRuntime)

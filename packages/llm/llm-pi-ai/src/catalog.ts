@@ -252,7 +252,7 @@ const COMPLETIONS_COMPAT_GATE = {
   vercelGatewayRouting: 'withhold',
   zaiToolStream: 'withhold',
   supportsOpenAIGrammarTools: 'withhold',
-  sendSessionAffinityHeaders: 'withhold',
+  sendSessionAffinityHeaders: 'offer',
   deferredToolsMode: 'withhold',
   sessionAffinityFormat: 'withhold',
 } as const satisfies Record<keyof OpenAICompletionsCompat, CompatDisposition>
@@ -279,7 +279,7 @@ const ANTHROPIC_COMPAT_GATE = {
   forceAdaptiveThinking: 'offer',
   allowEmptySignature: 'offer',
   supportsStrictTools: 'offer',
-  sendSessionAffinityHeaders: 'withhold',
+  sendSessionAffinityHeaders: 'offer',
   supportsToolReferences: 'withhold',
   supportsMidConvoEffort: 'withhold',
   allowedFallbackModels: 'withhold',
@@ -428,6 +428,16 @@ export interface PiAiCompatProfile {
   allowEmptySignature?: boolean
   /** Whether the endpoint accepts Anthropic strict tool schemas; `anthropic-messages`. */
   supportsStrictTools?: boolean
+  /**
+   * Whether to send the Harness session id as the `x-session-affinity`
+   * request header, which lets a gateway that load-balances several upstream
+   * credentials pin a session to one of them. Provider prompt caches are
+   * per credential, so without it a round-robin gateway re-prefills the
+   * whole prefix whenever consecutive steps land on different credentials.
+   * Sent only while prompt caching is on. `openai-completions` (which also
+   * sends `x-client-request-id`), `anthropic-messages`.
+   */
+  sendSessionAffinityHeaders?: boolean
 }
 
 /** Compile-time constraint that `T` is `never`. */

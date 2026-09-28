@@ -33,7 +33,7 @@ it('shows a goal activating from /goal, then paused and done, repainting on ever
   expect(changed).toHaveBeenCalled()
   expect(controller.view.goal).toEqual({ objective: 'Ship the patch', phase: 'active', armed: true, rounds: 0, maxRounds: 256 })
   expect(goalState(controller.view.goal, dictionaries.en)).toMatchObject({
-    label: dictionaries.en.goalActive, details: 'round 0/256',
+    label: dictionaries.en.goalTitle, count: '0/256',
   })
 
   const goals = fixture.ctx.goals

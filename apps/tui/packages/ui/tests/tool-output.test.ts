@@ -1,6 +1,7 @@
 /** Tool source metadata, diagnostic colour, and bounded result presentation. */
 import { describe, expect, test } from 'bun:test'
-import { outputLines, outputSpans, toolText } from '../src/tool-output.ts'
+import stringWidth from 'string-width'
+import { clipCells, outputLines, outputSpans, toolText } from '../src/tool-output.ts'
 import { ToolCards, type ToolPresenters } from '../src/cards.ts'
 import { dictionaries } from '../src/copy.ts'
 import { PALETTE } from '../src/palette.ts'
@@ -96,4 +97,20 @@ test('strips tool ANSI and OSC before assigning styles and measuring text', () =
   const raw = '\x1b[31mERROR\x1b[0m \x1b]8;;https://example.com\x07link\x1b]8;;\x07\tfile.ts\r\n\x07'
   expect(toolText(raw)).toBe('ERROR link    file.ts\n\\x07')
   expect(outputLines(raw).map(line => line.text)).toEqual(['ERROR link    file.ts', '\\x07'])
+})
+
+test('cuts a line to terminal cells, whole graphemes only, with the ellipsis inside the bound', () => {
+  expect(clipCells('short', 8)).toBe('short')
+  expect(clipCells('exactly8', 8)).toBe('exactly8')
+  expect(clipCells('one more', 7)).toBe('one mo\u2026')
+  // Space before the cut would hold the ellipsis off the word it ends.
+  expect(clipCells('one more', 5)).toBe('one\u2026')
+  // Two cells each: an odd bound leaves a cell empty rather than overrun.
+  expect(clipCells('\u4e2d\u6587\u6807\u9898', 6)).toBe('\u4e2d\u6587\u2026')
+  expect(stringWidth(clipCells('\u4e2d\u6587\u6807\u9898', 6))).toBe(5)
+  // A combining mark rides with its letter; a joined emoji is never split.
+  expect(clipCells('e\u0301e\u0301e\u0301e\u0301', 3)).toBe('e\u0301e\u0301\u2026')
+  const family = '\u{1f469}\u200d\u{1f469}\u200d\u{1f467}'
+  expect(clipCells(family.repeat(4), 5)).toBe(`${family.repeat(2)}\u2026`)
+  expect(clipCells('abc', 0)).toBe('\u2026')
 })

@@ -53,7 +53,7 @@ const META_STATEMENT = /^\s*export\s+const\s+meta\b/
  */
 function assertBodyParses(body: string, name: string): void {
   if (META_STATEMENT.test(body)) {
-    throw new WorkflowError('workflow meta rides the `meta` request field, not the script: remove the `export const meta = {...}` statement from the body', 'SCRIPT_PARSE')
+    throw new WorkflowError('meta is a parameter, not code: remove the `export const meta = {...}` statement from the script and pass it as `meta`', 'SCRIPT_PARSE')
   }
   try {
     // Parse only — the script object is discarded, nothing executes.

@@ -5,6 +5,7 @@ import {
   projectCordisCatalog,
   renderInheritedPage,
   renderPageRegion,
+  type CordisCatalogModel,
   type CordisCatalogPolicy,
 } from '../src/cordis-catalog.ts'
 import {
@@ -22,12 +23,15 @@ const workspaceRoot = resolve(import.meta.dirname, '../../../..')
 let cached: ReturnType<typeof projectCordisCatalog> | undefined
 const projection = (): ReturnType<typeof projectCordisCatalog> =>
   (cached ??= projectCordisCatalog(workspaceRoot, CORDIS_CATALOG_POLICY))
-let cachedClient: ReturnType<typeof projectCordisCatalog> | undefined
-const clientProjection = (): ReturnType<typeof projectCordisCatalog> =>
-  (cachedClient ??= projectCordisCatalog(workspaceRoot, {
+let cachedWide: ReturnType<typeof projectCordisCatalog> | undefined
+const wideProjection = (): ReturnType<typeof projectCordisCatalog> =>
+  (cachedWide ??= projectCordisCatalog(workspaceRoot, {
     ...CORDIS_CATALOG_POLICY,
     runtimeDeclarationMaxChars: 4_096,
-  }, 'client'))
+  }))
+let cachedClient: ReturnType<typeof projectCordisCatalog> | undefined
+const clientProjection = (): ReturnType<typeof projectCordisCatalog> =>
+  (cachedClient ??= projectCordisCatalog(workspaceRoot, CORDIS_CATALOG_POLICY, 'client'))
 
 const SOURCE_LINK_POLICY: CordisCatalogPolicy = {
   linkedTypePages: {},
@@ -99,29 +103,43 @@ describe('Typert-backed Cordis catalog', () => {
     expect(rendered).toContain('ACTIVE,')
   })
 
-  it('keeps the Slots service declaration and its referenced types within the display budget', { timeout: 480_000 }, () => {
-    const { projector, model } = clientProjection()
-    const slots = model.services.find(service => service.key === 'slots')
-    if (slots === undefined) throw new Error('Client slots service is missing')
-    const rendered = projector.renderRuntimeApi({
-      services: [{
-        ...slots,
-        methods: slots.methods.filter(method => /\b(?:inject|register|registerFactory)\b/u.test(method.signature)),
-      }],
-      events: [],
-    })
-    const slotCoreStart = rendered.indexOf("name: 'SlotCore'")
-    const slotCoreEnd = rendered.indexOf('\n  },', slotCoreStart)
-    expect(rendered.slice(slotCoreStart, slotCoreEnd)).not.toContain('truncated')
-    expect(rendered).toContain("name: 'StoredEntry'")
-    expect(rendered).toContain("name: 'SlotLabel'")
+  it('keeps a service\'s referenced types whole within a raised display budget', { timeout: 480_000 }, () => {
+    const registerProvider = ({ model }: ReturnType<typeof projectCordisCatalog>): CordisCatalogModel => {
+      const subagents = model.services.find(service => service.key === 'subagents')
+      if (subagents === undefined) throw new Error('subagents service is missing')
+      return {
+        services: [{ ...subagents, methods: subagents.methods.filter(method => /\bregisterProvider\b/u.test(method.signature)) }],
+        events: [],
+      }
+    }
+    const declarationOf = (rendered: string, name: string): string => {
+      const start = rendered.indexOf(`name: '${name}'`)
+      expect(start, `${name} is rendered`).toBeGreaterThanOrEqual(0)
+      return rendered.slice(start, rendered.indexOf('\n  },', start))
+    }
+    // SessionEventMap, reached through SubagentProvider, outgrows the default budget.
+    const narrow = projection()
+    expect(declarationOf(narrow.projector.renderRuntimeApi(registerProvider(narrow)), 'SessionEventMap'))
+      .toContain('truncated')
+    const wide = wideProjection()
+    const rendered = wide.projector.renderRuntimeApi(registerProvider(wide))
+    expect(declarationOf(rendered, 'SessionEventMap')).not.toContain('truncated')
+    expect(rendered).toContain("name: 'SubagentProvider'")
+  })
+
+  it('projects the Client face from workspace source', { timeout: 480_000 }, () => {
+    // The Client aggregate must resolve workspace packages to source like the
+    // Host one; built declarations would leave cross-face exports unreadable.
+    const { model } = clientProjection()
+    expect(model.services.find(service => service.key === 'remote')?.type).toBe('ClientRemote')
+    expect(model.events.map(event => event.name)).toContain('connection/reset')
   })
 
   it('resolves each key to the declaration a caller meets, and drops keys no plugin provides', { timeout: 480_000 }, () => {
     const byKey = new Map(projection().model.services.map(service => [service.key, service]))
     // An interface-typed key is described by its Service Definition: that is where
     // the contract and, by repository convention, the member JSDoc live.
-    expect(byKey.get('lsp')?.type).toBe('LspService')
+    expect(byKey.get('connection')?.type).toBe('HostConnectionHandle')
     // Two packages describe `ctx.typert` — a merge-extensible interface in
     // type-meta and the implementing class in registry. The class wins: it is the
     // object a caller meets and it carries the documentation.

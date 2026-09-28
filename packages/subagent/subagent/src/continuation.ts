@@ -223,7 +223,7 @@ export class SubagentContinuationManager {
     }
     if (sender.session.header.parentSession === targetId) {
       throw new SubagentError(
-        `agent "${sender.id}" is not a resident continuable child and cannot send to parent "${targetId}"`,
+        `agent "${sender.id}" is not a continuable subagent of "${targetId}", so it cannot message it as its parent`,
         'UNAUTHORIZED',
       )
     }

@@ -92,6 +92,36 @@ describe('present', () => {
     expect(ctx.tools.get('present', owner)).toBeUndefined()
   })
 
+  it('pins the model-facing description and parameter guidance', async () => {
+    const { ctx } = await setup()
+    const schema = ctx.tools.schemas().find(item => item.name === 'present')
+    expect(schema?.description).toBe(
+      'Deliver files the user asked to receive. After creating or updating such a file, however you made it, '
+      + 'call present before your final reply; mentioning its path is not enough. The files must already exist where '
+      + 'your file tools can see them. The user opens them in place, so leave them there.',
+    )
+    const files = (schema?.parameters['properties'] as Record<string, {
+      items: { properties: Record<string, { description?: string }> }
+    }>)['files']
+    expect(files?.items.properties['path']?.description)
+      .toBe('Path of an existing regular file, absolute or relative to the working directory.')
+    expect(files?.items.properties['description']?.description).toBe('Brief description for the user.')
+  })
+
+  it('titles a delivery by its file names, counting past three', async () => {
+    const { ctx } = await setup()
+    const present = ctx.tools.get('present')!
+    expect(present.presentCall?.({ files: [{ path: '/work/out/report.md', description: 'Final report' }, { path: 'C:\\out\\报告.docx' }] }))
+      .toEqual({ card: 'generic', title: 'report.md, 报告.docx', kind: 'other' })
+    expect(present.presentCall?.({ files: ['a.md', 'dir/b.md', 'c.md', 'd.md', 'e.md'].map(path => ({ path })) }))
+      .toEqual({ card: 'generic', title: 'a.md, b.md, c.md +2', kind: 'other' })
+    // The completed call keeps the full paths the result names.
+    expect(present.presentResult).toBeUndefined()
+    // Obsolete or invalid logged arguments keep the generic rendering.
+    expect(present.presentCall?.({ files: [{ file: 'a.md' }] })).toBeUndefined()
+    expect(present.presentCall?.({ paths: ['a.md'] })).toBeUndefined()
+  })
+
   it('ignores a different present definition in the calling agent scope', async () => {
     const { owner, execute } = await setup()
     owner.ctx.tools.register(defineTool({

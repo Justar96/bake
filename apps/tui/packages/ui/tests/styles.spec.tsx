@@ -2,10 +2,11 @@
 import { execFileSync } from 'node:child_process'
 import { expect, it } from 'vitest'
 import type { Row } from '../src/rows.ts'
-import { AGENT_TONES, PALETTE } from '../src/palette.ts'
+import { AGENT_TONES, CONTEXT_RAMP, PALETTE } from '../src/palette.ts'
 import { ICON } from '../src/icons.ts'
 import { subagentSheet } from '../src/subagents.tsx'
 import { dictionaries } from '../src/copy.ts'
+import { FOLD_REST } from '../src/activity.ts'
 
 it('draws the rule dim and leaves the draft in the terminal\'s own foreground at every width', () => {
   const env: NodeJS.ProcessEnv = { ...process.env, FORCE_COLOR: '3', COLORTERM: 'truecolor' }
@@ -17,7 +18,7 @@ it('draws the rule dim and leaves the draft in the terminal\'s own foreground at
     import { Chrome } from ${JSON.stringify(new URL('../src/line.tsx', import.meta.url).href)};
     const hints = { send: 'Enter sends', interrupt: 'Esc stops', select: 'Tab selects', answer: 'Enter sends' };
     for (const columns of ${JSON.stringify(widths)}) process.stdout.write(renderToString(React.createElement(Chrome, {
-      left: ['Model: m'], right: [], columns, state: { running: false, asking: false, listing: false },
+      status: [{ forms: [[{ text: 'm' }]], yields: [] }], columns, state: { running: false, asking: false, listing: false },
       before: 'hello', after: '', placeholder: 'Ask', hints, frame: 'round',
     }), { columns }) + '\\nEND\\n');
   `], { cwd: new URL('../../../../../', import.meta.url), env, encoding: 'utf8', timeout: 20_000 })
@@ -80,9 +81,9 @@ it('dims reasoning and metadata, and gives actions and outcomes their palette we
   // the output from the head.
   expect(frame).toContain('\u001b[1mBash\u001b[22m(ls -a)')
   expect(frame).toContain('\u001b[2m\u23bf\u001b[22m')
-  expect(frame).toContain(`\u001b[1m\u001b[38;2;34;197;94m${ICON.run}`)
-  expect(frame).toContain(`\u001b[38;2;239;68;68m${ICON.read}`)
-  expect(frame).toContain(`\u001b[1m\u001b[38;2;249;115;22m${ICON.find}`)
+  expect(frame).toContain(`\u001b[1m\u001b[38;2;34;197;94m${ICON.other}`)
+  expect(frame).toContain(`\u001b[38;2;239;68;68m${ICON.other}`)
+  expect(frame).toContain(`\u001b[1m\u001b[38;2;249;115;22m${ICON.other}`)
   expect(frame).not.toContain('\u001b[2mBash')
   // An edit says its size in each side's tone, numbers its lines in the
   // gutter, and reverses the words it changed.
@@ -102,7 +103,38 @@ it('dims reasoning and metadata, and gives actions and outcomes their palette we
   await expect(frame.replaceAll('\u001b', '<ESC>') + '\n').toMatchFileSnapshot('./expected/styles.txt')
 })
 
-it('colours the running header\'s word, leaves the rule bare, and colours a cache-hit reading by how good it is', () => {
+it('draws a step\'s tree dim and uncoloured, and puts a failed call\'s failure in its head', () => {
+  const rows: Row[] = [{ kind: 'tool-group', calls: [
+    { kind: 'tool-call', callId: 'a', tool: 'bash', input: 'make', result: { ok: true, text: 'one\ntwo' } },
+    { kind: 'tool-call', callId: 'b', tool: 'bash', input: 'false', result: { ok: false, text: 'boom' } },
+  ] }]
+  const env: NodeJS.ProcessEnv = { ...process.env, FORCE_COLOR: '3', COLORTERM: 'truecolor' }
+  delete env.NO_COLOR
+  const frame = execFileSync(process.execPath, ['--import', 'tsx/esm', '--input-type=module', '--eval', `
+    import React from 'react';
+    import { renderToString } from 'ink';
+    import { Line } from ${JSON.stringify(new URL('../src/line.tsx', import.meta.url).href)};
+    import { present } from ${JSON.stringify(new URL('../src/present.ts', import.meta.url).href)};
+    import { budgetFor } from ${JSON.stringify(new URL('../src/layout.ts', import.meta.url).href)};
+    const lines = ${JSON.stringify(rows)}.flatMap(row => present(row, { lines: 3, unit: 'lines', more: 'more lines', failures: 'failed' }));
+    process.stdout.write(renderToString(React.createElement(React.Fragment, null,
+      ...lines.map((line, key) => React.createElement(Line, { line, key, budget: budgetFor({ columns: 80, rows: 40 }) }))), { columns: 80 }));
+  `], { cwd: new URL('../../../../../', import.meta.url), env, encoding: 'utf8', timeout: 20_000 })
+  const rgb = (hex: string) => `\u001b[38;2;${[1, 3, 5].map(index => Number.parseInt(hex.slice(index, index + 2), 16)).join(';')}m`
+  // The step's head keeps its state colour.
+  expect(frame).toContain(`${rgb(PALETTE.failed)}${ICON.other}`)
+  // Every glyph of the tree is dim, in the terminal's own tone: no palette colour precedes one.
+  for (const glyph of ['\u251c', '\u2502', '\u2514', '\u23bf']) {
+    expect(frame, glyph).toContain(`\u001b[2m${glyph}`)
+    expect(frame, glyph).not.toMatch(new RegExp(`\\u001b\\[38;2;[0-9;]*m(?:\\u001b\\[[0-9;]*m)*${glyph}`))
+  }
+  // The failed call reads as failed without the branch's colour: its name bold and red, its argument red.
+  expect(frame).toContain(`\u001b[2m\u2514\u001b[22m \u001b[1m${rgb(PALETTE.failed)}Bash\u001b[22m(false)\u001b[39m`)
+  // The call that finished well stays plain.
+  expect(frame).toContain('\u001b[1mBash\u001b[22m(make)')
+})
+
+it('colours the running header\'s word, leaves the rule bare, and keeps the status line neutral until a reading needs attention', () => {
   // A child for its own colour environment, as above.
   const env: NodeJS.ProcessEnv = { ...process.env, FORCE_COLOR: '3', COLORTERM: 'truecolor' }
   delete env.NO_COLOR
@@ -112,41 +144,117 @@ it('colours the running header\'s word, leaves the rule bare, and colours a cach
     import { Header, Rule, StatusBar } from ${JSON.stringify(new URL('../src/line.tsx', import.meta.url).href)};
     import { Beat } from ${JSON.stringify(new URL('../src/beat.tsx', import.meta.url).href)};
     import { FRAME_MS } from ${JSON.stringify(new URL('../src/activity.ts', import.meta.url).href)};
-    import { cacheTone, PALETTE } from ${JSON.stringify(new URL('../src/palette.ts', import.meta.url).href)};
+    import { PALETTE } from ${JSON.stringify(new URL('../src/palette.ts', import.meta.url).href)};
+    import { statusFields } from ${JSON.stringify(new URL('../src/status-line.ts', import.meta.url).href)};
+    import { dictionaries } from ${JSON.stringify(new URL('../src/copy.ts', import.meta.url).href)};
     // Four beats in.
     const clock = { now: () => 4 * FRAME_MS, every: () => () => {} };
-    const field = hit => ({ label: 'cache hit', value: hit + '%', color: cacheTone(hit) });
+    const row = (input) => React.createElement(StatusBar, { key: JSON.stringify(input), columns: 120,
+      fields: statusFields({ model: 'm', cwd: '/w', glyphs: 'unicode', ...input }, dictionaries.en) });
     process.stdout.write(renderToString(React.createElement(React.Fragment, null,
       React.createElement(Beat, { clock },
         React.createElement(Header, { columns: 100, clock,
           state: { kind: 'running', word: 'Working', phase: undefined, startedAt: 0, color: PALETTE.running } })),
       React.createElement(Rule, { columns: 100, frame: 'round' }),
-      ...[85, 48, 12].map(hit => React.createElement(StatusBar, { key: hit,
-        left: [{ text: 'Model: m' }, 'plan'],
-        right: [{ text: 'Context: ~500/128k (0%)' }, 'in 1k', 'out 100', field(hit), '/w'], columns: 100 })),
-      React.createElement(StatusBar, { left: [{ text: 'Model: m' }],
-        right: [{ text: 'ctx ~75%', color: PALETTE.waiting }, { text: 'ctx ~92%', color: PALETTE.failed }, '/w'], columns: 100 })),
-      { columns: 100 }));
+      ...[850, 480, 120].map(cached => row({ plan: { active: true, pending: false }, thinkingLevel: 'high',
+        context: { used: 500, window: 128_000 }, usage: { input: 1000, output: 100, cached } })),
+      ...[65_000, 75_000, 85_000, 95_000].map(used => row({ context: { used, window: 100_000 } })),
+      row({ context: { used: 62_000, window: 100_000, compactAt: 80_000 } })),
+      { columns: 120 }));
   `], { cwd: new URL('../../../../../', import.meta.url), env, encoding: 'utf8', timeout: 20_000 })
   const rgb = (hex: string) => `\u001b[38;2;${[1, 3, 5].map(index => Number.parseInt(hex.slice(index, index + 2), 16)).join(';')}m`
   // The header's glyph and word carry the running orange, at the draft's
   // column; the rule under it is one dim run and says nothing.
-  const [header, rule] = frame.split('\n')
+  const [header, rule, ...rows] = frame.split('\n')
   expect(header!.replace(/\u001b\[[0-9;]*m/g, '').trimEnd()).toMatch(/^[\u2800-\u28ff]{3} Working… {2}0s$/)
   expect(header).toContain(`${rgb(PALETTE.running)}Working…`)
   expect(rule).toBe(`\u001b[2m${'─'.repeat(100)}\u001b[22m`)
-  // Primary fields use plain foreground; secondary fields retain dim styling.
-  expect(frame).toContain('Model: m\u001b[2m  plan\u001b[22m  Context: ~500/128k (0%)')
-  expect(frame).toContain('\u001b[2min 1k\u001b[22m')
-  expect(frame).toContain('\u001b[2mout 100\u001b[22m')
-  expect(frame).toContain('\u001b[2m/w\u001b[22m')
-  // The label stays dim; the value alone carries the tone.
-  expect(frame).toContain(`\u001b[2mcache hit \u001b[22m${rgb('#22c55e')}85%`)
-  expect(frame).toContain(`${rgb('#eab308')}48%`)
-  expect(frame).toContain(`${rgb('#ef4444')}12%`)
-  // A primary field that needs attention carries its tone on the whole text.
-  expect(frame).toContain(`${rgb(PALETTE.waiting)}ctx ~75%`)
-  expect(frame).toContain(`${rgb(PALETTE.failed)}ctx ~92%`)
+  // The model has no label and the normal foreground; labels are dim, values are not.
+  expect(rows[0]!.startsWith('m ')).toBe(true)
+  expect(rows[0]).toContain('\u001b[2mPlan\u001b[22m')
+  expect(rows[0]).toContain('\u001b[2mthink \u001b[22mhigh')
+  expect(rows[0]).toContain('\u001b[2mctx \u001b[22m~0% (500/128k)')
+  expect(rows[0]).toContain('\u001b[2m/w\u001b[22m')
+  // The totals and the cache hit's label are one dim run. A healthy hit is
+  // plain; a middling one yellow and a low one red.
+  expect(rows[0]).toContain('\u001b[2min 1k  out 100  cache hit \u001b[22m85%')
+  expect(rows[1]).toContain(`cache hit \u001b[22m${rgb(PALETTE.waiting)}48%`)
+  expect(rows[2]).toContain(`${rgb(PALETTE.failed)}12%`)
+  // Nothing on a healthy row is coloured at all.
+  expect(rows[0]).not.toContain('\u001b[38;')
+  // The context reading warms through the ramp as it fills, the label left dim.
+  for (const [index, reading] of ['~65%', '~75%', '~85%', '~95%'].entries()) {
+    expect(rows[3 + index]).toContain(`\u001b[2mctx \u001b[22m${rgb(CONTEXT_RAMP[index]!)}${reading}`)
+  }
+  // The compaction mark is dim beside a reading that turned yellow ten points under orange.
+  expect(rows[7]).toContain(`${rgb(CONTEXT_RAMP[1])}~62% (62k/100k)\u001b[39m\u001b[2m · compacts at 80%\u001b[22m`)
+})
+
+it('draws the task row neutral but for its current task\'s marker', () => {
+  const env: NodeJS.ProcessEnv = { ...process.env, FORCE_COLOR: '3', COLORTERM: 'truecolor' }
+  delete env.NO_COLOR
+  const frame = execFileSync(process.execPath, ['--import', 'tsx/esm', '--input-type=module', '--eval', `
+    import React from 'react';
+    import { renderToString } from 'ink';
+    import { Tasks } from ${JSON.stringify(new URL('../src/tasks.tsx', import.meta.url).href)};
+    import { dictionaries } from ${JSON.stringify(new URL('../src/copy.ts', import.meta.url).href)};
+    const todos = [{ text: 'Read', status: 'completed' }, { text: 'Thread the home', status: 'in_progress' }, { text: 'Test', status: 'pending' }];
+    process.stdout.write(renderToString(React.createElement(Tasks, { todos, copy: dictionaries.en, columns: 80, hint: 'Ctrl+T' }), { columns: 80 }));
+  `], { cwd: new URL('../../../../../', import.meta.url), env, encoding: 'utf8', timeout: 20_000 })
+  const rgb = (hex: string) => `\u001b[38;2;${[1, 3, 5].map(index => Number.parseInt(hex.slice(index, index + 2), 16)).join(';')}m`
+  // The rail's icon and the key are dim, the name bold, and the bar's fill plain.
+  expect(frame.startsWith('\u001b[2m\u2610\u001b[22m')).toBe(true)
+  expect(frame).toContain('\u001b[1mTasks\u001b[22m')
+  expect(frame).toMatch(/ {2}━━━━\u001b\[2m────────/)
+  expect(frame).toContain('\u001b[2mCtrl+T\u001b[22m')
+  // The one colour on the row: the marker of the task in progress.
+  expect(frame).toContain(`\u001b[1m${rgb(PALETTE.asking)}\u25b8`)
+  expect(frame.match(/\u001b\[38;2;/g)).toHaveLength(1)
+})
+
+it('colours compaction blue, by /compact or inside a turn, never the turn\'s orange, and the notice it leaves the same', () => {
+  // A child for its own colour environment, as above.
+  const env: NodeJS.ProcessEnv = { ...process.env, FORCE_COLOR: '3', COLORTERM: 'truecolor' }
+  delete env.NO_COLOR
+  const frames = execFileSync(process.execPath, ['--import', 'tsx/esm', '--input-type=module', '--eval', `
+    import React from 'react';
+    import { renderToString } from 'ink';
+    import { App } from ${JSON.stringify(new URL('../src/app.tsx', import.meta.url).href)};
+    import { Line } from ${JSON.stringify(new URL('../src/line.tsx', import.meta.url).href)};
+    import { present } from ${JSON.stringify(new URL('../src/present.ts', import.meta.url).href)};
+    import { budgetFor } from ${JSON.stringify(new URL('../src/layout.ts', import.meta.url).href)};
+    import { dictionaries } from ${JSON.stringify(new URL('../src/copy.ts', import.meta.url).href)};
+    import { emptyTranscript } from ${JSON.stringify(new URL('../src/transcript.ts', import.meta.url).href)};
+    const noop = () => {};
+    const props = {
+      files: { query: undefined, entries: [], loading: false, error: undefined }, onReferenceQuery: noop,
+      completion: { entries: [], loading: false, error: undefined }, completionLimit: 8, resultLines: 8,
+      committed: emptyTranscript, live: [], pending: [], status: 'idle', stopping: false, command: undefined,
+      notice: undefined, interaction: undefined, todos: undefined, model: 'mock/model', cwd: '/w', sessionId: 's',
+      copy: dictionaries.en, frame: 'round', quitting: false, context: undefined,
+      onSubmit: noop, onCancel: noop, onInterrupt: noop, onAnswer: noop,
+    };
+    for (const state of [{ command: '/compact', compactPhase: 'summarizing' }, { status: 'running', autoCompacting: true }]) {
+      process.stdout.write(renderToString(React.createElement(App, { ...props, ...state }), { columns: 80 }) + '\\nEND\\n');
+    }
+    // The transcript's mark where history was compacted.
+    const notice = present({ kind: 'notice', tone: 'info', text: dictionaries.en.compacted, compaction: true }, { lines: 3, unit: 'lines', more: 'more' });
+    process.stdout.write(renderToString(React.createElement(React.Fragment, null, ...notice.map((line, key) =>
+      React.createElement(Line, { line, key, budget: budgetFor({ columns: 80, rows: 40 }) }))), { columns: 80 }) + '\\nEND\\n');
+  `], { cwd: new URL('../../../../../', import.meta.url), env, encoding: 'utf8', timeout: 20_000 })
+  const rgb = (hex: string) => `\u001b[38;2;${[1, 3, 5].map(index => Number.parseInt(hex.slice(index, index + 2), 16)).join(';')}m`
+  const rendered = frames.split('END\n').filter(frame => frame.trim() !== '')
+  expect(rendered).toHaveLength(3)
+  for (const frame of rendered.slice(0, 2)) {
+    const header = frame.split('\n').find(line => line.includes(dictionaries.en.compacting))!
+    expect(header.replace(/\u001b\[[0-9;]*m/g, '')).toBe(`${FOLD_REST} ${dictionaries.en.compacting}…  ${dictionaries.en.compactSummarizing}`)
+    expect(header).toContain(`${rgb(PALETTE.compacting)}${FOLD_REST}`)
+    expect(header).toContain(`${rgb(PALETTE.compacting)}${dictionaries.en.compacting}…`)
+    expect(header).not.toContain(rgb(PALETTE.running))
+  }
+  // The notice keeps the same blue, neither dim nor bold.
+  expect(rendered[2]).toContain(`${rgb(PALETTE.compacting)}${dictionaries.en.compacted}`)
+  expect(rendered[2]).not.toContain(`\u001b[2m${dictionaries.en.compacted}`)
 })
 
 it('colours the permission boundary beside a dim label without relying on colour for its name', () => {
@@ -155,21 +263,18 @@ it('colours the permission boundary beside a dim label without relying on colour
   const frame = execFileSync(process.execPath, ['--import', 'tsx/esm', '--input-type=module', '--eval', `
     import React from 'react';
     import { renderToString } from 'ink';
-    import { StatusBar } from ${JSON.stringify(new URL('../src/line.tsx', import.meta.url).href)};
-    import { permissionTone } from ${JSON.stringify(new URL('../src/palette.ts', import.meta.url).href)};
+    import { Welcome } from ${JSON.stringify(new URL('../src/welcome.tsx', import.meta.url).href)};
+    import { dictionaries } from ${JSON.stringify(new URL('../src/copy.ts', import.meta.url).href)};
     const modes = ['read-only', 'workspace-write', 'danger-full-access', 'custom', 'auto'];
     process.stdout.write(renderToString(React.createElement(React.Fragment, null,
-      ...modes.map(value => React.createElement(StatusBar, { key: value,
-        left: [{ text: 'Model: m' }], badge: { label: 'Access', value, color: permissionTone(value) },
-        secondaryBadge: { label: 'Think', value: 'high', color: ${JSON.stringify(PALETTE.asking)} },
-        right: [], columns: 60 }))), { columns: 60 }));
+      ...modes.map(access => React.createElement(Welcome, { key: access, version: '1.0.0', heading: 'Session: s', access,
+        copy: dictionaries.en, frame: 'round', columns: 80 }))), { columns: 80 }));
   `], { cwd: new URL('../../../../../', import.meta.url), env, encoding: 'utf8', timeout: 20_000 })
   for (const [mode, tone] of [['read-only', PALETTE.reference], ['workspace-write', PALETTE.done],
     ['danger-full-access', PALETTE.failed], ['custom', PALETTE.waiting], ['auto', PALETTE.waiting]] as const) {
     const rgb = [1, 3, 5].map(index => Number.parseInt(tone.slice(index, index + 2), 16)).join(';')
-    expect(frame).toContain(`Model: m  \u001b[2mAccess \u001b[22m\u001b[38;2;${rgb}m${mode}`)
+    expect(frame).toContain(`\u001b[2mAccess \u001b[22m\u001b[38;2;${rgb}m${mode}`)
   }
-  expect(frame).toContain('\u001b[2mThink \u001b[22m\u001b[38;2;14;165;233mhigh')
 })
 
 it('dims the subagents row and draws each child in its own tone on the sheet', () => {
@@ -194,4 +299,25 @@ it('dims the subagents row and draws each child in its own tone on the sheet', (
   expect(names.map(part => [part.text, part.color])).toEqual(entries.map((entry, index) => [entry.label, AGENT_TONES[index]]))
   expect(new Set(AGENT_TONES).size).toBe(AGENT_TONES.length)
   for (const tone of AGENT_TONES) expect(Object.values(PALETTE)).not.toContain(tone)
+})
+
+it('colours the git field\'s staged paths green, unstaged yellow, and conflicts red, and leaves the rest dim', () => {
+  // A child for its own colour environment, as above.
+  const env: NodeJS.ProcessEnv = { ...process.env, FORCE_COLOR: '3', COLORTERM: 'truecolor' }
+  delete env.NO_COLOR
+  const frame = execFileSync(process.execPath, ['--import', 'tsx/esm', '--input-type=module', '--eval', `
+    import React from 'react';
+    import { renderToString } from 'ink';
+    import { StatusBar } from ${JSON.stringify(new URL('../src/line.tsx', import.meta.url).href)};
+    import { gitField } from ${JSON.stringify(new URL('../src/git.ts', import.meta.url).href)};
+    const git = gitField({ branch: 'main', detached: false, ahead: 1, behind: 0, staged: 2, modified: 3, untracked: 4, conflicted: 5 }, 'unicode');
+    process.stdout.write(renderToString(React.createElement(StatusBar, { fields: [git], columns: 100 }), { columns: 100 }));
+  `], { cwd: new URL('../../../../../', import.meta.url), env, encoding: 'utf8', timeout: 20_000 })
+  const rgb = (hex: string) => `\u001b[38;2;${[1, 3, 5].map(index => Number.parseInt(hex.slice(index, index + 2), 16)).join(';')}m`
+  expect(frame).toContain(`\u001b[2m\u2387 \u001b[22mmain`)
+  expect(frame).toContain(`${rgb(PALETTE.failed)} !5`)
+  expect(frame).toContain(`${rgb(PALETTE.done)} +2`)
+  expect(frame).toContain(`${rgb(PALETTE.waiting)} ~3`)
+  // Untracked paths and the distance from the upstream share one dim run.
+  expect(frame).toContain('\u001b[2m ?4 \u21911\u001b[22m')
 })

@@ -1,6 +1,9 @@
 /** Context occupancy follows the meter's public view through growth and compaction. */
+import { mkdir, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { expect, it } from 'vitest'
 import TokenMeter from '@deepseek-ai/dsh-token-meter'
+import BasicCompaction from '@deepseek-ai/dsh-compaction-basic'
 import { CompactionId } from '@deepseek-ai/dsh-compaction'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { AgentHandle } from '@deepseek-ai/dsh-agent'
@@ -17,6 +20,138 @@ it('does not pair one route’s sample with a changed capacity on the same route
   expect(contextFor(pressure, 'mock/model')).toBeUndefined()
   expect(contextFor({ ...pressure, sampledContextWindow: 64_000 }, 'mock/model'))
     .toEqual({ used: 900, window: 64_000 })
+})
+
+it('marks the lowest trigger engines report for the displayed route, and none when none reports one', () => {
+  const route = { provider: 'mock', model: 'model' }
+  const pressure = { projectedTokens: 900, contextWindow: 8192, sampledContextWindow: 8192, requestRoute: route, sampledRoute: route }
+  const asked: unknown[] = []
+  const engine = (threshold: number | undefined) => ({
+    pressureThreshold: (target: typeof route, window: number) => { asked.push([target, window]); return threshold },
+  })
+  expect(contextFor(pressure, 'mock/model')).toEqual({ used: 900, window: 8192 })
+  expect(contextFor(pressure, 'mock/model', [undefined, engine(undefined)])).toEqual({ used: 900, window: 8192 })
+  expect(contextFor(pressure, 'mock/model', [engine(6553), undefined, engine(4096)]))
+    .toEqual({ used: 900, window: 8192, compactAt: 4096 })
+  expect(asked).toEqual([[route, 8192], [route, 8192], [route, 8192]])
+  // An unpaired reading asks no engine.
+  expect(contextFor({ ...pressure, sampledContextWindow: 4096 }, 'mock/model', [engine(6553)])).toBeUndefined()
+  expect(asked).toHaveLength(3)
+})
+
+it('marks where the composed engine compacts the displayed route through a model switch, and drops it with the engine', async () => {
+  const fixture = await harness()
+  let controller: SessionController | undefined
+  let handle: AgentHandle | undefined
+  let repaints = 0
+  try {
+    await fixture.ctx.plugin(TokenMeter)
+    const engine = await fixture.ctx.plugin(BasicCompaction, {
+      thresholdRatio: 0.6, modelPolicies: [{ provider: 'mock', model: 'other', thresholdRatio: 0.5 }],
+    })
+    const resolve = fixture.model.resolveModel.bind(fixture.model)
+    fixture.model.resolveModel = async (provider, model, signal) => ({
+      ...await resolve(provider, model, signal), context: { contextWindow: model === 'other' ? 64_000 : 8192 },
+    })
+    handle = await openSession(fixture.ctx, {}, new AbortController().signal, (agent, selection) => {
+      controller = new SessionController(fixture.ctx, agent, dictionaries.en, [], () => { repaints += 1 },
+        { attachmentMaxBytes: 1048576, attachmentLimit: 8 }, selection)
+    })
+    await controller!.replay(new AbortController().signal)
+    expect(controller!.view.context).toBeUndefined()
+    fixture.model.response = async function* () {
+      yield { type: 'usage', usage: { inputTokens: 900, outputTokens: 20 } }
+      yield* textResponse('First answer')
+    }
+    controller!.submit('First question')
+    await handle.agent.whenIdle()
+    const compaction = fixture.ctx.get('compaction')!
+    expect(controller!.view.context?.compactAt).toBe(compaction.pressureThreshold({ provider: 'mock', model: 'model' }, 8192))
+    expect(controller!.view.context).toMatchObject({ window: 8192, compactAt: 4915 })
+
+    // The next route's own policy applies once that route reports usage.
+    controller!.submit('/model mock/other')
+    await controller!.drain()
+    expect(controller!.view.context).toBeUndefined()
+    fixture.model.response = async function* () {
+      yield { type: 'usage', usage: { inputTokens: 1250, outputTokens: 30 } }
+      yield* textResponse('Second answer')
+    }
+    controller!.submit('Use the other model')
+    await handle.agent.whenIdle()
+    expect(controller!.view.context).toMatchObject({ window: 64_000, compactAt: 32_000 })
+
+    // A profile reload disposes the engine before recreating it; with none
+    // composed, nothing is marked, and the swap alone repaints.
+    const before = repaints
+    await engine.dispose()
+    expect(repaints).toBeGreaterThan(before)
+    expect(controller!.view.context?.window).toBe(64_000)
+    expect(controller!.view.context).not.toHaveProperty('compactAt')
+  } finally {
+    controller?.close()
+    try { await controller?.drain() } finally { await handle?.dispose(); await fixture.dispose() }
+  }
+})
+
+/**
+ * Node imports preset rows outside Vitest's module graph, so this preset-local
+ * row hands the preset the engine class the test loaded rather than a second
+ * copy of the runtime.
+ */
+const ENGINE = Symbol.for('dsh-tui-test/context-compaction-basic')
+const ENGINE_ROW = 'export default globalThis[Symbol.for(\'dsh-tui-test/context-compaction-basic\')]\n'
+
+it('marks the lower trigger of the host engine and a preset’s own, and the host’s alone under a preset without one', async () => {
+  const fixture = await harness()
+  const opened: { handle: AgentHandle; controller: SessionController }[] = []
+  Reflect.set(globalThis, ENGINE, BasicCompaction)
+  try {
+    await fixture.ctx.plugin(TokenMeter)
+    await fixture.ctx.plugin(BasicCompaction, { thresholdRatio: 0.7 })
+    // As the shipped presets do, each mounts its own engine behind an `isolate` realm.
+    for (const [id, ratio] of [['audit', 0.5], ['other', 0.9]] as const) {
+      await writeFile(join(fixture.root, 'presets', id, 'compaction-basic.mjs'), ENGINE_ROW)
+      await writeFile(join(fixture.root, 'presets', id, 'agent.cordis.yml'), [
+        '- id: compaction-basic', '  name: ./compaction-basic.mjs', '  isolate:', '    compaction: true',
+        '  config:', `    thresholdRatio: ${ratio}`, '',
+      ].join('\n'))
+    }
+    // Like the shipped `minimal`, this preset mounts no compaction of its own.
+    await mkdir(join(fixture.root, 'presets', 'minimal'))
+    await writeFile(join(fixture.root, 'presets', 'minimal', 'agent.cordis.yml'), '[]\n')
+    const route = { provider: 'mock', model: 'model' }
+    expect(fixture.ctx.get('compaction')!.pressureThreshold(route, 8192)).toBe(5734)
+
+    for (const [preset, own, compactAt] of [['audit', 4096, 4096], ['other', 7372, 5734], ['minimal', undefined, 5734]] as const) {
+      let controller!: SessionController
+      const handle = await openSession(fixture.ctx, { preset }, new AbortController().signal, agent => {
+        controller = new SessionController(fixture.ctx, agent, dictionaries.en, [], () => {},
+          { attachmentMaxBytes: 1048576, attachmentLimit: 8 })
+      })
+      opened.push({ handle, controller })
+      await controller.replay(new AbortController().signal)
+      expect(fixture.ctx.agentPresets.serviceFor(handle.agent, 'compaction')?.pressureThreshold(route, 8192), preset).toBe(own)
+      fixture.model.response = async function* () {
+        yield { type: 'usage', usage: { inputTokens: 900, outputTokens: 20 } }
+        yield* textResponse('An answer')
+      }
+      controller.submit('A question')
+      await handle.agent.whenIdle()
+      expect(controller.view.context, preset).toMatchObject({ window: 8192, compactAt })
+    }
+  } finally {
+    try {
+      for (const { controller, handle } of opened) {
+        controller.close()
+        await controller.drain()
+        await handle.dispose()
+      }
+    } finally {
+      await fixture.dispose()
+      Reflect.deleteProperty(globalThis, ENGINE)
+    }
+  }
 })
 
 it('reports projected context after output and reduces it immediately after compaction', async () => {

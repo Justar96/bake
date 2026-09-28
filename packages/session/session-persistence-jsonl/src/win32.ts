@@ -11,22 +11,31 @@
  * @module dsh-session-persistence-jsonl/win32
  */
 
-import { createHash } from 'node:crypto'
 import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { join, parse, resolve, toNamespacedPath } from 'node:path'
 
 type MoveFileExW = (existing: string, replacement: string, flags: number) => number
-type CreateSemaphoreW = (security: null, initial: number, maximum: number, name: string) => number
-type WaitForSingleObject = (handle: number, milliseconds: number) => number
-type ReleaseSemaphore = (handle: number, count: number, previous: null) => number
-type CloseHandle = (handle: number) => number
+type NativeHandle = bigint
+type CreateFileW = (
+  path: string, access: number, share: number, security: null,
+  disposition: number, flags: number, template: null,
+) => NativeHandle | null
+type LockFileEx = (
+  handle: NativeHandle, flags: number, reserved: number,
+  bytesLow: number, bytesHigh: number, overlapped: Buffer,
+) => number
+type UnlockFileEx = (
+  handle: NativeHandle, reserved: number,
+  bytesLow: number, bytesHigh: number, overlapped: Buffer,
+) => number
+type CloseHandle = (handle: NativeHandle) => number
 type GetLastError = () => number
 
 interface Win32Bindings {
   moveFileExW: MoveFileExW
-  createSemaphoreW: CreateSemaphoreW
-  waitForSingleObject: WaitForSingleObject
-  releaseSemaphore: ReleaseSemaphore
+  createFileW: CreateFileW
+  lockFileEx: LockFileEx
+  unlockFileEx: UnlockFileEx
   closeHandle: CloseHandle
   getLastError: GetLastError
 }
@@ -37,30 +46,44 @@ interface Win32ErrnoException extends NodeJS.ErrnoException {
 }
 
 const MOVEFILE_WRITE_THROUGH = 0x00000008
-const WAIT_OBJECT_0 = 0
-const WAIT_TIMEOUT = 0x00000102
+const GENERIC_READ = 0x80000000
+const GENERIC_WRITE = 0x40000000
+const FILE_SHARE_READ = 0x00000001
+const FILE_SHARE_WRITE = 0x00000002
+const OPEN_ALWAYS = 4
+const LOCKFILE_FAIL_IMMEDIATELY = 0x1
+const LOCKFILE_EXCLUSIVE_LOCK = 0x2
 const ERROR_FILE_NOT_FOUND = 2
 const ERROR_PATH_NOT_FOUND = 3
 const ERROR_ACCESS_DENIED = 5
 const ERROR_NOT_SAME_DEVICE = 17
 const ERROR_SHARING_VIOLATION = 32
+const ERROR_LOCK_VIOLATION = 33
 const ERROR_FILE_EXISTS = 80
 const ERROR_INVALID_NAME = 123
 const ERROR_ALREADY_EXISTS = 183
 
 let bindings: Win32Bindings | undefined
 
+/** Open lock file and zeroed byte-range record retained until release. */
+export interface Win32LockHandle {
+  readonly handle: NativeHandle
+  readonly overlapped: Buffer
+  readonly path: string
+}
+
 /** Load the small Win32 API lazily so non-Windows processes never load Koffi. */
 async function win32(): Promise<Win32Bindings> {
   if (bindings !== undefined) return bindings
   const koffi = (await import('koffi')).default
   const kernel32 = koffi.load('kernel32.dll')
+  const pointer = 'void*'
   bindings = {
     moveFileExW: kernel32.func('__stdcall', 'MoveFileExW', 'int', ['str16', 'str16', 'uint']) as MoveFileExW,
-    createSemaphoreW: kernel32.func('__stdcall', 'CreateSemaphoreW', 'intptr', ['void*', 'int', 'int', 'str16']) as CreateSemaphoreW,
-    waitForSingleObject: kernel32.func('__stdcall', 'WaitForSingleObject', 'uint', ['intptr', 'uint']) as WaitForSingleObject,
-    releaseSemaphore: kernel32.func('__stdcall', 'ReleaseSemaphore', 'int', ['intptr', 'int', 'void*']) as ReleaseSemaphore,
-    closeHandle: kernel32.func('__stdcall', 'CloseHandle', 'int', ['intptr']) as CloseHandle,
+    createFileW: kernel32.func('__stdcall', 'CreateFileW', pointer, ['str16', 'uint32', 'uint32', pointer, 'uint32', 'uint32', pointer]) as CreateFileW,
+    lockFileEx: kernel32.func('__stdcall', 'LockFileEx', 'int', [pointer, 'uint32', 'uint32', 'uint32', 'uint32', pointer]) as LockFileEx,
+    unlockFileEx: kernel32.func('__stdcall', 'UnlockFileEx', 'int', [pointer, 'uint32', 'uint32', 'uint32', pointer]) as UnlockFileEx,
+    closeHandle: kernel32.func('__stdcall', 'CloseHandle', 'int', [pointer]) as CloseHandle,
     getLastError: kernel32.func('__stdcall', 'GetLastError', 'uint', []) as GetLastError,
   }
   return bindings
@@ -76,6 +99,7 @@ function errnoCode(win32Code: number): string {
     case ERROR_NOT_SAME_DEVICE:
       return 'EXDEV'
     case ERROR_SHARING_VIOLATION:
+    case ERROR_LOCK_VIOLATION:
       return 'EBUSY'
     case ERROR_FILE_EXISTS:
     case ERROR_ALREADY_EXISTS:
@@ -138,38 +162,45 @@ export async function publishNewFileWin32(existing: string, replacement: string)
 }
 
 /**
- * Acquire the session write lock as a named kernel semaphore (count 1) whose
- * name is derived from the canonical lock path. A kernel object never touches
- * the filesystem, so readers, searches, and directory removal proceed freely
- * while the lock is held; a second acquirer's zero-timeout wait times out
- * (`EBUSY`); and when the last handle closes — including on any process
- * death — the object is destroyed, so a successor's create starts fresh.
- * @param path - the lock file path the name is derived from (case-folded:
- *   Windows paths are case-insensitive).
- * @returns the open semaphore handle, released via {@link releaseLockHandleWin32}.
+ * Acquire an immediate one-byte exclusive file lock on `session.lock`.
+ * CreateFileW allows readers and writers but not deletion, so another process
+ * cannot replace the lock path while the handle is open. The file lock spans
+ * Windows login sessions and the kernel drops it if the process dies.
+ * @param path - the session's lock file path.
+ * @returns the held file handle and OVERLAPPED record for release.
  */
-export async function acquireLockHandleWin32(path: string): Promise<number> {
+export async function acquireLockHandleWin32(path: string): Promise<Win32LockHandle> {
   const api = await win32()
-  const name = `Local\\dsh-session-lock-${createHash('sha256').update(resolve(path).toLowerCase()).digest('hex')}`
-  const handle = api.createSemaphoreW(null, 1, 1, name)
-  if (handle === 0) throw win32Error('CreateSemaphoreW', api.getLastError(), path, name)
-  const wait = api.waitForSingleObject(handle, 0)
-  if (wait === WAIT_OBJECT_0) return handle
-  api.closeHandle(handle)
-  if (wait === WAIT_TIMEOUT) throw win32Error('WaitForSingleObject', ERROR_SHARING_VIOLATION, path, name)
-  throw win32Error('WaitForSingleObject', api.getLastError(), path, name)
+  const nativePath = toNamespacedPath(path)
+  const handle = api.createFileW(nativePath, (GENERIC_READ | GENERIC_WRITE) >>> 0,
+    FILE_SHARE_READ | FILE_SHARE_WRITE, null, OPEN_ALWAYS, 0, null)
+  if (handle === null || handle === 0n || handle === -1n || handle === 0xFFFFFFFFFFFFFFFFn) {
+    throw win32Error('CreateFileW', api.getLastError(), path, path)
+  }
+  // Koffi's pointer argument needs a real, zeroed OVERLAPPED record even for
+  // a synchronous handle. Offset 0 and a one-byte range select one lock.
+  const overlapped = Buffer.alloc(32)
+  if (api.lockFileEx(handle, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY,
+    0, 1, 0, overlapped) === 0) {
+    const code = api.getLastError()
+    api.closeHandle(handle)
+    throw win32Error('LockFileEx', code, path, path)
+  }
+  return { handle, overlapped, path }
 }
 
 /**
- * Release a lock from {@link acquireLockHandleWin32}: restore the semaphore
- * count and close the handle (the object dies with its last handle).
- * @param handle - the open semaphore handle.
+ * Release the byte-range lock and close its file handle. The lock file stays
+ * on disk so later writers address the same file.
+ * @param held - the lock returned by {@link acquireLockHandleWin32}.
  */
-export async function releaseLockHandleWin32(handle: number): Promise<void> {
+export async function releaseLockHandleWin32(held: Win32LockHandle): Promise<void> {
   const api = await win32()
-  const released = api.releaseSemaphore(handle, 1, null)
-  const closed = api.closeHandle(handle)
-  if (released === 0 || closed === 0) throw win32Error('ReleaseSemaphore', api.getLastError(), `handle:${handle}`, `handle:${handle}`)
+  const unlocked = api.unlockFileEx(held.handle, 0, 1, 0, held.overlapped)
+  const unlockCode = unlocked === 0 ? api.getLastError() : 0
+  const closed = api.closeHandle(held.handle)
+  if (unlocked === 0) throw win32Error('UnlockFileEx', unlockCode, held.path, held.path)
+  if (closed === 0) throw win32Error('CloseHandle', api.getLastError(), held.path, held.path)
 }
 
 /**

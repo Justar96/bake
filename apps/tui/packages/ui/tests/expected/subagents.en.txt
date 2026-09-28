@@ -2,7 +2,7 @@
 
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-> ▌Ask anything
+> ▌Ask anything · / commands · @ files
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-  ↓ Subagents: 5 · 1 Working · 1 Unreadable
-  Model: model  /workspace
+↳ Subagents 5 · 1 working · 1 unreadable                                                      Ctrl+G
+  model  /workspace

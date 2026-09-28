@@ -36,9 +36,6 @@
       "path": "../../jobs/jobs"
     },
     {
-      "path": "../../core/system-prompt"
-    },
-    {
       "path": "../../shell/shell-env"
     },
     {

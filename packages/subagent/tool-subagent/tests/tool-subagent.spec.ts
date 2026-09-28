@@ -212,6 +212,32 @@ describe('dsh-tool-subagent', () => {
     expect(text(viaAcp)).toBe('from acp')
   })
 
+  it('titles a delegation by its short description, never by its prompt', async () => {
+    const ctx = await projectedContext()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(SubagentRuntime)
+    await mock.mountScriptedProvider(ctx, { name: 'spawn', reply: 'done' })
+    await ctx.plugin(tool, { provider: 'spawn', toolName: 'subagent' })
+    await ctx.plugin(tool, { provider: 'spawn', toolName: 'subagent_fork' })
+    const prompt = 'Read the auth module.\n\n'.concat('Then explain every function that touches tokens. '.repeat(40))
+    for (const name of ['subagent', 'subagent_fork']) {
+      const definition = ctx.tools.get(name)!
+      expect(definition.presentCall?.({ description: 'Explore auth flow', prompt, run_in_background: true }))
+        .toEqual({ card: 'generic', title: 'Explore auth flow', kind: 'other' })
+      // A blank description yields to the prompt's first line, marked as cut.
+      expect(definition.presentCall?.({ description: ' ', prompt }))
+        .toEqual({ card: 'generic', title: 'Read the auth module. \u2026', kind: 'other' })
+      const long = definition.presentCall?.({ description: 'word '.repeat(40), prompt })
+      expect(long?.card === 'generic' ? Array.from(long.title) : []).toHaveLength(80)
+      expect(long?.title.endsWith('\u2026')).toBe(true)
+      // Obsolete or invalid logged arguments keep the generic rendering.
+      expect(definition.presentCall?.({ prompt })).toBeUndefined()
+      expect(definition.presentCall?.({ description: 3, prompt })).toBeUndefined()
+      expect(definition.presentResult).toBeUndefined()
+    }
+  })
+
   it('treats an unknown (plugin-added) stop reason as an isError result', async () => {
     // SubagentStopReason is merge-extensible; the tool's stopReasonError default
     // arm must treat an unrecognized terminal reason as a failure, not success.
@@ -258,8 +284,26 @@ describe('dsh-tool-subagent', () => {
       provider: 'alpha',
       model: 'child-model',
     })
-    expect(ctx.tools.schemas(modelSelectionSetupAgent(ctx)).find(schema => schema.name === 'subagent')?.description)
-      .toContain('this provider\'s route defaults')
+    const schema = ctx.tools.schemas(modelSelectionSetupAgent(ctx)).find(candidate => candidate.name === 'subagent')!
+    expect(schema.description).toContain(
+      ' Model choice is optional: omit `provider`, `model`, and `reasoning_effort` to use '
+      + 'the configured subagent defaults and this tool\'s default route. To choose, look up routes and '
+      + 'efforts with `list_subagent_models`, then pass `provider` and `model` together. If you change the '
+      + 'route without `reasoning_effort`, the new model\'s default effort applies.',
+    )
+    const props = (schema.parameters as { properties: Record<string, { description: string }> }).properties
+    expect(props['provider']!.description).toBe(
+      'LLM provider for the subagent. Pass it with model; omit both to use the configured defaults or this '
+      + 'tool\'s default route.',
+    )
+    expect(props['model']!.description).toBe(
+      'Model id for that provider. Pass it with provider; omit both to use the configured defaults or this '
+      + 'tool\'s default route.',
+    )
+    expect(props['reasoning_effort']!.description).toBe(
+      'Reasoning effort for the subagent\'s model. Omit to use a compatible configured effort or the '
+      + 'model\'s default.',
+    )
     expect(seen?.agentOptions).toEqual({
       provider: 'alpha',
       model: 'child-model',
@@ -355,7 +399,7 @@ describe('dsh-tool-subagent', () => {
     expect(text(result)).toBe('late but fine')
   })
 
-  it('keeps continuable guidance empty while its provider is absent', async () => {
+  it('keeps delegation guidance out of the system prompt while its provider is absent', async () => {
     const ctx = await projectedContext()
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
@@ -367,7 +411,7 @@ describe('dsh-tool-subagent', () => {
     })
 
     const assembly = await ctx.systemPrompt.assemble()
-    expect(assembly.sections.find(section => section.name === 'tool:subagent')?.text).toBe('')
+    expect(assembly.sections.some(section => section.name.includes('subagent'))).toBe(false)
     expect(ctx.tools.schemas().some(schema => schema.name === 'subagent')).toBe(false)
   })
 
@@ -396,8 +440,8 @@ describe('dsh-tool-subagent', () => {
     await ctx.plugin(ToolRuntime)
     await ctx.plugin(SubagentRuntime)
 
-    // Arm 1: a mounted tool and its prompt section die with the plugin fiber;
-    // the provider survives.
+    // Arm 1: a mounted tool dies with the plugin fiber, which never adds a
+    // prompt section; the provider survives.
     ctx.subagents.registerProvider({
       name: 'continuable',
       capabilities: { agentOptions: false, outputSchema: false, depthLimit: false, toolFilter: false, persona: false },
@@ -411,10 +455,9 @@ describe('dsh-tool-subagent', () => {
       maxDepth: 'provider-managed',
     })
     expect(ctx.tools.schemas().some(s => s.name === 'subagent')).toBe(true)
-    expect((await ctx.systemPrompt.assemble()).sections.some(s => s.name === 'tool:subagent')).toBe(true)
+    expect((await ctx.systemPrompt.assemble()).sections.some(s => s.name.includes('subagent'))).toBe(false)
     await mounted.dispose()
     expect(ctx.tools.schemas().some(s => s.name === 'subagent')).toBe(false)
-    expect((await ctx.systemPrompt.assemble()).sections.some(s => s.name === 'tool:subagent')).toBe(false)
     expect(ctx.subagents.getProvider('continuable')).toBeDefined()
 
     // Arm 2: a fiber disposed while WAITING must not react to the provider
@@ -445,22 +488,43 @@ describe('dsh-tool-subagent', () => {
   it('derives spawn-shaped wording from a fresh-conversation provider (default mock)', async () => {
     const ctx = await setup({ provider: 'mock' })
     const schema = ctx.tools.schemas().find(s => s.name === 'subagent')!
-    expect(schema.description).toContain('does not see this conversation')
+    // One-shot background: foreground by default, and a background start is a job.
+    expect(schema.description).toBe(
+      'Delegate a self-contained task, such as research, a scoped implementation, or an analysis, to a '
+      + 'subagent that works in its own context, so the work does not fill this conversation. You get its '
+      + 'result, not its intermediate steps. It does not see this conversation, so give it a complete, '
+      + 'standalone prompt. This call waits for the result by default. Set `run_in_background: true` to '
+      + 'return a job id; collect with `job_output` and stop with `job_kill`.',
+    )
     const props = (schema.parameters as { properties: Record<string, { description: string }> }).properties
-    expect(props['prompt']!.description).toContain('include everything it needs')
+    expect(props['prompt']!.description).toBe(
+      'The complete, self-contained task. The subagent does not see this conversation, so include '
+      + 'everything it needs.',
+    )
+    expect(props['run_in_background']!.description).toBe(
+      'Run as a background job and return its job id. Defaults to false; collect with job_output or stop '
+      + 'with job_kill.',
+    )
   })
 
   it('derives inherited-context wording from a seeded-conversation provider', async () => {
     const ctx = await setup({
       provider: 'mock',
       toolName: 'subagent',
+      enableRunInBackground: false,
     }, { inheritsParentContext: true })
     const schema = ctx.tools.schemas().find(s => s.name === 'subagent')!
-    expect(schema.description).toContain('inherits this conversation')
-    expect(schema.description).not.toContain('does not see this conversation')
-    expect(schema.description).not.toContain('can prevent provider-side reuse of the inherited conversation prefix')
+    // Background disabled: the call always waits.
+    expect(schema.description).toBe(
+      'Delegate a task to a subagent that inherits this conversation\'s completed turns, but not the '
+      + 'current one. Use it for work that builds on this context, such as a follow-up analysis, a review, '
+      + 'or a continuation, without filling this conversation with the work. You get its result, not its '
+      + 'intermediate steps. This call waits for the subagent and returns its result.',
+    )
     const props = (schema.parameters as { properties: Record<string, { description: string }> }).properties
-    expect(props['prompt']!.description).toContain('completed turns')
+    expect(props['prompt']!.description).toBe(
+      'The task. The subagent already sees this conversation\'s completed turns, so state only what is new.',
+    )
   })
 
   it('disposes the run on the success path (no leaked child)', async () => {
@@ -659,13 +723,13 @@ describe('dsh-tool-subagent', () => {
     // load with "cannot get property … without inject". Guard the shape directly.
     expect('default' in tool).toBe(false)
     expect(tool.name).toBe('tool-subagent')
-    expect(tool.inject).toEqual(['tools', 'subagents', 'systemPrompt', 'sessionProjections'])
+    expect(tool.inject).toEqual(['tools', 'subagents', 'sessionProjections'])
 
     const loader = Object.create(Loader.prototype) as Loader
     const unwrapped = loader.unwrapExports(tool) as Record<string, unknown>
     expect(unwrapped).toBe(tool)
     expect(unwrapped.name).toBe('tool-subagent')
-    expect(unwrapped.inject).toEqual(['tools', 'subagents', 'systemPrompt', 'sessionProjections'])
+    expect(unwrapped.inject).toEqual(['tools', 'subagents', 'sessionProjections'])
     expect(typeof unwrapped.apply).toBe('function')
     expect(unwrapped.Config).toBeDefined()
   })
@@ -1176,13 +1240,18 @@ describe('dsh-tool-subagent background mode', () => {
 
 describe('dsh-tool-subagent continuable background mode', () => {
   const roots: string[] = []
-  afterEach(() => {
+  const contexts: Context[] = []
+  afterEach(async () => {
+    // Dispose first: the persistence teardown closes every session handle and
+    // releases its session.lock before the root disappears.
+    for (const ctx of contexts.splice(0).reverse()) await ctx.fiber.dispose()
     for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
   })
 
   /** Boot the real continuable stack without any model-facing follow-up adapter. */
   async function continuableSetup() {
     const ctx = new Context()
+    contexts.push(ctx)
     await mountAgentLoopTestDependencies(ctx)
     const root = mkdtempSync(path.join(tmpdir(), 'dsh-tool-subagent-continuable-'))
     roots.push(root)
@@ -1210,25 +1279,30 @@ describe('dsh-tool-subagent continuable background mode', () => {
     })).toEqual({ kind: 'parallel' })
   })
 
-  it('defaults continuable delegation to background and returns only its durable id', async () => {
+  it('defaults continuable delegation to background and returns only its agent id', async () => {
     const { ctx, parent } = await continuableSetup()
     const schema = ctx.tools.schemas().find(s => s.name === 'subagent')!
-    // Continuable delegation has no Task, so the schema promises no collection.
-    expect(schema.description).not.toContain('job_output')
-    expect(schema.description).not.toContain('job_kill')
-    expect(schema.description).toContain('send_message')
-    expect(schema.description).toContain('steers the child\'s nearest step while it is running')
-    expect(schema.description).not.toContain('send_message` starts a later turn')
-    expect(schema.description).toContain('runs in the background by default')
-    expect(schema.description).not.toContain('never poll or wait on it')
+    // The description is the only home for delegation guidance, and continuable
+    // delegation has no Task, so it promises no job_output collection.
+    expect(schema.description).toBe(
+      'Delegate a self-contained task, such as research, a scoped implementation, or an analysis, to a '
+      + 'subagent that works in its own context, so the work does not fill this conversation. You get its '
+      + 'result, not its intermediate steps. It does not see this conversation, so give it a complete, '
+      + 'standalone prompt. It runs in the background by default and returns its agent id right away. '
+      + 'Start independent subagents in the same message and keep working while they run. When one '
+      + 'finishes, you get a notice with its outcome and closing message. It stays available afterward: '
+      + '`send_message` steers it while it is running and otherwise starts a new turn. Set '
+      + '`run_in_background: false` only when your next step needs the result.',
+    )
     const properties = (schema.parameters as {
       properties: Record<string, { description?: string }>
     }).properties
-    expect(properties.run_in_background?.description).toContain('Defaults to true')
+    expect(properties.run_in_background?.description).toBe(
+      'Run in the background and return the agent id right away. Defaults to true; set false to wait for '
+      + 'the result when your next step needs it.',
+    )
     const assembly = await ctx.systemPrompt.assemble(assembleContextFor(parent))
-    const guidance = assembly.sections.find(section => section.name === 'tool:subagent')
-    expect(guidance?.text).toContain('Use subagent in the background by default')
-    expect(guidance?.text).toContain('runtime sends you a notice containing its outcome')
+    expect(assembly.sections.some(section => section.name.includes('subagent'))).toBe(false)
 
     const started = await callSubagent(
       ctx,
@@ -1249,15 +1323,6 @@ describe('dsh-tool-subagent continuable background mode', () => {
     const loaded = await loadStoredSession(ctx.sessionPersistence, SessionId(childId!))
     expect(loaded.events.some(event => event.type === 'subagent/descriptor')).toBe(true)
     expect(loaded.events.some(event => event.type === 'assistant/message')).toBe(true)
-  })
-
-  it('hides continuable guidance when the current agent cannot see the tool', async () => {
-    const { ctx, parent } = await continuableSetup()
-    parent.ctx.tools.restrict({ deny: ['subagent'] })
-
-    expect(ctx.tools.get('subagent', parent)).toBeUndefined()
-    const assembly = await ctx.systemPrompt.assemble(assembleContextFor(parent))
-    expect(assembly.sections.find(section => section.name === 'tool:subagent')?.text).toBe('')
   })
 
   it('waits for a continuable provider only when run_in_background is explicitly false', async () => {

@@ -21,6 +21,11 @@ import { canOpenNativePath, nativeFileManager, revealNativePath, openNativePath,
 
 const signal = () => new AbortController().signal
 
+/** Whether this host carries WSL markers, which route Linux desktop actions to Windows. */
+const ambientWsl = (): boolean => [process.env.WSL_DISTRO_NAME, process.env.WSL_INTEROP]
+  .some(value => value !== undefined && value !== '')
+  || osRelease().toLowerCase().includes('microsoft')
+
 describe('native path opener', () => {
   it('opens with macOS open(1)', async () => {
     const run = vi.fn<PathOpenerRunner>(async () => ({ stdout: '', stderr: '' }))
@@ -136,14 +141,11 @@ describe('native path opener', () => {
   })
 
   it('samples ambient WSL markers and kernel release when no fact overrides are supplied', async () => {
-    const ambientWsl = [process.env.WSL_DISTRO_NAME, process.env.WSL_INTEROP]
-      .some(value => value !== undefined && value !== '')
-      || osRelease().toLowerCase().includes('microsoft')
     const run = vi.fn<PathOpenerRunner>(async command => command === 'wslpath'
       ? { stdout: 'C:\\settings.yaml\n', stderr: '' }
       : { stdout: '', stderr: '' })
     await openNativePath('/tmp/ambient-facts.yaml', signal(), { platform: 'linux', run })
-    expect(run.mock.calls[0]?.[0]).toBe(ambientWsl ? 'wslpath' : 'xdg-open')
+    expect(run.mock.calls[0]?.[0]).toBe(ambientWsl() ? 'wslpath' : 'xdg-open')
   })
 
   it('runs the default command adapter without a shell and preserves command failures', async () => {
@@ -368,15 +370,24 @@ describe('native file manager', () => {
     await expect(revealNativePath('/file', AbortSignal.abort(new Error('cancelled')), { run })).rejects.toThrow('cancelled')
     expect(run).not.toHaveBeenCalled()
     await expect(revealNativePath('/file', signal(), { platform: 'darwin', run })).rejects.toThrow('desktop failed')
-    expect(nativeFileManager()).toBe(process.platform === 'darwin' ? 'finder' : process.platform === 'win32' ? 'explorer' : 'directory')
+    // The ambient default is host-dependent: WSL reveals through the Windows desktop.
+    const ambient = process.platform === 'darwin' ? 'finder'
+      : process.platform === 'win32' || (process.platform === 'linux' && ambientWsl()) ? 'explorer'
+        : process.platform === 'linux' ? 'directory' : null
+    expect(nativeFileManager()).toBe(ambient)
   })
 })
 
 
 it('uses the native runner for a file-manager handoff when none is injected', async () => {
-  execFileMock.mockImplementation((_command, _args, _options, callback) => { callback(null, '', '') })
+  execFileMock.mockReset()
+  // WSL hosts translate the path first; answer that like wslpath would so every host reaches its launcher.
+  execFileMock.mockImplementation((command, _args, _options, callback) => {
+    callback(null, command === 'wslpath' ? 'C:\\tmp\\report.txt\n' : '', '')
+  })
   await revealNativePath('/tmp/report.txt', signal())
-  expect(execFileMock).toHaveBeenCalled()
+  const launcher = nativeFileManager() === 'finder' ? 'open' : nativeFileManager() === 'explorer' ? 'explorer.exe' : 'xdg-open'
+  expect(execFileMock.mock.calls.at(-1)?.[0]).toBe(launcher)
 })
 
 

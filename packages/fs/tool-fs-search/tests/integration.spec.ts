@@ -56,7 +56,7 @@ describe('search tools over the real subprocess service + the packaged rg', () =
     await writeFile(join(dir, '.hidden.ts'), 'export const hidden = 3\n')
     await writeFile(join(dir, '.git', 'config.ts'), 'never listed\n')
     await writeFile(join(dir, 'spaced dir', "wei'rd name.ts"), 'const inside = true\n')
-    // Deterministic --sort=modified order: alpha oldest, beta newest.
+    // Deterministic newest-first (--sortr=modified) order: beta newest, alpha oldest.
     await utimes(join(dir, 'src', 'alpha.ts'), new Date(2000, 0, 1), new Date(2000, 0, 1))
     await utimes(join(dir, 'src', 'beta.ts'), new Date(2020, 0, 1), new Date(2020, 0, 1))
 
@@ -72,11 +72,13 @@ describe('search tools over the real subprocess service + the packaged rg', () =
   })
 
   describe('glob', () => {
-    it('discovers files by pattern, sorted by modification time, hidden included, .git excluded', async () => {
+    it('discovers files by pattern, newest first, hidden included, .git excluded', async () => {
       const result = await call('glob', { pattern: '**/*.ts' }, agent())
       expect(result.isError).toBe(false)
       const paths = text(result).split('\n')
-      expect(paths.indexOf(join('src', 'alpha.ts'))).toBeLessThan(paths.indexOf(join('src', 'beta.ts')))
+      expect(paths.indexOf(join('src', 'beta.ts'))).toBeLessThan(paths.indexOf(join('src', 'alpha.ts')))
+      // The fixtures written just now are newer than both backdated files.
+      expect(paths.at(-1)).toBe(join('src', 'alpha.ts'))
       expect(paths).toContain('.hidden.ts')
       expect(paths).toContain(join('spaced dir', "wei'rd name.ts"))
       expect(paths).not.toContain(join('.git', 'config.ts'))

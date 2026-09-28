@@ -3,9 +3,9 @@
  *
  * Colour is semantic, never decorative. The same tone means the same state
  * everywhere, so a marker, its verb, and the turn header do not need a second
- * vocabulary. Saturated orange, green, red, ocean blue, and yellow are the
- * five states. `output` only marks a tool result's preview text. It says
- * where output is, not what state it is in. Text and glyphs still
+ * vocabulary. Saturated orange, green, red, ocean blue, yellow, and royal
+ * blue are the six states. `output` only marks a tool result's preview text.
+ * It says where output is, not what state it is in. Text and glyphs still
  * carry each state without colour. Hex values let Ink pick the closest tone
  * on terminals without truecolour.
  *
@@ -21,22 +21,32 @@
 /**
  * Semantic tones of the default terminal theme.
  *
- * `running`, `done`, `failed`, `asking`, and `waiting` are the five states an
- * indicator can report. `output` marks a result's preview text.
- * A cache-hit reading borrows `done`, `waiting`, and `failed` as good, fair,
- * and poor.
+ * `running`, `done`, `failed`, `asking`, `waiting`, and `compacting` are the
+ * six states an indicator can report. `output` marks a result's preview text.
+ * A cache-hit reading borrows `waiting` and `failed` as fair and poor; a good
+ * one keeps the terminal's own foreground.
  */
 export const PALETTE = {
   /** Blue. References, including Markdown headings and links, paths, and informational tool fields. */
   reference: '#60a5fa',
   /**
-   * Orange. A turn in progress. The header and its spinner, a running
-   * action's marker, and manual compaction.
+   * Orange. A turn in progress. The header and its spinner, and a running
+   * action's marker.
    *
    * A separate hue, because every other tone already means something else
    * and none of them means "still happening".
    */
   running: '#f97316',
+  /**
+   * Royal blue. Context maintenance. The header, its folding spinner, and its
+   * word while history is compacted, by `/compact` or automatically inside a
+   * turn, and the transcript's notice that the context was compacted.
+   *
+   * Its own hue, because compaction is neither the turn's work nor a choice
+   * the user makes. Deeper than `reference` and `asking`, so it is not read
+   * as a link or a selection.
+   */
+  compacting: '#3b82f6',
   /** Green. What finished well. A finished action, a completed turn's summary, and an added line. */
   done: '#22c55e',
   /** Red. What went wrong. A failure, an error, a removed line, and the header of a turn being stopped. */
@@ -74,8 +84,18 @@ export const CRUST: readonly string[] = ['#f5e6c4', '#f0d49a', '#e8ba68', '#dc9c
  */
 export const AGENT_TONES = ['#a78bfa', '#f472b6', '#2dd4bf', '#a3e635', '#818cf8', '#e879f9'] as const
 
+/**
+ * How full the context window is, warming as it fills: soft yellow, yellow,
+ * orange, then red. Not states: the status line's context reading takes the
+ * step {@link contextTone} picks for its occupancy, and keeps the terminal's
+ * own foreground while there is plenty of room. Its own values rather than the
+ * state tones, so a filling context is never read as a running turn or a
+ * failure; the percentage beside the tone says the same under `NO_COLOR`.
+ */
+export const CONTEXT_RAMP = ['#fde68a', '#facc15', '#fb923c', '#f87171'] as const
+
 /** A colour from the palette, for props that carry one. */
-export type PaletteColor = typeof PALETTE[keyof typeof PALETTE] | typeof AGENT_TONES[number]
+export type PaletteColor = typeof PALETTE[keyof typeof PALETTE] | typeof AGENT_TONES[number] | typeof CONTEXT_RAMP[number]
 
 /**
  * A child's identity tone, by its place in the catalog. The catalog appends
@@ -95,33 +115,55 @@ export const CACHE_FAIR = 30
 /**
  * Tone for a cache-hit percentage.
  *
- * `done` when the provider served most of the input from cache, `waiting`
- * when it served some, `failed` when it served little. The percentage beside
- * the tone says the same thing without colour.
+ * None when the provider served most of the input from cache, so a healthy
+ * reading stays in the terminal's own foreground; `waiting` when it served
+ * some, `failed` when it served little. The percentage beside the tone says
+ * the same thing without colour.
  * @param hit - whole-percent hit rate.
- * @returns the palette tone.
- */
-export function cacheTone(hit: number): PaletteColor {
-  return hit >= CACHE_GOOD ? PALETTE.done : hit >= CACHE_FAIR ? PALETTE.waiting : PALETTE.failed
-}
-
-/** Context occupancy from here up is worth compacting soon. */
-export const CONTEXT_WARN = 70
-/** Context occupancy from here up is close to the model's limit. */
-export const CONTEXT_FULL = 90
-
-/**
- * Tone for a context-occupancy percentage.
- *
- * No tone while there is room, so the meter stays in the terminal's own
- * foreground for most of a session. `waiting` once compacting is worth
- * considering and `failed` near the limit. The percentage says the same
- * thing without colour.
- * @param percent - whole-percent occupancy.
  * @returns the palette tone, or undefined for the normal foreground.
  */
-export function contextTone(percent: number): PaletteColor | undefined {
-  return percent >= CONTEXT_FULL ? PALETTE.failed : percent >= CONTEXT_WARN ? PALETTE.waiting : undefined
+export function cacheTone(hit: number): PaletteColor | undefined {
+  return hit >= CACHE_GOOD ? undefined : hit >= CACHE_FAIR ? PALETTE.waiting : PALETTE.failed
+}
+
+/**
+ * Context occupancy from here up is worth compacting soon: the status line
+ * keeps the reading's absolute count, `(90k/128k)`, among the last things it
+ * gives up rather than the first.
+ */
+export const CONTEXT_WARN = 70
+/** Context occupancy from here up is close to the model's limit, and red whatever the compaction mark. */
+export const CONTEXT_FULL = 90
+/** Where the ramp turns orange when no compaction mark is known. */
+export const CONTEXT_HOT = 80
+/** Points below the compaction mark where the ramp turns orange. */
+export const CONTEXT_LEAD = 10
+/** The latest the ramp turns orange, so it stays a step apart from red. */
+export const CONTEXT_HOT_MAX = 85
+/** Points between the ramp's steps below orange. */
+export const CONTEXT_STEP = 10
+
+/**
+ * Tone for a context-occupancy percentage, from {@link CONTEXT_RAMP}.
+ *
+ * No tone while there is plenty of room, so the meter stays in the terminal's
+ * own foreground for most of a session. Orange starts {@link CONTEXT_LEAD}
+ * points below the compaction mark when one is known (no later than
+ * {@link CONTEXT_HOT_MAX}), and at {@link CONTEXT_HOT} otherwise; yellow and
+ * soft yellow lead it by {@link CONTEXT_STEP} points each, and red starts at
+ * {@link CONTEXT_FULL}. Without a mark: soft yellow from 60%, yellow from 70%,
+ * orange from 80%, red from 90%. With a mark at 80%: 50%, 60%, 70%, and 90%.
+ * The percentage says the same thing without colour.
+ * @param percent - whole-percent occupancy.
+ * @param compactAt - whole-percent occupancy at which automatic compaction starts, when known.
+ * @returns the ramp's tone, or undefined for the normal foreground.
+ */
+export function contextTone(percent: number, compactAt?: number): PaletteColor | undefined {
+  if (percent >= CONTEXT_FULL) return CONTEXT_RAMP[3]
+  const hot = compactAt === undefined ? CONTEXT_HOT : Math.min(CONTEXT_HOT_MAX, compactAt - CONTEXT_LEAD)
+  if (percent >= hot) return CONTEXT_RAMP[2]
+  if (percent >= hot - CONTEXT_STEP) return CONTEXT_RAMP[1]
+  return percent >= hot - 2 * CONTEXT_STEP ? CONTEXT_RAMP[0] : undefined
 }
 
 /**

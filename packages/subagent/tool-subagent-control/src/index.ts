@@ -16,6 +16,7 @@ import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-subagent'
 import { markAdjacentAgentSendMessageTool } from '@deepseek-ai/dsh-subagent/internal'
+import { presentInterruptCall, presentSendMessageCall } from './presentation.ts'
 
 export const name = 'tool-subagent-control'
 export const inject = ['tools', 'subagents']
@@ -28,20 +29,20 @@ export function apply(ctx: Context): void {
   ctx.tools.register(markAdjacentAgentSendMessageTool(defineTool({
     name: 'send_message',
     description:
-      'Send a message to a direct continuable child by its agent id. If you are a resident continuable child, '
-      + 'you may also target your direct parent. If the target is still working, the message steers its nearest step; '
-      + 'if it is idle, the message starts a turn. This call returns no answer from the agent — only confirmation '
-      + 'that the message was delivered. A failure means the message was NOT delivered.',
+      'Send a message to one of your direct continuable subagents by its agent id. If you are a continuable '
+      + 'subagent, you can also message your parent. A working target reads the message at its next step; '
+      + 'otherwise the message starts a new turn. You get delivery confirmation, not a reply, and an error '
+      + 'means the message was not delivered.',
     parameters: {
       agent_id: {
         type: 'string',
         required: true,
-        description: 'The agent id of your direct continuable child, or your direct parent when you are a resident continuable child.',
+        description: 'The agent id of a direct continuable subagent, or of your parent if you are a continuable subagent.',
       },
       message: {
         type: 'string',
         required: true,
-        description: 'The message to deliver to the agent.',
+        description: 'The message to send.',
       },
     },
     output: {
@@ -71,22 +72,21 @@ export function apply(ctx: Context): void {
       )
       return { messageId }
     },
+    presentCall: args => presentSendMessageCall(args),
   })))
 
   ctx.tools.register(defineTool({
     name: 'interrupt_agent',
     description:
-      'Request cancellation of a background agent\'s current turn by its agent id. The target may be your '
-      + 'direct child or a deeper agent created under you. Only the current turn stops: messages already '
-      + 'queued for the agent stay parked until a later send_message, agents it started keep running, and '
-      + 'the agent itself stays available for follow-ups. This call returns as soon as the stop request is '
-      + 'accepted, so the target may keep running briefly; interrupting an agent that already finished is '
-      + 'an accepted no-op.',
+      'Stop the current turn of a continuable subagent below you, whether a direct child or deeper, by its '
+      + 'agent id. Messages already queued for it wait for a later send_message, subagents it started keep '
+      + 'running, and it stays available for follow-ups. The call returns once the stop is requested, so the '
+      + 'subagent may keep running briefly; interrupting one that has already finished does nothing.',
     parameters: {
       agent_id: {
         type: 'string',
         required: true,
-        description: 'The agent id of the running agent to interrupt.',
+        description: 'The agent id of the subagent to interrupt.',
       },
     },
     output: {
@@ -113,5 +113,6 @@ export function apply(ctx: Context): void {
       ctx.subagents.interrupt(brandString<SessionId>(args.agent_id), { kind: 'ancestor', agent: caller })
       return Promise.resolve({ accepted: true })
     },
+    presentCall: args => presentInterruptCall(args),
   }))
 }

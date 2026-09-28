@@ -21,6 +21,7 @@ import {
   scheduleView,
 } from './domain.ts'
 import { flushSchedulePersistence } from './persistence.ts'
+import { presentCreateResult, presentDeleteResult, presentListResult } from './presentation.ts'
 import { runScheduleTransaction } from './transaction.ts'
 import type {
   AtInput,
@@ -395,6 +396,7 @@ export function registerScheduleTools(
         })
       },
       presentCall: args => present('Create reminder', 'other', args.prompt),
+      presentResult: (_args, result) => presentCreateResult(result),
     })))
 
     disposers.push(toolCtx.tools.register(defineTool({
@@ -415,6 +417,7 @@ export function registerScheduleTools(
         })
       },
       presentCall: () => present('List reminders', 'read'),
+      presentResult: (_args, result) => presentListResult(result),
     })))
 
     disposers.push(toolCtx.tools.register(defineTool({
@@ -453,6 +456,7 @@ export function registerScheduleTools(
         })
       },
       presentCall: args => present('Delete reminder', 'other', args.id),
+      presentResult: (_args, result) => presentDeleteResult(result),
     })))
   } catch (error) {
     for (const dispose of disposers.reverse()) dispose()

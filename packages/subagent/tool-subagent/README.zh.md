@@ -92,13 +92,18 @@ kind: "package-reference"
 
 ### 随上下文变化的措辞
 
-工具描述源自 `provider.inheritsParentContext`：全新子 agent 得到「it does not see this conversation」措辞，fork 子 agent 得到「it does not see the current in-flight turn」措辞，因此模型既不会复述、也不会省略并不存在的上下文。
+工具描述源自 `provider.inheritsParentContext`：全新子 agent 得到「It does not see this conversation」措辞，fork 子 agent 得到「inherits this conversation's completed turns, but not the current one」措辞，因此模型既不会复述、也不会省略并不存在的上下文。工具描述是委派指引的唯一归属：插件不注册任何系统提示词 section，因此隐藏 schema 的工具限制也会同时隐藏这段指引。
+
+### UI 呈现
+
+每个委派工具都声明一个纯函数 `presentCall`：UI 以简短的 `description` 为调用命名；description 为空时改用 prompt 的第一行，截断为 80 个字符。可能长达多段的 prompt 不进入卡片；它是子会话的第一条消息。`list_subagent_models` 按查询内容命名：`List subagent providers`、`List <provider> models` 或 `Show <provider>/<model>`。两个工具都不声明 `presentResult`，因此完成的调用保留 UI 对结果文本的通用渲染；过时的记录参数也会让调用回退到通用渲染。
 
 ### 源码地图
 
 | 文件 | 职责 |
 |---|---|
 | [`src/index.ts`](src/index.ts) | 工具注册、生命周期镜像、模式解析、结果结算 |
+| [`src/presentation.ts`](src/presentation.ts) | 委派工具与发现工具的纯函数调用标题 |
 | [`src/model-selection.ts`](src/model-selection.ts) | 请求／配置合并与实时 LLM 路由预检 |
 | [`src/model-selection-settings.ts`](src/model-selection-settings.ts) | 为新 Session 读取的宿主所有 opt-in 设置 |
 | [`src/model-selection-state.ts`](src/model-selection-state.ts) | 记录并继承已读取决定的 Session 事件 |
@@ -129,11 +134,17 @@ kind: "package-reference"
 
 #### 模型看到什么
 
-当提供方存在时，以当前实例配置的名称公开已生成的默认 [`subagent` schema](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-subagent)。启用的 Session 策略会添加 `provider`、`model` 与 `reasoning_effort`，以及继承和选择指引；提供方必须支持 `agentOptions`。提供方是否继承上下文会改变工具描述和提示词描述。启用后台模式会添加 `run_in_background`：可继续模式会记录其默认值为 `true`、运行时结算通知与显式前台覆盖；一次性模式会记录其默认值为 `false`，以及用 `job_output` 收集或用 `job_kill` 停止的 job id。当工具在本次组装的作用域中可见时，一个 `tool:<toolName>` 系统提示词 section 会指示模型同时启动相互独立的可继续委派、在它们运行时继续工作，并且仅当下一步动作依赖结果时选择前台；工具限制会同时移除其 schema 和这段指引。
+当提供方存在时，以当前实例配置的名称公开已生成的默认 [`subagent` schema](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-subagent)。启用的 Session 策略会添加 `provider`、`model` 与 `reasoning_effort`，以及继承和选择指引；提供方必须支持 `agentOptions`。提供方是否继承上下文会改变工具描述和提示词描述。启用后台模式会添加 `run_in_background`：可继续模式会记录其默认值为 `true`、返回的 agent id、完成通知、用 `send_message` 发送后续消息、在同一条消息中启动相互独立的子 agent，以及显式前台覆盖；一次性模式会记录其默认值为 `false`，以及用 `job_output` 收集或用 `job_kill` 停止的 job id。本包不添加任何系统提示词 section，因此这些指引全部随 schema 一起出现。使用默认工具名 `subagent` 时，可继续模式的描述为：
+
+##### 可继续模式描述
+
+```markdown
+Delegate a self-contained task, such as research, a scoped implementation, or an analysis, to a subagent that works in its own context, so the work does not fill this conversation. You get its result, not its intermediate steps. It does not see this conversation, so give it a complete, standalone prompt. It runs in the background by default and returns its agent id right away. Start independent subagents in the same message and keep working while they run. When one finishes, you get a notice with its outcome and closing message. It stays available afterward: `send_message` steers it while it is running and otherwise starts a new turn. Set `run_in_background: false` only when your next step needs the result.
+```
 
 #### Token 影响
 
-每个父级请求支付固定的 schema 成本；模型选择会增加三个参数。每个提供方实例增加一个 schema，每个可继续实例还增加一个简短的系统提示词 section。
+每个父级请求支付固定的 schema 成本；模型选择会增加三个参数。每个提供方实例增加一个 schema，不向系统提示词添加任何内容。
 
 #### KV Cache 影响
 
@@ -152,26 +163,6 @@ Session 携带策略的 settings 控制实例会公开子级 LLM 选择字段与
 #### KV Cache 影响
 
 适配器注册与目录变化不会改变 schema 前缀。每个发现结果都追加在可复用前缀之后。
-
-### 系统提示词
-
-#### 模型看到什么
-
-当 `enableRunInBackground` 与 `backgroundMode: continuable` 同时设置时，模型还会读到 `tool:<toolName>` 系统提示词 section，指示它把相互独立的可继续委派一起启动，并在它们运行时继续工作。使用默认工具名 `subagent` 时，section 文本为：
-
-##### 工具指导 section
-
-```markdown
-Use subagent in the background by default. Start independent delegations together in one assistant message and continue useful work while they run. Set `run_in_background: false` only when your next action depends on that subagent's result. When a background run settles, the runtime sends you a notice containing its outcome and any final assistant message.
-```
-
-#### Token 影响
-
-每个可继续实例一个简短固定 section，只要工具在作用域内，就由每个父级请求支付。
-
-#### KV Cache 影响
-
-只要 section 文本与工具存在性不变，前缀就保持稳定；移除工具或更改 section 会建立不同的父级前缀。
 
 ### 前台结果
 
@@ -208,8 +199,8 @@ Use subagent in the background by default. Start independent delegations togethe
 
 这些限制说明本工具不返回或不强制执行什么；它们是当前包约束。
 
-- **后台运行不通过本工具公开结果**——一次性任务的最终输出通过通用 Task 接口收集，可继续子 agent 的输出留在其自身会话中，按其 subagent id 读取。结算通知会说明该子 agent 如何结束，并携带其最终 assistant 输出中的非空文本，但它不是本次调用的返回值，也无法在此等待。
-- **等待中的一次性实例较晚才发现重复名称**（`TODO(subagent-dup-toolname)`）——可继续实例会在插件应用期间预留提示词 section 名称，但若要阻止等待中的一次性实例回滚提供方注册，仍需要一份预期名称注册表。
+- **后台运行不通过本工具公开结果**——一次性任务的最终输出通过通用 Task 接口收集，可继续子 agent 的输出留在其自身会话中，按其 agent id 读取。结算通知会说明该子 agent 如何结束，并携带其最终 assistant 输出中的非空文本，但它不是本次调用的返回值，也无法在此等待。
+- **等待中的实例较晚才发现重复名称**（`TODO(subagent-dup-toolname)`）——两个 `toolName` 相同的实例只有在其提供方出现时才会冲突，而重复名称失败会回滚该提供方注册；若要更早失败，需要一份预期名称注册表。
 - **随附 fork 工具不能选择子级 LLM 路由**——它们继承父级提供方与模型，使复制的对话前缀仍有资格复用 KV Cache。仅当路由变更能保留复用或公开有界重算成本时，才重新启用选择。
 - **非路由子 agent 策略按实例固定**——另一个 persona、工具过滤器或深度上限需要另一个名称不同的工具。LLM 选择要求启用逐 Session 偏好，且提供方必须声明 `agentOptions`；两个进程内提供方和 DSH SDK 会声明该能力，而 ACP、Codex 与 Claude Code 会拒绝它，而不是忽略它。
 

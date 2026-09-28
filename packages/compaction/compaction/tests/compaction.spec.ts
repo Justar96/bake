@@ -120,6 +120,11 @@ describe('CompactionEngine seam', () => {
     expect(svc.lastSignal).toBe(signal)
   })
 
+  it('declares no automatic pressure threshold unless a backend overrides it', () => {
+    const svc = new StubCompactionEngine(new Context())
+    expect(svc.pressureThreshold({ provider: 'mock', model: 'm' }, 8192)).toBeUndefined()
+  })
+
   it('compaction/* events merge into SessionEventMap and are log-only', async () => {
     const ctx = new Context()
     const svc = new StubCompactionEngine(ctx)

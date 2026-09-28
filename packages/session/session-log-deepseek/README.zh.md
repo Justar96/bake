@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-用于 DeepSeek 官方 LLM（大语言模型）API 请求的增量规范会话日志上传。该函数插件注入 `ctx.sessions` 与 `ctx.deepseekLlmApiExtensions`，并拥有 `dsh_session_log` 请求字段以及用于派生接受水位的持久 `session-log-deepseek/delivery-accepted` 事件。仅当官方 API 不得接收会话日志后缀时才禁用它。
+用于 DeepSeek 官方 LLM（大语言模型）API 请求的增量规范会话日志上传。该函数插件注入 `ctx.sessions` 与 `ctx.deepseekLlmApiExtensions`，并拥有 `dsh_session_log` 请求字段以及用于派生接受水位的持久 `session-log-deepseek/delivery-accepted` 事件。Bake 不向 DeepSeek 发送会话日志，因此随附 profile 以 `enabled: false` 挂载本插件；只有当官方 API 应当接收完整日志时才启用它。
 
 ## 目录
 
@@ -30,7 +30,13 @@ kind: "package-reference"
 | `enabled` | `true` | 注册 `dsh_session_log` 贡献。将其设为 `false` 可停止会话日志上传。 |
 | `maxBytes` | 8 MiB | 单次请求携带的 `dsh_session_log` 字段序列化后的最大 UTF-8 字节数。 |
 
-随附 profile 会挂载该插件，因此默认配置会注册请求字段并追加接受水位；overlay 可用 `enabled: false` 选择退出。
+包默认值为 `true`，但 Bake 随附的 profile 以 `enabled: false` 挂载该插件：官方 DeepSeek 请求都不携带 `dsh_session_log`，也不会追加接受水位。该行仍保持挂载，因此在早先选择启用时记录了 `session-log-deepseek/delivery-accepted` 事件的会话日志仍可恢复与重放。要选择启用，请在 profile、home 或 `--patch` 层中重述该行；此后每个启用的请求都会发送日志中的工作目录、提示词、消息、工具参数与结果以及反馈：
+
+```yaml
+- id: session-log-deepseek
+  config:
+    enabled: true
+```
 
 <a id="request-field"></a>
 ## 请求字段

@@ -6,6 +6,7 @@ import { defineTool, type ToolExecution } from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import type { Session } from '@deepseek-ai/dsh-session'
+import { presentFilesCall } from './presentation.ts'
 import type { PresentedFile } from './types.ts'
 
 /** Stable Loader identity. */
@@ -37,17 +38,16 @@ export function apply(ctx: Context, config: Config): void {
   const pending = new WeakMap<ToolExecution, { session: Session; turn: number; files: PresentedFile[] }>()
   ctx.tools.register(defineTool({
     name: 'present',
-    description: 'Declare existing files accessible through the Session filesystem as final deliverables. '
-      + 'When a file you create or update is an output the user asked to receive, you must call present after writing it and before your final response, including files created through Bash or code execution. '
-      + 'Mentioning its path in your reply does not replace this call. The files must already exist. '
-      + 'The user opens the current source files; their contents are not copied or preserved.',
+    description: 'Deliver files the user asked to receive. After creating or updating such a file, however you made it, '
+      + 'call present before your final reply; mentioning its path is not enough. The files must already exist where '
+      + 'your file tools can see them. The user opens them in place, so leave them there.',
     parameters: {
       files: {
         type: 'array', required: true,
         items: {
           type: 'object', additionalProperties: false,
           properties: {
-            path: { type: 'string', required: true, description: 'Path of an existing regular file. Relative paths use the Session working directory.' },
+            path: { type: 'string', required: true, description: 'Path of an existing regular file, absolute or relative to the working directory.' },
             description: { type: 'string', description: 'Brief description for the user.' },
           },
         },
@@ -95,6 +95,7 @@ export function apply(ctx: Context, config: Config): void {
       pending.set(exec, { session: exec.agent.session, turn: boundary.lastTurn, files })
       return { turn: boundary.lastTurn, files }
     },
+    presentCall: args => presentFilesCall(args.files),
   }))
   ctx.on('tools/result', (exec, result) => {
     const delivery = pending.get(exec)

@@ -8,7 +8,7 @@
  * refusals are injected through the module mocks below: POSIX modes cannot
  * express them on Windows, and an injected error is the only deterministic
  * cross-platform refusal. Real cross-process exclusion and crash release are
- * pinned by lease.two-process.e2e.ts.
+ * pinned by lease.two-process.spec.ts.
  */
 
 import { existsSync } from 'node:fs'
@@ -18,16 +18,16 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { SESSION_FORMAT_VERSION, SessionId, SessionSeq } from '@deepseek-ai/dsh-session'
-import type { SessionHeader } from '@deepseek-ai/dsh-session'
+import type { Session, SessionHeader } from '@deepseek-ai/dsh-session'
 import {
   SessionAlreadyExistsError,
   SessionAlreadyOwnedError,
   SessionPersistenceNotFoundError,
 } from '@deepseek-ai/dsh-session-persistence'
-import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
+import type { SessionHandle, SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import JsonlSessionPersistence from '../src/index.ts'
 import { LEASE_FILENAME, SessionWriteLease } from '../src/lease.ts'
-import type { JsonlSessionHandle } from '../src/storage.ts'
+import { LIVE_WRITE_BATCH_MAX_DELAY_MS, type JsonlSessionHandle } from '../src/storage.ts'
 import { sessionDir } from '../src/format.ts'
 
 // The lock's base name, duplicated for the hoisted mock factories: they run
@@ -182,9 +182,9 @@ describe('cross-process write lock', () => {
     await reader.close()
 
     await holder.close()
-    // POSIX keeps the materialized session's lock file (Windows locks a kernel
-    // object with no filesystem footprint); the kernel lock itself is gone.
-    if (process.platform !== 'win32') expect(existsSync(lockPath(root, 'excluded'))).toBe(true)
+    // Both platforms keep the materialized session's lock file; its kernel
+    // lock is released with the handle.
+    expect(existsSync(lockPath(root, 'excluded'))).toBe(true)
     const reopened = await second.open(SessionId('excluded'), 'write')
     await reopened.append([{ type: 'turn/start', seq: SessionSeq(2), time: 3, data: { turn: 2 } }])
     await reopened.close()
@@ -243,7 +243,7 @@ describe('cross-process write lock', () => {
     const creator = await first.create(meta('lazy-lock'))
     await creator.append([...EVENTS])
     // The materializing append acquired and retained the lock.
-    if (process.platform !== 'win32') expect(existsSync(lockPath(root, 'lazy-lock'))).toBe(true)
+    expect(existsSync(lockPath(root, 'lazy-lock'))).toBe(true)
     await expect(second.open(SessionId('lazy-lock'), 'write')).rejects.toBeInstanceOf(SessionAlreadyOwnedError)
     // A later append reuses the held lock rather than re-acquiring.
     await creator.append([{ type: 'turn/start', seq: SessionSeq(2), time: 3, data: { turn: 2 } }])
@@ -403,14 +403,80 @@ describe('cross-process write lock', () => {
     await reopened.close()
   })
 
-  it.skipIf(process.platform === 'win32')('release is idempotent and never removes the lock file', async () => {
+  describe('an event routed while close releases the lock', () => {
+    /**
+     * Mount a backend and publish one live event for `id` through the real
+     * `session/event` route at the last moment the handle is still routed:
+     * after close drained and released the lock, just before it unbinds.
+     */
+    async function mountWithLateEvent(root: string, id: string, seq: number) {
+      const backend = await mount(root)
+      const ctx = contexts.at(-1)!
+      const storage = backend as unknown as { releaseHandle: (handle: JsonlSessionHandle, materialized: boolean) => void }
+      const unbind = storage.releaseHandle.bind(storage)
+      vi.spyOn(storage, 'releaseHandle').mockImplementationOnce((handle, materialized) => {
+        ctx.emit('session/event', { id: SessionId(id) } as Session, { type: 'turn/start', seq: SessionSeq(seq), time: 9, data: { turn: 9 } })
+        unbind(handle, materialized)
+      })
+      return backend
+    }
+
+    /** Let a batch timer armed during close fire, then join the drain it started. */
+    async function settleLateDrain(handle: SessionHandle): Promise<void> {
+      await vi.advanceTimersByTimeAsync(LIVE_WRITE_BATCH_MAX_DELAY_MS)
+      await (handle as JsonlSessionHandle).drainLive()
+    }
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('never materializes or locks a created session after close', async () => {
+      const root = await freshRoot()
+      const backend = await mountWithLateEvent(root, 'late-created', 0)
+      const creator = await backend.create(meta('late-created'))
+
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      await creator.close()
+      await settleLateDrain(creator)
+      vi.useRealTimers()
+
+      // A closed creator that never materialized leaves nothing behind: a
+      // post-close drain would acquire a lock no owner ever releases.
+      expect(existsSync(join(lockPath(root, 'late-created'), '..'))).toBe(false)
+      await expect(backend.stat(SessionId('late-created'))).resolves.toBeUndefined()
+      const successor = await (await mount(root)).create(meta('late-created'))
+      await successor.append([...EVENTS])
+      await successor.close()
+    })
+
+    it('never writes a materialized session after its lock is released', async () => {
+      const root = await freshRoot()
+      const backend = await mountWithLateEvent(root, 'late-held', 2)
+      const holder = await backend.create(meta('late-held'))
+      await holder.append([...EVENTS])
+
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      await holder.close()
+      await settleLateDrain(holder)
+      vi.useRealTimers()
+
+      // The successor owns the log exclusively: the closed holder appended
+      // nothing after releasing the lock.
+      const successor = await (await mount(root)).open(SessionId('late-held'), 'write')
+      expect((await successor.read()).events.map(event => event.seq)).toEqual([0, 1])
+      await successor.append([{ type: 'turn/start', seq: SessionSeq(2), time: 3, data: { turn: 2 } }])
+      await successor.close()
+    })
+  })
+
+  it('release is idempotent and never removes the lock file', async () => {
     const root = await freshRoot()
     const dir = join(root, 'solo')
     const lease = await SessionWriteLease.acquire(dir, SessionId('solo'))
     await lease.release()
     await lease.release()
-    // The file survives every release, keeping the stable inode later
-    // lockers verify against; the kernel lock died with the descriptor.
+    // The file survives every release; the kernel lock died with the handle.
     expect(existsSync(join(dir, LOCK))).toBe(true)
     const successor = await SessionWriteLease.acquire(dir, SessionId('solo'))
     await successor.release()
@@ -425,9 +491,7 @@ describe('cross-process write lock', () => {
     const b = await backend.create(meta('indep-b'))
     await a.append([...EVENTS])
     await b.append([...EVENTS])
-    if (process.platform !== 'win32') {
-      expect((await readdir(join(lockPath(root, 'indep-a'), '..'))).filter(name => name === LOCK)).toHaveLength(1)
-    }
+    expect((await readdir(join(lockPath(root, 'indep-a'), '..'))).filter(name => name === LOCK)).toHaveLength(1)
     await a.close()
     await b.close()
   })

@@ -1,6 +1,10 @@
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Context, Service } from '@deepseek-ai/cordis'
 import { AttachmentId, AttachmentStore, ImageVariantId } from '@deepseek-ai/dsh-attachment'
+import LocalAttachments from '@deepseek-ai/dsh-attachment-local'
 import type {
   ImageAttachmentLimits,
   ImageAttachmentRef,
@@ -17,7 +21,8 @@ import { getBuiltinModels } from '@earendil-works/pi-ai/providers/all'
 import { DEFAULT_MAX_REQUEST_IMAGE_BYTES, resolveProfiles } from '../src/config.ts'
 import { memoryAuth } from './auth-double.ts'
 import { assemble } from './assemble.ts'
-import { closeMockServers, mockServer, textEvents } from './mock-server.ts'
+import { encodedDimensions, solidPng, wireImages } from './image-fixtures.ts'
+import { anthropicTextWire, closeMockServers, mockServer, textEvents } from './mock-server.ts'
 
 afterEach(async () => {
   vi.unstubAllEnvs()
@@ -331,6 +336,74 @@ describe('PiAiAdapter provider routing', () => {
     }, expect.any(AbortSignal))
     expect(JSON.stringify(server.requests[0])).toContain(MODEL_IMAGE_PATH)
     expect(server.paths).toEqual(['/v1/responses'])
+  })
+
+  it('keeps every image of a 21-image Anthropic Messages request within 2000 px, and each image byte-stable', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-pi-request-images-'))
+    const failure = { status: 401, body: JSON.stringify({ error: { message: 'expected mock failure' } }) }
+    const server = await mockServer([{ wire: anthropicTextWire }, { wire: anthropicTextWire }, failure])
+    const ctx = new Context()
+    try {
+      await ctx.plugin(LlmRuntime)
+      // One route mixing protocols per model, as a gateway serving Claude and GPT does.
+      await ctx.plugin(LlmPiAi, { providers: { gateway: {
+        apiKeyEnv: 'PI_TEST_KEY',
+        api: 'openai-responses',
+        baseURL: `${server.url}/v1`,
+        models: [
+          { id: 'claude-large', api: 'anthropic-messages', baseURL: server.url, input: ['text', 'image'] },
+          { id: 'gpt-large', input: ['text', 'image'] },
+        ],
+      } } })
+      await ctx.plugin(LocalAttachments, { dshHome: home })
+      // Normalized attachments keep these sizes: each fits the 2048x2048 normalization budget.
+      const sources = [[4000, 1000], [2048, 2048], [1000, 4000]] as const
+      const refs = await Promise.all(sources.map(([width, height], index) => ctx.attachments.saveImage({
+        data: solidPng(width, height, [40 * index, 120, 200]),
+        mediaType: 'image/png',
+      })))
+      expect(refs.map(ref => [ref.width, ref.height])).toEqual(sources)
+      const occurrences = Array.from({ length: 21 }, (_, index) => refs[index % refs.length] as ImageAttachmentRef)
+      const ask = (images: readonly ImageAttachmentRef[]) => [createUserMessage({
+        content: [
+          { type: 'text', text: 'describe' },
+          ...images.map(attachment => ({ type: 'image' as const, attachment })),
+        ],
+        source: { kind: 'plugin', plugin: 'test' },
+      })]
+
+      const alone = await assemble(ctx, { provider: 'gateway', model: 'claude-large', messages: ask(occurrences.slice(0, 1)) })
+      const crowded = await assemble(ctx, { provider: 'gateway', model: 'claude-large', messages: ask(occurrences) })
+      await assemble(ctx, { provider: 'gateway', model: 'gpt-large', messages: ask(occurrences) })
+
+      expect(alone.finish).toEqual({ kind: 'stop' })
+      expect(crowded.finish).toEqual({ kind: 'stop' })
+      expect(server.paths.map(path => path.split('?')[0])).toEqual(['/v1/messages', '/v1/messages', '/v1/responses'])
+      const [single, many, openai] = server.requests.map(wireImages)
+      expect(many).toHaveLength(21)
+      const dimensions = many!.map(encodedDimensions)
+      for (const { width, height } of dimensions) {
+        expect(width).toBeLessThanOrEqual(2000)
+        expect(height).toBeLessThanOrEqual(2000)
+      }
+      expect(dimensions.slice(0, 3)).toEqual([
+        { width: 2000, height: 500 },
+        { width: 2000, height: 2000 },
+        { width: 500, height: 2000 },
+      ])
+      expect(JSON.stringify(server.requests[1])).toContain('request preview 2000x500px')
+      // The 21st image changes no earlier image's bytes, so the provider's cached prefix stays reusable.
+      expect(Buffer.from(many![0]!).equals(Buffer.from(single![0]!))).toBe(true)
+      // Only the Anthropic Messages model takes the default cap; OpenAI Responses keeps the pixel budget alone.
+      expect(openai!.slice(0, 3).map(encodedDimensions)).toEqual([
+        { width: 4000, height: 1000 },
+        { width: 2048, height: 2048 },
+        { width: 1000, height: 4000 },
+      ])
+    } finally {
+      await ctx.fiber.dispose()
+      await rm(home, { recursive: true, force: true })
+    }
   })
 
   it('forces one wire request for an SDK-retryable provider failure', async () => {

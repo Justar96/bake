@@ -5,8 +5,8 @@
  * (`@deepseek-ai/dsh-workflow`), so a hardened engine swaps in without touching what the model
  * sees. Execution awaits `run.result` and always disposes the run; non-completed reasons become tool
  * errors, and background collection remains deferred. Presentation is an args-only generic card
- * titled from `meta.name`. Explicit-ask usage guidance is registered as the tool's own prompt
- * section rather than deployment persona prose.
+ * titled from `meta.name`. The explicit-ask usage policy is part of the tool description; the
+ * plugin contributes no system-prompt section.
  * @module @deepseek-ai/dsh-tool-workflow
  */
 
@@ -26,7 +26,7 @@ import type {
 } from './types.ts'
 
 export const name = 'tool-workflow'
-export const inject = ['tools', 'workflowEngine', 'systemPrompt']
+export const inject = ['tools', 'workflowEngine']
 
 /** Config: the model-facing tool name plus result rendering caps. */
 export interface Config {
@@ -130,23 +130,21 @@ function createWorkflowRecorder(ctx: Context): WorkflowRecorder {
 }
 
 /**
- * The script-authoring contract, embedded in the tool description. This IS the
- * model-facing spec: the meta block, the hooks and their exact semantics, and
- * the supported schema subset.
+ * The usage policy and script-authoring contract, embedded in the tool
+ * description. This IS the model-facing spec: the hooks and their exact
+ * semantics, the supported schema subset, failure propagation, and caps. The
+ * script body, meta block, and `args` rules live on their parameters, so each
+ * fact has one home.
  */
-const DESCRIPTION = `Run a JavaScript workflow script that orchestrates subagents at scale. Use this for work that fans out across many independent pieces — an audit over many files, a migration, multi-angle research, adversarial verification of findings — where you write the orchestration as a script instead of delegating turn by turn.
+const DESCRIPTION = `Run a JavaScript workflow script that coordinates many subagents, and return the script's result. Use it only when the user explicitly asks for a workflow or for large-scale multi-agent orchestration, because one run can start many subagents; for one or two delegations, use a plain subagent call. The call blocks until the script finishes.
 
-The workflow's identity rides the \`meta\` parameter as JSON: required \`name\` (short kebab-case) and \`description\` strings, optional \`whenToUse\` string and \`phases\` array (\`{title, detail?, provider?, model?}\`). The \`script\` parameter is the plain JavaScript body ONLY (NOT TypeScript, and NO \`export const meta\` statement — meta is a parameter, not code), running with top-level await; end with \`return <value>\` — the value must be JSON-serializable and is this tool's result.
+The script can call these globals:
+- \`agent(prompt, opts?)\` runs one subagent to completion. It resolves to the subagent's final text, to an object validated against \`opts.schema\` when one is given, or to \`null\` if the subagent fails. \`opts.schema\` must be an object-rooted JSON Schema that uses only type, properties, required, additionalProperties, items, enum, const, oneOf, and annotations such as description; pattern, format, and numeric bounds are rejected. The other options are \`label\` (display name), \`phase\` (progress group, defaulting to the current phase), and \`provider\` and \`model\` (route overrides, usable separately). Any other option is an error.
+- \`pipeline(items, ...stages)\` runs each item through the stages independently, with no barrier between stages, and resolves to the final values in item order. Each stage is called as \`stage(prev, item, index)\`, where \`prev\` is the previous stage's result, or the item itself for the first stage. A stage that throws turns that item into \`null\` and skips its remaining stages.
+- \`parallel(thunks)\` runs zero-argument functions concurrently, waits for all of them, and resolves to their results in order; a thunk that throws yields \`null\`.
+- \`phase(title)\` starts a progress phase, and \`log(message)\` reports progress.
 
-Script-body hooks:
-- \`agent(prompt, opts?): Promise<any>\` — run one subagent to completion. Without \`opts.schema\` it resolves to the child's final text; with \`opts.schema\` (an object-rooted JSON Schema using ONLY type/properties/required/additionalProperties/items/enum/const/oneOf — no pattern/format/numeric bounds) it resolves to the validated object. Resolves \`null\` when the child fails (filter with \`.filter(Boolean)\`). Other opts: \`label\` (display), \`phase\` (progress group), and independent \`provider\`/\`model\` LLM target overrides (either may be provided alone). Anything else (\`effort\`/\`isolation\`/\`agentType\`) is rejected loudly.
-- \`pipeline(items, ...stages): Promise<any[]>\` — run each item through the stages independently with NO barrier between stages (prefer this for multi-stage work). Each stage receives \`(prev, item, index)\`. An ordinary stage throw drops that ITEM to \`null\` and skips its remaining stages.
-- \`parallel(thunks): Promise<any[]>\` — run zero-argument functions concurrently and await ALL of them (a barrier; use only when a stage genuinely needs every prior result together). A throwing thunk resolves to \`null\`.
-- \`phase(title)\` — start a progress phase; \`log(message)\` — narrate progress; \`args\` — the tool call's \`args\` input, verbatim.
-
-Misused hooks (bad arguments, unknown options, unsupported schemas, tripped caps) throw errors that ALWAYS kill the script — they never dissolve into a per-item \`null\`.
-
-Constraints: concurrency and total-agent caps apply; no filesystem, network, timers, or Node.js APIs are provided — the agents do the work, the script only coordinates them. The run executes in the foreground: this call returns when the whole script finishes.`
+Misusing a hook (bad arguments, unknown options, unsupported schemas, exceeded caps) or a subagent that cannot start throws an error that \`pipeline\` and \`parallel\` pass through instead of turning into \`null\`; if nothing catches it, the run fails and returns only the error. Caps limit concurrent subagents (extra \`agent()\` calls wait for a slot), total subagents per run, and items per \`pipeline()\` or \`parallel()\` call. The script has no filesystem, network, timers, or Node.js APIs; the subagents do the work.`
 
 type WorkflowCallArgs = {
   script: string
@@ -206,13 +204,8 @@ export function apply(ctx: Context, config: Config): void {
   // fields; the assertion records that resolution, not a hidden fallback.
   const { toolName, maxResultChars } = config as ResolvedConfig
   const recorder = createWorkflowRecorder(ctx)
-  // Usage policy ships with the tool (the master convention: tool guidance
-  // lives in tool plugins as prompt sections, not in the deployment persona).
-  ctx.systemPrompt.section({
-    name: `tool:${toolName}`,
-    order: ctx.systemPrompt.getSectionOrder('TOOL_WORKFLOW'),
-    text: `Use the ${toolName} tool ONLY when the user explicitly asks for a workflow or for large multi-agent orchestration: you write a JavaScript script (the tool description documents the exact format) that fans work out across many subagents with phases and structured results. For one or two delegations, prefer plain subagent calls.`,
-  })
+  // The usage policy and the whole authoring contract live in the tool's own
+  // schema; the plugin contributes no system-prompt section.
   ctx.tools.register(defineTool({
     name: toolName,
     description: DESCRIPTION,
@@ -220,28 +213,28 @@ export function apply(ctx: Context, config: Config): void {
       script: {
         type: 'string',
         required: true,
-        description: 'The plain-JS workflow script body (top-level await allowed; NO `export const meta` statement; end with `return <json-value>`).',
+        description: `Body of an async JavaScript function, so \`await\` works at the top level. Plain JavaScript only: no TypeScript and no import or export statements. Its return value, which must be JSON-serializable, becomes the tool result; results longer than ${maxResultChars} characters are truncated.`,
       },
       meta: {
         type: 'object',
         additionalProperties: true,
         required: true,
-        description: 'The workflow identity block (plain JSON — never code).',
+        description: 'The workflow\'s identity, as JSON data.',
         properties: {
           name: { type: 'string', required: true, description: 'Short kebab-case workflow name.' },
           description: { type: 'string', required: true, description: 'One-line description of what the workflow does.' },
-          whenToUse: { type: 'string', description: 'Optional guidance on when this workflow applies.' },
+          whenToUse: { type: 'string', description: 'Optional note on when this workflow applies.' },
           phases: {
             type: 'array',
-            description: 'Optional phase declarations matched by phase() calls.',
+            description: 'Optional list of the phases the script enters with phase(); informational only.',
             items: {
               type: 'object',
               additionalProperties: true,
               properties: {
-                title: { type: 'string', required: true, description: 'The phase title phase() calls match by exact string.' },
+                title: { type: 'string', required: true, description: 'The title the script passes to phase().' },
                 detail: { type: 'string', description: 'Optional one-line description of the phase.' },
-                provider: { type: 'string', description: 'Optional provider override this phase is expected to use.' },
-                model: { type: 'string', description: 'Optional model override this phase is expected to use.' },
+                provider: { type: 'string', description: 'Informational; pass `provider` to agent() to route a subagent.' },
+                model: { type: 'string', description: 'Informational; pass `model` to agent() to choose a subagent\'s model.' },
               },
             },
           },
@@ -250,7 +243,7 @@ export function apply(ctx: Context, config: Config): void {
       args: {
         type: 'object',
         additionalProperties: true,
-        description: 'Optional JSON input exposed to the script as the `args` global (wrap a bare list as a field, e.g. {"files": [...]}).',
+        description: 'Optional JSON object available to the script as the global `args`.',
       },
     },
     output: {

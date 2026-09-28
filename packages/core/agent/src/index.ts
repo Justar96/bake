@@ -149,8 +149,9 @@ export interface ResumeAgentOptions {
  * only the holder can tear this agent down. The registered factory provider is
  * also a structural owner because the scoped agent depends on that provider's
  * service API; provider unload stops and drains every live handle it made.
- * `dispose()` stops the loop, awaits its exit, unregisters the agent, removes
- * its session from the store, and finally unwinds its scoped world.
+ * `dispose()` stops the loop, awaits its exit, unwinds its scoped world, closes
+ * the session's write path, and finally unregisters the agent and removes its
+ * session from the store.
  *
  * `ctx.agents.get(id)` still returns a bare {@link Agent} — the handle is
  * exposed only to the consumer owner that created it; the structural provider

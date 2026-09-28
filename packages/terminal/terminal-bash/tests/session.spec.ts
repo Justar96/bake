@@ -545,9 +545,32 @@ describe('LocalPtySession readiness and output', () => {
     expect(terminal.writes).toEqual(['python3\r'])
     inspector.pgid = 789
     terminal.emitData('Python\r\n>>> ')
-    await vi.advanceTimersByTimeAsync(20)
+    // Exact evidence settles on its second observation with no output delivered in between.
+    await vi.advanceTimersByTimeAsync(30)
     expect(await operation.done).toMatchObject({ waitReason: 'stdin_read', viewport: 'Python\n>>> ', sessionStatus: { kind: 'running' } })
     expect(operation.cancel()).toBe(false)
+  })
+
+  it('holds exact stdin-wait evidence until output written before the wait is delivered', async () => {
+    vi.useFakeTimers()
+    const terminal = new FakeTerminal()
+    const inspector = new FakeInspector()
+    const session = makeSession(terminal, inspector, config())
+    await initialize(session, terminal)
+
+    inspector.waiting = true
+    const operation = session.startSend({ text: 'reader', submit: true })
+    let settled = false
+    void operation.done.then(() => { settled = true })
+    // The child already blocks in read, but its prompt is still crossing the PTY.
+    inspector.pgid = 789
+    await vi.advanceTimersByTimeAsync(20)
+    expect(settled).toBe(false)
+    terminal.emitData('WAITING\r\n')
+    await vi.advanceTimersByTimeAsync(10)
+    expect(settled).toBe(false)
+    await vi.advanceTimersByTimeAsync(10)
+    expect(await operation.done).toMatchObject({ waitReason: 'stdin_read', viewport: 'WAITING\n' })
   })
 
   it('does not reuse a pre-write stdin wait as post-write readiness', async () => {
@@ -568,6 +591,8 @@ describe('LocalPtySession readiness and output', () => {
     await vi.advanceTimersByTimeAsync(10)
     expect(settled).toBe(false)
     inspector.waiting = true
+    await vi.advanceTimersByTimeAsync(10)
+    expect(settled).toBe(false)
     await vi.advanceTimersByTimeAsync(10)
     expect((await operation.done).waitReason).toBe('stdin_read')
   })
@@ -591,6 +616,8 @@ describe('LocalPtySession readiness and output', () => {
     await vi.advanceTimersByTimeAsync(10)
     inspector.waiting = true
     await vi.advanceTimersByTimeAsync(30)
+    expect(settled).toBe(false)
+    await vi.advanceTimersByTimeAsync(10)
     expect(settled).toBe(false)
     await vi.advanceTimersByTimeAsync(10)
     expect(settled).toBe(true)

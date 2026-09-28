@@ -54,7 +54,7 @@
     "@deepseek-ai/dsh-deque": "workspace:^",
     "@deepseek-ai/dsh-timeout": "workspace:^",
     "@deepseek-ai/schemastery": "workspace:^",
-    "ws": "^8.21.0",
+    "ws": "catalog:",
     "@deepseek-ai/dsh-typert-protocol": "workspace:^"
   },
   "peerDependencies": {
@@ -67,8 +67,8 @@
     "@deepseek-ai/dsh-remote-mock": "workspace:^",
     "@deepseek-ai/dsh-typert-registry": "workspace:^",
     "@deepseek-ai/dsh-util-crypto": "workspace:^",
-    "@types/ws": "^8.18.1",
+    "@types/ws": "catalog:",
     "@deepseek-ai/cordis": "workspace:^",
-    "zod": "^4.4.3"
+    "zod": "catalog:"
   }
 }

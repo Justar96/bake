@@ -157,6 +157,52 @@ describe('tool-jobs setup', () => {
     expect(await loadWith(1)).toBe('loaded')
   })
 
+  it('registers no prompt section; the tool descriptions carry the job guidance', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(LocalJobRegistry)
+    const sections = async (): Promise<string[]> => (await ctx.systemPrompt.assemble()).sections.map(section => section.name)
+    const before = await sections()
+    const fiber = await ctx.plugin(ToolJobs, {})
+    expect(ctx.tools.get('job_output')).toBeDefined()
+    expect(await sections()).toEqual(before)
+    await fiber.dispose()
+    expect(ctx.tools.get('job_output')).toBeUndefined()
+    expect(await sections()).toEqual(before)
+  })
+
+  it('pins the model-facing descriptions and configured wait bounds', async () => {
+    const { ctx } = await setup({ waitTimeoutMs: 5_000, maxWaitTimeoutMs: 60_000 })
+    const schemas = new Map(ctx.tools.schemas().map(schema => [schema.name, schema]))
+    const parameterDescriptions = (name: string): Record<string, unknown> => Object.fromEntries(
+      Object.entries((schemas.get(name)?.parameters['properties'] ?? {}) as Record<string, { description?: string }>)
+        .map(([key, value]) => [key, value.description]),
+    )
+    expect(schemas.get('job_output')?.description).toBe(
+      'Read a background job\'s output. You receive a notice when a job finishes, so there is '
+      + 'no need to poll or sleep while it runs. Jobs that stream output return what is new since your '
+      + 'last read; other jobs return their result once they finish. Every reply ends with '
+      + '`[status: ...]`. Returns immediately unless `wait: true`.',
+    )
+    expect(parameterDescriptions('job_output')).toEqual({
+      job_id: 'The id returned when the job started.',
+      wait: 'Wait until the job finishes or the timeout passes, for when you cannot continue without the result. '
+        + 'A timed-out wait returns `[status: running]` and leaves the job running.',
+      timeout_ms: 'Maximum wait in milliseconds when wait is true (default 5000, at most 60000).',
+    })
+    expect(schemas.get('job_list')?.description)
+      .toBe('List your background jobs, running and finished, with their ids, kinds, statuses, and labels.')
+    expect(schemas.get('job_kill')?.description).toBe(
+      'Stop a running background job. Jobs otherwise keep running after your turn ends, until '
+      + 'they finish. Returns immediately; the job\'s status becomes `killed` once its work has stopped.',
+    )
+    expect(parameterDescriptions('job_kill')).toEqual({
+      job_id: 'The id returned when the job started.',
+      reason: 'Optional short reason for stopping the job.',
+    })
+  })
+
   it('renders status lines with and without producer detail', () => {
     const base = { id: 'bash-1', kind: 'bash', label: 'x', startedAt: 0, reported: false } as unknown as JobSnapshot
     expect(statusLine({ ...base, status: 'running' })).toBe('[status: running]')
@@ -172,6 +218,9 @@ describe('tool-jobs setup', () => {
     await ctx.plugin(LocalJobRegistry)
     ToolJobs.apply(ctx, {})
     expect(ctx.tools.get('job_output')).toBeDefined()
+    const outputParameters = ctx.tools.schemas().find(schema => schema.name === 'job_output')?.parameters['properties']
+    expect((outputParameters as Record<string, { description?: string }>)['timeout_ms']?.description)
+      .toBe('Maximum wait in milliseconds when wait is true (default 30000, at most 600000).')
     expect(() => ctx.jobs.start(producer().spec)).not.toThrow()
   })
 })

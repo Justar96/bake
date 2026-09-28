@@ -10,7 +10,13 @@ while [ -L "$source" ]; do
 done
 root=$(CDPATH= cd -- "$(dirname -- "$source")/.." && pwd -P)
 if [ -z "${DSH_HOME+x}" ]; then DSH_HOME="$HOME/.bake"; export DSH_HOME; fi
+# Node writes the runtime watchdog's fatal-error reports and heap snapshots
+# here, without environment variables or network interfaces. Node arguments,
+# not NODE_OPTIONS, which the agent's subprocesses would inherit.
+diagnostics=$DSH_HOME/diagnostics
+if [ -n "$DSH_HOME" ]; then mkdir -p -m 700 -- "$diagnostics" 2>/dev/null || :; fi
 case ${1-} in
-  tui|headless|plugin|update|--profile) exec node "$root/apps/cli/lib/bin.js" "$@" ;;
-  *) exec node "$root/apps/cli/lib/bin.js" --profile tui "$@" ;;
+  tui|headless|plugin|update|--profile) ;;
+  *) set -- --profile tui "$@" ;;
 esac
+exec node --report-exclude-env --report-exclude-network "--diagnostic-dir=$diagnostics" "$root/apps/cli/lib/bin.js" "$@"

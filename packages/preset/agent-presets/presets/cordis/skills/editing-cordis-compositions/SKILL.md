@@ -1,11 +1,11 @@
 ---
 name: editing-cordis-compositions
-description: Use when creating, changing, or validating a Cordis composition for this harness — writing or editing an agent preset, adding or removing a plugin row, deciding whether something belongs to the host composition or to one session, checking whether a preset you authored actually mounts, or diagnosing a row that mounted but contributed nothing.
+description: Use when creating, changing, or validating a Cordis composition for Bake — writing or editing an agent preset, adding or removing a plugin row, deciding whether something belongs to the host composition or to one session, checking whether a preset you authored actually mounts, or diagnosing a row that mounted but contributed nothing.
 ---
 
 # Editing Cordis compositions
 
-Every capability in this harness is a plugin row in a `cordis.yml`. There is no separate configuration language: changing what an agent can do means changing which rows are composed for it.
+Every capability in Bake is a plugin row in a `cordis.yml`. There is no separate configuration language: changing what an agent can do means changing which rows are composed for it.
 
 ## Off-limits
 
@@ -21,17 +21,17 @@ Two planes, and the choice is not about how "agent-related" something feels — 
 
 **Agent preset.** What one session contributes to those registries: its tool plugins, its persona and prompt sections, its compaction policy. One instance per session, mounted under that session's scope and unwound with it.
 
-**A service with a consumer outside the agent plane cannot move into a preset.** `subagents` is the worked example: the registry answers cross-session queries for the host api-proxy, so a per-session copy both starves that host row — it waits forever for a service nothing provides — and collides on the second session, since a provider name registers once. The preset contributes the delegation *tools*; the registry and its backends stay host-side.
+**A service with a consumer outside the agent plane cannot move into a preset.** `subagents` is the worked example: the registry answers cross-session queries for the host, so a per-session copy both starves that host row — it waits forever for a service nothing provides — and collides on the second session, since a provider name registers once. The preset contributes the delegation *tools*; the registry and its backends stay host-side.
 
-A preset is a directory holding one `agent.cordis.yml`, optionally beside a `preset.yml` carrying display metadata — `name` and `description` (and, for shipped presets, a roster `order`). Write the metadata too: a preset without it shows up in every picker as its bare directory name.
+A preset is a directory holding one `agent.cordis.yml`, optionally beside a `preset.yml` carrying metadata — `name` and `description` (and, for shipped presets, a roster `order`). Write the metadata too so Bake can show a readable name and description when it reports the preset.
 
-Locally authored presets live one directory per preset under `${DSH_HOME:-$HOME/.dsh}/.agent-presets/`, and the shipped set sits beside the deployment's own config. Use those when the user asks where to look. For deployment overrides, read `${DSH_HOME:-$HOME/.dsh}/profiles/<profile>/cordis.patch.yml`, `${DSH_HOME:-$HOME/.dsh}/cordis.patch.yml`, and any launch `--patch` files for the `agent-presets` row's `roots` and `includeUserRoot`. Obtain the active profile and extra patch paths from the user when they are not in the task context; do not guess a different profile.
+Locally authored presets live one directory per preset under `${DSH_HOME:-$HOME/.bake}/.agent-presets/`, and the shipped set sits beside the deployment's own config. Use those when the user asks where to look. For deployment overrides, read `${DSH_HOME:-$HOME/.bake}/profiles/<profile>/cordis.patch.yml`, `${DSH_HOME:-$HOME/.bake}/cordis.patch.yml`, and any launch `--patch` files for the `agent-presets` row's `roots` and `includeUserRoot`. Obtain the active profile and extra patch paths from the user when they are not in the task context; do not guess a different profile.
 
 ## Authoring a preset
 
-Use shell and file tools to locate the installed `@deepseek-ai/dsh-agent-presets` package under the active profile's `node_modules` or the deployment installation. Its `presets/<id>/` directory contains each shipped preset. If those files are unavailable, ask the user to copy the preset through the Web preset picker and provide the copied directory; runtime API inspection does not execute Remote methods.
+Use shell and file tools to locate the installed `@deepseek-ai/dsh-agent-presets` package under the active profile's `node_modules` or the Bake installation. Its `presets/<id>/` directory contains each shipped preset. If those files are unavailable, ask the user for the installed package path; runtime API inspection does not execute Remote methods.
 
-Copy the complete source directory, including skills and assets, into a new `${DSH_HOME:-$HOME/.dsh}/.agent-presets/<new-id>/` directory (or the explicitly configured writable root). Refuse an existing destination. Set `name` and `description` in `preset.yml` and remove the copied roster `order`. Never overwrite the installed source.
+Copy the complete source directory, including skills and assets, into a new `${DSH_HOME:-$HOME/.bake}/.agent-presets/<new-id>/` directory (or the explicitly configured writable root). Refuse an existing destination. Set `name` and `description` in `preset.yml` and remove the copied roster `order`. Never overwrite the installed source.
 
 Edit the copy's `agent.cordis.yml` with the normal file tools. Writes outside the workspace follow the active filesystem approval policy. For profile-wide capabilities, author a workspace bundle and install it with `plugin_manager`; load `cordis-plugin-development` for packaging guidance.
 
@@ -56,7 +56,7 @@ A preset row that publishes a service needs an `isolate` realm containing both t
 
 ## Verify a preset
 
-Check the edited YAML and referenced local files with file tools. Ask the user to select the new preset in the Web picker and start a session; this authoring agent cannot invoke the preset Remote API or start a Web session through inspection. Once the user provides a running session or browser control, inspect the visible tools and any activation diagnostic. File validation alone does not verify imports, service dependencies, or isolation. Report which checks ran and leave activation unverified until that session check succeeds.
+Check the edited YAML and referenced local files with file tools. Start Bake with `--preset <new-id>` and a fresh session, then invoke a newly registered tool or run `/help` to confirm commands. Inspect activation diagnostics and the visible tool catalog when available. File validation alone does not verify imports, service dependencies, or isolation. Report which checks ran and leave activation unverified until that session check succeeds.
 
 ## What not to move into a preset
 

@@ -8,9 +8,17 @@ import type { PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 
 const REPOSITORY_ROOT = fileURLToPath(new URL('../../../', import.meta.url))
 
+/** The patch file of each shipped profile layer, relative to the repository root. */
+const BUNDLE_PATCHES = {
+  'base': 'packages/bundle/base/cordis.patch.yml',
+  'desktop': 'packages/bundle/desktop/cordis.patch.yml',
+  'headless': 'packages/bundle/headless/cordis.patch.yml',
+  'tui': 'apps/tui/packages/app/cordis.patch.yml',
+} as const
+
 /** Load one shipped bundle patch through the same parser as profile boot. */
-function bundle(name: 'acp-app' | 'base' | 'headless' | 'sdk-app' | 'sdk-minimal' | 'web-app'): PatchOptions[] {
-  return loadOverlayPatches('profile-hmr test', join(REPOSITORY_ROOT, 'packages', 'bundle', name, 'cordis.patch.yml'))
+function bundle(name: keyof typeof BUNDLE_PATCHES): PatchOptions[] {
+  return loadOverlayPatches('profile-hmr test', join(REPOSITORY_ROOT, BUNDLE_PATCHES[name]))
 }
 
 /** Resolve the effective HMR row after the supplied layers. */
@@ -21,12 +29,13 @@ function hmr(layers: PatchOptions[][]) {
 }
 
 describe('YAML-owned profile HMR', () => {
-  it('enables configuration watching in the base and web compositions', () => {
-    expect(hmr([bundle('base'), bundle('web-app')])).toMatchObject({ config: { root: [] } })
+  it('enables configuration watching in the base and TUI compositions', () => {
+    expect(hmr([bundle('base'), bundle('tui')])).toMatchObject({ config: { root: [] } })
+    expect(hmr([bundle('base'), bundle('tui')]).disabled).not.toBe(true)
     expect(hmr([bundle('base')]).disabled).not.toBe(true)
   })
 
-  it.each(['headless', 'sdk-app', 'acp-app'] as const)('%s disables HMR with a bundle override', (mode) => {
+  it.each(['headless', 'desktop'] as const)('%s disables HMR with a bundle override', (mode) => {
     expect(hmr([bundle('base'), bundle(mode)])).toMatchObject({ disabled: true })
     expect(hmr([bundle('base'), bundle(mode), [{ id: 'hmr', disabled: false }]])).toMatchObject({
       disabled: false, config: { root: [] },
@@ -37,9 +46,5 @@ describe('YAML-owned profile HMR', () => {
     expect(hmr([bundle('base'), [{ id: 'hmr', config: { root: ['.'] } }]])).toMatchObject({
       config: { root: ['.'] },
     })
-  })
-
-  it('keeps the standalone sdk-minimal tree free of HMR', () => {
-    expect(composeEntries([bundle('sdk-minimal')]).find(entry => entry.id === 'hmr')).toBeUndefined()
   })
 })

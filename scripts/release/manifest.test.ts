@@ -122,6 +122,7 @@ test('rejects a manifest changed after signing, and a missing signature', () => 
 test('every copy of the release public key is the one the updater trusts', async () => {
   const { RELEASE_PUBLIC_KEYS } = await import('../../packages/boot/updater/src/keys.ts')
   const [trusted] = RELEASE_PUBLIC_KEYS
+  if (trusted === undefined) throw new Error('The updater trusts no release key')
   expect(readFileSync(resolve(import.meta.dir, '../../distribution/host/release-key.pub'), 'utf8').trim()).toBe(trusted)
   for (const installer of ['install.sh', 'install.ps1']) {
     expect(readFileSync(resolve(import.meta.dir, '../../distribution/host', installer), 'utf8')).toContain(`['${trusted}', process.env.BAKE_RELEASE_PUBLIC_KEY]`)

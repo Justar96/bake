@@ -38,6 +38,57 @@ import { renderPwshProcessRead, renderPwshResult } from '../src/render.ts'
 
 const testToolSignal = new AbortController().signal
 
+// Pinned model-visible text, the PowerShell twin of the bash tool's. The
+// description is the tool's only guidance (no system-prompt section); the
+// sandbox paragraph appears only with a confining executor.
+const PWSH_DESCRIPTION_BASE = 'Run a PowerShell command with `pwsh -Command` and return its stdout and stderr. '
+  + 'Each call starts a fresh pwsh process, so directory changes and variables do not carry over to later calls. '
+  + 'Paths use native Windows form (`C:\\...`), and environment variables are read as `$env:NAME`. '
+  + 'A non-zero exit is reported in the result as `[exit code: N]`, not as a tool error. '
+  + 'On Windows a force-killed command also ends with `[exit code: 1]` and no signal marker, '
+  + 'so after an interruption that exit means termination, not a command failure. '
+  + 'Long output is truncated to its tail, and the full output is saved to a file named in the result when possible. '
+  + '`$env:DSH_HOME` is the harness home directory and `$env:DSH_SESSION_ID` is this session\'s id. '
+const PWSH_DESCRIPTION_BACKGROUND = 'A command run with `run_in_background` returns a job id right away; '
+  + 'read its output with `job_output` and stop it with `job_kill`.'
+const PWSH_DESCRIPTION_NO_BACKGROUND = 'Background execution is not available, so a command must finish within its timeout.'
+const PWSH_DESCRIPTION_SANDBOX = ' Commands may run in a file sandbox; trying one it might block is safe. '
+  + 'A blocked file operation reports `[sandbox: file access denied under <mode> mode]`: '
+  + 'a policy denial, not a bug in the command, so do not work around it. '
+  + 'Under the Windows sandbox, read-only runs PowerShell in ConstrainedLanguage mode: cmdlets, core types '
+  + '(`[string]`, `[datetime]`, `[regex]`, `[guid]`), `-f` formatting, and property access work, while '
+  + '.NET static calls (`[System.IO.*]::`, `[math]::`), `Add-Type`, COM objects, and reflection fail '
+  + 'with "only core types" errors. Workspace-write stays in FullLanguage unless host policy says otherwise. '
+  + 'In both confined modes programs cannot open named pipes, so capturing another program\'s output '
+  + 'through piped stdio (Node.js `child_process.spawn` or `exec` with the default `stdio: \'pipe\'`) '
+  + 'fails with EPERM, while `stdio: \'inherit\'`, `stdio: \'ignore\'`, and PowerShell\'s own pipelines work. '
+  + 'Treat that EPERM as a sandbox denial, or restructure the command so it does not capture output. '
+  + 'When a wider mode would let a denied command succeed, retry that same command once in the same turn '
+  + 'with the narrowest sufficient `sandbox_permissions` and a `justification`. '
+  + 'That retry itself asks the user for approval, so there is no need to ask in chat first. '
+  + 'Request a wider mode up front only when this session already denied the same access. '
+  + 'A rejection is final for that command: stop and explain. Other commands can still run or escalate.'
+const PWSH_PARAMETER_DESCRIPTIONS = {
+  command: 'The PowerShell command to execute.',
+  description: 'Short summary of what the command does, shown to the user.',
+  timeoutMs: 'Timeout in milliseconds, capped at the maximum; the command is killed when it expires.',
+  workdir: 'Directory to run this command in. Defaults to your working directory; a relative path resolves against it.',
+  run_in_background: 'Run in the background, with no timeout.',
+  sandbox_permissions: 'Wider sandbox mode for retrying a denied command.',
+  justification: 'One sentence telling the user why this command needs wider access.',
+}
+
+/** Every parameter description of one schema, keyed by parameter name. */
+function parameterDescriptions(schema: { parameters: { properties?: unknown } }): Record<string, string | undefined> {
+  const properties = schema.parameters.properties as Record<string, { description?: string }>
+  return Object.fromEntries(Object.entries(properties).map(([name, property]) => [name, property.description]))
+}
+
+/** The pinned descriptions of the named parameters. */
+function pinnedParameters(...names: Array<keyof typeof PWSH_PARAMETER_DESCRIPTIONS>): Record<string, string> {
+  return Object.fromEntries(names.map(name => [name, PWSH_PARAMETER_DESCRIPTIONS[name]]))
+}
+
 /** Per-test temp dirs (session cwd/home fixtures), removed after each test. */
 const tempDirs: string[] = []
 afterEach(() => {
@@ -210,7 +261,7 @@ class ConfiningFakeBash extends ShellExecutor {
 }
 
 /** Sandboxed composition: the shared policy service + a confining executor + the pwsh tool (+ optional approval). */
-async function setupSandboxed(withApproval = false) {
+async function setupSandboxed(withApproval = false, toolConfig: Partial<ToolPwsh.Config> = {}) {
   const ctx = new Context()
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
@@ -226,7 +277,7 @@ async function setupSandboxed(withApproval = false) {
   await ctx.plugin(SandboxPolicyService, {})
   await ctx.plugin(ConfiningFakeBash)
   if (withApproval) await ctx.plugin(ApprovalService)
-  await ctx.plugin(ToolPwsh)
+  await ctx.plugin(ToolPwsh, toolConfig)
   const bash = ctx.shell as ConfiningFakeBash
   return { ctx, bash }
 }
@@ -342,11 +393,11 @@ async function callUntilText(
 }
 
 describe('registration', () => {
-  it('registers the pwsh tool with its prompt section and schema', async () => {
+  it('registers the pwsh schema, whose description is its only guidance', async () => {
     const { ctx } = await setup()
     const schema = ctx.tools.schemas().find(s => s.name === 'pwsh')
     expect(schema).toBeDefined()
-    expect(schema?.description).toContain('PowerShell command')
+    expect(schema?.description).toBe(PWSH_DESCRIPTION_BASE + PWSH_DESCRIPTION_BACKGROUND)
     expect(schema?.parameters.properties).toMatchObject({
       command: { type: 'string' },
       description: { type: 'string' },
@@ -354,10 +405,14 @@ describe('registration', () => {
       workdir: { type: 'string' },
       run_in_background: { type: 'boolean' },
     })
+    expect(parameterDescriptions(schema!)).toEqual(
+      pinnedParameters('command', 'description', 'timeoutMs', 'workdir', 'run_in_background'),
+    )
     expect(schema?.parameters.required).toEqual(['command', 'description'])
-    const prompt = renderPrompt(await ctx.systemPrompt.assemble())
-    expect(prompt).toContain('Non-zero exits are reported as `[exit code: N]` markers')
-    expect(prompt).toContain('without a signal marker')
+    // No system-prompt section: only the system-prompt plugin's own built-ins remain.
+    const assembly = await ctx.systemPrompt.assemble()
+    expect(assembly.sections.map(s => s.name)).toEqual(['harness:identity', 'deployment:persona-prefix', 'deployment:persona-suffix'])
+    expect(renderPrompt(assembly)).not.toContain('pwsh')
   })
 
   it('stays pending until ctx.shell exists (inject)', async () => {
@@ -599,11 +654,11 @@ describe('sandbox escalation through ctx.approval', () => {
     const schema = ctx.tools.schemas().find(item => item.name === 'pwsh')!
     const properties = schema.parameters.properties as Record<string, { enum?: string[] }>
     expect(properties['sandbox_permissions']?.enum).toEqual(['workspace-write', 'danger-full-access'])
-    expect(schema.description).toContain('approval prompt')
-    expect(schema.description).toContain('ConstrainedLanguage')
-    expect(schema.description).toContain('workspace-write stays in FullLanguage')
-    expect(schema.description).toContain('In both confined modes, programs cannot open named pipes')
-    expect(schema.description).toContain('fails with EPERM')
+    // The approval policy's runtime context, not this description, says when approvals are off.
+    expect(schema.description).toBe(PWSH_DESCRIPTION_BASE + PWSH_DESCRIPTION_BACKGROUND + PWSH_DESCRIPTION_SANDBOX)
+    expect(parameterDescriptions(schema)).toEqual(pinnedParameters(
+      'command', 'description', 'timeoutMs', 'workdir', 'run_in_background', 'sandbox_permissions', 'justification',
+    ))
 
     for (const args of [
       { command: 'Write-Output ok', description: 'd', sandbox_permissions: 'workspace-write' },
@@ -614,12 +669,27 @@ describe('sandbox escalation through ctx.approval', () => {
     }
   })
 
+  it('keeps the sandbox paragraph after the no-background sentence when background is disabled', async () => {
+    const { ctx } = await setupSandboxed(false, { enableRunInBackground: false })
+    try {
+      const schema = ctx.tools.schemas().find(item => item.name === 'pwsh')!
+      expect(schema.description).toBe(PWSH_DESCRIPTION_BASE + PWSH_DESCRIPTION_NO_BACKGROUND + PWSH_DESCRIPTION_SANDBOX)
+      expect(parameterDescriptions(schema)).toEqual(pinnedParameters(
+        'command', 'description', 'timeoutMs', 'workdir', 'sandbox_permissions', 'justification',
+      ))
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
   it('the escalation fields and the confined-mode clauses stay out of sandbox-less compositions', async () => {
     const { ctx } = await setup()
     const schema = ctx.tools.schemas().find(item => item.name === 'pwsh')!
     expect(schema.description).not.toContain('ConstrainedLanguage')
     expect(schema.description).not.toContain('named pipes')
     expect(schema.description).not.toContain('sandbox_permissions')
+    // No confining executor means no denial can occur, so the marker is not described either.
+    expect(schema.description).not.toContain('[sandbox:')
     expect(schema.parameters.properties).not.toHaveProperty('sandbox_permissions')
   })
 
@@ -837,8 +907,9 @@ describe('background execution through the job runtime', () => {
     const schema = ctx.tools.schemas().find(s => s.name === 'pwsh')!
     expect(Object.keys(schema.parameters.properties as Record<string, unknown>))
       .toEqual(['command', 'description', 'timeoutMs', 'workdir'])
-    expect(schema.description).toContain('Background execution is not available')
+    expect(schema.description).toBe(PWSH_DESCRIPTION_BASE + PWSH_DESCRIPTION_NO_BACKGROUND)
     expect(schema.description).not.toContain('run_in_background')
+    expect(parameterDescriptions(schema)).toEqual(pinnedParameters('command', 'description', 'timeoutMs', 'workdir'))
 
     // Schema omission is advertising; execution must also enforce the opt-out.
     const forced = await call(ctx, 'pwsh', { command: 'Write-Output hi', description: 'test command', run_in_background: true })

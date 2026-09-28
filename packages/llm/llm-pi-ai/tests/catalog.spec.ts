@@ -704,6 +704,54 @@ describe('per-model protocols', () => {
     expect(JSON.stringify(server.requests[1])).toContain('"cache_control":{"type":"ephemeral"}')
   })
 
+  it('names the session on every protocol so a sticky gateway keeps it on one credential', async () => {
+    const failure = { status: 401, body: JSON.stringify({ error: { message: 'expected mock failure' } }) }
+    const server = await mockServer([failure, failure, failure, failure])
+    const ctx = await harness(gateway(`${server.url}/v1`, {
+      api: 'openai-responses',
+      // A deployment header must not be able to impersonate another session.
+      headers: { 'X-Deepseek-Harness-Session-Id': 'spoofed' },
+      models: [
+        { id: 'gpt-large' },
+        { id: 'claude-large', api: 'anthropic-messages', baseURL: server.url },
+        { id: 'kimi-large', api: 'openai-completions' },
+      ],
+    }))
+    const messages = [createUserMessage({ content: [{ type: 'text', text: 'hi' }], source: { kind: 'user' } })]
+
+    for (const model of ['gpt-large', 'claude-large', 'kimi-large']) {
+      await assemble(ctx, { provider: 'acme-gateway', model, messages, sessionId: 'session-a' as never })
+    }
+    await assemble(ctx, { provider: 'acme-gateway', model: 'claude-large', messages })
+
+    expect(server.headers.slice(0, 3).map(headers => headers['x-deepseek-harness-session-id']))
+      .toEqual(['session-a', 'session-a', 'session-a'])
+    // A request outside any session (a probe, a title call) names none rather than the deployment's.
+    expect(server.headers[3]).not.toHaveProperty('x-deepseek-harness-session-id')
+  })
+
+  it('pins an Anthropic session to one gateway credential only when the model opts in', async () => {
+    const failure = { status: 401, body: JSON.stringify({ error: { message: 'expected mock failure' } }) }
+    const server = await mockServer([failure, failure])
+    const ctx = await harness(gateway(`${server.url}/v1`, {
+      api: 'openai-responses',
+      models: [
+        { id: 'claude-plain', api: 'anthropic-messages', baseURL: server.url },
+        { id: 'claude-sticky', api: 'anthropic-messages', baseURL: server.url,
+          compat: { sendSessionAffinityHeaders: true } },
+      ],
+    }))
+    const messages = [createUserMessage({ content: [{ type: 'text', text: 'hi' }], source: { kind: 'user' } })]
+
+    await assemble(ctx, { provider: 'acme-gateway', model: 'claude-plain', messages, sessionId: 'session-a' as never })
+    await assemble(ctx, { provider: 'acme-gateway', model: 'claude-sticky', messages, sessionId: 'session-a' as never })
+
+    // A round-robin gateway keeps one prompt cache per upstream credential;
+    // the header is what lets it route every step of a session to the same one.
+    expect(server.headers[0]).not.toHaveProperty('x-session-affinity')
+    expect(server.headers[1]?.['x-session-affinity']).toBe('session-a')
+  })
+
   it('refuses an empty model endpoint', () => {
     expect(() => resolveProfiles(gateway('https://acme.test/v1', { models: [{ id: 'acme-large', baseURL: '' }] }).providers))
       .toThrow(/model "acme-large" has an empty baseURL/)

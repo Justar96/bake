@@ -61,24 +61,21 @@ export function parseReadArgs(args: { file_path: string; offset?: number; limit?
 }
 
 /**
- * Register the `read` tool and its scope-aware system-prompt guidance.
+ * Register the `read` tool. Its description carries all of its model-facing
+ * guidance; the tool contributes no system-prompt section.
  * @param ctx - the plugin context; registrations are effects scoped to it, and execution uses its `fs` service.
  * @param caps - the deployment's resolved read caps (plugin config after defaulting).
  */
 export function applyReadTool(ctx: Context, caps: ReadToolCaps): void {
-  ctx.systemPrompt.section({
-    name: 'tool:read',
-    order: ctx.systemPrompt.getSectionOrder('TOOL_READ'),
-    text: ({ scope }) => ctx.tools.get('read', scope) === undefined
-      ? ''
-      : 'Use the read tool — not shell commands like cat — to inspect text files. Results include line numbers. Use offset and limit to continue reading large files.',
-  })
-
   ctx.tools.register(defineTool({
     name: 'read',
-    description: 'Read a UTF-8 text file and return line-numbered content.',
+    // The observation sentence is what distinguishes this tool from a shell
+    // `cat`: shipped compositions mount fs-observation-policy, which gates
+    // write/edit on this tool's `fs/observed` record.
+    description: 'Read a UTF-8 text file as numbered lines, paged for long files. '
+      + 'Unlike cat, head, or tail in a shell, this counts as reading the file for later write and edit calls.',
     parameters: {
-      file_path: { type: 'string', required: true, description: 'Path to read, resolved by the filesystem backend.' },
+      file_path: { type: 'string', required: true, description: 'Absolute path, or relative to the working directory.' },
       offset: { type: 'number', description: '1-based first line to return. Defaults to 1.' },
       limit: { type: 'number', description: `Maximum number of lines to return. Defaults to ${caps.limit}.` },
     },

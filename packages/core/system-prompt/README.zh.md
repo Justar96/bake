@@ -43,7 +43,7 @@ kind: "package-reference"
 
 | 字段 | 默认值 | 含义 |
 |---|---|---|
-| `includeHarnessIdentity` | `true` | 是否包含顺序为 −1000 的第一方固定开场白 `You are an AI agent powered by DeepSeek Harness.`。仅当兼容性部署拥有完整系统提示词时设为 false。 |
+| `includeHarnessIdentity` | `true` | 是否包含顺序为 −1000 的第一方固定开场白 `You are an AI agent powered by DeepSeek Harness.`。当部署 persona 自带身份介绍时设为 false，Bake 的终端配置即是如此。 |
 | `includeRuntimeContext` | `true` | 是否在组装中包含有序动态 runtime 上下文 |
 | `personaPrefix` | `''` | 全局 persona 前缀模板，顺序为 `0`，位于第一方指导之前 |
 | `personaSuffix` | `''` | 全局 `deployment:persona-suffix` 模板，顺序为 `10200`，位于第一方指导之后 |
@@ -57,9 +57,9 @@ kind: "package-reference"
 
 ```text
 ctx.systemPrompt.section({
-  name: 'tool:bash',
+  name: 'my-plugin:policy',
   order: 100,
-  text: 'Prefer bash for file and process operations.',
+  text: 'Answer in the language the user writes in.',
 })
 ```
 

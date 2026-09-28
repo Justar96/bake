@@ -120,7 +120,24 @@ describe('dsh-tool-subagent model selection', () => {
       'reasoning_effort',
       'run_in_background',
     ])
-    expect(schema.description).toContain('list_subagent_models')
+    // Without provider route defaults, unset values come from the parent's route.
+    expect(schema.description).toContain(
+      ' Model choice is optional: omit `provider`, `model`, and `reasoning_effort` to use '
+      + 'the configured subagent defaults, filling gaps from your own route where compatible. '
+      + 'To choose, look up routes and efforts with `list_subagent_models`, then pass `provider` and `model` '
+      + 'together. If you change the route without `reasoning_effort`, the new model\'s default effort applies.',
+    )
+    const described = props as Record<string, { description: string }>
+    expect(described['provider']!.description).toBe(
+      'LLM provider for the subagent. Pass it with model; omit both to use the configured defaults or your own route.',
+    )
+    expect(described['model']!.description).toBe(
+      'Model id for that provider. Pass it with provider; omit both to use the configured defaults or your own route.',
+    )
+    expect(described['reasoning_effort']!.description).toBe(
+      'Reasoning effort for the subagent\'s model. Omit to use a compatible configured or inherited effort, '
+      + 'or the new model\'s default after a route change.',
+    )
     expect(ctx.tools.get('list_subagent_models', agent)).toBeDefined()
     expect(schema.description).not.toContain('alpha')
 
@@ -428,7 +445,7 @@ describe('dsh-tool-subagent model selection', () => {
     const ctx = await setup({ provider: 'mock', withModelSelection: true }, { inheritsParentContext: true })
     const schema = ctx.tools.schemas(modelSelectionSetupAgent(ctx)).find(entry => entry.name === 'subagent')!
     expect(schema.description).toContain('inherits this conversation')
-    expect(schema.description).toContain('can prevent provider-side reuse of the inherited conversation prefix')
+    expect(schema.description).toMatch(/ Changing the route may prevent cache reuse of the inherited conversation\.$/)
   })
 
   it('propagates an exact-route resolver failure before child creation', async () => {

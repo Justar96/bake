@@ -32,8 +32,9 @@ Source: [`packages/core/agent/src/index.ts`](../../packages/core/agent/src/index
  * only the holder can tear this agent down. The registered factory provider is
  * also a structural owner because the scoped agent depends on that provider's
  * service API; provider unload stops and drains every live handle it made.
- * `dispose()` stops the loop, awaits its exit, unregisters the agent, removes
- * its session from the store, and finally unwinds its scoped world.
+ * `dispose()` stops the loop, awaits its exit, unwinds its scoped world, closes
+ * the session's write path, and finally unregisters the agent and removes its
+ * session from the store.
  *
  * `ctx.agents.get(id)` still returns a bare {@link Agent} — the handle is
  * exposed only to the consumer owner that created it; the structural provider
@@ -106,7 +107,7 @@ interface Agent {
    * turn and runs when the aborted activity converges to idle; a `disposed`
    * cancel leaves it parked. A wake submitted while already idle always opens
    * its turn boundary, even when its message is cleared before the driver
-   * claims (cancel-convergence wake latch).
+   * claims ([cancel-convergence wake latch](../../../../.agents/notes/implemented/bug-fix/2026-08-07-cancel-convergence-wake-latch.md)).
    * @param message - identified content and the source that supplied it.
    * @param target - the preferred next-turn or next-step inbox boundary.
    * @param wakeup - whether delivery may wake the driver.
@@ -959,13 +960,20 @@ Source: [`packages/core/agent/src/runtime-types.ts`](../../packages/core/agent/s
 
 #### `agent/disposed` — emit
 
-An agent left the registry; AgentLoop emits this after driver quiescence and scoped-registration unwind, but before session detachment. Custom registry users own their driver-ordering contract.
+An agent left the registry; AgentLoop emits this after driver quiescence and scoped-registration unwind, but before session detachment. Custom registry users own their driver-ordering contract. Because the agent's scope has already unwound, a listener registered on `agent.ctx` cannot observe this event — register on a host or registry-owning context instead (scope-filtered dispatch still targets such a listener to this agent by identity). A session event appended from this listener, or from a `session/disposed` listener reached during the same disposal, is not persisted: the session's write handle is already closed by then, so the append is silently dropped rather than durably written.
 
 ```ts cordis-catalog
 /**
  * An agent left the registry; AgentLoop emits this after driver quiescence
  * and scoped-registration unwind, but before session detachment. Custom
- * registry users own their driver-ordering contract.
+ * registry users own their driver-ordering contract. Because the agent's
+ * scope has already unwound, a listener registered on `agent.ctx` cannot
+ * observe this event — register on a host or registry-owning context
+ * instead (scope-filtered dispatch still targets such a listener to this
+ * agent by identity). A session event appended from this listener, or
+ * from a `session/disposed` listener reached during the same disposal,
+ * is not persisted: the session's write handle is already closed by then,
+ * so the append is silently dropped rather than durably written.
  * @param payload.agent - the exact agent removed from the registry.
  * Scope-filtered dispatch (`@deepseek-ai/dsh-scope`): agent-scoped listeners receive only that agent.
  * @mode emit

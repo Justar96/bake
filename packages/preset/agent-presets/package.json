@@ -70,9 +70,9 @@
     "@deepseek-ai/cordis": "workspace:^"
   },
   "dependencies": {
-    "js-yaml": "^4.1.0",
+    "js-yaml": "catalog:",
     "@deepseek-ai/schemastery": "workspace:^",
-    "zod": "^4.4.3"
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@deepseek-ai/dsh-app-boot": "workspace:^",

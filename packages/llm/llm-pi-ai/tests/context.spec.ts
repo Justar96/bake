@@ -8,7 +8,7 @@ import type {
 } from '@deepseek-ai/dsh-attachment'
 import { ToolCallId, createMessage, createUserMessage, offloadedImageText } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, GenerateOptions, Message } from '@deepseek-ai/dsh-llm'
-import { toPiContext } from '../src/context.ts'
+import { requestImageTarget, toPiContext } from '../src/context.ts'
 import type { PiImageRequestContext } from '../src/context.ts'
 import { toPiAssistant } from '../src/replay.ts'
 
@@ -467,6 +467,89 @@ describe('pi-ai request context conversion', () => {
     )).toThrow(/assistant image output/)
   })
 
+})
+
+describe('pi-ai request image target', () => {
+  const MAX_BYTES = 1024 * 1024
+  /** The shipped pixel budget beside the anthropic-messages long-edge default. */
+  const anthropic = { maxPixels: 2048 * 2048, maxDimension: 2000, maxBytes: MAX_BYTES }
+  const size = (width: number, height: number): Pick<ImageAttachmentRef, 'width' | 'height'> => ({ width, height })
+
+  it.each([
+    ['square 2048', 2048, 2048, 2000, 2000],
+    ['wide 4000x1000 inside the pixel budget', 4000, 1000, 2000, 500],
+    ['tall 1000x4000 inside the pixel budget', 1000, 4000, 500, 2000],
+    ['tall screenshot above the pixel budget', 1280, 4000, 640, 2000],
+    ['tiny', 16, 9, 16, 9],
+    ['exact 2000 boundary', 2000, 2000, 2000, 2000],
+    ['exact 2000 long edge', 2000, 1, 2000, 1],
+    ['one pixel past the boundary, short edge rounded from the source', 2001, 1000, 2000, 1000],
+    ['1xN extreme', 1, 8192, 1, 2000],
+    ['Nx1 extreme', 8192, 1, 2000, 1],
+    ['1x1', 1, 1, 1, 1],
+  ])('caps %s under both bounds', (_label, width, height, expectedWidth, expectedHeight) => {
+    expect(requestImageTarget(size(width, height), anthropic)).toEqual({
+      width: expectedWidth,
+      height: expectedHeight,
+      maxBytes: MAX_BYTES,
+    })
+  })
+
+  it('lets a stricter pixel budget win without consulting the cap', () => {
+    expect(requestImageTarget(size(2048, 2048), { ...anthropic, maxPixels: 1_000_000 }))
+      .toEqual({ width: 1000, height: 1000, maxBytes: MAX_BYTES })
+    expect(requestImageTarget(size(4000, 1000), { ...anthropic, maxPixels: 1_000_000 }))
+      .toEqual({ width: 2000, height: 500, maxBytes: MAX_BYTES })
+  })
+
+  it('applies the pixel budget alone when no cap is configured', () => {
+    const budgetOnly = { maxPixels: 2048 * 2048, maxBytes: MAX_BYTES }
+    expect(requestImageTarget(size(4000, 1000), budgetOnly)).toEqual({ width: 4000, height: 1000, maxBytes: MAX_BYTES })
+    expect(requestImageTarget(size(2048, 2048), budgetOnly)).toEqual({ width: 2048, height: 2048, maxBytes: MAX_BYTES })
+  })
+
+  it('keeps every target inside both bounds, at least 1 px, and never enlarged', () => {
+    const edges = [1, 2, 7, 999, 1000, 1999, 2000, 2001, 2047, 2048, 2049, 3000, 4000, 6000, 8192]
+    for (const width of edges) {
+      for (const height of edges) {
+        for (const budget of [anthropic, { ...anthropic, maxPixels: 1_000_000 }, { ...anthropic, maxDimension: 1 }]) {
+          const target = requestImageTarget(size(width, height), budget)
+          expect(target.width * target.height).toBeLessThanOrEqual(budget.maxPixels)
+          expect(Math.max(target.width, target.height)).toBeLessThanOrEqual(budget.maxDimension)
+          expect(Math.min(target.width, target.height)).toBeGreaterThanOrEqual(1)
+          expect(target.width).toBeLessThanOrEqual(width)
+          expect(target.height).toBeLessThanOrEqual(height)
+          expect(requestImageTarget(size(width, height), budget)).toEqual(target)
+        }
+      }
+    }
+  })
+
+  it('reads each image at the same target however many images the request holds', async () => {
+    const first: ImageAttachmentRef = { ...ref, width: 4000, height: 1000 }
+    const others = Array.from({ length: 20 }, (_, index): ImageAttachmentRef => ({
+      ...ref,
+      attachmentId: AttachmentId(`sha256:${index.toString(16).padStart(64, '0')}`),
+      width: 2048,
+      height: 2048,
+    }))
+    const targets = async (images: readonly ImageAttachmentRef[]): Promise<Map<AttachmentId, ImageRequestTarget>> => {
+      const readImageRequest = vi.fn((value: ImageAttachmentRef, _target: ImageRequestTarget) => (
+        Promise.resolve(requestImage(value, Uint8Array.of(1)))
+      ))
+      await toPiContext(
+        request([user(images.map((attachment): ContentBlock => ({ type: 'image', attachment })))]),
+        imageContext(projectionStore(readImageRequest), { requestImagePolicy: anthropic }),
+      )
+      return new Map(readImageRequest.mock.calls.map(([value, target]) => [value.attachmentId, target]))
+    }
+
+    const alone = await targets([first])
+    const crowded = await targets([first, ...others])
+    expect(crowded.size).toBe(21)
+    expect(crowded.get(first.attachmentId)).toEqual(alone.get(first.attachmentId))
+    expect(alone.get(first.attachmentId)).toEqual({ width: 2000, height: 500, maxBytes: MAX_BYTES })
+  })
 })
 
 describe('pi-ai system prompt source', () => {
