@@ -15,6 +15,7 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 - The status line keeps the cache-hit reading when tasks, a goal, and subagents crowd it; only the input and output totals give way. It used to disappear as soon as a session with a task list spawned a subagent.
 - A prompt a command prints just before it waits for input, such as `Password:`, is no longer missing from the terminal tool's result on a busy machine. The tool now waits for output already on its way before reporting that the command is waiting.
 - A programmatic tool call that times out, is cancelled, or exits early keeps the console output it printed before it stopped. Output the program had sent but Bake had not yet read used to be dropped on a busy machine.
+- Bake no longer writes to a session, or takes its lock, after the session closes. An event arriving as a session closed could leave the session's lock file open, which on Node 26 could crash Bake later or make that session report as already in use until restart. It could also write to the session after its lock was released.
 
 ## [0.1.8] - 2026-09-28
 
