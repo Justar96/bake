@@ -151,15 +151,29 @@ const ACTION_FIELDS = [
  * Reject meaningful values in fields the selected action does not use. The
  * message names each such field and its filler, because a model that copies
  * values from `get_goal` otherwise retries the same arguments.
+ *
+ * A strict-schema model must send every field, and the value it most often
+ * has at hand is the one `get_goal` just returned. An `objective` or
+ * `max_goal_rounds` equal to the addressed goal's current value changes
+ * nothing, so it counts as a filler rather than costing a rejected step;
+ * any other value is still rejected.
+ * @param action - the selected update action.
+ * @param args - the raw model arguments.
+ * @param echo - the addressed goal's current values, when the ref names the current goal.
  */
 function rejectUnusedFields(action: string, args: {
   objective?: string | undefined
   max_goal_rounds?: number | undefined
   blocked_reason?: string | undefined
-}): void {
-  const unused = ACTION_FIELDS.filter(field => field.action !== action && (field.name === 'max_goal_rounds'
-    ? hasRoundCap(args.max_goal_rounds)
-    : hasText(args[field.name])))
+}, echo?: Pick<GoalView, 'objective' | 'maxGoalRounds'>): void {
+  const unused = ACTION_FIELDS.filter((field) => {
+    if (field.action === action) return false
+    if (field.name === 'max_goal_rounds') {
+      return hasRoundCap(args.max_goal_rounds) && args.max_goal_rounds !== echo?.maxGoalRounds
+    }
+    if (field.name === 'objective') return hasText(args.objective) && args.objective !== echo?.objective
+    return hasText(args[field.name])
+  })
   if (unused.length === 0) return
   const names = unused.map(field => field.name).join(' and ')
   const fillers = unused.map(field => `${field.name}: ${field.filler}`).join(', ')
@@ -287,6 +301,8 @@ export function apply(ctx: Context, config: Config): void {
     execute(args, exec) {
       const execution = goalToolExecution(ctx, exec)
       const ref = goalRef(args.goal_id, args.revision)
+      const addressed = ctx.goals.get(execution.agent)
+      const echo = addressed?.id === ref.id ? addressed : undefined
       const replacements = {
         ...hasText(args.objective) ? { objective: args.objective } : {},
         ...hasRoundCap(args.max_goal_rounds) ? { maxGoalRounds: args.max_goal_rounds } : {},
@@ -299,8 +315,8 @@ export function apply(ctx: Context, config: Config): void {
       }
       if (args.action === 'pause' || args.action === 'resume') {
         requireDirectHuman(ctx, execution)
-        rejectUnusedFields(args.action, args)
-        const current = ctx.goals.get(execution.agent)
+        rejectUnusedFields(args.action, args, echo)
+        const current = addressed
         if (args.action === 'resume' && current?.id === ref.id && current.revision === ref.revision
           && current.phase === 'paused') {
           throw new HarnessError(
@@ -314,7 +330,7 @@ export function apply(ctx: Context, config: Config): void {
         return Promise.resolve(goalValue(goal))
       }
       const authority = completionAuthority(ctx, execution)
-      rejectUnusedFields(args.action, args)
+      rejectUnusedFields(args.action, args, echo)
       if (args.action === 'blocked'
         && (args.blocked_reason === undefined || args.blocked_reason.trim().length === 0)) {
         throw new HarnessError('blocked_reason is required with action blocked', 'GOAL_TOOL_INVALID_UPDATE')

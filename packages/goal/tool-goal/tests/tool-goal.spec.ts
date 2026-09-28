@@ -508,17 +508,16 @@ describe('goal tool state transitions', () => {
     const { ctx, root } = await harness()
     openTurn(root, { kind: 'user' })
     const created = ctx.goals.create(root.agent, { objective: 'valid', maxGoalRounds: 12 })
-    // The shape a model sends after copying the cap from get_goal.
-    const copiedCap = await execute(ctx, 'update_goal', {
+    const changedCap = await execute(ctx, 'update_goal', {
       goal_id: created.id,
       revision: created.revision,
       action: 'resume',
       objective: '',
-      max_goal_rounds: 12,
+      max_goal_rounds: 20,
       blocked_reason: '',
     }, root.agent)
-    expect(copiedCap.error?.info?.code).toBe('GOAL_TOOL_INVALID_UPDATE')
-    expect(copiedCap.error?.message).toBe('max_goal_rounds is not used by action resume; omit it or send '
+    expect(changedCap.error?.info?.code).toBe('GOAL_TOOL_INVALID_UPDATE')
+    expect(changedCap.error?.message).toBe('max_goal_rounds is not used by action resume; omit it or send '
       + 'max_goal_rounds: 0. objective and max_goal_rounds apply only to action edit; '
       + 'blocked_reason applies only to action blocked.')
     const several = await execute(ctx, 'update_goal', {
@@ -531,6 +530,33 @@ describe('goal tool state transitions', () => {
     expect(several.error?.message).toMatch(
       /^objective and blocked_reason are not used by action complete; omit them or send objective: "", blocked_reason: ""\./,
     )
+  })
+
+  it('accepts values echoed from get_goal as fillers, but only for the addressed goal', async () => {
+    const { ctx, root } = await harness()
+    openTurn(root, { kind: 'user' })
+    const created = ctx.goals.create(root.agent, { objective: 'valid', maxGoalRounds: 12 })
+    // The shape a strict-schema model sends after copying every field from get_goal.
+    const echoed = await execute(ctx, 'update_goal', {
+      goal_id: created.id,
+      revision: created.revision,
+      action: 'pause',
+      objective: 'valid',
+      max_goal_rounds: 12,
+      blocked_reason: '',
+    }, root.agent)
+    expect(resultGoal(echoed)).toMatchObject({ phase: 'paused', objective: 'valid', maxGoalRounds: 12 })
+
+    const paused = ctx.goals.get(root.agent)!
+    const wrongGoal = await execute(ctx, 'update_goal', {
+      goal_id: 'goal-other',
+      revision: paused.revision,
+      action: 'pause',
+      objective: '',
+      max_goal_rounds: 12,
+      blocked_reason: '',
+    }, root.agent)
+    expect(wrongGoal.error?.message).toMatch(/^max_goal_rounds is not used by action pause/)
   })
 
   it('accepts only empty fillers in fields unused by the selected action', async () => {
