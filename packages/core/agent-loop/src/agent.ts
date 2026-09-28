@@ -331,8 +331,6 @@ export class ReactLoopAgent implements Agent {
           // max-tokens is sticky: once any step hits the ceiling, later steps
           // that complete normally must not downgrade the turn outcome.
           const stepEnd = await this.step(decision)
-          // max-tokens stays sticky: a later completed step must not
-          // downgrade the turn outcome.
           if (turnEnds === null || turnEnds.kind !== 'max-tokens') turnEnds = stepEnd
         } finally {
           this.session.append('step/end', { turn, step })
@@ -570,6 +568,14 @@ export class ReactLoopAgent implements Agent {
       config = preparedCall.config
     } catch (error: unknown) {
       // Middleware may serve an unregistered route; terminal dispatch still requires an adapter.
+      // Only NO_ADAPTER falls through — an `llm/stream` listener may still
+      // dispatch it. Every other `prepareCall` failure (adapter model/config
+      // resolution, unsupported reasoning effort, a middleware defect) throws
+      // straight to `turn/end{error}` here rather than entering the
+      // `agent/request-error` waterfall: no attempt was dispatched, so a
+      // retry would resubmit the identical route and config and fail
+      // identically. See the agent-loop README's "Failure and cancellation"
+      // section for the documented contract this pins.
       if (!(error instanceof LlmError) || error.code !== 'NO_ADAPTER') throw error
       config = proposedConfig
     }

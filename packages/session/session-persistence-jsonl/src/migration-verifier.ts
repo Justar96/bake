@@ -1,7 +1,8 @@
 /** Isolated verification for a staged or competing current JSONL generation. */
 
+import { getHeapStatistics } from 'node:v8'
 import { Worker } from 'node:worker_threads'
-import type { WorkerOptions } from 'node:worker_threads'
+import type { ResourceLimits, WorkerOptions } from 'node:worker_threads'
 import type { JsonlCompression } from './format.ts'
 import type { JsonlExpectedPrefix, JsonlVerifiedGeneration } from './generation.ts'
 
@@ -19,6 +20,20 @@ type VerificationResponse =
 
 /** Process-wide memory bound for full-generation verification isolates. */
 const MAX_CONCURRENT_VERIFIERS = 2
+
+/**
+ * Old-generation budget for one verifier. Concurrent verifiers split the
+ * parent's heap limit, so together they stay within one parent heap; without a
+ * limit, each Worker inherits the whole parent limit. A verifier that exceeds
+ * its budget fails with `ERR_WORKER_OUT_OF_MEMORY`, which rejects that
+ * publication and leaves the source generation and the parent process intact.
+ * @param heapSizeLimit - the parent isolate's V8 heap size limit in bytes.
+ * @returns the Worker resource limits.
+ */
+export function verifierResourceLimits(heapSizeLimit: number = getHeapStatistics().heap_size_limit): ResourceLimits {
+  const parentMb = Math.floor(heapSizeLimit / (1024 * 1024))
+  return { maxOldGenerationSizeMb: Math.max(1, Math.floor(parentMb / MAX_CONCURRENT_VERIFIERS)) }
+}
 
 class VerificationScheduler {
   private active = 0
@@ -71,11 +86,12 @@ class VerificationScheduler {
 const verificationScheduler = new VerificationScheduler()
 
 function workerSpawn(request: VerificationRequest): { readonly entry: string | URL; readonly options: WorkerOptions } {
+  const resourceLimits = verifierResourceLimits()
   /* v8 ignore next 3 -- built-worker coverage owns the bundled path. */
   if (!import.meta.url.endsWith('.ts')) {
     return {
       entry: new URL('./worker.cjs', import.meta.url),
-      options: { workerData: request, execArgv: [] },
+      options: { workerData: request, execArgv: [], resourceLimits },
     }
   }
   const workerEntry = new URL('./worker.ts', import.meta.url)
@@ -91,6 +107,7 @@ function workerSpawn(request: VerificationRequest): { readonly entry: string | U
     options: {
       workerData: request,
       execArgv: [],
+      resourceLimits,
     },
   }
 }

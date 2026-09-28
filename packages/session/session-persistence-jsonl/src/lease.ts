@@ -2,11 +2,10 @@
  * Cross-process write-ownership lock for one session's artifact directory,
  * held for the whole life of a write handle. The arbiter is the kernel:
  * POSIX takes a non-blocking `flock(2)` via native system support on `session.lock`
- * beside the log, and Windows holds a named kernel semaphore derived from
- * that path — never a file lock or handle, so readers, searches, and
- * directory removal proceed freely while the lock is held. Contention maps
+ * beside the log, and Windows takes a non-blocking one-byte `LockFileEx` on
+ * the same file across login sessions. Contention maps
  * to `SessionAlreadyOwnedError`; the kernel releases the lock when the
- * holder's descriptor or last object handle closes, including on any process
+ * holder's file handle closes, including on any process
  * death, so a crashed holder never blocks a successor. A live but wedged
  * holder keeps the lock until its process exits: there is deliberately no
  * expiry that could expropriate a stalled writer whose resumed appends would
@@ -16,15 +15,14 @@
  * otherwise: an unlinked-and-recreated lock file carries a fresh inode, and
  * a lock on the orphaned one proves nothing. Removing a live session's lock
  * file therefore forfeits exclusion on POSIX (nothing in the harness does
- * so); Windows has no lock file at all. Readers never touch the lock.
+ * so); Windows opens without share-delete, preventing replacement while held.
+ * Readers never touch the lock.
  * The lock is acquired at write-open of an existing artifact and, for a
  * created session, only right before its first materializing write — an
  * unmaterialized session has no filesystem footprint. Release never removes
- * the POSIX lock file: every acquired lock belongs to a materialized or
+ * the lock file: every acquired lock belongs to a materialized or
  * materializing session, and the surviving file keeps the stable inode later
- * lockers verify against. The browser worker stubs the native flock entry to
- * immediate success: it is single-process, so the in-process write claim
- * already excludes every writer.
+ * POSIX lockers verify against.
  * @module @deepseek-ai/dsh-session-persistence-jsonl/lease
  */
 
@@ -34,15 +32,15 @@ import { join } from 'node:path'
 import { tryLockExclusive } from '@deepseek-ai/node-addon-system/flock'
 import { SessionAlreadyOwnedError } from '@deepseek-ai/dsh-session-persistence'
 import type { SessionId } from '@deepseek-ai/dsh-session'
-import { acquireLockHandleWin32, releaseLockHandleWin32 } from './win32.ts'
+import { acquireLockHandleWin32, releaseLockHandleWin32, type Win32LockHandle } from './win32.ts'
 
 /** Base name of the kernel lock file inside a session's directory. */
 export const LEASE_FILENAME = 'session.lock'
 
-/** The held kernel lock: a POSIX descriptor or a Win32 semaphore handle. */
+/** The held kernel lock: a POSIX descriptor or a Win32 file handle. */
 type HeldLock =
   | { readonly kind: 'posix'; readonly handle: FileHandle }
-  | { readonly kind: 'win32'; readonly handle: number }
+  | { readonly kind: 'win32'; readonly handle: Win32LockHandle }
 
 /** Whether a flock failure means another descriptor holds the lock. */
 function isLockContention(error: unknown): boolean {
@@ -74,11 +72,11 @@ export class SessionWriteLease {
     await mkdir(dir, { recursive: true, mode: 0o700 })
     /* v8 ignore start -- native Windows coverage exercises this platform branch; Linux covers the POSIX peer */
     if (process.platform === 'win32') {
-      let handle: number
+      let handle: Win32LockHandle
       try {
         handle = await acquireLockHandleWin32(path)
       } catch (error: unknown) {
-        // Sharing violation: another handle already holds the write exclusion.
+        // Byte-range contention: another handle already holds the write exclusion.
         if ((error as NodeJS.ErrnoException | null)?.code === 'EBUSY') throw new SessionAlreadyOwnedError(id)
         throw error
       }

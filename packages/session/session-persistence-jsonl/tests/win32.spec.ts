@@ -6,7 +6,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { link, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -210,23 +210,21 @@ describe('Windows durable namespace helpers', () => {
 })
 
 async function importWithLock(bindings: {
-  createSemaphoreW?: (name: string, initial: number, maximum: number) => number
-  waitResult?: number
-  releaseSemaphore?: (handle: number) => number
-  closeHandle?: (handle: number) => number
+  createFileW?: (...args: unknown[]) => bigint | null
+  lockFileEx?: (...args: unknown[]) => number
+  unlockFileEx?: (...args: unknown[]) => number
+  closeHandle?: (handle: bigint) => number
   lastError?: number
 }): Promise<typeof import('../src/win32.ts')> {
   vi.resetModules()
   vi.doMock('koffi', () => ({
     default: {
+      pointer: () => 'void*',
       load: () => ({
         func: (_convention: string, name: string) => {
-          if (name === 'CreateSemaphoreW') {
-            return (_security: null, initial: number, maximum: number, semName: string) =>
-              (bindings.createSemaphoreW ?? (() => 7))(semName, initial, maximum)
-          }
-          if (name === 'WaitForSingleObject') return () => bindings.waitResult ?? 0
-          if (name === 'ReleaseSemaphore') return bindings.releaseSemaphore ?? (() => 1)
+          if (name === 'CreateFileW') return bindings.createFileW ?? (() => 7n)
+          if (name === 'LockFileEx') return bindings.lockFileEx ?? (() => 1)
+          if (name === 'UnlockFileEx') return bindings.unlockFileEx ?? (() => 1)
           if (name === 'CloseHandle') return bindings.closeHandle ?? (() => 1)
           if (name === 'MoveFileExW') return () => 1
           return () => bindings.lastError ?? 0 // GetLastError
@@ -237,52 +235,78 @@ async function importWithLock(bindings: {
   return import('../src/win32.ts')
 }
 
-describe('Windows write-lock semaphore', () => {
-  it('acquires a path-derived named semaphore with a zero-timeout wait', async () => {
-    const created: Array<{ name: string; initial: number; maximum: number }> = []
-    const { acquireLockHandleWin32 } = await importWithLock({
-      createSemaphoreW: (name, initial, maximum) => {
-        created.push({ name, initial, maximum })
-        return 7
-      },
-    })
-    await expect(acquireLockHandleWin32('C:\\s\\session.lock')).resolves.toBe(7)
-    expect(created).toHaveLength(1)
-    // Count-1 semaphore in the login-session namespace, named by path hash:
-    // no filesystem footprint, and case-insensitive like Windows paths.
-    expect(created[0]).toMatchObject({ initial: 1, maximum: 1 })
-    expect(created[0]?.name).toMatch(/^Local\\dsh-session-lock-[0-9a-f]{64}$/)
-    const upper = await importWithLock({ createSemaphoreW: (name) => { created.push({ name, initial: 1, maximum: 1 }); return 7 } })
-    await upper.acquireLockHandleWin32('C:\\S\\SESSION.LOCK')
-    expect(created[1]?.name).toBe(created[0]?.name)
+describe('Windows session file lock', () => {
+  it.skipIf(process.platform !== 'win32')('locks file identity across aliases and refuses deletion while held', async () => {
+    vi.doUnmock('koffi')
+    vi.resetModules()
+    const { acquireLockHandleWin32, releaseLockHandleWin32 } = await import('../src/win32.ts')
+    const root = await tempRoot()
+    const path = join(root, 'session.lock')
+    const alias = join(root, 'alias.lock')
+    const held = await acquireLockHandleWin32(path)
+    try {
+      await link(path, alias)
+      await expect(acquireLockHandleWin32(alias)).rejects.toMatchObject({ code: 'EBUSY' })
+      await expect(rm(path)).rejects.toBeDefined()
+    } finally {
+      await releaseLockHandleWin32(held)
+    }
+    const successor = await acquireLockHandleWin32(alias)
+    await releaseLockHandleWin32(successor)
   })
 
-  it('maps a held semaphore (wait timeout) to EBUSY and closes the probe handle', async () => {
-    const closed: number[] = []
+  it('opens session.lock without share-delete and locks byte zero immediately', async () => {
+    const opened: unknown[][] = []
+    const locked: unknown[][] = []
     const { acquireLockHandleWin32 } = await importWithLock({
-      waitResult: 0x102,
+      createFileW: (...args) => { opened.push(args); return 7n },
+      lockFileEx: (...args) => { locked.push(args); return 1 },
+    })
+    const held = await acquireLockHandleWin32('C:\\s\\session.lock')
+    expect(held.handle).toBe(7n)
+    expect(opened).toHaveLength(1)
+    expect(opened[0]?.[1]).toBe(0xC0000000) // GENERIC_READ | GENERIC_WRITE
+    expect(opened[0]?.[2]).toBe(0x3) // share read/write, never delete
+    expect(opened[0]?.[4]).toBe(4) // OPEN_ALWAYS
+    expect(locked).toHaveLength(1)
+    expect(locked[0]?.slice(0, 5)).toEqual([7n, 0x3, 0, 1, 0])
+    expect(held.overlapped).toEqual(Buffer.alloc(32))
+    expect(locked[0]?.[5]).toBe(held.overlapped)
+  })
+
+  it('maps byte-range contention to EBUSY and closes the probe handle', async () => {
+    const closed: bigint[] = []
+    const { acquireLockHandleWin32 } = await importWithLock({
+      lockFileEx: () => 0,
+      lastError: 33, // ERROR_LOCK_VIOLATION
       closeHandle: (handle) => { closed.push(handle); return 1 },
     })
-    await expect(acquireLockHandleWin32('C:\\s\\session.lock')).rejects.toMatchObject({ code: 'EBUSY' })
-    expect(closed).toEqual([7])
+    await expect(acquireLockHandleWin32('C:\\s\\session.lock')).rejects.toMatchObject({ code: 'EBUSY', win32Code: 33 })
+    expect(closed).toEqual([7n])
   })
 
-  it('surfaces create and wait failures with Win32 codes', async () => {
-    const createFailed = await importWithLock({ createSemaphoreW: () => 0, lastError: 5 })
-    await expect(createFailed.acquireLockHandleWin32('C:\\s\\session.lock')).rejects.toMatchObject({ code: 'EACCES', win32Code: 5 })
-    const waitFailed = await importWithLock({ waitResult: 0xffffffff, lastError: 5 })
-    await expect(waitFailed.acquireLockHandleWin32('C:\\s\\session.lock')).rejects.toMatchObject({ code: 'EACCES', win32Code: 5 })
+  it('surfaces open and lock failures with Win32 codes', async () => {
+    for (const invalid of [null, 0n, -1n, 0xFFFFFFFFFFFFFFFFn]) {
+      const failed = await importWithLock({ createFileW: () => invalid, lastError: 5 })
+      await expect(failed.acquireLockHandleWin32('C:\\s\\session.lock')).rejects.toMatchObject({ code: 'EACCES', win32Code: 5, syscall: 'CreateFileW' })
+    }
+    const locked = await importWithLock({ lockFileEx: () => 0, lastError: 5 })
+    await expect(locked.acquireLockHandleWin32('C:\\s\\session.lock')).rejects.toMatchObject({ code: 'EACCES', win32Code: 5, syscall: 'LockFileEx' })
   })
 
-  it('releases by restoring the count and closing, surfacing a failed release', async () => {
+  it('unlocks the same byte range before closing, even when unlock fails', async () => {
     const order: string[] = []
     const working = await importWithLock({
-      releaseSemaphore: (handle) => { order.push(`release:${handle}`); return 1 },
-      closeHandle: (handle) => { order.push(`close:${handle}`); return 1 },
+      unlockFileEx: (...args) => { order.push(`unlock:${String(args[0])}`); return 1 },
+      closeHandle: (handle) => { order.push(`close:${String(handle)}`); return 1 },
     })
-    await working.releaseLockHandleWin32(7)
-    expect(order).toEqual(['release:7', 'close:7'])
-    const failing = await importWithLock({ releaseSemaphore: () => 0, lastError: 5 })
-    await expect(failing.releaseLockHandleWin32(9)).rejects.toMatchObject({ code: 'EACCES', win32Code: 5 })
+    const held = await working.acquireLockHandleWin32('C:\\s\\session.lock')
+    await working.releaseLockHandleWin32(held)
+    expect(order).toEqual(['unlock:7', 'close:7'])
+    const failed = await importWithLock({ unlockFileEx: () => 0, lastError: 5,
+      closeHandle: (handle) => { order.push(`close-failed:${String(handle)}`); return 1 } })
+    const other = await failed.acquireLockHandleWin32('C:\\s\\session.lock')
+    await expect(failed.releaseLockHandleWin32(other)).rejects.toMatchObject({ code: 'EACCES', syscall: 'UnlockFileEx' })
+    expect(order.at(-1)).toBe('close-failed:7')
   })
 })

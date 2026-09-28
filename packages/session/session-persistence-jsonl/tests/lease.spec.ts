@@ -8,7 +8,7 @@
  * refusals are injected through the module mocks below: POSIX modes cannot
  * express them on Windows, and an injected error is the only deterministic
  * cross-platform refusal. Real cross-process exclusion and crash release are
- * pinned by lease.two-process.e2e.ts.
+ * pinned by lease.two-process.spec.ts.
  */
 
 import { existsSync } from 'node:fs'
@@ -182,9 +182,9 @@ describe('cross-process write lock', () => {
     await reader.close()
 
     await holder.close()
-    // POSIX keeps the materialized session's lock file (Windows locks a kernel
-    // object with no filesystem footprint); the kernel lock itself is gone.
-    if (process.platform !== 'win32') expect(existsSync(lockPath(root, 'excluded'))).toBe(true)
+    // Both platforms keep the materialized session's lock file; its kernel
+    // lock is released with the handle.
+    expect(existsSync(lockPath(root, 'excluded'))).toBe(true)
     const reopened = await second.open(SessionId('excluded'), 'write')
     await reopened.append([{ type: 'turn/start', seq: SessionSeq(2), time: 3, data: { turn: 2 } }])
     await reopened.close()
@@ -243,7 +243,7 @@ describe('cross-process write lock', () => {
     const creator = await first.create(meta('lazy-lock'))
     await creator.append([...EVENTS])
     // The materializing append acquired and retained the lock.
-    if (process.platform !== 'win32') expect(existsSync(lockPath(root, 'lazy-lock'))).toBe(true)
+    expect(existsSync(lockPath(root, 'lazy-lock'))).toBe(true)
     await expect(second.open(SessionId('lazy-lock'), 'write')).rejects.toBeInstanceOf(SessionAlreadyOwnedError)
     // A later append reuses the held lock rather than re-acquiring.
     await creator.append([{ type: 'turn/start', seq: SessionSeq(2), time: 3, data: { turn: 2 } }])
@@ -470,14 +470,13 @@ describe('cross-process write lock', () => {
     })
   })
 
-  it.skipIf(process.platform === 'win32')('release is idempotent and never removes the lock file', async () => {
+  it('release is idempotent and never removes the lock file', async () => {
     const root = await freshRoot()
     const dir = join(root, 'solo')
     const lease = await SessionWriteLease.acquire(dir, SessionId('solo'))
     await lease.release()
     await lease.release()
-    // The file survives every release, keeping the stable inode later
-    // lockers verify against; the kernel lock died with the descriptor.
+    // The file survives every release; the kernel lock died with the handle.
     expect(existsSync(join(dir, LOCK))).toBe(true)
     const successor = await SessionWriteLease.acquire(dir, SessionId('solo'))
     await successor.release()
@@ -492,9 +491,7 @@ describe('cross-process write lock', () => {
     const b = await backend.create(meta('indep-b'))
     await a.append([...EVENTS])
     await b.append([...EVENTS])
-    if (process.platform !== 'win32') {
-      expect((await readdir(join(lockPath(root, 'indep-a'), '..'))).filter(name => name === LOCK)).toHaveLength(1)
-    }
+    expect((await readdir(join(lockPath(root, 'indep-a'), '..'))).filter(name => name === LOCK)).toHaveLength(1)
     await a.close()
     await b.close()
   })

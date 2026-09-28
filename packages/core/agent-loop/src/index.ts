@@ -100,6 +100,7 @@ class FactoryOwnership {
   private readonly inactive = Promise.withResolvers<void>()
   private readonly liveAgents = new Set<() => Promise<void>>()
   private startupTasks = new Set<Promise<void>>()
+  private disposal: Promise<void> | undefined
 
   constructor(private readonly fiber: Context['fiber']) {}
 
@@ -136,13 +137,22 @@ class FactoryOwnership {
   }
 
   async dispose(): Promise<void> {
+    if (this.disposal !== undefined) return this.disposal
+    this.disposal = this.disposeAll()
+    return this.disposal
+  }
+
+  private async disposeAll(): Promise<void> {
     this.accepting = false
     this.teardown.abort(new Error('agent loop is not active'))
     this.inactive.resolve()
-    await Promise.all([
+    const outcomes = await Promise.allSettled([
       ...[...this.liveAgents].map(dispose => dispose()),
       ...this.startupTasks,
     ])
+    const failures = outcomes.flatMap(outcome => outcome.status === 'rejected' ? [outcome.reason] : [])
+    if (failures.length === 1) throw failures[0]
+    if (failures.length > 1) throw new AggregateError(failures, 'agent loop disposal failed')
   }
 }
 
@@ -234,6 +244,8 @@ declare module '@deepseek-ai/cordis' {
     configuredAgentIdentities?: ConfiguredAgentIdentities
   }
   interface Events {
+    /** Drain plugin-owned work before the launcher unloads root services. @mode parallel */
+    'app/shutdown'(): Promise<void> | void
     /**
      * A declarative agent entry failed before it could publish a live agent.
      * Consumers that buffer work for the configured identity use this
@@ -417,6 +429,7 @@ export class AgentLoop extends Service implements AgentFactory {
     ctx.sessionProjections.register(inboxProjectionDefinition)
     this.ownership = new FactoryOwnership(ctx.fiber)
     this.runtime = { ctx }
+    ctx.on('app/shutdown', () => this.ownership.dispose())
     ctx.effect(() => () => this.ownership.dispose(), 'agentLoop.transactions()')
     ctx.effect(() => ctx.agents.setFactory(this), 'agentLoop.setFactory()')
     ctx.systemPrompt.variable('provider', context => context.agent?.options.provider)

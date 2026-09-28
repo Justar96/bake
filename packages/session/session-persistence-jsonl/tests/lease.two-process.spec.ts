@@ -2,8 +2,8 @@
  * Real two-process lock contention over one shared root: a child Node
  * process (running the built package under plain Node) creates a session and
  * holds its kernel write lock; this process is excluded while the child
- * lives, and acquires immediately after a SIGKILL — the kernel releases the
- * lock with the dead process's descriptors, no waiting period. Keyless.
+ * lives, and acquires immediately after it is killed — the kernel releases
+ * the lock with the dead process's handle, no waiting period. Keyless.
  */
 
 import { spawn } from 'node:child_process'
@@ -40,14 +40,18 @@ describe('two-process write lock (built lib)', () => {
     })
     const exited = new Promise<void>((resolve) => { holder.once('exit', () => { resolve() }) })
     try {
-      await once(holder.stdout, 'data') // 'holding'
+      const ready = await Promise.race([
+        once(holder.stdout, 'data').then(([data]) => String(data)),
+        exited.then(() => { throw new Error('holder exited before acquiring the session lock') }),
+      ])
+      expect(ready).toContain('holding')
 
       const ctx = new Context()
       contexts.push(ctx)
       await ctx.plugin(JsonlSessionPersistence, { root, compression: 'none' })
       const mine = ctx.sessionPersistence
 
-      // Excluded while the other process's descriptor holds the kernel lock.
+      // Excluded while the other process's handle holds the kernel lock.
       await expect(mine.open(SessionId(SESSION), 'write')).rejects.toBeInstanceOf(SessionAlreadyOwnedError)
       // Reads are unaffected across processes.
       const reader = await mine.open(SessionId(SESSION), 'read')
@@ -63,7 +67,8 @@ describe('two-process write lock (built lib)', () => {
       expect((await taken.read()).events.map(event => event.seq)).toEqual([0, 1, 2])
       await taken.close()
     } finally {
-      if (holder.exitCode === null) holder.kill('SIGKILL')
+      if (holder.exitCode === null && holder.signalCode === null) holder.kill('SIGKILL')
+      await exited
     }
   })
 })
