@@ -75,7 +75,7 @@ Each profile may set a `retryPolicy`; omission uses normal mode with five retrie
 | `apiKeyEnv` | absent | Credential reference resolved per request; omission defers to pi-ai ambient discovery |
 | `displayName` | provider name | Label shown by selector surfaces |
 | `api` | catalog protocol | Wire protocol; only needed for routes the catalog does not supply. A `models` or `modelOverrides` entry's own `api` wins for that model |
-| `baseURL` | catalog endpoint | Endpoint of every model on the route |
+| `baseURL` | catalog endpoint | Endpoint of every model on the route. A `models` or `modelOverrides` entry's own `baseURL` wins for that model |
 | `models` | installed catalog | Replaces the route's catalog wholesale; each entry defaults from the installed model |
 | `modelOverrides` | none | Reshapes individual installed-catalog models without replacing the rest |
 | `compat` | catalog detection | Wire-compatibility switches for unrecognized endpoints |
@@ -94,7 +94,7 @@ A provider pi-ai ships a login for can be signed into through the harness author
 
 ### Resolve the model catalog
 
-A profile's `models` list replaces the route's installed catalog rather than extending it; each entry defaults its unset fields from the installed model of the same id, so narrowing a route to two models, correcting one capacity, or adding a model newer than the installed catalog are one-line edits. `modelOverrides` reshapes individual installed-catalog models without that cost — correct one model, keep the other thirty-seven — and is refused when set beside a `models` list, on a hand-declared route, or naming a model the catalog does not describe, because a silently unchanged model would be a typo someone hunts for later. An entry's own `api` moves that model alone onto another wire protocol, so a gateway that translates some upstreams poorly can serve each model over the protocol it relays cleanly under one route key and credential.
+A profile's `models` list replaces the route's installed catalog rather than extending it; each entry defaults its unset fields from the installed model of the same id, so narrowing a route to two models, correcting one capacity, or adding a model newer than the installed catalog are one-line edits. `modelOverrides` reshapes individual installed-catalog models without that cost — correct one model, keep the other thirty-seven — and is refused when set beside a `models` list, on a hand-declared route, or naming a model the catalog does not describe, because a silently unchanged model would be a typo someone hunts for later. An entry's own `api` moves that model alone onto another wire protocol, so a gateway that translates some upstreams poorly can serve each model over the protocol it relays cleanly under one route key and credential. The protocols join different paths onto an endpoint — the OpenAI ones append `/responses` or `/chat/completions` to a `/v1` base, Anthropic Messages appends `/v1/messages` to the server root — so a model moved to another protocol can also name its own `baseURL` for the same gateway.
 
 ### Run with reasoning and wire compatibility
 
@@ -191,7 +191,7 @@ Provider tokenization governs exact input. Retained images add the stable attach
 
 #### KV Cache effect
 
-Conversion preserves logical request order, while image handles and offload placeholders add model-visible text. A changed execution-world path rewrites a historical handle and can prevent reuse from that image even when attachment identity and request bytes stay stable. Changing adapter instance, provider, model, or another upstream token has the same suffix effect. An offload decision turns an earlier image into placeholder text, so reuse ends at that message; the omission never reverts, so the prefix stays stable afterwards.
+Conversion preserves logical request order, while image handles and offload placeholders add model-visible text. A changed execution-world path rewrites a historical handle and can prevent reuse from that image even when attachment identity and request bytes stay stable. Changing adapter instance, provider, model, or another upstream token has the same suffix effect. Which prefix a provider reuses is decided by the wire protocol: OpenAI-family endpoints cache automatically and receive the session id as `prompt_cache_key`, while Anthropic Messages caches only at the `cache_control` breakpoints pi-ai marks on the system prompt, the last tool, and the last user message. A Claude model a gateway serves over a translated OpenAI protocol therefore gets no prompt caching. An offload decision turns an earlier image into placeholder text, so reuse ends at that message; the omission never reverts, so the prefix stays stable afterwards.
 
 ### Provider response
 
