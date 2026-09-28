@@ -1,0 +1,9 @@
+# actionlint configuration: https://github.com/rhysd/actionlint/blob/main/docs/config.md
+paths:
+  .github/workflows/release.yml:
+    ignore:
+      # `concurrency.queue: max` is a GitHub Actions key added on 2026-05-07
+      # (https://github.blog/changelog/2026-05-07-github-actions-concurrency-groups-now-allow-larger-queues/).
+      # actionlint 1.7.12 predates it (https://github.com/rhysd/actionlint/issues/657);
+      # remove this entry once the pinned actionlint accepts the key.
+      - 'unexpected key "queue" for "concurrency" section'
