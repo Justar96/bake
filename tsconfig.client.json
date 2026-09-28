@@ -1,4 +1,8 @@
 {
+  // Client-face solution. Typert's client-face analysis compiles the referenced
+  // projects in one program under these options, so it must inherit the client
+  // compiler shape and the source `paths` that resolve workspace packages.
+  "extends": "./tsconfig.base.client.json",
   "files": [],
   "references": [
     { "path": "./packages/api/gateway/tsconfig.client.json" },
