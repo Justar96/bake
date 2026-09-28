@@ -55,7 +55,7 @@ interface SessionSurfaceSnapshot {
 }
 ```
 
-`SessionTitleObservation` applies the same atomic-observation rule to title folding, so an authorization consumer can validate the source header that supplied the title. Batch reads return one ordered `SessionTitleObservationResult` per unique requested id: operational failures remain local to that id, while cancellation rejects the complete operation.
+`SessionTitleObservation` applies the same atomic-observation rule to title folding, so an authorization consumer can validate the source header that supplied the title. The same observation reports `lastEventAt`, the time of that log's newest event, so a caller can order sessions by recent activity without a second read. Batch reads return one ordered `SessionTitleObservationResult` per unique requested id: operational failures remain local to that id, while cancellation rejects the complete operation.
 
 ```ts type-equiv
 /** Latest folded title bound to the same session-header observation. */
@@ -64,6 +64,8 @@ interface SessionTitleObservation {
   session: SessionHeader
   /** Latest title snapshot, absent when the observed log has no title. */
   title?: SessionTitleSnapshot
+  /** Unix epoch milliseconds of the observed log's newest event, absent for an empty log. */
+  lastEventAt?: number
 }
 ```
 

@@ -55,7 +55,7 @@ interface SessionSurfaceSnapshot {
 }
 ```
 
-`SessionTitleObservation` 将同样的原子观测规则应用于标题折叠，使执行授权检查的消费方能够验证提供标题的源 header。批量读取会按顺序为每个唯一请求 id 返回一个 `SessionTitleObservationResult`：操作失败只影响对应 id，而取消会拒绝整个操作。
+`SessionTitleObservation` 将同样的原子观测规则应用于标题折叠，使执行授权检查的消费方能够验证提供标题的源 header。同一次观测还报告 `lastEventAt`，即该日志最新事件的时间，因此调用方无需再次读取即可按最近活动对会话排序。批量读取会按顺序为每个唯一请求 id 返回一个 `SessionTitleObservationResult`：操作失败只影响对应 id，而取消会拒绝整个操作。
 
 ```ts type-equiv
 /** Latest folded title bound to the same session-header observation. */
@@ -64,6 +64,8 @@ interface SessionTitleObservation {
   session: SessionHeader
   /** Latest title snapshot, absent when the observed log has no title. */
   title?: SessionTitleSnapshot
+  /** Unix epoch milliseconds of the observed log's newest event, absent for an empty log. */
+  lastEventAt?: number
 }
 ```
 
