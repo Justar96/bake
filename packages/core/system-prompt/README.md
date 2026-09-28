@@ -43,7 +43,7 @@ The config owns the fixed opener, runtime context, deployment persona prefix and
 
 | Field | Default | Meaning |
 |---|---|---|
-| `includeHarnessIdentity` | `true` | Include the fixed `You are an AI agent powered by DeepSeek Harness.` first-party opener at order −1000. Set false only when a compatibility deployment owns the complete system prompt. |
+| `includeHarnessIdentity` | `true` | Include the fixed `You are an AI agent powered by DeepSeek Harness.` first-party opener at order −1000. Set false when the deployment persona supplies its own identity, as Bake's terminal profile does. |
 | `includeRuntimeContext` | `true` | Include ordered dynamic runtime context in assembly |
 | `personaPrefix` | `''` | Global persona prefix template at order `0`, before first-party guidance |
 | `personaSuffix` | `''` | Global `deployment:persona-suffix` template at order `10200`, after first-party guidance |
@@ -57,9 +57,9 @@ Sections carry static or context-resolved text with an `order`; they are concate
 
 ```text
 ctx.systemPrompt.section({
-  name: 'tool:bash',
+  name: 'my-plugin:policy',
   order: 100,
-  text: 'Prefer bash for file and process operations.',
+  text: 'Answer in the language the user writes in.',
 })
 ```
 

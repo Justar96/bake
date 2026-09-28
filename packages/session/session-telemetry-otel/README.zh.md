@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-`dsh-session-telemetry-otel` 仅在新的显式反馈后通过 OTel JS SDK 导出会话记录，适用于所有用户和提供方，包括 `deepseek-official`。`FEEDBACK_ONLY` 释放截至该反馈的权威日志前缀，包含上下文；后续记录等待下一次显式反馈。`DISABLED` 不构造传输。SDK 批处理可完成已授权的上传，无需另一次用户交互或模型调用。部署方负责脱敏规则。
+`dsh-session-telemetry-otel` 仅在新的显式反馈后通过 OTel JS SDK 导出会话记录，适用于所有用户和提供方，包括 `deepseek-official`。`FEEDBACK_ONLY` 释放截至该反馈的权威日志前缀，包含上下文；后续记录等待下一次显式反馈。`DISABLED` 不构造传输。SDK 批处理可完成已授权的上传，无需另一次用户交互或模型调用。部署方负责脱敏规则。Bake 随附的 profile 不给它端点，因此在 `DSH_TELEMETRY_OTLP_URL` 指向你运行的 collector 之前，它保持 `DISABLED`。
 
 ## 目录
 
@@ -34,7 +34,11 @@ kind: "package-reference"
 | `FEEDBACK_ONLY` | 默认值。文本反馈、评分创建或修改、备注修改和撤回释放尚未交接的前缀，截止该权威反馈事件；后续记录等待 |
 | `DISABLED` | 不构造协调器、提供方、处理器或导出器；没有遥测记录离开进程。活跃会话反馈在本地告警；冷会话修改保持静默 |
 
-程序化 TypeScript 配置使用导出的 `SessionTelemetryMode` 枚举；原始字符串字面量不可赋值。`FULL` 会被拒绝，不是别名。[`sharing` 属性](../session-telemetry/README.zh.md#the-sharing-disclosure)报告 `feedback-only` 或 `disabled`，不代表投递回执。`/feedback` 确认文本只确认记录。
+程序化 TypeScript 配置使用导出的 `SessionTelemetryMode` 枚举；原始字符串字面量不可赋值。`FULL` 会被拒绝，不是别名。[`sharing` 属性](../session-telemetry/README.zh.md#the-sharing-disclosure)报告 `feedback-only` 或 `disabled`，不代表投递回执。`/feedback` 确认文本读取它，以说明会话历史会被上传，还是只保留在本地会话日志中。
+
+### Bake 随附的 profile
+
+[base bundle](../../bundle/base/README.zh.md) 挂载此后端时不提供默认端点。只要 `DSH_TELEMETRY_OTLP_URL` 未设置或为空，无论 `DSH_TELEMETRY_MODE` 取何值，该行都把 `mode` 解析为 `DISABLED`：不上传任何内容，`sharing` 报告 `disabled`，`/feedback` 说明反馈只保留在本地会话日志中。把 `DSH_TELEMETRY_OTLP_URL` 设为完整的 OTLP/HTTP 日志 URL 后，只会上传到该 URL，模式取 `DSH_TELEMETRY_MODE`（默认 `FEEDBACK_ONLY`）。即使设置了 URL，非空的 `DSH_TELEMETRY_DISABLED` 也会卸下该行。
 
 ### 最小配置
 

@@ -47,7 +47,7 @@ kind: "package-bundle"
 
 ### 你得到什么
 
-开箱即用，基于本核心构建的每个 profile 都提供：DeepSeek 模型连接（提供方与模型可配置，你还可以在设置中启用额外提供方）、完整工具集——文件编辑、shell 命令、web 搜索、公开 HTTP(S) 抓取、subagent、任务与目标跟踪——可跨重启存活的持久会话，以及默认的 `workspace-write` 权限预设及 `ask` 审批策略。写入限制在工作区与允许的临时目录内；请求更广访问权限时需要审批。显式的 `DSH_PERMISSION_MODE` 或权限默认值设置会覆盖新会话默认值，恢复的会话则保留已记录的模式。Web 抓取无需逐次审批，其提供方会拒绝非公开目的地址。反馈保存在会话日志中。[OTel 会话上传](../../session/session-telemetry-otel/README.zh.md)对所有用户默认使用 `FEEDBACK_ONLY`，包括 `deepseek-official`：新的文本反馈、消息评分、编辑与撤回会释放截至该事件的完整规范会话日志前缀，包含上下文。后续记录等待下一次显式反馈；发送已授权批次无需进一步交互或模型调用。`DISABLED` 阻止 OTel 捕获。默认开启的 [DeepSeek 会话日志贡献器](../../session/session-log-deepseek/README.zh.md)仍是独立的请求路径。
+开箱即用，基于本核心构建的每个 profile 都提供：DeepSeek 模型连接（提供方与模型可配置，你还可以在设置中启用额外提供方）、完整工具集——文件编辑、shell 命令、web 搜索、公开 HTTP(S) 抓取、subagent、任务与目标跟踪——可跨重启存活的持久会话，以及默认的 `workspace-write` 权限预设及 `ask` 审批策略。写入限制在工作区与允许的临时目录内；请求更广访问权限时需要审批。显式的 `DSH_PERMISSION_MODE` 或权限默认值设置会覆盖新会话默认值，恢复的会话则保留已记录的模式。Web 抓取无需逐次审批，其提供方会拒绝非公开目的地址。反馈保存在会话日志中，会话历史默认不会被共享。[OTel 会话上传](../../session/session-telemetry-otel/README.zh.md)没有默认目的地：在你把 `DSH_TELEMETRY_OTLP_URL` 设为你自己的 OTLP/HTTP 日志端点之前，它保持 `DISABLED`。设置 URL 后，它只上传到该 URL，模式取 `DSH_TELEMETRY_MODE`（默认 `FEEDBACK_ONLY`），适用于所有模型提供方：新的文本反馈、消息评分、编辑与撤回会释放截至该事件的完整规范会话日志前缀，包含上下文。后续记录等待下一次显式反馈；发送已授权批次无需进一步交互或模型调用。即使设置了 URL，非空的 `DSH_TELEMETRY_DISABLED` 也会关闭上传。[DeepSeek 会话日志贡献器](../../session/session-log-deepseek/README.zh.md)以 `enabled: false` 挂载，因此官方 DeepSeek 请求不携带会话日志。
 
 默认文件编辑使用 `read`、`write` 和 `edit`。`str_replace_editor` 工具仍可显式启用。要将它加入基于 base 的 profile，请在 profile、home 或逐次调用 patch 中添加以下条目：
 
@@ -60,6 +60,8 @@ kind: "package-bundle"
 ```
 
 本 bundle 统一挂载 [MCP 资源](../../mcp/mcp-resources/README.zh.md)一次。只需为所需服务器配置 [MCP 客户端条目](../../mcp/mcp-client/README.zh.md)。其他提供方挂载的客户端在所属作用域中也属于已配置状态。调用方作用域中没有已配置服务器时，不会获得 MCP 工具或提示词文本。
+
+[运行时看门狗](../../runtime-diagnostics/runtime-watchdog/README.zh.md)会把持续的事件循环延迟和接近 V8 上限的堆占用记录到 `$DSH_HOME/diagnostics` 下。它不会向终端或模型上下文写入任何内容。
 
 ### 各平台的 shell 工具
 

@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`dsh-session-telemetry-otel` exports session records through the OTel JS SDK only after new explicit feedback, for all users and providers, including `deepseek-official`. `FEEDBACK_ONLY` releases the canonical prefix through that feedback, including context; later records wait for the next explicit feedback. `DISABLED` constructs no transport. SDK batching can finish an authorized upload without another user interaction or model call. Deployments own their redaction rules.
+`dsh-session-telemetry-otel` exports session records through the OTel JS SDK only after new explicit feedback, for all users and providers, including `deepseek-official`. `FEEDBACK_ONLY` releases the canonical prefix through that feedback, including context; later records wait for the next explicit feedback. `DISABLED` constructs no transport. SDK batching can finish an authorized upload without another user interaction or model call. Deployments own their redaction rules. Bake's shipped profiles give it no endpoint, so it stays `DISABLED` until `DSH_TELEMETRY_OTLP_URL` names a collector you run.
 
 ## Table of Contents
 
@@ -34,7 +34,11 @@ Mount this plugin when a deployment should export session records through OpenTe
 | `FEEDBACK_ONLY` | Default. Text feedback, rating creation/edit, note edit, and withdrawal release the unhanded prefix through that canonical feedback event; later records wait |
 | `DISABLED` | No coordinator, provider, processor, or exporter is constructed; no telemetry record leaves the process. Live feedback warns locally; cold mutations stay silent |
 
-Programmatic TypeScript configuration uses the exported `SessionTelemetryMode` enum; raw string literals are not assignable. `FULL` is rejected, not an alias. The [`sharing` property](../session-telemetry/README.md#the-sharing-disclosure) reports `feedback-only` or `disabled`, not a delivery receipt. The `/feedback` acknowledgement confirms recording only.
+Programmatic TypeScript configuration uses the exported `SessionTelemetryMode` enum; raw string literals are not assignable. `FULL` is rejected, not an alias. The [`sharing` property](../session-telemetry/README.md#the-sharing-disclosure) reports `feedback-only` or `disabled`, not a delivery receipt. The `/feedback` acknowledgement reads it to say whether the session history is uploaded or stays in the local session log.
+
+### In Bake's shipped profiles
+
+The [base bundle](../../bundle/base/README.md) mounts this backend without a default endpoint. While `DSH_TELEMETRY_OTLP_URL` is unset or empty, the row resolves `mode` to `DISABLED` whatever `DSH_TELEMETRY_MODE` says: nothing is uploaded, `sharing` reports `disabled`, and `/feedback` says the feedback stays in the local session log. Setting `DSH_TELEMETRY_OTLP_URL` to a full OTLP/HTTP logs URL enables upload to that URL only, in `DSH_TELEMETRY_MODE` (default `FEEDBACK_ONLY`). A non-empty `DSH_TELEMETRY_DISABLED` unmounts the row even when a URL is set.
 
 ### Minimal configuration
 

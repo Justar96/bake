@@ -29,7 +29,7 @@ kind: "package-library"
 
 ### 选择并挂载后端
 
-只加载一个后端插件；它把捕获协调器与投递流水线注册为 `ctx.sessionTelemetry`。重复加载会抛出异常。必需的 [`sharing` 成员](#the-sharing-disclosure) 报告部署模式，不代表会话准入或投递。只有在未挂载任何遥测服务时，消费方才可报告「未配置」。`/feedback` 命令确认记录，不读取此策略。
+只加载一个后端插件；它把捕获协调器与投递流水线注册为 `ctx.sessionTelemetry`。重复加载会抛出异常。必需的 [`sharing` 成员](#the-sharing-disclosure) 报告部署模式，不代表会话准入或投递。只有在未挂载任何遥测服务时，消费方才可报告「未配置」。`/feedback` 确认文本读取 `sharing`，以说明会话历史会被上传，还是只保留在本地会话日志中。在 `DSH_TELEMETRY_OTLP_URL` 指定 collector 之前，Bake 随附的 profile 以 `disabled` 挂载 [OTel 后端](../session-telemetry-otel/README.zh.md)。
 
 ### 后端约定
 

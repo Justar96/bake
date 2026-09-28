@@ -29,7 +29,7 @@ As a deployment, choose a backend, mount it, and add redaction rules when record
 
 ### Choosing and mounting a backend
 
-Load exactly one backend plugin; it registers `ctx.sessionTelemetry` with the capture coordinator and its delivery pipeline. A duplicate load throws. The required [`sharing` member](#the-sharing-disclosure) reports the deployment mode, not per-session admission or delivery. A consumer may report "not configured" only when no telemetry service is mounted. The `/feedback` command confirms recording without reading this policy.
+Load exactly one backend plugin; it registers `ctx.sessionTelemetry` with the capture coordinator and its delivery pipeline. A duplicate load throws. The required [`sharing` member](#the-sharing-disclosure) reports the deployment mode, not per-session admission or delivery. A consumer may report "not configured" only when no telemetry service is mounted. The `/feedback` acknowledgement reads `sharing` to say whether the session history is uploaded or stays in the local session log. Bake's shipped profiles mount the [OTel backend](../session-telemetry-otel/README.md) as `disabled` until `DSH_TELEMETRY_OTLP_URL` names a collector.
 
 ### The backend contract
 

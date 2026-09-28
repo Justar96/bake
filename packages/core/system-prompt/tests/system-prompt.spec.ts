@@ -14,13 +14,10 @@ import type { PromptContextOrderName, PromptSectionOrderName } from '@deepseek-a
 const BUILT_IN = ['harness:identity', 'deployment:persona-prefix', 'deployment:persona-suffix']
 const IDENTITY = 'You are an AI agent powered by DeepSeek Harness.'
 const SECTION_ORDER_NAMES = [
-  'HARNESS_IDENTITY', 'DEPLOYMENT_PERSONA_PREFIX',
-  'PLAN_POLICY', 'TEAM_POLICY', 'PTC_ONLY', 'FILE_REFERENCE', 'TOOL_BASH',
-  'TOOL_PWSH', 'TOOL_READ', 'TOOL_WRITE', 'TOOL_EDIT', 'TOOL_GLOB',
-  'TOOL_GREP', 'TOOL_JOBS', 'TOOL_PTY', 'TOOL_WEB_SEARCH', 'TOOL_WEB_FETCH',
-  'TOOL_LSP', 'TOOL_SESSION_QUERY', 'TOOL_GOAL', 'TOOL_CORDIS', 'TOOL_WORKFLOW',
-  'TOOL_RALPH', 'TOOL_SUBAGENT', 'TOOL_REPORT', 'TOOLS_SDK',
-  'DELIVERABLE_FILE_REFERENCES', 'STRUCTURED_OUTPUT',
+  'HARNESS_IDENTITY', 'DEPLOYMENT_PERSONA_PREFIX', 'PLAN_POLICY',
+  'TEAM_POLICY', 'PTC_ONLY', 'FILE_REFERENCE', 'TOOL_PTY', 'TOOL_LSP',
+  'TOOL_SESSION_QUERY', 'TOOL_CORDIS', 'TOOL_RALPH', 'TOOL_REPORT',
+  'TOOLS_SDK', 'DELIVERABLE_FILE_REFERENCES', 'STRUCTURED_OUTPUT',
   'HARNESS_SOURCE', 'WEB_SURFACE', 'DEPLOYMENT_PERSONA_SUFFIX',
 ] as const satisfies readonly PromptSectionOrderName[]
 const CONTEXT_ORDER_NAMES = [
@@ -182,7 +179,7 @@ describe('SystemPrompt', () => {
     expect(assembly.tools).toEqual([{ name: 'echo', description: 'echo back', parameters: {} }])
     expect(assembly.variables).toEqual({})
     expect(renderPrompt(assembly)).toBe(`${IDENTITY}\n\nYou are DeepSeek Harness.\n\nBe precise.\n\ncwd: /tmp`)
-    expect(renderContextSnapshot(assembly)).toBe('Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\ncontext 1\n\ncontext 2')
+    expect(renderContextSnapshot(assembly)).toBe('Runtime context (replaces any earlier snapshot):\n\ncontext 1\n\ncontext 2')
   })
 
   it('breaks equal section orders by code-unit name regardless of registration order', async () => {
@@ -447,7 +444,7 @@ describe('SystemPrompt', () => {
     ctx.systemPrompt.variable('mode', () => 'read-only')
     ctx.systemPrompt.context({ name: 'policy', order: 1, text: 'Mode: {{mode}}.' })
     expect(renderContextSnapshot(await ctx.systemPrompt.assemble()))
-      .toBe('Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nMode: read-only.')
+      .toBe('Runtime context (replaces any earlier snapshot):\n\nMode: read-only.')
   })
 
   it('attributes context interpolation failures to the contributing context', () => {

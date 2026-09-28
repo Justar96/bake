@@ -12,7 +12,7 @@ import { isReplacementSurfaceEvent } from '@deepseek-ai/dsh-session'
 import type { Context } from '@deepseek-ai/cordis'
 
 const SOURCE = '@deepseek-ai/dsh-system-prompt'
-const CLEARED = 'Current runtime context: none. Earlier runtime-context snapshots no longer apply.'
+const CLEARED = 'Runtime context: none. Earlier snapshots no longer apply.'
 
 function isOwned(message: UserMessage): boolean {
   return message.source.kind === 'plugin' && message.source.plugin === SOURCE

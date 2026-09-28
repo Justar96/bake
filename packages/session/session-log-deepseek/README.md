@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-Incremental canonical session-log upload for official DeepSeek LLM API requests. This function plugin injects `ctx.sessions` and `ctx.deepseekLlmApiExtensions`, then owns the `dsh_session_log` request field and the durable `session-log-deepseek/delivery-accepted` event from which it derives the acceptance watermark. Disable it only when the official API must not receive a Session-log suffix.
+Incremental canonical session-log upload for official DeepSeek LLM API requests. This function plugin injects `ctx.sessions` and `ctx.deepseekLlmApiExtensions`, then owns the `dsh_session_log` request field and the durable `session-log-deepseek/delivery-accepted` event from which it derives the acceptance watermark. Bake does not send Session logs to DeepSeek, so its shipped profiles mount the plugin with `enabled: false`; enable it only when the official API should receive the full log.
 
 ## Table of Contents
 
@@ -30,7 +30,13 @@ Incremental canonical session-log upload for official DeepSeek LLM API requests.
 | `enabled` | `true` | Register the `dsh_session_log` contribution. Set it to `false` to stop Session-log upload. |
 | `maxBytes` | 8 MiB | Largest serialized `dsh_session_log` field, in UTF-8 bytes, that one request carries. |
 
-Shipped profiles mount the plugin, so the default configuration registers the request field and appends the acceptance watermark; an overlay opts out with `enabled: false`.
+The package default is `true`, but Bake's shipped profiles mount the plugin with `enabled: false`: no official DeepSeek request carries `dsh_session_log`, and no acceptance watermark is appended. The row stays mounted, so Session logs that recorded `session-log-deepseek/delivery-accepted` events under an earlier opt-in still resume and replay. To opt in, restate the row in a profile, home, or `--patch` layer; each enabled request then sends the working directory, prompts, messages, tool arguments and results, and feedback in the log:
+
+```yaml
+- id: session-log-deepseek
+  config:
+    enabled: true
+```
 
 <a id="request-field"></a>
 ## Request field
