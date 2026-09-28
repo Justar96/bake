@@ -123,7 +123,7 @@ patch 叠加在 `dsh-base` 之上：继承投影缓存与共享 PTC 运行时，
 <a id="model-experience"></a>
 ## 模型体验
 
-无，因为 runner 把任务作为普通用户消息提交，提示词与工具由组合出的 base 与 headless 行提供。
+[组合包 persona](cordis.patch.yml) 将 Bake 介绍为执行一个命令行任务的编码 agent。它要求 agent 遵循周边代码惯例，仅在任务要求时提交或推送，保留他人的修改，并以简洁、客观、中立的回答如实报告结果与验证情况。runner 把任务作为普通用户消息提交；组合出的配置行提供其余提示词与工具。
 
 #### KV Cache 影响
 

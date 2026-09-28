@@ -123,7 +123,7 @@ Read these pages when you want to go deeper into the shared core, the sibling GU
 <a id="model-experience"></a>
 ## Model Experience
 
-None, as the runner submits the task as an ordinary user message and the composed base and headless rows own the prompts and tools.
+The [bundle persona](cordis.patch.yml) introduces Bake as a coding agent running one command-line task. It asks the agent to follow local code conventions, commit or push only when the task requests it, preserve others' changes, and give a concise, factual, neutral answer with accurate results and verification. The runner submits the task as an ordinary user message; the composed rows supply the remaining prompts and tools.
 
 #### KV Cache effect
 

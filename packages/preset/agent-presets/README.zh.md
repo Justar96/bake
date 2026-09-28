@@ -162,7 +162,7 @@ agent-presets:
 
 间接地，经由 preset 常驻组装安装的插件：这些插件拥有该 preset 向加入它的 agent 呈现的每个工具 schema、提示词段落与 skill。
 
-随附的 `standard` 与 `ptc` preset 共用同一个 persona 和同一段计划模式指引。persona 把 agent 介绍为在用户终端中、基于所选模型工作的 Bake，用户会看到它的工具调用和以 Markdown 渲染的回复；随后是一段工作指引：先检查再修改，用覆盖该修改的检查验证，编写与周边代码风格一致的代码，只就读取工作区无法确定的决策询问用户，仅在用户要求时提交或推送，保留并非由 agent 做出的修改，并如实报告检查结果。确切文本见各 preset 的 `agent.cordis.yml`，它为系统提示词增加数百个字符。
+随附的 `standard` 与 `ptc` preset 共用同一个 persona 和同一段计划模式指引。persona 介绍 Bake、所选模型，以及终端中的工具调用和 Markdown 回复。它要求 agent 遵循周边代码惯例，仅在用户要求时提交或推送，除非用户要求否则保留他人的修改，使用简洁、中立的语言，并如实报告结果与验证情况。确切文本见各 preset 的 `agent.cordis.yml`，它为系统提示词增加数百个字符。
 
 #### KV Cache 影响
 
