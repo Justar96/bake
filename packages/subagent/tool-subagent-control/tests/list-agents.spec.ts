@@ -47,12 +47,17 @@ class GatedAdapter extends LlmAdapter {
 const testToolSignal = new AbortController().signal
 
 const roots: string[] = []
-afterEach(() => {
+const contexts: Context[] = []
+afterEach(async () => {
+  // Dispose first: the persistence teardown closes every session handle and
+  // releases its session.lock before the root disappears.
+  for (const ctx of contexts.splice(0).reverse()) await ctx.fiber.dispose()
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
 
 async function setupWith(adapter: MockAdapter | GatedAdapter) {
   const ctx = new Context()
+  contexts.push(ctx)
   await mountAgentLoopTestDependencies(ctx)
   const root = mkdtempSync(join(tmpdir(), 'dsh-tool-list-agents-'))
   roots.push(root)
@@ -247,6 +252,7 @@ describe('dsh-tool-subagent-control/list-agents', () => {
 
   it('unregisters with its plugin fiber (HMR safety)', async () => {
     const ctx = new Context()
+    contexts.push(ctx)
     await mountAgentLoopTestDependencies(ctx)
     await ctx.plugin(AgentLoop, { agents: [] })
     await ctx.plugin(SubagentRuntime)
