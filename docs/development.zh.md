@@ -90,7 +90,7 @@ hook 不运行测试或构建；请自行运行相关检查。未经维护者同
 
 ### CI
 
-[`ci.yml`](../.github/workflows/ci.yml) 在推送到 `main` 以及拉取请求时运行无密钥检查。[`release.yml`](../.github/workflows/release.yml) 构建、签名并发布发行归档；流程见[发行指南](../distribution/README.zh.md)。
+[`ci.yml`](../.github/workflows/ci.yml) 在拉取请求以及直接推送到 `main` 时运行无密钥检查。拉取请求在 `main` 上的合并提交会被跳过，因为该拉取请求的运行已经检查过它。`main` 只通过来自 `develop` 的合并提交式拉取请求接收变更：其规则集要求 [`main-source.yml`](../.github/workflows/main-source.yml) 中的 `develop only` 检查通过，来自其他分支的拉取请求会使该检查失败。[`release.yml`](../.github/workflows/release.yml) 构建、签名并发布发行归档；流程见[发行指南](../distribution/README.zh.md)。
 
 ## 仓库结构
 

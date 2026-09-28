@@ -82,7 +82,7 @@ The hooks do not run tests or builds; run the relevant checks yourself. Never sk
 
 ### CI
 
-[`ci.yml`](../.github/workflows/ci.yml) runs the keyless checks on pushes to `main` and on pull requests. [`release.yml`](../.github/workflows/release.yml) builds, signs, and publishes release archives; the [release guide](../distribution/README.md) covers the process.
+[`ci.yml`](../.github/workflows/ci.yml) runs the keyless checks on pull requests and on direct pushes to `main`. It skips a pull request's merge commit on `main`, which its pull request run already checked. `main` takes changes only through merge-commit pull requests from `develop`: its ruleset requires the `develop only` check from [`main-source.yml`](../.github/workflows/main-source.yml), which fails a pull request from any other branch. [`release.yml`](../.github/workflows/release.yml) builds, signs, and publishes release archives; the [release guide](../distribution/README.md) covers the process.
 
 ## Repository layout
 
