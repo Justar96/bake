@@ -2125,7 +2125,7 @@ scenario('presets', 'minimal and cordis start, answer the recorded turn, and rea
     }
   })
 
-scenario('settings', 'a /settings choice is saved to the settings file, plugin settings are found by search, and a saved fullscreen screen opens at the next launch',
+scenario('settings', '/settings opens on its most general section, a choice is saved to the settings file, plugin settings are found by search, and a saved fullscreen screen opens at the next launch',
   { replayOnly: true },
   async run => {
     const copy = dictionaries.en
@@ -2137,23 +2137,18 @@ scenario('settings', 'a /settings choice is saved to the settings file, plugin s
       await run.terminal('settings', [], async tty => {
         const start = tty.mark()
         tty.send('/settings\r', 'open the settings panel')
-        // Sections, each read by its values; the running composition fills the plugin ones.
-        await tty.expect(copy.settingsSession, 'deepseek-official/deepseek-v4-flash', copy.settingsTerminal, copy.settingsScreenInline,
-          copy.settingsAgent, copy.settingsAdvanced, start)
-        await tty.wait('the session section to be selected', text => picked(copy.settingsSession).test(text.slice(start)))
-        // The top page searches the settings inside every section.
+        // It opens on the most general section, with every section on its tab row; the running composition fills the plugin ones.
+        await tty.expect(`${copy.settingsTitle} › ${copy.settingsTerminal}`, copy.settingsScreenInline,
+          copy.settingsSession, copy.settingsAgent, copy.settingsAdvanced, start)
+        await tty.wait('the screen row to be selected', text => picked(copy.settingsScreen).test(text.slice(start)))
+        // A section's page searches the settings inside every section.
         const search = tty.mark()
         tty.send('parallel', 'search for a plugin setting')
-        await tty.wait('the agent loop setting found from the top', text =>
+        await tty.wait('the agent loop setting found from the terminal section', text =>
           picked(`${copy.settingsAgent} › ${copy.settingsParallelTools}`).test(text.slice(search)))
         const cleared = tty.mark()
         tty.send('\x7f'.repeat('parallel'.length), 'clear the search')
-        await tty.wait('the session section to be selected again', text => picked(copy.settingsSession).test(text.slice(cleared)))
-        const terminal = tty.mark()
-        tty.send('\x1b[B', 'point at the terminal section')
-        await tty.wait('the terminal section to be selected', text => picked(copy.settingsTerminal).test(text.slice(terminal)))
-        tty.send('\r', 'open the terminal section')
-        await tty.wait('the screen row to be selected', text => picked(copy.settingsScreen).test(text.slice(terminal)))
+        await tty.wait('the screen row to be selected again', text => picked(copy.settingsScreen).test(text.slice(cleared)))
         const values = tty.mark()
         tty.send('\r', 'open the screen values')
         await tty.wait('the inline value to be selected', text => picked(copy.settingsScreenInline).test(text.slice(values)))
@@ -2164,9 +2159,7 @@ scenario('settings', 'a /settings choice is saved to the settings file, plugin s
         const chosen = tty.mark()
         tty.send('\r', 'choose fullscreen')
         await tty.expect(copy.settingsNextLaunch, chosen)
-        const up = tty.mark()
-        tty.send('\x1b', 'return to the sections')
-        await tty.wait('the terminal section under the pointer again', text => picked(copy.settingsTerminal).test(text.slice(up)))
+        await tty.wait('the screen row under the pointer again', text => picked(copy.settingsScreen).test(text.slice(chosen)))
         const closed = tty.mark()
         tty.send('\x1b', 'close the panel')
         await tty.expect(`${SCREEN.prompt}${SCREEN.caret}`, closed)
@@ -2211,14 +2204,11 @@ scenario('settings-agent', 'Tab moves between /settings sections, subagent model
       await run.terminal('settings-agent', [], async tty => {
         const start = tty.mark()
         tty.send('/settings\r', 'open the settings panel')
-        await tty.expect(copy.settingsAgent, copy.pickerTabsHelp, start)
-        // Tab opens the first section, and each Tab the next one.
+        // The panel opens on its first section, and each Tab moves to the next one.
+        await tty.expect(`${copy.settingsTitle} › ${copy.settingsTerminal}`, copy.settingsAgent, copy.pickerTabsHelp, start)
         let at = tty.mark()
-        tty.send('\t', 'open the first section')
+        tty.send('\t', 'move to the session section')
         await tty.expect(`${copy.settingsTitle} › ${copy.settingsSession}`, at)
-        at = tty.mark()
-        tty.send('\t', 'move to the terminal section')
-        await tty.expect(`${copy.settingsTitle} › ${copy.settingsTerminal}`, at)
         at = tty.mark()
         tty.send('\t', 'move to the agent section')
         await tty.expect(`${copy.settingsTitle} › ${copy.settingsAgent}`, copy.settingsSubagentAllowed, copy.settingsSubagentAllowedNone, at)
@@ -2240,13 +2230,10 @@ scenario('settings-agent', 'Tab moves between /settings sections, subagent model
         await tty.expect(`${copy.settingsTitle} › ${copy.settingsAgent}`, at)
         await tty.wait('the agent section to show the switch on and the model', text =>
           text.slice(at).includes(copy.settingsOn) && text.slice(at).includes('deepseek-official/deepseek-v4-flash'))
-        at = tty.mark()
-        tty.send('\x1b', 'return to the top')
-        await tty.expect(copy.settingsAdvanced, at)
         // The model list found under Advanced opens the same catalog picker, never the editor.
         at = tty.mark()
         tty.send('advanced allowedModels', 'search for the model list under Advanced')
-        await tty.wait('the model list found from the top', text =>
+        await tty.wait('the model list found from the agent section', text =>
           picked(`${copy.settingsAdvanced} › subagent-model-selection › allowedModels`).test(text.slice(at)))
         at = tty.mark()
         tty.send('\r', 'open the list')
@@ -2264,12 +2251,13 @@ scenario('settings-agent', 'Tab moves between /settings sections, subagent model
         tty.send('\r', 'remove it')
         await tty.expect(copy.settingsSubagentAllowed, at)
         at = tty.mark()
-        tty.send('\x1b', 'return to the top')
-        await tty.expect(copy.settingsAdvanced, at)
+        tty.send('\x1b', 'leave the list')
+        // An edit found by search opens the section it lives in.
+        await tty.expect(`${copy.settingsTitle} › ${copy.settingsAdvanced}`, at)
         // A list with no picker of its own opens in the editor, which reads the line typed into it.
         at = tty.mark()
         tty.send('advanced router.hints', 'search for the router hints under Advanced')
-        await tty.wait('the hint list found from the top', text =>
+        await tty.wait('the hint list found from the advanced section', text =>
           picked(`${copy.settingsAdvanced} › subagent-model-selection › router.hints`).test(text.slice(at)))
         at = tty.mark()
         tty.send('\r', 'open the list in the editor')

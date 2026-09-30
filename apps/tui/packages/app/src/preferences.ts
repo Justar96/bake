@@ -150,6 +150,12 @@ interface ModelRoute {
   readonly model: string
 }
 
+/** The top-level section a page hands over to, and the row to point at there. */
+interface Move {
+  readonly key: string
+  readonly initial?: string
+}
+
 /** What one run of the panel has done so far. */
 interface Progress {
   changed: boolean
@@ -318,8 +324,9 @@ export class Preferences implements RecentModels {
   }
 
   /**
-   * Run the `/settings` panel: pick a section, then a setting, then its value,
-   * until Escape leaves the top. Each pick is saved before the list returns
+   * Run the `/settings` panel. It opens on the first, most general section;
+   * Tab moves between sections, Enter picks a setting and then its value, and
+   * Escape from a section closes the panel. Each pick is saved before the list returns
    * with the pointer where it was; a failed save stays in the panel as its
    * warning instead of closing it.
    * @param copy - locale-owned labels.
@@ -335,39 +342,43 @@ export class Preferences implements RecentModels {
     const account = session.routerAccount
     this.routerToken = account === undefined ? undefined
       : await Promise.resolve().then(account.status).then(status => ({ status }), () => undefined)
-    await this.page([], copy, interactions, signal, session, progress)
+    const first = this.sections(copy, session, interactions)[0]
+    let move: Move | undefined = first === undefined ? undefined : { key: first.key }
+    while (move !== undefined) move = await this.page([move.key], copy, interactions, signal, session, progress, move.initial)
     return this.closing(copy, progress.changed)
   }
 
   /**
-   * One page, until Escape returns to the page above. The top page also
-   * offers every setting below it to a search. The top page and each section
-   * directly under it carry the sections as tabs.
-   * @param keys - the sections leading to the page; empty for the top.
-   * @returns the section a tab moved to, which replaces this one; undefined after Escape.
+   * One section's page, until Escape returns to the page above. A top-level
+   * section carries every section as a tab, and offers every setting in the
+   * panel to a search.
+   * @param keys - the sections leading to the page, starting at a top-level one.
+   * @param initial - the row to point at first.
+   * @returns the top-level section to open instead of this one; undefined after Escape.
    */
   private async page(keys: readonly string[], copy: TuiCopy, interactions: Interactions, signal: AbortSignal,
-    session: PanelSession, progress: Progress): Promise<string | undefined> {
-    let initial: string | undefined
+    session: PanelSession, progress: Progress, initial?: string): Promise<Move | undefined> {
+    const topLevel = keys.length === 1
     for (;;) {
       // Read again each time, so a row shows what the last pick saved.
       const top = this.sections(copy, session, interactions)
       const trail = locate(top, keys)
-      if (trail === undefined) return undefined
-      const page = trail.at(-1)
-      const sections = page === undefined ? top : page.sections ?? []
-      const settings = page?.settings ?? []
+      const page = trail?.at(-1)
+      if (page === undefined) return undefined
+      const sections = page.sections ?? []
+      const settings = page.settings
       const resettable = settings.filter(setting => setting.reset !== undefined)
       const path = this.service?.documentPath
-      const title = page === undefined
-        ? path === undefined ? copy.settingsTitle : `${copy.settingsTitle} · ${compactPath(path, process.env['HOME'])}`
-        : [copy.settingsTitle, ...trail.map(section => section.label)].join(' › ')
+      const trailTitle = [copy.settingsTitle, ...trail!.map(section => section.label)].join(' › ')
+      // The first page a user sees also says where the settings are saved.
+      const title = !topLevel || path === undefined ? trailTitle : `${trailTitle} · ${compactPath(path, process.env['HOME'])}`
+      const own = new Set(settings.map(setting => `${SETTING}${keys[0]}/${setting.key}`))
       const warnings = [this.scope === undefined ? copy.settingsUnsaved : undefined, progress.problem].filter(text => text !== undefined)
       const choices: Choice[] = [
         ...settings.map(setting => settingChoice(setting, copy, `${SETTING}${setting.key}`)),
         // Before the sections, so a search lists the settings it found ahead
-        // of a section whose summary merely names them.
-        ...page === undefined ? searchable(top, copy) : [],
+        // of a section that merely holds them.
+        ...topLevel ? searchable(top, copy).filter(choice => !own.has(choice.value)) : [],
         ...sections.map(section => ({
           value: `${SECTION}${section.key}`, label: section.label, description: summaryOf(section),
           ...section.status === undefined ? {} : { status: statusOf(section.status, copy) },
@@ -376,9 +387,9 @@ export class Preferences implements RecentModels {
       ]
       const listed = choices.filter(choice => choice.searchOnly !== true)
       if (listed.length === 0) return undefined
-      const tabs = keys.length > 1 ? undefined : {
+      const tabs = !topLevel ? undefined : {
         items: top.map(section => ({ value: `${TAB}${section.key}`, label: section.label })),
-        ...keys[0] === undefined ? {} : { active: `${TAB}${keys[0]}` },
+        active: `${TAB}${keys[0]}`,
       }
       const picked = await interactions.choose({
         title, choices, initial: initial !== undefined && listed.some(choice => choice.value === initial) ? initial : listed[0]!.value,
@@ -388,8 +399,8 @@ export class Preferences implements RecentModels {
       signal.throwIfAborted()
       if (picked === undefined) return undefined
       progress.problem = undefined
-      // A section's tab replaces it; the top page opens the one it names.
-      if (picked.startsWith(TAB) && keys.length > 0) return picked.slice(TAB.length)
+      // A tab replaces this section with the one it names.
+      if (picked.startsWith(TAB)) return { key: picked.slice(TAB.length) }
       if (picked === RESET) {
         initial = settings[0] === undefined ? undefined : `${SETTING}${settings[0].key}`
         const confirmed = await interactions.choose({
@@ -401,28 +412,29 @@ export class Preferences implements RecentModels {
         await save(copy, progress, async () => { for (const setting of resettable) await setting.reset!() })
         continue
       }
-      if (picked.startsWith(SECTION) || picked.startsWith(TAB)) {
-        let next: string | undefined = picked.slice(picked.startsWith(TAB) ? TAB.length : SECTION.length)
-        while (next !== undefined) {
-          // Escape returns to the top on the row of the section it left.
-          initial = `${SECTION}${next}`
-          next = await this.page([...keys, next], copy, interactions, signal, session, progress)
-        }
+      if (picked.startsWith(SECTION)) {
+        const next = picked.slice(SECTION.length)
+        // Escape returns here on the row of the section it left.
+        initial = picked
+        await this.page([...keys, next], copy, interactions, signal, session, progress)
         continue
       }
       // A search result names its sections before the setting.
       const found = picked.slice(SETTING.length).split('/')
       const at = found.length > 1 ? locate(top, found.slice(0, -1))?.at(-1) : page
       const setting = at?.settings.find(entry => entry.key === found.at(-1))
-      initial = found.length > 1 ? `${SECTION}${found[0]}` : picked
+      // A search result's row on its top-level section: the setting itself, or the section holding it.
+      initial = found.length === 1 ? picked : found.length === 2 ? `${SETTING}${found[1]}` : `${SECTION}${found[1]}`
       if (setting === undefined) continue
       await this.edit(setting, copy, interactions, signal, progress)
       // A setting with its own picker saves through it; the row says whether it did.
       if (setting.open !== undefined && progress.problem === undefined) {
         const again = locate(this.sections(copy, session, interactions), found.length > 1 ? found.slice(0, -1) : keys)
-        const now = (found.length > 1 || keys.length > 0 ? again?.at(-1)?.settings : [])?.find(entry => entry.key === setting.key)
+        const now = again?.at(-1)?.settings.find(entry => entry.key === setting.key)
         if (now !== undefined && now.shown !== setting.shown) progress.changed = true
       }
+      // A setting found in another section opens that section, where the change shows.
+      if (found.length > 1 && found[0] !== keys[0]) return { key: found[0]!, initial }
     }
   }
 
@@ -506,29 +518,28 @@ export class Preferences implements RecentModels {
   private sections(copy: TuiCopy, session: PanelSession, interactions: Interactions): readonly Section[] {
     const descriptors = this.service?.describe() ?? []
     const curated = (list: readonly Curated[]): readonly Setting[] => list.flatMap(entry => this.curated(entry, descriptors, copy))
-    const section = (key: string, label: string, settings: readonly Setting[], named = false): readonly Section[] =>
-      settings.length === 0 ? [] : [{ key, label, settings,
-        // A bare number says nothing on the page above, so these sections name what they hold.
-        ...named ? { summary: settings.map(setting => setting.label).join(' · ') } : {} }]
+    const section = (key: string, label: string, settings: readonly Setting[]): readonly Section[] =>
+      settings.length === 0 ? [] : [{ key, label, settings }]
     return [
-      ...section('session', copy.settingsSession, [...this.modelRow(copy, session), ...this.permissionRow(copy, descriptors)]),
+      // Most general first: the panel opens on the first section.
       { key: 'terminal', label: copy.settingsTerminal, settings: this.terminalRows(copy) },
+      ...section('session', copy.settingsSession, [...this.modelRow(copy, session), ...this.permissionRow(copy, descriptors)]),
       ...section('agent', copy.settingsAgent, curated([
         { ns: 'agent-loop', path: ['maxParallelToolCalls'], label: copy.settingsParallelTools, steps: [1, 2, 4, 8, 16] },
         { ns: 'subagent', path: ['maxActiveSubagents'], label: copy.settingsSubagentsActive, steps: [1, 2, 4, 8, 16] },
         { ns: 'subagent', path: ['maxDepth'], label: copy.settingsSubagentDepth, steps: [0, 1, 2, 3],
           format: depth => depth === 0 ? copy.settingsSubagentDepthOff : String(depth) },
-      ]).concat(this.subagentModelRows(copy, descriptors, session, interactions)), true),
+      ]).concat(this.subagentModelRows(copy, descriptors, session, interactions))),
       ...section('shell', copy.settingsShell, curated([
         { ns: 'shell', path: ['timeoutMs'], label: copy.settingsShellTimeout, unit: 'ms', steps: [30_000, 60_000, 120_000, 300_000, 600_000] },
         { ns: 'shell', path: ['maxTimeoutMs'], label: copy.settingsShellMaxTimeout, unit: 'ms', steps: [300_000, 600_000, 1_800_000, 3_600_000] },
         { ns: 'shell', path: ['maxOutputBytes'], label: copy.settingsShellOutput, unit: 'bytes', steps: [16_000, 64_000, 256_000, 1_000_000] },
-      ]), true),
+      ])),
       ...section('web', copy.settingsWeb, curated([
         { ns: 'web-search-deepseek', path: ['maxUses'], label: copy.settingsWebUses, steps: [1, 3, 5, 10] },
         { ns: 'web-search-deepseek', path: ['model'], label: copy.settingsWebModel },
         { ns: 'web-search-deepseek', path: ['maxTokens'], label: copy.settingsWebTokens, steps: [1024, 2048, 4096, 8192] },
-      ]), true),
+      ])),
       ...this.advanced(copy, descriptors, session, interactions),
     ]
   }
@@ -1052,7 +1063,7 @@ export class Preferences implements RecentModels {
       })
       .filter(section => section.settings.length > 0)
       .sort((left, right) => left.key.localeCompare(right.key))
-    return sections.length === 0 ? [] : [{ key: 'advanced', label: copy.settingsAdvanced, summary: copy.settingsAdvancedAbout, settings: [], sections }]
+    return sections.length === 0 ? [] : [{ key: 'advanced', label: copy.settingsAdvanced, settings: [], sections }]
   }
 
   /**
