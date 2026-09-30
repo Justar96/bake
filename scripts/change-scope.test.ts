@@ -5,6 +5,10 @@ import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'bun:test'
 
 import { renderChangeScope } from './change-scope.ts'
+import { dropRepositoryGitEnv } from './git-env.ts'
+
+// These tests build fixture repositories; a hook's GIT_DIR must not reach them.
+dropRepositoryGitEnv(process.env)
 
 interface Report {
   formatVersion: number

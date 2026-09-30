@@ -23,7 +23,9 @@ export function gitBlobHash(content: Buffer): string {
 export function runGit(root: string, args: string[], operation: string, input?: Buffer): Buffer {
   let result: Bun.SyncSubprocess<'pipe', 'pipe'>
   try {
-    result = Bun.spawnSync(['git', '-C', root, ...args], { stdin: input, maxBuffer: GIT_COMMAND_MAX_BUFFER })
+    // The live environment: Bun's default is the one the process started with,
+    // so a GIT_DIR a caller removed would otherwise still bind every call.
+    result = Bun.spawnSync(['git', '-C', root, ...args], { stdin: input, maxBuffer: GIT_COMMAND_MAX_BUFFER, env: process.env })
   } catch (error) {
     throw new Error(`${operation} failed: ${error instanceof Error ? error.message : String(error)}`, { cause: error })
   }
