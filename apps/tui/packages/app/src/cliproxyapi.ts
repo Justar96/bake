@@ -3,6 +3,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import { normalizeApiKey } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-settings'
+import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
 import type { LoginPrompt } from './login.ts'
 
@@ -500,4 +501,73 @@ export async function configureCliProxyApi(ctx: Context, prompt: (question: Logi
     throw error
   }
   return models.length
+}
+
+/** A model list with absent and empty fields dropped and keys sorted, for comparing a saved list with a fetched one. */
+function canonical(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonical)
+  if (!isRecord(value)) return value
+  return Object.fromEntries(Object.keys(value).sort().flatMap((key) => {
+    const field = canonical(value[key])
+    const empty = field === undefined || (Array.isArray(field) && field.length === 0)
+      || (isRecord(field) && Object.keys(field).length === 0)
+    return empty ? [] : [[key, field]]
+  }))
+}
+
+/**
+ * Bring a saved CLIProxyAPI route's models up to what the proxy lists now, so
+ * a model it started serving after `/login cliproxyapi` can be chosen without
+ * signing in again. Only a route a current login wrote is refreshed: one an
+ * earlier release wrote waits for {@link upgradeCliProxyRoute}, and one whose
+ * credential or protocol was changed by hand is not a login's.
+ *
+ * A model the proxy no longer lists is dropped, as a new login would drop it,
+ * unless `keep` names it: a transient gap in the proxy's accounts must not
+ * take away the model a session is running on.
+ *
+ * @param ctx - the settled plugin context.
+ * @param signal - bounds the request; its abort propagates as itself.
+ * @param keep - model ids to retain when the proxy stops listing them.
+ * @param fetcher - the HTTP client.
+ * @returns whether the saved list changed.
+ * @throws CliProxyCheckError when the proxy cannot be read; the saved list is left as it was.
+ */
+export async function refreshCliProxyModels(ctx: Context, signal: AbortSignal, keep: readonly string[] = [],
+  fetcher: typeof fetch = fetch): Promise<boolean> {
+  const settings = ctx.get('settings')
+  const credentials = ctx.get('credentials')
+  if (settings === undefined || credentials === undefined || !settings.writable) return false
+  const section = settings.get('llm-pi-ai') as { providers?: Readonly<Record<string, unknown>> } | undefined
+  const saved = section?.providers?.[CLIPROXYAPI_ID]
+  if (!isRecord(saved) || saved['apiKeyEnv'] !== CLIPROXYAPI_KEY || typeof saved['baseURL'] !== 'string'
+    || !Array.isArray(saved['models']) || (saved['api'] !== undefined && saved['api'] !== 'openai-responses')
+    || planCliProxyRouteUpgrade(saved) !== undefined) return false
+  let endpoints: ReturnType<typeof cliProxyEndpoints>
+  try { endpoints = cliProxyEndpoints(saved['baseURL']) } catch { return false }
+  const key = await credentials.resolve(credentialRef(CLIPROXYAPI_KEY))
+  if (key === undefined) return false
+  const listed = await fetchCliProxyModels(endpoints.models, key.value, signal, fetcher, endpoints.root)
+  signal.throwIfAborted()
+  const ids = new Set(listed.map(model => model.id))
+  const kept = (saved['models'] as readonly unknown[]).filter(entry => isRecord(entry) && typeof entry['id'] === 'string'
+    && keep.includes(entry['id']) && !ids.has(entry['id']))
+  const models = [...listed, ...kept]
+  if (JSON.stringify(canonical(models)) === JSON.stringify(canonical(saved['models']))) return false
+  await settings.mutate('llm-pi-ai', [{ op: 'set', path: ['providers', CLIPROXYAPI_ID, 'models'], value: models }])
+  return true
+}
+
+/**
+ * The CLIProxyAPI models something already uses: the session's model, the
+ * new-session default, and the subagent allow-list, which a refresh keeps.
+ * @param ctx - the settled plugin context.
+ * @param current - the running session's model, when it has one.
+ * @returns their model ids on the `cliproxyapi` route.
+ */
+export function cliProxyModelsInUse(ctx: Context, current?: { readonly provider: string, readonly model: string }): string[] {
+  const allowed = (ctx.get('settings')?.get('subagent-model-selection') as { allowedModels?: unknown } | undefined)?.allowedModels
+  const routes: unknown[] = [current, ctx.get('agentDefaultModel')?.currentSelection(), ...Array.isArray(allowed) ? allowed : []]
+  return [...new Set(routes.flatMap(route => isRecord(route) && route['provider'] === CLIPROXYAPI_ID
+    && typeof route['model'] === 'string' ? [route['model']] : []))]
 }

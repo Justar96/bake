@@ -360,7 +360,7 @@ describe('turn header', () => {
     expect(turn).toMatch(new RegExp(`^${SPINNER_REST} `))
     ui.rerender(<App {...state} autoCompacting={true} />)
     expect(compactionOf(ui.lastFrame())).toBe(compaction)
-    expect(inputOf(ui.lastFrame())).toMatch(new RegExp(`^> ▌${dictionaries.en.steering}`))
+    expect(inputOf(ui.lastFrame())?.startsWith(`> ▌${dictionaries.en.steering}`)).toBe(true)
     ui.rerender(<App {...state} />)
     expect(headerOf(ui.lastFrame())).toBe(turn)
     expect(compactionOf(ui.lastFrame())).toBeUndefined()

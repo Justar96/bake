@@ -12,13 +12,13 @@
   2. Check docs
   (https://example.com/docs).
 
-  > A quote with emphasis.
+  │ A quote with emphasis.
 
   ts
     const snake_case = "**literal**"
       return snake_case
 
-  Check | Result
-  ------+--------------------------
-  Width | wraps without losing text
-  State | ready
+  Check │ Result
+  ──────┼──────────────────────────
+  Width │ wraps without losing text
+  State │ ready

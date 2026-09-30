@@ -577,6 +577,11 @@ executionMode(exec: ToolExecutionInput): ToolExecutionMode
  * not-yet-started body with `ABORTED_BEFORE_DISPATCH` or replaces a
  * successful started outcome with `ABORTED`; already-started work is still
  * drained and may retain a tool-owned structured error.
+ * Within an agent's open turn, a model-direct call identical (name plus
+ * key-order-normalized arguments) to one refused as unread or stale
+ * (`FS_NOT_OBSERVED`, `FS_STALE_VERSION`) skips policy and dispatch with a
+ * {@link TOOL_DUPLICATE_CALL} error until any other call settles. Successes
+ * are never cached or replayed.
  * @param exec - the typed same-process call input. The registry assigns its
  *   correlation token before policy begins.
  * @returns the materialized final result.

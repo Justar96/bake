@@ -23,8 +23,10 @@ import { formatAttachment, type CardLine, type Row, type ToolCallRow, type ToolO
 export type Tone =
   /** The user's own words. */
   | 'said'
-  /** The answer, and anything else the user is waiting to read. */
+  /** Anything else the user is waiting to read, at the terminal's own foreground. */
   | 'plain'
+  /** The answer's prose: a step below `plain`, so its headings and bold words stand out. */
+  | 'body'
   /** Secondary interface metadata. */
   | 'quiet'
   /** Reasoning. Dim like metadata, and italic so it stays distinct from the answer. */
@@ -132,6 +134,7 @@ export function styleOf(tone: Tone): LineStyle {
   switch (tone) {
     case 'said': return { dim: false, bold: true }
     case 'plain': return { dim: false, bold: false }
+    case 'body': return { color: PALETTE.body, dim: false, bold: false }
     case 'quiet': return { dim: true, bold: false }
     // Dim, like metadata, and italic, so reasoning stays distinct from tool
     // output in the same column.
@@ -1118,10 +1121,10 @@ export function present(row: Row, result: ResultBound, wrap?: (line: PresentedLi
       }])
 
     case 'assistant': {
-      const lines = markdownLines(row.text, 'plain', result.code, width).map(line => ({
+      const lines = markdownLines(row.text, 'body', result.code, width).map(line => ({
         ...line,
         marker: MARKER.none,
-        verb: '', column: COLUMN.rail, tone: 'plain' as const,
+        verb: '', column: COLUMN.rail, tone: 'body' as const,
       }))
       return row.continued === true ? lines : opening(lines)
     }

@@ -52,7 +52,9 @@ export function Line({ line, budget, clock, window }: {
   // answer, but not dimmed to reasoning. Semantic and syntax colours keep
   // their own tones.
   const zone = line.zone === true
-  const colored = colorOf(style, zone)
+  // Body prose drawn in runs colours each run itself: a bold run takes the
+  // full foreground, which a nested run cannot do under a coloured parent.
+  const colored = line.tone === 'body' && line.spans !== undefined ? {} : colorOf(style, zone)
   const placed = placement(line, budget)
   const { rail, verb: verbWidth, width } = placed
   const content = window === undefined ? placed.content : windowContent(line, budget, window.offset, window.height)

@@ -18,7 +18,7 @@ import stringWidth from 'string-width'
 import type { TuiCopy } from './copy.ts'
 import { cacheHit, compactPercent, contextPercent, formatContext, formatTotals, type ContextUsage, type TokenTotals } from './format.ts'
 import { gitField, type GitState } from './git.ts'
-import { cacheTone, CONTEXT_FULL, CONTEXT_WARN, contextTone, PALETTE, type PaletteColor } from './palette.ts'
+import { cacheTone, CONTEXT_FULL, CONTEXT_WARN, contextTone, PALETTE, thinkingTone, type PaletteColor } from './palette.ts'
 import { compactModel } from './present.ts'
 
 /** One run of a status field, in its own tone. */
@@ -132,7 +132,7 @@ export function statusFields(input: StatusInput, copy: TuiCopy): readonly Status
       : { forms: [[{ text: compactModel(input.model) }]], yields: [], shrink: { kind: 'end' as const, rank: RANK.model, min: MODEL_MIN } },
     ...plan === undefined ? [] : [{ forms: [[{ text: plan, dim: true }]], yields: [RANK.plan] }],
     ...input.thinkingLevel === undefined ? [] : [{
-      forms: [[{ text: `${copy.think} `, dim: true }, { text: input.thinkingLevel }]], yields: [RANK.thinking],
+      forms: [[{ text: `${copy.think} `, dim: true }, { text: input.thinkingLevel, ...thinkingTone(input.thinkingLevel) }]], yields: [RANK.thinking],
     }],
     ...input.context === undefined ? [] : [contextField(input.context, copy)],
     // The branch and its changes. It narrows to the branch alone before it

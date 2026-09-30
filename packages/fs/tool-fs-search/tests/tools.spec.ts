@@ -289,6 +289,8 @@ describe('registration', () => {
     expect(props('glob')['path']?.description).toBe('Directory to search. Defaults to the working directory; relative paths resolve against it.')
     expect(schema('grep')?.description).toBe('Search file contents with a ripgrep regular expression, as a bounded alternative to grep or rg in a shell. '
       + 'Hidden and ignored files are skipped unless path points at them. '
+      + 'When the path or file type is uncertain, use `glob` first; keep `path` scoped to the repository or a known subtree and set one `include` filter. '
+      + 'Do not search filesystem-wide roots such as `/` or `$HOME`. '
       + 'Returns only the matching lines, numbered and grouped by file; read a matched file for surrounding context. '
       + 'Up to 250 matches are shown; a larger result says so and reports where the full list was saved.')
     expect(props('grep')['path']?.description).toBe('File or directory to search. Defaults to the working directory; relative paths resolve against it.')
@@ -299,6 +301,8 @@ describe('registration', () => {
 function globDescription(overCap: string): string {
   return 'Find files, not directories, whose paths match a glob pattern. '
     + 'It is a bounded, newest-first alternative to find in a shell: hidden and ignored files are included, but VCS metadata is not. '
+    + 'Keep `path` scoped to the repository or a known subtree; when the file path is uncertain, use this before `grep` or a shell search. '
+    + 'Do not search filesystem-wide roots such as `/` or `$HOME`. '
     + `A result over 100 paths ${overCap}, says so, and reports where the full list was saved.`
 }
 
@@ -596,6 +600,15 @@ describe('exit semantics and failure classification', () => {
     const result = await call(ctx, 'grep', { pattern: 'x', path: 'missing.dir' })
     expect(result.error).toMatchObject({ info: { code: 'SEARCH_FAILED' } })
     expect(text(result)).toContain('IO error')
+    expect(text(result)).toContain('Use `glob` to verify the path')
+  })
+
+  it('glob path failures tell the model to narrow the confirmed search root', async () => {
+    const { ctx, subprocess } = await setup()
+    subprocess.handler = () => runResult('', { exitCode: 2, stderr: { text: 'rg: /: Permission denied' } })
+    const result = await call(ctx, 'glob', { pattern: '*' })
+    expect(result.error).toMatchObject({ info: { code: 'SEARCH_FAILED' } })
+    expect(text(result)).toContain('repository-scoped path')
   })
 
   it('a nonzero exit with EMPTY stderr still reports the exit code', async () => {

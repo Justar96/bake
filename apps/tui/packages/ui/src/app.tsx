@@ -1,5 +1,5 @@
 /** Terminal view over committed history, live presentation, and harness-owned state. */
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import React, { lazy, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Box, Text, useApp, useInput, useIsScreenReaderEnabled, usePaste, useWindowSize } from 'ink'
 import type { AgentStatus } from '@deepseek-ai/dsh-agent'
 import { formatAttachment, type AttachmentSummary, type Row } from './rows.ts'
@@ -24,9 +24,12 @@ import { statusFields } from './status-line.ts'
 import { Installing } from './installing.tsx'
 import type { InstallStep } from './install-progress.ts'
 import { Scrollback, type Opening } from './scrollback.tsx'
-import { Fullscreen, WHEEL_ROWS, type TranscriptScroll } from './fullscreen.tsx'
+import type { Fullscreen as FullscreenComponent, TranscriptScroll } from './fullscreen.tsx'
 import { Chrome, Completion, composerHint, draftWidth, Line, LiveRegion, Notice, Panel, Thinking, THINKING_GAP, wrappedRows, type ActivityState } from './line.tsx'
 import { activityWord, phaseLabel, phaseOf, lastTurn, THINKING_ROWS, thinkingRows, turnSummary, type Clock } from './activity.ts'
+
+const Fullscreen = lazy(async () => ({ default: (await import('./fullscreen.tsx')).Fullscreen as typeof FullscreenComponent }))
+const WHEEL_ROWS = 3
 
 /** Display-only projection of one pending inbox message. */
 export interface PendingInput {
@@ -190,6 +193,12 @@ export interface AppProps {
   readonly onSubmit: Submit
   readonly onCancel: () => void
   readonly onInterrupt: () => void
+  /**
+   * Alt-Up: send the steering now, interrupting the turn it waits on, instead
+   * of at the next step. A draft typed during a turn is submitted first. The
+   * steering placeholder and the pending panel name the key.
+   */
+  readonly onSendPending?: () => void
   /**
    * Called for any key other than Ctrl-C while `quitting`. The user went on
    * with something else, so the quit prompt goes instead of waiting out
@@ -489,6 +498,22 @@ function SessionView(props: AppProps): React.ReactElement {
       && !composer.blocked && (key.pageUp || key.pageDown || (key.ctrl && (key.home || key.end)))) {
       scroll.current?.move(key.pageUp ? 'up' : key.pageDown ? 'down' : key.home ? 'start' : 'end')
       return
+    }
+    // Alt-Up sends steering now instead of at the next step: a typed draft is
+    // submitted and sent, and with an empty draft the queued input is. It is
+    // checked before the composer, which takes no other Meta key. A command
+    // draft is left alone: it is not steering.
+    if (key.meta && key.upArrow && interaction === undefined && props.inputBlocked !== true && props.inspection === undefined
+      && !composer.blocked) {
+      const draft = composer.value
+      if (props.status === 'running' && draft.trim() !== '' && !draft.trimStart().startsWith('/')) {
+        composer.type('\n')
+        // Accepted at once, the draft is queued steering by now; a refused or
+        // still-sending draft stays where it is and is not sent.
+        if (!composer.blocked && composer.value === '') props.onSendPending?.()
+        return
+      }
+      if (props.pending.length > 0) { props.onSendPending?.(); return }
     }
     // Alt-Enter is the one Meta key the composer takes: a line break.
     if (interaction !== undefined || props.inputBlocked === true || props.inspection !== undefined || composer.blocked
@@ -881,8 +906,8 @@ function SessionView(props: AppProps): React.ReactElement {
             )}
         </>
   return <Beat clock={clock}>{fullscreen
-    ? <Fullscreen ref={scroll} transcript={props.committed} live={liveRows} heading={heading} opening={opening}
-        budget={budget} result={result} copy={copy} frame={props.frame} size={size} clock={animate}>{controlsView}</Fullscreen>
+    ? <React.Suspense fallback={controlsView}><Fullscreen ref={scroll} transcript={props.committed} live={liveRows} heading={heading} opening={opening}
+        budget={budget} result={result} copy={copy} frame={props.frame} size={size} clock={animate}>{controlsView}</Fullscreen></React.Suspense>
     : <Scrollback transcript={props.committed} heading={heading} opening={opening} budget={budget} result={result}
         copy={copy} frame={props.frame} size={size} repainting={repainting}>{controlsView}</Scrollback>}
   </Beat>

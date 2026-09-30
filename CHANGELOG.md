@@ -4,6 +4,12 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 ## [Unreleased]
 
+- Identical edits refused for unread or stale files skip repeated tool dispatch within the same turn until another tool settles. The filesystem guard remains strict, and tool guidance explains how to reread and recover, scope searches, run long commands in background jobs, and respect subagent depth limits.
+- Failed command exits, signals, and HTTP responses appear as failed tool outcomes in the terminal.
+- `/model` refreshes CLIProxyAPI's model list while keeping models used by the current session, default selection, and subagents. Advanced settings use the same subagent model pickers as the Agent section.
+- Alt-Up sends queued steering immediately by interrupting the current turn. Markdown has clearer headings, lists, tables, and inline code, and reasoning efforts share colours across the model picker and status line.
+- The terminal loads its renderer, fullscreen view, and syntax highlighting on demand; disabled telemetry leaves the OpenTelemetry SDK unloaded.
+
 ## [0.2.0] - 2026-09-30
 
 - The composer's key hint (`Enter sends`, `Tab completes`) and the goal at the end of the header no longer lose their last characters in Warp and other terminals that erase a full row's last cell when the rest of the row is cleared. Every row the terminal redraws is now cleared before it is drawn.

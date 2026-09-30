@@ -2,7 +2,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { SESSION_IN_USE_EXIT, SessionInUseError } from '@deepseek-ai/dsh-cmdline'
 import z from '@deepseek-ai/schemastery'
-import { run, type RunnerOptions, type TuiIo } from './runner.ts'
+import type { RunnerOptions, TuiIo } from './runner.ts'
 import type { CredentialTargetConfig, SignInFlowConfig } from './login.ts'
 
 /** Stable Cordis plugin name. */
@@ -59,7 +59,10 @@ export function apply(ctx: Context, config: Config): void {
   // `run` already reported this error on stderr as soon as it was caught,
   // before its own drains ran; this handler only picks the exit code once
   // the whole disposal that error triggered has settled.
-  void run(ctx, config, io).catch((error: unknown) => {
+  // Keep the production runner in its own artifact: loading the Ink graph as
+  // part of this lightweight plugin entry would delay every other plugin.
+  const runnerModule = './runner-loader' + '.js'
+  void import(runnerModule).then(({ run }: typeof import('./runner-loader.ts')) => run(ctx, config, io)).catch((error: unknown) => {
     io.exit(error instanceof SessionInUseError ? SESSION_IN_USE_EXIT : 1)
   })
 }

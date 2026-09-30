@@ -79,7 +79,9 @@ export function applyEditTool(ctx: Context, sandbox: FsSandboxController): void 
     // The refusal sentence states the fs-observation-policy guard that every
     // shipped composition mounts; the uniqueness rule lives only on old_string.
     description: 'Replace literal text in an existing UTF-8 text file. '
-      + 'The edit is refused unless you have read, written, or edited the file in this session and it has not changed since.',
+      + 'Before composing old_string, read the target with `read` immediately before the edit, unless its current content came from a write or edit result in this session. '
+      + 'The edit is refused unless you have read, written, or edited the file in this session and it has not changed since; '
+      + 'if it is refused as unread or stale, read it again, rebuild old_string, and do not repeat the same edit arguments.',
     parameters: {
       file_path: { type: 'string', required: true, description: 'Absolute path, or relative to the working directory.' },
       old_string: {

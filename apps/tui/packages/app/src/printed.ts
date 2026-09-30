@@ -10,7 +10,8 @@
  * @module @dsh-tui/app/printed
  */
 
-import { finishedMarkdown, type Row } from '@dsh-tui/ui'
+import { finishedMarkdown } from '@dsh-tui/ui/markdown.ts'
+import type { Row } from '@dsh-tui/ui/rows.ts'
 import type { KeyedRow } from './live.ts'
 
 /** Text printed from one block, in stream order. */

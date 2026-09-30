@@ -4,7 +4,8 @@
  * Colour is semantic, never decorative. The same tone means the same state
  * everywhere, so a marker, its verb, and the turn header do not need a second
  * vocabulary. Saturated orange, green, red, ocean blue, yellow, and royal
- * blue are the six states. `output` only marks a tool result's preview text.
+ * blue are the six states. `output` only marks a tool result's preview text,
+ * and `body` an answer's prose.
  * It says where output is, not what state it is in. Text and glyphs still
  * carry each state without colour. Hex values let Ink pick the closest tone
  * on terminals without truecolour.
@@ -29,7 +30,7 @@
 export const PALETTE = {
   /** Blue. References, including Markdown headings and links, paths, and informational tool fields. */
   reference: '#60a5fa',
-  /** Lavender. Inline code in an answer; surrounding prose keeps the terminal foreground. */
+  /** Lavender. Inline code in an answer; surrounding prose is `body`. */
   code: '#c4b5fd',
   /**
    * Orange. A turn in progress. The header and its spinner, and a running
@@ -69,6 +70,13 @@ export const PALETTE = {
    * which reasoning and metadata use.
    */
   output: '#b4b8bf',
+  /**
+   * Light grey. An answer's body text. A step below the terminal's own
+   * foreground, so headings, bold words, and the user's own words stand out
+   * from it, and a step above `output`, so an answer still reads before a
+   * tool result does.
+   */
+  body: '#cfd3d9',
 } as const
 
 /**
@@ -97,8 +105,26 @@ export const AGENT_TONES = ['#a78bfa', '#f472b6', '#2dd4bf', '#a3e635', '#818cf8
  */
 export const CONTEXT_RAMP = ['#fde68a', '#facc15', '#fb923c', '#f87171'] as const
 
+/**
+ * The marks of an answer's Markdown, each its own soft tone so a reply reads
+ * by its structure: what a list hangs from, what a quote hangs from, a deep
+ * heading, a code block's language, and inline code by what it names. None
+ * is a state; each mark keeps its glyph or its word under `NO_COLOR`.
+ */
+export const MARKDOWN = {
+  /** Sky. List bullets and numbers. */
+  bullet: '#7dd3fc',
+  /** Violet. The bar a quote hangs from. */
+  quote: '#a78bfa',
+  /** Teal. Headings from the third level down. */
+  heading: '#5eead4',
+  /** Amber. A code block's language, and inline code that is a literal: a number, a string, `true`. */
+  literal: '#fbbf24',
+} as const
+
 /** A colour from the palette, for props that carry one. */
 export type PaletteColor = typeof PALETTE[keyof typeof PALETTE] | typeof AGENT_TONES[number] | typeof CONTEXT_RAMP[number]
+  | typeof MARKDOWN[keyof typeof MARKDOWN]
 
 /**
  * A child's identity tone, by its place in the catalog. The catalog appends
@@ -167,6 +193,24 @@ export function contextTone(percent: number, compactAt?: number): PaletteColor |
   if (percent >= hot) return CONTEXT_RAMP[2]
   if (percent >= hot - CONTEXT_STEP) return CONTEXT_RAMP[1]
   return percent >= hot - 2 * CONTEXT_STEP ? CONTEXT_RAMP[0] : undefined
+}
+
+/**
+ * How a reasoning effort reads, warming as it asks for more: the light
+ * efforts dim, `medium` in the normal foreground, `high` blue, `xhigh`
+ * orange, and `max` pink. An effort a provider names otherwise keeps the
+ * normal foreground; the word beside the tone says the same under `NO_COLOR`.
+ * @param level - the effort id, as the route offers it.
+ * @returns the effort's tone, or `dim` for the light ones.
+ */
+export function thinkingTone(level: string): { readonly color?: PaletteColor, readonly dim?: true } {
+  switch (level.toLowerCase()) {
+    case 'none': case 'off': case 'minimal': case 'low': return { dim: true }
+    case 'high': return { color: PALETTE.asking }
+    case 'xhigh': return { color: CONTEXT_RAMP[2] }
+    case 'max': return { color: AGENT_TONES[1] }
+    default: return {}
+  }
 }
 
 /**

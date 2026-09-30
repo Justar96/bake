@@ -1,9 +1,9 @@
 /** Terminal ownership and bounded application lifetime across session navigation. */
-import React, { useEffect } from 'react'
+import React, { useEffect, type ComponentType } from 'react'
 import { render, useApp, type Instance } from 'ink'
 import type { Context } from '@deepseek-ai/cordis'
-import { App } from '@dsh-tui/ui/app.tsx'
 import { compactPath } from '@dsh-tui/ui/present.ts'
+import type { Highlight } from '@dsh-tui/ui/present.ts'
 import { dictionaries, type Locale, type TuiCopy } from '@dsh-tui/ui/copy.ts'
 import type { FrameStyle } from '@dsh-tui/ui/layout.ts'
 import type { Clock } from '@dsh-tui/ui/activity.ts'
@@ -11,16 +11,20 @@ import { resolveFrame } from './frame.ts'
 import { frameOutput, type FrameOutput } from './output.ts'
 import { editExternally, holdInput, type EditText, type SuspendTerminal } from './external-editor.ts'
 import { Preferences } from './preferences.ts'
-import { createSyntax } from './syntax.ts'
+import type { Syntax } from './syntax.ts'
 import type { SessionOptions } from './session.ts'
 import type { AttachmentOptions } from './attachments.ts'
+import type { AppProps } from '@dsh-tui/ui/app.tsx'
 import { SessionNavigation } from './navigation.ts'
 import { bakeVersion, releaseRoot } from './release.ts'
 import { Updates } from './update.ts'
 import { WorkspaceGit } from './git.ts'
-import { cliProxyUpgradeNotice, upgradeCliProxyRoute } from './cliproxyapi.ts'
+import { cliProxyModelsInUse, cliProxyUpgradeNotice, refreshCliProxyModels, upgradeCliProxyRoute } from './cliproxyapi.ts'
 import type { CredentialTargetConfig, LoginSources, SignInFlowConfig } from './login.ts'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
+
+/** The renderer component is loaded from its own artifact after the runner starts. */
+type AppComponent = ComponentType<AppProps>
 
 /**
  * Validated application options; no implicit defaults remain in the runner.
@@ -95,6 +99,13 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
   if (io.in.isTTY !== true || io.out.isTTY !== true) throw new Error('tui needs an interactive terminal; use dsh --profile headless for scripted runs')
   const abort = new AbortController()
   const done = Promise.withResolvers<void>()
+  let App: AppComponent | undefined
+  const uiReady = import(new URL('./ui-loader.js', import.meta.url).href).then(module => { App = module.App })
+  let syntax: Syntax | undefined
+  const syntaxReady = import(new URL('./syntax-loader.js', import.meta.url).href).then(({ createSyntax }) => { syntax = createSyntax() })
+  // The highlighter module is deliberately separate from the runner. Its
+  // Shiki graph can load while the profile loader and session open.
+  const highlight: Highlight = (...args) => syntax?.highlight(...args)
   let ui: Instance | undefined
   // NO_COLOR suppresses text styling and animated indicators for this terminal.
   const motion = (process.env['NO_COLOR'] ?? '') === ''
@@ -127,6 +138,7 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
   }
   let completed = false
   let startupReport: Promise<void> | undefined
+  let proxyModels: Promise<void> | undefined
   const releaseTerminal = (): void => {
     if (terminalReleased) return
     terminalReleased = true
@@ -159,10 +171,6 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
   const updates = new Updates({ running: version, release: releaseRoot() })
   // The status line's branch and changes, for whichever workspace is displayed.
   const git = new WorkspaceGit()
-  // Loaded while the session starts, and awaited before the first frame.
-  // A resumed session prints its history once. A diff drawn before the
-  // grammars are ready would stay uncoloured.
-  const syntax = createSyntax()
   // Resolved once per configured choice. The terminal it describes does not
   // change for the life of the process. The presentation layer takes the
   // result instead of reading the environment itself.
@@ -192,16 +200,18 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
     repaint()
   }
   const element = (): React.ReactElement => {
+    const View = App
+    if (View === undefined) throw new Error('tui: UI module is not ready')
     const active = navigation?.controller
     if (navigation === undefined || active === undefined) throw new Error('tui: session is not connected')
     const settings = preferences.value
     const cwd = active.agent.session.header.cwd
     const branch = cwd === undefined ? undefined : git.follow(cwd)
-    return React.createElement(TerminalOwner, { bind: bindSuspend }, React.createElement(App, {
+    return React.createElement(TerminalOwner, { bind: bindSuspend }, React.createElement(View, {
       ...active.view, key: active.agent.id, inputBlocked: navigation.busy, copy, frame: frame(), clock: systemClock, motion, screen,
       quitting: quitTimer !== undefined, completionLimit: settings.completionLimit, resultLines: settings.resultLines,
       goalObjective: settings.goalObjective,
-      highlight: syntax.highlight, version, ...updates.state === undefined ? {} : { update: updates.state },
+      highlight, version, ...updates.state === undefined ? {} : { update: updates.state },
       ...updates.installing === undefined ? {} : { installing: updates.installing },
       // Shortened against home here: the presentation layer reads no environment.
       cwd: cwd === undefined ? '' : compactPath(cwd, process.env['HOME']), ...branch === undefined ? {} : { git: branch }, sessionId: active.agent.id,
@@ -210,7 +220,7 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
       onInspectSubagent: id => { navigation?.submit(`/agents ${id}`) },
       onCycleThinking: () => { active.cycleThinking() },
       onSubmit: text => navigation?.submit(text) ?? false, onCancel: () => navigation?.cancel(),
-      onInterrupt: interrupt, onQuitDismiss: dismissQuit, onAnswer: (id, answer) => active.interactions.answer(id, answer),
+      onInterrupt: interrupt, onSendPending: () => { active.sendPending() }, onQuitDismiss: dismissQuit, onAnswer: (id, answer) => active.interactions.answer(id, answer),
     }))
   }
   const repaint = (): void => { if (!terminalReleased && !editing) ui?.rerender(element()) }
@@ -228,21 +238,25 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
     // upgraded route. A route an earlier release wrote is brought up to what
     // the current login writes; one that cannot be is named for a new login.
     // Neither outcome may keep the terminal from opening.
-    const routeNotice = cliProxyUpgradeNotice(
-      await upgradeCliProxyRoute(ctx).catch((error: unknown) => {
+    const routeNotice = cliProxyUpgradeNotice(await upgradeCliProxyRoute(ctx).catch((error: unknown) => {
         ctx.logger.warn('tui: CLIProxyAPI route upgrade failed: %o', error)
         return { kind: 'current' as const }
-      }),
-      copy,
-    )
+      }), copy)
     const login: LoginSources = { refs: config.credentialRefs, ...config.signInFlows === undefined ? {} : { flows: config.signInFlows } }
     navigation = new SessionNavigation(ctx, config, copy, login, repaint, updates, preferences)
-    await navigation.start(abort.signal)
+    await Promise.all([uiReady, navigation.start(abort.signal)])
+    abort.signal.throwIfAborted()
     // Before the first frame, so a known update is named from it; the network
     // request runs on behind it and never delays the session.
     updates.start(abort.signal, repaint)
     git.start(abort.signal, repaint)
-    await syntax.ready
+    // Once per launch and behind the first frame: CLIProxyAPI's current list
+    // replaces the one the login saved, so a model the proxy started serving
+    // since then reaches `/model`. A proxy that cannot be read keeps the saved list.
+    proxyModels = refreshCliProxyModels(ctx, abort.signal, cliProxyModelsInUse(ctx, navigation.controller?.model))
+      .then(() => {}, (error: unknown) => {
+        if (!abort.signal.aborted) ctx.logger.debug('tui: kept the saved CLIProxyAPI models: %o', error)
+      })
     abort.signal.throwIfAborted()
     // Incremental rendering. A frame rewrites only the lines that changed.
     // A spinner tick or a streamed token repaints one row, not every control
@@ -275,9 +289,11 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
     try {
       await navigation?.drain()
       await startupReport
+      await proxyModels
       await updates.drain()
       await git.drain()
-      await syntax.close()
+      await syntaxReady
+      await syntax?.close()
     } finally {
       // A failed drain must still release a disposal waiting on this gate.
       drained.resolve()

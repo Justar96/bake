@@ -241,7 +241,7 @@ it.each(['committed', 'live'] as const)('keeps a paused table row through column
   const paused = await view.check(lines => expect(lines.join('\n')).toContain(dictionaries.en.transcriptPaused))
   const item = paused[0]!.match(/row_\d+/)?.[0]
   expect(item, paused.join('\n')).toBeDefined()
-  expect(paused[0]).toContain('|')
+  expect(paused[0]).toContain('\u2502')
   if (mode === 'live') {
     text += '\n| a_new_item_that_widens_the_first_column | 999 | A longer item makes the preceding descriptions wrap. |'
     view.update({ live: [{ kind: 'assistant', text }] })
@@ -269,7 +269,7 @@ it.each(['committed', 'live'] as const)('keeps a paused table row through column
   view.resize(80, 18)
   await view.check(lines => {
     expect(lines[0]).toContain(item)
-    expect(lines[0]).toContain('|')
+    expect(lines[0]).toContain('\u2502')
     expect(caret(lines)).toBe(15)
   })
 })

@@ -279,6 +279,8 @@ export function applyGrepTool(ctx: Context, caps: GrepToolCaps): void {
     // where a scope hides read; the sentence remains true there.
     description: 'Search file contents with a ripgrep regular expression, as a bounded alternative to grep or rg in a shell. '
       + 'Hidden and ignored files are skipped unless path points at them. '
+      + 'When the path or file type is uncertain, use `glob` first; keep `path` scoped to the repository or a known subtree and set one `include` filter. '
+      + 'Do not search filesystem-wide roots such as `/` or `$HOME`. '
       + 'Returns only the matching lines, numbered and grouped by file; read a matched file for surrounding context. '
       + `Up to ${caps.maxMatches} matches are shown; a larger result says so and reports where the full list was saved.`,
     parameters: {

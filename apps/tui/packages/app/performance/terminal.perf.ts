@@ -37,9 +37,11 @@ process.on('SIGINT', interrupt)
 process.on('SIGTERM', interrupt)
 try {
   const suppliedApplication = values['app-artifacts'] === undefined ? undefined : resolve(values['app-artifacts'])
-  await build((suppliedApplication === undefined ? ['src/index.ts', 'src/startup.ts', 'performance/seed.ts'] : ['performance/seed.ts']).map(entry => join(APP, entry)), bundle, values.mode)
+  await build((suppliedApplication === undefined
+    ? ['src/index.ts', 'src/startup.ts', 'src/runner-loader.ts', 'src/ui-loader.ts', 'src/syntax-loader.ts', 'performance/seed.ts']
+    : ['performance/seed.ts']).map(entry => join(APP, entry)), bundle, values.mode)
   if (suppliedApplication !== undefined) {
-    for (const file of ['index.js', 'startup.js']) await copyFile(join(suppliedApplication, file), join(bundle, file))
+    for (const file of ['index.js', 'startup.js', 'runner-loader.js', 'ui-loader.js', 'syntax-loader.js']) await copyFile(join(suppliedApplication, file), join(bundle, file))
   }
   await writeFile(join(bundle, 'metrics.mjs'), await readFile(join(APP, 'performance/metrics.mjs')))
   const sourcePatch = await readFile(join(APP, 'cordis.built.patch.yml'), 'utf8')
@@ -48,7 +50,7 @@ try {
     dirty: execFileSync('git', ['status', '--porcelain'], { cwd: ROOT, encoding: 'utf8' }).trim() !== '',
     bundleSha256: sha(join(bundle, 'index.js')), bundleBytes: Bun.file(join(bundle, 'index.js')).size,
     mode: values.mode, node: execFileSync(values.node!, ['--version'], { encoding: 'utf8' }).trim(),
-    artifacts: Object.fromEntries(['index.js', 'startup.js', 'seed.js', 'metrics.mjs'].map(file => [file, sha(join(bundle, file))])),
+    artifacts: Object.fromEntries(['index.js', 'startup.js', 'runner-loader.js', 'ui-loader.js', 'syntax-loader.js', 'seed.js', 'metrics.mjs'].map(file => [file, sha(join(bundle, file))])),
     compositionSha256: createHash('sha256').update(sourcePatch).digest('hex'),
     applicationSource: suppliedApplication === undefined ? { kind: 'checkout' } : {
       kind: 'supplied-artifacts', directory: suppliedApplication,

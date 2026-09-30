@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'bun:test'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'
+import { AGENT_TONES, CONTEXT_RAMP, PALETTE } from '@dsh-tui/ui/palette.ts'
 import { modelSheetPrompt, newestFirst, versionOf, withRecent, RECENT_MODELS, type ModelSheet, type SheetModel } from '../src/model.ts'
 
 const copy = dictionaries.en
@@ -94,10 +95,24 @@ describe('modelSheetPrompt', () => {
   it('opens each model on the session\'s effort when it offers it, and on the default otherwise', () => {
     const choices = modelSheetPrompt(sheet, { provider: 'deepseek', model: 'flash', reasoningEffort: ReasoningEffortId('high') }, copy).choices
     expect(choices[0]?.levels).toEqual({ initial: 'high',
-      items: [{ value: '', label: `${copy.effortDefault} (Low)` }, { value: 'low', label: 'Low' }, { value: 'high', label: 'High' }] })
+      items: [{ value: '', label: `${copy.effortDefault} (Low)` }, { value: 'low', label: 'Low' },
+        { value: 'high', label: 'High', color: PALETTE.asking }] })
     expect(choices[1]?.levels?.initial).toBe('high')
     expect(choices[2]?.levels).toBeUndefined()
     const defaults = modelSheetPrompt(sheet, { provider: 'deepseek', model: 'flash' }, copy).choices
     expect(defaults.map(choice => choice.levels?.initial)).toEqual(['', '', undefined])
+  })
+
+  it('draws each effort in its status-line tone, and the default in the tone of the effort it stands for', () => {
+    const deep = { efforts: [{ id: ReasoningEffortId('medium'), name: 'Medium' }, { id: ReasoningEffortId('xhigh'), name: 'Extra high' },
+      { id: ReasoningEffortId('max'), name: 'Max' }], defaultEffort: ReasoningEffortId('xhigh') }
+    const [choice] = modelSheetPrompt({ ...sheet, recent: [model('deepseek/pro', { current: true, reasoning: deep })], groups: [] },
+      { provider: 'deepseek', model: 'pro' }, copy).choices
+    expect(choice?.levels?.items).toEqual([
+      { value: '', label: `${copy.effortDefault} (Extra high)`, color: CONTEXT_RAMP[2] },
+      { value: 'medium', label: 'Medium' },
+      { value: 'xhigh', label: 'Extra high', color: CONTEXT_RAMP[2] },
+      { value: 'max', label: 'Max', color: AGENT_TONES[1] },
+    ])
   })
 })

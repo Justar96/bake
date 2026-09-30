@@ -22,7 +22,7 @@
 import { createHighlighterCore, type HighlighterCore, type LanguageInput } from 'shiki/core'
 import { createJavaScriptRegexEngine } from 'shiki/engine/javascript'
 import { bundledLanguages, bundledLanguagesInfo } from 'shiki/langs'
-import type { CodeToken, Highlight } from '@dsh-tui/ui'
+import type { CodeToken, Highlight } from '@dsh-tui/ui/present.ts'
 
 /** Languages loaded before the first frame. These are what an agent in a repository edits most. */
 const PRELOADED = ['typescript', 'tsx', 'javascript', 'jsx', 'json', 'markdown', 'python', 'rust', 'go', 'yaml', 'shellscript', 'css', 'html', 'toml'] as const

@@ -136,10 +136,14 @@ const fsDescriptions = {
   read: 'Read a UTF-8 text file as numbered lines, paged for long files. '
     + 'Unlike cat, head, or tail in a shell, this counts as reading the file for later write and edit calls.',
   write: 'Create a UTF-8 text file or replace all of its content. '
-    + 'Replacing an existing file is refused unless you have read, written, or edited it in this session and it has not changed since. '
+    + 'Before replacing an existing file, read it with `read` immediately before composing content, unless its current content came from a write or edit result in this session. '
+    + 'The replacement is refused unless you have read, written, or edited the file in this session and it has not changed since; '
+    + 'if it is refused as unread or stale, read it again, rebuild the content, and do not repeat the same write arguments. '
     + 'For a partial change, edit avoids resending the whole file.',
   edit: 'Replace literal text in an existing UTF-8 text file. '
-    + 'The edit is refused unless you have read, written, or edited the file in this session and it has not changed since.',
+    + 'Before composing old_string, read the target with `read` immediately before the edit, unless its current content came from a write or edit result in this session. '
+    + 'The edit is refused unless you have read, written, or edited the file in this session and it has not changed since; '
+    + 'if it is refused as unread or stale, read it again, rebuild old_string, and do not repeat the same edit arguments.',
 } as const
 
 describe('session cwd resolution', () => {

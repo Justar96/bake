@@ -11,7 +11,11 @@ import type {} from '@deepseek-ai/dsh-compaction'
 import type {} from '@deepseek-ai/dsh-agent-presets'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import { attachmentSummaries } from '@dsh-tui/ui/rows.ts'
-import { Actions, appendTranscript, emptyTranscript, foldEvent, project, projector, suggestCommand, type Projector, type Row } from '@dsh-tui/ui'
+import { Actions, foldEvent } from '@dsh-tui/ui/actions.ts'
+import { project, projector, type Projector } from '@dsh-tui/ui/project.ts'
+import { appendTranscript, emptyTranscript } from '@dsh-tui/ui/transcript.ts'
+import { suggestCommand } from '@dsh-tui/ui/completion.ts'
+import type { Row } from '@dsh-tui/ui/rows.ts'
 import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
 import { AttachmentDraft, type AttachmentOptions } from './attachments.ts'
 import { LiveBlocks } from './live.ts'
@@ -223,15 +227,6 @@ export class SessionController {
       },
     })))
     this.off.push(agent.ctx.effect(() => commands.register({
-      name: 'clear-pending', description: copy.clearPending,
-      handler: ({ rawInput }) => {
-        if (rawInput.trim() !== '') return { kind: 'error', text: copy.clearPendingUsage }
-        const pending = [...agent.inbox.nextStep, ...agent.inbox.nextTurn].filter(message => message.source.kind === 'user')
-        for (const message of pending) agent.inbox.remove(message.id)
-        return { kind: 'success', text: pending.length === 0 ? copy.noPending : copy.pendingCleared }
-      },
-    })))
-    this.off.push(agent.ctx.effect(() => commands.register({
       name: 'help', description: copy.listCommands, input: { hint: copy.helpHint }, recordInput: false,
       handler: ({ rawInput }) => {
         // The registry is the list. A command contributed by any plugin
@@ -356,6 +351,9 @@ export class SessionController {
     this.buffered = undefined
     this.repaint()
   }
+
+  /** The model this session runs on, when one is selected. */
+  get model(): ModelSelection | undefined { return this.selection?.current }
 
   /** Current renderer fields; inbox and activity are read from their harness owners. */
   get view() {
@@ -536,6 +534,31 @@ export class SessionController {
   private unknownText(typed: string, names: readonly string[]): string {
     const suggestion = suggestCommand(names, typed)
     return `${this.copy.unknownCommand}: /${typed}${suggestion === undefined ? '' : ` · ${this.copy.didYouMean} /${suggestion}?`}`
+  }
+
+  /**
+   * Send the user's queued input now, the Alt-Up key: interrupt the running
+   * turn it waits on, keeping plugin context queued, and start a turn with it
+   * at once. The oldest queued message opens the turn and the rest join its
+   * first step, in the order they were queued. While compaction runs the
+   * input already starts the turn after it, so it is left to.
+   */
+  sendPending(): void {
+    if (this.closed || this.inspection !== undefined) return
+    const agent = this.agent
+    const pending = [...agent.inbox.nextStep, ...agent.inbox.nextTurn].filter(message => message.source.kind === 'user')
+    const [first, ...rest] = pending
+    if (first === undefined) { this.notify(this.copy.noPending); return }
+    if (this.command?.compactPhase !== undefined) { this.notify(this.copy.pendingAfterCompaction); return }
+    for (const message of pending) agent.inbox.remove(message.id)
+    if (agent.status === 'running') {
+      this.stopping = true
+      agent.cancel({ kind: 'user' }, { keepInbox: true })
+    }
+    // After the cancel, waking input waits for the aborted turn to settle and then opens the next.
+    agent.followup(first)
+    for (const message of rest) agent.send(message, 'next-step', false)
+    this.notify(this.copy.pendingSent)
   }
 
   /** Cancel the nearest interaction or command; otherwise interrupt while retaining visible pending work. */

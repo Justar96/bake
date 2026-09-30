@@ -161,7 +161,7 @@ describe('thinking window', () => {
 
   it('reads through the markdown it cannot render', () => {
     expect(thinking('## Plan\n**Check** `startup.ts` first\n> quoted\ttabbed', 40)).toEqual([
-      'Plan', 'Check startup.ts first', '> quoted tabbed',
+      'Plan', 'Check startup.ts first', '\u2502 quoted tabbed',
     ])
   })
 

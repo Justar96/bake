@@ -134,7 +134,7 @@ Node 部署在受支持的 macOS、Linux 与 Windows 目标上获得 `@vscode/ri
 
 #### 模型看到的内容
 
-本包不添加系统提示词段落：各工具的描述和参数就是它唯一的指导，同时也是 PTC 模式下 `run_code` 背后的 SDK 文档。glob 描述把它表述为 shell `find` 的有界、最新优先替代，并声明配置的超过上限行为；其 `pattern` 参数说明不含 `/` 的模式会在任意深度匹配文件名。grep 描述把它表述为 shell `grep` 或 `rg` 的有界替代，说明它只返回匹配行，并指向 `read` 以获取周围上下文。描述是注册时的文本，因此即使某个作用域隐藏了 `read`，这一指向仍会保留。两个工具的 `path` 都被描述为默认使用工作目录。生成的 [`glob` 和 `grep` schema](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-fs-search) 使用 `sampleOverCapGlobResults: true`；工具无条件注册。
+本包不添加系统提示词段落：各工具的描述和参数就是它唯一的指导，同时也是 PTC 模式下 `run_code` 背后的 SDK 文档。glob 描述把它表述为 shell `find` 的有界、最新优先替代，要求模型把 `path` 限制在仓库或已知子树内，路径不确定时先用它再做内容搜索，并将覆盖整个文件系统的根路径作为应避免的工作流，同时声明配置的超过上限行为；其 `pattern` 参数说明不含 `/` 的模式会在任意深度匹配文件名。grep 描述把它表述为 shell `grep` 或 `rg` 的有界替代，路径或文件类型不确定时先使用 `glob`，要求使用有界路径和一个 include 过滤器，说明它只返回匹配行，并指向 `read` 以获取周围上下文。描述是注册时的文本，因此即使某个作用域隐藏了 `read`，这一指向仍会保留。两个工具的 `path` 都被描述为默认使用工作目录。生成的 [`glob` 和 `grep` schema](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-fs-search) 使用 `sampleOverCapGlobResults: true`；工具无条件注册。
 
 #### Token 影响
 
@@ -162,7 +162,7 @@ Node 部署在受支持的 macOS、Linux 与 Windows 目标上获得 `@vscode/ri
 
 #### 模型看到的内容
 
-失败被规范化为 `Error: <message>`，并携带结构化 `SEARCH_INVALID_PATTERN`、`SEARCH_FAILED`、`SEARCH_RAW_OUTPUT_OVERFLOW` 或 `SEARCH_ABORTED` 元数据供调用方使用。
+失败被规范化为 `Error: <message>`，并携带结构化 `SEARCH_INVALID_PATTERN`、`SEARCH_FAILED`、`SEARCH_RAW_OUTPUT_OVERFLOW` 或 `SEARCH_ABORTED` 元数据供调用方使用。目标缺失或无法访问时会附带恢复指引：`grep` 会提示模型用 `glob` 验证路径，再使用一个 include 过滤器重试；`glob` 会要求确认仓库范围内的路径。
 
 #### Token 影响
 

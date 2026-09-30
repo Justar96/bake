@@ -6,7 +6,7 @@ import { gfmFromMarkdown } from 'mdast-util-gfm'
 import { gfm } from 'micromark-extension-gfm'
 import type { Nodes, Root } from 'mdast'
 import type { Highlight, Span, Tone } from './present.ts'
-import { PALETTE } from './palette.ts'
+import { MARKDOWN, PALETTE } from './palette.ts'
 
 export interface MarkdownLine {
   readonly text: string
@@ -61,9 +61,35 @@ const safe = (text: string): string => text.replace(/\r\n?/g, '\n').replace(/\t/
 
 type Emphasis = Omit<Span, 'length'>
 
+/** Extensions a bare file name ends in; without one, `ctx.get` would read as a file. */
+const EXTENSIONS = 'ts|tsx|js|jsx|mjs|cjs|json|jsonc|md|mdx|ya?ml|toml|ini|cfg|conf|env|lock|txt|log|csv|sql|html?|css|scss|xml|svg|'
+  + 'png|jpe?g|gif|webp|pdf|zip|gz|tar|py|rs|go|rb|java|kt|swift|c|h|cc|cpp|hpp|cs|php|lua|dart|ex|exs|nix|proto|sh|bash|zsh|fish|ps1|vue|svelte|wasm'
+/** A path such as `src/app.ts`, `./bin`, `~/.bake/`, `.gitignore`, or `README.md`. */
+const PATH = new RegExp(`^(?:~|\\.{1,2})?\\/?(?:[\\w@.-]+\\/)+[\\w@.-]*$|^\\.?[\\w@-]+(?:\\.[\\w-]+)*\\.(?:${EXTENSIONS})$|^\\.[\\w-]+$`, 'i')
+/** A literal: a number with an optional unit, a quoted string, or a keyword value. */
+const LITERAL = /^(?:-?\d[\d_.,]*[a-z%]*|(["'`]).*\1|true|false|null|nil|none|undefined|NaN)$/i
+
+/**
+ * The colour inline code takes by what it names: a path is a reference, a
+ * literal is amber, and anything else, an identifier or a command, lavender.
+ * @param value - the code span's text.
+ */
+export function inlineCodeColor(value: string): string {
+  const text = value.trim()
+  if (PATH.test(text) && !/\s/.test(text)) return PALETTE.reference
+  return LITERAL.test(text) ? MARKDOWN.literal : PALETTE.code
+}
+
 /**
  * Render CommonMark and GFM without terminal escapes.
  *
+ * In the `body` tone, an answer's prose is a step below the terminal's
+ * foreground, so its headings and bold words stand out at full brightness. Headings step
+ * down by level: the first underlined in reference blue, the second blue,
+ * deeper ones bold teal. Lists hang from sky bullets that alternate by
+ * nesting and numbers aligned on their dot; quotes hang from a violet bar; a
+ * break is a dim rule. Inline code is coloured by what it names
+ * ({@link inlineCodeColor}), and a code block's language is amber.
  * Links keep their target. HTML and references stay literal. Tables use
  * aligned columns when width permits, otherwise stacked labeled cells.
  * A wide value stays readable in a narrow terminal.
@@ -76,9 +102,17 @@ export function markdownLines(source: string, tone: Tone = 'plain', code?: Highl
   const lines: MarkdownLine[] = []
   let text = ''
   let spans: Span[] = []
+  const thought = tone === 'thought'
   const base: Emphasis = { tone }
-  const quiet: Emphasis = { tone: tone === 'thought' ? tone : 'quiet' }
-  const labelStyle: Emphasis = { ...base, bold: true, ...tone === 'thought' ? {} : { color: PALETTE.reference } }
+  // What stands out from body prose: the full foreground, where the body is a step below it.
+  const bright: Tone = tone === 'body' ? 'plain' : tone
+  const quiet: Emphasis = { tone: thought ? tone : 'quiet' }
+  const labelStyle: Emphasis = { tone, bold: true, ...thought ? {} : { color: PALETTE.reference } }
+  /** A heading's style by level. Reasoning keeps its own tone at every level. */
+  const headingStyle = (level: number): Emphasis => thought ? { tone, bold: true }
+    : level === 1 ? { ...labelStyle, underline: true } : level === 2 ? labelStyle : { tone: bright, bold: true, color: MARKDOWN.heading }
+  // Lists nested inside lists, for the bullet a level takes.
+  let lists = 0
   const raw = (node: Nodes): string => source.slice(node.position?.start.offset, node.position?.end.offset)
   const push = (literal = false): void => {
     const styled = spans.some(span => span.tone !== tone || span.bold || span.italic || span.underline || span.strikethrough || span.color)
@@ -105,10 +139,11 @@ export function markdownLines(source: string, tone: Tone = 'plain', code?: Highl
   const inline = (node: Nodes, style: Emphasis = base, depth = 0): void => {
     if (depth > 64) { write(raw(node), style); return }
     switch (node.type) {
-      case 'strong': style = { ...style, bold: true }; break
+      // Bold words leave the body grey for the full foreground, so they stand out twice.
+      case 'strong': style = { ...style, bold: true, ...style.tone === 'body' ? { tone: bright } : {} }; break
       case 'emphasis': style = { ...style, italic: true }; break
       case 'delete': style = { ...style, strikethrough: true }; break
-      case 'inlineCode': write(node.value, { ...style, bold: true, ...tone === 'thought' ? {} : { color: PALETTE.code } }); return
+      case 'inlineCode': write(node.value, { ...style, bold: true, ...tone === 'thought' ? {} : { color: inlineCodeColor(node.value) } }); return
       case 'break': push(); return
       case 'link': {
         const reference = tone === 'thought' ? style : { ...style, color: PALETTE.reference }
@@ -130,12 +165,14 @@ export function markdownLines(source: string, tone: Tone = 'plain', code?: Highl
     else if ('value' in node) write(node.value, style)
     else write(raw(node), style)
   }
-  const prefix = (from: number, first: string, rest = first, firstSpans: readonly Span[] = [{ ...quiet, length: first.length }]): void => {
+  // `restStyle` draws the lead of the lines after the first, which a quote's bar repeats on.
+  const prefix = (from: number, first: string, rest = first, firstSpans: readonly Span[] = [{ ...quiet, length: first.length }],
+    restStyle: Emphasis = quiet): void => {
     for (let at = from; at < lines.length; at++) {
       const line = lines[at]!
       const lead = at === from ? first : rest
       lines[at] = { ...line, text: lead + line.text,
-        spans: [...at === from ? firstSpans : [{ ...quiet, length: lead.length }],
+        spans: [...at === from ? firstSpans : [{ ...restStyle, length: lead.length }],
           ...line.spans ?? [{ ...base, length: line.text.length }]] }
     }
   }
@@ -151,14 +188,12 @@ export function markdownLines(source: string, tone: Tone = 'plain', code?: Highl
   const block = (node: Nodes, depth: number): void => {
     if (depth > 64) { write(raw(node)); push(); return }
     switch (node.type) {
-      case 'paragraph': case 'heading':
-        inline(node, node.type === 'heading'
-          ? labelStyle : base)
-        push(); return
+      case 'paragraph': inline(node, base); push(); return
+      case 'heading': inline(node, headingStyle(node.depth)); push(); return
       case 'code': {
         const sourceLines = safe(node.value).split('\n')
         const language = node.lang?.split(/\s/)[0]
-        if (language) { write(language, { ...quiet, bold: true }); push() }
+        if (language) { write(language, { ...quiet, bold: true, ...thought ? {} : { tone, color: MARKDOWN.literal } }); push() }
         const tokens = language ? code?.(sourceLines, language) : undefined
         for (const [index, value] of sourceLines.entries()) {
           write('  ')
@@ -175,22 +210,31 @@ export function markdownLines(source: string, tone: Tone = 'plain', code?: Highl
       }
       case 'blockquote': {
         const from = lines.length
-        blocks(node.children, depth + 1); prefix(from, '> '); return
+        blocks(node.children, depth + 1)
+        prefix(from, '\u2502 ', '\u2502 ', [{ ...quiet, ...thought ? {} : { tone, color: MARKDOWN.quote }, length: 2 }],
+          thought ? undefined : { tone, color: MARKDOWN.quote })
+        return
       }
-      case 'list':
+      case 'list': {
+        // Numbers align on their dot, so a tenth item does not push its text right.
+        const last = (node.start ?? 1) + node.children.length - 1
+        const bullet = lists % 2 === 0 ? '\u2022 ' : '\u25e6 '
+        lists++
         for (const [index, item] of node.children.entries()) {
           if (index > 0 && node.spread) lines.push({ text: '' })
           const from = lines.length
           blocks(item.children, depth + 1)
           if (from === lines.length) lines.push({ text: '' })
-          const marker = node.ordered ? `${(node.start ?? 1) + index}. ` : '- '
+          const marker = node.ordered ? `${(node.start ?? 1) + index}. `.padStart(String(last).length + 2) : bullet
           const check = item.checked === null || item.checked === undefined ? '' : item.checked ? '[x] ' : '[ ] '
           prefix(from, marker + check, ' '.repeat(marker.length + check.length), [
-            { ...quiet, length: marker.length },
+            { ...quiet, ...thought ? {} : { tone, color: MARKDOWN.bullet }, length: marker.length },
             ...check === '' ? [] : [{ ...quiet, ...item.checked && tone !== 'thought' ? { tone, color: PALETTE.done } : {}, length: check.length }],
           ])
         }
+        lists--
         return
+      }
       case 'table': {
         const [header, ...rows] = node.children
         if (header === undefined) return
@@ -226,7 +270,7 @@ export function markdownLines(source: string, tone: Tone = 'plain', code?: Highl
         }
         if (rows.length === 0) {
           for (const [index, cell] of header.children.entries()) {
-            if (index > 0) write(' | ', quiet)
+            if (index > 0) write(' \u2502 ', quiet)
             inline(cell, labelStyle)
           }
           push()
@@ -234,7 +278,7 @@ export function markdownLines(source: string, tone: Tone = 'plain', code?: Highl
         }
         return
       }
-      case 'thematicBreak': write('---'); push(); return
+      case 'thematicBreak': write('\u2500'.repeat(Math.max(3, Math.min(width ?? 40, 72))), quiet); push(); return
       default: write(raw(node)); push()
     }
   }
@@ -301,7 +345,7 @@ function tableGrid(
       let text = ''
       const spans: Span[] = []
       for (const [column, cell] of cells.entries()) {
-        if (column > 0) { text += ' | '; spans.push({ ...quiet, length: 3 }) }
+        if (column > 0) { text += ' \u2502 '; spans.push({ ...quiet, length: 3 }) }
         const line = cell[at] ?? { text: '' }
         const padding = Math.max(0, widths[column]! - stringWidth(line.text))
         const left = align[column] === 'right' ? padding : align[column] === 'center' ? Math.floor(padding / 2) : 0
@@ -313,7 +357,7 @@ function tableGrid(
       result.push({ text, spans, literal: true })
     }
     if (index === 0) {
-      const rule = widths.map(size => '-'.repeat(size)).join('-+-')
+      const rule = widths.map(size => '\u2500'.repeat(size)).join('\u2500\u253c\u2500')
       result.push({ text: rule, spans: [{ ...quiet, length: rule.length }], literal: true })
     }
     return result

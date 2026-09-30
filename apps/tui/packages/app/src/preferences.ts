@@ -529,7 +529,7 @@ export class Preferences implements RecentModels {
         { ns: 'web-search-deepseek', path: ['model'], label: copy.settingsWebModel },
         { ns: 'web-search-deepseek', path: ['maxTokens'], label: copy.settingsWebTokens, steps: [1024, 2048, 4096, 8192] },
       ]), true),
-      ...this.advanced(copy, descriptors),
+      ...this.advanced(copy, descriptors, session, interactions),
     ]
   }
 
@@ -1028,14 +1028,22 @@ export class Preferences implements RecentModels {
     }
   }
 
-  /** Advanced: every registered namespace but this one, each field as its schema describes it. */
-  private advanced(copy: TuiCopy, descriptors: readonly SettingsDescriptor[]): readonly Section[] {
+  /** Advanced: schema fields, sharing the Agent section's model and router pickers. */
+  private advanced(copy: TuiCopy, descriptors: readonly SettingsDescriptor[], session: PanelSession,
+    interactions: Interactions): readonly Section[] {
+    const modelRows = new Map(this.subagentModelRows(copy, descriptors, session, interactions)
+      .map(row => [row.key, row]))
     const sections = descriptors
       .filter(descriptor => descriptor.ns !== SETTINGS_NAMESPACE)
       .map(descriptor => {
         const restart = descriptor.applies === 'restart'
         const settings = schemaFields(descriptor.schema, descriptor.value, descriptor.user)
-          .map(field => this.fieldSetting(descriptor.ns, field, copy, restart))
+          .map(field => {
+            const key = field.path.join('.')
+            const row = modelRows.get(`${descriptor.ns}.${key}`)
+            return row === undefined ? this.fieldSetting(descriptor.ns, field, copy, restart)
+              : { ...row, key, label: key }
+          })
         return {
           key: descriptor.ns, label: descriptor.ns, settings,
           summary: `${settings.length} ${settings.length === 1 ? copy.settingsField : copy.settingsFields}`,

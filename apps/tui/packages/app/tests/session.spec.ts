@@ -199,25 +199,54 @@ describe('session wiring', () => {
     expect(controller.view.live).toEqual([])
     expect(controller.view.pending).toEqual([expect.objectContaining({ text: 'Keep this steering' })])
     expect(transcriptRows(controller.view.committed)).toContainEqual({ kind: 'notice', placement: 'turn-end', tone: 'warn', text: 'Interrupted' })
+    // Alt-Up sends the retained input now, in the order it was queued, and leaves plugin context queued with it.
     const context = createUserMessage({ content: [{ type: 'text', text: 'Plugin context' }], source: { kind: 'plugin', plugin: 'test' } })
     handle.agent.inject(context)
     handle.agent.inbox.append('next-turn', createUserMessage({ content: [{ type: 'text', text: 'Queued followup' }], source: { kind: 'user' } }))
-    controller.submit('/clear-pending extra')
-    await controller.drain()
-    expect(controller.view.pending).toHaveLength(2)
-    controller.submit('/clear-pending')
-    await controller.drain()
-    expect(controller.view.pending).toEqual([])
-    expect(handle.agent.inbox.nextStep).toEqual([context])
-    expect(handle.agent.inbox.nextTurn).toEqual([])
-    controller.submit('/clear-pending')
-    await controller.drain()
-    expect(transcriptRows(controller.view.committed).at(-1)).toEqual({ kind: 'notice', placement: 'command', tone: 'info', text: dictionaries.en.noPending })
-    model.response = async function* () { yield* textResponse('New task answer') }
-    controller.submit('A different task')
+    model.response = async function* () { yield* textResponse('Sent answer') }
+    controller.sendPending()
+    expect(controller.view.notice).toBe(dictionaries.en.pendingSent)
     await handle.agent.whenIdle()
-    expect(JSON.stringify(model.requests.at(-1)?.messages)).not.toContain('Keep this steering')
-    expect(JSON.stringify(model.requests.at(-1)?.messages)).not.toContain('Queued followup')
+    expect(controller.view.pending).toEqual([])
+    const sent = JSON.stringify(model.requests.at(-1)?.messages)
+    expect(sent).toContain('Keep this steering')
+    expect(sent).toContain('Queued followup')
+    expect(sent).toContain('Plugin context')
+    expect(sent.indexOf('Keep this steering')).toBeLessThan(sent.indexOf('Queued followup'))
+    controller.sendPending()
+    expect(controller.view.notice).toBe(dictionaries.en.noPending)
+  })
+
+  it('sends steering now with Alt-Up, interrupting the turn it waits on', async () => {
+    const { handle, controller, model } = await connected()
+    const streaming = Promise.withResolvers<void>()
+    model.response = async function* (options) {
+      yield { type: 'block-start', index: 0, blockType: 'text' }
+      yield { type: 'text-delta', index: 0, text: 'Long answer' }
+      streaming.resolve()
+      await new Promise<void>(resolve => {
+        if (options.signal?.aborted) resolve()
+        else options.signal?.addEventListener('abort', () => resolve(), { once: true })
+      })
+      options.signal?.throwIfAborted()
+    }
+    controller.submit('Start a turn')
+    await streaming.promise
+    controller.submit('Change course')
+    expect(controller.view.pending).toEqual([expect.objectContaining({ text: 'Change course', target: 'next-step' })])
+    const requests = model.requests.length
+    model.response = async function* () { yield* textResponse('New course') }
+    controller.sendPending()
+    expect(controller.view.stopping).toBe(true)
+    // It opens the next turn, which starts as soon as the interrupted one settles.
+    expect(controller.view.pending).toEqual([expect.objectContaining({ text: 'Change course', target: 'next-turn' })])
+    await vi.waitFor(() => expect(model.requests.length).toBe(requests + 1))
+    expect(controller.view.pending).toEqual([])
+    await handle.agent.whenIdle()
+    expect(JSON.stringify(model.requests.at(-1)?.messages)).toContain('Change course')
+    const rows = transcriptRows(controller.view.committed)
+    expect(rows).toContainEqual({ kind: 'notice', placement: 'turn-end', tone: 'warn', text: 'Interrupted' })
+    expect(rows).toContainEqual(expect.objectContaining({ kind: 'assistant', text: 'New course' }))
   })
 
   it('does not replay settled text when a stream start is repeated', async () => {

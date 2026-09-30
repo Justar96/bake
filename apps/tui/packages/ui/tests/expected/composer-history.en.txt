@@ -10,7 +10,7 @@
 
 Pending input
 Next step: Queued prompt
-/clear-pending discards queued input
+Alt+↑ sends it now
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────
 > Unsent draf▌t                                                                          Enter sends

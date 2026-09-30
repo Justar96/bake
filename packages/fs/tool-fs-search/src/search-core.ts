@@ -126,7 +126,15 @@ function classifyRunFailure(toolName: string, exitCode: number, stderrText: stri
   if (/regex parse error|error parsing glob/i.test(stderr)) {
     return new SearchError(`${toolName} pattern rejected by ripgrep: ${stderr}`, 'SEARCH_INVALID_PATTERN')
   }
-  return new SearchError(`${toolName} search failed (exit ${exitCode})${stderr.length > 0 ? `: ${stderr}` : ''}`, 'SEARCH_FAILED')
+  const pathRecovery = /no such file or directory|permission denied|i\/o error/i.test(stderr)
+    ? toolName === 'grep'
+      ? ' Use `glob` to verify the path, then retry with a repository-scoped path and one `include` filter.'
+      : ' Retry with a repository-scoped path after confirming it exists.'
+    : ''
+  return new SearchError(
+    `${toolName} search failed (exit ${exitCode})${stderr.length > 0 ? `: ${stderr}` : ''}${pathRecovery}`,
+    'SEARCH_FAILED',
+  )
 }
 
 /**

@@ -120,6 +120,8 @@ The registry holds typed `ToolDefinition`s in scoped layers and projects them on
 
 Each typed invocation materializes and freezes parsed arguments, assigns an opaque correlation token, and runs policy and dispatch. A pre-execute denial may attach `ToolErrorInfo` beside its model-facing reason; the native and PTC durable projections preserve the structured name, code, and optional user-facing reason without adding that detail to model content. Cancellation is cooperative and quiescent: every tool body receives the caller-owned `exec.signal` and must observe it; cancellation before body invocation is `ABORTED_BEFORE_DISPATCH`, after invocation it replaces only a successful outcome with `ABORTED`. Denials, wrapper failures, tool failures, post-policy failures, and timeout-owned `TOOL_TIMEOUT` remain more specific. Unknown and throwing tools become structured errors (`UNKNOWN_TOOL`), so a call fails without ending the turn.
 
+Within an agent's open turn (between the Session's `turn/start` and `turn/end`), the registry remembers a model-direct call refused as unread (`FS_NOT_OBSERVED`) or stale (`FS_STALE_VERSION`), keyed by tool name and key-order-normalized arguments. An identical retry skips policy and dispatch and fails with `DUPLICATE_TOOL_CALL`, quoting the earlier refusal. Any other settled call, including a read, a successful mutation, another failure, or a nested `run_code` sub-dispatch, clears that memory, so a retry after new observation always dispatches. Successful results are never cached or replayed, and the filesystem observation policy still decides every dispatched mutation.
+
 ### PTC mode
 
 Under `ptc` or `both`, the registry exposes the reserved `run_code` transport plus a deterministic SDK generated in the loaded runtime's language. Each SDK binding captures a frozen ToolSchema and passes it through the scheduler to its execution context. Before policy, a started call records only pairing ids, name, and normalized arguments; its settle event preserves the rendered result and optional structured error. Description and parameters remain transient and never enter Session events or SDK output. Calls are scheduled through a per-run pool that reuses the native concurrency contract. Under `ptc` alone, a model-direct call naming any other visible tool resolves to `UNKNOWN_TOOL` before policy — the announced surface and the callable surface stay the same. Intermediate binding values are execution-local; only the outer `run_code` result has a hard size cap. The [executor-collapse note](../../../.agents/notes/implemented/bug-fix/2026-08-07-ptc-executor-collapse.md) owns the collapse contract.
@@ -205,11 +207,13 @@ Prefix-stable while the PTC mode selection, generated SDK, transport schema, and
 
 #### What the model sees
 
-The loop retains model-emitted arguments and the registry's final content. Any thrown or denied call becomes exactly `Error: <message>`; structured user-facing failure detail is not added to that message. PTC mode renders the outer program's printed lines and return value, `(run_code completed with no output)` when both are empty, or `Error: code run failed (<kind>): <message>` followed conditionally by `Captured output:` and the captured lines. Inner dispatch events stay log-only, while a successful image-bearing sub-result is appended after the outer result as source-attributed context.
+The loop retains model-emitted arguments and the registry's final content. Any thrown or denied call becomes exactly `Error: <message>`; structured user-facing failure detail is not added to that message. PTC mode renders the outer program's printed lines and return value, `(run_code completed with no output)` when both are empty, or `Error: code run failed (<kind>): <message>` followed conditionally by `Captured output:` and the captured lines. Inner dispatch events stay log-only, while a successful image-bearing sub-result is appended after the outer result as source-attributed context. A suppressed repeat of an unread or stale refusal reads `Error: this "<tool>" call is identical to one already refused in this turn, and nothing has run since that could change the outcome, so it was not executed. Earlier refusal: <message>`.
 
 #### Token effect
 
 Arguments, results, and additional context are data-dependent and resent until compaction. Restrictions that hide tools also remove their schemas before the model can call them.
+
+Suppressing a repeated refusal skips policy and dispatch work. The model's call and the replacement error still enter history, so suppression alone does not remove model requests or guarantee lower token use.
 
 #### KV Cache effect
 

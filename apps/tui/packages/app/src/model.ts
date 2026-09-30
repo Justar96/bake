@@ -3,6 +3,7 @@ import type { ModelSelection } from '@deepseek-ai/dsh-agent'
 import type { LlmModelInfo, LlmRuntime, LlmModelReasoningInfo, LlmResolvedModelInfo } from '@deepseek-ai/dsh-llm'
 import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
 import { formatTokens } from '@dsh-tui/ui/format.ts'
+import { thinkingTone } from '@dsh-tui/ui/palette.ts'
 import type { Choice, ChoicePrompt } from '@dsh-tui/ui/picker.tsx'
 
 /**
@@ -238,6 +239,10 @@ export function newestFirst<T extends { readonly name: string; readonly model: s
  * @returns a tall picker prompt whose values are routes and whose levels are effort ids, `''` for the default.
  */
 export function modelSheetPrompt(sheet: ModelSheet, current: ModelSelection, copy: TuiCopy): ChoicePrompt {
+  const toned = (effort: string | undefined) => {
+    const color = effort === undefined ? undefined : thinkingTone(effort).color
+    return color === undefined ? {} : { color }
+  }
   const names = new Map(sheet.providers.map(provider => [provider.id, provider.name]))
   const choice = (model: SheetModel, group: string, recent: boolean): Choice => {
     const efforts = model.reasoning?.efforts ?? []
@@ -255,8 +260,10 @@ export function modelSheetPrompt(sheet: ModelSheet, current: ModelSelection, cop
         model.image === true ? copy.factImage : '',
       ],
       ...efforts.length === 0 ? {} : { levels: {
-        items: [{ value: '', label: fallbackName === undefined ? copy.effortDefault : `${copy.effortDefault} (${fallbackName})` },
-          ...efforts.map(item => ({ value: item.id, label: item.name }))],
+        // Each effort in its status-line tone; the default in the tone of the effort it stands for.
+        items: [{ value: '', label: fallbackName === undefined ? copy.effortDefault : `${copy.effortDefault} (${fallbackName})`,
+          ...toned(fallback) },
+          ...efforts.map(item => ({ value: item.id, label: item.name, ...toned(item.id) }))],
         initial: offers(current.reasoningEffort) ? current.reasoningEffort : '',
       } },
     }

@@ -84,10 +84,12 @@ function bashDescription(backgroundEnabled: boolean, escalationModes: readonly S
   // The registry's built-ins; DSH_SHELL=1 only marks the process and tells the model nothing.
   const base = 'Run a command with `bash -c` and return its stdout and stderr. '
     + 'Each call starts a fresh shell, so directory changes and variables do not carry over to later calls. '
+    + 'Keep commands scoped to the current repository; use `rg --files`, `glob`, or `grep` instead of filesystem-wide `find` scans. '
     + 'A non-zero exit is reported in the result as `[exit code: N]`, not as a tool error. '
     + 'Long output is truncated to its tail, and the full output is saved to a file named in the result when possible. '
     + `\`$${DSH_ENV_PREFIX}HOME\` is the harness home directory and \`$${DSH_ENV_PREFIX}SESSION_ID\` is this session's id. `
     + background
+    + (backgroundEnabled ? ' Put builds and tests that may outlast their timeout in the background, then inspect them with `job_output`.' : '')
   if (escalationModes.length === 0) return base
   return base + ' Commands may run in a file sandbox; trying one it might block is safe. '
     + 'A blocked file operation reports `[sandbox: file access denied under <mode> mode]`: '

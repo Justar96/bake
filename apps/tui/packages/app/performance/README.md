@@ -36,7 +36,7 @@ The coordinator and native PTY run on Bun; the shared application bundler suppli
 bun apps/tui/scripts/tui.ts perf --mode development --workload fresh --workload typical --samples 3 --output /tmp/bake-bun-native-development.json
 ```
 
-`--app-artifacts <directory>` measures saved `index.js` and `startup.js` application bundles with the current fixture writer. The driver copies the bundles into its private application directory so dependencies resolve normally. Supply artifacts built for the selected mode and keep their optional `metadata.json` alongside them to record provenance. Without this option, the driver builds the application from the checkout.
+`--app-artifacts <directory>` measures saved `index.js`, `startup.js`, `runner-loader.js`, `ui-loader.js`, and `syntax-loader.js` application bundles with the current fixture writer. The driver copies the bundles into its private application directory so dependencies resolve normally. Supply artifacts built for the selected mode and keep their optional `metadata.json` alongside them to record provenance. Without this option, the driver builds the application from the checkout.
 
 `--cpu-profile <directory>` enables Node CPU profiling for each sample. Profiled timings include profiling overhead and should remain separate from ordinary samples. A timeout, crash, missing historical answer, repeated historical answer, missing final delta, or unclean exit fails the sample. The diagnostic continues remaining samples, updates the JSON report after each one, and exits nonzero if any failed. Ctrl-C or SIGTERM interrupts observations, drains the current process, and stops remaining samples with a nonzero exit and an interrupted report. Inspect each failure before comparing medians.
 

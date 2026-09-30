@@ -1,7 +1,7 @@
 /** Cancellable path discovery delegated to the session's Harness provider. */
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-file-reference'
-import type { FileCatalog } from '@dsh-tui/ui'
+import type { FileCatalog } from '@dsh-tui/ui/completion.ts'
 import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
 
 /** One terminal's active file query; discovery never changes the session log. */

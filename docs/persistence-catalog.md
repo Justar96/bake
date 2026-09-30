@@ -4683,7 +4683,7 @@ One of:
 
 SHA-256: `3cfc3a56502da1f8c6153c2c56657bab4b749056968634dd0991d325ec1c919f`
 
-Sources: [`packages/core/tools/src/index.ts:683`](../packages/core/tools/src/index.ts)
+Sources: [`packages/core/tools/src/index.ts:698`](../packages/core/tools/src/index.ts)
 
 | Property | Presence | Type |
 |---|---|---|

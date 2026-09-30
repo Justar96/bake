@@ -24,7 +24,7 @@ it.each([40, 80])('renders Markdown at %i columns with a bounded reasoning previ
   expect(frame.split('\n').every(line => stringWidth(line) <= columns)).toBe(true)
   expect(frame).not.toContain('```')
   expect(frame).toContain('**literal**')
-  expect(frame).toContain(columns < 24 ? 'Check: Width' : 'Check | Result')
+  expect(frame).toContain(columns < 24 ? 'Check: Width' : 'Check \u2502 Result')
   await expect(frame + '\n').toMatchFileSnapshot(`./expected/markdown.${columns}.txt`)
 })
 
@@ -33,7 +33,7 @@ it.each([20, 40, 80, 120])('keeps formatted headings, links, and table cells wit
   const frame = renderToString(<RowView row={{ kind: 'assistant', text: source }} budget={budget} result={result} />, { columns })
   expect(frame.split('\n').every(line => stringWidth(line) <= columns)).toBe(true)
   expect(frame).toContain('Result')
-  expect(frame).toContain(columns < 24 ? 'Check: Width' : 'Check | Result')
+  expect(frame).toContain(columns < 24 ? 'Check: Width' : 'Check \u2502 Result')
   expect(frame.replace(/\n\s*/g, '')).toContain('https://example.com/docs')
 })
 
@@ -72,12 +72,14 @@ it.each(['truecolor', 'no-color'])('keeps semantic Markdown readable with %s', a
   `], { cwd: new URL('../../../../../', import.meta.url), env, encoding: 'utf8', timeout: 20_000 })
   if (mode === 'truecolor') {
     expect(frame).toContain('\x1b[1mBold\x1b[22m')
+    // Body prose is a step below the foreground, and bold words leave it for the full foreground.
+    expect(frame).toContain('\x1b[1mBold\x1b[22m\x1b[38;2;207;211;217m and ')
     expect(frame).toContain('\x1b[4mdocs\x1b[24m')
     expect(frame).toContain('\x1b[38;2;196;181;253m')
     expect(frame).toContain('\x1b[38;2;34;197;94m')
   } else {
     expect(frame).not.toContain('\x1b')
-    expect(frame).toContain('- [x] done')
+    expect(frame).toContain('\u2022 [x] done')
     expect(frame).toContain('docs (https://example.com)')
   }
   await expect(frame.replaceAll('\x1b', '<ESC>') + '\n').toMatchFileSnapshot(`./expected/markdown.${mode === 'truecolor' ? 'styles' : 'no-color'}.txt`)

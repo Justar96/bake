@@ -30,6 +30,8 @@ export interface ChoiceStatus {
 export interface ChoiceLevel {
   readonly value: string
   readonly label: string
+  /** The level's tone, such as a reasoning effort's; absent, the picker's own. */
+  readonly color?: PaletteColor
 }
 
 /** Values ←→ steps through for one choice, such as a model's reasoning efforts. */
@@ -310,7 +312,7 @@ export function Picker({ prompt, copy, limit, onSelect }: {
     </Text>
     {scroll.above > 0 && <Edge arrow="↑" count={hiddenAbove} copy={copy} {...carried === undefined ? {} : { group: carried }} />}
     {[...windowed, ...shownPinned].map(line => line.kind === 'group'
-      ? <Heading key={`group:${line.group}:${line.at}`} group={line.group} count={line.count} />
+      ? <Heading key={`group:${line.group}:${line.at}`} group={line.group} count={line.count} width={columns - FRAME} />
       : <Row key={line.match.choice.value} match={line.match} active={line.index === selectedIndex} copy={copy} columns={columnsOf} />)}
     {scroll.below > 0 && <Edge arrow="↓" count={hiddenBelow} copy={copy} />}
     {matches.length === 0 && <Text dimColor>{`${' '.repeat(MARKER_WIDTH)}${copy.noChoices}`}</Text>}
@@ -373,15 +375,20 @@ function linesOf(matches: readonly Match<Choice>[], listed: number): readonly Li
   return lines
 }
 
-/** A run's heading, with how many of its choices the filter kept. */
-function Heading({ group, count }: { readonly group: string, readonly count: number }): React.ReactElement {
-  return <Text wrap="truncate-end"><Text bold>{group}</Text><Text dimColor>{` ${count}`}</Text></Text>
+/**
+ * A run's heading, with how many of its choices the filter kept, and a dim
+ * rule to the panel's edge that sets the run apart without spending a row.
+ */
+function Heading({ group, count, width }: { readonly group: string, readonly count: number, readonly width: number }): React.ReactElement {
+  const rule = Math.max(0, width - stringWidth(`${group} ${count} `))
+  return <Text wrap="truncate-end"><Text bold>{group}</Text><Text dimColor>{` ${count} ${'\u2500'.repeat(rule)}`}</Text></Text>
 }
 
 /**
- * The selected choice's levels, the current one reversed as a tab is. Where
- * the whole row does not fit, only the current level is named, between the
- * arrows that can still move it, with its place among them.
+ * The selected choice's levels, the current one reversed as a tab is, each in
+ * its own tone where it has one and the others dim. Where the whole row does
+ * not fit, only the current level is named, between the arrows that can
+ * still move it, with its place among them.
  */
 function Levels({ label, none, levels, value, width }: {
   readonly label: string
@@ -397,7 +404,7 @@ function Levels({ label, none, levels, value, width }: {
   if (full > width) {
     return <Text wrap="truncate-end">
       <Text dimColor>{`${lead}${at > 0 ? '‹ ' : '  '}`}</Text>
-      <Text bold color={PALETTE.asking}>{levels[at]!.label}</Text>
+      <Text bold color={levels[at]!.color ?? PALETTE.asking}>{levels[at]!.label}</Text>
       <Text dimColor>{`${at < levels.length - 1 ? ' ›' : '  '}  ${at + 1}/${levels.length}`}</Text>
     </Text>
   }
@@ -406,8 +413,8 @@ function Levels({ label, none, levels, value, width }: {
     {levels.map((level, index) => <React.Fragment key={level.value}>
       {index > 0 && ' '}
       {index === at
-        ? <Text bold inverse color={PALETTE.asking}>{` ${level.label} `}</Text>
-        : <Text dimColor>{` ${level.label} `}</Text>}
+        ? <Text bold inverse color={level.color ?? PALETTE.asking}>{` ${level.label} `}</Text>
+        : <Text dimColor {...level.color === undefined ? {} : { color: level.color }}>{` ${level.label} `}</Text>}
     </React.Fragment>)}
   </Text>
 }

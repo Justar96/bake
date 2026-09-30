@@ -67,7 +67,9 @@ export function applyWriteTool(ctx: Context, sandbox: FsSandboxController): void
     // Descriptions are registration-time text, so the edit pointer stays even
     // where a scope hides edit; it remains true there.
     description: 'Create a UTF-8 text file or replace all of its content. '
-      + 'Replacing an existing file is refused unless you have read, written, or edited it in this session and it has not changed since. '
+      + 'Before replacing an existing file, read it with `read` immediately before composing content, unless its current content came from a write or edit result in this session. '
+      + 'The replacement is refused unless you have read, written, or edited the file in this session and it has not changed since; '
+      + 'if it is refused as unread or stale, read it again, rebuild the content, and do not repeat the same write arguments. '
       + 'For a partial change, edit avoids resending the whole file.',
     parameters: {
       file_path: { type: 'string', required: true, description: 'Absolute path, or relative to the working directory.' },

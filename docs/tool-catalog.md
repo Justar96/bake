@@ -331,7 +331,7 @@ exit_plan_mode stays in the model-facing schema while planning is inactive so tr
 
 ### `bash`
 
-Run a command with `bash -c` and return its stdout and stderr. Each call starts a fresh shell, so directory changes and variables do not carry over to later calls. A non-zero exit is reported in the result as `[exit code: N]`, not as a tool error. Long output is truncated to its tail, and the full output is saved to a file named in the result when possible. `$DSH_HOME` is the harness home directory and `$DSH_SESSION_ID` is this session's id. A command run with `run_in_background` returns a job id right away; read its output with `job_output` and stop it with `job_kill`.
+Run a command with `bash -c` and return its stdout and stderr. Each call starts a fresh shell, so directory changes and variables do not carry over to later calls. Keep commands scoped to the current repository; use `rg --files`, `glob`, or `grep` instead of filesystem-wide `find` scans. A non-zero exit is reported in the result as `[exit code: N]`, not as a tool error. Long output is truncated to its tail, and the full output is saved to a file named in the result when possible. `$DSH_HOME` is the harness home directory and `$DSH_SESSION_ID` is this session's id. A command run with `run_in_background` returns a job id right away; read its output with `job_output` and stop it with `job_kill`. Put builds and tests that may outlast their timeout in the background, then inspect them with `job_output`.
 
 ```json
 {
@@ -679,7 +679,7 @@ Standalone view/create/unique literal replace/line insert tool over the filesyst
 
 ### `edit`
 
-Replace literal text in an existing UTF-8 text file. The edit is refused unless you have read, written, or edited the file in this session and it has not changed since.
+Replace literal text in an existing UTF-8 text file. Before composing old_string, read the target with `read` immediately before the edit, unless its current content came from a write or edit result in this session. The edit is refused unless you have read, written, or edited the file in this session and it has not changed since; if it is refused as unread or stale, read it again, rebuild old_string, and do not repeat the same edit arguments.
 
 ```json
 {
@@ -764,7 +764,7 @@ Source: [`packages/fs/tool-fs/src/index.ts`](../packages/fs/tool-fs/src/index.ts
 
 ### `write`
 
-Create a UTF-8 text file or replace all of its content. Replacing an existing file is refused unless you have read, written, or edited it in this session and it has not changed since. For a partial change, edit avoids resending the whole file.
+Create a UTF-8 text file or replace all of its content. Before replacing an existing file, read it with `read` immediately before composing content, unless its current content came from a write or edit result in this session. The replacement is refused unless you have read, written, or edited the file in this session and it has not changed since; if it is refused as unread or stale, read it again, rebuild the content, and do not repeat the same write arguments. For a partial change, edit avoids resending the whole file.
 
 ```json
 {
@@ -796,7 +796,7 @@ The read-before-write/edit policy is added by `@deepseek-ai/dsh-fs-observation-p
 
 ### `glob`
 
-Find files, not directories, whose paths match a glob pattern. It is a bounded, newest-first alternative to find in a shell: hidden and ignored files are included, but VCS metadata is not. A result over 100 paths shows 100 sampled across top-level entries, says so, and reports where the full list was saved.
+Find files, not directories, whose paths match a glob pattern. It is a bounded, newest-first alternative to find in a shell: hidden and ignored files are included, but VCS metadata is not. Keep `path` scoped to the repository or a known subtree; when the file path is uncertain, use this before `grep` or a shell search. Do not search filesystem-wide roots such as `/` or `$HOME`. A result over 100 paths shows 100 sampled across top-level entries, says so, and reports where the full list was saved.
 
 ```json
 {
@@ -821,7 +821,7 @@ Source: [`packages/fs/tool-fs-search/src/index.ts`](../packages/fs/tool-fs-searc
 
 ### `grep`
 
-Search file contents with a ripgrep regular expression, as a bounded alternative to grep or rg in a shell. Hidden and ignored files are skipped unless path points at them. Returns only the matching lines, numbered and grouped by file; read a matched file for surrounding context. Up to 250 matches are shown; a larger result says so and reports where the full list was saved.
+Search file contents with a ripgrep regular expression, as a bounded alternative to grep or rg in a shell. Hidden and ignored files are skipped unless path points at them. When the path or file type is uncertain, use `glob` first; keep `path` scoped to the repository or a known subtree and set one `include` filter. Do not search filesystem-wide roots such as `/` or `$HOME`. Returns only the matching lines, numbered and grouped by file; read a matched file for surrounding context. Up to 250 matches are shown; a larger result says so and reports where the full list was saved.
 
 ```json
 {
@@ -1125,7 +1125,7 @@ Source: [`packages/subagent/tool-subagent/src/list-models.ts`](../packages/subag
 
 ### `subagent`
 
-Delegate a self-contained task, such as research, a scoped implementation, or an analysis, to a subagent that works in its own context, so the work does not fill this conversation. You get its result, not its intermediate steps. It does not see this conversation, so give it a complete, standalone prompt. This call waits for the result by default. Set `run_in_background: true` to return a job id; collect with `job_output` and stop with `job_kill`.
+Delegate a self-contained task, such as research, a scoped implementation, or an analysis, to a subagent that works in its own context, so the work does not fill this conversation. You get its result, not its intermediate steps. It does not see this conversation, so give it a complete, standalone prompt. Delegation depth is bounded by deployment policy; do not rely on the child spawning more children. If a delegation is rejected for depth, continue the task here. This call waits for the result by default. Set `run_in_background: true` to return a job id; collect with `job_output` and stop with `job_kill`.
 
 ```json
 {

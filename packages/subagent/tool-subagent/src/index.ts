@@ -258,7 +258,8 @@ function providerWording(inheritsConversation: boolean): { description: string; 
         'Delegate a task to a subagent that inherits this conversation\'s completed turns, but not the '
         + 'current one. Use it for work that builds on this context, such as a follow-up analysis, a review, '
         + 'or a continuation, without filling this conversation with the work. You get its result, not its '
-        + 'intermediate steps.',
+        + 'intermediate steps. Delegation depth is bounded by deployment policy; do not rely on the child '
+        + 'spawning more children. If a delegation is rejected for depth, continue the task here.',
       promptDescription:
         'The task. The subagent already sees this conversation\'s completed turns, so state only what is new.',
     }
@@ -268,7 +269,8 @@ function providerWording(inheritsConversation: boolean): { description: string; 
       'Delegate a self-contained task, such as research, a scoped implementation, or an analysis, to a '
       + 'subagent that works in its own context, so the work does not fill this conversation. You get its '
       + 'result, not its intermediate steps. It does not see this conversation, so give it a complete, '
-      + 'standalone prompt.',
+      + 'standalone prompt. Delegation depth is bounded by deployment policy; do not rely on the child '
+      + 'spawning more children. If a delegation is rejected for depth, continue the task here.',
     promptDescription:
       'The complete, self-contained task. The subagent does not see this conversation, so include '
       + 'everything it needs.',

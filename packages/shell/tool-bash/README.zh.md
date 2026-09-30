@@ -126,7 +126,7 @@ kind: "package-reference"
 
 #### 模型看到什么
 
-模型会看到生成的 [`bash` schema](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-bash)。其说明是该工具唯一的指引：本插件不贡献任何系统提示词区段，因此工具限制隐藏了 `bash` 的 agent 不会看到任何相关内容；在 PTC 工具模式下，同一段文本也用作生成的 SDK 函数的文档。仅当本生产方启用 `run_in_background` 时，该字段才会出现；仅当已挂载执行器声明支持沙箱时，`sandbox_permissions`、`justification` 以及说明中的沙箱段落（拒绝标记与升权规则）才会出现，因为只有约束型执行器会报告拒绝。策略归属方通过其运行时上下文说明当前沙箱模式与审批策略，而不修改本说明。按 agent 作用域限制工具可以移除该 agent 的定义。
+模型会看到生成的 [`bash` schema](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-bash)。其说明是该工具唯一的指引：本插件不贡献任何系统提示词区段，因此工具限制隐藏了 `bash` 的 agent 不会看到任何相关内容；在 PTC 工具模式下，同一段文本也用作生成的 SDK 函数的文档。说明要求命令限制在当前仓库内，使用 `rg --files`、`glob` 或 `grep`，避免覆盖整个文件系统的 `find`；启用后台能力时，它还要求可能超过超时的构建和测试使用后台任务。仅当本生产方启用 `run_in_background` 时，该字段才会出现；仅当已挂载执行器声明支持沙箱时，`sandbox_permissions`、`justification` 以及说明中的沙箱段落（拒绝标记与升权规则）才会出现，因为只有约束型执行器会报告拒绝。策略归属方通过其运行时上下文说明当前沙箱模式与审批策略，而不修改本说明。按 agent 作用域限制工具可以移除该 agent 的定义。
 
 #### Token 影响
 
