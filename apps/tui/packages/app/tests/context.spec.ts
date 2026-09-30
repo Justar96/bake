@@ -54,7 +54,7 @@ it('marks where the composed engine compacts the displayed route through a model
       ...await resolve(provider, model, signal), context: { contextWindow: model === 'other' ? 64_000 : 8192 },
     })
     handle = await openSession(fixture.ctx, {}, new AbortController().signal, (agent, selection) => {
-      controller = new SessionController(fixture.ctx, agent, dictionaries.en, [], () => { repaints += 1 },
+      controller = new SessionController(fixture.ctx, agent, dictionaries.en, { refs: [] }, () => { repaints += 1 },
         { attachmentMaxBytes: 1048576, attachmentLimit: 8 }, selection)
     })
     await controller!.replay(new AbortController().signal)
@@ -126,7 +126,7 @@ it('marks the lower trigger of the host engine and a preset’s own, and the hos
     for (const [preset, own, compactAt] of [['audit', 4096, 4096], ['other', 7372, 5734], ['minimal', undefined, 5734]] as const) {
       let controller!: SessionController
       const handle = await openSession(fixture.ctx, { preset }, new AbortController().signal, agent => {
-        controller = new SessionController(fixture.ctx, agent, dictionaries.en, [], () => {},
+        controller = new SessionController(fixture.ctx, agent, dictionaries.en, { refs: [] }, () => {},
           { attachmentMaxBytes: 1048576, attachmentLimit: 8 })
       })
       opened.push({ handle, controller })
@@ -161,7 +161,7 @@ it('reports projected context after output and reduces it immediately after comp
   try {
     await fixture.ctx.plugin(TokenMeter)
     handle = await openSession(fixture.ctx, {}, new AbortController().signal, agent => {
-      controller = new SessionController(fixture.ctx, agent, dictionaries.en, [], () => {}, { attachmentMaxBytes: 1048576, attachmentLimit: 8 })
+      controller = new SessionController(fixture.ctx, agent, dictionaries.en, { refs: [] }, () => {}, { attachmentMaxBytes: 1048576, attachmentLimit: 8 })
     })
     const view = controller!
     await view.replay(new AbortController().signal)
@@ -215,7 +215,7 @@ it('withholds a previous model’s context through selection and the next reques
       ...await resolve(provider, model, signal), context: { contextWindow: model === 'other' ? 64_000 : 8192 },
     })
     handle = await openSession(fixture.ctx, {}, new AbortController().signal, (agent, selection) => {
-      controller = new SessionController(fixture.ctx, agent, dictionaries.en, [], () => {},
+      controller = new SessionController(fixture.ctx, agent, dictionaries.en, { refs: [] }, () => {},
         { attachmentMaxBytes: 1048576, attachmentLimit: 8 }, selection)
     })
     await controller!.replay(new AbortController().signal)
@@ -265,7 +265,7 @@ it('reports billed tokens once a request has, and a cache hit only from a provid
   try {
     await fixture.ctx.plugin(TokenMeter)
     handle = await openSession(fixture.ctx, {}, new AbortController().signal, agent => {
-      controller = new SessionController(fixture.ctx, agent, dictionaries.en, [], () => {}, { attachmentMaxBytes: 1048576, attachmentLimit: 8 })
+      controller = new SessionController(fixture.ctx, agent, dictionaries.en, { refs: [] }, () => {}, { attachmentMaxBytes: 1048576, attachmentLimit: 8 })
     })
     const view = controller!
     await view.replay(new AbortController().signal)

@@ -76,6 +76,11 @@ async function workspace(): Promise<{ cwd: string; patch: string; optIn: string 
   onTestFinished(() => rm(cwd, { recursive: true, force: true, maxRetries: 3 }))
   const patch = join(cwd, 'endpoint.patch.yml')
   await writeFile(patch, [
+    // No provider is the default; the run names the one the endpoint serves.
+    '- id: agent-default-model',
+    '  config:',
+    '    provider: deepseek-official',
+    '    model: deepseek-v4-flash',
     '- id: session-persistence-jsonl',
     '  config:',
     "    root: !!js dshHomePath('sessions')",

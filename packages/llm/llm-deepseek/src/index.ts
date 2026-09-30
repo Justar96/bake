@@ -101,7 +101,7 @@ export function apply(ctx: Context, config: Config): void {
     }
     throw new LlmError(
       `llm-deepseek: no API key for provider route "${PROVIDER}"; store ${ref} through the credentials`
-      + ` service (the web Models page writes it), or export ${ref} in the launching environment`,
+      + ` service (/login in Bake writes it), or export ${ref} in the launching environment`,
       'MISSING_CREDENTIAL',
     )
   }

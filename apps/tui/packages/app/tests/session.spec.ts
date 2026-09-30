@@ -19,7 +19,7 @@ async function connected() {
   cleanup.push(fixture.dispose)
   let controller!: SessionController
   const handle = await openSession(fixture.ctx, {}, new AbortController().signal, agent => {
-    controller = new SessionController(fixture.ctx, agent, dictionaries.en, [], () => {}, { attachmentMaxBytes: 1048576, attachmentLimit: 8 })
+    controller = new SessionController(fixture.ctx, agent, dictionaries.en, { refs: [] }, () => {}, { attachmentMaxBytes: 1048576, attachmentLimit: 8 })
   })
   cleanup.push(async () => { controller.close(); await handle.dispose(); await controller.drain() })
   await controller.replay(new AbortController().signal)
@@ -43,7 +43,7 @@ describe('session wiring', () => {
     await handle.dispose()
     let resumed!: SessionController
     const second = await openSession(ctx, { resume: id }, new AbortController().signal, agent => {
-      resumed = new SessionController(ctx, agent, dictionaries.en, [], () => {}, { attachmentMaxBytes: 1048576, attachmentLimit: 8 })
+      resumed = new SessionController(ctx, agent, dictionaries.en, { refs: [] }, () => {}, { attachmentMaxBytes: 1048576, attachmentLimit: 8 })
     })
     cleanup.push(async () => { resumed.close(); await second.dispose() })
     await resumed.replay(new AbortController().signal)
@@ -285,7 +285,7 @@ describe('session wiring', () => {
     controller.close()
     await handle.dispose()
     const second = await openSession(ctx, { resume: id }, new AbortController().signal, agent => {
-      resumed = new SessionController(ctx, agent, dictionaries.en, [], () => {}, { attachmentMaxBytes: 1048576, attachmentLimit: 8 })
+      resumed = new SessionController(ctx, agent, dictionaries.en, { refs: [] }, () => {}, { attachmentMaxBytes: 1048576, attachmentLimit: 8 })
     })
     cleanup.push(async () => { resumed.close(); await second.dispose() })
     await resumed.replay(new AbortController().signal)

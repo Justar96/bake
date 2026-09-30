@@ -28,7 +28,7 @@ async function connected(compaction: Record<string, unknown> = {}) {
   await fixture.ctx.plugin(CommandCompact)
   let controller!: SessionController
   const handle = await openSession(fixture.ctx, {}, new AbortController().signal, agent => {
-    controller = new SessionController(fixture.ctx, agent, dictionaries.en, [], () => {}, { attachmentMaxBytes: 1048576, attachmentLimit: 8 })
+    controller = new SessionController(fixture.ctx, agent, dictionaries.en, { refs: [] }, () => {}, { attachmentMaxBytes: 1048576, attachmentLimit: 8 })
   })
   cleanup.push(async () => { controller.close(); await controller.drain(); await handle.dispose() })
   await controller.replay(new AbortController().signal)

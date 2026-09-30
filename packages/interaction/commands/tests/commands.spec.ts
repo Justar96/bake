@@ -76,6 +76,21 @@ describe('CommandRuntime', () => {
     expect(provider).toHaveBeenCalledTimes(1)
   })
 
+  it('carries a trimmed choice description and drops a blank one', async () => {
+    const ctx = await mount()
+    const { agent } = await mintAgentScope(ctx, 'described-agent')
+    ctx.commands.register({ ...command('described'), input: { hint: '[target]', choices: async () => [
+      { value: 'deepseek', description: '  DeepSeek · Not set  ' },
+      { value: 'blank', description: '   ' },
+    ] } })
+    expect(await ctx.commands.choices(agent, 'described', '', new AbortController().signal)).toEqual([
+      { value: 'deepseek', description: 'DeepSeek · Not set' },
+      { value: 'blank' },
+    ])
+    ctx.commands.register({ ...command('malformed'), input: { hint: '[x]', choices: async () => [{ value: 'x', description: 3 }] as never } })
+    await expect(ctx.commands.choices(agent, 'malformed', '', new AbortController().signal)).rejects.toThrow('non-empty values')
+  })
+
   it('lists immutable global descriptors with input metadata', async () => {
     const ctx = await mount()
     const { agent } = await mintAgentScope(ctx, 'a')

@@ -96,8 +96,11 @@ const MARK = '\u25b8'
 
 /** What the status line reports, as the application supplies it. */
 export interface StatusInput {
-  /** `provider/model`, or a bare model name; the provider is left out. */
-  readonly model: string
+  /**
+   * `provider/model`, or a bare model name; the provider is left out.
+   * Absent, no model is selected yet, and the row says how to get one.
+   */
+  readonly model?: string | undefined
   readonly plan?: { readonly active: boolean, readonly pending: boolean } | undefined
   readonly thinkingLevel?: string | undefined
   readonly context?: ContextUsage | undefined
@@ -122,7 +125,11 @@ export function statusFields(input: StatusInput, copy: TuiCopy): readonly Status
   const hit = input.usage === undefined ? undefined : cacheHit(input.usage)
   const fields: StatusField[] = [
     // The model leads because it is what the row exists to say; it needs no label.
-    { forms: [[{ text: compactModel(input.model) }]], yields: [], shrink: { kind: 'end' as const, rank: RANK.model, min: MODEL_MIN } },
+    input.model === undefined
+      // Nothing is selected until a sign-in: the way to start stays until the model's own rank.
+      ? { forms: [[{ text: copy.noModel, color: PALETTE.waiting }, { text: `  ${copy.noModelHint}`, dim: true }],
+        [{ text: copy.noModel, color: PALETTE.waiting }]], yields: [RANK.model] }
+      : { forms: [[{ text: compactModel(input.model) }]], yields: [], shrink: { kind: 'end' as const, rank: RANK.model, min: MODEL_MIN } },
     ...plan === undefined ? [] : [{ forms: [[{ text: plan, dim: true }]], yields: [RANK.plan] }],
     ...input.thinkingLevel === undefined ? [] : [{
       forms: [[{ text: `${copy.think} `, dim: true }, { text: input.thinkingLevel }]], yields: [RANK.thinking],

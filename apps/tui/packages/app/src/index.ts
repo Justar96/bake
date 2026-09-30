@@ -3,14 +3,16 @@ import type { Context } from '@deepseek-ai/cordis'
 import { SESSION_IN_USE_EXIT, SessionInUseError } from '@deepseek-ai/dsh-cmdline'
 import z from '@deepseek-ai/schemastery'
 import { run, type RunnerOptions, type TuiIo } from './runner.ts'
+import type { CredentialTargetConfig, SignInFlowConfig } from './login.ts'
 
 /** Stable Cordis plugin name. */
 export const name = 'tui-runner'
 /** Services required before terminal setup. */
 export const inject = ['agents', 'agentDefaultModel', 'sessions', 'sessionProjections', 'sessionQuery', 'commands']
 /** Session choices and terminal presentation configured by the profile. */
-export interface Config extends Omit<RunnerOptions, 'credentialRefs'> {
-  readonly credentialRefs: string[]
+export interface Config extends Omit<RunnerOptions, 'credentialRefs' | 'signInFlows'> {
+  readonly credentialRefs: CredentialTargetConfig[]
+  readonly signInFlows?: SignInFlowConfig[]
 }
 /** Validate deployment choices and resolve defaults before starting the runner. */
 export const Config: z<Config> = z.object({
@@ -27,7 +29,14 @@ export const Config: z<Config> = z.object({
   // Long enough to read the prompt and press again. Any other key ends it
   // sooner, so the prompt never stays over what the user went on to do.
   doubleInterruptMs: z.number().min(1).default(2000),
-  credentialRefs: z.array(z.string()).default([]),
+  // A key reference alone, or with the provider name `/login` shows, the
+  // route a first sign-in selects, and the model it starts on.
+  credentialRefs: z.array(z.union([z.string(), z.object({
+    ref: z.string().required(), label: z.string(), provider: z.string(), model: z.string(),
+  })])).default([]),
+  // The authorization flows `/login` offers, by credential key, each with the
+  // model a first sign-in starts on. Absent, it offers every registered flow.
+  signInFlows: z.array(z.union([z.string(), z.object({ key: z.string().required(), model: z.string() })])),
   completionLimit: z.number().min(1).step(1).default(8),
   // Lines of each tool result the transcript keeps under its outcome. Zero
   // keeps output out of the terminal entirely. That is what a deployment

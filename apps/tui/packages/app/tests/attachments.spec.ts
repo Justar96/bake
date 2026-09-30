@@ -31,7 +31,7 @@ async function connected(limits: Partial<AttachmentOptions> = {}, store: StoreCo
   await writeFile(join(fixture.root, 'notes with spaces.bin'), Buffer.from([0, 1, 2, 255]))
   await writeFile(join(fixture.root, 'pixel.png'), png)
   const options = { attachmentMaxBytes: 1024, attachmentLimit: 8, ...limits }
-  const navigation = new SessionNavigation(fixture.ctx, options, copy, [], () => {})
+  const navigation = new SessionNavigation(fixture.ctx, options, copy, { refs: [] }, () => {})
   cleanup.push(async () => { navigation.close(); await navigation.drain() })
   await navigation.start(new AbortController().signal)
   const controller = navigation.controller!
@@ -109,7 +109,7 @@ it('logs file and image references in order and resumes their metadata and exact
   const id = controller.agent.id
   navigation.close()
   await navigation.drain()
-  const resumed = new SessionNavigation(ctx, { ...options, resume: id }, copy, [], () => {})
+  const resumed = new SessionNavigation(ctx, { ...options, resume: id }, copy, { refs: [] }, () => {})
   cleanup.push(async () => { resumed.close(); await resumed.drain() })
   await resumed.start(new AbortController().signal)
   expect(transcriptRows(resumed.controller!.view.committed)).toEqual(rows.map(row => row.kind === 'command'

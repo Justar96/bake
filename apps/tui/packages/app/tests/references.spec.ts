@@ -24,7 +24,7 @@ async function connected(provider = true) {
   const changed = vi.fn()
   const handle = await fixture.ctx.agents.create({
     sessionId: SessionId('file-reference-session'), meta: { cwd: workspace }, agentOptions: { provider: 'mock', model: 'model' },
-    setup: (_ctx, agent) => { controller = new SessionController(fixture.ctx, agent, dictionaries.en, [], changed, { attachmentMaxBytes: 1048576, attachmentLimit: 8 }) },
+    setup: (_ctx, agent) => { controller = new SessionController(fixture.ctx, agent, dictionaries.en, { refs: [] }, changed, { attachmentMaxBytes: 1048576, attachmentLimit: 8 }) },
   })
   cleanup.push(async () => { controller.close(); await controller.drain(); await handle.dispose() })
   await controller.replay(new AbortController().signal)

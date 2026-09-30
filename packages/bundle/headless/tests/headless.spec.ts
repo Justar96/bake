@@ -53,6 +53,8 @@ interface BenchOptions {
   omitSessionQuery?: boolean
   /** Leave the persistence service unmounted to exercise the fail-loud path. */
   omitPersistence?: boolean
+  /** Compose no default model, as Bake's base profile does. */
+  noDefaultModel?: boolean
   /** Register a live Agent under `sessionId` before the runner starts. */
   prelive?: boolean
   /** Header facts for that pre-registered live Agent. */
@@ -176,7 +178,7 @@ async function bench(script: Script, options: BenchOptions = {}): Promise<{
   await ctx.plugin(SessionStore)
   await ctx.plugin(SessionProjectionRegistry)
   await ctx.plugin(AgentRegistry)
-  await ctx.plugin(AgentDefaultModelConfig, { provider: 'test-provider', model: 'test-model' })
+  await ctx.plugin(AgentDefaultModelConfig, options.noDefaultModel === true ? {} : { provider: 'test-provider', model: 'test-model' })
   ctx.agents.setFactory({
     async createAgent(ownerCtx: Context, createOptions: CreateAgentOptions): Promise<AgentHandle> {
       const session = ctx.sessions.create(createOptions.sessionId, {
@@ -526,6 +528,16 @@ describe('headless runner', () => {
     await test.ctx.fiber.dispose()
   })
 
+  it('refuses a run with no model selected, naming how to choose one', async () => {
+    const prompted: string[] = []
+    const test = await bench({ afterPrompt: (_session, message) => { prompted.push(String(message.id)) } }, { noDefaultModel: true })
+    const result = await test.run()
+    expect(result.code).toBe(1)
+    expect(result.err).toContain('no model is selected: start `bake`, sign in with /login, and choose one with /model')
+    expect(prompted).toEqual([])
+    await test.ctx.fiber.dispose()
+  })
+
   it('reads the default process stdin when no override is installed', async () => {
     const original = Object.getOwnPropertyDescriptor(process, 'stdin')
     Object.defineProperty(process, 'stdin', {
@@ -619,6 +631,29 @@ describe('headless runner', () => {
     expect(await test.run()).toMatchObject({ code: 0, out: 'resumed answer\n', err: '' })
     expect(session.seq).toBeGreaterThan(before)
     await test.ctx.fiber.dispose()
+  })
+
+  it('resumes on the model the Session last requested when no default is saved, and refuses one that requested none', async () => {
+    const resumed = async (recorded: boolean) => {
+      const test = await bench({
+        afterPrompt(session, message) { appendTurn(session, 1, message, 'resumed answer', true) },
+      }, {
+        sessionId: 'session-exact', noDefaultModel: true,
+        observe: () => Promise.resolve({ header: { cwd: process.cwd(), origin: 'user' }, events: [], [Symbol.dispose]() {} }),
+      })
+      const session = test.ctx.sessions.create(brandString<SessionId>('session-exact'), { meta: { cwd: process.cwd() } })
+      if (recorded) {
+        session.append('request/header', { header: { config: { provider: 'recorded-provider', model: 'recorded-model' } },
+          reason: 'initial' } as never)
+      }
+      const result = await test.run()
+      await test.ctx.fiber.dispose()
+      return result
+    }
+    expect(await resumed(true)).toMatchObject({ code: 0, out: 'resumed answer\n' })
+    const refused = await resumed(false)
+    expect(refused.code).toBe(1)
+    expect(refused.err).toContain('no model is selected')
   })
 
   it('rejects a persisted Session recorded in another working directory', async () => {

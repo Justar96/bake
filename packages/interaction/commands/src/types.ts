@@ -16,8 +16,12 @@ export type CommandSubmitAttachment =
   | ({ readonly type: 'image' } & EncodedImageAttachment)
   | { readonly type: 'file'; readonly receiptId: string }
 
-/** An advisory argument value. `requiresInput` leaves the composer open after insertion. */
-export type CommandArgumentChoice = string | { readonly value: string; readonly requiresInput?: boolean }
+/**
+ * An advisory argument value. `requiresInput` leaves the composer open after
+ * insertion; `description` is secondary text a menu may show beside the value.
+ */
+export type CommandArgumentChoice = string
+  | { readonly value: string; readonly requiresInput?: boolean; readonly description?: string }
 
 /** Immutable metadata for a command's optional unstructured input. */
 export interface CommandInputDescriptor {

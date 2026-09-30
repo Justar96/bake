@@ -23,6 +23,19 @@ it('puts common commands first while retaining other registered commands and ski
   expect(completions(entries, '/c')?.map(entry => entry.name)).toEqual(['clear', 'compact'])
 })
 
+it('ranks a command the session needs ahead of the frequent ones, and never a skill', () => {
+  const entries: CompletionCatalog['entries'] = [
+    { name: 'help', description: 'Help', kind: 'command' },
+    { name: 'login', description: 'Sign in', kind: 'command' },
+    { name: 'model', description: 'Model', kind: 'command' },
+    { name: 'logout', description: 'Sign out', kind: 'skill' },
+  ]
+  expect(completions(entries, '/', ['login'])?.map(entry => entry.name)).toEqual(['login', 'model', 'help', 'logout'])
+  expect(completions(entries, '/', ['logout'])?.map(entry => entry.name)).toEqual(['model', 'help', 'login', 'logout'])
+  expect(completionMenu({ loading: false, error: undefined, entries, first: ['login'] }, files('', ''), '/')?.entries[0]?.name)
+    .toBe('/login')
+})
+
 it('replaces the entire slash token and retains existing arguments', () => {
   const choice = completionMenu(commands, files('', ''), '/heXX later', 3)?.entries[0]
   expect(choice).toMatchObject({ draft: '/help later', cursor: 6 })
@@ -81,6 +94,18 @@ it('matches first-argument choices and preserves usage when the list has no matc
   expect(argumentQuery(catalog.entries, '/goal clear now')).toBeUndefined()
   expect(completionMenu({ ...catalog, argument: { ...catalog.argument!, partial: 'zz' } }, files('', ''), '/goal zz')).toBeUndefined()
   expect(commandUsage(catalog.entries, '/goal zz')?.name).toBe('goal')
+})
+
+it('shows a choice description beside its value', () => {
+  const catalog: CompletionCatalog = { loading: false, error: undefined,
+    entries: [{ name: 'login', description: 'Sign in', kind: 'command', hint: '[target]', choices: true }],
+    argument: { name: 'login', partial: '', loading: false, error: undefined,
+      entries: [{ value: 'deepseek', description: 'DeepSeek · Not set' }, 'cliproxyapi'] },
+  }
+  expect(completionMenu(catalog, files('', ''), '/login ')?.entries).toMatchObject([
+    { name: 'deepseek', description: 'DeepSeek · Not set', draft: '/login deepseek ' },
+    { name: 'cliproxyapi', description: '' },
+  ])
 })
 
 it('suggests the nearest command for a typo and nothing for a distant or ambiguous one', () => {

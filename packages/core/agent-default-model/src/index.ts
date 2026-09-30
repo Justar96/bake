@@ -20,33 +20,47 @@ declare module '@deepseek-ai/cordis' {
 /** Settings namespace carrying the default model selection for future Agents. */
 export const AGENT_DEFAULT_MODEL_SETTINGS_NAMESPACE = 'agent-default-model'
 
-/** Stored and composed default model selection. */
+/**
+ * Stored and composed default model selection. Both halves or neither: a
+ * section without a provider and a model selects nothing.
+ */
 export interface AgentDefaultModelSettings {
   /** Registered provider route. */
-  provider: string
+  provider?: string
   /** Provider-owned model id. */
-  model: string
+  model?: string
   /** Adapter-owned reasoning effort, or provider/default behavior when absent. */
   reasoningEffort?: string
 }
 
 /** Schema of the default Agent model settings section. */
 export const AGENT_DEFAULT_MODEL_SETTINGS_SCHEMA: z<AgentDefaultModelSettings> = z.object({
-  provider: z.string().required(),
-  model: z.string().required(),
+  provider: z.string(),
+  model: z.string(),
   reasoningEffort: z.string(),
 })
 
-/** Composition entry for the default model selection. */
+/**
+ * Composition entry for the default model selection. Absent, no provider is
+ * the default: entry points start without a model until the user picks one,
+ * and a saved selection is the only default there is.
+ */
 export interface Config {
   /** Registered provider route. */
-  provider: string
+  provider?: string
   /** Provider-owned model id. */
-  model: string
+  model?: string
 }
 
-/** Project stored settings onto the Agent-facing selection type. */
-function selection(settings: AgentDefaultModelSettings): ModelSelection {
+/**
+ * Project stored settings onto the Agent-facing selection type.
+ * @param settings - the resolved section.
+ * @returns the selection, or undefined when it names no provider and model.
+ */
+function selection(settings: AgentDefaultModelSettings): ModelSelection | undefined {
+  if (settings.provider === undefined || settings.provider === '' || settings.model === undefined || settings.model === '') {
+    return undefined
+  }
   return {
     provider: settings.provider,
     model: settings.model,
@@ -63,15 +77,19 @@ function selection(settings: AgentDefaultModelSettings): ModelSelection {
  */
 export class AgentDefaultModelConfig extends Service {
   static Config: z<Config> = z.object({
-    provider: z.string().required(),
-    model: z.string().required(),
+    provider: z.string(),
+    model: z.string(),
   })
 
   private source: () => AgentDefaultModelSettings
 
   constructor(ctx: Context, config: Config) {
     super(ctx, 'agentDefaultModel')
-    const entry: AgentDefaultModelSettings = { provider: config.provider, model: config.model }
+    if ((config.provider === undefined) !== (config.model === undefined)) {
+      throw new TypeError('agent-default-model: provider and model are configured together or not at all')
+    }
+    const entry: AgentDefaultModelSettings = config.provider === undefined || config.model === undefined
+      ? {} : { provider: config.provider, model: config.model }
     this.source = () => entry
     ctx.inject(['settings'], (settingsCtx) => {
       settingsCtx.settings.installSection(ctx, AGENT_DEFAULT_MODEL_SETTINGS_NAMESPACE, AGENT_DEFAULT_MODEL_SETTINGS_SCHEMA, entry, {
@@ -85,9 +103,10 @@ export class AgentDefaultModelConfig extends Service {
 
   /**
    * Read the current default model selection.
-   * @returns a detached provider, model, and optional reasoning selection.
+   * @returns a detached provider, model, and optional reasoning selection, or
+   *   undefined when neither the composition nor the user saved one.
    */
-  currentSelection(): ModelSelection {
+  currentSelection(): ModelSelection | undefined {
     return selection(this.source())
   }
 
@@ -105,5 +124,12 @@ export class AgentDefaultModelConfig extends Service {
     })
   }
 }
+
+/**
+ * The message an entry point gives when it must start a turn and no model is
+ * selected. One wording for every surface that cannot pick a model itself.
+ */
+export const NO_DEFAULT_MODEL_MESSAGE = 'no model is selected: start `bake`, sign in with /login, and choose one with /model;'
+  + ' the choice is saved as the default for new sessions'
 
 export default AgentDefaultModelConfig

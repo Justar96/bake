@@ -16,7 +16,7 @@ import z from '@deepseek-ai/schemastery'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import { installModelSelection } from '@deepseek-ai/dsh-agent'
 import type { Agent, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
-import type {} from '@deepseek-ai/dsh-agent-default-model'
+import { NO_DEFAULT_MODEL_MESSAGE } from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-fs'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
@@ -254,8 +254,8 @@ async function resolveAgent(
   ctx: Context,
   agents: Context['agents'],
   sessionId: SessionId,
-  agentOptions: { provider: string; model: string },
-  setup: (agentCtx: Context) => void,
+  agentOptions: { provider: string; model: string } | undefined,
+  setup: (agentCtx: Context, agent: Agent) => void,
   cwd: string,
 ): Promise<Agent> {
   // Resuming promises the caller a log a later process can continue. Without a
@@ -284,7 +284,7 @@ async function resolveAgent(
   try {
     using observation = await query.observeSession(sessionId)
     assertAdoptable(observation.header, observation.events, sessionId, cwd)
-    const { agent } = await agents.resume({ resumeSessionId: sessionId, agentOptions, setup })
+    const { agent } = await agents.resume({ resumeSessionId: sessionId, ...agentOptions === undefined ? {} : { agentOptions }, setup })
     // The observation is a snapshot: another writer may have appended a preset
     // selection before this process took the write lease. Re-check the log
     // resume actually attached, now that no other process can append.
@@ -344,14 +344,20 @@ async function run(ctx: Context, config: Config, io: HeadlessIo): Promise<void> 
     throw new Error('a task is required, for example: dsh --profile headless "run the tests"')
   }
 
+  // No provider is the default. A new run needs the selection a user saved;
+  // a resumed one without it continues on the model its log last requested.
   const selection = defaultModel.currentSelection()
-  const agentOptions = { provider: selection.provider, model: selection.model }
+  if (selection === undefined && config.sessionId === undefined) throw new Error(NO_DEFAULT_MODEL_MESSAGE)
+  const agentOptions = selection === undefined ? undefined : { provider: selection.provider, model: selection.model }
   // This bundle composes no preset roster, so the model-facing rows sit in the
   // host plane and the agent reads them from the global layer. A deployment
   // that DOES configure one has to join it here first
   // (@deepseek-ai/dsh-agent-presets README, "Composing a child agent").
-  const setup = (agentCtx: Context): void => {
-    const selected: ModelSelectionRef = { current: selection, assembled: undefined }
+  const setup = (agentCtx: Context, agent: Agent): void => {
+    const recorded = agent.session.requestHeader()?.config
+    const current = selection ?? (recorded === undefined ? undefined : { provider: recorded.provider, model: recorded.model })
+    if (current === undefined) throw new Error(NO_DEFAULT_MODEL_MESSAGE)
+    const selected: ModelSelectionRef = { current, assembled: undefined }
     installModelSelection(agentCtx, selected)
   }
   const sessionId = brandString<SessionId>(config.sessionId ?? `session-${randomUUID()}`)
@@ -361,7 +367,7 @@ async function run(ctx: Context, config: Config, io: HeadlessIo): Promise<void> 
     ? (await agents.create({
       sessionId,
       meta: { cwd },
-      agentOptions,
+      ...agentOptions === undefined ? {} : { agentOptions },
       setup,
     })).agent
     : await resolveAgent(ctx, agents, sessionId, agentOptions, setup, cwd)

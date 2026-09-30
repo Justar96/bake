@@ -18,7 +18,7 @@ it('shows live delegated children and lists their authoritative saved metadata',
   try {
     await fixture.ctx.plugin(SubagentRuntime)
     handle = await openSession(fixture.ctx, {}, new AbortController().signal, (agent, selection) => {
-      controller = new SessionController(fixture.ctx, agent, dictionaries.en, [], () => {},
+      controller = new SessionController(fixture.ctx, agent, dictionaries.en, { refs: [] }, () => {},
         { attachmentMaxBytes: 1048576, attachmentLimit: 8 }, selection)
     })
     await controller!.replay(new AbortController().signal)
@@ -97,7 +97,7 @@ it('observes a running child, returns without cancellation, and opens its saved 
     await fixture.ctx.plugin(SubagentRuntime)
     await fixture.ctx.plugin(TokenMeter)
     parent = await openSession(fixture.ctx, {}, new AbortController().signal, (agent, selection) => {
-      controller = new SessionController(fixture.ctx, agent, dictionaries.en, [], () => {},
+      controller = new SessionController(fixture.ctx, agent, dictionaries.en, { refs: [] }, () => {},
         { attachmentMaxBytes: 1048576, attachmentLimit: 8 }, selection)
     })
     await controller!.replay(new AbortController().signal)
@@ -182,7 +182,7 @@ it('shows each saved child outcome and clears it when another turn starts', asyn
   try {
     await fixture.ctx.plugin(SubagentRuntime)
     handle = await openSession(fixture.ctx, {}, new AbortController().signal, (agent, selection) => {
-      controller = new SessionController(fixture.ctx, agent, dictionaries.en, [], () => {},
+      controller = new SessionController(fixture.ctx, agent, dictionaries.en, { refs: [] }, () => {},
         { attachmentMaxBytes: 1048576, attachmentLimit: 8 }, selection)
     })
     const child = fixture.ctx.sessions.create(SessionId('outcome-child'), {

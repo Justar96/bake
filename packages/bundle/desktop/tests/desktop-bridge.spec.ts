@@ -55,6 +55,11 @@ async function startBridge(
   const workspace = join(root, 'workspace')
   const patchPath = join(root, 'test.patch.yml')
   await writeFile(patchPath, [
+    // No provider is the default, so the bridge under test names its model.
+    '- id: agent-default-model',
+    '  config:',
+    '    provider: deepseek-official',
+    '    model: deepseek-flash',
     '- id: llm-deepseek',
     '  config:',
     '    protocol: chat-completions',

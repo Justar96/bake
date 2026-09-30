@@ -44,11 +44,12 @@ export function isNewline(text: string, key: Key): boolean {
  *
  * @param submit - explicit Enter action. False or rejection keeps the complete draft and cursor.
  * @param history - optional lazy session input, newest first. Omitted for secrets and questions.
- * @param allowEmpty - permit Enter with only staged attachments.
+ * @param allowEmpty - permit Enter with only staged attachments, or on an empty field that has a default.
+ * @param initial - text the draft opens with, the caret after it; read on mount only.
  * @returns rendered text and cursor, synchronous values, editing actions, and history navigation.
  */
-export function useComposer(submit: Submit, history?: () => Iterable<string>, allowEmpty = false) {
-  const [draft, setDraft] = useState(() => draftAt(''))
+export function useComposer(submit: Submit, history?: () => Iterable<string>, allowEmpty = false, initial = '') {
+  const [draft, setDraft] = useState(() => draftAt(composerText(initial)))
   const [submitting, setSubmitting] = useState(false)
   const pending = useRef(false)
   const mounted = useRef(true)

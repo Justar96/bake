@@ -8,7 +8,7 @@ import type {} from '@deepseek-ai/dsh-agent-presets'
 import { SessionAlreadyOwnedError } from '@deepseek-ai/dsh-session-persistence'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import type {} from '@deepseek-ai/dsh-fs'
-import { availableSelection } from './login.ts'
+import { availableSelection, type LoginSources } from './login.ts'
 
 /** Explicit session choices resolved before the renderer mounts. */
 export interface SessionOptions {
@@ -62,13 +62,13 @@ export function needsPreset(error: unknown): error is SessionNeedsPresetError {
  * @param options - requested identity and optional preset.
  * @param signal - application setup lifetime.
  * @param connect - install observers before the agent is published or driven.
- * @param credentialRefs - keys the default provider reads; a fresh session without them starts on CLIProxyAPI when it is set up.
+ * @param login - the key references and flows `/login` offers; a fresh session starts on a provider one of them signed in, or on no model.
  * @returns the owned agent handle. The caller must dispose it.
  * @throws {SessionAlreadyOwnedError} when another process has the resumed session open; see {@link openElsewhere}.
  */
 export async function openSession(
   ctx: Context, options: SessionOptions, signal: AbortSignal,
-  connect: (agent: Agent, selection: ModelSelectionRef) => void, credentialRefs: readonly string[] = [],
+  connect: (agent: Agent, selection: ModelSelectionRef) => void, login: LoginSources = { refs: [] },
 ): Promise<AgentHandle> {
   const agents = ctx.get('agents')
   const defaults = ctx.get('agentDefaultModel')
@@ -84,7 +84,7 @@ export async function openSession(
   const fs = ctx.get('fs')
   const cwd = fs === undefined ? process.cwd() : fs.processPath(await fs.resolve('.'))
   const selection = options.resume === undefined
-    ? await availableSelection(ctx, credentialRefs, defaults.currentSelection()) : defaults.currentSelection()
+    ? await availableSelection(ctx, login, defaults.currentSelection()) : defaults.currentSelection()
   signal.throwIfAborted()
   const initialPreset = presets === undefined || (options.resume !== undefined && options.preset === undefined)
     ? undefined : (await presets.resolve(options.preset)).id
@@ -130,12 +130,12 @@ export async function openSession(
       if (ctx.get('sessionPersistence') === undefined) throw new Error('tui: --resume requires sessionPersistence')
       const id = brandString<SessionId>(options.resume)
       if (agents.get(id) !== undefined) throw new Error(`tui: session ${id} already has a live owner`)
-      return await agents.resume({ resumeSessionId: id, agentOptions: selection, signal, setup })
+      return await agents.resume({ resumeSessionId: id, ...selection === undefined ? {} : { agentOptions: selection }, signal, setup })
     }
     return await agents.create({
       sessionId: brandString<SessionId>(`session-${randomUUID()}`),
       meta: { cwd, ...initialPreset === undefined ? {} : { agentPreset: initialPreset } },
-      agentOptions: selection, signal, setup,
+      ...selection === undefined ? {} : { agentOptions: selection }, signal, setup,
     })
   } catch (error) {
     // Preset mounting has no abort parameter. Keep its lifetime through rollback.

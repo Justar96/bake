@@ -12,6 +12,11 @@
   config:
     auto: false
 
+# Bound newly produced previews; persisted results keep their original bytes.
+- id: spill-policy
+  config:
+    maxInlineBytes: 16384
+
 # Presets mount the agent's own rows. A host copy would reach every preset
 # agent: doubled where the preset mounts the row too (the skill catalog and
 # `/skill` bodies), leaked where it leaves the row out (`ptc`'s `workflow`,
@@ -76,6 +81,12 @@
     - id: subagent-model-selection-settings
       name: '@deepseek-ai/dsh-tool-subagent/model-selection-settings'
 
+    # The authorization seam: `llm-pi-ai` registers one sign-in flow per
+    # provider pi-ai ships a login for (OAuth or an interactive key prompt),
+    # and `/login` runs them. The credential it stores needs `credentials`.
+    - id: authorization
+      name: '@deepseek-ai/dsh-authorization'
+
     - id: tui-startup
       name: ./lib/startup.js
 
@@ -88,4 +99,24 @@
         preset: !!js ctx.tuiStartup.preset
         screen: !!js ctx.tuiStartup.screen
         credentialRefs:
-          - DEEPSEEK_API_KEY
+          - ref: DEEPSEEK_API_KEY
+            label: DeepSeek
+            provider: deepseek-official
+            model: deepseek-flash
+        # The sign-ins `/login` offers, by the credential record each writes.
+        # A subscription sign-in first; each also takes an API key. Signing in
+        # adds the provider's route, so its models reach /model at once, and a
+        # session that had no model starts on `model`.
+        signInFlows:
+          - key: llm-pi-ai/openai
+            model: gpt-5.5
+          - key: llm-pi-ai/anthropic
+            model: claude-opus-4-8
+          - key: llm-pi-ai/github-copilot
+            model: gpt-5.4
+          - key: llm-pi-ai/openrouter
+            model: moonshotai/kimi-k2.6
+          - key: llm-pi-ai/kimi-coding
+            model: kimi-for-coding
+          - key: llm-pi-ai/xai
+            model: grok-4.7

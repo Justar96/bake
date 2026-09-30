@@ -85,7 +85,7 @@ it.each(['en', 'zh'] as const satisfies readonly Locale[])(
     const copy = dictionaries[locale]
     const { ctx, root, id, model } = await withSaved()
     const release = await holdElsewhere(root, id)
-    const navigation = new SessionNavigation(ctx, options, copy, [], vi.fn())
+    const navigation = new SessionNavigation(ctx, options, copy, { refs: [] }, vi.fn())
     cleanup.push(async () => { navigation.close(); await navigation.drain() })
     await navigation.start(new AbortController().signal)
     const current = navigation.controller!

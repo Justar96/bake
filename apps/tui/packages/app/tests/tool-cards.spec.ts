@@ -61,7 +61,7 @@ it('presents an agent-layer tool\'s call and result through its presenters, not 
   await writeFile(join(preset, 'agent.cordis.yml'), '- id: probe\n  name: ./probe-tool.mjs\n')
   let controller!: SessionController
   const handle = await openSession(fixture.ctx, {}, new AbortController().signal, agent => {
-    controller = new SessionController(fixture.ctx, agent, dictionaries.en, [], () => {},
+    controller = new SessionController(fixture.ctx, agent, dictionaries.en, { refs: [] }, () => {},
       { attachmentMaxBytes: 1048576, attachmentLimit: 8 })
   })
   cleanup.push(async () => { controller.close(); await controller.drain(); await handle.dispose() })
@@ -92,7 +92,7 @@ it('presents an inspected child\'s agent-layer tool calls through the child\'s p
   await fixture.ctx.plugin(SubagentRuntime)
   let controller!: SessionController
   const parent = await openSession(fixture.ctx, {}, new AbortController().signal, agent => {
-    controller = new SessionController(fixture.ctx, agent, dictionaries.en, [], () => {},
+    controller = new SessionController(fixture.ctx, agent, dictionaries.en, { refs: [] }, () => {},
       { attachmentMaxBytes: 1048576, attachmentLimit: 8 })
   })
   cleanup.push(async () => { controller.close(); await controller.drain(); await parent.dispose() })

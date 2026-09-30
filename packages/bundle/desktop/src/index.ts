@@ -14,7 +14,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import { installModelSelection } from '@deepseek-ai/dsh-agent'
 import type { Agent, AssistantStreamFrame, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
-import type {} from '@deepseek-ai/dsh-agent-default-model'
+import { NO_DEFAULT_MODEL_MESSAGE } from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-fs'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { Session, SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
@@ -252,8 +252,9 @@ class DesktopBridge {
   private selection(): { provider: string; model: string } {
     const defaultModel = this.ctx.get('agentDefaultModel')
     if (defaultModel === undefined) throw new Error('the default-model service is not available')
-    const { provider, model } = defaultModel.currentSelection()
-    return { provider, model }
+    const selected = defaultModel.currentSelection()
+    if (selected === undefined) throw new Error(NO_DEFAULT_MODEL_MESSAGE)
+    return { provider: selected.provider, model: selected.model }
   }
 
   private ensureAgent(): Promise<Agent> {
@@ -269,7 +270,9 @@ class DesktopBridge {
     const defaultModel = this.ctx.get('agentDefaultModel')
     if (agents === undefined || defaultModel === undefined) throw new Error('the agent services are not available')
     if (this.workspace === undefined) throw new Error('init must precede the first user message')
+    // No provider is the default; a session needs the selection a user saved.
     const selection = defaultModel.currentSelection()
+    if (selection === undefined) throw new Error(NO_DEFAULT_MODEL_MESSAGE)
     const agentOptions = { provider: selection.provider, model: selection.model }
     // This bundle composes no preset roster; model-facing rows read the
     // global layer, as in dsh-headless.

@@ -21,6 +21,7 @@ import Loader, { Group } from '@deepseek-ai/cordis-plugin-loader'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import { ToolCallId, type GenerateOptions, type Message, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import { defineContentToolFixture } from '@deepseek-ai/dsh-tools'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'
 import { SessionController } from '../src/controller.ts'
 import { openSession } from '../src/session.ts'
@@ -56,6 +57,8 @@ async function profile() {
   cleanup.push(async () => { await ctx.fiber.dispose(); await rm(root, { recursive: true, force: true }) })
   const workspace = join(root, 'workspace')
   await mkdir(join(workspace, '.agents', 'skills', SKILL), { recursive: true })
+  // Skill discovery must stop here even when an ancestor of the temp root is a repository.
+  await mkdir(join(workspace, '.git'))
   await writeFile(join(workspace, 'AGENTS.md'), `# Rules\n\n${INSTRUCTIONS_MARKER}: keep answers short.\n`)
   await writeFile(join(workspace, '.agents', 'skills', SKILL, 'SKILL.md'),
     `---\nname: ${SKILL}\ndescription: ${SKILL_MARKER} a workspace skill.\n---\n\nPLANE_SKILL_BODY: answer in one word.\n`)
@@ -105,7 +108,7 @@ async function profile() {
   const open = async (preset: 'standard' | 'ptc' | 'minimal' | 'cordis') => {
     let controller!: SessionController
     const handle = await openSession(ctx, { preset }, new AbortController().signal, agent => {
-      controller = new SessionController(ctx, agent, dictionaries.en, [], () => {},
+      controller = new SessionController(ctx, agent, dictionaries.en, { refs: [] }, () => {},
         { attachmentMaxBytes: 1048576, attachmentLimit: 8 })
     })
     cleanup.push(async () => { controller.close(); await controller.drain(); await handle.dispose() })
@@ -123,7 +126,7 @@ async function profile() {
     }
     return { controller, agent: handle.agent, turn, events }
   }
-  return { ctx, model, open }
+  return { ctx, model, open, workspace }
 }
 
 /** @returns one message's text. */
@@ -203,6 +206,82 @@ it('leaves workflow out of the ptc agent\'s run_code program interface', async (
   expect(system(request)).toContain('todo_write')
   expect(system(request)).not.toMatch(/\bworkflow\b/u)
   expect(carrying(request, '<available_skills>')).toHaveLength(1)
+})
+
+it('shows the real workflow and its member while running, then its durable completion', async () => {
+  const { model, open } = await profile()
+  model.resolveModel = async (provider, model) => ({ provider, id: model, name: model, inputModalities: ['text'], context: { contextWindow: 128_000 } })
+  const session = await open('standard')
+  const release = Promise.withResolvers<void>()
+  const call = { type: 'tool-call' as const, id: ToolCallId('workflow-call'), name: 'workflow',
+    arguments: JSON.stringify({ meta: { name: 'review', description: 'Review changes' },
+      script: 'phase("Inspect"); return await agent("Review files", { label: "Reviewer" });' }),
+  }
+  model.response = async function* (options) {
+    if (options.sessionId !== session.agent.id) {
+      await release.promise
+      yield* textResponse('Review complete')
+    } else if (JSON.stringify(options.messages).includes(call.id)) {
+      yield* textResponse('Workflow complete')
+    } else {
+      yield { type: 'block-start', index: 0, blockType: 'tool-call' }
+      yield { type: 'tool-call-delta', index: 0, id: call.id, name: call.name, argumentsDelta: call.arguments }
+      yield { type: 'block-end', index: 0, block: call }
+      yield { type: 'finish', reason: { kind: 'tool-calls' } }
+    }
+  }
+  try {
+    expect(session.controller.submit('Run a workflow to review the files')).toBe(true)
+    await vi.waitFor(() => expect(session.controller.view.workflows).toEqual([
+      expect.objectContaining({ name: 'review', state: 'working', total: 1, completed: 0 }),
+    ]))
+    await vi.waitFor(() => expect(session.controller.view.subagents).toContainEqual(
+      expect.objectContaining({ workflow: 'review', state: 'working', detail: 'One-shot · Inspect' })))
+    release.resolve()
+    await session.agent.whenIdle()
+    expect(session.controller.view.workflows).toEqual([
+      expect.objectContaining({ name: 'review', state: 'completed', total: 1, completed: 1 }),
+    ])
+    const requests = model.requests.filter(request => request.sessionId === session.agent.id && request.purpose === undefined)
+    expect(requests).toHaveLength(2)
+    expect(requests[1]!.tools).toEqual(requests[0]!.tools)
+    expect(requests[1]!.messages.slice(0, requests[0]!.messages.length)).toEqual(requests[0]!.messages)
+  } finally { release.resolve(); await session.agent.whenIdle() }
+})
+
+it('bounds new file reads without changing tool schemas and keeps later pages available', async () => {
+  const { ctx, open, workspace } = await profile()
+  const session = await open('standard')
+  const path = join(workspace, 'preview.txt')
+  await writeFile(path, Array.from({ length: 1000 }, (_, index) => `${index + 1}: ${'x'.repeat(80)}`).join('\n'))
+  const schemas = ctx.tools.schemas(session.agent)
+  const read = (offset: number) => ctx.tools.execute({ name: 'read', callId: ToolCallId(`read-${offset}`),
+    arguments: { file_path: path, offset }, agent: session.agent, signal: new AbortController().signal })
+  const first = await read(1)
+  expect(first.isError).toBe(false)
+  expect(JSON.stringify(first.content)).not.toContain(`1000: ${'x'.repeat(80)}`)
+  expect(JSON.stringify(first.content).length).toBeLessThan(20_000)
+  const last = await read(1000)
+  expect(last.isError).toBe(false)
+  expect(JSON.stringify(last.content)).toContain(`1000: ${'x'.repeat(80)}`)
+  expect(ctx.tools.schemas(session.agent)).toEqual(schemas)
+  expect(schemas.find(schema => schema.name === 'read')?.parameters).toMatchObject({
+    properties: { limit: { description: 'Maximum number of lines to return. Defaults to 2000.' } },
+  })
+
+  const output = 'complete tool output\n'.repeat(1000)
+  ctx.tools.register(defineContentToolFixture({
+    name: 'preview_fixture', description: 'Return fixture text.', parameters: {},
+    async execute() { return [{ type: 'text', text: output }] },
+  }))
+  const preview = await ctx.tools.execute({ name: 'preview_fixture', callId: ToolCallId('preview'),
+    arguments: {}, agent: session.agent, signal: new AbortController().signal })
+  expect(preview.isError).toBe(false)
+  const rendered = preview.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('')
+  expect(Buffer.byteLength(rendered)).toBeLessThanOrEqual(16384)
+  const locator = /Full formatted result stored at: (.+?)\. /u.exec(rendered)?.[1]
+  if (locator === undefined) throw new Error('the preview must name the complete saved output')
+  expect(await readFile(locator, 'utf8')).toBe(output)
 })
 
 it('gives a minimal agent only its shell, and /compact still folds its history', async () => {

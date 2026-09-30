@@ -90,6 +90,11 @@ async function hangUp(graceMs: number) {
   const model = await heldModel()
   const patch = join(cwd, 'hangup.patch.yml')
   await writeFile(patch, [
+    // No provider is the default; the run names the one the endpoint serves.
+    '- id: agent-default-model',
+    '  config:',
+    '    provider: deepseek-official',
+    '    model: deepseek-v4-flash',
     '- id: session-persistence-jsonl',
     '  config:',
     "    root: !!js dshHomePath('sessions')",

@@ -125,7 +125,7 @@ async function terminal() {
   const open = async (preset: 'standard' | 'minimal') => {
     let controller!: SessionController
     const handle = await openSession(fixture.ctx, { preset }, new AbortController().signal, agent => {
-      controller = new SessionController(fixture.ctx, agent, dictionaries.en, [], () => {},
+      controller = new SessionController(fixture.ctx, agent, dictionaries.en, { refs: [] }, () => {},
         { attachmentMaxBytes: 1048576, attachmentLimit: 8 })
     })
     cleanup.push(async () => { controller.close(); await controller.drain(); await handle.dispose() })

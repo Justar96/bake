@@ -17,7 +17,7 @@ export interface Completion {
 export interface ArgumentCatalog {
   readonly name: string
   readonly partial: string
-  readonly entries: readonly (string | { readonly value: string; readonly requiresInput?: boolean })[]
+  readonly entries: readonly (string | { readonly value: string; readonly requiresInput?: boolean; readonly description?: string })[]
   readonly loading: boolean
   readonly error: string | undefined
 }
@@ -28,6 +28,11 @@ export interface CompletionCatalog {
   readonly loading: boolean
   readonly error: string | undefined
   readonly argument?: ArgumentCatalog | undefined
+  /**
+   * Command names the session needs next, listed ahead of the frequent ones:
+   * `login` while no provider can answer.
+   */
+  readonly first?: readonly string[]
 }
 
 /** Query-tagged paths observed by the application; never file contents. */
@@ -59,9 +64,12 @@ export interface CompletionMenu {
 }
 
 const frequentCommands = ['model', 'resume', 'new', 'clear'] as const
-const commandRank = (entry: Completion): number => {
-  const index = entry.kind === 'command' ? frequentCommands.findIndex(name => name === entry.name) : -1
-  return index < 0 ? frequentCommands.length : index
+const commandRank = (entry: Completion, first: readonly string[]): number => {
+  if (entry.kind !== 'command') return first.length + frequentCommands.length
+  const needed = first.indexOf(entry.name)
+  if (needed >= 0) return needed
+  const index = frequentCommands.findIndex(name => name === entry.name)
+  return first.length + (index < 0 ? frequentCommands.length : index)
 }
 
 /**
@@ -73,7 +81,7 @@ const commandRank = (entry: Completion): number => {
  * @returns the active menu, or undefined outside a completion token.
  */
 export function completionMenu(commands: CompletionCatalog, files: FileCatalog, draft: string, cursor = draft.length): CompletionMenu | undefined {
-  const slash = completions(commands.entries, draft.slice(0, cursor))
+  const slash = completions(commands.entries, draft.slice(0, cursor), commands.first)
   if (slash !== undefined) {
     const end = draft.search(/\s/u)
     return { ...commands, kind: 'slash', query: undefined, entries: slash.map(entry => ({ ...entry, name: `/${entry.name}`,
@@ -88,7 +96,8 @@ export function completionMenu(commands: CompletionCatalog, files: FileCatalog, 
       .toLowerCase().startsWith(argument.partial.toLowerCase())) : []
     if (current && entries.length === 0 && !observed.loading && observed.error === undefined) return undefined
     return { kind: 'argument', query: undefined, loading: !current || observed.loading, error: current ? observed.error : undefined,
-      entries: entries.map(choice => ({ name: typeof choice === 'string' ? choice : choice.value, description: '', kind: 'command',
+      entries: entries.map(choice => ({ name: typeof choice === 'string' ? choice : choice.value,
+        description: typeof choice === 'string' ? '' : choice.description ?? '', kind: 'command',
         ...typeof choice === 'string' || choice.requiresInput !== true ? {} : { argumentRequiresInput: true },
         ...replaceToken(draft, argument.start, argument.end, typeof choice === 'string' ? choice : choice.value, false),
       })) }
@@ -138,14 +147,15 @@ function replaceToken(draft: string, start: number, end: number, mention: string
  * Match a leading slash token before its argument separator.
  * @param entries - effective commands and user-invocable skills, with unique names.
  * @param draft - complete composer text.
+ * @param first - command names ranked ahead of the frequent ones.
  * @returns prefix matches, or undefined outside the slash menu.
  */
-export function completions(entries: readonly Completion[], draft: string): readonly Completion[] | undefined {
+export function completions(entries: readonly Completion[], draft: string, first: readonly string[] = []): readonly Completion[] | undefined {
   const token = /^\/([a-z0-9_-]*)$/i.exec(draft)
   if (token === null) return undefined
   const prefix = token[1]!.toLowerCase()
   return entries.filter(entry => entry.name.startsWith(prefix))
-    .sort((left, right) => commandRank(left) - commandRank(right))
+    .sort((left, right) => commandRank(left, first) - commandRank(right, first))
 }
 
 /**
