@@ -82,7 +82,7 @@ irm https://bake.justar.dev/install.ps1 | iex
 
 安装脚本验证清单签名，按宿主平台选择归档，对照清单验证 SHA-256，并在用户主目录下安装 `bake`。它们不会读取或迁移 `~/.dsh`；除非设置 `DSH_HOME`，命令使用 Bake 的 `~/.bake` 目录。Unix 需要 `curl`、`tar`，以及 `shasum` 或 `sha256sum`；Windows 需要 `tar.exe`。下载服务只提供发行文件，不保存 API 密钥。
 
-交互式安装、`bake update` 和终端中的 `/update` 会在操作期间于同一行烘焙面包：蒸汽在其上方升起，面包随安装进度从面团色烤成焦褐色，成功后留下烤好的面包。UTF-8 终端使用盲文和方块字符绘制（`⡀⠢⠁ ▄▆███▆▄`）；其他终端、`TERM=dumb` 以及 CJK 字符区域设置（其终端常将方块字符绘制为两格宽）使用 ASCII（`.': (=====)`）。帧定义在 `apps/tui/packages/ui/src/loaf.ts` 中，因此三处绘制相同的面包。重定向输出、CI 和 `TERM=dumb` 使用纯文本。设置 `BAKE_NO_ANIMATION=1` 可关闭动画，设置 `NO_COLOR=1` 可关闭颜色。安装脚本内嵌 CLI 渲染器；修改 `apps/tui/packages/ui/src/loaf.ts`、`apps/cli/src/bakery.ts` 或 `scripts/release/installer-animation.ts` 后，运行 `bun scripts/release/embed-animation.ts`，再用 `bun scripts/release/embed-animation.ts --check` 验证。
+交互式安装和 `bake update` 以 `BAKE` 标题开头，每完成一步就打印一行：对勾、完成的操作，以及以耗时结尾的暗色说明（`✓  Downloaded          18.4 MB · 2.1s`），最后给出安装结果和要运行的命令。只有仍在运行的步骤会在一个实时行中重绘：四个盲文点绕方形旋转的轨道、步骤名称和进度条。长度已知的步骤（即下载）以从橙色到琥珀色的渐变填充进度条，一道高光扫过已填充部分，旁边显示百分比和字节数；长度未知的步骤让一颗彗星在轨道上来回移动，而不是给出猜测的百分比。失败的步骤在安装脚本的诊断信息之前标记为 `✗`。终端中的 `/update` 在输入框上方绘制同样的实时行。UTF-8 终端或 Windows Terminal 使用盲文和框线字符绘制；其他终端以及 CJK 字符区域设置（其终端常将框线字符绘制为两格宽）使用 ASCII（`| Downloading  =====>----`）。`COLORTERM` 或 Windows Terminal 表明终端支持时使用 24 位颜色，否则使用 256 色。这些行定义在 `apps/tui/packages/ui/src/install-progress.ts` 中，因此三处绘制相同的安装过程。重定向输出、CI 和 `TERM=dumb` 使用纯文本。设置 `BAKE_NO_ANIMATION=1` 可关闭动画，设置 `NO_COLOR=1` 可关闭颜色。安装脚本内嵌 CLI 渲染器，并通过一个以制表符分隔事件的文件告知其进度；修改 `apps/tui/packages/ui/src/install-progress.ts`、`apps/cli/src/progress.ts` 或 `scripts/release/installer-animation.ts` 后，运行 `bun scripts/release/embed-animation.ts`，再用 `bun scripts/release/embed-animation.ts --check` 验证。
 
 <a id="updating-an-install"></a>
 

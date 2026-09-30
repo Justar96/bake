@@ -61,14 +61,24 @@ test.skipIf(process.platform === 'win32' || process.platform === 'darwin')('inst
         if (mode === 'failure') {
           expect(code).toBe(1)
           expect(output).toContain('signature did not verify')
-          expect(output).not.toContain('Freshly baked')
+          expect(output).not.toContain('installed in')
+          // The step that failed is marked, and the live row is gone, before the diagnostics.
+          expect(output).toMatch(/[\u2717x] {2}Verifying release/u)
           expect(output.lastIndexOf('\x1b[2K')).toBeLessThan(output.indexOf('signature did not verify'))
         } else {
           expect(code).toBe(0)
           expect(readlinkSync(join(install, 'current'))).toContain(`0.1.0-${sha256.slice(0, 12)}`)
-          expect(output).toContain('Installed Bake 0.1.0')
-          if (mode === 'tty') expect(output).toContain('Freshly baked.')
-          else expect(output).not.toContain('\x1b')
+          if (mode === 'tty') {
+            for (const done of ['Verified release', 'Downloaded', 'Checked SHA-256', 'Installed', 'Linked']) {
+              expect(output).toMatch(new RegExp(`[\u2713+] {2}${done}`, 'u'))
+            }
+            expect(output).toContain(sha256.slice(0, 12))
+            expect(output).toMatch(/Bake 0\.1\.0 installed in \d/u)
+            expect(output).not.toContain('Installed Bake 0.1.0')
+          } else {
+            expect(output).toContain('Installed Bake 0.1.0')
+            expect(output).not.toContain('\x1b')
+          }
         }
       } finally {
         child.kill()

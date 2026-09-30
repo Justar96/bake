@@ -26,8 +26,8 @@ if (import.meta.main) {
   for (const name of ['install.sh', 'install.ps1']) {
     const path = resolve(import.meta.dir, '../../distribution/host', name)
     const source = readFileSync(path, 'utf8')
-    const next = source.replace(/(?<=\/\/ # BEGIN BAKERY\n)[\s\S]*?(?=\/\/ # END BAKERY)/, code + '\n')
-    if (next === source && !source.includes(code)) throw new Error(`Missing bakery markers in ${name}`)
+    const next = source.replace(/(?<=\/\/ # BEGIN ANIMATION\n)[\s\S]*?(?=\/\/ # END ANIMATION)/, code + '\n')
+    if (next === source && !source.includes(code)) throw new Error(`Missing animation markers in ${name}`)
     if (process.argv.includes('--check')) {
       if (next !== source) throw new Error(`Run bun scripts/release/embed-animation.ts to refresh ${name}`)
     } else writeFileSync(path, next)
