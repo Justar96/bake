@@ -1,0 +1,75 @@
+{
+  "title": "v0.2.0 agent-loop baseline",
+  "version": "v0.2.0",
+  "arms": {
+    "baseline": {
+      "version": "v0.2.0",
+      "revision": null
+    },
+    "candidate": {
+      "version": "v0.2.0+99d94e7",
+      "revision": null
+    }
+  },
+  "candidate": "baseline",
+  "bases": [],
+  "models": [
+    "claude-sonnet-5-5",
+    "gemini-3.8-flash-medium",
+    "gpt-6.1-sol"
+  ],
+  "scenarios": [
+    "duplicate_recovery",
+    "no_tools",
+    "ordinary_edit",
+    "path_discovery",
+    "stale_edit"
+  ],
+  "trials": 3,
+  "startedAt": null,
+  "harness": ".preflight/token-eval/eval.ts (Codex, before evals/agent-loop existed)",
+  "note": "First recorded version. The samples come from the base arm of the 2026-09-30 run that measured 99d94e7; commit 5b63c1860f has the same tree as the v0.2.0 tag. The suite is the earlier five-case one (no_tools, ordinary_edit, path_discovery, stale_edit, duplicate_recovery), so compare later versions with it only through a paired run.",
+  "settings": {
+    "effort": "medium",
+    "maxOutputTokens": 8192,
+    "capMs": 180000,
+    "maxRequests": 14
+  },
+  "regressionRule": "all tasks, per model: total tokens with the 95% interval above zero; failures +2 or more; any tool-error increase",
+  "regressions": [],
+  "perModel": {
+    "claude-sonnet-5-5": {
+      "samples": 15,
+      "successes": 15,
+      "firstRequestBytes": 23140,
+      "toolSchemaChars": 21985,
+      "meanTotalTokensPerTask": 39333,
+      "meanRequestsPerTask": 4.42,
+      "cacheReadShare": 0.97,
+      "toolErrors": 15,
+      "comparisons": {}
+    },
+    "gemini-3.8-flash-medium": {
+      "samples": 15,
+      "successes": 15,
+      "firstRequestBytes": 22806,
+      "toolSchemaChars": 21594,
+      "meanTotalTokensPerTask": 35601,
+      "meanRequestsPerTask": 5.92,
+      "cacheReadShare": 0.01,
+      "toolErrors": 12,
+      "comparisons": {}
+    },
+    "gpt-6.1-sol": {
+      "samples": 15,
+      "successes": 14,
+      "firstRequestBytes": 22782,
+      "toolSchemaChars": 21594,
+      "meanTotalTokensPerTask": 33973,
+      "meanRequestsPerTask": 6.91,
+      "cacheReadShare": 0.683,
+      "toolErrors": 21,
+      "comparisons": {}
+    }
+  }
+}

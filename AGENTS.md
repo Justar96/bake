@@ -22,6 +22,7 @@ Bun is the single toolchain for this workspace: it owns dependency installation,
 - `packages/`: shared agent runtime and its tests; read [the architecture](docs/architecture.md) before changing it.
 - `native/`, `vendor/`: native support and pinned Cordis sources. Preserve licenses and upstream attribution.
 - `snapshots/`: recorded session evidence. Never overwrite, move, or delete a committed session generation.
+- `evals/`: per-version agent-loop metrics and the live paired runner that produces them.
 
 ## Commands
 
@@ -35,12 +36,23 @@ bun run check             # TUI types, tests, layout, peer identity, and docs
 bun run test              # pure and Node integration tests
 bun run test:runtime <file>  # focused shared-runtime tests
 bun run test:e2e           # keyless built-profile PTY scenarios
-bun run lint              # Oxlint over apps, packages, and scripts
+bun run lint              # Oxlint over apps, packages, scripts, and evals
 bun run preflight         # every CI gate before a PR; --fast for the static half
 bun run verify            # preflight with the whole runtime suite
+bun run eval              # live paired agent-loop eval; needs a model route
+bun run eval:record       # commit an eval's metrics and flag regressions
 ```
 
 Run the checks relevant to your change while you work, and `bun run preflight` before a PR; it reports every gate instead of stopping at the first failure. Any terminal behavior change also requires the built-profile PTY scenarios. Tests that use Cordis or Ink run on Node; pure modules and tooling tests run on Bun. Report only what you actually ran, including failures and skipped checks. Never bypass hooks without explicit approval.
+
+## Evals
+
+Every version keeps its agent-loop metrics so the next one can be checked for regressions. [evals/README.md](evals/README.md) has the procedure.
+
+- A change that can alter what the model sees or how many round trips a task takes needs an eval record in its PR. That covers prompts, personas, tool schemas, descriptions, arguments, results, and errors, context assembly, compaction, caching, the agent loop, and LLM adapters.
+- Measure the candidate in a paired run against a clean, built worktree of the PR base, on the standard suite with three models and three trials. Record it under `evals/agent-loop/versions/unreleased/<YYYY-MM-DD>-<topic>/`. A release renames `unreleased/` to its tag, as the changelog does.
+- Report the record's regressions in the PR. Fix a flagged regression, or state its cause and why it is accepted, in the record's note and in the PR. Compare versions only through a paired run: absolute counts from different days drift with the gateway, the cache, and the models.
+- Never edit or delete a committed record, and move one only in that release rename; supersede a wrong record with a new one. Raw output, which includes transcripts, stays in the ignored `.preflight/`.
 
 ## Engineering
 

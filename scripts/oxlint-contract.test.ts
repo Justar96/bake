@@ -226,7 +226,7 @@ export const longProbe = 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 +
     expect(configFlag, lint).toBeGreaterThanOrEqual(0)
     expect(lintArgs[configFlag + 1]).toBe('.oxlintrc.staged.json')
     const lintRoots = lintArgs.filter((argument, index) => !argument.startsWith('-') && index !== configFlag + 1)
-    expect(lintRoots.sort(), lint).toEqual(['apps', 'packages', 'scripts'])
+    expect(lintRoots.sort(), lint).toEqual(['apps', 'evals', 'packages', 'scripts'])
     expect(lint).not.toMatch(/\beslint\b/)
 
     for (const dependencies of [packageJson.dependencies, packageJson.devDependencies]) {
