@@ -295,7 +295,7 @@ it('dims the subagents row and draws each child in its own tone on the sheet', (
   for (const tone of AGENT_TONES) expect(frame).not.toContain(rgb(tone))
   const entries = ['Review', 'Check', 'Audit'].map((label, index) =>
     ({ id: label, label, state: index === 0 ? 'working' as const : 'saved' as const, detail: '', inspectable: true }))
-  const names = subagentSheet(entries, 0, dictionaries.en).flatMap(line => line.parts?.slice(0, 1) ?? [])
+  const names = subagentSheet(entries, 0, dictionaries.en).filter(line => line.selected !== undefined).flatMap(line => line.parts?.slice(0, 1) ?? [])
   expect(names.map(part => [part.text, part.color])).toEqual(entries.map((entry, index) => [entry.label, AGENT_TONES[index]]))
   expect(new Set(AGENT_TONES).size).toBe(AGENT_TONES.length)
   for (const tone of AGENT_TONES) expect(Object.values(PALETTE)).not.toContain(tone)

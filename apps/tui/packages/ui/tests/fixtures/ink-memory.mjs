@@ -23,6 +23,7 @@ const ui = render(view('warmup'), {
   stdout: output, stderr: output, stdin: input,
   patchConsole: false, exitOnCtrlC: false, interactive: true, maxFps: 1_000_000,
 })
+const exited = ui.waitUntilExit()
 const samples = []
 const sample = frames => {
   globalThis.gc()
@@ -46,7 +47,7 @@ try {
   assert.ok(tail.includes('frame-1:'), 'revisiting text must reach the terminal')
 } finally {
   ui.cleanup()
-  await ui.waitUntilExit()
+  await exited
   input.destroy()
   output.destroy()
 }

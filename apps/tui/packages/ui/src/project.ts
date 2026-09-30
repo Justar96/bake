@@ -322,8 +322,13 @@ export function project(event: SessionEvent, projector: Projector): Projection {
       switch (reason.kind) {
         case 'completed':
           return [{ kind: 'notice', placement: 'turn-end', tone: 'info', text: copy.turnCompleted }]
-        case 'error':
-          return [{ kind: 'notice', placement: 'turn-end', tone: 'error', text: `${reason.error.code}: ${reason.error.message}` }]
+        case 'error': {
+          // A turn that failed for want of a usable key says how to get one, under the reason.
+          const hint = reason.error.code === 'MISSING_CREDENTIAL' ? copy.missingCredentialHint
+            : reason.error.code === 'AUTH' || reason.error.code === 'INVALID_CREDENTIAL' ? copy.authFailedHint : undefined
+          return [{ kind: 'notice', placement: 'turn-end', tone: 'error',
+            text: `${reason.error.code}: ${reason.error.message}${hint === undefined ? '' : `\n${hint}`}` }]
+        }
         case 'aborted':
         case 'interrupted':
           return [{ kind: 'notice', placement: 'turn-end', tone: 'warn', text: copy.cancelled }]

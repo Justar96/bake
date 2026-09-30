@@ -190,9 +190,12 @@ function normalizeChoices(name: string, value: unknown): readonly CommandArgumen
     if (typeof choice === 'string' && choice.trim() !== '') return choice
     if (typeof choice === 'object' && choice !== null && 'value' in choice
       && typeof choice.value === 'string' && choice.value.trim() !== ''
-      && (!('requiresInput' in choice) || typeof choice.requiresInput === 'boolean')) {
+      && (!('requiresInput' in choice) || typeof choice.requiresInput === 'boolean')
+      && (!('description' in choice) || choice.description === undefined || typeof choice.description === 'string')) {
+      const description = 'description' in choice && typeof choice.description === 'string' ? choice.description.trim() : ''
       return Object.freeze({ value: choice.value,
-        ...'requiresInput' in choice && choice.requiresInput === true ? { requiresInput: true } : {} })
+        ...'requiresInput' in choice && choice.requiresInput === true ? { requiresInput: true } : {},
+        ...description === '' ? {} : { description } })
     }
     throw new TypeError(`command "${name}" choices must contain non-empty values`)
   }))

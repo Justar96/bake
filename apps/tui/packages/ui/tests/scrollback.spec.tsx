@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events'
 import { Writable } from 'node:stream'
 import React from 'react'
 import { render } from 'ink'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { App, type AppProps } from '../src/app.tsx'
 import { dictionaries } from '../src/copy.ts'
 import { appendTranscript, emptyTranscript, type Transcript } from '../src/transcript.ts'
@@ -74,15 +74,18 @@ function props(committed: Transcript, overrides: Partial<AppProps> = {}): AppPro
 const history = (count: number): Transcript => appendTranscript(emptyTranscript,
   Array.from({ length: count }, (_, index): Row => ({ kind: 'assistant', text: `history-${index}-end` })))
 const markers = (text: string): string[] => text.match(/history-\d+-end/g) ?? []
-const owned: { ui: ReturnType<typeof render>; output: Output }[] = []
+const owned: { ui: ReturnType<typeof render>; output: Output; exited: ReturnType<ReturnType<typeof render>['waitUntilExit']> }[] = []
+let beforeExitListeners = 0
+beforeEach(() => { beforeExitListeners = process.listenerCount('beforeExit') })
 afterEach(async () => {
-  for (const { ui, output } of owned.splice(0).reverse()) {
+  for (const { ui, output, exited } of owned.splice(0).reverse()) {
     ui.unmount()
     output.release()
-    await ui.waitUntilExit()
+    await exited
     ui.cleanup()
     output.destroy()
   }
+  expect(process.listenerCount('beforeExit')).toBe(beforeExitListeners)
 })
 
 function mount(state: AppProps) {
@@ -92,8 +95,9 @@ function mount(state: AppProps) {
     stdin: input as unknown as NodeJS.ReadStream, stdout: output as unknown as NodeJS.WriteStream,
     stderr: output as unknown as NodeJS.WriteStream, patchConsole: false, exitOnCtrlC: false, interactive: true,
   })
-  owned.push({ ui, output })
-  return { ui, input, output }
+  const exited = ui.waitUntilExit()
+  owned.push({ ui, output, exited })
+  return { ui, input, output, exited }
 }
 
 it('waits for output before admitting more history, accepting input and ordered appends meanwhile', async () => {
@@ -125,12 +129,12 @@ it('bounds one large multiline answer across flushes without dropping or repeati
 })
 
 it('cancels pending admission on exit and restores raw mode', async () => {
-  const { ui, input, output } = mount(props(history(800)))
+  const { ui, input, output, exited } = mount(props(history(800)))
   await output.waitUntil(() => output.waiting)
   const first = markers(output.chunks.join(''))
   ui.unmount()
   output.release()
-  await ui.waitUntilExit()
+  await exited
   await ui.waitUntilRenderFlush()
   expect(input.raw).toBe(false)
   expect(markers(output.chunks.join(''))).toEqual(first)

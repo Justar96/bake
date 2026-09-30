@@ -152,6 +152,8 @@ export function styleOf(tone: Tone): LineStyle {
 
 /** One display line, already placed in its columns. */
 export interface PresentedLine {
+  /** Source offset of a Markdown table row, stable across responsive layouts. */
+  readonly tableRow?: number
   /** Preserve code whitespace instead of applying prose soft breaks. */
   readonly literal?: boolean
   /** Whether this line separates turns across the prose width. */
@@ -1085,9 +1087,10 @@ export function softBreaks(text: string, width: number): string {
  * @param wrap - the rows a line wraps into where it is drawn. Reasoning is
  *   previewed in rows, because one paragraph of it can fill a screen; without
  *   this, as in the live region, it is drawn whole.
+ * @param width - available prose cells for responsive Markdown tables.
  * @returns display lines in order, possibly empty.
  */
-export function present(row: Row, result: ResultBound, wrap?: (line: PresentedLine) => readonly string[]): readonly PresentedLine[] {
+export function present(row: Row, result: ResultBound, wrap?: (line: PresentedLine) => readonly string[], width?: number): readonly PresentedLine[] {
   switch (row.kind) {
     case 'user': {
       const said = linesOf(row.text).map((text, index) => ({
@@ -1115,7 +1118,7 @@ export function present(row: Row, result: ResultBound, wrap?: (line: PresentedLi
       }])
 
     case 'assistant': {
-      const lines = markdownLines(row.text, 'plain', result.code).map(line => ({
+      const lines = markdownLines(row.text, 'plain', result.code, width).map(line => ({
         ...line,
         marker: MARKER.none,
         verb: '', column: COLUMN.rail, tone: 'plain' as const,
@@ -1132,7 +1135,7 @@ export function present(row: Row, result: ResultBound, wrap?: (line: PresentedLi
       // A paragraph at the rail, as the answer is, without a verb. Dim and
       // italic, it is the working-out. The blank that opens the answer, at
       // full brightness, marks where the reply begins.
-      const lines = markdownLines(row.text, 'thought', result.code).map(line => ({
+      const lines = markdownLines(row.text, 'thought', result.code, width).map(line => ({
         ...line, marker: MARKER.none, verb: '', column: COLUMN.rail, tone: 'thought' as const, prose: true,
       }))
       const kept = wrap === undefined ? lines : reasoningPreview(lines, result, wrap)

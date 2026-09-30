@@ -80,12 +80,34 @@ describe('AgentDefaultModelConfig', () => {
   it('falls back to the composition entry when the settings provider detaches', async () => {
     const bench = await boot()
     await bench.defaultModel.saveSelection({ provider: 'acme-gateway', model: 'acme-large' })
-    expect(bench.defaultModel.currentSelection().provider).toBe('acme-gateway')
+    expect(bench.defaultModel.currentSelection()?.provider).toBe('acme-gateway')
     await bench.settingsFiber.dispose()
     expect(bench.defaultModel.currentSelection()).toEqual({
       provider: 'deepseek-official', model: 'deepseek-v4-flash',
     })
     await bench.ctx.fiber.dispose()
+  })
+
+  it('has no default until a selection is saved when the composition names none', async () => {
+    const ctx = new Context()
+    const settingsFiber = ctx.plugin(MemorySettings)
+    await settingsFiber.await()
+    await ctx.plugin(AgentDefaultModelConfig, {})
+    expect(ctx.agentDefaultModel.currentSelection()).toBeUndefined()
+    // Half a selection names nothing either.
+    await settingsFiber.ctx.settings.replace(AGENT_DEFAULT_MODEL_SETTINGS_NAMESPACE, { model: 'orphan' })
+    expect(ctx.agentDefaultModel.currentSelection()).toBeUndefined()
+    await ctx.agentDefaultModel.saveSelection({ provider: 'acme-gateway', model: 'acme-large' })
+    expect(ctx.agentDefaultModel.currentSelection()).toEqual({ provider: 'acme-gateway', model: 'acme-large' })
+    await settingsFiber.dispose()
+    expect(ctx.agentDefaultModel.currentSelection()).toBeUndefined()
+    await ctx.fiber.dispose()
+  })
+
+  it('refuses a composition entry that names a provider without a model', async () => {
+    const ctx = new Context()
+    await expect(ctx.plugin(AgentDefaultModelConfig, { provider: 'p' })).rejects.toThrow('together or not at all')
+    await ctx.fiber.dispose()
   })
 
   it('keeps the composition entry when no settings provider is mounted', async () => {

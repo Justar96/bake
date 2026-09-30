@@ -174,6 +174,7 @@ describe('dsh-tool-subagent-control', () => {
     const parentSchemas = ctx.tools.schemas(parent)
     const childSchemas = ctx.tools.schemas(child)
     expect(JSON.stringify(childSchemas)).toBe(JSON.stringify(parentSchemas))
+    expect(adapter.requests[1]!.messages.slice(0, adapter.requests[0]!.messages.length)).toEqual(adapter.requests[0]!.messages)
     expect(childSchemas.map(schema => schema.name)).not.toContain('report')
 
     release.resolve(undefined)
@@ -189,6 +190,7 @@ describe('dsh-tool-subagent-control', () => {
     expect(texts[0]).toBe('fork task')
     expect(texts[1]).toContain(`Your parent agent id is ${JSON.stringify(parent.id)}`)
     expect(texts[1]).toContain(`send_message({ agent_id: ${JSON.stringify(parent.id)}`)
+    expect(texts[1]).toContain('Your final answer is delivered to the parent automatically')
     expect(texts[1]).not.toContain('report tool')
   })
 

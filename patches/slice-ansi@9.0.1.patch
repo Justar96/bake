@@ -1,0 +1,29 @@
+diff --git a/tokenize-ansi.js b/tokenize-ansi.js
+index 8bc4454d4fb638e193208e0c72bab18a3853c12b..eb8e4f57600b9f4ee220738802346945ff9e2117 100644
+--- a/tokenize-ansi.js
++++ b/tokenize-ansi.js
+@@ -126,8 +126,15 @@ function isEmojiStyleGrapheme(grapheme) {
+ 
+ function getGraphemeWidth(grapheme) {
+ 	let regionalIndicatorCount = 0;
++	let amWidth = 0;
++	let first = true;
+ 	for (const character of grapheme) {
+ 		const codePoint = character.codePointAt(0);
++		// Thai/Lao AM add a cell when attached to a base, just as in string-width.
++		if (!first && (codePoint === 0x0E33 || codePoint === 0x0EB3)) {
++			amWidth++;
++		}
++		first = false;
+ 		if (isFullwidthCodePoint(codePoint)) {
+ 			return 2;
+ 		}
+@@ -145,7 +152,7 @@ function getGraphemeWidth(grapheme) {
+ 		return 2;
+ 	}
+ 
+-	return 1;
++	return 1 + amWidth;
+ }
+ 
+ function getSgrPrefix(code) {

@@ -87,11 +87,10 @@ export function withContinuableReturnGuidance(
     ...prompt,
     {
       type: 'text',
-      text: `Your parent agent id is ${encodedParentId}. Before you finish, send your result to that agent with `
-        + `send_message({ agent_id: ${encodedParentId}, message: "<self-contained result>" }). The parent shares `
-        + 'your workspace but does not automatically receive your transcript, tool output, or reasoning. Send '
-        + 'earlier messages as well when a finding changes what the parent should do next; sending a message '
-        + 'does not end your turn.',
+      text: `Your parent agent id is ${encodedParentId}. Your final answer is delivered to the parent automatically; `
+        + 'make it a self-contained result. The parent shares your workspace but does not receive your transcript, '
+        + 'tool output, or reasoning. When an earlier finding changes what the parent should do next, use '
+        + `send_message({ agent_id: ${encodedParentId}, message: "<actionable finding>" }); sending a message does not end your turn.`,
     },
   ]
 }

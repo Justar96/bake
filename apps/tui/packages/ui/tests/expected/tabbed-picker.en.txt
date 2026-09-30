@@ -1,10 +1,9 @@
   note   Session: session-test
 
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ Choose reasoning effort                                                                          │
+│ Settings › Agent                                                                                 │
+│  Terminal   Agent   Shell                                                                        │
 │ > ▌Type to filter                                                                                │
-│   Provider default           low                                                                 │
-│   Low                                                                                            │
-│ ▸ High              Current                                                                      │
-│ ↑↓ choose · Enter selects · Esc cancels                                                      3/3 │
+│ ▸ Subagent nesting depth  1                                                                      │
+│ Tab/⇧Tab switch section · ↑↓ choose · Enter selects · Esc back                               1/1 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

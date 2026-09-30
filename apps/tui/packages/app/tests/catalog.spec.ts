@@ -23,7 +23,7 @@ async function connected() {
   let controller!: SessionController
   const changed = vi.fn()
   const handle = await openSession(fixture.ctx, {}, new AbortController().signal, (agent, selection) => {
-    controller = new SessionController(fixture.ctx, agent, dictionaries.en, [], changed, { attachmentMaxBytes: 1048576, attachmentLimit: 8 }, selection)
+    controller = new SessionController(fixture.ctx, agent, dictionaries.en, { refs: [] }, changed, { attachmentMaxBytes: 1048576, attachmentLimit: 8 }, selection)
   })
   cleanup.push(async () => { controller.close(); await controller.drain(); await handle.dispose() })
   await controller.replay(new AbortController().signal)

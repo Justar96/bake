@@ -24,7 +24,7 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
-启动器提供 `profileContext` 时，base 组合包以 `root: []` 启用 HMR；没有该 profile 上下文的宿主保留此条目为禁用状态。Headless、SDK 和 ACP 组合包在 YAML 中禁用此条目，后续 profile patch 可以重新启用。禁用或省略 HMR 时，更改在重启后生效。如需监听源码模块，在启动前通过 profile patch 配置 base 组合包提供的 `hmr` 条目：
+启动器提供 `profileContext` 时，base 组合包以 `root: []` 启用 HMR；没有该 profile 上下文的宿主保留此条目为禁用状态。TUI 保持配置重载启用。Headless 和 Bake Desktop 组合包在 YAML 中禁用此条目，后续 profile patch 可以重新启用。禁用或省略 HMR 时，更改在重启后生效。如需监听源码模块，在启动前通过 profile patch 配置 base 组合包提供的 `hmr` 条目：
 
 ```yaml
 - id: hmr
@@ -58,6 +58,8 @@ Chokidar 选项（包括轮询）保持原有含义。精确配置监听同时�
 
 App-boot 负责 profile 解析和 patch 优先级规则。HMR 读取启动器提供的纯数据 `profileContext`，在初始化时注册 profile manifest 和两份用户 patch 的监听，并等待应用就绪后处理更改。销毁 HMR 时会关闭监听器并取消等待启动的重载。HMR 也负责模块缓存替换和重载调度。配置监听器在当前事务上下文之外启动，使后续通知可以进入队列。不发布 invariant 伴生入口，因为队列和监听注册没有独立的持久投影。
 
+`root: []` 只初始化配置监听，不读取 Node 模块图，也不创建模块监听器。显式调用 `getLinked()` 仍需要 Node loader 内部接口。
+
 被监听模块的路径沿用 Node ESM 解析所用的 `realpathSync()` 表示，包括 Windows 短目录名，使文件事件与模块缓存匹配。
 
 模块替换实现源自 `@cordisjs/plugin-hmr` 1.0.15，包含 Harness 的 Node loader 和惰性配置修改。保留其 [MIT 许可证](LICENSE)。
@@ -86,7 +88,7 @@ App-boot 负责 profile 解析和 patch 优先级规则。HMR 读取启动器提
 <a id="known-limitations-and-deferred-work"></a>
 
 - 模块替换需要 Node loader 内部接口。框架依赖变化调用宿主提供的 `loader.exit()` 钩子；HMR 本身不重启进程。
-- 通过插件管理器替换已安装包版本仍需要重启。浏览器 Client 模块图保留独立的浏览器侧加载机制。
+- 通过插件管理器替换已安装包版本仍需要重启。
 
 ### 开发备注
 

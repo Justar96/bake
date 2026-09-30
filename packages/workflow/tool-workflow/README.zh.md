@@ -68,6 +68,8 @@ kind: "package-reference"
 
 对于根 transport 执行（`exec.parent` 缺省），工具会用四个 log-only 事件把运行投影到调用方 agent 的会话：`start()` 返回后写 run-start，只记录 `run.id` 匹配的成员开始与结束，并且只在结果可用且 dispose 完全停稳后写 run-end。嵌套 transport 调用照常执行，但不写任何记录。会话追加操作首次失败后，本运行会停止后续记录并只告警一次，留下空记录或合法连续前缀，同时不改变工具结果和清理。包 invariant 会在冷加载与实时追加时拒绝重复 start、未配对成员、仍有开放成员的终点与 run-end 后更新，同时允许缺失终态后缀的连续前缀。
 
+存在 `sessionProjections` 时，插件注册 `workflows` 投影，提供运行名称、成员、阶段及已记录的结果。未结束的运行会在轮次边界变为 `unfinished`；客户端还需确认所属代理正在运行，才将其显示为活动状态。继承的 fork 种子结束时会从子代理投影中清除父代理的运行。注册随插件释放，投影不会添加模型可见消息。
+
 ### 渲染意图
 
 按[渲染意图 Agent Note](../../../.agents/notes/implemented/architecture/2026-07-02-tool-render-intent-union.zh.md)预先确定：使用 `generic` 卡片，标题为 `workflow: <meta.name>`，直接从 `args.meta.name` 读取——呈现是参数的纯函数——脚本文本作为 `rawInput` 携带。结果继续使用 generic 卡片。

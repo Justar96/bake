@@ -1,6 +1,6 @@
 {
   "name": "bake",
-  "version": "0.1.9",
+  "version": "0.2.0",
   "description": "A terminal coding agent built on Cordis and the DeepSeek Harness runtime",
   "license": "MIT",
   "private": true,
@@ -49,7 +49,9 @@
   },
   "patchedDependencies": {
     "node-pty@1.2.0-beta.15": "patches/node-pty@1.2.0-beta.15.patch",
-    "ink@7.1.1": "patches/ink@7.1.1.patch"
+    "ink@7.1.1": "patches/ink@7.1.1.patch",
+    "string-width@8.2.2": "patches/string-width@8.2.2.patch",
+    "slice-ansi@9.0.1": "patches/slice-ansi@9.0.1.patch"
   },
   "trustedDependencies": [
     "@deepseek-ai/dsh-subprocess-local",

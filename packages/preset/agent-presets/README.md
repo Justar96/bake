@@ -31,6 +31,8 @@ The shipped `standard`, `ptc`, and `cordis` presets support explicit file delive
 
 ### What a preset gives a session
 
+The shipped `standard`, `ptc`, and `cordis` presets cap selected text in each `read` result at 16 KiB (`readMaxBytes: 16384`). The line limit stays at 2,000, and callers can use `offset` to fetch later lines. This bounds newly produced results without changing the tool schema or rewriting saved history.
+
 A session composed from a preset runs the plugins that preset's `agent.cordis.yml` names: its tools, prompt sections, and skills. Sessions joined to the same preset share one installed composition, and each session's state stays separate. A child agent (subagent) joins its parent's composition, so it sees the same tools and prompt sections as the agent that spawned it.
 
 An agent also sees what the host composition registers globally. A host that mounts a row a preset also mounts runs it twice for that preset's agents, and a host row a preset leaves out or disables still reaches its agents. A deployment that mounts this package therefore leaves agent rows, such as tools, instructions, and skill discovery, to its presets; the terminal profile disables the base bundle's copies, so `minimal` gets only its shell.

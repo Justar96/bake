@@ -33,6 +33,8 @@ Load this plugin in any composition where the agent should start, observe, and s
 - `job_list()` — List your background jobs with their ids, kinds, statuses, and labels, one per line: `<id> [<kind>] <status> — <label>`.
 - `job_kill(job_id, reason?)` — Request cancellation of a running job immediately; the job settles as `killed` once its work actually stops. A terminal job returns its current snapshot, and the optional reason is recorded and forwarded to the job. The description tells the model that jobs otherwise keep running after its turn ends, because only completion, a kill, or owner disposal ends them.
 
+Use the background job id from a start result or `job_list` with `job_output` and `job_kill`. A continuable subagent returns an agent id for the subagent control tools, not a job id. An unknown job error points back to `job_list` and this distinction.
+
 The three tools return `{ text, job }`, `PublicJobSnapshot[]`, and `{ outcome: 'cancellation-requested' | 'already-finished', job }` respectively. A public snapshot carries id, kind, label, status/detail, and start/finish times and omits ownership and notification bookkeeping. All three render through generic UI cards: `read` for output and list, `execute` for kill.
 
 ### Completion notices

@@ -564,6 +564,13 @@ describe('Composer width and wrapping', () => {
 })
 
 describe('Composer', () => {
+  it.each(['น้ำ', 'ກຳ'])('keeps the hint aligned after the two-cell cluster %s', cluster => {
+    const rendered = strip(renderToString(
+      <Composer columns={16} marker={MARKER.prompt} before={cluster.repeat(5)} after="" placeholder="Ask" hint="hint" />,
+      { columns: 16 }))
+    expect(rendered.split('\n')).toEqual([`> ${cluster.repeat(4)}`, `  ${cluster}${CARET}       hint`])
+  })
+
   it('grows with a multi-line draft', () => {
     const rendered = strip(renderToString(
       <Composer columns={40} marker={MARKER.prompt} before={'one\ntwo\nthree'} after="" placeholder="Ask" />, { columns: 40 }))
@@ -593,6 +600,13 @@ describe('Composer', () => {
     expect(rows[0]).not.toContain('enter to send')
     expect(rows[1]).toContain('enter to send')
   })
+})
+
+it.each([['น้ำใจ', 'น้ำ'], ['ກຳລາ', 'ກຳ']])('truncates %s by terminal cells without splitting a grapheme', (text, cluster) => {
+  for (const columns of [1, 2, 3]) {
+    expect(strip(renderToString(<Text wrap="truncate-end" bold>{text}</Text>, { columns })))
+      .toBe(columns < 3 ? '…' : `${cluster}…`)
+  }
 })
 
 describe('Completion', () => {

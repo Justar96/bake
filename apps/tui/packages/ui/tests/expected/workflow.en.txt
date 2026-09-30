@@ -1,0 +1,19 @@
+  note   Session: session-test
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│  Workflow review · 1 working · 1 done                                        │
+│ ━━━━━━━━━━━━────────────  1/2 done · 1 working                               │
+│ Workflow review · Working · 1/2 done                                         │
+│ Select a child to view its session. The parent keeps running.                │
+│                                                                              │
+│ ▸ ● Review files  Working · Workflow review                                  │
+│     One-shot · Inspect · member                                              │
+│   ○ Check docs  Completed · Saved · Direct                                   │
+│ ↑↓ select · Enter opens · Esc closes  1-7/7                                  │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+> ▌Ask anything · / commands · @ files
+────────────────────────────────────────────────────────────────────────────────────────────────────
+↳ Workflow review · 1 working · 1 done                                                        Ctrl+G
+  model  /workspace

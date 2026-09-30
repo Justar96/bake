@@ -103,7 +103,11 @@ class Hmr extends Service {
   public baseDir: string
 
   private readonly ownerContext: Context
-  private internal: ModuleLoader
+  private get internal(): ModuleLoader {
+    const internal = this.ctx.loader.internal
+    if (internal === undefined) throw new Error('--expose-internals is required for module HMR')
+    return internal
+  }
   private watcher: FSWatcher | undefined
 
   /**
@@ -178,10 +182,6 @@ class Hmr extends Service {
   constructor(ctx: Context, public config: HmrConfig) {
     super(ctx, 'hmr')
     this.ownerContext = ctx
-    if (!this.ctx.loader.internal) {
-      throw new Error('--expose-internals is required for HMR service')
-    }
-    this.internal = this.ctx.loader.internal
     this.baseDir = fileURLToPath(new URL(config.base || '.', ctx.baseUrl))
   }
 
@@ -238,6 +238,8 @@ class Hmr extends Service {
 
     const { loader } = this.ctx
     const { root, ignored } = this.config
+    if (root.length === 0) return
+    const internal = this.internal
     if (!this.config.base) {
       this.ctx.logger.info('watching %o', root)
     } else {
@@ -250,7 +252,7 @@ class Hmr extends Service {
     // Collect externals before opening the watcher so every post-ready change
     // is observed by listeners that already have their classification state.
     const mainJob = process.argv[1] === undefined ? undefined
-      : this.internal.loadCache.get(pathToFileURL(resolve(process.argv[1])).href)
+      : internal.loadCache.get(pathToFileURL(resolve(process.argv[1])).href)
     if (mainJob) {
       this.externals = await loadDependencies(mainJob)
     } else {
@@ -305,15 +307,11 @@ class Hmr extends Service {
     this.watcher.on('change', (path) => { changed.add(path); dispatch() })
 
     const ready = Promise.withResolvers<void>()
-    let readyState: 'pending' | 'resolved' | 'rejected' = root.length === 0 ? 'resolved' : 'pending'
-    if (root.length === 0) {
+    let readyState: 'pending' | 'resolved' | 'rejected' = 'pending'
+    this.watcher.once('ready', () => {
+      readyState = 'resolved'
       ready.resolve()
-    } else {
-      this.watcher.once('ready', () => {
-        readyState = 'resolved'
-        ready.resolve()
-      })
-    }
+    })
     this.watcher.on('error', (error) => {
       if (readyState === 'pending') {
         readyState = 'rejected'
@@ -333,6 +331,7 @@ class Hmr extends Service {
   /** Read direct module dependency URLs from the active Node loader.
    * @param url Module URL.
    * @returns Linked module URLs, or an empty list for an uncached module.
+   * @throws If the Node internal loader is unavailable, including with empty watch roots.
    */
   async getLinked(url: string): Promise<string[]> {
     const job = this.internal.loadCache.get(url)

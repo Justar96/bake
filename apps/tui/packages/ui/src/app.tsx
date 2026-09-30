@@ -14,14 +14,15 @@ import { InteractionView, type Interaction, type InteractionAnswer } from './int
 import { budgetFor, selectionWindow, type Budget, type FrameStyle, type WindowSize } from './layout.ts'
 import { present, type Highlight, type ResultBound } from './present.ts'
 import { PALETTE, type PaletteColor } from './palette.ts'
-import { SubagentRow, subagentLine, subagentSheet, subagentTab, type SubagentEntry } from './subagents.tsx'
+import { InspectionBar, SubagentRow, subagentLine, subagentSheet, subagentTab, type SubagentEntry, type WorkflowEntry } from './subagents.tsx'
 import { goalSheet, goalState, type GoalEntry } from './goal.ts'
 import type { GitState } from './git.ts'
-import { Sheet, sheetPage, sheetRows, type SheetLine, type SheetTab } from './sheet.tsx'
+import { Sheet, sheetPage, sheetRows, type SheetFollow, type SheetLine, type SheetTab } from './sheet.tsx'
 import { Tasks, taskSheet, taskTab, tasksOpen, type TaskEntry } from './tasks.tsx'
 import { Beat } from './beat.tsx'
 import { statusFields } from './status-line.ts'
-import { Baking } from './baking.tsx'
+import { Installing } from './installing.tsx'
+import type { InstallStep } from './install-progress.ts'
 import { Scrollback, type Opening } from './scrollback.tsx'
 import { Fullscreen, WHEEL_ROWS, type TranscriptScroll } from './fullscreen.tsx'
 import { Chrome, Completion, composerHint, draftWidth, Line, LiveRegion, Notice, Panel, Thinking, THINKING_GAP, wrappedRows, type ActivityState } from './line.tsx'
@@ -77,6 +78,8 @@ export interface AppProps {
   readonly todos: readonly TaskEntry[] | undefined
   /** Child identities and activity from the Harness catalog, including saved history. */
   readonly subagents?: readonly SubagentEntry[]
+  /** Recorded workflows, including progress before their first child is published. */
+  readonly workflows?: readonly WorkflowEntry[]
   /** Read-only child session; the parent composer stays mounted while it is open. */
   readonly inspection?: {
     readonly sessionId: string
@@ -91,6 +94,8 @@ export interface AppProps {
     readonly thinkingLevel?: string
   } | undefined
   readonly inspectionParent?: string
+  /** The open child's name, for the bar that says where the user is and how to leave. */
+  readonly inspectionLabel?: string
   /** Open a child's session read-only, as `/agents <id>` does. */
   readonly onInspectSubagent?: (id: string) => void
   /**
@@ -100,10 +105,11 @@ export interface AppProps {
    */
   readonly update?: { readonly version: string; readonly installed: boolean }
   /**
-   * The install `/update` is running: what it is doing and how far, from 0 to
-   * 1. Drawn as a loaf that browns above the composer; absent, no row.
+   * The install `/update` is running: what it is doing, and how far from 0
+   * to 1 when that is known. Drawn as one live row above the composer;
+   * absent, no row.
    */
-  readonly baking?: { readonly label: string; readonly level: number }
+  readonly installing?: InstallStep
   /** Shift-Tab: step the selected model's reasoning effort. Absent, Shift-Tab does nothing. */
   readonly onCycleThinking?: () => void
   /** Harness plan projection; absent when this profile has no plan mode. */
@@ -119,7 +125,8 @@ export interface AppProps {
   readonly permission?: string
   /** Selected reasoning effort, or the model's advertised default when known. */
   readonly thinkingLevel?: string
-  readonly model: string
+  /** `provider/model` of the selected model; absent until one is selected. */
+  readonly model?: string | undefined
   /**
    * The working directory as the status line reads it, already shortened
    * against home by the application: this layer reads no environment.
@@ -215,7 +222,7 @@ export function RowView({ row, budget, result }: {
   readonly budget: Budget
   readonly result: ResultBound
 }): React.ReactElement {
-  return <>{present(row, result, line => wrappedRows(line, budget)).map((line, index) => <Line key={index} line={line} budget={budget} />)}</>
+  return <>{present(row, result, line => wrappedRows(line, budget), budget.measure).map((line, index) => <Line key={index} line={line} budget={budget} />)}</>
 }
 
 /**
@@ -318,10 +325,12 @@ function SessionView(props: AppProps): React.ReactElement {
   const [sheet, setSheet] = useState<SheetKind | undefined>(undefined)
   const sheetRef = useRef<SheetKind | undefined>(undefined)
   const [sheetScroll, setSheetScroll] = useState(0)
+  const [sheetFollowing, setSheetFollowing] = useState(true)
   const openSheet = (next: SheetKind | undefined): void => {
     sheetRef.current = next
     setSheet(next)
     setSheetScroll(0)
+    setSheetFollowing(true)
   }
   // The child under the agents sheet's pointer. A ref, as focus is.
   const [agentIndex, setAgentIndex] = useState(0)
@@ -329,10 +338,11 @@ function SessionView(props: AppProps): React.ReactElement {
   const pointAt = (index: number): void => {
     agentRef.current = index
     setAgentIndex(index)
+    setSheetFollowing(true)
   }
   const tasksShown = tasksOpen(props.todos)
   const hasTasks = (props.todos?.length ?? 0) > 0
-  const hasSubagents = (props.subagents?.length ?? 0) > 0
+  const hasSubagents = (props.subagents?.length ?? 0) > 0 || (props.workflows?.length ?? 0) > 0
   const available = (target: Focus): boolean =>
     target === 'goal' ? props.goal !== undefined : target === 'tasks' ? tasksShown : hasSubagents
   const showable = (kind: SheetKind): boolean =>
@@ -407,11 +417,19 @@ function SessionView(props: AppProps): React.ReactElement {
     if (button === WHEEL_UP || button === WHEEL_DOWN) {
       const rows = (button === WHEEL_UP ? -1 : 1) * WHEEL_ROWS
       if (sheetOpen) {
-        if (sheetRef.current !== 'agents') setSheetScroll(current => Math.max(0, Math.min(sheetMaxScroll, Math.min(current, sheetMaxScroll) + rows)))
+        setSheetFollowing(false)
+        setSheetScroll(current => Math.max(0, Math.min(sheetMaxScroll, Math.min(current, sheetMaxScroll) + rows)))
       } else if ((!props.inputBlocked || props.inspectionParent !== undefined) && !composer.blocked) scroll.current?.scroll(rows)
     } else if (button === 0 && pressed && !sheetOpen && interaction === undefined) scroll.current?.press(row)
   }
-  usePaste(composer.paste, { isActive: sheet === undefined && interaction === undefined && props.inputBlocked !== true && props.inspection === undefined && !composer.submitting })
+  // Keep bracketed paste enabled for the whole mounted terminal. Modal hooks
+  // still receive their own paste events, while this listener ignores them;
+  // keeping one owner avoids a mode-off/mode-on gap when fullscreen opens a
+  // sheet or an interaction replaces the composer.
+  usePaste(text => {
+    if (sheetRef.current === undefined && interaction === undefined && props.inputBlocked !== true
+      && props.inspection === undefined && !composer.submitting) composer.paste(text)
+  })
   useInput((text, key) => {
     if (props.inspection !== undefined) return
     // Fullscreen turns on SGR mouse reports, which Ink passes on as unknown
@@ -436,10 +454,15 @@ function SessionView(props: AppProps): React.ReactElement {
       if (key.tab) { showSheet(stepSheet(key.shift ? -1 : 1)); return }
       if (key.ctrl && text === 'o' && props.goal !== undefined) { toggleSheet('goal'); return }
       if (key.ctrl && text === 'g' && hasSubagents) { toggleSheet('agents'); return }
-      if (sheetRef.current === 'agents') {
+      if (key.pageUp || key.pageDown) {
+        setSheetFollowing(false)
+        setSheetScroll(current => Math.max(0, Math.min(sheetMaxScroll, Math.min(current, sheetMaxScroll) + (key.pageUp ? -1 : 1) * sheetRowsShown)))
+        return
+      }
+      if (sheetRef.current === 'agents' && (props.subagents?.length ?? 0) > 0) {
         const children = props.subagents ?? []
         if (key.upArrow || (key.ctrl && text === 'p')) pointAt(Math.max(0, agentRef.current - 1))
-        if (key.downArrow || (key.ctrl && text === 'n')) pointAt(Math.min(children.length - 1, agentRef.current + 1))
+        if (key.downArrow || (key.ctrl && text === 'n')) pointAt(Math.max(0, Math.min(children.length - 1, agentRef.current + 1)))
         if (key.home) pointAt(0)
         if (key.end) pointAt(Math.max(0, children.length - 1))
         const child = children[agentRef.current]
@@ -447,12 +470,10 @@ function SessionView(props: AppProps): React.ReactElement {
         return
       }
       if (key.return) { openSheet(undefined); return }
-      if (key.upArrow || (key.ctrl && text === 'p')) setSheetScroll(current => Math.max(0, Math.min(current, sheetMaxScroll) - 1))
-      if (key.downArrow || (key.ctrl && text === 'n')) setSheetScroll(current => Math.min(sheetMaxScroll, current + 1))
-      if (key.pageUp) setSheetScroll(current => Math.max(0, Math.min(current, sheetMaxScroll) - sheetRowsShown))
-      if (key.pageDown) setSheetScroll(current => Math.min(sheetMaxScroll, current + sheetRowsShown))
-      if (key.home) setSheetScroll(0)
-      if (key.end) setSheetScroll(Number.MAX_SAFE_INTEGER)
+      if (key.upArrow || (key.ctrl && text === 'p')) { setSheetFollowing(false); setSheetScroll(current => Math.max(0, Math.min(current, sheetMaxScroll) - 1)) }
+      if (key.downArrow || (key.ctrl && text === 'n')) { setSheetFollowing(false); setSheetScroll(current => Math.min(sheetMaxScroll, current + 1)) }
+      if (key.home) { setSheetFollowing(false); setSheetScroll(0) }
+      if (key.end) { setSheetFollowing(false); setSheetScroll(Number.MAX_SAFE_INTEGER) }
       return
     }
     if (props.quitting) props.onQuitDismiss?.()
@@ -648,34 +669,44 @@ function SessionView(props: AppProps): React.ReactElement {
   // An interaction replaces the chrome, so the blank that opens the chrome
   // opens the interaction instead and is charged here, not to the interaction.
   const openLimit = claim(interaction !== undefined && budget.chrome.gap ? 1 : 0)
-  const interactionLimit = claim(interaction === undefined ? 0 : menuLimit)
+  // A tall picker is a list worth scanning, such as every model: it takes up
+  // to half the screen, and never less than a menu would.
+  const interactionLimit = claim(interaction === undefined ? 0
+    : interaction.kind === 'questions' ? budget.dynamic
+      : interaction.kind === 'select' && interaction.tall === true
+        ? Math.max(menuLimit, Math.min(budget.items, Math.floor(budget.dynamic / 2)))
+        : menuLimit)
   // Under the input, with the chrome; an interaction replaces both. Claimed
   // before anything above the input, so the input's row never depends on
   // what streams over it.
-  const subagentLimit = claim(hasSubagents && interaction === undefined ? 1 : 0)
+  const subagentLimit = claim((hasSubagents || props.inspectionParent !== undefined) && interaction === undefined ? 1 : 0)
   // An open sheet takes every row the interaction leaves. Below five it
   // replaces the whole region, composer included, so it can still be read.
   const sheetColor = (kind: SheetKind): PaletteColor =>
     kind === 'goal' ? goalState(props.goal, copy)?.color ?? PALETTE.asking
-      : kind === 'agents' && props.subagents?.some(entry => entry.state === 'working') === true ? PALETTE.running : PALETTE.asking
+      : kind === 'agents' && (props.subagents?.some(entry => entry.state === 'working') === true
+        || props.workflows?.some(run => run.state === 'working') === true) ? PALETTE.running : PALETTE.asking
   const tabs: readonly SheetTab[] = showing.map(kind => ({
-    label: kind === 'goal' ? copy.goalTitle : kind === 'tasks' ? taskTab(props.todos ?? [], copy) : subagentTab(props.subagents ?? [], copy),
+    label: kind === 'goal' ? copy.goalTitle : kind === 'tasks' ? taskTab(props.todos ?? [], copy)
+      : subagentTab(props.subagents ?? [], copy, props.workflows),
     color: sheetColor(kind), current: kind === sheet,
   }))
   // The footer names what the keys do here. Cycling is named only when there is somewhere to go.
   const sheetKeys = (kind: SheetKind): string => [
-    kind === 'agents' ? copy.sheetSelect : copy.sheetScroll,
-    ...kind === 'agents' ? [copy.subagentsOpen] : [],
+    kind === 'agents' && (props.subagents?.length ?? 0) > 0 ? copy.sheetSelect : copy.sheetScroll,
+    ...kind === 'agents' && (props.subagents?.length ?? 0) > 0 ? [copy.subagentsOpen] : [],
     ...showing.length > 1 ? [copy.sheetCycle] : [],
     copy.sheetClose,
   ].join(' \u00b7 ')
-  const sheetView: { readonly color: PaletteColor, readonly lines: readonly SheetLine[], readonly keys: string, readonly follow?: number } | undefined =
+  const subagentFollow: { readonly follow?: SheetFollow } = sheetFollowing && (props.subagents?.length ?? 0) > 0
+    ? { follow: subagentLine(agentIndex, props.workflows?.length) } : {}
+  const sheetView: { readonly color: PaletteColor, readonly lines: readonly SheetLine[], readonly keys: string, readonly follow?: SheetFollow } | undefined =
     sheet === undefined || !showable(sheet) ? undefined
       : {
         color: sheetColor(sheet), keys: sheetKeys(sheet),
         ...sheet === 'goal' ? { lines: goalSheet(props.goal!, copy) }
           : sheet === 'tasks' ? { lines: taskSheet(props.todos!, copy) }
-          : { lines: subagentSheet(props.subagents!, agentIndex, copy), follow: subagentLine(agentIndex) },
+          : { lines: subagentSheet(props.subagents ?? [], agentIndex, copy, props.workflows), ...subagentFollow },
       }
   const sheetLimit = claim(sheetView === undefined ? 0 : unclaimed)
   const sheetStandalone = sheetView !== undefined && sheetLimit < 5
@@ -710,7 +741,7 @@ function SessionView(props: AppProps): React.ReactElement {
   // Compaction's progress is the header's to show, in place of the command.
   const commandLimit = claim(props.compactPhase === undefined && props.command !== undefined ? 1 : 0)
   const noticeLimit = claim(props.notice === undefined ? 0 : budget.notice)
-  const bakingLimit = claim(props.baking === undefined ? 0 : 1)
+  const installingLimit = claim(props.installing === undefined ? 0 : 1)
   const menuRows = Math.max(0, completionLimit - menuStatusRows)
   const menuWindow = selectionWindow(matches ?? [], selected, menuRows, props.completionLimit)
   const visibleMatches = menuWindow.shown
@@ -754,12 +785,12 @@ function SessionView(props: AppProps): React.ReactElement {
       footer={copy.attachmentsHelp}
     />
     {composer.submitting && sendingLimit > 0 && <Text color={PALETTE.waiting} wrap="truncate-end">{copy.attachmentsSending}</Text>}
-    {interaction !== undefined && <InteractionView key={interaction.id} interaction={interaction} copy={copy} limit={interactionLimit} onAnswer={props.onAnswer} />}
+    {interaction !== undefined && <InteractionView key={interaction.id} interaction={interaction} copy={copy} limit={interaction.kind === 'questions' ? menuLimit : interactionLimit} height={interactionLimit} columns={size.columns} onAnswer={props.onAnswer} />}
     {props.command !== undefined && commandLimit > 0 && <Box flexShrink={0} maxHeight={commandLimit} overflowY="hidden">
       <Text wrap="truncate-end">{copy.command}: {props.command}</Text>
     </Box>}
     {props.notice !== undefined && <Notice text={props.notice} limit={noticeLimit} more={copy.moreLines} />}
-    {props.baking !== undefined && bakingLimit > 0 && <Baking label={props.baking.label} level={props.baking.level}
+    {props.installing !== undefined && installingLimit > 0 && <Installing step={props.installing}
       glyphs={props.frame === 'classic' ? 'ascii' : 'unicode'} clock={animate} />}
     {props.quitting && quitLimit > 0 && <Text color={PALETTE.waiting} wrap="truncate-end">{copy.quit}</Text>}
     {matches !== undefined && interaction === undefined && completionLimit > 0 && <Box flexDirection="column" flexShrink={0} height={completionLimit} overflowY="hidden">
@@ -785,12 +816,11 @@ function SessionView(props: AppProps): React.ReactElement {
     const { context: _context, usage: _usage, plan: _plan, goal: _goal, permission: _permission, thinkingLevel: _thinkingLevel,
       compactPhase: _compactPhase, autoCompacting: _autoCompacting, ...childProps } = props
     return <SessionView {...childProps} {...child} key={child.sessionId} inspection={undefined}
-      inspectionParent={props.sessionId} inputBlocked={true} stopping={false}
+      inspectionParent={props.sessionId} inspectionLabel={child.label} inputBlocked={true} stopping={false}
       // The parent's children stay listed under the input, inert here, so the
       // input keeps its row while a child is open and after it closes.
       pending={[]} todos={undefined} subagents={props.subagents ?? []} attachments={[]} context={child.context}
-      interaction={undefined} command={undefined}
-      notice={`${child.label} · ${copy.subagentBack}`} />
+      interaction={undefined} command={undefined} notice={undefined} />
   }
   const controlsView = sheetStandalone ? sheetBlock : <>
         {!fullscreen && sheet === undefined && <LiveRegion rows={liveRows} budget={budget} limit={liveLimit} result={result} clock={animate} />}
@@ -834,9 +864,11 @@ function SessionView(props: AppProps): React.ReactElement {
               clock={clock}
               motion={animate !== undefined}
               compact={screenReader}
-              {...subagentLimit === 0 ? {} : { footer: (columns: number) =>
-                <SubagentRow entries={props.subagents ?? []} copy={copy} columns={columns} focused={focus === 'subagents'}
-                  hint={copy.subagentsKey} /> }}
+              {...subagentLimit === 0 ? {} : { footer: (columns: number) => props.inspectionParent === undefined
+                ? <SubagentRow entries={props.subagents ?? []} workflows={props.workflows} copy={copy} columns={columns} focused={focus === 'subagents'}
+                  hint={copy.subagentsKey} />
+                : <InspectionBar label={props.inspectionLabel ?? props.sessionId} entries={props.subagents ?? []} id={props.sessionId}
+                  working={props.status === 'running'} copy={copy} columns={columns} /> }}
             >
               {panels}
             </Chrome>

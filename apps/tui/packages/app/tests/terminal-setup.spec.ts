@@ -32,7 +32,7 @@ async function connected(env: Record<string, string>) {
   const terminal: TerminalHost = { env, platform: 'linux', home, now: () => NOW }
   let controller!: SessionController
   const handle = await openSession(fixture.ctx, {}, new AbortController().signal, (agent, selection) => {
-    controller = new SessionController(fixture.ctx, agent, copy, [], () => {},
+    controller = new SessionController(fixture.ctx, agent, copy, { refs: [] }, () => {},
       { attachmentMaxBytes: 1048576, attachmentLimit: 8, terminal }, selection)
   })
   cleanup.push(async () => { controller.close(); await controller.drain(); await handle.dispose() })

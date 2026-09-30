@@ -3,11 +3,12 @@ import { describe, expect, it } from 'bun:test'
 import type { Context } from '@deepseek-ai/cordis'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'
 import {
-  cliProxyApi, cliProxyEndpoints, cliProxyModels, cliProxyUpgradeNotice, configureCliProxyApi, fetchCliProxyModels,
-  planCliProxyRouteUpgrade, upgradeCliProxyRoute,
+  CliProxyCheckError, cliProxyApi, cliProxyEndpoints, cliProxyFailureText, cliProxyModels, cliProxyUpgradeNotice,
+  configureCliProxyApi, fetchCliProxyModels, planCliProxyRouteUpgrade, upgradeCliProxyRoute,
 } from '../src/cliproxyapi.ts'
+import type { LoginPrompt } from '../src/login.ts'
 
-const labels = { url: 'CLIProxyAPI base URL', key: 'CLIProxyAPI API key' }
+const labels = dictionaries.en
 
 describe('CLIProxyAPI endpoints', () => {
   it('accepts the published root, /v1, and /backend-api forms', () => {
@@ -108,9 +109,9 @@ it('saves a validated URL and model route without placing the key in settings', 
     expect(url).toBe('https://proxy.example/v1/models?client_version=pi')
     return Response.json({ models: [{ slug: 'gpt-test' }, { slug: 'claude-test', owned_by: 'anthropic' }] })
   }) as typeof fetch
-  const questions: string[] = []
+  const questions: LoginPrompt[] = []
   const count = await configureCliProxyApi(ctx, async question => {
-    questions.push(question.message)
+    questions.push(question)
     return prompts.shift()!
   }, new AbortController().signal, labels, fetcher)
   expect(count).toBe(2)
@@ -118,9 +119,9 @@ it('saves a validated URL and model route without placing the key in settings', 
   expect(op!.value.baseURL).toBe('https://proxy.example/v1')
   expect(op!.value.models).toMatchObject([{ id: 'gpt-test' },
     { id: 'claude-test', api: 'anthropic-messages', baseURL: 'https://proxy.example' }])
-  expect(questions).toEqual([
-    '1/2 · CLIProxyAPI base URL [http://127.0.0.1:8317]',
-    '2/2 · CLIProxyAPI API key',
+  expect(questions).toMatchObject([
+    { kind: 'text', title: 'Sign in · CLIProxyAPI', message: 'Base URL', step: { index: 1, count: 2 }, fallback: 'http://127.0.0.1:8317' },
+    { kind: 'secret', message: 'API key', step: { index: 2, count: 2 }, hint: `proxy.example · ${labels.keyStoredLocally}` },
   ])
   expect(writes[0]).toEqual(['credential', 'test-key'])
   // The multi-credential gateway defaults: wait out a credential cooldown, keep a session on one credential.
@@ -164,16 +165,16 @@ it('uses the saved connection URL when refreshing models', async () => {
       return undefined
     },
   } as unknown as Context
-  const questions: string[] = []
+  const questions: LoginPrompt[] = []
   const fetcher = (async (url: string) => {
     expect(url).toBe('https://proxy.example/prefix/v1/models?client_version=pi')
     return Response.json({ models: [{ slug: 'gpt-test' }] })
   }) as typeof fetch
   await configureCliProxyApi(ctx, async question => {
-    questions.push(question.message)
+    questions.push(question)
     return question.kind === 'text' ? '' : 'new-key'
   }, new AbortController().signal, labels, fetcher)
-  expect(questions[0]).toBe('1/2 · CLIProxyAPI base URL [https://proxy.example/prefix]')
+  expect(questions[0]).toMatchObject({ fallback: 'https://proxy.example/prefix' })
 })
 
 describe('upgrading a route an earlier login wrote', () => {
@@ -279,5 +280,84 @@ describe('upgrading a route an earlier login wrote', () => {
         + 'run /login cliproxyapi for: waiting out account cooldowns, one account per session')
     expect(cliProxyUpgradeNotice({ kind: 'upgraded', changes }, dictionaries.zh))
       .toBe('已为此版本更新 CLIProxyAPI 路由：等待账号冷却结束、每个会话固定一个账号')
+  })
+})
+
+describe('a proxy that does not validate', () => {
+  const ctx = (): Context => ({
+    get(name: string) {
+      if (name === 'credentials') return { resolve: async () => undefined, set: async () => {} }
+      if (name === 'settings') return { get: () => undefined, mutate: async () => {} }
+      return undefined
+    },
+  }) as unknown as Context
+
+  it('says which field to ask again, and words each failure', async () => {
+    const signal = new AbortController().signal
+    const failure = async (fetcher: typeof fetch) => {
+      const error = await fetchCliProxyModels('http://127.0.0.1:18399/v1/models', 'k', signal, fetcher).catch((thrown: unknown) => thrown)
+      if (!(error instanceof CliProxyCheckError)) throw new Error(`expected a check failure, got ${String(error)}`)
+      return [error.field, cliProxyFailureText(error.failure, labels)]
+    }
+    const refused = Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }) })
+    expect(await failure((async () => { throw refused }) as unknown as typeof fetch))
+      .toEqual(['url', 'Could not reach 127.0.0.1:18399 (ECONNREFUSED)'])
+    expect(await failure((async () => { throw Object.assign(new TypeError('fetch failed'), { cause: new Error('unexpected redirect') }) }) as unknown as typeof fetch))
+      .toEqual(['url', labels.cliProxyRedirect])
+    expect(await failure((async () => { throw new DOMException('timed out', 'TimeoutError') }) as unknown as typeof fetch))
+      .toEqual(['url', 'No answer within 15 seconds from 127.0.0.1:18399'])
+    expect(await failure((async () => new Response('no', { status: 401 })) as unknown as typeof fetch))
+      .toEqual(['key', 'The proxy rejected this API key (HTTP 401)'])
+    expect(await failure((async () => new Response('no', { status: 404 })) as unknown as typeof fetch))
+      .toEqual(['url', 'No CLIProxyAPI model list at this address (HTTP 404)'])
+    expect(await failure((async () => new Response('<html>', { status: 200 })) as unknown as typeof fetch))
+      .toEqual(['url', labels.cliProxyNotProxy])
+  })
+
+  it('lets the caller abort instead of reporting a failure', async () => {
+    const abort = new AbortController()
+    abort.abort(new Error('stopped'))
+    const fetcher = (async () => { throw new TypeError('fetch failed') }) as unknown as typeof fetch
+    await expect(fetchCliProxyModels('http://127.0.0.1:18399/v1/models', 'k', abort.signal, fetcher)).rejects.toThrow('fetch failed')
+  })
+
+  it('asks for the key again after a rejection, and the address again, with what was typed, after an unreachable proxy', async () => {
+    const answers = ['http://proxy.example', 'wrong-key', 'right-key', 'bad url with spaces', 'http://good.example', 'right-key']
+    const statuses = [401, 0, 200]
+    const questions: LoginPrompt[] = []
+    const fetcher = (async (url: string) => {
+      const status = statuses.shift()!
+      if (status === 0) throw Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('refused'), { code: 'ECONNREFUSED' }) })
+      if (status !== 200) return new Response('no', { status })
+      expect(url).toBe('http://good.example/v1/models?client_version=pi')
+      return Response.json({ data: [{ id: 'gpt-test' }] })
+    }) as unknown as typeof fetch
+    const checked: string[] = []
+    const count = await configureCliProxyApi(ctx(), async question => { questions.push(question); return answers.shift()! },
+      new AbortController().signal, labels, fetcher, host => checked.push(host))
+    expect(count).toBe(1)
+    expect(questions.map(question => [question.kind, question.error, question.initial])).toEqual([
+      ['text', undefined, undefined],
+      ['secret', undefined, undefined],
+      // Rejected: the key alone, fresh.
+      ['secret', 'The proxy rejected this API key (HTTP 401)', undefined],
+      // Unreachable: back to the address, which keeps what was typed.
+      ['text', 'Could not reach proxy.example (ECONNREFUSED)', 'http://proxy.example'],
+      // Unreadable address: refused before any request.
+      ['text', labels.cliProxyBadUrl, 'bad url with spaces'],
+      // The key survives an address problem, so Enter checks it again.
+      ['secret', undefined, 'right-key'],
+    ])
+    expect(checked).toEqual(['proxy.example', 'proxy.example', 'good.example'])
+  })
+
+  it('ends the setup when the user declines a field', async () => {
+    const fetcher = (async () => new Response('no', { status: 401 })) as unknown as typeof fetch
+    const answers: (string | Error)[] = ['', 'wrong-key', new Error('declined')]
+    await expect(configureCliProxyApi(ctx(), async () => {
+      const next = answers.shift()!
+      if (next instanceof Error) throw next
+      return next
+    }, new AbortController().signal, labels, fetcher)).rejects.toThrow('declined')
   })
 })

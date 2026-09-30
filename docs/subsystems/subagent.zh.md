@@ -486,8 +486,73 @@ Singleton settings owner read when delegation tools are composed for a Session.
  * Read a detached selection preference for the next eligible Session composition.
  * @returns the enabled state and exact allowed routes.
  */
-current(): SubagentModelSelectionSettings
+current(): Pick<SubagentModelSelectionSettings, 'enabled' | 'allowedModels'>
+
+/**
+ * Read the task router for the delegation being made now.
+ * @returns the router settings, or undefined while routing is off.
+ */
+router(): SubagentRouterSettings | undefined
+
+/**
+ * Ask the router how it recognizes each model new Sessions may use, sending
+ * exactly what a routed delegation sends about them, so the user can see
+ * which models need a hint. It asks even while routing is off.
+ * @param llm - Live LLM runtime that describes each route.
+ * @param signal - The caller's lifetime.
+ * @returns the router's view of each allowed model, in their order.
+ */
+describeRoutes(llm: Pick<LlmRuntime, 'resolveModelInfo'> | undefined, signal: AbortSignal): Promise<readonly RouterRouteView[]>
+
+/**
+ * The router's bearer token, resolved afresh for each request so a sign-in
+ * or sign-out reaches the next delegation.
+ * @returns the token, or undefined when none is stored or exported.
+ */
+async routerToken(): Promise<string | undefined>
+
+/**
+ * Whether a router token is present and where it comes from, without the token.
+ * @returns the token's reference, presence, source, and whether sign-in can replace it.
+ */
+async routerTokenStatus(): Promise<RouterTokenStatus>
+
+/**
+ * The router account the current token belongs to.
+ * @param signal - The caller's lifetime.
+ * @returns the account's address, or undefined without a token or when the router does not know it as an account's.
+ */
+async routerAccount(signal: AbortSignal): Promise<string | undefined>
+
+/**
+ * Ask the router to email a one-time sign-in code. The first sign-in with
+ * an address registers it. Refused before anything is sent when a token
+ * from the environment would shadow the one signing in stores.
+ * @param email - The address to sign in with.
+ * @param signal - The caller's lifetime.
+ */
+async requestSignInCode(email: string, signal: AbortSignal): Promise<void>
+
+/**
+ * Trade an emailed code for a router token and store it, so routed
+ * delegations and the calibration list send it from the next request on.
+ * @param email - The address the code was sent to.
+ * @param code - The code as the user typed it.
+ * @param signal - The caller's lifetime.
+ * @returns the signed-in account's address.
+ */
+async signIn(email: string, code: string, signal: AbortSignal): Promise<string>
+
+/**
+ * Revoke the stored router token at the router and remove it. The token is
+ * removed even when the router cannot be reached, so signing out always
+ * stops this machine from sending it.
+ * @param signal - The caller's lifetime.
+ */
+async signOut(signal: AbortSignal): Promise<void>
 ```
+
+Types: [LlmRuntime](llm-streaming.zh.md)
 
 Source: [`packages/subagent/tool-subagent/src/model-selection-settings.ts`](../../packages/subagent/tool-subagent/src/model-selection-settings.ts)
 

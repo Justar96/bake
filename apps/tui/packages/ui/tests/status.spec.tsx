@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render } from '../../../tests/render.tsx'
 import { App, type AppProps } from '../src/app.tsx'
 import { Tasks } from '../src/tasks.tsx'
-import { SubagentRow } from '../src/subagents.tsx'
+import { InspectionBar, SubagentRow } from '../src/subagents.tsx'
 import { emptyTranscript } from '../src/transcript.ts'
 import { dictionaries } from '../src/copy.ts'
 import type { GitState } from '../src/git.ts'
@@ -17,6 +17,58 @@ const statusRow = (frame: string | undefined) => (frame ?? '').split('\n').findL
 /** The subagents' row, under the input's base rule and over the status line, its icon in the rail. */
 const agentRow = (frame: string | undefined) => (frame ?? '').split('\n').find(line => /^[↳>] (?:Subagents|子代理) /u.test(line)) ?? ''
 
+it.each(['en', 'zh'] as const)('shows workflow progress and distinguishes its members from direct delegation in %s', async locale => {
+  const copy = dictionaries[locale]
+  const ui = render(<App {...props({ copy, workflows: [{ id: 'run', name: 'review', state: 'working', completed: 1, total: 2 }],
+    subagents: [
+      { id: 'member', label: 'Review files', state: 'working', detail: 'One-shot · Inspect', workflow: 'review', inspectable: true },
+      { id: 'direct', label: 'Check docs', state: 'saved', outcome: 'completed', detail: 'Continuable', inspectable: true },
+    ],
+  })} />)
+  expect(ui.lastFrame()).toContain(`${copy.workflowTitle} review`)
+  ui.stdin.write('\x07')
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain(`${copy.workflowTitle} review · ${copy.subagentWorking} · 1/2 ${copy.subagentCountDone}`))
+  expect(ui.lastFrame()).toContain(copy.subagentDirect)
+  expect(ui.lastFrame()).toContain('One-shot · Inspect')
+  await expect(ui.lastFrame() + '\n').toMatchFileSnapshot(`./expected/workflow.${locale}.txt`)
+})
+
+it('pages through workflow-only progress without a child selection', async () => {
+  const workflows = Array.from({ length: 40 }, (_, index) => ({ id: `run-${index + 1}`, name: `workflow-${index + 1}`, state: 'working' as const, completed: index, total: 40 }))
+  const ui = render(<App {...props({ workflows })} />)
+  ui.stdin.write('\x07')
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain('Workflow workflow-1'))
+  expect(ui.lastFrame()).not.toContain('Workflow workflow-40')
+  ui.stdin.write('\x1b[6~')
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain('Workflow workflow-14'))
+  ui.stdin.write('\x1b[F')
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain('Workflow workflow-40'))
+})
+
+it('opens workflow progress before any child exists and preserves the draft', async () => {
+  const onInspectSubagent = vi.fn(), onSubmit = vi.fn()
+  const ui = render(<App {...props({ onInspectSubagent, onSubmit,
+    workflows: [{ id: 'run', name: 'audit', state: 'working', completed: 0, total: 0 }],
+  })} />)
+  expect(ui.lastFrame()).toContain('Workflow audit')
+  ui.stdin.write('draft')
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain('draft'))
+  ui.stdin.write('\x07')
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain(dictionaries.en.workflowNoChildren))
+  ui.stdin.write('\x1b[B\r')
+  expect(onInspectSubagent).not.toHaveBeenCalled()
+  expect(onSubmit).not.toHaveBeenCalled()
+  ui.stdin.write('\x1b')
+  await vi.waitFor(() => expect(ui.lastFrame()).not.toContain(dictionaries.en.sheetClose))
+  expect(ui.lastFrame()).toContain('draft')
+  for (const columns of [8, 20, 40, 80]) {
+    const row = renderToString(<SubagentRow entries={[]} workflows={[{ id: 'run', name: 'audit', state: 'working', completed: 0, total: 0 }]}
+      copy={dictionaries.en} columns={columns} />, { columns })
+    expect(row.split('\n')).toHaveLength(1)
+    expect(stringWidth(row)).toBeLessThanOrEqual(columns)
+  }
+})
+
 it.each(['en', 'zh'] as const)('counts the children on one row under the input in %s', async locale => {
   const ui = render(<App {...props({ copy: dictionaries[locale], subagents: [
     { id: 'child-1', label: 'Review tests', state: 'working', detail: 'Continuable', inspectable: true },
@@ -26,10 +78,10 @@ it.each(['en', 'zh'] as const)('counts the children on one row under the input i
     { id: 'child-5', label: 'Lost', state: 'issue', detail: 'Unreadable', inspectable: false },
   ] })} />)
   const copy = dictionaries[locale]
-  // Names are the sheet's; the row counts what is working and what cannot be read,
-  // in lowercase and without a colon, and names its key at the right edge.
+  // Names are the sheet's; the row counts what is working, what is done, and what
+  // cannot be read, in lowercase and without a colon, and names its key at the right edge.
   expect(agentRow(ui.lastFrame())).toMatch(new RegExp(
-    `^↳ ${copy.subagentsTitle} 5 · 1 ${copy.subagentCountWorking} · 1 ${copy.subagentUnreadable} +Ctrl\\+G$`, 'u'))
+    `^↳ ${copy.subagentsTitle} 5 · 1 ${copy.subagentCountWorking} · 1 ${copy.subagentCountDone} · 1 ${copy.subagentUnreadable} +Ctrl\\+G$`, 'u'))
   expect(statusRow(ui.lastFrame())).not.toContain(dictionaries[locale].subagentsTitle)
   // The row sits between the base rule and the status line.
   const lines = (ui.lastFrame() ?? '').split('\n')
@@ -297,6 +349,38 @@ it('opens the agents sheet from the shortcut, inspects the child, and preserves 
   await vi.waitFor(() => expect(ui.lastFrame()).toContain('Unsent parent draft'))
 })
 
+it('names the open child and the way back on a bar under the input', () => {
+  const entries = [
+    { id: 'other', label: 'Earlier', state: 'saved', outcome: 'completed', detail: 'One-shot', inspectable: true },
+    { id: 'child', label: 'Review', state: 'working', detail: 'Continuable', inspectable: true },
+  ] as const
+  const inspection = { sessionId: 'child', label: 'Review', committed: emptyTranscript,
+    live: [], status: 'running' as const, model: 'mock/child-model' }
+  const frame = render(<App {...props({ subagents: entries, inspection })} />).lastFrame() ?? ''
+  const lines = frame.split('\n')
+  const bar = lines.find(line => /^↳ Review /u.test(line)) ?? ''
+  expect(bar).toMatch(/^↳ Review 2\/2 · Working · Read-only +Esc back to parent$/)
+  // The bar takes the slot of the parent's row, and the row is not drawn beside it.
+  expect(lines.at(-2)).toBe(bar)
+  expect(agentRow(frame)).toBe('')
+  for (const columns of [8, 12, 18, 20, 40, 59, 60, 80]) {
+    const row = renderToString(<InspectionBar label="Review" entries={entries} id="child" working copy={dictionaries.en} columns={columns} />, { columns })
+    expect(row.split('\n'), `${columns}`).toHaveLength(1)
+    expect(stringWidth(row), `${columns}`).toBeLessThanOrEqual(columns)
+    // The way back is never the part given up while any of it fits.
+    if (columns >= 18) expect(row, `${columns}`).toContain('Esc back to parent')
+  }
+  const zh = renderToString(<InspectionBar label="Review" entries={entries} id="child" working copy={dictionaries.zh} columns={80} />, { columns: 80 })
+  expect(zh).toMatch(/^↳ Review 2\/2 · 工作中 · 只读 +Esc 返回父会话$/u)
+})
+
+it('keeps the bar for a child the catalog does not list', () => {
+  const inspection = { sessionId: 'gone', label: 'Gone', committed: emptyTranscript,
+    live: [], status: 'idle' as const, model: 'mock/child-model' }
+  const frame = render(<App {...props({ subagents: [], inspection })} />).lastFrame() ?? ''
+  expect(frame.split('\n').at(-2)).toMatch(/^↳ Gone · Read-only +Esc back to parent$/)
+})
+
 it('selects the subagents row with Down, and moves the pointer past a child with no transcript', async () => {
   const onInspectSubagent = vi.fn()
   const onSubmit = vi.fn()
@@ -304,13 +388,14 @@ it('selects the subagents row with Down, and moves the pointer past a child with
   const saved = { id: 'old', label: 'Earlier', state: 'saved', outcome: 'completed', detail: 'One-shot', inspectable: true } as const
   const ui = render(<App {...props({ onInspectSubagent, onSubmit, subagents: [remote, saved] })} />)
   ui.stdin.write('\x1b[B')
-  await vi.waitFor(() => expect(agentRow(ui.lastFrame())).toMatch(/^> Subagents 2 · 1 working +Enter opens$/))
+  await vi.waitFor(() => expect(agentRow(ui.lastFrame())).toMatch(/^> Subagents 2 · 1 working · 1 done +Enter opens$/))
   ui.stdin.write('\r')
   // The pointer starts on the first child it can open.
   await vi.waitFor(() => expect(ui.lastFrame()).toContain('▸ ○ Earlier  Completed · Saved'))
-  expect(ui.lastFrame()).toContain('Remote run · run-1 · No local transcript available')
+  expect(ui.lastFrame()).not.toContain('Remote run')
   ui.stdin.write('\x1b[A')
   await vi.waitFor(() => expect(ui.lastFrame()).toContain('▸ ● remote'))
+  expect(ui.lastFrame()).toContain('Remote run · run-1 · No local transcript available')
   // Enter on a child it cannot open keeps the sheet.
   ui.stdin.write('\r')
   await new Promise(resolve => setTimeout(resolve, 20))
@@ -318,6 +403,27 @@ it('selects the subagents row with Down, and moves the pointer past a child with
   ui.stdin.write('\x1b[B\r')
   await vi.waitFor(() => expect(onInspectSubagent).toHaveBeenCalledWith('old'))
   expect(onSubmit).not.toHaveBeenCalled()
+})
+
+it('summarises a crowded subagent sheet and gives only the selected child a detail line', async () => {
+  const subagents = Array.from({ length: 10 }, (_, index) => ({
+    id: `c${index}`, label: `Child ${index}`, detail: 'One-shot', inspectable: true,
+    ...index < 2 ? { state: 'working' as const }
+      : index === 2 ? { state: 'saved' as const, outcome: 'failed' as const }
+      : { state: 'saved' as const, outcome: 'completed' as const },
+  }))
+  const ui = render(<App {...props({ subagents })} />)
+  ui.stdin.write('\x07')
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain(' Subagents 10 · 2 working · 7 done '))
+  const frame = ui.lastFrame() ?? ''
+  expect(frame).toMatch(/━+─+ {2}7\/10 done · 2 working · 1 failed/)
+  expect(frame).toContain('▸ ● Child 0  Working')
+  expect(frame).toContain('One-shot · c0')
+  expect(frame).not.toContain('One-shot · c1')
+  expect(frame).not.toContain('One-shot · c5')
+  ui.stdin.write('\x1b[B')
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain('One-shot · c1'))
+  expect(ui.lastFrame()).not.toContain('One-shot · c0')
 })
 
 it('toggles each sheet on its own key and cycles the open one with Tab both ways', async () => {

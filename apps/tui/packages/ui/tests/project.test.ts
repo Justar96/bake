@@ -70,11 +70,15 @@ describe('project', () => {
     expect(project(event({ type: 'tool/result', surfaceOp: 'replace', data }), bare())).toEqual([])
   })
 
-  it('surfaces a failed turn as an error notice', () => {
-    expect(project(event({
+  it('surfaces a failed turn as an error notice, with the way to a key when one is missing', () => {
+    const failed = (code: string) => project(event({
       type: 'turn/end',
-      data: { turn: 1, reason: { kind: 'error', error: { code: 'MISSING_CREDENTIAL', message: 'no API key' } } },
-    }), bare())).toEqual([{ kind: 'notice', placement: 'turn-end', tone: 'error', text: 'MISSING_CREDENTIAL: no API key' }])
+      data: { turn: 1, reason: { kind: 'error', error: { code, message: 'no API key' } } },
+    }), bare())
+    expect(failed('SERVER')).toEqual([{ kind: 'notice', placement: 'turn-end', tone: 'error', text: 'SERVER: no API key' }])
+    expect(failed('MISSING_CREDENTIAL')).toEqual([{ kind: 'notice', placement: 'turn-end', tone: 'error',
+      text: `MISSING_CREDENTIAL: no API key\n${dictionaries.en.missingCredentialHint}` }])
+    expect(failed('AUTH')[0]).toMatchObject({ text: `AUTH: no API key\n${dictionaries.en.authFailedHint}` })
   })
 
   it('words a cancelled turn and a compaction in the reader locale', () => {

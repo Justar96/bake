@@ -68,6 +68,8 @@ The consumer owns the model-facing schema, including the explicit-request usage 
 
 For a root transport execution (`exec.parent` absent), the tool projects the run into the calling Agent's Session with four log-only events: run-start after `start()` returns, member starts and endings filtered by `run.id`, then run-end only after the result is available and disposal reaches quiescence. Nested transport calls execute normally but write no record. The first failed Session append disables later recording for that run with one warning, leaving either no record or a legal continuous prefix without changing the tool result or cleanup. The package invariant rejects duplicate starts, unpaired members, terminal events with open members, and updates after run-end on both cold load and live append, while accepting missing terminal suffixes.
 
+When `sessionProjections` is available, the plugin registers the `workflows` projection with run names, members, phases, and recorded outcomes. An open run becomes `unfinished` at a turn boundary; clients also require the owning agent to be running before displaying it as active. An inherited fork seed clears parent runs from the child’s projection. Registration is disposed with the plugin, and the projection adds no model-visible messages.
+
 ### Render intent
 
 Decided up front per the [render-intent Agent Note](../../../.agents/notes/implemented/architecture/2026-07-02-tool-render-intent-union.md): a `generic` card titled `workflow: <meta.name>`, read directly from `args.meta.name` — presentation is a pure function of args — with the script text carried as `rawInput`. The result keeps the generic card.

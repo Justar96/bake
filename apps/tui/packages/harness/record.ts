@@ -1,7 +1,7 @@
 /**
- * Session-event recorder. Appends every committed event of every session to a
- * newline-delimited JSON file. A real agent run then becomes a fixture the
- * component harness can replay with no harness runtime and no API key.
+ * Session-event recorder. Appends every committed event of the first root
+ * session to a newline-delimited JSON file. A real agent run then becomes a
+ * fixture the component harness can replay with no harness runtime and no API key.
  *
  * Recording is raw on purpose. The fixture holds `SessionEvent` values
  * exactly as the log commits them, because that is what `project()` consumes.
@@ -12,7 +12,7 @@
  *
  * ```sh
  * node --import tsx/esm apps/cli/src/bin.ts --profile headless \
- *   --patch ./tui/harness/record.patch.yml "list the files here"
+ *   --patch ./apps/tui/packages/harness/record.patch.yml "list the files here"
  * ```
  *
  * @module tui-recorder
@@ -38,7 +38,7 @@ export const Config: z<Config> = z.object({
 })
 
 /**
- * Record every committed session event to the configured file.
+ * Record committed events from the first root session to the configured file.
  *
  * @param ctx - the profile's Cordis context.
  * @param config - the fixture path.
@@ -47,7 +47,13 @@ export function apply(ctx: Context, config: Config): void {
   mkdirSync(dirname(config.path), { recursive: true })
   // Truncate on mount so a rerun replaces the fixture instead of growing it.
   writeFileSync(config.path, '')
-  ctx.effect(() => ctx.on('session/event', (_session: Session, event: SessionEvent) => {
+  let root: Session | undefined
+  ctx.effect(() => ctx.on('session/event', (session: Session, event: SessionEvent) => {
+    // A profile may create child sessions during the root turn. Fixtures replay
+    // one displayed transcript, so keep the first non-subagent session only.
+    if (session.header.origin === 'subagent') return
+    root ??= session
+    if (session !== root) return
     // Synchronous append. The process may exit immediately after the final
     // event, and a queued write would lose the end of the fixture.
     appendFileSync(config.path, `${JSON.stringify(event)}\n`)

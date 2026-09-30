@@ -1,6 +1,6 @@
 /** Terminal ownership and bounded application lifetime across session navigation. */
-import React from 'react'
-import { render, type Instance } from 'ink'
+import React, { useEffect } from 'react'
+import { render, useApp, type Instance } from 'ink'
 import type { Context } from '@deepseek-ai/cordis'
 import { App } from '@dsh-tui/ui/app.tsx'
 import { compactPath } from '@dsh-tui/ui/present.ts'
@@ -9,6 +9,7 @@ import type { FrameStyle } from '@dsh-tui/ui/layout.ts'
 import type { Clock } from '@dsh-tui/ui/activity.ts'
 import { resolveFrame } from './frame.ts'
 import { frameOutput, type FrameOutput } from './output.ts'
+import { editExternally, holdInput, type EditText, type SuspendTerminal } from './external-editor.ts'
 import { Preferences } from './preferences.ts'
 import { createSyntax } from './syntax.ts'
 import type { SessionOptions } from './session.ts'
@@ -18,12 +19,13 @@ import { bakeVersion, releaseRoot } from './release.ts'
 import { Updates } from './update.ts'
 import { WorkspaceGit } from './git.ts'
 import { cliProxyUpgradeNotice, upgradeCliProxyRoute } from './cliproxyapi.ts'
+import type { CredentialTargetConfig, LoginSources, SignInFlowConfig } from './login.ts'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 
 /**
  * Validated application options; no implicit defaults remain in the runner.
  *
- * Everything but the session choices and `credentialRefs` is the base layer
+ * Everything but the session choices and the sign-in sources is the base layer
  * of the `tui` settings namespace, which the user's settings override.
  */
 export interface RunnerOptions extends SessionOptions, AttachmentOptions {
@@ -37,7 +39,10 @@ export interface RunnerOptions extends SessionOptions, AttachmentOptions {
   /** Profile's composer frame choice, or `auto` to read it from the terminal. */
   readonly composerFrame: FrameStyle | 'auto'
   readonly doubleInterruptMs: number
-  readonly credentialRefs: readonly string[]
+  /** Key references `/login` offers, with their labels and routes. */
+  readonly credentialRefs: readonly CredentialTargetConfig[]
+  /** Authorization flows `/login` offers, with the model each first sign-in starts on; absent offers every one. */
+  readonly signInFlows?: readonly SignInFlowConfig[]
   readonly completionLimit: number
   /** Maximum tool-result preview lines; zero keeps only the headline and size. */
   readonly resultLines: number
@@ -52,6 +57,22 @@ const systemClock: Clock = {
     const timer = setInterval(tick, ms)
     return () => { clearInterval(timer) }
   },
+}
+
+/**
+ * Ink's terminal suspension, which only a component can read. Handed to the
+ * runner on mount and withdrawn on unmount.
+ */
+function TerminalOwner({ bind, children }: {
+  readonly bind: (suspend: SuspendTerminal | undefined) => void
+  readonly children?: React.ReactNode
+}): React.ReactNode {
+  const { suspendTerminal } = useApp()
+  useEffect(() => {
+    bind(callback => suspendTerminal(callback))
+    return () => { bind(undefined) }
+  }, [bind, suspendTerminal])
+  return children
 }
 
 /** Renderer streams and launcher-owned process exit. */
@@ -83,6 +104,27 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
   let navigation: SessionNavigation | undefined
   let quitTimer: ReturnType<typeof setTimeout> | undefined
   let terminalReleased = false
+  // Set while the user's editor has the terminal. Rows committed meanwhile
+  // wait for the redraw after it, since Ink discards frames while suspended.
+  let editing = false
+  let suspend: SuspendTerminal | undefined
+  const bindSuspend = (next: SuspendTerminal | undefined): void => { suspend = next }
+  const editText: EditText = async (text, name, signal) => {
+    const owner = suspend
+    if (owner === undefined || editing || terminalReleased) throw new Error('the terminal is not available')
+    editing = true
+    try {
+      return await editExternally(callback => owner(async () => {
+        // Ink's last writes before the handoff reach the terminal before the editor does.
+        output?.flush()
+        const release = holdInput(io.in)
+        try { await callback() } finally { release() }
+      }), text, name, signal)
+    } finally {
+      editing = false
+      repaint()
+    }
+  }
   let completed = false
   let startupReport: Promise<void> | undefined
   const releaseTerminal = (): void => {
@@ -109,8 +151,8 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
   const preferences = new Preferences(ctx, {
     screen: config.screen ?? 'inline', locale: config.locale, composerFrame: config.composerFrame,
     goalObjective: config.goalObjective ?? false, resultLines: config.resultLines,
-    completionLimit: config.completionLimit, doubleInterruptMs: config.doubleInterruptMs,
-  }, config.screen ?? undefined, () => { repaint() })
+    completionLimit: config.completionLimit, doubleInterruptMs: config.doubleInterruptMs, recentModels: [],
+  }, config.screen ?? undefined, () => { repaint() }, editText)
   let copy: TuiCopy = dictionaries[config.locale]
   // Read once. The release does not change for the life of the process.
   const version = bakeVersion()
@@ -155,12 +197,12 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
     const settings = preferences.value
     const cwd = active.agent.session.header.cwd
     const branch = cwd === undefined ? undefined : git.follow(cwd)
-    return React.createElement(App, {
+    return React.createElement(TerminalOwner, { bind: bindSuspend }, React.createElement(App, {
       ...active.view, key: active.agent.id, inputBlocked: navigation.busy, copy, frame: frame(), clock: systemClock, motion, screen,
       quitting: quitTimer !== undefined, completionLimit: settings.completionLimit, resultLines: settings.resultLines,
       goalObjective: settings.goalObjective,
       highlight: syntax.highlight, version, ...updates.state === undefined ? {} : { update: updates.state },
-      ...updates.baking === undefined ? {} : { baking: updates.baking },
+      ...updates.installing === undefined ? {} : { installing: updates.installing },
       // Shortened against home here: the presentation layer reads no environment.
       cwd: cwd === undefined ? '' : compactPath(cwd, process.env['HOME']), ...branch === undefined ? {} : { git: branch }, sessionId: active.agent.id,
       onReferenceQuery: query => active.references.search(query),
@@ -169,9 +211,9 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
       onCycleThinking: () => { active.cycleThinking() },
       onSubmit: text => navigation?.submit(text) ?? false, onCancel: () => navigation?.cancel(),
       onInterrupt: interrupt, onQuitDismiss: dismissQuit, onAnswer: (id, answer) => active.interactions.answer(id, answer),
-    })
+    }))
   }
-  const repaint = (): void => { if (!terminalReleased) ui?.rerender(element()) }
+  const repaint = (): void => { if (!terminalReleased && !editing) ui?.rerender(element()) }
   try {
     await ctx.get('loader')?.await()
     abort.signal.throwIfAborted()
@@ -193,7 +235,8 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
       }),
       copy,
     )
-    navigation = new SessionNavigation(ctx, config, copy, config.credentialRefs, repaint, updates, preferences)
+    const login: LoginSources = { refs: config.credentialRefs, ...config.signInFlows === undefined ? {} : { flows: config.signInFlows } }
+    navigation = new SessionNavigation(ctx, config, copy, login, repaint, updates, preferences)
     await navigation.start(abort.signal)
     // Before the first frame, so a known update is named from it; the network
     // request runs on behind it and never delays the session.

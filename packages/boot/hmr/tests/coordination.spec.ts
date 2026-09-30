@@ -89,7 +89,7 @@ it('holds configuration handlers behind configuration mutations', async () => {
 })
 
 it('reports unrelated lock-file notifications without reloading', async () => {
-  const { ctx, dir, hmr } = await fixture()
+  const { ctx, dir, hmr } = await fixture({ root: ['.'] })
   const loaded = vi.spyOn(ctx.loader, 'await')
   onTestFinished(() => { loaded.mockRestore() })
   const observed = Promise.withResolvers<string>()
@@ -108,7 +108,7 @@ it('can dispose HMR from its own transaction without waiting on itself', async (
 
 
 it('refreshes an Include through the queue and skips registered exact paths', async () => {
-  const { ctx, dir, hmr } = await fixture()
+  const { ctx, dir, hmr } = await fixture({ root: ['.'] })
   const moduleWatcher = watchers.at(-1)!
   const file = join(dir, 'nested.yml')
   writeFileSync(file, '[]\n')
@@ -136,7 +136,7 @@ it('refreshes an Include through the queue and skips registered exact paths', as
 })
 
 it('queues cached module replacements behind configuration mutations and recovers after failure', async () => {
-  const { ctx, dir, hmr } = await fixture()
+  const { ctx, dir, hmr } = await fixture({ root: ['.'] })
   const file = join(dir, 'source.mjs')
   writeFileSync(file, 'export {}')
   const cached = vi.spyOn(ctx.loader.internal!.loadCache, 'has').mockReturnValue(true)
@@ -163,7 +163,7 @@ it('queues cached module replacements behind configuration mutations and recover
 })
 
 it('requests the host full-reload hook for framework files', async () => {
-  const { ctx, dir, hmr } = await fixture()
+  const { ctx, dir, hmr } = await fixture({ root: ['.'] })
   const file = join(dir, 'framework.mjs')
   writeFileSync(file, 'export {}')
   ;(hmr as unknown as { externals: Set<string> }).externals.add(pathToFileURL(join(realpathSync(dir), 'framework.mjs')).href)
@@ -183,10 +183,34 @@ it('closes an exact watcher from its running transaction', async () => {
   await hmr.runExclusive(async () => { await dispose() })
 })
 
+it('keeps configuration-only HMR usable without the Node internal loader', async () => {
+  const native = vi.spyOn(ModuleLoader, 'fromInternal').mockReturnValue(undefined)
+  onTestFinished(() => { native.mockRestore() })
+  const count = watchers.length
+  const { hmr, dir } = await fixture()
+  expect(watchers).toHaveLength(count)
+  const file = join(dir, 'profile.yml')
+  const refreshed = Promise.withResolvers<undefined>()
+  const dispose = await hmr.watchConfig(file, async () => { refreshed.resolve(undefined) })
+  watchers.at(-1)!.emit('change', file)
+  await refreshed.promise
+  await dispose()
+  await expect(hmr.getLinked(pathToFileURL(file).href)).rejects.toThrow('--expose-internals')
+})
+
+it('does not inspect the module graph when watch roots are empty', async () => {
+  const native = vi.spyOn(ModuleLoader, 'fromInternal').mockReturnValue({
+    get loadCache() { throw new Error('module graph read') },
+  } as ModuleLoader)
+  onTestFinished(() => { native.mockRestore() })
+  const { hmr } = await fixture()
+  await hmr.runExclusive(async () => {})
+})
+
 it('rejects unavailable Node internals before starting a watcher', async () => {
   const native = vi.spyOn(ModuleLoader, 'fromInternal').mockReturnValue(undefined)
   onTestFinished(() => { native.mockRestore() })
-  await expect(fixture()).rejects.toThrow('--expose-internals')
+  await expect(fixture({ root: ['.'] })).rejects.toThrow('--expose-internals')
 })
 
 it('rejects watcher startup failure and logs later watcher errors', async () => {
@@ -204,7 +228,7 @@ it('starts without a process entry module', async () => {
   const argv = process.argv
   process.argv = []
   onTestFinished(() => { process.argv = argv })
-  const { hmr } = await fixture()
+  const { hmr } = await fixture({ root: ['.'] })
   await hmr.runExclusive(async () => {})
 })
 

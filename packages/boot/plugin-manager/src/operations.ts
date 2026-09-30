@@ -2,7 +2,6 @@
 import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, open } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
-import { execa } from 'execa'
 import { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import {
   DEFAULT_PROFILE_BUNDLES, bundlePatchPaths, initProfile, PROFILE_TEMPLATES, readProfileManifest,
@@ -105,6 +104,7 @@ async function reconcile(before: ProfileManifest, dir: string, anchor: string, o
 export async function runProfilePnpm(
   context: PackageOperationContext, args: readonly string[], options: PackageOperationOptions,
 ): Promise<PackageResult> {
+  const { execa } = await import('execa')
   const dir = context.dir ?? resolveProfileDir(context.profile, context.home)
   const before = readProfileManifest('dsh', dir)
   const logRoot = join(dir, '.plugin-manager', 'logs')
@@ -220,6 +220,7 @@ export interface PackageViewOptions {
  * @returns pnpm's exit, output, and how the lookup ended.
  */
 export async function viewProfilePackage(dir: string, spec: string, options: PackageViewOptions): Promise<PackageViewResult> {
+  const { execa } = await import('execa')
   const result = await execa(options.command ?? 'pnpm', [...options.args ?? [], 'view', spec, 'name', 'version', 'description', 'dsh', '--json'], {
     cwd: dir, env: { ...scrubbedParentEnv(), ...options.env }, extendEnv: false, reject: false, stdin: 'ignore',
     timeout: options.timeoutMs, ...options.signal === undefined ? {} : { cancelSignal: options.signal },

@@ -47,6 +47,7 @@ async watchConfig(filename: string, refresh: () => Promise<void>): Promise<() =>
 /** Read direct module dependency URLs from the active Node loader.
  * @param url Module URL.
  * @returns Linked module URLs, or an empty list for an uncached module.
+ * @throws If the Node internal loader is unavailable, including with empty watch roots.
  */
 async getLinked(url: string): Promise<string[]>
 ```

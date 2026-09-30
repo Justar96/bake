@@ -49,6 +49,13 @@ const MOUSE_OFF = `${CSI}?1006l${CSI}?1000l`
 const NEXT_LINE = `${CSI}E`
 
 /**
+ * A row Ink's incremental renderer rewrites: to its first column, the row's
+ * text, then erase to the end of the line. The text holds no newline and no
+ * further return to the first column, so each match is one row.
+ */
+const REWRITTEN_ROW = /\u001B\[1G((?:(?!\u001B\[1G|\u001B\[K)[^\n])*)\u001B\[K/gu
+
+/**
  * `ansi-escapes` `eraseLines(n)`, as Ink's log writes it to clear the dynamic
  * region. Erase a line and move up, `n - 1` times, then erase the top line
  * and return to its first column.
@@ -99,6 +106,21 @@ export function overwrite(chunks: readonly string[]): string {
   close()
   return out
 }
+
+/**
+ * Clear each row Ink rewrites before its text instead of after it.
+ *
+ * A row that fills the terminal leaves the cursor on its last cell until the
+ * next character wraps it. Erasing to the end of the line from there erases
+ * that cell on terminals that do not defer the wrap, Warp among them, so the
+ * right edge of every full-width row lost its last character: the composer's
+ * hint and the goal at the header's end. Cleared first, the row keeps it, on
+ * every terminal.
+ *
+ * @param text - one render's bytes.
+ * @returns the bytes with each rewritten row cleared before it is drawn.
+ */
+export const clearFirst = (text: string): string => text.replace(REWRITTEN_ROW, `${CSI}1G${CLEAR_LINE}$1`)
 
 /**
  * Move the cursor to the bottom row, where the next frame is drawn upward from.
@@ -160,7 +182,8 @@ export interface FrameOutput {
  * Writes are held until the current task finishes, which is when Ink has
  * finished writing a frame, and then written in order. Consecutive writes to
  * one stream are joined. Stdout is joined through {@link overwrite},
- * {@link anchor}, and {@link scrolling}. The first of those writes starts on
+ * {@link anchor}, {@link scrolling}, and {@link clearFirst}; fullscreen
+ * through {@link clearFirst} alone. The first of those writes starts on
  * the bottom row. Every other property of each stream is the stream's own, so
  * size, TTY state, and resize events reach Ink unchanged.
  *
@@ -196,7 +219,7 @@ export function frameOutput(out: NodeJS.WriteStream, err: NodeJS.WriteStream, st
       const callbacks = run.flatMap(entry => entry.callback === undefined ? [] : [entry.callback])
       let text = chunks.join('')
       if (stream === out && screen === 'inline') {
-        text = scrolling(anchor(overwrite(chunks), out.rows))
+        text = clearFirst(scrolling(anchor(overwrite(chunks), out.rows)))
         if (!started) text = toBottom(out.rows) + text
         started = true
       } else if (stream === out) {
@@ -204,7 +227,7 @@ export function frameOutput(out: NodeJS.WriteStream, err: NodeJS.WriteStream, st
         // only after entering it; never move the saved primary-screen cursor.
         // Mouse reports live exactly as long as the alternate buffer, so every
         // path that restores the shell screen also returns the mouse to it.
-        text = text.replaceAll(`${CSI}?1049h`, `${CSI}?1049h${CSI}2J${CSI}H${MOUSE_ON}`)
+        text = clearFirst(text).replaceAll(`${CSI}?1049h`, `${CSI}?1049h${CSI}2J${CSI}H${MOUSE_ON}`)
           .replaceAll(`${CSI}?1049l`, `${MOUSE_OFF}${CSI}?1049l`)
           .replaceAll(`${CSI}3J`, '')
       }

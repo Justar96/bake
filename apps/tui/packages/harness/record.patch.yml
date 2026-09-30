@@ -1,4 +1,4 @@
-# Recording overlay: writes every committed session event to a fixture file.
+# Recording overlay: writes root-session events to a fixture file.
 # Use with any profile that runs a turn; `headless` needs no terminal.
 #
 # Points at the built recorder: the built CLI runs plain Node and cannot import
@@ -6,7 +6,7 @@
 # first.
 - insert:
     - id: tui-recorder
-      name: ../packages/app/lib/record.js
+      name: ../app/lib/record.js
       config:
         # `!!js` expressions evaluate as ESM, where `require` does not exist.
-        path: !!js process.cwd() + '/tui/packages/harness/fixtures/session.jsonl'
+        path: !!js (process.env.DSH_TUI_RECORD_PATH ?? process.cwd() + '/apps/tui/packages/harness/fixtures/session.jsonl')

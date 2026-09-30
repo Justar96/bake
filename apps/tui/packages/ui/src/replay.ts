@@ -37,8 +37,8 @@ export class ReplayCursor {
    * Consume the next display batch. The caller must print it before advancing again.
    *
    * Appends join the cursor after its captured snapshot is consumed. Presentation
-   * uses the supplied result bound when a row is first read; remaining lines are
-   * measured at the width supplied to each call. One line larger than either the
+   * uses the supplied width and result bound when a row is first read; remaining
+   * lines keep that table layout and are measured at each call's width. One line larger than either the
    * height or text limit is returned alone so that replay always makes progress.
    *
    * @param transcript - the current snapshot, extending every preceding one.
@@ -56,7 +56,7 @@ export class ReplayCursor {
         this.line = 0
         const row = this.nextRow(transcript)
         if (row === undefined) break
-        this.pending = present(row, result, line => wrappedRows(line, budget))
+        this.pending = present(row, result, line => wrappedRows(line, budget), budget.measure)
         if (this.pending.length === 0) continue
       }
       const line = this.pending[this.line]!

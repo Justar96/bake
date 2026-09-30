@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { detectInstall, hostTarget } from '@deepseek-ai/dsh-updater'
-import { progressLabel, runUpdate, UPDATE_AVAILABLE_EXIT } from '../src/update.ts'
+import { runUpdate, UPDATE_AVAILABLE_EXIT } from '../src/update.ts'
 
 const roots: string[] = []
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
@@ -45,7 +45,7 @@ function fixture(version: string) {
   const lines: string[] = []
   const run = (check: boolean, layout = detectInstall(running)) =>
     runUpdate(check, '0.1.0', { env, fetch, layout, out: line => lines.push(line), err: line => lines.push(line) })
-  return { root, install, running, sha256, run, lines }
+  return { root, install, running, sha256, run, lines, env, fetch }
 }
 
 describe.skipIf(process.platform === 'win32')('runUpdate', () => {
@@ -69,11 +69,23 @@ describe.skipIf(process.platform === 'win32')('runUpdate', () => {
     expect(JSON.parse(readFileSync(join(root, 'home/update-check.json'), 'utf8'))).toMatchObject({ version: '0.2.0' })
   })
 
-  it('labels each install step for the progress row', () => {
-    expect(progressLabel('0.2.0', { phase: 'download', received: 1_500_000, total: 3_000_000 }))
-      .toBe('Downloading Bake 0.2.0… 50% (1.5 / 3.0 MB)')
-    expect(progressLabel('0.2.0', { phase: 'unpack' })).toBe('Unpacking Bake 0.2.0…')
-    expect(progressLabel('0.2.0', { phase: 'verify' })).toBe('Checking Bake 0.2.0 starts…')
+  it('draws each install step and a summary on a terminal, instead of the plain report', async () => {
+    const { running, lines, env, fetch } = fixture('0.2.0')
+    const writes: string[] = []
+    const code = await runUpdate(false, '0.1.0', {
+      env: { ...env, LANG: 'en_US.UTF-8', TERM: 'xterm-256color' }, fetch, layout: detectInstall(running),
+      out: line => lines.push(line), err: line => lines.push(line),
+      terminal: { isTTY: true, columns: 100, write: (text) => { writes.push(text) } },
+    })
+    expect(code).toBe(0)
+    const shown = writes.join('').replace(/\u001b\[[\d;]*m/gu, '')
+    expect(shown).toContain('BAKE  update \u00b7 v0.1.0 \u2192 v0.2.0')
+    expect(shown).toMatch(/\u2713 {2}Downloaded {10}0\.0 MB \u00b7 <?\d/u)
+    expect(shown).toMatch(/\u2713 {2}Unpacked/u)
+    expect(shown).toMatch(/\u2713 {2}Verified {12}v0\.2\.0 starts/u)
+    expect(shown).toMatch(/Updated Bake 0\.1\.0 \u2192 0\.2\.0 in <?\d/u)
+    expect(shown).toContain('New sessions start 0.2.0; sessions already open keep 0.1.0.')
+    expect(lines).toEqual([])
   })
 
   it('says so when up to date', async () => {

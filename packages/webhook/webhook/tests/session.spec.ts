@@ -14,6 +14,8 @@ interface HarnessOptions {
   failAt?: 'permission-resolve' | 'preset-resolve' | 'standing' | 'workspace' | 'agent' | 'attach' | 'permission-set' | 'title' | 'followup'
   failDetach?: boolean
   failDispose?: boolean
+  /** No default model is saved or composed. */
+  noDefault?: boolean
   abortAt?: 'workspace' | 'agent'
 }
 
@@ -89,7 +91,8 @@ function harness(options: HarnessOptions = {}): SessionHarness {
     agentDefaultModel: {
       currentSelection() {
         calls.push('default-model')
-        return { provider: 'default-provider', model: 'default-model', reasoningEffort: 'high' }
+        return options.noDefault === true ? undefined
+          : { provider: 'default-provider', model: 'default-model', reasoningEffort: 'high' }
       },
     },
     agentPresets: {
@@ -229,6 +232,15 @@ describe('webhook Session creation', () => {
     await expect(modelRequestListener(withoutCap)(undefined, async () => ({
       provider: 'p', model: 'm', reasoningEffort: ReasoningEffortId('inherited'),
     }))).resolves.toEqual({ provider: 'p', model: 'm' })
+  })
+
+  it('refuses a request without a model when no default is saved, before creating anything', async () => {
+    const test = harness({ noDefault: true })
+    await expect(create(test)).rejects.toThrow('webhook Session request has no model and no model is selected')
+    expect(test.calls).not.toContain('agent-create')
+    const explicit = harness({ noDefault: true })
+    await create(explicit, { ...explicit.request, model: { provider: 'p', model: 'm' } })
+    expect(explicit.calls).toContain('agent-create')
   })
 
   it('preserves default reasoning until the first request header is durable', async () => {

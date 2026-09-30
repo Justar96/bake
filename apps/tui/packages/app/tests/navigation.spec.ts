@@ -18,7 +18,7 @@ async function connected() {
   const fixture = await harness()
   cleanup.push(fixture.dispose)
   const changed = vi.fn()
-  const navigation = new SessionNavigation(fixture.ctx, { attachmentMaxBytes: 1048576, attachmentLimit: 8 }, copy, [], changed)
+  const navigation = new SessionNavigation(fixture.ctx, { attachmentMaxBytes: 1048576, attachmentLimit: 8 }, copy, { refs: [] }, changed)
   cleanup.push(async () => { navigation.close(); await navigation.drain() })
   await navigation.start(new AbortController().signal)
   return { ...fixture, navigation, changed }

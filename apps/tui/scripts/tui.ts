@@ -362,7 +362,8 @@ try {
     case 'record':
       requireBuilt([CLI])
       await build()
-      await launch(['--profile', 'headless', '--patch', './tui/packages/harness/record.patch.yml', ...args])
+      requireBuilt([join(APP_LIB, 'record.js')])
+      await launch(['--profile', 'headless', '--patch', './apps/tui/packages/harness/record.patch.yml', ...args])
       break
     case 'help':
     case '--help':

@@ -19,7 +19,7 @@ it('shows a goal activating from /goal, then paused and done, repainting on ever
   const changed = vi.fn()
   let controller!: SessionController
   const handle = await openSession(fixture.ctx, {}, new AbortController().signal, agent => {
-    controller = new SessionController(fixture.ctx, agent, dictionaries.en, [], changed,
+    controller = new SessionController(fixture.ctx, agent, dictionaries.en, { refs: [] }, changed,
       { attachmentMaxBytes: 1048576, attachmentLimit: 8 })
   })
   cleanup.push(async () => { controller.close(); await controller.drain(); await handle.dispose() })

@@ -33,6 +33,8 @@ kind: "package-reference"
 - `job_list()`——列出你的后台任务及其 id、kind、状态与 label，每行一个：`<id> [<kind>] <status> — <label>`。
 - `job_kill(job_id, reason?)`——立即请求取消运行中的任务；任务在其工作真正停止后以 `killed` 结算。终止任务返回其当前快照，可选的原因会被记录并转发给任务。其描述告诉模型任务在其轮次结束后仍会继续运行，因为只有完成、kill 或所有者释放才会结束任务。
 
+`job_output` 和 `job_kill` 使用启动结果或 `job_list` 返回的后台任务 id。可继续的 subagent 返回的是供 subagent 控制工具使用的 agent id，并非任务 id。未知任务错误会提示使用 `job_list`，并说明这两种 id 的区别。
+
 三个工具依次返回 `{ text, job }`、`PublicJobSnapshot[]` 与 `{ outcome: 'cancellation-requested' | 'already-finished', job }`。公共快照携带 id、kind、label、status/detail 及开始／结束时间，并省略归属与通知簿记字段。三个工具都通过通用 UI 卡片渲染：output 和 list 用 `read`，kill 用 `execute`。
 
 ### 完成通知

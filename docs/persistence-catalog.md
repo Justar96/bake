@@ -334,7 +334,7 @@ Source: [`packages/core/session/src/types.ts:322`](../packages/core/session/src/
 }
 ```
 
-Source: [`packages/interaction/commands/src/types.ts:117`](../packages/interaction/commands/src/types.ts)
+Source: [`packages/interaction/commands/src/types.ts:121`](../packages/interaction/commands/src/types.ts)
 
 <a id="commandrun--log-only"></a>
 
@@ -354,7 +354,7 @@ Source: [`packages/interaction/commands/src/types.ts:117`](../packages/interacti
 'command/run': { commandId: CommandId; name: string; args?: string; source: CommandSource }
 ```
 
-Source: [`packages/interaction/commands/src/types.ts:110`](../packages/interaction/commands/src/types.ts)
+Source: [`packages/interaction/commands/src/types.ts:114`](../packages/interaction/commands/src/types.ts)
 
 ### `compaction/*`
 
@@ -1793,7 +1793,7 @@ Sources: [`packages/attachment/attachment/src/types.ts:28`](../packages/attachme
 
 SHA-256: `ada310bf0bdb8fed51f3b56ea63f6ea6b18bbd587f04fccb63a14ab0b2a24e05`
 
-Sources: [`packages/core/session/src/types.ts:190`](../packages/core/session/src/types.ts) · [`packages/interaction/commands/src/types.ts:80`](../packages/interaction/commands/src/types.ts) · [`packages/interaction/commands/src/types.ts:84`](../packages/interaction/commands/src/types.ts) · [`packages/llm/llm/src/message.ts:103`](../packages/llm/llm/src/message.ts) · [`packages/session/session-title/src/types.ts:35`](../packages/session/session-title/src/types.ts)
+Sources: [`packages/core/session/src/types.ts:190`](../packages/core/session/src/types.ts) · [`packages/interaction/commands/src/types.ts:84`](../packages/interaction/commands/src/types.ts) · [`packages/interaction/commands/src/types.ts:88`](../packages/interaction/commands/src/types.ts) · [`packages/llm/llm/src/message.ts:103`](../packages/llm/llm/src/message.ts) · [`packages/session/session-title/src/types.ts:35`](../packages/session/session-title/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -2407,7 +2407,7 @@ SHA-256: `15196447222782e773eb943c92b18316ce96b9af0f0cfddb6e57ba8274ecc5ff`
 
 SHA-256: `5b6fb1f226ff56402db08a6aae82af76100b14056271875f69ec526a1ae05d51`
 
-Sources: [`packages/interaction/commands/src/types.ts:117`](../packages/interaction/commands/src/types.ts)
+Sources: [`packages/interaction/commands/src/types.ts:121`](../packages/interaction/commands/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -2447,7 +2447,7 @@ SHA-256: `37184378c6439257d105c4e2022d80fc9c3a3f7c7f6ac661b00bc9f18d871006`
 
 SHA-256: `a853902cfab417b8f08aa51ad6855fea46f34ed4588a74e47403035111d0fb86`
 
-Sources: [`packages/interaction/commands/src/types.ts:110`](../packages/interaction/commands/src/types.ts)
+Sources: [`packages/interaction/commands/src/types.ts:114`](../packages/interaction/commands/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|

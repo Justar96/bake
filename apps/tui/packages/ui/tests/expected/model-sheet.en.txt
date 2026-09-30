@@ -1,0 +1,13 @@
+  note   Session: session-test
+
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Model · 3 from Mock                                                                              │
+│ > ▌Type to filter                                                                                │
+│ Recent 1                                                                                         │
+│ ▸ Mock Current    1M  think  image  Current  Mock                                                │
+│ Mock 2                                                                                           │
+│   Mock Other    128k  think                                                                      │
+│   Mock Plain      8k                                                                             │
+│ Effort   Default (Low)   Low   High                                                              │
+│ ↑↓ choose · ←→ effort · Enter selects · Esc cancels                                          1/3 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

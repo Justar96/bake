@@ -1,15 +1,16 @@
 /** CLIProxyAPI connection setup for Bake's built-in pi-ai route. */
 import type { Context } from '@deepseek-ai/cordis'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
-import { assertUsableApiKey } from '@deepseek-ai/dsh-llm'
+import { normalizeApiKey } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-settings'
-import type { AuthorizationPrompt } from '@deepseek-ai/dsh-authorization/types'
 import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
+import type { LoginPrompt } from './login.ts'
 
 export const CLIPROXYAPI_ID = 'cliproxyapi'
 export const CLIPROXYAPI_KEY = 'CLIPROXYAPI_API_KEY'
 export const CLIPROXYAPI_DEFAULT_URL = 'http://127.0.0.1:8317'
 const MAX_CATALOG_BYTES = 4 * 1024 * 1024
+const CATALOG_TIMEOUT_MS = 15_000
 
 /** The wire protocols a login assigns; the route's own is `openai-responses`. */
 export type CliProxyApi = 'openai-responses' | 'openai-completions' | 'anthropic-messages'
@@ -287,22 +288,78 @@ export function cliProxyUpgradeNotice(result: CliProxyRouteUpgrade, copy: CliPro
   return `${result.kind === 'upgraded' ? copy.cliProxyUpgraded : copy.cliProxyRelogin}${changes}`
 }
 
-/** Validate a connection before changing either credentials or provider settings. */
+/**
+ * Why a proxy did not validate, and so which field a sign-in asks for again:
+ * a refused key is the key's fault, everything else the address's.
+ */
+export type CliProxyCheckFailure =
+  | { readonly reason: 'unreachable', readonly host: string, readonly detail: string }
+  | { readonly reason: 'timeout', readonly host: string }
+  | { readonly reason: 'redirect' }
+  | { readonly reason: 'rejected', readonly status: number }
+  | { readonly reason: 'not-found' }
+  | { readonly reason: 'status', readonly status: number }
+  | { readonly reason: 'not-proxy' }
+  | { readonly reason: 'too-large' }
+  | { readonly reason: 'empty' }
+
+/** A proxy that did not validate. The message is English for logs; a surface words `failure` itself. */
+export class CliProxyCheckError extends Error {
+  constructor(readonly failure: CliProxyCheckFailure, message: string, options?: ErrorOptions) {
+    super(message, options)
+    this.name = 'CliProxyCheckError'
+  }
+
+  /** The field a sign-in asks for again. */
+  get field(): 'url' | 'key' { return this.failure.reason === 'rejected' ? 'key' : 'url' }
+}
+
+/**
+ * Validate a connection before changing either credentials or provider settings.
+ * @param url - the proxy's model-list URL.
+ * @param apiKey - the key to check.
+ * @param signal - the caller's lifetime; its abort propagates as itself.
+ * @param fetcher - the HTTP client.
+ * @param root - the proxy root, which an Anthropic Messages model is sent to.
+ * @returns the chat models the proxy lists.
+ * @throws CliProxyCheckError when the proxy cannot be reached or does not validate.
+ */
 export async function fetchCliProxyModels(url: string, apiKey: string, signal: AbortSignal,
   fetcher: typeof fetch = fetch, root?: string): Promise<CliProxyModel[]> {
-  const response = await fetcher(url, {
-    headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
-    redirect: 'error',
-    signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
-  })
-  if (response.status !== 200) throw new Error(`CLIProxyAPI model request failed (HTTP ${response.status})`)
+  const host = new URL(url).host
+  let response: Response
+  try {
+    response = await fetcher(url, {
+      headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
+      redirect: 'error',
+      signal: AbortSignal.any([signal, AbortSignal.timeout(CATALOG_TIMEOUT_MS)]),
+    })
+  } catch (error) {
+    if (signal.aborted) throw error
+    if (error instanceof Error && error.name === 'TimeoutError') {
+      throw new CliProxyCheckError({ reason: 'timeout', host }, `CLIProxyAPI at ${host} did not answer within 15 seconds`, { cause: error })
+    }
+    // undici reports every transport failure as `fetch failed`; the cause says which.
+    const cause = error instanceof Error && error.cause instanceof Error ? error.cause as Error & { code?: unknown } : undefined
+    if (cause !== undefined && /redirect/iu.test(cause.message)) {
+      throw new CliProxyCheckError({ reason: 'redirect' }, `CLIProxyAPI at ${host} redirected the model request`, { cause: error })
+    }
+    const detail = typeof cause?.code === 'string' ? cause.code : cause?.message ?? (error instanceof Error ? error.message : String(error))
+    throw new CliProxyCheckError({ reason: 'unreachable', host, detail }, `CLIProxyAPI at ${host} is unreachable: ${detail}`, { cause: error })
+  }
+  if (response.status !== 200) {
+    await response.body?.cancel().catch(() => {})
+    const failure: CliProxyCheckFailure = response.status === 401 || response.status === 403 ? { reason: 'rejected', status: response.status }
+      : response.status === 404 ? { reason: 'not-found' } : { reason: 'status', status: response.status }
+    throw new CliProxyCheckError(failure, `CLIProxyAPI model request failed (HTTP ${response.status})`)
+  }
   const length = Number(response.headers.get('content-length'))
   if (length > MAX_CATALOG_BYTES) {
     await response.body?.cancel()
-    throw new Error('CLIProxyAPI model list is too large')
+    throw new CliProxyCheckError({ reason: 'too-large' }, 'CLIProxyAPI model list is too large')
   }
   const reader = response.body?.getReader()
-  if (reader === undefined) throw new Error('CLIProxyAPI returned an empty model response')
+  if (reader === undefined) throw new CliProxyCheckError({ reason: 'not-proxy' }, 'CLIProxyAPI returned an empty model response')
   const chunks: Uint8Array[] = []
   let size = 0
   try {
@@ -310,7 +367,7 @@ export async function fetchCliProxyModels(url: string, apiKey: string, signal: A
       const { done, value } = await reader.read()
       if (done) break
       size += value.byteLength
-      if (size > MAX_CATALOG_BYTES) throw new Error('CLIProxyAPI model list is too large')
+      if (size > MAX_CATALOG_BYTES) throw new CliProxyCheckError({ reason: 'too-large' }, 'CLIProxyAPI model list is too large')
       chunks.push(value)
     }
   } finally {
@@ -321,15 +378,60 @@ export async function fetchCliProxyModels(url: string, apiKey: string, signal: A
   for (const chunk of chunks) { body.set(chunk, offset); offset += chunk.byteLength }
   let payload: unknown
   try { payload = JSON.parse(new TextDecoder().decode(body)) as unknown }
-  catch { throw new Error('CLIProxyAPI returned invalid model JSON') }
-  const models = cliProxyModels(payload, root)
-  if (models.length === 0) throw new Error('CLIProxyAPI returned no selectable models')
+  catch { throw new CliProxyCheckError({ reason: 'not-proxy' }, 'CLIProxyAPI returned invalid model JSON') }
+  let models: CliProxyModel[]
+  try { models = cliProxyModels(payload, root) }
+  catch (error) { throw new CliProxyCheckError({ reason: 'not-proxy' }, 'CLIProxyAPI returned an invalid model list', { cause: error }) }
+  if (models.length === 0) throw new CliProxyCheckError({ reason: 'empty' }, 'CLIProxyAPI returned no selectable models')
   return models
 }
 
-/** Prompt for both connection fields, then install the route for the next request. */
-export async function configureCliProxyApi(ctx: Context, prompt: (question: AuthorizationPrompt) => Promise<string>,
-  signal: AbortSignal, labels: { readonly url: string, readonly key: string }, fetcher: typeof fetch = fetch): Promise<number> {
+/** The labels CLIProxyAPI setup shows. */
+export type CliProxySetupCopy = Pick<TuiCopy, 'signInTitle' | 'loginEmpty' | 'keyInvalid' | 'keyStoredLocally'
+  | 'cliProxyUrl' | 'cliProxyUrlHint' | 'cliProxyKey' | 'cliProxyChecking' | 'cliProxyBadUrl' | 'cliProxyUnreachable'
+  | 'cliProxyTimeout' | 'cliProxyRedirect' | 'cliProxyRejected' | 'cliProxyNotFound' | 'cliProxyStatus'
+  | 'cliProxyNotProxy' | 'cliProxyTooLarge' | 'cliProxyEmpty'>
+
+/**
+ * Word a failed check for the field that asks again.
+ * @param failure - why the proxy did not validate.
+ * @param copy - localized labels.
+ * @returns one line naming what went wrong.
+ */
+export function cliProxyFailureText(failure: CliProxyCheckFailure, copy: CliProxySetupCopy): string {
+  switch (failure.reason) {
+    case 'unreachable': return `${copy.cliProxyUnreachable} ${failure.host} (${failure.detail})`
+    case 'timeout': return `${copy.cliProxyTimeout} ${failure.host}`
+    case 'redirect': return copy.cliProxyRedirect
+    case 'rejected': return `${copy.cliProxyRejected} (HTTP ${failure.status})`
+    case 'not-found': return `${copy.cliProxyNotFound} (HTTP 404)`
+    case 'status': return `${copy.cliProxyStatus} HTTP ${failure.status}`
+    case 'not-proxy': return copy.cliProxyNotProxy
+    case 'too-large': return copy.cliProxyTooLarge
+    case 'empty': return copy.cliProxyEmpty
+  }
+}
+
+/**
+ * Ask for the proxy's address and key, check them against its model list,
+ * then install the route for the next request.
+ *
+ * A refused answer asks again in the same panel, with the reason: a bad
+ * address or an unreachable proxy returns to the address with what was typed,
+ * and a rejected key returns to the key. Only an unexpected error ends the
+ * setup; a declined prompt ends it as the prompt's own rejection.
+ *
+ * @param ctx - the settled plugin context.
+ * @param prompt - asks one field; rejects when the user declines.
+ * @param signal - command cancellation lifetime.
+ * @param copy - localized labels.
+ * @param fetcher - the HTTP client.
+ * @param checking - told the proxy host while its model list is being read.
+ * @returns how many models the route now offers.
+ */
+export async function configureCliProxyApi(ctx: Context, prompt: (question: LoginPrompt) => Promise<string>,
+  signal: AbortSignal, copy: CliProxySetupCopy, fetcher: typeof fetch = fetch,
+  checking: (host: string) => void = () => {}): Promise<number> {
   const credentials = ctx.get('credentials')
   const settings = ctx.get('settings')
   if (credentials === undefined || settings === undefined) throw new Error('CLIProxyAPI setup requires credentials and settings')
@@ -337,14 +439,47 @@ export async function configureCliProxyApi(ctx: Context, prompt: (question: Auth
   const savedBaseURL = configured?.providers?.[CLIPROXYAPI_ID]?.baseURL
   const defaultURL = typeof savedBaseURL === 'string'
     ? cliProxyEndpoints(savedBaseURL).root : CLIPROXYAPI_DEFAULT_URL
-  const input = await prompt({ kind: 'text', message: `1/2 · ${labels.url} [${defaultURL}]` })
-  signal.throwIfAborted()
-  const endpoints = cliProxyEndpoints(input.trim() === '' ? defaultURL : input)
-  const apiKey = (await prompt({ kind: 'secret', message: `2/2 · ${labels.key}` })).trim()
-  signal.throwIfAborted()
-  if (apiKey === '') throw new Error('CLIProxyAPI API key is empty')
-  const validKey = assertUsableApiKey(apiKey, CLIPROXYAPI_ID, CLIPROXYAPI_KEY)
-  const models = await fetchCliProxyModels(endpoints.models, validKey, signal, fetcher, endpoints.root)
+  const title = `${copy.signInTitle} \u00b7 CLIProxyAPI`
+  let step: 'url' | 'key' = 'url'
+  let typedURL = ''
+  let typedKey = ''
+  let urlError: string | undefined
+  let keyError: string | undefined
+  let endpoints = cliProxyEndpoints(defaultURL)
+  let validKey = ''
+  let models: CliProxyModel[]
+  for (;;) {
+    if (step === 'url') {
+      typedURL = (await prompt({ kind: 'text', title, message: copy.cliProxyUrl, step: { index: 1, count: 2 },
+        fallback: defaultURL, hint: copy.cliProxyUrlHint,
+        ...urlError === undefined ? {} : { error: urlError }, ...typedURL === '' ? {} : { initial: typedURL } })).trim()
+      signal.throwIfAborted()
+      try { endpoints = cliProxyEndpoints(typedURL === '' ? defaultURL : typedURL) }
+      catch { urlError = copy.cliProxyBadUrl; continue }
+      urlError = undefined
+      step = 'key'
+    }
+    const host = new URL(endpoints.root).host
+    typedKey = (await prompt({ kind: 'secret', title, message: copy.cliProxyKey, step: { index: 2, count: 2 },
+      hint: `${host} \u00b7 ${copy.keyStoredLocally}`,
+      ...keyError === undefined ? {} : { error: keyError }, ...typedKey === '' ? {} : { initial: typedKey } })).trim()
+    signal.throwIfAborted()
+    const checked = normalizeApiKey(typedKey)
+    if (!checked.ok) { keyError = checked.reason === 'empty' ? copy.loginEmpty : copy.keyInvalid; typedKey = ''; continue }
+    keyError = undefined
+    validKey = checked.value
+    checking(host)
+    try {
+      models = await fetchCliProxyModels(endpoints.models, validKey, signal, fetcher, endpoints.root)
+    } catch (error) {
+      if (signal.aborted || !(error instanceof CliProxyCheckError)) throw error
+      const text = cliProxyFailureText(error.failure, copy)
+      // A rejected key is asked for fresh; an address problem keeps the key for the next check.
+      if (error.field === 'key') { keyError = text; typedKey = '' } else { urlError = text; step = 'url' }
+      continue
+    }
+    break
+  }
   signal.throwIfAborted()
   const ref = credentialRef(CLIPROXYAPI_KEY)
   const previous = await credentials.resolve(ref)

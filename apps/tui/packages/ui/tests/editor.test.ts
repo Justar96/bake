@@ -1,11 +1,20 @@
 /** Text transformations are independent of terminal and harness state. */
 import { describe, expect, it } from 'bun:test'
 import stringWidth from 'string-width'
-import { composerText, draftRows, eraseLast, draftAt, insertText, moveCursor, moveVertically, eraseAtCursor, TAB_COLUMNS, wrapDraft } from '../src/editor.ts'
+import { composerText, cursorWindow, draftRows, eraseLast, draftAt, insertText, moveCursor, moveVertically, eraseAtCursor, TAB_COLUMNS, wrapDraft } from '../src/editor.ts'
 
 it('keeps pasted lines and tabs while removing terminal controls', () => {
   expect(composerText('a\r\nb\rc\t\u0003\u0000')).toBe('a\nb\nc\t')
 })
+it('keeps a narrow input window around the caret', () => {
+  const window = cursorWindow('0123456789', 'abcdefghij', 10)
+  expect(window.before).toContain('\u2026')
+  expect(window.after).toContain('\u2026')
+  expect(stringWidth(window.before) + 1 + stringWidth(window.after)).toBeLessThanOrEqual(10)
+  expect(cursorWindow('', '0123456789', 5).before).toBe('')
+  expect(cursorWindow('', '0123456789', 5).after).toContain('\u2026')
+})
+
 it('backspaces one visible grapheme', () => {
   expect(eraseLast('a👩🏽‍💻')).toBe('a')
   expect(eraseLast('ae\u0301')).toBe('a')
@@ -35,6 +44,19 @@ it('inserts literal multiline text in place and moves to logical line boundaries
 it('keeps the cursor outside graphemes formed by insertion', () => {
   expect(insertText(draftAt('👩💻', 2), '\u200d')).toEqual({ text: '👩‍💻', cursor: '👩‍💻'.length })
   expect(insertText(draftAt('ae\u0301b', 1), '中')).toEqual({ text: 'a中e\u0301b', cursor: 2 })
+})
+
+it.each(['น้ำ', 'กี้', 'ກຳ', 'ດີ', 'ភា', 'မြ', 'e\u0301'])('edits %s without separating its combining characters', cluster => {
+  const text = `a${cluster}z`
+  const end = 1 + cluster.length
+  expect(draftAt(text, 2).cursor).toBe(end)
+  expect(moveCursor(draftAt(text, 1), 'right').cursor).toBe(end)
+  expect(moveCursor(draftAt(text, end), 'left').cursor).toBe(1)
+  expect(eraseAtCursor(draftAt(text, end), 'backward')).toEqual({ text: 'az', cursor: 1 })
+  expect(eraseAtCursor(draftAt(text, 1), 'forward')).toEqual({ text: 'az', cursor: 1 })
+  let typed = draftAt('')
+  for (const character of cluster) typed = insertText(typed, character)
+  expect(typed).toEqual({ text: cluster, cursor: cluster.length })
 })
 
 describe('wrapDraft', () => {
@@ -79,6 +101,42 @@ describe('wrapDraft', () => {
   it('breaks between wide characters, which have no spaces to break at', () => {
     expect(wrap('你好世界你好', 0, 6).rows).toEqual(['|你好', '世界', '你好'])
     expect(wrap('ab你好', 0, 6).rows).toEqual(['|ab你', '好'])
+  })
+
+  it.each(['น้ำ', 'ກຳ'])('reserves both terminal cells of %s when wrapping', cluster => {
+    const text = cluster.repeat(3)
+    expect(stringWidth(cluster)).toBe(2)
+    expect(wrap(text, text.length, 5).rows).toEqual([cluster.repeat(2), `${cluster}|`])
+  })
+
+  it.each([
+    ['ภาษาไทยทดสอบ', 9, ['ภาษาไทย', 'ทดสอบ|']],
+    ['ພາສາລາວທົດສອບ', 9, ['ພາສາລາວ', 'ທົດສອບ|']],
+    ['ភាសាខ្មែរសាកល្បង', 11, ['ភាសាខ្មែរ', 'សាកល្បង|']],
+    ['မြန်မာဘာသာစမ်းသပ်', 11, ['မြန်မာဘာသာ', 'စမ်းသပ်|']],
+  ])('wraps %s at dictionary word boundaries without adding spaces', (text, width, rows) => {
+    expect(wrap(text, text.length, width).rows).toEqual(rows)
+  })
+
+  it('preserves mixed scripts at every caret stop and when a word exceeds the row', () => {
+    const text = 'ภาษาไทยน้ำກຳភាសាខ្មែរမြန်မာe\u0301👩🏽‍💻'
+    const segments = new Intl.Segmenter('en', { granularity: 'grapheme' })
+    const stops = [...segments.segment(text)].map(segment => segment.index).concat(text.length)
+    for (const width of [5, 9, 20, 40]) {
+      const expected = wrap(text, 0, width).rows.map(row => row.replace('|', ''))
+      expect(expected.join('')).toBe(text)
+      let offset = 0
+      for (const row of expected) {
+        expect(stops).toContain(offset)
+        offset += row.length
+      }
+      for (const cursor of stops) {
+        const { rows } = wrap(text, cursor, width)
+        expect(rows.map(row => row.replace('|', ''))).toEqual(expected)
+        expect(rows.join('').split('|')).toHaveLength(2)
+        for (const row of rows) expect(stringWidth(row)).toBeLessThanOrEqual(width)
+      }
+    }
   })
 
   it('expands tabs to spaces, which is what the layout measured', () => {
@@ -130,6 +188,12 @@ describe('moveVertically', () => {
     const up = move(family, family.length - 3, 40, 'up')!
     expect(up.draft.cursor % 1).toBe(0)
     expect(draftAt(family, up.draft.cursor)).toEqual(up.draft)
+  })
+
+  it.each(['น้ำ', 'ກຳ'])('counts both cells of %s during vertical movement', cluster => {
+    const text = `abc\n${cluster}z`
+    expect(shown(text, move(text, 1, 20, 'down')!.draft.cursor, 20)).toBe(`1:|${cluster}z`)
+    expect(shown(text, move(text, 2, 20, 'down')!.draft.cursor, 20)).toBe(`1:${cluster}|z`)
   })
 
   it('keeps the goal column across a shorter row', () => {

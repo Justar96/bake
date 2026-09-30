@@ -55,7 +55,7 @@ The [release manifest](https://bake.justar.dev/latest.json) lists the current ve
 bake
 ```
 
-Sign in with `/login`, or export `DEEPSEEK_API_KEY` before starting. Type `/` to browse commands, `/help` for the list, and `@` to reference a file. `bake --help` shows the launch options, such as `--resume <id>`.
+Bake has no default provider: sign in with `/login` (DeepSeek, CLIProxyAPI, OpenAI, Anthropic, GitHub Copilot, OpenRouter, Kimi, or xAI), and the first sign-in selects its model. An exported `DEEPSEEK_API_KEY` counts as signed in. Type `/` to browse commands, `/help` for the list, and `@` to reference a file. `bake --help` shows the launch options, such as `--resume <id>`.
 
 Bake keeps sessions, credentials, and profiles in `~/.bake`. Set `DSH_HOME` to use a different directory. Bake never reads or migrates DeepSeek Harness's `~/.dsh`.
 

@@ -184,7 +184,7 @@ export function apply(ctx: Context, config: Config): void {
     if (hit !== undefined && hit.length > 0) return assertUsableApiKey(hit, 'llm-pi-ai', ref)
     throw new LlmError(
       `llm-pi-ai: no credential for provider route "${provider}"; its profile resolves ${ref}, which is not`
-      + ` set — store ${ref} through the credentials service (the web Models page writes it) or export it,`
+      + ` set — store ${ref} through the credentials service (/login in Bake writes it) or export it,`
       + ' and remove apiKeyEnv only if this provider should authenticate from pi-ai\'s own environment discovery',
       'MISSING_CREDENTIAL',
     )

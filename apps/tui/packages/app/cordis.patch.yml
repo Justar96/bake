@@ -32,6 +32,11 @@
   config:
     auto: false
 
+# Bound newly produced previews; persisted results keep their original bytes.
+- id: spill-policy
+  config:
+    maxInlineBytes: 16384
+
 # The agent's own rows belong to its preset: instructions, the shells, file
 # tools, skills, goal controls, plan mode, delegation, workflows, tasks, and
 # web tools. The base copies would run on the host plane, where their global
@@ -116,6 +121,12 @@
     - id: subagent-model-selection-settings
       name: '@deepseek-ai/dsh-tool-subagent/model-selection-settings'
 
+    # The authorization seam: `llm-pi-ai` registers one sign-in flow per
+    # provider pi-ai ships a login for (OAuth or an interactive key prompt),
+    # and `/login` runs them. The credential it stores needs `credentials`.
+    - id: authorization
+      name: '@deepseek-ai/dsh-authorization'
+
     # argv → ctx.tuiStartup, before the runner resolves its lazy config.
     - id: tui-startup
       name: ./src/startup.ts
@@ -132,7 +143,28 @@
         screen: !!js ctx.tuiStartup.screen
         # The composition knows which providers it mounted; the surface does
         # not. `llm-deepseek` reads this reference (its `apiKeyEnv` default),
-        # so `/login` can set it. A patch adding another provider adds its
+        # so `/login` can set it; `provider` is the route it unlocks, which a
+        # first sign-in selects. A patch adding another provider adds its
         # reference here.
         credentialRefs:
-          - DEEPSEEK_API_KEY
+          - ref: DEEPSEEK_API_KEY
+            label: DeepSeek
+            provider: deepseek-official
+            model: deepseek-flash
+        # The sign-ins `/login` offers, by the credential record each writes.
+        # A subscription sign-in first; each also takes an API key. Signing in
+        # adds the provider's route, so its models reach /model at once, and a
+        # session that had no model starts on `model`.
+        signInFlows:
+          - key: llm-pi-ai/openai
+            model: gpt-5.5
+          - key: llm-pi-ai/anthropic
+            model: claude-opus-4-8
+          - key: llm-pi-ai/github-copilot
+            model: gpt-5.4
+          - key: llm-pi-ai/openrouter
+            model: moonshotai/kimi-k2.6
+          - key: llm-pi-ai/kimi-coding
+            model: kimi-for-coding
+          - key: llm-pi-ai/xai
+            model: grok-4.7

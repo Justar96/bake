@@ -35062,7 +35062,7 @@
         "event:command/done.data"
       ],
       "sources": [
-        "packages/interaction/commands/src/types.ts:117"
+        "packages/interaction/commands/src/types.ts:121"
       ]
     },
     {
@@ -48790,7 +48790,7 @@
         "event:command/run.data"
       ],
       "sources": [
-        "packages/interaction/commands/src/types.ts:110"
+        "packages/interaction/commands/src/types.ts:114"
       ]
     },
     {
@@ -49260,8 +49260,8 @@
       ],
       "sources": [
         "packages/core/session/src/types.ts:190",
-        "packages/interaction/commands/src/types.ts:80",
         "packages/interaction/commands/src/types.ts:84",
+        "packages/interaction/commands/src/types.ts:88",
         "packages/llm/llm/src/message.ts:103",
         "packages/session/session-title/src/types.ts:35"
       ]

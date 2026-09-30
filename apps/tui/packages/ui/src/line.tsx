@@ -272,7 +272,7 @@ export function LiveRegion({ rows, budget, limit, result, clock }: {
   // head that says what the step is doing.
   const lines = tailLines(rows.flatMap(row => row.kind === 'tool-group'
     ? fittedGroup(row.calls, result, limit, height)
-    : present(row, result)), limit, height)
+    : present(row, result, undefined, budget.measure)), limit, height)
   if (lines.length === 0 || limit <= 0) return null
   // A section's opening blank is drawn outside the clip. The clipped rows are
   // the oldest text, never the gap that separates the section from history.

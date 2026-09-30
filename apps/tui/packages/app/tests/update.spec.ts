@@ -11,7 +11,8 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CHECK_CACHE, CHECK_INTERVAL_MS, hostTarget } from '@deepseek-ai/dsh-updater'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'
-import { progressText, Updates, type Baking } from '../src/update.ts'
+import { progressStep, Updates } from '../src/update.ts'
+import type { InstallStep } from '@dsh-tui/ui/install-progress.ts'
 
 const copy = dictionaries.en
 const roots: string[] = []
@@ -129,21 +130,24 @@ describe.skipIf(process.platform === 'win32')('Updates', () => {
     const abort = new AbortController()
     const updates = new Updates({ running: '0.1.0', release, env, fetch })
     // Each change is read as the renderer reads it, through the change callback.
-    const baked: (Baking | undefined)[] = []
-    const changed = vi.fn(() => { baked.push(updates.baking) })
+    const shown: (InstallStep | undefined)[] = []
+    const changed = vi.fn(() => { shown.push(updates.installing) })
     updates.start(abort.signal, changed)
     const result = await updates.update(copy, new AbortController().signal)
     expect(result).toEqual({ kind: 'success', text: `${copy.updateInstalled}: v0.1.0 → v0.2.0` })
     expect(readlinkSync(join(root, 'install/current'))).toContain('/versions/0.2.0-')
-    expect(baked[0]).toEqual({ label: copy.updateChecking, level: 0 })
-    const steps = baked.filter((step): step is Baking => step !== undefined)
-    expect(steps.map(step => step.label)).toContain(`${copy.updateUnpacking} v0.2.0…`)
-    expect(steps.filter(step => step.label.startsWith(copy.updateDownloading)).length).toBeLessThanOrEqual(101)
-    // The loaf only ever browns, and the row goes when the command ends.
-    expect(steps.every((step, index) => index === 0 || step.level >= steps[index - 1]!.level)).toBe(true)
-    expect(steps.at(-1)!.level).toBeGreaterThan(0.8)
-    expect(baked.at(-1)).toBeUndefined()
-    expect(updates.baking).toBeUndefined()
+    // Checking has no length to fill; the download fills its meter, only forwards.
+    expect(shown[0]).toEqual({ label: copy.updateChecking })
+    const steps = shown.filter((step): step is InstallStep => step !== undefined)
+    expect(steps.map(step => step.label)).toContain(`${copy.updateUnpacking} v0.2.0`)
+    const downloads = steps.filter(step => step.label.startsWith(copy.updateDownloading))
+    expect(downloads.length).toBeLessThanOrEqual(101)
+    expect(downloads.every((step, index) => index === 0 || step.fraction! >= downloads[index - 1]!.fraction!)).toBe(true)
+    expect(downloads.at(-1)!.fraction).toBe(1)
+    expect(steps.at(-1)!.fraction).toBeUndefined()
+    // The row goes when the command ends.
+    expect(shown.at(-1)).toBeUndefined()
+    expect(updates.installing).toBeUndefined()
     expect(updates.state).toEqual({ version: '0.2.0', installed: true })
     expect(changed).toHaveBeenCalled()
     abort.abort()
@@ -168,10 +172,11 @@ describe.skipIf(process.platform === 'win32')('Updates', () => {
   })
 })
 
-describe('progressText', () => {
+describe('progressStep', () => {
   it('names the step and, while downloading, how far it has got', () => {
-    expect(progressText(copy, '0.2.0', { phase: 'download', received: 2_500_000, total: 10_000_000 }))
-      .toBe(`${copy.updateDownloading} v0.2.0… 25% (2.5 / 10.0 MB)`)
-    expect(progressText(copy, '0.2.0', { phase: 'verify' })).toBe(`${copy.updateVerifying}: v0.2.0…`)
+    expect(progressStep(copy, '0.2.0', { phase: 'download', received: 2_500_000, total: 10_000_000 }))
+      .toEqual({ label: `${copy.updateDownloading} v0.2.0`, fraction: 0.25, detail: '2.5 / 10.0 MB' })
+    expect(progressStep(copy, '0.2.0', { phase: 'download', received: 0, total: 0 })).toMatchObject({ fraction: 1 })
+    expect(progressStep(copy, '0.2.0', { phase: 'verify' })).toEqual({ label: `${copy.updateVerifying}: v0.2.0` })
   })
 })

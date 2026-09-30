@@ -139,6 +139,63 @@ describe('frame output', () => {
 })
 
 /**
+ * Where a write erases to the end of a row after drawing on it. The cursor
+ * rests on a full-width row's last cell until the next character wraps it,
+ * and a terminal that does not defer the wrap, as Warp does not, erases that
+ * cell. A row is drawn from its first column after a newline, a return, or a
+ * move to a column or position.
+ * @param bytes - what reached the terminal.
+ * @returns the text drawn before each such erase.
+ */
+function erasedAfterText(bytes: string): string[] {
+  const found: string[] = []
+  let drawn = ''
+  for (const token of bytes.match(/\u001B\[[\d;?]*[\x40-\x7e]|\u001B[^[]|[^\u001B]/gu) ?? []) {
+    if (token === '\n' || token === '\r' || /^\u001B\[[\d;]*[GEFHf]$/u.test(token)) drawn = ''
+    else if (token === '\u001B[K' || token === '\u001B[0K') { if (drawn !== '') found.push(drawn); drawn = '' }
+    else if (!token.startsWith('\u001B')) drawn += token
+  }
+  return found
+}
+
+describe('the right edge', () => {
+  it('never erases a row after drawing it, so the hint and the goal keep their last cells', async () => {
+    const stdout = new Output(COLUMNS, ROWS)
+    const output = frameOutput(stdout as unknown as NodeJS.WriteStream, stdout as unknown as NodeJS.WriteStream)
+    let state: AppProps = {
+      files: { query: undefined, entries: [], loading: false, error: undefined }, onReferenceQuery: () => {},
+      completion: { entries: [], loading: false, error: undefined }, completionLimit: 8, resultLines: 4,
+      committed: emptyTranscript, live: [], pending: [], status: 'idle', stopping: false,
+      command: undefined, notice: undefined, interaction: undefined, todos: undefined,
+      model: 'mock/model', cwd: '/workspace', sessionId: 'edge', copy: dictionaries.en,
+      frame: 'round', quitting: false, context: undefined,
+      onSubmit: () => {}, onCancel: () => {}, onInterrupt: () => {}, onAnswer: () => {},
+    }
+    const instance = render(<App {...state} />, {
+      stdout: output.out, stderr: output.err, stdin: new Input() as unknown as NodeJS.ReadStream,
+      patchConsole: false, exitOnCtrlC: false, interactive: true, incrementalRendering: true,
+    })
+    disposers.push(() => { instance.unmount(); instance.cleanup() })
+    const update = async (patch: Partial<AppProps>): Promise<void> => {
+      state = { ...state, ...patch }
+      instance.rerender(<App {...state} />)
+      await instance.waitUntilRenderFlush()
+      await new Promise(resolve => setImmediate(resolve))
+    }
+    await update({})
+    // Each of these rewrites the header, whose goal ends in the last column, and the composer.
+    await update({ goal: { objective: 'Ship it', phase: 'paused', armed: false, rounds: 3, maxRounds: 256 } })
+    await update({ status: 'running' })
+    await update({ notice: 'A notice above the composer' })
+    await update({ status: 'idle', notice: undefined })
+    const bytes = stdout.writes.join('')
+    // Ink erases after each row it rewrites; every one reaching the terminal is cleared first.
+    expect(bytes).toMatch(/\u001B\[1G\u001B\[K/u)
+    expect(erasedAfterText(bytes)).toEqual([])
+  })
+})
+
+/**
  * Mount the app through {@link frameOutput} in a terminal whose shell has
  * printed one line.
  * @returns a props update that reads the settled screen, and a resize.
@@ -205,6 +262,34 @@ async function session(columns: number, rows: number) {
 const inputRow = (screen: readonly string[]): number => screen.findIndex(line => line.startsWith('> ') || line.startsWith('^ '))
 
 describe('bottom anchoring', () => {
+  it('releases a closed code block into complete scrollback while the response is still streaming', async () => {
+    const ui = await session(COLUMNS, ROWS)
+    const blocks = new LiveBlocks()
+    const printed = new Printed()
+    const code = Array.from({ length: 30 }, (_, index) => `console.log("code-line-${String(index).padStart(2, '0')}")`)
+    const open = `\`\`\`js\n${code.join('\n')}\n`
+    const closing = '```\n'
+    const feed = async (text: string): Promise<string[]> => {
+      blocks.push({ type: 'text-delta', index: 0, text })
+      const { print, live } = printed.split(blocks.keyed())
+      return ui.update({ status: 'running', committed: appendTranscript(ui.state().committed, print), live })
+    }
+    const preview = await feed(open)
+    expect(preview.join('\n')).not.toContain(code[0])
+    expect(preview.join('\n')).toContain(code.at(-1))
+    const closed = await feed(closing)
+    expect(inputRow(closed)).toBe(ROWS - 4)
+    const history = await ui.history()
+    for (const line of code) expect(history.filter(row => row.trim() === line)).toHaveLength(1)
+    expect(history.join('\n')).not.toContain('```')
+    const committed = appendTranscript(ui.state().committed,
+      printed.reconcile([{ kind: 'assistant', text: open + closing }]))
+    const done = await ui.update({ committed, live: [], status: 'idle' })
+    expect(inputRow(done)).toBe(ROWS - 4)
+    const final = await ui.history()
+    for (const line of code) expect(final.filter(row => row.trim() === line)).toHaveLength(1)
+  })
+
   it('rests the composer on the bottom row from the first frame, through a turn and its panels', async () => {
     const ui = await session(COLUMNS, ROWS)
     // The base rule, the status line, and Ink's cursor row under it.

@@ -38,6 +38,18 @@ export class InputCatalog {
   /** Current metadata. Skill bodies are never loaded for completion. */
   get view(): CompletionCatalog { return this.state }
 
+  /**
+   * Rank these commands ahead of the frequent ones, such as `login` while no
+   * provider can answer. An empty list restores the usual order.
+   * @param names - command names without the slash, most needed first.
+   */
+  prefer(names: readonly string[]): void {
+    if (this.closed || (this.state.first ?? []).join('\u0000') === names.join('\u0000')) return
+    const { first: _first, ...rest } = this.state
+    this.state = names.length === 0 ? rest : { ...rest, first: [...names] }
+    this.changed()
+  }
+
   /** Observe one command's first argument. Leaving the menu drops its session cache. */
   searchArgument(query: { name: string; partial: string } | undefined): void {
     if (this.closed) return

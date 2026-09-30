@@ -87,10 +87,10 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     description: 'Owns the default model selection independently of any Host or transport. The composition entry remains usable without a settings provider; when one is mounted, its user layer is read live.',
     methods: [
       {
-        signature: 'currentSelection(): ModelSelection',
+        signature: 'currentSelection(): ModelSelection | undefined',
         description: 'Read the current default model selection.',
         parameters: [],
-        returns: 'a detached provider, model, and optional reasoning selection.',
+        returns: 'a detached provider, model, and optional reasoning selection, or undefined when neither the composition nor the user saved one.',
       },
       {
         signature: 'async saveSelection(next: ModelSelection): Promise<void>',
@@ -928,6 +928,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Read direct module dependency URLs from the active Node loader.',
         parameters: [{ name: 'url', description: 'Module URL.' }],
         returns: 'Linked module URLs, or an empty list for an uncached module.',
+        throws: ['If the Node internal loader is unavailable, including with empty watch roots.'],
       },
     ],
   },
@@ -2051,10 +2052,56 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     description: 'Singleton settings owner read when delegation tools are composed for a Session.',
     methods: [
       {
-        signature: 'current(): SubagentModelSelectionSettings',
+        signature: 'current(): Pick<SubagentModelSelectionSettings, \'enabled\' | \'allowedModels\'>',
         description: 'Read a detached selection preference for the next eligible Session composition.',
         parameters: [],
         returns: 'the enabled state and exact allowed routes.',
+      },
+      {
+        signature: 'router(): SubagentRouterSettings | undefined',
+        description: 'Read the task router for the delegation being made now.',
+        parameters: [],
+        returns: 'the router settings, or undefined while routing is off.',
+      },
+      {
+        signature: 'describeRoutes(llm: Pick<LlmRuntime, \'resolveModelInfo\'> | undefined, signal: AbortSignal): Promise<readonly RouterRouteView[]>',
+        description: 'Ask the router how it recognizes each model new Sessions may use, sending exactly what a routed delegation sends about them, so the user can see which models need a hint. It asks even while routing is off.',
+        parameters: [{ name: 'llm', description: 'Live LLM runtime that describes each route.' }, { name: 'signal', description: 'The caller\'s lifetime.' }],
+        returns: 'the router\'s view of each allowed model, in their order.',
+      },
+      {
+        signature: 'async routerToken(): Promise<string | undefined>',
+        description: 'The router\'s bearer token, resolved afresh for each request so a sign-in or sign-out reaches the next delegation.',
+        parameters: [],
+        returns: 'the token, or undefined when none is stored or exported.',
+      },
+      {
+        signature: 'async routerTokenStatus(): Promise<RouterTokenStatus>',
+        description: 'Whether a router token is present and where it comes from, without the token.',
+        parameters: [],
+        returns: 'the token\'s reference, presence, source, and whether sign-in can replace it.',
+      },
+      {
+        signature: 'async routerAccount(signal: AbortSignal): Promise<string | undefined>',
+        description: 'The router account the current token belongs to.',
+        parameters: [{ name: 'signal', description: 'The caller\'s lifetime.' }],
+        returns: 'the account\'s address, or undefined without a token or when the router does not know it as an account\'s.',
+      },
+      {
+        signature: 'async requestSignInCode(email: string, signal: AbortSignal): Promise<void>',
+        description: 'Ask the router to email a one-time sign-in code. The first sign-in with an address registers it. Refused before anything is sent when a token from the environment would shadow the one signing in stores.',
+        parameters: [{ name: 'email', description: 'The address to sign in with.' }, { name: 'signal', description: 'The caller\'s lifetime.' }],
+      },
+      {
+        signature: 'async signIn(email: string, code: string, signal: AbortSignal): Promise<string>',
+        description: 'Trade an emailed code for a router token and store it, so routed delegations and the calibration list send it from the next request on.',
+        parameters: [{ name: 'email', description: 'The address the code was sent to.' }, { name: 'code', description: 'The code as the user typed it.' }, { name: 'signal', description: 'The caller\'s lifetime.' }],
+        returns: 'the signed-in account\'s address.',
+      },
+      {
+        signature: 'async signOut(signal: AbortSignal): Promise<void>',
+        description: 'Revoke the stored router token at the router and remove it. The token is removed even when the router cannot be reached, so signing out always stops this machine from sending it.',
+        parameters: [{ name: 'signal', description: 'The caller\'s lifetime.' }],
       },
     ],
   },
@@ -3546,7 +3593,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'CommandArgumentChoice',
-    declaration: 'export type CommandArgumentChoice = string | {\n    readonly value: string;\n    readonly requiresInput?: boolean;\n};',
+    declaration: 'export type CommandArgumentChoice = string | {\n    readonly value: string;\n    readonly requiresInput?: boolean;\n    readonly description?: string;\n};',
   },
   {
     name: 'CommandChoiceProvider',
@@ -4665,6 +4712,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface ResumeAgentOptions {\n    readonly resumeSessionId: SessionId;\n    readonly parentAgent?: Agent;\n    readonly agentOptions?: AgentOptions;\n    readonly signal?: AbortSignal;\n    readonly setup?: AgentSetup;\n}',
   },
   {
+    name: 'RouterRouteView',
+    declaration: 'export interface RouterRouteView {\n    readonly provider: string;\n    readonly model: string;\n    readonly profile?: string;\n    readonly matchedBy?: \'name\' | \'same_as\';\n    readonly ranked: boolean;\n    readonly quality?: number;\n    readonly qualitySource?: \'benchmarks\' | \'hint\';\n    readonly price?: number;\n    readonly priceSource?: \'catalog\' | \'hint\';\n}',
+  },
+  {
+    name: 'RouterTokenStatus',
+    declaration: 'export interface RouterTokenStatus {\n    readonly tokenEnv: string;\n    readonly configured: boolean;\n    readonly source?: string;\n    readonly writable: boolean;\n}',
+  },
+  {
     name: 'RpcId',
     declaration: 'export type RpcId = Branded<\'rpc-id\'>;',
   },
@@ -5266,7 +5321,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SubagentModelSelectionSettings',
-    declaration: 'export interface SubagentModelSelectionSettings {\n    enabled: boolean;\n    allowedModels: AllowedModelRoute[];\n}',
+    declaration: 'export interface SubagentModelSelectionSettings {\n    enabled: boolean;\n    allowedModels: AllowedModelRoute[];\n    router: SubagentRouterSettings;\n}',
   },
   {
     name: 'SubagentPromptReceipt',
@@ -5287,6 +5342,18 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'SubagentResult',
     declaration: 'export interface SubagentResult {\n    readonly output: ContentBlock[];\n    readonly structured?: unknown;\n    readonly diagnostic?: string;\n    readonly stopReason: SubagentStopReason;\n}',
+  },
+  {
+    name: 'SubagentRouteHint',
+    declaration: 'export interface SubagentRouteHint {\n    provider: string;\n    model: string;\n    sameAs?: string;\n    quality?: \'low\' | \'medium\' | \'high\' | \'frontier\';\n    cost?: \'free\' | \'low\' | \'medium\' | \'high\';\n}',
+  },
+  {
+    name: 'SubagentRouterPriority',
+    declaration: 'export type SubagentRouterPriority = \'quality\' | \'cost\' | \'speed\' | \'balanced\';',
+  },
+  {
+    name: 'SubagentRouterSettings',
+    declaration: 'export interface SubagentRouterSettings {\n    enabled: boolean;\n    url: string;\n    tokenEnv: string;\n    timeoutMs: number;\n    priority?: SubagentRouterPriority;\n    hints?: SubagentRouteHint[];\n}',
   },
   {
     name: 'SubagentRun',

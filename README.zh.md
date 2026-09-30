@@ -55,7 +55,7 @@ irm https://bake.justar.dev/install.ps1 | iex
 bake
 ```
 
-使用 `/login` 登录，或在启动前导出 `DEEPSEEK_API_KEY`。输入 `/` 浏览命令，`/help` 查看列表，`@` 引用文件。`bake --help` 显示启动选项，例如 `--resume <id>`。
+Bake 没有默认提供方：使用 `/login` 登录（DeepSeek、CLIProxyAPI、OpenAI、Anthropic、GitHub Copilot、OpenRouter、Kimi 或 xAI），第一次登录会选中其模型。启动前导出的 `DEEPSEEK_API_KEY` 也视为已登录。输入 `/` 浏览命令，`/help` 查看列表，`@` 引用文件。`bake --help` 显示启动选项，例如 `--resume <id>`。
 
 Bake 把会话、凭据和配置保存在 `~/.bake`。设置 `DSH_HOME` 可改用其他目录。Bake 从不读取或迁移 DeepSeek Harness 的 `~/.dsh`。
 

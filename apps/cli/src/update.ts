@@ -5,8 +5,7 @@
 
 import { fileURLToPath } from 'node:url'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
-import { bakeLevel } from '@dsh-tui/ui/loaf.ts'
-import { startBakery } from './bakery.ts'
+import { startProgress, type ProgressTerminal } from './progress.ts'
 import {
   detectInstall, markLaunched, selfUpdate, UpdateError, type InstallLayout, type InstallProgress,
 } from '@deepseek-ai/dsh-updater'
@@ -34,19 +33,25 @@ export async function recordLaunch(): Promise<void> {
 }
 
 /**
- * The spinner's label for an install step.
+ * Show one install step on the progress rows: each phase is its own step, and
+ * the download fills its meter with the bytes received.
+ * @param progress - the rows.
  * @param version - the release being installed.
- * @param progress - the step.
- * @returns one line, without a trailing newline.
+ * @param update - the updater's report.
+ * @param previous - the phase reported before this one.
  */
-export function progressLabel(version: string, progress: InstallProgress): string {
-  switch (progress.phase) {
-    case 'download': {
-      const percent = progress.total === 0 ? 100 : Math.floor(progress.received * 100 / progress.total)
-      return `Downloading Bake ${version}… ${percent}% (${megabytes(progress.received)} / ${megabytes(progress.total)} MB)`
+export function showStep(progress: ReturnType<typeof startProgress>, version: string, update: InstallProgress,
+  previous: InstallProgress | undefined): void {
+  if (update.phase !== previous?.phase) {
+    if (previous?.phase === 'download') progress.note(`${megabytes(previous.total)} MB`)
+    switch (update.phase) {
+      case 'download': progress.step('Downloading', 'Downloaded'); break
+      case 'unpack': progress.step('Unpacking', 'Unpacked'); break
+      case 'verify': progress.step('Verifying', 'Verified'); progress.note(`v${version} starts`); break
     }
-    case 'unpack': return `Unpacking Bake ${version}…`
-    case 'verify': return `Checking Bake ${version} starts…`
+  }
+  if (update.phase === 'download') {
+    progress.progress(update.total === 0 ? 1 : update.received / update.total, `${megabytes(update.received)} / ${megabytes(update.total)} MB`)
   }
 }
 
@@ -69,12 +74,15 @@ export async function runUpdate(check: boolean, running: string, io: {
   readonly signal?: AbortSignal
   /** Replaces the global `fetch`, for tests. */
   readonly fetch?: typeof fetch
+  /** Where progress is drawn; the process's stderr unless `out` or `err` is given. */
+  readonly terminal?: ProgressTerminal
 } = {}): Promise<number> {
   const out = io.out ?? (line => process.stdout.write(`${line}\n`))
   const err = io.err ?? (line => process.stderr.write(`${line}\n`))
   const env = io.env ?? process.env
   const layout = io.layout ?? detectInstall(releaseRoot())
-  let bakery: ReturnType<typeof startBakery> | undefined
+  let progress: ReturnType<typeof startProgress> | undefined
+  let previous: InstallProgress | undefined
   let found = ''
   try {
     const outcome = await selfUpdate({
@@ -83,10 +91,14 @@ export async function runUpdate(check: boolean, running: string, io: {
       ...io.fetch === undefined ? {} : { fetch: io.fetch },
       onFound: (version) => {
         found = version
-        out(`Downloading Bake ${version}…`)
-        bakery = startBakery(io.out === undefined && io.err === undefined ? process.stderr : { write() {} }, env, 'Baking your update...')
+        const terminal = io.terminal ?? (io.out === undefined && io.err === undefined ? process.stderr : { write() {} })
+        progress = startProgress(terminal, env, ['update', `v${running} \u2192 v${version}`])
+        if (!progress.animated) out(`Downloading Bake ${version}…`)
       },
-      onProgress: (progress) => { bakery?.stage(progressLabel(found, progress), bakeLevel(progress)) },
+      onProgress: (update) => {
+        if (progress !== undefined) showStep(progress, found, update, previous)
+        previous = update
+      },
     })
     switch (outcome.kind) {
       case 'unmanaged':
@@ -101,11 +113,19 @@ export async function runUpdate(check: boolean, running: string, io: {
         out(`Bake ${outcome.version} is available (running ${running}). Run: bake update`)
         return UPDATE_AVAILABLE_EXIT
       case 'installed': {
-        bakery?.finish(true)
         const next = outcome.version
-        out(`Updated Bake ${running} → ${next}. New sessions start ${next}; sessions already open keep ${running}.`)
-        if (outcome.result.launcherPending) out('The bake command switches over once this window\'s bake exits.')
-        if (outcome.result.pruned.length > 0) out(`Removed releases unused for a week: ${outcome.result.pruned.join(', ')}`)
+        const sessions = `New sessions start ${next}; sessions already open keep ${running}.`
+        const after = [
+          sessions,
+          ...outcome.result.launcherPending ? ['The bake command switches over once this window\'s bake exits.'] : [],
+          ...outcome.result.pruned.length > 0 ? [`Removed releases unused for a week: ${outcome.result.pruned.join(', ')}`] : [],
+        ]
+        if (progress?.animated === true) {
+          progress.finish({ title: `Updated Bake ${running} \u2192 ${next}`, next: after })
+          return 0
+        }
+        out(`Updated Bake ${running} → ${next}. ${sessions}`)
+        for (const line of after.slice(1)) out(line)
         return 0
       }
       default:
@@ -113,11 +133,11 @@ export async function runUpdate(check: boolean, running: string, io: {
         throw new Error(`bake update: unhandled outcome ${JSON.stringify(outcome)}`)
     }
   } catch (error) {
-    bakery?.finish()
+    progress?.fail()
     if (io.signal?.aborted === true) { err('Update cancelled; the install is unchanged.'); return 1 }
     if (error instanceof UpdateError) { err(error.message); return 1 }
     throw error
   } finally {
-    bakery?.finish()
+    progress?.stop()
   }
 }

@@ -12,7 +12,8 @@ import { SettingsProvider, type SettingsNamespace } from '@deepseek-ai/dsh-setti
 import Defaults from '@deepseek-ai/dsh-agent-default-model'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'
-import type { ChoicePrompt } from '@dsh-tui/ui/picker.tsx'
+import { stepTab, type ChoicePrompt } from '@dsh-tui/ui/picker.tsx'
+import SubagentModelSelection from '@deepseek-ai/dsh-tool-subagent/model-selection-settings'
 import type { Interactions } from '../src/interactions.ts'
 import { Preferences, SETTINGS_NAMESPACE, type TuiSettings } from '../src/preferences.ts'
 import { formatBytes, formatDuration, parseNumber, schemaFields } from '../src/schema-fields.ts'
@@ -20,7 +21,7 @@ import { formatBytes, formatDuration, parseNumber, schemaFields } from '../src/s
 const copy = dictionaries.en
 const base: TuiSettings = {
   screen: 'inline', locale: 'en', composerFrame: 'auto', goalObjective: false,
-  resultLines: 4, completionLimit: 8, doubleInterruptMs: 2000,
+  resultLines: 4, completionLimit: 8, doubleInterruptMs: 2000, recentModels: [],
 }
 
 /** A settings store over one in-memory document. */
@@ -230,6 +231,22 @@ describe('Preferences', () => {
     expect([preferences.screen, preferences.launch.locale]).toEqual(['fullscreen', 'zh'])
   })
 
+  it('keeps the models chosen on /model in the tui section, most recent first, and leaves the panel without a row for them', async () => {
+    const { preferences, changed } = await mount()
+    await preferences.rememberModel('a/1')
+    await preferences.rememberModel('b/2')
+    await preferences.rememberModel('a/1')
+    expect(preferences.recentModels).toEqual(['a/1', 'b/2'])
+    expect(MemoryProvider.doc[SETTINGS_NAMESPACE]).toEqual({ recentModels: ['a/1', 'b/2'] })
+    // Choosing the model already first writes nothing.
+    const writes = changed.mock.calls.length
+    await preferences.rememberModel('a/1')
+    expect(changed.mock.calls).toHaveLength(writes)
+    const { interactions, prompts } = scripted(pick('section:terminal'), back, back)
+    await run(preferences, interactions)
+    expect(JSON.stringify(prompts.map(prompt => prompt.choices))).not.toContain('recentModels')
+  })
+
   it('keeps the profile\'s values when the stored section is invalid', async () => {
     MemoryProvider.doc = { [SETTINGS_NAMESPACE]: { screen: 'sideways' } }
     const ctx = new Context()
@@ -339,6 +356,35 @@ describe('Preferences', () => {
     })
   })
 
+  it('opens a list in the user\'s editor as JSON, and keeps the panel open with what went wrong', async () => {
+    const ctx = new Context()
+    disposers.push(() => ctx.fiber.dispose())
+    await ctx.plugin(MemoryProvider)
+    const edits: { text: string, name: string }[] = []
+    const replies = ['// hosts\n["a.test", "b.test",]\n', 'not json', '[]\n']
+    const editText = vi.fn((text: string, name: string) => {
+      edits.push({ text, name })
+      const reply = replies.shift()
+      return reply === undefined ? Promise.reject(new Error('vi exited with 1')) : Promise.resolve(reply)
+    })
+    const preferences = new Preferences(ctx, base, undefined, vi.fn(), editText)
+    ctx.settings.register('example-plugin', z.object({ hosts: z.array(z.string()).default([]) }))
+    const { interactions, prompts } = scripted(
+      pick('section:advanced'), pick('section:example-plugin'),
+      pick('setting:hosts'), pick('setting:hosts'), pick('setting:hosts'), pick('setting:hosts'),
+      back, back, back,
+    )
+    await run(preferences, interactions)
+    expect(prompts[2]!.choices.find(choice => choice.value === 'setting:hosts')?.description).toBe(`[0] · ${copy.settingsInEditor}`)
+    expect(edits[0]).toEqual({ text: '[]\n', name: 'example-plugin.hosts.json' })
+    // Comments and a trailing comma are the settings file's own JSONC.
+    expect(edits[1]!.text).toBe('[\n  "a.test",\n  "b.test"\n]\n')
+    expect(prompts[4]!.warning).toBe(`${copy.settingsFailed}: ${copy.settingsNotJson}: JSONC: unexpected character at offset 0`)
+    expect(prompts[6]!.warning).toBe(`${copy.settingsEditorFailed}: vi exited with 1`)
+    expect(MemoryProvider.doc['example-plugin']).toEqual({ hosts: [] })
+    expect(prompts[5]!.choices.find(choice => choice.value === 'setting:hosts')?.description).toBe(`[0] · ${copy.settingsInEditor}`)
+  })
+
   it('searches every setting from the top page, and edits the one found in place', async () => {
     const { ctx, preferences } = await mount()
     plugins(ctx)
@@ -354,6 +400,232 @@ describe('Preferences', () => {
     expect(MemoryProvider.doc['shell']).toEqual({ timeoutMs: 60_000 })
     // Back at the top with the section of the setting it changed under the pointer.
     expect(prompts[2]!.initial).toBe('section:shell')
+  })
+
+  it('moves between sections with their tabs, and returns to the top on the last one', async () => {
+    const { ctx, preferences } = await mount()
+    plugins(ctx)
+    const { interactions, prompts } = scripted(
+      pick('tab:terminal'),
+      (prompt) => stepTab(prompt.tabs, false),
+      (prompt) => stepTab(prompt.tabs, true),
+      (prompt) => stepTab(prompt.tabs, true),
+      back, back,
+    )
+    await run(preferences, interactions)
+    const labels = [copy.settingsTerminal, copy.settingsAgent, copy.settingsShell, copy.settingsAdvanced]
+    expect(prompts[0]!.tabs).toEqual({ items: ['terminal', 'agent', 'shell', 'advanced'].map((key, index) => ({ value: `tab:${key}`, label: labels[index] })) })
+    expect(prompts.slice(1, 5).map(prompt => [prompt.title, prompt.tabs?.active])).toEqual([
+      [`${copy.settingsTitle} › ${copy.settingsTerminal}`, 'tab:terminal'],
+      [`${copy.settingsTitle} › ${copy.settingsAgent}`, 'tab:agent'],
+      [`${copy.settingsTitle} › ${copy.settingsTerminal}`, 'tab:terminal'],
+      // Shift-Tab wraps from the first section to the last.
+      [`${copy.settingsTitle} › ${copy.settingsAdvanced}`, 'tab:advanced'],
+    ])
+    expect(prompts[5]!.initial).toBe('section:advanced')
+    expect(prompts[5]!.tabs?.active).toBeUndefined()
+  })
+
+  it('asks which models subagents may use before switching the choice on, and saves both together', async () => {
+    const { ctx, preferences } = await mount()
+    await ctx.plugin(SubagentModelSelection)
+    await vi.waitFor(() => expect(ctx.settings.describe().some(entry => entry.ns === 'subagent-model-selection')).toBe(true))
+    const catalog = { entries: [
+      { route: 'deepseek/deepseek-v4-flash', name: 'deepseek-v4-flash', current: true },
+      { route: 'openrouter/anthropic/claude', name: 'Claude via OpenRouter', current: false },
+    ], unavailable: ['offline'] }
+    const listModels = vi.fn(() => Promise.resolve(catalog))
+    const { interactions, prompts } = scripted(
+      pick('section:agent'), pick('setting:subagent-model-selection.enabled'),
+      pick('openrouter/anthropic/claude'),
+      // The last model of a switched-on choice stays.
+      pick('openrouter/anthropic/claude'),
+      back,
+      pick('setting:subagent-model-selection.allowedModels'), pick('deepseek/deepseek-v4-flash'), pick('openrouter/anthropic/claude'),
+      labelled(copy.settingsSubagentAllowedDone),
+      back, back,
+    )
+    await expect(run(preferences, interactions, { listModels })).resolves.toMatchObject({ kind: 'success', text: copy.settingsStored })
+    expect(MemoryProvider.doc['subagent-model-selection']).toEqual({
+      enabled: true, allowedModels: [{ provider: 'deepseek', model: 'deepseek-v4-flash' }],
+    })
+    const [, agent, first, second, third] = prompts
+    expect(agent!.choices.filter(choice => choice.value.startsWith('setting:subagent')).map(choice => [choice.label, choice.description])).toEqual([
+      [copy.settingsSubagentModels, copy.settingsOff], [copy.settingsSubagentAllowed, copy.settingsSubagentAllowedNone],
+    ])
+    expect(first!.title).toBe(`${copy.settingsTitle} › ${copy.settingsAgent} › ${copy.settingsSubagentAllowed}`)
+    expect(first!.warning).toBe(`${copy.settingsSubagentAllowedFirst} · ${copy.modelCatalogError}: offline`)
+    // A name that only restates the route is dropped.
+    expect(first!.choices.map(choice => [choice.value, choice.description, choice.status?.text])).toEqual([
+      ['deepseek/deepseek-v4-flash', undefined, undefined],
+      ['openrouter/anthropic/claude', 'Claude via OpenRouter', undefined],
+      ['\u0000done', undefined, undefined],
+    ])
+    expect(second!.choices.find(choice => choice.value === 'openrouter/anthropic/claude')?.status).toEqual({ text: copy.settingsSubagentAllowedOn, tone: 'done' })
+    expect(third!.warning).toBe(`${copy.settingsSubagentAllowedLast} · ${copy.modelCatalogError}: offline`)
+    expect(prompts[5]!.choices.find(choice => choice.value === 'setting:subagent-model-selection.enabled')?.description).toBe(copy.settingsOn)
+  })
+
+  it('leaves the choice off when no model is chosen, and without a catalog edits the list in the file', async () => {
+    const { ctx, preferences } = await mount()
+    await ctx.plugin(SubagentModelSelection)
+    await vi.waitFor(() => expect(ctx.settings.describe().some(entry => entry.ns === 'subagent-model-selection')).toBe(true))
+    const listModels = () => Promise.resolve({ entries: [{ route: 'mock/model', name: 'Mock', current: true }], unavailable: [] })
+    const opened = scripted(pick('section:agent'), pick('setting:subagent-model-selection.enabled'), back, back, back)
+    await expect(run(preferences, opened.interactions, { listModels })).resolves.toEqual({ kind: 'success' })
+    expect(MemoryProvider.doc['subagent-model-selection']).toBeUndefined()
+    const plain = scripted(pick('section:agent'), back, back)
+    await run(preferences, plain.interactions)
+    expect(plain.prompts[1]!.choices.filter(choice => choice.value.startsWith('setting:subagent')).map(choice => choice.label))
+      .toEqual([copy.settingsSubagentModels])
+  })
+})
+
+describe('task router settings', () => {
+  afterEach(() => { vi.unstubAllEnvs() })
+  const allowed = [{ provider: 'deepseek', model: 'deepseek-v4-flash' }, { provider: 'corp', model: 'opus-alias' }]
+
+  async function mounted() {
+    const mountedPanel = await mount()
+    await mountedPanel.ctx.plugin(SubagentModelSelection, { enabled: true, allowedModels: allowed })
+    await vi.waitFor(() => expect(mountedPanel.ctx.settings.describe().some(entry => entry.ns === 'subagent-model-selection')).toBe(true))
+    return mountedPanel
+  }
+
+  it('says what the beta router sends, and where, before it turns on', async () => {
+    vi.stubEnv('ING_API_TOKEN', '')
+    const { preferences } = await mounted()
+    const { interactions, prompts } = scripted(
+      pick('section:agent'), pick('setting:subagent-model-selection.router.enabled'), pick('off'),
+      pick('setting:subagent-model-selection.router.enabled'), pick('on'), back, back,
+    )
+    await run(preferences, interactions, { describeRoutes: () => Promise.resolve([]) })
+    expect(MemoryProvider.doc['subagent-model-selection']).toEqual({ router: { enabled: true } })
+    const [, agent, kept] = prompts
+    expect(agent!.choices.filter(choice => choice.value.startsWith('setting:subagent-model-selection.router')).map(choice => choice.label))
+      .toEqual([copy.settingsRouter])
+    expect(kept!.warning).toBe(`${copy.settingsRouterAbout} · https://ing.gissx.org · ${copy.settingsRouterSignedOut}`)
+    // Once on, the router's URL, priority, and model calibration follow its switch.
+    expect(prompts[5]!.choices.filter(choice => choice.value.startsWith('setting:subagent-model-selection.router')).map(choice => choice.label))
+      .toEqual([copy.settingsRouter, copy.settingsRouterUrl, copy.settingsRouterPriority, copy.settingsRouterCalibrate])
+  })
+
+  it('lists how the router sees each allowed model and saves the hints set there', async () => {
+    const { ctx, preferences } = await mounted()
+    await ctx.settings.mutate('subagent-model-selection', [{ op: 'set', path: ['router', 'enabled'], value: true }])
+    const describeRoutes = vi.fn(() => Promise.resolve([
+      { provider: 'deepseek', model: 'deepseek-v4-flash', profile: 'deepseek-v4-flash', ranked: true, quality: 0.8,
+        qualitySource: 'benchmarks' as const, price: 0.3 },
+      { provider: 'corp', model: 'opus-alias', ranked: false },
+    ]))
+    await ctx.settings.mutate('subagent-model-selection', [{ op: 'set', path: ['router', 'hints'],
+      value: [{ provider: 'deepseek', model: 'deepseek-v4-flash', quality: 'low' }] }])
+    const { interactions, prompts } = scripted(
+      pick('section:agent'), pick('setting:subagent-model-selection.router.hints'),
+      pick('corp/opus-alias'), pick('quality'), pick('high'),
+      pick('corp/opus-alias'), pick('sameAs'), { typed: 'claude-opus-4.5' },
+      labelled(copy.settingsSubagentAllowedDone), back, back,
+    )
+    await run(preferences, interactions, { describeRoutes })
+    expect(MemoryProvider.doc['subagent-model-selection']).toEqual({ router: { enabled: true, hints: [
+      { provider: 'deepseek', model: 'deepseek-v4-flash', quality: 'low' },
+      { provider: 'corp', model: 'opus-alias', quality: 'high', sameAs: 'claude-opus-4.5' },
+    ] } })
+    // The router is asked again after each change.
+    expect(describeRoutes).toHaveBeenCalledTimes(3)
+    const list = prompts[2]!
+    expect(list.title).toBe(`${copy.settingsTitle} › ${copy.settingsAgent} › ${copy.settingsRouterCalibrate}`)
+    expect(list.choices.map(choice => [choice.value, choice.description, choice.status?.text])).toEqual([
+      // A declared tier does not replace benchmarks, and the list says so.
+      ['deepseek/deepseek-v4-flash', `deepseek-v4-flash · ${copy.settingsRouterQualityShort} 0.80 · $0.30/M · ${copy.settingsRouterHinted}: low · ${copy.settingsRouterBenchmarksWin}`, copy.settingsRouterRanked],
+      ['corp/opus-alias', copy.settingsRouterUnknown, copy.settingsRouterUnranked],
+      ['\u0000done', undefined, undefined],
+    ])
+    expect(prompts[5]!.choices.find(choice => choice.value === 'corp/opus-alias')?.description)
+      .toBe(`${copy.settingsRouterUnknown} · ${copy.settingsRouterHinted}: high`)
+  })
+
+  it('warns when no allowed model is ranked, and reports a router that cannot be reached', async () => {
+    const { ctx, preferences } = await mounted()
+    await ctx.settings.mutate('subagent-model-selection', [{ op: 'set', path: ['router', 'enabled'], value: true }])
+    const unranked = scripted(pick('section:agent'), pick('setting:subagent-model-selection.router.hints'),
+      labelled(copy.settingsSubagentAllowedDone), back, back)
+    await run(preferences, unranked.interactions, { describeRoutes: () => Promise.resolve([{ provider: 'corp', model: 'opus-alias', ranked: false }]) })
+    expect(unranked.prompts[2]!.warning).toBe(copy.settingsRouterNoneRanked)
+
+    const down = scripted(pick('section:agent'), pick('setting:subagent-model-selection.router.hints'), back, back)
+    await run(preferences, down.interactions, { describeRoutes: () => Promise.reject(new Error('router requires a token; set ING_API_TOKEN')) })
+    expect(down.prompts[2]!.warning).toContain(`${copy.settingsRouterUnavailable}: router requires a token; set ING_API_TOKEN`)
+  })
+
+  /** Router sign-in controls over an in-memory token, refusing the first `wrongCodes` codes. */
+  function account(options: { wrongCodes?: number; fromEnv?: boolean } = {}) {
+    let wrong = options.wrongCodes ?? 0
+    let token: string | undefined = options.fromEnv === true ? 'env-token' : undefined
+    const calls: string[] = []
+    const controls = {
+      status: () => Promise.resolve({ tokenEnv: 'ING_API_TOKEN', configured: token !== undefined,
+        ...token === undefined ? {} : { source: options.fromEnv === true ? 'env' : 'file' }, writable: options.fromEnv !== true }),
+      account: () => Promise.resolve(token === undefined ? undefined : 'ada@example.com'),
+      requestCode: (email: string) => { calls.push(`code ${email}`); return Promise.resolve() },
+      signIn: (email: string, code: string) => {
+        calls.push(`sign-in ${email} ${code}`)
+        if (wrong-- > 0) return Promise.reject(new Error('wrong or expired code'))
+        token = 'ing_abc'
+        return Promise.resolve(email)
+      },
+      signOut: () => { calls.push('sign-out'); token = undefined; return Promise.resolve() },
+    }
+    return { controls, calls }
+  }
+  const accountRow = (prompt: ChoicePrompt | undefined) =>
+    prompt?.choices.find(choice => choice.value === 'setting:subagent-model-selection.router.account')
+
+  it('signs in to the router from its account row, asking again after a refused code', async () => {
+    const { ctx, preferences } = await mounted()
+    await ctx.settings.mutate('subagent-model-selection', [{ op: 'set', path: ['router', 'enabled'], value: true }])
+    const { controls, calls } = account({ wrongCodes: 1 })
+    const { interactions, prompts, typed } = scripted(
+      pick('section:agent'), pick('setting:subagent-model-selection.router.account'),
+      { typed: ' ada@example.com ' }, { typed: '000000' }, { typed: '123456' }, back, back,
+    )
+    await run(preferences, interactions, { describeRoutes: () => Promise.resolve([]), routerAccount: controls })
+    expect(calls).toEqual(['code ada@example.com', 'sign-in ada@example.com 000000', 'sign-in ada@example.com 123456'])
+    expect(accountRow(prompts[1])?.description).toBe(copy.settingsRouterSignedOut)
+    expect(typed.map(field => (field as { step?: { index: number } }).step?.index)).toEqual([1, 2, 2])
+    expect((typed[2] as { error?: string }).error).toBe('wrong or expired code')
+    expect(typed[1]!.message).toBe(`${copy.settingsRouterCode} ada@example.com`)
+    expect(accountRow(prompts[2])?.description).toBe(`${copy.settingsRouterSignedInAs} ada@example.com`)
+  })
+
+  it('offers to sign in before turning the router on, and signs out from the account row', async () => {
+    const { preferences } = await mounted()
+    const { controls, calls } = account()
+    const { interactions, prompts } = scripted(
+      pick('section:agent'), pick('setting:subagent-model-selection.router.enabled'), pick('sign-in'),
+      { typed: 'ada@example.com' }, { typed: '123456' },
+      pick('setting:subagent-model-selection.router.account'), pick('out'), back, back,
+    )
+    await run(preferences, interactions, { describeRoutes: () => Promise.resolve([]), routerAccount: controls })
+    expect(prompts[2]!.choices.map(choice => choice.value)).toEqual(['sign-in', 'on', 'off'])
+    expect(MemoryProvider.doc['subagent-model-selection']).toEqual({ router: { enabled: true } })
+    expect(prompts[4]!.choices.map(choice => choice.label))
+      .toEqual([`${copy.settingsRouterSignedInAs} ada@example.com`, copy.settingsRouterSwitch, copy.settingsRouterSignOut])
+    expect(calls.at(-1)).toBe('sign-out')
+    expect(accountRow(prompts[5])?.description).toBe(copy.settingsRouterSignedOut)
+  })
+
+  it('names the variable when the environment supplies the router token', async () => {
+    const { ctx, preferences } = await mounted()
+    await ctx.settings.mutate('subagent-model-selection', [{ op: 'set', path: ['router', 'enabled'], value: true }])
+    const { controls, calls } = account({ fromEnv: true })
+    const { interactions, prompts } = scripted(
+      pick('section:agent'), pick('setting:subagent-model-selection.router.account'), back, back,
+    )
+    await run(preferences, interactions, { describeRoutes: () => Promise.resolve([]), routerAccount: controls })
+    expect(accountRow(prompts[1])?.description).toBe(`${copy.settingsRouterTokenFrom} ING_API_TOKEN`)
+    expect(prompts[2]!.warning).toContain(`${copy.settingsRouterTokenFrom} ING_API_TOKEN`)
+    expect(calls).toEqual([])
   })
 })
 

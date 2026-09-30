@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto'
 import { isAbsolute } from 'node:path'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import type { ModelSelection } from '@deepseek-ai/dsh-agent'
-import type {} from '@deepseek-ai/dsh-agent-default-model'
+import { NO_DEFAULT_MODEL_MESSAGE } from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-agent-presets'
 import { boundContextSummary, createUserMessage, errorChain, type LlmCallConfig } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-permission-presets'
@@ -61,7 +61,9 @@ function resolveRequest(ctx: Context, input: WebhookSessionRequest): ResolvedWeb
   let agentOptions: ResolvedWebhookSessionRequest['agentOptions']
   let modelSelection: ModelSelection
   if (model === undefined) {
+    // No provider is the default: a request without a model needs a saved one.
     const selected = ctx.agentDefaultModel.currentSelection()
+    if (selected === undefined) throw new TypeError(`webhook Session request has no model and ${NO_DEFAULT_MODEL_MESSAGE}`)
     agentOptions = { provider: selected.provider, model: selected.model }
     modelSelection = { ...selected }
   } else {

@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-`dsh-agent-default-model` 在会话未指定模型时，为新创建的 agent 提供共享的默认提供方与模型。使用它可以为所有受支持的 agent 入口统一选择起始模型，其中包括 `dsh --profile headless`。设置可用时，用户可以覆盖已配置的选择（包括推理（reasoning）强度），保存的更改会在后续读取中生效。该默认值作用于整个进程；按会话选择模型仍由创建 agent 的入口负责。
+`dsh-agent-default-model` 在会话未指定模型时，为新创建的 agent 提供共享的默认提供方与模型，或报告尚无默认值。使用它可以为所有受支持的 agent 入口统一选择起始模型，其中包括 `dsh --profile headless`。设置可用时，用户可以覆盖已配置的选择（包括推理（reasoning）强度），保存的更改会在后续读取中生效。该默认值作用于整个进程；按会话选择模型仍由创建 agent 的入口负责。
 
 ## 目录
 
@@ -29,7 +29,7 @@ kind: "package-reference"
 
 ### 配置默认值
 
-组合配置项是默认值的基础：它要求提供方与模型，并且不依赖任何设置提供方也能使用。
+组合配置项是默认值的基础：它同时指定提供方与模型，或两者都不指定，并且不依赖任何设置提供方也能使用。Bake 的基础配置两者都不指定，因此没有默认提供方：新安装启动时没有模型，用户登录后保存的选择即成为默认值。
 
 ```yaml
 - name: '@deepseek-ai/dsh-agent-default-model'
@@ -40,14 +40,14 @@ kind: "package-reference"
 
 | 字段 | 默认值 | 含义 |
 |---|---|---|
-| `provider` | 必填 | 新 agent 使用的已注册提供方路由 |
-| `model` | 必填 | 新 agent 使用的、由提供方持有的模型 id |
+| `provider` | 不设置 | 新 agent 使用的已注册提供方路由；须与 `model` 一同设置 |
+| `model` | 不设置 | 新 agent 使用的、由提供方持有的模型 id；须与 `provider` 一同设置 |
 
 生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-agent-default-model)是所有受支持字段的完整参考。`reasoningEffort` 刻意不是配置字段：它属于设置层，因此完整保存的选择可以在下一个选定的模型没有推理强度时清除旧值，而组合配置值会再次被继承。
 
 ### 读取与更改默认值
 
-`currentSelection()` 为新创建的 agent 返回一份独立的 `{ provider, model, reasoningEffort? }`；`saveSelection()` 为后续 agent 保存完整选择。
+`currentSelection()` 为新创建的 agent 返回一份独立的 `{ provider, model, reasoningEffort? }`；组合配置与已保存的选择都未指定时返回 `undefined`。`saveSelection()` 为后续 agent 保存完整选择。无法自行选择模型的入口会以 `NO_DEFAULT_MODEL_MESSAGE` 失败，提示用户在终端中登录并选择模型。
 
 ```text
 const selection = ctx.agentDefaultModel.currentSelection()
@@ -68,7 +68,7 @@ await ctx.agentDefaultModel.saveSelection({ provider, model, reasoningEffort: 'h
 
 ### 设计理念
 
-该服务是一个组合配置项，带有由设置支撑的数据源。插件配置提供基础 `{ provider, model }`；挂载设置提供方后，`agent-default-model` 设置分节成为实时数据源，所有消费方都通过 `currentSelection()` 读取，因此写入设置后无需在注册层面重建。`reasoningEffort` 只存在于设置 schema 中：配置不能携带它，因为新选择清除推理强度后，该值必须保持清除，而不能再次从组合配置中继承。
+该服务是一个组合配置项，带有由设置支撑的数据源。插件配置提供基础 `{ provider, model }`，未指定时基础为空；挂载设置提供方后，`agent-default-model` 设置分节成为实时数据源，所有消费方都通过 `currentSelection()` 读取，因此写入设置后无需在注册层面重建。`reasoningEffort` 只存在于设置 schema 中：配置不能携带它，因为新选择清除推理强度后，该值必须保持清除，而不能再次从组合配置中继承。
 
 ### 源码地图
 

@@ -16,7 +16,7 @@ it('reflects a logged plan change and repaints when its projection changes', asy
   const changed = vi.fn()
   let controller!: SessionController
   const handle = await openSession(fixture.ctx, {}, new AbortController().signal, agent => {
-    controller = new SessionController(fixture.ctx, agent, dictionaries.en, [], changed,
+    controller = new SessionController(fixture.ctx, agent, dictionaries.en, { refs: [] }, changed,
       { attachmentMaxBytes: 1048576, attachmentLimit: 8 })
   })
   cleanup.push(async () => { controller.close(); await controller.drain(); await handle.dispose() })
@@ -35,7 +35,7 @@ it('shows a mode change waiting for the next accepted step', async () => {
   await fixture.ctx.plugin(PlanMode, { section: 'Plan before acting.' })
   let controller!: SessionController
   const handle = await openSession(fixture.ctx, {}, new AbortController().signal, agent => {
-    controller = new SessionController(fixture.ctx, agent, dictionaries.en, [], () => {},
+    controller = new SessionController(fixture.ctx, agent, dictionaries.en, { refs: [] }, () => {},
       { attachmentMaxBytes: 1048576, attachmentLimit: 8 })
   })
   cleanup.push(async () => { controller.close(); await controller.drain(); await handle.dispose() })

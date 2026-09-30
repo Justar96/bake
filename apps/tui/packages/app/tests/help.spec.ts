@@ -15,7 +15,7 @@ async function connected() {
   cleanup.push(fixture.dispose)
   let controller!: SessionController
   const handle = await openSession(fixture.ctx, {}, new AbortController().signal, (agent, selection) => {
-    controller = new SessionController(fixture.ctx, agent, dictionaries.en, [], () => {}, { attachmentMaxBytes: 1048576, attachmentLimit: 8 }, selection)
+    controller = new SessionController(fixture.ctx, agent, dictionaries.en, { refs: [] }, () => {}, { attachmentMaxBytes: 1048576, attachmentLimit: 8 }, selection)
   })
   cleanup.push(async () => { controller.close(); await handle.dispose(); await controller.drain() })
   await controller.replay(new AbortController().signal)
@@ -37,6 +37,7 @@ describe('/help', () => {
     // holds the whole list and can scroll it.
     expect(listed(controller)).toMatch(/\/help \[command\] +List available commands/u)
     expect(listed(controller)).toMatch(/\/login \[target\] +Sign in or set up CLIProxyAPI/u)
+    expect(listed(controller)).toMatch(/\/logout \[target\] +Remove a stored key or the CLIProxyAPI route/u)
     expect(listed(controller)).toMatch(/\/attach <path> +Stage a file for the next prompt/u)
     expect(listed(controller)).toContain(dictionaries.en.helpFooter)
     // The composer's keys, line breaks included, close the list.

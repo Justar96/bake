@@ -755,8 +755,12 @@ describe('read caps are plugin config', () => {
     expect(text(result)).toContain('1: abcd... (line truncated to 4 chars)')
   })
 
-  it('a configured readMaxBytes caps the window at the configured bytes', async () => {
+  it('a configured readMaxBytes caps the window without changing serialized tool schemas', async () => {
     const { ctx, fs } = await setupWith({ readMaxBytes: 9 })
+    const baseline = await setup()
+    try {
+      expect(JSON.stringify(ctx.tools.schemas())).toBe(JSON.stringify(baseline.ctx.tools.schemas()))
+    } finally { await baseline.ctx.fiber.dispose() }
     fs.files.set('key:a.txt', 'aaaa\nbbbb\ncccc')
     const result = await call(ctx, 'read', { file_path: 'a.txt' })
     expect(result.isError).toBe(false)

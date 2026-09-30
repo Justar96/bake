@@ -49,8 +49,11 @@ export function textResponse(text: string): StreamChunk[] {
   ]
 }
 
-/** @returns isolated services and cleanup that drains all agents before removing files. */
-export async function harness() {
+/**
+ * @param options - `defaultModel: false` composes no default model, as a new install starts.
+ * @returns isolated services and cleanup that drains all agents before removing files.
+ */
+export async function harness(options: { readonly defaultModel?: false } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'dsh-tui-test-'))
   const ctx = new Context()
   const dispose = async () => { await ctx.fiber.dispose(); await rm(root, { recursive: true, force: true }) }
@@ -67,7 +70,7 @@ export async function harness() {
     await ctx.plugin(Persistence, { root: join(root, 'sessions'), compression: 'none' })
     await ctx.plugin(ExactQuery)
     await ctx.plugin(AgentLoop, { agents: [] })
-    await ctx.plugin(Defaults, { provider: 'mock', model: 'model' })
+    await ctx.plugin(Defaults, options.defaultModel === false ? {} : { provider: 'mock', model: 'model' })
     await ctx.plugin(Presets, { default: 'audit', roots: [{ path: presets, trust: 'system' }], includeShippedRoot: false, includeUserRoot: false })
     await ctx.plugin(Commands)
     await ctx.plugin(Approval, {})

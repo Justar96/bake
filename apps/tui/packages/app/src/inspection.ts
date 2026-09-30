@@ -4,7 +4,7 @@ import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import type { ProjectionSnapshot } from '@deepseek-ai/dsh-session-projection'
 import type {} from '@deepseek-ai/dsh-token-meter'
 import type {} from '@deepseek-ai/dsh-permission-presets/types'
-import { Actions, announcedCalls, appendTranscript, emptyTranscript, project, projector, SETTLES } from '@dsh-tui/ui'
+import { Actions, appendTranscript, emptyTranscript, foldEvent, project, projector } from '@dsh-tui/ui'
 import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
 import { LiveBlocks } from './live.ts'
 import { contextFor, usageFor } from './status.ts'
@@ -131,7 +131,6 @@ export class SubagentInspection {
       this.thinkingLevel = config.reasoningEffort
     }
     const rows = project(event, this.projection)
-    this.committed = appendTranscript(this.committed, this.actions.fold(rows, SETTLES.has(event.type)))
-    if (event.type === 'assistant/message') this.actions.announce(announcedCalls(event))
+    this.committed = appendTranscript(this.committed, foldEvent(event, rows, this.actions))
   }
 }

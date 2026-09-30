@@ -18,8 +18,7 @@
     const snake_case = "**literal**"
       return snake_case
 
-  Check: Width
-  Result: wraps without losing text
-
-  Check: State
-  Result: ready
+  Check | Result
+  ------+--------------------------
+  Width | wraps without losing text
+  State | ready

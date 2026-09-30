@@ -1,12 +1,14 @@
 /** The action fold, run under `bun test` because it is pure. */
 
 import { describe, expect, it } from 'bun:test'
-import { Actions, SETTLES } from '../src/actions.ts'
+import { Actions, foldEvent, SETTLES } from '../src/actions.ts'
 import { PENDING_ARGUMENTS } from '../src/present.ts'
 import type { Row, ToolCallRow } from '../src/rows.ts'
+import type { SessionEvent } from '@deepseek-ai/dsh-session'
 
 const call = (callId: string): Row => ({ kind: 'tool-call', callId, tool: 'bash', input: callId })
 const result = (callId: string, ok = true): Row => ({ kind: 'tool-result', callId, ok, text: `${callId} out` })
+const event = (partial: unknown): SessionEvent => partial as SessionEvent
 
 describe('actions', () => {
   it('holds a call until its step ends and releases one merged row', () => {
@@ -51,6 +53,21 @@ describe('actions', () => {
 
   it('settles on the end of a step, and on a message or turn end for a log without one', () => {
     expect([...SETTLES].sort()).toEqual(['assistant/message', 'step/end', 'turn/end'])
+  })
+
+  it('uses the same event seam to announce committed calls for every replay surface', () => {
+    const actions = new Actions()
+    const message = event({ type: 'assistant/message', data: { message: { content: [
+      { type: 'text', text: 'Checking' }, { type: 'tool-call', id: 'a', name: 'bash', arguments: '{}' },
+    ] } } })
+    expect(foldEvent(message, [{ kind: 'assistant', text: 'Checking' }], actions)).toEqual([{ kind: 'assistant', text: 'Checking' }])
+    expect(actions.live()).toEqual([{ kind: 'tool-call', callId: 'a', tool: 'bash', input: PENDING_ARGUMENTS }])
+    const callEvent = event({ type: 'tool/call', data: { callId: 'a', name: 'bash', arguments: '{}' } })
+    expect(foldEvent(callEvent, [call('a')], actions)).toEqual([])
+    const resultEvent = event({ type: 'tool/result', data: { callId: 'a', isError: false, content: 'done' } })
+    expect(foldEvent(resultEvent, [result('a')], actions)).toEqual([])
+    const endEvent = event({ type: 'step/end', data: {} })
+    expect(foldEvent(endEvent, [], actions)).toEqual([{ ...call('a'), result: { ok: true, text: 'a out' } }])
   })
 
   it('draws a step\'s calls as one block from the moment they stream to the moment they print', () => {

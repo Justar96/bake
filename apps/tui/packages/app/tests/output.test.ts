@@ -1,6 +1,6 @@
 /** Rewriting a render's writes so the terminal never shows the controls erased, and draws them on the bottom row. */
 import { describe, expect, test } from 'bun:test'
-import { anchor, overwrite, scrolling } from '../src/output.ts'
+import { anchor, clearFirst, overwrite, scrolling } from '../src/output.ts'
 
 const ESC = '\u001B['
 /** `ansi-escapes` `eraseLines(rows)`, byte for byte. */
@@ -43,6 +43,24 @@ describe('overwrite', () => {
     expect(overwrite(['\u001B[?25l', 'plain\n'])).toBe('\u001B[?25lplain\n')
     // An erase with anything else in the same write is not the region clear.
     expect(overwrite([`${eraseLines(2)}text`])).toBe(`${eraseLines(2)}text`)
+  })
+})
+
+describe('clearFirst', () => {
+  test('clears each row Ink rewrites before its text, so a full-width row keeps its last cell', () => {
+    // Ink's incremental update: up to the frame, step over an unchanged row, rewrite two.
+    const incremental = `${ESC}2A${ESC}E${ESC}1Ghint row${ESC}39m${ESC}K\n${ESC}1G${ESC}1mgoal${ESC}22m${ESC}K\n`
+    expect(clearFirst(incremental)).toBe(`${ESC}2A${ESC}E${ESC}1G${ESC}Khint row${ESC}39m\n${ESC}1G${ESC}K${ESC}1mgoal${ESC}22m\n`)
+  })
+
+  test('rewrites the last row of a fullscreen frame, which has no newline after it', () => {
+    expect(clearFirst(`${ESC}1Glast${ESC}K`)).toBe(`${ESC}1G${ESC}Klast`)
+  })
+
+  test('leaves every other erase where it is', () => {
+    const others = `${ESC}G${ESC}Krow\n${ESC}K${ESC}J${ESC}2Ktext${ESC}Kmore`
+    expect(clearFirst(others)).toBe(others)
+    expect(clearFirst(overwrite([eraseLines(3), 'a\n', 'b\n']))).toBe(overwrite([eraseLines(3), 'a\n', 'b\n']))
   })
 })
 

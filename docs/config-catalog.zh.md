@@ -14,16 +14,20 @@
 ## `@deepseek-ai/dsh-agent-default-model`
 
 ```ts config-catalog
-/** Composition entry for the default model selection. */
+/**
+ * Composition entry for the default model selection. Absent, no provider is
+ * the default: entry points start without a model until the user picks one,
+ * and a saved selection is the only default there is.
+ */
 export interface Config {
   /** Registered provider route. */
-  provider: string
+  provider?: string
   /** Provider-owned model id. */
-  model: string
+  model?: string
 }
 ```
 
-来源：[`packages/core/agent-default-model/src/index.ts:41`](../packages/core/agent-default-model/src/index.ts)
+来源：[`packages/core/agent-default-model/src/index.ts:48`](../packages/core/agent-default-model/src/index.ts)
 
 <a id="deepseek-aidsh-agent-instructions"></a>
 
@@ -2532,7 +2536,7 @@ export interface Config {
 
 Depends on: [`AgentOptions`](subsystems/core.zh.md)
 
-来源：[`packages/subagent/tool-subagent/src/index.ts:49`](../packages/subagent/tool-subagent/src/index.ts)
+来源：[`packages/subagent/tool-subagent/src/index.ts:50`](../packages/subagent/tool-subagent/src/index.ts)
 
 ## `@deepseek-ai/dsh-tool-todo`
 

@@ -29,6 +29,8 @@
 export const PALETTE = {
   /** Blue. References, including Markdown headings and links, paths, and informational tool fields. */
   reference: '#60a5fa',
+  /** Lavender. Inline code in an answer; surrounding prose keeps the terminal foreground. */
+  code: '#c4b5fd',
   /**
    * Orange. A turn in progress. The header and its spinner, and a running
    * action's marker.
@@ -70,11 +72,12 @@ export const PALETTE = {
 } as const
 
 /**
- * How far a release has baked while Bake installs it, from pale dough to dark
- * crust. The loaf takes the tone for its progress, so colour reads as how
- * much is done, and the percentage beside it carries the same under `NO_COLOR`.
+ * The install meter's tones. It fills from `running`'s orange to amber, a
+ * pale glint sweeps across what is filled, and a comet lights the dark track
+ * while a step's length is unknown. The meter's glyphs and the percentage
+ * beside it carry the same under `NO_COLOR`.
  */
-export const CRUST: readonly string[] = ['#f5e6c4', '#f0d49a', '#e8ba68', '#dc9c3f', '#c97f2a', '#ab621f', '#8b4a17']
+export const PROGRESS_TONES = { from: PALETTE.running, to: '#fbbf24', glint: '#fff7ed', track: '#44403c' } as const
 
 /**
  * Identity tones for subagents. They are not states: each tells one child
