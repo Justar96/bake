@@ -1761,8 +1761,13 @@ scenario('tables', 'streamed tables align columns, wrap styled cells, reflow to 
       await run.terminal(label, ['--screen', 'fullscreen', ...resume === undefined ? [] : ['--resume', resume]], async tty => {
         const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
         let consumed = 0
+        // A slow host delivers one repaint in several reads, and a screen that
+        // shows the final rows may still hold rows of the frame it replaces. A
+        // wait passes only on a capture that found no output since the last.
+        let quiet = false
         const capture = async (): Promise<string[]> => {
           const raw = tty.raw
+          quiet = raw.length === consumed
           await new Promise<void>(resolve => screen.write(raw.slice(consumed), resolve))
           consumed = raw.length
           const buffer = screen.buffer.active
@@ -1783,7 +1788,7 @@ scenario('tables', 'streamed tables align columns, wrap styled cells, reflow to 
           let wide: string[] = []
           await tty.wait('the table in aligned columns', async () => {
             wide = await capture()
-            return wide.some(line => line.includes('TABLE_DONE')) && wide.some(line => /Item\s+\u2502\s+Count\s+\u2502/.test(line))
+            return quiet && wide.some(line => line.includes('TABLE_DONE')) && wide.some(line => /Item\s+\u2502\s+Count\s+\u2502/.test(line))
               && SCREEN.status.test(wide.at(-1) ?? '')
           })
           checkContent(wide)
@@ -1795,7 +1800,7 @@ scenario('tables', 'streamed tables align columns, wrap styled cells, reflow to 
           let narrow: string[] = []
           await tty.wait('the narrow table in labeled rows', async () => {
             narrow = await capture()
-            return narrow.some(line => line.includes('Item: alpha')) && narrow.some(line => line.includes('Count: 125'))
+            return quiet && narrow.some(line => line.includes('Item: alpha')) && narrow.some(line => line.includes('Count: 125'))
               && narrow.some(line => line.includes('TABLE_DONE')) && narrow.some(line => line.includes(SCREEN.caret))
           })
           checkContent(narrow)
@@ -1803,7 +1808,7 @@ scenario('tables', 'streamed tables align columns, wrap styled cells, reflow to 
           tty.resize(80, 40)
           await tty.wait('the table returns to columns', async () => {
             wide = await capture()
-            return wide.some(line => /Item\s+\u2502\s+Count\s+\u2502/.test(line)) && SCREEN.status.test(wide.at(-1) ?? '')
+            return quiet && wide.some(line => /Item\s+\u2502\s+Count\s+\u2502/.test(line)) && SCREEN.status.test(wide.at(-1) ?? '')
           })
           checkContent(wide)
         } finally { screen.dispose() }
