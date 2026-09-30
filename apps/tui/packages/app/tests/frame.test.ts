@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test'
 import { resolveFrame, type FrameRequest } from '../src/frame.ts'
 
 const ask = (env: FrameRequest['env'], overrides: Partial<FrameRequest> = {}) =>
-  resolveFrame({ configured: 'auto', locale: 'en', env, ...overrides })
+  resolveFrame({ configured: 'auto', locale: 'en', env, platform: 'linux', systemLocale: 'en-US', ...overrides })
 
 const utf8 = { LANG: 'en_US.UTF-8', TERM: 'xterm-256color' }
 
@@ -49,6 +49,24 @@ describe('resolveFrame', () => {
     expect(ask({ ...windows, LANG: 'zh_CN.UTF-8' })).toBe('classic')
     expect(ask(windows, { locale: 'zh' })).toBe('classic')
     expect(ask({ WT_SESSION: '' })).toBe('classic')
+  })
+
+  test('draws the rounded frame in any native Windows console', () => {
+    // Node writes to the console as UTF-16 whatever the code page, and no
+    // Windows console sets a locale or TERM, so their absence says nothing.
+    const windows = { platform: 'win32' }
+    expect(ask({}, windows)).toBe('round')
+    expect(ask({ TERM_PROGRAM: 'vscode' }, windows)).toBe('round')
+    expect(ask({ TERMINAL_EMULATOR: 'JetBrains-JediTerm' }, windows)).toBe('round')
+    expect(ask({ TERM: 'dumb' }, windows)).toBe('classic')
+    // The console host draws Ambiguous characters wide under a CJK code page,
+    // and Windows names that locale in the system, not the environment.
+    expect(ask({}, { ...windows, systemLocale: 'zh-CN' })).toBe('classic')
+    expect(ask({}, { ...windows, systemLocale: 'ja-JP' })).toBe('classic')
+    expect(ask({ LANG: 'ko_KR.UTF-8' }, windows)).toBe('classic')
+    expect(ask({}, { ...windows, locale: 'zh' })).toBe('classic')
+    // Windows Terminal draws them narrow, so the system locale does not apply there.
+    expect(ask({ WT_SESSION: 'guid' }, { ...windows, systemLocale: 'zh-CN' })).toBe('round')
   })
 
   test('reads the variables in the order POSIX resolves them', () => {
