@@ -30,7 +30,7 @@ describe('iconFor', () => {
 
   test('keeps the plain dot for every other tool Bake registers', () => {
     for (const tool of ['bash', 'pwsh', 'read', 'edit', 'write', 'grep', 'glob', 'web_fetch', 'web_search', 'job_output',
-      'job_kill', 'interrupt_agent', 'list_agents', 'workflow', 'exit_plan_mode', 'ask_user_question', 'get_goal', 'present']) {
+      'job_kill', 'interrupt_agent', 'list_agents', 'workflow', 'ask_user_question', 'get_goal', 'present']) {
       expect(iconFor(tool)).toBe(MARKER.action)
     }
   })

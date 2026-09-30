@@ -820,9 +820,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the outcome, including the version the write produced.',
       },
       {
-        signature: 'abstract editText( target: FsTarget, edit: FsEditRequest, expected?: { version: FsVersion }, signal?: AbortSignal, sandboxPolicy?: SandboxExecutionPolicy, ): Promise<FsEditOutcome>',
-        description: 'Atomically edit literal text. When supplied, the version guard is checked before matching so stale content reports `FS_STALE_VERSION`; omission edits the current content without a freshness precondition.',
-        parameters: [{ name: 'target', description: 'the resolved target to edit.' }, { name: 'edit', description: 'the literal search/replace request.' }, { name: 'expected', description: 'the version guard; omit for an unconditional edit.' }, { name: 'signal', description: 'aborts before atomic publication takes effect.' }, { name: 'sandboxPolicy', description: 'the per-call mode and workspace root this edit runs under; a sandboxing backend fences the edit by it, the bare backend ignores it. Omit to leave the backend its own default.' }],
+        signature: 'abstract editText( target: FsTarget, edit: FsEditRequest | readonly FsEditRequest[], expected?: FsEditIntent, signal?: AbortSignal, sandboxPolicy?: SandboxExecutionPolicy, ): Promise<FsEditOutcome>',
+        description: 'Atomically edit literal text. The guard is checked with checkEditGuard before matching, so stale content reports `FS_STALE_VERSION`; omission edits the current content without a freshness precondition. Several requests are each matched against the original content and publish in one write.',
+        parameters: [{ name: 'target', description: 'the resolved target to edit.' }, { name: 'edit', description: 'one literal search/replace request, or several with non-overlapping matches.' }, { name: 'expected', description: 'the version or anchored guard; omit for an unconditional edit.' }, { name: 'signal', description: 'aborts before atomic publication takes effect.' }, { name: 'sandboxPolicy', description: 'the per-call mode and workspace root this edit runs under; a sandboxing backend fences the edit by it, the bare backend ignores it. Omit to leave the backend its own default.' }],
         returns: 'the outcome, including the version the edit produced.',
       },
     ],
@@ -1183,25 +1183,6 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         signature: 'set(session: Session, name: string): void',
         description: 'Record a changed preset, then update each changed knob through its own setter. Selecting the effective preset again appends nothing.',
         parameters: [{ name: 'session', description: 'the session the switch belongs to.' }, { name: 'name', description: 'the preset to switch to; unknown names throw.' }],
-      },
-    ],
-  },
-  {
-    key: 'planMode',
-    summary: '`ctx.planMode`: owns logged plan state, applies and narrates selected state at step start, the `plan:policy` section, the `/plan` command, and the stable exit tool.',
-    description: '`ctx.planMode`: owns logged plan state, applies and narrates selected state at step start, the `plan:policy` section, the `/plan` command, and the stable exit tool. Client carriers expose the projection\'s cropped `{ active, pending }` view.',
-    methods: [
-      {
-        signature: 'get(agent: Agent): { active: boolean; pending?: boolean }',
-        description: 'Read the logged plan state and any selected state awaiting the next accepted in-turn pre-step.',
-        parameters: [{ name: 'agent', description: 'The agent to read.' }],
-        returns: 'Current logged state plus a pending selection, when present.',
-      },
-      {
-        signature: 'set(agent: Agent, active: boolean): \'committed\' | \'queued\' | \'cancelled\' | \'noop\'',
-        description: 'Select whether plan mode should be active. Between turns the method appends the change immediately because no in-turn pre-step will run until another prompt starts a turn. The open-turn fold is the idle signal: agent status stays `running` through post-turn checkpointing, when no further in-turn pre-step runs. During an open turn the selection remains pending until the next accepted in-turn pre-step. Repeated selection of the current or already-pending state is a no-op.',
-        parameters: [{ name: 'agent', description: 'The agent to switch.' }, { name: 'active', description: 'Whether plan mode should be active.' }],
-        returns: 'what happened: `committed` (logged now), `queued` (awaiting the next accepted in-turn pre-step), `cancelled` (an opposite pending selection was cleared; the logged state already matches), or `noop` (already in that state).',
       },
     ],
   },
@@ -3010,7 +2991,7 @@ export const EVENT_API: readonly EventApiEntry[] = [
   {
     name: 'fs/edit-intent',
     mode: 'waterfall',
-    signature: '\'fs/edit-intent\'(target: FsTarget, actor: object | undefined, next: () => { version: FsVersion } | undefined | Promise<{ version: FsVersion } | undefined>): Promise<{ version: FsVersion } | undefined>',
+    signature: '\'fs/edit-intent\'(target: FsTarget, actor: object | undefined, next: () => FsEditIntent | undefined | Promise<FsEditIntent | undefined>): Promise<FsEditIntent | undefined>',
     summary: 'Single-slot decision for the next FileSystem.editText.',
     description: 'Single-slot decision for the next FileSystem.editText. Calling `next()` yields an unconditional edit; the first returned guard wins.',
     parameters: [{ name: 'target', description: 'the resolved target about to be edited.' }, { name: 'actor', description: 'the opaque tool-execution context the decider keys off.' }],
@@ -3440,12 +3421,8 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface AskUserQuestionAnswerItem {\n    id: string;\n    selected: string[];\n    custom?: string;\n}',
   },
   {
-    name: 'AskUserQuestionIntent',
-    declaration: 'export type AskUserQuestionIntent = {\n    kind: \'plan-review\';\n    approve: string;\n    callId?: ToolCallId;\n};',
-  },
-  {
     name: 'AskUserQuestionItem',
-    declaration: 'export interface AskUserQuestionItem {\n    id: string;\n    question: string;\n    detail?: string;\n    header?: string;\n    options?: AskUserQuestionOption[];\n    multiSelect?: boolean;\n    intent?: AskUserQuestionIntent;\n}',
+    declaration: 'export interface AskUserQuestionItem {\n    id: string;\n    question: string;\n    detail?: string;\n    header?: string;\n    options?: AskUserQuestionOption[];\n    multiSelect?: boolean;\n}',
   },
   {
     name: 'AskUserQuestionOption',
@@ -3972,8 +3949,16 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface FsDirEntry {\n    name: string;\n    type: \'file\' | \'directory\' | \'other\';\n    target: FsTarget;\n    version?: FsVersion;\n    size?: number;\n}',
   },
   {
+    name: 'FsEditBasis',
+    declaration: 'export type FsEditBasis = \'observed\' | \'changed\' | \'unobserved\';',
+  },
+  {
+    name: 'FsEditIntent',
+    declaration: 'export type FsEditIntent = {\n    kind?: \'version\';\n    version: FsVersion;\n} | {\n    kind: \'anchored\';\n    version?: FsVersion;\n};',
+  },
+  {
     name: 'FsEditOutcome',
-    declaration: 'export interface FsEditOutcome {\n    version: FsVersion;\n    before: string;\n    after: string;\n}',
+    declaration: 'export interface FsEditOutcome {\n    version: FsVersion;\n    before: string;\n    after: string;\n    basis?: FsEditBasis;\n}',
   },
   {
     name: 'FsEditRequest',
@@ -5609,7 +5594,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ToolDefinition',
-    declaration: 'export interface ToolDefinition extends ToolSchema {\n    readonly output: ToolOutputDefinition;\n    execute(args: unknown, exec: ToolRunContext): Promise<unknown>;\n    finalizeContent?(exec: Readonly<ToolExecution>, result: Readonly<ToolExecutionResult>): ContentBlock[] | undefined;\n    timeoutMs?: number;\n    isConcurrencySafe?(args: unknown): boolean;\n    presentCall?(args: unknown): ToolCallView | undefined;\n    presentResult?(args: unknown, result: ToolResult): ToolResultView | undefined;\n}',
+    declaration: 'export interface ToolDefinition extends ToolSchema {\n    readonly output: ToolOutputDefinition;\n    readonly details?: string;\n    execute(args: unknown, exec: ToolRunContext): Promise<unknown>;\n    finalizeContent?(exec: Readonly<ToolExecution>, result: Readonly<ToolExecutionResult>): ContentBlock[] | undefined;\n    timeoutMs?: number;\n    isConcurrencySafe?(args: unknown): boolean;\n    presentCall?(args: unknown): ToolCallView | undefined;\n    presentResult?(args: unknown, result: ToolResult): ToolResultView | undefined;\n}',
   },
   {
     name: 'ToolDispatchExecution',

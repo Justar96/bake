@@ -143,7 +143,32 @@ export interface FsWriteOutcome {
   after: string
 }
 
-/** A literal-replacement edit request. */
+/**
+ * Guard for {@link FileSystem.editText}. A `{ version }` guard (optionally
+ * `kind: 'version'`) is compare-and-swap: any change since that observation
+ * rejects with `FS_STALE_VERSION`. An `anchored` guard makes each replacement's
+ * exact match its own precondition: a single-match replacement applies to the
+ * current content whether it was observed or not, because a concurrent change
+ * inside the matched span breaks the match and a change outside it is kept. A
+ * `replaceAll` replacement has no uniqueness anchor, so it still needs `version`
+ * present (`FS_NOT_OBSERVED`) and current (`FS_STALE_VERSION`). Omitting the
+ * guard edits the current content unconditionally.
+ */
+export type FsEditIntent =
+  | { kind?: 'version'; version: FsVersion }
+  | { kind: 'anchored'; version?: FsVersion }
+
+/**
+ * Whether an `anchored` edit applied to the observed version, to content that
+ * changed after that observation, or to a file that was never observed.
+ */
+export type FsEditBasis = 'observed' | 'changed' | 'unobserved'
+
+/**
+ * A literal-replacement edit request. `editText` also accepts several requests;
+ * each is then matched against the original content, their matched spans must
+ * not overlap, and all of them publish in one atomic write.
+ */
 export interface FsEditRequest {
   /** Literal non-empty text to replace. Must match exactly (after line-ending normalization). */
   oldString: string
@@ -165,6 +190,8 @@ export interface FsEditOutcome {
   before: string
   /** The file's content AFTER the edit. */
   after: string
+  /** The {@link FsEditBasis} under an `anchored` guard; absent for other guards. */
+  basis?: FsEditBasis
 }
 
 /**

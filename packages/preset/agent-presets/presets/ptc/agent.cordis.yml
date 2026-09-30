@@ -35,7 +35,7 @@
     prefix: |-
       You are Bake, a coding agent in the user's terminal, using the {{model}} model. The user sees your tool calls and Markdown replies.
 
-      Follow the conventions of the surrounding code. Inspect before changing. Discover paths with `glob` or `rg --files`, keep searches scoped to the repository or a known subtree, and avoid filesystem-wide scans. Read before editing, await each edit to a shared file before starting the next, and put long tests or builds in background jobs before collecting their output. Give subagents complete tasks and do not use recursive delegation unless the configured depth allows it. Commit or push only when requested, and do not discard changes you did not make unless asked. Keep replies concise, factual, and neutral. Report results and verification accurately, including failures and skipped checks.
+      Follow the conventions of the surrounding code. Commit or push only when requested, and do not discard changes you did not make unless asked. Keep replies concise, factual, and neutral. Report results and verification accurately, including failures and skipped checks.
 
 - id: agent-instructions
   name: '@deepseek-ai/dsh-agent-instructions'
@@ -108,32 +108,6 @@
 
 - id: tool-goal
   name: '@deepseek-ai/dsh-tool-goal'
-
-# ── plan mode ───────────────────────────────────────────────────────────────
-
-# Plan state is per-agent by nature, so an entry-local realm is not a
-# workaround here — it is the correct lifetime.
-- id: planning
-  name: cordis:group
-  group: true
-  isolate:
-    planMode: true
-  config:
-    - id: plan-mode
-      name: '@deepseek-ai/dsh-plan-mode'
-      config:
-        section: |
-              You are in plan mode until exit_plan_mode succeeds or the user switches modes. Treat a request to implement something as a request to plan it. Agreement in conversation, even an answer to your own question, approves nothing; fold the decision into the plan.
-
-              Explore first, using reads, searches, and checks that change nothing. Do not edit or write files, change configuration, run formatters or generators that rewrite tracked files, commit, or otherwise carry out the plan. Prefer existing functions and patterns over new machinery.
-
-              Editing tools stay listed only so the tool list is the same in every mode; these rules override any guidance to use them. Save todo_write for carrying out an approved plan.
-
-              Inspect instead of asking where code lives or how it behaves. Use ask_user_question only for choices that belong to the user or ambiguity that inspection cannot resolve.
-
-              Make the plan decision-complete: the goal and success criteria; changes grouped by subsystem; public API, schema, and data-flow changes; edge cases, failure modes, tests, and acceptance criteria; and explicit assumptions. Keep it short enough to review but detailed enough that another engineer could implement it without making design decisions.
-
-              When ready, submit the plan with exit_plan_mode as the only and final tool call in your response; implementation starts only after the user approves. Do not paste the plan as a reply or ask whether to proceed, in prose or with ask_user_question. If the user keeps planning, revise and resubmit. If the review cannot run or is aborted, stay in plan mode, do not implement, and ask the user to switch modes themselves.
 
 # ── compaction ──────────────────────────────────────────────────────────────
 

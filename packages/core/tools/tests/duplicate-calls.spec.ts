@@ -71,9 +71,9 @@ describe('duplicate refused-call suppression', () => {
     const second = await run('write', { content: 'x', path: '/a' })
     expect(second).toEqual({
       isError: true,
-      content: [{ type: 'text', text: 'Error: this "write" call is identical to one already refused in this turn, and nothing has run since that could change the outcome, so it was not executed. Earlier refusal: refused /a' }],
+      content: [{ type: 'text', text: 'Error: not run: this "write" call repeats one already refused this turn. Earlier refusal: refused /a' }],
       error: {
-        message: 'this "write" call is identical to one already refused in this turn, and nothing has run since that could change the outcome, so it was not executed. Earlier refusal: refused /a',
+        message: 'not run: this "write" call repeats one already refused this turn. Earlier refusal: refused /a',
         info: { name: 'DuplicateToolCallError', code: TOOL_DUPLICATE_CALL },
       },
     })

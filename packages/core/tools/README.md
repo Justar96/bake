@@ -59,6 +59,8 @@ ctx.tools.register(defineTool({
 
 The unified schema DSL supports `string`, `number`, `integer`, `boolean`, `null`, `array`, `object`, author-only `json`, and exact-one `oneOf`; `InferValue` preserves exact types through 16 container levels before widening to `JsonValue`. A raw JSON Schema (`JsonSchemaNode`) is the wire-level counterpart shared with subagents, workflows, and MCP.
 
+A long usage reference that the model needs only when it uses a tool belongs in `details`, not in `description`. The native schema, which every request resends, then stays short. While a visible tool declares `details`, the registry adds its reserved `tool_help` tool, which returns them. The description should tell the model to call `tool_help` before first use. Under `ptc`, the details join the tool's SDK documentation instead.
+
 ### Configure the presentation mode
 
 The `mode` config decides what the model sees: `native` (every visible schema), `ptc` (only `run_code` plus a generated SDK), or `both`.
@@ -164,7 +166,7 @@ In normal mode the model sees each visible definition's exact name, description,
 
 #### Token effect
 
-Fixed per-request cost proportional to the visible definitions. Restrictions that hide tools remove their entire schema cost for that agent.
+Fixed per-request cost proportional to the visible definitions. Restrictions that hide tools remove their entire schema cost for that agent. A tool's `details` cost nothing until the model reads them with `tool_help`; then they cost one tool result, and `tool_help`'s own schema is under 300 bytes.
 
 #### KV Cache effect
 
@@ -207,7 +209,7 @@ Prefix-stable while the PTC mode selection, generated SDK, transport schema, and
 
 #### What the model sees
 
-The loop retains model-emitted arguments and the registry's final content. Any thrown or denied call becomes exactly `Error: <message>`; structured user-facing failure detail is not added to that message. PTC mode renders the outer program's printed lines and return value, `(run_code completed with no output)` when both are empty, or `Error: code run failed (<kind>): <message>` followed conditionally by `Captured output:` and the captured lines. Inner dispatch events stay log-only, while a successful image-bearing sub-result is appended after the outer result as source-attributed context. A suppressed repeat of an unread or stale refusal reads `Error: this "<tool>" call is identical to one already refused in this turn, and nothing has run since that could change the outcome, so it was not executed. Earlier refusal: <message>`.
+The loop retains model-emitted arguments and the registry's final content. Any thrown or denied call becomes exactly `Error: <message>`; structured user-facing failure detail is not added to that message. PTC mode renders the outer program's printed lines and return value, `(run_code completed with no output)` when both are empty, or `Error: code run failed (<kind>): <message>` followed conditionally by `Captured output:` and the captured lines. Inner dispatch events stay log-only, while a successful image-bearing sub-result is appended after the outer result as source-attributed context. A suppressed repeat of an unread or stale refusal reads `Error: not run: this "<tool>" call repeats one already refused this turn. Earlier refusal: <message>`.
 
 #### Token effect
 

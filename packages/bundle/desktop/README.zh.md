@@ -146,7 +146,7 @@ Follow the conventions of the surrounding code. Commit or push only when request
 - **每个进程一个根 Agent** — 桌面为每个工作区会话启动一个进程；第二个对话需要第二个进程。
 - **子 Agent 无法询问** — 子 Agent 的审批策略为 `never`，因此在 `normal` 下子 Agent 的 shell 命令会被拒绝，而不会到达桌面。
 - **不投影子 Agent** — 只有根 Agent 的流、工具调用和审批会到达桌面。
-- **没有用户问题应答者** — `exit_plan_mode` 和 `ask_user_question` 会因没有提供者而失败，因为桥接尚未转发 `user-questions/request`。
+- **没有用户问题应答者** — `ask_user_question` 会因没有提供者而失败，因为桥接尚未转发 `user-questions/request`。
 
 <a id="dev-note"></a>
 ### 开发备注

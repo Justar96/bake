@@ -40,8 +40,6 @@
   disabled: true
 - id: tool-goal
   disabled: true
-- id: plan-mode
-  disabled: true
 - id: tool-subagent-control
   disabled: true
 - id: tool-subagent-list-agents

@@ -16,6 +16,7 @@ export {
   escalationHintMarker,
   sandboxDenialMarker,
   validateEscalationArgs,
+  isNoOpEscalation,
 } from './escalation.ts'
 export type { EscalationApproval, EscalationApprover, EscalationOutcome, EscalationRequest } from './escalation.ts'
 export { canonicalPath, writableRoots } from './roots.ts'

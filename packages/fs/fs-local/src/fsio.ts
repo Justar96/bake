@@ -703,15 +703,72 @@ function restoreLineEndings(content: string, lineEndings: LineEndings): string {
   return lineEndings === 'LF' ? content : normalizeLineEndings(content).split('\n').join('\r\n')
 }
 
-function countOccurrences(content: string, needle: string): number {
-  let count = 0
+function matchOffsets(content: string, needle: string): number[] {
+  const offsets: number[] = []
   let index = 0
   while (true) {
     const found = content.indexOf(needle, index)
-    if (found === -1) return count
-    count += 1
+    if (found === -1) return offsets
+    offsets.push(found)
     index = found + needle.length
   }
+}
+
+/** 1-based line number of a character offset. */
+function lineAt(content: string, offset: number): number {
+  let line = 1
+  for (let index = content.indexOf('\n'); index !== -1 && index < offset; index = content.indexOf('\n', index + 1)) line += 1
+  return line
+}
+
+/** Most match lines named in an ambiguity diagnostic. */
+const MAX_LISTED_MATCH_LINES = 8
+
+/**
+ * Collapse every whitespace run to one space, remembering each output
+ * character's source offset so a match maps back to a line.
+ */
+function squashWhitespace(text: string): { text: string; offsets: number[] } {
+  let out = ''
+  const offsets: number[] = []
+  let pendingSpace = false
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text.charAt(index)
+    if (char === ' ' || char === '\t' || char === '\n' || char === '\r') {
+      pendingSpace = out.length > 0
+      continue
+    }
+    if (pendingSpace) {
+      out += ' '
+      offsets.push(index)
+      pendingSpace = false
+    }
+    out += char
+    offsets.push(index)
+  }
+  return { text: out, offsets }
+}
+
+/**
+ * Point a failed literal match at the likely target so the model can recover
+ * in one step: a whitespace-insensitive match first, then the first line alone.
+ */
+function nearMatchHint(content: string, needle: string): string {
+  const wanted = squashWhitespace(needle).text
+  if (wanted.length > 0) {
+    const haystack = squashWhitespace(content)
+    const offset = haystack.offsets[haystack.text.indexOf(wanted)]
+    if (offset !== undefined) {
+      return `; it matches line ${lineAt(content, offset)} if whitespace is ignored, so copy the exact indentation and line breaks from the file`
+    }
+  }
+  const firstLine = needle.split('\n').map(line => line.trim()).find(line => line.length > 0)
+  if (firstLine !== undefined) {
+    const lines = content.split('\n')
+    const index = lines.findIndex(line => line.trim() === firstLine)
+    if (index !== -1) return `; its first line matches line ${index + 1}, but the lines after it differ`
+  }
+  return ''
 }
 
 /**
@@ -822,15 +879,60 @@ export function applyLiteralEdit(
   if (oldNorm.length === 0) {
     throw new FsError('old_string must be a non-empty string', 'FS_EDIT_NOT_FOUND')
   }
-  const newNorm = normalizeLineEndings(newString)
-  const replacements = countOccurrences(content, oldNorm)
-  if (replacements === 0) {
-    throw new FsError(`old_string was not found in "${displayPath}"`, 'FS_EDIT_NOT_FOUND')
+  return applyLiteralEdits(content, [{ oldString, newString, replaceAll }], displayPath)
+}
+
+/**
+ * Apply several literal replacements to LF-normalized content in one pass.
+ * Every search text is matched against the original `content`, never against
+ * an earlier replacement's output, and matched spans may not overlap. A single
+ * edit reports `old_string` in diagnostics; several report `edits[i].old_string`.
+ * Not-found diagnostics name a whitespace-insensitive or first-line near match
+ * when one exists, and ambiguity diagnostics list the matching lines.
+ * @param content - the current file content, already LF-normalized.
+ * @param edits - the replacements; CRLF in their text is normalized to LF.
+ * @param displayPath - the caller-facing path used in error messages.
+ * @returns the edited LF-normalized content plus the total occurrences replaced.
+ */
+export function applyLiteralEdits(
+  content: string,
+  edits: readonly { oldString: string; newString: string; replaceAll: boolean }[],
+  displayPath: string,
+): { content: string; replacements: number } {
+  const spans: { start: number; end: number; text: string; edit: number }[] = []
+  edits.forEach((edit, index) => {
+    const label = edits.length === 1 ? 'old_string' : `edits[${index}].old_string`
+    const oldNorm = normalizeLineEndings(edit.oldString)
+    if (oldNorm.length === 0) throw new FsError(`${label} must be a non-empty string`, 'FS_EDIT_NOT_FOUND')
+    const newNorm = normalizeLineEndings(edit.newString)
+    const offsets = matchOffsets(content, oldNorm)
+    if (offsets.length === 0) {
+      throw new FsError(`${label} was not found in "${displayPath}"${nearMatchHint(content, oldNorm)}`, 'FS_EDIT_NOT_FOUND')
+    }
+    if (!edit.replaceAll && offsets.length > 1) {
+      const lines = offsets.slice(0, MAX_LISTED_MATCH_LINES).map(offset => lineAt(content, offset))
+      const more = offsets.length > lines.length ? ', …' : ''
+      throw new FsError(
+        `${label} matched ${offsets.length} times in "${displayPath}" (lines ${lines.join(', ')}${more}); provide a more specific old_string or set replace_all to true`,
+        'FS_AMBIGUOUS_EDIT',
+      )
+    }
+    for (const start of offsets) spans.push({ start, end: start + oldNorm.length, text: newNorm, edit: index })
+  })
+  spans.sort((a, b) => a.start - b.start)
+  let out = ''
+  let previous: (typeof spans)[number] | undefined
+  for (const span of spans) {
+    const cursor = previous?.end ?? 0
+    if (previous !== undefined && span.start < cursor) {
+      const [first, second] = [previous.edit, span.edit].sort((a, b) => a - b)
+      throw new FsError(`edits[${first}] and edits[${second}] overlap in "${displayPath}"; merge them into one edit`, 'FS_AMBIGUOUS_EDIT')
+    }
+    out += content.slice(cursor, span.start) + span.text
+    previous = span
   }
-  if (!replaceAll && replacements > 1) {
-    throw new FsError(`old_string matched ${replacements} times in "${displayPath}"; provide a more specific old_string or set replace_all to true`, 'FS_AMBIGUOUS_EDIT')
-  }
-  return { content: content.split(oldNorm).join(newNorm), replacements }
+  const cursor = previous?.end ?? 0
+  return { content: out + content.slice(cursor), replacements: spans.length }
 }
 
 export { normalizeLineEndings, restoreLineEndings }

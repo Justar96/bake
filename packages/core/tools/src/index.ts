@@ -23,6 +23,7 @@ import type { ToolCallView, ToolResultView } from './presentation.ts'
 import { assertSupportedJsonSchema, validateJsonSchemaValue } from './json-schema.ts'
 import type { JsonSchemaNode } from './json-schema.ts'
 import { createRunCodeTool, RUN_CODE_NAME } from './ptc.ts'
+import { createToolHelpTool, TOOL_HELP_NAME } from './tool-help.ts'
 import type { PtcSdkLanguage } from './ptc.ts'
 import { renderToolsSdk } from './ts-types.ts'
 import type { ToolSdkSchema } from './ts-types.ts'
@@ -95,6 +96,7 @@ export {
 export type { PtcDispatchEventData, PtcDispatchStartEventData } from './types.ts'
 
 export { CodeRunFailedError, RUN_CODE_NAME } from './ptc.ts'
+export { TOOL_HELP_NAME } from './tool-help.ts'
 export { jsonSchemaToTs, renderToolsSdk } from './ts-types.ts'
 export { jsonSchemaToPy, renderToolsSdkPy } from './py-types.ts'
 export { defineContentToolFixture, type ContentToolFixtureOptions } from './testing.ts'
@@ -216,6 +218,14 @@ export interface ToolOutputDefinition {
 export interface ToolDefinition extends ToolSchema {
   /** Mandatory canonical output declaration. */
   readonly output: ToolOutputDefinition
+  /**
+   * Usage reference kept out of the native schema, which is resent with every
+   * request. A scope that can see a tool with details also sees the reserved
+   * {@link TOOL_HELP_NAME} tool, which returns them; the description should
+   * tell the model to call it before first use. The PTC mode SDK appends the
+   * details to the binding's documentation instead. Must be non-empty when set.
+   */
+  readonly details?: string
   /**
    * Run one accepted call and return only its canonical lossless-JSON value.
    * Async work must observe or forward `exec.signal` and settle only after its
@@ -849,6 +859,8 @@ export class ToolRuntime extends Service {
    * transport is stateless beyond its closures over `this`.
    */
   private ptcTransport: ToolDefinition | undefined
+  /** Reserved on-demand details reader, stateless beyond its closure over `this`. */
+  private readonly toolHelp: ToolDefinition = createToolHelpTool((name, scope) => this.view(scope).visible.get(name))
 
   constructor(ctx: Context, config: Config = {}) {
     super(ctx, 'tools')
@@ -1083,11 +1095,17 @@ export class ToolRuntime extends Service {
       && (!Number.isFinite(timeoutMs) || timeoutMs <= 0)) {
       throw new TypeError(`tool "${name}" timeoutMs must be a positive finite number`)
     }
+    if (definition.details !== undefined && (typeof definition.details !== 'string' || definition.details.trim().length === 0)) {
+      throw new TypeError(`tool "${name}" details must be a non-empty string when given`)
+    }
     // Reserved unconditionally: any agent may select a code mode for itself,
     // so a name free to take under the deployment default would become a
     // collision the moment a preset mounted.
     if (name === RUN_CODE_NAME) {
       throw new Error(`tool name "${RUN_CODE_NAME}" is reserved for the PTC mode presentation transport and cannot be registered or shadowed`)
+    }
+    if (name === TOOL_HELP_NAME) {
+      throw new Error(`tool name "${TOOL_HELP_NAME}" is reserved for the registry's on-demand tool details and cannot be registered or shadowed`)
     }
     return this.layers.effect(
       this.ctx,
@@ -1119,6 +1137,9 @@ export class ToolRuntime extends Service {
     }
     if ([...allow ?? [], ...deny ?? []].includes(RUN_CODE_NAME)) {
       throw new Error(`tools.restrict() cannot name reserved PTC mode presentation transport "${RUN_CODE_NAME}"; restrict end-capability tools instead`)
+    }
+    if ([...allow ?? [], ...deny ?? []].includes(TOOL_HELP_NAME)) {
+      throw new Error(`tools.restrict() cannot name reserved "${TOOL_HELP_NAME}"; it follows the visibility of tools that declare details`)
     }
     const known = this.view(scope).restrictableNames
     const unknown = [...allow ?? [], ...deny ?? []].filter(name => !known.has(name))
@@ -1224,6 +1245,13 @@ export class ToolRuntime extends Service {
     if (this.modeFor(scope) !== 'native') {
       visible.set(RUN_CODE_NAME, this.requirePtcTransport())
     }
+    // The details reader follows the tools it serves: present exactly while a
+    // visible tool declares details, so a scope whose filter removed them also
+    // loses the reader, and no other scope's tools leak into this one.
+    if ([...visible.values()].some(definition => definition.details !== undefined)) {
+      knownNames.add(TOOL_HELP_NAME)
+      visible.set(TOOL_HELP_NAME, this.toolHelp)
+    }
     return { visible, knownNames, restrictableNames }
   }
 
@@ -1272,16 +1300,20 @@ export class ToolRuntime extends Service {
 
   /** Project visible callable tools onto the generated PTC mode SDK contract. */
   private sdkSchemas(scope?: ScopeKey): ToolSdkSchema[] {
+    // The SDK is already prompt text, so a binding's details join its
+    // documentation there and the details reader is not a binding.
     return [...this.view(scope).visible.values()]
-      .filter(definition => definition.name !== RUN_CODE_NAME)
+      .filter(definition => definition.name !== RUN_CODE_NAME && definition.name !== TOOL_HELP_NAME)
       .map((definition): ToolSdkSchema => {
         const output = snapshotJsonValue(definition.output.schema)
         /* v8 ignore next -- registration already validated and retained this schema as lossless JSON. */
         if (output === undefined) {
           throw new Error(`tool "${definition.name}" output schema must be lossless JSON before SDK projection`)
         }
+        const schema = this.schemaOf(definition, true)
         return {
-          ...this.schemaOf(definition, true),
+          ...schema,
+          ...definition.details === undefined ? {} : { description: `${schema.description}\n\n${definition.details}` },
           output,
         }
       })
@@ -1975,8 +2007,7 @@ function repeatKey(exec: ToolExecution): string | undefined {
 
 /** Result for a model-direct call suppressed as a repeat of an earlier refusal. */
 function duplicateCallResult(name: string, prior: ToolFailure): ToolExecutionResult {
-  const message = `this "${name}" call is identical to one already refused in this turn, `
-    + `and nothing has run since that could change the outcome, so it was not executed. Earlier refusal: ${prior.message}`
+  const message = `not run: this "${name}" call repeats one already refused this turn. Earlier refusal: ${prior.message}`
   return {
     content: [{ type: 'text', text: `Error: ${message}` }],
     isError: true,

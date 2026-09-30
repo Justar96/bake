@@ -28,6 +28,14 @@ interface ToolDefinition extends ToolSchema {
   /** Mandatory canonical output declaration. */
   readonly output: ToolOutputDefinition
   /**
+   * Usage reference kept out of the native schema, which is resent with every
+   * request. A scope that can see a tool with details also sees the reserved
+   * {@link TOOL_HELP_NAME} tool, which returns them; the description should
+   * tell the model to call it before first use. The PTC mode SDK appends the
+   * details to the binding's documentation instead. Must be non-empty when set.
+   */
+  readonly details?: string
+  /**
    * Run one accepted call and return only its canonical lossless-JSON value.
    * Async work must observe or forward `exec.signal` and settle only after its
    * owned work reaches quiescence. The registry preserves caller cancellation

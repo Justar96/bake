@@ -148,10 +148,39 @@ interface FsWriteOutcome {
 }
 ```
 
-`editText` 是提供方级别的变更操作，而非在别处组合的 `read` 加 `write`。带守卫时，它在字面匹配之前先验证预期版本（因此对陈旧内容的编辑报 `FS_STALE_VERSION`，而非对更新内容的匹配失败）；不带守卫时，它编辑当前内容。无论哪种路径，它都应用替换并原子写入——将匹配、行尾处理、陈旧检查和原子替换保持在一个变更临界区内——目标缺失时两条路径都报 `FS_STALE_VERSION`。
+`editText` 是提供方级别的变更操作，而非在别处组合的 `read` 加 `write`。它在字面匹配之前用导出的 `checkEditGuard` 应用守卫：版本守卫以 `FS_STALE_VERSION` 拒绝陈旧编辑，而非对更新内容报匹配失败；`anchored` 守卫让唯一匹配代替新鲜度检查，仍防护 `replaceAll`，并报告 `basis`；不带守卫时，它编辑当前内容。多个请求都与原始内容匹配，并在一次写入中发布。无论哪种路径，它都应用替换并原子写入——将匹配、行尾处理、陈旧检查和原子替换保持在一个变更临界区内——目标缺失时两条路径都报 `FS_STALE_VERSION`。
 
 ```ts type-equiv
-/** A literal-replacement edit request. */
+/**
+ * Guard for {@link FileSystem.editText}. A `{ version }` guard (optionally
+ * `kind: 'version'`) is compare-and-swap: any change since that observation
+ * rejects with `FS_STALE_VERSION`. An `anchored` guard makes each replacement's
+ * exact match its own precondition: a single-match replacement applies to the
+ * current content whether it was observed or not, because a concurrent change
+ * inside the matched span breaks the match and a change outside it is kept. A
+ * `replaceAll` replacement has no uniqueness anchor, so it still needs `version`
+ * present (`FS_NOT_OBSERVED`) and current (`FS_STALE_VERSION`). Omitting the
+ * guard edits the current content unconditionally.
+ */
+type FsEditIntent =
+  | { kind?: 'version'; version: FsVersion }
+  | { kind: 'anchored'; version?: FsVersion }
+```
+
+```ts type-equiv
+/**
+ * Whether an `anchored` edit applied to the observed version, to content that
+ * changed after that observation, or to a file that was never observed.
+ */
+type FsEditBasis = 'observed' | 'changed' | 'unobserved'
+```
+
+```ts type-equiv
+/**
+ * A literal-replacement edit request. `editText` also accepts several requests;
+ * each is then matched against the original content, their matched spans must
+ * not overlap, and all of them publish in one atomic write.
+ */
 interface FsEditRequest {
   /** Literal non-empty text to replace. Must match exactly (after line-ending normalization). */
   oldString: string
@@ -175,6 +204,8 @@ interface FsEditOutcome {
   before: string
   /** The file's content AFTER the edit. */
   after: string
+  /** The {@link FsEditBasis} under an `anchored` guard; absent for other guards. */
+  basis?: FsEditBasis
 }
 ```
 
@@ -435,19 +466,20 @@ abstract listDir(target: FsTarget, signal?: AbortSignal): Promise<FsDirEntry[]>
 abstract writeText( target: FsTarget, content: string, expected?: FsWriteIntent, signal?: AbortSignal, sandboxPolicy?: SandboxExecutionPolicy, ): Promise<FsWriteOutcome>
 
 /**
- * Atomically edit literal text. When supplied, the version guard is checked
- * before matching so stale content reports `FS_STALE_VERSION`; omission edits
- * the current content without a freshness precondition.
+ * Atomically edit literal text. The guard is checked with {@link checkEditGuard}
+ * before matching, so stale content reports `FS_STALE_VERSION`; omission edits
+ * the current content without a freshness precondition. Several requests are
+ * each matched against the original content and publish in one write.
  * @param target - the resolved target to edit.
- * @param edit - the literal search/replace request.
- * @param expected - the version guard; omit for an unconditional edit.
+ * @param edit - one literal search/replace request, or several with non-overlapping matches.
+ * @param expected - the version or anchored guard; omit for an unconditional edit.
  * @param signal - aborts before atomic publication takes effect.
  * @param sandboxPolicy - the per-call mode and workspace root this edit runs
  *   under; a sandboxing backend fences the edit by it, the bare backend
  *   ignores it. Omit to leave the backend its own default.
  * @returns the outcome, including the version the edit produced.
  */
-abstract editText( target: FsTarget, edit: FsEditRequest, expected?: { version: FsVersion }, signal?: AbortSignal, sandboxPolicy?: SandboxExecutionPolicy, ): Promise<FsEditOutcome>
+abstract editText( target: FsTarget, edit: FsEditRequest | readonly FsEditRequest[], expected?: FsEditIntent, signal?: AbortSignal, sandboxPolicy?: SandboxExecutionPolicy, ): Promise<FsEditOutcome>
 ```
 
 Types: [SandboxExecutionPolicy](sandbox.zh.md)
@@ -472,7 +504,7 @@ Single-slot decision for the next FileSystem.editText. Calling `next()` yields a
  * @param actor - the opaque tool-execution context the decider keys off.
  * @mode waterfall
  */
-'fs/edit-intent'(target: FsTarget, actor: object | undefined, next: () => { version: FsVersion } | undefined | Promise<{ version: FsVersion } | undefined>): Promise<{ version: FsVersion } | undefined>
+'fs/edit-intent'(target: FsTarget, actor: object | undefined, next: () => FsEditIntent | undefined | Promise<FsEditIntent | undefined>): Promise<FsEditIntent | undefined>
 ```
 
 Source: [`packages/fs/fs/src/index.ts`](../../packages/fs/fs/src/index.ts)

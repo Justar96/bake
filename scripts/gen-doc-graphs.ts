@@ -376,13 +376,6 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'UI front ends provide the active human-answer provider; tool-ask-user pauses a tool call on the provider-neutral ask() promise.',
   },
   {
-    key: 'planMode',
-    pkg: 'plan-mode',
-    title: 'Plan collaboration state',
-    mode: 'core',
-    note: 'Folds logged plan/mode state, flushes user selections at turn boundaries, renders deployment-owned guidance, registers /plan, and keeps the plan-exit schema stable across transitions.',
-  },
-  {
     key: 'agentPresets',
     pkg: 'agent-presets',
     title: 'Per-session agent composition',

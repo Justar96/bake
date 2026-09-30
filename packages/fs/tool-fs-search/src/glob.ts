@@ -305,8 +305,7 @@ export function applyGlobTool(ctx: Context, caps: GlobToolCaps): void {
     name: 'glob',
     description: 'Find files, not directories, whose paths match a glob pattern. '
       + 'It is a bounded, newest-first alternative to find in a shell: hidden and ignored files are included, but VCS metadata is not. '
-      + 'Keep `path` scoped to the repository or a known subtree; when the file path is uncertain, use this before `grep` or a shell search. '
-      + 'Do not search filesystem-wide roots such as `/` or `$HOME`. '
+      + 'Scope `path` to the repository, never `/` or `$HOME`. '
       + `A result over ${caps.maxResults} paths ${overCapDescription}, says so, and reports where the full list was saved.`,
     parameters: {
       pattern: {

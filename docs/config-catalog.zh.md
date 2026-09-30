@@ -516,7 +516,27 @@ export interface Config {
 }
 ```
 
-来源：[`packages/fs/fs-local/src/index.ts:43`](../packages/fs/fs-local/src/index.ts)
+来源：[`packages/fs/fs-local/src/index.ts:44`](../packages/fs/fs-local/src/index.ts)
+
+<a id="deepseek-aidsh-fs-observation-policy"></a>
+
+## `@deepseek-ai/dsh-fs-observation-policy`
+
+```ts config-catalog
+/** Plugin config (all optional — `Config` supplies the defaults). */
+export interface Config {
+  /**
+   * `anchored` (default) lets a unique exact match stand in for a fresh read;
+   * `version` refuses an edit of an unread or changed file.
+   */
+  editGuard?: EditGuard
+}
+
+/** How the policy guards `edit`; `write` is always version-guarded. */
+export type EditGuard = 'anchored' | 'version'
+```
+
+来源：[`packages/fs/fs-observation-policy/src/index.ts:113`](../packages/fs/fs-observation-policy/src/index.ts)
 
 <a id="deepseek-aidsh-fs-sandbox"></a>
 
@@ -1375,22 +1395,6 @@ export interface Config {
 ```
 
 来源：[`packages/preset/persona/src/index.ts:30`](../packages/preset/persona/src/index.ts)
-
-<a id="deepseek-aidsh-plan-mode"></a>
-
-## `@deepseek-ai/dsh-plan-mode`
-
-需要：`tools` · `systemPrompt` · `sessionProjections`
-
-```ts config-catalog
-/** Deployment-owned plan guidance. */
-export interface PlanModeConfig {
-  /** Guidance rendered as the `plan:policy` prompt section while plan mode is active. */
-  section: string
-}
-```
-
-来源：[`packages/plan/plan-mode/src/index.ts:64`](../packages/plan/plan-mode/src/index.ts)
 
 <a id="deepseek-aidsh-plugin-manager"></a>
 
@@ -2465,7 +2469,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/fs/tool-str-replace-editor/src/index.ts:506`](../packages/fs/tool-str-replace-editor/src/index.ts)
+来源：[`packages/fs/tool-str-replace-editor/src/index.ts:519`](../packages/fs/tool-str-replace-editor/src/index.ts)
 
 <a id="deepseek-aidsh-tool-subagent"></a>
 
@@ -2602,7 +2606,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/workflow/tool-workflow/src/index.ts:32`](../packages/workflow/tool-workflow/src/index.ts)
+来源：[`packages/workflow/tool-workflow/src/index.ts:36`](../packages/workflow/tool-workflow/src/index.ts)
 
 <a id="deepseek-aidsh-tools"></a>
 
@@ -2638,7 +2642,7 @@ export interface Config {
 export type ToolPresentationMode = 'native' | 'ptc' | 'both'
 ```
 
-来源：[`packages/core/tools/src/index.ts:672`](../packages/core/tools/src/index.ts)
+来源：[`packages/core/tools/src/index.ts:682`](../packages/core/tools/src/index.ts)
 
 <a id="deepseek-aidsh-typert-loader"></a>
 
@@ -2839,7 +2843,6 @@ export interface Config {
 - `@deepseek-ai/dsh-compaction-image-offload`，需要 `agents` 和 `sessions`（[`packages/compaction/compaction-image-offload/src/index.ts`](../packages/compaction/compaction-image-offload/src/index.ts)）
 - `@deepseek-ai/dsh-deepseek-llm-api-extensions`（[`packages/llm/deepseek-llm-api-extensions/src/index.ts`](../packages/llm/deepseek-llm-api-extensions/src/index.ts)）
 - `@deepseek-ai/dsh-desktop` — 需要 `agentDefaultModel` · `agents` · `sessions` ([`packages/bundle/desktop/src/index.ts`](../packages/bundle/desktop/src/index.ts))
-- `@deepseek-ai/dsh-fs-observation-policy`（[`packages/fs/fs-observation-policy/src/index.ts`](../packages/fs/fs-observation-policy/src/index.ts)）
 - `@deepseek-ai/dsh-goal-round-driver` — 需要 `agents` · `goals` · `sessions`（[`packages/goal/goal-round-driver/src/index.ts`](../packages/goal/goal-round-driver/src/index.ts)）
 - `@deepseek-ai/dsh-host-plugin-inventory` — 需要 `loader`（[`packages/host/plugin-inventory/src/index.ts`](../packages/host/plugin-inventory/src/index.ts)）
 - `@deepseek-ai/dsh-llm`（[`packages/llm/llm/src/index.ts`](../packages/llm/llm/src/index.ts)）

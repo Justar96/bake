@@ -159,17 +159,12 @@ describe('the shipped preset root', () => {
       suffix: 'Your working directory is {{cwd}}.',
       prefix: 'You are Bake, a coding agent in the user\'s terminal, using the {{model}} model. '
         + 'The user sees your tool calls and Markdown replies.\n\n'
-        + 'Follow the conventions of the surrounding code. Inspect before changing. '
-        + 'Discover paths with `glob` or `rg --files`, keep searches scoped to the repository or a known subtree, '
-        + 'and avoid filesystem-wide scans. Read before editing, await each edit to a shared file before starting the next, '
-        + 'and put long tests or builds in background jobs before collecting their output. Give subagents complete tasks '
-        + 'and do not use recursive delegation unless the configured depth allows it. '
+        + 'Follow the conventions of the surrounding code. '
         + 'Commit or push only when requested, and do not discard changes you did not make unless asked. '
         + 'Keep replies concise, factual, and neutral. '
         + 'Report results and verification accurately, including failures and skipped checks.',
     })
     expect(findEntry(ptc, 'persona')?.config).toEqual(findEntry(standard, 'persona')?.config)
-    expect(findEntry(ptc, 'plan-mode')?.config).toEqual(findEntry(standard, 'plan-mode')?.config)
   })
 
   it('directs the cordis preset to terminal tools, commands, and preset selection', async () => {

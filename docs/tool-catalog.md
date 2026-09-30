@@ -18,8 +18,7 @@ This table connects model-visible tool names to the plugin package and service s
 | `@deepseek-ai/dsh-plugin-manager` | `plugin_manager` | `ctx.tools`, `ctx.pluginManager`, `ctx.sandboxPolicy` | `tool/call`, `tool/result`, `user/message` | - | - |
 | `@deepseek-ai/dsh-mcp-resources` | `list_mcp_resource_templates`, `list_mcp_resources`, `read_mcp_resource` | `ctx.tools`, `ctx.mcpResources` | `tool/call`, `tool/result` | - | - |
 | `@deepseek-ai/dsh-tool-ask-user` | `ask_user_question` | `ctx.tools`, `ctx.userQuestions` | `tool/call`, `tool/result after a UI/provider answers the question` | - | ask_user_question pauses the tool call until the active UI provider returns a human answer. |
-| `@deepseek-ai/dsh-tools` | `run_code` | `ctx.tools`, `ctx.ptcRuntime (execution time)`, `ctx.systemPrompt` | `tool/call`, `one tool/ptc-dispatch-start + tool/ptc-dispatch pair per bridged sub-call`, `tool/result` | - | Owned by the tool registry as a reserved transport outside filterable capability layers under `mode: ptc` / `mode: both` (see the PTC mode Agent Note). Under `ptc` it is the registry's only wire contribution; the other visible capabilities are declared in a generated SDK section in the loaded runtime's language, and a program calls them through bindings scheduled under the native concurrency contract (submission-ordered starts and policy; concurrency-safe bodies overlap up to `maxParallelSubCalls`) that re-enter the complete guarded tool pipeline and link each nested execution to this outer result. |
-| `@deepseek-ai/dsh-plan-mode` | `exit_plan_mode` | `ctx.tools`, `ctx.systemPrompt`, `ctx.userQuestions (execution time, opportunistic)` | `tool/call`, `plan/mode inactive on an approved review`, `tool/result` | - | exit_plan_mode stays in the model-facing schema while planning is inactive so transitions add no tool-catalog churn on top of the plan-policy change. Its execute path rejects calls outside plan mode; in plan mode it presents the plan over the user-questions seam (approve / keep planning with feedback), and approval logs plan mode inactive at the step boundary. |
+| `@deepseek-ai/dsh-tools` | `run_code`, `tool_help` | `ctx.tools`, `ctx.ptcRuntime (execution time)`, `ctx.systemPrompt` | `tool/call`, `one tool/ptc-dispatch-start + tool/ptc-dispatch pair per bridged sub-call`, `tool/result` | - | Owned by the tool registry as a reserved transport outside filterable capability layers under `mode: ptc` / `mode: both` (see the PTC mode Agent Note). Under `ptc` it is the registry's only wire contribution; the other visible capabilities are declared in a generated SDK section in the loaded runtime's language, and a program calls them through bindings scheduled under the native concurrency contract (submission-ordered starts and policy; concurrency-safe bodies overlap up to `maxParallelSubCalls`) that re-enter the complete guarded tool pipeline and link each nested execution to this outer result. `tool_help` is visible exactly while a visible tool declares `details`, a usage reference kept out of the native schema; it returns that reference, and under `ptc` the reference joins the tool's SDK documentation instead. |
 | `@deepseek-ai/dsh-tool-bash` | `bash` | `ctx.tools`, `ctx.shell`, `ctx.shellEnv`, `ctx.jobs at call time for run_in_background` | `tool/call`, `tool/result` | - | The bash tool is the model-facing consumer of the bash executor seam. A `run_in_background` run registers with the generic `ctx.jobs` runtime and is collected/stopped through the `job_*` tools from `@deepseek-ai/dsh-tool-jobs`; the `enableRunInBackground` config (default true) removes the parameter entirely when disabled. |
 | `@deepseek-ai/dsh-tool-present` | `present` | `ctx.tools`, `ctx.fs`, `ctx.sessionProjections` | `tool/call`, `deliverables/presented after a successful final result`, `tool/result` | - | Deliveries belong to the calling Session; Web ui-deliverables supplies source-file opening and cards. |
 | `@deepseek-ai/dsh-tool-pwsh` | `pwsh` | `ctx.tools`, `ctx.shell`, `ctx.shellEnv`, `ctx.jobs at call time for run_in_background` | `tool/call`, `tool/result` | - | The pwsh tool is the PowerShell-dialect consumer of the bash executor seam for Windows compositions (a PowerShell executor such as `@deepseek-ai/dsh-pwsh-local` backs `ctx.shell`); it mirrors the bash tool call-for-call minus sandbox controls — `run_in_background` runs register with the generic `ctx.jobs` runtime and are collected/stopped through the `job_*` tools, and the managed `DSH_*` environment comes from `@deepseek-ai/dsh-shell-env`. Each call runs in a fresh process (no persistent PTY session), with native `C:\...` paths and `$env:NAME` variables. |
@@ -296,34 +295,28 @@ Execute a TypeScript program against the available tools. Takes two required arg
 
 Source: [`packages/core/tools/src/ptc.ts`](../packages/core/tools/src/ptc.ts)
 
-Owned by the tool registry as a reserved transport outside filterable capability layers under `mode: ptc` / `mode: both` (see the PTC mode Agent Note). Under `ptc` it is the registry's only wire contribution; the other visible capabilities are declared in a generated SDK section in the loaded runtime's language, and a program calls them through bindings scheduled under the native concurrency contract (submission-ordered starts and policy; concurrency-safe bodies overlap up to `maxParallelSubCalls`) that re-enter the complete guarded tool pipeline and link each nested execution to this outer result.
+### `tool_help`
 
-<a id="deepseek-aidsh-plan-mode"></a>
-
-## `@deepseek-ai/dsh-plan-mode`
-
-### `exit_plan_mode`
-
-Use only in plan mode. Submit your complete plan for the user's review. If the user approves, plan mode ends and you carry out the plan from your next step. If they keep planning, the result carries any feedback; revise the plan and submit it again.
+Return the full usage reference of a tool whose description says to read it with tool_help first.
 
 ```json
 {
   "type": "object",
   "properties": {
-    "plan": {
+    "name": {
       "type": "string",
-      "description": "The complete plan in markdown, starting with a # heading that names it."
+      "description": "Name of the tool."
     }
   },
   "required": [
-    "plan"
+    "name"
   ]
 }
 ```
 
-Source: [`packages/plan/plan-mode/src/index.ts`](../packages/plan/plan-mode/src/index.ts)
+Source: [`packages/core/tools/src/tool-help.ts`](../packages/core/tools/src/tool-help.ts)
 
-exit_plan_mode stays in the model-facing schema while planning is inactive so transitions add no tool-catalog churn on top of the plan-policy change. Its execute path rejects calls outside plan mode; in plan mode it presents the plan over the user-questions seam (approve / keep planning with feedback), and approval logs plan mode inactive at the step boundary.
+Owned by the tool registry as a reserved transport outside filterable capability layers under `mode: ptc` / `mode: both` (see the PTC mode Agent Note). Under `ptc` it is the registry's only wire contribution; the other visible capabilities are declared in a generated SDK section in the loaded runtime's language, and a program calls them through bindings scheduled under the native concurrency contract (submission-ordered starts and policy; concurrency-safe bodies overlap up to `maxParallelSubCalls`) that re-enter the complete guarded tool pipeline and link each nested execution to this outer result. `tool_help` is visible exactly while a visible tool declares `details`, a usage reference kept out of the native schema; it returns that reference, and under `ptc` the reference joins the tool's SDK documentation instead.
 
 <a id="deepseek-aidsh-tool-bash"></a>
 
@@ -331,7 +324,7 @@ exit_plan_mode stays in the model-facing schema while planning is inactive so tr
 
 ### `bash`
 
-Run a command with `bash -c` and return its stdout and stderr. Each call starts a fresh shell, so directory changes and variables do not carry over to later calls. Keep commands scoped to the current repository; use `rg --files`, `glob`, or `grep` instead of filesystem-wide `find` scans. A non-zero exit is reported in the result as `[exit code: N]`, not as a tool error. Long output is truncated to its tail, and the full output is saved to a file named in the result when possible. `$DSH_HOME` is the harness home directory and `$DSH_SESSION_ID` is this session's id. A command run with `run_in_background` returns a job id right away; read its output with `job_output` and stop it with `job_kill`. Put builds and tests that may outlast their timeout in the background, then inspect them with `job_output`.
+Run a command with `bash -c` and return its stdout and stderr. Each call starts a fresh shell, so directory changes and variables do not carry over to later calls. Avoid filesystem-wide `find` scans. A non-zero exit is reported in the result as `[exit code: N]`, not as a tool error. Long output is truncated to its tail, and the full output is saved to a file named in the result when possible. `$DSH_HOME` is the harness home directory and `$DSH_SESSION_ID` is this session's id. Run long builds and tests with `run_in_background`, which returns a job id at once; read output with `job_output` and stop with `job_kill`.
 
 ```json
 {
@@ -359,8 +352,7 @@ Run a command with `bash -c` and return its stdout and stderr. Each call starts 
     }
   },
   "required": [
-    "command",
-    "description"
+    "command"
   ]
 }
 ```
@@ -446,8 +438,7 @@ Run a PowerShell command with `pwsh -Command` and return its stdout and stderr. 
     }
   },
   "required": [
-    "command",
-    "description"
+    "command"
   ]
 }
 ```
@@ -679,7 +670,7 @@ Standalone view/create/unique literal replace/line insert tool over the filesyst
 
 ### `edit`
 
-Replace literal text in an existing UTF-8 text file. Before composing old_string, read the target with `read` immediately before the edit, unless its current content came from a write or edit result in this session. The edit is refused unless you have read, written, or edited the file in this session and it has not changed since; if it is refused as unread or stale, read it again, rebuild old_string, and do not repeat the same edit arguments.
+Replace literal text in an existing UTF-8 text file. Each old_string must match the current file exactly once unless replace_all is set. Put several changes to one file in `edits`, each matched against the original. Use this, not shell scripts, to change files.
 
 ```json
 {
@@ -691,21 +682,42 @@ Replace literal text in an existing UTF-8 text file. Before composing old_string
     },
     "old_string": {
       "type": "string",
-      "description": "Text to replace, matching the file exactly, including whitespace but without the line numbers read adds. It must occur exactly once unless replace_all is true."
+      "description": "Exact text to replace, including whitespace, without read's line numbers."
     },
     "new_string": {
       "type": "string",
-      "description": "Literal replacement text. Use an empty string to delete the match."
+      "description": "Replacement text; empty deletes the match."
     },
     "replace_all": {
       "type": "boolean",
-      "description": "Replace every occurrence. Defaults to false."
+      "description": "Replace every occurrence."
+    },
+    "edits": {
+      "type": "array",
+      "description": "Several replacements, instead of old_string and new_string.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "old_string": {
+            "type": "string"
+          },
+          "new_string": {
+            "type": "string"
+          },
+          "replace_all": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "old_string",
+          "new_string"
+        ]
+      }
     }
   },
   "required": [
-    "file_path",
-    "old_string",
-    "new_string"
+    "file_path"
   ]
 }
 ```
@@ -714,7 +726,7 @@ Source: [`packages/fs/tool-fs/src/index.ts`](../packages/fs/tool-fs/src/index.ts
 
 ### `read`
 
-Read a UTF-8 text file as numbered lines, paged for long files. Unlike cat, head, or tail in a shell, this counts as reading the file for later write and edit calls.
+Read a UTF-8 text file as numbered lines, paged for long files. Unlike cat in a shell, it counts as a read for later `write` calls.
 
 ```json
 {
@@ -764,7 +776,7 @@ Source: [`packages/fs/tool-fs/src/index.ts`](../packages/fs/tool-fs/src/index.ts
 
 ### `write`
 
-Create a UTF-8 text file or replace all of its content. Before replacing an existing file, read it with `read` immediately before composing content, unless its current content came from a write or edit result in this session. The replacement is refused unless you have read, written, or edited the file in this session and it has not changed since; if it is refused as unread or stale, read it again, rebuild the content, and do not repeat the same write arguments. For a partial change, edit avoids resending the whole file.
+Create a UTF-8 text file or replace all of its content. Replacing an existing file requires a current read of it. For a partial change, edit avoids resending the whole file.
 
 ```json
 {
@@ -796,7 +808,7 @@ The read-before-write/edit policy is added by `@deepseek-ai/dsh-fs-observation-p
 
 ### `glob`
 
-Find files, not directories, whose paths match a glob pattern. It is a bounded, newest-first alternative to find in a shell: hidden and ignored files are included, but VCS metadata is not. Keep `path` scoped to the repository or a known subtree; when the file path is uncertain, use this before `grep` or a shell search. Do not search filesystem-wide roots such as `/` or `$HOME`. A result over 100 paths shows 100 sampled across top-level entries, says so, and reports where the full list was saved.
+Find files, not directories, whose paths match a glob pattern. It is a bounded, newest-first alternative to find in a shell: hidden and ignored files are included, but VCS metadata is not. Scope `path` to the repository, never `/` or `$HOME`. A result over 100 paths shows 100 sampled across top-level entries, says so, and reports where the full list was saved.
 
 ```json
 {
@@ -821,7 +833,7 @@ Source: [`packages/fs/tool-fs-search/src/index.ts`](../packages/fs/tool-fs-searc
 
 ### `grep`
 
-Search file contents with a ripgrep regular expression, as a bounded alternative to grep or rg in a shell. Hidden and ignored files are skipped unless path points at them. When the path or file type is uncertain, use `glob` first; keep `path` scoped to the repository or a known subtree and set one `include` filter. Do not search filesystem-wide roots such as `/` or `$HOME`. Returns only the matching lines, numbered and grouped by file; read a matched file for surrounding context. Up to 250 matches are shown; a larger result says so and reports where the full list was saved.
+Search file contents with a ripgrep regular expression, as a bounded alternative to grep or rg in a shell. Hidden and ignored files are skipped unless path points at them. Scope `path` to the repository, never `/` or `$HOME`. Returns only the matching lines, numbered and grouped by file; read a matched file for surrounding context. Up to 250 matches are shown; a larger result says so and reports where the full list was saved.
 
 ```json
 {
@@ -1125,7 +1137,7 @@ Source: [`packages/subagent/tool-subagent/src/list-models.ts`](../packages/subag
 
 ### `subagent`
 
-Delegate a self-contained task, such as research, a scoped implementation, or an analysis, to a subagent that works in its own context, so the work does not fill this conversation. You get its result, not its intermediate steps. It does not see this conversation, so give it a complete, standalone prompt. Delegation depth is bounded by deployment policy; do not rely on the child spawning more children. If a delegation is rejected for depth, continue the task here. This call waits for the result by default. Set `run_in_background: true` to return a job id; collect with `job_output` and stop with `job_kill`.
+Delegate a self-contained task, such as research, a scoped implementation, or an analysis, to a subagent that works in its own context, so the work does not fill this conversation. You get its result, not its intermediate steps. It does not see this conversation, so give it a complete, standalone prompt. This call waits for the result by default. Set `run_in_background: true` to return a job id; collect with `job_output` and stop with `job_kill`.
 
 ```json
 {
@@ -1161,7 +1173,7 @@ The registered delegation name is the load-time `toolName` config (default `suba
 
 ### `interrupt_agent`
 
-Stop the current turn of a continuable subagent below you, whether a direct child or deeper, by its agent id. Messages already queued for it wait for a later send_message, subagents it started keep running, and it stays available for follow-ups. The call returns once the stop is requested, so the subagent may keep running briefly; interrupting one that has already finished does nothing.
+Stop the current turn of a continuable subagent below you by its agent id. It stays available for follow-ups and its own subagents keep running. The stop is requested, not awaited; interrupting a finished subagent does nothing.
 
 ```json
 {
@@ -1182,7 +1194,7 @@ Source: [`packages/subagent/tool-subagent-control/src/index.ts`](../packages/sub
 
 ### `list_agents`
 
-List the continuable subagents you started, with each one's agent id, label, and status: running (working now), idle (between turns, possibly waiting on its own subagents), or ready (saved and inactive; it can be resumed and is not a result to collect). A `send_message` steers a running subagent at its next step and starts a new turn for an idle or ready one. Use this to look up ids, not to poll: you are notified when one finishes. Subagents that cannot be read appear as diagnostics. Scope `descendants` also lists the subagents below them, each with its parent's agent id and depth. You can message only depth-1 entries, your direct subagents, but you can stop any entry's current turn with `interrupt_agent`.
+List the continuable subagents you started, with each one's agent id, label, and status: running, idle (between turns), or ready (saved and resumable; not a result to collect). Use it to look up ids, not to poll: you are notified when one finishes. Scope `descendants` adds deeper subagents with their parent's id and depth; only depth-1 entries can be messaged, but `interrupt_agent` can stop any of them.
 
 ```json
 {
@@ -1357,15 +1369,7 @@ todo_write is session-owned state; UIs render the latest todo/write event as a c
 
 ### `workflow`
 
-Run a JavaScript workflow script that coordinates many subagents, and return the script's result. Use it only when the user explicitly asks for a workflow or for large-scale multi-agent orchestration, because one run can start many subagents; for one or two delegations, use a plain subagent call. The call blocks until the script finishes.
-
-The script can call these globals:
-- `agent(prompt, opts?)` runs one subagent to completion. It resolves to the subagent's final text, to an object validated against `opts.schema` when one is given, or to `null` if the subagent fails. `opts.schema` must be an object-rooted JSON Schema that uses only type, properties, required, additionalProperties, items, enum, const, oneOf, and annotations such as description; pattern, format, and numeric bounds are rejected. The other options are `label` (display name), `phase` (progress group, defaulting to the current phase), and `provider` and `model` (route overrides, usable separately). Any other option is an error.
-- `pipeline(items, ...stages)` runs each item through the stages independently, with no barrier between stages, and resolves to the final values in item order. Each stage is called as `stage(prev, item, index)`, where `prev` is the previous stage's result, or the item itself for the first stage. A stage that throws turns that item into `null` and skips its remaining stages.
-- `parallel(thunks)` runs zero-argument functions concurrently, waits for all of them, and resolves to their results in order; a thunk that throws yields `null`.
-- `phase(title)` starts a progress phase, and `log(message)` reports progress.
-
-Misusing a hook (bad arguments, unknown options, unsupported schemas, exceeded caps) or a subagent that cannot start throws an error that `pipeline` and `parallel` pass through instead of turning into `null`; if nothing catches it, the run fails and returns only the error. Caps limit concurrent subagents (extra `agent()` calls wait for a slot), total subagents per run, and items per `pipeline()` or `parallel()` call. The script has no filesystem, network, timers, or Node.js APIs; the subagents do the work.
+Run a JavaScript workflow script that coordinates many subagents, and return the script's result. Use it only when the user explicitly asks for a workflow or for large-scale multi-agent orchestration, because one run can start many subagents; for one or two delegations, use a plain subagent call. The call blocks until the script finishes. Before writing a script, call tool_help with name "workflow" for the script reference.
 
 ```json
 {

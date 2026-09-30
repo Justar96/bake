@@ -156,7 +156,7 @@ it('colours the running header\'s word, leaves the rule bare, and keeps the stat
         React.createElement(Header, { columns: 100, clock,
           state: { kind: 'running', word: 'Working', phase: undefined, startedAt: 0, color: PALETTE.running } })),
       React.createElement(Rule, { columns: 100, frame: 'round' }),
-      ...[850, 480, 120].map(cached => row({ plan: { active: true, pending: false }, thinkingLevel: 'medium',
+      ...[850, 480, 120].map(cached => row({ thinkingLevel: 'medium',
         context: { used: 500, window: 128_000 }, usage: { input: 1000, output: 100, cached } })),
       ...[65_000, 75_000, 85_000, 95_000].map(used => row({ context: { used, window: 100_000 } })),
       row({ context: { used: 62_000, window: 100_000, compactAt: 80_000 } }),
@@ -172,7 +172,6 @@ it('colours the running header\'s word, leaves the rule bare, and keeps the stat
   expect(rule).toBe(`\u001b[2m${'─'.repeat(100)}\u001b[22m`)
   // The model has no label and the normal foreground; labels are dim, values are not.
   expect(rows[0]!.startsWith('m ')).toBe(true)
-  expect(rows[0]).toContain('\u001b[2mPlan\u001b[22m')
   expect(rows[0]).toContain('\u001b[2mthink \u001b[22mmedium')
   expect(rows[0]).toContain('\u001b[2mctx \u001b[22m~0% (500/128k)')
   expect(rows[0]).toContain('\u001b[2m/w\u001b[22m')

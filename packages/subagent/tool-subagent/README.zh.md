@@ -158,7 +158,7 @@ subagent-model-selection:
 ##### 可继续模式描述
 
 ```markdown
-Delegate a self-contained task, such as research, a scoped implementation, or an analysis, to a subagent that works in its own context, so the work does not fill this conversation. You get its result, not its intermediate steps. It does not see this conversation, so give it a complete, standalone prompt. Delegation depth is bounded by deployment policy; do not rely on the child spawning more children. If a delegation is rejected for depth, continue the task here. It runs in the background by default and returns its agent id right away. Start independent subagents in the same message and keep working while they run. When one finishes, you get a notice with its outcome and closing message. It stays available afterward: `send_message` steers it while it is running and otherwise starts a new turn. Set `run_in_background: false` only when your next step needs the result.
+Delegate a self-contained task, such as research, a scoped implementation, or an analysis, to a subagent that works in its own context, so the work does not fill this conversation. You get its result, not its intermediate steps. It does not see this conversation, so give it a complete, standalone prompt. It runs in the background by default and returns its agent id right away. Start independent subagents in the same message and keep working while they run. When one finishes, you get a notice with its outcome and closing message. It stays available afterward: `send_message` steers it while it is running and otherwise starts a new turn. Set `run_in_background: false` only when your next step needs the result.
 ```
 
 #### Token 影响

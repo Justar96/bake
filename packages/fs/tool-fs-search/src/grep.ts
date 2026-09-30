@@ -80,8 +80,10 @@ function validateInclude(include: string): void {
 /**
  * Validate value constraints the schema DSL can't express: a non-EMPTY
  * `pattern` (whitespace is a legitimate regex), a non-blank `path` when given,
- * and a single positive `include` glob ({@link GrepInput}). Throws a plain
- * `Error` (an ordinary tool argument error) otherwise.
+ * and a single positive `include` glob ({@link GrepInput}). A blank `include`
+ * means no filter: models that fill every optional field send `""`, and
+ * refusing it would only cost another request. Throws a plain `Error` (an
+ * ordinary tool argument error) otherwise.
  *
  * @param args - the schema-validated `grep` arguments.
  * @returns the accepted input, unchanged.
@@ -89,11 +91,12 @@ function validateInclude(include: string): void {
 export function parseGrepArgs(args: { pattern: string; path?: string; include?: string }): GrepInput {
   if (args.pattern.length === 0) throw new Error('pattern must be a non-empty string')
   if (args.path !== undefined && args.path.trim().length === 0) throw new Error('path must be a non-empty string when given')
-  if (args.include !== undefined) validateInclude(args.include)
+  const include = args.include?.trim() === '' ? undefined : args.include
+  if (include !== undefined) validateInclude(include)
   return {
     pattern: args.pattern,
     ...args.path !== undefined ? { path: args.path } : {},
-    ...args.include !== undefined ? { include: args.include } : {},
+    ...include !== undefined ? { include } : {},
   }
 }
 
@@ -279,8 +282,7 @@ export function applyGrepTool(ctx: Context, caps: GrepToolCaps): void {
     // where a scope hides read; the sentence remains true there.
     description: 'Search file contents with a ripgrep regular expression, as a bounded alternative to grep or rg in a shell. '
       + 'Hidden and ignored files are skipped unless path points at them. '
-      + 'When the path or file type is uncertain, use `glob` first; keep `path` scoped to the repository or a known subtree and set one `include` filter. '
-      + 'Do not search filesystem-wide roots such as `/` or `$HOME`. '
+      + 'Scope `path` to the repository, never `/` or `$HOME`. '
       + 'Returns only the matching lines, numbered and grouped by file; read a matched file for surrounding context. '
       + `Up to ${caps.maxMatches} matches are shown; a larger result says so and reports where the full list was saved.`,
     parameters: {

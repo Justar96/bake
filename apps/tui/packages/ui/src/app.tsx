@@ -115,8 +115,6 @@ export interface AppProps {
   readonly installing?: InstallStep
   /** Shift-Tab: step the selected model's reasoning effort. Absent, Shift-Tab does nothing. */
   readonly onCycleThinking?: () => void
-  /** Harness plan projection; absent when this profile has no plan mode. */
-  readonly plan?: { readonly active: boolean; readonly pending: boolean }
   /** Current goal from the Harness goal service; absent without one or before `/goal` sets it. */
   readonly goal?: GoalEntry | undefined
   /**
@@ -834,7 +832,7 @@ function SessionView(props: AppProps): React.ReactElement {
     </>
   if (props.inspection !== undefined) {
     const child = props.inspection
-    const { context: _context, usage: _usage, plan: _plan, goal: _goal, permission: _permission, thinkingLevel: _thinkingLevel,
+    const { context: _context, usage: _usage, goal: _goal, permission: _permission, thinkingLevel: _thinkingLevel,
       compactPhase: _compactPhase, autoCompacting: _autoCompacting, ...childProps } = props
     return <SessionView {...childProps} {...child} key={child.sessionId} inspection={undefined}
       inspectionParent={props.sessionId} inspectionLabel={child.label} inputBlocked={true} stopping={false}
@@ -856,7 +854,7 @@ function SessionView(props: AppProps): React.ReactElement {
               // One layout in every mode; the fields give way in their own
               // order as the row narrows (`status-line.ts`).
               status={statusFields({
-                model: props.model, plan: props.plan, thinkingLevel: props.thinkingLevel, context: props.context,
+                model: props.model, thinkingLevel: props.thinkingLevel, context: props.context,
                 git: props.git, usage: props.usage, update: props.update, cwd: props.cwd,
                 glyphs: props.frame === 'classic' ? 'ascii' : 'unicode',
               }, copy)}

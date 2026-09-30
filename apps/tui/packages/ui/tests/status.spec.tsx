@@ -328,21 +328,6 @@ describe('context occupancy', () => {
   })
 })
 
-it.each([
-  [{ active: true, pending: false }, dictionaries.en.planActive],
-  [{ active: false, pending: true }, dictionaries.en.planEntryPending],
-  [{ active: true, pending: true }, dictionaries.en.planExitPending],
-] as const)('shows the projected plan state %s in the status line', (plan, label) => {
-  const ui = render(<App {...props({ plan })} />)
-  expect(ui.lastFrame()).toContain(label)
-})
-
-it('omits the plan indicator when the profile has no plan projection', () => {
-  const ui = render(<App {...props()} />)
-  expect(ui.lastFrame()).not.toContain(dictionaries.en.planEntryPending)
-  expect(ui.lastFrame()).not.toContain(dictionaries.en.planActive)
-})
-
 describe('model and billed tokens', () => {
   it('names the model where the state word was, without a label, and no token fields before a request reports', () => {
     const ui = render(<App {...props({ status: 'running' })} />)

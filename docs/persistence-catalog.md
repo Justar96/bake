@@ -666,15 +666,11 @@ Source: [`packages/interaction/permission-presets/src/index.ts:57`](../packages/
 #### `plan/mode` — log-only
 
 ```ts persistence-catalog
-/**
- * Whether plan mode is in force from this point on: log-only, non-surface,
- * whole-value replace. The last `plan/mode` wins; a log with none folds to
- * inactive through the projection unit's fold.
- */
+/** Whether plan mode was in force from this point on; the last record won. */
 'plan/mode': { active: boolean }
 ```
 
-Source: [`packages/plan/plan-mode/src/index.ts:47`](../packages/plan/plan-mode/src/index.ts)
+Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:120`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 ### `request/*`
 
@@ -2981,7 +2977,7 @@ SHA-256: `a7cf43ce7c2a4c038feed1885cd7a00d5c6ee2d90a7e0d56b46f78a3e1ca327f`
 
 SHA-256: `20a57544bbf204dacd1ae6beb2ab29444365c3c869f2afdf489dcdcbc3d9c8c5`
 
-Sources: [`packages/plan/plan-mode/src/index.ts:47`](../packages/plan/plan-mode/src/index.ts)
+Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:120`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -4683,7 +4679,7 @@ One of:
 
 SHA-256: `3cfc3a56502da1f8c6153c2c56657bab4b749056968634dd0991d325ec1c919f`
 
-Sources: [`packages/core/tools/src/index.ts:698`](../packages/core/tools/src/index.ts)
+Sources: [`packages/core/tools/src/index.ts:708`](../packages/core/tools/src/index.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -5394,7 +5390,7 @@ Sources: [`packages/llm/llm/src/types.ts:452`](../packages/llm/llm/src/types.ts)
 
 SHA-256: `fab2bb09bc5e3b9db0685e8f5500b029af1a2b33e70bc703c1d5d0f596fbc1fd`
 
-Sources: [`packages/sandbox/sandbox/src/index.ts:29`](../packages/sandbox/sandbox/src/index.ts)
+Sources: [`packages/sandbox/sandbox/src/index.ts:30`](../packages/sandbox/sandbox/src/index.ts)
 
 One of:
 

@@ -1075,30 +1075,6 @@ scenario('git-status', 'the status line names the workspace branch and its chang
     }
   })
 
-scenario('plan', 'plan-mode status follows the logged Harness projection', { replayOnly: true },
-  async run => {
-    const before = await run.logs()
-    await run.terminal('plan', [], async tty => {
-      tty.send('/plan\r', 'enter plan mode')
-      await tty.expect('deepseek-v4-flash  Plan  ')
-      const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
-      let consumed = 0
-      try {
-        tty.send('/plan off\r', 'leave plan mode')
-        await tty.wait('the status row without plan mode', async () => {
-          const raw = tty.raw
-          await new Promise<void>(resolve => screen.write(raw.slice(consumed), resolve))
-          consumed = raw.length
-          const line = screen.buffer.active.getLine(screen.buffer.active.viewportY + screen.rows - 2)?.translateToString(true) ?? ''
-          return SCREEN.status.test(line) && line.includes('deepseek-v4-flash') && !line.includes('Plan')
-        })
-      } finally { screen.dispose() }
-    })
-    const log = await events(await run.created(before, 'persisted'))
-    const modes = log.filter(e => e.type === 'plan/mode').map(e => e.data.active)
-    assert(same(modes, [true, false]), 'plan status did not follow the logged mode changes')
-  })
-
 scenario('thinking', 'selected and provider-default thinking levels follow model changes without wrapping', { replayOnly: true },
   async run => {
     const before = await run.logs()
@@ -2104,10 +2080,9 @@ scenario('agents', 'the built TUI exposes the Harness subagent catalog through /
   })
 
 scenario('presets', 'minimal and cordis start, answer the recorded turn, and read what their presets mount; minimal gets only '
-  + 'its shell, and its status line and sheet keys work without the task-list and plan-mode units no preset registered',
+  + 'its shell, and its status line and sheet keys work without the task-list unit no preset registered',
   { replayOnly: true },
   async run => {
-    const copy = dictionaries.en
     for (const preset of ['minimal', 'cordis'] as const) {
       const before = await run.logs()
       await run.terminal(`preset-${preset}`, ['--preset', preset], async tty => {
@@ -2116,12 +2091,6 @@ scenario('presets', 'minimal and cordis start, answer the recorded turn, and rea
                        text => text.includes(SCREEN.toolResult) && DONE_LINE.test(text))
         await tty.follows(SCREEN.idle, SCREEN.toolResult)
         if (preset !== 'minimal') return
-        const refused = tty.mark()
-        tty.send('/plan\r', 'ask for plan mode, which minimal does not mount')
-        await tty.expect(`${copy.unknownCommand}: /plan`, refused)
-        const cleared = tty.mark()
-        tty.send('\x7f'.repeat('/plan'.length), 'erase the refused draft')
-        await tty.expect(`${SCREEN.prompt}${SCREEN.caret}`, cleared)
         // No sheet has anything to show, so each key leaves the composer in place.
         const keys = tty.mark()
         tty.send('\x14', 'Ctrl+T')
@@ -2130,7 +2099,6 @@ scenario('presets', 'minimal and cordis start, answer the recorded turn, and rea
         tty.send('still here', 'type after the sheet keys')
         await tty.expect(`${SCREEN.prompt}still here${SCREEN.caret}`, keys)
         tty.refuse('a sheet opened under minimal', tty.text.slice(keys).includes('Esc closes'))
-        tty.refuse('the status line claimed plan mode at any point', /deepseek-v4-flash {2}Plan\b/u.test(tty.text))
         const erased = tty.mark()
         tty.send('\x7f'.repeat('still here'.length), 'erase the draft before quitting')
         await tty.expect(`${SCREEN.prompt}${SCREEN.caret}`, erased)

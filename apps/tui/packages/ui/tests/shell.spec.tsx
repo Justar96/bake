@@ -85,14 +85,14 @@ describe('terminal composer', () => {
 
   it('shows usage when an argument has no matching choices', async () => {
     const state = props({ completion: { loading: false, error: undefined,
-      entries: [{ name: 'plan', description: 'Plan mode', kind: 'command', hint: '[off|message]', choices: true }],
-      argument: { name: 'plan', partial: 'hello', entries: ['off'], loading: false, error: undefined },
+      entries: [{ name: 'review', description: 'Review mode', kind: 'command', hint: '[off|message]', choices: true }],
+      argument: { name: 'review', partial: 'hello', entries: ['off'], loading: false, error: undefined },
     } })
     const ui = render(<App {...state} />)
-    ui.stdin.write('/plan hello')
-    await vi.waitFor(() => expect(ui.lastFrame()).toContain('/plan [off|message]  Plan mode'))
+    ui.stdin.write('/review hello')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('/review [off|message]  Review mode'))
     ui.stdin.write('\r')
-    await vi.waitFor(() => expect(state.onSubmit).toHaveBeenCalledExactlyOnceWith('/plan hello'))
+    await vi.waitFor(() => expect(state.onSubmit).toHaveBeenCalledExactlyOnceWith('/review hello'))
   })
 
   it('keeps an incomplete argument choice open for more text', async () => {
@@ -125,14 +125,14 @@ describe('terminal composer', () => {
 
   it('submits an exact complete argument choice on Enter', async () => {
     const state = props({ completion: { loading: false, error: undefined,
-      entries: [{ name: 'plan', description: 'Plan mode', kind: 'command', hint: '[off|message]', choices: true }],
-      argument: { name: 'plan', partial: 'off', entries: ['off'], loading: false, error: undefined },
+      entries: [{ name: 'review', description: 'Review mode', kind: 'command', hint: '[off|message]', choices: true }],
+      argument: { name: 'review', partial: 'off', entries: ['off'], loading: false, error: undefined },
     } })
     const ui = render(<App {...state} />)
-    ui.stdin.write('/plan off')
+    ui.stdin.write('/review off')
     await vi.waitFor(() => expect(ui.lastFrame()).toContain('▸ off'))
     ui.stdin.write('\r')
-    await vi.waitFor(() => expect(state.onSubmit).toHaveBeenCalledExactlyOnceWith('/plan off'))
+    await vi.waitFor(() => expect(state.onSubmit).toHaveBeenCalledExactlyOnceWith('/review off'))
   })
 
   it('inserts a selected skill on Enter and submits it when its full name is typed', async () => {
@@ -718,10 +718,10 @@ describe('terminal composer', () => {
     expect(ui.lastFrame()).toContain('Partial answer')
   })
 
-  it.each(['inline', 'fullscreen'] as const)('keeps answer controls visible beside a long plan in %s mode', async screen => {
+  it.each(['inline', 'fullscreen'] as const)('keeps answer controls visible beside a long detail in %s mode', async screen => {
     const state = props({ screen, interaction: { id: 30, kind: 'questions', questions: [{
       id: 'plan', question: 'Review this plan', detail: Array.from({ length: 35 }, (_, index) => `Plan line ${index + 1}`).join('\n'),
-      options: [{ label: 'Revise' }, { label: 'Implement' }], intent: { kind: 'plan-review', approve: 'Implement' },
+      options: [{ label: 'Revise' }, { label: 'Implement' }],
     }] } })
     const ui = renderAt(<App {...state} />, 80, 24)
     await vi.waitFor(() => {
@@ -755,10 +755,10 @@ describe('terminal composer', () => {
     await vi.waitFor(() => expect(state.onAnswer).toHaveBeenCalledExactlyOnceWith(32, 'k'.repeat(80)))
   })
 
-  it('renders the complete plan and answers with the named option label', async () => {
+  it('renders the complete detail and answers with the chosen option label', async () => {
     const state = props({ interaction: { id: 3, kind: 'questions', questions: [{
       id: 'plan', question: 'Review this plan', detail: '# Plan\nChange the adapter',
-      options: [{ label: 'Revise' }, { label: 'Implement' }], intent: { kind: 'plan-review', approve: 'Implement' },
+      options: [{ label: 'Revise' }, { label: 'Implement' }],
     }] } })
     const ui = render(<App {...state} />)
     await vi.waitFor(() => expect(ui.lastFrame()).toContain('Change the adapter'))

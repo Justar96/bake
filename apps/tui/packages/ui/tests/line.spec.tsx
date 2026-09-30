@@ -227,7 +227,7 @@ describe('StatusBar', () => {
   it.each(['en', 'zh'] as const)('keeps one row whatever the width in %s', async locale => {
     const scenes: readonly [string, StatusInput][] = [
       ['idle', session()],
-      ['plan', session({ plan: { active: true, pending: false }, update: { version: '0.2.0', installed: false } })],
+      ['update', session({ update: { version: '0.2.0', installed: false } })],
       ['filling', session({ context: { used: 99_000, window: 128_000, compactAt: 102_400 } })],
       ['full', session({ context: { used: 121_400, window: 128_000 } })],
       ['fresh', { model: 'deepseek-official/deepseek-v4-flash', thinkingLevel: 'high', cwd: '/tmp/bake-ui-audit/ws', glyphs: 'unicode' }],

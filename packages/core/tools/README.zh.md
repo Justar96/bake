@@ -59,6 +59,8 @@ ctx.tools.register(defineTool({
 
 统一 schema DSL 支持 `string`、`number`、`integer`、`boolean`、`null`、`array`、`object`、仅供作者使用的 `json` 与恰好匹配一个分支的 `oneOf`；`InferValue` 在 16 层容器内保留精确类型，之后加宽为 `JsonValue`。原始 JSON Schema（`JsonSchemaNode`）是与 subagent、工作流和 MCP 共享的协议级对应类型。
 
+模型只在使用某个工具时才需要的长篇用法参考应放在 `details` 中，而不是 `description` 中。这样，每次请求都会重发的原生 schema 就能保持简短。只要有可见工具声明了 `details`，注册表就会加入它保留的 `tool_help` 工具，由它返回这些内容。描述中应提示模型在首次使用前调用 `tool_help`。在 `ptc` 下，details 改为并入该工具的 SDK 文档。
+
 ### 配置呈现模式
 
 `mode` 配置决定模型看到什么：`native`（每个可见 schema）、`ptc`（只有 `run_code` 加一份生成 SDK）或 `both`。
@@ -164,7 +166,7 @@ ctx.tools.register(defineTool({
 
 #### Token 影响
 
-每次请求的固定成本与可见定义成正比。隐藏工具的限制会为该 agent 移除其全部 schema 成本。
+每次请求的固定成本与可见定义成正比。隐藏工具的限制会为该 agent 移除其全部 schema 成本。工具的 `details` 在模型用 `tool_help` 读取之前不产生成本；读取后计为一次工具结果，而 `tool_help` 自身的 schema 不到 300 字节。
 
 #### KV Cache 影响
 
@@ -207,7 +209,7 @@ Program-only SDK bindings:
 
 #### 模型看到什么
 
-循环会保留模型发出的参数与注册表的最终内容。任何抛出异常或遭到拒绝的调用，都会转换为确切的 `Error: <message>`；结构化的用户可见失败详情不会加入该消息。PTC mode 只返回外层程序打印的行与呈现后的返回值；两者都为空时返回 `(run_code completed with no output)`；失败时返回 `Error: code run failed (<kind>): <message>`，并根据是否存在已捕获内容，在其后附加 `Captured output:` 与捕获的行。内部分发事件只保留在日志中；成功且含图片的子结果会在外层结果之后作为带来源归属的上下文追加。被抑制的未读取或过期拒绝重试会返回 `Error: this "<tool>" call is identical to one already refused in this turn, and nothing has run since that could change the outcome, so it was not executed. Earlier refusal: <message>`。
+循环会保留模型发出的参数与注册表的最终内容。任何抛出异常或遭到拒绝的调用，都会转换为确切的 `Error: <message>`；结构化的用户可见失败详情不会加入该消息。PTC mode 只返回外层程序打印的行与呈现后的返回值；两者都为空时返回 `(run_code completed with no output)`；失败时返回 `Error: code run failed (<kind>): <message>`，并根据是否存在已捕获内容，在其后附加 `Captured output:` 与捕获的行。内部分发事件只保留在日志中；成功且含图片的子结果会在外层结果之后作为带来源归属的上下文追加。被抑制的未读取或过期拒绝重试会返回 `Error: not run: this "<tool>" call repeats one already refused this turn. Earlier refusal: <message>`。
 
 #### Token 影响
 

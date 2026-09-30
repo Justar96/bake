@@ -18,7 +18,7 @@ export const TIER_PRESET: Readonly<Record<PermissionTier, string>> = {
 /** Tools that only read the workspace, the web, or the agent's own state. */
 const READ_TOOLS = new Set([
   'read', 'glob', 'grep', 'read_image', 'web_fetch', 'web_search', 'todo_write',
-  'list_agents', 'list_subagent_models', 'skill', 'exit_plan_mode', 'ask_user_question',
+  'list_agents', 'list_subagent_models', 'skill', 'ask_user_question', 'tool_help',
 ])
 
 /** Workspace file writes; the sandbox still asks before a write outside the workspace. */

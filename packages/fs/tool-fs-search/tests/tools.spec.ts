@@ -289,8 +289,7 @@ describe('registration', () => {
     expect(props('glob')['path']?.description).toBe('Directory to search. Defaults to the working directory; relative paths resolve against it.')
     expect(schema('grep')?.description).toBe('Search file contents with a ripgrep regular expression, as a bounded alternative to grep or rg in a shell. '
       + 'Hidden and ignored files are skipped unless path points at them. '
-      + 'When the path or file type is uncertain, use `glob` first; keep `path` scoped to the repository or a known subtree and set one `include` filter. '
-      + 'Do not search filesystem-wide roots such as `/` or `$HOME`. '
+      + 'Scope `path` to the repository, never `/` or `$HOME`. '
       + 'Returns only the matching lines, numbered and grouped by file; read a matched file for surrounding context. '
       + 'Up to 250 matches are shown; a larger result says so and reports where the full list was saved.')
     expect(props('grep')['path']?.description).toBe('File or directory to search. Defaults to the working directory; relative paths resolve against it.')
@@ -301,8 +300,7 @@ describe('registration', () => {
 function globDescription(overCap: string): string {
   return 'Find files, not directories, whose paths match a glob pattern. '
     + 'It is a bounded, newest-first alternative to find in a shell: hidden and ignored files are included, but VCS metadata is not. '
-    + 'Keep `path` scoped to the repository or a known subtree; when the file path is uncertain, use this before `grep` or a shell search. '
-    + 'Do not search filesystem-wide roots such as `/` or `$HOME`. '
+    + 'Scope `path` to the repository, never `/` or `$HOME`. '
     + `A result over 100 paths ${overCap}, says so, and reports where the full list was saved.`
 }
 
@@ -1093,7 +1091,7 @@ describe('grep results', () => {
     const { ctx } = await setup()
     expect(text(await call(ctx, 'grep', { pattern: '' }))).toContain('pattern must be a non-empty string')
     expect(text(await call(ctx, 'grep', { pattern: 'x', path: '  ' }))).toContain('path must be a non-empty string')
-    expect(text(await call(ctx, 'grep', { pattern: 'x', include: '  ' }))).toContain('include must be a non-empty glob')
+    expect(text(await call(ctx, 'grep', { pattern: 'x', include: '  ' }))).not.toContain('include must be')
     expect(text(await call(ctx, 'grep', { pattern: 'x', include: '!*.ts' }))).toContain('negated patterns')
     expect(text(await call(ctx, 'grep', { pattern: 'x', include: '*.ts,*.js' }))).toContain('comma-separated list')
   })

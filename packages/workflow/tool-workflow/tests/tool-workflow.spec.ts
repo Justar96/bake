@@ -91,10 +91,11 @@ async function setup(config?: { toolName?: string; maxResultChars?: number }) {
 const SCRIPT = 'return 1'
 const META = { name: 'audit', description: 'd' }
 
-/** The exact authoring contract the model reads; parameter texts are pinned beside it. */
-const WORKFLOW_DESCRIPTION = `Run a JavaScript workflow script that coordinates many subagents, and return the script's result. Use it only when the user explicitly asks for a workflow or for large-scale multi-agent orchestration, because one run can start many subagents; for one or two delegations, use a plain subagent call. The call blocks until the script finishes.
+/** The usage policy every request carries; parameter texts are pinned beside it. */
+const WORKFLOW_DESCRIPTION = 'Run a JavaScript workflow script that coordinates many subagents, and return the script\'s result. Use it only when the user explicitly asks for a workflow or for large-scale multi-agent orchestration, because one run can start many subagents; for one or two delegations, use a plain subagent call. The call blocks until the script finishes. Before writing a script, call tool_help with name "workflow" for the script reference.'
 
-The script can call these globals:
+/** The exact authoring contract the model reads through `tool_help`. */
+const WORKFLOW_DETAILS = `The script can call these globals:
 - \`agent(prompt, opts?)\` runs one subagent to completion. It resolves to the subagent's final text, to an object validated against \`opts.schema\` when one is given, or to \`null\` if the subagent fails. \`opts.schema\` must be an object-rooted JSON Schema that uses only type, properties, required, additionalProperties, items, enum, const, oneOf, and annotations such as description; pattern, format, and numeric bounds are rejected. The other options are \`label\` (display name), \`phase\` (progress group, defaulting to the current phase), and \`provider\` and \`model\` (route overrides, usable separately). Any other option is an error.
 - \`pipeline(items, ...stages)\` runs each item through the stages independently, with no barrier between stages, and resolves to the final values in item order. Each stage is called as \`stage(prev, item, index)\`, where \`prev\` is the previous stage's result, or the item itself for the first stage. A stage that throws turns that item into \`null\` and skips its remaining stages.
 - \`parallel(thunks)\` runs zero-argument functions concurrently, waits for all of them, and resolves to their results in order; a thunk that throws yields \`null\`.
@@ -404,6 +405,9 @@ describe('dsh-tool-workflow', () => {
     const { ctx } = await setup({ maxResultChars: 1234 })
     const schema = ctx.tools.schemas().find(s => s.name === 'workflow')!
     expect(schema.description).toBe(WORKFLOW_DESCRIPTION)
+    expect(ctx.tools.get('workflow')?.details).toBe(WORKFLOW_DETAILS)
+    // The registry adds its details reader beside a tool that declares details.
+    expect(ctx.tools.schemas().map(s => s.name)).toContain('tool_help')
     type Field = {
       description: string
       items?: { properties: Record<string, { description: string }> }

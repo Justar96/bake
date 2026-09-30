@@ -40,6 +40,25 @@ export const WIDER_MODES: Record<string, readonly SandboxMode[]> = {
  */
 export const ESCALATION_TARGETS: readonly SandboxMode[] = ['workspace-write', 'danger-full-access']
 
+/** Every mode name, for recognizing a non-widening request. */
+const SANDBOX_MODES: readonly string[] = ['read-only', 'workspace-write', 'danger-full-access']
+
+/**
+ * Whether a request asks for access the call already has: both modes are known
+ * and `requested` is not strictly wider than `effective`. Tools run such a
+ * request under the effective mode without approval or escalation-argument
+ * validation, because refusing it would only cost the model another step.
+ * An unknown mode on either side is never a no-op, so it still fails closed.
+ * @param effective - the call's effective mode.
+ * @param requested - the raw requested mode.
+ * @returns true only for a known, non-widening request.
+ */
+export function isNoOpEscalation(effective: string, requested: string): boolean {
+  return SANDBOX_MODES.includes(effective)
+    && SANDBOX_MODES.includes(requested)
+    && !(WIDER_MODES[effective] ?? []).includes(requested as SandboxMode)
+}
+
 /**
  * Validate the escalation argument pairing a tool schema cannot express:
  * `sandbox_permissions` and `justification` travel together — an approval
@@ -141,21 +160,22 @@ export interface EscalationRequest {
 }
 
 /**
- * Resolve a sandbox permission request before execution. Repeating the call's
- * effective mode returns it without approval. A strictly wider mode requires
- * approval and applies only to this call. Narrower or unsupported targets,
- * missing approval services or agents for widening, and non-grant outcomes
- * throw before execution.
+ * Resolve a sandbox permission request before execution. A known mode that is
+ * not strictly wider than the call's known effective mode returns the effective
+ * mode without approval: the call already has that access. A strictly wider
+ * mode requires approval and applies only to this call. Unknown modes, missing
+ * approval services or agents for widening, and non-grant outcomes throw
+ * before execution.
  * @param request - the escalation to judge (see {@link EscalationRequest}).
  * @param approval - the approval ingredients the tool holds (see {@link EscalationApproval}).
  * @returns the granted mode, consumed by the one call that asked.
  */
 export async function approveEscalation<A, C>(request: EscalationRequest, approval: EscalationApproval<A, C>): Promise<SandboxMode> {
   const { requestedMode: mode, effectiveMode, justification, subject } = request
-  if (mode === effectiveMode) return effectiveMode
   // Strict widening is an EXECUTION check against the call's effective mode —
   // deliberately not a schema constraint (the enum is the closed target
   // vocabulary; the effective mode is per-call truth).
+  if (isNoOpEscalation(effectiveMode, mode)) return effectiveMode
   if (!(WIDER_MODES[effectiveMode] ?? []).includes(mode as SandboxMode)) {
     throw new Error(`sandbox escalation to "${mode}" is not strictly wider than this call's current "${effectiveMode}" mode`)
   }

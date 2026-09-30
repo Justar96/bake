@@ -146,7 +146,7 @@ Append-only: the result joins the history like any other tool result.
 - **One root Agent per process** — the desktop starts one process per workspace session; a second conversation needs a second process.
 - **Sub-agents cannot ask** — children run with the approval policy `never`, so in `normal` a child's shell command is refused instead of reaching the desktop.
 - **Children are not projected** — only the root Agent's stream, tool calls, and approvals reach the desktop.
-- **No user-question answerer** — `exit_plan_mode` and `ask_user_question` fail with no provider, because the bridge does not yet forward `user-questions/request`.
+- **No user-question answerer** — `ask_user_question` fails with no provider, because the bridge does not yet forward `user-questions/request`.
 
 <a id="dev-note"></a>
 ### Dev Note

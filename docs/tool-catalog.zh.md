@@ -22,8 +22,7 @@
 | `@deepseek-ai/dsh-plugin-manager` | `plugin_manager` | `ctx.tools`, `ctx.pluginManager`, `ctx.sandboxPolicy` | `tool/call`, `tool/result`, `user/message` | - | - |
 | `@deepseek-ai/dsh-mcp-resources` | `list_mcp_resource_templates`, `list_mcp_resources`, `read_mcp_resource` | `ctx.tools`, `ctx.mcpResources` | `tool/call`, `tool/result` | - | - |
 | `@deepseek-ai/dsh-tool-ask-user` | `ask_user_question` | `ctx.tools`、`ctx.userQuestions` | `tool/call`、`tool/result after a UI/provider answers the question` | - | ask_user_question 会暂停工具调用，直到当前 UI 提供方返回人类答案。 |
-| `@deepseek-ai/dsh-tools` | `run_code` | `ctx.tools`、`ctx.ptcRuntime (execution time)`、`ctx.systemPrompt` | `tool/call`、`one tool/ptc-dispatch-start + tool/ptc-dispatch pair per bridged sub-call`、`tool/result` | - | 在 `mode: ptc`／`mode: both` 下，它由工具注册表所有，作为可过滤能力层之外的保留传输机制（参见 PTC mode Agent Note）。在 `ptc` 下，它是注册表对协议格式（wire format）的唯一贡献；其他可见能力在使用已加载运行时语言生成的 SDK 章节中声明。程序通过 binding 调用这些能力，调用按照原生并发约定调度：启动顺序和策略遵循提交顺序，并发安全的函数体最多重叠执行 `maxParallelSubCalls` 个。调用会重新进入完整且受守卫保护的工具流水线，并将每个嵌套执行关联到此外层结果。 |
-| `@deepseek-ai/dsh-plan-mode` | `exit_plan_mode` | `ctx.tools`、`ctx.systemPrompt`、`ctx.userQuestions (execution time, opportunistic)` | `tool/call`、`plan/mode inactive on an approved review`、`tool/result` | - | 规划未激活时，exit_plan_mode 仍保留在面向模型的 schema 中，这样状态转换不会在规划策略变更之外额外造成工具目录变动。其执行路径会拒绝规划模式之外的调用；在规划模式下，它通过用户交互 seam 提交计划（批准／根据反馈继续规划），批准后会在步骤边界记录规划模式已停用。 |
+| `@deepseek-ai/dsh-tools` | `run_code`、`tool_help` | `ctx.tools`、`ctx.ptcRuntime (execution time)`、`ctx.systemPrompt` | `tool/call`、`one tool/ptc-dispatch-start + tool/ptc-dispatch pair per bridged sub-call`、`tool/result` | - | 在 `mode: ptc`／`mode: both` 下，它由工具注册表所有，作为可过滤能力层之外的保留传输机制（参见 PTC mode Agent Note）。在 `ptc` 下，它是注册表对协议格式（wire format）的唯一贡献；其他可见能力在使用已加载运行时语言生成的 SDK 章节中声明。程序通过 binding 调用这些能力，调用按照原生并发约定调度：启动顺序和策略遵循提交顺序，并发安全的函数体最多重叠执行 `maxParallelSubCalls` 个。调用会重新进入完整且受守卫保护的工具流水线，并将每个嵌套执行关联到此外层结果。`tool_help` 恰在某个可见工具声明 `details` 时可见；`details` 是不放进原生 schema 的用法参考，`tool_help` 返回这份参考，而在 `ptc` 下，这份参考改为并入该工具的 SDK 文档。 |
 | `@deepseek-ai/dsh-tool-bash` | `bash` | `ctx.tools`、`ctx.shell`、`ctx.shellEnv`、`ctx.jobs at call time for run_in_background` | `tool/call`、`tool/result` | - | bash 工具是 bash 执行器 seam 面向模型的消费方。使用 `run_in_background` 的运行会注册到通用 `ctx.jobs` 运行时，并通过 `job_*` 工具（来自 `@deepseek-ai/dsh-tool-jobs`）收集／停止；禁用 `enableRunInBackground` 配置（默认为 true）后，该参数会被完全移除。 |
 | `@deepseek-ai/dsh-tool-present` | `present` | `ctx.tools`, `ctx.fs`, `ctx.sessionProjections` | `tool/call`, `deliverables/presented 在成功的最终结果之后`, `tool/result` | - | 交付归调用方 Session 所有；Web ui-deliverables 提供源文件打开与卡片。 |
 | `@deepseek-ai/dsh-tool-pwsh` | `pwsh` | `ctx.tools`、`ctx.shell`、`ctx.shellEnv`、`ctx.jobs at call time for run_in_background` | `tool/call`、`tool/result` | - | pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费方（由 `@deepseek-ai/dsh-pwsh-local` 等 PowerShell 执行器为 `ctx.shell` 提供后端）；除沙箱接口外，它逐项对应 bash 工具调用。使用 `run_in_background` 的运行会注册到通用 `ctx.jobs` 运行时，并通过 `job_*` 工具收集／停止；托管的 `DSH_*` 环境来自 `@deepseek-ai/dsh-shell-env`。每次调用都在新进程中运行，不使用持久 PTY 会话。路径采用原生 `C:\...` 形式，变量采用 `$env:NAME`。 |
@@ -298,34 +297,28 @@ ask_user_question 会暂停工具调用，直到当前 UI 提供方返回人类�
 
 来源：[`packages/core/tools/src/ptc.ts`](../packages/core/tools/src/ptc.ts)
 
-在 `mode: ptc`／`mode: both` 下，它由工具注册表所有，作为可过滤能力层之外的保留传输机制（参见 PTC mode Agent Note）。在 `ptc` 下，它是注册表对协议格式的唯一贡献；其他可见能力在使用已加载运行时语言生成的 SDK 章节中声明。程序通过 binding 调用这些能力，调用按照原生并发约定调度：启动顺序和策略遵循提交顺序，并发安全的函数体最多重叠执行 `maxParallelSubCalls` 个。调用会重新进入完整且受守卫保护的工具流水线，并将每个嵌套执行关联到此外层结果。
+### `tool_help`
 
-<a id="deepseek-aidsh-plan-mode"></a>
-
-## `@deepseek-ai/dsh-plan-mode`
-
-### `exit_plan_mode`
-
-仅在规划模式下使用。提交完整计划供用户评审。如果用户批准，规划模式随即结束，你从下一步骤起执行计划。如果用户选择继续规划，结果会附带其反馈（如有）；请修改计划后再次提交。
+返回某个工具的完整用法参考；该工具的描述会说明首次使用前先用 tool_help 读取。
 
 ```json
 {
   "type": "object",
   "properties": {
-    "plan": {
+    "name": {
       "type": "string",
-      "description": "The complete plan in markdown, starting with a # heading that names it."
+      "description": "Name of the tool."
     }
   },
   "required": [
-    "plan"
+    "name"
   ]
 }
 ```
 
-来源：[`packages/plan/plan-mode/src/index.ts`](../packages/plan/plan-mode/src/index.ts)
+来源：[`packages/core/tools/src/tool-help.ts`](../packages/core/tools/src/tool-help.ts)
 
-规划未激活时，exit_plan_mode 仍保留在面向模型的 schema 中，这样状态转换不会在规划策略变更之外额外造成工具目录变动。其执行路径会拒绝规划模式之外的调用；在规划模式下，它通过用户交互 seam 提交计划（批准／根据反馈继续规划），批准后会在步骤边界记录规划模式已停用。
+在 `mode: ptc`／`mode: both` 下，它由工具注册表所有，作为可过滤能力层之外的保留传输机制（参见 PTC mode Agent Note）。在 `ptc` 下，它是注册表对协议格式的唯一贡献；其他可见能力在使用已加载运行时语言生成的 SDK 章节中声明。程序通过 binding 调用这些能力，调用按照原生并发约定调度：启动顺序和策略遵循提交顺序，并发安全的函数体最多重叠执行 `maxParallelSubCalls` 个。调用会重新进入完整且受守卫保护的工具流水线，并将每个嵌套执行关联到此外层结果。`tool_help` 恰在某个可见工具声明 `details` 时可见；`details` 是不放进原生 schema 的用法参考，`tool_help` 返回这份参考，而在 `ptc` 下，这份参考改为并入该工具的 SDK 文档。
 
 <a id="deepseek-aidsh-tool-bash"></a>
 
@@ -333,7 +326,7 @@ ask_user_question 会暂停工具调用，直到当前 UI 提供方返回人类�
 
 ### `bash`
 
-使用 `bash -c` 运行命令，并返回其 stdout 和 stderr。每次调用都会启动新 shell，因此目录切换和变量不会延续到后续调用。命令应限制在当前仓库内；文件发现使用 `rg --files`、`glob` 或 `grep`，不要用覆盖整个文件系统的 `find`。非零退出会在结果中报告为 `[exit code: N]`，而不是作为工具错误。较长的输出会截断为尾部；如有可能，完整输出会保存到结果中注明的文件。`$DSH_HOME` 是 harness 主目录，`$DSH_SESSION_ID` 是本会话的 id。使用 `run_in_background` 运行的命令会立即返回 job id；使用 `job_output` 读取其输出，使用 `job_kill` 停止它。可能超过超时的构建和测试应放到后台，再用 `job_output` 检查。
+使用 `bash -c` 运行命令，并返回其 stdout 和 stderr。每次调用都会启动新 shell，因此目录切换和变量不会延续到后续调用。避免覆盖整个文件系统的 `find` 扫描。非零退出会在结果中报告为 `[exit code: N]`，而不是作为工具错误。较长的输出会截断为尾部；如有可能，完整输出会保存到结果中注明的文件。`$DSH_HOME` 是 harness 主目录，`$DSH_SESSION_ID` 是本会话的 id。耗时的构建和测试应使用 `run_in_background` 运行，它会立即返回 job id；使用 `job_output` 读取输出，使用 `job_kill` 停止。
 
 ```json
 {
@@ -361,8 +354,7 @@ ask_user_question 会暂停工具调用，直到当前 UI 提供方返回人类�
     }
   },
   "required": [
-    "command",
-    "description"
+    "command"
   ]
 }
 ```
@@ -448,8 +440,7 @@ bash 工具是 bash 执行器 seam 面向模型的消费方。使用 `run_in_bac
     }
   },
   "required": [
-    "command",
-    "description"
+    "command"
   ]
 }
 ```
@@ -683,7 +674,7 @@ pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费
 
 ### `edit`
 
-替换现有 UTF-8 文本文件中的字面量文本。组成 `old_string` 前，应立即使用 `read` 读取目标文件；如果本会话中的 write 或 edit 结果已经提供当前内容，则可省略这次读取。除非你已在本会话中读取、写入或编辑过该文件，且此后它未发生变化，否则编辑会被拒绝；如果因未读取或内容过期而被拒绝，请重新读取、重建参数，不要重复相同的编辑参数。
+替换现有 UTF-8 文本文件中的字面量文本。除非设置了 replace_all，否则每个 old_string 都必须与当前文件恰好匹配一次。对同一文件的多处修改放进 `edits`，每项都与原始内容匹配。修改文件请使用此工具，而不是 shell 脚本。
 
 ```json
 {
@@ -695,21 +686,42 @@ pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费
     },
     "old_string": {
       "type": "string",
-      "description": "Text to replace, matching the file exactly, including whitespace but without the line numbers read adds. It must occur exactly once unless replace_all is true."
+      "description": "Exact text to replace, including whitespace, without read's line numbers."
     },
     "new_string": {
       "type": "string",
-      "description": "Literal replacement text. Use an empty string to delete the match."
+      "description": "Replacement text; empty deletes the match."
     },
     "replace_all": {
       "type": "boolean",
-      "description": "Replace every occurrence. Defaults to false."
+      "description": "Replace every occurrence."
+    },
+    "edits": {
+      "type": "array",
+      "description": "Several replacements, instead of old_string and new_string.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "old_string": {
+            "type": "string"
+          },
+          "new_string": {
+            "type": "string"
+          },
+          "replace_all": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "old_string",
+          "new_string"
+        ]
+      }
     }
   },
   "required": [
-    "file_path",
-    "old_string",
-    "new_string"
+    "file_path"
   ]
 }
 ```
@@ -718,7 +730,7 @@ pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费
 
 ### `read`
 
-以带行号的形式读取 UTF-8 文本文件，长文件会分页返回。与在 shell 中使用 cat、head 或 tail 不同，用它读取的文件在后续 write 和 edit 调用中会被视为已读取。
+以带行号的形式读取 UTF-8 文本文件，长文件会分页返回。与 shell 中的 cat 不同，它会被视为后续 `write` 调用所需的读取。
 
 ```json
 {
@@ -768,7 +780,7 @@ pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费
 
 ### `write`
 
-创建 UTF-8 文本文件，或替换其全部内容。替换现有文件前，应立即使用 `read` 读取文件再组成内容；如果本会话中的 write 或 edit 结果已经提供当前内容，则可省略这次读取。除非你已在本会话中读取、写入或编辑过该文件，且此后它未发生变化，否则替换会被拒绝；如果因未读取或内容过期而被拒绝，请重新读取、重建参数，不要重复相同的写入参数。只做局部修改时，使用 edit 可避免重新发送整个文件。
+创建 UTF-8 文本文件，或替换其全部内容。替换现有文件需要对它的当前读取。只做局部修改时，使用 edit 可避免重新发送整个文件。
 
 ```json
 {
@@ -800,7 +812,7 @@ pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费
 
 ### `glob`
 
-查找路径匹配 glob 模式的文件，不包括目录。它是 shell 中 find 的有界替代方案，结果按最新优先排序：包括隐藏文件和被忽略的文件，但不包括 VCS 元数据。将 `path` 限制在仓库或已知子树内；不知道文件路径时，先用此工具，再用 `grep` 或 shell 搜索。不要搜索 `/` 或 `$HOME` 等覆盖整个文件系统的根路径。如果结果超过 100 条路径，则显示从顶层条目中抽样的 100 条，说明已抽样，并报告完整列表的保存位置。
+查找路径匹配 glob 模式的文件，不包括目录。它是 shell 中 find 的有界替代方案，结果按最新优先排序：包括隐藏文件和被忽略的文件，但不包括 VCS 元数据。将 `path` 限制在仓库内，不要使用 `/` 或 `$HOME`。如果结果超过 100 条路径，则显示从顶层条目中抽样的 100 条，说明已抽样，并报告完整列表的保存位置。
 
 ```json
 {
@@ -825,7 +837,7 @@ pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费
 
 ### `grep`
 
-使用 ripgrep 正则表达式搜索文件内容，可作为 shell 中 grep 或 rg 的有界替代方案。会跳过隐藏文件和被忽略的文件，除非 path 指向它们。路径或文件类型不确定时，先用 `glob`；将 `path` 限制在仓库或已知子树内，并设置一个 `include` 过滤器。不要搜索 `/` 或 `$HOME` 等覆盖整个文件系统的根路径。只返回匹配行，带行号并按文件分组；如需上下文，请读取匹配的文件。最多显示 250 条匹配；如果结果更多，会予以说明，并报告完整列表的保存位置。
+使用 ripgrep 正则表达式搜索文件内容，可作为 shell 中 grep 或 rg 的有界替代方案。会跳过隐藏文件和被忽略的文件，除非 path 指向它们。将 `path` 限制在仓库内，不要使用 `/` 或 `$HOME`。只返回匹配行，带行号并按文件分组；如需上下文，请读取匹配的文件。最多显示 250 条匹配；如果结果更多，会予以说明，并报告完整列表的保存位置。
 
 ```json
 {
@@ -1123,7 +1135,7 @@ create、edit、pause 和 resume 要求直接来自人类的根权限；complete
 
 ### `subagent`
 
-将一项自包含任务（例如研究、限定范围的实现或分析）委派给在自身上下文中工作的 subagent，使这些工作不会占满当前对话。你会得到它的结果，而不是其中间步骤。它看不到当前对话，因此请提供完整、独立的提示词。委派深度受部署策略限制，不要依赖子 agent 再创建更多子 agent。如果委派因深度被拒绝，请在此处继续任务。此调用默认等待结果。设置 `run_in_background: true` 可返回 job id；使用 `job_output` 收集结果，使用 `job_kill` 停止任务。
+将一项自包含任务（例如研究、限定范围的实现或分析）委派给在自身上下文中工作的 subagent，使这些工作不会占满当前对话。你会得到它的结果，而不是其中间步骤。它看不到当前对话，因此请提供完整、独立的提示词。此调用默认等待结果。设置 `run_in_background: true` 可返回 job id；使用 `job_output` 收集结果，使用 `job_kill` 停止任务。
 
 ```json
 {
@@ -1159,7 +1171,7 @@ create、edit、pause 和 resume 要求直接来自人类的根权限；complete
 
 ### `interrupt_agent`
 
-根据 agent id 停止你下方某个可继续 subagent 的当前轮次，无论它是直接子级还是更深层级。已经排队发给它的消息会等待后续的 send_message；它启动的 subagent 会继续运行；它本身仍可接受后续操作。停止请求发出后，此调用即返回，因此该 subagent 可能还会短暂运行；中断一个已经完成的 subagent 不会产生任何效果。
+根据 agent id 停止你下方某个可继续 subagent 的当前轮次。它仍可接受后续操作，它自己的 subagent 也会继续运行。此调用只发出停止请求，不等待其生效；中断一个已经完成的 subagent 不会产生任何效果。
 
 ```json
 {
@@ -1180,7 +1192,7 @@ create、edit、pause 和 resume 要求直接来自人类的根权限；complete
 
 ### `list_agents`
 
-列出你启动的可继续 subagent，以及每个 subagent 的 agent id、标签和状态：running（正在工作）、idle（处于轮次之间，可能正在等待它自己的 subagent）或 ready（已保存且未激活；可以恢复，也不是待收集的结果）。`send_message` 会在运行中 subagent 的下一个 step steer 它，并为 idle 或 ready 的 subagent 启动新轮次。用它查找 id，而不是轮询：subagent 完成时你会收到通知。无法读取的 subagent 会显示为诊断信息。`descendants` 作用域还会列出它们下方的 subagent，并为每个条目标注其父级的 agent id 和深度。你只能向深度为 1 的条目（即你的直接 subagent）发送消息，但可以使用 `interrupt_agent` 停止任一条目的当前轮次。
+列出你启动的可继续 subagent，以及每个 subagent 的 agent id、标签和状态：running、idle（处于轮次之间）或 ready（已保存、可恢复；不是待收集的结果）。用它查找 id，而不是轮询：subagent 完成时你会收到通知。`descendants` 作用域还会列出更深层的 subagent，附带其父级 id 和深度；只有深度为 1 的条目可以发消息，但 `interrupt_agent` 可以停止其中任何一个。
 
 ```json
 {
@@ -1353,16 +1365,7 @@ todo_write 是会话所有的状态；UI 将最新的 todo/write 事件渲染为
 
 ### `workflow`
 
-运行一个协调许多 subagent 的 JavaScript 工作流脚本，并返回脚本的结果。仅当用户明确要求使用工作流或进行大规模多 agent 编排时才使用它，因为一次运行可能启动许多 subagent；只需一两次委派时，请使用普通的 subagent 调用。此调用会阻塞，直至脚本完成。
-
-脚本可以调用以下全局函数：
-
-- `agent(prompt, opts?)`：运行一个 subagent 直至完成。它解析为该 subagent 的最终文本；提供 `opts.schema` 时，解析为通过该 schema 校验的对象；subagent 失败时解析为 `null`。`opts.schema` 必须是以对象为根的 JSON Schema，只能使用 type、properties、required、additionalProperties、items、enum、const、oneOf 以及 description 等注解；pattern、format 和数值边界会被拒绝。其他选项包括 `label`（显示名称）、`phase`（进度组，默认为当前进度阶段），以及 `provider` 和 `model`（路由覆盖，可分别使用）。任何其他选项都会报错。
-- `pipeline(items, ...stages)`：让每个条目独立经过各阶段，阶段之间没有屏障，并按条目顺序解析为各条目的最终值。每个阶段以 `stage(prev, item, index)` 的形式调用，其中 `prev` 是上一阶段的结果；对第一个阶段而言则是条目本身。抛出异常的阶段会将该条目变为 `null`，并跳过它的剩余阶段。
-- `parallel(thunks)`：并发运行零参数函数，等待全部完成，并按顺序解析为它们的结果；抛出异常的 thunk 产生 `null`。
-- `phase(title)`：开始一个进度阶段；`log(message)`：报告进度。
-
-误用钩子（参数错误、未知选项、不受支持的 schema、超出上限）或 subagent 无法启动时会抛出错误，`pipeline` 和 `parallel` 会将其原样传出，而不会转为 `null`；如果没有代码捕获它，本次运行会失败，并且只返回该错误。上限会限制并发 subagent 数（多出的 `agent()` 调用会等待空闲槽位）、每次运行的 subagent 总数，以及每次 `pipeline()` 或 `parallel()` 调用的条目数。脚本没有文件系统、网络、定时器或 Node.js API；具体工作由 subagent 完成。
+运行一个协调许多 subagent 的 JavaScript 工作流脚本，并返回脚本的结果。仅当用户明确要求使用工作流或进行大规模多 agent 编排时才使用它，因为一次运行可能启动许多 subagent；只需一两次委派时，请使用普通的 subagent 调用。此调用会阻塞，直至脚本完成。编写脚本前，先以 name "workflow" 调用 tool_help 读取脚本参考。
 
 ```json
 {

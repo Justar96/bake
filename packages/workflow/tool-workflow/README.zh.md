@@ -29,7 +29,7 @@ kind: "package-reference"
 
 ### 调用工具
 
-模型提交三个参数：`meta`（必需的身份数据：`name`、`description`，以及可选的 `whenToUse` 与 `phases`）、`script`（必需的 async JavaScript 函数体——不支持 TypeScript，也不含 import 或 export 语句，因此不含 `export const meta` 头部；工具描述携带完整的编写约定）与 `args`（可选 JSON 对象，作为全局变量 `args` 向脚本公开；裸列表应包装到字段中，使协议 schema 如实表达形态）。
+模型提交三个参数：`meta`（必需的身份数据：`name`、`description`，以及可选的 `whenToUse` 与 `phases`）、`script`（必需的 async JavaScript 函数体——不支持 TypeScript，也不含 import 或 export 语句，因此不含 `export const meta` 头部；完整的编写约定位于工具的 details 中，模型通过 `tool_help` 读取）与 `args`（可选 JSON 对象，作为全局变量 `args` 向脚本公开；裸列表应包装到字段中，使协议 schema 如实表达形态）。
 
 成功返回规范包络 `{ runId, agentsStarted, result }`，向模型渲染为 `workflow "<name>" completed (<count> agent<optional-s>).`，后接 `Return value:` 与美化打印的 JSON。无法启动的工作流——脚本解析或 meta 校验失败——返回模型可以修正的错误。取消与执行失败返回 `Error: workflow run was cancelled` 或 `Error: workflow run failed: <error>`；部分输出绝不会被报告为成功。
 
@@ -58,7 +58,7 @@ kind: "package-reference"
 
 ### 设计理念
 
-消费方拥有模型侧 schema（包括工具描述中仅限明确请求的使用策略）与结果包络；脚本解析、执行、上限与取消位于 `ctx.workflowEngine` 之后，PTC 引擎与 `run_code` 共享 Node 进程约束。本插件不贡献系统提示词段，其使用策略也绝不放入部署 persona。
+消费方拥有模型侧 schema（包括工具描述中仅限明确请求的使用策略）、工具 details 中的编写约定与结果包络；脚本解析、执行、上限与取消位于 `ctx.workflowEngine` 之后，PTC 引擎与 `run_code` 共享 Node 进程约束。本插件不贡献系统提示词段，其使用策略也绝不放入部署 persona。
 
 ### 运行生命周期
 
@@ -107,11 +107,11 @@ kind: "package-reference"
 
 #### 模型看到什么
 
-工具可见时，已生成的默认 [`workflow` schema](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-workflow) 包含使用策略以及完整的 JavaScript 钩子与元数据约定；本插件不添加系统提示词段，因此隐藏该工具的作用域限制不会留下任何内容。描述只允许在用户明确要求工作流或大规模多 agent 编排时运行，因为一次运行可能启动许多 subagent。`script` 参数描述写明所配置的 `maxResultChars` 上限，`meta.phases` 的 `provider` 与 `model` 字段被标为仅供参考，因为只有 `agent()` 选项才会路由 subagent。`toolName` 可以重命名该定义，模型会提交脚本、元数据与可选 args。
+工具可见时，已生成的默认 [`workflow` schema](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-workflow) 包含使用策略，并提示模型在编写脚本前用 `tool_help` 读取 JavaScript 钩子约定；该约定是工具的 details，只在模型请求时才进入对话。本插件不添加系统提示词段，因此隐藏该工具的作用域限制不会留下任何内容。描述只允许在用户明确要求工作流或大规模多 agent 编排时运行，因为一次运行可能启动许多 subagent。`script` 参数描述写明所配置的 `maxResultChars` 上限，`meta.phases` 的 `provider` 与 `model` 字段被标为仅供参考，因为只有 `agent()` 选项才会路由 subagent。`toolName` 可以重命名该定义，模型会提交脚本、元数据与可选 args。
 
 #### Token 影响
 
-工具可见时，每个请求都会产生较大的固定 schema token 开销。
+工具可见时，每个请求约有 2 KB 固定 schema 开销。约 1.8 KB 的编写约定只在需要编写脚本的对话中计为一次 `tool_help` 结果。
 
 #### KV Cache 影响
 

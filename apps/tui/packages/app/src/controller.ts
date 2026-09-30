@@ -41,7 +41,6 @@ import type {} from '@deepseek-ai/dsh-tool-subagent/model-selection-settings'
 // (`contextPressure`, `todos`), and those keys are invisible here without them.
 import type {} from '@deepseek-ai/dsh-token-meter'
 import type {} from '@deepseek-ai/dsh-tool-todo/types'
-import type {} from '@deepseek-ai/dsh-plan-mode/types'
 import type {} from '@deepseek-ai/dsh-permission-presets/types'
 import type {} from '@deepseek-ai/dsh-goal'
 
@@ -317,7 +316,7 @@ export class SessionController {
     if (projections === undefined) throw new Error('tui: sessionProjections is required')
     this.off.push(projections.onChanged((session, key) => {
       if (session !== agent.session) return
-      if (key === 'inbox' || key === 'contextPressure' || key === 'todos' || key === 'plan' || key === 'permissions' || key === 'goal' || key === 'workflows') this.repaint()
+      if (key === 'inbox' || key === 'contextPressure' || key === 'todos' || key === 'permissions' || key === 'goal' || key === 'workflows') this.repaint()
     }))
     // Activation is process-local and is not written to the goal projection.
     // Create and resume arm the goal; pause disarms it. Those transitions
@@ -363,13 +362,12 @@ export class SessionController {
     const pending = (['next-step', 'next-turn'] as const).flatMap(target => inbox[target]
       .filter(message => message.source.kind === 'user')
       .map(message => ({ id: message.id, target, text: message.content.flatMap(block => block.type === 'text' ? [block.text] : []).join(''), attachments: attachmentSummaries(message.content) })))
-    const surface = projections?.snapshot(this.agent.session, ['contextPressure', 'plan', 'tokenUsage', 'permissions', 'workflows']).values
+    const surface = projections?.snapshot(this.agent.session, ['contextPressure', 'tokenUsage', 'permissions', 'workflows']).values
     const pressure = surface?.contextPressure
     // The agent's current list, not a log of writes to it. `todos` folds every
     // `todo/write` to the latest whole list, which is the only version that
     // is still current.
     const todos = projections?.stateOf(this.agent.session, 'todos')
-    const plan = surface?.plan
     const goal = this.goal()
     const children = this.subagents.view
     const workflows = surface?.workflows ?? []
@@ -395,7 +393,6 @@ export class SessionController {
       subagents,
       workflows: workflowEntries(workflows, this.agent.status === 'running'),
       inspection: this.inspection?.view,
-      ...plan === undefined ? {} : { plan },
       ...goal === undefined ? {} : { goal },
       ...surface?.permissions === undefined ? {} : { permission: surface.permissions.currentValue },
       ...thinkingLevel === undefined ? {} : { thinkingLevel },

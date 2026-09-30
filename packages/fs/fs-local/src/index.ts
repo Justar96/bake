@@ -9,9 +9,10 @@ import { constants as bufferConstants } from 'node:buffer'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import z from '@deepseek-ai/schemastery'
-import { FileSystem, FsError, FsVersion } from '@deepseek-ai/dsh-fs'
+import { checkEditGuard, FileSystem, FsError, FsVersion } from '@deepseek-ai/dsh-fs'
 import type {
   FsDirEntry,
+  FsEditIntent,
   FsEditOutcome,
   FsEditRequest,
   FsInfo,
@@ -21,7 +22,7 @@ import type {
   FsWriteOutcome,
 } from '@deepseek-ai/dsh-fs'
 import {
-  applyLiteralEdit,
+  applyLiteralEdits,
   listDirectory,
   localDisplayPath,
   normalizeLineEndings,
@@ -231,10 +232,11 @@ export class LocalFileSystem extends FileSystem {
 
   override async editText(
     target: FsTarget,
-    edit: FsEditRequest,
-    expected?: { version: FsVersion },
+    edit: FsEditRequest | readonly FsEditRequest[],
+    expected?: FsEditIntent,
     signal?: AbortSignal,
   ): Promise<FsEditOutcome> {
+    const edits: readonly FsEditRequest[] = Array.isArray(edit) ? edit : [edit as FsEditRequest]
     return this.withLock(target.targetKey, async () => {
       const existing = await probe(target.targetKey)
       // Stale guard before literal matching: an edit based on an old read reports
@@ -242,15 +244,12 @@ export class LocalFileSystem extends FileSystem {
       // Missing targets use the same stale code on guarded and unconditional edit paths.
       if (!existing) throw new FsError(`cannot edit "${target.displayPath}": file changed since it was read`, 'FS_STALE_VERSION')
       if (existing.type !== 'file') throw new FsError(`cannot edit "${target.displayPath}": not a regular file`, 'FS_NOT_REGULAR_FILE')
-      // expected === undefined: unconditional edit of the current content — no
-      // version guard. Still inside the per-target lock, so the read→match→write
-      // window is serialized and atomic.
-      if (expected && existing.version !== expected.version) {
-        throw new FsError(`cannot edit "${target.displayPath}": file changed since it was read`, 'FS_STALE_VERSION')
-      }
+      // An unconditional or anchored guard still runs inside the per-target
+      // lock, so the read→match→write window is serialized and atomic.
+      const basis = checkEditGuard(existing.version, expected, edits, target.displayPath)
 
       const original = await readForEdit(target.targetKey, target.displayPath, signal)
-      const edited = applyLiteralEdit(original.content, edit.oldString, edit.newString, edit.replaceAll, target.displayPath)
+      const edited = applyLiteralEdits(original.content, edits, target.displayPath)
       const content = restoreLineEndings(edited.content, original.lineEndings)
       await writeFileAtomic(target.targetKey, content, existing.mode, signal, this.internals)
 
@@ -261,6 +260,7 @@ export class LocalFileSystem extends FileSystem {
         // line-ending restoration is a storage detail the diff ignores.
         before: original.content,
         after: edited.content,
+        ...basis === undefined ? {} : { basis },
       }
     })
   }

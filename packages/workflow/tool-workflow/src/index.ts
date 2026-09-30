@@ -134,15 +134,24 @@ function createWorkflowRecorder(ctx: Context): WorkflowRecorder {
 }
 
 /**
- * The usage policy and script-authoring contract, embedded in the tool
- * description. This IS the model-facing spec: the hooks and their exact
- * semantics, the supported schema subset, failure propagation, and caps. The
- * script body, meta block, and `args` rules live on their parameters, so each
- * fact has one home.
+ * The usage policy, sent with every request. The script-authoring contract is
+ * long and needed only by a model about to write a script, so it is the
+ * tool's on-demand details instead, read through the registry's `tool_help`.
+ * The script body, meta block, and `args` rules live on their parameters, so
+ * each fact has one home.
  */
-const DESCRIPTION = `Run a JavaScript workflow script that coordinates many subagents, and return the script's result. Use it only when the user explicitly asks for a workflow or for large-scale multi-agent orchestration, because one run can start many subagents; for one or two delegations, use a plain subagent call. The call blocks until the script finishes.
+function description(toolName: string): string {
+  return 'Run a JavaScript workflow script that coordinates many subagents, and return the script\'s result. '
+    + 'Use it only when the user explicitly asks for a workflow or for large-scale multi-agent orchestration, because one run can start many subagents; '
+    + 'for one or two delegations, use a plain subagent call. The call blocks until the script finishes. '
+    + `Before writing a script, call tool_help with name "${toolName}" for the script reference.`
+}
 
-The script can call these globals:
+/**
+ * The script-authoring contract: the hooks and their exact semantics, the
+ * supported schema subset, failure propagation, and caps.
+ */
+const DETAILS = `The script can call these globals:
 - \`agent(prompt, opts?)\` runs one subagent to completion. It resolves to the subagent's final text, to an object validated against \`opts.schema\` when one is given, or to \`null\` if the subagent fails. \`opts.schema\` must be an object-rooted JSON Schema that uses only type, properties, required, additionalProperties, items, enum, const, oneOf, and annotations such as description; pattern, format, and numeric bounds are rejected. The other options are \`label\` (display name), \`phase\` (progress group, defaulting to the current phase), and \`provider\` and \`model\` (route overrides, usable separately). Any other option is an error.
 - \`pipeline(items, ...stages)\` runs each item through the stages independently, with no barrier between stages, and resolves to the final values in item order. Each stage is called as \`stage(prev, item, index)\`, where \`prev\` is the previous stage's result, or the item itself for the first stage. A stage that throws turns that item into \`null\` and skips its remaining stages.
 - \`parallel(thunks)\` runs zero-argument functions concurrently, waits for all of them, and resolves to their results in order; a thunk that throws yields \`null\`.
@@ -211,11 +220,12 @@ export function apply(ctx: Context, config: Config): void {
   // fields; the assertion records that resolution, not a hidden fallback.
   const { toolName, maxResultChars } = config as ResolvedConfig
   const recorder = createWorkflowRecorder(ctx)
-  // The usage policy and the whole authoring contract live in the tool's own
-  // schema; the plugin contributes no system-prompt section.
+  // The usage policy lives in the tool's schema and the authoring contract in
+  // its details; the plugin contributes no system-prompt section.
   ctx.tools.register(defineTool({
     name: toolName,
-    description: DESCRIPTION,
+    description: description(toolName),
+    details: DETAILS,
     parameters: {
       script: {
         type: 'string',

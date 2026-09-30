@@ -34,13 +34,13 @@ async function connected() {
   return { ...fixture, start, handle, interactions, agent: handle.agent }
 }
 
-it('queues approvals and questions, rejects stale answers, and preserves plan choices', async () => {
+it('queues approvals and questions, rejects stale answers, and preserves question detail', async () => {
   const { ctx, agent, interactions } = await connected()
   const approval = ctx.approval.request({ agent, toolName: 'bash', reason: 'Write outside workspace' })
   await vi.waitFor(() => expect(interactions.current?.kind).toBe('approval'))
   const first = interactions.current!
   expect(first.kind).toBe('approval')
-  const questions = [{ id: 'plan', question: 'Review', detail: '# Full plan\nImplement this change', options: [{ label: 'Revise' }, { label: 'Implement' }], intent: { kind: 'plan-review' as const, approve: 'Implement' } }]
+  const questions = [{ id: 'plan', question: 'Review', detail: '# Full plan\nImplement this change', options: [{ label: 'Revise' }, { label: 'Implement' }] }]
   const answer = ctx.userQuestions.ask({ agent, questions })
   expect(interactions.current).toBe(first)
   interactions.answer(first.id, 'allowed-once')

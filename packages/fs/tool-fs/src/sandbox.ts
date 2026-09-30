@@ -13,7 +13,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { ToolExecution } from '@deepseek-ai/dsh-tools'
 import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
-import { ESCALATION_TARGETS, approveEscalation, escalationHintMarker, sandboxDenialMarker, validateEscalationArgs } from '@deepseek-ai/dsh-sandbox'
+import { ESCALATION_TARGETS, approveEscalation, escalationHintMarker, sandboxDenialMarker, validateEscalationArgs, isNoOpEscalation } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxPolicyService } from '@deepseek-ai/dsh-sandbox-policy'
 import { FsError } from '@deepseek-ai/dsh-fs'
 
@@ -77,8 +77,9 @@ export class FsSandboxController {
    * strictly wider retry resolved through `ctx.approval` before anything
    * executes), else the session's standing mode. Repeating the standing mode
    * requires no approval. The calling session's cwd is
-   * always carried as the workspace root. Validates the escalation argument
-   * pairing first.
+   * always carried as the workspace root. A requested mode that does not widen
+   * the standing one is ignored along with its justification; otherwise the
+   * escalation argument pairing is validated first.
    * @param toolName - the mutating tool's name, for the approval audit trail.
    * @param args - the call's escalation arguments.
    * @param exec - the tool-execution context (agent, callId, signal).
@@ -86,8 +87,12 @@ export class FsSandboxController {
    *   unsandboxed backend.
    */
   async resolvePolicy(toolName: string, args: FsEscalationArgs, exec: ToolExecution): Promise<SandboxExecutionPolicy | undefined> {
-    validateEscalationArgs(args.sandbox_permissions, args.justification)
     const standingPolicy = this.policy?.resolve({ ...exec.agent ? { session: exec.agent.session } : {} })
+    const requested = args.sandbox_permissions
+    if (standingPolicy !== undefined && requested !== undefined && isNoOpEscalation(standingPolicy.mode, requested)) {
+      return standingPolicy
+    }
+    validateEscalationArgs(args.sandbox_permissions, args.justification)
     if (args.sandbox_permissions === undefined || args.justification === undefined) {
       return standingPolicy
     }

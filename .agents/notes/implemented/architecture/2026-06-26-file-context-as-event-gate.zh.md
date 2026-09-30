@@ -133,7 +133,7 @@ interface Events {
 `dsh-fs-observation-policy` 是插件，不是服务。它不注册 `ctx.fileContext`，没有公开方法面，不暴露 `read`/`write`/`edit`/`resolve` 方法。它通过 `ctx.on()` 注册三个监听器（每个返回一个 disposer 用于 HMR（热模块替换））。它维护观测状态 `WeakMap<owner, Map<targetKey, FsObservation>>`，以及结构化的 owner 推导（将事件中不透明的 `object` actor 收窄为自己的 `{ agent?: { session? } }` 形状），但不注入 `fs`——每个处理器只操作自己的 `WeakMap`，从不操作 `ctx.fs`。
 
 - `fs/write-intent` 监听器：未见/缺失 ⇒ `createIfAbsent`；存在 ⇒ `replaceIfVersion`。它不调用 `next()`：完全占据单一决策槽位。
-- `fs/edit-intent` 监听器：未见 ⇒ `FS_NOT_OBSERVED`；缺失 ⇒ `FS_NOT_FOUND`；存在 ⇒ 返回其版本守卫。同样不调用 `next()`。
+- `fs/edit-intent` 监听器：默认返回携带任何已观察版本的 `anchored` 意图，见[内容锚定编辑](../feature/2026-09-30-content-anchored-edits.zh.md)；在 `editGuard: version` 下，未见 ⇒ `FS_NOT_OBSERVED`；缺失 ⇒ `FS_NOT_FOUND`；存在 ⇒ 返回其版本守卫。同样不调用 `next()`。
 - `fs/observed` 监听器：记录存在/缺失的可辨识值。
 
 一条观测状态条目是**先前观测记录**，但其可辨识字段会影响决策。成功的 read/write/edit 会记录存在状态及版本，使 create-then-edit 或 edit-then-edit 序列无需中间重新读取即可工作。确认缺失的 read/view 会用缺失状态取代旧的正向版本，因此只允许带防护的创建；随后成功的创建会再用新的存在版本取代缺失状态。只有条目不存在才表示未见，并使 edit 返回 `FS_NOT_OBSERVED`。owner 从 `{ agent?: { session? } }` 结构化推导；dispose 时丢弃所有状态（HMR 安全）。

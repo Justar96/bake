@@ -61,7 +61,8 @@ export const Config: z<Config> = z.object({
 /** Parsed tool args; execute validates value constraints absent from ParameterSchemaSpec. */
 interface PwshToolArgs {
   command: string
-  description: string
+  /** Display-only summary; a missing or blank one falls back to the command. */
+  description?: string
   timeoutMs?: number
   workdir?: string
   run_in_background?: boolean
@@ -86,9 +87,6 @@ interface PwshForegroundResult {
 function validatePwshArgs(args: PwshToolArgs): void {
   if (args.command.trim().length === 0) {
     throw new Error('invalid command: expected a non-empty string')
-  }
-  if (args.description.trim().length === 0) {
-    throw new Error('invalid description: expected a non-empty string')
   }
   if (args.timeoutMs !== undefined && (!Number.isFinite(args.timeoutMs) || args.timeoutMs <= 0)) {
     throw new Error(`invalid timeoutMs: expected a positive number, got ${JSON.stringify(args.timeoutMs)}`)
@@ -249,11 +247,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     /* jscpd:ignore-start -- deliberate mirror of dsh-tool-bash's parameter surface (pwsh-tool-and-executor Agent Note). */
     parameters: {
       command: { type: 'string', required: true, description: 'The PowerShell command to execute.' },
-      description: {
-        type: 'string',
-        required: true,
-        description: 'Short summary of what the command does, shown to the user.',
-      },
+      description: { type: 'string', description: 'Short summary of what the command does, shown to the user.' },
       timeoutMs: { type: 'number', description: 'Timeout in milliseconds, capped at the maximum; the command is killed when it expires.' },
       workdir: { type: 'string', description: 'Directory to run this command in. Defaults to your working directory; a relative path resolves against it.' },
       ...backgroundEnabled ? {
@@ -398,19 +392,20 @@ export function apply(ctx: Context, config: Config = {}): void {
     presentCall: (args: PwshToolArgs): TerminalCallView | GenericCallView => {
       // Background acknowledgements carry no terminal exit status; the generic
       // card mirrors the bash tool's background presentation.
+      const description = typeof args.description === 'string' && args.description.trim().length > 0 ? args.description : undefined
       if (args.run_in_background === true) {
         return {
           card: 'generic',
           title: args.command,
           kind: 'execute',
           rawInput: args.command,
-          content: [{ type: 'text', text: args.description }],
+          content: [{ type: 'text', text: description ?? args.command }],
         }
       }
       return {
         card: 'terminal',
         title: args.command,
-        description: args.description,
+        ...description === undefined ? {} : { description },
         ...args.workdir !== undefined ? { cwd: args.workdir } : {},
       }
     },

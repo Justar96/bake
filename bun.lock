@@ -64,7 +64,6 @@
         "@deepseek-ai/dsh-mcp-client": "workspace:^",
         "@deepseek-ai/dsh-mcp-resources": "workspace:^",
         "@deepseek-ai/dsh-persona": "workspace:^",
-        "@deepseek-ai/dsh-plan-mode": "workspace:^",
         "@deepseek-ai/dsh-plugin-manager": "workspace:^",
         "@deepseek-ai/dsh-pwsh-local": "workspace:^",
         "@deepseek-ai/dsh-pwsh-sandbox": "workspace:^",
@@ -172,7 +171,6 @@
         "@deepseek-ai/dsh-home-paths": "workspace:^",
         "@deepseek-ai/dsh-llm": "workspace:^",
         "@deepseek-ai/dsh-permission-presets": "workspace:^",
-        "@deepseek-ai/dsh-plan-mode": "workspace:^",
         "@deepseek-ai/dsh-session": "workspace:^",
         "@deepseek-ai/dsh-session-persistence": "workspace:^",
         "@deepseek-ai/dsh-session-projection": "workspace:^",
@@ -545,7 +543,6 @@
         "@deepseek-ai/dsh-llm-retry": "workspace:^",
         "@deepseek-ai/dsh-mcp-resources": "workspace:^",
         "@deepseek-ai/dsh-permission-presets": "workspace:^",
-        "@deepseek-ai/dsh-plan-mode": "workspace:^",
         "@deepseek-ai/dsh-plugin-manager": "workspace:^",
         "@deepseek-ai/dsh-plugin-package-inventory-deepseek": "workspace:^",
         "@deepseek-ai/dsh-ptc-runtime-node": "workspace:^",
@@ -1458,6 +1455,9 @@
     "packages/fs/fs-observation-policy": {
       "name": "@deepseek-ai/dsh-fs-observation-policy",
       "version": "0.1.6-alpha.2",
+      "dependencies": {
+        "@deepseek-ai/schemastery": "workspace:^",
+      },
       "devDependencies": {
         "@deepseek-ai/cordis": "workspace:^",
         "@deepseek-ai/dsh-fs": "workspace:^",
@@ -2352,43 +2352,6 @@
       },
       "optionalPeers": [
         "@deepseek-ai/dsh-system-prompt",
-      ],
-    },
-    "packages/plan/plan-mode": {
-      "name": "@deepseek-ai/dsh-plan-mode",
-      "version": "0.1.6-alpha.2",
-      "dependencies": {
-        "@deepseek-ai/dsh-brand": "workspace:^",
-        "zod": "catalog:",
-      },
-      "devDependencies": {
-        "@deepseek-ai/cordis": "workspace:^",
-        "@deepseek-ai/dsh-agent": "workspace:^",
-        "@deepseek-ai/dsh-agent-loop": "workspace:^",
-        "@deepseek-ai/dsh-commands": "workspace:^",
-        "@deepseek-ai/dsh-invariants": "workspace:^",
-        "@deepseek-ai/dsh-llm": "workspace:^",
-        "@deepseek-ai/dsh-ptc-runtime": "workspace:^",
-        "@deepseek-ai/dsh-session": "workspace:^",
-        "@deepseek-ai/dsh-session-projection": "workspace:^",
-        "@deepseek-ai/dsh-system-prompt": "workspace:^",
-        "@deepseek-ai/dsh-tools": "workspace:^",
-        "@deepseek-ai/dsh-user-questions": "workspace:^",
-      },
-      "peerDependencies": {
-        "@deepseek-ai/cordis": "workspace:^",
-        "@deepseek-ai/dsh-agent": "workspace:^",
-        "@deepseek-ai/dsh-commands": "workspace:^",
-        "@deepseek-ai/dsh-invariants": "workspace:^",
-        "@deepseek-ai/dsh-llm": "workspace:^",
-        "@deepseek-ai/dsh-session": "workspace:^",
-        "@deepseek-ai/dsh-session-projection": "workspace:^",
-        "@deepseek-ai/dsh-system-prompt": "workspace:^",
-        "@deepseek-ai/dsh-tools": "workspace:^",
-        "@deepseek-ai/dsh-user-questions": "workspace:^",
-      },
-      "optionalPeers": [
-        "@deepseek-ai/dsh-commands",
       ],
     },
     "packages/preset/agent-presets": {
@@ -4947,8 +4910,6 @@
     "@deepseek-ai/dsh-permission-presets": ["@deepseek-ai/dsh-permission-presets@workspace:packages/interaction/permission-presets"],
 
     "@deepseek-ai/dsh-persona": ["@deepseek-ai/dsh-persona@workspace:packages/preset/persona"],
-
-    "@deepseek-ai/dsh-plan-mode": ["@deepseek-ai/dsh-plan-mode@workspace:packages/plan/plan-mode"],
 
     "@deepseek-ai/dsh-plugin-manager": ["@deepseek-ai/dsh-plugin-manager@workspace:packages/boot/plugin-manager"],
 

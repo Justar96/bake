@@ -898,11 +898,6 @@
     },
     {
       "doc": "docs/subsystems/user-questions.md",
-      "symbol": "AskUserQuestionIntent",
-      "source": "packages/interaction/user-questions/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/user-questions.md",
       "symbol": "AskUserQuestionItem",
       "source": "packages/interaction/user-questions/src/types.ts"
     },
@@ -1214,6 +1209,16 @@
     {
       "doc": "docs/subsystems/filesystem.md",
       "symbol": "FsWriteOutcome",
+      "source": "packages/fs/fs/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/filesystem.md",
+      "symbol": "FsEditIntent",
+      "source": "packages/fs/fs/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/filesystem.md",
+      "symbol": "FsEditBasis",
       "source": "packages/fs/fs/src/types.ts"
     },
     {
@@ -1675,11 +1680,6 @@
       "doc": "docs/subsystems/permission-presets.md",
       "symbol": "PresetOption",
       "source": "packages/interaction/permission-presets/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/plan.md",
-      "symbol": "PlanModeConfig",
-      "source": "packages/plan/plan-mode/src/index.ts"
     },
     {
       "doc": "docs/subsystems/invariants.md",

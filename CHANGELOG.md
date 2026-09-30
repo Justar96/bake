@@ -4,7 +4,11 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 ## [Unreleased]
 
-- Identical edits refused for unread or stale files skip repeated tool dispatch within the same turn until another tool settles. The filesystem guard remains strict, and tool guidance explains how to reread and recover, scope searches, run long commands in background jobs, and respect subagent depth limits.
+- `edit` no longer needs a prior `read`. A replacement whose `old_string` matches the current file exactly once is applied, even if the file changed since it was read, and changes elsewhere in the file are kept. When the model had not seen that content, the result shows the edited lines. `replace_all` and `write` still require a current read. `edits: [{ old_string, new_string }]` applies several changes to one file in one atomic call. A failed match names a whitespace-insensitive near match or lists the matching lines. `fs-observation-policy.editGuard: version` restores the old refusal.
+- Tool descriptions are shorter, so each request carries about 1.5 KB less fixed text than in the previous build. Recovery advice now appears in the error that needs it. The bash `description` argument is optional, and a sandbox request for access a call already has runs without asking.
+- Plan mode is removed: `/plan`, `exit_plan_mode`, the plan guidance section, and the `Plan` status-line label are gone. Sessions that recorded plan mode still open.
+- The `workflow` tool's script reference is no longer sent with every request. The model reads it with the new `tool_help` tool before writing a script. `list_agents`, `interrupt_agent`, and `subagent_fork` have shorter descriptions. Together with plan mode's removal, each request of the standard preset carries about 2.4 KB less tool schema.
+- Identical edits refused for unread or stale files skip repeated tool dispatch within the same turn until another tool settles.
 - Failed command exits, signals, and HTTP responses appear as failed tool outcomes in the terminal.
 - `/model` refreshes CLIProxyAPI's model list while keeping models used by the current session, default selection, and subagents. Advanced settings use the same subagent model pickers as the Agent section.
 - Alt-Up sends queued steering immediately by interrupting the current turn. Markdown has clearer headings, lists, tables, and inline code, and reasoning efforts share colours across the model picker and status line.

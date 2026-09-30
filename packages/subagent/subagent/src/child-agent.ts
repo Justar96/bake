@@ -32,7 +32,7 @@ import { delegationDepthOf } from './depth.ts'
 /** Thrown when starting a child would exceed the requested depth cap. */
 export class SubagentDepthError extends Error {
   constructor(public readonly attemptedDepth: number, public readonly maxDepth: number) {
-    super(`subagent depth ${attemptedDepth} exceeds maxDepth ${maxDepth}`)
+    super(`subagent depth ${attemptedDepth} exceeds maxDepth ${maxDepth}; continue the task here instead of delegating`)
     this.name = 'SubagentDepthError'
   }
 }
