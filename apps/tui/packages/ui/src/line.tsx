@@ -17,7 +17,7 @@ import { wrapDraft } from './editor.ts'
 import { sliceSpans } from './markdown.ts'
 import { chromeFor, COLUMN, COMPOSER_BUDGET, HINT_MIN_COLUMNS, MARKER, RULE, TREE, windowOf, type Budget, type ChromeLayout, type FrameStyle } from './layout.ts'
 import { PALETTE, type PaletteColor } from './palette.ts'
-import { fittedGroup, hintFor, isBlank, present, softBreaks, styleOf, tailLines, type ComposerState, type Hint, type LineStyle, type PresentedLine, type ResultBound, type Span } from './present.ts'
+import { fittedGroup, hintFor, isBlank, present, softBreaks, streamingThought, styleOf, tailLines, type ComposerState, type Hint, type LineStyle, type PresentedLine, type ResultBound, type Span } from './present.ts'
 import type { Row } from './rows.ts'
 import { FOLD_REST, foldFrame, FRAME_MS, formatElapsed, SPINNER_REST, spinnerFrame, type Clock, type Outcome, type Spinner, type TurnSummary } from './activity.ts'
 import { useBeat } from './beat.tsx'
@@ -271,10 +271,13 @@ export function LiveRegion({ rows, budget, limit, result, clock }: {
   // clip below never cuts a section's verb line.
   const height = (line: PresentedLine): number => lineHeight(line, budget)
   // A running step folds its own detail to fit, so the window never cuts the
-  // head that says what the step is doing.
-  const lines = tailLines(rows.flatMap(row => row.kind === 'tool-group'
+  // head that says what the step is doing. Reasoning is drawn whole only while
+  // it is the newest row; a finished thought folds to its transcript preview.
+  const lines = tailLines(rows.flatMap((row, index) => row.kind === 'tool-group'
     ? fittedGroup(row.calls, result, limit, height)
-    : present(row, result, undefined, budget.measure)), limit, height)
+    : row.kind !== 'reasoning' ? present(row, result, undefined, budget.measure)
+      : index === rows.length - 1 ? streamingThought(row, result, limit, height, budget.measure)
+        : present(row, result, line => wrappedRows(line, budget), budget.measure)), limit, height)
   if (lines.length === 0 || limit <= 0) return null
   // A section's opening blank is drawn outside the clip. The clipped rows are
   // the oldest text, never the gap that separates the section from history.
@@ -288,42 +291,6 @@ export function LiveRegion({ rows, budget, limit, result, clock }: {
       <Box flexDirection="column" flexShrink={0} maxHeight={limit - Number(gap)} justifyContent="flex-end" overflowY="hidden">
         {body.map((line, index) => <Line key={index} line={line} budget={budget} clock={clock} />)}
       </Box>
-    </Box>
-  )
-}
-
-/** Blank rows between the thinking window and the header under it. */
-export const THINKING_GAP = 1
-
-/**
- * Newest rows of streaming reasoning, drawn above the header while a turn thinks.
- *
- * The window is a few rows held at a fixed height, never a growing block.
- * Reasoning arrives faster than it can be read, and drawing it in full scrolls
- * the surface. Placement matches transcript reasoning. It is a dim italic paragraph
- * at the rail, with no verb, so the window is the text the transcript will
- * keep. Each row is its own truncated `Text`. The rows are already wrapped to
- * fit. If Ink wrapped them again, the height would change.
- *
- * One blank row under the window keeps the reasoning off the header. Without
- * it, the turn's stats would look like the paragraph's last line.
- * The blank belongs to the window. It comes and goes with it, and it is the
- * first row given up when there is room for only one.
- *
- * @param props.rows - newest rows, from `thinkingRows`.
- * @param props.limit - maximum rows, the blank included; older rows are dropped.
- * @returns the window, or null when there is nothing to show or no room.
- */
-export function Thinking({ rows, limit }: { readonly rows: readonly string[], readonly limit: number }): React.ReactElement | null {
-  const gap = limit > 1 ? THINKING_GAP : 0
-  const window = limit > 0 ? rows.slice(-(limit - gap)) : []
-  if (window.length === 0) return null
-  return (
-    <Box flexDirection="column" flexShrink={0} marginBottom={gap}>
-      {window.map((row, index) => <Box key={index} flexDirection="row" flexShrink={0}>
-        <Box width={COLUMN.rail} flexShrink={0}><Text> </Text></Box>
-        <Text dimColor italic wrap="truncate-end">{row}</Text>
-      </Box>)}
     </Box>
   )
 }

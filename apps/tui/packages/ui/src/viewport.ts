@@ -172,7 +172,18 @@ export class Viewport {
   }
 
   private measure(index: number, budget: Budget, result: ResultBound): Measured {
-    return this.measureRow(this.rowAt(index)!, budget, result)
+    const row = this.rowAt(index)!
+    // Reasoning still streaming is drawn whole; it folds to its preview once
+    // a later row follows it. Uncached, since the next delta replaces the row.
+    if (row.kind === 'reasoning' && index === this.rows.length + this.live.length - 1 && index >= this.rows.length) {
+      return this.measureLines(present(row, result, undefined, budget.measure), budget)
+    }
+    return this.measureRow(row, budget, result)
+  }
+
+  private measureLines(lines: readonly PresentedLine[], budget: Budget): Measured {
+    const heights = lines.map(line => lineHeight(line, budget))
+    return { lines, heights, height: heights.reduce((sum, value) => sum + value, 0) }
   }
 
   private measureRow(row: Row, budget: Budget, result: ResultBound): Measured {
@@ -182,9 +193,7 @@ export class Viewport {
       this.cache.set(row, cached)
       return cached
     }
-    const lines = present(row, result, line => wrappedRows(line, budget), budget.measure)
-    const heights = lines.map(line => lineHeight(line, budget))
-    const measured = { lines, heights, height: heights.reduce((sum, value) => sum + value, 0) }
+    const measured = this.measureLines(present(row, result, line => wrappedRows(line, budget), budget.measure), budget)
     this.cache.set(row, measured)
     if (this.cache.size > 32) this.cache.delete(this.cache.keys().next().value!)
     return measured

@@ -1271,9 +1271,62 @@ export function tailLines(
   return lines.slice(from)
 }
 
-/** A row that opens a section. Nothing in it, at the rail. */
+/**
+ * A row that opens a section. Nothing in it, at the rail. A thought's own
+ * paragraph breaks stay inside its section, so a long one streaming in the
+ * live region scrolls by rows instead of dropping whole paragraphs.
+ */
 export const isBlank = (line: PresentedLine): boolean =>
   line.text === '' && line.verb === '' && line.column === COLUMN.rail && line.marker === MARKER.none && line.divider !== true
+    && line.tone !== 'thought'
+
+/**
+ * A streaming thought's lines, parsed from only as many of its newest
+ * paragraphs as fill `limit` rows.
+ *
+ * Reasoning never prints while it streams, so the live row holds the whole
+ * thought, and parsing and wrapping all of it on every delta costs the length
+ * of the thought. The live region draws its newest rows only. Parse the newest
+ * paragraphs, and more of them only while they draw no more rows than the
+ * window holds, so the window is cut as the whole thought would be.
+ *
+ * @param row - the newest live row, still streaming.
+ * @param result - the surface's result bound, for code highlighting.
+ * @param limit - rows the live region may draw.
+ * @param height - rows one line occupies once wrapped.
+ * @param width - available prose cells for responsive Markdown tables.
+ * @returns the lines of the thought's tail, opening blank included.
+ */
+export function streamingThought(row: Row & { readonly kind: 'reasoning' }, result: ResultBound, limit: number,
+  height: (line: PresentedLine) => number, width?: number): readonly PresentedLine[] {
+  for (let paragraphs = 1; ; paragraphs *= 2) {
+    const start = paragraphStart(row.text, paragraphs)
+    const lines = present(start === 0 ? row : { ...row, text: row.text.slice(start) }, result, undefined, width)
+    if (start === 0 || lines.reduce((sum, line) => sum + height(line), 0) > limit) return lines
+  }
+}
+
+/** A line that opens or closes a fenced code block. */
+const FENCE = /^ {0,3}(?:`{3,}|~{3,})/gmu
+
+/**
+ * Where the `count`th paragraph from the end starts, so the text after it
+ * parses as it does within the whole. A paragraph starts after a blank line;
+ * a start inside a fenced block moves back to the fence that opened it.
+ * @returns 0 when the text has no more paragraphs than that.
+ */
+function paragraphStart(text: string, count: number): number {
+  let start = text.length
+  for (let found = 0; found < count; found++) {
+    // A blank line at the very start has no paragraph before it.
+    const blank = start < 1 ? -1 : text.lastIndexOf('\n\n', start - 1)
+    if (blank <= 0) return 0
+    start = blank
+  }
+  start += 2
+  const fences = [...text.slice(0, start).matchAll(FENCE)]
+  return fences.length % 2 === 0 ? start : fences.at(-1)!.index
+}
 
 /**
  * Cut `lines` at `from`, restoring the verb-column mark the cut removed.
