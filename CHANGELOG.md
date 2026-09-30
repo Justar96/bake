@@ -4,6 +4,11 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-30
+
+- `/settings` opens straight on its most general section, Terminal, instead of a list of sections. The sections run from most general to most specific on the tab row under the title: Terminal, Session, Agent, Shell, Web search, and Advanced. Tab and Shift-Tab move between them, and Escape from a section closes the panel. Typing on any section searches every setting, and a setting changed from another section's results opens that section with the changed row selected.
+- Native Windows consoles, including the classic console host and editor terminals, draw the rounded frame instead of the ASCII one. Node writes to them as UTF-16, so the missing locale and `TERM` variables no longer mean the frame cannot be drawn. A Chinese, Japanese, or Korean system locale still selects the ASCII frame outside Windows Terminal, because the console host draws its line characters two cells wide there.
+
 ## [0.3.0] - 2026-10-01
 
 - `edit` no longer needs a prior `read`. A replacement whose `old_string` matches the current file exactly once is applied, even if the file changed since it was read, and changes elsewhere in the file are kept. When the model had not seen that content, the result shows the edited lines. `replace_all` and `write` still require a current read. `edits: [{ old_string, new_string }]` applies several changes to one file in one atomic call. A failed match names a whitespace-insensitive near match or lists the matching lines. `fs-observation-policy.editGuard: version` restores the old refusal.
