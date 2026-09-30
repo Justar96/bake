@@ -1,4 +1,5 @@
 /** Markdown formatting, incomplete input, and terminal-safe text. */
+import stringWidth from 'string-width'
 import { describe, expect, test } from 'bun:test'
 import { finishedMarkdown, markdownLines, sliceSpans } from '../src/markdown.ts'
 import { present } from '../src/present.ts'
@@ -41,9 +42,31 @@ describe('Markdown', () => {
     const answer = markdownLines(source)
     expect(answer[0]?.spans).toContainEqual({ tone: 'plain', bold: true, color: PALETTE.reference, length: 7 })
     expect(answer[2]?.spans).toContainEqual({ tone: 'plain', underline: true, color: PALETTE.reference, length: 4 })
-    expect(answer[2]?.spans?.some(span => span.color === PALETTE.reference && span.length === ' (https://example.com)'.length)).toBe(true)
-    expect(answer[2]?.spans?.some(span => span.color === PALETTE.reference && span.length === 'diagram (img.png)'.length)).toBe(true)
+    expect(answer[2]?.spans?.some(span => span.tone === 'quiet' && span.color === undefined && span.length === ' (https://example.com)'.length)).toBe(true)
+    expect(answer[2]?.spans?.some(span => span.color === PALETTE.reference && span.length === 'diagram'.length)).toBe(true)
     expect(markdownLines(source, 'thought').flatMap(line => line.spans ?? []).every(span => span.color === undefined)).toBe(true)
+  })
+
+  test('uses semantic accents without colouring ordinary prose or reasoning', () => {
+    const source = '`value` and **strong**\n\n- [x] done\n- [ ] next\n\n> quote\n\n| Name |\n| --- |\n| plain |\n\n```ts\nvalue\n```'
+    const lines = markdownLines(source)
+    expect(lines[0]?.spans).toContainEqual({ tone: 'plain', bold: true, color: PALETTE.code, length: 5 })
+    const task = lines.find(line => line.text === '- [x] done')!
+    expect(task.spans).toEqual([
+      { tone: 'quiet', length: 2 }, { tone: 'plain', color: PALETTE.done, length: 4 }, { tone: 'plain', length: 4 },
+    ])
+    expect(lines.find(line => line.text === '> quote')?.spans).toEqual([{ tone: 'quiet', length: 2 }, { tone: 'plain', length: 5 }])
+    expect(lines.find(line => line.text === 'Name: plain')?.spans?.[0]).toEqual({ tone: 'plain', bold: true, color: PALETTE.reference, length: 4 })
+    expect(lines.find(line => line.text === 'ts')?.spans).toEqual([{ tone: 'quiet', bold: true, length: 2 }])
+    expect(markdownLines(source, 'thought').flatMap(line => line.spans ?? []).every(span => span.tone === 'thought' && span.color === undefined)).toBe(true)
+  })
+
+  test('deduplicates visible nested link labels and preserves distinct image destinations', () => {
+    expect(textOf('[**https://example.com**](https://example.com) [`src/app.ts`](src/app.ts)')).toEqual(['https://example.com src/app.ts'])
+    expect(textOf('[![logo](img.png)](https://example.com) ![img.png](img.png)')).toEqual(['logo (img.png) (https://example.com) img.png'])
+    const codeLink = markdownLines('[`src/app.ts`](src/app.ts)')[0]!
+    expect(codeLink.spans).toEqual([{ tone: 'plain', color: PALETTE.code, underline: true, bold: true, length: 10 }])
+    expect(textOf('[**a\x07**](a%07)')).toEqual(['a\\x07 (a%07)'])
   })
 
   test('renders tables as labeled cells without a terminal-width assumption', () => {
@@ -91,5 +114,74 @@ describe('stable Markdown prefix', () => {
     const source = '```ts\nconst x = 1\n```\n\nnext'
     expect(source.slice(0, finishedMarkdown(source))).toBe('```ts\nconst x = 1\n```\n')
     expect(finishedMarkdown('hello\r\n\r\n')).toBe(7)
+  })
+})
+
+test('settles only a complete top-level closing fence line', () => {
+  for (const source of ['```ts\nx\n```\n', '~~~~ js\nx\n~~~~~  \n', '  ```\nx\n   ```\r\n', '```\n```\n']) {
+    expect(finishedMarkdown(source)).toBe(source.length)
+  }
+  for (const source of ['```ts\nx\n```', '```ts\nx\n```\r', '````\nx\n```\n', '```\nx\n~~~\n',
+    '```\nx\n``` more\n', '    ```\n    x\n    ```\n', '> ```\n> x\n> ```\n', '- ```\n  x\n  ```\n']) {
+    expect(finishedMarkdown(source)).toBe(0)
+  }
+})
+
+describe('responsive tables', () => {
+  const table = '| Item | Count | Description |\n| :--- | ---: | :---: |\n| **中文** | 7 | `ready` |\n| next | 120 | a longer description with 👩‍💻 |'
+
+  test('aligns compact columns and preserves header, code, and body styles', () => {
+    const lines = markdownLines('| Name | N | State |\n| :--- | --: | :---: |\n| 中文 | 7 | `yes` |\n| x | 120 | no |', 'plain', undefined, 80)
+    expect(lines.map(line => line.text)).toEqual([
+      'Name |   N | State', '-----+-----+------', '中文 |   7 |  yes ', 'x    | 120 |  no  ',
+    ])
+    expect(lines.every(line => line.literal)).toBe(true)
+    expect(lines[0]?.spans?.[0]).toMatchObject({ color: PALETTE.reference, bold: true })
+    expect(lines[2]?.spans).toContainEqual({ tone: 'plain', color: PALETTE.code, bold: true, length: 3 })
+    expect(lines.flatMap(line => line.spans ?? []).some(span => span.tone === 'quiet')).toBe(true)
+  })
+
+  test('wraps Unicode cells without losing characters or styled offsets', () => {
+    const lines = markdownLines(table, 'plain', undefined, 36)
+    expect(lines.every(line => stringWidth(line.text) <= 36)).toBe(true)
+    expect(lines.every(line => line.spans?.reduce((sum, span) => sum + span.length, 0) === line.text.length)).toBe(true)
+    const lastRow = lines.filter(line => line.tableRow === table.lastIndexOf('| next'))
+    const description = lastRow.map(line => line.text.split(' | ')[2]!.trim()).join(' ')
+    expect(description).toBe('a longer description with 👩‍💻')
+    expect(lines.some(line => line.text.includes('👩‍💻'))).toBe(true)
+    expect(markdownLines(table, 'thought', undefined, 36).flatMap(line => line.spans ?? []).every(span => span.tone === 'thought' && span.color === undefined)).toBe(true)
+  })
+
+  test('carries inline code styles through hard wraps without splitting Unicode text', () => {
+    const code = '界👩‍💻'.repeat(12)
+    const lines = markdownLines(`| Code | Note |\n| --- | --- |\n| \`${code}\` | plain |`, 'plain', undefined, 28)
+    let styled = ''
+    for (const line of lines) {
+      expect(stringWidth(line.text)).toBeLessThanOrEqual(28)
+      let offset = 0
+      for (const span of line.spans ?? []) {
+        if (span.color === PALETTE.code) styled += line.text.slice(offset, offset + span.length)
+        offset += span.length
+      }
+    }
+    expect(styled).toBe(code)
+  })
+
+  test('retains source-row anchors across grid and stacked layouts', () => {
+    const wide = markdownLines(table, 'plain', undefined, 80)
+    const narrow = markdownLines(table, 'plain', undefined, 20)
+    const offset = table.lastIndexOf('| next')
+    expect(wide.filter(line => line.tableRow === offset).map(line => line.text).join('')).toContain('next')
+    expect(narrow.filter(line => line.tableRow === offset).map(line => line.text)).toEqual([
+      'Item: next', 'Count: 120', 'Description: a longer description with 👩‍💻',
+    ])
+  })
+
+  test('keeps nested and malformed tables readable without dropping extra cells', () => {
+    const malformed = '| A | B |\n| - | - |\n| one |\n| x | y | extra |'
+    expect(markdownLines(malformed, 'plain', undefined, 80).map(line => line.text)).toEqual(['A: one', 'B: ', '', 'A: x', 'B: y', ': extra'])
+    expect(markdownLines('> | A | B |\n> | - | - |\n> | x | y |', 'plain', undefined, 80).map(line => line.text)).toEqual(['> A: x', '> B: y'])
+    expect(markdownLines('| | B |\n| - | - |\n| x | y |', 'plain', undefined, 80).map(line => line.text)).toEqual([': x', 'B: y'])
+    expect(finishedMarkdown(table + '\n\n')).toBe(0)
   })
 })

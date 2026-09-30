@@ -1242,7 +1242,7 @@ create、edit、pause 和 resume 要求直接来自人类的根权限；complete
   "properties": {
     "job_id": {
       "type": "string",
-      "description": "The id returned when the job started."
+      "description": "The background job id from a start result or job_list. A continuable subagent id is an agent id, not a job id."
     },
     "reason": {
       "type": "string",
@@ -1280,7 +1280,7 @@ create、edit、pause 和 resume 要求直接来自人类的根权限；complete
   "properties": {
     "job_id": {
       "type": "string",
-      "description": "The id returned when the job started."
+      "description": "The background job id from a start result or job_list. A continuable subagent id is an agent id, not a job id."
     },
     "wait": {
       "type": "boolean",

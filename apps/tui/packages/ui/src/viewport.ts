@@ -10,6 +10,7 @@ export interface Position { readonly row: number, readonly offset: number }
 
 /** A character in a displayed source row, retained while following is paused. */
 export interface ReadingAnchor extends Position {
+  readonly tableRow?: number
   readonly source: Row | undefined
   readonly line: number
   readonly character: number
@@ -108,7 +109,8 @@ export class Viewport {
     while (line < measured.lines.length - 1 && offset >= measured.heights[line]!) offset -= measured.heights[line++]!
     const content = measured.lines[line]
     return { ...position, source: this.rowAt(position.row), line, columns: budget.columns,
-      character: content === undefined ? 0 : wrappedStarts(content, budget)[offset] ?? 0 }
+      character: content === undefined ? 0 : wrappedStarts(content, budget)[offset] ?? 0,
+      ...content?.tableRow === undefined ? {} : { tableRow: content.tableRow } }
   }
 
   /** Resolve a reading anchor, including live text split into committed fragments. */
@@ -117,6 +119,16 @@ export class Viewport {
     if (row === this.end.row) return { row, offset: 0 }
     if (anchor.source === undefined) return this.move({ row, offset: 0 }, 0, budget, result)
     if (this.rowAt(row) !== anchor.source) {
+      const replacement = this.rowAt(row)
+      if (anchor.tableRow !== undefined && (anchor.source.kind === 'assistant' || anchor.source.kind === 'reasoning')
+        && replacement?.kind === anchor.source.kind && replacement.text.length >= anchor.tableRow
+        && replacement.text.slice(0, anchor.tableRow) === anchor.source.text.slice(0, anchor.tableRow)) {
+        const measured = this.measure(row, budget, result)
+        if (measured.lines.some(line => line.tableRow === anchor.tableRow)) {
+          return { row, offset: this.offsetOf(anchor, measured, budget) }
+        }
+      }
+
       // A resize and a stream publication can share a render. Convert the old
       // source's text anchor to the new width before walking its replacement.
       const offset = anchor.columns === budget.columns ? anchor.offset
@@ -128,6 +140,10 @@ export class Viewport {
   }
 
   private offsetOf(anchor: ReadingAnchor, measured: Measured, budget: Budget): number {
+    const tableLine = anchor.tableRow === undefined ? -1 : measured.lines.findIndex(line => line.tableRow === anchor.tableRow)
+    if (tableLine >= 0 && (anchor.columns !== budget.columns || measured.lines[anchor.line]?.tableRow !== anchor.tableRow)) {
+      return measured.heights.slice(0, tableLine).reduce((sum, value) => sum + value, 0)
+    }
     const index = Math.min(anchor.line, measured.lines.length - 1)
     const content = measured.lines[index]
     if (content === undefined) return 0
@@ -166,7 +182,7 @@ export class Viewport {
       this.cache.set(row, cached)
       return cached
     }
-    const lines = present(row, result, line => wrappedRows(line, budget))
+    const lines = present(row, result, line => wrappedRows(line, budget), budget.measure)
     const heights = lines.map(line => lineHeight(line, budget))
     const measured = { lines, heights, height: heights.reduce((sum, value) => sum + value, 0) }
     this.cache.set(row, measured)

@@ -1,0 +1,13 @@
+diff --git a/index.js b/index.js
+index 42ec3a1194234c0dd1187f00bbe42a62f0a18a70..c826b044549418a66c02fc7c76ab1deb22f3ea53 100644
+--- a/index.js
++++ b/index.js
+@@ -138,6 +138,8 @@ function trailingWidth(visibleSegment, eastAsianWidthOptions) {
+ 
+ 		if (
+ 			spacingMarkRegex.test(character)
++			// Thai/Lao AM are letters (Lo), but add a spacing vowel within a grapheme.
++			|| character === '\u0E33' || character === '\u0EB3'
+ 			|| (character >= '\uFF00' && character <= '\uFFEF')
+ 		) {
+ 			extra += eastAsianWidth(character.codePointAt(0), eastAsianWidthOptions);

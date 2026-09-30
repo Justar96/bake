@@ -55,7 +55,8 @@
     "commander": "catalog:",
     "ink": "catalog:",
     "react": "catalog:",
-    "shiki": "^4.4.3"
+    "shiki": "^4.4.3",
+    "@deepseek-ai/dsh-tool-workflow": "workspace:^"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "workspace:^"

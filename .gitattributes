@@ -13,3 +13,8 @@ docs/persistence-schema.json linguist-generated=true
 docs/persistence-changes/*.schema.json linguist-generated=true
 docs/persistence-changes/releases/*.schema.json linguist-generated=true
 docs/persistence-changes/historical-formats/*.schema.json linguist-generated=true
+
+# A dependency patch is a diff of upstream bytes: its context lines start with a
+# space, and a tab-indented source puts a tab after it. Changing those bytes
+# would stop the patch applying, so whitespace checks skip it.
+patches/*.patch -whitespace

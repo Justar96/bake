@@ -2,6 +2,8 @@
 import stringWidth from 'string-width'
 
 const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+const words = new Intl.Segmenter('en', { granularity: 'word' })
+const dictionaryScript = /[\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}]/u
 
 /** Text and a UTF-16 cursor offset at a grapheme boundary. */
 export interface Draft {
@@ -116,8 +118,9 @@ interface Cell {
  * Rows break after whitespace. Whitespace at a break hangs past the row
  * instead of opening the next one, so a wrapped row never starts with a space
  * the user did not type. Wide characters are their own break opportunities,
- * because CJK text has no spaces to break on. A word longer than a row starts
- * a row of its own and is split at each row boundary.
+ * because CJK text has no spaces to break on. Thai, Lao, Khmer, and Myanmar
+ * use ICU word boundaries. A word longer than a row starts a row of its own
+ * and is split only between graphemes.
  *
  * The layout is computed without the caret and one column narrower than
  * `width`. The caret is then drawn into the column that remains. Moving the
@@ -156,6 +159,62 @@ export function wrapDraft(text: string, cursor: number, width: number, caret: st
  */
 export function draftRows(text: string, width: number): number {
   return layoutDraft(text, width).rows.length
+}
+
+/** A one-line draft window that keeps the caret visible in a bounded field. */
+export interface CursorWindow {
+  /** Display text before the caret, including an ellipsis when text is hidden. */
+  readonly before: string
+  /** Display text after the caret, including an ellipsis when text is hidden. */
+  readonly after: string
+}
+
+/**
+ * Keep a one-line input's caret visible while preserving as much surrounding
+ * text as the field width allows. The inputs are already display text, so a
+ * masked secret and a normal URL use the same cell accounting.
+ * @param before - display text before the caret.
+ * @param after - display text after the caret.
+ * @param width - cells available for text and the caret.
+ * @returns the visible before and after portions.
+ */
+export function cursorWindow(before: string, after: string, width: number): CursorWindow {
+  const segments = Array.from(segmenter.segment(before + after), ({ segment }) => segment)
+  const cursor = Array.from(segmenter.segment(before)).length
+  const capacity = Math.max(0, width - 1)
+  const build = (limit: number): { readonly start: number; readonly end: number } => {
+    let start = cursor
+    let end = cursor
+    let used = 0
+    while (true) {
+      const left = start === 0 ? undefined : stringWidth(segments[start - 1]!)
+      const right = end === segments.length ? undefined : stringWidth(segments[end]!)
+      const leftFits = left !== undefined && used + left <= limit
+      const rightFits = right !== undefined && used + right <= limit
+      if (!leftFits && !rightFits) break
+      if (leftFits && rightFits) {
+        if (end - cursor < cursor - start) { end += 1; used += right! }
+        else { start -= 1; used += left! }
+      } else if (rightFits) { end += 1; used += right! }
+      else { start -= 1; used += left! }
+    }
+    return { start, end }
+  }
+  let limit = capacity
+  let window = build(limit)
+  for (let pass = 0; pass < 3; pass++) {
+    const markers = Number(window.start > 0) + Number(window.end < segments.length)
+    const next = Math.max(0, capacity - markers)
+    if (next === limit) break
+    limit = next
+    window = build(limit)
+  }
+  const hiddenBefore = window.start > 0
+  const hiddenAfter = window.end < segments.length
+  return {
+    before: `${hiddenBefore ? '\u2026' : ''}${segments.slice(window.start, cursor).join('')}`,
+    after: `${segments.slice(cursor, window.end).join('')}${hiddenAfter ? '\u2026' : ''}`,
+  }
 }
 
 /**
@@ -221,6 +280,14 @@ function layoutDraft(text: string, width: number): {
     const open = (): void => { row = []; column = 0; rows.push(row) }
     const place = (cell: Cell): void => { row.push(cell); column += cell.width }
     const graphemes = Array.from(segmenter.segment(line), ({ segment, index }) => ({ segment, index: offset + index }))
+    const breaks = new Set<number>()
+    if (dictionaryScript.test(line)) {
+      for (const { segment, index } of words.segment(line)) {
+        if (dictionaryScript.test(segment)) {
+          breaks.add(offset + index).add(offset + index + segment.length)
+        }
+      }
+    }
     for (let index = 0; index < graphemes.length;) {
       const first = graphemes[index]!
       if (first.segment === ' ' || first.segment === '\t') {
@@ -237,7 +304,9 @@ function layoutDraft(text: string, width: number): {
         const { segment, index: at } = graphemes[index]!
         if (segment === ' ' || segment === '\t') break
         const cell = { offset: at, text: segment, width: stringWidth(segment) }
-        if (word.length > 0 && (cell.width > 1 || word.at(-1)!.width > 1)) break
+        if (word.length > 0 && (breaks.has(at)
+          || (cell.width > 1 && !dictionaryScript.test(cell.text))
+          || (word.at(-1)!.width > 1 && !dictionaryScript.test(word.at(-1)!.text)))) break
         word.push(cell)
       }
       const size = word.reduce((sum, cell) => sum + cell.width, 0)

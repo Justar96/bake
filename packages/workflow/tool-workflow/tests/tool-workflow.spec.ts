@@ -380,18 +380,23 @@ describe('dsh-tool-workflow', () => {
 
   it('registers under a configured toolName and unregisters on fiber dispose (HMR safety)', async () => {
     const ctx = new Context()
+    onTestFinished(async () => { await ctx.fiber.dispose() })
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
     await ctx.plugin(StubEngine)
+    await ctx.plugin(SessionProjectionRegistry)
+    const session = Session.create(SessionId('workflow-projection-disposal'))
     const bareSections = (await ctx.systemPrompt.assemble()).sections
     const fiber = await ctx.plugin(toolWorkflow, { toolName: 'orchestrate' })
     expect(ctx.tools.get('orchestrate')).toBeDefined()
     expect(ctx.tools.get('workflow')).toBeUndefined()
+    expect(ctx.sessionProjections.snapshot(session, ['workflows']).values.workflows).toEqual([])
     // The tool carries its usage policy in its description, so the plugin
     // adds no prompt section under any name.
     expect((await ctx.systemPrompt.assemble()).sections).toEqual(bareSections)
     await fiber.dispose()
     expect(ctx.tools.get('orchestrate')).toBeUndefined()
+    expect(ctx.sessionProjections.snapshot(session, ['workflows']).values.workflows).toBeUndefined()
     expect((await ctx.systemPrompt.assemble()).sections).toEqual(bareSections)
   })
 

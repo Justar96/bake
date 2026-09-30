@@ -50,6 +50,9 @@ export interface SheetTab {
   readonly current: boolean
 }
 
+/** The logical line, or first and last line, a sheet keeps whole in view. */
+export type SheetFollow = number | readonly [number, number]
+
 /** A drawn row: a logical line's slice, with the glyph only on its first row. */
 interface SheetRow extends SheetLine {
   readonly lead: string
@@ -110,12 +113,13 @@ export function sheetRows(lines: readonly SheetLine[], limit: number, columns: n
  * @param offset - the caller's scroll position.
  * @param follow - logical line to keep in view, such as a list's selection.
  */
-function pageStart(rows: readonly SheetRow[], page: number, offset: number, follow: number | undefined): number {
+function pageStart(rows: readonly SheetRow[], page: number, offset: number, follow: SheetFollow | undefined): number {
   const last = Math.max(0, rows.length - page)
   if (follow === undefined) return Math.min(offset, last)
-  const first = rows.findIndex(row => row.line === follow)
+  const [from, to] = typeof follow === 'number' ? [follow, follow] : follow
+  const first = rows.findIndex(row => row.line === from)
   if (first < 0) return Math.min(offset, last)
-  const end = rows.findLastIndex(row => row.line === follow)
+  const end = rows.findLastIndex(row => row.line === to)
   return Math.max(0, Math.min(first, last, Math.max(offset, end - page + 1)))
 }
 
@@ -129,7 +133,7 @@ function pageStart(rows: readonly SheetRow[], page: number, offset: number, foll
  * @param props.tabs - every view the cycle key reaches, the open one current.
  * @param props.keys - what the keys do in this view, for its footer.
  * @param props.offset - first content row shown; clamped to the last page.
- * @param props.follow - logical line kept in view, which a selecting view passes.
+ * @param props.follow - logical line, or first and last line, kept in view, which a selecting view passes.
  */
 export function Sheet({ tabs, color, lines, keys, columns, limit, offset, follow, frame }: {
   readonly tabs: readonly SheetTab[]
@@ -139,7 +143,7 @@ export function Sheet({ tabs, color, lines, keys, columns, limit, offset, follow
   readonly columns: number
   readonly limit: number
   readonly offset: number
-  readonly follow?: number | undefined
+  readonly follow?: SheetFollow | undefined
   readonly frame: FrameStyle
 }): React.ReactElement {
   const rows = sheetRows(lines, limit, columns)

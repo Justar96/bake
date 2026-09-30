@@ -122,7 +122,8 @@ describe('dsh-tool-subagent model selection', () => {
     ])
     // Without provider route defaults, unset values come from the parent's route.
     expect(schema.description).toContain(
-      ' Model choice is optional: omit `provider`, `model`, and `reasoning_effort` to use '
+      ' Model choice is optional: omit `provider`, `model`, and `reasoning_effort` to let the host '
+      + 'choose; it may pick an allowed model and effort suited to the task, and otherwise uses '
       + 'the configured subagent defaults, filling gaps from your own route where compatible. '
       + 'To choose, look up routes and efforts with `list_subagent_models`, then pass `provider` and `model` '
       + 'together. If you change the route without `reasoning_effort`, the new model\'s default effort applies.',

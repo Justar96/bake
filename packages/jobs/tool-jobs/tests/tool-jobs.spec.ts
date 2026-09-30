@@ -186,7 +186,7 @@ describe('tool-jobs setup', () => {
       + '`[status: ...]`. Returns immediately unless `wait: true`.',
     )
     expect(parameterDescriptions('job_output')).toEqual({
-      job_id: 'The id returned when the job started.',
+      job_id: 'The background job id from a start result or job_list. A continuable subagent id is an agent id, not a job id.',
       wait: 'Wait until the job finishes or the timeout passes, for when you cannot continue without the result. '
         + 'A timed-out wait returns `[status: running]` and leaves the job running.',
       timeout_ms: 'Maximum wait in milliseconds when wait is true (default 5000, at most 60000).',
@@ -198,7 +198,7 @@ describe('tool-jobs setup', () => {
       + 'they finish. Returns immediately; the job\'s status becomes `killed` once its work has stopped.',
     )
     expect(parameterDescriptions('job_kill')).toEqual({
-      job_id: 'The id returned when the job started.',
+      job_id: 'The background job id from a start result or job_list. A continuable subagent id is an agent id, not a job id.',
       reason: 'Optional short reason for stopping the job.',
     })
   })
@@ -393,7 +393,9 @@ describe('job_output', () => {
     expect((await call(ctx, 'job_output', { job_id: '' })).isError).toBe(true)
     const unknown = await call(ctx, 'job_output', { job_id: 'bash-99' })
     expect(unknown.isError).toBe(true)
-    expect(text(unknown)).toContain('unknown job bash-99')
+    expect(text(unknown)).toContain('unknown job bash-99; use job_list to find a background job id. A continuable subagent id belongs to the subagent control tools.')
+    const waited = await call(ctx, 'job_output', { job_id: 'bash-99', wait: true })
+    expect(text(waited)).toContain('use job_list to find a background job id')
   })
 })
 
@@ -536,9 +538,12 @@ describe('job_kill', () => {
     expect(text(await call(ctx, 'job_output', { job_id: 'bash-1' }))).toBe('unread tail\n[status: completed, exit code: 0]')
   })
 
-  it('rejects an empty job id as an errored result', async () => {
+  it('rejects an empty job id and explains an unknown one', async () => {
     const { ctx } = await setup()
     expect((await call(ctx, 'job_kill', { job_id: '' })).isError).toBe(true)
+    const unknown = await call(ctx, 'job_kill', { job_id: 'bash-99' })
+    expect(unknown.isError).toBe(true)
+    expect(text(unknown)).toContain('use job_list to find a background job id')
   })
 })
 

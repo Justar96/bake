@@ -31,6 +31,8 @@ kind: "package-reference"
 
 ### preset 给会话带来什么
 
+内置的 `standard`、`ptc` 和 `cordis` 预设将每次 `read` 结果中选取的文本限制为 16 KiB（`readMaxBytes: 16384`）。行数上限仍为 2,000，调用方可以通过 `offset` 读取后续行。此设置限制新生成的结果，不改变工具 schema，也不改写已保存的历史。
+
 从 preset 组装的会话会运行该 preset `agent.cordis.yml` 所列插件：它的工具、提示词段落与 skill。加入同一 preset 的会话共享一份已安装的组装，且各会话的状态彼此隔离。subagent 会加入其父方的组装，因此它看到的工具与提示词段落和创建它的 agent 相同。
 
 agent 也能看到宿主组装全局注册的内容。宿主若挂载了 preset 同样挂载的行，就会为该 preset 的 agent 运行两次；preset 省略或禁用的宿主行仍会触及它的 agent。因此挂载本包的部署应把工具、指令和 skill 发现等 agent 行留给 preset；终端 profile 禁用了基础组合包中的这些副本，所以 `minimal` 只有它的 shell。

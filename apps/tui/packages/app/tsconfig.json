@@ -110,6 +110,12 @@
     },
     {
       "path": "../../../../packages/subagent/subagent"
+    },
+    {
+      "path": "../../../../packages/subagent/tool-subagent"
+    },
+    {
+      "path": "../../../../packages/workflow/tool-workflow"
     }
   ]
 }

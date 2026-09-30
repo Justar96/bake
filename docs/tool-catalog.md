@@ -1244,7 +1244,7 @@ Stop a running background job. Jobs otherwise keep running after your turn ends,
   "properties": {
     "job_id": {
       "type": "string",
-      "description": "The id returned when the job started."
+      "description": "The background job id from a start result or job_list. A continuable subagent id is an agent id, not a job id."
     },
     "reason": {
       "type": "string",
@@ -1282,7 +1282,7 @@ Read a background job's output. You receive a notice when a job finishes, so the
   "properties": {
     "job_id": {
       "type": "string",
-      "description": "The id returned when the job started."
+      "description": "The background job id from a start result or job_list. A continuable subagent id is an agent id, not a job id."
     },
     "wait": {
       "type": "boolean",

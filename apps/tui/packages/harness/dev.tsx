@@ -22,7 +22,7 @@ import { readFileSync } from 'node:fs'
 import React, { useEffect, useMemo, useState } from 'react'
 import { render } from 'ink'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
-import { App, appendTranscript, emptyTranscript, project, projector } from '@dsh-tui/ui'
+import { Actions, App, appendTranscript, emptyTranscript, foldEvent, project, projector } from '@dsh-tui/ui'
 import type { Row } from '@dsh-tui/ui'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'
 import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
@@ -53,10 +53,12 @@ const clock: Clock | undefined = process.stdout.isTTY === true && (process.env['
 export function rowsOf(path: string, copy: TuiCopy): readonly Row[] {
   const file = new URL(path, import.meta.url)
   const seam = projector(copy, () => undefined)
+  const actions = new Actions()
   const rows: Row[] = []
   for (const line of readFileSync(file, 'utf8').split('\n')) {
     if (line.trim() === '') continue
-    rows.push(...project(JSON.parse(line) as SessionEvent, seam))
+    const event = JSON.parse(line) as SessionEvent
+    rows.push(...foldEvent(event, project(event, seam), actions))
   }
   return rows
 }

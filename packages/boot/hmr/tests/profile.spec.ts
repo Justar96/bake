@@ -23,7 +23,7 @@ vi.mock('chokidar', async (original) => {
   } }
 })
 
-async function fixture(beforeWatch?: (profile: ProfileContext) => void) {
+async function fixture(beforeWatch?: (profile: ProfileContext) => void, moduleRoots: string[] = []) {
   const home = realpathSync(mkdtempSync(join(tmpdir(), 'hmr-profile-')))
   const dir = join(home, 'profiles', 'test')
   initProfile(dir, [])
@@ -34,7 +34,7 @@ async function fixture(beforeWatch?: (profile: ProfileContext) => void) {
   }
   const rows = [{ insert: [
     { id: 'timer', name: 'cordis:timer' },
-    { id: 'hmr', name: 'cordis:hmr', config: { root: [] } },
+    { id: 'hmr', name: 'cordis:hmr', config: { root: moduleRoots } },
     { id: 'probe', name: 'cordis:probe', config: { value: 'initial' } },
   ] }]
   writeFileSync(profile.patchPath, JSON.stringify(rows))
@@ -164,7 +164,7 @@ it('rejects a profile launcher that omits application readiness', async () => {
 })
 
 it('cancels a queued module notification when startup is interrupted', async () => {
-  const f = await fixture()
+  const f = await fixture(undefined, ['.'])
   const queued = Promise.withResolvers<undefined>()
   const hmr = f.ctx.hmr
   const run = hmr.runExclusive.bind(hmr)

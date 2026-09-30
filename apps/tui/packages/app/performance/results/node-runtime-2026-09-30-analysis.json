@@ -1,0 +1,1333 @@
+{
+  "cpuProfiles": {
+    "tail-0.cpuprofile": {
+      "sampledMs": 5423.967,
+      "topGroups": [
+        {
+          "group": "(idle)",
+          "ms": 1185.356
+        },
+        {
+          "group": "apps/tui/packages/app/lib/perf-r0nInx/index.js",
+          "ms": 1164.36
+        },
+        {
+          "group": "ink",
+          "ms": 404.953
+        },
+        {
+          "group": "wasm://wasm/000460e2",
+          "ms": 351.772
+        },
+        {
+          "group": "(garbage collector)",
+          "ms": 322.421
+        },
+        {
+          "group": "yoga-layout",
+          "ms": 220.992
+        },
+        {
+          "group": "string-width",
+          "ms": 186.722
+        },
+        {
+          "group": "vendor/cordis/lib/index.js",
+          "ms": 161.76
+        },
+        {
+          "group": "react-reconciler",
+          "ms": 148.411
+        },
+        {
+          "group": "(program)",
+          "ms": 87.914
+        },
+        {
+          "group": "packages/llm/token-meter/lib/index.js",
+          "ms": 75.879
+        },
+        {
+          "group": "RegExp: https?:\\/\\/[^\\s<>\"']+|(?:\\b(?:[A-Za-z]:)?[\\w.@~-]+|\\.{1,2}|~)?[\\\\/][\\w.@~+\\-/\\\\]+(?::\\d+(?::\\d+)?)?|\\b[\\w@-]+\\.(?:tsx?|jsx?|mjs|cjs|jsonc?|py|rs|go|ya?ml|toml|md|sh|css|html|txt|log)(?::\\d+(?::\\d+)?)?|\\b(?:ERROR|Error|error|FATAL|Fatal|fatal|FAIL(?:ED)?|WARN(?:ING)?|Warning|warning|PASS(?:ED)?|SUCCESS|INFO|DEBUG)\\b",
+          "ms": 67.8
+        },
+        {
+          "group": "@alcalzone",
+          "ms": 54.075
+        },
+        {
+          "group": "node:internal/modules/esm/utils",
+          "ms": 33.807
+        },
+        {
+          "group": "packages/util/values/lib/index.js",
+          "ms": 32.162
+        },
+        {
+          "group": "zod",
+          "ms": 30.841
+        },
+        {
+          "group": "packages/session/session-persistence-jsonl/lib/index.js",
+          "ms": 29.601
+        },
+        {
+          "group": "node:internal/bootstrap/realm",
+          "ms": 28.138
+        },
+        {
+          "group": "writeUtf8String",
+          "ms": 26.908
+        },
+        {
+          "group": "RegExp: ^(?:\\p{Default_Ignorable_Code_Point}|\\p{Control}|\\p{Format}|\\p{Nonspacing_Mark}|\\p{Enclosing_Mark}|\\p{Surrogate})+$",
+          "ms": 26.082
+        }
+      ],
+      "topFunctions": [
+        {
+          "function": "(idle)",
+          "url": "",
+          "line": 0,
+          "selfMs": 1185.356
+        },
+        {
+          "function": "(garbage collector)",
+          "url": "",
+          "line": 0,
+          "selfMs": 322.421
+        },
+        {
+          "function": "stringWidth",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/node_modules/string-width/index.js",
+          "line": 150,
+          "selfMs": 135.077
+        },
+        {
+          "function": "K",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/apps/tui/packages/app/lib/perf-r0nInx/index.js",
+          "line": 1,
+          "selfMs": 113.96
+        },
+        {
+          "function": "(program)",
+          "url": "",
+          "line": 0,
+          "selfMs": 87.914
+        },
+        {
+          "function": "",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/node_modules/yoga-layout/dist/binaries/yoga-wasm-base64-esm.js",
+          "line": 32,
+          "selfMs": 76.451
+        },
+        {
+          "function": "wasm-function[61]",
+          "url": "wasm://wasm/000460e2",
+          "line": 1,
+          "selfMs": 73.428
+        },
+        {
+          "function": "RegExp: https?:\\/\\/[^\\s<>\"']+|(?:\\b(?:[A-Za-z]:)?[\\w.@~-]+|\\.{1,2}|~)?[\\\\/][\\w.@~+\\-/\\\\]+(?::\\d+(?::\\d+)?)?|\\b[\\w@-]+\\.(?:tsx?|jsx?|mjs|cjs|jsonc?|py|rs|go|ya?ml|toml|md|sh|css|html|txt|log)(?::\\d+(?::\\d+)?)?|\\b(?:ERROR|Error|error|FATAL|Fatal|fatal|FAIL(?:ED)?|WARN(?:ING)?|Warning|warning|PASS(?:ED)?|SUCCESS|INFO|DEBUG)\\b",
+          "url": "",
+          "line": 0,
+          "selfMs": 67.8
+        },
+        {
+          "function": "ge",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/apps/tui/packages/app/lib/perf-r0nInx/index.js",
+          "line": 24,
+          "selfMs": 62.181
+        },
+        {
+          "function": "Wp",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/apps/tui/packages/app/lib/perf-r0nInx/index.js",
+          "line": 24,
+          "selfMs": 59.676
+        },
+        {
+          "function": "Ua",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/node_modules/yoga-layout/dist/binaries/yoga-wasm-base64-esm.js",
+          "line": 19,
+          "selfMs": 59.489
+        },
+        {
+          "function": "v",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/apps/tui/packages/app/lib/perf-r0nInx/index.js",
+          "line": 24,
+          "selfMs": 58.263
+        },
+        {
+          "function": "x",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/apps/tui/packages/app/lib/perf-r0nInx/index.js",
+          "line": 24,
+          "selfMs": 55.858
+        },
+        {
+          "function": "apply",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/packages/llm/token-meter/lib/index.js",
+          "line": 235,
+          "selfMs": 45.206
+        },
+        {
+          "function": "nd",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/apps/tui/packages/app/lib/perf-r0nInx/index.js",
+          "line": 34,
+          "selfMs": 44.452
+        },
+        {
+          "function": "t",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/apps/tui/packages/app/lib/perf-r0nInx/index.js",
+          "line": 24,
+          "selfMs": 44.158
+        },
+        {
+          "function": "get",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/node_modules/ink/build/output.js",
+          "line": 72,
+          "selfMs": 38.949
+        },
+        {
+          "function": "get",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/vendor/cordis/lib/index.js",
+          "line": 687,
+          "selfMs": 36.229
+        },
+        {
+          "function": "",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/node_modules/ink/build/components/Box.js",
+          "line": 7,
+          "selfMs": 34.761
+        },
+        {
+          "function": "wasm-function[31]",
+          "url": "wasm://wasm/000460e2",
+          "line": 1,
+          "selfMs": 34.076
+        },
+        {
+          "function": "Bt",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/apps/tui/packages/app/lib/perf-r0nInx/index.js",
+          "line": 24,
+          "selfMs": 34.032
+        },
+        {
+          "function": "compileSourceTextModule",
+          "url": "node:internal/modules/esm/utils",
+          "line": 338,
+          "selfMs": 33.807
+        },
+        {
+          "function": "",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/apps/tui/packages/app/lib/perf-r0nInx/index.js",
+          "line": 19,
+          "selfMs": 32.127
+        },
+        {
+          "function": "b",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/apps/tui/packages/app/lib/perf-r0nInx/index.js",
+          "line": 24,
+          "selfMs": 31.65
+        },
+        {
+          "function": "renderNodeToOutput",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/node_modules/ink/build/render-node-to-output.js",
+          "line": 71,
+          "selfMs": 31.605
+        },
+        {
+          "function": "",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/node_modules/ink/build/output.js",
+          "line": 187,
+          "selfMs": 28.366
+        },
+        {
+          "function": "writeUtf8String",
+          "url": "",
+          "line": 0,
+          "selfMs": 26.908
+        },
+        {
+          "function": "",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/packages/llm/token-meter/lib/index.js",
+          "line": 257,
+          "selfMs": 26.164
+        },
+        {
+          "function": "Kr",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/apps/tui/packages/app/lib/perf-r0nInx/index.js",
+          "line": 24,
+          "selfMs": 26.157
+        },
+        {
+          "function": "RegExp: ^(?:\\p{Default_Ignorable_Code_Point}|\\p{Control}|\\p{Format}|\\p{Nonspacing_Mark}|\\p{Enclosing_Mark}|\\p{Surrogate})+$",
+          "url": "",
+          "line": 0,
+          "selfMs": 26.082
+        }
+      ]
+    },
+    "typical-0.cpuprofile": {
+      "sampledMs": 3284.098,
+      "topGroups": [
+        {
+          "group": "(idle)",
+          "ms": 1183.857
+        },
+        {
+          "group": "apps/tui/packages/app/lib/perf-r0nInx/index.js",
+          "ms": 432.231
+        },
+        {
+          "group": "ink",
+          "ms": 174.264
+        },
+        {
+          "group": "vendor/cordis/lib/index.js",
+          "ms": 157.293
+        },
+        {
+          "group": "(garbage collector)",
+          "ms": 153.721
+        },
+        {
+          "group": "wasm://wasm/000460e2",
+          "ms": 103.617
+        },
+        {
+          "group": "react-reconciler",
+          "ms": 82.621
+        },
+        {
+          "group": "yoga-layout",
+          "ms": 74.191
+        },
+        {
+          "group": "string-width",
+          "ms": 69.556
+        },
+        {
+          "group": "node:internal/bootstrap/realm",
+          "ms": 41.226
+        },
+        {
+          "group": "(program)",
+          "ms": 40.3
+        },
+        {
+          "group": "node:internal/modules/esm/utils",
+          "ms": 31.589
+        },
+        {
+          "group": "node:internal/modules/cjs/loader",
+          "ms": 31.312
+        },
+        {
+          "group": "zod",
+          "ms": 26.635
+        },
+        {
+          "group": "node:internal/modules/package_json_reader",
+          "ms": 26.096
+        },
+        {
+          "group": "@shikijs",
+          "ms": 24.238
+        },
+        {
+          "group": "packages/boot/app-boot/lib/index.js",
+          "ms": 20.399
+        },
+        {
+          "group": "@alcalzone",
+          "ms": 18.457
+        },
+        {
+          "group": "internalModuleStat",
+          "ms": 18.206
+        },
+        {
+          "group": "packages/session/session-projection/lib/index.js",
+          "ms": 17.428
+        }
+      ],
+      "topFunctions": [
+        {
+          "function": "(idle)",
+          "url": "",
+          "line": 0,
+          "selfMs": 1183.857
+        },
+        {
+          "function": "(garbage collector)",
+          "url": "",
+          "line": 0,
+          "selfMs": 153.721
+        },
+        {
+          "function": "stringWidth",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/node_modules/string-width/index.js",
+          "line": 150,
+          "selfMs": 41.836
+        },
+        {
+          "function": "(program)",
+          "url": "",
+          "line": 0,
+          "selfMs": 40.3
+        },
+        {
+          "function": "compileForInternalLoader",
+          "url": "node:internal/bootstrap/realm",
+          "line": 392,
+          "selfMs": 39.895
+        },
+        {
+          "function": "K",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/apps/tui/packages/app/lib/perf-r0nInx/index.js",
+          "line": 1,
+          "selfMs": 37.642
+        },
+        {
+          "function": "get",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/node_modules/ink/build/output.js",
+          "line": 72,
+          "selfMs": 37.477
+        },
+        {
+          "function": "compileSourceTextModule",
+          "url": "node:internal/modules/esm/utils",
+          "line": 338,
+          "selfMs": 31.589
+        },
+        {
+          "function": "get",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/vendor/cordis/lib/index.js",
+          "line": 687,
+          "selfMs": 26.952
+        },
+        {
+          "function": "",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/node_modules/yoga-layout/dist/binaries/yoga-wasm-base64-esm.js",
+          "line": 32,
+          "selfMs": 23.867
+        },
+        {
+          "function": "wasm-function[61]",
+          "url": "wasm://wasm/000460e2",
+          "line": 1,
+          "selfMs": 23.193
+        },
+        {
+          "function": "x",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/apps/tui/packages/app/lib/perf-r0nInx/index.js",
+          "line": 24,
+          "selfMs": 23.181
+        },
+        {
+          "function": "nd",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/apps/tui/packages/app/lib/perf-r0nInx/index.js",
+          "line": 34,
+          "selfMs": 20.073
+        },
+        {
+          "function": "internalModuleStat",
+          "url": "",
+          "line": 0,
+          "selfMs": 18.206
+        },
+        {
+          "function": "ge",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/apps/tui/packages/app/lib/perf-r0nInx/index.js",
+          "line": 24,
+          "selfMs": 17.852
+        },
+        {
+          "function": "v",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/apps/tui/packages/app/lib/perf-r0nInx/index.js",
+          "line": 24,
+          "selfMs": 16.977
+        },
+        {
+          "function": "renderNodeToOutput",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/node_modules/ink/build/render-node-to-output.js",
+          "line": 71,
+          "selfMs": 16.257
+        },
+        {
+          "function": "wrapSafe",
+          "url": "node:internal/modules/cjs/loader",
+          "line": 1824,
+          "selfMs": 15.75
+        },
+        {
+          "function": "get",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/vendor/cordis/lib/index.js",
+          "line": 136,
+          "selfMs": 15.523
+        },
+        {
+          "function": "RegExp: ^(?:\\p{Default_Ignorable_Code_Point}|\\p{Control}|\\p{Format}|\\p{Nonspacing_Mark}|\\p{Enclosing_Mark}|\\p{Surrogate})+$",
+          "url": "",
+          "line": 0,
+          "selfMs": 14.781
+        },
+        {
+          "function": "Wp",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/apps/tui/packages/app/lib/perf-r0nInx/index.js",
+          "line": 24,
+          "selfMs": 14.747
+        },
+        {
+          "function": "parse",
+          "url": "",
+          "line": 0,
+          "selfMs": 13.676
+        },
+        {
+          "function": "ModuleWrap",
+          "url": "",
+          "line": 0,
+          "selfMs": 13.634
+        },
+        {
+          "function": "collectExternalReferencesInRules",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/node_modules/@shikijs/vscode-textmate/dist/index.js",
+          "line": 897,
+          "selfMs": 13.621
+        },
+        {
+          "function": "",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/node_modules/string-width/index.js",
+          "line": 1,
+          "selfMs": 12.671
+        },
+        {
+          "function": "Bt",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/apps/tui/packages/app/lib/perf-r0nInx/index.js",
+          "line": 24,
+          "selfMs": 12.661
+        },
+        {
+          "function": "",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/apps/tui/packages/app/lib/perf-r0nInx/index.js",
+          "line": 15,
+          "selfMs": 11.618
+        },
+        {
+          "function": "get",
+          "url": "node:internal/modules/package_json_reader",
+          "line": 79,
+          "selfMs": 11.607
+        },
+        {
+          "function": "a",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/apps/tui/packages/app/lib/perf-r0nInx/index.js",
+          "line": 26,
+          "selfMs": 11.536
+        },
+        {
+          "function": "RegExp: https?:\\/\\/[^\\s<>\"']+|(?:\\b(?:[A-Za-z]:)?[\\w.@~-]+|\\.{1,2}|~)?[\\\\/][\\w.@~+\\-/\\\\]+(?::\\d+(?::\\d+)?)?|\\b[\\w@-]+\\.(?:tsx?|jsx?|mjs|cjs|jsonc?|py|rs|go|ya?ml|toml|md|sh|css|html|txt|log)(?::\\d+(?::\\d+)?)?|\\b(?:ERROR|Error|error|FATAL|Fatal|fatal|FAIL(?:ED)?|WARN(?:ING)?|Warning|warning|PASS(?:ED)?|SUCCESS|INFO|DEBUG)\\b",
+          "url": "",
+          "line": 0,
+          "selfMs": 11.516
+        }
+      ]
+    },
+    "fresh-0.cpuprofile": {
+      "sampledMs": 2390.259,
+      "topGroups": [
+        {
+          "group": "(idle)",
+          "ms": 1255.514
+        },
+        {
+          "group": "vendor/cordis/lib/index.js",
+          "ms": 162.909
+        },
+        {
+          "group": "apps/tui/packages/app/lib/perf-r0nInx/index.js",
+          "ms": 95.518
+        },
+        {
+          "group": "(garbage collector)",
+          "ms": 65.229
+        },
+        {
+          "group": "node:internal/modules/esm/utils",
+          "ms": 54.999
+        },
+        {
+          "group": "react-reconciler",
+          "ms": 53.737
+        },
+        {
+          "group": "(program)",
+          "ms": 40.352
+        },
+        {
+          "group": "ink",
+          "ms": 34.247
+        },
+        {
+          "group": "node:internal/bootstrap/realm",
+          "ms": 28.967
+        },
+        {
+          "group": "node:internal/modules/package_json_reader",
+          "ms": 22.448
+        },
+        {
+          "group": "@shikijs",
+          "ms": 22.166
+        },
+        {
+          "group": "packages/boot/app-boot/lib/index.js",
+          "ms": 22.036
+        },
+        {
+          "group": "node:internal/modules/cjs/loader",
+          "ms": 21.143
+        },
+        {
+          "group": "zod",
+          "ms": 19.103
+        },
+        {
+          "group": "string-width",
+          "ms": 19.048
+        },
+        {
+          "group": "node:internal/modules/esm/loader",
+          "ms": 14.877
+        },
+        {
+          "group": "@alcalzone",
+          "ms": 13.739
+        },
+        {
+          "group": "packages/session/session-projection/lib/index.js",
+          "ms": 13.61
+        },
+        {
+          "group": "js-yaml",
+          "ms": 13.516
+        },
+        {
+          "group": "node:fs",
+          "ms": 12.929
+        }
+      ],
+      "topFunctions": [
+        {
+          "function": "(idle)",
+          "url": "",
+          "line": 0,
+          "selfMs": 1255.514
+        },
+        {
+          "function": "(garbage collector)",
+          "url": "",
+          "line": 0,
+          "selfMs": 65.229
+        },
+        {
+          "function": "compileSourceTextModule",
+          "url": "node:internal/modules/esm/utils",
+          "line": 338,
+          "selfMs": 54.999
+        },
+        {
+          "function": "(program)",
+          "url": "",
+          "line": 0,
+          "selfMs": 40.352
+        },
+        {
+          "function": "get",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/vendor/cordis/lib/index.js",
+          "line": 687,
+          "selfMs": 34.472
+        },
+        {
+          "function": "compileForInternalLoader",
+          "url": "node:internal/bootstrap/realm",
+          "line": 392,
+          "selfMs": 26.317
+        },
+        {
+          "function": "get",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/vendor/cordis/lib/index.js",
+          "line": 136,
+          "selfMs": 15.109
+        },
+        {
+          "function": "stringWidth",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/node_modules/string-width/index.js",
+          "line": 150,
+          "selfMs": 13.777
+        },
+        {
+          "function": "extend",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/vendor/cordis/lib/index.js",
+          "line": 1718,
+          "selfMs": 12.82
+        },
+        {
+          "function": "internalModuleStat",
+          "url": "",
+          "line": 0,
+          "selfMs": 11.866
+        },
+        {
+          "function": "collectExternalReferencesInRules",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/node_modules/@shikijs/vscode-textmate/dist/index.js",
+          "line": 897,
+          "selfMs": 11.803
+        },
+        {
+          "function": "parse",
+          "url": "",
+          "line": 0,
+          "selfMs": 11.696
+        },
+        {
+          "function": "renderWithHooks",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/node_modules/react-reconciler/cjs/react-reconciler.production.js",
+          "line": 2637,
+          "selfMs": 11.693
+        },
+        {
+          "function": "tokenize",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/node_modules/@alcalzone/ansi-tokenize/build/tokenize.js",
+          "line": 125,
+          "selfMs": 9.898
+        },
+        {
+          "function": "realpathSync",
+          "url": "node:fs",
+          "line": 3234,
+          "selfMs": 9.558
+        },
+        {
+          "function": "get",
+          "url": "node:internal/modules/package_json_reader",
+          "line": 79,
+          "selfMs": 9.42
+        },
+        {
+          "function": "isSpecialProperty",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/vendor/cordis/lib/index.js",
+          "line": 674,
+          "selfMs": 8.503
+        },
+        {
+          "function": "get",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/vendor/cordis/lib/index.js",
+          "line": 105,
+          "selfMs": 8.485
+        },
+        {
+          "function": "readModuleFallbackManifest",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/packages/boot/app-boot/lib/index.js",
+          "line": 586,
+          "selfMs": 8.467
+        },
+        {
+          "function": "ModuleWrap",
+          "url": "",
+          "line": 0,
+          "selfMs": 8.3
+        },
+        {
+          "function": "getTraceable",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/vendor/cordis/lib/index.js",
+          "line": 94,
+          "selfMs": 7.34
+        },
+        {
+          "function": "processTimers",
+          "url": "node:internal/timers",
+          "line": 603,
+          "selfMs": 6.432
+        },
+        {
+          "function": "t",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/apps/tui/packages/app/lib/perf-r0nInx/index.js",
+          "line": 24,
+          "selfMs": 6.314
+        },
+        {
+          "function": "wrapSafe",
+          "url": "node:internal/modules/cjs/loader",
+          "line": 1824,
+          "selfMs": 6.284
+        },
+        {
+          "function": "exports.createElement",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/node_modules/react/cjs/react.production.js",
+          "line": 453,
+          "selfMs": 6.282
+        },
+        {
+          "function": "apply",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/vendor/cordis/lib/index.js",
+          "line": 128,
+          "selfMs": 6.26
+        },
+        {
+          "function": "compileFunctionForCJSLoader",
+          "url": "",
+          "line": 0,
+          "selfMs": 5.301
+        },
+        {
+          "function": "Bt",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/apps/tui/packages/app/lib/perf-r0nInx/index.js",
+          "line": 24,
+          "selfMs": 5.273
+        },
+        {
+          "function": "composeError",
+          "url": "file:///tmp/bake-node-perf-hz7c3a74/worktree/vendor/cordis/lib/index.js",
+          "line": 203,
+          "selfMs": 5.268
+        },
+        {
+          "function": "read",
+          "url": "",
+          "line": 0,
+          "selfMs": 5.266
+        }
+      ]
+    }
+  },
+  "profiledSamples": {
+    "metadata": {
+      "revision": "b2003878364cfca97d73d7653bd24fd9dec1f329",
+      "dirty": true,
+      "bundleSha256": "62f204b5a5f79195fd98212dd3d27ef8ddef9944ee8f8e917d2ff727984818c5",
+      "bundleBytes": 394716,
+      "mode": "production",
+      "node": "v26.7.0",
+      "artifacts": {
+        "index.js": "62f204b5a5f79195fd98212dd3d27ef8ddef9944ee8f8e917d2ff727984818c5",
+        "startup.js": "a4b9c6f0b9c55a2057ad16021609d343a1041a3ee13b67415d9338752482357d",
+        "seed.js": "dd9b9ccbeb5cc27874ecce7ed90658bd1695e230153cb1b6d8622294ce1e1a95",
+        "metrics.mjs": "04dbc557eb5253e3d8b86f97b908bbfa89a0b14cfc74f48dcbb681d74033c35e"
+      },
+      "compositionSha256": "bc917d9e6d2a14df205e9bff67fb1e74788f0e898130c12f4aab8771ebfc0c89",
+      "applicationSource": {
+        "kind": "checkout"
+      },
+      "sourceSha256": "7b5f2f1a8d69295660552a050c970bd0934b4b90659b0ce32637b3a9e41319ef",
+      "lockSha256": "a4a08da6d90ea27c62a8da10b0f08fe4ff80a8c48677b99fb5d0c6963c87940c",
+      "platform": "linux",
+      "arch": "x64",
+      "viewport": {
+        "columns": 120,
+        "rows": 40
+      },
+      "terminalDriver": "Bun.Terminal",
+      "bun": "1.4.3",
+      "samples": 1,
+      "workloads": [
+        "fresh",
+        "typical",
+        "tail"
+      ],
+      "workloadSpecifications": {
+        "fresh": {
+          "turns": 0
+        },
+        "typical": {
+          "turns": 500
+        },
+        "tail": {
+          "turns": 2000
+        }
+      },
+      "heapLimitMiB": 1024,
+      "cpuProfile": true,
+      "clock": "fresh process; warm filesystem cache; no model/network latency",
+      "memory": "main Node process; forced GC at ready and after streaming; RSS includes worker threads"
+    },
+    "interrupted": false,
+    "summary": [
+      {
+        "workload": "fresh",
+        "completed": 1,
+        "failed": 0,
+        "initialInputMs": 61.487949999999955,
+        "firstInputMs": 767.834192,
+        "readyMs": 767.922515,
+        "maxIdleInputMs": 37.33051899999998,
+        "liveInputMs": 41.341210000000046,
+        "firstDeltaMs": 113.74294299999997,
+        "streamMs": 1428.6207479999998,
+        "retainedHeapMiB": 58.32664489746094,
+        "settledRetainedHeapMiB": 61.55720520019531,
+        "peakRssMiB": 246.328125,
+        "initialBytes": 1901,
+        "idleBytes": 830,
+        "streamBytes": 33355
+      },
+      {
+        "workload": "typical",
+        "completed": 1,
+        "failed": 0,
+        "initialInputMs": 97.46134600000005,
+        "firstInputMs": 978.0530210000002,
+        "readyMs": 1645.4971200000005,
+        "maxIdleInputMs": 39.493553999999676,
+        "liveInputMs": 37.042670999999245,
+        "firstDeltaMs": 128.9906490000003,
+        "streamMs": 1440.570675,
+        "retainedHeapMiB": 68.66179656982422,
+        "settledRetainedHeapMiB": 70.10208129882812,
+        "peakRssMiB": 319.55078125,
+        "initialBytes": 764948,
+        "idleBytes": 830,
+        "streamBytes": 33306
+      },
+      {
+        "workload": "tail",
+        "completed": 1,
+        "failed": 0,
+        "initialInputMs": 103.43516799999998,
+        "firstInputMs": 1130.0967659999997,
+        "readyMs": 3820.4305809999987,
+        "maxIdleInputMs": 37.24978100000044,
+        "liveInputMs": 39.18761299999824,
+        "firstDeltaMs": 119.83518600000025,
+        "streamMs": 1424.6374899999992,
+        "retainedHeapMiB": 87.22039794921875,
+        "settledRetainedHeapMiB": 88.61762237548828,
+        "peakRssMiB": 390.2734375,
+        "initialBytes": 3068771,
+        "idleBytes": 830,
+        "streamBytes": 33359
+      }
+    ],
+    "results": [
+      {
+        "workload": "fresh",
+        "iteration": 0,
+        "dimensions": {
+          "turns": 0,
+          "events": 0,
+          "deltaCount": 0,
+          "compactRecordCount": 0,
+          "toolCount": 0,
+          "assistantMarkerCount": 0,
+          "historyMarkerCount": 0,
+          "userTextBytes": 0,
+          "assistantTextBytes": 0,
+          "reasoningBytes": 0,
+          "toolOutputBytes": 0,
+          "maxAssistantTextBytes": 0,
+          "fileBytes": 0,
+          "sessionId": "tui-perf-session"
+        },
+        "initialInputMs": 61.487949999999955,
+        "firstInputMs": 767.834192,
+        "historyMarkersAtFirstInput": 0,
+        "readyMs": 767.922515,
+        "idleInputMs": [
+          4.168373000000088,
+          37.33051899999998,
+          2.0865420000000086,
+          36.903867000000105,
+          4.095568000000071
+        ],
+        "idleBytes": 830,
+        "initialBytes": 1901,
+        "firstDeltaMs": 113.74294299999997,
+        "liveInputMs": 41.341210000000046,
+        "streamMs": 1428.6207479999998,
+        "streamBytes": 33355,
+        "historyMarkerOccurrences": 0,
+        "readyMemory": {
+          "sequence": 1,
+          "beforeGc": {
+            "rss": 231075840,
+            "heapTotal": 123330560,
+            "heapUsed": 69007520,
+            "external": 4429392,
+            "arrayBuffers": 233775
+          },
+          "afterGc": {
+            "rss": 231030784,
+            "heapTotal": 123179008,
+            "heapUsed": 61159920,
+            "external": 4429432,
+            "arrayBuffers": 212397
+          },
+          "resources": {
+            "userCPUTime": 899071,
+            "systemCPUTime": 155608,
+            "maxRSS": 226172,
+            "sharedMemorySize": 0,
+            "unsharedDataSize": 0,
+            "unsharedStackSize": 0,
+            "minorPageFault": 52986,
+            "majorPageFault": 3,
+            "swappedOut": 0,
+            "fsRead": 1280,
+            "fsWrite": 0,
+            "ipcSent": 0,
+            "ipcReceived": 0,
+            "signalsCount": 0,
+            "voluntaryContextSwitches": 2870,
+            "involuntaryContextSwitches": 18
+          },
+          "cpu": {
+            "user": 899105,
+            "system": 155614
+          }
+        },
+        "settledMemory": {
+          "sequence": 2,
+          "beforeGc": {
+            "rss": 258293760,
+            "heapTotal": 141004800,
+            "heapUsed": 82643592,
+            "external": 4475894,
+            "arrayBuffers": 280237
+          },
+          "afterGc": {
+            "rss": 254631936,
+            "heapTotal": 137596928,
+            "heapUsed": 64547408,
+            "external": 4475894,
+            "arrayBuffers": 277949
+          },
+          "resources": {
+            "userCPUTime": 1644473,
+            "systemCPUTime": 213915,
+            "maxRSS": 252240,
+            "sharedMemorySize": 0,
+            "unsharedDataSize": 0,
+            "unsharedStackSize": 0,
+            "minorPageFault": 62305,
+            "majorPageFault": 3,
+            "swappedOut": 0,
+            "fsRead": 1280,
+            "fsWrite": 0,
+            "ipcSent": 0,
+            "ipcReceived": 0,
+            "signalsCount": 0,
+            "voluntaryContextSwitches": 7029,
+            "involuntaryContextSwitches": 21
+          },
+          "cpu": {
+            "user": 1644504,
+            "system": 213919
+          }
+        }
+      },
+      {
+        "workload": "typical",
+        "iteration": 0,
+        "dimensions": {
+          "turns": 500,
+          "events": 3251,
+          "deltaCount": 20500,
+          "compactRecordCount": 3750,
+          "toolCount": 125,
+          "assistantMarkerCount": 500,
+          "historyMarkerCount": 501,
+          "userTextBytes": 110892,
+          "assistantTextBytes": 335500,
+          "reasoningBytes": 156000,
+          "toolOutputBytes": 992011,
+          "maxAssistantTextBytes": 671,
+          "fileBytes": 3561460,
+          "sessionId": "tui-perf-session"
+        },
+        "initialInputMs": 97.46134600000005,
+        "firstInputMs": 978.0530210000002,
+        "historyMarkersAtFirstInput": 105,
+        "readyMs": 1645.4971200000005,
+        "idleInputMs": [
+          39.493553999999676,
+          4.186123000000407,
+          37.40006699999958,
+          4.174187999999958,
+          37.537325999999666
+        ],
+        "idleBytes": 830,
+        "initialBytes": 764948,
+        "firstDeltaMs": 128.9906490000003,
+        "liveInputMs": 37.042670999999245,
+        "streamMs": 1440.570675,
+        "streamBytes": 33306,
+        "historyMarkerOccurrences": 501,
+        "readyMemory": {
+          "sequence": 1,
+          "beforeGc": {
+            "rss": 333619200,
+            "heapTotal": 183160832,
+            "heapUsed": 73193296,
+            "external": 4565205,
+            "arrayBuffers": 219261
+          },
+          "afterGc": {
+            "rss": 333238272,
+            "heapTotal": 144338944,
+            "heapUsed": 71997112,
+            "external": 4410842,
+            "arrayBuffers": 212397
+          },
+          "resources": {
+            "userCPUTime": 2568427,
+            "systemCPUTime": 193286,
+            "maxRSS": 326068,
+            "sharedMemorySize": 0,
+            "unsharedDataSize": 0,
+            "unsharedStackSize": 0,
+            "minorPageFault": 83870,
+            "majorPageFault": 0,
+            "swappedOut": 0,
+            "fsRead": 0,
+            "fsWrite": 0,
+            "ipcSent": 0,
+            "ipcReceived": 0,
+            "signalsCount": 0,
+            "voluntaryContextSwitches": 5732,
+            "involuntaryContextSwitches": 18
+          },
+          "cpu": {
+            "user": 2568485,
+            "system": 193286
+          }
+        },
+        "settledMemory": {
+          "sequence": 2,
+          "beforeGc": {
+            "rss": 335073280,
+            "heapTotal": 159068160,
+            "heapUsed": 89663632,
+            "external": 4613807,
+            "arrayBuffers": 422226
+          },
+          "afterGc": {
+            "rss": 335073280,
+            "heapTotal": 155086848,
+            "heapUsed": 73507360,
+            "external": 4613807,
+            "arrayBuffers": 212413
+          },
+          "resources": {
+            "userCPUTime": 3268858,
+            "systemCPUTime": 240546,
+            "maxRSS": 327220,
+            "sharedMemorySize": 0,
+            "unsharedDataSize": 0,
+            "unsharedStackSize": 0,
+            "minorPageFault": 89866,
+            "majorPageFault": 0,
+            "swappedOut": 0,
+            "fsRead": 0,
+            "fsWrite": 0,
+            "ipcSent": 0,
+            "ipcReceived": 0,
+            "signalsCount": 0,
+            "voluntaryContextSwitches": 9445,
+            "involuntaryContextSwitches": 19
+          },
+          "cpu": {
+            "user": 3268890,
+            "system": 240549
+          }
+        }
+      },
+      {
+        "workload": "tail",
+        "iteration": 0,
+        "dimensions": {
+          "turns": 2000,
+          "events": 13001,
+          "deltaCount": 82000,
+          "compactRecordCount": 15000,
+          "toolCount": 500,
+          "assistantMarkerCount": 2000,
+          "historyMarkerCount": 2001,
+          "userTextBytes": 444893,
+          "assistantTextBytes": 1342000,
+          "reasoningBytes": 624000,
+          "toolOutputBytes": 3968011,
+          "maxAssistantTextBytes": 671,
+          "fileBytes": 14264343,
+          "sessionId": "tui-perf-session"
+        },
+        "initialInputMs": 103.43516799999998,
+        "firstInputMs": 1130.0967659999997,
+        "historyMarkersAtFirstInput": 105,
+        "readyMs": 3820.4305809999987,
+        "idleInputMs": [
+          4.157000999999582,
+          37.179863999999725,
+          2.0842160000011063,
+          37.24978100000044,
+          4.148905000000013
+        ],
+        "idleBytes": 830,
+        "initialBytes": 3068771,
+        "firstDeltaMs": 119.83518600000025,
+        "liveInputMs": 39.18761299999824,
+        "streamMs": 1424.6374899999992,
+        "streamBytes": 33359,
+        "historyMarkerOccurrences": 2001,
+        "readyMemory": {
+          "sequence": 1,
+          "beforeGc": {
+            "rss": 403468288,
+            "heapTotal": 232484864,
+            "heapUsed": 134032160,
+            "external": 4400369,
+            "arrayBuffers": 212397
+          },
+          "afterGc": {
+            "rss": 403202048,
+            "heapTotal": 185278464,
+            "heapUsed": 91457216,
+            "external": 4399108,
+            "arrayBuffers": 212397
+          },
+          "resources": {
+            "userCPUTime": 5191841,
+            "systemCPUTime": 350740,
+            "maxRSS": 394832,
+            "sharedMemorySize": 0,
+            "unsharedDataSize": 0,
+            "unsharedStackSize": 0,
+            "minorPageFault": 115352,
+            "majorPageFault": 0,
+            "swappedOut": 0,
+            "fsRead": 0,
+            "fsWrite": 0,
+            "ipcSent": 0,
+            "ipcReceived": 0,
+            "signalsCount": 0,
+            "voluntaryContextSwitches": 10180,
+            "involuntaryContextSwitches": 32
+          },
+          "cpu": {
+            "user": 5191937,
+            "system": 350740
+          }
+        },
+        "settledMemory": {
+          "sequence": 2,
+          "beforeGc": {
+            "rss": 409231360,
+            "heapTotal": 188887040,
+            "heapUsed": 136580488,
+            "external": 5028429,
+            "arrayBuffers": 841718
+          },
+          "afterGc": {
+            "rss": 409231360,
+            "heapTotal": 178335744,
+            "heapUsed": 92922312,
+            "external": 5028429,
+            "arrayBuffers": 212413
+          },
+          "resources": {
+            "userCPUTime": 5888040,
+            "systemCPUTime": 404203,
+            "maxRSS": 399640,
+            "sharedMemorySize": 0,
+            "unsharedDataSize": 0,
+            "unsharedStackSize": 0,
+            "minorPageFault": 118210,
+            "majorPageFault": 0,
+            "swappedOut": 0,
+            "fsRead": 0,
+            "fsWrite": 0,
+            "ipcSent": 0,
+            "ipcReceived": 0,
+            "signalsCount": 0,
+            "voluntaryContextSwitches": 13850,
+            "involuntaryContextSwitches": 34
+          },
+          "cpu": {
+            "user": 5888073,
+            "system": 404206
+          }
+        }
+      }
+    ]
+  },
+  "markdownProbe": {
+    "results": {
+      "workload": {
+        "documents": 2000,
+        "answerBytes": 671,
+        "operations": "markdownLines and finishedMarkdown"
+      },
+      "results": [
+        {
+          "round": 0,
+          "name": "original",
+          "ms": 1802.809297,
+          "chars": 1338000
+        },
+        {
+          "round": 0,
+          "name": "candidate",
+          "ms": 2410.6690419999995,
+          "chars": 1338000
+        },
+        {
+          "round": 1,
+          "name": "candidate",
+          "ms": 2749.1453850000007,
+          "chars": 1338000
+        },
+        {
+          "round": 1,
+          "name": "original",
+          "ms": 1803.869771999999,
+          "chars": 1338000
+        },
+        {
+          "round": 2,
+          "name": "original",
+          "ms": 1809.2495589999999,
+          "chars": 1338000
+        },
+        {
+          "round": 2,
+          "name": "candidate",
+          "ms": 2427.7628289999993,
+          "chars": 1338000
+        }
+      ]
+    },
+    "script": "import assert from 'node:assert/strict'\nimport * as original from './original.mjs'\nimport * as candidate from './candidate.mjs'\nconst documents = Array.from({length: 2000}, (_, i) => 'Validate ordering, cancellation, and resource cleanup. '.repeat(12) + `\\nH${String(i).padStart(5,'0')}_END`)\nconst results = []\nfor (let round=0;round<3;round++) for (const name of round%2===0 ? ['original','candidate'] : ['candidate','original']) {\n const parser = name==='original' ? original : candidate\n global.gc(); const start=performance.now();let chars=0\n for (const source of documents) {\n   chars += parser.markdownLines(source).reduce((sum,line)=>sum+line.text.length,0)\n   chars += parser.finishedMarkdown(source)\n }\n results.push({round,name,ms:performance.now()-start,chars})\n}\nassert(results.every(r=>r.chars===results[0].chars))\nconsole.log(JSON.stringify({workload:{documents:documents.length,answerBytes:documents[0].length,operations:'markdownLines and finishedMarkdown'},results},null,2))\n",
+    "build": "bun build apps/tui/packages/ui/src/markdown.ts --target=node --format=esm --outfile <variant>.mjs",
+    "run": "node --expose-gc probe.mjs",
+    "original": "per-call options and GFM descriptors at baseline",
+    "candidate": "same options/descriptors hoisted to a module constant; tested and reverted"
+  },
+  "controlScript": "import pathlib,subprocess,json\nroot=pathlib.Path.cwd(); paths=[root/'packages/boot/plugin-manager/lib/index.js',root/'packages/boot/plugin-manager/lib/types/operations.js'];saved={p:p.read_text() for p in paths}\ntry:\n for iteration in range(3):\n  for variant in (['original','candidate'] if iteration%2==0 else ['candidate','original']):\n   for p,s in saved.items():\n    if variant=='original':\n     s='import { execa } from \"execa\";\\n'+s\n     s=s.replace('const { execa } = await import(\"execa\");','')\n    p.write_text(s)\n   out=root.parent/'measurements'/f'execa-control-{iteration}-{variant}.json'\n   cmd=['bun','apps/tui/scripts/tui.ts','perf','--workload','fresh','--workload','tail','--samples','1','--output',str(out)]\n   with out.with_suffix('.log').open('w') as log:subprocess.run(cmd,stdout=log,stderr=subprocess.STDOUT,check=True)\n   print(iteration,variant,[(s['workload'],round(s['readyMs'],1)) for s in json.loads(out.read_text())['summary']],flush=True)\nfinally:\n for p,s in saved.items():p.write_text(s)\n",
+  "runtimeProbe": {
+    "script": "import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'\nimport { tmpdir } from 'node:os'\nimport { join } from 'node:path'\nimport assert from 'node:assert/strict'\nimport { pathToFileURL } from 'node:url'\nconst { runProfilePnpm, viewProfilePackage } = await import(pathToFileURL(join(process.cwd(), 'packages/boot/plugin-manager/lib/types/operations.js')))\nconst root = await mkdtemp(join(tmpdir(), 'bake-package-probe-'))\ntry {\n const dir = join(root, 'profile'); await mkdir(dir)\n await writeFile(join(dir, 'package.json'), '{\"name\":\"fixture\",\"dsh\":{\"profile\":{\"bundles\":[]}}}')\n const script = join(root, 'child.mjs'); await writeFile(script, 'process.stdout.write(JSON.stringify({name:\"fixture\",version:\"1.0.0\"}))')\n const context = { profile:'fixture', dir, installAnchor:join(dir,'package.json'), cwd:root }\n const out = await runProfilePnpm(context, [], { command:process.execPath,args:[script],execution:'service',outputBytes:1024,activateNewBundles:false })\n assert.equal(out.exitCode,0);assert.equal(await readFile(out.logPath,'utf8'),out.output)\n const view = await viewProfilePackage(dir,'fixture',{command:process.execPath,args:[script],timeoutMs:3000})\n assert.equal(view.exitCode,0);assert.equal(JSON.parse(view.stdout).name,'fixture')\n const canceled = await runProfilePnpm(context, [], {command:process.execPath,args:[script],execution:'service',outputBytes:1024,activateNewBundles:false,signal:AbortSignal.abort()})\n assert.notEqual(canceled.exitCode,0)\n const inspectCanceled = await viewProfilePackage(dir,'fixture',{command:process.execPath,args:[script],timeoutMs:3000,signal:AbortSignal.abort()})\n assert.equal(inspectCanceled.exitCode,null)\n console.log(JSON.stringify({run:'passed',view:'passed',abortedRun:'passed',abortedView:'passed'}))\n} finally {await rm(root,{recursive:true,force:true})}\n",
+    "result": {
+      "run": "passed",
+      "view": "passed",
+      "abortedRun": "passed",
+      "abortedView": "passed"
+    }
+  },
+  "limitations": [
+    "Node26.7.0 Linux x64 WSL2; Bun1.4.3-canary.1 (manifest pins1.4.2).",
+    "Initial checkout includes existing uncommitted changes copied into a private detached worktree.",
+    "Variable shared-host timing; compare all samples and avoid attributing full baseline/final timing differences to these changes.",
+    "Main-isolate retained memory after explicit GC; one streamed response, not prolonged repeated-turn memory.",
+    "No real provider latency. CPU profiling separate from ordinary timed samples.",
+    "Control preliminary run produced valid samples then coordinator print failed; retained separately, not included in three alternating rounds."
+  ]
+}

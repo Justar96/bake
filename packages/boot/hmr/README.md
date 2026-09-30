@@ -24,7 +24,7 @@ Reload plugin source and configuration while an application is running. Module r
 <a id="use-this-package"></a>
 ## Use this package
 
-The base bundle enables HMR with `root: []` when the launcher supplies `profileContext`; hosts without that profile context leave this entry disabled. Headless, SDK and ACP bundles disable that entry in YAML; a later profile patch can enable it. Disabling or omitting HMR applies changes on restart. To enable source-module watching, configure the `hmr` entry supplied by the base bundle in the profile patch before launching:
+The base bundle enables HMR with `root: []` when the launcher supplies `profileContext`; hosts without that profile context leave this entry disabled. The TUI keeps configuration reload enabled. Headless and Bake Desktop bundles disable that entry in YAML; a later profile patch can enable it. Disabling or omitting HMR applies changes on restart. To enable source-module watching, configure the `hmr` entry supplied by the base bundle in the profile patch before launching:
 
 ```yaml
 - id: hmr
@@ -58,6 +58,8 @@ Chokidar options, including polling, retain their existing meaning. Exact config
 
 App-boot owns profile parsing and patch precedence. HMR reads the launcher’s data-only `profileContext`, registers the profile manifest and both user patch watches during initialization, and waits for application readiness before processing changes. Its disposal closes the watchers and cancels reloads waiting for startup. HMR also owns module-cache replacement and reload scheduling. Configuration watchers start outside the active transaction context so later notifications can enter the queue. No invariant companion is published because the queue and watcher registrations have no independent persisted projection.
 
+`root: []` initializes configuration watches without reading the Node module graph or creating a module watcher. Explicit `getLinked()` calls still require Node loader internals.
+
 Watched module paths use Node ESM resolution's `realpathSync()` spelling, including Windows short directory names, so file events match the module cache.
 
 The module replacement implementation derives from `@cordisjs/plugin-hmr` 1.0.15, with Harness Node-loader and lazy-config changes. Its [MIT license](LICENSE) is retained.
@@ -86,7 +88,7 @@ Reloading a contributing plugin can change later request prefixes; HMR does not 
 <a id="known-limitations-and-deferred-work"></a>
 
 - Module replacement requires Node loader internals. Framework dependency changes call the host-provided `loader.exit()` hook; HMR itself does not restart the process.
-- Replacing installed package versions still requires a restart through Plugin Manager. The browser Client module graph retains its separate browser-side loading mechanism.
+- Replacing installed package versions still requires a restart through Plugin Manager.
 
 ### Dev Note
 

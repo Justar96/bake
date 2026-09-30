@@ -65,6 +65,8 @@
 # they need no realm. The `fs` service and its policy stay in the host.
 - id: tool-fs
   name: '@deepseek-ai/dsh-tool-fs'
+  config:
+    readMaxBytes: 16384
 
 - id: tool-fs-search
   name: '@deepseek-ai/dsh-tool-fs-search'

@@ -27,6 +27,8 @@
  * @module @dsh-tui/ui/actions
  */
 
+import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import { announcedCalls } from './project.ts'
 import type { Row, ToolCallRow } from './rows.ts'
 
 /**
@@ -102,6 +104,23 @@ export class Actions {
     }
     return out
   }
+}
+
+/**
+ * Fold projected rows and announce calls from a committed assistant message.
+ *
+ * This is the shared committed-event seam for the live root, child inspection,
+ * and component replay. Stream-prefix reconciliation remains application-owned.
+ *
+ * @param event - the committed event being folded.
+ * @param rows - rows already projected for the owning terminal view.
+ * @param actions - the fold state for one displayed transcript.
+ * @returns rows ready to append to the committed transcript.
+ */
+export function foldEvent(event: SessionEvent, rows: readonly Row[], actions: Actions): readonly Row[] {
+  const folded = actions.fold(rows, SETTLES.has(event.type))
+  if (event.type === 'assistant/message') actions.announce(announcedCalls(event))
+  return folded
 }
 
 /**

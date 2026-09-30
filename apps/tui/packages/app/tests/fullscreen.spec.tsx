@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events'
 import React from 'react'
 import { render } from 'ink'
 import xterm from '@xterm/headless'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { App, type AppProps } from '@dsh-tui/ui/app.tsx'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'
 import { appendTranscript, emptyTranscript } from '@dsh-tui/ui/transcript.ts'
@@ -33,7 +33,12 @@ class Output extends EventEmitter {
 }
 
 const disposers: (() => Promise<void>)[] = []
-afterEach(async () => { for (const dispose of disposers.splice(0).reverse()) await dispose() })
+let beforeExitListeners = 0
+beforeEach(() => { beforeExitListeners = process.listenerCount('beforeExit') })
+afterEach(async () => {
+  for (const dispose of disposers.splice(0).reverse()) await dispose()
+  expect(process.listenerCount('beforeExit')).toBe(beforeExitListeners)
+})
 
 async function mount(overrides: Partial<AppProps> = {}, columns = 60, rows = 18) {
   const input = new Input()
@@ -41,9 +46,10 @@ async function mount(overrides: Partial<AppProps> = {}, columns = 60, rows = 18)
   const output = frameOutput(stdout as unknown as NodeJS.WriteStream, stdout as unknown as NodeJS.WriteStream, false, 'fullscreen')
   const terminal = new xterm.Terminal({ cols: columns, rows, convertEol: true, allowProposedApi: true })
   let ui: ReturnType<typeof render> | undefined
+  let exited: ReturnType<ReturnType<typeof render>['waitUntilExit']> | undefined
   disposers.push(async () => {
     ui?.cleanup()
-    await ui?.waitUntilExit()
+    await exited
     output.flush()
     terminal.dispose()
   })
@@ -62,6 +68,7 @@ async function mount(overrides: Partial<AppProps> = {}, columns = 60, rows = 18)
     stdout: output.out, stderr: output.err, stdin: input as unknown as NodeJS.ReadStream,
     interactive: true, alternateScreen: true, incrementalRendering: true, patchConsole: false, exitOnCtrlC: false, isScreenReaderEnabled: false,
   })
+  exited = ui.waitUntilExit()
   let consumed = 0
   const capture = async (): Promise<string[]> => {
     await ui!.waitUntilRenderFlush()
@@ -85,7 +92,7 @@ async function mount(overrides: Partial<AppProps> = {}, columns = 60, rows = 18)
       terminal.resize(width, height)
       stdout.columns = width; stdout.rows = height; stdout.emit('resize')
     },
-    async close() { ui!.cleanup(); await ui!.waitUntilExit(); return capture() },
+    async close() { ui!.cleanup(); await exited; return capture() },
   }
 }
 
@@ -155,6 +162,22 @@ it('scrolls by wheel rows without typing reports into the draft, and resumes fol
   })
 })
 
+it('keeps bracketed paste owned while a fullscreen sheet is open', async () => {
+  const view = await mount({ todos: [{ text: 'Task', status: 'pending' }] })
+  view.input.send('\x14')
+  await view.check(lines => expect(lines.join('\n')).toContain(dictionaries.en.sheetClose))
+  view.input.send('\x1b[200~ignored while the sheet is open\x1b[201~')
+  await view.check(lines => {
+    expect(lines.join('\n')).not.toContain('ignored while the sheet is open')
+    expect(lines.join('\n')).not.toContain('[200~')
+  })
+  view.input.send('\x1b')
+  await view.check(lines => expect(lines.join('\n')).not.toContain(dictionaries.en.sheetClose))
+  view.input.send('\x1b[200~accepted after the sheet closes\x1b[201~')
+  await view.check(lines => expect(lines.join('\n')).toContain('accepted after the sheet closes▌'))
+  expect(view.stdout.chunks.join('')).not.toContain('\x1b[?2004l')
+})
+
 it.each(['en', 'zh'] as const)('offers the way back to the latest output and marks output that arrived below (%s)', async locale => {
   const copy = dictionaries[locale]
   let committed = history(80)
@@ -205,6 +228,50 @@ it('keeps the same passage visible when a paused paragraph rewraps repeatedly', 
     await view.check(lines => expect(lines[0]).toContain(word))
   }
   await view.check(lines => expect(lines[0]).toBe(paused[0]))
+})
+
+it.each(['committed', 'live'] as const)('keeps a paused table row through column and stacked layouts (%s)', async mode => {
+  let text = '| Item | Count | Description |\n| :--- | ---: | :---: |\n'
+    + Array.from({ length: 40 }, (_, index) => `| row_${String(index).padStart(2, '0')} | ${index + 100} | entry_${index} with enough detail to wrap in a smaller cell |`).join('\n')
+  let committed = mode === 'committed' ? appendTranscript(emptyTranscript, [{ kind: 'assistant', text }]) : emptyTranscript
+  const view = await mount({ committed, live: mode === 'live' ? [{ kind: 'assistant', text }] : [],
+    status: mode === 'live' ? 'running' : 'idle' }, 80, 18)
+  await view.check(lines => expect(lines.join('\n')).toContain('row_39'))
+  view.input.send('\x1b[5~')
+  const paused = await view.check(lines => expect(lines.join('\n')).toContain(dictionaries.en.transcriptPaused))
+  const item = paused[0]!.match(/row_\d+/)?.[0]
+  expect(item, paused.join('\n')).toBeDefined()
+  expect(paused[0]).toContain('|')
+  if (mode === 'live') {
+    text += '\n| a_new_item_that_widens_the_first_column | 999 | A longer item makes the preceding descriptions wrap. |'
+    view.update({ live: [{ kind: 'assistant', text }] })
+    await view.check(lines => expect(lines[0]).toContain(item))
+  }
+  view.resize(24, 18)
+  await view.check(lines => {
+    expect(lines[0]).toContain(`Item: ${item}`)
+    expect(caret(lines)).toBe(15)
+  })
+  if (mode === 'live') {
+    text += '\n| row_40 | 140 | entry_40 |'
+    view.update({ live: [{ kind: 'assistant', text }] })
+    await view.check(lines => expect(lines[0]).toContain(`Item: ${item}`))
+    const printed = new Printed()
+    text += '\n\nTable complete.'
+    const split = printed.split([{ key: 0, row: { kind: 'assistant', text } }])
+    committed = appendTranscript(committed, split.print)
+    view.update({ committed, live: split.live })
+    await view.check(lines => expect(lines[0]).toContain(`Item: ${item}`))
+    committed = appendTranscript(committed, printed.reconcile([{ kind: 'assistant', text }]))
+    view.update({ committed, live: [], status: 'idle' })
+    await view.check(lines => expect(lines[0]).toContain(`Item: ${item}`))
+  }
+  view.resize(80, 18)
+  await view.check(lines => {
+    expect(lines[0]).toContain(item)
+    expect(lines[0]).toContain('|')
+    expect(caret(lines)).toBe(15)
+  })
 })
 
 it('keeps a paused live passage through chunks arriving during and after resize', async () => {

@@ -108,6 +108,18 @@ The cache-patch checkout, before bounded history replay, also completed [three b
 
 ## Dev Note
 
+The [2026-09-30 Node measurements](results/node-runtime-2026-09-30.json) use Linux x64 WSL2, Node 26.7.0, and Bun 1.4.3-canary.1 (the workspace manifest pins 1.4.2). Each ordinary comparison has three samples per workload; separate profiles and the rejected parser probe are retained in the [analysis record](results/node-runtime-2026-09-30-analysis.json). The baseline includes the checkout's existing uncommitted changes. These local measurements have no CI timing budget.
+
+| Workload | Baseline ready ms | Final ready ms | Baseline retained heap MiB | Final retained heap MiB | Final peak RSS MiB |
+|---|---:|---:|---:|---:|---:|
+| Fresh | 750 | 630 | 55.6 | 54.2 | 227.4 |
+| 500 turns | 1544 | 1456 | 66.0 | 64.5 | 298.2 |
+| 2000 turns | 3666 | 3617 | 84.3 | 82.6 | 365.6 |
+
+All baseline and final samples observed complete history, a completed synthetic response, and clean exit. Input remained about 37 ms. Shared-host timing varied substantially between batches, so this table does not isolate a causal latency improvement. Three alternating controls for deferred `execa` loading gave fresh medians of 755 versus 725 ms and retained heap of 55.62 versus 54.26 MiB; its first-use import cost moves to package operations and registry lookup. Final HMR startup with empty module roots keeps configuration watches and omits module graph traversal and module watching. The profile resolver still uses its existing Node loader adapters; these results do not qualify replacing them.
+
+The tail profile places substantial work in Markdown, text measurement, Ink/Yoga, and GC. Reusing GFM descriptors was tested and reverted: the serial built-Node probe's median was 1804 ms with per-call descriptors versus 2428 ms with shared descriptors, and the whole-profile batch supplied no improvement. Those observations do not establish why the candidate was slower. Replay already presents each row once in bounded batches, and immutable presentation lines share cached wrapping. No rendering change is retained. The memory samples cover reachable history and one response, not prolonged multi-turn growth.
+
 The historical Bun-native comparison uses the same source hash, viewport, fixtures, and three samples per workload: [development](results/bun-native-development.json) and [production](results/bun-native-production.json). Production reduces the plugin from 104,323 to 58,820 bytes. The 500-turn readiness median drops from 6197 to 5114 ms (17.5%), and peak RSS from 909.4 to 804.8 MiB (11.5%). Retained heap is 58.1 versus 56.4 MiB; live input is 2.14 versus 2.26 ms, near the 2 ms observation interval. Fresh readiness is 1321 versus 1281 ms. These measurements support production React selection, not a claim that Bun executes Harness faster. The [native-driver tail sample](results/bun-native-tail.json) failed at 2000 turns under the 1 GiB cap; the driver recorded Node's SIGABRT and heap-exhaustion message.
 
 A [single Node 24 production sample](results/bun-native-node24.json) completed 500-turn resume in 5540 ms with 857.5 MiB peak RSS and 2.27 ms live-input observation. Built replay, navigation, attachments, and terminal restoration also pass on Node 24 and 26. The earlier script-based measurements below retain their own artifacts and driver context; their samples are not pooled with the Bun-native comparison.

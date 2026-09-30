@@ -63,7 +63,7 @@ export interface PublicJobSnapshot {
 }
 
 /** Where the model finds the id both job-addressing tools take. */
-const JOB_ID_DESCRIPTION = 'The id returned when the job started.'
+const JOB_ID_DESCRIPTION = 'The background job id from a start result or job_list. A continuable subagent id is an agent id, not a job id.'
 
 /** Shared schema for job-control outputs. */
 const PUBLIC_JOB_SCHEMA = {
@@ -199,6 +199,13 @@ function validateJobId(value: string): JobId {
   return JobId(value)
 }
 
+function explainUnknownJob(error: unknown, id: JobId): never {
+  if (error instanceof Error && error.message === `unknown job ${id}`) {
+    throw new Error(`unknown job ${id}; use job_list to find a background job id. A continuable subagent id belongs to the subagent control tools.`)
+  }
+  throw error
+}
+
 /** Pending presentation shared by the three generic job controls. */
 function presentJobCall(title: string, kind: 'read' | 'execute', rawInput?: string): GenericCallView {
   return { card: 'generic', title, kind, ...rawInput !== undefined ? { rawInput } : {} }
@@ -327,12 +334,16 @@ export function apply(ctx: Context, config: Config): void {
     },
     async execute(args, exec) {
       const id = validateJobId(args.job_id)
-      if (args.wait === true) {
-        const timeout = Math.min(args.timeout_ms ?? waitDefault, waitCap)
-        await ctx.jobs.wait(id, timeout, exec.agent, exec.signal)
+      try {
+        if (args.wait === true) {
+          const timeout = Math.min(args.timeout_ms ?? waitDefault, waitCap)
+          await ctx.jobs.wait(id, timeout, exec.agent, exec.signal)
+        }
+        const read = ctx.jobs.read(id, exec.agent)
+        return { text: read.text, job: publicJob(read.snapshot) }
+      } catch (error) {
+        explainUnknownJob(error, id)
       }
-      const read = ctx.jobs.read(id, exec.agent)
-      return { text: read.text, job: publicJob(read.snapshot) }
     },
     presentCall: args => presentJobCall(`Read output from background job ${args.job_id}`, 'read', args.job_id),
   }))
@@ -389,13 +400,17 @@ export function apply(ctx: Context, config: Config): void {
     },
     execute(args, exec) {
       const id = validateJobId(args.job_id)
-      const result = ctx.jobs.kill(id, exec.agent, args.reason)
-      // A snapshot describes current state without consuming pending output.
-      const snapshot = publicJob(ctx.jobs.get(id, exec.agent))
-      return Promise.resolve({
-        outcome: result === 'already-finished' ? 'already-finished' as const : 'cancellation-requested' as const,
-        job: snapshot,
-      })
+      try {
+        const result = ctx.jobs.kill(id, exec.agent, args.reason)
+        // A snapshot describes current state without consuming pending output.
+        const snapshot = publicJob(ctx.jobs.get(id, exec.agent))
+        return Promise.resolve({
+          outcome: result === 'already-finished' ? 'already-finished' as const : 'cancellation-requested' as const,
+          job: snapshot,
+        })
+      } catch (error) {
+        explainUnknownJob(error, id)
+      }
     },
     presentCall: args => presentJobCall(`Kill background job ${args.job_id}`, 'execute', args.job_id),
   }))

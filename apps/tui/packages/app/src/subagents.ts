@@ -3,7 +3,8 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { SubagentRunInfo } from '@deepseek-ai/dsh-subagent'
-import type { SubagentEntry } from '@dsh-tui/ui/subagents.tsx'
+import type { SubagentEntry, WorkflowEntry } from '@dsh-tui/ui/subagents.tsx'
+import type { WorkflowProgress } from '@deepseek-ai/dsh-tool-workflow/projection'
 import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
 
 type SubagentListEntry = Awaited<ReturnType<NonNullable<Context['subagents']>['listChildren']>>[number]
@@ -16,25 +17,41 @@ export interface SubagentView {
 }
 
 /** Preserve catalog order and derive activity from live owners and run notifications. */
-export function subagentEntries(view: SubagentView, ctx: Context, copy: TuiCopy): readonly SubagentEntry[] {
+export function subagentEntries(view: SubagentView, ctx: Context, copy: TuiCopy,
+  workflows: readonly WorkflowProgress[] = []): readonly SubagentEntry[] {
   const working = new Set(view.activeRuns.map(run => run.id))
   const listed = new Set(view.entries.map(entry => entry.id))
+  const membership = new Map(workflows.flatMap(run => run.members.map(member => [member.childId, { run, member }] as const)))
   return [
     ...view.entries.map((entry): SubagentEntry => {
       if (entry.kind === 'diagnostic') return { id: entry.id, label: entry.id, state: 'issue', detail: entry.reason, inspectable: false }
+      const workflow = membership.get(entry.id)
       return {
         id: entry.id, label: entry.label ?? entry.id,
         state: working.has(entry.id) || ctx.get('agents')?.get(entry.id)?.status === 'running' ? 'working'
           : entry.activity === 'running' ? 'live' : 'saved',
-        detail: entry.mode === 'continuable' ? copy.subagentContinuable : copy.subagentOneShot,
+        detail: [entry.mode === 'continuable' ? copy.subagentContinuable : copy.subagentOneShot,
+          workflow?.member.phase].filter(Boolean).join(' · '),
+        ...workflow === undefined ? {} : { workflow: workflow.run.name },
         inspectable: true,
         ...view.outcomes.get(entry.id) === undefined ? {} : { outcome: view.outcomes.get(entry.id)! },
       }
     }),
     ...view.activeRuns.filter(run => !listed.has(run.id)).map((run): SubagentEntry => ({
       id: run.id, label: run.provider, state: 'working', detail: copy.subagentRemote, inspectable: false,
+      ...membership.has(run.id) ? { workflow: membership.get(run.id)!.run.name } : {},
     })),
   ]
+}
+
+/** An unfinished saved run must not appear live just because its final record is absent. */
+export function workflowEntries(runs: readonly WorkflowProgress[], running: boolean): readonly WorkflowEntry[] {
+  return runs.map(run => ({
+    id: run.id, name: run.name,
+    state: run.status === 'running' ? running ? 'working' : 'unfinished'
+      : run.status === 'error' ? 'failed' : run.status === 'cancelled' ? 'stopped' : run.status,
+    total: run.members.length, completed: run.members.filter(member => member.outcome === 'completed').length,
+  }))
 }
 
 /** Keep the visible child list current without owning child lifecycle state. */

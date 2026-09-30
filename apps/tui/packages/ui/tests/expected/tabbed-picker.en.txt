@@ -1,0 +1,9 @@
+  note   Session: session-test
+
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Settings › Agent                                                                                 │
+│  Terminal   Agent   Shell                                                                        │
+│ > ▌Type to filter                                                                                │
+│ ▸ Subagent nesting depth  1                                                                      │
+│ Tab/⇧Tab switch section · ↑↓ choose · Enter selects · Esc back                               1/1 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

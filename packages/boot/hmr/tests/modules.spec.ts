@@ -12,7 +12,6 @@ import { expect, it, onTestFinished, vi } from 'vitest'
 import Hmr from '../src/index.ts'
 
 interface ModuleReload {
-  internal: ModuleLoader
   externals: Set<string>
   accepted: Set<string>
   declined: Set<string>
@@ -37,7 +36,7 @@ async function fixture(version: 'v1' | 'v2' = 'v2') {
     resolveSync: (_parent: string, request: { specifier: string }) => resolve(request.specifier),
   } as unknown as ModuleLoader
   const reload = ctx.hmr as unknown as ModuleReload
-  reload.internal = internal
+  ctx.loader.internal = internal
   reload.externals = new Set()
   const imported = vi.spyOn(ctx.loader, 'import').mockImplementation(async (name: string) => {
     const plugin = imports.get(name)

@@ -136,3 +136,17 @@ it('limits text per batch independently of wrapped height', () => {
   expect(batches.map(batch => batch.lines.map(line => line.text))).toEqual(texts.map(text => [text]))
   expect(batches.every(batch => batch.height === 1)).toBe(true)
 })
+
+it('retains every cell at the source row admission width while replay resizes', () => {
+  const source = '| Item | Description |\n| --- | --- |\n' + Array.from({ length: 700 }, (_, index) => `| item_${index} | description_${index} |`).join('\n')
+  const row: Row = { kind: 'assistant', text: source }
+  const transcript = appendTranscript(emptyTranscript, [row])
+  const cursor = new ReplayCursor()
+  const first = cursor.next(transcript, budget, result)!
+  expect(first.lines).toHaveLength(512)
+  const lines = [...first.lines]
+  const narrow = budgetFor({ columns: 20, rows: 24 })
+  for (let batch = cursor.next(transcript, narrow, result); batch !== undefined; batch = cursor.next(transcript, narrow, result)) lines.push(...batch.lines)
+  expect(lines).toEqual(present(row, result, undefined, budget.measure))
+  expect(lines.filter(line => line.text.includes('item_699'))).toHaveLength(1)
+})

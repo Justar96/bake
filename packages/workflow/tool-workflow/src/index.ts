@@ -24,6 +24,10 @@ import type {
   ToolWorkflowAgentEndData, ToolWorkflowAgentStartData,
   ToolWorkflowRunEndData, ToolWorkflowRunStartData,
 } from './types.ts'
+import { workflowsProjectionDefinition } from './projection.ts'
+import type {} from '@deepseek-ai/dsh-session-projection'
+
+export type { WorkflowProgress } from './projection.ts'
 
 export const name = 'tool-workflow'
 export const inject = ['tools', 'workflowEngine']
@@ -200,6 +204,9 @@ function renderResult(name: string, agentsStarted: number, value: JsonValue, max
 }
 
 export function apply(ctx: Context, config: Config): void {
+  ctx.inject(['sessionProjections'], (scoped) => {
+    scoped.sessionProjections.register(workflowsProjectionDefinition)
+  })
   // schemastery (the exported Config schema) has already filled the defaulted
   // fields; the assertion records that resolution, not a hidden fallback.
   const { toolName, maxResultChars } = config as ResolvedConfig

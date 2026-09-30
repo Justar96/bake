@@ -3,7 +3,9 @@ import { describe, expect, it as test } from 'vitest'
 import type { Row } from '@dsh-tui/ui'
 import { Printed } from '../src/printed.ts'
 import type { KeyedRow } from '../src/live.ts'
-import { present } from '../../ui/src/present.ts'
+import { present, type PresentedLine } from '../../ui/src/present.ts'
+
+const visual = ({ tableRow: _tableRow, ...line }: PresentedLine): Omit<PresentedLine, 'tableRow'> => line
 
 const answer = (text: string, key = 1): KeyedRow => ({ key, row: { kind: 'assistant', text } })
 const reasoning = (text: string, key = 0): KeyedRow => ({ key, row: { kind: 'reasoning', text } })
@@ -129,7 +131,7 @@ describe('reconciling the commit', () => {
   })
 })
 
-test.each([1, 2, 7, 4096])('streamed Markdown matches replay with %i-character deltas', size => {
+test.each([20, 40, 80].flatMap(width => [1, 2, 7, 4096].map(size => [width, size] as const)))('streamed Markdown matches replay at %i cells with %i-character deltas', (width, size) => {
   const source = '# Summary\n\n**bold across\nlines** and [docs](https://example.com).\n\n'
     + 'Setext heading\n---\n\n3. first\n   - nested\n4. second\n\n'
     + '```ts\nconst snake_case = "**literal**"\n\n  return snake_case\n```\n\n'
@@ -140,6 +142,20 @@ test.each([1, 2, 7, 4096])('streamed Markdown matches replay with %i-character d
   const { printed: rows } = stream(printed, chunks)
   const commit: Row[] = [{ kind: 'assistant', text: source }]
   const bound = { lines: 3, unit: 'lines', more: 'more lines' }
-  expect([...rows, ...printed.reconcile(commit)].flatMap(row => present(row, bound)))
-    .toEqual(commit.flatMap(row => present(row, bound)))
+  expect([...rows, ...printed.reconcile(commit)].flatMap(row => present(row, bound, undefined, width)).map(visual))
+    .toEqual(commit.flatMap(row => present(row, bound, undefined, width)).map(visual))
+})
+
+test.each(['\n', '\r\n'])('prints a closed fence at its newline before the next block (%j)', newline => {
+  const printed = new Printed()
+  const fence = ['~~~~ts', 'const x = 1', '~~~~~'].join(newline)
+  expect(printed.split([answer(fence)]).print).toEqual([])
+  const settled = printed.split([answer(fence + newline)])
+  expect(settled.print).toHaveLength(1)
+  const source = fence + newline + newline + '**Done.**'
+  const later = printed.split([answer(source)])
+  const committed: Row[] = [{ kind: 'assistant', text: source }]
+  const bound = { lines: 3, unit: 'lines', more: 'more lines' }
+  expect([...settled.print, ...later.print, ...printed.reconcile(committed)].flatMap(row => present(row, bound)))
+    .toEqual(committed.flatMap(row => present(row, bound)))
 })

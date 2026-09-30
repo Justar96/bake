@@ -34,6 +34,7 @@ import {
 } from './model-selection.ts'
 import type { DelegationModelRequest, ModelSelectionPolicy } from './model-selection.ts'
 import { registerListSubagentModels } from './list-models.ts'
+import { routeDelegation } from './auto-route.ts'
 import { presentDelegationCall } from './presentation.ts'
 import type {} from './model-selection-settings.ts'
 import {
@@ -304,6 +305,38 @@ function resolveDelegationRun(
 }
 
 /**
+ * Ask the configured task router for a route when the calling model chose none.
+ * A router that is unset, slow, failing, or out of policy leaves the default
+ * route in place; cancellation still propagates.
+ * @param ctx - Context of the installed tool.
+ * @param policy - Routes this Session may use; the router chooses among them.
+ * @param args - The delegation call: its description and prompt describe the task.
+ * @param signal - Tool-call cancellation signal.
+ * @returns selection fields for the chosen route, or undefined for the default route.
+ */
+async function routedRequest(
+  ctx: Context,
+  policy: ModelSelectionPolicy,
+  args: { description: string; prompt: string },
+  signal: AbortSignal,
+): Promise<DelegationModelRequest | undefined> {
+  const settings = ctx.get('subagentModelSelection')
+  const router = settings?.router()
+  if (settings === undefined || router === undefined) return undefined
+  try {
+    const routed = await routeDelegation(
+      router, `${args.description}\n\n${args.prompt}`, policy.routes, ctx.get('llm'), signal, await settings.routerToken())
+    ctx.logger.info(`subagent router chose ${routed.request.provider}/${routed.request.model}`
+      + `${routed.request.reasoning_effort === undefined ? '' : ` (${routed.request.reasoning_effort})`}: ${routed.reason}`)
+    return routed.request
+  } catch (error) {
+    signal.throwIfAborted()
+    ctx.logger.warn(`subagent router unavailable, using the default route: ${String(error)}`)
+    return undefined
+  }
+}
+
+/**
  * Install one delegation-tool composition.
  * @param ctx - Context that owns the registrations.
  * @param config - delegation-tool configuration.
@@ -371,7 +404,7 @@ export function apply(ctx: Context, config: Config, session?: Session): void {
         : 'the configured subagent defaults, filling gaps from your own route where compatible'
       const choiceDescription = !modelSelectionEnabled
         ? ''
-        : ` Model choice is optional: omit \`provider\`, \`model\`, and \`reasoning_effort\` to use ${defaultsDescription}. To choose, look up routes and efforts with \`list_subagent_models\`, then pass \`provider\` and \`model\` together. If you change the route without \`reasoning_effort\`, the new model's default effort applies.`
+        : ` Model choice is optional: omit \`provider\`, \`model\`, and \`reasoning_effort\` to let the host choose; it may pick an allowed model and effort suited to the task, and otherwise uses ${defaultsDescription}. To choose, look up routes and efforts with \`list_subagent_models\`, then pass \`provider\` and \`model\` together. If you change the route without \`reasoning_effort\`, the new model's default effort applies.`
           + (subagentProvider.inheritsParentContext
             ? ' Changing the route may prevent cache reuse of the inherited conversation.'
             : '')
@@ -477,7 +510,10 @@ export function apply(ctx: Context, config: Config, session?: Session): void {
             throw new Error('subagent tool requires a calling agent (exec.agent was undefined)')
           }
 
-          const modelRequest = args as DelegationModelRequest
+          let modelRequest = args as DelegationModelRequest
+          if (modelSelectionPolicy !== undefined && !hasDelegationModelRequest(modelRequest)) {
+            modelRequest = await routedRequest(runtimeCtx, modelSelectionPolicy, args, exec.signal) ?? modelRequest
+          }
           const parentOptions = parentAgentOptionsForDelegation(parent)
           const requiresRoutePreflight = hasDelegationModelRequest(modelRequest)
             || hasConfiguredLlmSelection(config.agentOptions)
