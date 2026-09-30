@@ -178,7 +178,10 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
   const frame = (): FrameStyle => {
     const configured = preferences.value.composerFrame
     if (resolved?.configured !== configured) {
-      resolved = { configured, frame: resolveFrame({ configured, locale: preferences.launch.locale, env: process.env }) }
+      resolved = { configured, frame: resolveFrame({
+        configured, locale: preferences.launch.locale, env: process.env, platform: process.platform,
+        systemLocale: () => Intl.DateTimeFormat().resolvedOptions().locale,
+      }) }
     }
     return resolved.frame
   }

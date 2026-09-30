@@ -3,7 +3,7 @@
  * the settings document, screen and language wait for the next launch, a flag
  * outranks the user's screen, and without a document the change stays local.
  * Plugin settings are offered in named sections and, from their schemas, under
- * Advanced, and the top page searches all of them.
+ * Advanced, and each top-level section's page searches all of them.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
@@ -108,10 +108,9 @@ describe('Preferences', () => {
     const { preferences, changed } = await mount()
     expect(preferences.launch.screen).toBe('inline')
     const { interactions, prompts } = scripted(
-      pick('section:terminal'),
       pick('setting:goalObjective'),
       pick('setting:screen'), pick('fullscreen'),
-      back, back,
+      back,
     )
     await expect(run(preferences, interactions)).resolves.toEqual({ kind: 'success', text: copy.settingsStored })
     expect(MemoryProvider.doc[SETTINGS_NAMESPACE]).toEqual({ goalObjective: true, screen: 'fullscreen' })
@@ -119,27 +118,27 @@ describe('Preferences', () => {
     await vi.waitFor(() => expect(changed).toHaveBeenCalled())
     // The process keeps the screen it started with; the panel says when the change lands.
     expect(preferences.screen).toBe('inline')
-    const page = prompts.at(-2)!
-    expect(page.title).toBe(`${copy.settingsTitle} › ${copy.settingsTerminal}`)
+    // The panel opens on its most general section.
+    expect(prompts[0]!.title).toBe(`${copy.settingsTitle} › ${copy.settingsTerminal}`)
+    expect(prompts[0]!.tabs?.active).toBe('tab:terminal')
+    expect(prompts[0]!.initial).toBe('setting:screen')
+    const page = prompts.at(-1)!
     expect(page.initial).toBe('setting:screen')
     expect(page.choices.find(choice => choice.value === 'setting:screen')).toMatchObject({
       description: copy.settingsScreenFullscreen, status: { text: copy.settingsNextLaunch },
     })
     expect(page.choices.find(choice => choice.value === 'setting:goalObjective')?.description).toBe(copy.settingsOn)
     // The value picker marks what is in force, and the profile's value.
-    expect(prompts[3]!.choices.find(choice => choice.current === true)?.value).toBe('inline')
-    expect(prompts[3]!.choices.find(choice => choice.value === 'inline')?.description).toBe(copy.settingsDefault)
-    // Back at the top, the section's row reads its values.
-    expect(prompts.at(-1)!.choices.find(choice => choice.value === 'section:terminal')?.description)
-      .toBe(`${copy.settingsScreenFullscreen} · English · ${copy.settingsFrameAuto}`)
+    expect(prompts[2]!.choices.find(choice => choice.current === true)?.value).toBe('inline')
+    expect(prompts[2]!.choices.find(choice => choice.value === 'inline')?.description).toBe(copy.settingsDefault)
   })
 
   it('closes without a message when nothing changed, and offers no reset over defaults', async () => {
     const { preferences } = await mount()
-    const { interactions, prompts } = scripted(pick('section:terminal'), pick('setting:locale'), back, back, back)
+    const { interactions, prompts } = scripted(pick('setting:locale'), back, back)
     await expect(run(preferences, interactions)).resolves.toEqual({ kind: 'success' })
+    expect(prompts[0]!.choices.some(choice => choice.pinned === true)).toBe(false)
     expect(prompts[1]!.choices.some(choice => choice.pinned === true)).toBe(false)
-    expect(prompts[2]!.choices.some(choice => choice.pinned === true)).toBe(false)
   })
 
   it('resets a section after a confirmation, keeps it on a refusal, and resets one setting on its own', async () => {
@@ -147,54 +146,53 @@ describe('Preferences', () => {
     const { preferences } = await mount()
     const reset = (prompt: ChoicePrompt) => prompt.choices.find(choice => choice.pinned === true)?.value
     const { interactions, prompts } = scripted(
-      pick('section:terminal'),
       // One setting: its value list ends with its own reset.
       pick('setting:completionLimit'), reset,
       reset, pick('keep'),
       reset, pick('reset'),
-      back, back,
+      back,
     )
     await run(preferences, interactions)
-    expect(prompts[2]!.choices.at(-1)).toMatchObject({ label: copy.settingsResetField, pinned: true })
-    expect(prompts[4]!.title).toBe(copy.settingsResetConfirm)
-    expect(prompts[4]!.initial).toBe('keep')
+    expect(prompts[1]!.choices.at(-1)).toMatchObject({ label: copy.settingsResetField, pinned: true })
+    expect(prompts[3]!.title).toBe(copy.settingsResetConfirm)
+    expect(prompts[3]!.initial).toBe('keep')
     expect(MemoryProvider.doc[SETTINGS_NAMESPACE]).toEqual({})
     expect(MemoryProvider.doc['other']).toEqual({ kept: true })
     expect(preferences.value).toEqual(base)
     // Nothing left to reset.
-    expect(prompts.at(-2)!.choices.some(choice => choice.pinned === true)).toBe(false)
+    expect(prompts.at(-1)!.choices.some(choice => choice.pinned === true)).toBe(false)
   })
 
   it('keeps the panel open with the reason when a save fails', async () => {
     const { preferences } = await mount()
     const persist = vi.spyOn(MemoryProvider.prototype as unknown as { persist: () => Promise<void> }, 'persist')
       .mockRejectedValueOnce(new Error('disk full'))
-    const { interactions, prompts } = scripted(pick('section:terminal'),
-      pick('setting:resultLines'), pick('16'), pick('setting:resultLines'), pick('8'), back, back)
+    const { interactions, prompts } = scripted(
+      pick('setting:resultLines'), pick('16'), pick('setting:resultLines'), pick('8'), back)
     await expect(run(preferences, interactions)).resolves.toMatchObject({ kind: 'success' })
-    expect(prompts[3]!.warning).toBe(`${copy.settingsFailed}: disk full`)
-    expect(prompts[5]!.warning).toBeUndefined()
+    expect(prompts[2]!.warning).toBe(`${copy.settingsFailed}: disk full`)
+    expect(prompts[4]!.warning).toBeUndefined()
     expect(MemoryProvider.doc[SETTINGS_NAMESPACE]).toEqual({ resultLines: 8 })
     persist.mockRestore()
   })
 
   it('takes a typed number within its bounds, and names the bound a typed number breaks', async () => {
     const { preferences } = await mount()
-    const { interactions, prompts, typed } = scripted(pick('section:terminal'),
+    const { interactions, prompts, typed } = scripted(
       pick('setting:resultLines'), labelled(copy.settingsCustom), { typed: '-1' },
       pick('setting:resultLines'), labelled(copy.settingsCustom), { typed: 'lots' },
       pick('setting:resultLines'), labelled(copy.settingsCustom), { cancel: true },
       pick('setting:doubleInterruptMs'), labelled(copy.settingsCustom), { typed: '1.5s' },
       pick('setting:resultLines'), labelled(copy.settingsCustom), { typed: '12' },
-      back, back)
+      back)
     await run(preferences, interactions)
-    expect(prompts[3]!.warning).toBe(`${copy.settingsResultLines}: ${copy.settingsBelowMin} 0`)
-    expect(prompts[5]!.warning).toBe(`${copy.settingsResultLines}: ${copy.settingsNotNumber}`)
+    expect(prompts[2]!.warning).toBe(`${copy.settingsResultLines}: ${copy.settingsBelowMin} 0`)
+    expect(prompts[4]!.warning).toBe(`${copy.settingsResultLines}: ${copy.settingsNotNumber}`)
     // Escape from the text leaves the value and the page as they were.
-    expect(prompts[7]!.warning).toBeUndefined()
+    expect(prompts[6]!.warning).toBeUndefined()
     expect(typed[3]).toEqual({ kind: 'text', message: `${copy.settingsDoubleInterrupt} · ${copy.settingsDurationHint}` })
     expect(MemoryProvider.doc[SETTINGS_NAMESPACE]).toEqual({ doubleInterruptMs: 1500, resultLines: 12 })
-    expect(prompts.at(-2)!.choices.find(choice => choice.value === 'setting:doubleInterruptMs')?.description).toBe('1500ms')
+    expect(prompts.at(-1)!.choices.find(choice => choice.value === 'setting:doubleInterruptMs')?.description).toBe('1500ms')
   })
 
   it('offers the default model through the session\'s model picker', async () => {
@@ -205,10 +203,13 @@ describe('Preferences', () => {
       await ctx.agentDefaultModel.saveSelection({ provider: 'mock', model: 'other', reasoningEffort: ReasoningEffortId('high') })
       return { kind: 'success' as const }
     })
-    const { interactions, prompts } = scripted(pick('section:session'), pick('setting:defaultModel'), back, back)
+    const { interactions, prompts } = scripted(pick('tab:session'), pick('setting:defaultModel'), back)
     const result = await run(preferences, interactions, { chooseModel })
     expect(chooseModel).toHaveBeenCalledOnce()
-    expect(prompts[0]!.choices.find(choice => choice.searchOnly !== true)).toMatchObject({ value: 'section:session', label: copy.settingsSession, description: 'mock/model' })
+    // The most general section comes first; Session follows it.
+    expect(prompts[0]!.tabs?.items.slice(0, 2)).toEqual([
+      { value: 'tab:terminal', label: copy.settingsTerminal }, { value: 'tab:session', label: copy.settingsSession },
+    ])
     expect(prompts[1]!.choices[0]).toMatchObject({ value: 'setting:defaultModel', description: 'mock/model', status: { text: copy.settingsNewSessions } })
     expect(prompts[2]!.choices[0]).toMatchObject({ value: 'setting:defaultModel', description: 'mock/other (high)' })
     expect(result).toEqual({ kind: 'success', text: copy.settingsStored })
@@ -220,9 +221,9 @@ describe('Preferences', () => {
     const { preferences } = await mount({ screen: 'inline' })
     expect(preferences.value.screen).toBe('fullscreen')
     expect(preferences.screen).toBe('inline')
-    const { interactions, prompts } = scripted(pick('section:terminal'), back, back)
+    const { interactions, prompts } = scripted(back)
     await run(preferences, interactions)
-    expect(prompts[1]!.choices.find(choice => choice.value === 'setting:screen')?.status?.text).toBe(copy.settingsByFlag)
+    expect(prompts[0]!.choices.find(choice => choice.value === 'setting:screen')?.status?.text).toBe(copy.settingsByFlag)
   })
 
   it('reads a stored choice at launch', async () => {
@@ -242,7 +243,7 @@ describe('Preferences', () => {
     const writes = changed.mock.calls.length
     await preferences.rememberModel('a/1')
     expect(changed.mock.calls).toHaveLength(writes)
-    const { interactions, prompts } = scripted(pick('section:terminal'), back, back)
+    const { interactions, prompts } = scripted(back)
     await run(preferences, interactions)
     expect(JSON.stringify(prompts.map(prompt => prompt.choices))).not.toContain('recentModels')
   })
@@ -260,15 +261,15 @@ describe('Preferences', () => {
 
   it('changes only this process without a settings document, and says so', async () => {
     const { preferences, changed } = await mount({ settings: false })
-    const { interactions, prompts } = scripted(pick('section:terminal'), pick('setting:resultLines'), pick('16'), back, back)
+    const { interactions, prompts } = scripted(pick('setting:resultLines'), pick('16'), back)
     await expect(run(preferences, interactions)).resolves.toEqual({ kind: 'success', text: copy.settingsUnsaved })
     expect(preferences.value.resultLines).toBe(16)
     expect(changed).toHaveBeenCalledOnce()
     expect(prompts[0]!.warning).toBe(copy.settingsUnsaved)
     // Only the terminal's own settings exist without a document.
-    expect(prompts[0]!.choices.filter(choice => choice.searchOnly !== true).map(choice => choice.value)).toEqual(['section:terminal'])
+    expect(prompts[0]!.tabs?.items.map(tab => tab.value)).toEqual(['tab:terminal'])
     // A reset returns to the profile's values without a document too.
-    expect(prompts[3]!.choices.some(choice => choice.pinned === true)).toBe(true)
+    expect(prompts[2]!.choices.some(choice => choice.pinned === true)).toBe(true)
   })
 
   it('offers the default access preset from its registered namespace', async () => {
@@ -276,7 +277,7 @@ describe('Preferences', () => {
     ctx.settings.register('permission', z.object({
       defaultPreset: z.union([z.const('read-only').description('Read only'), z.const('workspace-write')]).required(),
     }), { base: { defaultPreset: 'read-only' } })
-    const { interactions, prompts } = scripted(pick('section:session'), pick('setting:defaultPreset'), pick('workspace-write'), back, back)
+    const { interactions, prompts } = scripted(pick('tab:session'), pick('setting:defaultPreset'), pick('workspace-write'), back)
     await run(preferences, interactions)
     expect(prompts[2]!.choices.map(choice => choice.value)).toEqual(['read-only', 'workspace-write'])
     expect(prompts[2]!.choices[0]!.description).toBe('Read only')
@@ -287,29 +288,23 @@ describe('Preferences', () => {
     const { ctx, preferences } = await mount()
     plugins(ctx)
     const { interactions, prompts } = scripted(
-      pick('section:shell'),
+      pick('tab:shell'),
       pick('setting:shell.timeoutMs'), labelled('5m'),
       pick('setting:shell.maxOutputBytes'), labelled(copy.settingsCustom), { typed: '256KB' },
       // The owner refuses a timeout past the longest one allowed; the panel says so and stays.
       pick('setting:shell.timeoutMs'), labelled(copy.settingsCustom), { typed: '1h' },
-      back,
-      pick('section:agent'), pick('setting:agent-loop.maxParallelToolCalls'), labelled('8'), back,
-      back,
+      pick('tab:agent'), pick('setting:agent-loop.maxParallelToolCalls'), labelled('8'), back,
     )
     await run(preferences, interactions)
-    const top = prompts[0]!.choices.filter(choice => choice.searchOnly !== true).map(choice => choice.label)
+    const top = prompts[0]!.tabs?.items.map(tab => tab.label)
     expect(top).toEqual([copy.settingsTerminal, copy.settingsAgent, copy.settingsShell, copy.settingsAdvanced])
-    // A bare number says nothing a page up, so a plugin section names what it holds.
-    expect(prompts[0]!.choices.find(choice => choice.value === 'section:shell')?.description)
-      .toBe([copy.settingsShellTimeout, copy.settingsShellMaxTimeout, copy.settingsShellOutput].join(' · '))
-    expect(prompts[0]!.choices.find(choice => choice.value === 'section:advanced')?.description).toBe(copy.settingsAdvancedAbout)
-    expect(prompts[1]!.choices.map(choice => [choice.label, choice.description])).toEqual([
+    expect(prompts[1]!.choices.filter(choice => choice.searchOnly !== true).map(choice => [choice.label, choice.description])).toEqual([
       [copy.settingsShellTimeout, '2m'], [copy.settingsShellMaxTimeout, '10m'], [copy.settingsShellOutput, '64 KB'],
     ])
     // Steps in the setting's unit, the schema's default marked, and a typed value last.
     expect(prompts[2]!.choices.map(choice => choice.label)).toEqual(['30s', '1m', '2m', '5m', '10m', copy.settingsCustom])
     expect(prompts[2]!.choices.find(choice => choice.label === '2m')).toMatchObject({ current: true, description: copy.settingsDefault })
-    expect(prompts[8]!.warning).toBe(`${copy.settingsFailed}: timeoutMs exceeds maxTimeoutMs`)
+    expect(prompts[7]!.warning).toBe(`${copy.settingsFailed}: timeoutMs exceeds maxTimeoutMs`)
     expect(MemoryProvider.doc['shell']).toEqual({ timeoutMs: 300_000, maxOutputBytes: 256_000 })
     expect(MemoryProvider.doc['agent-loop']).toEqual({ maxParallelToolCalls: 8 })
   })
@@ -326,14 +321,14 @@ describe('Preferences', () => {
       label: z.string(),
     }), { applies: 'restart' })
     const { interactions, prompts, typed } = scripted(
-      pick('section:advanced'), pick('section:example-plugin'),
+      pick('tab:advanced'), pick('section:example-plugin'),
       pick('setting:verbose'),
       pick('setting:mode'), pick('careful'),
       pick('setting:limits.retries'), labelled(copy.settingsCustom), { typed: '12' },
       pick('setting:limits.retries'), labelled(copy.settingsCustom), { typed: '3' },
       pick('setting:label'), { typed: 'mine' },
       pick('setting:hosts'),
-      back, back, back,
+      back, back,
     )
     await run(preferences, interactions)
     expect(prompts[1]!.choices.find(choice => choice.value === 'section:example-plugin')).toMatchObject({
@@ -350,7 +345,7 @@ describe('Preferences', () => {
     expect(prompts[7]!.warning).toBe(`limits.retries: ${copy.settingsAboveMax} 9`)
     // A string with nothing to pick from asks for its text at once.
     expect(typed.at(-1)).toEqual({ kind: 'text', message: 'label' })
-    expect(prompts.at(-3)!.warning).toBe(copy.settingsInFile)
+    expect(prompts.at(-2)!.warning).toBe(copy.settingsInFile)
     expect(MemoryProvider.doc['example-plugin']).toEqual({
       apiKey: 'kept-secret', verbose: true, mode: 'careful', limits: { retries: 3 }, label: 'mine',
     })
@@ -370,9 +365,9 @@ describe('Preferences', () => {
     const preferences = new Preferences(ctx, base, undefined, vi.fn(), editText)
     ctx.settings.register('example-plugin', z.object({ hosts: z.array(z.string()).default([]) }))
     const { interactions, prompts } = scripted(
-      pick('section:advanced'), pick('section:example-plugin'),
+      pick('tab:advanced'), pick('section:example-plugin'),
       pick('setting:hosts'), pick('setting:hosts'), pick('setting:hosts'), pick('setting:hosts'),
-      back, back, back,
+      back, back,
     )
     await run(preferences, interactions)
     expect(prompts[2]!.choices.find(choice => choice.value === 'setting:hosts')?.description).toBe(`[0] · ${copy.settingsInEditor}`)
@@ -385,7 +380,7 @@ describe('Preferences', () => {
     expect(prompts[5]!.choices.find(choice => choice.value === 'setting:hosts')?.description).toBe(`[0] · ${copy.settingsInEditor}`)
   })
 
-  it('searches every setting from the top page, and edits the one found in place', async () => {
+  it('searches every setting from a section\'s page, and opens the section of the one it edited', async () => {
     const { ctx, preferences } = await mount()
     plugins(ctx)
     const { interactions, prompts } = scripted(
@@ -397,33 +392,35 @@ describe('Preferences', () => {
     const found = prompts[0]!.choices.find(choice => choice.label === `${copy.settingsShell} › ${copy.settingsShellTimeout}`)
     expect(found).toMatchObject({ searchOnly: true, description: '2m', value: 'setting:shell/shell.timeoutMs' })
     expect(prompts[0]!.choices.some(choice => choice.label === `${copy.settingsAdvanced} › shell › timeoutMs` && choice.searchOnly === true)).toBe(true)
+    // The page's own settings are listed already, so the search does not repeat them.
+    expect(prompts[0]!.choices.some(choice => choice.label === `${copy.settingsTerminal} › ${copy.settingsScreen}`)).toBe(false)
     expect(MemoryProvider.doc['shell']).toEqual({ timeoutMs: 60_000 })
-    // Back at the top with the section of the setting it changed under the pointer.
-    expect(prompts[2]!.initial).toBe('section:shell')
+    // The panel moves to the setting's section with the changed row under the pointer.
+    expect(prompts[2]!.tabs?.active).toBe('tab:shell')
+    expect(prompts[2]!.initial).toBe('setting:shell.timeoutMs')
   })
 
-  it('moves between sections with their tabs, and returns to the top on the last one', async () => {
+  it('opens on the first section, moves between sections with their tabs, and closes on Escape', async () => {
     const { ctx, preferences } = await mount()
     plugins(ctx)
     const { interactions, prompts } = scripted(
-      pick('tab:terminal'),
       (prompt) => stepTab(prompt.tabs, false),
       (prompt) => stepTab(prompt.tabs, true),
       (prompt) => stepTab(prompt.tabs, true),
-      back, back,
+      back,
     )
     await run(preferences, interactions)
     const labels = [copy.settingsTerminal, copy.settingsAgent, copy.settingsShell, copy.settingsAdvanced]
-    expect(prompts[0]!.tabs).toEqual({ items: ['terminal', 'agent', 'shell', 'advanced'].map((key, index) => ({ value: `tab:${key}`, label: labels[index] })) })
-    expect(prompts.slice(1, 5).map(prompt => [prompt.title, prompt.tabs?.active])).toEqual([
-      [`${copy.settingsTitle} › ${copy.settingsTerminal}`, 'tab:terminal'],
-      [`${copy.settingsTitle} › ${copy.settingsAgent}`, 'tab:agent'],
-      [`${copy.settingsTitle} › ${copy.settingsTerminal}`, 'tab:terminal'],
+    const items = ['terminal', 'agent', 'shell', 'advanced'].map((key, index) => ({ value: `tab:${key}`, label: labels[index] }))
+    expect(prompts.map(prompt => prompt.tabs)).toEqual([
+      { items, active: 'tab:terminal' },
+      { items, active: 'tab:agent' },
+      { items, active: 'tab:terminal' },
       // Shift-Tab wraps from the first section to the last.
-      [`${copy.settingsTitle} › ${copy.settingsAdvanced}`, 'tab:advanced'],
+      { items, active: 'tab:advanced' },
     ])
-    expect(prompts[5]!.initial).toBe('section:advanced')
-    expect(prompts[5]!.tabs?.active).toBeUndefined()
+    expect(prompts.map(prompt => prompt.title)).toEqual([copy.settingsTerminal, copy.settingsAgent, copy.settingsTerminal, copy.settingsAdvanced]
+      .map(label => `${copy.settingsTitle} › ${label}`))
   })
 
   it('asks which models subagents may use before switching the choice on, and saves both together', async () => {
@@ -436,14 +433,14 @@ describe('Preferences', () => {
     ], unavailable: ['offline'] }
     const listModels = vi.fn(() => Promise.resolve(catalog))
     const { interactions, prompts } = scripted(
-      pick('section:agent'), pick('setting:subagent-model-selection.enabled'),
+      pick('tab:agent'), pick('setting:subagent-model-selection.enabled'),
       pick('openrouter/anthropic/claude'),
       // The last model of a switched-on choice stays.
       pick('openrouter/anthropic/claude'),
       back,
       pick('setting:subagent-model-selection.allowedModels'), pick('deepseek/deepseek-v4-flash'), pick('openrouter/anthropic/claude'),
       labelled(copy.settingsSubagentAllowedDone),
-      back, back,
+      back,
     )
     await expect(run(preferences, interactions, { listModels })).resolves.toMatchObject({ kind: 'success', text: copy.settingsStored })
     expect(MemoryProvider.doc['subagent-model-selection']).toEqual({
@@ -482,16 +479,19 @@ describe('Preferences', () => {
     const { interactions, prompts } = scripted(
       // A search result and a field opened directly must use the same picker.
       pick('setting:advanced/subagent-model-selection/enabled'),
+      // The search opens the section it found the field in.
       pick('mock/first'), back,
-      pick('section:advanced'), pick('section:subagent-model-selection'),
+      pick('section:subagent-model-selection'),
       pick('setting:allowedModels'), pick('mock/second'), pick('mock/first'),
-      labelled(copy.settingsSubagentAllowedDone), back, back, back,
+      labelled(copy.settingsSubagentAllowedDone), back, back,
     )
     await expect(run(preferences, interactions, { listModels })).resolves.toMatchObject({ kind: 'success', text: copy.settingsStored })
     expect(editText).not.toHaveBeenCalled()
     expect(listModels).toHaveBeenCalledTimes(2)
     expect(prompts[1]!.warning).toBe(copy.settingsSubagentAllowedFirst)
-    expect(prompts[6]!.choices.find(choice => choice.value === 'mock/first')?.status?.text).toBe(copy.settingsSubagentAllowedOn)
+    expect(prompts[3]!.tabs?.active).toBe('tab:advanced')
+    expect(prompts[3]!.initial).toBe('section:subagent-model-selection')
+    expect(prompts[5]!.choices.find(choice => choice.value === 'mock/first')?.status?.text).toBe(copy.settingsSubagentAllowedOn)
     expect(MemoryProvider.doc['subagent-model-selection']).toEqual({
       enabled: true, allowedModels: [{ provider: 'mock', model: 'second' }],
     })
@@ -502,10 +502,10 @@ describe('Preferences', () => {
     await ctx.plugin(SubagentModelSelection)
     await vi.waitFor(() => expect(ctx.settings.describe().some(entry => entry.ns === 'subagent-model-selection')).toBe(true))
     const listModels = () => Promise.resolve({ entries: [{ route: 'mock/model', name: 'Mock', current: true }], unavailable: [] })
-    const opened = scripted(pick('section:agent'), pick('setting:subagent-model-selection.enabled'), back, back, back)
+    const opened = scripted(pick('tab:agent'), pick('setting:subagent-model-selection.enabled'), back, back)
     await expect(run(preferences, opened.interactions, { listModels })).resolves.toEqual({ kind: 'success' })
     expect(MemoryProvider.doc['subagent-model-selection']).toBeUndefined()
-    const plain = scripted(pick('section:agent'), back, back)
+    const plain = scripted(pick('tab:agent'), back)
     await run(preferences, plain.interactions)
     expect(plain.prompts[1]!.choices.filter(choice => choice.value.startsWith('setting:subagent')).map(choice => choice.label))
       .toEqual([copy.settingsSubagentModels])
@@ -527,8 +527,8 @@ describe('task router settings', () => {
     vi.stubEnv('ING_API_TOKEN', '')
     const { preferences } = await mounted()
     const { interactions, prompts } = scripted(
-      pick('section:agent'), pick('setting:subagent-model-selection.router.enabled'), pick('off'),
-      pick('setting:subagent-model-selection.router.enabled'), pick('on'), back, back,
+      pick('tab:agent'), pick('setting:subagent-model-selection.router.enabled'), pick('off'),
+      pick('setting:subagent-model-selection.router.enabled'), pick('on'), back,
     )
     await run(preferences, interactions, { describeRoutes: () => Promise.resolve([]) })
     expect(MemoryProvider.doc['subagent-model-selection']).toEqual({ router: { enabled: true } })
@@ -552,10 +552,10 @@ describe('task router settings', () => {
     await ctx.settings.mutate('subagent-model-selection', [{ op: 'set', path: ['router', 'hints'],
       value: [{ provider: 'deepseek', model: 'deepseek-v4-flash', quality: 'low' }] }])
     const { interactions, prompts } = scripted(
-      pick('section:agent'), pick('setting:subagent-model-selection.router.hints'),
+      pick('tab:agent'), pick('setting:subagent-model-selection.router.hints'),
       pick('corp/opus-alias'), pick('quality'), pick('high'),
       pick('corp/opus-alias'), pick('sameAs'), { typed: 'claude-opus-4.5' },
-      labelled(copy.settingsSubagentAllowedDone), back, back,
+      labelled(copy.settingsSubagentAllowedDone), back,
     )
     await run(preferences, interactions, { describeRoutes })
     expect(MemoryProvider.doc['subagent-model-selection']).toEqual({ router: { enabled: true, hints: [
@@ -579,12 +579,12 @@ describe('task router settings', () => {
   it('warns when no allowed model is ranked, and reports a router that cannot be reached', async () => {
     const { ctx, preferences } = await mounted()
     await ctx.settings.mutate('subagent-model-selection', [{ op: 'set', path: ['router', 'enabled'], value: true }])
-    const unranked = scripted(pick('section:agent'), pick('setting:subagent-model-selection.router.hints'),
-      labelled(copy.settingsSubagentAllowedDone), back, back)
+    const unranked = scripted(pick('tab:agent'), pick('setting:subagent-model-selection.router.hints'),
+      labelled(copy.settingsSubagentAllowedDone), back)
     await run(preferences, unranked.interactions, { describeRoutes: () => Promise.resolve([{ provider: 'corp', model: 'opus-alias', ranked: false }]) })
     expect(unranked.prompts[2]!.warning).toBe(copy.settingsRouterNoneRanked)
 
-    const down = scripted(pick('section:agent'), pick('setting:subagent-model-selection.router.hints'), back, back)
+    const down = scripted(pick('tab:agent'), pick('setting:subagent-model-selection.router.hints'), back)
     await run(preferences, down.interactions, { describeRoutes: () => Promise.reject(new Error('router requires a token; set ING_API_TOKEN')) })
     expect(down.prompts[2]!.warning).toContain(`${copy.settingsRouterUnavailable}: router requires a token; set ING_API_TOKEN`)
   })
@@ -617,8 +617,8 @@ describe('task router settings', () => {
     await ctx.settings.mutate('subagent-model-selection', [{ op: 'set', path: ['router', 'enabled'], value: true }])
     const { controls, calls } = account({ wrongCodes: 1 })
     const { interactions, prompts, typed } = scripted(
-      pick('section:agent'), pick('setting:subagent-model-selection.router.account'),
-      { typed: ' ada@example.com ' }, { typed: '000000' }, { typed: '123456' }, back, back,
+      pick('tab:agent'), pick('setting:subagent-model-selection.router.account'),
+      { typed: ' ada@example.com ' }, { typed: '000000' }, { typed: '123456' }, back,
     )
     await run(preferences, interactions, { describeRoutes: () => Promise.resolve([]), routerAccount: controls })
     expect(calls).toEqual(['code ada@example.com', 'sign-in ada@example.com 000000', 'sign-in ada@example.com 123456'])
@@ -633,9 +633,9 @@ describe('task router settings', () => {
     const { preferences } = await mounted()
     const { controls, calls } = account()
     const { interactions, prompts } = scripted(
-      pick('section:agent'), pick('setting:subagent-model-selection.router.enabled'), pick('sign-in'),
+      pick('tab:agent'), pick('setting:subagent-model-selection.router.enabled'), pick('sign-in'),
       { typed: 'ada@example.com' }, { typed: '123456' },
-      pick('setting:subagent-model-selection.router.account'), pick('out'), back, back,
+      pick('setting:subagent-model-selection.router.account'), pick('out'), back,
     )
     await run(preferences, interactions, { describeRoutes: () => Promise.resolve([]), routerAccount: controls })
     expect(prompts[2]!.choices.map(choice => choice.value)).toEqual(['sign-in', 'on', 'off'])
@@ -651,7 +651,7 @@ describe('task router settings', () => {
     await ctx.settings.mutate('subagent-model-selection', [{ op: 'set', path: ['router', 'enabled'], value: true }])
     const { controls, calls } = account({ fromEnv: true })
     const { interactions, prompts } = scripted(
-      pick('section:agent'), pick('setting:subagent-model-selection.router.account'), back, back,
+      pick('tab:agent'), pick('setting:subagent-model-selection.router.account'), back,
     )
     await run(preferences, interactions, { describeRoutes: () => Promise.resolve([]), routerAccount: controls })
     expect(accountRow(prompts[1])?.description).toBe(`${copy.settingsRouterTokenFrom} ING_API_TOKEN`)

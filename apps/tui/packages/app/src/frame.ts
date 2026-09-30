@@ -20,6 +20,14 @@ export interface FrameRequest {
   readonly locale: Locale
   /** Process environment; only the locale and terminal-type variables are read. */
   readonly env: Readonly<Partial<Record<string, string>>>
+  /** The operating system, as `process.platform` names it. */
+  readonly platform: string
+  /**
+   * The operating system's locale, which Windows exposes instead of locale
+   * variables. Read only on native Windows outside Windows Terminal, so other
+   * platforms never consult it.
+   */
+  readonly systemLocale: () => string
 }
 
 /** Locale variables in the order POSIX resolves them for character handling. */
@@ -27,6 +35,15 @@ const CTYPE_VARIABLES = ['LC_ALL', 'LC_CTYPE', 'LANG'] as const
 
 /** Languages whose terminals are commonly configured to draw Ambiguous characters two cells wide. */
 const AMBIGUOUS_WIDE_LANGUAGES = ['zh', 'ja', 'ko'] as const
+
+/**
+ * Whether a locale names a language whose terminals may draw Ambiguous characters wide.
+ * @param locale - a lowercased POSIX or BCP 47 locale name.
+ * @returns true for Chinese, Japanese, and Korean.
+ */
+function ambiguousWide(locale: string): boolean {
+  return AMBIGUOUS_WIDE_LANGUAGES.some(language => locale.startsWith(language))
+}
 
 /**
  * The character-handling locale in force, as POSIX resolves it.
@@ -59,9 +76,14 @@ function ctypeOf(env: FrameRequest['env']): string | undefined {
  *
  * The first two are read from the environment. Windows Terminal sets neither
  * a locale nor `TERM`, yet draws UTF-8, so its `WT_SESSION` stands in for
- * both. The third cannot be detected. It is a terminal preference, not a
- * capability, so a CJK character locale stands in for it. The profile's own
- * setting overrides all three.
+ * both. On native Windows neither applies: Node writes to the console as
+ * UTF-16, whatever the code page, and `TERM` is not a Windows convention, so
+ * any console there can draw the frame. The third cannot be detected. It is a
+ * terminal preference, not a capability, so a CJK character locale stands in
+ * for it. Windows names that locale in the system instead of the environment,
+ * and its console host draws Ambiguous characters wide under a CJK code page,
+ * so outside Windows Terminal the system locale is the signal there. The
+ * profile's own setting overrides all three.
  *
  * @param request - the profile's choice and the environment to read.
  * @returns the frame style to draw.
@@ -69,13 +91,17 @@ function ctypeOf(env: FrameRequest['env']): string | undefined {
 export function resolveFrame(request: FrameRequest): FrameStyle {
   if (request.configured !== 'auto') return request.configured
   const ctype = ctypeOf(request.env)
-  if (ctype !== undefined && AMBIGUOUS_WIDE_LANGUAGES.some(language => ctype.startsWith(language))) return 'classic'
+  if (ctype !== undefined && ambiguousWide(ctype)) return 'classic'
   const terminal = request.env['WT_SESSION']
   if (terminal === undefined || terminal === '') {
-    // No variable set means the C locale, which is not UTF-8.
-    if (ctype === undefined || !/utf-?8/.test(ctype)) return 'classic'
     const term = request.env['TERM']
-    if (term === undefined || term === '' || term === 'dumb') return 'classic'
+    if (request.platform === 'win32') {
+      if (ambiguousWide(request.systemLocale().toLowerCase()) || term === 'dumb') return 'classic'
+    } else {
+      // No variable set means the C locale, which is not UTF-8.
+      if (ctype === undefined || !/utf-?8/.test(ctype)) return 'classic'
+      if (term === undefined || term === '' || term === 'dumb') return 'classic'
+    }
   }
   return request.locale === 'zh' ? 'classic' : 'round'
 }
