@@ -9,6 +9,7 @@ import { SessionController } from './controller.ts'
 import { needsPreset, openElsewhere, openSession, type SessionOptions } from './session.ts'
 import type { Updates } from './update.ts'
 import type { Preferences } from './preferences.ts'
+import type { LoginSources } from './login.ts'
 
 interface ConnectedSession {
   readonly handle: AgentHandle
@@ -26,13 +27,13 @@ export class SessionNavigation {
    * @param ctx - settled Harness services and owning plugin context.
    * @param options - startup identity and fresh-session preset.
    * @param copy - locale-owned application labels.
-   * @param credentialRefs - configured login targets.
+   * @param login - the key references and flows `/login` offers.
    * @param changed - renderer notification.
    * @param updates - the process's updater, registered as `/update` in every session. Absent, there is no `/update`.
    * @param preferences - the terminal's settings, registered as `/settings` in every session. Absent, there is no `/settings`.
    */
   constructor(private readonly ctx: Context, private readonly options: SessionOptions & AttachmentOptions,
-    private readonly copy: TuiCopy, private readonly credentialRefs: readonly string[],
+    private readonly copy: TuiCopy, private readonly login: LoginSources,
     private readonly changed: () => void, private readonly updates?: Updates,
     private readonly preferences?: Preferences) {}
 
@@ -123,16 +124,18 @@ export class SessionNavigation {
           name: 'settings', description: this.copy.settingsCommand, recordInput: false,
           handler: ({ rawInput, signal }) => {
             const session = controller
-            return rawInput.trim() !== '' || session === undefined
-              ? { kind: 'error', text: this.copy.settingsUsage }
-              : preferences.panel(this.copy, session.interactions, signal,
-                { chooseModel: modelSignal => session.chooseModel(modelSignal) })
+            if (rawInput.trim() !== '' || session === undefined) return { kind: 'error', text: this.copy.settingsUsage }
+            const routerAccount = session.routerAccount()
+            return preferences.panel(this.copy, session.interactions, signal,
+              { chooseModel: modelSignal => session.chooseModel(modelSignal), listModels: modelSignal => session.listModels(modelSignal),
+                describeRoutes: routeSignal => session.describeRoutes(routeSignal), ...routerAccount === undefined ? {} : { routerAccount } })
           },
         }))
-        controller = new SessionController(this.ctx, agent, this.copy, this.credentialRefs,
-          () => { if (this.controller === controller && !this.closed) this.changed() }, this.options, selection)
+        controller = new SessionController(this.ctx, agent, this.copy, this.login,
+          () => { if (this.controller === controller && !this.closed) this.changed() },
+          { ...this.options, ...this.preferences === undefined ? {} : { recentModels: this.preferences } }, selection)
         this.candidate = controller
-      }, this.credentialRefs)
+      }, this.login)
       if (controller === undefined) throw new Error('tui: agent setup did not connect the session')
       await controller.replay(signal)
       signal.throwIfAborted()

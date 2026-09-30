@@ -88,3 +88,54 @@ it('delegates requests for other agents and cancels only the displayed request',
   interactions.cancel()
   await expect(decision).resolves.toBe('cancelled')
 })
+
+it('answers a picker with levels by its choice and level, and refuses a level the choice does not offer', async () => {
+  const { interactions } = await connected()
+  const signal = new AbortController().signal
+  const prompt = { title: 'Model', initial: 'm/a', levels: { label: 'Effort', none: '-' }, choices: [
+    { value: 'm/a', label: 'A', levels: { initial: '', items: [{ value: '', label: 'Default' }, { value: 'high', label: 'High' }] } },
+    { value: 'm/b', label: 'B' }] }
+  const leveled = interactions.pick(prompt, signal)
+  await vi.waitFor(() => expect(interactions.current?.kind).toBe('select'))
+  interactions.answer(interactions.current!.id, { value: 'm/a', level: 'high' })
+  await expect(leveled).resolves.toEqual({ value: 'm/a', level: 'high' })
+  const plain = interactions.pick(prompt, signal)
+  await vi.waitFor(() => expect(interactions.current?.kind).toBe('select'))
+  interactions.answer(interactions.current!.id, 'm/b')
+  await expect(plain).resolves.toEqual({ value: 'm/b' })
+  const refused = interactions.pick(prompt, signal)
+  await vi.waitFor(() => expect(interactions.current?.kind).toBe('select'))
+  interactions.answer(interactions.current!.id, { value: 'm/b', level: 'high' })
+  await expect(refused).rejects.toThrow('invalid picker answer')
+  // A plain choose takes the value of an answer that carries a level.
+  const chosen = interactions.choose(prompt, signal)
+  await vi.waitFor(() => expect(interactions.current?.kind).toBe('select'))
+  interactions.answer(interactions.current!.id, { value: 'm/a', level: '' })
+  await expect(chosen).resolves.toBe('m/a')
+})
+
+it('asks a select prompt with the picker and a sign-in field with its whole field, each withdrawn by its own signal', async () => {
+  const { interactions } = await connected()
+  const command = new AbortController()
+  const chosen = interactions.prompt({ kind: 'select', title: 'Sign in \u00b7 OpenAI', message: 'Choose how to sign in',
+    options: [{ id: 'oauth', label: 'Sign in with ChatGPT' }, { id: 'api-key', label: 'API key', description: 'paste one' }] }, command.signal)
+  await vi.waitFor(() => expect(interactions.current).toMatchObject({ kind: 'select', title: 'Sign in \u00b7 OpenAI \u00b7 Choose how to sign in',
+    initial: 'oauth', choices: [{ value: 'oauth' }, { value: 'api-key', description: 'paste one' }] }))
+  interactions.answer(interactions.current!.id, 'api-key')
+  await expect(chosen).resolves.toBe('api-key')
+  const dismissed = interactions.prompt({ kind: 'select', message: 'Which?', options: [{ id: 'a', label: 'A' }] }, command.signal)
+  await vi.waitFor(() => expect(interactions.current?.kind).toBe('select'))
+  interactions.cancel()
+  await expect(dismissed).rejects.toThrow('Authorization cancelled')
+
+  const field = new AbortController()
+  const typed = interactions.prompt({ kind: 'secret', title: 'Sign in \u00b7 DeepSeek', message: 'API key', hint: 'h', error: 'e',
+    step: { index: 2, count: 2 }, initial: 'kept', signal: field.signal }, command.signal)
+  await vi.waitFor(() => expect(interactions.current).toMatchObject({ kind: 'login', secret: true, title: 'Sign in \u00b7 DeepSeek',
+    message: 'API key', hint: 'h', error: 'e', step: { index: 2, count: 2 }, initial: 'kept' }))
+  expect(interactions.current).not.toHaveProperty('signal')
+  // A flow withdrawing the losing question leaves the command running.
+  field.abort()
+  await expect(typed).rejects.toThrow('Authorization cancelled')
+  expect(command.signal.aborted).toBe(false)
+})

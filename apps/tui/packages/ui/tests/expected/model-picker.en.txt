@@ -1,7 +1,7 @@
   note   Session: session-test
 
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ Choose model                                                                                     │
+│ Model                                                                                            │
 │ > ▌Type to filter                                                                                │
 │ ▸ mock/other                                                                                     │
 │   provider/model                                                                                 │

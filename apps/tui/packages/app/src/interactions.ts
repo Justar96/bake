@@ -3,8 +3,8 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 import { UserQuestionError } from '@deepseek-ai/dsh-user-questions'
-import type { AuthorizationPrompt } from '@deepseek-ai/dsh-authorization/types'
 import type { ChoicePrompt } from '@dsh-tui/ui/picker.tsx'
+import type { LoginPrompt } from './login.ts'
 import type { Interaction, InteractionAnswer } from '@dsh-tui/ui/interaction.tsx'
 
 interface Pending {
@@ -41,7 +41,7 @@ export class Interactions {
       if (request.agent !== agent) return next()
       return this.enqueue({ id: ++this.nextId, kind: 'questions', questions: request.questions }, request.signal,
         value => {
-          if (typeof value === 'string') throw new Error('tui: invalid question answer')
+          if (typeof value === 'string' || !('answers' in value)) throw new Error('tui: invalid question answer')
           return value
         }, () => { throw new UserQuestionError('Question cancelled', 'ASK_ABORTED') })
     }))
@@ -72,16 +72,28 @@ export class Interactions {
   }
 
   /**
-   * Ask for authorization input without storing the answer in session history.
-   * @param prompt - authorization-owned text and secrecy mode.
+   * Ask for sign-in input without storing the answer in session history. A
+   * `select` prompt is the picker every other choice uses; text and secrets
+   * are the sign-in panel.
+   * @param prompt - the field, with whatever the flow knows about its place and last refusal.
    * @param signal - command cancellation lifetime.
-   * @returns the answer, or rejects on cancellation.
+   * @returns the answer, or the chosen option's id; rejects on cancellation.
    */
-  prompt(prompt: AuthorizationPrompt, signal: AbortSignal): Promise<string> {
-    const message = prompt.kind === 'select'
-      ? `${prompt.message} (${prompt.options.map(option => `${option.id}: ${option.label}`).join(', ')})`
-      : prompt.message
-    return this.enqueue({ id: ++this.nextId, kind: 'login', message, secret: prompt.kind === 'secret' }, signal,
+  async prompt(prompt: LoginPrompt, signal: AbortSignal): Promise<string> {
+    const scope = prompt.signal === undefined ? signal : AbortSignal.any([signal, prompt.signal])
+    if (prompt.kind === 'select') {
+      const chosen = await this.choose({
+        title: prompt.title === undefined ? prompt.message : `${prompt.title} \u00b7 ${prompt.message}`,
+        initial: prompt.options[0]?.id ?? '',
+        choices: prompt.options.map(option => ({ value: option.id, label: option.label,
+          ...option.description === undefined ? {} : { description: option.description } })),
+        ...prompt.error === undefined ? {} : { warning: prompt.error },
+      }, scope)
+      if (chosen === undefined) throw new Error('Authorization cancelled')
+      return chosen
+    }
+    const { kind, signal: _signal, ...field } = prompt
+    return this.enqueue({ ...field, id: ++this.nextId, kind: 'login', secret: kind === 'secret' }, scope,
       value => {
         if (typeof value !== 'string') throw new Error('tui: invalid authorization answer')
         return value
@@ -90,14 +102,33 @@ export class Interactions {
 
   /**
    * Request a terminal-owned choice without writing conversation input.
-   * @param prompt - available values, labels, and initial selection.
+   * @param prompt - available values, labels, initial selection, and any tabs.
    * @param signal - owning command lifetime.
-   * @returns the chosen value, or undefined when dismissed.
+   * @returns the chosen value or tab, or undefined when dismissed.
    */
   choose(prompt: ChoicePrompt, signal: AbortSignal): Promise<string | undefined> {
-    return this.enqueue({ ...prompt, id: ++this.nextId, kind: 'select' }, signal, value => {
-      if (typeof value !== 'string' || !prompt.choices.some(choice => choice.value === value)) throw new Error('tui: invalid picker answer')
+    return this.enqueue({ ...prompt, id: ++this.nextId, kind: 'select' }, signal, answer => {
+      const value = typeof answer === 'string' ? answer : 'level' in answer ? answer.value : undefined
+      if (value === undefined || (!prompt.choices.some(choice => choice.value === value)
+        && !(prompt.tabs?.items ?? []).some(tab => tab.value === value))) throw new Error('tui: invalid picker answer')
       return value
+    }, () => undefined)
+  }
+
+  /**
+   * Request a choice with the level its row showed, for a prompt with
+   * `levels`. A choice without levels answers no level.
+   * @param prompt - available values, their levels, and the initial selection.
+   * @param signal - owning command lifetime.
+   * @returns the chosen value and level, or undefined when dismissed.
+   */
+  pick(prompt: ChoicePrompt, signal: AbortSignal): Promise<{ readonly value: string; readonly level?: string } | undefined> {
+    return this.enqueue({ ...prompt, id: ++this.nextId, kind: 'select' }, signal, answer => {
+      const picked = typeof answer === 'string' ? { value: answer } : 'level' in answer ? answer : undefined
+      const choice = prompt.choices.find(candidate => candidate.value === picked?.value)
+      if (picked === undefined || choice === undefined || ('level' in picked
+        && !(choice.levels?.items ?? []).some(item => item.value === picked.level))) throw new Error('tui: invalid picker answer')
+      return picked
     }, () => undefined)
   }
 

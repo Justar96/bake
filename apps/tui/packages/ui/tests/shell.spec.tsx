@@ -1,7 +1,7 @@
 /** Input integration against Ink's real key and paste channels. */
 import React from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render } from '../../../tests/render.tsx'
+import { cleanup, render, renderAt } from '../../../tests/render.tsx'
 import { App, type AppProps } from '../src/app.tsx'
 import { appendTranscript, emptyTranscript } from '../src/transcript.ts'
 import { dictionaries } from '../src/copy.ts'
@@ -252,7 +252,7 @@ describe('terminal composer', () => {
 
   it.each(['en', 'zh'] as const)('filters model choices and accepts only explicit Enter in %s', async locale => {
     const state = props({ copy: dictionaries[locale], completionLimit: 2, interaction: {
-      id: 10, kind: 'select', title: dictionaries[locale].chooseModel, initial: 'mock/current', choices: [
+      id: 10, kind: 'select', title: dictionaries[locale].modelSheet, initial: 'mock/current', choices: [
         { value: 'mock/current', label: 'mock/current', current: true },
         { value: 'mock/other', label: 'mock/other' },
         { value: 'provider/model', label: 'provider/model' },
@@ -275,19 +275,91 @@ describe('terminal composer', () => {
     expect(state.onSubmit).not.toHaveBeenCalled()
   })
 
-  it.each(['en', 'zh'] as const)('shows current effort and the provider default in %s', async locale => {
+  it.each(['en', 'zh'] as const)('draws a model sheet\'s headings, facts, and levels, and answers a level with Enter in %s', async locale => {
     const copy = dictionaries[locale]
-    const state = props({ copy, interaction: { id: 11, kind: 'select', title: copy.chooseEffort, initial: 'high', choices: [
-      { value: '', label: copy.providerDefault, description: 'low' },
-      { value: 'low', label: 'Low' }, { value: 'high', label: 'High', current: true },
-    ] } })
+    const efforts = (initial: string) => ({ initial, items: [{ value: '', label: `${copy.effortDefault} (Low)` },
+      { value: 'low', label: 'Low' }, { value: 'high', label: 'High' }] })
+    const state = props({ copy, interaction: { id: 11, kind: 'select', title: `${copy.modelSheet} \u00b7 3 ${copy.modelsFrom} Mock`,
+      initial: 'mock/current', tall: true, factAlign: ['right'], help: copy.modelSheetHelp,
+      levels: { label: copy.effortLevels, none: copy.noEffort }, choices: [
+        { value: 'mock/current', label: 'Mock Current', group: copy.recentModels, current: true, description: 'Mock',
+          facts: ['1M', copy.factThink, copy.factImage], levels: efforts('high') },
+        { value: 'mock/other', label: 'Mock Other', group: 'Mock', facts: ['128k', copy.factThink, ''], levels: efforts('') },
+        { value: 'mock/plain', label: 'Mock Plain', group: 'Mock', facts: ['8k', '', ''] },
+      ] } })
     const ui = render(<App {...state} />)
-    await vi.waitFor(() => expect(ui.lastFrame()).toContain('▸ High'))
-    await expect(ui.lastFrame() + '\n').toMatchFileSnapshot(`./expected/effort-picker.${locale}.txt`)
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('\u25b8 Mock Current'))
+    await expect(ui.lastFrame() + '\n').toMatchFileSnapshot(`./expected/model-sheet.${locale}.txt`)
+    const frame = ui.lastFrame()!
+    // A heading once per run, above the rows it heads; right-aligned context.
+    expect(frame.indexOf(`${copy.recentModels} 1`)).toBeLessThan(frame.indexOf('Mock Current'))
+    expect(frame.indexOf('Mock 2')).toBeLessThan(frame.indexOf('Mock Other'))
+    expect(frame).toMatch(/Mock Other\s+128k/)
+    expect(frame).toMatch(/Mock Plain\s+ 8k/)
+    // Left steps down from the current model's effort, and the level carries to a model that offers it.
+    ui.stdin.write('\u001b[D')
     ui.stdin.write('\u001b[B')
-    await vi.waitFor(() => expect(ui.lastFrame()).toContain(`\u25b8 ${copy.providerDefault}`))
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('\u25b8 Mock Other'))
+    // A model without levels says so, and Left or Right there changes nothing.
+    ui.stdin.write('\u001b[B')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain(`${copy.effortLevels}  ${copy.noEffort}`))
+    ui.stdin.write('\u001b[C')
+    ui.stdin.write('\u001b[A')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('\u25b8 Mock Other'))
     ui.stdin.write('\r')
-    await vi.waitFor(() => expect(state.onAnswer).toHaveBeenCalledExactlyOnceWith(11, ''))
+    await vi.waitFor(() => expect(state.onAnswer).toHaveBeenCalledExactlyOnceWith(11, { value: 'mock/other', level: 'low' }))
+  })
+
+  it('answers a choice without levels by its value alone, and carries a run\'s heading into the top edge', async () => {
+    const choices = Array.from({ length: 12 }, (_, index) => ({ value: `mock/${index}`, label: `Model ${index}`,
+      group: index < 2 ? 'First' : 'Second' }))
+    const state = props({ completionLimit: 5, interaction: { id: 15, kind: 'select', title: 'Model', initial: 'mock/0',
+      levels: { label: 'Effort', none: 'not offered' }, choices } })
+    const ui = render(<App {...state} />)
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('\u25b8 Model 0'))
+    // Without a choice that has levels, there is no levels row.
+    expect(ui.lastFrame()).not.toContain('not offered')
+    for (let step = 0; step < 6; step++) ui.stdin.write('\u001b[B')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('\u25b8 Model 6'))
+    expect(ui.lastFrame()).toMatch(/Second\s+\u2191 \d+ /)
+    ui.stdin.write('\r')
+    await vi.waitFor(() => expect(state.onAnswer).toHaveBeenCalledExactlyOnceWith(15, 'mock/6'))
+  })
+
+  it.each(['en', 'zh'] as const)('draws a picker\'s tabs and answers a neighbour on Tab and Shift-Tab in %s', async locale => {
+    const copy = dictionaries[locale]
+    const interaction = { id: 13, kind: 'select' as const, title: `${copy.settingsTitle} › ${copy.settingsAgent}`, initial: 'setting:depth',
+      choices: [{ value: 'setting:depth', label: copy.settingsSubagentDepth, description: '1' }],
+      tabs: { active: 'tab:agent', items: [
+        { value: 'tab:terminal', label: copy.settingsTerminal }, { value: 'tab:agent', label: copy.settingsAgent },
+        { value: 'tab:shell', label: copy.settingsShell },
+      ] } }
+    const forward = props({ copy, interaction })
+    const ui = render(<App {...forward} />)
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain(copy.pickerTabsHelp))
+    await expect(ui.lastFrame() + '\n').toMatchFileSnapshot(`./expected/tabbed-picker.${locale}.txt`)
+    ui.stdin.write('\t')
+    await vi.waitFor(() => expect(forward.onAnswer).toHaveBeenCalledExactlyOnceWith(13, 'tab:shell'))
+    ui.stdin.write('\t')
+    expect(forward.onAnswer).toHaveBeenCalledTimes(1)
+    ui.unmount()
+    const back = props({ copy, onCycleThinking: vi.fn(), interaction: { ...interaction, tabs: { ...interaction.tabs, active: 'tab:terminal' } } })
+    const again = render(<App {...back} />)
+    await vi.waitFor(() => expect(again.lastFrame()).toContain(copy.pickerTabsHelp))
+    again.stdin.write('\u001b[Z')
+    // Shift-Tab wraps from the first tab to the last.
+    await vi.waitFor(() => expect(back.onAnswer).toHaveBeenCalledExactlyOnceWith(13, 'tab:shell'))
+    expect(back.onCycleThinking).not.toHaveBeenCalled()
+  })
+
+  it('ignores Tab in a picker without tabs', async () => {
+    const state = props({ interaction: { id: 14, kind: 'select', title: 'Choose model', initial: 'mock/model',
+      choices: [{ value: 'mock/model', label: 'mock/model' }] } })
+    const ui = render(<App {...state} />)
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain(state.copy.pickerHelp))
+    ui.stdin.write('\t')
+    ui.stdin.write('\r')
+    await vi.waitFor(() => expect(state.onAnswer).toHaveBeenCalledExactlyOnceWith(14, 'mock/model'))
   })
 
   it('keeps an empty filtered picker open and routes Escape to cancellation', async () => {
@@ -583,12 +655,47 @@ describe('terminal composer', () => {
     expect(state.onSubmit).not.toHaveBeenCalled()
   })
 
+  it('draws a sign-in field with its heading, step, default, hint, and refusal, and asks for what is missing', async () => {
+    const url = props({ interaction: { kind: 'login', id: 5, title: 'Sign in · CLIProxyAPI', message: 'Base URL', secret: false,
+      step: { index: 1, count: 2 }, fallback: 'http://127.0.0.1:8317', hint: 'The proxy root', error: 'Could not reach x' } })
+    const ui = render(<App {...url} />)
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('Sign in · CLIProxyAPI'))
+    const frame = ui.lastFrame()!
+    for (const part of ['1/2', 'Base URL', '▌http://127.0.0.1:8317', 'The proxy root', '✗ Could not reach x', dictionaries.en.loginRetryHelp]) {
+      expect(frame).toContain(part)
+    }
+    // An empty field with a default submits empty, and the flow applies the default.
+    ui.stdin.write('\r')
+    await vi.waitFor(() => expect(url.onAnswer).toHaveBeenCalledExactlyOnceWith(5, ''))
+    ui.unmount()
+    const key = props({ interaction: { kind: 'login', id: 6, message: 'API key', secret: true, error: 'The proxy rejected this API key' } })
+    const view = render(<App {...key} />)
+    await vi.waitFor(() => expect(view.lastFrame()).toContain('rejected'))
+    view.stdin.write('\r')
+    await vi.waitFor(() => expect(view.lastFrame()).toContain(dictionaries.en.loginEmpty))
+    expect(key.onAnswer).not.toHaveBeenCalled()
+    // Typing replaces the refusal, which described the answer that was.
+    view.stdin.write('k')
+    await vi.waitFor(() => expect(view.lastFrame()).toContain('\u2022▌'))
+    expect(view.lastFrame()).not.toContain('rejected')
+    expect(view.lastFrame()).not.toContain(dictionaries.en.loginEmpty)
+    expect(view.lastFrame()).toContain(dictionaries.en.loginHelp)
+  })
+
+  it('opens a sign-in field on the answer that failed', async () => {
+    const state = props({ interaction: { kind: 'login', id: 7, message: 'Base URL', secret: false, initial: 'http://typo' } })
+    const ui = render(<App {...state} />)
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('> http://typo▌'))
+    ui.stdin.write('\r')
+    await vi.waitFor(() => expect(state.onAnswer).toHaveBeenCalledExactlyOnceWith(7, 'http://typo'))
+  })
+
   it('keeps login secrets out of rendered frames and the model composer', async () => {
     const state = props({ interaction: { kind: 'login', id: 2, message: 'API key', secret: true } })
     const ui = render(<App {...state} />)
     await vi.waitFor(() => expect(ui.lastFrame()).toContain('API key'))
     ui.stdin.write('\u001b[200~private-test-value\u001b[201~')
-    await vi.waitFor(() => expect(ui.lastFrame()).toContain('******************'))
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('\u2022'.repeat('private-test-value'.length)))
     ui.stdin.write('\r')
     await vi.waitFor(() => expect(state.onAnswer).toHaveBeenCalledWith(2, 'private-test-value'))
     expect(ui.frames.join('')).not.toContain('private-test-value')
@@ -609,6 +716,43 @@ describe('terminal composer', () => {
     expect(ui.lastFrame()).toContain(copy.nextStep)
     expect(ui.lastFrame()).toContain('Keep this instruction')
     expect(ui.lastFrame()).toContain('Partial answer')
+  })
+
+  it.each(['inline', 'fullscreen'] as const)('keeps answer controls visible beside a long plan in %s mode', async screen => {
+    const state = props({ screen, interaction: { id: 30, kind: 'questions', questions: [{
+      id: 'plan', question: 'Review this plan', detail: Array.from({ length: 35 }, (_, index) => `Plan line ${index + 1}`).join('\n'),
+      options: [{ label: 'Revise' }, { label: 'Implement' }], intent: { kind: 'plan-review', approve: 'Implement' },
+    }] } })
+    const ui = renderAt(<App {...state} />, 80, 24)
+    await vi.waitFor(() => {
+      expect(ui.lastFrame()).toContain('Revise')
+      expect(ui.lastFrame()).toContain('Implement')
+    })
+    ui.stdin.write('\u001b[6~\u001b[6~\u001b[6~')
+    await vi.waitFor(() => {
+      expect(ui.lastFrame()).toContain('Plan line 35')
+      expect(ui.lastFrame()).toContain('Revise')
+      expect(ui.lastFrame()).toContain('Implement')
+    })
+    expect(state.onAnswer).not.toHaveBeenCalled()
+  })
+
+  it('follows the caret through a long sign-in value without exposing the value after masking', async () => {
+    const initial = 'https://example.invalid/' + 'a'.repeat(80)
+    const state = props({ interaction: { kind: 'login', id: 31, message: 'Base URL', secret: false, initial } })
+    const ui = renderAt(<App {...state} />, 40, 12)
+    await vi.waitFor(() => expect(ui.lastFrame()).toMatch(/\u2026a+▌/u))
+    ui.stdin.write('\r')
+    await vi.waitFor(() => expect(state.onAnswer).toHaveBeenCalledExactlyOnceWith(31, initial))
+  })
+
+  it('keeps a long masked sign-in value caret-visible while typing', async () => {
+    const state = props({ interaction: { kind: 'login', id: 32, message: 'API key', secret: true } })
+    const ui = renderAt(<App {...state} />, 40, 12)
+    ui.stdin.write('k'.repeat(80))
+    await vi.waitFor(() => expect(ui.lastFrame()).toMatch(/\u2022+▌/u))
+    ui.stdin.write('\r')
+    await vi.waitFor(() => expect(state.onAnswer).toHaveBeenCalledExactlyOnceWith(32, 'k'.repeat(80)))
   })
 
   it('renders the complete plan and answers with the named option label', async () => {

@@ -6,6 +6,7 @@ import { formatRow, transcriptRows } from '@dsh-tui/ui'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'
 import { openSession } from '../src/session.ts'
 import { SessionController } from '../src/controller.ts'
+import type { RecentModels } from '../src/model.ts'
 import { harness, ScriptedModel, textResponse } from './harness.ts'
 
 const cleanup: (() => Promise<void>)[] = []
@@ -24,7 +25,7 @@ const info = (model: string): LlmResolvedModelInfo => ({
   } },
 })
 
-async function connected() {
+async function connected(recentModels?: RecentModels) {
   const fixture = await harness()
   cleanup.push(fixture.dispose)
   let controller!: SessionController
@@ -33,19 +34,21 @@ async function connected() {
   const resolve = vi.spyOn(fixture.model, 'resolveModel').mockImplementation(async (_provider, model) => info(model))
   const handle = await openSession(fixture.ctx, {}, new AbortController().signal, (agent, ref) => {
     selection = ref
-    controller = new SessionController(fixture.ctx, agent, dictionaries.en, [], () => {}, { attachmentMaxBytes: 1048576, attachmentLimit: 8 }, ref)
+    controller = new SessionController(fixture.ctx, agent, dictionaries.en, { refs: [] }, () => {},
+      { attachmentMaxBytes: 1048576, attachmentLimit: 8, ...recentModels === undefined ? {} : { recentModels } }, ref)
   })
   cleanup.push(async () => { controller.close(); await controller.drain(); await handle.dispose() })
   await controller.replay(new AbortController().signal)
-  const picker = async (title: string) => {
-    await vi.waitFor(() => expect(controller.view.interaction).toMatchObject({ kind: 'select', title }))
+  /** The open `/model` sheet. */
+  const picker = async () => {
+    await vi.waitFor(() => expect(controller.view.interaction).toMatchObject({ kind: 'select', tall: true }))
     const active = controller.view.interaction!
     if (active.kind !== 'select') throw new Error('Expected picker')
     return active
   }
-  const chooseModel = async (route: string) => {
-    const active = await picker(dictionaries.en.chooseModel)
-    controller.interactions.answer(active.id, route)
+  const chooseModel = async (route: string, level?: string) => {
+    const active = await picker()
+    controller.interactions.answer(active.id, level === undefined ? route : { value: route, level })
   }
   return { ...fixture, handle, controller, selection, resolve, picker, chooseModel }
 }
@@ -55,11 +58,12 @@ describe('/model', () => {
     const { controller, model } = await connected()
     controller.argumentQuery({ name: 'model', partial: 'mock/o' })
     await controller.drain()
-    expect(controller.view.completion.argument?.entries).toContain('mock/other')
+    const values = () => controller.view.completion.argument?.entries.map(entry => typeof entry === 'string' ? entry : entry.value)
+    expect(values()).toContain('mock/other')
     const reads = vi.mocked(model.listModels).mock.calls.length
     controller.argumentQuery({ name: 'model', partial: 'mock/p' })
     await controller.drain()
-    expect(controller.view.completion.argument?.entries).toContain('mock/plain')
+    expect(values()).toContain('mock/plain')
     expect(vi.mocked(model.listModels).mock.calls).toHaveLength(reads)
   })
 
@@ -76,7 +80,7 @@ describe('/model', () => {
         return release.promise
       })
       handle = await openSession(fixture.ctx, {}, new AbortController().signal, (agent, ref) => {
-        controller = new SessionController(fixture.ctx, agent, dictionaries.en, [], () => { paints += 1 },
+        controller = new SessionController(fixture.ctx, agent, dictionaries.en, { refs: [] }, () => { paints += 1 },
           { attachmentMaxBytes: 1048576, attachmentLimit: 8 }, ref)
       })
       await began.promise
@@ -101,15 +105,14 @@ describe('/model', () => {
     await handle.agent.whenIdle()
     const before = { ...selection.current }
     controller.submit('/model')
-    const routes = await picker(dictionaries.en.chooseModel)
+    const routes = await picker()
     expect(routes.initial).toBe('mock/model')
     expect(routes.choices.find(choice => choice.value === 'mock/model')?.current).toBe(true)
-    await chooseModel('mock/other')
-    const efforts = await picker('Choose reasoning effort: mock/other')
-    expect(efforts.choices.map(choice => choice.value)).toEqual(['', 'low', 'high'])
+    // The efforts ride on the sheet's levels row: one step, no second picker.
+    expect(routes.choices.find(choice => choice.value === 'mock/other')?.levels?.items.map(item => item.value)).toEqual(['', 'low', 'high'])
     expect(selection.current).toEqual(before)
     expect(model.requests).toHaveLength(1)
-    controller.interactions.answer(efforts.id, 'high')
+    await chooseModel('mock/other', 'high')
     await controller.drain()
     expect(selection.current).toEqual({ provider: 'mock', model: 'other', reasoningEffort: 'high' })
     expect(controller.view.model).toBe('mock/other')
@@ -124,17 +127,11 @@ describe('/model', () => {
       .toMatchFileSnapshot('./expected/model-selection.json')
   })
 
-  it.each(['model', 'effort'] as const)('cancels the %s stage without changing selection or sending input', async stage => {
-    const { controller, selection, model, picker, chooseModel } = await connected()
+  it('cancels the sheet without changing selection or sending input', async () => {
+    const { controller, selection, model, picker } = await connected()
     const before = { ...selection.current }
     controller.submit('/model')
-    const first = await picker(dictionaries.en.chooseModel)
-    if (stage === 'effort') {
-      await chooseModel('mock/other')
-      const second = await picker('Choose reasoning effort: mock/other')
-      controller.interactions.answer(first.id, 'mock/plain')
-      expect(controller.view.interaction?.id).toBe(second.id)
-    }
+    await picker()
     controller.cancel()
     await controller.drain()
     expect(controller.view.interaction).toBeUndefined()
@@ -148,10 +145,11 @@ describe('/model', () => {
     controller.submit('/model mock/model high')
     await controller.drain()
     controller.submit('/model')
-    await chooseModel('mock/model')
-    const efforts = await picker('Choose reasoning effort: mock/model')
-    expect(efforts.initial).toBe('high')
-    controller.interactions.answer(efforts.id, '')
+    const sheet = await picker()
+    // The current model opens on its effort, and another that offers the same one opens on it too.
+    expect(sheet.choices.find(choice => choice.value === 'mock/model')?.levels?.initial).toBe('high')
+    expect(sheet.choices.find(choice => choice.value === 'mock/other')?.levels?.initial).toBe('high')
+    await chooseModel('mock/model', '')
     await controller.drain()
     expect(selection.current).toEqual({ provider: 'mock', model: 'model' })
     expect(controller.view.thinkingLevel).toBe('low')
@@ -161,9 +159,10 @@ describe('/model', () => {
     expect(handle.agent.session.requestHeader()?.adapterDefaults?.reasoningEffort).toBe(true)
   })
 
-  it('accepts models without reasoning controls without an extra picker', async () => {
-    const { controller, selection, chooseModel } = await connected()
+  it('accepts models without reasoning controls, which offer no levels', async () => {
+    const { controller, selection, picker, chooseModel } = await connected()
     controller.submit('/model')
+    expect((await picker()).choices.find(choice => choice.value === 'mock/plain')?.levels).toBeUndefined()
     await chooseModel('mock/plain')
     await controller.drain()
     expect(controller.view.interaction).toBeUndefined()
@@ -188,7 +187,7 @@ describe('/model', () => {
     vi.spyOn(unavailable, 'listModels').mockRejectedValue(new Error('Offline'))
     ctx.llm.registerAdapter(['offline'], unavailable)
     controller.submit('/model')
-    const active = await picker(dictionaries.en.chooseModel)
+    const active = await picker()
     expect(active.choices.map(choice => choice.value)).toEqual(['mock/model'])
     expect(active.warning).toBe('Unavailable model catalogs: offline')
     controller.cancel()
@@ -214,11 +213,38 @@ describe('/model', () => {
   it('withdraws an open picker and settles the command during terminal shutdown', async () => {
     const { controller, selection, picker } = await connected()
     controller.submit('/model')
-    await picker(dictionaries.en.chooseModel)
+    await picker()
     controller.close()
     await controller.drain()
     expect(controller.view.interaction).toBeUndefined()
     expect(selection.current?.model).toBe('model')
+  })
+
+  it('leads with Recent, then each provider newest first, and puts each choice first on Recent', async () => {
+    const remembered: string[] = []
+    const recent: RecentModels = { recentModels: ['mock/plain', 'gone/model'],
+      rememberModel: async route => { remembered.push(route) } }
+    const { controller, model, resolve, picker, chooseModel } = await connected(recent)
+    const names: Record<string, string> = { model: 'Mock 2', old: 'Mock 1', other: 'Mock 3', plain: 'Plain' }
+    vi.mocked(model.listModels).mockResolvedValue(['model', 'old', 'other', 'plain'].map(id => ({ provider: 'mock', id, name: names[id]!,
+      ...id === 'plain' ? { inputModalities: ['text', 'image'] } : {} })))
+    resolve.mockImplementation(async (_provider, id) => ({ ...info(id), name: names[id] ?? id }))
+    controller.submit('/model')
+    const sheet = await picker()
+    // Recent holds the current model, then the routes chosen before that still exist, and nothing twice.
+    expect(sheet.choices.map(choice => [choice.group, choice.value])).toEqual([
+      [dictionaries.en.recentModels, 'mock/model'], [dictionaries.en.recentModels, 'mock/plain'],
+      [expect.any(String), 'mock/other'], [expect.any(String), 'mock/old'],
+    ])
+    expect(sheet.title).toMatch(/^Model · 4 from /)
+    expect(sheet.choices.find(choice => choice.value === 'mock/plain')?.facts).toEqual(['', '', dictionaries.en.factImage])
+    expect(sheet.choices.find(choice => choice.value === 'mock/other')?.facts).toEqual(['', dictionaries.en.factThink, ''])
+    await chooseModel('mock/other', 'low')
+    await controller.drain()
+    expect(remembered).toEqual(['mock/other'])
+    controller.submit('/model mock/plain')
+    await controller.drain()
+    expect(remembered).toEqual(['mock/other', 'mock/plain'])
   })
 
   it('rejects unknown routes, unsupported efforts, and excess arguments without mutation', async () => {
@@ -252,7 +278,7 @@ describe('/model', () => {
     let resumed!: SessionController
     const next = await openSession(ctx, { resume: id }, new AbortController().signal, (agent, ref) => {
       restored = ref
-      resumed = new SessionController(ctx, agent, dictionaries.en, [], () => {}, { attachmentMaxBytes: 1048576, attachmentLimit: 8 }, ref)
+      resumed = new SessionController(ctx, agent, dictionaries.en, { refs: [] }, () => {}, { attachmentMaxBytes: 1048576, attachmentLimit: 8 }, ref)
     })
     cleanup.push(async () => { resumed.close(); await resumed.drain(); await next.dispose() })
     expect(restored.current).toEqual({ provider: 'mock', model: 'other', ...effort === undefined ? {} : { reasoningEffort: effort } })

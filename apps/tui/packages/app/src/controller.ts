@@ -11,24 +11,28 @@ import type {} from '@deepseek-ai/dsh-compaction'
 import type {} from '@deepseek-ai/dsh-agent-presets'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import { attachmentSummaries } from '@dsh-tui/ui/rows.ts'
-import { Actions, announcedCalls, appendTranscript, emptyTranscript, project, projector, SETTLES, suggestCommand, type Projector, type Row } from '@dsh-tui/ui'
+import { Actions, appendTranscript, emptyTranscript, foldEvent, project, projector, suggestCommand, type Projector, type Row } from '@dsh-tui/ui'
 import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
 import { AttachmentDraft, type AttachmentOptions } from './attachments.ts'
 import { LiveBlocks } from './live.ts'
 import { Printed } from './printed.ts'
 import { Interactions } from './interactions.ts'
 import { InputCatalog } from './catalog.ts'
-import { SubagentCatalog, subagentEntries } from './subagents.ts'
+import { SubagentCatalog, subagentEntries, workflowEntries } from './subagents.ts'
 import { subagentStatus } from '@dsh-tui/ui/subagents.tsx'
 import { SubagentInspection } from './inspection.ts'
 import { FileReferences } from './references.ts'
-import { listTargets, login } from './login.ts'
+import { listTargets, login, logout, startingModel, type LoginSources, type LoginTarget } from './login.ts'
+import type { ChoiceStatus } from '@dsh-tui/ui/picker.tsx'
 import { bakeVersion, changelogFor } from './release.ts'
 import { contextFor, goalFor, usageFor } from './status.ts'
 import { processHost, terminalSetup, type TerminalHost } from './terminal-setup.ts'
-import { listRoutes, namesRoute, routeOf, resolveRoute, resolveSelection } from './model.ts'
+import { listRoutes, loadModelSheet, modelSheetPrompt, namesRoute, routeOf, resolveRoute, resolveSelection,
+  type ModelCatalog, type RecentModels } from './model.ts'
+import type { RouterAccountControls, RouteView } from './preferences.ts'
 import type { ModelSelection, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
+import type {} from '@deepseek-ai/dsh-tool-subagent/model-selection-settings'
 // Empty type imports. Each declaration-merges a key into the projection map
 // (`contextPressure`, `todos`), and those keys are invisible here without them.
 import type {} from '@deepseek-ai/dsh-token-meter'
@@ -65,6 +69,8 @@ export class SessionController {
   private reasoningLoad: Promise<void> | undefined
   /** Queued saves of the chosen model as the new-session default. */
   private remembering: Promise<void> | undefined
+  /** Models chosen before, which the `/model` sheet leads with; absent, it leads with the current one alone. */
+  private readonly recent: RecentModels | undefined
   /** Rows for the attempt currently streaming that have not printed yet. */
   private blocks: readonly Row[] = []
   /**
@@ -96,16 +102,18 @@ export class SessionController {
    * @param ctx - terminal-owned context.
    * @param agent - the exact agent being connected.
    * @param copy - localized labels.
-   * @param credentialRefs - profile-owned credential names used by /login.
+   * @param login - the key references and flows `/login` offers.
    * @param changed - renderer notification; ignored after closure.
    * @param attachmentOptions - validated draft byte and count limits, and, for
    *   tests, the environment and home `/terminal-setup` reads instead of this process's.
    * @param selection - harness reference for the active model selection, when available.
    */
   constructor(private readonly ctx: Context, readonly agent: Agent, private readonly copy: TuiCopy,
-    private readonly credentialRefs: readonly string[], private readonly changed: () => void,
-    attachmentOptions: AttachmentOptions & { readonly terminal?: TerminalHost }, private readonly selection?: ModelSelectionRef) {
-    this.attachments = new AttachmentDraft(agent, attachmentOptions, copy)
+    private readonly login: LoginSources, private readonly changed: () => void,
+    options: AttachmentOptions & { readonly terminal?: TerminalHost; readonly recentModels?: RecentModels },
+    private readonly selection?: ModelSelectionRef) {
+    this.attachments = new AttachmentDraft(agent, options, copy)
+    this.recent = options.recentModels
     // The tool registry is the lookup. A tool contributed by any plugin
     // presents its own calls here without this surface knowing it exists. A
     // profile with no tools service renders every call at its raw arguments.
@@ -146,8 +154,21 @@ export class SessionController {
     })))
     this.off.push(agent.ctx.effect(() => commands.register({
       name: 'login', description: copy.signIn, input: { hint: copy.loginHint,
-        choices: async (_agent, _partial, signal) => { const targets = await listTargets(this.ctx, this.credentialRefs); signal.throwIfAborted(); return targets.map(target => target.id) } }, recordInput: false,
+        choices: async (_agent, _partial, signal) => {
+          const targets = await listTargets(this.ctx, this.login)
+          signal.throwIfAborted()
+          return targets.map(target => ({ value: target.name, description: this.summary(target) }))
+        } }, recordInput: false,
       handler: ({ rawInput, signal }) => this.runLogin(rawInput.trim(), signal),
+    })))
+    this.off.push(agent.ctx.effect(() => commands.register({
+      name: 'logout', description: copy.signOut, input: { hint: copy.logoutHint,
+        choices: async (_agent, _partial, signal) => {
+          const targets = await listTargets(this.ctx, this.login)
+          signal.throwIfAborted()
+          return targets.filter(target => target.configured).map(target => ({ value: target.name, description: this.summary(target) }))
+        } },
+      handler: ({ rawInput, signal }) => this.runLogout(rawInput.trim(), signal),
     })))
     this.off.push(agent.ctx.effect(() => commands.register({
       name: 'model', description: copy.selectModel, input: { hint: copy.modelHint,
@@ -156,7 +177,8 @@ export class SessionController {
           if (llm === undefined) return []
           const current = this.selection?.current
           if (current === undefined) return []
-          return (await listRoutes(llm, current, signal)).entries.map(entry => entry.route)
+          return (await listRoutes(llm, current, signal)).entries.map(entry => ({ value: entry.route,
+            ...namesRoute(entry.name, entry.route) ? {} : { description: entry.name } }))
         } }, recordInput: false,
       handler: ({ rawInput, signal }) => this.runModel(rawInput.trim(), signal),
     })))
@@ -167,7 +189,7 @@ export class SessionController {
         if (/\s/.test(requested)) return { kind: 'error', text: copy.agentsUsage }
         const entries = await this.subagents.list(signal)
         if (entries === undefined) return { kind: 'error', text: copy.subagentsUnavailable }
-        const children = subagentEntries(this.subagents.view, ctx, copy)
+        const children = this.view.subagents
         if (children.length === 0) return { kind: 'success', text: copy.noSubagents }
         // An id opens that child directly, as the agents sheet's Enter does.
         if (requested !== '' && !children.some(child => child.id === requested)) return { kind: 'error', text: copy.agentsUsage }
@@ -259,7 +281,7 @@ export class SessionController {
       // the user may need after the notice region has moved on.
       handler: ({ rawInput, signal }) => rawInput.trim() !== ''
         ? { kind: 'error', text: copy.terminalSetupUsage }
-        : terminalSetup(attachmentOptions.terminal ?? processHost(),
+        : terminalSetup(options.terminal ?? processHost(),
           (prompt, asked) => this.interactions.choose(prompt, asked), copy, signal),
     })))
     this.off.push(ctx.on('session/event', (session, event) => {
@@ -300,7 +322,7 @@ export class SessionController {
     if (projections === undefined) throw new Error('tui: sessionProjections is required')
     this.off.push(projections.onChanged((session, key) => {
       if (session !== agent.session) return
-      if (key === 'inbox' || key === 'contextPressure' || key === 'todos' || key === 'plan' || key === 'permissions' || key === 'goal') this.repaint()
+      if (key === 'inbox' || key === 'contextPressure' || key === 'todos' || key === 'plan' || key === 'permissions' || key === 'goal' || key === 'workflows') this.repaint()
     }))
     // Activation is process-local and is not written to the goal projection.
     // Create and resume arm the goal; pause disarms it. Those transitions
@@ -343,7 +365,7 @@ export class SessionController {
     const pending = (['next-step', 'next-turn'] as const).flatMap(target => inbox[target]
       .filter(message => message.source.kind === 'user')
       .map(message => ({ id: message.id, target, text: message.content.flatMap(block => block.type === 'text' ? [block.text] : []).join(''), attachments: attachmentSummaries(message.content) })))
-    const surface = projections?.snapshot(this.agent.session, ['contextPressure', 'plan', 'tokenUsage', 'permissions']).values
+    const surface = projections?.snapshot(this.agent.session, ['contextPressure', 'plan', 'tokenUsage', 'permissions', 'workflows']).values
     const pressure = surface?.contextPressure
     // The agent's current list, not a log of writes to it. `todos` folds every
     // `todo/write` to the latest whole list, which is the only version that
@@ -352,9 +374,13 @@ export class SessionController {
     const plan = surface?.plan
     const goal = this.goal()
     const children = this.subagents.view
-    const subagents = subagentEntries(children, this.ctx, this.copy)
+    const workflows = surface?.workflows ?? []
+    const subagents = subagentEntries(children, this.ctx, this.copy, workflows)
     const selected = this.selection?.current
-    const model = selected === undefined ? `${this.agent.options.provider}/${this.agent.options.model}` : routeOf(selected)
+    // A session can start on no model: nothing is the default until a sign-in.
+    const model = selected !== undefined ? routeOf(selected)
+      : this.agent.options.provider !== undefined && this.agent.options.model !== undefined
+        ? `${this.agent.options.provider}/${this.agent.options.model}` : undefined
     const usage = usageFor(surface?.tokenUsage)
     const reasoning = selected === undefined || this.reasoning?.route !== routeOf(selected) ? undefined : this.reasoning.info
     const thinkingLevel = selected?.reasoningEffort ?? reasoning?.defaultEffort
@@ -369,6 +395,7 @@ export class SessionController {
       todos: todos === undefined || todos === null ? undefined
         : todos.map(item => ({ text: item.content, status: item.status })),
       subagents,
+      workflows: workflowEntries(workflows, this.agent.status === 'running'),
       inspection: this.inspection?.view,
       ...plan === undefined ? {} : { plan },
       ...goal === undefined ? {} : { goal },
@@ -376,7 +403,7 @@ export class SessionController {
       ...thinkingLevel === undefined ? {} : { thinkingLevel },
       completion: this.catalog.view, files: this.references.view, attachments: this.attachments.view,
       model,
-      context: contextFor(pressure, model, this.compactionEngines()),
+      context: model === undefined ? undefined : contextFor(pressure, model, this.compactionEngines()),
       ...usage === undefined ? {} : { usage },
     }
   }
@@ -439,6 +466,8 @@ export class SessionController {
     }
     if (parsed === undefined || commands?.find(this.agent, parsed.name) === undefined) {
       if (this.command !== undefined && parseCommand(this.command.text)?.name === 'attach') { this.notify(this.copy.commandBusy); return false }
+      // No provider is the default: a message waits in the composer until one is chosen.
+      if (this.modelless() && (text.trim() !== '' || this.attachments.pending)) { this.notify(this.copy.noModelSubmit); return false }
       if (this.attachments.pending) {
         // Compaction leaves the draft alone, so staged files may queue behind it.
         if (this.command !== undefined && this.command.compactPhase === undefined) { this.notify(this.copy.commandBusy); return false }
@@ -525,13 +554,24 @@ export class SessionController {
   }
 
   /**
-   * Report that no provider can answer, without reading credential values.
-   * One configured key or a configured CLIProxyAPI is enough to start.
+   * Report that no provider can answer, without reading credential values,
+   * and put `/login` first in the command menu until one can. One signed-in
+   * target is enough to start.
    * @returns after credential metadata has been inspected.
    */
   async reportCredentials(): Promise<void> {
-    const targets = await listTargets(this.ctx, this.credentialRefs)
-    if (targets.some(target => target.kind === 'key') && !targets.some(target => target.configured)) this.notify(this.copy.noCredentials)
+    if (!await this.signedIn()) this.notify(this.copy.noCredentials)
+  }
+
+  /**
+   * Whether any target is signed in, ranking `/login` first in the menu while none is.
+   * @returns false when targets exist and none is configured.
+   */
+  private async signedIn(): Promise<boolean> {
+    const targets = await listTargets(this.ctx, this.login)
+    const any = targets.length === 0 || targets.some(target => target.configured)
+    this.catalog.prefer(any ? [] : ['login'])
+    return any
   }
 
   /** Stop observers and settle human requests synchronously before terminal release. */
@@ -588,10 +628,68 @@ export class SessionController {
     return result
   }
 
+  /**
+   * Every model the harness's providers advertise, as `/model` lists them,
+   * for a picker outside it such as `/settings`.
+   * @param signal - the calling command's lifetime.
+   * @returns the catalog, or undefined without an LLM service or a model selection.
+   */
+  async listModels(signal: AbortSignal): Promise<ModelCatalog | undefined> {
+    const llm = this.agent.ctx.get('llm')
+    const current = this.selection?.current
+    if (llm === undefined || current === undefined) return undefined
+    return listRoutes(llm, current, signal)
+  }
+
+  /**
+   * The task router's view of each model new Sessions may use, sent with the
+   * same model info a routed delegation sends, for `/settings`.
+   * @param signal - the calling command's lifetime.
+   * @returns one view per allowed model, in their order.
+   */
+  describeRoutes(signal: AbortSignal): Promise<readonly RouteView[]> {
+    const settings = this.ctx.get('subagentModelSelection')
+    if (settings === undefined) return Promise.reject(new Error('subagent model selection is not installed'))
+    return settings.describeRoutes(this.agent.ctx.get('llm'), signal)
+  }
+
+  /**
+   * The task router's email sign-in for `/settings`, which stores the token
+   * it issues through the credential store.
+   * @returns the sign-in controls, or undefined without subagent model selection.
+   */
+  routerAccount(): RouterAccountControls | undefined {
+    const settings = this.ctx.get('subagentModelSelection')
+    if (settings === undefined) return undefined
+    return {
+      status: () => settings.routerTokenStatus(),
+      account: signal => settings.routerAccount(signal),
+      requestCode: (email, signal) => settings.requestSignInCode(email, signal),
+      signIn: (email, code, signal) => settings.signIn(email, code, signal),
+      signOut: signal => settings.signOut(signal),
+    }
+  }
+
   /** @returns after outstanding command, catalog, and default-model work has settled. */
   async drain(): Promise<void> {
     await Promise.all([this.submission?.done, this.command?.done, this.reasoningLoad, this.remembering,
       this.catalog.drain(), this.subagents.drain(), this.references.drain()])
+  }
+
+  /**
+   * Install one accepted route and its already-resolved reasoning controls.
+   * Login and `/model` use the same commit so a first sign-in is immediately
+   * as capable as an explicit model change.
+   * @param selection - validated provider, model, and optional effort.
+   * @param reasoning - route capabilities, when the adapter supplied them.
+   */
+  private commitSelection(selection: ModelSelection, reasoning?: LlmModelReasoningInfo): void {
+    this.reasoningRevision += 1
+    this.reasoning = { route: routeOf(selection), info: reasoning }
+    if (this.selection !== undefined) this.selection.current = selection
+    this.rememberSelection(selection)
+    this.rememberRecent(routeOf(selection))
+    this.repaint()
   }
 
   /**
@@ -606,6 +704,30 @@ export class SessionController {
     this.remembering = (this.remembering ?? Promise.resolve()).then(() => defaults.saveSelection(selection)).catch((error: unknown) => {
       if (!this.closed) this.notify(`${this.copy.settingsFailed}: ${error instanceof Error ? error.message : String(error)}`)
     })
+  }
+
+  /**
+   * Put a chosen model first on the sheet's Recent list. Queued behind the
+   * default-model write, so a failure reports once and `drain` awaits both.
+   */
+  private rememberRecent(route: string): void {
+    const recent = this.recent
+    if (recent === undefined) return
+    this.remembering = (this.remembering ?? Promise.resolve()).then(() => recent.rememberModel(route)).catch((error: unknown) => {
+      if (!this.closed) this.notify(`${this.copy.settingsFailed}: ${error instanceof Error ? error.message : String(error)}`)
+    })
+  }
+
+  /**
+   * What to call providers their adapters name only by id: the label of the
+   * sign-in that added them, as `openai` is OpenAI.
+   * @param signal - the command's lifetime.
+   * @returns labels by provider id.
+   */
+  private async providerNames(signal: AbortSignal): Promise<ReadonlyMap<string, string>> {
+    const targets = await listTargets(this.ctx, this.login).catch(() => [])
+    signal.throwIfAborted()
+    return new Map(targets.flatMap(target => target.provider === undefined ? [] : [[target.provider, target.label] as const]))
   }
 
   /** Read only the selected route's advertised default; explicit efforts need no lookup. */
@@ -685,10 +807,7 @@ export class SessionController {
       this.stream.printed = new Printed()
     }
     // A step end follows every action it made, finished or not.
-    const out = this.actions.fold(rows, SETTLES.has(event.type))
-    // After the fold. The message settles the step before it, so its calls
-    // keep their places until the loop dispatches each one.
-    if (event.type === 'assistant/message') this.actions.announce(announcedCalls(event))
+    const out = foldEvent(event, rows, this.actions)
     this.committed = appendTranscript(this.committed, out)
     return out
   }
@@ -756,46 +875,20 @@ export class SessionController {
       let [route, effort] = args
       if (route === undefined) {
         this.notify(this.copy.modelsLoading)
-        const catalog = await listRoutes(llm, current, signal)
+        const sheet = await loadModelSheet(llm, current, this.recent?.recentModels ?? [], signal, await this.providerNames(signal))
         signal.throwIfAborted()
         this.notify(undefined)
-        route = await this.interactions.choose({
-          title: this.copy.chooseModel, initial: routeOf(current),
-          choices: catalog.entries.map(entry => ({ value: entry.route, label: entry.route, current: entry.current,
-            ...namesRoute(entry.name, entry.route) ? {} : { description: entry.name } })),
-          ...catalog.unavailable.length === 0 ? {} : { warning: `${this.copy.modelCatalogError}: ${catalog.unavailable.join(', ')}` },
-        }, signal)
+        const picked = await this.interactions.pick(modelSheetPrompt(sheet, current, this.copy), signal)
         signal.throwIfAborted()
-        if (route === undefined) return { kind: 'success', text: this.copy.modelCancelled }
-        const info = await resolveRoute(llm, route, signal)
-        if (info === undefined) return { kind: 'error', text: `${this.copy.unknownModel}: ${route}` }
-        if ((info.reasoning?.efforts.length ?? 0) > 0) {
-          const sameRoute = route === routeOf(current)
-          const picked = await this.interactions.choose({
-            title: `${this.copy.chooseEffort}: ${route}`,
-            initial: sameRoute ? current.reasoningEffort ?? '' : '',
-            choices: [
-              { value: '', label: this.copy.providerDefault, current: sameRoute && current.reasoningEffort === undefined,
-                ...info.reasoning?.defaultEffort === undefined ? {} : { description: info.reasoning.defaultEffort } },
-              ...info.reasoning!.efforts.map(item => ({ value: item.id, label: item.name,
-                current: sameRoute && current.reasoningEffort === item.id,
-                ...item.description === undefined ? {} : { description: item.description },
-              })),
-            ],
-          }, signal)
-          signal.throwIfAborted()
-          if (picked === undefined) return { kind: 'success', text: this.copy.modelCancelled }
-          effort = picked === '' ? undefined : picked
-        }
+        if (picked === undefined) return { kind: 'success', text: this.copy.modelCancelled }
+        route = picked.value
+        effort = picked.level === undefined || picked.level === '' ? undefined : picked.level
       }
       const result = await resolveSelection(llm, route, effort, signal)
       signal.throwIfAborted()
       switch (result.kind) {
         case 'selected':
-          this.reasoningRevision += 1
-          this.reasoning = { route: routeOf(result.selection), info: result.reasoning }
-          selection.current = result.selection
-          this.rememberSelection(result.selection)
+          this.commitSelection(result.selection, result.reasoning)
           return { kind: 'success', text: `${this.copy.modelSelected}: ${routeOf(result.selection)}${result.selection.reasoningEffort === undefined ? '' : ` (${result.selection.reasoningEffort})`}` }
         case 'unknown-effort': return { kind: 'error', text: `${this.copy.unknownEffort}: ${result.offered.join(' ')}` }
         case 'unknown-route': return { kind: 'error', text: `${this.copy.unknownModel}: ${result.route} (${routeOf(current)})` }
@@ -808,35 +901,159 @@ export class SessionController {
     }
   }
 
+  /**
+   * One target's standing: configured, from the environment, or not set.
+   * @param target - the sign-in target.
+   * @returns the status the picker draws in its aligned column.
+   */
+  private status(target: LoginTarget): ChoiceStatus {
+    if (!target.configured) return { text: this.copy.notSet }
+    return { text: target.source === 'env' ? this.copy.fromEnvironment : this.copy.configured, tone: 'done' }
+  }
+
+  /**
+   * Where a target lives and what it takes: the key reference, the proxy's
+   * host, a flow's ways in, and whether this surface can change it.
+   * @param target - the sign-in target.
+   * @returns dim text beside the label.
+   */
+  private detail(target: LoginTarget): string {
+    return [target.detail ?? (target.kind === 'cliproxyapi' ? this.copy.cliProxySetupHint : undefined),
+      target.writable ? undefined : this.copy.readOnly].filter(part => part !== undefined && part !== '').join(' \u00b7 ')
+  }
+
+  /** A target as one line for the argument menu, which has no status column. */
+  private summary(target: LoginTarget): string {
+    return [target.label, this.status(target).text, this.detail(target)].filter(part => part !== '').join(' \u00b7 ')
+  }
+
+  /** Whether no model is selected, so a message has nothing to go to. */
+  private modelless(): boolean {
+    return this.selection !== undefined && this.selection.current === undefined
+      && (this.agent.options.provider === undefined || this.agent.options.model === undefined)
+  }
+
+  /**
+   * Start a session that had no model on the provider a first sign-in just
+   * unlocked, and save it as the default for new sessions. A route a sign-in
+   * added registers asynchronously, so its models are awaited briefly.
+   * @param target - the target signed into; its route and the model it starts on.
+   * @param signal - the command's lifetime.
+   * @returns the selected route, or undefined when none was chosen.
+   */
+  private async selectFirstModel(target: LoginTarget, signal: AbortSignal): Promise<string | undefined> {
+    const provider = target.provider
+    if (provider === undefined) return undefined
+    const llm = this.agent.ctx.get('llm')
+    if (llm === undefined || this.selection === undefined || !this.modelless()) return undefined
+    const registered = (): boolean => llm.listProviders().some(entry => entry.id === provider)
+    if (!registered()) {
+      await new Promise<void>(resolve => {
+        const done = (): void => { off(); clearTimeout(timer); signal.removeEventListener('abort', done); resolve() }
+        const off = this.ctx.on('llm/adapters-updated', () => { if (registered()) done() })
+        const timer = setTimeout(done, ROUTE_WAIT_MS)
+        signal.addEventListener('abort', done, { once: true })
+      })
+    }
+    signal.throwIfAborted()
+    const model = startingModel(target, await llm.listModels(provider).catch(() => undefined) ?? [])
+    signal.throwIfAborted()
+    if (model === undefined || !this.modelless()) return undefined
+    const selection: ModelSelection = { provider, model }
+    const info = await resolveRoute(llm, routeOf(selection), signal)
+    signal.throwIfAborted()
+    if (!this.modelless()) return undefined
+    this.commitSelection(selection, info?.reasoning)
+    return routeOf(selection)
+  }
+
   private async runLogin(id: string, signal: AbortSignal): Promise<CommandResult> {
-    const targets = await listTargets(this.ctx, this.credentialRefs)
+    const targets = await listTargets(this.ctx, this.login)
     signal.throwIfAborted()
     if (targets.length === 0) return { kind: 'error', text: this.copy.noTargets }
     const chosen = id === '' ? await this.interactions.choose({
       title: this.copy.chooseLogin,
-      initial: targets.find(target => target.id === 'cliproxyapi' && !target.configured)?.id ?? targets[0]!.id,
-      choices: targets.map(target => ({
-        value: target.id, label: target.label,
-        status: target.configured ? { text: this.copy.configured, tone: 'done' as const } : { text: this.copy.notSet },
-        description: [target.writable ? undefined : this.copy.readOnly,
-          target.kind === 'cliproxyapi' ? this.copy.cliProxySetupHint : undefined,
-        ].filter(part => part !== undefined).join(' · '),
-      })),
+      initial: (targets.find(target => target.kind === 'cliproxyapi' && !target.configured) ?? targets[0]!).name,
+      choices: targets.map(target => ({ value: target.name, label: target.label,
+        status: this.status(target), description: this.detail(target) })),
     }, signal) : id
     signal.throwIfAborted()
     if (chosen === undefined) return { kind: 'success', text: this.copy.loginCancelled }
-    const result = await login(this.ctx, targets, chosen, {
-      notify: notice => this.notify([notice.message, notice.url, notice.code].filter(value => value !== undefined).join(' ')),
-      prompt: prompt => this.interactions.prompt(prompt, signal),
-    }, signal, this.copy)
-    // Progress notices (a device code, a URL) have served their purpose.
-    this.notify(undefined)
-    if (result.kind === 'cancelled') return { kind: 'success', text: this.copy.loginCancelled }
-    if (result.kind !== 'stored') {
-      const known = targets.map(target => target.id)
-      return { kind: 'error', text: `${this.copy.unknownTarget} (${known.join(', ')})` }
+    const result = await (async () => {
+      try {
+        return await login(this.ctx, targets, chosen, {
+          notify: notice => this.notify([notice.message, notice.url, notice.code].filter(value => value !== undefined).join(' ')),
+          progress: text => this.notify(text),
+          prompt: prompt => this.interactions.prompt(prompt, signal),
+        }, signal, this.copy)
+      } finally {
+        // Progress notices (a device code, a URL, a check in flight) have served their purpose.
+        this.notify(undefined)
+      }
+    })()
+    switch (result.kind) {
+      case 'cancelled': return { kind: 'success', text: this.copy.loginCancelled }
+      case 'unknown-target': return { kind: 'error', text: this.unknownTargetText(this.copy.unknownTarget, 'login', result, targets) }
+      case 'read-only': return { kind: 'error', text: `${result.target.label}: ${result.target.id} ${this.copy.setElsewhere}` }
+      case 'stored': break
+      default: return assertNever(result)
     }
-    return { kind: 'success', text: result.models === undefined
-      ? `${result.target}: ${this.copy.stored}` : `${result.target}: ${result.models} ${result.models === 1 ? this.copy.cliProxyReadyOne : this.copy.cliProxyReady}` }
+    const { target } = result
+    await this.signedIn()
+    if (result.route === 'unwritable') return { kind: 'success', text: `${target.label}: ${this.copy.routeNeeded}` }
+    const using = await this.selectFirstModel(target, signal)
+    const models = result.models === undefined ? undefined
+      : `${result.models} ${result.models === 1 ? this.copy.modelReady : this.copy.modelsReady}`
+    if (using !== undefined) {
+      return { kind: 'success', text: `${target.label}: ${models ?? this.copy.signedIn} \u00b7 ${this.copy.nowUsing} ${using}` }
+    }
+    return { kind: 'success', text: `${target.label}: ${result.models !== undefined
+      ? `${result.models} ${result.models === 1 ? this.copy.cliProxyReadyOne : this.copy.cliProxyReady}`
+      : target.kind === 'flow' ? this.copy.signedIn : this.copy.stored}` }
+  }
+
+  private async runLogout(id: string, signal: AbortSignal): Promise<CommandResult> {
+    const targets = await listTargets(this.ctx, this.login)
+    signal.throwIfAborted()
+    const stored = targets.filter(target => target.configured)
+    if (id === '' && stored.length === 0) return { kind: 'success', text: this.copy.nothingToSignOut }
+    const chosen = id === '' ? await this.interactions.choose({
+      title: this.copy.chooseLogout, initial: stored[0]!.name,
+      choices: stored.map(target => ({ value: target.name, label: target.label,
+        status: this.status(target), description: this.detail(target) })),
+    }, signal) : id
+    signal.throwIfAborted()
+    if (chosen === undefined) return { kind: 'success', text: this.copy.logoutCancelled }
+    const result = await logout(this.ctx, targets, chosen)
+    switch (result.kind) {
+      case 'unknown-target': return { kind: 'error', text: this.unknownTargetText(this.copy.unknownLogoutTarget, 'logout', result, stored) }
+      case 'not-configured': return { kind: 'error', text: `${result.target.label}: ${this.copy.notSet}` }
+      case 'read-only': return { kind: 'error', text: result.target.kind === 'key'
+        ? `${result.target.label}: ${result.target.id} ${this.copy.setElsewhere}` : `${result.target.label}: ${this.copy.readOnly}` }
+      case 'removed': break
+      default: return assertNever(result)
+    }
+    const { target } = result
+    await this.signedIn()
+    const removed = target.kind === 'key' ? this.copy.keyRemoved : target.kind === 'cliproxyapi' ? this.copy.cliProxyRemoved : this.copy.flowRemoved
+    const stranded = target.provider !== undefined && this.selection?.current?.provider === target.provider
+    return { kind: 'success', text: `${target.label}: ${removed}${stranded ? ` \u00b7 ${this.copy.modelNeedsProvider}` : ''}` }
+  }
+
+  /**
+   * Name a target no one offers, with the nearest one or the whole list.
+   * @param label - the localized lead.
+   * @param command - the command to suggest running again.
+   * @param result - the typed name and its nearest match.
+   * @param offered - the targets the command could have meant.
+   * @returns one line for the transcript.
+   */
+  private unknownTargetText(label: string, command: 'login' | 'logout',
+    result: { readonly id: string, readonly suggestion?: string }, offered: readonly LoginTarget[]): string {
+    if (result.suggestion !== undefined) return `${label}: ${result.id} \u00b7 ${this.copy.didYouMean} /${command} ${result.suggestion}?`
+    return `${label}: ${result.id} (${offered.map(target => target.name).join(', ')})`
   }
 }
+
+/** How long a first sign-in waits for the route it added to register before leaving the choice to /model. */
+const ROUTE_WAIT_MS = 3000
