@@ -7,6 +7,7 @@ import { transcriptRows, type Transcript } from './transcript.ts'
 import type { TuiCopy } from './copy.ts'
 import type { ContextUsage, TokenTotals } from './format.ts'
 import { isNewline, useComposer, type Submit } from './composer.ts'
+import { imagePath } from './paste.ts'
 import { draftRows } from './editor.ts'
 import { argumentQuery, commandUsage, completionMenu, requiresInput, type CompletionCatalog, type CompletionChoice, type FileCatalog } from './completion.ts'
 import { inputHistory } from './history.ts'
@@ -189,6 +190,16 @@ export interface AppProps {
    */
   readonly motion?: boolean
   readonly onSubmit: Submit
+  /**
+   * Stage a pasted image: a dropped or pasted image file path, or the
+   * clipboard's image on Ctrl-V or an empty paste. Resolves to the staged
+   * attachment's key, which the draft shows as `[Image #N]`, or undefined when
+   * nothing was staged; the application reports why. A path that stages
+   * nothing is inserted as the text it was.
+   */
+  readonly onPasteImage?: (source: { readonly path: string } | { readonly clipboard: true }) => Promise<string | undefined>
+  /** One Backspace or Delete erased an `[Image #N]` placeholder; unstage its attachment. */
+  readonly onRemoveImage?: (key: string) => void
   readonly onCancel: () => void
   readonly onInterrupt: () => void
   /**
@@ -224,12 +235,13 @@ function Status({ text, tone }: { readonly text: string, readonly tone?: 'error'
  * @param props - the row to render.
  * @returns the row element.
  */
-export function RowView({ row, budget, result }: {
+export function RowView({ row, budget, frame, result }: {
   readonly row: Row
   readonly budget: Budget
+  readonly frame: FrameStyle
   readonly result: ResultBound
 }): React.ReactElement {
-  return <>{present(row, result, line => wrappedRows(line, budget), budget.measure).map((line, index) => <Line key={index} line={line} budget={budget} />)}</>
+  return <>{present(row, result, line => wrappedRows(line, budget), budget.measure).map((line, index) => <Line key={index} line={line} budget={budget} frame={frame} />)}</>
 }
 
 /**
@@ -318,7 +330,8 @@ const WHEEL_DOWN = 65
 function SessionView(props: AppProps): React.ReactElement {
   const scroll = useRef<TranscriptScroll>(null)
   const fullscreen = props.screen === 'fullscreen'
-  const composer = useComposer(props.onSubmit, () => inputHistory(props.committed, props.pending), (props.attachments?.length ?? 0) > 0)
+  const composer = useComposer(props.onSubmit, () => inputHistory(props.committed, props.pending), (props.attachments?.length ?? 0) > 0,
+    '', key => props.onRemoveImage?.(key))
   const { copy, interaction } = props
   // One arrow-key focus across the rows around the composer: the task row
   // and the goal above it, the subagents field below. Refs, because keys
@@ -434,8 +447,18 @@ function SessionView(props: AppProps): React.ReactElement {
   // keeping one owner avoids a mode-off/mode-on gap when fullscreen opens a
   // sheet or an interaction replaces the composer.
   usePaste(text => {
-    if (sheetRef.current === undefined && interaction === undefined && props.inputBlocked !== true
-      && props.inspection === undefined && !composer.submitting) composer.paste(text)
+    if (sheetRef.current !== undefined || interaction !== undefined || props.inputBlocked === true
+      || props.inspection !== undefined || composer.submitting) return
+    const path = imagePath(text)
+    // A terminal pastes nothing for a clipboard that holds only an image.
+    if (props.onPasteImage !== undefined && (path !== undefined || text === '')) {
+      void props.onPasteImage(path === undefined ? { clipboard: true } : { path }).then(key => {
+        if (key !== undefined) composer.attach(key)
+        else if (path !== undefined) composer.pasteBlock(text)
+      })
+      return
+    }
+    composer.pasteBlock(text)
   })
   useInput((text, key) => {
     if (props.inspection !== undefined) return
@@ -519,6 +542,10 @@ function SessionView(props: AppProps): React.ReactElement {
     if (key.ctrl && text === 'o' && props.goal !== undefined) { toggleSheet('goal'); return }
     if (key.ctrl && text === 't' && hasTasks) { toggleSheet('tasks'); return }
     if (key.ctrl && text === 'g' && hasSubagents) { toggleSheet('agents'); return }
+    if (key.ctrl && text === 'v' && props.onPasteImage !== undefined) {
+      void props.onPasteImage({ clipboard: true }).then(staged => { if (staged !== undefined) composer.attach(staged) })
+      return
+    }
     const focused = focusRef.current
     if (focused !== undefined && available(focused)) {
       if (focused === 'subagents') {
@@ -842,7 +869,7 @@ function SessionView(props: AppProps): React.ReactElement {
       interaction={undefined} command={undefined} notice={undefined} />
   }
   const controlsView = sheetStandalone ? sheetBlock : <>
-        {!fullscreen && sheet === undefined && <LiveRegion rows={props.live} budget={budget} limit={liveTotal} result={result} clock={animate} />}
+        {!fullscreen && sheet === undefined && <LiveRegion rows={props.live} budget={budget} frame={props.frame} limit={liveTotal} result={result} clock={animate} />}
         {/* The held rows: under the output, so what streams stays against the
             history it continues, and over the controls, which stay together. */}
         {!fullscreen && <Box flexGrow={1} />}

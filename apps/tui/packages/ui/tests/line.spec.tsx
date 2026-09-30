@@ -3,7 +3,7 @@ import React from 'react'
 import { renderToString, Text } from 'ink'
 import { describe, expect, it, vi } from 'vitest'
 import { render } from '../../../tests/render.tsx'
-import { budgetFor, CHROME_ROWS, chromeFor, COLUMN, COMPOSER_BUDGET, HINT_MIN_COLUMNS, isRenderable, MARKER, type FrameStyle } from '../src/layout.ts'
+import { budgetFor, CHROME_ROWS, chromeFor, COLUMN, COMPOSER_BUDGET, HINT_MIN_COLUMNS, isRenderable, MARKER, RULE, type FrameStyle } from '../src/layout.ts'
 import { ICON } from '../src/icons.ts'
 import { present, type PresentedLine, type ResultBound } from '../src/present.ts'
 import { Chrome, Completion, Composer, fitStanding, headerLayout, Line, StatusBar, wrappedRows, type ActivityState, type StandingState } from '../src/line.tsx'
@@ -28,11 +28,11 @@ const show = (rows: readonly React.ReactElement[], columns = 80): string =>
 describe('Line', () => {
   it('starts prose at the rail and output under the verb', () => {
     const said = show(present({ kind: 'user', text: 'hello' }, shown)
-      .map((line, index) => <Line key={index} line={line} budget={at80} />))
+      .map((line, index) => <Line key={index} line={line} budget={at80} frame="classic" />))
     // The outcome line, then the output under it.
     const result = { kind: 'tool-result' as const, callId: 'c', ok: true, text: 'result' }
     const output = show(present(result, shown)
-      .map((line, index) => <Line key={index} line={line} budget={at80} />))
+      .map((line, index) => <Line key={index} line={line} budget={at80} frame="classic" />))
 
     // A blank row opens the turn. Scrollback pays for it, not the dynamic region.
     expect(said).toBe(`\n  ${'-'.repeat(at80.measure)}\n${MARKER.turn} hello`)
@@ -41,7 +41,7 @@ describe('Line', () => {
 
   it('heads a call with its tool and the argument in parentheses', () => {
     const rendered = show(present({ kind: 'tool-call', callId: 'c', tool: 'bash', input: 'rg -n foo' }, shown)
-      .map((line, index) => <Line key={index} line={line} budget={at80} />))
+      .map((line, index) => <Line key={index} line={line} budget={at80} frame="classic" />))
     // The blank that opens the call's zone renders as an empty first row.
     expect(rendered).toBe(`\n${ICON.other} Bash(rg -n foo)`)
   })
@@ -50,7 +50,7 @@ describe('Line', () => {
     const budget = budgetFor({ columns: 300, rows: 24 })
     const text = 'word '.repeat(80).trim()
     const rendered = show(present({ kind: 'assistant', text }, shown)
-      .map((line, index) => <Line key={index} line={line} budget={budget} />), 300)
+      .map((line, index) => <Line key={index} line={line} budget={budget} frame="classic" />), 300)
     const longest = Math.max(...rendered.split('\n').map(line => line.trimEnd().length))
 
     expect(longest).toBeLessThanOrEqual(300)
@@ -62,7 +62,7 @@ describe('Line', () => {
     const columns = 120
     const budget = budgetFor({ columns, rows: 24 })
     const rendered = show(present({ kind: 'command', name: 'help', args: ` ${'x'.repeat(columns - 6)}` }, shown)
-      .map((line, index) => <Line key={index} line={line} budget={budget} />), columns)
+      .map((line, index) => <Line key={index} line={line} budget={budget} frame="classic" />), columns)
     expect(rendered.split('\n').at(-1)).toHaveLength(columns)
   })
 
@@ -70,7 +70,7 @@ describe('Line', () => {
     const budget = budgetFor({ columns: 300, rows: 24 })
     const text = 'x'.repeat(200)
     const rendered = show(present({ kind: 'tool-result', callId: 'c', ok: true, text }, shown)
-      .map((line, index) => <Line key={index} line={line} budget={budget} />), 300)
+      .map((line, index) => <Line key={index} line={line} budget={budget} frame="classic" />), 300)
 
     // The outcome, then one line. 200 characters fit after the verb.
     expect(rendered.split('\n')).toHaveLength(2)
@@ -86,7 +86,7 @@ describe('Line', () => {
       const budget = budgetFor({ columns, rows: 24 })
       const measured = wrappedRows(line, budget)
       expect(measured).toEqual(columns === 6 ? ['note', 'abcd', 'efgh'] : ['abcd', 'efgh'])
-      const rendered = show([<Line key="reused" line={line} budget={budget} />], columns)
+      const rendered = show([<Line key="reused" line={line} budget={budget} frame="classic" />], columns)
       expect(rendered).toBe(columns === 6 ? '  note\n  abcd\n  efgh' : '  note   abcd\n         efgh')
       const offset = columns === 6 ? COLUMN.rail : COLUMN.output
       expect(rendered.split('\n').map(row => row.slice(offset))).toEqual(measured)
@@ -102,7 +102,7 @@ describe('Line', () => {
       const budget = { ...budgetFor({ columns: 20, rows: 24 }), measure }
       const measured = wrappedRows(line, budget)
       expect(measured).toEqual(measure === 4 ? ['abcd', 'efgh'] : ['abcd efgh'])
-      const rendered = show([<Line key="reused" line={line} budget={budget} />], budget.columns)
+      const rendered = show([<Line key="reused" line={line} budget={budget} frame="classic" />], budget.columns)
       expect(rendered).toBe(measure === 4 ? '  abcd\n  efgh' : '  abcd efgh')
       expect(rendered.split('\n').map(row => row.slice(COLUMN.rail))).toEqual(measured)
     }
@@ -117,13 +117,20 @@ describe('Line', () => {
       { kind: 'notice' as const, placement: 'turn-end' as const, tone: 'info' as const, text: 'Completed' },
     ]
     const rendered = show(rows.flatMap(row => present(row, shown))
-      .map((line, index) => <Line key={index} line={line} budget={budget} />), columns)
+      .map((line, index) => <Line key={index} line={line} budget={budget} frame="classic" />), columns)
     expect(rendered.split('\n').every(line => line.length <= columns)).toBe(true)
     expect(rendered).toContain(`  ${'-'.repeat(budget.measure)}`)
     expect(rendered).toContain('\n  The configuration')
     expect(rendered).not.toContain('< ')
     expect(rendered).not.toContain('Completed')
     expect(Math.max(...rendered.split('\n').map(line => line.length))).toBeLessThanOrEqual(columns)
+  })
+
+  it.each(['round', 'classic'] as const)('draws the turn divider with the %s frame rule', frame => {
+    const budget = budgetFor({ columns: 40, rows: 24 })
+    const rendered = show(present({ kind: 'user', text: 'Hello' }, shown)
+      .map((line, index) => <Line key={index} line={line} budget={budget} frame={frame} />), 40)
+    expect(rendered).toContain(`  ${RULE[frame].line.repeat(budget.measure)}`)
   })
 
   it.each([1, 2, 3, 8, 9, 10, 20])('fits response and result text at %i columns without losing labels', columns => {
@@ -133,7 +140,7 @@ describe('Line', () => {
       { kind: 'tool-result' as const, callId: 'c', ok: false, text: 'result-text' },
     ]
     const rendered = show(rows.flatMap(row => present(row, shown))
-      .map((line, index) => <Line key={index} line={line} budget={budget} />), columns)
+      .map((line, index) => <Line key={index} line={line} budget={budget} frame="classic" />), columns)
     expect(rendered.split('\n').every(row => row.length <= columns), rendered).toBe(true)
     expect(rendered.replaceAll('\n', '').replaceAll(' ', '')).toContain('Answer' + 'x'.repeat(24))
     expect(rendered.replaceAll('\n', '').replaceAll(' ', '')).toContain('error')
@@ -145,7 +152,7 @@ describe('Line', () => {
     // outside a TTY, so a colour assertion here would pass for the wrong reason.
     const failed = { kind: 'tool-result' as const, callId: 'c', ok: false, text: 'boom' }
     const rendered = show(present(failed, shown)
-      .map((line, index) => <Line key={index} line={line} budget={at80} />))
+      .map((line, index) => <Line key={index} line={line} budget={at80} frame="classic" />))
     expect(rendered.split('\n')[0]).toBe('  error  [c]  1 lines')
     expect(rendered.split('\n')[1]!.indexOf('boom')).toBe(COLUMN.output)
   })

@@ -19,7 +19,6 @@ import {
   healProfilesModuleFallback,
   healIsolatedProfileModuleFallback,
   initProfile,
-  unlinkProfileModuleFallback,
   loadProfile,
   loadProfileDirectory,
   PROFILE_PATCH_FILENAME,
@@ -139,33 +138,6 @@ describe('healIsolatedProfileModuleFallback', () => {
     expect(existsSync(join(profileB.dir, 'node_modules', 'bundle-only'))).toBe(true)
     expect(realpathSync.native(createRequire(consumerA).resolve('commander')))
       .toBe(realpathSync.native(join(anchorA, '..', 'node_modules', 'commander', 'index.js')))
-  })
-})
-
-describe('unlinkProfileModuleFallback', () => {
-  it('detaches only this profile projections and restores missing packages from a relocated installation', () => {
-    const home = tmp()
-    const anchor = stageInstallation({ fallback: {}, '@scope/peer': {}, replaced: {} })
-    const nextAnchor = stageInstallation({ fallback: {}, '@scope/peer': {}, replaced: {} })
-    const bundleAnchor = stageInstallation({}, 'selected-bundle')
-    const profile = stageProfile(home, 'desktop', bundleAnchor)
-    const other = stageProfile(home, 'other', bundleAnchor)
-    unlinkProfileModuleFallback(profile.dir)
-    healIsolatedProfileModuleFallback({ installAnchor: anchor, profile })
-    healIsolatedProfileModuleFallback({ installAnchor: anchor, profile: other })
-    const modules = join(profile.dir, 'node_modules')
-    unlinkSync(join(modules, 'replaced'))
-    mkdirSync(join(modules, 'replaced'))
-    writeFileSync(join(modules, 'replaced', 'sentinel'), 'pnpm')
-    unlinkProfileModuleFallback(profile.dir)
-    unlinkProfileModuleFallback(profile.dir)
-    expect(existsSync(join(modules, 'fallback'))).toBe(false)
-    expect(existsSync(join(modules, '@scope/peer'))).toBe(false)
-    expect(readFileSync(join(modules, 'replaced', 'sentinel'), 'utf8')).toBe('pnpm')
-    expect(existsSync(join(other.dir, 'node_modules', 'fallback'))).toBe(true)
-    healIsolatedProfileModuleFallback({ installAnchor: nextAnchor, profile })
-    expect(realpathSync(join(modules, 'fallback'))).toBe(realpathSync(join(nextAnchor, '..', 'node_modules', 'fallback')))
-    expect(readFileSync(join(modules, 'replaced', 'sentinel'), 'utf8')).toBe('pnpm')
   })
 })
 

@@ -288,8 +288,9 @@ describe('jsonc', () => {
     const text = '{ "a": "// not a comment", /* c */ "b": [1, 2,], }'
     const root = parseJsonc(text)!
     expect(valueOf(root)).toEqual({ a: '// not a comment', b: [1, 2] })
-    expect(root.kind === 'object' && text.slice(root.members[1]!.value.start, root.members[1]!.value.end)).toBe('[1, 2,]')
-    expect(jsonc(appendMember(text, root as Extract<typeof root, { kind: 'object' }>, 'c', () => 'true', { unit: '  ', eol: '\n' })))
+    const value = root.children?.[1]?.children?.[1]
+    expect(value !== undefined && text.slice(value.offset, value.offset + value.length)).toBe('[1, 2,]')
+    expect(jsonc(appendMember(text, root, 'c', () => 'true', { unit: '  ', eol: '\n' })))
       .toEqual({ a: '// not a comment', b: [1, 2], c: true })
     expect(() => parseJsonc('{ "a": 1 } x')).toThrow(SyntaxError)
   })

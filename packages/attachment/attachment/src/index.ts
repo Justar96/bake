@@ -13,7 +13,6 @@ import type {
   ImageRequestTarget,
   RequestImageAttachment,
   SaveFileAttachment,
-  SaveFileStreamAttachment,
   SaveImageAttachment,
   StoredImageAttachment,
 } from './types.ts'
@@ -38,7 +37,6 @@ export type {
   PromptContentPart,
   RequestImageAttachment,
   SaveFileAttachment,
-  SaveFileStreamAttachment,
   SaveImageAttachment,
   StoredImageAttachment,
 } from './types.ts'
@@ -189,41 +187,6 @@ export abstract class AttachmentStore extends Service {
     void input
     return Promise.reject(new AttachmentError(
       'The mounted attachment provider cannot store verbatim files.',
-      'ATTACHMENT_FILES_UNSUPPORTED',
-    ))
-  }
-
-  /**
-   * Durably commit one file byte-for-byte from bounded chunks. Providers must
-   * apply backpressure and must not collect the complete file in memory.
-   * Backends without streamed verbatim storage keep this default rejection.
-   * @param input - ordered exact bytes, optional cancellation, and display name.
-   * @returns the durable content-addressed file reference.
-   */
-  saveFileStream(input: SaveFileStreamAttachment): Promise<FileAttachmentRef> {
-    void input
-    return Promise.reject(new AttachmentError(
-      'The mounted attachment provider cannot stream verbatim files.',
-      'ATTACHMENT_FILES_UNSUPPORTED',
-    ))
-  }
-
-  /**
-   * Read and verify one verbatim stored file as bounded chunks. Providers must
-   * not collect the complete file in memory. Backends without verbatim file
-   * reads keep this default rejection.
-   * @param ref - durable reference from the session log.
-   * @param signal - optional cancellation for backend reads and verification work.
-   * @returns exact file bytes in order; integrity failures reject the iteration.
-   */
-  async *readFileStream(
-    ref: FileAttachmentRef,
-    signal?: AbortSignal,
-  ): AsyncIterable<Uint8Array> {
-    signal?.throwIfAborted()
-    void ref
-    await Promise.reject(new AttachmentError(
-      'The mounted attachment provider cannot read verbatim files.',
       'ATTACHMENT_FILES_UNSUPPORTED',
     ))
   }

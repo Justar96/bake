@@ -227,41 +227,6 @@ export async function publishImmutableObject(
   await publishStagedObject(root, target, staged)
 }
 
-/** Digest and byte count produced while streaming one immutable object to disk. */
-export interface StreamedImmutableObject {
-  readonly sha256: string
-  readonly bytes: number
-}
-
-/**
- * Stream one immutable object from bounded chunks into a staging file, then
- * publish it at a digest-derived target without collecting the complete object in memory.
- * @param root - absolute `DSH_HOME/attachments/v1` root.
- * @param data - exact object bytes in order.
- * @param targetFor - derive the final absolute target from the completed digest and byte count.
- * @param signal - optional cancellation for source reads and storage writes.
- * @returns digest and exact byte count of the published object.
- */
-export async function publishImmutableObjectStream(
-  root: string,
-  data: AsyncIterable<Uint8Array>,
-  targetFor: (sha256: string, bytes: number) => string,
-  signal?: AbortSignal,
-): Promise<StreamedImmutableObject> {
-  const staged = await stageImmutableObject(root, data, signal)
-  let target: string
-  try {
-    target = targetFor(staged.sha256, staged.bytes)
-  } catch (error) {
-    /* v8 ignore start -- The local target callback constructs a validated reference from this function's digest. */
-    await removeTemporary(staged.path)
-    throw error
-    /* v8 ignore stop */
-  }
-  await publishStagedObject(root, target, staged)
-  return { sha256: staged.sha256, bytes: staged.bytes }
-}
-
 /**
  * Publish another durable hard-link name for an existing immutable object.
  * @param root - absolute versioned attachment root.
@@ -301,15 +266,15 @@ export async function publishImmutableAlias(
   }
 }
 
-interface StagedImmutableObject extends StreamedImmutableObject {
+interface StagedImmutableObject {
+  readonly sha256: string
   readonly path: string
   readonly boundary: string
 }
 
 async function stageImmutableObject(
   root: string,
-  data: AsyncIterable<Uint8Array> | Iterable<Uint8Array>,
-  signal?: AbortSignal,
+  data: Iterable<Uint8Array>,
 ): Promise<StagedImmutableObject> {
   const staging = join(root, 'tmp')
   // Establish DSH_HOME itself against the filesystem root once per process.
@@ -322,19 +287,14 @@ async function stageImmutableObject(
   try {
     handle = await open(temporary, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600)
     const hash = createHash('sha256')
-    let bytes = 0
-    for await (const chunk of data) {
-      signal?.throwIfAborted()
+    for (const chunk of data) {
       await handle.writeFile(chunk)
       hash.update(chunk)
-      bytes += chunk.byteLength
     }
-    signal?.throwIfAborted()
     await handle.sync()
-    signal?.throwIfAborted()
     await handle.close()
     handle = undefined
-    return { path: temporary, boundary, sha256: hash.digest('hex'), bytes }
+    return { path: temporary, boundary, sha256: hash.digest('hex') }
   } catch (error) {
     /* v8 ignore next -- A descriptor remains open only when write, sync, or close fails. */
     if (handle !== undefined) await handle.close().catch(
@@ -342,7 +302,7 @@ async function stageImmutableObject(
       () => {},
     )
     await removeTemporary(temporary)
-    if (error instanceof AttachmentError || signal?.aborted === true) throw error
+    if (error instanceof AttachmentError) throw error
     throw new AttachmentError('Unable to persist attachment.', 'ATTACHMENT_WRITE_FAILED', { cause: error })
   }
 }

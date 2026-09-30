@@ -142,7 +142,6 @@ async function startupSession(
       viewport = result.viewport
       if (result.waitReason === 'stdin_read') break
     }
-    session.motd = viewport
   }
   const races: Promise<void>[] = []
   let onAbort: (() => void) | undefined

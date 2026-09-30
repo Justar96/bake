@@ -4,7 +4,8 @@ import { Box, Text } from 'ink'
 import stringWidth from 'string-width'
 import type { TuiCopy } from './copy.ts'
 import { ICON } from './icons.ts'
-import { COLUMN, HINT_MIN_COLUMNS, MARKER } from './layout.ts'
+import { COLUMN, MARKER } from './layout.ts'
+import { tailFits } from './line.tsx'
 import { agentTone, PALETTE, type PaletteColor } from './palette.ts'
 import { sheetBar, type SheetLine } from './sheet.tsx'
 
@@ -113,8 +114,8 @@ export function subagentTab(entries: readonly SubagentEntry[], copy: TuiCopy, wo
  * `↳ Subagents 5 · 2 working · 2 done`.
  * An active workflow replaces the title with its name; member names stay in
  * the sheet. Dim, so it stays supporting material beside the draft.
- * `hint` names the key that opens the sheet at the right edge, given up below
- * {@link HINT_MIN_COLUMNS} as the composer's hint is. Focused, the rail holds
+ * `hint` names the key that opens the sheet at the right edge, given up as
+ * {@link tailFits} decides, as the composer's hint is. Focused, the rail holds
  * `>`, the row is drawn at full strength, and the hint says what Enter does.
  *
  * @param props.entries - the children, in the catalog's order.
@@ -141,7 +142,7 @@ export function SubagentRow({ entries, workflows = [], copy, columns, focused = 
   const tail = focused ? copy.subagentsOpen : hint
   // The key goes before the head or the counts would be cut.
   const text = `${head}${summary === '' ? '' : ` · ${summary}`}`
-  const showTail = tail !== undefined && columns >= HINT_MIN_COLUMNS && rail + stringWidth(text) + 2 + stringWidth(tail) <= columns
+  const showTail = tailFits(columns, rail + stringWidth(text), tail)
   return <Box width={columns} height={1} flexDirection="row" flexShrink={0} overflowX="hidden">
     <Box width={rail} flexShrink={0}><Text bold={focused} dimColor={!focused}>{focused ? '>' : ICON.spawn}</Text></Box>
     <Box flexGrow={1} flexShrink={1}>
@@ -164,9 +165,8 @@ export function SubagentRow({ entries, workflows = [], copy, columns, focused = 
  * sheet, and the status its outcome's colour. The way back is the one part
  * that never gives way. On a narrow row the name and status are cut from the
  * end, and below the width of the key alone the key is cut instead, so the
- * row is one line at any width. The hint is not hidden below
- * {@link HINT_MIN_COLUMNS} as other standing rows' keys are: here it is the
- * only visible way out.
+ * row is one line at any width. The hint is not hidden as other standing
+ * rows' keys are by {@link tailFits}: here it is the only visible way out.
  *
  * @param props.label - the child's name, from the sheet's entry when there is one.
  * @param props.entries - the parent's children, in the catalog's order.

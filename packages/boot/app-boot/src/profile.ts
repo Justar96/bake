@@ -649,19 +649,6 @@ export function healIsolatedProfileModuleFallback(options: { installAnchor: stri
   healProfileModuleFallback(options.profile, new Set(installationLinks.keys()), true, undefined, undefined, installationLinks)
 }
 
-/**
- * Detach this profile's fallback links before a package-manager mutation.
- * Installed packages and links replaced by pnpm remain untouched; the next profile launch restores fallbacks.
- * @param profileDir - profile directory whose package mutation is serialized by the caller.
- */
-export function unlinkProfileModuleFallback(profileDir: string): void {
-  const ownedModulesDir = join(profileDir, PROFILE_MODULE_FALLBACK_DIR, 'node_modules')
-  if (!existsSync(ownedModulesDir)) return
-  for (const name of ownedPackageNames(ownedModulesDir)) {
-    removeProfileSymlink(join(profileDir, 'node_modules'), ownedModulesDir, name)
-  }
-}
-
 /** Heal one module-fallback generation while the cross-process writer lock is held. */
 function healProfilesModuleFallbackLocked(entries: readonly ModuleFallbackEntry[], modulesDir: string): void {
   for (const entry of entries) {

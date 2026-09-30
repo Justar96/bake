@@ -95,7 +95,7 @@ describe('local attachment store', () => {
     // Later directory creation can then stop at that process-proven boundary.
     expect(fsControl.syncedDirectories).toEqual([
       ...parentChainToRoot(base),
-      // Staging precedes publication because the streamed digest selects the
+      // Staging precedes publication because the digest selects the
       // target bucket only after every byte has been written.
       storageRoot,
       join(storageRoot, '..'),

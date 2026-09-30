@@ -147,14 +147,3 @@ export type JobDoneListener = (
   snapshot: JobSnapshot,
   owner: Agent | undefined,
 ) => void | PromiseLike<void>
-
-/**
- * Observation callback for a change to what one owner's {@link JobRegistry.list}
- * would return. It is owner-granular rather than job-granular because the
- * change may be a removal, which no per-job record can express, and because
- * its consumers re-read the whole visible set anyway.
- *
- * An `undefined` owner means an unowned job changed, so every caller's visible
- * set changed with it.
- */
-export type JobsChangedListener = (owner: Agent | undefined) => void

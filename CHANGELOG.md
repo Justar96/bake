@@ -8,6 +8,9 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 - Tool descriptions are shorter, so each request carries about 1.5 KB less fixed text than in the previous build. Recovery advice now appears in the error that needs it. The bash `description` argument is optional, and a sandbox request for access a call already has runs without asking.
 - Plan mode is removed: `/plan`, `exit_plan_mode`, the plan guidance section, and the `Plan` status-line label are gone. Sessions that recorded plan mode still open.
 - The `workflow` tool's script reference is no longer sent with every request. The model reads it with the new `tool_help` tool before writing a script. `list_agents`, `interrupt_agent`, and `subagent_fork` have shorter descriptions. Together with plan mode's removal, each request of the standard preset carries about 2.4 KB less tool schema.
+- A long paste, over 800 characters or three lines or more, shows in the composer as one placeholder such as `[Pasted text #1 +42 lines]`. It moves and deletes as one character, and the full text is sent in its place.
+- Images can be pasted. Ctrl-V, or a paste that arrives empty, attaches the clipboard's image through `wl-paste`, `xclip`, AppleScript, or PowerShell. Dropping a single PNG, JPEG, WebP, or GIF file attaches it. Each one shows as `[Image #N]`, and erasing the placeholder removes the image.
+- In Windows Terminal, rules and the divider above each turn draw as solid lines instead of dashes.
 - Identical edits refused for unread or stale files skip repeated tool dispatch within the same turn until another tool settles.
 - Failed command exits, signals, and HTTP responses appear as failed tool outcomes in the terminal.
 - `/model` refreshes CLIProxyAPI's model list while keeping models used by the current session, default selection, and subagents. Advanced settings use the same subagent model pickers as the Agent section.

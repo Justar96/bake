@@ -13,9 +13,7 @@ import {
   buildSessionEventSearchDocuments,
   compileSessionTextFilter,
   extractSessionEventText,
-  filterSessionEventDocuments,
   filterSessionResults,
-  materializeSessionEventResultFilters,
   materializeSessionResultFilters,
   type SessionQueryErrorCode,
 } from '@deepseek-ai/dsh-session-query'
@@ -212,33 +210,12 @@ describe('session-query document and filter helpers', () => {
       .toThrow(expectCode('SESSION_QUERY_INVALID_FILTER'))
   })
 
-  it('applies event metadata and safe literal text clauses', () => {
-    const documents = buildSessionEventSearchDocuments(id, events).map((document, marker) => ({ ...document, marker }))
-    expect(filterSessionEventDocuments(documents, [
-      { kind: 'seq', from: 0, to: 1 },
-      { kind: 'time', from: 9, to: 11 },
-      { kind: 'type', values: ['user/message', 'tool/result'] },
-      { kind: 'surface', values: ['shadowed'] },
-      { kind: 'text', text: 'hello   (ai)+' },
-    ])).toEqual([documents[0]])
+  it('compiles a safe literal text filter', () => {
     expect(compileSessionTextFilter('CAFÉ').test('café')).toBe(true)
-    expect(filterSessionEventDocuments(documents)).toEqual(documents)
-    expect(filterSessionEventDocuments(documents, [{ kind: 'surface', values: [] }])).toEqual([])
-    expect(() => filterSessionEventDocuments(documents, [{ kind: 'surface', values: ['future' as never] }]))
-      .toThrow(expectCode('SESSION_QUERY_INVALID_FILTER'))
     expect(() => compileSessionTextFilter(' \n ')).toThrow(expectCode('SESSION_QUERY_INVALID_FILTER'))
   })
 
   it('rejects malformed range filters and malformed surfaces', () => {
-    const documents = buildSessionEventSearchDocuments(id, events)
-    for (const filter of [
-      { kind: 'seq', from: Number.NaN },
-      { kind: 'seq', to: Number.POSITIVE_INFINITY },
-      { kind: 'time', from: 2, to: 1 },
-    ] as const) {
-      expect(() => filterSessionEventDocuments(documents, [filter]))
-        .toThrow(expectCode('SESSION_QUERY_INVALID_FILTER'))
-    }
     expect(() => filterSessionResults([], [{ kind: 'created-at', from: Number.NaN }]))
       .toThrow(expectCode('SESSION_QUERY_INVALID_FILTER'))
     expect(() => filterSessionResults([{ header: header('x'), live: true, persisted: false }], [
@@ -272,30 +249,8 @@ describe('session-query document and filter helpers', () => {
       .toThrow(expectCode('SESSION_QUERY_INVALID_FILTER'))
     expect(() => materializeSessionResultFilters([{} as never]))
       .toThrow(expectCode('SESSION_QUERY_INVALID_FILTER'))
-    expect(() => materializeSessionEventResultFilters([{ kind: 'text', text: 1 } as never]))
-      .toThrow(expectCode('SESSION_QUERY_INVALID_FILTER'))
-    expect(() => materializeSessionEventResultFilters([{ kind: 'future' } as never]))
-      .toThrow(expectCode('SESSION_QUERY_INVALID_FILTER'))
     expect(() => filterSessionResults([], [{ kind: 'future' } as never]))
       .toThrow(expectCode('SESSION_QUERY_INVALID_FILTER'))
-    expect(() => filterSessionEventDocuments([], [{ kind: 'future' } as never]))
-      .toThrow(expectCode('SESSION_QUERY_INVALID_FILTER'))
-  })
-
-  it('exposes the scan path on the combined query service', async () => {
-    const ctx = new Context()
-    await ctx.plugin(SessionStore)
-    await ctx.plugin(SessionProjectionRegistry)
-    await ctx.plugin(TestSessionQueryEngine)
-    const session = ctx.sessions.create(id)
-    session.append('user/message', createUserMessage({
-      content: [{ type: 'text', text: 'Alpha\n beta' }], source: { kind: 'user' },
-    }), { surfaceOp: 'append' })
-    session.append('user/message', createUserMessage({
-      content: [{ type: 'text', text: 'other' }], source: { kind: 'user' },
-    }), { surfaceOp: 'append' })
-    await expect(ctx.sessionQuery.filterEvents(id, [{ kind: 'text', text: 'alpha beta' }]))
-      .resolves.toMatchObject([{ seq: 0, text: 'Alpha\n beta' }])
   })
 })
 

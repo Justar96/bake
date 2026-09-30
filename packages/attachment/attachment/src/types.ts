@@ -60,16 +60,6 @@ export interface SaveFileAttachment {
   name?: string
 }
 
-/** Request to durably commit one file from bounded byte chunks. */
-export interface SaveFileStreamAttachment {
-  /** Exact file bytes in order; providers must not retain the complete sequence in memory. */
-  data: AsyncIterable<Uint8Array>
-  /** Optional cancellation for source reads and storage writes. */
-  signal?: AbortSignal
-  /** Optional browser/provider display name; it is never interpreted as a path. */
-  name?: string
-}
-
 /** Deployment-resolved limits used by upload admission and request buffering. */
 export interface ImageAttachmentLimits {
   maxImageBytes: number

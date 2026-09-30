@@ -146,8 +146,6 @@ export interface TerminalSessionSnapshot {
 
 /** Backend-owned live session retained by {@link TerminalSessionService}. */
 export interface TerminalBackendSession {
-  /** Initial bounded terminal output returned from `terminal_open`. */
-  readonly motd: string
   /** Top-level process id when one exists. */
   readonly pid?: number
   /** Start one exclusive send operation. */
@@ -168,10 +166,4 @@ export interface TerminalBackend {
   readonly type: string
   /** Create an unpublished session or reject after cleaning partial resources; cleanup failure uses {@link TerminalBackendCleanupError}. */
   spawn(spec: TerminalBackendSpawnSpec): Promise<TerminalBackendSession>
-}
-
-/** Successful publication returned by {@link TerminalSessionService.spawn}. */
-export interface TerminalSpawnResult extends TerminalSessionSnapshot {
-  /** Initial bounded output captured before publication. */
-  motd: string
 }

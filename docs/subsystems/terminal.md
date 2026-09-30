@@ -39,8 +39,6 @@ interface TerminalBackend {
 ```ts type-equiv
 /** Backend-owned live session retained by {@link TerminalSessionService}. */
 interface TerminalBackendSession {
-  /** Initial bounded terminal output returned from `terminal_open`. */
-  readonly motd: string
   /** Top-level process id when one exists. */
   readonly pid?: number
   /** Start one exclusive send operation. */
@@ -113,19 +111,13 @@ In-process registry for replaceable PTY backends and exact-Agent sessions.
 registerBackend(backend: TerminalBackend): () => void
 
 /**
- * List registered backend types in registration order.
- * @returns fresh backend type names.
- */
-listBackends(): string[]
-
-/**
  * Create and publish one owner-scoped session after backend setup succeeds.
  * @param owner - exact registered Agent that owns access and cleanup.
  * @param request - backend type plus optional owner-local name and cwd.
  * @param signal - cancellation of unpublished setup.
- * @returns published identity, metadata, status, and MOTD.
+ * @returns published identity, metadata, and status.
  */
-async spawn(owner: Agent, request: TerminalSpawnRequest, signal?: AbortSignal): Promise<TerminalSpawnResult>
+async spawn(owner: Agent, request: TerminalSpawnRequest, signal?: AbortSignal): Promise<TerminalSessionSnapshot>
 
 /**
  * Test whether an exact owner has a published session or unpublished spawn.
@@ -151,15 +143,6 @@ startSend(owner: Agent, id: TerminalSessionId, request: TerminalSendRequest): Te
  * @returns bounded retained text and pagination metadata.
  */
 read(owner: Agent, id: TerminalSessionId, request: TerminalReadRequest = {}): TerminalReadResult
-
-/**
- * Deliver an allowed signal through an owned backend session.
- * @param owner - exact session owner.
- * @param id - target PTY identity.
- * @param signal - allowed POSIX signal name.
- * @returns delivered foreground process-group identity.
- */
-signal(owner: Agent, id: TerminalSessionId, signal: TerminalSignal): Promise<TerminalSignalResult>
 
 /**
  * Close one owned session and remove it only after quiescent backend cleanup.

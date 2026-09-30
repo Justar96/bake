@@ -16,10 +16,7 @@ import type {
   TerminalSendRequest,
   TerminalSessionIdValue,
   TerminalSessionSnapshot,
-  TerminalSignal,
-  TerminalSignalResult,
   TerminalSpawnRequest,
-  TerminalSpawnResult,
 } from './types.ts'
 
 export type {
@@ -37,7 +34,6 @@ export type {
   TerminalSignal,
   TerminalSignalResult,
   TerminalSpawnRequest,
-  TerminalSpawnResult,
   TerminalWaitReason,
 } from './types.ts'
 export { TerminalBackendCleanupError } from './types.ts'
@@ -54,7 +50,6 @@ declare module '@deepseek-ai/cordis' {
 /** Machine-routable PTY service failures. */
 export type TerminalErrorCode =
   | 'DUPLICATE_BACKEND'
-  | 'DUPLICATE_NAME'
   | 'FOREIGN_SESSION'
   | 'NO_BACKEND'
   | 'NO_SESSION'
@@ -105,7 +100,6 @@ interface SpawnReservation {
 export class TerminalSessionService extends Service {
   private readonly backends = new Map<string, TerminalBackend>()
   private readonly sessions = new Map<TerminalSessionId, SessionRecord>()
-  private readonly reservedNames = new Map<Agent, Set<string>>()
   private readonly pendingSpawns = new Map<Agent, Set<PendingSpawn>>()
   private readonly ownerCleanups = new Map<Agent, () => Promise<void> | void>()
   private readonly disposedOwners = new WeakSet<Agent>()
@@ -137,28 +131,19 @@ export class TerminalSessionService extends Service {
   }
 
   /**
-   * List registered backend types in registration order.
-   * @returns fresh backend type names.
-   */
-  listBackends(): string[] {
-    return [...this.backends.keys()]
-  }
-
-  /**
    * Create and publish one owner-scoped session after backend setup succeeds.
    * @param owner - exact registered Agent that owns access and cleanup.
    * @param request - backend type plus optional owner-local name and cwd.
    * @param signal - cancellation of unpublished setup.
-   * @returns published identity, metadata, status, and MOTD.
+   * @returns published identity, metadata, and status.
    */
-  async spawn(owner: Agent, request: TerminalSpawnRequest, signal?: AbortSignal): Promise<TerminalSpawnResult> {
+  async spawn(owner: Agent, request: TerminalSpawnRequest, signal?: AbortSignal): Promise<TerminalSessionSnapshot> {
     this.assertActive()
     signal?.throwIfAborted()
     this.ensureOwnerCleanup(owner)
     const backend = this.backends.get(request.type)
     if (backend === undefined) throw new TerminalError(`no PTY backend registered for "${request.type}"`, 'NO_BACKEND')
     if (request.name !== undefined && request.name.length === 0) throw new Error('PTY session name must be non-empty')
-    const releaseName = this.reserveName(owner, request.name)
     const spawnReservation = this.reserveSpawn(owner)
     const backendSignal = signal === undefined
       ? spawnReservation.signal
@@ -192,7 +177,7 @@ export class TerminalSessionService extends Service {
         closing: undefined,
       }
       this.sessions.set(sessionId, record)
-      return this.snapshot(record, session.motd)
+      return this.snapshot(record)
     } catch (error) {
       if (error instanceof TerminalBackendCleanupError) {
         cleanupFailure = { error: error.cleanupError }
@@ -219,7 +204,6 @@ export class TerminalSessionService extends Service {
       throw failure
     } finally {
       spawnReservation.release(cleanupFailure)
-      releaseName()
     }
   }
 
@@ -262,17 +246,6 @@ export class TerminalSessionService extends Service {
    */
   read(owner: Agent, id: TerminalSessionId, request: TerminalReadRequest = {}): TerminalReadResult {
     return this.expectOwned(owner, id).session.read(request)
-  }
-
-  /**
-   * Deliver an allowed signal through an owned backend session.
-   * @param owner - exact session owner.
-   * @param id - target PTY identity.
-   * @param signal - allowed POSIX signal name.
-   * @returns delivered foreground process-group identity.
-   */
-  signal(owner: Agent, id: TerminalSessionId, signal: TerminalSignal): Promise<TerminalSignalResult> {
-    return this.expectOwned(owner, id).session.signal(signal)
   }
 
   /**
@@ -332,21 +305,6 @@ export class TerminalSessionService extends Service {
     this.ownerCleanups.set(owner, detach)
   }
 
-  private reserveName(owner: Agent, name: string | undefined): () => void {
-    if (name === undefined) return () => {}
-    if ([...this.sessions.values()].some(record => record.owner === owner && record.name === name)) {
-      throw new TerminalError(`PTY session name "${name}" already exists for this owner`, 'DUPLICATE_NAME')
-    }
-    const reserved = this.reservedNames.get(owner) ?? new Set<string>()
-    if (reserved.has(name)) throw new TerminalError(`PTY session name "${name}" is already being created`, 'DUPLICATE_NAME')
-    reserved.add(name)
-    this.reservedNames.set(owner, reserved)
-    return () => {
-      reserved.delete(name)
-      if (reserved.size === 0) this.reservedNames.delete(owner)
-    }
-  }
-
   private reserveSpawn(owner: Agent): SpawnReservation {
     const controller = new AbortController()
     const settlement = Promise.withResolvers<void>()
@@ -391,16 +349,13 @@ export class TerminalSessionService extends Service {
     return record
   }
 
-  private snapshot(record: SessionRecord): TerminalSessionSnapshot
-  private snapshot(record: SessionRecord, motd: string): TerminalSpawnResult
-  private snapshot(record: SessionRecord, motd?: string): TerminalSpawnResult | TerminalSessionSnapshot {
+  private snapshot(record: SessionRecord): TerminalSessionSnapshot {
     return {
       sessionId: record.id,
       ...record.name !== undefined ? { name: record.name } : {},
       type: record.type,
       ...record.session.pid !== undefined ? { pid: record.session.pid } : {},
       status: record.session.status(),
-      ...motd !== undefined ? { motd } : {},
     }
   }
 
@@ -421,15 +376,11 @@ export class TerminalSessionService extends Service {
   }
 
   private async disposeOwned(owner: Agent): Promise<void> {
-    try {
-      await this.abortAndClose(
-        owner,
-        new TerminalError('PTY owner is no longer live', 'OWNER_NOT_LIVE'),
-        'PTY owner disposed',
-      )
-    } finally {
-      this.reservedNames.delete(owner)
-    }
+    await this.abortAndClose(
+      owner,
+      new TerminalError('PTY owner is no longer live', 'OWNER_NOT_LIVE'),
+      'PTY owner disposed',
+    )
   }
 
   private async disposeAll(): Promise<void> {
@@ -445,7 +396,6 @@ export class TerminalSessionService extends Service {
       )
     } finally {
       this.backends.clear()
-      this.reservedNames.clear()
       this.pendingSpawns.clear()
       const cleanups = [...this.ownerCleanups.values()]
       this.ownerCleanups.clear()

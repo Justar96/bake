@@ -2,9 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { JobId, JobRegistry } from '@deepseek-ai/dsh-jobs'
-import type {
-  JobDoneListener, JobRead, JobSnapshot, JobStart, JobsChangedListener,
-} from '@deepseek-ai/dsh-jobs'
+import type { JobDoneListener, JobRead, JobSnapshot, JobStart } from '@deepseek-ai/dsh-jobs'
 
 /**
  * Minimal concrete registry: one canned record. The Service Definition owns the contract
@@ -52,10 +50,6 @@ class StubJobRegistry extends JobRegistry {
     return () => {}
   }
 
-  onJobsChanged(_listener: JobsChangedListener): () => void {
-    return () => {}
-  }
-
   attachController(_name: string): () => void {
     return () => {}
   }
@@ -76,8 +70,6 @@ describe('JobRegistry seam', () => {
     await expect(ctx.jobs.wait(id, 5)).resolves.toMatchObject({ id })
     const detachListener = ctx.jobs.onJobDone(() => {})
     detachListener()
-    const detachChanges = ctx.jobs.onJobsChanged(() => {})
-    detachChanges()
     detachController()
   })
 

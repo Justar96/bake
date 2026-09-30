@@ -603,11 +603,6 @@
     },
     {
       "doc": "docs/subsystems/session-query.md",
-      "symbol": "SessionLogSnapshot",
-      "source": "packages/session-query/session-query/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/session-query.md",
       "symbol": "SessionSurfaceSnapshot",
       "source": "packages/session-query/session-query/src/types.ts"
     },
@@ -628,43 +623,8 @@
     },
     {
       "doc": "docs/subsystems/session-query.md",
-      "symbol": "SessionLineageNode",
-      "source": "packages/session-query/session-query/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/session-query.md",
-      "symbol": "SessionLineageTrace",
-      "source": "packages/session-query/session-query/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/session-query.md",
       "symbol": "SessionQueryErrorCode",
       "source": "packages/session-query/session-query/src/config.ts"
-    },
-    {
-      "doc": "docs/subsystems/session-query.md",
-      "symbol": "SessionEventReadRequest",
-      "source": "packages/session-query/session-query/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/session-query.md",
-      "symbol": "SessionEventWindow",
-      "source": "packages/session-query/session-query/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/session-query.md",
-      "symbol": "SessionEventTraceRequest",
-      "source": "packages/session-query/session-query/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/session-query.md",
-      "symbol": "SessionEventTrace",
-      "source": "packages/session-query/session-query/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/session-query.md",
-      "symbol": "SessionEventTraceObservation",
-      "source": "packages/session-query/session-query/src/types.ts"
     },
     {
       "doc": "docs/subsystems/session-title.md",

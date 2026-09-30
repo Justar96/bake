@@ -5,17 +5,9 @@ import {
   ToolCallId,
   assembleAssistantStream,
   assistantStreamChunks,
-  assistantStreamFirstTokenTime,
-  assistantStreamHasVisibleContent,
-  assistantStreamHasVisibleText,
-  chunkHasVisibleText,
   expandAssistantStream,
-  isTokenDelta,
-  isVisibleChunk,
   joinAssistantStreamText,
   lastAssistantStreamChunk,
-  runFirstTokenTime,
-  runFirstVisibleTime,
 } from '@deepseek-ai/dsh-llm'
 import type { AssistantStreamRecord, AssistantStreamRun, StreamChunk, TimedStreamChunk } from '@deepseek-ai/dsh-llm'
 
@@ -237,18 +229,6 @@ describe('AssistantStreamAccumulator', () => {
   })
 })
 
-/** Fragment array that counts index reads, so a scan's early exit is observable. */
-function countedFragments(values: readonly string[]): { readonly fragments: readonly string[]; reads(): number } {
-  let reads = 0
-  const fragments = new Proxy([...values], {
-    get(target, property, receiver): unknown {
-      if (typeof property === 'string' && /^\d+$/.test(property)) reads += 1
-      return Reflect.get(target, property, receiver)
-    },
-  })
-  return { fragments, reads: () => reads }
-}
-
 /** Record whose every property read throws, proving a stream scan never reached it. */
 const unreachableRecord = new Proxy({}, {
   get() {
@@ -288,86 +268,6 @@ function raw(time: number, chunk: StreamChunk): AssistantStreamRecord {
   return { type: 'chunk', time, chunk }
 }
 
-describe('stream chunk classification', () => {
-  it('recognizes the first token as a non-empty fragment or a name-bearing Tool-call delta', () => {
-    expect(isTokenDelta({ type: 'text-delta', index: 0, text: ' ' })).toBe(true)
-    expect(isTokenDelta({ type: 'text-delta', index: 0, text: '' })).toBe(false)
-    expect(isTokenDelta({ type: 'reasoning-delta', index: 0, text: 'r' })).toBe(true)
-    expect(isTokenDelta({ type: 'reasoning-delta', index: 0, text: '' })).toBe(false)
-    expect(isTokenDelta({ type: 'tool-call-delta', index: 0, id: ToolCallId('c'), argumentsDelta: '{' })).toBe(true)
-    expect(isTokenDelta({ type: 'tool-call-delta', index: 0, id: ToolCallId('c'), argumentsDelta: '' })).toBe(false)
-    expect(isTokenDelta({ type: 'tool-call-delta', index: 0, id: ToolCallId('c'), name: 'read', argumentsDelta: '' })).toBe(true)
-    expect(isTokenDelta({ type: 'tool-call-delta', index: 0, id: ToolCallId('c'), name: '', argumentsDelta: '' })).toBe(true)
-    expect(isTokenDelta({ type: 'block-start', index: 0, blockType: 'text' })).toBe(false)
-    expect(isTokenDelta({ type: 'block-end', index: 0, block: { type: 'text', text: 'x' } })).toBe(false)
-    expect(isTokenDelta({ type: 'usage', usage: { inputTokens: 1, outputTokens: 1 } })).toBe(false)
-    expect(isTokenDelta({ type: 'finish', reason: { kind: 'stop' } })).toBe(false)
-  })
-
-  it('classifies reader-visible chunks by non-whitespace text and non-Tool-call block kinds', () => {
-    expect(isVisibleChunk({ type: 'text-delta', index: 0, text: ' \t\n' })).toBe(false)
-    expect(isVisibleChunk({ type: 'text-delta', index: 0, text: ' x' })).toBe(true)
-    expect(isVisibleChunk({ type: 'reasoning-delta', index: 0, text: '\u00a0' })).toBe(false)
-    expect(isVisibleChunk({ type: 'reasoning-delta', index: 0, text: 'r' })).toBe(true)
-    expect(isVisibleChunk({ type: 'block-start', index: 0, blockType: 'text' })).toBe(false)
-    expect(isVisibleChunk({ type: 'block-start', index: 0, blockType: 'reasoning' })).toBe(false)
-    expect(isVisibleChunk({ type: 'block-start', index: 0, blockType: 'tool-call' })).toBe(false)
-    expect(isVisibleChunk({ type: 'block-start', index: 0, blockType: 'image' })).toBe(true)
-    expect(isVisibleChunk({ type: 'block-end', index: 0, block: { type: 'text', text: '  ' } })).toBe(false)
-    expect(isVisibleChunk({ type: 'block-end', index: 0, block: { type: 'reasoning', text: 'why' } })).toBe(true)
-    expect(isVisibleChunk({
-      type: 'block-end', index: 0, block: { type: 'tool-call', id: ToolCallId('c'), name: 'read', arguments: '{}' },
-    })).toBe(false)
-    expect(isVisibleChunk({ type: 'block-end', index: 0, block: { type: 'image', attachment: {} as never } })).toBe(true)
-    expect(isVisibleChunk({ type: 'tool-call-delta', index: 0, id: ToolCallId('c'), name: 'read', argumentsDelta: '{}' })).toBe(false)
-    expect(isVisibleChunk({ type: 'usage', usage: { inputTokens: 1, outputTokens: 1 } })).toBe(false)
-    expect(isVisibleChunk({ type: 'finish', reason: { kind: 'stop' } })).toBe(false)
-  })
-
-  it('counts visible text only from text deltas and completed text blocks', () => {
-    expect(chunkHasVisibleText({ type: 'text-delta', index: 0, text: 'a' })).toBe(true)
-    expect(chunkHasVisibleText({ type: 'text-delta', index: 0, text: '\r\n' })).toBe(false)
-    expect(chunkHasVisibleText({ type: 'reasoning-delta', index: 0, text: 'a' })).toBe(false)
-    expect(chunkHasVisibleText({ type: 'block-end', index: 0, block: { type: 'text', text: ' a ' } })).toBe(true)
-    expect(chunkHasVisibleText({ type: 'block-end', index: 0, block: { type: 'text', text: ' ' } })).toBe(false)
-    expect(chunkHasVisibleText({ type: 'block-end', index: 0, block: { type: 'reasoning', text: 'a' } })).toBe(false)
-    expect(chunkHasVisibleText({ type: 'block-start', index: 0, blockType: 'text' })).toBe(false)
-    expect(chunkHasVisibleText({ type: 'finish', reason: { kind: 'stop' } })).toBe(false)
-  })
-})
-
-describe('packed run boundaries', () => {
-  it('reconstructs the first token member time from time0 and the preceding gaps', () => {
-    expect(runFirstTokenTime(textRun(1_000, [5, -3, 10], ['', '', 'x', 'y']))).toBe(1_002)
-    expect(runFirstTokenTime(textRun(1_000, [5], ['a', 'b']))).toBe(1_000)
-    expect(runFirstTokenTime(reasoningRun(7, [1, 1], ['', '', '']))).toBeUndefined()
-    expect(runFirstTokenTime(toolRun(50, [2, 2], ['', '', '{']))).toBe(54)
-    expect(runFirstTokenTime(toolRun(50, [2], ['', '']))).toBeUndefined()
-    expect(runFirstTokenTime(toolRun(50, [2], ['', ''], 'read'))).toBe(50)
-  })
-
-  it('reconstructs the first visible member time from non-whitespace fragments only', () => {
-    expect(runFirstVisibleTime(textRun(1_000, [5, 1, 1], ['', '   ', '\t', 'answer']))).toBe(1_007)
-    expect(runFirstVisibleTime(reasoningRun(20, [3], [' ', 'think']))).toBe(23)
-    expect(runFirstVisibleTime(textRun(20, [3], [' ', '\n']))).toBeUndefined()
-    expect(runFirstVisibleTime(toolRun(20, [3], ['{"x":', '1}'], 'read'))).toBeUndefined()
-  })
-
-  it('stops reading fragments at the first qualifying member', () => {
-    const token = countedFragments(['', 'x', 'unread', 'unread'])
-    expect(runFirstTokenTime({ ...textRun(0, [1, 1, 1], []), texts: token.fragments })).toBe(1)
-    expect(token.reads()).toBe(2)
-
-    const visible = countedFragments([' ', ' ', 'v', 'unread'])
-    expect(runFirstVisibleTime({ ...reasoningRun(0, [1, 1, 1], []), texts: visible.fragments })).toBe(2)
-    expect(visible.reads()).toBe(3)
-
-    const named = countedFragments(['unread'])
-    expect(runFirstTokenTime({ ...toolRun(9, [], [], 'read'), args: named.fragments })).toBe(9)
-    expect(named.reads()).toBe(0)
-  })
-})
-
 describe('compact stream readers', () => {
   const usage = { inputTokens: 10, outputTokens: 4 }
   const laterUsage = { inputTokens: 10, outputTokens: 9 }
@@ -383,10 +283,7 @@ describe('compact stream readers', () => {
     raw(114, { type: 'finish', reason: { kind: 'stop' } }),
   ]
 
-  it('answers first token, visibility, text, and usage questions from records', () => {
-    expect(assistantStreamFirstTokenTime(stream)).toBe(103)
-    expect(assistantStreamHasVisibleContent(stream)).toBe(true)
-    expect(assistantStreamHasVisibleText(stream)).toBe(true)
+  it('answers last-chunk, chunk-listing, and joined-text questions from records', () => {
     expect(lastAssistantStreamChunk(stream, 'usage')?.usage).toBe(laterUsage)
     expect(lastAssistantStreamChunk(stream, 'finish')).toStrictEqual({ type: 'finish', reason: { kind: 'stop' } })
     expect(lastAssistantStreamChunk(stream, 'block-start')).toStrictEqual({ type: 'block-start', index: 1, blockType: 'text' })
@@ -404,12 +301,6 @@ describe('compact stream readers', () => {
       reasoningRun(7, [], ['  '], 2),
       raw(8, { type: 'block-end', index: 1, block: { type: 'text', text: ' \t' } }),
     ]
-    expect(assistantStreamFirstTokenTime([])).toBeUndefined()
-    expect(assistantStreamFirstTokenTime(silent)).toBe(2)
-    expect(assistantStreamHasVisibleContent([])).toBe(false)
-    expect(assistantStreamHasVisibleContent(silent)).toBe(false)
-    expect(assistantStreamHasVisibleText([])).toBe(false)
-    expect(assistantStreamHasVisibleText(silent)).toBe(false)
     expect(lastAssistantStreamChunk(silent, 'usage')).toBeUndefined()
     expect(lastAssistantStreamChunk([], 'finish')).toBeUndefined()
     expect(assistantStreamChunks(silent, 'usage')).toStrictEqual([])
@@ -424,27 +315,10 @@ describe('compact stream readers', () => {
       raw(3, { type: 'text-delta', index: 1, text: ' ' }),
       raw(4, { type: 'text-delta', index: 1, text: 'raw' }),
     ]
-    expect(assistantStreamFirstTokenTime(degenerate)).toBe(2)
-    expect(assistantStreamHasVisibleContent(degenerate)).toBe(true)
-    expect(assistantStreamHasVisibleContent(degenerate.slice(0, 3))).toBe(false)
-    expect(assistantStreamHasVisibleText(degenerate)).toBe(true)
-    expect(assistantStreamHasVisibleText(degenerate.slice(0, 3))).toBe(false)
     expect(joinAssistantStreamText(degenerate)).toBe(' raw')
   })
 
   it('stops at the first qualifying record', () => {
-    expect(assistantStreamFirstTokenTime([textRun(5, [], ['x']), unreachableRecord])).toBe(5)
-    expect(assistantStreamFirstTokenTime([
-      raw(6, { type: 'tool-call-delta', index: 0, id: ToolCallId('call'), name: '', argumentsDelta: '' }),
-      unreachableRecord,
-    ])).toBe(6)
-    expect(assistantStreamHasVisibleContent([raw(1, { type: 'block-start', index: 0, blockType: 'image' }), unreachableRecord])).toBe(true)
-    expect(assistantStreamHasVisibleContent([reasoningRun(1, [], ['r']), unreachableRecord])).toBe(true)
-    expect(assistantStreamHasVisibleText([textRun(1, [], ['t']), unreachableRecord])).toBe(true)
-    expect(assistantStreamHasVisibleText([
-      raw(1, { type: 'block-end', index: 0, block: { type: 'text', text: 't' } }),
-      unreachableRecord,
-    ])).toBe(true)
     expect(lastAssistantStreamChunk([unreachableRecord, raw(9, { type: 'finish', reason: { kind: 'stop' } })], 'finish')?.type)
       .toBe('finish')
   })

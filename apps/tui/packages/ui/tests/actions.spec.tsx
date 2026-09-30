@@ -34,7 +34,7 @@ describe('action transcript', () => {
     const budget = budgetFor({ columns: 40, rows: 24 })
     // The application's default preview.
     const committed: ResultBound = { lines: 4, unit: dictionaries[locale].cardLines, single: dictionaries[locale].cardLine, more: dictionaries[locale].moreLines, failures: dictionaries[locale].summaryFailures }
-    const frame = renderToString(<>{rows.map((row, index) => <RowView key={index} row={row} budget={budget} result={committed} />)}</>, { columns: 40 })
+    const frame = renderToString(<>{rows.map((row, index) => <RowView key={index} row={row} budget={budget} frame="classic" result={committed} />)}</>, { columns: 40 })
     // Each result lands under its own call, and the calls keep the order the
     // model made them, though c2 finished first, hung from one head.
     expect(frame.indexOf('notes.md')).toBeLessThan(frame.indexOf('private.md'))

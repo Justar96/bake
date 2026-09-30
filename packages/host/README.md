@@ -27,7 +27,7 @@ Eight packages play the host roles; each package README owns its contract and co
 | Package | Role | ctx key |
 |---|---|---|
 | [`webserver/`](webserver/README.md) | Browser HTTP server: named routes, upgrades, index taps, and the fallback seat | `ctx.webServer` |
-| [`plugin-inventory/`](plugin-inventory/README.md) | Read-only projection of current Loader entries | Remote `pluginInventory/list` |
+| [`plugin-inventory/`](plugin-inventory/README.md) | Read-only projection of current Loader entries | Consumed by plugin-manager's `listPlugins` Remote |
 
 -----
 

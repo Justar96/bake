@@ -261,25 +261,6 @@ imageHostPath(ref: ImageAttachmentRef): string | undefined
 saveFile(input: SaveFileAttachment): Promise<FileAttachmentRef>
 
 /**
- * Durably commit one file byte-for-byte from bounded chunks. Providers must
- * apply backpressure and must not collect the complete file in memory.
- * Backends without streamed verbatim storage keep this default rejection.
- * @param input - ordered exact bytes, optional cancellation, and display name.
- * @returns the durable content-addressed file reference.
- */
-saveFileStream(input: SaveFileStreamAttachment): Promise<FileAttachmentRef>
-
-/**
- * Read and verify one verbatim stored file as bounded chunks. Providers must
- * not collect the complete file in memory. Backends without verbatim file
- * reads keep this default rejection.
- * @param ref - durable reference from the session log.
- * @param signal - optional cancellation for backend reads and verification work.
- * @returns exact file bytes in order; integrity failures reject the iteration.
- */
-async *readFileStream( ref: FileAttachmentRef, signal?: AbortSignal, ): AsyncIterable<Uint8Array>
-
-/**
  * Locate the verbatim stored file object in the harness host filesystem.
  * @param ref - durable file reference.
  * @returns an absolute host path, or undefined when this backend is not host-file-backed.

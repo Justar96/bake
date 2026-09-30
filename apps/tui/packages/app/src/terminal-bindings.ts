@@ -293,9 +293,9 @@ function findKeybindings(text: string): Found | undefined | 'unreadable' {
   let root: JsonNode | undefined
   try { root = parseJsonc(text) } catch { return 'unreadable' }
   if (root === undefined) return undefined
-  if (root.kind !== 'array') return 'unreadable'
+  if (root.type !== 'array') return 'unreadable'
   let found: Found | undefined
-  for (const item of root.items) {
+  for (const item of root.children ?? []) {
     const rule = valueOf(item)
     if (!isRecord(rule) || typeof rule['key'] !== 'string' || normalizeKeys(rule['key']) !== 'shift+enter') continue
     // `-command` removes a rule instead of adding one.
@@ -304,7 +304,7 @@ function findKeybindings(text: string): Found | undefined | 'unreadable' {
     if (when !== '' && !/(?<![!\w.])terminal/u.test(when)) continue
     const args = rule['args']
     found = rule['command'] === SEND_SEQUENCE && isRecord(args) && args['text'] === NEWLINE_SEQUENCE
-      ? { kind: 'present' } : { kind: 'conflict', existing: oneLine(text.slice(item.start, item.end)) }
+      ? { kind: 'present' } : { kind: 'conflict', existing: oneLine(text.slice(item.offset, item.offset + item.length)) }
   }
   return found
 }
@@ -317,7 +317,7 @@ function editKeybindings(text: string | undefined): Edit {
   const render = (indent: string): string => `// ${MARK}${layout.eol}${indent}${blockJson(vscodeBinding(), indent, layout)}`
   const snippet = render('').replaceAll(layout.eol, '\n')
   const root = parseJsonc(text ?? '')
-  if (root === undefined || root.kind !== 'array') {
+  if (root === undefined || root.type !== 'array') {
     const { eol, unit } = layout
     return { kind: 'write', text: `${lead(text, layout)}[${eol}${unit}${render(unit)}${eol}]${eol}`, snippet }
   }
@@ -349,10 +349,10 @@ function findWindowsTerminal(text: string): Found | undefined | 'unreadable' {
   let root: JsonNode | undefined
   try { root = parseJsonc(text) } catch { return 'unreadable' }
   if (root === undefined) return undefined
-  if (root.kind !== 'object') return 'unreadable'
+  if (root.type !== 'object') return 'unreadable'
   const entries = (['actions', 'keybindings'] as const).flatMap(key => {
     const array = member(root, key)
-    return array?.kind === 'array' ? array.items : []
+    return array?.type === 'array' ? array.children ?? [] : []
   })
   const commands = new Map<string, unknown>()
   for (const entry of entries) {
@@ -367,7 +367,7 @@ function findWindowsTerminal(text: string): Found | undefined | 'unreadable' {
     if (!keys.some(key => typeof key === 'string' && normalizeKeys(key) === 'shift+enter')) continue
     const command = value['command'] ?? (typeof value['id'] === 'string' ? commands.get(value['id']) : undefined)
     found = isRecord(command) && command['action'] === 'sendInput' && command['input'] === NEWLINE_SEQUENCE
-      ? { kind: 'present' } : { kind: 'conflict', existing: oneLine(text.slice(entry.start, entry.end)) }
+      ? { kind: 'present' } : { kind: 'conflict', existing: oneLine(text.slice(entry.offset, entry.offset + entry.length)) }
   }
   return found
 }
@@ -378,32 +378,32 @@ function editWindowsTerminal(text: string | undefined): Edit {
   if (found === 'unreadable') return { kind: 'manual', reason: 'unreadable' }
   if (found !== undefined) return found
   const root = parseJsonc(text)
-  if (root?.kind !== 'object') return { kind: 'manual', reason: 'unreadable' }
+  if (root?.type !== 'object') return { kind: 'manual', reason: 'unreadable' }
   const layout = layoutOf(text)
   const actions = member(root, 'actions')
   const keybindings = member(root, 'keybindings')
-  if ((actions !== undefined && actions.kind !== 'array') || (keybindings !== undefined && keybindings.kind !== 'array')) {
+  if ((actions !== undefined && actions.type !== 'array') || (keybindings !== undefined && keybindings.type !== 'array')) {
     return { kind: 'manual', reason: 'unreadable' }
   }
   const item = (value: unknown) => (indent: string): string => `// ${MARK}${layout.eol}${indent}${inlineJson(value)}`
   const add = (source: string, key: 'actions' | 'keybindings', value: unknown): string => {
-    const object = parseJsonc(source) as Extract<JsonNode, { kind: 'object' }>
+    const object = parseJsonc(source)!
     const array = member(object, key)
-    if (array?.kind === 'array') return appendItem(source, array, item(value), layout)
+    if (array?.type === 'array') return appendItem(source, array, item(value), layout)
     const inner = (indent: string): string => indent + layout.unit
     return appendMember(source, object, key,
       indent => `[${layout.eol}${inner(indent)}${item(value)(inner(indent))}${layout.eol}${indent}]`, layout)
   }
   // 1.21 and later keep keys in `keybindings`, each naming an action's id; an
   // older file's `keybindings` is the former name of `actions`, holding commands.
-  const split = keybindings?.kind === 'array' && !keybindings.items.some((entry) => {
+  const split = keybindings?.type === 'array' && !(keybindings.children ?? []).some((entry) => {
     const value = valueOf(entry)
     return isRecord(value) && value['command'] !== undefined
   })
   if (split) {
     const action = { command: wtCommand(), id: WT_ACTION_ID }
     const binding = { id: WT_ACTION_ID, keys: 'shift+enter' }
-    const ours = actions?.kind === 'array' && actions.items.some(entry => {
+    const ours = actions?.type === 'array' && (actions.children ?? []).some(entry => {
       const value = valueOf(entry)
       return isRecord(value) && value['id'] === WT_ACTION_ID
     })

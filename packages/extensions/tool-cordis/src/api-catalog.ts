@@ -439,18 +439,6 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the durable content-addressed file reference.',
       },
       {
-        signature: 'saveFileStream(input: SaveFileStreamAttachment): Promise<FileAttachmentRef>',
-        description: 'Durably commit one file byte-for-byte from bounded chunks. Providers must apply backpressure and must not collect the complete file in memory. Backends without streamed verbatim storage keep this default rejection.',
-        parameters: [{ name: 'input', description: 'ordered exact bytes, optional cancellation, and display name.' }],
-        returns: 'the durable content-addressed file reference.',
-      },
-      {
-        signature: 'async *readFileStream( ref: FileAttachmentRef, signal?: AbortSignal, ): AsyncIterable<Uint8Array>',
-        description: 'Read and verify one verbatim stored file as bounded chunks. Providers must not collect the complete file in memory. Backends without verbatim file reads keep this default rejection.',
-        parameters: [{ name: 'ref', description: 'durable reference from the session log.' }, { name: 'signal', description: 'optional cancellation for backend reads and verification work.' }],
-        returns: 'exact file bytes in order; integrity failures reject the iteration.',
-      },
-      {
         signature: 'fileHostPath(ref: FileAttachmentRef): string | undefined',
         description: 'Locate the verbatim stored file object in the harness host filesystem.',
         parameters: [{ name: 'ref', description: 'durable file reference.' }],
@@ -948,7 +936,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
   {
     key: 'jobs',
     summary: 'Abstract background job registry.',
-    description: 'Abstract background job registry. Subclass, implement the abstract methods, and load the subclass as a plugin — it registers as `ctx.jobs` (one implementation per context; loading a second throws, which is cordis\' standard duplicate-service behavior).\n\nImplementations must honor these semantics:\n\n- Registrations outlive producer and controller fibers. Owner and service disposal cancel live work and await compliant producers; a throwing teardown cancel force-fails only the record. Teardown cancellation also marks the record reported, because a record its owner is being destroyed for has no reader left.\n- Owned-job access is fenced by the owner\'s session id. Ids are predictable, so authorization — not secrecy — is the boundary.\n- Settlement is first-wins: one terminal record, released waiters, and one round of contained listener notification, even against a late producer outcome. Completion is announced last, after the record is committed and every other observer of the settlement has seen it, because a reporter may open a model turn synchronously.\n- start refuses work while no attached job controller serves the spec\'s owner, so a producer cannot start work that owner cannot collect or stop. One registry serves every composition in the process, so this question — and completion-listener delivery — is owner-relative rather than process-wide: registrations made from an unscoped context serve every owner, and registrations made under an agent composition\'s scope serve exactly the agents composed under it.',
+    description: 'Abstract background job registry. Subclass, implement the abstract methods, and load the subclass as a plugin — it registers as `ctx.jobs` (one implementation per context; loading a second throws, which is cordis\' standard duplicate-service behavior).\n\nImplementations must honor these semantics:\n\n- Registrations outlive producer and controller fibers. Owner and service disposal cancel live work and await compliant producers; a throwing teardown cancel force-fails only the record. Teardown cancellation also marks the record reported, because a record its owner is being destroyed for has no reader left.\n- Owned-job access is fenced by the owner\'s session id. Ids are predictable, so authorization — not secrecy — is the boundary.\n- Settlement is first-wins: one terminal record, released waiters, and one round of contained listener notification, even against a late producer outcome. Completion is announced last, after the record is committed and its waiters are released, because a reporter may open a model turn synchronously.\n- start refuses work while no attached job controller serves the spec\'s owner, so a producer cannot start work that owner cannot collect or stop. One registry serves every composition in the process, so this question — and completion-listener delivery — is owner-relative rather than process-wide: registrations made from an unscoped context serve every owner, and registrations made under an agent composition\'s scope serve exactly the agents composed under it.',
     methods: [
       {
         signature: 'abstract start(spec: JobStart): JobId',
@@ -990,12 +978,6 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         signature: 'abstract onJobDone(listener: JobDoneListener): () => void',
         description: 'Register an effect-scoped completion listener. It receives the settlements of the owners its registering context\'s scope covers; each listener is contained; returned promises are observed but not awaited. No listener runs after service disposal.',
         parameters: [{ name: 'listener', description: 'receives each terminal snapshot and its exact owner.' }],
-        returns: 'disposer that unregisters the listener.',
-      },
-      {
-        signature: 'abstract onJobsChanged(listener: JobsChangedListener): () => void',
-        description: '/** Register an effect-scoped observer of visible-set changes. It fires after every commit that changes what list returns for that owner — registration, every stopping transition (including the one teardown performs before it awaits a slow producer), settlement, owner-disposal removal, and the emptying that service disposal commits — so an observer re-reads rather than accumulating deltas.\n\nDelivery is owner-relative on the same terms as onJobDone: an observer registered from an unscoped context — a host composition\'s own carrier — sees every owner, while one registered under an agent composition\'s scope sees exactly the agents composed under it.\n\nThis is not a superset of onJobDone: that one delivers the terminal record under first-wins semantics a job controller couples to notice delivery, while this one carries no delivery meaning and marks nothing reported. Listeners are contained and never awaited.',
-        parameters: [{ name: 'listener', description: 'receives the owner whose visible set changed, or `undefined` when an unowned job changed and every caller\'s set did.' }],
         returns: 'disposer that unregisters the listener.',
       },
       {
@@ -1511,7 +1493,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
   {
     key: 'sessionQuery',
     summary: 'Unified live-preferred session query service.',
-    description: 'Unified live-preferred session query service.\n\nExact reads, filters, and traces are backend-independent concrete behavior. A backend implements full-text observation, reconciliation, ranking, cursor generations, and query execution on the same `ctx.sessionQuery` service.',
+    description: 'Unified live-preferred session query service.\n\nExact reads and filters are backend-independent concrete behavior. A backend implements full-text observation, reconciliation, ranking, cursor generations, and query execution on the same `ctx.sessionQuery` service.',
     methods: [
       {
         signature: 'observeSession( sessionId: SessionId, options: SessionObservationOptions = {}, ): Promise<SessionObservation>',
@@ -1538,29 +1520,10 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'deterministic newest-first cloned session records.',
       },
       {
-        signature: 'async readSession(sessionId: SessionId): Promise<SessionLogSnapshot>',
-        description: 'Read and replay-validate one complete logical session log without making it live.',
-        parameters: [{ name: 'sessionId', description: 'live or persisted session id to read.' }],
-        returns: 'cloned header and complete raw event log from one observation.',
-        throws: ['when persistence, header compatibility, or replay validation fails.'],
-      },
-      {
         signature: 'async filterSessions( filters: readonly SessionResultFilter[], signal?: AbortSignal, ): Promise<SessionRecord[]>',
         description: 'Filter the complete logical corpus with provider-independent predicates.',
         parameters: [{ name: 'filters', description: 'ANDed session metadata and availability clauses.' }, { name: 'signal', description: 'optional cancellation for persistence listing.' }],
         returns: 'matching cloned records in deterministic newest-first order.',
-      },
-      {
-        signature: 'async readTitle( sessionId: SessionId, signal?: AbortSignal, ): Promise<SessionTitleSnapshot | undefined>',
-        description: 'Fold the latest log-backed title from one live-preferred logical session.',
-        parameters: [{ name: 'sessionId', description: 'live or persisted session id to read.' }, { name: 'signal', description: 'optional cancellation for source resolution and title folding.' }],
-        returns: 'latest title snapshot, or `undefined` when the log has no title event.',
-      },
-      {
-        signature: 'async readTitleSnapshot( sessionId: SessionId, signal?: AbortSignal, ): Promise<SessionTitleObservation>',
-        description: 'Fold the latest title and return its source header from one corpus observation.',
-        parameters: [{ name: 'sessionId', description: 'live or persisted session id to read.' }, { name: 'signal', description: 'optional cancellation for source resolution and title folding.' }],
-        returns: 'cloned source header and optional latest title snapshot.',
       },
       {
         signature: 'async readTitleSnapshots( sessionIds: readonly SessionId[], signal?: AbortSignal, ): Promise<SessionTitleObservationResult[]>',
@@ -1569,43 +1532,11 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'one fulfilled or rejected result per unique requested id.',
       },
       {
-        signature: 'async listEvents(sessionId: SessionId): Promise<SessionEventRecord[]>',
-        description: 'List lightweight raw-log event records for one logical session.',
-        parameters: [{ name: 'sessionId', description: 'live-preferred session id to read.' }],
-        returns: 'event records in ascending seq order.',
-      },
-      {
-        signature: 'async filterEvents( sessionId: SessionId, filters: readonly SessionEventResultFilter[], ): Promise<SessionEventSearchDocument[]>',
-        description: 'Scan first-party semantic event documents with provider-independent filters.',
-        parameters: [{ name: 'sessionId', description: 'live-preferred session id to scan.' }, { name: 'filters', description: 'ANDed metadata and literal-text predicates.' }],
-        returns: 'matching semantic documents in ascending seq order.',
-      },
-      {
         signature: 'async readSurface(sessionId: SessionId): Promise<SessionSurfaceSnapshot>',
         description: 'Read one session\'s complete current model surface from one corpus observation.',
         parameters: [{ name: 'sessionId', description: 'live-preferred session id to read.' }],
         returns: 'cloned header, current surface, and the last sequence number included in the raw-log capture.',
         throws: ['when source resolution fails or the session surface is invalid.'],
-      },
-      {
-        signature: 'async traceSession(sessionId: SessionId, signal?: AbortSignal): Promise<SessionLineageTrace>',
-        description: 'Trace known ancestry and descendants from one corpus observation.',
-        parameters: [{ name: 'sessionId', description: 'logical session id to trace.' }, { name: 'signal', description: 'optional cancellation for persistence listing.' }],
-        returns: 'a complete lineage or the first parent that could not be resolved.',
-        throws: ['when corpus resolution fails, the target is absent, or its known ancestry cycles.'],
-      },
-      {
-        signature: 'async traceEvent(request: SessionEventTraceRequest, signal?: AbortSignal): Promise<SessionEventTraceObservation>',
-        description: 'Trace one event\'s direct positional replacements and cited source events.',
-        parameters: [{ name: 'request', description: 'target session id and event seq.' }, { name: 'signal', description: 'optional cancellation for persisted source resolution.' }],
-        returns: 'source header, direct links, and the target\'s positional replacement chain.',
-        throws: ['when source resolution fails, the target is absent, or surface/source-event validation fails.'],
-      },
-      {
-        signature: 'async readEvent(request: SessionEventReadRequest, signal?: AbortSignal): Promise<SessionEventWindow>',
-        description: 'Read one full event plus a bounded raw-log context window.',
-        parameters: [{ name: 'request', description: 'target session/seq and context sizes.' }, { name: 'signal', description: 'optional cancellation for persisted source resolution.' }],
-        returns: 'cloned target and neighboring events.',
       },
     ],
   },
@@ -2291,16 +2222,10 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'disposer that removes exactly this contribution.',
       },
       {
-        signature: 'listBackends(): string[]',
-        description: 'List registered backend types in registration order.',
-        parameters: [],
-        returns: 'fresh backend type names.',
-      },
-      {
-        signature: 'async spawn(owner: Agent, request: TerminalSpawnRequest, signal?: AbortSignal): Promise<TerminalSpawnResult>',
+        signature: 'async spawn(owner: Agent, request: TerminalSpawnRequest, signal?: AbortSignal): Promise<TerminalSessionSnapshot>',
         description: 'Create and publish one owner-scoped session after backend setup succeeds.',
         parameters: [{ name: 'owner', description: 'exact registered Agent that owns access and cleanup.' }, { name: 'request', description: 'backend type plus optional owner-local name and cwd.' }, { name: 'signal', description: 'cancellation of unpublished setup.' }],
-        returns: 'published identity, metadata, status, and MOTD.',
+        returns: 'published identity, metadata, and status.',
       },
       {
         signature: 'hasOwnerActivity(owner: Agent): boolean',
@@ -2319,12 +2244,6 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Read one bounded scrollback page from an owned session.',
         parameters: [{ name: 'owner', description: 'exact session owner.' }, { name: 'id', description: 'target PTY identity.' }, { name: 'request', description: 'optional newest-relative offset and line count.' }],
         returns: 'bounded retained text and pagination metadata.',
-      },
-      {
-        signature: 'signal(owner: Agent, id: TerminalSessionId, signal: TerminalSignal): Promise<TerminalSignalResult>',
-        description: 'Deliver an allowed signal through an owned backend session.',
-        parameters: [{ name: 'owner', description: 'exact session owner.' }, { name: 'id', description: 'target PTY identity.' }, { name: 'signal', description: 'allowed POSIX signal name.' }],
-        returns: 'delivered foreground process-group identity.',
       },
       {
         signature: 'async kill(owner: Agent, id: TerminalSessionId, reason: string = \'model request\'): Promise<boolean>',
@@ -4153,10 +4072,6 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface JobRead {\n    text: string;\n    snapshot: JobSnapshot;\n}',
   },
   {
-    name: 'JobsChangedListener',
-    declaration: 'export type JobsChangedListener = (owner: Agent | undefined) => void;',
-  },
-  {
     name: 'JobSnapshot',
     declaration: 'export interface JobSnapshot {\n    id: JobId;\n    kind: JobKind;\n    label: string;\n    outputLimitBytes?: number;\n    ownerSession?: SessionId;\n    status: JobStatus;\n    detail?: string;\n    startedAt: number;\n    finishedAt?: number;\n    reported: boolean;\n}',
   },
@@ -4737,10 +4652,6 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface SaveFileAttachment {\n    data: Uint8Array;\n    name?: string;\n}',
   },
   {
-    name: 'SaveFileStreamAttachment',
-    declaration: 'export interface SaveFileStreamAttachment {\n    data: AsyncIterable<Uint8Array>;\n    signal?: AbortSignal;\n    name?: string;\n}',
-  },
-  {
     name: 'SaveImageAttachment',
     declaration: 'export interface SaveImageAttachment {\n    data: Uint8Array;\n    mediaType: ImageMediaType;\n    name?: string;\n}',
   },
@@ -4813,20 +4724,12 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type SessionEventMetadataFilter = Exclude<SessionEventResultFilter, {\n    kind: \'text\';\n}>;',
   },
   {
-    name: 'SessionEventReadRequest',
-    declaration: 'export interface SessionEventReadRequest {\n    sessionId: SessionId;\n    seq: SessionSeq;\n    before?: number;\n    after?: number;\n}',
-  },
-  {
     name: 'SessionEventRecord',
     declaration: 'export interface SessionEventRecord {\n    sessionId: SessionId;\n    seq: SessionSeq;\n    type: SessionEventType;\n    time: number;\n    surface: SessionEventSurface;\n}',
   },
   {
     name: 'SessionEventResultFilter',
     declaration: 'export type SessionEventResultFilter = ({\n    kind: \'seq\';\n} & SessionResultRange) | ({\n    kind: \'time\';\n} & SessionResultRange) | {\n    kind: \'type\';\n    values: readonly SessionEventType[];\n} | {\n    kind: \'surface\';\n    values: readonly SessionEventSurface[];\n} | {\n    kind: \'text\';\n    text: string;\n};',
-  },
-  {
-    name: 'SessionEventSearchDocument',
-    declaration: 'export interface SessionEventSearchDocument extends SessionEventRecord {\n    text: string;\n}',
   },
   {
     name: 'SessionEventSearchHit',
@@ -4845,24 +4748,8 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type SessionEventSurface = \'current\' | \'shadowed\' | \'log-only\';',
   },
   {
-    name: 'SessionEventTrace',
-    declaration: 'export interface SessionEventTrace {\n    target: SessionEventRecord;\n    replacedBy?: SessionSeq;\n    replacementChain: SessionSeq[];\n    replacedEventSeqs: SessionSeq[];\n    sourceEventSeqs: SessionSeq[];\n    derivedEventSeqs: SessionSeq[];\n}',
-  },
-  {
-    name: 'SessionEventTraceObservation',
-    declaration: 'export interface SessionEventTraceObservation extends SessionEventTrace {\n    session: SessionHeader;\n}',
-  },
-  {
-    name: 'SessionEventTraceRequest',
-    declaration: 'export interface SessionEventTraceRequest {\n    sessionId: SessionId;\n    seq: SessionSeq;\n}',
-  },
-  {
     name: 'SessionEventType',
     declaration: 'export type SessionEventType = keyof SessionEventMap;',
-  },
-  {
-    name: 'SessionEventWindow',
-    declaration: 'export interface SessionEventWindow {\n    session: SessionHeader;\n    inheritedEventCount: SessionLogOffset;\n    target: SessionEvent;\n    events: SessionEvent[];\n    startSeq: SessionSeq;\n    endSeq: SessionSeq;\n}',
   },
   {
     name: 'SessionFeedbackRecordRequest',
@@ -4917,20 +4804,8 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface SessionInspection extends SessionStorageMetadata {\n    readonly events: readonly SessionEvent[];\n}',
   },
   {
-    name: 'SessionLineageNode',
-    declaration: 'export interface SessionLineageNode {\n    session: SessionRecord;\n    descendants: SessionLineageNode[];\n}',
-  },
-  {
-    name: 'SessionLineageTrace',
-    declaration: 'export type SessionLineageTrace = {\n    target: SessionRecord;\n    ancestors: SessionRecord[];\n    descendants: SessionLineageNode[];\n} & ({\n    complete: true;\n    root: SessionRecord;\n} | {\n    complete: false;\n    unresolvedParentId: SessionId;\n});',
-  },
-  {
     name: 'SessionLogOffset',
     declaration: 'export type SessionLogOffset = BrandedNumber<\'SessionLogOffset\'>;',
-  },
-  {
-    name: 'SessionLogSnapshot',
-    declaration: 'export interface SessionLogSnapshot {\n    session: SessionHeader;\n    inheritedEventCount: SessionLogOffset;\n    events: SessionEvent[];\n}',
   },
   {
     name: 'SessionMessageProjection',
@@ -5482,7 +5357,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'TerminalBackendSession',
-    declaration: 'export interface TerminalBackendSession {\n    readonly motd: string;\n    readonly pid?: number;\n    startSend(request: TerminalSendRequest): TerminalSendOperation;\n    read(request: TerminalReadRequest): TerminalReadResult;\n    signal(signal: TerminalSignal): Promise<TerminalSignalResult>;\n    status(): TerminalSessionStatus;\n    close(reason: string): Promise<void>;\n}',
+    declaration: 'export interface TerminalBackendSession {\n    readonly pid?: number;\n    startSend(request: TerminalSendRequest): TerminalSendOperation;\n    read(request: TerminalReadRequest): TerminalReadResult;\n    signal(signal: TerminalSignal): Promise<TerminalSignalResult>;\n    status(): TerminalSessionStatus;\n    close(reason: string): Promise<void>;\n}',
   },
   {
     name: 'TerminalBackendSpawnSpec',
@@ -5547,10 +5422,6 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'TerminalSpawnRequest',
     declaration: 'export interface TerminalSpawnRequest {\n    type: string;\n    name?: string;\n    cwd?: string;\n}',
-  },
-  {
-    name: 'TerminalSpawnResult',
-    declaration: 'export interface TerminalSpawnResult extends TerminalSessionSnapshot {\n    motd: string;\n}',
   },
   {
     name: 'TerminalWaitReason',

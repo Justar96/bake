@@ -4,7 +4,8 @@ import { Box, Text } from 'ink'
 import stringWidth from 'string-width'
 import type { TuiCopy } from './copy.ts'
 import { ICON } from './icons.ts'
-import { COLUMN, HINT_MIN_COLUMNS, MARKER } from './layout.ts'
+import { COLUMN, MARKER } from './layout.ts'
+import { tailFits } from './line.tsx'
 import { PALETTE } from './palette.ts'
 import { sheetBar, type SheetLine } from './sheet.tsx'
 
@@ -50,8 +51,8 @@ export function tasksOpen(todos: readonly TaskEntry[] | undefined): boolean {
  * work remains and none once it is done. The complete checklist is a sheet away.
  *
  * `hint` names the key that opens the sheet, dim at the row's right edge; the
- * row gives it up below {@link HINT_MIN_COLUMNS}, as the composer does its
- * hint, and before it cuts the task below a few cells. Focused, the rail
+ * row gives it up as {@link tailFits} decides, as the composer does its hint,
+ * and before it cuts the task below a few cells. Focused, the rail
  * holds `>`, the name is marked, and the hint says what Enter does.
  *
  * Neutral but for its marker: the bar fills in the terminal's own
@@ -76,13 +77,13 @@ export function Tasks({ todos, copy, columns, focused = false, hint }: {
   const count = ` ${done}/${todos.length}`
   const task = `${glyphOf(current.status)} ${current.text}`
   const tail = focused ? copy.todoOpen : hint
+  const tailWidth = tail === undefined ? 0 : stringWidth(tail)
   const fixed = rail + stringWidth(copy.todoTitle) + stringWidth(count) + 2 + TASK_BAR + 2
-  const showTail = tail !== undefined && columns >= HINT_MIN_COLUMNS
-    && fixed + Math.min(stringWidth(task), TASK_TEXT_MIN) + 2 + stringWidth(tail) <= columns
+  const showTail = tailFits(columns, fixed + Math.min(stringWidth(task), TASK_TEXT_MIN), tail)
   const color = colorOf(current.status)
   return <Box width={columns} height={1} flexDirection="row" flexShrink={0} overflowX="hidden">
     <Box width={rail} flexShrink={0}><Text bold={focused} dimColor={!focused}>{focused ? '>' : ICON.todo}</Text></Box>
-    <Box width={Math.max(0, (showTail ? columns - 2 - stringWidth(tail) : columns) - rail)} flexShrink={0}>
+    <Box width={Math.max(0, (showTail ? columns - 2 - tailWidth : columns) - rail)} flexShrink={0}>
       <Text wrap="truncate-end">
         <Text bold inverse={focused}>{copy.todoTitle}</Text>
         <Text dimColor>{count}</Text>

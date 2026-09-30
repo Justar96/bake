@@ -4,9 +4,6 @@ import type { Context, FiberState } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 // Type-only: the optional agent-preset roster resolved through `ctx.get`.
 import type {} from '@deepseek-ai/dsh-agent-presets'
-import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
-// Typert-generated ./typert and ./remote artifacts import Zod at runtime.
-import type {} from 'zod'
 import type {
   AgentPresetPluginGroup,
   PluginEntryId,
@@ -45,34 +42,6 @@ const FIBER_PHASE = {
   [FIBER_STATE.DISPOSED]: null,
   [FIBER_STATE.UNLOADING]: 'unloading',
 } as const satisfies Record<FiberState, PluginFiberPhase>
-
-/** Remote-only service exposing the Loader's current non-group entry state. */
-export class PluginInventoryGateway extends TypertRemoteService {
-  static inject = ['loader']
-
-  constructor(ctx: Context) {
-    super(ctx, 'pluginInventory')
-  }
-
-  /**
-   * Read the Loader directly on every call. Cordis's internal plugin/status
-   * events already maintain Entry.fiber and Fiber.state, so a second cache
-   * would only add another lifecycle truth to keep synchronized.
-   *
-   * When an agent-preset roster is composed, the snapshot also carries each
-   * preset's composition rows, because those rows — not the Loader's own
-   * entries — are where a deployment that mounts the roster runs its
-   * model-facing plugins.
-   * @returns Current non-group Loader entries in Loader order, with per-preset
-   * compositions when a roster is composed.
-   */
-  @Remote('list')
-  async list(): Promise<PluginInventorySnapshot> {
-    return readPluginInventory(this.ctx)
-  }
-}
-
-export default PluginInventoryGateway
 
 /** Read current Loader entries and optional preset compositions.
  * @param ctx Context with the Loader service.

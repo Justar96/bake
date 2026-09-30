@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { chmod, mkdir, readdir, readFile, stat, unlink, writeFile } from 'node:fs/promises'
+import { chmod, readdir, readFile, stat, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { AttachmentId } from '@deepseek-ai/dsh-attachment'
 import type { FileAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import {
-  fileLeafName, readFileStreamVerbatim, saveFileStreamVerbatim, saveFileVerbatim, storedFilePath,
+  fileLeafName, saveFileVerbatim, storedFilePath,
 } from '../src/file-store.ts'
 import { publishImmutableAlias } from '../src/store.ts'
 
@@ -27,12 +27,6 @@ afterEach(async () => {
 
 function sha256(data: Uint8Array): string {
   return createHash('sha256').update(data).digest('hex')
-}
-
-async function readStream(stream: AsyncIterable<Uint8Array>): Promise<Uint8Array> {
-  const chunks: Uint8Array[] = []
-  for await (const chunk of stream) chunks.push(chunk)
-  return new Uint8Array(Buffer.concat(chunks))
 }
 
 describe('fileLeafName', () => {
@@ -145,118 +139,6 @@ describe('saveFileVerbatim', () => {
       join(root, 'files', 'ff', 'missing', 'alias.bin'),
       'f'.repeat(64),
     )).rejects.toMatchObject({ code: 'ATTACHMENT_WRITE_FAILED' })
-  })
-})
-
-describe('saveFileStreamVerbatim', () => {
-  it('stores ordered chunks without materializing one aggregate byte array', async () => {
-    const root = await makeRoot()
-    const ref = await saveFileStreamVerbatim(root, {
-      data: (async function* (): AsyncIterable<Uint8Array> {
-        yield Uint8Array.of(0, 1)
-        yield Uint8Array.of(2, 250)
-        yield Uint8Array.of(251, 252)
-      })(),
-      name: 'large.bin',
-    })
-    const expected = Uint8Array.of(0, 1, 2, 250, 251, 252)
-    expect(ref).toEqual({
-      attachmentId: AttachmentId(`sha256:${sha256(expected)}`),
-      name: 'large.bin',
-      bytes: expected.byteLength,
-    })
-    expect(new Uint8Array(await readFile(storedFilePath(root, ref)))).toEqual(expected)
-  })
-
-  it('removes its staging file when cancellation interrupts the source', async () => {
-    const root = await makeRoot()
-    const abort = new AbortController()
-    const reason = new Error('upload cancelled')
-    await expect(saveFileStreamVerbatim(root, {
-      data: (async function* (): AsyncIterable<Uint8Array> {
-        yield Uint8Array.of(1, 2)
-        abort.abort(reason)
-        yield Uint8Array.of(3, 4)
-      })(),
-      signal: abort.signal,
-      name: 'cancelled.bin',
-    })).rejects.toBe(reason)
-    expect(await readdir(join(root, 'tmp'))).toEqual([])
-  })
-
-  it('wraps source failures and removes the staging file', async () => {
-    const root = await makeRoot()
-    await expect(saveFileStreamVerbatim(root, {
-      data: (async function* (): AsyncIterable<Uint8Array> {
-        yield Uint8Array.of(1, 2)
-        throw new Error('source failed')
-      })(),
-      name: 'failed.bin',
-    })).rejects.toMatchObject({ code: 'ATTACHMENT_WRITE_FAILED' })
-    expect(await readdir(join(root, 'tmp'))).toEqual([])
-  })
-})
-
-describe('readFileStreamVerbatim', () => {
-  it('returns exact bounded chunks and accepts an empty file', async () => {
-    const root = await makeRoot()
-    const data = Uint8Array.from({ length: (1 << 16) + 3 }, (_, index) => index % 251)
-    const ref = await saveFileVerbatim(root, { data, name: 'large.bin' })
-    await expect(readStream(readFileStreamVerbatim(root, ref))).resolves.toEqual(data)
-    const empty = await saveFileVerbatim(root, { data: new Uint8Array(), name: 'empty.bin' })
-    await expect(readStream(readFileStreamVerbatim(root, empty))).resolves.toEqual(new Uint8Array())
-  })
-
-  it('rejects invalid, missing, and unreadable references with storage codes', async () => {
-    const root = await makeRoot()
-    const ref: FileAttachmentRef = {
-      attachmentId: AttachmentId(`sha256:${'c'.repeat(64)}`),
-      name: 'missing.bin',
-      bytes: 1,
-    }
-    await expect(readStream(readFileStreamVerbatim(root, { ...ref, name: '../escape' })))
-      .rejects.toMatchObject({ code: 'INVALID_ATTACHMENT_REF' })
-    await expect(readStream(readFileStreamVerbatim(root, ref)))
-      .rejects.toMatchObject({ code: 'ATTACHMENT_NOT_FOUND' })
-
-    const saved = await saveFileVerbatim(root, { data: Uint8Array.of(1), name: 'unreadable.bin' })
-    const path = storedFilePath(root, saved)
-    await unlink(path)
-    await mkdir(path)
-    await expect(readStream(readFileStreamVerbatim(root, saved)))
-      .rejects.toMatchObject({ code: 'ATTACHMENT_READ_FAILED' })
-  })
-
-  it('detects changed bytes and recorded lengths', async () => {
-    const root = await makeRoot()
-    const ref = await saveFileVerbatim(root, { data: Uint8Array.of(1, 2, 3), name: 'data.bin' })
-    const path = storedFilePath(root, ref)
-    await chmod(path, 0o600)
-    await writeFile(path, Uint8Array.of(3, 2, 1))
-    await expect(readStream(readFileStreamVerbatim(root, ref)))
-      .rejects.toMatchObject({ code: 'ATTACHMENT_CORRUPT' })
-    await writeFile(path, Uint8Array.of(1, 2, 3))
-    await expect(readStream(readFileStreamVerbatim(root, { ...ref, bytes: 4 })))
-      .rejects.toMatchObject({ code: 'ATTACHMENT_CORRUPT' })
-  })
-
-  it('preserves caller cancellation before and during a read', async () => {
-    const root = await makeRoot()
-    const ref = await saveFileVerbatim(root, {
-      data: Uint8Array.from({ length: 1 << 17 }, () => 7),
-      name: 'cancel.bin',
-    })
-    const before = new AbortController()
-    const beforeReason = new Error('cancelled before read')
-    before.abort(beforeReason)
-    await expect(readStream(readFileStreamVerbatim(root, ref, before.signal))).rejects.toBe(beforeReason)
-
-    const during = new AbortController()
-    const stream = readFileStreamVerbatim(root, ref, during.signal)[Symbol.asyncIterator]()
-    await expect(stream.next()).resolves.toMatchObject({ done: false })
-    const duringReason = new Error('cancelled during read')
-    during.abort(duringReason)
-    await expect(stream.next()).rejects.toBe(duringReason)
   })
 })
 

@@ -37,8 +37,6 @@ The launcher makes three things available to your app:
 
 An app launched with no arguments sees an empty list — that is the honest answer, not a missing value.
 
-`exitOnStdinEnd(ctx, label)` binds a successfully started stdio application's EOF to `ctx.appExit(0)`. It never reads or resumes stdin, so a protocol transport receives bytes buffered before it mounts; startup rejection wins over a racing EOF, and the owning fiber removes both pending listeners.
-
 `SESSION_IN_USE_EXIT` (75, sysexits' `EX_TEMPFAIL`) is the status an app passes to `ctx.appExit` when the session its command line names is open in another process, because the same command succeeds once that process lets the session go. An app that refuses such a launch throws `SessionInUseError(message, cause)` with the line it prints and the persistence refusal as `cause`, and maps that class to the status where it reports failures. The terminal and headless profiles both refuse `--resume` this way. Only the app knows whether a write refusal means another process, so each app decides when to throw it.
 
 ### Parsing your flags

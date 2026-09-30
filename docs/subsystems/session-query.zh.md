@@ -27,19 +27,7 @@ interface SessionRecord {
 }
 ```
 
-`SessionLogSnapshot` 是供恢复预检使用的完整原始日志：它脱离运行时，并经过回放验证。`SessionSurfaceSnapshot` 表示一次精确读取的 surface 观测结果，而不是持续保留的订阅。
-
-```ts type-equiv
-/** One validated detached observation of a logical session's complete raw log. */
-interface SessionLogSnapshot {
-  /** Cloned session header selected from the same observation as `events`. */
-  session: SessionHeader
-  /** Exact number of fork-inherited events in the observed log. */
-  inheritedEventCount: SessionLogOffset
-  /** Cloned contiguous raw events after in-memory interrupted-turn balancing and replay validation. */
-  events: SessionEvent[]
-}
-```
+`SessionSurfaceSnapshot` 表示一次精确读取的 surface 观测结果，而不是持续保留的订阅。
 
 ```ts type-equiv
 /** One atomic live-preferred observation of a session's current model surface. */
@@ -144,7 +132,7 @@ interface SessionEventSearchDocument extends SessionEventRecord {
 }
 ```
 
-`ctx.sessionQuery.filterSessions(filters)` 会对完整的逻辑会话语料库应用 `SessionResultFilter`；`ctx.sessionQuery.filterEvents(sessionId, filters)` 按 seq 升序返回匹配的文档。消息、工具调用和工具结果、待办事项，以及失败和状态详情会纳入语义文本；推理（reasoning）块、被阻止的提示词、结构事件和流分片则不会。
+`ctx.sessionQuery.filterSessions(filters)` 会对完整的逻辑会话语料库应用 `SessionResultFilter`。消息、工具调用和工具结果、待办事项，以及失败和状态详情会纳入语义文本；推理（reasoning）块、被阻止的提示词、结构事件和流分片则不会。
 
 ## 全文搜索结果页
 
@@ -223,140 +211,22 @@ interface SessionSearchHit extends SessionRecord {
 }
 ```
 
-## 会话谱系
-
-`SessionLineageTrace` 按由近及远的顺序携带已知 parent，以及由直接 descendant 递归嵌套而成的森林。完整性判别字段使已知 root 与缺失 parent 互斥。
-
-```ts type-equiv
-/** Recursive descendant node in a session-lineage trace. */
-interface SessionLineageNode {
-  /** Detached logical-corpus record for this descendant. */
-  session: SessionRecord
-  /** Direct children, each carrying its own recursive descendants. */
-  descendants: SessionLineageNode[]
-}
-```
-
-```ts type-equiv
-/** Known ancestry and descendants for one logical session. */
-type SessionLineageTrace = {
-  /** Detached record for the session that was traced. */
-  target: SessionRecord
-  /** Known parents from the immediate parent outward. */
-  ancestors: SessionRecord[]
-  /** Complete known descendant trees rooted at the target's direct children. */
-  descendants: SessionLineageNode[]
-} & (
-  | {
-    /** The complete parent chain is present in the logical corpus. */
-    complete: true
-    /** Detached record at the top of the complete lineage. */
-    root: SessionRecord
-  }
-  | {
-    /** The parent chain leaves the visible logical corpus. */
-    complete: false
-    /** First parent id that is not present in the logical corpus. */
-    unresolvedParentId: SessionId
-  }
-)
-```
-
-## 有界事件读取
-
-请求指定一个原始 seq 及可选的邻近数量。结果携带 `SessionHeader` 而非可用性标志，使已知的 live 目标可以独立于持久化健康状态。
-
-```ts type-equiv
-/** Request for one event plus raw neighboring log context. */
-interface SessionEventReadRequest {
-  /** Session that owns the target event. */
-  sessionId: SessionId
-  /** Target event seq. */
-  seq: SessionSeq
-  /** Number of preceding raw events to include. */
-  before?: number
-  /** Number of following raw events to include. */
-  after?: number
-}
-```
-
-```ts type-equiv
-/** Full target event and a bounded raw-log window. */
-interface SessionEventWindow {
-  /** Cloned header for the live-preferred source read. */
-  session: SessionHeader
-  /** Exact number of fork-inherited events in the observed log. */
-  inheritedEventCount: SessionLogOffset
-  /** Full cloned target event. */
-  target: SessionEvent
-  /** Full cloned events from `startSeq` through `endSeq`. */
-  events: SessionEvent[]
-  /** First seq included in `events`. */
-  startSeq: SessionSeq
-  /** Last seq included in `events`. */
-  endSeq: SessionSeq
-}
-```
-
-## 事件关系
-
-事件追踪会区分位置替换与被引用为来源的事件。除 `replacementChain` 外，每个 seq 列表都只包含直接链接；该链从目标沿直接 replacer 追踪到最终的位置替换。
-
-```ts type-equiv
-/** Request for direct surface replacements and relationships to cited source events around one event. */
-interface SessionEventTraceRequest {
-  /** Session that owns the target event. */
-  sessionId: SessionId
-  /** Target event seq. */
-  seq: SessionSeq
-}
-```
-
-```ts type-equiv
-/** Direct surface replacements and relationships to cited source events for one event. */
-interface SessionEventTrace {
-  /** Lightweight target record. */
-  target: SessionEventRecord
-  /** Immediate positional replacement event, when the target was shadowed. */
-  replacedBy?: SessionSeq
-  /** Positional replacers from the immediate replacement to the final replacement. */
-  replacementChain: SessionSeq[]
-  /** Surface nodes directly removed when the target itself performed a replacement. */
-  replacedEventSeqs: SessionSeq[]
-  /** Earlier events cited directly as sources, in their recorded order. */
-  sourceEventSeqs: SessionSeq[]
-  /** Later events that directly cite the target as a source, in log order. */
-  derivedEventSeqs: SessionSeq[]
-}
-```
-
-```ts type-equiv
-/** Event relationships bound to the same session-header observation. */
-interface SessionEventTraceObservation extends SessionEventTrace {
-  /** Cloned header selected with the event log used for the trace. */
-  session: SessionHeader
-}
-```
-
 ## 错误
 
 封闭的 code 联合类型区分请求校验、目标缺失、surface 日志格式错误、可选后端故障、部署关闭搜索与矛盾的源元数据。
 
 ```ts type-equiv
-/** Stable machine-routable failure taxonomy for session reads, traces, and search. */
+/** Stable machine-routable failure taxonomy for session reads and search. */
 type SessionQueryErrorCode =
   | 'SESSION_QUERY_ABORTED'
   | 'SESSION_QUERY_CORRUPT_SESSION'
-  | 'SESSION_QUERY_EVENT_NOT_FOUND'
   | 'SESSION_QUERY_INDEX_FAILED'
   | 'SESSION_QUERY_INVALID_CONFIG'
   | 'SESSION_QUERY_INVALID_CURSOR'
   | 'SESSION_QUERY_INVALID_FILTER'
   | 'SESSION_QUERY_INVALID_LIMIT'
   | 'SESSION_QUERY_INVALID_QUERY'
-  | 'SESSION_QUERY_INVALID_LINEAGE'
   | 'SESSION_QUERY_INVALID_SURFACE'
-  | 'SESSION_QUERY_INVALID_WINDOW'
   | 'SESSION_QUERY_PERSISTENCE_FAILED'
   | 'SESSION_QUERY_SEARCH_DISABLED'
   | 'SESSION_QUERY_SESSION_NOT_FOUND'
@@ -378,7 +248,7 @@ Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnp
 
 Unified live-preferred session query service.
 
-Exact reads, filters, and traces are backend-independent concrete behavior. A backend implements full-text observation, reconciliation, ranking, cursor generations, and query execution on the same `ctx.sessionQuery` service.
+Exact reads and filters are backend-independent concrete behavior. A backend implements full-text observation, reconciliation, ranking, cursor generations, and query execution on the same `ctx.sessionQuery` service.
 
 ```ts cordis-catalog
 /**
@@ -413,36 +283,12 @@ abstract searchEvents( request: SessionEventSearchRequest, exec?: SessionSearchE
 listSessions(signal?: AbortSignal): Promise<SessionRecord[]>
 
 /**
- * Read and replay-validate one complete logical session log without making it live.
- * @param sessionId - live or persisted session id to read.
- * @returns cloned header and complete raw event log from one observation.
- * @throws when persistence, header compatibility, or replay validation fails.
- */
-async readSession(sessionId: SessionId): Promise<SessionLogSnapshot>
-
-/**
  * Filter the complete logical corpus with provider-independent predicates.
  * @param filters - ANDed session metadata and availability clauses.
  * @param signal - optional cancellation for persistence listing.
  * @returns matching cloned records in deterministic newest-first order.
  */
 async filterSessions( filters: readonly SessionResultFilter[], signal?: AbortSignal, ): Promise<SessionRecord[]>
-
-/**
- * Fold the latest log-backed title from one live-preferred logical session.
- * @param sessionId - live or persisted session id to read.
- * @param signal - optional cancellation for source resolution and title folding.
- * @returns latest title snapshot, or `undefined` when the log has no title event.
- */
-async readTitle( sessionId: SessionId, signal?: AbortSignal, ): Promise<SessionTitleSnapshot | undefined>
-
-/**
- * Fold the latest title and return its source header from one corpus observation.
- * @param sessionId - live or persisted session id to read.
- * @param signal - optional cancellation for source resolution and title folding.
- * @returns cloned source header and optional latest title snapshot.
- */
-async readTitleSnapshot( sessionId: SessionId, signal?: AbortSignal, ): Promise<SessionTitleObservation>
 
 /**
  * Fold titles for unique sessions from one cancellable corpus observation.
@@ -456,56 +302,15 @@ async readTitleSnapshot( sessionId: SessionId, signal?: AbortSignal, ): Promise<
 async readTitleSnapshots( sessionIds: readonly SessionId[], signal?: AbortSignal, ): Promise<SessionTitleObservationResult[]>
 
 /**
- * List lightweight raw-log event records for one logical session.
- * @param sessionId - live-preferred session id to read.
- * @returns event records in ascending seq order.
- */
-async listEvents(sessionId: SessionId): Promise<SessionEventRecord[]>
-
-/**
- * Scan first-party semantic event documents with provider-independent filters.
- * @param sessionId - live-preferred session id to scan.
- * @param filters - ANDed metadata and literal-text predicates.
- * @returns matching semantic documents in ascending seq order.
- */
-async filterEvents( sessionId: SessionId, filters: readonly SessionEventResultFilter[], ): Promise<SessionEventSearchDocument[]>
-
-/**
  * Read one session's complete current model surface from one corpus observation.
  * @param sessionId - live-preferred session id to read.
  * @returns cloned header, current surface, and the last sequence number included in the raw-log capture.
  * @throws when source resolution fails or the session surface is invalid.
  */
 async readSurface(sessionId: SessionId): Promise<SessionSurfaceSnapshot>
-
-/**
- * Trace known ancestry and descendants from one corpus observation.
- * @param sessionId - logical session id to trace.
- * @param signal - optional cancellation for persistence listing.
- * @returns a complete lineage or the first parent that could not be resolved.
- * @throws when corpus resolution fails, the target is absent, or its known ancestry cycles.
- */
-async traceSession(sessionId: SessionId, signal?: AbortSignal): Promise<SessionLineageTrace>
-
-/**
- * Trace one event's direct positional replacements and cited source events.
- * @param request - target session id and event seq.
- * @param signal - optional cancellation for persisted source resolution.
- * @returns source header, direct links, and the target's positional replacement chain.
- * @throws when source resolution fails, the target is absent, or surface/source-event validation fails.
- */
-async traceEvent(request: SessionEventTraceRequest, signal?: AbortSignal): Promise<SessionEventTraceObservation>
-
-/**
- * Read one full event plus a bounded raw-log context window.
- * @param request - target session/seq and context sizes.
- * @param signal - optional cancellation for persisted source resolution.
- * @returns cloned target and neighboring events.
- */
-async readEvent(request: SessionEventReadRequest, signal?: AbortSignal): Promise<SessionEventWindow>
 ```
 
-Types: [SessionId](core.zh.md) · [SessionTitleSnapshot](session-title.zh.md)
+Types: [SessionId](core.zh.md)
 
 Source: [`packages/session-query/session-query/src/index.ts`](../../packages/session-query/session-query/src/index.ts)
 <!-- END GENERATED cordis-surface -->

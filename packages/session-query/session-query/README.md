@@ -1,5 +1,5 @@
 ---
-description: "The unified session-history query service for consumers and backend authors: exact reads, relationship traces, and provider-independent filters over live and durable session logs."
+description: "The unified session-history query service for consumers and backend authors: exact reads and provider-independent filters over live and durable session logs."
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`dsh-session-query` lets application code list, filter, read, and search session history, inspect bounded event context, and trace session or event relationships. Reads prefer live sessions over persisted copies and return detached clones from one consistent observation. Exact reads, filters, and traces work with any supported storage setup; ranked full-text search requires a backend such as `dsh-session-query-sqlite`. Use it when application code needs programmatic access to the history presented to the model.
+`dsh-session-query` lets application code list, filter, read, and search session history. Reads prefer live sessions over persisted copies and return detached clones from one consistent observation. Exact reads and filters work with any supported storage setup; ranked full-text search requires a backend such as `dsh-session-query-sqlite`. Use it when application code needs programmatic access to the history presented to the model.
 
 ## Table of Contents
 
@@ -32,23 +32,16 @@ Use `ctx.sessionQuery` from application code when you need to read or search ses
 | Operation | What you get |
 |---|---|
 | `listSessions()` | Every logical session, newest first, with `live` and `persisted` availability flags |
-| `readSession(id)` | The complete replay-validated raw event log, without making the session live |
 | `filterSessions(filters)` | Sessions matching ANDed metadata and availability predicates |
-| `filterEvents(id, filters)` | Semantic event documents matching metadata and literal-text predicates |
 | `readTitleSnapshots(ids)` | The latest folded title per session, bound to its source header, with the newest event's time as `lastEventAt` |
-| `listEvents(id)` / `readSurface(id)` | Lightweight per-event records, or the complete current model surface |
-| `readEvent(request)` | One full event plus a bounded raw-log window around it |
-| `traceSession(id)` | The known ancestor chain and recursive descendant trees |
-| `traceEvent(request)` | One event's positional replacements and cited source-event relationships |
+| `readSurface(id)` | The complete current model surface |
 | `searchSessions(request)` / `searchEvents(request)` | Full-text search pages, implemented by the mounted backend |
 
-Body-free records expose only `SessionHeader.isSeeded`. Reads that return event bodies (`readSession`, `readSurface`, `readEvent`) and retained `SessionObservation` values also carry the exact `inheritedEventCount`, so callers can distinguish inherited and owned events without inferring a cut from the log.
+Body-free records expose only `SessionHeader.isSeeded`. Reads that return event bodies (`readSurface`) and retained `SessionObservation` values also carry the exact `inheritedEventCount`, so callers can distinguish inherited and owned events without inferring a cut from the log.
 
 ### Filters
 
-`SessionResultFilter` narrows sessions by id, nullable cwd, created-at range, nullable parent, or source availability; `SessionEventResultFilter` narrows events by seq/time range, event type, surface, or literal text. Filter arrays are ANDed and list values within one clause are ORed; empty list values match nothing, ranges are inclusive, and malformed ranges or unknown closed-union values fail with `SESSION_QUERY_INVALID_FILTER`.
-
-The text clause is a literal, case-insensitive, whitespace-flexible scan of extracted semantic text — not a full-text query. Use it for arbitrary substring recall; use the mounted backend's search methods when you need ranked full-text results.
+`SessionResultFilter` narrows sessions by id, nullable cwd, created-at range, nullable parent, or source availability — both for `filterSessions` and as search session filters. Full-text search additionally accepts event predicates as `SessionEventMetadataFilter`: seq/time range, event type, and surface. Filter arrays are ANDed and list values within one clause are ORed; empty list values match nothing, ranges are inclusive, and malformed ranges or unknown closed-union values fail with `SESSION_QUERY_INVALID_FILTER`.
 
 ### Configuration
 
@@ -56,7 +49,7 @@ The inherited knobs are set through the mounted backend's config:
 
 | Field | Default | Meaning |
 |---|---|---|
-| `readWindowMax` | `50` | Maximum `before`/`after` raw events accepted by `readEvent` |
+| `readWindowMax` | `50` | Maximum accepted raw event window on either side |
 | `persistedReadConcurrency` | `4` | Concurrent persisted-log reads in one batch title read |
 | `preparedSessionCacheSize` | `5` | Cold prepared-Session observations retained for reuse across `observeSession` reads |
 
@@ -80,8 +73,8 @@ The service is built on one separation and three commitments:
 
 - **Live-preferred logical corpus.** Every read resolves one consistent observation: live `ctx.sessions` wins, optional `ctx.sessionPersistence` fills the rest, and conflicting immutable headers fail rather than merge.
 - **Detached results.** All returned headers, events, and records are cloned; nothing exposes live state or a retained subscription.
-- **Exact reads concrete, search abstract.** Reads, filters, and traces are implemented here once; the two full-text methods are the only abstract surface a backend owns.
-- **One canonical surface fold.** `listEvents`, `readSurface`, and `traceEvent` validate the whole log with the same `dsh-session` fold, so search and traces agree with model-history derivation.
+- **Exact reads concrete, search abstract.** Reads and filters are implemented here once; the two full-text methods are the only abstract surface a backend owns.
+- **One canonical surface fold.** `readSurface` validates the whole log with the same `dsh-session` fold, so search and surface reads agree with model-history derivation.
 
 The decision history lives in the [unified service decision](../../../.agents/notes/archived/architecture/2026-07-23-unified-session-query-service.md), the [tracing note](../../../.agents/notes/archived/feature/2026-07-13-session-query-tracing.md), and the [SQLite provider note](../../../.agents/notes/archived/feature/2026-07-10-sqlite-session-query-provider.md).
 
@@ -98,9 +91,9 @@ The decision history lives in the [unified service decision](../../../.agents/no
 | [`src/filters.ts`](src/filters.ts) | Provider-independent predicates and the literal text scan |
 | [`src/extraction.ts`](src/extraction.ts) | First-party semantic text extraction per event type |
 | [`src/documents.ts`](src/documents.ts) | Surface-aware semantic document projection |
-| [`src/tracing.ts`](src/tracing.ts) | One-shot session-lineage and event-relationship tracing |
+| [`src/tracing.ts`](src/tracing.ts) | Canonical current-surface fold for exact surface reads |
 | [`src/sources.ts`](src/sources.ts) | Immutable-header compatibility check |
-| — | No runtime invariant companion is published; query results are immutable per-call projections whose lineage and event relations are validated while they are built; the service retains no observable result state. |
+| — | No runtime invariant companion is published; query results are immutable per-call projections validated while they are built; the service retains no observable result state. |
 
 ### Corpus resolution
 
@@ -110,9 +103,9 @@ The decision history lives in the [unified service decision](../../../.agents/no
 
 `observeSession` builds point observations without a listing preflight. A live observation fixes its cut as the current log length and materializes `events` on first read, so header-, cursor-, or projection-only consumers never copy the log; the log only appends, so a late first read still yields exactly that prefix. The cold path stats the stored session first and consults its own bounded cache keyed by a stable persistence-service identity and the `stat` revision, rather than a Context proxy reference: an unchanged revision reuses the restored unpublished Session without re-reading the log; a changed revision, or a replaced persistence instance, reloads through the handle seam and replaces the entry. The cache holds `preparedSessionCacheSize` entries with least-recently-used eviction, entries pinned by active observation leases are never evicted, and a session that goes live mid-read retries the live path.
 
-### Reads and traces
+### Reads
 
-`readSession` replays the log through `Session.create` to reuse resume's validation. `readSurface`, `listEvents`, and `traceEvent` share one `foldSurface` pass that classifies events as `current`, `shadowed`, or `log-only` and validates zero-based contiguous seqs, surface-marker eligibility, and replacement or citation integrity; any violation fails with `SESSION_QUERY_INVALID_SURFACE`. Traces are one-shot: session lineage reads the corpus once and walks parents and descendant trees deterministically, and event traces follow positional replacers to the final node while keeping cited-source links non-transitive.
+`readSurface` runs one `foldSurface` pass that classifies events as `current`, `shadowed`, or `log-only` and validates zero-based contiguous seqs, surface-marker eligibility, and replacement or citation integrity; any violation fails with `SESSION_QUERY_INVALID_SURFACE`.
 
 </details>
 
@@ -123,7 +116,7 @@ The decision history lives in the [unified service decision](../../../.agents/no
 
 Read these pages when the package-level contract is not enough. They move from the shared query vocabulary to the concrete backend and the decision evidence.
 
-- [Session Query subsystem reference](../../../docs/subsystems/session-query.md) — the full type-level contract: records, filters, search pages, lineage, bounded reads, and errors.
+- [Session Query subsystem reference](../../../docs/subsystems/session-query.md) — the full type-level contract: records, filters, search pages, and errors.
 - [dsh-session-query-sqlite](../session-query-sqlite/README.md) — the shipped full-text backend and its index lifecycle.
 - [Session query relationship tracing](../../../.agents/notes/archived/feature/2026-07-13-session-query-tracing.md) — trace semantics and the validation boundary.
 - [SQLite FTS5 session search](../../../.agents/notes/archived/feature/2026-07-10-sqlite-session-query-provider.md) — how the search surface is implemented and reconciled.
@@ -148,8 +141,7 @@ These limits define when this package is a poor fit or needs special operational
 
 - **No caller authorization** — this is trusted context-wide infrastructure; a model tool or UI must constrain which sessions its caller may inspect.
 - **No provider coordinator or fallback** — the service is abstract over search, so a composition must mount a concrete backend; there is no search-provider registry or fallback implementation.
-- **Exact reads replay whole logs** — `readSession`, `readSurface`, `filterEvents`, and event traces load and validate the complete logical log, so very large histories pay full inspection per call; `listSessions` stays lightweight.
-- **Literal text scan, not full-text search** — the `text` filter scans extracted documents with a regular expression and does not rank; ranked search requires the mounted backend.
+- **Exact reads replay whole logs** — `readSurface` and batch title reads load and validate the complete logical log, so very large histories pay full inspection per call; `listSessions` stays lightweight.
 
 <a id="dev-note"></a>
 ### Dev Note
@@ -161,6 +153,6 @@ This Dev Note is working context for maintainers: open design questions and dire
 
 #### Future: extractor and search-provider registries
 
-Recursive traversal through cited source events, extractor and search-provider registries, and additional model-facing surfaces are deferred.
+Extractor and search-provider registries, and additional model-facing surfaces are deferred.
 
 </details>

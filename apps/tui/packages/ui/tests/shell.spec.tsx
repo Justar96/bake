@@ -633,6 +633,43 @@ describe('terminal composer', () => {
     expect(state.onSubmit).not.toHaveBeenCalled()
   })
 
+  it('collapses a long paste into one placeholder that submits its text and erases with one Backspace', async () => {
+    const state = props()
+    const ui = render(<App {...state} />)
+    const long = 'one\ntwo\nthree\nfour'
+    ui.stdin.write(`\u001b[200~${long}\u001b[201~`)
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('> [Pasted text #1 +3 lines]▌'))
+    ui.stdin.write('\u007f')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('> ▌'))
+    expect(ui.lastFrame()).not.toContain('Pasted text')
+    ui.stdin.write('see ')
+    ui.stdin.write(`\u001b[200~${long}\u001b[201~`)
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('> see [Pasted text #2 +3 lines]▌'))
+    ui.stdin.write('\r')
+    await vi.waitFor(() => expect(state.onSubmit).toHaveBeenCalledExactlyOnceWith(`see ${long}`))
+  })
+
+  it('stages a dropped image path and the clipboard image as placeholders that unstage on erase', async () => {
+    const onPasteImage = vi.fn(async (source: { readonly path: string } | { readonly clipboard: true }) =>
+      'path' in source ? (source.path === '/tmp/shot.png' ? 'a' : undefined) : 'b')
+    const onRemoveImage = vi.fn()
+    const state = props({ onPasteImage, onRemoveImage })
+    const ui = render(<App {...state} />)
+    ui.stdin.write("\u001b[200~'/tmp/shot.png'\u001b[201~")
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('> [Image #1]▌'))
+    expect(onPasteImage).toHaveBeenCalledWith({ path: '/tmp/shot.png' })
+    ui.stdin.write('\u0016')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('> [Image #1][Image #2]▌'))
+    ui.stdin.write('\u007f')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('> [Image #1]▌'))
+    expect(onRemoveImage).toHaveBeenCalledExactlyOnceWith('b')
+    // A path that stages nothing stays the text it was.
+    ui.stdin.write('\u001b[200~/tmp/gone.png\u001b[201~')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('> [Image #1]/tmp/gone.png▌'))
+    ui.stdin.write('\r')
+    await vi.waitFor(() => expect(state.onSubmit).toHaveBeenCalledExactlyOnceWith('[Image #1]/tmp/gone.png'))
+  })
+
   it('keeps a fragmented multiline paste in the draft until Enter', async () => {
     const state = props()
     const ui = render(<App {...state} />)

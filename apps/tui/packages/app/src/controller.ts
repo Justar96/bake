@@ -17,7 +17,9 @@ import { appendTranscript, emptyTranscript } from '@dsh-tui/ui/transcript.ts'
 import { suggestCommand } from '@dsh-tui/ui/completion.ts'
 import type { Row } from '@dsh-tui/ui/rows.ts'
 import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
+import { homedir } from 'node:os'
 import { AttachmentDraft, type AttachmentOptions } from './attachments.ts'
+import { readClipboardImage, type ClipboardImage } from './clipboard.ts'
 import { LiveBlocks } from './live.ts'
 import { Printed } from './printed.ts'
 import { Interactions } from './interactions.ts'
@@ -56,6 +58,9 @@ export class SessionController {
   /** Unsubmitted file bytes for this session only. */
   readonly attachments: AttachmentDraft
   private submission: { abort: AbortController; done: Promise<boolean> } | undefined
+  /** Pasted images still being read and validated; submission waits for none of them. */
+  private readonly staging = new Set<{ abort: AbortController; done: Promise<unknown> }>()
+  private readonly clipboard: (signal: AbortSignal) => Promise<ClipboardImage | undefined>
   private readonly catalog: InputCatalog
   private readonly subagents: SubagentCatalog
   private inspection: SubagentInspection | undefined
@@ -108,15 +113,18 @@ export class SessionController {
    * @param login - the key references and flows `/login` offers.
    * @param changed - renderer notification; ignored after closure.
    * @param attachmentOptions - validated draft byte and count limits, and, for
-   *   tests, the environment and home `/terminal-setup` reads instead of this process's.
+   *   tests, the environment and home `/terminal-setup` reads and the clipboard
+   *   reader instead of this process's.
    * @param selection - harness reference for the active model selection, when available.
    */
   constructor(private readonly ctx: Context, readonly agent: Agent, private readonly copy: TuiCopy,
     private readonly login: LoginSources, private readonly changed: () => void,
-    options: AttachmentOptions & { readonly terminal?: TerminalHost; readonly recentModels?: RecentModels },
+    options: AttachmentOptions & { readonly terminal?: TerminalHost; readonly recentModels?: RecentModels
+      readonly clipboard?: (signal: AbortSignal) => Promise<ClipboardImage | undefined> },
     private readonly selection?: ModelSelectionRef) {
     this.attachments = new AttachmentDraft(agent, options, copy)
     this.recent = options.recentModels
+    this.clipboard = options.clipboard ?? (signal => readClipboardImage(signal))
     // The tool registry is the lookup. A tool contributed by any plugin
     // presents its own calls here without this surface knowing it exists. A
     // profile with no tools service renders every call at its raw arguments.
@@ -437,6 +445,44 @@ export class SessionController {
   notify(text: string | undefined): void { this.notice = text; this.repaint() }
 
   /**
+   * Stage a pasted image file path or the clipboard's image for the next prompt.
+   * @param source - a path as the terminal pasted it, or the clipboard.
+   * @returns the staged attachment's key, or undefined after reporting why nothing was staged.
+   */
+  pasteImage(source: { readonly path: string } | { readonly clipboard: true }): Promise<string | undefined> {
+    if (this.closed) return Promise.resolve(undefined)
+    const abort = new AbortController()
+    const done = (async () => {
+      if (this.submission !== undefined) throw new Error(this.copy.commandBusy)
+      if ('path' in source) {
+        const path = source.path.startsWith('~/') ? `${homedir()}${source.path.slice(1)}` : source.path
+        return await this.attachments.add(path, abort.signal)
+      }
+      const image = await this.clipboard(abort.signal)
+      abort.signal.throwIfAborted()
+      if (image === undefined) throw new Error(this.copy.clipboardNoImage)
+      return await this.attachments.addImage({ ...image, name: `clipboard.${image.mediaType.slice('image/'.length)}` }, abort.signal)
+    })().then(key => { this.repaint(); return key }, (error: unknown) => {
+      if (!abort.signal.aborted && !this.closed) this.notify(error instanceof Error ? error.message : String(error))
+      return undefined
+    })
+    const entry = { abort, done }
+    this.staging.add(entry)
+    void done.finally(() => { this.staging.delete(entry) })
+    return done
+  }
+
+  /**
+   * Unstage the image whose placeholder the user erased.
+   * @param key - from {@link pasteImage}.
+   */
+  removeImage(key: string): void {
+    if (this.closed) return
+    this.attachments.discard(key)
+    this.repaint()
+  }
+
+  /**
    * Dispatch a registered command or identified user message.
    * @param text - submitted composer text.
    * @returns acceptance; asynchronous attachment failure retains the composer draft.
@@ -461,6 +507,7 @@ export class SessionController {
     }
     if (parsed === undefined || commands?.find(this.agent, parsed.name) === undefined) {
       if (this.command !== undefined && parseCommand(this.command.text)?.name === 'attach') { this.notify(this.copy.commandBusy); return false }
+      if (this.staging.size > 0) { this.notify(this.copy.imageStaging); return false }
       // No provider is the default: a message waits in the composer until one is chosen.
       if (this.modelless() && (text.trim() !== '' || this.attachments.pending)) { this.notify(this.copy.noModelSubmit); return false }
       if (this.attachments.pending) {
@@ -607,6 +654,7 @@ export class SessionController {
     this.interactions.dispose()
     this.command?.abort.abort()
     this.submission?.abort.abort()
+    for (const entry of this.staging) entry.abort.abort()
     this.attachments.clear()
   }
 
@@ -692,7 +740,7 @@ export class SessionController {
 
   /** @returns after outstanding command, catalog, and default-model work has settled. */
   async drain(): Promise<void> {
-    await Promise.all([this.submission?.done, this.command?.done, this.reasoningLoad, this.remembering,
+    await Promise.all([this.submission?.done, ...[...this.staging].map(entry => entry.done), this.command?.done, this.reasoningLoad, this.remembering,
       this.catalog.drain(), this.subagents.drain(), this.references.drain()])
   }
 

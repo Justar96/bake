@@ -8,6 +8,7 @@ import { formatRow, transcriptRows } from '@dsh-tui/ui'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'
 import { inputHistory } from '@dsh-tui/ui/history.ts'
 import type { AttachmentOptions } from '../src/attachments.ts'
+import type { ClipboardImage } from '../src/clipboard.ts'
 import { SessionNavigation } from '../src/navigation.ts'
 import { harness, textResponse } from './harness.ts'
 
@@ -23,7 +24,9 @@ function barrier() {
   return { entered: entered.promise, release: release.resolve, wait: async () => { entered.resolve(); await release.promise } }
 }
 
-async function connected(limits: Partial<AttachmentOptions> = {}, store: StoreConfig = {}) {
+async function connected(limits: Partial<AttachmentOptions> & {
+  readonly clipboard?: (signal: AbortSignal) => Promise<ClipboardImage | undefined>
+} = {}, store: StoreConfig = {}) {
   const fixture = await harness()
   cleanup.push(fixture.dispose)
   await fixture.ctx.plugin(FileSystem, { cwd: fixture.root })
@@ -292,4 +295,37 @@ it('refuses late admission when another Harness consumer changes the selected mo
   expect(controller.view.notice).toBe(copy.attachmentModelChanged)
   expect(controller.view.attachments).toHaveLength(1)
   expect(model.requests).toEqual([])
+})
+
+it('stages pasted image paths and clipboard images under keys the composer unstages', async () => {
+  let clipboard: ClipboardImage | undefined = { data: png, mediaType: 'image/png' }
+  const { controller, navigation, root, model } = await connected({ clipboard: async () => clipboard })
+  const dropped = await controller.pasteImage({ path: join(root, 'pixel.png') })
+  expect(dropped).toBeDefined()
+  const pasted = await controller.pasteImage({ clipboard: true })
+  expect(pasted).toBeDefined()
+  expect(pasted).not.toBe(dropped)
+  expect(controller.view.attachments.map(item => item.name)).toEqual(['pixel.png', 'clipboard.png'])
+  controller.removeImage(dropped!)
+  expect(controller.view.attachments.map(item => item.name)).toEqual(['clipboard.png'])
+  clipboard = undefined
+  expect(await controller.pasteImage({ clipboard: true })).toBeUndefined()
+  expect(controller.view.notice).toBe(copy.clipboardNoImage)
+  expect(await controller.pasteImage({ path: 'missing.png' })).toBeUndefined()
+  expect(controller.view.attachments).toHaveLength(1)
+  navigation.close()
+  await navigation.drain()
+  expect(model.requests).toEqual([])
+})
+
+it('refuses submission while a pasted image is still being read', async () => {
+  const gate = barrier()
+  const { controller, navigation } = await connected({ clipboard: async () => { await gate.wait(); return { data: png, mediaType: 'image/png' } } })
+  const staging = controller.pasteImage({ clipboard: true })
+  await gate.entered
+  expect(navigation.submit('Inspect [Image #1]')).toBe(false)
+  expect(controller.view.notice).toBe(copy.imageStaging)
+  gate.release()
+  expect(await staging).toBeDefined()
+  expect(controller.view.attachments).toHaveLength(1)
 })

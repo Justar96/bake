@@ -8,9 +8,7 @@
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import type {
-  JobDoneListener, JobId, JobRead, JobSnapshot, JobStart, JobsChangedListener,
-} from './types.ts'
+import type { JobDoneListener, JobId, JobRead, JobSnapshot, JobStart } from './types.ts'
 
 export { JobId } from './types.ts'
 export type {
@@ -23,7 +21,6 @@ export type {
   JobSnapshot,
   JobStart,
   JobStatus,
-  JobsChangedListener,
 } from './types.ts'
 
 declare module '@deepseek-ai/cordis' {
@@ -49,8 +46,8 @@ declare module '@deepseek-ai/cordis' {
  * - Settlement is first-wins: one terminal record, released waiters, and one
  *   round of contained listener notification, even against a late producer
  *   outcome. Completion is announced last, after the record is committed and
- *   every other observer of the settlement has seen it, because a reporter
- *   may open a model turn synchronously.
+ *   its waiters are released, because a reporter may open a model turn
+ *   synchronously.
  * - {@link start} refuses work while no attached job controller serves the
  *   spec's owner, so a producer cannot start work that owner cannot collect
  *   or stop. One registry serves every composition in the process, so this
@@ -141,30 +138,6 @@ export abstract class JobRegistry extends Service {
    * @returns disposer that unregisters the listener.
    */
   abstract onJobDone(listener: JobDoneListener): () => void
-
-  /**
-  /**
-   * Register an effect-scoped observer of visible-set changes. It fires after
-   * every commit that changes what {@link list} returns for that owner —
-   * registration, every stopping transition (including the one teardown
-   * performs before it awaits a slow producer), settlement, owner-disposal
-   * removal, and the emptying that service disposal commits — so an observer
-   * re-reads rather than accumulating deltas.
-   *
-   * Delivery is owner-relative on the same terms as {@link onJobDone}: an
-   * observer registered from an unscoped context — a host composition's own
-   * carrier — sees every owner, while one registered under an agent
-   * composition's scope sees exactly the agents composed under it.
-   *
-   * This is not a superset of {@link onJobDone}: that one delivers the terminal
-   * record under first-wins semantics a job controller couples to notice
-   * delivery, while this one carries no delivery meaning and marks nothing
-   * reported. Listeners are contained and never awaited.
-   * @param listener - receives the owner whose visible set changed, or
-   *   `undefined` when an unowned job changed and every caller's set did.
-   * @returns disposer that unregisters the listener.
-   */
-  abstract onJobsChanged(listener: JobsChangedListener): () => void
 
   /**
    * Attach an effect-scoped controller that can read and stop jobs. It serves the

@@ -13,6 +13,7 @@ export interface AttachmentOptions {
 }
 
 interface Staged {
+  readonly key: string
   readonly data: Uint8Array
   readonly name: string
   readonly mediaType?: ImageMediaType
@@ -21,6 +22,7 @@ interface Staged {
 /** Source bytes staged for one session. The controller serializes mutations. Harness owns storage and normalization. */
 export class AttachmentDraft {
   private items: readonly Staged[] = []
+  private staged = 0
 
   /**
    * @param agent - owner of filesystem, attachment storage, and model services.
@@ -42,8 +44,9 @@ export class AttachmentDraft {
    * Read one complete path through the scoped filesystem and validate raster sources.
    * @param path - the entire command remainder, including literal spaces.
    * @param signal - command lifetime. A late provider result never enters the draft.
+   * @returns the staged item's key, stable while it stays staged.
    */
-  async add(path: string, signal: AbortSignal): Promise<void> {
+  async add(path: string, signal: AbortSignal): Promise<string> {
     signal.throwIfAborted()
     if (path === '') throw new Error(this.copy.attachUsage)
     if (this.items.length >= this.options.attachmentLimit) throw new Error(this.copy.attachmentCountLimit)
@@ -60,7 +63,40 @@ export class AttachmentDraft {
     signal.throwIfAborted()
     if (mediaType !== undefined) await store.validateImage({ data, name, mediaType })
     signal.throwIfAborted()
-    this.items = [...this.items, { data, name, ...mediaType === undefined ? {} : { mediaType } }]
+    return this.push({ data, name, ...mediaType === undefined ? {} : { mediaType } })
+  }
+
+  /**
+   * Stage image bytes read outside the workspace filesystem, such as a clipboard image.
+   * @param image - raster bytes, a display name, and their media type.
+   * @param signal - staging lifetime. A late validation never enters the draft.
+   * @returns the staged item's key.
+   */
+  async addImage(image: { readonly data: Uint8Array, readonly name: string, readonly mediaType: ImageMediaType },
+    signal: AbortSignal): Promise<string> {
+    signal.throwIfAborted()
+    if (this.items.length >= this.options.attachmentLimit) throw new Error(this.copy.attachmentCountLimit)
+    const store = this.agent.ctx.get('attachments')
+    if (store === undefined) throw new Error(this.copy.attachmentsUnavailable)
+    const remaining = this.options.attachmentMaxBytes - this.items.reduce((sum, item) => sum + item.data.byteLength, 0)
+    if (image.data.byteLength > Math.min(remaining, store.imageLimits.maxImageBytes)) throw new Error(this.copy.clipboardImageTooLarge)
+    await store.validateImage(image)
+    signal.throwIfAborted()
+    return this.push(image)
+  }
+
+  private push(item: Omit<Staged, 'key'>): string {
+    const key = String(++this.staged)
+    this.items = [...this.items, { ...item, key }]
+    return key
+  }
+
+  /**
+   * Remove the staged item a key names, when it is still staged.
+   * @param key - from {@link add} or {@link addImage}.
+   */
+  discard(key: string): void {
+    this.items = this.items.filter(item => item.key !== key)
   }
 
   /**
@@ -87,7 +123,8 @@ export class AttachmentDraft {
     const store = this.agent.ctx.get('attachments')
     const llm = this.agent.ctx.get('llm')
     if (store === undefined || llm === undefined) throw new Error(this.copy.attachmentsUnavailable)
-    const images: SaveImageAttachment[] = this.items.flatMap(item => item.mediaType === undefined ? [] : [{ ...item, mediaType: item.mediaType }])
+    const images: SaveImageAttachment[] = this.items.flatMap(item => item.mediaType === undefined ? []
+      : [{ data: item.data, name: item.name, mediaType: item.mediaType }])
     const route = selection?.current
     if (images.length > 0) {
       if (route === undefined) throw new Error(this.copy.noModelSelection)
@@ -100,7 +137,7 @@ export class AttachmentDraft {
     const result: (ImageBlock | FileBlock)[] = []
     let imageIndex = 0
     for (const item of this.items) {
-      if (item.mediaType === undefined) result.push({ type: 'file', attachment: await store.saveFile(item) })
+      if (item.mediaType === undefined) result.push({ type: 'file', attachment: await store.saveFile({ data: item.data, name: item.name }) })
       else result.push({ type: 'image', attachment: refs[imageIndex++]! })
       signal.throwIfAborted()
     }

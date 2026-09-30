@@ -1,5 +1,5 @@
 ---
-description: "当前 Cordis Loader 插件状态的只读投影，并附带每个 agent preset（智能体预设）的组合：面向 web GUI 宿主客户端的 pluginInventory 服务及其 pluginInventory/list Remote。"
+description: "当前 Cordis Loader 插件状态的只读投影，并附带每个 agent preset（智能体预设）的组合，由插件管理器的管理 Remote 消费。"
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-客户端可以调用 `pluginInventory/list`，按加载顺序展示宿主的当前插件，包括每个条目的标识符、模块标识、有效启用状态与存活阶段。部署组合了 agent preset roster 时，还会报告各预设的元数据、健康状态与压平后的插件组合；没有 roster 时，预设数据缺席。每次响应都是供展示和诊断使用的只读即时快照：它不能修改插件，也不提供历史、来源信息或变更订阅。
+本包按加载顺序投影宿主的当前插件——每个条目的标识符、模块标识、有效启用状态与存活阶段——供插件管理器的管理 Remote 使用。部署组合了 agent preset roster 时，还会报告各预设的元数据、健康状态与压平后的插件组合；没有 roster 时，预设数据缺席。每个快照都是供展示和诊断使用的只读即时答案：它不能修改插件，也不提供历史、来源信息或变更订阅。
 
 ## 目录
 
@@ -25,7 +25,7 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
-当客户端或设置页需要展示宿主当前组合了什么——哪些插件已加载、已启用、是否存活，以及每个 agent preset 会给会话什么——时调用 `pluginInventory/list`。Remote 是唯一入口：该服务仅供 Remote 使用，刻意不声明同进程 Cordis `Context` 合并。
+当宿主代码需要展示宿主当前组合了什么——哪些插件已加载、已启用、是否存活，以及每个 agent preset 会给会话什么——时调用 `readPluginInventory`。当前消费者是插件管理器：其 `listPlugins` Remote 把每个条目并入它提供的管理答案，`pluginEntryId` 则在这个属主边界为 Loader 树的 id 加品牌。
 
 ### 快照包含什么
 
@@ -37,7 +37,7 @@ kind: "package-reference"
 
 ### 你能用它做什么、不能做什么
 
-该清单是供展示与诊断的快照：客户端可以渲染名单、标出失败条目，并通过比较快照检测变化。它不能启用、停用、添加或移除插件，也不携带历史——已经失败并被移除的 fiber 缺席。由于服务每次调用都读取 Loader，答案总是反映当前组合，而不是缓存视图。
+该清单是供展示与诊断的快照：读者可以渲染名单、标出失败条目，并通过比较快照检测变化。它不能启用、停用、添加或移除插件，也不携带历史——已经失败并被移除的 fiber 缺席。由于投影每次调用都读取 Loader，答案总是反映当前组合，而不是缓存视图。
 
 -----
 
@@ -49,7 +49,7 @@ kind: "package-reference"
 
 ### 设计理念
 
-网关是一层没有第二个生命周期真源的直接投影：每次 `list()` 调用都读取 `ctx.loader.entries()`，并把每个非组条目映射为公共行。Cordis 内部的 `plugin/status` 事件已经维护了 `Entry.fiber` 与 `Fiber.state`，因此再加缓存只会多出一个需要同步的生命周期真源。agent preset roster 是每次调用经 `ctx.get('agentPresets')` 解析的可选伙伴：所有预设读取都由它的 `compositionInventory()` 负责，本包只把根 Fiber 状态映射到公共阶段词汇。
+投影直接读取、没有第二个生命周期真源：每次 `readPluginInventory` 调用都读取 `ctx.loader.entries()`，并把每个非组条目映射为公共行。Cordis 内部的 `plugin/status` 事件已经维护了 `Entry.fiber` 与 `Fiber.state`，因此再加缓存只会多出一个需要同步的生命周期真源。agent preset roster 是每次调用经 `ctx.get('agentPresets')` 解析的可选伙伴：所有预设读取都由它的 `compositionInventory()` 负责，本包只把根 Fiber 状态映射到公共阶段词汇。
 
 ### 阶段映射
 
@@ -59,11 +59,9 @@ Fiber 状态映射到公共阶段词汇，其中 `disposed` 折叠为 `null`—�
 
 | 文件 | 职责 |
 |---|---|
-| [`src/index.ts`](src/index.ts) | `PluginInventoryGateway`：`pluginInventory` Remote 服务与 Loader 投影 |
+| [`src/index.ts`](src/index.ts) | `readPluginInventory` 与 `pluginEntryId`：Loader 投影 |
 | [`src/types.ts`](src/types.ts) | 公共 payload 类型：`PluginInventoryEntry`、`PluginInventorySnapshot`、`PluginFiberPhase` |
 | — | 不发布运行时不变式配套项；每个快照都投影 Loader 持有的状态。 |
-
-Typert 生成由 `./typert` 与 `./remote` 导出的 Host 和 Client Remote 产物。
 
 </details>
 
@@ -72,7 +70,7 @@ Typert 生成由 `./typert` 与 `./remote` 导出的 Host 和 Client Remote 产�
 <a id="further-exploration"></a>
 ## 进一步探索
 
-当清单约定不够用时阅读以下内容：先看 Remote 如何到达客户端，再看它所投影的 Loader 与渲染它的界面。
+当清单约定不够用时阅读以下内容：本包所投影的 Loader 与渲染它的界面。
 
 - [Cordis 插件 loader](../../../vendor/loader/README.md)——本包所投影条目的那个 Loader。
 
@@ -95,7 +93,7 @@ Typert 生成由 `./typert` 与 `./remote` 导出的 Host 和 Client Remote 产�
 这些限制说明即时清单无法向客户端提供哪些信息。它们是当前包约束，不是任务积压。
 
 - **仅表示调用当下**——结果不包含持久的失败历史或订阅；只要不存在存活的根 Fiber，就会报告 `null`，而不区分其原因。
-- **无来源与修改能力**——服务不识别条目由哪个 bundle、profile 或 override 引入，也不能在任一平面启用、停用、添加或移除插件。
+- **无来源与修改能力**——投影不识别条目由哪个 bundle、profile 或 override 引入，也不能在任一平面启用、停用、添加或移除插件。
 - **预设仅随 roster 出现**——未装 `dsh-agent-presets` 的部署只提供 Loader 条目；`agentPresets` 字段缺席而非为空。
 
 <a id="dev-note"></a>

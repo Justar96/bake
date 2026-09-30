@@ -49,7 +49,7 @@ Enter 提交输入；运行期间输入会引导下一步。Alt+↑ 立即发送
 
 新会话默认使用 `workspace-write` 和 `ask` 审批策略；显式设置的 `DSH_PERMISSION_MODE` 或权限默认值设置优先。会话的 `permissions` 投影在会话开启处显示 `权限 <模式>`：新会话显示在欢迎区块的会话行下方，恢复的会话显示在标题之后。状态行不显示该字段；之后的 `/permission` 更改由命令结果报告。`/permission` 列出可用模式，`/permission read-only`、`/permission workspace-write` 或 `/permission danger-full-access` 会立即切换当前会话。恢复会话保留已记录的模式；`/new` 使用配置的默认值。查看子会话时显示子会话自己的权限模式。未提供此投影的 profile 不显示该指示器。状态栏的 `思考` 读数显示所选模型显式指定的推理强度，或模型声明的默认强度。未提供推理控制的模型不显示强度；切换 `/model` 会更新它，恢复会话则还原已选强度。
 
-左右方向键每次将光标移动一个可见字符。Home/End 或 Ctrl-A/E 移到当前行的开头或末尾。Backspace 删除光标前的字符，Delete 删除光标后的字符。Ctrl-J 或 Alt-Enter（Option 作为 Meta 键时为 Option-Enter）在任何终端中都插入换行，问题和登录输入框同样适用；终端以 CSI-u 报告 Shift-Enter 时（按此配置的终端会这样做），Shift-Enter 也插入换行，而大多数终端将其作为普通 Enter 发送。`/terminal-setup` 让终端在按下 Shift-Enter 时发送 Escape 加回车，即 Alt-Enter 的序列。它根据环境变量识别终端。对于 VS Code、Cursor、Windsurf、Windows Terminal、Ghostty、kitty 和 Alacritty，它先显示配置文件及将要添加的内容，用户确认后才将文件复制为 `<文件>.bak-<毫秒数>` 并添加绑定，同时保留文件原有的注释和格式。报告会列出备份文件和撤销更改的命令，并说明终端是否需要重新加载配置。再次运行时，它会报告绑定已设置，不做任何更改；若 Shift-Enter 已绑定到其他操作，它会报告并保留原绑定。对于 WezTerm、iTerm2、Apple Terminal、无法识别的终端，以及通过 SSH 或在远程编辑器窗口中运行的会话，它改为输出操作步骤，并在 macOS 上提示将 Option 用作 Meta 键以使用 Option-Enter。在 tmux 中，它设置的是 tmux 外层的终端。无论光标位于何处，Enter 都提交完整草稿。粘贴在光标处插入文字并保留换行。欢迎卡片会提示一次 Ctrl+J，并提示用 `/terminal-setup` 设置 Shift+Enter，`/help` 的末尾列出输入框的所有按键。
+左右方向键每次将光标移动一个可见字符。Home/End 或 Ctrl-A/E 移到当前行的开头或末尾。Backspace 删除光标前的字符，Delete 删除光标后的字符。Ctrl-J 或 Alt-Enter（Option 作为 Meta 键时为 Option-Enter）在任何终端中都插入换行，问题和登录输入框同样适用；终端以 CSI-u 报告 Shift-Enter 时（按此配置的终端会这样做），Shift-Enter 也插入换行，而大多数终端将其作为普通 Enter 发送。`/terminal-setup` 让终端在按下 Shift-Enter 时发送 Escape 加回车，即 Alt-Enter 的序列。它根据环境变量识别终端。对于 VS Code、Cursor、Windsurf、Windows Terminal、Ghostty、kitty 和 Alacritty，它先显示配置文件及将要添加的内容，用户确认后才将文件复制为 `<文件>.bak-<毫秒数>` 并添加绑定，同时保留文件原有的注释和格式。报告会列出备份文件和撤销更改的命令，并说明终端是否需要重新加载配置。再次运行时，它会报告绑定已设置，不做任何更改；若 Shift-Enter 已绑定到其他操作，它会报告并保留原绑定。对于 WezTerm、iTerm2、Apple Terminal、无法识别的终端，以及通过 SSH 或在远程编辑器窗口中运行的会话，它改为输出操作步骤，并在 macOS 上提示将 Option 用作 Meta 键以使用 Option-Enter。在 tmux 中，它设置的是 tmux 外层的终端。无论光标位于何处，Enter 都提交完整草稿。粘贴在光标处插入文字并保留换行。超过 800 个字符或至少三行的粘贴显示为一个占位符，例如 `[Pasted text #1 +42 lines]`；光标把它当作一个字符跨过，按一次 Backspace 或 Delete 即删除整个占位符，按 Enter 时以粘贴的原文提交。粘贴内容恰好是一个 PNG、JPEG、WebP 或 GIF 路径时（终端拖入文件时发送的形式：带引号、反斜杠转义或 `file://` URL），会暂存该图片并显示 `[Image #N]`；无法暂存的路径保留为文字。Ctrl-V 或内容为空的粘贴会通过 `wl-paste`、`xclip`、AppleScript 或 PowerShell 暂存剪贴板中的图片。删除 `[Image #N]` 占位符会取消暂存对应图片，提交的提示在图片旁保留占位符文字。欢迎卡片会提示一次 Ctrl+J，并提示用 `/terminal-setup` 设置 Shift+Enter，`/help` 的末尾列出输入框的所有按键。
 
 草稿有多行时，上下方向键将光标移到上一行或下一行，并保持所在列。补全菜单关闭时，光标在第一行按上方向键调出较早的人工输入，在最后一行按下方向键调出较新的输入；Ctrl-P/N 在补全菜单打开时也可调出历史。向前调出的多行条目以光标位于首行打开，因此再按上方向键会继续向前。历史包含当前会话中已提交的用户消息和待处理人工输入。越过最新条目向后浏览会恢复未发送的草稿及其光标位置。编辑调出的条目不会修改会话日志，调出历史也不会自动提交。设置目标后，上方向键翻过最早的条目会选中标题行中的目标并恢复未发送的草稿，按 Enter 打开完整视图；Ctrl+O 可随时打开该视图，包括正在编写草稿时。任务列表所在行位于目标上方：从选中的目标再按上方向键，或未设置目标时翻过最早的条目，即可选中该行；按 Enter 或 Ctrl+T 查看全部任务。问题和登录提示支持光标编辑，但不提供历史浏览；这些回答不会进入输入框历史。
 
@@ -119,7 +119,7 @@ TUI 不构建模型请求，也不修改缓存设置。
 
 - 选择器会列出已在另一个 Bake 进程中打开的会话；拒绝发生在选中之时。两种拒绝都无法指明是哪个进程：会话的内核写锁不记录持有者。
 
-- 不支持剪贴板图像、向已注册命令传递附件参数或内联图像预览。图像提交会检查当前所选模型；最终请求接收由 Harness 管理。
+- 不支持向已注册命令传递附件参数或内联图像预览。图像提交会检查当前所选模型；最终请求接收由 Harness 管理。
 
 - 尚未被请求使用的模型选择不会持久化；选择不会修改配置默认值。
 

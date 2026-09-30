@@ -11,7 +11,6 @@ import type {
   ImageRequestTarget,
   RequestImageAttachment,
   SaveFileAttachment,
-  SaveFileStreamAttachment,
   SaveImageAttachment,
   StoredImageAttachment,
 } from '@deepseek-ai/dsh-attachment'
@@ -20,7 +19,7 @@ import type { NormalizationPolicy } from './normalization.ts'
 import { CompressionLimiter, compressionFailure } from './compression-limiter.ts'
 import { commitPreparedImageFile, normalizedImagePath, prepareImageFile, readImageFile, validateImageFile } from './store.ts'
 import {
-  readFileStreamVerbatim, saveFileStreamVerbatim, saveFileVerbatim, storedFilePath,
+  saveFileVerbatim, storedFilePath,
 } from './file-store.ts'
 import { readRequestImageFile, requestImageVariantId } from './request-image.ts'
 
@@ -231,14 +230,6 @@ export class LocalAttachmentStore extends AttachmentStore {
 
   override async saveFile(input: SaveFileAttachment): Promise<FileAttachmentRef> {
     return saveFileVerbatim(this.root, input)
-  }
-
-  override async saveFileStream(input: SaveFileStreamAttachment): Promise<FileAttachmentRef> {
-    return saveFileStreamVerbatim(this.root, input)
-  }
-
-  override readFileStream(ref: FileAttachmentRef, signal?: AbortSignal): AsyncIterable<Uint8Array> {
-    return readFileStreamVerbatim(this.root, ref, signal)
   }
 
   override fileHostPath(ref: FileAttachmentRef): string {

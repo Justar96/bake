@@ -209,8 +209,12 @@ describe('composer placement', () => {
   it.each([[40, 4], [80, 6]])('keeps the input visible on a short %ix%i terminal', async (columns, rows) => {
     const ui = await mount(columns, rows)
     expect(inputRow(await ui.screen())).toBeGreaterThanOrEqual(0)
-    ui.stdin.write('\u001b[200~first\nsecond\nthird\nfourth\u001b[201~')
-    await vi.waitFor(async () => expect((await ui.screen()).join('\n')).toContain('fourth▌'))
+    // Typed with Ctrl-J between lines: a four-line paste collapses into one placeholder row.
+    for (const [index, line] of ['first', 'second', 'third', 'fourth'].entries()) {
+      if (index > 0) ui.stdin.write('\n')
+      ui.stdin.write(line)
+      await vi.waitFor(async () => expect((await ui.screen()).join('\n')).toContain(`${line}▌`))
+    }
     const screen = await ui.screen()
     // The prompt row has scrolled out of the one-row window, so the caret
     // row carries `^`. The prompt marker is no longer on that row.

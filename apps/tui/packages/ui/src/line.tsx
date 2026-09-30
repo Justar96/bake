@@ -33,10 +33,12 @@ import { FIELD_GAP, fitStatus, type StatusField } from './status-line.ts'
  *
  * @param props.line - the placed line.
  * @param props.budget - budgets for the current terminal size.
+ * @param props.frame - line glyphs this terminal can draw, for a turn divider.
  */
-export function Line({ line, budget, clock, window }: {
+export function Line({ line, budget, frame, clock, window }: {
   readonly line: PresentedLine
   readonly budget: Budget
+  readonly frame: FrameStyle
   /** Clock for a blinking marker. Absent, the marker stays lit. */
   readonly clock?: Clock | undefined
   /** Physical rows to render when a fullscreen viewport intersects this line. */
@@ -85,7 +87,7 @@ export function Line({ line, budget, clock, window }: {
         : null}
       <Box width={width}>
         <Text bold={style.bold} dimColor={style.dim} italic={style.italic === true} wrap="wrap" {...colored}>
-          {line.divider ? '-'.repeat(width) : content.spans === undefined ? text : spansOf({ ...content, text }, zone)}
+          {line.divider ? RULE[frame].line.repeat(width) : content.spans === undefined ? text : spansOf({ ...content, text }, zone)}
         </Text>
       </Box>
     </Box>
@@ -199,8 +201,9 @@ function placement(line: PresentedLine, budget: Budget): Placement {
  */
 export function wrappedRows(line: PresentedLine, budget: Budget): readonly string[] {
   const placed = placement(line, budget)
+  // A divider measures one cell per column in either frame; `Line` draws its glyph.
   return placed.rows ??= line.divider === true || placed.text === ''
-    ? [line.divider === true ? '-'.repeat(placed.width) : placed.text]
+    ? [line.divider === true ? RULE.classic.line.repeat(placed.width) : placed.text]
     : wrapAnsi(placed.text, placed.width, { hard: true, trim: false }).split('\n')
 }
 
@@ -252,13 +255,15 @@ export const lineHeight = (line: PresentedLine, budget: Budget): number => wrapp
  * newest line instead of waiting under a reserved block of empty rows.
  * @param props.rows - live rows in arrival order.
  * @param props.budget - terminal width and region budgets.
+ * @param props.frame - line glyphs this terminal can draw.
  * @param props.limit - maximum physical rows visible.
  * @param props.result - localized tool-result preview limit.
  * @returns the live region, or null when it has nothing to show.
  */
-export function LiveRegion({ rows, budget, limit, result, clock }: {
+export function LiveRegion({ rows, budget, frame, limit, result, clock }: {
   readonly rows: readonly Row[]
   readonly budget: Budget
+  readonly frame: FrameStyle
   readonly limit: number
   readonly result: ResultBound
   /** Time source for the markers of actions still running. */
@@ -289,7 +294,7 @@ export function LiveRegion({ rows, budget, limit, result, clock }: {
       {/* Clipped from the top: the line that overflows is the oldest prose,
           and the rows kept are the ones still arriving. */}
       <Box flexDirection="column" flexShrink={0} maxHeight={limit - Number(gap)} justifyContent="flex-end" overflowY="hidden">
-        {body.map((line, index) => <Line key={index} line={line} budget={budget} clock={clock} />)}
+        {body.map((line, index) => <Line key={index} line={line} budget={budget} frame={frame} clock={clock} />)}
       </Box>
     </Box>
   )
@@ -509,6 +514,24 @@ export function headerLayout(columns: number, turn: TurnWidths, standing: Standi
     if (fit !== undefined) return { left: used, level, right: fit }
   }
   return alone
+}
+
+/**
+ * Whether a standing row's key hint still draws at its right edge.
+ *
+ * Every standing row's key gives way below {@link HINT_MIN_COLUMNS}, as the
+ * composer's hint does, and yields before it would cut the row's own text
+ * short of the few cells it keeps: the two columns between text and key stay
+ * with the key, so a key that no longer fits whole is dropped, never
+ * truncated. The key it names still works unnamed.
+ *
+ * @param columns - row width.
+ * @param fixed - cells the row's own text needs even at its narrowest: the rail, the title, and every count or bar that never wraps away.
+ * @param tail - the key hint, or undefined when the row has none.
+ * @returns whether the tail draws.
+ */
+export function tailFits(columns: number, fixed: number, tail: string | undefined): boolean {
+  return tail !== undefined && columns >= HINT_MIN_COLUMNS && fixed + 2 + stringWidth(tail) <= columns
 }
 
 /** A standing state without its shortcut. */

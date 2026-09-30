@@ -183,12 +183,12 @@ A window under ~10 rows cannot honor this. There, draw interaction-or-composer p
 
 ### The frame is chosen from the terminal, not assumed
 
-The composer's rule is a full-width run of box-drawing characters (`─`), and the welcome card is framed in them (`╭─╮`). Two kinds of terminal cannot draw them:
+The composer's rule and the divider that opens each turn are full-width runs of box-drawing characters (`─`), and the welcome card is framed in them (`╭─╮`). Two kinds of terminal cannot draw them:
 
 - One that is **not encoding UTF-8** writes the bytes through as mojibake, so the frame becomes punctuation on every row.
 - One configured to draw **East Asian Ambiguous** characters two cells wide draws a full-width horizontal run at twice the width Ink measured. The frame wraps, and Ink's own row arithmetic is wrong from then on — this is the damaging case. Every other Ambiguous character on this surface (the turn marker, the selection pointer, the caret) sits alone in a fixed-width rail, where a terminal that draws it wide shifts one row by one column; a border run accumulates that error across the whole line.
 
-`resolveFrame` in `packages/app/src/frame.ts` decides once, before the first frame, and `@dsh-tui/ui` takes the answer as a prop — the presentation layer reads no environment. Encoding and `TERM` come from `LC_ALL`/`LC_CTYPE`/`LANG` in POSIX order; ambiguous width is a terminal *preference* and cannot be detected, so a CJK character locale (or `--locale zh`) stands in for it. `composerFrame` in the profile overrules the lot, which is the only answer for a terminal the environment describes wrongly.
+`resolveFrame` in `packages/app/src/frame.ts` decides once, before the first frame, and `@dsh-tui/ui` takes the answer as a prop — the presentation layer reads no environment. Encoding and `TERM` come from `LC_ALL`/`LC_CTYPE`/`LANG` in POSIX order; Windows Terminal sets neither but draws UTF-8, so its `WT_SESSION` stands in for both. Ambiguous width is a terminal *preference* and cannot be detected, so a CJK character locale (or `--locale zh`) stands in for it. `composerFrame` in the profile overrules the lot, which is the only answer for a terminal the environment describes wrongly.
 
 The ASCII fallback is laid out against the same widths and spends the same rows.
 

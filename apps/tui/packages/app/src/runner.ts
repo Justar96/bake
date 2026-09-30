@@ -220,6 +220,7 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
       onInspectSubagent: id => { navigation?.submit(`/agents ${id}`) },
       onCycleThinking: () => { active.cycleThinking() },
       onSubmit: text => navigation?.submit(text) ?? false, onCancel: () => navigation?.cancel(),
+      onPasteImage: source => active.pasteImage(source), onRemoveImage: key => { active.removeImage(key) },
       onInterrupt: interrupt, onSendPending: () => { active.sendPending() }, onQuitDismiss: dismissQuit, onAnswer: (id, answer) => active.interactions.answer(id, answer),
     }))
   }

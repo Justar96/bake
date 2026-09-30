@@ -280,7 +280,7 @@ function QuestionPage({ question, number, count, copy, limit, height, columns, o
     } else if (custom !== '') onSubmit({ id: question.id, selected: [], custom })
     else setNudged(true)
   }
-  usePaste(text => { setNudged(false); focus(other); composer.paste(text) })
+  usePaste(text => { setNudged(false); focus(other); composer.pasteBlock(text) })
   useInput((text, key) => {
     const newline = isNewline(text, key)
     if ((key.meta && !newline) || key.escape) return

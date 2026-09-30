@@ -53,6 +53,7 @@
     "@dsh-tui/ui": "workspace:^",
     "commander": "catalog:",
     "ink": "catalog:",
+    "jsonc-parser": "catalog:",
     "react": "catalog:",
     "shiki": "^4.4.3",
     "@deepseek-ai/dsh-tool-workflow": "workspace:^"

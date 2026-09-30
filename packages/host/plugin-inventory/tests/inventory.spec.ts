@@ -1,9 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context, FiberState, type Plugin } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
-import { remoteMethods } from '@deepseek-ai/dsh-typert-protocol'
 import type { AgentPresets } from '@deepseek-ai/dsh-agent-presets'
-import PluginInventoryGateway from '../src/index.ts'
+import { readPluginInventory } from '../src/index.ts'
 
 const contexts: Context[] = []
 
@@ -17,34 +16,18 @@ const pendingPlugin: Plugin.Object = {
   apply() {},
 }
 
-async function harness(): Promise<{
-  ctx: Context
-  inventory: PluginInventoryGateway
-}> {
+async function harness(): Promise<Context> {
   const ctx = new Context()
   contexts.push(ctx)
   await ctx.plugin(Loader)
   ctx.loader.builtins.active = activePlugin
   ctx.loader.builtins.pending = pendingPlugin
-  await ctx.plugin(PluginInventoryGateway)
-  const inventory = ctx.get('pluginInventory') as PluginInventoryGateway
-  return { ctx, inventory }
+  return ctx
 }
 
-describe('PluginInventoryGateway', () => {
-  it('publishes one direct list method under the pluginInventory namespace', async () => {
-    const { inventory } = await harness()
-    expect(inventory.typertRemote).toMatchObject({
-      serviceKey: 'pluginInventory',
-      namespace: 'pluginInventory',
-    })
-    expect(remoteMethods(inventory)).toEqual([
-      { method: 'list', invocation: { kind: 'direct' } },
-    ])
-  })
-
+describe('readPluginInventory', () => {
   it('projects current non-group Loader entries without a second cache', async () => {
-    const { ctx, inventory } = await harness()
+    const ctx = await harness()
     const activeId = await ctx.loader.create({ name: 'cordis:active' })
     const pendingId = await ctx.loader.create({ name: 'cordis:pending' })
     const disabledId = await ctx.loader.create({
@@ -53,7 +36,7 @@ describe('PluginInventoryGateway', () => {
     })
     await ctx.loader.create({ name: 'cordis:active', group: true })
 
-    const snapshot = await inventory.list()
+    const snapshot = await readPluginInventory(ctx)
     // No agent-preset roster is composed, so the snapshot carries no presets.
     expect(snapshot.agentPresets).toBeUndefined()
     expect(snapshot.entries).toHaveLength(3)
@@ -79,7 +62,7 @@ describe('PluginInventoryGateway', () => {
     ]))
 
     await ctx.loader.update(activeId, { disabled: true })
-    expect((await inventory.list()).entries.find(entry => entry.entryId === activeId)).toEqual({
+    expect((await readPluginInventory(ctx)).entries.find(entry => entry.entryId === activeId)).toEqual({
       entryId: activeId,
       moduleName: 'cordis:active',
       enabled: false,
@@ -87,11 +70,11 @@ describe('PluginInventoryGateway', () => {
     })
 
     ctx.loader.remove(pendingId)
-    expect((await inventory.list()).entries.some(entry => entry.entryId === pendingId)).toBe(false)
+    expect((await readPluginInventory(ctx)).entries.some(entry => entry.entryId === pendingId)).toBe(false)
   })
 
   it('carries each composed preset with root-fiber states mapped to phases', async () => {
-    const { ctx, inventory } = await harness()
+    const ctx = await harness()
     ctx.provide('agentPresets', {
       compositionInventory: async () => [
         {
@@ -108,7 +91,7 @@ describe('PluginInventoryGateway', () => {
       ],
     } as Partial<AgentPresets> as never)
 
-    const snapshot = await inventory.list()
+    const snapshot = await readPluginInventory(ctx)
     expect(snapshot.agentPresets).toEqual([
       {
         id: 'standard',

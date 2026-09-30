@@ -70,7 +70,7 @@ it('dims reasoning and metadata, and gives actions and outcomes their palette we
     const preview = { lines: 3, unit: 'lines', more: 'more lines' };
     const lines = ${JSON.stringify(rows)}.flatMap(row => present(row, preview));
     process.stdout.write(renderToString(React.createElement(React.Fragment, null,
-      ...lines.map((line, key) => React.createElement(Line, { line, key, budget }))), { columns: 80 }));
+      ...lines.map((line, key) => React.createElement(Line, { line, key, budget, frame: 'classic' }))), { columns: 80 }));
   `], { cwd: new URL('../../../../../', import.meta.url), env, encoding: 'utf8', timeout: 20_000 })
   // Reasoning is a dim, italic paragraph at the rail with no verb, so it is
   // the working-out, not output and not the answer.
@@ -118,7 +118,7 @@ it('draws a step\'s tree dim and uncoloured, and puts a failed call\'s failure i
     import { budgetFor } from ${JSON.stringify(new URL('../src/layout.ts', import.meta.url).href)};
     const lines = ${JSON.stringify(rows)}.flatMap(row => present(row, { lines: 3, unit: 'lines', more: 'more lines', failures: 'failed' }));
     process.stdout.write(renderToString(React.createElement(React.Fragment, null,
-      ...lines.map((line, key) => React.createElement(Line, { line, key, budget: budgetFor({ columns: 80, rows: 40 }) }))), { columns: 80 }));
+      ...lines.map((line, key) => React.createElement(Line, { line, key, budget: budgetFor({ columns: 80, rows: 40 }), frame: 'classic' }))), { columns: 80 }));
   `], { cwd: new URL('../../../../../', import.meta.url), env, encoding: 'utf8', timeout: 20_000 })
   const rgb = (hex: string) => `\u001b[38;2;${[1, 3, 5].map(index => Number.parseInt(hex.slice(index, index + 2), 16)).join(';')}m`
   // The step's head keeps its state colour.
@@ -245,7 +245,7 @@ it('colours compaction blue, by /compact or inside a turn, never the turn\'s ora
     // The transcript's mark where history was compacted.
     const notice = present({ kind: 'notice', tone: 'info', text: dictionaries.en.compacted, compaction: true }, { lines: 3, unit: 'lines', more: 'more' });
     process.stdout.write(renderToString(React.createElement(React.Fragment, null, ...notice.map((line, key) =>
-      React.createElement(Line, { line, key, budget: budgetFor({ columns: 80, rows: 40 }) }))), { columns: 80 }) + '\\nEND\\n');
+      React.createElement(Line, { line, key, budget: budgetFor({ columns: 80, rows: 40 }), frame: 'classic' }))), { columns: 80 }) + '\\nEND\\n');
   `], { cwd: new URL('../../../../../', import.meta.url), env, encoding: 'utf8', timeout: 20_000 })
   const rgb = (hex: string) => `\u001b[38;2;${[1, 3, 5].map(index => Number.parseInt(hex.slice(index, index + 2), 16)).join(';')}m`
   const rendered = frames.split('END\n').filter(frame => frame.trim() !== '')

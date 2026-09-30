@@ -142,7 +142,6 @@ describe.skipIf(process.platform === 'win32')('terminal-bash real shell', () => 
     try {
       const { ctx, root, agent } = await harness('danger-full-access')
       const created = await ctx.terminals.spawn(agent, { type: 'shell', name: 'main', cwd: root })
-      expect(created.motd).toContain('dsh> ')
 
       const first = ctx.terminals.startSend(agent, created.sessionId, { text: 'export KEEP=ok; cd /', submit: true })
       expect((await first.done).waitReason).toBe('stdin_read')
@@ -211,18 +210,18 @@ describe.skipIf(process.platform === 'win32')('terminal-bash real shell', () => 
       policy: { mode: 'workspace-write', workspaceRoot: root, sessionId: 'agent-workspace-write' },
     }])
     await fiber.dispose()
-    expect(ctx.terminals.listBackends()).toEqual([])
+    expect((ctx.terminals as unknown as { backends: Map<string, unknown> }).backends.size).toBe(0)
     expect(ctx.terminals.list(agent)).toHaveLength(1)
     await ctx.terminals.kill(agent, created.sessionId)
   }, 10_000)
 
-  it('signals a foreground command and kills a TERM-ignoring background descendant', async () => {
+  it('interrupts a foreground command and kills a TERM-ignoring background descendant', async () => {
     const { ctx, agent } = await harness('danger-full-access')
     const created = await ctx.terminals.spawn(agent, { type: 'shell' })
 
     const foreground = ctx.terminals.startSend(agent, created.sessionId, { text: 'sleep 60', submit: true })
     await new Promise(resolve => setTimeout(resolve, 50))
-    expect((await ctx.terminals.signal(agent, created.sessionId, 'SIGINT')).delivered).toBe(true)
+    expect(foreground.cancel()).toBe(true)
     expectReadyForNextSend((await foreground.done).waitReason)
 
     const background = ctx.terminals.startSend(agent, created.sessionId, {

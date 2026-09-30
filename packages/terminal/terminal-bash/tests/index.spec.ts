@@ -98,7 +98,6 @@ function spec(owner: Agent, signal?: AbortSignal) {
 
 function stubLocalSession(initialize: () => Promise<void> = () => Promise.resolve()): LocalPtySession {
   return {
-    motd: '',
     initialize,
     startSend: () => { throw new Error('unused') },
     read: () => { throw new Error('unused') },
@@ -413,7 +412,6 @@ describe('BashTerminalBackend startup rollback', () => {
       async () => terminal,
     )
     const session = await backend.spawn(spec(agent(ctx)))
-    expect(session.motd).toBe('dsh> ')
     await session.close('test complete')
   })
 
@@ -425,7 +423,6 @@ describe('BashTerminalBackend startup rollback', () => {
     let spawned: SubprocessTerminalSpawnSpec | undefined
     let sent: TerminalSendRequest | undefined
     const session = {
-      motd: '',
       startSend: (request: TerminalSendRequest) => {
         sent = request
         return {
@@ -447,7 +444,6 @@ describe('BashTerminalBackend startup rollback', () => {
     )
     expect(await backend.spawn(spec(agent(ctx)))).toBe(session)
     expect(sent).toMatchObject({ text: ENCODING_PREAMBLE + PWSH_PROMPT_SETUP, submit: true })
-    expect(session.motd).toBe('setup-echo dsh> ')
     expect(spawned?.env).toMatchObject({
       TERM: 'dumb', NO_COLOR: '1', DSH_SHELL: '1', DSH_SESSION_ID: 'agent', DSH_PTY_SESSION_ID: 'pty-1',
     })
@@ -462,7 +458,6 @@ describe('BashTerminalBackend startup rollback', () => {
     await ctx.plugin(SandboxPolicyService, { mode: 'danger-full-access', workspaceRoot: '/workspace' })
     const sends: TerminalSendRequest[] = []
     const session = {
-      motd: '',
       startSend: (request: TerminalSendRequest) => {
         sends.push(request)
         const second = sends.length > 1
@@ -487,7 +482,6 @@ describe('BashTerminalBackend startup rollback', () => {
     await backend.spawn(spec(agent(ctx)))
     expect(sends).toHaveLength(2)
     expect(sends[1]).toMatchObject({ text: '', submit: false })
-    expect(session.motd).toBe('dsh> ')
   })
 
   it('rejects a pwsh bootstrap whose shell exits or times out', async () => {
@@ -530,7 +524,6 @@ describe('BashTerminalBackend startup rollback', () => {
       let cancellations = 0
       let closes = 0
       const session = {
-        motd: '',
         startSend: () => {
           sends += 1
           return {
@@ -575,7 +568,6 @@ describe('BashTerminalBackend startup rollback', () => {
     await ctx.plugin(SandboxPolicyService, { mode: 'danger-full-access', workspaceRoot: '/workspace' })
     const sends: TerminalSendRequest[] = []
     const session = {
-      motd: '',
       startSend: (request: TerminalSendRequest) => {
         sends.push(request)
         return {
@@ -596,8 +588,7 @@ describe('BashTerminalBackend startup rollback', () => {
       () => session,
     )
     const signal = new AbortController().signal
-    const spawned = await backend.spawn({ ...spec(agent(ctx)), signal })
-    expect(spawned.motd).toBe('dsh> ')
+    await backend.spawn({ ...spec(agent(ctx)), signal })
     expect(sends).toHaveLength(1)
     expect(sends[0]?.signal).toBe(signal)
   })
@@ -621,9 +612,10 @@ describe('terminal-bash plugin shape', () => {
     await ctx.plugin(SandboxPolicyService, { mode: 'danger-full-access', workspaceRoot: '/tmp' })
     await ctx.plugin(StubSubprocessRuntime)
     const fiber = await ctx.plugin(ptyLocal, config())
-    expect(ctx.terminals.listBackends()).toEqual(['shell'])
+    const backends = ctx.terminals as unknown as { backends: Map<string, unknown> }
+    expect([...backends.backends.keys()]).toEqual(['shell'])
     await fiber.dispose()
-    expect(ctx.terminals.listBackends()).toEqual([])
+    expect(backends.backends.size).toBe(0)
   })
 
   it('ignores unrelated session events and mode changes without a live owner', async () => {
@@ -677,7 +669,7 @@ describe('terminal-bash plugin shape', () => {
 
     expect(() => { setSandboxMode(session, 'danger-full-access') }).not.toThrow()
     await providerFiber.dispose()
-    expect(ctx.terminals.listBackends()).toEqual([])
+    expect((ctx.terminals as unknown as { backends: Map<string, unknown> }).backends.size).toBe(0)
     expect(() => { setSandboxMode(session, 'read-only') }).toThrow(
       'cannot change sandbox mode from "danger-full-access" to "read-only" while persistent terminal sessions are open or being created; wait for creation to settle and close them first',
     )

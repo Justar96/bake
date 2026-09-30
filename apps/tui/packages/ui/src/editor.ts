@@ -34,13 +34,38 @@ export function draftAt(text: string, cursor = text.length): Draft {
 }
 
 /**
+ * The span of the placeholder a cursor step or erase would enter.
+ * @param text - complete draft.
+ * @param cursor - UTF-16 cursor offset.
+ * @param atoms - placeholders that edit as one character.
+ * @param direction - backward enters a span ending at or around the cursor; forward one starting there.
+ * @returns the span's offsets, or undefined when the step leaves every placeholder alone.
+ */
+function atomAt(text: string, cursor: number, atoms: readonly string[], direction: 'backward' | 'forward'):
+  { readonly start: number, readonly end: number } | undefined {
+  for (const atom of atoms) {
+    if (atom === '') continue
+    for (let start = text.indexOf(atom); start !== -1; start = text.indexOf(atom, start + atom.length)) {
+      const end = start + atom.length
+      if (direction === 'backward' ? start < cursor && cursor <= end : start <= cursor && cursor < end) return { start, end }
+    }
+  }
+  return undefined
+}
+
+/**
  * Move by one grapheme or to the current logical line's boundary.
  * @param draft - current text and cursor.
  * @param direction - desired cursor movement.
+ * @param atoms - placeholders the cursor steps over whole.
  * @returns the draft with its new cursor; text remains unchanged.
  */
-export function moveCursor(draft: Draft, direction: 'left' | 'right' | 'home' | 'end'): Draft {
+export function moveCursor(draft: Draft, direction: 'left' | 'right' | 'home' | 'end', atoms: readonly string[] = []): Draft {
   const { text, cursor } = draft
+  if (direction === 'left' || direction === 'right') {
+    const atom = atomAt(text, cursor, atoms, direction === 'left' ? 'backward' : 'forward')
+    if (atom !== undefined) return { text, cursor: direction === 'left' ? atom.start : atom.end }
+  }
   if (direction === 'home') return { text, cursor: text.slice(0, cursor).lastIndexOf('\n') + 1 }
   if (direction === 'end') {
     const next = text.indexOf('\n', cursor)
@@ -67,12 +92,15 @@ export function insertText(draft: Draft, value: string): Draft {
 }
 
 /**
- * Delete one adjacent visible grapheme, including combining marks.
+ * Delete one adjacent visible grapheme, including combining marks, or one whole placeholder.
  * @param draft - current text and cursor.
  * @param direction - Backspace removes left; Delete removes right.
+ * @param atoms - placeholders one erase removes whole.
  * @returns the edited draft, preserving the remaining graphemes.
  */
-export function eraseAtCursor(draft: Draft, direction: 'backward' | 'forward'): Draft {
+export function eraseAtCursor(draft: Draft, direction: 'backward' | 'forward', atoms: readonly string[] = []): Draft {
+  const atom = atomAt(draft.text, draft.cursor, atoms, direction)
+  if (atom !== undefined) return draftAt(draft.text.slice(0, atom.start) + draft.text.slice(atom.end), atom.start)
   const neighbor = moveCursor(draft, direction === 'backward' ? 'left' : 'right').cursor
   const start = Math.min(neighbor, draft.cursor)
   const end = Math.max(neighbor, draft.cursor)

@@ -93,15 +93,6 @@ describe('local attachment service', () => {
       const filePath = service.fileHostPath(fileRef)
       expect(filePath).toContain(join('files', String(fileRef.attachmentId).slice(7, 9)))
       await expect(readFile(filePath)).resolves.toEqual(Buffer.from(fileData))
-
-      const streamRef = await service.saveFileStream({
-        data: (async function* (): AsyncIterable<Uint8Array> { yield fileData })(),
-        name: 'stream.bin',
-      })
-      await expect(readFile(service.fileHostPath(streamRef))).resolves.toEqual(Buffer.from(fileData))
-      const streamed: Uint8Array[] = []
-      for await (const chunk of service.readFileStream(streamRef)) streamed.push(chunk)
-      expect(Buffer.concat(streamed)).toEqual(Buffer.from(fileData))
     } finally {
       await rm(dshHome, { recursive: true, force: true })
     }
