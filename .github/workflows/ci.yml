@@ -76,6 +76,8 @@ jobs:
             .preflight/
             apps/tui/.smoke/
           if-no-files-found: ignore
+          # Both directories are hidden, which upload-artifact skips by default.
+          include-hidden-files: true
 
   windows-release:
     if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Merge pull request ')
