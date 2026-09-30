@@ -494,7 +494,8 @@ describe('dsh-tool-subagent', () => {
       'Delegate a self-contained task, such as research, a scoped implementation, or an analysis, to a '
       + 'subagent that works in its own context, so the work does not fill this conversation. You get its '
       + 'result, not its intermediate steps. It does not see this conversation, so give it a complete, '
-      + 'standalone prompt. This call waits for the result by default. Set `run_in_background: true` to '
+      + 'standalone prompt. This call '
+      + 'waits for the result by default. Set `run_in_background: true` to '
       + 'return a job id; collect with `job_output` and stop with `job_kill`.',
     )
     const props = (schema.parameters as { properties: Record<string, { description: string }> }).properties
@@ -518,9 +519,9 @@ describe('dsh-tool-subagent', () => {
     // Background disabled: the call always waits.
     expect(schema.description).toBe(
       'Delegate a task to a subagent that inherits this conversation\'s completed turns, but not the '
-      + 'current one. Use it for work that builds on this context, such as a follow-up analysis, a review, '
-      + 'or a continuation, without filling this conversation with the work. You get its result, not its '
-      + 'intermediate steps. This call waits for the subagent and returns its result.',
+      + 'current one, for work that builds on this context, such as a review or a continuation. You get '
+      + 'its result, not its intermediate steps. This call '
+      + 'waits for the subagent and returns its result.',
     )
     const props = (schema.parameters as { properties: Record<string, { description: string }> }).properties
     expect(props['prompt']!.description).toBe(
@@ -1289,7 +1290,8 @@ describe('dsh-tool-subagent continuable background mode', () => {
       'Delegate a self-contained task, such as research, a scoped implementation, or an analysis, to a '
       + 'subagent that works in its own context, so the work does not fill this conversation. You get its '
       + 'result, not its intermediate steps. It does not see this conversation, so give it a complete, '
-      + 'standalone prompt. It runs in the background by default and returns its agent id right away. '
+      + 'standalone prompt. It runs in '
+      + 'the background by default and returns its agent id right away. '
       + 'Start independent subagents in the same message and keep working while they run. When one '
       + 'finishes, you get a notice with its outcome and closing message. It stays available afterward: '
       + '`send_message` steers it while it is running and otherwise starts a new turn. Set '

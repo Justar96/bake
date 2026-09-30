@@ -28,6 +28,14 @@ interface ToolDefinition extends ToolSchema {
   /** Mandatory canonical output declaration. */
   readonly output: ToolOutputDefinition
   /**
+   * Usage reference kept out of the native schema, which is resent with every
+   * request. A scope that can see a tool with details also sees the reserved
+   * {@link TOOL_HELP_NAME} tool, which returns them; the description should
+   * tell the model to call it before first use. The PTC mode SDK appends the
+   * details to the binding's documentation instead. Must be non-empty when set.
+   */
+  readonly details?: string
+  /**
    * Run one accepted call and return only its canonical lossless-JSON value.
    * Async work must observe or forward `exec.signal` and settle only after its
    * owned work reaches quiescence. The registry preserves caller cancellation
@@ -577,6 +585,11 @@ executionMode(exec: ToolExecutionInput): ToolExecutionMode
  * not-yet-started body with `ABORTED_BEFORE_DISPATCH` or replaces a
  * successful started outcome with `ABORTED`; already-started work is still
  * drained and may retain a tool-owned structured error.
+ * Within an agent's open turn, a model-direct call identical (name plus
+ * key-order-normalized arguments) to one refused as unread or stale
+ * (`FS_NOT_OBSERVED`, `FS_STALE_VERSION`) skips policy and dispatch with a
+ * {@link TOOL_DUPLICATE_CALL} error until any other call settles. Successes
+ * are never cached or replayed.
  * @param exec - the typed same-process call input. The registry assigns its
  *   correlation token before policy begins.
  * @returns the materialized final result.

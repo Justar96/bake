@@ -243,9 +243,6 @@
       "path": "./packages/mcp/mcp-resources/tsconfig.json"
     },
     {
-      "path": "./packages/plan/plan-mode/tsconfig.json"
-    },
-    {
       "path": "./packages/preset/agent-presets/tsconfig.json"
     },
     {

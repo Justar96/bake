@@ -29,7 +29,7 @@ The `workflow` tool runs a model-authored orchestration script that fans work ou
 
 ### Calling the tool
 
-The model submits three parameters: `meta` (required identity data: `name`, `description`, and optional `whenToUse` and `phases`), `script` (required body of an async JavaScript function — no TypeScript and no import or export statements, so no `export const meta` header; the tool description carries the complete authoring contract), and `args` (optional JSON object exposed to the script as the `args` global; wrap a bare list in a field so the wire schema stays honest).
+The model submits three parameters: `meta` (required identity data: `name`, `description`, and optional `whenToUse` and `phases`), `script` (required body of an async JavaScript function — no TypeScript and no import or export statements, so no `export const meta` header; the tool's details carry the complete authoring contract, which the model reads with `tool_help`), and `args` (optional JSON object exposed to the script as the `args` global; wrap a bare list in a field so the wire schema stays honest).
 
 Success returns the canonical envelope `{ runId, agentsStarted, result }`, rendered to the model as `workflow "<name>" completed (<count> agent<optional-s>).` followed by `Return value:` and the pretty-printed JSON. A workflow that cannot start — a script parse or meta validation failure — returns an error the model can correct from. Cancellation and execution failures return `Error: workflow run was cancelled` or `Error: workflow run failed: <error>`; partial output is never reported as success.
 
@@ -58,7 +58,7 @@ This section explains how the consumer is split from the engine and how the run 
 
 ### Design concept
 
-The consumer owns the model-facing schema, including the explicit-request usage policy in the tool description, and the result envelope; script parsing, execution, caps, and cancellation live behind `ctx.workflowEngine`, while the PTC engine shares Node process confinement with `run_code`. The plugin contributes no system-prompt section, and its usage policy never lives in the deployment persona.
+The consumer owns the model-facing schema, including the explicit-request usage policy in the tool description, the authoring contract in the tool's details, and the result envelope; script parsing, execution, caps, and cancellation live behind `ctx.workflowEngine`, while the PTC engine shares Node process confinement with `run_code`. The plugin contributes no system-prompt section, and its usage policy never lives in the deployment persona.
 
 ### Run lifecycle
 
@@ -107,11 +107,11 @@ Read these pages when the tool-level contract is not enough. They move from the 
 
 #### What the model sees
 
-When visible, the generated default [`workflow` schema](../../../docs/tool-catalog.md#deepseek-aidsh-tool-workflow) carries the usage policy and the complete JavaScript hook and metadata contract; the plugin adds no system-prompt section, so a scoped restriction that hides the tool leaves nothing behind. The description allows a run only when the user explicitly asks for a workflow or large-scale multi-agent orchestration, because one run can start many subagents. The `script` parameter description states the configured `maxResultChars` bound, and the `meta.phases` `provider` and `model` fields are marked informational because only `agent()` options route subagents. `toolName` can rename the definition, and the model submits script, metadata, and optional args.
+When visible, the generated default [`workflow` schema](../../../docs/tool-catalog.md#deepseek-aidsh-tool-workflow) carries the usage policy and tells the model to read the JavaScript hook contract with `tool_help` before writing a script; that contract is the tool's details, so it reaches the model only when requested. The plugin adds no system-prompt section, so a scoped restriction that hides the tool leaves nothing behind. The description allows a run only when the user explicitly asks for a workflow or large-scale multi-agent orchestration, because one run can start many subagents. The `script` parameter description states the configured `maxResultChars` bound, and the `meta.phases` `provider` and `model` fields are marked informational because only `agent()` options route subagents. `toolName` can rename the definition, and the model submits script, metadata, and optional args.
 
 #### Token effect
 
-Substantial fixed schema cost on each request where the tool is visible.
+About 2 KB of fixed schema on each request where the tool is visible. The roughly 1.8 KB authoring contract costs one `tool_help` result, only in a conversation that writes a script.
 
 #### KV Cache effect
 

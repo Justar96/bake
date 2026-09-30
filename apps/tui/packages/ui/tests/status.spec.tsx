@@ -272,29 +272,60 @@ describe('context occupancy', () => {
     expect(statusRow(ui.lastFrame())).toContain('上下文 ~0% (500/128k)')
   })
 
-  it.each(['en', 'zh'] as const)('shows the discard action beside retained input in %s', async locale => {
+  it.each(['en', 'zh'] as const)('names the send-now key beside retained input, and sends it on Alt-Up in %s', async locale => {
     const copy = dictionaries[locale]
-    const ui = render(<App {...props({ copy, context: { used: 12_340, window: 128_000 }, pending: [{ id: 'pending-1', target: 'next-step', text: 'Queued direction' }] })} />)
+    const onSendPending = vi.fn()
+    const ui = render(<App {...props({ copy, context: { used: 12_340, window: 128_000 }, onSendPending,
+      pending: [{ id: 'pending-1', target: 'next-step', text: 'Queued direction' }] })} />)
     expect(ui.lastFrame()).toContain('Queued direction')
     expect(ui.lastFrame()).toContain(copy.pendingHelp)
-    expect(ui.lastFrame()).toContain('/clear-pending')
+    expect(ui.lastFrame()).toContain('Alt+\u2191')
     await expect(ui.lastFrame() + '\n').toMatchFileSnapshot(`./expected/pending-context.${locale}.txt`)
+    // xterm's Alt-Up, and the Escape-prefixed arrow macOS terminals send for Option-Up.
+    ui.stdin.write('\u001b[1;3A')
+    await vi.waitFor(() => expect(onSendPending).toHaveBeenCalledTimes(1))
+    ui.stdin.write('\u001b\u001b[A')
+    await vi.waitFor(() => expect(onSendPending).toHaveBeenCalledTimes(2))
+    expect(ui.lastFrame()).toContain('Queued direction')
   })
-})
 
-it.each([
-  [{ active: true, pending: false }, dictionaries.en.planActive],
-  [{ active: false, pending: true }, dictionaries.en.planEntryPending],
-  [{ active: true, pending: true }, dictionaries.en.planExitPending],
-] as const)('shows the projected plan state %s in the status line', (plan, label) => {
-  const ui = render(<App {...props({ plan })} />)
-  expect(ui.lastFrame()).toContain(label)
-})
+  it('submits a draft typed during a turn and sends it now on Alt-Up, but never a command', async () => {
+    const onSendPending = vi.fn()
+    const onSubmit = vi.fn(() => true)
+    const ui = render(<App {...props({ status: 'running', onSendPending, onSubmit })} />)
+    expect(ui.lastFrame()).toContain('Alt+\u2191')
+    ui.stdin.write('Stop and use the other API')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('Stop and use the other API'))
+    ui.stdin.write('\u001b[1;3A')
+    await vi.waitFor(() => expect(onSendPending).toHaveBeenCalledTimes(1))
+    expect(onSubmit).toHaveBeenCalledExactlyOnceWith('Stop and use the other API')
+    await vi.waitFor(() => expect(ui.lastFrame()).not.toContain('Stop and use the other API'))
+    ui.stdin.write('/model')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('/model'))
+    ui.stdin.write('\u001b[1;3A')
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(onSubmit).toHaveBeenCalledTimes(1)
+    expect(onSendPending).toHaveBeenCalledTimes(1)
+  })
 
-it('omits the plan indicator when the profile has no plan projection', () => {
-  const ui = render(<App {...props()} />)
-  expect(ui.lastFrame()).not.toContain(dictionaries.en.planEntryPending)
-  expect(ui.lastFrame()).not.toContain(dictionaries.en.planActive)
+  it('keeps a refused draft and sends nothing', async () => {
+    const onSendPending = vi.fn()
+    const ui = render(<App {...props({ status: 'running', onSendPending, onSubmit: () => false })} />)
+    ui.stdin.write('Not accepted')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('Not accepted'))
+    ui.stdin.write('\u001b[1;3A')
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(onSendPending).not.toHaveBeenCalled()
+    expect(ui.lastFrame()).toContain('Not accepted')
+  })
+
+  it('leaves Alt-Up alone with nothing queued', async () => {
+    const onSendPending = vi.fn()
+    const ui = render(<App {...props({ onSendPending })} />)
+    ui.stdin.write('\u001b[1;3A')
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(onSendPending).not.toHaveBeenCalled()
+  })
 })
 
 describe('model and billed tokens', () => {

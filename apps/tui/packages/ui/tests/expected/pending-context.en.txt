@@ -2,7 +2,7 @@
 
 Pending input
 Next step: Queued direction
-/clear-pending discards queued input
+Alt+↑ sends it now
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────
 > ▌Ask anything · / commands · @ files

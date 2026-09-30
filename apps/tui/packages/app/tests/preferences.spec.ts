@@ -466,6 +466,37 @@ describe('Preferences', () => {
     expect(prompts[5]!.choices.find(choice => choice.value === 'setting:subagent-model-selection.enabled')?.description).toBe(copy.settingsOn)
   })
 
+  it('uses the catalog when enabling and editing allowed models under Advanced, even with an editor', async () => {
+    const ctx = new Context()
+    disposers.push(() => ctx.fiber.dispose())
+    await ctx.plugin(MemoryProvider)
+    const editText = vi.fn(() => Promise.resolve('[]'))
+    const preferences = new Preferences(ctx, base, undefined, vi.fn(), editText)
+    await vi.waitFor(() => expect(ctx.settings.get(SETTINGS_NAMESPACE)).toBeDefined())
+    await ctx.plugin(SubagentModelSelection)
+    await vi.waitFor(() => expect(ctx.settings.describe().some(entry => entry.ns === 'subagent-model-selection')).toBe(true))
+    const listModels = vi.fn(() => Promise.resolve({ entries: [
+      { route: 'mock/first', name: 'First', current: true },
+      { route: 'mock/second', name: 'Second', current: false },
+    ], unavailable: [] }))
+    const { interactions, prompts } = scripted(
+      // A search result and a field opened directly must use the same picker.
+      pick('setting:advanced/subagent-model-selection/enabled'),
+      pick('mock/first'), back,
+      pick('section:advanced'), pick('section:subagent-model-selection'),
+      pick('setting:allowedModels'), pick('mock/second'), pick('mock/first'),
+      labelled(copy.settingsSubagentAllowedDone), back, back, back,
+    )
+    await expect(run(preferences, interactions, { listModels })).resolves.toMatchObject({ kind: 'success', text: copy.settingsStored })
+    expect(editText).not.toHaveBeenCalled()
+    expect(listModels).toHaveBeenCalledTimes(2)
+    expect(prompts[1]!.warning).toBe(copy.settingsSubagentAllowedFirst)
+    expect(prompts[6]!.choices.find(choice => choice.value === 'mock/first')?.status?.text).toBe(copy.settingsSubagentAllowedOn)
+    expect(MemoryProvider.doc['subagent-model-selection']).toEqual({
+      enabled: true, allowedModels: [{ provider: 'mock', model: 'second' }],
+    })
+  })
+
   it('leaves the choice off when no model is chosen, and without a catalog edits the list in the file', async () => {
     const { ctx, preferences } = await mount()
     await ctx.plugin(SubagentModelSelection)

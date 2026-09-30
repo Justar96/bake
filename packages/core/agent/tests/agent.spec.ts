@@ -146,8 +146,8 @@ describe('AgentRegistry', () => {
     expect(heard).toEqual(['contained'])
     expect(ctx.agents.list()).toEqual([])
     expect(warnings).toEqual([
-      'agent "contained": agent/disposed listener threw: Error: disposed sync',
-      'agent "contained": agent/disposed listener rejected: Error: disposed async',
+      'agent event "agent/disposed" listener threw: Error: disposed sync',
+      'agent event "agent/disposed" listener rejected: Error: disposed async',
     ])
   })
 

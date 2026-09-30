@@ -11,9 +11,15 @@ import type {} from '@deepseek-ai/dsh-compaction'
 import type {} from '@deepseek-ai/dsh-agent-presets'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import { attachmentSummaries } from '@dsh-tui/ui/rows.ts'
-import { Actions, appendTranscript, emptyTranscript, foldEvent, project, projector, suggestCommand, type Projector, type Row } from '@dsh-tui/ui'
+import { Actions, foldEvent } from '@dsh-tui/ui/actions.ts'
+import { project, projector, type Projector } from '@dsh-tui/ui/project.ts'
+import { appendTranscript, emptyTranscript } from '@dsh-tui/ui/transcript.ts'
+import { suggestCommand } from '@dsh-tui/ui/completion.ts'
+import type { Row } from '@dsh-tui/ui/rows.ts'
 import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
+import { homedir } from 'node:os'
 import { AttachmentDraft, type AttachmentOptions } from './attachments.ts'
+import { readClipboardImage, type ClipboardImage } from './clipboard.ts'
 import { LiveBlocks } from './live.ts'
 import { Printed } from './printed.ts'
 import { Interactions } from './interactions.ts'
@@ -37,7 +43,6 @@ import type {} from '@deepseek-ai/dsh-tool-subagent/model-selection-settings'
 // (`contextPressure`, `todos`), and those keys are invisible here without them.
 import type {} from '@deepseek-ai/dsh-token-meter'
 import type {} from '@deepseek-ai/dsh-tool-todo/types'
-import type {} from '@deepseek-ai/dsh-plan-mode/types'
 import type {} from '@deepseek-ai/dsh-permission-presets/types'
 import type {} from '@deepseek-ai/dsh-goal'
 
@@ -53,6 +58,9 @@ export class SessionController {
   /** Unsubmitted file bytes for this session only. */
   readonly attachments: AttachmentDraft
   private submission: { abort: AbortController; done: Promise<boolean> } | undefined
+  /** Pasted images still being read and validated; submission waits for none of them. */
+  private readonly staging = new Set<{ abort: AbortController; done: Promise<unknown> }>()
+  private readonly clipboard: (signal: AbortSignal) => Promise<ClipboardImage | undefined>
   private readonly catalog: InputCatalog
   private readonly subagents: SubagentCatalog
   private inspection: SubagentInspection | undefined
@@ -105,15 +113,18 @@ export class SessionController {
    * @param login - the key references and flows `/login` offers.
    * @param changed - renderer notification; ignored after closure.
    * @param attachmentOptions - validated draft byte and count limits, and, for
-   *   tests, the environment and home `/terminal-setup` reads instead of this process's.
+   *   tests, the environment and home `/terminal-setup` reads and the clipboard
+   *   reader instead of this process's.
    * @param selection - harness reference for the active model selection, when available.
    */
   constructor(private readonly ctx: Context, readonly agent: Agent, private readonly copy: TuiCopy,
     private readonly login: LoginSources, private readonly changed: () => void,
-    options: AttachmentOptions & { readonly terminal?: TerminalHost; readonly recentModels?: RecentModels },
+    options: AttachmentOptions & { readonly terminal?: TerminalHost; readonly recentModels?: RecentModels
+      readonly clipboard?: (signal: AbortSignal) => Promise<ClipboardImage | undefined> },
     private readonly selection?: ModelSelectionRef) {
     this.attachments = new AttachmentDraft(agent, options, copy)
     this.recent = options.recentModels
+    this.clipboard = options.clipboard ?? (signal => readClipboardImage(signal))
     // The tool registry is the lookup. A tool contributed by any plugin
     // presents its own calls here without this surface knowing it exists. A
     // profile with no tools service renders every call at its raw arguments.
@@ -223,15 +234,6 @@ export class SessionController {
       },
     })))
     this.off.push(agent.ctx.effect(() => commands.register({
-      name: 'clear-pending', description: copy.clearPending,
-      handler: ({ rawInput }) => {
-        if (rawInput.trim() !== '') return { kind: 'error', text: copy.clearPendingUsage }
-        const pending = [...agent.inbox.nextStep, ...agent.inbox.nextTurn].filter(message => message.source.kind === 'user')
-        for (const message of pending) agent.inbox.remove(message.id)
-        return { kind: 'success', text: pending.length === 0 ? copy.noPending : copy.pendingCleared }
-      },
-    })))
-    this.off.push(agent.ctx.effect(() => commands.register({
       name: 'help', description: copy.listCommands, input: { hint: copy.helpHint }, recordInput: false,
       handler: ({ rawInput }) => {
         // The registry is the list. A command contributed by any plugin
@@ -322,7 +324,7 @@ export class SessionController {
     if (projections === undefined) throw new Error('tui: sessionProjections is required')
     this.off.push(projections.onChanged((session, key) => {
       if (session !== agent.session) return
-      if (key === 'inbox' || key === 'contextPressure' || key === 'todos' || key === 'plan' || key === 'permissions' || key === 'goal' || key === 'workflows') this.repaint()
+      if (key === 'inbox' || key === 'contextPressure' || key === 'todos' || key === 'permissions' || key === 'goal' || key === 'workflows') this.repaint()
     }))
     // Activation is process-local and is not written to the goal projection.
     // Create and resume arm the goal; pause disarms it. Those transitions
@@ -357,6 +359,9 @@ export class SessionController {
     this.repaint()
   }
 
+  /** The model this session runs on, when one is selected. */
+  get model(): ModelSelection | undefined { return this.selection?.current }
+
   /** Current renderer fields; inbox and activity are read from their harness owners. */
   get view() {
     const projections = this.ctx.get('sessionProjections')
@@ -365,13 +370,12 @@ export class SessionController {
     const pending = (['next-step', 'next-turn'] as const).flatMap(target => inbox[target]
       .filter(message => message.source.kind === 'user')
       .map(message => ({ id: message.id, target, text: message.content.flatMap(block => block.type === 'text' ? [block.text] : []).join(''), attachments: attachmentSummaries(message.content) })))
-    const surface = projections?.snapshot(this.agent.session, ['contextPressure', 'plan', 'tokenUsage', 'permissions', 'workflows']).values
+    const surface = projections?.snapshot(this.agent.session, ['contextPressure', 'tokenUsage', 'permissions', 'workflows']).values
     const pressure = surface?.contextPressure
     // The agent's current list, not a log of writes to it. `todos` folds every
     // `todo/write` to the latest whole list, which is the only version that
     // is still current.
     const todos = projections?.stateOf(this.agent.session, 'todos')
-    const plan = surface?.plan
     const goal = this.goal()
     const children = this.subagents.view
     const workflows = surface?.workflows ?? []
@@ -397,7 +401,6 @@ export class SessionController {
       subagents,
       workflows: workflowEntries(workflows, this.agent.status === 'running'),
       inspection: this.inspection?.view,
-      ...plan === undefined ? {} : { plan },
       ...goal === undefined ? {} : { goal },
       ...surface?.permissions === undefined ? {} : { permission: surface.permissions.currentValue },
       ...thinkingLevel === undefined ? {} : { thinkingLevel },
@@ -442,6 +445,44 @@ export class SessionController {
   notify(text: string | undefined): void { this.notice = text; this.repaint() }
 
   /**
+   * Stage a pasted image file path or the clipboard's image for the next prompt.
+   * @param source - a path as the terminal pasted it, or the clipboard.
+   * @returns the staged attachment's key, or undefined after reporting why nothing was staged.
+   */
+  pasteImage(source: { readonly path: string } | { readonly clipboard: true }): Promise<string | undefined> {
+    if (this.closed) return Promise.resolve(undefined)
+    const abort = new AbortController()
+    const done = (async () => {
+      if (this.submission !== undefined) throw new Error(this.copy.commandBusy)
+      if ('path' in source) {
+        const path = source.path.startsWith('~/') ? `${homedir()}${source.path.slice(1)}` : source.path
+        return await this.attachments.add(path, abort.signal)
+      }
+      const image = await this.clipboard(abort.signal)
+      abort.signal.throwIfAborted()
+      if (image === undefined) throw new Error(this.copy.clipboardNoImage)
+      return await this.attachments.addImage({ ...image, name: `clipboard.${image.mediaType.slice('image/'.length)}` }, abort.signal)
+    })().then(key => { this.repaint(); return key }, (error: unknown) => {
+      if (!abort.signal.aborted && !this.closed) this.notify(error instanceof Error ? error.message : String(error))
+      return undefined
+    })
+    const entry = { abort, done }
+    this.staging.add(entry)
+    void done.finally(() => { this.staging.delete(entry) })
+    return done
+  }
+
+  /**
+   * Unstage the image whose placeholder the user erased.
+   * @param key - from {@link pasteImage}.
+   */
+  removeImage(key: string): void {
+    if (this.closed) return
+    this.attachments.discard(key)
+    this.repaint()
+  }
+
+  /**
    * Dispatch a registered command or identified user message.
    * @param text - submitted composer text.
    * @returns acceptance; asynchronous attachment failure retains the composer draft.
@@ -466,6 +507,7 @@ export class SessionController {
     }
     if (parsed === undefined || commands?.find(this.agent, parsed.name) === undefined) {
       if (this.command !== undefined && parseCommand(this.command.text)?.name === 'attach') { this.notify(this.copy.commandBusy); return false }
+      if (this.staging.size > 0) { this.notify(this.copy.imageStaging); return false }
       // No provider is the default: a message waits in the composer until one is chosen.
       if (this.modelless() && (text.trim() !== '' || this.attachments.pending)) { this.notify(this.copy.noModelSubmit); return false }
       if (this.attachments.pending) {
@@ -538,6 +580,31 @@ export class SessionController {
     return `${this.copy.unknownCommand}: /${typed}${suggestion === undefined ? '' : ` · ${this.copy.didYouMean} /${suggestion}?`}`
   }
 
+  /**
+   * Send the user's queued input now, the Alt-Up key: interrupt the running
+   * turn it waits on, keeping plugin context queued, and start a turn with it
+   * at once. The oldest queued message opens the turn and the rest join its
+   * first step, in the order they were queued. While compaction runs the
+   * input already starts the turn after it, so it is left to.
+   */
+  sendPending(): void {
+    if (this.closed || this.inspection !== undefined) return
+    const agent = this.agent
+    const pending = [...agent.inbox.nextStep, ...agent.inbox.nextTurn].filter(message => message.source.kind === 'user')
+    const [first, ...rest] = pending
+    if (first === undefined) { this.notify(this.copy.noPending); return }
+    if (this.command?.compactPhase !== undefined) { this.notify(this.copy.pendingAfterCompaction); return }
+    for (const message of pending) agent.inbox.remove(message.id)
+    if (agent.status === 'running') {
+      this.stopping = true
+      agent.cancel({ kind: 'user' }, { keepInbox: true })
+    }
+    // After the cancel, waking input waits for the aborted turn to settle and then opens the next.
+    agent.followup(first)
+    for (const message of rest) agent.send(message, 'next-step', false)
+    this.notify(this.copy.pendingSent)
+  }
+
   /** Cancel the nearest interaction or command; otherwise interrupt while retaining visible pending work. */
   cancel(): void {
     if (this.inspection !== undefined) {
@@ -587,6 +654,7 @@ export class SessionController {
     this.interactions.dispose()
     this.command?.abort.abort()
     this.submission?.abort.abort()
+    for (const entry of this.staging) entry.abort.abort()
     this.attachments.clear()
   }
 
@@ -672,7 +740,7 @@ export class SessionController {
 
   /** @returns after outstanding command, catalog, and default-model work has settled. */
   async drain(): Promise<void> {
-    await Promise.all([this.submission?.done, this.command?.done, this.reasoningLoad, this.remembering,
+    await Promise.all([this.submission?.done, ...[...this.staging].map(entry => entry.done), this.command?.done, this.reasoningLoad, this.remembering,
       this.catalog.drain(), this.subagents.drain(), this.references.drain()])
   }
 

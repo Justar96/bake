@@ -210,6 +210,21 @@ describe('project', () => {
     }])
   })
 
+  it('marks failed work in a successful tool result as failed in the UI', () => {
+    const seam = projector(dictionaries.en, name => name === 'bash' ? {
+      presentCall: () => ({ card: 'terminal' as const, title: 'false' }),
+      presentResult: () => ({ card: 'terminal' as const, output: '', exitCode: 2 }),
+    } : undefined)
+    project(event({ type: 'tool/call', data: { callId: 'b1', name: 'bash', arguments: '{}' } }), seam)
+    expect(project(event({
+      type: 'tool/result',
+      data: { message: { content: [{ toolCallId: 'b1', isError: false, content: '[exit code: 2]' }] } },
+    }), seam)).toEqual([{
+      kind: 'tool-result', callId: 'b1', ok: false, text: '',
+      detail: [{ text: 'exit 2', summary: 'failure' }],
+    }])
+  })
+
   it('keeps the model-facing text under a generic result that omits its content, cut as a raw result is', () => {
     // The workflow tool's presenters as it declares them: a call titled by
     // the workflow's name, and a result card that reformats nothing.

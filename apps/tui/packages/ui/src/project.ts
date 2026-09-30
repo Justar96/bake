@@ -298,10 +298,16 @@ export function project(event: SessionEvent, projector: Projector): Projection {
         isError,
         ...event.data.meta === undefined ? {} : { meta: event.data.meta },
       })
+      // A tool can complete normally while the work it ran fails. Shell tools
+      // deliberately keep non-zero exits out of `isError` so the model gets a
+      // usable result and can decide whether to retry; their terminal card
+      // carries the structured `summary: 'failure'` instead. Keep the model
+      // contract intact, but make the UI outcome reflect that failed work.
+      const failedWork = card?.detail.some(line => line.summary === 'failure') === true
       return [{
         kind: 'tool-result',
         callId,
-        ok: !isError,
+        ok: !isError && !failedWork,
         // A card reformats the result for a reader; showing the model-facing
         // text under it would print the same outcome twice. A card that
         // reformats nothing, such as a generic result with no `content`,

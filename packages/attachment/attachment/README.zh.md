@@ -68,11 +68,11 @@ kind: "package-reference"
 - **读取时校验。** 读取在返回前把字节和元数据与记录的引用比对，请求投影还会完整解码缓存字节，因此缺失、损坏或被替换的对象不会通过校验。
 - **角色无关的图片块。** `dsh-llm` 中的 `ImageBlock` 内容块携带 `ImageAttachmentRef`；提供方适配器按路由显式选定的目标尺寸与字节目标把引用解析为确定性请求版本，执行文件系统则可以把不可变宿主对象映射为模型可读的进程路径。
 - **按错误码路由。** `AttachmentError` 重新实现 `HarnessError` 的结构而不是继承它，因为基类位于 `dsh-llm`，而后者依赖本包；消费方用 `isAttachmentError` 识别错误并按 `code` 路由，绝不依赖原型链。
-- **文件原样，图片规范化。**`saveFile` 提交已有字节数组，`saveFileStream` 以背压和取消语义提交有界分块，`readFileStream` 校验并返回有界分块，`fileHostPath` 定位存储对象供按需读取投影；两种文件写入路径都不设准入限制。图片路径保留其独立的规范化、限额与请求版本流水线。`dsh-llm` 中的 `FileBlock` 内容块承载 `FileAttachmentRef`，请求组装会为每条路由将其投影为确定性的句柄文本。
+- **文件原样，图片规范化。**`saveFile` 提交已有字节数组，`fileHostPath` 定位存储对象供按需读取投影；文件路径不设准入限制。图片路径保留其独立的规范化、限额与请求版本流水线。`dsh-llm` 中的 `FileBlock` 内容块承载 `FileAttachmentRef`，请求组装会为每条路由将其投影为确定性的句柄文本。
 
 ### 服务操作
 
-服务族运行同一条准入与存储流程：每个入口都强制执行源批次限制与规范 base64，在发布任何成员前准备提供方无关的规范化附件，再按输入顺序持久提交而不产生部分结果。Host 提示词消费方把有序文本、编码图片和已经解析的文件引用交给 `ctx.attachments.admitPromptContent()`；该方法持久化图片，并让文件引用原样通过。编码协议适配器调用 `ctx.attachments.admitEncodedFile()`，由该方法检查规范 base64 后委托给 `saveFile`；适配器通过 `ctx.attachments.isAttachmentError()` 识别附件错误。通用文件调用方可以用 `saveFile` 提交已有字节，或用 `saveFileStream` 提交有界异步字节源；两者返回相同的持久引用，`readFileStream` 则在有界读取过程中校验摘要与长度。`readImageRequest` 派生确定性的路由尺寸变体，其身份包含附件 id、变换版本、目标尺寸、字节目标及编码参数。纯函数导出 `requestImageDimensions` 与 `longEdgeDimensions` 按总像素预算或精确长边计算保持宽高比的尺寸，使路由与请求定价共享同一套几何计算。`imageHostPath` 只向需要把该位置映射到执行环境的受信任同进程消费方暴露实现拥有的宿主位置。调用方组合有序批次，而实现负责管理压缩并发、缓存与 singleflight。读取、流式写入和投影保留调用方的取消语义。失败带有稳定且机器可读的错误码，运行时即可识别可由调用方修正的准入子集，让每个协议适配器映射自己的词汇；各操作的确切约定见 [`src/index.ts`](src/index.ts) 与 [`src/error.ts`](src/error.ts)。
+服务族运行同一条准入与存储流程：每个入口都强制执行源批次限制与规范 base64，在发布任何成员前准备提供方无关的规范化附件，再按输入顺序持久提交而不产生部分结果。Host 提示词消费方把有序文本、编码图片和已经解析的文件引用交给 `ctx.attachments.admitPromptContent()`；该方法持久化图片，并让文件引用原样通过。编码协议适配器调用 `ctx.attachments.admitEncodedFile()`，由该方法检查规范 base64 后委托给 `saveFile`；适配器通过 `ctx.attachments.isAttachmentError()` 识别附件错误。通用文件调用方用 `saveFile` 提交已有字节，并获得同样的持久内容寻址引用。`readImageRequest` 派生确定性的路由尺寸变体，其身份包含附件 id、变换版本、目标尺寸、字节目标及编码参数。纯函数导出 `requestImageDimensions` 与 `longEdgeDimensions` 按总像素预算或精确长边计算保持宽高比的尺寸，使路由与请求定价共享同一套几何计算。`imageHostPath` 只向需要把该位置映射到执行环境的受信任同进程消费方暴露实现拥有的宿主位置。调用方组合有序批次，而实现负责管理压缩并发、缓存与 singleflight。读取和投影保留调用方的取消语义。失败带有稳定且机器可读的错误码，运行时即可识别可由调用方修正的准入子集，让每个协议适配器映射自己的词汇；各操作的确切约定见 [`src/index.ts`](src/index.ts) 与 [`src/error.ts`](src/error.ts)。
 
 ### 源码地图
 

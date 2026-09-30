@@ -33,12 +33,12 @@ kind: "package-reference"
 
 ```text
 ctx.commands.register({
-  name: 'plan',
-  description: 'Enter plan mode',
+  name: 'review',
+  description: 'Select the review checklist',
   input: { hint: '<message>' },
   handler: ({ agent, rawInput }) => {
     // Runs directly against the agent; no model message is created.
-    return { kind: 'success', text: 'plan mode selected' }
+    return { kind: 'success', text: 'review checklist selected' }
   },
 })
 ```
@@ -108,7 +108,7 @@ ctx.commands.register({
 - [命令子系统参考](../../../docs/subsystems/commands.zh.md)——注册表语义、输入元数据与 `ctx.commands` 的 Cordis 接口面。
 - [命令注册 Agent Note](../../../.agents/notes/implemented/feature/2026-07-19-plugin-command-registration.zh.md)——此服务背后的边界与分发约定。
 - [交互组映射](../README.zh.md)——相邻的审批、权限与问答包。
-- [Plan mode 包](../../plan/plan-mode/README.zh.md)——一个驱动模型可见工作的已交付命令生产方。
+- [Goal 命令包](../../goal/command-goal/README.zh.md)——一个驱动模型可见工作的已交付命令生产方。
 
 -----
 
@@ -119,7 +119,7 @@ ctx.commands.register({
 
 #### 模型看到的内容
 
-注册表自身不会提交任何内容。已知斜杠命令在 UI 命令平面执行，其 `CommandResult` 文本不会作为用户消息提交。已交付的适配器会拒绝未知斜杠命令输入，而不是将其变成模型提示词。命令生产方可以显式使用接收命令的 `Agent`；例如，[`dsh-plan-mode`](../../plan/plan-mode/README.zh.md#model-and-human-interactions)在选择 plan mode 后，会提交 `/plan [message]` 中的可选消息与有序附件。执行器只负责把附件准入为持久化对象，是否以及如何成为模型可见消息由声明接受的生产方决定。
+注册表自身不会提交任何内容。已知斜杠命令在 UI 命令平面执行，其 `CommandResult` 文本不会作为用户消息提交。已交付的适配器会拒绝未知斜杠命令输入，而不是将其变成模型提示词。命令生产方可以显式使用接收命令的 `Agent`；例如，[`dsh-command-goal`](../../goal/command-goal/README.zh.md#attachments)在设置 goal 后，会将 `/goal <objective>` 的有序附件作为一条用户消息提交。执行器只负责把附件准入为持久化对象，是否以及如何成为模型可见消息由声明接受的生产方决定。
 
 #### Token 影响
 

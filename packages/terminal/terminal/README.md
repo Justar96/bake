@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`dsh-terminal` provides persistent, owner-scoped terminal sessions to the harness: a session keeps shell or REPL state across tool calls, and every operation is fenced to the exact agent that created it. It provides the `ctx.terminals` service, which mints opaque session ids, routes session creation through registered backends, and waits for quiescent cleanup when an owner or the service disposes. It defines no terminal mechanics itself: backends such as the shipped `dsh-terminal-bash` own spawning and readiness, and the model-facing tools in `dsh-tool-terminal` own presentation. Sessions are process-local: they do not survive a harness restart.
+`dsh-terminal` provides persistent, owner-scoped terminal sessions to the harness: a session keeps shell or REPL state across tool calls, and every operation is fenced to the exact agent that created it. It provides the `ctx.terminals` service, which mints opaque session ids, routes session creation through registered backends, and waits for quiescent cleanup when an owner or the service disposes. It defines no terminal mechanics itself: backends such as the shipped `dsh-terminal-bash` own spawning and readiness, and the model-facing persistent shell tools in `dsh-tool-bash-persistent` and `dsh-tool-pwsh-persistent` own presentation. Sessions are process-local: they do not survive a harness restart.
 
 ## Table of Contents
 
@@ -25,7 +25,7 @@ English | [中文](README.zh.md)
 <a id="use-this-package"></a>
 ## Use this package
 
-Mount `@deepseek-ai/dsh-terminal` whenever a composition needs terminal sessions whose state survives across tool calls. The service alone does nothing useful: pair it with a backend such as `@deepseek-ai/dsh-terminal-bash` and a tool package such as `@deepseek-ai/dsh-tool-terminal`, and load all three in one composition.
+Mount `@deepseek-ai/dsh-terminal` whenever a composition needs terminal sessions whose state survives across tool calls. The service alone does nothing useful: pair it with a backend such as `@deepseek-ai/dsh-terminal-bash` and a tool package such as `@deepseek-ai/dsh-tool-bash-persistent` or `@deepseek-ai/dsh-tool-pwsh-persistent`, and load all three in one composition.
 
 ### When to choose it
 
@@ -38,22 +38,22 @@ Load the session service together with a backend and a tool package:
 ```yaml
 - name: '@deepseek-ai/dsh-terminal'
 - name: '@deepseek-ai/dsh-terminal-bash'
-- name: '@deepseek-ai/dsh-tool-terminal'
+- name: '@deepseek-ai/dsh-tool-bash-persistent'
 ```
 
 A backend provides one stable type — the shipped shell backend provides `shell` — and the tools open sessions by that type. The shell backend additionally requires the sandbox, sandbox-policy, and subprocess providers; see its [README](../terminal-bash/README.md) for the full composition.
 
 ### What sessions give you
 
-Once a session exists, consumers can open a session and receive its id and bounded startup output, send text (optionally submitting Enter) and wait until the shell is ready again or the send times out, read bounded retained output, deliver one allowed signal to the foreground process group, close a session and wait for its process tree to end, and list the sessions a caller owns. Exactly one send can be active per session at a time; a second send fails until the first settles.
+Once a session exists, consumers can open a session and receive its id, send text (optionally submitting Enter) and wait until the shell is ready again or the send times out, read bounded retained output, close a session and wait for its process tree to end, and list the sessions a caller owns. Exactly one send can be active per session at a time; a second send fails until the first settles.
 
 ### Ownership and isolation
 
-Every session is owned by the exact agent that opened it. Operations that name a session are rejected when the caller is not that agent, so the model cannot reach another agent's terminal even if it learns the id. An optional session `name` is owner-local display metadata — labels such as `main` or `gdb` — and is unique only within its owner.
+Every session is owned by the exact agent that opened it. Operations that name a session are rejected when the caller is not that agent, so the model cannot reach another agent's terminal even if it learns the id. An optional session `name` is owner-local display metadata — labels such as `main` or `gdb`.
 
 ### Observable outcomes and failures
 
-A successful open returns the session id, type, pid when the backend has one, status, and a bounded startup message. Sends settle with a wait reason: `stdin_read` (the shell is waiting for input), `inferred_idle` (output silence), `timeout`, or `session_exit` (the top-level shell exited). Failures carry stable machine-routable codes: a missing backend type (`NO_BACKEND`), an unknown session (`NO_SESSION`), another agent's session (`FOREIGN_SESSION`), a second concurrent send (`SEND_ACTIVE`), or an owner that is no longer live (`OWNER_NOT_LIVE`). Backend setup failures reject the open before anything is published, and a failed cleanup rejects the close rather than claiming success.
+A successful open returns the session id, type, pid when the backend has one, and status. Sends settle with a wait reason: `stdin_read` (the shell is waiting for input), `inferred_idle` (output silence), `timeout`, or `session_exit` (the top-level shell exited). Failures carry stable machine-routable codes: a missing backend type (`NO_BACKEND`), an unknown session (`NO_SESSION`), another agent's session (`FOREIGN_SESSION`), a second concurrent send (`SEND_ACTIVE`), or an owner that is no longer live (`OWNER_NOT_LIVE`). Backend setup failures reject the open before anything is published, and a failed cleanup rejects the close rather than claiming success.
 
 -----
 
@@ -73,7 +73,7 @@ The service owns everything except terminal mechanics: session identity, publica
 
 | File | Role |
 |---|---|
-| [`src/index.ts`](src/index.ts) | `TerminalSessionService`: backend registry, spawn/send/read/signal/kill/list, owner cleanups, disposal |
+| [`src/index.ts`](src/index.ts) | `TerminalSessionService`: backend registry, spawn/send/read/kill/list, owner cleanups, disposal |
 | [`src/types.ts`](src/types.ts) | Shared contracts: backend interface, session types, wait reasons, signal set, error codes |
 | — | No runtime invariant companion is published; backend and owner-scoped session registries are private mutable state, and the service exposes neither an independent lifecycle stream nor an unscoped snapshot. |
 
@@ -114,7 +114,7 @@ Read these pages when the package-level contract is not enough. They move from t
 
 #### What the model sees
 
-Nothing directly. This package registers no prompt or tool; `@deepseek-ai/dsh-tool-terminal` owns visible schemas and result text.
+Nothing directly. This package registers no prompt or tool; the persistent shell tools own visible schemas and result text.
 
 #### Token effect
 
@@ -122,7 +122,7 @@ None directly. Live session state stays process-local until a consumer returns a
 
 #### KV Cache effect
 
-No direct invalidation; `@deepseek-ai/dsh-tool-terminal` owns request-prefix changes.
+No direct invalidation; the persistent shell tools own request-prefix changes.
 
 ## Known Limitations and Deferred Work
 

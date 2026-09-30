@@ -668,15 +668,11 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 #### `plan/mode` — log-only
 
 ```ts persistence-catalog
-/**
- * Whether plan mode is in force from this point on: log-only, non-surface,
- * whole-value replace. The last `plan/mode` wins; a log with none folds to
- * inactive through the projection unit's fold.
- */
+/** Whether plan mode was in force from this point on; the last record won. */
 'plan/mode': { active: boolean }
 ```
 
-来源：[`packages/plan/plan-mode/src/index.ts:47`](../packages/plan/plan-mode/src/index.ts)
+来源：[`packages/session/session-format-catalog/src/retired-vocabulary.ts:120`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 ### `request/*`
 
@@ -2983,7 +2979,7 @@ SHA-256: `a7cf43ce7c2a4c038feed1885cd7a00d5c6ee2d90a7e0d56b46f78a3e1ca327f`
 
 SHA-256: `20a57544bbf204dacd1ae6beb2ab29444365c3c869f2afdf489dcdcbc3d9c8c5`
 
-来源：[`packages/plan/plan-mode/src/index.ts:47`](../packages/plan/plan-mode/src/index.ts)
+来源：[`packages/session/session-format-catalog/src/retired-vocabulary.ts:120`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 | 属性 | 存在性 | 类型 |
 |---|---|---|
@@ -4685,7 +4681,7 @@ SHA-256: `a5a8c15f08af1b0f26f40906e0797b6b0920fd01069e660becce35ab7fc48d77`
 
 SHA-256: `3cfc3a56502da1f8c6153c2c56657bab4b749056968634dd0991d325ec1c919f`
 
-来源：[`packages/core/tools/src/index.ts:683`](../packages/core/tools/src/index.ts)
+来源：[`packages/core/tools/src/index.ts:708`](../packages/core/tools/src/index.ts)
 
 | 属性 | 存在性 | 类型 |
 |---|---|---|
@@ -5396,7 +5392,7 @@ SHA-256: `7f5f2a8618c2ece530a18b1358b890fb57fb8c35705e47b66bff2296f8c6e889`
 
 SHA-256: `fab2bb09bc5e3b9db0685e8f5500b029af1a2b33e70bc703c1d5d0f596fbc1fd`
 
-来源：[`packages/sandbox/sandbox/src/index.ts:29`](../packages/sandbox/sandbox/src/index.ts)
+来源：[`packages/sandbox/sandbox/src/index.ts:30`](../packages/sandbox/sandbox/src/index.ts)
 
 以下类型之一：
 

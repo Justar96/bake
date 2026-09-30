@@ -42,7 +42,7 @@ async function render(columns: number, color: boolean): Promise<string> {
       const budget = budgetFor({ columns: ${columns}, rows: 24 });
       const result = { lines: 4, unit: 'lines', more: 'more lines', code: syntax.highlight };
       process.stdout.write(renderToString(React.createElement(React.Fragment, null,
-        ...rows.map((row, key) => React.createElement(RowView, { key, row, budget, result }))), { columns: ${columns} }));
+        ...rows.map((row, key) => React.createElement(RowView, { key, row, budget, frame: 'classic', result }))), { columns: ${columns} }));
     } finally { await syntax.close(); }
   `], { cwd: new URL('../../../../../', import.meta.url), env })
   onTestFinished(async () => { child.kill('SIGKILL'); await child.catch(() => {}) })

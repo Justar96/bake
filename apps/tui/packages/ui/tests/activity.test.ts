@@ -6,11 +6,9 @@
 import { describe, expect, it } from 'bun:test'
 import {
   activityWord, FOLD_REST, FOLD_SPINNER, foldFrame, FRAME_MS, formatElapsed, lastTurn, phaseLabel, phaseOf, SPINNER, SPINNER_REST, spinnerFrame,
-  RATE_MIN_MS, RATE_MIN_TOKENS, rateLabel, thinkingRows, turnSummary,
+  RATE_MIN_MS, RATE_MIN_TOKENS, rateLabel, turnSummary,
 } from '../src/activity.ts'
 import { dictionaries } from '../src/copy.ts'
-import { markdownLines } from '../src/markdown.ts'
-import wrapAnsi from 'wrap-ansi'
 import type { Row } from '../src/rows.ts'
 
 const copy = dictionaries.en
@@ -143,79 +141,6 @@ describe('phase', () => {
     expect(phaseLabel({ kind: 'running', tool: 'bash' }, copy)).toBe('running bash')
     expect(phaseLabel({ kind: 'thinking' }, dictionaries.zh)).toBe('思考')
     expect(phaseLabel(undefined, copy)).toBeUndefined()
-  })
-})
-
-describe('thinking window', () => {
-  const thinking = (text: string, width = 20, count = 3) => thinkingRows([{ kind: 'reasoning', text }], width, count)
-
-  it('shows the newest rows across paragraphs, leaving blank lines out', () => {
-    expect(thinking('first\n\n  second  \n\n')).toEqual(['first', 'second'])
-    expect(thinking('one two three four five six seven eight nine ten eleven')).toEqual([
-      'one two three four', 'five six seven eight', 'nine ten eleven',
-    ])
-    expect(thinking('one two three four five six seven eight nine ten eleven twelve thirteen')).toEqual([
-      'five six seven eight', 'nine ten eleven', 'twelve thirteen',
-    ])
-  })
-
-  it('reads through the markdown it cannot render', () => {
-    expect(thinking('## Plan\n**Check** `startup.ts` first\n> quoted\ttabbed', 40)).toEqual([
-      'Plan', 'Check startup.ts first', '> quoted tabbed',
-    ])
-  })
-
-  it('never loses a row as text arrives, and keeps full rows where they are', () => {
-    const text = 'The loader reads the profile before it resolves each plugin and then the session store opens.\nNext'
-    let previous: readonly string[] = []
-    for (let end = 1; end <= text.length; end++) {
-      const rows = thinking(text.slice(0, end), 24)
-      expect(rows.length).toBeGreaterThanOrEqual(previous.length)
-      expect(rows.every(row => row.length <= 24)).toBe(true)
-      // Rows above the newest keep their text while it grows, or move up one
-      // together when it wraps; the row it wrapped from may give up a word.
-      if (rows.length === previous.length && rows.length > 1) {
-        const grew = Bun.deepEquals(rows.slice(0, -1), previous.slice(0, -1))
-        const scrolled = Bun.deepEquals(rows.slice(0, -2), previous.slice(1, -1))
-        expect(grew || scrolled, `${JSON.stringify(previous)} -> ${JSON.stringify(rows)}`).toBe(true)
-      }
-      previous = rows
-    }
-  })
-
-  it('draws what parsing the whole thought would, from its newest paragraphs alone', () => {
-    // The window's rows from the entire text, as parsing everything would give them.
-    const whole = (text: string, width: number, count: number): string[] => {
-      const lines = markdownLines(text, 'thought').map(line => line.text.replace(/\s+/g, ' ').trim()).filter(line => line !== '')
-      return lines.flatMap(line => wrapAnsi(line, width, { hard: true, trim: true }).split('\n')).slice(-count)
-    }
-    const parts = [
-      'Plain paragraph that runs long enough to wrap onto a second row.',
-      '```ts\nconst a = 1\n\nconst b = 2\n```',
-      '- first item\n- second item',
-      '## Heading',
-      '---',
-      '~~~\nfenced\n\n\nwith gaps\n~~~',
-      'Short.',
-      '> quoted line',
-      '1. one\n2. two',
-    ]
-    for (let size = 1; size <= 40; size++) {
-      const text = Array.from({ length: size }, (_, index) => parts[(index * 7) % parts.length]).join('\n\n')
-      for (const count of [1, 3, 8]) {
-        expect(thinking(text, 24, count), `${size} ${count}`).toEqual(whole(text, 24, count))
-        // Mid-stream, including cuts inside an unclosed fence.
-        const cut = text.slice(0, Math.floor(text.length * 0.6))
-        expect(thinking(cut, 24, count), `${size} ${count} cut`).toEqual(whole(cut, 24, count))
-      }
-    }
-  })
-
-  it('is empty once anything else is newest', () => {
-    expect(thinkingRows([{ kind: 'reasoning', text: 'first' }, { kind: 'assistant', text: 'ok' }], 20, 3)).toEqual([])
-    expect(thinking('\n\n')).toEqual([])
-    expect(thinking('first', 20, 0)).toEqual([])
-    expect(thinkingRows([], 20, 3)).toEqual([])
   })
 })
 

@@ -8,37 +8,44 @@
  * splice new text in at those offsets. Everything outside the insertion
  * stays byte for byte.
  *
+ * Parsing is the maintained `jsonc-parser` package, VS Code's own reader:
+ * `parseTree` for the offset-keeping nodes and `getNodeValue` for their
+ * values, its error list mapped back to the `SyntaxError` the module has
+ * always failed with. The splice helpers stay local, because they place
+ * pre-rendered text — the comment above a new entry included — where the
+ * package's `modify` can only place a JSON value.
+ *
  * The comment and trailing-comma rules are VS Code's "JSON with Comments"
  * mode: https://code.visualstudio.com/docs/languages/json#_json-with-comments
  *
  * @module @dsh-tui/app/jsonc
  */
+// The package's bare specifier resolves to its UMD main, whose lazy
+// `require('./impl/format')` cannot resolve from the bundled runner; the ESM
+// build bundles statically.
+import { getNodeValue, parseTree, stripComments, ParseErrorCode, type Node, type ParseError } from 'jsonc-parser/lib/esm/main.js'
 
-/** A parsed value with the source span `[start, end)` it came from. */
-export type JsonNode = JsonObject | JsonArray | JsonScalar
+/** A parsed value, with the source span `[offset, offset + length)` it came from. */
+export type JsonNode = Node
 
-/** An object and its members in source order. */
-export interface JsonObject {
-  readonly kind: 'object'
-  readonly start: number
-  readonly end: number
-  readonly members: readonly JsonMember[]
-}
-/** One `"key": value` pair. */
-export interface JsonMember { readonly key: string; readonly keyStart: number; readonly value: JsonNode }
-/** An array and its items in source order. */
-export interface JsonArray {
-  readonly kind: 'array'
-  readonly start: number
-  readonly end: number
-  readonly items: readonly JsonNode[]
-}
-/** A string, number, boolean, or null. */
-export interface JsonScalar {
-  readonly kind: 'scalar'
-  readonly start: number
-  readonly end: number
-  readonly value: string | number | boolean | null
+/** How each of the package's error codes reads, in the wording callers saw before it. */
+const UNREADABLE: Readonly<Record<ParseErrorCode, string>> = {
+  [ParseErrorCode.InvalidSymbol]: 'unexpected character',
+  [ParseErrorCode.InvalidNumberFormat]: 'unexpected character',
+  [ParseErrorCode.PropertyNameExpected]: 'expected a key',
+  [ParseErrorCode.ValueExpected]: 'unexpected character',
+  [ParseErrorCode.ColonExpected]: 'expected :',
+  [ParseErrorCode.CommaExpected]: 'expected ,',
+  [ParseErrorCode.CloseBraceExpected]: 'expected , or }',
+  [ParseErrorCode.CloseBracketExpected]: 'expected , or ]',
+  [ParseErrorCode.EndOfFileExpected]: 'unexpected content after the document',
+  [ParseErrorCode.InvalidCommentToken]: 'unexpected character',
+  [ParseErrorCode.UnexpectedEndOfComment]: 'unterminated comment',
+  [ParseErrorCode.UnexpectedEndOfString]: 'unterminated string',
+  [ParseErrorCode.UnexpectedEndOfNumber]: 'unexpected character',
+  [ParseErrorCode.InvalidUnicode]: 'invalid string',
+  [ParseErrorCode.InvalidEscapeCharacter]: 'invalid string',
+  [ParseErrorCode.InvalidCharacter]: 'invalid string',
 }
 
 /**
@@ -48,88 +55,20 @@ export interface JsonScalar {
  * @throws SyntaxError at the first offset that is not JSONC.
  */
 export function parseJsonc(text: string): JsonNode | undefined {
-  let at = 0
-  const fail = (what: string): never => { throw new SyntaxError(`JSONC: ${what} at offset ${at}`) }
-  const skip = (): void => {
-    for (;;) {
-      const char = text[at]
-      if (char === ' ' || char === '\t' || char === '\n' || char === '\r' || char === '\uFEFF') at += 1
-      else if (text.startsWith('//', at)) { const end = text.indexOf('\n', at); at = end < 0 ? text.length : end }
-      else if (text.startsWith('/*', at)) {
-        const end = text.indexOf('*/', at + 2)
-        if (end < 0) fail('unterminated comment')
-        at = end + 2
-      }
-      else return
-    }
-  }
-  const string = (): string => {
-    const start = at
-    at += 1
-    for (;;) {
-      const char = text[at]
-      if (char === undefined || char === '\n') fail('unterminated string')
-      if (char === '\\') at += 2
-      else if (char === '"') { at += 1; break } else at += 1
-    }
-    try { return JSON.parse(text.slice(start, at)) as string } catch { return fail('invalid string') }
-  }
-  const value = (): JsonNode => {
-    skip()
-    const start = at
-    const char = text[at]
-    if (char === '{') {
-      at += 1
-      const members: JsonMember[] = []
-      for (;;) {
-        skip()
-        if (text[at] === '}') { at += 1; return { kind: 'object', start, end: at, members } }
-        if (members.length > 0) {
-          if (text[at] !== ',') fail('expected , or }')
-          at += 1
-          skip()
-          // A trailing comma before the closing brace.
-          if (text[at] === '}') { at += 1; return { kind: 'object', start, end: at, members } }
-        }
-        if (text[at] !== '"') fail('expected a key')
-        const keyStart = at
-        const key = string()
-        skip()
-        if (text[at] !== ':') fail('expected :')
-        at += 1
-        members.push({ key, keyStart, value: value() })
-      }
-    }
-    if (char === '[') {
-      at += 1
-      const items: JsonNode[] = []
-      for (;;) {
-        skip()
-        if (text[at] === ']') { at += 1; return { kind: 'array', start, end: at, items } }
-        if (items.length > 0) {
-          if (text[at] !== ',') fail('expected , or ]')
-          at += 1
-          skip()
-          if (text[at] === ']') { at += 1; return { kind: 'array', start, end: at, items } }
-        }
-        items.push(value())
-      }
-    }
-    if (char === '"') {
-      const decoded = string()
-      return { kind: 'scalar', start, end: at, value: decoded }
-    }
-    const literal = /^(?:true|false|null|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)/u.exec(text.slice(at, at + 64))?.[0]
-    if (literal === undefined) return fail('unexpected character')
-    at += literal.length
-    return { kind: 'scalar', start, end: at, value: JSON.parse(literal) as number | boolean | null }
-  }
-  skip()
-  if (at >= text.length) return undefined
-  const root = value()
-  skip()
-  if (at < text.length) fail('unexpected content after the document')
-  return root
+  if (/^\s*$/u.test(stripComments(text))) return undefined
+  const errors: ParseError[] = []
+  const root = parseTree(text, errors, { allowTrailingComma: true })
+  // The package has no byte-order-mark concept: its scanner reads a leading
+  // one as a single invalid symbol. The module's contract skips it, and every
+  // other report is one the package repaired around but a JSONC file may not
+  // hold — the reader this replaced failed on the first of them.
+  const first = (text.charCodeAt(0) === 0xfeff
+    ? errors.filter(error => error.error !== ParseErrorCode.InvalidSymbol || error.offset !== 0 || error.length !== 1)
+    : errors)[0]
+  if (first === undefined && root !== undefined) return root
+  throw new SyntaxError(
+    `JSONC: ${first === undefined ? UNREADABLE[ParseErrorCode.ValueExpected] : UNREADABLE[first.error]} at offset ${first?.offset ?? 0}`,
+  )
 }
 
 /**
@@ -137,20 +76,21 @@ export function parseJsonc(text: string): JsonNode | undefined {
  * @returns the plain JavaScript value it denotes.
  */
 export function valueOf(node: JsonNode): unknown {
-  switch (node.kind) {
-    case 'scalar': return node.value
-    case 'array': return node.items.map(valueOf)
-    case 'object': return Object.fromEntries(node.members.map(member => [member.key, valueOf(member.value)]))
-  }
+  return getNodeValue(node)
 }
 
 /**
  * @param object - an object node.
  * @param key - a member name.
  * @returns the last member of that name, which is the one a JSON reader keeps.
+ *
+ * The package's own `findNodeAtLocation` stops at the first member of the
+ * name, so the lookup walks the members itself.
  */
-export function member(object: JsonObject, key: string): JsonNode | undefined {
-  return object.members.findLast(entry => entry.key === key)?.value
+export function member(object: JsonNode, key: string): JsonNode | undefined {
+  return object.type === 'object'
+    ? object.children?.findLast(entry => entry.type === 'property' && entry.children?.[0]?.value === key)?.children?.[1]
+    : undefined
 }
 
 /** How new text is laid out to match the file around it. */
@@ -178,9 +118,10 @@ export function layoutOf(text: string): Layout {
  * @param layout - the file's indentation and line ending.
  * @returns the file with the item added and every other byte unchanged.
  */
-export function appendItem(text: string, array: JsonArray, render: (indent: string) => string, layout: Layout): string {
-  const last = array.items.at(-1)
-  return insertBefore(text, array.start, array.end - 1, last?.start, last?.end, render, layout)
+export function appendItem(text: string, array: JsonNode, render: (indent: string) => string, layout: Layout): string {
+  const last = array.children?.at(-1)
+  return insertBefore(text, array.offset, array.offset + array.length - 1, last?.offset,
+    last === undefined ? undefined : last.offset + last.length, render, layout)
 }
 
 /**
@@ -192,9 +133,12 @@ export function appendItem(text: string, array: JsonArray, render: (indent: stri
  * @param layout - the file's indentation and line ending.
  * @returns the file with the member added and every other byte unchanged.
  */
-export function appendMember(text: string, object: JsonObject, key: string, render: (indent: string) => string, layout: Layout): string {
-  const last = object.members.at(-1)
-  return insertBefore(text, object.start, object.end - 1, last?.keyStart, last?.value.end,
+export function appendMember(text: string, object: JsonNode, key: string, render: (indent: string) => string, layout: Layout): string {
+  const last = object.children?.at(-1)
+  const lastKey = last?.children?.[0]
+  const lastValue = last?.children?.[1]
+  return insertBefore(text, object.offset, object.offset + object.length - 1, lastKey?.offset,
+    lastValue === undefined ? undefined : lastValue.offset + lastValue.length,
     indent => `${JSON.stringify(key)}: ${render(indent)}`, layout)
 }
 

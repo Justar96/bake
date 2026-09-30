@@ -1,5 +1,5 @@
 /** Terminal view over committed history, live presentation, and harness-owned state. */
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import React, { lazy, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Box, Text, useApp, useInput, useIsScreenReaderEnabled, usePaste, useWindowSize } from 'ink'
 import type { AgentStatus } from '@deepseek-ai/dsh-agent'
 import { formatAttachment, type AttachmentSummary, type Row } from './rows.ts'
@@ -7,6 +7,7 @@ import { transcriptRows, type Transcript } from './transcript.ts'
 import type { TuiCopy } from './copy.ts'
 import type { ContextUsage, TokenTotals } from './format.ts'
 import { isNewline, useComposer, type Submit } from './composer.ts'
+import { imagePath } from './paste.ts'
 import { draftRows } from './editor.ts'
 import { argumentQuery, commandUsage, completionMenu, requiresInput, type CompletionCatalog, type CompletionChoice, type FileCatalog } from './completion.ts'
 import { inputHistory } from './history.ts'
@@ -24,9 +25,12 @@ import { statusFields } from './status-line.ts'
 import { Installing } from './installing.tsx'
 import type { InstallStep } from './install-progress.ts'
 import { Scrollback, type Opening } from './scrollback.tsx'
-import { Fullscreen, WHEEL_ROWS, type TranscriptScroll } from './fullscreen.tsx'
-import { Chrome, Completion, composerHint, draftWidth, Line, LiveRegion, Notice, Panel, Thinking, THINKING_GAP, wrappedRows, type ActivityState } from './line.tsx'
-import { activityWord, phaseLabel, phaseOf, lastTurn, THINKING_ROWS, thinkingRows, turnSummary, type Clock } from './activity.ts'
+import type { Fullscreen as FullscreenComponent, TranscriptScroll } from './fullscreen.tsx'
+import { Chrome, Completion, composerHint, draftWidth, Line, LiveRegion, Notice, Panel, wrappedRows, type ActivityState } from './line.tsx'
+import { activityWord, phaseLabel, phaseOf, lastTurn, turnSummary, type Clock } from './activity.ts'
+
+const Fullscreen = lazy(async () => ({ default: (await import('./fullscreen.tsx')).Fullscreen as typeof FullscreenComponent }))
+const WHEEL_ROWS = 3
 
 /** Display-only projection of one pending inbox message. */
 export interface PendingInput {
@@ -112,8 +116,6 @@ export interface AppProps {
   readonly installing?: InstallStep
   /** Shift-Tab: step the selected model's reasoning effort. Absent, Shift-Tab does nothing. */
   readonly onCycleThinking?: () => void
-  /** Harness plan projection; absent when this profile has no plan mode. */
-  readonly plan?: { readonly active: boolean; readonly pending: boolean }
   /** Current goal from the Harness goal service; absent without one or before `/goal` sets it. */
   readonly goal?: GoalEntry | undefined
   /**
@@ -188,8 +190,24 @@ export interface AppProps {
    */
   readonly motion?: boolean
   readonly onSubmit: Submit
+  /**
+   * Stage a pasted image: a dropped or pasted image file path, or the
+   * clipboard's image on Ctrl-V or an empty paste. Resolves to the staged
+   * attachment's key, which the draft shows as `[Image #N]`, or undefined when
+   * nothing was staged; the application reports why. A path that stages
+   * nothing is inserted as the text it was.
+   */
+  readonly onPasteImage?: (source: { readonly path: string } | { readonly clipboard: true }) => Promise<string | undefined>
+  /** One Backspace or Delete erased an `[Image #N]` placeholder; unstage its attachment. */
+  readonly onRemoveImage?: (key: string) => void
   readonly onCancel: () => void
   readonly onInterrupt: () => void
+  /**
+   * Alt-Up: send the steering now, interrupting the turn it waits on, instead
+   * of at the next step. A draft typed during a turn is submitted first. The
+   * steering placeholder and the pending panel name the key.
+   */
+  readonly onSendPending?: () => void
   /**
    * Called for any key other than Ctrl-C while `quitting`. The user went on
    * with something else, so the quit prompt goes instead of waiting out
@@ -217,12 +235,13 @@ function Status({ text, tone }: { readonly text: string, readonly tone?: 'error'
  * @param props - the row to render.
  * @returns the row element.
  */
-export function RowView({ row, budget, result }: {
+export function RowView({ row, budget, frame, result }: {
   readonly row: Row
   readonly budget: Budget
+  readonly frame: FrameStyle
   readonly result: ResultBound
 }): React.ReactElement {
-  return <>{present(row, result, line => wrappedRows(line, budget), budget.measure).map((line, index) => <Line key={index} line={line} budget={budget} />)}</>
+  return <>{present(row, result, line => wrappedRows(line, budget), budget.measure).map((line, index) => <Line key={index} line={line} budget={budget} frame={frame} />)}</>
 }
 
 /**
@@ -311,7 +330,8 @@ const WHEEL_DOWN = 65
 function SessionView(props: AppProps): React.ReactElement {
   const scroll = useRef<TranscriptScroll>(null)
   const fullscreen = props.screen === 'fullscreen'
-  const composer = useComposer(props.onSubmit, () => inputHistory(props.committed, props.pending), (props.attachments?.length ?? 0) > 0)
+  const composer = useComposer(props.onSubmit, () => inputHistory(props.committed, props.pending), (props.attachments?.length ?? 0) > 0,
+    '', key => props.onRemoveImage?.(key))
   const { copy, interaction } = props
   // One arrow-key focus across the rows around the composer: the task row
   // and the goal above it, the subagents field below. Refs, because keys
@@ -427,8 +447,18 @@ function SessionView(props: AppProps): React.ReactElement {
   // keeping one owner avoids a mode-off/mode-on gap when fullscreen opens a
   // sheet or an interaction replaces the composer.
   usePaste(text => {
-    if (sheetRef.current === undefined && interaction === undefined && props.inputBlocked !== true
-      && props.inspection === undefined && !composer.submitting) composer.paste(text)
+    if (sheetRef.current !== undefined || interaction !== undefined || props.inputBlocked === true
+      || props.inspection !== undefined || composer.submitting) return
+    const path = imagePath(text)
+    // A terminal pastes nothing for a clipboard that holds only an image.
+    if (props.onPasteImage !== undefined && (path !== undefined || text === '')) {
+      void props.onPasteImage(path === undefined ? { clipboard: true } : { path }).then(key => {
+        if (key !== undefined) composer.attach(key)
+        else if (path !== undefined) composer.pasteBlock(text)
+      })
+      return
+    }
+    composer.pasteBlock(text)
   })
   useInput((text, key) => {
     if (props.inspection !== undefined) return
@@ -490,12 +520,32 @@ function SessionView(props: AppProps): React.ReactElement {
       scroll.current?.move(key.pageUp ? 'up' : key.pageDown ? 'down' : key.home ? 'start' : 'end')
       return
     }
+    // Alt-Up sends steering now instead of at the next step: a typed draft is
+    // submitted and sent, and with an empty draft the queued input is. It is
+    // checked before the composer, which takes no other Meta key. A command
+    // draft is left alone: it is not steering.
+    if (key.meta && key.upArrow && interaction === undefined && props.inputBlocked !== true && props.inspection === undefined
+      && !composer.blocked) {
+      const draft = composer.value
+      if (props.status === 'running' && draft.trim() !== '' && !draft.trimStart().startsWith('/')) {
+        composer.type('\n')
+        // Accepted at once, the draft is queued steering by now; a refused or
+        // still-sending draft stays where it is and is not sent.
+        if (!composer.blocked && composer.value === '') props.onSendPending?.()
+        return
+      }
+      if (props.pending.length > 0) { props.onSendPending?.(); return }
+    }
     // Alt-Enter is the one Meta key the composer takes: a line break.
     if (interaction !== undefined || props.inputBlocked === true || props.inspection !== undefined || composer.blocked
       || (key.meta && !newline)) return
     if (key.ctrl && text === 'o' && props.goal !== undefined) { toggleSheet('goal'); return }
     if (key.ctrl && text === 't' && hasTasks) { toggleSheet('tasks'); return }
     if (key.ctrl && text === 'g' && hasSubagents) { toggleSheet('agents'); return }
+    if (key.ctrl && text === 'v' && props.onPasteImage !== undefined) {
+      void props.onPasteImage({ clipboard: true }).then(staged => { if (staged !== undefined) composer.attach(staged) })
+      return
+    }
     const focused = focusRef.current
     if (focused !== undefined && available(focused)) {
       if (focused === 'subagents') {
@@ -637,11 +687,9 @@ function SessionView(props: AppProps): React.ReactElement {
   }, [running, ended, replayed, props.committed, copy])
   const lastCommitted = useMemo(
     () => transcriptRows(props.committed, Math.max(0, props.committed.length - 1)).at(-1), [props.committed])
-  // Reasoning is not part of the live region. The thinking window above the
-  // header draws it. Drawn row by row in the live region, it arrives faster
-  // than it can be read and scrolls the surface.
-  const liveRows = useMemo(() => props.live.filter(row => row.kind !== 'reasoning'), [props.live])
-  const thinking = useMemo(() => thinkingRows(props.live, budget.measure, THINKING_ROWS), [props.live, budget])
+  // Streaming reasoning is drawn whole under the running actions, and may take
+  // every row the panels leave; once it commits it prints as its preview.
+  const reasoning = running && interaction === undefined && props.live.at(-1)?.kind === 'reasoning'
   // The access boundary is read where the session opens, not on every frame.
   // A session without the welcome block names it on its heading instead.
   const access = props.permission === undefined ? '' : ` · ${copy.permission} ${props.permission}`
@@ -730,10 +778,7 @@ function SessionView(props: AppProps): React.ReactElement {
   // Only while it has rows to draw. An empty live region draws nothing, and
   // reserving its window for a turn that has not spoken yet would starve the
   // panels below it of rows it never uses.
-  const liveLimit = claim(!fullscreen && liveRows.length > 0 ? liveWant : 0)
-  // After the output it summarizes, which it cannot outrank on a short
-  // terminal; the header already says the turn is running.
-  const thinkingLimit = claim(interaction !== undefined || !running || thinking.length === 0 ? 0 : thinking.length + THINKING_GAP)
+  const liveLimit = claim(!fullscreen && props.live.length > 0 ? liveWant : 0)
   const taskLimit = claim(tasksShown ? 1 : 0)
   const pendingLimit = claim(props.pending.length === 0 ? 0 : menuLimit)
   const attachmentLimit = claim((props.attachments?.length ?? 0) === 0 ? 0 : menuLimit)
@@ -742,6 +787,8 @@ function SessionView(props: AppProps): React.ReactElement {
   const commandLimit = claim(props.compactPhase === undefined && props.command !== undefined ? 1 : 0)
   const noticeLimit = claim(props.notice === undefined ? 0 : budget.notice)
   const installingLimit = claim(props.installing === undefined ? 0 : 1)
+  // Claimed last, so the panels keep their rows and the thought fills the rest.
+  const liveTotal = liveLimit + claim(reasoning && !fullscreen ? unclaimed : 0)
   const menuRows = Math.max(0, completionLimit - menuStatusRows)
   const menuWindow = selectionWindow(matches ?? [], selected, menuRows, props.completionLimit)
   const visibleMatches = menuWindow.shown
@@ -770,7 +817,6 @@ function SessionView(props: AppProps): React.ReactElement {
   const sheetBlock = sheetView === undefined ? null : <Sheet {...sheetView} tabs={tabs} columns={size.columns}
     limit={sheetViewLimit} offset={sheetScroll} frame={props.frame} />
   const panels = sheetView !== undefined && !sheetStandalone ? sheetBlock : <>
-    {turn.current !== undefined && interaction === undefined && <Thinking rows={thinking} limit={thinkingLimit} />}
     {props.todos !== undefined && taskLimit > 0 && <Tasks todos={props.todos} copy={copy} columns={size.columns}
       focused={focus === 'tasks'} hint={copy.todoKey} />}
     <Panel
@@ -813,7 +859,7 @@ function SessionView(props: AppProps): React.ReactElement {
     </>
   if (props.inspection !== undefined) {
     const child = props.inspection
-    const { context: _context, usage: _usage, plan: _plan, goal: _goal, permission: _permission, thinkingLevel: _thinkingLevel,
+    const { context: _context, usage: _usage, goal: _goal, permission: _permission, thinkingLevel: _thinkingLevel,
       compactPhase: _compactPhase, autoCompacting: _autoCompacting, ...childProps } = props
     return <SessionView {...childProps} {...child} key={child.sessionId} inspection={undefined}
       inspectionParent={props.sessionId} inspectionLabel={child.label} inputBlocked={true} stopping={false}
@@ -823,7 +869,7 @@ function SessionView(props: AppProps): React.ReactElement {
       interaction={undefined} command={undefined} notice={undefined} />
   }
   const controlsView = sheetStandalone ? sheetBlock : <>
-        {!fullscreen && sheet === undefined && <LiveRegion rows={liveRows} budget={budget} limit={liveLimit} result={result} clock={animate} />}
+        {!fullscreen && sheet === undefined && <LiveRegion rows={props.live} budget={budget} frame={props.frame} limit={liveTotal} result={result} clock={animate} />}
         {/* The held rows: under the output, so what streams stays against the
             history it continues, and over the controls, which stay together. */}
         {!fullscreen && <Box flexGrow={1} />}
@@ -835,7 +881,7 @@ function SessionView(props: AppProps): React.ReactElement {
               // One layout in every mode; the fields give way in their own
               // order as the row narrows (`status-line.ts`).
               status={statusFields({
-                model: props.model, plan: props.plan, thinkingLevel: props.thinkingLevel, context: props.context,
+                model: props.model, thinkingLevel: props.thinkingLevel, context: props.context,
                 git: props.git, usage: props.usage, update: props.update, cwd: props.cwd,
                 glyphs: props.frame === 'classic' ? 'ascii' : 'unicode',
               }, copy)}
@@ -881,8 +927,8 @@ function SessionView(props: AppProps): React.ReactElement {
             )}
         </>
   return <Beat clock={clock}>{fullscreen
-    ? <Fullscreen ref={scroll} transcript={props.committed} live={liveRows} heading={heading} opening={opening}
-        budget={budget} result={result} copy={copy} frame={props.frame} size={size} clock={animate}>{controlsView}</Fullscreen>
+    ? <React.Suspense fallback={controlsView}><Fullscreen ref={scroll} transcript={props.committed} live={props.live} heading={heading} opening={opening}
+        budget={budget} result={result} copy={copy} frame={props.frame} size={size} clock={animate}>{controlsView}</Fullscreen></React.Suspense>
     : <Scrollback transcript={props.committed} heading={heading} opening={opening} budget={budget} result={result}
         copy={copy} frame={props.frame} size={size} repainting={repainting}>{controlsView}</Scrollback>}
   </Beat>

@@ -78,10 +78,9 @@ export function apply(ctx: Context): void {
   ctx.tools.register(defineTool({
     name: 'interrupt_agent',
     description:
-      'Stop the current turn of a continuable subagent below you, whether a direct child or deeper, by its '
-      + 'agent id. Messages already queued for it wait for a later send_message, subagents it started keep '
-      + 'running, and it stays available for follow-ups. The call returns once the stop is requested, so the '
-      + 'subagent may keep running briefly; interrupting one that has already finished does nothing.',
+      'Stop the current turn of a continuable subagent below you by its agent id. It stays available for '
+      + 'follow-ups and its own subagents keep running. The stop is requested, not awaited; interrupting a '
+      + 'finished subagent does nothing.',
     parameters: {
       agent_id: {
         type: 'string',

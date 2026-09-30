@@ -176,8 +176,10 @@ describe('present', () => {
   test('draws the answer at the prose column, with no marker', () => {
     const [, line] = present({ kind: 'assistant', text: 'Two registrations.' }, shown)
     expect(line).toEqual({
-      marker: MARKER.none, verb: '', text: 'Two registrations.', column: COLUMN.rail, tone: 'plain',
+      marker: MARKER.none, verb: '', text: 'Two registrations.', column: COLUMN.rail, tone: 'body',
     })
+    // A step below the terminal's foreground, so the answer's headings and bold words stand out.
+    expect(styleOf('body')).toEqual({ color: PALETTE.body, dim: false, bold: false })
   })
 
   test('draws reasoning as a paragraph at the rail, with no verb and no marker', () => {

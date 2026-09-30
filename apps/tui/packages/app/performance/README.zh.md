@@ -36,7 +36,7 @@ bun apps/tui/scripts/tui.ts perf --workload fresh --workload typical --samples 3
 bun apps/tui/scripts/tui.ts perf --mode development --workload fresh --workload typical --samples 3 --output /tmp/bake-bun-native-development.json
 ```
 
-`--app-artifacts <目录>` 使用当前夹具写入器测量已保存的 `index.js` 和 `startup.js` 应用包。驱动将这些包复制到私有应用目录，使依赖正常解析。请提供按所选模式构建的产物，并将可选的 `metadata.json` 放在同一目录，以记录来源。未指定此选项时，驱动从当前检出构建应用。
+`--app-artifacts <目录>` 使用当前夹具写入器测量已保存的 `index.js`、`startup.js`、`runner-loader.js`、`ui-loader.js` 和 `syntax-loader.js` 应用包。驱动将这些包复制到私有应用目录，使依赖正常解析。请提供按所选模式构建的产物，并将可选的 `metadata.json` 放在同一目录，以记录来源。未指定此选项时，驱动从当前检出构建应用。
 
 `--cpu-profile <目录>` 为每次样本启用 Node CPU 分析。启用分析后的耗时包含分析开销，应与普通样本分开。超时、崩溃、缺少历史回答、重复历史回答、缺少最后一个增量或退出异常都会使样本失败。诊断继续运行其余样本，每完成一次便更新 JSON 报告，只要有失败便以非零状态退出。Ctrl-C 或 SIGTERM 会中断观察、等待当前进程清理完成，并停止其余样本，以非零状态退出并在报告中标记中断。比较中位数之前先检查每个失败。
 

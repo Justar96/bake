@@ -8,6 +8,8 @@ import { bundle, BUILT_ENV, diagnosticArguments, profileEnvironment, requireBuil
 const ROOT = resolve(import.meta.dir, '../../..')
 const APP_LIB = join(ROOT, 'apps/tui/packages/app/lib')
 const CLI = join(ROOT, 'apps/cli/lib/bin.js')
+const APP_ENTRIES = ['index.js', 'startup.js', 'runner-loader.js', 'ui-loader.js', 'syntax-loader.js'] as const
+const builtApp = (): string[] => APP_ENTRIES.map(entry => join(APP_LIB, entry))
 
 /**
  * Processes one check target runs at once: its independent tsc programs,
@@ -142,6 +144,8 @@ const tsc = (...args: string[]): string[] => ['bun', 'node_modules/typescript/bi
  */
 async function build(): Promise<void> {
   const entrypoints = ['apps/tui/packages/app/src/index.ts', 'apps/tui/packages/app/src/startup.ts',
+                       'apps/tui/packages/app/src/runner-loader.ts', 'apps/tui/packages/app/src/ui-loader.ts',
+                       'apps/tui/packages/app/src/syntax-loader.ts',
                        'apps/tui/packages/harness/record.ts']
   const built = await bundle(entrypoints.map(entry => join(ROOT, entry)), APP_LIB)
   console.log('built for Node with production React:')
@@ -276,7 +280,7 @@ async function e2e(args: string[]): Promise<void> {
   if (!args.includes('--list') && !args.includes('--help')) {
     requireBuilt([CLI])
     if (!args.includes('--no-build')) await build()
-    requireBuilt([join(APP_LIB, 'index.js'), join(APP_LIB, 'startup.js')])
+    requireBuilt(builtApp())
   }
   await must(['bun', 'apps/tui/scripts/pty-smoke.ts', ...forwarded], { env: BUILT_ENV })
 }
@@ -326,7 +330,7 @@ try {
       await must(['bun', '--hot', 'apps/tui/packages/harness/dev.tsx', ...args], { env: { NODE_ENV: 'development' } })
       break
     case 'app':
-      requireBuilt([CLI, join(APP_LIB, 'index.js'), join(APP_LIB, 'startup.js')])
+      requireBuilt([CLI, ...builtApp()])
       await launch(['--profile', 'tui', ...args])
       break
     case 'dsh':

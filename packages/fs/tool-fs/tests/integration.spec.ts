@@ -49,19 +49,174 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true })
 })
 
+/** The read-before-edit guard; the shipped default is content-anchored. */
+const VERSION_GUARD: FsPolicy.Config = { editGuard: 'version' }
+
+async function mount(policy: FsPolicy.Config | undefined): Promise<void> {
+  dir = await mkdtemp(join(tmpdir(), 'dsh-tool-fs-'))
+  ctx = new Context()
+  await ctx.plugin(SystemPrompt)
+  await ctx.plugin(ToolRuntime)
+  await ctx.plugin(LocalFileSystem, { cwd: dir })
+  if (policy === undefined) await ctx.plugin(FsPolicy)
+  else await ctx.plugin(FsPolicy, policy)
+  fiber = await ctx.plugin(ToolFs)
+}
+
 // --------------------------------------------------------------------------
-// DEFAULT deployment: the policy gate plugin is loaded.
+// DEFAULT deployment: the policy gate with content-anchored edits.
 // --------------------------------------------------------------------------
-describe('default deployment (with dsh-fs-observation-policy)', () => {
-  beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'dsh-tool-fs-'))
-    ctx = new Context()
-    await ctx.plugin(SystemPrompt)
-    await ctx.plugin(ToolRuntime)
-    await ctx.plugin(LocalFileSystem, { cwd: dir })
-    await ctx.plugin(FsPolicy)
-    fiber = await ctx.plugin(ToolFs)
+describe('default deployment (content-anchored edits)', () => {
+  beforeEach(() => mount(undefined))
+
+  it('edits an unread file and shows the edited lines so no re-read is needed', async () => {
+    await writeFile(join(dir, 'a.txt'), 'one\ntwo\nthree\n')
+    const result = await call('edit', { file_path: 'a.txt', old_string: 'two', new_string: 'TWO' })
+    expect(result.isError).toBe(false)
+    expect(await readFile(join(dir, 'a.txt'), 'utf8')).toBe('one\nTWO\nthree\n')
+    expect(text(result)).toBe(`The file ${join(dir, 'a.txt')} has been updated successfully. You had not read it. The edited lines now read:\n1: one\n2: TWO\n3: three`)
   })
+
+  it('keeps the plain confirmation for an edit of the content the model observed', async () => {
+    await writeFile(join(dir, 'a.txt'), 'hello world')
+    await call('read', { file_path: 'a.txt' })
+    const result = await call('edit', { file_path: 'a.txt', old_string: 'world', new_string: 'there' })
+    expect(text(result)).toBe(`The file ${join(dir, 'a.txt')} has been updated successfully.`)
+  })
+
+  it('applies a uniquely matching edit to a changed file and keeps the external change', async () => {
+    await writeFile(join(dir, 'a.txt'), 'hello world\n')
+    await call('read', { file_path: 'a.txt' })
+    await writeFile(join(dir, 'a.txt'), '// added by another writer\nhello world\n')
+    const result = await call('edit', { file_path: 'a.txt', old_string: 'world', new_string: 'there' })
+    expect(result.isError).toBe(false)
+    expect(await readFile(join(dir, 'a.txt'), 'utf8')).toBe('// added by another writer\nhello there\n')
+    expect(text(result)).toContain('It had changed since you read it; those changes were kept.')
+    expect(text(result)).toContain('2: hello there')
+  })
+
+  it('refuses when an external change removed the match, leaving the file untouched', async () => {
+    await writeFile(join(dir, 'a.txt'), 'hello world')
+    await call('read', { file_path: 'a.txt' })
+    await writeFile(join(dir, 'a.txt'), 'goodbye')
+    const result = await call('edit', { file_path: 'a.txt', old_string: 'world', new_string: 'there' })
+    expect(result.error).toMatchObject({ info: { code: 'FS_EDIT_NOT_FOUND' } })
+    expect(await readFile(join(dir, 'a.txt'), 'utf8')).toBe('goodbye')
+  })
+
+  it('still requires a current read for replace_all, which has no uniqueness anchor', async () => {
+    await writeFile(join(dir, 'a.txt'), 'a a a')
+    const unread = await call('edit', { file_path: 'a.txt', old_string: 'a', new_string: 'b', replace_all: true })
+    expect(unread.error).toMatchObject({ info: { code: 'FS_NOT_OBSERVED' } })
+    await call('read', { file_path: 'a.txt' })
+    await writeFile(join(dir, 'a.txt'), 'a a a a')
+    const stale = await call('edit', { file_path: 'a.txt', old_string: 'a', new_string: 'b', replace_all: true })
+    expect(stale.error).toMatchObject({ info: { code: 'FS_STALE_VERSION' } })
+    expect(await readFile(join(dir, 'a.txt'), 'utf8')).toBe('a a a a')
+    await call('read', { file_path: 'a.txt' })
+    const fresh = await call('edit', { file_path: 'a.txt', old_string: 'a', new_string: 'b', replace_all: true })
+    expect(fresh.isError).toBe(false)
+    expect(await readFile(join(dir, 'a.txt'), 'utf8')).toBe('b b b b')
+  })
+
+  it('keeps write version-guarded', async () => {
+    await writeFile(join(dir, 'a.txt'), 'original')
+    const result = await call('write', { file_path: 'a.txt', content: 'clobber' })
+    expect(result.error).toMatchObject({ info: { code: 'FS_NOT_OBSERVED' } })
+    expect(await readFile(join(dir, 'a.txt'), 'utf8')).toBe('original')
+  })
+
+  it('applies several replacements atomically, each matched against the original', async () => {
+    await writeFile(join(dir, 'a.ts'), 'const a = 1\nconst b = 2\nconst c = 3\n')
+    const result = await call('edit', {
+      file_path: 'a.ts',
+      edits: [
+        { old_string: 'const c = 3', new_string: 'const c = 30' },
+        { old_string: 'const a = 1', new_string: 'const b = 2' },
+      ],
+    })
+    expect(result.isError).toBe(false)
+    expect(await readFile(join(dir, 'a.ts'), 'utf8')).toBe('const b = 2\nconst b = 2\nconst c = 30\n')
+    expect(text(result)).toContain('has been updated successfully (2 edits).')
+  })
+
+  it('writes nothing when any replacement fails, and names the failing entry', async () => {
+    await writeFile(join(dir, 'a.ts'), 'alpha\nbeta\n')
+    const missing = await call('edit', {
+      file_path: 'a.ts',
+      edits: [{ old_string: 'alpha', new_string: 'ALPHA' }, { old_string: 'gamma', new_string: 'GAMMA' }],
+    })
+    expect(missing.error).toMatchObject({ info: { code: 'FS_EDIT_NOT_FOUND' } })
+    expect(text(missing)).toContain('edits[1].old_string was not found')
+    const overlap = await call('edit', {
+      file_path: 'a.ts',
+      edits: [{ old_string: 'alpha\nbeta', new_string: 'x' }, { old_string: 'beta', new_string: 'y' }],
+    })
+    expect(overlap.error).toMatchObject({ info: { code: 'FS_AMBIGUOUS_EDIT' } })
+    expect(text(overlap)).toContain('edits[0] and edits[1] overlap')
+    expect(await readFile(join(dir, 'a.ts'), 'utf8')).toBe('alpha\nbeta\n')
+  })
+
+  it('ignores empty placeholders that models send for unused fields', async () => {
+    await writeFile(join(dir, 'a.txt'), 'one two three')
+    // GPT-style: a real pair plus `edits: []`.
+    const pairWithEmptyList = await call('edit', { file_path: 'a.txt', old_string: 'one', new_string: '1', replace_all: false, edits: [] })
+    expect(pairWithEmptyList.isError).toBe(false)
+    // An empty pair beside real edits.
+    const listWithEmptyPair = await call('edit', { file_path: 'a.txt', old_string: '', new_string: '', edits: [{ old_string: 'two', new_string: '2' }] })
+    expect(listWithEmptyPair.isError).toBe(false)
+    // The same replacement in both forms applies once.
+    const duplicated = await call('edit', { file_path: 'a.txt', old_string: 'three', new_string: '3', edits: [{ old_string: 'three', new_string: '3' }] })
+    expect(duplicated.isError).toBe(false)
+    expect(await readFile(join(dir, 'a.txt'), 'utf8')).toBe('1 2 3')
+  })
+
+  it('applies a real pair and real edits together', async () => {
+    await writeFile(join(dir, 'a.txt'), 'x y')
+    const both = await call('edit', { file_path: 'a.txt', old_string: 'x', new_string: 'X', edits: [{ old_string: 'y', new_string: 'Y' }] })
+    expect(both.isError).toBe(false)
+    expect(await readFile(join(dir, 'a.txt'), 'utf8')).toBe('X Y')
+  })
+
+  it('rejects a call with no replacement', async () => {
+    await writeFile(join(dir, 'a.txt'), 'x')
+    const expected = 'Error: give old_string and new_string, or a non-empty edits list'
+    expect(text(await call('edit', { file_path: 'a.txt', edits: [] }))).toBe(expected)
+    expect(text(await call('edit', { file_path: 'a.txt' }))).toBe(expected)
+    expect(text(await call('edit', { file_path: 'a.txt', old_string: '', new_string: '', edits: [] }))).toBe(expected)
+  })
+
+  it('points a failed match at its whitespace-insensitive near match', async () => {
+    await writeFile(join(dir, 'a.ts'), 'function f() {\n    return 1\n}\n')
+    const result = await call('edit', { file_path: 'a.ts', old_string: 'function f() {\n  return 1\n}', new_string: 'x' })
+    expect(result.error).toMatchObject({ info: { code: 'FS_EDIT_NOT_FOUND' } })
+    expect(text(result)).toContain('it matches line 1 if whitespace is ignored')
+  })
+
+  it('lists the lines of an ambiguous match', async () => {
+    await writeFile(join(dir, 'a.txt'), 'x\ny\nx\n')
+    const result = await call('edit', { file_path: 'a.txt', old_string: 'x', new_string: 'z' })
+    expect(result.error).toMatchObject({ info: { code: 'FS_AMBIGUOUS_EDIT' } })
+    expect(text(result)).toContain('matched 2 times')
+    expect(text(result)).toContain('(lines 1, 3)')
+  })
+
+  it('serializes two concurrent edits of different spans so both land', async () => {
+    await writeFile(join(dir, 'a.txt'), 'base value here')
+    const [one, two] = await Promise.all([
+      call('edit', { file_path: 'a.txt', old_string: 'base', new_string: 'ONE' }),
+      call('edit', { file_path: 'a.txt', old_string: 'value', new_string: 'TWO' }),
+    ])
+    expect([one.isError, two.isError]).toEqual([false, false])
+    expect(await readFile(join(dir, 'a.txt'), 'utf8')).toBe('ONE TWO here')
+  })
+})
+
+// --------------------------------------------------------------------------
+// VERSION-GUARDED deployment: the policy gate refuses unread or changed edits.
+// --------------------------------------------------------------------------
+describe('version-guarded deployment (editGuard: version)', () => {
+  beforeEach(() => mount(VERSION_GUARD))
 
   describe('write → disk', () => {
     it('creates a file with exactly the requested bytes', async () => {
@@ -423,16 +578,8 @@ describe('per-session cwd', () => {
 // Abort-through-the-tool, tool-tier concurrency, and the fs/observed contract —
 // all through ctx.tools.execute() against the REAL backend + policy.
 // --------------------------------------------------------------------------
-describe('signal, concurrency, and the fs/observed contract', () => {
-  beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'dsh-tool-fs-'))
-    ctx = new Context()
-    await ctx.plugin(SystemPrompt)
-    await ctx.plugin(ToolRuntime)
-    await ctx.plugin(LocalFileSystem, { cwd: dir })
-    await ctx.plugin(FsPolicy)
-    fiber = await ctx.plugin(ToolFs)
-  })
+describe('signal, concurrency, and the fs/observed contract (editGuard: version)', () => {
+  beforeEach(() => mount(VERSION_GUARD))
 
   const session = { header: {} }
   const callSig = (signal: AbortSignal, name: string, args: unknown) =>

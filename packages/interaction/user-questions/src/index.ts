@@ -23,7 +23,7 @@ import type {
 } from './types.ts'
 
 export type {
-  AskUserQuestionAnswer, AskUserQuestionAnswerItem, AskUserQuestionIntent, AskUserQuestionItem,
+  AskUserQuestionAnswer, AskUserQuestionAnswerItem, AskUserQuestionItem,
   AskUserQuestionOption,
 } from './types.ts'
 
@@ -103,28 +103,6 @@ export class UserQuestionService extends Service {
           'human interaction is unavailable while the calling agent is owned by another live agent; '
           + "include the unresolved question or decision in the child agent's final result",
           'DELEGATED_CALLER')
-      }
-    }
-    // A presentation intent asserts two things the types cannot: that the
-    // named approve label is one of this question's own options, and that a
-    // plan-review carries the plan it is a review of. A UI honouring the
-    // intent answers with that label, and shows that detail as the plan, so
-    // either gap would put a choice the asker never offered — or an approval of
-    // something invisible — in front of the user. Caught at the asker, where
-    // the mistake is, rather than in each UI.
-    for (const question of request.questions) {
-      const intent = question.intent
-      if (intent === undefined) continue
-      if (!(question.options ?? []).some(option => option.label === intent.approve)) {
-        throw new UserQuestionError(
-          `question ${question.id} declares intent ${intent.kind} whose approve label `
-          + `${JSON.stringify(intent.approve)} names none of its options`,
-          'BAD_INTENT')
-      }
-      if (question.detail === undefined) {
-        throw new UserQuestionError(
-          `question ${question.id} declares intent ${intent.kind} without the detail it reviews`,
-          'BAD_INTENT')
       }
     }
     const noAnswerer = () => Promise.reject(new UserQuestionError(

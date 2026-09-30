@@ -4,6 +4,22 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-01
+
+- `edit` no longer needs a prior `read`. A replacement whose `old_string` matches the current file exactly once is applied, even if the file changed since it was read, and changes elsewhere in the file are kept. When the model had not seen that content, the result shows the edited lines. `replace_all` and `write` still require a current read. `edits: [{ old_string, new_string }]` applies several changes to one file in one atomic call. A failed match names a whitespace-insensitive near match or lists the matching lines. `fs-observation-policy.editGuard: version` restores the old refusal.
+- Tool descriptions are shorter, so each request carries about 1.5 KB less fixed text than in the previous build. Recovery advice now appears in the error that needs it. The bash `description` argument is optional, and a sandbox request for access a call already has runs without asking.
+- Plan mode is removed: `/plan`, `exit_plan_mode`, the plan guidance section, and the `Plan` status-line label are gone. Sessions that recorded plan mode still open.
+- The `workflow` tool's script reference is no longer sent with every request. The model reads it with the new `tool_help` tool before writing a script. `list_agents`, `interrupt_agent`, and `subagent_fork` have shorter descriptions. Together with plan mode's removal, each request of the standard preset carries about 2.4 KB less tool schema.
+- A long paste, over 800 characters or three lines or more, shows in the composer as one placeholder such as `[Pasted text #1 +42 lines]`. It moves and deletes as one character, and the full text is sent in its place.
+- Images can be pasted. Ctrl-V, or a paste that arrives empty, attaches the clipboard's image through `wl-paste`, `xclip`, AppleScript, or PowerShell. Dropping a single PNG, JPEG, WebP, or GIF file attaches it. Each one shows as `[Image #N]`, and erasing the placeholder removes the image.
+- In Windows Terminal, rules and the divider above each turn draw as solid lines instead of dashes.
+- Streaming reasoning shows under the step it follows and uses every free row, then folds to a short preview once the next block starts.
+- Identical edits refused for unread or stale files skip repeated tool dispatch within the same turn until another tool settles.
+- Failed command exits, signals, and HTTP responses appear as failed tool outcomes in the terminal.
+- `/model` refreshes CLIProxyAPI's model list while keeping models used by the current session, default selection, and subagents. Advanced settings use the same subagent model pickers as the Agent section.
+- Alt-Up sends queued steering immediately by interrupting the current turn. Markdown has clearer headings, lists, tables, and inline code, and reasoning efforts share colours across the model picker and status line.
+- The terminal loads its renderer, fullscreen view, and syntax highlighting on demand; disabled telemetry leaves the OpenTelemetry SDK unloaded.
+
 ## [0.2.0] - 2026-09-30
 
 - The composer's key hint (`Enter sends`, `Tab completes`) and the goal at the end of the header no longer lose their last characters in Warp and other terminals that erase a full row's last cell when the rest of the row is cleared. Every row the terminal redraws is now cleared before it is drawn.

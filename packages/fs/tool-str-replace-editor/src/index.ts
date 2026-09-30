@@ -7,7 +7,7 @@ import { isAbsolute } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { FsError } from '@deepseek-ai/dsh-fs'
-import type { FsInfo, FsTarget, FsWriteIntent } from '@deepseek-ai/dsh-fs'
+import type { FsEditIntent, FsInfo, FsTarget, FsVersion, FsWriteIntent } from '@deepseek-ai/dsh-fs'
 import { truncateWithoutSplittingSurrogatePair } from '@deepseek-ai/dsh-output-retention'
 import { sandboxDenialMarker } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
@@ -314,9 +314,7 @@ async function replaceInFile(
     outcome = await ctx.fs.writeText(
       target,
       before.slice(0, offset) + newValue + before.slice(offset + oldValue.length),
-      intent === undefined
-        ? { kind: 'replaceIfVersion', version: info.version }
-        : { kind: 'replaceIfVersion', version: intent.version },
+      { kind: 'replaceIfVersion', version: writeBasis(intent, info, target, true) },
       exec.signal,
       sandboxPolicy,
     )
@@ -325,6 +323,23 @@ async function replaceInFile(
   }
   ctx.emit('fs/observed', target, { kind: 'present', version: outcome.version }, exec)
   return `The file ${target.displayPath} has been edited successfully.`
+}
+
+/**
+ * The version a mutation's replace-if-version write is checked against. With
+ * no policy, the stat just taken is the basis; a version guard supplies the
+ * observed version. Under an anchored guard, `str_replace` matched the content
+ * read just now, so the fresh stat is its basis; `insert` addresses lines
+ * rather than text, so it still needs an observed version.
+ */
+function writeBasis(intent: FsEditIntent | undefined, info: FsInfo, target: FsTarget, byContent: boolean): FsVersion {
+  if (intent === undefined) return info.version
+  if (intent.kind !== 'anchored') return intent.version
+  if (byContent) return info.version
+  if (intent.version === undefined) {
+    throw new FsError(`cannot modify "${target.displayPath}": file has not been read — view the file, then retry`, 'FS_NOT_OBSERVED')
+  }
+  return intent.version
 }
 
 async function insertInFile(
@@ -356,9 +371,7 @@ async function insertInFile(
     ...value.split('\n'),
     ...lines.slice(insertLine),
   ].join('\n')
-  const expected: FsWriteIntent = intent === undefined
-    ? { kind: 'replaceIfVersion', version: info.version }
-    : { kind: 'replaceIfVersion', version: intent.version }
+  const expected: FsWriteIntent = { kind: 'replaceIfVersion', version: writeBasis(intent, info, target, false) }
   let outcome
   try {
     outcome = await ctx.fs.writeText(target, after, expected, exec.signal, sandboxPolicy)

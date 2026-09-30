@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-`dsh-terminal` 为 harness 提供持久且限定所有者范围的终端会话：会话让 shell 或 REPL 状态跨工具调用存活，且每个操作都被限制在创建它的那个确切 agent（智能体）内。本包提供 `ctx.terminals` 服务，负责生成不透明的会话 id、通过已注册的后端路由会话创建，并在所有者或服务 dispose（资源释放）时等待完全停稳的清理。它本身不定义任何终端机制：`dsh-terminal-bash` 之类的后端负责启动与就绪检测，`dsh-tool-terminal` 中的面向模型工具负责呈现。会话只存在于进程本地：harness 重启后不会恢复。
+`dsh-terminal` 为 harness 提供持久且限定所有者范围的终端会话：会话让 shell 或 REPL 状态跨工具调用存活，且每个操作都被限制在创建它的那个确切 agent（智能体）内。本包提供 `ctx.terminals` 服务，负责生成不透明的会话 id、通过已注册的后端路由会话创建，并在所有者或服务 dispose（资源释放）时等待完全停稳的清理。它本身不定义任何终端机制：`dsh-terminal-bash` 之类的后端负责启动与就绪检测，`dsh-tool-bash-persistent` 与 `dsh-tool-pwsh-persistent` 中的面向模型持久 shell 工具负责呈现。会话只存在于进程本地：harness 重启后不会恢复。
 
 ## 目录
 
@@ -25,7 +25,7 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
-当组合需要状态跨工具调用存活的终端会话时，挂载 `@deepseek-ai/dsh-terminal`。单独的服务本身没有用处：请与 `@deepseek-ai/dsh-terminal-bash` 之类的后端、`@deepseek-ai/dsh-tool-terminal` 之类的工具包配对，并在同一个组合中一起加载。
+当组合需要状态跨工具调用存活的终端会话时，挂载 `@deepseek-ai/dsh-terminal`。单独的服务本身没有用处：请与 `@deepseek-ai/dsh-terminal-bash` 之类的后端、`@deepseek-ai/dsh-tool-bash-persistent` 或 `@deepseek-ai/dsh-tool-pwsh-persistent` 之类的工具包配对，并在同一个组合中一起加载。
 
 ### 何时选择
 
@@ -38,22 +38,22 @@ kind: "package-reference"
 ```yaml
 - name: '@deepseek-ai/dsh-terminal'
 - name: '@deepseek-ai/dsh-terminal-bash'
-- name: '@deepseek-ai/dsh-tool-terminal'
+- name: '@deepseek-ai/dsh-tool-bash-persistent'
 ```
 
 后端提供一个稳定类型——随附的 shell 后端提供 `shell`——工具按该类型打开会话。shell 后端还额外要求沙箱、沙箱策略与子进程提供方；完整组合见其 [README](../terminal-bash/README.zh.md)。
 
 ### 会话能做什么
 
-会话存在后，消费方可以：打开会话并获得其 id 与有界启动输出；发送文本（可选地提交 Enter）并等待 shell 再次就绪或发送超时；读取有界保留输出；向前台进程组投递一个允许的信号；关闭会话并等待其进程树结束；以及列出调用方拥有的会话。每个会话同一时间最多有一个活跃发送；第二次发送会失败，直到第一次结算。
+会话存在后，消费方可以：打开会话并获得其 id；发送文本（可选地提交 Enter）并等待 shell 再次就绪或发送超时；读取有界保留输出；关闭会话并等待其进程树结束；以及列出调用方拥有的会话。每个会话同一时间最多有一个活跃发送；第二次发送会失败，直到第一次结算。
 
 ### 所有权与隔离
 
-每个会话都由打开它的确切 agent 拥有。凡是指名会话的操作，只要调用方不是该 agent 就会被拒绝，因此即使模型获知另一个 agent 的会话 id，也无法操作其终端。可选的会话 `name` 是所有者本地的显示元数据——例如 `main` 或 `gdb` 这样的标签——并且只在所有者范围内唯一。
+每个会话都由打开它的确切 agent 拥有。凡是指名会话的操作，只要调用方不是该 agent 就会被拒绝，因此即使模型获知另一个 agent 的会话 id，也无法操作其终端。可选的会话 `name` 是所有者本地的显示元数据——例如 `main` 或 `gdb` 这样的标签。
 
 ### 可观察结果与失败
 
-成功打开会返回会话 id、类型、后端提供的 pid（如有）、状态与有界启动消息。发送以等待原因结算：`stdin_read`（shell 正在等待输入）、`inferred_idle`（输出静默）、`timeout` 或 `session_exit`（顶层 shell 已退出）。失败携带稳定的机器可路由错误码：后端类型缺失（`NO_BACKEND`）、会话未知（`NO_SESSION`）、属于其他 agent 的会话（`FOREIGN_SESSION`）、并发第二次发送（`SEND_ACTIVE`），或所有者不再存活（`OWNER_NOT_LIVE`）。后端设置失败会在发布任何内容之前拒绝打开；清理失败会拒绝关闭，而不是声称成功。
+成功打开会返回会话 id、类型、后端提供的 pid（如有）与状态。发送以等待原因结算：`stdin_read`（shell 正在等待输入）、`inferred_idle`（输出静默）、`timeout` 或 `session_exit`（顶层 shell 已退出）。失败携带稳定的机器可路由错误码：后端类型缺失（`NO_BACKEND`）、会话未知（`NO_SESSION`）、属于其他 agent 的会话（`FOREIGN_SESSION`）、并发第二次发送（`SEND_ACTIVE`），或所有者不再存活（`OWNER_NOT_LIVE`）。后端设置失败会在发布任何内容之前拒绝打开；清理失败会拒绝关闭，而不是声称成功。
 
 -----
 
@@ -73,7 +73,7 @@ kind: "package-reference"
 
 | 文件 | 职责 |
 |---|---|
-| [`src/index.ts`](src/index.ts) | `TerminalSessionService`：后端注册表、spawn/send/read/signal/kill/list、所有者清理与 dispose |
+| [`src/index.ts`](src/index.ts) | `TerminalSessionService`：后端注册表、spawn/send/read/kill/list、所有者清理与 dispose |
 | [`src/types.ts`](src/types.ts) | 共享约定：后端接口、会话类型、等待原因、信号集合、错误码 |
 | — | 不发布运行时不变式伴生入口；后端与限定所有者范围的会话注册表均为私有可变状态，且服务既不暴露独立的生命周期流，也不暴露不限定范围的快照。 |
 
@@ -114,7 +114,7 @@ kind: "package-reference"
 
 #### 模型看到什么
 
-没有直接可见内容。此包不注册提示词或工具；可见 schema 与结果文本由 `@deepseek-ai/dsh-tool-terminal` 负责。
+没有直接可见内容。此包不注册提示词或工具；可见 schema 与结果文本由持久 shell 工具负责。
 
 #### Token 影响
 
@@ -122,7 +122,7 @@ kind: "package-reference"
 
 #### KV Cache 影响
 
-不会直接失效；请求前缀变更由 `@deepseek-ai/dsh-tool-terminal` 负责。
+不会直接失效；请求前缀变更由持久 shell 工具负责。
 
 ## 已知限制与延期工作
 

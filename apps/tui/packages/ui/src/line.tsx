@@ -17,7 +17,7 @@ import { wrapDraft } from './editor.ts'
 import { sliceSpans } from './markdown.ts'
 import { chromeFor, COLUMN, COMPOSER_BUDGET, HINT_MIN_COLUMNS, MARKER, RULE, TREE, windowOf, type Budget, type ChromeLayout, type FrameStyle } from './layout.ts'
 import { PALETTE, type PaletteColor } from './palette.ts'
-import { fittedGroup, hintFor, isBlank, present, softBreaks, styleOf, tailLines, type ComposerState, type Hint, type LineStyle, type PresentedLine, type ResultBound, type Span } from './present.ts'
+import { fittedGroup, hintFor, isBlank, present, softBreaks, streamingThought, styleOf, tailLines, type ComposerState, type Hint, type LineStyle, type PresentedLine, type ResultBound, type Span } from './present.ts'
 import type { Row } from './rows.ts'
 import { FOLD_REST, foldFrame, FRAME_MS, formatElapsed, SPINNER_REST, spinnerFrame, type Clock, type Outcome, type Spinner, type TurnSummary } from './activity.ts'
 import { useBeat } from './beat.tsx'
@@ -33,10 +33,12 @@ import { FIELD_GAP, fitStatus, type StatusField } from './status-line.ts'
  *
  * @param props.line - the placed line.
  * @param props.budget - budgets for the current terminal size.
+ * @param props.frame - line glyphs this terminal can draw, for a turn divider.
  */
-export function Line({ line, budget, clock, window }: {
+export function Line({ line, budget, frame, clock, window }: {
   readonly line: PresentedLine
   readonly budget: Budget
+  readonly frame: FrameStyle
   /** Clock for a blinking marker. Absent, the marker stays lit. */
   readonly clock?: Clock | undefined
   /** Physical rows to render when a fullscreen viewport intersects this line. */
@@ -52,7 +54,9 @@ export function Line({ line, budget, clock, window }: {
   // answer, but not dimmed to reasoning. Semantic and syntax colours keep
   // their own tones.
   const zone = line.zone === true
-  const colored = colorOf(style, zone)
+  // Body prose drawn in runs colours each run itself: a bold run takes the
+  // full foreground, which a nested run cannot do under a coloured parent.
+  const colored = line.tone === 'body' && line.spans !== undefined ? {} : colorOf(style, zone)
   const placed = placement(line, budget)
   const { rail, verb: verbWidth, width } = placed
   const content = window === undefined ? placed.content : windowContent(line, budget, window.offset, window.height)
@@ -83,7 +87,7 @@ export function Line({ line, budget, clock, window }: {
         : null}
       <Box width={width}>
         <Text bold={style.bold} dimColor={style.dim} italic={style.italic === true} wrap="wrap" {...colored}>
-          {line.divider ? '-'.repeat(width) : content.spans === undefined ? text : spansOf({ ...content, text }, zone)}
+          {line.divider ? RULE[frame].line.repeat(width) : content.spans === undefined ? text : spansOf({ ...content, text }, zone)}
         </Text>
       </Box>
     </Box>
@@ -197,8 +201,9 @@ function placement(line: PresentedLine, budget: Budget): Placement {
  */
 export function wrappedRows(line: PresentedLine, budget: Budget): readonly string[] {
   const placed = placement(line, budget)
+  // A divider measures one cell per column in either frame; `Line` draws its glyph.
   return placed.rows ??= line.divider === true || placed.text === ''
-    ? [line.divider === true ? '-'.repeat(placed.width) : placed.text]
+    ? [line.divider === true ? RULE.classic.line.repeat(placed.width) : placed.text]
     : wrapAnsi(placed.text, placed.width, { hard: true, trim: false }).split('\n')
 }
 
@@ -250,13 +255,15 @@ export const lineHeight = (line: PresentedLine, budget: Budget): number => wrapp
  * newest line instead of waiting under a reserved block of empty rows.
  * @param props.rows - live rows in arrival order.
  * @param props.budget - terminal width and region budgets.
+ * @param props.frame - line glyphs this terminal can draw.
  * @param props.limit - maximum physical rows visible.
  * @param props.result - localized tool-result preview limit.
  * @returns the live region, or null when it has nothing to show.
  */
-export function LiveRegion({ rows, budget, limit, result, clock }: {
+export function LiveRegion({ rows, budget, frame, limit, result, clock }: {
   readonly rows: readonly Row[]
   readonly budget: Budget
+  readonly frame: FrameStyle
   readonly limit: number
   readonly result: ResultBound
   /** Time source for the markers of actions still running. */
@@ -269,10 +276,13 @@ export function LiveRegion({ rows, budget, limit, result, clock }: {
   // clip below never cuts a section's verb line.
   const height = (line: PresentedLine): number => lineHeight(line, budget)
   // A running step folds its own detail to fit, so the window never cuts the
-  // head that says what the step is doing.
-  const lines = tailLines(rows.flatMap(row => row.kind === 'tool-group'
+  // head that says what the step is doing. Reasoning is drawn whole only while
+  // it is the newest row; a finished thought folds to its transcript preview.
+  const lines = tailLines(rows.flatMap((row, index) => row.kind === 'tool-group'
     ? fittedGroup(row.calls, result, limit, height)
-    : present(row, result, undefined, budget.measure)), limit, height)
+    : row.kind !== 'reasoning' ? present(row, result, undefined, budget.measure)
+      : index === rows.length - 1 ? streamingThought(row, result, limit, height, budget.measure)
+        : present(row, result, line => wrappedRows(line, budget), budget.measure)), limit, height)
   if (lines.length === 0 || limit <= 0) return null
   // A section's opening blank is drawn outside the clip. The clipped rows are
   // the oldest text, never the gap that separates the section from history.
@@ -284,44 +294,8 @@ export function LiveRegion({ rows, budget, limit, result, clock }: {
       {/* Clipped from the top: the line that overflows is the oldest prose,
           and the rows kept are the ones still arriving. */}
       <Box flexDirection="column" flexShrink={0} maxHeight={limit - Number(gap)} justifyContent="flex-end" overflowY="hidden">
-        {body.map((line, index) => <Line key={index} line={line} budget={budget} clock={clock} />)}
+        {body.map((line, index) => <Line key={index} line={line} budget={budget} frame={frame} clock={clock} />)}
       </Box>
-    </Box>
-  )
-}
-
-/** Blank rows between the thinking window and the header under it. */
-export const THINKING_GAP = 1
-
-/**
- * Newest rows of streaming reasoning, drawn above the header while a turn thinks.
- *
- * The window is a few rows held at a fixed height, never a growing block.
- * Reasoning arrives faster than it can be read, and drawing it in full scrolls
- * the surface. Placement matches transcript reasoning. It is a dim italic paragraph
- * at the rail, with no verb, so the window is the text the transcript will
- * keep. Each row is its own truncated `Text`. The rows are already wrapped to
- * fit. If Ink wrapped them again, the height would change.
- *
- * One blank row under the window keeps the reasoning off the header. Without
- * it, the turn's stats would look like the paragraph's last line.
- * The blank belongs to the window. It comes and goes with it, and it is the
- * first row given up when there is room for only one.
- *
- * @param props.rows - newest rows, from `thinkingRows`.
- * @param props.limit - maximum rows, the blank included; older rows are dropped.
- * @returns the window, or null when there is nothing to show or no room.
- */
-export function Thinking({ rows, limit }: { readonly rows: readonly string[], readonly limit: number }): React.ReactElement | null {
-  const gap = limit > 1 ? THINKING_GAP : 0
-  const window = limit > 0 ? rows.slice(-(limit - gap)) : []
-  if (window.length === 0) return null
-  return (
-    <Box flexDirection="column" flexShrink={0} marginBottom={gap}>
-      {window.map((row, index) => <Box key={index} flexDirection="row" flexShrink={0}>
-        <Box width={COLUMN.rail} flexShrink={0}><Text> </Text></Box>
-        <Text dimColor italic wrap="truncate-end">{row}</Text>
-      </Box>)}
     </Box>
   )
 }
@@ -540,6 +514,24 @@ export function headerLayout(columns: number, turn: TurnWidths, standing: Standi
     if (fit !== undefined) return { left: used, level, right: fit }
   }
   return alone
+}
+
+/**
+ * Whether a standing row's key hint still draws at its right edge.
+ *
+ * Every standing row's key gives way below {@link HINT_MIN_COLUMNS}, as the
+ * composer's hint does, and yields before it would cut the row's own text
+ * short of the few cells it keeps: the two columns between text and key stay
+ * with the key, so a key that no longer fits whole is dropped, never
+ * truncated. The key it names still works unnamed.
+ *
+ * @param columns - row width.
+ * @param fixed - cells the row's own text needs even at its narrowest: the rail, the title, and every count or bar that never wraps away.
+ * @param tail - the key hint, or undefined when the row has none.
+ * @returns whether the tail draws.
+ */
+export function tailFits(columns: number, fixed: number, tail: string | undefined): boolean {
+  return tail !== undefined && columns >= HINT_MIN_COLUMNS && fixed + 2 + stringWidth(tail) <= columns
 }
 
 /** A standing state without its shortcut. */

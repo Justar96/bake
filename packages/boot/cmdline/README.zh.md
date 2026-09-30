@@ -37,8 +37,6 @@ kind: "package-library"
 
 没有参数的启动会看到空列表——这是诚实的答案，而不是缺失的值。
 
-`exitOnStdinEnd(ctx, label)` 把已成功启动的 stdio 应用 EOF 绑定到 `ctx.appExit(0)`。它绝不读取或恢复 stdin，因此协议传输会收到挂载前已缓冲的字节；启动拒绝优先于竞态 EOF，所属 fiber 会移除两个待处理的监听器。
-
 `SESSION_IN_USE_EXIT`（75，即 sysexits 的 `EX_TEMPFAIL`）是命令行指定的会话已在另一个进程中打开时，应用传给 `ctx.appExit` 的状态，因为那个进程释放该会话后同一命令即可成功。拒绝此类启动的应用抛出 `SessionInUseError(message, cause)`，其中带有它要打印的那一行，并以持久化层的拒绝作为 `cause`；应用在报告失败的位置把该类映射为这个状态。终端与 headless profile 都以这种方式拒绝 `--resume`。只有应用知道写入拒绝是否意味着另一个进程，因此由各应用决定何时抛出它。
 
 ### 解析你的 flag

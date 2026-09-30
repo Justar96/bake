@@ -11,6 +11,7 @@ import {
   readGitIndexBlob,
   storeGitBlob,
 } from './translation-pairing-git.ts'
+import { dropRepositoryGitEnv } from './git-env.ts'
 import {
   parseTranslationPairingRecord,
   renderTranslationPairingRecord,
@@ -70,6 +71,9 @@ function gitSupportsObjectFormat(format: 'sha256'): boolean {
 }
 
 const supportsSha256ObjectFormat = gitSupportsObjectFormat('sha256')
+
+// These tests build fixture repositories; a hook's GIT_DIR must not reach them.
+dropRepositoryGitEnv(process.env)
 
 describe('translation pairing snapshots', () => {
   it('stores exact uncommitted bytes for later recovery by object ID', () => {

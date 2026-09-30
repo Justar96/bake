@@ -18,7 +18,7 @@ import stringWidth from 'string-width'
 import type { TuiCopy } from './copy.ts'
 import { cacheHit, compactPercent, contextPercent, formatContext, formatTotals, type ContextUsage, type TokenTotals } from './format.ts'
 import { gitField, type GitState } from './git.ts'
-import { cacheTone, CONTEXT_FULL, CONTEXT_WARN, contextTone, PALETTE, type PaletteColor } from './palette.ts'
+import { cacheTone, CONTEXT_FULL, CONTEXT_WARN, contextTone, PALETTE, thinkingTone, type PaletteColor } from './palette.ts'
 import { compactModel } from './present.ts'
 
 /** One run of a status field, in its own tone. */
@@ -60,8 +60,7 @@ export interface StatusField {
  * working directory, which always takes only what the others leave; the
  * update notice; the git counts, then the cache hit, the compaction mark, the
  * branch, and the thinking level. The model is cut last, to
- * {@link MODEL_MIN} cells, and plan mode goes only after it, since it changes
- * what the agent may do. `ctx ~N%` never yields. From
+ * {@link MODEL_MIN} cells. `ctx ~N%` never yields. From
  * {@link CONTEXT_WARN} the absolute count holds until the thinking level has
  * gone, and from {@link CONTEXT_FULL} it takes cells from the model.
  */
@@ -79,7 +78,6 @@ export const RANK = {
   contextAbsoluteWarm: 8.5,
   model: 9,
   contextAbsoluteFull: 9.5,
-  plan: 9.7,
 } as const
 
 /** Fewest cells the model is cut to. Fewer name no model. */
@@ -101,7 +99,6 @@ export interface StatusInput {
    * Absent, no model is selected yet, and the row says how to get one.
    */
   readonly model?: string | undefined
-  readonly plan?: { readonly active: boolean, readonly pending: boolean } | undefined
   readonly thinkingLevel?: string | undefined
   readonly context?: ContextUsage | undefined
   readonly git?: GitState | undefined
@@ -120,8 +117,6 @@ export interface StatusInput {
  * @returns the fields, each with the ranks it gives way at.
  */
 export function statusFields(input: StatusInput, copy: TuiCopy): readonly StatusField[] {
-  const plan = input.plan === undefined || (!input.plan.active && !input.plan.pending) ? undefined
-    : input.plan.pending ? input.plan.active ? copy.planExitPending : copy.planEntryPending : copy.planActive
   const hit = input.usage === undefined ? undefined : cacheHit(input.usage)
   const fields: StatusField[] = [
     // The model leads because it is what the row exists to say; it needs no label.
@@ -130,9 +125,8 @@ export function statusFields(input: StatusInput, copy: TuiCopy): readonly Status
       ? { forms: [[{ text: copy.noModel, color: PALETTE.waiting }, { text: `  ${copy.noModelHint}`, dim: true }],
         [{ text: copy.noModel, color: PALETTE.waiting }]], yields: [RANK.model] }
       : { forms: [[{ text: compactModel(input.model) }]], yields: [], shrink: { kind: 'end' as const, rank: RANK.model, min: MODEL_MIN } },
-    ...plan === undefined ? [] : [{ forms: [[{ text: plan, dim: true }]], yields: [RANK.plan] }],
     ...input.thinkingLevel === undefined ? [] : [{
-      forms: [[{ text: `${copy.think} `, dim: true }, { text: input.thinkingLevel }]], yields: [RANK.thinking],
+      forms: [[{ text: `${copy.think} `, dim: true }, { text: input.thinkingLevel, ...thinkingTone(input.thinkingLevel) }]], yields: [RANK.thinking],
     }],
     ...input.context === undefined ? [] : [contextField(input.context, copy)],
     // The branch and its changes. It narrows to the branch alone before it

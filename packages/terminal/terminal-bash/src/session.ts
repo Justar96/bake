@@ -254,7 +254,6 @@ class LocalSendOperation implements TerminalSendOperation {
 
 /** Backend session wrapping one provider-owned terminal process. */
 export class LocalPtySession implements TerminalBackendSession {
-  motd = ''
   readonly pid: number
   private readonly decoder = new TextDecoder()
   /** Protocol state only; the sanitizer and bounded buffers own returned text. */
@@ -337,7 +336,6 @@ export class LocalPtySession implements TerminalBackendSession {
       const result = await operation.done
       if (result.waitReason === 'session_exit') throw new Error('PTY shell exited during startup')
       if (result.waitReason === 'timeout') throw new Error('PTY shell did not reach readiness before startup timeout')
-      this.motd = result.viewport
     } catch (error: unknown) {
       signal?.throwIfAborted()
       throw error

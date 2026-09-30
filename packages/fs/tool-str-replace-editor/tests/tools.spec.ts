@@ -530,14 +530,13 @@ describe('tool-str-replace-editor', () => {
     const created = join(root, 'created.txt')
     await writeFile(existing, 'before')
 
-    const blindEdit = await call(ctx, owner, {
-      command: 'str_replace',
-      path: existing,
-      old_str: 'before',
-      new_str: 'after',
-    })
-    expect(blindEdit.error).toMatchObject({ info: { code: 'FS_NOT_OBSERVED' } })
-    expect(await readFile(existing, 'utf8')).toBe('before')
+    // Under the default anchored guard, a unique str_replace match is its own
+    // precondition, but a line-addressed insert still needs a view first.
+    const blindInsert = await call(ctx, owner, { command: 'insert', path: existing, insert_line: 0, new_str: 'x' })
+    expect(blindInsert.error).toMatchObject({ info: { code: 'FS_NOT_OBSERVED' } })
+    expect((await call(ctx, owner, { command: 'str_replace', path: existing, old_str: 'before', new_str: 'blind' })).isError).toBe(false)
+    expect(await readFile(existing, 'utf8')).toBe('blind')
+    await writeFile(existing, 'before')
 
     await call(ctx, owner, { command: 'view', path: existing })
     expect((await call(ctx, owner, {

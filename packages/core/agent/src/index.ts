@@ -12,6 +12,7 @@ import { isPromise } from 'node:util/types'
 import { scopeTarget } from '@deepseek-ai/dsh-scope'
 import type { Scoped } from '@deepseek-ai/dsh-scope'
 import type { SessionEvent, SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
+import { agentEvents } from './dispatch.ts'
 import type { Agent } from './types.ts'
 import type { AgentOptions, SessionStartSource } from './runtime-types.ts'
 
@@ -509,17 +510,7 @@ export class AgentRegistry extends Service {
 
   /** Emit the paired disposal edge through the entry's stable carrier. */
   private emitDisposed(entry: AgentEntry): void {
-    const args: unknown[] = [entry.carrier, 'agent/disposed', { agent: entry.agent }]
-    for (const callback of this.ctx.events.dispatch('emit', args)) {
-      try {
-        const returned: unknown = callback(...args)
-        void Promise.resolve(returned).catch((error: unknown) => {
-          this.ctx.logger.warn(`agent "${entry.id}": agent/disposed listener rejected: ${String(error)}`)
-        })
-      } catch (error: unknown) {
-        this.ctx.logger.warn(`agent "${entry.id}": agent/disposed listener threw: ${String(error)}`)
-      }
-    }
+    agentEvents(this.ctx, entry.agent, entry.carrier).emit('agent/disposed', {})
   }
 
   /**

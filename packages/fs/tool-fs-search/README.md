@@ -134,7 +134,7 @@ Read these pages when the package-level contract is not enough. They move from t
 
 #### What the model sees
 
-The package adds no system-prompt section: each tool's description and parameters are its only guidance, and they are also the SDK documentation behind `run_code` in PTC mode. The glob description presents it as a bounded, newest-first alternative to a shell `find` and states the configured over-cap behavior; its `pattern` parameter explains that a pattern without `/` matches file names at any depth. The grep description presents it as a bounded alternative to a shell `grep` or `rg`, says it returns only matching lines, and points at `read` for surrounding context. Descriptions are registration-time text, so that pointer stays where a scope hides `read`. `path` on both tools is described as defaulting to the working directory. The generated [`glob` and `grep` schemas](../../../docs/tool-catalog.md#deepseek-aidsh-tool-fs-search) use `sampleOverCapGlobResults: true`; the tools are registered unconditionally.
+The package adds no system-prompt section: each tool's description and parameters are its only guidance, and they are also the SDK documentation behind `run_code` in PTC mode. The glob description presents it as a bounded, newest-first alternative to a shell `find`, asks the model to keep `path` inside the repository or a known subtree, recommends it before content searches when the path is uncertain, rejects filesystem-wide roots as a workflow, and states the configured over-cap behavior; its `pattern` parameter explains that a pattern without `/` matches file names at any depth. The grep description presents it as a bounded alternative to a shell `grep` or `rg`, recommends `glob` first when the path or file type is uncertain, asks for a scoped path and one include filter, says it returns only matching lines, and points at `read` for surrounding context. Descriptions are registration-time text, so that pointer stays where a scope hides `read`. `path` on both tools is described as defaulting to the working directory. The generated [`glob` and `grep` schemas](../../../docs/tool-catalog.md#deepseek-aidsh-tool-fs-search) use `sampleOverCapGlobResults: true`; the tools are registered unconditionally.
 
 #### Token effect
 
@@ -162,7 +162,7 @@ Append-only; newly visible content follows the reusable request prefix and does 
 
 #### What the model sees
 
-Failures are normalized as `Error: <message>` with structured `SEARCH_INVALID_PATTERN`, `SEARCH_FAILED`, `SEARCH_RAW_OUTPUT_OVERFLOW`, or `SEARCH_ABORTED` metadata for callers.
+Failures are normalized as `Error: <message>` with structured `SEARCH_INVALID_PATTERN`, `SEARCH_FAILED`, `SEARCH_RAW_OUTPUT_OVERFLOW`, or `SEARCH_ABORTED` metadata for callers. A missing or inaccessible target adds recovery guidance: `grep` tells the model to verify the path with `glob` and retry with one include filter, while `glob` asks for a confirmed repository-scoped path.
 
 #### Token effect
 

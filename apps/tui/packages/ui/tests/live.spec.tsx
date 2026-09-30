@@ -8,10 +8,10 @@ import { dictionaries } from '../src/copy.ts'
 import { budgetFor, CHROME_ROWS, NOTICE_BUDGET, type WindowSize } from '../src/layout.ts'
 import { appendTranscript, emptyTranscript } from '../src/transcript.ts'
 import { ICON } from '../src/icons.ts'
-import { FOLD_REST, FOLD_SPINNER, FRAME_MS, SPINNER, SPINNER_REST, THINKING_ROWS, type Clock } from '../src/activity.ts'
+import { FOLD_REST, FOLD_SPINNER, FRAME_MS, SPINNER, SPINNER_REST, type Clock } from '../src/activity.ts'
 import type { Row } from '../src/rows.ts'
 import { Beat } from '../src/beat.tsx'
-import { Header, PULSE_MS, THINKING_GAP } from '../src/line.tsx'
+import { Header, PULSE_MS } from '../src/line.tsx'
 import { PALETTE } from '../src/palette.ts'
 
 afterEach(cleanup)
@@ -360,7 +360,7 @@ describe('turn header', () => {
     expect(turn).toMatch(new RegExp(`^${SPINNER_REST} `))
     ui.rerender(<App {...state} autoCompacting={true} />)
     expect(compactionOf(ui.lastFrame())).toBe(compaction)
-    expect(inputOf(ui.lastFrame())).toMatch(new RegExp(`^> ▌${dictionaries.en.steering}`))
+    expect(inputOf(ui.lastFrame())?.startsWith(`> ▌${dictionaries.en.steering}`)).toBe(true)
     ui.rerender(<App {...state} />)
     expect(headerOf(ui.lastFrame())).toBe(turn)
     expect(compactionOf(ui.lastFrame())).toBeUndefined()
@@ -408,27 +408,33 @@ describe('turn header', () => {
     expect(headerOf(ui.lastFrame())).toBeUndefined()
   })
 
-  it('grows a thinking window to its rows, then holds its height while reasoning streams', () => {
-    const state = props({ status: 'running' })
+  it('streams reasoning whole under the running step, past the live window, then folds it', () => {
+    const { dynamic, live } = budgetFor(measured())
+    // A short preview, so the folded thought fits the live window beside the answer.
+    const state = props({ status: 'running', resultLines: 3 })
     const ui = render(<App {...state} />)
-    const idle = heightOf(ui.lastFrame())
-    for (let lines = 1; lines <= 30; lines++) {
-      const text = Array.from({ length: lines }, (_, index) => `line ${index + 1}`).join('\n')
-      ui.rerender(<App {...state} live={[{ kind: 'reasoning', text }]} />)
+    const call: Row = { kind: 'tool-call', callId: 'c1', tool: 'bash', input: 'ls' }
+    const thought = (lines: number): Row => ({ kind: 'reasoning', text: Array.from({ length: lines }, (_, index) => `line ${index + 1}`).join('\n') })
+    const shown = (rows: readonly string[]): number => rows.filter(line => /^ {2}line \d+$/.test(line)).length
+    for (let lines = 1; lines <= dynamic + 5; lines++) {
+      ui.rerender(<App {...state} live={[call, thought(lines)]} />)
       const frame = ui.lastFrame()!
-      const shown = Math.min(lines, THINKING_ROWS)
-      expect(heightOf(frame)).toBe(idle + shown + THINKING_GAP)
-      // Drawn above the header, one blank row clear of it, and the header sits
-      // on the rule over the input. Same placement as transcript reasoning. A
-      // paragraph at the rail, no verb.
       const rows = frame.split('\n')
       const header = rows.findIndex(line => RUNNING.test(line))
-      expect(rows[header - 1]).toBe('')
-      expect(rows.slice(header - 1 - shown, header - 1)).toEqual(Array.from({ length: shown }, (_, index) =>
-        `  line ${lines - shown + index + 1}`))
-      expect(rows[header + 1]).toMatch(/^─+$/)
-      expect(rows[header + 2]).toMatch(/^> /)
+      // The newest row of the thought is the last text over the header, with
+      // only blanks between, and the frame never outgrows the terminal.
+      expect(rows.slice(0, header).findLast(line => line !== ''), frame).toBe(`  line ${lines}`)
+      expect(heightOf(frame)).toBeLessThanOrEqual(dynamic)
+      // Under the step it follows while both fit.
+      if (lines <= 3) expect(rows.findIndex(line => line.includes('ls'))).toBeLessThan(rows.indexOf('  line 1'))
     }
+    // Every row the panels leave, not the live region's own window.
+    expect(shown(ui.lastFrame()!.split('\n'))).toBeGreaterThan(live)
+    // A later row folds it to the preview the transcript keeps.
+    ui.rerender(<App {...state} live={[call, thought(20), { kind: 'assistant', text: 'Done.' }]} />)
+    const folded = ui.lastFrame()!.split('\n')
+    expect(shown(folded)).toBe(3)
+    expect(folded.some(line => line.trim() === '+17 more lines')).toBe(true)
   })
 
   it('animates from the clock it is given and stops asking once the turn ends', () => {

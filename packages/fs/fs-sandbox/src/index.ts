@@ -30,7 +30,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { LocalFileSystem } from '@deepseek-ai/dsh-fs-local'
 import type { Config as LocalConfig } from '@deepseek-ai/dsh-fs-local'
 import { FsError } from '@deepseek-ai/dsh-fs'
-import type { FsEditOutcome, FsEditRequest, FsTarget, FsVersion, FsWriteIntent, FsWriteOutcome } from '@deepseek-ai/dsh-fs'
+import type { FsEditIntent, FsEditOutcome, FsEditRequest, FsTarget, FsWriteIntent, FsWriteOutcome } from '@deepseek-ai/dsh-fs'
 import { writableRoots } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
@@ -91,8 +91,8 @@ export class SandboxedFileSystem extends LocalFileSystem {
    * Fence the edit by the per-call policy, then delegate to the inherited
    * atomic edit. See {@link checkedTarget}.
    * @param target - the resolved target to edit.
-   * @param edit - the literal search/replace request.
-   * @param expected - the version guard; omit for an unconditional edit.
+   * @param edit - one literal search/replace request, or several.
+   * @param expected - the version or anchored guard; omit for an unconditional edit.
    * @param signal - aborts before atomic publication takes effect.
    * @param sandboxPolicy - the per-call mode and workspace root; omit to use
    *   the deployment fallback.
@@ -100,8 +100,8 @@ export class SandboxedFileSystem extends LocalFileSystem {
    */
   override async editText(
     target: FsTarget,
-    edit: FsEditRequest,
-    expected?: { version: FsVersion },
+    edit: FsEditRequest | readonly FsEditRequest[],
+    expected?: FsEditIntent,
     signal?: AbortSignal,
     sandboxPolicy?: SandboxExecutionPolicy,
   ): Promise<FsEditOutcome> {

@@ -1,7 +1,7 @@
 /** Display readings derived from the current session's Harness projections. */
 import type { ContextPressureProjection, TokenUsageProjection } from '@deepseek-ai/dsh-token-meter/client'
 import type { ContextUsage, TokenTotals } from '@dsh-tui/ui/format.ts'
-import type { GoalEntry } from '@dsh-tui/ui/app.tsx'
+import type { GoalEntry } from '@dsh-tui/ui/goal.ts'
 import type { GoalView } from '@deepseek-ai/dsh-goal'
 import type { CompactionEngine } from '@deepseek-ai/dsh-compaction'
 

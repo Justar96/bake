@@ -70,9 +70,9 @@ This section explains the design decisions behind the registry and points at the
 ### Design philosophy
 
 - **In-memory records, fresh snapshots.** `LocalJobRegistry` keeps one `TrackedJob` per job and projects a new read-only snapshot per call; callers never receive live state.
-- **Owner-relative layers, one process-wide registry.** Controllers, completion listeners, and change observers are filed into the scope that registered them (`ScopedLayers`), and reads union the global layer with the owner's scope chain — so one preset's job controls never hold `start()` open for an agent whose own composition loads none, and a settlement reaches only the listeners its owner's composition registered.
+- **Owner-relative layers, one process-wide registry.** Controllers and completion listeners are filed into the scope that registered them (`ScopedLayers`), and reads union the global layer with the owner's scope chain — so one preset's job controls never hold `start()` open for an agent whose own composition loads none, and a settlement reaches only the listeners its owner's composition registered.
 - **Preflight before start.** `start()` checks controller service, spec validity, live ownership, and capacity before invoking the producer, so a rejection leaves no job id or execution resource; registration commits without a later failable step.
-- **First-wins settlement, completion last.** The earliest terminal outcome records once, releases waiters, and notifies listeners once with per-listener containment; completion is announced after the record is committed and the visible-set change published, because a reporter may open a model turn synchronously.
+- **First-wins settlement, completion last.** The earliest terminal outcome records once, releases waiters, and notifies listeners once with per-listener containment; completion is announced after the record is committed and every waiter is released, because a reporter may open a model turn synchronously.
 - **Teardown never deadlocks.** A throwing cancel force-fails the record and reports a possible orphan instead of stalling disposal.
 
 ### Source map
@@ -84,15 +84,15 @@ This section explains the design decisions behind the registry and points at the
 
 ### Scope layers
 
-`attachController`, `onJobDone`, and `onJobsChanged` register into the calling context's scope layer. The controller question (`servesOwner`) and listener delivery (`listenersFor`, `changedFor`) walk the same chain: global layer first, then each scoped layer along the owner's chain. Registrations are anonymous tokens so duplicate labels stay independently disposable.
+`attachController` and `onJobDone` register into the calling context's scope layer. The controller question (`servesOwner`) and listener delivery (`listenersFor`) walk the same chain: global layer first, then each scoped layer along the owner's chain. Registrations are anonymous tokens so duplicate labels stay independently disposable.
 
 ### Admission and settlement
 
-`activeJobCount` counts authoritative records per exact owner or in the shared unowned bucket. `settle` marks a job reported when waiters are pending, resolves every waiter, records the terminal snapshot, announces the visible-set change, then notifies completion listeners. Pending waits mark the job reported before listeners run so completion reporters do not duplicate notices; a teardown cancel marks it for the same reason — nothing will read a notice addressed to an owner being destroyed.
+`activeJobCount` counts authoritative records per exact owner or in the shared unowned bucket. `settle` marks a job reported when waiters are pending, resolves every waiter, records the terminal snapshot, then notifies completion listeners. Pending waits mark the job reported before listeners run so completion reporters do not duplicate notices; a teardown cancel marks it for the same reason — nothing will read a notice addressed to an owner being destroyed.
 
 ### Teardown
 
-Owner disposal (`disposeOwned`) cancels the owner's jobs, awaits their settlement, removes their records, and announces the removal — the one visible-set change no per-job record carries. Service disposal (`disposeAll`) closes listeners, cancels all live jobs, awaits settlement, clears the store, announces the emptying to the distinct owners, then detaches the cross-fiber owner-cleanup effects.
+Owner disposal (`disposeOwned`) cancels the owner's jobs, awaits their settlement, and removes their records. Service disposal (`disposeAll`) closes listeners, cancels all live jobs, awaits settlement, clears the store, then detaches the cross-fiber owner-cleanup effects.
 
 </details>
 

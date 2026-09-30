@@ -164,7 +164,7 @@ Read these pages when the package-level contract is not enough; they move from t
 
 Indirectly, through the plugins a preset's standing composition installs, which own every tool schema, prompt section, and skill the preset makes visible to the agents joined to it.
 
-The shipped `standard` and `ptc` presets share one persona and one plan-mode section. The persona introduces Bake, the selected model, and the terminal's tool calls and Markdown replies. It asks the agent to follow local code conventions, commit or push only on request, preserve others' changes unless asked, use concise and neutral language, and report results and verification accurately. Each preset's `agent.cordis.yml` holds the exact text, which adds a few hundred characters to the system prompt.
+The shipped `standard` and `ptc` presets share one persona. The persona introduces Bake, the selected model, and the terminal's tool calls and Markdown replies. It asks the agent to follow local code conventions, commit or push only on request, preserve others' changes unless asked, use concise and neutral language, and report results and verification accurately. Each preset's `agent.cordis.yml` holds the exact text, which adds a few hundred characters to the system prompt.
 
 #### KV Cache effect
 

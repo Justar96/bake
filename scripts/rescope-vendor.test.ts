@@ -1,4 +1,4 @@
-/** Recorded npm evidence stays intact while authored files and exact edits remain checked. */
+/** Authored files stay subject to upstream package-name checks while exact edits remain checked. */
 
 import { describe, expect, it } from 'bun:test'
 import { exactEditState, isRescopeExcluded } from './rescope-vendor.ts'
@@ -7,13 +7,7 @@ const ANCHOR = '\n## Sync procedure'
 const INSERTED = `\n15. **rescope**: one log entry.\n${ANCHOR}`
 
 describe('rescope file selection', () => {
-  it('preserves the recorded npm resolution', () => {
-    expect(isRescopeExcluded('scripts/dependency-catalog/package-lock.json')).toBe(true)
-  })
-
   it.each([
-    'scripts/dependency-catalog/package.json',
-    'scripts/dependency-catalog/source.ts',
     'scripts/other/package-lock.json',
     'packages/example/src/index.ts',
     'packages/example/package.json',

@@ -1,5 +1,5 @@
 ---
-description: "编辑前读取的文件系统策略插件：面向选择或排查受防护写入/编辑行为的部署方与维护者。"
+description: "文件系统观察策略插件：面向选择或排查受防护写入/编辑行为的部署方与维护者。"
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-`dsh-fs-observation-policy` 要求 agent（智能体）先读取文件，文件系统工具才可覆盖或编辑它。如果文件自读取后发生变化，它也会拒绝变更，并清楚提示重新读取后重试。读取缺失路径会授权带防护的创建，同时仍防止覆盖并发创建的文件。需要编辑前读取安全性的部署请选择它；由于观察记录不持久化，恢复的会话必须重新读取目标。
+`dsh-fs-observation-policy` 要求 agent（智能体）先读取文件，文件系统工具才可覆盖它；如果文件自读取后发生变化，它会拒绝覆盖，并清楚提示重新读取后重试。编辑默认以内容为锚点：文本恰好匹配一次的字面替换直接作用于当前文件，无论是否读取过；agent 未见过这些内容时，工具会显示编辑后的行。读取缺失路径会授权带防护的创建，同时仍防止覆盖并发创建的文件。需要防覆盖写入的部署请选择它；由于观察记录不持久化，恢复的会话必须重新读取目标。
 
 ## 目录
 
@@ -25,7 +25,7 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
-当部署希望模型在覆盖或编辑文件之前先读取该文件时，把本插件与 `ctx.fs` 后端及 `dsh-tool-fs` 工具一起加载。插件无需配置，也不注入任何服务；它只监听工具分派的 `fs/*` 事件。
+当部署希望模型在覆盖文件之前先读取该文件时，把本插件与 `ctx.fs` 后端及 `dsh-tool-fs` 工具一起加载。插件不注入任何服务；它只监听工具分派的 `fs/*` 事件。唯一的设置 `editGuard` 默认为 `anchored`；设为 `version` 可恢复编辑前必须读取的拒绝行为。
 
 ### 最小组合
 
@@ -39,11 +39,11 @@ kind: "package-reference"
 
 ### 对模型而言的变化
 
-挂载策略后，`write` 可以创建新文件，但拒绝覆盖会话未读取过的现有文件；`edit` 要求先读取目标；自读取以来发生变化（包括缺失）的文件以 `FS_STALE_VERSION` 失败。缺失也会被记录：读取缺失文件会把它标记为确认缺失，因此随后的 `write` 可以通过防护创建流程重新创建它。会话恢复后不携带任何已观察状态，因此必须重新读取文件，防护变更才能再次成功。
+挂载策略后，`write` 可以创建新文件，但拒绝覆盖会话未读取过的现有文件；覆盖自读取以来发生变化（包括缺失）的文件以 `FS_STALE_VERSION` 失败。在默认的 `anchored` 防护下，`edit` 无需先读取：每个精确且唯一的 `old_string` 匹配本身就是前置条件，因此文件其他位置的变化会被保留，而匹配范围内的变化会使匹配失败。`replace_all` 没有唯一性锚点，因此仍需当前读取。设为 `editGuard: version` 时，每次 `edit` 都需要当前读取。缺失也会被记录：读取缺失文件会把它标记为确认缺失，因此随后的 `write` 可以通过防护创建流程重新创建它。会话恢复后不携带任何已观察状态，因此必须重新读取文件，防护写入才能再次成功。
 
 ### 失败与恢复
 
-没有先前观测的编辑以代码 `FS_NOT_OBSERVED` 和策略原因 `edit requires reading "<path>" first` 失败；编辑被观测为缺失的目标以 `FS_NOT_FOUND` 失败。工具把策略和提供方的未读失败统一为 `cannot modify "<path>": file has not been read — read the file, then retry`，同时保留错误码和原始原因。在外部删除的文件上遵循该恢复指令会记录缺失，因此下一次防护写入可以重新创建它，而不会覆盖并发创建者。
+未读取的 `replace_all` 编辑，或 `editGuard: version` 下的任何未读取编辑，以代码 `FS_NOT_OBSERVED` 失败；在 `version` 下，编辑被观测为缺失的目标以 `FS_NOT_FOUND` 失败。工具把策略和提供方的未读失败统一为 `cannot modify "<path>": file has not been read — read the file, then retry`，同时保留错误码和原始原因。在外部删除的文件上遵循该恢复指令会记录缺失，因此下一次防护写入可以重新创建它，而不会覆盖并发创建者。
 
 -----
 
@@ -71,7 +71,7 @@ kind: "package-reference"
 
 ### 决策流程
 
-`fs/write-intent` 把未见或确认缺失解析为 `{ kind: 'createIfAbsent' }`，把已观测存在解析为 `{ kind: 'replaceIfVersion', version: vObserved }`。`fs/edit-intent` 以 `FS_NOT_OBSERVED` 拒绝未见目标，以 `FS_NOT_FOUND` 拒绝确认缺失的目标，否则提供观察到的版本作为比较并交换的基础。`fs/observed` 为该所有者与目标记录 `{ kind: 'present', version }` 或 `{ kind: 'absent' }`——同步、只有副作用的 `WeakMap.set`，因为成功的变更已经提交。
+`fs/write-intent` 把未见或确认缺失解析为 `{ kind: 'createIfAbsent' }`，把已观测存在解析为 `{ kind: 'replaceIfVersion', version: vObserved }`。在 `anchored` 下，`fs/edit-intent` 返回 `{ kind: 'anchored', version? }`，有观察记录时携带观察到的版本；提供方在锁内比较该版本，用于报告基础并防护 `replace_all`。在 `version` 下，它以 `FS_NOT_OBSERVED` 拒绝未见目标，以 `FS_NOT_FOUND` 拒绝确认缺失的目标，否则提供观察到的版本作为比较并交换的基础。`fs/observed` 为该所有者与目标记录 `{ kind: 'present', version }` 或 `{ kind: 'absent' }`——同步、只有副作用的 `WeakMap.set`，因为成功的变更已经提交。
 
 ### 单 slot、先到者胜
 
@@ -96,6 +96,7 @@ kind: "package-reference"
 - [fs-local](../fs-local/README.zh.md)——本策略所防护的宿主文件系统后端。
 - [fs-sandbox](../fs-sandbox/README.zh.md)——与本策略组合的沙箱强制后端。
 - [Fsspec 风格 seam 拆分 Agent Note](../../../.agents/notes/implemented/simplification/2026-06-26-fsspec-style-fs-seam.zh.md)——策略为何是事件插件而非提供方方法。
+- [内容锚定编辑 Agent Note](../../../.agents/notes/implemented/feature/2026-09-30-content-anchored-edits.zh.md)——`edit` 为何不再要求先读取。
 
 -----
 
@@ -106,11 +107,11 @@ kind: "package-reference"
 
 #### 模型看到的内容
 
-该插件不添加提示词或 schema。没有先前观测时，它会以代码 `FS_NOT_OBSERVED` 和策略原因 `edit requires reading "<path>" first` 拒绝编辑；编辑被观测为缺失的目标返回 `FS_NOT_FOUND`。正向观测陈旧时，带防护的变更会传播由提供方拥有的 `FS_STALE_VERSION` 错误。[`dsh-tool-fs`](../tool-fs/README.zh.md) 拥有模型侧错误包装：它把所有 `FS_NOT_OBSERVED` 来源规范化为 `cannot modify "<path>": file has not been read — read the file, then retry`，而 `FS_STALE_VERSION` 保留提供方原因并追加 `— re-read the file, then retry`；两者都保留错误码和原始原因。外部删除目标后，遵循陈旧恢复指令会记录缺失：下一次带防护的写入可以通过 `createIfAbsent` 重新创建该目标，而提供方会以原子方式保留任何并发创建者写入的文件。
+该插件不添加提示词或 schema。在默认防护下，未读取的 `replace_all` 编辑以 `FS_NOT_OBSERVED` 失败；在 `editGuard: version` 下，没有先前观测时它会以代码 `FS_NOT_OBSERVED` 和策略原因 `edit requires reading "<path>" first` 拒绝任何编辑，编辑被观测为缺失的目标返回 `FS_NOT_FOUND`。正向观测陈旧时，带防护的变更会传播由提供方拥有的 `FS_STALE_VERSION` 错误。[`dsh-tool-fs`](../tool-fs/README.zh.md) 拥有模型侧错误包装：它把所有 `FS_NOT_OBSERVED` 来源规范化为 `cannot modify "<path>": file has not been read — read the file, then retry`，而 `FS_STALE_VERSION` 保留提供方原因并追加 `— re-read the file, then retry`；两者都保留错误码和原始原因。外部删除目标后，遵循陈旧恢复指令会记录缺失：下一次带防护的写入可以通过 `createIfAbsent` 重新创建该目标，而提供方会以原子方式保留任何并发创建者写入的文件。
 
 #### Token 影响
 
-允许的操作除了普通工具结果外不增加 token。拒绝会添加少量保留的错误结果，并避免产生成功 payload。
+允许的操作除了普通工具结果外不增加 token；对模型未见过的内容执行锚定编辑时，会在该结果中加入编辑后的行。拒绝会添加少量保留的错误结果，并避免产生成功 payload。锚定编辑避免了编辑前读取防护所需的拒绝和重新读取请求。
 
 #### KV Cache 影响
 
@@ -124,8 +125,8 @@ kind: "package-reference"
 这些限制说明本策略何时不合适，或何时需要特别的运维注意。它们是当前包约束，不是通用文件系统对比或任务积压。
 
 - **已观察状态无法在会话恢复后保留**：该记录的持久化工作延期处理，因此恢复的会话必须重新读取文件，才能执行防护写入与编辑。
-- **没有 agent 会话的参与者绝无法满足策略**：它们的编辑会抛出 `FS_NOT_OBSERVED`，写入总会解析为 `createIfAbsent`，因此非 agent 调用方无法通过门禁覆盖现有文件。
-- **直接 `ctx.fs` 读取不会发出 `fs/observed`**：在 `read` 工具之外读取的文件仍未观察；后续防护编辑会以 `FS_NOT_OBSERVED` 拒绝，直到工具读取该文件。
+- **没有 agent 会话的参与者绝无法满足策略**：它们的 `replace_all` 编辑（在 `version` 下为所有编辑）会抛出 `FS_NOT_OBSERVED`，写入总会解析为 `createIfAbsent`，因此非 agent 调用方无法通过门禁覆盖现有文件。
+- **直接 `ctx.fs` 读取不会发出 `fs/observed`**：在 `read` 工具之外读取的文件仍未观察；后续防护写入或 `replace_all` 编辑会以 `FS_NOT_OBSERVED` 拒绝，直到工具读取该文件。
 - **授权依据是版本新鲜度，而非视图完整性**：任何窗口读取都会授权对未变文件执行全文件覆盖，这有意弱于完整视图规则（见[seam 拆分 Agent Note](../../../.agents/notes/implemented/simplification/2026-06-26-fsspec-style-fs-seam.zh.md)）。
 
 <a id="dev-note"></a>

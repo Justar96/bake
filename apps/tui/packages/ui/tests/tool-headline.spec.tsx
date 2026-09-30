@@ -70,7 +70,7 @@ function draw(columns: number): string {
   // The application's default preview.
   const { cardLines: unit, cardLine: single, moreLines: more } = dictionaries.en
   const bound: ResultBound = { lines: 4, unit, single, more }
-  return renderToString(<>{rows.map((row, index) => <RowView key={index} row={row} budget={budget} result={bound} />)}</>, { columns })
+  return renderToString(<>{rows.map((row, index) => <RowView key={index} row={row} budget={budget} frame="classic" result={bound} />)}</>, { columns })
 }
 
 it.each([40, 80])('heads every call in a line or two and never prints its arguments as JSON at %i columns', async columns => {

@@ -13,6 +13,7 @@ import { closeSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'nod
 import { availableParallelism } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { dropRepositoryGitEnv } from './git-env.ts'
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const LOG_DIR = join(ROOT, '.preflight')
@@ -312,7 +313,7 @@ Logs: .preflight/<step>.log`
 
 /** Run a command and return its stdout; reject when it fails. */
 async function capture(argv: readonly string[]): Promise<string> {
-  const child = Bun.spawn([...argv], { cwd: ROOT, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' })
+  const child = Bun.spawn([...argv], { cwd: ROOT, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe', env: process.env })
   const [out, err, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
   if (code !== 0) throw new Error(`${argv.join(' ')}: ${err.trim()}`)
   return out
@@ -394,6 +395,9 @@ function tail(path: string, lines: number): string {
 }
 
 async function main(argv: readonly string[]): Promise<number> {
+  // A pre-push hook exports GIT_DIR; tests that build fixture repositories
+  // would otherwise rewrite the repository being pushed. See git-env.ts.
+  dropRepositoryGitEnv(process.env)
   let options: Options
   try {
     options = parseOptions(argv)

@@ -19,7 +19,7 @@ import type {} from '@deepseek-ai/dsh-jobs'
 import type {} from '@deepseek-ai/dsh-user-approval'
 import type {} from '@deepseek-ai/dsh-shell-env'
 import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
-import { ESCALATION_TARGETS, approveEscalation, validateEscalationArgs } from '@deepseek-ai/dsh-sandbox'
+import { ESCALATION_TARGETS, approveEscalation, validateEscalationArgs, isNoOpEscalation } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxPolicyService } from '@deepseek-ai/dsh-sandbox-policy'
 import { DSH_ENV_PREFIX } from '@deepseek-ai/dsh-shell'
 import type { ShellRunResult } from '@deepseek-ai/dsh-shell'
@@ -43,7 +43,8 @@ export const Config: z<Config> = z.object({
 /** Parsed tool args; execute validates value constraints absent from ParameterSchemaSpec. */
 interface BashToolArgs {
   command: string
-  description: string
+  /** Display-only summary; a missing or blank one falls back to the command. */
+  description?: string
   timeoutMs?: number
   workdir?: string
   run_in_background?: boolean
@@ -56,13 +57,11 @@ function validateBashArgs(args: BashToolArgs, effectiveMode: SandboxMode | undef
   if (args.command.trim().length === 0) {
     throw new Error('invalid command: expected a non-empty string')
   }
-  if (args.description.trim().length === 0) {
-    throw new Error('invalid description: expected a non-empty string')
-  }
   if (args.timeoutMs !== undefined && (!Number.isFinite(args.timeoutMs) || args.timeoutMs <= 0)) {
     throw new Error(`invalid timeoutMs: expected a positive number, got ${JSON.stringify(args.timeoutMs)}`)
   }
-  if (args.sandbox_permissions !== undefined && args.sandbox_permissions === effectiveMode) return
+  const requested = args.sandbox_permissions
+  if (requested !== undefined && effectiveMode !== undefined && isNoOpEscalation(effectiveMode, requested)) return
   const justification = args.sandbox_permissions === undefined && args.justification?.trim() === ''
     ? undefined
     : args.justification
@@ -79,11 +78,12 @@ function validateBashArgs(args: BashToolArgs, effectiveMode: SandboxMode | undef
  */
 function bashDescription(backgroundEnabled: boolean, escalationModes: readonly SandboxMode[]): string {
   const background = backgroundEnabled
-    ? 'A command run with `run_in_background` returns a job id right away; read its output with `job_output` and stop it with `job_kill`.'
+    ? 'Run long builds and tests with `run_in_background`, which returns a job id at once; read output with `job_output` and stop with `job_kill`.'
     : 'Background execution is not available, so a command must finish within its timeout.'
   // The registry's built-ins; DSH_SHELL=1 only marks the process and tells the model nothing.
   const base = 'Run a command with `bash -c` and return its stdout and stderr. '
     + 'Each call starts a fresh shell, so directory changes and variables do not carry over to later calls. '
+    + 'Avoid filesystem-wide `find` scans. '
     + 'A non-zero exit is reported in the result as `[exit code: N]`, not as a tool error. '
     + 'Long output is truncated to its tail, and the full output is saved to a file named in the result when possible. '
     + `\`$${DSH_ENV_PREFIX}HOME\` is the harness home directory and \`$${DSH_ENV_PREFIX}SESSION_ID\` is this session's id. `
@@ -103,8 +103,16 @@ function bashDescription(backgroundEnabled: boolean, escalationModes: readonly S
  * Present foreground calls as terminals and background starts as generic cards.
  * The command remains the title on both paths; foreground cwd is passed through
  * for the bridge to resolve, while background descriptions remain card content.
+ * The description is optional display metadata: a missing one costs the model
+ * nothing, so it is never worth a refused call.
  */
-type BashCallArgs = { command: string; description: string; workdir?: string; run_in_background?: boolean }
+type BashCallArgs = { command: string; description?: string; workdir?: string; run_in_background?: boolean }
+
+/** The non-blank description, if the model supplied one. */
+function displayDescription(args: BashCallArgs): string | undefined {
+  const text = typeof args.description === 'string' ? args.description.trim() : ''
+  return text.length > 0 ? args.description : undefined
+}
 
 function presentBashCall(args: BashCallArgs): GenericCallView | TerminalCallView {
   if (args.run_in_background === true) {
@@ -113,13 +121,14 @@ function presentBashCall(args: BashCallArgs): GenericCallView | TerminalCallView
       title: args.command,
       kind: 'execute',
       rawInput: args.command,
-      content: [{ type: 'text', text: args.description }],
+      content: [{ type: 'text', text: displayDescription(args) ?? args.command }],
     }
   }
+  const description = displayDescription(args)
   return {
     card: 'terminal',
     title: args.command,
-    description: args.description,
+    ...description === undefined ? {} : { description },
     ...args.workdir !== undefined ? { cwd: args.workdir } : {},
   }
 }
@@ -244,11 +253,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     description: bashDescription(backgroundEnabled, escalationModes),
     parameters: {
       command: { type: 'string', required: true, description: 'The bash command to execute.' },
-      description: {
-        type: 'string',
-        required: true,
-        description: 'Short summary of what the command does, shown to the user.',
-      },
+      description: { type: 'string', description: 'Short summary of what the command does, shown to the user.' },
       timeoutMs: { type: 'number', description: 'Timeout in milliseconds, capped at the maximum; the command is killed when it expires.' },
       workdir: { type: 'string', description: 'Directory to run this command in. Defaults to your working directory; a relative path resolves against it.' },
       ...backgroundEnabled ? {

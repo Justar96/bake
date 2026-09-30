@@ -250,7 +250,7 @@ describe('SQLite session search', () => {
     await expect(stat(path)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
-  it('refuses search in never mode while inherited reads and traces keep working', async () => {
+  it('refuses search in never mode while inherited reads keep working', async () => {
     const path = await temporaryPath('never-mode.db')
     const ctx = new Context()
     await ctx.plugin(SessionStore)
@@ -271,9 +271,10 @@ describe('SQLite session search', () => {
 
     expect((await service.listSessions()).map(record => record.header.id).sort())
       .toEqual([child, parent])
-    const lineage = await service.traceSession(parent)
-    expect(lineage.complete).toBe(true)
-    expect(lineage.descendants.map(node => node.session.header.id)).toEqual([child])
+    await expect(service.readSurface(parent)).resolves.toMatchObject({
+      session: { id: parent },
+      events: [{ seq: 0 }],
+    })
 
     // The disabled index never touches the filesystem, in mount, use, or disposal.
     await expect(stat(path)).rejects.toMatchObject({ code: 'ENOENT' })

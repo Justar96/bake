@@ -3,7 +3,7 @@
 待处理输入
 下一步: Inspect
 pixel.png · image/png · 84 B · 1×1
-/clear-pending 丢弃排队输入
+Alt+↑ 立即发送
 暂存附件: 1
 1. pixel.png · image/png · 84 B · 1×1
 Enter 发送 · /remove-attachment <编号> 移除 · /clear-attachments 清除

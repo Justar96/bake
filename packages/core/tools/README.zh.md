@@ -59,6 +59,8 @@ ctx.tools.register(defineTool({
 
 统一 schema DSL 支持 `string`、`number`、`integer`、`boolean`、`null`、`array`、`object`、仅供作者使用的 `json` 与恰好匹配一个分支的 `oneOf`；`InferValue` 在 16 层容器内保留精确类型，之后加宽为 `JsonValue`。原始 JSON Schema（`JsonSchemaNode`）是与 subagent、工作流和 MCP 共享的协议级对应类型。
 
+模型只在使用某个工具时才需要的长篇用法参考应放在 `details` 中，而不是 `description` 中。这样，每次请求都会重发的原生 schema 就能保持简短。只要有可见工具声明了 `details`，注册表就会加入它保留的 `tool_help` 工具，由它返回这些内容。描述中应提示模型在首次使用前调用 `tool_help`。在 `ptc` 下，details 改为并入该工具的 SDK 文档。
+
 ### 配置呈现模式
 
 `mode` 配置决定模型看到什么：`native`（每个可见 schema）、`ptc`（只有 `run_code` 加一份生成 SDK）或 `both`。
@@ -120,6 +122,8 @@ ctx.tools.register(defineTool({
 
 每次类型化调用都会实体化并冻结解析后的参数、分配不透明关联 token，再运行策略与分发。pre-execute 拒绝可以在模型可见原因旁附带 `ToolErrorInfo`；原生与 PTC 持久投影会保留结构化名称、代码与可选用户可见原因，但不会把该详情加入模型内容。取消采用协作式并等待完全停稳：每个工具主体都收到调用方拥有的 `exec.signal` 且必须观测它；调用主体前的取消为 `ABORTED_BEFORE_DISPATCH`，调用主体后的取消只能把成功结果替换为 `ABORTED`。拒绝、包装层失败、工具失败、后置策略失败与超时产生的 `TOOL_TIMEOUT` 仍保留更具体的结果。未知工具与抛出异常的工具都会变成结构化错误（`UNKNOWN_TOOL`），因此调用会失败而不会结束轮次。
 
+在 agent 的开放轮次内（Session 的 `turn/start` 与 `turn/end` 之间），注册表会以工具名与键序归一化后的参数为键，记住因未读取（`FS_NOT_OBSERVED`）或已过期（`FS_STALE_VERSION`）而被拒绝的模型直接调用。完全相同的重试会跳过策略与分发，以 `DUPLICATE_TOOL_CALL` 失败并引用先前的拒绝。任何其他已结束的调用（读取、成功的变更、其他失败或嵌套的 `run_code` 子分发）都会清除这份记录，因此在新的观测之后重试总会被分发。成功结果从不缓存或重放，每次实际分发的变更仍由文件系统观测策略决定。
+
 ### PTC mode
 
 在 `ptc` 或 `both` 下，注册表公开保留的 `run_code` 传输以及按所加载运行时语言生成的确定性 SDK。每个 SDK 绑定捕获冻结的 ToolSchema，经由调度器传入该次执行上下文。已开始的调用在策略之前只记录配对 id、名称和规范化参数；其结算事件保留渲染结果与可选结构化错误。描述与参数 schema 仅临时存活，不进入 Session 事件或 SDK 输出。调用通过复用原生并发约定的每次运行独有池调度。在纯 `ptc` 下，模型直呼其他任何可见工具都会在策略之前解析为 `UNKNOWN_TOOL`——通告面与可调用面保持一致。中间绑定值只存在于执行局部；只有外层 `run_code` 结果有硬大小上限。[执行器塌缩 note](../../../.agents/notes/implemented/bug-fix/2026-08-07-ptc-executor-collapse.zh.md) 拥有该收束约定。
@@ -162,7 +166,7 @@ ctx.tools.register(defineTool({
 
 #### Token 影响
 
-每次请求的固定成本与可见定义成正比。隐藏工具的限制会为该 agent 移除其全部 schema 成本。
+每次请求的固定成本与可见定义成正比。隐藏工具的限制会为该 agent 移除其全部 schema 成本。工具的 `details` 在模型用 `tool_help` 读取之前不产生成本；读取后计为一次工具结果，而 `tool_help` 自身的 schema 不到 300 字节。
 
 #### KV Cache 影响
 
@@ -205,11 +209,13 @@ Program-only SDK bindings:
 
 #### 模型看到什么
 
-循环会保留模型发出的参数与注册表的最终内容。任何抛出异常或遭到拒绝的调用，都会转换为确切的 `Error: <message>`；结构化的用户可见失败详情不会加入该消息。PTC mode 只返回外层程序打印的行与呈现后的返回值；两者都为空时返回 `(run_code completed with no output)`；失败时返回 `Error: code run failed (<kind>): <message>`，并根据是否存在已捕获内容，在其后附加 `Captured output:` 与捕获的行。内部分发事件只保留在日志中；成功且含图片的子结果会在外层结果之后作为带来源归属的上下文追加。
+循环会保留模型发出的参数与注册表的最终内容。任何抛出异常或遭到拒绝的调用，都会转换为确切的 `Error: <message>`；结构化的用户可见失败详情不会加入该消息。PTC mode 只返回外层程序打印的行与呈现后的返回值；两者都为空时返回 `(run_code completed with no output)`；失败时返回 `Error: code run failed (<kind>): <message>`，并根据是否存在已捕获内容，在其后附加 `Captured output:` 与捕获的行。内部分发事件只保留在日志中；成功且含图片的子结果会在外层结果之后作为带来源归属的上下文追加。被抑制的未读取或过期拒绝重试会返回 `Error: not run: this "<tool>" call repeats one already refused this turn. Earlier refusal: <message>`。
 
 #### Token 影响
 
 参数、结果与附加上下文取决于数据，并会重复发送直至压缩（compaction）。隐藏工具的限制还会在模型可以调用这些工具之前移除其 schema。
+
+抑制重复拒绝只会跳过策略与分发工作。模型发出的调用和替代错误仍会进入历史，因此仅靠抑制不会减少模型请求，也不能保证降低 token 用量。
 
 #### KV Cache 影响
 

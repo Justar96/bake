@@ -8,7 +8,7 @@ import { App, type AppProps } from '../src/app.tsx'
 import { dictionaries } from '../src/copy.ts'
 import { appendTranscript, emptyTranscript } from '../src/transcript.ts'
 import type { Row, ToolCallRow } from '../src/rows.ts'
-import { FOLD_REST, SPINNER_REST, THINKING_ROWS } from '../src/activity.ts'
+import { FOLD_REST, SPINNER_REST } from '../src/activity.ts'
 
 class Input extends EventEmitter {
   isTTY = true
@@ -115,9 +115,8 @@ const inputRow = (screen: readonly string[]): number => screen.findIndex(line =>
 const lastRow = (screen: readonly string[], text: string): number => screen.findLastIndex(line => line.includes(text))
 
 /**
- * Assert the resting shape. The newest line, blank rows, the thinking window
- * while one streams, the header — blank, naming the running turn, or holding
- * its summary — the bare rule, the input under it, the base rule, and the
+ * Assert the resting shape. The newest line, blank rows, the header — blank,
+ * naming the running turn, or holding its summary — the bare rule, the input under it, the base rule, and the
  * status line on the terminal's last rows, over Ink's cursor row.
  * @returns the blank rows between the newest line and what rests on the
  *   input. One, and more while the frame holds rows something above the
@@ -134,19 +133,12 @@ function expectInputUnder(screen: readonly string[], text: string): number {
   const header = rule - 1
   expect(header, dump).toBeGreaterThan(newest + 1)
   expect(screen[header], dump).toMatch(new RegExp(`^((> |${SPINNER_REST} )\\S+….*|[✓■✗] .*|)$`))
-  // The thinking window while there is one, one blank row above the header.
-  // nothing else between.
-  let bottom = header
-  if (screen[header - 1] === '' && screen[header - 2] !== undefined && header - 2 > newest && screen[header - 2] !== '') bottom = header - 1
-  let first = bottom
-  while (first > newest + 1 && screen[first - 1] !== '') first--
-  expect(screen.slice(newest + 1, first).every(line => line === ''), dump).toBe(true)
-  expect(bottom - first, dump).toBeLessThanOrEqual(THINKING_ROWS)
+  expect(screen.slice(newest + 1, header).every(line => line === ''), dump).toBe(true)
   expect(screen[input]!.startsWith('> '), dump).toBe(true)
   expect(screen[input + 1], dump).toMatch(/^─+$/)
   expect(screen[input + 2], dump).toMatch(/^ {2}model {2}/)
   expect(input + 3, dump).toBe(screen.length - 1)
-  return first - newest - 1
+  return header - newest - 1
 }
 
 describe('composer placement', () => {
@@ -217,8 +209,12 @@ describe('composer placement', () => {
   it.each([[40, 4], [80, 6]])('keeps the input visible on a short %ix%i terminal', async (columns, rows) => {
     const ui = await mount(columns, rows)
     expect(inputRow(await ui.screen())).toBeGreaterThanOrEqual(0)
-    ui.stdin.write('\u001b[200~first\nsecond\nthird\nfourth\u001b[201~')
-    await vi.waitFor(async () => expect((await ui.screen()).join('\n')).toContain('fourth▌'))
+    // Typed with Ctrl-J between lines: a four-line paste collapses into one placeholder row.
+    for (const [index, line] of ['first', 'second', 'third', 'fourth'].entries()) {
+      if (index > 0) ui.stdin.write('\n')
+      ui.stdin.write(line)
+      await vi.waitFor(async () => expect((await ui.screen()).join('\n')).toContain(`${line}▌`))
+    }
     const screen = await ui.screen()
     // The prompt row has scrolled out of the one-row window, so the caret
     // row carries `^`. The prompt marker is no longer on that row.
@@ -314,6 +310,28 @@ describe('composer placement', () => {
       expect(inputRow(screen), screen.join('\n')).toBe(resting)
       expect(expectInputUnder(screen, `FIN-${line}.`)).toBe(1)
     }
+    expect(stdoutClears(ui.stdout)).toBe(false)
+  })
+
+  it('holds the input while a tall thought streams and then folds to its preview', async () => {
+    const ui = await mount(80, 24)
+    await ui.screen()
+    let committed = appendTranscript(emptyTranscript, Array.from({ length: 30 }, (_, index) => ({ kind: 'user' as const, text: `Prompt ${index}` })))
+    const text = Array.from({ length: 25 }, (_, index) => `thought ${index + 1}`).join('\n')
+    let screen = await ui.update({ committed, status: 'running', live: [{ kind: 'reasoning', text: 'thought 1' }] })
+    const resting = inputRow(screen)
+    for (let lines = 2; lines <= 25; lines++) {
+      screen = await ui.update({ live: [{ kind: 'reasoning', text: text.split('\n').slice(0, lines).join('\n') }] })
+      expect(inputRow(screen), screen.join('\n')).toBe(resting)
+      expect(lastRow(screen, 'thought '), screen.join('\n')).toBe(lastRow(screen, `thought ${lines}`))
+    }
+    // Printed as its preview once the answer starts; the rows it gave up are
+    // held blank over the controls until the answer's lines take them.
+    committed = appendTranscript(committed, [{ kind: 'reasoning', text }])
+    screen = await ui.update({ committed, live: [{ kind: 'assistant', text: 'Answer' }] })
+    expect(inputRow(screen), screen.join('\n')).toBe(resting)
+    expect(screen.some(line => line.trim() === '+17 more lines'), screen.join('\n')).toBe(true)
+    expectInputUnder(screen, 'Answer')
     expect(stdoutClears(ui.stdout)).toBe(false)
   })
 

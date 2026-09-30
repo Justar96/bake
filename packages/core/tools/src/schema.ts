@@ -498,6 +498,8 @@ export interface DefineToolOptions<S extends ParameterSchemaSpec, O extends Valu
   }
   /** Optional positive cooperative timeout budget in milliseconds. */
   readonly timeoutMs?: number
+  /** Optional usage reference served on demand. See {@link ToolDefinition.details}. */
+  readonly details?: string
   /**
    * Pure classifier for sibling overlap.
    * @param args - typed validated arguments.
@@ -582,6 +584,7 @@ export function defineTool<const S extends ParameterSchemaSpec, const O extends 
       } : {},
     },
     ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+    ...(options.details !== undefined ? { details: options.details } : {}),
     async execute(args: unknown, exec: ToolRunContext): Promise<JsonValue> {
       const violations = validate(args)
       if (violations.length > 0) throw new ToolArgsError(violations)

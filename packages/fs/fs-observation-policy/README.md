@@ -1,5 +1,5 @@
 ---
-description: "The read-before-edit filesystem policy plugin for deployments and maintainers choosing or debugging guarded write and edit behavior."
+description: "The filesystem observation policy plugin for deployments and maintainers choosing or debugging guarded write and edit behavior."
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`dsh-fs-observation-policy` makes filesystem tools require an agent to read a file before overwriting or editing it. It also rejects a mutation when the file has changed since that read, and returns a clear instruction to re-read and retry. Reading a missing path authorizes guarded creation, while concurrent creation remains protected. Choose it for deployments that want read-before-write safety; resumed sessions must read targets again because observations are not persisted.
+`dsh-fs-observation-policy` makes filesystem tools require an agent to read a file before overwriting it, and rejects an overwrite when the file has changed since that read, with a clear instruction to re-read and retry. Edits are content-anchored by default: a literal replacement whose text matches exactly once applies to the current file, read or not, and the tool shows the edited lines when the agent had not seen them. Reading a missing path authorizes guarded creation, while concurrent creation remains protected. Choose it for deployments that want no-clobber writes; resumed sessions must read targets again because observations are not persisted.
 
 ## Table of Contents
 
@@ -25,7 +25,7 @@ English | [中文](README.zh.md)
 <a id="use-this-package"></a>
 ## Use this package
 
-Load this plugin alongside a `ctx.fs` backend and the `dsh-tool-fs` tools when a deployment wants the model to read a file before it can overwrite or edit it. The plugin needs no configuration and injects no service; it only listens for the `fs/*` events the tools dispatch.
+Load this plugin alongside a `ctx.fs` backend and the `dsh-tool-fs` tools when a deployment wants the model to read a file before it can overwrite it. The plugin injects no service; it only listens for the `fs/*` events the tools dispatch. Its one setting, `editGuard`, defaults to `anchored`; `version` restores the read-before-edit refusal.
 
 ### Minimal composition
 
@@ -39,11 +39,11 @@ Load a backend, then this plugin, then the tools. The policy listener should be 
 
 ### What changes for the model
 
-With the policy mounted, `write` creates new files but refuses to overwrite an existing file that the session has not read, `edit` requires a prior read of the target, and a file that changed since it was read fails with `FS_STALE_VERSION`. Absence is recorded too: reading a missing file marks it confirmed absent, so a later `write` may recreate it through the guarded-create flow. A session resumes with no observed state, so it must re-read files before guarded mutations succeed again.
+With the policy mounted, `write` creates new files but refuses to overwrite an existing file that the session has not read, and an overwrite of a file that changed since it was read fails with `FS_STALE_VERSION`. Under the default `anchored` guard, `edit` needs no prior read: each exact, unique `old_string` match is its own precondition, so a change elsewhere in the file is kept and a change inside the match makes it fail to match. `replace_all` has no uniqueness anchor, so it still requires a current read. With `editGuard: version`, every `edit` requires a current read. Absence is recorded too: reading a missing file marks it confirmed absent, so a later `write` may recreate it through the guarded-create flow. A session resumes with no observed state, so it must re-read files before guarded writes succeed again.
 
 ### Failures and recovery
 
-An edit without a prior observation fails with code `FS_NOT_OBSERVED` and policy reason `edit requires reading "<path>" first`; editing a target observed absent fails with `FS_NOT_FOUND`. The tools normalize unread policy and provider failures to `cannot modify "<path>": file has not been read — read the file, then retry` while preserving the code and original cause. Following the remedy on an externally deleted file records absence, so the next guarded write can recreate it without clobbering a concurrent creator.
+An unread `replace_all` edit, or any unread edit under `editGuard: version`, fails with code `FS_NOT_OBSERVED`; under `version`, editing a target observed absent fails with `FS_NOT_FOUND`. The tools normalize unread policy and provider failures to `cannot modify "<path>": file has not been read — read the file, then retry` while preserving the code and original cause. Following the remedy on an externally deleted file records absence, so the next guarded write can recreate it without clobbering a concurrent creator.
 
 -----
 
@@ -71,7 +71,7 @@ The plugin is built on two ideas:
 
 ### Decision flow
 
-`fs/write-intent` resolves unseen or confirmed absent to `{ kind: 'createIfAbsent' }` and observed present to `{ kind: 'replaceIfVersion', version: vObserved }`. `fs/edit-intent` rejects an unseen target with `FS_NOT_OBSERVED`, a confirmed-absent target with `FS_NOT_FOUND`, and otherwise supplies the observed version as the compare-and-swap basis. `fs/observed` records `{ kind: 'present', version }` or `{ kind: 'absent' }` for the owner and target — a synchronous, side-effect-only `WeakMap.set`, because successful mutations have already committed.
+`fs/write-intent` resolves unseen or confirmed absent to `{ kind: 'createIfAbsent' }` and observed present to `{ kind: 'replaceIfVersion', version: vObserved }`. Under `anchored`, `fs/edit-intent` returns `{ kind: 'anchored', version? }` carrying the observed version when there is one; the provider compares it under its lock to report the basis and to guard `replace_all`. Under `version`, it rejects an unseen target with `FS_NOT_OBSERVED`, a confirmed-absent target with `FS_NOT_FOUND`, and otherwise supplies the observed version as the compare-and-swap basis. `fs/observed` records `{ kind: 'present', version }` or `{ kind: 'absent' }` for the owner and target — a synchronous, side-effect-only `WeakMap.set`, because successful mutations have already committed.
 
 ### Single-slot, first-wins
 
@@ -96,6 +96,7 @@ Read these pages when the package-level contract is not enough. They move from t
 - [fs-local](../fs-local/README.md) — the host-filesystem backend this policy guards.
 - [fs-sandbox](../fs-sandbox/README.md) — the sandbox-enforcing backend this policy composes with.
 - [Fsspec-style seam-split Agent Note](../../../.agents/notes/implemented/simplification/2026-06-26-fsspec-style-fs-seam.md) — why the policy is an event plugin rather than a provider method.
+- [Content-anchored edits Agent Note](../../../.agents/notes/implemented/feature/2026-09-30-content-anchored-edits.md) — why `edit` no longer requires a prior read.
 
 -----
 
@@ -106,11 +107,11 @@ Read these pages when the package-level contract is not enough. They move from t
 
 #### What the model sees
 
-This plugin adds no prompt or schema. It rejects an edit without a prior observation with code `FS_NOT_OBSERVED` and policy reason `edit requires reading "<path>" first`; editing a target observed absent returns `FS_NOT_FOUND`. Guarded mutations whose positive observation is stale propagate the provider-owned `FS_STALE_VERSION` error. [`dsh-tool-fs`](../tool-fs/README.md) owns the model-facing error wrapper: it normalizes every `FS_NOT_OBSERVED` source to `cannot modify "<path>": file has not been read — read the file, then retry`, while `FS_STALE_VERSION` retains the provider reason and adds `— re-read the file, then retry`; both preserve the code and original cause. Following the stale remedy on an externally deleted target records absence: the next guarded write may recreate it with `createIfAbsent`, while the provider atomically preserves any concurrent creator.
+This plugin adds no prompt or schema. Under the default guard, an unread `replace_all` edit fails with `FS_NOT_OBSERVED`; under `editGuard: version`, it rejects any edit without a prior observation with code `FS_NOT_OBSERVED` and policy reason `edit requires reading "<path>" first`, and editing a target observed absent returns `FS_NOT_FOUND`. Guarded mutations whose positive observation is stale propagate the provider-owned `FS_STALE_VERSION` error. [`dsh-tool-fs`](../tool-fs/README.md) owns the model-facing error wrapper: it normalizes every `FS_NOT_OBSERVED` source to `cannot modify "<path>": file has not been read — read the file, then retry`, while `FS_STALE_VERSION` retains the provider reason and adds `— re-read the file, then retry`; both preserve the code and original cause. Following the stale remedy on an externally deleted target records absence: the next guarded write may recreate it with `createIfAbsent`, while the provider atomically preserves any concurrent creator.
 
 #### Token effect
 
-Zero tokens on allowed operations beyond the ordinary tool result. A denial adds the small retained error result and avoids any success payload.
+Zero tokens on allowed operations beyond the ordinary tool result; an anchored edit of content the model had not seen adds the edited lines to that result. A denial adds the small retained error result and avoids any success payload. Anchored edits avoid the refusal and the re-read request that a read-before-edit guard costs.
 
 #### KV Cache effect
 
@@ -124,8 +125,8 @@ Append-only; newly visible content follows the reusable request prefix and does 
 These limits define when the policy is a poor fit or needs special operational care. They are current package constraints, not a general filesystem comparison or a task backlog.
 
 - **Observed state does not survive a session resume** — persistence of the record is deferred, so a resumed session must re-read files before guarded writes and edits.
-- **Actors without an agent session can never satisfy the policy** — their edits throw `FS_NOT_OBSERVED` and their writes always resolve `createIfAbsent`, so a non-agent caller cannot overwrite an existing file through the gate.
-- **Direct `ctx.fs` reads emit no `fs/observed`** — a file read outside the `read` tool stays unobserved, and a later guarded edit rejects with `FS_NOT_OBSERVED` until the tool reads it.
+- **Actors without an agent session can never satisfy the policy** — their `replace_all` edits (all edits under `version`) throw `FS_NOT_OBSERVED` and their writes always resolve `createIfAbsent`, so a non-agent caller cannot overwrite an existing file through the gate.
+- **Direct `ctx.fs` reads emit no `fs/observed`** — a file read outside the `read` tool stays unobserved, and a later guarded write or `replace_all` edit rejects with `FS_NOT_OBSERVED` until the tool reads it.
 - **Authorization is version freshness, not view completeness** — any windowed read authorizes a full-file overwrite of an unchanged file, deliberately weaker than a full-view rule ([seam-split Agent Note](../../../.agents/notes/implemented/simplification/2026-06-26-fsspec-style-fs-seam.md)).
 
 <a id="dev-note"></a>

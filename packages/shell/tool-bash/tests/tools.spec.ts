@@ -32,11 +32,12 @@ const testToolSignal = new AbortController().signal
 // the sandbox paragraph appears only with a confining executor.
 const BASH_DESCRIPTION_BASE = 'Run a command with `bash -c` and return its stdout and stderr. '
   + 'Each call starts a fresh shell, so directory changes and variables do not carry over to later calls. '
+  + 'Avoid filesystem-wide `find` scans. '
   + 'A non-zero exit is reported in the result as `[exit code: N]`, not as a tool error. '
   + 'Long output is truncated to its tail, and the full output is saved to a file named in the result when possible. '
   + '`$DSH_HOME` is the harness home directory and `$DSH_SESSION_ID` is this session\'s id. '
-const BASH_DESCRIPTION_BACKGROUND = 'A command run with `run_in_background` returns a job id right away; '
-  + 'read its output with `job_output` and stop it with `job_kill`.'
+const BASH_DESCRIPTION_BACKGROUND = 'Run long builds and tests with `run_in_background`, which returns a job id at once; '
+  + 'read output with `job_output` and stop with `job_kill`.'
 const BASH_DESCRIPTION_NO_BACKGROUND = 'Background execution is not available, so a command must finish within its timeout.'
 const BASH_DESCRIPTION_SANDBOX = ' Commands may run in a file sandbox; trying one it might block is safe. '
   + 'A blocked file operation reports `[sandbox: file access denied under <mode> mode]`: '
@@ -377,7 +378,6 @@ describe('bash tool', () => {
   it.each([
     [{}, /missing required property "command"/],
     [{ command: 42, description: 'd' }, /"command" must be a string/],
-    [{ command: 'x' }, /missing required property "description"/],
     [{ command: 'x', description: 7 }, /"description" must be a string/],
     [{ command: 'x', description: 'd', timeoutMs: 'soon' }, /"timeoutMs" must be a number/],
     [{ command: 'x', description: 'd', workdir: 7 }, /"workdir" must be a string/],
@@ -392,7 +392,6 @@ describe('bash tool', () => {
   // Value constraints the ParameterSchemaSpec can't express stay in the tool body.
   it.each([
     [{ command: '  ', description: 'd' }, /invalid command/],
-    [{ command: 'x', description: '   ' }, /invalid description/],
     [{ command: 'x', description: 'd', timeoutMs: -1 }, /invalid timeoutMs/],
   ])('rejects value-invalid args %j', async (args, pattern) => {
     const ctx = await setup()
@@ -417,7 +416,7 @@ describe('bash tool', () => {
     const bashSchema = schemas[0]!
     expect(bashSchema.parameters).toMatchObject({
       type: 'object',
-      required: ['command', 'description'],
+      required: ['command'],
     })
     expect(Object.keys(bashSchema.parameters.properties as Record<string, unknown>))
       .toContain('run_in_background')
@@ -694,7 +693,7 @@ describe('sandbox escalation through the generic task producer', () => {
     }
   })
 
-  it('rejects injected escalation without a sandbox and narrower escalation without prompting', async () => {
+  it('rejects injected escalation without a sandbox and runs narrower escalation without prompting', async () => {
     const plain = await setup()
     expect(text(await call(plain, 'bash', escalate))).toContain('not available in this composition')
 
@@ -702,7 +701,7 @@ describe('sandbox escalation through the generic task producer', () => {
     const prompted = vi.fn()
     ctx.on('approval/request', () => { prompted(); return Promise.resolve<ApprovalOutcome>('allowed-once') })
     const result = await call(ctx, 'bash', { ...escalate, sandbox_permissions: 'workspace-write' }, sandboxAgent('danger-full-access'))
-    expect(text(result)).toContain('not strictly wider')
+    expect(result.isError).toBe(false)
     expect(prompted).not.toHaveBeenCalled()
 
     const malformed = sandboxAgent()
@@ -1162,11 +1161,19 @@ describe('tool-owned UI presentation (presentCall / presentResult)', () => {
     })).toBeUndefined()
   })
 
-  it('presentCall validates softly: malformed args (missing required description) return undefined, never throw', async () => {
+  it('presentCall validates softly: malformed args return undefined, never throw', async () => {
     const ctx = await setup()
     // `defineTool` soft-validates replayed logged args before presentation. Invalid shapes return
     // undefined for generic UI rendering rather than throwing; `presentCall` accepts `unknown`.
-    expect(ctx.tools.get('bash')?.presentCall?.({ command: 'ls' })).toBeUndefined()
+    expect(ctx.tools.get('bash')?.presentCall?.({ command: 42 })).toBeUndefined()
+  })
+
+  it('treats the description as optional display metadata', async () => {
+    const ctx = await setup()
+    expect(ctx.tools.get('bash')?.presentCall?.({ command: 'ls' })).toEqual({ card: 'terminal', title: 'ls' })
+    expect(ctx.tools.get('bash')?.presentCall?.({ command: 'ls', description: '  ' })).toEqual({ card: 'terminal', title: 'ls' })
+    expect(ctx.tools.get('bash')?.presentCall?.({ command: 'make', run_in_background: true }))
+      .toMatchObject({ card: 'generic', content: [{ type: 'text', text: 'make' }] })
   })
 })
 

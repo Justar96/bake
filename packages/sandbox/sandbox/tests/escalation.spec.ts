@@ -91,14 +91,22 @@ describe('approveEscalation', () => {
       .resolves.toBe(mode)
   })
 
-  it('a narrower or unsupported target fails closed without asking', async () => {
+  it('a narrower known target keeps the effective mode without asking', async () => {
     const seen: unknown[] = []
     const spy = ingredients({ approver: approver('allowed-once', r => seen.push(r)) })
     await expect(approveEscalation(req({ requestedMode: 'read-only', effectiveMode: 'workspace-write' }), spy))
-      .rejects.toThrow(/not strictly wider than this call's current "workspace-write" mode/)
+      .resolves.toBe('workspace-write')
     await expect(approveEscalation(req({ requestedMode: 'workspace-write', effectiveMode: 'danger-full-access' as never }), spy))
-      .rejects.toThrow(/not strictly wider/)
+      .resolves.toBe('danger-full-access')
+    expect(seen).toEqual([])
+  })
+
+  it('an unknown requested or effective mode fails closed without asking', async () => {
+    const seen: unknown[] = []
+    const spy = ingredients({ approver: approver('allowed-once', r => seen.push(r)) })
     await expect(approveEscalation(req({ requestedMode: 'unknown-mode' }), spy))
+      .rejects.toThrow(/not strictly wider/)
+    await expect(approveEscalation(req({ requestedMode: 'danger-full-access', effectiveMode: 'unknown-mode' as never }), spy))
       .rejects.toThrow(/not strictly wider/)
     expect(seen).toEqual([])
   })

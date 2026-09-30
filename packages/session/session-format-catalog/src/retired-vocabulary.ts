@@ -2,10 +2,10 @@
  * Event and message-source vocabulary that released Session logs carry but no
  * mounted plugin writes any more.
  *
- * Bake dropped the upstream products that wrote these records: the web
- * session controller (`model/selection` and browser-correlated `user`
- * sources), Agent Teams (`team/*` and `team-message` sources), and workspace
- * change summaries (`workspace/changes`). Released formats v0 through v3 admit
+ * Bake dropped the features that wrote these records: the web session
+ * controller (`model/selection` and browser-correlated `user` sources), Agent
+ * Teams (`team/*` and `team-message` sources), workspace change summaries
+ * (`workspace/changes`), and plan mode (`plan/mode`). Released formats v0 through v3 admit
  * them, and a log that holds one must still open. The storage contract refuses
  * any unknown event type that is not marked ignorable, and the known set is
  * generated from these declarations, so removing one would refuse such a log
@@ -116,5 +116,7 @@ declare module '@deepseek-ai/dsh-session/types' {
     }
     /** A completed turn's changed files were summarized on the host; only the turn is logged. */
     'workspace/changes': { turn: number }
+    /** Whether plan mode was in force from this point on; the last record won. */
+    'plan/mode': { active: boolean }
   }
 }

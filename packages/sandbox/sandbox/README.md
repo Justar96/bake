@@ -97,7 +97,7 @@ This section explains the design decisions behind the contract and points at the
 
 ### Escalation choreography
 
-The ladder is a closed table — `read-only` may escalate to `workspace-write` or `danger-full-access`, `workspace-write` only to `danger-full-access` — checked at execution, never baked into a tool schema, whose enum stays the closed target vocabulary. [`approveEscalation`](src/escalation.ts) returns the current mode without approval when it is repeated, rejects narrower or unsupported targets, and requests approval for wider modes. Callers validate the `sandbox_permissions`/`justification` pairing first.
+The ladder is a closed table — `read-only` may escalate to `workspace-write` or `danger-full-access`, `workspace-write` only to `danger-full-access` — checked at execution, never baked into a tool schema, whose enum stays the closed target vocabulary. [`approveEscalation`](src/escalation.ts) returns the current mode without approval for a known mode that does not widen it, rejects unknown modes on either side, and requests approval for wider modes. Callers skip a non-widening request ([`isNoOpEscalation`](src/escalation.ts)) and otherwise validate the `sandbox_permissions`/`justification` pairing first.
 
 ### Writable roots
 

@@ -16,6 +16,7 @@ import ToolRuntime, { type ToolResult } from '@deepseek-ai/dsh-tools'
 import { FileSystem, FsError, FsTargetKey, FsVersion } from '@deepseek-ai/dsh-fs'
 import type {
   FsDirEntry,
+  FsEditIntent,
   FsEditOutcome,
   FsEditRequest,
   FsInfo,
@@ -43,7 +44,7 @@ class FakeFs extends FileSystem {
   files = new Map<string, string>()
   rejectWith?: FsError
   writeIntents: (FsWriteIntent | undefined)[] = []
-  editIntents: ({ version: FsVersion } | undefined)[] = []
+  editIntents: (FsEditIntent | undefined)[] = []
 
   private throwIfArmed(): void {
     if (this.rejectWith) throw this.rejectWith
@@ -95,11 +96,16 @@ class FakeFs extends FileSystem {
     this.files.set(target.targetKey, content)
     return { operation: before !== null ? 'update' : 'create', version: FsVersion('v2'), before, after: content }
   }
-  override async editText(target: FsTarget, edit: FsEditRequest, expected?: { version: FsVersion }): Promise<FsEditOutcome> {
+  override async editText(
+    target: FsTarget,
+    edit: FsEditRequest | readonly FsEditRequest[],
+    expected?: FsEditIntent,
+  ): Promise<FsEditOutcome> {
     this.throwIfArmed()
     this.editIntents.push(expected)
     const content = this.files.get(target.targetKey) ?? ''
-    const after = content.split(edit.oldString).join(edit.newString)
+    const edits: readonly FsEditRequest[] = Array.isArray(edit) ? edit : [edit as FsEditRequest]
+    const after = edits.reduce((text, one) => text.split(one.oldString).join(one.newString), content)
     this.files.set(target.targetKey, after)
     return { version: FsVersion('v3'), before: content, after }
   }
@@ -134,12 +140,14 @@ function text(result: { content: { type: string; text?: string }[] }): string {
 /** The exact model-facing descriptions; they are the tools' only guidance. */
 const fsDescriptions = {
   read: 'Read a UTF-8 text file as numbered lines, paged for long files. '
-    + 'Unlike cat, head, or tail in a shell, this counts as reading the file for later write and edit calls.',
+    + 'Unlike cat in a shell, it counts as a read for later `write` calls.',
   write: 'Create a UTF-8 text file or replace all of its content. '
-    + 'Replacing an existing file is refused unless you have read, written, or edited it in this session and it has not changed since. '
+    + 'Replacing an existing file requires a current read of it. '
     + 'For a partial change, edit avoids resending the whole file.',
   edit: 'Replace literal text in an existing UTF-8 text file. '
-    + 'The edit is refused unless you have read, written, or edited the file in this session and it has not changed since.',
+    + 'Each old_string must match the current file exactly once unless replace_all is set. '
+    + 'Put several changes to one file in `edits`, each matched against the original. '
+    + 'Use this, not shell scripts, to change files.',
 } as const
 
 describe('session cwd resolution', () => {
@@ -198,10 +206,11 @@ describe('registration', () => {
     for (const name of ['read', 'write', 'edit'] as const) {
       expect(schema(name)?.description).toBe(fsDescriptions[name])
     }
-    expect(props('edit')['old_string']?.description).toBe('Text to replace, matching the file exactly, including whitespace but without the line numbers read adds. '
-      + 'It must occur exactly once unless replace_all is true.')
-    expect(props('edit')['new_string']?.description).toBe('Literal replacement text. Use an empty string to delete the match.')
-    expect(props('edit')['replace_all']?.description).toBe('Replace every occurrence. Defaults to false.')
+    expect(props('edit')['old_string']?.description).toBe('Exact text to replace, including whitespace, without read\'s line numbers.')
+    expect(props('edit')['new_string']?.description).toBe('Replacement text; empty deletes the match.')
+    expect(props('edit')['replace_all']?.description).toBe('Replace every occurrence.')
+    expect(props('edit')['edits']?.description).toBe('Several replacements, instead of old_string and new_string.')
+    expect((schema('edit')?.parameters as { required?: string[] }).required).toEqual(['file_path'])
   })
 
   it('contributes no system-prompt section', async () => {
@@ -317,7 +326,7 @@ describe('read tool', () => {
     expect((await call(ctx, 'read', { file_path: 'a.txt' }, { session })).isError).toBe(false)
     const edited = await call(ctx, 'edit', { file_path: 'a.txt', old_string: 'hello', new_string: 'bye' }, { session })
     expect(edited.isError).toBe(false)
-    expect(fs.editIntents).toEqual([{ version: 'v1' }])
+    expect(fs.editIntents).toEqual([{ kind: 'anchored', version: 'v1' }])
   })
 
   it('propagates FS_NOT_FOUND for an absent file', async () => {
@@ -497,12 +506,12 @@ describe('edit tool', () => {
     expect(text(result)).toContain('file_path must be a non-empty string')
   })
 
-  it('propagates FS_NOT_OBSERVED when the file was never read (the gate decides)', async () => {
+  it('passes the gate\'s anchored decision for a never-read file to the provider', async () => {
     const { ctx, fs } = await setup()
     fs.files.set('key:a.txt', 'hello')
-    const result = await call(ctx, 'edit', { file_path: 'a.txt', old_string: 'a', new_string: 'b' }, { session: { header: {} } })
-    expect(result.isError).toBe(true)
-    expect(result.error).toMatchObject({ info: { code: 'FS_NOT_OBSERVED' } })
+    const result = await call(ctx, 'edit', { file_path: 'a.txt', old_string: 'hello', new_string: 'bye' }, { session: { header: {} } })
+    expect(result.isError).toBe(false)
+    expect(fs.editIntents).toEqual([{ kind: 'anchored' }])
   })
 })
 
@@ -1016,9 +1025,17 @@ describe('sandbox escalation API (write/edit)', () => {
 
   it('rejects the escalation argument pairing (one field without the other)', async () => {
     const { ctx } = await setupConfining()
-    const missing = await call(ctx, 'write', { file_path: 'a.txt', content: 'x', sandbox_permissions: 'workspace-write' }, escalationAgent())
+    const missing = await call(ctx, 'write', { file_path: 'a.txt', content: 'x', sandbox_permissions: 'danger-full-access' }, escalationAgent())
     expect(missing.isError).toBe(true)
     expect(text(missing)).toContain('sandbox_permissions requires a justification')
+  })
+
+  it('ignores a request that does not widen the standing mode, with or without a justification', async () => {
+    const { ctx } = await setupConfining()
+    const same = await call(ctx, 'write', { file_path: 'a.txt', content: 'x', sandbox_permissions: 'workspace-write' }, escalationAgent())
+    expect(same.isError).toBe(false)
+    const blank = await call(ctx, 'write', { file_path: 'b.txt', content: 'x', sandbox_permissions: 'workspace-write', justification: '' }, escalationAgent())
+    expect(blank.isError).toBe(false)
   })
 
   it('sandbox_permissions under a non-confining backend fails closed (unadvertised field still reaches execute)', async () => {

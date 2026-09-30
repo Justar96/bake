@@ -1,10 +1,10 @@
 /** CLIProxyAPI setup and model mapping without network or credential fixtures. */
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it, mock } from 'bun:test'
 import type { Context } from '@deepseek-ai/cordis'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'
 import {
   CliProxyCheckError, cliProxyApi, cliProxyEndpoints, cliProxyFailureText, cliProxyModels, cliProxyUpgradeNotice,
-  configureCliProxyApi, fetchCliProxyModels, planCliProxyRouteUpgrade, upgradeCliProxyRoute,
+  cliProxyModelsInUse, configureCliProxyApi, fetchCliProxyModels, planCliProxyRouteUpgrade, refreshCliProxyModels, upgradeCliProxyRoute,
 } from '../src/cliproxyapi.ts'
 import type { LoginPrompt } from '../src/login.ts'
 
@@ -43,13 +43,15 @@ describe('CLIProxyAPI models', () => {
 
   it('serves each family over the protocol it relays cleanly', () => {
     const apis = cliProxyModels({ data: ['kimi-k3', 'moonshotai/kimi-k3-256k', 'glm-5.3-flash', 'qwen3-coder-plus',
-      'deepseek-v4-pro', 'MiniMax-M3', 'gpt-6-sol', 'claude-opus-5-5', 'anthropic/claude-sonnet-5', 'gemini-3.8-flash-high', 'grok-4.7']
+      'deepseek-v4-pro', 'MiniMax-M3', 'gpt-6-sol', 'gpt-6.1-sol', 'claude-opus-5-5', 'claude-sonnet-5-5',
+      'anthropic/claude-sonnet-5', 'gemini-3.8-flash-high', 'grok-4.7']
       .map(id => ({ id })) }).map(model => [model.id, model.api])
     expect(apis).toEqual([
       ['kimi-k3', 'openai-completions'], ['moonshotai/kimi-k3-256k', 'openai-completions'],
       ['glm-5.3-flash', 'openai-completions'], ['qwen3-coder-plus', 'openai-completions'],
       ['deepseek-v4-pro', 'openai-completions'], ['MiniMax-M3', 'openai-completions'],
-      ['gpt-6-sol', undefined], ['claude-opus-5-5', 'anthropic-messages'], ['anthropic/claude-sonnet-5', 'anthropic-messages'],
+      ['gpt-6-sol', undefined], ['gpt-6.1-sol', undefined], ['claude-opus-5-5', 'anthropic-messages'],
+      ['claude-sonnet-5-5', 'anthropic-messages'], ['anthropic/claude-sonnet-5', 'anthropic-messages'],
       ['gemini-3.8-flash-high', undefined], ['grok-4.7', undefined],
     ])
     // The listing's owner decides for an id that does not name its family.
@@ -60,12 +62,15 @@ describe('CLIProxyAPI models', () => {
   it('sends Claude to the proxy root, with adaptive thinking only where it takes an effort level', () => {
     const models = cliProxyModels({ data: [
       { id: 'claude-opus-5-5', owned_by: 'anthropic', supported_reasoning_levels: ['none', 'low', 'high', 'xhigh', 'max'] },
+      { id: 'claude-sonnet-5-5', owned_by: 'anthropic', supported_reasoning_levels: ['none', 'low', 'medium', 'high', 'xhigh', 'max'] },
       { id: 'claude-opus-4-5-20251101', owned_by: 'anthropic', supported_reasoning_levels: ['none', 'low', 'high'] },
       { id: 'gpt-6-sol', owned_by: 'openai', supported_reasoning_levels: ['low', 'high'] },
     ] }, 'https://proxy.example')
     expect(models).toEqual([
       { id: 'claude-opus-5-5', api: 'anthropic-messages', baseURL: 'https://proxy.example', name: 'claude-opus-5-5',
         reasoningEfforts: { low: 'low', high: 'high', xhigh: 'xhigh', max: 'max' }, compat: { forceAdaptiveThinking: true } },
+      { id: 'claude-sonnet-5-5', api: 'anthropic-messages', baseURL: 'https://proxy.example', name: 'claude-sonnet-5-5',
+        reasoningEfforts: { low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh', max: 'max' }, compat: { forceAdaptiveThinking: true } },
       { id: 'claude-opus-4-5-20251101', api: 'anthropic-messages', baseURL: 'https://proxy.example', name: 'claude-opus-4-5-20251101',
         reasoningEfforts: { low: 'low', high: 'high' } },
       { id: 'gpt-6-sol', name: 'gpt-6-sol', reasoningEfforts: { low: 'low', high: 'high' } },
@@ -175,6 +180,93 @@ it('uses the saved connection URL when refreshing models', async () => {
     return question.kind === 'text' ? '' : 'new-key'
   }, new AbortController().signal, labels, fetcher)
   expect(questions[0]).toMatchObject({ fallback: 'https://proxy.example/prefix' })
+})
+
+describe('refreshing a saved route\'s models', () => {
+  // A route the current login writes, as the settings service resolves it.
+  const saved = {
+    displayName: 'CLIProxyAPI', apiKeyEnv: 'CLIPROXYAPI_API_KEY', api: 'openai-responses',
+    baseURL: 'https://proxy.example/v1', models: [{ id: 'gpt-old', name: 'gpt-old', input: [] }, { id: 'gpt-kept', name: 'gpt-kept' }],
+    retryPolicy: { mode: 'normal', backoff: { maxDelayMs: 60_000 } }, compat: { sendSessionAffinityHeaders: true },
+  }
+
+  function routeContext(route: unknown, writes: unknown[], options: { key?: string | undefined, writable?: boolean } = {}): Context {
+    return {
+      get(name: string) {
+        if (name === 'credentials') {
+          return { resolve: async () => 'key' in options && options.key === undefined ? undefined : { value: options.key ?? 'proxy-key', source: 'file' } }
+        }
+        if (name === 'settings') {
+          return { writable: options.writable ?? true, get: () => ({ providers: { cliproxyapi: route } }),
+            mutate: async (ns: string, ops: unknown) => { writes.push([ns, ops]) } }
+        }
+        return undefined
+      },
+    } as unknown as Context
+  }
+
+  it('saves the models the proxy lists now, keeping a model still in use', async () => {
+    const writes: unknown[] = []
+    const fetcher = (async (url: string, init: RequestInit) => {
+      expect(url).toBe('https://proxy.example/v1/models?client_version=pi')
+      expect(new Headers(init.headers).get('Authorization')).toBe('Bearer proxy-key')
+      return Response.json({ data: [{ id: 'gpt-new' }, { id: 'claude-new', owned_by: 'anthropic' }] })
+    }) as typeof fetch
+    await expect(refreshCliProxyModels(routeContext(saved, writes), new AbortController().signal, ['gpt-kept'], fetcher))
+      .resolves.toBe(true)
+    expect(writes).toEqual([['llm-pi-ai', [{ op: 'set', path: ['providers', 'cliproxyapi', 'models'], value: [
+      { id: 'gpt-new', name: 'gpt-new' },
+      { id: 'claude-new', api: 'anthropic-messages', baseURL: 'https://proxy.example', name: 'claude-new' },
+      { id: 'gpt-kept', name: 'gpt-kept' },
+    ] }]]])
+  })
+
+  it('writes nothing when the list is unchanged, ignoring fields the settings service fills in', async () => {
+    const writes: unknown[] = []
+    const fetcher = (async () => Response.json({ data: [{ id: 'gpt-old' }, { id: 'gpt-kept' }] })) as unknown as typeof fetch
+    await expect(refreshCliProxyModels(routeContext(saved, writes), new AbortController().signal, [], fetcher)).resolves.toBe(false)
+    expect(writes).toEqual([])
+  })
+
+  it('leaves routes it does not own, and asks nothing without a key or a writable file', async () => {
+    const writes: unknown[] = []
+    const fetcher = mock(async () => Response.json({ data: [{ id: 'gpt-new' }] })) as unknown as typeof fetch
+    const signal = new AbortController().signal
+    for (const route of [undefined, { ...saved, apiKeyEnv: 'OTHER_KEY' }, { ...saved, api: 'openai-completions' },
+      { ...saved, retryPolicy: undefined }]) {
+      await expect(refreshCliProxyModels(routeContext(route, writes), signal, [], fetcher)).resolves.toBe(false)
+    }
+    await expect(refreshCliProxyModels(routeContext(saved, writes, { key: undefined }), signal, [], fetcher)).resolves.toBe(false)
+    await expect(refreshCliProxyModels(routeContext(saved, writes, { writable: false }), signal, [], fetcher)).resolves.toBe(false)
+    expect(fetcher).not.toHaveBeenCalled()
+    expect(writes).toEqual([])
+  })
+
+  it('names the proxy models the session, the default, and the subagent allow-list use', () => {
+    const ctx = {
+      get(name: string) {
+        if (name === 'agentDefaultModel') return { currentSelection: () => ({ provider: 'cliproxyapi', model: 'gpt-default' }) }
+        if (name === 'settings') {
+          return { get: (ns: string) => ns === 'subagent-model-selection' ? { allowedModels: [
+            { provider: 'cliproxyapi', model: 'claude-sub' }, { provider: 'deepseek', model: 'deepseek-v4-flash' },
+            { provider: 'cliproxyapi', model: 'gpt-default' },
+          ] } : undefined }
+        }
+        return undefined
+      },
+    } as unknown as Context
+    expect(cliProxyModelsInUse(ctx, { provider: 'cliproxyapi', model: 'gpt-session' }))
+      .toEqual(['gpt-session', 'gpt-default', 'claude-sub'])
+    expect(cliProxyModelsInUse({ get: () => undefined } as unknown as Context, { provider: 'openai', model: 'gpt-6' })).toEqual([])
+  })
+
+  it('keeps the saved list when the proxy cannot be read', async () => {
+    const writes: unknown[] = []
+    const fetcher = (async () => new Response('', { status: 503 })) as unknown as typeof fetch
+    await expect(refreshCliProxyModels(routeContext(saved, writes), new AbortController().signal, [], fetcher))
+      .rejects.toBeInstanceOf(CliProxyCheckError)
+    expect(writes).toEqual([])
+  })
 })
 
 describe('upgrading a route an earlier login wrote', () => {

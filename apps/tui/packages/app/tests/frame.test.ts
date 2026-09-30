@@ -41,6 +41,16 @@ describe('resolveFrame', () => {
     expect(ask(utf8, { locale: 'zh' })).toBe('classic')
   })
 
+  test('draws the rounded frame in Windows Terminal, which sets no locale or TERM', () => {
+    const windows = { WT_SESSION: '0f3c9a52-3a0e-4d8e-9a55-6f1b1c2d3e4f' }
+    expect(ask(windows)).toBe('round')
+    expect(ask({ ...windows, LANG: 'C' })).toBe('round')
+    // A CJK locale still names a terminal that may draw Ambiguous characters wide.
+    expect(ask({ ...windows, LANG: 'zh_CN.UTF-8' })).toBe('classic')
+    expect(ask(windows, { locale: 'zh' })).toBe('classic')
+    expect(ask({ WT_SESSION: '' })).toBe('classic')
+  })
+
   test('reads the variables in the order POSIX resolves them', () => {
     expect(ask({ LC_ALL: 'en_US.UTF-8', LC_CTYPE: 'zh_CN.UTF-8', LANG: 'C', TERM: 'xterm' })).toBe('round')
     expect(ask({ LC_CTYPE: 'zh_CN.UTF-8', LANG: 'en_US.UTF-8', TERM: 'xterm' })).toBe('classic')

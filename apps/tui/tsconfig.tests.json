@@ -50,9 +50,6 @@
       "path": "../../packages/compaction/command-compact"
     },
     {
-      "path": "../../packages/plan/plan-mode"
-    },
-    {
       "path": "../../packages/context/file-reference-local"
     },
     {

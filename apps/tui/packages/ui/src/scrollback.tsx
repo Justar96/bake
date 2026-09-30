@@ -63,8 +63,8 @@ const Committed = memo(function Committed({ batch, heading, opening, budget, res
       ? item.kind === 'welcome'
         ? <Welcome key={index} version={item.version} heading={item.heading} access={item.access} copy={copy} frame={frame} columns={columns} />
         : <React.Fragment key={index}>{present({ kind: 'notice', tone: 'info', text: item.text }, result)
-            .map((line, part) => <Line key={part} line={line} budget={budget} />)}</React.Fragment>
-      : <Line key={index} line={item} budget={budget} />}
+            .map((line, part) => <Line key={part} line={line} budget={budget} frame={frame} />)}</React.Fragment>
+      : <Line key={index} line={item} budget={budget} frame={frame} />}
   </Static>
 })
 

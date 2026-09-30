@@ -70,7 +70,7 @@ it('dims reasoning and metadata, and gives actions and outcomes their palette we
     const preview = { lines: 3, unit: 'lines', more: 'more lines' };
     const lines = ${JSON.stringify(rows)}.flatMap(row => present(row, preview));
     process.stdout.write(renderToString(React.createElement(React.Fragment, null,
-      ...lines.map((line, key) => React.createElement(Line, { line, key, budget }))), { columns: 80 }));
+      ...lines.map((line, key) => React.createElement(Line, { line, key, budget, frame: 'classic' }))), { columns: 80 }));
   `], { cwd: new URL('../../../../../', import.meta.url), env, encoding: 'utf8', timeout: 20_000 })
   // Reasoning is a dim, italic paragraph at the rail with no verb, so it is
   // the working-out, not output and not the answer.
@@ -118,7 +118,7 @@ it('draws a step\'s tree dim and uncoloured, and puts a failed call\'s failure i
     import { budgetFor } from ${JSON.stringify(new URL('../src/layout.ts', import.meta.url).href)};
     const lines = ${JSON.stringify(rows)}.flatMap(row => present(row, { lines: 3, unit: 'lines', more: 'more lines', failures: 'failed' }));
     process.stdout.write(renderToString(React.createElement(React.Fragment, null,
-      ...lines.map((line, key) => React.createElement(Line, { line, key, budget: budgetFor({ columns: 80, rows: 40 }) }))), { columns: 80 }));
+      ...lines.map((line, key) => React.createElement(Line, { line, key, budget: budgetFor({ columns: 80, rows: 40 }), frame: 'classic' }))), { columns: 80 }));
   `], { cwd: new URL('../../../../../', import.meta.url), env, encoding: 'utf8', timeout: 20_000 })
   const rgb = (hex: string) => `\u001b[38;2;${[1, 3, 5].map(index => Number.parseInt(hex.slice(index, index + 2), 16)).join(';')}m`
   // The step's head keeps its state colour.
@@ -156,10 +156,11 @@ it('colours the running header\'s word, leaves the rule bare, and keeps the stat
         React.createElement(Header, { columns: 100, clock,
           state: { kind: 'running', word: 'Working', phase: undefined, startedAt: 0, color: PALETTE.running } })),
       React.createElement(Rule, { columns: 100, frame: 'round' }),
-      ...[850, 480, 120].map(cached => row({ plan: { active: true, pending: false }, thinkingLevel: 'high',
+      ...[850, 480, 120].map(cached => row({ thinkingLevel: 'medium',
         context: { used: 500, window: 128_000 }, usage: { input: 1000, output: 100, cached } })),
       ...[65_000, 75_000, 85_000, 95_000].map(used => row({ context: { used, window: 100_000 } })),
-      row({ context: { used: 62_000, window: 100_000, compactAt: 80_000 } })),
+      row({ context: { used: 62_000, window: 100_000, compactAt: 80_000 } }),
+      ...['low', 'high', 'xhigh', 'max'].map(thinkingLevel => row({ thinkingLevel }))),
       { columns: 120 }));
   `], { cwd: new URL('../../../../../', import.meta.url), env, encoding: 'utf8', timeout: 20_000 })
   const rgb = (hex: string) => `\u001b[38;2;${[1, 3, 5].map(index => Number.parseInt(hex.slice(index, index + 2), 16)).join(';')}m`
@@ -171,8 +172,7 @@ it('colours the running header\'s word, leaves the rule bare, and keeps the stat
   expect(rule).toBe(`\u001b[2m${'─'.repeat(100)}\u001b[22m`)
   // The model has no label and the normal foreground; labels are dim, values are not.
   expect(rows[0]!.startsWith('m ')).toBe(true)
-  expect(rows[0]).toContain('\u001b[2mPlan\u001b[22m')
-  expect(rows[0]).toContain('\u001b[2mthink \u001b[22mhigh')
+  expect(rows[0]).toContain('\u001b[2mthink \u001b[22mmedium')
   expect(rows[0]).toContain('\u001b[2mctx \u001b[22m~0% (500/128k)')
   expect(rows[0]).toContain('\u001b[2m/w\u001b[22m')
   // The totals and the cache hit's label are one dim run. A healthy hit is
@@ -188,6 +188,11 @@ it('colours the running header\'s word, leaves the rule bare, and keeps the stat
   }
   // The compaction mark is dim beside a reading that turned yellow ten points under orange.
   expect(rows[7]).toContain(`${rgb(CONTEXT_RAMP[1])}~62% (62k/100k)\u001b[39m\u001b[2m · compacts at 80%\u001b[22m`)
+  // The thinking level warms with the effort: a light one dim with its label, then blue, orange, and pink.
+  expect(rows[8]).toContain('\u001b[2mthink low\u001b[22m')
+  for (const [index, [level, tone]] of ([['high', PALETTE.asking], ['xhigh', CONTEXT_RAMP[2]], ['max', AGENT_TONES[1]]] as const).entries()) {
+    expect(rows[9 + index]).toContain(`\u001b[2mthink \u001b[22m${rgb(tone)}${level}`)
+  }
 })
 
 it('draws the task row neutral but for its current task\'s marker', () => {
@@ -240,7 +245,7 @@ it('colours compaction blue, by /compact or inside a turn, never the turn\'s ora
     // The transcript's mark where history was compacted.
     const notice = present({ kind: 'notice', tone: 'info', text: dictionaries.en.compacted, compaction: true }, { lines: 3, unit: 'lines', more: 'more' });
     process.stdout.write(renderToString(React.createElement(React.Fragment, null, ...notice.map((line, key) =>
-      React.createElement(Line, { line, key, budget: budgetFor({ columns: 80, rows: 40 }) }))), { columns: 80 }) + '\\nEND\\n');
+      React.createElement(Line, { line, key, budget: budgetFor({ columns: 80, rows: 40 }), frame: 'classic' }))), { columns: 80 }) + '\\nEND\\n');
   `], { cwd: new URL('../../../../../', import.meta.url), env, encoding: 'utf8', timeout: 20_000 })
   const rgb = (hex: string) => `\u001b[38;2;${[1, 3, 5].map(index => Number.parseInt(hex.slice(index, index + 2), 16)).join(';')}m`
   const rendered = frames.split('END\n').filter(frame => frame.trim() !== '')

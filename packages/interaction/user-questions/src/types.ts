@@ -2,7 +2,6 @@
 
 import type { Scoped } from '@deepseek-ai/dsh-scope'
 import type { Agent } from '@deepseek-ai/dsh-agent/types'
-import type { ToolCallId } from '@deepseek-ai/dsh-llm/brand'
 
 /** One selectable answer offered to the user. */
 export interface AskUserQuestionOption {
@@ -10,26 +9,6 @@ export interface AskUserQuestionOption {
   label: string
   /** Optional extra context rendered by capable UIs. */
   description?: string
-}
-
-/**
- * A caller-declared presentation intent: the question IS this kind of
- * decision, so a UI that recognises the tag may present it as such instead of as a
- * generic option list. Tagged so further intents can be added; a UI that does
- * not know a tag renders the generic flow, and the answer encoding is identical
- * either way — an intent changes presentation only, never the protocol.
- */
-export type AskUserQuestionIntent = {
-  /** A plan submitted for review: `detail` is the plan markdown `ask()` requires, and the decision approves or declines it. */
-  kind: 'plan-review'
-  /**
-   * The option label that approves the plan; every other option declines it.
-   * Named rather than positional so no UI infers the verdict from option order.
-   * An `approve` naming no option of its own question is rejected at `ask()`.
-   */
-  approve: string
-  /** Logged tool invocation whose arguments contain the reviewed plan. */
-  callId?: ToolCallId
 }
 
 /** One question in a user-questions request. */
@@ -46,8 +25,6 @@ export interface AskUserQuestionItem {
   options?: AskUserQuestionOption[]
   /** Whether more than one option may be selected. Defaults to single-select. */
   multiSelect?: boolean
-  /** Optional presentation intent for capable UIs; absent asks for the generic option list. */
-  intent?: AskUserQuestionIntent
 }
 
 /** Answer to one question. */

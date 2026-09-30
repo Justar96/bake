@@ -38,7 +38,7 @@
     maxInlineBytes: 16384
 
 # The agent's own rows belong to its preset: instructions, the shells, file
-# tools, skills, goal controls, plan mode, delegation, workflows, tasks, and
+# tools, skills, goal controls, delegation, workflows, tasks, and
 # web tools. The base copies would run on the host plane, where their global
 # tools and untagged listeners reach every preset agent as well. A preset that
 # mounts the same row then runs it twice: the host `tool-skill` finds none of
@@ -67,8 +67,6 @@
 - id: command-goal
   disabled: true
 - id: tool-goal
-  disabled: true
-- id: plan-mode
   disabled: true
 - id: tool-subagent-control
   disabled: true

@@ -67,7 +67,7 @@ The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-a
 
 Path authorization for `read` and `read_image` belongs entirely to `ctx.fs`; media-type declarations and file signatures only decide whether `read_image` accepts the bytes returned by that backend.
 
-With the policy plugin mounted, `write` and `edit` obtain their guard from the `fs/*` intent slots, so an unread target or a stale observation fails with `FS_NOT_OBSERVED` or `FS_STALE_VERSION` and a recovery instruction. Under a confining backend (`fs-sandbox`), `write`/`edit` additionally advertise `sandbox_permissions` and `justification`; a denied mutation returns the `[sandbox: file access denied under <mode> mode]` marker with the same-turn escalation hint, and an approved retry may stamp a strictly wider mode for that one call.
+With the policy plugin mounted, `write` and `edit` obtain their guard from the `fs/*` intent slots. An unread or stale `write` fails with `FS_NOT_OBSERVED` or `FS_STALE_VERSION` and a recovery instruction. Under the default content-anchored guard, `edit` applies a uniquely matching replacement to unread or changed content and appends the numbered edited lines to its result; `replace_all` keeps the read requirement. `edits` applies several non-overlapping replacements in one atomic write. Under a confining backend (`fs-sandbox`), `write`/`edit` additionally advertise `sandbox_permissions` and `justification`; a denied mutation returns the `[sandbox: file access denied under <mode> mode]` marker with the same-turn escalation hint, and an approved retry may stamp a strictly wider mode for that one call.
 
 ### Failures and recovery
 

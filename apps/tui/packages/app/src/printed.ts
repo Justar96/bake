@@ -10,7 +10,8 @@
  * @module @dsh-tui/app/printed
  */
 
-import { finishedMarkdown, type Row } from '@dsh-tui/ui'
+import { finishedMarkdown } from '@dsh-tui/ui/markdown.ts'
+import type { Row } from '@dsh-tui/ui/rows.ts'
 import type { KeyedRow } from './live.ts'
 
 /** Text printed from one block, in stream order. */
@@ -35,10 +36,10 @@ export class Printed {
    *
    * Every text or reasoning block followed by another block is complete. The
    * last block is still streaming. An answer prints only settled Markdown,
-   * and reasoning stays whole in the live region, where the header's
-   * thinking window shows it. Nothing past the first tool call prints,
-   * because the call commits through its own event. Printing text after it
-   * would put that text above the call.
+   * and reasoning stays whole in the live region until a later block starts,
+   * since its printed form is a preview that cannot grow. Nothing past the
+   * first tool call prints, because the call commits through its own event.
+   * Printing text after it would put that text above the call.
    *
    * @param rows - the attempt's rows, keyed by block, in stream order.
    * @returns rows to append to the transcript, and rows the live region draws.

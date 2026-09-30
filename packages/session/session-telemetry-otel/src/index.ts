@@ -28,19 +28,14 @@ import {
 } from '@deepseek-ai/dsh-session-telemetry'
 import { APP_IDENTITY } from '@deepseek-ai/dsh-llm'
 import { getOrCreateAnonymousUserId } from '@deepseek-ai/dsh-anonymous-user-id'
-import {
-  BatchLogRecordProcessor,
-  LoggerProvider,
-  type BatchLogRecordProcessorOptions,
-} from '@opentelemetry/sdk-logs'
-import { OTLPLogExporter } from '@opentelemetry/exporter-logs-otlp-http'
+import type { LoggerProvider, BatchLogRecordProcessorOptions } from '@opentelemetry/sdk-logs'
 import type { OTLPExporterNodeConfigBase } from '@opentelemetry/otlp-exporter-base'
-import { SeverityNumber, type AnyValue } from '@opentelemetry/api-logs'
-import { resourceFromAttributes } from '@opentelemetry/resources'
+import type { SeverityNumber, AnyValue } from '@opentelemetry/api-logs'
 
 // The package's own manifest is the single source of the instrumentation-scope
 // version (same pattern as dsh-llm's attribution identity).
-const { version } = createRequire(import.meta.url)('../package.json') as { version: string }
+const require = createRequire(import.meta.url)
+const { version } = require('../package.json') as { version: string }
 
 /** Session-sharing policy selected by {@link Config.mode}. */
 export enum SessionTelemetryMode {
@@ -140,18 +135,11 @@ export const DEFAULT_SHUTDOWN_TIMEOUT_MILLIS = 3_000
 // protocol limit, not a deployment default.
 const MAX_TIMER_DELAY_MILLIS = 2_147_483_647
 
-/** Severity mapping from the Service Definition's three-level vocabulary to OTel severity numbers. */
-const SEVERITY: Record<SessionTelemetrySeverity, { severityNumber: SeverityNumber; severityText: string }> = {
-  info: { severityNumber: SeverityNumber.INFO, severityText: 'INFO' },
-  warn: { severityNumber: SeverityNumber.WARN, severityText: 'WARN' },
-  error: { severityNumber: SeverityNumber.ERROR, severityText: 'ERROR' },
-}
-
 /**
  * The backend plugin — the only entry a deployment loads. It always registers
  * the `sessionTelemetry` service (duplicate load throws). `FEEDBACK_ONLY` wires the SDK
  * pipeline and on-demand {@link SessionTelemetryCoordinator}; `DISABLED` constructs no
- * SDK state and listens only to warn when recorded feedback stays local.
+ * SDK modules or state and listens only to warn when recorded feedback stays local.
  */
 export class OpenTelemetrySessionBackend extends SessionTelemetryBackend {
   static inject = ['sessions']
@@ -201,6 +189,17 @@ export class OpenTelemetrySessionBackend extends SessionTelemetryBackend {
       throw new Error(`session-telemetry-otel: shutdownTimeoutMillis must be a positive finite number no greater than ${MAX_TIMER_DELAY_MILLIS}, got ${String(shutdownTimeoutMillis)}`)
     }
     this.shutdownTimeoutMillis = shutdownTimeoutMillis
+    // The SDK publishes CommonJS entries. Keep its module graph out of disabled
+    // profiles while preserving synchronous construction for enabled ones.
+    const { LoggerProvider, BatchLogRecordProcessor } = require('@opentelemetry/sdk-logs') as typeof import('@opentelemetry/sdk-logs')
+    const { OTLPLogExporter } = require('@opentelemetry/exporter-logs-otlp-http') as typeof import('@opentelemetry/exporter-logs-otlp-http')
+    const { resourceFromAttributes } = require('@opentelemetry/resources') as typeof import('@opentelemetry/resources')
+    const { SeverityNumber } = require('@opentelemetry/api-logs') as typeof import('@opentelemetry/api-logs')
+    const severity: Record<SessionTelemetrySeverity, { severityNumber: SeverityNumber; severityText: string }> = {
+      info: { severityNumber: SeverityNumber.INFO, severityText: 'INFO' },
+      warn: { severityNumber: SeverityNumber.WARN, severityText: 'WARN' },
+      error: { severityNumber: SeverityNumber.ERROR, severityText: 'ERROR' },
+    }
     this.provider = new LoggerProvider({
       resource: resourceFromAttributes({
         'service.name': APP_IDENTITY.product,
@@ -228,7 +227,7 @@ export class OpenTelemetrySessionBackend extends SessionTelemetryBackend {
       ledger.emit({
         timestamp: record.time,
         observedTimestamp: record.time,
-        ...SEVERITY[record.severity],
+        ...severity[record.severity],
         // JSON-serializable by the seam's contract (validated at Session.append),
         // which is exactly the AnyValue subset.
         body: record.body as AnyValue,

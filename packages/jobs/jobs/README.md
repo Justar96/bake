@@ -67,7 +67,7 @@ This section explains the design decisions behind the contract and points at the
 - **Contract and implementation are separate packages.** `JobRegistry` is an abstract Cordis service; loading the class directly throws, so a misconfigured composition fails at load instead of registering an empty `ctx.jobs`.
 - **One registry per process, owner-relative answers.** One instance serves every composition in the process, so registrations and deliveries are relative to the registering scope: a controller or listener registered from an unscoped context serves every owner; one registered under an agent composition's scope serves exactly the agents composed under it.
 - **Access is fenced by the owner's session id.** Ids are predictable, so authorization — not secrecy — is the boundary.
-- **Settlement is first-wins, and completion is announced last.** One terminal record, released waiters, and one round of contained listener notification; completion is announced after the record is committed and every other observer has seen it, because a reporter may open a model turn synchronously.
+- **Settlement is first-wins, and completion is announced last.** One terminal record, released waiters, and one round of contained listener notification; completion is announced after the record is committed and its waiters are released, because a reporter may open a model turn synchronously.
 - **Registrations outlive producer and controller fibers.** Owner and service disposal cancel live work and await compliant producers; a throwing teardown cancel force-fails only the record.
 
 ### Source map
@@ -81,7 +81,7 @@ This section explains the design decisions behind the contract and points at the
 
 ### Service operations
 
-Every operation is a thin projection over the registered jobs: `get` and `list` return non-consuming snapshots, `read` advances the single stream cursor, `kill` invokes producer cancellation before changing status, `wait` blocks up to a timeout, and `start()` preflights access, validation, and admission before invoking the producer's `run()` once while refusing any owner no attached controller serves; listeners observe terminal records and visible-set changes at owner granularity, and `attachController` scopes controller availability to its effect lifetime. Exact signatures and behavior live in the JSDoc on [`src/index.ts`](src/index.ts) and the generated [`ctx.jobs` Cordis surface](../../../docs/subsystems/jobs.md).
+Every operation is a thin projection over the registered jobs: `get` and `list` return non-consuming snapshots, `read` advances the single stream cursor, `kill` invokes producer cancellation before changing status, `wait` blocks up to a timeout, and `start()` preflights access, validation, and admission before invoking the producer's `run()` once while refusing any owner no attached controller serves; listeners observe terminal records at owner granularity, and `attachController` scopes controller availability to its effect lifetime. Exact signatures and behavior live in the JSDoc on [`src/index.ts`](src/index.ts) and the generated [`ctx.jobs` Cordis surface](../../../docs/subsystems/jobs.md).
 
 </details>
 

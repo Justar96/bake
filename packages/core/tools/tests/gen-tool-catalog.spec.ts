@@ -28,13 +28,13 @@ describe('gen-tool-catalog collectToolCatalog', () => {
     expect(names).toEqual([
       'ask_user_question', 'bash', 'bash', 'cordis_inspect_list',
       'cordis_inspect_query',
-      'create_goal', 'edit', 'exit_plan_mode', 'get_goal', 'glob', 'grep',
+      'create_goal', 'edit', 'get_goal', 'glob', 'grep',
       'interrupt_agent', 'job_kill', 'job_list', 'job_output',
       'list_agents', 'list_mcp_resource_templates', 'list_mcp_resources',
       'list_subagent_models', 'plugin_manager', 'present', 'pwsh', 'pwsh', 'ralph',
       'read', 'read_image', 'read_mcp_resource', 'run_code', 'schedule_create', 'schedule_delete',
       'schedule_list', 'send_message', 'skill',
-      'str_replace_editor', 'subagent', 'todo_write',
+      'str_replace_editor', 'subagent', 'todo_write', 'tool_help',
       'update_goal', 'web_fetch', 'web_search', 'workflow', 'write',
     ])
     // Every tool carries a JSON-Schema `parameters` object (what the model sees).

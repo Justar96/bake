@@ -71,9 +71,9 @@ export function applyReadTool(ctx: Context, caps: ReadToolCaps): void {
     name: 'read',
     // The observation sentence is what distinguishes this tool from a shell
     // `cat`: shipped compositions mount fs-observation-policy, which gates
-    // write/edit on this tool's `fs/observed` record.
+    // write and replace_all edits on this tool's `fs/observed` record.
     description: 'Read a UTF-8 text file as numbered lines, paged for long files. '
-      + 'Unlike cat, head, or tail in a shell, this counts as reading the file for later write and edit calls.',
+      + 'Unlike cat in a shell, it counts as a read for later `write` calls.',
     parameters: {
       file_path: { type: 'string', required: true, description: 'Absolute path, or relative to the working directory.' },
       offset: { type: 'number', description: '1-based first line to return. Defaults to 1.' },

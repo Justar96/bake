@@ -93,14 +93,11 @@ export function apply(ctx: Context): void {
   ctx.tools.register(defineTool({
     name: 'list_agents',
     description:
-      'List the continuable subagents you started, with each one\'s agent id, label, and status: running '
-      + '(working now), idle (between turns, possibly waiting on its own subagents), or ready (saved and '
-      + 'inactive; it can be resumed and is not a result to collect). A `send_message` steers a running '
-      + 'subagent at its next step and starts a new turn for an idle or ready one. Use this to look up ids, '
-      + 'not to poll: you are notified when one finishes. Subagents that cannot be read appear as diagnostics. '
-      + 'Scope `descendants` also lists the subagents below them, each with its parent\'s agent id and depth. '
-      + 'You can message only depth-1 entries, your direct subagents, but you can stop any entry\'s current '
-      + 'turn with `interrupt_agent`.',
+      'List the continuable subagents you started, with each one\'s agent id, label, and status: running, '
+      + 'idle (between turns), or ready (saved and resumable; not a result to collect). Use it to look up '
+      + 'ids, not to poll: you are notified when one finishes. Scope `descendants` adds deeper subagents '
+      + 'with their parent\'s id and depth; only depth-1 entries can be messaged, but `interrupt_agent` can '
+      + 'stop any of them.',
     parameters: {
       scope: {
         type: 'string',

@@ -4,12 +4,12 @@ idle 60: deepseek-v4-flash  思考 high  上下文 ~11%  ⎇ main  ~/bake
 idle 40: deepseek-v4-flash  上下文 ~11%  ~/bake
 idle 24: deepseek…  上下文 ~11%
 idle 12: 上下文 ~11
-plan 120: deepseek-v4-flash  规划  思考 high  上下文 ~11%  ⎇ main +2 ~3 ?1 ↑1  缓存命中 81%  可更新 v0.2.0 · /update  ~/bake
-plan 80: deepseek-v4-flash  规划  思考 high  上下文 ~11%  ⎇ main  缓存命中 81%  ~/bake
-plan 60: deepseek-v4-flash  规划  思考 high  上下文 ~11%  ⎇ main
-plan 40: deepseek-v4-flash  规划  上下文 ~11%
-plan 24: deepseek…  上下文 ~11%
-plan 12: 上下文 ~11
+update 120: deepseek-v4-flash  思考 high  上下文 ~11%  ⎇ main +2 ~3 ?1 ↑1  缓存命中 81%  可更新 v0.2.0 · /update  ~/bake
+update 80: deepseek-v4-flash  思考 high  上下文 ~11%  ⎇ main +2 ~3 ?1 ↑1  缓存命中 81%
+update 60: deepseek-v4-flash  思考 high  上下文 ~11%  ⎇ main  ~/bake
+update 40: deepseek-v4-flash  上下文 ~11%  ~/bake
+update 24: deepseek…  上下文 ~11%
+update 12: 上下文 ~11
 filling 120: deepseek-v4-flash  思考 high  上下文 ~77% (99k/128k) · 压缩于 80%  ⎇ main +2 ~3 ?1 ↑1  缓存命中 81%  ~/bake
 filling 80: deepseek-v4-flash  思考 high  上下文 ~77% (99k/128k) ▸80%  ⎇ main  ~/bake
 filling 60: deepseek-v4-flash  思考 high  上下文 ~77% (99k/128k)

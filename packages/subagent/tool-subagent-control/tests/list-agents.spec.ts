@@ -118,14 +118,11 @@ describe('dsh-tool-subagent-control/list-agents', () => {
     expect(parameters.properties?.scope?.enum).toEqual(['children', 'descendants'])
     expect(parameters.required ?? []).toEqual([])
     expect(schemas[0]!.description).toBe(
-      'List the continuable subagents you started, with each one\'s agent id, label, and status: running '
-      + '(working now), idle (between turns, possibly waiting on its own subagents), or ready (saved and '
-      + 'inactive; it can be resumed and is not a result to collect). A `send_message` steers a running '
-      + 'subagent at its next step and starts a new turn for an idle or ready one. Use this to look up ids, '
-      + 'not to poll: you are notified when one finishes. Subagents that cannot be read appear as diagnostics. '
-      + 'Scope `descendants` also lists the subagents below them, each with its parent\'s agent id and depth. '
-      + 'You can message only depth-1 entries, your direct subagents, but you can stop any entry\'s current '
-      + 'turn with `interrupt_agent`.',
+      'List the continuable subagents you started, with each one\'s agent id, label, and status: running, '
+      + 'idle (between turns), or ready (saved and resumable; not a result to collect). Use it to look up '
+      + 'ids, not to poll: you are notified when one finishes. Scope `descendants` adds deeper subagents '
+      + 'with their parent\'s id and depth; only depth-1 entries can be messaged, but `interrupt_agent` can '
+      + 'stop any of them.',
     )
     expect(parameters.properties?.scope).toMatchObject({
       description: 'children (default) lists your direct subagents; descendants lists every subagent below you.',
@@ -254,7 +251,7 @@ describe('dsh-tool-subagent-control/list-agents', () => {
     // Completion reaches the parent through its notice; listing is discovery,
     // so its inactive status must not send the model looking for a result.
     expect(schema?.description).toContain('you are notified when one finishes')
-    expect(schema?.description).toContain('it can be resumed and is not a result to collect')
+    expect(schema?.description).toContain('ready (saved and resumable; not a result to collect)')
     // The enum is the closed vocabulary the model renders, so pin it rather than
     // scanning prose that legitimately reads "not to poll for completion".
     const variants = ctx.tools.get('list_agents')?.output.schema.items?.oneOf ?? []

@@ -5,32 +5,32 @@
 
   <ESC>[2m<ESC>[4m<ESC>[3m<ESC>[1msrc/app.ts<ESC>[22m<ESC>[24m and <ESC>[1mvalue<ESC>[22m.<ESC>[23m<ESC>[22m
 
-  <ESC>[2m<ESC>[3m- [x] done<ESC>[23m<ESC>[22m
-  <ESC>[2m<ESC>[3m- [ ] next<ESC>[23m<ESC>[22m
+  <ESC>[2m<ESC>[3m• [x] done<ESC>[23m<ESC>[22m
+  <ESC>[2m<ESC>[3m• [ ] next<ESC>[23m<ESC>[22m
 
-  <ESC>[2m<ESC>[3m> quote<ESC>[23m<ESC>[22m
+  <ESC>[2m<ESC>[3m│ quote<ESC>[23m<ESC>[22m
 
   <ESC>[2m<ESC>[3m<ESC>[1mCheck<ESC>[22m<ESC>[23m
-  <ESC>[2m<ESC>[3m-----<ESC>[23m<ESC>[22m
+  <ESC>[2m<ESC>[3m─────<ESC>[23m<ESC>[22m
   <ESC>[2m<ESC>[3mready<ESC>[23m<ESC>[22m
 
   <ESC>[2m<ESC>[3m<ESC>[1mts<ESC>[22m<ESC>[23m
   <ESC>[3m<ESC>[2m  const value = 1<ESC>[22m<ESC>[23m
 
-  <ESC>[1m<ESC>[38;2;96;165;250mResult<ESC>[39m<ESC>[22m
-
-  <ESC>[1mBold<ESC>[22m and <ESC>[3mitalic<ESC>[23m with <ESC>[9mold<ESC>[29m and <ESC>[4m<ESC>[38;2;96;165;250mdocs<ESC>[39m<ESC>[24m<ESC>[2m (https://example.com)<ESC>[22m.
-
-  <ESC>[4m<ESC>[1m<ESC>[38;2;196;181;253msrc/app.ts<ESC>[39m<ESC>[22m<ESC>[24m and <ESC>[1m<ESC>[38;2;196;181;253mvalue<ESC>[39m<ESC>[22m.
-
-  <ESC>[2m- <ESC>[22m<ESC>[38;2;34;197;94m[x] <ESC>[39mdone
-  <ESC>[2m- [ ] <ESC>[22mnext
-
-  <ESC>[2m> <ESC>[22mquote
-
-  <ESC>[1m<ESC>[38;2;96;165;250mCheck<ESC>[39m<ESC>[22m
-  <ESC>[2m-----<ESC>[22m
-  ready
-
-  <ESC>[1m<ESC>[2mts<ESC>[22m
-    const value = 1
+<ESC>[38;2;207;211;217m <ESC>[39m <ESC>[4m<ESC>[1m<ESC>[38;2;96;165;250mResult<ESC>[39m<ESC>[22m<ESC>[24m
+<ESC>[38;2;207;211;217m <ESC>[39m
+<ESC>[38;2;207;211;217m <ESC>[39m <ESC>[1mBold<ESC>[22m<ESC>[38;2;207;211;217m and <ESC>[3mitalic<ESC>[23m with <ESC>[9mold<ESC>[29m and <ESC>[4m<ESC>[38;2;96;165;250mdocs<ESC>[39m<ESC>[24m<ESC>[2m (https://example.com)<ESC>[22m<ESC>[38;2;207;211;217m.<ESC>[39m
+<ESC>[38;2;207;211;217m <ESC>[39m
+<ESC>[38;2;207;211;217m <ESC>[39m <ESC>[4m<ESC>[1m<ESC>[38;2;96;165;250msrc/app.ts<ESC>[22m<ESC>[24m<ESC>[38;2;207;211;217m and <ESC>[1m<ESC>[38;2;196;181;253mvalue<ESC>[22m<ESC>[38;2;207;211;217m.<ESC>[39m
+<ESC>[38;2;207;211;217m <ESC>[39m
+<ESC>[38;2;207;211;217m <ESC>[39m <ESC>[38;2;125;211;252m• <ESC>[38;2;34;197;94m[x] <ESC>[38;2;207;211;217mdone<ESC>[39m
+<ESC>[38;2;207;211;217m <ESC>[39m <ESC>[38;2;125;211;252m• <ESC>[39m<ESC>[2m[ ] <ESC>[22m<ESC>[38;2;207;211;217mnext<ESC>[39m
+<ESC>[38;2;207;211;217m <ESC>[39m
+<ESC>[38;2;207;211;217m <ESC>[39m <ESC>[38;2;167;139;250m│ <ESC>[38;2;207;211;217mquote<ESC>[39m
+<ESC>[38;2;207;211;217m <ESC>[39m
+<ESC>[38;2;207;211;217m <ESC>[39m <ESC>[1m<ESC>[38;2;96;165;250mCheck<ESC>[39m<ESC>[22m
+<ESC>[38;2;207;211;217m <ESC>[39m <ESC>[2m─────<ESC>[22m
+<ESC>[38;2;207;211;217m <ESC>[39m <ESC>[38;2;207;211;217mready<ESC>[39m
+<ESC>[38;2;207;211;217m <ESC>[39m
+<ESC>[38;2;207;211;217m <ESC>[39m <ESC>[1m<ESC>[38;2;251;191;36mts<ESC>[39m<ESC>[22m
+<ESC>[38;2;207;211;217m <ESC>[39m <ESC>[38;2;207;211;217m  const value = 1<ESC>[39m

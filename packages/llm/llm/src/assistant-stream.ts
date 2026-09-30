@@ -8,7 +8,7 @@
 import { assertNever, deepFreeze, snapshotJsonValue } from '@deepseek-ai/dsh-util-values'
 import { BlockAssembler } from './assembler.ts'
 import type { ToolCallId } from './brand.ts'
-import type { ContentBlock, StreamChunk } from './types.ts'
+import type { StreamChunk } from './types.ts'
 
 /** One model chunk paired with its original Session timestamp. */
 export interface TimedStreamChunk {
@@ -229,139 +229,6 @@ export function expandAssistantStream(stream: readonly AssistantStreamRecord[]):
     }
   }
   return chunks
-}
-
-function hasNonWhitespace(text: string): boolean {
-  return /\S/.test(text)
-}
-
-function blockIsVisible(block: ContentBlock): boolean {
-  if (block.type === 'tool-call') return false
-  if (block.type === 'text' || block.type === 'reasoning') return hasNonWhitespace(block.text)
-  return true
-}
-
-/**
- * Whether one chunk carries the model's first output token for latency measurement.
- * @param chunk - any stream chunk.
- * @returns true for a non-empty text, reasoning, or Tool-call arguments fragment and for
- *   every name-bearing Tool-call delta; false for block, usage, and finish chunks.
- */
-export function isTokenDelta(chunk: StreamChunk): boolean {
-  switch (chunk.type) {
-    case 'text-delta':
-    case 'reasoning-delta':
-      return chunk.text !== ''
-    case 'tool-call-delta':
-      return chunk.argumentsDelta !== '' || chunk.name !== undefined
-    default:
-      return false
-  }
-}
-
-/**
- * Whether one chunk by itself contributes reader-visible transcript content.
- * Text and reasoning count only with non-whitespace content, streamed as a delta or
- * completed as a block; a block of any other kind counts at its start and its end,
- * except a Tool call, which is protocol rather than content. Usage and finish never count.
- * @param chunk - any stream chunk.
- * @returns whether a transcript reader would see this chunk.
- */
-export function isVisibleChunk(chunk: StreamChunk): boolean {
-  switch (chunk.type) {
-    case 'text-delta':
-    case 'reasoning-delta':
-      return hasNonWhitespace(chunk.text)
-    case 'block-start':
-      return chunk.blockType !== 'text' && chunk.blockType !== 'reasoning' && chunk.blockType !== 'tool-call'
-    case 'block-end':
-      return blockIsVisible(chunk.block)
-    default:
-      return false
-  }
-}
-
-/**
- * Whether one chunk carries non-whitespace text, as a text delta or a completed text block.
- * Reasoning, Tool calls, and other block kinds never count.
- * @param chunk - any stream chunk.
- * @returns whether the chunk contributes visible text.
- */
-export function chunkHasVisibleText(chunk: StreamChunk): boolean {
-  if (chunk.type === 'text-delta') return hasNonWhitespace(chunk.text)
-  return chunk.type === 'block-end' && chunk.block.type === 'text' && hasNonWhitespace(chunk.block.text)
-}
-
-function firstRunMemberTime(run: AssistantStreamRun, predicate: (fragment: string) => boolean): number | undefined {
-  const fragments = run.type === 'tool-call-chunks' ? run.args : run.texts
-  let time = run.time0
-  for (let index = 0; index < fragments.length; index += 1) {
-    if (index > 0) time += run.dt[index - 1] as number
-    if (predicate(fragments[index] as string)) return time
-  }
-  return undefined
-}
-
-/**
- * Time of the first member of one packed run that {@link isTokenDelta} accepts: a
- * name-bearing Tool-call run starts at its first member, otherwise the first non-empty fragment.
- * Stops scanning at that member.
- * @param run - one packed delta run.
- * @returns the member's reconstructed time, or undefined when no member qualifies.
- */
-export function runFirstTokenTime(run: AssistantStreamRun): number | undefined {
-  if (run.type === 'tool-call-chunks' && run.name !== undefined) return run.time0
-  return firstRunMemberTime(run, fragment => fragment !== '')
-}
-
-/**
- * Time of the first member of one packed run that {@link isVisibleChunk} accepts: the first
- * non-whitespace text or reasoning fragment. A Tool-call run has none. Stops scanning at that member.
- * @param run - one packed delta run.
- * @returns the member's reconstructed time, or undefined when no member qualifies.
- */
-export function runFirstVisibleTime(run: AssistantStreamRun): number | undefined {
-  return run.type === 'tool-call-chunks' ? undefined : firstRunMemberTime(run, hasNonWhitespace)
-}
-
-/**
- * Time of the first token in one compact stream per {@link isTokenDelta}, read from the
- * records themselves and stopping at the first qualifying member.
- * @param stream - compact records from one durable Assistant settlement.
- * @returns the first token's time, or undefined when the stream carries no token.
- */
-export function assistantStreamFirstTokenTime(stream: readonly AssistantStreamRecord[]): number | undefined {
-  for (const record of stream) {
-    const time = record.type === 'chunk'
-      ? (isTokenDelta(record.chunk) ? record.time : undefined)
-      : runFirstTokenTime(record)
-    if (time !== undefined) return time
-  }
-  return undefined
-}
-
-/**
- * Whether one compact stream carries any reader-visible content per {@link isVisibleChunk},
- * stopping at the first qualifying member.
- * @param stream - compact records from one durable Assistant settlement.
- * @returns whether a transcript reader would see anything from this stream.
- */
-export function assistantStreamHasVisibleContent(stream: readonly AssistantStreamRecord[]): boolean {
-  return stream.some(record => record.type === 'chunk'
-    ? isVisibleChunk(record.chunk)
-    : runFirstVisibleTime(record) !== undefined)
-}
-
-/**
- * Whether one compact stream carries non-whitespace text per {@link chunkHasVisibleText},
- * stopping at the first qualifying member.
- * @param stream - compact records from one durable Assistant settlement.
- * @returns whether the stream contributes visible text.
- */
-export function assistantStreamHasVisibleText(stream: readonly AssistantStreamRecord[]): boolean {
-  return stream.some(record => record.type === 'text-chunks'
-    ? record.texts.some(hasNonWhitespace)
-    : record.type === 'chunk' && chunkHasVisibleText(record.chunk))
 }
 
 /**

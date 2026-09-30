@@ -10,8 +10,11 @@
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
+import { FsError } from './types.ts'
 import type {
   FsDirEntry,
+  FsEditBasis,
+  FsEditIntent,
   FsEditOutcome,
   FsEditRequest,
   FsInfo,
@@ -29,6 +32,8 @@ export {
   FsVersion,
 } from './types.ts'
 export type {
+  FsEditBasis,
+  FsEditIntent,
   FsEditOutcome,
   FsEditRequest,
   FsDirEntry,
@@ -63,7 +68,7 @@ declare module '@deepseek-ai/cordis' {
      * @param actor - the opaque tool-execution context the decider keys off.
      * @mode waterfall
      */
-    'fs/edit-intent'(target: FsTarget, actor: object | undefined, next: () => { version: FsVersion } | undefined | Promise<{ version: FsVersion } | undefined>): Promise<{ version: FsVersion } | undefined>
+    'fs/edit-intent'(target: FsTarget, actor: object | undefined, next: () => FsEditIntent | undefined | Promise<FsEditIntent | undefined>): Promise<FsEditIntent | undefined>
     /**
      * Record an authoritative positive or negative observation. Listeners must
      * be synchronous recorders: throws fail the tool call and returned promises
@@ -256,12 +261,13 @@ export abstract class FileSystem extends Service {
   ): Promise<FsWriteOutcome>
 
   /**
-   * Atomically edit literal text. When supplied, the version guard is checked
-   * before matching so stale content reports `FS_STALE_VERSION`; omission edits
-   * the current content without a freshness precondition.
+   * Atomically edit literal text. The guard is checked with {@link checkEditGuard}
+   * before matching, so stale content reports `FS_STALE_VERSION`; omission edits
+   * the current content without a freshness precondition. Several requests are
+   * each matched against the original content and publish in one write.
    * @param target - the resolved target to edit.
-   * @param edit - the literal search/replace request.
-   * @param expected - the version guard; omit for an unconditional edit.
+   * @param edit - one literal search/replace request, or several with non-overlapping matches.
+   * @param expected - the version or anchored guard; omit for an unconditional edit.
    * @param signal - aborts before atomic publication takes effect.
    * @param sandboxPolicy - the per-call mode and workspace root this edit runs
    *   under; a sandboxing backend fences the edit by it, the bare backend
@@ -270,11 +276,44 @@ export abstract class FileSystem extends Service {
    */
   abstract editText(
     target: FsTarget,
-    edit: FsEditRequest,
-    expected?: { version: FsVersion },
+    edit: FsEditRequest | readonly FsEditRequest[],
+    expected?: FsEditIntent,
     signal?: AbortSignal,
     sandboxPolicy?: SandboxExecutionPolicy,
   ): Promise<FsEditOutcome>
+}
+
+/**
+ * Apply an edit guard against the current version, inside the provider's
+ * per-target critical section, so every backend enforces one rule.
+ * @param current - the target's version as read under the lock.
+ * @param expected - the caller's guard; `undefined` is unconditional.
+ * @param edits - the replacements about to be matched.
+ * @param displayPath - the path used in diagnostics.
+ * @returns the anchored basis, or `undefined` for other guards.
+ * @throws FsError `FS_STALE_VERSION` for a stale version guard or a stale
+ *   anchored `replaceAll`; `FS_NOT_OBSERVED` for an unobserved anchored `replaceAll`.
+ */
+export function checkEditGuard(
+  current: FsVersion,
+  expected: FsEditIntent | undefined,
+  edits: readonly FsEditRequest[],
+  displayPath: string,
+): FsEditBasis | undefined {
+  if (expected === undefined) return undefined
+  const stale = (): FsError => new FsError(`cannot edit "${displayPath}": file changed since it was read`, 'FS_STALE_VERSION')
+  if (expected.kind !== 'anchored') {
+    if (current !== expected.version) throw stale()
+    return undefined
+  }
+  const basis: FsEditBasis = expected.version === undefined
+    ? 'unobserved'
+    : expected.version === current ? 'observed' : 'changed'
+  if (basis !== 'observed' && edits.some(edit => edit.replaceAll)) {
+    if (basis === 'changed') throw stale()
+    throw new FsError(`cannot edit "${displayPath}" with replace_all: file has not been read`, 'FS_NOT_OBSERVED')
+  }
+  return basis
 }
 
 export default FileSystem

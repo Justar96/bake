@@ -2,7 +2,6 @@
 
 import type {
   SessionEventResultFilter,
-  SessionEventSearchDocument,
   SessionRecord,
   SessionResultFilter,
   SessionResultRange,
@@ -21,20 +20,6 @@ export function filterSessionResults<T extends SessionRecord>(
 ): T[] {
   const predicates = filters.map(sessionPredicate)
   return records.filter(record => predicates.every(predicate => predicate(record)))
-}
-
-/**
- * Apply ANDed event filters to extracted semantic documents.
- * @param documents - semantic documents produced by {@link buildSessionEventSearchDocuments}.
- * @param filters - metadata and literal-text predicates.
- * @returns documents accepted by every clause, in input order.
- */
-export function filterSessionEventDocuments<T extends SessionEventSearchDocument>(
-  documents: readonly T[],
-  filters: readonly SessionEventResultFilter[] = [],
-): T[] {
-  const predicates = filters.map(eventPredicate)
-  return documents.filter(document => predicates.every(predicate => predicate(document)))
 }
 
 /**
@@ -132,30 +117,6 @@ function sessionPredicate(filter: SessionResultFilter): (record: SessionRecord) 
     case 'availability':
       assertAllowedValues(filter.kind, filter.values, ['live', 'persisted'])
       return record => filter.values.some(value => value === 'live' ? record.live : record.persisted)
-    default:
-      return unknownFilter(filter)
-  }
-}
-
-function eventPredicate(filter: SessionEventResultFilter): (document: SessionEventSearchDocument) => boolean {
-  switch (filter.kind) {
-    case 'seq': {
-      const range = validateRange(filter.kind, filter)
-      return document => matchesRange(document.seq, range)
-    }
-    case 'time': {
-      const range = validateRange(filter.kind, filter)
-      return document => matchesRange(document.time, range)
-    }
-    case 'type':
-      return document => filter.values.includes(document.type)
-    case 'surface':
-      assertAllowedValues(filter.kind, filter.values, ['current', 'shadowed', 'log-only'])
-      return document => filter.values.includes(document.surface)
-    case 'text': {
-      const pattern = compileSessionTextFilter(filter.text)
-      return document => pattern.test(document.text)
-    }
     default:
       return unknownFilter(filter)
   }

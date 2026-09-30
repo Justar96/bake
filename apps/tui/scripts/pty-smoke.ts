@@ -36,7 +36,7 @@ import { COLUMN, MARKER } from '../packages/ui/src/layout.ts'
 import { toolLabel } from '../packages/ui/src/present.ts'
 import { dictionaries } from '../packages/ui/src/copy.ts'
 import { FOLD_REST } from '../packages/ui/src/activity.ts'
-import { PALETTE } from '../packages/ui/src/palette.ts'
+import { MARKDOWN, PALETTE } from '../packages/ui/src/palette.ts'
 
 const ROOT = resolve(import.meta.dir, '../../..')
 const FIXTURE = join(ROOT, 'snapshots/session/bash-tool-turn/session.v3.jsonl')
@@ -1075,30 +1075,6 @@ scenario('git-status', 'the status line names the workspace branch and its chang
     }
   })
 
-scenario('plan', 'plan-mode status follows the logged Harness projection', { replayOnly: true },
-  async run => {
-    const before = await run.logs()
-    await run.terminal('plan', [], async tty => {
-      tty.send('/plan\r', 'enter plan mode')
-      await tty.expect('deepseek-v4-flash  Plan  ')
-      const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
-      let consumed = 0
-      try {
-        tty.send('/plan off\r', 'leave plan mode')
-        await tty.wait('the status row without plan mode', async () => {
-          const raw = tty.raw
-          await new Promise<void>(resolve => screen.write(raw.slice(consumed), resolve))
-          consumed = raw.length
-          const line = screen.buffer.active.getLine(screen.buffer.active.viewportY + screen.rows - 2)?.translateToString(true) ?? ''
-          return SCREEN.status.test(line) && line.includes('deepseek-v4-flash') && !line.includes('Plan')
-        })
-      } finally { screen.dispose() }
-    })
-    const log = await events(await run.created(before, 'persisted'))
-    const modes = log.filter(e => e.type === 'plan/mode').map(e => e.data.active)
-    assert(same(modes, [true, false]), 'plan status did not follow the logged mode changes')
-  })
-
 scenario('thinking', 'selected and provider-default thinking levels follow model changes without wrapping', { replayOnly: true },
   async run => {
     const before = await run.logs()
@@ -1693,15 +1669,16 @@ scenario('markdown', 'streamed Markdown keeps semantic colours, formats once, su
       const lines = Array.from({ length: screen.buffer.active.length }, (_, row) => screen.buffer.active.getLine(row)?.translateToString(true) ?? '')
       assert(lines.filter(line => line === '  Formatted response').length === 1, 'Markdown heading was lost or printed twice')
       const text = lines.join('\n')
-      assert(text.includes('Review the formatter.') && lines.some(line => /Check\s+\|\s+State/.test(line))
-        && lines.some(line => /Stream\s+\|\s+ready/.test(line)), 'reasoning or table was not formatted')
+      assert(text.includes('Review the formatter.') && lines.some(line => /Check\s+\u2502\s+State/.test(line))
+        && lines.some(line => /Stream\s+\u2502\s+ready/.test(line)), 'reasoning or table was not formatted')
       assert(text.includes('const snake_case = "**literal**"') && !text.includes('```'), 'code was parsed as prose or retained its fences')
       assert([...text.matchAll(/https:\/\/example\.org/g)].length === 1 && [...text.matchAll(/src\/helper\.ts/g)].length === 1,
         'a formatted link label duplicated its target')
-      assert(text.includes('- [x] parsed') && text.includes('- [ ] verified'), 'task states were lost')
+      assert(text.includes('\u2022 [x] parsed') && text.includes('\u2022 [ ] verified'), 'task states were lost')
       if (coloured) {
         for (const [needle, expected] of [['Formatted response', PALETTE.reference], ['snake_case', PALETTE.code],
-          ['[x]', PALETTE.done], ['Check', PALETTE.reference]] as const) {
+          ['[x]', PALETTE.done], ['Check', PALETTE.reference], ['Wide ', PALETTE.body],
+          ['\u2022 [x]', MARKDOWN.bullet], ['src/helper.ts', PALETTE.reference]] as const) {
           const row = lines.findIndex(line => line.includes(needle))
           const cell = screen.buffer.active.getLine(row)?.getCell(lines[row]!.indexOf(needle))
           assert(cell?.isFgRGB() && cell.getFgColor() === Number.parseInt(expected.slice(1), 16), `${needle} lost its semantic colour`)
@@ -1784,8 +1761,13 @@ scenario('tables', 'streamed tables align columns, wrap styled cells, reflow to 
       await run.terminal(label, ['--screen', 'fullscreen', ...resume === undefined ? [] : ['--resume', resume]], async tty => {
         const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
         let consumed = 0
+        // A slow host delivers one repaint in several reads, and a screen that
+        // shows the final rows may still hold rows of the frame it replaces. A
+        // wait passes only on a capture that found no output since the last.
+        let quiet = false
         const capture = async (): Promise<string[]> => {
           const raw = tty.raw
+          quiet = raw.length === consumed
           await new Promise<void>(resolve => screen.write(raw.slice(consumed), resolve))
           consumed = raw.length
           const buffer = screen.buffer.active
@@ -1806,19 +1788,19 @@ scenario('tables', 'streamed tables align columns, wrap styled cells, reflow to 
           let wide: string[] = []
           await tty.wait('the table in aligned columns', async () => {
             wide = await capture()
-            return wide.some(line => line.includes('TABLE_DONE')) && wide.some(line => /Item\s+\|\s+Count\s+\|/.test(line))
+            return quiet && wide.some(line => line.includes('TABLE_DONE')) && wide.some(line => /Item\s+\u2502\s+Count\s+\u2502/.test(line))
               && SCREEN.status.test(wide.at(-1) ?? '')
           })
           checkContent(wide)
-          const alpha = wide.find(line => /alpha\s+\|/.test(line))!
-          const beta = wide.find(line => /beta\s+\|/.test(line))!
+          const alpha = wide.find(line => /alpha\s+\u2502/.test(line))!
+          const beta = wide.find(line => /beta\s+\u2502/.test(line))!
           assert(alpha.indexOf('125') + 3 === beta.indexOf('7') + 1, 'numeric table cells were not right-aligned')
           screen.resize(24, 40)
           tty.resize(24, 40)
           let narrow: string[] = []
           await tty.wait('the narrow table in labeled rows', async () => {
             narrow = await capture()
-            return narrow.some(line => line.includes('Item: alpha')) && narrow.some(line => line.includes('Count: 125'))
+            return quiet && narrow.some(line => line.includes('Item: alpha')) && narrow.some(line => line.includes('Count: 125'))
               && narrow.some(line => line.includes('TABLE_DONE')) && narrow.some(line => line.includes(SCREEN.caret))
           })
           checkContent(narrow)
@@ -1826,7 +1808,7 @@ scenario('tables', 'streamed tables align columns, wrap styled cells, reflow to 
           tty.resize(80, 40)
           await tty.wait('the table returns to columns', async () => {
             wide = await capture()
-            return wide.some(line => /Item\s+\|\s+Count\s+\|/.test(line)) && SCREEN.status.test(wide.at(-1) ?? '')
+            return quiet && wide.some(line => /Item\s+\u2502\s+Count\s+\u2502/.test(line)) && SCREEN.status.test(wide.at(-1) ?? '')
           })
           checkContent(wide)
         } finally { screen.dispose() }
@@ -2028,6 +2010,10 @@ scenario('cliproxyapi-upgrade', 'a CLIProxyAPI route an earlier release wrote is
       const url = new URL(request.url)
       requests.push({ path: url.pathname, affinity: request.headers.get('x-session-affinity'),
         session: request.headers.get('x-deepseek-harness-session-id') })
+      // The launch's model refresh, answered with the list the route already holds.
+      if (request.method === 'GET' && url.pathname === '/v1/models') {
+        return Response.json({ data: [{ id: 'gpt-test', name: 'GPT Test' }, { id: 'claude-test', name: 'Claude Test' }] })
+      }
       const body = await request.json() as { model: string }
       const events = [
         ['message_start', { type: 'message_start', message: { id: 'msg_upgrade', type: 'message', role: 'assistant', model: body.model,
@@ -2074,9 +2060,12 @@ scenario('cliproxyapi-upgrade', 'a CLIProxyAPI route an earlier release wrote is
       assert(upgraded.includes(fragment), `upgraded settings lack ${fragment}:\n${upgraded}`)
     }
     // Claude moved to Anthropic Messages at the proxy root, carrying the session on both headers.
-    assert(requests.length === 1 && requests[0]!.path === '/v1/messages'
-      && requests[0]!.session !== null && requests[0]!.affinity === requests[0]!.session,
+    const turns = requests.filter(request => request.path !== '/v1/models')
+    assert(turns.length === 1 && turns[0]!.path === '/v1/messages'
+      && turns[0]!.session !== null && turns[0]!.affinity === turns[0]!.session,
     `the upgraded Claude turn did not reach Messages with its session headers: ${JSON.stringify(requests)}`)
+    // The launch read the proxy's list once, after the upgrade, and found the route current.
+    assert(requests.filter(request => request.path === '/v1/models').length === 1, `the launch did not refresh the model list once: ${JSON.stringify(requests)}`)
   })
 
 scenario('agents', 'the built TUI exposes the Harness subagent catalog through /agents',
@@ -2096,10 +2085,9 @@ scenario('agents', 'the built TUI exposes the Harness subagent catalog through /
   })
 
 scenario('presets', 'minimal and cordis start, answer the recorded turn, and read what their presets mount; minimal gets only '
-  + 'its shell, and its status line and sheet keys work without the task-list and plan-mode units no preset registered',
+  + 'its shell, and its status line and sheet keys work without the task-list unit no preset registered',
   { replayOnly: true },
   async run => {
-    const copy = dictionaries.en
     for (const preset of ['minimal', 'cordis'] as const) {
       const before = await run.logs()
       await run.terminal(`preset-${preset}`, ['--preset', preset], async tty => {
@@ -2108,12 +2096,6 @@ scenario('presets', 'minimal and cordis start, answer the recorded turn, and rea
                        text => text.includes(SCREEN.toolResult) && DONE_LINE.test(text))
         await tty.follows(SCREEN.idle, SCREEN.toolResult)
         if (preset !== 'minimal') return
-        const refused = tty.mark()
-        tty.send('/plan\r', 'ask for plan mode, which minimal does not mount')
-        await tty.expect(`${copy.unknownCommand}: /plan`, refused)
-        const cleared = tty.mark()
-        tty.send('\x7f'.repeat('/plan'.length), 'erase the refused draft')
-        await tty.expect(`${SCREEN.prompt}${SCREEN.caret}`, cleared)
         // No sheet has anything to show, so each key leaves the composer in place.
         const keys = tty.mark()
         tty.send('\x14', 'Ctrl+T')
@@ -2122,7 +2104,6 @@ scenario('presets', 'minimal and cordis start, answer the recorded turn, and rea
         tty.send('still here', 'type after the sheet keys')
         await tty.expect(`${SCREEN.prompt}still here${SCREEN.caret}`, keys)
         tty.refuse('a sheet opened under minimal', tty.text.slice(keys).includes('Esc closes'))
-        tty.refuse('the status line claimed plan mode at any point', /deepseek-v4-flash {2}Plan\b/u.test(tty.text))
         const erased = tty.mark()
         tty.send('\x7f'.repeat('still here'.length), 'erase the draft before quitting')
         await tty.expect(`${SCREEN.prompt}${SCREEN.caret}`, erased)
@@ -2212,7 +2193,7 @@ scenario('settings', 'a /settings choice is saved to the settings file, plugin s
     }
   })
 
-scenario('settings-agent', 'Tab moves between /settings sections, subagent models are chosen from the catalog before the choice turns on, and a list opens in $VISUAL',
+scenario('settings-agent', 'Tab moves between /settings sections, subagent models are chosen from the catalog before the choice turns on and again under Advanced, and a list without a picker opens in $VISUAL',
   { replayOnly: true },
   async run => {
     const copy = dictionaries.en
@@ -2262,17 +2243,40 @@ scenario('settings-agent', 'Tab moves between /settings sections, subagent model
         at = tty.mark()
         tty.send('\x1b', 'return to the top')
         await tty.expect(copy.settingsAdvanced, at)
-        // A list found by search opens in the editor, which reads the line typed into it.
+        // The model list found under Advanced opens the same catalog picker, never the editor.
         at = tty.mark()
         tty.send('advanced allowedModels', 'search for the model list under Advanced')
         await tty.wait('the model list found from the top', text =>
           picked(`${copy.settingsAdvanced} › subagent-model-selection › allowedModels`).test(text.slice(at)))
         at = tty.mark()
+        tty.send('\r', 'open the list')
+        await tty.expect(`${copy.settingsAgent} › ${copy.settingsSubagentAllowed}`, 'deepseek-official/tui-picked-model', at)
+        at = tty.mark()
+        tty.send('picked', 'filter to the other model')
+        await tty.wait('the other model to be selected', text => picked('deepseek-official/tui-picked-model').test(text.slice(at)))
+        at = tty.mark()
+        tty.send('\r', 'allow it')
+        await tty.expect(copy.settingsSubagentAllowedOn, at)
+        at = tty.mark()
+        tty.send('v4-flash', 'filter to the flash model')
+        await tty.wait('the flash model to be selected', text => picked('deepseek-official/deepseek-v4-flash').test(text.slice(at)))
+        at = tty.mark()
+        tty.send('\r', 'remove it')
+        await tty.expect(copy.settingsSubagentAllowed, at)
+        at = tty.mark()
+        tty.send('\x1b', 'return to the top')
+        await tty.expect(copy.settingsAdvanced, at)
+        // A list with no picker of its own opens in the editor, which reads the line typed into it.
+        at = tty.mark()
+        tty.send('advanced router.hints', 'search for the router hints under Advanced')
+        await tty.wait('the hint list found from the top', text =>
+          picked(`${copy.settingsAdvanced} › subagent-model-selection › router.hints`).test(text.slice(at)))
+        at = tty.mark()
         tty.send('\r', 'open the list in the editor')
-        await tty.expect('EDITOR-READY subagent-model-selection.allowedModels.json', at)
+        await tty.expect('EDITOR-READY subagent-model-selection.router.hints.json', at)
         at = tty.mark()
         // A line feed ends the line whether or not the PTY maps carriage returns in cooked mode.
-        tty.send('[{"provider": "deepseek-official", "model": "deepseek-v4-pro"}]\n', 'type the list into the editor')
+        tty.send('[{"provider": "deepseek-official", "model": "deepseek-v4-pro", "quality": "high"}]\n', 'type the list into the editor')
         // The panel is drawn again once the editor exits.
         await tty.expect(copy.pickerTabsHelp, at)
         at = tty.mark()
@@ -2281,7 +2285,8 @@ scenario('settings-agent', 'Tab moves between /settings sections, subagent model
         await tty.expect(`${copy.settingsSaved} `, at)
       })
       const saved = await Bun.file(settingsPath).text()
-      assert(saved.includes('enabled: true') && saved.includes('model: deepseek-v4-pro') && !saved.includes('model: deepseek-v4-flash'),
+      assert(saved.includes('enabled: true') && saved.includes('model: tui-picked-model') && !saved.includes('model: deepseek-v4-flash')
+        && saved.includes('model: deepseek-v4-pro') && saved.includes('quality: high'),
       `the subagent models were not saved:\n${saved}`)
     } finally {
       for (const [name, value] of Object.entries(previous)) {
@@ -2996,7 +3001,7 @@ scenario('corrupt-picker', 'a damaged compressed header does not hide healthy se
     }
   })
 
-scenario('cancel', 'skill and quoted-file completion, steering a running turn, interruption, and discarding queued input',
+scenario('cancel', 'skill and quoted-file completion, and Alt-Up sending steering typed into a running turn now instead of at the next step',
   { replayOnly: true },
   async run => {
     // Keep project skill discovery inside this fixture even when the temp parent has a .git marker.
@@ -3008,10 +3013,17 @@ scenario('cancel', 'skill and quoted-file completion, steering a running turn, i
     const referenced = join(run.workspace, 'notes folder/read me.txt')
     mkdirSync(dirname(referenced), { recursive: true })
     await Bun.write(referenced, 'TUI_FILE_CONTENT_MUST_NOT_BE_INJECTED')
-    // The replay hangs on this turn so the composer stays live while the agent runs.
+    // The replay hangs on this turn so the composer stays live while the agent runs,
+    // then answers the turn the steering opens once Alt-Up sends it.
     const ready = join(run.root, 'stream-ready')
     const override = join(run.root, 'cancel.json')
-    await Bun.write(override, JSON.stringify([{ kind: 'hang', readyFile: ready }]))
+    const steered = [
+      { type: 'block-start', index: 0, blockType: 'text' },
+      { type: 'text-delta', index: 0, text: 'STEERED_NOW' },
+      { type: 'block-end', index: 0, block: { type: 'text', text: 'STEERED_NOW' } },
+      { type: 'finish', reason: { kind: 'stop' } },
+    ]
+    await Bun.write(override, JSON.stringify([{ kind: 'hang', readyFile: ready }, { kind: 'chunks', chunks: steered }]))
     await run.writeOverlay(override)
 
     const before = await run.logs()
@@ -3032,12 +3044,12 @@ scenario('cancel', 'skill and quoted-file completion, steering a running turn, i
       tty.send('\r', 'Enter to submit')
       await tty.wait('the turn to start streaming and hang',
                      text => existsSync(ready) && text.includes('partial'))
-      tty.send('Discard this steering\r', 'steering typed into a running turn')
-      await tty.expect('Next step: Discard this steering', '/clear-pending discards queued input')
-      tty.send('\x1b', 'Escape to interrupt the turn')
-      await tty.follows(SCREEN.idle, 'Interrupted')
-      tty.send('/clear-pending\r')
-      await tty.expect('Queued input discarded')
+      await tty.expect('Alt+\u2191 sends now')
+      tty.send('Send this steering now', 'steering typed into a running turn')
+      await tty.expect(`Send this steering now${SCREEN.caret}`)
+      tty.send('\x1b[1;3A', 'Alt-Up to send the draft now instead of at the next step')
+      await tty.expect('Interrupted', 'STEERED_NOW')
+      await tty.follows(SCREEN.idle, 'STEERED_NOW')
     })
 
     const path = await run.created(before, 'cancellation')
@@ -3052,8 +3064,9 @@ scenario('cancel', 'skill and quoted-file completion, steering a running turn, i
            'completed file mention was not submitted literally')
     assert(!JSON.stringify(log).includes('TUI_FILE_CONTENT_MUST_NOT_BE_INJECTED'),
            'file completion injected file contents')
-    assert(log.some(e => e.type === 'agent/inbox/spliced' && e.data?.outcome === 'canceled'
-                    && e.data?.removedCount === 1), 'discard did not persist an inbox removal')
+    assert(log.filter(e => e.type === 'turn/start').length === 2, 'Alt-Up did not open a turn for the steering')
+    assert(log.some(e => e.type === 'user/message' && e.data.source?.kind === 'user'
+                    && same(e.data.content, [{ type: 'text', text: 'Send this steering now' }])), 'the sent steering was not logged')
     Object.assign(run.state, { cancelledLog: path, cancelledId: log[0].id })
   })
 
@@ -3190,16 +3203,16 @@ scenario('hangup', 'a closed terminal or a repeated SIGHUP exits 129 once dispos
   })
 
 scenario('resume-cleared',
-  'a resumed session showing the discard and neither the discarded steering nor stale pending input',
+  'a resumed session showing the steering Alt-Up sent answered, and no stale pending input',
   { requires: ['cancel'], replayOnly: true },
   async run => {
     const text = await run.terminal('resume-cleared', ['--resume', run.state.cancelledId], async tty => {
-      await tty.expect('Queued input discarded', SCREEN.idle, '@"notes folder/read me.txt"')
+      await tty.expect('STEERED_NOW', SCREEN.idle, '@"notes folder/read me.txt"')
     })
-    assert(!text.includes('Discard this steering'), 'discarded steering returned after resume')
-    assert(!text.includes('/clear-pending discards queued input'), 'resume shows stale pending input')
+    assert(!text.includes('Next step: Send this steering now'), 'sent steering returned as pending after resume')
+    assert(!text.includes('Alt+\u2191 sends it now'), 'resume shows stale pending input')
     const log = await events(run.state.cancelledLog)
-    assert(log.filter(e => e.type === 'turn/start').length === 1, 'resume drove discarded input')
+    assert(log.filter(e => e.type === 'turn/start').length === 2, 'resume drove the sent input again')
   })
 
 scenario('attachments', 'attachment staging, exact stored bytes, recorded model output, and metadata on resume',

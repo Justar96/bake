@@ -1,14 +1,13 @@
 /** Verbatim content-addressed local file storage. @module @deepseek-ai/dsh-attachment-local/file-store */
 
 import { createHash } from 'node:crypto'
-import { createReadStream } from 'node:fs'
 import { join } from 'node:path'
 import { AttachmentError, AttachmentId } from '@deepseek-ai/dsh-attachment'
 import type {
-  FileAttachmentRef, SaveFileAttachment, SaveFileStreamAttachment,
+  FileAttachmentRef, SaveFileAttachment,
 } from '@deepseek-ai/dsh-attachment'
 import {
-  publishImmutableAlias, publishImmutableObject, publishImmutableObjectStream,
+  publishImmutableAlias, publishImmutableObject,
 } from './store.ts'
 
 const FILE_ID_PATTERN = /^sha256:([a-f0-9]{64})$/
@@ -102,80 +101,4 @@ export async function saveFileVerbatim(
   await publishImmutableObject(root, objectPath, input.data, sha256)
   await publishImmutableAlias(root, objectPath, storedFilePath(root, ref), sha256)
   return ref
-}
-
-/**
- * Commit one file byte-for-byte from bounded chunks below a versioned attachment root.
- * @param root - absolute `DSH_HOME/attachments/v1` root.
- * @param input - ordered exact bytes, optional cancellation, and display name.
- * @returns the durable content-addressed file reference.
- */
-export async function saveFileStreamVerbatim(
-  root: string,
-  input: SaveFileStreamAttachment,
-): Promise<FileAttachmentRef> {
-  const name = fileLeafName(input.name)
-  const stored = await publishImmutableObjectStream(
-    root,
-    input.data,
-    sha256 => storedFileObjectPath(root, sha256),
-    input.signal,
-  )
-  const ref: FileAttachmentRef = {
-    attachmentId: AttachmentId(`sha256:${stored.sha256}`),
-    name,
-    bytes: stored.bytes,
-  }
-  input.signal?.throwIfAborted()
-  await publishImmutableAlias(
-    root,
-    storedFileObjectPath(root, stored.sha256),
-    storedFilePath(root, ref),
-    stored.sha256,
-  )
-  input.signal?.throwIfAborted()
-  return ref
-}
-
-/**
- * Read one stored file in bounded chunks and verify its byte count and digest.
- * @param root - absolute `DSH_HOME/attachments/v1` root.
- * @param ref - durable file reference from the session log.
- * @param signal - optional cancellation for filesystem reads.
- * @returns exact stored bytes in order; integrity failures reject after the final chunk.
- */
-export async function* readFileStreamVerbatim(
-  root: string,
-  ref: FileAttachmentRef,
-  signal?: AbortSignal,
-): AsyncIterable<Uint8Array> {
-  signal?.throwIfAborted()
-  const sha256 = ensureFileReference(ref)
-  const stream = createReadStream(storedFilePath(root, ref), {
-    highWaterMark: 1 << 16,
-    ...(signal === undefined ? {} : { signal }),
-  })
-  const hash = createHash('sha256')
-  let bytes = 0
-  try {
-    for await (const chunk of stream) {
-      signal?.throwIfAborted()
-      const data = chunk as Buffer
-      hash.update(data)
-      bytes += data.byteLength
-      yield data
-    }
-  } catch (error) {
-    signal?.throwIfAborted()
-    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
-      throw new AttachmentError('File attachment object is missing.', 'ATTACHMENT_NOT_FOUND')
-    }
-    throw new AttachmentError('Unable to read file attachment.', 'ATTACHMENT_READ_FAILED', { cause: error })
-  } finally {
-    stream.destroy()
-  }
-  signal?.throwIfAborted()
-  if (bytes !== ref.bytes || hash.digest('hex') !== sha256) {
-    throw new AttachmentError('Stored file attachment failed integrity verification.', 'ATTACHMENT_CORRUPT')
-  }
 }

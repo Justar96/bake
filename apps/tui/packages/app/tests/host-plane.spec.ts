@@ -157,7 +157,7 @@ it('keeps only the compaction rows and the preset services on the terminal host 
   }
   for (const id of [
     'agent-instructions', 'tool-bash', 'tool-pwsh', 'tool-fs', 'tool-fs-search', 'skill-filesystem', 'tool-skill',
-    'command-goal', 'tool-goal', 'plan-mode', 'tool-subagent-control', 'tool-subagent-list-agents', 'tool-subagent',
+    'command-goal', 'tool-goal', 'tool-subagent-control', 'tool-subagent-list-agents', 'tool-subagent',
     'tool-subagent-fork', 'workflow-ptc', 'tool-workflow', 'tool-todo', 'tool-web', 'tool-jobs',
   ]) expect(active(id), id).toBe(false)
   // The registries and drivers behind those tools, `/compact` for `minimal`,
@@ -302,10 +302,8 @@ it('gives a minimal agent only its shell, and /compact still folds its history',
   // Nothing but the human's own prompt: no instructions, catalog, or runtime snapshot.
   expect(request.messages.filter(message => message.role === 'user').map(text)).toEqual([CHUNK])
 
-  // No preset unit registers a task list or plan mode here, and the status reads without them.
-  const view = session.controller.view
-  expect(view.todos).toBeUndefined()
-  expect(view).not.toHaveProperty('plan')
+  // No preset unit registers a task list here, and the status reads without it.
+  expect(session.controller.view.todos).toBeUndefined()
 
   expect(session.controller.submit('/compact')).toBe(true)
   await session.controller.drain()

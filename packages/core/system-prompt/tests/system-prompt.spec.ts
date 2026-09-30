@@ -18,7 +18,7 @@ const SECTION_ORDER_NAMES = [
   'TEAM_POLICY', 'PTC_ONLY', 'FILE_REFERENCE', 'TOOL_PTY', 'TOOL_LSP',
   'TOOL_SESSION_QUERY', 'TOOL_CORDIS', 'TOOL_RALPH', 'TOOL_REPORT',
   'TOOLS_SDK', 'DELIVERABLE_FILE_REFERENCES', 'STRUCTURED_OUTPUT',
-  'HARNESS_SOURCE', 'WEB_SURFACE', 'DEPLOYMENT_PERSONA_SUFFIX',
+  'DEPLOYMENT_PERSONA_SUFFIX',
 ] as const satisfies readonly PromptSectionOrderName[]
 const CONTEXT_ORDER_NAMES = [
   'SANDBOX_POLICY', 'APPROVAL_POLICY', 'SUBAGENT_DELEGATION',
@@ -47,22 +47,24 @@ describe('SystemPrompt', () => {
         ctx.systemPrompt.variable(key, () => environment[key])
       }
       const reusable = SECTION_ORDER_NAMES.filter(name =>
-        !['HARNESS_IDENTITY', 'DEPLOYMENT_PERSONA_PREFIX', 'HARNESS_SOURCE', 'WEB_SURFACE', 'DEPLOYMENT_PERSONA_SUFFIX'].includes(name))
+        !['HARNESS_IDENTITY', 'DEPLOYMENT_PERSONA_PREFIX', 'DEPLOYMENT_PERSONA_SUFFIX'].includes(name))
       for (const name of [...reusable].reverse()) {
         ctx.systemPrompt.section({ name, order: ctx.systemPrompt.getSectionOrder(name), text: name })
       }
+      // The 'source' and 'web' sections share the persona-suffix slot; the name
+      // tie-break renders the suffix, then 'source', then 'web'.
       ctx.systemPrompt.section({
-        name: 'source', order: ctx.systemPrompt.getSectionOrder('HARNESS_SOURCE'), text: () => environment.source,
+        name: 'source', order: ctx.systemPrompt.getSectionOrder('DEPLOYMENT_PERSONA_SUFFIX'), text: () => environment.source,
       })
       ctx.systemPrompt.section({
-        name: 'web', order: ctx.systemPrompt.getSectionOrder('WEB_SURFACE'), text: () => environment.url,
+        name: 'web', order: ctx.systemPrompt.getSectionOrder('DEPLOYMENT_PERSONA_SUFFIX'), text: () => environment.url,
       })
       const first = renderPrompt(await ctx.systemPrompt.assemble())
       environment = { model: 'model-a', cwd: 'C:/bob/project', platform: 'win32', source: 'C:/bob/dsh', url: 'http://127.0.0.1:4080' }
       const second = renderPrompt(await ctx.systemPrompt.assemble())
       const prefix = [IDENTITY, 'Model model-a.', ...reusable].join('\n\n') + '\n\n'
-      expect(first).toBe(prefix + '/alice/dsh\n\nhttp://127.0.0.1:3080\n\nIn /alice/project on darwin.')
-      expect(second).toBe(prefix + 'C:/bob/dsh\n\nhttp://127.0.0.1:4080\n\nIn C:/bob/project on win32.')
+      expect(first).toBe(prefix + 'In /alice/project on darwin.\n\n/alice/dsh\n\nhttp://127.0.0.1:3080')
+      expect(second).toBe(prefix + 'In C:/bob/project on win32.\n\nC:/bob/dsh\n\nhttp://127.0.0.1:4080')
       environment.model = 'model-b'
       expect(renderPrompt(await ctx.systemPrompt.assemble()))
         .toBe(second.replace('Model model-a.', 'Model model-b.'))

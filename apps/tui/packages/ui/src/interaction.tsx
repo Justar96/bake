@@ -234,9 +234,7 @@ function QuestionPage({ question, number, count, copy, limit, height, columns, o
   const options = question.options ?? []
   const other = options.length
   const multi = question.multiSelect === true
-  const initial = question.intent?.kind === 'plan-review'
-    ? options.findIndex(option => option.label !== question.intent?.approve) : 0
-  const [focused, setFocused] = useState(initial < 0 ? other : initial)
+  const [focused, setFocused] = useState(0)
   const cursor = useRef(focused)
   const [selected, setSelected] = useState<readonly string[]>([])
   const checked = useRef(selected)
@@ -282,7 +280,7 @@ function QuestionPage({ question, number, count, copy, limit, height, columns, o
     } else if (custom !== '') onSubmit({ id: question.id, selected: [], custom })
     else setNudged(true)
   }
-  usePaste(text => { setNudged(false); focus(other); composer.paste(text) })
+  usePaste(text => { setNudged(false); focus(other); composer.pasteBlock(text) })
   useInput((text, key) => {
     const newline = isNewline(text, key)
     if ((key.meta && !newline) || key.escape) return

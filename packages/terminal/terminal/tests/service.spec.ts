@@ -49,7 +49,6 @@ async function disposeAgentScope(agent: Agent): Promise<void> {
 }
 
 class StubSession implements TerminalBackendSession {
-  readonly motd = 'stub ready'
   readonly pid = 123
   closed: string[] = []
   statusValue: TerminalSessionStatus = { kind: 'running' }
@@ -138,12 +137,12 @@ describe('TerminalSessionService backend registry', () => {
     const ctx = await harness()
     const first = backend()
     const dispose = ctx.terminals.registerBackend(first.provider)
-    expect(ctx.terminals.listBackends()).toEqual(['stub'])
     expect(() => ctx.terminals.registerBackend(backend().provider)).toThrow(TerminalError)
     const internal = ctx.terminals as unknown as { backends: Map<string, TerminalBackend> }
     internal.backends.set('stub', backend('replacement').provider)
     dispose()
-    expect(ctx.terminals.listBackends()).toEqual(['stub'])
+    // The disposer removes exactly its own contribution, never a same-key replacement.
+    expect(internal.backends.get('stub')?.type).toBe('replacement')
     internal.backends.clear()
   })
 
@@ -164,16 +163,15 @@ describe('TerminalSessionService ownership and lifecycle', () => {
     await ctx.agents.register(foreign)
 
     const created = await ctx.terminals.spawn(owner, { type: 'stub', name: 'main', cwd: '/tmp' })
-    expect(created).toMatchObject({ sessionId: 'pty-1', name: 'main', type: 'stub', pid: 123, motd: 'stub ready', status: { kind: 'running' } })
+    expect(created).toMatchObject({ sessionId: 'pty-1', name: 'main', type: 'stub', pid: 123, status: { kind: 'running' } })
     expect(ctx.terminals.hasOwnerActivity(owner)).toBe(true)
     expect(ctx.terminals.list(owner)).toHaveLength(1)
     expect(ctx.terminals.list(foreign)).toEqual([])
     expect(() => ctx.terminals.read(foreign, created.sessionId)).toThrow('belongs to another agent')
-    expect(() => ctx.terminals.signal(foreign, created.sessionId, 'SIGINT')).toThrow('belongs to another agent')
     await expect(Promise.resolve().then(() => ctx.terminals.kill(foreign, created.sessionId))).rejects.toThrow('belongs to another agent')
   })
 
-  it('rejects unknown backends, non-live owners, duplicate names, and active sends', async () => {
+  it('rejects unknown backends, non-live owners, and active sends', async () => {
     const ctx = await harness()
     const owner = stubAgent(ctx, 'owner')
     await expect(ctx.terminals.spawn(owner, { type: 'missing' })).rejects.toMatchObject({ code: 'OWNER_NOT_LIVE' })
@@ -187,7 +185,6 @@ describe('TerminalSessionService ownership and lifecycle', () => {
     const abortReason = new Error('spawn aborted')
     aborted.abort(abortReason)
     await expect(ctx.terminals.spawn(owner, { type: 'stub' }, aborted.signal)).rejects.toBe(abortReason)
-    await expect(ctx.terminals.spawn(owner, { type: 'stub', name: 'main' })).rejects.toMatchObject({ code: 'DUPLICATE_NAME' })
 
     const operation = ctx.terminals.startSend(owner, created.sessionId, { text: 'echo hi', submit: true })
     expect(() => ctx.terminals.startSend(owner, created.sessionId, { text: 'pwd', submit: true })).toThrow(TerminalError)
@@ -203,15 +200,14 @@ describe('TerminalSessionService ownership and lifecycle', () => {
     await new Promise(resolve => setTimeout(resolve, 0))
   })
 
-  it('reserves concurrent names and rolls back a spawn whose owner disappears', async () => {
+  it('rolls back a spawn whose owner disappears', async () => {
     const ctx = await harness()
     const gate = Promise.withResolvers<TerminalBackendSession>()
     const session = new StubSession()
     ctx.terminals.registerBackend({ type: 'slow', spawn: () => gate.promise })
     const owner = stubAgent(ctx, 'owner')
     await ctx.agents.register(owner)
-    const pending = ctx.terminals.spawn(owner, { type: 'slow', name: 'main' })
-    await expect(ctx.terminals.spawn(owner, { type: 'slow', name: 'main' })).rejects.toMatchObject({ code: 'DUPLICATE_NAME' })
+    const pending = ctx.terminals.spawn(owner, { type: 'slow' })
     const disposal = disposeAgentScope(owner)
     gate.resolve(session)
     await expect(pending).rejects.toMatchObject({ code: 'OWNER_NOT_LIVE' })
@@ -528,7 +524,7 @@ describe('TerminalSessionService ownership and lifecycle', () => {
     await ctx.agents.register(owner)
     const created = await ctx.terminals.spawn(owner, { type: 'stub' })
     disposeBackend()
-    expect(ctx.terminals.listBackends()).toEqual([])
+    expect((ctx.terminals as unknown as { backends: Map<string, unknown> }).backends.size).toBe(0)
     expect(ctx.terminals.read(owner, created.sessionId).text).toBe('0:0')
 
     await disposeAgentScope(owner)

@@ -12,7 +12,7 @@
  */
 
 import type { StreamChunk } from '@deepseek-ai/dsh-llm'
-import type { Row } from '@dsh-tui/ui'
+import type { Row } from '@dsh-tui/ui/rows.ts'
 import { PENDING_ARGUMENTS } from '@dsh-tui/ui/present.ts'
 
 /** One block being assembled, before it is known whether the stream completes. */

@@ -57,9 +57,11 @@ function ctypeOf(env: FrameRequest['env']): string | undefined {
  * costs one row one column. A border run accumulates the error across the
  * whole line.
  *
- * The first two are read from the environment. The third cannot be detected.
- * It is a terminal preference, not a capability, so a CJK character locale
- * stands in for it. The profile's own setting overrides all three.
+ * The first two are read from the environment. Windows Terminal sets neither
+ * a locale nor `TERM`, yet draws UTF-8, so its `WT_SESSION` stands in for
+ * both. The third cannot be detected. It is a terminal preference, not a
+ * capability, so a CJK character locale stands in for it. The profile's own
+ * setting overrides all three.
  *
  * @param request - the profile's choice and the environment to read.
  * @returns the frame style to draw.
@@ -67,10 +69,13 @@ function ctypeOf(env: FrameRequest['env']): string | undefined {
 export function resolveFrame(request: FrameRequest): FrameStyle {
   if (request.configured !== 'auto') return request.configured
   const ctype = ctypeOf(request.env)
-  // No variable set means the C locale, which is not UTF-8.
-  if (ctype === undefined || !/utf-?8/.test(ctype)) return 'classic'
-  const term = request.env['TERM']
-  if (term === undefined || term === '' || term === 'dumb') return 'classic'
-  if (AMBIGUOUS_WIDE_LANGUAGES.some(language => ctype.startsWith(language))) return 'classic'
+  if (ctype !== undefined && AMBIGUOUS_WIDE_LANGUAGES.some(language => ctype.startsWith(language))) return 'classic'
+  const terminal = request.env['WT_SESSION']
+  if (terminal === undefined || terminal === '') {
+    // No variable set means the C locale, which is not UTF-8.
+    if (ctype === undefined || !/utf-?8/.test(ctype)) return 'classic'
+    const term = request.env['TERM']
+    if (term === undefined || term === '' || term === 'dumb') return 'classic'
+  }
   return request.locale === 'zh' ? 'classic' : 'round'
 }

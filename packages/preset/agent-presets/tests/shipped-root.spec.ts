@@ -165,7 +165,6 @@ describe('the shipped preset root', () => {
         + 'Report results and verification accurately, including failures and skipped checks.',
     })
     expect(findEntry(ptc, 'persona')?.config).toEqual(findEntry(standard, 'persona')?.config)
-    expect(findEntry(ptc, 'plan-mode')?.config).toEqual(findEntry(standard, 'plan-mode')?.config)
   })
 
   it('directs the cordis preset to terminal tools, commands, and preset selection', async () => {

@@ -18,7 +18,6 @@ import { deadline, timeoutOf } from '@deepseek-ai/dsh-timeout'
 import { JobRegistry, JobId } from '@deepseek-ai/dsh-jobs'
 import type {
   JobDoneListener, JobKind, JobOutcome, JobRead, JobSnapshot, JobStart, JobStatus,
-  JobsChangedListener,
 } from '@deepseek-ai/dsh-jobs'
 
 /** Timeout code that distinguishes a bounded wait from caller cancellation. */
@@ -76,10 +75,9 @@ function isTerminal(status: JobStatus): boolean {
 class JobLayer implements ScopeLayer {
   readonly controllers = new AnonymousEntries<symbol>()
   readonly listeners = new AnonymousEntries<JobDoneListener>()
-  readonly changed = new AnonymousEntries<JobsChangedListener>()
 
   isEmpty(): boolean {
-    return this.controllers.isEmpty() && this.listeners.isEmpty() && this.changed.isEmpty()
+    return this.controllers.isEmpty() && this.listeners.isEmpty()
   }
 }
 
@@ -110,8 +108,7 @@ export class LocalJobRegistry extends JobRegistry {
    * flat table would answer a per-owner question process-wide: one preset's
    * job controls would hold `start()` open for an agent whose own composition
    * loads none, and one settlement would reach every preset's notice listener.
-   * Layers make both reads owner-relative. Nothing derives a cache from a
-   * layer, so change notification is a no-op.
+   * Layers make both reads owner-relative.
    */
   private readonly layers = new ScopedLayers<JobLayer>(() => new JobLayer(), () => {})
   private listenersClosed = false
@@ -183,9 +180,6 @@ export class LocalJobRegistry extends JobRegistry {
         this.settle(job, { status: 'failed', detail: String(error) })
       },
     )
-    // Registration is complete and cannot fail from here, so the visible set
-    // has genuinely changed.
-    this.notifyChanged(job.owner)
     return id
   }
 
@@ -223,7 +217,6 @@ export class LocalJobRegistry extends JobRegistry {
     job.cancel(reason)
     job.status = 'stopping'
     job.reported = true
-    this.notifyChanged(job.owner)
     return 'requested'
   }
 
@@ -283,14 +276,6 @@ export class LocalJobRegistry extends JobRegistry {
       this.ctx,
       layer => layer.listeners.append(listener),
       { label: 'jobs.onJobDone()' },
-    )
-  }
-
-  onJobsChanged(listener: JobsChangedListener): () => void {
-    return this.layers.effect(
-      this.ctx,
-      layer => layer.changed.append(listener),
-      { label: 'jobs.onJobsChanged()' },
     )
   }
 
@@ -377,41 +362,12 @@ export class LocalJobRegistry extends JobRegistry {
   }
 
   /**
-   * The change observers that own `owner`'s updates, resolved exactly like
-   * {@link listenersFor}: the global layer — a host composition's own carrier,
-   * which serves every owner — then each scoped layer along the owner's chain.
-   * An observer outside that chain belongs to another composition and would
-   * otherwise be told about agents it does not compose.
-   * @param owner - the owner whose visible set moved, or undefined for unowned work.
-   * @returns the observers to notify, in registration order per layer.
-   */
-  private *changedFor(owner?: Agent): IterableIterator<JobsChangedListener> {
-    yield* this.layers.global.changed.values()
-    const scope = owner === undefined ? undefined : scopeOf(owner.ctx)
-    for (const layer of this.layers.chainLayers(scope)) yield* layer.changed.values()
-  }
-
-  /**
-   * Announce that one owner's visible set changed. Each listener is contained
-   * so an observer cannot break a lifecycle commit that already happened.
-   */
-  private notifyChanged(owner: Agent | undefined): void {
-    for (const listener of this.changedFor(owner)) {
-      try {
-        listener(owner)
-      } catch (error: unknown) {
-        this.selfCtx.logger.warn(`jobs: onJobsChanged listener threw: ${String(error)}`)
-      }
-    }
-  }
-
-  /**
    * Record the first terminal outcome, release waiters, then announce
    * completion. First-wins preserves a teardown force-failure against late
    * producer settlement. Pending waits mark the job reported before listeners
-   * run. Completion is announced last because a reporter may open a model turn
-   * synchronously: every other observer of this settlement must already have
-   * seen the committed record.
+   * run. Completion is announced last, after the record is committed and
+   * every waiter is released, because a reporter may open a model turn
+   * synchronously.
    */
   private settle(job: TrackedJob, outcome: JobOutcome): void {
     if (isTerminal(job.status)) return
@@ -425,7 +381,6 @@ export class LocalJobRegistry extends JobRegistry {
     job.waitResolvers.clear()
     for (const resolveWait of waitResolvers) resolveWait()
     job.markSettled()
-    this.notifyChanged(job.owner)
     if (this.listenersClosed) return
     for (const listener of this.listenersFor(job.owner)) {
       try {
@@ -469,9 +424,6 @@ export class LocalJobRegistry extends JobRegistry {
     this.cancelForTeardown(owned, 'owner disposed')
     await Promise.all(owned.map(job => job.settled))
     for (const job of owned) this.store.delete(job.id)
-    // Removal is the one visible-set change no per-job record carries, so it
-    // must be announced here or an observer keeps the dropped rows forever.
-    if (owned.length > 0) this.notifyChanged(owner)
   }
 
   /**
@@ -485,14 +437,7 @@ export class LocalJobRegistry extends JobRegistry {
     const all = [...this.store.values()]
     this.cancelForTeardown(all, 'jobs service disposed')
     await Promise.all(all.map(job => job.settled))
-    // Distinct owners whose records just disappeared. A change observer files
-    // into the layer of the context that registered it, so a consumer mounted
-    // outside this service — the api-proxy carrier registers from the mux
-    // stream — is still reachable here. Without this it keeps the rows it last
-    // received after a registry reload.
-    const emptied = new Set(all.map(job => job.owner))
     this.store.clear()
-    for (const owner of emptied) this.notifyChanged(owner)
     // Detach cross-fiber owner effects after the shared store is quiescent.
     const ownerCleanups = [...this.ownerCleanups.values()]
     this.ownerCleanups.clear()
@@ -518,10 +463,6 @@ export class LocalJobRegistry extends JobRegistry {
       try {
         job.cancel(reason)
         job.status = 'stopping'
-        // Teardown reaches settlement only after the producer releases, which a
-        // slow stop can defer; announcing the transition here is what keeps an
-        // observer from showing `running` for that whole window.
-        this.notifyChanged(job.owner)
       } catch (error: unknown) {
         const detail = `cancel threw during teardown; work may be orphaned: ${String(error)}`
         this.selfCtx.logger.warn(`jobs: cancel of ${job.id} threw during teardown; job record forced failed and work may be orphaned: ${String(error)}`)

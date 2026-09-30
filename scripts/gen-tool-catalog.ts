@@ -18,7 +18,7 @@ import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import GoalService from '@deepseek-ai/dsh-goal'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
-import ToolRuntime, { type Config as ToolsConfig } from '@deepseek-ai/dsh-tools'
+import ToolRuntime, { TOOL_HELP_NAME, defineTool, type Config as ToolsConfig } from '@deepseek-ai/dsh-tools'
 import LocalBashExecutor from '@deepseek-ai/dsh-bash-local'
 import * as BashEnvPlugin from '@deepseek-ai/dsh-shell-env'
 import { PwshLocalExecutor } from '@deepseek-ai/dsh-pwsh-local'
@@ -27,7 +27,6 @@ import LocalFileSystem from '@deepseek-ai/dsh-fs-local'
 import { AttachmentStore } from '@deepseek-ai/dsh-attachment'
 import type { ImageAttachmentLimits, ImageAttachmentRef, SaveImageAttachment, StoredImageAttachment } from '@deepseek-ai/dsh-attachment'
 import UserQuestionService from '@deepseek-ai/dsh-user-questions'
-import PlanModeController from '@deepseek-ai/dsh-plan-mode'
 import WebRuntime from '@deepseek-ai/dsh-web'
 import * as WebSearchExa from '@deepseek-ai/dsh-web-search-exa'
 import * as WebFetchLocal from '@deepseek-ai/dsh-web-fetch-http'
@@ -178,6 +177,12 @@ export interface ToolPackage {
    */
   toolsConfig?: ToolsConfig
   /**
+   * Harvested names this entry documents, for an entry that mounts a stand-in
+   * tool only to make a registry-owned tool visible. Every other entry omits
+   * the registry's `tool_help`, which follows any tool that declares details.
+   */
+  only?: readonly string[]
+  /**
    * A deployment note rendered after the package's tools, for a fact that
    * booting the package alone cannot show. The registered tool NAME can be a
    * load-time config (`tool-subagent`'s `toolName`), so one package may appear
@@ -235,28 +240,28 @@ const TOOL_PACKAGES: ToolPackage[] = [
   {
     pkg: '@deepseek-ai/dsh-tools',
     dir: 'tools',
-    source: 'packages/core/tools/src/ptc.ts',
+    source: { run_code: 'packages/core/tools/src/ptc.ts', tool_help: 'packages/core/tools/src/tool-help.ts' },
     requires: ['ctx.tools', 'ctx.ptcRuntime (execution time)', 'ctx.systemPrompt'],
     writes: ['tool/call', 'one tool/ptc-dispatch-start + tool/ptc-dispatch pair per bridged sub-call', 'tool/result'],
-    // The registry's OWN tool: run_code exists only under a non-native mode
+    // The registry's OWN tools: run_code exists only under a non-native mode
     // (the registry registers it in its constructor; the PTC runtime is read
-    // at assembly/execution time, so the schema harvest needs none mounted).
+    // at assembly/execution time, so the schema harvest needs none mounted),
+    // and tool_help only beside a tool that declares details, which the
+    // stand-in below provides.
     toolsConfig: { mode: 'ptc' },
-    async mount() {},
-    note:
-      'Owned by the tool registry as a reserved transport outside filterable capability layers under `mode: ptc` / `mode: both` (see the PTC mode Agent Note). Under `ptc` it is the registry\'s only wire contribution; the other visible capabilities are declared in a generated SDK section in the loaded runtime\'s language, and a program calls them through bindings scheduled under the native concurrency contract (submission-ordered starts and policy; concurrency-safe bodies overlap up to `maxParallelSubCalls`) that re-enter the complete guarded tool pipeline and link each nested execution to this outer result.',
-  },
-  {
-    pkg: '@deepseek-ai/dsh-plan-mode',
-    dir: 'plan-mode',
-    source: 'packages/plan/plan-mode/src/index.ts',
-    requires: ['ctx.tools', 'ctx.systemPrompt', 'ctx.userQuestions (execution time, opportunistic)'],
-    writes: ['tool/call', 'plan/mode inactive on an approved review', 'tool/result'],
+    only: ['run_code', TOOL_HELP_NAME],
     async mount(ctx) {
-      await ctx.plugin(PlanModeController, { section: 'Tool catalog schema harvest.' })
+      ctx.tools.register(defineTool({
+        name: 'catalog_stand_in',
+        description: 'Stand-in that declares details.',
+        details: 'Stand-in details.',
+        parameters: {},
+        output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
+        execute: () => Promise.resolve(''),
+      }))
     },
     note:
-      'exit_plan_mode stays in the model-facing schema while planning is inactive so transitions add no tool-catalog churn on top of the plan-policy change. Its execute path rejects calls outside plan mode; in plan mode it presents the plan over the user-questions seam (approve / keep planning with feedback), and approval logs plan mode inactive at the step boundary.',
+      'Owned by the tool registry as a reserved transport outside filterable capability layers under `mode: ptc` / `mode: both` (see the PTC mode Agent Note). Under `ptc` it is the registry\'s only wire contribution; the other visible capabilities are declared in a generated SDK section in the loaded runtime\'s language, and a program calls them through bindings scheduled under the native concurrency contract (submission-ordered starts and policy; concurrency-safe bodies overlap up to `maxParallelSubCalls`) that re-enter the complete guarded tool pipeline and link each nested execution to this outer result. `tool_help` is visible exactly while a visible tool declares `details`, a usage reference kept out of the native schema; it returns that reference, and under `ptc` the reference joins the tool\'s SDK documentation instead.',
   },
   {
     pkg: '@deepseek-ai/dsh-tool-bash',
@@ -633,7 +638,9 @@ export async function collectToolCatalog(packages: ToolPackage[] = TOOL_PACKAGES
       await ctx.plugin(SystemPrompt)
       await ctx.plugin(ToolRuntime, entry.toolsConfig ?? {})
       await entry.mount(ctx)
-      const schemas = ctx.tools.schemas(entry.scope?.(ctx)).sort((a, b) => a.name.localeCompare(b.name))
+      const schemas = ctx.tools.schemas(entry.scope?.(ctx))
+        .filter(schema => entry.only === undefined ? schema.name !== TOOL_HELP_NAME : entry.only.includes(schema.name))
+        .sort((a, b) => a.name.localeCompare(b.name))
       assertToolsHarvested(entry, schemas.length)
       catalog.push({
         pkg: entry.pkg,

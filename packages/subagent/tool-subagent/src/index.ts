@@ -256,9 +256,8 @@ function providerWording(inheritsConversation: boolean): { description: string; 
     return {
       description:
         'Delegate a task to a subagent that inherits this conversation\'s completed turns, but not the '
-        + 'current one. Use it for work that builds on this context, such as a follow-up analysis, a review, '
-        + 'or a continuation, without filling this conversation with the work. You get its result, not its '
-        + 'intermediate steps.',
+        + 'current one, for work that builds on this context, such as a review or a continuation. You get '
+        + 'its result, not its intermediate steps.',
       promptDescription:
         'The task. The subagent already sees this conversation\'s completed turns, so state only what is new.',
     }

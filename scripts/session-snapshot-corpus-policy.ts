@@ -1,7 +1,9 @@
 /** Enforced current-writer majority and retained migration coverage. */
 
 import { SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session'
-import type { SnapshotSessionFormatManifest } from '@deepseek-ai/dsh-session-snapshot'
+
+/** Retained-generation manifest describing the released behavior a generation preserves. */
+type SnapshotSessionFormatManifest = Readonly<Record<string, unknown>>
 
 /** One owning scenario's selected parent and child generations. */
 export interface SnapshotCorpusScenarioGenerations {

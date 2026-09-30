@@ -36,7 +36,6 @@
     "@deepseek-ai/dsh-home-paths": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
     "@deepseek-ai/dsh-permission-presets": "workspace:^",
-    "@deepseek-ai/dsh-plan-mode": "workspace:^",
     "@deepseek-ai/dsh-session": "workspace:^",
     "@deepseek-ai/dsh-session-persistence": "workspace:^",
     "@deepseek-ai/dsh-session-projection": "workspace:^",
@@ -54,6 +53,7 @@
     "@dsh-tui/ui": "workspace:^",
     "commander": "catalog:",
     "ink": "catalog:",
+    "jsonc-parser": "catalog:",
     "react": "catalog:",
     "shiki": "^4.4.3",
     "@deepseek-ai/dsh-tool-workflow": "workspace:^"

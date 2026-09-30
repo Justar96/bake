@@ -101,7 +101,7 @@ export function Fullscreen({ transcript, live, heading, opening, budget, result,
       <Box flexDirection="column" height={room} flexShrink={0} overflow="hidden">
         {welcome
           ? <Welcome {...opening} copy={copy} frame={frame} columns={size.columns} />
-          : lines.map(item => <Line key={item.key} line={item.line} budget={budget} clock={clock}
+          : lines.map(item => <Line key={item.key} line={item.line} budget={budget} frame={frame} clock={clock}
               window={{ offset: item.offset, height: item.height }} />)}
       </Box>
       {hint > 0 && (position === undefined

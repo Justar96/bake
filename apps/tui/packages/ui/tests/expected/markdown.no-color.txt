@@ -5,13 +5,13 @@
 
   src/app.ts and value.
 
-  - [x] done
-  - [ ] next
+  • [x] done
+  • [ ] next
 
-  > quote
+  │ quote
 
   Check
-  -----
+  ─────
   ready
 
   ts
@@ -23,13 +23,13 @@
 
   src/app.ts and value.
 
-  - [x] done
-  - [ ] next
+  • [x] done
+  • [ ] next
 
-  > quote
+  │ quote
 
   Check
-  -----
+  ─────
   ready
 
   ts

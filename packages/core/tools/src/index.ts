@@ -11,7 +11,7 @@ import type { ScopeKey, ScopeLayer, Scoped } from '@deepseek-ai/dsh-scope'
 import type { ToolCallId, ContentBlock, ToolSchema } from '@deepseek-ai/dsh-llm'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import type { UserMessage } from '@deepseek-ai/dsh-session'
+import type { Session, UserMessage } from '@deepseek-ai/dsh-session'
 import { assertNever, deepFreeze, snapshotJsonValue, type JsonValue } from '@deepseek-ai/dsh-util-values'
 import type { PromptSection, ToolProviderResult } from '@deepseek-ai/dsh-system-prompt'
 import type { PtcRuntime } from '@deepseek-ai/dsh-ptc-runtime'
@@ -23,6 +23,7 @@ import type { ToolCallView, ToolResultView } from './presentation.ts'
 import { assertSupportedJsonSchema, validateJsonSchemaValue } from './json-schema.ts'
 import type { JsonSchemaNode } from './json-schema.ts'
 import { createRunCodeTool, RUN_CODE_NAME } from './ptc.ts'
+import { createToolHelpTool, TOOL_HELP_NAME } from './tool-help.ts'
 import type { PtcSdkLanguage } from './ptc.ts'
 import { renderToolsSdk } from './ts-types.ts'
 import type { ToolSdkSchema } from './ts-types.ts'
@@ -95,6 +96,7 @@ export {
 export type { PtcDispatchEventData, PtcDispatchStartEventData } from './types.ts'
 
 export { CodeRunFailedError, RUN_CODE_NAME } from './ptc.ts'
+export { TOOL_HELP_NAME } from './tool-help.ts'
 export { jsonSchemaToTs, renderToolsSdk } from './ts-types.ts'
 export { jsonSchemaToPy, renderToolsSdkPy } from './py-types.ts'
 export { defineContentToolFixture, type ContentToolFixtureOptions } from './testing.ts'
@@ -216,6 +218,14 @@ export interface ToolOutputDefinition {
 export interface ToolDefinition extends ToolSchema {
   /** Mandatory canonical output declaration. */
   readonly output: ToolOutputDefinition
+  /**
+   * Usage reference kept out of the native schema, which is resent with every
+   * request. A scope that can see a tool with details also sees the reserved
+   * {@link TOOL_HELP_NAME} tool, which returns them; the description should
+   * tell the model to call it before first use. The PTC mode SDK appends the
+   * details to the binding's documentation instead. Must be non-empty when set.
+   */
+  readonly details?: string
   /**
    * Run one accepted call and return only its canonical lossless-JSON value.
    * Async work must observe or forward `exec.signal` and settle only after its
@@ -468,6 +478,21 @@ export const TOOL_ABORTED = 'ABORTED'
 
 /** Canonical error code for cancellation before a tool body was invoked. */
 export const TOOL_ABORTED_BEFORE_DISPATCH = 'ABORTED_BEFORE_DISPATCH'
+
+/**
+ * Canonical error code for a model-direct call suppressed because an identical
+ * call already met a deterministic refusal earlier in the same turn.
+ */
+export const TOOL_DUPLICATE_CALL = 'DUPLICATE_TOOL_CALL'
+
+/**
+ * Failure codes whose unchanged retry must fail the same way until another
+ * tool call settles: the filesystem observation policy refuses an unread
+ * (`FS_NOT_OBSERVED`) or stale (`FS_STALE_VERSION`) guarded mutation, and only
+ * a later observation or mutation can change that verdict. The codes are
+ * matched as strings so this package takes no filesystem dependency.
+ */
+const REPEAT_REFUSAL_CODES: ReadonlySet<string> = new Set(['FS_NOT_OBSERVED', 'FS_STALE_VERSION'])
 
 /** Structured error metadata for a failed tool call (alongside the model-facing text). */
 export interface ToolErrorInfo {
@@ -811,6 +836,15 @@ export class ToolRuntime extends Service {
   private cancellationStates = new WeakMap<ToolRunContext, ToolCancellationState>()
   /** Definition-owned final content transform snapshotted before policy begins. */
   private contentFinalizers = new WeakMap<ToolRunContext, ToolDefinition['finalizeContent']>()
+  /**
+   * Refusals that an identical retry would repeat, keyed by call identity
+   * ({@link repeatKey}), for each Session with an open turn. `turn/start`
+   * opens an empty ledger and `turn/end` drops it, so suppression never spans
+   * turns and never applies outside one.
+   */
+  private readonly turnRefusals = new WeakMap<Session, Map<string, ToolFailure>>()
+  /** Executions answered from {@link turnRefusals} without dispatch. */
+  private readonly suppressedExecutions = new WeakSet<ToolExecution>()
   private readonly layers = new ScopedLayers(
     scope => new ToolLayer(scope),
     () => { this.ctx.emit('tools/change') },
@@ -825,6 +859,8 @@ export class ToolRuntime extends Service {
    * transport is stateless beyond its closures over `this`.
    */
   private ptcTransport: ToolDefinition | undefined
+  /** Reserved on-demand details reader, stateless beyond its closure over `this`. */
+  private readonly toolHelp: ToolDefinition = createToolHelpTool((name, scope) => this.view(scope).visible.get(name))
 
   constructor(ctx: Context, config: Config = {}) {
     super(ctx, 'tools')
@@ -833,6 +869,10 @@ export class ToolRuntime extends Service {
     this.defaultMode = config.mode ?? 'native'
     this.maxParallelSubCalls = resolveMaxParallelSubCalls(config.maxParallelSubCalls)
     ctx.systemPrompt.tools(context => this.wireSchemas(context.scope))
+    ctx.on('session/event', (session, event) => {
+      if (event.type === 'turn/start') this.turnRefusals.set(session, new Map())
+      else if (event.type === 'turn/end') this.turnRefusals.delete(session)
+    })
     if (this.defaultMode !== 'native') {
       ctx.systemPrompt.section(this.collapseSection())
       ctx.systemPrompt.section(this.sdkSection())
@@ -1055,11 +1095,17 @@ export class ToolRuntime extends Service {
       && (!Number.isFinite(timeoutMs) || timeoutMs <= 0)) {
       throw new TypeError(`tool "${name}" timeoutMs must be a positive finite number`)
     }
+    if (definition.details !== undefined && (typeof definition.details !== 'string' || definition.details.trim().length === 0)) {
+      throw new TypeError(`tool "${name}" details must be a non-empty string when given`)
+    }
     // Reserved unconditionally: any agent may select a code mode for itself,
     // so a name free to take under the deployment default would become a
     // collision the moment a preset mounted.
     if (name === RUN_CODE_NAME) {
       throw new Error(`tool name "${RUN_CODE_NAME}" is reserved for the PTC mode presentation transport and cannot be registered or shadowed`)
+    }
+    if (name === TOOL_HELP_NAME) {
+      throw new Error(`tool name "${TOOL_HELP_NAME}" is reserved for the registry's on-demand tool details and cannot be registered or shadowed`)
     }
     return this.layers.effect(
       this.ctx,
@@ -1091,6 +1137,9 @@ export class ToolRuntime extends Service {
     }
     if ([...allow ?? [], ...deny ?? []].includes(RUN_CODE_NAME)) {
       throw new Error(`tools.restrict() cannot name reserved PTC mode presentation transport "${RUN_CODE_NAME}"; restrict end-capability tools instead`)
+    }
+    if ([...allow ?? [], ...deny ?? []].includes(TOOL_HELP_NAME)) {
+      throw new Error(`tools.restrict() cannot name reserved "${TOOL_HELP_NAME}"; it follows the visibility of tools that declare details`)
     }
     const known = this.view(scope).restrictableNames
     const unknown = [...allow ?? [], ...deny ?? []].filter(name => !known.has(name))
@@ -1196,6 +1245,13 @@ export class ToolRuntime extends Service {
     if (this.modeFor(scope) !== 'native') {
       visible.set(RUN_CODE_NAME, this.requirePtcTransport())
     }
+    // The details reader follows the tools it serves: present exactly while a
+    // visible tool declares details, so a scope whose filter removed them also
+    // loses the reader, and no other scope's tools leak into this one.
+    if ([...visible.values()].some(definition => definition.details !== undefined)) {
+      knownNames.add(TOOL_HELP_NAME)
+      visible.set(TOOL_HELP_NAME, this.toolHelp)
+    }
     return { visible, knownNames, restrictableNames }
   }
 
@@ -1244,16 +1300,20 @@ export class ToolRuntime extends Service {
 
   /** Project visible callable tools onto the generated PTC mode SDK contract. */
   private sdkSchemas(scope?: ScopeKey): ToolSdkSchema[] {
+    // The SDK is already prompt text, so a binding's details join its
+    // documentation there and the details reader is not a binding.
     return [...this.view(scope).visible.values()]
-      .filter(definition => definition.name !== RUN_CODE_NAME)
+      .filter(definition => definition.name !== RUN_CODE_NAME && definition.name !== TOOL_HELP_NAME)
       .map((definition): ToolSdkSchema => {
         const output = snapshotJsonValue(definition.output.schema)
         /* v8 ignore next -- registration already validated and retained this schema as lossless JSON. */
         if (output === undefined) {
           throw new Error(`tool "${definition.name}" output schema must be lossless JSON before SDK projection`)
         }
+        const schema = this.schemaOf(definition, true)
         return {
-          ...this.schemaOf(definition, true),
+          ...schema,
+          ...definition.details === undefined ? {} : { description: `${schema.description}\n\n${definition.details}` },
           output,
         }
       })
@@ -1342,6 +1402,11 @@ export class ToolRuntime extends Service {
    * not-yet-started body with `ABORTED_BEFORE_DISPATCH` or replaces a
    * successful started outcome with `ABORTED`; already-started work is still
    * drained and may retain a tool-owned structured error.
+   * Within an agent's open turn, a model-direct call identical (name plus
+   * key-order-normalized arguments) to one refused as unread or stale
+   * (`FS_NOT_OBSERVED`, `FS_STALE_VERSION`) skips policy and dispatch with a
+   * {@link TOOL_DUPLICATE_CALL} error until any other call settles. Successes
+   * are never cached or replayed.
    * @param exec - the typed same-process call input. The registry assigns its
    *   correlation token before policy begins.
    * @returns the materialized final result.
@@ -1477,6 +1542,13 @@ export class ToolRuntime extends Service {
     const exec = created.exec
     if (this.callerCancelled(exec)) {
       return next({ kind: 'final-result', exec, result: toolAbortedBeforeDispatchResult() })
+    }
+    const repeated = this.repeatedRefusal(exec)
+    if (repeated !== undefined) {
+      // Before policy: an approval prompt for a call that cannot succeed only
+      // costs the user an answer. Post-execute still observes the result.
+      this.suppressedExecutions.add(exec)
+      return next({ kind: 'post-result', exec, result: duplicateCallResult(exec.name, repeated) })
     }
     try {
       const carrier = scopeTarget(this, exec.agent)
@@ -1651,8 +1723,50 @@ export class ToolRuntime extends Service {
     } catch (error: unknown) {
       finalResult = this.materializeFinalResult(toolErrorResult(error))
     }
+    this.recordTurnOutcome(exec, finalResult)
     this.notifyResult(exec, finalResult)
     return finalResult
+  }
+
+  /**
+   * The open-turn refusal ledger that governs one execution, if any. Calls
+   * without an agent have no turn and are never suppressed.
+   */
+  private turnLedger(exec: ToolExecution): Map<string, ToolFailure> | undefined {
+    return exec.agent === undefined ? undefined : this.turnRefusals.get(exec.agent.session)
+  }
+
+  /**
+   * The earlier refusal an identical model-direct call would repeat. Nested
+   * transport sub-dispatches are never suppressed: a program's retry loop is
+   * its own logic, and its outer result reports what happened.
+   */
+  private repeatedRefusal(exec: ToolExecution): ToolFailure | undefined {
+    if (exec.parent !== undefined) return undefined
+    const key = repeatKey(exec)
+    return key === undefined ? undefined : this.turnLedger(exec)?.get(key)
+  }
+
+  /**
+   * Update the turn ledger at the commit point of one final result. A
+   * repeat-refusal is remembered for a model-direct call; every other settled
+   * call, including successes, other failures, and nested sub-dispatches,
+   * forgets all remembered refusals because it may have observed or changed
+   * the state that decided them. A suppressed duplicate changes nothing.
+   */
+  private recordTurnOutcome(exec: ToolExecution, result: ToolExecutionResult): void {
+    if (this.suppressedExecutions.has(exec)) return
+    const ledger = this.turnLedger(exec)
+    if (ledger === undefined) return
+    const code = result.isError ? result.error.info?.code : undefined
+    const key = exec.parent === undefined && code !== undefined && REPEAT_REFUSAL_CODES.has(code)
+      ? repeatKey(exec)
+      : undefined
+    if (key === undefined || !result.isError) {
+      ledger.clear()
+      return
+    }
+    ledger.set(key, result.error)
   }
 
   /** Apply the snapshotted tool-owned content transform without exposing other result fields. */
@@ -1875,6 +1989,30 @@ export class ToolRuntime extends Service {
 /** Mint a same-process correlation token whose identity is its value. */
 function createExecutionToken(): ToolExecutionToken {
   return Symbol('dsh.tool.execution') as ToolExecutionToken
+}
+
+/**
+ * Identity of one call for repeat detection: the tool name plus its
+ * materialized arguments with object keys sorted, so key order never makes
+ * two identical calls differ. Undefined when arguments failed to materialize.
+ */
+function repeatKey(exec: ToolExecution): string | undefined {
+  if (exec.arguments === undefined) return undefined
+  return JSON.stringify([exec.name, exec.arguments], (_key, value: unknown) => {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) return value
+    const record = value as Record<string, unknown>
+    return Object.fromEntries(Object.keys(record).sort().map(name => [name, record[name]]))
+  })
+}
+
+/** Result for a model-direct call suppressed as a repeat of an earlier refusal. */
+function duplicateCallResult(name: string, prior: ToolFailure): ToolExecutionResult {
+  const message = `not run: this "${name}" call repeats one already refused this turn. Earlier refusal: ${prior.message}`
+  return {
+    content: [{ type: 'text', text: `Error: ${message}` }],
+    isError: true,
+    error: { message, info: { name: 'DuplicateToolCallError', code: TOOL_DUPLICATE_CALL } },
+  }
 }
 
 function toolErrorResult(error: unknown): ToolExecutionResult {

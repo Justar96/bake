@@ -1,7 +1,7 @@
 /** The status line's fields and the order they give way in. Pure, so it runs under `bun test`. */
 import { describe, expect, it } from 'bun:test'
 import { dictionaries } from '../src/copy.ts'
-import { CONTEXT_RAMP, PALETTE } from '../src/palette.ts'
+import { AGENT_TONES, CONTEXT_RAMP, PALETTE } from '../src/palette.ts'
 import { CWD_MIN, fitStatus, formWidth, MODEL_MIN, RANK, statusFields, type StatusField, type StatusInput } from '../src/status-line.ts'
 
 const copy = dictionaries.en
@@ -21,9 +21,18 @@ describe('statusFields', () => {
       'deepseek-v4-flash', 'think high', 'ctx ~11% (15.2k/128k)', 'in 42.3k  out 3.1k  cache hit 81%', '~/bake'])
     // Labels are dim; values keep the normal foreground while they are healthy.
     const [, think, context, tokens] = fields
-    expect(think!.forms[0]).toEqual([{ text: 'think ', dim: true }, { text: 'high' }])
+    expect(think!.forms[0]).toEqual([{ text: 'think ', dim: true }, { text: 'high', color: PALETTE.asking }])
     expect(context!.forms[0]).toEqual([{ text: 'ctx ', dim: true }, { text: '~11% (15.2k/128k)', color: undefined }])
     expect(tokens!.forms[0]!.at(-1)).toEqual({ text: '81%', color: undefined })
+  })
+
+  it('warms the thinking level as the effort rises, and keeps an effort it does not know plain', () => {
+    const level = (thinkingLevel: string) => statusFields({ ...base, thinkingLevel }, copy)[1]!.forms[0]![1]
+    expect(['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'Turbo'].map(level)).toEqual([
+      { text: 'minimal', dim: true }, { text: 'low', dim: true }, { text: 'medium' },
+      { text: 'high', color: PALETTE.asking }, { text: 'xhigh', color: CONTEXT_RAMP[2] },
+      { text: 'max', color: AGENT_TONES[1] }, { text: 'Turbo' },
+    ])
   })
 
   it('narrows the totals to the cache hit, which outlasts them, and drops totals with no cache whole', () => {
@@ -67,10 +76,10 @@ describe('statusFields', () => {
       .toBe('上下文 ~81% (81k/100k) · 即将压缩')
   })
 
-  it('names plan mode and an update, and leaves out what the session has not reported', () => {
+  it('names an update, and leaves out what the session has not reported', () => {
     expect(statusFields(base, copy).map(field => text(field.forms[0]!))).toEqual(['deepseek-v4-flash', '~/bake'])
-    const fields = statusFields({ ...base, plan: { active: true, pending: true }, update: { version: '0.2.0', installed: true } }, copy)
-    expect(fields.map(field => text(field.forms[0]!))).toEqual(['deepseek-v4-flash', 'Plan exit pending', 'update v0.2.0 · restart to use', '~/bake'])
+    const fields = statusFields({ ...base, update: { version: '0.2.0', installed: true } }, copy)
+    expect(fields.map(field => text(field.forms[0]!))).toEqual(['deepseek-v4-flash', 'update v0.2.0 · restart to use', '~/bake'])
     expect(statusFields({ ...base, cwd: '' }, copy)).toHaveLength(1)
   })
 })

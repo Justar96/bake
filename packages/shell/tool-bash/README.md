@@ -126,7 +126,7 @@ Read these pages when the package-level contract is not enough. They move from t
 
 #### What the model sees
 
-The model sees the generated [`bash` schema](../../../docs/tool-catalog.md#deepseek-aidsh-tool-bash). Its description is the tool's only guidance: this plugin contributes no system-prompt section, so an agent whose tool restriction hides `bash` sees nothing about it, and in PTC tools mode the same text documents the generated SDK function. `run_in_background` appears only when this producer enables it; `sandbox_permissions`, `justification`, and the description's sandbox paragraph (denial marker and escalation rules) appear only when the mounted executor advertises sandboxing, because only a confining executor can report a denial. The policy owner states the current sandbox mode and approval policy through its runtime context rather than changing this description. Agent-scoped tool restrictions can remove the definition for that agent.
+The model sees the generated [`bash` schema](../../../docs/tool-catalog.md#deepseek-aidsh-tool-bash). Its description is the tool's only guidance: this plugin contributes no system-prompt section, so an agent whose tool restriction hides `bash` sees nothing about it, and in PTC tools mode the same text documents the generated SDK function. The description keeps commands scoped to the current repository, points at `rg --files`, `glob`, or `grep` instead of filesystem-wide `find` scans, and tells the model to put builds and tests that may outlast their timeout in background jobs when that capability is enabled. `run_in_background` appears only when this producer enables it; `sandbox_permissions`, `justification`, and the description's sandbox paragraph (denial marker and escalation rules) appear only when the mounted executor advertises sandboxing, because only a confining executor can report a denial. The policy owner states the current sandbox mode and approval policy through its runtime context rather than changing this description. Agent-scoped tool restrictions can remove the definition for that agent.
 
 #### Token effect
 
@@ -168,7 +168,7 @@ Append-only; newly visible content follows the reusable request prefix and does 
 
 #### What the model sees
 
-Validation and policy failures are normalized as `Error: <message>`. This package's stable messages are `invalid command: expected a non-empty string`, `invalid description: expected a non-empty string`, `invalid timeoutMs: expected a positive number, got <value>`, the escalation pairing failures, `run_in_background is disabled for this deployment (enableRunInBackground: false)`, `background jobs unavailable: load @deepseek-ai/dsh-jobs and @deepseek-ai/dsh-tool-jobs`, `sandbox_permissions is not available in this composition (no sandboxing executor to escalate)`, the approval availability/rejection/cancellation variants, and `tool call aborted`.
+Validation and policy failures are normalized as `Error: <message>`. This package's stable messages are `invalid command: expected a non-empty string`, `invalid timeoutMs: expected a positive number, got <value>`, the escalation pairing failures, `run_in_background is disabled for this deployment (enableRunInBackground: false)`, `background jobs unavailable: load @deepseek-ai/dsh-jobs and @deepseek-ai/dsh-tool-jobs`, `sandbox_permissions is not available in this composition (no sandboxing executor to escalate)`, the approval availability/rejection/cancellation variants, and `tool call aborted`.
 
 #### Token effect
 
