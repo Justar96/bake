@@ -22,8 +22,12 @@ export interface FrameRequest {
   readonly env: Readonly<Partial<Record<string, string>>>
   /** The operating system, as `process.platform` names it. */
   readonly platform: string
-  /** The operating system's locale, which Windows exposes instead of locale variables. */
-  readonly systemLocale: string
+  /**
+   * The operating system's locale, which Windows exposes instead of locale
+   * variables. Read only on native Windows outside Windows Terminal, so other
+   * platforms never consult it.
+   */
+  readonly systemLocale: () => string
 }
 
 /** Locale variables in the order POSIX resolves them for character handling. */
@@ -92,7 +96,7 @@ export function resolveFrame(request: FrameRequest): FrameStyle {
   if (terminal === undefined || terminal === '') {
     const term = request.env['TERM']
     if (request.platform === 'win32') {
-      if (ambiguousWide(request.systemLocale.toLowerCase()) || term === 'dumb') return 'classic'
+      if (ambiguousWide(request.systemLocale().toLowerCase()) || term === 'dumb') return 'classic'
     } else {
       // No variable set means the C locale, which is not UTF-8.
       if (ctype === undefined || !/utf-?8/.test(ctype)) return 'classic'

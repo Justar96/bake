@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test'
 import { resolveFrame, type FrameRequest } from '../src/frame.ts'
 
 const ask = (env: FrameRequest['env'], overrides: Partial<FrameRequest> = {}) =>
-  resolveFrame({ configured: 'auto', locale: 'en', env, platform: 'linux', systemLocale: 'en-US', ...overrides })
+  resolveFrame({ configured: 'auto', locale: 'en', env, platform: 'linux', systemLocale: () => 'en-US', ...overrides })
 
 const utf8 = { LANG: 'en_US.UTF-8', TERM: 'xterm-256color' }
 
@@ -61,12 +61,19 @@ describe('resolveFrame', () => {
     expect(ask({ TERM: 'dumb' }, windows)).toBe('classic')
     // The console host draws Ambiguous characters wide under a CJK code page,
     // and Windows names that locale in the system, not the environment.
-    expect(ask({}, { ...windows, systemLocale: 'zh-CN' })).toBe('classic')
-    expect(ask({}, { ...windows, systemLocale: 'ja-JP' })).toBe('classic')
+    expect(ask({}, { ...windows, systemLocale: () => 'zh-CN' })).toBe('classic')
+    expect(ask({}, { ...windows, systemLocale: () => 'ja-JP' })).toBe('classic')
     expect(ask({ LANG: 'ko_KR.UTF-8' }, windows)).toBe('classic')
     expect(ask({}, { ...windows, locale: 'zh' })).toBe('classic')
     // Windows Terminal draws them narrow, so the system locale does not apply there.
-    expect(ask({ WT_SESSION: 'guid' }, { ...windows, systemLocale: 'zh-CN' })).toBe('round')
+    expect(ask({ WT_SESSION: 'guid' }, { ...windows, systemLocale: () => 'zh-CN' })).toBe('round')
+  })
+
+  test('never reads the system locale outside native Windows', () => {
+    const unread = { systemLocale: (): string => { throw new Error('read the system locale') } }
+    expect(ask(utf8, unread)).toBe('round')
+    expect(ask({}, { ...unread, platform: 'darwin' })).toBe('classic')
+    expect(ask({ WT_SESSION: 'guid' }, { ...unread, platform: 'win32' })).toBe('round')
   })
 
   test('reads the variables in the order POSIX resolves them', () => {
