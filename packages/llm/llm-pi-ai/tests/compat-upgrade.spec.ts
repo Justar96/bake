@@ -81,8 +81,17 @@ describe('pi-ai gateway compatibility declarations', () => {
     expect(() => resolved({ sendSessionAffinityHeaders: true }, 'openai-responses')).toThrow(/compat/)
   })
 
-  it.each(['supportsMidConvoEffort', 'allowedFallbackModels'])('withholds catalog-owned %s', (field) => {
+  it.each(['supportsMidConvoEffort', 'supportsMidConvoSystemMessages', 'supportsMidConvoToolChanges', 'allowedFallbackModels'])('withholds catalog-owned %s', (field) => {
     expect(() => resolved({ [field]: true }, 'anthropic-messages'))
+      .toThrow(/which is not configurable here/)
+  })
+
+  it.each([
+    ['supportsMidConvoSystemMessages', 'openai-completions'],
+    ['supportsMidConvoToolAdditions', 'openai-completions'],
+    ['supportsMidConvoSystemMessages', 'openai-responses'],
+  ])('withholds catalog-owned %s on %s', (field, api) => {
+    expect(() => resolved({ [field]: true }, api))
       .toThrow(/which is not configurable here/)
   })
 

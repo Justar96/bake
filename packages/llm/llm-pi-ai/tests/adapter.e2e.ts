@@ -8,12 +8,12 @@ import * as LlmDeepSeek from '@deepseek-ai/dsh-llm-deepseek'
 import { assemble, type AssembledResult } from './assemble.ts'
 
 /**
- * Real-API e2e for the pi-ai-backed adapter: V4 Flash defaults and
+ * Real-API e2e for the pi-ai-backed adapter: V4.1 Flash defaults and
  * off/high/max reasoning. Mirrors the native adapter's StreamChunk contract
  * and exercises a replayed tool follow-up. Key-gated.
  */
 
-const FLASH = 'deepseek-v4-flash'
+const FLASH = 'deepseek-flash'
 const contexts: Context[] = []
 
 async function harness(_model: string, config: Partial<PiAiProviderProfile> = {}) {
