@@ -101,12 +101,26 @@ function manifestBinViolations(root: string): string[] {
   return failures
 }
 
+/**
+ * Read a file the glob listed, or undefined when it vanished since. Parallel
+ * tests write and remove probe files inside the repository, and a file that no
+ * longer exists is no entrypoint.
+ */
+function readIfPresent(path: string): string | undefined {
+  try {
+    return readFileSync(path, 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+    throw error
+  }
+}
+
 function executableSourceViolations(root: string): string[] {
   const failures: string[] = []
   for (const rawPath of globSync(SOURCE_PATTERNS, { cwd: root, exclude: SOURCE_EXCLUDES }).sort()) {
     const path = repositoryPath(rawPath)
-    const source = readFileSync(resolve(root, path), 'utf8')
-    if (!source.startsWith('#!')) continue
+    const source = readIfPresent(resolve(root, path))
+    if (source === undefined || !source.startsWith('#!')) continue
     if (!EXECUTABLE_SOURCE_ALLOWLIST.has(path)) {
       failures.push(`${path}: executable source has no application/build/test classification`)
     }
