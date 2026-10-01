@@ -393,7 +393,7 @@ describe('job_output', () => {
     expect((await call(ctx, 'job_output', { job_id: '' })).isError).toBe(true)
     const unknown = await call(ctx, 'job_output', { job_id: 'bash-99' })
     expect(unknown.isError).toBe(true)
-    expect(text(unknown)).toContain('unknown job bash-99; use job_list to find a background job id. A continuable subagent id belongs to the subagent control tools.')
+    expect(text(unknown)).toContain("unknown job bash-99; use job_list to find a background job id. A continuable subagent's id is not a job id: its result arrives as a notice when it finishes.")
     const waited = await call(ctx, 'job_output', { job_id: 'bash-99', wait: true })
     expect(text(waited)).toContain('use job_list to find a background job id')
   })

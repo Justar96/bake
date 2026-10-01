@@ -15,10 +15,10 @@
  * @module @dsh-tui/ui/cards
  */
 
-import type { FileDiff, ToolCallView, ToolResult, ToolResultView } from '@deepseek-ai/dsh-tools'
+import type { FileDiff, TerminalChanges, TerminalFileChange, ToolCallView, ToolResult, ToolResultView } from '@deepseek-ai/dsh-tools'
 import { diffArrays, diffWordsWithSpace } from 'diff'
 import type { TuiCopy } from './copy.ts'
-import type { CardLine } from './rows.ts'
+import type { CardChanges, CardLine } from './rows.ts'
 import { outputLines, toolText } from './tool-output.ts'
 
 /**
@@ -41,6 +41,8 @@ export interface Card {
   readonly title: string
   /** Lines shown under the headline, in display order. */
   readonly detail: readonly CardLine[]
+  /** The files a command changed, drawn under its output in tones of their own. */
+  readonly changes?: CardChanges
   /**
    * Whether the result's model-facing text still renders under the card, cut
    * as a result without a card is. Set by a result that reformats nothing: a
@@ -186,11 +188,12 @@ function resultCard(view: ToolResultView, copy: TuiCopy, called?: string): Card 
       const status = view.signal !== undefined ? `signal ${view.signal}`
         : view.exitCode !== undefined && view.exitCode !== 0 ? `exit ${view.exitCode}`
           : undefined
+      const changes = view.changes === undefined ? undefined : changesCard(view.changes, copy)
       return { title, detail: [
         ...outputLines(view.output ?? ''),
         // A zero exit says only what the absence of a failure already says.
         ...status === undefined ? [] : [{ text: status, summary: 'failure' as const }],
-      ] }
+      ], ...changes === undefined ? {} : { changes } }
     }
 
     case 'diff':
@@ -240,6 +243,81 @@ function resultCard(view: ToolResultView, copy: TuiCopy, called?: string): Card 
       return { title: titleOf(view), detail: [], raw: true }
   }
 }
+
+/**
+ * The section for the files a command changed while it ran.
+ *
+ * Each file's hunks are drawn as an edit's are. The surface bounds the
+ * section, so every file the producer listed is kept here.
+ *
+ * @param changes - the files, as the tool reported them.
+ * @param copy - localized words for the kinds of change and the caveats.
+ * @returns the section, or undefined when it lists nothing.
+ */
+function changesCard(changes: TerminalChanges, copy: TuiCopy): CardChanges | undefined {
+  const omitted = changes.omittedFiles ?? 0
+  if (changes.files.length === 0 && omitted <= 0) return undefined
+  const notes = [
+    ...changes.concurrent === true ? [copy.changeConcurrent] : [],
+    ...changes.timedOut === true ? [copy.changeTimedOut] : [],
+  ]
+  return {
+    files: changes.files.map(file => {
+      const status = statusOf(file, copy)
+      return {
+        path: pathText(file.path), ...status === undefined ? {} : { status },
+        added: file.added, removed: file.removed,
+        lines: diffLines((file.hunks ?? []).map(hunk => ({ ...hunk, path: file.path }))),
+      }
+    }),
+    ...omitted > 0 ? { omitted } : {},
+    ...notes.length === 0 ? {} : { notes },
+  }
+}
+
+/**
+ * The word drawn after a changed file's path.
+ *
+ * @param file - the file as the tool reported it.
+ * @param copy - localized words.
+ * @returns the word, or undefined for a plain edit, a change whose
+ *   before-content was unknown, and a kind newer than this build.
+ */
+function statusOf(file: TerminalFileChange, copy: TuiCopy): string | undefined {
+  switch (file.status) {
+    case 'created': return copy.changeNew
+    case 'deleted': return copy.changeDeleted
+    case 'renamed': return file.from === undefined ? undefined : `${copy.changeRenamed} ${pathText(file.from)}`
+    case 'binary': return copy.changeBinary
+    case 'too-large': return copy.changeTooLarge
+    case 'mode': return copy.changeMode
+    case 'symlink': return copy.changeSymlink
+    default: return undefined
+  }
+}
+
+/** A line break or carriage return as the escape `toolText` gives other controls. */
+const escapedBreak = (char: string): string => `\\x${char.charCodeAt(0).toString(16).padStart(2, '0')}`
+
+/**
+ * A path as one line of display text. A file name can hold any byte but `/`
+ * and NUL, so a control in it is escaped as in tool output, and a line break,
+ * which would split the line, is escaped too.
+ */
+const pathText = (path: string): string => toolText(path.replace(/[\r\n]/g, escapedBreak))
+
+/**
+ * One source line of a file as display text, before its words are compared.
+ *
+ * The text is from the file on disk, so terminal controls in it are made
+ * visible as tool output's are, and a tab is expanded, before word offsets
+ * are measured against what is drawn. A CRLF ending is dropped. Any other
+ * carriage return is escaped, since `toolText` reads it as a line break.
+ *
+ * @param line - one line of a hunk's side, without its newline.
+ * @returns the line as drawn.
+ */
+const sourceText = (line: string): string => toolText(line.replace(/\r$/, '').replace(/\r/g, escapedBreak))
 
 /**
  * Sign and marker text of one change line, and the gap between two changes.
@@ -302,7 +380,7 @@ function diffLines(diffs: readonly FileDiff[]): readonly CardLine[] {
  */
 function hunkLines(diff: FileDiff): readonly CardLine[] {
   const after = textLines(diff.newText).map(line => line.text)
-  if (diff.oldText === null) return after.map((text, index) => changeLine('added', text, diff.path, diff.newStart ?? 1, index))
+  if (diff.oldText === null) return after.map((text, index) => changeLine('added', sourceText(text), diff.path, diff.newStart ?? 1, index))
   const before = textLines(diff.oldText).map(line => line.text)
   const lines: CardLine[] = []
   let removed: string[] = []
@@ -314,10 +392,14 @@ function hunkLines(diff: FileDiff): readonly CardLine[] {
   const flush = (): void => {
     if (removed.length === 0 && added.length === 0) return
     if (apart && lines.length > 0) lines.push(GAP)
-    const pairs = removed.map((text, index) => index < added.length ? wordRanges(text, added[index]!) : undefined)
+    // Lines are paired by the raw text, so a change only a control made is
+    // still drawn, and words by the drawn text, so offsets match what is shown.
+    const gone = removed.map(sourceText)
+    const come = added.map(sourceText)
+    const pairs = gone.map((text, index) => index < come.length ? wordRanges(text, come[index]!) : undefined)
     lines.push(
-      ...removed.map((text, index) => changeLine('removed', text, diff.path, diff.oldStart, old - removed.length + index, pairs[index]?.removed)),
-      ...added.map((text, index) => changeLine('added', text, diff.path, diff.newStart, now - added.length + index, pairs[index]?.added)))
+      ...gone.map((text, index) => changeLine('removed', text, diff.path, diff.oldStart, old - removed.length + index, pairs[index]?.removed)),
+      ...come.map((text, index) => changeLine('added', text, diff.path, diff.newStart, now - added.length + index, pairs[index]?.added)))
     removed = []
     added = []
     apart = false

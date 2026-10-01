@@ -88,6 +88,10 @@ export type Row =
    * none. It is kept apart from `detail` because it is the line that survives
    * a collapsed result. A surface that reports the body as a count still says
    * which file was edited or which command was run.
+   *
+   * `changes` lists the files a command changed while it ran. It is apart
+   * from `detail` because it keeps its own tones and its own bound: a
+   * command that failed still shows its changes in green and red.
    */
   | {
     readonly kind: 'tool-result'
@@ -96,6 +100,7 @@ export type Row =
     readonly text: string
     readonly title?: string
     readonly detail?: readonly CardLine[]
+    readonly changes?: CardChanges
   }
   | {
     readonly kind: 'notice'
@@ -185,6 +190,34 @@ export interface CardLine {
  * a diff leaves out between two changes.
  */
 export type CardEmphasis = 'added' | 'removed' | 'gap'
+
+/**
+ * The workspace files a command changed while it ran, already localized.
+ *
+ * Drawn as a section of the command's own block, under its output. The
+ * surface bounds it, so it carries every file the producer listed.
+ */
+export interface CardChanges {
+  /** Each changed file, in the producer's order. */
+  readonly files: readonly CardFileChange[]
+  /** Files the producer listed beyond its own bound, absent when none. */
+  readonly omitted?: number
+  /** Caveats drawn dim under the section, such as that it may include other activity. */
+  readonly notes?: readonly string[]
+}
+
+/** One file in a {@link CardChanges} section. */
+export interface CardFileChange {
+  /** Path relative to the session's working directory, as display text. */
+  readonly path: string
+  /** How the file changed when it was not a plain edit, such as `new` or `renamed from a.ts`. */
+  readonly status?: string
+  /** Lines added and removed, whether or not `lines` carries them. */
+  readonly added: number
+  readonly removed: number
+  /** Its changed lines, as a `diff` card draws them; empty when the producer sent no hunks. */
+  readonly lines: readonly CardLine[]
+}
 
 /** How a notice is classified. Neutral progress, a recoverable problem, or a failure. */
 export type NoticeTone = 'info' | 'warn' | 'error'

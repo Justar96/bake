@@ -5,6 +5,7 @@ import type { AddressInfo } from 'node:net'
 import { Context } from '@deepseek-ai/cordis'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import { SessionId } from '@deepseek-ai/dsh-session'
 import type { SubagentStartRequest } from '@deepseek-ai/dsh-subagent'
 import { MockAdapter } from '../../../core/agent-loop/tests/mock-adapter.ts'
 import { MemoryCredentials } from '../../../credentials/credentials/tests/memory.ts'
@@ -13,6 +14,8 @@ import SubagentModelSelectionConfig from '../src/model-selection-settings.ts'
 import { DEFAULT_ROUTER_URL } from '../src/model-selection-settings.ts'
 import type { SubagentRouterSettings } from '../src/model-selection-settings.ts'
 import { callSubagent, modelSelectionSetupAgent, setup } from './harness.ts'
+import { subagentRoutingDecision } from '../src/routing-state.ts'
+import { MAX_TASK_CHARS, routerTaskExcerpt } from '../src/auto-route.ts'
 
 const REASONING = {
   efforts: [
@@ -61,17 +64,120 @@ afterEach(async () => {
   })))
 })
 
-async function routedSetup(router: Partial<SubagentRouterSettings> & { url: string }) {
+async function routedSetup(
+  router: Partial<SubagentRouterSettings> & { url: string },
+  agentRouteDefaults?: { provider: string; model: string },
+) {
   const requests: SubagentStartRequest[] = []
   const ctx = await setup({ provider: 'mock', withModelSelection: true, router: { enabled: true, ...router } },
-    { onStart: (request) => { requests.push(request) } })
+    { onStart: (request) => { requests.push(request) }, ...agentRouteDefaults === undefined ? {} : { agentRouteDefaults } })
   ctx.llm.registerAdapter(['alpha'], new MockAdapter([], REASONING))
   const parent = modelSelectionSetupAgent(ctx)
   ;(parent as unknown as { options: Agent['options'] }).options = { provider: 'alpha', model: 'parent-model' }
   return { ctx, requests }
 }
 
+describe('routerTaskExcerpt', () => {
+  it('sends a short task whole', () => {
+    expect(routerTaskExcerpt('Fix the flaky test.')).toBe('Fix the flaky test.')
+    expect(routerTaskExcerpt('x'.repeat(MAX_TASK_CHARS))).toHaveLength(MAX_TASK_CHARS)
+  })
+
+  it('keeps a long task\'s opening and its end, where a pasted log puts the ask', () => {
+    const task = `Investigate this log.\n${'log line\n'.repeat(10_000)}Now fix the retry bug it shows.`
+    const excerpt = routerTaskExcerpt(task)
+    expect(excerpt).toHaveLength(MAX_TASK_CHARS)
+    expect(excerpt.startsWith('Investigate this log.')).toBe(true)
+    expect(excerpt.endsWith('Now fix the retry bug it shows.')).toBe(true)
+    expect(excerpt).toContain('\n[\u2026]\n')
+    expect(excerpt.indexOf('\n[\u2026]\n')).toBe(Math.floor(MAX_TASK_CHARS * 3 / 8))
+  })
+
+  it('never splits a surrogate pair at either cut', () => {
+    const emoji = '\u{1F600}'
+    for (const offset of [0, 1]) {
+      const excerpt = routerTaskExcerpt('a'.repeat(offset) + emoji.repeat(MAX_TASK_CHARS))
+      expect(excerpt.length).toBeLessThanOrEqual(MAX_TASK_CHARS)
+      expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(excerpt)).toBe(false)
+    }
+  })
+})
+
 describe('dsh-tool-subagent task router', () => {
+  it('records a bounded assessment and resolved effort without changing model-visible output', async () => {
+    const router = await startRouter(() => ({ body: {
+      provider: 'alpha', model: 'fast-model', reason: `\u001b${'R'.repeat(1000)}`,
+      routing: { policy: '2026-10-01', status: 'cautious', difficulty: 0.8,
+        reasons: Array.from({ length: 20 }, () => `\n${'E'.repeat(1000)}`) },
+    } }))
+    const { ctx } = await routedSetup({ url: router.url })
+    try {
+      const parent = modelSelectionSetupAgent(ctx)
+      const result = await callSubagent(ctx, { description: 'work', prompt: 'do it' })
+      const decision = subagentRoutingDecision(ctx.sessionProjections, parent.session, SessionId(`scripted-subagent:mock:${parent.id}`))
+      expect(decision).toMatchObject({ source: 'auto', route: { provider: 'alpha', model: 'fast-model', reasoningEffort: 'high' },
+        router: { fallback: false, assessment: { policy: '2026-10-01', status: 'cautious', difficulty: 0.8 } } })
+      expect(decision?.router?.reason).toHaveLength(500)
+      expect(decision?.router?.assessment?.reasons).toEqual(Array.from({ length: 8 }, () => 'E'.repeat(240)))
+      expect(result.content).toEqual([{ type: 'text', text: 'scripted subagent reply' }])
+      expect(result.meta).toBeUndefined()
+      expect(JSON.stringify(result)).not.toContain('cautious')
+      const event = parent.session.snapshotEvents().find(event => event.type === 'subagent/routing-decision')
+      expect(event).toMatchObject({ ignorable: true })
+      expect(event).not.toHaveProperty('surfaceOp')
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('ignores malformed optional assessments while preserving a valid allowed route', async () => {
+    for (const routing of [null, [], { status: 'unknown' },
+      { policy: 'test', status: 'normal', difficulty: 2, reasons: [] },
+      { policy: 'test', status: 'normal', difficulty: 0.5, reasons: [42] }]) {
+      const router = await startRouter(() => ({ body: { provider: 'alpha', model: 'fast-model', routing } }))
+      const { ctx } = await routedSetup({ url: router.url })
+      try {
+        const parent = modelSelectionSetupAgent(ctx)
+        expect((await callSubagent(ctx, { description: 'work', prompt: 'do it' })).isError).toBe(false)
+        const decision = subagentRoutingDecision(ctx.sessionProjections, parent.session, SessionId(`scripted-subagent:mock:${parent.id}`))
+        expect(decision?.source).toBe('auto')
+        expect(decision?.route?.model).toBe('fast-model')
+        expect(decision?.router?.assessment).toBeUndefined()
+      } finally {
+        await ctx.fiber.dispose()
+      }
+    }
+  })
+
+  it('records the actual default and missing-context refusal rather than the rejected suggestion', async () => {
+    const router = await startRouter(() => ({ body: { provider: 'alpha', model: 'fast-model', fallback: true,
+      reason: 'missing previous conversation', routing: { policy: 'test', status: 'needs_context', difficulty: 0.5, reasons: ['needs context'] } } }))
+    const { ctx } = await routedSetup({ url: router.url }, { provider: 'alpha', model: 'configured-model' })
+    try {
+      const parent = modelSelectionSetupAgent(ctx)
+      expect((await callSubagent(ctx, { description: 'continue', prompt: 'do that' })).isError).toBe(false)
+      expect(subagentRoutingDecision(ctx.sessionProjections, parent.session, SessionId(`scripted-subagent:mock:${parent.id}`)))
+        .toMatchObject({ source: 'fallback', route: { provider: 'alpha', model: 'configured-model' },
+          router: { fallback: true, assessment: { status: 'needs_context' } } })
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('publishes no route decision when cancellation prevents child admission', async () => {
+    const router = await startRouter(() => ({ body: { provider: 'alpha', model: 'fast-model' } }))
+    const { ctx, requests } = await routedSetup({ url: router.url })
+    try {
+      const controller = new AbortController()
+      controller.abort('cancelled before routing')
+      await callSubagent(ctx, { description: 'work', prompt: 'do it' }, { signal: controller.signal })
+      expect(requests).toHaveLength(0)
+      expect(modelSelectionSetupAgent(ctx).session.snapshotEvents().filter(event => event.type === 'subagent/routing-decision')).toEqual([])
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
   it('routes a call that names no model to the router\'s allowed choice and effort', async () => {
     vi.stubEnv('TEST_ROUTER_TOKEN', 's3cret')
     const router = await startRouter(() => ({
@@ -92,6 +198,19 @@ describe('dsh-tool-subagent task router', () => {
     })
     expect(sent?.body.priority).toBeUndefined()
     expect(sent?.headers.authorization).toBe('Bearer s3cret')
+  })
+
+  it('routes a call whose route fields are all blank, as GPT models send them', async () => {
+    const router = await startRouter(() => ({ body: { provider: 'alpha', model: 'fast-model', reasoning_effort: 'low' } }))
+    const { ctx, requests } = await routedSetup({ url: router.url })
+
+    const result = await callSubagent(ctx, {
+      description: 'rename files', prompt: 'Rename the test files.', provider: '', model: '', reasoning_effort: '',
+    })
+
+    expect(result.isError).toBe(false)
+    expect(router.received).toHaveLength(1)
+    expect(requests[0]?.agentOptions).toEqual({ provider: 'alpha', model: 'fast-model', reasoningEffort: 'low' })
   })
 
   it('sends the user\'s route hints and stated priority', async () => {
@@ -168,10 +287,16 @@ describe('dsh-tool-subagent task router', () => {
     })
     expect(chosen.isError).toBe(false)
     expect(requests[0]?.agentOptions).toEqual({ provider: 'alpha', model: 'selected-model' })
+    const explicitParent = modelSelectionSetupAgent(ctx)
+    expect(subagentRoutingDecision(ctx.sessionProjections, explicitParent.session,
+      SessionId(`scripted-subagent:mock:${explicitParent.id}`))?.source).toBe('explicit')
 
     const unset = await routedSetup({ url: router.url, enabled: false })
     expect((await callSubagent(unset.ctx, { description: 'work', prompt: 'do it' })).isError).toBe(false)
     expect(unset.requests[0]?.agentOptions).toBeUndefined()
+    const defaultParent = modelSelectionSetupAgent(unset.ctx)
+    expect(subagentRoutingDecision(unset.ctx.sessionProjections, defaultParent.session,
+      SessionId(`scripted-subagent:mock:${defaultParent.id}`))?.source).toBe('default')
     expect(router.received).toHaveLength(0)
   })
 
@@ -196,6 +321,7 @@ describe('dsh-tool-subagent task router', () => {
     const router = await startRouter(() => ({ body: { routes: [
       { provider: 'alpha', model: 'fast-model', profile: 'claude-opus-4-5', matched_by: 'same_as', ranked: true,
         quality: 0.93, quality_source: 'benchmarks', price: 9.5, price_source: 'hint' },
+      { provider: 'alpha', model: 'child-model', ranked: true, quality: 0.7, quality_source: 'inherited', price: -1 },
       { provider: 'other', model: 'injected', ranked: true },
     ] } }))
     const { ctx } = await routedSetup({
@@ -213,6 +339,7 @@ describe('dsh-tool-subagent task router', () => {
     expect(views.map(view => `${view.provider}/${view.model}`)).toEqual(allowed.map(route => `${route.provider}/${route.model}`))
     expect(views).toContainEqual({ provider: 'alpha', model: 'fast-model', profile: 'claude-opus-4-5', matchedBy: 'same_as',
       ranked: true, quality: 0.93, qualitySource: 'benchmarks', price: 9.5, priceSource: 'hint' })
+    expect(views).toContainEqual({ provider: 'alpha', model: 'child-model', ranked: true, quality: 0.7, qualitySource: 'inherited' })
     // A route the router said nothing about is unranked.
     expect(views).toContainEqual({ provider: 'alpha', model: 'selected-model', ranked: false })
   })

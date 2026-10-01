@@ -2,7 +2,7 @@
 import { describe, expect, test } from 'bun:test'
 import { ICON } from '../src/icons.ts'
 import { COLUMN, MARKER, TREE, VERB } from '../src/layout.ts'
-import type { CardLine, ToolCallRow } from '../src/rows.ts'
+import type { CardChanges, CardFileChange, CardLine, ToolCallRow } from '../src/rows.ts'
 import { PALETTE } from '../src/palette.ts'
 import wrapAnsi from 'wrap-ansi'
 import { compactModel, compactPath, CONNECTOR, fittedGroup, hintFor, isBlank, present, RAW_LINE_CELLS, softBreaks, styleOf, tailLines, toolLabel, verbFor, type Highlight, type PresentedLine, type ResultBound } from '../src/present.ts'
@@ -594,6 +594,115 @@ describe('present, drawing a change', () => {
     const failed = { ...edit(detail), result: { ok: false, text: '', detail } }
     const lines = present(failed, shown, undefined).slice(2)
     expect(lines.every(line => line.tone === 'failed' && line.spans === undefined)).toBe(true)
+  })
+})
+
+describe('present, drawing what a command changed', () => {
+  const words = { files: 'files', moreFiles: 'more files', moreFile: 'more file' }
+  const change = (side: 'added' | 'removed', code: string, number: number, source = 'a.js'): CardLine =>
+    ({ text: `${side === 'added' ? '+' : '-'} ${code}`, emphasis: side, source, number })
+  const file = (path: string, lines: readonly CardLine[], extra: Partial<CardFileChange> = {}): CardFileChange => ({
+    path, added: lines.filter(line => line.emphasis === 'added').length, removed: lines.filter(line => line.emphasis === 'removed').length, lines, ...extra,
+  })
+  const retries = file('a.js', [change('removed', 'const retries = 3', 4), change('added', 'const retries = 5', 4)])
+  const created = file('b.js', [change('added', 'module.exports = {}', 1, 'b.js')], { status: 'new' })
+  const output = Array.from({ length: 9 }, (_, index) => ({ text: `out ${index}` }))
+  const exit: CardLine = { text: 'exit 1', summary: 'failure' }
+  /** A command that failed after it changed files, as the projection hands it over. */
+  const run = (changes: CardChanges, ok = false, detail: readonly CardLine[] = [...output, exit]): ToolCallRow =>
+    ({ kind: 'tool-call', callId: 'c1', tool: 'bash', input: 'make', result: { ok, text: '', detail, changes } })
+  const text = (lines: readonly PresentedLine[]) => lines.map(line => line.text)
+
+  test('puts the change\'s size on the head before the exit status', () => {
+    const [, head] = present(run({ files: [retries, created] }), { ...live, ...words })
+    expect(head!.text).toBe('Bash(make)  +2 \u22121  exit 1')
+    expect(head!.spans?.slice(2)).toEqual([
+      { length: 4, tone: 'added' }, { length: 1, tone: 'plain' }, { length: 2, tone: 'removed' }, { length: 'exit 1'.length + 2, tone: 'failed' },
+    ])
+    // The size counts what the producer measured, including a file it sent no lines for.
+    expect(present(run({ files: [file('big.js', [], { added: 40, removed: 7 })] }, true, []), { ...live, ...words })[1]!.text)
+      .toBe('Bash(make)  +40 \u22127')
+  })
+
+  test('previews the output and the changes each against its own bound', () => {
+    const many = file('a.js', Array.from({ length: 6 }, (_, index) => change('added', `line ${index}`, index + 1)))
+    const lines = present(run({ files: [many, created] }), { ...live, ...words }).slice(2)
+    expect(lines.map(line => [line.verb, line.gutter, line.text])).toEqual([
+      [CONNECTOR, undefined, 'out 0'], ['', undefined, 'out 1'], ['', undefined, '+6 more lines'], ['', undefined, 'out 8'],
+      ['edited', undefined, 'a.js'], ['', '1', '+ line 0'], ['', '2', '+ line 1'], ['', '3', '+ line 2'], ['', undefined, '+3 more lines'],
+      // The bound is spent, and a count standing for one file would cost the row its path takes.
+      ['edited', undefined, 'b.js  new  +1'],
+    ])
+    expect(lines.every(line => line.zone === true)).toBe(true)
+    // A command that wrote nothing hangs its changes straight from the head.
+    expect(text(present(run({ files: [retries] }, true, []), { ...live, ...words }).slice(2)))
+      .toEqual(['a.js', '- const retries = 3', '+ const retries = 5'])
+  })
+
+  test('keeps the diff\'s own tones and the path\'s under a failed command', () => {
+    const lines = present(run({ files: [retries, created] }), { ...shown, ...words }).slice(2)
+    expect(lines.slice(0, 9).every(line => line.tone === 'failed')).toBe(true)
+    const section = lines.slice(9)
+    expect(section.map(line => [line.verb, line.text, line.tone])).toEqual([
+      ['edited', 'a.js', 'plain'], ['', '- const retries = 3', 'removed'], ['', '+ const retries = 5', 'added'],
+      ['edited', 'b.js  new', 'plain'], ['', '+ module.exports = {}', 'added'],
+    ])
+    expect(section[0]!.verbTone).toBe('strong')
+    expect(section[0]!.spans).toEqual([{ length: 4, tone: 'plain', color: PALETTE.reference }])
+    expect(section[3]!.spans).toEqual([{ length: 4, tone: 'plain', color: PALETTE.reference }, { length: 5, tone: 'quiet' }])
+    expect(section[1]!.spans).toEqual([{ length: 19, tone: 'removed' }])
+    // In a step's block, the failed head turns red but its size keeps its sides.
+    const [, , branch] = present({ kind: 'tool-group', calls: [run({ files: [retries] }), { kind: 'tool-call', callId: 'c2', tool: 'read', input: 'Read a.md' }] }, live)
+    expect(branch!.spans?.filter(span => span.tone === 'added' || span.tone === 'removed')).toEqual([{ length: 4, tone: 'added' }, { length: 2, tone: 'removed' }])
+  })
+
+  test('collapses to the head at a bound of zero, counting the files when there are several', () => {
+    const several = present(run({ files: [retries, created], omitted: 1 }), { ...committed, ...words })
+    expect(text(several)).toEqual(['', 'Bash(make)  +2 \u22121  3 files  exit 1'])
+    expect(several[1]!.spans?.at(-2)).toEqual({ length: '3 files'.length + 2, tone: 'quiet' })
+    expect(text(present(run({ files: [retries] }), { ...committed, ...words }))).toEqual(['', 'Bash(make)  +1 \u22121  exit 1'])
+    // A command that succeeded reports what it changed, not how much it printed.
+    expect(text(present(run({ files: [retries] }, true, output), { ...committed, ...words }))).toEqual(['', 'Bash(make)  +1 \u22121'])
+    // A change with no size to report leaves the output's count in its place.
+    expect(text(present(run({ files: [file('logo.png', [], { status: 'binary' })] }, true, output), { ...committed, ...words })))
+      .toEqual(['', 'Bash(make)  9 lines'])
+  })
+
+  test('keeps the path line of a file it has no lines for, with the size it measured', () => {
+    const files = [file('logo.png', [], { status: 'binary' }), file('gen.js', [], { added: 3, removed: 1 }), retries]
+    const lines = present(run({ files }, true, []), { ...live, ...words }).slice(2)
+    expect(lines.map(line => [line.verb, line.text])).toEqual([
+      ['edited', 'logo.png  binary'], ['edited', 'gen.js  +3 \u22121'], ['edited', 'a.js'], ['', '- const retries = 3'], ['', '+ const retries = 5'],
+    ])
+    expect(lines[1]!.spans).toEqual([{ length: 6, tone: 'plain', color: PALETTE.reference }, { length: 4, tone: 'added' }, { length: 1, tone: 'plain' }, { length: 2, tone: 'removed' }])
+  })
+
+  test('counts the files the bound and the producer left out, then the caveats, dim', () => {
+    const files = Array.from({ length: 6 }, (_, index) => file(`f${index}.js`, [change('added', 'x', 1, `f${index}.js`)]))
+    const lines = present(run({ files, omitted: 2, notes: ['may include other activity', 'may be incomplete'] }, true, []), { ...live, ...words }).slice(2)
+    expect(text(lines)).toEqual(['f0.js', '+ x', 'f1.js', '+ x', 'f2.js', '+ x', '+5 more files', 'may include other activity', 'may be incomplete'])
+    expect(lines.slice(-3).every(line => line.tone === 'quiet' && line.verb === '')).toBe(true)
+    // One file the producer left out takes the singular.
+    expect(present(run({ files: [retries], omitted: 1 }, true, []), { ...live, ...words }).at(-1)!.text).toBe('+1 more file')
+  })
+
+  test('highlights the drawn changes, and only those, under a failed command', () => {
+    const seen: string[] = []
+    const highlight: Highlight = lines => {
+      seen.push(...lines)
+      return lines.map(text => [{ length: text.length, color: '#268bd2' }])
+    }
+    const many = file('a.js', Array.from({ length: 6 }, (_, index) => change('added', `line ${index}`, index + 1)))
+    const lines = present(run({ files: [many] }), { ...live, ...words, code: highlight })
+    expect(seen).toEqual(['line 0', 'line 1', 'line 2'])
+    expect(lines.find(line => line.text === '+ line 0')!.spans).toEqual([{ length: 2, tone: 'added' }, { length: 6, tone: 'added', color: '#268bd2' }])
+  })
+
+  test('draws the changes under a result that stands apart from its call', () => {
+    const lines = present({ kind: 'tool-result', callId: 'c1', ok: false, text: '', detail: [{ text: 'boom' }], changes: { files: [retries] } }, { ...live, ...words })
+    expect(lines.map(line => [line.text, line.tone])).toEqual([
+      ['[c1]  1 lines', 'failed'], ['boom', 'failed'], ['a.js', 'plain'], ['- const retries = 3', 'removed'], ['+ const retries = 5', 'added'],
+    ])
   })
 })
 

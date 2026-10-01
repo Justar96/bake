@@ -565,8 +565,17 @@ export class JsonlBackendTracker {
       const writer = this.writers.get(session.id)
       if (writer === null || writer === undefined) return undefined
       return (async () => {
-        await writer.drainLive()
-        await writer.flush()
+        try {
+          await writer.drainLive()
+          await writer.flush()
+        } catch (error: unknown) {
+          // The session is being disposed and its handle is closing: close
+          // drains the routed buffer durably, so this flush settles with that
+          // close, including its failure, as flushAll does. On a closing
+          // handle close() returns the close already running.
+          if (!(error instanceof SessionHandleClosedError)) throw error
+          await writer.close()
+        }
       })()
     })
     ctx.on('session/disposed', (session: Session) => {

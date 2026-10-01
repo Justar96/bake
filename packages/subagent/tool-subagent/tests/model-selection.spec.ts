@@ -71,7 +71,7 @@ describe('dsh-tool-subagent model selection', () => {
         { provider: 'alpha', model: 'other-model' },
         { provider: 'alpha', model: 'other-model' },
       )
-    }).toThrow('is not allowed for this Session')
+    }).toThrow('"alpha/other-model" is not allowed for this Session; allowed routes: alpha/allowed-model')
     expect(() => {
       assertAllowedModelSelection(
         policy,
@@ -325,15 +325,25 @@ describe('dsh-tool-subagent model selection', () => {
     expect(starts).toBe(0)
   })
 
+  it('reads blank route fields as omitted', async () => {
+    const requests: SubagentStartRequest[] = []
+    const ctx = await setup({ provider: 'mock', withModelSelection: true }, { onStart: (request) => { requests.push(request) } })
+    const result = await callSubagent(ctx, {
+      description: 'blank route', prompt: 'do it', provider: '', model: ' ', reasoning_effort: '',
+    })
+    expect(result.isError).toBe(false)
+    expect(requests).toHaveLength(1)
+    expect(requests[0]?.agentOptions).toBeUndefined()
+  })
+
   it.each([
-    { provider: '', model: 'fast-model', expected: '`provider` must be non-empty' },
-    { provider: 'alpha', model: '', expected: '`model` must be non-empty' },
-    { reasoning_effort: '', expected: '`reasoning_effort` must be non-empty' },
-  ])('rejects empty model-facing values', async ({ expected, ...selection }) => {
+    { provider: '', model: 'fast-model' },
+    { provider: 'alpha', model: '' },
+  ])('still requires a named provider and model together', async (selection) => {
     const ctx = await setup({ provider: 'mock', withModelSelection: true })
-    const result = await callSubagent(ctx, { description: 'empty route', prompt: 'do it', ...selection })
+    const result = await callSubagent(ctx, { description: 'half-blank route', prompt: 'do it', ...selection })
     expect(result.isError).toBe(true)
-    expect(text(result)).toContain(expected)
+    expect(text(result)).toContain('`provider` and `model` must be supplied together')
   })
 
   it('uses the LLM runtime for provider and reasoning-effort validation before child creation', async () => {

@@ -46,12 +46,13 @@ The single config field toggles background support.
 | Field | Default | Meaning |
 |---|---|---|
 | `enableRunInBackground` | `true` | Expose `run_in_background`; when `false`, forced background calls are rejected |
+| `changeReport` | `true` | Show the workspace files a foreground call changed under its output, through [`dsh-shell-change-report`](../shell-change-report/README.md); display only, so the model's result is the same either way |
 
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-tool-bash) is the exhaustive source for every accepted field and its JSDoc; the generated [tool catalog](../../../docs/tool-catalog.md#deepseek-aidsh-tool-bash) carries the full argument schema.
 
 ### Running a command
 
-The tool executes `bash -c <command>` and returns the combined output. Commands run in a fresh shell every call, so directory changes and variables never carry over; `workdir` sets where a command runs, and a relative `workdir` resolves against the session's working directory. A non-zero exit is reported as `[exit code: N]` for the agent to interpret, not surfaced as a tool error. A short `description` labels the call for the user; `timeoutMs` replaces the executor's default timeout and is capped at its maximum. Output beyond the executor's stream caps is truncated to its tail, with the full output saved to a spill file whose path is reported. The tool description names `$DSH_HOME` and `$DSH_SESSION_ID` from the managed environment; `DSH_SHELL=1` is set too but only marks the process.
+The tool executes `bash -c <command>` and returns the combined output. Commands run in a fresh shell every call, so directory changes and variables never carry over; `workdir` sets where a command runs, and a relative `workdir` resolves against the session's working directory. A non-zero exit is reported as `[exit code: N]` for the agent to interpret, not surfaced as a tool error. A short `description` labels the call for the user; `timeoutMs` replaces the executor's default timeout and is capped at its maximum. The undeclared spellings `timeout` and `timeout_ms`, as a number or a numeric string, set it too when `timeoutMs` is absent: models used to other harnesses send them, and ignoring them would kill a long command at the default timeout. Output beyond the executor's stream caps is truncated to its tail, with the full output saved to a spill file whose path is reported. The tool description names `$DSH_HOME` and `$DSH_SESSION_ID` from the managed environment; `DSH_SHELL=1` is set too but only marks the process.
 
 <a id="running-long-commands-in-the-background"></a>
 ### Running long commands in the background
@@ -168,7 +169,7 @@ Append-only; newly visible content follows the reusable request prefix and does 
 
 #### What the model sees
 
-Validation and policy failures are normalized as `Error: <message>`. This package's stable messages are `invalid command: expected a non-empty string`, `invalid timeoutMs: expected a positive number, got <value>`, the escalation pairing failures, `run_in_background is disabled for this deployment (enableRunInBackground: false)`, `background jobs unavailable: load @deepseek-ai/dsh-jobs and @deepseek-ai/dsh-tool-jobs`, `sandbox_permissions is not available in this composition (no sandboxing executor to escalate)`, the approval availability/rejection/cancellation variants, and `tool call aborted`.
+Validation and policy failures are normalized as `Error: <message>`. This package's stable messages are `invalid command: expected a non-empty string`, `invalid timeoutMs: expected a positive number, got <value>`, `invalid <timeout|timeout_ms>: expected a positive number of milliseconds for timeoutMs, got <value>`, the escalation pairing failures, `run_in_background is disabled for this deployment (enableRunInBackground: false)`, `background jobs unavailable: load @deepseek-ai/dsh-jobs and @deepseek-ai/dsh-tool-jobs`, `sandbox_permissions is not available in this composition (no sandboxing executor to escalate)`, the approval availability/rejection/cancellation variants, and `tool call aborted`.
 
 #### Token effect
 

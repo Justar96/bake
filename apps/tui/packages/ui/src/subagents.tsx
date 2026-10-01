@@ -8,6 +8,27 @@ import { COLUMN, MARKER } from './layout.ts'
 import { tailFits } from './line.tsx'
 import { agentTone, PALETTE, type PaletteColor } from './palette.ts'
 import { sheetBar, type SheetLine } from './sheet.tsx'
+import { toolText } from './tool-output.ts'
+
+/** Recorded selection of the child's effective model; supplied by the parent's routing projection. */
+export interface SubagentRouting {
+  readonly source: 'explicit' | 'default' | 'auto' | 'fallback'
+  readonly route?: {
+    readonly provider: string
+    readonly model: string
+    readonly reasoningEffort?: string
+  }
+  readonly router?: {
+    readonly reason: string
+    readonly fallback: boolean
+    readonly assessment?: {
+      readonly policy: string
+      readonly status: 'normal' | 'cautious' | 'needs_context' | 'fallback'
+      readonly difficulty: number
+      readonly reasons: readonly string[]
+    }
+  }
+}
 
 export interface SubagentEntry {
   readonly id: string
@@ -19,6 +40,8 @@ export interface SubagentEntry {
   readonly inspectable: boolean
   /** Workflow name for a recorded member; absent for direct delegation. */
   readonly workflow?: string
+  /** A durable routing decision. Absent for historical children without one. */
+  readonly routing?: SubagentRouting
 }
 
 /** Display fields derived from recorded workflow runs and the owning agent's activity. */
@@ -215,10 +238,62 @@ const SUBAGENT_BAR = 24
 
 /**
  * The logical lines the child under the pointer takes, first and last: its row
- * and the detail line under it. The sheet keeps both in view.
+ * and its detail lines. The sheet keeps them together when they fit; longer
+ * routing evidence remains reachable with the sheet's page keys.
  */
-export const subagentLine = (index: number, workflowCount = 0): readonly [number, number] =>
-  [SUBAGENT_LEAD + workflowCount + index, SUBAGENT_LEAD + workflowCount + index + 1]
+export const subagentLine = (index: number, workflowCount = 0, routing?: SubagentRouting): readonly [number, number] => {
+  const first = SUBAGENT_LEAD + workflowCount + index
+  const detail = routingContent(routing)
+  return [first, first + 1 + Number(detail.route !== undefined) + Number(detail.difficulty !== undefined) + detail.notes.length]
+}
+
+/** Router and provider strings are data: controls cannot style the sheet or create extra logical rows. */
+const routingText = (text: string): string => toolText(text).replace(/\n/g, ' ').trim()
+
+/** Selection provenance stays separate from the child's running/completed state. */
+function routingBadge(routing: SubagentRouting, copy: TuiCopy): { readonly text: string, readonly caution: boolean } {
+  const status = routing.router?.assessment?.status
+  const fallback = routing.source === 'fallback' || routing.router?.fallback === true || status === 'fallback'
+  // The recorded action owns provenance; optional router metadata may only qualify it.
+  const label = routing.source === 'auto' ? copy.subagentRoutingAuto
+    : routing.source === 'explicit' ? copy.subagentRoutingSelected : copy.subagentRoutingDefault
+  const note = status === 'needs_context' ? copy.subagentRoutingNeedsContext
+    : status === 'cautious' ? copy.subagentRoutingCautious : fallback ? copy.subagentRoutingFallback : undefined
+  return { text: note === undefined ? label : `${label} · ${note}`, caution: fallback || note !== undefined }
+}
+
+/** The same content determines both the drawn details and the range kept under the sheet's pointer. */
+function routingContent(routing: SubagentRouting | undefined): {
+  readonly route: SubagentRouting['route']
+  readonly difficulty: number | undefined
+  readonly notes: readonly string[]
+} {
+  const assessment = routing?.router?.assessment
+  const difficulty = assessment?.difficulty
+  return {
+    route: routing?.route,
+    difficulty: difficulty !== undefined && Number.isFinite(difficulty) && difficulty >= 0 && difficulty <= 1 ? difficulty : undefined,
+    notes: [...new Set([routing?.router?.reason ?? '', ...assessment?.reasons ?? []].map(routingText).filter(Boolean))],
+  }
+}
+
+/** Exact effective route and readable policy evidence for only the child under the pointer. */
+function routingDetails(routing: SubagentRouting, copy: TuiCopy): readonly SheetLine[] {
+  const content = routingContent(routing)
+  const badge = routingBadge(routing, copy)
+  return [
+    ...content.route === undefined ? [] : [{
+      text: `${routingText(content.route.provider)}/${routingText(content.route.model)}`
+        + (content.route.reasoningEffort === undefined ? '' : ` · ${copy.think} ${routingText(content.route.reasoningEffort)}`),
+      selected: false, glyph: ' ',
+    }],
+    ...content.difficulty === undefined ? [] : [{
+      text: `${copy.subagentRoutingDifficulty} ${content.difficulty.toFixed(2)} · ${badge.text}`,
+      selected: false, glyph: ' ', ...badge.caution ? { color: PALETTE.waiting } : { dim: true },
+    }],
+    ...content.notes.map(text => ({ text, selected: false, glyph: ' ', dim: true })),
+  ]
+}
 
 /** The summary's counts, largest concern first: those still working, then how the rest ended. */
 function subagentSummary(entries: readonly SubagentEntry[], copy: TuiCopy): string {
@@ -260,13 +335,16 @@ export function subagentSheet(entries: readonly SubagentEntry[], selected: numbe
       const color = statusColor(entry)
       const current = index === selected
       const receded = !current && entry.state !== 'working' && entry.outcome === 'completed'
+      const routing = entry.routing === undefined ? undefined : routingBadge(entry.routing, copy)
       return [
         { text: '', selected: current, glyph: shape.glyph, ...'color' in shape ? { glyphColor: shape.color } : {},
           parts: [{ text: entry.label, bold: entry.inspectable && !receded, dim: !entry.inspectable || receded, color: agentTone(index) },
             { text: `  ${subagentStatus(entry, copy)}`, ...color === undefined || receded ? { dim: true } : { color } },
+            ...routing === undefined ? [] : [{ text: ` · ${routing.text}`, ...routing.caution ? { color: PALETTE.waiting } : { dim: true } }],
             ...workflows.length === 0 ? [] : [{ text: ` · ${entry.workflow === undefined ? copy.subagentDirect : `${copy.workflowTitle} ${entry.workflow}`}`, dim: true }] ] },
         ...current ? [{ text: `${entry.detail} · ${entry.id}${entry.inspectable ? '' : ` · ${copy.subagentNoTranscript}`}`,
           selected: false, glyph: ' ', dim: true }] : [],
+        ...current && entry.routing !== undefined ? routingDetails(entry.routing, copy) : [],
       ]
     }),
   ]

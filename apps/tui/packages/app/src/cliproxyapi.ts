@@ -504,6 +504,37 @@ export async function configureCliProxyApi(ctx: Context, prompt: (question: Logi
 }
 
 /** A model list with absent and empty fields dropped and keys sorted, for comparing a saved list with a fetched one. */
+/** Capabilities a listing can omit for a model that still has them. */
+const LISTED_CAPABILITIES = ['contextWindow', 'maxTokens', 'input', 'reasoningEfforts', 'compat'] as const
+
+/**
+ * Fill the capabilities a listed model lacks from its saved entry. The
+ * protocol, endpoint, and name always follow the listing; adaptive thinking
+ * travels with the saved efforts it was derived from.
+ * @param listed - the model as the proxy lists it now.
+ * @param saved - the same id's saved entry, if any.
+ * @returns the listed model, completed from the saved one.
+ */
+function withSavedCapabilities(listed: CliProxyModel, saved: Readonly<Record<string, unknown>> | undefined): CliProxyModel {
+  if (saved === undefined) return listed
+  const filled: Record<string, unknown> = {}
+  for (const field of LISTED_CAPABILITIES) {
+    const value = saved[field]
+    const empty = value === undefined || (Array.isArray(value) && value.length === 0)
+      || (isRecord(value) && Object.keys(value).length === 0)
+    if (listed[field] !== undefined || empty) continue
+    if (field === 'compat') {
+      // A listing with its own efforts already derived its own adaptive thinking.
+      if (listed.reasoningEfforts === undefined && isRecord(value) && value['forceAdaptiveThinking'] === true) {
+        filled[field] = { forceAdaptiveThinking: true }
+      }
+      continue
+    }
+    filled[field] = value
+  }
+  return Object.keys(filled).length === 0 ? listed : { ...listed, ...filled } as CliProxyModel
+}
+
 function canonical(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonical)
   if (!isRecord(value)) return value
@@ -524,7 +555,10 @@ function canonical(value: unknown): unknown {
  *
  * A model the proxy no longer lists is dropped, as a new login would drop it,
  * unless `keep` names it: a transient gap in the proxy's accounts must not
- * take away the model a session is running on.
+ * take away the model a session is running on. A listed model keeps the
+ * saved capabilities its listing leaves out: a listing that stops reporting a
+ * model's effort levels or limits does not mean the model lost them, and
+ * dropping its efforts would refuse every request that names one.
  *
  * @param ctx - the settled plugin context.
  * @param signal - bounds the request; its abort propagates as itself.
@@ -550,9 +584,10 @@ export async function refreshCliProxyModels(ctx: Context, signal: AbortSignal, k
   const listed = await fetchCliProxyModels(endpoints.models, key.value, signal, fetcher, endpoints.root)
   signal.throwIfAborted()
   const ids = new Set(listed.map(model => model.id))
-  const kept = (saved['models'] as readonly unknown[]).filter(entry => isRecord(entry) && typeof entry['id'] === 'string'
-    && keep.includes(entry['id']) && !ids.has(entry['id']))
-  const models = [...listed, ...kept]
+  const savedById = new Map((saved['models'] as readonly unknown[]).flatMap(entry =>
+    isRecord(entry) && typeof entry['id'] === 'string' ? [[entry['id'], entry] as const] : []))
+  const kept = [...savedById.values()].filter(entry => keep.includes(entry['id'] as string) && !ids.has(entry['id'] as string))
+  const models = [...listed.map(model => withSavedCapabilities(model, savedById.get(model.id))), ...kept]
   if (JSON.stringify(canonical(models)) === JSON.stringify(canonical(saved['models']))) return false
   await settings.mutate('llm-pi-ai', [{ op: 'set', path: ['providers', CLIPROXYAPI_ID, 'models'], value: models }])
   return true

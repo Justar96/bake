@@ -37,16 +37,31 @@ EVAL_MODELS=claude-sonnet-5-5 EVAL_OUTPUT=.preflight/evals/agent-loop/<topic>/cl
   bun run eval
 ```
 
-每个模型运行一个进程，并行执行。运行器从 `~/.bake/settings.yaml` 读取 `cliproxyapi` 路由，并把 `~/.bake/.credentials.yaml` 复制到每个样本的私有主目录，因此记录需要本机具备这两者；二者都不会写入输出。原始输出（包括对话记录和捕获的请求）保留在被忽略的 `.preflight/` 下。标准套件在三个模型、每项三次试验下约需 40 分钟和 400 万 token。
+每个模型运行一个进程，并行执行。运行器从 `~/.bake/settings.yaml` 读取 `cliproxyapi` 路由，通过 `llm-deepseek` 把 DeepSeek 模型发往官方的 Anthropic 格式端点，并把存有 `CLIPROXYAPI_API_KEY` 与 `DEEPSEEK_API_KEY` 的 `~/.bake/.credentials.yaml` 复制到每个样本的私有主目录。记录需要本机具备这两者；二者都不会写入输出。原始输出（包括对话记录和捕获的请求）保留在被忽略的 `.preflight/` 下。仅标准集在每项三次试验下约需 40 分钟和 400 万 token；每个扩展模型各增加一个进程及其 token，其中 Opus 的单价最高。
+
+一份记录覆盖两个模型集。`EVAL_MODELS` 接受模型 id、集合名或两者混用，因此 `EVAL_MODELS=standard` 重跑前三个模型，`EVAL_MODELS=deepseek/deepseek-flash` 只跑一个模型。
+
+| 集合 | 模型 | 路由 | 推理强度 |
+|---|---|---|---|
+| `standard` | `gemini-3.8-flash-medium` | `cliproxyapi`，OpenAI Responses | medium |
+| `standard` | `gpt-6.1-sol` | `cliproxyapi`，OpenAI Responses | medium |
+| `standard` | `claude-sonnet-5-5` | `cliproxyapi`，Anthropic Messages | medium |
+| `extended` | `gpt-6-astra` | `cliproxyapi`，OpenAI Responses | medium |
+| `extended` | `claude-opus-5-5` | `cliproxyapi`，Anthropic Messages | medium |
+| `extended` | `deepseek-flash` | DeepSeek 官方，Anthropic Messages | high |
+| `extended` | `deepseek-v4-pro` | DeepSeek 官方，Anthropic Messages | high |
+
+DeepSeek 提供 `low`、`high` 与 `max`，没有 `medium`，因此以其默认的 `high` 运行。`design.json` 与每个样本都会记录提供方、线路格式与推理强度。
 
 | 变量 | 含义 |
 |---|---|
 | `EVAL_ARMS` | `name=checkout` 对，两个或更多 |
-| `EVAL_MODELS` | `cliproxyapi` 模型 id |
+| `EVAL_MODELS` | 模型 id 或集合名，默认 `standard,extended`；裸 id 是 `cliproxyapi` 模型，`deepseek/<id>` 或网关未列出的裸 `deepseek-*` id 是 DeepSeek 模型 |
 | `EVAL_CASES` | 场景；默认是下面的标准套件 |
 | `EVAL_TRIALS` | 每个场景的试验次数，默认 3 |
 | `EVAL_OUTPUT` | 原始输出目录 |
 | `EVAL_EXTRA_<ARM>` | 为某一组追加的覆盖行 JSON 数组，用于归因组，例如 `[{"id":"fs-observation-policy","config":{"editGuard":"version"}}]` |
+| `EVAL_SETTINGS_<ARM>` | 合并进某一组 `settings.yaml` 的 JSON 对象，用于覆盖行无法携带的设置；`$PROVIDER` 和 `$MODEL` 会替换为被测路由 |
 
 | 场景 | 检查内容 |
 |---|---|
@@ -57,6 +72,8 @@ EVAL_MODELS=claude-sonnet-5-5 EVAL_OUTPUT=.preflight/evals/agent-loop/<topic>/cl
 | `multi_site_edit`、`multi_file_edit` | 同一文件内多处修改，以及跨两个文件的修改 |
 | `shell_then_edit` | 编辑前有一个 shell 步骤改写了文件 |
 | `workflow_script` | 运行两个 subagent 的 `workflow` 脚本 |
+
+`delegation` 不属于标准套件；在 `EVAL_CASES` 中点名它即可衡量 subagent 路由。它通过 `subagent` 工具委派同样的两次读取，并检查同样的 `summary.txt`。每个样本都会记录其 `subagentCalls`，以及会话日志中的 `routingDecisions`：每个子 agent 的路由由谁选定，以及所用的模型和推理等级。做路由对照时，要通过 `EVAL_SETTINGS_<ARM>` 为两组设置相同的 `subagent-model-selection` 允许列表，因为该列表会出现在 `subagent` 工具的 schema 中，并且只在其中一组开启 `router.enabled`。
 
 当 agent 正常退出且外部检查通过时，样本即为成功。该检查是 `no_tools` 的精确回复、fixture 的 `node test.cjs` 在测试文件未被修改的情况下通过，或得到预期的 `summary.txt`；场景注入了内容时，还必须保留该内容。
 

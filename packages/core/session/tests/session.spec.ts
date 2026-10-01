@@ -1232,6 +1232,27 @@ describe('Session', () => {
     ])
     expect(marked.snapshotEvents()[0]?.ignorable).toBe(true)
   })
+
+  it('appends informational records that an older reader can retain without model history', () => {
+    const session = Session.create(SessionId('informational-event'))
+    // An external plugin type is absent from this build's generated vocabulary,
+    // exercising the same reader path as a newly added informational event.
+    const append = session.append.bind(session) as (type: SessionEventType, data: unknown, opts?: unknown) => SessionEvent
+    const event = append('external/routing-note' as SessionEventType, { model: 'selected-model' }, { ignorable: true })
+    expect(event.ignorable).toBe(true)
+    expect(Object.isFrozen(event)).toBe(true)
+    const restored = Session.fromRestore(session.id, JSON.parse(JSON.stringify([event])), session.header, SessionLogOffset(0), 'detached')
+    expect(restored.snapshotEvents()[0]).toEqual(event)
+    expect(restored.deriveMessages()).toEqual([])
+    expect(restored.surface.nodes).toEqual([])
+    expect(session.append('turn/start', { turn: 1 }).ignorable).toBeUndefined()
+  })
+
+  it.each([false, 'true', null, 1])('rejects an invalid append ignorable marker (%s) before committing', (ignorable) => {
+    const session = Session.create(SessionId('invalid-ignorable'))
+    expect(() => session.append('turn/start', { turn: 1 }, { ignorable } as never)).toThrow(/ignorable marker must be true or absent/)
+    expect(session.seq).toBe(0)
+  })
 })
 
 

@@ -165,8 +165,7 @@ export function applyEditTool(ctx: Context, sandbox: FsSandboxController): void 
     // the file need not have been read with `read`.
     description: 'Replace literal text in an existing UTF-8 text file. '
       + 'Each old_string must match the current file exactly once unless replace_all is set. '
-      + 'Put several changes to one file in `edits`, each matched against the original. '
-      + 'Use this, not shell scripts, to change files.',
+      + 'Put several changes to one file in `edits`, each matched against the original.',
     parameters: {
       file_path: { type: 'string', required: true, description: 'Absolute path, or relative to the working directory.' },
       old_string: {

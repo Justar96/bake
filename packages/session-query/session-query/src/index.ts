@@ -182,12 +182,15 @@ export abstract class SessionQueryEngine extends Service {
   ): Promise<SessionTitleObservationResult[]> {
     return this._corpus.projectMany(sessionIds, (source): SessionTitleObservation => {
       const title = foldSessionTitle(source.events)
-      // From the same log as the title, so a picker orders by recent use without a second read.
+      // From the same log as the title, so a picker orders by recent use, and
+      // leaves out sessions that never started a turn, without a second read.
       const lastEventAt = source.events.at(-1)?.time
+      const startedTurn = source.events.some(event => event.type === 'turn/start')
       return {
         session: structuredClone(source.header),
         ...title === undefined ? {} : { title },
         ...lastEventAt === undefined ? {} : { lastEventAt },
+        ...startedTurn ? { startedTurn: true as const } : {},
       }
     }, signal)
   }

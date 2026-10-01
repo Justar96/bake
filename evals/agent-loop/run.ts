@@ -4,14 +4,18 @@
  * sample cost. See evals/README.md for the procedure and the regression rule.
  *
  * EVAL_ARMS    name=checkout pairs, comma-separated; each checkout must be built
- * EVAL_MODELS  cliproxyapi model ids from ~/.bake/settings.yaml
+ * EVAL_MODELS  model ids or set names (default: standard and extended sets); a
+ *              cliproxyapi id from ~/.bake/settings.yaml, or a DeepSeek id
+ *              (deepseek/<id>, or a bare deepseek-* id the gateway lacks)
  * EVAL_CASES   scenario names (default: the standard suite)
  * EVAL_TRIALS  trials per scenario (default 3)
  * EVAL_OUTPUT  raw output directory (default .preflight/evals/agent-loop/<time>)
  * EVAL_EXTRA_<ARM>  optional JSON array of extra overlay rows for one arm
+ * EVAL_SETTINGS_<ARM>  optional JSON object merged into one arm's settings.yaml;
+ *              the strings $PROVIDER and $MODEL become the route under test
  */
 import { spawn } from 'node:child_process'
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, rmSync, existsSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync, copyFileSync, rmSync, existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createHash } from 'node:crypto'
@@ -20,16 +24,24 @@ import { reconcile } from './accounting.ts'
 
 const out = resolve(process.env.EVAL_OUTPUT ?? join('.preflight/evals/agent-loop', new Date().toISOString().replace(/[:.]/g, '-')))
 mkdirSync(out, { recursive: true })
-const ARMS: Record<string, { root: string; extra: unknown[] }> = Object.fromEntries((process.env.EVAL_ARMS ?? '').split(',').filter(Boolean).map(entry => {
+const ARMS: Record<string, { root: string; extra: unknown[]; settings: string }> = Object.fromEntries((process.env.EVAL_ARMS ?? '').split(',').filter(Boolean).map(entry => {
   const [name, root] = entry.split('=')
   if (!name || !root) throw new Error(`EVAL_ARMS entry "${entry}" is not name=checkout`)
   if (!existsSync(join(root, 'apps/cli/lib/bin.js'))) throw new Error(`arm ${name}: ${root} has no built apps/cli/lib/bin.js; run bun run build there`)
-  return [name, { root: resolve(root), extra: JSON.parse(process.env[`EVAL_EXTRA_${name.toUpperCase()}`] ?? '[]') }]
+  const settings = process.env[`EVAL_SETTINGS_${name.toUpperCase()}`] ?? '{}'
+  JSON.parse(settings)
+  return [name, { root: resolve(root), extra: JSON.parse(process.env[`EVAL_EXTRA_${name.toUpperCase()}`] ?? '[]'), settings }]
 }))
 const armNames = Object.keys(ARMS)
 if (armNames.length < 2) throw new Error('EVAL_ARMS needs at least two name=checkout pairs, for example base=../bake-v0.2.0,candidate=.')
 const variants = Object.fromEntries(armNames.map(name => [name, ARMS[name]!.root])) as Record<string, string>
-const models = (process.env.EVAL_MODELS ?? 'gemini-3.8-flash-medium,gpt-6.1-sol,claude-sonnet-5-5').split(',')
+/** Named model sets; EVAL_MODELS may list set names, model ids, or both. */
+const MODEL_SETS: Record<string, string[]> = {
+  standard: ['gemini-3.8-flash-medium', 'gpt-6.1-sol', 'claude-sonnet-5-5'],
+  extended: ['gpt-6-astra', 'claude-opus-5-5', 'deepseek/deepseek-flash', 'deepseek/deepseek-v4-pro'],
+}
+const models = [...new Set((process.env.EVAL_MODELS ?? 'standard,extended').split(',').filter(Boolean)
+  .flatMap(entry => MODEL_SETS[entry] ?? [entry]))]
 /** The standard suite every recorded version runs; duplicate_recovery is an opt-in stress case. */
 const STANDARD_CASES = ['no_tools', 'ordinary_edit', 'path_discovery', 'stale_edit', 'unprompted_edit', 'multi_site_edit', 'multi_file_edit', 'shell_then_edit', 'workflow_script']
 const cases = (process.env.EVAL_CASES ?? STANDARD_CASES.join(',')).split(',')
@@ -37,9 +49,62 @@ const trials = Number(process.env.EVAL_TRIALS ?? 3)
 const settings = YAML.parse(readFileSync(join(process.env.HOME!, '.bake/settings.yaml'), 'utf8'))
 const original = settings['llm-pi-ai'].providers.cliproxyapi
 const credentialFile = join(process.env.HOME!, '.bake/.credentials.yaml')
+/** DeepSeek's Anthropic-format root; its usage counters use the Anthropic field names. */
+const DEEPSEEK_MESSAGES_BASE = 'https://api.deepseek.com/anthropic'
+
+/**
+ * One model's route through the capturing proxy: the provider the agent selects,
+ * the wire format whose usage the proxy reads, the upstream it forwards to, and
+ * the settings that point the provider at the proxy.
+ */
+interface Route {
+  /** Bare model id, used in labels and records. */
+  model: string
+  provider: string
+  api: string
+  upstreamBase: string
+  /** The requested effort; DeepSeek has no `medium`, so it runs at its `high` default. */
+  effort: string
+  settings(proxyBase: string): Record<string, unknown>
+}
+
+/** Resolve an EVAL_MODELS entry to its route; a gateway listing wins for a bare id. */
+function resolveRoute(entry: string): Route {
+  const [prefix, rest] = entry.includes('/') ? [entry.slice(0, entry.indexOf('/')), entry.slice(entry.indexOf('/') + 1)] : [undefined, entry]
+  const gateway = original.models.find((m: any) => m.id === rest)
+  if (prefix === 'deepseek' || (prefix === undefined && gateway === undefined && rest.startsWith('deepseek-'))) {
+    return {
+      model: rest, provider: 'deepseek-official', api: 'anthropic-messages', upstreamBase: DEEPSEEK_MESSAGES_BASE, effort: 'high',
+      settings: proxyBase => ({
+        'llm-deepseek': { baseURL: proxyBase, maxTokens: 8192, retryPolicy: { mode: 'normal', maxRetries: 0 } },
+        'agent-default-model': { provider: 'deepseek-official', model: rest, reasoningEffort: 'high' },
+      }),
+    }
+  }
+  if (prefix !== undefined && prefix !== 'cliproxyapi') throw new Error(`EVAL_MODELS entry "${entry}": unknown provider ${prefix}; use cliproxyapi/<id> or deepseek/<id>`)
+  if (gateway === undefined) throw new Error(`Missing configured model ${rest}`)
+  const api = gateway.api ?? original.api
+  return {
+    model: rest, provider: 'cliproxyapi', api, upstreamBase: (gateway.baseURL ?? original.baseURL).replace(/\/$/, ''), effort: 'medium',
+    settings: proxyBase => {
+      const route = structuredClone(original)
+      route.baseURL = proxyBase
+      route.models = [{ ...gateway, baseURL: proxyBase, maxTokens: 8192 }]
+      if (api === 'openai-responses' && route.compat !== undefined) delete route.compat.sendSessionAffinityHeaders
+      route.retryPolicy = { mode: 'normal', maxRetries: 0 }
+      delete route.modelOverrides
+      return {
+        'llm-pi-ai': { providers: { cliproxyapi: route } },
+        'agent-default-model': { provider: 'cliproxyapi', model: rest, reasoningEffort: 'medium' },
+      }
+    },
+  }
+}
+const routes = models.map(resolveRoute)
+for (const route of routes) if (routes.filter(other => other.model === route.model).length > 1) throw new Error(`EVAL_MODELS names ${route.model} through two providers`)
 const summaries: any[] = []
 const capMs = 180_000
-const maxRequestsFor = (scenario: string) => scenario === 'workflow_script' ? 40 : 14
+const maxRequestsFor = (scenario: string) => scenario === 'workflow_script' || scenario === 'delegation' ? 40 : 14
 const maxLogicalTokens = Number(process.env.EVAL_MAX_TOKENS ?? 5_000_000)
 const hash = (text: string) => createHash('sha256').update(text).digest('hex')
 const baseCode = 'function roundMoney(value) {\n  return Math.floor(value * 100) / 100;\n}\nmodule.exports = { roundMoney };\n'
@@ -56,8 +121,19 @@ const prompts: Record<string, string> = {
   multi_file_edit: 'Fix two bugs: roundMoney in src/money.js must round to the nearest cent (Math.round(value * 100) / 100), and formatMoney in src/format.js must show two decimals with a leading $ sign.' + natural,
   shell_then_edit: 'Read src/money.js, then run node scripts/stamp.cjs (it adds a build header to the file that must be kept), then fix roundMoney to round to the nearest cent, matching Math.round(value * 100) / 100.' + natural,
   workflow_script: 'Use the workflow tool for this task. Write a workflow script that uses parallel() to run two subagents: one reads notes/a.txt and the other reads notes/b.txt, and each returns only that file\'s single line of text. The script returns { a, b }. Then write summary.txt in this directory with the a line followed by the b line, one per line. Work only inside this fixture. Do not install packages, use the network, or make commits. Give a brief final result.',
+  delegation: 'Use the subagent tool for this task: delegate to one subagent the job of reading notes/a.txt and notes/b.txt and returning each file\'s single line of text, labelled a and b. Then write summary.txt in this directory with the a line followed by the b line, one per line. Work only inside this fixture. Do not install packages, use the network, or make commits. Give a brief final result.',
   duplicate_recovery: 'Exercise a guarded-edit recovery case. Before reading or running any other tool, attempt the same edit of src/money.js three times: replace "Math.floor(value * 100) / 100" with "Math.round(value * 100) / 100". Make these three edit calls consecutive, even if a call is refused. Then recover from any refusal and finish the correction.' + common,
 }
+/** The subagent routing decisions a run's session logs recorded: who chose each child's route, and the route. */
+function routingDecisions(dir: string): { source: string; model: string | null; effort: string | null }[] {
+  if (!existsSync(dir)) return []
+  return readdirSync(dir, { recursive: true, encoding: 'utf8' }).filter(path => path.endsWith('.jsonl'))
+    .flatMap(path => readFileSync(join(dir, path), 'utf8').split('\n').filter(Boolean))
+    .map(line => JSON.parse(line) as { type?: string; data?: any })
+    .filter(event => event.type === 'subagent/routing-decision')
+    .map(({ data }) => ({ source: data.source, model: data.route?.model ?? null, effort: data.route?.reasoningEffort ?? null }))
+}
+
 function persona(root: string): string {
   const source = readFileSync(join(root, 'packages/preset/agent-presets/presets/standard/agent.cordis.yml'), 'utf8')
   const start = source.indexOf('    prefix: |-\n') + '    prefix: |-\n'.length
@@ -92,7 +168,7 @@ function fixture(root: string, scenario: string) {
     writeFileSync(join(workspace, 'test.cjs'), multiTests)
     return { workspace, file }
   }
-  if (scenario === 'workflow_script') {
+  if (scenario === 'workflow_script' || scenario === 'delegation') {
     mkdirSync(join(workspace, 'notes'), { recursive: true })
     writeFileSync(join(workspace, 'notes/a.txt'), `${WORKFLOW_LINES.a}\n`)
     writeFileSync(join(workspace, 'notes/b.txt'), `${WORKFLOW_LINES.b}\n`)
@@ -120,14 +196,11 @@ function wireUsage(data: any): any | undefined {
   if (usage == null) return undefined
   return { event: data.type ?? 'usage', ...usage }
 }
-async function run(model: string, scenario: string, trial: number, variant: string) {
+async function run(route: Route, scenario: string, trial: number, variant: string) {
+  const { model, api, upstreamBase } = route
   const label = `${model}.${scenario}.${trial}.${variant}`
   const savedPath = join(out, `${label}.json`)
   if (existsSync(savedPath)) { const saved = JSON.parse(readFileSync(savedPath, 'utf8')); summaries.push(saved); return saved }
-  const modelConfig = original.models.find((m: any) => m.id === model)
-  if (!modelConfig) throw new Error(`Missing configured model ${model}`)
-  const api = modelConfig.api ?? original.api
-  const upstreamBase = (modelConfig.baseURL ?? original.baseURL).replace(/\/$/, '')
   const root = mkdtempSync(join(tmpdir(), 'bake-token-eval-'))
   const { workspace, file } = fixture(root, scenario)
   const home = join(root, 'home'); mkdirSync(home, { mode: 0o700 })
@@ -196,15 +269,9 @@ async function run(model: string, scenario: string, trial: number, variant: stri
   let code: number | null = null
   let signal: string | null = null
   try {
-    const route = structuredClone(original)
-    route.baseURL = `${server.url.origin}/upstream`
-    route.models = [{ ...modelConfig, baseURL: route.baseURL, maxTokens: 8192 }]
-    if (api === 'openai-responses' && route.compat !== undefined) delete route.compat.sendSessionAffinityHeaders
-    route.retryPolicy = { mode: 'normal', maxRetries: 0 }
-    delete route.modelOverrides
     writeFileSync(join(home, 'settings.yaml'), YAML.stringify({
-      'llm-pi-ai': { providers: { cliproxyapi: route } },
-      'agent-default-model': { provider: 'cliproxyapi', model, reasoningEffort: 'medium' },
+      ...route.settings(`${server.url.origin}/upstream`),
+      ...JSON.parse(ARMS[variant]!.settings.replaceAll('$PROVIDER', route.provider).replaceAll('$MODEL', model)),
       permission: { defaultPreset: 'danger-full-access' },
     }), { mode: 0o600 })
     copyFileSync(credentialFile, join(home, '.credentials.yaml'))
@@ -255,9 +322,9 @@ async function run(model: string, scenario: string, trial: number, variant: stri
     let source = ''
     let testsUnchanged: boolean | null = null
     let testExit: number | null = null
-    if (scenario === 'workflow_script') {
+    if (scenario === 'workflow_script' || scenario === 'delegation') {
       source = existsSync(join(workspace, file)) ? readFileSync(join(workspace, file), 'utf8') : ''
-      validated = code === 0 && (byTool.workflow ?? 0) > 0
+      validated = code === 0 && (byTool[scenario === 'delegation' ? 'subagent' : 'workflow'] ?? 0) > 0
         && source.trim().split(/\r?\n/).map(line => line.trim()).join('\n') === `${WORKFLOW_LINES.a}\n${WORKFLOW_LINES.b}`
     } else if (scenario !== 'no_tools') {
       source = readFileSync(join(workspace, file), 'utf8')
@@ -270,7 +337,7 @@ async function run(model: string, scenario: string, trial: number, variant: stri
     }
     const toolErrors = results.filter(result => result.status === 'error').map(result => result.result)
     const summary = {
-      label, model, api, scenario, trial, variant, code, signal, abortCause: abortCause ?? null,
+      label, model, provider: route.provider, api, effort: route.effort, scenario, trial, variant, code, signal, abortCause: abortCause ?? null,
       success: code === 0 && validated, validated, testsUnchanged, testExit,
       injectedStale: scenario === 'stale_edit' && existsSync(injectionPath),
       elapsedMs: Math.round(performance.now() - started), requests: wire.length, steps: steps.length,
@@ -283,6 +350,8 @@ async function run(model: string, scenario: string, trial: number, variant: stri
       workflowErrors: results.filter(result => result.status === 'error' && calls.some(call => call.callId === result.callId && call.tool === 'workflow')).length,
       multiEditCalls: calls.filter(call => call.tool === 'edit' && Array.isArray(call.input?.edits)).length,
       editedLineEchoes: results.filter(result => String(result.result).includes('The edited lines now read')).length,
+      subagentCalls: byTool.subagent ?? 0,
+      routingDecisions: routingDecisions(join(root, 'sessions')),
       cache: (() => {
         const logical = usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens
         const perStep = steps.map(step => step.usage === undefined ? null : ({ read: step.usage.cacheReadTokens ?? 0, write: step.usage.cacheWriteTokens ?? 0, uncached: step.usage.inputTokens ?? 0 }))
@@ -327,16 +396,18 @@ writeFileSync(join(out, 'design.json'), JSON.stringify({
   arms: Object.fromEntries(armNames.map(name => [name, ARMS[name]])),
   revisions: Object.fromEntries(armNames.map(name => [name, revisionOf(ARMS[name]!.root)])),
   startedAt: new Date().toISOString(),
-  node: Bun.spawnSync(['node', '--version']).stdout.toString().trim(), models, cases, trials,
-  effort: 'medium', maxOutputTokens: 8192, capMs, maxRequests: { default: 14, workflow_script: 40 }, maxLogicalTokens,
+  node: Bun.spawnSync(['node', '--version']).stdout.toString().trim(), models: routes.map(route => route.model), cases, trials,
+  routes: Object.fromEntries(routes.map(route => [route.model, { provider: route.provider, api: route.api, effort: route.effort }])),
+  effort: 'medium where the model offers it; DeepSeek runs at high, its default, having no medium', maxOutputTokens: 8192, capMs, maxRequests: { default: 14, workflow_script: 40, delegation: 40 }, maxLogicalTokens,
   retryPolicy: { mode: 'normal', maxRetries: 0 },
   composition: 'Built headless CLI, with each revision standard-preset persona; host tools retained. Session title and ambient AGENTS disabled equally.',
   cache: 'Fresh process/home/workspace/session per sample; provider cache is observed, not assumed cold. Pair order alternates by trial and scenario.',
   endpoint: 'Agent exits; external Node test passes without test modification; injected external comment is preserved.',
-  tokenAccounting: 'Provider total_tokens is authoritative. Gemini via Responses may report reasoning outside output_tokens; recorded separately and reconciled against raw SSE. Anthropic totals are the sum of input, cache reads/writes, and output.',
+  tokenAccounting: 'Provider total_tokens is authoritative. Gemini via Responses may report reasoning outside output_tokens; recorded separately and reconciled against raw SSE. Anthropic-format totals, DeepSeek\'s included, are the sum of input, cache reads/writes, and output.',
   exclusions: 'No price inference; no inference about gateway retries hidden from the wire; no cross-model token-count comparability claim.',
 }, null, 2) + '\n')
-for (const model of models) {
+for (const route of routes) {
+  const { model } = route
   let modelBlocked = false
   for (let trial = 0; trial < trials && !modelBlocked; trial++) {
     for (const [caseIndex, scenario] of cases.entries()) {
@@ -345,7 +416,7 @@ for (const model of models) {
       const pair = []
       for (const variant of order) {
         if (summaries.reduce((sum, sample) => sum + sample.logicalTotalTokens, 0) > maxLogicalTokens) throw new Error('Evaluation token limit reached; partial results retained')
-        pair.push(await run(model, scenario, trial, variant))
+        pair.push(await run(route, scenario, trial, variant))
       }
       if (scenario === 'no_tools' && pair.every(sample => !sample.success && (sample.requests === 0 || sample.rawProviderUsage.some((request: any) => request.status !== 200)))) {
         console.log(JSON.stringify({ model, blocked: 'both control samples failed before a usable response; remaining cells skipped' }))

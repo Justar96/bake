@@ -1,7 +1,8 @@
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
@@ -23,7 +24,7 @@ import { MockAdapter, textResponse, toolCallResponse } from '../../../core/agent
  * (tool/call + tool/result session events, the generic `ctx.jobs` runtime,
  * agent.inject completion notices).
  */
-async function harness(adapter: MockAdapter, sessionRoot?: string, dshHome?: string) {
+async function harness(adapter: MockAdapter, sessionRoot?: string, dshHome?: string, toolConfig: ToolBash.Config = {}) {
   const ctx = new Context()
   await mountAgentLoopTestDependencies(ctx)
   if (sessionRoot !== undefined) {
@@ -35,7 +36,7 @@ async function harness(adapter: MockAdapter, sessionRoot?: string, dshHome?: str
   await ctx.plugin(LocalSubprocessRuntime)
   await ctx.plugin(BashEnvPlugin, dshHome === undefined ? {} : { dshHome })
   await ctx.plugin(LocalBashExecutor, { timeoutMs: 10_000 })
-  await ctx.plugin(ToolBash)
+  await ctx.plugin(ToolBash, toolConfig)
   ctx.llm.registerAdapter(['mock'], adapter)
   return ctx
 }
@@ -232,5 +233,72 @@ describe('bash tool through the agent loop', () => {
     expect(readResult.data.message.content[0].isError).toBe(false)
     expect(resultText(readResult)).toContain('bg-ok')
     expect(resultText(readResult)).toContain('[status: completed, exit code: 0]')
+  })
+})
+
+describe('change report through the agent loop', () => {
+  /** A committed repository whose config an isolated git reads, as the session's workspace. */
+  function workspace(): string {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-bash-change-report-'))
+    dirs.push(root)
+    const env = { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_'))),
+      HOME: root, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: join(root, 'gitconfig'), GIT_CEILING_DIRECTORIES: root }
+    vi.stubEnv('HOME', root)
+    vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1')
+    vi.stubEnv('GIT_CONFIG_GLOBAL', join(root, 'gitconfig'))
+    const git = (...args: string[]): void => {
+      execFileSync('git', ['-c', 'user.name=Bake', '-c', 'user.email=bake@example.test', ...args], { cwd: root, env, stdio: 'ignore' })
+    }
+    git('init', '-q', '-b', 'main')
+    writeFileSync(join(root, 'config.js'), 'module.exports = { retries: 3 }\n')
+    git('add', '.')
+    git('commit', '-q', '-m', 'first')
+    return root
+  }
+
+  async function run(root: string, args: Record<string, unknown>, toolConfig: ToolBash.Config = {}) {
+    const adapter = new MockAdapter([
+      toolCallResponse('call-1', 'bash', args),
+      textResponse('Done.'),
+    ])
+    const ctx = await harness(adapter, undefined, undefined, toolConfig)
+    const handle = await ctx.agents.create({
+      sessionId: SessionId(`change-report-${Math.random().toString(36).slice(2)}`),
+      agentOptions: { provider: 'mock', model: 'mock' },
+      meta: { cwd: root },
+    })
+    const agent = handle.agent
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'edit the config' }], source: { kind: 'user' } }))
+    await waitForIdle(ctx, agent)
+    const result = findEvent(events(agent), 'tool/result')
+    const seen = (adapter.requests.at(-1)?.messages ?? []).flatMap(message => message.content).filter(block => block.type === 'tool-result')
+    await handle.dispose()
+    return { result, seen }
+  }
+
+  it('logs the files a shell edit changed as display metadata, leaving the model\'s result unchanged', async () => {
+    const root = workspace()
+    const command = "sed -i.bak 's/retries: 3/retries: 5/' config.js && rm config.js.bak && cat config.js"
+    const { result, seen } = await run(root, { command, description: 'raise retries' })
+    expect(readFileSync(join(root, 'config.js'), 'utf8')).toBe('module.exports = { retries: 5 }\n')
+    expect(resultText(result)).toBe('module.exports = { retries: 5 }\n')
+    expect(result.data.meta).toEqual({ shellChanges: {
+      version: 1,
+      files: [{ path: 'config.js', status: 'modified', added: 1, removed: 1, hunks: [{
+        oldText: 'module.exports = { retries: 3 }', newText: 'module.exports = { retries: 5 }', oldStart: 1, newStart: 1,
+      }] }],
+    } })
+    // The model's next request carries the result text alone.
+    expect(JSON.stringify(seen)).not.toContain('shellChanges')
+    expect(JSON.stringify(seen)).not.toContain('retries: 3')
+  })
+
+  it('logs no report when the call changed nothing, ran in the background, or the deployment turned it off', async () => {
+    const quiet = await run(workspace(), { command: 'echo unchanged', description: 'no change' })
+    expect(quiet.result.data.meta).toBeUndefined()
+    const off = await run(workspace(), { command: 'echo two > new.txt', description: 'off' }, { changeReport: false })
+    expect(off.result.data.meta).toBeUndefined()
+    const background = await run(workspace(), { command: 'echo three > new.txt', description: 'bg', run_in_background: true })
+    expect(background.result.data.meta).toBeUndefined()
   })
 })

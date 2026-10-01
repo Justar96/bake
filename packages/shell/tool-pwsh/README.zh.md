@@ -46,12 +46,13 @@ kind: "package-reference"
 | 字段 | 默认值 | 含义 |
 |---|---|---|
 | `enableRunInBackground` | `true` | 暴露 `run_in_background`；为 `false` 时拒绝强制后台调用 |
+| `changeReport` | `true` | 通过 [`dsh-shell-change-report`](../shell-change-report/README.zh.md) 在输出下方显示前台调用改动的工作区文件；仅供展示，因此模型得到的结果不变 |
 
 生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-tool-pwsh)是每个受支持字段及其 JSDoc 的穷尽式真源；生成的[工具目录](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-pwsh)携带完整参数 schema。
 
 ### 运行命令
 
-工具执行 `pwsh -Command <command>` 并返回合并后的输出。命令每次调用都运行在全新 pwsh 进程中，因此目录切换与变量都不会延续；`workdir` 设定命令的运行目录。路径使用原生 Windows 形式，环境变量用 `$env:NAME` 读取。非零退出以 `[exit code: N]` 报告；在 Windows 上，强制终止的命令以 `[exit code: 1]` 结算且没有信号标记，因此 agent 把中断后的裸 exit 1 当作终止而非命令失败。工具说明会点名受管环境中的 `$env:DSH_HOME` 与 `$env:DSH_SESSION_ID`。后台运行、输出截断以及 `description`／`timeoutMs`／`workdir` 参数的行为与 [`dsh-tool-bash`](../tool-bash/README.zh.md#running-long-commands-in-the-background) 完全一致，包括异步 shell 准备过程中由任务负责的取消。
+工具执行 `pwsh -Command <command>` 并返回合并后的输出。命令每次调用都运行在全新 pwsh 进程中，因此目录切换与变量都不会延续；`workdir` 设定命令的运行目录。路径使用原生 Windows 形式，环境变量用 `$env:NAME` 读取。非零退出以 `[exit code: N]` 报告；在 Windows 上，强制终止的命令以 `[exit code: 1]` 结算且没有信号标记，因此 agent 把中断后的裸 exit 1 当作终止而非命令失败。工具说明会点名受管环境中的 `$env:DSH_HOME` 与 `$env:DSH_SESSION_ID`。后台运行、输出截断以及 `description`／`timeoutMs`／`workdir` 参数（包括 `timeout` 与 `timeout_ms` 拼写）的行为与 [`dsh-tool-bash`](../tool-bash/README.zh.md#running-long-commands-in-the-background) 完全一致，包括异步 shell 准备过程中由任务负责的取消。
 
 ### Windows 特有的沙箱行为
 
@@ -160,7 +161,7 @@ kind: "package-reference"
 
 #### 模型看到什么
 
-验证与基础设施失败统一为 `Error: <message>`。本包的稳定消息包括 `invalid command: expected a non-empty string`、`invalid timeoutMs: expected a positive number, got <value>`、升权配对失败、`sandbox_permissions is not available in this composition (no sandboxing executor to escalate)`、共享升权失败（未知模式／无审批服务／无 agent 可路由／无审批通道／用户拒绝／已取消）、`run_in_background is disabled for this deployment (enableRunInBackground: false)`、`background jobs unavailable: load @deepseek-ai/dsh-jobs and @deepseek-ai/dsh-tool-jobs`，以及 `tool call aborted`。
+验证与基础设施失败统一为 `Error: <message>`。本包的稳定消息包括 `invalid command: expected a non-empty string`、`invalid timeoutMs: expected a positive number, got <value>`、`invalid <timeout|timeout_ms>: expected a positive number of milliseconds for timeoutMs, got <value>`、升权配对失败、`sandbox_permissions is not available in this composition (no sandboxing executor to escalate)`、共享升权失败（未知模式／无审批服务／无 agent 可路由／无审批通道／用户拒绝／已取消）、`run_in_background is disabled for this deployment (enableRunInBackground: false)`、`background jobs unavailable: load @deepseek-ai/dsh-jobs and @deepseek-ai/dsh-tool-jobs`，以及 `tool call aborted`。
 
 #### Token 影响
 

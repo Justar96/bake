@@ -49,6 +49,8 @@ agent 会完成该任务，把提供方的每个非空推理（reasoning）增�
 
 生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-headless)是所有受支持字段及其 JSDoc 的完整真源。
 
+委派遵循 `settings.yaml` 中与终端 profile 相同的 `subagent-model-selection` 设置。启用后，`subagent` 工具会向 agent 提供该设置允许的路由；若同时开启其 `router`，未指定路由的委派会向路由器请求一个。每个新 Session 在开始时记录该设置，因此修改设置只影响之后的运行；恢复的 Session 沿用其已记录的设置。
+
 ### 选择 Session 标识
 
 每次调用默认使用全新的 `session-<uuid>` 标识，`--json` 会在开头的 `session` 事件里报告它。传入 `--resume <id>`（或其早先的写法 `--session-id <id>`）延续这段对话：runner 沿用该 id 对应的持久化 Session，而该 id 没有持久化 Session 时会在任务运行前失败，而不是悄悄开出一段空历史。沿用要求已组合 `sessionPersistence` 与 `sessionQuery` 服务，因此缺少任一服务的 profile 会显式失败，而不会返回一个历史随进程消失的 id。本进程中已存在持有该 id 的存活 Agent 时会被拒绝：它的原 owner 可能仍在驱动它，runner 无法取得独占的运行区间。已在另一个 Bake 进程（例如另一次 headless 运行）中打开的 Session 会在任务运行前被拒绝：向 stderr 输出终端 profile 的同一条启动提示 `dsh: <id>: open in another Bake process; close it there and run this command again, or leave out --resume to start a new session`，并以状态 75（`EX_TEMPFAIL`）退出，因此该进程关闭 Session 后重新运行同一命令即可成功。标识是不透明的，因此会原样使用调用方给出的字符串，包括空白字符。工作目录通过已挂载的文件系统提供方解析（`fs.resolve('.')` 与 `fs.processPath()`）；未挂载文件系统服务时使用进程 cwd，新 Session 会记录该目录。沿用会将已记录 cwd 与同一提供方解析出的目录比较，并拒绝子 agent 或 fork 会话、未记录工作目录的会话、运行在本 profile 不组合的 agent preset 下的会话，以及 preset 记录畸形的会话——该检查读取 Session 日志当前记录的 preset，因此在空白期切换过 preset 的会话同样会被拒绝。因此监督进程无法在另一套组合下悄悄驱动他人的会话；任一不匹配都会在任务运行前失败。
@@ -81,11 +83,11 @@ runner 等待整个应用结算（`ctx.get('loader')?.await()`），确保已组
 
 ### 基于 base 的 patch 内容
 
-patch 叠加在 `dsh-base` 之上：继承投影缓存与共享 PTC 运行时，在基础 `system-prompt` 行上设置 Bake 编码 persona 前缀与独立的 cwd 后缀并省略 harness 身份开场白，保留与 Web 表层相同的临时进程级 PTC mode 开关（`DSH_TOOLS_MODE`），禁用共享的 HMR（热模块替换）行，并挂载启动提供方与 runner。缓存为每个已持久化的一次性会话写入检查点，供后续消费方使用；其持久性屏障会在发布缓存行前 flush 所覆盖的日志前缀，因此可能拆分原本会合并的 JSONL 连续段。启动提供方（[`src/startup.ts`](src/startup.ts)）注入 `ctx.cmdlineArgs`（[`dsh-cmdline`](../../boot/cmdline/README.zh.md)），读取位置参数与 `--resume`/`--json` 选项、打印应用自己的 `--help`，并提供 `headlessStartup`；runner 注入该服务，再从惰性配置中读取任务与运行选项。
+patch 叠加在 `dsh-base` 之上：继承投影缓存与共享 PTC 运行时，在基础 `system-prompt` 行上设置 Bake 编码 persona 前缀与独立的 cwd 后缀并省略 harness 身份开场白，保留与 Web 表层相同的临时进程级 PTC mode 开关（`DSH_TOOLS_MODE`），以 `modelSelectionSettings: true` 重述基础 `tool-subagent` 行并挂载该行所等待的 `subagent-model-selection` 设置插件，禁用共享的 HMR（热模块替换）行，并挂载启动提供方与 runner。缓存为每个已持久化的一次性会话写入检查点，供后续消费方使用；其持久性屏障会在发布缓存行前 flush 所覆盖的日志前缀，因此可能拆分原本会合并的 JSONL 连续段。启动提供方（[`src/startup.ts`](src/startup.ts)）注入 `ctx.cmdlineArgs`（[`dsh-cmdline`](../../boot/cmdline/README.zh.md)），读取位置参数与 `--resume`/`--json` 选项、打印应用自己的 `--help`，并提供 `headlessStartup`；runner 注入该服务，再从惰性配置中读取任务与运行选项。
 
 ### 退出映射
 
-最终 `turn/end` 完成时退出码为 0；任何其他结果——aborted、error，或所属区间内没有轮次——退出码为 1。结束原因为 `error` 时还会向 stderr 写入 `dsh: <code>: <message>`。直接驱动器失败（例如 Agent 创建失败或不可用的 `--resume`）向 stderr 写入 `dsh: <message>` 并退出 1，且在 `--json` 模式下额外发出一个 `error` 事件。唯一的例外是写锁由另一个进程持有的 `--resume` Session：runner 把持久化层的拒绝转换为 [`dsh-cmdline`](../../boot/cmdline/README.zh.md) 的 `SessionInUseError`，以同样方式报告，并以 `SESSION_IN_USE_EXIT`（75）退出，与终端 profile 对同一拒绝的处理一致。
+最终 `turn/end` 完成时退出码为 0；任何其他结果——aborted、error，或所属区间内没有轮次——退出码为 1。结束原因为 `error` 时还会向 stderr 写入 `dsh: <code>: <message>`。直接驱动器失败（例如 Agent 创建失败或不可用的 `--resume`）向 stderr 写入 `dsh: <message>` 并退出 1，且在 `--json` 模式下额外发出一个 `error` 事件。进程在轮次结束前停止运行并不算失败：无论是 SIGTERM、SIGINT 或 SIGHUP，还是其他释放 Agent 的情况。runner 向 stderr 写入 `dsh: stopped before the task finished; continue it with --resume <id>`，不发出 `error` 或 `final` 事件，并以该信号的退出码（0、130 或 129）退出。释放会关闭 Session 并排空其日志，因此按提示即可恢复。轮次在停止前已完成的回答仍会输出。唯一的例外是写锁由另一个进程持有的 `--resume` Session：runner 把持久化层的拒绝转换为 [`dsh-cmdline`](../../boot/cmdline/README.zh.md) 的 `SessionInUseError`，以同样方式报告，并以 `SESSION_IN_USE_EXIT`（75）退出，与终端 profile 对同一拒绝的处理一致。
 
 ### 源码地图
 
@@ -123,7 +125,7 @@ patch 叠加在 `dsh-base` 之上：继承投影缓存与共享 PTC 运行时，
 <a id="model-experience"></a>
 ## 模型体验
 
-[组合包 persona](cordis.patch.yml) 将 Bake 介绍为执行一个命令行任务的编码 agent。它要求 agent 遵循周边代码惯例，仅在任务要求时提交或推送，保留他人的修改，并以简洁、客观、中立的回答如实报告结果与验证情况。runner 把任务作为普通用户消息提交；组合出的配置行提供其余提示词与工具。
+[组合包 persona](cordis.patch.yml) 将 Bake 介绍为执行一个命令行任务的编码 agent。它要求 agent 遵循周边代码惯例，仅在任务要求时提交或推送，保留他人的修改，并以简洁、客观、中立的回答如实报告结果与验证情况。runner 把任务作为普通用户消息提交；组合出的配置行提供其余提示词与工具。启用 `subagent-model-selection` 时，`subagent` 工具会增加可选的 `provider`、`model` 与 `reasoning_effort` 字段，并加入 `list_subagent_models` 工具；关闭时，工具与基础配置行的逐字节相同。
 
 #### KV Cache 影响
 

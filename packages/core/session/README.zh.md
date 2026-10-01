@@ -47,7 +47,7 @@ session.append('user/message', { role: 'user', content: [{ type: 'text', text: '
 session.deriveMessages()         // the derived model history
 ```
 
-表层事件（`system/message`、`user/message`、`assistant/message`、`tool/result`）在类型化事件与追加输入中都要求 `surfaceOp`。替换使用 `{ op: 'replace', startSeq, endSeq }`，端点为当前表层顺序中的含边界 `SessionSeq`。Assistant 消息内嵌精确紧凑提供方流，禁止 `sourceEventSeqs`。仅日志事件不携带这两个表层字段；必读工具更新通过 `toolHistory()` 参与提供方请求投影。
+表层事件（`system/message`、`user/message`、`assistant/message`、`tool/result`）在类型化事件与追加输入中都要求 `surfaceOp`。替换使用 `{ op: 'replace', startSeq, endSeq }`，端点为当前表层顺序中的含边界 `SessionSeq`。Assistant 消息内嵌精确紧凑提供方流，禁止 `sourceEventSeqs`。仅日志事件不携带这两个表层字段；必读工具更新通过 `toolHistory()` 参与提供方请求投影。纯信息性的仅日志记录可将 `{ ignorable: true }` 作为追加的第三个参数。不识别该类型的读取器会保留记录，但不加入模型历史；仅当丢失记录不会影响重建时才能使用此标记。该标记默认省略，拒绝 `true` 以外的值。
 
 插件用 `@messageProjection` 声明修改内容的事件，并通过 `ctx.sessions.registerMessageProjection()` 注册纯处理器。Session 在接受事件前调用处理器，并缓存其不可变消息更新。缺少处理器时拒绝追加和恢复，卸载已经使用的处理器后也会拒绝读取缓存。独立构造函数和 `foldSurface(events, projections)` 必须显式接收处理器。重建函数将折叠结果的 `projectedMessages` 传给 `deriveEventMessage()`，实时实例方法自动应用相同的投影。[插件拥有消息投影](../../../.agents/notes/implemented/architecture/2026-09-11-plugin-owned-message-projections.zh.md)说明职责划分和离线装配。
 

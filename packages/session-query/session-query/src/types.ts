@@ -66,6 +66,8 @@ export interface SessionTitleObservation {
   title?: SessionTitleSnapshot
   /** Unix epoch milliseconds of the observed log's newest event, absent for an empty log. */
   lastEventAt?: number
+  /** Present when the observed log started a turn; absent for a session opened and left without one. */
+  startedTurn?: true
 }
 
 /** One ordered result from a batch title observation. */

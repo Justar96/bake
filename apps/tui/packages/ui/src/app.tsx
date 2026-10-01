@@ -697,7 +697,8 @@ function SessionView(props: AppProps): React.ReactElement {
     : `${copy.subagentParent}: ${props.inspectionParent} > ${props.sessionId}${access}`
   // Memoized so the committed transcript is not re-rendered on every frame.
   const result = useMemo<ResultBound>(
-    () => ({ lines: props.resultLines, unit: copy.cardLines, single: copy.cardLine, more: copy.moreLines, failures: copy.summaryFailures, earlier: copy.earlierCalls, ...props.highlight === undefined ? {} : { code: props.highlight } }),
+    () => ({ lines: props.resultLines, unit: copy.cardLines, single: copy.cardLine, more: copy.moreLines, failures: copy.summaryFailures, earlier: copy.earlierCalls,
+      files: copy.cardFiles, moreFiles: copy.moreFiles, moreFile: copy.moreFile, ...props.highlight === undefined ? {} : { code: props.highlight } }),
     [props.resultLines, props.highlight, copy])
   // Decided once per mount. A session with no history when it opens gets the
   // block, and keeps it in the stream while its first turn commits.
@@ -741,13 +742,15 @@ function SessionView(props: AppProps): React.ReactElement {
   }))
   // The footer names what the keys do here. Cycling is named only when there is somewhere to go.
   const sheetKeys = (kind: SheetKind): string => [
+    // Child arrows change the selection; page keys reach its wrapped routing evidence.
+    ...kind === 'agents' && props.subagents?.[agentIndex]?.routing !== undefined ? [copy.sheetPages] : [],
     kind === 'agents' && (props.subagents?.length ?? 0) > 0 ? copy.sheetSelect : copy.sheetScroll,
     ...kind === 'agents' && (props.subagents?.length ?? 0) > 0 ? [copy.subagentsOpen] : [],
     ...showing.length > 1 ? [copy.sheetCycle] : [],
     copy.sheetClose,
   ].join(' \u00b7 ')
   const subagentFollow: { readonly follow?: SheetFollow } = sheetFollowing && (props.subagents?.length ?? 0) > 0
-    ? { follow: subagentLine(agentIndex, props.workflows?.length) } : {}
+    ? { follow: subagentLine(agentIndex, props.workflows?.length, props.subagents?.[agentIndex]?.routing) } : {}
   const sheetView: { readonly color: PaletteColor, readonly lines: readonly SheetLine[], readonly keys: string, readonly follow?: SheetFollow } | undefined =
     sheet === undefined || !showable(sheet) ? undefined
       : {

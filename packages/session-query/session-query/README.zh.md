@@ -33,7 +33,7 @@ kind: "package-reference"
 |---|---|
 | `listSessions()` | 每个逻辑会话，最新的在前，带 `live` 与 `persisted` 可用性标志 |
 | `filterSessions(filters)` | 匹配 AND 连接的元数据与可用性谓词的会话 |
-| `readTitleSnapshots(ids)` | 每个会话的最新折叠标题，绑定到其来源 header，并以 `lastEventAt` 给出最新事件的时间 |
+| `readTitleSnapshots(ids)` | 每个会话的最新折叠标题，绑定到其来源 header，并以 `lastEventAt` 给出最新事件的时间；日志开始过轮次时带有 `startedTurn: true` |
 | `readSurface(id)` | 完整的当前模型表层 |
 | `searchSessions(request)` / `searchEvents(request)` | 全文搜索分页结果，由挂载的后端实现 |
 

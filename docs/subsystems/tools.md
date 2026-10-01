@@ -219,7 +219,7 @@ interface ToolExecutionInput {
 }
 ```
 
-A tool body receives the runtime extension. `deferContext()` attaches context to the execution's own result — the composite-tool nested-dispatch channel, also usable by a leaf tool minting a plugin-sourced instruction — without injecting inside the still-open outer call.
+A tool body receives the runtime extension. `deferContext()` attaches context to the execution's own result — the composite-tool nested-dispatch channel, also usable by a leaf tool minting a plugin-sourced instruction — without injecting inside the still-open outer call. `presentResultMeta()` attaches display-only `meta` to a successful top-level result when that metadata is not part of the value, as with the files a shell command changed.
 
 ```ts type-equiv
 /**
@@ -247,6 +247,19 @@ interface ToolRunContext extends ToolExecution {
    * conclude the enclosing run.
    */
   concludeTurn(): void
+  /**
+   * Attach display-only metadata to this execution's successful top-level
+   * result, for metadata that cannot derive from the canonical value: a
+   * shell command's file changes, for example, which are not part of what the
+   * command returns. It is logged as `tool/result.meta` and read back by the
+   * tool's own `presentResult`; the model never receives it. The value is
+   * snapshotted when called, and the last call wins. A nested (`parent`) call
+   * ignores it, as nested results carry no `meta`; a failed result does not
+   * carry it. A tool that declares `output.presentationMeta` cannot call it, so
+   * one result never has two sources of metadata.
+   * @param meta - lossless JSON metadata, bounded by the caller.
+   */
+  presentResultMeta(meta: JsonValue): void
 }
 ```
 
@@ -428,7 +441,7 @@ Post-policy may replace either content or value, never both. Content replacement
 
 ## The enforced raw JSON Schema subset
 
-Raw schemas from subagents, workflows, MCP, and dynamic registrations use the wire-level counterpart of the author DSL. `assertSupportedJsonSchema()` accepts any JSON root, `validateJsonSchemaValue()` enforces it, and `JsonSchemaError` reports every unsupported or malformed schema path. The empty annotation-only node means unconstrained lossless JSON. `oneOf` requires at least two branches and a value must match exactly one. Consumers that still require an object root call `assertObjectJsonSchema()` and carry `ObjectJsonSchema`; this is how subagent/workflow caller-defined structured output remains object-rooted without restricting the shared vocabulary.
+Raw schemas from subagents, workflows, MCP, and dynamic registrations use the wire-level counterpart of the author DSL. `assertSupportedJsonSchema()` accepts any JSON root, `validateJsonSchemaValue()` enforces it, and `JsonSchemaError` reports every unsupported or malformed schema path. The empty annotation-only node means unconstrained lossless JSON. `oneOf` requires at least two branches and a value must match exactly one. Consumers that still require an object root call `assertObjectJsonSchema()` and carry `ObjectJsonSchema`; this is how subagent caller-defined structured output remains object-rooted without restricting the shared vocabulary. Workflow `agent()` accepts any root and wraps a non-object one under a required `value` property before it reaches the child.
 
 ```ts type-equiv
 /** Scalar JSON values supported by `enum` and `const`. */

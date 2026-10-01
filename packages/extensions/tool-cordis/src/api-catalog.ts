@@ -4613,7 +4613,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'RouterRouteView',
-    declaration: 'export interface RouterRouteView {\n    readonly provider: string;\n    readonly model: string;\n    readonly profile?: string;\n    readonly matchedBy?: \'name\' | \'same_as\';\n    readonly ranked: boolean;\n    readonly quality?: number;\n    readonly qualitySource?: \'benchmarks\' | \'hint\';\n    readonly price?: number;\n    readonly priceSource?: \'catalog\' | \'hint\';\n}',
+    declaration: 'export interface RouterRouteView {\n    readonly provider: string;\n    readonly model: string;\n    readonly profile?: string;\n    readonly matchedBy?: \'name\' | \'same_as\';\n    readonly ranked: boolean;\n    readonly quality?: number;\n    readonly qualitySource?: \'benchmarks\' | \'hint\' | \'inherited\';\n    readonly price?: number;\n    readonly priceSource?: \'catalog\' | \'hint\';\n}',
   },
   {
     name: 'RouterTokenStatus',
@@ -4701,7 +4701,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'Session',
-    declaration: 'export class Session {\n    get surface(): SessionSurface;\n    readonly header: SessionHeader;\n    readonly inheritedEventCount: SessionLogOffset;\n    get id(): SessionId;\n    readonly firstLiveSeq: SessionLogOffset;\n    static create(id: SessionId, seed?: readonly SessionEvent[], header?: SessionHeader, inheritedEventCount?: SessionLogOffset, projections?: readonly SessionMessageProjection[]): Session;\n    static fromRestore(id: SessionId, seed: readonly SessionEvent[], header: SessionHeader, inheritedEventCount: SessionLogOffset, eventState: SessionSeedEventState, projections?: readonly SessionMessageProjection[]): Session;\n    eventAt(seq: SessionSeq): SessionEvent | undefined;\n    snapshotEvents(fromSeq: SessionLogOffset = SessionLogOffset(0), toSeqExclusive: SessionLogOffset = this.seq): readonly SessionEvent[];\n    ownEvents(): readonly SessionEvent[];\n    isOwnSeq(seq: SessionSeq): boolean;\n    get seq(): SessionLogOffset;\n    append<T extends SessionEventType>(type: T, data: SessionEventMap[T], ...opts: T extends SurfaceEventType ? [\n        opts: SurfaceIntent<T>\n    ] : [\n    ]): SessionEvent<T>;\n    requestHeader(): EpochHeader | undefined;\n    toolHistory(): ToolHistory;\n    requestContext(): RequestContext | undefined;\n    deriveMessages(): Message[];\n    deriveEventMessage(event: SessionEvent): Message | null;\n}',
+    declaration: 'export class Session {\n    get surface(): SessionSurface;\n    readonly header: SessionHeader;\n    readonly inheritedEventCount: SessionLogOffset;\n    get id(): SessionId;\n    readonly firstLiveSeq: SessionLogOffset;\n    static create(id: SessionId, seed?: readonly SessionEvent[], header?: SessionHeader, inheritedEventCount?: SessionLogOffset, projections?: readonly SessionMessageProjection[]): Session;\n    static fromRestore(id: SessionId, seed: readonly SessionEvent[], header: SessionHeader, inheritedEventCount: SessionLogOffset, eventState: SessionSeedEventState, projections?: readonly SessionMessageProjection[]): Session;\n    eventAt(seq: SessionSeq): SessionEvent | undefined;\n    snapshotEvents(fromSeq: SessionLogOffset = SessionLogOffset(0), toSeqExclusive: SessionLogOffset = this.seq): readonly SessionEvent[];\n    ownEvents(): readonly SessionEvent[];\n    isOwnSeq(seq: SessionSeq): boolean;\n    get seq(): SessionLogOffset;\n    append<T extends SessionEventType>(type: T, data: SessionEventMap[T], ...opts: T extends SurfaceEventType ? [\n        opts: SurfaceIntent<T>\n    ] : [\n        opts?: {\n            ignorable?: true;\n        }\n    ]): SessionEvent<T>;\n    requestHeader(): EpochHeader | undefined;\n    toolHistory(): ToolHistory;\n    requestContext(): RequestContext | undefined;\n    deriveMessages(): Message[];\n    deriveEventMessage(event: SessionEvent): Message | null;\n}',
   },
   {
     name: 'SessionAccess',
@@ -4953,7 +4953,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SessionTitleObservation',
-    declaration: 'export interface SessionTitleObservation {\n    session: SessionHeader;\n    title?: SessionTitleSnapshot;\n    lastEventAt?: number;\n}',
+    declaration: 'export interface SessionTitleObservation {\n    session: SessionHeader;\n    title?: SessionTitleSnapshot;\n    lastEventAt?: number;\n    startedTurn?: true;\n}',
   },
   {
     name: 'SessionTitleObservationResult',
@@ -5368,6 +5368,18 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface TerminalCallView {\n    card: \'terminal\';\n    title: string;\n    description?: string;\n    cwd?: string;\n}',
   },
   {
+    name: 'TerminalChanges',
+    declaration: 'export interface TerminalChanges {\n    files: TerminalFileChange[];\n    omittedFiles?: number;\n    timedOut?: true;\n    concurrent?: true;\n}',
+  },
+  {
+    name: 'TerminalFileChange',
+    declaration: 'export interface TerminalFileChange {\n    path: string;\n    status: TerminalFileChangeStatus;\n    from?: string;\n    added: number;\n    removed: number;\n    hunks?: FileDiff[];\n}',
+  },
+  {
+    name: 'TerminalFileChangeStatus',
+    declaration: 'export type TerminalFileChangeStatus = \'created\' | \'modified\' | \'deleted\' | \'renamed\' | \'mode\' | \'symlink\' | \'binary\' | \'too-large\' | \'unknown-before\';',
+  },
+  {
     name: 'TerminalReadRequest',
     declaration: 'export interface TerminalReadRequest {\n    offset?: number;\n    count?: number;\n}',
   },
@@ -5377,7 +5389,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'TerminalResultView',
-    declaration: 'export interface TerminalResultView {\n    card: \'terminal\';\n    title?: string;\n    output?: string;\n    exitCode?: number;\n    signal?: string;\n}',
+    declaration: 'export interface TerminalResultView {\n    card: \'terminal\';\n    title?: string;\n    output?: string;\n    exitCode?: number;\n    signal?: string;\n    changes?: TerminalChanges;\n}',
   },
   {
     name: 'TerminalSendOperation',
@@ -5553,7 +5565,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ToolRunContext',
-    declaration: 'export interface ToolRunContext extends ToolExecution {\n    deferContext(context: UserMessage): void;\n    concludeTurn(): void;\n}',
+    declaration: 'export interface ToolRunContext extends ToolExecution {\n    deferContext(context: UserMessage): void;\n    concludeTurn(): void;\n    presentResultMeta(meta: JsonValue): void;\n}',
   },
   {
     name: 'ToolRuntime',

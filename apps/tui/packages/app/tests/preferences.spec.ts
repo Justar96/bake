@@ -548,6 +548,8 @@ describe('task router settings', () => {
       { provider: 'deepseek', model: 'deepseek-v4-flash', profile: 'deepseek-v4-flash', ranked: true, quality: 0.8,
         qualitySource: 'benchmarks' as const, price: 0.3 },
       { provider: 'corp', model: 'opus-alias', ranked: false },
+      { provider: 'corp', model: 'family-estimate', profile: 'family-base', ranked: true, quality: 0.6,
+        qualitySource: 'inherited' as const },
     ]))
     await ctx.settings.mutate('subagent-model-selection', [{ op: 'set', path: ['router', 'hints'],
       value: [{ provider: 'deepseek', model: 'deepseek-v4-flash', quality: 'low' }] }])
@@ -570,6 +572,7 @@ describe('task router settings', () => {
       // A declared tier does not replace benchmarks, and the list says so.
       ['deepseek/deepseek-v4-flash', `deepseek-v4-flash · ${copy.settingsRouterQualityShort} 0.80 · $0.30/M · ${copy.settingsRouterHinted}: low · ${copy.settingsRouterBenchmarksWin}`, copy.settingsRouterRanked],
       ['corp/opus-alias', copy.settingsRouterUnknown, copy.settingsRouterUnranked],
+      ['corp/family-estimate', `family-base · ${copy.settingsRouterQualityShort} 0.60 · ${copy.settingsRouterInherited}`, copy.settingsRouterRanked],
       ['\u0000done', undefined, undefined],
     ])
     expect(prompts[5]!.choices.find(choice => choice.value === 'corp/opus-alias')?.description)

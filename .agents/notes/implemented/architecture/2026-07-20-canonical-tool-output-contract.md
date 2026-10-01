@@ -76,4 +76,6 @@ MCP bridges preserve protocol blocks through `McpResult<{...}> = { content: Json
 
 Native and replay behavior remains content-first and byte-compatible, while execution-time callers can use a validated domain value without parsing that content. Failures have one required message plus optional internal class/code information, successful and failed outcomes are discriminated, and a failed result can never promise a value. Tool authors must design the value and Native projection together; the extra declaration is intentional because it prevents accidental programmatic contracts from being inferred from prose.
 
+[Show the files a shell command changed](../feature/2026-10-01-shell-change-report.md) partly supersedes the rule that presentation metadata derives from the value: `ToolRunContext.presentResultMeta` lets a body attach display-only metadata to a top-level success when, as with a shell command's file changes, the data is not part of the value and putting it there would make it model input under PTC.
+
 Intermediate values remain bounded only by the producing capability and process memory. Their omission from the log means replay cannot recover them, and a content-only post policy does not hide them. These are explicit properties of the execution-local contract, not accidental gaps.

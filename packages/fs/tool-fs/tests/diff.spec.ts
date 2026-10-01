@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { computeHunkDiffs, diffsFromMeta, DIFF_CONTEXT } from '../src/diff.ts'
+import { computeHunkDiffs, diffsFromMeta, DIFF_CONTEXT, MAX_DIFF_EDIT_LENGTH } from '../src/diff.ts'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 
 const lines = (n: number): string => Array.from({ length: n }, (_, i) => `line${i + 1}`).join('\n') + '\n'
@@ -73,6 +73,41 @@ describe('computeHunkDiffs', () => {
     expect(diff?.oldText?.split('\n')).toHaveLength(7)
     expect(diff?.newText.split('\n')).toHaveLength(7)
     expect(diff?.oldText?.split('\n')[0]).toBe('line7')
+  })
+})
+
+describe('computeHunkDiffs past the edit-length cap', () => {
+  const numbered = (n: number, line: (i: number) => string): string => Array.from({ length: n }, (_, i) => line(i)).join('\n') + '\n'
+
+  it('gives up on a full rewrite quickly and reports one hunk spanning the file', () => {
+    const before = numbered(10_000, i => `old ${i} ${'a'.repeat(20)}`)
+    const after = numbered(10_000, i => `new ${i * 7} ${'b'.repeat(20)}`)
+    const started = performance.now()
+    const diffs = computeHunkDiffs('big.txt', before, after)
+    expect(performance.now() - started).toBeLessThan(2_000)
+    expect(diffs).toEqual([{ path: 'big.txt', oldText: before.slice(0, -1), newText: after.slice(0, -1), oldStart: 1, newStart: 1 }])
+  })
+
+  it('reports a large block replacement exactly, with context, once the cap is exceeded', () => {
+    const size = MAX_DIFF_EDIT_LENGTH
+    const before = numbered(10_000, i => `line ${i}`)
+    const after = numbered(10_000, i => i >= 4_000 && i < 4_000 + size ? `new ${i}` : `line ${i}`)
+    const [diff, ...rest] = computeHunkDiffs('block.txt', before, after)
+    expect(rest).toEqual([])
+    const context = (from: number, to: number): string[] => Array.from({ length: to - from }, (_, k) => `line ${from + k}`)
+    expect(diff).toEqual({
+      path: 'block.txt',
+      oldText: [...context(3_997, 4_000), ...context(4_000, 4_000 + size), ...context(4_000 + size, 4_003 + size)].join('\n'),
+      newText: [...context(3_997, 4_000), ...Array.from({ length: size }, (_, k) => `new ${4_000 + k}`), ...context(4_000 + size, 4_003 + size)].join('\n'),
+      oldStart: 3_998,
+      newStart: 3_998,
+    })
+  })
+
+  it('keeps exact hunks for many small edits within the cap', () => {
+    const before = numbered(10_000, i => `line ${i}`)
+    const after = numbered(10_000, i => i % 200 === 0 ? `changed ${i}` : `line ${i}`)
+    expect(computeHunkDiffs('scattered.txt', before, after)).toHaveLength(50)
   })
 })
 

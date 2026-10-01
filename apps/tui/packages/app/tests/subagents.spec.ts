@@ -8,8 +8,56 @@ import { childOutcome } from '../src/subagents.ts'
 import { SessionController } from '../src/controller.ts'
 import { openSession } from '../src/session.ts'
 import { harness } from './harness.ts'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, ToolCallId } from '@deepseek-ai/dsh-llm'
 import TokenMeter from '@deepseek-ai/dsh-token-meter'
+import * as ToolSubagent from '@deepseek-ai/dsh-tool-subagent'
+
+it('reads routing decisions from the parent projection and restores them without changing the root model', async () => {
+  const fixture = await harness()
+  let controller: SessionController | undefined
+  let handle: Awaited<ReturnType<typeof openSession>> | undefined
+  const changed = vi.fn()
+  try {
+    await fixture.ctx.plugin(SubagentRuntime)
+    await fixture.ctx.plugin(ToolSubagent, { provider: 'spawn' })
+    handle = await openSession(fixture.ctx, {}, new AbortController().signal, () => {})
+    const observe = () => new SessionController(fixture.ctx, handle!.agent, dictionaries.en, { refs: [] }, changed,
+      { attachmentMaxBytes: 1048576, attachmentLimit: 8 })
+    controller = observe()
+    await controller.replay(new AbortController().signal)
+    const child = fixture.ctx.sessions.create(SessionId('routed-child'), {
+      meta: { parentSession: handle.agent.id, origin: 'subagent' },
+    })
+    child.append('subagent/descriptor', {
+      version: SUBAGENT_DESCRIPTOR_VERSION, mode: 'continuable', provider: 'spawn', label: 'Review routing',
+    })
+    await controller.drain()
+    expect(controller.view.subagents[0]?.routing).toBeUndefined()
+    const decision: ToolSubagent.SubagentRoutingDecision = {
+      childId: child.id, callId: ToolCallId('route-review'), source: 'fallback',
+      route: { provider: 'mock', model: 'child-default', reasoningEffort: 'high' },
+      router: { reason: 'The task needs an objective', fallback: true,
+        assessment: { policy: '2026-10-01', status: 'needs_context', difficulty: 0.7,
+          reasons: ['No concrete objective was provided'] } },
+    }
+    changed.mockClear()
+    handle.agent.session.append('subagent/routing-decision', decision)
+    expect(changed).toHaveBeenCalled()
+    expect(controller.view.subagents[0]?.routing).toEqual(decision)
+    expect(controller.view.model).toBe('mock/model')
+    expect(JSON.stringify(transcriptRows(controller.view.committed))).not.toContain(decision.router!.reason)
+    controller.close()
+    await controller.drain()
+    controller = observe()
+    await controller.replay(new AbortController().signal)
+    await controller.drain()
+    expect(controller.view.subagents[0]?.routing).toEqual(decision)
+    expect(fixture.model.requests).toHaveLength(0)
+  } finally {
+    controller?.close()
+    try { await controller?.drain() } finally { await handle?.dispose(); await fixture.dispose() }
+  }
+})
 
 it('shows live delegated children and lists their authoritative saved metadata', async () => {
   const fixture = await harness()

@@ -11,6 +11,15 @@ import type { FileDiff } from '@deepseek-ai/dsh-tools'
 export const DIFF_CONTEXT = 3
 
 /**
+ * Lines added plus removed past which the line diff is not computed. jsdiff's
+ * cost grows with the square of this edit distance: a full rewrite of 10,000
+ * lines took 16 s on the event loop, while this cap gives up within about
+ * 70 ms. The bound is a count, not a clock, so the same edit always yields
+ * the same hunks, including the edited lines the model is shown.
+ */
+export const MAX_DIFF_EDIT_LENGTH = 1_000
+
+/**
  * The `write`/`edit` tools' private `tool/result` `meta` payload: the applied
  * contextual-diff hunks, and for `write` whether the call created or updated
  * the file, which tells an empty hunk list of a create from one of an
@@ -34,7 +43,12 @@ export type FsDiffMeta = { diffs: FileDiff[]; operation?: 'create' | 'update' }
  * @returns one diff per applied hunk, in file order; empty when the texts are identical.
  */
 export function computeHunkDiffs(path: string, before: string, after: string): (FileDiff & { oldStart: number; newStart: number })[] {
-  const patch = structuredPatch('', '', before, after, undefined, undefined, { context: DIFF_CONTEXT })
+  const patch = structuredPatch('', '', before, after, undefined, undefined, {
+    context: DIFF_CONTEXT, maxEditLength: MAX_DIFF_EDIT_LENGTH,
+  })
+  // Past the cap, one hunk spans the differing middle: the lines between the
+  // shared head and tail, which is the exact change when it is one block.
+  if (patch === undefined) return [coarseHunk(path, before, after)]
   const diffs: (FileDiff & { oldStart: number; newStart: number })[] = []
   for (const hunk of patch.hunks) {
     const oldLines: string[] = []
@@ -64,6 +78,40 @@ export function computeHunkDiffs(path: string, before: string, after: string): (
     })
   }
   return diffs
+}
+
+/**
+ * One hunk from the first differing line to the last, with
+ * {@link DIFF_CONTEXT} shared lines on each side, found by comparing the
+ * shared head and tail in linear time.
+ * @param path - the path stamped on the hunk.
+ * @param before - the text before the change.
+ * @param after - the text after the change; it differs from `before`.
+ * @returns the hunk, in the shape {@link computeHunkDiffs} produces.
+ */
+function coarseHunk(path: string, before: string, after: string): FileDiff & { oldStart: number; newStart: number } {
+  const lines = (text: string): string[] => {
+    const split = text.split('\n')
+    if (split.at(-1) === '') split.pop()
+    return split
+  }
+  const old = lines(before)
+  const next = lines(after)
+  let head = 0
+  while (head < old.length && head < next.length && old[head] === next[head]) head++
+  let tail = 0
+  while (tail < old.length - head && tail < next.length - head && old[old.length - 1 - tail] === next[next.length - 1 - tail]) tail++
+  const from = Math.max(0, head - DIFF_CONTEXT)
+  const oldTo = Math.min(old.length, old.length - tail + DIFF_CONTEXT)
+  const newTo = Math.min(next.length, next.length - tail + DIFF_CONTEXT)
+  const oldLines = old.slice(from, oldTo)
+  return {
+    path,
+    oldText: oldLines.length > 0 ? oldLines.join('\n') : null,
+    newText: next.slice(from, newTo).join('\n'),
+    oldStart: from + 1,
+    newStart: from + 1,
+  }
 }
 
 /** Whether `value` is a valid {@link FileDiff} (defensive narrowing from opaque `meta`). */

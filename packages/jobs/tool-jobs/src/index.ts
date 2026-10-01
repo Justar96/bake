@@ -201,7 +201,8 @@ function validateJobId(value: string): JobId {
 
 function explainUnknownJob(error: unknown, id: JobId): never {
   if (error instanceof Error && error.message === `unknown job ${id}`) {
-    throw new Error(`unknown job ${id}; use job_list to find a background job id. A continuable subagent id belongs to the subagent control tools.`)
+    // Models reach for job_output to wait on a subagent; say how that wait already happens.
+    throw new Error(`unknown job ${id}; use job_list to find a background job id. A continuable subagent's id is not a job id: its result arrives as a notice when it finishes.`)
   }
   throw error
 }

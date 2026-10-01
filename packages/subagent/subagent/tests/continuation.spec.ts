@@ -301,7 +301,11 @@ describe('continuable activation capacity', () => {
     try {
       await ctx.plugin(MemorySettings)
       const first = await ctx.subagents.startContinuable(startSpec(parent))
-      await expect(ctx.subagents.startContinuable(startSpec(parent))).rejects.toMatchObject({ code: 'ACTIVATION_LIMIT_REACHED' })
+      await expect(ctx.subagents.startContinuable(startSpec(parent))).rejects.toMatchObject({
+        code: 'ACTIVATION_LIMIT_REACHED',
+        message: 'subagent limit reached: 1 subagent is already active, the most allowed at once. '
+          + 'A notice arrives when one finishes; retry then, or do this work yourself.',
+      })
       await ctx.settings.update('subagent', { maxActiveSubagents: 2 })
       const second = await ctx.subagents.startContinuable(startSpec(parent))
       await ctx.settings.update('subagent', { maxActiveSubagents: 1 })

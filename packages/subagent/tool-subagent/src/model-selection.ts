@@ -1,7 +1,7 @@
 /** Child LLM route selection for the subagent tool. */
 
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
-import type { LlmRuntime } from '@deepseek-ai/dsh-llm'
+import type { LlmCallConfig, LlmRuntime } from '@deepseek-ai/dsh-llm'
 import type { AgentOptions } from '@deepseek-ai/dsh-agent'
 import z from '@deepseek-ai/schemastery'
 
@@ -79,11 +79,29 @@ export function hasDelegationModelRequest(request: DelegationModelRequest): bool
     || request.reasoning_effort !== undefined
 }
 
-/** Reject an empty model-facing route value at the tool JSON boundary. */
-function assertNonEmpty(value: string | undefined, field: keyof DelegationModelRequest): void {
-  if (value !== undefined && value.length === 0) {
-    throw new Error(`child LLM \`${field}\` must be non-empty`)
+/**
+ * The call's route fields without the blank ones. Some models send every
+ * optional field, an empty string for each they mean to leave out; a blank
+ * field names no route or effort, so it is read as omitted.
+ * @param request - Model-facing route fields from the tool call.
+ * @returns the fields that name something.
+ */
+export function withoutBlankRoute(request: DelegationModelRequest): DelegationModelRequest {
+  const named = (value: string | undefined): value is string => value !== undefined && value.trim().length > 0
+  return {
+    ...named(request.provider) ? { provider: request.provider } : {},
+    ...named(request.model) ? { model: request.model } : {},
+    ...named(request.reasoning_effort) ? { reasoning_effort: request.reasoning_effort } : {},
   }
+}
+
+/**
+ * The Session's allowed routes, for a refusal the model can act on.
+ * @param policy - Selection authority captured for this Session.
+ * @returns the routes as `provider/model`, comma-separated.
+ */
+export function allowedRoutesText(policy: ModelSelectionPolicy): string {
+  return policy.routes.map(route => `${route.provider}/${route.model}`).join(', ')
 }
 
 /**
@@ -106,9 +124,6 @@ export function requestedAgentOptions(
   if (!enabled) {
     throw new Error('child model selection is disabled for this tool instance')
   }
-  assertNonEmpty(request.provider, 'provider')
-  assertNonEmpty(request.model, 'model')
-  assertNonEmpty(request.reasoning_effort, 'reasoning_effort')
   if ((request.provider === undefined) !== (request.model === undefined)) {
     throw new Error('child LLM `provider` and `model` must be supplied together')
   }
@@ -149,7 +164,7 @@ export function assertAllowedModelSelection(
     throw new Error('cannot select child LLM values without an effective provider and model')
   }
   if (policy.routes.some(route => route.provider === provider && route.model === model)) return
-  throw new Error(`child LLM route "${provider}/${model}" is not allowed for this Session`)
+  throw new Error(`child LLM route "${provider}/${model}" is not allowed for this Session; allowed routes: ${allowedRoutesText(policy)}`)
 }
 
 /**
@@ -172,6 +187,7 @@ export function hasConfiguredLlmSelection(options: AgentOptions | undefined): bo
  * @param requested - Per-child options after request/config merging.
  * @param signal - Tool-call cancellation signal.
  * @param inheritParentReasoningEffort - Whether an omitted effort may inherit from the parent route.
+ * @returns the validated effective route, including adapter-resolved defaults.
  */
 export async function preflightChildLlmRoute(
   llm: LlmRuntime,
@@ -179,7 +195,7 @@ export async function preflightChildLlmRoute(
   requested: AgentOptions | undefined,
   signal: AbortSignal,
   inheritParentReasoningEffort = true,
-): Promise<void> {
+): Promise<LlmCallConfig> {
   const provider = requested?.provider ?? parentOptions.provider
   const model = requested?.model ?? parentOptions.model
   if (provider === undefined || model === undefined) {
@@ -188,7 +204,7 @@ export async function preflightChildLlmRoute(
   const routeChanged = provider !== parentOptions.provider || model !== parentOptions.model
   const reasoningEffort = requested?.reasoningEffort
     ?? (inheritParentReasoningEffort && !routeChanged ? parentOptions.reasoningEffort : undefined)
-  await llm.resolveCallConfig({
+  return llm.resolveCallConfig({
     provider,
     model,
     ...reasoningEffort === undefined ? {} : { reasoningEffort },

@@ -1,0 +1,644 @@
+{
+  "title": "Subagent routing in headless: task router on vs off on the delegation case, with blank route fields read as omitted",
+  "version": "router-on",
+  "arms": {
+    "off": {
+      "version": "router-off",
+      "revision": {
+        "root": "/home/jt-devnet/bake",
+        "commit": "794e39d0cb6f83a7dc049f236c3f113a04794684",
+        "dirty": true
+      }
+    },
+    "on": {
+      "version": "router-on",
+      "revision": {
+        "root": "/home/jt-devnet/bake",
+        "commit": "794e39d0cb6f83a7dc049f236c3f113a04794684",
+        "dirty": true
+      }
+    }
+  },
+  "candidate": "on",
+  "bases": [
+    "router-off"
+  ],
+  "models": [
+    "claude-opus-5-5",
+    "claude-sonnet-5-5",
+    "deepseek-flash",
+    "deepseek-v4-pro",
+    "gemini-3.8-flash-medium",
+    "gpt-6-astra",
+    "gpt-6.1-sol"
+  ],
+  "scenarios": [
+    "delegation"
+  ],
+  "trials": 3,
+  "startedAt": "2026-10-01T11:43:24.335Z",
+  "harness": "evals/agent-loop/run.ts",
+  "note": "Both arms are the same working tree on 794e39d (dirty), run headless with subagent-model-selection enabled and an allowlist of the model's own route; router-on also turns router.enabled on against https://ing.gissx.org. The scenario is the opt-in delegation case, outside the standard suite; this is its first record. Model-visible changes covered: dsh headless now composes model selection, so with the setting on the subagent tool gains provider, model, and reasoning_effort and list_subagent_models joins the tools (with it off, the tool definitions were checked byte-identical to HEAD's headless patch, so the standard suite is unaffected); subagent and list_subagent_models read a blank route field as omitted; and a refused provider or route names the allowed routes. An earlier run of this branch before the blank-field change had gpt-6.1-sol send provider '' and model '' in every subagent and list_subagent_models call: 7 to 20 tool errors per run, 2 of 3 router-off runs failed, and router-on recorded the default route because the call never reached the router. Here gpt-6.1-sol made one tool error in six runs, a guessed deepseek/deepseek-chat route that it corrected on the next call from the allowed routes the error named. With one allowed route the router can change only the child's effort: it chose that route at effort low in all three trials for six models. For deepseek-flash it answered fallback all three times, because it has no benchmark or declared quality for that model, so the default route kept effort high. gemini-3.8-flash-medium's +45% tokens come from two router-on trials of 7 requests instead of 5: the low-effort child wrapped its answer in Markdown, and the parent re-read the notes or summary.txt before finishing; the interval includes zero, so it is not flagged. gpt-6.1-sol's router-on runs took 52 to 77 seconds against 25 to 33 router-off; the runner records no per-request timing, so that is not attributed.",
+  "settings": {
+    "effort": "medium where the model offers it; DeepSeek runs at high, its default, having no medium",
+    "maxOutputTokens": 8192,
+    "capMs": 180000,
+    "maxRequests": {
+      "default": 14,
+      "workflow_script": 40,
+      "delegation": 40
+    }
+  },
+  "regressionRule": "all tasks, per model: total tokens with the 95% interval above zero; failures +2 or more; any tool-error increase",
+  "regressions": [],
+  "perModel": {
+    "claude-opus-5-5": {
+      "samples": 3,
+      "successes": 3,
+      "firstRequestBytes": null,
+      "toolSchemaChars": null,
+      "meanTotalTokensPerTask": 25108,
+      "meanRequestsPerTask": 5,
+      "cacheReadShare": 0.984,
+      "toolErrors": 0,
+      "comparisons": {
+        "router-off": {
+          "all tasks": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": 0.1,
+              "lo": -0.1,
+              "hi": 0.3
+            },
+            "logicalInputTokens": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0.1
+            },
+            "uncachedInputTokens": {
+              "pct": -86.5,
+              "lo": -95.3,
+              "hi": 4862.5
+            },
+            "requests": [
+              15,
+              15
+            ],
+            "toolCalls": [
+              6,
+              6
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          },
+          "delegation": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": 0.1,
+              "lo": -0.1,
+              "hi": 0.3
+            },
+            "logicalInputTokens": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0.1
+            },
+            "uncachedInputTokens": {
+              "pct": -86.5,
+              "lo": -95.3,
+              "hi": 4862.5
+            },
+            "requests": [
+              15,
+              15
+            ],
+            "toolCalls": [
+              6,
+              6
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          }
+        }
+      }
+    },
+    "claude-sonnet-5-5": {
+      "samples": 3,
+      "successes": 3,
+      "firstRequestBytes": null,
+      "toolSchemaChars": null,
+      "meanTotalTokensPerTask": 25046,
+      "meanRequestsPerTask": 5,
+      "cacheReadShare": 0.985,
+      "toolErrors": 0,
+      "comparisons": {
+        "router-off": {
+          "all tasks": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": 0,
+              "lo": -0.2,
+              "hi": 0.2
+            },
+            "logicalInputTokens": {
+              "pct": 0.1,
+              "lo": 0,
+              "hi": 0.1
+            },
+            "uncachedInputTokens": {
+              "pct": -86.7,
+              "lo": -95.5,
+              "hi": 4562.5
+            },
+            "requests": [
+              15,
+              15
+            ],
+            "toolCalls": [
+              6,
+              6
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          },
+          "delegation": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": 0,
+              "lo": -0.2,
+              "hi": 0.2
+            },
+            "logicalInputTokens": {
+              "pct": 0.1,
+              "lo": 0,
+              "hi": 0.1
+            },
+            "uncachedInputTokens": {
+              "pct": -86.7,
+              "lo": -95.5,
+              "hi": 4562.5
+            },
+            "requests": [
+              15,
+              15
+            ],
+            "toolCalls": [
+              6,
+              6
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          }
+        }
+      }
+    },
+    "deepseek-flash": {
+      "samples": 3,
+      "successes": 3,
+      "firstRequestBytes": null,
+      "toolSchemaChars": null,
+      "meanTotalTokensPerTask": 23968,
+      "meanRequestsPerTask": 6,
+      "cacheReadShare": 0.963,
+      "toolErrors": 0,
+      "comparisons": {
+        "router-off": {
+          "all tasks": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": -17.3,
+              "lo": -24.1,
+              "hi": -2.6
+            },
+            "logicalInputTokens": {
+              "pct": -17.2,
+              "lo": -23.8,
+              "hi": -2.1
+            },
+            "uncachedInputTokens": {
+              "pct": -58.1,
+              "lo": -81.5,
+              "hi": 0.8
+            },
+            "requests": [
+              20,
+              18
+            ],
+            "toolCalls": [
+              11,
+              9
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          },
+          "delegation": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": -17.3,
+              "lo": -24.1,
+              "hi": -2.6
+            },
+            "logicalInputTokens": {
+              "pct": -17.2,
+              "lo": -23.8,
+              "hi": -2.1
+            },
+            "uncachedInputTokens": {
+              "pct": -58.1,
+              "lo": -81.5,
+              "hi": 0.8
+            },
+            "requests": [
+              20,
+              18
+            ],
+            "toolCalls": [
+              11,
+              9
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          }
+        }
+      }
+    },
+    "deepseek-v4-pro": {
+      "samples": 3,
+      "successes": 3,
+      "firstRequestBytes": null,
+      "toolSchemaChars": null,
+      "meanTotalTokensPerTask": 24999,
+      "meanRequestsPerTask": 6,
+      "cacheReadShare": 0.983,
+      "toolErrors": 0,
+      "comparisons": {
+        "router-off": {
+          "all tasks": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": -13.7,
+              "lo": -22.7,
+              "hi": 1.4
+            },
+            "logicalInputTokens": {
+              "pct": -14.2,
+              "lo": -22.5,
+              "hi": 0.9
+            },
+            "uncachedInputTokens": {
+              "pct": -79.7,
+              "lo": -90,
+              "hi": -27.8
+            },
+            "requests": [
+              20,
+              18
+            ],
+            "toolCalls": [
+              11,
+              9
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          },
+          "delegation": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": -13.7,
+              "lo": -22.7,
+              "hi": 1.4
+            },
+            "logicalInputTokens": {
+              "pct": -14.2,
+              "lo": -22.5,
+              "hi": 0.9
+            },
+            "uncachedInputTokens": {
+              "pct": -79.7,
+              "lo": -90,
+              "hi": -27.8
+            },
+            "requests": [
+              20,
+              18
+            ],
+            "toolCalls": [
+              11,
+              9
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          }
+        }
+      }
+    },
+    "gemini-3.8-flash-medium": {
+      "samples": 3,
+      "successes": 3,
+      "firstRequestBytes": null,
+      "toolSchemaChars": null,
+      "meanTotalTokensPerTask": 24301,
+      "meanRequestsPerTask": 6.33,
+      "cacheReadShare": 0,
+      "toolErrors": 0,
+      "comparisons": {
+        "router-off": {
+          "all tasks": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": 45,
+              "lo": -1.3,
+              "hi": 68.4
+            },
+            "logicalInputTokens": {
+              "pct": 46,
+              "lo": -0.1,
+              "hi": 69.5
+            },
+            "uncachedInputTokens": {
+              "pct": 46,
+              "lo": -0.1,
+              "hi": 69.5
+            },
+            "requests": [
+              15,
+              19
+            ],
+            "toolCalls": [
+              6,
+              10
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          },
+          "delegation": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": 45,
+              "lo": -1.3,
+              "hi": 68.4
+            },
+            "logicalInputTokens": {
+              "pct": 46,
+              "lo": -0.1,
+              "hi": 69.5
+            },
+            "uncachedInputTokens": {
+              "pct": 46,
+              "lo": -0.1,
+              "hi": 69.5
+            },
+            "requests": [
+              15,
+              19
+            ],
+            "toolCalls": [
+              6,
+              10
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          }
+        }
+      }
+    },
+    "gpt-6-astra": {
+      "samples": 3,
+      "successes": 3,
+      "firstRequestBytes": null,
+      "toolSchemaChars": null,
+      "meanTotalTokensPerTask": 14679,
+      "meanRequestsPerTask": 5.33,
+      "cacheReadShare": 0.812,
+      "toolErrors": 0,
+      "comparisons": {
+        "router-off": {
+          "all tasks": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": 11.2,
+              "lo": -0.1,
+              "hi": 25.4
+            },
+            "logicalInputTokens": {
+              "pct": 11.3,
+              "lo": 0,
+              "hi": 24.7
+            },
+            "uncachedInputTokens": {
+              "pct": -58.5,
+              "lo": -88.2,
+              "hi": 222.3
+            },
+            "requests": [
+              17,
+              16
+            ],
+            "toolCalls": [
+              6,
+              7
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          },
+          "delegation": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": 11.2,
+              "lo": -0.1,
+              "hi": 25.4
+            },
+            "logicalInputTokens": {
+              "pct": 11.3,
+              "lo": 0,
+              "hi": 24.7
+            },
+            "uncachedInputTokens": {
+              "pct": -58.5,
+              "lo": -88.2,
+              "hi": 222.3
+            },
+            "requests": [
+              17,
+              16
+            ],
+            "toolCalls": [
+              6,
+              7
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          }
+        }
+      }
+    },
+    "gpt-6.1-sol": {
+      "samples": 3,
+      "successes": 3,
+      "firstRequestBytes": null,
+      "toolSchemaChars": null,
+      "meanTotalTokensPerTask": 13192,
+      "meanRequestsPerTask": 5.67,
+      "cacheReadShare": 0.401,
+      "toolErrors": 0,
+      "comparisons": {
+        "router-off": {
+          "all tasks": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": -10.8,
+              "lo": -21.9,
+              "hi": 0.2
+            },
+            "logicalInputTokens": {
+              "pct": -10.6,
+              "lo": -20.7,
+              "hi": 0
+            },
+            "uncachedInputTokens": {
+              "pct": -28.3,
+              "lo": -46.7,
+              "hi": -5.7
+            },
+            "requests": [
+              17,
+              17
+            ],
+            "toolCalls": [
+              7,
+              6
+            ],
+            "toolErrors": [
+              1,
+              0
+            ]
+          },
+          "delegation": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": -10.8,
+              "lo": -21.9,
+              "hi": 0.2
+            },
+            "logicalInputTokens": {
+              "pct": -10.6,
+              "lo": -20.7,
+              "hi": 0
+            },
+            "uncachedInputTokens": {
+              "pct": -28.3,
+              "lo": -46.7,
+              "hi": -5.7
+            },
+            "requests": [
+              17,
+              17
+            ],
+            "toolCalls": [
+              7,
+              6
+            ],
+            "toolErrors": [
+              1,
+              0
+            ]
+          }
+        }
+      }
+    }
+  }
+}

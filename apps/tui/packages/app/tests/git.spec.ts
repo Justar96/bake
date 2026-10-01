@@ -3,12 +3,17 @@
  * changes in the background, follows a session into another workspace, and
  * stops with the application.
  */
-import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { execFileSync, spawnSync } from 'node:child_process'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import type { Context } from '@deepseek-ai/cordis'
+import type { Session } from '@deepseek-ai/dsh-session'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { parseGitStatus, WorkspaceGit } from '../src/git.ts'
+import { parseGitStatus, sessionGitConfinement, WorkspaceGit, type GitConfinement } from '../src/git.ts'
+
+/** Whether bwrap can run here; hosts without user namespaces skip the real-confinement case. */
+const bwrapUsable = spawnSync('bwrap', ['--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', '--', 'true'], { timeout: 5_000, stdio: 'ignore' }).status === 0
 
 const roots: string[] = []
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
@@ -104,6 +109,73 @@ describe('WorkspaceGit', () => {
     expect(onChange).toHaveBeenCalledTimes(calls)
   })
 
+  it('reads a confined session through its wrapper, with the fsmonitor hook off', async () => {
+    const { repo, env, git } = fixture()
+    // A hook a sandboxed command could plant; the pass-through wrapper leaves only the flag to stop it.
+    git('config', 'core.fsmonitor', `touch ${join(repo, 'fsmonitor-ran')}; false`)
+    const wrapped: (readonly string[])[] = []
+    const confinement: GitConfinement = { key: 'workspace-write', wrap: async argv => { wrapped.push(argv); return argv } }
+    const workspace = new WorkspaceGit({ env, pollMs: 20 })
+    const abort = new AbortController()
+    workspace.start(abort.signal, () => {})
+    try {
+      workspace.follow(repo, confinement)
+      await vi.waitFor(() => expect(workspace.follow(repo, confinement)?.branch).toBe('main'))
+      expect(wrapped[0]).toEqual(['git', '--no-optional-locks', '-c', 'core.fsmonitor=false',
+        'status', '--porcelain=v2', '--branch', '--untracked-files=normal'])
+      expect(existsSync(join(repo, 'fsmonitor-ran'))).toBe(false)
+    } finally {
+      abort.abort()
+      await workspace.drain()
+    }
+  })
+
+  it('leaves the field empty rather than reading unconfined when confinement fails', async () => {
+    const { repo, env, git } = fixture()
+    git('config', 'core.fsmonitor', `touch ${join(repo, 'fsmonitor-ran')}; false`)
+    let attempts = 0
+    const unavailable: GitConfinement = { key: 'workspace-write', wrap: async () => { attempts++; throw new Error('no sandbox') } }
+    const workspace = new WorkspaceGit({ env, pollMs: 10 })
+    const abort = new AbortController()
+    const onChange = vi.fn()
+    workspace.start(abort.signal, onChange)
+    try {
+      workspace.follow(repo, unavailable)
+      await vi.waitFor(() => expect(attempts).toBeGreaterThan(2))
+      expect(workspace.follow(repo, unavailable)).toBeUndefined()
+      expect(onChange).not.toHaveBeenCalled()
+      expect(existsSync(join(repo, 'fsmonitor-ran'))).toBe(false)
+      // The session left the sandbox: its reads run as before.
+      await vi.waitFor(() => expect(workspace.follow(repo)?.branch).toBe('main'))
+    } finally {
+      abort.abort()
+      await workspace.drain()
+    }
+  })
+
+  it.skipIf(!bwrapUsable)('keeps a planted clean filter inside read-only confinement', async () => {
+    const { repo, env, git } = fixture()
+    // `git status` runs the clean filter of a changed file; core.fsmonitor=false does not stop it.
+    git('config', 'filter.plant.clean', `sh -c 'touch ${join(repo, 'filter-ran')}; cat'`)
+    writeFileSync(join(repo, '.gitattributes'), 'tracked.txt filter=plant\n')
+    writeFileSync(join(repo, 'tracked.txt'), 'changed size\n')
+    const readOnly: GitConfinement = {
+      key: 'read-only',
+      wrap: async argv => ['bwrap', '--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', '--die-with-parent', '--', ...argv],
+    }
+    const workspace = new WorkspaceGit({ env, pollMs: 20 })
+    const abort = new AbortController()
+    workspace.start(abort.signal, () => {})
+    try {
+      workspace.follow(repo, readOnly)
+      await vi.waitFor(() => expect(workspace.follow(repo, readOnly)).toMatchObject({ branch: 'main', modified: 1 }))
+      expect(existsSync(join(repo, 'filter-ran'))).toBe(false)
+    } finally {
+      abort.abort()
+      await workspace.drain()
+    }
+  })
+
   it('stops at once when the application does, without waiting out the pause', async () => {
     const { repo, env } = fixture()
     const workspace = new WorkspaceGit({ env, pollMs: 60_000 })
@@ -115,5 +187,31 @@ describe('WorkspaceGit', () => {
     abort.abort()
     await workspace.drain()
     expect(performance.now() - started).toBeLessThan(1_000)
+  })
+})
+
+describe('sessionGitConfinement', () => {
+  const session = { id: 'session-1' } as unknown as Session
+  function host(mode: string | undefined, sandbox?: { confine: (...args: unknown[]) => Promise<{ argv: string[] }> }): Context {
+    return {
+      get: (name: string) => name === 'sandboxPolicy'
+        ? mode === undefined ? undefined : { resolve: () => ({ mode, workspaceRoot: '/work', sessionId: 'session-1' }) }
+        : name === 'sandbox' ? sandbox : undefined,
+    } as unknown as Context
+  }
+
+  it('leaves an unconfined session unwrapped', () => {
+    expect(sessionGitConfinement(host(undefined), session)).toBeUndefined()
+    expect(sessionGitConfinement(host('danger-full-access'), session)).toBeUndefined()
+  })
+
+  it('wraps a confined session read-only in its workspace, and refuses without a provider', async () => {
+    const confine = vi.fn(async (argv: unknown) => ({ argv: ['runner', ...(argv as string[])] }))
+    const signal = new AbortController().signal
+    const confined = sessionGitConfinement(host('workspace-write', { confine }), session)
+    await expect(confined?.wrap(['git', 'status'], signal)).resolves.toEqual(['runner', 'git', 'status'])
+    expect(confine).toHaveBeenCalledWith(['git', 'status'], { mode: 'read-only', workspaceRoot: '/work', sessionId: 'session-1' }, signal)
+    expect(sessionGitConfinement(host('read-only', { confine }), session)?.key).not.toBe(confined?.key)
+    await expect(sessionGitConfinement(host('workspace-write'), session)?.wrap(['git'], signal)).rejects.toThrow('no sandbox provider')
   })
 })

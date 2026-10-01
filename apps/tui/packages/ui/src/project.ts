@@ -318,6 +318,9 @@ export function project(event: SessionEvent, projector: Projector): Projection {
         // applied diff a reader needs after the hunks have scrolled away.
         ...card === undefined || card.title === '' ? {} : { title: card.title },
         ...card === undefined || card.detail.length === 0 ? {} : { detail: card.detail },
+        // What the command changed is not part of its output, so a failed
+        // command's red does not reach it.
+        ...card?.changes === undefined ? {} : { changes: card.changes },
       }]
     }
 

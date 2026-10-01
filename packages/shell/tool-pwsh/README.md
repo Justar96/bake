@@ -46,12 +46,13 @@ The single config field toggles background support.
 | Field | Default | Meaning |
 |---|---|---|
 | `enableRunInBackground` | `true` | Expose `run_in_background`; when `false`, forced background calls are rejected |
+| `changeReport` | `true` | Show the workspace files a foreground call changed under its output, through [`dsh-shell-change-report`](../shell-change-report/README.md); display only, so the model's result is the same either way |
 
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-tool-pwsh) is the exhaustive source for every accepted field and its JSDoc; the generated [tool catalog](../../../docs/tool-catalog.md#deepseek-aidsh-tool-pwsh) carries the full argument schema.
 
 ### Running a command
 
-The tool executes `pwsh -Command <command>` and returns the combined output. Commands run in a fresh pwsh process every call, so directory changes and variables never carry over; `workdir` sets where a command runs. Paths use native Windows form and environment variables are read with `$env:NAME`. A non-zero exit is reported as `[exit code: N]`; on Windows a force-killed command settles as `[exit code: 1]` without a signal marker, so the agent treats a bare exit 1 after an interruption as a termination, not a command failure. The tool description names `$env:DSH_HOME` and `$env:DSH_SESSION_ID` from the managed environment. Background runs, output truncation, and the `description`/`timeoutMs`/`workdir` arguments behave exactly as in [`dsh-tool-bash`](../tool-bash/README.md#running-long-commands-in-the-background), including job-owned cancellation during asynchronous shell preparation.
+The tool executes `pwsh -Command <command>` and returns the combined output. Commands run in a fresh pwsh process every call, so directory changes and variables never carry over; `workdir` sets where a command runs. Paths use native Windows form and environment variables are read with `$env:NAME`. A non-zero exit is reported as `[exit code: N]`; on Windows a force-killed command settles as `[exit code: 1]` without a signal marker, so the agent treats a bare exit 1 after an interruption as a termination, not a command failure. The tool description names `$env:DSH_HOME` and `$env:DSH_SESSION_ID` from the managed environment. Background runs, output truncation, and the `description`/`timeoutMs`/`workdir` arguments, including the `timeout` and `timeout_ms` spellings, behave exactly as in [`dsh-tool-bash`](../tool-bash/README.md#running-long-commands-in-the-background), including job-owned cancellation during asynchronous shell preparation.
 
 ### Windows-specific sandbox behavior
 
@@ -160,7 +161,7 @@ Append-only; newly visible content follows the reusable request prefix and does 
 
 #### What the model sees
 
-Validation and infrastructure failures are normalized as `Error: <message>`. This package's stable messages are `invalid command: expected a non-empty string`, `invalid timeoutMs: expected a positive number, got <value>`, the escalation pairing failures, `sandbox_permissions is not available in this composition (no sandboxing executor to escalate)`, the shared escalation failures (unknown mode / no approval service / no agent to route / no approval channel / user rejected / was cancelled), `run_in_background is disabled for this deployment (enableRunInBackground: false)`, `background jobs unavailable: load @deepseek-ai/dsh-jobs and @deepseek-ai/dsh-tool-jobs`, and `tool call aborted`.
+Validation and infrastructure failures are normalized as `Error: <message>`. This package's stable messages are `invalid command: expected a non-empty string`, `invalid timeoutMs: expected a positive number, got <value>`, `invalid <timeout|timeout_ms>: expected a positive number of milliseconds for timeoutMs, got <value>`, the escalation pairing failures, `sandbox_permissions is not available in this composition (no sandboxing executor to escalate)`, the shared escalation failures (unknown mode / no approval service / no agent to route / no approval channel / user rejected / was cancelled), `run_in_background is disabled for this deployment (enableRunInBackground: false)`, `background jobs unavailable: load @deepseek-ai/dsh-jobs and @deepseek-ai/dsh-tool-jobs`, and `tool call aborted`.
 
 #### Token effect
 

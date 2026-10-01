@@ -219,7 +219,7 @@ interface ToolExecutionInput {
 }
 ```
 
-工具函数体接收运行时扩展。`deferContext()` 把上下文附着到本次执行自己的结果上——既是组合工具转运嵌套分派上下文的通道，也可供叶子工具铸造插件来源指令——而不会在外层调用尚未结束时注入这些上下文。
+工具函数体接收运行时扩展。`deferContext()` 把上下文附着到本次执行自己的结果上——既是组合工具转运嵌套分派上下文的通道，也可供叶子工具铸造插件来源指令——而不会在外层调用尚未结束时注入这些上下文。当元数据不属于返回值时（例如 shell 命令改动的文件），`presentResultMeta()` 把仅供展示的 `meta` 附加到成功的顶层结果上。
 
 ```ts type-equiv
 /**
@@ -247,6 +247,19 @@ interface ToolRunContext extends ToolExecution {
    * conclude the enclosing run.
    */
   concludeTurn(): void
+  /**
+   * Attach display-only metadata to this execution's successful top-level
+   * result, for metadata that cannot derive from the canonical value: a
+   * shell command's file changes, for example, which are not part of what the
+   * command returns. It is logged as `tool/result.meta` and read back by the
+   * tool's own `presentResult`; the model never receives it. The value is
+   * snapshotted when called, and the last call wins. A nested (`parent`) call
+   * ignores it, as nested results carry no `meta`; a failed result does not
+   * carry it. A tool that declares `output.presentationMeta` cannot call it, so
+   * one result never has two sources of metadata.
+   * @param meta - lossless JSON metadata, bounded by the caller.
+   */
+  presentResultMeta(meta: JsonValue): void
 }
 ```
 
@@ -428,7 +441,7 @@ type PostToolDecision =
 
 ## 已强制执行的原始 JSON Schema 子集
 
-subagent、工作流、MCP 和动态注册提供的原始 schema 使用作者侧 DSL 在协议层的对应表示。`assertSupportedJsonSchema()` 接受任意 JSON 根，`validateJsonSchemaValue()` 强制执行该 schema，`JsonSchemaError` 则报告每条不受支持或格式错误的 schema 路径。仅含注解的空节点表示不受约束的无损 JSON。`oneOf` 至少要求两个分支，且一个值必须恰好匹配其中一个。仍要求对象根的消费方调用 `assertObjectJsonSchema()` 并携带 `ObjectJsonSchema`；这样，subagent/工作流中由调用方定义的结构化输出可以继续以对象为根，而不会限制共享词汇。
+subagent、工作流、MCP 和动态注册提供的原始 schema 使用作者侧 DSL 在协议层的对应表示。`assertSupportedJsonSchema()` 接受任意 JSON 根，`validateJsonSchemaValue()` 强制执行该 schema，`JsonSchemaError` 则报告每条不受支持或格式错误的 schema 路径。仅含注解的空节点表示不受约束的无损 JSON。`oneOf` 至少要求两个分支，且一个值必须恰好匹配其中一个。仍要求对象根的消费方调用 `assertObjectJsonSchema()` 并携带 `ObjectJsonSchema`；这样，subagent 中由调用方定义的结构化输出可以继续以对象为根，而不会限制共享词汇。工作流的 `agent()` 接受任意根，并在 schema 到达子 agent 之前把非对象根包装在必填的 `value` 属性下。
 
 ```ts type-equiv
 /** Scalar JSON values supported by `enum` and `const`. */

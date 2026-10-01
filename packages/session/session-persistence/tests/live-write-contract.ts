@@ -203,6 +203,46 @@ export function runLiveWritePathContract(
       await verify.fiber.dispose()
     })
 
+    it('a session flush that races the handle close settles with that close, durably or with its failure', async () => {
+      const backend = await make()
+      const { ctx } = backend
+      const service = ctx.sessionPersistence as unknown as { persistBatch: (...args: unknown[]) => Promise<void> }
+      const original = service.persistBatch.bind(service)
+      const gate = Promise.withResolvers<undefined>()
+      const entered = Promise.withResolvers<undefined>()
+      const persist = vi.spyOn(service, 'persistBatch').mockImplementationOnce(async (...args) => {
+        entered.resolve(undefined)
+        await gate.promise
+        return original(...args)
+      })
+      const session = ctx.sessions.create(SessionId('flush-while-closing'))
+      const handle = await ctx.sessionPersistence.create(session.header)
+      session.append('turn/start', { turn: 1 })
+      // Close is draining, held inside the storage write, while the session is still live.
+      const closing = handle.close()
+      await entered.promise
+      let settled = false
+      const flushed = ctx.sessions.flush(session).finally(() => { settled = true })
+      await new Promise(resolve => setImmediate(resolve))
+      expect(settled).toBe(false)
+      gate.resolve(undefined)
+      await expect(flushed).resolves.toBe(true)
+      await closing
+      const verify = await backend.remount()
+      expect((await readAll(verify.sessionPersistence, session.id)).map(event => event.seq)).toEqual([0])
+      await verify.fiber.dispose()
+
+      // A close whose drain fails fails the flush that waited on it.
+      persist.mockRejectedValue(new Error('storage refused the drain'))
+      const failing = ctx.sessions.create(SessionId('flush-while-closing-fails'))
+      const failingHandle = await ctx.sessionPersistence.create(failing.header)
+      failing.append('turn/start', { turn: 1 })
+      const failingClose = failingHandle.close()
+      await expect(ctx.sessions.flush(failing)).rejects.toThrow('storage refused the drain')
+      await expect(failingClose).rejects.toThrow('storage refused the drain')
+      await ctx.fiber.dispose()
+    })
+
     it('close itself surfaces a failing drain and still releases write ownership', async () => {
       const { ctx } = await make()
       const session = ctx.sessions.create(SessionId('close-drain-fails'))

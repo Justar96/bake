@@ -348,6 +348,9 @@
       "path": "./packages/shell/pwsh-sandbox/tsconfig.json"
     },
     {
+      "path": "./packages/shell/shell-change-report/tsconfig.json"
+    },
+    {
       "path": "./packages/shell/shell-env/tsconfig.json"
     },
     {

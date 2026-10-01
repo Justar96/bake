@@ -146,8 +146,7 @@ const fsDescriptions = {
     + 'For a partial change, edit avoids resending the whole file.',
   edit: 'Replace literal text in an existing UTF-8 text file. '
     + 'Each old_string must match the current file exactly once unless replace_all is set. '
-    + 'Put several changes to one file in `edits`, each matched against the original. '
-    + 'Use this, not shell scripts, to change files.',
+    + 'Put several changes to one file in `edits`, each matched against the original.',
 } as const
 
 describe('session cwd resolution', () => {

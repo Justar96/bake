@@ -324,7 +324,8 @@ export class SessionController {
     if (projections === undefined) throw new Error('tui: sessionProjections is required')
     this.off.push(projections.onChanged((session, key) => {
       if (session !== agent.session) return
-      if (key === 'inbox' || key === 'contextPressure' || key === 'todos' || key === 'permissions' || key === 'goal' || key === 'workflows') this.repaint()
+      if (key === 'inbox' || key === 'contextPressure' || key === 'todos' || key === 'permissions' || key === 'goal'
+        || key === 'workflows' || key === 'subagentRoutingDecisions') this.repaint()
     }))
     // Activation is process-local and is not written to the goal projection.
     // Create and resume arm the goal; pause disarms it. Those transitions
@@ -370,7 +371,7 @@ export class SessionController {
     const pending = (['next-step', 'next-turn'] as const).flatMap(target => inbox[target]
       .filter(message => message.source.kind === 'user')
       .map(message => ({ id: message.id, target, text: message.content.flatMap(block => block.type === 'text' ? [block.text] : []).join(''), attachments: attachmentSummaries(message.content) })))
-    const surface = projections?.snapshot(this.agent.session, ['contextPressure', 'tokenUsage', 'permissions', 'workflows']).values
+    const surface = projections?.snapshot(this.agent.session, ['contextPressure', 'tokenUsage', 'permissions', 'workflows', 'subagentRoutingDecisions']).values
     const pressure = surface?.contextPressure
     // The agent's current list, not a log of writes to it. `todos` folds every
     // `todo/write` to the latest whole list, which is the only version that
@@ -379,7 +380,7 @@ export class SessionController {
     const goal = this.goal()
     const children = this.subagents.view
     const workflows = surface?.workflows ?? []
-    const subagents = subagentEntries(children, this.ctx, this.copy, workflows)
+    const subagents = subagentEntries(children, this.ctx, this.copy, workflows, surface?.subagentRoutingDecisions)
     const selected = this.selection?.current
     // A session can start on no model: nothing is the default until a sign-in.
     const model = selected !== undefined ? routeOf(selected)

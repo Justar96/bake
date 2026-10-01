@@ -211,8 +211,8 @@ export interface RouteView extends ModelRoute {
   readonly ranked: boolean
   /** Overall quality from 0 to 1. */
   readonly quality?: number
-  /** Where the quality comes from; benchmarks win over a declared tier. */
-  readonly qualitySource?: 'benchmarks' | 'hint'
+  /** Measured benchmarks outrank a declared tier; inherited estimates do not. */
+  readonly qualitySource?: 'benchmarks' | 'hint' | 'inherited'
   /** Blended USD per million tokens. */
   readonly price?: number
 }
@@ -910,6 +910,7 @@ export class Preferences implements RecentModels {
           const hint = hints.get(routeText(view))
           const description = [view.profile ?? copy.settingsRouterUnknown,
             view.quality === undefined ? undefined : `${copy.settingsRouterQualityShort} ${view.quality.toFixed(2)}`,
+            view.qualitySource === 'inherited' ? copy.settingsRouterInherited : undefined,
             view.price === undefined ? undefined : `$${view.price.toFixed(2)}/M`,
             hint === undefined || hintText(hint) === '' ? undefined : `${copy.settingsRouterHinted}: ${hintText(hint)}`,
             hint?.quality !== undefined && view.qualitySource === 'benchmarks' ? copy.settingsRouterBenchmarksWin : undefined,

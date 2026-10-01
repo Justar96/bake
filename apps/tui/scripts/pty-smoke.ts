@@ -1381,6 +1381,82 @@ scenario('edit', 'a recorded edit draws only its changed lines, numbered, with c
       'the recorded edit did not change the file')
   })
 
+scenario('shell-edit', 'files a real shell command changes are drawn under its output as numbered changes, a failed command keeps them, and replay draws the same',
+  { replayOnly: true },
+  async run => {
+    // The commands that set the tree up read no developer config, and no
+    // variable a hook exports points them at another repository.
+    const env: Record<string, string> = Object.fromEntries(Object.entries(run.env).filter(([key]) => !key.startsWith('GIT_')))
+    Object.assign(env, { GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: join(run.root, 'gitconfig'), GIT_CEILING_DIRECTORIES: run.root })
+    const git = (...args: string[]): void => {
+      const done = Bun.spawnSync(['git', '-c', 'user.name=Bake', '-c', 'user.email=bake@example.test', ...args], { cwd: run.workspace, env })
+      assert(done.exitCode === 0, `git ${args.join(' ')} failed: ${done.stderr.toString()}`)
+    }
+    const files = ['config.js', 'test.cjs', 'extra.js'].map(name => join(run.workspace, name))
+    const requests = [
+      // BSD sed needs the backup suffix, so the command removes the backup itself.
+      { command: "sed -i.bak 's/= 3/= 5/' config.js && rm config.js.bak && node test.cjs", description: 'Raise retries and test' },
+      { command: "printf 'module.exports = {}\\n' > extra.js && exit 1", description: 'Add a module, then fail' },
+    ]
+    const override = join(run.root, 'shell-edit-replay.json')
+    await Bun.write(override, JSON.stringify([
+      ...requests.map((args, index) => {
+        const call = { type: 'tool-call', id: `shell-edit-${index}`, name: 'bash', arguments: JSON.stringify(args) }
+        return { kind: 'chunks', chunks: [
+          { type: 'block-start', index: 0, blockType: 'tool-call' },
+          { type: 'tool-call-delta', index: 0, id: call.id, name: call.name, argumentsDelta: call.arguments },
+          { type: 'block-end', index: 0, block: call },
+          { type: 'finish', reason: { kind: 'tool-calls' } },
+        ] }
+      }),
+      { kind: 'chunks', chunks: [
+        { type: 'block-start', index: 0, blockType: 'text' },
+        { type: 'text-delta', index: 0, text: 'SHELL_EDIT_DONE' },
+        { type: 'block-end', index: 0, block: { type: 'text', text: 'SHELL_EDIT_DONE' } },
+        { type: 'finish', reason: { kind: 'stop' } },
+      ] },
+    ]))
+    // The workspace every scenario shares becomes a repository only for this one,
+    // and the agent's own git reads see no developer config either.
+    const saved = { ...run.env }
+    Object.keys(run.env).filter(key => key.startsWith('GIT_')).forEach(key => { delete run.env[key] })
+    Object.assign(run.env, { GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: join(run.root, 'gitconfig') })
+    delete run.env.NO_COLOR
+    run.env.FORCE_COLOR = '3'
+    try {
+      git('init', '-q', '-b', 'main')
+      await Bun.write(files[0]!, 'const retries = 3\nmodule.exports = { retries }\n')
+      await Bun.write(files[1]!, "const { retries } = require('./config.js')\nconsole.log(retries === 5 ? 'ok 1 - retries' : 'not ok 1 - retries')\n")
+      git('add', '-A')
+      git('commit', '-q', '-m', 'seed')
+      const before = await run.logs()
+      await run.writeOverlay(override)
+      await run.terminal('shell-edit', [], async tty => {
+        const start = tty.mark()
+        tty.send('Raise the retries and add a module.\r', 'trigger the recorded shell edits')
+        // The tones under a failure are pinned by the tool-changes styles expectation.
+        await tty.expect('ok 1 - retries', '+1 −1', 'edited config.js', '1 - const retries = 3', '1 + const retries = 5',
+          'edited extra.js  new', '1 + module.exports = {}', 'exit 1', 'SHELL_EDIT_DONE', start)
+      })
+      assert(await Bun.file(files[0]!).text() === 'const retries = 5\nmodule.exports = { retries }\n', 'the recorded shell edit did not change the file')
+      const log = await events(await run.created(before, 'shell edit'))
+      const metas = log.filter(event => event.type === 'tool/result').map(event => event.data.meta?.shellChanges?.files?.map((file: { path: string }) => file.path))
+      assert(JSON.stringify(metas) === JSON.stringify([['config.js'], ['extra.js']]), `unexpected change reports ${JSON.stringify(metas)}`)
+      run.env.NO_COLOR = '1'
+      delete run.env.FORCE_COLOR
+      await run.writeOverlay()
+      await run.terminal('shell-edit-resume', ['--resume', log[0].id], async tty => {
+        await tty.expect('edited config.js', '1 - const retries = 3', '1 + const retries = 5', 'edited extra.js  new', 'SHELL_EDIT_DONE')
+      })
+    } finally {
+      for (const key of Object.keys(run.env)) if (!(key in saved)) delete run.env[key]
+      Object.assign(run.env, saved)
+      await run.writeOverlay()
+      rmSync(join(run.workspace, '.git'), { recursive: true, force: true })
+      for (const file of files) rmSync(file, { force: true })
+    }
+  })
+
 scenario('tool-colour', 'real read, search, and shell results retain syntax colour, bounds, and readable replay without colour',
   { replayOnly: true }, async run => {
     const file = join(run.workspace, 'colours.ts')
@@ -2066,6 +2142,158 @@ scenario('cliproxyapi-upgrade', 'a CLIProxyAPI route an earlier release wrote is
     `the upgraded Claude turn did not reach Messages with its session headers: ${JSON.stringify(requests)}`)
     // The launch read the proxy's list once, after the upgrade, and found the route current.
     assert(requests.filter(request => request.path === '/v1/models').length === 1, `the launch did not refresh the model list once: ${JSON.stringify(requests)}`)
+  })
+
+scenario('auto-route', 'real delegated children show their recorded automatic or default route, uncertainty, and replay; cancellation admits no child',
+  { replayOnly: true },
+  async run => {
+    const settings = join(run.home, 'settings.yaml')
+    const savedSettings = existsSync(settings) ? await Bun.file(settings).text() : undefined
+    const override = join(run.root, 'routing-replay.json')
+    const childFixture = join(run.root, 'routing-child.jsonl')
+    const child = await events(join(ROOT, 'snapshots/session/subagent-spawn-in-process/session.1.v3.jsonl'))
+    child[0] = { ...child[0], createdAt: run.recorded[0].createdAt + 1 }
+    await Bun.write(childFixture, child.map(event => JSON.stringify(event)).join('\n') + '\n')
+    const args = JSON.stringify({ description: 'Check routing', prompt: 'Reply with exactly CHILD_OK.', run_in_background: false })
+    const call = { type: 'tool-call', id: 'routing-call', name: 'subagent', arguments: args }
+    const parentScript = [
+      { kind: 'chunks', chunks: [
+        { type: 'block-start', index: 0, blockType: 'tool-call' },
+        { type: 'tool-call-delta', index: 0, id: call.id, name: call.name, argumentsDelta: args },
+        { type: 'block-end', index: 0, block: call },
+        { type: 'finish', reason: { kind: 'tool-calls' } },
+      ] },
+      { kind: 'chunks', chunks: [
+        { type: 'block-start', index: 0, blockType: 'text' },
+        { type: 'text-delta', index: 0, text: 'ROUTING_DONE' },
+        { type: 'block-end', index: 0, block: { type: 'text', text: 'ROUTING_DONE' } },
+        { type: 'finish', reason: { kind: 'stop' } },
+      ] },
+    ]
+    const requests: any[] = []
+    let current = 'normal'
+    let pending: ReturnType<typeof Promise.withResolvers<Response>> | undefined
+    const answer = (): object => ({
+      provider: 'deepseek-official', model: current === 'needs_context' ? 'deepseek-v4-flash' : 'tui-picked-model',
+      reasoning_effort: current === 'needs_context' ? null : 'high', fallback: current === 'needs_context',
+      reason: current === 'needs_context' ? 'Objective needs earlier context.' : 'Integration checks need stronger reasoning.',
+      routing: { policy: '2026-10-01', status: current, difficulty: current === 'needs_context' ? 0.2 : 0.74,
+        reasons: current === 'cautious' ? ['limited benchmark support']
+          : current === 'needs_context' ? ['missing conversation context'] : [] },
+    })
+    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
+      assert(new URL(request.url).pathname === '/v1/bake/select', 'unexpected routing endpoint')
+      requests.push(await request.json())
+      if (current === 'cancel') {
+        pending = Promise.withResolvers<Response>()
+        return pending.promise
+      }
+      return Response.json(answer())
+    } })
+    try {
+      await Bun.write(settings, JSON.stringify({ 'subagent-model-selection': {
+        enabled: true,
+        allowedModels: [{ provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+          { provider: 'deepseek-official', model: 'tui-picked-model' }],
+        router: { enabled: true, url: server.url.href, timeoutMs: 10_000 },
+      } }))
+      for (const status of ['normal', 'cautious', 'needs_context', 'cancel']) {
+        current = status
+        const cancelled = status === 'cancel'
+        await Bun.write(override, JSON.stringify(cancelled ? parentScript.slice(0, 1) : parentScript))
+        await run.writeOverlay(override)
+        if (!cancelled) {
+          const patches = await Bun.file(run.overlay).json() as any[]
+          const replay = patches.flatMap(patch => patch.insert ?? []).find(plugin => plugin.id === 'tui-replay')
+          assert(replay !== undefined, 'routing replay plugin is missing')
+          replay.config.childFiles = [childFixture]
+          await Bun.write(run.overlay, JSON.stringify(patches))
+        }
+        const before = await run.logs()
+        const sentBefore = requests.length
+        await run.terminal(`auto-route-${status}`, [], async tty => {
+          tty.send('Delegate one routing check.\r', 'request the real delegated child')
+          if (cancelled) {
+            await tty.wait('the local router to receive the in-flight selection', () => pending !== undefined)
+            const at = tty.mark()
+            tty.send('\x1b', 'cancel while the routing response is still pending')
+            await tty.expect(SCREEN.idle, at)
+            pending!.resolve(Response.json({ ...answer(), routing: { policy: '2026-10-01', status: 'normal', difficulty: 0.74, reasons: [] } }))
+            pending = undefined
+            tty.send('/agents\r', 'verify cancellation admitted no child')
+            await tty.expect('No subagents in this session', at)
+            return
+          }
+          await tty.expect('ROUTING_DONE')
+          await tty.follows(SCREEN.idle, 'ROUTING_DONE')
+          // The transient working row can disappear before the persisted catalog is observed.
+          await tty.follows('↳ Subagents 1 · 1 done', 'ROUTING_DONE')
+          const at = tty.mark()
+          tty.send('\x07', 'inspect the routing decision in the subagent sheet')
+          await tty.expect('Check routing', status === 'needs_context' ? 'Default' : 'Auto', at)
+          await tty.expect(status === 'needs_context' ? 'deepseek-official/deepseek-v4-flash' : 'deepseek-official/tui-picked-model', at)
+          if (status === 'cautious') await tty.expect('cautious', 'limited benchmark support', at)
+          if (status === 'needs_context') await tty.expect('needs context', 'missing conversation context', at)
+          else await tty.expect('high', '0.74', 'Integration checks need stronger reasoning.', at)
+          // Read the rendered status row, waiting for it: the sheet's frame can
+          // arrive in chunks, and the row comes after the text expected above.
+          const statusRow = async (): Promise<string> => {
+            const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
+            try {
+              await new Promise<void>(resolve => screen.write(tty.raw, resolve))
+              return Array.from({ length: 40 }, (_, row) => screen.buffer.active.getLine(screen.buffer.active.viewportY + row)?.translateToString(true) ?? '')
+                .findLast(row => row.trim() !== '') ?? ''
+            } finally { screen.dispose() }
+          }
+          await tty.wait('the root status row to keep the root model under the sheet', async () => {
+            const row = await statusRow()
+            return row.includes('deepseek-v4-flash') && !row.includes('tui-picked-model')
+          })
+          const closing = tty.mark()
+          tty.send('\x07', 'close the routing sheet before exiting')
+          await tty.expect(SCREEN.idle, closing)
+        })
+        assert(requests.length === sentBefore + 1, 'one delegation did not issue exactly one routing request')
+        assert(requests.at(-1).allowed_models.length === 2, 'routing did not send the session allowlist')
+        const logs = await Promise.all([...await run.logs()].filter(path => !before.has(path)).map(async path => ({ path, log: await events(path) })))
+        const parent = logs.find(item => item.log[0].origin !== 'subagent')
+        assert(parent !== undefined, 'routing parent log is missing')
+        const decisions = parent.log.filter(event => event.type === 'subagent/routing-decision')
+        if (cancelled) {
+          assert(logs.length === 1 && decisions.length === 0, 'cancelled routing admitted a child or recorded a late decision')
+          continue
+        }
+        const childLog = logs.find(item => item.log[0].origin === 'subagent')
+        assert(childLog !== undefined && logs.length === 2, 'routing did not create exactly one real child')
+        const config = childLog.log.find(event => event.type === 'request/header')?.data.header.config
+        assert(config?.model === (status === 'needs_context' ? 'deepseek-v4-flash' : 'tui-picked-model'), 'the child used a different model from the indicator')
+        if (status !== 'needs_context') assert(config.reasoningEffort === 'high', 'the displayed effort was not applied to the child request')
+        assert(decisions.length === 1 && decisions[0].data.childId === childLog.log[0].id, 'the decision was not durably tied to the admitted child')
+        assert(decisions[0].data.source === (status === 'needs_context' ? 'fallback' : 'auto'), 'the recorded routing source is wrong')
+        assert(decisions[0].data.router.assessment.status === status, 'routing uncertainty was lost before persistence')
+        const toolResult = parent.log.find(event => event.type === 'tool/result')
+        assert(toolResult !== undefined && JSON.stringify(toolResult).includes('CHILD_OK'), 'the real child output did not reach the parent')
+        assert(!JSON.stringify(toolResult).includes('Integration checks') && !JSON.stringify(toolResult).includes('Objective needs'), 'routing details leaked into model-visible tool output')
+        if (status === 'cautious') {
+          await run.terminal('auto-route-resume', ['--resume', parent.log[0].id], async tty => {
+            await tty.expect('↳ Subagents 1')
+            const at = tty.mark()
+            tty.send('\x07', 'replay the persisted child decision after restart')
+            await tty.expect('Check routing', 'Auto', 'cautious', 'limited benchmark support', at)
+            const closing = tty.mark()
+            tty.send('\x07', 'close the replayed routing sheet')
+            await tty.expect(SCREEN.idle, closing)
+          })
+          assert(requests.length === sentBefore + 1, 'replaying a decision called the router again')
+        }
+      }
+    } finally {
+      pending?.resolve(Response.json({ error: 'scenario disposed' }, { status: 503 }))
+      server.stop(true)
+      if (savedSettings === undefined) rmSync(settings, { force: true })
+      else await Bun.write(settings, savedSettings)
+      await run.writeOverlay()
+    }
   })
 
 scenario('agents', 'the built TUI exposes the Harness subagent catalog through /agents',
@@ -2793,6 +3021,15 @@ scenario('navigate', 'session picker cancellation, a new session, and switching 
         [...text.matchAll(/Session: (session-[a-f0-9-]+)/g)].some(match => !known.has(match[1])))
       const cleared = [...clearedText.matchAll(/Session: (session-[a-f0-9-]+)/g)].at(-1)![1]!
       await tty.follows(SCREEN.idle, `Session: ${cleared}`)
+
+      // The /new session ran no turn, so there is nothing to go back to; the
+      // original session, which did, is still listed.
+      start = tty.mark()
+      tty.send('/resume\r')
+      await tty.expect('Choose session', `· ${/[0-9a-f]{8}/.exec(identity)![0]}`, start)
+      tty.refuse('the unused /new session being listed', tty.text.slice(start).includes(`· ${/[0-9a-f]{8}/.exec(direct)![0]}`))
+      tty.send('\x1b', 'close the picker')
+      await tty.expect('Session navigation cancelled', start)
     }) } finally { run.env.NO_COLOR = '1'; delete run.env.FORCE_COLOR }
 
     assert([...text.matchAll(new RegExp(DONE_LINE.source, 'g'))].length === 2,

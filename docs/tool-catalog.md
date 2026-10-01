@@ -670,7 +670,7 @@ Standalone view/create/unique literal replace/line insert tool over the filesyst
 
 ### `edit`
 
-Replace literal text in an existing UTF-8 text file. Each old_string must match the current file exactly once unless replace_all is set. Put several changes to one file in `edits`, each matched against the original. Use this, not shell scripts, to change files.
+Replace literal text in an existing UTF-8 text file. Each old_string must match the current file exactly once unless replace_all is set. Put several changes to one file in `edits`, each matched against the original.
 
 ```json
 {

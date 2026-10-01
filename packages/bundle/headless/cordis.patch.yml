@@ -21,7 +21,22 @@
     # Keep the same temporary process-wide PTC mode opt-in as the Web surface.
     mode: !!js process.env.DSH_TOOLS_MODE
 
+# The base row restated with model selection, so a run honors the user's
+# `subagent-model-selection` setting, task router included, as the terminal
+# profile does. While the setting is off the tool's definition is unchanged.
+# The row waits for the settings plugin inserted below.
+- id: tool-subagent
+  inject: [subagentModelSelection]
+  config:
+    provider: spawn
+    toolName: subagent
+    backgroundMode: continuable
+    modelSelectionSettings: true
+
 - insert:
+    - id: subagent-model-selection-settings
+      name: '@deepseek-ai/dsh-tool-subagent/model-selection-settings'
+
     - id: headless-startup
       name: '@deepseek-ai/dsh-headless/startup'
 

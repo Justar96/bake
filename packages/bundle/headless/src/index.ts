@@ -17,6 +17,7 @@ import { brandString } from '@deepseek-ai/dsh-brand'
 import { installModelSelection } from '@deepseek-ai/dsh-agent'
 import type { Agent, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 import { NO_DEFAULT_MODEL_MESSAGE } from '@deepseek-ai/dsh-agent-default-model'
+import type {} from '@deepseek-ai/dsh-agent-loop'
 import type {} from '@deepseek-ai/dsh-fs'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
@@ -305,6 +306,26 @@ async function resolveAgent(
 }
 
 /**
+ * Report a run the process stopped, by a signal or by disposing the Agent,
+ * before its turn finished. The stop is not a failure of the run, so stdout
+ * carries no `error` or `final`; the turn's end and its reason are already in
+ * the JSON stream when the turn started. Disposal closes the Session, and
+ * close drains its log, so the next process can continue it. The exit request
+ * is ignored while a signal's shutdown runs, which keeps that signal's code.
+ */
+function stopped(io: HeadlessIo, sessionId: SessionId | undefined, resumable: boolean): void {
+  io.stderr.write(sessionId !== undefined && resumable
+    ? `dsh: stopped before the task finished; continue it with --resume ${sessionId}\n`
+    : 'dsh: stopped before the task finished\n')
+  io.exit(1)
+}
+
+/** Whether the run's turn ended because its Agent was disposed. */
+function endedByDisposal(outcome: RunOutcome): boolean {
+  return outcome.reason?.kind === 'aborted' && outcome.reason.reason.kind === 'disposed'
+}
+
+/**
  * Report an unexpected direct-driver failure and request a failing exit: the
  * in-use status for a `--resume` Session another process has open, 1 otherwise.
  */
@@ -321,7 +342,7 @@ function fail(io: HeadlessIo, error: unknown, json: boolean): void {
  * @param config - task, optional exact Session identity, and output mode.
  * @param io - process-facing effects.
  */
-async function run(ctx: Context, config: Config, io: HeadlessIo): Promise<void> {
+async function run(ctx: Context, config: Config, io: HeadlessIo, stopping: AbortSignal): Promise<void> {
   // Loader siblings mount concurrently. Await the complete application before
   // creating an Agent so its scoped tools and adapters are not half-composed.
   await ctx.get('loader')?.await()
@@ -391,8 +412,17 @@ async function run(ctx: Context, config: Config, io: HeadlessIo): Promise<void> 
     } finally {
       stopReasoning?.()
     }
-    await sessions.flush(agent.session)
+    // The in-memory log stays readable after disposal, so an answer the turn
+    // finished before a stop is still delivered.
     const outcome = summarize(agent.session, firstSeq)
+    // A turn that already ended for its own reason keeps that outcome.
+    if (endedByDisposal(outcome) || (stopping.aborted && outcome.reason === undefined)) {
+      stopped(io, sessionId, ctx.get('sessionPersistence') !== undefined)
+      return
+    }
+    // Disposal flushes the log by closing the Session, which can leave the
+    // store before a flush here reaches it.
+    if (!stopping.aborted) await sessions.flush(agent.session)
     if (projection === undefined) io.stdout.write(outcome.text + '\n')
     else projection.finish(outcome.text)
     if (outcome.reason?.kind === 'error') {
@@ -417,5 +447,16 @@ export function apply(ctx: Context, config: Config): void {
     throw new Error('headless-runner: the launcher must provide ctx.appExit before the tree mounts')
   }
   const io: HeadlessIo = { stdout: internals.stdout, stderr: internals.stderr, exit }
-  void run(ctx, config, io).catch((error: unknown) => { fail(io, error, config.json === true) })
+  // Aborted when the launcher starts shutting the app down, or when this
+  // plugin unloads. `app/shutdown` runs before the tree disposes, so the run
+  // sees it before the Agent's disposal resumes it.
+  const stopping = new AbortController()
+  ctx.on('app/shutdown', () => { stopping.abort() })
+  ctx.effect(() => () => { stopping.abort() }, 'headless-runner stop')
+  void run(ctx, config, io, stopping.signal).catch((error: unknown) => {
+    // A failure once shutdown began is its consequence: the Session closed, or
+    // the Agent could not start, while the process was stopping.
+    if (stopping.signal.aborted) stopped(io, undefined, false)
+    else fail(io, error, config.json === true)
+  })
 }

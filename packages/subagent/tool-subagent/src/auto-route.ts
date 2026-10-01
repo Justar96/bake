@@ -4,9 +4,34 @@ import type { LlmResolvedModelInfo, LlmRuntime } from '@deepseek-ai/dsh-llm'
 import { modelRouteKey } from './model-selection.ts'
 import type { AllowedModelRoute, DelegationModelRequest } from './model-selection.ts'
 import type { SubagentRouteHint, SubagentRouterSettings } from './model-selection-settings.ts'
+import type { SubagentRouterDecision, SubagentRoutingAssessment } from './types.ts'
 
 /** Task text sent to the router; its judge reads only part of it anyway. */
-const MAX_TASK_CHARS = 20_000
+export const MAX_TASK_CHARS = 20_000
+
+/** Marks the cut in a long task's excerpt, as the router marks its own. */
+const ELIDED = '\n[…]\n'
+
+/**
+ * The part of a delegated task the router is sent: all of it, or its opening
+ * and its end. A delegation often pastes a log or a file and puts the ask
+ * last, and the router judges a long task by its opening and its end, so a
+ * prefix alone would send the paste and drop the work. The split matches the
+ * router's own: three eighths opening, the rest the end.
+ * @param task - The delegated task text.
+ * @returns at most {@link MAX_TASK_CHARS} UTF-16 code units of it.
+ */
+export function routerTaskExcerpt(task: string): string {
+  if (task.length <= MAX_TASK_CHARS) return task
+  let head = Math.floor(MAX_TASK_CHARS * 3 / 8)
+  let tail = task.length - (MAX_TASK_CHARS - head - ELIDED.length)
+  // Cut between code points, so no lone surrogate reaches the router.
+  if (isHighSurrogate(task.charCodeAt(head - 1))) head--
+  if (isHighSurrogate(task.charCodeAt(tail - 1))) tail++
+  return task.slice(0, head) + ELIDED + task.slice(tail)
+}
+
+const isHighSurrogate = (code: number): boolean => code >= 0xD800 && code <= 0xDBFF
 
 /**
  * Effort ids whose strength order is known. Adapters list efforts in display
@@ -22,6 +47,8 @@ export interface RoutedDelegation {
   readonly request: DelegationModelRequest
   /** The router's one-line explanation, for logs. */
   readonly reason: string
+  /** Bounded display-only evidence; never merged into the model-facing selection fields. */
+  readonly router: SubagentRouterDecision
 }
 
 interface RouterAnswer {
@@ -30,6 +57,35 @@ interface RouterAnswer {
   reasoning_effort?: unknown
   reason?: unknown
   fallback?: unknown
+  routing?: unknown
+}
+
+/** Bound untrusted explanatory text before it reaches logs, persistence, or terminal presentation. */
+function displayText(value: string, maxChars: number): string {
+  return Array.from(value.slice(0, maxChars * 2).replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').trim()).slice(0, maxChars).join('')
+}
+
+/** Optional metadata cannot invalidate an otherwise valid route from an older or newer router. */
+function routingAssessment(value: unknown): SubagentRoutingAssessment | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
+  const data = value as Record<string, unknown>
+  const status = oneOf(data['status'], ['normal', 'cautious', 'needs_context', 'fallback'] as const)
+  if (status === undefined || typeof data['policy'] !== 'string'
+    || typeof data['difficulty'] !== 'number' || !Number.isFinite(data['difficulty'])
+    || data['difficulty'] < 0 || data['difficulty'] > 1 || !Array.isArray(data['reasons'])
+    || !data['reasons'].every(reason => typeof reason === 'string')) return undefined
+  return {
+    policy: displayText(data['policy'], 64), status, difficulty: data['difficulty'],
+    reasons: data['reasons'].slice(0, 8).map(reason => displayText(reason as string, 240)),
+  }
+}
+
+/** A valid router refusal retains its assessment while the delegation uses its existing default. */
+export class RouterFallback extends Error {
+  constructor(readonly router: SubagentRouterDecision) {
+    super(`router could not tell the allowed routes apart: ${router.reason}`)
+    this.name = 'RouterFallback'
+  }
 }
 
 /** What the router is told about one route: this Session's model info and the user's hints. */
@@ -181,13 +237,21 @@ export async function routeDelegation(
   token?: string,
 ): Promise<RoutedDelegation> {
   const { allowedModels, infos } = await routePayload(router, routes, llm, signal)
-  const answer = await post(router, '/v1/bake/select', {
-    task: task.slice(0, MAX_TASK_CHARS),
+  const response = await post(router, '/v1/bake/select', {
+    task: routerTaskExcerpt(task),
     allowed_models: allowedModels,
     ...router.priority === undefined ? {} : { priority: router.priority },
-  }, signal, token) as RouterAnswer
+  }, signal, token)
+  if (typeof response !== 'object' || response === null || Array.isArray(response)) {
+    throw new Error('router answer names no provider and model')
+  }
+  const answer = response as RouterAnswer
   const { provider, model } = answer
-  const reason = typeof answer.reason === 'string' ? answer.reason : ''
+  const reason = typeof answer.reason === 'string' ? displayText(answer.reason, 500) : ''
+  const assessment = routingAssessment(answer.routing)
+  const decision: SubagentRouterDecision = {
+    reason, fallback: answer.fallback === true, ...assessment === undefined ? {} : { assessment },
+  }
   if (typeof provider !== 'string' || typeof model !== 'string') {
     throw new Error('router answer names no provider and model')
   }
@@ -197,7 +261,7 @@ export async function routeDelegation(
     throw new Error(`router chose "${provider}/${model}", which is not allowed for this Session`)
   }
   if (answer.fallback === true) {
-    throw new Error(`router could not tell the allowed routes apart: ${reason}`)
+    throw new RouterFallback(decision)
   }
   const suggested = typeof answer.reasoning_effort === 'string' ? answer.reasoning_effort : undefined
   const settled = infos[index]
@@ -207,6 +271,7 @@ export async function routeDelegation(
   return {
     request: { provider, model, ...effort === undefined ? {} : { reasoning_effort: effort } },
     reason,
+    router: decision,
   }
 }
 
@@ -224,7 +289,7 @@ export interface RouterRouteView {
   readonly ranked: boolean
   /** Overall quality from 0 to 1. */
   readonly quality?: number
-  readonly qualitySource?: 'benchmarks' | 'hint'
+  readonly qualitySource?: 'benchmarks' | 'hint' | 'inherited'
   /** Blended USD per million tokens. */
   readonly price?: number
   readonly priceSource?: 'catalog' | 'hint'
@@ -252,22 +317,23 @@ export async function describeRoutes(
 ): Promise<readonly RouterRouteView[]> {
   if (routes.length === 0) return []
   const { allowedModels } = await routePayload(router, routes, llm, signal)
-  const answer = await post(router, '/v1/bake/routes', { allowed_models: allowedModels }, signal, token) as { routes?: unknown }
-  const views = Array.isArray(answer.routes) ? answer.routes as Record<string, unknown>[] : []
+  const answer = await post(router, '/v1/bake/routes', { allowed_models: allowedModels }, signal, token) as { routes?: unknown } | null
+  const views = Array.isArray(answer?.routes) ? answer.routes as Record<string, unknown>[] : []
   // The router is outside this Session's authority; only views of the routes asked about are kept.
   return routes.map((route) => {
     const view = views.find(entry => entry?.['provider'] === route.provider && entry?.['model'] === route.model) ?? {}
     const profile = typeof view['profile'] === 'string' ? view['profile'] : undefined
     const matchedBy = oneOf(view['matched_by'], ['name', 'same_as'] as const)
-    const qualitySource = oneOf(view['quality_source'], ['benchmarks', 'hint'] as const)
+    const qualitySource = oneOf(view['quality_source'], ['benchmarks', 'hint', 'inherited'] as const)
     const priceSource = oneOf(view['price_source'], ['catalog', 'hint'] as const)
     return {
       provider: route.provider, model: route.model, ranked: view['ranked'] === true,
       ...profile === undefined ? {} : { profile },
       ...matchedBy === undefined ? {} : { matchedBy },
-      ...typeof view['quality'] === 'number' ? { quality: view['quality'] } : {},
+      ...typeof view['quality'] === 'number' && Number.isFinite(view['quality']) && view['quality'] >= 0 && view['quality'] <= 1
+        ? { quality: view['quality'] } : {},
       ...qualitySource === undefined ? {} : { qualitySource },
-      ...typeof view['price'] === 'number' ? { price: view['price'] } : {},
+      ...typeof view['price'] === 'number' && Number.isFinite(view['price']) && view['price'] >= 0 ? { price: view['price'] } : {},
       ...priceSource === undefined ? {} : { priceSource },
     }
   })
