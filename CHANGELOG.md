@@ -4,6 +4,8 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-10-01
+
 - Ctrl+G shows each subagent's recorded model selection: automatic, explicitly selected, or default, with the effective model and reasoning effort, task difficulty, and the router's reasons. Cautious decisions, missing context, and fallback remain visible after resume. Model calibration labels inherited quality estimates separately.
 
 - Security: the status line's `git status` poll no longer runs outside the sandbox for a sandboxed session. Such a session can write `.git/config` and `.gitattributes`, and `git status` runs a `core.fsmonitor` hook and clean filters named there, so a sandboxed command could plant a command that the poll then ran unconfined every two seconds. These reads now run under `read-only` confinement with the fsmonitor hook off. Where no sandbox backend can confine them, the git field is left out. `danger-full-access` sessions read as before.
