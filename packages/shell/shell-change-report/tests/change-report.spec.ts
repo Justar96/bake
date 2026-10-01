@@ -4,7 +4,7 @@
  * degrades and stays hardened.
  */
 import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -87,7 +87,8 @@ describe('beginChangeReport', () => {
     const changes = await report(repo, () => {
       writeFileSync(join(repo, 'new.js'), 'export const fresh = true\n')
       unlinkSync(join(repo, 'b.js'))
-      execFileSync('mv', [join(repo, 'docs/readme.md'), join(repo, 'docs/README.md')])
+      // Not a case-only rename: a case-insensitive filesystem, as macOS's, hides that from git.
+      renameSync(join(repo, 'docs/readme.md'), join(repo, 'docs/notes.md'))
       mkdirSync(join(repo, 'build'))
       writeFileSync(join(repo, 'build/out.js'), 'ignored\n')
       // Rewritten with the same bytes: git compares content, so it is not a change.
@@ -95,7 +96,7 @@ describe('beginChangeReport', () => {
     })
     expect(changes?.files.map(({ path, status, from, added, removed }) => ({ path, status, from, added, removed }))).toEqual([
       { path: 'b.js', status: 'deleted', from: undefined, added: 0, removed: 1 },
-      { path: 'docs/README.md', status: 'renamed', from: 'docs/readme.md', added: 0, removed: 0 },
+      { path: 'docs/notes.md', status: 'renamed', from: 'docs/readme.md', added: 0, removed: 0 },
       { path: 'new.js', status: 'created', from: undefined, added: 1, removed: 0 },
     ])
   })

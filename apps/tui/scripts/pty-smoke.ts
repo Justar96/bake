@@ -2235,14 +2235,20 @@ scenario('auto-route', 'real delegated children show their recorded automatic or
           if (status === 'cautious') await tty.expect('cautious', 'limited benchmark support', at)
           if (status === 'needs_context') await tty.expect('needs context', 'missing conversation context', at)
           else await tty.expect('high', '0.74', 'Integration checks need stronger reasoning.', at)
-          // Read the rendered status row: it is drawn before the sheet opens and
-          // need not be repainted after the mark.
-          const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
-          const rows = await new Promise<void>(resolve => screen.write(tty.raw, resolve)).then(() =>
-            Array.from({ length: 40 }, (_, row) => screen.buffer.active.getLine(screen.buffer.active.viewportY + row)?.translateToString(true) ?? ''))
-          screen.dispose()
-          const statusRow = rows.findLast(row => row.trim() !== '') ?? ''
-          assert(statusRow.includes('deepseek-v4-flash') && !statusRow.includes('tui-picked-model'), 'child selection replaced the root status model')
+          // Read the rendered status row, waiting for it: the sheet's frame can
+          // arrive in chunks, and the row comes after the text expected above.
+          const statusRow = async (): Promise<string> => {
+            const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
+            try {
+              await new Promise<void>(resolve => screen.write(tty.raw, resolve))
+              return Array.from({ length: 40 }, (_, row) => screen.buffer.active.getLine(screen.buffer.active.viewportY + row)?.translateToString(true) ?? '')
+                .findLast(row => row.trim() !== '') ?? ''
+            } finally { screen.dispose() }
+          }
+          await tty.wait('the root status row to keep the root model under the sheet', async () => {
+            const row = await statusRow()
+            return row.includes('deepseek-v4-flash') && !row.includes('tui-picked-model')
+          })
           const closing = tty.mark()
           tty.send('\x07', 'close the routing sheet before exiting')
           await tty.expect(SCREEN.idle, closing)
