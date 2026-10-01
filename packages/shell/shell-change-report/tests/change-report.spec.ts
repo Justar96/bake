@@ -4,7 +4,7 @@
  * degrades and stays hardened.
  */
 import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -62,6 +62,14 @@ describe('beginChangeReport', () => {
           newText: 'const retries = 5\nconst delay = 10\nmodule.exports = { retries, delay }', oldStart: 1, newStart: 1 }],
       }],
     })
+  })
+
+  it('reports paths relative to a session cwd reached through a symlink, as macOS temp dirs are', async () => {
+    const { root, repo } = repository()
+    const link = join(root, 'link')
+    symlinkSync(repo, link, 'junction')
+    const changes = await report(link, () => { writeFileSync(join(repo, 'b.js'), 'module.exports = 2\n') })
+    expect(changes?.files.map(file => file.path)).toEqual(['b.js'])
   })
 
   it('compares a dirty file with its bytes before the command, not with the index', async () => {

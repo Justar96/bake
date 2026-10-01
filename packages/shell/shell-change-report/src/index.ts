@@ -12,7 +12,7 @@
  */
 
 import { createHash } from 'node:crypto'
-import { copyFile, lstat, mkdtemp, open, rm } from 'node:fs/promises'
+import { copyFile, lstat, mkdtemp, open, realpath, rm } from 'node:fs/promises'
 import type { BigIntStats } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, relative, resolve } from 'node:path'
@@ -233,7 +233,11 @@ export async function beginChangeReport(options: ChangeReportOptions): Promise<C
     const status = parseStatus(text.toString('utf8'))
     const dirty = await captureDirty(top, status, limits, before.signal)
     slowWorkdirs.delete(workdir)
-    return openWindow({ read, top, index, temp, status, dirty, limits, displayRoot: resolve(options.displayRoot) })
+    // git reports the top level with symlinks resolved, as macOS's /var -> /private/var,
+    // so the display root must be resolved the same way for relative paths to hold.
+    const root = resolve(options.displayRoot)
+    const displayRoot = await realpath(root).catch(() => root)
+    return openWindow({ read, top, index, temp, status, dirty, limits, displayRoot })
   } catch {
     noteSlow(workdir, before.signal)
     if (temp !== undefined) await rm(temp, { recursive: true, force: true }).catch(() => {})
