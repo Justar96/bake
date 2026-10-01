@@ -697,7 +697,8 @@ function SessionView(props: AppProps): React.ReactElement {
     : `${copy.subagentParent}: ${props.inspectionParent} > ${props.sessionId}${access}`
   // Memoized so the committed transcript is not re-rendered on every frame.
   const result = useMemo<ResultBound>(
-    () => ({ lines: props.resultLines, unit: copy.cardLines, single: copy.cardLine, more: copy.moreLines, failures: copy.summaryFailures, earlier: copy.earlierCalls, ...props.highlight === undefined ? {} : { code: props.highlight } }),
+    () => ({ lines: props.resultLines, unit: copy.cardLines, single: copy.cardLine, more: copy.moreLines, failures: copy.summaryFailures, earlier: copy.earlierCalls,
+      files: copy.cardFiles, moreFiles: copy.moreFiles, moreFile: copy.moreFile, ...props.highlight === undefined ? {} : { code: props.highlight } }),
     [props.resultLines, props.highlight, copy])
   // Decided once per mount. A session with no history when it opens gets the
   // block, and keeps it in the stream while its first turn commits.

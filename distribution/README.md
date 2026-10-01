@@ -53,6 +53,16 @@ Before the first tagged release, create the `release` environment under the repo
 | `BAKE_RELEASE_SIGNING_KEY` | The whole PEM text of the release signing key |
 | `RAILWAY_TOKEN` | A Railway project token for the `production` environment of the download service's project; needed unless `BAKE_DOWNLOAD_SERVICE=off` |
 
+The download service counts active installs for gissx.org's admin when its Railway service has all three of these variables; without them it reports nothing:
+
+| Service variable | What it is |
+|---|---|
+| `GISSX_ACTIVITY_URL` | `https://gissx.org/api/activity` |
+| `GISSX_ACTIVITY_TOKEN` | The bearer token gissx.org's Worker holds as `ACTIVITY_TOKEN` |
+| `BAKE_ACTIVITY_SALT` | Any long random string; it salts the daily install hash, and changing it starts the count afresh |
+
+An installed Bake fetches `latest.json` with Node's own client when it checks for updates, at most hourly, so the service reports each such request as one install in use. Installers, browsers, and the release workflow's checks use other clients and are not counted. The service sends the install as a daily salted hash of its address, at most once a day, so no address leaves it; reporting runs after the response and never delays or fails it.
+
 The GitHub release is a release host of its own: it carries the signed manifest beside the archives, and the installers and `bake update` accept `BAKE_RELEASE_BASE_URL=https://github.com/Justar96/bake/releases/latest/download`, fetching each archive from its own tag. Its assets download without a login only once the repository is public, and the workflow verifies the published GitHub release as a client reads it. Set the repository variable `BAKE_DOWNLOAD_SERVICE` to `off` to publish to GitHub alone; this mode requires a public repository and checks GitHub's latest release before building. Clients then need that host, either through the variable or by making it the default in `packages/boot/updater/src/keys.ts` and both installers.
 
 ## Publish a checked release by hand
@@ -90,4 +100,4 @@ Interactive installs and `bake update` open with a `BAKE` heading, then print ea
 
 On Unix, `<install root>/current` is a link that `~/.local/bin/bake` follows. On Windows, `bake.cmd` reads the release name from `<install root>\current.txt` on every run, so an update never rewrites the batch file a running `cmd.exe` is reading; an older `bake.cmd` that named one release directly is replaced once the `cmd.exe` running it exits.
 
-The terminal names a newer release in its status line, from an answer cached in `<Bake home>/update-check.json` for an hour, or ten minutes when the check failed, and refreshes that answer in the background for as long as it runs, without delaying the first frame. `bake update` records its own answer there too. The notice never installs anything; once `/update` or `bake update` has installed the release, it asks for a restart instead. `BAKE_NO_UPDATE_CHECK=1` turns the check off. Installs from a release before the updater have no `bake update`; running the installer again brings them onto it.
+The terminal names a newer release in its status line, from an answer cached in `<Bake home>/update-check.json` for an hour, or ten minutes when the check failed, and refreshes that answer in the background for as long as it runs, without delaying the first frame. `bake update` records its own answer there too. The notice never installs anything; once `/update` or `bake update` has installed the release, it asks for a restart instead. `BAKE_NO_UPDATE_CHECK=1` turns the check off, which also keeps the install out of the download service's daily count of active installs. Installs from a release before the updater have no `bake update`; running the installer again brings them onto it.

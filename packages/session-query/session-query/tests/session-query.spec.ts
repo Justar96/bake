@@ -315,6 +315,25 @@ describe('session-query exact reads', () => {
     expect(TestPersistence.readSignals).toEqual([signal, signal])
   })
 
+  it('marks a session that started a turn, from the same read as its title', async () => {
+    const used = header('batch-title-used', 1)
+    const opened = header('batch-title-opened', 2)
+    const policy = (seq: number): SessionEvent => ({ type: 'sandbox/mode', seq: SessionSeq(seq), time: 5, data: { mode: 'workspace-write' } })
+    TestPersistence.reset([
+      { meta: used, events: [policy(0), { type: 'turn/start', seq: SessionSeq(1), time: 6, data: { turn: 1 } }, ...eventLog().map(event => ({ ...event, seq: SessionSeq(2) }))] },
+      // Opened and left: setup events only, no turn.
+      { meta: opened, events: [policy(0)] },
+    ])
+    const ctx = await liveContext()
+    await ctx.plugin(TestPersistence)
+
+    const [first, second] = await ctx.sessionQuery.readTitleSnapshots([used.id, opened.id])
+
+    expect(first).toMatchObject({ status: 'fulfilled', value: { startedTurn: true } })
+    expect(second?.status).toBe('fulfilled')
+    expect(second?.status === 'fulfilled' ? second.value.startedTurn : 'rejected').toBeUndefined()
+  })
+
   it('bounds persisted title inspection concurrency while preserving ordered results', async () => {
     const entries = Array.from({ length: 12 }, (_, index) => {
       const meta = header(`bounded-title-${index}`, index)

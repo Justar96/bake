@@ -49,6 +49,23 @@ describe('workflow guest callbacks', () => {
     expect(test.disposed).toEqual([1])
   })
 
+  it('carries a schema with a non-object root under value for the child and gives the script the bare value', async () => {
+    const test = fixture(`
+      const text = await agent('a', { schema: { type: 'string', description: 'the line' } })
+      const list = await agent('b', { schema: { type: 'array', items: { type: 'number' } } })
+      return { text, list }
+    `, { childResult: async ({ callId }) => ({
+      output: [],
+      structured: { value: callId === 1 ? 'ALPHA-7F3Q' : [1, 2] },
+      stopReason: 'completed',
+    }) })
+    await expect(runWorkflowGuest(test.host)).resolves.toMatchObject({ value: { text: 'ALPHA-7F3Q', list: [1, 2] }, stopReason: 'completed' })
+    expect(test.requests.map(request => request.schema)).toEqual([
+      { type: 'object', properties: { value: { type: 'string', description: 'the line' } }, required: ['value'], additionalProperties: false },
+      { type: 'object', properties: { value: { type: 'array', items: { type: 'number' } } }, required: ['value'], additionalProperties: false },
+    ])
+  })
+
   it('keeps combinator functions inside the VM and maps ordinary stage failures to null', async () => {
     const { host } = fixture(`
       const first = await parallel([() => agent('a'), () => { throw new Error('ordinary') }, () => { throw { fatal: true } }])

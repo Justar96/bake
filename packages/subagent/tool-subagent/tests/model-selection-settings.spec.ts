@@ -389,7 +389,7 @@ describe('SubagentModelSelectionConfig', () => {
     await ctx.fiber.dispose()
   })
 
-  it('requires both the Host setting owner and a scoped standing preset', async () => {
+  it('requires the Host setting owner', async () => {
     const withoutSettings = new Context()
     await mountAgentLoopTestDependencies(withoutSettings)
     await withoutSettings.plugin(SubagentRuntime)
@@ -401,17 +401,28 @@ describe('SubagentModelSelectionConfig', () => {
       })
     }).toThrow('requires @deepseek-ai/dsh-tool-subagent/model-selection-settings')
     await withoutSettings.fiber.dispose()
+  })
 
-    const withoutAgent = await boot(false)
-    expect(() => {
-      tool.apply(withoutAgent, {
-        provider: 'spawn',
-        modelSelectionSettings: true,
-        backgroundMode: 'continuable',
+  it('samples every Agent from an unscoped standing composition', async () => {
+    const ctx = await boot(false)
+    try {
+      await ctx.plugin(tool, { provider: 'spawn', modelSelectionSettings: true, backgroundMode: 'continuable' })
+      const create = async (id: string) => (await ctx.agents.create({ sessionId: SessionId(id) })).agent
+      const disabled = await create('unscoped-disabled')
+      expect(selectable(ctx, disabled)).toBe(false)
+      expect(ctx.tools.schemas(disabled).map(schema => schema.name)).toContain('subagent')
+
+      await ctx.settings.update(SUBAGENT_MODEL_SELECTION_SETTINGS_NAMESPACE, {
+        enabled: true,
+        allowedModels: ALLOWED_MODELS,
       })
-    }).toThrow('requires a scoped preset Context')
-
-    await withoutAgent.fiber.dispose()
+      const enabled = await create('unscoped-enabled')
+      expect(subagentModelSelectionPolicy(ctx.sessionProjections, enabled.session)).toEqual(ALLOWED_MODELS)
+      expect(selectable(ctx, enabled)).toBe(true)
+      expect(selectable(ctx, disabled)).toBe(false)
+    } finally {
+      await ctx.fiber.dispose()
+    }
   })
 
   it('requires the Session registry when a child inherits its parent policy', async () => {

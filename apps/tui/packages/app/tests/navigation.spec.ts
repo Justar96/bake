@@ -1,6 +1,7 @@
 /** Session handoff, rollback, and cancellation through real Harness lifecycle services. */
 import { afterEach, expect, it, vi } from 'vitest'
 import { brandString } from '@deepseek-ai/dsh-brand'
+import { CommandId } from '@deepseek-ai/dsh-commands'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { transcriptRows } from '@dsh-tui/ui'
@@ -140,19 +141,27 @@ it('shows a localized, actionable notice for a session recorded before agentPres
 it('pins the active session before saved history ordered by last use, pointing at the newest', async () => {
   const { ctx, navigation } = await connected()
   const active = navigation.controller!.agent.id
-  for (const id of ['older', 'newer', 'blank']) {
+  for (const id of ['older', 'newer', 'blank', 'opened']) {
     const handle = await ctx.agents.create({
       sessionId: brandString<SessionId>(`session-${id}`),
       meta: { cwd: process.cwd() },
       agentOptions: { provider: 'mock', model: 'model' },
     })
-    // A logged prompt, so the session persists, but no title for it.
-    if (id === 'blank') handle.agent.session.append('user/message', user('No title yet'), { surfaceOp: 'append' })
-    else handle.agent.session.append('session/title', { title: id, messageSeqs: [], source: { kind: 'user' } })
+    if (id === 'opened') {
+      // Opened, one command run, and left: no turn, so the picker leaves it out.
+      const commandId = CommandId('opened-model')
+      handle.agent.session.append('command/run', { commandId, name: 'model', source: { kind: 'user' } })
+      handle.agent.session.append('command/done', { commandId, kind: 'success' })
+    } else {
+      // A real turn, so the session persists and counts as used; only the blank one stays untitled.
+      handle.agent.followup(user(id === 'blank' ? 'No title yet' : `About ${id}`))
+      await handle.agent.whenIdle()
+      if (id !== 'blank') handle.agent.session.append('session/title', { title: id, messageSeqs: [], source: { kind: 'user' } })
+    }
     await handle.dispose()
   }
   // Created older, blank, newer; used older last, so it leads despite its age.
-  const created: Record<string, number> = { 'session-older': 100, 'session-blank': 150, 'session-newer': 200 }
+  const created: Record<string, number> = { 'session-older': 100, 'session-blank': 150, 'session-newer': 200, 'session-opened': 950 }
   const filter = ctx.sessionQuery.filterSessions.bind(ctx.sessionQuery)
   vi.spyOn(ctx.sessionQuery, 'filterSessions').mockImplementation(async (filters, signal) => {
     const records = await filter(filters, signal)
@@ -161,7 +170,7 @@ it('pins the active session before saved history ordered by last use, pointing a
   })
   const read = ctx.sessionQuery.readTitleSnapshots.bind(ctx.sessionQuery)
   // Pinned for every saved session: the real reads report each log's newest event, which is now.
-  const used: Record<string, number> = { 'session-older': 900, 'session-blank': 500, 'session-newer': 300 }
+  const used: Record<string, number> = { 'session-older': 900, 'session-blank': 500, 'session-newer': 300, 'session-opened': 950 }
   vi.spyOn(ctx.sessionQuery, 'readTitleSnapshots').mockImplementation(async (ids, signal) =>
     (await read(ids, signal)).map(result => result.status !== 'fulfilled' || used[result.sessionId] === undefined ? result
       : { ...result, value: { ...result.value, lastEventAt: used[result.sessionId]! } }))

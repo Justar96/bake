@@ -44,7 +44,7 @@ kind: "package-reference"
 |---|---|---|
 | `provider` | 必填 | `ctx.subagents` 上的提供方名称（如 `spawn`、`fork`、`acp`） |
 | `toolName` | `subagent` | 面向模型的工具名称；每个已加载实例必须不同 |
-| `modelSelectionSettings` | `false` | 为每个顶层 Session 读取宿主的精确路由授权偏好；常驻 preset 观察匹配 Session，直接 Agent setup 则显式传入其 Session；要求提供方支持 `agentOptions` |
+| `modelSelectionSettings` | `false` | 为每个顶层 Session 读取宿主的精确路由授权偏好；常驻组合观察其 Agent（preset 自己的 Agent，或无作用域挂载时的所有 Agent），直接 Agent setup 则显式传入其 Session；要求提供方支持 `agentOptions` |
 | `enableRunInBackground` | `true` | 公开 `run_in_background`；禁用时也会拒绝强制后台调用 |
 | `backgroundMode` | `one-shot` | 后台策略：`one-shot` 默认前台调用；`continuable` 默认后台调用，并要求提供方具备 `prepareContinuable` 能力 |
 | `agentOptions` | — | 配置的子级 `provider`、`model`、适配器所有的 `reasoningEffort` 与正整数 `maxTokens` 默认值；要求提供方支持 `agentOptions`，并会覆盖提供方持有的路由默认值 |
@@ -68,7 +68,7 @@ kind: "package-reference"
 
 一次调用需同时提供 `provider` 与 `model`；当配置值、父 agent 值或提供方持有的默认值能提供路由时，也可只提供推理等级。静态的 `provider.agentRouteDefaults` 在存在时构成提供方／模型基线；工具配置与模型字段会在路由相关强度合并和确切路由预检前覆盖它。没有这些默认值的提供方会使用父 agent 最新已记录请求中的兼容值，再使用父级首次请求前的创建选项，并保留配置的 `maxTokens`。更改路由但未显式提供推理等级时，会清除继承的路由自有等级，使所选模型解析自己的默认值。实时 LLM 适配器在创建子 agent 前校验有效路由。目录成员资格只提供建议，因此适配器接受时，模型可以使用未列出的 id。
 
-该设置的 `router` 是一个任务路由器，为未指定路由的调用做选择。它是测试版，在设置 `router.enabled` 之前保持关闭。开启后，这类调用会先把其描述与提示（前 20,000 个字符）以及 Session 允许的路由发送到 `<url>/v1/bake/select`，即 [ing](https://github.com/Justar96/ing) 路由器协议；`url` 默认是托管的 ing 路由器 `https://ing.gissx.org`。路由器只负责选择；每条路由仍在用户自己的提供方上运行。每条路由都附带其模型信息，因此即使路由器不认识某个模型名称，也能对其施加约束并排序：推理等级（模型不提供等级控制时为空）、默认等级、上下文窗口和输入类型。若用户在 `router.hints` 中为该路由设置了条目，也会一并发送：`sameAs` 指出该路由提供的、路由器已知的模型，例如网关别名背后的 `claude-opus-4.5`；`quality`（`low`、`medium`、`high`、`frontier`）在缺少基准数据时代替基准；`cost`（`free`、`low`、`medium`、`high`）取代路由器的价格。设置 `router.priority`（`quality`、`cost`、`speed`、`balanced`）后，它会取代路由器从任务文本推断的取舍。请求会携带 `Authorization: Bearer`，其值为 `router.tokenEnv`（默认 `ING_API_TOKEN`）所指定的凭据，每次请求都通过 `ctx.credentials` 重新解析，因此同名的已导出环境变量优先于已存储的值；未挂载凭据存储时只读取环境变量。只有当回答指定的是允许路由之一、且未标记 `fallback`（路由器在无法区分各路由时设置）时才会采用它。若该路由的模型信息列出了回答中的推理等级，就使用该等级；否则使用所列等级中强度最接近的一个，平局时对 `low` 取较低者，对其他等级取较高者。强度未知的等级 id 会被丢弃，模型默认值随之生效。请求失败、返回非 2xx 状态、回答格式错误或超出策略，或超过 `router.timeoutMs`（默认 5000）仍未返回时，会记录警告，调用随后使用默认路由。中止委派也会中止路由请求。在 `url` 为空时开启路由会被拒绝。路由器在每次委派时读取，因此编辑它会改变运行中 Session 之后的调用，但不会改变它们已记录的路由列表。`describeRoutes` 会把同样的路由描述（不含任务）发送到 `<url>/v1/bake/routes`，即使路由处于关闭状态也会发送。它为每个允许的模型返回路由器匹配到的已评测模型、是否已评估（有质量依据），以及路由器为其打分所用的质量和混合价格。`/settings` 将其显示为“模型校准”。若路由器对未携带令牌的请求返回 `401`，调用会失败并指出应设置的环境变量名。该服务还可通过邮箱登录 ing 路由器：`requestSignInCode` 让路由器向某个地址发送一次性验证码，`signIn` 在 `<url>/auth/email/verify` 用验证码换取标记为 `bake` 的令牌，并通过 `ctx.credentials.set` 存储在 `router.tokenEnv` 名下；`signOut` 在 `<url>/auth/logout` 撤销令牌并将其删除，即使无法连接路由器也会删除。首次用某个地址登录即注册该地址。`routerTokenStatus` 说明是否已存储令牌及其来源层级，从不返回令牌本身；`routerAccount` 向 `<url>/auth/me` 查询令牌所属的地址。当环境变量提供令牌或未挂载凭据存储时，登录与退出会在发送任何内容之前被拒绝。登录被拒时，错误信息使用路由器自己的原因，例如 `wrong or expired code`。
+该设置的 `router` 是一个任务路由器，为未指定路由的调用做选择。它是测试版，在设置 `router.enabled` 之前保持关闭。开启后，这类调用会先把其描述与提示以及 Session 允许的路由发送到 `<url>/v1/bake/select`，即 [ing](https://github.com/Justar96/ing) 路由器协议；`url` 默认是托管的 ing 路由器 `https://ing.gissx.org`。超过 20,000 个字符的任务只发送其开头的八分之三和结尾，中间以 `[…]` 连接，这正是路由器自身评判的摘录方式，因为粘贴日志的委派通常把要求放在最后。路由器只负责选择；每条路由仍在用户自己的提供方上运行。每条路由都附带其模型信息，因此即使路由器不认识某个模型名称，也能对其施加约束并排序：推理等级（模型不提供等级控制时为空）、默认等级、上下文窗口和输入类型。若用户在 `router.hints` 中为该路由设置了条目，也会一并发送：`sameAs` 指出该路由提供的、路由器已知的模型，例如网关别名背后的 `claude-opus-4.5`；`quality`（`low`、`medium`、`high`、`frontier`）在缺少基准数据时代替基准；`cost`（`free`、`low`、`medium`、`high`）取代路由器的价格。设置 `router.priority`（`quality`、`cost`、`speed`、`balanced`）后，它会取代路由器从任务文本推断的取舍。请求会携带 `Authorization: Bearer`，其值为 `router.tokenEnv`（默认 `ING_API_TOKEN`）所指定的凭据，每次请求都通过 `ctx.credentials` 重新解析，因此同名的已导出环境变量优先于已存储的值；未挂载凭据存储时只读取环境变量。只有当回答指定的是允许路由之一、且未标记 `fallback`（路由器在无法区分各路由时设置）时才会采用它。若该路由的模型信息列出了回答中的推理等级，就使用该等级；否则使用所列等级中强度最接近的一个，平局时对 `low` 取较低者，对其他等级取较高者。强度未知的等级 id 会被丢弃，模型默认值随之生效。请求失败、返回非 2xx 状态、回答格式错误或超出策略，或超过 `router.timeoutMs`（默认 5000）仍未返回时，会记录警告，调用随后使用默认路由。中止委派也会中止路由请求。在 `url` 为空时开启路由会被拒绝。路由器在每次委派时读取，因此编辑它会改变运行中 Session 之后的调用，但不会改变它们已记录的路由列表。`describeRoutes` 会把同样的路由描述（不含任务）发送到 `<url>/v1/bake/routes`，即使路由处于关闭状态也会发送。它为每个允许的模型返回路由器匹配到的已评测模型、是否已评估（有质量依据），以及路由器为其打分所用的质量和混合价格。`/settings` 将其显示为“模型校准”。若路由器对未携带令牌的请求返回 `401`，调用会失败并指出应设置的环境变量名。该服务还可通过邮箱登录 ing 路由器：`requestSignInCode` 让路由器向某个地址发送一次性验证码，`signIn` 在 `<url>/auth/email/verify` 用验证码换取标记为 `bake` 的令牌，并通过 `ctx.credentials.set` 存储在 `router.tokenEnv` 名下；`signOut` 在 `<url>/auth/logout` 撤销令牌并将其删除，即使无法连接路由器也会删除。首次用某个地址登录即注册该地址。`routerTokenStatus` 说明是否已存储令牌及其来源层级，从不返回令牌本身；`routerAccount` 向 `<url>/auth/me` 查询令牌所属的地址。当环境变量提供令牌或未挂载凭据存储时，登录与退出会在发送任何内容之前被拒绝。登录被拒时，错误信息使用路由器自己的原因，例如 `wrong or expired code`。
 
 ing 可附带可选的 `routing` 评估，包含策略版本、`normal`、`cautious`、`needs_context` 或 `fallback` 状态、归一化难度与原因。缺失或格式错误的评估元数据不会使本来有效且获准的路由失效；标记为 `fallback` 的回答仍保留现有默认路由。记录前会删除说明中的终端控制字符并限制长度：主要原因为 500 个码点，策略为 64 个码点，最多八条原因，每条 240 个码点。模型校准也保留 `quality_source: inherited`，将前代模型依据与实测基准、用户提示区分开。
 
@@ -102,7 +102,7 @@ subagent-model-selection:
 
 ### 设计理念
 
-一个实例就是一个提供方加一个工具名称。插件镜像提供方生命周期：具名提供方出现时注册工具，提供方离开时释放工具，因此同级加载顺序与 HMR 替换不会让工具悬空。直接 Agent setup 显式传入尚未发布的 Session，并在发布前等待安装完成。由设置控制的常驻 preset 通过 `agent/created` 接收每个匹配 Agent，从其 Session 选择策略，并等待通过其 Context 发起的安装；安装失败会拒绝创建。提供方无法执行的数值型 `maxDepth` 或已配置 LLM 选择会在挂载时失败，而不是在首次委派时失败。每个工具作用域内最多一个实例可以拥有模型选择，因为 `list_subagent_models` 使用全局名称。
+一个实例就是一个提供方加一个工具名称。插件镜像提供方生命周期：具名提供方出现时注册工具，提供方离开时释放工具，因此同级加载顺序与 HMR 替换不会让工具悬空。直接 Agent setup 显式传入尚未发布的 Session，并在发布前等待安装完成。由设置控制的常驻组合通过 `agent/created` 接收其每个 Agent，从其 Session 选择策略，并等待通过其 Context 发起的安装；安装失败会拒绝创建。preset 的组合覆盖在其作用域下组合的 Agent；无作用域的组合（例如一次性 profile 的组合）覆盖进程中的所有 Agent。提供方无法执行的数值型 `maxDepth` 或已配置 LLM 选择会在挂载时失败，而不是在首次委派时失败。每个工具作用域内最多一个实例可以拥有模型选择，因为 `list_subagent_models` 使用全局名称。
 
 ### 前台结算
 
@@ -179,7 +179,7 @@ Delegate a self-contained task, such as research, a scoped implementation, or an
 
 #### 模型看到什么
 
-Session 携带策略的 settings 控制实例会公开子级 LLM 选择字段与 `list_subagent_models`。可选 `ctx.llm` 服务不可用时，调用会失败。发现只返回精确路由策略中的已注册提供方与已公布模型；未授权提供方会在调用其适配器目录前被拒绝，精确查询也必须先获准，才会解析模型的推理强度与默认值。执行阶段会独立强制同一策略。
+Session 携带策略的 settings 控制实例会公开子级 LLM 选择字段与 `list_subagent_models`。可选 `ctx.llm` 服务不可用时，调用会失败。发现只返回精确路由策略中的已注册提供方与已公布模型；未授权提供方会在调用其适配器目录前被拒绝，精确查询也必须先获准，才会解析模型的推理强度与默认值。执行阶段会独立强制同一策略。两个工具都把空白的 `provider`、`model` 或 `reasoning_effort` 视为省略，因为 GPT 模型会发送每个可选字段，并把不用的留空；三者都为空白的调用会使用默认路由委派，或向路由器请求路由。被拒绝的提供方或路由会列出该 Session 允许的路由，模型无需再次查询即可修正调用。
 
 #### Token 影响
 

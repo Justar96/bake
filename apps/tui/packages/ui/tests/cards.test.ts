@@ -6,6 +6,8 @@
 import { describe, expect, it } from 'bun:test'
 import { ToolCards, type ToolPresenters } from '../src/cards.ts'
 import { dictionaries } from '../src/copy.ts'
+import { formatRow } from '../src/plain.ts'
+import { present } from '../src/present.ts'
 
 const copy = dictionaries.en
 
@@ -135,6 +137,24 @@ describe('result cards', () => {
     ])
   })
 
+  it('draws a file\'s controls as display text, and marks changed words where they are drawn', () => {
+    const words = (line: { text: string, changed?: readonly (readonly [number, number])[] } | undefined) =>
+      line?.changed?.map(([from, to]) => line.text.slice(from, to))
+    // A tab is expanded before words are compared, so the run lands on the drawn text.
+    const [, tab] = diffCard([{ path: 'a.ts', oldText: '\tconst limit = 1', newText: '\tconst limit = 2' }])!
+    expect(tab).toEqual({ text: '+     const limit = 2', emphasis: 'added', source: 'a.ts', changed: [[20, 21]] })
+    expect(words(tab)).toEqual(['2'])
+    // Colour codes in a file are stripped, not sent to the terminal, and offsets
+    // count only what is left.
+    const ansi = diffCard([{ path: 'a.ts', oldText: '\x1b[31mconst value = 1\x1b[0m', newText: '\x1b[31mconst value = 2\x1b[0m' }])!
+    expect(ansi.map(line => [line.text, line.changed])).toEqual([['- const value = 1', [[16, 17]]], ['+ const value = 2', [[16, 17]]]])
+    // A CRLF ending is dropped, and a stray carriage return is escaped rather than
+    // moving the cursor back over the line.
+    const crlf = diffCard([{ path: 'a.ts', oldText: 'a = 1\r\n', newText: 'a = 2\r\nb\rc\r\n', oldStart: 1, newStart: 1 }])!
+    expect(crlf.map(line => [line.text, line.number])).toEqual([['- a = 1', 1], ['+ a = 2', 1], ['+ b\\x0dc', 2]])
+    expect(diffCard([{ path: 'n.ts', oldText: null, newText: '\x1b[1mx\x1b[0m\ty\x07\n' }])?.map(line => line.text)).toEqual(['+ x    y\\x07'])
+  })
+
   it('captions a partial read window and leaves a whole file uncaptioned', () => {
     const window = round({ presentResult: () => ({
       card: 'read', path: 'a.ts', offset: 9, totalLines: 40,
@@ -217,5 +237,81 @@ describe('result cards', () => {
   it('keeps the raw result under a card kind this build does not know', () => {
     expect(round({ presentResult: () => ({ card: 'hologram', title: 'Projected' } as never) }, '{}', ok).result)
       .toEqual({ title: 'Projected', detail: [], raw: true })
+  })
+})
+
+describe('the files a command changed', () => {
+  const terminal = (changes: unknown, locale: keyof typeof dictionaries = 'en') => {
+    const cards = new ToolCards(() => ({ presentResult: () => ({ card: 'terminal', output: 'ok\n', exitCode: 1, changes }) } as never), dictionaries[locale])
+    cards.call('c1', 'bash', '{}')
+    return cards.result('c1', ok)
+  }
+  const hunk = (path: string, oldText: string | null, newText: string) => ({ path, oldText, newText, oldStart: 1, newStart: 1 })
+  const files = [
+    { path: 'a.js', status: 'modified', added: 1, removed: 1, hunks: [hunk('a.js', 'const retries = 3\n', 'const retries = 5\n')] },
+    { path: 'b.js', status: 'created', added: 1, removed: 0, hunks: [hunk('b.js', null, 'module.exports = {}\n')] },
+    { path: 'c.js', status: 'deleted', added: 0, removed: 2 },
+    { path: 'd.js', status: 'renamed', from: 'old/d.js', added: 0, removed: 0 },
+    { path: 'e.png', status: 'binary', added: 0, removed: 0 },
+    { path: 'f.log', status: 'too-large', added: 0, removed: 0 },
+    { path: 'run.sh', status: 'mode', added: 0, removed: 0 },
+    { path: 'link', status: 'symlink', added: 0, removed: 0 },
+    { path: 'g.js', status: 'unknown-before', added: 3, removed: 1 },
+  ]
+
+  it('keeps the output and exit in the detail, and the files beside them', () => {
+    const card = terminal({ files })
+    expect(card?.detail).toEqual([{ text: 'ok' }, { text: 'exit 1', summary: 'failure' }])
+    expect(card?.changes?.files[0]).toEqual({ path: 'a.js', added: 1, removed: 1, lines: [
+      { text: '- const retries = 3', emphasis: 'removed', source: 'a.js', number: 1, changed: [[18, 19]] },
+      { text: '+ const retries = 5', emphasis: 'added', source: 'a.js', number: 1, changed: [[18, 19]] },
+    ] })
+    expect(card?.changes?.files[1]?.lines).toEqual([{ text: '+ module.exports = {}', emphasis: 'added', source: 'b.js', number: 1 }])
+  })
+
+  it('says how each file changed unless it was a plain edit, in the reader\'s words', () => {
+    expect(terminal({ files })?.changes?.files.map(file => [file.path, file.status, file.lines.length])).toEqual([
+      ['a.js', undefined, 2], ['b.js', 'new', 1], ['c.js', 'deleted', 0], ['d.js', 'renamed from old/d.js', 0], ['e.png', 'binary', 0],
+      ['f.log', 'too large', 0], ['run.sh', 'mode', 0], ['link', 'symlink', 0], ['g.js', undefined, 0],
+    ])
+    const zh = dictionaries.zh
+    expect(terminal({ files }, 'zh')?.changes?.files.map(file => file.status)).toEqual([
+      undefined, zh.changeNew, zh.changeDeleted, `${zh.changeRenamed} old/d.js`, zh.changeBinary, zh.changeTooLarge, zh.changeMode, zh.changeSymlink, undefined,
+    ])
+  })
+
+  it('carries the files the producer left out, and its caveats', () => {
+    expect(terminal({ files: files.slice(0, 1), omittedFiles: 4, concurrent: true, timedOut: true })?.changes)
+      .toMatchObject({ omitted: 4, notes: [copy.changeConcurrent, copy.changeTimedOut] })
+    expect(terminal({ files: files.slice(0, 1) })?.changes).not.toHaveProperty('notes')
+  })
+
+  it('adds nothing when no file is listed', () => {
+    expect(terminal({ files: [] })).toEqual({ title: '', detail: [{ text: 'ok' }, { text: 'exit 1', summary: 'failure' }] })
+  })
+
+  it('draws a path as one line of text', () => {
+    const [file] = terminal({ files: [{ path: 'odd\nname\x1b[2J.txt', status: 'renamed', from: 'was\rhere', added: 0, removed: 0 }] })!.changes!.files
+    expect([file?.path, file?.status]).toEqual(['odd\\x0aname.txt', 'renamed from was\\x0dhere'])
+  })
+
+  it('is bounded by changed lines, keeps each drawn file\'s path, and counts the files left out', () => {
+    const many = Array.from({ length: 5 }, (_, index) => ({ path: `f${index}.js`, status: 'modified', added: 2, removed: 0,
+      hunks: [hunk(`f${index}.js`, '', 'a\nb\n')] }))
+    const card = terminal({ files: many, omittedFiles: 3 })!
+    const lines = present({ kind: 'tool-call', callId: 'c1', tool: 'bash', input: 'gen', result: { ok: false, text: '', detail: card.detail, changes: card.changes! } },
+      { lines: 4, unit: copy.cardLines, more: copy.moreLines, files: copy.cardFiles, moreFiles: copy.moreFiles, moreFile: copy.moreFile })
+    expect(lines.slice(2).map(line => [line.verb, line.text])).toEqual([
+      ['\u23bf', 'ok'],
+      ['edited', 'f0.js'], ['', '+ a'], ['', '+ b'],
+      ['edited', 'f1.js'], ['', '+ a'], ['', '+ b'],
+      ['', `+6 ${copy.moreFiles}`],
+    ])
+  })
+
+  it('joins the files onto a plain row after the output', () => {
+    const card = terminal({ files: [files[0], files[1], files[8]], concurrent: true })!
+    expect(formatRow({ kind: 'tool-call', callId: 'c1', tool: 'bash', input: 'gen', result: { ok: false, text: '', detail: card.detail, changes: card.changes! } }))
+      .toBe(`⚙ bash [c1](gen) ← error ok · exit 1 · edited a.js · - const retries = 3 · + const retries = 5 · edited b.js  new · + module.exports = {} · edited g.js  +3 −1 · ${copy.changeConcurrent}`)
   })
 })

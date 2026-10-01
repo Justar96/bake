@@ -1,0 +1,42 @@
+
+● Bash(sed -i 's/= 3/= 5/' a.js && cp t b.js && node t.cjs)  +2 −1  exit 1
+  ⎿      TAP version 13
+         not ok 1 - retries
+         +5 more lines
+           # detail 5
+         # fail 1
+  edited src/a.js
+       4 - const retries = 3
+       4 + const retries = 5
+  edited b.js  new
+       1 + module.exports = {}
+
+● Bash(python3 rewrite.py)  −2
+  edited logo.png  binary
+  edited docs/new-name.md  renamed from docs/old-name.md
+  edited gen/schema.json  too large
+  edited notes.txt  deleted
+       1 - first
+       2 - second
+         may include other activity
+
+● Bash(npm run format)  +7 −7
+  ⎿      formatted 9 files
+  edited src/f0.ts
+       1 - let v0 = 1
+       1 + let v0 = 2
+  edited src/f1.ts
+       1 - let v1 = 1
+       1 + let v1 = 2
+         +7 more files
+         may be incomplete
+
+● Bash(printf ...)  +2 −1
+  edited raw.txt
+       1 - level    one of the config
+       1 + level    two of the config
+       2 + bell\x07\x0dback
+
+● Edit(raw.txt)  +1 −1
+       1 - level    one of the config
+       1 + level    two of the config

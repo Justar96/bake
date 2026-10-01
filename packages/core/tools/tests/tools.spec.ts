@@ -398,6 +398,81 @@ describe('ToolRuntime', () => {
     })
   })
 
+  it('carries body-presented metadata on a top-level success only, through either post-execute replacement', async () => {
+    const ctx = await setup()
+    let present: (exec: Parameters<ToolDefinition['execute']>[1]) => void = (exec) => {
+      const meta = { files: ['a.js'] as string[] }
+      exec.presentResultMeta({ files: ['stale.js'] })
+      exec.presentResultMeta(meta)
+      // Snapshotted when presented: a later mutation does not leak into the result.
+      meta.files.push('mutated.js')
+    }
+    ctx.tools.register({ ...echoTool, name: 'presenting', async execute(_args, exec) { present(exec); return 'done' } })
+    ctx.tools.register({
+      ...echoTool,
+      name: 'composite',
+      async execute(_args, exec) {
+        const nested = await ctx.tools.execute({
+          signal: exec.signal, callId: ToolCallId('nested'), name: 'presenting', arguments: {}, parent: exec.token,
+        })
+        expect(nested.meta).toBeUndefined()
+        return 'composite'
+      },
+    })
+    const direct = await ctx.tools.execute({ signal: testToolSignal, callId: ToolCallId('direct'), name: 'presenting', arguments: {} })
+    expect(direct).toEqual({ isError: false, value: 'done', content: [{ type: 'text', text: 'done' }], meta: { files: ['a.js'] } })
+    const composite = await ctx.tools.execute({ signal: testToolSignal, callId: ToolCallId('composite'), name: 'composite', arguments: {} })
+    expect(composite.isError).toBe(false)
+    expect(composite.meta).toBeUndefined()
+
+    let replacement: 'content' | 'value' = 'content'
+    const policy = ctx.on('tools/post-execute', async (exec, _result, next): Promise<PostToolDecision> => {
+      if (exec.name !== 'presenting') return next()
+      return replacement === 'content'
+        ? { kind: 'accept', content: [{ type: 'text', text: 'policy content' }] }
+        : { kind: 'accept', value: 'policy value' }
+    })
+    const content = await ctx.tools.execute({ signal: testToolSignal, callId: ToolCallId('content'), name: 'presenting', arguments: {} })
+    replacement = 'value'
+    const value = await ctx.tools.execute({ signal: testToolSignal, callId: ToolCallId('value'), name: 'presenting', arguments: {} })
+    policy()
+    expect(content.meta).toEqual({ files: ['a.js'] })
+    expect(value).toMatchObject({ value: 'policy value', content: [{ type: 'text', text: 'policy value' }], meta: { files: ['a.js'] } })
+
+    // A failed body carries no presented metadata.
+    present = (exec) => {
+      exec.presentResultMeta({ files: ['a.js'] })
+      throw new Error('body failed')
+    }
+    const failed = await ctx.tools.execute({ signal: testToolSignal, callId: ToolCallId('failed'), name: 'presenting', arguments: {} })
+    expect(failed).toMatchObject({ isError: true, error: { message: 'body failed' } })
+    expect(failed.meta).toBeUndefined()
+  })
+
+  it('refuses presented metadata that is not lossless JSON, or from a tool whose metadata derives from its value', async () => {
+    const ctx = await setup()
+    ctx.tools.register({
+      ...echoTool,
+      name: 'not-json',
+      async execute(_args, exec) { exec.presentResultMeta({ when: Number.NaN }); return 'unreachable' },
+    })
+    ctx.tools.register(defineTool({
+      name: 'projecting',
+      description: 'projects its own metadata',
+      parameters: {},
+      output: {
+        schema: { type: 'string' },
+        render: (_args, value) => [{ type: 'text', text: value }],
+        presentationMeta: () => ({ card: true }),
+      },
+      async execute(_args, exec) { exec.presentResultMeta({ card: false }); return 'unreachable' },
+    }))
+    const notJson = await ctx.tools.execute({ signal: testToolSignal, callId: ToolCallId('not-json'), name: 'not-json', arguments: {} })
+    expect(notJson.error?.message).toBe('tool "not-json" presented metadata that is not lossless JSON')
+    const projecting = await ctx.tools.execute({ signal: testToolSignal, callId: ToolCallId('projecting'), name: 'projecting', arguments: {} })
+    expect(projecting.error?.message).toBe('tool "projecting" declares output.presentationMeta, so its metadata derives from its value')
+  })
+
   it('fails a post-execute decision that replaces both projections or supplies an invalid value', async () => {
     const both = await setup()
     both.tools.register(echoTool)

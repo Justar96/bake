@@ -44,9 +44,10 @@ class ActivationPool {
   /** Reserve before reconstruction; the returned release also tolerates unpublished rollback. */
   reserve(capacity: number): () => void {
     if (this.slots.size >= capacity) {
+      // Models that fan out past the cap look for a way to wait; name the one that exists.
       throw new SubagentError(
-        `subagent limit reached (active child limit: ${capacity}); wait for an existing child to finish `
-        + 'or complete this work with the current agents',
+        `subagent limit reached: ${capacity} ${capacity === 1 ? 'subagent is' : 'subagents are'} already active, the most allowed at once. `
+        + 'A notice arrives when one finishes; retry then, or do this work yourself.',
         'ACTIVATION_LIMIT_REACHED',
       )
     }

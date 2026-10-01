@@ -4,6 +4,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type LlmRuntime from '@deepseek-ai/dsh-llm'
 import type { LlmProviderInfo } from '@deepseek-ai/dsh-llm'
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import { allowedRoutesText, withoutBlankRoute } from './model-selection.ts'
 import type { ModelSelectionPolicy } from './model-selection.ts'
 import { presentModelListCall } from './presentation.ts'
 
@@ -33,13 +34,14 @@ function modelLine(provider: string, model: { id: string; name: string; descript
   return `${provider}/${model.id} — ${model.name}${model.description === undefined ? '' : `: ${model.description}`}`
 }
 
-/** Read the requested provider, advertised models, or exact-model efforts. */
+/** Read the requested provider, advertised models, or exact-model efforts; a blank field counts as omitted. */
 async function listSubagentModels(
   ctx: Context,
   policy: ModelSelectionPolicy,
-  request: ListSubagentModelsRequest,
+  args: ListSubagentModelsRequest,
   signal: AbortSignal,
 ): Promise<string> {
+  const request: ListSubagentModelsRequest = withoutBlankRoute(args)
   const llm = ctx.get('llm')
   if (llm === undefined) {
     throw new Error('cannot discover child LLM routes because the `llm` service is unavailable')
@@ -54,10 +56,9 @@ async function listSubagentModels(
       ? '(no LLM providers)'
       : providers.map(provider => `${provider.id} — ${provider.name}`).join('\n')
   }
-  if (request.provider.length === 0) throw new Error('`provider` must be non-empty')
   const allowedRoutes = policy.routes.filter(route => route.provider === request.provider)
   if (allowedRoutes.length === 0) {
-    throw new Error(`LLM provider "${request.provider}" is not allowed for this Session`)
+    throw new Error(`LLM provider "${request.provider}" is not allowed for this Session; allowed routes: ${allowedRoutesText(policy)}`)
   }
   const provider = registeredProvider(llm, policy, request.provider)
   if (request.model === undefined) {
@@ -67,9 +68,8 @@ async function listSubagentModels(
       ? `(no advertised models for ${provider.id})`
       : models.map(model => modelLine(provider.id, model)).join('\n')
   }
-  if (request.model.length === 0) throw new Error('`model` must be non-empty')
   if (!allowedRoutes.some(route => route.model === request.model)) {
-    throw new Error(`child LLM route "${provider.id}/${request.model}" is not allowed for this Session`)
+    throw new Error(`child LLM route "${provider.id}/${request.model}" is not allowed for this Session; allowed routes: ${allowedRoutesText(policy)}`)
   }
   const model = await llm.resolveModelInfo(provider.id, request.model, signal)
   const efforts = model.reasoning?.efforts.map(effort => (

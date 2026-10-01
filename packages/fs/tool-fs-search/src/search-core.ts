@@ -57,7 +57,8 @@ export const SEARCH_GRACE_MS = 3_000
  * `searchMetaMaxBytes` config). The inline match/path caps already bound the item
  * COUNT, but retained matches of a broad search (many long lines) can still
  * serialize to hundreds of kilobytes, and `meta` is persisted with the session
- * log and re-sent on every request. A deployment's final output budget
+ * log and copied again when compaction prunes the result. It never reaches the
+ * model, so the cap bounds the log, not the request. A deployment's final output budget
  * (`dsh-spill-policy`) only shrinks a result's `content`, never its `meta`, so the
  * projection owns this cap. 64 KiB holds the full default-capped result of a
  * typical search while bounding the pathological one.

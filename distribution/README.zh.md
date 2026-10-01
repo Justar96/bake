@@ -53,6 +53,16 @@ git push --atomic origin HEAD "v$NEXT"
 | `BAKE_RELEASE_SIGNING_KEY` | 发行签名密钥的完整 PEM 文本 |
 | `RAILWAY_TOKEN` | 下载服务所在项目 `production` 环境的 Railway 项目令牌；设置 `BAKE_DOWNLOAD_SERVICE=off` 时不需要 |
 
+当下载服务的 Railway 服务设置了以下全部三个变量时，它会为 gissx.org 的管理后台统计活跃安装；未设置时不上报任何内容：
+
+| 服务变量 | 说明 |
+|---|---|
+| `GISSX_ACTIVITY_URL` | `https://gissx.org/api/activity` |
+| `GISSX_ACTIVITY_TOKEN` | gissx.org 的 Worker 以 `ACTIVITY_TOKEN` 保存的 bearer 令牌 |
+| `BAKE_ACTIVITY_SALT` | 任意较长的随机字符串；用于给每日安装哈希加盐，更改后统计会重新开始 |
+
+已安装的 Bake 检查更新时（最多每小时一次）会用 Node 自带的客户端获取 `latest.json`，因此服务把每个这样的请求记为一个正在使用的安装。安装脚本、浏览器和发布流程的检查使用其他客户端，不计入。服务把安装上报为其地址的每日加盐哈希，每天最多一次，因此地址不会离开服务；上报在响应之后进行，绝不会延迟响应或使其失败。
+
 GitHub 发行版本身也是一个发行主机：它在归档旁附带已签名的清单，安装脚本和 `bake update` 接受 `BAKE_RELEASE_BASE_URL=https://github.com/Justar96/bake/releases/latest/download`，并从各自的标签获取每个归档。仓库公开后，这些资源才能免登录下载；工作流也会按客户端的方式验证已发布的 GitHub 发行版。将仓库变量 `BAKE_DOWNLOAD_SERVICE` 设为 `off` 即只发布到 GitHub；此模式要求公开仓库，并在构建前检查 GitHub 最新发行版。此时客户端需要使用该主机，可以通过上述变量，也可以把它设为 `packages/boot/updater/src/keys.ts` 和两个安装脚本中的默认值。
 
 ## 手动发布已检查的发行版
@@ -92,4 +102,4 @@ irm https://bake.justar.dev/install.ps1 | iex
 
 在 Unix 上，`<安装根目录>/current` 是 `~/.local/bin/bake` 所跟随的链接。在 Windows 上，`bake.cmd` 每次运行都从 `<安装根目录>\current.txt` 读取发行版名称，因此更新从不改写正在被 `cmd.exe` 读取的批处理文件；直接指定某个版本的旧版 `bake.cmd` 会在运行它的 `cmd.exe` 退出后被替换。
 
-终端会在状态栏中提示更新的发行版，该结果缓存在 `<Bake 主目录>/update-check.json` 中一小时（检查失败时为十分钟），终端运行期间会在后台持续刷新，不会延迟首帧。`bake update` 也会在那里记录自己的结果。该提示从不自动安装任何内容；`/update` 或 `bake update` 安装新版本后，它会改为提示重启。设置 `BAKE_NO_UPDATE_CHECK=1` 可关闭检查。更新程序出现之前的发行版没有 `bake update`；再次运行安装脚本即可获得它。
+终端会在状态栏中提示更新的发行版，该结果缓存在 `<Bake 主目录>/update-check.json` 中一小时（检查失败时为十分钟），终端运行期间会在后台持续刷新，不会延迟首帧。`bake update` 也会在那里记录自己的结果。该提示从不自动安装任何内容；`/update` 或 `bake update` 安装新版本后，它会改为提示重启。设置 `BAKE_NO_UPDATE_CHECK=1` 可关闭检查，这样该安装也不会计入下载服务每日的活跃安装统计。更新程序出现之前的发行版没有 `bake update`；再次运行安装脚本即可获得它。

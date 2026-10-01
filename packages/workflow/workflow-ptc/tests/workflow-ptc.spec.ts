@@ -575,6 +575,12 @@ describe('dsh-workflow-ptc', { timeout: 120_000 }, () => {
       expect(() => ctx.workflowEngine.start({ script: 'return 1', meta: { name: '', description: 'd' }, parent })).toThrow(/meta\.name must be a non-empty string/)
       expect(() => ctx.workflowEngine.start({ script: 'return 1', meta: { name: 'x', description: 'd', extra: 1 } as unknown as WorkflowMeta, parent })).toThrow(/META_INVALID|not a recognized field/)
       expect(() => ctx.workflowEngine.start({ ...scripted('return ((('), parent })).toThrow(/does not parse/)
+      // A parse failure names its body line and quotes it, so the script can be fixed without a reread.
+      expect(() => ctx.workflowEngine.start({ ...scripted("const a = 1\nconst r = await parallel([\n  () => agent('x'),\n}])\nreturn r"), parent }))
+        .toThrow("workflow script does not parse: SyntaxError: Unexpected token '}' (line 4)\n  }])\n  ^")
+      const unclosed = 'at the end of the script: a bracket, brace, parenthesis, string, or template literal is not closed'
+      expect(() => ctx.workflowEngine.start({ ...scripted('const x = {\n  a: 1,'), parent }))
+        .toThrow(new RegExp(`^workflow script does not parse: SyntaxError: .+ ${unclosed}$`))
       // The likeliest authoring slip — a Claude Code-style meta header in the
       // body — gets a pointed message, not a bare SyntaxError.
       expect(() => ctx.workflowEngine.start({ ...scripted("export const meta = { name: 'x', description: 'd' }\nreturn 1"), parent })).toThrow(/meta is a parameter, not code/)

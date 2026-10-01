@@ -519,6 +519,32 @@ An edit's card once drew each hunk as its tool sent it: the path, the three cont
 - **The preview counts changed lines.** `resultLines` bounds the lines that are part of the change; a `⋯` or a path rides along and never ends a preview.
 - **The words an edit changed are reversed** in the side's tone. A removed line and the added line in its place are compared word by word. A pair that shares less than half of the shorter line was replaced rather than edited, and is not marked.
 - **Code is highlighted** by the file's language. `packages/app/src/syntax.ts` wraps Shiki with the JavaScript regex engine and Solarized Dark, whose accents are the same in its light and dark variants, so they read on either background. Its base tones are left to the side's tone. The languages an agent edits most are loaded before the first frame, which costs about 70 ms beside a session's own startup, and any other loads its grammar the first time one is drawn. Presentation is synchronous, so until a grammar is ready its lines draw in the side's tone, and a committed row prints once, so an edit drawn before that stays uncoloured in scrollback.
+- **Diff text is display text.** Each side's lines pass through `toolText` before their words are compared, so a carriage return, a tab, or an ANSI code in the file on disk is escaped, expanded, or stripped before it reaches the terminal, and the reversed words still land on the characters drawn. Lines are paired by their raw text, so a change only a control made still shows. A CRLF ending is dropped.
+
+### A command shows what it changed
+
+A model often edits files through the shell instead of `edit`, as in `sed -i … && node test.cjs`. When the shell tool reports the files its command changed, the terminal card draws them as a section of the call's own block, under the output:
+
+```
+● Bash(sed -i 's/= 3/= 5/' a.js && cp t b.js && node t.cjs)  +2 −1  exit 1
+  ⎿      not ok 1 - retries
+         +6 more lines
+         # fail 1
+  edited a.js
+       4 - const retries = 3
+       4 + const retries = 5
+  edited b.js  new
+       1 + module.exports = {}
+```
+
+- **It stays in the block.** `Actions` prints the rows that are not calls before the held call they follow, so the changes travel on the result as the card's `changes`, not as a row of their own that would print above its command.
+- **Each file has a path line.** `edited`, the past tense of the `edit` verb, takes the verb column, in bold. The path follows in reference blue, then, dim, how the file changed when it was not a plain edit: `new`, `deleted`, `renamed from <path>`, `binary`, `too large`, `mode`, or `symlink`. The file's hunks are drawn as an edit's are. A file with no lines drawn, because the tool sent no hunks or the bound was spent, shows its own `+N −M` on the path line.
+- **The head says how much changed.** The total `+N −M`, over every file the tool measured, sits before the exit status. At `resultLines: 0` the block is its head alone, and the head adds the number of files when there are several, since no path line is left to say so.
+- **Output and changes are bounded apart.** The output keeps its first and last lines around `+N more lines`. The changes count their changed lines against `resultLines` on their own, as an edit's do, and a file with none to draw counts its path line. Files are drawn while some of the bound is left, each with its path line; the rest, and any the tool left out, are counted as `+N more files`. A count standing for one file is replaced by that file's path line, which costs the same row.
+- **Tones are per group.** A non-zero exit draws the output red, as any failure is. The changes are not the failure, so they keep green, red, reversed words, syntax colour, and the path's blue, in a single call's block or a step's.
+- **Caveats are dim lines under the section.** The tool marks a list that may include other activity in the workspace, because other work ran during the command, and one that may be incomplete because the comparison ran out of time.
+
+A result without `changes` draws exactly what it drew before.
 
 ### Reasoning is distinguished by geometry, not color
 
@@ -668,6 +694,8 @@ Layout claims are mechanically checkable and should be gated:
 | the header holds the finished turn | `packages/ui/tests/live.spec.tsx` ends a clocked turn and asserts the summary takes the header's label at the same frame height, survives a notice, reports failures, clears when the next turn starts, and summarizes a replayed session's last turn untimed; `activity.test.ts` covers the counts, the outcomes, and the rate, reported only for a sample of at least a second and 64 tokens |
 | a call and its result are one block | `packages/ui/tests/fold.test.ts` merges results into their calls, releases out-of-order results in call order, and settles held calls; `styles.spec.tsx` and `actions.spec.tsx` assert the running, done, and failed markers, `Tool(argument)` heads with a `⎿` connector, and no call ids; `styles.spec.tsx` and `present.test.ts` assert a step's tree is dim and uncoloured, branch, stem, corner, and connector alike, with a failed call's head red |
 | an edit shows what changed | `packages/ui/tests/cards.test.ts` draws only changed lines, numbers each side past the other's insertions, separates joined changes and hunks with `⋯`, heads files only when there are several, draws no numbers without `oldStart`, and marks the words of an edited line but not a replaced one; `present.test.ts` puts `+N −M` on the head at `resultLines: 0`, numbers lines in the gutter, counts only changed lines against the preview and never ends it on a gap, reverses changed words, highlights one side's run at a time, and keeps a failure red; `styles.spec.tsx` pins the size, the gutter, and the reversed words in truecolour; `packages/app/tests/syntax.spec.ts` highlights a preloaded language before the first frame, leaves another plain until its grammar loads, and draws nothing once closed; `packages/fs/tool-fs/tests/diff.spec.ts` records and validates `oldStart` and `newStart` |
+| diff text is display text | `packages/ui/tests/cards.test.ts` expands a tab, strips ANSI codes, drops a CRLF ending, and escapes a stray carriage return and a bell, and checks the changed words' offsets against the drawn text; `tool-output.spec.tsx` renders an edit and a command's change whose file holds them, with no raw control in the frame |
+| a command shows what it changed | `packages/ui/tests/cards.test.ts` keeps a terminal result without changes equal to its earlier card, words each kind of change in both locales, escapes controls in paths, and bounds the section with `+N more files`; `present.test.ts` puts `+N −M` before `exit 1`, previews output and changes each against its own bound, keeps the diff's tones and the path's blue under a failure and in a step's head, collapses to the size and the file count at `resultLines: 0`, keeps the path line of a file without hunks with its size, counts files left out and draws the caveats dim; `tool-output.spec.tsx` pins the section at 40 and 80 columns and in truecolour |
 | every indicator takes its colour from the palette | `packages/ui/tests/styles.spec.tsx` forces truecolour and pins a running, a finished, and a failed marker to their `PALETTE` tones; `present.test.ts` asserts `styleOf` returns the palette's done, failed, and asking tones, so no component can reintroduce a named colour |
 | quit feedback sits above the input | `packages/ui/tests/live.spec.tsx` checks one row of feedback above the input alongside command notices |
 | no foreign terminal writes | scripted turn asserts nothing reaches stderr while mounted |

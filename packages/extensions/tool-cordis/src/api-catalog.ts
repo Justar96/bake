@@ -4953,7 +4953,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SessionTitleObservation',
-    declaration: 'export interface SessionTitleObservation {\n    session: SessionHeader;\n    title?: SessionTitleSnapshot;\n    lastEventAt?: number;\n}',
+    declaration: 'export interface SessionTitleObservation {\n    session: SessionHeader;\n    title?: SessionTitleSnapshot;\n    lastEventAt?: number;\n    startedTurn?: true;\n}',
   },
   {
     name: 'SessionTitleObservationResult',
@@ -5368,6 +5368,18 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface TerminalCallView {\n    card: \'terminal\';\n    title: string;\n    description?: string;\n    cwd?: string;\n}',
   },
   {
+    name: 'TerminalChanges',
+    declaration: 'export interface TerminalChanges {\n    files: TerminalFileChange[];\n    omittedFiles?: number;\n    timedOut?: true;\n    concurrent?: true;\n}',
+  },
+  {
+    name: 'TerminalFileChange',
+    declaration: 'export interface TerminalFileChange {\n    path: string;\n    status: TerminalFileChangeStatus;\n    from?: string;\n    added: number;\n    removed: number;\n    hunks?: FileDiff[];\n}',
+  },
+  {
+    name: 'TerminalFileChangeStatus',
+    declaration: 'export type TerminalFileChangeStatus = \'created\' | \'modified\' | \'deleted\' | \'renamed\' | \'mode\' | \'symlink\' | \'binary\' | \'too-large\' | \'unknown-before\';',
+  },
+  {
     name: 'TerminalReadRequest',
     declaration: 'export interface TerminalReadRequest {\n    offset?: number;\n    count?: number;\n}',
   },
@@ -5377,7 +5389,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'TerminalResultView',
-    declaration: 'export interface TerminalResultView {\n    card: \'terminal\';\n    title?: string;\n    output?: string;\n    exitCode?: number;\n    signal?: string;\n}',
+    declaration: 'export interface TerminalResultView {\n    card: \'terminal\';\n    title?: string;\n    output?: string;\n    exitCode?: number;\n    signal?: string;\n    changes?: TerminalChanges;\n}',
   },
   {
     name: 'TerminalSendOperation',
@@ -5553,7 +5565,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ToolRunContext',
-    declaration: 'export interface ToolRunContext extends ToolExecution {\n    deferContext(context: UserMessage): void;\n    concludeTurn(): void;\n}',
+    declaration: 'export interface ToolRunContext extends ToolExecution {\n    deferContext(context: UserMessage): void;\n    concludeTurn(): void;\n    presentResultMeta(meta: JsonValue): void;\n}',
   },
   {
     name: 'ToolRuntime',

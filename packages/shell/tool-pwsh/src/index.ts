@@ -34,6 +34,7 @@ import { ESCALATION_TARGETS, approveEscalation, validateEscalationArgs } from '@
 import type { SandboxPolicyService } from '@deepseek-ai/dsh-sandbox-policy'
 import type { ShellRunResult } from '@deepseek-ai/dsh-shell'
 import { parseExitStatus } from '@deepseek-ai/dsh-shell'
+import { openChangeReport, shellChangesOf, terminalChanges, withRunningJobs } from '@deepseek-ai/dsh-shell-change-report'
 import { processJob } from './background.ts'
 import { renderPwshProcessRead, renderPwshResult } from './render.ts'
 import type { RenderablePwshResult } from './render.ts'
@@ -51,11 +52,17 @@ export const inject = ['tools', 'shell', 'shellEnv']
 export interface Config {
   /** Expose `run_in_background` (default true); disabled calls are also rejected. */
   enableRunInBackground?: boolean
+  /**
+   * Show the workspace files a foreground command changed under its output
+   * (default true). Display only: the model's result is the same either way.
+   */
+  changeReport?: boolean
 }
 
 /** Runtime configuration schema for the pwsh tool plugin. */
 export const Config: z<Config> = z.object({
   enableRunInBackground: z.boolean().default(true),
+  changeReport: z.boolean().default(true),
 })
 
 /** Parsed tool args; execute validates value constraints absent from ParameterSchemaSpec. */
@@ -64,6 +71,9 @@ interface PwshToolArgs {
   /** Display-only summary; a missing or blank one falls back to the command. */
   description?: string
   timeoutMs?: number
+  /** Undeclared spellings of `timeoutMs`; see {@link requestedTimeoutMs}. */
+  timeout?: unknown
+  timeout_ms?: unknown
   workdir?: string
   run_in_background?: boolean
   sandbox_permissions?: string
@@ -94,6 +104,31 @@ function validatePwshArgs(args: PwshToolArgs): void {
   // The escalation pairing (sandbox_permissions ⇔ justification, non-empty) is
   // the shared rule both enforcing families validate identically.
   validateEscalationArgs(args.sandbox_permissions, args.justification)
+}
+
+/** Undeclared timeout spellings, in the order they are consulted after `timeoutMs`. */
+const TIMEOUT_ALIASES = ['timeout_ms', 'timeout'] as const
+
+/**
+ * The requested timeout in milliseconds. Models used to other harnesses send
+ * `timeout` or `timeout_ms`, often as a numeric string. The parameter root
+ * admits undeclared keys, so ignoring them would kill a long command at the
+ * default timeout while the model believes it asked for more.
+ * @param args - schema-validated arguments; `timeoutMs` wins over an alias.
+ * @returns the timeout to request, or `undefined` for the executor default.
+ */
+function requestedTimeoutMs(args: PwshToolArgs): number | undefined {
+  if (args.timeoutMs !== undefined) return args.timeoutMs
+  for (const key of TIMEOUT_ALIASES) {
+    const value = args[key]
+    if (value === undefined || value === null) continue
+    const parsed = typeof value === 'string' && value.trim() !== '' ? Number(value) : value
+    if (typeof parsed !== 'number' || !Number.isFinite(parsed) || parsed <= 0) {
+      throw new Error(`invalid ${key}: expected a positive number of milliseconds for timeoutMs, got ${JSON.stringify(value)}`)
+    }
+    return parsed
+  }
+  return undefined
 }
 /* jscpd:ignore-end */
 
@@ -194,6 +229,7 @@ const BACKGROUND_OUTPUT_PROPERTIES = {
 /* jscpd:ignore-start -- deliberate mirror of dsh-tool-bash's apply() preamble (pwsh-tool-and-executor Agent Note). */
 export function apply(ctx: Context, config: Config = {}): void {
   const backgroundEnabled = config.enableRunInBackground ?? true
+  const changeReport = config.changeReport ?? true
   const defaultMode = ctx.shell.sandboxMode
   const escalationModes: readonly SandboxMode[] = defaultMode === undefined ? [] : ESCALATION_TARGETS
   const sandboxPolicy: SandboxPolicyService | undefined = defaultMode === undefined ? undefined : ctx.get('sandboxPolicy')
@@ -333,6 +369,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     /* jscpd:ignore-start -- the execute path mirrors dsh-tool-bash's by design (see the pwsh-tool-and-executor Agent Note). */
     async execute(args: PwshToolArgs, exec) {
       validatePwshArgs(args)
+      const timeoutMs = requestedTimeoutMs(args)
       // Description is display metadata; workdir defaults to the caller's session.
       const standingPolicy = resolveSandboxPolicy(exec)
       const approvedMode = args.sandbox_permissions !== undefined && args.justification !== undefined
@@ -345,7 +382,7 @@ export function apply(ctx: Context, config: Config = {}): void {
       const request = {
         command: args.command,
         ...workdir !== undefined ? { workdir } : {},
-        ...args.timeoutMs !== undefined ? { timeoutMs: args.timeoutMs } : {},
+        ...timeoutMs !== undefined ? { timeoutMs } : {},
         dshEnv: ctx.shellEnv.collect(exec),
         ...policy !== undefined ? { sandboxPolicy: policy } : {},
       }
@@ -376,16 +413,24 @@ export function apply(ctx: Context, config: Config = {}): void {
         })
         return { kind: 'background' as const, jobId: id }
       }
-      const result = await ctx.shell.run(ctx.shell.resolve({
-        ...request,
-        signal: exec.signal,
-      }))
-      if (result.aborted) {
-        const error = new HarnessError('tool call aborted', TOOL_ABORTED)
-        error.name = 'AbortError'
-        throw error
+      // After approval, so a long approval wait never widens the window.
+      const window = changeReport ? await openChangeReport(ctx, exec, policy, workdir) : undefined
+      try {
+        const result = await ctx.shell.run(ctx.shell.resolve({
+          ...request,
+          signal: exec.signal,
+        }))
+        if (result.aborted) {
+          const error = new HarnessError('tool call aborted', TOOL_ABORTED)
+          error.name = 'AbortError'
+          throw error
+        }
+        const changes = await window?.finish(exec.signal)
+        if (changes !== undefined) exec.presentResultMeta({ shellChanges: withRunningJobs(ctx, exec, changes) })
+        return canonicalPwshResult(result)
+      } finally {
+        await window?.release()
       }
-      return canonicalPwshResult(result)
     },
     /* jscpd:ignore-end */
     /* jscpd:ignore-start -- the background call card mirrors presentBashCall's by design (Agent Note). */
@@ -422,7 +467,8 @@ export function apply(ctx: Context, config: Config = {}): void {
       }
       // The exit marker becomes the card's exit pill, so it leaves the output body.
       const { body, ...exit } = parseExitStatus(raw)
-      return { card: 'terminal', output: body, ...exit }
+      const changes = terminalChanges(shellChangesOf(result.meta))
+      return { card: 'terminal', output: body, ...exit, ...changes === undefined ? {} : { changes } }
     },
     /* jscpd:ignore-end */
   }))

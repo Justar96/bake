@@ -47,6 +47,35 @@ type ResolvedConfig = Required<Config>
 /** A body that still carries the Claude Code-style meta header (meta rides the seam as data here). */
 const META_STATEMENT = /^\s*export\s+const\s+meta\b/
 
+/** Longest source line quoted in a parse failure. */
+const QUOTED_LINE_LIMIT = 240
+
+/**
+ * Describe a parse failure with its place in the body, so the model can fix
+ * the script without rereading all of it. V8 opens a SyntaxError's stack with
+ * `<filename>:<line>`, the source line, and a caret line; the wrapper's
+ * `lineOffset` makes that line the body's own. A line past the body is the
+ * wrapper's closing line: the script ended inside an unclosed construct.
+ * @param error - the value `vm.Script` threw.
+ * @param body - the script body as the model wrote it.
+ * @param filename - the filename the body was compiled under.
+ * @returns the message text after `workflow script does not parse: `.
+ */
+function describeParseFailure(error: unknown, body: string, filename: string): string {
+  const message = String(error)
+  const stack = error instanceof Error && typeof error.stack === 'string' ? error.stack.split('\n') : []
+  const located = stack[0]?.startsWith(`${filename}:`) === true ? Number(stack[0].slice(filename.length + 1)) : Number.NaN
+  if (!Number.isInteger(located) || located < 1) return message
+  if (located > body.split('\n').length) {
+    return `${message} at the end of the script: a bracket, brace, parenthesis, string, or template literal is not closed`
+  }
+  const source = stack[1] ?? ''
+  const caret = stack[2] ?? ''
+  const quoted = source.length > QUOTED_LINE_LIMIT ? `${source.slice(0, QUOTED_LINE_LIMIT)}…` : source
+  const pointer = /^\s*\^+\s*$/.test(caret) && caret.indexOf('^') < QUOTED_LINE_LIMIT ? `\n  ${caret.trimEnd()}` : ''
+  return `${message} (line ${located})\n  ${quoted}${pointer}`
+}
+
 /**
  * Reject invalid JavaScript synchronously before publishing a workflow run.
  * The guest compiles the same async wrapper in its own process.
@@ -55,11 +84,12 @@ function assertBodyParses(body: string, name: string): void {
   if (META_STATEMENT.test(body)) {
     throw new WorkflowError('meta is a parameter, not code: remove the `export const meta = {...}` statement from the script and pass it as `meta`', 'SCRIPT_PARSE')
   }
+  const filename = `workflow:${name}`
   try {
     // Parse only — the script object is discarded, nothing executes.
-    void new vm.Script(`(async () => {\n${body}\n})()`, { filename: `workflow:${name}`, lineOffset: -1 })
+    void new vm.Script(`(async () => {\n${body}\n})()`, { filename, lineOffset: -1 })
   } catch (error: unknown) {
-    throw new WorkflowError(`workflow script does not parse: ${String(error)}`, 'SCRIPT_PARSE', { cause: error })
+    throw new WorkflowError(`workflow script does not parse: ${describeParseFailure(error, body, filename)}`, 'SCRIPT_PARSE', { cause: error })
   }
 }
 

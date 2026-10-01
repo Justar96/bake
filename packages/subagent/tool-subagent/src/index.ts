@@ -31,6 +31,7 @@ import {
   hasDelegationModelRequest,
   preflightChildLlmRoute,
   requestedAgentOptions,
+  withoutBlankRoute,
 } from './model-selection.ts'
 import type { DelegationModelRequest, ModelSelectionPolicy } from './model-selection.ts'
 import { registerListSubagentModels } from './list-models.ts'
@@ -515,7 +516,7 @@ export function apply(ctx: Context, config: Config, session?: Session): void {
             throw new Error('subagent tool requires a calling agent (exec.agent was undefined)')
           }
 
-          let modelRequest = args as DelegationModelRequest
+          let modelRequest = withoutBlankRoute(args as DelegationModelRequest)
           let source: SubagentRoutingDecision['source'] = hasDelegationModelRequest(modelRequest) ? 'explicit' : 'default'
           let routerDecision: SubagentRouterDecision | undefined
           if (modelSelectionPolicy !== undefined && !hasDelegationModelRequest(modelRequest)) {
@@ -722,17 +723,16 @@ export function apply(ctx: Context, config: Config, session?: Session): void {
     return
   }
 
+  // A preset's composition covers the Agents composed under its scope; an
+  // unscoped one, such as the one-shot profile's, covers every Agent.
   const compositionScope = scopeOf(ctx)
-  if (compositionScope === undefined) {
-    throw new Error('tool-subagent: standing `modelSelectionSettings` requires a scoped preset Context')
-  }
   const agents = ctx.get('agents')
-  /* v8 ignore next -- shipped preset compositions always include the Agent registry. */
+  /* v8 ignore next -- shipped compositions always include the Agent registry. */
   if (agents === undefined) throw new Error('tool-subagent: standing `modelSelectionSettings` requires the Agent registry')
   const scopedInstalls = new WeakMap<Agent, ReturnType<Context['inject']>>()
   const installing = new WeakSet<Agent>()
   const belongsToComposition = (candidate: Agent): boolean =>
-    scopeChainOf(scopeOf(candidate.ctx)).includes(compositionScope)
+    compositionScope === undefined || scopeChainOf(scopeOf(candidate.ctx)).includes(compositionScope)
   const installScoped = (candidate: Agent): ReturnType<Context['inject']> | undefined => {
     const existing = scopedInstalls.get(candidate)
     if (existing !== undefined) return existing
@@ -767,9 +767,9 @@ export function apply(ctx: Context, config: Config, session?: Session): void {
       else removeScoped(candidate)
     }
   }
-  // The preset-scoped listener admits descendant Agents and installs the
-  // sampled tool definition in each Agent's own scope, so a later settings
-  // change cannot mutate a live session.
+  // The listener admits the composition's Agents, descendants included, and
+  // installs the sampled tool definition in each Agent's own scope, so a later
+  // settings change cannot mutate a live session.
   ctx.on('agent/created', async ({ agent: created }) => {
     await installScoped(created)
   })

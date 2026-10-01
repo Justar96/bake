@@ -15,6 +15,7 @@ import { DEFAULT_ROUTER_URL } from '../src/model-selection-settings.ts'
 import type { SubagentRouterSettings } from '../src/model-selection-settings.ts'
 import { callSubagent, modelSelectionSetupAgent, setup } from './harness.ts'
 import { subagentRoutingDecision } from '../src/routing-state.ts'
+import { MAX_TASK_CHARS, routerTaskExcerpt } from '../src/auto-route.ts'
 
 const REASONING = {
   efforts: [
@@ -75,6 +76,32 @@ async function routedSetup(
   ;(parent as unknown as { options: Agent['options'] }).options = { provider: 'alpha', model: 'parent-model' }
   return { ctx, requests }
 }
+
+describe('routerTaskExcerpt', () => {
+  it('sends a short task whole', () => {
+    expect(routerTaskExcerpt('Fix the flaky test.')).toBe('Fix the flaky test.')
+    expect(routerTaskExcerpt('x'.repeat(MAX_TASK_CHARS))).toHaveLength(MAX_TASK_CHARS)
+  })
+
+  it('keeps a long task\'s opening and its end, where a pasted log puts the ask', () => {
+    const task = `Investigate this log.\n${'log line\n'.repeat(10_000)}Now fix the retry bug it shows.`
+    const excerpt = routerTaskExcerpt(task)
+    expect(excerpt).toHaveLength(MAX_TASK_CHARS)
+    expect(excerpt.startsWith('Investigate this log.')).toBe(true)
+    expect(excerpt.endsWith('Now fix the retry bug it shows.')).toBe(true)
+    expect(excerpt).toContain('\n[\u2026]\n')
+    expect(excerpt.indexOf('\n[\u2026]\n')).toBe(Math.floor(MAX_TASK_CHARS * 3 / 8))
+  })
+
+  it('never splits a surrogate pair at either cut', () => {
+    const emoji = '\u{1F600}'
+    for (const offset of [0, 1]) {
+      const excerpt = routerTaskExcerpt('a'.repeat(offset) + emoji.repeat(MAX_TASK_CHARS))
+      expect(excerpt.length).toBeLessThanOrEqual(MAX_TASK_CHARS)
+      expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(excerpt)).toBe(false)
+    }
+  })
+})
 
 describe('dsh-tool-subagent task router', () => {
   it('records a bounded assessment and resolved effort without changing model-visible output', async () => {
@@ -171,6 +198,19 @@ describe('dsh-tool-subagent task router', () => {
     })
     expect(sent?.body.priority).toBeUndefined()
     expect(sent?.headers.authorization).toBe('Bearer s3cret')
+  })
+
+  it('routes a call whose route fields are all blank, as GPT models send them', async () => {
+    const router = await startRouter(() => ({ body: { provider: 'alpha', model: 'fast-model', reasoning_effort: 'low' } }))
+    const { ctx, requests } = await routedSetup({ url: router.url })
+
+    const result = await callSubagent(ctx, {
+      description: 'rename files', prompt: 'Rename the test files.', provider: '', model: '', reasoning_effort: '',
+    })
+
+    expect(result.isError).toBe(false)
+    expect(router.received).toHaveLength(1)
+    expect(requests[0]?.agentOptions).toEqual({ provider: 'alpha', model: 'fast-model', reasoningEffort: 'low' })
   })
 
   it('sends the user\'s route hints and stated priority', async () => {

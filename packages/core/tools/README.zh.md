@@ -88,7 +88,7 @@ ctx.tools.register(defineTool({
 
 ### Host 展示描述
 
-工具可以为 Host 本地消费方保留纯函数 `presentCall()` 与 `presentResult()` 方法。内置 Web Client 不消费这些值，而是通过 `tool.call.toolview` 选择 renderer，并从原始调用参数、结果内容、失败状态与持久 metadata 派生 card props。Client 派生展示决策负责该 transport 拆分。
+工具可以声明纯函数 `presentCall()` 与 `presentResult()` 方法。终端 UI 通过注册表为实时调用和重放调用调用它们，并传入记录的参数、结果内容和 `tool/result.meta`。工具的 `meta` 有两种来源，模型都收不到。`output.presentationMeta(args, value)` 从规范值派生它，文件编辑的差异就是这样得到的。展示数据不属于其返回值的工具主体改为调用 `exec.presentResultMeta(meta)`，shell 命令报告它改动的文件就用这种方式。注册表会快照该值，把它附加到成功的顶层结果上，在 post-execute 替换后保留它，并对嵌套调用忽略它。声明了 `presentationMeta` 的工具不能调用它。
 
 -----
 

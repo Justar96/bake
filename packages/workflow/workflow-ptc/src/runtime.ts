@@ -9,8 +9,8 @@ import * as vm from 'node:vm'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { SessionId } from '@deepseek-ai/dsh-session'
-import { assertObjectJsonSchema, JsonSchemaError } from '@deepseek-ai/dsh-tools'
-import type { ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
+import { assertSupportedJsonSchema, JsonSchemaError } from '@deepseek-ai/dsh-tools'
+import type { JsonSchemaNode, ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
 import { isFatalWorkflowError, WorkflowError } from '@deepseek-ai/dsh-workflow'
 import type {
   WorkflowAgentEndInfo,
@@ -213,7 +213,7 @@ export class WorkflowExecution {
               return null
             }
             this.observer.agentEnd({ ...info, outcome: 'completed' })
-            return result.structured
+            return opts.wrapped === true ? (result.structured as { value: unknown }).value : result.structured
           }
           this.observer.agentEnd({ ...info, outcome: 'completed' })
           return outputText(result.output)
@@ -235,6 +235,8 @@ export class WorkflowExecution {
     provider?: string
     model?: string
     schema?: ObjectJsonSchema
+    /** The script's schema was not object-rooted, so `schema` wraps it under `value` and the result is unwrapped. */
+    wrapped?: true
   } {
     if (rawOpts === undefined) return {}
     let opts: unknown
@@ -262,14 +264,24 @@ export class WorkflowExecution {
       }
     }
     let schema: ObjectJsonSchema | undefined
+    let wrapped = false
     if (record.schema !== undefined) {
+      let supported: JsonSchemaNode
       try {
-        assertObjectJsonSchema(record.schema)
-        schema = record.schema
+        assertSupportedJsonSchema(record.schema)
+        supported = record.schema
       } catch (error: unknown) {
-        /* v8 ignore next -- defensive rethrow arm: assertObjectJsonSchema only throws JsonSchemaError */
+        /* v8 ignore next -- defensive rethrow arm: assertSupportedJsonSchema only throws JsonSchemaError */
         if (!(error instanceof JsonSchemaError)) throw error
         throw new WorkflowError(`agent() schema is outside the supported subset — ${error.message}`, 'UNSUPPORTED_SCHEMA', { cause: error })
+      }
+      // Structured output is object-rooted. Any other root, such as
+      // {type: 'string'}, is carried under `value` and unwrapped for the script.
+      if (supported.type === 'object') {
+        schema = supported as ObjectJsonSchema
+      } else {
+        schema = { type: 'object', properties: { value: supported }, required: ['value'], additionalProperties: false }
+        wrapped = true
       }
     }
     return {
@@ -278,6 +290,7 @@ export class WorkflowExecution {
       ...record.provider !== undefined ? { provider: record.provider as string } : {},
       ...record.model !== undefined ? { model: record.model as string } : {},
       ...schema !== undefined ? { schema } : {},
+      ...wrapped ? { wrapped: true as const } : {},
     }
   }
 

@@ -316,6 +316,39 @@ describe('bash tool', () => {
     expect(text(result)).toBe('(no output)\n[timed out after 100ms]\n[killed by signal: SIGTERM]')
   })
 
+  // Models used to other harnesses name the timeout `timeout` or `timeout_ms`, often as a string;
+  // the open parameter root admits them, so ignoring them would run the command at the default.
+  it.each([
+    [{ timeout: '100' }, 100],
+    [{ timeout: 100 }, 100],
+    [{ timeout_ms: 150 }, 150],
+    [{ timeoutMs: 120, timeout: '90000', timeout_ms: 90_000 }, 120],
+  ])('honors the timeout spelling %j', async (timeout, expected) => {
+    const ctx = await setup()
+    const result = await call(ctx, 'bash', { command: 'sleep 60', description: 'test command', ...timeout })
+    expect(result.isError).toBe(false)
+    expect(text(result)).toBe(`(no output)\n[timed out after ${expected}ms]\n[killed by signal: SIGTERM]`)
+  })
+
+  it.each([
+    [{ timeout: 'soon' }, 'invalid timeout: expected a positive number of milliseconds for timeoutMs, got "soon"'],
+    [{ timeout_ms: -5 }, 'invalid timeout_ms: expected a positive number of milliseconds for timeoutMs, got -5'],
+    [{ timeout: '' }, 'invalid timeout: expected a positive number of milliseconds for timeoutMs, got ""'],
+  ])('refuses an unusable timeout spelling %j instead of ignoring it', async (timeout, message) => {
+    const ctx = await setup()
+    const result = await call(ctx, 'bash', { command: 'echo never', description: 'test command', ...timeout })
+    expect(result.isError).toBe(true)
+    expect(text(result)).toContain(message)
+    expect(text(result)).not.toContain('never')
+  })
+
+  it('treats a null timeout spelling as absent', async () => {
+    const ctx = await setup()
+    const result = await call(ctx, 'bash', { command: 'echo hello', description: 'test command', timeout: null })
+    expect(result.isError).toBe(false)
+    expect(text(result)).toBe('hello\n')
+  })
+
   it('reports a timeout even when the command traps the signal and exits 0', async () => {
     // The signal-independent timeout marker: a trapped SIGTERM that exits 0
     // after our timer fired must NOT look like a clean success. (bash may
@@ -1060,6 +1093,33 @@ describe('tool-owned UI presentation (presentCall / presentResult)', () => {
     expect(nonzero).toEqual({ card: 'terminal', output: 'oops', exitCode: 3 })
     const killed = ctx.tools.get('bash')!.presentResult!(args, { content: [{ type: 'text', text: 'gone\n[killed by signal: SIGKILL]' }], isError: false })
     expect(killed).toEqual({ card: 'terminal', output: 'gone', signal: 'SIGKILL' })
+  })
+
+  it('bash presentResult: a logged change report becomes the card\'s changes section; malformed or future ones are ignored', async () => {
+    const ctx = await setup()
+    const present = ctx.tools.get('bash')!.presentResult!
+    const args = { command: 'sed -i s/3/5/ a.js', description: 'edit' }
+    const content = [{ type: 'text' as const, text: 'done\n[exit code: 1]' }]
+    const shellChanges = {
+      version: 1, concurrent: true, omittedFiles: 2,
+      files: [
+        { path: 'a.js', status: 'modified', added: 1, removed: 1, hunks: [{ oldText: 'x = 3', newText: 'x = 5', oldStart: 4, newStart: 4 }] },
+        { path: 'b.bin', status: 'binary', added: 0, removed: 0 },
+      ],
+    }
+    expect(present(args, { content, isError: false, meta: { shellChanges } })).toEqual({
+      card: 'terminal', output: 'done', exitCode: 1,
+      changes: {
+        concurrent: true, omittedFiles: 2,
+        files: [
+          { path: 'a.js', status: 'modified', added: 1, removed: 1, hunks: [{ path: 'a.js', oldText: 'x = 3', newText: 'x = 5', oldStart: 4, newStart: 4 }] },
+          { path: 'b.bin', status: 'binary', added: 0, removed: 0 },
+        ],
+      },
+    })
+    for (const meta of [{ shellChanges: { ...shellChanges, version: 2 } }, { shellChanges: { version: 1, files: [{ path: 'a.js' }] } }, 'nonsense']) {
+      expect(present(args, { content, isError: false, meta })).toEqual({ card: 'terminal', output: 'done', exitCode: 1 })
+    }
   })
 
   it('bash presentResult: markers a pill CANNOT show (timeout, sandbox denial) stay in the terminal output', async () => {

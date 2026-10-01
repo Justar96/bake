@@ -7,7 +7,31 @@ import type { SubagentRouteHint, SubagentRouterSettings } from './model-selectio
 import type { SubagentRouterDecision, SubagentRoutingAssessment } from './types.ts'
 
 /** Task text sent to the router; its judge reads only part of it anyway. */
-const MAX_TASK_CHARS = 20_000
+export const MAX_TASK_CHARS = 20_000
+
+/** Marks the cut in a long task's excerpt, as the router marks its own. */
+const ELIDED = '\n[…]\n'
+
+/**
+ * The part of a delegated task the router is sent: all of it, or its opening
+ * and its end. A delegation often pastes a log or a file and puts the ask
+ * last, and the router judges a long task by its opening and its end, so a
+ * prefix alone would send the paste and drop the work. The split matches the
+ * router's own: three eighths opening, the rest the end.
+ * @param task - The delegated task text.
+ * @returns at most {@link MAX_TASK_CHARS} UTF-16 code units of it.
+ */
+export function routerTaskExcerpt(task: string): string {
+  if (task.length <= MAX_TASK_CHARS) return task
+  let head = Math.floor(MAX_TASK_CHARS * 3 / 8)
+  let tail = task.length - (MAX_TASK_CHARS - head - ELIDED.length)
+  // Cut between code points, so no lone surrogate reaches the router.
+  if (isHighSurrogate(task.charCodeAt(head - 1))) head--
+  if (isHighSurrogate(task.charCodeAt(tail - 1))) tail++
+  return task.slice(0, head) + ELIDED + task.slice(tail)
+}
+
+const isHighSurrogate = (code: number): boolean => code >= 0xD800 && code <= 0xDBFF
 
 /**
  * Effort ids whose strength order is known. Adapters list efforts in display
@@ -214,7 +238,7 @@ export async function routeDelegation(
 ): Promise<RoutedDelegation> {
   const { allowedModels, infos } = await routePayload(router, routes, llm, signal)
   const response = await post(router, '/v1/bake/select', {
-    task: task.slice(0, MAX_TASK_CHARS),
+    task: routerTaskExcerpt(task),
     allowed_models: allowedModels,
     ...router.priority === undefined ? {} : { priority: router.priority },
   }, signal, token)

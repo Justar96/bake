@@ -171,6 +171,8 @@
         "@deepseek-ai/dsh-home-paths": "workspace:^",
         "@deepseek-ai/dsh-llm": "workspace:^",
         "@deepseek-ai/dsh-permission-presets": "workspace:^",
+        "@deepseek-ai/dsh-sandbox": "workspace:^",
+        "@deepseek-ai/dsh-sandbox-policy": "workspace:^",
         "@deepseek-ai/dsh-session": "workspace:^",
         "@deepseek-ai/dsh-session-persistence": "workspace:^",
         "@deepseek-ai/dsh-session-projection": "workspace:^",
@@ -648,6 +650,7 @@
       "dependencies": {
         "@deepseek-ai/dsh-brand": "workspace:^",
         "@deepseek-ai/dsh-cmdline": "workspace:^",
+        "@deepseek-ai/dsh-tool-subagent": "workspace:^",
         "@deepseek-ai/dsh-util-values": "workspace:^",
         "@deepseek-ai/schemastery": "workspace:^",
         "commander": "catalog:",
@@ -670,6 +673,7 @@
         "@deepseek-ai/cordis-plugin-loader": "workspace:^",
         "@deepseek-ai/dsh-agent": "workspace:^",
         "@deepseek-ai/dsh-agent-default-model": "workspace:^",
+        "@deepseek-ai/dsh-agent-loop": "workspace:^",
         "@deepseek-ai/dsh-fs": "workspace:^",
         "@deepseek-ai/dsh-llm": "workspace:^",
         "@deepseek-ai/dsh-session": "workspace:^",
@@ -3156,6 +3160,29 @@
         "@deepseek-ai/dsh-subprocess": "workspace:^",
       },
     },
+    "packages/shell/shell-change-report": {
+      "name": "@deepseek-ai/dsh-shell-change-report",
+      "version": "0.1.6-alpha.2",
+      "dependencies": {
+        "diff": "catalog:",
+      },
+      "devDependencies": {
+        "@deepseek-ai/cordis": "workspace:^",
+        "@deepseek-ai/dsh-jobs": "workspace:^",
+        "@deepseek-ai/dsh-sandbox": "workspace:^",
+        "@deepseek-ai/dsh-subprocess": "workspace:^",
+        "@deepseek-ai/dsh-timeout": "workspace:^",
+        "@deepseek-ai/dsh-tools": "workspace:^",
+      },
+      "peerDependencies": {
+        "@deepseek-ai/cordis": "workspace:^",
+        "@deepseek-ai/dsh-jobs": "workspace:^",
+        "@deepseek-ai/dsh-sandbox": "workspace:^",
+        "@deepseek-ai/dsh-subprocess": "workspace:^",
+        "@deepseek-ai/dsh-timeout": "workspace:^",
+        "@deepseek-ai/dsh-tools": "workspace:^",
+      },
+    },
     "packages/shell/shell-env": {
       "name": "@deepseek-ai/dsh-shell-env",
       "version": "0.1.6-alpha.2",
@@ -3198,6 +3225,7 @@
         "@deepseek-ai/dsh-session-persistence-jsonl": "workspace:^",
         "@deepseek-ai/dsh-session-projection": "workspace:^",
         "@deepseek-ai/dsh-shell": "workspace:^",
+        "@deepseek-ai/dsh-shell-change-report": "workspace:^",
         "@deepseek-ai/dsh-shell-env": "workspace:^",
         "@deepseek-ai/dsh-subprocess-local": "workspace:^",
         "@deepseek-ai/dsh-system-prompt": "workspace:^",
@@ -3213,6 +3241,7 @@
         "@deepseek-ai/dsh-sandbox": "workspace:^",
         "@deepseek-ai/dsh-sandbox-policy": "workspace:^",
         "@deepseek-ai/dsh-shell": "workspace:^",
+        "@deepseek-ai/dsh-shell-change-report": "workspace:^",
         "@deepseek-ai/dsh-shell-env": "workspace:^",
         "@deepseek-ai/dsh-tools": "workspace:^",
         "@deepseek-ai/dsh-user-approval": "workspace:^",
@@ -3272,6 +3301,7 @@
         "@deepseek-ai/dsh-sandbox-policy": "workspace:^",
         "@deepseek-ai/dsh-session-projection": "workspace:^",
         "@deepseek-ai/dsh-shell": "workspace:^",
+        "@deepseek-ai/dsh-shell-change-report": "workspace:^",
         "@deepseek-ai/dsh-shell-env": "workspace:^",
         "@deepseek-ai/dsh-subprocess-local": "workspace:^",
         "@deepseek-ai/dsh-system-prompt": "workspace:^",
@@ -3287,6 +3317,7 @@
         "@deepseek-ai/dsh-sandbox": "workspace:^",
         "@deepseek-ai/dsh-sandbox-policy": "workspace:^",
         "@deepseek-ai/dsh-shell": "workspace:^",
+        "@deepseek-ai/dsh-shell-change-report": "workspace:^",
         "@deepseek-ai/dsh-shell-env": "workspace:^",
         "@deepseek-ai/dsh-tools": "workspace:^",
         "@deepseek-ai/dsh-user-approval": "workspace:^",
@@ -4982,6 +5013,8 @@
     "@deepseek-ai/dsh-settings-file": ["@deepseek-ai/dsh-settings-file@workspace:packages/settings/settings-file"],
 
     "@deepseek-ai/dsh-shell": ["@deepseek-ai/dsh-shell@workspace:packages/shell/shell"],
+
+    "@deepseek-ai/dsh-shell-change-report": ["@deepseek-ai/dsh-shell-change-report@workspace:packages/shell/shell-change-report"],
 
     "@deepseek-ai/dsh-shell-env": ["@deepseek-ai/dsh-shell-env@workspace:packages/shell/shell-env"],
 

@@ -37,16 +37,31 @@ EVAL_MODELS=claude-sonnet-5-5 EVAL_OUTPUT=.preflight/evals/agent-loop/<topic>/cl
   bun run eval
 ```
 
-Run one process per model, in parallel. The runner reads the `cliproxyapi` route from `~/.bake/settings.yaml` and copies `~/.bake/.credentials.yaml` into a private home for each sample, so a record needs those locally; neither is ever written into the output. Raw output, including transcripts and captured requests, stays under the ignored `.preflight/`. The standard suite takes about 40 minutes and 4 million tokens across three models at three trials.
+Run one process per model, in parallel. The runner reads the `cliproxyapi` route from `~/.bake/settings.yaml`, sends DeepSeek models to the official Anthropic-format endpoint through `llm-deepseek`, and copies `~/.bake/.credentials.yaml`, which holds `CLIPROXYAPI_API_KEY` and `DEEPSEEK_API_KEY`, into a private home for each sample. A record needs those locally; neither is ever written into the output. Raw output, including transcripts and captured requests, stays under the ignored `.preflight/`. The standard set alone takes about 40 minutes and 4 million tokens at three trials; each extended model adds its own process and tokens, and Opus costs the most per token.
+
+A record covers both model sets. `EVAL_MODELS` takes model ids, set names, or both, so `EVAL_MODELS=standard` reruns the first three and `EVAL_MODELS=deepseek/deepseek-flash` one model.
+
+| Set | Model | Route | Effort |
+|---|---|---|---|
+| `standard` | `gemini-3.8-flash-medium` | `cliproxyapi`, OpenAI Responses | medium |
+| `standard` | `gpt-6.1-sol` | `cliproxyapi`, OpenAI Responses | medium |
+| `standard` | `claude-sonnet-5-5` | `cliproxyapi`, Anthropic Messages | medium |
+| `extended` | `gpt-6-astra` | `cliproxyapi`, OpenAI Responses | medium |
+| `extended` | `claude-opus-5-5` | `cliproxyapi`, Anthropic Messages | medium |
+| `extended` | `deepseek-flash` | DeepSeek official, Anthropic Messages | high |
+| `extended` | `deepseek-v4-pro` | DeepSeek official, Anthropic Messages | high |
+
+DeepSeek offers `low`, `high`, and `max` but no `medium`, so it runs at `high`, its default. `design.json` and each sample record the provider, wire format, and effort.
 
 | Variable | Meaning |
 |---|---|
 | `EVAL_ARMS` | `name=checkout` pairs, two or more |
-| `EVAL_MODELS` | `cliproxyapi` model ids |
+| `EVAL_MODELS` | model ids or set names, default `standard,extended`; a bare id is a `cliproxyapi` model, and `deepseek/<id>`, or a bare `deepseek-*` id the gateway does not list, is a DeepSeek model |
 | `EVAL_CASES` | scenarios; the default is the standard suite below |
 | `EVAL_TRIALS` | trials per scenario, default 3 |
 | `EVAL_OUTPUT` | raw output directory |
 | `EVAL_EXTRA_<ARM>` | a JSON array of extra overlay rows for one arm, for an attribution arm such as `[{"id":"fs-observation-policy","config":{"editGuard":"version"}}]` |
+| `EVAL_SETTINGS_<ARM>` | a JSON object merged into one arm's `settings.yaml`, for settings no overlay row carries; `$PROVIDER` and `$MODEL` become the route under test |
 
 | Scenario | What it checks |
 |---|---|
@@ -57,6 +72,8 @@ Run one process per model, in parallel. The runner reads the `cliproxyapi` route
 | `multi_site_edit`, `multi_file_edit` | several changes in one file and across two |
 | `shell_then_edit` | a shell step rewrites the file before the edit |
 | `workflow_script` | a `workflow` script that runs two subagents |
+
+`delegation` is outside the standard suite; name it in `EVAL_CASES` to measure subagent routing. It delegates the same two reads through the `subagent` tool and checks the same `summary.txt`. Each sample records its `subagentCalls` and the `routingDecisions` its session logs carry: who chose each child's route, and the model and effort. For a routing arm, give both arms the same `subagent-model-selection` allowlist through `EVAL_SETTINGS_<ARM>`, since the allowlist appears in the `subagent` tool's schema, and turn `router.enabled` on in one of them only.
 
 A sample succeeds when the agent exits cleanly and an external check passes. That check is the exact `no_tools` reply, the fixture's `node test.cjs` with the test file unmodified, or the expected `summary.txt`. Where a scenario injects content, that content must also be kept.
 

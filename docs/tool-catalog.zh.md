@@ -674,7 +674,7 @@ pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费
 
 ### `edit`
 
-替换现有 UTF-8 文本文件中的字面量文本。除非设置了 replace_all，否则每个 old_string 都必须与当前文件恰好匹配一次。对同一文件的多处修改放进 `edits`，每项都与原始内容匹配。修改文件请使用此工具，而不是 shell 脚本。
+替换现有 UTF-8 文本文件中的字面量文本。除非设置了 replace_all，否则每个 old_string 都必须与当前文件恰好匹配一次。对同一文件的多处修改放进 `edits`，每项都与原始内容匹配。
 
 ```json
 {

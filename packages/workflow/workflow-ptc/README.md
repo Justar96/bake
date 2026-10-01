@@ -50,9 +50,9 @@ The Node PTC provider's `maxPendingCalls` also limits workflow concurrency: chil
 
 ### Results and failures
 
-The script runs with top-level `await`; `meta` and `args` arrive as JSON data. Every `agent()` call uses the configured subagent provider and the run's fixed parent. The final lossless-JSON return value becomes the run result; an ordinary child failure resolves `agent()` to `null`.
+The script runs with top-level `await`; `meta` and `args` arrive as JSON data. Every `agent()` call uses the configured subagent provider and the run's fixed parent. The final lossless-JSON return value becomes the run result; an ordinary child failure resolves `agent()` to `null`. A structured-output schema may have any root type. Providers take only object-rooted structured output, so a schema such as `{type: 'string'}` reaches the child as an object with one required `value` property, and `agent()` resolves to that value.
 
-Invalid metadata, an unparseable body, an unavailable provider route or a per-run cap above the ceiling is rejected before a run is published. During execution, hook misuse and tripped cooperative caps fail the workflow. Process failures, unavailable required confinement and PTC output or control limits also fail the run.
+Invalid metadata, an unparseable body, an unavailable provider route or a per-run cap above the ceiling is rejected before a run is published. A parse failure names the body line and quotes it under the message, or says that the script ended inside an unclosed bracket, brace, parenthesis, string, or template literal, so the model can fix the script without rereading it. During execution, hook misuse and tripped cooperative caps fail the workflow. Process failures, unavailable required confinement and PTC output or control limits also fail the run.
 
 ### File policy and cancellation
 
@@ -122,7 +122,7 @@ Use these references for the shared execution guarantees and workflow contracts.
 
 #### What the model sees
 
-Every script `agent()` call sends its prompt verbatim and optional model or structured-output schema to a subagent provider. Each child sees that provider's own context; phase and log narration stays on observer events.
+Every script `agent()` call sends its prompt verbatim and optional model or structured-output schema to a subagent provider; a schema without an object root reaches the child wrapped under `value`. Each child sees that provider's own context; phase and log narration stays on observer events.
 
 #### Token effect
 

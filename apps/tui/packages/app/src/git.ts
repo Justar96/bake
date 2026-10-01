@@ -5,6 +5,10 @@
  */
 
 import { execFile } from 'node:child_process'
+import type { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-sandbox'
+import type {} from '@deepseek-ai/dsh-sandbox-policy'
+import type { Session } from '@deepseek-ai/dsh-session'
 import type { GitState } from '@dsh-tui/ui/git.ts'
 
 /** What the reads use besides the working tree; injected so tests own it. */
@@ -15,6 +19,51 @@ export interface WorkspaceGitOptions {
   readonly env?: Record<string, string | undefined>
   /** The executable to run. */
   readonly git?: string
+}
+
+/**
+ * How the displayed session's reads are confined. A sandboxed session can
+ * write `.git/config` and `.gitattributes`, and `git status` runs commands
+ * named there: a `core.fsmonitor` hook, and a clean filter on a changed file.
+ * Run unconfined, the poll would execute them outside the sandbox.
+ */
+export interface GitConfinement {
+  /** Changes with the policy, so a changed policy is read again at once. */
+  readonly key: string
+  /**
+   * Wrap a read for read-only confinement.
+   * @param argv - `git` and its arguments.
+   * @param signal - the read's cancellation.
+   * @returns the argv to run instead; a rejection leaves the field empty rather than reading unconfined.
+   */
+  readonly wrap: (argv: readonly string[], signal: AbortSignal) => Promise<readonly string[]>
+}
+
+/**
+ * The reads' confinement for one session. A session under
+ * `danger-full-access`, or a composition with no sandbox policy, runs its
+ * commands unconfined, so its reads cannot reach anything the agent could not
+ * already. Any other mode reads under `read-only` confinement through the
+ * host's sandbox provider, and without one the field stays empty.
+ * @param ctx - the host context that owns the sandbox services.
+ * @param session - the displayed session.
+ * @returns the confinement, or undefined for an unconfined session.
+ */
+export function sessionGitConfinement(ctx: Context, session: Session): GitConfinement | undefined {
+  const policy = ctx.get('sandboxPolicy')?.resolve({ session })
+  if (policy === undefined || policy.mode === 'danger-full-access') return undefined
+  const { workspaceRoot, sessionId } = policy
+  return {
+    key: [policy.mode, workspaceRoot, sessionId ?? ''].join('\0'),
+    wrap: async (argv, signal) => {
+      const sandbox = ctx.get('sandbox')
+      if (sandbox === undefined) throw new Error('no sandbox provider can confine the status line\'s git read')
+      const confined = await sandbox.confine(argv, {
+        mode: 'read-only', workspaceRoot, ...sessionId === undefined ? {} : { sessionId },
+      }, signal)
+      return confined.argv
+    },
+  }
 }
 
 /** Pause between reads. `git status` on a large tree still takes milliseconds. */
@@ -81,6 +130,7 @@ function same(a: GitState | undefined, b: GitState | undefined): boolean {
  */
 export class WorkspaceGit {
   private cwd: string | undefined
+  private confinement: GitConfinement | undefined
   private state: GitState | undefined
   private work: Promise<void> | undefined
   private wake: (() => void) | undefined
@@ -101,17 +151,18 @@ export class WorkspaceGit {
       try {
         while (!signal.aborted) {
           const cwd = this.cwd
+          const confinement = this.confinement
           if (cwd !== undefined) {
-            const next = await this.read(cwd, signal)
-            // The session may have moved to another workspace while this ran.
-            if (!signal.aborted && cwd === this.cwd && !same(next, this.state)) {
+            const next = await this.read(cwd, confinement, signal)
+            // The session may have moved to another workspace, or policy, while this ran.
+            if (!signal.aborted && cwd === this.cwd && confinement?.key === this.confinement?.key && !same(next, this.state)) {
               this.state = next
               this.changed()
             }
           }
           if (signal.aborted) return
           // Followed elsewhere mid-read: read the new workspace now.
-          if (cwd !== this.cwd) continue
+          if (cwd !== this.cwd || confinement?.key !== this.confinement?.key) continue
           await new Promise<void>(resolve => {
             const timer = setTimeout(resolve, this.options.pollMs ?? GIT_POLL_MS)
             timer.unref()
@@ -126,27 +177,39 @@ export class WorkspaceGit {
   }
 
   /**
-   * The state of `cwd`, read again at once when it is not the workspace
-   * followed until now.
+   * The state of `cwd`, read again at once when it is not the workspace, or
+   * the confinement, followed until now.
    * @param cwd - the displayed session's working directory.
+   * @param confinement - how the displayed session's reads are confined; omitted for an unconfined session.
    * @returns what the last read of `cwd` found, or undefined before one has.
    */
-  follow(cwd: string): GitState | undefined {
-    if (cwd !== this.cwd) {
+  follow(cwd: string, confinement?: GitConfinement): GitState | undefined {
+    if (cwd !== this.cwd || confinement?.key !== this.confinement?.key) {
       this.cwd = cwd
       this.state = undefined
       this.wake?.()
     }
+    // The latest wrapper, so a read never runs under a policy the session left.
+    this.confinement = confinement
     return this.state
   }
 
   /** @returns once the reads have stopped, so teardown leaves no late callback. */
   async drain(): Promise<void> { await this.work }
 
-  private read(cwd: string, signal: AbortSignal): Promise<GitState | undefined> {
+  private async read(cwd: string, confinement: GitConfinement | undefined, signal: AbortSignal): Promise<GitState | undefined> {
     const env = { ...this.options.env ?? process.env, GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C' }
+    // Confinement is the defense; disabling the hook also spares the sandbox a pointless process.
+    let argv: readonly string[] = [this.options.git ?? 'git', '--no-optional-locks',
+      ...confinement === undefined ? [] : ['-c', 'core.fsmonitor=false'],
+      'status', '--porcelain=v2', '--branch', '--untracked-files=normal']
+    if (confinement !== undefined) {
+      try { argv = await confinement.wrap(argv, signal) } catch { return undefined }
+    }
+    const [program, ...args] = argv
+    if (program === undefined) return undefined
     return new Promise(resolve => {
-      execFile(this.options.git ?? 'git', ['--no-optional-locks', 'status', '--porcelain=v2', '--branch', '--untracked-files=normal'], {
+      execFile(program, args, {
         cwd, env, signal, timeout: GIT_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024, windowsHide: true, encoding: 'utf8',
       }, (error, stdout) => {
         // A read that ran out of time says nothing about the tree, so the

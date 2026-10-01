@@ -50,7 +50,7 @@ Run the checks relevant to your change while you work, and `bun run preflight` b
 Every version keeps its agent-loop metrics so the next one can be checked for regressions. [evals/README.md](evals/README.md) has the procedure.
 
 - A change that can alter what the model sees or how many round trips a task takes needs an eval record in its PR. That covers prompts, personas, tool schemas, descriptions, arguments, results, and errors, context assembly, compaction, caching, the agent loop, and LLM adapters.
-- Measure the candidate in a paired run against a clean, built worktree of the PR base, on the standard suite with three models and three trials. Record it under `evals/agent-loop/versions/unreleased/<YYYY-MM-DD>-<topic>/`. A release renames `unreleased/` to its tag, as the changelog does.
+- Measure the candidate in a paired run against a clean, built worktree of the PR base, on the standard suite with the standard and extended model sets listed in evals/README.md and three trials. Record it under `evals/agent-loop/versions/unreleased/<YYYY-MM-DD>-<topic>/`. A release renames `unreleased/` to its tag, as the changelog does.
 - Report the record's regressions in the PR. Fix a flagged regression, or state its cause and why it is accepted, in the record's note and in the PR. Compare versions only through a paired run: absolute counts from different days drift with the gateway, the cache, and the models.
 - Never edit or delete a committed record, and move one only in that release rename; supersede a wrong record with a new one. Raw output, which includes transcripts, stays in the ignored `.preflight/`.
 

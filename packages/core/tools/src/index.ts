@@ -116,6 +116,9 @@ export type {
   ToolResultView,
   GenericResultView,
   TerminalResultView,
+  TerminalChanges,
+  TerminalFileChange,
+  TerminalFileChangeStatus,
   DiffResultView,
   SearchResultView,
   SearchMatchesResultView,
@@ -425,6 +428,19 @@ export interface ToolRunContext extends ToolExecution {
    * conclude the enclosing run.
    */
   concludeTurn(): void
+  /**
+   * Attach display-only metadata to this execution's successful top-level
+   * result, for metadata that cannot derive from the canonical value: a
+   * shell command's file changes, for example, which are not part of what the
+   * command returns. It is logged as `tool/result.meta` and read back by the
+   * tool's own `presentResult`; the model never receives it. The value is
+   * snapshotted when called, and the last call wins. A nested (`parent`) call
+   * ignores it, as nested results carry no `meta`; a failed result does not
+   * carry it. A tool that declares `output.presentationMeta` cannot call it, so
+   * one result never has two sources of metadata.
+   * @param meta - lossless JSON metadata, bounded by the caller.
+   */
+  presentResultMeta(meta: JsonValue): void
 }
 
 /** Registry-owned live execution object; public pipeline views stay readonly. */
@@ -832,6 +848,8 @@ export class ToolRuntime extends Service {
   private deferredContexts = new WeakMap<ToolRunContext, UserMessage[]>()
   /** Executions whose tool body declared the current turn complete. */
   private concludingExecutions = new WeakSet<ToolExecution>()
+  /** Display-only metadata a tool body attached through `presentResultMeta`, keyed by its execution. */
+  private presentedMeta = new WeakMap<ToolExecution, { meta?: JsonValue }>()
   /** Original caller cancellation, kept outside the wrapper-mutable execution object. */
   private cancellationStates = new WeakMap<ToolRunContext, ToolCancellationState>()
   /** Definition-owned final content transform snapshotted before policy begins. */
@@ -1452,6 +1470,7 @@ export class ToolRuntime extends Service {
     const visible = this.get(name, agent)
     const collapsed = visible !== undefined && this.collapses(name, agent, parent !== undefined)
     const concludingExecutions = this.concludingExecutions
+    const presented: { meta?: JsonValue } = {}
     const base = {
       token,
       callId,
@@ -1466,6 +1485,15 @@ export class ToolRuntime extends Service {
       },
       concludeTurn(): void {
         concludingExecutions.add(this as unknown as ToolExecution)
+      },
+      presentResultMeta(meta: JsonValue): void {
+        if (visible?.output.presentationMeta !== undefined) {
+          throw new TypeError(`tool "${name}" declares output.presentationMeta, so its metadata derives from its value`)
+        }
+        if (parent !== undefined) return
+        const snapshot = snapshotJsonValue(meta)
+        if (snapshot === undefined) throw new TypeError(`tool "${name}" presented metadata that is not lossless JSON`)
+        presented.meta = deepFreeze(snapshot)
       },
     }
     // Capture the finalizer BEFORE argument materialization: the
@@ -1488,6 +1516,7 @@ export class ToolRuntime extends Service {
       }
       const execution: MutableToolRunContext = { ...base, arguments: deepFreeze(detached) }
       this.deferredContexts.set(execution, deferredContexts)
+      this.presentedMeta.set(execution, presented)
       this.contentFinalizers.set(execution, finalizerFor())
       this.cancellationStates.set(execution, {
         callerSignal: signal,
@@ -1935,6 +1964,9 @@ export class ToolRuntime extends Service {
         throw projectionError(tool.name, 'presentationMeta', error)
       }
       meta = snapshotProjection(tool.name, 'presentationMeta', projected)
+    } else if (exec.parent === undefined) {
+      // Re-read on every success, so a post-execute value replacement keeps it.
+      meta = this.presentedMeta.get(exec)?.meta
     }
     const concludesTurn = this.concludingExecutions.has(exec)
     return this.markCanonical(exec, this.materializeFinalResult({

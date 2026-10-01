@@ -1381,6 +1381,82 @@ scenario('edit', 'a recorded edit draws only its changed lines, numbered, with c
       'the recorded edit did not change the file')
   })
 
+scenario('shell-edit', 'files a real shell command changes are drawn under its output as numbered changes, a failed command keeps them, and replay draws the same',
+  { replayOnly: true },
+  async run => {
+    // The commands that set the tree up read no developer config, and no
+    // variable a hook exports points them at another repository.
+    const env: Record<string, string> = Object.fromEntries(Object.entries(run.env).filter(([key]) => !key.startsWith('GIT_')))
+    Object.assign(env, { GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: join(run.root, 'gitconfig'), GIT_CEILING_DIRECTORIES: run.root })
+    const git = (...args: string[]): void => {
+      const done = Bun.spawnSync(['git', '-c', 'user.name=Bake', '-c', 'user.email=bake@example.test', ...args], { cwd: run.workspace, env })
+      assert(done.exitCode === 0, `git ${args.join(' ')} failed: ${done.stderr.toString()}`)
+    }
+    const files = ['config.js', 'test.cjs', 'extra.js'].map(name => join(run.workspace, name))
+    const requests = [
+      // BSD sed needs the backup suffix, so the command removes the backup itself.
+      { command: "sed -i.bak 's/= 3/= 5/' config.js && rm config.js.bak && node test.cjs", description: 'Raise retries and test' },
+      { command: "printf 'module.exports = {}\\n' > extra.js && exit 1", description: 'Add a module, then fail' },
+    ]
+    const override = join(run.root, 'shell-edit-replay.json')
+    await Bun.write(override, JSON.stringify([
+      ...requests.map((args, index) => {
+        const call = { type: 'tool-call', id: `shell-edit-${index}`, name: 'bash', arguments: JSON.stringify(args) }
+        return { kind: 'chunks', chunks: [
+          { type: 'block-start', index: 0, blockType: 'tool-call' },
+          { type: 'tool-call-delta', index: 0, id: call.id, name: call.name, argumentsDelta: call.arguments },
+          { type: 'block-end', index: 0, block: call },
+          { type: 'finish', reason: { kind: 'tool-calls' } },
+        ] }
+      }),
+      { kind: 'chunks', chunks: [
+        { type: 'block-start', index: 0, blockType: 'text' },
+        { type: 'text-delta', index: 0, text: 'SHELL_EDIT_DONE' },
+        { type: 'block-end', index: 0, block: { type: 'text', text: 'SHELL_EDIT_DONE' } },
+        { type: 'finish', reason: { kind: 'stop' } },
+      ] },
+    ]))
+    // The workspace every scenario shares becomes a repository only for this one,
+    // and the agent's own git reads see no developer config either.
+    const saved = { ...run.env }
+    Object.keys(run.env).filter(key => key.startsWith('GIT_')).forEach(key => { delete run.env[key] })
+    Object.assign(run.env, { GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: join(run.root, 'gitconfig') })
+    delete run.env.NO_COLOR
+    run.env.FORCE_COLOR = '3'
+    try {
+      git('init', '-q', '-b', 'main')
+      await Bun.write(files[0]!, 'const retries = 3\nmodule.exports = { retries }\n')
+      await Bun.write(files[1]!, "const { retries } = require('./config.js')\nconsole.log(retries === 5 ? 'ok 1 - retries' : 'not ok 1 - retries')\n")
+      git('add', '-A')
+      git('commit', '-q', '-m', 'seed')
+      const before = await run.logs()
+      await run.writeOverlay(override)
+      await run.terminal('shell-edit', [], async tty => {
+        const start = tty.mark()
+        tty.send('Raise the retries and add a module.\r', 'trigger the recorded shell edits')
+        // The tones under a failure are pinned by the tool-changes styles expectation.
+        await tty.expect('ok 1 - retries', '+1 −1', 'edited config.js', '1 - const retries = 3', '1 + const retries = 5',
+          'edited extra.js  new', '1 + module.exports = {}', 'exit 1', 'SHELL_EDIT_DONE', start)
+      })
+      assert(await Bun.file(files[0]!).text() === 'const retries = 5\nmodule.exports = { retries }\n', 'the recorded shell edit did not change the file')
+      const log = await events(await run.created(before, 'shell edit'))
+      const metas = log.filter(event => event.type === 'tool/result').map(event => event.data.meta?.shellChanges?.files?.map((file: { path: string }) => file.path))
+      assert(JSON.stringify(metas) === JSON.stringify([['config.js'], ['extra.js']]), `unexpected change reports ${JSON.stringify(metas)}`)
+      run.env.NO_COLOR = '1'
+      delete run.env.FORCE_COLOR
+      await run.writeOverlay()
+      await run.terminal('shell-edit-resume', ['--resume', log[0].id], async tty => {
+        await tty.expect('edited config.js', '1 - const retries = 3', '1 + const retries = 5', 'edited extra.js  new', 'SHELL_EDIT_DONE')
+      })
+    } finally {
+      for (const key of Object.keys(run.env)) if (!(key in saved)) delete run.env[key]
+      Object.assign(run.env, saved)
+      await run.writeOverlay()
+      rmSync(join(run.workspace, '.git'), { recursive: true, force: true })
+      for (const file of files) rmSync(file, { force: true })
+    }
+  })
+
 scenario('tool-colour', 'real read, search, and shell results retain syntax colour, bounds, and readable replay without colour',
   { replayOnly: true }, async run => {
     const file = join(run.workspace, 'colours.ts')
@@ -2932,6 +3008,15 @@ scenario('navigate', 'session picker cancellation, a new session, and switching 
         [...text.matchAll(/Session: (session-[a-f0-9-]+)/g)].some(match => !known.has(match[1])))
       const cleared = [...clearedText.matchAll(/Session: (session-[a-f0-9-]+)/g)].at(-1)![1]!
       await tty.follows(SCREEN.idle, `Session: ${cleared}`)
+
+      // The /new session ran no turn, so there is nothing to go back to; the
+      // original session, which did, is still listed.
+      start = tty.mark()
+      tty.send('/resume\r')
+      await tty.expect('Choose session', `· ${/[0-9a-f]{8}/.exec(identity)![0]}`, start)
+      tty.refuse('the unused /new session being listed', tty.text.slice(start).includes(`· ${/[0-9a-f]{8}/.exec(direct)![0]}`))
+      tty.send('\x1b', 'close the picker')
+      await tty.expect('Session navigation cancelled', start)
     }) } finally { run.env.NO_COLOR = '1'; delete run.env.FORCE_COLOR }
 
     assert([...text.matchAll(new RegExp(DONE_LINE.source, 'g'))].length === 2,

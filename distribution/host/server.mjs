@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { createReadStream, existsSync, statSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { join, resolve, sep } from 'node:path'
@@ -10,6 +11,50 @@ if (!existsSync(join(publicRoot, 'latest.json'))) throw new Error('Missing publi
 // redirect grants that host no trust.
 const archiveRedirect = process.env.BAKE_ARCHIVE_REDIRECT?.trim().replace(/\/+$/, '') || undefined
 const archivePath = /^\/releases\/([0-9A-Za-z.-]+)\/(bake-v[0-9A-Za-z.-]+-(?:darwin-(?:arm64|x64)|linux-(?:arm64|x64)|win32-x64)\.tar\.gz)$/
+// Active installs, reported to gissx.org when all three are set. An installed
+// Bake fetches latest.json at most hourly to check for updates (unless
+// BAKE_NO_UPDATE_CHECK is set), with Node's own client, so each `node` request
+// is an install in use; the installers and release checks use other clients.
+// The install is sent as a daily salted hash of its address, at most once a
+// day per process, so no address leaves this host. Reporting never delays or
+// fails the response.
+const activityUrl = process.env.GISSX_ACTIVITY_URL?.trim() || undefined
+const activityToken = process.env.GISSX_ACTIVITY_TOKEN?.trim() || undefined
+const activitySalt = process.env.BAKE_ACTIVITY_SALT?.trim() || undefined
+const reportedToday = { day: '', visitors: new Set() }
+const MAX_REPORTED_PER_DAY = 100_000
+
+function clientAddress(request) {
+  // Railway's edge sets X-Real-IP; X-Forwarded-For's last entry is the one its proxy appended.
+  const real = request.headers['x-real-ip']
+  if (typeof real === 'string' && real.trim() !== '') return real.trim()
+  const forwarded = request.headers['x-forwarded-for']
+  const last = typeof forwarded === 'string' ? forwarded.split(',').at(-1)?.trim() : undefined
+  return last || request.socket.remoteAddress || ''
+}
+
+function reportActive(request) {
+  if (activityUrl === undefined || activityToken === undefined || activitySalt === undefined) return
+  if (!/^node(\/|$)/i.test(request.headers['user-agent'] ?? '')) return
+  const day = new Date().toISOString().slice(0, 10)
+  if (reportedToday.day !== day) {
+    reportedToday.day = day
+    reportedToday.visitors.clear()
+  }
+  const visitor = createHash('sha256').update([activitySalt, day, clientAddress(request), 'bake'].join('\n')).digest('hex').slice(0, 16)
+  if (reportedToday.visitors.has(visitor)) return
+  if (reportedToday.visitors.size < MAX_REPORTED_PER_DAY) reportedToday.visitors.add(visitor)
+  fetch(activityUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${activityToken}` },
+    body: JSON.stringify({ product: 'bake', visitor, day }),
+    signal: AbortSignal.timeout(5000),
+  }).then(response => {
+    // Not counted: let a later check try again.
+    if (!response.ok) reportedToday.visitors.delete(visitor)
+  }, () => { reportedToday.visitors.delete(visitor) })
+}
+
 const port = Number(process.env.PORT ?? '8080')
 if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('Invalid PORT')
 
@@ -55,6 +100,9 @@ const server = createServer((request, response) => {
     'X-Content-Type-Options': 'nosniff',
   })
   if (method === 'HEAD') response.end()
-  else createReadStream(file).pipe(response)
+  else {
+    if (pathname === '/latest.json') reportActive(request)
+    createReadStream(file).pipe(response)
+  }
 })
 server.listen(port, port === 0 ? '127.0.0.1' : '0.0.0.0', () => console.log(`Bake downloads listening on ${(server.address()).port}`))

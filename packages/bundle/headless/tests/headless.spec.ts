@@ -290,6 +290,87 @@ describe('headless runner', () => {
     await test.ctx.fiber.dispose()
   })
 
+  describe('a run the process stops', () => {
+    /** One turn whose Agent was disposed mid-step, as shutdown leaves it. */
+    function disposedTurn(session: Session, message: UserMessage): void {
+      session.append('turn/start', { turn: 1 })
+      session.append('step/start', { turn: 1, step: 1 })
+      session.append('user/message', message, { surfaceOp: 'append' })
+      session.append('step/end', { turn: 1, step: 1 })
+      session.append('turn/end', { turn: 1, reason: { kind: 'aborted', reason: { kind: 'disposed' } } })
+    }
+
+    it('reports the stop, not the closed Session the shutdown left behind, and names the id to resume', async () => {
+      let shutdown: () => Promise<void> = () => Promise.resolve()
+      const test = await bench({
+        async afterPrompt(session, message) {
+          await shutdown()
+          disposedTurn(session, message)
+        },
+      }, { json: true })
+      shutdown = async () => { await test.ctx.parallel('app/shutdown') }
+      // Persistence has already closed the Session's handle, as during real shutdown.
+      test.ctx.on('session/flush', () => Promise.reject(new Error('session "x": flush on a closed handle')))
+      const result = await test.run()
+      const types = result.out.trim().split('\n').map(line => (JSON.parse(line) as { type: string }).type)
+      expect(types).not.toContain('error')
+      expect(types).not.toContain('final')
+      expect(result.err).toMatch(/^dsh: stopped before the task finished; continue it with --resume session-[0-9a-f-]+\n$/)
+      expect(result.code).toBe(1)
+      expect(result.order).toEqual(['exit'])
+      await test.ctx.fiber.dispose()
+    })
+
+    it('treats a turn its disposed Agent ended as stopped even without a launcher shutdown', async () => {
+      const test = await bench({ afterPrompt(session, message) { disposedTurn(session, message) } }, { omitPersistence: true })
+      const result = await test.run()
+      expect(result).toEqual({ code: 1, out: '', err: 'dsh: stopped before the task finished\n', order: ['exit'] })
+      await test.ctx.fiber.dispose()
+    })
+
+    it('still delivers an answer the turn finished before the stop, without flushing the closing Session', async () => {
+      let shutdown: () => Promise<void> = () => Promise.resolve()
+      const test = await bench({
+        async afterPrompt(session, message) {
+          appendTurn(session, 1, message, 'done before the signal', true)
+          await shutdown()
+        },
+      })
+      shutdown = async () => { await test.ctx.parallel('app/shutdown') }
+      const result = await test.run()
+      expect(result).toEqual({ code: 0, out: 'done before the signal\n', err: '', order: ['exit'] })
+      await test.ctx.fiber.dispose()
+    })
+
+    it('keeps the outcome of a turn that ended for its own reason before the stop', async () => {
+      let shutdown: () => Promise<void> = () => Promise.resolve()
+      const test = await bench({
+        async afterPrompt(session, message) {
+          appendTurn(session, 1, message, undefined, false)
+          await shutdown()
+        },
+      })
+      shutdown = async () => { await test.ctx.parallel('app/shutdown') }
+      const result = await test.run()
+      expect(result.err).toBe('')
+      expect(result.code).toBe(1)
+      await test.ctx.fiber.dispose()
+    })
+
+    it('reports a failure raised after shutdown began as the stop', async () => {
+      const test = await bench({ afterPrompt() { throw new Error('unused') } }, {
+        sessionId: 'session-exact',
+        observe: async () => {
+          await test.ctx.parallel('app/shutdown')
+          throw new Error('agent initiator scope is disposed')
+        },
+      })
+      const result = await test.run()
+      expect(result).toMatchObject({ code: 1, out: '', err: 'dsh: stopped before the task finished\n' })
+      await test.ctx.fiber.dispose()
+    })
+  })
+
   it('ignores durable inbox events before the first owned turn', async () => {
     const test = await bench({
       afterPrompt(session, message) {

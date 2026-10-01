@@ -6,7 +6,8 @@
  * @module @dsh-tui/ui/plain
  */
 
-import { formatAttachment, type CardLine, type Row } from './rows.ts'
+import { PAST, VERB } from './layout.ts'
+import { formatAttachment, type CardChanges, type CardLine, type Row } from './rows.ts'
 
 /** Left gutter marking each row kind, wide enough to align in a fixed-width terminal. */
 const GUTTER: Record<Row['kind'], string> = {
@@ -39,7 +40,7 @@ export function formatRow(row: Row): string {
       const call = `${gutter} ${row.tool} [${row.callId}](${oneLine(row.input)})${cardText(row.detail)}`
       if (row.result === undefined) return call
       // One action, one line. The call, then how it ended.
-      return `${call} ${GUTTER['tool-result']} ${outcomeText(row.result.ok, row.result.title, row.result.text, row.result.detail)}`.trimEnd()
+      return `${call} ${GUTTER['tool-result']} ${outcomeText(row.result.ok, row.result.title, row.result.text, row.result.detail, row.result.changes)}`.trimEnd()
     }
     case 'tool-group':
       return row.calls.map(formatRow).join('\n')
@@ -48,7 +49,7 @@ export function formatRow(row: Row): string {
     case 'tool-result':
       // A card leaves `text` empty, so its title and lines are the whole
       // result here. This surface is one line already, so it needs no bound.
-      return `${gutter} ${outcomeText(row.ok, row.title, row.text, row.detail, row.callId)}`.trimEnd()
+      return `${gutter} ${outcomeText(row.ok, row.title, row.text, row.detail, row.changes, row.callId)}`.trimEnd()
     default:
       return `${gutter} ${oneLine(row.text)}`
   }
@@ -60,13 +61,38 @@ export function formatRow(row: Row): string {
  * @param title - the card's headline, when it declared one.
  * @param text - raw output, empty when a card replaced it.
  * @param detail - the card's lines.
+ * @param changes - the files a command changed, if any.
  * @param callId - the call it answers, named when it stands apart from it.
  * @returns the outcome text.
  */
-function outcomeText(ok: boolean, title: string | undefined, text: string, detail: readonly CardLine[] | undefined, callId?: string): string {
+function outcomeText(ok: boolean, title: string | undefined, text: string, detail: readonly CardLine[] | undefined,
+  changes: CardChanges | undefined, callId?: string): string {
   const parts = [ok ? 'done' : 'error', callId === undefined ? undefined : `[${callId}]`, [title, text]
     .map(part => oneLine(part ?? '')).filter(part => part !== '').join(' ')]
-  return `${parts.filter(part => part !== undefined && part !== '').join(' ')}${cardText(detail)}`
+  return `${parts.filter(part => part !== undefined && part !== '').join(' ')}${cardText([...detail ?? [], ...changeLines(changes)])}`
+}
+
+/**
+ * A command's changed files as card lines. Each path after `edited`, with
+ * how it changed and, when it has no lines, its size; then its lines and the
+ * section's caveats. This surface has no bound, so it has no count of files
+ * left out by one, and no words for those the producer left out.
+ *
+ * @param changes - the files a command changed, if any.
+ * @returns the lines, empty when there are none.
+ */
+function changeLines(changes: CardChanges | undefined): readonly CardLine[] {
+  if (changes === undefined) return []
+  const size = (added: number, removed: number): string =>
+    [added === 0 ? '' : `+${added}`, removed === 0 ? '' : `\u2212${removed}`].filter(part => part !== '').join(' ')
+  return [
+    ...changes.files.flatMap(file => [
+      { text: [`${PAST[VERB.edit]} ${file.path}`, file.status ?? '', file.lines.length === 0 ? size(file.added, file.removed) : '']
+        .filter(part => part !== '').join('  ') },
+      ...file.lines,
+    ]),
+    ...(changes.notes ?? []).map(text => ({ text })),
+  ]
 }
 
 /**

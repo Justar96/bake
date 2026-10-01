@@ -18,7 +18,7 @@ import type { AppProps } from '@dsh-tui/ui/app.tsx'
 import { SessionNavigation } from './navigation.ts'
 import { bakeVersion, releaseRoot } from './release.ts'
 import { Updates } from './update.ts'
-import { WorkspaceGit } from './git.ts'
+import { sessionGitConfinement, WorkspaceGit } from './git.ts'
 import { cliProxyModelsInUse, cliProxyUpgradeNotice, refreshCliProxyModels, upgradeCliProxyRoute } from './cliproxyapi.ts'
 import type { CredentialTargetConfig, LoginSources, SignInFlowConfig } from './login.ts'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
@@ -209,7 +209,7 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
     if (navigation === undefined || active === undefined) throw new Error('tui: session is not connected')
     const settings = preferences.value
     const cwd = active.agent.session.header.cwd
-    const branch = cwd === undefined ? undefined : git.follow(cwd)
+    const branch = cwd === undefined ? undefined : git.follow(cwd, sessionGitConfinement(ctx, active.agent.session))
     return React.createElement(TerminalOwner, { bind: bindSuspend }, React.createElement(View, {
       ...active.view, key: active.agent.id, inputBlocked: navigation.busy, copy, frame: frame(), clock: systemClock, motion, screen,
       quitting: quitTimer !== undefined, completionLimit: settings.completionLimit, resultLines: settings.resultLines,

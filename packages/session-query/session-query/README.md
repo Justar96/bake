@@ -33,7 +33,7 @@ Use `ctx.sessionQuery` from application code when you need to read or search ses
 |---|---|
 | `listSessions()` | Every logical session, newest first, with `live` and `persisted` availability flags |
 | `filterSessions(filters)` | Sessions matching ANDed metadata and availability predicates |
-| `readTitleSnapshots(ids)` | The latest folded title per session, bound to its source header, with the newest event's time as `lastEventAt` |
+| `readTitleSnapshots(ids)` | The latest folded title per session, bound to its source header, with the newest event's time as `lastEventAt` and `startedTurn: true` when the log started a turn |
 | `readSurface(id)` | The complete current model surface |
 | `searchSessions(request)` / `searchEvents(request)` | Full-text search pages, implemented by the mounted backend |
 

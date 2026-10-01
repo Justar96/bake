@@ -73,6 +73,12 @@
       "path": "../../../../packages/interaction/permission-presets"
     },
     {
+      "path": "../../../../packages/sandbox/sandbox"
+    },
+    {
+      "path": "../../../../packages/sandbox/sandbox-policy"
+    },
+    {
       "path": "../../../../packages/session/session-persistence"
     },
     {

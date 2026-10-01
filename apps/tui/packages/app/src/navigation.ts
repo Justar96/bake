@@ -242,7 +242,11 @@ export class SessionNavigation {
       && result.value.lastEventAt !== undefined ? [[result.sessionId, result.value.lastEventAt] as const] : []))
     const usedAt = (record: Pick<typeof records[number], 'header'>): number =>
       used.get(record.header.id) ?? record.header.createdAt
-    const saved = records.filter(record => record.header.id !== agent.id)
+    // A session opened and left without a turn has nothing to go back to. A log
+    // the query could not read stays listed, since its contents are unknown.
+    const unused = new Set(titles.flatMap(result => result.status === 'fulfilled'
+      && result.value.startedTurn !== true ? [result.sessionId] : []))
+    const saved = records.filter(record => record.header.id !== agent.id && !unused.has(record.header.id))
       .sort((left, right) => usedAt(right) - usedAt(left)
         || left.header.id.localeCompare(right.header.id))
     const current = records.find(record => record.header.id === agent.id) ?? { header: agent.session.header }

@@ -31,6 +31,7 @@ The shell group provides command execution to agents: run a foreground command a
 | [`pwsh-sandbox`](pwsh-sandbox/README.md) | Runs PowerShell commands confined through the sandbox capability | registers `ctx.shell` |
 | [`shell-env`](shell-env/README.md) | Supplies the managed `DSH_*` environment every shell command receives | `ctx.shellEnv` |
 | [`tool-bash`](tool-bash/README.md) | Exposes Bash execution and background jobs to the model as the `bash` tool | registers on `ctx.tools` |
+| [`shell-change-report`](shell-change-report/README.md) | Reports the workspace files a foreground `bash` or `pwsh` command changed, for display only | none (library) |
 | [`tool-bash-persistent`](tool-bash-persistent/README.md) | Runs model shell calls in one owner-isolated persistent Bash session | registers on `ctx.tools` |
 | [`tool-pwsh`](tool-pwsh/README.md) | Exposes PowerShell execution to the model as the `pwsh` tool | registers on `ctx.tools` |
 | [`tool-pwsh-persistent`](tool-pwsh-persistent/README.md) | Runs model shell calls in one owner-isolated persistent PowerShell session | registers on `ctx.tools` |

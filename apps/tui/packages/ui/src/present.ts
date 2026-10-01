@@ -17,7 +17,7 @@ import { clipCells, outputLines, outputSpans, toolText } from './tool-output.ts'
 import { iconFor, ICON } from './icons.ts'
 import { COLUMN, MARKER, PAST, TREE, VERB, type Verb } from './layout.ts'
 import { PALETTE, type PaletteColor } from './palette.ts'
-import { formatAttachment, type CardLine, type Row, type ToolCallRow, type ToolOutcome } from './rows.ts'
+import { formatAttachment, type CardChanges, type CardFileChange, type CardLine, type Row, type ToolCallRow, type ToolOutcome } from './rows.ts'
 
 /** How a line is emphasized. Colour is chosen by the component layer. */
 export type Tone =
@@ -812,6 +812,8 @@ function beside(base: Styled, extra: Styled): Styled {
  * A card summary — a search count, a read window, a command exit status —
  * stays on the head, where the preview bound cannot hide it. A failing run's
  * `exit 1` is the line that matters, and it is the last line of the output.
+ * The files a command changed follow its output as a section of their own,
+ * their size on the head before the exit status.
  *
  * @param outcome - how the call ended.
  * @param verb - the action's verb, which decides whether output is previewed.
@@ -829,6 +831,8 @@ function outcomeLines(outcome: ToolOutcome, verb: Verb, bound: ResultBound, titl
   const card = outcome.detail ?? []
   const summaries = card.filter(line => line.summary !== undefined)
   const stat = failed ? undefined : changeSize(outcome.detail)
+  const changes = outcome.changes
+  const touched = changes === undefined ? undefined : changedSize(changes, bound)
   // A failure is always news, and a diff is what an edit did.
   const previewed = failed || PREVIEWED.has(verb) || stat !== undefined
   const body = drawnBody([rawLines(outcome.text, failed), card.filter(line => line.summary === undefined)], failed, bound.code,
@@ -836,15 +840,14 @@ function outcomeLines(outcome: ToolOutcome, verb: Verb, bound: ResultBound, titl
   const { lines: shown, hidden } = previewed ? excerpt(body, bound.lines, bound, tone, failed) : { lines: [], hidden: body.length }
   // Previewed output counts what it left out below it; a count alone says how
   // much there was beside the headline. A change's size, or the card's own
-  // count, says it either way.
-  const size = stat !== undefined || summaries.length > 0 || shown.length > 0 || body.length === 0 || hidden === 0
+  // count, says it either way, and so does what a command changed.
+  const size = stat !== undefined || touched !== undefined || summaries.length > 0 || shown.length > 0 || body.length === 0 || hidden === 0
     ? undefined : countOf(body.length, bound)
   const summary = summaries.length === 0 ? undefined
     : joined(summaries.map(line => [line.text, line.summary === 'failure' || failed ? 'failed' : 'quiet'] as const))
   const headline = outcome.title === undefined || sameWords(outcome.title, title, verb) ? undefined : outcome.title
-  const quiet = (text: string | undefined): Styled | undefined =>
-    text === undefined ? undefined : { text, spans: [{ length: text.length, tone: 'quiet' }] }
-  const inline = [stat, summary, headline === undefined && !failed ? quiet(size) : undefined]
+  const inline = [stat, touched, summary,
+    headline === undefined && !failed && size !== undefined ? quietly(size) : undefined]
     .filter((part): part is Styled => part !== undefined)
     .reduce<Styled | undefined>((all, part) => all === undefined ? part : beside(all, part), undefined)
   const heading = headline === undefined && !failed ? undefined : joined([[headline, tone], [size, failed ? tone : 'quiet']])
@@ -853,8 +856,90 @@ function outcomeLines(outcome: ToolOutcome, verb: Verb, bound: ResultBound, titl
     lines: zoned([
       ...heading === undefined || heading.text === '' ? [] : [{ ...continuation(heading.text, tone), spans: heading.spans }],
       ...shown,
+      ...changes === undefined ? [] : changeSection(changes, bound),
     ]),
   }
+}
+
+/** Text in the quiet tone, as a head's metadata is. */
+const quietly = (text: string): Styled => ({ text, spans: [{ length: text.length, tone: 'quiet' }] })
+
+/**
+ * What a command changed, as its head reports it.
+ *
+ * The size counts every file the producer measured, including those whose
+ * lines it did not send. Once the bound collapses the section, the number of
+ * files joins it, since no path line is left to show there were several.
+ *
+ * @param changes - the files the command changed.
+ * @param bound - the preview bound and the noun for a count of files.
+ * @returns `+N −M`, then the file count when collapsed, or undefined when neither applies.
+ */
+function changedSize(changes: CardChanges, bound: ResultBound): Styled | undefined {
+  const size = sizeOf(changes.files.reduce((sum, file) => sum + file.added, 0), changes.files.reduce((sum, file) => sum + file.removed, 0))
+  const count = changes.files.length + (changes.omitted ?? 0)
+  const files = bound.lines > 0 || count < 2 || bound.files === undefined ? undefined : quietly(`${count} ${bound.files}`)
+  return size === undefined ? files : files === undefined ? size : beside(size, files)
+}
+
+/**
+ * The files a command changed, as a section under its output.
+ *
+ * It is bounded apart from the output, by the same number of lines. A
+ * file's changed lines count against it, as an edit's do, and a file with
+ * none to draw counts its path line. Files are drawn while some of the
+ * bound is left; a file that is drawn always keeps its path line, under
+ * `edited` in the verb column. The files left out, by the bound or by the
+ * producer, are counted, and the section's caveats close it.
+ *
+ * The section keeps its own tones whatever the command's exit status. A
+ * failed command still changed what it changed.
+ *
+ * @param changes - the files the command changed.
+ * @param bound - how many changed lines to draw, and the words for the rest.
+ * @returns the section's lines, none at a bound of zero.
+ */
+function changeSection(changes: CardChanges, bound: ResultBound): readonly PresentedLine[] {
+  if (bound.lines <= 0) return []
+  const lines: PresentedLine[] = []
+  let budget = bound.lines
+  let drawn = 0
+  for (const file of changes.files) {
+    if (budget <= 0) break
+    const body = drawnBody([file.lines], false, bound.code, plain => excerpt(plain, budget, bound, 'plain', false).lines)
+    const { lines: shown } = excerpt(body, budget, bound, 'plain', false)
+    const counted = shown.filter(isChange).length
+    lines.push(fileHead(file, counted === 0), ...shown)
+    budget -= Math.max(1, counted)
+    drawn++
+  }
+  const omitted = changes.omitted ?? 0
+  // A count standing for one file costs the row that file's own path line takes.
+  const last = drawn === changes.files.length - 1 && omitted === 0 ? changes.files.at(-1) : undefined
+  if (last !== undefined) lines.push(fileHead(last, true))
+  const hidden = changes.files.length - drawn - (last === undefined ? 0 : 1) + omitted
+  const more = hidden === 1 ? bound.moreFile ?? bound.moreFiles : bound.moreFiles
+  return [
+    ...lines,
+    ...hidden <= 0 ? [] : [continuation(more === undefined ? `+${hidden}` : `+${hidden} ${more}`, 'quiet')],
+    ...(changes.notes ?? []).map(note => continuation(note, 'quiet')),
+  ]
+}
+
+/**
+ * A changed file's path line: `edited` in the verb column, then the path,
+ * how it changed when that was not a plain edit, and, when none of its
+ * lines are drawn, how many it added and removed.
+ *
+ * @param file - the file.
+ * @param sized - whether the line carries the file's size.
+ * @returns the line, in the path's own tone whatever the command's exit.
+ */
+function fileHead(file: CardFileChange, sized: boolean): PresentedLine {
+  const path: Styled = { text: file.path, spans: [{ length: file.path.length, tone: 'plain', color: PALETTE.reference }] }
+  const head = [file.status === undefined ? undefined : quietly(file.status), sized ? sizeOf(file.added, file.removed) : undefined]
+    .reduce<Styled>((all, part) => part === undefined ? all : beside(all, part), path)
+  return { marker: MARKER.none, verb: PAST[VERB.edit], verbTone: 'strong', text: head.text, column: COLUMN.output, tone: 'plain', spans: head.spans }
 }
 
 /**
@@ -878,8 +963,16 @@ const countOf = (count: number, bound: ResultBound): string => `${count} ${count
  * @returns the size, or undefined when the card is not a change.
  */
 function changeSize(detail: readonly CardLine[] | undefined): Styled | undefined {
-  const added = (detail ?? []).filter(line => line.emphasis === 'added').length
-  const removed = (detail ?? []).filter(line => line.emphasis === 'removed').length
+  return sizeOf((detail ?? []).filter(line => line.emphasis === 'added').length, (detail ?? []).filter(line => line.emphasis === 'removed').length)
+}
+
+/**
+ * `+2 −1` in each side's tone.
+ * @param added - lines added.
+ * @param removed - lines removed.
+ * @returns the size, leaving out a side that is zero, or undefined when both are.
+ */
+function sizeOf(added: number, removed: number): Styled | undefined {
   const parts: Styled[] = [
     ...added === 0 ? [] : [{ text: `+${added}`, spans: [{ length: `+${added}`.length, tone: 'added' as const }] }],
     ...removed === 0 ? [] : [{ text: `−${removed}`, spans: [{ length: `−${removed}`.length, tone: 'removed' as const }] }],
@@ -1001,6 +1094,12 @@ export interface ResultBound {
    * finished call to its head but hides none.
    */
   readonly earlier?: string
+  /** Locale-owned noun for a count of the files a command changed, as in `3 files`; absent, a collapsed result leaves the count out. */
+  readonly files?: string
+  /** Locale-owned phrase for changed files a bound left out, as in `+2 more files`; absent, the count is drawn alone. */
+  readonly moreFiles?: string
+  /** Locale-owned phrase for one changed file left out, as in `+1 more file`; absent, {@link ResultBound.moreFiles} serves. */
+  readonly moreFile?: string
 }
 
 /**
@@ -1170,7 +1269,8 @@ export function present(row: Row, result: ResultBound, wrap?: (line: PresentedLi
       // The head of the output prints once, under the outcome, and stays. Shown
       // for a moment and then removed, it was the rows the composer jumped by.
       const { shown, hidden } = preview(body, result.lines)
-      return [head, ...zoned([...shown, ...hidden === 0 || shown.length === 0 ? [] : [continuation(`+${hidden} ${result.more}`, row.ok ? 'quiet' : tone)]])]
+      return [head, ...zoned([...shown, ...hidden === 0 || shown.length === 0 ? [] : [continuation(`+${hidden} ${result.more}`, row.ok ? 'quiet' : tone)],
+        ...row.changes === undefined ? [] : changeSection(row.changes, result)])]
     }
 
     case 'notice': {

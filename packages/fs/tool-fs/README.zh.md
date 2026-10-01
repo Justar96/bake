@@ -48,7 +48,7 @@ kind: "package-reference"
 | `write` | `file_path`、`content` | 创建或完整替换文件；有策略插件时，覆盖要求先在未变版本上执行 `read`，创建不需要 |
 | `edit` | `file_path`、`old_string`、`new_string`、`replace_all?` | 字面量替换，除非 `replace_all` 为 true 否则要求唯一匹配；有策略插件时，要求先执行 `read` 且文件未变 |
 
-字段名使用 snake_case，与 Claude Code 和现有 harness 工具 schema 一致。成功返回紧凑信封——读取窗口、图像引用或 `Created file`/`Updated file` 确认——`write`/`edit` 还会派生可回放的 diff 卡片元数据供 UI 展示。
+字段名使用 snake_case，与 Claude Code 和现有 harness 工具 schema 一致。成功返回紧凑信封——读取窗口、图像引用或 `Created file`/`Updated file` 确认——`write`/`edit` 还会派生可回放的 diff 卡片元数据供 UI 展示。这些 hunk 以及 `edit` 回显的已编辑行所依据的逐行差异，在新增与删除行合计超过 1,000 行后停止计算。超过该上限时，用一个 hunk 覆盖文件共同开头与结尾之间的行，因此改写 10,000 行不再阻塞事件循环数秒。该上限按行数而不是时间计算，因此同一次编辑总是得到相同的文本。
 
 ### 配置
 
@@ -133,7 +133,7 @@ kind: "package-reference"
 
 #### 模型看到的内容
 
-模型会看到已生成的 [`read`、`read_image`、`write` 和 `edit` schema](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-fs)，参数使用 snake_case。本包不添加系统提示词段落：各工具的描述和参数就是它唯一的指导，同时也是 PTC 模式下 `run_code` 背后的 SDK 文档。`read` 的描述说明，与 shell 中的 `cat` 不同，一次读取会计入之后的 `write` 和 `edit` 调用。`write` 和 `edit` 的描述写明观察策略的保护：修改本会话中未读取、未写入或未编辑过的文件，或此后已变化的文件，会被拒绝。`edit` 的 `old_string` 承载“恰好匹配一次”的规则，并说明不要包含 `read` 添加的行号。描述是注册时的文本，因此即使某个作用域隐藏了 `edit`，`write` 仍会提到 `edit`。每个 `file_path` 都被描述为绝对路径或相对于工作目录（即调用会话的 cwd）的路径。图片工具只在持久附件存储已挂载时出现；schema 本身与路由无关，严格门禁在执行时拒绝。作用域工具限制可以为某个 agent 移除任一定义。
+模型会看到已生成的 [`read`、`read_image`、`write` 和 `edit` schema](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-fs)，参数使用 snake_case。本包不添加系统提示词段落：各工具的描述和参数就是它唯一的指导，同时也是 PTC 模式下 `run_code` 背后的 SDK 文档。`read` 的描述说明，与 shell 中的 `cat` 不同，一次读取会计入之后的 `write` 和 `edit` 调用。`write` 的描述写明观察策略的保护：替换已有文件需要当前的读取。`edit` 的描述写明恰好匹配一次的规则和 `edits` 形式，不劝阻模型通过 shell 修改文件。`edit` 的 `old_string` 承载“恰好匹配一次”的规则，并说明不要包含 `read` 添加的行号。描述是注册时的文本，因此即使某个作用域隐藏了 `edit`，`write` 仍会提到 `edit`。每个 `file_path` 都被描述为绝对路径或相对于工作目录（即调用会话的 cwd）的路径。图片工具只在持久附件存储已挂载时出现；schema 本身与路由无关，严格门禁在执行时拒绝。作用域工具限制可以为某个 agent 移除任一定义。
 
 #### Token 影响
 

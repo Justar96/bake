@@ -221,6 +221,28 @@ describe('refreshing a saved route\'s models', () => {
     ] }]]])
   })
 
+  it('keeps the saved efforts and limits of a model whose listing stops reporting them', async () => {
+    const writes: unknown[] = []
+    const claude = {
+      id: 'claude-sonnet-9', api: 'anthropic-messages', baseURL: 'https://proxy.example', name: 'Claude Sonnet 9',
+      contextWindow: 1_000_000, maxTokens: 128_000, input: ['text', 'image'],
+      reasoningEfforts: { low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh', max: 'max' },
+      compat: { forceAdaptiveThinking: true },
+    }
+    const route = { ...saved, models: [claude, { id: 'gpt-old', name: 'gpt-old', reasoningEfforts: { low: 'low', high: 'high' } }] }
+    const fetcher = (async () => Response.json({ data: [
+      { id: 'claude-sonnet-9', owned_by: 'anthropic', display_name: 'Claude Sonnet 9', input_modalities: ['text'] },
+      { id: 'gpt-old', supported_reasoning_levels: ['medium'] },
+    ] })) as unknown as typeof fetch
+    await expect(refreshCliProxyModels(routeContext(route, writes), new AbortController().signal, [], fetcher)).resolves.toBe(true)
+    expect(writes).toEqual([['llm-pi-ai', [{ op: 'set', path: ['providers', 'cliproxyapi', 'models'], value: [
+      // The listing's own input wins; the efforts, limits, and adaptive thinking it left out are kept.
+      { ...claude, input: ['text'] },
+      // A listing that reports efforts replaces the saved ones.
+      { id: 'gpt-old', name: 'gpt-old', reasoningEfforts: { medium: 'medium' } },
+    ] }]]])
+  })
+
   it('writes nothing when the list is unchanged, ignoring fields the settings service fills in', async () => {
     const writes: unknown[] = []
     const fetcher = (async () => Response.json({ data: [{ id: 'gpt-old' }, { id: 'gpt-kept' }] })) as unknown as typeof fetch

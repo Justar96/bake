@@ -46,12 +46,13 @@ kind: "package-reference"
 | 字段 | 默认值 | 含义 |
 |---|---|---|
 | `enableRunInBackground` | `true` | 暴露 `run_in_background`；为 `false` 时拒绝强制后台调用 |
+| `changeReport` | `true` | 通过 [`dsh-shell-change-report`](../shell-change-report/README.zh.md) 在输出下方显示前台调用改动的工作区文件；仅供展示，因此模型得到的结果不变 |
 
 生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-tool-bash)是每个受支持字段及其 JSDoc 的穷尽式真源；生成的[工具目录](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-bash)携带完整参数 schema。
 
 ### 运行命令
 
-工具执行 `bash -c <command>` 并返回合并后的输出。命令每次调用都运行在全新 shell 中，因此目录切换与变量都不会延续；`workdir` 设定命令的运行目录，相对的 `workdir` 相对会话工作目录解析。非零退出以 `[exit code: N]` 报告给 agent 解读，而不是作为工具错误抛出。简短的 `description` 向用户标注该调用；`timeoutMs` 取代执行器的默认超时，并被限制在其上限之内。超出执行器流上限的输出会被截断为尾部，完整输出保存到 spill 文件并报告其路径。工具说明会点名受管环境中的 `$DSH_HOME` 与 `$DSH_SESSION_ID`；`DSH_SHELL=1` 同样会设置，但只用于标记进程。
+工具执行 `bash -c <command>` 并返回合并后的输出。命令每次调用都运行在全新 shell 中，因此目录切换与变量都不会延续；`workdir` 设定命令的运行目录，相对的 `workdir` 相对会话工作目录解析。非零退出以 `[exit code: N]` 报告给 agent 解读，而不是作为工具错误抛出。简短的 `description` 向用户标注该调用；`timeoutMs` 取代执行器的默认超时，并被限制在其上限之内。未声明的拼写 `timeout` 与 `timeout_ms`（数字或数字字符串）在缺少 `timeoutMs` 时同样生效：习惯其他 harness 的模型会发送它们，忽略它们会让长命令在默认超时被终止。超出执行器流上限的输出会被截断为尾部，完整输出保存到 spill 文件并报告其路径。工具说明会点名受管环境中的 `$DSH_HOME` 与 `$DSH_SESSION_ID`；`DSH_SHELL=1` 同样会设置，但只用于标记进程。
 
 <a id="running-long-commands-in-the-background"></a>
 ### 后台运行长时间命令
@@ -168,7 +169,7 @@ renderer 输出依数据而定的 stdout 尾部，再输出可选的 `[stderr]` 
 
 #### 模型看到什么
 
-验证与策略失败统一为 `Error: <message>`。本包的稳定消息包括 `invalid command: expected a non-empty string`、`invalid timeoutMs: expected a positive number, got <value>`、升权配对失败、`run_in_background is disabled for this deployment (enableRunInBackground: false)`、`background jobs unavailable: load @deepseek-ai/dsh-jobs and @deepseek-ai/dsh-tool-jobs`、`sandbox_permissions is not available in this composition (no sandboxing executor to escalate)`、审批不可用／拒绝／取消变体，以及 `tool call aborted`。
+验证与策略失败统一为 `Error: <message>`。本包的稳定消息包括 `invalid command: expected a non-empty string`、`invalid timeoutMs: expected a positive number, got <value>`、`invalid <timeout|timeout_ms>: expected a positive number of milliseconds for timeoutMs, got <value>`、升权配对失败、`run_in_background is disabled for this deployment (enableRunInBackground: false)`、`background jobs unavailable: load @deepseek-ai/dsh-jobs and @deepseek-ai/dsh-tool-jobs`、`sandbox_permissions is not available in this composition (no sandboxing executor to escalate)`、审批不可用／拒绝／取消变体，以及 `tool call aborted`。
 
 #### Token 影响
 

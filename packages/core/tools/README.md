@@ -88,7 +88,7 @@ The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-a
 
 ### Host presentation descriptors
 
-A tool can retain pure `presentCall()` and `presentResult()` methods for Host-local consumers. The built-in Web Client does not consume those values. It selects a renderer through `tool.call.toolview` and derives card props from raw call arguments, result content, failure state, and persisted metadata. The Client-derived presentation decision owns this transport split.
+A tool can declare pure `presentCall()` and `presentResult()` methods. The terminal UI calls them through the registry for live and replayed calls, with the logged arguments, result content, and `tool/result.meta`. A tool's `meta` comes from one of two sources, and the model never receives it. `output.presentationMeta(args, value)` derives it from the canonical value, as file edits derive their diffs. A body whose display data is not part of its value calls `exec.presentResultMeta(meta)` instead, as a shell command reports the files it changed. The registry snapshots that value and attaches it to a successful top-level result, keeps it through a post-execute replacement, and ignores it for a nested call. A tool that declares `presentationMeta` cannot call it.
 
 -----
 

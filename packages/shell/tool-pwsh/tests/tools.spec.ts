@@ -444,6 +444,18 @@ describe('argument validation', () => {
     expect(text(await call(ctx, 'pwsh', { command: 'Write-Output hi', description: 'd', timeoutMs: -1 })))
       .toContain('invalid timeoutMs: expected a positive number')
   })
+
+  it('forwards the timeout and timeout_ms spellings, and refuses an unusable one', async () => {
+    const { ctx, bash } = await setup()
+    bash.handler = () => runResult('hi\n')
+    await call(ctx, 'pwsh', { command: 'Write-Output hi', timeout: '90000' })
+    await call(ctx, 'pwsh', { command: 'Write-Output hi', timeout_ms: 45_000 })
+    await call(ctx, 'pwsh', { command: 'Write-Output hi', timeoutMs: 1234, timeout: 90_000 })
+    expect(bash.requests.map(request => request.timeoutMs)).toEqual([90_000, 45_000, 1234])
+    expect(text(await call(ctx, 'pwsh', { command: 'Write-Output hi', timeout: 'soon' })))
+      .toContain('invalid timeout: expected a positive number of milliseconds for timeoutMs, got "soon"')
+    expect(bash.requests).toHaveLength(3)
+  })
 })
 
 describe('execution through the bash seam', () => {
@@ -980,6 +992,16 @@ describe('UI presentation', () => {
       .toEqual({ card: 'terminal', output: 'oops', exitCode: 3 })
     expect(present?.presentResult?.(args, { content: [{ type: 'text', text: 'gone\n[killed by signal: SIGKILL]' }], isError: false }))
       .toEqual({ card: 'terminal', output: 'gone', signal: 'SIGKILL' })
+  })
+
+  it('presentResult: a logged change report becomes the card\'s changes section', async () => {
+    const { ctx } = await setup()
+    const shellChanges = { version: 1, files: [{ path: 'a.ps1', status: 'created', added: 1, removed: 0, hunks: [{ oldText: null, newText: 'Write-Output 1', oldStart: 1, newStart: 1 }] }] }
+    expect(ctx.tools.get('pwsh')?.presentResult?.({ command: 'x' }, { content: [{ type: 'text', text: 'ok' }], isError: false, meta: { shellChanges } }))
+      .toEqual({ card: 'terminal', output: 'ok', exitCode: 0, changes: { files: [{
+        path: 'a.ps1', status: 'created', added: 1, removed: 0,
+        hunks: [{ path: 'a.ps1', oldText: null, newText: 'Write-Output 1', oldStart: 1, newStart: 1 }],
+      }] } })
   })
 
   it('presentResult: markers a pill CANNOT show (timeout) stay in the terminal output', async () => {

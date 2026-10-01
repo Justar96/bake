@@ -180,6 +180,44 @@ export interface TerminalResultView {
   exitCode?: number
   /** Signal name that killed the process (e.g. `SIGTERM`). Mutually exclusive with `exitCode`. */
   signal?: string
+  /**
+   * Workspace files that changed while the command ran, drawn as a section of
+   * the same card under the output. Absent when the tool reported none.
+   */
+  changes?: TerminalChanges
+}
+
+/** How one file changed while a command ran. */
+export type TerminalFileChangeStatus =
+  | 'created' | 'modified' | 'deleted' | 'renamed' | 'mode' | 'symlink' | 'binary' | 'too-large' | 'unknown-before'
+
+/** One file in a {@link TerminalChanges} section. */
+export interface TerminalFileChange {
+  /** Path relative to the session's working directory. */
+  path: string
+  status: TerminalFileChangeStatus
+  /** A renamed file's previous path. */
+  from?: string
+  /** Lines added and removed; zero for a change without text lines. */
+  added: number
+  removed: number
+  /** Changed hunks, each with its file's `path`; absent past the producer's bounds. */
+  hunks?: FileDiff[]
+}
+
+/**
+ * The files a command changed while it ran. The record states what changed
+ * during the run, which may include other writers in the same workspace.
+ */
+export interface TerminalChanges {
+  /** Changed files in path order. */
+  files: TerminalFileChange[]
+  /** Files beyond the producer's list bound. */
+  omittedFiles?: number
+  /** The comparison ran out of time; `files` may be incomplete. */
+  timedOut?: true
+  /** Other known work ran in the same workspace during the command. */
+  concurrent?: true
 }
 
 /**
