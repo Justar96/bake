@@ -741,13 +741,15 @@ function SessionView(props: AppProps): React.ReactElement {
   }))
   // The footer names what the keys do here. Cycling is named only when there is somewhere to go.
   const sheetKeys = (kind: SheetKind): string => [
+    // Child arrows change the selection; page keys reach its wrapped routing evidence.
+    ...kind === 'agents' && props.subagents?.[agentIndex]?.routing !== undefined ? [copy.sheetPages] : [],
     kind === 'agents' && (props.subagents?.length ?? 0) > 0 ? copy.sheetSelect : copy.sheetScroll,
     ...kind === 'agents' && (props.subagents?.length ?? 0) > 0 ? [copy.subagentsOpen] : [],
     ...showing.length > 1 ? [copy.sheetCycle] : [],
     copy.sheetClose,
   ].join(' \u00b7 ')
   const subagentFollow: { readonly follow?: SheetFollow } = sheetFollowing && (props.subagents?.length ?? 0) > 0
-    ? { follow: subagentLine(agentIndex, props.workflows?.length) } : {}
+    ? { follow: subagentLine(agentIndex, props.workflows?.length, props.subagents?.[agentIndex]?.routing) } : {}
   const sheetView: { readonly color: PaletteColor, readonly lines: readonly SheetLine[], readonly keys: string, readonly follow?: SheetFollow } | undefined =
     sheet === undefined || !showable(sheet) ? undefined
       : {

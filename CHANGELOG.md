@@ -4,6 +4,8 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 ## [Unreleased]
 
+- Ctrl+G shows each subagent's recorded model selection: automatic, explicitly selected, or default, with the effective model and reasoning effort, task difficulty, and the router's reasons. Cautious decisions, missing context, and fallback remain visible after resume. Model calibration labels inherited quality estimates separately.
+
 ## [0.3.1] - 2026-09-30
 
 - `/settings` opens straight on its most general section, Terminal, instead of a list of sections. The sections run from most general to most specific on the tab row under the title: Terminal, Session, Agent, Shell, Web search, and Advanced. Tab and Shift-Tab move between them, and Escape from a section closes the panel. Typing on any section searches every setting, and a setting changed from another section's results opens that section with the changed row selected.

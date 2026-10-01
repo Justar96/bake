@@ -1,0 +1,18 @@
+╭──────────────────────────────────────────────────────────────────────────────╮
+│  Subagents                                                                   │
+│ ────────────────────────  0/6 done · 6 working                               │
+│ Select a child to view its session. The parent keeps running.                │
+│                                                                              │
+│   ● Review  Working · Auto                                                   │
+│ ▸ ● Coverage  Working · Auto · cautious                                      │
+│     One-shot · coverage                                                      │
+│     deepseek-official/tui-picked-model · think high                          │
+│     Difficulty 0.74 · Auto · cautious                                        │
+│     Integration checks need stronger reasoning.                              │
+│     limited benchmark support                                                │
+│   ● Continue  Working · Default · needs context                              │
+│   ● Selected model  Working · Selected                                       │
+│   ● Default model  Working · Default                                         │
+│   ● Older child  Working                                                     │
+│ Enter opens  1-14/14                                                         │
+╰──────────────────────────────────────────────────────────────────────────────╯

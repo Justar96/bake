@@ -1,7 +1,7 @@
 /** Child LLM route selection for the subagent tool. */
 
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
-import type { LlmRuntime } from '@deepseek-ai/dsh-llm'
+import type { LlmCallConfig, LlmRuntime } from '@deepseek-ai/dsh-llm'
 import type { AgentOptions } from '@deepseek-ai/dsh-agent'
 import z from '@deepseek-ai/schemastery'
 
@@ -172,6 +172,7 @@ export function hasConfiguredLlmSelection(options: AgentOptions | undefined): bo
  * @param requested - Per-child options after request/config merging.
  * @param signal - Tool-call cancellation signal.
  * @param inheritParentReasoningEffort - Whether an omitted effort may inherit from the parent route.
+ * @returns the validated effective route, including adapter-resolved defaults.
  */
 export async function preflightChildLlmRoute(
   llm: LlmRuntime,
@@ -179,7 +180,7 @@ export async function preflightChildLlmRoute(
   requested: AgentOptions | undefined,
   signal: AbortSignal,
   inheritParentReasoningEffort = true,
-): Promise<void> {
+): Promise<LlmCallConfig> {
   const provider = requested?.provider ?? parentOptions.provider
   const model = requested?.model ?? parentOptions.model
   if (provider === undefined || model === undefined) {
@@ -188,7 +189,7 @@ export async function preflightChildLlmRoute(
   const routeChanged = provider !== parentOptions.provider || model !== parentOptions.model
   const reasoningEffort = requested?.reasoningEffort
     ?? (inheritParentReasoningEffort && !routeChanged ? parentOptions.reasoningEffort : undefined)
-  await llm.resolveCallConfig({
+  return llm.resolveCallConfig({
     provider,
     model,
     ...reasoningEffort === undefined ? {} : { reasoningEffort },

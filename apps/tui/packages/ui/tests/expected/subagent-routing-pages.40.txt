@@ -1,0 +1,35 @@
+FIRST PAGE
+  note   Session: parent
+╭──────────────────────────────────────╮
+│  Subagents 1 · 1 working             │
+│ ▸ ● Review  Working · Auto · cautio… │
+│     One-shot · review                │
+│     deepseek-official/tui-picked-mod │
+│     el · think high                  │
+│     Difficulty 0.74 · Auto ·         │
+│     cautious                         │
+│     Main explanation.                │
+│     Evidence 0: word word word word  │
+│     word word word word word word    │
+│     word word word word word word    │
+│     word word word word word word    │
+│ PgUp/PgDn scroll · ↑↓ select · Ente… │
+╰──────────────────────────────────────╯
+
+LAST PAGE
+  note   Session: parent
+╭──────────────────────────────────────╮
+│  Subagents 1 · 1 working             │
+│     word word word word word word    │
+│     word word word word word word    │
+│     word word word word word word    │
+│     word word word word tail-6       │
+│     Evidence 7: word word word word  │
+│     word word word word word word    │
+│     word word word word word word    │
+│     word word word word word word    │
+│     word word word word word word    │
+│     word word word word word word    │
+│     word word word word tail-7       │
+│ PgUp/PgDn scroll · ↑↓ select · Ente… │
+╰──────────────────────────────────────╯

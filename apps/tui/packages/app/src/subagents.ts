@@ -3,6 +3,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { SubagentRunInfo } from '@deepseek-ai/dsh-subagent'
+import type { SubagentRoutingDecision } from '@deepseek-ai/dsh-tool-subagent'
 import type { SubagentEntry, WorkflowEntry } from '@dsh-tui/ui/subagents.tsx'
 import type { WorkflowProgress } from '@deepseek-ai/dsh-tool-workflow/projection'
 import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
@@ -18,7 +19,8 @@ export interface SubagentView {
 
 /** Preserve catalog order and derive activity from live owners and run notifications. */
 export function subagentEntries(view: SubagentView, ctx: Context, copy: TuiCopy,
-  workflows: readonly WorkflowProgress[] = []): readonly SubagentEntry[] {
+  workflows: readonly WorkflowProgress[] = [],
+  routing: Readonly<Record<string, SubagentRoutingDecision>> = {}): readonly SubagentEntry[] {
   const working = new Set(view.activeRuns.map(run => run.id))
   const listed = new Set(view.entries.map(entry => entry.id))
   const membership = new Map(workflows.flatMap(run => run.members.map(member => [member.childId, { run, member }] as const)))
@@ -35,11 +37,13 @@ export function subagentEntries(view: SubagentView, ctx: Context, copy: TuiCopy,
         ...workflow === undefined ? {} : { workflow: workflow.run.name },
         inspectable: true,
         ...view.outcomes.get(entry.id) === undefined ? {} : { outcome: view.outcomes.get(entry.id)! },
+        ...Object.hasOwn(routing, entry.id) ? { routing: routing[entry.id]! } : {},
       }
     }),
     ...view.activeRuns.filter(run => !listed.has(run.id)).map((run): SubagentEntry => ({
       id: run.id, label: run.provider, state: 'working', detail: copy.subagentRemote, inspectable: false,
       ...membership.has(run.id) ? { workflow: membership.get(run.id)!.run.name } : {},
+      ...Object.hasOwn(routing, run.id) ? { routing: routing[run.id]! } : {},
     })),
   ]
 }

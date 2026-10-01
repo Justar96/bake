@@ -14,10 +14,10 @@ import { scopeChainOf, scopeOf } from '@deepseek-ai/dsh-scope'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { Agent, AgentOptions } from '@deepseek-ai/dsh-agent'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock, LlmCallConfig } from '@deepseek-ai/dsh-llm'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import { SessionSeq } from '@deepseek-ai/dsh-session'
-import type { Session } from '@deepseek-ai/dsh-session'
+import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import {
   assertSubagentMaxDepth,
   parentAgentOptionsForDelegation,
@@ -34,7 +34,7 @@ import {
 } from './model-selection.ts'
 import type { DelegationModelRequest, ModelSelectionPolicy } from './model-selection.ts'
 import { registerListSubagentModels } from './list-models.ts'
-import { routeDelegation } from './auto-route.ts'
+import { routeDelegation, RouterFallback } from './auto-route.ts'
 import { presentDelegationCall } from './presentation.ts'
 import type {} from './model-selection-settings.ts'
 import {
@@ -42,6 +42,11 @@ import {
   subagentModelSelectionProjectionDefinition,
   subagentModelSelectionPolicy,
 } from './model-selection-state.ts'
+import { recordSubagentRoutingDecision, subagentRoutingProjectionDefinition } from './routing-state.ts'
+import type { SubagentRouterDecision, SubagentRoutingDecision } from './types.ts'
+
+export type {} from './routing-state.ts'
+export type { SubagentRoutingAssessment, SubagentRouterDecision, SubagentRoutingDecision } from './types.ts'
 
 export const name = 'tool-subagent'
 export const inject = ['tools', 'subagents', 'sessionProjections']
@@ -311,14 +316,14 @@ function resolveDelegationRun(
  * @param policy - Routes this Session may use; the router chooses among them.
  * @param args - The delegation call: its description and prompt describe the task.
  * @param signal - Tool-call cancellation signal.
- * @returns selection fields for the chosen route, or undefined for the default route.
+ * @returns selection fields and display evidence; an absent request preserves defaults, and undefined means routing was off.
  */
 async function routedRequest(
   ctx: Context,
   policy: ModelSelectionPolicy,
   args: { description: string; prompt: string },
   signal: AbortSignal,
-): Promise<DelegationModelRequest | undefined> {
+): Promise<{ request?: DelegationModelRequest; router: SubagentRouterDecision } | undefined> {
   const settings = ctx.get('subagentModelSelection')
   const router = settings?.router()
   if (settings === undefined || router === undefined) return undefined
@@ -327,11 +332,11 @@ async function routedRequest(
       router, `${args.description}\n\n${args.prompt}`, policy.routes, ctx.get('llm'), signal, await settings.routerToken())
     ctx.logger.info(`subagent router chose ${routed.request.provider}/${routed.request.model}`
       + `${routed.request.reasoning_effort === undefined ? '' : ` (${routed.request.reasoning_effort})`}: ${routed.reason}`)
-    return routed.request
+    return { request: routed.request, router: routed.router }
   } catch (error) {
     signal.throwIfAborted()
     ctx.logger.warn(`subagent router unavailable, using the default route: ${String(error)}`)
-    return undefined
+    return { router: error instanceof RouterFallback ? error.router : { reason: 'Router unavailable; default route retained.', fallback: true } }
   }
 }
 
@@ -355,6 +360,7 @@ export function apply(ctx: Context, config: Config, session?: Session): void {
 
   const modelSelectionCapable = config.modelSelectionSettings === true
   ctx.sessionProjections.register(subagentModelSelectionProjectionDefinition)
+  ctx.sessionProjections.register(subagentRoutingProjectionDefinition)
 
   const assertSubagentProviderConfiguration = (subagentProvider: SubagentProvider): void => {
     if (ctx.subagents.resolveMaxDepth(config.maxDepth) !== undefined && !subagentProvider.capabilities.depthLimit) {
@@ -499,8 +505,8 @@ export function apply(ctx: Context, config: Config, session?: Session): void {
                 : outputValueText(value.output),
           }],
         },
-        // Children never mutate the parent session; the one parent-owned write
-        // (tasks.start) is a synchronous commutative insertion.
+        // Child work is independent; parent-owned job, catalog, and routing
+        // facts are committed through synchronous insertions or appends.
         isConcurrencySafe: () => true,
         async execute(args, exec) {
           const parent = exec.agent
@@ -510,8 +516,15 @@ export function apply(ctx: Context, config: Config, session?: Session): void {
           }
 
           let modelRequest = args as DelegationModelRequest
+          let source: SubagentRoutingDecision['source'] = hasDelegationModelRequest(modelRequest) ? 'explicit' : 'default'
+          let routerDecision: SubagentRouterDecision | undefined
           if (modelSelectionPolicy !== undefined && !hasDelegationModelRequest(modelRequest)) {
-            modelRequest = await routedRequest(runtimeCtx, modelSelectionPolicy, args, exec.signal) ?? modelRequest
+            const routed = await routedRequest(runtimeCtx, modelSelectionPolicy, args, exec.signal)
+            if (routed !== undefined) {
+              modelRequest = routed.request ?? modelRequest
+              source = routed.request === undefined ? 'fallback' : 'auto'
+              routerDecision = routed.router
+            }
           }
           const parentOptions = parentAgentOptionsForDelegation(parent)
           const requiresRoutePreflight = hasDelegationModelRequest(modelRequest)
@@ -531,12 +544,13 @@ export function apply(ctx: Context, config: Config, session?: Session): void {
             requestedChildAgentOptions,
             modelRequest,
           )
+          let resolvedRoute: LlmCallConfig | undefined
           if (requiresRoutePreflight) {
             const llm = runtimeCtx.get('llm')
             if (llm === undefined) {
               throw new Error('cannot resolve the selected child LLM route because the `llm` service is unavailable')
             }
-            await preflightChildLlmRoute(
+            resolvedRoute = await preflightChildLlmRoute(
               llm,
               parentOptions,
               requestedChildAgentOptions,
@@ -559,6 +573,31 @@ export function apply(ctx: Context, config: Config, session?: Session): void {
             ...maxDepth !== undefined ? { maxDepth } : {},
           }
 
+          const recordRoute = (childId: SessionId, child?: Agent): void => {
+            // A local child's published options own its route. A remote route
+            // is known only when preflight or provider/tool defaults named it.
+            const options = child === undefined
+              ? resolvedRoute ?? { ...providerRouteDefaults, ...requestedChildAgentOptions }
+              : child.options
+            const provider = options.provider
+            const model = options.model
+            const reasoningEffort = options.reasoningEffort
+              ?? (resolvedRoute !== undefined && resolvedRoute.provider === provider && resolvedRoute.model === model
+                ? resolvedRoute.reasoningEffort : undefined)
+            try {
+              recordSubagentRoutingDecision(parent.session, {
+                childId, callId: exec.callId, source,
+                ...provider === undefined || model === undefined ? {} : {
+                  route: { provider, model, ...reasoningEffort === undefined ? {} : { reasoningEffort } },
+                },
+                ...routerDecision === undefined ? {} : { router: routerDecision },
+              })
+            } catch (error) {
+              // Display evidence must not orphan a child that already started.
+              runtimeCtx.logger.warn(`subagent routing decision could not be recorded: ${String(error)}`)
+            }
+          }
+
           const runSpec = resolveDelegationRun(args, { backgroundEnabled, continuable })
           if (runSpec.runInBackground) {
             if (continuable) {
@@ -570,6 +609,7 @@ export function apply(ctx: Context, config: Config, session?: Session): void {
                 request,
                 signal: exec.signal,
               })
+              recordRoute(started.childId, runtimeCtx.get('agents')?.get(started.childId))
               return { kind: 'continuable' as const, subagentId: started.childId }
             }
             const jobs = runtimeCtx.get('jobs')
@@ -584,7 +624,10 @@ export function apply(ctx: Context, config: Config, session?: Session): void {
               owner: parent,
               run: () => {
                 const controller = new AbortController()
-                const start = runtimeCtx.subagents.start(config.provider, { ...request, signal: controller.signal })
+                const start = runtimeCtx.subagents.start(config.provider, { ...request, signal: controller.signal }).then((run) => {
+                  recordRoute(run.id, run.localAgent)
+                  return run
+                })
                 return {
                   cancel: (reason?: string) => {
                     controller.abort(reason ?? 'background subagent task killed')
@@ -601,6 +644,7 @@ export function apply(ctx: Context, config: Config, session?: Session): void {
             ...request,
             signal: exec.signal,
           })
+          recordRoute(run.id, run.localAgent)
           return settleForegroundRun(run)
         },
         // Named by its short description; the prompt is the child's own
