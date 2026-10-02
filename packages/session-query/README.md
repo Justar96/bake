@@ -5,8 +5,6 @@ kind: "package-group"
 
 # session-query/ — session retrieval capability family
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 The `session-query/` group provides bounded retrieval over live and durable session history, including exact logs, filtered lists, relationship traces, and SQLite full-text search. Its service and backend READMEs own the query and index contracts.

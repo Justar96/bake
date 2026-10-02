@@ -384,7 +384,7 @@ describe('upgrading a route an earlier login wrote', () => {
     expect(await upgradeCliProxyRoute(settingsContext(undefined))).toEqual({ kind: 'current' })
   })
 
-  it('names the changes in the startup notice, in each locale', () => {
+  it('names the changes in the startup notice', () => {
     const changes = ['retry', 'affinity'] as const
     expect(cliProxyUpgradeNotice({ kind: 'current' }, dictionaries.en)).toBeUndefined()
     expect(cliProxyUpgradeNotice({ kind: 'upgraded', changes }, dictionaries.en))
@@ -392,8 +392,6 @@ describe('upgrading a route an earlier login wrote', () => {
     expect(cliProxyUpgradeNotice({ kind: 'relogin', changes, reason: 'read-only' }, dictionaries.en))
       .toBe('The CLIProxyAPI route is from an earlier version and could not be updated; '
         + 'run /login cliproxyapi for: waiting out account cooldowns, one account per session')
-    expect(cliProxyUpgradeNotice({ kind: 'upgraded', changes }, dictionaries.zh))
-      .toBe('已为此版本更新 CLIProxyAPI 路由：等待账号冷却结束、每个会话固定一个账号')
   })
 })
 

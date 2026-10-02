@@ -15,9 +15,9 @@ afterEach(cleanup)
 
 const statusRow = (frame: string | undefined) => (frame ?? '').split('\n').findLast(line => line.startsWith('  ')) ?? ''
 /** The subagents' row, under the input's base rule and over the status line, its icon in the rail. */
-const agentRow = (frame: string | undefined) => (frame ?? '').split('\n').find(line => /^[↳>] (?:Subagents|子代理) /u.test(line)) ?? ''
+const agentRow = (frame: string | undefined) => (frame ?? '').split('\n').find(line => /^[↳>] Subagents /u.test(line)) ?? ''
 
-it.each(['en', 'zh'] as const)('shows workflow progress and distinguishes its members from direct delegation in %s', async locale => {
+it.each(['en'] as const)('shows workflow progress and distinguishes its members from direct delegation in %s', async locale => {
   const copy = dictionaries[locale]
   const ui = render(<App {...props({ copy, workflows: [{ id: 'run', name: 'review', state: 'working', completed: 1, total: 2 }],
     subagents: [
@@ -69,7 +69,7 @@ it('opens workflow progress before any child exists and preserves the draft', as
   }
 })
 
-it.each(['en', 'zh'] as const)('counts the children on one row under the input in %s', async locale => {
+it.each(['en'] as const)('counts the children on one row under the input in %s', async locale => {
   const ui = render(<App {...props({ copy: dictionaries[locale], subagents: [
     { id: 'child-1', label: 'Review tests', state: 'working', detail: 'Continuable', inspectable: true },
     { id: 'child-2', label: 'Check types', state: 'saved', outcome: 'completed', detail: 'One-shot', inspectable: true },
@@ -196,7 +196,7 @@ function props(overrides: Partial<AppProps> = {}): AppProps {
 }
 
 describe('permission boundary', () => {
-  it.each(['en', 'zh'] as const)('names the access boundary where the session opens, not on the status line, in %s', locale => {
+  it.each(['en'] as const)('names the access boundary where the session opens, not on the status line, in %s', locale => {
     const copy = dictionaries[locale]
     expect(render(<App {...props({ copy })} />).lastFrame()).not.toContain(copy.permission)
     for (const permission of ['workspace-write', 'read-only', 'danger-full-access', 'auto', 'custom']) {
@@ -241,7 +241,7 @@ it('shows only the inspected child’s context and usage, then restores the pare
 })
 
 describe('thinking level', () => {
-  it.each(['en', 'zh'] as const)('labels a selected effort in %s and omits unknown levels', locale => {
+  it.each(['en'] as const)('labels a selected effort in %s and omits unknown levels', locale => {
     const copy = dictionaries[locale]
     const ui = render(<App {...props({ copy, permission: 'workspace-write' })} />)
     expect(statusRow(ui.lastFrame())).not.toContain(copy.think)
@@ -267,12 +267,7 @@ describe('context occupancy', () => {
     expect(statusRow(ui.lastFrame())).toBe('  model  /workspace')
   })
 
-  it('labels the figure in the active locale', () => {
-    const ui = render(<App {...props({ copy: dictionaries.zh, context: { used: 500, window: 128_000 } })} />)
-    expect(statusRow(ui.lastFrame())).toContain('上下文 ~0% (500/128k)')
-  })
-
-  it.each(['en', 'zh'] as const)('names the send-now key beside retained input, and sends it on Alt-Up in %s', async locale => {
+  it.each(['en'] as const)('names the send-now key beside retained input, and sends it on Alt-Up in %s', async locale => {
     const copy = dictionaries[locale]
     const onSendPending = vi.fn()
     const ui = render(<App {...props({ copy, context: { used: 12_340, window: 128_000 }, onSendPending,
@@ -337,7 +332,7 @@ describe('model and billed tokens', () => {
     expect(row).not.toContain(' in ')
   })
 
-  it.each(['en', 'zh'] as const)('reports input, output, and the cache hit the provider reported in %s', locale => {
+  it.each(['en'] as const)('reports input, output, and the cache hit the provider reported in %s', locale => {
     const copy = dictionaries[locale]
     const ui = render(<App {...props({ copy, context: { used: 500, window: 128_000 }, usage: { input: 12_340, output: 1_200, cached: 10_000 } })} />)
     expect(statusRow(ui.lastFrame())).toBe(
@@ -401,8 +396,6 @@ it('names the open child and the way back on a bar under the input', () => {
     // The way back is never the part given up while any of it fits.
     if (columns >= 18) expect(row, `${columns}`).toContain('Esc back to parent')
   }
-  const zh = renderToString(<InspectionBar label="Review" entries={entries} id="child" working copy={dictionaries.zh} columns={80} />, { columns: 80 })
-  expect(zh).toMatch(/^↳ Review 2\/2 · 工作中 · 只读 +Esc 返回父会话$/u)
 })
 
 it('keeps the bar for a child the catalog does not list', () => {

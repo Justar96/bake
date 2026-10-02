@@ -5,8 +5,6 @@ kind: "package-reference"
 
 # @deepseek-ai/dsh-hooks-claude-code
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 `dsh-hooks-claude-code` runs command hooks from your existing Claude Code `hooks.json` or settings file during agent runs, without requiring a rewrite. Supported hooks can run when sessions, prompts, tools, stops, or subagents reach matching moments. They can block prompts or tool calls with model-visible reasons, add conversation context, or force another model turn. Choose this package to reuse Claude Code command hooks in the harness; use a native plugin for behavior that has no Claude Code equivalent.
@@ -71,6 +69,7 @@ The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-a
 - Hooks on the same event run one after another, in config order.
 - If the config cannot be read or parsed, the bridge logs a warning and runs no hooks — the agent still starts.
 - A hook that fails to run (a bad command or a crash) is logged, and the agent continues.
+- A hook that returns `{"continue": false}` stops the run, as in Claude Code: the prompt is blocked, the tool call is denied, a tool that already ran keeps its result, or a `Stop` hook's block no longer forces another step. Tool calls already running finish first, and the turn ends as cancelled by the hook.
 
 -----
 
@@ -84,7 +83,7 @@ This section explains the design decisions behind the bridge and points at the c
 
 ### Hook point mapping
 
-Each supported event programs against one harness extension point: `SessionStart` adds context through awaited `agent/created` initialization before the first turn, `UserPromptSubmit` and `PreToolUse` are waterfalls that can reject the incoming action (`agent/pre-step`, `tools/pre-execute`), `PostToolUse` is a waterfall that can block with feedback or add context to the downstream decision (`tools/post-execute`), and `Stop` is a serial listener whose blocking result forces another step through `steer()` (`agent/turn-stopping`). The two subagent events emit into the child lifecycle (`subagent/start`, `subagent/end`): start injects context into a live in-process child, stop observes only. Context-only hooks always delegate via `next()` before folding a sourced message into the downstream decision, so a later listener can still reject or rewrite; blocking decisions map to `deny` (`ask` for `PreToolUse`). The per-event wiring lives in [`src/index.ts`](src/index.ts).
+Each supported event programs against one harness extension point: `SessionStart` adds context through awaited `agent/created` initialization before the first turn, `UserPromptSubmit` and `PreToolUse` are waterfalls that can reject the incoming action (`agent/pre-step`, `tools/pre-execute`), `PostToolUse` is a waterfall that can block with feedback or add context to the downstream decision (`tools/post-execute`), and `Stop` is a serial listener whose blocking result forces another step through `steer()` (`agent/turn-stopping`). The two subagent events emit into the child lifecycle (`subagent/start`, `subagent/end`): start injects context into a live in-process child, stop observes only. Context-only hooks always delegate via `next()` before folding a sourced message into the downstream decision, so a later listener can still reject or rewrite; blocking decisions map to `deny` (`ask` for `PreToolUse`). `{"continue": false}` overrides these decisions: it rejects the prompt, denies the call with a `halt` on `tools/pre-execute`, adds a `halt` to the downstream decision on `tools/post-execute`, and drops a `Stop` block's steering. The per-event wiring lives in [`src/index.ts`](src/index.ts).
 
 ### Payloads and environment
 
@@ -154,11 +153,11 @@ Append-only; newly visible content follows the reusable request prefix and does 
 
 #### What the model sees
 
-Provider-supplied reasons pass through verbatim. When absent, a denied tool becomes `Error: blocked by PreToolUse hook`, blocked post-tool feedback is exactly `blocked by PostToolUse hook`, and a blocking stop adds steering exactly `continue: blocked by Stop hook`; a blocked prompt is discarded with no model-visible message, ending the turn as `blocked`. `systemMessage` and `updatedInput` are logged or warned but are not model-visible in this implementation.
+Provider-supplied reasons pass through verbatim. When absent, a denied tool becomes `Error: blocked by PreToolUse hook`, blocked post-tool feedback is exactly `blocked by PostToolUse hook`, and a blocking stop adds steering exactly `continue: blocked by Stop hook`; a blocked prompt is discarded with no model-visible message, ending the turn as `blocked`. `systemMessage` and `updatedInput` are logged or warned but are not model-visible in this implementation. When a tool hook returns `{"continue": false}` with a `stopReason`, that text replaces the denial reason on `PreToolUse` and, on `PostToolUse`, joins as source-attributed context that the next turn admits, so the model sees it if the conversation continues.
 
 #### Token effect
 
-Blocking a prompt removes that prompt's request tokens; denial or feedback adds the retained fallback or provider text; forced continuation pays another full request.
+Blocking a prompt removes that prompt's request tokens; denial or feedback adds the retained fallback or provider text; forced continuation pays another full request. A `{"continue": false}` stop ends the turn without another request.
 
 #### KV Cache effect
 
@@ -178,7 +177,7 @@ These limits describe what your Claude Code hooks cannot do through this bridge 
 - **`PostToolUse` is partial** — blocking feedback and JSON `additionalContext` work, but `updatedToolOutput` and `updatedMCPToolOutput` are unsupported and `tool_response` is flattened to text.
 - **`SubagentStart` and `SubagentStop` are partial** — both report a constant `agent_type` of `general-purpose` and use the child session id where Claude Code reports the parent session. Start context is best-effort and can only reach a live in-process child; stop is observe-only and cannot block the subagent or feed it context. Stop omits `agent_transcript_path`, `last_assistant_message`, `background_tasks`, and `session_crons` and always reports `stop_hook_active: false`.
 - **`Stop` is partial** — blocking forces another model turn, but `stop_hook_active` is always `false`, `last_assistant_message`, `background_tasks`, and `session_crons` are omitted, and the consecutive-block cap is not implemented. An unconditionally blocking hook therefore force-continues every step unless it self-limits.
-- **Common payload and output fields are partial** — mapped event payloads omit `prompt_id`, `permission_mode`, and `effort` where Claude Code would provide them, and `transcript_path` is never populated: it is always the empty string, because the persistence seam exposes no artifact paths and the default Zstandard-compressed session log is not readable by hook scripts. `systemMessage` is logged + warned but not surfaced; `{"continue": false}` is recorded but does not halt the run; `suppressOutput`, `stopReason`, and `terminalSequence` are not applied.
+- **Common payload and output fields are partial** — mapped event payloads omit `prompt_id`, `permission_mode`, and `effort` where Claude Code would provide them, and `transcript_path` is never populated: it is always the empty string, because the persistence seam exposes no artifact paths and the default Zstandard-compressed session log is not readable by hook scripts. `systemMessage` is logged + warned but not surfaced; `{"continue": false}` has no effect on `SessionStart` or the subagent events, and the terminal reports a stop as an interruption without showing `stopReason`; `suppressOutput` and `terminalSequence` are not applied.
 - **Handler and config support is partial** — only shell-form command handlers run. `http`, `mcp_tool`, `prompt`, and `agent` handlers are skipped; command-handler options such as `args`, `async`, `asyncRewake`, `shell`, `if`, `once`, and `statusMessage` are not honored. Matching handlers run serially and are not deduplicated, whereas Claude Code runs them in parallel and deduplicates identical handlers. One process-level `configPath` is parsed once at load; Claude Code's layered project, user, plugin, and policy discovery and live reload are not implemented.
 
 <a id="dev-note"></a>
@@ -189,6 +188,6 @@ These limits describe what your Claude Code hooks cannot do through this bridge 
 
 This Dev Note is working context for maintainers: open questions and directions that are not decided. It is explicitly non-authoritative — shipped behavior, limits, and accepted rationale live in the sections above, the package code, and the linked Agent Notes.
 
-The deferred gaps above are the working queue: per-session hook-config discovery, a session-start delivery gate, a stop loop-guard, and a run-level halt for `continue: false`. None has a design yet; the official Claude Code reference is the baseline for closing any of them.
+The deferred gaps above are the working queue: per-session hook-config discovery, a session-start delivery gate, and a stop loop-guard. None has a design yet; the official Claude Code reference is the baseline for closing any of them.
 
 </details>

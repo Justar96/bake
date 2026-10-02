@@ -5,8 +5,6 @@ kind: persistence-release
 
 # Persistence release: dsh-v0.1.3-alpha.1
 
-English | [中文](dsh-v0.1.3-alpha.1.zh.md)
-
 ## Summary
 
 The writer format advances from 0 to 2 across these tags: the JSONL header replaces seedLength with required isSeeded, and session/end-seed gains optional inherited. assistant/chunk is removed, assistant/attempt is added, and assistant/message gains a required stream array. Team event payload versions advance from 1 to 2, alongside changes to shared content types and optional capturedFormatVersion/sessionFormatVersion metadata.

@@ -166,16 +166,11 @@ describe('StatusBar', () => {
     usage: { input: 42_300, output: 3_100, cached: 34_500 }, cwd: '~/bake', glyphs: 'unicode', ...overrides,
   })
   /** The row as the chrome draws it: at the draft's column, two cells in. */
-  const at = (columns: number, input: StatusInput = session(), locale: 'en' | 'zh' = 'en'): string => strip(renderToString(
-    <StatusBar fields={statusFields(input, dictionaries[locale])} columns={columns - 2} />, { columns: columns - 2 })).trimEnd()
+  const at = (columns: number, input: StatusInput = session()): string => strip(renderToString(
+    <StatusBar fields={statusFields(input, dictionaries.en)} columns={columns - 2} />, { columns: columns - 2 })).trimEnd()
 
   it('names the model without a label, and reads each field as a lowercase word beside its value', () => {
     expect(at(120)).toBe('deepseek-v4-flash  think high  ctx ~11% (15.2k/128k)  \u2387 main +2 ~3 ?1 \u21911  in 42.3k  out 3.1k  cache hit 81%  ~/bake')
-    // Chinese uses its own words, and no colon, ASCII or full-width.
-    const zh = at(140, session(), 'zh')
-    expect(zh).toContain('思考 high  上下文 ~11% (15.2k/128k)')
-    expect(zh).toContain('输入 42.3k  输出 3.1k  缓存命中 81%')
-    expect(zh).not.toMatch(/[:：]/u)
   })
 
   it('gives way in its own order: the absolute count, the totals, the path, then the git counts', () => {
@@ -218,9 +213,6 @@ describe('StatusBar', () => {
     // Past the mark, the next request compacts first.
     expect(at(140, session({ context: { used: 104_000, window: 128_000, compactAt: 102_400 } })))
       .toContain('ctx ~81% (104k/128k) \u00b7 compacts next')
-    expect(at(140, session({ context: { used: 104_000, window: 128_000, compactAt: 102_400 } }), 'zh'))
-      .toContain('上下文 ~81% (104k/128k) \u00b7 即将压缩')
-    expect(at(140, marked, 'zh')).toContain('上下文 ~61% (79k/128k) \u00b7 压缩于 80%')
     // Without a threshold there is no mark.
     expect(at(140)).not.toContain('\u25b8')
   })
@@ -231,7 +223,7 @@ describe('StatusBar', () => {
     expect(at(80, uncached)).not.toContain(' in ')
   })
 
-  it.each(['en', 'zh'] as const)('keeps one row whatever the width in %s', async locale => {
+  it.each(['en'] as const)('keeps one row whatever the width in %s', async locale => {
     const scenes: readonly [string, StatusInput][] = [
       ['idle', session()],
       ['update', session({ update: { version: '0.2.0', installed: false } })],
@@ -240,7 +232,7 @@ describe('StatusBar', () => {
       ['fresh', { model: 'deepseek-official/deepseek-v4-flash', thinkingLevel: 'high', cwd: '/tmp/bake-ui-audit/ws', glyphs: 'unicode' }],
     ]
     const frames = scenes.flatMap(([name, input]) => [120, 80, 60, 40, 24, 12].map(columns => {
-      const row = at(columns, input, locale)
+      const row = at(columns, input)
       expect(row.split('\n'), `${name} ${columns}`).toHaveLength(1)
       expect(stringWidth(row), `${name} ${columns}`).toBeLessThanOrEqual(columns - 2)
       return `${name} ${columns}: ${row}`
@@ -274,13 +266,6 @@ describe('StatusBar', () => {
     expect(at(30, input)).toBe('deepseek-v4-flash  \u2026orkspace')
   })
 
-  it('keeps a wide-character line on one row', () => {
-    // Each CJK cell is two columns. Counting code points puts this past the edge.
-    const row = at(40, session({ git: undefined, usage: undefined }), 'zh')
-    expect(row.split('\n')).toHaveLength(1)
-    expect(stringWidth(row)).toBeLessThanOrEqual(38)
-    expect(row).toContain('上下文 ~11%')
-  })
 })
 
 describe('Chrome', () => {
@@ -741,8 +726,6 @@ describe('Composer placeholder parts', () => {
   it('names commands and files beside the prompt on an ordinary terminal', () => {
     expect(empty(80)).toBe(`${MARKER.prompt} ${CARET}Ask anything · / commands · @ files`)
     expect(empty(HINT_MIN_COLUMNS)).toBe(`${MARKER.prompt} ${CARET}Ask anything · / commands · @ files`)
-    const zh = [dictionaries.zh.prompt, dictionaries.zh.promptCommands, dictionaries.zh.promptFiles]
-    expect(empty(80, zh)).toBe(`${MARKER.prompt} ${CARET}问点什么 · / 命令 · @ 文件`)
   })
 
   it('drops the later parts whole below the hint threshold, or where they do not fit', () => {

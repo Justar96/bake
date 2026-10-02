@@ -1,4 +1,8 @@
+import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import * as yaml from 'js-yaml'
 import { Context } from '@deepseek-ai/cordis'
+import { entryListSchema } from '@deepseek-ai/cordis-plugin-include'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
@@ -8,7 +12,8 @@ import * as BashEnvPlugin from '@deepseek-ai/dsh-shell-env'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import * as ToolBash from '@deepseek-ai/dsh-tool-bash'
 import * as ToolTodo from '@deepseek-ai/dsh-tool-todo'
-import * as LlmDeepSeek from '@deepseek-ai/dsh-llm-deepseek'
+import * as LlmPiAi from '@deepseek-ai/dsh-llm-pi-ai'
+import type { PiAiProviderProfile } from '@deepseek-ai/dsh-llm-pi-ai'
 import TokenMeter from '@deepseek-ai/dsh-token-meter'
 import ToolResultPruner from '@deepseek-ai/dsh-compaction-tool-result-pruner'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
@@ -18,7 +23,7 @@ import type { BasicCompactionConfig } from '@deepseek-ai/dsh-compaction-basic'
 
 /**
  * Shared harness for the headless-agent e2e suites: the full plugin stack
- * with the real DeepSeek adapter and the real bash + todo_write tools. Lives
+ * with the shipped DeepSeek route and the real bash + todo_write tools. Lives
  * outside the *.e2e.ts pattern so importing it never re-registers another
  * file's tests.
  */
@@ -49,8 +54,34 @@ export interface CodingHarnessOptions {
    * compaction plugin (the default suites run without it).
    */
   compact?: BasicCompactionConfig
-  /** Test-only context capacity advertised for `deepseek-v4-flash`. */
+  /** Test-only context capacity advertised for `deepseek-flash`. */
   modelContextWindow?: number
+}
+
+/** The `deepseek-official` profile in the base bundle's `llm-pi-ai` row, parsed once. */
+const SHIPPED_DEEPSEEK: PiAiProviderProfile = (() => {
+  const patchPath = createRequire(import.meta.url).resolve('@deepseek-ai/dsh-base/cordis.patch.yml')
+  const patches = yaml.load(readFileSync(patchPath, 'utf8'), { schema: entryListSchema }) as { insert?: { id?: string; config?: unknown }[] }[]
+  const row = patches.flatMap(patch => patch.insert ?? []).find(entry => entry.id === 'llm-pi-ai')
+  const profile = (row?.config as { providers?: Record<string, PiAiProviderProfile> } | undefined)?.providers?.['deepseek-official']
+  if (profile === undefined) throw new Error('dsh-base cordis.patch.yml ships no llm-pi-ai deepseek-official profile')
+  return profile
+})()
+
+/**
+ * The `deepseek-official` route the base bundle ships, read from
+ * packages/bundle/base/cordis.patch.yml, for suites that mount the adapter by
+ * hand.
+ * @param contextWindow - test-only capacity for `deepseek-flash`.
+ * @returns a fresh profile the caller may mutate.
+ */
+export function deepseekProfile(contextWindow?: number): PiAiProviderProfile {
+  const profile = structuredClone(SHIPPED_DEEPSEEK)
+  if (contextWindow === undefined) return profile
+  return {
+    ...profile,
+    models: profile.models?.map(model => model.id === 'deepseek-flash' ? { ...model, contextWindow } : model),
+  }
 }
 
 export async function codingHarness(workdir: string, options: CodingHarnessOptions = {}): Promise<Context> {
@@ -59,10 +90,8 @@ export async function codingHarness(workdir: string, options: CodingHarnessOptio
     systemPrompt: { personaPrefix: options.personaPrefix ?? '' },
   })
   await ctx.plugin(AgentLoop, { agents: [] })
-  await ctx.plugin(LlmDeepSeek, {
-    ...options.modelContextWindow === undefined ? {} : {
-      models: [{ id: 'deepseek-v4-flash', contextWindow: options.modelContextWindow }],
-    },
+  await ctx.plugin(LlmPiAi, {
+    providers: { 'deepseek-official': deepseekProfile(options.modelContextWindow) },
   })
   await ctx.plugin(LocalSubprocessRuntime)
   await ctx.plugin(BashEnvPlugin)

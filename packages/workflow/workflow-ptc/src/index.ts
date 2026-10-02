@@ -144,7 +144,11 @@ class PtcWorkflowEngine extends WorkflowEngine {
 
   constructor(ctx: Context, config: Config) {
     super(ctx)
-    if (ctx.ptcRuntime.language !== 'typescript') throw new Error('workflow-ptc requires the Node TypeScript PTC runtime')
+    // The guest imports its own module and evaluates scripts with node:vm, so only a
+    // Node process provider can run it; a QuickJS worker-thread provider cannot.
+    if (ctx.ptcRuntime.language !== 'typescript' || ctx.ptcRuntime.isolation !== 'process') {
+      throw new Error('workflow-ptc requires the Node TypeScript PTC runtime (@deepseek-ai/dsh-ptc-runtime-node)')
+    }
     // schemastery (static Config) has already filled the defaulted fields;
     // the assertion records that resolution, not a hidden fallback.
     this.config = config as ResolvedConfig

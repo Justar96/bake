@@ -37,6 +37,7 @@ import { RuntimeContextProjection } from './runtime-context.ts'
 import { AssistantStreamAttempt } from './assistant-stream.ts'
 import { SystemPromptProjection } from './runtime-context.ts'
 import { executeToolCalls } from './tool-calls.ts'
+import { droppedToolCallsNotice } from './max-tokens-notice.ts'
 
 type Phase =
   | { kind: 'idle'; lastTurn: number }
@@ -48,7 +49,11 @@ type Phase =
   }
   | { kind: 'running'; abort: AbortController; turn: number; step: number; wakeRequested: boolean }
 
-type StepEndReason = Extract<TurnEndReason, { kind: 'completed' | 'max-tokens' }>
+/** How a step that leaves no pending tool work ends; `null` from `step()` means the turn continues. */
+type StepEnd =
+  | { kind: 'completed' }
+  /** `droppedToolCalls` names the calls the truncated reply lost, in stream order. */
+  | { kind: 'max-tokens'; droppedToolCalls: readonly string[] }
 
 type PreparedStep =
   | { kind: 'reject' }
@@ -307,6 +312,12 @@ export class ReactLoopAgent implements Agent {
     }
     phase.turn = turn
     let turnEnds: TurnEndReason | null = null
+    // max-tokens is sticky: once any step hits the ceiling, a later step that
+    // completes normally must not downgrade the turn outcome.
+    let reachedMaxTokens = false
+    // At most one automatic continuation per turn re-requests dropped tool
+    // calls, so a call too large for one reply cannot loop.
+    let droppedCallsNoticed = false
     let target: InboxTarget = 'next-turn'
     try {
       while (true) {
@@ -327,15 +338,25 @@ export class ReactLoopAgent implements Agent {
         signal.throwIfAborted()
         this.session.append('step/start', { turn, step })
         phase.step = step
+        let stepEnd: StepEnd | null
         try {
-          // max-tokens is sticky: once any step hits the ceiling, later steps
-          // that complete normally must not downgrade the turn outcome.
-          const stepEnd = await this.step(decision)
-          if (turnEnds === null || turnEnds.kind !== 'max-tokens') turnEnds = stepEnd
+          stepEnd = await this.step(decision)
         } finally {
           this.session.append('step/end', { turn, step })
         }
         signal.throwIfAborted()
+        if (stepEnd?.kind === 'max-tokens') {
+          reachedMaxTokens = true
+          if (stepEnd.droppedToolCalls.length > 0 && !droppedCallsNoticed) {
+            // The notice stands in for the dropped calls' results, so it
+            // precedes any steering already waiting for this boundary.
+            droppedCallsNoticed = true
+            this.inbox.splice('next-step', 0, 0, [droppedToolCallsNotice(stepEnd.droppedToolCalls)])
+          }
+        }
+        // A step with pending tool work continues the turn even after an
+        // earlier max-tokens step; only a stopping step takes the sticky outcome.
+        turnEnds = stepEnd === null ? null : reachedMaxTokens ? { kind: 'max-tokens' } : { kind: 'completed' }
         if (turnEnds && this.inbox.nextStep.length === 0) {
           await this.dispatch.serial('agent/turn-stopping', { turn, signal })
           signal.throwIfAborted()
@@ -375,7 +396,7 @@ export class ReactLoopAgent implements Agent {
     return true
   }
 
-  private async step(decision: Extract<PreparedStep, { kind: 'enter' }>): Promise<StepEndReason | null> {
+  private async step(decision: Extract<PreparedStep, { kind: 'enter' }>): Promise<StepEnd | null> {
     /* v8 ignore next -- private callers establish the running phase before executing a step */
     if (this.phase.kind !== 'running') throw new Error(`agent "${this.id}": step outside running phase`)
     const { turn, step, abort: { signal } } = this.phase
@@ -507,14 +528,27 @@ export class ReactLoopAgent implements Agent {
             stream: live.stream,
           }, { surfaceOp: 'append' }).seq,
         )
-        if (finish.kind === 'max-tokens') return { kind: 'max-tokens' }
+        if (finish.kind === 'max-tokens') {
+          return { kind: 'max-tokens', droppedToolCalls: live.droppedToolCalls().map(call => call.name) }
+        }
 
         const toolCalls = message.content.filter(block => block.type === 'tool-call')
         if (toolCalls.length === 0) return { kind: 'completed' }
-        const { concluded } = await executeToolCalls(
+        const { concluded, halt } = await executeToolCalls(
           this.loopCtx, turn, step, toolCalls, signal,
           context => this.inbox.splice('next-step', this.inbox.nextStep.length, 0, [context]),
+          {
+            progress: (callId, progress) => { this.dispatch.emit('agent/tool-progress', { turn, step, callId, progress }) },
+            executed: (callId, isError) => { this.dispatch.emit('agent/tool-executed', { turn, step, callId, isError }) },
+          },
         )
+        if (halt !== undefined) {
+          // The batch has settled, so a policy halt ends the turn through the
+          // ordinary cancellation path without cutting off any running work;
+          // pending input stays for the next wake.
+          this.cancel({ kind: 'hook', reason: halt.reason }, { keepInbox: true })
+          signal.throwIfAborted()
+        }
         return concluded ? { kind: 'completed' } : null
       } catch (error: unknown) {
         if (!live.ended) live.abandon()

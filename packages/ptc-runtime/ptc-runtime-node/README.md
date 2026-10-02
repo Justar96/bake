@@ -5,11 +5,9 @@ kind: "package-reference"
 
 # @deepseek-ai/dsh-ptc-runtime-node
 
-English | [中文](README.zh.md)
-
 ## Summary
 
-Execute model-written TypeScript under the same platform sandbox policy as Bash, with host-provided functions available as async bindings. Each call starts a fresh Node process and returns captured logs, an exact JSON value, or a structured failure. Direct Node APIs remain available within the selected restrictions. Elapsed deadlines, output bounds and a V8 heap limit constrain execution; cancellation and completion terminate the managed process range. A requested restricted mode fails when its sandbox backend is unavailable.
+Execute model-written TypeScript under the same platform sandbox policy as Bash, with host-provided functions available as async bindings. Each call starts a fresh Node process and returns captured logs, an exact JSON value, or a structured failure. Direct Node APIs remain available within the selected restrictions. Elapsed deadlines, output bounds and a V8 heap limit constrain execution; cancellation and completion terminate the managed process range. A requested restricted mode fails when its sandbox backend is unavailable. Shipped compositions mount it for `dsh-workflow-ptc` in an entry-local `ptcRuntime` realm; `run_code` uses [`dsh-ptc-runtime-codemode`](../ptc-runtime-codemode/README.md).
 
 ## Table of Contents
 
@@ -124,7 +122,7 @@ Read the service contract before using the provider directly; the decisions expl
 <a id="model-experience"></a>
 ## Model Experience
 
-Indirectly, through PTC mode in `dsh-tools` and `dsh-workflow-ptc`, which present program outcomes through their own tool results. Intermediate binding traffic stays outside model history; the outer result follows the ordinary tool spill policy.
+Indirectly, through `dsh-workflow-ptc` in shipped compositions, and through PTC mode in `dsh-tools` when a composition mounts this provider as its `run_code` runtime. Both present program outcomes through their own tool results. Intermediate binding traffic stays outside model history; the outer result follows the ordinary tool spill policy.
 
 #### KV Cache effect
 

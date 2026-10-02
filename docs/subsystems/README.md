@@ -1,7 +1,5 @@
 # Subsystems
 
-English | [中文](README.zh.md)
-
 Each page describes one Bake subsystem and its current service or event contracts. [Architecture](../architecture.md) explains how the subsystems work together.
 
 | Page | Owns |

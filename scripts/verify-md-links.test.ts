@@ -31,17 +31,15 @@ function violationsIn(root: string, rel: string): { url: string; reason: string 
 }
 
 describe('Markdown source discovery', () => {
-  it('rejects broken links in both top-level package indexes', () => {
+  it('rejects broken links in the top-level package index', () => {
     const root = layout({
       'packages/README.md': '[removed group](removed/README.md)\n',
-      'packages/README.zh.md': '[removed group](removed/README.zh.md)\n',
     })
     const sources = markdownLinkSourcePaths(root)
     const violations = sources.flatMap(file => findViolations(join(root, file), anchorCache(), root))
     expect(violations.map(({ file, reason }) => ({ file, reason })).sort((a, b) => a.file.localeCompare(b.file)))
       .toEqual([
         { file: join('packages', 'README.md'), reason: 'target' },
-        { file: join('packages', 'README.zh.md'), reason: 'target' },
       ])
   })
 

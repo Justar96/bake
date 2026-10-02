@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { Client, InMemoryTransport } from '@modelcontextprotocol/client'
+import { McpClient, StdioTransport, StreamableHttpTransport } from '@earendil-works/pi-mcp'
+import { createInMemoryTransportPair } from '@earendil-works/pi-mcp/testing'
 import { Context } from '@deepseek-ai/cordis'
 import AttachmentStore, { AttachmentError, AttachmentId } from '@deepseek-ai/dsh-attachment'
 import type { ImageAttachmentLimits, ImageAttachmentRef, SaveImageAttachment, StoredImageAttachment } from '@deepseek-ai/dsh-attachment'
@@ -33,18 +34,16 @@ interface MockCallResult {
 }
 
 function createMockClient(tools: MockTool[], callResult: MockCallResult = { content: [{ type: 'text', text: 'ok' }] }) {
-  const listTools = vi.fn(async (
-    _params?: Record<string, unknown>,
-  ): Promise<{ tools: MockTool[]; nextCursor: string | undefined }> => ({ tools, nextCursor: undefined }))
+  const listTools = vi.fn(async (_options?: unknown): Promise<MockTool[]> => tools)
   const callTool = vi.fn(async (
-    _params?: Record<string, unknown>,
+    _name: string,
+    _args?: Record<string, unknown>,
     _options?: unknown,
   ): Promise<Record<string, unknown>> => ({ ...callResult }))
   return {
     listTools,
     callTool,
-    getServerCapabilities: (): object => ({ tools: {} }),
-    setNotificationHandler: vi.fn(),
+    serverCapabilities: { tools: {} },
     connect: vi.fn().mockResolvedValue(undefined),
     close: vi.fn().mockResolvedValue(undefined),
   }
@@ -235,6 +234,38 @@ describe('syncTools', () => {
     expect(ctx.tools.get('mcp__srv__dup')).toBeUndefined()
   })
 
+  it('rejects an invalid listed tool and names the failing field', async () => {
+    const client = createMockClient([
+      { name: 'good', inputSchema: { type: 'object' } },
+      { name: 'bad', inputSchema: { type: 'array' } },
+    ])
+
+    await expect(syncTools(client as never, ctx, defaultOpts, new Map()))
+      .rejects.toThrow('mcp-client(srv): server listed an invalid tool: tools[1].inputSchema.type must be "object"')
+    expect(ctx.tools.get('mcp__srv__good')).toBeUndefined()
+  })
+
+  it('publishes input schemas in MCP schema field order', async () => {
+    const client = createMockClient([{
+      name: 'search',
+      inputSchema: {
+        properties: { query: { type: 'string' } },
+        required: ['query'],
+        title: 'SearchArgs',
+        type: 'object',
+      },
+    }])
+
+    await syncTools(client as never, ctx, defaultOpts, new Map())
+
+    expect(JSON.stringify(ctx.tools.get('mcp__srv__search')?.parameters)).toBe(JSON.stringify({
+      type: 'object',
+      properties: { query: { type: 'string' } },
+      required: ['query'],
+      title: 'SearchArgs',
+    }))
+  })
+
   it('keeps the previous generation when the fetch phase fails', async () => {
     const client = createMockClient([{ name: 'stable', inputSchema: { type: 'object' } }])
     const first = await syncTools(client as never, ctx, defaultOpts, new Map())
@@ -278,7 +309,7 @@ describe('syncTools', () => {
     const firstDisposers = await syncTools(client as never, ctx, defaultOpts, new Map())
     expect(ctx.tools.get('mcp__srv__old_tool')).toBeDefined()
 
-    client.listTools.mockResolvedValue({ tools: [{ name: 'new_tool', inputSchema: { type: 'object' } }], nextCursor: undefined })
+    client.listTools.mockResolvedValue([{ name: 'new_tool', inputSchema: { type: 'object' } }])
     const secondDisposers = await syncTools(client as never, ctx, defaultOpts, firstDisposers)
 
     expect(ctx.tools.get('mcp__srv__old_tool')).toBeUndefined()
@@ -286,11 +317,13 @@ describe('syncTools', () => {
     expect(secondDisposers.size).toBe(1)
   })
 
-  it('validates outputs with the complete SDK definition after paginated discovery', async () => {
-    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
-    serverTransport.onmessage = (message) => {
+  it('requires structured content from tools with an output schema after paginated discovery', async () => {
+    const { client: clientTransport, server: serverTransport } = createInMemoryTransportPair()
+    serverTransport.onMessage((message) => {
       if (!('id' in message) || !('method' in message)) return
-      const params = 'params' in message ? message.params : undefined
+      const params = 'params' in message && typeof message.params === 'object' && message.params !== null
+        ? message.params as Record<string, unknown>
+        : undefined
       let result: Record<string, unknown>
       if (message.method === 'initialize') {
         const protocolVersion = params && 'protocolVersion' in params
@@ -333,9 +366,9 @@ describe('syncTools', () => {
         result = {}
       }
       void serverTransport.send({ jsonrpc: '2.0', id: message.id, result })
-    }
+    })
     await serverTransport.start()
-    const client = new Client({ name: 'cache-independent-test', version: '1' })
+    const client = new McpClient({ name: 'raw-protocol-test', version: '1' })
     await client.connect(clientTransport)
 
     try {
@@ -345,7 +378,7 @@ describe('syncTools', () => {
         signal: testToolSignal,
         callId: ToolCallId('missing'), name: 'mcp__srv__supported', arguments: {},
       })
-      expect(missing.error?.message).toContain('structured content')
+      expect(missing.error?.message).toBe('Tool supported has an output schema but did not return structured content')
 
       const fallback = await ctx.tools.execute({
         signal: testToolSignal,
@@ -384,8 +417,9 @@ describe('tool execution', () => {
     expect(result.value).toEqual({ content: [{ type: 'text', text: 'hello world' }] })
     // The wire sees the raw MCP name, never the public name.
     expect(client.callTool).toHaveBeenCalledWith(
-      { name: 'echo', arguments: { msg: 'hi' } },
-      expect.objectContaining({ timeout: 60_000 }),
+      'echo',
+      { msg: 'hi' },
+      expect.objectContaining({ timeoutMs: 60_000 }),
     )
   })
 
@@ -400,10 +434,7 @@ describe('tool execution', () => {
     const result = await ctx.tools.execute({ signal: testToolSignal, callId: ToolCallId('c1'), name: publicName, arguments: {} })
 
     expect(result.isError).toBe(false)
-    expect(client.callTool).toHaveBeenCalledWith(
-      { name: 'admin.reset', arguments: {} },
-      expect.anything(),
-    )
+    expect(client.callTool).toHaveBeenCalledWith('admin.reset', {}, expect.anything())
   })
 
   it('joins multiple text blocks with newline', async () => {
@@ -847,7 +878,8 @@ describe('tool execution', () => {
     await ctx.tools.execute({ callId: ToolCallId('c1'), name: 'mcp__srv__slow', arguments: {}, signal: controller.signal })
 
     expect(client.callTool).toHaveBeenCalledWith(
-      expect.anything(),
+      'slow',
+      {},
       expect.objectContaining({ signal: controller.signal }),
     )
   })
@@ -1021,54 +1053,70 @@ describe('tool execution', () => {
 })
 
 describe('createTransport', () => {
-  it('creates StdioClientTransport for stdio config', () => {
-    const config: Config = {
-      transport: 'stdio',
-      serverName: 'srv',
-      command: 'node',
-      args: ['server.js'],
-      env: {},
-      cwd: '/tmp',
-      toolCallTimeoutMs: 60_000,
-      failOnStartupError: false,
-    }
-    const transport = createTransport(config)
-    expect(transport).toBeDefined()
-    expect(transport).toHaveProperty('start')
-    expect(transport).toHaveProperty('close')
+  const stdioConfig = (overrides: Partial<Extract<Config, { transport: 'stdio' }>> = {}): Config => ({
+    transport: 'stdio',
+    serverName: 'srv',
+    command: 'node',
+    args: ['server.js'],
+    env: {},
+    cwd: '/tmp',
+    toolCallTimeoutMs: 60_000,
+    failOnStartupError: false,
+    ...overrides,
   })
 
-  it('creates StreamableHTTPClientTransport for http config without headers', () => {
-    const config: Config = {
+  it('creates an unstarted stdio transport for stdio config', () => {
+    const transport = createTransport(stdioConfig())
+    if (!(transport instanceof StdioTransport)) throw new Error('expected a stdio transport')
+    expect(transport.options).toMatchObject({
+      command: 'node',
+      args: ['server.js'],
+      cwd: '/tmp',
+      inheritEnv: false,
+      stderr: 'inherit',
+    })
+    expect(transport.pid).toBeUndefined()
+  })
+
+  it('creates a Streamable HTTP transport for http config without headers', () => {
+    const transport = createTransport({
       transport: 'streamable-http',
       serverName: 'srv',
       url: 'http://localhost:3000/mcp',
       headers: {},
       toolCallTimeoutMs: 60_000,
       failOnStartupError: false,
-    }
-    const transport = createTransport(config)
-    expect(transport).toBeDefined()
-    expect(transport).toHaveProperty('start')
-    expect(transport).toHaveProperty('close')
+    })
+    if (!(transport instanceof StreamableHttpTransport)) throw new Error('expected a Streamable HTTP transport')
+    expect(transport.url.href).toBe('http://localhost:3000/mcp')
+    expect(transport.options.headers).toEqual({})
   })
 
-  it('creates StreamableHTTPClientTransport for http config with headers', () => {
-    const config: Config = {
+  it('creates a Streamable HTTP transport for http config with headers', () => {
+    const transport = createTransport({
       transport: 'streamable-http',
       serverName: 'srv',
       url: 'http://localhost:3000/mcp',
       headers: { Authorization: 'Bearer token' },
       toolCallTimeoutMs: 60_000,
       failOnStartupError: false,
-    }
-    const transport = createTransport(config)
-    expect(transport).toBeDefined()
-    expect(transport).toHaveProperty('start')
-    expect(transport).toHaveProperty('close')
+    })
+    if (!(transport instanceof StreamableHttpTransport)) throw new Error('expected a Streamable HTTP transport')
+    expect(transport.options.headers).toEqual({ Authorization: 'Bearer token' })
   })
 
-  it('scrubs sensitive env vars and forwards the rest', () => {
+  it('rejects a malformed URL before any request', () => {
+    expect(() => createTransport({
+      transport: 'streamable-http',
+      serverName: 'srv',
+      url: 'not a url',
+      headers: {},
+      toolCallTimeoutMs: 60_000,
+      failOnStartupError: false,
+    })).toThrow()
+  })
+
+  it('scrubs sensitive env vars and forwards the rest as the complete child env', () => {
     const original = { ...process.env }
     try {
       process.env.SAFE_VAR = 'kept'
@@ -1076,20 +1124,16 @@ describe('createTransport', () => {
       process.env.API_KEY = 'hidden'
       process.env.AUTH_TOKEN = 'hidden'
 
-      const config: Config = {
-        transport: 'stdio',
-        serverName: 'srv',
-        command: 'echo',
-        args: [],
-        env: { EXTRA: 'injected' },
-        cwd: '',
-        toolCallTimeoutMs: 60_000,
-        failOnStartupError: false,
-      }
-      // StdioClientTransport keeps its env private; the observable contract is
-      // that createTransport(config) returns a transport without throwing.
-      const transport = createTransport(config)
-      expect(transport).toBeDefined()
+      const transport = createTransport(stdioConfig({ command: 'echo', args: [], env: { EXTRA: 'injected' }, cwd: '' }))
+      if (!(transport instanceof StdioTransport)) throw new Error('expected a stdio transport')
+      const env = transport.options.env ?? {}
+      expect(env.SAFE_VAR).toBe('kept')
+      expect(env.EXTRA).toBe('injected')
+      expect(env).not.toHaveProperty('MY_SECRET')
+      expect(env).not.toHaveProperty('API_KEY')
+      expect(env).not.toHaveProperty('AUTH_TOKEN')
+      // pi-mcp would otherwise merge the unscrubbed parent env back in at spawn.
+      expect(transport.options.inheritEnv).toBe(false)
     } finally {
       delete process.env.SAFE_VAR
       delete process.env.MY_SECRET
@@ -1102,18 +1146,16 @@ describe('createTransport', () => {
   })
 
   it('merges explicit env on top of scrubbed ambient env', () => {
-    const config: Config = {
-      transport: 'stdio',
-      serverName: 'srv',
-      command: 'echo',
-      args: [],
-      env: { CUSTOM: 'value' },
-      cwd: '',
-      toolCallTimeoutMs: 60_000,
-      failOnStartupError: false,
+    const original = process.env.CUSTOM
+    try {
+      process.env.CUSTOM = 'ambient'
+      const transport = createTransport(stdioConfig({ command: 'echo', args: [], env: { CUSTOM: 'value' }, cwd: '' }))
+      if (!(transport instanceof StdioTransport)) throw new Error('expected a stdio transport')
+      expect(transport.options.env?.CUSTOM).toBe('value')
+    } finally {
+      if (original === undefined) delete process.env.CUSTOM
+      else process.env.CUSTOM = original
     }
-    const transport = createTransport(config)
-    expect(transport).toBeDefined()
   })
 })
 
@@ -1133,10 +1175,7 @@ describe('tool execution — non-object args fallback', () => {
     await syncTools(client as never, ctx, defaultOpts, new Map())
     await ctx.tools.execute({ signal: testToolSignal, callId: ToolCallId('c1'), name: 'mcp__srv__coerce', arguments: null })
 
-    expect(client.callTool).toHaveBeenCalledWith(
-      { name: 'coerce', arguments: {} },
-      expect.anything(),
-    )
+    expect(client.callTool).toHaveBeenCalledWith('coerce', {}, expect.anything())
   })
 
   it('coerces primitive string args to empty object for callTool', async () => {
@@ -1148,9 +1187,6 @@ describe('tool execution — non-object args fallback', () => {
     await syncTools(client as never, ctx, defaultOpts, new Map())
     await ctx.tools.execute({ signal: testToolSignal, callId: ToolCallId('c1'), name: 'mcp__srv__coerce2', arguments: 'bad' })
 
-    expect(client.callTool).toHaveBeenCalledWith(
-      { name: 'coerce2', arguments: {} },
-      expect.anything(),
-    )
+    expect(client.callTool).toHaveBeenCalledWith('coerce2', {}, expect.anything())
   })
 })

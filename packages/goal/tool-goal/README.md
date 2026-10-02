@@ -5,8 +5,6 @@ kind: "package-reference"
 
 # @deepseek-ai/dsh-tool-goal
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 `dsh-tool-goal` lets a model read the session's persisted goal, create a long-running goal when the user explicitly asks for one, and update it. The model never creates a goal on its own initiative. Creating, editing, pausing, or resuming requires a direct request in a top-level agent turn; completing or blocking also works in an autonomous goal round. Updates require the exact goal id and revision returned by a prior read. `resume` rearms active-but-disarmed or blocked goals, while users resume durable paused goals through Web or `/goal resume`. Autonomous blocking requires the same condition for a configurable threshold of three consecutive rounds by default.

@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-12-ptc-runtime-vocabulary.zh.md)
-
 ## Problem
 
 PTC mode and its execution providers need one searchable name across package manifests, service lookup, public types, configuration, and documentation. Mixed runtime prefixes make it difficult to trace a provider from a profile to its implementation and packaged bootstrap.

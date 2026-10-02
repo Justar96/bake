@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-11-remove-e2b-providers.zh.md)
-
 ## Problem
 
 The E2B experiment supplied one remote filesystem/process world for file tools, Bash, PTY and language servers while the Harness, credentials, model transport and session state stayed on the host. Its three providers demonstrated that those consumers can share the existing filesystem and subprocess interfaces without provider-specific tools.

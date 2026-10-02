@@ -8,7 +8,7 @@ import { dictionaries } from '../../ui/src/copy.ts'
 
 const harness = resolve(import.meta.dirname, '../../harness')
 
-for (const locale of ['en', 'zh'] as const) test.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
+for (const locale of ['en'] as const) test.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
   `previews submissions and resizes a fixture with CI enabled (${locale})`, async () => {
     const copy = dictionaries[locale]
     const root = await mkdtemp(join(tmpdir(), 'bake-preview-'))
@@ -19,8 +19,7 @@ for (const locale of ['en', 'zh'] as const) test.skipIf(process.platform !== 'da
       let output = ''
       let pending = ''
       const decoder = new TextDecoder()
-      const child = Bun.spawn([process.execPath, '--hot', join(harness, 'dev.tsx'), fixture,
-        '--locale', locale, ...locale === 'zh' ? ['--replay'] : []], {
+      const child = Bun.spawn([process.execPath, '--hot', join(harness, 'dev.tsx'), fixture], {
         cwd: root, env: { ...process.env, CI: '1', NO_COLOR: '1', TERM: 'xterm-256color' },
         timeout: 15_000,
         terminal: {

@@ -7,7 +7,7 @@
  */
 
 import { readdirSync, readFileSync, realpathSync } from 'node:fs'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import type { Socket } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -17,6 +17,7 @@ import { execa } from 'execa'
 import { describe, expect, it, onTestFinished } from 'vitest'
 import { resolveExampleLaunch } from '@deepseek-ai/dsh-loader-smoke'
 import { PROCESS_SHUTDOWN_TIMEOUT_MS } from '../src/process-shutdown.ts'
+import { deepseekEndpointSettings } from './fixtures/deepseek-endpoint.ts'
 
 const dshBinScript = fileURLToPath(new URL('../src/bin.ts', import.meta.url))
 const tsconfigPath = fileURLToPath(new URL('../../../tsconfig.json', import.meta.url))
@@ -24,7 +25,7 @@ const bootTimeoutMs = 60_000
 
 /** A complete DeepSeek Messages reply carrying one text block. */
 const ANSWER = [
-  { type: 'message_start', message: { id: 'msg_resumed', model: 'deepseek-v4-flash', usage: { input_tokens: 12, output_tokens: 1 } } },
+  { type: 'message_start', message: { id: 'msg_resumed', model: 'deepseek-flash', usage: { input_tokens: 12, output_tokens: 1 } } },
   { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
   { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Resumed after the stop' } },
   { type: 'content_block_stop', index: 0 },
@@ -66,12 +67,14 @@ describe.skipIf(process.platform === 'win32')('a headless run stopped by a signa
     const cwd = realpathSync(await mkdtemp(join(tmpdir(), 'dsh-signal-stop-')))
     onTestFinished(() => rm(cwd, { recursive: true, force: true, maxRetries: 3 }))
     const endpoint = await model()
+    await mkdir(join(cwd, '.dsh'))
+    await writeFile(join(cwd, '.dsh', 'settings.yaml'), deepseekEndpointSettings(endpoint.url))
     const patch = join(cwd, 'stop.patch.yml')
     await writeFile(patch, [
       '- id: agent-default-model',
       '  config:',
       '    provider: deepseek-official',
-      '    model: deepseek-v4-flash',
+      '    model: deepseek-flash',
       '- id: session-persistence-jsonl',
       '  config:',
       "    root: !!js dshHomePath('sessions')",
@@ -90,7 +93,6 @@ describe.skipIf(process.platform === 'win32')('a headless run stopped by a signa
           DSH_AGENTS_HOME: join(cwd, '.agents'),
           DSH_TELEMETRY_DISABLED: '1',
           DEEPSEEK_API_KEY: 'keyless-signal-stop',
-          DEEPSEEK_BASE_URL: endpoint.url,
         },
       })
       const child = execa(launch.command, launch.args, {

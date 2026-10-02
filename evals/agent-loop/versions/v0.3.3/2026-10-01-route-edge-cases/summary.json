@@ -1,0 +1,688 @@
+{
+  "title": "Task router edge cases against a simulated ing router: one valid route and eight degradation paths",
+  "version": "sim routed",
+  "arms": {
+    "off": {
+      "version": "v0.3.2+7428f19 router-off",
+      "revision": {
+        "root": "/home/jt-devnet/bake/.agents/worktrees/eval-route-base",
+        "commit": "7428f19adb9753aa2cc975003047b1f94b0ae421",
+        "dirty": false
+      }
+    },
+    "routed": {
+      "version": "sim routed",
+      "revision": {
+        "root": "/home/jt-devnet/bake",
+        "commit": "7428f19adb9753aa2cc975003047b1f94b0ae421",
+        "dirty": true
+      }
+    },
+    "nearest": {
+      "version": "sim nearest",
+      "revision": {
+        "root": "/home/jt-devnet/bake",
+        "commit": "7428f19adb9753aa2cc975003047b1f94b0ae421",
+        "dirty": true
+      }
+    },
+    "policy": {
+      "version": "sim policy",
+      "revision": {
+        "root": "/home/jt-devnet/bake",
+        "commit": "7428f19adb9753aa2cc975003047b1f94b0ae421",
+        "dirty": true
+      }
+    },
+    "fallback": {
+      "version": "sim fallback",
+      "revision": {
+        "root": "/home/jt-devnet/bake",
+        "commit": "7428f19adb9753aa2cc975003047b1f94b0ae421",
+        "dirty": true
+      }
+    },
+    "slow": {
+      "version": "sim slow",
+      "revision": {
+        "root": "/home/jt-devnet/bake",
+        "commit": "7428f19adb9753aa2cc975003047b1f94b0ae421",
+        "dirty": true
+      }
+    },
+    "refusal": {
+      "version": "sim refusal",
+      "revision": {
+        "root": "/home/jt-devnet/bake",
+        "commit": "7428f19adb9753aa2cc975003047b1f94b0ae421",
+        "dirty": true
+      }
+    },
+    "malformed": {
+      "version": "sim malformed",
+      "revision": {
+        "root": "/home/jt-devnet/bake",
+        "commit": "7428f19adb9753aa2cc975003047b1f94b0ae421",
+        "dirty": true
+      }
+    },
+    "down": {
+      "version": "router down",
+      "revision": {
+        "root": "/home/jt-devnet/bake",
+        "commit": "7428f19adb9753aa2cc975003047b1f94b0ae421",
+        "dirty": true
+      }
+    },
+    "notoken": {
+      "version": "router no token",
+      "revision": {
+        "root": "/home/jt-devnet/bake",
+        "commit": "7428f19adb9753aa2cc975003047b1f94b0ae421",
+        "dirty": true
+      }
+    }
+  },
+  "candidate": "routed",
+  "bases": [
+    "v0.3.2+7428f19 router-off"
+  ],
+  "models": [
+    "claude-opus-5-5",
+    "claude-sonnet-5-5",
+    "deepseek-flash",
+    "deepseek-v4-pro",
+    "gemini-3.8-flash-medium",
+    "gpt-6-astra",
+    "gpt-6.1-sol"
+  ],
+  "scenarios": [
+    "delegation_auto"
+  ],
+  "trials": 1,
+  "startedAt": "2026-10-01T17:24:32.595Z",
+  "harness": "evals/agent-loop/run.ts",
+  "note": "Simulated ing router (evals/agent-loop/sim-router.ts) on the new opt-in delegation_auto case, which tells the model to leave the route to the host so every delegation reaches the router. One trial per arm and ten arms, so each model ran ten samples. claude-sonnet-5-5 ran in a later run of its own: CLIProxyAPI lists it without effort levels, so every run first exited at startup with UNSUPPORTED_REASONING_EFFORT medium; once the saved route took its efforts from pi-ai's Anthropic catalog entry, all ten of its arms succeeded with the same outcomes as below. router-off runs a clean worktree of 7428f19. The other arms run the working tree on 7428f19, whose only product change moves Auto routing to its own /settings tab, which nothing model-visible depends on. Every arm allows only the model's own route. All but router-off turn the router on with timeoutMs 1500. The comparison table covers routed against router-off only; samples.jsonl carries every arm with its routingDecisions. Outcomes for all 7 models: routed recorded source auto at effort low with a normal assessment, and the router received priority cost and the bearer token. nearest asked for max and recorded auto at max where the route lists it, and at high for gemini-3.8-flash-medium, which lists low to high, with a cautious assessment. policy (a route outside the allowlist), slow (a 3 s reply), refusal (HTTP 503), malformed (an HTML body), down (a closed port), and notoken (HTTP 401 without a token) all recorded source fallback at the default effort with the generic reason 'Router unavailable; default route retained.' fallback recorded source fallback with the router's own reason and its fallback assessment. No sample failed because of routing. The one failure, gpt-6-astra routed, is the gateway answering 'Our servers are currently overloaded' to the parent. gpt-6-astra's fallback and policy arms each made one tool error: the child's first request streamed 200 without completing, the tool returned only 'subagent run failed', and the model retried and succeeded; that child ran on the default route, as router-off does. deepseek-v4-pro's down arm made one tool error by passing a subagent id to job_output. The flagged token regressions are artifacts of a single pair, whose interval collapses to a point: deepseek-flash took 7 requests against 6, with one more bash call, and gemini-3.8-flash-medium 7 against 5, with an extra glob and read after the low-effort child answered. They are accepted as single-trial noise; a routing change that needs a token comparison should rerun delegation_auto at three trials.",
+  "settings": {
+    "effort": "medium where the model offers it; DeepSeek runs at high, its default, having no medium",
+    "maxOutputTokens": 8192,
+    "capMs": 180000,
+    "maxRequests": {
+      "default": 14,
+      "workflow_script": 40,
+      "delegation": 40,
+      "delegation_auto": 40
+    }
+  },
+  "regressionRule": "all tasks, per model: total tokens with the 95% interval above zero; failures +2 or more; any tool-error increase",
+  "regressions": [
+    "deepseek-flash vs v0.3.2+7428f19 router-off: total tokens 36.4% [36.4, 36.4]",
+    "gemini-3.8-flash-medium vs v0.3.2+7428f19 router-off: total tokens 65.9% [65.9, 65.9]"
+  ],
+  "perModel": {
+    "claude-opus-5-5": {
+      "samples": 1,
+      "successes": 1,
+      "firstRequestBytes": null,
+      "toolSchemaChars": null,
+      "meanTotalTokensPerTask": 25216,
+      "meanRequestsPerTask": 5,
+      "cacheReadShare": 0.984,
+      "toolErrors": 0,
+      "comparisons": {
+        "v0.3.2+7428f19 router-off": {
+          "all tasks": {
+            "cells": 1,
+            "pairs": 1,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "logicalInputTokens": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "uncachedInputTokens": {
+              "pct": -95.3,
+              "lo": -95.3,
+              "hi": -95.3
+            },
+            "requests": [
+              5,
+              5
+            ],
+            "toolCalls": [
+              2,
+              2
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          },
+          "delegation_auto": {
+            "cells": 1,
+            "pairs": 1,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "logicalInputTokens": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "uncachedInputTokens": {
+              "pct": -95.3,
+              "lo": -95.3,
+              "hi": -95.3
+            },
+            "requests": [
+              5,
+              5
+            ],
+            "toolCalls": [
+              2,
+              2
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          }
+        }
+      }
+    },
+    "claude-sonnet-5-5": {
+      "samples": 1,
+      "successes": 1,
+      "firstRequestBytes": null,
+      "toolSchemaChars": null,
+      "meanTotalTokensPerTask": 25156,
+      "meanRequestsPerTask": 5,
+      "cacheReadShare": 0.993,
+      "toolErrors": 0,
+      "comparisons": {
+        "v0.3.2+7428f19 router-off": {
+          "all tasks": {
+            "cells": 1,
+            "pairs": 1,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": -0.1,
+              "lo": -0.1,
+              "hi": -0.1
+            },
+            "logicalInputTokens": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "uncachedInputTokens": {
+              "pct": -98,
+              "lo": -98,
+              "hi": -98
+            },
+            "requests": [
+              5,
+              5
+            ],
+            "toolCalls": [
+              2,
+              2
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          },
+          "delegation_auto": {
+            "cells": 1,
+            "pairs": 1,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": -0.1,
+              "lo": -0.1,
+              "hi": -0.1
+            },
+            "logicalInputTokens": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "uncachedInputTokens": {
+              "pct": -98,
+              "lo": -98,
+              "hi": -98
+            },
+            "requests": [
+              5,
+              5
+            ],
+            "toolCalls": [
+              2,
+              2
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          }
+        }
+      }
+    },
+    "deepseek-flash": {
+      "samples": 1,
+      "successes": 1,
+      "firstRequestBytes": null,
+      "toolSchemaChars": null,
+      "meanTotalTokensPerTask": 32720,
+      "meanRequestsPerTask": 7,
+      "cacheReadShare": 0.966,
+      "toolErrors": 0,
+      "comparisons": {
+        "v0.3.2+7428f19 router-off": {
+          "all tasks": {
+            "cells": 1,
+            "pairs": 1,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": 36.4,
+              "lo": 36.4,
+              "hi": 36.4
+            },
+            "logicalInputTokens": {
+              "pct": 34.3,
+              "lo": 34.3,
+              "hi": 34.3
+            },
+            "uncachedInputTokens": {
+              "pct": 15.7,
+              "lo": 15.7,
+              "hi": 15.7
+            },
+            "requests": [
+              6,
+              7
+            ],
+            "toolCalls": [
+              3,
+              4
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          },
+          "delegation_auto": {
+            "cells": 1,
+            "pairs": 1,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": 36.4,
+              "lo": 36.4,
+              "hi": 36.4
+            },
+            "logicalInputTokens": {
+              "pct": 34.3,
+              "lo": 34.3,
+              "hi": 34.3
+            },
+            "uncachedInputTokens": {
+              "pct": 15.7,
+              "lo": 15.7,
+              "hi": 15.7
+            },
+            "requests": [
+              6,
+              7
+            ],
+            "toolCalls": [
+              3,
+              4
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          }
+        }
+      }
+    },
+    "deepseek-v4-pro": {
+      "samples": 1,
+      "successes": 1,
+      "firstRequestBytes": null,
+      "toolSchemaChars": null,
+      "meanTotalTokensPerTask": 24973,
+      "meanRequestsPerTask": 6,
+      "cacheReadShare": 0.983,
+      "toolErrors": 0,
+      "comparisons": {
+        "v0.3.2+7428f19 router-off": {
+          "all tasks": {
+            "cells": 1,
+            "pairs": 1,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": -23.3,
+              "lo": -23.3,
+              "hi": -23.3
+            },
+            "logicalInputTokens": {
+              "pct": -23.5,
+              "lo": -23.5,
+              "hi": -23.5
+            },
+            "uncachedInputTokens": {
+              "pct": -51.1,
+              "lo": -51.1,
+              "hi": -51.1
+            },
+            "requests": [
+              7,
+              6
+            ],
+            "toolCalls": [
+              4,
+              3
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          },
+          "delegation_auto": {
+            "cells": 1,
+            "pairs": 1,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": -23.3,
+              "lo": -23.3,
+              "hi": -23.3
+            },
+            "logicalInputTokens": {
+              "pct": -23.5,
+              "lo": -23.5,
+              "hi": -23.5
+            },
+            "uncachedInputTokens": {
+              "pct": -51.1,
+              "lo": -51.1,
+              "hi": -51.1
+            },
+            "requests": [
+              7,
+              6
+            ],
+            "toolCalls": [
+              4,
+              3
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          }
+        }
+      }
+    },
+    "gemini-3.8-flash-medium": {
+      "samples": 1,
+      "successes": 1,
+      "firstRequestBytes": null,
+      "toolSchemaChars": null,
+      "meanTotalTokensPerTask": 28394,
+      "meanRequestsPerTask": 7,
+      "cacheReadShare": 0,
+      "toolErrors": 0,
+      "comparisons": {
+        "v0.3.2+7428f19 router-off": {
+          "all tasks": {
+            "cells": 1,
+            "pairs": 1,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": 65.9,
+              "lo": 65.9,
+              "hi": 65.9
+            },
+            "logicalInputTokens": {
+              "pct": 67.7,
+              "lo": 67.7,
+              "hi": 67.7
+            },
+            "uncachedInputTokens": {
+              "pct": 67.7,
+              "lo": 67.7,
+              "hi": 67.7
+            },
+            "requests": [
+              5,
+              7
+            ],
+            "toolCalls": [
+              2,
+              4
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          },
+          "delegation_auto": {
+            "cells": 1,
+            "pairs": 1,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": 65.9,
+              "lo": 65.9,
+              "hi": 65.9
+            },
+            "logicalInputTokens": {
+              "pct": 67.7,
+              "lo": 67.7,
+              "hi": 67.7
+            },
+            "uncachedInputTokens": {
+              "pct": 67.7,
+              "lo": 67.7,
+              "hi": 67.7
+            },
+            "requests": [
+              5,
+              7
+            ],
+            "toolCalls": [
+              2,
+              4
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          }
+        }
+      }
+    },
+    "gpt-6-astra": {
+      "samples": 1,
+      "successes": 0,
+      "firstRequestBytes": null,
+      "toolSchemaChars": null,
+      "meanTotalTokensPerTask": null,
+      "meanRequestsPerTask": null,
+      "cacheReadShare": null,
+      "toolErrors": 0,
+      "comparisons": {
+        "v0.3.2+7428f19 router-off": {
+          "all tasks": {
+            "cells": 1,
+            "pairs": 0,
+            "failures": [
+              0,
+              1
+            ],
+            "totalTokens": null,
+            "logicalInputTokens": null,
+            "uncachedInputTokens": null,
+            "requests": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              0,
+              0
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          },
+          "delegation_auto": {
+            "cells": 1,
+            "pairs": 0,
+            "failures": [
+              0,
+              1
+            ],
+            "totalTokens": null,
+            "logicalInputTokens": null,
+            "uncachedInputTokens": null,
+            "requests": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              0,
+              0
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          }
+        }
+      }
+    },
+    "gpt-6.1-sol": {
+      "samples": 1,
+      "successes": 1,
+      "firstRequestBytes": null,
+      "toolSchemaChars": null,
+      "meanTotalTokensPerTask": 12709,
+      "meanRequestsPerTask": 6,
+      "cacheReadShare": 0.29,
+      "toolErrors": 0,
+      "comparisons": {
+        "v0.3.2+7428f19 router-off": {
+          "all tasks": {
+            "cells": 1,
+            "pairs": 1,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": -45.6,
+              "lo": -45.6,
+              "hi": -45.6
+            },
+            "logicalInputTokens": {
+              "pct": -46.2,
+              "lo": -46.2,
+              "hi": -46.2
+            },
+            "uncachedInputTokens": {
+              "pct": -38.5,
+              "lo": -38.5,
+              "hi": -38.5
+            },
+            "requests": [
+              7,
+              6
+            ],
+            "toolCalls": [
+              4,
+              2
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          },
+          "delegation_auto": {
+            "cells": 1,
+            "pairs": 1,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": -45.6,
+              "lo": -45.6,
+              "hi": -45.6
+            },
+            "logicalInputTokens": {
+              "pct": -46.2,
+              "lo": -46.2,
+              "hi": -46.2
+            },
+            "uncachedInputTokens": {
+              "pct": -38.5,
+              "lo": -38.5,
+              "hi": -38.5
+            },
+            "requests": [
+              7,
+              6
+            ],
+            "toolCalls": [
+              4,
+              2
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          }
+        }
+      }
+    }
+  }
+}

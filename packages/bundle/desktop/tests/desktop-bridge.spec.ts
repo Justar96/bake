@@ -60,10 +60,18 @@ async function startBridge(
     '  config:',
     '    provider: deepseek-official',
     '    model: deepseek-flash',
-    '- id: llm-deepseek',
+    // The mock speaks Chat Completions, so the patch restates the route
+    // (a patch replaces the row's whole config) over that protocol.
+    '- id: llm-pi-ai',
     '  config:',
-    '    protocol: chat-completions',
-    `    baseURL: ${server.baseURL}/v1`,
+    '    providers:',
+    '      deepseek-official:',
+    '        displayName: DeepSeek',
+    '        apiKeyEnv: DEEPSEEK_API_KEY',
+    '        api: openai-completions',
+    `        baseURL: ${server.baseURL}/v1`,
+    '        models:',
+    '          - id: deepseek-flash',
     // The title request would consume a scripted response in racing order.
     '- id: session-title-llm',
     '  disabled: true',

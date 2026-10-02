@@ -5,6 +5,7 @@ import type { ProjectionSnapshot } from '@deepseek-ai/dsh-session-projection'
 import type {} from '@deepseek-ai/dsh-token-meter'
 import type {} from '@deepseek-ai/dsh-permission-presets/types'
 import { Actions, foldEvent } from '@dsh-tui/ui/actions.ts'
+import { CallProgress } from '@dsh-tui/ui/progress.ts'
 import { project, projector } from '@dsh-tui/ui/project.ts'
 import { appendTranscript, emptyTranscript } from '@dsh-tui/ui/transcript.ts'
 import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
@@ -15,6 +16,8 @@ import { contextFor, usageFor } from './status.ts'
 export class SubagentInspection {
   private committed = emptyTranscript
   private readonly actions = new Actions()
+  /** The child's running calls' live output and finish, until each result commits. */
+  private readonly progress = new CallProgress()
   private buffered: SessionEvent[] | undefined = []
   private cursor = -1
   private model = ''
@@ -43,6 +46,16 @@ export class SubagentInspection {
         changed()
       }),
       ctx.on('agent/status', ({ agent }) => { if (agent.id === id && !this.closed) changed() }),
+      ctx.on('agent/tool-progress', ({ agent, callId, progress }) => {
+        if (agent.id !== id || this.closed) return
+        this.progress.progress(callId, progress.output)
+        changed()
+      }),
+      ctx.on('agent/tool-executed', ({ agent, callId, isError }) => {
+        if (agent.id !== id || this.closed) return
+        this.progress.finished(callId, !isError)
+        changed()
+      }),
       ctx.on('agent/assistant-stream', ({ agent, frame }) => {
         if (agent.id !== id || this.closed) return
         // A visit can begin halfway through an attempt. Show the arriving tail
@@ -109,7 +122,7 @@ export class SubagentInspection {
     const usage = usageFor(surface?.tokenUsage)
     return {
       sessionId: this.id, label: this.label, committed: this.committed,
-      live: this.actions.live(this.stream?.blocks.rows()), status: agent?.status ?? 'idle' as const,
+      live: this.progress.decorate(this.actions.live(this.stream?.blocks.rows())), status: agent?.status ?? 'idle' as const,
       model, context,
       ...usage === undefined ? {} : { usage },
       ...permission === undefined ? {} : { permission },
@@ -134,5 +147,6 @@ export class SubagentInspection {
     }
     const rows = project(event, this.projection)
     this.committed = appendTranscript(this.committed, foldEvent(event, rows, this.actions))
+    this.progress.fold(event)
   }
 }

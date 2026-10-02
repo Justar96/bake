@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-05-nonofficial-feedback-otel.zh.md)
-
 ## Problem
 
 Feedback needs the session context it describes and a delivery path independent of the model provider or a later model request. Ordinary activity must not authorize uploads. Inherited feedback must not count as a child Session's consent.
@@ -16,7 +14,7 @@ An authorized prefix includes all unhanded canonical context from seq 0 through 
 
 The backend uses on-demand capture with complete history and the existing redaction waterfall. `DISABLED` constructs no transport. `FULL` is rejected rather than aliased. Direct `ctx.sessionTelemetry.emit()` calls are no-ops, so callers cannot bypass feedback authorization. SDK scheduled flush and shutdown may finish previously authorized batches but never capture new records. Sending after submission needs no further user interaction or model call.
 
-The [canonical-feedback decision](2026-09-05-canonical-feedback-log.md) owns storage, versions, deletion, and plain command confirmation. The [default-on DeepSeek contribution](../../../../packages/session/session-log-deepseek/README.md) remains independent, with its existing destination and acceptance behavior.
+The [canonical-feedback decision](2026-09-05-canonical-feedback-log.md) owns storage, versions, deletion, and plain command confirmation. The default-on DeepSeek contribution remains independent, with its existing destination and acceptance behavior.
 
 ## Alternatives considered
 

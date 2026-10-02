@@ -5,8 +5,6 @@ kind: persistence-release
 
 # Persistence release: dsh-v0.1.0-rc.7
 
-English | [中文](dsh-v0.1.0-rc.7.zh.md)
-
 ## Summary
 
 assistant/chunk replayState changes from unknown to an object with required response and optional blocks. The writer format remains 0.

@@ -1,6 +1,6 @@
 {
   "name": "bake",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "A terminal coding agent built on Cordis and the DeepSeek Harness runtime",
   "license": "MIT",
   "private": true,
@@ -106,7 +106,6 @@
     "gen-tool-catalog": "bun scripts/gen-tool-catalog.ts",
     "verify-tool-catalog": "bun scripts/gen-tool-catalog.ts --check",
     "verify-type-equiv": "bun scripts/verify-type-equiv.ts",
-    "verify-translation-pairing": "bun scripts/verify-translation-pairing.ts",
     "verify-cordis-config": "bun scripts/verify-cordis-config.ts",
     "verify-package-invariants": "bun scripts/verify-package-invariants.ts",
     "dsh": "bun apps/tui/scripts/tui.ts dsh",

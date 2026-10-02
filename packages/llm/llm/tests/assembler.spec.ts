@@ -140,6 +140,9 @@ describe('BlockAssembler replay metadata', () => {
       { type: 'text', text: 'lead' },
       { type: 'reasoning', text: 'tail' },
     ])
+    expect(assembler.droppedToolCalls()).toEqual([
+      { type: 'tool-call', id: ToolCallId('c1'), name: 'echo', arguments: '{"text":' },
+    ])
     expect(assembler.replayState).toEqual({ response, blocks: ['meta-0', 'meta-2'] })
   })
 
@@ -169,6 +172,7 @@ describe('BlockAssembler replay metadata', () => {
     assembler.push({ type: 'finish', reason: { kind: 'tool-calls' }, replayState })
 
     expect(assembler.replayState).toBe(replayState)
+    expect(assembler.droppedToolCalls()).toEqual([])
   })
 
   it('keeps a max-tokens replay state with no per-block entries across a tool-call drop', () => {

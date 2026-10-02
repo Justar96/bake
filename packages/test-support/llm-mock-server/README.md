@@ -5,8 +5,6 @@ kind: "package-library"
 
 # @deepseek-ai/dsh-llm-mock-server
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 This package gives tests and demos a scriptable OpenAI-compatible HTTP/SSE endpoint, so they can exercise model-provider failures and successes without a provider key. Each accepted `/chat/completions` request consumes the next scripted behavior, including resets, stalls, malformed chunks, rate limits, server errors, completions, and tool calls. Test authors can run it with `pnpm run mock:llm` or call `startMockLlmServer`, which returns captured requests for assertions. Seeded `random` behavior supports reproducible mixed-failure stress runs.
@@ -39,13 +37,20 @@ pnpm run mock:llm \
   --partial-text "discard this half"
 ```
 
-Point the shipping DeepSeek adapter at the server; it appends `/chat/completions` to the configured base:
+Point a real adapter at the server through an OpenAI Chat Completions route of `dsh-llm-pi-ai`, which appends `/chat/completions` to the configured base. In `$DSH_HOME/settings.yaml`:
 
-```sh
-DEEPSEEK_BASE_URL=http://127.0.0.1:8000/v1 \
-DEEPSEEK_API_KEY=mock-key \
-pnpm dsh --profile headless "test provider recovery"
+```yaml
+llm-pi-ai:
+  providers:
+    mock:
+      apiKeyEnv: MOCK_LLM_API_KEY
+      api: openai-completions
+      baseURL: http://127.0.0.1:8000/v1
+      models:
+        - id: mock-model
 ```
+
+Then set `MOCK_LLM_API_KEY=mock-key` and select `mock/mock-model` with `/model`.
 
 The repository script writes JSONL to stdout: a `ready` record carries the `/v1` base URL and random seed, followed by request/result records that name both the scripted behavior and the concrete behavior selected. The package exposes no installable binary.
 

@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-14-current-profile-plugin-management.zh.md)
-
 ## Problem
 
 Web and agent controls need to change a running profile without creating an independent package installer or overwriting user-authored YAML. A file watcher can otherwise load the intermediate manifest written during package installation, or report success before removed plugins finish releasing resources.

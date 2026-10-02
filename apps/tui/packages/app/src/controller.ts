@@ -12,6 +12,7 @@ import type {} from '@deepseek-ai/dsh-agent-presets'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import { attachmentSummaries } from '@dsh-tui/ui/rows.ts'
 import { Actions, foldEvent } from '@dsh-tui/ui/actions.ts'
+import { CallProgress } from '@dsh-tui/ui/progress.ts'
 import { project, projector, type Projector } from '@dsh-tui/ui/project.ts'
 import { appendTranscript, emptyTranscript } from '@dsh-tui/ui/transcript.ts'
 import { suggestCommand } from '@dsh-tui/ui/completion.ts'
@@ -91,6 +92,12 @@ export class SessionController {
    * however they finish.
    */
   private readonly actions = new Actions()
+  /**
+   * Live output and finish of calls still waiting for their logged result,
+   * from the runtime's process-local events. Drawn over the held calls only;
+   * each call's `tool/result` replaces it.
+   */
+  private readonly progress = new CallProgress()
   private stream: { attemptId: string; blocks: LiveBlocks; printed: Printed } | undefined
   private streamRevision = -1
   private stopping = false
@@ -320,6 +327,16 @@ export class SessionController {
     this.off.push(ctx.on('agent/assistant-stream', payload => {
       if (payload.agent === agent) this.streamFrame(payload.frame)
     }))
+    this.off.push(ctx.on('agent/tool-progress', payload => {
+      if (payload.agent !== agent) return
+      this.progress.progress(payload.callId, payload.progress.output)
+      this.repaint()
+    }))
+    this.off.push(ctx.on('agent/tool-executed', payload => {
+      if (payload.agent !== agent) return
+      this.progress.finished(payload.callId, !payload.isError)
+      this.repaint()
+    }))
     const projections = ctx.get('sessionProjections')
     if (projections === undefined) throw new Error('tui: sessionProjections is required')
     this.off.push(projections.onChanged((session, key) => {
@@ -391,7 +408,7 @@ export class SessionController {
     const thinkingLevel = selected?.reasoningEffort ?? reasoning?.defaultEffort
       ?? (reasoning === undefined ? undefined : this.copy.providerDefault)
     return {
-      committed: this.committed, live: this.actions.live(this.blocks), pending, status: this.agent.status,
+      committed: this.committed, live: this.progress.decorate(this.actions.live(this.blocks)), pending, status: this.agent.status,
       stopping: this.stopping, command: this.command?.text,
       ...(this.command?.compactPhase === undefined ? {} : { compactPhase: this.command.compactPhase }),
       ...(this.autoCompacting ? { autoCompacting: true } : {}),
@@ -877,6 +894,7 @@ export class SessionController {
     }
     // A step end follows every action it made, finished or not.
     const out = foldEvent(event, rows, this.actions)
+    this.progress.fold(event)
     this.committed = appendTranscript(this.committed, out)
     return out
   }

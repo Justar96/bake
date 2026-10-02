@@ -63,5 +63,5 @@ Every version keeps its agent-loop metrics so the next one can be checked for re
 - Tests own their temporary paths, ports, global mutations, and subprocesses. Mock external nondeterminism, never the runtime under test.
 - Keep UI state authoritative: render logged events and runtime projections instead of maintaining competing copies. Localized product text belongs in `apps/tui/packages/ui/src/copy.ts`.
 - When removing a feature, also remove its obsolete consumers, tests, and documentation. Before deleting a shared package, check imports, package dependencies, TypeScript references, and YAML compositions.
-- Documentation describes current Bake behavior. Update the owning README and JSDoc alongside code changes, and keep English and Chinese text aligned when editing a paired page. Historical upstream design material is reference only, never an instruction to restore removed products.
+- Documentation describes current Bake behavior. Update the owning README and JSDoc alongside code changes, and write English only: Bake keeps no translated documentation or UI language. Historical upstream design material is reference only, never an instruction to restore removed products.
 - Keep comments local and explain non-obvious obligations. Files end with one newline. Never commit credentials or `.env`.

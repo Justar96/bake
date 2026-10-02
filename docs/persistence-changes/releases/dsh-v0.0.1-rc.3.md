@@ -5,8 +5,6 @@ kind: persistence-release
 
 # Persistence release: dsh-v0.0.1-rc.3
 
-English | [中文](dsh-v0.0.1-rc.3.zh.md)
-
 ## Summary
 
 The four compact/* event keys become compaction/*; user-message source kind workspace-instructions becomes agent-instructions, and hook dialect claude becomes claude-code. These literal and event-key changes occur while the writer format remains 0.

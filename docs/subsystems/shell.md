@@ -1,7 +1,5 @@
 # Shell Executor
 
-English | [中文](shell.zh.md)
-
 The shell execution seam uses [dsh-shell](../../packages/shell/shell) as its Service Definition on `ctx.shell`. The [shell package group](../../packages/shell/README.md) lists its Bash and PowerShell providers and model-facing Consumers. Generic background-job ids, ownership, and controls live in [jobs.md](jobs.md); this seam returns a process handle without job registration. Managed-range mechanics live behind the [subprocess seam](subprocess.md).
 
 Source: [`packages/shell/shell/src/types.ts`](../../packages/shell/shell/src/types.ts)
@@ -12,7 +10,7 @@ Source: [`packages/shell/shell/src/types.ts`](../../packages/shell/shell/src/typ
 
 ## Request vs. spec: the `resolve()` split
 
-The seam separates the **model-/plugin-facing request** (optional `workdir`/`timeoutMs`/`stdoutMaxBytes`, filled from config or request policy) from the **fully-resolved spec** the executor acts on (those fields required). The tool layer calls `ctx.shell.resolve(request)` between them (the repo's "explicit > implicit at package boundaries" rule); a `ShellExecSpec` carries resolved values.
+The seam separates the **model-/plugin-facing request** (optional `workdir`/`timeoutMs`/`stdoutMaxBytes`, filled from config or request policy) from the **fully-resolved spec** the executor acts on (those fields required). The tool layer calls `ctx.shell.resolve(request)` between them (the repo's "explicit > implicit at package boundaries" rule); a `ShellExecSpec` carries resolved values. A request's `onOutput` receives the growing tail of a foreground run's output while it runs, polled every `LIVE_OUTPUT_POLL_MS` (200 ms) by `watchOutput`; the bash and pwsh tools forward it as their call's progress, and the command's result is unchanged.
 
 ```ts type-equiv
 /**
@@ -62,6 +60,14 @@ interface ShellExecRequest {
   dshEnv?: DshEnvironment | undefined
   /** Fully resolved per-call sandbox policy; sandboxing executors default it. */
   sandboxPolicy?: SandboxExecutionPolicy | undefined
+  /**
+   * Display-only receiver for a foreground run's live output. While the
+   * command runs, executors poll its captured streams and pass the newest
+   * tail of their combined text, stderr after stdout, each time it grows.
+   * Calls stop before {@link ShellExecutor.run} resolves; background
+   * processes ignore it. The model-facing result is unaffected.
+   */
+  onOutput?: ((tail: string) => void) | undefined
 }
 ```
 
@@ -95,6 +101,8 @@ interface ShellExecSpec {
   dshEnv?: DshEnvironment | undefined
   /** Resolved sandbox policy; ignored by executors that do not confine. */
   sandboxPolicy: SandboxExecutionPolicy | undefined
+  /** Live-output receiver carried through from {@link ShellExecRequest.onOutput}. */
+  onOutput?: ((tail: string) => void) | undefined
 }
 ```
 

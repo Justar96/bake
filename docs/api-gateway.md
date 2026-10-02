@@ -1,7 +1,5 @@
 # API Gateway
 
-English | [中文](api-gateway.zh.md)
-
 This is the current-state reference for the Typert API Gateway. It describes how business services declare unary Remote methods, how the Host build generates Host and Host-for-Client contracts, and how calls reuse the Connection RPC and `/api` route. Stream Remote methods declared with `@Remote({ mode: 'stream' })` and forwarded Host events are documented in the [API Gateway package README](../packages/api/gateway/README.md), not here.
 
 ## Programming model

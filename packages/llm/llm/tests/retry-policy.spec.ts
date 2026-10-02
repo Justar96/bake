@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
+  isRetryableFailureCode,
   resolveRetryPolicy,
+  retryDelayMs,
   RetryPolicySchema,
 } from '@deepseek-ai/dsh-llm'
 import type { RetryPolicyConfig } from '@deepseek-ai/dsh-llm'
@@ -95,5 +97,36 @@ describe('provider retry policy', () => {
     expect(() => {
       resolveRetryPolicy(config as unknown as RetryPolicyConfig, 'provider.retryPolicy')
     }).toThrow(message)
+  })
+})
+
+describe('shared retry classification and backoff', () => {
+  const normal = resolveRetryPolicy({
+    mode: 'normal',
+    retryableCodes: ['RATE_LIMIT'],
+    backoff: { initialDelayMs: 100, maxDelayMs: 1_000, jitterRatio: 0.5 },
+  }, 'normal')
+  const always = resolveRetryPolicy({
+    mode: 'always',
+    backoff: { initialDelayMs: 100, maxDelayMs: 1_000, jitterRatio: 0 },
+  }, 'always')
+
+  it('classifies codes by the bounded list, and every code under an always policy', () => {
+    expect(isRetryableFailureCode(normal, 'RATE_LIMIT')).toBe(true)
+    expect(isRetryableFailureCode(normal, 'AUTH')).toBe(false)
+    expect(isRetryableFailureCode(always, 'AUTH')).toBe(true)
+  })
+
+  it('backs off exponentially with symmetric jitter, capped at the ceiling', () => {
+    expect(retryDelayMs(normal, 1, {}, () => 0)).toBe(50)
+    expect(retryDelayMs(normal, 1, {}, () => 1)).toBe(150)
+    expect(retryDelayMs(normal, 3, {}, () => 0.5)).toBe(400)
+    expect(retryDelayMs(normal, 5, {}, () => 1)).toBe(1_000)
+  })
+
+  it('honors a provider delay within the ceiling and declines or replaces a longer one', () => {
+    expect(retryDelayMs(normal, 1, { providerRetryAfterMs: 700 }, () => 0)).toBe(700)
+    expect(retryDelayMs(normal, 1, { providerRetryAfterMs: 5_000 }, () => 0)).toBeUndefined()
+    expect(retryDelayMs(always, 2, { providerRetryAfterMs: 5_000 }, () => 0)).toBe(200)
   })
 })

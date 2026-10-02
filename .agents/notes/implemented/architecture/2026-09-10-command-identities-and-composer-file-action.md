@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-10-command-identities-and-composer-file-action.zh.md)
-
 ## Problem
 
 Matching a command's English description to a client dictionary makes punctuation changes affect localization and inserted command tokens. A same-name override can also copy that description without implementing the first-party command. The File menu entry needs the composer's live attachment policy, including mount, lock, and submission state; a separate command-plugin check cannot determine that state.

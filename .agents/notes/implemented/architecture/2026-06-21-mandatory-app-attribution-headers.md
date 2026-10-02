@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-06-21-mandatory-app-attribution-headers.zh.md)
-
 ## Problem
 
 LLM provider requests should identify the product making them. That is useful for provider-side support, abuse investigation, compatibility debugging, and traffic analytics. Before this Agent Note the harness only partially did this: the hand-rolled DeepSeek adapter sent a hand-copied `User-Agent` constant (`packages/llm/llm-deepseek/src/adapter.ts`), while the pi-ai-backed twin sent no harness-owned headers at all (`packages/llm/llm-pi-ai/src/adapter.ts`). New adapters could therefore omit attribution silently, and a library-backed adapter could drift from the hand-rolled adapter even though [the twin-adapter Agent Note](2026-06-13-twin-llm-adapters.md) exists to keep the provider contract honest across both implementations.
@@ -24,7 +22,7 @@ The immediate prompt came from OpenRouter's [App Attribution](https://openrouter
 
 ## Decision
 
-Provider-neutral app attribution is mandatory at the LLM adapter boundary, using the standard `User-Agent` header only. The rule: every product LLM adapter sends a static, non-secret application identity on every provider HTTP request, and every adapter has tests proving that `User-Agent` reaches the wire (a mock server asserting received headers; for a library-backed adapter, the library's header hook feeding the same mock-server assertion). This rule governs app attribution, not provider-specific request identity: [the DeepSeek request-identity decision](../feature/2026-08-11-deepseek-request-user-id-header.md) separately owns its user and session headers.
+Provider-neutral app attribution is mandatory at the LLM adapter boundary, using the standard `User-Agent` header only. The rule: every product LLM adapter sends a static, non-secret application identity on every provider HTTP request, and every adapter has tests proving that `User-Agent` reaches the wire (a mock server asserting received headers; for a library-backed adapter, the library's header hook feeding the same mock-server assertion). This rule governs app attribution, not provider-specific request identity: [the DeepSeek request-identity decision](../feature/2026-08-11-deepseek-request-user-id-header.md) separately owns request identity: its user header was removed with `dsh-llm-deepseek`, and `dsh-llm-pi-ai` sends only the session header.
 
 OpenRouter app attribution is deliberately not implemented. `HTTP-Referer`, `X-OpenRouter-Title`, `X-Title`, and `X-OpenRouter-Categories` are OpenRouter-specific product-surface headers, not provider-neutral model-request attribution. They can be proposed later by an OpenRouter adapter or explicit OpenRouter mode, with its own privacy/product decision, tests, and docs. Until then, even requests pointed at OpenRouter send only the shared `User-Agent` attribution from this decision.
 
@@ -41,7 +39,7 @@ Wire mapping (`attributionHeaders`; header names lowercase in code - HTTP field 
 | Target | Mapping |
 |---|---|
 | All HTTP-based adapters | `User-Agent: {product}/{version} (+{url})` - the parenthesized `+url` comment stays within RFC 9110's conservative product/comment syntax. |
-| Direct DeepSeek endpoint | `User-Agent` for app attribution; `x-deepseek-harness-user-id` and conditional `x-deepseek-harness-session-id` are separate request identity under the DeepSeek-specific decision. Do not send OpenRouter-only headers unless DeepSeek documents an equivalent contract. |
+| Direct DeepSeek endpoint | `User-Agent` for app attribution; conditional `x-deepseek-harness-session-id`, which `dsh-llm-pi-ai` sends on every route, is separate request identity under the DeepSeek-specific decision. Do not send OpenRouter-only headers unless DeepSeek documents an equivalent contract. |
 | OpenRouter endpoints | `User-Agent` only. This decision excludes `HTTP-Referer`, `X-OpenRouter-Title`, `X-Title`, and `X-OpenRouter-Categories`. |
 | Future providers | `User-Agent` only unless a later provider-specific Agent Note accepts additional headers. Do not reuse `HTTP-Referer` by analogy. |
 
@@ -53,7 +51,7 @@ The landed contract:
 
 - `dsh-llm` documents the mandatory `User-Agent` attribution contract for `LlmAdapter` authors (`LlmAdapter` JSDoc, package README, and the adapter-contract section of `docs/subsystems/llm-streaming.md`).
 - A shared helper (`attributionHeaders` / `userAgent`) constructs the app identity and the standard `User-Agent` value from package metadata, so adapters do not hand-copy version constants.
-- `dsh-llm-deepseek` sends the shared `User-Agent` on every request and its mock-server suite asserts the exact value.
+- `dsh-llm-pi-ai` is the only product LLM adapter; `dsh-llm-deepseek`, which set the shared `User-Agent` directly, was removed.
 - `dsh-llm-pi-ai` sends the same `User-Agent` through pi-ai's `StreamOptions.headers` hook and its mock-server suite asserts the exact value.
 - No adapter sends OpenRouter-specific attribution headers (`HTTP-Referer`, `X-OpenRouter-Title`, `X-Title`, `X-OpenRouter-Categories`) as part of this decision.
 - No app-attribution field carries secrets, local paths, session ids, prompt text, model output, user email, or per-user stable identifiers.
@@ -77,6 +75,6 @@ The landed contract:
 
 **Providers see that traffic comes from the harness.** That is the point, but it means deployments that previously blended into generic SDK traffic become identifiable. Mitigation: send only static public product data and let forks/white-label deployments pass their own `AppIdentity`.
 
-**Header support differs by client library.** The hand-rolled adapter sets headers directly; the pi-ai-backed adapter depends on pi-ai continuing to honor `StreamOptions.headers` (merged last over provider defaults). The wire-level mock-server tests are the guard: if a pi-ai upgrade stops delivering the header, the suite goes red. This is useful pressure on the abstraction: a provider adapter that cannot set mandatory headers cannot fully implement the harness LLM contract.
+**Header support differs by client library.** The removed hand-rolled adapter set headers directly; the pi-ai-backed adapter, now the only one, depends on pi-ai continuing to honor `StreamOptions.headers` (merged last over provider defaults). The wire-level mock-server tests are the guard: if a pi-ai upgrade stops delivering the header, the suite goes red. This is useful pressure on the abstraction: a provider adapter that cannot set mandatory headers cannot fully implement the harness LLM contract.
 
 **OpenRouter rankings do not benefit yet.** `User-Agent` is the correct baseline for provider-neutral HTTP identity, but it will not create OpenRouter app pages or rankings because OpenRouter requires `HTTP-Referer` for that product feature. That is deliberate: public app marketplace participation is a separate product decision, not a prerequisite for mandatory request attribution.

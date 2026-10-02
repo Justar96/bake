@@ -1,7 +1,5 @@
 # Bake profile launcher reference
 
-English | [中文](README.zh.md)
-
 The `@deepseek-ai/dsh` launcher starts Bake's Node runtime through a named Cordis profile. The shipped profiles are `tui` for the terminal agent and `headless` for one task. [Launcher overview](../README.md) owns the common commands.
 
 <a id="profile-boot"></a>

@@ -10,6 +10,7 @@
 import z from '@deepseek-ai/schemastery'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
 import { EMPTY_RESPONSE_CODE } from './error.ts'
+import type { LlmFailure } from './types.ts'
 
 const DEFAULT_MAX_RETRIES = 5
 const DEFAULT_INITIAL_DELAY_MS = 500
@@ -192,4 +193,43 @@ export function resolveRetryPolicy(
     default:
       throw new Error(`${path}.mode must be "normal" or "always"`)
   }
+}
+
+/**
+ * Whether a bounded policy names one failure code as transient. An always
+ * policy retries every failure, so it accepts every code.
+ * @param policy - resolved provider policy.
+ * @param code - stable failure code to classify.
+ * @returns whether a retry under this policy may follow the failure.
+ */
+export function isRetryableFailureCode(policy: ResolvedRetryPolicy, code: string): boolean {
+  return policy.mode === 'always' || policy.retryableCodes.includes(code)
+}
+
+/**
+ * Delay before one retry: the provider's requested delay when it fits the
+ * policy ceiling, otherwise bounded exponential backoff with symmetric jitter.
+ * A normal policy declines a provider delay above its ceiling; an always
+ * policy falls back to its own backoff instead.
+ * @param policy - resolved provider policy.
+ * @param retry - one-based number of the retry about to be scheduled.
+ * @param failure - failure whose provider-requested delay, if any, applies.
+ * @param random - sample in the inclusive zero-to-one range used for jitter.
+ * @returns the delay in milliseconds, or `undefined` when the policy declines to retry.
+ */
+export function retryDelayMs(
+  policy: ResolvedRetryPolicy,
+  retry: number,
+  failure: Pick<LlmFailure, 'providerRetryAfterMs'>,
+  random: () => number = Math.random,
+): number | undefined {
+  const requested = failure.providerRetryAfterMs
+  if (requested !== undefined && Number.isFinite(requested) && requested > 0) {
+    if (requested <= policy.maxDelayMs) return requested
+    if (policy.mode === 'normal') return undefined
+  }
+  const exponent = Math.min(retry - 1, 1024)
+  const exponential = Math.min(policy.initialDelayMs * 2 ** exponent, policy.maxDelayMs)
+  const jitter = 1 - policy.jitterRatio + 2 * policy.jitterRatio * random()
+  return Math.min(exponential * jitter, policy.maxDelayMs)
 }

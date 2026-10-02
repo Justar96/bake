@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-15-continuable-activation-capacity.zh.md)
-
 ## Problem
 
 Depth limits bound nesting but permit wide concurrent delegation. Background Job limits do not cover continuable children, and a lifetime creation quota prevents useful later work after earlier children finish.

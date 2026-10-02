@@ -139,7 +139,6 @@ describe('phase', () => {
     expect(phaseLabel({ kind: 'thinking' }, copy)).toBe('thinking')
     expect(phaseLabel({ kind: 'writing' }, copy)).toBe('writing')
     expect(phaseLabel({ kind: 'running', tool: 'bash' }, copy)).toBe('running bash')
-    expect(phaseLabel({ kind: 'thinking' }, dictionaries.zh)).toBe('思考')
     expect(phaseLabel(undefined, copy)).toBeUndefined()
   })
 })
@@ -171,13 +170,13 @@ describe('turn summary', () => {
 
   it('reads the outcome from the recorded turn end', () => {
     expect(turnSummary([end('warn', 'Blocked')], copy, 3_000)).toEqual({ outcome: 'stopped', label: 'Blocked', details: '3s', brief: '3s' })
-    expect(turnSummary([end('error')], dictionaries.zh, undefined)).toEqual({ outcome: 'failed', label: '失败', details: '', brief: '' })
+    expect(turnSummary([end('error')], copy, undefined)).toEqual({ outcome: 'failed', label: 'Failed', details: '', brief: '' })
   })
 
   it('closes the details with the final answer\'s rate, only for a sample long enough to mean something', () => {
     const answer = (tokens: number, ms: number): Row[] => [ran('a', 'bash'), { kind: 'assistant', text: 'Done.' }, { kind: 'rate', tokens, ms }, end('info')]
     expect(turnSummary(answer(856, 20_240), copy, 72_000).details).toBe('1m 12s · ran 1 · 42 tok/s')
-    expect(turnSummary(answer(856, 20_240), dictionaries.zh, undefined).details).toBe('ran 1 · 42 token/秒')
+    expect(turnSummary(answer(856, 20_240), copy, undefined).details).toBe('ran 1 · 42 tok/s')
     // Four tokens over 74 ms, or a second of a handful of tokens, is not a speed.
     expect(turnSummary(answer(4, 74), copy, undefined).details).toBe('ran 1')
     expect(turnSummary(answer(RATE_MIN_TOKENS - 1, 5_000), copy, undefined).details).toBe('ran 1')

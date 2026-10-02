@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-14-transcript-width-handle-layering.zh.md)
-
 ## Problem
 
 The Conversation shell renders each content-width handle as a full-height absolute strip beside the reading column. A high stacking level placed that strip above wide Markdown tables that legitimately overflow the column. The handle glow covered their content and its pointer target could replace their interaction target.

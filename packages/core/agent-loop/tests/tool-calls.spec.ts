@@ -697,6 +697,135 @@ describe('tool-call scheduler: abort handling', () => {
   })
 })
 
+describe('tool-call scheduler: policy halt', () => {
+  it('lets started calls finish, skips the rest, and ends the turn after a pre-execute halt', async () => {
+    const adapter = new MockAdapter([
+      multiCall([
+        { id: 'c1', name: 'p', args: { id: '1' } },
+        { id: 'c2', name: 'p', args: { id: '2' } },
+        { id: 'c3', name: 'p', args: { id: '3' } },
+        { id: 'c4', name: 'x', args: { id: '4' } },
+      ]),
+      textResponse('after wake'),
+    ])
+    const ctx = await harness(adapter, 3)
+    const gated = gatedParallelTool('p')
+    ctx.tools.register(gated.tool)
+    const exclusive: string[] = []
+    ctx.tools.register(defineContentToolFixture({
+      name: 'x',
+      description: 'exclusive',
+      parameters: { id: { type: 'string', required: true } },
+      async execute(args) { exclusive.push(args.id); return [{ type: 'text', text: 'x' }] },
+    }))
+    const bodySignals: AbortSignal[] = []
+    ctx.on('tools/execute', async (exec, next) => {
+      bodySignals.push(exec.signal)
+      return next()
+    })
+    ctx.on('tools/pre-execute', async (exec, next): Promise<PreToolDecision> => exec.callId === ToolCallId('c2')
+      ? { kind: 'deny', reason: 'stop here', halt: { reason: 'policy halted the run' } }
+      : next())
+    ctx.on('tools/post-execute', async (exec, _result, next): Promise<PostToolDecision> => ({
+      ...await next(),
+      additionalContexts: [createUserMessage({
+        content: [{ type: 'text', text: `ctx-${exec.callId}` }], source: { kind: 'plugin', plugin: 'p' },
+      })],
+    }))
+    const agent = await ctx.agentLoop.create(SessionId('halt-pre'), { provider: 'mock', model: 'mock' })
+
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
+    await until(() => gated.started.length === 1)
+    // The halt is known once c2 is prepared; the in-flight call is not cut off.
+    await new Promise<void>(resolve => setImmediate(resolve))
+    expect(bodySignals.map(signal => signal.aborted)).toEqual([false])
+    gated.release('1')
+    await waitForIdle(ctx, agent)
+
+    expect(gated.started).toEqual(['1'])
+    expect(exclusive).toEqual([])
+    expect(adapter.requests).toHaveLength(1)
+    expect(events(agent).filter(e => e.type === 'tool/result').map(e => ({
+      callId: e.data.message.source.callId,
+      text: (e.data.message.content[0].content[0] as { text: string }).text,
+      error: e.data.error,
+    }))).toEqual([
+      { callId: ToolCallId('c1'), text: 'done-1', error: undefined },
+      { callId: ToolCallId('c2'), text: 'Error: stop here', error: undefined },
+      { callId: ToolCallId('c3'), text: 'Error: tool call aborted before dispatch', error: { name: 'AbortError', code: TOOL_ABORTED_BEFORE_DISPATCH } },
+      { callId: ToolCallId('c4'), text: 'Error: tool call aborted before dispatch', error: { name: 'AbortError', code: TOOL_ABORTED_BEFORE_DISPATCH } },
+    ])
+    expect(events(agent).findLast(e => e.type === 'turn/end')).toMatchObject({
+      data: { reason: { kind: 'aborted', reason: { kind: 'hook', reason: 'policy halted the run' } } },
+    })
+    // Context the batch accepted waits for the next wake instead of being cleared.
+    expect(agent.inbox.nextStep.map(message => message.content[0]))
+      .toEqual([{ type: 'text', text: 'ctx-c1' }, { type: 'text', text: 'ctx-c2' }])
+
+    const idle = waitForIdle(ctx, agent)
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'wake' }], source: { kind: 'user' } }))
+    await idle
+    expect(adapter.requests).toHaveLength(2)
+    expect(events(agent).findLast(e => e.type === 'turn/end')).toMatchObject({ data: { reason: { kind: 'completed' } } })
+  })
+
+  it('keeps the committed result and halts after a post-execute halt', async () => {
+    const adapter = new MockAdapter([
+      multiCall([
+        { id: 'c1', name: 'x', args: { id: '1' } },
+        { id: 'c2', name: 'x', args: { id: '2' } },
+      ]),
+      textResponse('should never be requested'),
+    ])
+    const ctx = await harness(adapter)
+    const ran: string[] = []
+    ctx.tools.register(defineContentToolFixture({
+      name: 'x',
+      description: 'exclusive',
+      parameters: { id: { type: 'string', required: true } },
+      async execute(args) { ran.push(args.id); return [{ type: 'text', text: `ran-${args.id}` }] },
+    }))
+    ctx.on('tools/post-execute', async (exec, _result, next): Promise<PostToolDecision> => exec.callId === ToolCallId('c1')
+      ? { ...await next(), halt: { reason: 'stop after this result' } }
+      : next())
+    const agent = await ctx.agentLoop.create(SessionId('halt-post'), { provider: 'mock', model: 'mock' })
+
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
+    await waitForIdle(ctx, agent)
+
+    expect(ran).toEqual(['1'])
+    expect(adapter.requests).toHaveLength(1)
+    const results = events(agent).filter(e => e.type === 'tool/result')
+    expect(results.map(e => e.data.message.content[0])).toMatchObject([
+      { isError: false, content: [{ type: 'text', text: 'ran-1' }] },
+      { isError: true, content: [{ type: 'text', text: 'Error: tool call aborted before dispatch' }] },
+    ])
+    expect(events(agent).findLast(e => e.type === 'turn/end')).toMatchObject({
+      data: { reason: { kind: 'aborted', reason: { kind: 'hook', reason: 'stop after this result' } } },
+    })
+  })
+
+  it('records an earlier user cancellation instead of the halt', async () => {
+    const adapter = new MockAdapter([toolCallResponse('c1', 'x', {}), textResponse('never')])
+    const ctx = await harness(adapter)
+    ctx.tools.register(defineContentToolFixture({
+      name: 'x', description: 'x', parameters: {}, async execute() { return [{ type: 'text', text: 'x' }] },
+    }))
+    const agent = await ctx.agentLoop.create(SessionId('halt-after-cancel'), { provider: 'mock', model: 'mock' })
+    ctx.on('tools/post-execute', async (_exec, _result, next): Promise<PostToolDecision> => {
+      agent.cancel({ kind: 'user' }, { keepInbox: true })
+      return { ...await next(), halt: { reason: 'late halt' } }
+    })
+
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
+    await waitForIdle(ctx, agent)
+
+    expect(events(agent).findLast(e => e.type === 'turn/end')).toMatchObject({
+      data: { reason: { kind: 'aborted', reason: { kind: 'user' } } },
+    })
+  })
+})
+
 describe('tool-call scheduler: failure quiescence', () => {
   it('stops new dispatches and drains started bodies before surfacing the first failure', async () => {
     const adapter = new MockAdapter([

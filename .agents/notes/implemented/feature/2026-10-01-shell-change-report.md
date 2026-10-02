@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-10-01-shell-change-report.zh.md)
-
 ## Problem
 
 Models often change files through the shell instead of `edit`: `sed -i … && node test.cjs`, or a Python heredoc that rewrites several files and asserts each replacement. In the ten most recent local sessions, 103 `bash` calls edited files this way, 92 of them from Claude Opus. The earlier [content-anchored edits](2026-09-30-content-anchored-edits.md) review counted 384 such edits in 75 sessions. A paired probe showed that this path costs no extra round trips, because Claude chains the edit and the test in one call. Telling the model to prefer `edit` changed which tool Opus used, but not its request count or success rate, so Bake leaves the choice to the model.

@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-10-01-on-demand-tool-details.zh.md)
-
 ## Problem
 
 Every request resends the native schema of every visible tool. In the standard preset's first request, tool schemas were about 20 KB of the 21 KB body, and the prompt and first message were under 1 KB. Prompt caching hides that cost only on some routes. Anthropic served 96% to 98% of input from cache and OpenAI about 65%, while Gemini through the shipped gateway cached almost none of it. The largest schema was `workflow`, at 3.7 KB, and most of that was the script API reference. No recorded session in the 75-session audit called `workflow`, so every request paid for a reference that almost none used.

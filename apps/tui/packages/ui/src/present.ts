@@ -331,6 +331,14 @@ function rawLines(text: string, failed: boolean): readonly CardLine[] {
   return failed ? lines : lines.map(line => ({ ...line, text: clipCells(line.text, RAW_LINE_CELLS) }))
 }
 
+/**
+ * Cells at the output column, given the cells at the rail.
+ * @param measure - cells from the rail to the right edge, when known.
+ * @returns cells from the output column, or undefined when unknown.
+ */
+const outputCells = (measure: number | undefined): number | undefined =>
+  measure === undefined ? undefined : Math.max(1, measure - (COLUMN.output - COLUMN.rail))
+
 /** Split text into lines, dropping a trailing newline's empty line. */
 const linesOf = (text: string): readonly string[] => {
   const lines = text.split('\n')
@@ -575,14 +583,21 @@ export const CONNECTOR = '\u23bf'
  * the reader sees one block per action, not a call and a result stacked
  * apart. The call id is not drawn. It only joins the two records.
  *
+ * While it waits for its result, the newest lines of its live output hang
+ * under it, and a call that has finished but waits for an earlier one to
+ * commit stops blinking and takes its outcome's colour. The logged result
+ * replaces both.
+ *
  * @param row - the call, including its outcome when one exists.
  * @param bound - how much of the outcome to preview.
+ * @param cells - cells a live output line may take, absent for {@link RAW_LINE_CELLS}.
  * @returns the block's lines, without the opening blank.
  */
-function action(row: ToolCallRow, bound: ResultBound): readonly PresentedLine[] {
+function action(row: ToolCallRow, bound: ResultBound, cells?: number): readonly PresentedLine[] {
   const family = familyOf(row.tool)
   const verb = family ?? VERB.run
   const outcome = row.result
+  const live = outcome === undefined ? row.live : undefined
   const [first = '', ...rest] = linesOf(row.input)
   const title = bare(first, verb)
   // Arguments still streaming. Show `Name(...)` until the full argument arrives.
@@ -596,8 +611,8 @@ function action(row: ToolCallRow, bound: ResultBound): readonly PresentedLine[] 
   const inline = after?.inline === undefined ? named : beside(named, after.inline)
   const head: PresentedLine = {
     marker: iconFor(row.tool),
-    markerTone: outcome === undefined ? 'strong' : outcome.ok ? 'done' : 'failed',
-    ...outcome === undefined ? { pulse: true } : {},
+    markerTone: stateTone(row),
+    ...running(row) ? { pulse: true } : {},
     verb: '', text: inline.text, column: COLUMN.rail, wide: true, tone: 'plain',
     ...inline.spans.length === 0 ? {} : { spans: inline.spans },
   }
@@ -612,8 +627,52 @@ function action(row: ToolCallRow, bound: ResultBound): readonly PresentedLine[] 
   const body = [
     ...excerpt(rest.map(text => continuation(text, 'plain')), limit, bound, 'plain', false).lines,
     ...excerpt(described, limit, bound, 'quiet', false).lines,
+    ...liveTail(live?.tail, bound, cells),
     ...after?.lines ?? []]
   return [head, ...connected(body)]
+}
+
+/**
+ * Whether a call is still running: no result, and no word that it finished.
+ * @param call - the call.
+ * @returns whether its marker blinks.
+ */
+const running = (call: ToolCallRow): boolean => call.result === undefined && call.live?.finished === undefined
+
+/**
+ * Whether a call has an outcome to show, logged or reported live.
+ * @param call - the call.
+ * @returns whether it may fold to its head like a finished call.
+ */
+const settled = (call: ToolCallRow): boolean => !running(call)
+
+/**
+ * A call's marker tone: its outcome's colour once it has one, logged or live.
+ * @param call - the call.
+ * @returns `strong` while it runs, else `done` or `failed`.
+ */
+function stateTone(call: ToolCallRow): Tone {
+  const ok = call.result?.ok ?? call.live?.finished?.ok
+  return ok === undefined ? 'strong' : ok ? 'done' : 'failed'
+}
+
+/**
+ * A running call's newest output lines, under its head in the output grey.
+ *
+ * The same bound as a result's preview, counted from the end, so the window
+ * holds still while new lines replace old ones. Each line is cut to one row
+ * at the output width rather than wrapped, so a long line cannot make the
+ * block grow and shrink as the tail moves.
+ *
+ * @param tail - the call's newest lines, oldest first.
+ * @param bound - the result preview's bound; zero shows none.
+ * @param cells - cells a line may take, absent for {@link RAW_LINE_CELLS}.
+ * @returns the lines, possibly empty.
+ */
+function liveTail(tail: readonly string[] | undefined, bound: ResultBound, cells: number | undefined): readonly PresentedLine[] {
+  if (tail === undefined || bound.lines <= 0) return []
+  const width = Math.max(1, Math.min(cells ?? RAW_LINE_CELLS, RAW_LINE_CELLS))
+  return zoned(tail.slice(-bound.lines).map(text => continuation(clipCells(toolText(text), width), 'plain')))
 }
 
 /**
@@ -643,8 +702,8 @@ function connected(body: readonly PresentedLine[]): readonly PresentedLine[] {
  * @param bound - how much of each outcome to preview.
  * @returns the block's lines, without the opening blank.
  */
-function group(calls: readonly ToolCallRow[], bound: ResultBound): readonly PresentedLine[] {
-  return [groupHead(calls, bound), ...hang(calls.map(call => action(call, bound)))]
+function group(calls: readonly ToolCallRow[], bound: ResultBound, cells?: number): readonly PresentedLine[] {
+  return [groupHead(calls, bound), ...hang(calls.map(call => action(call, bound, cells)))]
 }
 
 /**
@@ -654,19 +713,19 @@ function group(calls: readonly ToolCallRow[], bound: ResultBound): readonly Pres
  * @returns the head line, its marker the step's state.
  */
 function groupHead(calls: readonly ToolCallRow[], bound: ResultBound): PresentedLine {
-  const running = calls.some(call => call.result === undefined)
-  const failed = calls.filter(call => call.result?.ok === false).length
+  const active = calls.some(running)
+  const failed = calls.filter(call => stateTone(call) === 'failed').length
   // Count verbs in the order they first appear, in the step's tense.
   const counts = new Map<Verb, number>()
   for (const call of calls) counts.set(verbFor(call.tool), (counts.get(verbFor(call.tool)) ?? 0) + 1)
-  const tally = [...counts].map(([verb, count]) => `${running ? verb : PAST[verb]} ${count}`).join(' \u00b7 ')
-  const failures = failed === 0 || running || bound.failures === undefined ? undefined : ` \u00b7 ${failed} ${bound.failures}`
+  const tally = [...counts].map(([verb, count]) => `${active ? verb : PAST[verb]} ${count}`).join(' \u00b7 ')
+  const failures = failed === 0 || active || bound.failures === undefined ? undefined : ` \u00b7 ${failed} ${bound.failures}`
   // One kind of call throughout takes that kind's icon. A mix is just an action.
   const icons = new Set(calls.map(call => iconFor(call.tool)))
   return {
     marker: icons.size === 1 ? [...icons][0]! : ICON.other,
-    markerTone: running ? 'strong' : failed > 0 ? 'failed' : 'done',
-    ...running ? { pulse: true } : {},
+    markerTone: active ? 'strong' : failed > 0 ? 'failed' : 'done',
+    ...active ? { pulse: true } : {},
     verb: '', text: `${tally}${failures ?? ''}`, column: COLUMN.rail, tone: 'strong',
     ...failures === undefined ? {} : { spans: [{ length: tally.length, tone: 'strong' as const }, { length: failures.length, tone: 'failed' as const }] },
   }
@@ -726,6 +785,7 @@ function failedHead(line: PresentedLine): PresentedLine {
  * @param bound - how much of each outcome to preview, and the locale's words.
  * @param rows - rows the live region may draw.
  * @param height - rows one line occupies once wrapped.
+ * @param cells - cells a running call's live output line may take.
  * @returns the block's lines, at most `rows` tall unless even the head alone
  *   wraps past them; the head is always the first line or the one after the
  *   opening blank.
@@ -735,19 +795,20 @@ export function fittedGroup(
   bound: ResultBound,
   rows: number,
   height: (line: PresentedLine) => number = () => 1,
+  cells?: number,
 ): readonly PresentedLine[] {
   const head = groupHead(calls, bound)
-  const bodies = calls.map(call => action(call, bound))
+  const bodies = calls.map(call => action(call, bound, cells))
   const whole = opening([head, ...hang(bodies)])
   const size = (lines: readonly PresentedLine[]): number => lines.reduce((sum, line) => sum + height(line), 0)
   if (rows <= 0 || size(whole) <= rows) return whole
   // Heights ignore the rail's marker, which never changes a line's width, so
   // each call is measured once however it ends up folded.
   const full = bodies.map(size)
-  const folded = bodies.map((lines, index) => calls[index]!.result === undefined ? full[index]! : height(lines[0]!))
+  const folded = bodies.map((lines, index) => settled(calls[index]!) ? height(lines[0]!) : full[index]!)
   const fixed = height(BLANK) + height(head)
   const fold = (lines: readonly PresentedLine[], index: number, count: number): readonly PresentedLine[] =>
-    index < count && calls[index]!.result !== undefined ? lines.slice(0, 1) : lines
+    index < count && settled(calls[index]!) ? lines.slice(0, 1) : lines
   for (let count = 1; count <= calls.length; count++) {
     const used = fixed + bodies.reduce((sum, _, index) => sum + (index < count ? folded[index]! : full[index]!), 0)
     if (used <= rows) return [BLANK, head, ...hang(bodies.map((lines, index) => fold(lines, index, count)))]
@@ -1245,10 +1306,10 @@ export function present(row: Row, result: ResultBound, wrap?: (line: PresentedLi
     }
 
     case 'tool-call':
-      return opening(action(row, result))
+      return opening(action(row, result, outputCells(width)))
 
     case 'tool-group':
-      return opening(group(row.calls, result))
+      return opening(group(row.calls, result, outputCells(width)))
 
     case 'tool-result': {
       const tone: Tone = row.ok ? 'plain' : 'failed'

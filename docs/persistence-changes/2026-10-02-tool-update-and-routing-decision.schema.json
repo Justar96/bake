@@ -1,0 +1,307 @@
+{
+  "formatVersion": 1,
+  "roots": [
+    {
+      "key": "event:request/tool-update",
+      "kind": "event",
+      "event": "request/tool-update",
+      "surface": false,
+      "digest": "95d0a6c9a0ac744e3428b96a596a0b536df0c8852cab0b64122bfb91608fb908",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "data",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "ignorable",
+                "type": 5,
+                "optional": true
+              },
+              {
+                "name": "seq",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "time",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "type",
+                "type": 6,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "additions",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "afterMessageId",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "headerSeq",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "removals",
+                "type": 2,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "array",
+            "element": 3
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "kind": "literal",
+            "value": "request/tool-update"
+          }
+        ]
+      }
+    },
+    {
+      "key": "event:subagent/routing-decision",
+      "kind": "event",
+      "event": "subagent/routing-decision",
+      "surface": false,
+      "digest": "5df6c1d20d3b13520831b4f81f5d9f90e66d46baf9b1d04bb2da9ed4a72bb795",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "data",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "ignorable",
+                "type": 18,
+                "optional": true
+              },
+              {
+                "name": "seq",
+                "type": 6,
+                "optional": false
+              },
+              {
+                "name": "time",
+                "type": 6,
+                "optional": false
+              },
+              {
+                "name": "type",
+                "type": 19,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "callId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "childId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "route",
+                "type": 3,
+                "optional": true
+              },
+              {
+                "name": "router",
+                "type": 4,
+                "optional": true
+              },
+              {
+                "name": "source",
+                "type": 14,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "model",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "provider",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "reasoningEffort",
+                "type": 2,
+                "optional": true
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "assessment",
+                "type": 5,
+                "optional": true
+              },
+              {
+                "name": "fallback",
+                "type": 13,
+                "optional": false
+              },
+              {
+                "name": "reason",
+                "type": 2,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "difficulty",
+                "type": 6,
+                "optional": false
+              },
+              {
+                "name": "policy",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "reasons",
+                "type": 7,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 8,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "array",
+            "element": 2
+          },
+          {
+            "kind": "union",
+            "types": [
+              9,
+              10,
+              11,
+              12
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "cautious"
+          },
+          {
+            "kind": "literal",
+            "value": "fallback"
+          },
+          {
+            "kind": "literal",
+            "value": "needs_context"
+          },
+          {
+            "kind": "literal",
+            "value": "normal"
+          },
+          {
+            "kind": "primitive",
+            "type": "boolean"
+          },
+          {
+            "kind": "union",
+            "types": [
+              10,
+              15,
+              16,
+              17
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "auto"
+          },
+          {
+            "kind": "literal",
+            "value": "default"
+          },
+          {
+            "kind": "literal",
+            "value": "explicit"
+          },
+          {
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "kind": "literal",
+            "value": "subagent/routing-decision"
+          }
+        ]
+      }
+    }
+  ],
+  "types": []
+}

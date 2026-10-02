@@ -5,8 +5,6 @@ kind: "package-group"
 
 # packages/runtime-diagnostics
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 The runtime-diagnostics group provides runtime self-checking for DeepSeek Harness compositions. `invariants` runs package-owned checks that verify each package's durable event and data relationships while the composition is live. A violation surfaces as an error attributed to the package that owns the relationship; a global switch and package-name filters control which checks run. `runtime-watchdog` watches the process itself: it records sustained event-loop delay and heap use near V8's limit, and arms Node's fatal-error report, in a directory under the Harness home. Use this group's packages when a composition should verify its own runtime contracts or leave evidence of its health as part of normal operation.

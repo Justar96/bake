@@ -6,7 +6,7 @@
  */
 
 import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import type { Socket } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -16,6 +16,7 @@ import { execa } from 'execa'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { resolveExampleLaunch } from '@deepseek-ai/dsh-loader-smoke'
 import { PROCESS_SHUTDOWN_TIMEOUT_MS } from '../src/process-shutdown.ts'
+import { deepseekEndpointSettings } from './fixtures/deepseek-endpoint.ts'
 
 const dshBinScript = fileURLToPath(new URL('../src/bin.ts', import.meta.url))
 const tsconfigPath = fileURLToPath(new URL('../../../tsconfig.json', import.meta.url))
@@ -45,7 +46,7 @@ const FOLLOW_UP = 'follow-up typed during the reply'
 
 /** The start of a DeepSeek Messages reply: one text block, opened and never closed. */
 const PARTIAL_REPLY = [
-  { type: 'message_start', message: { id: 'msg_hangup', model: 'deepseek-v4-flash', usage: { input_tokens: 12, output_tokens: 1 } } },
+  { type: 'message_start', message: { id: 'msg_hangup', model: 'deepseek-flash', usage: { input_tokens: 12, output_tokens: 1 } } },
   { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
   { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Partial reply still streaming' } },
 ].map(event => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join('')
@@ -88,13 +89,15 @@ async function hangUp(graceMs: number) {
   const cwd = realpathSync(await mkdtemp(join(tmpdir(), 'dsh-hangup-')))
   onTestFinished(() => rm(cwd, { recursive: true, force: true, maxRetries: 3 }))
   const model = await heldModel()
+  await mkdir(join(cwd, '.dsh'))
+  await writeFile(join(cwd, '.dsh', 'settings.yaml'), deepseekEndpointSettings(model.url))
   const patch = join(cwd, 'hangup.patch.yml')
   await writeFile(patch, [
     // No provider is the default; the run names the one the endpoint serves.
     '- id: agent-default-model',
     '  config:',
     '    provider: deepseek-official',
-    '    model: deepseek-v4-flash',
+    '    model: deepseek-flash',
     '- id: session-persistence-jsonl',
     '  config:',
     "    root: !!js dshHomePath('sessions')",
@@ -116,7 +119,6 @@ async function hangUp(graceMs: number) {
       DSH_AGENTS_HOME: join(cwd, '.agents'),
       DSH_TELEMETRY_DISABLED: '1',
       DEEPSEEK_API_KEY: 'keyless-hangup',
-      DEEPSEEK_BASE_URL: model.url,
       DSH_TEST_HANGUP_DIR: cwd,
       DSH_TEST_HANGUP_GRACE_MS: String(graceMs),
     },

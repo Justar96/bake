@@ -71,6 +71,8 @@ describe('scoped-dispatch invariants', () => {
         },
         () => Promise.resolve(undefined),
       ],
+      'agent/tool-progress': [{ agent, turn: 1, step: 1, callId: 'call-1' as never, progress: { output: 'tail' } }],
+      'agent/tool-executed': [{ agent, turn: 1, step: 1, callId: 'call-1' as never, isError: false }],
       'agent/turn-stopping': [{ agent, turn: 1, signal }],
       'agent/error': [{ agent, turn: 1, step: 0, error: new Error('x') }],
     } satisfies { [K in AgentEventName]: EventArgs<K> }

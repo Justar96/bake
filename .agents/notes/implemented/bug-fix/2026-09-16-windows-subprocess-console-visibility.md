@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-16-windows-subprocess-console-visibility.zh.md)
-
 ## Problem
 
 PTC runtime and shell calls share the Windows subprocess provider. Its ordinary Job runner omits window hiding, and native targets supply standard handles without a startup visibility flag. Desktop execution can therefore flash console windows for short-lived commands.

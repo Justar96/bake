@@ -1,7 +1,5 @@
 # Subagent
 
-English | [中文](subagent.zh.md)
-
 The subagent seam lets an agent delegate work to a child agent. Like [bash](shell.md), it is **one optional capability**, not part of the agent loop, so its types live here rather than in [core.md](core.md). It differs from the other capability seams because **multiple provider implementations coexist** in one context, registered by name (`ctx.subagents`), while bash allows only one executor. Its registry follows the [LLM adapter registry](llm-streaming.md), not the single-service bash executor.
 
 Service Definition: [dsh-subagent](../../packages/subagent/subagent) (`ctx.subagents` + the vocabulary below). The in-process providers start fresh or history-seeded children; [dsh-tool-subagent](../../packages/subagent/tool-subagent/README.md) delegates to a configured provider, and [dsh-tool-subagent-control](../../packages/subagent/tool-subagent-control/README.md) provides follow-up, interruption, and listing. The service owns continuable-child orchestration and child discovery from the session store and optional persistence. The [subagent Agent Note](../../.agents/notes/implemented/feature/2026-06-21-subagent-capability-seam.md) records the service design.

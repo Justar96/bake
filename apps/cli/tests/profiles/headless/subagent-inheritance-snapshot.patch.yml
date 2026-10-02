@@ -6,7 +6,7 @@
 - id: headless-runner
   disabled: true
 
-- id: llm-deepseek
+- id: llm-pi-ai
   disabled: true
 
 - id: sandbox-policy

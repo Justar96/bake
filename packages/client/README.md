@@ -5,8 +5,6 @@ kind: "package-group"
 
 # client/ — shared Connection
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 The `client/` group currently contains the shared Connection package. It carries typed Client-to-Host requests and event delivery for consumers that use the Client transport.

@@ -5,8 +5,6 @@ kind: persistence-release
 
 # Persistence release: dsh-v0.1.2-alpha.2
 
-English | [中文](dsh-v0.1.2-alpha.2.zh.md)
-
 ## Summary
 
 The envelope restores optional ignorable. The writer format remains 0.

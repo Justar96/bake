@@ -263,6 +263,18 @@ describe('first-party Session format catalog', () => {
     }).toThrow(/format v2 delivery marker claims target format v3/)
   })
 
+  it.each(['current', 'transformed'] as const)('restores a retired delivery marker no plugin writes (%s)', (validation) => {
+    const header = { type: 'session', version: 3, id: 'retired-delivery', createdAt: 1, isSeeded: false, delegationDepth: 0 }
+    const rows = [
+      { type: 'feedback/record', seq: 0, time: 1, data: { text: 'accepted' } },
+      { type: 'session-log-deepseek/delivery-accepted', seq: 1, time: 2,
+        data: { sessionId: header.id, throughSeq: 0, sessionFormatVersion: 3 } },
+    ]
+    const restore = sessionFormatCatalog.createRestore(header, { recovery: 'strict', validation })
+    for (const row of rows) restore.decodeRow(row)
+    expect(restore.finish().events).toEqual(rows)
+  })
+
   it('validates complete relationships after streaming migration', () => {
     const stream = sessionFormatCatalog.createRestore({
       type: 'session', version: 1, id: 'invalid-stream', createdAt: 1, delegationDepth: 0,

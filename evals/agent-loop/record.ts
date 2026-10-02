@@ -76,6 +76,8 @@ function compact(sample: Sample) {
     firstRequestBytes: first.requestBytes ?? null, toolSchemaChars: first.toolSchemaChars ?? null,
     elapsedMs: sample.elapsedMs ?? null,
     toolErrorMessages: (sample.toolErrorMessages ?? []).map((text: string) => String(text).split('\n')[0]!.slice(0, 160)),
+    subagentCalls: sample.subagentCalls ?? null,
+    routingDecisions: sample.routingDecisions ?? null,
   }
 }
 type Compact = ReturnType<typeof compact>

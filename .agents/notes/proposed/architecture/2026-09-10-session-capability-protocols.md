@@ -2,8 +2,6 @@
 
 Status: proposed
 
-English | [中文](2026-09-10-session-capability-protocols.zh.md)
-
 ## Problem
 
 Keeping the legacy `Session` compatibility name does not make implementations replaceable. If storage, query, projection, or frontend code assumes that concrete in-memory class, JSONL paths, or a concrete index schema, physical implementation still leaks across the system.

@@ -1,7 +1,5 @@
 # Web Access
 
-English | [中文](web.zh.md)
-
 Web access uses [dsh-web](../../packages/web/web) for search and fetch. Search providers are [Exa](../../packages/web/web-search-exa) and [DeepSeek](../../packages/web/web-search-deepseek); the [HTTP provider](../../packages/web/web-fetch-http) fetches pages, and [dsh-tool-web](../../packages/web/tool-web) exposes `web_search` and `web_fetch`.
 
 Source: [`packages/web/web/src/types.ts`](../../packages/web/web/src/types.ts)

@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-07-25-subagent-policy-inheritance.zh.md)
-
 ## Problem
 
 The Auto or Full access preset identity plus sandbox and approval overrides are per-session log folds. An in-process subagent gets a new session, so a spawn child once fell back to deployment defaults and a fork child saw only switches inside its completed-turn prefix. Delegation could therefore widen a parent that had switched to `read-only` or silently retain a stale identity when Auto and Full access shared the same knob bundle.

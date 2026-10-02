@@ -5,8 +5,6 @@ kind: "package-library"
 
 # @deepseek-ai/dsh-launch-environment
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 Use `@deepseek-ai/dsh-launch-environment` to resolve launch-time environment values without trusting the flattened `process.env`. It freezes inherited process values, the invocation directory's `.env`, and the Harness home's `.env`, then returns the winning value and its source in a fixed trust order. Callers can exclude layers for sensitive lookups; an omitted layer stays unreachable regardless of later ordering changes. The snapshot is immutable, but every layer is still copied into `process.env`, so it does not isolate subprocesses. Import it as a library; it cannot be mounted from `cordis.yml`.
@@ -32,7 +30,7 @@ Resolve user-facing values through the snapshot instead of `process.env` wheneve
 import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 
 declare const ctx: import('@deepseek-ai/cordis').Context
-const endpoint = launchEnvironmentOf(ctx).get('DEEPSEEK_BASE_URL')?.value
+const apiKey = launchEnvironmentOf(ctx).get('DEEPSEEK_API_KEY')?.value
 ```
 
 `get(name)` searches every layer, most trusted first. `getFrom(name, sources)` searches only the named layers without changing that trust order — a caller that must never accept a layer leaves it out of the list, so no future reordering can let it back in.
@@ -89,7 +87,7 @@ Read these pages when you need the launcher that builds the snapshot or the cons
 
 - [Boot package](../../boot/app-boot/README.md) — the launcher that fills `ctx.launchEnvironment` before any config entry mounts.
 - [Credentials store](../../credentials/credentials-local/README.md) — resolves stored credentials against the snapshot's layers.
-- [DeepSeek provider](../../llm/llm-deepseek/README.md) — reads provider configuration through the launch environment.
+- [pi-ai provider](../../llm/llm-pi-ai/README.md) — resolves provider API keys through the launch environment.
 
 -----
 

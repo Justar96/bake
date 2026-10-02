@@ -42,7 +42,7 @@ function children(): readonly SubagentEntry[] {
 const lineText = (line: ReturnType<typeof subagentSheet>[number]): string =>
   line.parts?.map(part => part.text).join('') ?? line.text
 
-it.each(['en', 'zh'] as const)('shows recorded provenance, effective route, and evidence in %s', async locale => {
+it.each(['en'] as const)('shows recorded provenance, effective route, and evidence in %s', async locale => {
   const copy = dictionaries[locale]
   const entries = children()
   const lines = subagentSheet(entries, 1, copy)

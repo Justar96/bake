@@ -1,7 +1,5 @@
 # Deliverables
 
-English | [中文](deliverables.zh.md)
-
 The `present` tool lets an agent declare files for delivery and writes the declaration as a log-only Session event. The [group map](../../packages/deliverables/README.md) and [tool-present README](../../packages/deliverables/tool-present/README.md) own current configuration and behavior.
 
 Source: [`packages/deliverables/tool-present/src/types.ts`](../../packages/deliverables/tool-present/src/types.ts)

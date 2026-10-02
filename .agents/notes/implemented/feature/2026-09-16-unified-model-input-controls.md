@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-16-unified-model-input-controls.zh.md)
-
 ## Problem
 
 Separate DeepSeek and pi-ai row renderers let labels, icons, and spacing diverge. An automatic column count moves image input between the capacity row and a second row with small width changes. The image-support selector also cannot express image-only input, although both adapters accept it.

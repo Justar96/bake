@@ -1,7 +1,5 @@
 # Bake
 
-English | [中文](README.zh.md)
-
 Bake is a keyboard-driven coding agent for the terminal. It streams the model's answer as it arrives, runs shell and file tools inside a sandbox, and saves every session as an append-only log you can resume.
 
 - **Slash commands** for models, sign-in, sessions, goals, plan mode, compaction, and permissions, with argument completion.

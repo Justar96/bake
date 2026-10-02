@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-10-symmetric-message-feedback-submission.zh.md)
-
 ## Problem
 
 The assistant-message rating controls used different commit points. Like recorded a positive rating immediately, while Dislike opened the feedback dialog and recorded only after Submit. The asymmetry made an accidental Like durable before confirmation and prevented positive feedback from carrying the same optional category and description as negative feedback.

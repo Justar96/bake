@@ -871,6 +871,73 @@ describe('per-model reasoning efforts', () => {
   })
 })
 
+describe('vendor models on a hand-declared route', () => {
+  /** A relay route serving vendor models under their own ids, as CLIProxyAPI's sign-in declares one. */
+  function relay(models: LlmPiAi.PiAiModelProfile[]): Record<string, LlmPiAi.PiAiProviderProfile> {
+    return { relay: { api: 'openai-responses', baseURL: 'https://relay.test/v1', models } }
+  }
+  function modelsOf(providers: Record<string, LlmPiAi.PiAiProviderProfile>): Map<string, Model<Api>> {
+    return new Map((resolveProfiles(providers).get('relay')?.piProvider?.getModels() ?? []).map(model => [model.id, model]))
+  }
+  const vendor = (provider: string, id: string) => getBuiltinModels(provider as never).find(model => model.id === id) as Model<Api>
+
+  it('takes a bare entry\'s limits, inputs, efforts, and adaptive thinking from its vendor\'s entry', () => {
+    const sonnet = vendor('anthropic', 'claude-sonnet-5-5')
+    const model = modelsOf(relay([{ id: 'claude-sonnet-5-5', api: 'anthropic-messages', baseURL: 'https://relay.test' }]))
+      .get('claude-sonnet-5-5')!
+    expect(model).toMatchObject({ provider: 'relay', baseUrl: 'https://relay.test', api: 'anthropic-messages',
+      contextWindow: sonnet.contextWindow, maxTokens: sonnet.maxTokens, input: sonnet.input, reasoning: true })
+    expect(getSupportedThinkingLevels(model)).toEqual(['low', 'medium', 'high', 'xhigh', 'max'])
+    // Only adaptive thinking crosses over; the rest of the vendor's compat describes its own endpoint.
+    expect(model.compat).toEqual({ forceAdaptiveThinking: true })
+    expect(model.cost).toEqual({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 })
+  })
+
+  it('reaches the runtime, so a request naming an effort is accepted', async () => {
+    const ctx = await harness({ providers: { relay: { apiKeyEnv: KEY_ENV, api: 'openai-responses', baseURL: 'https://relay.test/v1',
+      models: [{ id: 'claude-sonnet-5-5', api: 'anthropic-messages', baseURL: 'https://relay.test' }, { id: 'gpt-5.4' }] } } })
+    const efforts = async (id: string) => (await ctx.llm.resolveModelInfo('relay', id)).reasoning?.efforts.map(effort => effort.id)
+    expect(await efforts('claude-sonnet-5-5')).toEqual(['low', 'medium', 'high', 'xhigh', 'max'])
+    expect(await efforts('gpt-5.4')).toEqual(getSupportedThinkingLevels(vendor('openai', 'gpt-5.4')))
+  })
+
+  it('keeps what the entry states, including a declared non-reasoning model', () => {
+    const models = modelsOf(relay([
+      { id: 'claude-sonnet-5-5', api: 'anthropic-messages', contextWindow: 200_000, reasoningEfforts: { low: 'low', high: 'high' },
+        compat: { forceAdaptiveThinking: false } },
+      { id: 'gpt-5.4', reasoningEfforts: false },
+    ]))
+    const sonnet = models.get('claude-sonnet-5-5')!
+    expect(sonnet.contextWindow).toBe(200_000)
+    expect(getSupportedThinkingLevels(sonnet)).toEqual(['low', 'high'])
+    expect(sonnet.compat).toMatchObject({ forceAdaptiveThinking: false })
+    expect(models.get('gpt-5.4')!.reasoning).toBe(false)
+  })
+
+  it('takes no efforts over another protocol, and nothing for an id its vendor does not publish', () => {
+    const models = modelsOf(relay([
+      // Anthropic spells its efforts for Messages; served over Responses, only the limits hold.
+      { id: 'claude-sonnet-5-5' },
+      { id: 'claude-sonnet-5-5:batch', api: 'anthropic-messages' },
+      { id: 'claude-sonnet-latest', api: 'anthropic-messages' },
+    ]))
+    const overResponses = models.get('claude-sonnet-5-5')!
+    expect(overResponses.reasoning).toBe(false)
+    expect(overResponses.compat).toBeUndefined()
+    expect(overResponses.contextWindow).toBe(vendor('anthropic', 'claude-sonnet-5-5').contextWindow)
+    for (const id of ['claude-sonnet-5-5:batch', 'claude-sonnet-latest']) {
+      expect(models.get(id)).toMatchObject({ reasoning: false, contextWindow: 262_144 })
+    }
+  })
+
+  it('leaves a catalog route to its own installed entries', () => {
+    const [catalogModel] = getBuiltinModels('deepseek')
+    const model = resolveProfiles({ deepseek: { models: [{ id: catalogModel!.id }] } }).get('deepseek')?.piProvider?.getModels()[0]
+    expect(model?.provider).toBe('deepseek')
+    expect(model?.contextWindow).toBe(catalogModel!.contextWindow)
+  })
+})
+
 describe('modelOverrides', () => {
   const deepseekModel = (): Model<Api> => {
     const [model] = getBuiltinModels('deepseek')
@@ -1331,14 +1398,14 @@ describe('configurable-provider directory', () => {
     const dir = await home()
     const ctx = await bootWithSettings(dir, {})
     ctx.llm.registerConfigurableProviders([
-      { provider: 'deepseek-official', displayName: 'DeepSeek', settingsNs: 'llm-deepseek', settingsPath: [] },
+      { provider: 'acme-official', displayName: 'Acme', settingsNs: 'llm-acme', settingsPath: [] },
     ])
     const before = ctx.llm.listConfigurableProviders().length
     expect(before).toBeGreaterThan(30)
 
     await ctx.settings.update('llm-pi-ai', {
       providers: {
-        'deepseek-official': {
+        'acme-official': {
           api: 'openai-completions',
           baseURL: 'https://acme.test/v1',
           models: [{ id: 'm', contextWindow: 1, maxTokens: 1 }],
@@ -1349,8 +1416,8 @@ describe('configurable-provider directory', () => {
     // The refused swap costs a diagnostic, not the directory: every entry the
     // page needs is still declared.
     expect(ctx.llm.listConfigurableProviders()).toHaveLength(before)
-    expect(ctx.llm.listConfigurableProviders().find(entry => entry.provider === 'deepseek-official')?.settingsNs)
-      .toBe('llm-deepseek')
+    expect(ctx.llm.listConfigurableProviders().find(entry => entry.provider === 'acme-official')?.settingsNs)
+      .toBe('llm-acme')
   })
 
   it('replaces its entries atomically as declared routes come and go', async () => {

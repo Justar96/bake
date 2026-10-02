@@ -5,8 +5,6 @@ kind: "package-reference"
 
 # @deepseek-ai/dsh-hooks-codex
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 `dsh-hooks-codex` runs command hooks from an existing Codex `hooks.json` during agent runs, so prompt and tool gates work without being rewritten. It supports five Codex hook points: session start, prompt submission, before and after tool execution, and stop. Hooks can block prompts or tool calls with model-visible reasons, add conversation context, or force another agent step. Choose this package to reuse Codex command hooks in the harness; use a native plugin for behavior outside this supported subset.
@@ -80,7 +78,7 @@ This section explains the design decisions behind the bridge and points at the c
 
 ### Hook point mapping
 
-Each supported event programs against one harness extension point: `SessionStart` adds context through awaited `agent/created` initialization before the first turn, `UserPromptSubmit` and `PreToolUse` are waterfalls that can reject the incoming action (`agent/pre-step`, `tools/pre-execute`), `PostToolUse` is a waterfall that can block with feedback or add context to the downstream decision (`tools/post-execute`), and `Stop` is a serial listener whose blocking result forces another step through `steer()` (`agent/turn-stopping`). Context-only hooks always delegate via `next()` before folding a sourced message into the downstream decision, so a later listener can still reject or rewrite; blocking decisions map to `deny` (`PreToolUse` has no `allow` or `ask`). The per-event wiring lives in [`src/index.ts`](src/index.ts).
+Each supported event programs against one harness extension point: `SessionStart` adds context through awaited `agent/created` initialization before the first turn, `UserPromptSubmit` and `PreToolUse` are waterfalls that can reject the incoming action (`agent/pre-step`, `tools/pre-execute`), `PostToolUse` is a waterfall that can block with feedback or add context to the downstream decision (`tools/post-execute`), and `Stop` is a serial listener whose blocking result forces another step through `steer()` (`agent/turn-stopping`). Context-only hooks always delegate via `next()` before folding a sourced message into the downstream decision, so a later listener can still reject or rewrite; blocking decisions map to `deny` (`PreToolUse` has no `allow` or `ask`). `{"continue": false}` rejects the prompt on `agent/pre-step`, blocks the tool result on `tools/post-execute`, and drops a `Stop` block's steering; it is ignored on `tools/pre-execute`, as in Codex. The per-event wiring lives in [`src/index.ts`](src/index.ts).
 
 ### Payloads and environment
 
@@ -150,7 +148,7 @@ Append-only; newly visible content follows the reusable request prefix and does 
 
 #### What the model sees
 
-Provider-supplied reasons pass through verbatim. When absent, a denied tool becomes `Error: blocked by PreToolUse hook`, blocked post-tool feedback is exactly `blocked by PostToolUse hook`, and a blocking stop adds steering exactly `continue: blocked by Stop hook`; a blocked prompt is discarded with no model-visible message, ending the turn as `blocked`. Codex `systemMessage` is not surfaced.
+Provider-supplied reasons pass through verbatim. When absent, a denied tool becomes `Error: blocked by PreToolUse hook`, blocked post-tool feedback is exactly `blocked by PostToolUse hook`, and a blocking stop adds steering exactly `continue: blocked by Stop hook`; a blocked prompt is discarded with no model-visible message, ending the turn as `blocked`. A `PostToolUse` hook that returns `{"continue": false}` replaces the tool result with its block reason, else its `stopReason`, else `blocked by PostToolUse hook`, and the turn continues. Codex `systemMessage` is not surfaced.
 
 #### Token effect
 
@@ -169,11 +167,11 @@ These limits describe what your Codex hooks cannot do through this bridge yet, a
 
 - **Unsupported hook events (5 of Codex's current 10)** — `PermissionRequest`, `PreCompact`, `PostCompact`, `SubagentStart`, and `SubagentStop`. Config for these events is silently dropped during parsing. The comparison baseline is Codex's [official hook reference](https://learn.chatgpt.com/docs/hooks).
 - **`SessionStart` is partial** — plain stdout and JSON `additionalContext` work, but the hook runs detached, so context can miss the first request.
-- **`UserPromptSubmit` is partial** — blocking plus plain-stdout or JSON context work, but the common `systemMessage` and `{"continue": false}` controls are not enforced.
+- **`UserPromptSubmit` is partial** — blocking plus plain-stdout or JSON context work, and `{"continue": false}` blocks the prompt, but the common `systemMessage` control is not enforced.
 - **`PreToolUse` is partial** — blocking works, but `additionalContext`, `permissionDecision: "allow"`, and `updatedInput` are ignored. Every tool is represented as `tool_input: { command }`, so non-shell tool arguments are not faithfully exposed to the hook.
-- **`PostToolUse` is partial** — blocking feedback and JSON `additionalContext` work, but `{"continue": false}` is not enforced, non-shell tool arguments are reduced to `{ command }`, and structured tool output is flattened to text in `tool_response`.
-- **`Stop` is partial** — blocking forces another model turn, but `stop_hook_active` is always `false`, `last_assistant_message` is always `null`, and `{"continue": false}` is not enforced. An unconditionally blocking hook therefore force-continues every step unless it self-limits.
-- **Common payload and output fields are partial** — every mapped event reports the statically configured `model` and `permission_mode: "default"` instead of current Codex runtime values, and `transcript_path` is never populated: it is always `null`, because the persistence seam exposes no artifact paths and the default-zstd session log is not readable by hook scripts. `systemMessage` is logged + warned but not surfaced, and `{"continue": false}` is recorded but does not apply Codex's event-specific stop behavior.
+- **`PostToolUse` is partial** — blocking feedback, `{"continue": false}`, and JSON `additionalContext` work, but non-shell tool arguments are reduced to `{ command }`, and structured tool output is flattened to text in `tool_response`.
+- **`Stop` is partial** — blocking forces another model turn and `{"continue": false}` overrides the block, but `stop_hook_active` is always `false` and `last_assistant_message` is always `null`. An unconditionally blocking hook therefore force-continues every step unless it self-limits.
+- **Common payload and output fields are partial** — every mapped event reports the statically configured `model` and `permission_mode: "default"` instead of current Codex runtime values, and `transcript_path` is never populated: it is always `null`, because the persistence seam exposes no artifact paths and the default-zstd session log is not readable by hook scripts. `systemMessage` is logged + warned but not surfaced, and `stopReason` reaches the model only as `PostToolUse` replacement text; a `SessionStart` stop is recorded without effect.
 - **Config loading and execution are partial** — one process-level `configPath` is parsed at load; Codex's active user, project, session, system/managed, and plugin layers, trust controls, and inline `config.toml` hook form are not implemented. Only synchronous `command` handlers run, current metadata such as `statusMessage` and `commandWindows` is ignored, and matching handlers run serially rather than with Codex's concurrent launch semantics.
 
 <a id="dev-note"></a>
@@ -184,6 +182,6 @@ These limits describe what your Codex hooks cannot do through this bridge yet, a
 
 This Dev Note is working context for maintainers: open questions and directions that are not decided. It is explicitly non-authoritative — shipped behavior, limits, and accepted rationale live in the sections above, the package code, and the linked Agent Notes.
 
-The deferred gaps above are the working queue: per-session hook-config discovery, a session-start delivery gate, a stop loop-guard, and a run-level halt for `continue: false`. None has a design yet; the official Codex reference is the baseline for closing any of them.
+The deferred gaps above are the working queue: per-session hook-config discovery, a session-start delivery gate, and a stop loop-guard. None has a design yet; the official Codex reference is the baseline for closing any of them.
 
 </details>

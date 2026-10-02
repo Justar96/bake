@@ -10,6 +10,7 @@ import type { Context, Events } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { z as zod } from 'zod'
 import type { Agent, RequestErrorAction } from '@deepseek-ai/dsh-agent'
+import { isRetryableFailureCode, retryDelayMs } from '@deepseek-ai/dsh-llm'
 import type { LlmFailure, ResolvedRetryPolicy } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import { RetryId } from './brand.ts'
@@ -54,13 +55,6 @@ async function settleDownstream(
   } catch (error: unknown) {
     return { type: 'error', error }
   }
-}
-
-function localDelay(config: ResolvedRetryPolicy, retry: number, random: () => number): number {
-  const exponent = Math.min(retry - 1, 1024)
-  const exponential = Math.min(config.initialDelayMs * 2 ** exponent, config.maxDelayMs)
-  const jitter = 1 - config.jitterRatio + 2 * config.jitterRatio * random()
-  return Math.min(exponential * jitter, config.maxDelayMs)
 }
 
 function retryPolicyKey(policy: ResolvedRetryPolicy): string {
@@ -212,7 +206,7 @@ export function apply(ctx: Context, config: Config = {}, internals: RetryInterna
       if (downstream.type === 'decision' && downstream.decision?.kind === 'retry') {
         return downstream.decision
       }
-    } else if (!policy.retryableCodes.includes(failure.code)) {
+    } else if (!isRetryableFailureCode(policy, failure.code)) {
       return next()
     }
 
@@ -223,19 +217,8 @@ export function apply(ctx: Context, config: Config = {}, internals: RetryInterna
     if (policy.mode === 'normal' && previousRetry >= policy.maxRetries) return next()
     const retry = previousRetry + 1
     const retryId = previous?.retryId ?? RetryId(randomUUID())
-    let delayMs: number
-    if (failure.providerRetryAfterMs !== undefined
-      && Number.isFinite(failure.providerRetryAfterMs)
-      && failure.providerRetryAfterMs > 0) {
-      if (failure.providerRetryAfterMs > policy.maxDelayMs) {
-        if (policy.mode === 'normal') return next()
-        delayMs = localDelay(policy, retry, random)
-      } else {
-        delayMs = failure.providerRetryAfterMs
-      }
-    } else {
-      delayMs = localDelay(policy, retry, random)
-    }
+    const delayMs = retryDelayMs(policy, retry, failure, random)
+    if (delayMs === undefined) return next()
 
     return backoff(agent, turn, step, failure, provider, policy, policyKey, retry, retryId, delayMs, signal)
   }

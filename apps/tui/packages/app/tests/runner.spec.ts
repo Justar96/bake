@@ -46,7 +46,7 @@ it.each([
   const exit = vi.fn()
   // These streams implement exactly the terminal methods Ink consumes.
   const io = { in: input, out: output, err: error, exit } as unknown as TuiIo
-  const finished = run(fixture.ctx, { screen, locale: 'en', composerFrame: 'auto', completionLimit: 8, resultLines: 8, attachmentMaxBytes: 1048576, attachmentLimit: 8, doubleInterruptMs: 500, credentialRefs: [] }, io)
+  const finished = run(fixture.ctx, { screen, composerFrame: 'auto', completionLimit: 8, resultLines: 8, attachmentMaxBytes: 1048576, attachmentLimit: 8, doubleInterruptMs: 500, credentialRefs: [] }, io)
   cleanup.push(async () => { await fixture.ctx.fiber.dispose(); await finished })
   await Promise.race([finished, vi.waitFor(() => expect(output.text).toContain('Session: '))])
   expect(input.isRaw).toBe(true)
@@ -84,7 +84,7 @@ it('leaves terminal modes untouched when fullscreen startup fails', async () => 
   const output = new Output()
   const error = new Output()
   const exit = vi.fn()
-  await expect(run(fixture.ctx, { screen: 'fullscreen', resume: 'missing-session', locale: 'en', composerFrame: 'auto', completionLimit: 8, resultLines: 8, attachmentMaxBytes: 1048576, attachmentLimit: 8, doubleInterruptMs: 500, credentialRefs: [] }, {
+  await expect(run(fixture.ctx, { screen: 'fullscreen', resume: 'missing-session', composerFrame: 'auto', completionLimit: 8, resultLines: 8, attachmentMaxBytes: 1048576, attachmentLimit: 8, doubleInterruptMs: 500, credentialRefs: [] }, {
     in: input, out: output, err: error, exit,
   } as unknown as TuiIo)).rejects.toThrow('missing-session')
   expect(input.isRaw).toBe(false)
@@ -102,7 +102,7 @@ it.each(['stdin', 'stdout'])('refuses piped %s before acquiring terminal modes',
   input.isTTY = stream !== 'stdin'
   const output = new Output()
   output.isTTY = stream !== 'stdout'
-  await expect(run(fixture.ctx, { screen: 'fullscreen', locale: 'en', composerFrame: 'auto', completionLimit: 8, resultLines: 8, attachmentMaxBytes: 1048576, attachmentLimit: 8, doubleInterruptMs: 500, credentialRefs: [] }, {
+  await expect(run(fixture.ctx, { screen: 'fullscreen', composerFrame: 'auto', completionLimit: 8, resultLines: 8, attachmentMaxBytes: 1048576, attachmentLimit: 8, doubleInterruptMs: 500, credentialRefs: [] }, {
     in: input, out: output, err: output, exit: vi.fn(),
   } as unknown as TuiIo)).rejects.toThrow('interactive terminal')
   expect(input.isRaw).toBe(false)
@@ -127,7 +127,7 @@ it('root fiber disposal awaits the drains owned by run()\'s own finally', async 
     return original.call(this)
   })
   cleanup.push(async () => { drainSpy.mockRestore() })
-  const finished = run(fixture.ctx, { screen: 'inline', locale: 'en', composerFrame: 'auto', completionLimit: 8, resultLines: 8, attachmentMaxBytes: 1048576, attachmentLimit: 8, doubleInterruptMs: 500, credentialRefs: [] }, io)
+  const finished = run(fixture.ctx, { screen: 'inline', composerFrame: 'auto', completionLimit: 8, resultLines: 8, attachmentMaxBytes: 1048576, attachmentLimit: 8, doubleInterruptMs: 500, credentialRefs: [] }, io)
   cleanup.push(async () => { gate.resolve(); await fixture.ctx.fiber.dispose(); await finished })
   await Promise.race([finished, vi.waitFor(() => expect(output.text).toContain('Session: '))])
   // Cordis's own root disposal, not run()'s explicit `await stop()`: proves the

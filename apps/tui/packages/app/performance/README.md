@@ -4,8 +4,6 @@ description: "Measure built TUI startup, long-session resume, input latency, and
 
 # Terminal performance diagnostic
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 Measure a fresh TUI process, resume mixed histories, and type during a paced response without an API key or user data. Reports retain individual samples, per-workload medians, and failures. This local diagnostic has no calibrated timing thresholds and does not qualify CI performance.

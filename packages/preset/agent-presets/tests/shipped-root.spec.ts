@@ -58,6 +58,7 @@ async function roster(config: Partial<Config> = {}): Promise<Context> {
 
 interface ShippedEntry {
   id?: unknown
+  name?: unknown
   disabled?: unknown
   config?: unknown
 }
@@ -150,6 +151,9 @@ describe('the shipped preset root', () => {
       const entries = await shippedEntries(id)
       expect(findEntry(entries, 'tool-workflow')?.disabled, id).not.toBe(true)
       expect(findEntry(entries, 'workflow-ptc')?.disabled, id).not.toBe(true)
+      // run_code uses the host QuickJS runtime; the workflow engine needs a Node process of its own.
+      expect(findEntry(entries, 'workflow-ptc-runtime'), id).toMatchObject({ isolate: { ptcRuntime: true } })
+      expect(findEntry(entries, 'workflow-node-runtime')?.name, id).toBe('@deepseek-ai/dsh-ptc-runtime-node')
     }
   })
 

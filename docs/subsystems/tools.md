@@ -1,7 +1,5 @@
 # Tools
 
-English | [中文](tools.zh.md)
-
 The tool pipeline of [dsh-tools](../../packages/core/tools). [core.md](core.md) introduces `ToolDefinition` as the pipeline-authoring type shared by the core packages; the model-facing [`ToolSchema`](llm-streaming.md#the-model-request-and-result) wire type is declared with the model request. This page documents every `ToolDefinition` field, the typed schema DSL that builds it, the guarded execution types, and the UI-presentation types.
 
 Source: [`packages/core/tools/src/index.ts`](../../packages/core/tools/src/index.ts) · [`packages/core/tools/src/schema.ts`](../../packages/core/tools/src/schema.ts) · [`packages/core/tools/src/presentation.ts`](../../packages/core/tools/src/presentation.ts)
@@ -216,10 +214,19 @@ interface ToolExecutionInput {
   readonly parent?: ToolExecutionToken
   /** Required caller-owned cancellation for this invocation. */
   readonly signal: AbortSignal
+  /**
+   * Caller-owned, process-local receiver for the body's
+   * {@link ToolRunContext.reportProgress} snapshots. The registry forwards
+   * snapshots only while the body runs, contains a throwing receiver, and
+   * never exposes the receiver on the {@link ToolExecution} that policy
+   * listeners see. Absent, progress is discarded. Nothing it receives is
+   * logged or model-visible.
+   */
+  readonly onProgress?: (progress: ToolProgress) => void
 }
 ```
 
-A tool body receives the runtime extension. `deferContext()` attaches context to the execution's own result — the composite-tool nested-dispatch channel, also usable by a leaf tool minting a plugin-sourced instruction — without injecting inside the still-open outer call. `presentResultMeta()` attaches display-only `meta` to a successful top-level result when that metadata is not part of the value, as with the files a shell command changed.
+A tool body receives the runtime extension. `deferContext()` attaches context to the execution's own result — the composite-tool nested-dispatch channel, also usable by a leaf tool minting a plugin-sourced instruction — without injecting inside the still-open outer call. `presentResultMeta()` attaches display-only `meta` to a successful top-level result when that metadata is not part of the value, as with the files a shell command changed. `haltTurn()` stamps a halt on the execution's own result, so `run_code` forwards a nested call's policy halt to the turn. `reportProgress()` publishes a display-only snapshot of a running body's progress, such as a command's newest output; the agent loop republishes it as the process-local `agent/tool-progress` event, and nothing it carries is logged or sent to the model.
 
 ```ts type-equiv
 /**
@@ -248,6 +255,13 @@ interface ToolRunContext extends ToolExecution {
    */
   concludeTurn(): void
   /**
+   * Halt the current agent turn through this execution's own result, as a
+   * policy {@link ToolHalt} would. A composite that dispatches nested calls
+   * forwards a nested result's `halt` here, so the outer result stops the
+   * turn. The first recorded halt wins.
+   */
+  haltTurn(halt: ToolHalt): void
+  /**
    * Attach display-only metadata to this execution's successful top-level
    * result, for metadata that cannot derive from the canonical value: a
    * shell command's file changes, for example, which are not part of what the
@@ -260,6 +274,16 @@ interface ToolRunContext extends ToolExecution {
    * @param meta - lossless JSON metadata, bounded by the caller.
    */
   presentResultMeta(meta: JsonValue): void
+  /**
+   * Publish a display-only snapshot of this call's progress, such as the
+   * newest output of a running command. Each snapshot replaces the previous
+   * one. It reaches the caller's {@link ToolExecutionInput.onProgress} only
+   * while the body runs; a call after the body settles, or without a
+   * receiver, is dropped. It is never logged and the model never sees it,
+   * so the canonical value must still carry everything the result means.
+   * @param progress - the newest snapshot; `output` must be a string.
+   */
+  reportProgress(progress: ToolProgress): void
 }
 ```
 
@@ -311,7 +335,7 @@ interface PtcDispatchLog {
  * readonly. The registry freezes the complete object before `tools/result`
  * observers run.
  */
-interface ToolExecution extends ToolExecutionInput {
+interface ToolExecution extends Omit<ToolExecutionInput, 'onProgress'> {
   /** Root model-requested call, resolved for every root and nested execution. */
   readonly rootCallId: ToolCallId
   /** Registry-assigned identity shared with nested calls only as their opaque `parent` token. */
@@ -369,6 +393,8 @@ interface ToolExecutionSuccess {
   readonly additionalContexts?: UserMessage[]
   /** The agent loop stops after committing this successful result batch. */
   readonly concludesTurn?: true
+  /** A policy decision halted the turn; see {@link ToolHalt}. */
+  readonly halt?: ToolHalt
 }
 ```
 
@@ -382,6 +408,8 @@ interface ToolExecutionFailure {
   readonly meta?: JsonValue
   readonly additionalContexts?: UserMessage[]
   readonly concludesTurn?: never
+  /** A policy decision halted the turn; see {@link ToolHalt}. */
+  readonly halt?: ToolHalt
 }
 ```
 
@@ -411,15 +439,15 @@ Each interception waterfall returns a typed **Decision** (the idiom shared with 
 ```ts type-equiv
 /**
  * Pre-dispatch decision. `allow` runs the call; `deny` materializes its
- * model-facing reason and optional structured error identity; `cancel` selects
- * the canonical cancellation result without presenting a policy denial; `ask`
- * runs only after an approval service returns `allowed-once` and otherwise
- * denies. Input rewriting is excluded because arguments are already logged and
- * presented.
+ * model-facing reason and optional structured error identity, and with `halt`
+ * also stops the turn; `cancel` selects the canonical cancellation result
+ * without presenting a policy denial; `ask` runs only after an approval service
+ * returns `allowed-once` and otherwise denies. Input rewriting is excluded
+ * because arguments are already logged and presented.
  */
 type PreToolDecision =
   | { kind: 'allow' }
-  | { kind: 'deny'; reason: string; info?: ToolErrorInfo }
+  | { kind: 'deny'; reason: string; info?: ToolErrorInfo; halt?: ToolHalt }
   | { kind: 'cancel' }
   | { kind: 'ask'; reason?: string }
 ```
@@ -428,14 +456,15 @@ type PreToolDecision =
 /**
  * Post-dispatch decision: accept, replace one projection, attach context for the
  * next request, or block by turning corrective feedback into an error result.
+ * Any decision may also carry `halt` to stop the turn after the call commits.
  */
 type PostToolDecision =
-  | { kind: 'accept'; content?: ContentBlock[]; value?: never; additionalContexts?: UserMessage[] }
-  | { kind: 'accept'; value: JsonValue; content?: never; additionalContexts?: UserMessage[] }
-  | { kind: 'block'; feedback: ContentBlock[]; additionalContexts?: UserMessage[] }
+  | { kind: 'accept'; content?: ContentBlock[]; value?: never; additionalContexts?: UserMessage[]; halt?: ToolHalt }
+  | { kind: 'accept'; value: JsonValue; content?: never; additionalContexts?: UserMessage[]; halt?: ToolHalt }
+  | { kind: 'block'; feedback: ContentBlock[]; additionalContexts?: UserMessage[]; halt?: ToolHalt }
 ```
 
-Call `next()` for the default or return a decision to short-circuit. Pre-policy may deny or ask; only `allowed-once` proceeds, while a non-grant, missing approval channel or service, or agent-less request becomes a denial. A deny may attach structured identity and user-facing detail without changing its model-facing reason. Guards may still impose a final denial. Arguments cannot be rewritten because history, audit, UI, and execution must agree.
+Call `next()` for the default or return a decision to short-circuit. Pre-policy may deny or ask; only `allowed-once` proceeds, while a non-grant, missing approval channel or service, or agent-less request becomes a denial. A deny may attach structured identity and user-facing detail without changing its model-facing reason. Guards may still impose a final denial. Arguments cannot be rewritten because history, audit, UI, and execution must agree. A deny, or any post-policy decision, may also carry a `ToolHalt`: the runtime keeps the first one an execution receives on its final result, and the agent loop then lets the current tool batch settle and ends the turn as cancelled by a hook.
 
 Post-policy may replace either content or value, never both. Content replacement preserves the canonical value and existing metadata; value replacement is revalidated and recomputes content/metadata; a block removes the value and becomes an `isError` containing corrective feedback. Content replacement is presentation policy, not confidentiality policy: a listener that must hide the programmatic value blocks or replaces it. `tools/result` receives the frozen execution and result after normalization; observers cannot transform them, and observer failures are contained. Unknown and throwing tools both become structured errors (`ToolNotFoundError` maps to `UNKNOWN_TOOL`), so the call fails without ending the turn.
 
@@ -667,12 +696,13 @@ Source: [`packages/core/tools/src/index.ts`](../../packages/core/tools/src/index
 
 #### `tools/post-execute` — waterfall
 
-Accept, replace, enrich, or block a normalized dispatch result. `next()` accepts it unchanged; thrown tools still reach this waterfall as errors. Async listeners must observe `exec.signal`; after they settle, caller cancellation replaces only a successful accepted outcome with the code selected by whether the tool body was invoked. Scope-filtered dispatch (`@deepseek-ai/dsh-scope`): agent-scoped listeners receive only that agent's calls.
+Accept, replace, enrich, or block a normalized dispatch result. `next()` accepts it unchanged; thrown tools still reach this waterfall as errors. A decision carrying `halt` stops the turn once the current tool batch settles. Async listeners must observe `exec.signal`; after they settle, caller cancellation replaces only a successful accepted outcome with the code selected by whether the tool body was invoked. Scope-filtered dispatch (`@deepseek-ai/dsh-scope`): agent-scoped listeners receive only that agent's calls.
 
 ```ts cordis-catalog
 /**
  * Accept, replace, enrich, or block a normalized dispatch result. `next()`
- * accepts it unchanged; thrown tools still reach this waterfall as errors. Async
+ * accepts it unchanged; thrown tools still reach this waterfall as errors. A
+ * decision carrying `halt` stops the turn once the current tool batch settles. Async
  * listeners must observe `exec.signal`; after they settle, caller
  * cancellation replaces only a successful accepted outcome with the code
  * selected by whether the tool body was invoked.
@@ -692,13 +722,14 @@ Source: [`packages/core/tools/src/index.ts`](../../packages/core/tools/src/index
 
 #### `tools/pre-execute` — waterfall
 
-Allow, deny, cancel, or ask before dispatch. `next()` delegates to allow; `cancel` selects the canonical pre-dispatch cancellation result, and missing approval support turns `ask` into denial. Async gates must observe `exec.signal`; the registry rechecks cancellation after they settle but never abandons their promise. Scope-filtered dispatch (`@deepseek-ai/dsh-scope`): agent-scoped listeners receive only that agent's calls.
+Allow, deny, cancel, or ask before dispatch. `next()` delegates to allow; `cancel` selects the canonical pre-dispatch cancellation result, and missing approval support turns `ask` into denial. A `deny` carrying `halt` also stops the turn once the current tool batch settles. Async gates must observe `exec.signal`; the registry rechecks cancellation after they settle but never abandons their promise. Scope-filtered dispatch (`@deepseek-ai/dsh-scope`): agent-scoped listeners receive only that agent's calls.
 
 ```ts cordis-catalog
 /**
  * Allow, deny, cancel, or ask before dispatch. `next()` delegates to allow;
  * `cancel` selects the canonical pre-dispatch cancellation result, and missing
- * approval support turns `ask` into denial. Async gates must observe
+ * approval support turns `ask` into denial. A `deny` carrying `halt` also
+ * stops the turn once the current tool batch settles. Async gates must observe
  * `exec.signal`; the registry rechecks cancellation after they settle but
  * never abandons their promise.
  * Scope-filtered dispatch (`@deepseek-ai/dsh-scope`): agent-scoped listeners receive only that agent's calls.

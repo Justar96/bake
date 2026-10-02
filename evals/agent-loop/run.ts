@@ -21,16 +21,27 @@ import { tmpdir } from 'node:os'
 import { createHash } from 'node:crypto'
 import YAML from 'yaml'
 import { reconcile } from './accounting.ts'
+import { DEEPSEEK_ANTHROPIC_BASE_URL, deepseekProfile } from '../../packages/llm/llm-pi-ai/tests/deepseek-profile.ts'
 
 const out = resolve(process.env.EVAL_OUTPUT ?? join('.preflight/evals/agent-loop', new Date().toISOString().replace(/[:.]/g, '-')))
 mkdirSync(out, { recursive: true })
-const ARMS: Record<string, { root: string; extra: unknown[]; settings: string }> = Object.fromEntries((process.env.EVAL_ARMS ?? '').split(',').filter(Boolean).map(entry => {
+/**
+ * Whether a checkout's base bundle still mounts the retired `llm-deepseek`
+ * adapter, which owns `deepseek-official` there. Such an arm configures the
+ * route through that adapter's settings section, since an `llm-pi-ai` route of
+ * the same id would collide with it.
+ */
+function shipsLlmDeepseek(root: string): boolean {
+  const patch = join(root, 'packages/bundle/base/cordis.patch.yml')
+  return existsSync(patch) && /name:\s*['"]?@deepseek-ai\/dsh-llm-deepseek['"]?\s*$/m.test(readFileSync(patch, 'utf8'))
+}
+const ARMS: Record<string, { root: string; extra: unknown[]; settings: string; llmDeepseek: boolean }> = Object.fromEntries((process.env.EVAL_ARMS ?? '').split(',').filter(Boolean).map(entry => {
   const [name, root] = entry.split('=')
   if (!name || !root) throw new Error(`EVAL_ARMS entry "${entry}" is not name=checkout`)
   if (!existsSync(join(root, 'apps/cli/lib/bin.js'))) throw new Error(`arm ${name}: ${root} has no built apps/cli/lib/bin.js; run bun run build there`)
   const settings = process.env[`EVAL_SETTINGS_${name.toUpperCase()}`] ?? '{}'
   JSON.parse(settings)
-  return [name, { root: resolve(root), extra: JSON.parse(process.env[`EVAL_EXTRA_${name.toUpperCase()}`] ?? '[]'), settings }]
+  return [name, { root: resolve(root), extra: JSON.parse(process.env[`EVAL_EXTRA_${name.toUpperCase()}`] ?? '[]'), settings, llmDeepseek: shipsLlmDeepseek(root) }]
 }))
 const armNames = Object.keys(ARMS)
 if (armNames.length < 2) throw new Error('EVAL_ARMS needs at least two name=checkout pairs, for example base=../bake-v0.2.0,candidate=.')
@@ -49,8 +60,6 @@ const trials = Number(process.env.EVAL_TRIALS ?? 3)
 const settings = YAML.parse(readFileSync(join(process.env.HOME!, '.bake/settings.yaml'), 'utf8'))
 const original = settings['llm-pi-ai'].providers.cliproxyapi
 const credentialFile = join(process.env.HOME!, '.bake/.credentials.yaml')
-/** DeepSeek's Anthropic-format root; its usage counters use the Anthropic field names. */
-const DEEPSEEK_MESSAGES_BASE = 'https://api.deepseek.com/anthropic'
 
 /**
  * One model's route through the capturing proxy: the provider the agent selects,
@@ -65,7 +74,8 @@ interface Route {
   upstreamBase: string
   /** The requested effort; DeepSeek has no `medium`, so it runs at its `high` default. */
   effort: string
-  settings(proxyBase: string): Record<string, unknown>
+  /** Settings for one arm; `llmDeepseek` is whether that arm's build still ships the retired DeepSeek adapter. */
+  settings(proxyBase: string, llmDeepseek: boolean): Record<string, unknown>
 }
 
 /** Resolve an EVAL_MODELS entry to its route; a gateway listing wins for a bare id. */
@@ -73,10 +83,21 @@ function resolveRoute(entry: string): Route {
   const [prefix, rest] = entry.includes('/') ? [entry.slice(0, entry.indexOf('/')), entry.slice(entry.indexOf('/') + 1)] : [undefined, entry]
   const gateway = original.models.find((m: any) => m.id === rest)
   if (prefix === 'deepseek' || (prefix === undefined && gateway === undefined && rest.startsWith('deepseek-'))) {
+    // The shipped llm-pi-ai deepseek-official route over Anthropic-format
+    // Messages, narrowed to the model under test. A settings `models` list
+    // replaces the shipped one, so the entry repeats the shipped model with
+    // only its output cap lowered. An arm built before that route existed
+    // still owns deepseek-official through llm-deepseek and gets its section.
+    const shipped = deepseekProfile().models?.find(m => m.id === rest)
+    if (shipped === undefined) throw new Error(`EVAL_MODELS entry "${entry}": deepseek-official ships no model ${rest}`)
     return {
-      model: rest, provider: 'deepseek-official', api: 'anthropic-messages', upstreamBase: DEEPSEEK_MESSAGES_BASE, effort: 'high',
-      settings: proxyBase => ({
-        'llm-deepseek': { baseURL: proxyBase, maxTokens: 8192, retryPolicy: { mode: 'normal', maxRetries: 0 } },
+      model: rest, provider: 'deepseek-official', api: 'anthropic-messages', upstreamBase: DEEPSEEK_ANTHROPIC_BASE_URL, effort: 'high',
+      settings: (proxyBase, llmDeepseek) => ({
+        ...llmDeepseek
+          ? { 'llm-deepseek': { baseURL: proxyBase, maxTokens: 8192, retryPolicy: { mode: 'normal', maxRetries: 0 } } }
+          : { 'llm-pi-ai': { providers: { 'deepseek-official': {
+            baseURL: proxyBase, models: [{ ...shipped, maxTokens: 8192 }], retryPolicy: { mode: 'normal', maxRetries: 0 },
+          } } } },
         'agent-default-model': { provider: 'deepseek-official', model: rest, reasoningEffort: 'high' },
       }),
     }
@@ -86,7 +107,7 @@ function resolveRoute(entry: string): Route {
   const api = gateway.api ?? original.api
   return {
     model: rest, provider: 'cliproxyapi', api, upstreamBase: (gateway.baseURL ?? original.baseURL).replace(/\/$/, ''), effort: 'medium',
-    settings: proxyBase => {
+    settings: (proxyBase) => {
       const route = structuredClone(original)
       route.baseURL = proxyBase
       route.models = [{ ...gateway, baseURL: proxyBase, maxTokens: 8192 }]
@@ -104,7 +125,7 @@ const routes = models.map(resolveRoute)
 for (const route of routes) if (routes.filter(other => other.model === route.model).length > 1) throw new Error(`EVAL_MODELS names ${route.model} through two providers`)
 const summaries: any[] = []
 const capMs = 180_000
-const maxRequestsFor = (scenario: string) => scenario === 'workflow_script' || scenario === 'delegation' ? 40 : 14
+const maxRequestsFor = (scenario: string) => scenario === 'workflow_script' || scenario.startsWith('delegation') ? 40 : 14
 const maxLogicalTokens = Number(process.env.EVAL_MAX_TOKENS ?? 5_000_000)
 const hash = (text: string) => createHash('sha256').update(text).digest('hex')
 const baseCode = 'function roundMoney(value) {\n  return Math.floor(value * 100) / 100;\n}\nmodule.exports = { roundMoney };\n'
@@ -122,16 +143,24 @@ const prompts: Record<string, string> = {
   shell_then_edit: 'Read src/money.js, then run node scripts/stamp.cjs (it adds a build header to the file that must be kept), then fix roundMoney to round to the nearest cent, matching Math.round(value * 100) / 100.' + natural,
   workflow_script: 'Use the workflow tool for this task. Write a workflow script that uses parallel() to run two subagents: one reads notes/a.txt and the other reads notes/b.txt, and each returns only that file\'s single line of text. The script returns { a, b }. Then write summary.txt in this directory with the a line followed by the b line, one per line. Work only inside this fixture. Do not install packages, use the network, or make commits. Give a brief final result.',
   delegation: 'Use the subagent tool for this task: delegate to one subagent the job of reading notes/a.txt and notes/b.txt and returning each file\'s single line of text, labelled a and b. Then write summary.txt in this directory with the a line followed by the b line, one per line. Work only inside this fixture. Do not install packages, use the network, or make commits. Give a brief final result.',
+  // The delegation task with the route left to the host, so every delegation reaches the task router when one is on.
+  delegation_auto: 'Use the subagent tool for this task: delegate to one subagent the job of reading notes/a.txt and notes/b.txt and returning each file\'s single line of text, labelled a and b. Leave provider, model, and reasoning_effort unset so the host chooses the subagent\'s route. Then write summary.txt in this directory with the a line followed by the b line, one per line. Work only inside this fixture. Do not install packages, use the network, or make commits. Give a brief final result.',
   duplicate_recovery: 'Exercise a guarded-edit recovery case. Before reading or running any other tool, attempt the same edit of src/money.js three times: replace "Math.floor(value * 100) / 100" with "Math.round(value * 100) / 100". Make these three edit calls consecutive, even if a call is refused. Then recover from any refusal and finish the correction.' + common,
 }
-/** The subagent routing decisions a run's session logs recorded: who chose each child's route, and the route. */
-function routingDecisions(dir: string): { source: string; model: string | null; effort: string | null }[] {
+/**
+ * The subagent routing decisions a run's session logs recorded: who chose each
+ * child's route, the route, and the router's fallback flag, assessment status,
+ * and one-line reason.
+ */
+function routingDecisions(dir: string): { source: string; model: string | null; effort: string | null; routerFallback: boolean | null; routerStatus: string | null; routerReason: string | null }[] {
   if (!existsSync(dir)) return []
   return readdirSync(dir, { recursive: true, encoding: 'utf8' }).filter(path => path.endsWith('.jsonl'))
     .flatMap(path => readFileSync(join(dir, path), 'utf8').split('\n').filter(Boolean))
     .map(line => JSON.parse(line) as { type?: string; data?: any })
     .filter(event => event.type === 'subagent/routing-decision')
-    .map(({ data }) => ({ source: data.source, model: data.route?.model ?? null, effort: data.route?.reasoningEffort ?? null }))
+    .map(({ data }) => ({ source: data.source, model: data.route?.model ?? null, effort: data.route?.reasoningEffort ?? null,
+      routerFallback: data.router?.fallback ?? null, routerStatus: data.router?.assessment?.status ?? null,
+      routerReason: typeof data.router?.reason === 'string' ? data.router.reason.slice(0, 120) : null }))
 }
 
 function persona(root: string): string {
@@ -168,7 +197,7 @@ function fixture(root: string, scenario: string) {
     writeFileSync(join(workspace, 'test.cjs'), multiTests)
     return { workspace, file }
   }
-  if (scenario === 'workflow_script' || scenario === 'delegation') {
+  if (scenario === 'workflow_script' || scenario.startsWith('delegation')) {
     mkdirSync(join(workspace, 'notes'), { recursive: true })
     writeFileSync(join(workspace, 'notes/a.txt'), `${WORKFLOW_LINES.a}\n`)
     writeFileSync(join(workspace, 'notes/b.txt'), `${WORKFLOW_LINES.b}\n`)
@@ -270,7 +299,7 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
   let signal: string | null = null
   try {
     writeFileSync(join(home, 'settings.yaml'), YAML.stringify({
-      ...route.settings(`${server.url.origin}/upstream`),
+      ...route.settings(`${server.url.origin}/upstream`, ARMS[variant]!.llmDeepseek),
       ...JSON.parse(ARMS[variant]!.settings.replaceAll('$PROVIDER', route.provider).replaceAll('$MODEL', model)),
       permission: { defaultPreset: 'danger-full-access' },
     }), { mode: 0o600 })
@@ -322,9 +351,9 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
     let source = ''
     let testsUnchanged: boolean | null = null
     let testExit: number | null = null
-    if (scenario === 'workflow_script' || scenario === 'delegation') {
+    if (scenario === 'workflow_script' || scenario.startsWith('delegation')) {
       source = existsSync(join(workspace, file)) ? readFileSync(join(workspace, file), 'utf8') : ''
-      validated = code === 0 && (byTool[scenario === 'delegation' ? 'subagent' : 'workflow'] ?? 0) > 0
+      validated = code === 0 && (byTool[scenario.startsWith('delegation') ? 'subagent' : 'workflow'] ?? 0) > 0
         && source.trim().split(/\r?\n/).map(line => line.trim()).join('\n') === `${WORKFLOW_LINES.a}\n${WORKFLOW_LINES.b}`
     } else if (scenario !== 'no_tools') {
       source = readFileSync(join(workspace, file), 'utf8')
@@ -398,7 +427,7 @@ writeFileSync(join(out, 'design.json'), JSON.stringify({
   startedAt: new Date().toISOString(),
   node: Bun.spawnSync(['node', '--version']).stdout.toString().trim(), models: routes.map(route => route.model), cases, trials,
   routes: Object.fromEntries(routes.map(route => [route.model, { provider: route.provider, api: route.api, effort: route.effort }])),
-  effort: 'medium where the model offers it; DeepSeek runs at high, its default, having no medium', maxOutputTokens: 8192, capMs, maxRequests: { default: 14, workflow_script: 40, delegation: 40 }, maxLogicalTokens,
+  effort: 'medium where the model offers it; DeepSeek runs at high, its default, having no medium', maxOutputTokens: 8192, capMs, maxRequests: { default: 14, workflow_script: 40, delegation: 40, delegation_auto: 40 }, maxLogicalTokens,
   retryPolicy: { mode: 'normal', maxRetries: 0 },
   composition: 'Built headless CLI, with each revision standard-preset persona; host tools retained. Session title and ambient AGENTS disabled equally.',
   cache: 'Fresh process/home/workspace/session per sample; provider cache is observed, not assumed cold. Pair order alternates by trial and scenario.',

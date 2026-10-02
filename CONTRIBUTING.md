@@ -1,13 +1,11 @@
 # Contributing to Bake
 
-English | [中文](CONTRIBUTING.zh.md)
-
 Thanks for helping improve Bake. The [development guide](docs/development.md) covers building from source, development loops, checks, and repository layout; [`AGENTS.md`](AGENTS.md) holds the engineering rules every change follows.
 
 ## Making a change
 
 1. Branch from `develop` and keep each change focused on one behavior.
-2. Update the owning README or JSDoc with the code, and keep English and Chinese pages aligned. Product text shown in the TUI belongs in [`copy.ts`](apps/tui/packages/ui/src/copy.ts), in both languages.
+2. Update the owning README or JSDoc with the code, and write English only. Product text shown in the TUI belongs in [`copy.ts`](apps/tui/packages/ui/src/copy.ts).
 3. Run the checks that cover the change while you work (see [Checks](docs/development.md#checks)). Terminal behavior changes also need the PTY scenarios.
 4. Before opening the pull request, run `bun run preflight` ([Before a pull request](docs/development.md#before-a-pull-request)). It runs every gate CI runs and lists each result. Report what it said, including failures and anything skipped.
 5. Open a pull request against `develop` describing the behavior change and how you verified it; the pull request template lists what to include.

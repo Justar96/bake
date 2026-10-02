@@ -169,7 +169,7 @@ describe('preset plane overlaps across the profiles that mount the roster', () =
     writeFileSync(join(fixture, 'packages/preset/agent-presets/presets', id, 'agent.cordis.yml'), body)
   }
 
-  it('reports each preset\'s rows, disabled or not, that a preset-hosting profile still runs after every layer\'s disables', () => {
+  it('reports each preset\'s rows, disabled or not, that a preset-hosting profile still runs after every layer\'s and group\'s disables', () => {
     const fixture = mkdtempSync(join(tmpdir(), 'dsh-preset-plane-'))
     try {
       bundle(fixture, 'packages/bundle/base', '@example/base', [
@@ -178,11 +178,16 @@ describe('preset plane overlaps across the profiles that mount the roster', () =
         '    - { id: taken-back, name: taken-back-plugin }',
         '    - { id: off, name: off-plugin, disabled: true }',
         '    - { id: gated, name: gated-plugin, disabled: !!js "process.platform === \'win32\'" }',
+        '    - id: host-realm',
+        '      name: cordis:group',
+        '      config:',
+        '        - { id: grouped, name: grouped-plugin }',
         '',
       ].join('\n'))
-      // The app layer mounts the roster and takes one base row back out.
+      // The app layer mounts the roster and takes one base row and one group back out.
       bundle(fixture, 'apps/tui/packages/app', '@example/app', [
         '- { id: taken-back, disabled: true }',
+        '- { id: host-realm, disabled: true }',
         '- insert:',
         "    - { id: agent-presets, name: '@deepseek-ai/dsh-agent-presets' }",
         '',
@@ -197,6 +202,7 @@ describe('preset plane overlaps across the profiles that mount the roster', () =
         '  config:',
         '    - { id: gated, name: gated-plugin }',
         '    - { id: plain-only, name: plain-plugin }',
+        '    - { id: grouped, name: grouped-plugin }',
         '',
       ].join('\n'))
       // A preset that turns a row off still receives the host's copy.
@@ -210,6 +216,10 @@ describe('preset plane overlaps across the profiles that mount the roster', () =
         { profile: 'hosted', file: 'packages/preset/agent-presets/presets/full/agent.cordis.yml', ids: ['shared', 'gated'] },
         { profile: 'hosted', file: 'packages/preset/agent-presets/presets/quiet/agent.cordis.yml', ids: ['shared'] },
       ])
+      // A host that leaves the group on still runs its child.
+      bundle(fixture, 'packages/bundle/open', '@example/open', "- insert:\n    - { id: agent-presets, name: '@deepseek-ai/dsh-agent-presets' }\n")
+      expect(presetPlaneOverlaps(fixture, { open: { bundles: ['@example/base', '@example/open'] } })[0])
+        .toEqual({ profile: 'open', file: 'packages/preset/agent-presets/presets/full/agent.cordis.yml', ids: ['shared', 'taken-back', 'gated', 'grouped'] })
       expect(() => presetPlaneOverlaps(fixture, { plain: { bundles: ['@example/base', '@example/plain'] } }))
         .toThrow('no shipped profile mounts @deepseek-ai/dsh-agent-presets')
       expect(() => presetPlaneOverlaps(fixture, { missing: { bundles: ['@example/absent'] } }))

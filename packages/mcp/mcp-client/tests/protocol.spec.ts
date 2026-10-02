@@ -1,10 +1,15 @@
-import { z } from 'zod'
-/** Real SDK negotiation, subscription, and cancellation through the connection supervisor. */
+/**
+ * Negotiation, list changes, resources, and cancellation between the
+ * connection supervisor and a real MCP SDK server.
+ */
 
+import { z } from 'zod'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { InMemoryTransport, type Transport } from '@modelcontextprotocol/client'
-import { McpServer } from '@modelcontextprotocol/server'
+import type {
+  JsonRpcMessage, McpTransport, McpTransportCloseListener, McpTransportErrorListener, McpTransportMessageListener,
+} from '@earendil-works/pi-mcp'
+import { InMemoryTransport, McpServer } from '@modelcontextprotocol/server'
 import { serveStdio } from '@modelcontextprotocol/server/stdio'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
@@ -13,8 +18,57 @@ import McpResources from '@deepseek-ai/dsh-mcp-resources'
 import { startConnection, resolveReconnectPolicy } from '../src/connection.ts'
 import type { Config } from '../src/index.ts'
 
-const { mockTransport } = vi.hoisted(() => ({ mockTransport: vi.fn<() => Transport>() }))
+const { mockTransport } = vi.hoisted(() => ({ mockTransport: vi.fn<() => McpTransport>() }))
 vi.mock('../src/transport.ts', () => ({ createTransport: mockTransport }))
+
+/** One end of the SDK's in-memory pair, seen through pi-mcp's transport contract. */
+class SdkPairTransport implements McpTransport {
+  private readonly messageListeners = new Set<McpTransportMessageListener>()
+  private readonly errorListeners = new Set<McpTransportErrorListener>()
+  private readonly closeListeners = new Set<McpTransportCloseListener>()
+  private closed = false
+
+  constructor(private readonly inner: InMemoryTransport) {
+    inner.onmessage = (message) => {
+      for (const listener of [...this.messageListeners]) listener(message as JsonRpcMessage)
+    }
+    inner.onerror = (error) => {
+      for (const listener of [...this.errorListeners]) listener(error)
+    }
+    inner.onclose = () => {
+      if (this.closed) return
+      this.closed = true
+      for (const listener of [...this.closeListeners]) listener()
+    }
+  }
+
+  start(): Promise<void> {
+    return this.inner.start()
+  }
+
+  send(message: JsonRpcMessage): Promise<void> {
+    return this.inner.send(message as Parameters<InMemoryTransport['send']>[0])
+  }
+
+  close(): Promise<void> {
+    return this.inner.close()
+  }
+
+  onMessage(listener: McpTransportMessageListener): () => void {
+    this.messageListeners.add(listener)
+    return () => void this.messageListeners.delete(listener)
+  }
+
+  onError(listener: McpTransportErrorListener): () => void {
+    this.errorListeners.add(listener)
+    return () => void this.errorListeners.delete(listener)
+  }
+
+  onClose(listener: McpTransportCloseListener): () => void {
+    this.closeListeners.add(listener)
+    return () => void this.closeListeners.delete(listener)
+  }
+}
 
 const config: Config = {
   transport: 'stdio', serverName: 'fixture', command: 'fixture', args: [], env: {}, cwd: '',
@@ -27,7 +81,7 @@ async function connect(server: McpServer, options?: { resources: true }): Promis
   await ctx.plugin(ToolRuntime)
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
   const serving = serveStdio(() => server, { transport: serverTransport })
-  mockTransport.mockReturnValue(clientTransport)
+  mockTransport.mockReturnValue(new SdkPairTransport(clientTransport))
   const connection = startConnection(ctx, config, resolveReconnectPolicy({ enabled: false }, 'fixture'))
   onTestFinished(async () => {
     await connection.dispose()
@@ -42,7 +96,7 @@ async function connect(server: McpServer, options?: { resources: true }): Promis
   return ctx
 }
 
-describe('modern MCP connections', () => {
+describe('MCP SDK server connections', () => {
   it('keeps a resource-only server connected without requesting tools', async () => {
     const server = new McpServer({ name: 'resources', version: '1' })
     server.registerResource('memo', 'memo://readme', {}, async () => ({
@@ -86,7 +140,7 @@ describe('modern MCP connections', () => {
     expect(ping).toMatchObject({ isError: false, value: { content: [{ type: 'text', text: 'pong' }] } })
   })
 
-  it('reads resources and preserves explicit list and template cursors through the SDK', async () => {
+  it('reads resources and preserves explicit list and template cursors', async () => {
     const server = new McpServer({ name: 'resources', version: '1' })
     server.registerResource('memo', 'memo://readme', {}, async () => ({
       contents: [{ uri: 'memo://readme', text: 'memo' }],
@@ -102,13 +156,17 @@ describe('modern MCP connections', () => {
       return { resourceTemplates: [] }
     })
     const ctx = await connect(server, { resources: true })
-    for (const name of ['list_mcp_resources', 'list_mcp_resource_templates']) {
+    for (const [name, expected] of [
+      ['list_mcp_resources', { resources: [{ name: 'memo', uri: 'memo://readme' }] }],
+      ['list_mcp_resource_templates', { resourceTemplates: [] }],
+    ] as const) {
       for (const cursor of [undefined, 'opaque-page']) {
         const result = await ctx.tools.execute({
           name, arguments: { server: 'fixture', ...cursor === undefined ? {} : { cursor } },
           callId: ToolCallId(name), signal: new AbortController().signal,
         })
-        expect(result.isError).toBe(false)
+        if (result.isError) throw result.error
+        expect(JSON.stringify(result.value)).toBe(JSON.stringify(expected))
       }
     }
     expect(seen).toEqual([undefined, 'opaque-page', undefined, 'opaque-page'])
@@ -116,10 +174,11 @@ describe('modern MCP connections', () => {
       name: 'read_mcp_resource', arguments: { server: 'fixture', uri: 'memo://readme' },
       callId: ToolCallId('read-resource'), signal: new AbortController().signal,
     })
-    expect(read).toMatchObject({ isError: false, value: { contents: [{ uri: 'memo://readme', text: 'memo' }] } })
+    if (read.isError) throw read.error
+    expect(JSON.stringify(read.value)).toBe(JSON.stringify({ contents: [{ uri: 'memo://readme', text: 'memo' }] }))
   })
 
-  it('updates tools through the SDK modern list-change subscription', async () => {
+  it('updates tools when the server announces a tool-list change', async () => {
     const server = new McpServer({ name: 'tools', version: '1' })
     server.registerTool('first', { inputSchema: z.object({}) }, async () => ({ content: [] }))
     const ctx = await connect(server)
@@ -128,7 +187,7 @@ describe('modern MCP connections', () => {
     await vi.waitFor(() => { expect(ctx.tools.get('mcp__fixture__second')).toBeDefined() })
   })
 
-  it('delivers caller cancellation to an executing modern tool', async () => {
+  it('delivers caller cancellation to an executing tool', async () => {
     const entered: PromiseWithResolvers<void> = Promise.withResolvers()
     const cancelled: PromiseWithResolvers<void> = Promise.withResolvers()
     const server = new McpServer({ name: 'cancel', version: '1' })

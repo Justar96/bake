@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test'
 import { resolveFrame, type FrameRequest } from '../src/frame.ts'
 
 const ask = (env: FrameRequest['env'], overrides: Partial<FrameRequest> = {}) =>
-  resolveFrame({ configured: 'auto', locale: 'en', env, platform: 'linux', systemLocale: () => 'en-US', ...overrides })
+  resolveFrame({ configured: 'auto', env, platform: 'linux', systemLocale: () => 'en-US', ...overrides })
 
 const utf8 = { LANG: 'en_US.UTF-8', TERM: 'xterm-256color' }
 
@@ -37,8 +37,6 @@ describe('resolveFrame', () => {
     expect(ask({ LANG: 'zh_CN.UTF-8', TERM: 'xterm-256color' })).toBe('classic')
     expect(ask({ LC_CTYPE: 'ja_JP.UTF-8', TERM: 'xterm-256color' })).toBe('classic')
     expect(ask({ LANG: 'ko_KR.UTF-8', TERM: 'xterm-256color' })).toBe('classic')
-    // The interface locale stands in when the environment names none.
-    expect(ask(utf8, { locale: 'zh' })).toBe('classic')
   })
 
   test('draws the rounded frame in Windows Terminal, which sets no locale or TERM', () => {
@@ -47,7 +45,6 @@ describe('resolveFrame', () => {
     expect(ask({ ...windows, LANG: 'C' })).toBe('round')
     // A CJK locale still names a terminal that may draw Ambiguous characters wide.
     expect(ask({ ...windows, LANG: 'zh_CN.UTF-8' })).toBe('classic')
-    expect(ask(windows, { locale: 'zh' })).toBe('classic')
     expect(ask({ WT_SESSION: '' })).toBe('classic')
   })
 
@@ -64,7 +61,6 @@ describe('resolveFrame', () => {
     expect(ask({}, { ...windows, systemLocale: () => 'zh-CN' })).toBe('classic')
     expect(ask({}, { ...windows, systemLocale: () => 'ja-JP' })).toBe('classic')
     expect(ask({ LANG: 'ko_KR.UTF-8' }, windows)).toBe('classic')
-    expect(ask({}, { ...windows, locale: 'zh' })).toBe('classic')
     // Windows Terminal draws them narrow, so the system locale does not apply there.
     expect(ask({ WT_SESSION: 'guid' }, { ...windows, systemLocale: () => 'zh-CN' })).toBe('round')
   })

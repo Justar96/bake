@@ -644,6 +644,9 @@ export function createRunCodeTool(registry: ToolRuntime, options: RunCodeBridgeO
               // (ToolExecutionFailure types it never), so a policy-converted
               // failure cannot stop the turn through a recovering program.
               if (result.concludesTurn) exec.concludeTurn()
+              // A policy halt on a nested call stops the enclosing turn,
+              // whether or not the program recovers from the nested result.
+              if (result.halt !== undefined) exec.haltTurn(result.halt)
               settle(result)
               // Backpressure on pending event-append tasks: each task retains
               // a full result while a slow backend stores it, so the pool cap

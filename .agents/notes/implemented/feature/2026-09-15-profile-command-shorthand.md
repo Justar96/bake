@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-15-profile-command-shorthand.zh.md)
-
 ## Problem
 
 Profile launch needs a concise spelling that works for custom names without making plugin management depend on the contents of the Harness home.

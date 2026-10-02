@@ -2,8 +2,6 @@
 
 Status: proposed
 
-English | [中文](2026-09-06-logical-session-storage-rebuild.zh.md)
-
 ## Problem
 
 Session consumers depend on a concrete event-log class, the live-session registry, the projection registry, and persistence handles. These dependencies mix logical session behavior with publication, storage, and physical-format concerns. A new session or storage implementation would therefore require changes across consumers, the Agent loop, persistence, query, telemetry, and frontend code.

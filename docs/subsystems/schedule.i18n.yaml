@@ -1,4 +1,0 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority.
-schedule.md: 20f117707c230eccfd33532d6f53531f3d8e737b
-schedule.zh.md: 997dae09dc3c5c2d140d56e85c2cfae2c35c76fb

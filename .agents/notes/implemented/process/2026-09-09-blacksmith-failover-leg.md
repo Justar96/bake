@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-09-blacksmith-failover-leg.zh.md)
-
 ## Problem
 
 The [failover runbook](2026-07-26-ci-failover-runbook.md) routes degraded enterprise-pool traffic onto the in-house `vm-backup` and `dsh-win-ci` pools, which are proven but bounded standbys. Blacksmith sells GitHub-hosted-style runners on demand, and its migration wizard proposed replacing the repository's `runs-on` labels wholesale, which would put credential-holding, benchmark, and spec-pinned jobs on third-party infrastructure as the default. The wholesale replacement is not acceptable as a default: it breaks the workflow contract specs, distorts benchmark and performance-budget measurements, and moves trust-boundary jobs without a decision record.

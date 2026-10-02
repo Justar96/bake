@@ -1,7 +1,5 @@
 # LLM adapters
 
-English | [中文](llm-adapter.zh.md)
-
 This guide connects a new LLM provider to Harness.
 
 ## Overview
@@ -146,10 +144,10 @@ The first argument lists provider routes handled by the adapter. `GenerateOption
 
 The repository contains complete implementations:
 
-- `packages/llm/llm-deepseek/` — DeepSeek API adapter using the OpenAI-compatible format
-- `packages/llm/llm-pi-ai/` — Pi AI adapter using a different API format
+- `packages/llm/llm-pi-ai/` — the shipped adapter, which serves every configured provider route, DeepSeek's `deepseek-official` included, over pi-ai's wire protocols
+- `packages/test-support/llm-replay/` — a keyless test adapter that replays model streams from recorded Session logs
 
-Compare the two shipped adapters to see the same harness contract implemented over different provider SDKs.
+Compare the two to see the same harness contract implemented over a provider library and over recorded fixtures.
 
 ## Error handling
 

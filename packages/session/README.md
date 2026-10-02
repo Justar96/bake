@@ -5,8 +5,6 @@ kind: "package-group"
 
 # session/ — durable session data plane
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 The session group keeps conversations durable, restores released log formats, and makes committed history available after restart. Its storage and checkpoint packages protect requests, tool side effects, and completed steps; projection packages derive client-ready values; title packages name sessions; telemetry packages report activity. Start with the shipped JSONL storage, then add checkpointing and only the projections, title policy, or telemetry your deployment needs. Each package README owns its guarantees and configuration, while a sibling query group provides independent read and tool access.
@@ -35,7 +33,6 @@ The group splits into four families: durable storage (persistence seam, backends
 | [`session-persistence/`](session-persistence/README.md) | Defines the durable session-storage service and the shared write coordination every backend composes | `ctx.sessionPersistence` |
 | [`session-persistence-jsonl/`](session-persistence-jsonl/README.md) | Shipped backend: immutable canonical generation filenames per Session with exclusive successor publication, optionally Zstandard-compressed | registers on `ctx.sessionPersistence` |
 | [`session-checkpoint-policy/`](session-checkpoint-policy/README.md) | Makes model requests, top-level tool side effects, and completed steps durable before the next action | wraps `ctx.llm` and `ctx.tools` |
-| [`session-log-deepseek/`](session-log-deepseek/README.md) | Uploads the incremental canonical log as opt-in official DeepSeek request metadata; off in Bake's shipped profiles | contributes `dsh_session_log` |
 
 ### Projection
 

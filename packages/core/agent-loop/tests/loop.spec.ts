@@ -11,6 +11,11 @@ import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { MockAdapter, maxTokensResponse, textResponse, toolCallResponse } from './mock-adapter.ts'
 
+/** Verbatim model-facing notice for one dropped `echo` call. */
+const DROPPED_ECHO_NOTICE = 'Your previous reply was cut off at the output token limit, so its tool calls did not run: echo. '
+  + 'Issue the calls you still need again, keeping each one small enough to finish within a single reply; '
+  + 'for example, split large file content across several calls.'
+
 function driverDone(agent: Agent): Promise<void> {
   return (agent as Agent & { done: Promise<void> }).done
 }
@@ -1378,7 +1383,7 @@ describe('agent loop', () => {
     expect(reasons).toEqual([{ kind: 'max-tokens' }, { kind: 'completed' }])
   })
 
-  it('does not dispatch tool calls from a max-tokens-truncated step', async () => {
+  it('does not dispatch tool calls from a max-tokens-truncated step and tells the model they did not run', async () => {
     const callId = ToolCallId('c1')
     const adapter = new MockAdapter([[
       { type: 'block-start', index: 0, blockType: 'tool-call' },
@@ -1386,7 +1391,7 @@ describe('agent loop', () => {
       { type: 'block-end', index: 0, block: { type: 'tool-call', id: callId, name: 'echo', arguments: '{"text":"x"}' } },
       { type: 'usage', usage: { inputTokens: 10, outputTokens: 5 } },
       { type: 'finish', reason: { kind: 'max-tokens' } },
-    ]])
+    ], textResponse('understood')])
     const ctx = await harness(adapter)
     let executions = 0
     ctx.tools.register(defineContentToolFixture({
@@ -1408,12 +1413,24 @@ describe('agent loop', () => {
 
     expect(executions).toBe(0)
     expect(agent.session.snapshotEvents().some(e => e.type === 'tool/call')).toBe(false)
-    expect(agent.session.deriveMessages().slice(1)).toEqual([{
-      id: expect.any(String) as unknown,
-      role: 'user',
-      content: [{ type: 'text', text: 'go' }],
-      source: { kind: 'user' },
-    }])
+    // The continuation request ends with the notice; the empty truncated
+    // reply hosts usage only and derives no assistant message.
+    expect(adapter.requests).toHaveLength(2)
+    expect(adapter.requests[1]!.messages.slice(1)).toEqual([
+      {
+        id: expect.any(String) as unknown,
+        role: 'user',
+        content: [{ type: 'text', text: 'go' }],
+        source: { kind: 'user' },
+      },
+      {
+        id: expect.any(String) as unknown,
+        role: 'user',
+        content: [{ type: 'text', text: DROPPED_ECHO_NOTICE }],
+        source: { kind: 'plugin', plugin: '@deepseek-ai/dsh-agent-loop' },
+      },
+    ])
+    // The recovered turn still records that a step hit the ceiling.
     expect(reasons).toEqual([{ kind: 'max-tokens' }])
     // Empty content still needs an assistant/message to carry usage; derivation
     // skips that host so it does not create a spurious assistant turn.
@@ -1440,7 +1457,7 @@ describe('agent loop', () => {
       { type: 'tool-call-delta', index: 0, id: callId, name: 'echo', argumentsDelta: '{"text":"x"}' },
       { type: 'block-end', index: 0, block: { type: 'tool-call', id: callId, name: 'echo', arguments: '{"text":"x"}' } },
       { type: 'finish', reason: { kind: 'max-tokens' } },
-    ]])
+    ], textResponse('ok')])
     const ctx = await harness(adapter)
     ctx.tools.register(defineContentToolFixture({
       name: 'echo',
@@ -1470,12 +1487,11 @@ describe('agent loop', () => {
     })
     expect(assistant.sourceEventSeqs).toBeUndefined()
     expect(assistant.type === 'assistant/message' ? assistant.data.stream.length : 0).toBeGreaterThan(0)
-    expect(agent.session.deriveMessages().slice(1)).toEqual([{
-      id: expect.any(String) as unknown,
-      role: 'user',
-      content: [{ type: 'text', text: 'go' }],
-      source: { kind: 'user' },
-    }])
+    expect(agent.session.deriveMessages().slice(1).map(message => message.content)).toEqual([
+      [{ type: 'text', text: 'go' }],
+      [{ type: 'text', text: DROPPED_ECHO_NOTICE }],
+      [{ type: 'text', text: 'ok' }],
+    ])
   })
 
   it('appends an empty completion anchor for a normal stop with no usage', async () => {
@@ -1532,11 +1548,9 @@ describe('agent loop', () => {
 
     send(agent, 'go')
     await waitForIdle(ctx, agent)
-    send(agent, 'continue')
-    await waitForIdle(ctx, agent)
 
     expect(agent.session.snapshotEvents().some(e => e.type === 'tool/call')).toBe(false)
-    // The follow-up request replays the truncated message with its replay
+    // The continuation request replays the truncated message with its replay
     // metadata pruned in step with the dropped tool call.
     expect(adapter.requests[1]?.messages[2]?.source).toEqual({
       kind: 'model',
@@ -1565,8 +1579,8 @@ describe('agent loop', () => {
       {
         id: expect.any(String) as unknown,
         role: 'user',
-        content: [{ type: 'text', text: 'continue' }],
-        source: { kind: 'user' },
+        content: [{ type: 'text', text: DROPPED_ECHO_NOTICE }],
+        source: { kind: 'plugin', plugin: '@deepseek-ai/dsh-agent-loop' },
       },
       {
         id: expect.any(String) as unknown,
@@ -1574,6 +1588,125 @@ describe('agent loop', () => {
         content: [{ type: 'text', text: 'continued' }],
         source: { kind: 'model', provider: 'mock', model: 'mock' },
       },
+    ])
+  })
+
+  it('runs re-issued calls after a dropped-call notice and keeps the turn going until the model stops', async () => {
+    // A step with tool work after a max-tokens step must still continue: the
+    // sticky outcome applies only when a step stops the turn.
+    const adapter = new MockAdapter([
+      [
+        { type: 'block-start', index: 0, blockType: 'tool-call' },
+        { type: 'tool-call-delta', index: 0, id: ToolCallId('c1'), name: 'echo', argumentsDelta: '{"text":"very lo' },
+        { type: 'finish', reason: { kind: 'max-tokens' } },
+      ],
+      toolCallResponse('c2', 'echo', { text: 'short' }),
+      textResponse('done'),
+    ])
+    const ctx = await harness(adapter)
+    const ran: unknown[] = []
+    ctx.tools.register(defineContentToolFixture({
+      name: 'echo',
+      description: '',
+      parameters: { text: { type: 'string' } },
+      async execute(args) {
+        ran.push(args)
+        return [{ type: 'text', text: 'echoed' }]
+      },
+    }))
+    const agent = await ctx.agentLoop.create(SessionId('a1'), { provider: 'mock', model: 'mock' })
+    const reasons: TurnEndReason[] = []
+    ctx.on('session/event', (_s, event) => { if (event.type === 'turn/end') reasons.push(event.data.reason) })
+
+    send(agent, 'go')
+    await waitForIdle(ctx, agent)
+
+    expect(ran).toEqual([{ text: 'short' }])
+    expect(adapter.requests).toHaveLength(3)
+    expect(adapter.requests[2]!.messages.at(-1)).toMatchObject({
+      role: 'user',
+      source: { kind: 'tool', callId: ToolCallId('c2') },
+    })
+    expect(agent.session.snapshotEvents().filter(e => e.type === 'step/start')).toHaveLength(3)
+    expect(reasons).toEqual([{ kind: 'max-tokens' }])
+  })
+
+  it('sends the dropped-call notice at most once per turn', async () => {
+    const truncated = (id: string): StreamChunk[] => [
+      { type: 'block-start', index: 0, blockType: 'tool-call' },
+      { type: 'tool-call-delta', index: 0, id: ToolCallId(id), name: 'echo', argumentsDelta: '{"text":"' },
+      { type: 'finish', reason: { kind: 'max-tokens' } },
+    ]
+    const adapter = new MockAdapter([truncated('c1'), truncated('c2'), textResponse('next turn')])
+    const ctx = await harness(adapter)
+    const agent = await ctx.agentLoop.create(SessionId('a1'), { provider: 'mock', model: 'mock' })
+    const reasons: TurnEndReason[] = []
+    ctx.on('session/event', (_s, event) => { if (event.type === 'turn/end') reasons.push(event.data.reason) })
+
+    send(agent, 'go')
+    await waitForIdle(ctx, agent)
+
+    // The second truncated reply ends the turn instead of earning another notice.
+    expect(adapter.requests).toHaveLength(2)
+    expect(reasons).toEqual([{ kind: 'max-tokens' }])
+    const notices = () => agent.session.snapshotEvents()
+      .filter(e => e.type === 'user/message' && e.data.source.kind === 'plugin')
+    expect(notices()).toHaveLength(1)
+
+    // The cap is per turn: a fresh turn may send its own notice.
+    send(agent, 'again')
+    await waitForIdle(ctx, agent)
+    expect(adapter.requests).toHaveLength(3)
+    expect(notices()).toHaveLength(1)
+    expect(reasons).toEqual([{ kind: 'max-tokens' }, { kind: 'completed' }])
+  })
+
+  it('omits call names the truncated reply never streamed from the dropped-call notice', async () => {
+    const adapter = new MockAdapter([
+      [
+        { type: 'block-start', index: 0, blockType: 'tool-call' },
+        { type: 'finish', reason: { kind: 'max-tokens' } },
+      ],
+      textResponse('ok'),
+    ])
+    const ctx = await harness(adapter)
+    const agent = await ctx.agentLoop.create(SessionId('a1'), { provider: 'mock', model: 'mock' })
+
+    send(agent, 'go')
+    await waitForIdle(ctx, agent)
+
+    expect(adapter.requests[1]!.messages.at(-1)?.content).toEqual([{
+      type: 'text',
+      text: 'Your previous reply was cut off at the output token limit, so its tool calls did not run. '
+        + 'Issue the calls you still need again, keeping each one small enough to finish within a single reply; '
+        + 'for example, split large file content across several calls.',
+    }])
+  })
+
+  it('places the dropped-call notice before steering that waited for the same boundary', async () => {
+    const live: { agent?: Agent } = {}
+    const adapter = new MockAdapter([
+      (): StreamChunk[] => {
+        // Steering submitted while the reply streams waits for the next step.
+        live.agent!.steer(createUserMessage({ content: [{ type: 'text', text: 'also check tests' }], source: { kind: 'user' } }))
+        return [
+          { type: 'block-start', index: 0, blockType: 'tool-call' },
+          { type: 'tool-call-delta', index: 0, id: ToolCallId('c1'), name: 'echo', argumentsDelta: '{' },
+          { type: 'finish', reason: { kind: 'max-tokens' } },
+        ]
+      },
+      textResponse('ok'),
+    ])
+    const ctx = await harness(adapter)
+    const agent = await ctx.agentLoop.create(SessionId('a1'), { provider: 'mock', model: 'mock' })
+    live.agent = agent
+
+    send(agent, 'go')
+    await waitForIdle(ctx, agent)
+
+    expect(adapter.requests[1]!.messages.slice(-2).map(message => message.content)).toEqual([
+      [{ type: 'text', text: DROPPED_ECHO_NOTICE }],
+      [{ type: 'text', text: 'also check tests' }],
     ])
   })
 

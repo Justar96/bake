@@ -12,7 +12,7 @@ Paste the summary `bun run preflight` printed (or `bun run verify` for the whole
 - [ ] `bun run preflight` ran on this branch and its summary is above
 - [ ] A terminal behavior change has an expected-output test and a PTY scenario
 - [ ] A user-visible change has a `CHANGELOG.md` `[Unreleased]` entry
-- [ ] The owning README or JSDoc is updated, English and Chinese pages together
+- [ ] The owning README or JSDoc is updated
 
 ## Upstream
 

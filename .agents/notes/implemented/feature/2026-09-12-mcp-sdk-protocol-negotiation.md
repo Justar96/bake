@@ -2,13 +2,13 @@
 
 Status: implemented
 
-English | [中文](2026-09-12-mcp-sdk-protocol-negotiation.zh.md)
-
 ## Problem
 
 MCP servers use different protocol revisions. A tool bridge that implements discovery and execution around an older SDK can omit modern request headers, subscription setup, or protocol validation.
 
 ## Decision
+
+The official SDK was later replaced by the [pi-mcp](https://github.com/earendil-works/pi) client, which [`dsh-mcp-client`](../../../../packages/mcp/mcp-client/README.md) now uses for negotiation, transports, discovery, and calls. pi-mcp negotiates protocol revisions up to 2025-11-25, so the 2026-07-28 discovery probe and `Mcp-Param` request headers are absent; discovery stops after 1,000 pages. pi-mcp checks only result envelopes, so the bridge's `src/protocol.ts` applies the MCP 2025-11-25 schema to tool definitions, tool results, and resource results, and still rejects legacy `toolResult` substitutes. `callTool` receives the raw name, arguments, signal, and timeout, without a discovered definition. The rest of this section records the SDK realization as it shipped.
 
 `dsh-mcp-client` uses the official TypeScript client 2.0.0 with automatic protocol negotiation. The SDK owns modern discovery and legacy initialization, transport-specific negotiation, list-change subscriptions, pagination, request headers, cancellation, and output validation. The bridge uses high-level `listTools` and `callTool`, passing the complete discovered definition to each call.
 
@@ -28,6 +28,6 @@ The [tool bridge note](2026-07-07-mcp-client-plugin.md) retains the independent 
 
 ## Consequences
 
-Stdio negotiation starts a disposable probe process and waits for its exit before starting the serving process. The SDK bounds discovery with its page limit, and malformed results fail before projection. Valid text, canonical JSON, image admission, cancellation, and registration ownership remain bridge contracts. Shipped profiles include shared resource access; elicitation, MCP prompts, and task execution remain unsupported.
+Stdio negotiation runs on the serving process; pi-mcp starts no probe process. Discovery stops at its page limit, and malformed results fail before projection. Valid text, canonical JSON, image admission, cancellation, and registration ownership remain bridge contracts. Shipped profiles include shared resource access; elicitation, MCP prompts, and task execution remain unsupported.
 
-Real-SDK lifecycle tests verify probe disposal, process ordering, HTTP probe retry budgets, and failed stdio spawns. The connection-supervisor tests retain attached-transport close barriers and bounded failure behavior.
+Real-transport lifecycle tests verify negotiation on one serving process, disposal during initialization, HTTP and stdio initialization retries, and the retry stop when cleanup cannot be confirmed. The connection-supervisor tests retain attached-transport close barriers and bounded failure behavior.

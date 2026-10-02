@@ -76,6 +76,7 @@ export type { PiAiAdapterOptions } from './adapter.ts'
 export { Config } from './config.ts'
 export type {
   PiAiCompatProfile,
+  PiAiMessagesWire,
   PiAiModality,
   PiAiModelOverride,
   PiAiModelProfile,
@@ -226,11 +227,11 @@ export function apply(ctx: Context, config: Config): void {
   const ensureDirectory = (): void => {
     const entries = directoryEntries(profiles())
     if (deepEqualJson(entries, directoryFacts)) return
-    // Atomic replace, never dispose-then-register: a route another adapter
-    // family already declares (a profile keyed `deepseek-official`) would
-    // otherwise leave this plugin's whole directory withdrawn and the Models
-    // page empty. The candidate set is validated first, so a collision keeps
-    // the previous entries serving and only costs a diagnostic.
+    // Atomic replace, never dispose-then-register: a profile keyed by a route
+    // another adapter family already declares would otherwise leave this
+    // plugin's whole directory withdrawn and the Models page empty. The
+    // candidate set is validated first, so a collision keeps the previous
+    // entries serving and only costs a diagnostic.
     if (directory === undefined) {
       directory = ctx.llm.registerConfigurableProviders(entries)
     } else {

@@ -430,6 +430,53 @@ describe('compact configuration and defaults', () => {
       })
   })
 
+  it('layers exact over provider-wide over defaults, field by field', () => {
+    const config = resolveConfig({
+      thresholdRatio: 0.75,
+      maxTokens: 1_000,
+      compactionRetries: 3,
+      modelPolicies: [
+        { provider: 'cliproxyapi', model: 'pinned', thresholdRatio: 0.5, maxTokens: 300 },
+        { provider: 'cliproxyapi', thresholdTokens: 150_000, retainTokens: 30_000, maxTokens: 200 },
+      ],
+    })
+
+    const routeWide = resolveTargetPolicy(config, { provider: 'cliproxyapi', model: 'any-model' })
+    expect(routeWide).toMatchObject({ thresholdTokens: 150_000, retainTokens: 30_000, maxTokens: 200, compactionRetries: 3 })
+    expect(routeWide).not.toHaveProperty('thresholdRatio')
+    expect(resolveCompactSpec(routeWide, 200_000)).toMatchObject({ thresholdTokens: 150_000, retainTokens: 30_000 })
+
+    // The exact entry's ratio replaces the provider-wide absolute threshold as
+    // a unit, while retention it leaves unset still comes from the route.
+    const pinned = resolveTargetPolicy(config, { provider: 'cliproxyapi', model: 'pinned' })
+    expect(pinned).toMatchObject({ thresholdRatio: 0.5, retainTokens: 30_000, maxTokens: 300, compactionRetries: 3 })
+    expect(pinned).not.toHaveProperty('thresholdTokens')
+    expect(resolveCompactSpec(pinned, 200_000)).toMatchObject({ thresholdTokens: 100_000, retainTokens: 30_000 })
+
+    const elsewhere = resolveTargetPolicy(config, { provider: 'deepseek', model: 'pinned' })
+    expect(elsewhere).toMatchObject({ thresholdRatio: 0.75, retainRatio: 0.16, maxTokens: 1_000 })
+  })
+
+  it('accepts one exact and one provider-wide entry for the same route', () => {
+    expect(() => resolveConfig({
+      modelPolicies: [{ provider: MODEL }, { provider: MODEL, model: MODEL }, { provider: 'other' }],
+    })).not.toThrow()
+  })
+
+  it('applies an absolute threshold and judges it against capacity per route', () => {
+    const config = resolveConfig({ thresholdTokens: 50_000 })
+    expect(config).toMatchObject({ thresholdTokens: 50_000, retainRatio: 0.16 })
+    expect(config).not.toHaveProperty('thresholdRatio')
+
+    const policy = resolveTargetPolicy(config, { provider: MODEL, model: MODEL })
+    expect(resolveCompactSpec(policy, 100_000)).toMatchObject({ thresholdTokens: 50_000, retainTokens: 16_000 })
+    expect(resolveCompactSpec(policy, 50_000)).toMatchObject({ thresholdTokens: 50_000, retainTokens: 8_000 })
+    expect(() => resolveCompactSpec(policy, 49_999))
+      .toThrow(/test-model\/test-model thresholdTokens \(50000\) exceeds the model's contextWindow \(49999\)/)
+    // A ratio tail can outgrow an absolute threshold on a large window.
+    expect(() => resolveCompactSpec(policy, 400_000)).toThrow(/retainTokens \(64000\) must be less than threshold tokens 50000/)
+  })
+
   it('validates common values and pressure-policy invariants', () => {
     const bad = [
       [{ maxTokens: 0 }, /maxTokens/],
@@ -476,7 +523,29 @@ describe('compact configuration and defaults', () => {
         { modelPolicies: [{ provider: MODEL, model: MODEL, retainRatio: 0.9 }] },
         /modelPolicies\[0\]: retainRatio \(0.9\).*thresholdRatio \(0.8\)/,
       ],
-      [{ modelPolicies: [{ provider: MODEL, model: MODEL }, { provider: MODEL, model: MODEL }] }, /duplicate model policy/],
+      [
+        { modelPolicies: [{ provider: MODEL, model: MODEL }, { provider: MODEL, model: MODEL }] },
+        /duplicate model policy for test-model\/test-model/,
+      ],
+      [{ modelPolicies: [{ provider: MODEL }, { provider: MODEL }] }, /duplicate provider-wide model policy for test-model/],
+      [{ modelPolicies: [{ model: MODEL }] }, /modelPolicies\[0\]\.provider must be a non-empty string/],
+      [{ thresholdTokens: 0 }, /thresholdTokens \(0\) must be a positive integer/],
+      [{ thresholdTokens: 1.5 }, /thresholdTokens \(1.5\) must be a positive integer/],
+      [{ thresholdRatio: 0.5, thresholdTokens: 100 }, /thresholdRatio and thresholdTokens are mutually exclusive/],
+      [{ thresholdTokens: 100, retainTokens: 100 }, /retainTokens \(100\) must be less than the resolved thresholdTokens \(100\)/],
+      [
+        { modelPolicies: [{ provider: MODEL, model: MODEL, thresholdRatio: 0.5, thresholdTokens: 100 }] },
+        /modelPolicies\[0\]: thresholdRatio and thresholdTokens are mutually exclusive/,
+      ],
+      [
+        { retainTokens: 500, modelPolicies: [{ provider: MODEL, thresholdTokens: 400 }] },
+        /modelPolicies\[0\]: retainTokens \(500\) must be less than the resolved thresholdTokens \(400\)/,
+      ],
+      // An exact entry is judged over its provider-wide entry, not just the defaults.
+      [
+        { modelPolicies: [{ provider: MODEL, retainTokens: 500 }, { provider: MODEL, model: MODEL, thresholdTokens: 400 }] },
+        /modelPolicies\[1\]: retainTokens \(500\) must be less than the resolved thresholdTokens \(400\)/,
+      ],
       [{ models: { [MODEL]: { retainTokens: 10 } } }, /BasicCompactionConfig: unknown key "models"/],
       [{ thresholdRato: 0.5 }, /BasicCompactionConfig: unknown key "thresholdRato"/],
     ] as Array<[unknown, RegExp]>

@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-07-06-timeout-deadline-library.zh.md)
-
 ## Problem
 
 Timeout handling was drifting apart across the tool-bearing capabilities, and the divergence was not superficial — it was the same logic re-implemented three ways, each with its own subtle correctness burden.
@@ -93,7 +91,7 @@ The signal only *notifies*; termination is always the listener's job, and the li
 
 - **web_fetch** — the tool stays validate-and-forward; the provider's hand-rolled controller + `setTimeout` + manual listener + `finally` + `signal.reason` recovery is replaced by provider-owned `deadline`/`timeoutOf`. A pre-aborted upstream signal still throws `WEB_ABORTED` up front; otherwise `fetch` runs against the fused `d.signal`, and `translateAbortOrNetwork` classifies a thrown error by the signal (`timeoutOf` → `WEB_FETCH_TIMEOUT`, else aborted → `WEB_ABORTED`, else network → `WEB_PROVIDER_ERROR`). The public error-code contract is unchanged, and `TimeoutReason` never crosses the web seam as the public error.
 - **bash** — `resolve()` clamps the request into an explicit spec. Foreground `run()` creates the deadline and passes its signal to process execution, whose abort listener calls `SubprocessHandle.terminate()` and awaits the same provider-managed range. The executor classifies the first abort as timeout or cancellation. Background starts remain timeout-free and forward only upstream cancellation.
-- **LLM adapters** — `dsh-llm-deepseek` and `dsh-llm-pi-ai` wrap actual transport iteration with `idleWatchdog`. The five-minute configured interval covers only outstanding provider demand, not time the downstream consumer spends between chunks. The direct DeepSeek adapter also pulses that outstanding demand when its SSE parser observes a comment, without yielding the comment as a `StreamChunk` or writing it to the session log. The pi-ai SDK does not expose comment activity to its adapter, so that path can rearm only when the SDK yields. The stable signal reaches `fetch` or the SDK for the whole call, so timeout closes the underlying request and maps to `TIMEOUT`, while an earlier caller abort maps to `ABORTED`.
+- **LLM adapters** — `dsh-llm-pi-ai`, the only LLM adapter, wraps actual transport iteration with `idleWatchdog`. The five-minute configured interval covers only outstanding provider demand, not time the downstream consumer spends between chunks. The pi-ai SDK does not expose comment activity to its adapter, so the watchdog rearms only when the SDK yields; SSE comments and proxy heartbeats do not count as progress. The comment pulse belonged to the direct DeepSeek adapter, which was removed with `dsh-llm-deepseek`. The stable signal reaches the SDK for the whole call, so timeout closes the underlying request and maps to `TIMEOUT`, while an earlier caller abort maps to `ABORTED`.
 
 ## Consequences
 

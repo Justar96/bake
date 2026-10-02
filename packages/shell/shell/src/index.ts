@@ -34,6 +34,7 @@ export type {
   DshEnvironmentKey,
 } from './types.ts'
 export { parseExitStatus } from './render.ts'
+export { LIVE_OUTPUT_MAX_CHARS, LIVE_OUTPUT_POLL_MS, watchOutput } from './watch.ts'
 export type { ParsedExitStatus } from './render.ts'
 
 declare module '@deepseek-ai/cordis' {

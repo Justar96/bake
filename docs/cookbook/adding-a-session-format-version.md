@@ -1,7 +1,5 @@
 # Cookbook: adding a Session log format version
 
-English | [中文](adding-a-session-format-version.zh.md)
-
 ## Summary
 
 Use this tutorial to introduce the next structural Session log version without rewriting released data. Read the [version and release-status authority](../session-format-status.md) to identify the checkout writer and the latest released format. Let N denote that verified released format and N+1 the target; substitute numeric values for these placeholders in names and metadata. Start with a working contributor checkout and read the [package checklist](adding-a-package.md), [format library](../../packages/session/session-format/README.md), and [released-format decision](../../.agents/notes/implemented/architecture/2026-08-31-released-session-format-migrations.md).
@@ -27,7 +25,7 @@ Released codecs and migration semantics remain frozen. Do not amend a released e
 
 Use disposable, isolated Harness homes for unreleased N+1 integration testing. An interim N+1 file already has the target writer version, so a later edit to N→N+1 will not migrate that file again. Re-run from unchanged historical input in a fresh test home; never repair this by rewriting a committed generation or reusing a real user's home.
 
-Before changing the writer, use the [archive command](../persistence-changes/historical-formats/README.md#maintenance) to preserve its complete persistence schema, then add the bilingual format reference under `docs/persistence-changes/historical-formats/vN.*`. Preserve all earlier records. The format coverage check requires every integer below the new writer to have its own document; the current generated catalog covers only the new writer.
+Before changing the writer, use the [archive command](../persistence-changes/historical-formats/README.md#maintenance) to preserve its complete persistence schema, then add the format reference under `docs/persistence-changes/historical-formats/vN.*`. Preserve all earlier records. The format coverage check requires every integer below the new writer to have its own document; the current generated catalog covers only the new writer.
 
 <a id="add-an-identity-edge"></a>
 ## 2. Add an identity edge
@@ -95,10 +93,9 @@ bun run test:runtime packages/session/session-format/tests packages/session/sess
 
 After implementing the new edge, add its actual test path to the focused `test:runtime` run. Add the changed JSONL, replay, projection, and SDK tests selected by the actual diff, plus the built publication-Worker smoke when that path changes. Require successful strict migration, identity preservation for the skeleton, malformed and unknown-required-event refusal, deterministic repeated restores, independent concurrent stage state, seeded multi-hop cuts, unchanged predecessors, and no fallback. Report exact commands and failures, not an inferred full-suite result.
 
-Update the [owning Agent Note](../../.agents/notes/implemented/architecture/2026-08-31-released-session-format-migrations.md) rather than adding a redundant decision record. Keep the [release record](../session-format-status.md#updating-the-record) unchanged until publication; after publication, update it with verified release evidence. Audit related active notes for supersession; retain independent rationale and leave archived notes frozen. Update bilingual prose together, re-record each changed pair with the repository tool, then run documentation checks:
+Update the [owning Agent Note](../../.agents/notes/implemented/architecture/2026-08-31-released-session-format-migrations.md) rather than adding a redundant decision record. Keep the [release record](../session-format-status.md#updating-the-record) unchanged until publication; after publication, update it with verified release evidence. Audit related active notes for supersession; retain independent rationale and leave archived notes frozen. Run the documentation checks:
 
 ```sh
-pnpm run verify-translation-pairing --write docs/cookbook/adding-a-session-format-version.md
 pnpm run test:docs
 pnpm run doc-sync
 pnpm run lint
