@@ -33,7 +33,7 @@ function gapUnderCard(frame: string): number | undefined {
 }
 
 describe('welcome block', () => {
-  it.each(['en', 'zh'] as const)('opens a fresh session with the version, session, and example commands in %s', async locale => {
+  it.each(['en'] as const)('opens a fresh session with the version, session, and example commands in %s', async locale => {
     const copy = dictionaries[locale]
     const ui = render(<App {...props({ copy })} />)
     const frame = ui.lastFrame() ?? ''
@@ -50,7 +50,7 @@ describe('welcome block', () => {
     await expect(frame + '\n').toMatchFileSnapshot(`./expected/welcome.${locale}.txt`)
   })
 
-  it.each(['en', 'zh'] as const)('names the access boundary under the session line in %s', async locale => {
+  it.each(['en'] as const)('names the access boundary under the session line in %s', async locale => {
     const copy = dictionaries[locale]
     const frame = render(<App {...props({ copy, permission: 'workspace-write' })} />).lastFrame() ?? ''
     const rows = frame.split('\n')
@@ -113,7 +113,7 @@ describe('welcome block', () => {
     expect(frame).toContain('BAKE  v1.2.3')
   })
 
-  it.each(['en', 'zh'] as const)('keeps Box borders and command columns aligned in %s', locale => {
+  it.each(['en'] as const)('keeps Box borders and command columns aligned in %s', locale => {
     for (const columns of [8, 12, 24, 40, 64, 100]) {
       const copy = dictionaries[locale]
       const frame = renderToString(<Welcome version="1.2.3" heading={`${copy.session}: session-test`} copy={copy} frame="round" columns={columns} />, { columns })

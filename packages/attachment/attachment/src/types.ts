@@ -128,7 +128,7 @@ export interface ImageRequestTarget {
   width: number
   /** Target height in pixels; a target above the source keeps the source height. */
   height: number
-  /** Encoded-byte target before base64 expansion or Files API upload; the smallest quality-ladder output is kept when no quality fits. */
+  /** Encoded-byte target before base64 expansion; the smallest quality-ladder output is kept when no quality fits. */
   maxBytes: number
 }
 

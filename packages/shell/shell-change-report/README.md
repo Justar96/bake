@@ -5,8 +5,6 @@ kind: "package-library"
 
 # @deepseek-ai/dsh-shell-change-report
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 `dsh-shell-change-report` finds the workspace files a shell command changed while it ran, so a terminal can show a shell edit the way it shows an `edit` call. It reads git before and after the command, with hardened and time-bounded reads. It returns the changed files with contextual hunks, bounded so the session log stays small. The report is for display only: the shell tools attach it as `tool/result.meta`, and the model never receives it. `tool-bash` and `tool-pwsh` use it; it registers no service and has no `ctx` key.

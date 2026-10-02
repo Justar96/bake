@@ -1,7 +1,5 @@
 # Core
 
-English | [中文](core.zh.md)
-
 The **core** subsystem is [`packages/core`](../../packages/core/README.md) — the packages every composition boots: the event-sourced session log, system-prompt assembly, the tool registry, the agent types, and the concrete loop that drives them. This page explains what the `agent`/`agent-loop` pair declares — how an agent is created and owned, and the `Agent` handle's delivery, cancellation, and interception contracts — plus the two type patterns every subsystem follows. The group's dedicated pages and the rest of the folder are indexed in the [subsystems README](README.md).
 
 ## The spine, package by package
@@ -194,6 +192,23 @@ type AssistantStreamFrame =
 `running` describes the driver-wide drain interval and may span consecutive queued turns; it does not prove a turn is still open. Disposal removes the agent from the registry and emits `agent/disposed`; it is not a terminal status value. `followup()` returns no handle: its `MessageId` identifies durable inbox insertion, claim, and discard facts, not a later assistant output or turn ending. `whenIdle()` observes the whole agent, so callers may call a receipt-to-idle interval a run only when they explicitly own that interval ([decision](../../.agents/notes/implemented/architecture/2026-07-30-followup-enqueue-and-owned-runs.md)).
 
 ```ts type-equiv
+/**
+ * One process-local progress snapshot a running tool published. Each
+ * snapshot replaces the previous one for its call; it is display-only, never
+ * logged, and never part of a model request.
+ */
+interface ToolProgress {
+  /**
+   * The newest output the call has produced so far, oldest first. The
+   * runtime keeps at most {@link TOOL_PROGRESS_MAX_CHARS} of its tail.
+   */
+  readonly output: string
+}
+```
+
+Like the assistant stream, tool progress is live state. `agent/tool-progress` carries a running call's newest `ToolProgress` snapshot, at most one per `TOOL_PROGRESS_INTERVAL_MS` (100 ms) per call, and `agent/tool-executed` reports each call finishing as it happens, ahead of the model-ordered `tool/result`. Neither is logged or reaches a model request; a call's `tool/result` replaces both.
+
+```ts type-equiv
 /** Merge-extensible agent creation options. Persona belongs to system-prompt sections. */
 interface AgentOptions {
   /** Provider route (must have a registered adapter at call time). */
@@ -294,13 +309,18 @@ interface CancelOptions {
 type AgentCancelCause =
   | { readonly kind: 'user' }
   | { readonly kind: 'parent' }
+  /**
+   * A tool policy or hook halted the turn through a tool decision's `halt`
+   * (`@deepseek-ai/dsh-tools` `ToolHalt`); `reason` is the halt's recorded
+   * reason, shown to the user and never to the model.
+   */
   | { readonly kind: 'hook'; readonly reason: string }
   | { readonly kind: 'disposed' }
 ```
 
 The cause is a TypeScript-enforced same-process input. An active cancellation holder copies it into the runtime-only `AbortSignal.reason`; a signal grants cooperating listeners no classification authority. Durable `turn/end` records the outcome as `{ kind: 'aborted', reason: TurnEndCancelCause }`, so the cancel cause lands in the terminal result.
 
-The [event taxonomy](../architecture.md#events) owns the `agent/*` lifecycle, checkpoint, and waterfall contracts. Turn and step boundaries are durable session events rather than agent emits.
+The [event taxonomy](../architecture.md#events-and-turns) owns the `agent/*` lifecycle, checkpoint, and waterfall contracts. Turn and step boundaries are durable session events rather than agent emits.
 
 ## Initiating Agent
 
@@ -1180,6 +1200,64 @@ Agent status changed (`idle` ⇄ `running`). A waking delivery enters `running` 
 ```
 
 Types: [Scoped](scope.md)
+
+Source: [`packages/core/agent/src/runtime-types.ts`](../../packages/core/agent/src/runtime-types.ts)
+
+<a id="agenttool-executed--emit"></a>
+
+#### `agent/tool-executed` — emit
+
+One started tool call finished executing. The loop commits results in model order, so a call that finishes before an earlier sibling waits for it before its `tool/result` is logged; this process-local signal arrives as each call finishes. `isError` is the dispatch outcome before `tools/post-execute`, which may still replace it; the logged `tool/result` is authoritative.
+
+```ts cordis-catalog
+/**
+ * One started tool call finished executing. The loop commits results in
+ * model order, so a call that finishes before an earlier sibling waits
+ * for it before its `tool/result` is logged; this process-local signal
+ * arrives as each call finishes. `isError` is the dispatch outcome before
+ * `tools/post-execute`, which may still replace it; the logged
+ * `tool/result` is authoritative.
+ * @param payload.agent - the agent whose step made the call.
+ * @param payload.turn - the turn containing the call.
+ * @param payload.step - the step that made the call.
+ * @param payload.callId - the model's id for the call.
+ * @param payload.isError - whether the dispatch outcome was an error.
+ * Scope-filtered dispatch (`@deepseek-ai/dsh-scope`): agent-scoped listeners receive only that agent.
+ * @mode emit
+ */
+'agent/tool-executed'(this: Scoped<Agent>, payload: { agent: Agent; turn: number; step: number; callId: ToolCallId; isError: boolean }): void
+```
+
+Types: [Scoped](scope.md) · [ToolCallId](llm-streaming.md)
+
+Source: [`packages/core/agent/src/runtime-types.ts`](../../packages/core/agent/src/runtime-types.ts)
+
+<a id="agenttool-progress--emit"></a>
+
+#### `agent/tool-progress` — emit
+
+Process-local progress of one model-requested tool call whose body is running. The loop coalesces a call's snapshots to at most one per TOOL_PROGRESS_INTERVAL_MS, publishing the newest, and drops every snapshot once the call's dispatch settles, so none follows its `agent/tool-executed`. Nothing here is logged or model-visible; the call's `tool/result` replaces it.
+
+```ts cordis-catalog
+/**
+ * Process-local progress of one model-requested tool call whose body is
+ * running. The loop coalesces a call's snapshots to at most one per
+ * {@link TOOL_PROGRESS_INTERVAL_MS}, publishing the newest, and drops every
+ * snapshot once the call's dispatch settles, so none follows its
+ * `agent/tool-executed`. Nothing here is logged or model-visible; the
+ * call's `tool/result` replaces it.
+ * @param payload.agent - the agent whose step made the call.
+ * @param payload.turn - the turn containing the call.
+ * @param payload.step - the step that made the call.
+ * @param payload.callId - the model's id for the call.
+ * @param payload.progress - the newest snapshot, replacing earlier ones.
+ * Scope-filtered dispatch (`@deepseek-ai/dsh-scope`): agent-scoped listeners receive only that agent.
+ * @mode emit
+ */
+'agent/tool-progress'(this: Scoped<Agent>, payload: { agent: Agent; turn: number; step: number; callId: ToolCallId; progress: ToolProgress }): void
+```
+
+Types: [Scoped](scope.md) · [ToolCallId](llm-streaming.md)
 
 Source: [`packages/core/agent/src/runtime-types.ts`](../../packages/core/agent/src/runtime-types.ts)
 

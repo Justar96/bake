@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-12-connection-and-compaction-fixture-preconditions.zh.md)
-
 ## Problem
 
 A reconnect label can appear while its hover color is still transitioning. Compaction pressure can select an initial instruction that is smaller than the required checkpoint framing. Neither observation alone establishes the state its test needs to assert.

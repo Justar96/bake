@@ -5,8 +5,6 @@ kind: persistence-change
 
 # 2026-09-14-image-offload
 
-English | [中文](2026-09-14-image-offload.zh.md)
-
 ## Summary
 
 Record selected image occurrences with the image/offload event and derive their offloaded marks through the owning plugin's message projection.

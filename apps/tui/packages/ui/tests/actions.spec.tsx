@@ -27,7 +27,7 @@ const events = [
 ]
 
 describe('action transcript', () => {
-  it.each(['en', 'zh'] as const)('pairs out-of-order results with their calls and separates turn outcomes (%s)', async locale => {
+  it.each(['en'] as const)('pairs out-of-order results with their calls and separates turn outcomes (%s)', async locale => {
     const seam = projector(dictionaries[locale], () => undefined)
     const actions = new Actions()
     const rows = events.flatMap(item => actions.fold(project(item, seam), SETTLES.has(item.type)))

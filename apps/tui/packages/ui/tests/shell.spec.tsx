@@ -149,7 +149,7 @@ describe('terminal composer', () => {
     await vi.waitFor(() => expect(state.onSubmit).toHaveBeenCalledExactlyOnceWith('/review'))
   })
 
-  it.each(['en', 'zh'] as const)('completes a selected skill without submitting in %s', async locale => {
+  it.each(['en'] as const)('completes a selected skill without submitting in %s', async locale => {
     const state = props({ copy: dictionaries[locale], completionLimit: 2, completion: { loading: false, error: undefined, entries: [
       { name: 'reset', description: 'Reset the view', kind: 'command' },
       { name: 'review', description: 'Review the current patch', kind: 'skill' },
@@ -200,7 +200,7 @@ describe('terminal composer', () => {
     await vi.waitFor(() => expect(state.onSubmit).toHaveBeenCalledExactlyOnceWith('/review this change'))
   })
 
-  it.each(['en', 'zh'] as const)('browses directories and completes a quoted file in %s', async locale => {
+  it.each(['en'] as const)('browses directories and completes a quoted file in %s', async locale => {
     const query = vi.fn()
     const state = props({ copy: dictionaries[locale], onReferenceQuery: query,
       files: { query: 'notes', loading: false, error: undefined, entries: [{ path: 'notes folder', kind: 'directory' }] },
@@ -250,7 +250,7 @@ describe('terminal composer', () => {
     await vi.waitFor(() => expect(state.onSubmit).toHaveBeenCalledExactlyOnceWith('Review @newer\t\nuser@example.com'))
   })
 
-  it.each(['en', 'zh'] as const)('filters model choices and accepts only explicit Enter in %s', async locale => {
+  it.each(['en'] as const)('filters model choices and accepts only explicit Enter in %s', async locale => {
     const state = props({ copy: dictionaries[locale], completionLimit: 2, interaction: {
       id: 10, kind: 'select', title: dictionaries[locale].modelSheet, initial: 'mock/current', choices: [
         { value: 'mock/current', label: 'mock/current', current: true },
@@ -275,7 +275,7 @@ describe('terminal composer', () => {
     expect(state.onSubmit).not.toHaveBeenCalled()
   })
 
-  it.each(['en', 'zh'] as const)('draws a model sheet\'s headings, facts, and levels, and answers a level with Enter in %s', async locale => {
+  it.each(['en'] as const)('draws a model sheet\'s headings, facts, and levels, and answers a level with Enter in %s', async locale => {
     const copy = dictionaries[locale]
     const efforts = (initial: string) => ({ initial, items: [{ value: '', label: `${copy.effortDefault} (Low)` },
       { value: 'low', label: 'Low' }, { value: 'high', label: 'High' }] })
@@ -326,7 +326,7 @@ describe('terminal composer', () => {
     await vi.waitFor(() => expect(state.onAnswer).toHaveBeenCalledExactlyOnceWith(15, 'mock/6'))
   })
 
-  it.each(['en', 'zh'] as const)('draws a picker\'s tabs and answers a neighbour on Tab and Shift-Tab in %s', async locale => {
+  it.each(['en'] as const)('draws a picker\'s tabs and answers a neighbour on Tab and Shift-Tab in %s', async locale => {
     const copy = dictionaries[locale]
     const interaction = { id: 13, kind: 'select' as const, title: `${copy.settingsTitle} › ${copy.settingsAgent}`, initial: 'setting:depth',
       choices: [{ value: 'setting:depth', label: copy.settingsSubagentDepth, description: '1' }],
@@ -426,7 +426,7 @@ describe('terminal composer', () => {
     await vi.waitFor(() => expect(state.onSubmit).toHaveBeenCalledExactlyOnceWith('first\nX\nYlast'))
   })
 
-  it.each(['en', 'zh'] as const)('preserves recalled edits and restores the unsent draft and cursor in %s', async locale => {
+  it.each(['en'] as const)('preserves recalled edits and restores the unsent draft and cursor in %s', async locale => {
     const committed = appendTranscript(emptyTranscript, [
       { kind: 'user', text: 'First prompt' }, { kind: 'assistant', text: 'Do not recall this answer' },
       { kind: 'user', text: 'Second prompt' },
@@ -743,7 +743,7 @@ describe('terminal composer', () => {
     expect(ui.lastFrame()).not.toContain('private-test-value')
   })
 
-  it.each(['en', 'zh'] as const)('shows pending input and interruption state in %s', async locale => {
+  it.each(['en'] as const)('shows pending input and interruption state in %s', async locale => {
     const copy = dictionaries[locale]
     const ui = render(<App {...props({ copy, status: 'running', stopping: true,
       pending: [{ id: 'input', target: 'next-step', text: 'Keep this instruction' }],
@@ -906,7 +906,7 @@ describe('terminal composer', () => {
   })
 })
 
-it.each(['en', 'zh'] as const)('renders a bounded session picker and returns the selected id in %s', async locale => {
+it.each(['en'] as const)('renders a bounded session picker and returns the selected id in %s', async locale => {
   const copy = dictionaries[locale]
   const state = props({ copy, inputBlocked: true, completionLimit: 2,
     interaction: { kind: 'select', id: 10, title: copy.chooseSession, initial: 'session-first', choices: [
@@ -980,7 +980,7 @@ it('resets draft, cursor, recall, and printed history when the displayed session
   await vi.waitFor(() => expect(ui.lastFrame()).toContain('Blocked draft▌'))
 })
 
-it.each(['en', 'zh'] as const)('renders staged and queued attachment metadata in %s', async locale => {
+it.each(['en'] as const)('renders staged and queued attachment metadata in %s', async locale => {
   const item = { name: 'pixel.png', bytes: 84, mediaType: 'image/png', width: 1, height: 1 }
   const state = props({ copy: dictionaries[locale], attachments: [item], pending: [{ id: 'queued', target: 'next-step', text: 'Inspect', attachments: [item] }] })
   const ui = render(<App {...state} />)

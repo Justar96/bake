@@ -5,8 +5,6 @@ kind: persistence-change
 
 # 2026-09-14-workspace-changes-event
 
-English | [中文](2026-09-14-workspace-changes-event.zh.md)
-
 ## Summary
 
 Adds the log-only workspace/changes event that records the files a top-level turn changed.

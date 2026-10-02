@@ -2,7 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-14-session-log-upload-default.zh.md)
 ## Problem
 
 Ordinary DeepSeek requests do not contain the complete canonical Session trajectory. Requiring each installation to enable log contribution prevents the default product configuration from supplying that trajectory. Recorded-session scenarios also need stable, explicit upload policies because acceptance events are part of their expected logs.

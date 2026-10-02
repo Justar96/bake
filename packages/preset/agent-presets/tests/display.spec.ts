@@ -10,15 +10,15 @@ const t = (key: BuiltInPresetCopyKey): string => `t:${key}`
 
 describe('presetDisplayText', () => {
   it('resolves a shipped preset through its dictionary keys', () => {
-    expect(presetDisplayText({ id: 'standard', trust: 'system', name: '标准模式' }, t)).toEqual({
+    expect(presetDisplayText({ id: 'standard', trust: 'system', name: 'Standard mode' }, t)).toEqual({
       name: 't:presetStandardName',
       description: 't:presetStandardDescription',
     })
   })
 
   it('keeps user-authored metadata untranslated', () => {
-    expect(presetDisplayText({ id: 'mine', trust: 'user', name: '我的模式', description: '自述' }, t))
-      .toEqual({ name: '我的模式', description: '自述' })
+    expect(presetDisplayText({ id: 'mine', trust: 'user', name: 'My mode', description: 'Notes' }, t))
+      .toEqual({ name: 'My mode', description: 'Notes' })
   })
 
   it('falls back to the id for a preset publishing no metadata', () => {

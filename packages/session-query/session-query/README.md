@@ -5,8 +5,6 @@ kind: "package-reference"
 
 # @deepseek-ai/dsh-session-query
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 `dsh-session-query` lets application code list, filter, read, and search session history. Reads prefer live sessions over persisted copies and return detached clones from one consistent observation. Exact reads and filters work with any supported storage setup; ranked full-text search requires a backend such as `dsh-session-query-sqlite`. Use it when application code needs programmatic access to the history presented to the model.

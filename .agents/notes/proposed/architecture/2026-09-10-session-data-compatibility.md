@@ -2,8 +2,6 @@
 
 Status: proposed
 
-English | [中文](2026-09-10-session-data-compatibility.zh.md)
-
 ## Problem
 
 Users care whether old conversations still open after an upgrade, not about internal class names. The abstraction refactor must not incidentally change disk bytes or require manual session moves. The current `0.1.5-rc.1` checkout writes Session format V3 and includes the released-format migration chain through V3.

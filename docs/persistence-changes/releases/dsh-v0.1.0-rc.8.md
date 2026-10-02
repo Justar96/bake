@@ -5,8 +5,6 @@ kind: persistence-release
 
 # Persistence release: dsh-v0.1.0-rc.8
 
-English | [中文](dsh-v0.1.0-rc.8.zh.md)
-
 ## Summary
 
 Four team/* events and the team-message user-message source variant are added; assistant/message gains optional interrupted. The writer format remains 0.

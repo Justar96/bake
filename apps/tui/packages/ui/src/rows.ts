@@ -134,6 +134,23 @@ export interface ToolCallRow {
   readonly input: string
   readonly detail?: readonly CardLine[]
   readonly result?: ToolOutcome
+  /**
+   * What the runtime said about the call while it waits for its result.
+   * Process-local and never on a committed row: the logged result replaces
+   * it, and a replayed session has none.
+   */
+  readonly live?: ToolCallLive
+}
+
+/** A running call's process-local state, projected from runtime events. */
+export interface ToolCallLive {
+  /** The newest lines of its output so far, oldest first, as raw text. */
+  readonly tail?: readonly string[]
+  /**
+   * It finished executing, and its result waits for an earlier call's to
+   * commit first. `ok` is the outcome before post-execute policy.
+   */
+  readonly finished?: { readonly ok: boolean }
 }
 
 /**

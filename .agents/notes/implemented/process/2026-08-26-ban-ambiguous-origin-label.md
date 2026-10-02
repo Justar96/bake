@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-08-26-ban-ambiguous-origin-label.zh.md)
-
 ## Problem
 
 The case-insensitive ten-letter ASCII token formed by `prove` followed by `nance` had accumulated unrelated meanings across the repository. It named source-event references, provider and model metadata, context producers, installed artifact identity, configuration origins, browser-recording evidence, and release attestations. A reader could not determine the recorded fact from the label alone.

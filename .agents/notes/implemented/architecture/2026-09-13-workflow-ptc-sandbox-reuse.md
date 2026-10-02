@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-13-workflow-ptc-sandbox-reuse.zh.md)
-
 ## Problem
 
 Dynamic workflows evaluate model-written JavaScript and start subagents. A worker thread keeps script execution off the host event loop, but code escaping its VM can use Node with the host process's file authority. PTC already owns a Node process implementation with OS file confinement, isolated program state, bounded output and control traffic, and managed cleanup. Maintaining a second launcher would duplicate those responsibilities.

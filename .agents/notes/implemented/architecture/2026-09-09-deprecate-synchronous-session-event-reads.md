@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-09-deprecate-synchronous-session-event-reads.zh.md)
-
 ## Problem
 
 Synchronous access to arbitrary event positions makes consumers depend on the complete Session event sequence being immediately available in memory. The storage direction is to stop retaining that complete sequence in memory. Once historical events require storage I/O, the runtime cannot preserve the same synchronous read guarantee without retaining the history or blocking on storage.

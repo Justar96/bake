@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-08-21-deepseek-llm-api-request-extensions.zh.md)
-
 ## Problem
 
 The canonical Session log contains request boundaries, raw response chunks, assembled messages, tool activity, plugin events, and failure facts that the model message list does not preserve. The OTel session-telemetry path projects and batches that log independently of model requests, uses deployment-selected sharing modes, and intentionally drops most assistant chunks. DeepSeek's official API therefore cannot reconstruct the complete harness trajectory from its ordinary request messages or the telemetry feed.
@@ -13,6 +11,8 @@ Provider-side diagnosis also needs the exact active plugin package versions that
 Both values belong only on the official DeepSeek adapter path. Adding them to `GenerateOptions` or the provider-neutral LLM seam would expose DeepSeek wire concepts to pi-ai and every future adapter.
 
 ## Decision
+
+The registry and both contributors were removed with `dsh-llm-deepseek`: `dsh-deepseek-llm-api-extensions`, `dsh-session-log-deepseek`, and `dsh-plugin-package-inventory-deepseek` are not shipped, and [`dsh-llm-pi-ai`](../../../../packages/llm/llm-pi-ai/README.md), whose `deepseek-official` route serves DeepSeek, sends no request extensions. Released Session logs keep their `session-log-deepseek/delivery-accepted` events as retired vocabulary, so they still open. The rest of this note records the design as it shipped.
 
 `@deepseek-ai/dsh-deepseek-llm-api-extensions` registers `ctx.deepseekLlmApiExtensions`, an additive registry of top-level fields for `deepseek-official` request bodies. A contributor claims one declaration-merged field with `register()`. The adapter invokes `prepare()` after serializing the exact wire messages, passes the request cancellation signal, rejects preparation or base-field collision before HTTP, merges the detached fields, and calls the captured `accept()` transaction after HTTP 2xx. The registry stops awaiting preparation after cancellation even if a contributor ignores the signal. Acceptance failures remain request failures under `REQUEST_EXTENSION`; transport and non-2xx failures never accept a contribution. A composition without the registry retains the reusable base adapter. Shipped compositions mount the registry and both contributors: both package metadata and Session-log upload are enabled by default; `session-log-deepseek.enabled: false` disables log upload under the [default-upload decision](2026-09-14-session-log-upload-default.md). Keyless `deepseek-official` replay invokes preparation with a synthetic empty base body and the same acceptance transaction before its first recorded chunk, preserving post-2xx extension side effects rather than field bytes.
 
@@ -85,8 +85,8 @@ About 98% of the measured v1 real-session events were `assistant/chunk`. Omittin
 
 ## Consequences
 
-Official DeepSeek requests carry active package versions to their resolved `baseURL`, including configured gateways. Unless Session-log upload is disabled, each eligible request also carries the complete newly unaccepted Session suffix. The fields are model-hidden and add no prompt tokens or KV-cache changes, but can substantially increase HTTP body size. Manifest resolution, field collision, acceptance logging, or provider schema rejection fails the model request rather than silently dropping metadata.
+These consequences held while the extensions shipped; `deepseek-official` requests now carry neither field. Official DeepSeek requests carried active package versions to their resolved `baseURL`, including configured gateways. Unless Session-log upload is disabled, each eligible request also carries the complete newly unaccepted Session suffix. The fields are model-hidden and add no prompt tokens or KV-cache changes, but can substantially increase HTTP body size. Manifest resolution, field collision, acceptance logging, or provider schema rejection fails the model request rather than silently dropping metadata.
 
 The `delivery-accepted` event becomes part of the canonical log and is itself delivered on a later request. Crash recovery can duplicate a suffix but does not infer acceptance from assistant output or create a second local cursor store. Direct calls without a live Session omit the session field; host package inventory remains available.
 
-The [DeepSeek request-identity decision](../feature/2026-08-11-deepseek-request-user-id-header.md) continues to own user/session headers, which remain outside the body. The [session-telemetry decision](../feature/2026-07-23-session-telemetry-otel-revival.md) remains current until a separate change removes that seam and backend; this request path does not alter OTel capture or sharing modes.
+The [DeepSeek request-identity decision](../feature/2026-08-11-deepseek-request-user-id-header.md) owns the request-identity headers, which stay outside the body; `dsh-llm-pi-ai` sends only the session header. The [session-telemetry decision](../feature/2026-07-23-session-telemetry-otel-revival.md) remains current until a separate change removes that seam and backend; this request path does not alter OTel capture or sharing modes.

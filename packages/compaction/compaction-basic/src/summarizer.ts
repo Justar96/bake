@@ -106,6 +106,31 @@ export type SummaryResult = {
 )
 
 /**
+ * Resolve the provider/model the default summarizer calls: the configured
+ * summarization pair, else the latest durably routed request, else a complete
+ * AgentOptions pair.
+ * @param config - resolved backend configuration.
+ * @param agent - supplies routed-model history and the fallback model.
+ * @returns the summarization target, or `undefined` when none is complete.
+ */
+export function summaryTarget(
+  config: Pick<SummaryConfig, 'summarizationProvider' | 'summarizationModel'>,
+  agent: Agent,
+): { provider: string; model: string } | undefined {
+  if (config.summarizationProvider.length > 0) {
+    return { provider: config.summarizationProvider, model: config.summarizationModel }
+  }
+  const latest = agent.session.requestHeader()?.config
+  if (latest !== undefined) return latest
+  return agent.options.provider !== undefined
+    && agent.options.provider.length > 0
+    && agent.options.model !== undefined
+    && agent.options.model.length > 0
+    ? { provider: agent.options.provider, model: agent.options.model }
+    : undefined
+}
+
+/**
  * Run the default cache-reusing `ctx.llm.stream()` summarization call: replay
  * the conversation prefix, then append the compaction instruction as the final
  * user message so the provider's warm prefix cache is reused.
@@ -123,17 +148,7 @@ export async function summarizeWithLlm(
   agent: Agent,
   signal?: AbortSignal,
 ): Promise<SummaryResult> {
-  const latest = agent.session.requestHeader()?.config
-  const configured = config.summarizationProvider.length === 0
-    ? undefined
-    : { provider: config.summarizationProvider, model: config.summarizationModel }
-  const agentTarget = agent.options.provider !== undefined
-    && agent.options.provider.length > 0
-    && agent.options.model !== undefined
-    && agent.options.model.length > 0
-    ? { provider: agent.options.provider, model: agent.options.model }
-    : undefined
-  const target = configured ?? latest ?? agentTarget
+  const target = summaryTarget(config, agent)
   if (target === undefined) {
     throw new Error(
       'no provider/model available for summarization: set both BasicCompactionConfig summarization fields, route one request, or set both AgentOptions fields',
@@ -180,15 +195,21 @@ export async function summarizeWithLlm(
 }
 
 /**
- * Wrap raw summary blocks in the durable checkpoint framing.
+ * Wrap raw summary blocks in the durable checkpoint framing, followed by any
+ * deterministic working-state sections.
  * @param summary - safe text-only model output.
+ * @param sections - blocks appended after the summary block, such as file lists and the todo list.
  * @returns content for the synthesized replacement user message.
  */
-export function frameSummary(summary: readonly ContentBlock[]): ContentBlock[] {
+export function frameSummary(
+  summary: readonly ContentBlock[],
+  sections: readonly ContentBlock[] = [],
+): ContentBlock[] {
   return [
     { type: 'text', text: `${CHECKPOINT_PREAMBLE}\n\n${SUMMARY_OPEN_TAG}` },
     ...summary,
     { type: 'text', text: SUMMARY_CLOSE_TAG },
+    ...sections,
   ]
 }
 

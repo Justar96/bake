@@ -5,8 +5,6 @@ kind: "package-group"
 
 # boot/ — shared app-bin boot glue
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 The boot group launches profile applications and manages their installed composition. `app-boot` resolves configuration and starts the Loader, `cmdline` supplies application arguments, `plugin-manager` exposes current-profile operations shared with the CLI, and `updater` replaces a managed install with a newer signed release. Each package README owns its details.

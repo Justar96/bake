@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-12-linux-scope-direct-kill-settlement.zh.md)
-
 ## Problem
 
 A failed scope signal can precede the exit notification of a direct process that accepted fallback `SIGKILL` or has already disappeared. Reporting the signal failure from an active scope observation during that interval can reject cleanup while termination remains in progress. The direct process's exit alone cannot prove that its descendants have stopped.

@@ -5,8 +5,6 @@ kind: "package-group"
 
 # MCP — Model Context Protocol
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 The `mcp/` group lets the model call external Model Context Protocol (MCP) tools and read server resources. Configure only `mcp-client` entries; shipped profiles already mount `mcp-resources` once. MCP tools and prompt text appear only for callers with a configured server in scope. Connections also supply server instructions. Package READMEs own configuration and limitations.

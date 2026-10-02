@@ -1,7 +1,5 @@
 # Development guide
 
-English | [中文](development.zh.md)
-
 This guide covers building Bake from source, the day-to-day development loops, the checks to run before a change lands, and where code lives. [`CONTRIBUTING.md`](../CONTRIBUTING.md) covers how changes are reviewed and how upstream DeepSeek Harness fixes are ported. [`AGENTS.md`](../AGENTS.md) holds the engineering rules every change follows.
 
 ## Prerequisites
@@ -25,7 +23,7 @@ bun run start
 
 Source runs use the same home as an installed `bake`: `~/.bake`, or the directory in `DSH_HOME`. An override selects that directory's existing profiles and sessions, not only its credentials. Existing `~/.dsh` data is never moved or changed.
 
-For real model requests, sign in with `/login` or set `DEEPSEEK_API_KEY` in the environment or in a gitignored `.env` at the repository root. `DEEPSEEK_BASE_URL` optionally overrides the API endpoint. Never commit keys or `.env`.
+For real model requests, sign in with `/login` or set `DEEPSEEK_API_KEY` in the environment or in a gitignored `.env` at the repository root. To use another DeepSeek endpoint, set `baseURL` on the `deepseek-official` route under `llm-pi-ai` in `settings.yaml`, as the [model configuration guide](user/guide/providers.md) shows. Never commit keys or `.env`.
 
 ## Development loops
 
@@ -33,7 +31,6 @@ For real model requests, sign in with `/login` or set `DEEPSEEK_API_KEY` in the 
 |---|---|---|
 | Ink components | `bun run dev` | Hot-reloads a recorded component preview; no agent, network, or model key. |
 | Streaming preview | `bun run dev --replay` | Plays recorded rows into the preview. |
-| Chinese copy | `bun run dev --locale zh` | Uses the Chinese component dictionary. |
 | Full agent | `bun run dev:tui` | Builds the runtime and TUI, then starts the Node agent; no automatic restart. |
 | TUI-only edits | `bun run build:tui && bun run start` | Rebundles terminal code; needs an existing runtime build. |
 | Shared runtime edits | `bun run build && bun run start` | Rebuilds runtime packages and terminal code. |
@@ -83,7 +80,7 @@ bun run verify             # every CI gate with the whole runtime suite (preflig
 `bun run preflight` is what CI runs. It measures the change from `origin/develop` (or `develop`; `--base <ref>` picks another), including uncommitted and untracked files, and runs each gate in turn:
 
 - **hygiene**: no compiled `.js` or `.d.ts` left under a `src/` directory, where it would load instead of the `.ts` beside it; no whitespace errors in the change; and a warning when shipped source changed without a `CHANGELOG.md` entry.
-- **generated**: every `verify-*` script, so the workspace manifests, tsconfig paths, config, tool, and Cordis catalogs, doc graphs, module graph, translation pairing, and pasted types match their sources. `verify-cordis-config` also keeps Loader row metadata static and requires each named plugin to resolve from the manifest that owns the row; it also fails when a profile that mounts agent presets runs one of their rows on its host plane as well, whether the preset enables that row or disables it, unless the script's `SHARED_PLANE_ROWS` list names the row with the reason both copies are harmless. `verify-package-invariants` requires each package's invariant companion to be wired completely, or its omission to be explained in the package README.
+- **generated**: every `verify-*` script, so the workspace manifests, tsconfig paths, config, tool, and Cordis catalogs, doc graphs, module graph, and pasted types match their sources. `verify-cordis-config` also keeps Loader row metadata static and requires each named plugin to resolve from the manifest that owns the row; it also fails when a profile that mounts agent presets runs one of their rows on its host plane as well, whether the preset enables that row or disables it, unless the script's `SHARED_PLANE_ROWS` list names the row with the reason both copies are harmless. `verify-package-invariants` requires each package's invariant companion to be wired completely, or its omission to be explained in the package README.
 - **types**, **lint** (Oxlint, and actionlint over the workflows when it is on `PATH`), and the Bun-run tooling tests.
 - **build**, then the TUI check targets, the runtime suite, and the PTY scenarios against what it built. The runtime step runs the specs the change reaches through the import graph (`vitest --changed`), the whole suite when a workspace or config file changed, and nothing when no runtime source changed. `--full` always runs the whole suite.
 
@@ -124,8 +121,8 @@ Useful references while working in the runtime:
 - ESM and strict TypeScript throughout. Local relative imports use `.ts`; cross-package imports use declared package names. Runtime packages keep their `@deepseek-ai/*` names so upstream fixes port cleanly.
 - The shared Node runtime builds through `tsconfig.host.json`; package `tsconfig.json` files reference their workspace dependencies. When you add or remove a package, update its references and run `bun run gen-workspace` and `bun run gen-tsconfig-paths`.
 - External dependency versions shared by two or more manifests live once in the root `package.json` `catalog`, and each manifest references them as `"catalog:"`. To add or upgrade one, edit the catalog entry and run `bun install`, then commit `bun.lock` with it; `bun run verify-workspace` rejects shared literal ranges, missing entries, and unused entries. `vendor/` manifests and peer ranges keep literal ranges.
-- Product text shown in the TUI lives in [`apps/tui/packages/ui/src/copy.ts`](../apps/tui/packages/ui/src/copy.ts), in English and Chinese.
-- Documentation describes current behavior. Update the owning README or JSDoc with the code, and keep English and Chinese pages aligned.
+- Product text shown in the TUI lives in [`apps/tui/packages/ui/src/copy.ts`](../apps/tui/packages/ui/src/copy.ts).
+- Documentation describes current behavior. Update the owning README or JSDoc with the code, and write English only.
 - Mark known issues by urgency: `FIXME` blocks a release, `TODO` should be fixed soon, and `XXX` is a someday item.
 
 ### Documenting types verbatim
@@ -136,4 +133,4 @@ Useful references while working in the runtime:
 { "doc": "docs/subsystems/session.md", "symbol": "SessionEvent", "source": "packages/core/session/src/types.ts" }
 ```
 
-`bun run verify-type-equiv` compares each block, and its Chinese counterpart, with the source declaration. When you change a documented declaration, update the paste in both languages and rerun the check.
+`bun run verify-type-equiv` compares each block with the source declaration. When you change a documented declaration, update the paste and rerun the check.

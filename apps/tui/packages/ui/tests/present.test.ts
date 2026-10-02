@@ -412,10 +412,10 @@ describe('present, bounding a tool result', () => {
     expect(present({ kind: 'tool-result', callId: 'c7', ok: true, text: '', detail: [{ text: json }] }, live)[1]!.text).toBe(json)
   })
 
-  test('reports the size in the words the locale supplied', () => {
-    const zh: ResultBound = { lines: 0, unit: '\u884c', more: '\u884c\u672a\u663e\u793a' }
-    expect(present(listing(70), zh)[0]!.text).toBe('[c1]  70 \u884c')
-    expect(present(listing(70), { ...zh, lines: 3 }).at(-1)!.text).toBe('+67 \u884c\u672a\u663e\u793a')
+  test('reports the size in the words the caller supplied', () => {
+    const words: ResultBound = { lines: 0, unit: 'rows', more: 'rows hidden' }
+    expect(present(listing(70), words)[0]!.text).toBe('[c1]  70 rows')
+    expect(present(listing(70), { ...words, lines: 3 }).at(-1)!.text).toBe('+67 rows hidden')
   })
 })
 

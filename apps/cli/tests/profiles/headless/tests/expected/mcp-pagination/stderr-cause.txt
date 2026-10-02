@@ -1,1 +1,1 @@
-SdkError: tools/list: exceeded listMaxPages (64); server pagination did not terminate
+Error: MCP tools/list exceeded 1000 pages

@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-15-guided-plugin-installation.zh.md)
-
 ## Problem
 
 The install dialog put a spec straight into `pnpm add` and showed pnpm's terminal as the whole story: a typo, an installed package, a missing path, and a registry outage all ended in the same red exit code, the person read pnpm's output to learn which, and nothing could be stopped once started. A run that failed, or that added a package without a bundle patch, left the dependency in the profile with nothing in the list to show or remove it. Enabling was a checkbox to tick before knowing what would be installed, and a finished install left the new package somewhere in the list.

@@ -5,7 +5,8 @@
  * Bake dropped the features that wrote these records: the web session
  * controller (`model/selection` and browser-correlated `user` sources), Agent
  * Teams (`team/*` and `team-message` sources), workspace change summaries
- * (`workspace/changes`), and plan mode (`plan/mode`). Released formats v0 through v3 admit
+ * (`workspace/changes`), plan mode (`plan/mode`), and Session-log delivery to
+ * the DeepSeek API (`session-log-deepseek/delivery-accepted`). Released formats v0 through v3 admit
  * them, and a log that holds one must still open. The storage contract refuses
  * any unknown event type that is not marked ignorable, and the known set is
  * generated from these declarations, so removing one would refuse such a log
@@ -118,5 +119,14 @@ declare module '@deepseek-ai/dsh-session/types' {
     'workspace/changes': { turn: number }
     /** Whether plan mode was in force from this point on; the last record won. */
     'plan/mode': { active: boolean }
+    /** Records that the configured endpoint accepted one delivery through `throughSeq`. */
+    'session-log-deepseek/delivery-accepted': {
+      /** Session identity the accepted delivery carried; inherited fork markers retain the parent's id. */
+      sessionId: SessionId
+      /** Accepted Session format generation; absence identifies version 0. */
+      sessionFormatVersion?: number
+      /** Last canonical event included in the accepted request. */
+      throughSeq: SessionSeq
+    }
   }
 }

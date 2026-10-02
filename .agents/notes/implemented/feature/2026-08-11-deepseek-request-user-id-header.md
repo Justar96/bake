@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-08-11-deepseek-request-user-id-header.zh.md)
-
 ## Problem
 
 Direct DeepSeek requests already carried `x-deepseek-harness-session-id` when the caller supplied `GenerateOptions.sessionId`, which lets provider-side support and diagnostics correlate turns within one conversation. They lacked a stable identity across sessions even though the harness already persists an anonymous user id for telemetry and feedback. A separate id would break correlation, while putting it in the provider-neutral attribution helper would send a stable per-user identifier through every HTTP adapter.
@@ -11,6 +9,8 @@ Direct DeepSeek requests already carried `x-deepseek-harness-session-id` when th
 The user id is transport metadata, not model input. It must not enter the request body, prompt, token accounting, KV-cache identity, or session log. The destination is the adapter's resolved `baseURL`, which can be DeepSeek itself or a configured gateway, so the privacy boundary must be explicit.
 
 ## Decision
+
+The user-id header was removed with `dsh-llm-deepseek`. [`dsh-llm-pi-ai`](../../../../packages/llm/llm-pi-ai/README.md), whose `deepseek-official` route serves DeepSeek, sends no `x-deepseek-harness-user-id`, so DeepSeek requests carry no cross-session identity. It sends `x-deepseek-harness-session-id` on every route for each request that belongs to a session, as gateway credential affinity, and a profile header cannot override it. The rest of this section records the user-id header as it shipped.
 
 `dsh-llm-deepseek` sends `x-deepseek-harness-user-id` on every provider request sent after successful credential resolution. The value comes from `@deepseek-ai/dsh-anonymous-user-id` and therefore matches the OpenTelemetry Resource `user.id` and `/feedback` acknowledgement for the same `$DSH_HOME`. The adapter continues to send `x-deepseek-harness-session-id` only when `GenerateOptions.sessionId` is present; the agent loop supplies the current durable `Session.id` for ordinary agent, title-generation, and compaction requests.
 
@@ -38,7 +38,7 @@ Both headers are model-hidden HTTP metadata sent to the resolved `baseURL`. The 
 
 ## Consequences
 
-- DeepSeek support can correlate requests across sessions by one anonymous harness-home id and within a conversation by the durable session id.
-- The first authorized DeepSeek request may create `$DSH_HOME/.anonymous-user-id` independently of telemetry export.
-- Custom DeepSeek gateways receive the stable user id and any available session id, so operators must treat the configured `baseURL` as an identity recipient.
-- The identity headers do not alter the request body, prompt, token count, KV-cache identity, or session log; separately registered DeepSeek body extensions retain their own contracts.
+- DeepSeek support can correlate requests within a conversation by the durable session id; cross-session correlation by the anonymous harness-home id ended with the user-id header.
+- Provider requests do not create `$DSH_HOME/.anonymous-user-id`; while the user-id header shipped, the first authorized DeepSeek request could create it independently of telemetry export.
+- Custom gateways receive any available session id, so operators must treat the configured `baseURL` as an identity recipient.
+- The identity headers do not alter the request body, prompt, token count, KV-cache identity, or session log; the DeepSeek body extensions were removed with `dsh-llm-deepseek`.

@@ -533,7 +533,6 @@ Notes: pnpm 12 cannot run this repo's pinned `@pnpm/exe@11.7.0` on darwin-x64 â€
 2. **Alternate screen.** Full-screen app, or inline like Claude Code? Inline keeps native scrollback and
    pairs naturally with `<Static>`; full-screen enables panes. Recommend inline through M6.
 3. **Multi-session.** Current-workspace navigation uses `ctx.sessionQuery` and owned Agent handles; see [the supported flow](DESIGN.md#6b-session-navigation). Background session execution and cross-workspace navigation remain outside this flow.
-4. **Locale.** Client UI copy is locale-owned upstream (`verify-client-ui-i18n`). Do we route TUI strings
-   through typed dictionaries from the start, or English-only until M7?
+4. ~~**Locale.**~~ Settled: the TUI is English-only, and its strings live in `copy.ts`.
 5. **Terminal tools.** Does the TUI surface `terminal_*` tool output as a pane? `tool-terminal`'s README
    states its schema has no TUI surface, so this would be presentation-only.

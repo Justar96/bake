@@ -11,7 +11,7 @@ import { assertNever } from '@deepseek-ai/dsh-util-values'
 import type { ToolCallId } from './brand.ts'
 import { createMessage } from './message.ts'
 import type { Message, MessageSource } from './message.ts'
-import type { ContentBlock, FinishReason, ReplayEnvelope, StreamChunk, TokenUsage } from './types.ts'
+import type { ContentBlock, FinishReason, ReplayEnvelope, StreamChunk, TokenUsage, ToolCallBlock } from './types.ts'
 
 interface PartialBlock {
   blockType: string
@@ -129,20 +129,25 @@ export class BlockAssembler {
 
   /**
    * The one shared keep/drop decision over all seen blocks: max-token
-   * truncation drops tool calls that cannot be executed safely. Emitted blocks
-   * and replay metadata both derive from this result, so they cannot disagree.
+   * truncation drops tool calls that cannot be executed safely. Emitted blocks,
+   * dropped calls, and replay metadata all derive from this result, so they
+   * cannot disagree.
    */
-  private assembled(): { blocks: ContentBlock[]; replay: ReplayEnvelope | undefined } {
+  private assembled(): { blocks: ContentBlock[]; dropped: ToolCallBlock[]; replay: ReplayEnvelope | undefined } {
     const all = this.order.map(index => this.assemble(this.mustGet(index), index))
     const kept = this.finish.kind === 'max-tokens'
       ? all.map(block => block.type !== 'tool-call')
       : undefined
     const blocks = kept === undefined ? all : all.filter((_, position) => kept[position])
+    const dropped = kept === undefined
+      ? []
+      : all.filter((block, position): block is ToolCallBlock => !kept[position] && block.type === 'tool-call')
     const envelope = this._replayState
-    if (envelope?.blocks === undefined) return { blocks, replay: envelope }
-    if (envelope.blocks.length !== all.length) return { blocks, replay: undefined }
+    if (envelope?.blocks === undefined) return { blocks, dropped, replay: envelope }
+    if (envelope.blocks.length !== all.length) return { blocks, dropped, replay: undefined }
     return {
       blocks,
+      dropped,
       replay: kept === undefined || blocks.length === all.length
         ? envelope
         : { response: envelope.response, blocks: envelope.blocks.filter((_, position) => kept[position]) },
@@ -157,6 +162,17 @@ export class BlockAssembler {
    */
   blocks(): ContentBlock[] {
     return this.assembled().blocks
+  }
+
+  /**
+   * Tool calls that max-token truncation removed from {@link blocks}, so a
+   * caller can tell the model they did not run. Each keeps whatever streamed
+   * before the cut: a name that never arrived is empty, and the arguments may
+   * be incomplete JSON.
+   * @returns the dropped calls in stream order; empty unless the finish is `max-tokens`.
+   */
+  droppedToolCalls(): ToolCallBlock[] {
+    return this.assembled().dropped
   }
 
   /**

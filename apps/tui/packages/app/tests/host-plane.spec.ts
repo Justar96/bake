@@ -71,7 +71,7 @@ async function profile() {
   // and exporter, the title model call, the profile reload watcher, storage,
   // and the workspace.
   const overlay: PatchOptions[] = [
-    ...['tui-startup', 'tui-runner', 'llm-deepseek', 'llm-pi-ai', 'session-title-llm', 'session-telemetry-otel', 'hmr']
+    ...['tui-startup', 'tui-runner', 'llm-pi-ai', 'session-title-llm', 'session-telemetry-otel', 'hmr']
       .map(id => ({ id, disabled: true })),
     { id: 'agent-default-model', config: { provider: 'mock', model: 'model' } },
     { id: 'session-persistence-jsonl', config: { root: join(root, 'sessions'), compression: 'none' } },
@@ -155,10 +155,12 @@ it('keeps only the compaction rows and the preset services on the terminal host 
     if (row === undefined) throw new Error(`the composition has no ${id} row`)
     return row.disabled !== true
   }
+  // `workflow-ptc` and its Node runtime sit inside the `workflow-ptc-runtime`
+  // group, so the disabled group stands for both.
   for (const id of [
     'agent-instructions', 'tool-bash', 'tool-pwsh', 'tool-fs', 'tool-fs-search', 'skill-filesystem', 'tool-skill',
     'command-goal', 'tool-goal', 'tool-subagent-control', 'tool-subagent-list-agents', 'tool-subagent',
-    'tool-subagent-fork', 'workflow-ptc', 'tool-workflow', 'tool-todo', 'tool-web', 'tool-jobs',
+    'tool-subagent-fork', 'workflow-ptc-runtime', 'tool-workflow', 'tool-todo', 'tool-web', 'tool-jobs',
   ]) expect(active(id), id).toBe(false)
   // The registries and drivers behind those tools, `/compact` for `minimal`,
   // and the inspection registry the `cordis` preset's tools register into.

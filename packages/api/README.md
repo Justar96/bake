@@ -5,8 +5,6 @@ kind: "package-group"
 
 # api/ — Remote API layers
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 The `api/` group contains the Typert Gateway and settings controller. The Gateway carries typed calls and events between a Client and Host; the settings controller owns configuration reads and writes. Each package README describes its current contract.

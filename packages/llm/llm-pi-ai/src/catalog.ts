@@ -204,6 +204,27 @@ export function catalogModels(provider: string): Map<string, Model<Api>> {
   return new Map(models.map(model => [model.id, model]))
 }
 
+/** The catalog provider that publishes each model family under its own ids. */
+const FAMILY_PROVIDERS: readonly (readonly [RegExp, string])[] = [
+  [/^claude-/, 'anthropic'],
+  [/^(?:gpt-|o\d|codex-|chatgpt-)/, 'openai'],
+  [/^gemini-/, 'google'],
+  [/^grok-/, 'xai'],
+]
+
+/**
+ * The installed catalog entry its vendor publishes under one model id, for a
+ * relay that serves the model under that same id. Only an exact id in the
+ * family's own provider counts: an alias, a dated variant, or a relay suffix
+ * such as `:batch` is a different model as far as the catalog is concerned.
+ * @param id - the model id the relay serves.
+ * @returns the vendor's catalog entry, or `undefined` when none matches.
+ */
+export function vendorCatalogModel(id: string): Model<Api> | undefined {
+  const provider = FAMILY_PROVIDERS.find(([family]) => family.test(id))?.[1]
+  return provider === undefined ? undefined : catalogModels(provider).get(id)
+}
+
 /**
  * Selectable reasoning efforts for one model: each key is a level the model
  * offers (and selectors show), and its value is the wire spelling dispatch
@@ -636,7 +657,9 @@ export interface PiAiModelProfile {
   input?: PiAiModality[]
   /**
    * Selectable reasoning efforts. Absent inherits the installed catalog
-   * entry's capability (a hand-declared model has none and does not reason);
+   * entry's capability; a hand-declared model whose id its vendor publishes
+   * inherits the vendor's when it speaks the vendor's protocol, and otherwise
+   * does not reason;
    * `false` declares a non-reasoning model, which is how a profile strips
    * reasoning from a catalog model its gateway cannot serve; a non-empty dict
    * declares the offered levels and their wire spellings.
@@ -644,6 +667,37 @@ export interface PiAiModelProfile {
   reasoningEfforts?: false | PiAiReasoningEfforts
   /** pi-ai wire-compatibility switches for this model, winning over the route's per field; one its protocol does not declare is refused. */
   compat?: PiAiCompatProfile
+  /** One-line guidance selectors and model-listing tools show beside the name. */
+  description?: string
+  /**
+   * Declares that this endpoint reads the latest `system` message at any
+   * position as the complete effective system prompt, so a changed prompt
+   * follows the cached history instead of rewriting the leading one. Only
+   * `anthropic-messages` can carry it: later prompts travel as native
+   * mid-conversation system messages. This is a claim about the endpoint that
+   * nothing can interrogate, so it is never inferred from the protocol.
+   */
+  systemPromptUpdate?: 'in-history'
+  /**
+   * Declares that this endpoint accepts native mid-conversation tool changes:
+   * tools added later are declared deferred and surfaced by `tool_addition`
+   * blocks, and removed ones are withdrawn by `tool_removal` blocks, so the
+   * cached prefix survives a change of tools. Only `anthropic-messages`.
+   */
+  toolUpdate?: 'in-history'
+}
+
+/**
+ * Model facts the Harness seam reports that pi-ai's `Model` has no field for,
+ * keyed by model id beside the materialized catalog.
+ */
+export interface PiAiHarnessModelInfo {
+  /** Selector guidance. */
+  description?: string
+  /** Declared in-history system prompt handling. */
+  systemPromptUpdate?: 'in-history'
+  /** Declared native tool changes. */
+  toolUpdate?: 'in-history'
 }
 
 /**
@@ -834,6 +888,24 @@ function resolveModelCompat(
   return { compat: { ...inherited, ...configured } as ModelCompat }
 }
 
+/**
+ * Add the vendor's adaptive thinking to a hand-declared model's compat block,
+ * unless a profile layer already decided it. Only that switch is taken: the
+ * rest of the vendor's block describes the vendor's own endpoint, not a relay.
+ * @param resolved - the compat field the profile's switches resolved to.
+ * @param vendor - the vendor's catalog entry, when the model speaks its protocol.
+ * @returns the compat field to spread into the model.
+ */
+function withVendorAdaptiveThinking(
+  resolved: { compat: ModelCompat } | Record<string, never>,
+  vendor: Model<Api> | undefined,
+): { compat: ModelCompat } | Record<string, never> {
+  const adaptive = (vendor?.compat as { forceAdaptiveThinking?: unknown } | undefined)?.forceAdaptiveThinking === true
+  const current = 'compat' in resolved ? resolved.compat as { forceAdaptiveThinking?: unknown } : undefined
+  if (!adaptive || current?.forceAdaptiveThinking !== undefined) return resolved
+  return { compat: { ...current, forceAdaptiveThinking: true } as ModelCompat }
+}
+
 /** One route's materialized catalog, plus the request caps its profile chose. */
 export interface RouteCatalog {
   /** The materialized models in configuration order. */
@@ -851,6 +923,51 @@ export interface RouteCatalog {
    * picked, so only an explicit configuration lands here.
    */
   configuredMaxTokens: ReadonlyMap<string, number>
+  /** Harness-facing facts each configured entry declared, by model id; absent ids declared none. */
+  harnessInfo: ReadonlyMap<string, PiAiHarnessModelInfo>
+}
+
+/**
+ * Validate one entry's capability declarations and translate them into the
+ * pi-ai compat switches that make its protocol carry them in place.
+ * @param provider - provider route key, for diagnostics.
+ * @param entry - the configured model entry.
+ * @param api - the model's resolved wire protocol.
+ * @param base - the installed catalog entry of the same id, when one exists.
+ * @param resolved - the compat field the profile's switches resolved to.
+ * @returns the compat field to spread into the model.
+ */
+function withDeclaredTranscriptUpdates(
+  provider: string,
+  entry: PiAiModelProfile,
+  api: string,
+  base: Model<Api> | undefined,
+  resolved: { compat: ModelCompat } | Record<string, never>,
+): { compat: ModelCompat } | Record<string, never> {
+  // Widened: a settings update reaches this check without schema validation.
+  const systemPromptUpdate: unknown = entry.systemPromptUpdate
+  const toolUpdate: unknown = entry.toolUpdate
+  if (systemPromptUpdate !== undefined && systemPromptUpdate !== 'in-history') {
+    invalid(provider, `model "${entry.id}" systemPromptUpdate must be "in-history" when present`)
+  }
+  if (toolUpdate !== undefined && toolUpdate !== 'in-history') {
+    invalid(provider, `model "${entry.id}" toolUpdate must be "in-history" when present`)
+  }
+  if (systemPromptUpdate === undefined && toolUpdate === undefined) return resolved
+  if (api !== 'anthropic-messages') {
+    invalid(provider, `model "${entry.id}" declares ${systemPromptUpdate === undefined ? 'toolUpdate' : 'systemPromptUpdate'},`
+      + ` but its api is "${api}"; only anthropic-messages carries mid-conversation system messages`)
+  }
+  // An empty resolution leaves the installed entry's block to the model's
+  // `...base` spread, which a replacement block here would otherwise discard.
+  const current = 'compat' in resolved ? resolved.compat : base?.api === api ? base.compat : undefined
+  return {
+    compat: {
+      ...current,
+      supportsMidConvoSystemMessages: true,
+      ...toolUpdate === undefined ? {} : { supportsMidConvoToolChanges: true },
+    } as ModelCompat,
+  }
 }
 
 /**
@@ -916,6 +1033,7 @@ export function resolveRouteModels(
   assertOfferedCompatFields(provider, 'route', request.compat)
   const seen = new Set<string>()
   const configuredMaxTokens = new Map<string, number>()
+  const harnessInfo = new Map<string, PiAiHarnessModelInfo>()
   const resolveEntry = (entry: PiAiModelProfile): Model<Api> => {
     assertOfferedCompatFields(provider, `model "${entry.id}"`, entry.compat)
     if (entry.id.length === 0) invalid(provider, 'has a model with an empty id')
@@ -938,17 +1056,34 @@ export function resolveRouteModels(
     // discloses nothing but ids still yields a serviceable route. The fallback
     // is a guess by construction, which is why it is a configurable route field
     // rather than a constant buried here.
-    const contextWindow = entry.contextWindow ?? base?.contextWindow ?? request.defaultContextWindow
+    // A hand-declared route has no installed entry to default from; the
+    // vendor's entry for a model a relay serves under the vendor's own id
+    // sizes it instead. Its effort levels and adaptive thinking are spelled
+    // for the vendor's protocol, so they apply only over that protocol.
+    const vendor = defaults.size === 0 ? vendorCatalogModel(entry.id) : undefined
+    const vendorReasoning = vendor?.api === api ? vendor : undefined
+    const contextWindow = entry.contextWindow ?? base?.contextWindow ?? vendor?.contextWindow ?? request.defaultContextWindow
     if (!Number.isInteger(contextWindow) || contextWindow <= 0) {
       invalid(provider, `model "${entry.id}" contextWindow must be a positive integer`)
     }
-    const maxTokens = entry.maxTokens ?? base?.maxTokens ?? request.defaultMaxTokens
+    const maxTokens = entry.maxTokens ?? base?.maxTokens ?? vendor?.maxTokens ?? request.defaultMaxTokens
     if (!Number.isInteger(maxTokens) || maxTokens <= 0) {
       invalid(provider, `model "${entry.id}" maxTokens must be a positive integer`)
     }
+    if (entry.description !== undefined && entry.description.length === 0) {
+      invalid(provider, `model "${entry.id}" has an empty description`)
+    }
+    const compat = withDeclaredTranscriptUpdates(provider, entry, api, base,
+      withVendorAdaptiveThinking(resolveModelCompat(provider, entry, request.compat, base, api), vendorReasoning))
     // Only a value the profile named is a deployment choice; the catalog's is
     // the model's capability and stays out of request defaults.
     if (entry.maxTokens !== undefined) configuredMaxTokens.set(entry.id, entry.maxTokens)
+    const info: PiAiHarnessModelInfo = {
+      ...entry.description === undefined ? {} : { description: entry.description },
+      ...entry.systemPromptUpdate === undefined ? {} : { systemPromptUpdate: entry.systemPromptUpdate },
+      ...entry.toolUpdate === undefined ? {} : { toolUpdate: entry.toolUpdate },
+    }
+    if (Object.keys(info).length > 0) harnessInfo.set(entry.id, info)
     return {
       // The installed entry lays the floor, and the fields below override it.
       // Enumerating instead would silently drop every `Model` field this
@@ -961,12 +1096,17 @@ export function resolveRouteModels(
       api,
       provider,
       baseUrl,
-      input: declaredInput(entry.input) ?? base?.input ?? [...request.defaultInput],
+      input: declaredInput(entry.input) ?? base?.input ?? (vendor === undefined ? undefined : [...vendor.input])
+        ?? [...request.defaultInput],
       cost: base?.cost ?? NO_COST,
       contextWindow,
       maxTokens,
       ...resolveModelReasoning(provider, entry, base),
-      ...resolveModelCompat(provider, entry, request.compat, base, api),
+      ...entry.reasoningEfforts === undefined && vendorReasoning !== undefined ? {
+        reasoning: vendorReasoning.reasoning,
+        ...vendorReasoning.thinkingLevelMap === undefined ? {} : { thinkingLevelMap: { ...vendorReasoning.thinkingLevelMap } },
+      } : {},
+      ...compat,
     }
   }
   const models: Model<Api>[] = []
@@ -993,5 +1133,6 @@ export function resolveRouteModels(
     invalid(provider, `sets compat "${field}", but no model on the route speaks a protocol that takes it;`
       + ` it exists on ${takers.join(', ')}`)
   }
-  return { models: serviceableModels, configuredMaxTokens, modelErrors }
+  for (const id of harnessInfo.keys()) if (modelErrors.has(id)) harnessInfo.delete(id)
+  return { models: serviceableModels, configuredMaxTokens, modelErrors, harnessInfo }
 }

@@ -2,12 +2,9 @@
 
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { renderPersistencePair } from './persistence-artifacts.ts'
 import type { PersistenceArtifact } from './persistence-artifacts.ts'
 import type { PersistenceReleaseEntry, PersistenceReleases } from './persistence-releases.ts'
 import { canonicalizeSchema, schemaDigest } from './persistence-schema-model.ts'
-
-type Language = 'en' | 'zh'
 
 function count(value: number, noun: string): string {
   return `${value} ${noun}${value === 1 ? '' : 's'}`
@@ -23,32 +20,25 @@ function replaceFacts(source: string, name: string, content: string, path: strin
   return source.slice(0, opening + start.length) + content + source.slice(closing)
 }
 
-function structuralChanges(entry: PersistenceReleaseEntry, language: Language): string {
+function structuralChanges(entry: PersistenceReleaseEntry): string {
   if (entry.record.previous === null) {
-    return language === 'en'
-      ? 'This entry establishes the historical comparison starting point. Its declaration lists every extracted root; it makes no compatibility judgment about earlier versions.'
-      : '本条记录建立历史比较起点。机器声明列出所有提取的根类型，不对更早版本作兼容性判断。'
+    return 'This entry establishes the historical comparison starting point. Its declaration lists every extracted root; it makes no compatibility judgment about earlier versions.'
   }
   if (entry.differences.length === 0) {
-    return language === 'en'
-      ? 'Normalized root types and their transitive digests are unchanged from the preceding tag.'
-      : '规范化后的根类型及其传递引用摘要与前一 tag 相同。'
+    return 'Normalized root types and their transitive digests are unchanged from the preceding tag.'
   }
-  const summary = language === 'en'
-    ? `Detected ${count(entry.record.changes.length, 'changed root')} and ${count(entry.differences.length, 'structural difference')}. The minimum below is calculated using current rules for comparison only; it does not assert historical compliance, migration correctness, or runtime compatibility.`
-    : `检测到 ${entry.record.changes.length} 个根类型变化、${entry.differences.length} 项结构差异。下表的最低要求按当前规则计算，只用于比较；不表示旧版本曾遵守这些规则，也不证明迁移或运行时兼容性。`
-  const heading = language === 'en' ? '| Path | Change | Current minimum |' : '| 路径 | 变化 | 当前最低要求 |'
+  const summary = `Detected ${count(entry.record.changes.length, 'changed root')} and ${count(entry.differences.length, 'structural difference')}. The minimum below is calculated using current rules for comparison only; it does not assert historical compliance, migration correctness, or runtime compatibility.`
   const rows = entry.differences.map((change) => {
     const path = change.path.replaceAll('`', '\\`').replaceAll('|', '\\|')
     return `| \`${path}\` | \`${change.kind}\` | \`${change.requiresVersionBump ? 'version-bump' : 'same-version'}\` |`
   })
-  return [summary, '', heading, '|---|---|---|', ...rows].join('\n')
+  return [summary, '', '| Path | Change | Current minimum |', '|---|---|---|', ...rows].join('\n')
 }
 
-/** Compute paired factual updates without writing or changing machine declarations.
+/** Compute factual updates without writing or changing machine declarations.
  * @param root - checkout containing existing documents with bounded factual markers.
  * @param archive - fully validated release records and reconstructed roots.
- * @returns complete bilingual documents and sidecars, validated together before any caller writes.
+ * @returns complete documents, validated together before any caller writes.
  */
 export function persistenceReleaseFactArtifacts(root: string, archive: PersistenceReleases): PersistenceArtifact[] {
   const directory = 'docs/persistence-changes/releases'
@@ -66,30 +56,26 @@ export function persistenceReleaseFactArtifacts(root: string, archive: Persisten
     return types.size
   })
   const read = (name: string): string => readFileSync(join(root, directory, name), 'utf8')
-  const index = (language: Language): string => {
-    const heading = language === 'en'
-      ? '| Tag | Source date (UTC) | Session version | Roots / types | Changed roots |'
-      : '| Tag | 源码日期（UTC） | Session 版本 | 根 / 类型 | 变化根 |'
+  const index = (): string => {
     const rows = archive.entries.map((entry, index) => {
       const tag = entry.release.tag
       const date = new Date(entry.release.sourceDate).toISOString().slice(0, 10)
-      return `| [${tag}](${tag}${language === 'zh' ? '.zh' : ''}.md) | ${date} | ${entry.release.sessionFormatVersion} | ${entry.roots.size} / ${typeCounts[index]} | ${entry.record.changes.length} |`
+      return `| [${tag}](${tag}.md) | ${date} | ${entry.release.sessionFormatVersion} | ${entry.roots.size} / ${typeCounts[index]} | ${entry.record.changes.length} |`
     })
-    return '\n\n' + [heading, '|---|---|---|---|---|', ...rows].join('\n') + '\n\n'
+    return '\n\n' + ['| Tag | Source date (UTC) | Session version | Roots / types | Changed roots |', '|---|---|---|---|---|', ...rows].join('\n') + '\n\n'
   }
-  const artifacts = renderPersistencePair(root, `${directory}/README.md`,
-    replaceFacts(read('README.md'), 'index', index('en'), 'README.md'),
-    replaceFacts(read('README.zh.md'), 'index', index('zh'), 'README.zh.md'))
+  const artifacts: PersistenceArtifact[] = [{
+    path: `${directory}/README.md`,
+    content: replaceFacts(read('README.md'), 'index', index(), 'README.md'),
+  }]
   for (const [index, entry] of archive.entries.entries()) {
-    const document = (language: Language): string => {
-      const path = `${entry.release.tag}${language === 'zh' ? '.zh' : ''}.md`
-      const inventory = language === 'en'
-        ? `${count(entry.roots.size, 'root')} / ${count(typeCounts[index] as number, 'type')}`
-        : `${entry.roots.size} 个根类型 / ${typeCounts[index]} 种类型`
-      return replaceFacts(replaceFacts(read(path), 'inventory', inventory, path),
-        'changes', '\n\n' + structuralChanges(entry, language) + '\n\n', path)
-    }
-    artifacts.push(...renderPersistencePair(root, `${directory}/${entry.release.tag}.md`, document('en'), document('zh')))
+    const path = `${entry.release.tag}.md`
+    const inventory = `${count(entry.roots.size, 'root')} / ${count(typeCounts[index] as number, 'type')}`
+    artifacts.push({
+      path: `${directory}/${path}`,
+      content: replaceFacts(replaceFacts(read(path), 'inventory', inventory, path),
+        'changes', '\n\n' + structuralChanges(entry) + '\n\n', path),
+    })
   }
   return artifacts
 }

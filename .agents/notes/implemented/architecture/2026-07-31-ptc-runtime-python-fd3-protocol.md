@@ -4,8 +4,6 @@ Status: implemented
 
 The CPython PTC runtime lives at `packages/experimental/ptc-runtime-python` and publishes as `@deepseek-ai/dsh-experimental-ptc-runtime-python`; the [publication decision](../process/2026-09-12-publish-all-experimental-packages.md) preserves its experimental status.
 
-English | [中文](2026-07-31-ptc-runtime-python-fd3-protocol.zh.md)
-
 ## Problem
 
 `@deepseek-ai/dsh-experimental-ptc-runtime-python` owns the wire protocol intended for a CPython ptc-runtime provider. Such a provider runs each model program in a fresh `python3 -I` subprocess and bridges binding calls and completion values over the child's fd 3. The host cannot trust that channel: model code has full access to fd 3 and can forge any frame, so every inbound frame is hostile input that the host must validate and rebuild before reading. The protocol also has to carry lossless JSON without the depth limit `JSON.stringify` and `json.dumps` impose, because the seam's `PtcJsonValue` is depth-unbounded.

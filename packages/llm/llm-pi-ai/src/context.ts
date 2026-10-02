@@ -14,7 +14,14 @@ import type {
   ImageRequestTarget,
   RequestImageAttachment,
 } from '@deepseek-ai/dsh-attachment'
-import type { Context as PiContext, ImageContent, Message as PiMessage, TextContent, Tool as PiTool } from '@earendil-works/pi-ai'
+import type {
+  Context as PiContext,
+  ImageContent,
+  Message as PiMessage,
+  SystemMessage as PiSystemMessage,
+  TextContent,
+  Tool as PiTool,
+} from '@earendil-works/pi-ai'
 import { toPiAssistant } from './replay.ts'
 import { longEdgeDimensions, requestImageDimensions } from '@deepseek-ai/dsh-attachment'
 import { DEFAULT_REQUEST_IMAGE_MAX_BYTES, DEFAULT_REQUEST_IMAGE_PIXEL_BUDGET } from './config.ts'
@@ -122,14 +129,101 @@ async function prepareRequestImages(
   return versions
 }
 
-function toolsOf(options: GenerateOptions): PiTool[] | undefined {
-  return options.tools?.map(tool => ({
+/** Route-declared transcript handling the conversion honours; see `LlmResolvedModelInfo`. */
+export interface PiTranscriptUpdates {
+  /** The route reads a later `system` message as the complete effective system prompt. */
+  systemPromptUpdate?: 'in-history'
+}
+
+function piTool(tool: NonNullable<GenerateOptions['tools']>[number]): PiTool {
+  return {
     name: tool.name,
     description: tool.description,
     // ToolSchema.parameters is a JSON Schema object; pi-ai's TSchema
     // (TypeBox) is structurally JSON Schema, so it assigns directly.
     parameters: tool.parameters,
-  }))
+  }
+}
+
+/**
+ * The tools active from the first request: every declaration the seam did not
+ * defer. A deferred declaration becomes available only through the tool change
+ * that adds it, so the leading tool set must not include it.
+ */
+function initialToolsOf(options: GenerateOptions): PiTool[] | undefined {
+  return options.tools?.filter(tool => tool.deferLoading !== true).map(piTool)
+}
+
+/**
+ * Index the seam's tool changes as pi-ai system messages by the message they
+ * follow. Each addition carries its complete definition from `options.tools`,
+ * because pi-ai declares a later tool from the system message that adds it.
+ * pi-ai then decides the wire form: native `tool_addition` and `tool_removal`
+ * blocks where the model's compat accepts them, otherwise the folded current
+ * tool set, so a route that cannot carry the change still sends the right tools.
+ */
+function toolChangesOf(options: GenerateOptions): Map<string, PiSystemMessage[]> {
+  const definitions = new Map((options.tools ?? []).map(tool => [tool.name, tool]))
+  const changes = new Map<string, PiSystemMessage[]>()
+  for (const update of options.toolUpdates ?? []) {
+    const toolsAdded = update.additions.map((name) => {
+      const tool = definitions.get(name)
+      if (tool === undefined) {
+        throw new LlmError(`pi-ai tool update adds "${name}", which the request does not declare`, 'INVALID_REQUEST')
+      }
+      return piTool(tool)
+    })
+    const message: PiSystemMessage = {
+      role: 'system',
+      content: '',
+      ...toolsAdded.length === 0 ? {} : { toolsAdded },
+      ...update.removals.length === 0 ? {} : { toolsRemoved: update.removals.map(name => ({ name })) },
+      timestamp: 0,
+    }
+    changes.set(update.afterMessageId, [...changes.get(update.afterMessageId) ?? [], message])
+  }
+  return changes
+}
+
+/**
+ * Place the tool changes anchored on one converted harness message. pi-ai holds
+ * a later system message until the next assistant message, so a change after a
+ * user turn's tool results still lands before the reply it governs.
+ */
+function appendToolChanges(
+  message: Message,
+  changes: Map<string, PiSystemMessage[]>,
+  messages: PiMessage[],
+): void {
+  const anchored = changes.get(message.id)
+  if (anchored === undefined) return
+  if (message.role !== 'user') {
+    throw new LlmError(`pi-ai tool update follows a ${message.role} message; only a user turn can anchor one`, 'INVALID_REQUEST')
+  }
+  messages.push(...anchored)
+  changes.delete(message.id)
+}
+
+/** Refuse tool changes whose anchoring message is not in the request. */
+function assertToolChangesPlaced(changes: ReadonlyMap<string, PiSystemMessage[]>): void {
+  if (changes.size > 0) {
+    throw new LlmError('pi-ai tool update follows a message absent from the request', 'INVALID_REQUEST')
+  }
+}
+
+/**
+ * Convert one non-leading harness `system` message. A route reading the
+ * latest system message as the whole prompt receives it as a pi-ai system
+ * message in place; every other route folds it into a `user` message to
+ * preserve order, since its single system slot already holds the prompt.
+ */
+function laterSystemMessage(message: Message, transcript: PiTranscriptUpdates | undefined): PiMessage {
+  const text = flattenText(message)
+  if (transcript?.systemPromptUpdate !== 'in-history') return { role: 'user', content: text, timestamp: 0 }
+  // An empty snapshot would leave the previous prompt in force on the wire
+  // while the Session recorded an empty one.
+  if (text.length === 0) throw new LlmError('pi-ai cannot send an empty in-history system prompt', 'INVALID_REQUEST')
+  return { role: 'system', content: text, timestamp: 0 }
 }
 
 /** The request split into pi-ai's single `systemPrompt` slot and the history that converts to `messages`. */
@@ -143,21 +237,26 @@ interface SystemPromptSplit {
 /**
  * Select the pi-ai `systemPrompt` source shared by both conversion paths.
  * `options.system` wins when defined and every history message converts,
- * including a leading `system` message, which then folds into a `user`
- * message. Otherwise a leading `system` history message supplies the prompt
- * and leaves the converted history; empty leading text sends no prompt.
+ * including a leading `system` message. Otherwise a leading `system` history
+ * message supplies the prompt and leaves the converted history; empty leading
+ * text sends no prompt. On an in-history route the whole leading run of system
+ * messages supplies it, the last one winning, because each is a complete
+ * prompt and no conversation precedes them.
  */
-function splitSystemPrompt(options: GenerateOptions): SystemPromptSplit {
+function splitSystemPrompt(options: GenerateOptions, transcript: PiTranscriptUpdates | undefined): SystemPromptSplit {
   if (options.system !== undefined) return { systemPrompt: options.system, messages: options.messages }
-  const [first, ...rest] = options.messages
-  if (first?.role !== 'system') return { systemPrompt: undefined, messages: options.messages }
-  const text = flattenText(first)
-  return { systemPrompt: text.length > 0 ? text : undefined, messages: rest }
+  const leading = transcript?.systemPromptUpdate === 'in-history'
+    ? options.messages.findIndex(message => message.role !== 'system')
+    : options.messages[0]?.role === 'system' ? 1 : 0
+  const count = leading === -1 ? options.messages.length : leading
+  if (count === 0) return { systemPrompt: undefined, messages: options.messages }
+  const text = flattenText(options.messages[count - 1] as Message)
+  return { systemPrompt: text.length > 0 ? text : undefined, messages: options.messages.slice(count) }
 }
 
 /** Assemble the request-level pi-ai context envelope shared by both conversion paths. */
 function piContext(systemPrompt: string | undefined, options: GenerateOptions, messages: PiMessage[]): PiContext {
-  const tools = toolsOf(options)
+  const tools = initialToolsOf(options)
   return {
     ...systemPrompt !== undefined ? { systemPrompt } : {},
     messages,
@@ -178,9 +277,14 @@ function appendAssistant(
   messages.push(assistant)
 }
 
-function textOnlyContext(options: GenerateOptions, onReplayDegrade?: (reason: string) => void): PiContext {
+function textOnlyContext(
+  options: GenerateOptions,
+  onReplayDegrade?: (reason: string) => void,
+  transcript?: PiTranscriptUpdates,
+): PiContext {
   assertSupportedImageRoles(options.messages)
-  const split = splitSystemPrompt(options)
+  const split = splitSystemPrompt(options, transcript)
+  const changes = toolChangesOf(options)
   const toolNames = new Map<ToolCallId, string>()
   const messages: PiMessage[] = []
   for (const message of split.messages) {
@@ -188,13 +292,13 @@ function textOnlyContext(options: GenerateOptions, onReplayDegrade?: (reason: st
       throw new LlmError('pi-ai image conversion requires the durable attachment service', 'UNSUPPORTED_CONTENT')
     }
     if (message.role === 'system') {
-      // pi-ai has a single systemPrompt slot; a system message that did not
-      // supply it folds into a user message to preserve order.
-      messages.push({ role: 'user', content: flattenText(message), timestamp: 0 })
+      messages.push(laterSystemMessage(message, transcript))
+      appendToolChanges(message, changes, messages)
       continue
     }
     if (message.role === 'assistant') {
       appendAssistant(message, messages, toolNames, onReplayDegrade)
+      appendToolChanges(message, changes, messages)
       continue
     }
     const text = flattenText(message)
@@ -213,7 +317,9 @@ function textOnlyContext(options: GenerateOptions, onReplayDegrade?: (reason: st
         timestamp: 0,
       })
     }
+    appendToolChanges(message, changes, messages)
   }
+  assertToolChangesPlaced(changes)
   return piContext(split.systemPrompt, options, messages)
 }
 
@@ -268,13 +374,16 @@ export function requestImageTarget(
  * @param options - the harness request; `options.system`, else a leading `system` message, maps to pi-ai's single `systemPrompt` slot.
  * @param images - absent; selects the synchronous conversion.
  * @param onReplayDegrade - forwarded to {@link toPiAssistant} for each assistant message.
+ * @param transcript - the dispatching route's declared transcript handling.
  * @returns the pi-ai context; `tools` is omitted when the request declares none.
  * @throws {LlmError} `UNSUPPORTED_CONTENT` for images in any history role, including a leading system message.
+ * @throws {LlmError} `INVALID_REQUEST` for a tool update without its anchoring user message or added definition.
  */
 export function toPiContext(
   options: GenerateOptions,
   images?: undefined,
   onReplayDegrade?: (reason: string) => void,
+  transcript?: PiTranscriptUpdates,
 ): PiContext
 /**
  * Convert harness history to a pi-ai Context while resolving durable images.
@@ -286,27 +395,31 @@ export function toPiContext(
  * @param options - the harness request; `options.system`, else a leading `system` message, maps to pi-ai's single `systemPrompt` slot.
  * @param images - attachment provider, current path resolver, and request limits.
  * @param onReplayDegrade - forwarded to {@link toPiAssistant} for each assistant message.
+ * @param transcript - the dispatching route's declared transcript handling.
  * @returns the asynchronously resolved pi-ai context.
  */
 export function toPiContext(
   options: GenerateOptions,
   images: PiImageRequestContext,
   onReplayDegrade?: (reason: string) => void,
+  transcript?: PiTranscriptUpdates,
 ): Promise<PiContext>
 export function toPiContext(
   options: GenerateOptions,
   images?: PiImageRequestContext,
   onReplayDegrade?: (reason: string) => void,
+  transcript?: PiTranscriptUpdates,
 ): PiContext | Promise<PiContext> {
   return images === undefined
-    ? textOnlyContext(options, onReplayDegrade)
-    : toPiContextWithImages(options, images, onReplayDegrade)
+    ? textOnlyContext(options, onReplayDegrade, transcript)
+    : toPiContextWithImages(options, images, onReplayDegrade, transcript)
 }
 
 async function toPiContextWithImages(
   options: GenerateOptions,
   images: PiImageRequestContext,
   onReplayDegrade?: (reason: string) => void,
+  transcript?: PiTranscriptUpdates,
 ): Promise<PiContext> {
   const { attachments, resolveImageAccess, maxRequestImageBytes } = images
   const requestImagePolicy = images.requestImagePolicy ?? {
@@ -314,7 +427,8 @@ async function toPiContextWithImages(
     maxBytes: DEFAULT_REQUEST_IMAGE_MAX_BYTES,
   }
   assertSupportedImageRoles(options.messages)
-  const split = splitSystemPrompt(options)
+  const split = splitSystemPrompt(options, transcript)
+  const changes = toolChangesOf(options)
   const requestImages = await prepareRequestImages(split.messages, attachments, requestImagePolicy, options.signal)
   if (maxRequestImageBytes !== undefined) {
     const offloadImages = requiredImageOffload(
@@ -339,13 +453,13 @@ async function toPiContextWithImages(
 
   for (const message of exactMessages) {
     if (message.role === 'system') {
-      // pi-ai has a single systemPrompt slot; a system message that did not
-      // supply it folds into a user message to preserve order.
-      messages.push({ role: 'user', content: flattenText(message), timestamp: 0 })
+      messages.push(laterSystemMessage(message, transcript))
+      appendToolChanges(message, changes, messages)
       continue
     }
     if (message.role === 'assistant') {
       appendAssistant(message, messages, toolNames, onReplayDegrade)
+      appendToolChanges(message, changes, messages)
       continue
     }
     // user role: text + tool results (each result becomes its own message).
@@ -370,7 +484,9 @@ async function toPiContextWithImages(
         timestamp: 0,
       })
     }
+    appendToolChanges(message, changes, messages)
   }
 
+  assertToolChangesPlaced(changes)
   return piContext(split.systemPrompt, options, messages)
 }

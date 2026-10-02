@@ -1,6 +1,6 @@
 /**
  * Tests for the mcp-client plugin's `apply` lifecycle entry point.
- * Isolated file so vi.mock of the MCP SDK doesn't pollute other test suites.
+ * Isolated file so vi.mock of pi-mcp doesn't pollute other test suites.
  */
 import assert from 'node:assert/strict'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
@@ -10,44 +10,65 @@ import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { createScope } from '@deepseek-ai/dsh-scope'
 import type { Config } from '@deepseek-ai/dsh-mcp-client'
 
-// ---- Mock MCP SDK ----
+// ---- Mock pi-mcp ----
 
 // vi.mock factories are hoisted above every import/const, so the mock fns and
-// class must be created inside vi.hoisted to exist when the factories run.
-const { mockConnect, mockClose, mockListTools, mockCallTool, mockSetNotificationHandler, MockClient } = vi.hoisted(() => {
-  const mockConnect = vi.fn<() => Promise<void>>()
-  const mockClose = vi.fn<() => Promise<void>>()
-  const mockListTools = vi.fn<(_params?: Record<string, unknown>) => Promise<unknown>>()
+// classes must be created inside vi.hoisted to exist when the factories run.
+const { mockConnect, mockClose, mockListTools, mockCallTool, mockOnNotification, MockClient, FakeTransport } = vi.hoisted(() => {
+  /** Transport double that emits its close signal once, as pi-mcp transports do. */
+  class FakeTransport {
+    private readonly closeListeners = new Set<() => void>()
+    private closeEmitted = false
+    onClose(listener: () => void): () => void {
+      this.closeListeners.add(listener)
+      return () => void this.closeListeners.delete(listener)
+    }
+    emitClose(): void {
+      if (this.closeEmitted) return
+      this.closeEmitted = true
+      for (const listener of [...this.closeListeners]) listener()
+    }
+    close(): Promise<void> {
+      this.emitClose()
+      return Promise.resolve()
+    }
+  }
+  const mockConnect = vi.fn<(this: MockClient, transport: FakeTransport) => Promise<void>>()
+  const mockClose = vi.fn<(this: MockClient) => Promise<void>>()
+  const mockListTools = vi.fn<(_options?: unknown) => Promise<unknown>>()
   const mockCallTool = vi.fn<(
-    _params?: Record<string, unknown>, _options?: unknown,
+    _name: string, _args?: Record<string, unknown>, _options?: unknown,
   ) => Promise<unknown>>()
-  const mockSetNotificationHandler = vi.fn()
+  const mockOnNotification = vi.fn<(method: string, listener: () => void) => void>()
   class MockClient {
-    transport = {}
-    connect = mockConnect
-    close = mockClose
+    transport: FakeTransport | undefined
+    serverCapabilities = { tools: { listChanged: true } }
     listTools = mockListTools
     callTool = mockCallTool
-    constructor(_info: unknown, options: { listChanged: { tools: { onChanged: () => void } } }) {
-      mockSetNotificationHandler('notifications/tools/list_changed', options.listChanged.tools.onChanged)
+    get instructions(): string | undefined { return undefined }
+    connect(transport: FakeTransport): Promise<void> {
+      this.transport = transport
+      return mockConnect.call(this, transport)
     }
-    getServerCapabilities = () => ({ tools: {} })
-    getInstructions(): string | undefined { return undefined }
+    close(): Promise<void> {
+      return mockClose.call(this)
+    }
+    onNotification(method: string, listener: () => void): () => void {
+      mockOnNotification(method, listener)
+      return () => {}
+    }
   }
-  return { mockConnect, mockClose, mockListTools, mockCallTool, mockSetNotificationHandler, MockClient }
+  return { mockConnect, mockClose, mockListTools, mockCallTool, mockOnNotification, MockClient, FakeTransport }
 })
 
-vi.mock('@modelcontextprotocol/client', () => ({
-  Client: MockClient,
-  StreamableHTTPClientTransport: vi.fn(),
-}))
-
-vi.mock('@modelcontextprotocol/client/stdio', () => ({
-  StdioClientTransport: vi.fn(),
+vi.mock('@earendil-works/pi-mcp', () => ({
+  McpClient: MockClient,
+  StdioTransport: FakeTransport,
+  StreamableHttpTransport: FakeTransport,
 }))
 
 // vi.mock is hoisted above static imports, so the module under test sees the
-// mocked SDK even through a static import.
+// mocked client even through a static import.
 import { apply, name, inject, Config as ConfigSchema } from '@deepseek-ai/dsh-mcp-client/src/index.ts'
 
 // ---- Helpers ----
@@ -153,21 +174,17 @@ describe('apply (plugin lifecycle)', () => {
   beforeEach(async () => {
     vi.clearAllMocks()
     mockConnect.mockResolvedValue(undefined)
-    mockClose.mockImplementation(function (this: { onclose?: () => void }) {
-      this.onclose?.()
-      return Promise.resolve()
+    mockClose.mockImplementation(function (this: InstanceType<typeof MockClient>) {
+      return this.transport?.close() ?? Promise.resolve()
     })
-    mockListTools.mockResolvedValue({
-      tools: [{ name: 'remote', description: 'A remote tool', inputSchema: { type: 'object' } }],
-      nextCursor: undefined,
-    })
+    mockListTools.mockResolvedValue([{ name: 'remote', description: 'A remote tool', inputSchema: { type: 'object' } }])
     mockCallTool.mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] })
     ctx = await mountRegistry()
   })
 
   it.each([undefined, '', ' \n\t'])(
     'connects without attributed prompt text when server instructions are absent or blank (%j)', async (instructions) => {
-      const spy = vi.spyOn(MockClient.prototype, 'getInstructions').mockReturnValue(instructions)
+      const spy = vi.spyOn(MockClient.prototype, 'instructions', 'get').mockReturnValue(instructions)
       try {
         await apply(ctx, {
           ...stdioConfig, failOnStartupError: true, reconnect: { enabled: false }, maxInstructionBytes: 1,
@@ -186,7 +203,7 @@ describe('apply (plugin lifecycle)', () => {
 
     expect(mockConnect).toHaveBeenCalled()
     expect(mockListTools).toHaveBeenCalled()
-    expect(mockSetNotificationHandler).toHaveBeenCalled()
+    expect(mockOnNotification).toHaveBeenCalledWith('notifications/tools/list_changed', expect.any(Function))
     expect(ctx.tools.get('mcp__srv__remote')).toBeDefined()
     expect(ctx.tools.get('remote')).toBeUndefined()
   })
@@ -221,10 +238,9 @@ describe('apply (plugin lifecycle)', () => {
   it('closes the transport when its owner unloads during initial connection', async () => {
     const connecting: PromiseWithResolvers<void> = Promise.withResolvers()
     mockConnect.mockImplementation(() => connecting.promise)
-    mockClose.mockImplementation(function (this: { onclose?: () => void }) {
-      this.onclose?.()
+    mockClose.mockImplementation(function (this: InstanceType<typeof MockClient>) {
       connecting.resolve()
-      return Promise.resolve()
+      return this.transport?.close() ?? Promise.resolve()
     })
     const fiber = ctx.plugin({ name: 'mcp-pending-startup', inject, apply }, { ...stdioConfig, reconnect: { enabled: false } })
     const activation = Promise.resolve(fiber).catch((error: unknown) => error)
@@ -347,7 +363,7 @@ describe('apply (plugin lifecycle)', () => {
       execute: async () => 'foreign',
     })
     mockConnect.mockImplementation(async () => {
-      const handler = mockSetNotificationHandler.mock.calls[0]![1] as () => void
+      const handler = mockOnNotification.mock.calls[0]![1]
       handler()
     })
 
@@ -366,15 +382,33 @@ describe('apply (plugin lifecycle)', () => {
 
     expect(ctx.tools.get('mcp__srv__remote')).toBeDefined()
 
-    mockListTools.mockResolvedValue({
-      tools: [{ name: 'updated', inputSchema: { type: 'object' } }],
-      nextCursor: undefined,
-    })
+    mockListTools.mockResolvedValue([{ name: 'updated', inputSchema: { type: 'object' } }])
 
-    const handler = mockSetNotificationHandler.mock.calls[0]![1] as () => void
+    const handler = mockOnNotification.mock.calls[0]![1]
     handler()
 
     await vi.waitFor(() => { expect(ctx.tools.get('mcp__srv__updated')).toBeDefined() })
+  })
+
+  it('ignores tool-list notifications from a server that does not advertise them', async () => {
+    const spy = vi.spyOn(MockClient.prototype, 'connect').mockImplementation(async function (
+      this: InstanceType<typeof MockClient>,
+      transport,
+    ) {
+      this.transport = transport
+      this.serverCapabilities = { tools: {} } as typeof this.serverCapabilities
+    })
+    try {
+      await apply(ctx, stdioConfig)
+      expect(mockListTools).toHaveBeenCalledTimes(1)
+
+      const handler = mockOnNotification.mock.calls[0]![1]
+      handler()
+      await sleep(10)
+      expect(mockListTools).toHaveBeenCalledTimes(1)
+    } finally {
+      spy.mockRestore()
+    }
   })
 
   it('keeps the previous generation when a re-sync fails', async () => {
@@ -383,7 +417,7 @@ describe('apply (plugin lifecycle)', () => {
 
     const reported = vi.spyOn(ctx.logger, 'error')
     mockListTools.mockRejectedValue(new Error('flaky server'))
-    const handler = mockSetNotificationHandler.mock.calls[0]![1] as () => void
+    const handler = mockOnNotification.mock.calls[0]![1]
     handler()
     await vi.waitFor(() => { expect(reported).toHaveBeenCalledWith(expect.stringContaining('flaky server')) })
 
@@ -397,11 +431,8 @@ describe('apply (plugin lifecycle)', () => {
     await fiber
 
     // Advance to a second generation first.
-    mockListTools.mockResolvedValue({
-      tools: [{ name: 'updated', inputSchema: { type: 'object' } }],
-      nextCursor: undefined,
-    })
-    const handler = mockSetNotificationHandler.mock.calls[0]![1] as () => void
+    mockListTools.mockResolvedValue([{ name: 'updated', inputSchema: { type: 'object' } }])
+    const handler = mockOnNotification.mock.calls[0]![1]
     handler()
     await vi.waitFor(() => { expect(ctx.tools.get('mcp__srv__updated')).toBeDefined() })
 
@@ -414,8 +445,8 @@ describe('apply (plugin lifecycle)', () => {
   })
 
   it('effect disposer handles client.close failure gracefully', async () => {
-    mockClose.mockImplementation(function (this: { onclose?: () => void }) {
-      this.onclose?.()
+    mockClose.mockImplementation(function (this: InstanceType<typeof MockClient>) {
+      this.transport?.emitClose()
       return Promise.reject(new Error('already closed'))
     })
 
@@ -450,7 +481,7 @@ describe('server instruction limits', () => {
   it('counts the complete attributed UTF-8 text before publishing tools', async () => {
     const ctx = await mountRegistry()
     const text = '服务器指南'
-    const spy = vi.spyOn(MockClient.prototype, 'getInstructions').mockReturnValue(text)
+    const spy = vi.spyOn(MockClient.prototype, 'instructions', 'get').mockReturnValue(text)
     const exactBytes = Buffer.byteLength(`### MCP server: srv\n\n${text}`)
     try {
       const failure: unknown = await apply(ctx, {
@@ -466,7 +497,7 @@ describe('server instruction limits', () => {
       await ctx.fiber.dispose()
     }
     const valid = await mountRegistry()
-    const validSpy = vi.spyOn(MockClient.prototype, 'getInstructions').mockReturnValue(text)
+    const validSpy = vi.spyOn(MockClient.prototype, 'instructions', 'get').mockReturnValue(text)
     try {
       await apply(valid, {
         ...stdioConfig, failOnStartupError: true, reconnect: { enabled: false },

@@ -420,6 +420,8 @@ export function apply(ctx: Context, config: Config = {}): void {
         const result = await ctx.shell.run(ctx.shell.resolve({
           ...request,
           signal: exec.signal,
+          // Display-only: the runtime shows the tail under the running call.
+          onOutput: (tail) => { exec.reportProgress({ output: tail }) },
         }))
         if (result.aborted) {
           const error = new HarnessError('tool call aborted', TOOL_ABORTED)

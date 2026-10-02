@@ -1,13 +1,13 @@
 ---
 name: Task
-about: 明确的非 Feature、非 Bug 工作
+about: Well-defined work that is neither a feature nor a bug
 type: Task
 ---
 
 ## Summary
 
-<!-- 简要说明需要完成的工作。 -->
+<!-- Briefly describe the work to be done. -->
 
 ## Deliverables
 
-<!-- 列出需要提交或更新的代码、文档、配置或结论。 -->
+<!-- List the code, documentation, configuration, or conclusions to deliver or update. -->

@@ -33,8 +33,7 @@ function jsonResult(source: string): { ok: boolean; files: readonly string[] } {
 }
 
 const AUTHORED_PROSE = {
-  en: { summary: 'Adds optional metadata.', compatibility: 'Readers may omit the metadata.', verification: 'The focused tests passed.' },
-  zh: { summary: '添加可选元数据。', compatibility: '读取方可省略元数据。', verification: '定向测试通过。' },
+  summary: 'Adds optional metadata.', compatibility: 'Readers may omit the metadata.', verification: 'The focused tests passed.',
 }
 
 function proseFile(root: string): string {
@@ -164,11 +163,9 @@ function onlyEvent(schema: PersistenceSchemaInventory): PersistenceSchemaInvento
 }
 
 function finishDocuments(root: string, id: string): void {
-  for (const suffix of ['.md', '.zh.md']) {
-    const path = join(root, 'docs/persistence-changes', id + suffix)
-    writeFileSync(path, readFileSync(path, 'utf8').replaceAll('TODO: explain this change.', 'Optional payload metadata preserves the recorded value.')
-      .replaceAll('TODO: record validation evidence.', 'The focused persistence-history tests passed.'))
-  }
+  const path = join(root, 'docs/persistence-changes', id + '.md')
+  writeFileSync(path, readFileSync(path, 'utf8').replaceAll('TODO: explain this change.', 'Optional payload metadata preserves the recorded value.')
+    .replaceAll('TODO: record validation evidence.', 'The focused persistence-history tests passed.'))
 }
 
 function commitCurrent(root: string, schema: PersistenceSchemaInventory): void {
@@ -398,14 +395,9 @@ describe('persistence changes current-tree commands', () => {
     expect(() => runPersistenceChanges(['--record', '2026-09-11-empty', '--decision', 'same-version'], root, () => after)).toThrow('no persistence type changes')
   })
 
-  it('rejects changed bilingual machine declarations and unreferenced snapshots', () => {
+  it('rejects unreferenced snapshots', () => {
     const root = fixture()
     baseline(root)
-    const chinese = join(root, 'docs/persistence-changes', `${BASE_ID}.zh.md`)
-    const original = readFileSync(chinese, 'utf8')
-    writeFileSync(chinese, original.replace('baseline: true', 'baseline: false'))
-    expect(() => loadPersistenceHistory(root)).toThrow('bilingual machine records differ')
-    writeFileSync(chinese, original)
     writeFileSync(join(root, 'docs/persistence-changes/2026-09-11-orphan.schema.json'), '{}\n')
     expect(() => loadPersistenceHistory(root)).toThrow('unreferenced')
   })
@@ -477,12 +469,11 @@ describe('persistence changes current-tree commands', () => {
     const written = jsonResult(runPersistenceChanges(['--record', NEXT_ID, '--decision', 'same-version', '--prose', proseFile(root), '--json'], root, () => after))
     expect(written).toMatchObject({ ok: true, operation: 'record', recordId: NEXT_ID })
     expect(written.files).toEqual([
-      'docs/persistence-schema.json', `docs/persistence-changes/${NEXT_ID}.md`, `docs/persistence-changes/${NEXT_ID}.zh.md`,
-      `docs/persistence-changes/${NEXT_ID}.i18n.yaml`, `docs/persistence-changes/${NEXT_ID}.schema.json`,
+      'docs/persistence-schema.json', `docs/persistence-changes/${NEXT_ID}.md`, `docs/persistence-changes/${NEXT_ID}.schema.json`,
     ])
     expect(written).toMatchObject({ roots: [{ root: 'event:example/value', kind: 'event',
       before: inventory().roots[2]?.digest, after: after.roots[2]?.digest }] })
-    expect(readFileSync(join(root, `docs/persistence-changes/${NEXT_ID}.md`), 'utf8')).toContain(AUTHORED_PROSE.en.compatibility)
+    expect(readFileSync(join(root, `docs/persistence-changes/${NEXT_ID}.md`), 'utf8')).toContain(AUTHORED_PROSE.compatibility)
     expect(jsonResult(runPersistenceChanges(['--check', '--json'], root, () => after)).ok).toBe(true)
   })
 
@@ -516,10 +507,10 @@ describe('persistence changes current-tree commands', () => {
     runPersistenceChanges(['--update', NEXT_ID, '--decision', 'same-version', '--prose', prose], root, () => after)
     expect(runPersistenceChanges(['--check'], root, () => after)).toContain('roots match')
     expect(readFileSync(join(root, `docs/persistence-changes/${NEXT_ID}.md`), 'utf8')).not.toContain('TODO:')
-    const pairedPaths = ['.md', '.zh.md', '.i18n.yaml'].map(suffix => join(root, `docs/persistence-changes/${NEXT_ID}${suffix}`))
-    const completed = pairedPaths.map(path => readFileSync(path, 'utf8'))
+    const recordPath = join(root, `docs/persistence-changes/${NEXT_ID}.md`)
+    const completed = readFileSync(recordPath, 'utf8')
     runPersistenceChanges(['--update', NEXT_ID, '--decision', 'same-version', '--prose', prose], root, () => after)
-    expect(pairedPaths.map(path => readFileSync(path, 'utf8'))).toEqual(completed)
+    expect(readFileSync(recordPath, 'utf8')).toEqual(completed)
     const path = join(root, `docs/persistence-changes/${NEXT_ID}.md`)
     const before = readFileSync(path, 'utf8')
     const invalid = inventory({ value: 'number' })
@@ -528,9 +519,8 @@ describe('persistence changes current-tree commands', () => {
     expect(readFileSync(path, 'utf8')).toBe(before)
     for (const value of [
       { ...AUTHORED_PROSE, extra: 'unsupported' },
-      { ...AUTHORED_PROSE, en: { ...AUTHORED_PROSE.en, compatibility: '   ' } },
-      { ...AUTHORED_PROSE, zh: { ...AUTHORED_PROSE.zh, verification: 'TODO: record validation evidence.' } },
-      { ...AUTHORED_PROSE, zh: { ...AUTHORED_PROSE.zh, verification: '```text\nUnpaired code.\n```' } },
+      { ...AUTHORED_PROSE, compatibility: '   ' },
+      { ...AUTHORED_PROSE, verification: 'TODO: record validation evidence.' },
     ]) {
       writeFileSync(prose, JSON.stringify(value))
       expect(() => runPersistenceChanges(['--update', NEXT_ID, '--decision', 'same-version', '--prose', prose], root, () => after)).toThrow()

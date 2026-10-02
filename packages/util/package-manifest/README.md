@@ -5,8 +5,6 @@ kind: "package-library"
 
 # @deepseek-ai/dsh-package-manifest
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 Use `DshPackageManifest` for package metadata, `DshManifest` for the public fields under `dsh`, and member types such as `DshClientManifest` for one domain. Each reader owns JSON parsing, validation, and default resolution.

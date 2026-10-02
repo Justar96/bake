@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-12-publish-all-experimental-packages.zh.md)
-
 ## Problem
 
 Users need npm access to Auto review, the Inspector, the CPython PTC backend, and browser-worker libraries without promoting their experimental APIs. Source-checkout tests alone do not establish that their tarballs contain the runtime files and imports needed by installed consumers.

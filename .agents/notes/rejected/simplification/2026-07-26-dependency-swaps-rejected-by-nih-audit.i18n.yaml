@@ -1,6 +1,0 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
-#   pnpm run verify-translation-pairing --write .agents/notes/rejected/simplification/2026-07-26-dependency-swaps-rejected-by-nih-audit.md
-2026-07-26-dependency-swaps-rejected-by-nih-audit.md: 7aa46756ad85e0348bfc30ee00fd87df2db10c9f
-2026-07-26-dependency-swaps-rejected-by-nih-audit.zh.md: 4f6a4baa20fa64df1df17ab35f6fd54d345c94ea

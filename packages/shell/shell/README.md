@@ -5,8 +5,6 @@ kind: "package-reference"
 
 # @deepseek-ai/dsh-shell
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 Use `ctx.shell` to run foreground shell commands with bounded output or prepare background processes asynchronously before receiving their handles. A profile can select local or sandboxed Bash or PowerShell execution without changing callers. Resolve each request before execution to make the working directory, timeout, and output limits explicit. Command completion, nonzero exits, timeouts, and caller aborts return results; only infrastructure failures reject, while the `bash` and `pwsh` tools own model-visible rendering and sandbox guidance.
@@ -29,7 +27,7 @@ Use `ctx.shell` when an agent or an in-process plugin needs to run a shell comma
 
 ### Foreground commands
 
-Call `run` with a resolved spec to execute a command in the foreground. The promise resolves when the command finishes: a nonzero exit, an executor timeout kill, or a caller abort kill is a result, never a rejection. `run` rejects only for infrastructure failures such as an unusable working directory or a missing shell. The result carries the exit code or signal, whether a timeout or an abort cut the run short, and the collected stdout/stderr with spill-file paths when a stream overflowed its budget.
+Call `run` with a resolved spec to execute a command in the foreground. The promise resolves when the command finishes: a nonzero exit, an executor timeout kill, or a caller abort kill is a result, never a rejection. `run` rejects only for infrastructure failures such as an unusable working directory or a missing shell. The result carries the exit code or signal, whether a timeout or an abort cut the run short, and the collected stdout/stderr with spill-file paths when a stream overflowed its budget. A spec may also carry `onOutput(tail)`: while the command runs, the local executors poll the collected output through `watchOutput` and pass its newest `LIVE_OUTPUT_MAX_CHARS` characters every `LIVE_OUTPUT_POLL_MS`. Polling stops before `run` resolves, so the callback never fires after the result exists, and a throwing callback does not affect the run.
 
 ```text
 const result = await ctx.shell.run(ctx.shell.resolve({ command: 'ls -la' }))

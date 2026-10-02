@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-10-component-factories-and-local-slots.zh.md)
-
 ## Problem
 
 The browser Slot system starts with a parent-owned extension position. A parent entry declares a child through `children`, and unrelated plugins may then register implementations into that position. The declaration fixes the child Slot's kind, scope, render authority, and lifetime.

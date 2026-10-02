@@ -5,8 +5,6 @@ kind: "package-reference"
 
 # @deepseek-ai/dsh-session-checkpoint-policy
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 Use this package with a session persistence backend to make work durable before a model request, before a top-level tool can cause external effects, and before the next agent step begins. After each checkpoint, work can resume after a crash from stored requests, tool calls, responses, and results without loss. Checkpoint failures are fail-closed: a model adapter or top-level tool body does not run until the durable write succeeds. The package has no configuration and adds no prompt or tool schema; unfinished Assistant streams remain transient, and interrupted tool calls recover with an unknown outcome instead of an automatic retry.

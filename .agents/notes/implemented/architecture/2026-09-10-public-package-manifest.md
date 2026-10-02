@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-10-public-package-manifest.zh.md)
-
 ## Problem
 
 Plugin authors need npm identity, runtime requirements, and DSH declarations from one public import. Internal image-packaging, Session catalog, and generated proxy metadata do not define extension points for community plugins. Exposing those fields together makes internal mechanisms appear available to external authors.

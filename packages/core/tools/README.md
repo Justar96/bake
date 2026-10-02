@@ -5,8 +5,6 @@ kind: "package-reference"
 
 # @deepseek-ai/dsh-tools
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 Use `dsh-tools` to expose typed capabilities to models, validate calls, enforce allow/deny/ask policy, and return finalized results without ending a turn on ordinary tool failures. Choose native Function Calling, [PTC mode](#ptc-mode), or both with `mode`; an agent can override the default through `presentAs`. Tool authors use `defineTool` to declare typed parameters and outputs, cooperative timeouts, parallel-safety, and optional UI presentation. Models see each permitted tool's declared name, description, and parameter schema; per-agent restrictions can narrow that visible set.
@@ -90,6 +88,8 @@ The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-a
 
 A tool can declare pure `presentCall()` and `presentResult()` methods. The terminal UI calls them through the registry for live and replayed calls, with the logged arguments, result content, and `tool/result.meta`. A tool's `meta` comes from one of two sources, and the model never receives it. `output.presentationMeta(args, value)` derives it from the canonical value, as file edits derive their diffs. A body whose display data is not part of its value calls `exec.presentResultMeta(meta)` instead, as a shell command reports the files it changed. The registry snapshots that value and attaches it to a successful top-level result, keeps it through a post-execute replacement, and ignores it for a nested call. A tool that declares `presentationMeta` cannot call it.
 
+A long-running body can call `exec.reportProgress({ output })` with a snapshot of its newest output, as a shell command does while it runs. The registry forwards snapshots only while the top-level body executes; the loop bounds and throttles them into the process-local `agent/tool-progress` event. A snapshot is never logged or sent to the model, a nested call has no receiver, and an `output` that is not a string throws.
+
 -----
 
 <a id="understand-the-implementation"></a>
@@ -130,7 +130,7 @@ Under `ptc` or `both`, the registry exposes the reserved `run_code` transport pl
 
 New sub-calls use `<parent>:ptc:<n>` ids. Consumers treat these ids as opaque and correlate events by exact equality; restored historical ids retain their original bytes. The [PTC mode decision](../../../.agents/notes/implemented/feature/2026-06-15-ptc.md) owns durable naming and restoration rules.
 
-`run_code` accepts `timeoutMs` when the mounted runtime supports an override; its schema reports the configured default and maximum, the runtime's usage instructions and the Session working directory. The Node default is 120,000 ms with a 600,000 ms cap, including nested tool and approval waits. A wider `sandbox_permissions` mode requires a non-empty `justification` and approval before the program starts. The grant applies to that complete execution; standing Session policy and nested tools retain their own authority. Programs are never replayed automatically: inspect earlier effects before explicitly retrying a denied program.
+`run_code` accepts `timeoutMs` when the mounted runtime supports an override; its schema reports the configured default and maximum, the runtime's usage instructions and the Session working directory. The shipped QuickJS runtime defaults to 120,000 ms with a 600,000 ms cap, including nested tool and approval waits. A runtime that advertises a `sandboxMode`, such as the Node process runtime, also offers `sandbox_permissions`; the QuickJS runtime has no file access and offers neither it nor `justification`. A wider `sandbox_permissions` mode requires a non-empty `justification` and approval before the program starts. The grant applies to that complete execution; standing Session policy and nested tools retain their own authority. Programs are never replayed automatically: inspect earlier effects before explicitly retrying a denied program.
 
 <a id="extension-points"></a>
 ### Extension points

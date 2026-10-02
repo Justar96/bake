@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-11-persistence-type-history.zh.md)
-
 ## Problem
 
 A persisted event can retain the same payload type expression while a referenced type changes. Reviewing declaration text alone does not expose every nested structural change. A digest detects a difference but cannot explain whether it adds optional data or changes an existing property. Regenerating a catalog also does not establish that the author reviewed the persistence consequences.

@@ -204,10 +204,9 @@ function reasoningInfo(
 }
 
 /**
- * Header carrying the Harness session id, spelled as the DeepSeek adapter
- * sends it. Gateways that balance one route over several upstream credentials
- * (CliRelay's `session-sticky` routing) key their per-session credential
- * binding on it. Provider prompt caches are per credential, so without a
+ * Header carrying the Harness session id. Gateways that balance one route over
+ * several upstream credentials (CliRelay's `session-sticky` routing) key their
+ * per-session credential binding on this spelling. Provider prompt caches are per credential, so without a
  * stable key each step of a conversation can land on a different account and
  * re-prefill its whole prefix.
  */
@@ -235,6 +234,19 @@ function requestHeaders(
     ...Object.fromEntries(Object.entries(headers ?? {}).filter(([name]) => !reserved.has(name.toLowerCase()))),
     ...attribution,
   }
+}
+
+/**
+ * Respell pi-ai's adaptive `thinking` block as `enabled` for an endpoint that
+ * reads `output_config.effort` but documents only `enabled` and `disabled`.
+ * The effort itself is untouched; a request that is not adaptive passes through.
+ * @param payload - the Messages request body pi-ai built.
+ * @returns the rewritten body, or `undefined` to send pi-ai's unchanged.
+ */
+function enabledThinkingPayload(payload: unknown): unknown {
+  const body = payload as { thinking?: { type?: unknown } } | undefined
+  if (body?.thinking?.type !== 'adaptive') return undefined
+  return { ...body, thinking: { type: 'enabled' } }
 }
 
 /**
@@ -302,13 +314,17 @@ export class PiAiAdapter extends LlmAdapter {
   override listModels(provider: string): Promise<readonly LlmModelInfo[]> {
     return Promise.resolve().then(() => {
       const snapshot = this.current()
-      this.profileOf(snapshot, provider)
-      return snapshot.models.getModels(provider).map(model => ({
-        provider,
-        id: model.id,
-        name: model.name,
-        inputModalities: [...model.input],
-      }))
+      const profile = this.profileOf(snapshot, provider)
+      return snapshot.models.getModels(provider).map((model) => {
+        const description = profile.harnessInfo.get(model.id)?.description
+        return {
+          provider,
+          id: model.id,
+          name: model.name,
+          ...description === undefined ? {} : { description },
+          inputModalities: [...model.input],
+        }
+      })
     })
   }
 
@@ -330,14 +346,18 @@ export class PiAiAdapter extends LlmAdapter {
     // Only a cap the deployment configured is a request default; the
     // catalog's `maxTokens` sizes the model and stops there.
     const configuredMaxTokens = profile.configuredMaxTokens.get(model)
+    const declared = profile.harnessInfo.get(model)
     return {
       provider,
       id: model,
       name: resolvedModel.name,
+      ...declared?.description === undefined ? {} : { description: declared.description },
       inputModalities: [...resolvedModel.input],
       context: { contextWindow: resolvedModel.contextWindow },
       ...configuredMaxTokens === undefined ? {} : { defaultMaxTokens: configuredMaxTokens },
       ...reasoningInfo(resolvedModel, defaultLevel),
+      ...declared?.systemPromptUpdate === undefined ? {} : { systemPromptUpdate: declared.systemPromptUpdate },
+      ...declared?.toolUpdate === undefined ? {} : { toolUpdate: declared.toolUpdate },
     }
   }
 
@@ -394,8 +414,9 @@ export class PiAiAdapter extends LlmAdapter {
       }
       // The model's own protocol, not the route's, selects the default: one route may mix them.
       const maxDimension = requestImageMaxDimensionFor(profile, model.api)
+      const transcript = profile.harnessInfo.get(model.id)
       const context = attachments === undefined
-        ? toPiContext(options, undefined, onReplayDegrade)
+        ? toPiContext(options, undefined, onReplayDegrade, transcript)
         : await toPiContext({ ...options, signal: watchdog.signal }, {
           attachments,
           resolveImageAccess: ref => this.config.resolveImageAccess?.(attachments, ref),
@@ -405,12 +426,15 @@ export class PiAiAdapter extends LlmAdapter {
             ...maxDimension === undefined ? {} : { maxDimension },
             maxBytes: profile.requestImageMaxBytes,
           },
-        }, onReplayDegrade)
+        }, onReplayDegrade, transcript)
       const events = snapshot.models.streamSimple(model, context, {
         ...profileOptions(profile, reasoning, apiKey),
         ...options.temperature === undefined ? {} : { temperature: options.temperature },
         ...options.maxTokens === undefined ? {} : { maxTokens: options.maxTokens },
         ...options.sessionId === undefined ? {} : { sessionId: String(options.sessionId) },
+        ...profile.adaptiveThinkingType === 'enabled' && model.api === 'anthropic-messages'
+          ? { onPayload: enabledThinkingPayload }
+          : {},
         signal: watchdog.signal,
         // Proxy heartbeats can empty or split SSE events before pi-ai's parsers read them.
         ...model.api === 'openai-responses' || model.api === 'openai-completions' ? { fetch: fetchOpenAiSse }

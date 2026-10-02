@@ -5,8 +5,6 @@ kind: "package-bundle"
 
 # @deepseek-ai/dsh-headless
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 `dsh-headless` runs one dsh task from the command line and prints the final answer, then exits — no GUI, no server, no browser. Type `dsh --profile headless "run the tests"` and the agent handles it with the same model, tools, and safety defaults as every other surface. It suits scripts, CI, and one-off jobs: it opens no ports and leaves nothing running behind. It also offers a JSON event stream (`--json`) and `--resume` to resume a conversation. Exit code 0 means the task completed; 1 means it aborted or errored; 75 means the `--resume` Session is open in another Bake process. The boundary: one task per invocation, no interactive follow-up.

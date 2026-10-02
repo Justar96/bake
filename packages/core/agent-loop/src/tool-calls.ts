@@ -5,17 +5,19 @@
  * model-ordered. Abort or an internal scheduler failure stops replenishment
  * and drains started calls.
  *
- * Abort records synthetic error results for skipped calls so replay stays
- * valid. A terminal scheduler failure preserves already-recorded `tool/call`
- * events without fabricating results.
+ * Abort and a policy halt record synthetic error results for skipped calls so
+ * replay stays valid. A terminal scheduler failure preserves already-recorded
+ * `tool/call` events without fabricating results.
  * @module dsh-agent-loop/tool-calls
  */
 
 import type { Context } from '@deepseek-ai/cordis'
 import { createToolResultMessage, type ToolCallBlock } from '@deepseek-ai/dsh-llm'
 import type { Session, SessionSeq, UserMessage } from '@deepseek-ai/dsh-session'
-import { TOOL_ABORTED_BEFORE_DISPATCH, TOOL_RUNTIME_SCHEDULER, type ToolExecutionInput, type ToolExecutionMode, type ToolExecutionResult, type ToolRunContext, type ToolRuntimeScheduler } from '@deepseek-ai/dsh-tools'
+import { TOOL_ABORTED_BEFORE_DISPATCH, TOOL_RUNTIME_SCHEDULER, type ToolExecutionInput, type ToolExecutionMode, type ToolExecutionResult, type ToolHalt, type ToolRunContext, type ToolRuntimeScheduler } from '@deepseek-ai/dsh-tools'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
+import type { ToolProgress } from '@deepseek-ai/dsh-agent'
+import { ProgressThrottle } from './tool-progress.ts'
 
 /** One tool call after argument parsing, ready to schedule. */
 interface PlannedCall {
@@ -36,6 +38,31 @@ interface GroupOutcome {
   aborted: boolean
   /** Whether any committed result carried {@link ToolExecutionResult.concludesTurn}. */
   concluded: boolean
+  /** The first halt a prepared or committed result carried; it stopped new starts. */
+  halt?: ToolHalt
+}
+
+/**
+ * Process-local publication of started calls' live state, outside the
+ * model-ordered commit. Both callbacks are display-only: the durable
+ * `tool/call` and `tool/result` order and every model request are unchanged.
+ */
+export interface ToolCallNotifier {
+  /**
+   * A running call's coalesced progress snapshot; never called after
+   * {@link executed} for the same call.
+   */
+  progress(callId: ToolCallBlock['id'], progress: ToolProgress): void
+  /** A started call finished executing, before its ordered commit; `isError` precedes post-execute. */
+  executed(callId: ToolCallBlock['id'], isError: boolean): void
+}
+
+/** What one step's tool batch reports to the turn driver. */
+export interface ToolBatchOutcome {
+  /** Whether any committed result carried {@link ToolExecutionResult.concludesTurn}. */
+  concluded: boolean
+  /** The first halt a result carried; the batch started no call after detecting it. */
+  halt?: ToolHalt
 }
 
 /**
@@ -44,7 +71,10 @@ interface GroupOutcome {
  * drains them, records synthetic results for unstarted calls, and returns with
  * the signal still aborted after accepting started-call context through the
  * caller-supplied acceptor (the machine stages it in its next-step inbox for the
- * step boundary). An internal scheduler failure stops new dispatches, drains
+ * step boundary). A result carrying {@link ToolHalt} settles the same way
+ * without aborting the signal: started calls run to completion, unstarted calls
+ * receive synthetic results, and the halt is returned for the caller to end the
+ * turn. An internal scheduler failure stops new dispatches, drains
  * already-started dispatches, and rejects with the first failure without
  * fabricating tool results.
  * The committed step's AgentLoop driver boundary supplies the initiating Agent
@@ -56,6 +86,7 @@ interface GroupOutcome {
  * @param toolCalls - assistant calls in model order.
  * @param signal - abort signal shared by the step.
  * @param acceptContext - accepts committed result context for the next step boundary.
+ * @param notify - receives each started call's live progress and its finish as it happens.
  */
 export async function executeToolCalls(
   ctx: Context,
@@ -64,7 +95,8 @@ export async function executeToolCalls(
   toolCalls: ToolCallBlock[],
   signal: AbortSignal,
   acceptContext: (context: UserMessage) => void,
-): Promise<{ concluded: boolean }> {
+  notify?: ToolCallNotifier,
+): Promise<ToolBatchOutcome> {
   const agent = ctx.agents.requireInitiator()
   const { session } = agent
   // Cordis resolves services through the live context. Keep the scheduler for
@@ -94,13 +126,13 @@ export async function executeToolCalls(
     const mode = executionMode(first.exec).kind
     const group = mode === 'parallel' ? planned.slice(next) : [first]
     const outcome = await runGroup(
-      ctx, scheduler, executionMode, turn, step, group, mode, signal, acceptContext,
+      ctx, scheduler, executionMode, turn, step, group, mode, signal, acceptContext, notify,
     )
     next += outcome.consumed
     concluded ||= outcome.concluded
-    if (outcome.aborted) {
+    if (outcome.aborted || outcome.halt !== undefined) {
       for (const call of planned.slice(next)) appendSkippedToolCall(session, turn, step, call.block)
-      return { concluded }
+      return { concluded, ...outcome.halt === undefined ? {} : { halt: outcome.halt } }
     }
   }
   return { concluded }
@@ -121,8 +153,10 @@ function parseArguments(raw: string): unknown {
  * drain and remains for the caller's next barrier. Results and contexts commit
  * in model order. Abort stops starts, drains and commits started calls, accepts
  * their contexts into the owning batch, records results for skipped calls, and
- * returns an aborted outcome. Scheduler failure drains dispatches without
- * committing synthetic recovery results.
+ * returns an aborted outcome. A halt, seen on a prepared result or on a
+ * committed one, does the same while started calls keep their live signal.
+ * Scheduler failure drains dispatches without committing synthetic recovery
+ * results.
  */
 async function runGroup(
   ctx: Context,
@@ -134,6 +168,7 @@ async function runGroup(
   mode: ToolExecutionMode['kind'],
   signal: AbortSignal,
   acceptContext: (context: UserMessage) => void,
+  notify: ToolCallNotifier | undefined,
 ): Promise<GroupOutcome> {
   const { session } = ctx.agents.requireInitiator()
   const { maxParallelToolCalls } = ctx.agentLoop.config
@@ -145,6 +180,7 @@ async function runGroup(
   let started = 0
   let aborted: boolean = signal.aborted
   let concluded = false
+  let halt: ToolHalt | undefined
   let schedulerFailure: { error: unknown } | undefined
   const throwSchedulerFailure = (): void => {
     if (schedulerFailure !== undefined) throw schedulerFailure.error
@@ -163,27 +199,45 @@ async function runGroup(
       appendToolResult(session, turn, step, call!.block, result, callSeqs[committed]!)
       for (const context of result.additionalContexts ?? []) acceptContext(context)
       concluded ||= result.concludesTurn === true
+      halt ??= result.halt
       committed++
     }
   }
 
   const inFlight = new Map<number, Promise<number>>()
+  // Each started call's progress publisher, closed as its dispatch settles
+  // and again when the group returns or throws, so no timer outlives it.
+  const throttles = new Set<ProgressThrottle>()
 
   const startCall = async (index: number): Promise<void> => {
     // oxlint-disable-next-line typescript/no-non-null-assertion -- bounded index
     const call = group[index]!
     callSeqs[index] = appendToolCall(session, turn, step, call.block)
     started++
-    const prepared = await scheduler.prepare(call.exec)
+    const callId = call.block.id
+    const throttle = notify === undefined ? undefined
+      : new ProgressThrottle((progress) => { notify.progress(callId, progress) })
+    if (throttle !== undefined) throttles.add(throttle)
+    const executed = (isError: boolean): void => {
+      throttle?.close()
+      notify?.executed(callId, isError)
+    }
+    const prepared = await scheduler.prepare(throttle === undefined ? call.exec
+      : { ...call.exec, onProgress: (progress) => { throttle.push(progress) } })
     throwSchedulerFailure()
+    // A pre-execute halt stops later starts before this result can commit
+    // behind still-running earlier calls.
+    if (prepared.kind !== 'dispatch') halt ??= prepared.result.halt
     switch (prepared.kind) {
       case 'dispatch': {
         const promise = scheduler.dispatch(prepared.exec).then(
           (outcome) => {
             slots[index] = { exec: prepared.exec, result: outcome.result, needsPost: outcome.kind === 'post-result' }
+            executed(outcome.result.isError)
             return index
           },
           (error: unknown) => {
+            throttle?.close()
             schedulerFailure ??= { error }
             return index
           },
@@ -193,9 +247,11 @@ async function runGroup(
       }
       case 'post-result':
         slots[index] = { exec: prepared.exec, result: prepared.result, needsPost: true }
+        executed(prepared.result.isError)
         break
       case 'final-result':
         slots[index] = { exec: prepared.exec, result: prepared.result, needsPost: false }
+        executed(prepared.result.isError)
         break
       /* v8 ignore next -- closed-union exhaustiveness guard */
       default:
@@ -204,7 +260,7 @@ async function runGroup(
   }
 
   const fillPool = async (): Promise<void> => {
-    while (!aborted && nextToStart < group.length && inFlight.size < maxParallelToolCalls) {
+    while (!aborted && halt === undefined && nextToStart < group.length && inFlight.size < maxParallelToolCalls) {
       // Re-read later modes after ordered commits so registry changes can create a barrier.
       // oxlint-disable-next-line typescript/no-non-null-assertion -- bounded by the loop condition
       const nextCall = group[nextToStart]!
@@ -240,13 +296,15 @@ async function runGroup(
     schedulerFailure ??= { error }
     await Promise.allSettled(inFlight.values())
     throw schedulerFailure.error
+  } finally {
+    for (const throttle of throttles) throttle.close()
   }
 
-  if (aborted) {
+  if (aborted || halt !== undefined) {
     // Started calls and accepted context settle first; every remaining model
-    // call then receives an ordered synthetic result before the turn aborts.
+    // call then receives an ordered synthetic result before the turn ends.
     for (const call of group.slice(started)) appendSkippedToolCall(session, turn, step, call.block)
-    return { consumed: group.length, aborted: true, concluded }
+    return { consumed: group.length, aborted, concluded, ...halt === undefined ? {} : { halt } }
   }
   /* v8 ignore next -- unreachable: a non-aborted group commits every started call */
   if (committed !== started) throw new Error('tool-call scheduler: uncommitted settled calls')

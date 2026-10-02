@@ -1,5 +1,22 @@
 /**
- * Basic replay-aware compaction backend.
+ * Basic replay-aware compaction backend. Its pressure policy resolves over the
+ * optional `compaction-basic` user-settings section, layered above the
+ * composition entry, so a changed threshold, retention, or route policy
+ * reaches the next pressure check without a restart:
+ *
+ * ```yaml
+ * # settings.yaml
+ * compaction-basic:
+ *   modelPolicies:
+ *     # Every model on the cliproxyapi route compacts at 150k tokens.
+ *     - provider: cliproxyapi
+ *       thresholdTokens: 150000
+ *       retainTokens: 30000
+ *     # One model on that route keeps the ratio form instead.
+ *     - provider: cliproxyapi
+ *       model: gpt-5-codex
+ *       thresholdRatio: 0.7
+ * ```
  *
  * @module @deepseek-ai/dsh-compaction-basic
  */
@@ -14,6 +31,7 @@ import type { LlmCallConfig } from '@deepseek-ai/dsh-llm'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
 import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
 import type { CommandId } from '@deepseek-ai/dsh-commands/brand'
+import type {} from '@deepseek-ai/dsh-settings'
 // Type-only: makes the optional sibling service available to `ctx.get()`.
 import type {} from '@deepseek-ai/dsh-compaction-tool-result-pruner'
 import {
@@ -27,8 +45,9 @@ import {
   compactSurfaceRegion,
   selectCompactableRange,
 } from './region.ts'
-import { summarizeWithLlm } from './summarizer.ts'
+import { summarizeWithLlm, summaryTarget } from './summarizer.ts'
 import type { SummarizationInput, SummaryResult } from './summarizer.ts'
+import type { SummaryRetryPlan } from './summary-retry.ts'
 import type {
   BasicCompactionConfig,
   ModelCompactPolicyConfig,
@@ -44,7 +63,11 @@ export type {
   ResolvedConfig,
   ResolvedRetention,
   ResolvedTargetPolicy,
+  ResolvedThreshold,
 } from './types.ts'
+
+/** User-settings namespace layered over the composition entry. */
+export const COMPACTION_BASIC_SETTINGS_NAMESPACE = 'compaction-basic'
 
 /** Resolve the exact provider/model durably routed for the latest request. */
 function routedTarget(
@@ -81,6 +104,7 @@ function conversationTarget(
 }
 
 const thresholdRatioSchema = z.number()
+const thresholdTokensSchema = z.number().step(1).min(1)
 const retainRatioSchema = z.number()
 const retainTokensSchema = z.number().step(1).min(0)
 const summarizationProviderSchema = z.string()
@@ -91,8 +115,9 @@ const maxOverflowRetriesSchema = z.number().step(1).min(0)
 
 const modelPolicy: z<ModelCompactPolicyConfig> = z.object({
   provider: z.string().required(),
-  model: z.string().required(),
+  model: z.string(),
   thresholdRatio: thresholdRatioSchema,
+  thresholdTokens: thresholdTokensSchema,
   retainRatio: retainRatioSchema,
   retainTokens: retainTokensSchema,
   summarizationProvider: summarizationProviderSchema,
@@ -101,6 +126,67 @@ const modelPolicy: z<ModelCompactPolicyConfig> = z.object({
   compactionRetries: compactionRetriesSchema,
   maxOverflowRetries: maxOverflowRetriesSchema,
 })
+
+/** Fields shared by the composition entry and the settings section. */
+const SETTINGS_FIELDS = {
+  thresholdRatio: thresholdRatioSchema,
+  thresholdTokens: thresholdTokensSchema,
+  retainRatio: retainRatioSchema,
+  retainTokens: retainTokensSchema,
+  summarizationProvider: summarizationProviderSchema,
+  summarizationModel: summarizationModelSchema,
+  maxTokens: maxTokensSchema,
+  compactionRetries: compactionRetriesSchema,
+  maxOverflowRetries: maxOverflowRetriesSchema,
+  modelPolicies: z.array(modelPolicy),
+}
+
+/** Schema of the `compaction-basic` settings section: every policy field except `auto`. */
+const SETTINGS_SCHEMA: z<BasicCompactionConfig> = z.object(SETTINGS_FIELDS)
+
+/** Top-level field pairs of which one layer may set only one. */
+const EXCLUSIVE_FORMS = [
+  ['thresholdRatio', 'thresholdTokens'],
+  ['retainRatio', 'retainTokens'],
+] as const
+
+/**
+ * Resolve one settings section with the composition's `auto`.
+ *
+ * The settings service merges the user section over the composition entry
+ * key by key, so a user `thresholdTokens` over a composed `thresholdRatio`
+ * arrives as both. The form the user set replaces the composed one, as a
+ * more specific layer's form does inside `modelPolicies`; both forms set in
+ * the user section itself still fail. `modelPolicies` replaces wholesale, so
+ * no pair inside it spans layers. The schema passes unknown keys through, so
+ * `auto` in the section is the user's and is refused rather than ignored.
+ * @param section - composition entry overlaid by the user section.
+ * @param entry - composition entry the section was layered over.
+ * @param auto - composition-owned automatic-compaction switch.
+ * @returns the validated configuration the engine serves.
+ */
+function resolveSettings(
+  section: BasicCompactionConfig,
+  entry: BasicCompactionConfig,
+  auto: boolean,
+): ResolvedConfig {
+  const name = `settings "${COMPACTION_BASIC_SETTINGS_NAMESPACE}"`
+  if ('auto' in section) {
+    throw new Error(`${name}: "auto" is fixed by the plugin's composition config; remove it from settings`)
+  }
+  const yielded = new Set<string>()
+  for (const [first, second] of EXCLUSIVE_FORMS) {
+    if (section[first] === undefined || section[second] === undefined) continue
+    // Only a key the composition alone set yields: equal to the entry's value
+    // while the entry lacks the other form.
+    if (entry[second] === undefined && section[first] === entry[first]) yielded.add(first)
+    else if (entry[first] === undefined && section[second] === entry[second]) yielded.add(second)
+  }
+  const layered = Object.fromEntries(
+    Object.entries(section).filter(([key]) => !yielded.has(key)),
+  ) as BasicCompactionConfig
+  return resolveConfig({ ...layered, auto }, name)
+}
 
 /**
  * Dependency-light compaction backend using `ctx.tokenMeter` for pressure,
@@ -113,30 +199,79 @@ const modelPolicy: z<ModelCompactPolicyConfig> = z.object({
 export class BasicCompactionEngine extends CompactionEngine {
   static inject = ['llm', 'tokenMeter', 'sessions']
 
+  // Spelled out for the generated config catalog; the settings section
+  // carries the same fields minus `auto` through `SETTINGS_FIELDS`.
   static Config: z<BasicCompactionConfig> = z.object({
-    thresholdRatio: thresholdRatioSchema,
-    retainRatio: retainRatioSchema,
-    retainTokens: retainTokensSchema,
-    summarizationProvider: summarizationProviderSchema,
-    summarizationModel: summarizationModelSchema,
-    maxTokens: maxTokensSchema,
-    compactionRetries: compactionRetriesSchema,
-    maxOverflowRetries: maxOverflowRetriesSchema,
-    modelPolicies: z.array(modelPolicy),
+    thresholdRatio: SETTINGS_FIELDS.thresholdRatio,
+    thresholdTokens: SETTINGS_FIELDS.thresholdTokens,
+    retainRatio: SETTINGS_FIELDS.retainRatio,
+    retainTokens: SETTINGS_FIELDS.retainTokens,
+    summarizationProvider: SETTINGS_FIELDS.summarizationProvider,
+    summarizationModel: SETTINGS_FIELDS.summarizationModel,
+    maxTokens: SETTINGS_FIELDS.maxTokens,
+    compactionRetries: SETTINGS_FIELDS.compactionRetries,
+    maxOverflowRetries: SETTINGS_FIELDS.maxOverflowRetries,
+    modelPolicies: SETTINGS_FIELDS.modelPolicies,
     auto: z.boolean(),
   })
 
-  /** Resolved and validated compaction configuration. */
-  readonly config: ResolvedConfig
-
+  private resolved: ResolvedConfig
   private readonly warnedPressureConfigTargets = new Set<string>()
   private readonly overflowRetries = new WeakMap<Agent, number>()
   private readonly overflowAgents = new WeakMap<Session, Agent>()
+  /** Aborts summary retry waits when the plugin is disposed. */
+  private readonly lifetime = new AbortController()
 
   constructor(ctx: Context, config: BasicCompactionConfig = {}) {
     super(ctx)
-    this.config = resolveConfig(config)
-    if (this.config.auto) this._registerAutomaticCompaction()
+    ctx.effect(() => () => {
+      this.lifetime.abort(new Error('compaction-basic disposed'))
+    }, 'compaction-basic: cancel summary retry waits')
+    this.resolved = resolveConfig(config)
+    const { auto } = this.resolved
+    // `auto` decides which listeners exist, so it stays composition-only; the
+    // section carries every field that is read per pressure check.
+    const { auto: _auto, ...entry } = config
+    ctx.inject(['settings'], (settingsCtx) => {
+      let source: () => BasicCompactionConfig = () => entry
+      let registering = true
+      settingsCtx.settings.installSection(ctx, COMPACTION_BASIC_SETTINGS_NAMESPACE, SETTINGS_SCHEMA, entry, {
+        validate: (value) => {
+          // A stored section that fails at registration would leave the
+          // namespace unregistered, so its repair could only land after a
+          // restart. Admit it; `onChange` keeps serving the composition
+          // policy. Afterwards a refusal keeps the previous policy serving:
+          // the settings service warns with this message and retains its
+          // last good value.
+          if (!registering) resolveSettings(value, entry, auto)
+        },
+        setSource: (current) => {
+          source = current
+        },
+        onChange: () => {
+          try {
+            this.resolved = resolveSettings(source(), entry, auto)
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error)
+            ctx.logger.warn(`compaction-basic: keeping the previous compaction policy: ${message}`)
+            return
+          }
+          // A repaired or replaced policy deserves a fresh warning per route.
+          this.warnedPressureConfigTargets.clear()
+        },
+      })
+      registering = false
+    })
+    if (auto) this._registerAutomaticCompaction()
+  }
+
+  /**
+   * Resolved and validated compaction configuration: the composition entry,
+   * overlaid by the `compaction-basic` settings section while a settings
+   * service is mounted. Read afresh at every pressure check and summary.
+   */
+  get config(): ResolvedConfig {
+    return this.resolved
   }
 
   /**
@@ -297,7 +432,9 @@ export class BasicCompactionEngine extends CompactionEngine {
       }
       const range = selectCompactableRange(agent.session, measurement, 0)
       if (range === null) return null
-      return this.compactRegion(range.start, range.end, agent, signal)
+      // The failed request is not retried until this pass lands, so its
+      // summary call retries transient failures itself.
+      return this.compactRegion(range.start, range.end, agent, signal, { retrySummary: true })
     }
 
     const context = (await this.ctx.llm.resolveModelInfo(target.provider, target.model, signal)).context
@@ -353,6 +490,9 @@ export class BasicCompactionEngine extends CompactionEngine {
    * @param end - inclusive last surface-node seq.
    * @param agent - owner of the target session, used by the summarizer.
    * @param signal - optional summarization cancellation signal.
+   * @param options - `retrySummary` retries a transient summary failure under
+   *   the summarizing provider's retry policy; pressure compaction leaves it
+   *   off because its next step checks pressure again.
    * @returns the successful durable compaction result.
    */
   override async compactRegion(
@@ -360,6 +500,7 @@ export class BasicCompactionEngine extends CompactionEngine {
     end: SessionSeq,
     agent: Agent,
     signal?: AbortSignal,
+    options: { readonly retrySummary?: boolean } = {},
   ): Promise<CompactionResult> {
     return compactSurfaceRegion(
       this.regionDependencies(),
@@ -367,7 +508,11 @@ export class BasicCompactionEngine extends CompactionEngine {
       start,
       end,
       agent,
-      { owner: 'current-turn', stability: 'whole-surface' },
+      {
+        owner: 'current-turn',
+        stability: 'whole-surface',
+        ...options.retrySummary === true ? this.summaryRetry(agent) : {},
+      },
       signal,
     )
   }
@@ -407,6 +552,7 @@ export class BasicCompactionEngine extends CompactionEngine {
               owner: null,
               stability: 'selected-span',
               ...sourceCommandId === undefined ? {} : { sourceCommandId },
+              ...this.summaryRetry(agent),
               flush: async () => {
                 await this.ctx.sessions.flush(agent.session)
               },
@@ -436,12 +582,14 @@ export class BasicCompactionEngine extends CompactionEngine {
 
   /**
    * Resolve the exact route's merged policy the way the `agent/pre-step`
-   * listener does: `floor(contextWindow × thresholdRatio)`, the figure it
-   * compares with the token meter's measurement. `auto: false` installs no
+   * listener does: `thresholdTokens` when the policy sets it, otherwise
+   * `floor(contextWindow × thresholdRatio)`, the figure it compares with the
+   * token meter's measurement. `auto: false` installs no
    * listener, and an empty route is never compacted, so both answer
-   * `undefined`. So does a capacity or absolute retention that the listener
-   * would reject with a once-per-target warning instead of compacting.
-   * @param route - exact provider/model whose override, if any, applies.
+   * `undefined`. So does a capacity, absolute threshold, or absolute retention
+   * that the listener would reject with a once-per-target warning instead of
+   * compacting.
+   * @param route - exact provider/model whose overrides, if any, apply.
    * @param contextWindow - that route's adapter-owned capacity in tokens.
    * @returns the pressure threshold in tokens, or `undefined` when automatic pressure cannot compact that route.
    */
@@ -458,10 +606,33 @@ export class BasicCompactionEngine extends CompactionEngine {
     }
   }
 
+  /**
+   * The summarizing provider's request-retry policy for one transaction, or
+   * nothing when no summarization target or provider registration resolves.
+   * @param agent - supplies the routed target the summarizer would use.
+   * @returns the transaction's retry plan, when one applies.
+   */
+  private summaryRetry(agent: Agent): { retry?: SummaryRetryPlan } {
+    try {
+      const conversation = conversationTarget(agent)
+      const target = summaryTarget(
+        conversation === undefined ? this.config : resolveTargetPolicy(this.config, conversation),
+        agent,
+      )
+      if (target === undefined) return {}
+      return { retry: { policy: this.ctx.llm.providerRetryPolicy(target.provider), lifetime: this.lifetime.signal } }
+    } catch {
+      return {}
+    }
+  }
+
   /** Bind the effective token meter and dynamically dispatched summarizer hook. */
   private regionDependencies(): Parameters<typeof compactSurfaceRegion>[0] {
     return {
       meter: this.ctx.tokenMeter,
+      log: (message) => {
+        this.ctx.logger.warn(message)
+      },
       summarize: (input, owner, abort) => this.summarize(input, owner, abort),
       recover: (error, agent, sourceEventSeqs, signal) => this.ctx.waterfall('compaction/summary-error', {
         session: agent.session,

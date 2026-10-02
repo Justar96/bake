@@ -5,8 +5,6 @@ kind: "package-reference"
 
 # @deepseek-ai/dsh-compaction-basic
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 This package keeps long agent conversations working near the model's context limit. As token pressure builds, it condenses the oldest history into a summary while preserving recent messages; after a context-overflow error, it condenses and retries. You can also request condensation with `/compact` and optionally trim oversized tool outputs first. Condensation uses one extra model request and retains only its summary text. It cannot reduce the system prompt, tools, or session prefix, or split one indivisible unit such as a single huge tool call.
@@ -63,7 +61,8 @@ All settings are optional. The defaults start condensing at 80% of the routed mo
 
 | Field | Default | Meaning |
 |---|---|---|
-| `thresholdRatio` | `0.8` | Start condensing at `floor(routedContextWindow × ratio)`. |
+| `thresholdRatio` | `0.8` | Start condensing at `floor(routedContextWindow × ratio)`; mutually exclusive with `thresholdTokens`. |
+| `thresholdTokens` | — | Start condensing at this absolute request size; mutually exclusive with `thresholdRatio` and must not exceed the routed context window. |
 | `retainRatio` | `0.16` | Recent conversation kept verbatim as a fraction of the routed context window; mutually exclusive with `retainTokens`. |
 | `retainTokens` | — | Absolute recent-conversation budget kept verbatim; mutually exclusive with `retainRatio` and must be below the resolved threshold. |
 | `summarizationProvider` | `''` | Set together with `summarizationModel`; an empty pair uses the latest routed request target, then the `AgentOptions` pair. |
@@ -71,16 +70,42 @@ All settings are optional. The defaults start condensing at 80% of the routed mo
 | `maxTokens` | `8192` | Output cap for the summarization request; may include reasoning tokens. |
 | `compactionRetries` | `1` | Extra condensation attempts after the first when pressure remains above threshold. |
 | `maxOverflowRetries` | `1` | Maximum retries after a confirmed context-window overflow; `0` disables recovery only. |
-| `modelPolicies` | `[]` | Exact `{ provider, model, ...partialPolicy }` overrides for individual model routes. |
+| `modelPolicies` | `[]` | Per-route `{ provider, model?, ...partialPolicy }` overrides; an entry without `model` covers every model on that provider route. |
 | `auto` | `true` | Enable automatic condensation and overflow recovery; set `false` for manual-only operation. |
 
-Misconfiguration fails fast: an unknown setting, a duplicate per-model override, both retention forms together, or a ratio retention that is not below the threshold all reject the plugin at load. An absolute `retainTokens` budget — top-level or per-model — that is not below its threshold fails when that model is first used, because the comparison needs the model's context size.
+An override applies field by field: the exact `provider` + `model` entry wins over the provider-wide entry for that provider, which wins over the top-level defaults. A threshold or retention form set at a more specific level replaces the inherited form as a unit, so an exact entry's `thresholdRatio` replaces a provider-wide `thresholdTokens`.
 
-Interfaces can ask where condensation starts for a route. `pressureThreshold(route, contextWindow)` returns `floor(contextWindow × thresholdRatio)` after the exact route's `modelPolicies` override, the same figure the automatic check compares with the token meter's measurement. It returns `undefined` with `auto: false`, for an empty provider or model, and for a capacity or `retainTokens` budget the automatic check would reject with a warning instead of condensing. The TUI shows this value beside context occupancy.
+Misconfiguration fails fast: an unknown setting, a second entry for the same provider and model, a second provider-wide entry for the same provider, both threshold forms or both retention forms together, or two ratios or two absolute budgets where retention is not below the threshold all reject the plugin at load. A pair that mixes a ratio with an absolute budget, and a `thresholdTokens` above the window, fail when that model is first used, because the comparison needs the model's context size.
+
+Interfaces can ask where condensation starts for a route. `pressureThreshold(route, contextWindow)` returns the resolved `thresholdTokens`, or `floor(contextWindow × thresholdRatio)`, after the route's `modelPolicies` overrides, the same figure the automatic check compares with the token meter's measurement. It returns `undefined` with `auto: false`, for an empty provider or model, and for a capacity, `thresholdTokens`, or `retainTokens` budget the automatic check would reject with a warning instead of condensing. The TUI shows this value beside context occupancy.
+
+### Changing the policy from settings.yaml
+
+With a settings provider such as `dsh-settings-file` mounted (the shipped `dsh` base mounts it), the `compaction-basic` section of `settings.yaml` overrides the composition config field by field, and `/settings` lists it under Advanced. Every field above except `auto` is accepted; `auto` decides which listeners exist, so it stays in the composition. A list replaces the composed list wholesale, so a `modelPolicies` section must repeat any composed entries it keeps. A threshold or retention form set in settings replaces the composed one, so `thresholdTokens` in settings over a composed `thresholdRatio` is not a conflict. For example, to compact every model on a `cliproxyapi` route by token count:
+
+```yaml
+# settings.yaml
+compaction-basic:
+  modelPolicies:
+    # Every model on the cliproxyapi route compacts at 150k tokens.
+    - provider: cliproxyapi
+      thresholdTokens: 150000
+      retainTokens: 30000
+    # One model on that route keeps a ratio instead.
+    - provider: cliproxyapi
+      model: gpt-5-codex
+      thresholdRatio: 0.7
+```
+
+A saved change applies at the next pressure check, without a restart. A section that fails the rules above keeps the previous policy serving and logs a warning that names the failed rule; at startup the composition policy serves until the section is repaired.
 
 ### What happens when condensation runs
 
 The oldest balanced span is replaced by one summary message and the recent tail stays verbatim; the conversation continues from the summary. The operation reports how many history items were condensed and the estimated tokens freed. If nothing can be condensed safely — for example the whole conversation is one indivisible unit — nothing changes and nothing is written to the session log. If no model is available to write the summary (no configured target and no routed request yet), condensation fails with a clear error telling you to configure the summarization provider and model or route one request.
+
+After the summary, the checkpoint lists the files the condensed span read and changed and the latest open todo list, so they survive condensation exactly. The lists come from the span's successful `read`, `read_image`, `write`, `edit`, and `todo_write` calls and from the previous checkpoint's lists, so they carry forward across condensations. A path the span changed is listed only as modified. Each file list keeps its 50 most recently touched paths and counts the rest; the todo list keeps 50 items and is omitted when it is empty or every item is completed.
+
+If the summary request itself is too large for the summarizing model, condensation retries it once as a bounded plain-text transcript of the same span, with tool results, tool-call arguments, and reasoning cut to 2,000 characters. If that also overflows, it summarizes the older half of the span instead, up to three times. During overflow recovery and `/compact`, a summary request that fails with a transient provider error, such as a rate limit or a server error, is retried up to three times with the summarizing provider's backoff; automatic condensation under pressure does not retry, because the next step checks pressure again.
 
 ### On-demand condensation with /compact
 
@@ -123,13 +148,17 @@ The auxiliary call also carries `session.toolHistory()`. Native tool updates are
 
 ### The region transaction
 
-Failed summary requests dispatch synchronous `compaction/summary-error` after checking cancellation and selection stability. A recovery listener must record a durable input change before requesting retry. The backend re-derives the selected messages and refreshes their token prices and shrink baseline. The image-offload plugin owns image selection; its recorded omissions remain effective if the summary later fails or is cancelled.
+A failed summary request is handled in this order. Under overflow recovery and `compactNow()`, a failure whose code the summarizing provider's `retryPolicy` lists as retryable (every code under an `always` policy, except `CONTEXT_WINDOW_EXCEEDED`) is retried after `retryDelayMs()` from `@deepseek-ai/dsh-llm`, at most `min(maxRetries, 3)` times; a provider-requested delay above a normal policy's ceiling ends the retries. The wait aborts with the transaction's signal or the plugin's disposal. Pressure compaction passes no retry plan. Next, failed summary requests dispatch synchronous `compaction/summary-error` after checking cancellation and selection stability. A recovery listener must record a durable input change before requesting retry. The backend re-derives the selected messages and refreshes their token prices and shrink baseline. The image-offload plugin owns image selection; its recorded omissions remain effective if the summary later fails or is cancelled.
+
+When no listener repairs a `CONTEXT_WINDOW_EXCEEDED` summary failure, the transaction prepares a bounded attempt: the same span serialized by `boundedSummarizationInput()` as one transcript user message, without the system head or tool schemas, then up to `MAX_SUMMARY_RANGE_HALVINGS` (3) attempts over the older half of the previous span, each cut at the latest balanced boundary. A shortened span is the span the checkpoint replaces, and its shadowed seqs and prices are re-derived. Every failed attempt is logged as a warning; the `compaction/summary` record does not say which form produced the summary.
+
+After the summary succeeds, `collectCheckpointContext()` reads the final span's derived messages, never the log beyond them, and `formatCheckpointContext()` renders the sections that `frameSummary()` appends after `</compacted-summary>`. A prior checkpoint in the span contributes the sections it carries, parsed only from text after its summary block.
 
 The transaction validates the surface span and the durable lock, appends `compaction/start`, summarizes through the hook, revalidates stability (whole-surface for automatic calls, selected-span for manual calls), rejects a summary that does not shrink its source, appends `compaction/summary` plus the replacement `user/message`, and makes exactly one `compaction/end` attempt. A live unmatched start is the durable lock: an unmatched marker before a newer `session/end-seed` is stale evidence from a prior lifecycle and does not block; one after that boundary reports `busy`. A failed close deliberately leaves a blocking orphan. Cancellation remains authoritative after cleanup and durability.
 
 ### Config resolution
 
-`resolveConfig` validates and detaches the defaults, `resolveTargetPolicy` merges an exact provider/model override over them, and `resolveCompactSpec` scales the merged policy into concrete token budgets using the adapter-owned context capacity. Model discovery (`listModels()`) is never consulted for policy; only the durable route's capacity matters.
+`resolveConfig` validates and detaches the defaults, `resolveTargetPolicy` layers the exact provider/model override over the provider-wide override over them, and `resolveCompactSpec` scales the merged policy into concrete token budgets using the adapter-owned context capacity. Model discovery (`listModels()`) is never consulted for policy; only the durable route's capacity matters.
 
 ### Source map
 
@@ -138,6 +167,9 @@ The transaction validates the surface span and the durable lock, appends `compac
 | [`src/index.ts`](src/index.ts) | Plugin entry: `BasicCompactionEngine`, automatic listeners, entry-point dispatch |
 | [`src/region.ts`](src/region.ts) | Retention selection and the shared bracket-first compaction transaction |
 | [`src/summarizer.ts`](src/summarizer.ts) | Default `ctx.llm.stream()` summarization, checkpoint framing, safe-summary projection |
+| [`src/checkpoint-context.ts`](src/checkpoint-context.ts) | Read and modified file lists and the open todo list appended to a checkpoint |
+| [`src/bounded-input.ts`](src/bounded-input.ts) | Transcript summarizer input after a summary request overflows |
+| [`src/summary-retry.ts`](src/summary-retry.ts) | Transient summary-failure classification and cancellable backoff |
 | [`src/config.ts`](src/config.ts) | Load-time validation and routed-model policy resolution |
 | [`src/types.ts`](src/types.ts) | `BasicCompactionConfig` and resolved policy vocabulary |
 | — | No runtime invariant companion is published; this package exposes no independent event sequence or mutable data relation beyond contracts enforced at its owning seam. The durable bracket remains observable in the session log. |
@@ -167,7 +199,7 @@ Read these pages when the package-level contract is not enough; they move from t
 
 #### What the model sees
 
-After a successful step crosses the threshold, oversized tool results are first rewritten when the optional pruner is loaded. If summarization remains necessary, the next request receives the checkpoint preamble below, a blank line, `<compacted-summary>`, the data-dependent summary, and `</compacted-summary>`. Overflow recovery rebuilds the immediate retry from whatever replacement advanced the surface. A checkpoint replaces the selected older range and is followed by the retained recent units.
+After a successful step crosses the threshold, oversized tool results are first rewritten when the optional pruner is loaded. If summarization remains necessary, the next request receives the checkpoint preamble below, a blank line, `<compacted-summary>`, the data-dependent summary, `</compacted-summary>`, and then any non-empty working-state sections below. Overflow recovery rebuilds the immediate retry from whatever replacement advanced the surface. A checkpoint replaces the selected older range and is followed by the retained recent units.
 
 ##### Conversation checkpoint preamble
 
@@ -175,9 +207,30 @@ After a successful step crosses the threshold, oversized tool results are first 
 This is an automatically generated checkpoint condensing an earlier span of the conversation to free up context. Treat the captured context as established background and build on it without restating it. Continue the task directly from the messages that follow, without acknowledging this checkpoint.
 ```
 
+##### Working-state sections
+
+Each section appears only when it has entries, in this order, separated by a blank line. The sections immediately follow `</compacted-summary>` in a separate text block. A list longer than its cap begins with `... N earlier paths not shown` (file lists, which keep the newest paths) or ends with `... N more not shown` (the todo list).
+
+```text
+<read-files>
+src/a.ts
+docs/b.md
+</read-files>
+
+<modified-files>
+src/index.ts
+</modified-files>
+
+<todo-list>
+- [in_progress] Write the tests
+- [pending] Update the README
+- [completed] Plan the change
+</todo-list>
+```
+
 #### Token effect
 
-Model-free pruning can avoid the auxiliary call entirely; otherwise it reduces that call's transcript before the summary replaces an older range. The replacement reduces future input history rather than appending a second copy. A summary remains until a later compaction replaces it, while an indivisible non-tool unit can still exceed the budget.
+The working-state sections add one line per listed path or todo item, bounded at 50 per list, and count toward the shrink check that every checkpoint must pass. Model-free pruning can avoid the auxiliary call entirely; otherwise it reduces that call's transcript before the summary replaces an older range. The replacement reduces future input history rather than appending a second copy. A summary remains until a later compaction replaces it, while an indivisible non-tool unit can still exceed the budget.
 
 #### KV Cache effect
 
@@ -228,13 +281,21 @@ Rules:
 - If the conversation already contains a <compacted-summary> block, it is a PRIOR checkpoint. Do not copy it forward verbatim: preserve still-true facts, drop stale ones, and merge newer information into a single consolidated summary under the same structure.
 ```
 
+When the replayed request exceeds the summarizing model's context window, the retry sends no system prompt and no tools: one user message holding the lead-in below, a blank line, and the span as a transcript inside `<conversation>` tags, followed by the same compaction instruction. Transcript entries are `[User]: `, `[Assistant]: `, `[Assistant reasoning]: `, `[Assistant tool call]: name(arguments)`, `[Tool result]: `, and `[Tool error]: `, separated by blank lines; images and files appear as `[image]` and `[file]`. A cut entry ends with `[... N more characters truncated]`.
+
+##### Bounded transcript lead-in
+
+```markdown
+The conversation to condense is serialized below as a transcript. Tool results, tool-call arguments, and reasoning longer than 2,000 characters are cut, with a marker giving the number of characters removed.
+```
+
 #### Token effect
 
-This is a separate model call: the replayed conversation prefix plus the fixed instruction as input, with `maxTokens`-capped output. Convergence retries can pay this cost more than once.
+This is a separate model call: the replayed conversation prefix plus the fixed instruction as input, with `maxTokens`-capped output. Convergence retries, transient-failure retries, and bounded overflow attempts can pay this cost more than once; a bounded attempt's input is at most the span's text with long tool output cut.
 
 #### KV Cache effect
 
-The summarizer can reuse a matching request prefix before its final instruction. A different provider/model, a non-head range, or a prefix missing tool-update anchors can prevent that reuse; provider caching determines the actual savings.
+The summarizer can reuse a matching request prefix before its final instruction. A different provider/model, a non-head range, or a prefix missing tool-update anchors can prevent that reuse; provider caching determines the actual savings. A bounded transcript attempt shares no prefix with the conversation and is always a cache miss.
 
 ## Known Limitations and Deferred Work
 
@@ -244,9 +305,11 @@ The summarizer can reuse a matching request prefix before its final instruction.
 These limits define when automatic condensation is a poor fit or needs special care; they are the current package constraints.
 
 - **Meter accuracy follows the fixed heuristic** — missing reusable provider usage falls back to character count plus structural overhead rather than exact tokenization; image occurrences carry provider-exact visual tokens only on routes whose adapter declares request-image pricing.
-- **Overflow classification is adapter-maintained** — provider wording can change; both DeepSeek adapters normalize recognized context-limit failures to `CONTEXT_WINDOW_EXCEEDED`.
+- **Overflow classification is adapter-maintained** — provider wording can change; the pi-ai adapter normalizes recognized context-limit failures to `CONTEXT_WINDOW_EXCEEDED`.
 - **Some indivisible-unit and envelope-only overflow remains outside surface compaction** — recovery cannot shrink system/tools/prefix, split an indivisible non-tool node, or repair a tool unit whose non-prunable remainder still exceeds the window. The optional pruner can shrink text-bearing tool-result bulk inside an otherwise indivisible pair.
 - **`compactRegion` requires an open turn** — a manual call on a fully-closed session throws ("no open turn") rather than compacting.
+- **The log does not record which summarizer input form ran** — `compaction/summary` keeps the summary, route, and usage, but not whether the replayed prefix or a bounded transcript produced it, or how many attempts failed first; only the warning log does. The checkpoint text itself is durable.
+- **Working-state lists see only file-tool and todo calls** — paths changed through `bash` or `pwsh` are not listed, even when a shell change report recorded them, because that report is display-only by design; paths are listed as the model wrote them, without resolving them against the working directory.
 - **Summarization failure preserves the latest durable surface** — before any replacement, the auto path logs a warning and proceeds with full over-budget history. If pruning already landed, a later summarization failure proceeds from that durable pruned surface. Summarization truncation at `maxTokens`, which hidden reasoning tokens can consume, follows the same rule.
 
 <a id="dev-note"></a>

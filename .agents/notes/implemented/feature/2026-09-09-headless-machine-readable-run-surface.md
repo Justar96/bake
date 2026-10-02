@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-09-headless-machine-readable-run-surface.zh.md)
-
 ## Problem
 
 `dsh --profile headless` serves a human terminal: the task arrives only through argv, stdout carries one final assistant message, provider reasoning streams to stderr, and every run creates a fresh random session. [Headless is a direct core entry point](../../archived/architecture/2026-08-09-headless-direct-core-entry-point.md) owns that transport and completion contract; [headless reasoning progress](../../archived/feature/2026-08-21-headless-reasoning-progress.md) owns the stderr projection.

@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-12-ralph-off-in-shipped-defaults.zh.md)
-
 ## Problem
 
 The `ralph` tool runs a fixed foreground loop of fresh, unseeded child agents and returns when a worker reports completion or a concrete blocker. Its own model-facing description restricts it to runs the direct human explicitly asked for, and its README records that completion is a worker self-declaration with no independent evaluator and that the loop has no background collection, resume checkpoint, or scheduler.

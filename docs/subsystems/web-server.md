@@ -1,7 +1,5 @@
 # HTTP Server
 
-English | [中文](web-server.zh.md)
-
 [dsh-host-webserver](../../packages/host/webserver) provides HTTP routing over `node:http`, with named routes, one claimable fallback handler, and optional compression. It is independent of the agent loop; other plugins register their own routes.
 
 Source: [`packages/host/webserver/src/index.ts`](../../packages/host/webserver/src/index.ts)

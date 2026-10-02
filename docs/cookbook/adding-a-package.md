@@ -1,7 +1,5 @@
 # Cookbook: adding a workspace package
 
-English | [中文](adding-a-package.zh.md)
-
 The file-by-file checklist for a new `@deepseek-ai/dsh-<name>` package. This checklist is validated against the bash and adapter packages as templates; if it drifts from them, fix it here.
 
 ## 1. Create the package
@@ -31,7 +29,7 @@ In-package relative imports use explicit `.ts` specifiers in source (for example
 | File | Change |
 |---|---|
 | `tsconfig.base.json` | no edit for an existing group; for a new group, add a `./packages/<group>/*/src` candidate to the `@deepseek-ai/dsh-*` wildcard |
-| `tsconfig.host.json` (Host package) or `tsconfig.client.json` (Client package) | add `{ "path": "./packages/<group>/<pkg>" }` to `references` — an ordinary package belongs to exactly one aggregate, never both. `api/remotes` uses a repository-specific split because the Host generates a contract that the Client consumes in a later phase; new packages must not copy it ([layout](../development.md#typescript-project-layout)) |
+| `tsconfig.host.json` (Host package) or `tsconfig.client.json` (Client package) | add `{ "path": "./packages/<group>/<pkg>" }` to `references` — an ordinary package belongs to exactly one aggregate, never both. `api/remotes` uses a repository-specific split because the Host generates a contract that the Client consumes in a later phase; new packages must not copy it ([layout](../development.md#conventions)) |
 
 A `packages/client/*` package additionally extends `tsconfig.base.client.json` instead of `tsconfig.base.json`, and a client plugin package declares `dsh.client` in package.json, exports `./client`, and calls the shared tsdown preset (`packages/client/tsdown.client.ts`) — see [packages/client/AGENTS.md](../../packages/client/AGENTS.md) for the client-side contract.
 
@@ -71,7 +69,7 @@ Use `SDK` only for the JSON-RPC client/server protocol used by the supported Pyt
 
 ## 4. Write the package README
 
-Keep package-specific service API, config, events, extension points, and design notes first. Choose the frontmatter `kind` from the four kind labels in the [dsh-doc metadata reference](../../.agents/skills/dsh-doc/references/metadata-links-i18n.md#the-kind-system) — group, reference, library, or bundle — matching the package's repository position and entry shape; each kind selects one README template. The limitations section records durable consumer gaps and non-obvious maintainer constraints owned by this package; ordinary cleanup stays in its source TODO or Agent Note. An indirect Model Experience sentence may name the consumer that surfaces this package's contribution, but it does not restate that consumer's implementation. End a package README with this canonical sequence:
+Keep package-specific service API, config, events, extension points, and design notes first. Choose the frontmatter `kind` from the four kind labels in the [dsh-doc metadata reference](../../.agents/skills/dsh-doc/references/metadata-links.md#the-kind-system) — group, reference, library, or bundle — matching the package's repository position and entry shape; each kind selects one README template. The limitations section records durable consumer gaps and non-obvious maintainer constraints owned by this package; ordinary cleanup stays in its source TODO or Agent Note. An indirect Model Experience sentence may name the consumer that surfaces this package's contribution, but it does not restate that consumer's implementation. End a package README with this canonical sequence:
 
 ````markdown
 ## Model Experience

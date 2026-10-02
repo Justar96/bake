@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-09-nontransactional-loader.zh.md)
-
 ## Problem
 
 Transactional config reload preserves an old plugin generation after a failed edit, but requires Loader to own candidate imports, lifecycle settlement, rollback, option identity, and Include serialization. These changes make the vendored implementation substantially different from its pinned sources. Application startup and profile patch watching also depend on that settlement implicitly.

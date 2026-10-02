@@ -1,6 +1,6 @@
 # AGENTS.md — Harness Packages
 
-These package-specific rules supplement the repo-wide [conventions](../AGENTS.md#conventions).
+These package-specific rules supplement the repo-wide [conventions](../AGENTS.md#engineering).
 
 - **Plugin exports:** service packages default-export their service class; function plugins named-export `name` / `inject` / `Config` / `apply` and have no default export. Mixing the forms makes the Loader discard the function plugin's namespace.
 - **Optional services use `ctx.get(name)`.** Reserve `ctx.<name>` for declared injections; the property proxy is topology-sensitive, while strict `ctx.get` reads the global service store.
@@ -15,12 +15,12 @@ These package-specific rules supplement the repo-wide [conventions](../AGENTS.md
 - **Publish state only at its commit point.** Emit each notification and update derived state only after the operation succeeds; derive caches, prompts, UI echoes, replay, and query views from one authoritative source.
 - **Apply bounds to the complete result.** Enforce byte, token, item, and time limits where the complete emitted or retained value, including wrappers and metadata, is known; test tiny and exact limits, oversized single chunks, and multibyte byte limits.
 - **Registry contributions prove disposal** through the HMR-safety test required by [testing policy](../docs/testing.md): dispose the fiber and observe removal.
-- **Specs run concurrently** in forked workers beside other gate processes. Own each acquired port, path, and child process through teardown; a spec that passes only when run alone is a defect in the spec ([execution model](../docs/testing.md#how-specs-execute)).
+- **Specs run concurrently** in forked workers beside other gate processes. Own each acquired port, path, and child process through teardown; a spec that passes only when run alone is a defect in the spec ([execution model](../docs/testing.md)).
 - **Publish `./invariant` only for diverging observations.** Check an owned relation under the manifest name. Otherwise omit wiring and give the package-specific README reason. Empty companions and ignored reporters fail [`verify-package-invariants`](../.agents/notes/implemented/simplification/2026-08-28-omit-unneeded-invariant-companions.md).
 
 [Naming rules](../docs/cookbook/adding-a-package.md#name-the-role-that-exists):
 
-- **Package tsconfig:** extends `tsconfig.base.json` (Client: `tsconfig.base.client.json`), sets `rootDir: src` and `outDir: lib/types`, references workspace dependencies, references `runtime-diagnostics/invariants` only when the package publishes `./invariant`, and registers in one aggregate. Packages with distinct Host and Client compiler faces use `tsconfig.host.json` and `tsconfig.client.json` leaves plus a solution-only root; ordinary two-entry Client plugins do not split ([layout](../docs/development.md#typescript-project-layout)).
+- **Package tsconfig:** extends `tsconfig.base.json` (Client: `tsconfig.base.client.json`), sets `rootDir: src` and `outDir: lib/types`, references workspace dependencies, references `runtime-diagnostics/invariants` only when the package publishes `./invariant`, and registers in one aggregate. Packages with distinct Host and Client compiler faces use `tsconfig.host.json` and `tsconfig.client.json` leaves plus a solution-only root; ordinary two-entry Client plugins do not split ([layout](../docs/development.md#conventions)).
 - `src/types.ts` contains only types — no runtime code.
 - Tests live at package level under `tests/`, not `src/__tests__/`.
 - Update package README and JSDoc contracts in the same commit as behavior, and verify them against code with [dsh-prose-standard](../.agents/skills/dsh-prose-standard/SKILL.md). Group READMEs declare subsystem ownership through a canonical English page link or justified exemption.

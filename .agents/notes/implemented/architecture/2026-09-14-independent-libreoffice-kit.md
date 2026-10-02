@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-14-independent-libreoffice-kit.zh.md)
-
 ## Problem
 
 LibreOffice compilation, source patches, platform qualification, and large binary releases have a different maintenance cycle from Harness plugins. Keeping them in the application workspace expands routine CI and couples engine repairs to monorepo package rules.

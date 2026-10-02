@@ -5,8 +5,6 @@ kind: "package-library"
 
 # @deepseek-ai/dsh-lazy-require
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 `dsh-lazy-require` keeps a CommonJS-compatible Host dependency unloaded until its first real operation. Resolution remains relative to the consuming package, and one successful module value is reused for the rest of the process realm.

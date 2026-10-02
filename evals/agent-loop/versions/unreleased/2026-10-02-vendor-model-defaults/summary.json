@@ -1,0 +1,610 @@
+{
+  "title": "Vendor catalog defaults for hand-declared route models: claude-sonnet-5-5 over CLIProxyAPI",
+  "version": "7428f19+vendor-defaults",
+  "arms": {
+    "base": {
+      "version": "v0.3.2+7428f19",
+      "revision": {
+        "root": "/home/jt-devnet/bake/.agents/worktrees/eval-route-base",
+        "commit": "7428f19adb9753aa2cc975003047b1f94b0ae421",
+        "dirty": false
+      }
+    },
+    "candidate": {
+      "version": "7428f19+vendor-defaults",
+      "revision": {
+        "root": "/home/jt-devnet/bake",
+        "commit": "7428f19adb9753aa2cc975003047b1f94b0ae421",
+        "dirty": true
+      }
+    }
+  },
+  "candidate": "candidate",
+  "bases": [
+    "v0.3.2+7428f19"
+  ],
+  "models": [
+    "claude-sonnet-5-5",
+    "gpt-6.1-sol"
+  ],
+  "scenarios": [
+    "multi_file_edit",
+    "multi_site_edit",
+    "no_tools",
+    "ordinary_edit",
+    "path_discovery",
+    "shell_then_edit",
+    "stale_edit",
+    "unprompted_edit",
+    "workflow_script"
+  ],
+  "trials": 1,
+  "startedAt": "2026-10-01T19:12:36.665Z",
+  "harness": "evals/agent-loop/run.ts",
+  "note": "Candidate: a hand-declared pi-ai route entry whose id its family's vendor publishes takes that vendor's context window, output capability, inputs, and, over the vendor's protocol, effort levels and adaptive thinking from the installed catalog, at route resolution; nothing is written to settings. The base is a clean worktree of 7428f19. Both arms read a copy of the settings saved before this work (HOME=/tmp/bake-eval-home), in which CLIProxyAPI lists claude-sonnet-5-5 bare. One trial of the standard suite per model. claude-sonnet-5-5: every base run exits at startup with UNSUPPORTED_REASONING_EFFORT medium before any request, so its 9 failures (8 task cells plus no_tools) and the absent token comparison are the defect this fixes; every candidate run succeeds, and its no_tools request carries thinking adaptive with output_config effort medium. gpt-6.1-sol is the control, whose saved entry already states its efforts: 18 of 18 succeed, total tokens 162205 against 161877, and the no_tools request bodies are identical apart from the cache key.",
+  "settings": {
+    "effort": "medium where the model offers it; DeepSeek runs at high, its default, having no medium",
+    "maxOutputTokens": 8192,
+    "capMs": 180000,
+    "maxRequests": {
+      "default": 14,
+      "workflow_script": 40,
+      "delegation": 40,
+      "delegation_auto": 40
+    }
+  },
+  "regressionRule": "all tasks, per model: total tokens with the 95% interval above zero; failures +2 or more; any tool-error increase",
+  "regressions": [],
+  "perModel": {
+    "claude-sonnet-5-5": {
+      "samples": 9,
+      "successes": 9,
+      "firstRequestBytes": 20895,
+      "toolSchemaChars": 19740,
+      "meanTotalTokensPerTask": 27749,
+      "meanRequestsPerTask": 4,
+      "cacheReadShare": 0.933,
+      "toolErrors": 0,
+      "comparisons": {
+        "v0.3.2+7428f19": {
+          "all tasks": {
+            "cells": 8,
+            "pairs": 0,
+            "failures": [
+              8,
+              0
+            ],
+            "totalTokens": null,
+            "logicalInputTokens": null,
+            "uncachedInputTokens": null,
+            "requests": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              0,
+              0
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          },
+          "multi_file_edit": {
+            "cells": 1,
+            "pairs": 0,
+            "failures": [
+              1,
+              0
+            ],
+            "totalTokens": null,
+            "logicalInputTokens": null,
+            "uncachedInputTokens": null,
+            "requests": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              0,
+              0
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          },
+          "multi_site_edit": {
+            "cells": 1,
+            "pairs": 0,
+            "failures": [
+              1,
+              0
+            ],
+            "totalTokens": null,
+            "logicalInputTokens": null,
+            "uncachedInputTokens": null,
+            "requests": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              0,
+              0
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          },
+          "ordinary_edit": {
+            "cells": 1,
+            "pairs": 0,
+            "failures": [
+              1,
+              0
+            ],
+            "totalTokens": null,
+            "logicalInputTokens": null,
+            "uncachedInputTokens": null,
+            "requests": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              0,
+              0
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          },
+          "path_discovery": {
+            "cells": 1,
+            "pairs": 0,
+            "failures": [
+              1,
+              0
+            ],
+            "totalTokens": null,
+            "logicalInputTokens": null,
+            "uncachedInputTokens": null,
+            "requests": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              0,
+              0
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          },
+          "shell_then_edit": {
+            "cells": 1,
+            "pairs": 0,
+            "failures": [
+              1,
+              0
+            ],
+            "totalTokens": null,
+            "logicalInputTokens": null,
+            "uncachedInputTokens": null,
+            "requests": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              0,
+              0
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          },
+          "stale_edit": {
+            "cells": 1,
+            "pairs": 0,
+            "failures": [
+              1,
+              0
+            ],
+            "totalTokens": null,
+            "logicalInputTokens": null,
+            "uncachedInputTokens": null,
+            "requests": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              0,
+              0
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          },
+          "unprompted_edit": {
+            "cells": 1,
+            "pairs": 0,
+            "failures": [
+              1,
+              0
+            ],
+            "totalTokens": null,
+            "logicalInputTokens": null,
+            "uncachedInputTokens": null,
+            "requests": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              0,
+              0
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          },
+          "workflow_script": {
+            "cells": 1,
+            "pairs": 0,
+            "failures": [
+              1,
+              0
+            ],
+            "totalTokens": null,
+            "logicalInputTokens": null,
+            "uncachedInputTokens": null,
+            "requests": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              0,
+              0
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          }
+        }
+      }
+    },
+    "gpt-6.1-sol": {
+      "samples": 9,
+      "successes": 9,
+      "firstRequestBytes": 20537,
+      "toolSchemaChars": 19349,
+      "meanTotalTokensPerTask": 19793,
+      "meanRequestsPerTask": 5.13,
+      "cacheReadShare": 0.635,
+      "toolErrors": 0,
+      "comparisons": {
+        "v0.3.2+7428f19": {
+          "all tasks": {
+            "cells": 8,
+            "pairs": 8,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": 0,
+              "lo": -9.3,
+              "hi": 8.9
+            },
+            "logicalInputTokens": {
+              "pct": 0.1,
+              "lo": -9.6,
+              "hi": 9.3
+            },
+            "uncachedInputTokens": {
+              "pct": 8.5,
+              "lo": -23.5,
+              "hi": 46.2
+            },
+            "requests": [
+              41,
+              41
+            ],
+            "toolCalls": [
+              31,
+              32
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          },
+          "multi_file_edit": {
+            "cells": 1,
+            "pairs": 1,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": -24.5,
+              "lo": -24.5,
+              "hi": -24.5
+            },
+            "logicalInputTokens": {
+              "pct": -25.1,
+              "lo": -25.1,
+              "hi": -25.1
+            },
+            "uncachedInputTokens": {
+              "pct": 5.4,
+              "lo": 5.4,
+              "hi": 5.4
+            },
+            "requests": [
+              5,
+              4
+            ],
+            "toolCalls": [
+              4,
+              6
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          },
+          "multi_site_edit": {
+            "cells": 1,
+            "pairs": 1,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": -2.1,
+              "lo": -2.1,
+              "hi": -2.1
+            },
+            "logicalInputTokens": {
+              "pct": -2.8,
+              "lo": -2.8,
+              "hi": -2.8
+            },
+            "uncachedInputTokens": {
+              "pct": -17.7,
+              "lo": -17.7,
+              "hi": -17.7
+            },
+            "requests": [
+              4,
+              4
+            ],
+            "toolCalls": [
+              3,
+              3
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          },
+          "ordinary_edit": {
+            "cells": 1,
+            "pairs": 1,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "logicalInputTokens": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "uncachedInputTokens": {
+              "pct": 73.3,
+              "lo": 73.3,
+              "hi": 73.3
+            },
+            "requests": [
+              5,
+              5
+            ],
+            "toolCalls": [
+              4,
+              4
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          },
+          "path_discovery": {
+            "cells": 1,
+            "pairs": 1,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": 22.2,
+              "lo": 22.2,
+              "hi": 22.2
+            },
+            "logicalInputTokens": {
+              "pct": 22.7,
+              "lo": 22.7,
+              "hi": 22.7
+            },
+            "uncachedInputTokens": {
+              "pct": 80,
+              "lo": 80,
+              "hi": 80
+            },
+            "requests": [
+              5,
+              6
+            ],
+            "toolCalls": [
+              6,
+              5
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          },
+          "shell_then_edit": {
+            "cells": 1,
+            "pairs": 1,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": -0.4,
+              "lo": -0.4,
+              "hi": -0.4
+            },
+            "logicalInputTokens": {
+              "pct": -0.3,
+              "lo": -0.3,
+              "hi": -0.3
+            },
+            "uncachedInputTokens": {
+              "pct": -47.9,
+              "lo": -47.9,
+              "hi": -47.9
+            },
+            "requests": [
+              6,
+              6
+            ],
+            "toolCalls": [
+              5,
+              5
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          },
+          "stale_edit": {
+            "cells": 1,
+            "pairs": 1,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": 9.3,
+              "lo": 9.3,
+              "hi": 9.3
+            },
+            "logicalInputTokens": {
+              "pct": 9.8,
+              "lo": 9.8,
+              "hi": 9.8
+            },
+            "uncachedInputTokens": {
+              "pct": 57.7,
+              "lo": 57.7,
+              "hi": 57.7
+            },
+            "requests": [
+              4,
+              4
+            ],
+            "toolCalls": [
+              3,
+              3
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          },
+          "unprompted_edit": {
+            "cells": 1,
+            "pairs": 1,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": 0.2,
+              "lo": 0.2,
+              "hi": 0.2
+            },
+            "logicalInputTokens": {
+              "pct": 0.1,
+              "lo": 0.1,
+              "hi": 0.1
+            },
+            "uncachedInputTokens": {
+              "pct": 11.2,
+              "lo": 11.2,
+              "hi": 11.2
+            },
+            "requests": [
+              4,
+              4
+            ],
+            "toolCalls": [
+              3,
+              3
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          },
+          "workflow_script": {
+            "cells": 1,
+            "pairs": 1,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": -1.6,
+              "lo": -1.6,
+              "hi": -1.6
+            },
+            "logicalInputTokens": {
+              "pct": -1,
+              "lo": -1,
+              "hi": -1
+            },
+            "uncachedInputTokens": {
+              "pct": -38.5,
+              "lo": -38.5,
+              "hi": -38.5
+            },
+            "requests": [
+              8,
+              8
+            ],
+            "toolCalls": [
+              3,
+              3
+            ],
+            "toolErrors": [
+              0,
+              0
+            ]
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,4 +1,4 @@
-import { ToolCallId, createUserMessage } from '@deepseek-ai/dsh-llm'
+import { ToolCallId, createUserMessage, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { type Agent, type AgentOptions } from '@deepseek-ai/dsh-agent'
@@ -172,16 +172,20 @@ describe('startInProcessRun', () => {
 
   it('keeps earlier streamed text when the final step appends an empty usage-only message', async () => {
     // A tool-only max-tokens step records an empty assistant/message for
-    // usage. The result retains the preceding assistant output.
+    // usage. The loop asks once for the dropped call, and the retry is cut off
+    // the same way, so the run ends on a usage-only message. The result
+    // retains the preceding assistant output.
+    const truncatedCall = (id: string): StreamChunk[] => [
+      { type: 'block-start', index: 0, blockType: 'tool-call' },
+      { type: 'tool-call-delta', index: 0, id: ToolCallId(id), name: 'noop', argumentsDelta: '{}' },
+      { type: 'block-end', index: 0, block: { type: 'tool-call', id: ToolCallId(id), name: 'noop', arguments: '{}' } },
+      { type: 'usage', usage: { inputTokens: 20, outputTokens: 5 } },
+      { type: 'finish', reason: { kind: 'max-tokens' } },
+    ]
     const { ctx, parent } = await setup([
       toolCallResponse('t1', 'noop', {}, 'partial one'),
-      [
-        { type: 'block-start', index: 0, blockType: 'tool-call' },
-        { type: 'tool-call-delta', index: 0, id: ToolCallId('t2'), name: 'noop', argumentsDelta: '{}' },
-        { type: 'block-end', index: 0, block: { type: 'tool-call', id: ToolCallId('t2'), name: 'noop', arguments: '{}' } },
-        { type: 'usage', usage: { inputTokens: 20, outputTokens: 5 } },
-        { type: 'finish', reason: { kind: 'max-tokens' } },
-      ],
+      truncatedCall('t2'),
+      truncatedCall('t3'),
     ])
     const disposeNoop = ctx.tools.register(defineContentToolFixture({
       name: 'noop', description: 'probe', parameters: {},

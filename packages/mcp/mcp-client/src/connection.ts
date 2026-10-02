@@ -15,12 +15,13 @@
  * @module
  */
 
-import { Client, type Transport } from '@modelcontextprotocol/client'
+import { McpClient, type McpTransport } from '@earendil-works/pi-mcp'
 import type { Context } from '@deepseek-ai/cordis'
 import { assertNever, type JsonValue } from '@deepseek-ai/dsh-util-values'
 import type { ServerContext } from './server-context.ts'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
 import { createTransport } from './transport.ts'
+import { parseReadResourceResult, resourceListResult, resourceTemplateListResult } from './protocol.ts'
 import { syncTools } from './tools.ts'
 import type { ToolBridgeOptions, ToolDisposers } from './tools.ts'
 import type { Config } from './index.ts'
@@ -48,10 +49,15 @@ export const RECONNECT_DEFAULTS: Required<ReconnectConfig> = Object.freeze({
 /** Default UTF-8 byte limit for attributed server instructions. */
 export const DEFAULT_MAX_INSTRUCTION_BYTES = 32_768
 
-// The SDK's stdio transport owns two two-second termination grace periods.
-// Keep one additional second for the process-close event that proves the old
-// generation is gone; timing out fails closed instead of overlapping children.
+// pi-mcp's stdio close ends stdin, sends SIGTERM to the server's process group
+// after 500 ms, and SIGKILL 2 s later. Keep the remaining time for the
+// process-close event that proves the old generation is gone; timing out fails
+// closed instead of overlapping children.
 const GENERATION_CLOSE_TIMEOUT_MS = 5_000
+
+// Budget for `initialize` and discovery requests, which have no per-call
+// config. Tool calls and resource requests use `toolCallTimeoutMs`.
+const PROTOCOL_REQUEST_TIMEOUT_MS = 60_000
 
 /** Fully resolved reconnect policy captured at plugin load. */
 export type ResolvedReconnectPolicy = Readonly<Required<ReconnectConfig>>
@@ -143,7 +149,7 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
   const maxInstructionBytes = config.maxInstructionBytes ?? DEFAULT_MAX_INSTRUCTION_BYTES
   let serverInstructions = ''
   /** Current generation: the connecting or connected client; undefined during backoff waits and after final failure. */
-  let client: Client | undefined
+  let client: McpClient | undefined
   /** Transport-aware close operation paired with {@link client}. */
   let closeClient: (() => Promise<boolean>) | undefined
   /** Live tool registrations owned by this server; only {@link enqueueSync} and dispose swap it. */
@@ -157,7 +163,7 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
   let firstAttemptError: unknown
 
   /** A generation may act only while it is the current one on a live plugin. */
-  const isCurrent = (generation: Client): boolean => !disposed && client === generation
+  const isCurrent = (generation: McpClient): boolean => !disposed && client === generation
 
   /**
    * Serializes every syncTools call — initial syncs and notification re-syncs
@@ -166,7 +172,7 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
    * generation and leak another).
    */
   let syncChain: Promise<void> = Promise.resolve()
-  function enqueueSync(generation: Client, syncOpts: ToolBridgeOptions = opts): Promise<void> {
+  function enqueueSync(generation: McpClient, syncOpts: ToolBridgeOptions = opts): Promise<void> {
     const run = syncChain.then(async () => {
       if (!isCurrent(generation)) return
       disposers = await syncTools(generation, ctx, syncOpts, disposers)
@@ -177,7 +183,7 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
   }
 
   /** One disconnect decision per generation: the isCurrent guard makes racing close/error signals idempotent. */
-  function generationDown(generation: Client): void {
+  function generationDown(generation: McpClient): void {
     if (!isCurrent(generation)) return
     client = undefined
     closeClient = undefined
@@ -185,7 +191,7 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
   }
 
   /** Decide retry ownership after a failed connection's close barrier settles. */
-  function settleFailedGeneration(generation: Client, quiesced: boolean): void {
+  function settleFailedGeneration(generation: McpClient, quiesced: boolean): void {
     if (!isCurrent(generation)) return
     if (!quiesced) {
       client = undefined
@@ -196,15 +202,21 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
     generationDown(generation)
   }
 
-  /** Wait for the transport-owned close signal without letting a broken transport wedge teardown forever. */
-  function waitForClose(closed: Promise<void>): Promise<boolean> {
+  /**
+   * Wait for the transport-owned close signal without letting a broken
+   * transport wedge teardown forever. A rejected close settles at once with
+   * whatever closure was already observed.
+   */
+  function waitForClose(closing: Promise<void>, closed: Promise<void>, hasClosed: () => boolean): Promise<boolean> {
     return new Promise((resolve) => {
+      const settle = (quiesced: boolean): void => {
+        clearTimeout(timeout)
+        resolve(quiesced)
+      }
       const timeout = setTimeout(() => { resolve(false) }, GENERATION_CLOSE_TIMEOUT_MS)
       timeout.unref()
-      void closed.then(() => {
-        clearTimeout(timeout)
-        resolve(true)
-      })
+      void closed.then(() => { settle(true) })
+      closing.catch(() => { settle(hasClosed()) })
     })
   }
 
@@ -245,53 +257,38 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
   }
 
   /**
-   * One connection attempt: fresh transport + client (the MCP SDK binds a
-   * Protocol to one transport for life), connect, then queue the initial tool
-   * sync. The startup flag belongs to the attempt rather than the shared sync
-   * queue, so an early notification cannot consume strict startup semantics.
-   * Every failure funnels through {@link generationDown}; success arms the
-   * onclose-driven disconnect path. Never rejects.
+   * One connection attempt: fresh transport + client (an McpClient connects
+   * once for life), connect, then queue the initial tool sync. The startup
+   * flag belongs to the attempt rather than the shared sync queue, so an early
+   * notification cannot consume strict startup semantics. Every failure
+   * funnels through {@link generationDown}; success arms the transport-close
+   * disconnect path. Never rejects.
    *
    * @param startup - Whether this is the plugin's activation attempt.
    */
   async function connectGeneration(startup: boolean): Promise<void> {
-    const generation = new Client(
-      { name: 'dsh-mcp-client', version: '0.0.1' },
-      {
-        capabilities: {},
-        versionNegotiation: { mode: 'auto' },
-        listChanged: {
-          tools: {
-            autoRefresh: false,
-            debounceMs: 0,
-            onChanged: () => { void refreshTools() },
-          },
-        },
-      },
-    )
+    const generation = new McpClient({
+      name: 'dsh-mcp-client',
+      version: '0.0.1',
+      requestTimeoutMs: PROTOCOL_REQUEST_TIMEOUT_MS,
+    })
     const closed: PromiseWithResolvers<void> = Promise.withResolvers()
     let attemptSettled = false
     let closeObserved = false
-    let transport: Transport | undefined
+    let transport: McpTransport | undefined
     const hasClosed = (): boolean => closeObserved
     client = generation
     closeClient = closeGeneration
-    generation.onclose = () => {
-      closeObserved = true
-      closed.resolve()
-      // A failed connect owns its close barrier in the catch path below. An
-      // established generation can transition down directly from this signal.
-      if (attemptSettled) generationDown(generation)
-    }
-    /** Unattached probes close through their transport; attached clients must also report transport closure. */
+    /**
+     * Close the client, then its transport, and wait for the transport's own
+     * close signal. The client's close event fires before the transport
+     * stops, so only the transport signal proves the server is gone.
+     */
     async function closeGeneration(): Promise<boolean> {
-      const attached = generation.transport !== undefined
-      try {
-        await (attached ? generation.close() : transport?.close())
-      } catch (_error) {
-        if (!attached) return hasClosed()
-      }
-      return !attached || hasClosed() || await waitForClose(closed.promise)
+      const owned = transport
+      if (owned === undefined) return true
+      // A failed connect already closed its transport; transport close is idempotent.
+      return await waitForClose(generation.close().then(() => owned.close()), closed.promise, hasClosed)
     }
     async function refreshTools(): Promise<void> {
       if (!isCurrent(generation)) return
@@ -305,6 +302,18 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
     let instructions: string
     try {
       transport = createTransport(config)
+      transport.onClose(() => {
+        closeObserved = true
+        closed.resolve()
+        // A failed connect owns its close barrier in the catch path below. An
+        // established generation can transition down directly from this signal.
+        if (attemptSettled) generationDown(generation)
+      })
+      // Registered before connect: a server may announce a change as soon as
+      // it is initialized. Only servers that advertise the capability count.
+      generation.onNotification('notifications/tools/list_changed', () => {
+        if (generation.serverCapabilities?.tools?.listChanged === true) void refreshTools()
+      })
       await generation.connect(transport)
       if (hasClosed()) {
         attemptSettled = true
@@ -315,7 +324,7 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
         if (!await closeGeneration()) ctx.logger.error(incompleteDisposalMessage)
         return
       }
-      const serverText = generation.getInstructions()?.trimEnd() ?? ''
+      const serverText = generation.instructions?.trimEnd() ?? ''
       instructions = serverText ? `### MCP server: ${config.serverName}\n\n${serverText}` : ''
       if (Buffer.byteLength(instructions) > maxInstructionBytes) {
         throw new Error(`${label}: server instructions exceed maxInstructionBytes (${maxInstructionBytes})`)
@@ -352,9 +361,9 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
     // After settling: if client is set the initial connect+sync succeeded.
     // If not, the supervisor either scheduled a retry (error logged) or gave
     // up (error logged). Either way the outcome is reported with the real error.
-    // Note: settling.then() is a microtask; stdio onclose is a macrotask — so
-    // a server that crashes AFTER a successful initial sync cannot flip client
-    // to undefined before this continuation runs.
+    // Note: settling.then() is a microtask; the stdio close event is a
+    // macrotask — so a server that crashes AFTER a successful initial sync
+    // cannot flip client to undefined before this continuation runs.
     if (client !== undefined) return {}
     /* v8 ignore next -- defensive: firstAttemptError is always set when connect/sync fails */
     return { error: firstAttemptError ?? new Error(`${label}: initial connection failed`) }
@@ -367,18 +376,26 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
       async request(request, exec): Promise<JsonValue> {
         const generation = client
         if (!generation || connectedAt === undefined) throw new Error(`${label}: server is disconnected`)
-        const options = { signal: exec.signal, timeout: config.toolCallTimeoutMs }
+        const options = { signal: exec.signal, timeoutMs: config.toolCallTimeoutMs }
+        // A server without the resources capability lists nothing; reads still reach it.
+        const listable = generation.serverCapabilities?.resources !== undefined
         switch (request.method) {
-          case 'resources/list':
-            return await generation.listResources(
-              request.cursor === undefined ? undefined : { cursor: request.cursor }, options,
-            ) as JsonValue
-          case 'resources/templates/list':
-            return await generation.listResourceTemplates(
-              request.cursor === undefined ? undefined : { cursor: request.cursor }, options,
-            ) as JsonValue
+          case 'resources/list': {
+            if (!listable) return resourceListResult([])
+            if (request.cursor === undefined) return resourceListResult(await generation.listResources(options))
+            const page = await generation.listResourcesPage(request.cursor, options)
+            return resourceListResult(page.resources, page.nextCursor)
+          }
+          case 'resources/templates/list': {
+            if (!listable) return resourceTemplateListResult([])
+            if (request.cursor === undefined) {
+              return resourceTemplateListResult(await generation.listResourceTemplates(options))
+            }
+            const page = await generation.listResourceTemplatesPage(request.cursor, options)
+            return resourceTemplateListResult(page.resourceTemplates, page.nextCursor)
+          }
           case 'resources/read':
-            return await generation.readResource({ uri: request.uri }, options) as JsonValue
+            return parseReadResourceResult(await generation.readResource(request.uri, options))
           /* v8 ignore next 2 -- resource requests are the closed, typed tool operation union */
           default:
             return assertNever(request)

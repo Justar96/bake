@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-11-plugin-owned-message-projections.zh.md)
-
 ## Problem
 
 The dedicated [image-offload event](2026-09-10-image-offload-events.md) changes derived message content without replacing nodes. Implementing its image traversal and target validation inside Session makes each feature-specific message transformation a core change. The ordinary session-projection registry derives domain state but does not participate in canonical model-history derivation.

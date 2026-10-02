@@ -10,7 +10,7 @@ import { AnonymousEntries, NamedEntries, ScopedLayers, scopeOf, scopeTarget } fr
 import type { ScopeKey, ScopeLayer, Scoped } from '@deepseek-ai/dsh-scope'
 import type { ToolCallId, ContentBlock, ToolSchema } from '@deepseek-ai/dsh-llm'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Agent, ToolProgress } from '@deepseek-ai/dsh-agent'
 import type { Session, UserMessage } from '@deepseek-ai/dsh-session'
 import { assertNever, deepFreeze, snapshotJsonValue, type JsonValue } from '@deepseek-ai/dsh-util-values'
 import type { PromptSection, ToolProviderResult } from '@deepseek-ai/dsh-system-prompt'
@@ -40,9 +40,9 @@ import { renderToolsSdkPy } from './py-types.ts'
  * at. The `satisfies` clause pins this table's key set to that union, which
  * the flavor table is checked against too, so any of the three left out is a
  * typecheck failure. What no check reaches is the prose that names the values
- * instead of deriving them: the seam's `dsh-ptc-runtime` README pair, its
- * `PtcRuntime.language` JSDoc, and `docs/subsystems/ptc-runtime.md`
- * with its zh pair, plus this package's own README pair and the
+ * instead of deriving them: the seam's `dsh-ptc-runtime` README, its
+ * `PtcRuntime.language` JSDoc, and `docs/subsystems/ptc-runtime.md`,
+ * plus this package's own README and the
  * {@link Config.mode} JSDoc.
  */
 /**
@@ -94,6 +94,8 @@ export {
 } from './json-schema.ts'
 
 export type { PtcDispatchEventData, PtcDispatchStartEventData } from './types.ts'
+/** The progress snapshot a body publishes through {@link ToolRunContext.reportProgress}. */
+export type { ToolProgress } from '@deepseek-ai/dsh-agent'
 
 export { CodeRunFailedError, RUN_CODE_NAME } from './ptc.ts'
 export { TOOL_HELP_NAME } from './tool-help.ts'
@@ -141,7 +143,8 @@ declare module '@deepseek-ai/cordis' {
     /**
      * Allow, deny, cancel, or ask before dispatch. `next()` delegates to allow;
      * `cancel` selects the canonical pre-dispatch cancellation result, and missing
-     * approval support turns `ask` into denial. Async gates must observe
+     * approval support turns `ask` into denial. A `deny` carrying `halt` also
+     * stops the turn once the current tool batch settles. Async gates must observe
      * `exec.signal`; the registry rechecks cancellation after they settle but
      * never abandons their promise.
      * Scope-filtered dispatch (`@deepseek-ai/dsh-scope`): agent-scoped listeners receive only that agent's calls.
@@ -162,7 +165,8 @@ declare module '@deepseek-ai/cordis' {
     'tools/execute'(this: Scoped<ToolRuntime>, exec: ToolDispatchExecution, next: () => Promise<ToolExecutionResult>): Promise<ToolExecutionResult>
     /**
      * Accept, replace, enrich, or block a normalized dispatch result. `next()`
-     * accepts it unchanged; thrown tools still reach this waterfall as errors. Async
+     * accepts it unchanged; thrown tools still reach this waterfall as errors. A
+     * decision carrying `halt` stops the turn once the current tool batch settles. Async
      * listeners must observe `exec.signal`; after they settle, caller
      * cancellation replaces only a successful accepted outcome with the code
      * selected by whether the tool body was invoked.
@@ -345,6 +349,15 @@ export interface ToolExecutionInput {
   readonly parent?: ToolExecutionToken
   /** Required caller-owned cancellation for this invocation. */
   readonly signal: AbortSignal
+  /**
+   * Caller-owned, process-local receiver for the body's
+   * {@link ToolRunContext.reportProgress} snapshots. The registry forwards
+   * snapshots only while the body runs, contains a throwing receiver, and
+   * never exposes the receiver on the {@link ToolExecution} that policy
+   * listeners see. Absent, progress is discarded. Nothing it receives is
+   * logged or model-visible.
+   */
+  readonly onProgress?: (progress: ToolProgress) => void
 }
 
 /**
@@ -386,7 +399,7 @@ export interface PtcDispatchLog {
  * readonly. The registry freezes the complete object before `tools/result`
  * observers run.
  */
-export interface ToolExecution extends ToolExecutionInput {
+export interface ToolExecution extends Omit<ToolExecutionInput, 'onProgress'> {
   /** Root model-requested call, resolved for every root and nested execution. */
   readonly rootCallId: ToolCallId
   /** Registry-assigned identity shared with nested calls only as their opaque `parent` token. */
@@ -429,6 +442,13 @@ export interface ToolRunContext extends ToolExecution {
    */
   concludeTurn(): void
   /**
+   * Halt the current agent turn through this execution's own result, as a
+   * policy {@link ToolHalt} would. A composite that dispatches nested calls
+   * forwards a nested result's `halt` here, so the outer result stops the
+   * turn. The first recorded halt wins.
+   */
+  haltTurn(halt: ToolHalt): void
+  /**
    * Attach display-only metadata to this execution's successful top-level
    * result, for metadata that cannot derive from the canonical value: a
    * shell command's file changes, for example, which are not part of what the
@@ -441,6 +461,16 @@ export interface ToolRunContext extends ToolExecution {
    * @param meta - lossless JSON metadata, bounded by the caller.
    */
   presentResultMeta(meta: JsonValue): void
+  /**
+   * Publish a display-only snapshot of this call's progress, such as the
+   * newest output of a running command. Each snapshot replaces the previous
+   * one. It reaches the caller's {@link ToolExecutionInput.onProgress} only
+   * while the body runs; a call after the body settles, or without a
+   * receiver, is dropped. It is never logged and the model never sees it,
+   * so the canonical value must still carry everything the result means.
+   * @param progress - the newest snapshot; `output` must be a string.
+   */
+  reportProgress(progress: ToolProgress): void
 }
 
 /** Registry-owned live execution object; public pipeline views stay readonly. */
@@ -604,6 +634,8 @@ export interface ToolExecutionSuccess {
   readonly additionalContexts?: UserMessage[]
   /** The agent loop stops after committing this successful result batch. */
   readonly concludesTurn?: true
+  /** A policy decision halted the turn; see {@link ToolHalt}. */
+  readonly halt?: ToolHalt
 }
 
 /** Failed canonical tool execution; failures never carry a successful value. */
@@ -615,33 +647,53 @@ export interface ToolExecutionFailure {
   readonly meta?: JsonValue
   readonly additionalContexts?: UserMessage[]
   readonly concludesTurn?: never
+  /** A policy decision halted the turn; see {@link ToolHalt}. */
+  readonly halt?: ToolHalt
 }
 
 /** The discriminated, execution-local outcome of one tool call. */
 export type ToolExecutionResult = ToolExecutionSuccess | ToolExecutionFailure
 
 /**
+ * A policy request to stop the agent turn that owns a call. A `deny`
+ * pre-execute decision or any post-execute decision may carry one; it rides
+ * that call's final result, and a later listener cannot remove it. The agent
+ * loop lets the current tool batch settle, stops starting calls, records the
+ * canonical `ABORTED_BEFORE_DISPATCH` result for each call not yet started,
+ * and then cancels the turn with cause `{ kind: 'hook', reason }`, keeping
+ * pending inbox input for the next wake. The stream that requested the calls
+ * has already finished, and started calls are not aborted. A halt on a nested
+ * `run_code` sub-dispatch is forwarded onto the outer `run_code` result when
+ * that sub-dispatch commits, so it stops the turn once the program settles.
+ */
+export interface ToolHalt {
+  /** Why the turn stopped, recorded on the turn's cancellation cause; it is not model-visible. */
+  readonly reason: string
+}
+
+/**
  * Pre-dispatch decision. `allow` runs the call; `deny` materializes its
- * model-facing reason and optional structured error identity; `cancel` selects
- * the canonical cancellation result without presenting a policy denial; `ask`
- * runs only after an approval service returns `allowed-once` and otherwise
- * denies. Input rewriting is excluded because arguments are already logged and
- * presented.
+ * model-facing reason and optional structured error identity, and with `halt`
+ * also stops the turn; `cancel` selects the canonical cancellation result
+ * without presenting a policy denial; `ask` runs only after an approval service
+ * returns `allowed-once` and otherwise denies. Input rewriting is excluded
+ * because arguments are already logged and presented.
  */
 export type PreToolDecision =
   | { kind: 'allow' }
-  | { kind: 'deny'; reason: string; info?: ToolErrorInfo }
+  | { kind: 'deny'; reason: string; info?: ToolErrorInfo; halt?: ToolHalt }
   | { kind: 'cancel' }
   | { kind: 'ask'; reason?: string }
 
 /**
  * Post-dispatch decision: accept, replace one projection, attach context for the
  * next request, or block by turning corrective feedback into an error result.
+ * Any decision may also carry `halt` to stop the turn after the call commits.
  */
 export type PostToolDecision =
-  | { kind: 'accept'; content?: ContentBlock[]; value?: never; additionalContexts?: UserMessage[] }
-  | { kind: 'accept'; value: JsonValue; content?: never; additionalContexts?: UserMessage[] }
-  | { kind: 'block'; feedback: ContentBlock[]; additionalContexts?: UserMessage[] }
+  | { kind: 'accept'; content?: ContentBlock[]; value?: never; additionalContexts?: UserMessage[]; halt?: ToolHalt }
+  | { kind: 'accept'; value: JsonValue; content?: never; additionalContexts?: UserMessage[]; halt?: ToolHalt }
+  | { kind: 'block'; feedback: ContentBlock[]; additionalContexts?: UserMessage[]; halt?: ToolHalt }
 
 /**
  * Best-effort human-readable message from an arbitrary thrown value: Error
@@ -803,6 +855,15 @@ interface ToolAskResolution {
   readonly approvalCancelled: boolean
 }
 
+/**
+ * Progress forwarding for one execution: open only while a body invocation
+ * runs, and without a receiver once dispatch has settled.
+ */
+interface ToolProgressState {
+  open: boolean
+  sink?: (progress: ToolProgress) => void
+}
+
 /** Caller cancellation and dispatch state kept outside the around-wrapper view. */
 interface ToolCancellationState {
   readonly callerSignal: AbortSignal
@@ -848,8 +909,12 @@ export class ToolRuntime extends Service {
   private deferredContexts = new WeakMap<ToolRunContext, UserMessage[]>()
   /** Executions whose tool body declared the current turn complete. */
   private concludingExecutions = new WeakSet<ToolExecution>()
+  /** First halt a policy decision requested for each execution; later decisions cannot clear it. */
+  private haltingExecutions = new WeakMap<ToolExecution, ToolHalt>()
   /** Display-only metadata a tool body attached through `presentResultMeta`, keyed by its execution. */
   private presentedMeta = new WeakMap<ToolExecution, { meta?: JsonValue }>()
+  /** Whether each execution's body may publish progress now, and to which caller receiver. */
+  private progressStates = new WeakMap<ToolExecution, ToolProgressState>()
   /** Original caller cancellation, kept outside the wrapper-mutable execution object. */
   private cancellationStates = new WeakMap<ToolRunContext, ToolCancellationState>()
   /** Definition-owned final content transform snapshotted before policy begins. */
@@ -1084,7 +1149,7 @@ export class ToolRuntime extends Service {
   private requirePtcRuntime(mode: ToolPresentationMode): PtcRuntime {
     const runtime = this.ctx.get('ptcRuntime')
     if (!runtime) {
-      throw new Error(`dsh-tools: mode "${mode}" requires a PTC runtime — load a ctx.ptcRuntime implementation (e.g. @deepseek-ai/dsh-ptc-runtime-node) or set tools mode to "native"`)
+      throw new Error(`dsh-tools: mode "${mode}" requires a PTC runtime — load a ctx.ptcRuntime implementation (e.g. @deepseek-ai/dsh-ptc-runtime-codemode) or set tools mode to "native"`)
     }
     if (!Object.hasOwn(SDK_RENDERERS, runtime.language)) {
       const known = Object.keys(SDK_RENDERERS).map(name => JSON.stringify(name)).join(', ')
@@ -1470,7 +1535,9 @@ export class ToolRuntime extends Service {
     const visible = this.get(name, agent)
     const collapsed = visible !== undefined && this.collapses(name, agent, parent !== undefined)
     const concludingExecutions = this.concludingExecutions
+    const recordHalt = (target: ToolExecution, halt: ToolHalt): void => { this.recordHalt(target, halt) }
     const presented: { meta?: JsonValue } = {}
+    const progress: ToolProgressState = { open: false, ...exec.onProgress === undefined ? {} : { sink: exec.onProgress } }
     const base = {
       token,
       callId,
@@ -1485,6 +1552,20 @@ export class ToolRuntime extends Service {
       },
       concludeTurn(): void {
         concludingExecutions.add(this as unknown as ToolExecution)
+      },
+      haltTurn(halt: ToolHalt): void {
+        recordHalt(this as unknown as ToolExecution, halt)
+      },
+      reportProgress(update: ToolProgress): void {
+        if (typeof update !== 'object' || update === null || typeof update.output !== 'string') {
+          throw new TypeError(`tool "${name}" reported progress without a string output`)
+        }
+        if (!progress.open || progress.sink === undefined) return
+        try {
+          progress.sink({ output: update.output })
+        } catch {
+          // The receiver is display-only and caller-owned; its failure must not fail the tool.
+        }
       },
       presentResultMeta(meta: JsonValue): void {
         if (visible?.output.presentationMeta !== undefined) {
@@ -1517,6 +1598,7 @@ export class ToolRuntime extends Service {
       const execution: MutableToolRunContext = { ...base, arguments: deepFreeze(detached) }
       this.deferredContexts.set(execution, deferredContexts)
       this.presentedMeta.set(execution, presented)
+      this.progressStates.set(execution, progress)
       this.contentFinalizers.set(execution, finalizerFor())
       this.cancellationStates.set(execution, {
         callerSignal: signal,
@@ -1598,6 +1680,7 @@ export class ToolRuntime extends Service {
       const denialReason = decision.kind === 'allow' ? this.guardReason(exec) : decision.reason
       const denialInfo = decision.kind === 'deny' ? decision.info : undefined
       if (denialReason !== undefined) {
+        const halt = decision.kind === 'deny' ? this.recordHalt(exec, decision.halt) : undefined
         return await next({
           kind: 'post-result',
           exec,
@@ -1605,6 +1688,7 @@ export class ToolRuntime extends Service {
             content: [{ type: 'text', text: `Error: ${denialReason}` }],
             isError: true,
             error: { message: denialReason, ...denialInfo === undefined ? {} : { info: denialInfo } },
+            ...halt === undefined ? {} : { halt },
           }),
         })
       }
@@ -1644,6 +1728,7 @@ export class ToolRuntime extends Service {
     const state = this.cancellationStates.get(exec)
     /* v8 ignore next -- only registry-minted executions reach the staged scheduler methods */
     if (state === undefined) throw new Error('tool registry scheduler invariant violated: missing cancellation state')
+    const progress = this.progressStates.get(exec)
     const wrapperSignal = exec.signal
     const fused = fuseToolSignals(state.callerSignal, wrapperSignal)
     const signal = fused.signal
@@ -1657,6 +1742,7 @@ export class ToolRuntime extends Service {
       const tool = this.resolveExecution(exec.name, exec.agent, exec.parent !== undefined)
       if (!tool) throw new ToolNotFoundError(exec.name)
       state.bodyInvoked = true
+      if (progress !== undefined) progress.open = true
       const returned = await tool.execute(exec.arguments, exec)
       const result = this.createSuccessResult(exec, tool, returned)
       return isAborted(signal)
@@ -1665,6 +1751,7 @@ export class ToolRuntime extends Service {
     } catch (error: unknown) {
       return toolErrorResult(error)
     } finally {
+      if (progress !== undefined) progress.open = false
       fused.dispose()
       exec.signal = wrapperSignal
     }
@@ -1706,6 +1793,11 @@ export class ToolRuntime extends Service {
       }
     } catch (error: unknown) {
       return { kind: 'final-result', result: toolErrorResult(error) }
+    } finally {
+      // A body that kept its context cannot publish once its dispatch settled,
+      // even through a wrapper that invokes it again.
+      const progress = this.progressStates.get(exec)
+      if (progress !== undefined) delete progress.sink
     }
   }
 
@@ -1748,9 +1840,9 @@ export class ToolRuntime extends Service {
     }
     let finalResult: ToolExecutionResult
     try {
-      finalResult = this.materializeFinalResult(this.applyFinalContent(exec, materializedResult))
+      finalResult = this.materializeFinalResult(this.withHalt(exec, this.applyFinalContent(exec, materializedResult)))
     } catch (error: unknown) {
-      finalResult = this.materializeFinalResult(toolErrorResult(error))
+      finalResult = this.materializeFinalResult(this.withHalt(exec, toolErrorResult(error)))
     }
     this.recordTurnOutcome(exec, finalResult)
     this.notifyResult(exec, finalResult)
@@ -1796,6 +1888,28 @@ export class ToolRuntime extends Service {
       return
     }
     ledger.set(key, result.error)
+  }
+
+  /**
+   * Record the first halt a policy decision requests for one execution.
+   * @param exec - the execution the decision governs.
+   * @param halt - the decision's halt request, if any.
+   * @returns the execution's recorded halt, if any.
+   * @throws TypeError when the reason is not a string the turn ending can record.
+   */
+  private recordHalt(exec: ToolExecution, halt: ToolHalt | undefined): ToolHalt | undefined {
+    const recorded = this.haltingExecutions.get(exec)
+    if (recorded !== undefined || halt === undefined) return recorded
+    if (typeof halt.reason !== 'string') throw new TypeError('tool halt reason must be a string')
+    const snapshot: ToolHalt = Object.freeze({ reason: halt.reason })
+    this.haltingExecutions.set(exec, snapshot)
+    return snapshot
+  }
+
+  /** Stamp an execution's recorded halt onto its final result, whatever replaced the result since. */
+  private withHalt(exec: ToolExecution, result: ToolExecutionResult): ToolExecutionResult {
+    const halt = this.haltingExecutions.get(exec)
+    return halt === undefined ? result : { ...result, halt }
   }
 
   /** Apply the snapshotted tool-owned content transform without exposing other result fields. */
@@ -1897,6 +2011,8 @@ export class ToolRuntime extends Service {
       scopeTarget(this, exec.agent), 'tools/post-execute', exec, result,
       () => Promise.resolve<PostToolDecision>({ kind: 'accept' }),
     )
+    // Recorded before the decision is applied, so a rejected projection still halts.
+    this.recordHalt(exec, decision.halt)
     const decisionContexts = decision.additionalContexts ?? []
     if (decision.kind === 'block') {
       const message = failureMessageFromContent(decision.feedback)
@@ -2005,6 +2121,7 @@ export class ToolRuntime extends Service {
       content: result.content,
       ...result.meta !== undefined ? { meta: result.meta } : {},
       ...result.additionalContexts !== undefined ? { additionalContexts: result.additionalContexts } : {},
+      ...result.halt !== undefined ? { halt: result.halt } : {},
     }
     if (result.isError) {
       return materializePresentation({ isError: true as const, error: result.error, ...presentation })

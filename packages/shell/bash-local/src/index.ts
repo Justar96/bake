@@ -11,7 +11,7 @@
 
 import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { SHELL_SETTINGS_NAMESPACE, ShellExecutor } from '@deepseek-ai/dsh-shell'
+import { SHELL_SETTINGS_NAMESPACE, ShellExecutor, watchOutput } from '@deepseek-ai/dsh-shell'
 import type { ShellExecRequest, ShellExecSpec, ShellProcess, ShellProcessRead, ShellRunResult, CollectedOutput } from '@deepseek-ai/dsh-shell'
 import type { SubprocessCollect, SubprocessHandle, SubprocessOutputReader, SubprocessSpawnSpec } from '@deepseek-ai/dsh-subprocess'
 import type {} from '@deepseek-ai/dsh-settings'
@@ -169,6 +169,7 @@ export class LocalBashExecutor extends ShellExecutor {
       // confines, so the field is inert here (the seam contract) — a
       // sandboxing subclass overrides resolve() to stamp its default instead.
       sandboxPolicy: request.sandboxPolicy,
+      ...request.onOutput !== undefined ? { onOutput: request.onOutput } : {},
     }
   }
 
@@ -250,8 +251,16 @@ export class LocalBashExecutor extends ShellExecutor {
       } finally { d.signal.removeEventListener('abort', abort) }
     } else { argv = argvOrPrepare }
     const handle = this.ctx.subprocess.spawn(this.spawnSpec(spec, argv, spec.stdoutMaxBytes, d.signal))
-    const outcome = await handle.done
     const collected = LocalBashExecutor.collected(handle)
+    // Display-only polling; it stops before the result exists, so no live
+    // output follows the run.
+    const stopWatching = watchOutput(collected, spec.onOutput)
+    let outcome: Awaited<typeof handle.done>
+    try {
+      outcome = await handle.done
+    } finally {
+      stopWatching()
+    }
     // Only this executor's timeout reason counts as timedOut; outer deadlines count as aborts.
     const timedOut = timeoutOf(d.signal, 'BASH_TIMEOUT') !== undefined
     const aborted = d.signal.aborted && !timedOut

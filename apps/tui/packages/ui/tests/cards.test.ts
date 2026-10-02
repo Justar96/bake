@@ -203,14 +203,6 @@ describe('result cards', () => {
     expect(result?.detail).toEqual([{ text: '404', summary: 'failure' }])
   })
 
-  it('words its counts in the reader locale', () => {
-    const zh = new ToolCards(() => ({
-      presentResult: () => ({ card: 'search', shape: 'paths', paths: ['a.ts'], truncated: false, total: 1 }),
-    }), dictionaries.zh)
-    zh.call('c1', 'glob', '{}')
-    expect(zh.result('c1', ok)?.detail.at(-1)).toEqual({ text: `1 ${dictionaries.zh.cardPath}`, summary: 'count' })
-  })
-
   it('has nothing to present for a result whose call it never saw', () => {
     expect(seam({ presentResult: () => ({ card: 'generic', title: 'x' }) }).result('unknown', ok))
       .toBeUndefined()
@@ -241,8 +233,8 @@ describe('result cards', () => {
 })
 
 describe('the files a command changed', () => {
-  const terminal = (changes: unknown, locale: keyof typeof dictionaries = 'en') => {
-    const cards = new ToolCards(() => ({ presentResult: () => ({ card: 'terminal', output: 'ok\n', exitCode: 1, changes }) } as never), dictionaries[locale])
+  const terminal = (changes: unknown) => {
+    const cards = new ToolCards(() => ({ presentResult: () => ({ card: 'terminal', output: 'ok\n', exitCode: 1, changes }) } as never), dictionaries.en)
     cards.call('c1', 'bash', '{}')
     return cards.result('c1', ok)
   }
@@ -269,14 +261,10 @@ describe('the files a command changed', () => {
     expect(card?.changes?.files[1]?.lines).toEqual([{ text: '+ module.exports = {}', emphasis: 'added', source: 'b.js', number: 1 }])
   })
 
-  it('says how each file changed unless it was a plain edit, in the reader\'s words', () => {
+  it('says how each file changed unless it was a plain edit, in plain words', () => {
     expect(terminal({ files })?.changes?.files.map(file => [file.path, file.status, file.lines.length])).toEqual([
       ['a.js', undefined, 2], ['b.js', 'new', 1], ['c.js', 'deleted', 0], ['d.js', 'renamed from old/d.js', 0], ['e.png', 'binary', 0],
       ['f.log', 'too large', 0], ['run.sh', 'mode', 0], ['link', 'symlink', 0], ['g.js', undefined, 0],
-    ])
-    const zh = dictionaries.zh
-    expect(terminal({ files }, 'zh')?.changes?.files.map(file => file.status)).toEqual([
-      undefined, zh.changeNew, zh.changeDeleted, `${zh.changeRenamed} old/d.js`, zh.changeBinary, zh.changeTooLarge, zh.changeMode, zh.changeSymlink, undefined,
     ])
   })
 

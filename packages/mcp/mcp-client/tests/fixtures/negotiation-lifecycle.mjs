@@ -1,4 +1,4 @@
-/** Legacy stdio server with a file barrier around protocol discovery. */
+/** Stdio MCP server that holds its `initialize` reply behind a file barrier. */
 import { appendFileSync, existsSync, readFileSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { setTimeout } from 'node:timers/promises'
@@ -24,12 +24,8 @@ createInterface({ input: process.stdin }).on('line', async (line) => {
   const request = JSON.parse(line)
   if (request.id === undefined) return
   record(request.method)
-  if (request.method === 'server/discover') {
+  if (request.method === 'initialize') {
     while (!existsSync(releasePath)) await setTimeout(10)
-    process.stdout.write(`${JSON.stringify({
-      jsonrpc: '2.0', id: request.id, error: { code: -32601, message: 'Legacy server' },
-    })}\n`)
-    return
   }
   const result = request.method === 'initialize'
     ? { protocolVersion: request.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'fixture', version: '1' } }

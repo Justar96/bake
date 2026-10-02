@@ -31,11 +31,16 @@ async function observe(run: () => Promise<unknown>): Promise<string[]> {
   try { await run().catch(() => undefined) } finally { await dispose() }
   return seen
 }
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
+import { StreamableHttpTransport } from '@earendil-works/pi-mcp'
 describe('mcp streamable-http egress', () => {
   it('goes through the proxy', async () => {
-    const t = new StreamableHTTPClientTransport(new URL('http://mcp-probe.invalid/mcp'))
-    const observed = await observe(() => t.send({ jsonrpc: '2.0', id: 1, method: 'ping' }))
-    expect(observed.join('|')).toContain('mcp-probe.invalid')
+    const t = new StreamableHttpTransport({ url: 'http://mcp-probe.invalid/mcp' })
+    try {
+      await t.start()
+      const observed = await observe(() => t.send({ jsonrpc: '2.0', id: 1, method: 'ping' }))
+      expect(observed.join('|')).toContain('mcp-probe.invalid')
+    } finally {
+      await t.close()
+    }
   })
 })

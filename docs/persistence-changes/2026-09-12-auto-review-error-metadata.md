@@ -5,8 +5,6 @@ kind: persistence-change
 
 # 2026-09-12-auto-review-error-metadata
 
-English | [中文](2026-09-12-auto-review-error-metadata.zh.md)
-
 ## Summary
 
 Adds optional structured error metadata to persisted PTC dispatches and an optional user-facing reason to persisted native tool errors. Both additions retain the Session format version.

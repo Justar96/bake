@@ -302,7 +302,7 @@ function usage(): void {
 
 run the app
   dev [args]         component loop under Bun: no harness, no agent, no key
-                     (--replay watches rows arrive, --locale zh checks a dictionary)
+                     (--replay watches rows arrive)
   app [args]         run the built Node TUI; run bun run build first
   dsh [args]         built profile/plugin CLI using Bake's home (~/.bake by default)
   build              bundle the plugin and recorder for Node with production React

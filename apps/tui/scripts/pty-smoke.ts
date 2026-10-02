@@ -49,8 +49,11 @@ const ARTIFACTS = join(ROOT, 'apps/tui/.smoke')
  * whose owning module exports no constant, so the next vocabulary change is one
  * edit here instead of sixty string literals.
  */
-/** The models the replay profile declares; one of them names every status line a scenario draws. */
-const MODELS = ['deepseek-v4-flash', 'tui-picked-model', 'gpt-test', 'claude-test'] as const
+/**
+ * The models the replay profile declares, plus the shipped route's model a live
+ * run starts on; one of them names every status line a scenario draws.
+ */
+const MODELS = ['deepseek-v4-flash', 'deepseek-flash', 'tui-picked-model', 'gpt-test', 'claude-test'] as const
 
 const SCREEN = {
   /** `line.tsx` draws the caret instead of using inverse video, which `NO_COLOR` would erase. */
@@ -665,9 +668,9 @@ class Run {
    * Rewrite the profile overlay the CLI loads over the built patch.
    *
    * @param override - a replay override file staging the next model response.
-   * @param profile - scenario-specific storage, goal-round, replay, or balance-endpoint settings.
+   * @param profile - scenario-specific storage, goal-round, replay, or provider settings.
    */
-  async writeOverlay(override?: string, profile: { root?: string; compression?: 'none' | 'zstd'; goalMaxRounds?: number; paceMs?: number; balanceBaseURL?: string; cliProxyApi?: boolean; noDefaultModel?: boolean } = {}): Promise<void> {
+  async writeOverlay(override?: string, profile: { root?: string; compression?: 'none' | 'zstd'; goalMaxRounds?: number; paceMs?: number; cliProxyApi?: boolean; noDefaultModel?: boolean } = {}): Promise<void> {
     const replay: any = {
       id: 'tui-replay', name: join(ROOT, 'packages/test-support/llm-replay/lib/index.js'),
       config: { file: FIXTURE, ...(profile.paceMs === undefined ? {} : { paceMs: profile.paceMs }), providers: [{ id: 'deepseek-official', models: [
@@ -679,18 +682,21 @@ class Run {
     const patches: any[] = [
       { id: 'session-title-llm', disabled: true },
       // The shipped profile names no default; every other scenario starts on this one.
-      ...profile.noDefaultModel === true ? [] : [{ id: 'agent-default-model', config: { provider: 'deepseek-official', model: 'deepseek-v4-flash' } }],
+      // The fixture recorded deepseek-v4-flash; the shipped route serves deepseek-flash.
+      ...profile.noDefaultModel === true ? [] : [{ id: 'agent-default-model', config: {
+        provider: 'deepseek-official', model: this.live ? 'deepseek-flash' : 'deepseek-v4-flash',
+      } }],
       { id: 'session-persistence-jsonl', config: {
         root: profile.root ?? this.sessionsRoot, compression: profile.compression ?? 'none',
       } },
       ...(profile.goalMaxRounds === undefined ? [] : [{ id: 'goal', config: { defaultMaxGoalRounds: profile.goalMaxRounds } }]),
     ]
     await Bun.write(this.overlay, JSON.stringify(this.live ? patches : [
-      profile.balanceBaseURL === undefined
-        ? { id: 'llm-deepseek', disabled: true }
-        : { id: 'llm-deepseek', config: { baseURL: profile.balanceBaseURL, protocol: 'messages' } },
-      ...profile.cliProxyApi ? [] : [{ id: 'llm-pi-ai', disabled: true }],
-      ...patches, ...(profile.balanceBaseURL === undefined ? [{ insert: [replay] }] : []),
+      // The replay adapter serves deepseek-official, which the pi-ai adapter
+      // also ships; a scenario that signs in to another pi-ai route keeps the
+      // adapter without that one.
+      profile.cliProxyApi ? { id: 'llm-pi-ai', config: { providers: {} } } : { id: 'llm-pi-ai', disabled: true },
+      ...patches, { insert: [replay] },
     ]))
   }
 
@@ -1527,6 +1533,51 @@ scenario('tool-colour', 'real read, search, and shell results retain syntax colo
     })
   })
 
+scenario('live-output', 'a slow real shell command shows its output under the running call before it finishes, and replay draws only the logged result',
+  { replayOnly: true }, async run => {
+    // The command prints its markers through a format string, so neither
+    // marker appears in the call's own title before the command prints it.
+    const command = "printf 'LIVE_%s\\n' TICK; sleep 3; printf 'LIVE_%s\\n' END"
+    const call = { type: 'tool-call', id: 'live-output-1', name: 'bash', arguments: JSON.stringify({ command, description: 'Print, wait, print' }) }
+    const override = join(run.root, 'live-output-replay.json')
+    await Bun.write(override, JSON.stringify([
+      { kind: 'chunks', chunks: [
+        { type: 'block-start', index: 0, blockType: 'tool-call' },
+        { type: 'tool-call-delta', index: 0, id: call.id, name: call.name, argumentsDelta: call.arguments },
+        { type: 'block-end', index: 0, block: call },
+        { type: 'finish', reason: { kind: 'tool-calls' } },
+      ] },
+      { kind: 'chunks', chunks: [
+        { type: 'block-start', index: 0, blockType: 'text' },
+        { type: 'text-delta', index: 0, text: 'LIVE_OUTPUT_DONE' },
+        { type: 'block-end', index: 0, block: { type: 'text', text: 'LIVE_OUTPUT_DONE' } },
+        { type: 'finish', reason: { kind: 'stop' } },
+      ] },
+    ]))
+    const before = await run.logs()
+    await run.writeOverlay(override)
+    try {
+      await run.terminal('live-output', [], async tty => {
+        const from = tty.raw.length
+        const start = tty.mark()
+        tty.send('Print, wait, and print again.\r', 'trigger the recorded slow command')
+        // The command sleeps between its two lines, so the first can only be
+        // on screen without the second while the call is still running.
+        await tty.expect('LIVE_TICK', start)
+        tty.check('the first line is drawn while the command still runs', !tty.raw.slice(from).includes('LIVE_END'))
+        await tty.follows(SCREEN.idle, 'LIVE_OUTPUT_DONE')
+      })
+    } finally {
+      await run.writeOverlay()
+    }
+    const log = await events(await run.created(before, 'live output'))
+    const results = log.filter(event => event.type === 'tool/result')
+    assert(results.length === 1 && JSON.stringify(results[0].data.message).includes('LIVE_END'), 'the slow command did not log its whole output')
+    await run.terminal('live-output-resume', ['--resume', log[0].id], async tty => {
+      await tty.expect('LIVE_TICK', 'LIVE_END', 'LIVE_OUTPUT_DONE')
+    })
+  })
+
 scenario('background-job', 'a background bash job that settles after the turn wakes the agent with exactly one completion notice',
   { replayOnly: true }, async run => {
     // The sleep outlasts the recorded turn, so the notice takes the idle-wake path.
@@ -1897,43 +1948,6 @@ scenario('tables', 'streamed tables align columns, wrap styled cells, reflow to 
       assert(same(messages, [[{ type: 'text', text: answer }]]), 'table layout changed the logged response source')
       await drive('tables-resume', log[0].id)
     } finally { await run.writeOverlay() }
-  })
-
-scenario('usage', 'the built TUI reads DeepSeek remaining credit through /usage without a model call',
-  { replayOnly: true },
-  async run => {
-    const requests: Array<{ path: string; authorization: string | null }> = []
-    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
-      const url = new URL(request.url)
-      requests.push({ path: url.pathname, authorization: request.headers.get('authorization') })
-      return Response.json({ is_available: true, balance_infos: [
-        { currency: 'USD', total_balance: '7.50', granted_balance: '2.00', topped_up_balance: '5.50' },
-      ] })
-    } })
-    const previousKey = run.env.DEEPSEEK_API_KEY
-    run.env.DEEPSEEK_API_KEY = 'smoke-balance-key'
-    await run.writeOverlay(undefined, { balanceBaseURL: new URL('anthropic', server.url).href })
-    const before = await run.logs()
-    try {
-      await run.terminal('usage', [], async tty => {
-        tty.send('/help\r', 'discover composed commands')
-        await tty.search(/\/usage\b.* {2}Show remaining DeepSeek API credit/u)
-        const start = tty.mark()
-        tty.send('/usage\r', 'read DeepSeek account balance')
-        await tty.expect('USD: 7.50 remaining (2.00 granted, 5.50 topped up)', start)
-      })
-    } finally {
-      if (previousKey === undefined) delete run.env.DEEPSEEK_API_KEY
-      else run.env.DEEPSEEK_API_KEY = previousKey
-      await run.writeOverlay()
-      server.stop(true)
-    }
-    assert(same(requests, [{ path: '/user/balance', authorization: 'Bearer smoke-balance-key' }]),
-      'usage did not call the configured balance API with its key')
-    const log = await events(await run.created(before, 'usage'))
-    assert(log.some(event => event.type === 'command/done' && event.data.kind === 'success'
-      && event.data.text?.includes('USD: 7.50 remaining')), '/usage result did not commit to the session')
-    assert(!log.some(event => event.type === 'user/message'), '/usage entered model input')
   })
 
 scenario('no-default', 'with nothing signed in the session starts on no model, keeps a message, and the first sign-in selects its provider',

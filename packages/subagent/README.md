@@ -5,8 +5,6 @@ kind: "package-group"
 
 # subagent/ — subagent capability family
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 The subagent family lets an agent delegate work to an in-process child, continue that child, and discover its status. A child can start fresh or inherit completed parent history. Model-facing tools support delegation, follow-up messages, interruption, and listing.

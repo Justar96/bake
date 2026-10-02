@@ -158,7 +158,6 @@ Ink owns raw mode, bracketed paste, cursor restoration, and the optional alterna
 |---|---|---|
 | `resume` | absent | Exact persisted session id |
 | `preset` | roster default for a fresh session | Fresh composition, or explicit legacy-session composition |
-| `locale` | `en` | `en` or `zh` labels |
 | `screen` | `inline` | `inline` for native scrollback or `fullscreen` for an alternate-screen transcript; overridden by `--screen <mode>`, with `INK_SCREEN_READER=true` forcing inline |
 | `composerFrame` | `auto` | line glyphs for the composer's rule and the welcome card: `round`, `classic`, or `auto` to read the terminal's encoding, `TERM`, and character locale ([why](DESIGN-LAYOUT.md#the-frame-is-chosen-from-the-terminal-not-assumed)) |
 | `doubleInterruptMs` | `2000` | How long the quit prompt waits for a second Ctrl-C; any other key dismisses it sooner |
@@ -169,7 +168,7 @@ Ink owns raw mode, bracketed paste, cursor restoration, and the optional alterna
 | `credentialRefs` | `[]` | Provider key references offered by `/login`, each a name or `{ ref, label, provider, model }`; the supplied patch names `DEEPSEEK_API_KEY` as DeepSeek on `deepseek-official` |
 | `signInFlows` | every registered flow | Authorization flows offered by `/login`, each a credential key or `{ key, model }`; the supplied patch offers OpenAI, Anthropic, GitHub Copilot, OpenRouter, Kimi, and xAI |
 
-Schemastery validates and defaults configuration before the runner receives it. Locale dictionaries own application text; model output, tool results, and provider-owned diagnostics remain verbatim.
+Schemastery validates and defaults configuration before the runner receives it. The copy dictionary owns application text; model output, tool results, and provider-owned diagnostics remain verbatim.
 
 Fullscreen supports the mouse wheel to scroll three rows, PgUp/PgDn to scroll half a viewport, Ctrl+Home to reach its beginning, and Ctrl+End to follow new output. Scrolling up pauses following; scrolling to the bottom resumes it. While paused, the hint row leads with the way back, `↓ Latest · Ctrl+End`, which becomes `↓ New output · Ctrl+End` when the viewport's newest row changes; a click on it follows again. Open sheets and interactions keep their own keys; the wheel scrolls an open sheet, and the transcript under an interaction. `frameOutput` turns on SGR mouse reporting (modes 1000 and 1006, no motion) with the alternate buffer and off before leaving it, so every release path returns the mouse; `App` swallows every report so none reaches the composer, and text selection needs Shift-drag or Option-drag. The runner enables Ink's `alternateScreen`, and `frameOutput` batches writes without applying inline bottom anchoring or newline conversions. On entry it homes the alternate buffer; on resize and cleanup it removes scrollback-erasure controls to preserve the primary shell buffer.
 

@@ -83,10 +83,10 @@ try {
       await writeFile(composition, sourcePatch.replace('./lib/index.js', JSON.stringify(join(bundle, 'index.js'))).replace('./lib/startup.js', JSON.stringify(join(bundle, 'startup.js'))))
       const patch = join(root, 'profile.json')
       await writeFile(patch, JSON.stringify([
-        { id: 'llm-deepseek', disabled: true }, { id: 'llm-pi-ai', disabled: true }, { id: 'session-title-llm', disabled: true },
+        { id: 'llm-pi-ai', disabled: true }, { id: 'session-title-llm', disabled: true },
         { id: 'agent-default-model', config: { provider: 'perf', model: 'synthetic' } },
         { id: 'session-persistence-jsonl', config: { root: join(home, 'sessions'), compression: 'none' } },
-        { id: 'tui-runner', config: { ...turns > 0 ? { resume: dimensions.sessionId } : {}, doubleInterruptMs: 2000, locale: 'en' } },
+        { id: 'tui-runner', config: { ...turns > 0 ? { resume: dimensions.sessionId } : {}, doubleInterruptMs: 2000 } },
         { insert: [
           { id: 'perf-replay', name: join(ROOT, 'packages/test-support/llm-replay/lib/index.js'), config: { file: join(root, 'replay.jsonl'), overrideFile: join(root, 'reply.json'), paceMs: 10,
             providers: [{ id: 'perf', models: [{ id: 'synthetic', contextWindow: 1_000_000_000 }] }] } },

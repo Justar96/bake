@@ -8,7 +8,7 @@ import { FiberState } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
 import type { GoalMessageSource, GoalRef, GoalView } from '@deepseek-ai/dsh-goal'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, lastAssistantStreamChunk } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, MessageId, MessageSource } from '@deepseek-ai/dsh-llm'
 import type { Session, SessionEvent, UserMessage } from '@deepseek-ai/dsh-session'
 import { renderGoalRoundPrompt } from './prompt.ts'
@@ -43,6 +43,8 @@ interface DriverState {
   requested: boolean
   run: Promise<void> | undefined
   stopping: boolean
+  /** Whether the latest committed reply stopped at the output-token limit. */
+  lastReplyCutOff: boolean
 }
 
 /** Whether a source identifies an automatic, positive-numbered goal round. */
@@ -88,6 +90,7 @@ export function apply(ctx: Context): void {
       requested: false,
       run: undefined,
       stopping: false,
+      lastReplyCutOff: false,
     }
     states.set(agent, state)
     return state
@@ -325,9 +328,15 @@ export function apply(ctx: Context): void {
             state.attempt.phase = 'admitted'
           }
           return
+        case 'assistant/message':
+          state.lastReplyCutOff = lastAssistantStreamChunk(event.data.stream, 'finish')?.reason.kind === 'max-tokens'
+          return
         case 'turn/end':
+          // A max-tokens turn whose last reply finished, after the loop's
+          // dropped-call notice let the model recover, continues like a
+          // completed turn; only a turn that ends on a cut-off reply disarms.
           if (event.data.reason.kind === 'max-tokens') {
-            disarm(state)
+            if (state.lastReplyCutOff) disarm(state)
             return
           }
           if (event.data.reason.kind !== 'aborted') return

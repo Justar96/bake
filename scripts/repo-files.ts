@@ -27,6 +27,14 @@ export function isArchivedAgentNotePath(path: string): boolean {
 }
 
 /**
+ * Whether Markdown is frozen history that documentation gates skip: archived Agent Notes, and the
+ * retired Chinese pages that survive only inside frozen history.
+ */
+export function isFrozenMarkdownPath(path: string): boolean {
+  return isArchivedAgentNotePath(path) || path.endsWith('.zh.md')
+}
+
+/**
  * Whether a pattern segment matches a directory or file name. Supports `*` and
  * `?` inside a segment and mirrors node's glob `dot: false`: a segment whose
  * first character is a wildcard does not match dot names. `**` is handled as a

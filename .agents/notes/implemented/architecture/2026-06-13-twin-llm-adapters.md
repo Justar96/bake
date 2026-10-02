@@ -2,13 +2,13 @@
 
 Status: implemented
 
-English | [中文](2026-06-13-twin-llm-adapters.zh.md)
-
 ## Problem
 
 `dsh-llm` owns a provider-neutral streaming vocabulary — the `StreamChunk` protocol (`block-start`, `text-delta`, `reasoning-delta`, `tool-call-delta`, `block-end`, `usage`, `finish`) and the content-block types ([the content-block vocabulary](2026-06-11-content-block-vocabulary.md)). A vocabulary defined against a single adapter risks baking that adapter's quirks into the "neutral" contract: anything the one implementation happens to do becomes the de-facto spec, and the abstraction is unverified until a second provider arrives — by which point the leak is expensive to fix.
 
 ## Decision
+
+The twin was later retired: `dsh-llm-deepseek` was removed, and [`dsh-llm-pi-ai`](../../../../packages/llm/llm-pi-ai/README.md) is the single LLM adapter, serving DeepSeek through its shipped `deepseek-official` provider profile. This section records the pair as it shipped and the conventions it pinned, which `StreamChunk` still documents.
 
 Ship **two** adapters against the one contract from the start, deliberately built on different internals:
 
@@ -26,4 +26,4 @@ The rule they enforce: **anything the StreamChunk vocabulary cannot express for 
 
 The twin doubles adapter and key-gated e2e maintenance—both cover V4 Flash and Pro across representative reasoning modes—in exchange for continuous seam-neutrality validation and a second implementation example. Both use `apiKey`, `baseURL`, and `models`; the direct-fetch adapter exposes `thinking`/`reasoningEffort`, while pi-ai exposes one `reasoning` level. A future conformance suite could justify retiring one adapter through a superseding Agent Note.
 
-The [Messages adapter](../feature/2026-09-07-deepseek-messages-adapter.md) adds an Anthropic-protocol implementation inside `llm-deepseek`; it preserves the same stream conventions.
+The [Messages adapter](../feature/2026-09-07-deepseek-messages-adapter.md) added an Anthropic-protocol implementation inside `llm-deepseek` that preserved the same stream conventions; the `deepseek-official` route now reaches that protocol through pi-ai's `anthropic-messages` implementation.

@@ -10,7 +10,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 import { SessionAlreadyOwnedError } from '@deepseek-ai/dsh-session-persistence'
 import Persistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import { App } from '@dsh-tui/ui/app.tsx'
-import { dictionaries, type Locale } from '@dsh-tui/ui/copy.ts'
+import { dictionaries } from '@dsh-tui/ui/copy.ts'
 import { cleanup as unmount, render } from '../../../tests/render.tsx'
 import { apply, type Config } from '../src/index.ts'
 import { SessionNavigation } from '../src/navigation.ts'
@@ -26,7 +26,7 @@ afterEach(async () => {
 
 const options = { attachmentMaxBytes: 1048576, attachmentLimit: 8 }
 const launch = {
-  locale: 'en', composerFrame: 'auto', completionLimit: 8, resultLines: 8, doubleInterruptMs: 500, credentialRefs: [], ...options,
+  composerFrame: 'auto', completionLimit: 8, resultLines: 8, doubleInterruptMs: 500, credentialRefs: [], ...options,
 } as const
 
 class Input extends EventEmitter {
@@ -80,7 +80,7 @@ async function holdElsewhere(root: string, id: SessionId): Promise<() => Promise
   return release
 }
 
-it.each(['en', 'zh'] as const satisfies readonly Locale[])(
+it.each(['en'] as const)(
   '/resume keeps the current session and says another process has the chosen one open (%s)', async locale => {
     const copy = dictionaries[locale]
     const { ctx, root, id, model } = await withSaved()
@@ -123,16 +123,16 @@ it('refuses --resume before the first frame with a localized reason, leaving the
   const output = new Output()
   const error = new Output()
   const exit = vi.fn()
-  const thrown: unknown = await run(ctx, { ...launch, locale: 'zh', resume: id }, { in: input, out: output, err: error, exit } as unknown as TuiIo)
+  const thrown: unknown = await run(ctx, { ...launch, resume: id }, { in: input, out: output, err: error, exit } as unknown as TuiIo)
     .then(() => undefined, (reason: unknown) => reason)
   expect(thrown).toBeInstanceOf(SessionInUseError)
-  expect((thrown as Error).message).toBe(`${id}: ${dictionaries.zh.sessionInUseLaunch}`)
+  expect((thrown as Error).message).toBe(`${id}: ${dictionaries.en.sessionInUseLaunch}`)
   expect((thrown as Error).cause).toBeInstanceOf(SessionAlreadyOwnedError)
   expect(input.isRaw).toBe(false)
   expect(input.listenerCount('readable')).toBe(0)
   expect(output.frames).toEqual([])
   // Reported immediately when caught, not deferred behind the caller's own catch.
-  expect(error.frames.join('')).toBe(`dsh: ${id}: ${dictionaries.zh.sessionInUseLaunch}\n`)
+  expect(error.frames.join('')).toBe(`dsh: ${id}: ${dictionaries.en.sessionInUseLaunch}\n`)
   expect(exit).not.toHaveBeenCalled()
   expect(ctx.agents.get(id)).toBeUndefined()
 })

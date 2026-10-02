@@ -424,3 +424,33 @@ describe('process lifecycle ownership (the subprocess service, not the executor)
     expect(trapping.signal).toBe('SIGKILL')
   })
 })
+
+describe('LocalBashExecutor.run live output', () => {
+  it('passes the growing output tail while the command runs, and nothing after it resolves', async () => {
+    const { bash } = await setup({ timeoutMs: 10_000 })
+    const tails: string[] = []
+    const result = await bash.run(bash.resolve({
+      command: "printf 'first\\n'; sleep 1; printf 'second\\n' >&2",
+      onOutput: (tail) => { tails.push(tail) },
+    }))
+    expect(result.exitCode).toBe(0)
+    // The first tail arrived during the sleep, before the second line existed.
+    // Output after the last poll is the result's to show, not a live tail's.
+    expect(tails[0]).toBe('first\n')
+    expect(tails.every(tail => tail.startsWith('first\n'))).toBe(true)
+    expect(result.stderr.text).toBe('second\n')
+    const seen = tails.length
+    await new Promise(resolve => setTimeout(resolve, 450))
+    expect(tails).toHaveLength(seen)
+  })
+
+  it('keeps the command result when the receiver throws', async () => {
+    const { bash } = await setup({ timeoutMs: 10_000 })
+    const result = await bash.run(bash.resolve({
+      command: "printf 'out\\n'; sleep 0.5",
+      onOutput: () => { throw new Error('receiver failed') },
+    }))
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout.text).toBe('out\n')
+  })
+})

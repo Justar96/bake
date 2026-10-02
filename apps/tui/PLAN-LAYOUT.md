@@ -91,7 +91,7 @@ This is correctness, not polish — a single stray warning corrupts the display 
 ### S7 — Resize and input polish
 
 - `useWindowSize` for `SIGWINCH`; recompute budgets, never cache `columns`/`rows`.
-- `useCursor` to publish cursor position for IME composition — required for CJK, which `--locale zh` implies.
+- `useCursor` to publish cursor position for IME composition — required for CJK input.
 - **Resolve the paste overlap.** Ink's `usePaste` owns bracketed-paste mode, and `app/src/terminal.ts` enables it for the pre-mount window. Two owners of `\x1b[?2004h` is a bug waiting to happen; pick one and document it.
 
 ### S8 — Accessibility and degradation

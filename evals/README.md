@@ -1,7 +1,5 @@
 # Agent-loop evals
 
-English | [中文](README.zh.md)
-
 Every Bake version records what its agent loop costs on a fixed task suite, measured against the version before it, so a regression shows up as a number rather than an impression. A record comes from a paired live run. The built headless CLI of each checkout runs the same scenarios through the same model gateway, and the arms are interleaved so that gateway and cache drift affect both alike.
 
 ## Layout
@@ -11,6 +9,7 @@ evals/agent-loop/
   run.ts          paired runner: arms, scenarios, fixtures, wire capture
   record.ts       raw output to a committed record and a regression check
   accounting.ts   provider usage normalization
+  sim-router.ts   simulated task router for routing edge cases
   versions/
     v0.2.0/release/                       a release's own baseline
     unreleased/<YYYY-MM-DD>-<topic>/      one change since the last release
@@ -37,7 +36,7 @@ EVAL_MODELS=claude-sonnet-5-5 EVAL_OUTPUT=.preflight/evals/agent-loop/<topic>/cl
   bun run eval
 ```
 
-Run one process per model, in parallel. The runner reads the `cliproxyapi` route from `~/.bake/settings.yaml`, sends DeepSeek models to the official Anthropic-format endpoint through `llm-deepseek`, and copies `~/.bake/.credentials.yaml`, which holds `CLIPROXYAPI_API_KEY` and `DEEPSEEK_API_KEY`, into a private home for each sample. A record needs those locally; neither is ever written into the output. Raw output, including transcripts and captured requests, stays under the ignored `.preflight/`. The standard set alone takes about 40 minutes and 4 million tokens at three trials; each extended model adds its own process and tokens, and Opus costs the most per token.
+Run one process per model, in parallel. The runner reads the `cliproxyapi` route from `~/.bake/settings.yaml`, sends DeepSeek models to the official Anthropic-format endpoint through the shipped `llm-pi-ai` `deepseek-official` route (or, for an arm whose base bundle still mounts `llm-deepseek`, through that adapter's settings section), and copies `~/.bake/.credentials.yaml`, which holds `CLIPROXYAPI_API_KEY` and `DEEPSEEK_API_KEY`, into a private home for each sample. A record needs those locally; neither is ever written into the output. Raw output, including transcripts and captured requests, stays under the ignored `.preflight/`. The standard set alone takes about 40 minutes and 4 million tokens at three trials; each extended model adds its own process and tokens, and Opus costs the most per token.
 
 A record covers both model sets. `EVAL_MODELS` takes model ids, set names, or both, so `EVAL_MODELS=standard` reruns the first three and `EVAL_MODELS=deepseek/deepseek-flash` one model.
 
@@ -74,6 +73,8 @@ DeepSeek offers `low`, `high`, and `max` but no `medium`, so it runs at `high`, 
 | `workflow_script` | a `workflow` script that runs two subagents |
 
 `delegation` is outside the standard suite; name it in `EVAL_CASES` to measure subagent routing. It delegates the same two reads through the `subagent` tool and checks the same `summary.txt`. Each sample records its `subagentCalls` and the `routingDecisions` its session logs carry: who chose each child's route, and the model and effort. For a routing arm, give both arms the same `subagent-model-selection` allowlist through `EVAL_SETTINGS_<ARM>`, since the allowlist appears in the `subagent` tool's schema, and turn `router.enabled` on in one of them only.
+
+`delegation_auto` is the same task with the route left to the host, so every delegation reaches the task router when one is on. Each sample's `routingDecisions` also carries the router's fallback flag, assessment status, and one-line reason. To measure how routing degrades without the hosted router, run `bun evals/agent-loop/sim-router.ts` and point each arm's `router.url` at `http://127.0.0.1:18917/<case>`. Its cases answer a valid route, an effort the route may not list, a route outside the allowlist, a marked fallback, a reply slower than `router.timeoutMs`, HTTP 503, and a body that is not JSON. It refuses a request without its bearer token, so export `ING_API_TOKEN=sim-eval-token` for the run, or point `router.tokenEnv` at an unset variable to measure a missing token.
 
 A sample succeeds when the agent exits cleanly and an external check passes. That check is the exact `no_tools` reply, the fixture's `node test.cjs` with the test file unmodified, or the expected `summary.txt`. Where a scenario injects content, that content must also be kept.
 

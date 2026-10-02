@@ -2,15 +2,15 @@
 
 Status: implemented
 
-English | [中文](2026-09-07-deepseek-messages-adapter.zh.md)
-
 ## Problem
 
 Deployments expose DeepSeek through Anthropic Messages gateways as well as chat-completions. Messages represents thinking, signatures, tool calls, tool results, and cumulative usage differently. Translating only the endpoint or flattening assistant history loses information needed by subsequent tool turns.
 
 ## Decision
 
-The [DeepSeek adapter](../../../../packages/llm/llm-deepseek/README.md) serves multiple protocols under one `deepseek-official` route and `llm-deepseek` settings namespace. `common/` shares configuration, the model catalog, capability resolution, and Files lifecycle; `protocols/chat-completions/` and `protocols/messages/` own serialization, stream conversion, and transport. Cordis YAML selects the implementation through `protocol`, defaulting to `messages`; shipped first-party compositions inherit that default. The existing `PreparedAdapterCall` freezes protocol, endpoint, credential reference, and model capabilities; retries retain that generation while subsequent calls read new configuration.
+The direct adapter was later replaced: `dsh-llm-deepseek` was removed, and `deepseek-official` is a [`dsh-llm-pi-ai`](../../../../packages/llm/llm-pi-ai/README.md#use-deepseek) provider profile that speaks Anthropic-format Messages at `https://api.deepseek.com/anthropic` through pi-ai's `anthropic-messages` implementation, with `adaptiveThinkingType: enabled` and the compat switches `forceAdaptiveThinking` and `allowEmptySignature`. Its settings live under `providers.deepseek-official` in the `llm-pi-ai:` section. The route has no protocol switch, Files-API upload, or request extensions; images travel inline, and pi-ai's own `deepseek` catalog route serves Chat Completions. The rest of this section records the direct adapter as it shipped.
+
+The DeepSeek adapter serves multiple protocols under one `deepseek-official` route and `llm-deepseek` settings namespace. `common/` shares configuration, the model catalog, capability resolution, and Files lifecycle; `protocols/chat-completions/` and `protocols/messages/` own serialization, stream conversion, and transport. Cordis YAML selects the implementation through `protocol`, defaulting to `messages`; shipped first-party compositions inherit that default. The existing `PreparedAdapterCall` freezes protocol, endpoint, credential reference, and model capabilities; retries retain that generation while subsequent calls read new configuration.
 
 The adapter follows the [DeepSeek compatibility documentation](https://api-docs.deepseek.com/zh-cn/guides/anthropic_api) and [Anthropic streaming protocol](https://platform.claude.com/docs/en/build-with-claude/streaming). The pi-ai Anthropic implementation informed the handling of adjacent user messages, cumulative usage, fragmented tool arguments, and optional thinking signatures. DeepSeek effort uses `output_config.effort`; an Anthropic thinking token budget does not control DeepSeek effort. Both protocols forward explicit `temperature` values; DeepSeek accepts that parameter with thinking enabled and ignores its value, so callers retain their existing thinking configuration.
 
@@ -36,6 +36,6 @@ Both transports use the existing [request-extension registry](../architecture/20
 
 ## Consequences
 
-The package owns wire validation, stop-reason mapping, cancellation, and error classification, so protocol changes require adapter maintenance. Unsupported content and incomplete streams fail explicitly. The existing retry consumer owns retries; the existing assembler drops incomplete tool calls at the output limit. Messages defaults cover the shared base, Web, and standalone first-party compositions. Protocol changes preserve the provider id and saved model selections, but an explicit endpoint override must support the selected protocol.
+These consequences applied to the direct adapter; pi-ai now owns Messages wire handling for the route. The package owned wire validation, stop-reason mapping, cancellation, and error classification, so protocol changes require adapter maintenance. Unsupported content and incomplete streams fail explicitly. The existing retry consumer owns retries; the existing assembler drops incomplete tool calls at the output limit. Messages defaults cover the shared base, Web, and standalone first-party compositions. Protocol changes preserve the provider id and saved model selections, but an explicit endpoint override must support the selected protocol.
 
 Verification covers wire fixtures, real Loader composition, per-file unit coverage, [recorded Session replay](../../../../snapshots/session/deepseek-messages-replay/snapshot.yml) with [unknown replay versions](../../../../snapshots/session/deepseek-messages-degraded-replay/snapshot.yml), a Web Messages Session replay, and credential-gated text, thinking, tool continuation, image, and cancellation requests. Live gateway checks establish compatibility with the configured gateway; they do not establish compatibility with every Anthropic proxy.

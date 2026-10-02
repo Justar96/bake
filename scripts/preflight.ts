@@ -199,7 +199,6 @@ export const STEPS: readonly Step[] = [
     ['doc-graphs', 'event and dependency graphs in docs match the source'],
     ['module-graph', 'module graph artifacts match the source'],
     ['persistence-catalog', 'persistence catalog and schema match the persisted types'],
-    ['translation-pairing', 'English and Chinese docs are paired'],
     ['type-equiv', 'types pasted in docs match their declarations'],
     ['cordis-config', 'Loader rows keep static metadata and resolve from their owner'],
     ['package-invariants', 'invariant companions are wired, or their omission is explained'],

@@ -5,8 +5,6 @@ kind: "package-group"
 
 # skill/ — skill capability family
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 The skill family lets agents discover and load reusable task instructions when needed. `skill-filesystem` discovers instructions from configured directories, `skill-badge` supplies the optional badge, and `tool-skill` exposes the catalog and loader to the model.

@@ -18,6 +18,7 @@ import { LOADER_SMOKE_TEST_TIMEOUT_MS, resolveExampleLaunch } from '@deepseek-ai
 import { SESSION_FORMAT_VERSION, SessionId, SessionSeq } from '@deepseek-ai/dsh-session'
 import Persistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'
+import { deepseekEndpointSettings } from './fixtures/deepseek-endpoint.ts'
 
 const dshBinScript = fileURLToPath(new URL('../src/bin.ts', import.meta.url))
 const tsconfigPath = fileURLToPath(new URL('../../../tsconfig.json', import.meta.url))
@@ -50,6 +51,8 @@ describe('headless --resume of a session another process has open (real launcher
     const before = logs()
     expect(Object.keys(before)).toHaveLength(1)
 
+    // The refusal comes before any model request; a request would fail fast here.
+    await writeFile(join(cwd, '.dsh', 'settings.yaml'), deepseekEndpointSettings('http://127.0.0.1:9'))
     const patch = join(cwd, 'in-use.patch.yml')
     await writeFile(patch, [
       '- id: session-persistence-jsonl',
@@ -66,9 +69,7 @@ describe('headless --resume of a session another process has open (real launcher
         DSH_HOME: join(cwd, '.dsh'),
         DSH_AGENTS_HOME: join(cwd, '.agents'),
         DSH_TELEMETRY_DISABLED: '1',
-        // The refusal comes before any model request; a request would fail fast here.
         DEEPSEEK_API_KEY: 'keyless-in-use',
-        DEEPSEEK_BASE_URL: 'http://127.0.0.1:9',
       },
     })
     const outcome = await execa(launch.command, launch.args, {

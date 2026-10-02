@@ -80,7 +80,7 @@ describe('readPluginInventory', () => {
         {
           id: 'standard',
           trust: 'system',
-          name: '标准模式',
+          name: 'Standard mode',
           isDefault: true,
           rows: [
             { entryId: 'alpha', moduleName: 'pkg-alpha', enabled: true, fiberState: FiberState.ACTIVE },
@@ -96,7 +96,7 @@ describe('readPluginInventory', () => {
       {
         id: 'standard',
         trust: 'system',
-        name: '标准模式',
+        name: 'Standard mode',
         isDefault: true,
         rows: [
           { entryId: 'alpha', moduleName: 'pkg-alpha', enabled: true, fiberPhase: 'active' },

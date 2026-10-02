@@ -17,8 +17,8 @@ import { LocalBashExecutor } from '@deepseek-ai/dsh-bash-local'
 import * as BashEnvPlugin from '@deepseek-ai/dsh-shell-env'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import * as ToolBash from '@deepseek-ai/dsh-tool-bash'
-import * as LlmDeepSeek from '@deepseek-ai/dsh-llm-deepseek'
-import NodeRuntime from '@deepseek-ai/dsh-ptc-runtime-node'
+import * as LlmPiAi from '@deepseek-ai/dsh-llm-pi-ai'
+import CodemodeRuntime from '@deepseek-ai/dsh-ptc-runtime-codemode'
 import Sandbox from '@deepseek-ai/dsh-sandbox-local'
 import SandboxPolicy from '@deepseek-ai/dsh-sandbox-policy'
 import LocalFileSystem from '@deepseek-ai/dsh-fs-local'
@@ -28,6 +28,7 @@ import LocalJobRegistry from '@deepseek-ai/dsh-jobs-local'
 import * as ToolJobs from '@deepseek-ai/dsh-tool-jobs'
 import CordisHostRunner from '@deepseek-ai/dsh-cordis-host-runner'
 import * as ToolCordis from '@deepseek-ai/dsh-tool-cordis'
+import { deepseekProfile } from './harness.ts'
 
 /**
  * With-key PTC mode proof: a real model receives only `run_code`, composes two
@@ -61,7 +62,7 @@ async function ptcModeHarness(cwd: string): Promise<Context> {
   await harness.plugin(ToolRuntime, { mode: 'ptc' })
   await harness.plugin(AgentRegistry)
   await harness.plugin(AgentLoop, { agents: [] })
-  await harness.plugin(LlmDeepSeek)
+  await harness.plugin(LlmPiAi, { providers: { 'deepseek-official': deepseekProfile() } })
   if (harness.get('subprocess') === undefined) await harness.plugin(LocalSubprocessRuntime)
   await harness.plugin(BashEnvPlugin)
   await harness.plugin(LocalBashExecutor, { cwd, timeoutMs: 30_000 })
@@ -82,7 +83,7 @@ async function workspacePtcModeHarness(): Promise<Context> {
   await harness.plugin(ToolFs)
   await harness.plugin(AgentInstructions, { maxBytes: 65536 })
   await harness.plugin(AgentLoop, { agents: [] })
-  await harness.plugin(LlmDeepSeek, { models: [{ id: 'deepseek-v4-flash' }] })
+  await harness.plugin(LlmPiAi, { providers: { 'deepseek-official': deepseekProfile() } })
   await mountRuntime(harness)
   return harness
 }
@@ -90,7 +91,7 @@ async function workspacePtcModeHarness(): Promise<Context> {
 let keylessCall = 0
 const testToolSignal = new AbortController().signal
 
-/** Execute one outer PTC mode call through the real registry and Node process. */
+/** Execute one outer PTC mode call through the real registry and QuickJS runtime. */
 function runCode(
   harness: Context,
   code: string,
@@ -124,10 +125,10 @@ async function mountRuntime(harness: Context): Promise<void> {
   if (!harness.get('sandbox')) await harness.plugin(Sandbox, {})
   if (!harness.get('sessionProjections')) await harness.plugin(SessionProjectionRegistry)
   if (!harness.get('sandboxPolicy')) await harness.plugin(SandboxPolicy, { mode: 'danger-full-access' })
-  await harness.plugin(NodeRuntime, {})
+  await harness.plugin(CodemodeRuntime, {})
 }
 
-/** Keyless real-process harness for direct typed-binding acceptance tests. */
+/** Keyless real-runtime harness for direct typed-binding acceptance tests. */
 async function typedPtcModeHarness(): Promise<Context> {
   const harness = new Context()
   await harness.plugin(SystemPrompt)
@@ -136,7 +137,7 @@ async function typedPtcModeHarness(): Promise<Context> {
   return harness
 }
 
-/** Keyless real-process harness with the task-owned bash lifecycle. */
+/** Keyless real-runtime harness with the task-owned bash lifecycle. */
 async function backgroundPtcModeHarness(cwd: string): Promise<Context> {
   const harness = await typedPtcModeHarness()
   await harness.plugin(LocalJobRegistry)
@@ -148,7 +149,7 @@ async function backgroundPtcModeHarness(cwd: string): Promise<Context> {
   return harness
 }
 
-describe('PTC mode typed values: keyless real-process contracts', () => {
+describe('PTC mode typed values: keyless real-runtime contracts', () => {
   it('crosses a large intermediate value intact and exposes only typed tool failure fields', async () => {
     ctx = await typedPtcModeHarness()
     ctx.tools.register(defineTool({
@@ -241,7 +242,8 @@ describe('PTC mode typed values: keyless real-process contracts', () => {
     const running = runCode(ctx, `
       const started = await tools.bash({ command: 'sleep 10', description: 'Wait for explicit task kill', run_in_background: true });
       console.log(started.jobId);
-      await new Promise(() => {});
+      // A pending tool call keeps the program waiting; a bare unsettled promise fails at once.
+      await tools.job_output({ job_id: started.jobId, wait: true, timeout_ms: 10000 });
     `, afterPublication.signal)
     for (let attempt = 0; attempt < 100 && ctx.jobs.list().length === 0; attempt++) {
       await new Promise(resolve => setTimeout(resolve, 10))
@@ -314,7 +316,7 @@ describe.skipIf(!process.env.DEEPSEEK_API_KEY)('PTC mode: real model writes a pr
   it('collapses the wire tool list to [run_code], bridges sub-calls, and returns curated output', async () => {
     workdir = await mkdtemp(join(tmpdir(), 'dsh-ptc-e2e-'))
     ctx = await ptcModeHarness(workdir)
-    const agent = await ctx.agentLoop.create(SessionId('e2e-ptc'), { provider: 'deepseek-official', model: 'deepseek-v4-flash' })
+    const agent = await ctx.agentLoop.create(SessionId('e2e-ptc'), { provider: 'deepseek-official', model: 'deepseek-flash' })
 
     agent.followup(createUserMessage({
       content: [{
@@ -366,7 +368,7 @@ describe.skipIf(!process.env.DEEPSEEK_API_KEY)('PTC mode: real model writes a pr
     const handle = await ctx.agents.create({
       sessionId: SessionId('e2e-ptc-workspace-session'),
       meta: { cwd: workdir },
-      agentOptions: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+      agentOptions: { provider: 'deepseek-official', model: 'deepseek-flash' },
     })
 
     handle.agent.followup(createUserMessage({

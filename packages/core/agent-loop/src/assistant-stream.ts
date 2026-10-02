@@ -10,6 +10,7 @@ import {
   type ReplayEnvelope,
   type StreamChunk,
   type TokenUsage,
+  type ToolCallBlock,
 } from '@deepseek-ai/dsh-llm'
 import type { AssistantStreamFrame } from '@deepseek-ai/dsh-agent'
 import type { SessionEventMap, SessionId, SessionSeq } from '@deepseek-ai/dsh-session'
@@ -121,6 +122,11 @@ export class AssistantStreamAttempt {
   /** Safe visible prefix when cancellation interrupts the attempt. */
   interruptedBlocks(): ContentBlock[] {
     return this.assembler.interruptedBlocks()
+  }
+
+  /** Tool calls a `max-tokens` finish removed from {@link blocks}, in stream order. */
+  droppedToolCalls(): ToolCallBlock[] {
+    return this.assembler.droppedToolCalls()
   }
 
   /** Latest adapter-reported usage in the stream. */

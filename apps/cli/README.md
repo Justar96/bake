@@ -1,7 +1,5 @@
 # Bake profile launcher
 
-English | [中文](README.zh.md)
-
 The `@deepseek-ai/dsh` package launches Bake's Node process through named Cordis profiles. `tui` starts the terminal agent; `headless` runs a single task and exits; `desktop` is the long-lived bridge the Bake Desktop app launches. Each profile initializes on first use. The package identifier and `dsh` command remain compatible with the shared runtime's package resolution.
 
 ## Profiles

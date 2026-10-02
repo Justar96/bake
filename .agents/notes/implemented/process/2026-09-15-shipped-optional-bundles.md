@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-15-shipped-optional-bundles.zh.md)
-
 ## Problem
 
 The Web plugin page manages only the bundles a person installed into the profile. An official experimental layer such as Agent Teams had to be found on npm and installed by name before it could be switched on, and [default-product isolation](2026-09-12-default-product-experimental-isolation.md) kept every experimental package out of the installation's runtime dependencies, so nothing shipped with dsh could offer it.
