@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-11-sandboxed-node-ptc-runtime.zh.md)
-
 ## Problem
 
 A Node worker isolates JavaScript state but does not apply the calling Session's OS sandbox policy. Model code can import filesystem and subprocess APIs directly, bypassing the tool-policy path even when nested `tools.*` calls receive the correct checks. Terminating the worker also does not establish that its child processes have stopped.

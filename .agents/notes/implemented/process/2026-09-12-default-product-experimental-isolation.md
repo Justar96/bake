@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-12-default-product-experimental-isolation.zh.md)
-
 ## Problem
 
 Public npm availability does not make an experimental package part of the default product. Direct manifest checks miss dependency aliases, transitive installation paths, runtime imports declared only for development, and plugins loaded by configuration. The release smoke installs every tarball together, so the presence of experimental packages in its consumer directory does not identify what the default product requires.

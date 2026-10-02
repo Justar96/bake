@@ -5,8 +5,6 @@ kind: "package-group"
 
 # packages/experimental
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 The experimental group currently contains the CPython backend for the PTC runtime. Its contract can change without a stability promise; released products outside this group do not depend on it.

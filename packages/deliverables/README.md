@@ -5,8 +5,6 @@ kind: "package-group"
 
 # packages/deliverables
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 The `deliverables/` group contains `tool-present`, which lets an agent identify files for delivery in a durable Session event. Its README owns the tool configuration and event contract.

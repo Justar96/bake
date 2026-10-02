@@ -5,8 +5,6 @@ kind: "package-bundle"
 
 # @deepseek-ai/dsh-desktop
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 `dsh-desktop` is the bundle the Bake Desktop app launches: `dsh --profile desktop` keeps one process alive for a workspace, drives one root Agent, and exchanges protocol messages with the desktop. It streams assistant text, reports tool calls and token usage, forwards every approval question to the desktop's approval card, and applies the desktop's permission tier (read-only, normal, or full access). It also reports harness spans, so a desktop trace follows one turn from the user's click through the model request and each tool call. The boundary: one root Agent per process, driven only by the desktop protocol.

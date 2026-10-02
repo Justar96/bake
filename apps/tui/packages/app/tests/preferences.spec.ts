@@ -20,7 +20,7 @@ import { formatBytes, formatDuration, parseNumber, schemaFields } from '../src/s
 
 const copy = dictionaries.en
 const base: TuiSettings = {
-  screen: 'inline', locale: 'en', composerFrame: 'auto', goalObjective: false,
+  screen: 'inline', composerFrame: 'auto', goalObjective: false,
   resultLines: 4, completionLimit: 8, doubleInterruptMs: 2000, recentModels: [],
 }
 
@@ -135,14 +135,14 @@ describe('Preferences', () => {
 
   it('closes without a message when nothing changed, and offers no reset over defaults', async () => {
     const { preferences } = await mount()
-    const { interactions, prompts } = scripted(pick('setting:locale'), back, back)
+    const { interactions, prompts } = scripted(pick('setting:composerFrame'), back, back)
     await expect(run(preferences, interactions)).resolves.toEqual({ kind: 'success' })
     expect(prompts[0]!.choices.some(choice => choice.pinned === true)).toBe(false)
     expect(prompts[1]!.choices.some(choice => choice.pinned === true)).toBe(false)
   })
 
   it('resets a section after a confirmation, keeps it on a refusal, and resets one setting on its own', async () => {
-    MemoryProvider.doc = { [SETTINGS_NAMESPACE]: { resultLines: 16, locale: 'zh', completionLimit: 12 }, other: { kept: true } }
+    MemoryProvider.doc = { [SETTINGS_NAMESPACE]: { resultLines: 16, completionLimit: 12 }, other: { kept: true } }
     const { preferences } = await mount()
     const reset = (prompt: ChoicePrompt) => prompt.choices.find(choice => choice.pinned === true)?.value
     const { interactions, prompts } = scripted(
@@ -227,9 +227,15 @@ describe('Preferences', () => {
   })
 
   it('reads a stored choice at launch', async () => {
+    MemoryProvider.doc = { [SETTINGS_NAMESPACE]: { screen: 'fullscreen' } }
+    const { preferences } = await mount()
+    expect(preferences.screen).toBe('fullscreen')
+  })
+
+  it('tolerates a `locale` an earlier release stored', async () => {
     MemoryProvider.doc = { [SETTINGS_NAMESPACE]: { screen: 'fullscreen', locale: 'zh' } }
     const { preferences } = await mount()
-    expect([preferences.screen, preferences.launch.locale]).toEqual(['fullscreen', 'zh'])
+    expect(preferences.screen).toBe('fullscreen')
   })
 
   it('keeps the models chosen on /model in the tui section, most recent first, and leaves the panel without a row for them', async () => {
@@ -461,6 +467,10 @@ describe('Preferences', () => {
     expect(second!.choices.find(choice => choice.value === 'openrouter/anthropic/claude')?.status).toEqual({ text: copy.settingsSubagentAllowedOn, tone: 'done' })
     expect(third!.warning).toBe(`${copy.settingsSubagentAllowedLast} · ${copy.modelCatalogError}: offline`)
     expect(prompts[5]!.choices.find(choice => choice.value === 'setting:subagent-model-selection.enabled')?.description).toBe(copy.settingsOn)
+    // Once there are models to route among, the router appears on its own tab, not on Agent's.
+    expect(prompts[5]!.tabs?.items.map(tab => tab.label)).toContain(copy.settingsRouting)
+    expect(prompts[5]!.choices.some(choice => choice.searchOnly !== true && choice.value.startsWith('setting:subagent-model-selection.router')))
+      .toBe(false)
   })
 
   it('uses the catalog when enabling and editing allowed models under Advanced, even with an editor', async () => {
@@ -527,13 +537,16 @@ describe('task router settings', () => {
     vi.stubEnv('ING_API_TOKEN', '')
     const { preferences } = await mounted()
     const { interactions, prompts } = scripted(
-      pick('tab:agent'), pick('setting:subagent-model-selection.router.enabled'), pick('off'),
+      pick('tab:routing'), pick('setting:subagent-model-selection.router.enabled'), pick('off'),
       pick('setting:subagent-model-selection.router.enabled'), pick('on'), back,
     )
     await run(preferences, interactions, { describeRoutes: () => Promise.resolve([]) })
     expect(MemoryProvider.doc['subagent-model-selection']).toEqual({ router: { enabled: true } })
-    const [, agent, kept] = prompts
-    expect(agent!.choices.filter(choice => choice.value.startsWith('setting:subagent-model-selection.router')).map(choice => choice.label))
+    const [top, routing, kept] = prompts
+    // The router has its own tab after Agent.
+    expect(top!.tabs?.items.map(tab => tab.label)).toEqual([copy.settingsTerminal, copy.settingsAgent, copy.settingsRouting, copy.settingsAdvanced])
+    expect(routing!.title).toBe(`${copy.settingsTitle} › ${copy.settingsRouting}`)
+    expect(routing!.choices.filter(choice => choice.value.startsWith('setting:subagent-model-selection.router')).map(choice => choice.label))
       .toEqual([copy.settingsRouter])
     expect(kept!.warning).toBe(`${copy.settingsRouterAbout} · https://ing.gissx.org · ${copy.settingsRouterSignedOut}`)
     // Once on, the router's URL, priority, and model calibration follow its switch.
@@ -554,7 +567,7 @@ describe('task router settings', () => {
     await ctx.settings.mutate('subagent-model-selection', [{ op: 'set', path: ['router', 'hints'],
       value: [{ provider: 'deepseek', model: 'deepseek-v4-flash', quality: 'low' }] }])
     const { interactions, prompts } = scripted(
-      pick('tab:agent'), pick('setting:subagent-model-selection.router.hints'),
+      pick('tab:routing'), pick('setting:subagent-model-selection.router.hints'),
       pick('corp/opus-alias'), pick('quality'), pick('high'),
       pick('corp/opus-alias'), pick('sameAs'), { typed: 'claude-opus-4.5' },
       labelled(copy.settingsSubagentAllowedDone), back,
@@ -567,7 +580,7 @@ describe('task router settings', () => {
     // The router is asked again after each change.
     expect(describeRoutes).toHaveBeenCalledTimes(3)
     const list = prompts[2]!
-    expect(list.title).toBe(`${copy.settingsTitle} › ${copy.settingsAgent} › ${copy.settingsRouterCalibrate}`)
+    expect(list.title).toBe(`${copy.settingsTitle} › ${copy.settingsRouting} › ${copy.settingsRouterCalibrate}`)
     expect(list.choices.map(choice => [choice.value, choice.description, choice.status?.text])).toEqual([
       // A declared tier does not replace benchmarks, and the list says so.
       ['deepseek/deepseek-v4-flash', `deepseek-v4-flash · ${copy.settingsRouterQualityShort} 0.80 · $0.30/M · ${copy.settingsRouterHinted}: low · ${copy.settingsRouterBenchmarksWin}`, copy.settingsRouterRanked],
@@ -582,12 +595,12 @@ describe('task router settings', () => {
   it('warns when no allowed model is ranked, and reports a router that cannot be reached', async () => {
     const { ctx, preferences } = await mounted()
     await ctx.settings.mutate('subagent-model-selection', [{ op: 'set', path: ['router', 'enabled'], value: true }])
-    const unranked = scripted(pick('tab:agent'), pick('setting:subagent-model-selection.router.hints'),
+    const unranked = scripted(pick('tab:routing'), pick('setting:subagent-model-selection.router.hints'),
       labelled(copy.settingsSubagentAllowedDone), back)
     await run(preferences, unranked.interactions, { describeRoutes: () => Promise.resolve([{ provider: 'corp', model: 'opus-alias', ranked: false }]) })
     expect(unranked.prompts[2]!.warning).toBe(copy.settingsRouterNoneRanked)
 
-    const down = scripted(pick('tab:agent'), pick('setting:subagent-model-selection.router.hints'), back)
+    const down = scripted(pick('tab:routing'), pick('setting:subagent-model-selection.router.hints'), back)
     await run(preferences, down.interactions, { describeRoutes: () => Promise.reject(new Error('router requires a token; set ING_API_TOKEN')) })
     expect(down.prompts[2]!.warning).toContain(`${copy.settingsRouterUnavailable}: router requires a token; set ING_API_TOKEN`)
   })
@@ -620,7 +633,7 @@ describe('task router settings', () => {
     await ctx.settings.mutate('subagent-model-selection', [{ op: 'set', path: ['router', 'enabled'], value: true }])
     const { controls, calls } = account({ wrongCodes: 1 })
     const { interactions, prompts, typed } = scripted(
-      pick('tab:agent'), pick('setting:subagent-model-selection.router.account'),
+      pick('tab:routing'), pick('setting:subagent-model-selection.router.account'),
       { typed: ' ada@example.com ' }, { typed: '000000' }, { typed: '123456' }, back,
     )
     await run(preferences, interactions, { describeRoutes: () => Promise.resolve([]), routerAccount: controls })
@@ -636,7 +649,7 @@ describe('task router settings', () => {
     const { preferences } = await mounted()
     const { controls, calls } = account()
     const { interactions, prompts } = scripted(
-      pick('tab:agent'), pick('setting:subagent-model-selection.router.enabled'), pick('sign-in'),
+      pick('tab:routing'), pick('setting:subagent-model-selection.router.enabled'), pick('sign-in'),
       { typed: 'ada@example.com' }, { typed: '123456' },
       pick('setting:subagent-model-selection.router.account'), pick('out'), back,
     )
@@ -654,7 +667,7 @@ describe('task router settings', () => {
     await ctx.settings.mutate('subagent-model-selection', [{ op: 'set', path: ['router', 'enabled'], value: true }])
     const { controls, calls } = account({ fromEnv: true })
     const { interactions, prompts } = scripted(
-      pick('tab:agent'), pick('setting:subagent-model-selection.router.account'), back,
+      pick('tab:routing'), pick('setting:subagent-model-selection.router.account'), back,
     )
     await run(preferences, interactions, { describeRoutes: () => Promise.resolve([]), routerAccount: controls })
     expect(accountRow(prompts[1])?.description).toBe(`${copy.settingsRouterTokenFrom} ING_API_TOKEN`)

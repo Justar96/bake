@@ -1,7 +1,5 @@
 # Skills
 
-English | [中文](skills.zh.md)
-
 The [skill capability family](../../packages/skill) contains the [dsh-skill](../../packages/skill/skill) service, local [dsh-skill-filesystem](../../packages/skill/skill-filesystem) provider, optional [dsh-skill-badge](../../packages/skill/skill-badge), and model-facing [dsh-tool-skill](../../packages/skill/tool-skill). The registry merges provider catalogs, and the tool loads full instructions on demand.
 
 Source: [`packages/skill/skill/src/index.ts`](../../packages/skill/skill/src/index.ts), [`packages/skill/skill-filesystem/src/index.ts`](../../packages/skill/skill-filesystem/src/index.ts), [`packages/skill/skill-badge/src/index.ts`](../../packages/skill/skill-badge/src/index.ts), and [`packages/skill/tool-skill/src/index.ts`](../../packages/skill/tool-skill/src/index.ts).

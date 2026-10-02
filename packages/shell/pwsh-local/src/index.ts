@@ -17,7 +17,7 @@
    design (see this package's README), so the two import the same seam surface */
 import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { SHELL_SETTINGS_NAMESPACE, ShellExecutor } from '@deepseek-ai/dsh-shell'
+import { SHELL_SETTINGS_NAMESPACE, ShellExecutor, watchOutput } from '@deepseek-ai/dsh-shell'
 import type { ShellExecRequest, ShellExecSpec, ShellProcess, ShellProcessRead, ShellRunResult, CollectedOutput } from '@deepseek-ai/dsh-shell'
 import type { SubprocessCollect, SubprocessHandle, SubprocessOutputReader, SubprocessSpawnSpec } from '@deepseek-ai/dsh-subprocess'
 import type {} from '@deepseek-ai/dsh-settings'
@@ -207,6 +207,7 @@ export class PwshLocalExecutor extends ShellExecutor {
       ...request.env !== undefined ? { env: request.env } : {},
       ...request.dshEnv !== undefined ? { dshEnv: request.dshEnv } : {},
       sandboxPolicy: request.sandboxPolicy,
+      ...request.onOutput !== undefined ? { onOutput: request.onOutput } : {},
     }
   }
 
@@ -292,8 +293,16 @@ export class PwshLocalExecutor extends ShellExecutor {
       } finally { d.signal.removeEventListener('abort', abort) }
     } else { argv = argvOrPrepare }
     const handle = this.ctx.subprocess.spawn(this.spawnSpec(spec, spec.stdoutMaxBytes, d.signal, argv))
-    const outcome = await handle.done
     const collected = PwshLocalExecutor.collected(handle)
+    // Display-only polling; it stops before the result exists, so no live
+    // output follows the run.
+    const stopWatching = watchOutput(collected, spec.onOutput)
+    let outcome: Awaited<typeof handle.done>
+    try {
+      outcome = await handle.done
+    } finally {
+      stopWatching()
+    }
     // Only this executor's timeout reason counts as timedOut; outer deadlines count as aborts.
     const timedOut = timeoutOf(d.signal, 'BASH_TIMEOUT') !== undefined
     const aborted = d.signal.aborted && !timedOut

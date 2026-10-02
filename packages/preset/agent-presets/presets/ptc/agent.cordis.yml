@@ -182,13 +182,27 @@
         toolName: subagent_fork
         backgroundMode: continuable
 
-    - id: workflow-ptc
-      name: '@deepseek-ai/dsh-workflow-ptc'
+    # Workflow scripts need a Node process, so the engine resolves its own
+    # Node runtime in an entry-local `ptcRuntime` realm rather than the host's
+    # QuickJS runtime that `run_code` uses.
+    - id: workflow-ptc-runtime
+      name: cordis:group
+      group: true
       # No consumer here: `tool-workflow` is off in PTC mode and `tool-ralph`
-      # below is off by default. Restore this row together with `tool-ralph`.
+      # below is off by default. Restore this group and its engine row
+      # together with `tool-ralph`.
       disabled: true
+      isolate:
+        ptcRuntime: true
       config:
-        provider: spawn
+        - id: workflow-node-runtime
+          name: '@deepseek-ai/dsh-ptc-runtime-node'
+
+        - id: workflow-ptc
+          name: '@deepseek-ai/dsh-workflow-ptc'
+          disabled: true
+          config:
+            provider: spawn
 
     - id: tool-workflow
       name: '@deepseek-ai/dsh-tool-workflow'

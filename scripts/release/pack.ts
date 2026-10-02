@@ -34,7 +34,7 @@ function copyWorkspace(relative: string, stage: string): void {
   const manifest = JSON.parse(readFileSync(join(source, 'package.json'), 'utf8')) as { files?: string[] }
   mkdirSync(destination, { recursive: true })
   cpSync(join(source, 'package.json'), join(destination, 'package.json'))
-  const entries = new Set(['LICENSE', 'LICENSE.md', 'README.md', 'README.zh.md'])
+  const entries = new Set(['LICENSE', 'LICENSE.md', 'README.md'])
   for (const pattern of manifest.files ?? ['lib', 'src']) {
     if (pattern.startsWith('!')) continue
     const [entry] = pattern.split('/')

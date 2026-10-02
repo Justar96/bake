@@ -6,7 +6,6 @@
  * ```sh
  * bun --hot tui/packages/harness/dev.tsx              # iterate on components
  * bun tui/packages/harness/dev.tsx --replay           # watch it arrive in order
- * bun tui/packages/harness/dev.tsx --locale zh        # check a dictionary
  * bun tui/packages/harness/dev.tsx fixtures/other.jsonl
  * ```
  *
@@ -126,13 +125,8 @@ function Preview(
 }
 
 const args = process.argv.slice(2)
-const localeArg = args[args.indexOf('--locale') + 1]
-const locale = args.includes('--locale') && localeArg !== undefined && localeArg in dictionaries
-  ? localeArg as keyof typeof dictionaries
-  : 'en'
-const copy = dictionaries[locale]
-const fixture = args.find((arg, index) => !arg.startsWith('--') && args[index - 1] !== '--locale')
-  ?? 'fixtures/session.jsonl'
+const copy = dictionaries.en
+const fixture = args.find(arg => !arg.startsWith('--')) ?? 'fixtures/session.jsonl'
 const rows = rowsOf(fixture, copy)
 
 // The preview's interrupt callback exits Bun's hot watcher as well as the renderer.

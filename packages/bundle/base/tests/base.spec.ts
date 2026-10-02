@@ -6,10 +6,13 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, onTestFinished } from 'vitest'
 import * as yaml from 'js-yaml'
+import { Context } from '@deepseek-ai/cordis'
 import { entryListSchema } from '@deepseek-ai/cordis-plugin-include'
 import { evaluate } from '@deepseek-ai/cordis-plugin-loader'
+import LlmRuntime from '@deepseek-ai/dsh-llm'
+import * as LlmPiAi from '@deepseek-ai/dsh-llm-pi-ai'
 
 interface BaseRow {
   id?: string
@@ -88,12 +91,34 @@ describe('dsh-base bundle', () => {
       .toEqual({ mode: 'DISABLED', url: endpoint })
   })
 
-  it('keeps the DeepSeek session-log upload mounted but off', () => {
-    expect(baseRows().find(row => row.id === 'session-log-deepseek')).toEqual({
-      id: 'session-log-deepseek',
-      name: '@deepseek-ai/dsh-session-log-deepseek',
-      config: { enabled: false },
+  it('serves DeepSeek through the pi-ai adapter with its in-history capabilities', async () => {
+    const rows = baseRows()
+    expect(rows.map(row => row.name)).not.toContain('@deepseek-ai/dsh-llm-deepseek')
+    const row = rows.find(candidate => candidate.id === 'llm-pi-ai')
+    expect(row?.name).toBe('@deepseek-ai/dsh-llm-pi-ai')
+    const ctx = new Context()
+    onTestFinished(() => ctx.fiber.dispose())
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(LlmPiAi, row?.config as LlmPiAi.Config)
+
+    expect(ctx.llm.listProviders()).toContainEqual({ id: 'deepseek-official', name: 'DeepSeek' })
+    expect((await ctx.llm.listModels('deepseek-official')).map(model => model.id))
+      .toEqual(['deepseek-flash', 'deepseek-v4-pro'])
+    const flash = await ctx.llm.resolveModelInfo('deepseek-official', 'deepseek-flash')
+    expect(flash).toMatchObject({
+      inputModalities: ['text', 'image'],
+      context: { contextWindow: 1_000_000 },
+      defaultMaxTokens: 256_000,
+      systemPromptUpdate: 'in-history',
+      toolUpdate: 'in-history',
+      reasoning: { defaultEffort: 'high' },
     })
+    expect(flash.reasoning?.efforts.map(effort => effort.id)).toEqual(['off', 'low', 'high', 'max'])
+    const pro = await ctx.llm.resolveModelInfo('deepseek-official', 'deepseek-v4-pro')
+    expect(pro).toMatchObject({ inputModalities: ['text'], defaultMaxTokens: 256_000 })
+    expect(pro.description).toBeTypeOf('string')
+    expect(pro).not.toHaveProperty('systemPromptUpdate')
+    expect(pro).not.toHaveProperty('toolUpdate')
   })
 
   it('gates each shell stack by platform with a symmetric disabled expression', () => {

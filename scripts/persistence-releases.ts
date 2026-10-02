@@ -36,7 +36,7 @@ export interface PersistenceReleaseChange {
   readonly after: string | null
 }
 
-/** Machine declaration shared byte-for-byte by a release's bilingual documents. */
+/** Machine declaration declared by a release's document. */
 export interface PersistenceReleaseRecord {
   readonly schemaVersion: 1
   readonly tag: string
@@ -188,10 +188,10 @@ export function loadPersistenceReleases(root: string): PersistenceReleases {
   const directory = join(root, ARCHIVE_DIRECTORY)
   const manifest = parseManifest(JSON.parse(readFileSync(join(directory, 'manifest.json'), 'utf8')))
   const files = new Set(readdirSync(directory))
-  const expected = new Set(['manifest.json', 'README.md', 'README.zh.md', 'README.i18n.yaml'])
+  const expected = new Set(['manifest.json', 'README.md'])
   for (const filename of expected) if (!files.has(filename)) throw new Error(`missing release artifact ${filename}`)
   for (const release of manifest.releases) {
-    for (const suffix of ['.md', '.zh.md', '.i18n.yaml', '.schema.json']) {
+    for (const suffix of ['.md', '.schema.json']) {
       const filename = release.tag + suffix
       expected.add(filename)
       if (!files.has(filename)) throw new Error(`${release.tag}: missing release artifact ${filename}`)
@@ -202,10 +202,7 @@ export function loadPersistenceReleases(root: string): PersistenceReleases {
   const roots = new Map<string, PersistenceRoot>()
   for (const release of manifest.releases) {
     const read = (suffix: string): string => readFileSync(join(directory, release.tag + suffix), 'utf8').replaceAll('\r\n', '\n')
-    const english = machineBlock(read('.md'), `${release.tag}.md`)
-    const chinese = machineBlock(read('.zh.md'), `${release.tag}.zh.md`)
-    if (english !== chinese) throw new Error(`${release.tag}: bilingual machine records differ`)
-    const record = parseRecord(english, release, entries.at(-1)?.release.tag ?? null)
+    const record = parseRecord(machineBlock(read('.md'), `${release.tag}.md`), release, entries.at(-1)?.release.tag ?? null)
     const snapshot = parseHistoricalPersistenceSnapshot(JSON.parse(read('.schema.json')))
     validateTypes(snapshot, release.tag)
     const afterRoots = new Map(snapshot.roots.map(root => [root.key, root]))
@@ -230,7 +227,7 @@ export function loadPersistenceReleases(root: string): PersistenceReleases {
 }
 
 /** Validate the archive and check or refresh its bounded factual Markdown regions.
- * @param args - CLI arguments; --write refreshes facts and pairing sidecars after complete validation.
+ * @param args - CLI arguments; --write refreshes facts after complete validation.
  * @param root - default repository directory, overridden by --root when provided.
  * @returns the verified release counts and optional number of refreshed artifacts.
  */

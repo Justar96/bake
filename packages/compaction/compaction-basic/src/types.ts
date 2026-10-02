@@ -6,10 +6,15 @@
 
 import type { LlmCallConfig } from '@deepseek-ai/dsh-llm'
 
-/** Policy fields shared by the default policy and exact model overrides. */
+/** Policy fields shared by the default policy and per-route overrides. */
 export interface CompactionPolicyConfig {
   /** Compact at this fraction of the model's context window. Defaults to `0.8`. */
   thresholdRatio?: number
+  /**
+   * Compact at this absolute request size; mutually exclusive with
+   * `thresholdRatio`. Must not exceed the routed model's context window.
+   */
+  thresholdTokens?: number
   /** Recent context retained as a fraction of the model's window. Defaults to `0.16`. */
   retainRatio?: number
   /** Absolute recent-context budget; mutually exclusive with `retainRatio`. */
@@ -26,17 +31,25 @@ export interface CompactionPolicyConfig {
   maxOverflowRetries?: number
 }
 
-/** Exact provider/model override merged over the default compaction policy. */
+/**
+ * Per-route override merged over the default compaction policy. An entry
+ * without `model` covers every model on `provider`; an entry naming a model
+ * layers over that provider-wide entry, field by field.
+ */
 export interface ModelCompactPolicyConfig extends CompactionPolicyConfig {
   /** Registered provider route to match. */
   provider: string
-  /** Exact routed model id to match within `provider`. */
-  model: string
+  /** Exact routed model id to match within `provider`; omit to cover every model on the route. */
+  model?: string
 }
 
-/** Basic compaction configuration with an optional exact-target policy table. */
+/** Basic compaction configuration with an optional per-route policy table. */
 export interface BasicCompactionConfig extends CompactionPolicyConfig {
-  /** Exact provider/model overrides; duplicate targets fail plugin load. */
+  /**
+   * Per-route overrides: exact provider/model beats provider-wide beats the
+   * defaults. A second entry for the same provider/model, or a second
+   * provider-wide entry for the same provider, fails validation.
+   */
   modelPolicies?: ModelCompactPolicyConfig[]
   /** Enable automatic step-boundary pressure and overflow-recovery listeners. Defaults to `true`. */
   auto?: boolean
@@ -47,9 +60,13 @@ export type ResolvedRetention =
   | { readonly retainRatio: number; readonly retainTokens?: never }
   | { readonly retainRatio?: never; readonly retainTokens: number }
 
-/** Validated policy fields shared before and after exact-target matching. */
+/** Exactly one validated pressure-threshold form. */
+export type ResolvedThreshold =
+  | { readonly thresholdRatio: number; readonly thresholdTokens?: never }
+  | { readonly thresholdRatio?: never; readonly thresholdTokens: number }
+
+/** Validated policy fields shared before and after route matching. */
 interface ResolvedPolicyFields {
-  readonly thresholdRatio: number
   readonly summarizationProvider: string
   readonly summarizationModel: string
   readonly maxTokens: number
@@ -58,18 +75,19 @@ interface ResolvedPolicyFields {
 }
 
 /** Validated immutable config whose target-specific defaults remain unresolved. */
-export type ResolvedConfig = ResolvedPolicyFields & ResolvedRetention & {
+export type ResolvedConfig = ResolvedPolicyFields & ResolvedThreshold & ResolvedRetention & {
   readonly modelPolicies: readonly Readonly<ModelCompactPolicyConfig>[]
   readonly auto: boolean
 }
 
 /** Fully merged policy for one routed conversation target, before capacity scaling. */
-export type ResolvedTargetPolicy = ResolvedPolicyFields & ResolvedRetention & {
+export type ResolvedTargetPolicy = ResolvedPolicyFields & ResolvedThreshold & ResolvedRetention & {
   readonly target: Pick<LlmCallConfig, 'provider' | 'model'>
 }
 
 /** One routed model's concrete pressure and retention budget. */
-export type ResolvedCompactSpec = Omit<ResolvedTargetPolicy, 'retainRatio' | 'retainTokens'> & {
+export type ResolvedCompactSpec = ResolvedPolicyFields & {
+  readonly target: Pick<LlmCallConfig, 'provider' | 'model'>
   readonly contextWindow: number
   readonly thresholdTokens: number
   readonly retainTokens: number

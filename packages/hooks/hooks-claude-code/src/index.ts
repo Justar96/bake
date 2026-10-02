@@ -16,7 +16,7 @@ import type {} from '@deepseek-ai/dsh-session-projection'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, MessageSource } from '@deepseek-ai/dsh-llm'
 import type { UserMessage } from '@deepseek-ai/dsh-session'
-import type { PostToolDecision, PreToolDecision, ToolExecution, ToolExecutionResult } from '@deepseek-ai/dsh-tools'
+import type { PostToolDecision, PreToolDecision, ToolExecution, ToolExecutionResult, ToolHalt } from '@deepseek-ai/dsh-tools'
 import {
   appendHookInvoked,
   appendHookResult,
@@ -185,7 +185,17 @@ export function apply(ctx: Context, config: Config): void {
     return mergeHookOutputs(outputs)
   }
 
-  // TODO(hook-continue-false): `merged.stop` is logged but needs a run-level halt mechanism.
+  // `continue:false` (`merged.stop`) stops Claude Code entirely and wins over
+  // every decision. Each point below maps it to its nearest stop: a rejected
+  // prompt, a tool halt, or a Stop hook that declines to continue. A tool halt
+  // names `stopReason` as its reason and, as in Claude Code, leaves the text in
+  // the conversation for the model to see if the conversation continues.
+
+  /** The tool halt for a hook that returned `continue:false`, if any did. */
+  function haltFrom(merged: MergedHookOutcome, point: 'PreToolUse' | 'PostToolUse'): ToolHalt | undefined {
+    if (!merged.stop) return undefined
+    return { reason: merged.stopReason ?? `stopped by ${point} hook` }
+  }
 
   /** Build additional model context from hook output, or return undefined when empty. */
   function contextFrom(merged: MergedHookOutcome): UserMessage | undefined {
@@ -219,7 +229,7 @@ export function apply(ctx: Context, config: Config): void {
     if (messages.length === 0) return next()
     const content = messages.flatMap(message => message.content)
     const merged = await runPoint('UserPromptSubmit', '', promptPayload(agent, content), { agent, turn, signal })
-    if (merged.decision === 'deny') {
+    if (merged.decision === 'deny' || merged.stop) {
       return { kind: 'reject' }
     }
     // Delegate so later listeners may still rewrite or reject, then prepend our
@@ -237,15 +247,36 @@ export function apply(ctx: Context, config: Config): void {
   ctx.on('tools/pre-execute', async (exec, next): Promise<PreToolDecision> => {
     const turn = lastTurn(ctx, exec.agent)
     const merged = await runPoint('PreToolUse', exec.name, preToolPayload(exec), { ...exec.agent ? { agent: exec.agent } : {}, turn, signal: exec.signal })
-    if (merged.decision === 'deny') return { kind: 'deny', reason: merged.reason ?? 'blocked by PreToolUse hook' }
+    const halt = haltFrom(merged, 'PreToolUse')
+    if (merged.decision === 'deny' || halt) {
+      const reason = (halt ? merged.stopReason : undefined) ?? merged.reason ?? 'blocked by PreToolUse hook'
+      return { kind: 'deny', reason, ...halt ? { halt } : {} }
+    }
     if (merged.decision === 'ask') return { kind: 'ask', ...merged.reason !== undefined ? { reason: merged.reason } : {} }
     return next()
   })
 
-  // --- PostToolUse → PostToolDecision. Matcher subject is the tool name. ---
+  // --- PostToolUse → PostToolDecision. Matcher subject is the tool name. The
+  // tool already ran, so `continue:false` keeps the decision and adds a halt. ---
   ctx.on('tools/post-execute', async (exec, result, next): Promise<PostToolDecision> => {
     const turn = lastTurn(ctx, exec.agent)
     const merged = await runPoint('PostToolUse', exec.name, postToolPayload(exec, result), { ...exec.agent ? { agent: exec.agent } : {}, turn, signal: exec.signal })
+    const decision = await postToolDecision(merged, next)
+    const halt = haltFrom(merged, 'PostToolUse')
+    if (!halt) return decision
+    // The result already stands, so the stop text joins as context the next wake admits.
+    const stopContext = merged.stopReason === undefined
+      ? undefined
+      : createUserMessage({ content: [{ type: 'text', text: merged.stopReason }], source: PLUGIN_SOURCE })
+    return {
+      ...decision,
+      ...stopContext ? { additionalContexts: [...decision.additionalContexts ?? [], stopContext] } : {},
+      halt,
+    }
+  })
+
+  /** Map one merged PostToolUse outcome to a decision, delegating unless our hooks blocked. */
+  async function postToolDecision(merged: MergedHookOutcome, next: () => Promise<PostToolDecision>): Promise<PostToolDecision> {
     const context = contextFrom(merged)
     if (merged.decision === 'deny') {
       return { kind: 'block', feedback: [{ type: 'text', text: merged.reason ?? 'blocked by PostToolUse hook' }], ...context ? { additionalContexts: [context] } : {} }
@@ -261,14 +292,15 @@ export function apply(ctx: Context, config: Config): void {
       ...downstream,
       additionalContexts: prependContext(context, downstream.additionalContexts),
     }
-  })
+  }
 
   // A blocking Stop hook steers at the stopping boundary, which makes the
-  // machine observe pending input and run another step.
+  // machine observe pending input and run another step; `continue:false`
+  // overrides the block and lets the turn stop.
   // TODO(stop-loop-guard): cap consecutive forced continuations; hooks must self-limit meanwhile.
   ctx.on('agent/turn-stopping', async ({ agent, turn, signal }): Promise<void> => {
     const merged = await runPoint('Stop', '', stopPayload(agent), { agent, turn, signal })
-    if (merged.decision === 'deny') {
+    if (merged.decision === 'deny' && !merged.stop) {
       // A blocking Stop hook forces continuation.
       const text = merged.reason ?? 'continue: blocked by Stop hook'
       agent.steer(createUserMessage({ content: [{ type: 'text', text }], source: PLUGIN_SOURCE }))

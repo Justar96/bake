@@ -5,8 +5,6 @@ kind: "package-group"
 
 # terminal/ — persistent PTY capability family
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 The `terminal/` family keeps interactive shell sessions alive across calls, including their working directory, environment, and running child processes. `terminal/` manages owner-isolated sessions and `terminal-bash/` supplies a sandboxed bash or pwsh backend. Sessions remain local to one process.

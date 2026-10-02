@@ -5,8 +5,6 @@ kind: "package-reference"
 
 # @deepseek-ai/dsh-fs-observation-policy
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 `dsh-fs-observation-policy` makes filesystem tools require an agent to read a file before overwriting it, and rejects an overwrite when the file has changed since that read, with a clear instruction to re-read and retry. Edits are content-anchored by default: a literal replacement whose text matches exactly once applies to the current file, read or not, and the tool shows the edited lines when the agent had not seen them. Reading a missing path authorizes guarded creation, while concurrent creation remains protected. Choose it for deployments that want no-clobber writes; resumed sessions must read targets again because observations are not persisted.

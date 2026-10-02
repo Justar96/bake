@@ -2172,17 +2172,21 @@ describe('continuable review regressions', () => {
 
   it('keeps the epoch\'s earlier text past a final empty usage-only message', async () => {
     // A tool-only max-tokens step records an empty assistant/message for
-    // usage. The terminal event retains the previous assistant content,
-    // including its tool call but not the intervening tool result.
+    // usage. The loop asks once for the dropped call, and the retry is cut off
+    // the same way, so the turn ends on a usage-only message. The terminal
+    // event retains the previous assistant content, including its tool call
+    // but not the intervening tool result.
+    const truncatedCall = (id: string): StreamChunk[] => [
+      { type: 'block-start', index: 0, blockType: 'tool-call' },
+      { type: 'tool-call-delta', index: 0, id: ToolCallId(id), name: 'noop', argumentsDelta: '{}' },
+      { type: 'block-end', index: 0, block: { type: 'tool-call', id: ToolCallId(id), name: 'noop', arguments: '{}' } },
+      { type: 'usage', usage: { inputTokens: 20, outputTokens: 5 } },
+      { type: 'finish', reason: { kind: 'max-tokens' } },
+    ]
     const { ctx, parent } = await setup([
       toolCallResponse('t1', 'noop', {}, 'partial one'),
-      [
-        { type: 'block-start', index: 0, blockType: 'tool-call' },
-        { type: 'tool-call-delta', index: 0, id: ToolCallId('t2'), name: 'noop', argumentsDelta: '{}' },
-        { type: 'block-end', index: 0, block: { type: 'tool-call', id: ToolCallId('t2'), name: 'noop', arguments: '{}' } },
-        { type: 'usage', usage: { inputTokens: 20, outputTokens: 5 } },
-        { type: 'finish', reason: { kind: 'max-tokens' } },
-      ],
+      truncatedCall('t2'),
+      truncatedCall('t3'),
     ])
     ctx.tools.register(defineTool({
       name: 'noop',

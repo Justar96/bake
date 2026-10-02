@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-16-session-writer-held-feedback.zh.md)
-
 ## Problem
 
 A Session can retain its write handle while its Agent is idle. Another Host cannot resume that Session, but a generic internal-error toast gives the user no recovery guidance. The holder can also belong to the same process, so contention alone does not identify another running application.

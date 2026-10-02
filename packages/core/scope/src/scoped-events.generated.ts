@@ -1,6 +1,6 @@
 /**
  * Generated scoped-event routing-subject resolvers for dsh-scope invariants.
- * Do not edit by hand; run `pnpm run gen-scoped-events`.
+ * Do not edit by hand; run `bun run gen-scoped-events`.
  *
  * @module @deepseek-ai/dsh-scope/scoped-events.generated
  */
@@ -19,6 +19,8 @@ const scopedSubjectResolvers: Readonly<Record<string, ScopedSubjectResolver | nu
   'agent/request': args => (args[0] as Record<string, unknown>)['agent'],
   'agent/request-error': args => (args[0] as Record<string, unknown>)['agent'],
   'agent/status': args => (args[0] as Record<string, unknown>)['agent'],
+  'agent/tool-executed': args => (args[0] as Record<string, unknown>)['agent'],
+  'agent/tool-progress': args => (args[0] as Record<string, unknown>)['agent'],
   'agent/turn-stopping': args => (args[0] as Record<string, unknown>)['agent'],
   'approval/request': args => (args[0] as Record<string, unknown>)['agent'],
   'goal/changed': args => (args[0] as Record<string, unknown>)['agent'],

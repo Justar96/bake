@@ -14,6 +14,7 @@ import type {
   ResolvedConfig,
   ResolvedRetention,
   ResolvedTargetPolicy,
+  ResolvedThreshold,
 } from './types.ts'
 
 /** Default request-pressure fraction for every routed model. */
@@ -22,9 +23,10 @@ const DEFAULT_THRESHOLD_RATIO = 0.8
 /** Default verbatim-tail fraction for every routed model. */
 const DEFAULT_RETAIN_RATIO = 0.16
 
-/** Fields shared by top-level defaults and exact-target overrides. */
+/** Fields shared by top-level defaults and per-route overrides. */
 const POLICY_CONFIG_KEYS = [
   'thresholdRatio',
+  'thresholdTokens',
   'retainRatio',
   'retainTokens',
   'summarizationProvider',
@@ -41,7 +43,7 @@ const BASIC_COMPACT_CONFIG_KEYS: ReadonlySet<string> = new Set([
   'auto',
 ])
 
-/** Complete exact-target override key set. */
+/** Complete per-route override key set. */
 const MODEL_POLICY_KEYS: ReadonlySet<string> = new Set([
   'provider',
   'model',
@@ -60,31 +62,43 @@ export class TargetPressureConfigError extends Error {
 }
 
 /**
- * Resolve and validate service defaults plus exact-target partial overrides.
- * @param config - untrusted plugin configuration after Loader normalization.
- * @returns detached immutable defaults and validated exact-target overrides.
+ * Resolve and validate service defaults plus per-route partial overrides.
+ * Every capacity-independent conflict an override can produce once layered
+ * over the defaults (and, for an exact entry, over its provider-wide entry)
+ * fails here rather than at the first pressure check.
+ * @param config - untrusted plugin configuration or settings section.
+ * @param name - diagnostic prefix naming where the configuration came from.
+ * @returns detached immutable defaults and validated per-route overrides.
  */
-export function resolveConfig(config: BasicCompactionConfig = {}): ResolvedConfig {
-  validateKeys(config, BASIC_COMPACT_CONFIG_KEYS, 'BasicCompactionConfig')
-  validatePolicy(config, 'BasicCompactionConfig')
+export function resolveConfig(
+  config: BasicCompactionConfig = {},
+  name = 'BasicCompactionConfig',
+): ResolvedConfig {
+  validateKeys(config, BASIC_COMPACT_CONFIG_KEYS, name)
+  validatePolicy(config, name)
   if (config.auto !== undefined && typeof config.auto !== 'boolean') {
-    throw new Error('BasicCompactionConfig: auto must be a boolean')
+    throw new Error(`${name}: auto must be a boolean`)
   }
 
-  const thresholdRatio = config.thresholdRatio ?? DEFAULT_THRESHOLD_RATIO
+  const threshold = resolveThreshold(config, { thresholdRatio: DEFAULT_THRESHOLD_RATIO })
   const retention = resolveRetention(config, { retainRatio: DEFAULT_RETAIN_RATIO })
-  validateRatioRetention(thresholdRatio, retention, 'BasicCompactionConfig')
-  const modelPolicies = resolveModelPolicies(config.modelPolicies)
+  validateThresholdRetention(threshold, retention, name)
+  const modelPolicies = resolveModelPolicies(config.modelPolicies, name)
   for (const [index, policy] of modelPolicies.entries()) {
-    validateRatioRetention(
-      policy.thresholdRatio ?? thresholdRatio,
-      resolveRetention(policy, retention),
-      `BasicCompactionConfig: modelPolicies[${index}]`,
+    const providerWide = policy.model === undefined
+      ? undefined
+      : modelPolicies.find(other => other.provider === policy.provider && other.model === undefined)
+    const inheritedThreshold = resolveThreshold(providerWide ?? {}, threshold)
+    const inheritedRetention = resolveRetention(providerWide ?? {}, retention)
+    validateThresholdRetention(
+      resolveThreshold(policy, inheritedThreshold),
+      resolveRetention(policy, inheritedRetention),
+      `${name}: modelPolicies[${index}]`,
     )
   }
 
   return deepFreeze({
-    thresholdRatio,
+    ...threshold,
     ...retention,
     summarizationProvider: config.summarizationProvider ?? '',
     summarizationModel: config.summarizationModel ?? '',
@@ -97,7 +111,10 @@ export function resolveConfig(config: BasicCompactionConfig = {}): ResolvedConfi
 }
 
 /**
- * Merge the exact provider/model override over the validated default policy.
+ * Layer the matching overrides over the validated default policy, field by
+ * field: the exact provider/model entry over the provider-wide entry over the
+ * defaults. A threshold or retention form set at a more specific level
+ * replaces the inherited form as a unit.
  * @param config - validated service defaults and override table.
  * @param target - exact durable provider/model route to match.
  * @returns detached immutable policy before model-capacity scaling.
@@ -106,21 +123,31 @@ export function resolveTargetPolicy(
   config: ResolvedConfig,
   target: Pick<LlmCallConfig, 'provider' | 'model'>,
 ): ResolvedTargetPolicy {
-  const override = config.modelPolicies.find(policy => (
+  const providerWide = config.modelPolicies.find(policy => (
+    policy.provider === target.provider && policy.model === undefined
+  ))
+  const exact = config.modelPolicies.find(policy => (
     policy.provider === target.provider && policy.model === target.model
   ))
-  const inheritedRetention: ResolvedRetention = config.retainTokens === undefined
+  const defaultThreshold: ResolvedThreshold = config.thresholdTokens === undefined
+    ? { thresholdRatio: config.thresholdRatio }
+    : { thresholdTokens: config.thresholdTokens }
+  const defaultRetention: ResolvedRetention = config.retainTokens === undefined
     ? { retainRatio: config.retainRatio }
     : { retainTokens: config.retainTokens }
+  const pick = <K extends keyof CompactionPolicyConfig>(
+    key: K,
+    fallback: NonNullable<CompactionPolicyConfig[K]>,
+  ): NonNullable<CompactionPolicyConfig[K]> => exact?.[key] ?? providerWide?.[key] ?? fallback
   return deepFreeze({
     target: { provider: target.provider, model: target.model },
-    thresholdRatio: override?.thresholdRatio ?? config.thresholdRatio,
-    ...resolveRetention(override ?? {}, inheritedRetention),
-    summarizationProvider: override?.summarizationProvider ?? config.summarizationProvider,
-    summarizationModel: override?.summarizationModel ?? config.summarizationModel,
-    maxTokens: override?.maxTokens ?? config.maxTokens,
-    compactionRetries: override?.compactionRetries ?? config.compactionRetries,
-    maxOverflowRetries: override?.maxOverflowRetries ?? config.maxOverflowRetries,
+    ...resolveThreshold(exact ?? {}, resolveThreshold(providerWide ?? {}, defaultThreshold)),
+    ...resolveRetention(exact ?? {}, resolveRetention(providerWide ?? {}, defaultRetention)),
+    summarizationProvider: pick('summarizationProvider', config.summarizationProvider),
+    summarizationModel: pick('summarizationModel', config.summarizationModel),
+    maxTokens: pick('maxTokens', config.maxTokens),
+    compactionRetries: pick('compactionRetries', config.compactionRetries),
+    maxOverflowRetries: pick('maxOverflowRetries', config.maxOverflowRetries),
   })
 }
 
@@ -141,7 +168,14 @@ export function resolveCompactSpec(
       `BasicCompactionConfig: contextWindow (${contextWindow}) must be a positive integer`,
     )
   }
-  const thresholdTokens = Math.floor(contextWindow * policy.thresholdRatio)
+  const thresholdTokens = policy.thresholdTokens ?? Math.floor(contextWindow * policy.thresholdRatio)
+  if (thresholdTokens > contextWindow) {
+    throw new TargetPressureConfigError(
+      targetKey,
+      `BasicCompactionConfig: ${targetKey} thresholdTokens (${thresholdTokens}) exceeds `
+      + `the model's contextWindow (${contextWindow}); lower it or use thresholdRatio`,
+    )
+  }
   const retainTokens = policy.retainTokens === undefined
     ? Math.floor(contextWindow * policy.retainRatio)
     : policy.retainTokens
@@ -155,7 +189,6 @@ export function resolveCompactSpec(
   return deepFreeze({
     target: { ...policy.target },
     contextWindow,
-    thresholdRatio: policy.thresholdRatio,
     thresholdTokens,
     retainTokens,
     summarizationProvider: policy.summarizationProvider,
@@ -176,42 +209,66 @@ function resolveRetention(
   return fallback
 }
 
-/** Reject a capacity-independent retention conflict at plugin load. */
-function validateRatioRetention(
-  thresholdRatio: number,
+/** Choose an explicit threshold form or inherit the already-resolved fallback. */
+function resolveThreshold(
+  config: CompactionPolicyConfig,
+  fallback: ResolvedThreshold,
+): ResolvedThreshold {
+  if (config.thresholdTokens !== undefined) return { thresholdTokens: config.thresholdTokens }
+  if (config.thresholdRatio !== undefined) return { thresholdRatio: config.thresholdRatio }
+  return fallback
+}
+
+/**
+ * Reject a capacity-independent threshold/retention conflict at load: two
+ * ratios, or two absolute budgets. A mixed pair depends on the routed model's
+ * window and is judged per target by {@link resolveCompactSpec}.
+ */
+function validateThresholdRetention(
+  threshold: ResolvedThreshold,
   retention: ResolvedRetention,
   name: string,
 ): void {
-  if (retention.retainRatio !== undefined && retention.retainRatio >= thresholdRatio) {
+  if (threshold.thresholdRatio !== undefined && retention.retainRatio !== undefined
+    && retention.retainRatio >= threshold.thresholdRatio) {
     throw new Error(
       `${name}: retainRatio (${retention.retainRatio}) must be less than `
-      + `the resolved thresholdRatio (${thresholdRatio})`,
+      + `the resolved thresholdRatio (${threshold.thresholdRatio})`,
+    )
+  }
+  if (threshold.thresholdTokens !== undefined && retention.retainTokens !== undefined
+    && retention.retainTokens >= threshold.thresholdTokens) {
+    throw new Error(
+      `${name}: retainTokens (${retention.retainTokens}) must be less than `
+      + `the resolved thresholdTokens (${threshold.thresholdTokens})`,
     )
   }
 }
 
-/** Validate, detach, and reject duplicate exact-target policies. */
-function resolveModelPolicies(configured: unknown): ModelCompactPolicyConfig[] {
+/** Validate, detach, and reject duplicate exact and provider-wide policies. */
+function resolveModelPolicies(configured: unknown, owner: string): ModelCompactPolicyConfig[] {
   if (configured === undefined) return []
   if (!Array.isArray(configured)) {
-    throw new Error('BasicCompactionConfig: modelPolicies must be an array')
+    throw new Error(`${owner}: modelPolicies must be an array`)
   }
   const seen = new Set<string>()
   return configured.map((source: unknown, index) => {
-    const name = `BasicCompactionConfig: modelPolicies[${index}]`
+    const name = `${owner}: modelPolicies[${index}]`
     assertModelPolicy(source, name)
-    const key = `${source.provider}\u0000${source.model}`
+    const key = source.model === undefined
+      ? `${source.provider}\u0000`
+      : `${source.provider}\u0000\u0000${source.model}`
     if (seen.has(key)) {
-      throw new Error(
-        `BasicCompactionConfig: duplicate model policy for ${source.provider}/${source.model}`,
-      )
+      throw new Error(source.model === undefined
+        ? `${owner}: duplicate provider-wide model policy for ${source.provider}`
+        : `${owner}: duplicate model policy for ${source.provider}/${source.model}`)
     }
     seen.add(key)
     return { ...source }
   })
 }
 
-/** Validate one untrusted exact-target override and narrow its public type. */
+/** Validate one untrusted per-route override and narrow its public type. */
 function assertModelPolicy(
   source: unknown,
   name: string,
@@ -219,22 +276,27 @@ function assertModelPolicy(
   if (!isUnknownRecord(source)) throw new Error(`${name} must be an object`)
   validateKeys(source, MODEL_POLICY_KEYS, name)
   assertNonEmptyString(`${name}.provider`, source.provider)
-  assertNonEmptyString(`${name}.model`, source.model)
+  if (source.model !== undefined) assertNonEmptyString(`${name}.model`, source.model)
   validatePolicy(source, name)
 }
 
-/** Validate the fields common to defaults and exact-target partial overrides. */
+/** Validate the fields common to defaults and per-route partial overrides. */
 function validatePolicy(
   config: CompactionPolicyConfig | Record<string, unknown>,
   name: string,
 ): void {
   const thresholdRatio = config.thresholdRatio
+  const thresholdTokens = config.thresholdTokens
   const retainRatio = config.retainRatio
   const retainTokens = config.retainTokens
   const maxTokens = config.maxTokens
   const compactionRetries = config.compactionRetries
   const maxOverflowRetries = config.maxOverflowRetries
   if (thresholdRatio !== undefined) assertRatio(`${name}.thresholdRatio`, thresholdRatio)
+  if (thresholdTokens !== undefined) assertPositiveInteger(`${name}.thresholdTokens`, thresholdTokens)
+  if (thresholdRatio !== undefined && thresholdTokens !== undefined) {
+    throw new Error(`${name}: thresholdRatio and thresholdTokens are mutually exclusive`)
+  }
   if (retainRatio !== undefined) assertRatio(`${name}.retainRatio`, retainRatio)
   if (retainTokens !== undefined) assertNonNegativeInteger(`${name}.retainTokens`, retainTokens)
   if (retainRatio !== undefined && retainTokens !== undefined) {

@@ -5,8 +5,6 @@ kind: "package-reference"
 
 # @deepseek-ai/dsh-agent-loop
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 `dsh-agent-loop` creates fresh agents or resumes persisted sessions, then drives each turn through model requests, streamed responses, tool execution, and durable session history. Mount it for standard agent compositions; declarative entries start agents at boot, while the public `ctx.agents` API supports programmatic creation and resume. `maxParallelToolCalls` limits concurrent parallel-safe calls, and exclusive calls retain ordering. Cancellation preserves streamed text already delivered to the user. Choose a custom `Agent` implementation only when the standard "call model, run tools, repeat" lifecycle is insufficient.
@@ -72,7 +70,7 @@ Every inbox mutation commits one normalized `agent/inbox/spliced` event. The pro
 
 ### What a step does
 
-Each step sends the session's derived history — with the latest non-empty `system/message` node as the effective prompt, or no system messages when the rendered prompt is empty — and its visible tool schemas; the model's tool calls run through the guarded tool pipeline and every accepted fact is appended to the session log before the next step derives from it. Parallel-safe calls may overlap up to `maxParallelToolCalls`; exclusive calls run alone as ordering barriers. Cancellation is cooperative: `agent.cancel()` aborts the current activity and, unless `keepInbox` is set, clears pending work; a cancelled stream finalizes the text already delivered to the user.
+Each step sends the session's derived history — with the latest non-empty `system/message` node as the effective prompt, or no system messages when the rendered prompt is empty — and its visible tool schemas; the model's tool calls run through the guarded tool pipeline and every accepted fact is appended to the session log before the next step derives from it. Parallel-safe calls may overlap up to `maxParallelToolCalls`; exclusive calls run alone as ordering barriers. Cancellation is cooperative: `agent.cancel()` aborts the current activity and, unless `keepInbox` is set, clears pending work; a cancelled stream finalizes the text already delivered to the user. A reply cut off at the output token limit runs none of its tool calls; the first time a step in a turn drops calls that way, the loop tells the model which calls did not run and takes one more step. A tool policy or hook can halt a turn: calls already running finish, calls that had not started get synthetic results, and the turn ends as cancelled by a hook.
 
 -----
 
@@ -101,7 +99,9 @@ The loop deep-freezes each derived message identity on its first request and reu
 | [`src/index.ts`](src/index.ts) | Plugin entry: `AgentLoop` service, config schema, declarative agent startup, factory registration |
 | [`src/agent.ts`](src/agent.ts) | The concrete `ReactLoopAgent` driver: inbox, turn/step machine, cancellation |
 | [`src/inbox.ts`](src/inbox.ts) | Package-internal `ReactLoopInbox`: durable projection, structural commands, and loop-only claim state |
-| [`src/tool-calls.ts`](src/tool-calls.ts) | Tool scheduling: exclusive barriers and the bounded parallel pool |
+| [`src/tool-calls.ts`](src/tool-calls.ts) | Tool scheduling: exclusive barriers, the bounded parallel pool, and policy halts |
+| [`src/tool-progress.ts`](src/tool-progress.ts) | Bounding and throttling of process-local tool progress |
+| [`src/max-tokens-notice.ts`](src/max-tokens-notice.ts) | The notice that tells the model which truncated tool calls did not run |
 | [`src/runtime-context.ts`](src/runtime-context.ts) | Per-step runtime-context snapshot handling |
 | [`src/constants.ts`](src/constants.ts) | `DEFAULT_MAX_PARALLEL_TOOL_CALLS` |
 | [`src/invariant.ts`](src/invariant.ts) | Invariant companion: request reconstruction from the session log |
@@ -116,7 +116,7 @@ The loop is the production acquisition point for session write handles. When `ct
 
 ### Turn and step flow
 
-The driver owns one agent for its lifetime and runs inside `ctx.agents.withInitiator(agent, ...)`. `AgentLoop` registers the standard `inbox` projection for its service lifetime, so cold reads work before any Agent exists and after all Agents unload. Its package-internal `ReactLoopInbox` uses that shared projection for structural commands and loop-only claims. At a turn boundary it opens the durable turn, then atomically claims pending next-step input plus one queued prompt; between steps it claims only next-step input. The driver assembles the prompt and tools, projects runtime context, and runs `agent/pre-step`. A rejected decision or empty first batch opens no step. On the first attempt after acceptance, `step/start` precedes the `agent/request` waterfall and `prepareCall()`; neither async phase sees the pending system prompt or accepted users committed to history, and cancellation during either commits neither. For every attempt, the loop then synchronously reconciles the rendered prompt against the surviving `system/message` nodes using the prepared call capability, appends the accepted `user/message` batch only on the first attempt, logs the header and context as needed, and derives and freezes the request before streaming through that bound prepared call. Retries reuse the same rendered assembly without repeating assembly, `agent/pre-step`, or user admission. Reconciliation sees pre-step and retry compaction; a broken series consolidates the prompt at the head rather than appending an update after already-committed users. The request carries `header.config`, `deriveMessages()`, `header.tools`, and `toolHistory()`; it carries no `system` field. Each model attempt emits one process-local `start`, emits each `chunk` immediately as it streams, and emits exactly one terminal `end` after durable settlement; `committed` follows a durable `assistant/attempt` or `assistant/message`, while `abandoned` marks a settlement that could not commit either event. Each successful model call appends one message anchor, and a cancelled stream appends an `interrupted: true` anchor with the delivered prefix so the next request contains what the user saw. Within a step, exclusive calls form barriers and parallel-safe calls use the bounded rolling pool; policy, durable results... (line truncated to 2000 chars)
+The driver owns one agent for its lifetime and runs inside `ctx.agents.withInitiator(agent, ...)`. `AgentLoop` registers the standard `inbox` projection for its service lifetime, so cold reads work before any Agent exists and after all Agents unload. Its package-internal `ReactLoopInbox` uses that shared projection for structural commands and loop-only claims. At a turn boundary it opens the durable turn, then atomically claims pending next-step input plus one queued prompt; between steps it claims only next-step input. The driver assembles the prompt and tools, projects runtime context, and runs `agent/pre-step`. A rejected decision or empty first batch opens no step. On the first attempt after acceptance, `step/start` precedes the `agent/request` waterfall and `prepareCall()`; neither async phase sees the pending system prompt or accepted users committed to history, and cancellation during either commits neither. For every attempt, the loop then synchronously reconciles the rendered prompt against the surviving `system/message` nodes using the prepared call capability, appends the accepted `user/message` batch only on the first attempt, logs the header and context as needed, and derives and freezes the request before streaming through that bound prepared call. Retries reuse the same rendered assembly without repeating assembly, `agent/pre-step`, or user admission. Reconciliation sees pre-step and retry compaction; a broken series consolidates the prompt at the head rather than appending an update after already-committed users. The request carries `header.config`, `deriveMessages()`, `header.tools`, and `toolHistory()`; it carries no `system` field. Each model attempt emits one process-local `start`, emits each `chunk` immediately as it streams, and emits exactly one terminal `end` after durable settlement; `committed` follows a durable `assistant/attempt` or `assistant/message`, while `abandoned` marks a settlement that could not commit either event. Each successful model call appends one message anchor, and a cancelled stream appends an `interrupted: true` anchor with the delivered prefix so the next request contains what the user saw. Within a step, exclusive calls form barriers and parallel-safe calls use the bounded rolling pool; policy, durable results, and result context remain model-ordered. Process-local signals do not wait for that order: `agent/tool-executed` fires as each call's execution finishes, and `agent/tool-progress` carries a call's reported snapshot, bounded to its newest `TOOL_PROGRESS_MAX_CHARS` characters and throttled to the newest one per `TOOL_PROGRESS_INTERVAL_MS`. A snapshot still pending when the call finishes is dropped, and neither event reaches the session log or the model.
 
 Prompt admission uses the actual `prepareCall()` result, not the preceding `request/context`. With no system node, even an empty prompt is appended (reserving node 0 without a wire message). On an incapable route or at a new request series, a non-empty rendering is consolidated at the first system node: each non-empty later system node receives a logged per-node empty replacement, then the head is rewritten if needed. Dormant empty tails need no replacement and do not determine the effective text. Consolidation applies even when the latest effective text is unchanged. On a continuing `in-history` series, an unchanged effective prompt produces no event and a non-empty change appends. An empty rendering clears every non-empty later system node through a logged per-node empty replacement, then empties the head if needed, regardless of route or series state. No older instructions remain model-visible. An empty head with no active later system node means no prompt; repeated clears and resume leave it empty. A restored non-empty prompt follows the same route/series rule: a continuing capable route may append it, while an incapable route or new series refills the head. A step starts a series when the pre-step decision declares `startsRequestSeries`, when `session.surface.contentGeneration` changed since attachment or the last request (a replacement or image-offload decision), or when visible tool schemas changed on a route without native tool updates. Resume and a provider or model swap alone continue the series; the prepared route still governs admission. Per-node empty replacements preserve intervening history without a surface delete operation.
 
@@ -127,6 +127,10 @@ When visible tool names change after the initial request, the loop records `requ
 Cancellation records a fresh `AgentCancelCause` in `turn/end`, retaining the caller's `kind` and the hook's `reason` text. The live `AbortSignal.reason` remains the caller's object, which a transport may extend — Node's fetch assigns a `stack` onto it — so the copy keeps that trace out of the log and keeps the ending appendable.
 
 Final adapter selection, dispatch, and iteration failures arrive as terminal finishes and enter `agent/request-error`; a handling listener returns `{ kind: 'retry' }` without calling `next()`, while an unhandled failure is terminal. Middleware, result-processing, tool, and other extension failures remain thrown and close the turn directly — plugin failure ends the turn, not the loop. A `prepareCall()` failure before any dispatch is started is terminal the same way and does not enter `agent/request-error`: no attempt was made, so a retry would resubmit the identical route and config and fail identically; this covers adapter model/config resolution, unsupported reasoning effort, and middleware defects alike. `NO_ADAPTER` alone falls through instead of throwing, because an `llm/stream` listener may still serve an otherwise-unregistered route at dispatch time. Source and built tool runtimes share the same scheduler symbol. The loop retains the tool service for each call batch, so service teardown after a `tool/call` is logged can settle under the turn's cancellation signal. Undispatched model tool calls after cancellation receive synthetic `tool/call` plus `ABORTED_BEFORE_DISPATCH` result pairs. The [explicit-cancellation decision](../../../.agents/notes/implemented/architecture/2026-07-16-explicit-turn-cancellation.md) owns the signal lifecycle.
+
+A step that finishes at the output token limit commits its safe assistant content but drops every tool call, complete or not, because the assembler cannot tell which calls finished streaming; the logged `assistant/message` keeps none of them. The first such step in a turn that dropped at least one call queues a plugin-sourced notice at the front of next-step input naming those calls, so the turn takes another step instead of running `agent/turn-stopping`; the notice is admitted as an ordinary `user/message`, so the request stays reconstructable from the log. A truncated step that dropped no calls, or any truncated step after the notice, ends the turn as before. A turn that reached the limit at any step ends as `max-tokens` even when a later step completes, so consumers that stop on truncation still see it.
+
+A `tools/pre-execute` deny or any `tools/post-execute` decision may carry `halt: { reason }`. The tool runtime keeps the first halt an execution receives and stamps it on that call's final result. Once a prepared call or a committed result carries a halt, the scheduler starts no more calls, lets calls already running finish without aborting them, commits their results in model order, and gives calls that never started synthetic `ABORTED_BEFORE_DISPATCH` results. The driver then cancels with `{ kind: 'hook', reason }` and `keepInbox`, so `turn/end` records `aborted` with that cause, while post-execute context and pending input stay queued for the next wake. A halt that arrives after another cancellation leaves the earlier cause in place. The halt reason is not model-visible.
 
 </details>
 
@@ -181,7 +185,7 @@ Ordinary history growth is append-only and preserves reusable entries. A surface
 
 #### What the model sees
 
-If a later request replays an aborted step, each tool call that cancellation prevented from dispatching has error code `ABORTED_BEFORE_DISPATCH` and result text `Error: tool call aborted before dispatch`.
+If a later request replays an aborted or halted step, each tool call that cancellation or a policy halt prevented from dispatching has error code `ABORTED_BEFORE_DISPATCH` and result text `Error: tool call aborted before dispatch`.
 
 #### Token effect
 
@@ -190,6 +194,20 @@ One fixed error result per skipped call remains in history until compaction shad
 #### KV Cache effect
 
 Append-only; each synthetic result follows the reusable request prefix and does not invalidate existing KV Cache entries.
+
+### Tool calls cut off at the output token limit
+
+#### What the model sees
+
+A truncated reply's tool calls are removed from the logged assistant message and never run. The first time a step in a turn drops calls this way, the next request adds one user message ahead of any steering that waited for the same step: `Your previous reply was cut off at the output token limit, so its tool calls did not run: <names>. Issue the calls you still need again, keeping each one small enough to finish within a single reply; for example, split large file content across several calls.` `<names>` lists the dropped calls' tool names in stream order, separated by `, `; a call whose name never streamed is left out, and when no name streamed the first sentence ends at `did not run.` with no list.
+
+#### Token effect
+
+At most one notice of a few dozen tokens per turn, plus the extra step that re-issues the calls; the notice stays in history until compaction shadows it.
+
+#### KV Cache effect
+
+Append-only; the notice follows the truncated assistant message and does not invalidate existing KV Cache entries.
 
 ## Known Limitations and Deferred Work
 
@@ -201,7 +219,8 @@ These limits define when the loop needs special care. They are current package c
 - **Classification is unary** — calls whose safety depends on comparing siblings or resources must remain exclusive ([rationale](../../../.agents/notes/implemented/feature/2026-07-10-parallel-tool-call-execution.md)).
 - **Config labels are fresh by default** — omitting `sessionId` creates a fresh `${id}-session-<uuid>` on every startup; exact resume-or-create behavior requires an explicit stable `sessionId`, while `resumeSessionId` requires existing persisted history.
 - **Config agents have no per-agent persona field or setup hook** — they use the deployment persona; scoped persona and tool composition are available only through the programmatic `ctx.agents.create()` / `resume()` factory options.
-- **No built-in turn budget** — tool calls or steering continue the current turn; a policy that bounds runaway turns must cancel from an existing lifecycle extension point such as `agent/turn-stopping`.
+- **No built-in turn budget** — tool calls or steering continue the current turn; a policy that bounds runaway turns must cancel from an existing lifecycle extension point such as `agent/turn-stopping`, or halt from a tool decision.
+- **A halt from a nested `run_code` call waits for the program** — the scheduler sees only the model's own tool calls, so `run_code` forwards a halt that a policy or hook returns for one of its nested calls onto its own result. The turn stops once the whole program settles; the program's later nested calls still run.
 
 <a id="dev-note"></a>
 ### Dev Note

@@ -5,8 +5,6 @@ kind: persistence-release
 
 # Persistence release: dsh-v0.1.1-rc.2
 
-English | [中文](dsh-v0.1.1-rc.2.zh.md)
-
 ## Summary
 
 permission/preset removes origin, while attachment records gain optional originalDimensions across the message and tool payloads that reference them. The writer format remains 0.

@@ -9,7 +9,7 @@ const configPath = fileURLToPath(new URL('pagination-limit.patch.yml', fixtureRo
 const headlessOverlayPath = fileURLToPath(new URL('./fixtures/headless-profile.patch.yml', import.meta.url))
 const expectedPath = fileURLToPath(new URL('./expected/mcp-pagination/stderr-cause.txt', import.meta.url))
 
-it('warns when MCP discovery exceeds the SDK page limit and completes the headless task', async () => {
+it('warns when MCP discovery exceeds the client page limit and completes the headless task', async () => {
   const { stdout, stderr } = await runLoaderSmoke({
     label: 'MCP discovery pagination limit',
     tempDirPrefix: 'dsh-mcp-pagination-',
@@ -33,6 +33,6 @@ it('warns when MCP discovery exceeds the SDK page limit and completes the headle
   expect(stderr).toContain('dsh: warning: 1 entry did not activate')
   expect(stderr).toContain('mcp-pagination-limit (@deepseek-ai/dsh-mcp-client)')
   expect(stderr).toContain('initial connection or tool synchronization failed')
-  const cause = stderr.split('\n').find(line => line.includes('exceeded listMaxPages'))
+  const cause = stderr.split('\n').find(line => line.includes('tools/list exceeded'))
   await expect(`${cause}\n`).toMatchFileSnapshot(expectedPath)
 }, LOADER_SMOKE_TEST_TIMEOUT_MS)

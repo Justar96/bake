@@ -1,7 +1,5 @@
 # Cookbook: adding a vendored package
 
-English | [中文](adding-a-vendored-package.zh.md)
-
 When the harness needs another upstream Cordis package (e.g. `@cordisjs/plugin-http`), it is **vendored** as pinned source under `vendor/`, not added as an npm dependency. [vendor/README.md](../../vendor/README.md) states why and covers *updating* an already-vendored package; this guide is the file-by-file checklist for adding a **new** one. (Verified against the existing vendored set; if it drifts, fix it here.)
 
 ## 1. Copy the source in
@@ -56,4 +54,4 @@ pnpm run typecheck
 pnpm run build && pnpm run constraints
 ```
 
-Run the behavior checks selected by the [testing policy](../testing.md). The source `paths` map lives once in `tsconfig.base.json` and serves every graph. The important isolation boundary is the project-reference graph: vendored source must be referenced through its own `vendor/<dir>/tsconfig.json`, not pulled into an aggregate's strict program ([layout](../development.md#typescript-project-layout)).
+Run the behavior checks selected by the [testing policy](../testing.md). The source `paths` map lives once in `tsconfig.base.json` and serves every graph. The important isolation boundary is the project-reference graph: vendored source must be referenced through its own `vendor/<dir>/tsconfig.json`, not pulled into an aggregate's strict program ([layout](../development.md#conventions)).

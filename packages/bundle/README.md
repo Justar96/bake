@@ -5,8 +5,6 @@ kind: "package-group"
 
 # bundle/ — profile plugin bundles
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 This group contains the `base` and `headless` profile bundles. The launcher stacks their patches to assemble the shipped terminal and one-task profiles.

@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-12-mcp-resources-and-instructions.zh.md)
-
 ## Problem
 
 MCP servers expose documents and URI templates separately from tools. A tools-only client cannot read those documents or use a server that offers resources without tools. Servers also supply instructions that explain how their operations fit together; ignoring those instructions removes context needed to choose and combine operations.

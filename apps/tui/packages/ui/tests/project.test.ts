@@ -81,14 +81,23 @@ describe('project', () => {
     expect(failed('AUTH')[0]).toMatchObject({ text: `AUTH: no API key\n${dictionaries.en.authFailedHint}` })
   })
 
-  it('words a cancelled turn and a compaction in the reader locale', () => {
-    expect(project(event({ type: 'turn/end', data: { turn: 1, reason: { kind: 'interrupted' } } }), bare()))
-      .toEqual([{ kind: 'notice', placement: 'turn-end', tone: 'warn', text: dictionaries.en.cancelled }])
-    expect(project(event({ type: 'compaction/summary', data: {} }), projector(dictionaries.zh, () => undefined)))
-      .toEqual([{ kind: 'notice', tone: 'info', text: dictionaries.zh.compacted, compaction: true }])
+  it.each(['en'] as const)('gives a hook halt its recorded reason (%s)', locale => {
+    const copy = dictionaries[locale]
+    const ended = (reason: object) => project(event({ type: 'turn/end', data: { turn: 3, reason: { kind: 'aborted', reason } } }), projector(copy, () => undefined))
+    expect(ended({ kind: 'hook', reason: 'budget exhausted' }))
+      .toEqual([{ kind: 'notice', placement: 'turn-end', tone: 'warn', text: `${copy.turnHalted}: budget exhausted` }])
+    expect(ended({ kind: 'user' }))
+      .toEqual([{ kind: 'notice', placement: 'turn-end', tone: 'warn', text: copy.cancelled }])
   })
 
-  it.each(['en', 'zh'] as const)('renders each turn ending without treating it as agent idle (%s)', locale => {
+  it('words a cancelled turn and a compaction in the terminal copy', () => {
+    expect(project(event({ type: 'turn/end', data: { turn: 1, reason: { kind: 'interrupted' } } }), bare()))
+      .toEqual([{ kind: 'notice', placement: 'turn-end', tone: 'warn', text: dictionaries.en.cancelled }])
+    expect(project(event({ type: 'compaction/summary', data: {} }), projector(dictionaries.en, () => undefined)))
+      .toEqual([{ kind: 'notice', tone: 'info', text: dictionaries.en.compacted, compaction: true }])
+  })
+
+  it.each(['en'] as const)('renders each turn ending without treating it as agent idle (%s)', locale => {
     const copy = dictionaries[locale]
     const endings = [
       ['completed', copy.turnCompleted, 'info'],

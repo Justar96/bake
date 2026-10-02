@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-12-experimental-publication-denylist.zh.md)
-
 ## Problem
 
 An allowlist for public experimental packages requires a policy edit whenever a new installable prototype joins the repository. Experimental status describes compatibility and support expectations, but internal-only prototypes still need an explicit publication exclusion.

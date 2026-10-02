@@ -14,10 +14,11 @@ import { fileURLToPath } from 'node:url'
 import { execa } from 'execa'
 import { describe, expect, it, onTestFinished } from 'vitest'
 import { LOADER_SMOKE_TEST_TIMEOUT_MS, resolveExampleLaunch } from '@deepseek-ai/dsh-loader-smoke'
+import { deepseekEndpointSettings } from './fixtures/deepseek-endpoint.ts'
 
 const dshBinScript = fileURLToPath(new URL('../src/bin.ts', import.meta.url))
 const tsconfigPath = fileURLToPath(new URL('../../../tsconfig.json', import.meta.url))
-const MODEL = 'deepseek-v4-flash'
+const MODEL = 'deepseek-flash'
 const PARENT_TASK = 'PARENT-TASK: delegate the lookup.'
 const CHILD_PROMPT = 'CHILD-PROMPT: report the answer.'
 const CHILD_REPLY = 'Child reply complete.'
@@ -79,7 +80,8 @@ function stream(content: { text: string } | { delegate: Record<string, unknown> 
 async function deepseekEndpoint(): Promise<{ url: string; requests: CapturedRequest[] }> {
   const requests: CapturedRequest[] = []
   const url = await listen((request, body, response) => {
-    if (request.method !== 'POST' || !(request.url ?? '').endsWith('/messages')) {
+    // The Anthropic SDK may mark its beta surface with `?beta=true`.
+    if (request.method !== 'POST' || !new URL(request.url ?? '', 'http://endpoint').pathname.endsWith('/messages')) {
       response.writeHead(404, { 'content-type': 'application/json' }).end('{}')
       return
     }
@@ -116,12 +118,15 @@ async function routerEndpoint(): Promise<{ url: string; selections: { authorizat
   return { url, selections }
 }
 
-/** A workspace with an isolated home, its settings document, and the test-only patch. */
-async function workspace(settings: string): Promise<{ cwd: string; patch: string }> {
+/**
+ * A workspace with an isolated home, its settings document pointing the
+ * DeepSeek route at the endpoint, and the test-only patch.
+ */
+async function workspace(endpoint: string, settings = ''): Promise<{ cwd: string; patch: string }> {
   const cwd = realpathSync(await mkdtemp(join(tmpdir(), 'dsh-headless-selection-')))
   onTestFinished(() => rm(cwd, { recursive: true, force: true, maxRetries: 3 }))
   await mkdir(join(cwd, '.dsh'))
-  await writeFile(join(cwd, '.dsh', 'settings.yaml'), settings)
+  await writeFile(join(cwd, '.dsh', 'settings.yaml'), deepseekEndpointSettings(endpoint) + settings)
   const patch = join(cwd, 'endpoint.patch.yml')
   await writeFile(patch, [
     '- id: agent-default-model',
@@ -141,7 +146,7 @@ async function workspace(settings: string): Promise<{ cwd: string; patch: string
 }
 
 /** Run one headless task to completion against the endpoint. */
-async function headless(cwd: string, endpoint: string, args: readonly string[]): Promise<string> {
+async function headless(cwd: string, args: readonly string[]): Promise<string> {
   const launch = resolveExampleLaunch({
     srcBin: dshBinScript,
     configArgs: ['--profile', 'headless', ...args],
@@ -152,7 +157,6 @@ async function headless(cwd: string, endpoint: string, args: readonly string[]):
       DSH_TELEMETRY_OTLP_URL: undefined,
       DSH_TELEMETRY_MODE: undefined,
       DEEPSEEK_API_KEY: 'keyless-model-selection',
-      DEEPSEEK_BASE_URL: endpoint,
       ING_API_TOKEN: ROUTER_TOKEN,
     },
   })
@@ -189,9 +193,9 @@ function delegationTools(request: CapturedRequest | undefined): { routeFields: s
 describe('subagent model selection in the shipped headless profile', () => {
   it('leaves the subagent tool without route fields while the setting is off', async () => {
     const endpoint = await deepseekEndpoint()
-    const { cwd, patch } = await workspace('{}\n')
+    const { cwd, patch } = await workspace(endpoint.url)
 
-    await headless(cwd, endpoint.url, ['--patch', patch, 'say hello'])
+    await headless(cwd, ['--patch', patch, 'say hello'])
 
     const tools = delegationTools(endpoint.requests[0])
     expect(tools.names).toContain('subagent')
@@ -203,7 +207,7 @@ describe('subagent model selection in the shipped headless profile', () => {
   it('offers the allowed routes and asks the router when a delegation names none', async () => {
     const endpoint = await deepseekEndpoint()
     const router = await routerEndpoint()
-    const { cwd, patch } = await workspace([
+    const { cwd, patch } = await workspace(endpoint.url, [
       'subagent-model-selection:',
       '  enabled: true',
       '  allowedModels:',
@@ -215,7 +219,7 @@ describe('subagent model selection in the shipped headless profile', () => {
       '',
     ].join('\n'))
 
-    const stdout = await headless(cwd, endpoint.url, ['--patch', patch, PARENT_TASK])
+    const stdout = await headless(cwd, ['--patch', patch, PARENT_TASK])
 
     expect(stdout).toContain(FINAL_REPLY)
     const tools = delegationTools(endpoint.requests[0])

@@ -34,21 +34,8 @@
     - id: llm
       name: '@deepseek-ai/dsh-llm'
 
-    - id: deepseek-llm-api-extensions
-      name: '@deepseek-ai/dsh-deepseek-llm-api-extensions'
-
     - id: session
       name: '@deepseek-ai/dsh-session'
-
-    # Off because Bake does not send session logs to DeepSeek. Enabling it adds
-    # the full canonical Session log (working directory, prompts, messages, tool
-    # arguments and results, feedback) as `dsh_session_log` to official DeepSeek
-    # API requests. The row stays mounted so logs that recorded its
-    # `session-log-deepseek/delivery-accepted` events keep their event type.
-    - id: session-log-deepseek
-      name: '@deepseek-ai/dsh-session-log-deepseek'
-      config:
-        enabled: false
 
     - id: typert
       name: '@deepseek-ai/dsh-typert-registry'
@@ -81,9 +68,6 @@
     - id: agent
       name: '@deepseek-ai/dsh-agent'
 
-    - id: plugin-package-inventory-deepseek
-      name: '@deepseek-ai/dsh-plugin-package-inventory-deepseek'
-
     # The transport-independent default for Agents created by entry points.
     # No provider is the default: a new install starts without a model until
     # the user signs in and chooses one, and that saved selection becomes the
@@ -98,8 +82,8 @@
       name: '@deepseek-ai/dsh-llm-retry'
 
     # User-settings document (`$DSH_HOME/settings.yaml`, hot-reloaded): a
-    # `llm-deepseek:` or `llm-pi-ai:` section there overrides the adapter entries
-    # below without a restart. Bake has no web client; this file is edited
+    # `llm-pi-ai:` section there overrides the adapter entry below without a
+    # restart. Bake has no web client; this file is edited
     # directly or through the TUI's settings surface.
     - id: settings
       name: '@deepseek-ai/dsh-settings-file'
@@ -111,15 +95,59 @@
     - id: credentials
       name: '@deepseek-ai/dsh-credentials-local'
 
-    # The pi-ai multi-provider twin, mounted dormant: zero routes (and no extra
-    # models in the picker) until a `llm-pi-ai:` settings section supplies provider
-    # profiles — then those routes register live, keys resolving per request
-    # through their apiKeyEnv references, and drop again when the section empties.
-    # Supplying those profiles is exactly what editing the settings file does. Which
-    # adapters exist is composition; which providers run is the user's settings
-    # document.
+    # The LLM adapter. It ships one route, DeepSeek over its Anthropic-format
+    # Messages endpoint; further routes register live when a `llm-pi-ai:` settings
+    # section supplies their profiles, and that section deep-merges over this
+    # entry per route and field. No key is inlined: each route resolves its
+    # apiKeyEnv reference per request through the credential store above.
+    # DeepSeek reads `thinking.type` as enabled or disabled beside an
+    # `output_config.effort`, hence the adaptive-thinking respelling; it reads
+    # the latest system message as the whole prompt and accepts native tool
+    # changes, which the two in-history declarations state per model.
     - id: llm-pi-ai
       name: '@deepseek-ai/dsh-llm-pi-ai'
+      config:
+        providers:
+          deepseek-official:
+            displayName: DeepSeek
+            apiKeyEnv: DEEPSEEK_API_KEY
+            api: anthropic-messages
+            baseURL: https://api.deepseek.com/anthropic
+            reasoning: high
+            adaptiveThinkingType: enabled
+            # DeepSeek caches prefixes on its own: send the body its earlier
+            # native adapter did, without Anthropic's cache scaffolding.
+            messagesWire:
+              dropDeferredToolPlaceholder: true
+              stripCacheControl: true
+              mergeAdjacentRoles: true
+            compat:
+              forceAdaptiveThinking: true
+              allowEmptySignature: true
+            models:
+              - id: deepseek-flash
+                name: DeepSeek-V41-Flash
+                contextWindow: 1000000
+                maxTokens: 256000
+                input: [text, image]
+                reasoningEfforts:
+                  off:
+                  low: low
+                  high: high
+                  max: max
+                systemPromptUpdate: in-history
+                toolUpdate: in-history
+              - id: deepseek-v4-pro
+                name: DeepSeek-V4-Pro
+                description: Stronger agentic coding, knowledge, and difficult reasoning; suited to complex or quality-critical tasks at higher cost.
+                contextWindow: 1000000
+                maxTokens: 256000
+                input: [text]
+                reasoningEfforts:
+                  off:
+                  low: low
+                  high: high
+                  max: max
 
     - id: session-persistence-jsonl
       name: '@deepseek-ai/dsh-session-persistence-jsonl'
@@ -385,13 +413,27 @@
         toolName: subagent_fork
         backgroundMode: one-shot
 
+    # `run_code` programs run in a fresh QuickJS VM whose only capability is
+    # the tool bindings; nested calls keep each tool's own policy and approval.
     - id: ptc-runtime
-      name: '@deepseek-ai/dsh-ptc-runtime-node'
+      name: '@deepseek-ai/dsh-ptc-runtime-codemode'
 
-    - id: workflow-ptc
-      name: '@deepseek-ai/dsh-workflow-ptc'
+    # Workflow scripts need a Node process (module import, `node:vm`, the
+    # session file sandbox), so the engine gets its own Node runtime behind an
+    # entry-local `ptcRuntime` realm instead of the QuickJS one above.
+    - id: workflow-ptc-runtime
+      name: cordis:group
+      group: true
+      isolate:
+        ptcRuntime: true
       config:
-        provider: spawn
+        - id: workflow-node-runtime
+          name: '@deepseek-ai/dsh-ptc-runtime-node'
+
+        - id: workflow-ptc
+          name: '@deepseek-ai/dsh-workflow-ptc'
+          config:
+            provider: spawn
 
     - id: tool-workflow
       name: '@deepseek-ai/dsh-tool-workflow'
@@ -515,10 +557,3 @@
     # overlay can pin another workspace.
     - id: fs-sandbox
       name: '@deepseek-ai/dsh-fs-sandbox'
-
-    # The native DeepSeek adapter. No key or endpoint is inlined: both resolve per
-    # request from the `llm-deepseek:` settings section over this entry, with the
-    # key coming from the credential store below. Thinking defaults are a deployment
-    # choice.
-    - id: llm-deepseek
-      name: '@deepseek-ai/dsh-llm-deepseek'

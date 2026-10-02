@@ -18,7 +18,6 @@ export interface Config extends Omit<RunnerOptions, 'credentialRefs' | 'signInFl
 export const Config: z<Config> = z.object({
   resume: z.string(),
   preset: z.string(),
-  locale: z.union(['en', 'zh']).default('en'),
   // No default: set, it overrides the user's `/settings` choice, which
   // otherwise decides and starts inline.
   screen: z.union(['inline', 'fullscreen']),

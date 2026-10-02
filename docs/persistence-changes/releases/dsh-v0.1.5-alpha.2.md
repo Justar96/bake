@@ -5,8 +5,6 @@ kind: persistence-release
 
 # Persistence release: dsh-v0.1.5-alpha.2
 
-English | [中文](dsh-v0.1.5-alpha.2.zh.md)
-
 ## Summary
 
 deliverables/presented and subagent/catalog are added. Feedback records gain optional category, feedback/record text becomes optional, and the writer format remains 3.

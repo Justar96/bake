@@ -31,9 +31,9 @@ const testToolSignal = new AbortController().signal
 
 const fixtureServerPath = fileURLToPath(new URL('./fixture-server.ts', import.meta.url))
 
-// Resolve package-local .bin for pnpm-hoisted MCP server binaries.
 const packageDir = fileURLToPath(new URL('..', import.meta.url))
-const localBin = join(packageDir, 'node_modules', '.bin')
+// Bun links workspace dependency binaries into the repository root's .bin.
+const localBin = fileURLToPath(new URL('../../../../node_modules/.bin', import.meta.url))
 
 // ---- Helpers ----
 
@@ -462,7 +462,6 @@ describe('streamable-http — in-process MCP server', () => {
   let baseUrl: string
   /** Authorization header values observed by the HTTP server, in arrival order. */
   const seenAuth: Array<string | undefined> = []
-  const seenMessageHeaders: Array<string | string[] | undefined> = []
 
   const handler = createMcpHandler(() => {
     const server = new McpServer(
@@ -477,7 +476,7 @@ describe('streamable-http — in-process MCP server', () => {
     }))
     server.registerTool('shout', {
       description: 'Upper-cases a message.',
-      inputSchema: z.object({ message: z.string().describe('Message to upper-case').meta({ 'x-mcp-header': 'message' }) }),
+      inputSchema: z.object({ message: z.string().describe('Message to upper-case') }),
     }, async args => ({
       content: [{ type: 'text', text: args.message.toUpperCase() }],
     }))
@@ -486,7 +485,6 @@ describe('streamable-http — in-process MCP server', () => {
   const handle = toNodeHandler(handler)
   async function handleMcpRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     seenAuth.push(req.headers.authorization)
-    seenMessageHeaders.push(req.headers['mcp-param-message'])
     // The adapter excludes explicit undefined on Node's optional HTTP fields.
     await handle(req as NodeIncomingMessageLike, res)
   }
@@ -546,7 +544,6 @@ describe('streamable-http — in-process MCP server', () => {
     })
     expect(result.isError).toBe(false)
     expect(result.content[0]).toEqual({ type: 'text', text: 'QUIET' })
-    expect(seenMessageHeaders).toContain('quiet')
   })
 
   it('sends configured headers on every HTTP request', () => {

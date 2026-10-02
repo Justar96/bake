@@ -279,7 +279,7 @@ export function LiveRegion({ rows, budget, frame, limit, result, clock }: {
   // head that says what the step is doing. Reasoning is drawn whole only while
   // it is the newest row; a finished thought folds to its transcript preview.
   const lines = tailLines(rows.flatMap((row, index) => row.kind === 'tool-group'
-    ? fittedGroup(row.calls, result, limit, height)
+    ? fittedGroup(row.calls, result, limit, height, budget.output)
     : row.kind !== 'reasoning' ? present(row, result, undefined, budget.measure)
       : index === rows.length - 1 ? streamingThought(row, result, limit, height, budget.measure)
         : present(row, result, line => wrappedRows(line, budget), budget.measure)), limit, height)

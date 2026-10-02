@@ -1,7 +1,7 @@
 /** Readable, linked persistence schemas rendered from the fingerprint inventory. */
 
 import { githubSlug } from './verify-md-links.ts'
-import { persistenceCatalogText, type PersistenceCatalogLocale } from './persistence-catalog-text.ts'
+import { persistenceCatalogText } from './persistence-catalog-text.ts'
 import {
   canonicalizeSchema,
   schemaChildren,
@@ -92,23 +92,21 @@ function typeExpression(
   schema: CanonicalSchema,
   index: number,
   entries: ReadonlyMap<string, TypeDisplay>,
-  locale: PersistenceCatalogLocale,
 ): string {
   const node = nodeAt(schema, index)
   if (node.kind === 'primitive') return code(node.type)
   if (node.kind === 'literal') return code(JSON.stringify(node.value))
-  if (node.kind === 'opaque') return `${code(node.reason)}${persistenceCatalogText[locale].opaque}`
+  if (node.kind === 'opaque') return `${code(node.reason)}${persistenceCatalogText.opaque}`
   return reference(schemaDigest(canonicalizeSchema(schema.nodes, index)), entries)
 }
 
 function definition(
   entry: TypeDisplay,
   entries: ReadonlyMap<string, TypeDisplay>,
-  locale: PersistenceCatalogLocale,
   sourceLink: (source: string) => string | undefined,
   headingLevel: number,
 ): string[] {
-  const text = persistenceCatalogText[locale]
+  const text = persistenceCatalogText
   const schema = entry.type.schema
   const node = nodeAt(schema, 0)
   const lines = [`<a id="${entry.anchor}"></a>`, '', `${'#'.repeat(headingLevel)} ${code(entry.label)}`, '', `SHA-256: ${code(entry.type.digest)}`, '']
@@ -118,7 +116,7 @@ function definition(
       return href === undefined ? code(source) : `[${code(source)}](${href})`
     }).join(' · ')}`, '')
   }
-  const expression = (index: number): string => typeExpression(schema, index, entries, locale)
+  const expression = (index: number): string => typeExpression(schema, index, entries)
   switch (node.kind) {
     case 'object':
       if (node.properties.length === 0 && node.indices.length === 0) lines.push(text.emptyObject, '')
@@ -154,19 +152,17 @@ function definition(
 /**
  * Render every tracked root with its exact digest and resolved type reference.
  * @param inventory - complete current-source schemas and declaration metadata.
- * @param locale - generated document language.
  * @param introduction - paragraphs before the root table; defaults to current-source links.
  * @param headingLevel - section depth within the containing reference.
  * @returns Markdown index including the history and contributor workflow links.
  */
 export function renderPersistenceSchemaIndex(
   inventory: PersistenceSchemaInventory,
-  locale: PersistenceCatalogLocale = 'en',
-  introduction: readonly string[] = [persistenceCatalogText[locale].fingerprintsIntro, persistenceCatalogText[locale].historyIntro],
+  introduction: readonly string[] = [persistenceCatalogText.fingerprintsIntro, persistenceCatalogText.historyIntro],
   headingLevel: 2 | 3 = 2,
 ): string {
   const entries = displays(inventory)
-  const text = persistenceCatalogText[locale]
+  const text = persistenceCatalogText
   return [
     `${'#'.repeat(headingLevel)} ${text.fingerprints}`, '', ...introduction.flatMap(paragraph => [paragraph, '']),
     text.rootColumns, '|---|---|---|---|',
@@ -177,23 +173,21 @@ export function renderPersistenceSchemaIndex(
 /**
  * Render every reachable type once, with links for shared and recursive definitions.
  * @param inventory - complete current-source schemas and declaration metadata.
- * @param locale - generated document language.
  * @param sourceLink - source path to URL; undefined keeps historical locations as text.
  * @param headingLevel - section depth; individual definitions use the next heading level.
  * @returns Markdown definitions whose anchors use names or owning paths instead of hashes.
  */
 export function renderPersistenceSchemaDefinitions(
   inventory: PersistenceSchemaInventory,
-  locale: PersistenceCatalogLocale = 'en',
   sourceLink: (source: string) => string | undefined = source => `../${source}`,
   headingLevel: 2 | 3 = 2,
 ): string {
   const entries = displays(inventory)
-  const text = persistenceCatalogText[locale]
+  const text = persistenceCatalogText
   const sorted = [...entries.values()].sort((left, right) => left.anchor < right.anchor ? -1 : left.anchor > right.anchor ? 1 : 0)
   return [
     `${'#'.repeat(headingLevel)} ${text.definitions}`, '', text.definitionsIntro, '',
-    ...sorted.flatMap(entry => definition(entry, entries, locale, sourceLink, headingLevel + 1)),
+    ...sorted.flatMap(entry => definition(entry, entries, sourceLink, headingLevel + 1)),
   ].join('\n')
 }
 

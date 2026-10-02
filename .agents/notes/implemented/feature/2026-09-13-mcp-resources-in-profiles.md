@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-13-mcp-resources-in-profiles.zh.md)
-
 ## Problem
 
 Sessions without configured MCP servers need neither resource schemas nor MCP guidance. Requiring a separate resource-service entry also makes users configure shared resource access in addition to each connection. A shared tool set owned by the first server can disappear when that server unloads even though another server still needs it.

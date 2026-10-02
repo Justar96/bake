@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-14-windows-lock-release-probe.zh.md)
-
 ## Problem
 
 Windows exclusive file creation can report `EPERM` while another writer owns the lock. The holder can remove the lock before the contender's `lstat`, so absence at that later observation does not prove the create failed for a persistent permission restriction. The profile module-fallback contention test exposed this race.

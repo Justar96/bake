@@ -48,7 +48,7 @@
   disabled: true
 - id: tool-subagent-fork
   disabled: true
-- id: workflow-ptc
+- id: workflow-ptc-runtime
   disabled: true
 - id: tool-workflow
   disabled: true

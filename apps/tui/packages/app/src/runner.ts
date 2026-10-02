@@ -4,7 +4,7 @@ import { render, useApp, type Instance } from 'ink'
 import type { Context } from '@deepseek-ai/cordis'
 import { compactPath } from '@dsh-tui/ui/present.ts'
 import type { Highlight } from '@dsh-tui/ui/present.ts'
-import { dictionaries, type Locale, type TuiCopy } from '@dsh-tui/ui/copy.ts'
+import { dictionaries, type TuiCopy } from '@dsh-tui/ui/copy.ts'
 import type { FrameStyle } from '@dsh-tui/ui/layout.ts'
 import type { Clock } from '@dsh-tui/ui/activity.ts'
 import { resolveFrame } from './frame.ts'
@@ -33,7 +33,6 @@ type AppComponent = ComponentType<AppProps>
  * of the `tui` settings namespace, which the user's settings override.
  */
 export interface RunnerOptions extends SessionOptions, AttachmentOptions {
-  readonly locale: Locale
   /**
    * Inline terminal scrollback or an application-owned alternate screen.
    * Set by `--screen` or the profile, it wins over the user's setting;
@@ -161,11 +160,11 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
     return drained.promise
   }, 'tui terminal owner')
   const preferences = new Preferences(ctx, {
-    screen: config.screen ?? 'inline', locale: config.locale, composerFrame: config.composerFrame,
+    screen: config.screen ?? 'inline', composerFrame: config.composerFrame,
     goalObjective: config.goalObjective ?? false, resultLines: config.resultLines,
     completionLimit: config.completionLimit, doubleInterruptMs: config.doubleInterruptMs, recentModels: [],
   }, config.screen ?? undefined, () => { repaint() }, editText)
-  let copy: TuiCopy = dictionaries[config.locale]
+  const copy: TuiCopy = dictionaries.en
   // Read once. The release does not change for the life of the process.
   const version = bakeVersion()
   const updates = new Updates({ running: version, release: releaseRoot() })
@@ -179,7 +178,7 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
     const configured = preferences.value.composerFrame
     if (resolved?.configured !== configured) {
       resolved = { configured, frame: resolveFrame({
-        configured, locale: preferences.launch.locale, env: process.env, platform: process.platform,
+        configured, env: process.env, platform: process.platform,
         systemLocale: () => Intl.DateTimeFormat().resolvedOptions().locale,
       }) }
     }
@@ -231,10 +230,9 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
   try {
     await ctx.get('loader')?.await()
     abort.signal.throwIfAborted()
-    // The screen and the language hold for the life of the process; a change
-    // to either in `/settings` is read at the next launch.
+    // The screen holds for the life of the process; a change to it in
+    // `/settings` is read at the next launch.
     screen = process.env['INK_SCREEN_READER'] === 'true' ? 'inline' : preferences.screen
-    copy = dictionaries[preferences.launch.locale]
     // One write per frame, drawn over the previous frame. Without synchronized
     // output, the controls would otherwise appear erased each time a line prints.
     output = frameOutput(io.out, io.err, motion, screen)

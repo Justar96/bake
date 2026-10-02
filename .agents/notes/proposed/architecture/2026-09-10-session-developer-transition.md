@@ -2,8 +2,6 @@
 
 Status: proposed
 
-English | [中文](2026-09-10-session-developer-transition.zh.md)
-
 ## Problem
 
 The refactor spans several stages. The old system must remain usable, but new plugins are discouraged from continuing to depend on concrete `Session`, JSONL handles, or lifecycle events. Developers need rules that match the target branch state.

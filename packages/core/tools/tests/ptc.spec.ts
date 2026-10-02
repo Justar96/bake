@@ -1020,6 +1020,32 @@ describe('the run_code dispatch bridge', () => {
     expect(recovered.concludesTurn).toBeUndefined()
   })
 
+  it('forwards a nested policy halt onto the run_code result even when the program recovers', async () => {
+    const { ctx, runtime } = await setup({ mode: 'ptc' })
+    ctx.tools.register(defineTool({
+      name: 'guarded',
+      description: 'Denied by policy.',
+      parameters: {},
+      output: {
+        schema: { type: 'string' },
+        render: (_args, value) => [{ type: 'text', text: value }],
+      },
+      execute: () => Promise.resolve('ran'),
+    }))
+    ctx.on('tools/pre-execute', async (exec, next) => {
+      if (exec.name !== 'guarded') return next()
+      return { kind: 'deny', reason: 'blocked', halt: { reason: 'policy stop' } }
+    })
+    runtime.behavior = async (request) => {
+      await request.bindings[0]!.functions.guarded!({}).catch(() => undefined)
+      return { logs: [], value: 'recovered' }
+    }
+
+    const result = await runCode(ctx, 'await tools.guarded({}).catch(() => {})')
+    expect(result.isError).toBe(false)
+    expect(result.halt).toEqual({ reason: 'policy stop' })
+  })
+
   it('serializes Promise.all dispatches: tool executions never overlap, in submission order', async () => {
     const { ctx, runtime } = await setup({ mode: 'ptc' })
     const intervals: [string, string][] = []

@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-30-content-anchored-edits.zh.md)
-
 ## Problem
 
 The read-before-edit guard refused any `edit` of a file the session had not read, or had not read since the file last changed. In 75 recorded Bake sessions (9,444 tool calls), 103 of 213 tool errors were those refusals: 70 unread and 33 stale. Each one cost a model request, and usually a second request for the re-read, while the whole context was resent both times. Models also routed around the guard. They made 384 file edits through `bash` with Python scripts, compared with 1,700 through `edit`. Those scripts carried a median of two replacements each, and 298 of them asserted the exact-once match that `edit` already enforces. The scripts gave up atomicity, diff cards, and observation tracking. Sixteen of the 33 stale refusals followed such a shell edit in the same session.

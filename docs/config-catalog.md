@@ -328,18 +328,27 @@ Source: [`packages/client/connection/src/index.ts:87`](../packages/client/connec
 Requires: `llm` · `tokenMeter` · `sessions`
 
 ```ts config-catalog
-/** Basic compaction configuration with an optional exact-target policy table. */
+/** Basic compaction configuration with an optional per-route policy table. */
 export interface BasicCompactionConfig extends CompactionPolicyConfig {
-  /** Exact provider/model overrides; duplicate targets fail plugin load. */
+  /**
+   * Per-route overrides: exact provider/model beats provider-wide beats the
+   * defaults. A second entry for the same provider/model, or a second
+   * provider-wide entry for the same provider, fails validation.
+   */
   modelPolicies?: ModelCompactPolicyConfig[]
   /** Enable automatic step-boundary pressure and overflow-recovery listeners. Defaults to `true`. */
   auto?: boolean
 }
 
-/** Policy fields shared by the default policy and exact model overrides. */
+/** Policy fields shared by the default policy and per-route overrides. */
 export interface CompactionPolicyConfig {
   /** Compact at this fraction of the model's context window. Defaults to `0.8`. */
   thresholdRatio?: number
+  /**
+   * Compact at this absolute request size; mutually exclusive with
+   * `thresholdRatio`. Must not exceed the routed model's context window.
+   */
+  thresholdTokens?: number
   /** Recent context retained as a fraction of the model's window. Defaults to `0.16`. */
   retainRatio?: number
   /** Absolute recent-context budget; mutually exclusive with `retainRatio`. */
@@ -356,16 +365,20 @@ export interface CompactionPolicyConfig {
   maxOverflowRetries?: number
 }
 
-/** Exact provider/model override merged over the default compaction policy. */
+/**
+ * Per-route override merged over the default compaction policy. An entry
+ * without `model` covers every model on `provider`; an entry naming a model
+ * layers over that provider-wide entry, field by field.
+ */
 export interface ModelCompactPolicyConfig extends CompactionPolicyConfig {
   /** Registered provider route to match. */
   provider: string
-  /** Exact routed model id to match within `provider`. */
-  model: string
+  /** Exact routed model id to match within `provider`; omit to cover every model on the route. */
+  model?: string
 }
 ```
 
-Source: [`packages/compaction/compaction-basic/src/types.ts:38`](../packages/compaction/compaction-basic/src/types.ts)
+Source: [`packages/compaction/compaction-basic/src/types.ts:47`](../packages/compaction/compaction-basic/src/types.ts)
 
 <a id="deepseek-aidsh-compaction-tool-result-pruner"></a>
 
@@ -748,104 +761,6 @@ export interface Config {
 
 Source: [`packages/jobs/jobs-local/src/index.ts:30`](../packages/jobs/jobs-local/src/index.ts)
 
-<a id="deepseek-aidsh-llm-deepseek"></a>
-
-## `@deepseek-ai/dsh-llm-deepseek`
-
-Requires: `llm`
-
-```ts config-catalog
-/**
- * Plugin config, validated by the same-named schemastery schema and doubling
- * as the `llm-deepseek` settings-section shape. Every field is optional in
- * yml: a missing API key resolves through {@link Config.apiKeyEnv} at each
- * request (a request without any key fails with `MISSING_CREDENTIAL`, not at
- * plugin load), omitted thinking mode uses the provider default, and omitted
- * reasoning effort resolves to `high`.
- */
-export interface Config {
-  /** Wire protocol; defaults to messages. Configure through Cordis YAML. */
-  protocol?: DeepSeekProtocol
-  /** Credential reference (environment-variable name) resolved per request; defaults to `DEEPSEEK_API_KEY`. */
-  apiKeyEnv?: string
-  /** Endpoint base; falls back to $DEEPSEEK_BASE_URL from a trusted environment layer, then the public API. */
-  baseURL?: string
-  /** Deployment thinking policy; `disabled` limits every conversation request to `off`. */
-  thinking?: 'enabled' | 'disabled'
-  /** Default thinking effort (default `high`); `off` disables thinking per request. */
-  reasoningEffort?: 'off' | 'low' | 'high' | 'max'
-  /** Default per-request output cap (default 256,000); a model's own cap and explicit request values win. */
-  maxTokens?: number
-  /** Positive context capacity used when the selected model has no exact value (default 1,000,000). */
-  defaultContextWindow?: number
-  /** Advisory models shown by discovery consumers; defaults to V41 Flash and V4 Pro. */
-  models?: DeepSeekCatalogModel[]
-  /** Maximum provider idle time while one stream read is outstanding (default five minutes). */
-  streamIdleTimeoutMs?: number
-  /** Maximum accumulated file-referenced image bytes per chat request (default 128 MiB). */
-  maxRequestFilesBytes?: number
-  /** Maximum accumulated base64 image payload after Files API fallback (default 20 MiB). */
-  maxInlineRequestImageBytes?: number
-  /** Maximum number of represented images per chat request (default 600). */
-  maxImagesPerRequest?: number
-  /** Raw-byte removal step after the request exceeds its file bound (default 64 MiB). */
-  imageOffloadByteQuantum?: number
-  /** Base64-byte removal step after inline fallback exceeds its bound (default 10 MiB). */
-  inlineImageOffloadByteQuantum?: number
-  /** Image-count removal step after the request exceeds its count bound (default 20). */
-  imageOffloadCountQuantum?: number
-  /** Maximum duration of one request-image Files API resolution (default one minute). */
-  filesApiTimeoutMs?: number
-  /** Explicit lifetime assigned to each uploaded image (default seven days). */
-  fileExpiresAfterSeconds?: number
-  /** Remaining lifetime below which an indexed file is replaced (default one hour). */
-  fileRefreshMarginSeconds?: number
-  /** Oldest harness-owned files deleted before one quota-recovery upload retry (default 100). */
-  fileQuotaCleanupBatch?: number
-  /** Provider-owned model-request retry policy; omission uses normal mode with five retries. */
-  retryPolicy?: RetryPolicyConfig
-}
-
-/** Supported wire implementations; Responses is not yet implemented. */
-export type DeepSeekProtocol = 'chat-completions' | 'messages'
-
-/** One optional model entry advertised by the direct-fetch adapter. */
-export interface DeepSeekCatalogModel {
-  /** Wire model id accepted by the configured endpoint. */
-  id: string
-  /** Selector label; defaults to {@link id}. */
-  name?: string
-  /** Optional selector detail for deployments with similar model variants. */
-  description?: string
-  /** Known combined request/response context capacity; omitted when deployment metadata is unavailable. */
-  contextWindow?: number
-  /** Per-request output cap for this model; omission falls back to the profile's {@link DeepSeekConnectionOptions.maxTokens}. */
-  maxTokens?: number
-  /** Accepted request modalities; omission is text-only. */
-  inputModalities?: ModelModality[]
-  /**
-   * Total-pixel budget replacing the published token-grid projection for one
-   * deterministic request preview, or the 512-by-512 `low` preset; omission
-   * projects onto the token grid.
-   */
-  imagePixelBudget?: number | 'low'
-  /** Encoded-byte target for one deterministic request preview; the smallest quality-ladder output is used when no quality fits. */
-  imageMaxBytes?: number
-  /**
-   * `'in-history'` declares that the endpoint reads the latest `system`
-   * message at any position of the conversation as the complete effective
-   * system prompt; omission means only a leading system message is read.
-   */
-  systemPromptUpdate?: SystemPromptUpdate
-  /** Native tool changes for Messages; Chat Completions always sends the complete active list. */
-  toolUpdate?: ToolUpdate
-}
-```
-
-Depends on: [`ModelModality`](../packages/llm/llm/src/index.ts) · [`RetryPolicyConfig`](../packages/llm/llm/src/index.ts) · [`SystemPromptUpdate`](../packages/llm/llm/src/index.ts) · [`ToolUpdate`](../packages/llm/llm/src/index.ts)
-
-Source: [`packages/llm/llm-deepseek/src/config.ts:25`](../packages/llm/llm-deepseek/src/config.ts)
-
 <a id="deepseek-aidsh-llm-pi-ai"></a>
 
 ## `@deepseek-ai/dsh-llm-pi-ai`
@@ -927,6 +842,22 @@ export interface PiAiProviderProfile {
   headers?: Record<string, string>
   /** Provider-neutral pi-ai reasoning level. */
   reasoning?: ModelThinkingLevel
+  /**
+   * The `thinking.type` an `anthropic-messages` request carries beside its
+   * `output_config.effort` when the model's compat forces adaptive thinking.
+   * Omission sends Anthropic's `adaptive`. An Anthropic-compatible endpoint
+   * that reads the effort but accepts only `enabled` and `disabled`, as
+   * DeepSeek documents, sets `enabled`, which also omits the `display` field
+   * Anthropic pairs with it. Refused on a route with no model it could reach.
+   */
+  adaptiveThinkingType?: AdaptiveThinkingType
+  /**
+   * Request-body rewrites for an Anthropic-compatible endpoint that caches by
+   * prefix on its own and needs none of Anthropic's prompt-cache scaffolding,
+   * as DeepSeek's does. Applies only to `anthropic-messages` models; refused
+   * on a route with no such model.
+   */
+  messagesWire?: PiAiMessagesWire
   /** Token budgets used by reasoning providers that support them. */
   thinkingBudgets?: ThinkingBudgets
   /** Prompt-cache retention preference. */
@@ -1011,7 +942,9 @@ export interface PiAiModelProfile {
   input?: PiAiModality[]
   /**
    * Selectable reasoning efforts. Absent inherits the installed catalog
-   * entry's capability (a hand-declared model has none and does not reason);
+   * entry's capability; a hand-declared model whose id its vendor publishes
+   * inherits the vendor's when it speaks the vendor's protocol, and otherwise
+   * does not reason;
    * `false` declares a non-reasoning model, which is how a profile strips
    * reasoning from a catalog model its gateway cannot serve; a non-empty dict
    * declares the offered levels and their wire spellings.
@@ -1019,6 +952,24 @@ export interface PiAiModelProfile {
   reasoningEfforts?: false | PiAiReasoningEfforts
   /** pi-ai wire-compatibility switches for this model, winning over the route's per field; one its protocol does not declare is refused. */
   compat?: PiAiCompatProfile
+  /** One-line guidance selectors and model-listing tools show beside the name. */
+  description?: string
+  /**
+   * Declares that this endpoint reads the latest `system` message at any
+   * position as the complete effective system prompt, so a changed prompt
+   * follows the cached history instead of rewriting the leading one. Only
+   * `anthropic-messages` can carry it: later prompts travel as native
+   * mid-conversation system messages. This is a claim about the endpoint that
+   * nothing can interrogate, so it is never inferred from the protocol.
+   */
+  systemPromptUpdate?: 'in-history'
+  /**
+   * Declares that this endpoint accepts native mid-conversation tool changes:
+   * tools added later are declared deferred and surfaced by `tool_addition`
+   * blocks, and removed ones are withdrawn by `tool_removal` blocks, so the
+   * cached prefix survives a change of tools. Only `anthropic-messages`.
+   */
+  toolUpdate?: 'in-history'
 }
 
 /**
@@ -1135,6 +1086,36 @@ export interface PiAiCompatProfile {
 /** One request modality a pi-ai model may accept. */
 export type PiAiModality = Model<Api>['input'][number]
 
+/** The `thinking.type` an effort-carrying `anthropic-messages` request sends. */
+export type AdaptiveThinkingType = typeof ADAPTIVE_THINKING_TYPES[number]
+
+/**
+ * Switches of {@link PiAiProviderProfile.messagesWire}. Each defaults off, which
+ * sends the body pi-ai built.
+ */
+export interface PiAiMessagesWire {
+  /**
+   * Drop the never-callable `__pi_deferred_placeholder__` tool pi-ai declares
+   * whenever native tool changes are on. Anthropic needs it so the hidden
+   * deferred-tool scaffolding sits in the cached prefix from the first request;
+   * an endpoint without that scaffolding only pays its tokens. Kept when every
+   * other tool is deferred, because a request needs one tool that is not.
+   */
+  dropDeferredToolPlaceholder?: boolean
+  /**
+   * Remove every `cache_control` breakpoint pi-ai marks on the system prompt,
+   * tools, and message blocks, for an endpoint whose automatic prefix cache
+   * does not read them.
+   */
+  stripCacheControl?: boolean
+  /**
+   * Merge adjacent messages of the same role into one by concatenating their
+   * content blocks, so a user prompt and the runtime context after it travel
+   * as one user message.
+   */
+  mergeAdjacentRoles?: boolean
+}
+
 /**
  * Selectable reasoning efforts for one model: each key is a level the model
  * offers (and selectors show), and its value is the wire spelling dispatch
@@ -1154,7 +1135,7 @@ export type PiAiThinkingTokenBudgetField = NonNullable<OpenAICompletionsCompat['
 
 Depends on: `Api` (`@earendil-works/pi-ai`) · `CacheRetention` (`@earendil-works/pi-ai`) · `Model` (`@earendil-works/pi-ai`) · `ModelThinkingLevel` (`@earendil-works/pi-ai`) · `OpenAICompletionsCompat` (`@earendil-works/pi-ai`) · [`RetryPolicyConfig`](../packages/llm/llm/src/index.ts) · `ThinkingBudgets` (`@earendil-works/pi-ai`) · `Transport` (`@earendil-works/pi-ai`)
 
-Source: [`packages/llm/llm-pi-ai/src/config.ts:246`](../packages/llm/llm-pi-ai/src/config.ts)
+Source: [`packages/llm/llm-pi-ai/src/config.ts:299`](../packages/llm/llm-pi-ai/src/config.ts)
 
 <a id="deepseek-aidsh-llm-replay"></a>
 
@@ -1235,7 +1216,7 @@ export interface ReplayModelConfig {
 
 Depends on: [`ModelModality`](../packages/llm/llm/src/index.ts) · [`RetryPolicyConfig`](../packages/llm/llm/src/index.ts) · [`SystemPromptUpdate`](../packages/llm/llm/src/index.ts) · [`ToolUpdate`](../packages/llm/llm/src/index.ts)
 
-Source: [`packages/test-support/llm-replay/src/index.ts:1128`](../packages/test-support/llm-replay/src/index.ts)
+Source: [`packages/test-support/llm-replay/src/index.ts:1091`](../packages/test-support/llm-replay/src/index.ts)
 
 <a id="deepseek-aidsh-llm-retry"></a>
 
@@ -1248,7 +1229,7 @@ Requires: `agents` · `sessionProjections`
 export type Config = Readonly<Record<string, never>>
 ```
 
-Source: [`packages/llm/llm-retry/src/index.ts:25`](../packages/llm/llm-retry/src/index.ts)
+Source: [`packages/llm/llm-retry/src/index.ts:26`](../packages/llm/llm-retry/src/index.ts)
 
 <a id="deepseek-aidsh-mcp-client"></a>
 
@@ -1434,21 +1415,29 @@ export interface Config {
 
 Source: [`packages/boot/plugin-manager/src/index.ts:34`](../packages/boot/plugin-manager/src/index.ts)
 
-<a id="deepseek-aidsh-plugin-package-inventory-deepseek"></a>
+<a id="deepseek-aidsh-ptc-runtime-codemode"></a>
 
-## `@deepseek-ai/dsh-plugin-package-inventory-deepseek`
-
-Requires: `agents` · `deepseekLlmApiExtensions` · `loader`
+## `@deepseek-ai/dsh-ptc-runtime-codemode`
 
 ```ts config-catalog
-/** Plugin-package request contribution configuration. */
+/** Deployment-varying runtime bounds. */
 export interface Config {
-  /** Contribute `dsh_plugin_packages` to official DeepSeek requests. Defaults to `true`. */
-  enabled?: boolean
+  /** Default elapsed deadline, including nested tool and approval waits. */
+  timeoutMs?: number
+  /** Maximum numeric elapsed budget accepted by resolve. */
+  maxTimeoutMs?: number
+  /** Combined serialized logs, completion and diagnostic byte cap. */
+  maxOutputBytes?: number
+  /** QuickJS heap limit for one program, in bytes. */
+  maxMemoryBytes?: number
+  /** Maximum serialized bytes of one binding call's arguments and of all outstanding binding arguments. */
+  maxMessageBytes?: number
+  /** Maximum simultaneous host binding calls accepted from a program. */
+  maxPendingCalls?: number
 }
 ```
 
-Source: [`packages/llm/plugin-package-inventory-deepseek/src/index.ts:32`](../packages/llm/plugin-package-inventory-deepseek/src/index.ts)
+Source: [`packages/ptc-runtime/ptc-runtime-codemode/src/index.ts:23`](../packages/ptc-runtime/ptc-runtime-codemode/src/index.ts)
 
 <a id="deepseek-aidsh-ptc-runtime-node"></a>
 
@@ -1672,28 +1661,6 @@ export interface Config {
 Depends on: [`SandboxMode`](subsystems/sandbox.md)
 
 Source: [`packages/sandbox/sandbox-policy/src/index.ts:71`](../packages/sandbox/sandbox-policy/src/index.ts)
-
-<a id="deepseek-aidsh-session-log-deepseek"></a>
-
-## `@deepseek-ai/dsh-session-log-deepseek`
-
-Requires: `deepseekLlmApiExtensions` · `sessions`
-
-```ts config-catalog
-/** Session-log request contribution configuration. */
-export interface Config {
-  /** Contribute `dsh_session_log` to official DeepSeek requests. Defaults to `true`. */
-  enabled?: boolean
-  /**
-   * Largest serialized `dsh_session_log` field, in UTF-8 bytes, that one request carries.
-   * A request uploads the longest pending event prefix that fits; later requests continue
-   * after its acceptance. Defaults to 8 MiB.
-   */
-  maxBytes?: number
-}
-```
-
-Source: [`packages/session/session-log-deepseek/src/index.ts:39`](../packages/session/session-log-deepseek/src/index.ts)
 
 <a id="deepseek-aidsh-session-persistence-jsonl"></a>
 
@@ -2688,7 +2655,7 @@ export interface Config {
 export type ToolPresentationMode = 'native' | 'ptc' | 'both'
 ```
 
-Source: [`packages/core/tools/src/index.ts:698`](../packages/core/tools/src/index.ts)
+Source: [`packages/core/tools/src/index.ts:750`](../packages/core/tools/src/index.ts)
 
 <a id="deepseek-aidsh-typert-loader"></a>
 
@@ -2891,7 +2858,6 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-command-goal` — requires `commands` · `goals` ([`packages/goal/command-goal/src/index.ts`](../packages/goal/command-goal/src/index.ts))
 - `@deepseek-ai/dsh-commands` ([`packages/interaction/commands/src/index.ts`](../packages/interaction/commands/src/index.ts))
 - `@deepseek-ai/dsh-compaction-image-offload` — requires `agents` · `sessions` ([`packages/compaction/compaction-image-offload/src/index.ts`](../packages/compaction/compaction-image-offload/src/index.ts))
-- `@deepseek-ai/dsh-deepseek-llm-api-extensions` ([`packages/llm/deepseek-llm-api-extensions/src/index.ts`](../packages/llm/deepseek-llm-api-extensions/src/index.ts))
 - `@deepseek-ai/dsh-desktop` — requires `agentDefaultModel` · `agents` · `sessions` ([`packages/bundle/desktop/src/index.ts`](../packages/bundle/desktop/src/index.ts))
 - `@deepseek-ai/dsh-goal-round-driver` — requires `agents` · `goals` · `sessions` ([`packages/goal/goal-round-driver/src/index.ts`](../packages/goal/goal-round-driver/src/index.ts))
 - `@deepseek-ai/dsh-llm` ([`packages/llm/llm/src/index.ts`](../packages/llm/llm/src/index.ts))

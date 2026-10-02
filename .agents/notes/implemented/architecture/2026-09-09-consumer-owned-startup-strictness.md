@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-09-consumer-owned-startup-strictness.zh.md)
-
 ## Problem
 
 Best-effort Loader reconciliation preserves usable plugins, but applications still need a minimum set of capabilities. An HTTP application without its listening server is not running, while an unavailable tool can be omitted without making the remaining application unusable. Cordis cannot infer this distinction from plugin implementation or dependency state.

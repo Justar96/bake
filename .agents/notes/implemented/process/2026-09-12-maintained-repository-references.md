@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-12-maintained-repository-references.zh.md)
-
 ## Problem
 
 Historical evidence needs recognizable release, PR, and measured-run identities. Maintained files also serve the public source home, while native publishing uses the repository identity supplied by its workflow. Concrete commit references and deployment-specific organization URLs do not express that distinction.

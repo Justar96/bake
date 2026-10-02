@@ -168,7 +168,10 @@ export function apply(ctx: Context, config: Config): void {
     return mergeHookOutputs(outputs)
   }
 
-  // TODO(hook-continue-false): `merged.stop` is logged but needs a run-level halt mechanism.
+  // `continue:false` (`merged.stop`) follows Codex per event: UserPromptSubmit
+  // ends the turn, PostToolUse replaces the tool result and lets the turn go on,
+  // and Stop declines a block's continuation. Codex rejects it on PreToolUse and
+  // proceeds, so that point ignores it here too.
 
   function contextFrom(merged: MergedHookOutcome): UserMessage | undefined {
     if (merged.additionalContext.length === 0) return undefined
@@ -206,7 +209,7 @@ export function apply(ctx: Context, config: Config): void {
       agent, turn, plainStdoutAsContext: true, signal,
     })
     /* jscpd:ignore-start */
-    if (merged.decision === 'deny') {
+    if (merged.decision === 'deny' || merged.stop) {
       return { kind: 'reject' }
     }
     // Context alone is not a veto: DELEGATE so a later pre-step listener can
@@ -220,7 +223,8 @@ export function apply(ctx: Context, config: Config): void {
     }
   })
 
-  // PreToolUse → PreToolDecision. Codex blocks only (no allow/ask honored).
+  // PreToolUse → PreToolDecision. Codex blocks only (no allow/ask or
+  // `continue:false` honored).
   ctx.on('tools/pre-execute', async (exec, next): Promise<PreToolDecision> => {
     const turn = lastTurn(ctx, exec.agent)
     const merged = await runPoint('PreToolUse', exec.name, preToolPayload(ctx, exec, model), { ...exec.agent ? { agent: exec.agent } : {}, turn, signal: exec.signal })
@@ -230,13 +234,16 @@ export function apply(ctx: Context, config: Config): void {
   })
 
   // PostToolUse → PostToolDecision (block with feedback, or attach context).
+  // `continue:false` blocks too: Codex replaces the result with the feedback,
+  // else the stop reason, and the turn continues.
   ctx.on('tools/post-execute', async (exec, result, next): Promise<PostToolDecision> => {
     const turn = lastTurn(ctx, exec.agent)
     /* jscpd:ignore-start */
     const merged = await runPoint('PostToolUse', exec.name, postToolPayload(ctx, exec, result, model), { ...exec.agent ? { agent: exec.agent } : {}, turn, signal: exec.signal })
     const context = contextFrom(merged)
-    if (merged.decision === 'deny') {
-      return { kind: 'block', feedback: [{ type: 'text', text: merged.reason ?? 'blocked by PostToolUse hook' }], ...context ? { additionalContexts: [context] } : {} }
+    if (merged.decision === 'deny' || merged.stop) {
+      const text = merged.reason ?? merged.stopReason ?? 'blocked by PostToolUse hook'
+      return { kind: 'block', feedback: [{ type: 'text', text }], ...context ? { additionalContexts: [context] } : {} }
     }
     // Context alone is not a veto: DELEGATE, then fold our context onto the
     // downstream decision (a downstream block carries it too).
@@ -252,14 +259,15 @@ export function apply(ctx: Context, config: Config): void {
   })
 
   // A blocking Stop hook steers at the stopping boundary, which makes the
-  // machine observe pending input and run another step.
+  // machine observe pending input and run another step; `continue:false`
+  // overrides the block and lets the turn stop.
   // TODO(stop-loop-guard): Codex supplies `stop_hook_active` so a Stop hook can
   // avoid continuing the same turn indefinitely. It is always false here, so an
   // unconditionally blocking hook force-continues every step until it self-limits.
   ctx.on('agent/turn-stopping', async ({ agent, turn, signal }): Promise<void> => {
     const merged = await runPoint('Stop', '', { ...turnBase(ctx, agent, 'Stop', model), stop_hook_active: false, last_assistant_message: null }, { agent, turn, signal })
     /* jscpd:ignore-end */
-    if (merged.decision === 'deny') {
+    if (merged.decision === 'deny' && !merged.stop) {
       // A blocking Stop hook forces continuation; a block with no reason (exit 2,
       // empty stderr) still forces it — fall back to a generic steering line
       // rather than letting the turn stop.

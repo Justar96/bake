@@ -34,6 +34,7 @@ import {
 } from './catalog.ts'
 import type {
   PiAiCompatProfile,
+  PiAiHarnessModelInfo,
   PiAiModality,
   PiAiModelOverride,
   PiAiModelProfile,
@@ -91,6 +92,7 @@ export const DEFAULT_INPUT: readonly PiAiModality[] = ['text']
 
 export type {
   PiAiCompatProfile,
+  PiAiHarnessModelInfo,
   PiAiModality,
   PiAiModelOverride,
   PiAiModelProfile,
@@ -162,6 +164,22 @@ export interface PiAiProviderProfile {
   headers?: Record<string, string>
   /** Provider-neutral pi-ai reasoning level. */
   reasoning?: ModelThinkingLevel
+  /**
+   * The `thinking.type` an `anthropic-messages` request carries beside its
+   * `output_config.effort` when the model's compat forces adaptive thinking.
+   * Omission sends Anthropic's `adaptive`. An Anthropic-compatible endpoint
+   * that reads the effort but accepts only `enabled` and `disabled`, as
+   * DeepSeek documents, sets `enabled`, which also omits the `display` field
+   * Anthropic pairs with it. Refused on a route with no model it could reach.
+   */
+  adaptiveThinkingType?: AdaptiveThinkingType
+  /**
+   * Request-body rewrites for an Anthropic-compatible endpoint that caches by
+   * prefix on its own and needs none of Anthropic's prompt-cache scaffolding,
+   * as DeepSeek's does. Applies only to `anthropic-messages` models; refused
+   * on a route with no such model.
+   */
+  messagesWire?: PiAiMessagesWire
   /** Token budgets used by reasoning providers that support them. */
   thinkingBudgets?: ThinkingBudgets
   /** Prompt-cache retention preference. */
@@ -199,6 +217,39 @@ export interface PiAiProviderProfile {
   requestImageMaxBytes?: number
   /** Provider-owned model-request retry policy; omission uses normal mode with five retries. */
   retryPolicy?: RetryPolicyConfig
+}
+
+/** Spellings of {@link PiAiProviderProfile.adaptiveThinkingType}. */
+export const ADAPTIVE_THINKING_TYPES = ['adaptive', 'enabled'] as const
+
+/** The `thinking.type` an effort-carrying `anthropic-messages` request sends. */
+export type AdaptiveThinkingType = typeof ADAPTIVE_THINKING_TYPES[number]
+
+/**
+ * Switches of {@link PiAiProviderProfile.messagesWire}. Each defaults off, which
+ * sends the body pi-ai built.
+ */
+export interface PiAiMessagesWire {
+  /**
+   * Drop the never-callable `__pi_deferred_placeholder__` tool pi-ai declares
+   * whenever native tool changes are on. Anthropic needs it so the hidden
+   * deferred-tool scaffolding sits in the cached prefix from the first request;
+   * an endpoint without that scaffolding only pays its tokens. Kept when every
+   * other tool is deferred, because a request needs one tool that is not.
+   */
+  dropDeferredToolPlaceholder?: boolean
+  /**
+   * Remove every `cache_control` breakpoint pi-ai marks on the system prompt,
+   * tools, and message blocks, for an endpoint whose automatic prefix cache
+   * does not read them.
+   */
+  stripCacheControl?: boolean
+  /**
+   * Merge adjacent messages of the same role into one by concatenating their
+   * content blocks, so a user prompt and the runtime context after it travel
+   * as one user message.
+   */
+  mergeAdjacentRoles?: boolean
 }
 
 /** Validated profile with its route stamped and every adapter-owned default resolved. */
@@ -240,6 +291,8 @@ export interface ResolvedPiAiProviderProfile
    * own, so a catalog capability must not appear here.
    */
   configuredMaxTokens: ReadonlyMap<string, number>
+  /** Harness-facing facts configured model entries declared, by model id; absent ids declared none. */
+  harnessInfo: ReadonlyMap<string, PiAiHarnessModelInfo>
 }
 
 /** Plugin configuration: the provider routes this instance owns. */
@@ -337,6 +390,9 @@ const modelFields = {
   // installed catalog's capability", while `false` disables reasoning.
   reasoningEfforts: z.union([z.const(false), reasoningEfforts]),
   compat: compatProfile,
+  description: z.string(),
+  systemPromptUpdate: z.const('in-history' as const),
+  toolUpdate: z.const('in-history' as const),
 }
 
 const modelProfile: z<PiAiModelProfile> = z.object({
@@ -360,6 +416,12 @@ const profile = z.object({
   defaultInput: z.array(z.union(MODALITIES)).default([...DEFAULT_INPUT]),
   headers: z.dict(z.string()),
   reasoning: z.union(THINKING_LEVELS),
+  adaptiveThinkingType: z.union(ADAPTIVE_THINKING_TYPES),
+  messagesWire: z.object({
+    dropDeferredToolPlaceholder: z.boolean(),
+    stripCacheControl: z.boolean(),
+    mergeAdjacentRoles: z.boolean(),
+  }),
   thinkingBudgets,
   cacheRetention: z.union(['none', 'short', 'long']),
   transport: z.union(['sse', 'websocket', 'websocket-cached', 'auto']),
@@ -443,6 +505,47 @@ function assertValidHeaders(provider: string, headers: Readonly<Record<string, s
 }
 
 /**
+ * Refuse a non-default {@link PiAiProviderProfile.adaptiveThinkingType} that
+ * no serviceable model on the route would ever send, so the setting cannot
+ * look applied on a route that dispatches budget thinking or another protocol.
+ */
+function assertAdaptiveThinkingReachable(
+  provider: string,
+  type: AdaptiveThinkingType | undefined,
+  catalog: RouteCatalog,
+): void {
+  if (type === undefined || type === 'adaptive') return
+  if (!(ADAPTIVE_THINKING_TYPES as readonly unknown[]).includes(type)) {
+    throw new Error(`llm-pi-ai: provider "${provider}" adaptiveThinkingType must be one of ${ADAPTIVE_THINKING_TYPES.join(', ')}`)
+  }
+  const reached = catalog.models.some(model => model.api === 'anthropic-messages'
+    && (model.compat as { forceAdaptiveThinking?: unknown } | undefined)?.forceAdaptiveThinking === true)
+  if (reached) return
+  throw new PiAiCatalogError(
+    `llm-pi-ai: provider "${provider}" sets adaptiveThinkingType "${type}", but no model on the route speaks`
+    + ' anthropic-messages with compat forceAdaptiveThinking, so no request would carry it',
+  )
+}
+
+/**
+ * Refuse a {@link PiAiProviderProfile.messagesWire} switch that no serviceable
+ * model on the route would apply, because only `anthropic-messages` requests
+ * carry the rewritten body.
+ */
+function assertMessagesWireReachable(
+  provider: string,
+  wire: PiAiMessagesWire | undefined,
+  catalog: RouteCatalog,
+): void {
+  if (wire === undefined || !Object.values(wire).some(value => value === true)) return
+  if (catalog.models.some(model => model.api === 'anthropic-messages')) return
+  throw new PiAiCatalogError(
+    `llm-pi-ai: provider "${provider}" sets messagesWire, but no model on the route speaks`
+    + ' anthropic-messages, so no request would carry it',
+  )
+}
+
+/**
  * Resolve scalar defaults and materialize each route's serviceable models.
  * Deferred catalog validation retains diagnostics without deleting configured
  * routes. An omitted dict resolves to the empty, dormant route set.
@@ -523,6 +626,8 @@ export function resolveProfiles(
         defaultMaxTokens: source.defaultMaxTokens ?? DEFAULT_MAX_TOKENS,
       }, validation)
       catalogError = catalog.modelErrors.values().next().value
+      assertAdaptiveThinkingReachable(provider, source.adaptiveThinkingType, catalog)
+      assertMessagesWireReachable(provider, source.messagesWire, catalog)
       piProvider = buildProvider({
         provider,
         displayName,
@@ -558,7 +663,9 @@ export function resolveProfiles(
       retryPolicy: resolveRetryPolicy(retryPolicy, `llm-pi-ai: provider "${provider}" retryPolicy`),
       ...rest.headers === undefined ? {} : { headers: { ...rest.headers } },
       ...rest.thinkingBudgets === undefined ? {} : { thinkingBudgets: { ...rest.thinkingBudgets } },
+      ...rest.messagesWire === undefined ? {} : { messagesWire: { ...rest.messagesWire } },
       configuredMaxTokens: catalog?.configuredMaxTokens ?? new Map(),
+      harnessInfo: catalog?.harnessInfo ?? new Map(),
       modelErrors: catalog?.modelErrors ?? new Map(),
       ...piProvider === undefined ? {} : { piProvider },
       ...catalogError === undefined ? {} : { catalogError },

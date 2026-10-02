@@ -77,7 +77,7 @@ describe('llm/adapters-updated', () => {
   })
 
   it('replaces a route set in one event, never publishing an empty registry between the two', async () => {
-    // The retry-policy swap in llm-deepseek: disposing and re-registering
+    // The route-set swap in llm-pi-ai: disposing and re-registering
     // would let an observer see the provider disappear and come back.
     const ctx = await setup()
     const observed: string[][] = []
@@ -107,18 +107,18 @@ describe('configurable-provider directory', () => {
     const events = vi.fn()
     ctx.on('llm/adapters-updated', events)
     ctx.llm.registerConfigurableProviders([
-      entry({ provider: 'deepseek-official', displayName: 'DeepSeek', settingsNs: 'llm-deepseek', settingsPath: [] }),
+      entry({ provider: 'acme', displayName: 'Acme', settingsNs: 'llm-acme', settingsPath: [] }),
       entry(),
     ])
     expect(events).toHaveBeenCalledTimes(1)
     const listed = ctx.llm.listConfigurableProviders()
     expect(listed).toEqual([
-      { provider: 'deepseek-official', displayName: 'DeepSeek', settingsNs: 'llm-deepseek', settingsPath: [] },
+      { provider: 'acme', displayName: 'Acme', settingsNs: 'llm-acme', settingsPath: [] },
       { provider: 'openai', displayName: 'OpenAI', settingsNs: 'llm-pi-ai', settingsPath: ['providers', 'openai'] },
     ])
     listed[0]!.displayName = 'mutated'
     ;(listed[1]!.settingsPath as string[]).push('mutated')
-    expect(ctx.llm.listConfigurableProviders()[0]!.displayName).toBe('DeepSeek')
+    expect(ctx.llm.listConfigurableProviders()[0]!.displayName).toBe('Acme')
     expect(ctx.llm.listConfigurableProviders()[1]!.settingsPath).toEqual(['providers', 'openai'])
   })
 

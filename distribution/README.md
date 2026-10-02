@@ -1,7 +1,5 @@
 # Bake direct download releases
 
-English | [中文](README.zh.md)
-
 The `bake-downloads` Railway service in project `28ff3000-7240-4c57-81d1-7bd05445c1ee` serves a release manifest and installers at `https://bake.justar.dev`, and redirects each versioned platform archive to the asset of the same name on that version's GitHub release. The service exists, but a release is available only after its archives are built, checked, and deployed. Bake still runs on Node; Bun builds the workspace and installs the production dependency graph into each archive.
 
 ## Build and check one platform locally

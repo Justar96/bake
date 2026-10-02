@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-07-14-provider-routed-llm-adapters.zh.md)
-
 ## Problem
 
 `dsh-llm` registered adapters by exact model name. A plugin supplied a model list at Cordis startup, `LlmRuntime` stored one adapter per listed string, and `GenerateOptions.model` selected the adapter and the provider model at once. This worked while both shipping adapters targeted the same two DeepSeek models, but it conflated two independent decisions: which upstream provider owns a request, and which model that provider should run.
@@ -22,9 +20,9 @@ The adapter configuration also assumes one DeepSeek API key and endpoint. A gene
 
 `LlmRuntime` registers and resolves adapters by provider. `registerAdapter(providers, adapter)` checks the entire provider list before mutating the registry, rejects a duplicate with `DUPLICATE_ADAPTER`, and disposes the whole registration as one effect. Model ids are not registration keys; the selected adapter still validates or forwards them. The later [LLM catalog and ACP selection Agent Note](../../archived/architecture/2026-07-15-llm-model-catalog-and-acp-selection.md) added advisory `listProviders()` / `listModels()` discovery without turning model membership into request validation.
 
-A provider has exactly one adapter owner in a Cordis context. `dsh-llm-deepseek` registers `deepseek`; `dsh-llm-pi-ai` may also register `deepseek`, but loading both owners is a configuration error rather than an ordering rule or fallback. A deployment that wants the hand-rolled DeepSeek implementation excludes `deepseek` from the pi-ai profiles. A deployment that wants pi-ai's DeepSeek implementation does not mount `dsh-llm-deepseek`.
+A provider has exactly one adapter owner in a Cordis context; loading two owners for one provider is a configuration error rather than an ordering rule or fallback. The hand-rolled `dsh-llm-deepseek`, which registered `deepseek`, was removed. [`dsh-llm-pi-ai`](../../../../packages/llm/llm-pi-ai/README.md) is the single LLM adapter and serves DeepSeek through its shipped `deepseek-official` route, with pi-ai's own `deepseek` catalog route available beside it.
 
-`dsh-llm-deepseek` removes its model registration list and accepts any model string routed through provider `deepseek`. Its request serialization, `/chat/completions` endpoint, thinking options, SSE parsing, and error behavior remain unchanged; `options.model` is still sent verbatim.
+The removed `dsh-llm-deepseek` accepted any model string routed through provider `deepseek` and sent `options.model` verbatim. The `deepseek-official` route instead serves the models it declares and fails any other model id with `UNKNOWN_MODEL`.
 
 ### Explicit pi-ai provider profiles
 
@@ -32,9 +30,9 @@ A provider has exactly one adapter owner in a Cordis context. `dsh-llm-deepseek`
 
 The plugin registers configured provider names against one `PiAiAdapter` in one atomic call. Each immutable request snapshot combines the effective profiles and their serviceable model descriptors. Catalog-external models require an explicit or inferable protocol and endpoint. Stored catalog errors remain visible and repairable under the [settings catalog recovery decision](../bug-fix/2026-09-07-pi-ai-settings-catalog-recovery.md), while writes validate changed providers and requests reject the selected failed model before network I/O.
 
-The adapter calls pi-ai's `streamSimple()` so each catalog model chooses its registered API implementation, including OpenAI Responses instead of Chat Completions where the descriptor says `openai-responses`. Harness temperature, maximum tokens, signal, session id, and the profile's common stream options flow through directly. Profile headers merge with the mandatory Harness attribution headers, with Harness attribution winning its reserved names. The adapter no longer maintains DeepSeek-specific payload rewrites or a provider-protocol matrix.
+The adapter calls pi-ai's `streamSimple()` so each catalog model chooses its registered API implementation, including OpenAI Responses instead of Chat Completions where the descriptor says `openai-responses`. Harness temperature, maximum tokens, signal, session id, and the profile's common stream options flow through directly. Profile headers merge with the mandatory Harness attribution headers, with Harness attribution winning its reserved names. The adapter maintains no provider-protocol matrix; endpoint quirks, such as the thinking spelling `deepseek-official` needs, are per-profile `compat` and `adaptiveThinkingType` settings.
 
-pi-ai's common stream options do not expose stop sequences. `dsh-llm-pi-ai` rejects a defined Harness `stop` option with `UNSUPPORTED_OPTION` rather than silently ignoring it or growing a second provider-specific payload implementation. `dsh-llm-deepseek` continues to support `stop` through its native request serializer.
+pi-ai's common stream options do not expose stop sequences. `dsh-llm-pi-ai` rejects a defined Harness `stop` option with `UNSUPPORTED_OPTION` rather than silently ignoring it or growing a second provider-specific payload implementation. No shipped adapter supports `stop`: the native request serializer that did was removed with `dsh-llm-deepseek`.
 
 ### Recorded assistant route and replay state
 
@@ -52,7 +50,7 @@ Every model-selection path carries provider and model together: declarative agen
 
 Compaction configuration gains `summarizationProvider` beside `summarizationModel`. Both are empty to inherit, or both are non-empty to select an explicit target; a half-configured pair fails load. Inheritance uses the last logged request target when one exists and falls back to the agent's creation options. `compaction/summary` records both fields with the existing model-call envelope.
 
-The JSON-RPC runtime receives provider and model explicitly. Its convenience fallback mounts `dsh-llm-deepseek` only for provider `deepseek` when that provider has no registered owner; other missing providers fail without guessing an adapter.
+Hosts receive provider and model explicitly. A provider with no registered owner fails without guessing an adapter; the convenience fallback that mounted `dsh-llm-deepseek` for provider `deepseek` was removed with that package.
 
 Current seed/load validation rejects request headers and assistant messages that omit required provider/model fields. The frozen v0-to-v1 edge requires the same reconstructable routing identity before migration; it never guesses a missing provider or model, and malformed shapes refuse before publication.
 
@@ -73,10 +71,10 @@ Current seed/load validation rejects request headers and assistant messages that
 ## Consequences
 
 - Provider names are deployment-wide route ownership keys: two providers may use the same model string, but mounting two adapters for one provider fails at load instead of creating fallback order.
-- Model selection no longer changes the Cordis plugin graph. Catalog-backed adapters can accept any installed catalog model selected after startup, while the native DeepSeek adapter forwards arbitrary DeepSeek model ids.
+- Model selection no longer changes the Cordis plugin graph. Catalog-backed adapters can accept any installed catalog model selected after startup, while a hand-declared route such as `deepseek-official` serves only the models it declares.
 - A custom `baseURL` preserves the selected catalog model's protocol and capabilities; it does not make catalog-external model ids valid. Private endpoints must implement that catalog entry's protocol.
 - pi-ai credentials, transport knobs, SDK timeouts, and the five-minute-default `streamIdleTimeoutMs` watchdog are scoped per provider profile. Hidden provider retries are disabled; bounded retries belong to the separately composed agent recovery policy.
-- `dsh-llm-pi-ai` rejects stop sequences because pi-ai's common stream API cannot express them; the native DeepSeek adapter retains its stop support.
+- `dsh-llm-pi-ai` rejects stop sequences because pi-ai's common stream API cannot express them; with `dsh-llm-deepseek` removed, no shipped adapter supports them.
 - Replay state is portable only within the adapter instance that owns both the historical and target providers. Cross-provider and cross-model restoration is an adapter responsibility, and another adapter receives provider-neutral history without the opaque state.
 - Current Session JSONL requires provider/model on request headers and assistant messages. The v0 edge migrates only frozen shapes that already carry reconstructable request identity.
 

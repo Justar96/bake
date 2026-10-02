@@ -12,6 +12,7 @@ import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import TokenMeter from '@deepseek-ai/dsh-token-meter'
 import BasicCompactionEngine from '@deepseek-ai/dsh-compaction-basic'
 import ToolResultPruner from '@deepseek-ai/dsh-compaction-tool-result-pruner'
+import { FileSettingsProvider } from '@deepseek-ai/dsh-settings-file'
 
 let root: string | undefined
 let context: Context | undefined
@@ -23,10 +24,15 @@ afterEach(async () => {
   root = undefined
 })
 
-async function loadYaml(lines: readonly string[]): Promise<Context> {
+async function loadYaml(
+  lines: readonly string[] | ((root: string) => readonly string[]),
+  files: Readonly<Record<string, string>> = {},
+): Promise<Context> {
   root = await mkdtemp(join(tmpdir(), 'dsh-token-meter-loader-'))
   const configPath = join(root, 'cordis.yml')
-  await writeFile(configPath, [...lines, ''].join('\n'))
+  const composed = typeof lines === 'function' ? lines(root) : lines
+  await writeFile(configPath, [...composed, ''].join('\n'))
+  for (const [name, content] of Object.entries(files)) await writeFile(join(root, name), content)
 
   context = new Context()
   context.baseUrl = pathToFileURL(root).href + '/'
@@ -39,6 +45,7 @@ async function loadYaml(lines: readonly string[]): Promise<Context> {
     ['@deepseek-ai/dsh-token-meter', TokenMeter],
     ['@deepseek-ai/dsh-compaction-tool-result-pruner', ToolResultPruner],
     ['@deepseek-ai/dsh-compaction-basic', BasicCompactionEngine],
+    ['@deepseek-ai/dsh-settings-file', FileSettingsProvider],
   ])
   context.loader.internal = {
     version: 'v2',
@@ -85,6 +92,36 @@ describe('real Loader composition', () => {
       retainRatio: 0.125,
       auto: false,
     })
+  })
+
+  it('layers a settings.yaml route-wide policy over the composed compaction entry', async () => {
+    const loaded = await loadYaml(dir => [
+      "- name: '@deepseek-ai/dsh-llm'",
+      "- name: '@deepseek-ai/dsh-session'",
+      "- name: '@deepseek-ai/dsh-session-projection'",
+      "- name: '@deepseek-ai/dsh-token-meter'",
+      "- name: '@deepseek-ai/dsh-settings-file'",
+      '  config:',
+      `    path: ${JSON.stringify(join(dir, 'settings.yaml'))}`,
+      '    watch: false',
+      "- name: '@deepseek-ai/dsh-compaction-basic'",
+      '  config:',
+      '    thresholdRatio: 0.7',
+    ], {
+      'settings.yaml': [
+        'compaction-basic:',
+        '  modelPolicies:',
+        '    - provider: cliproxyapi',
+        '      thresholdTokens: 150000',
+        '      retainTokens: 30000',
+        '',
+      ].join('\n'),
+    })
+
+    const engine = loaded.compaction as unknown as BasicCompactionEngine
+    await expect.poll(() => engine.pressureThreshold({ provider: 'cliproxyapi', model: 'gpt-5-codex' }, 200_000))
+      .toBe(150_000)
+    expect(engine.pressureThreshold({ provider: 'deepseek', model: 'deepseek-chat' }, 200_000)).toBe(140_000)
   })
 
   it('rejects stale token-meter config after Schemastery normalization', async () => {

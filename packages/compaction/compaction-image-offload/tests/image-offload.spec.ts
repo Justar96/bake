@@ -10,7 +10,8 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import BasicCompactionEngine from '@deepseek-ai/dsh-compaction-basic'
 import TokenMeter from '@deepseek-ai/dsh-token-meter'
 import { ImageVariantId } from '@deepseek-ai/dsh-attachment'
-import { serializeRequestWithImages } from '@deepseek-ai/dsh-llm-deepseek/src/protocols/chat-completions/serialize.ts'
+import type { AttachmentStore, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
+import { toPiContext } from '@deepseek-ai/dsh-llm-pi-ai/src/context.ts'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { createAssistantMessage, createToolResultMessage, createUserMessage, IMAGE_OFFLOAD_REQUIRED_CODE, LlmAdapter, LlmError, ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
@@ -32,15 +33,15 @@ class ScriptedAdapter extends LlmAdapter {
   async * stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     this.requests.push(options)
     if (this.serializeSummary && options.purpose === 'compaction') {
-      await serializeRequestWithImages(options, {
-        representation: { kind: 'base64' },
-        requestImages: new Map([image('first').attachment].map(ref => [ref.attachmentId, {
+      const attachments = {
+        readImageRequest: (ref: ImageAttachmentRef) => Promise.resolve({
           variantId: ImageVariantId(`sha256:${'b'.repeat(64)}`), attachment: ref,
           data: new Uint8Array(ref.bytes), mediaType: ref.mediaType, bytes: ref.bytes,
           width: ref.width, height: ref.height, depth: 'uchar', space: 'srgb', hasAlpha: false,
-        }])),
-        maxRequestImageBytes: 1,
-      })
+        }),
+        imageHostPath: () => undefined,
+      } as unknown as AttachmentStore
+      await toPiContext(options, { attachments, resolveImageAccess: () => undefined, maxRequestImageBytes: 1 })
     }
     const entry = this.script.shift()
     if (entry === undefined) throw new Error('script exhausted')
@@ -176,10 +177,10 @@ describe('summary image offload', () => {
 
   it('preserves omission when a subsequent summary failure is terminal', async () => {
     const { compact, agent, adapter } = await summaryHarness([
-      textResponse('answer'), offloadRequired(1), () => { throw new LlmError('provider outage', 'SERVER') },
+      textResponse('answer'), offloadRequired(1), () => { throw new LlmError('provider rejected the key', 'AUTH') },
     ])
     await seedImages(agent, ['first'])
-    await expect(compact.compactNow(agent, new AbortController().signal)).rejects.toMatchObject({ code: 'summary', cause: { code: 'SERVER' } })
+    await expect(compact.compactNow(agent, new AbortController().signal)).rejects.toMatchObject({ code: 'summary', cause: { code: 'AUTH' } })
     expect(adapter.requests).toHaveLength(3)
     expect(decisions(agent.session)).toHaveLength(1)
     expect(agent.session.surface.replaceGeneration).toBe(0)

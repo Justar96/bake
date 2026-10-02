@@ -11,7 +11,7 @@
  * process. One row per composition, not one per session.
  *
  * A PTC mode needs a TypeScript PTC runtime, which is a host-plane service
- * ([`dsh-ptc-runtime-node`](../../../ptc-runtime/ptc-runtime-node/README.md)).
+ * ([`dsh-ptc-runtime-codemode`](../../../ptc-runtime/ptc-runtime-codemode/README.md)).
  * This row therefore waits for it rather than assuming it: a preset selecting
  * PTC mode against a deployment that composes no runtime fails at mount, named
  * in the preset's own activation audit, instead of at the first prompt.

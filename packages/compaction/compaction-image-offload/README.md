@@ -5,8 +5,6 @@ kind: "package-reference"
 
 # @deepseek-ai/dsh-compaction-image-offload
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 Image-heavy conversations continue when older images exceed a model route's budget. The plugin permanently replaces those images with text naming each attachment and its available read-only path, then retries without spending the provider retry budget. Later requests retain that choice across route changes, resume, and replay. Token accounting follows the logged selections, and provider cache reuse ends at the first changed message.
@@ -25,7 +23,7 @@ Image-heavy conversations continue when older images exceed a model route's budg
 <a id="use-this-package"></a>
 ## Use this package
 
-Mount this plugin in every composition that runs the agent loop with an image-capable route. The shipped `dsh` base does. Without it, an `IMAGE_OFFLOAD_REQUIRED` failure reaches ordinary recovery and ends the turn as an error. The plugin has no configuration: the DeepSeek adapter enforces its file-mode and inline-fallback budgets, the pi-ai adapter its base64 bound, and each reports the count it needs offloaded.
+Mount this plugin in every composition that runs the agent loop with an image-capable route. The shipped `dsh` base does. Without it, an `IMAGE_OFFLOAD_REQUIRED` failure reaches ordinary recovery and ends the turn as an error. The plugin has no configuration: the pi-ai adapter enforces its base64 bound and reports the count it needs offloaded.
 
 ### Minimal configuration
 
@@ -66,7 +64,7 @@ No runtime invariant companion is published: the pure projection rejects invalid
 - [compaction seam](../compaction/README.md) — the neighboring summary and text-pruning operations.
 - [compaction-tool-result-pruner](../compaction-tool-result-pruner/README.md) — the sibling executor that trims tool outputs while preserving image selections.
 - [dsh-llm](../../llm/llm/README.md) — `ImageBlock.offloaded`, `IMAGE_OFFLOAD_REQUIRED`, and the placeholder projection.
-- [llm-deepseek adapter](../../llm/llm-deepseek/README.md) and [llm-pi-ai adapter](../../llm/llm-pi-ai/README.md) — the route budgets that report offload counts.
+- [llm-pi-ai adapter](../../llm/llm-pi-ai/README.md) — the route budget that reports offload counts.
 
 -----
 

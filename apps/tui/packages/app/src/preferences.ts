@@ -5,7 +5,7 @@
  *
  * The panel lists sections. Session holds the default model (the session's
  * `/model` picker, which writes `agent-default-model`) and the default access
- * preset. Terminal holds this namespace. Agent, Shell, and Web search name the
+ * preset. Terminal holds this namespace. Agent, Routing, Shell, and Web search name the
  * plugin settings a user reaches for most, with labels and steps of their
  * own. Advanced lists every registered namespace and edits its fields from
  * the schema its owner registered, so a plugin's settings are reachable
@@ -50,8 +50,6 @@ export const SETTINGS_NAMESPACE = 'tui'
 export interface TuiSettings {
   /** Read once at launch. */
   readonly screen: 'inline' | 'fullscreen'
-  /** Read once at launch. */
-  readonly locale: 'en' | 'zh'
   readonly composerFrame: 'round' | 'classic' | 'auto'
   /** Whether the header names the goal's objective after its state. */
   readonly goalObjective: boolean
@@ -65,7 +63,6 @@ export interface TuiSettings {
 /** Schema of the `tui` namespace. Defaults match the runner's profile config. */
 export const TuiSettings: z<TuiSettings> = z.object({
   screen: z.union(['inline', 'fullscreen']).default('inline'),
-  locale: z.union(['en', 'zh']).default('en'),
   composerFrame: z.union(['round', 'classic', 'auto']).default('auto'),
   goalObjective: z.boolean().default(false),
   resultLines: z.number().min(0).step(1).default(4),
@@ -530,6 +527,7 @@ export class Preferences implements RecentModels {
         { ns: 'subagent', path: ['maxDepth'], label: copy.settingsSubagentDepth, steps: [0, 1, 2, 3],
           format: depth => depth === 0 ? copy.settingsSubagentDepthOff : String(depth) },
       ]).concat(this.subagentModelRows(copy, descriptors, session, interactions))),
+      ...section('routing', copy.settingsRouting, this.routingRows(copy, descriptors, session, interactions)),
       ...section('shell', copy.settingsShell, curated([
         { ns: 'shell', path: ['timeoutMs'], label: copy.settingsShellTimeout, unit: 'ms', steps: [30_000, 60_000, 120_000, 300_000, 600_000] },
         { ns: 'shell', path: ['maxTimeoutMs'], label: copy.settingsShellMaxTimeout, unit: 'ms', steps: [300_000, 600_000, 1_800_000, 3_600_000] },
@@ -566,11 +564,6 @@ export class Preferences implements RecentModels {
         options: marked([{ value: 'inline', label: copy.settingsScreenInline }, { value: 'fullscreen', label: copy.settingsScreenFullscreen }], base.screen),
         ...this.screenFlag !== undefined ? { status: copy.settingsByFlag } : later(value.screen !== launch.screen),
       }, next => next as TuiSettings['screen']),
-      row('locale', {
-        label: copy.settingsLocale, current: value.locale,
-        options: marked([{ value: 'en', label: 'English' }, { value: 'zh', label: '中文' }], base.locale),
-        ...later(value.locale !== launch.locale),
-      }, next => next as TuiSettings['locale']),
       row('composerFrame', {
         label: copy.settingsFrame, current: value.composerFrame,
         options: marked([{ value: 'auto', label: copy.settingsFrameAuto }, { value: 'round', label: copy.settingsFrameRound },
@@ -670,10 +663,9 @@ export class Preferences implements RecentModels {
   }
 
   /**
-   * Whether subagents may pick a model, the models they may pick, and, once
-   * they may, the task router that picks among them. Without a model catalog
-   * the list stays in the settings file, and the switch is the owner's plain
-   * field.
+   * Whether subagents may pick a model and the models they may pick. Without
+   * a model catalog the list stays in the settings file, and the switch is
+   * the owner's plain field.
    */
   private subagentModelRows(copy: TuiCopy, descriptors: readonly SettingsDescriptor[], session: PanelSession,
     interactions: Interactions): readonly Setting[] {
@@ -681,10 +673,8 @@ export class Preferences implements RecentModels {
       status: copy.settingsNewSessions }, descriptors, copy)
     const selection = subagentSelection(descriptors)
     if (toggle === undefined || selection === undefined) return toggle === undefined ? [] : [toggle]
-    // The router chooses among the allowed models, so it is offered once there are some to choose among.
-    const routing = selection.enabled && selection.allowedModels.length > 0 ? this.routerRows(copy, descriptors, session, interactions) : []
     const list = session.listModels
-    if (list === undefined) return [toggle, ...routing]
+    if (list === undefined) return [toggle]
     const choose = (enable: boolean) => (signal: AbortSignal): Promise<CommandResult> =>
       this.chooseAllowed(copy, interactions, list, signal, enable)
     const user = descriptors.find(entry => entry.ns === SUBAGENT_MODELS)?.user
@@ -699,8 +689,19 @@ export class Preferences implements RecentModels {
         ...typeof user === 'object' && user !== null && Object.hasOwn(user, 'allowedModels')
           ? { reset: () => service.mutate(SUBAGENT_MODELS, [{ op: 'unset', path: ['allowedModels'] }]) } : {},
       },
-      ...routing,
     ]
+  }
+
+  /**
+   * The Routing section: the task router, once subagents may pick a model.
+   * It chooses among the allowed models, so it is offered once there are
+   * some to choose among.
+   */
+  private routingRows(copy: TuiCopy, descriptors: readonly SettingsDescriptor[], session: PanelSession,
+    interactions: Interactions): readonly Setting[] {
+    const selection = subagentSelection(descriptors)
+    return selection?.enabled === true && selection.allowedModels.length > 0
+      ? this.routerRows(copy, descriptors, session, interactions) : []
   }
 
   /**
@@ -714,7 +715,7 @@ export class Preferences implements RecentModels {
     const router = routerSettings(descriptors)
     if (toggle === undefined || router === undefined) return []
     const service = this.service!
-    const title = `${copy.settingsTitle} › ${copy.settingsAgent} › ${copy.settingsRouter}`
+    const title = `${copy.settingsTitle} › ${copy.settingsRouting} › ${copy.settingsRouter}`
     const account = session.routerAccount
     const rows: Setting[] = [router.enabled
       ? { ...toggle, about: copy.settingsRouterAbout }
@@ -891,7 +892,7 @@ export class Preferences implements RecentModels {
    */
   private async calibrate(copy: TuiCopy, interactions: Interactions,
     describe: (signal: AbortSignal) => Promise<readonly RouteView[]>, signal: AbortSignal): Promise<CommandResult> {
-    const title = `${copy.settingsTitle} › ${copy.settingsAgent} › ${copy.settingsRouterCalibrate}`
+    const title = `${copy.settingsTitle} › ${copy.settingsRouting} › ${copy.settingsRouterCalibrate}`
     let initial: string | undefined
     for (;;) {
       const router = routerSettings(this.service?.describe() ?? [])
@@ -1040,11 +1041,11 @@ export class Preferences implements RecentModels {
     }
   }
 
-  /** Advanced: schema fields, sharing the Agent section's model and router pickers. */
+  /** Advanced: schema fields, sharing the Agent section's model pickers and the Routing section's router pickers. */
   private advanced(copy: TuiCopy, descriptors: readonly SettingsDescriptor[], session: PanelSession,
     interactions: Interactions): readonly Section[] {
-    const modelRows = new Map(this.subagentModelRows(copy, descriptors, session, interactions)
-      .map(row => [row.key, row]))
+    const modelRows = new Map([...this.subagentModelRows(copy, descriptors, session, interactions),
+      ...this.routingRows(copy, descriptors, session, interactions)].map(row => [row.key, row]))
     const sections = descriptors
       .filter(descriptor => descriptor.ns !== SETTINGS_NAMESPACE)
       .map(descriptor => {

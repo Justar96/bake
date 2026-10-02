@@ -101,7 +101,7 @@ const history = (count: number) => appendTranscript(emptyTranscript,
 const caret = (lines: readonly string[]) => lines.findIndex(line => line.includes('▌'))
 const snapshot = (lines: readonly string[]) => `${lines.map((line, index) => `${String(index).padStart(2, '0')} |${line}|`).join('\n')}\n`
 
-it.each(['en', 'zh'] as const)('pages history without moving the composer, holds appends, and resumes following (%s)', async locale => {
+it.each(['en'] as const)('pages history without moving the composer, holds appends, and resumes following (%s)', async locale => {
   let committed = history(80)
   const copy = dictionaries[locale]
   const view = await mount({ committed, copy })
@@ -178,7 +178,7 @@ it('keeps bracketed paste owned while a fullscreen sheet is open', async () => {
   expect(view.stdout.chunks.join('')).not.toContain('\x1b[?2004l')
 })
 
-it.each(['en', 'zh'] as const)('offers the way back to the latest output and marks output that arrived below (%s)', async locale => {
+it.each(['en'] as const)('offers the way back to the latest output and marks output that arrived below (%s)', async locale => {
   const copy = dictionaries[locale]
   let committed = history(80)
   const view = await mount({ committed, copy })

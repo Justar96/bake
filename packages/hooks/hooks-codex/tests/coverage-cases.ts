@@ -92,6 +92,17 @@ export function defineCoverageCases(groups: CoverageGroup | readonly CoverageGro
         .toEqual(['turn/start', 'hook/invoked', 'hook/result', 'turn/end'])
     })
 
+    it('UserPromptSubmit {"continue":false} blocks the prompt without a step', async () => {
+      const d = dir()
+      hooks(d, { UserPromptSubmit: [{ hooks: [{ type: 'command', command: sh(d, 's.sh', '#!/usr/bin/env bash\necho \'{"continue":false,"stopReason":"not now"}\'\n') }] }] })
+      const adapter = new MockAdapter([textResponse('no')])
+      const ctx = await harness(join(d, 'hooks.json'), adapter)
+      const agent = await ctx.agentLoop.create(SessionId('a1'), { provider: 'mock', model: 'mock' })
+      agent.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } })); await waitForIdle(ctx, agent)
+      expect(adapter.requests).toHaveLength(0)
+      expect(events(agent).findLast(e => e.type === 'turn/end')).toMatchObject({ data: { reason: { kind: 'blocked' } } })
+    })
+
     it('UserPromptSubmit additionalContext is injected; a no-op hook proceeds', async () => {
       const d = dir()
       hooks(d, { UserPromptSubmit: [{ hooks: [{ type: 'command', command: sh(d, 'c.sh', '#!/usr/bin/env bash\necho \'{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"ctx-x"}}\'\n') }] }] })
@@ -151,6 +162,21 @@ export function defineCoverageCases(groups: CoverageGroup | readonly CoverageGro
   })
 
   if (selected.has('post-tool')) describe('hooks-codex coverage — post-tool and session context mapping', () => {
+    it('PostToolUse {"continue":false} replaces the result with the stop reason and the turn continues', async () => {
+      const d = dir()
+      hooks(d, { PostToolUse: [{ hooks: [{ type: 'command', command: sh(d, 's.sh', '#!/usr/bin/env bash\necho \'{"continue":false,"stopReason":"output withheld"}\'\n') }] }] })
+      const adapter = new MockAdapter([toolCallResponse('c1', 'echo', {}), textResponse('done')])
+      const ctx = await harness(join(d, 'hooks.json'), adapter)
+      ctx.tools.register(defineContentToolFixture({ name: 'echo', description: 'e', parameters: {}, async execute() { return [{ type: 'text', text: 'secret' }] } }))
+      const agent = await ctx.agentLoop.create(SessionId('a1'), { provider: 'mock', model: 'mock' })
+      agent.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } })); await waitForIdle(ctx, agent)
+      const result = events(agent).find(e => e.type === 'tool/result')
+      expect(result?.type === 'tool/result' && result.data.message.content[0]).toMatchObject({ isError: true, content: [{ type: 'text', text: 'output withheld' }] })
+      expect(adapter.requests).toHaveLength(2)
+      expect(JSON.stringify(adapter.requests[1]!.messages)).not.toContain('secret')
+      expect(events(agent).findLast(e => e.type === 'turn/end')).toMatchObject({ data: { reason: { kind: 'completed' } } })
+    })
+
     it('folds the bridge PostToolUse context onto a downstream canonical value replacement', async () => {
       const d = dir()
       hooks(d, { PostToolUse: [{ hooks: [{ type: 'command', command: sh(d, 'pc.sh', '#!/usr/bin/env bash\necho \'{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"bridge-note"}}\'\n') }] }] })
@@ -400,10 +426,9 @@ export function defineCoverageCases(groups: CoverageGroup | readonly CoverageGro
       expect(events(agent).some(e => e.type === 'hook/invoked')).toBe(false)
     })
 
-    it('a {"continue":false} hook is RECORDED as "stop" but does not halt the run (TODO(hook-continue-false))', async () => {
-    // Honoring `continue:false` is deferred — the extension points have no hard-halt
-    // primitive. Assert the LOG records the halt request AND that the run is not
-    // actually halted (the tool still runs, the turn completes).
+    it('a PreToolUse {"continue":false} hook is RECORDED as "stop" and the call still runs, as in Codex', async () => {
+    // Codex parses `continue:false` on PreToolUse but does not support it there, so
+    // the log records the request while the tool runs and the turn goes on.
       const d = dir()
       hooks(d, { PreToolUse: [{ hooks: [{ type: 'command', command: sh(d, 's.sh', '#!/usr/bin/env bash\necho \'{"continue":false,"stopReason":"halt"}\'\n') }] }] })
       const adapter = new MockAdapter([toolCallResponse('c1', 'Bash', { command: 'x' }), textResponse('done')])
@@ -414,7 +439,8 @@ export function defineCoverageCases(groups: CoverageGroup | readonly CoverageGro
       agent.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } })); await waitForIdle(ctx, agent)
       const res = events(agent).find(e => e.type === 'hook/result')
       expect(res?.type === 'hook/result' && res.data.decision).toBe('stop') // recorded
-      expect(ran).toBe(true) // NOT honored: the tool still ran (halt is deferred)
+      expect(ran).toBe(true) // Codex ignores the stop here, so the tool still ran
+      expect(adapter.requests).toHaveLength(2)
     })
 
     it('PreToolUse deny with EMPTY stderr uses the default reason (?? right arm)', async () => {
@@ -496,6 +522,17 @@ export function defineCoverageCases(groups: CoverageGroup | readonly CoverageGro
   })
 
   if (selected.has('payload')) describe('hooks-codex coverage — continuation, payload, and cwd mapping', () => {
+    it('a Stop hook {"continue":false} overrides its own block and lets the turn stop', async () => {
+      const d = dir()
+      hooks(d, { Stop: [{ hooks: [{ type: 'command', command: sh(d, 's.sh', '#!/usr/bin/env bash\necho \'{"decision":"block","reason":"keep going","continue":false}\'\n') }] }] })
+      const adapter = new MockAdapter([textResponse('one'), textResponse('two')])
+      const ctx = await harness(join(d, 'hooks.json'), adapter)
+      const agent = await ctx.agentLoop.create(SessionId('a1'), { provider: 'mock', model: 'mock' })
+      agent.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } })); await waitForIdle(ctx, agent)
+      expect(adapter.requests).toHaveLength(1)
+      expect(events(agent).findLast(e => e.type === 'turn/end')).toMatchObject({ data: { reason: { kind: 'completed' } } })
+    })
+
     it('a blocking Stop hook with EMPTY stderr still forces continuation (no reason required)', async () => {
     // Regression: an exit-2 Stop hook with no stderr yields decision 'deny' +
     // reason undefined; the turn must STILL force-continue, not silently stop.

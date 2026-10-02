@@ -216,12 +216,6 @@
       "path": "./packages/jobs/tool-jobs/tsconfig.json"
     },
     {
-      "path": "./packages/llm/deepseek-llm-api-extensions/tsconfig.json"
-    },
-    {
-      "path": "./packages/llm/llm-deepseek/tsconfig.json"
-    },
-    {
       "path": "./packages/llm/llm-pi-ai/tsconfig.json"
     },
     {
@@ -229,9 +223,6 @@
     },
     {
       "path": "./packages/llm/llm/tsconfig.json"
-    },
-    {
-      "path": "./packages/llm/plugin-package-inventory-deepseek/tsconfig.json"
     },
     {
       "path": "./packages/llm/token-meter/tsconfig.json"
@@ -247,6 +238,9 @@
     },
     {
       "path": "./packages/preset/persona/tsconfig.json"
+    },
+    {
+      "path": "./packages/ptc-runtime/ptc-runtime-codemode/tsconfig.json"
     },
     {
       "path": "./packages/ptc-runtime/ptc-runtime-node/tsconfig.json"
@@ -298,9 +292,6 @@
     },
     {
       "path": "./packages/session/session-format/tsconfig.json"
-    },
-    {
-      "path": "./packages/session/session-log-deepseek/tsconfig.json"
     },
     {
       "path": "./packages/session/session-persistence-jsonl/tsconfig.json"

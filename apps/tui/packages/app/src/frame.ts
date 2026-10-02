@@ -10,14 +10,11 @@
  */
 
 import type { FrameStyle } from '@dsh-tui/ui/layout.ts'
-import type { Locale } from '@dsh-tui/ui/copy.ts'
 
 /** Everything the decision reads, so it can be made without a terminal. */
 export interface FrameRequest {
   /** The profile's choice, or `auto` to resolve it from the terminal. */
   readonly configured: FrameStyle | 'auto'
-  /** The interface locale, which is the fallback signal when the environment names none. */
-  readonly locale: Locale
   /** Process environment; only the locale and terminal-type variables are read. */
   readonly env: Readonly<Partial<Record<string, string>>>
   /** The operating system, as `process.platform` names it. */
@@ -103,5 +100,5 @@ export function resolveFrame(request: FrameRequest): FrameStyle {
       if (term === undefined || term === '' || term === 'dumb') return 'classic'
     }
   }
-  return request.locale === 'zh' ? 'classic' : 'round'
+  return 'round'
 }

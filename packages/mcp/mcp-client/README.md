@@ -5,8 +5,6 @@ kind: "package-reference"
 
 # @deepseek-ai/dsh-mcp-client
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 `dsh-mcp-client` lets the model use tools and resources from external Model Context Protocol (MCP) servers. Configure one server per entry; its tools use names such as `mcp__github__create_issue`. No server is enabled by default. Shipped profiles already provide [shared resource discovery and reading](../mcp-resources/README.md). An empty caller scope adds no MCP tools or prompt text. Server instructions join the logged system prompt as literal text; MCP prompt templates are unsupported. Slow or crashed servers can delay startup or fail calls until recovery.
@@ -25,7 +23,7 @@ English | [中文](README.zh.md)
 <a id="use-this-package"></a>
 ## Use this package
 
-Add `dsh-mcp-client` when the model should call tools from an external MCP server as if they were native. Give each server a unique name and transport. The official SDK selects the 2026-07-28 protocol when available and falls back to supported legacy revisions. Choose stdio for a local program and Streamable HTTP for a service; stdio negotiation starts a temporary probe process before the serving process.
+Add `dsh-mcp-client` when the model should call tools from an external MCP server as if they were native. Give each server a unique name and transport. The bridge uses the [pi-mcp](https://github.com/earendil-works/pi) client, which negotiates MCP protocol revisions up to 2025-11-25. Choose stdio for a local program and Streamable HTTP for a service. A stdio server runs as one process in its own process group, and closing the connection ends that group.
 
 ### Minimal configuration
 
@@ -76,8 +74,8 @@ The model sees each tool under a stable server-qualified name: `mcp__<serverName
 
 - Two servers publishing the same tool name (for example `search`) coexist under their own namespaces.
 - Two entries using the same server name: the later one fails to load with a clear error.
-- A server that lists the same tool twice gets its tool list rejected as invalid, and the previous tool set stays active.
-- The SDK owns discovery pagination and its page limit. A discovery failure preserves the previous tools; malformed cursor chains follow the SDK's behavior.
+- A server that lists the same tool twice, or lists a tool that violates the MCP 2025-11-25 tool schema, gets its tool list rejected as invalid, and the previous tool set stays active.
+- Discovery follows `nextCursor` for at most 1,000 pages and rejects a repeated cursor. A discovery failure, including either cursor error, preserves the previous tools.
 - An update that conflicts with an already-registered tool name is rejected entirely — you never get a partial tool set from that server.
 
 ### Calling tools and reading results
@@ -118,24 +116,25 @@ This section explains the design decisions behind the bridge and points at the c
 | [`src/connection.ts`](src/connection.ts) | Connection supervisor: client generations, reconnect policy, attempt budget, disposal |
 | [`src/server-context.ts`](src/server-context.ts) | Resource-provider registration and literal server instructions |
 | [`src/tools.ts`](src/tools.ts) | Tool bridge: discovery, naming, registration swap, execution, image projection |
+| [`src/protocol.ts`](src/protocol.ts) | MCP 2025-11-25 schema checks and field order for tool definitions, tool results, and resource results |
 | [`src/transport.ts`](src/transport.ts) | Transport factory: stdio spawn with scrubbed env, Streamable HTTP |
 | — | No runtime invariant companion is published; MCP generations contribute through the tool registry, but the bridge exposes no independent server-to-tool snapshot after an asynchronous resync. |
 
-The exported `createMcpToolDefinition(ctx, options)` adapts an upstream tool schema and raw-result callback to the same canonical values, errors, and durable image projection. Each callback receives the exact `ToolExecution`, including its Agent and cancellation signal; SDK spec-type validation checks its result before projection. Callers own registration, cancellation deadlines, and provider teardown. The native Cua Driver provider uses this adapter without opening an MCP transport.
+The exported `createMcpToolDefinition(ctx, options)` adapts an upstream tool schema and raw-result callback to the same canonical values, errors, and durable image projection. Each callback receives the exact `ToolExecution`, including its Agent and cancellation signal; the bridge checks its result against the MCP tool-result schema before projection. Callers own registration, cancellation deadlines, and provider teardown.
 
 ### Lifecycle and sync
 
-`apply` resolves the reconnect policy, reserves the `serverName` inside the current registration scope, starts the supervisor, and awaits the initial connection plus discovery. Independent Agent scopes may reuse the same namespace because their tools and transports are isolated; a duplicate inside one scope fails at load. The supervisor serializes every sync — initial, notification, and reconnect — through one queue so two syncs can never interleave their dispose-previous/register-next swap. Disposal cancels pending reconnects, closes the negotiating transport or attached client, waits for the in-flight attempt and queued syncs to quiesce, and unregisters the current generation.
+`apply` resolves the reconnect policy, reserves the `serverName` inside the current registration scope, starts the supervisor, and awaits the initial connection plus discovery. Independent Agent scopes may reuse the same namespace because their tools and transports are isolated; a duplicate inside one scope fails at load. The supervisor serializes every sync — initial, notification, and reconnect — through one queue so two syncs can never interleave their dispose-previous/register-next swap. Disposal cancels pending reconnects, closes the current client and its transport, waits for the in-flight attempt and queued syncs to quiesce, and unregisters the current generation.
 
-The SDK receives tool-list changes through legacy notifications or a modern subscription. The supervisor queues each re-sync; a fetch failure keeps the previous generation registered, while a registration conflict rolls back the attempted generation. Each outage shares one attempt budget: after `maxAttempts` consecutive failures the tools are unregistered and reconnection stops, and a connection that stays up past `maxDelayMs` resets the budget.
+A server that advertises `tools.listChanged` announces tool-list changes with `notifications/tools/list_changed`; the same notification from any other server is ignored. The supervisor queues each re-sync; a fetch failure keeps the previous generation registered, while a registration conflict rolls back the attempted generation. Each outage shares one attempt budget: after `maxAttempts` consecutive failures the tools are unregistered and reconnection stops, and a connection that stays up past `maxDelayMs` resets the budget.
 
 ### Tool execution internals
 
-A tool call uses the SDK with the raw name, complete tool definition, JSON arguments, abort signal, and configured timeout. The SDK owns protocol validation, advertised output-schema validation, and modern request headers. Canonical success is `{ content: JsonValue[], structuredContent? }`, preserving valid MCP JSON blocks for programmatic and PTC mode callers. An MCP `isError` result throws before image persistence. The bridge validates each image batch before saving it; a refusal projects every image as diagnostic text.
+A tool call sends the raw name, JSON arguments, abort signal, and configured timeout through pi-mcp. The bridge checks the result against the MCP 2025-11-25 tool-result schema and rebuilds each content block in schema field order without unknown fields, so recorded values match what earlier releases stored for the same server output. A tool that advertises an output schema must return structured content; ToolRuntime validates that content only against output schemas it supports. Canonical success is `{ content: JsonValue[], structuredContent? }`, preserving valid MCP JSON blocks for programmatic and PTC mode callers. An MCP `isError` result throws before image persistence. The bridge validates each image batch before saving it; a refusal projects every image as diagnostic text.
 
 ### Environment scrubbing (stdio)
 
-The child environment starts from the subprocess seam's `scrubbedParentEnv()` — ambient names matching `/KEY|PASSWORD|SECRET|TOKEN/i` and ambient `DSH_*` names are dropped — and the configured `env` merges on top, so explicit overrides survive. The MCP SDK owns the actual spawn; this package shares the scrub definition, not the spawn path.
+The child environment starts from the subprocess seam's `scrubbedParentEnv()` — ambient names matching `/KEY|PASSWORD|SECRET|TOKEN/i` and ambient `DSH_*` names are dropped — and the configured `env` merges on top, so explicit overrides survive. pi-mcp owns the actual spawn and receives this environment with parent-environment inheritance disabled; this package shares the scrub definition, not the spawn path. The child inherits stderr and runs in its own process group. Closing it ends stdin, sends SIGTERM to the group after 500 ms and SIGKILL 2 s later; the supervisor waits up to 5 s for the process to close before it reports incomplete shutdown.
 
 </details>
 
@@ -161,7 +160,7 @@ Read these pages when the package-level contract is not enough. They move from t
 
 #### What the model sees
 
-After discovery succeeds, SDK-admitted MCP tools appear as native tools named `mcp__<serverName>__<rawName>` (or their deterministic normalized form), with the server description and input schema. A re-sync replaces the generation; disposal or an exhausted reconnect budget removes it. A server without the tools capability connects with an empty tool set.
+After discovery succeeds, MCP tools that pass the MCP 2025-11-25 tool schema appear as native tools named `mcp__<serverName>__<rawName>` (or their deterministic normalized form), with the server description and input schema. The input schema lists `type`, `properties`, and `required` first, then the server's other keywords in server order. A re-sync replaces the generation; disposal or an exhausted reconnect budget removes it. A server without the tools capability connects with an empty tool set.
 
 #### Token effect
 
@@ -207,10 +206,12 @@ Unchanged instructions retain identical prompt text. Updated or removed instruct
 These limits describe what you cannot do with this plugin and when it needs operational attention. They are current package constraints, not a comparison with other MCP clients or a task backlog.
 
 - **Resources are read on demand** — shipped profiles provide the [shared resource service](../mcp-resources/README.md); resource subscriptions and MCP prompt templates are unsupported.
-- **Startup and discovery timeouts are inherited from the MCP SDK** — the plugin exposes no separate connection or discovery timeout. Negotiation and discovery use the SDK's 60-second request default; discovery also uses its page limit. Plugin unload closes the transport to interrupt pending startup requests before awaiting teardown.
-- **Reconnect handles failed negotiation and transport close** — a failed initial probe or crashed stdio child uses the configured reconnect budget. Once HTTP is connected, request failures use the SDK transport's recovery rather than respawning the connection.
+- **Protocol revisions stop at 2025-11-25** — the 2026-07-28 revision is not negotiated, so its discovery probe, result cache hints, and `Mcp-Param` request headers are absent.
+- **OAuth authorization is unsupported** — the bridge sends only the configured `headers`; an HTTP server that answers 401 fails the connection attempt.
+- **Startup and discovery timeouts are fixed** — the plugin exposes no separate connection or discovery timeout. Negotiation and each discovery request use a 60-second request timeout, and discovery stops after 1,000 pages. Plugin unload closes the transport to interrupt pending startup requests before awaiting teardown.
+- **Reconnect handles failed negotiation and transport close** — a failed initialization or crashed stdio child uses the configured reconnect budget. Once HTTP is connected, a failed request fails only its call; pi-mcp resumes dropped event streams, and the supervisor does not replace the connection, so an expired HTTP session needs a plugin reload.
 - **Image is the only durable rich-result bridge** — PNG, JPEG, WebP, and GIF enter Native context after exact capability proof. Audio and embedded-resource payloads remain execution-local with explicit diagnostics, while resource links preserve only their name and URI as text.
-- **Invalid protocol results or output schemas fail through the SDK** — the bridge does not accept legacy `toolResult` substitutes or bypass advertised schema validation.
+- **Invalid protocol results fail the call** — the bridge does not accept legacy `toolResult` substitutes or non-object structured content. Structured content is validated only against output schemas ToolRuntime supports; content for any other advertised output schema is kept as JSON without validation.
 - **Task-required MCP tools are rejected at call time** — a tool that requires the task-based execution extension throws instead of bridging; the extension is not implemented.
 
 <a id="dev-note"></a>
@@ -222,9 +223,10 @@ These limits describe what you cannot do with this plugin and when it needs oper
 This Dev Note is working context for maintainers: open design questions and directions that are not decided. It is explicitly non-authoritative — shipped behavior, limits, and accepted rationale live in the sections above, the package code, and the linked Agent Notes.
 
 - The public-name algorithm is a v1 contract pinned by tests; changing it after release would break session history and permission rules.
-- An explicit DSH-owned connection and discovery timeout is an open direction; the SDK's 60-second default bounds startup requests.
-- Reconnect ownership for Streamable HTTP is open: per-request retry is SDK behavior, and the supervisor could also own the HTTP generation.
+- An explicit DSH-owned connection and discovery timeout is an open direction; a fixed 60-second request timeout bounds startup requests.
+- Reconnect ownership for Streamable HTTP is open: a failed request fails only its call, and the supervisor could also own the HTTP generation.
 - MCP prompt templates need a separate user-selection and invocation mechanism.
-- The pinned MCP SDK is still evolving; a breaking upstream change requires updating the bridge.
+- OAuth could build on `@earendil-works/pi-mcp/oauth`: an `oauth` config block, durable token storage through the credentials service, a user-facing authorization step, and reconnect handling for authorization-required errors.
+- pi-mcp is a young client; a breaking upstream change requires updating the bridge.
 
 </details>

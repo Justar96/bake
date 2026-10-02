@@ -1,7 +1,5 @@
 # Permission Presets
 
-English | [中文](permission-presets.zh.md)
-
 The permission-preset layer of [dsh-permission-presets](../../packages/interaction/permission-presets) (`ctx.permissionPresets`) combines [sandbox mode](sandbox.md) and [approval policy](approval.md) into named presets. Its table owns future-session defaults; the layer itself does not enforce policy. The [package README](../../packages/interaction/permission-presets/README.md) owns composition status and limitations.
 
 Source: [`packages/interaction/permission-presets/src/index.ts`](../../packages/interaction/permission-presets/src/index.ts)

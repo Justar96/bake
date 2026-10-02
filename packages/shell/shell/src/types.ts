@@ -76,6 +76,14 @@ export interface ShellExecRequest {
   dshEnv?: DshEnvironment | undefined
   /** Fully resolved per-call sandbox policy; sandboxing executors default it. */
   sandboxPolicy?: SandboxExecutionPolicy | undefined
+  /**
+   * Display-only receiver for a foreground run's live output. While the
+   * command runs, executors poll its captured streams and pass the newest
+   * tail of their combined text, stderr after stdout, each time it grows.
+   * Calls stop before {@link ShellExecutor.run} resolves; background
+   * processes ignore it. The model-facing result is unaffected.
+   */
+  onOutput?: ((tail: string) => void) | undefined
 }
 
 /**
@@ -107,6 +115,8 @@ export interface ShellExecSpec {
   dshEnv?: DshEnvironment | undefined
   /** Resolved sandbox policy; ignored by executors that do not confine. */
   sandboxPolicy: SandboxExecutionPolicy | undefined
+  /** Live-output receiver carried through from {@link ShellExecRequest.onOutput}. */
+  onOutput?: ((tail: string) => void) | undefined
 }
 
 /** The outcome of a foreground run, including timeout during preparation. */

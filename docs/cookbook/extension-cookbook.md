@@ -1,7 +1,5 @@
 # Cookbook: extension plugin shapes
 
-English | [中文](extension-cookbook.zh.md)
-
 Reference patterns for harness extensions. The snippets omit imports and helper implementations and are not copy-paste-complete. For concrete authoring paths, see the [package checklist](adding-a-package.md), [first-tool tutorial](../user/develop/basic/tool.md), [tool reference](adding-a-tool.md), [LLM adapter guide](adding-an-llm-adapter.md), and [Session format version tutorial](adding-a-session-format-version.md); the [architecture](../architecture.md) owns the system and extension-point map.
 
 ## A tool plugin
@@ -126,5 +124,5 @@ Every product feature maps to a listener on a documented extension point — the
 | UI (GUI; CLI emits JSONL) | listen to `agent/assistant-stream` for live chunks and `session/event` for durable settlements, boundaries, and tool activity; input → `followup()` |
 | Web Client Chat business node | register a `ConversationNodeDefinition` and `conversation.chat.node` keyed renderer |
 | SessionTelemetryBackend / replayable trace | `session/event` → JSONL; replay = `sessions.create(id, { seed })` |
-| Model adapters | `LlmAdapter` subclass via `registerAdapter` (`dsh-llm-deepseek`, `dsh-llm-pi-ai`) |
+| Model adapters | `LlmAdapter` subclass via `registerAdapter` (`dsh-llm-pi-ai`) |
 | Plugin hot-reload | every registration is a `ctx.effect` → vendored HMR just works |

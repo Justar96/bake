@@ -339,6 +339,9 @@ export function project(event: SessionEvent, projector: Projector): Projection {
             text: `${reason.error.code}: ${reason.error.message}${hint === undefined ? '' : `\n${hint}`}` }]
         }
         case 'aborted':
+          // A hook halt carries why it stopped the turn; other causes read as an interruption.
+          return [{ kind: 'notice', placement: 'turn-end', tone: 'warn',
+            text: reason.reason?.kind === 'hook' ? `${copy.turnHalted}: ${reason.reason.reason}` : copy.cancelled }]
         case 'interrupted':
           return [{ kind: 'notice', placement: 'turn-end', tone: 'warn', text: copy.cancelled }]
         case 'blocked':

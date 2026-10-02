@@ -5,8 +5,6 @@ kind: "package-group"
 
 # web/ — web access capability family
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 The `web/` packages let models search the public web and fetch HTTP(S) pages through `web_search` and `web_fetch`. Search providers currently include Exa and DeepSeek; the HTTP fetch provider handles page retrieval. Availability and limits depend on the configured provider.

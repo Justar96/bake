@@ -1,7 +1,5 @@
 # Bake architecture
 
-English | [中文](architecture.zh.md)
-
 Bake is a terminal application over a Cordis plugin runtime. Read this map before changing shared packages; the [Cordis primer](cordis-primer.md) explains service injection, typed events, and reversible effects.
 
 ## Application launch

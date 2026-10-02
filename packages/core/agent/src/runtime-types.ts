@@ -8,7 +8,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Scoped } from '@deepseek-ai/dsh-scope'
 import type {
-  LlmAttemptId, LlmCallConfig, LlmFailure, MessageId, ReasoningEffortId, ResolvedRetryPolicy, StreamChunk,
+  LlmAttemptId, LlmCallConfig, LlmFailure, MessageId, ReasoningEffortId, ResolvedRetryPolicy, StreamChunk, ToolCallId,
 } from '@deepseek-ai/dsh-llm'
 import type { AgentCancelCause, Session, SessionSeq, UserMessage } from '@deepseek-ai/dsh-session'
 export type { AgentCancelCause } from '@deepseek-ai/dsh-session'
@@ -159,6 +159,25 @@ export type AssistantStreamFrame =
       }
       | { readonly kind: 'abandoned' }
   }
+
+/**
+ * One process-local progress snapshot a running tool published. Each
+ * snapshot replaces the previous one for its call; it is display-only, never
+ * logged, and never part of a model request.
+ */
+export interface ToolProgress {
+  /**
+   * The newest output the call has produced so far, oldest first. The
+   * runtime keeps at most {@link TOOL_PROGRESS_MAX_CHARS} of its tail.
+   */
+  readonly output: string
+}
+
+/** Longest {@link ToolProgress.output} the runtime publishes; a longer snapshot keeps its tail. */
+export const TOOL_PROGRESS_MAX_CHARS = 8192
+
+/** Shortest interval between two `agent/tool-progress` publications for one call. */
+export const TOOL_PROGRESS_INTERVAL_MS = 100
 
 declare module './types.ts' {
   interface Agent {
@@ -368,6 +387,38 @@ declare module '@deepseek-ai/cordis' {
      * @mode emit
      */
     'agent/assistant-stream'(this: Scoped<Agent>, payload: { agent: Agent; frame: AssistantStreamFrame }): void
+    /**
+     * Process-local progress of one model-requested tool call whose body is
+     * running. The loop coalesces a call's snapshots to at most one per
+     * {@link TOOL_PROGRESS_INTERVAL_MS}, publishing the newest, and drops every
+     * snapshot once the call's dispatch settles, so none follows its
+     * `agent/tool-executed`. Nothing here is logged or model-visible; the
+     * call's `tool/result` replaces it.
+     * @param payload.agent - the agent whose step made the call.
+     * @param payload.turn - the turn containing the call.
+     * @param payload.step - the step that made the call.
+     * @param payload.callId - the model's id for the call.
+     * @param payload.progress - the newest snapshot, replacing earlier ones.
+     * Scope-filtered dispatch (`@deepseek-ai/dsh-scope`): agent-scoped listeners receive only that agent.
+     * @mode emit
+     */
+    'agent/tool-progress'(this: Scoped<Agent>, payload: { agent: Agent; turn: number; step: number; callId: ToolCallId; progress: ToolProgress }): void
+    /**
+     * One started tool call finished executing. The loop commits results in
+     * model order, so a call that finishes before an earlier sibling waits
+     * for it before its `tool/result` is logged; this process-local signal
+     * arrives as each call finishes. `isError` is the dispatch outcome before
+     * `tools/post-execute`, which may still replace it; the logged
+     * `tool/result` is authoritative.
+     * @param payload.agent - the agent whose step made the call.
+     * @param payload.turn - the turn containing the call.
+     * @param payload.step - the step that made the call.
+     * @param payload.callId - the model's id for the call.
+     * @param payload.isError - whether the dispatch outcome was an error.
+     * Scope-filtered dispatch (`@deepseek-ai/dsh-scope`): agent-scoped listeners receive only that agent.
+     * @mode emit
+     */
+    'agent/tool-executed'(this: Scoped<Agent>, payload: { agent: Agent; turn: number; step: number; callId: ToolCallId; isError: boolean }): void
     /**
      * The turn is about to close: the model owes no response (no live tool
      * calls, no fresh steering). Awaited before the boundary commits — a

@@ -14,7 +14,7 @@
 
 import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
-import { specTypeSchemas, type Client, type ImageContent } from '@modelcontextprotocol/client'
+import type { ImageContent, McpClient } from '@earendil-works/pi-mcp'
 import type { Context } from '@deepseek-ai/cordis'
 import { isImageAdmissionError } from '@deepseek-ai/dsh-attachment'
 import type { AttachmentStore, ImageAttachmentRef, ImageMediaType, SaveImageAttachment } from '@deepseek-ai/dsh-attachment'
@@ -23,6 +23,7 @@ import type { ToolDefinition, ToolExecution, ToolExecutionResult } from '@deepse
 import { assertSupportedJsonSchema } from '@deepseek-ai/dsh-tools'
 import type { JsonSchemaNode } from '@deepseek-ai/dsh-tools'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
+import { parseCallToolResult, parseListedTool, type ListedTool } from './protocol.ts'
 
 /** Resolved options relevant to tool bridging. */
 export interface ToolBridgeOptions {
@@ -91,10 +92,11 @@ export function publicToolName(serverName: string, rawName: string): string {
  *
  * Two phases keep the swap safe:
  *
- * 1. Fetch: let the SDK aggregate `tools/list` and build the full next
- *    generation of `ToolDefinition`s under public names. Any failure here
- *    (network error or duplicate raw name) rejects
- *    and leaves the previous generation registered untouched.
+ * 1. Fetch: let pi-mcp aggregate `tools/list`, check each tool against the
+ *    MCP schema, and build the full next generation of `ToolDefinition`s
+ *    under public names. Any failure here (network error, invalid tool, or
+ *    duplicate raw name) rejects and leaves the previous generation
+ *    registered untouched.
  * 2. Swap: dispose the previous generation, register the new one. A registry
  *    conflict here can only mean a foreign registration squats on this
  *    server's `mcp__<serverName>__` namespace — the partial generation is
@@ -102,7 +104,7 @@ export function publicToolName(serverName: string, rawName: string): string {
  *    synchronization may propagate the conflict so its parent transaction
  *    rejects; ordinary clients and later re-syncs return an empty map.
  *
- * @param client - Connected MCP Client instance used to list and call tools.
+ * @param client - Connected MCP client used to list and call tools.
  * @param ctx - Cordis context providing the `tools` service for registration.
  * @param opts - Bridge options: server namespace and per-call timeout.
  * @param previous - Disposer map from the prior sync generation; disposed
@@ -111,17 +113,23 @@ export function publicToolName(serverName: string, rawName: string): string {
  *   disposers — the exact set of live registrations owned by this server.
  */
 export async function syncTools(
-  client: Client,
+  client: McpClient,
   ctx: Context,
   opts: ToolBridgeOptions,
   previous: ToolDisposers,
 ): Promise<ToolDisposers> {
   // Phase 1: fetch and build the next generation without touching the registry.
   const definitions = new Map<string, ToolDefinition>()
-  const response = client.getServerCapabilities()?.tools === undefined
-    ? { tools: [] }
-    : await client.listTools(undefined, { cacheMode: 'refresh' })
-  for (const tool of response.tools) {
+  const listed = client.serverCapabilities?.tools === undefined ? [] : await client.listTools()
+  const tools: ListedTool[] = []
+  for (const [index, value] of listed.entries()) {
+    try {
+      tools.push(parseListedTool(value, `tools[${index}]`))
+    } catch (error) {
+      throw new Error(`mcp-client(${opts.serverName}): server listed an invalid tool: ${(error as Error).message}`)
+    }
+  }
+  for (const tool of tools) {
     const publicName = publicToolName(opts.serverName, tool.name)
     if (definitions.has(publicName)) {
       throw new Error(
@@ -136,8 +144,9 @@ export async function syncTools(
       outputSchema: tool.outputSchema,
       taskRequired: tool.execution?.taskSupport === 'required',
       call: (args, execution) => client.callTool(
-        { name: tool.name, arguments: args },
-        { signal: execution.signal, timeout: opts.toolCallTimeoutMs, toolDefinition: tool },
+        tool.name,
+        args,
+        { signal: execution.signal, timeoutMs: opts.toolCallTimeoutMs },
       ),
     }))
   }
@@ -284,13 +293,19 @@ function createExecutor(
     // string/number/null). Fallback to {} lets the MCP server produce a
     // specific "missing required param" error the model can learn from.
     const argsObj = (typeof args === 'object' && args !== null ? args : {}) as Record<string, unknown>
-    const parsed = specTypeSchemas.CallToolResult['~standard'].validate(await options.call(argsObj, exec))
-    if (parsed.issues !== undefined) {
-      throw new Error(`Tool "${rawName}" returned an invalid MCP result: ${parsed.issues.map(issue => issue.message).join('; ')}`)
+    const raw = await options.call(argsObj, exec)
+    let result: ReturnType<typeof parseCallToolResult>
+    try {
+      result = parseCallToolResult(raw)
+    } catch (error) {
+      throw new Error(`Tool "${rawName}" returned an invalid MCP result: ${(error as Error).message}`)
     }
-    const result = parsed.value
+    // An advertised output schema obliges every successful result to carry structured content.
+    if (options.outputSchema !== undefined && result.structuredContent === undefined && result.isError !== true) {
+      throw new Error(`Tool ${rawName} has an output schema but did not return structured content`)
+    }
 
-    const content = result.content as unknown as JsonValue[]
+    const content = result.content
     const text = extractText(content, rawName)
 
     // MCP isError → throw so ToolRuntime produces an isError result for the model.
@@ -301,7 +316,7 @@ function createExecutor(
     const value: McpResult = {
       content,
       ...result.structuredContent !== undefined
-        ? { structuredContent: result.structuredContent as JsonValue }
+        ? { structuredContent: result.structuredContent }
         : {},
     }
     if (containsImage(content)) {

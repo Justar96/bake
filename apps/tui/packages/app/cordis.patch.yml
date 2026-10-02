@@ -76,7 +76,7 @@
   disabled: true
 - id: tool-subagent-fork
   disabled: true
-- id: workflow-ptc
+- id: workflow-ptc-runtime
   disabled: true
 - id: tool-workflow
   disabled: true
@@ -140,8 +140,8 @@
         preset: !!js ctx.tuiStartup.preset
         screen: !!js ctx.tuiStartup.screen
         # The composition knows which providers it mounted; the surface does
-        # not. `llm-deepseek` reads this reference (its `apiKeyEnv` default),
-        # so `/login` can set it; `provider` is the route it unlocks, which a
+        # not. `llm-pi-ai`'s `deepseek-official` route reads this reference
+        # (its `apiKeyEnv`), so `/login` can set it; `provider` is the route it unlocks, which a
         # first sign-in selects. A patch adding another provider adds its
         # reference here.
         credentialRefs:

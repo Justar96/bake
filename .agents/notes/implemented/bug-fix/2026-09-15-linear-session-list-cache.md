@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-15-linear-session-list-cache.zh.md)
-
 ## Problem
 
 The Client Session list retains row objects for React reference stability. Scanning the entire new list for every cached ID makes snapshot rebuilds quadratic, including first hydration because new rows enter the cache before cleanup. Thousands of Sessions can occupy the browser thread during list updates.

@@ -72,8 +72,6 @@ describe('statusFields', () => {
     expect(warm.forms[0]![1]!.color).toBe(CONTEXT_RAMP[2])
     const due = statusFields({ ...base, context: { used: 81_000, window: 100_000, compactAt: 80_000 } }, copy)[1]!
     expect(text(due.forms[0]!)).toBe('ctx ~81% (81k/100k) · compacts next')
-    expect(text(statusFields({ ...base, context: { used: 81_000, window: 100_000, compactAt: 80_000 } }, dictionaries.zh)[1]!.forms[0]!))
-      .toBe('上下文 ~81% (81k/100k) · 即将压缩')
   })
 
   it('names an update, and leaves out what the session has not reported', () => {

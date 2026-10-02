@@ -6,7 +6,7 @@ import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
 import GoalService, { GoalId } from '@deepseek-ai/dsh-goal'
 import type { GoalView } from '@deepseek-ai/dsh-goal'
-import { createUserMessage, LlmAdapter, LlmError  } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, LlmAdapter, LlmError, ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type { UserMessage } from '@deepseek-ai/dsh-session'
@@ -245,6 +245,27 @@ describe('same-session goal driving', () => {
 
     expect(goal).toMatchObject({ roundsStarted: 1, activation: 'disarmed' })
     expect(test.adapter.requests).toHaveLength(1)
+  })
+
+  it('keeps continuing after a max-tokens turn whose last reply recovered', async () => {
+    // The first reply loses its tool call at the limit; the loop's notice
+    // takes one more step, which finishes, so the turn ends max-tokens with a
+    // complete final reply.
+    const cutOffCall: StreamChunk[] = [
+      { type: 'block-start', index: 0, blockType: 'tool-call' },
+      { type: 'tool-call-delta', index: 0, id: ToolCallId('cut'), name: 'write', argumentsDelta: '{"path":' },
+      { type: 'finish', reason: { kind: 'max-tokens' } },
+    ]
+    const test = await harness([cutOffCall, textResponse('recovered'), textResponse('round two')])
+    test.ctx.goals.create(test.agent, { objective: 'recover and continue', maxGoalRounds: 2 })
+
+    const goal = await waitForGoal(test.ctx, test.agent, current => current?.phase === 'blocked')
+
+    expect(goal).toMatchObject({ roundsStarted: 2, blockedReason: { code: 'round-limit' } })
+    expect(test.adapter.requests).toHaveLength(3)
+    expect(test.agent.session.snapshotEvents().filter(event => event.type === 'turn/end')
+      .map(event => event.type === 'turn/end' ? event.data.reason.kind : undefined))
+      .toEqual(['max-tokens', 'completed'])
   })
 
   it('maps a downstream step rejection to blocked without entering the round', async () => {

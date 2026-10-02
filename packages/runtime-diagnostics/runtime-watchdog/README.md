@@ -5,8 +5,6 @@ kind: "package-reference"
 
 # @deepseek-ai/dsh-runtime-watchdog
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 This package leaves evidence when a long session slows down, grows toward V8's heap limit, or dies of a fatal error. It samples Node's event-loop delay, V8 heap use, and resident memory every ten seconds on an unreferenced timer. When the event loop stays delayed, or the heap reaches a high fraction of its limit, it appends a rate-limited JSON record to a file under `$DSH_HOME/diagnostics`. When Node runs with the flags that keep secrets and network data out of them, it also directs Node's fatal-error report, and optionally a near-limit heap snapshot, into that directory. It writes nothing to stdout, stderr, the session log, or model context. The `dsh` base bundle mounts it for every profile.

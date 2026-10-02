@@ -21,14 +21,33 @@ import type { Message, UserMessage } from '@deepseek-ai/dsh-llm'
 import type { TokenMeasurement, TokenMeter } from '@deepseek-ai/dsh-token-meter'
 import { SessionSeq, type Session, type SessionEvent } from '@deepseek-ai/dsh-session'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import { boundedSummarizationInput } from './bounded-input.ts'
+import { collectCheckpointContext, formatCheckpointContext } from './checkpoint-context.ts'
 import { frameSummary } from './summarizer.ts'
 import type { SummarizationInput, SummaryResult } from './summarizer.ts'
+import { isContextOverflow, summaryRetryDelay, waitForRetry } from './summary-retry.ts'
+import type { SummaryRetryPlan } from './summary-retry.ts'
 
 interface RegionDependencies {
   readonly meter: TokenMeter
   summarize(input: SummarizationInput, agent: Agent, signal?: AbortSignal): Promise<SummaryResult>
   recover(error: unknown, agent: Agent, sourceEventSeqs: readonly SessionSeq[], signal?: AbortSignal): boolean
+  /** Report a summary retry or bounded fallback; never throws. */
+  log(message: string): void
 }
+
+/**
+ * Most times a bounded transcript that still overflows is retried over the
+ * older half of its span, after the first bounded attempt over the whole span.
+ */
+export const MAX_SUMMARY_RANGE_HALVINGS = 3
+
+/**
+ * How a prepared span reaches the summarizer: `replay` reproduces the routed
+ * request's warm prefix; `transcript` is the bounded fallback after a
+ * context-window overflow.
+ */
+type SummaryForm = 'replay' | 'transcript'
 
 /** One validated inclusive span of current surface positions. */
 interface SurfaceSelection {
@@ -46,6 +65,11 @@ interface PreparedCompaction extends SurfaceSelection {
   readonly shadowedTokenCount: number
   /** Route-priced total of the selected span; the shrink comparison's unit. */
   readonly shadowedRouteTokenCount: number
+  /** The span's derived messages in surface order, without the system head. */
+  readonly regionMessages: readonly Message[]
+  readonly form: SummaryForm
+  /** Bounded attempts that halved the span so far. */
+  readonly halvings: number
   readonly input: SummarizationInput
 }
 
@@ -62,6 +86,8 @@ interface CompactionTransactionOptions {
   readonly flush?: () => Promise<void>
   /** Manual command that initiated this transaction, when present. */
   readonly sourceCommandId?: CommandId
+  /** Transient summary-failure retries; absent where a later step retries anyway. */
+  readonly retry?: SummaryRetryPlan
 }
 
 interface CompactionEntryState {
@@ -226,7 +252,7 @@ export async function compactSurfaceRegion(
       prepared,
       agent,
       compactionId,
-      options.sourceCommandId,
+      options,
       assertStable,
       signal,
     )
@@ -358,11 +384,13 @@ function validateSurfaceRegion(session: Session, start: SessionSeq, end: Session
   return { start, end, startIdx, endIdx, shadowedSeqs: nodes.slice(startIdx, endIdx + 1) }
 }
 
-/** Snapshot pricing and replay input for a validated surface range. */
+/** Snapshot pricing and summarizer input for a validated surface range. */
 function prepareCompaction(
   dependencies: RegionDependencies,
   session: Session,
   selection: SurfaceSelection,
+  form: SummaryForm = 'replay',
+  halvings = 0,
 ): PreparedCompaction {
   const measurement = dependencies.meter.measure(session)
   const selectedNodes = measurement.nodes.slice(selection.startIdx, selection.endIdx + 1)
@@ -370,6 +398,7 @@ function prepareCompaction(
     || selectedNodes.some((node, index) => node.seq !== selection.shadowedSeqs[index])) {
     throw new SurfaceChangedError('compaction: selected surface changed before summarization began')
   }
+  const regionMessages = deriveRegionMessages(session, selection.shadowedSeqs)
   return {
     ...selection,
     measurement,
@@ -380,21 +409,33 @@ function prepareCompaction(
     // route-priced `tokens` instead.
     shadowedTokenCount: selectedNodes.reduce((total, node) => total + node.heuristicTokens, 0),
     shadowedRouteTokenCount: selectedNodes.reduce((total, node) => total + node.tokens, 0),
-    input: buildSummarizationInput(session, selection.shadowedSeqs),
+    regionMessages,
+    form,
+    halvings,
+    input: form === 'replay'
+      ? buildSummarizationInput(session, regionMessages)
+      : boundedSummarizationInput(regionMessages),
   }
 }
 
-/** Run the summarizer and frame its replacement checkpoint. */
+/**
+ * Run the summarizer and frame its replacement checkpoint. A failed call is
+ * retried in this order: a transient model-request failure after a backoff,
+ * when the transaction carries a retry plan; a `compaction/summary-error`
+ * repair; then, for a context-window overflow, the bounded transcript of the
+ * same span, and after that of successively older halves of it.
+ */
 async function summarizeCompaction(
   dependencies: RegionDependencies,
   prepared: PreparedCompaction,
   agent: Agent,
   compactionId: CompactionResult['compactionId'],
-  sourceCommandId: CommandId | undefined,
+  options: CompactionTransactionOptions,
   assertStable: StabilityCheck,
   signal?: AbortSignal,
 ): Promise<SummarizedCompaction> {
   let summaryResult: SummaryResult
+  let retries = 0
   for (;;) {
     signal?.throwIfAborted()
     try {
@@ -402,15 +443,40 @@ async function summarizeCompaction(
       break
     } catch (error: unknown) {
       if (signal?.aborted === true) throw error
+      const delayMs = options.retry === undefined ? undefined : summaryRetryDelay(options.retry, error, retries + 1)
+      if (options.retry !== undefined && delayMs !== undefined) {
+        retries += 1
+        dependencies.log(
+          `compaction summary failed: ${errorMessage(error)}; retry ${retries} in ${Math.round(delayMs)} ms`,
+        )
+        const waited = await waitForRetry(delayMs, signal === undefined
+          ? [options.retry.lifetime]
+          : [options.retry.lifetime, signal])
+        signal?.throwIfAborted()
+        if (!waited) throw error
+        continue
+      }
       assertStable(dependencies, agent.session, prepared)
-      if (!dependencies.recover(error, agent, prepared.shadowedSeqs, signal)) throw error
-      prepared = prepareCompaction(dependencies, agent.session,
-        validateSurfaceRegion(agent.session, prepared.start, prepared.end))
+      if (dependencies.recover(error, agent, prepared.shadowedSeqs, signal)) {
+        prepared = prepareCompaction(dependencies, agent.session,
+          validateSurfaceRegion(agent.session, prepared.start, prepared.end), prepared.form, prepared.halvings)
+        continue
+      }
+      const bounded = isContextOverflow(error) ? prepareBounded(dependencies, agent.session, prepared) : undefined
+      if (bounded === undefined) throw error
+      dependencies.log(
+        'compaction summary exceeded the context window; retrying with a bounded transcript of '
+        + `${bounded.shadowedSeqs.length} of ${prepared.shadowedSeqs.length} surface nodes`,
+      )
+      prepared = bounded
     }
   }
   const checkpointMessage = createUserMessage({
-    content: frameSummary(summaryResult.summary),
-    source: compactCheckpointSource(compactionId, sourceCommandId),
+    content: frameSummary(
+      summaryResult.summary,
+      formatCheckpointContext(collectCheckpointContext(prepared.regionMessages)),
+    ),
+    source: compactCheckpointSource(compactionId, options.sourceCommandId),
   })
   // The checkpoint is text-only, so its fixed-heuristic price IS its route
   // price; comparing it against the span's route price asks the real
@@ -426,6 +492,39 @@ async function summarizeCompaction(
     ...summaryResult,
     checkpointMessage,
   }
+}
+
+/**
+ * The next bounded attempt after an overflow: the same span as a transcript,
+ * then the older half of a transcript span, cut where no tool call is split.
+ * @returns the prepared attempt, or `undefined` when no smaller span remains.
+ */
+function prepareBounded(
+  dependencies: RegionDependencies,
+  session: Session,
+  prepared: PreparedCompaction,
+): PreparedCompaction | undefined {
+  if (prepared.form === 'replay') {
+    return prepareCompaction(dependencies, session,
+      validateSurfaceRegion(session, prepared.start, prepared.end), 'transcript', prepared.halvings)
+  }
+  if (prepared.halvings >= MAX_SUMMARY_RANGE_HALVINGS) return undefined
+  const nodes = session.surface.nodes
+  const startIdx = nodes.indexOf(prepared.start)
+  const count = prepared.shadowedSeqs.length
+  for (let endIdx = startIdx + Math.floor(count / 2) - 1; endIdx >= startIdx; endIdx -= 1) {
+    // oxlint-disable-next-line typescript/no-non-null-assertion
+    const end = nodes[endIdx]!
+    if (!toolPairingBalancedAfter(session, end)) continue
+    return prepareCompaction(dependencies, session,
+      validateSurfaceRegion(session, prepared.start, end), 'transcript', prepared.halvings + 1)
+  }
+  return undefined
+}
+
+/** Message of a thrown value for a diagnostic line. */
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }
 
 /** Reject a summary prepared against any earlier surface generation. */
@@ -531,6 +630,21 @@ function completeCompaction(
 }
 
 /**
+ * Derive the shadowed region's own messages in surface order.
+ * @param session - session supplying the per-node projection.
+ * @param shadowedSeqs - the surface-node seqs, in order, being compacted.
+ * @returns the region's model-facing messages.
+ */
+function deriveRegionMessages(session: Session, shadowedSeqs: readonly SessionSeq[]): Message[] {
+  return shadowedSeqs
+    // shadowedSeqs are current surface seqs, so each is a valid log index.
+    // Existing Session history read; migration deferred.
+    // oxlint-disable-next-line typescript/no-non-null-assertion, typescript/no-deprecated
+    .map(seq => session.deriveEventMessage(session.eventAt(seq)!))
+    .filter((message): message is Message => message !== null)
+}
+
+/**
  * Reconstruct the last routed request's cacheable prefix for the shadowed
  * region: the system prompt held by the `system/message` at surface node 0,
  * the header's tool schemas, then the region's own derived messages in surface
@@ -538,28 +652,22 @@ function completeCompaction(
  * the call is a genuine prefix of the conversation and reuses the provider's
  * KV cache. A surface without a system head, or whose head projects to no
  * message, contributes no leading system message.
- * @param session - session supplying the surface head, request header, and per-node projection.
- * @param shadowedSeqs - the surface-node seqs, in order, being compacted.
+ * @param session - session supplying the surface head and request header.
+ * @param regionMessages - the region's derived messages in surface order.
  * @returns the replayed conversation prefix to condense.
  */
 function buildSummarizationInput(
   session: Session,
-  shadowedSeqs: readonly SessionSeq[],
+  regionMessages: readonly Message[],
 ): SummarizationInput {
   const header = session.requestHeader()
-  // shadowedSeqs are current surface seqs, so the surface has a node 0.
+  // A prepared region is non-empty, so the surface has a node 0.
   // oxlint-disable-next-line typescript/no-non-null-assertion
   const head = systemHead(session, session.surface.nodes[0]!)
   const system = head === undefined ? null : session.deriveEventMessage(head)
-  const regionMessages = shadowedSeqs
-    // shadowedSeqs are current surface seqs, so each is a valid log index.
-    // Existing Session history read; migration deferred.
-    // oxlint-disable-next-line typescript/no-non-null-assertion, typescript/no-deprecated
-    .map(seq => session.deriveEventMessage(session.eventAt(seq)!))
-    .filter((message): message is Message => message !== null)
   return {
     ...header?.tools === undefined ? {} : { tools: header.tools },
-    messages: system === null ? regionMessages : [system, ...regionMessages],
+    messages: system === null ? [...regionMessages] : [system, ...regionMessages],
   }
 }
 

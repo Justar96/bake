@@ -5,8 +5,6 @@ kind: "package-group"
 
 # Packages
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 Bake uses the shared packages under `packages/` for sessions, agent execution, tools, persistence, and supporting services. Use this map to find a package group and its current members.

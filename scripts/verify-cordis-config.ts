@@ -255,7 +255,9 @@ function presetHostProfiles(
  * Row ids a stack of patch layers leaves active. Each layer declares rows,
  * active unless declared `disabled: true`, then its top-level patches take an
  * id out with `disabled: true` or put a declared one back with `disabled: false`.
- * A `!!js` gate counts as active, since some host evaluates it that way.
+ * A `!!js` gate counts as active, since some host evaluates it that way. A row
+ * nested in a group is mounted only while every enclosing group is active, so
+ * disabling a group takes its whole subtree out.
  * @param files Repository-relative patch files in application order.
  * @param repoRoot Repository root the paths are relative to.
  * @returns the ids the composed tree mounts.
@@ -263,9 +265,11 @@ function presetHostProfiles(
 function activeRowIds(files: readonly string[], repoRoot: string): Set<string> {
   const declared = new Set<string>()
   const active = new Set<string>()
+  const ancestry = new Map<string, readonly string[]>()
   for (const file of files) {
     for (const row of rows(file, repoRoot)) {
       declared.add(row.id)
+      ancestry.set(row.id, row.ancestors)
       if (row.disabled) active.delete(row.id)
       else active.add(row.id)
     }
@@ -275,7 +279,7 @@ function activeRowIds(files: readonly string[], repoRoot: string): Set<string> {
       else if (entry.disabled === false && declared.has(entry.id)) active.add(entry.id)
     }
   }
-  return active
+  return new Set([...active].filter(id => (ancestry.get(id) ?? []).every(ancestor => active.has(ancestor))))
 }
 
 /** Every entry of one config file, or an empty list when it is not an entry array. */
@@ -284,25 +288,39 @@ function loadEntries(file: string, repoRoot: string = root): unknown[] {
   return isUnknownArray(document) ? document : []
 }
 
+/** One row a config file declares; see {@link rows}. */
+interface DeclaredRow {
+  readonly id: string
+  readonly name: string
+  /** Whether the row is declared with a literal `disabled: true`. */
+  readonly disabled: boolean
+  /** Ids of the rows enclosing this one, outermost first. */
+  readonly ancestors: readonly string[]
+}
+
 /**
  * Rows declared anywhere in one config file, including inside group `config`
  * lists — a preset nests most of its rows in `isolate` groups.
  * @param file - repository-relative config path.
  * @param repoRoot - repository root the path is relative to.
- * @returns each declared row's id, plugin name, and whether it is declared with a literal `disabled: true`.
+ * @returns each declared row's id, plugin name, literal `disabled: true`, and enclosing row ids.
  */
-function rows(file: string, repoRoot: string): { id: string; name: string; disabled: boolean }[] {
-  const found: { id: string; name: string; disabled: boolean }[] = []
-  const walk = (value: unknown): void => {
+function rows(file: string, repoRoot: string): DeclaredRow[] {
+  const found: DeclaredRow[] = []
+  const walk = (value: unknown, ancestors: readonly string[]): void => {
     if (isUnknownArray(value)) {
-      for (const item of value) walk(item)
+      for (const item of value) walk(item, ancestors)
       return
     }
     if (!isRecord(value)) return
-    if (typeof value.id === 'string' && typeof value.name === 'string') found.push({ id: value.id, name: value.name, disabled: value.disabled === true })
-    for (const child of Object.values(value)) walk(child)
+    let inner = ancestors
+    if (typeof value.id === 'string' && typeof value.name === 'string') {
+      found.push({ id: value.id, name: value.name, disabled: value.disabled === true, ancestors })
+      inner = [...ancestors, value.id]
+    }
+    for (const child of Object.values(value)) walk(child, inner)
   }
-  walk(loadEntries(file, repoRoot))
+  walk(loadEntries(file, repoRoot), [])
   return found
 }
 

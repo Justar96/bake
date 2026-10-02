@@ -5,7 +5,7 @@
 
 Every repository-declared durable Session event appears here with its source declaration and resolved types. The catalog covers the logical and physical headers, event envelopes, and every plugin declaration merge. See [Session](subsystems/session.md) for replay and [persistence](subsystems/persistence.md) for storage.
 
-Run `bun run gen-persistence-catalog` to regenerate both catalog languages, their pairing record, the known-event module, and the machine schema inventory. `bun run verify-persistence-catalog` checks all generated files. Declaration fences preserve source JSDoc and type references; resolved definitions expose their transitive structure.
+Run `bun run gen-persistence-catalog` to regenerate the catalog, the known-event module, and the machine schema inventory. `bun run verify-persistence-catalog` checks all generated files. Declaration fences preserve source JSDoc and type references; resolved definitions expose their transitive structure.
 
 The envelope carries `type`, `seq`, `time`, `data`, optional `ignorable`, and conditional `surfaceOp` / `sourceEventSeqs`. A **surface** event produces model history; a **log-only** event does not. The inventory covers this repository; external plugin types require their own declarations and are outside this catalog.
 
@@ -155,7 +155,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }[T]
 ```
 
-Sources: [`packages/core/session/src/types.ts:423`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:431`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:453`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:484`](../packages/core/session/src/types.ts)
+Sources: [`packages/core/session/src/types.ts:428`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:436`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:458`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:489`](../packages/core/session/src/types.ts)
 
 ## Events
 
@@ -282,7 +282,7 @@ Source: [`packages/interaction/user-approval/src/index.ts:33`](../packages/inter
 'assistant/attempt': { turn: number; step: number; stream: AssistantStreamRecord[] }
 ```
 
-Source: [`packages/core/session/src/types.ts:336`](../packages/core/session/src/types.ts)
+Source: [`packages/core/session/src/types.ts:341`](../packages/core/session/src/types.ts)
 
 <a id="assistantmessage--surface"></a>
 
@@ -312,7 +312,7 @@ Source: [`packages/core/session/src/types.ts:336`](../packages/core/session/src/
 
 Types: [TokenUsage](subsystems/llm-streaming.md)
 
-Source: [`packages/core/session/src/types.ts:322`](../packages/core/session/src/types.ts)
+Source: [`packages/core/session/src/types.ts:327`](../packages/core/session/src/types.ts)
 
 ### `command/*`
 
@@ -640,7 +640,7 @@ Source: [`packages/llm/llm-retry/src/types.ts:11`](../packages/llm/llm-retry/src
 'model/selection': RetiredModelSelection
 ```
 
-Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:103`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:104`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 ### `permission/*`
 
@@ -671,7 +671,7 @@ Source: [`packages/interaction/permission-presets/src/index.ts:57`](../packages/
 'plan/mode': { active: boolean }
 ```
 
-Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:120`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:121`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 ### `request/*`
 
@@ -689,7 +689,7 @@ Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:120`
 'request/context': RequestContext
 ```
 
-Source: [`packages/core/session/src/types.ts:396`](../packages/core/session/src/types.ts)
+Source: [`packages/core/session/src/types.ts:401`](../packages/core/session/src/types.ts)
 
 <a id="requestheader--log-only"></a>
 
@@ -708,7 +708,7 @@ Source: [`packages/core/session/src/types.ts:396`](../packages/core/session/src/
 }
 ```
 
-Source: [`packages/core/session/src/types.ts:371`](../packages/core/session/src/types.ts)
+Source: [`packages/core/session/src/types.ts:376`](../packages/core/session/src/types.ts)
 
 <a id="requesttool-update--log-only"></a>
 
@@ -730,7 +730,7 @@ Source: [`packages/core/session/src/types.ts:371`](../packages/core/session/src/
 }
 ```
 
-Source: [`packages/core/session/src/types.ts:384`](../packages/core/session/src/types.ts)
+Source: [`packages/core/session/src/types.ts:389`](../packages/core/session/src/types.ts)
 
 ### `sandbox/*`
 
@@ -805,7 +805,7 @@ Source: [`packages/schedule/schedule/src/types.ts:219`](../packages/schedule/sch
 'session/end-seed': { inherited?: true }
 ```
 
-Source: [`packages/core/session/src/types.ts:419`](../packages/core/session/src/types.ts)
+Source: [`packages/core/session/src/types.ts:424`](../packages/core/session/src/types.ts)
 
 <a id="sessiontitle--log-only"></a>
 
@@ -846,15 +846,15 @@ Source: [`packages/session/session-title-llm/src/index.ts:45`](../packages/sessi
 /** Records that the configured endpoint accepted one delivery through `throughSeq`. */
 'session-log-deepseek/delivery-accepted': {
   /** Session identity the accepted delivery carried; inherited fork markers retain the parent's id. */
-  sessionId: import('@deepseek-ai/dsh-session/types').SessionId
+  sessionId: SessionId
   /** Accepted Session format generation; absence identifies version 0. */
   sessionFormatVersion?: number
   /** Last canonical event included in the accepted request. */
-  throughSeq: import('@deepseek-ai/dsh-session/types').SessionSeq
+  throughSeq: SessionSeq
 }
 ```
 
-Source: [`packages/session/session-log-deepseek/src/types.ts:81`](../packages/session/session-log-deepseek/src/types.ts)
+Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:123`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 ### `step/*`
 
@@ -867,7 +867,7 @@ Source: [`packages/session/session-log-deepseek/src/types.ts:81`](../packages/se
 'step/end': { turn: number; step: number }
 ```
 
-Source: [`packages/core/session/src/types.ts:290`](../packages/core/session/src/types.ts)
+Source: [`packages/core/session/src/types.ts:295`](../packages/core/session/src/types.ts)
 
 <a id="stepstart--log-only"></a>
 
@@ -878,7 +878,7 @@ Source: [`packages/core/session/src/types.ts:290`](../packages/core/session/src/
 'step/start': { turn: number; step: number }
 ```
 
-Source: [`packages/core/session/src/types.ts:288`](../packages/core/session/src/types.ts)
+Source: [`packages/core/session/src/types.ts:293`](../packages/core/session/src/types.ts)
 
 ### `subagent/*`
 
@@ -965,7 +965,7 @@ Source: [`packages/subagent/tool-subagent/src/routing-state.ts:13`](../packages/
 'system/message': { turn: number; step: number; message: SystemMessage }
 ```
 
-Source: [`packages/core/session/src/types.ts:311`](../packages/core/session/src/types.ts)
+Source: [`packages/core/session/src/types.ts:316`](../packages/core/session/src/types.ts)
 
 ### `team/*`
 
@@ -978,7 +978,7 @@ Source: [`packages/core/session/src/types.ts:311`](../packages/core/session/src/
 'team/member': { version: 2; teamId: RetiredTeamId; member: RetiredTeamMemberSnapshot }
 ```
 
-Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:105`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:106`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 <a id="teammessagedelivered--log-only"></a>
 
@@ -994,7 +994,7 @@ Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:105`
 }
 ```
 
-Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:111`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:112`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 <a id="teammessagequeued--log-only"></a>
 
@@ -1005,7 +1005,7 @@ Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:111`
 'team/message/queued': { version: 2; teamId: RetiredTeamId; message: RetiredTeamMessageSnapshot }
 ```
 
-Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:109`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:110`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 <a id="teamtask--log-only"></a>
 
@@ -1016,7 +1016,7 @@ Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:109`
 'team/task': { version: 2; teamId: RetiredTeamId; task: RetiredTeamTaskSnapshot }
 ```
 
-Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:107`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:108`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 ### `todo/*`
 
@@ -1050,7 +1050,7 @@ Source: [`packages/todo/tool-todo/src/types.ts:31`](../packages/todo/tool-todo/s
 
 Types: [ToolCallId](subsystems/core.md)
 
-Source: [`packages/core/session/src/types.ts:342`](../packages/core/session/src/types.ts)
+Source: [`packages/core/session/src/types.ts:347`](../packages/core/session/src/types.ts)
 
 <a id="toolptc-dispatch--log-only"></a>
 
@@ -1131,7 +1131,7 @@ Source: [`packages/core/tools/src/types.ts:42`](../packages/core/tools/src/types
 }
 ```
 
-Source: [`packages/core/session/src/types.ts:356`](../packages/core/session/src/types.ts)
+Source: [`packages/core/session/src/types.ts:361`](../packages/core/session/src/types.ts)
 
 ### `tool-workflow/*`
 
@@ -1211,7 +1211,7 @@ Source: [`packages/workflow/tool-workflow/src/types.ts:47`](../packages/workflow
 
 Types: [TurnEndReason](subsystems/session.md)
 
-Source: [`packages/core/session/src/types.ts:286`](../packages/core/session/src/types.ts)
+Source: [`packages/core/session/src/types.ts:291`](../packages/core/session/src/types.ts)
 
 <a id="turnstart--log-only"></a>
 
@@ -1227,7 +1227,7 @@ Source: [`packages/core/session/src/types.ts:286`](../packages/core/session/src/
 'turn/start': { turn: number }
 ```
 
-Source: [`packages/core/session/src/types.ts:277`](../packages/core/session/src/types.ts)
+Source: [`packages/core/session/src/types.ts:282`](../packages/core/session/src/types.ts)
 
 ### `user/*`
 
@@ -1246,7 +1246,7 @@ Source: [`packages/core/session/src/types.ts:277`](../packages/core/session/src/
 'user/message': UserMessage
 ```
 
-Source: [`packages/core/session/src/types.ts:298`](../packages/core/session/src/types.ts)
+Source: [`packages/core/session/src/types.ts:303`](../packages/core/session/src/types.ts)
 
 ### `web/*`
 
@@ -1272,7 +1272,7 @@ Source: [`packages/web/web-search-deepseek/src/provider.ts:82`](../packages/web/
 'workspace/changes': { turn: number }
 ```
 
-Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:118`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:119`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 ## Resolved persistence types
 
@@ -1848,7 +1848,7 @@ SHA-256: `0ddab4577db37a3e0d9e3a91761735c8ef6f5629d526ab8ecaeeea19c097c8f8`
 
 SHA-256: `6a4f72e2e179e17b922f2a9392c0e1c8f8c707f32494372454850a3eb184a6e7`
 
-Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:94`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:95`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -2130,7 +2130,7 @@ SHA-256: `c80c89da83c46db7a454f034c10f969e03cfb574859c7316e5bff683f5a14b0e`
 
 SHA-256: `0c6412d3ba5e41adfaa6929c7d4093f2d52d8598c03f35844fc0d55e3070a3b1`
 
-Sources: [`packages/core/session/src/types.ts:336`](../packages/core/session/src/types.ts)
+Sources: [`packages/core/session/src/types.ts:341`](../packages/core/session/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -2349,7 +2349,7 @@ Sources: [`packages/llm/llm/src/types.ts:148`](../packages/llm/llm/src/types.ts)
 
 SHA-256: `ab7ec5f9eb2c6dfacca5da4c37cf7ba85d04172053ee6b1ebf1709ffcd99c1a7`
 
-Sources: [`packages/core/session/src/types.ts:214`](../packages/core/session/src/types.ts) · [`packages/llm/llm/src/types.ts:146`](../packages/llm/llm/src/types.ts)
+Sources: [`packages/core/session/src/types.ts:219`](../packages/core/session/src/types.ts) · [`packages/llm/llm/src/types.ts:146`](../packages/llm/llm/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -2408,7 +2408,7 @@ SHA-256: `1169b301aaabcd992657b93ec93750c43175dda81ada5cac086f14f2eaaeed6d`
 
 SHA-256: `77b8491f946edfc8cc77ebae3ba49183759da31ba2dfa83d4c9e9e618c4b91d2`
 
-Sources: [`packages/core/session/src/types.ts:322`](../packages/core/session/src/types.ts)
+Sources: [`packages/core/session/src/types.ts:327`](../packages/core/session/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -3013,7 +3013,7 @@ SHA-256: `a7cf43ce7c2a4c038feed1885cd7a00d5c6ee2d90a7e0d56b46f78a3e1ca327f`
 
 SHA-256: `20a57544bbf204dacd1ae6beb2ab29444365c3c869f2afdf489dcdcbc3d9c8c5`
 
-Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:120`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:121`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -3053,7 +3053,7 @@ SHA-256: `8ea13bcd983eab596dbfd41c5c2b62a0b318b71cd2a987a6fd752c6ced7e4489`
 
 SHA-256: `2f0aefb72ab453c4bf21a6687f436775d359dc6f8f10410fd4c0615b20bd9d76`
 
-Sources: [`packages/core/session/src/types.ts:371`](../packages/core/session/src/types.ts)
+Sources: [`packages/core/session/src/types.ts:376`](../packages/core/session/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -3099,7 +3099,7 @@ SHA-256: `95d0a6c9a0ac744e3428b96a596a0b536df0c8852cab0b64122bfb91608fb908`
 
 SHA-256: `f6713a60884c5ae1241f72f852dee2775ece57f032e44fd534389d1457d04b71`
 
-Sources: [`packages/core/session/src/types.ts:384`](../packages/core/session/src/types.ts)
+Sources: [`packages/core/session/src/types.ts:389`](../packages/core/session/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -3169,7 +3169,7 @@ SHA-256: `d63b8b8ffad9c02fd80c43a17df4f240c1fe8118ecca9de34f9d5871838ab5b9`
 
 SHA-256: `8bb8c3751a6ce64b61aba1ec7ae798c00a5803c4d868a0430873216c6569ed52`
 
-Sources: [`packages/session/session-log-deepseek/src/types.ts:81`](../packages/session/session-log-deepseek/src/types.ts)
+Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:123`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -3197,7 +3197,7 @@ SHA-256: `5e6db6e24948d4a853c71cb9fabd252ad051ce93d4672c1266cf837c1c17b84e`
 
 SHA-256: `17d1afb770d9941936130996da00dc86782cfef731d8d6526162c301256a4ac3`
 
-Sources: [`packages/core/session/src/types.ts:419`](../packages/core/session/src/types.ts)
+Sources: [`packages/core/session/src/types.ts:424`](../packages/core/session/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -3297,7 +3297,7 @@ SHA-256: `e0a787e6ec76c7c94fecbc501b489164ab0293db05bc947914077ad01e674f05`
 
 SHA-256: `ef11a3b7fa2033ae4279545ff8a8a2ee4e301b9b73e5b91654c48e6d08283545`
 
-Sources: [`packages/core/session/src/types.ts:288`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:290`](../packages/core/session/src/types.ts)
+Sources: [`packages/core/session/src/types.ts:293`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:295`](../packages/core/session/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -3428,7 +3428,7 @@ SHA-256: `5df6c1d20d3b13520831b4f81f5d9f90e66d46baf9b1d04bb2da9ed4a72bb795`
 
 SHA-256: `f09e5e7acf5ff5ccd193ff2eeec015fa2ff7c29d98bc465f8c3302058d47e29b`
 
-Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:26`](../packages/session/session-format-catalog/src/retired-vocabulary.ts) · [`packages/subagent/tool-subagent/src/types.ts:27`](../packages/subagent/tool-subagent/src/types.ts)
+Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:27`](../packages/session/session-format-catalog/src/retired-vocabulary.ts) · [`packages/subagent/tool-subagent/src/types.ts:27`](../packages/subagent/tool-subagent/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -3484,7 +3484,7 @@ SHA-256: `69becfb6b2d3fd5da91518089454cae8ef33f1835637ec44dde35dd077fd4bae`
 
 SHA-256: `2074f40221b76c75fd314246db558965dc3477dfb440bcc952b1eedc9778e366`
 
-Sources: [`packages/core/session/src/types.ts:311`](../packages/core/session/src/types.ts)
+Sources: [`packages/core/session/src/types.ts:316`](../packages/core/session/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -3528,7 +3528,7 @@ SHA-256: `4fb59762612c3e3ac3a3bd4f84c9c148d3c3893bd422ba2b201cc039fabd49bc`
 
 SHA-256: `b1ebd5cda47d90d980bb05bffc3f970c51537b9aff15b3bc3d639811727741b1`
 
-Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:105`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:106`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -3567,7 +3567,7 @@ SHA-256: `48f9c19417a1abbedfa59f4667bba36b93ac2db407adf5e84cb3ba0de30942cb`
 
 SHA-256: `0bcfaf5566d271028429ac7b562cb59053c9d78b8ae14708c35fac835108d1b1`
 
-Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:111`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:112`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -3596,7 +3596,7 @@ SHA-256: `443371ec07a03a82a0e93d93abca3e70b03bca55ba5b01d507030fcb66e8fbb4`
 
 SHA-256: `0c3f4d2248d9bc9700e2d7253fa71aa9935f5c39af6f11de5727f08cccaf8383`
 
-Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:109`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:110`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -3624,7 +3624,7 @@ SHA-256: `d595ec73b32b016a6055333c67a5d646032b22e672da1d4a09c5b1ae398a093a`
 
 SHA-256: `a40d12070f6f4a124f32fb3cc86e7857554702e32f0eda3080a25c4b9ac9b18c`
 
-Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:107`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:108`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -3754,7 +3754,7 @@ SHA-256: `3b1be838223869fe0a08210db85bf773796ed3f2373ac16555dff227cade0c48`
 
 SHA-256: `e4c18e294232c3ba6c9f1999f168263cc55956147cfe4121720899be8e52edd1`
 
-Sources: [`packages/core/session/src/types.ts:342`](../packages/core/session/src/types.ts)
+Sources: [`packages/core/session/src/types.ts:347`](../packages/core/session/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -3798,7 +3798,7 @@ SHA-256: `ec38b5949af8eacaf00df002f4acbe344f934f8a061e9cdc65a52a48e5f6dd93`
 
 SHA-256: `a81059ca06999da1e712414520c2c65e491d052fcf9640fae20aa38f0a5dc735`
 
-Sources: [`packages/core/session/src/types.ts:364`](../packages/core/session/src/types.ts) · [`packages/core/tools/src/types.ts:24`](../packages/core/tools/src/types.ts)
+Sources: [`packages/core/session/src/types.ts:369`](../packages/core/session/src/types.ts) · [`packages/core/tools/src/types.ts:24`](../packages/core/tools/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -3828,7 +3828,7 @@ SHA-256: `29af48b840d0cd9e48b6f50bf3b354f8f6340607c5b99220a48e74f60beac9e2`
 
 SHA-256: `356aad27134a0e31af67c994ff8b9e4b91acfb6c4917b3bc1f7a62bbf82794d5`
 
-Sources: [`packages/core/session/src/types.ts:356`](../packages/core/session/src/types.ts)
+Sources: [`packages/core/session/src/types.ts:361`](../packages/core/session/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -3905,7 +3905,7 @@ SHA-256: `bab768260853e13a7cf2e22e65af572a1e76a5b2c01f3cdc2ce09d39b87fb70b`
 
 SHA-256: `d3e447062a2847dad847dad5168a9508d92c484363dfc76fd82605aa7bd46285`
 
-Sources: [`packages/core/session/src/types.ts:286`](../packages/core/session/src/types.ts)
+Sources: [`packages/core/session/src/types.ts:291`](../packages/core/session/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -3918,7 +3918,7 @@ Sources: [`packages/core/session/src/types.ts:286`](../packages/core/session/src
 
 SHA-256: `b6ef9c6210be8350cd465f485cf520031fffa6bf3809c61a1e713e834c5982d0`
 
-Sources: [`packages/core/session/src/types.ts:202`](../packages/core/session/src/types.ts)
+Sources: [`packages/core/session/src/types.ts:207`](../packages/core/session/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -3930,7 +3930,7 @@ Sources: [`packages/core/session/src/types.ts:202`](../packages/core/session/src
 
 SHA-256: `0a30c3be336cdd4f8f34e66543a3d46d611c43986edd9b3ce6cbb9b721d3b5d3`
 
-Sources: [`packages/core/session/src/types.ts:204`](../packages/core/session/src/types.ts)
+Sources: [`packages/core/session/src/types.ts:209`](../packages/core/session/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -3955,7 +3955,7 @@ Sources: [`packages/core/session/src/types.ts:191`](../packages/core/session/src
 
 SHA-256: `6c5a37d42ebdb12db4410699259335f1e149e3a0260425684c00b153afc8990d`
 
-Sources: [`packages/core/session/src/types.ts:192`](../packages/core/session/src/types.ts)
+Sources: [`packages/core/session/src/types.ts:197`](../packages/core/session/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -3968,7 +3968,7 @@ Sources: [`packages/core/session/src/types.ts:192`](../packages/core/session/src
 
 SHA-256: `4bb451330ff699f36b45539ceb0eb2606ead72084e2c5bb637c36cc80e2252db`
 
-Sources: [`packages/core/session/src/types.ts:193`](../packages/core/session/src/types.ts)
+Sources: [`packages/core/session/src/types.ts:198`](../packages/core/session/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -3980,7 +3980,7 @@ Sources: [`packages/core/session/src/types.ts:193`](../packages/core/session/src
 
 SHA-256: `eaa71be0fbf0f702df8ea6c11d0aa2f9782263d45a10d0fb14eda662f4bfe04c`
 
-Sources: [`packages/core/session/src/types.ts:196`](../packages/core/session/src/types.ts)
+Sources: [`packages/core/session/src/types.ts:201`](../packages/core/session/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -3992,7 +3992,7 @@ Sources: [`packages/core/session/src/types.ts:196`](../packages/core/session/src
 
 SHA-256: `023a355b2be0d688fb6e4df8388dadb942761d46cfe96d0f499aae9631a159d4`
 
-Sources: [`packages/core/session/src/types.ts:206`](../packages/core/session/src/types.ts)
+Sources: [`packages/core/session/src/types.ts:211`](../packages/core/session/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -4004,7 +4004,7 @@ Sources: [`packages/core/session/src/types.ts:206`](../packages/core/session/src
 
 SHA-256: `79650cfa10aa3c52440328d85e8a25f0ffadc8d7efd784e3c0819d8bb74a1985`
 
-Sources: [`packages/core/session/src/types.ts:212`](../packages/core/session/src/types.ts)
+Sources: [`packages/core/session/src/types.ts:217`](../packages/core/session/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -4017,7 +4017,7 @@ Sources: [`packages/core/session/src/types.ts:212`](../packages/core/session/src
 
 SHA-256: `56b7c047694875a843ba020dfea3c8380d54ae4ff88ab349e72004dc21e07c23`
 
-Sources: [`packages/core/session/src/types.ts:221`](../packages/core/session/src/types.ts)
+Sources: [`packages/core/session/src/types.ts:226`](../packages/core/session/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -4043,7 +4043,7 @@ SHA-256: `aa0957eca50aeb28bcd2e6930b95809926edacb550c8c340ba526ba6b861b3d8`
 
 SHA-256: `f90eb4ab2d3897bc20c521a038e3119d581f791ec974b1a0004f63a8ab9e232d`
 
-Sources: [`packages/core/session/src/types.ts:277`](../packages/core/session/src/types.ts) · [`packages/session/session-format-catalog/src/retired-vocabulary.ts:118`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+Sources: [`packages/core/session/src/types.ts:282`](../packages/core/session/src/types.ts) · [`packages/session/session-format-catalog/src/retired-vocabulary.ts:119`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -4675,7 +4675,7 @@ One of:
 
 SHA-256: `c55a891c7aac496de6ee64c91c1fb65728c977314013033e42c863428aada854`
 
-Sources: [`packages/core/session/src/types.ts:233`](../packages/core/session/src/types.ts)
+Sources: [`packages/core/session/src/types.ts:238`](../packages/core/session/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -4689,7 +4689,7 @@ Sources: [`packages/core/session/src/types.ts:233`](../packages/core/session/src
 
 SHA-256: `b158f3ff6923714807c0d73882f0b05dc87f8fa85c9e90814852d48bbc866081`
 
-Sources: [`packages/core/session/src/types.ts:243`](../packages/core/session/src/types.ts)
+Sources: [`packages/core/session/src/types.ts:248`](../packages/core/session/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -4704,7 +4704,7 @@ Sources: [`packages/core/session/src/types.ts:243`](../packages/core/session/src
 
 SHA-256: `530da6c0267813bb4511af72883cc518834e624e3b3220a7062955fd57a788a6`
 
-Sources: [`packages/core/session/src/types.ts:262`](../packages/core/session/src/types.ts)
+Sources: [`packages/core/session/src/types.ts:267`](../packages/core/session/src/types.ts)
 
 One of:
 
@@ -4739,7 +4739,7 @@ Sources: [`packages/core/session/src/types.ts:94`](../packages/core/session/src/
 
 SHA-256: `335e242de1fcc17b6ca920fc420d71bec2d76e53e37955c00948b65ab77f05c5`
 
-Sources: [`packages/core/session/src/types.ts:453`](../packages/core/session/src/types.ts)
+Sources: [`packages/core/session/src/types.ts:458`](../packages/core/session/src/types.ts)
 
 One of:
 
@@ -4752,7 +4752,7 @@ One of:
 
 SHA-256: `1f8c126cfab3df812cd115cfc23e3256f0fa2383400f4ce91ecad313577e59b0`
 
-Sources: [`packages/core/session/src/types.ts:196`](../packages/core/session/src/types.ts)
+Sources: [`packages/core/session/src/types.ts:201`](../packages/core/session/src/types.ts)
 
 One of:
 
@@ -4768,7 +4768,7 @@ One of:
 
 SHA-256: `a5a8c15f08af1b0f26f40906e0797b6b0920fd01069e660becce35ab7fc48d77`
 
-Sources: [`packages/core/session/src/types.ts:225`](../packages/core/session/src/types.ts)
+Sources: [`packages/core/session/src/types.ts:230`](../packages/core/session/src/types.ts)
 
 One of:
 
@@ -4785,7 +4785,7 @@ One of:
 
 SHA-256: `3cfc3a56502da1f8c6153c2c56657bab4b749056968634dd0991d325ec1c919f`
 
-Sources: [`packages/core/tools/src/index.ts:724`](../packages/core/tools/src/index.ts)
+Sources: [`packages/core/tools/src/index.ts:776`](../packages/core/tools/src/index.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -5643,7 +5643,7 @@ One of:
 
 SHA-256: `dfce5db4aa42b7ebe0bb79eca92553587287e18c06b9eba85cbfb9d332e26acd`
 
-Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:45`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:46`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 One of:
 
@@ -5657,7 +5657,7 @@ One of:
 
 SHA-256: `6598cd6da253948d6b207c6374a45335804c79b576866d6215649c2d1bc85e25`
 
-Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:48`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:49`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -5675,7 +5675,7 @@ Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:48`
 
 SHA-256: `5b694f394d5e11609887a3ccfa82844935d49806c37e336b30be2186d649ab94`
 
-Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:74`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:75`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -5691,7 +5691,7 @@ Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:74`
 
 SHA-256: `2152caf1a71e588e4df2358a806dea24936c1c47131134f01a12939d12cdc0c0`
 
-Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:83`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:84`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -5707,7 +5707,7 @@ Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:83`
 
 SHA-256: `51edec100659da3a9bd9c3f6ba1180f5e64ec9a1585e5057080df45c180bd357`
 
-Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:62`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:63`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -5726,7 +5726,7 @@ Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:62`
 
 SHA-256: `b2d2a01e51341a3bfec809198952c8c830a7899f4cb6ecd3c1dc0b5d9a2af943`
 
-Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:59`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:60`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 One of:
 
@@ -6429,7 +6429,7 @@ SHA-256: `7af85bf70d4eafce63e739adae38ea85501e68df3a0e22f97f3a0be90fd9e4cb`
 
 SHA-256: `bcf0caf62d964b2fcf5404bd5c909cfa9a21c3f3c96e6b7e36d9e33565223825`
 
-Sources: [`packages/core/session/src/types.ts:455`](../packages/core/session/src/types.ts)
+Sources: [`packages/core/session/src/types.ts:460`](../packages/core/session/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -6515,7 +6515,7 @@ SHA-256: `57f3f606ff8b6c84d9c443faace9d1dd10cca0354f37a4f515ef075f7c351b90`
 
 SHA-256: `4cd48f3e5108bd6ebedf7301c3638839b8b2b9db8dbd493974177fbdeb91a01b`
 
-Sources: [`packages/attachment/attachment/src/brand.ts:6`](../packages/attachment/attachment/src/brand.ts) · [`packages/compaction/compaction/src/brand.ts:4`](../packages/compaction/compaction/src/brand.ts) · [`packages/core/session/src/types.ts:20`](../packages/core/session/src/types.ts) · [`packages/feedback/message-feedback/src/types.ts:14`](../packages/feedback/message-feedback/src/types.ts) · [`packages/goal/goal/src/types.ts:17`](../packages/goal/goal/src/types.ts) · [`packages/interaction/commands/src/brand.ts:31`](../packages/interaction/commands/src/brand.ts) · [`packages/interaction/user-approval/src/types.ts:17`](../packages/interaction/user-approval/src/types.ts) · [`packages/llm/llm-retry/src/brand.ts:4`](../packages/llm/llm-retry/src/brand.ts) · [`packages/llm/llm/src/brand.ts:16`](../packages/llm/llm/src/brand.ts) · [`packages/llm/llm/src/brand.ts:31`](../packages/llm/llm/src/brand.ts) · [`packages/llm/llm/src/brand.ts:43`](../packages/llm/llm/src/brand.ts) · [`packages/llm/llm/src/brand.ts:67`](../packages/llm/llm/src/brand.ts) · [`packages/schedule/schedule/src/types.ts:10`](../packages/schedule/schedule/src/types.ts) · [`packages/session/session-format-catalog/src/retired-vocabulary.ts:33`](../packages/session/session-format-catalog/src/retired-vocabulary.ts) · [`packages/session/session-format-catalog/src/retired-vocabulary.ts:36`](../packages/session/session-format-catalog/src/retired-vocabulary.ts) · [`packages/session/session-format-catalog/src/retired-vocabulary.ts:39`](../packages/session/session-format-catalog/src/retired-vocabulary.ts) · [`packages/session/session-format-catalog/src/retired-vocabulary.ts:42`](../packages/session/session-format-catalog/src/retired-vocabulary.ts) · [`packages/session/session-title/src/index.ts:42`](../packages/session/session-title/src/index.ts) · [`packages/session/session-title/src/types.ts:17`](../packages/session/session-title/src/types.ts) · [`packages/webhook/webhook/src/brand.ts:12`](../packages/webhook/webhook/src/brand.ts) · [`packages/webhook/webhook/src/brand.ts:6`](../packages/webhook/webhook/src/brand.ts) · [`packages/webhook/webhook/src/brand.ts:9`](../packages/webhook/webhook/src/brand.ts) · [`packages/workflow/workflow/src/types.ts:13`](../packages/workflow/workflow/src/types.ts)
+Sources: [`packages/attachment/attachment/src/brand.ts:6`](../packages/attachment/attachment/src/brand.ts) · [`packages/compaction/compaction/src/brand.ts:4`](../packages/compaction/compaction/src/brand.ts) · [`packages/core/session/src/types.ts:20`](../packages/core/session/src/types.ts) · [`packages/feedback/message-feedback/src/types.ts:14`](../packages/feedback/message-feedback/src/types.ts) · [`packages/goal/goal/src/types.ts:17`](../packages/goal/goal/src/types.ts) · [`packages/interaction/commands/src/brand.ts:31`](../packages/interaction/commands/src/brand.ts) · [`packages/interaction/user-approval/src/types.ts:17`](../packages/interaction/user-approval/src/types.ts) · [`packages/llm/llm-retry/src/brand.ts:4`](../packages/llm/llm-retry/src/brand.ts) · [`packages/llm/llm/src/brand.ts:16`](../packages/llm/llm/src/brand.ts) · [`packages/llm/llm/src/brand.ts:31`](../packages/llm/llm/src/brand.ts) · [`packages/llm/llm/src/brand.ts:43`](../packages/llm/llm/src/brand.ts) · [`packages/llm/llm/src/brand.ts:67`](../packages/llm/llm/src/brand.ts) · [`packages/schedule/schedule/src/types.ts:10`](../packages/schedule/schedule/src/types.ts) · [`packages/session/session-format-catalog/src/retired-vocabulary.ts:34`](../packages/session/session-format-catalog/src/retired-vocabulary.ts) · [`packages/session/session-format-catalog/src/retired-vocabulary.ts:37`](../packages/session/session-format-catalog/src/retired-vocabulary.ts) · [`packages/session/session-format-catalog/src/retired-vocabulary.ts:40`](../packages/session/session-format-catalog/src/retired-vocabulary.ts) · [`packages/session/session-format-catalog/src/retired-vocabulary.ts:43`](../packages/session/session-format-catalog/src/retired-vocabulary.ts) · [`packages/session/session-title/src/index.ts:42`](../packages/session/session-title/src/index.ts) · [`packages/session/session-title/src/types.ts:17`](../packages/session/session-title/src/types.ts) · [`packages/webhook/webhook/src/brand.ts:12`](../packages/webhook/webhook/src/brand.ts) · [`packages/webhook/webhook/src/brand.ts:6`](../packages/webhook/webhook/src/brand.ts) · [`packages/webhook/webhook/src/brand.ts:9`](../packages/webhook/webhook/src/brand.ts) · [`packages/workflow/workflow/src/types.ts:13`](../packages/workflow/workflow/src/types.ts)
 
 `string`
 

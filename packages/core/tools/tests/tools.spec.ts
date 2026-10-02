@@ -1785,6 +1785,41 @@ describe('ToolRuntime', () => {
     expect(entered).toBe(false) // A denied call never enters the around-dispatch extension point.
   })
 
+  it('carries the first halt on the final result, whatever post-execute decides later', async () => {
+    const ctx = await setup()
+    ctx.tools.register(echoTool)
+    ctx.on('tools/pre-execute', async (): Promise<PreToolDecision> => ({ kind: 'deny', reason: 'nope', halt: { reason: 'first' } }))
+    ctx.on('tools/post-execute', async (): Promise<PostToolDecision> => ({
+      kind: 'block', feedback: [{ type: 'text', text: 'replaced' }], halt: { reason: 'second' },
+    }))
+
+    const result = await ctx.tools.execute({ signal: testToolSignal, callId: ToolCallId('c1'), name: 'echo', arguments: { text: 'hi' } })
+    expect(result.content).toEqual([{ type: 'text', text: 'replaced' }])
+    expect(result.halt).toEqual({ reason: 'first' })
+    expect(Object.isFrozen(result.halt)).toBe(true)
+  })
+
+  it('keeps a post-execute halt on an accepted result', async () => {
+    const ctx = await setup()
+    ctx.tools.register(echoTool)
+    ctx.on('tools/post-execute', async (_exec, _result, next): Promise<PostToolDecision> => ({ ...await next(), halt: { reason: 'stop' } }))
+
+    const result = await ctx.tools.execute({ signal: testToolSignal, callId: ToolCallId('c1'), name: 'echo', arguments: { text: 'hi' } })
+    expect(result.isError).toBe(false)
+    expect(result.halt).toEqual({ reason: 'stop' })
+  })
+
+  it('turns a halt without a string reason into an error result that does not halt', async () => {
+    const ctx = await setup()
+    ctx.tools.register(echoTool)
+    ctx.on('tools/pre-execute', async (): Promise<PreToolDecision> => ({ kind: 'deny', reason: 'nope', halt: { reason: 42 as unknown as string } }))
+
+    const result = await ctx.tools.execute({ signal: testToolSignal, callId: ToolCallId('c1'), name: 'echo', arguments: { text: 'hi' } })
+    expect(result.isError).toBe(true)
+    expect(result.content[0]).toMatchObject({ text: 'Error: tool halt reason must be a string' })
+    expect(result.halt).toBeUndefined()
+  })
+
   it('a thrown tool is normalized to an isError result BEFORE a tools/execute listener sees next()', async () => {
     const ctx = await setup()
     ctx.tools.register({

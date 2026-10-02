@@ -5,8 +5,6 @@ kind: "package-reference"
 
 # @deepseek-ai/dsh-host-plugin-inventory
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 This package projects the host’s current plugins in load order — each entry’s identifier, module specifier, effective enablement, and live phase — for the plugin manager’s management Remote. Deployments with an agent-preset roster also report each preset’s metadata, health, and flattened plugin composition; without a roster, preset data is absent. Each snapshot is a point-in-time, read-only answer for display and diagnostics: it cannot mutate plugins and provides no history, introduction source, or change subscription.

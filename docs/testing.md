@@ -1,7 +1,5 @@
 # Testing policy
 
-English | [中文](testing.zh.md)
-
 Bake tests the shared runtime, terminal application, and built profile at the layer where each behavior is observable. The root [AGENTS.md](../AGENTS.md) owns the current commands.
 
 ## Choose a check

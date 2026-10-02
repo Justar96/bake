@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-16-movable-mandatory-update-window.zh.md)
-
 ## Problem
 
 The Windows mandatory-update page used a frameless modal overlay sized to the product window. The modal disabled its parent, so the parent's native title bar could not be used to move or maximize either window. Closing the overlay was intercepted, leaving no visible exit control.

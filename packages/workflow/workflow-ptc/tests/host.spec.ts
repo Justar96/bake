@@ -15,7 +15,7 @@ type HostBindings = Record<string, PtcBindingFunction>
 
 class ControlledRuntime extends PtcRuntime {
   language = 'typescript'
-  readonly isolation = 'process'
+  isolation = 'process'
   execute: (spec: PtcRunSpec) => Promise<PtcRunResult> = () => Promise.resolve(completed)
 
   resolve(request: PtcRunRequest): PtcRunSpec {
@@ -25,7 +25,7 @@ class ControlledRuntime extends PtcRuntime {
   run(spec: PtcRunSpec): Promise<PtcRunResult> { return this.execute(spec) }
 }
 
-async function setup(execute?: (bindings: HostBindings, spec: PtcRunSpec) => Promise<PtcRunResult>, language = 'typescript') {
+async function setup(execute?: (bindings: HostBindings, spec: PtcRunSpec) => Promise<PtcRunResult>, language = 'typescript', isolation = 'process') {
   const ctx = new Context()
   onTestFinished(async () => { await ctx.fiber.dispose() })
   await ctx.plugin(SessionStore)
@@ -46,6 +46,7 @@ async function setup(execute?: (bindings: HostBindings, spec: PtcRunSpec) => Pro
   await ctx.plugin(ControlledRuntime)
   const runtime = ctx.ptcRuntime as ControlledRuntime
   runtime.language = language
+  runtime.isolation = isolation
   if (execute !== undefined) runtime.execute = spec => execute(spec.bindings[0]!.functions, spec)
   await ctx.plugin(PtcWorkflowEngine, { provider: 'stub' })
   const parent = fakeParent(ctx)
@@ -147,6 +148,10 @@ describe('workflow runtime outcomes', () => {
 
   it('rejects a non-TypeScript runtime while loading the workflow provider', async () => {
     await expect(setup(undefined, 'python')).rejects.toThrow('requires the Node TypeScript PTC runtime')
+  })
+
+  it('rejects a TypeScript runtime without a Node process while loading the workflow provider', async () => {
+    await expect(setup(undefined, 'typescript', 'worker-thread')).rejects.toThrow('requires the Node TypeScript PTC runtime')
   })
 
   it('stops waiting for child output after disposal releases the child resources', async () => {

@@ -5,8 +5,6 @@ kind: "package-group"
 
 # host/ — web-GUI host half
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 The `host/` group contains the HTTP web server and the read-only plugin inventory projection. Their READMEs describe the routes and data they currently expose.

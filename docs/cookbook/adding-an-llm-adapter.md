@@ -1,8 +1,6 @@
 # Cookbook: adding an LLM adapter
 
-English | [中文](adding-an-llm-adapter.zh.md)
-
-How to connect a new model provider. Reference implementations: `packages/llm/llm-deepseek` (direct HTTP, SSE framed by `eventsource-parser`) and `packages/llm/llm-pi-ai` (wrapping an LLM library). Read the `StreamChunk` doc in `packages/llm/llm/src/types.ts` first — it records the protocol conventions both adapters were verified against.
+How to connect a new model provider. Reference implementation: `packages/llm/llm-pi-ai` (wrapping an LLM library). Read the `StreamChunk` doc in `packages/llm/llm/src/types.ts` first — it records the protocol conventions the shipped adapter is verified against.
 
 ## The shape
 
@@ -22,7 +20,7 @@ export function apply(ctx: Context, config: Config) {
 
 Registration is effect-based (HMR-safe); one adapter per provider route — duplicates throw, and multi-route registration is all-or-nothing. `options.provider` selects the adapter and `options.model` is the provider model id, so a dynamic catalog adapter can serve new models without lifecycle reconfiguration. Secrets are cordis-native: schemastery Config with env fallbacks, fed from cordis.yml via `!!js process.env.MY_KEY`. Never read ad-hoc key files in code.
 
-## Protocol obligations (the contract two implementations verified)
+## Protocol obligations (the contract the shipped adapter verifies)
 
 - Emit `usage` BEFORE `finish`; emit NOTHING after `finish`. The robust way: buffer finish/usage until the provider's end-of-stream marker, then flush (handles providers that send trailing usage-only chunks).
 - Tool-call `arguments` are RAW JSON strings end-to-end; stream fragments as `argumentsDelta`. If your provider hands back parsed objects, re-stringify at `block-end`.
@@ -36,7 +34,7 @@ Provider-specific thinking-mode toggles remain in the adapter's Config. Exact mo
 
 ## Implementation structure
 
-Keep wire types, request serialization, transport parsing, chunk translation, and the adapter class as separate responsibilities; [`llm-deepseek`](../../packages/llm/llm-deepseek/README.md) is the reference layout.
+Keep wire types, request serialization, transport parsing, chunk translation, and the adapter class as separate responsibilities; [`llm-pi-ai`](../../packages/llm/llm-pi-ai/README.md) is the reference layout.
 
 ## Verification
 
