@@ -76,6 +76,7 @@ export type { PiAiAdapterOptions } from './adapter.ts'
 export { Config } from './config.ts'
 export type {
   PiAiCompatProfile,
+  PiAiMessagesWire,
   PiAiModality,
   PiAiModelOverride,
   PiAiModelProfile,

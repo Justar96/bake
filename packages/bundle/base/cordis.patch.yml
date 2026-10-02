@@ -115,6 +115,12 @@
             baseURL: https://api.deepseek.com/anthropic
             reasoning: high
             adaptiveThinkingType: enabled
+            # DeepSeek caches prefixes on its own: send the body its earlier
+            # native adapter did, without Anthropic's cache scaffolding.
+            messagesWire:
+              dropDeferredToolPlaceholder: true
+              stripCacheControl: true
+              mergeAdjacentRoles: true
             compat:
               forceAdaptiveThinking: true
               allowEmptySignature: true

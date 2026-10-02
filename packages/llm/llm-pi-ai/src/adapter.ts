@@ -61,6 +61,7 @@ import { requestImageMaxDimensionFor } from './config.ts'
 import type { ResolvedPiAiProviderProfile } from './config.ts'
 import { toPiContext } from './context.ts'
 import { createModels, getSupportedThinkingLevels } from './models.ts'
+import { messagesPayloadHook } from './payload.ts'
 import { fetchAnthropicSse, fetchOpenAiSse } from './sse.ts'
 import { toStreamChunks } from './stream.ts'
 
@@ -237,19 +238,6 @@ function requestHeaders(
 }
 
 /**
- * Respell pi-ai's adaptive `thinking` block as `enabled` for an endpoint that
- * reads `output_config.effort` but documents only `enabled` and `disabled`.
- * The effort itself is untouched; a request that is not adaptive passes through.
- * @param payload - the Messages request body pi-ai built.
- * @returns the rewritten body, or `undefined` to send pi-ai's unchanged.
- */
-function enabledThinkingPayload(payload: unknown): unknown {
-  const body = payload as { thinking?: { type?: unknown } } | undefined
-  if (body?.thinking?.type !== 'adaptive') return undefined
-  return { ...body, thinking: { type: 'enabled' } }
-}
-
-/**
  * pi-ai-backed multi-provider adapter. Each operation reads the current
  * profiles, so a configuration change reaches the next request without a
  * restart; model descriptors come from the collection those profiles built.
@@ -415,6 +403,8 @@ export class PiAiAdapter extends LlmAdapter {
       // The model's own protocol, not the route's, selects the default: one route may mix them.
       const maxDimension = requestImageMaxDimensionFor(profile, model.api)
       const transcript = profile.harnessInfo.get(model.id)
+      // Body rewrites are spelled for Messages; a route mixing protocols sends others as built.
+      const onPayload = model.api === 'anthropic-messages' ? messagesPayloadHook(profile) : undefined
       const context = attachments === undefined
         ? toPiContext(options, undefined, onReplayDegrade, transcript)
         : await toPiContext({ ...options, signal: watchdog.signal }, {
@@ -432,9 +422,7 @@ export class PiAiAdapter extends LlmAdapter {
         ...options.temperature === undefined ? {} : { temperature: options.temperature },
         ...options.maxTokens === undefined ? {} : { maxTokens: options.maxTokens },
         ...options.sessionId === undefined ? {} : { sessionId: String(options.sessionId) },
-        ...profile.adaptiveThinkingType === 'enabled' && model.api === 'anthropic-messages'
-          ? { onPayload: enabledThinkingPayload }
-          : {},
+        ...onPayload === undefined ? {} : { onPayload },
         signal: watchdog.signal,
         // Proxy heartbeats can empty or split SSE events before pi-ai's parsers read them.
         ...model.api === 'openai-responses' || model.api === 'openai-completions' ? { fetch: fetchOpenAiSse }

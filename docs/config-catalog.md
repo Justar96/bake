@@ -851,6 +851,13 @@ export interface PiAiProviderProfile {
    * Anthropic pairs with it. Refused on a route with no model it could reach.
    */
   adaptiveThinkingType?: AdaptiveThinkingType
+  /**
+   * Request-body rewrites for an Anthropic-compatible endpoint that caches by
+   * prefix on its own and needs none of Anthropic's prompt-cache scaffolding,
+   * as DeepSeek's does. Applies only to `anthropic-messages` models; refused
+   * on a route with no such model.
+   */
+  messagesWire?: PiAiMessagesWire
   /** Token budgets used by reasoning providers that support them. */
   thinkingBudgets?: ThinkingBudgets
   /** Prompt-cache retention preference. */
@@ -1083,6 +1090,33 @@ export type PiAiModality = Model<Api>['input'][number]
 export type AdaptiveThinkingType = typeof ADAPTIVE_THINKING_TYPES[number]
 
 /**
+ * Switches of {@link PiAiProviderProfile.messagesWire}. Each defaults off, which
+ * sends the body pi-ai built.
+ */
+export interface PiAiMessagesWire {
+  /**
+   * Drop the never-callable `__pi_deferred_placeholder__` tool pi-ai declares
+   * whenever native tool changes are on. Anthropic needs it so the hidden
+   * deferred-tool scaffolding sits in the cached prefix from the first request;
+   * an endpoint without that scaffolding only pays its tokens. Kept when every
+   * other tool is deferred, because a request needs one tool that is not.
+   */
+  dropDeferredToolPlaceholder?: boolean
+  /**
+   * Remove every `cache_control` breakpoint pi-ai marks on the system prompt,
+   * tools, and message blocks, for an endpoint whose automatic prefix cache
+   * does not read them.
+   */
+  stripCacheControl?: boolean
+  /**
+   * Merge adjacent messages of the same role into one by concatenating their
+   * content blocks, so a user prompt and the runtime context after it travel
+   * as one user message.
+   */
+  mergeAdjacentRoles?: boolean
+}
+
+/**
  * Selectable reasoning efforts for one model: each key is a level the model
  * offers (and selectors show), and its value is the wire spelling dispatch
  * sends for it. `off` alone may leave its value empty — "supported, send
@@ -1101,7 +1135,7 @@ export type PiAiThinkingTokenBudgetField = NonNullable<OpenAICompletionsCompat['
 
 Depends on: `Api` (`@earendil-works/pi-ai`) · `CacheRetention` (`@earendil-works/pi-ai`) · `Model` (`@earendil-works/pi-ai`) · `ModelThinkingLevel` (`@earendil-works/pi-ai`) · `OpenAICompletionsCompat` (`@earendil-works/pi-ai`) · [`RetryPolicyConfig`](../packages/llm/llm/src/index.ts) · `ThinkingBudgets` (`@earendil-works/pi-ai`) · `Transport` (`@earendil-works/pi-ai`)
 
-Source: [`packages/llm/llm-pi-ai/src/config.ts:265`](../packages/llm/llm-pi-ai/src/config.ts)
+Source: [`packages/llm/llm-pi-ai/src/config.ts:299`](../packages/llm/llm-pi-ai/src/config.ts)
 
 <a id="deepseek-aidsh-llm-replay"></a>
 

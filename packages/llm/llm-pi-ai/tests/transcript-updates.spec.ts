@@ -23,6 +23,7 @@ import type { PiAiModelProfile } from '@deepseek-ai/dsh-llm-pi-ai'
 import { PiAiCatalogError, resolveRouteModels } from '../src/catalog.ts'
 import { resolveProfiles } from '../src/config.ts'
 import { toPiContext } from '../src/context.ts'
+import { DEFERRED_TOOL_PLACEHOLDER } from '../src/payload.ts'
 import { memoryAuth } from './auth-double.ts'
 import { DEEPSEEK_PRO_DESCRIPTION, deepseekProfile } from './deepseek-profile.ts'
 import { anthropicTextWire, closeMockServers, mockServer } from './mock-server.ts'
@@ -258,7 +259,7 @@ describe('in-history system prompts on the wire', () => {
       messages: [createSystemMessage('first prompt', 'test'), user('one'), assistant('reply one'), createSystemMessage('second prompt', 'test'), user('two')],
     })
     const body = server.requests[0] as WireBody
-    expect(body.messages.map(shape)).toEqual(['user[one]', 'assistant[reply one]', 'user[second prompt]', 'user[two]'])
+    expect(body.messages.map(shape)).toEqual(['user[one]', 'assistant[reply one]', 'user[second prompt|two]'])
   })
 })
 
@@ -292,7 +293,6 @@ describe('native tool changes on the wire', () => {
     const body = server.requests[0] as WireBody
     expect(body.tools?.map(tool => [tool.name, tool.defer_loading === true])).toEqual([
       ['read', false],
-      ['__pi_deferred_placeholder__', true],
       ['search', true],
     ])
     expect(body.messages.map(shape)).toEqual([
@@ -301,6 +301,32 @@ describe('native tool changes on the wire', () => {
       'user[tool_result]',
       'system[tool_removal:read|tool_addition:search]',
     ])
+  })
+
+  it('keeps pi-ai\'s deferred placeholder on a route without messagesWire', async () => {
+    const server = await mockServer([{ wire: anthropicTextWire }])
+    const profile = deepseekProfile(server.url)
+    delete profile.messagesWire
+    const { messages, anchor } = toolHistory()
+    for await (const chunk of new PiAiAdapter({
+      profiles: () => resolveProfiles({ 'deepseek-official': profile }),
+      resolveApiKey: () => Promise.resolve('sk-test'),
+      auth: memoryAuth(),
+    }).stream({
+      provider: 'deepseek-official',
+      model: 'deepseek-flash',
+      messages,
+      tools: [read, search],
+      toolUpdates: [{ afterMessageId: anchor.id, additions: ['search'], removals: [] }],
+    })) void chunk
+
+    const body = server.requests[0] as WireBody
+    expect(body.tools?.map(tool => [tool.name, tool.defer_loading === true])).toEqual([
+      ['read', false],
+      [DEFERRED_TOOL_PLACEHOLDER, true],
+      ['search', true],
+    ])
+    expect(JSON.stringify(body)).toContain('"cache_control":')
   })
 
   it('refuses a tool change whose anchor or definition the request lacks', () => {
@@ -333,5 +359,46 @@ describe('native tool changes on the wire', () => {
     const body = server.requests[0] as WireBody
     expect(body.tools?.map(tool => [tool.name, tool.defer_loading === true])).toEqual([['search', false]])
     expect(body.messages.map(shape)).toEqual(['user[look]', 'assistant[tool_use]', 'user[tool_result]'])
+  })
+})
+
+describe('the DeepSeek Messages wire', () => {
+  it('sends no placeholder, no cache breakpoints, and one leading user message', async () => {
+    const server = await mockServer([{ wire: anthropicTextWire }])
+    const ctx = await deepseekRuntime(server.url)
+    const read: ToolDeclaration = { name: 'read', description: 'Read a file.', parameters: { type: 'object', properties: {} } }
+    await drain(ctx, {
+      model: 'deepseek-flash',
+      messages: [createSystemMessage('prompt', 'test'), user('fix the bug'), user('runtime context')],
+      tools: [read],
+      toolHistory: { tools: [read], updates: [] },
+    })
+
+    const body = server.requests[0] as WireBody
+    expect(body.system?.map(block => block.text)).toEqual(['prompt'])
+    expect(body.tools?.map(tool => tool.name)).toEqual(['read'])
+    expect(JSON.stringify(body)).not.toContain('cache_control')
+    expect(JSON.stringify(body)).not.toContain(DEFERRED_TOOL_PLACEHOLDER)
+    expect(body.messages.map(shape)).toEqual(['user[fix the bug|runtime context]'])
+    expect(body.thinking).toEqual({ type: 'enabled' })
+  })
+
+  it('refuses messagesWire on a route where no request would carry it', () => {
+    expect(() => resolveProfiles({
+      gateway: {
+        api: 'openai-completions',
+        baseURL: 'https://gateway.example',
+        messagesWire: { stripCacheControl: true },
+        models: [{ id: 'm' }],
+      },
+    })).toThrow('sets messagesWire, but no model on the route speaks anthropic-messages')
+    expect(() => resolveProfiles({
+      gateway: {
+        api: 'openai-completions',
+        baseURL: 'https://gateway.example',
+        messagesWire: { stripCacheControl: false },
+        models: [{ id: 'm' }],
+      },
+    })).not.toThrow()
   })
 })
