@@ -7,7 +7,7 @@ kind: "package-reference"
 
 ## Summary
 
-Use `dsh-session-projection` when clients need current per-session state—such as todos, goals, or conversation statistics—without replaying the raw event log. Domains define synchronous projections from committed session events, and clients receive complete, schema-validated JSON values through snapshots and change notifications. Snapshots identify the last event reflected by every returned value, so carriers can pair state with the matching history cut. Projection state can be checkpointed for faster cold reads, while host-only projections remain private to the host.
+Use `dsh-session-projection` when clients need current per-session state—such as goals, permissions, or conversation statistics—without replaying the raw event log. Domains define synchronous projections from committed session events, and clients receive complete, schema-validated JSON values through snapshots and change notifications. Snapshots identify the last event reflected by every returned value, so carriers can pair state with the matching history cut. Projection state can be checkpointed for faster cold reads, while host-only projections remain private to the host.
 
 ## Table of Contents
 
@@ -27,7 +27,7 @@ Mount `dsh-session-projection` wherever client carriers need current values of l
 
 ### When to choose it
 
-Choose it when a domain keeps state that clients should see without re-deriving it — a todo list, a goal snapshot, conversation statistics. The registry drives units eagerly over committed events, so any registered unit's value is current by construction. Skip it for host-only bookkeeping that no client reads: a unit without a `wire` block stays host-only. A host reader either declares `sessionProjections` in its plugin `inject` or fails explicitly when the registry or required key is absent. Contributors may preserve optional registration through `ctx.inject(['sessionProjections'], ...)`.
+Choose it when a domain keeps state that clients should see without re-deriving it — a goal snapshot, the permission preset in force, conversation statistics. The registry drives units eagerly over committed events, so any registered unit's value is current by construction. Skip it for host-only bookkeeping that no client reads: a unit without a `wire` block stays host-only. A host reader either declares `sessionProjections` in its plugin `inject` or fails explicitly when the registry or required key is absent. Contributors may preserve optional registration through `ctx.inject(['sessionProjections'], ...)`.
 
 ### Define a projection unit
 
@@ -35,16 +35,14 @@ A domain contributes one `ProjectionDefinition` per state key: a key, a state sc
 
 ```text
 const definition = {
-  key: 'todo',
-  stateSchema: todoStateSchema,
-  stateVersion: 1,
-  init: (_header, _inheritedEventCount) => ({ items: [] }),
-  apply: (state, event) => event.type === 'todo/upsert'
-    ? { items: event.data.items }
-    : state,
+  key: 'goal',
+  stateSchema: goalProjectionStateSchema,
+  stateVersion: 6,
+  init: (_header, _inheritedEventCount) => ({ current: null, seenGoalIds: [], failure: null }),
+  apply: applyGoalProjection,
   wire: {
-    viewSchema: todoViewSchema,
-    view: state => ({ items: state.items }),
+    viewSchema: goalProjectionSchema,
+    view: state => state.current,
   },
 }
 ```

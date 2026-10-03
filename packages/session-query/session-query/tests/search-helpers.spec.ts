@@ -30,7 +30,7 @@ function expectCode(code: SessionQueryErrorCode): Error {
 }
 
 describe('session-query semantic extraction', () => {
-  it('extracts first-party message, tool, todo, and failure detail', () => {
+  it('extracts first-party message, tool, and failure detail', () => {
     const callId = ToolCallId('call')
     const messageContent: SessionEvent<'user/message'>['data']['content'] = [
       { type: 'text', text: ' visible ' },
@@ -91,7 +91,6 @@ describe('session-query semantic extraction', () => {
         },
         surfaceOp: 'append',
       },
-      { type: 'todo/write', seq: SessionSeq(6), time: 8, data: { todos: [{ status: 'in_progress', content: 'ship search' }] } },
     ]
 
     for (const event of events.slice(0, 3)) {
@@ -116,7 +115,6 @@ describe('session-query semantic extraction', () => {
     expect(extractSessionEventText(events[3]!)).toBe('bash\n{"cmd":"pwd"}')
     expect(extractSessionEventText(events[4]!)).toBe('failed\nOops\nE_OOPS')
     expect(extractSessionEventText(events[5]!)).toBe('')
-    expect(extractSessionEventText(events[6]!)).toBe('in_progress\nship search')
   })
 
   it('extracts meaningful turn outcomes and skips structural or unknown events', () => {

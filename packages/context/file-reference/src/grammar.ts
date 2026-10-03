@@ -1,5 +1,5 @@
 /**
- * Browser-safe `@file` token grammar shared by terminal and web clients.
+ * `@file` token grammar used by the terminal composer.
  *
  * @module @deepseek-ai/dsh-file-reference/grammar
  */

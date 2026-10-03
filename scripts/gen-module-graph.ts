@@ -26,7 +26,6 @@ const GROUP_ORDER = [
   'web',
   'spill',
   'timeout',
-  'todo',
   'plan',
   'cordis',
   'hooks',

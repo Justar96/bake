@@ -118,14 +118,12 @@ describe('dsh-tool-subagent-control/list-agents', () => {
     expect(parameters.properties?.scope?.enum).toEqual(['children', 'descendants'])
     expect(parameters.required ?? []).toEqual([])
     expect(schemas[0]!.description).toBe(
-      'List the continuable subagents you started, with each one\'s agent id, label, and status: running, '
-      + 'idle (between turns), or ready (saved and resumable; not a result to collect). Use it to look up '
-      + 'ids, not to poll: you are notified when one finishes. Scope `descendants` adds deeper subagents '
-      + 'with their parent\'s id and depth; only depth-1 entries can be messaged, but `interrupt_agent` can '
-      + 'stop any of them.',
+      'List your continuable subagents: agent id, label, status (running, idle, or ready = saved, resumable, '
+      + 'not a result). For ids only; you are notified on finish. Only depth-1 entries take messages; '
+      + '`interrupt_agent` stops any.',
     )
     expect(parameters.properties?.scope).toMatchObject({
-      description: 'children (default) lists your direct subagents; descendants lists every subagent below you.',
+      description: 'descendants adds deeper subagents.',
     })
   })
 
@@ -250,8 +248,8 @@ describe('dsh-tool-subagent-control/list-agents', () => {
     const schema = ctx.tools.schemas().find(candidate => candidate.name === 'list_agents')
     // Completion reaches the parent through its notice; listing is discovery,
     // so its inactive status must not send the model looking for a result.
-    expect(schema?.description).toContain('you are notified when one finishes')
-    expect(schema?.description).toContain('ready (saved and resumable; not a result to collect)')
+    expect(schema?.description).toContain('you are notified on finish')
+    expect(schema?.description).toContain('ready = saved, resumable, not a result')
     // The enum is the closed vocabulary the model renders, so pin it rather than
     // scanning prose that legitimately reads "not to poll for completion".
     const variants = ctx.tools.get('list_agents')?.output.schema.items?.oneOf ?? []

@@ -6,7 +6,7 @@ Source: [`packages/ptc-runtime/ptc-runtime/src/types.ts`](../../packages/ptc-run
 
 ## The run: request in, result out
 
-`PtcRunRequest` contains the program, bindings, cancellation and optional execution choices. The provider's `resolve` validates supported choices and applies its deployment defaults; `run` receives a `PtcRunSpec` with an explicit directory and deadline choice. An omitted timeout uses provider defaults, a number requests a capped elapsed budget, and `null` requests no elapsed deadline. Providers reject unsupported choices before execution:
+`PtcRunRequest` contains the program, bindings, cancellation and optional execution choices. The provider's `resolve` validates supported choices and applies its deployment defaults; `run` receives a `PtcRunSpec` with an explicit directory and deadline. An omitted timeout uses provider defaults, and a number requests a capped elapsed budget. Providers reject unsupported choices before execution:
 
 ```ts type-equiv
 /**
@@ -26,10 +26,10 @@ interface PtcRunRequest {
   /** Working directory in the mounted filesystem and subprocess execution world. */
   cwd?: string
   /**
-   * Elapsed execution budget in milliseconds. Omission uses provider defaults;
-   * null requests no deadline. Providers validate and cap numeric budgets or reject unsupported choices.
+   * Elapsed execution budget in milliseconds. Omission uses provider defaults.
+   * Providers validate and cap numeric budgets or reject unsupported choices.
    */
-  timeoutMs?: number | null
+  timeoutMs?: number
   /** Resolved authority for this execution. Providers without confinement reject an explicit policy. */
   sandboxPolicy?: SandboxExecutionPolicy
   /**
@@ -46,8 +46,8 @@ interface PtcRunRequest {
 interface PtcRunSpec extends PtcRunRequest {
   /** Absolute directory in the provider's execution world. */
   cwd: string
-  /** Positive finite elapsed budget in milliseconds after provider capping, or null for no deadline. */
-  timeoutMs: number | null
+  /** Positive finite elapsed budget in milliseconds after provider capping. */
+  timeoutMs: number
 }
 ```
 

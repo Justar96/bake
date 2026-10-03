@@ -27,6 +27,7 @@ import { frameSummary } from './summarizer.ts'
 import type { SummarizationInput, SummaryResult } from './summarizer.ts'
 import { isContextOverflow, summaryRetryDelay, waitForRetry } from './summary-retry.ts'
 import type { SummaryRetryPlan } from './summary-retry.ts'
+import { errorMessage } from '@deepseek-ai/dsh-util-values'
 
 interface RegionDependencies {
   readonly meter: TokenMeter
@@ -520,11 +521,6 @@ function prepareBounded(
       validateSurfaceRegion(session, prepared.start, end), 'transcript', prepared.halvings + 1)
   }
   return undefined
-}
-
-/** Message of a thrown value for a diagnostic line. */
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }
 
 /** Reject a summary prepared against any earlier surface generation. */

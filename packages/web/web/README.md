@@ -35,7 +35,7 @@ Load the service and let a single mounted backend auto-select, or pin a provider
 
 ```yaml
 - name: '@deepseek-ai/dsh-web'
-- name: '@deepseek-ai/dsh-web-search-exa'
+- name: '@deepseek-ai/dsh-web-search-deepseek'
 - name: '@deepseek-ai/dsh-web-fetch-http'
 ```
 

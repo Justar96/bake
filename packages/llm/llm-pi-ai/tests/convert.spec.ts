@@ -310,7 +310,7 @@ describe('toPiContext', () => {
       role: 'toolResult',
       toolCallId: 'c1',
       toolName: 'get_weather',
-      content: [{ type: 'text', text: 'Sunny!' }],
+      content: [{ type: 'text', text: 'Sunny' }, { type: 'text', text: '!' }],
       isError: false,
       timestamp: 0,
     })

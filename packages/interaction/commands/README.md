@@ -7,7 +7,7 @@ kind: "package-reference"
 
 ## Summary
 
-`dsh-commands` lets users run `/command [input]` actions in interactive Harness UIs without turning the command or its result into a model message. Commands can advertise input hints, accept attachments, and target one agent while preserving a global command with the same name for other agents. Every admitted run is recorded in the receiving agent's session log, while the UI renders the settled result outside model history. Use it for direct human controls in the `dsh` CLI or Web client; UI-less demos and ACP automation do not provide this command surface.
+`dsh-commands` lets users run `/command [input]` actions in interactive Harness UIs without turning the command or its result into a model message. Commands can advertise input hints, accept attachments, and target one agent while preserving a global command with the same name for other agents. Every admitted run is recorded in the receiving agent's session log, while the UI renders the settled result outside model history. Use it for direct human controls in the terminal app; UI-less demos and headless runs do not provide this command surface.
 
 ## Table of Contents
 
@@ -23,7 +23,7 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## Use this package
 
-Compose this service when an interactive UI should let users drive agent-side behavior with slash commands instead of model prompts. UI-less demo spines and ACP automation provide no command adapter and do not need it.
+Compose this service when an interactive UI should let users drive agent-side behavior with slash commands instead of model prompts. UI-less demo spines and headless runs provide no command adapter and do not need it.
 
 ### Registering a command
 

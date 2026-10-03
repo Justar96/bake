@@ -122,21 +122,15 @@
         headChars: 4096
         tailChars: 1024
 
-# ── delegation and workflows ────────────────────────────────────────────────
+# ── delegation ──────────────────────────────────────────────────────────────
 
-# The `subagents` registry and its spawn/fork backends live in the HOST
-# composition: the registry is a process singleton whose provider names may
-# only be registered once. This preset contributes the delegation TOOLS, which resolve
+# The `subagents` registry and its spawn backend live in the HOST composition:
+# the registry is a process singleton whose provider names may only be
+# registered once. This preset contributes the delegation TOOLS, which resolve
 # that host registry.
-#
-# `workflows` is different — nothing outside an agent reads it — so every row
-# that reaches it shares one entry-local realm here, and a consumer left
-# outside would resolve a host registry this preset does not populate.
 - id: delegation
   name: cordis:group
   group: true
-  isolate:
-    workflowEngine: true
   config:
     - id: tool-subagent-control
       name: '@deepseek-ai/dsh-tool-subagent-control'
@@ -152,59 +146,10 @@
         modelSelectionSettings: true
         backgroundMode: continuable
 
-    # Fork omits model selection so provider/model stay equal to the parent and
-    # the inherited history remains eligible for KV Cache reuse. This preset
-    # keeps fork continuable; parent and child inherit the same messaging tool,
-    # while the parent id and return guidance follow the inherited history.
-    - id: tool-subagent-fork
-      name: '@deepseek-ai/dsh-tool-subagent'
-      config:
-        provider: fork
-        toolName: subagent_fork
-        backgroundMode: continuable
-
-    # Workflow scripts need a Node process, so the engine resolves its own
-    # Node runtime in an entry-local `ptcRuntime` realm rather than the host's
-    # QuickJS runtime that `run_code` uses.
-    - id: workflow-ptc-runtime
-      name: cordis:group
-      group: true
-      isolate:
-        ptcRuntime: true
-      config:
-        - id: workflow-node-runtime
-          name: '@deepseek-ai/dsh-ptc-runtime-node'
-
-        - id: workflow-ptc
-          name: '@deepseek-ai/dsh-workflow-ptc'
-          config:
-            provider: spawn
-
-    - id: tool-workflow
-      name: '@deepseek-ai/dsh-tool-workflow'
-
-    # Off by default with the base row it mirrors: the tool description
-    # restricts `ralph` to runs the human explicitly asked for, and completion
-    # is a worker self-report, not an independent evaluation. Preset files take
-    # no patches, so a session that wants it duplicates this preset under a new
-    # id and drops `disabled`; the shipped root shadows a copy that reuses this
-    # id.
-    - id: tool-ralph
-      name: '@deepseek-ai/dsh-tool-ralph'
-      disabled: true
-      config:
-        subagentProvider: spawn
-        maxRounds: 64
-
 # ── remaining model-facing rows ─────────────────────────────────────────────
 
 - id: tool-ask-user
   name: '@deepseek-ai/dsh-tool-ask-user'
-
-- id: tool-todo
-  name: '@deepseek-ai/dsh-tool-todo'
-  config:
-    allowParallelInProgress: true
 
 # The `web` service and its search provider stay in the host composition; only
 # the model-facing tool is per-session.
@@ -235,9 +180,6 @@
 
 - id: tool-skill
   name: '@deepseek-ai/dsh-tool-skill'
-
-- id: present
-  name: '@deepseek-ai/dsh-tool-present'
 
 - id: tool-plugin-manager
   name: '@deepseek-ai/dsh-plugin-manager/tools'

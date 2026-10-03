@@ -208,12 +208,10 @@ function imageReadContent(value: ImageReadValue): ContentBlock[] {
 export function applyReadImageTool(ctx: Context): void {
   ctx.tools.register(defineTool({
     name: 'read_image',
-    description: 'Read a PNG, JPEG, WebP, or GIF file and return the image. '
-      + 'A path without an extension works; its format is detected from the content. '
-      + 'Large images are downscaled automatically, so do not install image tools or make thumbnails just to view one. '
-      + 'Requires a model that accepts image input.',
+    description: 'View a PNG, JPEG, WebP, or GIF file; format is detected from content and large images are '
+      + 'downscaled, so do not make thumbnails. Needs an image-input model.',
     parameters: {
-      file_path: { type: 'string', required: true, description: 'Absolute path, or relative to the working directory.' },
+      file_path: { type: 'string', required: true, description: 'Absolute, or relative to the working directory.' },
     },
     output: {
       schema: {

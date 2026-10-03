@@ -57,8 +57,6 @@ ctx.tools.register(defineTool({
 
 The unified schema DSL supports `string`, `number`, `integer`, `boolean`, `null`, `array`, `object`, author-only `json`, and exact-one `oneOf`; `InferValue` preserves exact types through 16 container levels before widening to `JsonValue`. A raw JSON Schema (`JsonSchemaNode`) is the wire-level counterpart shared with subagents, workflows, and MCP.
 
-A long usage reference that the model needs only when it uses a tool belongs in `details`, not in `description`. The native schema, which every request resends, then stays short. While a visible tool declares `details`, the registry adds its reserved `tool_help` tool, which returns them. The description should tell the model to call `tool_help` before first use. Under `ptc`, the details join the tool's SDK documentation instead.
-
 ### Configure the presentation mode
 
 The `mode` config decides what the model sees: `native` (every visible schema), `ptc` (only `run_code` plus a generated SDK), or `both`.
@@ -88,6 +86,8 @@ The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-a
 
 A tool can declare pure `presentCall()` and `presentResult()` methods. The terminal UI calls them through the registry for live and replayed calls, with the logged arguments, result content, and `tool/result.meta`. A tool's `meta` comes from one of two sources, and the model never receives it. `output.presentationMeta(args, value)` derives it from the canonical value, as file edits derive their diffs. A body whose display data is not part of its value calls `exec.presentResultMeta(meta)` instead, as a shell command reports the files it changed. The registry snapshots that value and attaches it to a successful top-level result, keeps it through a post-execute replacement, and ignores it for a nested call. A tool that declares `presentationMeta` cannot call it.
 
+The `run_code` call presenter includes the program as fenced code in generic-card `content`, tagged with the mounted runtime's language as a best-effort display hint. This language is not recorded in the call: replay uses the currently mounted runtime and may colour historical source differently. Consumers can preserve whitespace and highlight it; an unavailable grammar leaves the source uncoloured. An embedded backtick fence remains part of the program. This presentation content does not enter model schemas or result content.
+
 A long-running body can call `exec.reportProgress({ output })` with a snapshot of its newest output, as a shell command does while it runs. The registry forwards snapshots only while the top-level body executes; the loop bounds and throttles them into the process-local `agent/tool-progress` event. A snapshot is never logged or sent to the model, a nested call has no receiver, and an `output` that is not a string throws.
 
 -----
@@ -109,6 +109,8 @@ The registry holds typed `ToolDefinition`s in scoped layers and projects them on
 | File | Role |
 |---|---|
 | [`src/index.ts`](src/index.ts) | Plugin entry: `ToolRuntime` service, config, registry, execution pipeline |
+| [`src/schema-presentation.ts`](src/schema-presentation.ts) | Model-facing schema assembly: per-mode wire schemas, the PTC mode SDK contract, and the `tools:ptc-only` and `tools:sdk` sections |
+| [`src/turn-ledger.ts`](src/turn-ledger.ts) | Per-turn suppression of repeated refused calls (`DUPLICATE_TOOL_CALL`) |
 | [`src/types.ts`](src/types.ts) | `ToolDefinition`, `ToolExecution`, `ToolExecutionResult`, guard and decision types |
 | [`src/schema.ts`](src/schema.ts) | The `defineTool` DSL: `ValueSchemaSpec`, `ParameterSchemaSpec`, `InferValue`, `InferArgs` |
 | [`src/json-schema.ts`](src/json-schema.ts) | The enforced raw JSON Schema subset and validation |
@@ -166,7 +168,7 @@ In normal mode the model sees each visible definition's exact name, description,
 
 #### Token effect
 
-Fixed per-request cost proportional to the visible definitions. Restrictions that hide tools remove their entire schema cost for that agent. A tool's `details` cost nothing until the model reads them with `tool_help`; then they cost one tool result, and `tool_help`'s own schema is under 300 bytes.
+Fixed per-request cost proportional to the visible definitions. Restrictions that hide tools remove their entire schema cost for that agent.
 
 #### KV Cache effect
 
@@ -230,7 +232,7 @@ These limits define when the registry needs special care. They are current packa
 
 - **Concurrency policy is not an event gate** — `executionMode()` reads the resolved tool definition directly; plugins can only declare a classifier on definitions they own.
 - **`tools/pre-execute` deliberately cannot rewrite `exec.arguments`** — logged and rendered args would desync from what ran; the rewrite design is [a proposed Agent Note](../../../.agents/notes/proposed/feature/2026-06-30-pre-tool-input-rewrite.md).
-- **Caller-defined subagent and workflow structured outputs remain object-rooted** — this is a consumer-level guard; the shared schema vocabulary and tool outputs support every JSON root.
+- **Caller-defined subagent structured outputs remain object-rooted** — this is a consumer-level guard; the shared schema vocabulary and tool outputs support every JSON root.
 - **`timeoutMs` on a definition is declarative only** — the registry never enforces deadlines; enforcement requires the `@deepseek-ai/dsh-tool-call-timeout-policy` wrapper.
 - **PTC mode's SDK language follows the one loaded runtime, and a presentation is per agent rather than per tool** — `mode: ptc`/`both` rejects prompt assembly unless `ctx.ptcRuntime.language` has a registered SDK renderer; within one agent no tool can be native-only while another is ptc-only.
 - **PTC mode intermediate values are execution-local and unbounded by bytes** — they cannot be reconstructed from session replay and may exhaust process or worker memory; only the outer `run_code` output has the worker's configurable hard cap.

@@ -122,7 +122,7 @@ None of its own. A host half that registers tools changes the next request's too
 These limits define when the runner needs special care. They are current package constraints, not a task backlog.
 
 - **A successful run does not mean the UI rendered** — React renders after the load receipt; failures reach the owning session through steering and appear in the browser panel.
-- **A browser-half package suspends where no page is connected** — headless and ACP deployments hold the run until the asking turn is cancelled; host-only packages are unaffected.
+- **A browser-half package suspends where no page is connected** — headless deployments hold the run until the asking turn is cancelled; host-only packages are unaffected.
 - **A suspended run request has no timeout** — it waits for a person until the asking turn is cancelled, so unattended automation cannot use packages with a browser half.
 - **`vmTimeoutMs` bounds only synchronous evaluation** — an async host-half body escapes it, matching the toolset's cooperative trust stance.
 - **A stale-success refusal leaves the request suspended** — when the answering page names a revision the registry has moved past, the resolution is refused (`accepted: false`) and the request stays answerable until another page answers or the caller cancels; the browser half does not read the acknowledgement.

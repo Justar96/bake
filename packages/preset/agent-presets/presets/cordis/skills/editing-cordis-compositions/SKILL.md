@@ -40,18 +40,19 @@ Edit the copy's `agent.cordis.yml` with the normal file tools. Writes outside th
 A preset row that publishes a service needs an `isolate` realm containing both the provider and all its consumers. A tool that only consumes a host service remains outside that realm. Copy the shipped preset's existing groups rather than introducing service instances into the process-global realm.
 
 ```yaml
-- id: delegation
+- id: compaction
   name: cordis:group
   group: true
   isolate:
-    workflowEngine: true
+    compaction: true
+    toolResultPruner: true
   config:
-    - id: workflow-ptc
-      name: '@deepseek-ai/dsh-workflow-ptc'
-      config:
-        provider: spawn
-    - id: tool-workflow
-      name: '@deepseek-ai/dsh-tool-workflow'
+    - id: compaction-basic
+      name: '@deepseek-ai/dsh-compaction-basic'
+    - id: command-compact
+      name: '@deepseek-ai/dsh-command-compact'
+    - id: tool-result-pruner
+      name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
 ```
 
 ## Verify a preset

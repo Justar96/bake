@@ -8,6 +8,7 @@
  */
 
 import type z from '@deepseek-ai/schemastery'
+import { isRecord } from '@deepseek-ai/dsh-util-values'
 
 /**
  * Minimal structural view of a live schemastery node. Only the relations the
@@ -40,11 +41,6 @@ export interface RedactedValue {
    * value has them.
    */
   secrets: RedactedSecret[]
-}
-
-/** Whether a value is a plain data object the walker may recurse into. */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function walk(node: SchemaNode | undefined, value: unknown, path: string[], secrets: RedactedSecret[]): unknown {

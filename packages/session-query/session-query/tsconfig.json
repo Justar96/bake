@@ -27,9 +27,6 @@
       "path": "../../session/session-title"
     },
     {
-      "path": "../../todo/tool-todo"
-    },
-    {
       "path": "../../session/session-persistence"
     },
     {

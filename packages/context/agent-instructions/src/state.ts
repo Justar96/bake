@@ -30,6 +30,7 @@ import {
   type ChangeRenderItem,
   type AgentInstructionChange,
 } from './render.ts'
+import { isRecord } from '@deepseek-ai/dsh-util-values'
 
 export const name = 'agent-instructions'
 
@@ -103,10 +104,6 @@ function isAgentInstructionsSource(
   return typeof source === 'object' && source !== null
     && 'kind' in source && source.kind === 'agent-instructions'
     && 'changes' in source && Array.isArray(source.changes)
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function workspaceInstructionChanges(source: { changes: unknown[] }): AgentInstructionChange[] {

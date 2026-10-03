@@ -27,7 +27,6 @@ import SubagentRuntime, {
   SubagentError,
 } from '@deepseek-ai/dsh-subagent'
 import * as SubagentSpawn from '@deepseek-ai/dsh-subagent-spawn-in-process'
-import * as SubagentFork from '@deepseek-ai/dsh-subagent-fork-in-process'
 import { MockAdapter, textResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
 import { TestSessionQuery } from './test-session-query.ts'
 import { seedStoredSession } from './persistence-helpers.ts'
@@ -72,7 +71,6 @@ async function setup(
   await ctx.plugin(TestSessionQuery)
   await ctx.plugin(SubagentRuntime)
   await ctx.plugin(SubagentSpawn, { providerName: 'spawn' })
-  await ctx.plugin(SubagentFork, { providerName: 'fork' })
   ctx.llm.registerAdapter(['mock'], new MockAdapter(script))
   const loop = ctx.get('agentLoop')
   const parent = loop === undefined

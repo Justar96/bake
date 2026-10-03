@@ -303,18 +303,16 @@ export function applyGlobTool(ctx: Context, caps: GlobToolCaps): void {
     : `shows the newest ${caps.maxResults}`
   const tool = defineTool({
     name: 'glob',
-    description: 'Find files, not directories, whose paths match a glob pattern. '
-      + 'It is a bounded, newest-first alternative to find in a shell: hidden and ignored files are included, but VCS metadata is not. '
-      + 'Scope `path` to the repository, never `/` or `$HOME`. '
-      + `A result over ${caps.maxResults} paths ${overCapDescription}, says so, and reports where the full list was saved.`,
+    description: 'Find files by glob, newest first, including hidden and ignored ones (not VCS metadata). '
+      + 'Keep `path` in the repository, never `/` or `$HOME`. '
+      + `Past ${caps.maxResults} paths it ${overCapDescription} and names a file with all of them.`,
     parameters: {
       pattern: {
         type: 'string',
         required: true,
-        description: 'Glob pattern, e.g. "**/*.ts" or "src/**/*.test.js". '
-          + 'A pattern without "/" matches file names at any depth, so "*.ts" searches the whole tree.',
+        description: 'Without "/", matches file names at any depth.',
       },
-      path: { type: 'string', description: 'Directory to search. Defaults to the working directory; relative paths resolve against it.' },
+      path: { type: 'string', description: 'Defaults to the working directory.' },
     },
     timeoutMs: caps.timeoutMs,
     output: {

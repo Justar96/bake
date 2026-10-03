@@ -38,9 +38,10 @@ export function formatRow(row: Row): string {
       return `${gutter} ${row.name}${oneLine(row.args)}`
     case 'tool-call': {
       const call = `${gutter} ${row.tool} [${row.callId}](${oneLine(row.input)})${cardText(row.detail)}`
-      if (row.result === undefined) return call
-      // One action, one line. The call, then how it ended.
-      return `${call} ${GUTTER['tool-result']} ${outcomeText(row.result.ok, row.result.title, row.result.text, row.result.detail, row.result.changes)}`.trimEnd()
+      const nested = (row.dispatches ?? []).map(child => `  ${formatRow(child)}`).join('\n')
+      const ended = row.result === undefined ? call
+        : `${call} ${GUTTER['tool-result']} ${outcomeText(row.result.ok, row.result.title, row.result.text, row.result.detail, row.result.changes)}`.trimEnd()
+      return nested === '' ? ended : `${ended}\n${nested}`
     }
     case 'tool-group':
       return row.calls.map(formatRow).join('\n')

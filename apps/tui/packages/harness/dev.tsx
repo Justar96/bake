@@ -73,7 +73,6 @@ function staticProps(copy: TuiCopy) {
     command: undefined,
     notice: copy.previewHelp,
     interaction: undefined,
-    todos: undefined,
     model: 'harness/replay',
     cwd: compactPath(process.cwd(), process.env['HOME']),
     sessionId: 'session-harness',

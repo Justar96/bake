@@ -11,7 +11,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, AgentOptions, CreateAgentOptions } from '@deepseek-ai/dsh-agent'
 import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
-import type { Session, SessionId } from '@deepseek-ai/dsh-session'
+import type { Session } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import type { ToolRestriction } from '@deepseek-ai/dsh-tools'
 // Type-only: make `ctx.get('sandboxPolicy')`, `ctx.get('approval')`, and
@@ -122,8 +122,8 @@ export function resolveChildAgentOptions(
 /**
  * Build the child session's durable creation metadata: the parent's workspace,
  * its direct lineage, coarse product origin, the recursion budget that must
- * survive persistence, the seed boundary that separates inherited parent
- * history from child work, and the composition the child runs under.
+ * survive persistence, and the composition the child runs under. A delegated
+ * child never inherits a parent-log prefix, so `isSeeded` is always false.
  *
  * The preset is read from the parent's LIVE scope chain rather than from its
  * header, because a parent that switched preset while blank runs on the newer
@@ -133,21 +133,16 @@ export function resolveChildAgentOptions(
  * child never had.
  * @param parent - the delegating parent agent.
  * @param childDepth - the resolved delegation depth to persist.
- * @param isSeeded - whether this child inherits a parent-log prefix, including an explicitly empty one.
  * @returns the `meta` for `ctx.agents.create()`.
  */
-export function childSessionMeta(
-  parent: Agent,
-  childDepth: number,
-  isSeeded: boolean,
-): NonNullable<CreateAgentOptions['meta']> {
+export function childSessionMeta(parent: Agent, childDepth: number): NonNullable<CreateAgentOptions['meta']> {
   const parentHeader = parent.session.header
   const agentPreset = parent.ctx.get('agentPresets')?.composedPreset(parent.ctx)
   return {
     ...parentHeader.cwd !== undefined ? { cwd: parentHeader.cwd } : {},
     ...agentPreset === undefined ? {} : { agentPreset },
     parentSession: parentHeader.id,
-    isSeeded,
+    isSeeded: false,
     // Navigation classification only; the descriptor remains the authority
     // for mode and continuation capability.
     origin: 'subagent',
@@ -235,8 +230,7 @@ export interface DelegatedPolicyOverrides {
  * Capture the permission state to seed into one delegation. Call synchronously before
  * the child start's first await: a later parent switch belongs to the
  * parent's future, not to this child. Auto and Full access identities are
- * inherited only through the in-process DSH path so either can replace a stale
- * same-bundle fork value. Only the parent session's explicit sandbox override
+ * inherited only through the in-process DSH path. Only the parent session's explicit sandbox override
  * is captured — never deployment defaults or one-shot grants — and the approval
  * policy is pinned to `'never'` regardless of the parent's own policy.
  * @param parent - the delegating parent agent.
@@ -254,8 +248,7 @@ export function captureDelegatedPolicyOverrides(parent: Agent): DelegatedPolicyO
 /**
  * Append the captured delegation policy onto the child's own log as
  * `source: 'delegation'` events inside the unpublished creation window, so the
- * child's effective policy is reconstructable from its log alone. Appends land
- * after any fork seed, so fresh policy wins stale seed state; later child
+ * child's effective policy is reconstructable from its log alone. Later child
  * switches still win over these events.
  * @param childSession - the unpublished child's session.
  * @param overrides - the policy captured at delegation.
@@ -273,16 +266,4 @@ export function appendDelegatedPolicyOverrides(
   if (overrides.permissionPreset !== undefined) {
     childSession.append('permission/preset', { preset: overrides.permissionPreset })
   }
-}
-
-/** Identity and lineage inputs shared by every in-process child creation. */
-export interface ChildCreateInputs {
-  /** The child's reserved session id. */
-  readonly sessionId: SessionId
-  /** The delegating parent agent. */
-  readonly parent: Agent
-  /** The resolved delegation depth. */
-  readonly childDepth: number
-  /** How many leading seed events came from the parent's log. */
-  readonly lineageSeedLength: number
 }

@@ -130,6 +130,21 @@ describe('WorkspaceGit', () => {
     }
   })
 
+  it.skipIf(process.platform === 'win32')('stops what git ran when a read is aborted', async () => {
+    const { repo, env, git } = fixture()
+    // A hook still running when the read stops must not write afterwards.
+    git('config', 'core.fsmonitor', `touch ${join(repo, 'hook-started')}; sleep 0.4; touch ${join(repo, 'hook-finished')}; false`)
+    const workspace = new WorkspaceGit({ env, pollMs: 10 })
+    const abort = new AbortController()
+    workspace.start(abort.signal, () => {})
+    workspace.follow(repo)
+    await vi.waitFor(() => expect(existsSync(join(repo, 'hook-started'))).toBe(true))
+    abort.abort()
+    await workspace.drain()
+    await new Promise(resolve => setTimeout(resolve, 700))
+    expect(existsSync(join(repo, 'hook-finished'))).toBe(false)
+  })
+
   it('leaves the field empty rather than reading unconfined when confinement fails', async () => {
     const { repo, env, git } = fixture()
     git('config', 'core.fsmonitor', `touch ${join(repo, 'fsmonitor-ran')}; false`)

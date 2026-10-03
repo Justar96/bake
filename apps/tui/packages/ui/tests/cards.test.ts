@@ -47,10 +47,10 @@ describe('call cards', () => {
   })
 
   it('draws a structured raw input a field or an item to a line', () => {
-    const todos = seam({ presentCall: () => ({ card: 'generic', title: 'Update todo list', rawInput: [
+    const steps = seam({ presentCall: () => ({ card: 'generic', title: 'Record plan steps', rawInput: [
       { content: 'Find the bug', status: 'completed' }, { content: 'Fix it', status: 'in_progress', tags: ['a'] },
     ] }) })
-    expect(todos.call('c1', 'todo_write', '{}')?.detail).toEqual([
+    expect(steps.call('c1', 'plan_steps', '{}')?.detail).toEqual([
       { text: 'Find the bug  completed' }, { text: '{"content":"Fix it","status":"in_progress","tags":["a"]}' },
     ])
     const manage = seam({ presentCall: () => ({ card: 'generic', title: 'Manage profile plugins', rawInput: { action: 'list', names: ['x'] } }) })

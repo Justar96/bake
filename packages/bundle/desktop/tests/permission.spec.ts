@@ -21,7 +21,7 @@ describe('classifyTool', () => {
   })
 
   it('allows reads, workspace writes, and sub-agents in normal mode without asking', () => {
-    for (const name of ['read', 'grep', 'glob', 'web_fetch', 'todo_write', 'write', 'edit', 'subagent']) {
+    for (const name of ['read', 'grep', 'glob', 'web_fetch', 'write', 'edit', 'subagent']) {
       expect(classifyTool('normal', name, {})).toEqual({ kind: 'allow' })
     }
   })

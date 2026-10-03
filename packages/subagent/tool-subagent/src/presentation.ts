@@ -36,7 +36,7 @@ function firstLine(text: string): string {
 }
 
 /**
- * The pending card of a `subagent` or `subagent_fork` call: its short
+ * The pending card of a delegation call: its short
  * description, falling back to the prompt's first line when the description
  * is blank. The prompt itself stays out of the card.
  * @param args - the validated delegation arguments.

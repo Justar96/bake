@@ -108,6 +108,9 @@ export class SessionNavigation {
           name, description, recordInput: false,
           handler: ({ rawInput }) => {
             if (rawInput.trim() !== '') return { kind: 'error', text: `${this.copy.usage}: /${name}` }
+            // Refused now, so the command's record says why instead of a later notice.
+            const refused = this.busy ? this.copy.sessionsBusy : this.unavailable(agent)
+            if (refused !== undefined) return { kind: 'error', text: refused }
             this.request(agent, name === 'new' || name === 'clear')
             return { kind: 'success' }
           },
@@ -175,10 +178,17 @@ export class SessionNavigation {
     return `${this.copy.sessionsError}: ${error instanceof Error ? error.message : String(error)}`
   }
 
+  /** Why the Session cannot be left now, or undefined when it can. */
+  private unavailable(agent: Agent): string | undefined {
+    if (this.controller?.attachments.pending) return this.copy.attachmentsBeforeNavigation
+    if (agent.status !== 'idle') return this.copy.sessionsIdle
+    if (agent.inbox.nextStep.length > 0 || agent.inbox.nextTurn.length > 0) return this.copy.sessionsPending
+    return undefined
+  }
+
   private assertAvailable(agent: Agent): void {
-    if (this.controller?.attachments.pending) throw new Error(this.copy.attachmentsBeforeNavigation)
-    if (agent.status !== 'idle') throw new Error(this.copy.sessionsIdle)
-    if (agent.inbox.nextStep.length > 0 || agent.inbox.nextTurn.length > 0) throw new Error(this.copy.sessionsPending)
+    const refused = this.unavailable(agent)
+    if (refused !== undefined) throw new Error(refused)
   }
 
   private async navigate(commandSignal: AbortSignal, newSession: boolean): Promise<void> {

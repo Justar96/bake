@@ -162,7 +162,7 @@
 
     # Full-text session search is opt-in. `openAt: never` keeps
     # ctx.sessionQuery mounted — exact reads, titles, and lineage traces
-    # (session export, subagent-fork Workspace inheritance) stay available —
+    # (session export, subagent Workspace inheritance) stay available —
     # while search calls fail with SESSION_QUERY_SEARCH_DISABLED and SQLite is
     # never opened; the Web sidebar search matches titles and workspace names
     # only. Deployments enabling content search override `openAt` to
@@ -380,11 +380,6 @@
       config:
         providerName: spawn
 
-    - id: subagent-fork-in-process
-      name: '@deepseek-ai/dsh-subagent-fork-in-process'
-      config:
-        providerName: fork
-
     # Continuable background children are selected per delegation tool. The
     # separately loaded follow-up tool registers the one global `send_message`.
     - id: tool-subagent-control
@@ -400,43 +395,10 @@
         toolName: subagent
         backgroundMode: continuable
 
-    # Fork omits model selection so provider/model stay equal to the parent and
-    # the inherited history remains eligible for KV Cache reuse. This base row
-    # stays one-shot; preset layers may select continuable mode without adding a
-    # child-only system-prompt section or tool schema ahead of that history.
-    # See .agents/notes/implemented/feature/2026-08-18-model-selected-subagent-routes.md
-    # and .agents/notes/implemented/architecture/2026-08-10-fork-children-stay-one-shot.md.
-    - id: tool-subagent-fork
-      name: '@deepseek-ai/dsh-tool-subagent'
-      config:
-        provider: fork
-        toolName: subagent_fork
-        backgroundMode: one-shot
-
     # `run_code` programs run in a fresh QuickJS VM whose only capability is
     # the tool bindings; nested calls keep each tool's own policy and approval.
     - id: ptc-runtime
       name: '@deepseek-ai/dsh-ptc-runtime-codemode'
-
-    # Workflow scripts need a Node process (module import, `node:vm`, the
-    # session file sandbox), so the engine gets its own Node runtime behind an
-    # entry-local `ptcRuntime` realm instead of the QuickJS one above.
-    - id: workflow-ptc-runtime
-      name: cordis:group
-      group: true
-      isolate:
-        ptcRuntime: true
-      config:
-        - id: workflow-node-runtime
-          name: '@deepseek-ai/dsh-ptc-runtime-node'
-
-        - id: workflow-ptc
-          name: '@deepseek-ai/dsh-workflow-ptc'
-          config:
-            provider: spawn
-
-    - id: tool-workflow
-      name: '@deepseek-ai/dsh-tool-workflow'
 
     - id: timeout-policy
       name: '@deepseek-ai/dsh-tool-call-timeout-policy'
@@ -467,29 +429,10 @@
     - id: image-offload
       name: '@deepseek-ai/dsh-compaction-image-offload'
 
-    - id: tool-todo
-      name: '@deepseek-ai/dsh-tool-todo'
-      config:
-        allowParallelInProgress: true
-
     # Persisted same-session goals reach the model and the slash menu here; the
     # domain, driver, and `/goal` command are above.
     - id: tool-goal
       name: '@deepseek-ai/dsh-tool-goal'
-
-    # Fresh-agent Ralph iteration over a build-time-fixed script. Off by
-    # default: the tool description restricts `ralph` to runs the human
-    # explicitly asked for, and completion is a worker self-report, not an
-    # independent evaluation. An overlay row restores it for a base-backed
-    # profile (`$DSH_HOME/cordis.patch.yml`, or a `--patch <file>`):
-    #   - id: tool-ralph
-    #     disabled: false
-    - id: tool-ralph
-      name: '@deepseek-ai/dsh-tool-ralph'
-      disabled: true
-      config:
-        subagentProvider: spawn
-        maxRounds: 64
 
     # Consecutive-repeat reminders on the tool chain.
     - id: repeat-tool-reminder

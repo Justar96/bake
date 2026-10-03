@@ -56,7 +56,7 @@ function text(blocks: readonly { type: string; text?: string }[]): string {
 describe('startInProcessRun', () => {
   it('returns only after publication, drives a fresh child, and disposes it', async () => {
     const { ctx, parent } = await setup([textResponse('driver answer')])
-    const run = await startInProcessRun(request(parent), {})
+    const run = await startInProcessRun(request(parent))
     expect(ctx.agents.get(run.id)).toBeDefined()
     const result = await run.result
     expect(result.stopReason).toBe('completed')
@@ -73,7 +73,7 @@ describe('startInProcessRun', () => {
     const run = await startInProcessRun({
       ...request(parent),
       agentOptions: { provider: 'mock', model: 'mock' },
-    }, {})
+    })
 
     const child = ctx.agents.get(run.id)!
     expect(child.options).toMatchObject({ provider: 'mock', model: 'mock' })
@@ -91,7 +91,7 @@ describe('startInProcessRun', () => {
       return { kind: 'reject' as const }
     })
 
-    const run = await startInProcessRun(request(parent), {})
+    const run = await startInProcessRun(request(parent))
     await expect(run.result).resolves.toMatchObject({ stopReason: 'refusal' })
     await run.dispose()
   })
@@ -105,7 +105,7 @@ describe('startInProcessRun', () => {
       throw new Error('disk full')
     })
 
-    const run = await startInProcessRun(request(parent), {})
+    const run = await startInProcessRun(request(parent))
     await expect(run.result).resolves.toMatchObject({ stopReason: 'completed' })
     expect(flushes).toBe(0)
     await run.dispose()
@@ -138,7 +138,7 @@ describe('startInProcessRun', () => {
       },
     } as unknown as Agent
 
-    const run = await startInProcessRun(request(parentWithFailedDisposal), {})
+    const run = await startInProcessRun(request(parentWithFailedDisposal))
     expect(ctx.agents.get(run.id)).toBeDefined()
     await expect(run.result).rejects.toBe(runError)
     await expect(run.dispose()).rejects.toBe(disposalError)
@@ -159,7 +159,7 @@ describe('startInProcessRun', () => {
       }), { surfaceOp: 'append' })
     })
 
-    const run = await startInProcessRun(request(parent), {})
+    const run = await startInProcessRun(request(parent))
     const result = await run.result
     const child = ctx.agents.get(run.id)!
 
@@ -191,7 +191,7 @@ describe('startInProcessRun', () => {
       name: 'noop', description: 'probe', parameters: {},
       execute() { return Promise.resolve([{ type: 'text', text: 'noop result' }]) },
     }))
-    const run = await startInProcessRun(request(parent), {})
+    const run = await startInProcessRun(request(parent))
     const result = await run.result
     expect(result.stopReason).toBe('max-tokens')
     expect(text(result.output)).toBe('partial one')
@@ -199,57 +199,9 @@ describe('startInProcessRun', () => {
     disposeNoop()
   })
 
-  it('seeds a forked child but reads only the child-owned output', async () => {
-    const { ctx, parent } = await setup([textResponse('parent answer'), textResponse('child answer')])
-    parent.followup(createUserMessage({ content: [{ type: 'text', text: 'parent question' }], source: { kind: 'user' } }))
-    await parent.whenIdle()
-    const seed = parent.session.snapshotEvents()
-    const run = await startInProcessRun(request(parent), { seed })
-    const result = await run.result
-    expect(text(result.output)).toBe('child answer')
-    const child = ctx.agents.get(run.id)!
-    expect(child.session.header.isSeeded).toBe(true)
-    expect(child.session.inheritedEventCount).toBe(seed.length)
-    expect(child.session.snapshotEvents().slice(0, seed.length)).toEqual(seed)
-    // The seeded `system/message` stays surface node 0: the child renders the
-    // same prompt, so its loop appends no second system node.
-    const seededSystem = seed.find(event => event.type === 'system/message')
-    expect(seededSystem).toBeDefined()
-    expect(child.session.snapshotEvents().filter(event => event.type === 'system/message')).toHaveLength(1)
-    expect(child.session.surface.nodes[0]).toBe(seededSystem?.seq)
-    expect(child.session.deriveMessages()[0]).toEqual(parent.session.deriveMessages()[0])
-    await run.dispose()
-  })
-
-  it('replaces a seeded system node in place when the forked child renders a different prompt', async () => {
-    const { ctx, parent, adapter } = await setup([textResponse('parent answer'), textResponse('child answer')])
-    parent.followup(createUserMessage({ content: [{ type: 'text', text: 'parent question' }], source: { kind: 'user' } }))
-    await parent.whenIdle()
-    const seed = parent.session.snapshotEvents()
-    const seededSystem = seed.find(event => event.type === 'system/message')
-    if (seededSystem === undefined) throw new Error('the parent log lacks a system node')
-    ctx.systemPrompt.section({ name: 'test:after-fork', order: 10, text: 'Registered after the fork seed.' })
-
-    const run = await startInProcessRun(request(parent), { seed })
-    await run.result
-    const child = ctx.agents.get(run.id)!
-    const systemNodes = child.session.snapshotEvents().filter(event => event.type === 'system/message')
-    expect(systemNodes.map(event => event.seq)).toEqual([seededSystem.seq, systemNodes[1]?.seq])
-    expect(systemNodes[1]?.surfaceOp).toEqual({ op: 'replace', startSeq: seededSystem.seq, endSeq: seededSystem.seq })
-    expect(systemNodes[1]?.sourceEventSeqs).toEqual([seededSystem.seq])
-    expect(child.session.surface.nodes[0]).toBe(systemNodes[1]?.seq)
-    const childRequest = adapter.requests.at(-1)!
-    expect(childRequest.system).toBeUndefined()
-    expect(childRequest.messages[0]).toMatchObject({
-      role: 'system',
-      content: [{ type: 'text', text: expect.stringContaining('Registered after the fork seed.') as unknown }],
-    })
-    await run.dispose()
-  })
-
   it('persists the child origin and depth in its session header', async () => {
     const { ctx, parent } = await setup([textResponse('child answer')])
-    const run = await startInProcessRun(request(parent), {})
+    const run = await startInProcessRun(request(parent))
     await run.result
     // The recursion budget is durable session data, not only runtime options —
     // a depth that lived only in AgentOptions would reset to 0 on resume.
@@ -265,7 +217,7 @@ describe('startInProcessRun', () => {
       [textResponse('inherited'), textResponse('overridden')],
       { maxTokens: 111 },
     )
-    const inherited = await startInProcessRun(request(parent), {})
+    const inherited = await startInProcessRun(request(parent))
     await inherited.result
     expect(adapter.requests[0]?.maxTokens).toBe(111)
     expect(ctx.agents.get(inherited.id)?.options.maxTokens).toBe(111)
@@ -274,7 +226,7 @@ describe('startInProcessRun', () => {
     const overridden = await startInProcessRun({
       ...request(parent),
       agentOptions: { maxTokens: 222 },
-    }, {})
+    })
     await overridden.result
     expect(adapter.requests[1]?.maxTokens).toBe(222)
     expect(ctx.agents.get(overridden.id)?.options.maxTokens).toBe(222)
@@ -291,7 +243,7 @@ describe('startInProcessRun', () => {
       agentOptions: { provider: 'mock', model: 'mock' },
       signal: new AbortController().signal,
     })).agent
-    await expect(startInProcessRun({ ...request(resumed), maxDepth: 1 }, {}))
+    await expect(startInProcessRun({ ...request(resumed), maxDepth: 1 }))
       .rejects.toMatchObject({ name: 'SubagentDepthError', attemptedDepth: 2, maxDepth: 1 })
   })
 
@@ -304,23 +256,23 @@ describe('startInProcessRun', () => {
       signal: new AbortController().signal,
     })).agent
     // Persisted 2 vs runtime 1: the child is depth 3, so maxDepth 2 rejects.
-    await expect(startInProcessRun({ ...request(parent), maxDepth: 2 }, {}))
+    await expect(startInProcessRun({ ...request(parent), maxDepth: 2 }))
       .rejects.toMatchObject({ name: 'SubagentDepthError', attemptedDepth: 3, maxDepth: 2 })
   })
 
   it('rejects invalid and exceeded depth before publication', async () => {
     const { parent } = await setup([])
-    await expect(startInProcessRun({ ...request(parent), maxDepth: -1 }, {}))
+    await expect(startInProcessRun({ ...request(parent), maxDepth: -1 }))
       .rejects.toThrow('non-negative safe integer')
-    await expect(startInProcessRun({ ...request(parent), maxDepth: 0 }, {}))
+    await expect(startInProcessRun({ ...request(parent), maxDepth: 0 }))
       .rejects.toMatchObject({ name: 'SubagentDepthError' })
     for (const value of [Number.NaN, 1.5, -1, -0, Number.MAX_SAFE_INTEGER + 1]) {
       const malformed = { options: { subagentDepth: value }, session: { header: {} } } as unknown as Agent
-      await expect(startInProcessRun(request(malformed), {}))
+      await expect(startInProcessRun(request(malformed)))
         .rejects.toThrow('agent subagentDepth must be a non-negative safe integer')
     }
     const maxParent = { options: { subagentDepth: Number.MAX_SAFE_INTEGER }, session: { header: {} } } as unknown as Agent
-    await expect(startInProcessRun(request(maxParent), {})).rejects.toBeInstanceOf(RangeError)
+    await expect(startInProcessRun(request(maxParent))).rejects.toBeInstanceOf(RangeError)
   })
 
   it('rejects an already-aborted request without publishing a child', async () => {
@@ -329,7 +281,7 @@ describe('startInProcessRun', () => {
     const beforeSessions = ctx.sessions.list().length
     const controller = new AbortController()
     controller.abort('too late')
-    await expect(startInProcessRun(request(parent, controller.signal), {}))
+    await expect(startInProcessRun(request(parent, controller.signal)))
       .rejects.toThrow('aborted before child publication')
     expect(ctx.agents.list()).toHaveLength(beforeAgents)
     expect(ctx.sessions.list()).toHaveLength(beforeSessions)
@@ -343,7 +295,7 @@ describe('startInProcessRun', () => {
     // route rather than silently adopting one.
     const { ctx } = await setup([])
     const parent = await ctx.agentLoop.create(SessionId('routeless-parent'), {})
-    const run = await startInProcessRun(request(parent), {})
+    const run = await startInProcessRun(request(parent))
     const child = ctx.agents.get(run.id)!
     expect(child.options).toEqual({ subagentDepth: 1 })
     await expect(run.result).resolves.toMatchObject({ stopReason: 'error' })
@@ -353,7 +305,7 @@ describe('startInProcessRun', () => {
   it('uses the request signal after publication and dispose as cancellation paths', async () => {
     const { parent, adapter } = await setup(['hang', 'hang'])
     const controller = new AbortController()
-    const signalled = await startInProcessRun(request(parent, controller.signal), {})
+    const signalled = await startInProcessRun(request(parent, controller.signal))
     await new Promise(resolve => setTimeout(resolve, 30))
     controller.abort('stop child')
     // No step completed a message, so the text streamed before the abort is
@@ -368,7 +320,7 @@ describe('startInProcessRun', () => {
     expect(turnEnd?.type === 'turn/end' && turnEnd.data.reason).toEqual({ kind: 'aborted', reason: { kind: 'parent' } })
     await signalled.dispose()
 
-    const disposed = await startInProcessRun(request(parent), {})
+    const disposed = await startInProcessRun(request(parent))
     await new Promise(resolve => setTimeout(resolve, 30))
     await disposed.dispose()
     await expect(disposed.result).resolves.toMatchObject({ stopReason: 'aborted' })
@@ -381,7 +333,7 @@ describe('startInProcessRun', () => {
     await expect(startInProcessRun({
       ...request(parent),
       toolFilter: { deny: ['unknown-tool'] },
-    }, {})).rejects.toThrow('unknown global tool')
+    })).rejects.toThrow('unknown global tool')
     expect(ctx.agents.list()).toHaveLength(beforeAgents)
     expect(ctx.sessions.list()).toHaveLength(beforeSessions)
   })
@@ -409,7 +361,7 @@ describe('startInProcessRun', () => {
         },
       },
     } as unknown as Agent
-    const run = await startInProcessRun(request(parentWithAbortAtHandoff, controller.signal), {})
+    const run = await startInProcessRun(request(parentWithAbortAtHandoff, controller.signal))
     expect(ctx.agents.get(run.id)).toBeDefined()
     await expect(run.result).resolves.toEqual({ output: [], stopReason: 'aborted' })
     await run.dispose()

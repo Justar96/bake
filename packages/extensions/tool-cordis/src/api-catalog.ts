@@ -1081,31 +1081,6 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
-    key: 'messageFeedback',
-    summary: 'Session-log service; cold operations never construct a Session or Agent.',
-    description: 'Session-log service; cold operations never construct a Session or Agent.',
-    methods: [
-      {
-        signature: '@Remote(\'list\') list(request: MessageFeedbackListRequest): Promise<MessageFeedbackListResult>',
-        description: 'Read current feedback from the canonical log.',
-        parameters: [{ name: 'request', description: 'Session to inspect.' }],
-        returns: 'immutable items or a definite persistence miss.',
-      },
-      {
-        signature: '@Remote(\'put\') put(request: MessageFeedbackPutRequest): Promise<MessageFeedbackPutResult>',
-        description: 'Create or replace feedback after checking its current version. Matching no-ops retain the version and append no event.',
-        parameters: [{ name: 'request', description: 'Target, desired value, and observed item version.' }],
-        returns: 'the durable item or an explicit business failure.',
-      },
-      {
-        signature: '@Remote(\'delete\') delete(request: MessageFeedbackDeleteRequest): Promise<MessageFeedbackDeleteResult>',
-        description: 'Delete one item after checking its version; absence succeeds without an event.',
-        parameters: [{ name: 'request', description: 'Session, message, and observed item version.' }],
-        returns: 'the stable absent postcondition or an explicit failure.',
-      },
-    ],
-  },
-  {
     key: 'permissionPresets',
     summary: 'Owns the deployment\'s configured permission presets, the fixed Auto integration hook, and their write path.',
     description: 'Owns the deployment\'s configured permission presets, the fixed Auto integration hook, and their write path. Requires a confining `ctx.shell` executor and `ctx.approval`; unmatched knob values are reported as CUSTOM_PRESET, not an error.',
@@ -2509,25 +2484,6 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
-    key: 'webhookRuntime',
-    summary: 'Fire-and-forget rule runtime.',
-    description: 'Fire-and-forget rule runtime. Session creation is the only built-in action.',
-    methods: [
-      {
-        signature: 'register<K extends string>(rule: WebhookRule<K>): () => Promise<void>',
-        description: 'Register one trusted programmatic rule.',
-        parameters: [{ name: 'rule', description: 'unique id, provider kind, and arbitrary callback.' }],
-        returns: 'awaitable effect disposer that aborts and drains this rule\'s active callbacks.',
-      },
-      {
-        signature: 'dispatch<K extends string>(delivery: VerifiedWebhookDelivery<K>): void',
-        description: 'Start every currently matching rule and return before any callback settles.',
-        parameters: [{ name: 'delivery', description: 'authenticated provider data; snapshotted before dispatch.' }],
-        throws: ['synchronously when the runtime is closing or the delivery is malformed.'],
-      },
-    ],
-  },
-  {
     key: 'webServer',
     summary: 'The browser HTTP carrier service.',
     description: 'The browser HTTP carrier service. Activation listens immediately. Route registration order does not affect requests because configured named routes must be distinct, and the fallback handler answers anything not yet claimed during startup with 404 until its owner registers. A listen failure rejects initialization, and the boot process reports the failed fiber.',
@@ -2573,74 +2529,6 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Render one index.html body: the structured injection table first, then the raw `tapIndex` transforms over the result.',
         parameters: [{ name: 'html', description: 'the raw index.html body.' }],
         returns: 'the transformed body.',
-      },
-    ],
-  },
-  {
-    key: 'workflowEngine',
-    summary: 'Workflow Service Definition contract.',
-    description: 'Workflow Service Definition contract. Invalid requests throw before publication; a live run is holder-owned, its result never rejects, and disposal waits for script and child cleanup. Lifecycle listener failures are contained, and `workflow/end` fires exactly once as the result settles.',
-    methods: [
-      {
-        signature: 'abstract start(request: WorkflowStartRequest): WorkflowRun',
-        description: 'Parse and execute a workflow script.',
-        parameters: [{ name: 'request', description: 'the script, its `args`, the parent agent, and an optional cancel signal.' }],
-        returns: 'the live run; its `result` resolves when the script settles.',
-      },
-    ],
-  },
-  {
-    key: 'workspaceRegistry',
-    summary: 'Durable workspace registry.',
-    description: 'Durable workspace registry. Startup waits for `sessionPersistence`, builds one canonical-cwd header index, and completes the one-time history bootstrap before the service becomes active. The persistence dependency is mandatory so an unavailable peer can never be mistaken for an empty history and commit the initialized marker.',
-    methods: [
-      {
-        signature: 'async create(path: string, title?: string): Promise<Workspace>',
-        description: 'Create or reuse a workspace for an existing directory. The fully qualified path is canonicalized through `fs.realpath`; a relative, nonexistent, or non-directory path rejects. Repeated calls for the same canonical path return the existing entity without changing its title. A newly created workspace is prepended to the durable registry order. Different canonical paths may share a display title.',
-        parameters: [{ name: 'path', description: 'Existing directory to own, in a fully qualified path spelling.' }, { name: 'title', description: 'Display title used only when a new record is created.' }],
-        returns: 'the existing or newly durable workspace.',
-      },
-      {
-        signature: 'get(id: WorkspaceId): Workspace | undefined',
-        description: 'Look up a workspace by id.',
-        parameters: [{ name: 'id', description: 'Workspace id.' }],
-        returns: 'the workspace, or `undefined` when unknown.',
-      },
-      {
-        signature: 'list(): Workspace[]',
-        description: 'Synchronous workspace projection in durable registry order. Every entity\'s `sessionIds` getter is already filtered by the startup/live canonical-cwd header index; this method performs no persistence reads.',
-        parameters: [],
-        returns: 'a fresh ordered array of workspace entities.',
-      },
-      {
-        signature: 'delete(id: WorkspaceId): Promise<boolean>',
-        description: 'Delete one workspace registration while retaining its directory and every session log. The durable order is updated before the table deletion; a failed table write restores the prior order and keeps the entity published. Unknown ids are an idempotent no-op for domain callers.',
-        parameters: [{ name: 'id', description: 'Workspace registration to remove.' }],
-        returns: '`true` when a record was deleted, `false` when it was unknown.',
-      },
-      {
-        signature: 'insertBefore(id: WorkspaceId, beforeId?: WorkspaceId): Promise<readonly WorkspaceId[]>',
-        description: 'Move one workspace within the durable display order, DOM-insertBefore-like. With an anchor it lands before that workspace; without one it appends.',
-        parameters: [{ name: 'id', description: 'Workspace to move.' }, { name: 'beforeId', description: 'Workspace anchor; omitted appends.' }],
-        returns: 'the complete committed workspace order.',
-      },
-      {
-        signature: 'archiveSession(sessionId: SessionId): Promise<void>',
-        description: 'Archive one session durably. The session must exist (live or in session persistence); its workspace accounting — or lack of one — is irrelevant. An already archived id resolves without writing.',
-        parameters: [{ name: 'sessionId', description: 'The session to archive.' }],
-        returns: 'resolution after durability.',
-      },
-      {
-        signature: 'unarchiveSession(sessionId: SessionId): Promise<void>',
-        description: 'Unarchive one session durably by dropping it from the registry-global archive set; the accounting slot was never touched, so the session returns to its recorded position. Unarchiving runs no session-existence check because removing an id cannot introduce an unknown one, so an entry whose session is gone still resolves. An id that is not archived resolves without writing.',
-        parameters: [{ name: 'sessionId', description: 'The session to unarchive.' }],
-        returns: 'resolution after durability.',
-      },
-      {
-        signature: 'async resolveByPath(path: string): Promise<Workspace | undefined>',
-        description: 'Resolve by canonical directory path without creating or mutating a workspace. A missing path rejects during `realpath`; an existing unowned directory returns `undefined`.',
-        parameters: [{ name: 'path', description: 'Existing directory path in a fully qualified spelling.' }],
-        returns: 'the workspace owning the canonical path, when one exists.',
       },
     ],
   },
@@ -2895,14 +2783,6 @@ export const EVENT_API: readonly EventApiEntry[] = [
     summary: 'A domain record or the global singleton changed, emitted once per write strictly after the backend acknowledged durability.',
     description: 'A domain record or the global singleton changed, emitted once per write strictly after the backend acknowledged durability. Events of one domain arrive in its write-chain order.',
     parameters: [{ name: 'change', description: 'domain, table (`\'\'` for global), key (`\'\'` for global), operation discriminant, and on `put` the new snapshot.' }],
-  },
-  {
-    name: 'feedback/committed',
-    mode: 'parallel',
-    signature: '\'feedback/committed\'(inspection: SessionInspection): void',
-    summary: 'Observe a durable cold feedback mutation without publishing a live Session.',
-    description: 'Observe a durable cold feedback mutation without publishing a live Session. Observers run before write ownership is released and must not await another message-feedback operation for this Session. The payload is borrowed read-only; deep-clone it before transferring ownership (for example, to Session.fromRestore).',
-    parameters: [{ name: 'inspection', description: 'committed canonical prefix, including the feedback as its last event.' }],
   },
   {
     name: 'fs/edit-intent',
@@ -3183,54 +3063,6 @@ export const EVENT_API: readonly EventApiEntry[] = [
     summary: 'Collect the structured index injection table.',
     description: 'Collect the structured index injection table. Emitted on every index render and every worker boot-payload request; listeners push their current rows, so a row\'s data is read fresh at emit time.',
     parameters: [{ name: 'table', description: 'Mutable row table; listeners append in activation order.' }],
-  },
-  {
-    name: 'workflow/agent-end',
-    mode: 'emit',
-    signature: '\'workflow/agent-end\'(info: WorkflowRunInfo, agent: WorkflowAgentEndInfo): void',
-    summary: 'One `agent()` call settled (clean result, child failure, or run cancellation).',
-    description: 'One `agent()` call settled (clean result, child failure, or run cancellation). Paired with Events[\'workflow/agent-start\'] by `agent.seq`, exactly once per started call on every stop path — on an engine termination path the end is engine-synthesized with outcome `\'cancelled\'`.',
-    parameters: [{ name: 'info', description: 'the run\'s identity snapshot.' }, { name: 'agent', description: 'the call identity plus its outcome.' }],
-  },
-  {
-    name: 'workflow/agent-start',
-    mode: 'emit',
-    signature: '\'workflow/agent-start\'(info: WorkflowRunInfo, agent: WorkflowAgentInfo): void',
-    summary: 'One `agent()` call established a published child run.',
-    description: 'One `agent()` call established a published child run. Paired with Events[\'workflow/agent-end\'] by `agent.seq`. A call that never receives a published run from the provider emits neither event in this pair.',
-    parameters: [{ name: 'info', description: 'the run\'s identity snapshot.' }, { name: 'agent', description: 'the call\'s sequence number, label, phase, and child id.' }],
-  },
-  {
-    name: 'workflow/end',
-    mode: 'emit',
-    signature: '\'workflow/end\'(info: WorkflowRunInfo, result: WorkflowResultInfo): void',
-    summary: 'A workflow run settled (any stop reason).',
-    description: 'A workflow run settled (any stop reason). Fired when WorkflowRun.result resolves. Paired with Events[\'workflow/start\'].',
-    parameters: [{ name: 'info', description: 'the run\'s identity snapshot.' }, { name: 'result', description: 'the outcome data (stop reason, error, agent count) — deliberately WITHOUT the result value (see {@link WorkflowResultInfo}).' }],
-  },
-  {
-    name: 'workflow/log',
-    mode: 'emit',
-    signature: '\'workflow/log\'(info: WorkflowRunInfo, message: string): void',
-    summary: 'The script emitted a narration line (a `log(message)` call).',
-    description: 'The script emitted a narration line (a `log(message)` call).',
-    parameters: [{ name: 'info', description: 'the run\'s identity snapshot.' }, { name: 'message', description: 'the logged message, verbatim.' }],
-  },
-  {
-    name: 'workflow/phase',
-    mode: 'emit',
-    signature: '\'workflow/phase\'(info: WorkflowRunInfo, title: string): void',
-    summary: 'The script entered a phase (a `phase(title)` call) — progress grouping for observers; no execution semantics.',
-    description: 'The script entered a phase (a `phase(title)` call) — progress grouping for observers; no execution semantics.',
-    parameters: [{ name: 'info', description: 'the run\'s identity snapshot.' }, { name: 'title', description: 'the phase title, verbatim.' }],
-  },
-  {
-    name: 'workflow/start',
-    mode: 'emit',
-    signature: '\'workflow/start\'(info: WorkflowRunInfo): void',
-    summary: 'A workflow run started — the script\'s meta block validated, the body about to execute.',
-    description: 'A workflow run started — the script\'s meta block validated, the body about to execute. Paired with Events[\'workflow/end\'].',
-    parameters: [{ name: 'info', description: 'the run\'s identity snapshot (id + meta).' }],
   },
 ]
 
@@ -3627,10 +3459,6 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ContinuableCreateRequest',
     declaration: 'export interface ContinuableCreateRequest {\n    readonly sessionId: SessionId;\n    readonly parent: Agent;\n    readonly signal: AbortSignal;\n}',
-  },
-  {
-    name: 'ContinuableCreateSpec',
-    declaration: 'export interface ContinuableCreateSpec {\n    readonly seed?: readonly SessionEvent[];\n}',
   },
   {
     name: 'ContinuableStart',
@@ -4185,82 +4013,6 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface Message {\n    readonly id: MessageId;\n    readonly role: \'system\' | \'user\' | \'assistant\';\n    readonly content: ContentBlock[];\n    readonly source: MessageSource;\n}',
   },
   {
-    name: 'MessageFeedbackDeleteRequest',
-    declaration: 'export interface MessageFeedbackDeleteRequest {\n    readonly sessionId: SessionId;\n    readonly messageId: MessageId;\n    readonly ifVersion: MessageFeedbackVersion;\n}',
-  },
-  {
-    name: 'MessageFeedbackDeleteResult',
-    declaration: 'export type MessageFeedbackDeleteResult = MessageFeedbackSuccess<MessageFeedbackDeleteValue> | MessageFeedbackRejected<MessageFeedbackSessionNotFound | MessageFeedbackVersionConflict>;',
-  },
-  {
-    name: 'MessageFeedbackDeleteValue',
-    declaration: 'export interface MessageFeedbackDeleteValue {\n    readonly absent: true;\n}',
-  },
-  {
-    name: 'MessageFeedbackFailure',
-    declaration: 'export type MessageFeedbackFailure = MessageFeedbackSessionNotFound | MessageFeedbackTargetNotFound | MessageFeedbackVersionConflict | MessageFeedbackNoteBlank | MessageFeedbackNoteTooLarge;',
-  },
-  {
-    name: 'MessageFeedbackItem',
-    declaration: 'export interface MessageFeedbackItem {\n    readonly messageId: MessageId;\n    readonly rating: MessageFeedbackRating;\n    readonly note?: string;\n    readonly category?: FeedbackCategory;\n    readonly version: MessageFeedbackVersion;\n    readonly createdAt: number;\n    readonly updatedAt: number;\n}',
-  },
-  {
-    name: 'MessageFeedbackListRequest',
-    declaration: 'export interface MessageFeedbackListRequest {\n    readonly sessionId: SessionId;\n}',
-  },
-  {
-    name: 'MessageFeedbackListResult',
-    declaration: 'export type MessageFeedbackListResult = MessageFeedbackSuccess<MessageFeedbackListValue> | MessageFeedbackRejected<MessageFeedbackSessionNotFound>;',
-  },
-  {
-    name: 'MessageFeedbackListValue',
-    declaration: 'export interface MessageFeedbackListValue {\n    readonly items: readonly MessageFeedbackItem[];\n}',
-  },
-  {
-    name: 'MessageFeedbackNoteBlank',
-    declaration: 'export interface MessageFeedbackNoteBlank {\n    readonly code: \'note-blank\';\n}',
-  },
-  {
-    name: 'MessageFeedbackNoteTooLarge',
-    declaration: 'export interface MessageFeedbackNoteTooLarge {\n    readonly code: \'note-too-large\';\n    readonly maxBytes: number;\n    readonly actualBytes: number;\n}',
-  },
-  {
-    name: 'MessageFeedbackPutRequest',
-    declaration: 'export interface MessageFeedbackPutRequest {\n    readonly sessionId: SessionId;\n    readonly messageId: MessageId;\n    readonly rating: MessageFeedbackRating;\n    readonly note?: string;\n    readonly category?: FeedbackCategory;\n    readonly ifVersion: MessageFeedbackVersion | null;\n}',
-  },
-  {
-    name: 'MessageFeedbackPutResult',
-    declaration: 'export type MessageFeedbackPutResult = MessageFeedbackSuccess<MessageFeedbackItem> | MessageFeedbackRejected<MessageFeedbackSessionNotFound | MessageFeedbackTargetNotFound | MessageFeedbackVersionConflict | MessageFeedbackNoteBlank | MessageFeedbackNoteTooLarge>;',
-  },
-  {
-    name: 'MessageFeedbackRating',
-    declaration: 'export type MessageFeedbackRating = \'positive\' | \'negative\';',
-  },
-  {
-    name: 'MessageFeedbackRejected',
-    declaration: 'export interface MessageFeedbackRejected<E extends MessageFeedbackFailure> {\n    readonly ok: false;\n    readonly error: E;\n}',
-  },
-  {
-    name: 'MessageFeedbackSessionNotFound',
-    declaration: 'export interface MessageFeedbackSessionNotFound {\n    readonly code: \'session-not-found\';\n    readonly sessionId: SessionId;\n}',
-  },
-  {
-    name: 'MessageFeedbackSuccess',
-    declaration: 'export interface MessageFeedbackSuccess<T> {\n    readonly ok: true;\n    readonly value: T;\n}',
-  },
-  {
-    name: 'MessageFeedbackTargetNotFound',
-    declaration: 'export interface MessageFeedbackTargetNotFound {\n    readonly code: \'target-not-found\';\n    readonly sessionId: SessionId;\n    readonly messageId: MessageId;\n}',
-  },
-  {
-    name: 'MessageFeedbackVersion',
-    declaration: 'export type MessageFeedbackVersion = Branded<\'MessageFeedbackVersion\'>;',
-  },
-  {
-    name: 'MessageFeedbackVersionConflict',
-    declaration: 'export interface MessageFeedbackVersionConflict {\n    readonly code: \'version-conflict\';\n    readonly current: MessageFeedbackItem | null;\n}',
-  },
-  {
     name: 'MessageId',
     declaration: 'export type MessageId = Branded<\'MessageId\'>;',
   },
@@ -4482,7 +4234,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PtcRunRequest',
-    declaration: 'export interface PtcRunRequest {\n    program: string;\n    bindings: PtcBindingNamespace[];\n    cwd?: string;\n    timeoutMs?: number | null;\n    sandboxPolicy?: SandboxExecutionPolicy;\n    signal?: AbortSignal;\n}',
+    declaration: 'export interface PtcRunRequest {\n    program: string;\n    bindings: PtcBindingNamespace[];\n    cwd?: string;\n    timeoutMs?: number;\n    sandboxPolicy?: SandboxExecutionPolicy;\n    signal?: AbortSignal;\n}',
   },
   {
     name: 'PtcRunResult',
@@ -4494,7 +4246,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PtcRunSpec',
-    declaration: 'export interface PtcRunSpec extends PtcRunRequest {\n    cwd: string;\n    timeoutMs: number | null;\n}',
+    declaration: 'export interface PtcRunSpec extends PtcRunRequest {\n    cwd: string;\n    timeoutMs: number;\n}',
   },
   {
     name: 'ReadFileLine',
@@ -4773,10 +4525,6 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type SessionId = Branded<\'SessionId\'>;',
   },
   {
-    name: 'SessionInspection',
-    declaration: 'export interface SessionInspection extends SessionStorageMetadata {\n    readonly events: readonly SessionEvent[];\n}',
-  },
-  {
     name: 'SessionLogOffset',
     declaration: 'export type SessionLogOffset = BrandedNumber<\'SessionLogOffset\'>;',
   },
@@ -4887,10 +4635,6 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'SessionStartSource',
     declaration: 'export type SessionStartSource = \'startup\' | \'resume\' | \'clear\' | \'compact\';',
-  },
-  {
-    name: 'SessionStorageMetadata',
-    declaration: 'export interface SessionStorageMetadata {\n    readonly meta: SessionHeader;\n    readonly inheritedEventCount: SessionLogOffset;\n}',
   },
   {
     name: 'SessionSurface',
@@ -5170,7 +4914,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SubagentProvider',
-    declaration: 'export interface SubagentProvider {\n    readonly name: string;\n    readonly capabilities: SubagentCapabilities;\n    readonly inheritsParentContext: boolean;\n    readonly agentRouteDefaults?: Readonly<{\n        provider: string;\n        model: string;\n    }>;\n    start(request: ResolvedSubagentStartRequest): Promise<SubagentRun>;\n    prepareContinuable?(request: ContinuableCreateRequest): Promise<ContinuableCreateSpec>;\n}',
+    declaration: 'export interface SubagentProvider {\n    readonly name: string;\n    readonly capabilities: SubagentCapabilities;\n    readonly agentRouteDefaults?: Readonly<{\n        provider: string;\n        model: string;\n    }>;\n    start(request: ResolvedSubagentStartRequest): Promise<SubagentRun>;\n    prepareContinuable?(request: ContinuableCreateRequest): Promise<void>;\n}',
   },
   {
     name: 'SubagentResult',
@@ -5450,7 +5194,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ToolDefinition',
-    declaration: 'export interface ToolDefinition extends ToolSchema {\n    readonly output: ToolOutputDefinition;\n    readonly details?: string;\n    execute(args: unknown, exec: ToolRunContext): Promise<unknown>;\n    finalizeContent?(exec: Readonly<ToolExecution>, result: Readonly<ToolExecutionResult>): ContentBlock[] | undefined;\n    timeoutMs?: number;\n    isConcurrencySafe?(args: unknown): boolean;\n    presentCall?(args: unknown): ToolCallView | undefined;\n    presentResult?(args: unknown, result: ToolResult): ToolResultView | undefined;\n}',
+    declaration: 'export interface ToolDefinition extends ToolSchema {\n    readonly output: ToolOutputDefinition;\n    execute(args: unknown, exec: ToolRunContext): Promise<unknown>;\n    finalizeContent?(exec: Readonly<ToolExecution>, result: Readonly<ToolExecutionResult>): ContentBlock[] | undefined;\n    timeoutMs?: number;\n    isConcurrencySafe?(args: unknown): boolean;\n    presentCall?(args: unknown): ToolCallView | undefined;\n    presentResult?(args: unknown, result: ToolResult): ToolResultView | undefined;\n}',
   },
   {
     name: 'ToolDispatchExecution',
@@ -5685,10 +5429,6 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface TypertTypeModel {\n    readonly name: string;\n    readonly declaration: string;\n}',
   },
   {
-    name: 'VerifiedWebhookDelivery',
-    declaration: 'export interface VerifiedWebhookDelivery<K extends string = string> {\n    readonly kind: K;\n    readonly source: WebhookSourceId;\n    readonly deliveryId: WebhookDeliveryId;\n    readonly event: WebhookEventOf<K>;\n    readonly receivedAt: number;\n}',
-  },
-  {
     name: 'WebFetchBody',
     declaration: 'export type WebFetchBody = {\n    readonly kind: \'html\';\n    readonly content: string;\n} | {\n    readonly kind: \'text\';\n    readonly content: string;\n};',
   },
@@ -5707,38 +5447,6 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'WebFetchResultView',
     declaration: 'export interface WebFetchResultView {\n    card: \'web\';\n    kind: \'fetch\';\n    title?: string;\n    url: string;\n    statusCode: number;\n    truncated: boolean;\n}',
-  },
-  {
-    name: 'WebhookDeliveryId',
-    declaration: 'export type WebhookDeliveryId = Branded<\'WebhookDeliveryId\'>;',
-  },
-  {
-    name: 'WebhookEventMap',
-    declaration: 'export interface WebhookEventMap {\n}',
-  },
-  {
-    name: 'WebhookEventOf',
-    declaration: 'export type WebhookEventOf<K extends string> = K extends keyof WebhookEventMap ? WebhookEventMap[K] : JsonValue;',
-  },
-  {
-    name: 'WebhookModelSelection',
-    declaration: 'export interface WebhookModelSelection {\n    readonly provider: string;\n    readonly model: string;\n    readonly maxTokens?: number;\n}',
-  },
-  {
-    name: 'WebhookRule',
-    declaration: 'export interface WebhookRule<K extends string = string> {\n    readonly id: WebhookRuleId;\n    readonly kind: K;\n    run(delivery: Readonly<VerifiedWebhookDelivery<K>>, signal: AbortSignal): WebhookSessionRequest | null | Promise<WebhookSessionRequest | null>;\n}',
-  },
-  {
-    name: 'WebhookRuleId',
-    declaration: 'export type WebhookRuleId = Branded<\'WebhookRuleId\'>;',
-  },
-  {
-    name: 'WebhookSessionRequest',
-    declaration: 'export interface WebhookSessionRequest {\n    readonly workspacePath: string;\n    readonly title: string;\n    readonly prompt: string;\n    readonly agentPreset: string;\n    readonly permissionPreset: string;\n    readonly model?: WebhookModelSelection;\n}',
-  },
-  {
-    name: 'WebhookSourceId',
-    declaration: 'export type WebhookSourceId = Branded<\'WebhookSourceId\'>;',
   },
   {
     name: 'WebResultView',
@@ -5779,58 +5487,6 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'WebUpgradeRoute',
     declaration: 'export interface WebUpgradeRoute {\n    path: string;\n    handler: (req: IncomingMessage, socket: Duplex, head: Buffer) => void | Promise<void>;\n}',
-  },
-  {
-    name: 'WorkflowAgentEndInfo',
-    declaration: 'export interface WorkflowAgentEndInfo extends WorkflowAgentInfo {\n    outcome: WorkflowAgentOutcome;\n}',
-  },
-  {
-    name: 'WorkflowAgentInfo',
-    declaration: 'export interface WorkflowAgentInfo {\n    seq: number;\n    label: string;\n    phase?: string;\n    childId: SessionId;\n}',
-  },
-  {
-    name: 'WorkflowAgentOutcome',
-    declaration: 'export type WorkflowAgentOutcome = \'completed\' | \'failed\' | \'cancelled\';',
-  },
-  {
-    name: 'WorkflowMeta',
-    declaration: 'export interface WorkflowMeta {\n    name: string;\n    description: string;\n    whenToUse?: string;\n    phases?: WorkflowPhase[];\n}',
-  },
-  {
-    name: 'WorkflowPhase',
-    declaration: 'export interface WorkflowPhase {\n    title: string;\n    detail?: string;\n    provider?: string;\n    model?: string;\n}',
-  },
-  {
-    name: 'WorkflowResult',
-    declaration: 'export interface WorkflowResult {\n    value: unknown;\n    stopReason: WorkflowStopReason;\n    error?: string;\n    agentsStarted: number;\n}',
-  },
-  {
-    name: 'WorkflowResultInfo',
-    declaration: 'export interface WorkflowResultInfo {\n    stopReason: WorkflowStopReason;\n    error?: string;\n    agentsStarted: number;\n}',
-  },
-  {
-    name: 'WorkflowRun',
-    declaration: 'export interface WorkflowRun {\n    readonly id: WorkflowRunId;\n    readonly meta: WorkflowMeta;\n    readonly result: Promise<WorkflowResult>;\n    cancel(reason?: string): void;\n    dispose(): Promise<void>;\n}',
-  },
-  {
-    name: 'WorkflowRunId',
-    declaration: 'export type WorkflowRunId = Branded<\'WorkflowRunId\'>;',
-  },
-  {
-    name: 'WorkflowRunInfo',
-    declaration: 'export interface WorkflowRunInfo {\n    id: WorkflowRunId;\n    meta: WorkflowMeta;\n}',
-  },
-  {
-    name: 'WorkflowStartRequest',
-    declaration: 'export interface WorkflowStartRequest {\n    script: string;\n    meta: WorkflowMeta;\n    args?: unknown;\n    subagentProvider?: string;\n    maxTotalAgents?: number;\n    parent: Agent;\n    signal?: AbortSignal;\n}',
-  },
-  {
-    name: 'WorkflowStopReason',
-    declaration: 'export type WorkflowStopReason = \'completed\' | \'cancelled\' | \'error\';',
-  },
-  {
-    name: 'Workspace',
-    declaration: 'export interface Workspace {\n    readonly id: WorkspaceId;\n    readonly path: string;\n    readonly title: string;\n    readonly createdAt: string;\n    readonly updatedAt: string;\n    readonly sessionIds: readonly SessionId[];\n    setTitle(title: string): Promise<void>;\n    attachSession(sessionId: SessionId): Promise<void>;\n    insertSessionBefore(sessionId: SessionId, beforeSessionId?: SessionId): Promise<void>;\n    detachSession(sessionId: SessionId): Promise<void>;\n    status(): Promise<\'ok\' | \'missing-dir\'>;\n}',
   },
 ]
 

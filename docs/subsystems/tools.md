@@ -26,14 +26,6 @@ interface ToolDefinition extends ToolSchema {
   /** Mandatory canonical output declaration. */
   readonly output: ToolOutputDefinition
   /**
-   * Usage reference kept out of the native schema, which is resent with every
-   * request. A scope that can see a tool with details also sees the reserved
-   * {@link TOOL_HELP_NAME} tool, which returns them; the description should
-   * tell the model to call it before first use. The PTC mode SDK appends the
-   * details to the binding's documentation instead. Must be non-empty when set.
-   */
-  readonly details?: string
-  /**
    * Run one accepted call and return only its canonical lossless-JSON value.
    * Async work must observe or forward `exec.signal` and settle only after its
    * owned work reaches quiescence. The registry preserves caller cancellation
@@ -470,7 +462,7 @@ Post-policy may replace either content or value, never both. Content replacement
 
 ## The enforced raw JSON Schema subset
 
-Raw schemas from subagents, workflows, MCP, and dynamic registrations use the wire-level counterpart of the author DSL. `assertSupportedJsonSchema()` accepts any JSON root, `validateJsonSchemaValue()` enforces it, and `JsonSchemaError` reports every unsupported or malformed schema path. The empty annotation-only node means unconstrained lossless JSON. `oneOf` requires at least two branches and a value must match exactly one. Consumers that still require an object root call `assertObjectJsonSchema()` and carry `ObjectJsonSchema`; this is how subagent caller-defined structured output remains object-rooted without restricting the shared vocabulary. Workflow `agent()` accepts any root and wraps a non-object one under a required `value` property before it reaches the child.
+Raw schemas from subagents, MCP, and dynamic registrations use the wire-level counterpart of the author DSL. `assertSupportedJsonSchema()` accepts any JSON root, `validateJsonSchemaValue()` enforces it, and `JsonSchemaError` reports every unsupported or malformed schema path. The empty annotation-only node means unconstrained lossless JSON. `oneOf` requires at least two branches and a value must match exactly one. Consumers that still require an object root call `assertObjectJsonSchema()` and carry `ObjectJsonSchema`; this is how subagent caller-defined structured output remains object-rooted without restricting the shared vocabulary. Workflow `agent()` accepts any root and wraps a non-object one under a required `value` property before it reaches the child.
 
 ```ts type-equiv
 /** Scalar JSON values supported by `enum` and `const`. */

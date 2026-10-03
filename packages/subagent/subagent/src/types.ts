@@ -12,7 +12,7 @@
 import type { Agent, AgentOptions } from '@deepseek-ai/dsh-agent'
 import type { Branded } from '@deepseek-ai/dsh-brand'
 import type { ContentBlock, MessageId } from '@deepseek-ai/dsh-llm'
-import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
+import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { ObjectJsonSchema, ToolRestriction } from '@deepseek-ai/dsh-tools'
 import type { SubagentDescriptorData } from './descriptor.ts'
 
@@ -210,37 +210,20 @@ export interface ResolvedSubagentStartRequest extends SubagentStartRequest {
 }
 
 /**
- * What the continuation manager asks a provider for while materializing one
+ * What the continuation manager passes a provider while materializing one
  * continuable child's FIRST activation. The manager has already reserved the
- * durable child identity and owns every later operation, so this request
- * carries only what distinguishes a fresh child from one seeded with parent
- * history.
+ * durable child identity and owns every later operation.
  */
 export interface ContinuableCreateRequest {
   /** The reserved durable child session id, for provider diagnostics. */
   readonly sessionId: SessionId
-  /** The delegating parent agent whose history a seeding provider reads. */
+  /** The delegating parent agent. */
   readonly parent: Agent
   /**
    * Caller cancellation, which owns preparation only until the manager accepts
    * the initial prompt into the child's inbox.
    */
   readonly signal: AbortSignal
-}
-
-/**
- * A provider's detached contribution to one continuable child's creation. This
- * is DATA, never a capability: it carries no Agent, `AgentHandle`, prompt
- * delivery, result, disposal, or resume operation, because the continuation
- * manager owns the child's whole lifecycle after preparation.
- */
-export interface ContinuableCreateSpec {
-  /**
-   * Completed-turn prefix of the parent's log to seed the child session with,
-   * or absent for a fresh child. Same durable contract as
-   * `CreateAgentOptions.seed`: contiguous from seq 0, lossless JSON, balanced.
-   */
-  readonly seed?: readonly SessionEvent[]
 }
 
 /**
@@ -342,16 +325,10 @@ export interface SubagentRun {
  * settlement or cleanup to a sibling.
  */
 export interface SubagentProvider {
-  /** Unique registry name (e.g. `spawn`, `fork`, `acp`). */
+  /** Unique registry name (e.g. `spawn`). */
   readonly name: string
   /** The start-time features this provider supports (see {@link SubagentCapabilities}). */
   readonly capabilities: SubagentCapabilities
-  /**
-   * Whether the child sees the parent's completed-turn prefix. This is descriptive, not a
-   * service-validated start capability: the model-facing tool derives truthful wording from it.
-   * It says nothing about tool registration, injected services, or authority inheritance.
-   */
-  readonly inheritsParentContext: boolean
   /**
    * Optional static provider-owned provider/model route for one-shot Agent
    * options. Consumers merge tool/model overrides over these values before
@@ -372,19 +349,17 @@ export interface SubagentProvider {
    */
   start(request: ResolvedSubagentStartRequest): Promise<SubagentRun>
   /**
-   * OPTIONAL (continuable-creation capability): contribute the detached
-   * creation inputs that distinguish this provider's continuable children —
-   * only whether the child session is seeded with parent history. Method
-   * presence IS the capability: the service rejects continuable starts on
-   * providers without it, while a provider that has it may still serve
-   * ordinary one-shot delegations.
+   * OPTIONAL (continuable-creation capability): admit one continuable child
+   * before the continuation manager creates it. Method presence IS the
+   * capability: the service rejects continuable starts on providers without
+   * it, while a provider that has it may still serve ordinary one-shot
+   * delegations. Rejection aborts the start before any child session exists.
    *
    * This is the provider's ONLY participation in a continuable child. The
    * continuation manager owns identity reservation, composition, Agent
    * creation, prompt delivery, cold resume, ownership, and disposal, so a
    * provider never sees the child's Agent, handle, turns, or teardown.
-   * Distinct preparations may overlap; each follows its own signal and returns
-   * data belonging only to `request.sessionId`.
+   * Distinct preparations may overlap; each follows its own signal.
    */
-  prepareContinuable?(request: ContinuableCreateRequest): Promise<ContinuableCreateSpec>
+  prepareContinuable?(request: ContinuableCreateRequest): Promise<void>
 }

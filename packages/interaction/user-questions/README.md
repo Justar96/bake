@@ -40,7 +40,7 @@ When a request carries an agent, `ask()` authenticates its exact identity throug
 <a id="role"></a>
 ## Role
 
-This is the Service Definition package. Consumers such as `@deepseek-ai/dsh-tool-ask-user` depend on this service; the Web client contributes an Agent-scoped answerer through Remote Events. The loop stays unchanged: a tool call awaits the waterfall result, and that result resumes the normal agent loop.
+This is the Service Definition package. Consumers such as `@deepseek-ai/dsh-tool-ask-user` depend on this service; an interactive UI such as the terminal app contributes the answerer. The loop stays unchanged: a tool call awaits the waterfall result, and that result resumes the normal agent loop.
 
 <a id="model-experience"></a>
 ## Model Experience

@@ -440,6 +440,47 @@ describe('pi-ai request context conversion', () => {
     })
   })
 
+  it('keeps several text blocks apart as parts on both conversion paths', async () => {
+    const callId = ToolCallId('parts-call')
+    const options = request([
+      user([{ type: 'text', text: 'one block' }]),
+      user([
+        { type: 'text', text: '<system-reminder>first</system-reminder>' },
+        { type: 'text', text: '' },
+        { type: 'text', text: '<system-reminder>second</system-reminder>' },
+      ]),
+      user([{
+        type: 'tool-result',
+        toolCallId: callId,
+        content: [
+          { type: 'text', text: 'output' },
+          { type: 'tool-result', toolCallId: callId, content: [{ type: 'text', text: 'notice' }] },
+        ],
+      }]),
+    ])
+    const expected = [
+      { role: 'user', content: 'one block', timestamp: 0 },
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: '<system-reminder>first</system-reminder>' },
+          { type: 'text', text: '<system-reminder>second</system-reminder>' },
+        ],
+        timestamp: 0,
+      },
+      {
+        role: 'toolResult',
+        toolCallId: 'parts-call',
+        toolName: 'unknown',
+        content: [{ type: 'text', text: 'output' }, { type: 'text', text: 'notice' }],
+        isError: false,
+        timestamp: 0,
+      },
+    ]
+    expect(toPiContext(options).messages).toEqual(expected)
+    expect((await toPiContext(options, imageContext(attachments))).messages).toEqual(expected)
+  })
+
   it('handles in-history system and assistant messages explicitly on the image path', async () => {
     for (const role of ['system', 'assistant'] as const) {
       const readImageRequest = vi.fn()

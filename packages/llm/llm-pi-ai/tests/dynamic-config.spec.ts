@@ -67,7 +67,7 @@ describe('login flows in a real composition', () => {
   it('mounts without the seam, and simply offers no sign-in', async () => {
     const ctx = await boot(await home(), {})
 
-    // A headless or ACP composition has no surface to sign in from; everything
+    // A headless composition has no surface to sign in from; everything
     // else this plugin does still works.
     expect(ctx.get('authorization')).toBeUndefined()
     expect(ctx.llm.listConfigurableProviders().length).toBeGreaterThan(0)

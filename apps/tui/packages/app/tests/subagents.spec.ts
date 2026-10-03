@@ -106,7 +106,7 @@ it('shows live delegated children and lists their authoritative saved metadata',
 
     const settled = Promise.withResolvers<SubagentResult>()
     const off = fixture.ctx.subagents.registerProvider({
-      name: 'remote-test', inheritsParentContext: false,
+      name: 'remote-test',
       capabilities: { agentOptions: false, outputSchema: false, depthLimit: false, toolFilter: false, persona: false },
       start: async () => ({ id: SessionId('remote-child'), localAgent: undefined,
         result: settled.promise, dispose: async () => {} }),

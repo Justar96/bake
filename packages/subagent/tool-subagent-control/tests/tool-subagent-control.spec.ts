@@ -10,7 +10,6 @@ import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-test
 import { SessionId } from '@deepseek-ai/dsh-session'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
-import * as SubagentFork from '@deepseek-ai/dsh-subagent-fork-in-process'
 import * as SubagentSpawn from '@deepseek-ai/dsh-subagent-spawn-in-process'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { LlmAdapter } from '@deepseek-ai/dsh-llm'
@@ -68,7 +67,6 @@ async function setupWith(adapter: MockAdapter | GatedAdapter, park = true) {
   await ctx.plugin(AgentLoop, { agents: [] })
   await ctx.plugin(SubagentRuntime)
   await ctx.plugin(SubagentSpawn, { providerName: 'spawn' })
-  await ctx.plugin(SubagentFork, { providerName: 'fork' })
   await ctx.plugin(tool)
   ctx.llm.registerAdapter(['mock'], adapter)
   const parent = await ctx.agentLoop.create(SessionId('parent'), { provider: 'mock', model: 'mock' })
@@ -119,15 +117,12 @@ describe('dsh-tool-subagent-control', () => {
     expect(schemas[0]!.description).not.toContain('job_output')
     expect(schemas[0]!.description).not.toContain('job id')
     expect(schemas[0]!.description).toBe(
-      'Send a message to one of your direct continuable subagents by its agent id. If you are a continuable '
-      + 'subagent, you can also message your parent. A working target reads the message at its next step; '
-      + 'otherwise the message starts a new turn. You get delivery confirmation, not a reply, and an error '
-      + 'means the message was not delivered.',
+      'Message a direct continuable subagent, or your parent if you are one. A busy target reads it next '
+      + 'step; an idle one starts a new turn. Confirms delivery; no reply.',
     )
-    expect(props.agent_id).toMatchObject({
-      description: 'The agent id of a direct continuable subagent, or of your parent if you are a continuable subagent.',
-    })
-    expect(props.message).toMatchObject({ description: 'The message to send.' })
+    // Both parameters are self-describing.
+    expect(props.agent_id).not.toHaveProperty('description')
+    expect(props.message).not.toHaveProperty('description')
   })
 
   it('titles a message by its target and first line, and an interrupt by its target', async () => {
@@ -147,51 +142,6 @@ describe('dsh-tool-subagent-control', () => {
     // Obsolete or invalid logged arguments keep the generic rendering.
     expect(send.presentCall?.({ target: 'a1', message: 'hi' })).toBeUndefined()
     expect(ctx.tools.get('interrupt_agent')?.presentCall?.({ agent_id: 1 })).toBeUndefined()
-  })
-
-  it('keeps the send_message definition and ordering byte-identical in a fork child', async () => {
-    const release = Promise.withResolvers<undefined>()
-    const { ctx, parent, adapter } = await setupWith(new GatedAdapter([
-      { chunks: textResponse('parent done') },
-      { chunks: textResponse('child done'), gate: release.promise },
-    ]), false)
-    parent.followup(createUserMessage({
-      content: [{ type: 'text', text: 'parent work' }],
-      source: { kind: 'user' },
-    }))
-    await parent.whenIdle()
-    parkParent(ctx, parent)
-    const started = await ctx.subagents.startContinuable({
-      provider: 'fork',
-      label: 'fork child',
-      request: { prompt: [{ type: 'text', text: 'fork task' }], parent },
-      signal: testToolSignal,
-    })
-    await vi.waitFor(() => { expect(adapter.requests).toHaveLength(2) })
-    const child = ctx.agents.get(started.childId)
-    if (child === undefined) throw new Error('expected a live fork child')
-
-    const parentSchemas = ctx.tools.schemas(parent)
-    const childSchemas = ctx.tools.schemas(child)
-    expect(JSON.stringify(childSchemas)).toBe(JSON.stringify(parentSchemas))
-    expect(adapter.requests[1]!.messages.slice(0, adapter.requests[0]!.messages.length)).toEqual(adapter.requests[0]!.messages)
-    expect(childSchemas.map(schema => schema.name)).not.toContain('report')
-
-    release.resolve(undefined)
-    await waitNoActivation(ctx, started.childId)
-    const loaded = await loadStoredSession(ctx.sessionPersistence, started.childId)
-    const promptIndex = loaded.events.findIndex(event => event.type === 'user/message'
-      && event.data.content.some(block => block.type === 'text' && block.text === 'fork task'))
-    expect(loaded.meta.isSeeded).toBe(true)
-    expect(promptIndex).toBeGreaterThanOrEqual(loaded.inheritedEventCount)
-    const prompt = loaded.events[promptIndex]
-    if (prompt?.type !== 'user/message') throw new Error('expected the initial fork task')
-    const texts = prompt.data.content.flatMap(block => block.type === 'text' ? [block.text] : [])
-    expect(texts[0]).toBe('fork task')
-    expect(texts[1]).toContain(`Your parent agent id is ${JSON.stringify(parent.id)}`)
-    expect(texts[1]).toContain(`send_message({ agent_id: ${JSON.stringify(parent.id)}`)
-    expect(texts[1]).toContain('Your final answer is delivered to the parent automatically')
-    expect(texts[1]).not.toContain('report tool')
   })
 
   it('JSON-encodes a caller-supplied parent id in the initial return instruction', async () => {
@@ -387,11 +337,10 @@ describe('dsh-tool-subagent-control interrupt_agent', () => {
     const props = (schemas[0]!.parameters as { properties?: Record<string, unknown> }).properties ?? {}
     expect(Object.keys(props)).toEqual(['agent_id'])
     expect(schemas[0]!.description).toBe(
-      'Stop the current turn of a continuable subagent below you by its agent id. It stays available for '
-      + 'follow-ups and its own subagents keep running. The stop is requested, not awaited; interrupting a '
-      + 'finished subagent does nothing.',
+      'Request a stop of a continuable subagent\'s current turn; it stays available, and its own '
+      + 'subagents keep running.',
     )
-    expect(props.agent_id).toMatchObject({ description: 'The agent id of the subagent to interrupt.' })
+    expect(props.agent_id).not.toHaveProperty('description')
   })
 
   it('interrupts a running direct child with the parent cause, parking its queue', async () => {

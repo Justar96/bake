@@ -177,3 +177,24 @@ it('shows a turn compacting its own context from the live events, and steers it 
   expect(start?.data).not.toHaveProperty('sourceCommandId')
   expect(prompts(log).map(prompt => prompt.text)).toEqual([HISTORY, 'Continue from there', 'Steer after compaction'])
 })
+
+it('refuses /compact during a turn without showing compaction over it', async () => {
+  const { handle, controller, model } = await connected()
+  const started = Promise.withResolvers<void>()
+  const release = Promise.withResolvers<void>()
+  model.response = async function* () { started.resolve(); await release.promise; yield* textResponse('Finished') }
+  try {
+    controller.submit(HISTORY)
+    await started.promise
+    controller.submit('Steer meanwhile')
+    controller.submit('/compact')
+    expect(controller.view.compactPhase).toBeUndefined()
+    // Alt-Up still sends steering; it is not held behind a compaction that never runs.
+    controller.sendPending()
+    expect(controller.view.notice).toBe(dictionaries.en.pendingSent)
+    release.resolve()
+    await controller.drain()
+    await handle.agent.whenIdle()
+    expect(JSON.stringify(model.requests.at(-1)?.messages)).toContain('Steer meanwhile')
+  } finally { release.resolve(); await handle.agent.whenIdle() }
+})

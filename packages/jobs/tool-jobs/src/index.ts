@@ -63,7 +63,7 @@ export interface PublicJobSnapshot {
 }
 
 /** Where the model finds the id both job-addressing tools take. */
-const JOB_ID_DESCRIPTION = 'The background job id from a start result or job_list. A continuable subagent id is an agent id, not a job id.'
+const JOB_ID_DESCRIPTION = 'A job id, not a continuable subagent\'s agent id.'
 
 /** Shared schema for job-control outputs. */
 const PUBLIC_JOB_SCHEMA = {
@@ -306,16 +306,14 @@ export function apply(ctx: Context, config: Config): void {
     name: 'job_output',
     // The completion notice below is this plugin's own delivery, so the
     // description can promise it whenever the tool is registered.
-    description: 'Read a background job\'s output. You receive a notice when a job finishes, so there is '
-      + 'no need to poll or sleep while it runs. Jobs that stream output return what is new since your '
-      + 'last read; other jobs return their result once they finish. Every reply ends with '
-      + '`[status: ...]`. Returns immediately unless `wait: true`.',
+    description: 'Read a background job\'s new output since your last read, or its result once done; ends with '
+      + '`[status: ...]`. You are notified when it finishes; do not poll or sleep.',
     // A timed-out wait returns job state rather than a TOOL_TIMEOUT error, so
     // this tool owns its deadline instead of using ToolDefinition.timeoutMs.
     parameters: {
       job_id: { type: 'string', required: true, description: JOB_ID_DESCRIPTION },
-      wait: { type: 'boolean', description: 'Wait until the job finishes or the timeout passes, for when you cannot continue without the result. A timed-out wait returns `[status: running]` and leaves the job running.' },
-      timeout_ms: { type: 'number', description: `Maximum wait in milliseconds when wait is true (default ${waitDefault}, at most ${waitCap}).` },
+      wait: { type: 'boolean', description: 'Block until done or timeout; only if you cannot continue without it.' },
+      timeout_ms: { type: 'number', description: `Default ${waitDefault}, max ${waitCap}.` },
     },
     finalizeContent: finalizeJobContent,
     output: {
@@ -351,7 +349,7 @@ export function apply(ctx: Context, config: Config): void {
 
   ctx.tools.register(defineTool({
     name: 'job_list',
-    description: 'List your background jobs, running and finished, with their ids, kinds, statuses, and labels.',
+    description: 'List your background jobs, running and finished.',
     parameters: {},
     output: {
       schema: { type: 'array', items: PUBLIC_JOB_SCHEMA },
@@ -372,11 +370,10 @@ export function apply(ctx: Context, config: Config): void {
   ctx.tools.register(defineTool({
     name: 'job_kill',
     // Jobs end only by finishing, this kill, or owner disposal; a turn ending leaves them running.
-    description: 'Stop a running background job. Jobs otherwise keep running after your turn ends, until '
-      + 'they finish. Returns immediately; the job\'s status becomes `killed` once its work has stopped.',
+    description: 'Stop a background job (jobs outlive your turn).',
     parameters: {
       job_id: { type: 'string', required: true, description: JOB_ID_DESCRIPTION },
-      reason: { type: 'string', description: 'Optional short reason for stopping the job.' },
+      reason: { type: 'string' },
     },
     finalizeContent: finalizeJobContent,
     output: {

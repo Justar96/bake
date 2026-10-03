@@ -44,7 +44,7 @@ import { canonicalClientTimeZone } from '@deepseek-ai/dsh-util-time'
 <a id="model-experience"></a>
 ## Model Experience
 
-Indirectly, through the consumer that records a canonical zone on a durable message, from which `dsh-time-context` renders the turn's model-visible zone instruction and timestamp.
+None directly. `dsh-subagent` canonicalizes a client zone with it before recording that zone on a child Session; no shipped plugin renders the zone into model-visible text.
 
 #### KV Cache effect
 

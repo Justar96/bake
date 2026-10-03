@@ -32,8 +32,6 @@ export interface Config {
   diagnostic?: string
   /** Start-time features advertised by the provider. */
   capabilities?: Partial<SubagentCapabilities>
-  /** Whether tool descriptions say the child inherits completed turns. */
-  inheritsParentContext?: boolean
   /** Provider-owned child route defaults. */
   agentRouteDefaults?: Readonly<{ provider: string; model: string }>
   /** Structured value returned when the request asks for one. */
@@ -45,14 +43,12 @@ export interface Config {
 /** Scripted provider whose result aborts if its signal or disposer wins first. */
 class ScriptedSubagentProvider implements SubagentProvider {
   readonly capabilities: SubagentCapabilities
-  readonly inheritsParentContext: boolean
 
   constructor(
     readonly name: string,
     private readonly config: Config,
   ) {
     this.capabilities = { ...DEFAULT_CAPABILITIES, ...config.capabilities }
-    this.inheritsParentContext = config.inheritsParentContext ?? false
   }
 
   async start(request: SubagentStartRequest): Promise<SubagentRun> {

@@ -131,6 +131,10 @@ function compare(model: string, baseArm: string, scenarios: (scenario: string) =
     requests: [total(0, s => s.requests), total(1, s => s.requests)],
     toolCalls: [total(0, s => s.toolCalls), total(1, s => s.toolCalls)],
     toolErrors: [total(0, s => s.toolErrors), total(1, s => s.toolErrors)],
+    cacheReadShare: ([0, 1] as const).map(arm => {
+      const input = total(arm, logicalInput)
+      return input === 0 ? null : Math.round(total(arm, s => s.cacheReadTokens) / input * 1000) / 1000
+    }),
   }
 }
 type Comparison = ReturnType<typeof compare>
@@ -198,6 +202,7 @@ const summary = {
   perModel,
 }
 
+const share = (value: number | null) => value === null ? 'n/a' : `${Math.round(value * 100)}%`
 const fmt = (change: { pct: number; lo: number; hi: number } | null) => change === null ? 'n/a' : `${change.pct > 0 ? '+' : ''}${change.pct}% [${change.lo}, ${change.hi}]`
 const lines: string[] = [
   `# ${summary.title}`, '',
@@ -211,10 +216,10 @@ const lines: string[] = [
       : flagged.map(text => `- ${text}`),
 ]
 for (const baseArm of bases) {
-  lines.push('', `## Against \`${armLabels[baseArm]}\``, '', '| Model | Pairs | Total tokens | Uncached input | Requests | Tool errors | Failures |', '|---|---|---|---|---|---|---|')
+  lines.push('', `## Against \`${armLabels[baseArm]}\``, '', '| Model | Pairs | Total tokens | Uncached input | Requests | Tool calls | Cache-read share | Tool errors | Failures |', '|---|---|---|---|---|---|---|---|---|')
   for (const model of models) {
     const result = perModel[model].comparisons[armLabels[baseArm]]['all tasks'] as Comparison
-    lines.push(`| ${model} | ${result.pairs}/${result.cells} | ${fmt(result.totalTokens)} | ${fmt(result.uncachedInputTokens)} | ${result.requests[0]} → ${result.requests[1]} | ${result.toolErrors[0]} → ${result.toolErrors[1]} | ${result.failures[0]} → ${result.failures[1]} |`)
+    lines.push(`| ${model} | ${result.pairs}/${result.cells} | ${fmt(result.totalTokens)} | ${fmt(result.uncachedInputTokens)} | ${result.requests[0]} → ${result.requests[1]} | ${result.toolCalls[0]} → ${result.toolCalls[1]} | ${result.cacheReadShare.map(share).join(' → ')} | ${result.toolErrors[0]} → ${result.toolErrors[1]} | ${result.failures[0]} → ${result.failures[1]} |`)
   }
   lines.push('', '<details><summary>Per scenario</summary>', '', '| Model | Scenario | Pairs | Total tokens | Requests | Failures |', '|---|---|---|---|---|---|')
   for (const model of models) for (const scenario of Object.keys(groups).filter(name => name !== 'all tasks')) {
@@ -227,7 +232,7 @@ for (const baseArm of bases) {
 lines.push('', `## \`${summary.version}\` on its own`, '', '| Model | Successes | First request bytes | Mean tokens per task | Mean requests per task | Cache-read share | Tool errors |', '|---|---|---|---|---|---|---|')
 for (const model of models) {
   const own = perModel[model]
-  lines.push(`| ${model} | ${own.successes}/${own.samples} | ${own.firstRequestBytes ?? 'n/a'} | ${own.meanTotalTokensPerTask ?? 'n/a'} | ${own.meanRequestsPerTask ?? 'n/a'} | ${own.cacheReadShare === null ? 'n/a' : `${Math.round(own.cacheReadShare * 100)}%`} | ${own.toolErrors} |`)
+  lines.push(`| ${model} | ${own.successes}/${own.samples} | ${own.firstRequestBytes ?? 'n/a'} | ${own.meanTotalTokensPerTask ?? 'n/a'} | ${own.meanRequestsPerTask ?? 'n/a'} | ${share(own.cacheReadShare)} | ${own.toolErrors} |`)
 }
 const failed = samples.filter(sample => !sample.success)
 if (failed.length > 0) {

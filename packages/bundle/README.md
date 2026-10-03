@@ -1,5 +1,5 @@
 ---
-description: "Ready-made dsh profile bundles for the shared core, browser GUI, one-shot task, ACP, and SDK application surfaces."
+description: "Ready-made dsh profile bundles for the shared core, the Bake Desktop app, and one-shot headless tasks; the terminal app's bundle lives in `apps/tui`."
 kind: "package-group"
 ---
 
@@ -7,7 +7,7 @@ kind: "package-group"
 
 ## Summary
 
-This group contains the `base` and `headless` profile bundles. The launcher stacks their patches to assemble the shipped terminal and one-task profiles.
+This group contains the `base`, `desktop`, and `headless` profile bundles. The launcher stacks their patches to assemble the shipped terminal, Bake Desktop, and one-task profiles.
 
 ## Table of Contents
 
@@ -21,6 +21,7 @@ This group contains the `base` and `headless` profile bundles. The launcher stac
 | Package | Role | ctx key |
 |---|---|---|
 | [`base`](base/README.md) | Shared core for base-backed profiles | — (patch only) |
+| [`desktop`](desktop/README.md) | Long-lived bridge the Bake Desktop app drives over base | `desktop-bridge` |
 | [`headless`](headless/README.md) | One-shot command-line task application over base | `headless-runner` |
 
 In-box bundles resolve from the dsh installation; out-of-tree bundles install into a profile through `dsh plugin --profile <name> add <package>`.

@@ -113,25 +113,21 @@ function validateBashArgs(args: BashToolArgs, effectiveMode: SandboxMode | undef
  */
 function bashDescription(backgroundEnabled: boolean, escalationModes: readonly SandboxMode[]): string {
   const background = backgroundEnabled
-    ? 'Run long builds and tests with `run_in_background`, which returns a job id at once; read output with `job_output` and stop with `job_kill`.'
-    : 'Background execution is not available, so a command must finish within its timeout.'
+    ? 'Use `run_in_background` for long builds and tests, then `job_output` and `job_kill`.'
+    : 'No background execution: a command must finish within its timeout.'
   // The registry's built-ins; DSH_SHELL=1 only marks the process and tells the model nothing.
-  const base = 'Run a command with `bash -c` and return its stdout and stderr. '
-    + 'Each call starts a fresh shell, so directory changes and variables do not carry over to later calls. '
-    + 'Avoid filesystem-wide `find` scans. '
-    + 'A non-zero exit is reported in the result as `[exit code: N]`, not as a tool error. '
-    + 'Long output is truncated to its tail, and the full output is saved to a file named in the result when possible. '
-    + `\`$${DSH_ENV_PREFIX}HOME\` is the harness home directory and \`$${DSH_ENV_PREFIX}SESSION_ID\` is this session's id. `
+  const base = 'Run `bash -c` in a fresh shell (cd and variables do not persist); returns stdout and stderr. '
+    + 'Avoid filesystem-wide `find`. A non-zero exit shows as `[exit code: N]`, not a tool error. '
+    + 'Long output keeps its tail; the result names a file with all of it. '
+    + `\`$${DSH_ENV_PREFIX}HOME\`: harness home; \`$${DSH_ENV_PREFIX}SESSION_ID\`: session id. `
     + background
   if (escalationModes.length === 0) return base
-  return base + ' Commands may run in a file sandbox; trying one it might block is safe. '
-    + 'A blocked file operation reports `[sandbox: file access denied under <mode> mode]`: '
-    + 'a policy denial, not a bug in the command, so do not work around it. '
-    + 'When a wider mode would let a denied command succeed, retry that same command once in the same turn '
-    + 'with the narrowest sufficient `sandbox_permissions` and a `justification`. '
-    + 'That retry itself asks the user for approval, so there is no need to ask in chat first. '
-    + 'Request a wider mode up front only when this session already denied the same access. '
-    + 'A rejection is final for that command: stop and explain. Other commands can still run or escalate.'
+  return base + ' A file sandbox may block commands; trying is safe. '
+    + '`[sandbox: file access denied under <mode> mode]` is a policy denial: do not work around it. '
+    + 'If a wider mode would help, retry the same command once this turn with the narrowest '
+    + '`sandbox_permissions` and a `justification`; that asks the user, so do not ask in chat. '
+    + 'Request wider access up front only after this session was denied the same access. '
+    + 'A rejection is final for that command.'
 }
 
 /**
@@ -289,22 +285,22 @@ export function apply(ctx: Context, config: Config = {}): void {
     name: 'bash',
     description: bashDescription(backgroundEnabled, escalationModes),
     parameters: {
-      command: { type: 'string', required: true, description: 'The bash command to execute.' },
-      description: { type: 'string', description: 'Short summary of what the command does, shown to the user.' },
-      timeoutMs: { type: 'number', description: 'Timeout in milliseconds, capped at the maximum; the command is killed when it expires.' },
-      workdir: { type: 'string', description: 'Directory to run this command in. Defaults to your working directory; a relative path resolves against it.' },
+      command: { type: 'string', required: true },
+      description: { type: 'string', description: 'Shown to the user.' },
+      timeoutMs: { type: 'number', description: 'Capped; kills the command on expiry.' },
+      workdir: { type: 'string', description: 'Defaults to the working directory.' },
       ...backgroundEnabled ? {
-        run_in_background: { type: 'boolean' as const, description: 'Run in the background, with no timeout.' },
+        run_in_background: { type: 'boolean' as const, description: 'No timeout.' },
       } : {},
       ...escalationModes.length > 0 ? {
         sandbox_permissions: {
           type: 'string' as const,
           enum: [...escalationModes],
-          description: 'Wider sandbox mode for retrying a denied command.',
+          description: 'For retrying a denied command.',
         },
         justification: {
           type: 'string' as const,
-          description: 'One sentence telling the user why this command needs wider access.',
+          description: 'One sentence for the user.',
         },
       } : {},
     },

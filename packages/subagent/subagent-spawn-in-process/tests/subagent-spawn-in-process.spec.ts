@@ -241,16 +241,14 @@ describe('dsh-subagent-spawn-in-process', () => {
     expect('steer' in run).toBe(false)
     expect('resume' in run).toBe(false)
     await run.result
-    // The spawn provider DOES advertise continuable creation, and — because a
-    // spawned child starts fresh — contributes no seed.
+    // The spawn provider DOES advertise continuable creation.
     const provider = ctx.subagents.getProvider('spawn')!
     expect(typeof provider.prepareContinuable).toBe('function')
-    const spec = await provider.prepareContinuable!({
+    await expect(provider.prepareContinuable!({
       sessionId: SessionId('continuable-child'),
       parent,
       signal: new AbortController().signal,
-    })
-    expect(spec.seed).toBeUndefined()
+    })).resolves.toBeUndefined()
     await run.dispose()
   })
 

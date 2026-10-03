@@ -26,7 +26,7 @@ export const RUN_CODE_NAME = 'run_code'
  * The language-specific `run_code` schema text: the tool `description` and its
  * `code` parameter description, kept together so a language's two model-facing
  * strings share one source of truth. Keyed by `PtcRuntime.language`, mirroring
- * `SDK_RENDERERS` in {@link ./index.ts}. The emitted flavor MUST match the
+ * `SDK_RENDERERS` in {@link ./schema-presentation.ts}. The emitted flavor MUST match the
  * semantics the same language's SDK instructions promise, so the model never
  * receives a TypeScript schema beside a Python SDK (or vice versa).
  */
@@ -72,7 +72,7 @@ const PYTHON_FLAVOR: RunCodeFlavor = {
 
 /**
  * The languages PTC mode ships a presentation for. Both per-language tables —
- * {@link RUN_CODE_FLAVORS} here and `SDK_RENDERERS` in {@link ./index.ts} — are
+ * {@link RUN_CODE_FLAVORS} here and `SDK_RENDERERS` in {@link ./schema-presentation.ts} — are
  * checked against this union with `satisfies`, so a language added to one and
  * not the other fails `typecheck` instead of waiting for a runtime that reports
  * it. The tables stay declared `Record<string, …>` because `PtcRuntime.language`
@@ -725,14 +725,18 @@ export function createRunCodeTool(registry: ToolRuntime, options: RunCodeBridgeO
         exec.signal.removeEventListener('abort', onOuterAbort)
       }
     },
-    // The model-authored description is the call's always-visible UI label
-    // (the bash `description` precedent); the program itself rides rawInput.
-    presentCall: args => ({
-      card: 'generic',
-      title: args.description,
-      kind: 'execute',
-      rawInput: args.code,
-    }),
+    // A fence carries the grammar through generic presentation. Its delimiter
+    // exceeds every embedded backtick run, so the whole program stays literal.
+    presentCall: (args) => {
+      let width = 3
+      for (const match of args.code.matchAll(/`+/g)) width = Math.max(width, match[0].length + 1)
+      const fence = '`'.repeat(width)
+      const language = peekRuntime()?.language ?? 'text'
+      return {
+        card: 'generic', title: args.description, kind: 'execute',
+        content: [{ type: 'text', text: `${fence}${language}\n${args.code}\n${fence}` }],
+      }
+    },
     // Deliberately no presentResult: the generic card fallback keeps this
     // title and reads durable result content without duplicating a large raw
     // result into the host view payload.

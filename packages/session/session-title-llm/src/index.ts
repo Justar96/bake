@@ -9,7 +9,7 @@ import z from '@deepseek-ai/schemastery'
 import { createUserMessage, BlockAssembler } from '@deepseek-ai/dsh-llm'
 import type { FinishReason, GenerateOptions, Message } from '@deepseek-ai/dsh-llm'
 import { deadline, MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
-import { deepFreeze } from '@deepseek-ai/dsh-util-values'
+import { assertPositiveInteger, deepFreeze } from '@deepseek-ai/dsh-util-values'
 import type { SessionSeq } from '@deepseek-ai/dsh-session'
 import {
   normalizeSessionTitle,
@@ -95,13 +95,6 @@ const CONFIG_KEYS: ReadonlySet<string> = new Set([
   'model',
 ])
 
-/** Validate one positive integer limit. */
-function assertPositiveInteger(name: string, value: number): void {
-  if (!Number.isInteger(value) || value <= 0) {
-    throw new Error(`session-title-llm: ${name} must be a positive integer`)
-  }
-}
-
 /**
  * Validate and detach required model-provider configuration.
  * @param config - untrusted plugin configuration.
@@ -118,11 +111,11 @@ export function resolveSessionTitleLlmConfig(
   for (const key of Object.keys(value)) {
     if (!CONFIG_KEYS.has(key)) throw new Error(`session-title-llm: unknown config key "${key}"`)
   }
-  assertPositiveInteger('targetWords', value.targetWords)
-  assertPositiveInteger('targetCjkCharacters', value.targetCjkCharacters)
-  assertPositiveInteger('maxInputBytes', value.maxInputBytes)
-  assertPositiveInteger('maxOutputTokens', value.maxOutputTokens)
-  assertPositiveInteger('timeoutMs', value.timeoutMs)
+  assertPositiveInteger('session-title-llm: targetWords', value.targetWords)
+  assertPositiveInteger('session-title-llm: targetCjkCharacters', value.targetCjkCharacters)
+  assertPositiveInteger('session-title-llm: maxInputBytes', value.maxInputBytes)
+  assertPositiveInteger('session-title-llm: maxOutputTokens', value.maxOutputTokens)
+  assertPositiveInteger('session-title-llm: timeoutMs', value.timeoutMs)
   if (value.timeoutMs > MAX_TIMER_DELAY_MS) {
     throw new Error(`session-title-llm: timeoutMs must not exceed ${MAX_TIMER_DELAY_MS}`)
   }

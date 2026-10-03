@@ -6,8 +6,10 @@
  * and each consumer maps the cards it understands. This module is the
  * terminal's mapping. It is the only place a `card` becomes display lines.
  *
- * Presenters are pure over `args` and the durable result, so a replayed
- * session log reproduces the same card. A tool the registry no longer knows,
+ * Presenters derive source and outcomes from `args` and the durable result.
+ * Display-only hints, such as a configured syntax grammar, can depend on the
+ * currently loaded tool; replay preserves the logged text, not those hints.
+ * A tool the registry no longer knows,
  * a tool with no presenter, and a card this build does not recognize all fall
  * back to the raw arguments and result text. So does a generic result that
  * omits its `content`, which the contract defines as "render the raw result".
@@ -87,6 +89,14 @@ export class ToolCards {
     const card = view === undefined ? undefined : callCard(view)
     this.pending.set(callId, { tool, args: parsed.value, ...card === undefined ? {} : { title: card.title } })
     return card
+  }
+
+  /**
+   * @param callId - the call's identifier, as the session log recorded it.
+   * @returns whether the call's arguments are still held for its result.
+   */
+  has(callId: string): boolean {
+    return this.pending.has(callId)
   }
 
   /**

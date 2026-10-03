@@ -198,7 +198,7 @@ export async function summarizeWithLlm(
  * Wrap raw summary blocks in the durable checkpoint framing, followed by any
  * deterministic working-state sections.
  * @param summary - safe text-only model output.
- * @param sections - blocks appended after the summary block, such as file lists and the todo list.
+ * @param sections - blocks appended after the summary block, such as the file lists.
  * @returns content for the synthesized replacement user message.
  */
 export function frameSummary(

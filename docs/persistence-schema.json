@@ -15388,7 +15388,7 @@
         "event:team/message/delivered.data"
       ],
       "sources": [
-        "packages/session/session-format-catalog/src/retired-vocabulary.ts:112"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:175"
       ]
     },
     {
@@ -15751,7 +15751,7 @@
         "event:team/message/queued.data"
       ],
       "sources": [
-        "packages/session/session-format-catalog/src/retired-vocabulary.ts:110"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:173"
       ]
     },
     {
@@ -18603,7 +18603,7 @@
         "event:deliverables/presented.data"
       ],
       "sources": [
-        "packages/deliverables/tool-present/src/types.ts:15"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:190"
       ]
     },
     {
@@ -19533,7 +19533,7 @@
         "packages/compaction/compaction-image-offload/src/projection.ts#ImageOffloadTarget"
       ],
       "sources": [
-        "packages/compaction/compaction-image-offload/src/projection.ts:9"
+        "packages/compaction/compaction-image-offload/src/projection.ts:10"
       ]
     },
     {
@@ -20554,7 +20554,7 @@
         "event:plan/mode.data"
       ],
       "sources": [
-        "packages/session/session-format-catalog/src/retired-vocabulary.ts:121"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:210"
       ]
     },
     {
@@ -20621,7 +20621,7 @@
         "packages/session/session-format-catalog/src/retired-vocabulary.ts#RetiredTeamMessageSource"
       ],
       "sources": [
-        "packages/session/session-format-catalog/src/retired-vocabulary.ts:84"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:137"
       ]
     },
     {
@@ -24171,7 +24171,7 @@
         ]
       },
       "names": [
-        "event:agent/inbox/spliced.data.inserted[0].source[12].changes"
+        "event:agent/inbox/spliced.data.inserted[0].source[13].changes"
       ],
       "sources": []
     },
@@ -28673,11 +28673,9 @@
         ]
       },
       "names": [
-        "packages/feedback/message-feedback/src/types.ts#MessageFeedbackRating"
+        "event:feedback/message-put.data.item.rating"
       ],
-      "sources": [
-        "packages/feedback/message-feedback/src/types.ts:17"
-      ]
+      "sources": []
     },
     {
       "digest": "3aa261c8516b5c955ed12080e6257a56cbe513f6c9f0ac9274c12e96c196ebca",
@@ -29459,7 +29457,7 @@
         "packages/core/tools/src/index.ts#ToolRestriction"
       ],
       "sources": [
-        "packages/core/tools/src/index.ts:776"
+        "packages/core/tools/src/index.ts:728"
       ]
     },
     {
@@ -29574,10 +29572,10 @@
         ]
       },
       "names": [
-        "packages/feedback/message-feedback/src/types.ts#MessageFeedbackItem"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts#RetiredMessageFeedbackItem"
       ],
       "sources": [
-        "packages/feedback/message-feedback/src/types.ts:20"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:117"
       ]
     },
     {
@@ -30551,7 +30549,7 @@
         "event:image/offload.data"
       ],
       "sources": [
-        "packages/compaction/compaction-image-offload/src/projection.ts:25"
+        "packages/compaction/compaction-image-offload/src/projection.ts:26"
       ]
     },
     {
@@ -32825,7 +32823,6 @@
         "packages/attachment/attachment/src/brand.ts#AttachmentId",
         "packages/compaction/compaction/src/brand.ts#CompactionId",
         "packages/core/session/src/types.ts#SessionId",
-        "packages/feedback/message-feedback/src/types.ts#MessageFeedbackVersion",
         "packages/goal/goal/src/types.ts#GoalId",
         "packages/interaction/commands/src/brand.ts#CommandId",
         "packages/interaction/user-approval/src/types.ts#ApprovalRequestId",
@@ -32835,22 +32832,22 @@
         "packages/llm/llm/src/brand.ts#ReasoningEffortId",
         "packages/llm/llm/src/brand.ts#ToolCallId",
         "packages/schedule/schedule/src/types.ts#ScheduleId",
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts#RetiredMessageFeedbackVersion",
         "packages/session/session-format-catalog/src/retired-vocabulary.ts#RetiredSessionRequestId",
         "packages/session/session-format-catalog/src/retired-vocabulary.ts#RetiredTeamId",
         "packages/session/session-format-catalog/src/retired-vocabulary.ts#RetiredTeamMessageId",
         "packages/session/session-format-catalog/src/retired-vocabulary.ts#RetiredTeamTaskId",
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts#RetiredWebhookDeliveryId",
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts#RetiredWebhookRuleId",
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts#RetiredWebhookSourceId",
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts#RetiredWorkflowRunId",
         "packages/session/session-title/src/index.ts#SessionTitleProviderId",
-        "packages/session/session-title/src/types.ts#SessionTitleProviderId",
-        "packages/webhook/webhook/src/brand.ts#WebhookDeliveryId",
-        "packages/webhook/webhook/src/brand.ts#WebhookRuleId",
-        "packages/webhook/webhook/src/brand.ts#WebhookSourceId",
-        "packages/workflow/workflow/src/types.ts#WorkflowRunId"
+        "packages/session/session-title/src/types.ts#SessionTitleProviderId"
       ],
       "sources": [
         "packages/attachment/attachment/src/brand.ts:6",
         "packages/compaction/compaction/src/brand.ts:4",
         "packages/core/session/src/types.ts:20",
-        "packages/feedback/message-feedback/src/types.ts:14",
         "packages/goal/goal/src/types.ts:17",
         "packages/interaction/commands/src/brand.ts:31",
         "packages/interaction/user-approval/src/types.ts:17",
@@ -32860,16 +32857,17 @@
         "packages/llm/llm/src/brand.ts:43",
         "packages/llm/llm/src/brand.ts:67",
         "packages/schedule/schedule/src/types.ts:10",
-        "packages/session/session-format-catalog/src/retired-vocabulary.ts:34",
-        "packages/session/session-format-catalog/src/retired-vocabulary.ts:37",
-        "packages/session/session-format-catalog/src/retired-vocabulary.ts:40",
-        "packages/session/session-format-catalog/src/retired-vocabulary.ts:43",
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:114",
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:134",
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:39",
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:42",
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:45",
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:48",
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:51",
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:54",
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:57",
         "packages/session/session-title/src/index.ts:42",
-        "packages/session/session-title/src/types.ts:17",
-        "packages/webhook/webhook/src/brand.ts:12",
-        "packages/webhook/webhook/src/brand.ts:6",
-        "packages/webhook/webhook/src/brand.ts:9",
-        "packages/workflow/workflow/src/types.ts:13"
+        "packages/session/session-title/src/types.ts:17"
       ]
     },
     {
@@ -34167,7 +34165,7 @@
         ]
       },
       "names": [
-        "event:agent/inbox/spliced.data.inserted[0].source[15].references[0]"
+        "event:agent/inbox/spliced.data.inserted[0].source[16].references[0]"
       ],
       "sources": [
         "packages/context/session-reference/src/types.ts:18"
@@ -34563,7 +34561,7 @@
         "packages/session/session-format-catalog/src/retired-vocabulary.ts#RetiredTeamTaskSnapshot"
       ],
       "sources": [
-        "packages/session/session-format-catalog/src/retired-vocabulary.ts:63"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:77"
       ]
     },
     {
@@ -35644,7 +35642,7 @@
         "packages/session/session-format-catalog/src/retired-vocabulary.ts#RetiredTeamMessageSnapshot"
       ],
       "sources": [
-        "packages/session/session-format-catalog/src/retired-vocabulary.ts:75"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:89"
       ]
     },
     {
@@ -38025,7 +38023,7 @@
         "packages/session/session-format-catalog/src/retired-vocabulary.ts#RetiredTeamMemberSnapshot"
       ],
       "sources": [
-        "packages/session/session-format-catalog/src/retired-vocabulary.ts:49"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:63"
       ]
     },
     {
@@ -39007,7 +39005,7 @@
         "event:agent/inbox/spliced.data.inserted[0].source[10]"
       ],
       "sources": [
-        "packages/session/session-format-catalog/src/retired-vocabulary.ts:95"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:148"
       ]
     },
     {
@@ -39438,7 +39436,7 @@
         "packages/context/agent-instructions/src/state.ts#AgentInstructionSource"
       ],
       "sources": [
-        "packages/context/agent-instructions/src/state.ts:37"
+        "packages/context/agent-instructions/src/state.ts:38"
       ]
     },
     {
@@ -41165,7 +41163,7 @@
         "event:todo/write.data"
       ],
       "sources": [
-        "packages/todo/tool-todo/src/types.ts:31"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:184"
       ]
     },
     {
@@ -41301,10 +41299,10 @@
         ]
       },
       "names": [
-        "packages/feedback/message-feedback/src/types.ts#MessageFeedbackDelete"
+        "event:feedback/message-delete.data"
       ],
       "sources": [
-        "packages/feedback/message-feedback/src/types.ts:46"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:188"
       ]
     },
     {
@@ -41829,10 +41827,10 @@
         ]
       },
       "names": [
-        "packages/workflow/tool-workflow/src/types.ts#ToolWorkflowRunEndData"
+        "event:tool-workflow/run-end.data"
       ],
       "sources": [
-        "packages/workflow/tool-workflow/src/types.ts:36"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:208"
       ]
     },
     {
@@ -41995,7 +41993,7 @@
         ]
       },
       "names": [
-        "event:agent/inbox/spliced.data.inserted[0].source[18].entries[0]"
+        "event:agent/inbox/spliced.data.inserted[0].source[19].entries[0]"
       ],
       "sources": [
         "packages/skill/tool-skill/src/index.ts:40"
@@ -42093,11 +42091,9 @@
         ]
       },
       "names": [
-        "packages/workflow/workflow/src/types.ts#WorkflowStopReason"
+        "event:tool-workflow/run-end.data.stopReason"
       ],
-      "sources": [
-        "packages/workflow/workflow/src/types.ts:63"
-      ]
+      "sources": []
     },
     {
       "digest": "84ac8c1a66ffc697262e181f42e851259eae14038c113ca329fb4700ccdb1f7c",
@@ -43513,7 +43509,7 @@
         "event:session-log-deepseek/delivery-accepted.data"
       ],
       "sources": [
-        "packages/session/session-format-catalog/src/retired-vocabulary.ts:123"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:212"
       ]
     },
     {
@@ -44629,7 +44625,7 @@
         ]
       },
       "names": [
-        "event:agent/inbox/spliced.data.inserted[0].source[12].changes[0].action"
+        "event:agent/inbox/spliced.data.inserted[0].source[13].changes[0].action"
       ],
       "sources": []
     },
@@ -45732,10 +45728,10 @@
         ]
       },
       "names": [
-        "packages/workflow/tool-workflow/src/types.ts#ToolWorkflowAgentStartData"
+        "event:tool-workflow/agent-start.data"
       ],
       "sources": [
-        "packages/workflow/tool-workflow/src/types.ts:20"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:194"
       ]
     },
     {
@@ -45932,10 +45928,10 @@
         ]
       },
       "names": [
-        "event:agent/inbox/spliced.data.inserted[0].source[19]"
+        "event:agent/inbox/spliced.data.inserted[0].source[12]"
       ],
       "sources": [
-        "packages/webhook/webhook/src/types.ts:74"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:152"
       ]
     },
     {
@@ -47957,7 +47953,7 @@
         "event:team/task.data"
       ],
       "sources": [
-        "packages/session/session-format-catalog/src/retired-vocabulary.ts:108"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:171"
       ]
     },
     {
@@ -49489,10 +49485,10 @@
         ]
       },
       "names": [
-        "packages/workflow/tool-workflow/src/types.ts#ToolWorkflowRunStartData"
+        "event:tool-workflow/run-start.data"
       ],
       "sources": [
-        "packages/workflow/tool-workflow/src/types.ts:14"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:192"
       ]
     },
     {
@@ -49727,10 +49723,10 @@
         ]
       },
       "names": [
-        "packages/todo/tool-todo/src/types.ts#TodoItem"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts#RetiredTodoItem"
       ],
       "sources": [
-        "packages/todo/tool-todo/src/types.ts:21"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:98"
       ]
     },
     {
@@ -49927,10 +49923,10 @@
         ]
       },
       "names": [
-        "packages/feedback/message-feedback/src/types.ts#MessageFeedbackPut"
+        "event:feedback/message-put.data"
       ],
       "sources": [
-        "packages/feedback/message-feedback/src/types.ts:38"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:186"
       ]
     },
     {
@@ -50024,7 +50020,7 @@
         ]
       },
       "names": [
-        "event:agent/inbox/spliced.data.inserted[0].source[18].entries"
+        "event:agent/inbox/spliced.data.inserted[0].source[19].entries"
       ],
       "sources": []
     },
@@ -50722,7 +50718,7 @@
         "event:team/member.data"
       ],
       "sources": [
-        "packages/session/session-format-catalog/src/retired-vocabulary.ts:106"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:169"
       ]
     },
     {
@@ -50865,7 +50861,7 @@
         "packages/session/session-format-catalog/src/retired-vocabulary.ts#RetiredTeamTaskStatus"
       ],
       "sources": [
-        "packages/session/session-format-catalog/src/retired-vocabulary.ts:60"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:74"
       ]
     },
     {
@@ -52124,10 +52120,10 @@
         ]
       },
       "names": [
-        "packages/deliverables/tool-present/src/types.ts#PresentedFile"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts#RetiredPresentedFile"
       ],
       "sources": [
-        "packages/deliverables/tool-present/src/types.ts:5"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:128"
       ]
     },
     {
@@ -53328,10 +53324,10 @@
         ]
       },
       "names": [
-        "packages/workflow/tool-workflow/src/types.ts#ToolWorkflowAgentEndData"
+        "event:tool-workflow/agent-end.data"
       ],
       "sources": [
-        "packages/workflow/tool-workflow/src/types.ts:29"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:202"
       ]
     },
     {
@@ -53679,11 +53675,9 @@
         ]
       },
       "names": [
-        "packages/workflow/workflow/src/types.ts#WorkflowAgentOutcome"
+        "event:tool-workflow/agent-end.data.outcome"
       ],
-      "sources": [
-        "packages/workflow/workflow/src/types.ts:110"
-      ]
+      "sources": []
     },
     {
       "digest": "c43b119ce579b3e9983a0d3adc4ba402ebb9ba773d89738a2dab01ecf5813943",
@@ -58001,7 +57995,7 @@
         ]
       },
       "names": [
-        "event:agent/inbox/spliced.data.inserted[0].source[15].references"
+        "event:agent/inbox/spliced.data.inserted[0].source[16].references"
       ],
       "sources": []
     },
@@ -58036,7 +58030,7 @@
         "packages/session/session-format-catalog/src/retired-vocabulary.ts#RetiredTeamMemberPhase"
       ],
       "sources": [
-        "packages/session/session-format-catalog/src/retired-vocabulary.ts:46"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:60"
       ]
     },
     {
@@ -60863,7 +60857,7 @@
         "packages/session/session-format-catalog/src/retired-vocabulary.ts#RetiredModelSelection"
       ],
       "sources": [
-        "packages/session/session-format-catalog/src/retired-vocabulary.ts:27",
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:32",
         "packages/subagent/tool-subagent/src/types.ts:27"
       ]
     },
@@ -61885,7 +61879,7 @@
       ],
       "sources": [
         "packages/core/session/src/types.ts:282",
-        "packages/session/session-format-catalog/src/retired-vocabulary.ts:119"
+        "packages/session/session-format-catalog/src/retired-vocabulary.ts:182"
       ]
     },
     {

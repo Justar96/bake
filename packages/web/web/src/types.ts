@@ -18,7 +18,7 @@ export interface WebSearchRequest {
   /**
    * Upper bound on returned sources; the seam truncates to it. Omitted = no
    * bound. `dsh-tool-web` always sets it. A provider whose API supports a
-   * result-count control (Exa's `numResults`) should apply it at the request
+   * result-count control should apply it at the request
    * layer as a cost/latency optimization; the seam enforces the bound
    * regardless.
    */
@@ -27,7 +27,7 @@ export interface WebSearchRequest {
 
 /**
  * Normalized search outcome. `content` is optional provider-generated answer
- * text or summary (Exa and DeepSeek return none; Perplexity returns a
+ * text or summary (DeepSeek returns none; Perplexity returns a
  * generated answer).
  * `sources[]` is the portable citation shape. `truncated` is set by the seam
  * when it cut `sources[]` down to `maxResults`.

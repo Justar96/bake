@@ -45,22 +45,22 @@ A record covers both model sets. `EVAL_MODELS` takes model ids, set names, or bo
 | `standard` | `gemini-3.8-flash-medium` | `cliproxyapi`, OpenAI Responses | medium |
 | `standard` | `gpt-6.1-sol` | `cliproxyapi`, OpenAI Responses | medium |
 | `standard` | `claude-sonnet-5-5` | `cliproxyapi`, Anthropic Messages | medium |
-| `extended` | `gpt-6-astra` | `cliproxyapi`, OpenAI Responses | medium |
 | `extended` | `claude-opus-5-5` | `cliproxyapi`, Anthropic Messages | medium |
 | `extended` | `deepseek-flash` | DeepSeek official, Anthropic Messages | high |
 | `extended` | `deepseek-v4-pro` | DeepSeek official, Anthropic Messages | high |
 
-DeepSeek offers `low`, `high`, and `max` but no `medium`, so it runs at `high`, its default. `design.json` and each sample record the provider, wire format, and effort.
+DeepSeek offers `low`, `high`, and `max` but no `medium`, so it runs at `high`, its default. `design.json` and each sample record the provider, wire format, and effort. Each raw sample's `requestMetrics` also carries the stream timing of every request: milliseconds from the proxy receiving it to the response headers, the first and last byte, and the stream's end (null if it never ended), with the event count and the last event type. A sample stopped at the wall-clock cap whose last request shows events that stop well before the cap points to the gateway, not the model.
 
 | Variable | Meaning |
 |---|---|
-| `EVAL_ARMS` | `name=checkout` pairs, two or more |
-| `EVAL_MODELS` | model ids or set names, default `standard,extended`; a bare id is a `cliproxyapi` model, and `deepseek/<id>`, or a bare `deepseek-*` id the gateway does not list, is a DeepSeek model |
+| `EVAL_ARMS` | `name=checkout` pairs, two or more; `name=pi` or `name=pi:<bin>` is the pi coding agent instead of a checkout |
+| `EVAL_MODELS` | model ids or set names, default `standard,extended`; a bare id is a `cliproxyapi` model, and `deepseek/<id>`, or a bare `deepseek-*` id the gateway does not list, is a DeepSeek model; a trailing `@<effort>`, as in `gemini-3.8-flash-high@high`, replaces the model's default effort |
 | `EVAL_CASES` | scenarios; the default is the standard suite below |
 | `EVAL_TRIALS` | trials per scenario, default 3 |
 | `EVAL_OUTPUT` | raw output directory |
+| `EVAL_GATEWAY` | a JSON file of `{ baseUrl, apiKey }`, such as pi's `~/.pi/agent/cliproxyapi.json`, that replaces the `cliproxyapi` upstream and key for every arm; the proxy swaps each arm's key for this one, so both arms reach one upstream with one account. DeepSeek routes are unaffected |
 | `EVAL_EXTRA_<ARM>` | a JSON array of extra overlay rows for one arm, for an attribution arm such as `[{"id":"fs-observation-policy","config":{"editGuard":"version"}}]` |
-| `EVAL_SETTINGS_<ARM>` | a JSON object merged into one arm's `settings.yaml`, for settings no overlay row carries; `$PROVIDER` and `$MODEL` become the route under test |
+| `EVAL_SETTINGS_<ARM>` | a JSON object deep-merged into one arm's `settings.yaml`, for settings no overlay row carries; it can change one route key, such as `{"llm-pi-ai":{"providers":{"$PROVIDER":{"strictTools":true}}}}`, without replacing the route, and arrays replace; `$PROVIDER` and `$MODEL` become the route under test |
 
 | Scenario | What it checks |
 |---|---|
@@ -70,13 +70,25 @@ DeepSeek offers `low`, `high`, and `max` but no `medium`, so it runs at `high`, 
 | `stale_edit` | an external writer changes the file after the read |
 | `multi_site_edit`, `multi_file_edit` | several changes in one file and across two |
 | `shell_then_edit` | a shell step rewrites the file before the edit |
-| `workflow_script` | a `workflow` script that runs two subagents |
 
-`delegation` is outside the standard suite; name it in `EVAL_CASES` to measure subagent routing. It delegates the same two reads through the `subagent` tool and checks the same `summary.txt`. Each sample records its `subagentCalls` and the `routingDecisions` its session logs carry: who chose each child's route, and the model and effort. For a routing arm, give both arms the same `subagent-model-selection` allowlist through `EVAL_SETTINGS_<ARM>`, since the allowlist appears in the `subagent` tool's schema, and turn `router.enabled` on in one of them only.
+`delegation` is outside the standard suite; name it in `EVAL_CASES` to measure subagent routing. It delegates two file reads through the `subagent` tool and checks the `summary.txt` the parent writes from their answers. Each sample records its `subagentCalls` and the `routingDecisions` its session logs carry: who chose each child's route, and the model and effort. For a routing arm, give both arms the same `subagent-model-selection` allowlist through `EVAL_SETTINGS_<ARM>`, since the allowlist appears in the `subagent` tool's schema, and turn `router.enabled` on in one of them only.
 
 `delegation_auto` is the same task with the route left to the host, so every delegation reaches the task router when one is on. Each sample's `routingDecisions` also carries the router's fallback flag, assessment status, and one-line reason. To measure how routing degrades without the hosted router, run `bun evals/agent-loop/sim-router.ts` and point each arm's `router.url` at `http://127.0.0.1:18917/<case>`. Its cases answer a valid route, an effort the route may not list, a route outside the allowlist, a marked fallback, a reply slower than `router.timeoutMs`, HTTP 503, and a body that is not JSON. It refuses a request without its bearer token, so export `ING_API_TOKEN=sim-eval-token` for the run, or point `router.tokenEnv` at an unset variable to measure a missing token.
 
 A sample succeeds when the agent exits cleanly and an external check passes. That check is the exact `no_tools` reply, the fixture's `node test.cjs` with the test file unmodified, or the expected `summary.txt`. Where a scenario injects content, that content must also be kept.
+
+## Comparing with pi
+
+An arm named `pi` (or `pi:<path to the CLI>`) runs the installed pi coding agent through the same capturing proxy, fixtures, and checks, so a record can compare Bake with pi on tool calls, round trips, tokens, and cache reads. Each sample runs `pi --mode json` in a private agent directory whose `models.json` points one `eval` provider at the proxy. pi keeps its own system prompt and default tools (`read`, `bash`, `edit`, `write`), with no session, extensions, skills, prompt templates, or context files, and agent-level retry is off as in the Bake arms. A `cliproxyapi` model uses the same gateway wire and model metadata as the Bake arm. A DeepSeek model uses pi's own DeepSeek catalog entry, which is Chat Completions at `api.deepseek.com`, so the two arms reach DeepSeek over different wires. The pi arm passes `CLIPROXYAPI_API_KEY` or `DEEPSEEK_API_KEY` from the environment, or from the reference of that name in `~/.bake/.credentials.yaml`. It skips the delegation scenarios, which need tools pi does not ship, so leave them out of `EVAL_CASES`. The stale writer runs as a pi extension on pi's `tool_result` event.
+
+```sh
+EVAL_ARMS=bake=.,pi=pi EVAL_MODELS=gpt-6.1-sol EVAL_CASES=no_tools,ordinary_edit,path_discovery,stale_edit,unprompted_edit,multi_site_edit,multi_file_edit,shell_then_edit \
+  EVAL_OUTPUT=.preflight/evals/agent-loop/bake-vs-pi/gpt-6.1-sol bun run eval
+```
+
+When the default gateway serves one agent but not the other, as when a subscription bills pi's requests as third-party extra usage, point both arms at a gateway that serves both with `EVAL_GATEWAY`, rather than giving the arms different upstreams.
+
+Record such a run with `--candidate bake --base pi`. The regression rule still applies, but a comparison with pi measures two agents rather than one change, so its record is evidence for where Bake costs more, not a gate.
 
 ## Record
 
@@ -97,7 +109,7 @@ Labels name what an arm measured: a tag such as `v0.2.0`, `<tag>+<short commit>`
 - the candidate failed at least two more runs than the base; or
 - tool errors rose.
 
-`--fail-on-regression` exits non-zero for scripts. A flagged regression is either fixed before merge or explained in the record's `--note` and in the PR, with its cause. Some regressions are the intended price of a change, as when `workflow_script` pays for a `tool_help` read. Compare two versions only through a paired run. Absolute counts from runs on different days drift with the gateway, the provider's cache, and model updates.
+`--fail-on-regression` exits non-zero for scripts. A flagged regression is either fixed before merge or explained in the record's `--note` and in the PR, with its cause. Some regressions are the intended price of a change, as when a scenario pays for a `tool_help` read. Compare two versions only through a paired run. Absolute counts from runs on different days drift with the gateway, the provider's cache, and model updates.
 
 ## Rules
 

@@ -259,9 +259,9 @@ export class PermissionPresetService extends TypertRemoteService {
       this.pinInitialPermission(session)
     }
 
-    // The /permission command: the one write path a web client uses (the
-    // popup contribution submits the picked preset as this line). The child
-    // activates only when a command registry is composed.
+    // The /permission command: an interactive UI switches presets by submitting
+    // the picked preset as this line. The child activates only when a command
+    // registry is composed.
     ctx.inject(['commands'], (commandCtx) => {
       commandCtx.commands.register({
         definitionId: CommandDefinitionId('@deepseek-ai/dsh-permission-presets'),

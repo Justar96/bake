@@ -36,6 +36,7 @@ bun run check             # TUI types, tests, layout, peer identity, and docs
 bun run test              # pure and Node integration tests
 bun run test:runtime <file>  # focused shared-runtime tests
 bun run test:e2e           # keyless built-profile PTY scenarios
+bun run test:integration   # *.e2e.ts suites: built profiles, sandboxes, artifacts; keyless
 bun run lint              # Oxlint over apps, packages, scripts, and evals
 bun run preflight         # every CI gate before a PR; --fast for the static half
 bun run verify            # preflight with the whole runtime suite

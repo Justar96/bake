@@ -32,7 +32,7 @@ Eight packages play the host roles; each package README owns its contract and co
 <a id="related-documentation"></a>
 ## Related documentation
 
-Start with the subsystem references for the transport and the workspace records, then the layering decision behind the Web client.
+Start with the subsystem references for the transport and the workspace records, then the transport layering.
 
 - [HTTP server subsystem](../../docs/subsystems/web-server.md) — the webserver's routes, matching order, and config.
 - [Workspace subsystem](../../docs/subsystems/workspace.md) — the workspace records the directory picker feeds.
