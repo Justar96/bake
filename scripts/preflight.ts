@@ -89,7 +89,7 @@ export interface VitestFailures {
   readonly unattributed: number
 }
 
-const TEST_FILE = String.raw`\S+?\.(?:spec|test)\.[cm]?tsx?`
+const TEST_FILE = String.raw`\S+?\.(?:spec|test|e2e)\.[cm]?tsx?`
 
 /**
  * What a Vitest run failed on, read from its uncoloured output.
@@ -117,6 +117,7 @@ export function bunTests(directory: string): string[] {
 }
 const node = (...args: string[]): readonly string[] => ['node', ...args]
 const VITEST = 'node_modules/vitest/vitest.mjs'
+const INTEGRATION_CONFIG = 'vitest.e2e.config.ts'
 
 /** Paths whose change can move any runtime test, so a scoped run widens to the whole suite. */
 const RUNTIME_WIDE = /^(package\.json|bun\.lock|vitest\.(config|shared)\.ts|tsconfig[^/]*\.json)$/u
@@ -248,6 +249,13 @@ export const STEPS: readonly Step[] = [
     summary: 'shared runtime, CLI, and tooling specs under Node',
     command: runtimeArgs,
     rerun: files => node(VITEST, 'run', '--maxWorkers=1', ...files),
+  },
+  {
+    name: 'integration', phase: 'runtime', group: 'runtime', needsBuild: true,
+    summary: 'assembled profiles, sandbox backends, and built artifacts (`*.e2e.ts`), keyless',
+    // Always whole: these suites boot built output, which no import graph from a changed source reaches.
+    command: () => node(VITEST, 'run', '--config', INTEGRATION_CONFIG),
+    rerun: files => node(VITEST, 'run', '--config', INTEGRATION_CONFIG, '--maxWorkers=1', ...files),
   },
   {
     name: 'e2e', phase: 'e2e', group: 'e2e', needsBuild: true,

@@ -47,7 +47,7 @@ Mount this provider in any composition; it injects no services. PTC mode in `dsh
 | `maxMessageBytes` | `134,217,728` | Serialized bytes of one binding call's arguments and of all outstanding binding arguments |
 | `maxPendingCalls` | `128` | Maximum simultaneous host binding calls |
 
-The [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-ptc-runtime-codemode) defines accepted config fields. `resolve(request)` supplies the cwd and the numeric or null deadline choice. It rejects an explicit `sandboxPolicy`, because programs have no file access to confine, and it advertises no `sandboxMode`. `run(spec)` accepts resolved inputs and does not fill missing values.
+The [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-ptc-runtime-codemode) defines accepted config fields. `resolve(request)` supplies the cwd and the numeric deadline. It rejects an explicit `sandboxPolicy`, because programs have no file access to confine, and it advertises no `sandboxMode`. `run(spec)` accepts resolved inputs and does not fill missing values.
 
 ### Execution and results
 
@@ -57,7 +57,7 @@ Binding arguments, binding results, and the completion value must be lossless JS
 
 ### Deadlines and cancellation
 
-The runtime's `timeout` descriptor reports its effective default and maximum, and `executionInstructions` describes the sandbox in the model-visible schema. Omitting `timeoutMs` uses the configured default; numeric requests are validated and capped; service callers can pass `timeoutMs: null` for no deadline. The deadline covers worker startup and execution, including time awaiting bindings or approval. Timeout, cancellation, and disposal interrupt the VM and terminate its worker before `run` resolves, even for a synchronous loop. A program awaiting a promise that no pending binding call can settle fails at once, because nothing in the VM could ever resume it.
+The runtime's `timeout` descriptor reports its effective default and maximum, and `executionInstructions` describes the sandbox in the model-visible schema. Omitting `timeoutMs` uses the configured default; numeric requests are validated and capped. The deadline covers worker startup and execution, including time awaiting bindings or approval. Timeout, cancellation, and disposal interrupt the VM and terminate its worker before `run` resolves, even for a synchronous loop. A program awaiting a promise that no pending binding call can settle fails at once, because nothing in the VM could ever resume it.
 
 ### Failures
 
@@ -110,7 +110,6 @@ Read the service contract before using the provider directly.
 
 - [PTC runtime service](../ptc-runtime/README.md) — requests, resolved specs and results.
 - [PTC mode](../../core/tools/README.md#ptc-mode) — `run_code`, the typed SDK and nested tool dispatch.
-- [Node process backend](../ptc-runtime-node/README.md) — the sandboxed Node runtime workflow scripts still use.
 
 -----
 
@@ -142,6 +141,6 @@ These limits qualify the execution guarantees and the dependency.
 <details>
 <summary>Working context for maintainers — click to expand</summary>
 
-Workflow scripts (`dsh-workflow-ptc`) still require the Node process runtime: the guest imports its own module and evaluates scripts with `node:vm`. Moving them onto this runtime would need the guest inlined into the program, a same-realm evaluator in place of `node:vm`, and a replacement for `syncTimeoutMs`.
+None.
 
 </details>

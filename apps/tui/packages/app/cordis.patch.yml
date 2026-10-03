@@ -38,15 +38,13 @@
     maxInlineBytes: 16384
 
 # The agent's own rows belong to its preset: instructions, the shells, file
-# tools, skills, goal controls, delegation, workflows, tasks, and
-# web tools. The base copies would run on the host plane, where their global
-# tools and untagged listeners reach every preset agent as well. A preset that
-# mounts the same row then runs it twice: the host `tool-skill` finds none of
-# the preset's skills, strips the preset's catalog, and injects each `/skill`
-# body a second time. A preset that leaves a row out gets the host copy
-# anyway: `ptc` disables both workflow rows yet would still offer `workflow`,
-# and the shell-only `minimal` would receive every tool here, AGENTS.md, and
-# the skill catalog. The services behind these tools stay on the host: the
+# tools, skills, goal controls, delegation, and web tools. The base copies
+# would run on the host plane, where their global tools and untagged listeners
+# reach every preset agent as well. A preset that mounts the same row then runs
+# it twice: the host `tool-skill` finds none of the preset's skills, strips the
+# preset's catalog, and injects each `/skill` body a second time. A preset that
+# leaves a row out gets the host copy anyway: the shell-only `minimal` would
+# receive every tool here, AGENTS.md, and the skill catalog. The services behind these tools stay on the host: the
 # `skill` registry, the `goal` service and its round driver, and the
 # `subagent` registry and backends. The compaction rows above stay too, for
 # the host `/compact`.
@@ -73,14 +71,6 @@
 - id: tool-subagent-list-agents
   disabled: true
 - id: tool-subagent
-  disabled: true
-- id: tool-subagent-fork
-  disabled: true
-- id: workflow-ptc-runtime
-  disabled: true
-- id: tool-workflow
-  disabled: true
-- id: tool-todo
   disabled: true
 - id: tool-web
   disabled: true

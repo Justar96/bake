@@ -195,28 +195,6 @@ it('colours the running header\'s word, leaves the rule bare, and keeps the stat
   }
 })
 
-it('draws the task row neutral but for its current task\'s marker', () => {
-  const env: NodeJS.ProcessEnv = { ...process.env, FORCE_COLOR: '3', COLORTERM: 'truecolor' }
-  delete env.NO_COLOR
-  const frame = execFileSync(process.execPath, ['--import', 'tsx/esm', '--input-type=module', '--eval', `
-    import React from 'react';
-    import { renderToString } from 'ink';
-    import { Tasks } from ${JSON.stringify(new URL('../src/tasks.tsx', import.meta.url).href)};
-    import { dictionaries } from ${JSON.stringify(new URL('../src/copy.ts', import.meta.url).href)};
-    const todos = [{ text: 'Read', status: 'completed' }, { text: 'Thread the home', status: 'in_progress' }, { text: 'Test', status: 'pending' }];
-    process.stdout.write(renderToString(React.createElement(Tasks, { todos, copy: dictionaries.en, columns: 80, hint: 'Ctrl+T' }), { columns: 80 }));
-  `], { cwd: new URL('../../../../../', import.meta.url), env, encoding: 'utf8', timeout: 20_000 })
-  const rgb = (hex: string) => `\u001b[38;2;${[1, 3, 5].map(index => Number.parseInt(hex.slice(index, index + 2), 16)).join(';')}m`
-  // The rail's icon and the key are dim, the name bold, and the bar's fill plain.
-  expect(frame.startsWith('\u001b[2m\u2610\u001b[22m')).toBe(true)
-  expect(frame).toContain('\u001b[1mTasks\u001b[22m')
-  expect(frame).toMatch(/ {2}━━━━\u001b\[2m────────/)
-  expect(frame).toContain('\u001b[2mCtrl+T\u001b[22m')
-  // The one colour on the row: the marker of the task in progress.
-  expect(frame).toContain(`\u001b[1m${rgb(PALETTE.asking)}\u25b8`)
-  expect(frame.match(/\u001b\[38;2;/g)).toHaveLength(1)
-})
-
 it('colours compaction blue, by /compact or inside a turn, never the turn\'s orange, and the notice it leaves the same', () => {
   // A child for its own colour environment, as above.
   const env: NodeJS.ProcessEnv = { ...process.env, FORCE_COLOR: '3', COLORTERM: 'truecolor' }
@@ -235,7 +213,7 @@ it('colours compaction blue, by /compact or inside a turn, never the turn\'s ora
       files: { query: undefined, entries: [], loading: false, error: undefined }, onReferenceQuery: noop,
       completion: { entries: [], loading: false, error: undefined }, completionLimit: 8, resultLines: 8,
       committed: emptyTranscript, live: [], pending: [], status: 'idle', stopping: false, command: undefined,
-      notice: undefined, interaction: undefined, todos: undefined, model: 'mock/model', cwd: '/w', sessionId: 's',
+      notice: undefined, interaction: undefined, model: 'mock/model', cwd: '/w', sessionId: 's',
       copy: dictionaries.en, frame: 'round', quitting: false, context: undefined,
       onSubmit: noop, onCancel: noop, onInterrupt: noop, onAnswer: noop,
     };

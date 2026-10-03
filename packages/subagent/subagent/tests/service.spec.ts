@@ -38,7 +38,6 @@ function baseRequest(overrides: Partial<SubagentStartRequest> = {}): SubagentSta
 }
 
 class StubProvider implements SubagentProvider {
-  readonly inheritsParentContext = false
   startCount = 0
   lastRequest: ResolvedSubagentStartRequest | undefined
 
@@ -217,7 +216,6 @@ describe('SubagentRuntime', () => {
     subagents.registerProvider({
       name: 'deferred',
       capabilities: NO_CAPS,
-      inheritsParentContext: false,
       start: () => ready.promise,
     })
     const parent = fakeParent('delegator')
@@ -260,7 +258,6 @@ describe('SubagentRuntime', () => {
     subagents.registerProvider({
       name: 'failed',
       capabilities: NO_CAPS,
-      inheritsParentContext: false,
       start: async () => { throw new Error('setup rolled back') },
     })
     const lifecycle = vi.fn()
@@ -289,7 +286,6 @@ describe('SubagentRuntime', () => {
     subagents.registerProvider({
       name: 'catalog-failure',
       capabilities: NO_CAPS,
-      inheritsParentContext: false,
       start: () => Promise.resolve({
         id: childSession.id,
         localAgent,
@@ -342,7 +338,6 @@ describe('SubagentRuntime', () => {
     subagents.registerProvider({
       name: 'infra',
       capabilities: NO_CAPS,
-      inheritsParentContext: false,
       async start() {
         return { id: SessionId('infra-child'), localAgent: undefined, result: failure.promise, async dispose() {} }
       },

@@ -102,7 +102,7 @@ export class CodemodePtcRuntime extends PtcRuntime {
     return {
       ...request,
       cwd,
-      timeoutMs: request.timeoutMs === null ? null : clampTimeout(request.timeoutMs, this.config.timeoutMs, this.config.maxTimeoutMs, 'dsh-ptc-runtime-codemode: timeoutMs'),
+      timeoutMs: clampTimeout(request.timeoutMs, this.config.timeoutMs, this.config.maxTimeoutMs, 'dsh-ptc-runtime-codemode: timeoutMs'),
     }
   }
 
@@ -114,7 +114,7 @@ export class CodemodePtcRuntime extends PtcRuntime {
   async run(spec: PtcRunSpec): Promise<PtcRunResult> {
     if (this.disposed) throw new Error('dsh-ptc-runtime-codemode: run after disposal')
     if (spec.sandboxPolicy !== undefined) throw new Error('dsh-ptc-runtime-codemode: programs have no file access, so a sandbox policy is unsupported')
-    if (!isAbsolute(spec.cwd) || (spec.timeoutMs !== null && (!Number.isFinite(spec.timeoutMs) || spec.timeoutMs <= 0 || spec.timeoutMs > this.config.maxTimeoutMs))) throw new Error('dsh-ptc-runtime-codemode: run requires resolved cwd and timeout')
+    if (!isAbsolute(spec.cwd) || !Number.isFinite(spec.timeoutMs) || spec.timeoutMs <= 0 || spec.timeoutMs > this.config.maxTimeoutMs) throw new Error('dsh-ptc-runtime-codemode: run requires resolved cwd and timeout')
     const bindings = [...validateBindings(spec).values()]
     const controller = new AbortController()
     const completion = Promise.withResolvers<void>()
@@ -188,7 +188,7 @@ export class CodemodePtcRuntime extends PtcRuntime {
         ...prepared.layout,
       }, prepared.code), {
         signal: controller.signal,
-        timeoutMs: spec.timeoutMs ?? Number.POSITIVE_INFINITY,
+        timeoutMs: spec.timeoutMs,
       })
 
       const logs: string[] = []

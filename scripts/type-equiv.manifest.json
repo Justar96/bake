@@ -485,11 +485,6 @@
       "source": "packages/core/session/src/types.ts"
     },
     {
-      "doc": "docs/subsystems/todo.md",
-      "symbol": "TodoItem",
-      "source": "packages/todo/tool-todo/src/types.ts"
-    },
-    {
       "doc": "docs/subsystems/session.md",
       "symbol": "SessionEvent",
       "source": "packages/core/session/src/types.ts"
@@ -1353,11 +1348,6 @@
     },
     {
       "doc": "docs/subsystems/subagent.md",
-      "symbol": "ContinuableCreateSpec",
-      "source": "packages/subagent/subagent/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/subagent.md",
       "symbol": "SubagentResult",
       "source": "packages/subagent/subagent/src/types.ts"
     },
@@ -1430,26 +1420,6 @@
       "doc": "docs/subsystems/spill.md",
       "symbol": "SpillLocator",
       "source": "packages/spill/spill/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/workflow.md",
-      "symbol": "WorkflowStartRequest",
-      "source": "packages/workflow/workflow/src/runtime-types.ts"
-    },
-    {
-      "doc": "docs/subsystems/workflow.md",
-      "symbol": "WorkflowMeta",
-      "source": "packages/workflow/workflow/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/workflow.md",
-      "symbol": "WorkflowResult",
-      "source": "packages/workflow/workflow/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/workflow.md",
-      "symbol": "WorkflowRun",
-      "source": "packages/workflow/workflow/src/runtime-types.ts"
     },
     {
       "doc": "docs/subsystems/persistence.md",
@@ -1702,16 +1672,6 @@
       "source": "packages/storage/storage-domain/src/events.ts"
     },
     {
-      "doc": "docs/subsystems/workspace.md",
-      "symbol": "WorkspaceId",
-      "source": "packages/workspace/workspace/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/workspace.md",
-      "symbol": "Workspace",
-      "source": "packages/workspace/workspace/src/types.ts"
-    },
-    {
       "doc": "docs/subsystems/session-telemetry.md",
       "symbol": "SessionTelemetryCapture",
       "source": "packages/session/session-telemetry/src/coordinator.ts"
@@ -1853,111 +1813,6 @@
     },
     {
       "doc": "docs/subsystems/feedback.md",
-      "symbol": "MessageFeedbackVersion",
-      "source": "packages/feedback/message-feedback/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/feedback.md",
-      "symbol": "MessageFeedbackRating",
-      "source": "packages/feedback/message-feedback/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/feedback.md",
-      "symbol": "MessageFeedbackItem",
-      "source": "packages/feedback/message-feedback/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/feedback.md",
-      "symbol": "MessageFeedbackPut",
-      "source": "packages/feedback/message-feedback/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/feedback.md",
-      "symbol": "MessageFeedbackDelete",
-      "source": "packages/feedback/message-feedback/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/feedback.md",
-      "symbol": "MessageFeedbackListRequest",
-      "source": "packages/feedback/message-feedback/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/feedback.md",
-      "symbol": "MessageFeedbackListValue",
-      "source": "packages/feedback/message-feedback/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/feedback.md",
-      "symbol": "MessageFeedbackPutRequest",
-      "source": "packages/feedback/message-feedback/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/feedback.md",
-      "symbol": "MessageFeedbackDeleteRequest",
-      "source": "packages/feedback/message-feedback/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/feedback.md",
-      "symbol": "MessageFeedbackDeleteValue",
-      "source": "packages/feedback/message-feedback/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/feedback.md",
-      "symbol": "MessageFeedbackSessionNotFound",
-      "source": "packages/feedback/message-feedback/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/feedback.md",
-      "symbol": "MessageFeedbackTargetNotFound",
-      "source": "packages/feedback/message-feedback/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/feedback.md",
-      "symbol": "MessageFeedbackVersionConflict",
-      "source": "packages/feedback/message-feedback/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/feedback.md",
-      "symbol": "MessageFeedbackNoteBlank",
-      "source": "packages/feedback/message-feedback/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/feedback.md",
-      "symbol": "MessageFeedbackNoteTooLarge",
-      "source": "packages/feedback/message-feedback/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/feedback.md",
-      "symbol": "MessageFeedbackFailure",
-      "source": "packages/feedback/message-feedback/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/feedback.md",
-      "symbol": "MessageFeedbackSuccess",
-      "source": "packages/feedback/message-feedback/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/feedback.md",
-      "symbol": "MessageFeedbackRejected",
-      "source": "packages/feedback/message-feedback/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/feedback.md",
-      "symbol": "MessageFeedbackListResult",
-      "source": "packages/feedback/message-feedback/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/feedback.md",
-      "symbol": "MessageFeedbackPutResult",
-      "source": "packages/feedback/message-feedback/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/feedback.md",
-      "symbol": "MessageFeedbackDeleteResult",
-      "source": "packages/feedback/message-feedback/src/types.ts"
-    },
-    {
-      "doc": "docs/subsystems/feedback.md",
       "symbol": "FeedbackCategory",
       "source": "packages/feedback/command-feedback/src/types.ts"
     },
@@ -2015,11 +1870,6 @@
       "doc": "docs/subsystems/mcp.md",
       "symbol": "McpResourceProvider",
       "source": "packages/mcp/mcp-resources/src/index.ts"
-    },
-    {
-      "doc": "docs/subsystems/deliverables.md",
-      "symbol": "PresentedFile",
-      "source": "packages/deliverables/tool-present/src/types.ts"
     }
   ]
 }

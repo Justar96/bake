@@ -4,7 +4,7 @@
  * @module @dsh-tui/app/git
  */
 
-import { execFile } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-sandbox'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
@@ -70,6 +70,10 @@ export function sessionGitConfinement(ctx: Context, session: Session): GitConfin
 export const GIT_POLL_MS = 2_000
 /** A read that takes longer is abandoned; the field keeps its last answer. */
 const GIT_TIMEOUT_MS = 5_000
+/** Output beyond this is not a status worth parsing; the read is stopped. */
+const GIT_MAX_OUTPUT = 16 * 1024 * 1024
+/** Windows has no process groups to signal; there git alone is stopped. */
+const GROUP_KILL = process.platform !== 'win32'
 
 /**
  * Read `git status --porcelain=v2 --branch` into branch and change counts.
@@ -209,14 +213,40 @@ export class WorkspaceGit {
     const [program, ...args] = argv
     if (program === undefined) return undefined
     return new Promise(resolve => {
-      execFile(program, args, {
-        cwd, env, signal, timeout: GIT_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024, windowsHide: true, encoding: 'utf8',
-      }, (error, stdout) => {
-        // A read that ran out of time says nothing about the tree, so the
-        // field keeps its last answer. Not a repository or no git: no field.
-        if (error !== null && error.killed === true && !signal.aborted) resolve(this.state)
-        else resolve(error === null ? parseGitStatus(stdout) : undefined)
+      // Its own process group on POSIX, so stopping the read also stops what
+      // git ran, such as a `core.fsmonitor` hook, before teardown goes on.
+      // `execFile` ignores `detached`, so the output is collected here.
+      const child = spawn(program, args, { cwd, env, detached: GROUP_KILL, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true })
+      let stdout = ''
+      let timedOut = false
+      let overflowed = false
+      let settled = false
+      const stop = (): void => {
+        if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return
+        try { if (GROUP_KILL) process.kill(-child.pid, 'SIGTERM'); else child.kill() } catch { /* already exited */ }
+      }
+      const timer = setTimeout(() => { timedOut = true; stop() }, GIT_TIMEOUT_MS)
+      const finish = (state: GitState | undefined): void => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        signal.removeEventListener('abort', stop)
+        resolve(state)
+      }
+      child.stdout.setEncoding('utf8')
+      child.stdout.on('data', (chunk: string) => {
+        stdout += chunk
+        if (stdout.length > GIT_MAX_OUTPUT) { overflowed = true; stop() }
       })
+      // Not a repository or no git: no field.
+      child.on('error', () => finish(undefined))
+      child.on('close', code => {
+        // A read that ran out of time says nothing about the tree, so the field keeps its last answer.
+        if (timedOut && !signal.aborted) finish(this.state)
+        else finish(code === 0 && !overflowed ? parseGitStatus(stdout) : undefined)
+      })
+      if (signal.aborted) stop()
+      else signal.addEventListener('abort', stop, { once: true })
     })
   }
 }

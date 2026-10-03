@@ -520,7 +520,7 @@ export function defineCoverageCases(group: CoverageGroup): void {
     })
 
     it('defaults CLAUDE_PROJECT_DIR to the session workspace when no projectDir is configured', async () => {
-    // The default ACP wiring sets no projectDir. A stock CC hook that references
+    // The default wiring sets no projectDir. A stock CC hook that references
     // $CLAUDE_PROJECT_DIR (shell expansion) must still get the session workspace,
     // not an empty string. The hook echoes the var as additionalContext.
       const d = dir()

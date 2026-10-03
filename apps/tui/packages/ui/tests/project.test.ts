@@ -235,15 +235,15 @@ describe('project', () => {
   })
 
   it('keeps the model-facing text under a generic result that omits its content, cut as a raw result is', () => {
-    // The workflow tool's presenters as it declares them: a call titled by
-    // the workflow's name, and a result card that reformats nothing.
-    const seam = projector(dictionaries.en, name => name === 'workflow' ? {
-      presentCall: (args: unknown) => ({ card: 'generic' as const, title: `workflow: ${(args as { meta: { name: string } }).meta.name}` }),
+    // A plugin tool's presenters: a call titled by the run's name, and a
+    // result card that reformats nothing.
+    const seam = projector(dictionaries.en, name => name === 'orchestrate' ? {
+      presentCall: (args: unknown) => ({ card: 'generic' as const, title: `orchestrate: ${(args as { meta: { name: string } }).meta.name}` }),
       presentResult: () => ({ card: 'generic' as const }),
     } : undefined)
-    project(event({ type: 'tool/call', data: { callId: 'w1', name: 'workflow', arguments: '{"script":"return 1","meta":{"name":"audit"}}' } }), seam)
+    project(event({ type: 'tool/call', data: { callId: 'w1', name: 'orchestrate', arguments: '{"script":"return 1","meta":{"name":"audit"}}' } }), seam)
     const summary = 'finding '.repeat(40).trim()
-    const text = `workflow "audit" completed (2 agents).\nReturn value:\n${JSON.stringify({ summary }, null, 2)}`
+    const text = `run "audit" completed (2 agents).\nReturn value:\n${JSON.stringify({ summary }, null, 2)}`
     const rows = project(event({
       type: 'tool/result',
       data: { message: { content: [{ toolCallId: 'w1', isError: false, content: text }] } },
@@ -251,7 +251,7 @@ describe('project', () => {
     expect(rows).toEqual([{ kind: 'tool-result', callId: 'w1', ok: true, text }])
     const long = `  "summary": "${summary}"`
     expect(present(rows[0]!, { lines: 8, unit: 'lines', more: 'more lines' }).map(line => line.text)).toEqual([
-      '[w1]  5 lines', 'workflow "audit" completed (2 agents).', 'Return value:', '{',
+      '[w1]  5 lines', 'run "audit" completed (2 agents).', 'Return value:', '{',
       `${long.slice(0, RAW_LINE_CELLS - 1).trimEnd()}\u2026`, '}',
     ])
   })

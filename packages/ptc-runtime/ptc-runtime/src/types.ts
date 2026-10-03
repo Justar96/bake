@@ -83,10 +83,10 @@ export interface PtcRunRequest {
   /** Working directory in the mounted filesystem and subprocess execution world. */
   cwd?: string
   /**
-   * Elapsed execution budget in milliseconds. Omission uses provider defaults;
-   * null requests no deadline. Providers validate and cap numeric budgets or reject unsupported choices.
+   * Elapsed execution budget in milliseconds. Omission uses provider defaults.
+   * Providers validate and cap numeric budgets or reject unsupported choices.
    */
-  timeoutMs?: number | null
+  timeoutMs?: number
   /** Resolved authority for this execution. Providers without confinement reject an explicit policy. */
   sandboxPolicy?: SandboxExecutionPolicy
   /**
@@ -101,8 +101,8 @@ export interface PtcRunRequest {
 export interface PtcRunSpec extends PtcRunRequest {
   /** Absolute directory in the provider's execution world. */
   cwd: string
-  /** Positive finite elapsed budget in milliseconds after provider capping, or null for no deadline. */
-  timeoutMs: number | null
+  /** Positive finite elapsed budget in milliseconds after provider capping. */
+  timeoutMs: number
 }
 
 /** File confinement applied to a program, independently of its terminal outcome. */

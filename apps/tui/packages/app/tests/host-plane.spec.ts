@@ -6,8 +6,8 @@
  * workspace, and the terminal surface itself are replaced. A host row whose
  * tools or listeners reached preset agents would change what their requests
  * carry, so these cases read the requests: the skill catalog and a `/skill`
- * body once each, no `workflow` for `ptc`, only the shell for `minimal`, and
- * a `cordis` session that starts at all.
+ * body once each, only `run_code` for `ptc`, only the shell for `minimal`,
+ * and a `cordis` session that starts at all.
  */
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -155,17 +155,15 @@ it('keeps only the compaction rows and the preset services on the terminal host 
     if (row === undefined) throw new Error(`the composition has no ${id} row`)
     return row.disabled !== true
   }
-  // `workflow-ptc` and its Node runtime sit inside the `workflow-ptc-runtime`
-  // group, so the disabled group stands for both.
   for (const id of [
     'agent-instructions', 'tool-bash', 'tool-pwsh', 'tool-fs', 'tool-fs-search', 'skill-filesystem', 'tool-skill',
     'command-goal', 'tool-goal', 'tool-subagent-control', 'tool-subagent-list-agents', 'tool-subagent',
-    'tool-subagent-fork', 'workflow-ptc-runtime', 'tool-workflow', 'tool-todo', 'tool-web', 'tool-jobs',
+    'tool-web', 'tool-jobs',
   ]) expect(active(id), id).toBe(false)
   // The registries and drivers behind those tools, `/compact` for `minimal`,
   // and the inspection registry the `cordis` preset's tools register into.
   for (const id of [
-    'skill', 'goal', 'goal-round-driver', 'subagent', 'subagent-spawn-in-process', 'subagent-fork-in-process',
+    'skill', 'goal', 'goal-round-driver', 'subagent', 'subagent-spawn-in-process',
     'compaction-basic', 'command-compact', 'tool-result-pruner', 'cordis-host-runner',
   ]) expect(active(id), id).toBe(true)
 })
@@ -186,7 +184,7 @@ it('gives a standard agent the skill catalog once, and a /skill invocation its b
   expect(carrying(first, '<available_skills>')).toHaveLength(1)
   expect(carrying(first, SKILL_MARKER)).toHaveLength(1)
   expect(carrying(first, INSTRUCTIONS_MARKER)).toHaveLength(1)
-  expect(first.tools?.map(tool => tool.name)).toEqual(expect.arrayContaining([SHELL, 'read', 'skill', 'todo_write', 'workflow']))
+  expect(first.tools?.map(tool => tool.name)).toEqual(expect.arrayContaining([SHELL, 'read', 'skill', 'job_output']))
 
   const [invoked] = await session.turn(`/${SKILL} go`)
   if (invoked === undefined) throw new Error('the invocation made no request')
@@ -197,58 +195,16 @@ it('gives a standard agent the skill catalog once, and a /skill invocation its b
   expect(log.filter(event => event.type === 'user/message' && event.data.source.kind === 'skill-invocation')).toHaveLength(1)
 })
 
-it('leaves workflow out of the ptc agent\'s run_code program interface', async () => {
+it('gives the ptc agent run_code alone, with its tools in the program interface', async () => {
   const { model, open } = await profile()
   model.response = async function* () { yield* textResponse('Recorded answer') }
   const session = await open('ptc')
   const [request] = await session.turn('Hello')
   if (request === undefined) throw new Error('the turn made no request')
   expect(request.tools?.map(tool => tool.name)).toEqual(['run_code'])
-  // The program interface lists the agent's tools; the host rows' `workflow` would join them.
-  expect(system(request)).toContain('todo_write')
-  expect(system(request)).not.toMatch(/\bworkflow\b/u)
+  // The program interface lists the agent's tools.
+  expect(system(request)).toContain('job_output')
   expect(carrying(request, '<available_skills>')).toHaveLength(1)
-})
-
-it('shows the real workflow and its member while running, then its durable completion', async () => {
-  const { model, open } = await profile()
-  model.resolveModel = async (provider, model) => ({ provider, id: model, name: model, inputModalities: ['text'], context: { contextWindow: 128_000 } })
-  const session = await open('standard')
-  const release = Promise.withResolvers<void>()
-  const call = { type: 'tool-call' as const, id: ToolCallId('workflow-call'), name: 'workflow',
-    arguments: JSON.stringify({ meta: { name: 'review', description: 'Review changes' },
-      script: 'phase("Inspect"); return await agent("Review files", { label: "Reviewer" });' }),
-  }
-  model.response = async function* (options) {
-    if (options.sessionId !== session.agent.id) {
-      await release.promise
-      yield* textResponse('Review complete')
-    } else if (JSON.stringify(options.messages).includes(call.id)) {
-      yield* textResponse('Workflow complete')
-    } else {
-      yield { type: 'block-start', index: 0, blockType: 'tool-call' }
-      yield { type: 'tool-call-delta', index: 0, id: call.id, name: call.name, argumentsDelta: call.arguments }
-      yield { type: 'block-end', index: 0, block: call }
-      yield { type: 'finish', reason: { kind: 'tool-calls' } }
-    }
-  }
-  try {
-    expect(session.controller.submit('Run a workflow to review the files')).toBe(true)
-    await vi.waitFor(() => expect(session.controller.view.workflows).toEqual([
-      expect.objectContaining({ name: 'review', state: 'working', total: 1, completed: 0 }),
-    ]))
-    await vi.waitFor(() => expect(session.controller.view.subagents).toContainEqual(
-      expect.objectContaining({ workflow: 'review', state: 'working', detail: 'One-shot · Inspect' })))
-    release.resolve()
-    await session.agent.whenIdle()
-    expect(session.controller.view.workflows).toEqual([
-      expect.objectContaining({ name: 'review', state: 'completed', total: 1, completed: 1 }),
-    ])
-    const requests = model.requests.filter(request => request.sessionId === session.agent.id && request.purpose === undefined)
-    expect(requests).toHaveLength(2)
-    expect(requests[1]!.tools).toEqual(requests[0]!.tools)
-    expect(requests[1]!.messages.slice(0, requests[0]!.messages.length)).toEqual(requests[0]!.messages)
-  } finally { release.resolve(); await session.agent.whenIdle() }
 })
 
 it('bounds new file reads without changing tool schemas and keeps later pages available', async () => {
@@ -268,7 +224,7 @@ it('bounds new file reads without changing tool schemas and keeps later pages av
   expect(JSON.stringify(last.content)).toContain(`1000: ${'x'.repeat(80)}`)
   expect(ctx.tools.schemas(session.agent)).toEqual(schemas)
   expect(schemas.find(schema => schema.name === 'read')?.parameters).toMatchObject({
-    properties: { limit: { description: 'Maximum number of lines to return. Defaults to 2000.' } },
+    properties: { limit: { description: 'Maximum lines; default 2000.' } },
   })
 
   const output = 'complete tool output\n'.repeat(1000)
@@ -303,9 +259,6 @@ it('gives a minimal agent only its shell, and /compact still folds its history',
   expect(system(request)).toBe('You are a helpful software engineer assistant.')
   // Nothing but the human's own prompt: no instructions, catalog, or runtime snapshot.
   expect(request.messages.filter(message => message.role === 'user').map(text)).toEqual([CHUNK])
-
-  // No preset unit registers a task list here, and the status reads without it.
-  expect(session.controller.view.todos).toBeUndefined()
 
   expect(session.controller.submit('/compact')).toBe(true)
   await session.controller.drain()

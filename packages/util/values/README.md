@@ -1,5 +1,5 @@
 ---
-description: "Lossless JSON validation, detached snapshots, deep freezing, structural equality, and exhaustive-union helpers for runtime packages."
+description: "Lossless JSON validation, detached snapshots, deep freezing, structural equality, exhaustive-union, and small value-guard helpers for runtime packages."
 kind: "package-library"
 ---
 
@@ -7,7 +7,7 @@ kind: "package-library"
 
 ## Summary
 
-`dsh-util-values` gives runtime packages one implementation for lossless JSON values, immutable object graphs, structural JSON equality, and exhaustive closed-union failures. Callers can validate untrusted values, detach a JSON snapshot, freeze a published value, compare JSON-compatible data, or terminate an unreachable branch without importing a capability package. The helpers hold no shared registry, constructor identity, or mutable module state.
+`dsh-util-values` gives runtime packages one implementation for lossless JSON values, immutable object graphs, structural JSON equality, exhaustive closed-union failures, and the small value guards many packages need. Callers can validate untrusted values, detach a JSON snapshot, freeze a published value, compare JSON-compatible data, terminate an unreachable branch, or narrow a record, a thrown value, a configured limit, or a missing-file error without importing a capability package. The helpers hold no shared registry, constructor identity, or mutable module state.
 
 ## Table of Contents
 
@@ -45,6 +45,14 @@ const snapshot = snapshotJsonValue(input) as JsonValue
 
 Use `assertNever(value, context?)` in the default branch of a closed discriminated union. A newly added variant then fails TypeScript compilation at every exhaustive switch, while a runtime value that escaped its declared type throws with the optional context label.
 
+### Guard small values
+
+- `isRecord(value)` narrows a non-null, non-array object to `Record<string, unknown>`. It is structural only; use `isJsonValue()` when the prototype chain matters.
+- `errorMessage(error)` returns an `Error`'s message, or the string coercion of any other thrown value.
+- `assertPositiveInteger(name, value)` throws `Error("<name> must be a positive integer")`; callers put their package prefix in `name`, as in `'tool-web: fetchTimeoutMs'`.
+- `isENOENT(error)` reports whether a filesystem failure means absence, so every other failure can surface.
+- `hasIntrinsicConstructor()`, `isIntrinsicObjectPrototype()`, and `hasPlainArrayPrototype()` recognize another realm's intrinsic `Array` and `Object` prototypes for packages that validate values crossing a VM boundary.
+
 -----
 
 <a id="understand-the-implementation"></a>
@@ -59,7 +67,7 @@ The JSON validator uses an explicit work stack and tracks only the active ancest
 
 | File | Role |
 |---|---|
-| [`src/index.ts`](src/index.ts) | JSON value type, validation and snapshot traversal, structural equality, deep freezing, weak-key/strong-value associations, and exhaustive-union failure |
+| [`src/index.ts`](src/index.ts) | JSON value type, validation and snapshot traversal, structural equality, deep freezing, weak-key/strong-value associations, exhaustive-union failure, and small value guards |
 | — | No runtime invariant companion is published because these value operations have no shared runtime state; unit tests cover their algebra. |
 
 </details>

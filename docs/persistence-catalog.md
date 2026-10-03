@@ -475,13 +475,13 @@ Source: [`packages/compaction/compaction/src/types.ts:34`](../packages/compactio
 #### `deliverables/presented` — log-only
 
 ```ts persistence-catalog
-/** Declared filesystem files from a successful final present result, including nested calls. */
-'deliverables/presented': { turn: number; callId: ToolCallId; files: PresentedFile[] }
+/** Files a successful `present` result declared, including nested calls. */
+'deliverables/presented': { turn: number; callId: ToolCallId; files: RetiredPresentedFile[] }
 ```
 
-Types: [PresentedFile](subsystems/deliverables.md) · [ToolCallId](subsystems/core.md)
+Types: [ToolCallId](subsystems/core.md)
 
-Source: [`packages/deliverables/tool-present/src/types.ts:15`](../packages/deliverables/tool-present/src/types.ts)
+Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:190`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 ### `feedback/*`
 
@@ -490,22 +490,22 @@ Source: [`packages/deliverables/tool-present/src/types.ts:15`](../packages/deliv
 #### `feedback/message-delete` — log-only
 
 ```ts persistence-catalog
-/** Log-only deletion; earlier ratings and notes remain in the log. */
-'feedback/message-delete': MessageFeedbackDelete
+/** Log-only removal of one message's feedback. */
+'feedback/message-delete': { readonly sessionId: SessionId; readonly messageId: MessageId }
 ```
 
-Source: [`packages/feedback/message-feedback/src/types.ts:58`](../packages/feedback/message-feedback/src/types.ts)
+Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:188`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 <a id="feedbackmessage-put--log-only"></a>
 
 #### `feedback/message-put` — log-only
 
 ```ts persistence-catalog
-/** Log-only human feedback; never enters model history. */
-'feedback/message-put': MessageFeedbackPut
+/** Log-only feedback value for one assistant message; inherited feedback in a fork names its parent. */
+'feedback/message-put': { readonly sessionId: SessionId; readonly item: RetiredMessageFeedbackItem }
 ```
 
-Source: [`packages/feedback/message-feedback/src/types.ts:56`](../packages/feedback/message-feedback/src/types.ts)
+Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:186`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 <a id="feedbackrecord--log-only"></a>
 
@@ -603,7 +603,7 @@ Source: [`packages/hooks/hook-protocol/src/types.ts:31`](../packages/hooks/hook-
 'image/offload': { targets: ImageOffloadTarget[] }
 ```
 
-Source: [`packages/compaction/compaction-image-offload/src/projection.ts:25`](../packages/compaction/compaction-image-offload/src/projection.ts)
+Source: [`packages/compaction/compaction-image-offload/src/projection.ts:26`](../packages/compaction/compaction-image-offload/src/projection.ts)
 
 ### `llm/*`
 
@@ -640,7 +640,7 @@ Source: [`packages/llm/llm-retry/src/types.ts:11`](../packages/llm/llm-retry/src
 'model/selection': RetiredModelSelection
 ```
 
-Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:104`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:167`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 ### `permission/*`
 
@@ -671,7 +671,7 @@ Source: [`packages/interaction/permission-presets/src/index.ts:57`](../packages/
 'plan/mode': { active: boolean }
 ```
 
-Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:121`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:210`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 ### `request/*`
 
@@ -854,7 +854,7 @@ Source: [`packages/session/session-title-llm/src/index.ts:45`](../packages/sessi
 }
 ```
 
-Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:123`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:212`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 ### `step/*`
 
@@ -978,7 +978,7 @@ Source: [`packages/core/session/src/types.ts:316`](../packages/core/session/src/
 'team/member': { version: 2; teamId: RetiredTeamId; member: RetiredTeamMemberSnapshot }
 ```
 
-Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:106`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:169`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 <a id="teammessagedelivered--log-only"></a>
 
@@ -994,7 +994,7 @@ Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:106`
 }
 ```
 
-Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:112`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:175`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 <a id="teammessagequeued--log-only"></a>
 
@@ -1005,7 +1005,7 @@ Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:112`
 'team/message/queued': { version: 2; teamId: RetiredTeamId; message: RetiredTeamMessageSnapshot }
 ```
 
-Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:110`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:173`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 <a id="teamtask--log-only"></a>
 
@@ -1016,7 +1016,7 @@ Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:110`
 'team/task': { version: 2; teamId: RetiredTeamId; task: RetiredTeamTaskSnapshot }
 ```
 
-Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:108`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:171`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 ### `todo/*`
 
@@ -1025,13 +1025,11 @@ Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:108`
 #### `todo/write` — log-only
 
 ```ts persistence-catalog
-/** Whole-list snapshot; latest write wins on replay. Log-only UI state; never derived history. */
-'todo/write': { todos: TodoItem[] }
+/** Whole todo-list snapshot the `todo_write` tool wrote; the last record won. Log-only. */
+'todo/write': { todos: RetiredTodoItem[] }
 ```
 
-Types: [TodoItem](subsystems/todo.md)
-
-Source: [`packages/todo/tool-todo/src/types.ts:31`](../packages/todo/tool-todo/src/types.ts)
+Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:184`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 ### `tool/*`
 
@@ -1140,56 +1138,54 @@ Source: [`packages/core/session/src/types.ts:361`](../packages/core/session/src/
 #### `tool-workflow/agent-end` — log-only
 
 ```ts persistence-catalog
-/**
- * Records one member settlement.
- * @param data - run identity, paired member sequence, and outcome.
- */
-'tool-workflow/agent-end': ToolWorkflowAgentEndData
+/** Settles one workflow member. */
+'tool-workflow/agent-end': {
+  readonly runId: RetiredWorkflowRunId
+  readonly seq: number
+  readonly outcome: 'completed' | 'failed' | 'cancelled'
+}
 ```
 
-Source: [`packages/workflow/tool-workflow/src/types.ts:57`](../packages/workflow/tool-workflow/src/types.ts)
+Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:202`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 <a id="tool-workflowagent-start--log-only"></a>
 
 #### `tool-workflow/agent-start` — log-only
 
 ```ts persistence-catalog
-/**
- * Records one published workflow member.
- * @param data - run identity, member sequence, display identity, and child Session.
- */
-'tool-workflow/agent-start': ToolWorkflowAgentStartData
+/** Records one workflow member after its child Session was published. */
+'tool-workflow/agent-start': {
+  readonly runId: RetiredWorkflowRunId
+  readonly seq: number
+  readonly label: string
+  readonly phase?: string
+  readonly childId: SessionId
+}
 ```
 
-Source: [`packages/workflow/tool-workflow/src/types.ts:52`](../packages/workflow/tool-workflow/src/types.ts)
+Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:194`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 <a id="tool-workflowrun-end--log-only"></a>
 
 #### `tool-workflow/run-end` — log-only
 
 ```ts persistence-catalog
-/**
- * Closes one workflow record after cleanup.
- * @param data - stable run identity and terminal reason.
- */
-'tool-workflow/run-end': ToolWorkflowRunEndData
+/** Closes one workflow run record after cleanup. */
+'tool-workflow/run-end': { readonly runId: RetiredWorkflowRunId; readonly stopReason: 'completed' | 'cancelled' | 'error' }
 ```
 
-Source: [`packages/workflow/tool-workflow/src/types.ts:62`](../packages/workflow/tool-workflow/src/types.ts)
+Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:208`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 <a id="tool-workflowrun-start--log-only"></a>
 
 #### `tool-workflow/run-start` — log-only
 
 ```ts persistence-catalog
-/**
- * Opens one top-level workflow record.
- * @param data - stable run identity and display name.
- */
-'tool-workflow/run-start': ToolWorkflowRunStartData
+/** Opens one top-level workflow run record. */
+'tool-workflow/run-start': { readonly runId: RetiredWorkflowRunId; readonly name: string }
 ```
 
-Source: [`packages/workflow/tool-workflow/src/types.ts:47`](../packages/workflow/tool-workflow/src/types.ts)
+Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:192`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 ### `turn/*`
 
@@ -1272,7 +1268,7 @@ Source: [`packages/web/web-search-deepseek/src/provider.ts:82`](../packages/web/
 'workspace/changes': { turn: number }
 ```
 
-Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:119`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+Source: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:182`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 ## Resolved persistence types
 
@@ -1848,7 +1844,7 @@ SHA-256: `0ddab4577db37a3e0d9e3a91761735c8ef6f5629d526ab8ecaeeea19c097c8f8`
 
 SHA-256: `6a4f72e2e179e17b922f2a9392c0e1c8f8c707f32494372454850a3eb184a6e7`
 
-Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:95`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:148`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -1856,17 +1852,35 @@ Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:95`
 | `kind` | required | `"user"` |
 | `rpcId` | required | `string` |
 
-<a id="persistence-type-eventagentinboxspliceddatainserted0source12changes"></a>
+<a id="persistence-type-eventagentinboxspliceddatainserted0source12"></a>
 
-### `event:agent/inbox/spliced.data.inserted[0].source[12].changes`
+### `event:agent/inbox/spliced.data.inserted[0].source[12]`
+
+SHA-256: `9edc162949abf93bd5ff049191b345454ba104f583937ce5580fb50f067d2b94`
+
+Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:152`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+
+| Property | Presence | Type |
+|---|---|---|
+| `deliveryId` | required | `string` |
+| `form` | required | `"notice"` |
+| `kind` | required | `"webhook"` |
+| `provider` | required | `string` |
+| `ruleId` | required | `string` |
+| `source` | required | `string` |
+| `summary` | required | `string` |
+
+<a id="persistence-type-eventagentinboxspliceddatainserted0source13changes"></a>
+
+### `event:agent/inbox/spliced.data.inserted[0].source[13].changes`
 
 SHA-256: `2ab12a0e345658f9342816d773fe610f049982bcad82631f43b9205abe43e5ee`
 
 Array of [`packages/context/agent-instructions/src/render.ts#AgentInstructionChange`](#persistence-type-packagescontextagent-instructionssrcrendertsagentinstructionchange).
 
-<a id="persistence-type-eventagentinboxspliceddatainserted0source12changes0action"></a>
+<a id="persistence-type-eventagentinboxspliceddatainserted0source13changes0action"></a>
 
-### `event:agent/inbox/spliced.data.inserted[0].source[12].changes[0].action`
+### `event:agent/inbox/spliced.data.inserted[0].source[13].changes[0].action`
 
 SHA-256: `904bf499d98be4a3a5f836fcac533b6c4899569b018071e6604e1d32657d00fd`
 
@@ -1876,17 +1890,17 @@ One of:
 - `"replace"`
 - `"set"`
 
-<a id="persistence-type-eventagentinboxspliceddatainserted0source15references"></a>
+<a id="persistence-type-eventagentinboxspliceddatainserted0source16references"></a>
 
-### `event:agent/inbox/spliced.data.inserted[0].source[15].references`
+### `event:agent/inbox/spliced.data.inserted[0].source[16].references`
 
 SHA-256: `df843efd87c78cf8de98f8e0d0216956cd568d0d0e56a22c853663e274aa1a18`
 
-Array of [`event:agent/inbox/spliced.data.inserted[0].source[15].references[0]`](#persistence-type-eventagentinboxspliceddatainserted0source15references0).
+Array of [`event:agent/inbox/spliced.data.inserted[0].source[16].references[0]`](#persistence-type-eventagentinboxspliceddatainserted0source16references0).
 
-<a id="persistence-type-eventagentinboxspliceddatainserted0source15references0"></a>
+<a id="persistence-type-eventagentinboxspliceddatainserted0source16references0"></a>
 
-### `event:agent/inbox/spliced.data.inserted[0].source[15].references[0]`
+### `event:agent/inbox/spliced.data.inserted[0].source[16].references[0]`
 
 SHA-256: `4f91f187baeabef5c7950c4780d31bbe39f3345dff591a6cf26ac7e135ac1cf4`
 
@@ -1906,17 +1920,17 @@ Sources: [`packages/context/session-reference/src/types.ts:18`](../packages/cont
 | `sessionId` | required | `string` |
 | `truncated` | required | `boolean` |
 
-<a id="persistence-type-eventagentinboxspliceddatainserted0source18entries"></a>
+<a id="persistence-type-eventagentinboxspliceddatainserted0source19entries"></a>
 
-### `event:agent/inbox/spliced.data.inserted[0].source[18].entries`
+### `event:agent/inbox/spliced.data.inserted[0].source[19].entries`
 
 SHA-256: `aba175fb20ffc71112c55efe70458ff5d7dbfb83501892b4ba8d077f0ea5d7ba`
 
-Array of [`event:agent/inbox/spliced.data.inserted[0].source[18].entries[0]`](#persistence-type-eventagentinboxspliceddatainserted0source18entries0).
+Array of [`event:agent/inbox/spliced.data.inserted[0].source[19].entries[0]`](#persistence-type-eventagentinboxspliceddatainserted0source19entries0).
 
-<a id="persistence-type-eventagentinboxspliceddatainserted0source18entries0"></a>
+<a id="persistence-type-eventagentinboxspliceddatainserted0source19entries0"></a>
 
-### `event:agent/inbox/spliced.data.inserted[0].source[18].entries[0]`
+### `event:agent/inbox/spliced.data.inserted[0].source[19].entries[0]`
 
 SHA-256: `83079c8a3f733ac3fa603eefa0fbb4737ca4d8b69e7e2e7298b60f9ac4098693`
 
@@ -1926,24 +1940,6 @@ Sources: [`packages/skill/tool-skill/src/index.ts:40`](../packages/skill/tool-sk
 |---|---|---|
 | `description` | required | `string` |
 | `name` | required | `string` |
-
-<a id="persistence-type-eventagentinboxspliceddatainserted0source19"></a>
-
-### `event:agent/inbox/spliced.data.inserted[0].source[19]`
-
-SHA-256: `9edc162949abf93bd5ff049191b345454ba104f583937ce5580fb50f067d2b94`
-
-Sources: [`packages/webhook/webhook/src/types.ts:74`](../packages/webhook/webhook/src/types.ts)
-
-| Property | Presence | Type |
-|---|---|---|
-| `deliveryId` | required | `string` |
-| `form` | required | `"notice"` |
-| `kind` | required | `"webhook"` |
-| `provider` | required | `string` |
-| `ruleId` | required | `string` |
-| `source` | required | `string` |
-| `summary` | required | `string` |
 
 <a id="persistence-type-eventagentinboxspliceddatainserted0source2"></a>
 
@@ -2685,7 +2681,7 @@ SHA-256: `13d3d180f977bf78081d487ffa0ecb75857349bcab29a5a3fb48189fca2a6176`
 
 SHA-256: `1528539c63db8b23506f0209a99ce77d8ad138adfbfcee3d4769b7382d93756c`
 
-Sources: [`packages/deliverables/tool-present/src/types.ts:15`](../packages/deliverables/tool-present/src/types.ts)
+Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:190`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -2699,7 +2695,7 @@ Sources: [`packages/deliverables/tool-present/src/types.ts:15`](../packages/deli
 
 SHA-256: `1d9cb3caa96100b18b1911fa3ff8c751ef6992971a03c5f4d9aefc1a0004a345`
 
-Array of [`packages/deliverables/tool-present/src/types.ts#PresentedFile`](#persistence-type-packagesdeliverablestool-presentsrctypestspresentedfile).
+Array of [`packages/session/session-format-catalog/src/retired-vocabulary.ts#RetiredPresentedFile`](#persistence-type-packagessessionsession-format-catalogsrcretired-vocabularytsretiredpresentedfile).
 
 <a id="persistence-type-eventfeedbackmessage-delete"></a>
 
@@ -2709,11 +2705,24 @@ SHA-256: `3ee93b06f3a125850337602bcdf155d2538c43a5c944ec55b1b3c365152d6796`
 
 | Property | Presence | Type |
 |---|---|---|
-| `data` | required | [`packages/feedback/message-feedback/src/types.ts#MessageFeedbackDelete`](#persistence-type-packagesfeedbackmessage-feedbacksrctypestsmessagefeedbackdelete) |
+| `data` | required | [`event:feedback/message-delete.data`](#persistence-type-eventfeedbackmessage-deletedata) |
 | `ignorable` | optional | `true` |
 | `seq` | required | `number` |
 | `time` | required | `number` |
 | `type` | required | `"feedback/message-delete"` |
+
+<a id="persistence-type-eventfeedbackmessage-deletedata"></a>
+
+### `event:feedback/message-delete.data`
+
+SHA-256: `7c6129b6961cf4b2a030f36c78d2b0a5be38617651a9b81322e054ee512bee06`
+
+Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:188`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+
+| Property | Presence | Type |
+|---|---|---|
+| `messageId` | required | `string` |
+| `sessionId` | required | `string` |
 
 <a id="persistence-type-eventfeedbackmessage-put"></a>
 
@@ -2723,11 +2732,24 @@ SHA-256: `b5086d249e8502e9ead1d39156bb8d559bde7951cac0f14ce150345b4e42a2bf`
 
 | Property | Presence | Type |
 |---|---|---|
-| `data` | required | [`packages/feedback/message-feedback/src/types.ts#MessageFeedbackPut`](#persistence-type-packagesfeedbackmessage-feedbacksrctypestsmessagefeedbackput) |
+| `data` | required | [`event:feedback/message-put.data`](#persistence-type-eventfeedbackmessage-putdata) |
 | `ignorable` | optional | `true` |
 | `seq` | required | `number` |
 | `time` | required | `number` |
 | `type` | required | `"feedback/message-put"` |
+
+<a id="persistence-type-eventfeedbackmessage-putdata"></a>
+
+### `event:feedback/message-put.data`
+
+SHA-256: `aa7bc2817014ca6c45719b1c193c5c131be718a0921f34345098ff250f444626`
+
+Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:186`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+
+| Property | Presence | Type |
+|---|---|---|
+| `item` | required | [`packages/session/session-format-catalog/src/retired-vocabulary.ts#RetiredMessageFeedbackItem`](#persistence-type-packagessessionsession-format-catalogsrcretired-vocabularytsretiredmessagefeedbackitem) |
+| `sessionId` | required | `string` |
 
 <a id="persistence-type-eventfeedbackmessage-putdataitemcategory"></a>
 
@@ -2744,6 +2766,17 @@ One of:
 - `"security-privacy-permission"`
 - `"service-stability"`
 - `"task-result"`
+
+<a id="persistence-type-eventfeedbackmessage-putdataitemrating"></a>
+
+### `event:feedback/message-put.data.item.rating`
+
+SHA-256: `390eed1028aba02774f14408647acec10ec5516e97d4f15ecde2b9989d5a69f2`
+
+One of:
+
+- `"negative"`
+- `"positive"`
 
 <a id="persistence-type-eventfeedbackrecord"></a>
 
@@ -2870,7 +2903,7 @@ SHA-256: `b222069eea2d768065161c1147b1f2c78c1b54328c84b3586ae5c8f91b8ed35e`
 
 SHA-256: `477614bca595a9e7adb5a1870be446b9a8684f3ba8950259d6289f2d3b74f028`
 
-Sources: [`packages/compaction/compaction-image-offload/src/projection.ts:25`](../packages/compaction/compaction-image-offload/src/projection.ts)
+Sources: [`packages/compaction/compaction-image-offload/src/projection.ts:26`](../packages/compaction/compaction-image-offload/src/projection.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -3013,7 +3046,7 @@ SHA-256: `a7cf43ce7c2a4c038feed1885cd7a00d5c6ee2d90a7e0d56b46f78a3e1ca327f`
 
 SHA-256: `20a57544bbf204dacd1ae6beb2ab29444365c3c869f2afdf489dcdcbc3d9c8c5`
 
-Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:121`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:210`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -3169,7 +3202,7 @@ SHA-256: `d63b8b8ffad9c02fd80c43a17df4f240c1fe8118ecca9de34f9d5871838ab5b9`
 
 SHA-256: `8bb8c3751a6ce64b61aba1ec7ae798c00a5803c4d868a0430873216c6569ed52`
 
-Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:123`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:212`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -3428,7 +3461,7 @@ SHA-256: `5df6c1d20d3b13520831b4f81f5d9f90e66d46baf9b1d04bb2da9ed4a72bb795`
 
 SHA-256: `f09e5e7acf5ff5ccd193ff2eeec015fa2ff7c29d98bc465f8c3302058d47e29b`
 
-Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:27`](../packages/session/session-format-catalog/src/retired-vocabulary.ts) · [`packages/subagent/tool-subagent/src/types.ts:27`](../packages/subagent/tool-subagent/src/types.ts)
+Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:32`](../packages/session/session-format-catalog/src/retired-vocabulary.ts) · [`packages/subagent/tool-subagent/src/types.ts:27`](../packages/subagent/tool-subagent/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -3528,7 +3561,7 @@ SHA-256: `4fb59762612c3e3ac3a3bd4f84c9c148d3c3893bd422ba2b201cc039fabd49bc`
 
 SHA-256: `b1ebd5cda47d90d980bb05bffc3f970c51537b9aff15b3bc3d639811727741b1`
 
-Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:106`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:169`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -3567,7 +3600,7 @@ SHA-256: `48f9c19417a1abbedfa59f4667bba36b93ac2db407adf5e84cb3ba0de30942cb`
 
 SHA-256: `0bcfaf5566d271028429ac7b562cb59053c9d78b8ae14708c35fac835108d1b1`
 
-Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:112`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:175`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -3596,7 +3629,7 @@ SHA-256: `443371ec07a03a82a0e93d93abca3e70b03bca55ba5b01d507030fcb66e8fbb4`
 
 SHA-256: `0c3f4d2248d9bc9700e2d7253fa71aa9935f5c39af6f11de5727f08cccaf8383`
 
-Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:110`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:173`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -3624,7 +3657,7 @@ SHA-256: `d595ec73b32b016a6055333c67a5d646032b22e672da1d4a09c5b1ae398a093a`
 
 SHA-256: `a40d12070f6f4a124f32fb3cc86e7857554702e32f0eda3080a25c4b9ac9b18c`
 
-Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:108`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:171`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -3652,7 +3685,7 @@ SHA-256: `b978cff734e62143eb56c9125423ec275405eda969802d42aaf73ecb987d3b26`
 
 SHA-256: `79ddc907312f97cf9553d4841e8b3fc937097bd8d97900a790efad3c05255e99`
 
-Sources: [`packages/todo/tool-todo/src/types.ts:31`](../packages/todo/tool-todo/src/types.ts)
+Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:184`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -3664,7 +3697,7 @@ Sources: [`packages/todo/tool-todo/src/types.ts:31`](../packages/todo/tool-todo/
 
 SHA-256: `4b7ddaf3710b88ff9b8df66304f5f97bf03688fd19730eedc2e9535203c820ea`
 
-Array of [`packages/todo/tool-todo/src/types.ts#TodoItem`](#persistence-type-packagestodotool-todosrctypeststodoitem).
+Array of [`packages/session/session-format-catalog/src/retired-vocabulary.ts#RetiredTodoItem`](#persistence-type-packagessessionsession-format-catalogsrcretired-vocabularytsretiredtodoitem).
 
 <a id="persistence-type-eventtodowritedatatodos0status"></a>
 
@@ -3686,11 +3719,37 @@ SHA-256: `babf9ee4d1af62bf6c3a8103737f7a5e4e78ce179be835ce05a38803e15884b7`
 
 | Property | Presence | Type |
 |---|---|---|
-| `data` | required | [`packages/workflow/tool-workflow/src/types.ts#ToolWorkflowAgentEndData`](#persistence-type-packagesworkflowtool-workflowsrctypeststoolworkflowagentenddata) |
+| `data` | required | [`event:tool-workflow/agent-end.data`](#persistence-type-eventtool-workflowagent-enddata) |
 | `ignorable` | optional | `true` |
 | `seq` | required | `number` |
 | `time` | required | `number` |
 | `type` | required | `"tool-workflow/agent-end"` |
+
+<a id="persistence-type-eventtool-workflowagent-enddata"></a>
+
+### `event:tool-workflow/agent-end.data`
+
+SHA-256: `c0ea97bc89dfc46fa94eab956f5c3ee6af2f964aa7db6327cb18b451f207bef7`
+
+Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:202`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+
+| Property | Presence | Type |
+|---|---|---|
+| `outcome` | required | [`event:tool-workflow/agent-end.data.outcome`](#persistence-type-eventtool-workflowagent-enddataoutcome) |
+| `runId` | required | `string` |
+| `seq` | required | `number` |
+
+<a id="persistence-type-eventtool-workflowagent-enddataoutcome"></a>
+
+### `event:tool-workflow/agent-end.data.outcome`
+
+SHA-256: `c2deb7c9183735d4e0fffddf5c623f4e34daa1c8e96b111982e957dfcbbcf896`
+
+One of:
+
+- `"cancelled"`
+- `"completed"`
+- `"failed"`
 
 <a id="persistence-type-eventtool-workflowagent-start"></a>
 
@@ -3700,11 +3759,27 @@ SHA-256: `5f26a6c20b37632f8f57729d171c671def4683d994ac6257a8dffcd855101627`
 
 | Property | Presence | Type |
 |---|---|---|
-| `data` | required | [`packages/workflow/tool-workflow/src/types.ts#ToolWorkflowAgentStartData`](#persistence-type-packagesworkflowtool-workflowsrctypeststoolworkflowagentstartdata) |
+| `data` | required | [`event:tool-workflow/agent-start.data`](#persistence-type-eventtool-workflowagent-startdata) |
 | `ignorable` | optional | `true` |
 | `seq` | required | `number` |
 | `time` | required | `number` |
 | `type` | required | `"tool-workflow/agent-start"` |
+
+<a id="persistence-type-eventtool-workflowagent-startdata"></a>
+
+### `event:tool-workflow/agent-start.data`
+
+SHA-256: `9a410ddf56792b2b7cd4a224a2e54dc4dee30a8e8e6b1c2b9a1d19992b217adc`
+
+Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:194`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+
+| Property | Presence | Type |
+|---|---|---|
+| `childId` | required | `string` |
+| `label` | required | `string` |
+| `phase` | optional | `string` |
+| `runId` | required | `string` |
+| `seq` | required | `number` |
 
 <a id="persistence-type-eventtool-workflowrun-end"></a>
 
@@ -3714,11 +3789,36 @@ SHA-256: `42e0916e0dda5f6d1e7bb05d8514717147c036a79c9f36085683469516c1fd3f`
 
 | Property | Presence | Type |
 |---|---|---|
-| `data` | required | [`packages/workflow/tool-workflow/src/types.ts#ToolWorkflowRunEndData`](#persistence-type-packagesworkflowtool-workflowsrctypeststoolworkflowrunenddata) |
+| `data` | required | [`event:tool-workflow/run-end.data`](#persistence-type-eventtool-workflowrun-enddata) |
 | `ignorable` | optional | `true` |
 | `seq` | required | `number` |
 | `time` | required | `number` |
 | `type` | required | `"tool-workflow/run-end"` |
+
+<a id="persistence-type-eventtool-workflowrun-enddata"></a>
+
+### `event:tool-workflow/run-end.data`
+
+SHA-256: `7f9365bae9fcb73e1e34061a1acfe0422c1a5fd351848cace9bebbe806f28462`
+
+Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:208`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+
+| Property | Presence | Type |
+|---|---|---|
+| `runId` | required | `string` |
+| `stopReason` | required | [`event:tool-workflow/run-end.data.stopReason`](#persistence-type-eventtool-workflowrun-enddatastopreason) |
+
+<a id="persistence-type-eventtool-workflowrun-enddatastopreason"></a>
+
+### `event:tool-workflow/run-end.data.stopReason`
+
+SHA-256: `8465ece5e9d9007c038b357015d849c15262cb0bc25abc59e47692d87ee01a15`
+
+One of:
+
+- `"cancelled"`
+- `"completed"`
+- `"error"`
 
 <a id="persistence-type-eventtool-workflowrun-start"></a>
 
@@ -3728,11 +3828,24 @@ SHA-256: `c1f9e0405de6d18cabb9ee70782a027f9bbdc57e5abec9dcccdd56119e2e9058`
 
 | Property | Presence | Type |
 |---|---|---|
-| `data` | required | [`packages/workflow/tool-workflow/src/types.ts#ToolWorkflowRunStartData`](#persistence-type-packagesworkflowtool-workflowsrctypeststoolworkflowrunstartdata) |
+| `data` | required | [`event:tool-workflow/run-start.data`](#persistence-type-eventtool-workflowrun-startdata) |
 | `ignorable` | optional | `true` |
 | `seq` | required | `number` |
 | `time` | required | `number` |
 | `type` | required | `"tool-workflow/run-start"` |
+
+<a id="persistence-type-eventtool-workflowrun-startdata"></a>
+
+### `event:tool-workflow/run-start.data`
+
+SHA-256: `a6da9ad5d42ae83a6833a8288b076688e8e0801633ea36cbdd8a30a6d9f3160c`
+
+Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:192`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+
+| Property | Presence | Type |
+|---|---|---|
+| `name` | required | `string` |
+| `runId` | required | `string` |
 
 <a id="persistence-type-eventtoolcall"></a>
 
@@ -4043,7 +4156,7 @@ SHA-256: `aa0957eca50aeb28bcd2e6930b95809926edacb550c8c340ba526ba6b861b3d8`
 
 SHA-256: `f90eb4ab2d3897bc20c521a038e3119d581f791ec974b1a0004f63a8ab9e232d`
 
-Sources: [`packages/core/session/src/types.ts:282`](../packages/core/session/src/types.ts) · [`packages/session/session-format-catalog/src/retired-vocabulary.ts:119`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+Sources: [`packages/core/session/src/types.ts:282`](../packages/core/session/src/types.ts) · [`packages/session/session-format-catalog/src/retired-vocabulary.ts:182`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -4603,7 +4716,7 @@ One of:
 
 SHA-256: `1cde1bedde79c5e8a56aee9c05c8e0a579cf5bc611deb85b93fa331a16ca978f`
 
-Sources: [`packages/compaction/compaction-image-offload/src/projection.ts:9`](../packages/compaction/compaction-image-offload/src/projection.ts)
+Sources: [`packages/compaction/compaction-image-offload/src/projection.ts:10`](../packages/compaction/compaction-image-offload/src/projection.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -4620,7 +4733,7 @@ Sources: [`packages/context/agent-instructions/src/render.ts:45`](../packages/co
 
 | Property | Presence | Type |
 |---|---|---|
-| `action` | required | [`event:agent/inbox/spliced.data.inserted[0].source[12].changes[0].action`](#persistence-type-eventagentinboxspliceddatainserted0source12changes0action) |
+| `action` | required | [`event:agent/inbox/spliced.data.inserted[0].source[13].changes[0].action`](#persistence-type-eventagentinboxspliceddatainserted0source13changes0action) |
 | `digest` | optional | `string` |
 | `path` | required | `string` |
 | `scope` | required | `string` |
@@ -4631,13 +4744,13 @@ Sources: [`packages/context/agent-instructions/src/render.ts:45`](../packages/co
 
 SHA-256: `6f22a9d02b9a1f1157f3b0e7bdccd7e7b12b085c4efdb709dfc74a465cd4e590`
 
-Sources: [`packages/context/agent-instructions/src/state.ts:37`](../packages/context/agent-instructions/src/state.ts)
+Sources: [`packages/context/agent-instructions/src/state.ts:38`](../packages/context/agent-instructions/src/state.ts)
 
 | Property | Presence | Type |
 |---|---|---|
 | `baseline` | optional | `true` |
 | `baselineIdentity` | optional | `string` |
-| `changes` | required | [`event:agent/inbox/spliced.data.inserted[0].source[12].changes`](#persistence-type-eventagentinboxspliceddatainserted0source12changes) |
+| `changes` | required | [`event:agent/inbox/spliced.data.inserted[0].source[13].changes`](#persistence-type-eventagentinboxspliceddatainserted0source13changes) |
 | `form` | required | `"instructions"` |
 | `kind` | required | `"agent-instructions"` |
 
@@ -4653,7 +4766,7 @@ Sources: [`packages/context/session-reference/src/types.ts:13`](../packages/cont
 |---|---|---|
 | `form` | required | `"recall"` |
 | `kind` | required | `"session-reference"` |
-| `references` | required | [`event:agent/inbox/spliced.data.inserted[0].source[15].references`](#persistence-type-eventagentinboxspliceddatainserted0source15references) |
+| `references` | required | [`event:agent/inbox/spliced.data.inserted[0].source[16].references`](#persistence-type-eventagentinboxspliceddatainserted0source16references) |
 | `version` | required | `1` |
 
 <a id="persistence-type-packagescoreagentsrctypestsinboxtarget"></a>
@@ -4785,7 +4898,7 @@ One of:
 
 SHA-256: `3cfc3a56502da1f8c6153c2c56657bab4b749056968634dd0991d325ec1c919f`
 
-Sources: [`packages/core/tools/src/index.ts:776`](../packages/core/tools/src/index.ts)
+Sources: [`packages/core/tools/src/index.ts:728`](../packages/core/tools/src/index.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -4827,19 +4940,6 @@ Sources: [`packages/core/tools/src/types.ts:11`](../packages/core/tools/src/type
 | `rootCallId` | required | `string` |
 | `subCallId` | required | `string` |
 
-<a id="persistence-type-packagesdeliverablestool-presentsrctypestspresentedfile"></a>
-
-### `packages/deliverables/tool-present/src/types.ts#PresentedFile`
-
-SHA-256: `b8fc636a2121df9d8423c242e03c9d23b7ab7c6fdce00e45746932c60b730f97`
-
-Sources: [`packages/deliverables/tool-present/src/types.ts:5`](../packages/deliverables/tool-present/src/types.ts)
-
-| Property | Presence | Type |
-|---|---|---|
-| `description` | optional | `string` |
-| `path` | required | `string` |
-
 <a id="persistence-type-packagesfeedbackcommand-feedbacksrctypestsfeedbackrecord"></a>
 
 ### `packages/feedback/command-feedback/src/types.ts#FeedbackRecord`
@@ -4852,63 +4952,6 @@ Sources: [`packages/feedback/command-feedback/src/types.ts:27`](../packages/feed
 |---|---|---|
 | `category` | optional | [`event:feedback/message-put.data.item.category`](#persistence-type-eventfeedbackmessage-putdataitemcategory) |
 | `text` | optional | `string` |
-
-<a id="persistence-type-packagesfeedbackmessage-feedbacksrctypestsmessagefeedbackdelete"></a>
-
-### `packages/feedback/message-feedback/src/types.ts#MessageFeedbackDelete`
-
-SHA-256: `7c6129b6961cf4b2a030f36c78d2b0a5be38617651a9b81322e054ee512bee06`
-
-Sources: [`packages/feedback/message-feedback/src/types.ts:46`](../packages/feedback/message-feedback/src/types.ts)
-
-| Property | Presence | Type |
-|---|---|---|
-| `messageId` | required | `string` |
-| `sessionId` | required | `string` |
-
-<a id="persistence-type-packagesfeedbackmessage-feedbacksrctypestsmessagefeedbackitem"></a>
-
-### `packages/feedback/message-feedback/src/types.ts#MessageFeedbackItem`
-
-SHA-256: `3d7d07060a7be77984feb651ea2bf1925d3e0477911d9d3ed86330d1e8ca6182`
-
-Sources: [`packages/feedback/message-feedback/src/types.ts:20`](../packages/feedback/message-feedback/src/types.ts)
-
-| Property | Presence | Type |
-|---|---|---|
-| `category` | optional | [`event:feedback/message-put.data.item.category`](#persistence-type-eventfeedbackmessage-putdataitemcategory) |
-| `createdAt` | required | `number` |
-| `messageId` | required | `string` |
-| `note` | optional | `string` |
-| `rating` | required | [`packages/feedback/message-feedback/src/types.ts#MessageFeedbackRating`](#persistence-type-packagesfeedbackmessage-feedbacksrctypestsmessagefeedbackrating) |
-| `updatedAt` | required | `number` |
-| `version` | required | `string` |
-
-<a id="persistence-type-packagesfeedbackmessage-feedbacksrctypestsmessagefeedbackput"></a>
-
-### `packages/feedback/message-feedback/src/types.ts#MessageFeedbackPut`
-
-SHA-256: `aa7bc2817014ca6c45719b1c193c5c131be718a0921f34345098ff250f444626`
-
-Sources: [`packages/feedback/message-feedback/src/types.ts:38`](../packages/feedback/message-feedback/src/types.ts)
-
-| Property | Presence | Type |
-|---|---|---|
-| `item` | required | [`packages/feedback/message-feedback/src/types.ts#MessageFeedbackItem`](#persistence-type-packagesfeedbackmessage-feedbacksrctypestsmessagefeedbackitem) |
-| `sessionId` | required | `string` |
-
-<a id="persistence-type-packagesfeedbackmessage-feedbacksrctypestsmessagefeedbackrating"></a>
-
-### `packages/feedback/message-feedback/src/types.ts#MessageFeedbackRating`
-
-SHA-256: `390eed1028aba02774f14408647acec10ec5516e97d4f15ecde2b9989d5a69f2`
-
-Sources: [`packages/feedback/message-feedback/src/types.ts:17`](../packages/feedback/message-feedback/src/types.ts)
-
-One of:
-
-- `"negative"`
-- `"positive"`
 
 <a id="persistence-type-packagesgoalgoalsrcdomaintsgoalchangemeta"></a>
 
@@ -5200,7 +5243,7 @@ One of:
 - [`packages/context/agent-instructions/src/state.ts#AgentInstructionSource`](#persistence-type-packagescontextagent-instructionssrcstatetsagentinstructionsource)
 - [`packages/llm/llm/src/message.ts#ToolMessageSource`](#persistence-type-packagesllmllmsrcmessagetstoolmessagesource)
 - [`event:agent/inbox/spliced.data.inserted[0].source[10]`](#persistence-type-eventagentinboxspliceddatainserted0source10)
-- [`event:agent/inbox/spliced.data.inserted[0].source[19]`](#persistence-type-eventagentinboxspliceddatainserted0source19)
+- [`event:agent/inbox/spliced.data.inserted[0].source[12]`](#persistence-type-eventagentinboxspliceddatainserted0source12)
 - [`packages/skill/tool-skill/src/index.ts#SkillCatalogSource`](#persistence-type-packagesskilltool-skillsrcindextsskillcatalogsource)
 - [`packages/skill/skill/src/index.ts#SkillInvocationSource`](#persistence-type-packagesskillskillsrcindextsskillinvocationsource)
 - [`event:agent/inbox/spliced.data.inserted[0].source[4]`](#persistence-type-eventagentinboxspliceddatainserted0source4)
@@ -5637,13 +5680,44 @@ One of:
 - [`packages/schedule/schedule/src/types.ts#EveryScheduleRecord`](#persistence-type-packagesscheduleschedulesrctypestseveryschedulerecord)
 - [`packages/schedule/schedule/src/types.ts#AtScheduleRecord`](#persistence-type-packagesscheduleschedulesrctypestsatschedulerecord)
 
+<a id="persistence-type-packagessessionsession-format-catalogsrcretired-vocabularytsretiredmessagefeedbackitem"></a>
+
+### `packages/session/session-format-catalog/src/retired-vocabulary.ts#RetiredMessageFeedbackItem`
+
+SHA-256: `3d7d07060a7be77984feb651ea2bf1925d3e0477911d9d3ed86330d1e8ca6182`
+
+Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:117`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+
+| Property | Presence | Type |
+|---|---|---|
+| `category` | optional | [`event:feedback/message-put.data.item.category`](#persistence-type-eventfeedbackmessage-putdataitemcategory) |
+| `createdAt` | required | `number` |
+| `messageId` | required | `string` |
+| `note` | optional | `string` |
+| `rating` | required | [`event:feedback/message-put.data.item.rating`](#persistence-type-eventfeedbackmessage-putdataitemrating) |
+| `updatedAt` | required | `number` |
+| `version` | required | `string` |
+
+<a id="persistence-type-packagessessionsession-format-catalogsrcretired-vocabularytsretiredpresentedfile"></a>
+
+### `packages/session/session-format-catalog/src/retired-vocabulary.ts#RetiredPresentedFile`
+
+SHA-256: `b8fc636a2121df9d8423c242e03c9d23b7ab7c6fdce00e45746932c60b730f97`
+
+Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:128`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+
+| Property | Presence | Type |
+|---|---|---|
+| `description` | optional | `string` |
+| `path` | required | `string` |
+
 <a id="persistence-type-packagessessionsession-format-catalogsrcretired-vocabularytsretiredteammemberphase"></a>
 
 ### `packages/session/session-format-catalog/src/retired-vocabulary.ts#RetiredTeamMemberPhase`
 
 SHA-256: `dfce5db4aa42b7ebe0bb79eca92553587287e18c06b9eba85cbfb9d332e26acd`
 
-Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:46`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:60`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 One of:
 
@@ -5657,7 +5731,7 @@ One of:
 
 SHA-256: `6598cd6da253948d6b207c6374a45335804c79b576866d6215649c2d1bc85e25`
 
-Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:49`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:63`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -5675,7 +5749,7 @@ Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:49`
 
 SHA-256: `5b694f394d5e11609887a3ccfa82844935d49806c37e336b30be2186d649ab94`
 
-Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:75`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:89`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -5691,7 +5765,7 @@ Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:75`
 
 SHA-256: `2152caf1a71e588e4df2358a806dea24936c1c47131134f01a12939d12cdc0c0`
 
-Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:84`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:137`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -5707,7 +5781,7 @@ Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:84`
 
 SHA-256: `51edec100659da3a9bd9c3f6ba1180f5e64ec9a1585e5057080df45c180bd357`
 
-Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:63`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:77`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -5726,7 +5800,7 @@ Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:63`
 
 SHA-256: `b2d2a01e51341a3bfec809198952c8c830a7899f4cb6ecd3c1dc0b5d9a2af943`
 
-Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:60`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:74`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
 
 One of:
 
@@ -5734,6 +5808,19 @@ One of:
 - `"deleted"`
 - `"in_progress"`
 - `"pending"`
+
+<a id="persistence-type-packagessessionsession-format-catalogsrcretired-vocabularytsretiredtodoitem"></a>
+
+### `packages/session/session-format-catalog/src/retired-vocabulary.ts#RetiredTodoItem`
+
+SHA-256: `a99f76fd149051c363f960bfeeb5b9509587ecaf7591a42797e4bfe810d8987a`
+
+Sources: [`packages/session/session-format-catalog/src/retired-vocabulary.ts:98`](../packages/session/session-format-catalog/src/retired-vocabulary.ts)
+
+| Property | Presence | Type |
+|---|---|---|
+| `content` | required | `string` |
+| `status` | required | [`event:todo/write.data.todos[0].status`](#persistence-type-eventtodowritedatatodos0status) |
 
 <a id="persistence-type-packagessessionsession-persistence-jsonlsrcformattsheaderline"></a>
 
@@ -5838,7 +5925,7 @@ Sources: [`packages/skill/tool-skill/src/index.ts:34`](../packages/skill/tool-sk
 
 | Property | Presence | Type |
 |---|---|---|
-| `entries` | required | [`event:agent/inbox/spliced.data.inserted[0].source[18].entries`](#persistence-type-eventagentinboxspliceddatainserted0source18entries) |
+| `entries` | required | [`event:agent/inbox/spliced.data.inserted[0].source[19].entries`](#persistence-type-eventagentinboxspliceddatainserted0source19entries) |
 | `form` | required | `"catalog"` |
 | `kind` | required | `"skill-catalog"` |
 | `update` | optional | `true` |
@@ -5978,19 +6065,6 @@ Sources: [`packages/subagent/tool-subagent/src/types.ts:22`](../packages/subagen
 | `router` | optional | [`packages/subagent/tool-subagent/src/types.ts#SubagentRouterDecision`](#persistence-type-packagessubagenttool-subagentsrctypestssubagentrouterdecision) |
 | `source` | required | [`event:subagent/routing-decision.data.source`](#persistence-type-eventsubagentrouting-decisiondatasource) |
 
-<a id="persistence-type-packagestodotool-todosrctypeststodoitem"></a>
-
-### `packages/todo/tool-todo/src/types.ts#TodoItem`
-
-SHA-256: `a99f76fd149051c363f960bfeeb5b9509587ecaf7591a42797e4bfe810d8987a`
-
-Sources: [`packages/todo/tool-todo/src/types.ts:21`](../packages/todo/tool-todo/src/types.ts)
-
-| Property | Presence | Type |
-|---|---|---|
-| `content` | required | `string` |
-| `status` | required | [`event:todo/write.data.todos[0].status`](#persistence-type-eventtodowritedatatodos0status) |
-
 <a id="persistence-type-packageswebweb-search-deepseeksrcprovidertsdeepseeksearchllmrequest"></a>
 
 ### `packages/web/web-search-deepseek/src/provider.ts#DeepSeekSearchLlmRequest`
@@ -6004,90 +6078,6 @@ Sources: [`packages/web/web-search-deepseek/src/provider.ts:55`](../packages/web
 | `apiVersion` | required | `string` |
 | `body` | required | [`event:web/deepseek-search-llm-request.data.body`](#persistence-type-eventwebdeepseek-search-llm-requestdatabody) |
 | `endpoint` | required | `string` |
-
-<a id="persistence-type-packagesworkflowtool-workflowsrctypeststoolworkflowagentenddata"></a>
-
-### `packages/workflow/tool-workflow/src/types.ts#ToolWorkflowAgentEndData`
-
-SHA-256: `c0ea97bc89dfc46fa94eab956f5c3ee6af2f964aa7db6327cb18b451f207bef7`
-
-Sources: [`packages/workflow/tool-workflow/src/types.ts:29`](../packages/workflow/tool-workflow/src/types.ts)
-
-| Property | Presence | Type |
-|---|---|---|
-| `outcome` | required | [`packages/workflow/workflow/src/types.ts#WorkflowAgentOutcome`](#persistence-type-packagesworkflowworkflowsrctypestsworkflowagentoutcome) |
-| `runId` | required | `string` |
-| `seq` | required | `number` |
-
-<a id="persistence-type-packagesworkflowtool-workflowsrctypeststoolworkflowagentstartdata"></a>
-
-### `packages/workflow/tool-workflow/src/types.ts#ToolWorkflowAgentStartData`
-
-SHA-256: `9a410ddf56792b2b7cd4a224a2e54dc4dee30a8e8e6b1c2b9a1d19992b217adc`
-
-Sources: [`packages/workflow/tool-workflow/src/types.ts:20`](../packages/workflow/tool-workflow/src/types.ts)
-
-| Property | Presence | Type |
-|---|---|---|
-| `childId` | required | `string` |
-| `label` | required | `string` |
-| `phase` | optional | `string` |
-| `runId` | required | `string` |
-| `seq` | required | `number` |
-
-<a id="persistence-type-packagesworkflowtool-workflowsrctypeststoolworkflowrunenddata"></a>
-
-### `packages/workflow/tool-workflow/src/types.ts#ToolWorkflowRunEndData`
-
-SHA-256: `7f9365bae9fcb73e1e34061a1acfe0422c1a5fd351848cace9bebbe806f28462`
-
-Sources: [`packages/workflow/tool-workflow/src/types.ts:36`](../packages/workflow/tool-workflow/src/types.ts)
-
-| Property | Presence | Type |
-|---|---|---|
-| `runId` | required | `string` |
-| `stopReason` | required | [`packages/workflow/workflow/src/types.ts#WorkflowStopReason`](#persistence-type-packagesworkflowworkflowsrctypestsworkflowstopreason) |
-
-<a id="persistence-type-packagesworkflowtool-workflowsrctypeststoolworkflowrunstartdata"></a>
-
-### `packages/workflow/tool-workflow/src/types.ts#ToolWorkflowRunStartData`
-
-SHA-256: `a6da9ad5d42ae83a6833a8288b076688e8e0801633ea36cbdd8a30a6d9f3160c`
-
-Sources: [`packages/workflow/tool-workflow/src/types.ts:14`](../packages/workflow/tool-workflow/src/types.ts)
-
-| Property | Presence | Type |
-|---|---|---|
-| `name` | required | `string` |
-| `runId` | required | `string` |
-
-<a id="persistence-type-packagesworkflowworkflowsrctypestsworkflowagentoutcome"></a>
-
-### `packages/workflow/workflow/src/types.ts#WorkflowAgentOutcome`
-
-SHA-256: `c2deb7c9183735d4e0fffddf5c623f4e34daa1c8e96b111982e957dfcbbcf896`
-
-Sources: [`packages/workflow/workflow/src/types.ts:110`](../packages/workflow/workflow/src/types.ts)
-
-One of:
-
-- `"cancelled"`
-- `"completed"`
-- `"failed"`
-
-<a id="persistence-type-packagesworkflowworkflowsrctypestsworkflowstopreason"></a>
-
-### `packages/workflow/workflow/src/types.ts#WorkflowStopReason`
-
-SHA-256: `8465ece5e9d9007c038b357015d849c15262cb0bc25abc59e47692d87ee01a15`
-
-Sources: [`packages/workflow/workflow/src/types.ts:63`](../packages/workflow/workflow/src/types.ts)
-
-One of:
-
-- `"cancelled"`
-- `"completed"`
-- `"error"`
 
 <a id="persistence-type-parent"></a>
 
@@ -6515,7 +6505,7 @@ SHA-256: `57f3f606ff8b6c84d9c443faace9d1dd10cca0354f37a4f515ef075f7c351b90`
 
 SHA-256: `4cd48f3e5108bd6ebedf7301c3638839b8b2b9db8dbd493974177fbdeb91a01b`
 
-Sources: [`packages/attachment/attachment/src/brand.ts:6`](../packages/attachment/attachment/src/brand.ts) · [`packages/compaction/compaction/src/brand.ts:4`](../packages/compaction/compaction/src/brand.ts) · [`packages/core/session/src/types.ts:20`](../packages/core/session/src/types.ts) · [`packages/feedback/message-feedback/src/types.ts:14`](../packages/feedback/message-feedback/src/types.ts) · [`packages/goal/goal/src/types.ts:17`](../packages/goal/goal/src/types.ts) · [`packages/interaction/commands/src/brand.ts:31`](../packages/interaction/commands/src/brand.ts) · [`packages/interaction/user-approval/src/types.ts:17`](../packages/interaction/user-approval/src/types.ts) · [`packages/llm/llm-retry/src/brand.ts:4`](../packages/llm/llm-retry/src/brand.ts) · [`packages/llm/llm/src/brand.ts:16`](../packages/llm/llm/src/brand.ts) · [`packages/llm/llm/src/brand.ts:31`](../packages/llm/llm/src/brand.ts) · [`packages/llm/llm/src/brand.ts:43`](../packages/llm/llm/src/brand.ts) · [`packages/llm/llm/src/brand.ts:67`](../packages/llm/llm/src/brand.ts) · [`packages/schedule/schedule/src/types.ts:10`](../packages/schedule/schedule/src/types.ts) · [`packages/session/session-format-catalog/src/retired-vocabulary.ts:34`](../packages/session/session-format-catalog/src/retired-vocabulary.ts) · [`packages/session/session-format-catalog/src/retired-vocabulary.ts:37`](../packages/session/session-format-catalog/src/retired-vocabulary.ts) · [`packages/session/session-format-catalog/src/retired-vocabulary.ts:40`](../packages/session/session-format-catalog/src/retired-vocabulary.ts) · [`packages/session/session-format-catalog/src/retired-vocabulary.ts:43`](../packages/session/session-format-catalog/src/retired-vocabulary.ts) · [`packages/session/session-title/src/index.ts:42`](../packages/session/session-title/src/index.ts) · [`packages/session/session-title/src/types.ts:17`](../packages/session/session-title/src/types.ts) · [`packages/webhook/webhook/src/brand.ts:12`](../packages/webhook/webhook/src/brand.ts) · [`packages/webhook/webhook/src/brand.ts:6`](../packages/webhook/webhook/src/brand.ts) · [`packages/webhook/webhook/src/brand.ts:9`](../packages/webhook/webhook/src/brand.ts) · [`packages/workflow/workflow/src/types.ts:13`](../packages/workflow/workflow/src/types.ts)
+Sources: [`packages/attachment/attachment/src/brand.ts:6`](../packages/attachment/attachment/src/brand.ts) · [`packages/compaction/compaction/src/brand.ts:4`](../packages/compaction/compaction/src/brand.ts) · [`packages/core/session/src/types.ts:20`](../packages/core/session/src/types.ts) · [`packages/goal/goal/src/types.ts:17`](../packages/goal/goal/src/types.ts) · [`packages/interaction/commands/src/brand.ts:31`](../packages/interaction/commands/src/brand.ts) · [`packages/interaction/user-approval/src/types.ts:17`](../packages/interaction/user-approval/src/types.ts) · [`packages/llm/llm-retry/src/brand.ts:4`](../packages/llm/llm-retry/src/brand.ts) · [`packages/llm/llm/src/brand.ts:16`](../packages/llm/llm/src/brand.ts) · [`packages/llm/llm/src/brand.ts:31`](../packages/llm/llm/src/brand.ts) · [`packages/llm/llm/src/brand.ts:43`](../packages/llm/llm/src/brand.ts) · [`packages/llm/llm/src/brand.ts:67`](../packages/llm/llm/src/brand.ts) · [`packages/schedule/schedule/src/types.ts:10`](../packages/schedule/schedule/src/types.ts) · [`packages/session/session-format-catalog/src/retired-vocabulary.ts:114`](../packages/session/session-format-catalog/src/retired-vocabulary.ts) · [`packages/session/session-format-catalog/src/retired-vocabulary.ts:134`](../packages/session/session-format-catalog/src/retired-vocabulary.ts) · [`packages/session/session-format-catalog/src/retired-vocabulary.ts:39`](../packages/session/session-format-catalog/src/retired-vocabulary.ts) · [`packages/session/session-format-catalog/src/retired-vocabulary.ts:42`](../packages/session/session-format-catalog/src/retired-vocabulary.ts) · [`packages/session/session-format-catalog/src/retired-vocabulary.ts:45`](../packages/session/session-format-catalog/src/retired-vocabulary.ts) · [`packages/session/session-format-catalog/src/retired-vocabulary.ts:48`](../packages/session/session-format-catalog/src/retired-vocabulary.ts) · [`packages/session/session-format-catalog/src/retired-vocabulary.ts:51`](../packages/session/session-format-catalog/src/retired-vocabulary.ts) · [`packages/session/session-format-catalog/src/retired-vocabulary.ts:54`](../packages/session/session-format-catalog/src/retired-vocabulary.ts) · [`packages/session/session-format-catalog/src/retired-vocabulary.ts:57`](../packages/session/session-format-catalog/src/retired-vocabulary.ts) · [`packages/session/session-title/src/index.ts:42`](../packages/session/session-title/src/index.ts) · [`packages/session/session-title/src/types.ts:17`](../packages/session/session-title/src/types.ts)
 
 `string`
 

@@ -30,7 +30,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
-import xterm from '@xterm/headless'
+import xterm, { type IBuffer } from '@xterm/headless'
 
 import { COLUMN, MARKER } from '../packages/ui/src/layout.ts'
 import { toolLabel } from '../packages/ui/src/present.ts'
@@ -786,8 +786,82 @@ function same(left: unknown, right: unknown): boolean {
   return Bun.deepEquals(left, right)
 }
 
+/**
+ * Turn colour on for part of a scenario; `NO_COLOR` would erase the escapes a check reads.
+ *
+ * @param env - the run's environment, changed in place.
+ * @param truecolour - also ask for 24-bit colour.
+ * @returns a restore that puts the variables back as they were, idempotent.
+ */
+function forceColour(env: Record<string, string>, truecolour = false): () => void {
+  const saved = { NO_COLOR: env.NO_COLOR, FORCE_COLOR: env.FORCE_COLOR, COLORTERM: env.COLORTERM }
+  delete env.NO_COLOR
+  env.FORCE_COLOR = '3'
+  if (truecolour) env.COLORTERM = 'truecolor'
+  return () => {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete env[key]
+      else env[key] = value
+    }
+  }
+}
+
+/** A headless terminal fed a PTY's output, so a check reads the screen a user sees rather than the stream that drew it. */
+class Screen {
+  readonly terminal = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
+  private consumed = 0
+
+  /** The active buffer: the normal one, or the alternate one while fullscreen holds it. */
+  get buffer(): IBuffer {
+    return this.terminal.buffer.active
+  }
+
+  /**
+   * Write what `raw` holds beyond what was fed before.
+   *
+   * @param raw - the PTY's whole output so far.
+   * @returns whether `raw` held anything new.
+   */
+  async feed(raw: string): Promise<boolean> {
+    const fresh = raw.length !== this.consumed
+    await this.write(raw.slice(this.consumed))
+    this.consumed = raw.length
+    return fresh
+  }
+
+  /** Write text the PTY did not produce, such as a shell's output before the agent starts. */
+  async write(text: string): Promise<void> {
+    await new Promise<void>(resolve => this.terminal.write(text, resolve))
+  }
+
+  /** One row's text, counted from the top of the scrollback. */
+  text(row: number): string {
+    return this.buffer.getLine(row)?.translateToString(true) ?? ''
+  }
+
+  /** The rows in view, top first. */
+  viewport(): string[] {
+    return Array.from({ length: this.terminal.rows }, (_, row) => this.text(this.buffer.viewportY + row))
+  }
+
+  /** Every row, scrollback included. */
+  all(): string[] {
+    return Array.from({ length: this.buffer.length }, (_, row) => this.text(row))
+  }
+
+  resize(cols: number, rows: number): void {
+    this.terminal.resize(cols, rows)
+  }
+
+  dispose(): void {
+    this.terminal.dispose()
+  }
+}
+
 const DONE_LINE = new RegExp(`\\n {${COLUMN.rail}}DONE\\r?\\n`)
 /** The recorded answer to a prompt queued behind `/compact`, and its line in the transcript. */
+/** A foreground colour: basic, bright, 256-colour, or truecolour. NO_COLOR replay emits none. */
+const FOREGROUND = /\x1b\[(?:[39][0-7]|38;(?:5;\d+|2;\d+;\d+;\d+))m/g
 const QUEUED_REPLY = 'QUEUED_AFTER_COMPACTION'
 const QUEUED_LINE = new RegExp(`\\n {${COLUMN.rail}}${QUEUED_REPLY}\\r?\\n`)
 
@@ -850,15 +924,11 @@ scenario('fresh', 'login, model and effort selection, paste, cursor editing, a b
       tty.send('\n', 'Ctrl-J')
       await tty.expect(`  ${SCREEN.caret}`, broken)
       tty.send('draft line two', 'the second line of the draft')
-      const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
-      let consumed = 0
+      const screen = new Screen()
       try {
         await tty.wait('the draft to hold two rows, the caret at the end of the second', async () => {
-          const raw = tty.raw
-          await new Promise<void>(resolve => screen.write(raw.slice(consumed), resolve))
-          consumed = raw.length
-          const buffer = screen.buffer.active
-          const rows = Array.from({ length: screen.rows }, (_, row) => buffer.getLine(buffer.viewportY + row)?.translateToString(true) ?? '')
+          await screen.feed(tty.raw)
+          const rows = screen.viewport()
           const first = rows.findIndex(row => row === '> Draft line one')
           return first >= 0 && rows[first + 1]?.startsWith(`  draft line two${SCREEN.caret}`) === true
         })
@@ -971,24 +1041,18 @@ scenario('terminal-setup', '/terminal-setup in VS Code shows the file and bindin
 
 scenario('status-colour', 'model and context use normal foreground while supporting status fields stay dim', { replayOnly: true },
   async run => {
-    const colour = { NO_COLOR: run.env.NO_COLOR, FORCE_COLOR: run.env.FORCE_COLOR }
-    delete run.env.NO_COLOR
-    run.env.FORCE_COLOR = '3'
+    const restoreColour = forceColour(run.env)
     try {
       await run.terminal('status-colour', [], async tty => {
-        const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
-        let consumed = 0
+        const screen = new Screen()
         try {
           tty.send(`${run.prompt}\r`)
           await tty.follows(SCREEN.idle, SCREEN.toolResult)
           await tty.wait('the complete status row with context and billed tokens', async () => {
-            const raw = tty.raw
-            await new Promise<void>(resolve => screen.write(raw.slice(consumed), resolve))
-            consumed = raw.length
-            const buffer = screen.buffer.active
-            for (let row = buffer.length - 1; row >= 0; row--) {
-              const line = buffer.getLine(row)
-              const text = line?.translateToString(true) ?? ''
+            await screen.feed(tty.raw)
+            for (let row = screen.buffer.length - 1; row >= 0; row--) {
+              const line = screen.buffer.getLine(row)
+              const text = screen.text(row)
               if (!SCREEN.status.test(text) || !text.includes('ctx ~') || !text.includes('in 5.9k')) continue
               // Values in the normal foreground: the model, and a context reading with room to spare.
               for (const field of ['deepseek-v4-flash', '~']) {
@@ -1006,20 +1070,13 @@ scenario('status-colour', 'model and context use normal foreground while support
           screen.resize(60, 40)
           tty.resize(60, 40)
           await tty.wait('a context reading beside the model at 60 columns, with no access mode', async () => {
-            const raw = tty.raw
-            await new Promise<void>(resolve => screen.write(raw.slice(consumed), resolve))
-            consumed = raw.length
-            const line = screen.buffer.active.getLine(screen.buffer.active.viewportY + screen.rows - 2)?.translateToString(true) ?? ''
+            await screen.feed(tty.raw)
+            const line = screen.viewport().at(-2) ?? ''
             return SCREEN.status.test(line) && !line.includes(dictionaries.en.permission) && /ctx ~\d+%/.test(line)
           })
         } finally { screen.dispose() }
       })
-    } finally {
-      for (const [key, value] of Object.entries(colour)) {
-        if (value === undefined) delete run.env[key]
-        else run.env[key] = value
-      }
-    }
+    } finally { restoreColour() }
   })
 
 scenario('git-status', 'the status line names the workspace branch and its changes, and follows them while the terminal runs', { replayOnly: true },
@@ -1044,19 +1101,11 @@ scenario('git-status', 'the status line names the workspace branch and its chang
       await Bun.write(files[0]!, 'two\n')
       await Bun.write(files[1]!, 'new\n')
       await run.terminal('git-status', [], async tty => {
-        const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
-        let consumed = 0
+        const screen = new Screen()
         // The status row as the terminal shows it now, not as the stream wrote it.
         const status = async (): Promise<string> => {
-          const raw = tty.raw
-          await new Promise<void>(resolve => screen.write(raw.slice(consumed), resolve))
-          consumed = raw.length
-          const buffer = screen.buffer.active
-          for (let row = buffer.length - 1; row >= 0; row--) {
-            const text = buffer.getLine(row)?.translateToString(true) ?? ''
-            if (SCREEN.status.test(text)) return text
-          }
-          return ''
+          await screen.feed(tty.raw)
+          return screen.all().findLast(text => SCREEN.status.test(text)) ?? ''
         }
         try {
           // The branch glyph is drawn only where the terminal draws the round frame.
@@ -1085,16 +1134,12 @@ scenario('thinking', 'selected and provider-default thinking levels follow model
   async run => {
     const before = await run.logs()
     await run.terminal('thinking', [], async tty => {
-      const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
-      let consumed = 0
+      const screen = new Screen()
       const footer = async (description: string, accepts: (line: string) => boolean) => {
         await tty.wait(description, async () => {
-          const raw = tty.raw
-          await new Promise<void>(resolve => screen.write(raw.slice(consumed), resolve))
-          consumed = raw.length
-          const buffer = screen.buffer.active
-          return accepts(buffer.getLine(buffer.viewportY + screen.rows - 2)?.translateToString(true) ?? '')
-            && buffer.getLine(buffer.viewportY + screen.rows - 1)?.translateToString(true) === ''
+          await screen.feed(tty.raw)
+          const rows = screen.viewport()
+          return accepts(rows.at(-2) ?? '') && rows.at(-1) === ''
         })
       }
       try {
@@ -1136,17 +1181,13 @@ scenario('permissions', 'workspace-write default, the access mode where a sessio
       readonly set: (mode: string) => Promise<void>
       readonly resize: () => void
     }) => Promise<void>) => {
-      const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
-      let consumed = 0
+      const screen = new Screen()
       const footer = async () => {
         await tty.wait('a one-row footer without the access mode', async () => {
-          const raw = tty.raw
-          await new Promise<void>(resolve => screen.write(raw.slice(consumed), resolve))
-          consumed = raw.length
-          const buffer = screen.buffer.active
-          const line = buffer.getLine(buffer.viewportY + screen.rows - 2)?.translateToString(true) ?? ''
-          return SCREEN.status.test(line) && !line.includes(access)
-            && buffer.getLine(buffer.viewportY + screen.rows - 1)?.translateToString(true) === ''
+          await screen.feed(tty.raw)
+          const rows = screen.viewport()
+          const line = rows.at(-2) ?? ''
+          return SCREEN.status.test(line) && !line.includes(access) && rows.at(-1) === ''
         })
       }
       const opened = async (mode: string, after = 0) => { await tty.expect(`${access} ${mode}`, after); await footer() }
@@ -1252,79 +1293,6 @@ scenario('questions', 'a real ask_user_question tool call offers choices and ret
       'selected and custom answers were not both returned by the tool')
   })
 
-scenario('tasks', 'a real todo_write call folds into one row above the header that opens the full checklist',
-  { replayOnly: true },
-  async run => {
-    const override = join(run.root, 'tasks-replay.json')
-    const args = JSON.stringify({ todos: [
-      { content: 'Read startup', status: 'completed' },
-      { content: 'Thread the home', status: 'in_progress' },
-      { content: 'Test it', status: 'pending' },
-    ] })
-    const call = { type: 'tool-call' as const, id: 'call-todo-1', name: 'todo_write', arguments: args }
-    await Bun.write(override, JSON.stringify([
-      { kind: 'chunks', chunks: [
-        { type: 'block-start', index: 0, blockType: 'tool-call' },
-        { type: 'tool-call-delta', index: 0, id: call.id, name: call.name, argumentsDelta: args },
-        { type: 'block-end', index: 0, block: call },
-        { type: 'finish', reason: { kind: 'tool-calls' } },
-      ] },
-      { kind: 'chunks', chunks: [
-        { type: 'block-start', index: 0, blockType: 'text' },
-        { type: 'text-delta', index: 0, text: 'Planned.' },
-        { type: 'block-end', index: 0, block: { type: 'text', text: 'Planned.' } },
-        { type: 'finish', reason: { kind: 'stop' } },
-      ] },
-    ]))
-    await run.writeOverlay(override)
-    try {
-      await run.terminal('tasks', [], async tty => {
-        tty.send('Plan the work.\r', 'trigger the recorded todo_write call')
-        await tty.follows(SCREEN.idle, 'Planned.')
-        await tty.search(/☐ Tasks 1\/3 {2}━{4}─{8} {2}▸ Thread the home +Ctrl\+T/u)
-        // The row is the whole list's cost: the other tasks get no rows of
-        // their own. The call's card above still lists them in the transcript.
-        const viewport = async (): Promise<string> => {
-          const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
-          try {
-            await new Promise<void>(resolve => screen.write(tty.raw, resolve))
-            return Array.from({ length: 40 }, (_, row) =>
-              screen.buffer.active.getLine(screen.buffer.active.viewportY + row)?.translateToString(true) ?? '').join('\n')
-          } finally { screen.dispose() }
-        }
-        assert(!/^\s*□ Test it/mu.test(await viewport()), 'the task row drew more than the current task')
-        // Up walks back through the one prompt, then selects the row.
-        const walk = tty.mark()
-        tty.send('\x1b[A'.repeat(4), 'walk up through history to the task row')
-        await tty.expect('> Tasks', walk)
-        const opened = tty.mark()
-        tty.send('\r', 'open the full checklist')
-        await tty.expect('1/3 done', '✓ 1 Read startup', '▸ 2 Thread the home', '□ 3 Test it', opened)
-        tty.send('\x1b', 'close the checklist')
-        // A lone Escape decodes only once no sequence follows it.
-        await tty.wait('the checklist to close over the empty draft', async () => {
-          const visible = await viewport()
-          return visible.includes(`${SCREEN.prompt}${SCREEN.caret}`) && !visible.includes('Esc closes')
-        })
-        // Closing replays the history the sheet pushed up back down: the answer
-        // sits over the task row again, not over a block of the sheet's blank rows.
-        const reanchored = async (): Promise<boolean> => {
-          const rows = (await viewport()).split('\n')
-          const answer = rows.findLastIndex(row => row.includes('Planned.'))
-          const task = rows.findLastIndex(row => row.startsWith('☐ Tasks '))
-          return answer >= 0 && task > answer && rows.slice(answer + 1, task).filter(row => row.trim() === '').length <= 1
-        }
-        await tty.wait('the history to come back down against the controls', reanchored)
-        const shortcut = tty.mark()
-        tty.send('\x14', 'open the checklist with Ctrl+T')
-        await tty.expect('1/3 done', shortcut)
-        tty.send('\x1b', 'close it again')
-        await tty.wait('the checklist to close', async () => !(await viewport()).includes('Esc closes'))
-        await tty.wait('the history to come back down after Ctrl+T', reanchored)
-      })
-    } finally { await run.writeOverlay() }
-  })
-
 scenario('edit', 'a recorded edit draws only its changed lines, numbered, with changed words reversed and code highlighted',
   { replayOnly: true },
   async run => {
@@ -1354,9 +1322,7 @@ scenario('edit', 'a recorded edit draws only its changed lines, numbered, with c
     await run.writeOverlay(override)
     // Colour on for this run alone. Reversed words and syntax colour are
     // escape sequences, and `NO_COLOR` erases both.
-    const colour = { NO_COLOR: run.env.NO_COLOR, FORCE_COLOR: run.env.FORCE_COLOR }
-    delete run.env.NO_COLOR
-    run.env.FORCE_COLOR = '3'
+    const restoreColour = forceColour(run.env)
     try {
       await run.terminal('edit', [], async tty => {
         const start = tty.mark()
@@ -1377,10 +1343,7 @@ scenario('edit', 'a recorded edit draws only its changed lines, numbered, with c
         tty.check('the removed line carries syntax colour beside its red', colours.size >= 2)
       })
     } finally {
-      for (const [name, value] of Object.entries(colour)) {
-        if (value === undefined) delete run.env[name]
-        else run.env[name] = value
-      }
+      restoreColour()
       await run.writeOverlay()
     }
     assert(await Bun.file(file).text() === source.replace('const home = process.env.HOME', 'const home = resolvedHome ?? process.env.HOME'),
@@ -1494,11 +1457,8 @@ scenario('tool-colour', 'real read, search, and shell results retain syntax colo
       ] },
     ]))
     const before = await run.logs()
-    const colour = { NO_COLOR: run.env.NO_COLOR, FORCE_COLOR: run.env.FORCE_COLOR, COLORTERM: run.env.COLORTERM }
     await run.writeOverlay(override)
-    delete run.env.NO_COLOR
-    run.env.FORCE_COLOR = '3'
-    run.env.COLORTERM = 'truecolor'
+    const restoreColour = forceColour(run.env, true)
     try {
       await run.terminal('tool-colour', [], async tty => {
         const from = tty.raw.length
@@ -1508,19 +1468,16 @@ scenario('tool-colour', 'real read, search, and shell results retain syntax colo
         tty.check('read and grep source tokens are coloured', /\x1b\[38;[^m]+mcolourValue/.test(raw))
         tty.check('JSON keys are coloured', /\x1b\[38;[^m]+m"tool_colour"/.test(raw))
         tty.check('diagnostic labels use semantic colours', raw.includes('\x1b[38;2;234;179;8mWARN') && raw.includes('\x1b[38;2;34;197;94mPASS'))
-        const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
+        const screen = new Screen()
         try {
-          await new Promise<void>(resolve => screen.write(tty.raw, resolve))
-          const lines = Array.from({ length: screen.buffer.active.length }, (_, row) => screen.buffer.active.getLine(row)?.translateToString(true) ?? '')
+          await screen.feed(tty.raw)
+          const lines = screen.all()
           tty.check('both read and search show the source once', lines.filter(line => line.includes('export const colourValue = "ready"')).length === 2)
           tty.check('JSON remains exact', lines.some(line => line.trim() === json))
         } finally { screen.dispose() }
       })
     } finally {
-      for (const [name, value] of Object.entries(colour)) {
-        if (value === undefined) delete run.env[name]
-        else run.env[name] = value
-      }
+      restoreColour()
       await run.writeOverlay()
     }
     const log = await events(await run.created(before, 'tool colour'))
@@ -1528,7 +1485,7 @@ scenario('tool-colour', 'real read, search, and shell results retain syntax colo
     assert(log.filter(event => event.type === 'tool/result').length === requests.length, 'not every real tool completed')
     await run.terminal('tool-colour-resume', ['--resume', log[0].id], async tty => {
       await tty.expect('TOOL_COLOUR_DONE', 'colourValue', json, 'WARN colours.ts:1', 'PASS syntax checks')
-      const colours = tty.raw.match(/\x1b\[(?:3[0-7]|38;(?:5;\d+|2;\d+;\d+;\d+))m/g) ?? []
+      const colours = tty.raw.match(FOREGROUND) ?? []
       tty.check(`NO_COLOR replay emits no foreground colour (${JSON.stringify([...new Set(colours)])})`, colours.length === 0)
     })
   })
@@ -1576,6 +1533,205 @@ scenario('live-output', 'a slow real shell command shows its output under the ru
     await run.terminal('live-output-resume', ['--resume', log[0].id], async tty => {
       await tty.expect('LIVE_TICK', 'LIVE_END', 'LIVE_OUTPUT_DONE')
     })
+  })
+
+scenario('code-mode', 'real QuickJS scripts show readable input, nested shell activity, results and captured errors in inline and fullscreen, including narrow resize and replay',
+  { replayOnly: true }, async run => {
+    const override = join(run.root, 'code-mode-replay.json')
+    const directories: string[] = []
+    // Each mode forces colour for its own run and restores it before the uncoloured resume.
+    let restoreColour = (): void => {}
+    const script = dictionaries.en.scriptLabel
+    const successHead = `${script}(Gated code)`
+    const errorHead = `${script}(Fail with captured output)`
+    const failureCode = 'console.log(["CODE", "CAPTURED"].join("_"));\nthrow new Error(["CODE", "ERROR"].join("_"));'
+    const modelCall = (id: string, code: string, description: string): object => {
+      const call = { type: 'tool-call', id, name: 'run_code', arguments: JSON.stringify({ code, description }) }
+      return { kind: 'chunks', chunks: [
+        { type: 'block-start', index: 0, blockType: 'tool-call' },
+        { type: 'tool-call-delta', index: 0, id, name: call.name, argumentsDelta: call.arguments },
+        { type: 'block-end', index: 0, block: call },
+        { type: 'finish', reason: { kind: 'tool-calls' } },
+      ] }
+    }
+    try {
+      for (const mode of ['inline', 'fullscreen'] as const) {
+        const directory = mkdtempSync(join(run.workspace, 'code-mode-'))
+        directories.push(directory)
+        const ready = join(directory, 'ready')
+        const release = join(directory, 'release')
+        // Register the watcher before readiness; release closes it before the real shell returns.
+        await Bun.write(join(directory, 'gate.mjs'), `import { existsSync, watch, writeFileSync } from 'node:fs'
+const ready = new URL('./ready', import.meta.url)
+const release = new URL('./release', import.meta.url)
+const released = Promise.withResolvers()
+const watcher = watch(new URL('.', import.meta.url), () => {
+  if (existsSync(release)) released.resolve()
+})
+const closed = new Promise(resolve => watcher.once('close', resolve))
+watcher.once('error', released.reject)
+try {
+  writeFileSync(ready, 'ready')
+  if (existsSync(release)) released.resolve()
+  await released.promise
+} finally {
+  watcher.close()
+  await closed
+}
+console.log(['CODE', 'NESTED', 'OK'].join('_'))
+`)
+        const command = `node ${basename(directory)}/gate.mjs`
+        const successCode = `const nested = await tools.bash({\n  command: ${JSON.stringify(command)},\n  description: "Await code gate",\n  timeoutMs: ${run.options.budget * 1000}\n});\nconsole.log(["CODE", "LOG"].join("_"));\nreturn ["CODE", "VALUE"].join("_");`
+        await Bun.write(override, JSON.stringify([
+          modelCall('code-success', successCode, 'Gated code'),
+          modelCall('code-failure', failureCode, 'Fail with captured output'),
+          { kind: 'chunks', chunks: [
+            { type: 'block-start', index: 0, blockType: 'text' },
+            { type: 'text-delta', index: 0, text: 'CODE_MODE_DONE' },
+            { type: 'block-end', index: 0, block: { type: 'text', text: 'CODE_MODE_DONE' } },
+            { type: 'finish', reason: { kind: 'stop' } },
+          ] },
+        ]))
+        const before = await run.logs()
+        await run.writeOverlay(override)
+        restoreColour = forceColour(run.env, true)
+        const screen = new Screen()
+        let terminal: Terminal | undefined
+        const capture = async (): Promise<string[]> => {
+          await screen.feed(terminal!.raw)
+          return screen.viewport()
+        }
+        const controls = (rows: readonly string[]): boolean => {
+          const status = rows.findLastIndex(row => SCREEN.status.test(row))
+          return status >= 2 && rows[status - 2]!.includes(SCREEN.caret) && (mode !== 'fullscreen' || status === rows.length - 1)
+        }
+        try {
+          await screen.write('shell before Bake\r\n$ ')
+          await run.terminal(`code-mode-${mode}`, ['--preset', 'ptc', '--screen', mode], async tty => {
+            terminal = tty
+            tty.send('Run the code-mode rendering probes.\r')
+            try {
+              await tty.wait('the real nested shell to reach its release barrier', () => existsSync(ready))
+              await tty.wait('the script preview and nested running Bash head', async () => {
+                const rows = await capture()
+                return rows.some(row => row.includes(successHead)) && rows.some(row => row.includes(`Bash(${command})`))
+                  && rows.some(row => row.includes('const nested = await tools.bash({')) && controls(rows)
+              })
+              const rows = await capture()
+              const first = rows.find(row => row.includes('const nested ='))!
+              const argument = rows.find(row => row.includes('command:'))!
+              tty.check('the program keeps its two-space argument indentation', argument.indexOf('command:') === first.indexOf('const nested =') + 2)
+              tty.refuse('the script input is a JSON dump', rows.join('\n').includes('"code":') || rows.join('\n').includes('\\n  command:'))
+              const previewLines = successCode.split('\n').filter(line => rows.some(row => row.includes(line)))
+              tty.check('the script preview stays within four source lines', previewLines.length > 0 && previewLines.length <= 4)
+              tty.refuse('the held program has already returned', tty.text.includes('CODE_VALUE') || tty.text.includes('CODE_NESTED_OK'))
+              await tty.wait('the script await keyword to carry syntax colour', async () => {
+                const visible = await capture()
+                const row = visible.findIndex(line => line.includes('const nested ='))
+                return row >= 0 && Boolean(screen.buffer.getLine(screen.buffer.viewportY + row)?.getCell(visible[row]!.indexOf('await'))?.isFgRGB())
+              })
+              let resized = tty.raw.length
+              screen.resize(40, 24)
+              tty.resize(40, 24)
+              await tty.wait('narrow rendering keeps both running heads and the composer', async () => {
+                const visible = await capture()
+                return tty.raw.length > resized && visible.some(row => row.includes(successHead))
+                  && visible.some(row => row.includes('Bash(')) && controls(visible)
+              })
+              resized = tty.raw.length
+              screen.resize(120, 40)
+              tty.resize(120, 40)
+              await tty.wait('the wide script preview returns after resize', async () => {
+                const visible = await capture()
+                return tty.raw.length > resized && visible.some(row => row.includes('const nested =')) && controls(visible)
+              })
+            } finally {
+              // Failure also releases the child and awaits the whole turn before PTY teardown.
+              await Bun.write(release, 'release')
+              await tty.follows(SCREEN.idle, 'CODE_MODE_DONE')
+            }
+            await tty.wait('finished scripts retain the nested output, value, and captured error', async () => {
+              const shown = (await capture()).join('\n')
+              return ['CODE_NESTED_OK', 'CODE_LOG', 'CODE_VALUE', 'CODE_ERROR', 'Captured output:', 'CODE_CAPTURED', 'CODE_MODE_DONE'].every(value => shown.includes(value))
+            })
+            const lines = screen.all()
+            for (const head of [successHead, errorHead, `Bash(${command})`]) {
+              tty.check(`${head} is committed once`, lines.filter(line => line.includes(head)).length === 1)
+            }
+            tty.check('nested output is committed once', lines.filter(line => line.includes('CODE_NESTED_OK')).length === 1)
+            const errorRow = lines.findIndex(line => line.includes('CODE_ERROR'))
+            const errorCell = screen.buffer.getLine(errorRow)?.getCell(lines[errorRow]!.indexOf('CODE_ERROR'))
+            tty.check('the program error has failure emphasis', Boolean(errorCell?.isFgRGB()) && errorCell?.getFgColor() === Number.parseInt(PALETTE.failed.slice(1), 16))
+            const resized = tty.raw.length
+            screen.resize(40, 12)
+            tty.resize(40, 12)
+            await tty.wait('short narrow rendering keeps the completed response and input', async () => {
+              const visible = await capture()
+              return tty.raw.length > resized && visible.some(row => row.includes('CODE_MODE_DONE')) && controls(visible)
+            })
+          })
+          await capture()
+          if (mode === 'fullscreen') {
+            assert(screen.buffer.type === 'normal', 'code mode did not release the alternate screen')
+            assert(screen.text(0) === 'shell before Bake', 'code mode erased shell history')
+          }
+          const path = await run.created(before, `code-mode ${mode}`)
+          const log = await events(path)
+          const calls = log.filter(event => event.type === 'tool/call')
+          const results = log.filter(event => event.type === 'tool/result').map(event => event.data.message.content[0])
+          const starts = log.filter(event => event.type === 'tool/ptc-dispatch-start')
+          const settled = log.filter(event => event.type === 'tool/ptc-dispatch')
+          assert(calls.length === 2 && calls.every(event => event.data.name === 'run_code'), 'code mode did not execute exactly two real scripts')
+          assert(JSON.parse(calls[0].data.arguments).code === successCode && JSON.parse(calls[1].data.arguments).code === failureCode, 'script preview changed the logged source')
+          assert(results.length === 2 && results[0].isError !== true && results[1].isError === true, 'script results lost their success or failure')
+          assert(JSON.stringify(results[0]).includes('CODE_VALUE') && JSON.stringify(results[1]).includes('CODE_ERROR') && JSON.stringify(results[1]).includes('CODE_CAPTURED'), 'script values or captured output were not retained')
+          assert(starts.length === 1 && settled.length === 1 && starts[0].data.name === 'bash' && settled[0].data.isError === false, 'the real nested shell did not start and settle once')
+          assert(starts[0].data.rootCallId === calls[0].data.callId && starts[0].data.parentCallId === calls[0].data.callId
+            && settled[0].data.subCallId === starts[0].data.subCallId && settled[0].data.rootCallId === starts[0].data.rootCallId
+            && settled[0].data.parentCallId === starts[0].data.parentCallId && same(settled[0].data.arguments, starts[0].data.arguments), 'nested activity lost its parent identity or arguments')
+          assert(JSON.stringify(settled[0].data.content).includes('CODE_NESTED_OK'), 'nested output was not durable')
+          const firstResult = log.find(event => event.type === 'tool/result')!
+          assert(starts[0].seq < settled[0].seq && settled[0].seq < firstResult.seq, 'nested execution escaped its owning script')
+          restoreColour()
+          await run.terminal(`code-mode-${mode}-resume`, ['--resume', log[0].id, '--screen', mode], async tty => {
+            await tty.expect('CODE_MODE_DONE')
+            if (mode === 'fullscreen') {
+              const viewport = async (): Promise<string> => {
+                const replay = new Screen()
+                try {
+                  await replay.feed(tty.raw)
+                  return replay.viewport().join('\n')
+                } finally { replay.dispose() }
+              }
+              // Navigation can be a no-op when all history fits; observe the viewport, not a redraw.
+              tty.send('\x1b[1;5H', 'Ctrl+Home shows the replayed script opening')
+              await tty.wait('the replayed script opening in the fullscreen viewport', async () => {
+                const shown = await viewport()
+                return [successHead, `Bash(${command})`, 'CODE_NESTED_OK', 'CODE_VALUE'].every(value => shown.includes(value))
+              })
+              tty.send('\x1b[1;5F', 'Ctrl+End shows the replayed script error')
+              await tty.wait('the replayed script error in the fullscreen viewport', async () => {
+                const shown = await viewport()
+                return [errorHead, 'CODE_ERROR', 'CODE_CAPTURED', 'CODE_MODE_DONE'].every(value => shown.includes(value))
+              })
+            } else {
+              await tty.expect(successHead, errorHead, `Bash(${command})`, 'CODE_NESTED_OK', 'CODE_VALUE', 'CODE_ERROR', 'CODE_CAPTURED')
+            }
+            tty.check('NO_COLOR script replay emits no foreground colour', tty.raw.match(FOREGROUND) === null)
+          })
+          const resumed = await events(path)
+          for (const type of ['request/header', 'tool/call', 'tool/result', 'tool/ptc-dispatch-start', 'tool/ptc-dispatch']) {
+            assert(same(resumed.filter(event => event.type === type), log.filter(event => event.type === type)), `replaying scripts changed ${type}`)
+          }
+        } finally {
+          screen.dispose()
+        }
+      }
+    } finally {
+      restoreColour()
+      for (const directory of directories) rmSync(directory, { recursive: true, force: true })
+      await run.writeOverlay()
+    }
   })
 
 scenario('background-job', 'a background bash job that settles after the turn wakes the agent with exactly one completion notice',
@@ -1627,20 +1783,14 @@ scenario('arrow-wave', 'the single-line kneading spinner loops in place and yiel
       { type: 'block-end', index: 1, block: { type: 'text', text: 'WAVE_DONE' } },
       { type: 'finish', reason: { kind: 'stop' } },
     ] }]))
-    const colour = { NO_COLOR: run.env.NO_COLOR, FORCE_COLOR: run.env.FORCE_COLOR }
-    delete run.env.NO_COLOR
-    run.env.FORCE_COLOR = '3'
+    const restoreColour = forceColour(run.env)
     try {
       await run.writeOverlay(override, { paceMs: 100 })
       await run.terminal('arrow-wave', [], async tty => {
-        const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
-        let consumed = 0
+        const screen = new Screen()
         const capture = async (): Promise<string[]> => {
-          const raw = tty.raw
-          await new Promise<void>(resolve => screen.write(raw.slice(consumed), resolve))
-          consumed = raw.length
-          return Array.from({ length: screen.rows }, (_, row) =>
-            screen.buffer.active.getLine(screen.buffer.active.viewportY + row)?.translateToString(true) ?? '')
+          await screen.feed(tty.raw)
+          return screen.viewport()
         }
         try {
           const frames = new Set<string>()
@@ -1675,10 +1825,7 @@ scenario('arrow-wave', 'the single-line kneading spinner loops in place and yiel
         } finally { screen.dispose() }
       })
     } finally {
-      for (const [key, value] of Object.entries(colour)) {
-        if (value === undefined) delete run.env[key]
-        else run.env[key] = value
-      }
+      restoreColour()
       await run.writeOverlay()
     }
   })
@@ -1697,14 +1844,11 @@ scenario('fullscreen', 'alternate-screen scrolling, pinned input, resize, replay
     await run.writeOverlay(override, { paceMs: 1 })
     try {
       const drive = async (label: string, resume?: string): Promise<void> => {
-        const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
-        await new Promise<void>(resolve => screen.write('shell before Bake\r\n$ ', resolve))
-        let consumed = 0
+        const screen = new Screen()
+        await screen.write('shell before Bake\r\n$ ')
         const capture = async (raw: string): Promise<string[]> => {
-          await new Promise<void>(resolve => screen.write(raw.slice(consumed), resolve))
-          consumed = raw.length
-          const buffer = screen.buffer.active
-          return Array.from({ length: screen.rows }, (_, row) => buffer.getLine(buffer.viewportY + row)?.translateToString(true) ?? '')
+          await screen.feed(raw)
+          return screen.viewport()
         }
         let tty: Terminal | undefined
         try {
@@ -1716,7 +1860,7 @@ scenario('fullscreen', 'alternate-screen scrolling, pinned input, resize, replay
             }
             await terminal.wait('the fullscreen response and bottom status', async () => {
               const rows = await capture(terminal.raw)
-              return screen.buffer.active.type === 'alternate' && rows.some(line => line.includes('FULLSCREEN_DONE'))
+              return screen.buffer.type === 'alternate' && rows.some(line => line.includes('FULLSCREEN_DONE'))
                 && SCREEN.status.test(rows.at(-1) ?? '')
             })
             terminal.send('\x1b[5~', 'PageUp pauses transcript following')
@@ -1752,9 +1896,9 @@ scenario('fullscreen', 'alternate-screen scrolling, pinned input, resize, replay
             await terminal.wait('the pasted draft stays above status', async () => (await capture(terminal.raw)).at(-3)?.includes('saved draft') === true)
           })
           await capture(tty!.raw)
-          assert(screen.buffer.active.type === 'normal', 'fullscreen did not restore the primary screen')
-          assert(screen.buffer.active.getLine(0)?.translateToString(true) === 'shell before Bake', 'fullscreen erased shell history')
-          assert(screen.buffer.active.cursorY === 1 && screen.buffer.active.cursorX === 2, 'fullscreen moved the saved shell cursor')
+          assert(screen.buffer.type === 'normal', 'fullscreen did not restore the primary screen')
+          assert(screen.text(0) === 'shell before Bake', 'fullscreen erased shell history')
+          assert(screen.buffer.cursorY === 1 && screen.buffer.cursorX === 2, 'fullscreen moved the saved shell cursor')
         } finally { screen.dispose() }
       }
       await drive('fullscreen')
@@ -1787,13 +1931,10 @@ scenario('markdown', 'streamed Markdown keeps semantic colours, formats once, su
     ]
     await Bun.write(override, JSON.stringify([{ kind: 'chunks', chunks }]))
     const before = await run.logs()
-    const colour = { NO_COLOR: run.env.NO_COLOR, FORCE_COLOR: run.env.FORCE_COLOR, COLORTERM: run.env.COLORTERM }
     await run.writeOverlay(override, { paceMs: 15 })
-    delete run.env.NO_COLOR
-    run.env.FORCE_COLOR = '3'
-    run.env.COLORTERM = 'truecolor'
-    const checkScreen = (screen: InstanceType<typeof xterm.Terminal>, coloured = false): void => {
-      const lines = Array.from({ length: screen.buffer.active.length }, (_, row) => screen.buffer.active.getLine(row)?.translateToString(true) ?? '')
+    const restoreColour = forceColour(run.env, true)
+    const checkScreen = (screen: Screen, coloured = false): void => {
+      const lines = screen.all()
       assert(lines.filter(line => line === '  Formatted response').length === 1, 'Markdown heading was lost or printed twice')
       const text = lines.join('\n')
       assert(text.includes('Review the formatter.') && lines.some(line => /Check\s+\u2502\s+State/.test(line))
@@ -1807,24 +1948,19 @@ scenario('markdown', 'streamed Markdown keeps semantic colours, formats once, su
           ['[x]', PALETTE.done], ['Check', PALETTE.reference], ['Wide ', PALETTE.body],
           ['\u2022 [x]', MARKDOWN.bullet], ['src/helper.ts', PALETTE.reference]] as const) {
           const row = lines.findIndex(line => line.includes(needle))
-          const cell = screen.buffer.active.getLine(row)?.getCell(lines[row]!.indexOf(needle))
+          const cell = screen.buffer.getLine(row)?.getCell(lines[row]!.indexOf(needle))
           assert(cell?.isFgRGB() && cell.getFgColor() === Number.parseInt(expected.slice(1), 16), `${needle} lost its semantic colour`)
         }
       }
       const wide = lines.filter(line => line.includes('Wide '))
       assert(wide.length > 0 && text.includes('end.'), 'long response was lost')
-      if (screen.cols >= 120) assert(wide.some(line => line.length > 90), 'wide terminal still caps response at a fixed prose measure')
+      if (screen.terminal.cols >= 120) assert(wide.some(line => line.length > 90), 'wide terminal still caps response at a fixed prose measure')
       else assert(wide.length > 1, 'narrow terminal did not rewrap the response')
     }
     try {
       await run.terminal('markdown', [], async tty => {
-        const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
-        let consumed = 0
-        const capture = async (): Promise<void> => {
-          const raw = tty.raw
-          await new Promise<void>(resolve => screen.write(raw.slice(consumed), resolve))
-          consumed = raw.length
-        }
+        const screen = new Screen()
+        const capture = async (): Promise<void> => { await screen.feed(tty.raw) }
         try {
           tty.send('Show formatted output.\r')
           await tty.follows(SCREEN.idle, 'FORMATTER_DONE')
@@ -1835,33 +1971,27 @@ scenario('markdown', 'streamed Markdown keeps semantic colours, formats once, su
           tty.resize(40, 12)
           await tty.wait('formatted history and composer after resize', async () => {
             await capture()
-            return tty.raw.length > mark && SCREEN.status.test(screen.buffer.active.getLine(screen.buffer.active.viewportY + 10)?.translateToString(true) ?? '')
+            return tty.raw.length > mark && SCREEN.status.test(screen.text(screen.buffer.viewportY + 10))
           })
           checkScreen(screen, true)
         } finally { screen.dispose() }
       })
-      for (const [name, value] of Object.entries(colour)) {
-        if (value === undefined) delete run.env[name]
-        else run.env[name] = value
-      }
+      restoreColour()
       const path = await run.created(before, 'Markdown')
       const log = await events(path)
       const messages = log.filter(event => event.type === 'assistant/message').map(event => event.data.message.content)
       assert(same(messages, [[{ type: 'reasoning', text: reasoning }, { type: 'text', text: answer }]]), 'formatting changed the logged model source')
       await run.terminal('markdown-resume', ['--resume', log[0].id], async tty => {
         await tty.expect('FORMATTER_DONE')
-        assert(!/\x1b\[(?:3[0-7]|38;(?:5;\d+|2;\d+;\d+;\d+))m/.test(tty.raw), 'NO_COLOR Markdown replay emitted foreground colour')
-        const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
+        assert(tty.raw.match(FOREGROUND) === null, 'NO_COLOR Markdown replay emitted foreground colour')
+        const screen = new Screen()
         try {
-          await new Promise<void>(resolve => screen.write(tty.raw, resolve))
+          await screen.feed(tty.raw)
           checkScreen(screen)
         } finally { screen.dispose() }
       })
     } finally {
-      for (const [name, value] of Object.entries(colour)) {
-        if (value === undefined) delete run.env[name]
-        else run.env[name] = value
-      }
+      restoreColour()
       await run.writeOverlay()
     }
   })
@@ -1886,19 +2016,14 @@ scenario('tables', 'streamed tables align columns, wrap styled cells, reflow to 
     await run.writeOverlay(override, { paceMs: 15 })
     const drive = async (label: string, resume?: string): Promise<void> => {
       await run.terminal(label, ['--screen', 'fullscreen', ...resume === undefined ? [] : ['--resume', resume]], async tty => {
-        const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
-        let consumed = 0
+        const screen = new Screen()
         // A slow host delivers one repaint in several reads, and a screen that
         // shows the final rows may still hold rows of the frame it replaces. A
         // wait passes only on a capture that found no output since the last.
         let quiet = false
         const capture = async (): Promise<string[]> => {
-          const raw = tty.raw
-          quiet = raw.length === consumed
-          await new Promise<void>(resolve => screen.write(raw.slice(consumed), resolve))
-          consumed = raw.length
-          const buffer = screen.buffer.active
-          return Array.from({ length: screen.rows }, (_, row) => buffer.getLine(buffer.viewportY + row)?.translateToString(true) ?? '')
+          quiet = !await screen.feed(tty.raw)
+          return screen.viewport()
         }
         const checkContent = (lines: readonly string[]): void => {
           const text = lines.join('\n')
@@ -2252,11 +2377,10 @@ scenario('auto-route', 'real delegated children show their recorded automatic or
           // Read the rendered status row, waiting for it: the sheet's frame can
           // arrive in chunks, and the row comes after the text expected above.
           const statusRow = async (): Promise<string> => {
-            const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
+            const screen = new Screen()
             try {
-              await new Promise<void>(resolve => screen.write(tty.raw, resolve))
-              return Array.from({ length: 40 }, (_, row) => screen.buffer.active.getLine(screen.buffer.active.viewportY + row)?.translateToString(true) ?? '')
-                .findLast(row => row.trim() !== '') ?? ''
+              await screen.feed(tty.raw)
+              return screen.viewport().findLast(row => row.trim() !== '') ?? ''
             } finally { screen.dispose() }
           }
           await tty.wait('the root status row to keep the root model under the sheet', async () => {
@@ -2327,7 +2451,7 @@ scenario('agents', 'the built TUI exposes the Harness subagent catalog through /
   })
 
 scenario('presets', 'minimal and cordis start, answer the recorded turn, and read what their presets mount; minimal gets only '
-  + 'its shell, and its status line and sheet keys work without the task-list unit no preset registered',
+  + 'its shell, and its status line and sheet keys work with no sheet to show',
   { replayOnly: true },
   async run => {
     for (const preset of ['minimal', 'cordis'] as const) {
@@ -2340,7 +2464,6 @@ scenario('presets', 'minimal and cordis start, answer the recorded turn, and rea
         if (preset !== 'minimal') return
         // No sheet has anything to show, so each key leaves the composer in place.
         const keys = tty.mark()
-        tty.send('\x14', 'Ctrl+T')
         tty.send('\x07', 'Ctrl+G')
         tty.send('\x0f', 'Ctrl+O')
         tty.send('still here', 'type after the sheet keys')
@@ -2529,7 +2652,7 @@ scenario('settings-agent', 'Tab moves between /settings sections, subagent model
     }
   })
 
-scenario('inspect-agent', 'show recorded workflow progress, inspect its child, and preserve the parent draft',
+scenario('inspect-agent', 'resume a parent with retired workflow records, inspect its child, and preserve the parent draft',
   { requires: ['fresh'], replayOnly: true },
   async run => {
     const source = await events(run.state.log)
@@ -2537,6 +2660,8 @@ scenario('inspect-agent', 'show recorded workflow progress, inspect its child, a
     const parentPath = join(dirname(dirname(run.state.log)), parentId, basename(run.state.log))
     mkdirSync(dirname(parentPath), { recursive: true })
     const childId = 'tui-inspected-child'
+    // Released logs carry these records; no plugin writes them now, and the
+    // parent must still resume with its child listed.
     const progress = [
       { type: 'tool-workflow/run-start', data: { runId: 'review', name: 'terminal-review' } },
       { type: 'tool-workflow/agent-start', data: { runId: 'review', seq: 1, childId, label: 'Review terminal output', phase: 'Inspect' } },
@@ -2558,11 +2683,10 @@ scenario('inspect-agent', 'show recorded workflow progress, inspect its child, a
     await Bun.write(path, recorded)
     await run.terminal('inspect-agent', ['--resume', parentId], async tty => {
       const viewport = async (): Promise<string> => {
-        const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
+        const screen = new Screen()
         try {
-          await new Promise<void>(resolve => screen.write(tty.raw, resolve))
-          return Array.from({ length: 40 }, (_, row) =>
-            screen.buffer.active.getLine(screen.buffer.active.viewportY + row)?.translateToString(true) ?? '').join('\n')
+          await screen.feed(tty.raw)
+          return screen.viewport().join('\n')
         } finally { screen.dispose() }
       }
       await tty.expect('↳ Subagents 1')
@@ -2570,7 +2694,7 @@ scenario('inspect-agent', 'show recorded workflow progress, inspect its child, a
       await tty.expect('> Subagents 1')
       tty.send('\r', 'open the subagent sheet from the status line')
       await tty.expect('Select a child to view its session', 'Review terminal output')
-      await tty.expect('Workflow terminal-review · Completed · 1/1 done', 'Workflow interrupted-audit · Unfinished', 'Continuable · Inspect')
+      await tty.expect(`Continuable · ${childId}`)
       tty.send('\x1b', 'close the sheet')
       // A lone Escape decodes only once no sequence follows it, and the prompt
       // is drawn under an open sheet too, so typing waits for the sheet to leave
@@ -2594,7 +2718,7 @@ scenario('inspect-agent', 'show recorded workflow progress, inspect its child, a
       await tty.expect(`> Keep this parent draft!${SCREEN.caret}`, start)
     })
     assert(await Bun.file(path).text() === recorded, 'inspection modified the saved child')
-    assert((await Bun.file(parentPath).text()).startsWith(parentRecorded), 'workflow display rewrote recorded history')
+    assert((await Bun.file(parentPath).text()).startsWith(parentRecorded), 'resuming rewrote recorded history')
     const parent = await events(parentPath)
     assert(parent.filter(event => event.type === 'request/header').length === run.state.headers.length,
       'child inspection requested a model response')
@@ -2649,11 +2773,10 @@ scenario('goal-compact', 'the built TUI exposes goal and compact commands and sh
         // The raw stream can end inside a frame: a macOS PTY hands one render
         // over in small reads. The header is checked once the viewport draws it.
         const viewport = async (): Promise<readonly string[]> => {
-          const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
+          const screen = new Screen()
           try {
-            await new Promise<void>(resolve => screen.write(tty.raw, resolve))
-            return Array.from({ length: 40 }, (_, row) =>
-              screen.buffer.active.getLine(screen.buffer.active.viewportY + row)?.translateToString(true) ?? '')
+            await screen.feed(tty.raw)
+            return screen.viewport()
           } finally { screen.dispose() }
         }
         const headed = (lines: readonly string[]): number => {
@@ -2767,11 +2890,10 @@ scenario('compact-history', 'manual compaction works after completed replayed tu
         let visible = ''
         try {
           await tty.wait('the compaction result, the queued turn, and an empty pending panel in the viewport', async () => {
-            const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
+            const screen = new Screen()
             try {
-              await new Promise<void>(resolve => screen.write(tty.raw, resolve))
-              visible = Array.from({ length: 40 }, (_, row) =>
-                screen.buffer.active.getLine(screen.buffer.active.viewportY + row)?.translateToString(true) ?? '').join('\n')
+              await screen.feed(tty.raw)
+              visible = screen.viewport().join('\n')
             } finally { screen.dispose() }
             return visible.includes('Compacted') && visible.includes(QUEUED_REPLY) && !visible.includes(dictionaries.en.pending)
           }, 5)
@@ -2816,14 +2938,10 @@ scenario('thai', 'Thai and Lao grapheme editing, cell widths, resize, and exact 
     await run.writeOverlay(override)
     try {
       await run.terminal('thai', [], async tty => {
-        const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
-        let consumed = 0
+        const screen = new Screen()
         const capture = async (): Promise<string[]> => {
-          const raw = tty.raw
-          await new Promise<void>(resolve => screen.write(raw.slice(consumed), resolve))
-          consumed = raw.length
-          return Array.from({ length: screen.rows }, (_, row) =>
-            screen.buffer.active.getLine(screen.buffer.active.viewportY + row)?.translateToString(true) ?? '')
+          await screen.feed(tty.raw)
+          return screen.viewport()
         }
         try {
           for (const [character, typed] of [['น', 'น'], ['้', 'น้'], ['ำ', 'น้ำ']] as const) {
@@ -2872,15 +2990,12 @@ scenario('thai', 'Thai and Lao grapheme editing, cell widths, resize, and exact 
 scenario('rendering', 'preserved scrollback after resize and a visible caret in short terminals and wrapped drafts', { requires: ['fresh'], replayOnly: true },
   async run => {
     await run.terminal('rendering', ['--resume', run.state.id], async tty => {
-      const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
-      let consumed = 0
+      const screen = new Screen()
       const capture = async (): Promise<string[]> => {
-        const raw = tty.raw
-        await new Promise<void>(resolve => screen.write(raw.slice(consumed), resolve))
-        consumed = raw.length
-        return Array.from({ length: screen.buffer.active.length }, (_, row) => screen.buffer.active.getLine(row)?.translateToString(true) ?? '')
+        await screen.feed(tty.raw)
+        return screen.all()
       }
-      const shown = async (): Promise<string> => (await capture()).slice(screen.buffer.active.viewportY).join('\n')
+      const shown = async (): Promise<string> => (await capture()).slice(screen.buffer.viewportY).join('\n')
       const resize = async (columns: number, rows: number): Promise<number> => {
         await capture()
         const mark = tty.raw.length
@@ -3137,13 +3252,11 @@ scenario('session-in-use', 'a session another Bake process has open: --resume ex
         const again = tty.mark()
         tty.send('/resume\r', 'reopen the session picker')
         await tty.wait('this terminal\'s own session marked current', async () => {
-          const screen = new xterm.Terminal({ cols: 120, rows: 40, convertEol: true, allowProposedApi: true })
+          const screen = new Screen()
           try {
-            await new Promise<void>(resolve => screen.write(tty.raw, resolve))
-            const buffer = screen.buffer.active
-            return tty.text.slice(again).includes(copy.chooseSession) && Array.from({ length: screen.rows }, (_, row) =>
-              buffer.getLine(buffer.viewportY + row)?.translateToString(true) ?? '')
-              .some(row => row.includes(short(own)) && row.includes(copy.currentSelection))
+            await screen.feed(tty.raw)
+            return tty.text.slice(again).includes(copy.chooseSession)
+              && screen.viewport().some(row => row.includes(short(own)) && row.includes(copy.currentSelection))
           } finally { screen.dispose() }
         })
         tty.send('\x1b', 'close the picker')

@@ -3,7 +3,7 @@
 Bake is a keyboard-driven coding agent for the terminal. It streams the model's answer as it arrives, runs shell and file tools inside a sandbox, and saves every session as an append-only log you can resume.
 
 - **Slash commands** for models, sign-in, sessions, goals, plan mode, compaction, and permissions, with argument completion.
-- **Long-running work**: goals that continue across rounds, a task list, subagents, and parallel workflows.
+- **Long-running work**: goals that continue across rounds, a task list, and subagents.
 - **Sandboxed tools**: bash or PowerShell, file reads and edits, search, and web fetch, each gated by a permission preset.
 - **Sessions you keep**: resume by id or pick from a list; context is compacted when it fills up.
 - **Skills and attachments**: invoke project or user skills as `/name`, and attach images and files to a prompt.

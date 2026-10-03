@@ -21,7 +21,7 @@
  * @module @deepseek-ai/dsh-subagent/descriptor
  */
 
-import { snapshotJsonValue } from '@deepseek-ai/dsh-util-values'
+import { isRecord, snapshotJsonValue } from '@deepseek-ai/dsh-util-values'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { ToolRestriction } from '@deepseek-ai/dsh-tools'
@@ -143,11 +143,6 @@ const CONTINUABLE_DESCRIPTOR_KEYS = new Set([
   'toolFilter',
 ])
 const TOOL_FILTER_KEYS = new Set(['allow', 'deny'])
-
-/** Whether a persisted JSON value is an object record. */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
 
 /** Reject fields outside one versioned record's declared schema. */
 function assertKnownKeys(value: Record<string, unknown>, keys: ReadonlySet<string>, path: string): void {

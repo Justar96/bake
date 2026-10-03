@@ -21,7 +21,7 @@ function props(overrides: Partial<AppProps> = {}): AppProps {
     files: { query: undefined, entries: [], loading: false, error: undefined }, onReferenceQuery: () => {},
     completion: { entries: [], loading: false, error: undefined }, completionLimit: 8, resultLines: 8,
     committed: emptyTranscript, live: [], pending: [], status: 'idle', stopping: false,
-    command: undefined, notice: undefined, interaction: undefined, todos: undefined,
+    command: undefined, notice: undefined, interaction: undefined,
     model: 'mock/model', cwd: '/workspace', sessionId: 'session-live', copy: dictionaries.en, frame: 'round', quitting: false, context: undefined,
     onSubmit: vi.fn(), onCancel: vi.fn(), onInterrupt: vi.fn(), onAnswer: vi.fn(), ...overrides,
   }
@@ -149,14 +149,13 @@ describe('live region', () => {
   it('keeps the chrome on screen with every region loaded at once', () => {
     // Each region bounded against the whole dynamic region is not enough. Three
     // of them at their own limit overrun it together. This is the case that
-    // catches that — queued input, staged attachments, a task list, a notice
-    // and a running turn, each longer than the terminal on its own.
+    // catches that — queued input, staged attachments, a notice and a running
+    // turn, each longer than the terminal on its own.
     const many = (prefix: string, count: number) =>
       Array.from({ length: count }, (_, index) => `${prefix} ${index}`)
     const ui = render(<App {...props({
       status: 'running',
       live: streamed(60),
-      todos: many('task', 60).map(text => ({ text, status: 'pending' as const })),
       pending: many('queued', 60).map((text, index) => ({ id: `p${index}`, target: 'next-turn' as const, text })),
       attachments: many('file', 60).map(name => ({ name, bytes: 4 })),
       command: 'x'.repeat(4000),

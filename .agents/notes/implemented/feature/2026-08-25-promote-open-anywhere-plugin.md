@@ -32,7 +32,7 @@ The pair lives in `packages/host/` and `packages/client/` because that is what t
 
 **Vendor the plugin's `lib/` as-is under `packages/`.** Fastest, but the hand-authored JavaScript fails typecheck, coverage, i18n, JSDoc, and invariant gates wholesale; keeping it exempt would create a package class the repository deliberately does not have.
 
-**A Typert Remote instead of raw webServer routes.** The apps/open calls fit the Remote RPC shape, but the icon route serves binary PNGs, which the JSON RPC vocabulary does not carry; splitting icons onto a raw route while apps/open ride Remote gives two transports for one feature. Raw routes also match the original's client, and `webhook-github` establishes the validated-raw-route pattern.
+**A Typert Remote instead of raw webServer routes.** The apps/open calls fit the Remote RPC shape, but the icon route serves binary PNGs, which the JSON RPC vocabulary does not carry; splitting icons onto a raw route while apps/open ride Remote gives two transports for one feature. Raw routes also match the original's client, and `webhook-github`, since removed, established the validated-raw-route pattern.
 
 **Extend `host/apiproxy`'s `openPath` instead of a new open endpoint.** `openPath` opens one path with the OS-default application; this feature's subject is *which* application, with availability probing and per-application launchers — a different contract. Both share `dsh-native-command`.
 

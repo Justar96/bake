@@ -70,7 +70,7 @@ describe('a child agent composed in-process', () => {
   it('reaches the model with its parent\'s preset tools', async () => {
     const { ctx, adapter, parent } = await setupPresetHost()
 
-    const run = await startInProcessRun(spawnRequest(parent), {})
+    const run = await startInProcessRun(spawnRequest(parent))
     await run.result
 
     const childRequest = adapter.requests.at(-1)
@@ -82,7 +82,7 @@ describe('a child agent composed in-process', () => {
   it('carries its parent\'s prompt sections', async () => {
     const { parent } = await setupPresetHost()
 
-    const run = await startInProcessRun(spawnRequest(parent), {})
+    const run = await startInProcessRun(spawnRequest(parent))
     await run.result
 
     expect(run.localAgent?.session.snapshotEvents().some(event =>
@@ -94,7 +94,7 @@ describe('a child agent composed in-process', () => {
   it('records the composition it ran under on the child header', async () => {
     const { parent } = await setupPresetHost()
 
-    const run = await startInProcessRun(spawnRequest(parent), {})
+    const run = await startInProcessRun(spawnRequest(parent))
     await run.result
 
     // Without this the child's own history reads back under the deployment
@@ -106,10 +106,7 @@ describe('a child agent composed in-process', () => {
   it('honours a tool filter over the preset tools it inherited', async () => {
     const { ctx, parent } = await setupPresetHost()
 
-    const run = await startInProcessRun(
-      { ...spawnRequest(parent), toolFilter: { deny: ['preset_only'] } },
-      {},
-    )
+    const run = await startInProcessRun({ ...spawnRequest(parent), toolFilter: { deny: ['preset_only'] } })
     await run.result
 
     // The capability filter is the only thing bounding a delegated child, and
@@ -125,7 +122,7 @@ describe('a child agent composed in-process', () => {
     // to the same id would pass either way.
     await ctx.agentPresets.recompose(parent.ctx, 'reviewing')
 
-    const run = await startInProcessRun(spawnRequest(parent), {})
+    const run = await startInProcessRun(spawnRequest(parent))
     await run.result
 
     expect(ctx.tools.schemas(run.localAgent).map(schema => schema.name)).toEqual(['reviewing_only'])

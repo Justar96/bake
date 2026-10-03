@@ -15,7 +15,7 @@ function props(overrides: Partial<AppProps> = {}): AppProps {
     files: { query: undefined, entries: [], loading: false, error: undefined }, onReferenceQuery: () => {},
     completion: { entries: [], loading: false, error: undefined }, completionLimit: 8, resultLines: 8,
     committed: emptyTranscript, live: [], pending: [], status: 'idle', stopping: false,
-    command: undefined, notice: undefined, interaction: undefined, todos: undefined,
+    command: undefined, notice: undefined, interaction: undefined,
     model: 'mock/model', cwd: '/workspace', sessionId: 'session-test', copy: dictionaries.en, frame: 'round', quitting: false, context: undefined,
     onSubmit: vi.fn(), onCancel: vi.fn(), onInterrupt: vi.fn(), onAnswer: vi.fn(), ...overrides,
   }

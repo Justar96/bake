@@ -23,7 +23,6 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import * as Spawn from '@deepseek-ai/dsh-subagent-spawn-in-process'
-import * as Fork from '@deepseek-ai/dsh-subagent-fork-in-process'
 import * as ToolSubagent from '../src/index.ts'
 import SubagentModelSelection from '../src/model-selection-settings.ts'
 import { MockAdapter, textResponse, toolCallResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
@@ -69,7 +68,7 @@ async function localRouter(reply: (response: ServerResponse) => void) {
 }
 
 /** The YAML mounts every shipping runtime component; only model and HTTP answers are scripted. */
-async function load(url: string, cancel = false, provider: 'spawn' | 'fork' = 'spawn') {
+async function load(url: string, cancel = false) {
   directory = await mkdtemp(join(tmpdir(), 'bake-routing-loader-'))
   const path = join(directory, 'cordis.yml')
   const modules = new Map<string, unknown>([
@@ -82,12 +81,11 @@ async function load(url: string, cancel = false, provider: 'spawn' | 'fork' = 's
     ['@deepseek-ai/dsh-agent-loop', AgentLoop],
     ['@deepseek-ai/dsh-subagent', SubagentRuntime],
     ['@deepseek-ai/dsh-subagent-spawn-in-process', Spawn],
-    ['@deepseek-ai/dsh-subagent-fork-in-process', Fork],
     ['@deepseek-ai/dsh-tool-subagent/model-selection-settings', SubagentModelSelection],
     ['@deepseek-ai/dsh-tool-subagent', ToolSubagent],
   ])
   const entries = [...modules.keys()].map(name => ({ name, ...name === '@deepseek-ai/dsh-tool-subagent' ? {
-    config: { provider, modelSelectionSettings: true, enableRunInBackground: false },
+    config: { provider: 'spawn', modelSelectionSettings: true, enableRunInBackground: false },
   } : name === '@deepseek-ai/dsh-tool-subagent/model-selection-settings' ? {
     config: { enabled: true, allowedModels: ALLOWED, router: { enabled: true, url, timeoutMs: 5000 } },
   } : name === '@deepseek-ai/dsh-agent-loop' ? { config: { agents: [] } } : {} }))
@@ -112,7 +110,6 @@ async function load(url: string, cancel = false, provider: 'spawn' | 'fork' = 's
   expect([...loader.entries()].filter(entry => entry.fiber === undefined && !entry.disabled)
     .map(entry => entry.options.name)).toEqual([])
   const adapter = new MockAdapter([
-    ...provider === 'fork' ? [textResponse('WARMUP_OK')] : [],
     toolCallResponse('route-call', 'subagent', { description: 'Check routing', prompt: 'Return CHILD_OK.' }),
     ...cancel ? [] : [textResponse('CHILD_OK'), textResponse('PARENT_OK')],
   ], REASONING)
@@ -195,27 +192,4 @@ describe('automatic routing through a real Loader composition', () => {
       router: { fallback: true, reason: 'Router unavailable; default route retained.' } })
   })
 
-  it('a fork records its selected route instead of the parent request header in its seed', async () => {
-    const router = await localRouter((response) => {
-      response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(ANSWER))
-    })
-    const { parent, adapter, children } = await load(router.url, false, 'fork')
-    parent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Warm up first.' }] }))
-    await parent.whenIdle()
-    expect(parent.session.requestHeader()?.config.model).toBe('parent')
-    begin(parent)
-    await parent.whenIdle()
-    expect(children).toHaveLength(1)
-    const child = children[0]
-    if (child === undefined) throw new Error('fork did not admit its child')
-    expect(child.session.header.isSeeded).toBe(true)
-    const requests = child.session.snapshotEvents().filter(event => event.type === 'request/header')
-    expect(requests[0]?.data.header.config.model).toBe('parent')
-    expect(adapter.requests[2]).toMatchObject({ provider: 'route-test', model: 'selected', reasoningEffort: 'high' })
-    const decisions = parent.session.snapshotEvents().filter(event => event.type === 'subagent/routing-decision')
-    expect(decisions).toHaveLength(1)
-    expect(decisions[0]?.data).toMatchObject({ childId: child.id, source: 'auto',
-      route: { provider: 'route-test', model: 'selected', reasoningEffort: 'high' } })
-    expect(parent.session.deriveMessages().at(-1)?.content).toEqual([{ type: 'text', text: 'PARENT_OK' }])
-  })
 })

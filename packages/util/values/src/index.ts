@@ -14,8 +14,53 @@ export function assertNever(value: never, context?: string): never {
   throw new Error(`unreachable variant${context ? ` in ${context}` : ''}: ${rendered}`)
 }
 
-/** Whether a realm-owned intrinsic prototype is backed by its native constructor. */
-function hasIntrinsicConstructor(prototype: object, name: 'Array' | 'Object'): boolean {
+/**
+ * Test whether a value is a non-null, non-array object, such as a decoded JSON record.
+ * The check is structural only: class instances and exotic objects also pass.
+ * @param value - candidate value.
+ * @returns Whether the value can be read as a string-keyed record.
+ */
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/**
+ * Render a thrown value for a diagnostic: an `Error`'s message, otherwise its string coercion.
+ * @param error - caught value of any type.
+ * @returns The message text; string coercion of a hostile value can still throw.
+ */
+export function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+/**
+ * Reject a configured count, limit, or duration that is not a positive integer.
+ * @param name - label that prefixes the failure message, such as `tool-web: fetchTimeoutMs`.
+ * @param value - configured number.
+ * @returns Nothing; throws `Error("<name> must be a positive integer")` otherwise.
+ */
+export function assertPositiveInteger(name: string, value: number): void {
+  if (!Number.isInteger(value) || value < 1) {
+    throw new Error(`${name} must be a positive integer`)
+  }
+}
+
+/**
+ * Test whether a filesystem failure means absence; every other failure should surface.
+ * @param error - caught value, usually a Node `ErrnoException`.
+ * @returns Whether its `code` is `ENOENT`.
+ */
+export function isENOENT(error: unknown): boolean {
+  return (error as { code?: unknown } | null | undefined)?.code === 'ENOENT'
+}
+
+/**
+ * Test whether a realm-owned intrinsic prototype is backed by its native constructor.
+ * @param prototype - candidate `Array.prototype` or `Object.prototype` from any realm.
+ * @param name - the intrinsic constructor name the prototype must carry.
+ * @returns Whether the prototype's own `constructor` is that realm's native intrinsic.
+ */
+export function hasIntrinsicConstructor(prototype: object, name: 'Array' | 'Object'): boolean {
   const descriptor = Object.getOwnPropertyDescriptor(prototype, 'constructor')
   const constructor: unknown = descriptor?.value
   if (typeof constructor !== 'function') return false
@@ -28,13 +73,21 @@ function hasIntrinsicConstructor(prototype: object, name: 'Array' | 'Object'): b
   }
 }
 
-/** Whether a candidate is one realm's intrinsic `Object.prototype`. */
-function isIntrinsicObjectPrototype(value: object): boolean {
+/**
+ * Test whether a candidate is one realm's intrinsic `Object.prototype`.
+ * @param value - candidate prototype from any realm.
+ * @returns Whether the value ends the prototype chain and carries the native `Object` constructor.
+ */
+export function isIntrinsicObjectPrototype(value: object): boolean {
   return Object.getPrototypeOf(value) === null && hasIntrinsicConstructor(value, 'Object')
 }
 
-/** Whether an array uses one realm's intrinsic `Array.prototype`, not a subclass or forged prototype. */
-function hasPlainArrayPrototype(value: unknown[]): boolean {
+/**
+ * Test whether an array uses one realm's intrinsic `Array.prototype`, not a subclass or forged prototype.
+ * @param value - array from any realm.
+ * @returns Whether its prototype chain is exactly that realm's `Array.prototype` then `Object.prototype`.
+ */
+export function hasPlainArrayPrototype(value: unknown[]): boolean {
   const prototype: unknown = Object.getPrototypeOf(value)
   if (!Array.isArray(prototype) || !hasIntrinsicConstructor(prototype, 'Array')) return false
   const objectPrototype: unknown = Object.getPrototypeOf(prototype)

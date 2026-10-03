@@ -17,15 +17,15 @@ export const TIER_PRESET: Readonly<Record<PermissionTier, string>> = {
 
 /** Tools that only read the workspace, the web, or the agent's own state. */
 const READ_TOOLS = new Set([
-  'read', 'glob', 'grep', 'read_image', 'web_fetch', 'web_search', 'todo_write',
-  'list_agents', 'list_subagent_models', 'skill', 'ask_user_question', 'tool_help',
+  'read', 'glob', 'grep', 'read_image', 'web_fetch', 'web_search',
+  'list_agents', 'list_subagent_models', 'skill', 'ask_user_question',
 ])
 
 /** Workspace file writes; the sandbox still asks before a write outside the workspace. */
 const WRITE_TOOLS = new Set(['write', 'edit'])
 
 /** Sub-agent orchestration; children run under their parent's sandbox. */
-const AGENT_TOOLS = new Set(['subagent', 'subagent_fork', 'send_message', 'interrupt_agent'])
+const AGENT_TOOLS = new Set(['subagent', 'send_message', 'interrupt_agent'])
 
 /** Shell tools, whose effect depends on the command. */
 const SHELL_TOOLS = new Set(['bash', 'pwsh'])

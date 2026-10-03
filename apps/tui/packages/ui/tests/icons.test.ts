@@ -20,17 +20,15 @@ describe('ICON', () => {
 })
 
 describe('iconFor', () => {
-  test('gives skills, subagents, messages to them, and the task list their own shape', () => {
+  test('gives skills, subagents, and messages to them their own shape', () => {
     expect(iconFor('skill')).toBe(ICON.skill)
     expect(iconFor('subagent')).toBe(ICON.spawn)
-    expect(iconFor('subagent_fork')).toBe(ICON.spawn)
     expect(iconFor('send_message')).toBe(ICON.send)
-    expect(iconFor('todo_write')).toBe(ICON.todo)
   })
 
   test('keeps the plain dot for every other tool Bake registers', () => {
     for (const tool of ['bash', 'pwsh', 'read', 'edit', 'write', 'grep', 'glob', 'web_fetch', 'web_search', 'job_output',
-      'job_kill', 'interrupt_agent', 'list_agents', 'workflow', 'ask_user_question', 'get_goal', 'present']) {
+      'job_kill', 'interrupt_agent', 'list_agents', 'ask_user_question', 'get_goal']) {
       expect(iconFor(tool)).toBe(MARKER.action)
     }
   })

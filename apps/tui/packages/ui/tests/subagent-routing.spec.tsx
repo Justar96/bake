@@ -57,7 +57,7 @@ it.each(['en'] as const)('shows recorded provenance, effective route, and eviden
   expect(lines.find(line => line.parts?.[0]?.text === 'Older child')?.parts).toHaveLength(2)
   const frame = renderToString(<Sheet tabs={[{ label: copy.subagentsTitle, color: PALETTE.asking, current: true }]}
     color={PALETTE.asking} lines={lines} keys={copy.subagentsOpen} columns={80} limit={24} offset={0}
-    follow={subagentLine(1, 0, entries[1]!.routing)} frame="round" />, { columns: 80 })
+    follow={subagentLine(1, entries[1]!.routing)} frame="round" />, { columns: 80 })
   await expect(frame + '\n').toMatchFileSnapshot(`./expected/subagent-routing.${locale}.txt`)
 })
 
@@ -91,7 +91,7 @@ it.each([40, 80])('wraps the selected route and explanation within %i columns', 
   const lines = subagentSheet(entries, 2, dictionaries.en)
   const frame = renderToString(<Sheet tabs={[{ label: 'Subagents', color: PALETTE.asking, current: true }]}
     color={PALETTE.asking} lines={lines} keys="Enter opens" columns={columns} limit={24} offset={0}
-    follow={subagentLine(2, 0, entries[2]!.routing)} frame="round" />, { columns })
+    follow={subagentLine(2, entries[2]!.routing)} frame="round" />, { columns })
   for (const line of frame.split('\n')) expect(stringWidth(line)).toBeLessThanOrEqual(columns)
   expect(frame).toContain('Difficulty 0.20')
   expect(frame).toContain('Objective needs earlier context.')
@@ -103,7 +103,7 @@ it('keeps the selected child and all of its logical details in the followed rang
   const entries = children()
   for (const [index, entry] of entries.entries()) {
     const lines = subagentSheet(entries, index, dictionaries.en)
-    const [first, last] = subagentLine(index, 0, entry.routing)
+    const [first, last] = subagentLine(index, entry.routing)
     expect(lines[first]?.selected).toBe(true)
     expect(lines[last]?.selected).toBe(false)
     expect(lines[last + 1]?.parts?.[0]?.text).toBe(entries[index + 1]?.label)
@@ -118,7 +118,7 @@ it('leaves long routing evidence reachable when the sheet is shorter than the se
   const sheet = (offset: number, follow?: readonly [number, number]) => renderToString(
     <Sheet tabs={[{ label: 'Subagents', color: PALETTE.asking, current: true }]} color={PALETTE.asking}
       lines={lines} keys="PgDn more" columns={40} limit={10} offset={offset} follow={follow} frame="round" />, { columns: 40 })
-  expect(sheet(0, subagentLine(0, 0, routing))).toContain('Review  Working · Auto')
+  expect(sheet(0, subagentLine(0, routing))).toContain('Review  Working · Auto')
   expect(sheet(1000)).toContain('tail.')
   expect(sheet(1000)).toContain('limited benchmark support')
 })
@@ -141,7 +141,7 @@ function appProps(): AppProps {
     files: { query: undefined, entries: [], loading: false, error: undefined }, onReferenceQuery: () => {},
     completion: { entries: [], loading: false, error: undefined }, completionLimit: 8, resultLines: 8,
     committed: emptyTranscript, live: [], pending: [], status: 'idle', stopping: false,
-    command: undefined, notice: undefined, interaction: undefined, todos: undefined,
+    command: undefined, notice: undefined, interaction: undefined,
     model: 'deepseek-official/deepseek-v4-flash', cwd: '/workspace', sessionId: 'parent', copy: dictionaries.en,
     frame: 'round', quitting: false, context: undefined, subagents: children(),
     onSubmit: vi.fn(), onCancel: vi.fn(), onInterrupt: vi.fn(), onAnswer: vi.fn(),

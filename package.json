@@ -1,6 +1,6 @@
 {
   "name": "bake",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "A terminal coding agent built on Cordis and the DeepSeek Harness runtime",
   "license": "MIT",
   "private": true,
@@ -75,6 +75,7 @@
     "test": "bun apps/tui/scripts/tui.ts check unit spec",
     "test:runtime": "node node_modules/vitest/vitest.mjs run",
     "test:e2e": "bun apps/tui/scripts/tui.ts e2e",
+    "test:integration": "node node_modules/vitest/vitest.mjs run --config vitest.e2e.config.ts",
     "verify": "bun scripts/preflight.ts --full",
     "release:pack": "bun scripts/release/pack.ts",
     "release:assemble": "bun scripts/release/assemble.ts",
@@ -91,7 +92,6 @@
     "verify-workspace": "bun scripts/gen-workspace.ts --check",
     "gen-tsconfig-paths": "bun scripts/gen-tsconfig-paths.ts",
     "verify-tsconfig-paths": "bun scripts/gen-tsconfig-paths.ts --check",
-    "gen-workflow-guest": "bun scripts/gen-workflow-guest.ts",
     "gen-session-format-catalog": "bun scripts/gen-session-format-catalog.ts",
     "gen-persistence-catalog": "bun scripts/gen-persistence-catalog.ts",
     "verify-persistence-catalog": "bun scripts/gen-persistence-catalog.ts --check",

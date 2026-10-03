@@ -41,7 +41,7 @@ Mount the hub whenever any package in the composition persists data that is not 
     backend: json
 ```
 
-With these rows, the `json` backend registers itself and the `domain` data form mounts; a consumer such as `dsh-workspace` then opens its domain over the routed backend and reads and writes records through `ctx.storageDomain`. Several backends can stay mounted side by side; which backend serves which domain is the domain form's configuration, never a hub-wide choice.
+With these rows, the `json` backend registers itself and the `domain` data form mounts; a consumer such as `dsh-session-projection-cache` then opens its domain over the routed backend and reads and writes records through `ctx.storageDomain`. Several backends can stay mounted side by side; which backend serves which domain is the domain form's configuration, never a hub-wide choice.
 
 ### What you get
 

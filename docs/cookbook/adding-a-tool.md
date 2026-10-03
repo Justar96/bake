@@ -88,11 +88,9 @@ Hard rules (they bite if broken):
 
 The neutral vocabulary lives in `dsh-tools`; tools never import a UI or transport type. Consumers of this API map each `card` into their own view. The design and the why are in [the render-intent-union Agent Note](../../.agents/notes/implemented/architecture/2026-07-02-tool-render-intent-union.md); `dsh-tool-fs` (generic/diff) and `dsh-tool-bash` (terminal) are the reference implementations.
 
-## Web Client presentation
+## Terminal presentation
 
-The built-in Web Client does not consume `presentCall` or `presentResult`. Session `page` and `follow` transport raw `tool/call` and `tool/result` events, including persisted `result.meta`. A Client plugin registers its wire tool name in the `tool.call.toolview` keyed slot and derives component props from the `ToolCallBlock` arguments, content, error, metadata, existing PTC dispatch `parentCallId`, and Session path facts. It validates these wire values locally and returns the generic row for malformed or unsupported input.
-
-Use `output.presentationMeta(args, value)` when an existing Web card needs bounded structured result facts that model-facing content cannot preserve losslessly. Do not store React props or a selected card in metadata, import a Host tool implementation into a browser bundle, or create another Client presenter registry. Defining Host presentation methods alone does not add a specialized Web card. The Client-derived presentation Agent Note defines ownership, fallback, and equivalence requirements.
+The terminal app consumes `presentCall` and `presentResult` in [`apps/tui/packages/ui/src/cards.ts`](../../apps/tui/packages/ui/src/cards.ts). It looks up the recorded tool name, maps each `card` it understands to display lines, and falls back to the raw arguments and result text for a tool with no presenter, a tool the registry no longer knows, or an unrecognized card. Presenters must derive everything from `args` and the durable result, so a replayed session renders the same card.
 
 ## Verification
 

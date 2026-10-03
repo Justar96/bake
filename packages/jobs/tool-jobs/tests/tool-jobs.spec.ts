@@ -180,26 +180,19 @@ describe('tool-jobs setup', () => {
         .map(([key, value]) => [key, value.description]),
     )
     expect(schemas.get('job_output')?.description).toBe(
-      'Read a background job\'s output. You receive a notice when a job finishes, so there is '
-      + 'no need to poll or sleep while it runs. Jobs that stream output return what is new since your '
-      + 'last read; other jobs return their result once they finish. Every reply ends with '
-      + '`[status: ...]`. Returns immediately unless `wait: true`.',
+      'Read a background job\'s new output since your last read, or its result once done; ends with '
+      + '`[status: ...]`. You are notified when it finishes; do not poll or sleep.',
     )
     expect(parameterDescriptions('job_output')).toEqual({
-      job_id: 'The background job id from a start result or job_list. A continuable subagent id is an agent id, not a job id.',
-      wait: 'Wait until the job finishes or the timeout passes, for when you cannot continue without the result. '
-        + 'A timed-out wait returns `[status: running]` and leaves the job running.',
-      timeout_ms: 'Maximum wait in milliseconds when wait is true (default 5000, at most 60000).',
+      job_id: 'A job id, not a continuable subagent\'s agent id.',
+      wait: 'Block until done or timeout; only if you cannot continue without it.',
+      timeout_ms: 'Default 5000, max 60000.',
     })
-    expect(schemas.get('job_list')?.description)
-      .toBe('List your background jobs, running and finished, with their ids, kinds, statuses, and labels.')
-    expect(schemas.get('job_kill')?.description).toBe(
-      'Stop a running background job. Jobs otherwise keep running after your turn ends, until '
-      + 'they finish. Returns immediately; the job\'s status becomes `killed` once its work has stopped.',
-    )
+    expect(schemas.get('job_list')?.description).toBe('List your background jobs, running and finished.')
+    expect(schemas.get('job_kill')?.description).toBe('Stop a background job (jobs outlive your turn).')
     expect(parameterDescriptions('job_kill')).toEqual({
-      job_id: 'The background job id from a start result or job_list. A continuable subagent id is an agent id, not a job id.',
-      reason: 'Optional short reason for stopping the job.',
+      job_id: 'A job id, not a continuable subagent\'s agent id.',
+      reason: undefined,
     })
   })
 
@@ -220,7 +213,7 @@ describe('tool-jobs setup', () => {
     expect(ctx.tools.get('job_output')).toBeDefined()
     const outputParameters = ctx.tools.schemas().find(schema => schema.name === 'job_output')?.parameters['properties']
     expect((outputParameters as Record<string, { description?: string }>)['timeout_ms']?.description)
-      .toBe('Maximum wait in milliseconds when wait is true (default 30000, at most 600000).')
+      .toBe('Default 30000, max 600000.')
     expect(() => ctx.jobs.start(producer().spec)).not.toThrow()
   })
 })

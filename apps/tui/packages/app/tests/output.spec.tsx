@@ -53,7 +53,7 @@ async function turn(wrapped: boolean): Promise<{ readonly deficit: number, reado
     files: { query: undefined, entries: [], loading: false, error: undefined }, onReferenceQuery: () => {},
     completion: { entries: [], loading: false, error: undefined }, completionLimit: 8, resultLines: 4,
     committed: appendTranscript(emptyTranscript, history), live: [], pending: [], status: 'running', stopping: false,
-    command: undefined, notice: undefined, interaction: undefined, todos: undefined,
+    command: undefined, notice: undefined, interaction: undefined,
     model: 'mock/model', cwd: '/workspace', sessionId: 'output', copy: dictionaries.en,
     frame: 'round', quitting: false, context: undefined,
     onSubmit: () => {}, onCancel: () => {}, onInterrupt: () => {}, onAnswer: () => {},
@@ -166,7 +166,7 @@ describe('the right edge', () => {
       files: { query: undefined, entries: [], loading: false, error: undefined }, onReferenceQuery: () => {},
       completion: { entries: [], loading: false, error: undefined }, completionLimit: 8, resultLines: 4,
       committed: emptyTranscript, live: [], pending: [], status: 'idle', stopping: false,
-      command: undefined, notice: undefined, interaction: undefined, todos: undefined,
+      command: undefined, notice: undefined, interaction: undefined,
       model: 'mock/model', cwd: '/workspace', sessionId: 'edge', copy: dictionaries.en,
       frame: 'round', quitting: false, context: undefined,
       onSubmit: () => {}, onCancel: () => {}, onInterrupt: () => {}, onAnswer: () => {},
@@ -210,7 +210,7 @@ async function session(columns: number, rows: number) {
     files: { query: undefined, entries: [], loading: false, error: undefined }, onReferenceQuery: () => {},
     completion: { entries: [], loading: false, error: undefined }, completionLimit: 8, resultLines: 4,
     committed: emptyTranscript, live: [], pending: [], status: 'idle', stopping: false,
-    command: undefined, notice: undefined, interaction: undefined, todos: undefined,
+    command: undefined, notice: undefined, interaction: undefined,
     model: 'mock/model', cwd: '/workspace', sessionId: 'bottom', copy: dictionaries.en,
     frame: 'round', quitting: false, context: undefined,
     onSubmit: () => {}, onCancel: () => {}, onInterrupt: () => {}, onAnswer: () => {},
@@ -303,13 +303,13 @@ describe('bottom anchoring', () => {
     expect(first.findLastIndex(line => line.includes('Session: bottom'))).toBe(bottom - 4)
     let committed = appendTranscript(emptyTranscript, [{ kind: 'user', text: 'Fix the loader.' }])
     record(await ui.update({ committed, status: 'running', live: [{ kind: 'reasoning', text: 'Where is the home read?\nIn startup, then again in the launcher.' }] }))
-    record(await ui.update({ todos: [
-      { text: 'Read startup', status: 'in_progress' }, { text: 'Thread the home', status: 'pending' }, { text: 'Test it', status: 'pending' },
+    record(await ui.update({ pending: [
+      { id: 'p1', target: 'next-turn', text: 'Then thread the home.' }, { id: 'p2', target: 'next-turn', text: 'And test it.' },
     ] }))
     record(await ui.update({ notice: 'Model set for the next turn' }))
     // Rows given up with nothing printed to take them.
     record(await ui.update({ notice: undefined }))
-    record(await ui.update({ todos: [{ text: 'Read startup', status: 'in_progress' }] }))
+    record(await ui.update({ pending: [{ id: 'p2', target: 'next-turn', text: 'And test it.' }] }))
     // Reasoning commits as its preview while the answer starts.
     committed = appendTranscript(committed, [{ kind: 'reasoning', text: 'Where is the home read?\nIn startup, then again in the launcher.' }])
     record(await ui.update({ committed, live: [{ kind: 'assistant', text: 'Reading it' }] }))
@@ -319,9 +319,9 @@ describe('bottom anchoring', () => {
       { kind: 'tool-call', callId: 'c1', tool: 'bash', input: 'grep -n DSH_HOME' },
       { kind: 'tool-result', callId: 'c1', ok: true, text: 'startup.ts:4\nlauncher.ts:9' },
     ])
-    record(await ui.update({ committed, live: [], todos: [{ text: 'Read startup', status: 'completed' }] }))
+    record(await ui.update({ committed, live: [], pending: [] }))
     committed = appendTranscript(committed, [{ kind: 'assistant', text: 'Both reads found.' }])
-    const idle = await ui.update({ committed, status: 'idle', todos: undefined })
+    const idle = await ui.update({ committed, status: 'idle' })
     record(idle)
     expect(rows, idle.join('\n')).toEqual(rows.map(() => bottom))
     // The shell's line and the session heading are each in history once.

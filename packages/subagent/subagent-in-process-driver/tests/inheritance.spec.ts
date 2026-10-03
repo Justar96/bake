@@ -90,7 +90,7 @@ describe('in-process policy inheritance', () => {
         current: (session: Session) => session === parent.session ? preset : 'custom',
       } as never)
 
-      const run = await startInProcessRun(spawnRequest(parent), {})
+      const run = await startInProcessRun(spawnRequest(parent))
       try {
         await run.result
         const child = run.localAgent as Agent
@@ -105,36 +105,6 @@ describe('in-process policy inheritance', () => {
     },
   )
 
-  it.each([
-    { seedPreset: 'auto', preset: 'danger-full-access' },
-    { seedPreset: 'danger-full-access', preset: 'auto' },
-  ] as const)('captures $preset before child creation and overrides the $seedPreset fork prefix', async ({ seedPreset, preset }) => {
-    const { ctx, parent } = await setupWalled([textResponse('child done')])
-    parent.session.append('permission/preset', { preset: seedPreset })
-    setSandboxMode(parent.session, 'danger-full-access')
-    const seed = parent.session.snapshotEvents()
-    parent.session.append('permission/preset', { preset })
-    let currentPreset: 'auto' | 'danger-full-access' = preset
-    ctx.provide('permissionPresets', {
-      current: (session: Session) => session === parent.session ? currentPreset : 'custom',
-    } as never)
-
-    const starting = startInProcessRun(spawnRequest(parent), { seed })
-    currentPreset = seedPreset
-    parent.session.append('permission/preset', { preset: seedPreset })
-    const run = await starting
-    try {
-      await run.result
-      const child = run.localAgent as Agent
-      expect(child.session.snapshotEvents().filter(event => event.type === 'permission/preset')).toMatchObject([
-        { data: { preset: seedPreset } },
-        { data: { preset } },
-      ])
-    } finally {
-      await run.dispose()
-    }
-  })
-
   it('records the parent sandbox override and the approval pin before publishing a spawn child', async () => {
     const script: Script = []
     const { ctx, parent } = await setupWalled(script)
@@ -148,7 +118,7 @@ describe('in-process policy inheritance', () => {
       textResponse('child done'),
     )
 
-    const run = await startInProcessRun(spawnRequest(parent), {})
+    const run = await startInProcessRun(spawnRequest(parent))
     try {
       const result = await run.result
       const child = run.localAgent as Agent
@@ -204,47 +174,12 @@ describe('in-process policy inheritance', () => {
     }
   })
 
-  it('places inherited events after a fork prefix so fresh policy wins stale seed state', async () => {
-    const script: Script = []
-    const { ctx, parent } = await setupWalled(script)
-    const blocked = join(workspace, 'fork-blocked.txt')
-    setSandboxMode(parent.session, 'workspace-write')
-    const seed = parent.session.snapshotEvents()
-    setSandboxMode(parent.session, 'read-only')
-    script.push(
-      toolCallResponse('write', 'write', { file_path: blocked, content: 'escaped' }),
-      textResponse('child done'),
-    )
-
-    const run = await startInProcessRun(spawnRequest(parent), { seed })
-    try {
-      await run.result
-      const child = run.localAgent as Agent
-
-      expect(child.session.header.isSeeded).toBe(true)
-      expect(child.session.inheritedEventCount).toBe(1)
-      expect(child.session.firstLiveSeq).toBe(seed.length)
-      // seq 1 is the constructor's end-seed marker.
-      expect(child.session.snapshotEvents().filter(event => event.type === 'sandbox/mode')).toMatchObject([
-        { seq: 0, data: { mode: 'workspace-write' } },
-        { seq: 2, data: { mode: 'read-only', source: 'delegation' } },
-      ])
-      await expect(readFile(blocked, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
-      expect(ctx.sandboxPolicy.overrideOf(child.session)).toBe('read-only')
-
-      setSandboxMode(child.session, 'danger-full-access')
-      expect(ctx.sandboxPolicy.overrideOf(child.session)).toBe('danger-full-access')
-    } finally {
-      await run.dispose()
-    }
-  })
-
   it('captures policy at delegation before asynchronous child creation', async () => {
     const script: Script = [textResponse('child done')]
     const { ctx, parent } = await setupWalled(script)
     setSandboxMode(parent.session, 'read-only')
 
-    const starting = startInProcessRun(spawnRequest(parent), {})
+    const starting = startInProcessRun(spawnRequest(parent))
     setSandboxMode(parent.session, 'danger-full-access')
     const run = await starting
     try {
@@ -266,7 +201,7 @@ describe('in-process policy inheritance', () => {
       textResponse('child done'),
     )
 
-    const run = await startInProcessRun(spawnRequest(parent), {})
+    const run = await startInProcessRun(spawnRequest(parent))
     try {
       await run.result
       const child = run.localAgent as Agent
@@ -302,7 +237,7 @@ describe('in-process policy inheritance', () => {
       textResponse('child done'),
     )
 
-    const run = await startInProcessRun(spawnRequest(parent), {})
+    const run = await startInProcessRun(spawnRequest(parent))
     try {
       await run.result
       const child = run.localAgent as Agent

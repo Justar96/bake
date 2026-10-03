@@ -9,6 +9,7 @@
  */
 
 import type { PiAiMessagesWire, ResolvedPiAiProviderProfile } from './config.ts'
+import { isRecord } from '@deepseek-ai/dsh-util-values'
 
 /**
  * Name of the never-callable deferred tool pi-ai declares beside native tool
@@ -31,10 +32,6 @@ type PayloadStep = (body: MessagesBody) => MessagesBody | undefined
 
 /** A block or tool as the rewrites see it. */
 type WireRecord = Record<string, unknown>
-
-function isRecord(value: unknown): value is WireRecord {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
 
 /**
  * Respell pi-ai's adaptive `thinking` block as `enabled` for an endpoint that

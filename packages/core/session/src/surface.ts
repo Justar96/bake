@@ -2,9 +2,6 @@
  * Surface layer on top of the session event log: an ordered view of events
  * that produce LLM messages. The append-only log remains the source of truth.
  *
- * Browser-safe: web clients consume this subpath export, so it must stay free
- * of `node:` imports (they break the vite bundle).
- *
  * @module @deepseek-ai/dsh-session/surface
  */
 
@@ -19,6 +16,7 @@ import type {
   SurfaceEvent,
   SurfaceOp,
 } from './types.ts'
+import { isRecord } from '@deepseek-ai/dsh-util-values'
 
 /** Readonly history immediately before a message-projection event. */
 export interface SessionMessageProjectionContext {
@@ -156,11 +154,6 @@ export function deriveEventMessage(
       // no message. Merge-extensible union: no assertNever here.
       return null
   }
-}
-
-/** Whether a payload field is a JSON object rather than an array or scalar. */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 /**

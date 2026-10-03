@@ -103,7 +103,7 @@ A saved change applies at the next pressure check, without a restart. A section 
 
 The oldest balanced span is replaced by one summary message and the recent tail stays verbatim; the conversation continues from the summary. The operation reports how many history items were condensed and the estimated tokens freed. If nothing can be condensed safely — for example the whole conversation is one indivisible unit — nothing changes and nothing is written to the session log. If no model is available to write the summary (no configured target and no routed request yet), condensation fails with a clear error telling you to configure the summarization provider and model or route one request.
 
-After the summary, the checkpoint lists the files the condensed span read and changed and the latest open todo list, so they survive condensation exactly. The lists come from the span's successful `read`, `read_image`, `write`, `edit`, and `todo_write` calls and from the previous checkpoint's lists, so they carry forward across condensations. A path the span changed is listed only as modified. Each file list keeps its 50 most recently touched paths and counts the rest; the todo list keeps 50 items and is omitted when it is empty or every item is completed.
+After the summary, the checkpoint lists the files the condensed span read and changed, so they survive condensation exactly. The lists come from the span's successful `read`, `read_image`, `write`, and `edit` calls and from the previous checkpoint's lists, so they carry forward across condensations. A path the span changed is listed only as modified. Each file list keeps its 50 most recently touched paths and counts the rest. A checkpoint from an older release may also end with a `<todo-list>` section; it stays in that checkpoint's text and is not carried into the next one.
 
 If the summary request itself is too large for the summarizing model, condensation retries it once as a bounded plain-text transcript of the same span, with tool results, tool-call arguments, and reasoning cut to 2,000 characters. If that also overflows, it summarizes the older half of the span instead, up to three times. During overflow recovery and `/compact`, a summary request that fails with a transient provider error, such as a rate limit or a server error, is retried up to three times with the summarizing provider's backoff; automatic condensation under pressure does not retry, because the next step checks pressure again.
 
@@ -167,7 +167,7 @@ The transaction validates the surface span and the durable lock, appends `compac
 | [`src/index.ts`](src/index.ts) | Plugin entry: `BasicCompactionEngine`, automatic listeners, entry-point dispatch |
 | [`src/region.ts`](src/region.ts) | Retention selection and the shared bracket-first compaction transaction |
 | [`src/summarizer.ts`](src/summarizer.ts) | Default `ctx.llm.stream()` summarization, checkpoint framing, safe-summary projection |
-| [`src/checkpoint-context.ts`](src/checkpoint-context.ts) | Read and modified file lists and the open todo list appended to a checkpoint |
+| [`src/checkpoint-context.ts`](src/checkpoint-context.ts) | Read and modified file lists appended to a checkpoint |
 | [`src/bounded-input.ts`](src/bounded-input.ts) | Transcript summarizer input after a summary request overflows |
 | [`src/summary-retry.ts`](src/summary-retry.ts) | Transient summary-failure classification and cancellable backoff |
 | [`src/config.ts`](src/config.ts) | Load-time validation and routed-model policy resolution |
@@ -209,7 +209,7 @@ This is an automatically generated checkpoint condensing an earlier span of the 
 
 ##### Working-state sections
 
-Each section appears only when it has entries, in this order, separated by a blank line. The sections immediately follow `</compacted-summary>` in a separate text block. A list longer than its cap begins with `... N earlier paths not shown` (file lists, which keep the newest paths) or ends with `... N more not shown` (the todo list).
+Each section appears only when it has entries, in this order, separated by a blank line. The sections immediately follow `</compacted-summary>` in a separate text block. A list longer than its cap begins with `... N earlier paths not shown`, since file lists keep the newest paths.
 
 ```text
 <read-files>
@@ -220,17 +220,11 @@ docs/b.md
 <modified-files>
 src/index.ts
 </modified-files>
-
-<todo-list>
-- [in_progress] Write the tests
-- [pending] Update the README
-- [completed] Plan the change
-</todo-list>
 ```
 
 #### Token effect
 
-The working-state sections add one line per listed path or todo item, bounded at 50 per list, and count toward the shrink check that every checkpoint must pass. Model-free pruning can avoid the auxiliary call entirely; otherwise it reduces that call's transcript before the summary replaces an older range. The replacement reduces future input history rather than appending a second copy. A summary remains until a later compaction replaces it, while an indivisible non-tool unit can still exceed the budget.
+The working-state sections add one line per listed path, bounded at 50 per list, and count toward the shrink check that every checkpoint must pass. Model-free pruning can avoid the auxiliary call entirely; otherwise it reduces that call's transcript before the summary replaces an older range. The replacement reduces future input history rather than appending a second copy. A summary remains until a later compaction replaces it, while an indivisible non-tool unit can still exceed the budget.
 
 #### KV Cache effect
 
@@ -309,7 +303,7 @@ These limits define when automatic condensation is a poor fit or needs special c
 - **Some indivisible-unit and envelope-only overflow remains outside surface compaction** — recovery cannot shrink system/tools/prefix, split an indivisible non-tool node, or repair a tool unit whose non-prunable remainder still exceeds the window. The optional pruner can shrink text-bearing tool-result bulk inside an otherwise indivisible pair.
 - **`compactRegion` requires an open turn** — a manual call on a fully-closed session throws ("no open turn") rather than compacting.
 - **The log does not record which summarizer input form ran** — `compaction/summary` keeps the summary, route, and usage, but not whether the replayed prefix or a bounded transcript produced it, or how many attempts failed first; only the warning log does. The checkpoint text itself is durable.
-- **Working-state lists see only file-tool and todo calls** — paths changed through `bash` or `pwsh` are not listed, even when a shell change report recorded them, because that report is display-only by design; paths are listed as the model wrote them, without resolving them against the working directory.
+- **Working-state lists see only file-tool calls** — paths changed through `bash` or `pwsh` are not listed, even when a shell change report recorded them, because that report is display-only by design; paths are listed as the model wrote them, without resolving them against the working directory.
 - **Summarization failure preserves the latest durable surface** — before any replacement, the auto path logs a warning and proceeds with full over-budget history. If pruning already landed, a later summarization failure proceeds from that durable pruned surface. Summarization truncation at `maxTokens`, which hidden reasoning tokens can consume, follows the same rule.
 
 <a id="dev-note"></a>

@@ -14,6 +14,8 @@
 
       Follow the conventions of the surrounding code. Commit or push only when requested, and do not discard changes you did not make unless asked. Keep replies concise, factual, and neutral. Report results and verification accurately, including failures and skipped checks.
 
+      Work in as few model round trips as you can. Put independent tool calls in one response: read the files you need together, and send an edit with the command that checks it, since calls in one response run in order. Make several changes to one file in one edit call, and do not re-read a file to confirm an edit that succeeded.
+
 - id: tools
   config:
     mode: !!js process.env.DSH_TOOLS_MODE

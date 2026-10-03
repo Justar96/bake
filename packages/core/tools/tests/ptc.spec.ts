@@ -1582,17 +1582,41 @@ describe('the run_code dispatch bridge', () => {
     expect((result.content[0] as { text: string }).text).toContain('requires a PTC runtime')
   })
 
-  it('presents the model-authored description as the execute-card title over the program input', async () => {
+  it.each(['typescript', 'python'])('presents the description over the program with its runtime language (%s)', async (language) => {
+    const { ctx } = await setup({ mode: 'ptc', runtime: { language } })
+    try {
+      const tool = ctx.tools.get(RUN_CODE_NAME)!
+      expect(tool.presentCall?.({ code: 'return 1', description: 'Return the constant one' })).toEqual({
+        card: 'generic', title: 'Return the constant one', kind: 'execute',
+        content: [{ type: 'text', text: `\`\`\`${language}\nreturn 1\n\`\`\`` }],
+      })
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('leaves source uncoloured when no runtime can identify its language', async () => {
+    const { ctx } = await setup({ mode: 'ptc', runtime: false })
+    try {
+      expect(ctx.tools.get(RUN_CODE_NAME)!.presentCall?.({ code: 'return 1', description: 'Return one' })).toEqual({
+        card: 'generic', title: 'Return one', kind: 'execute', content: [{ type: 'text', text: '```text\nreturn 1\n```' }],
+      })
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('keeps embedded fences inside the presented program', async () => {
     const { ctx } = await setup({ mode: 'ptc' })
-    const tool = ctx.tools.get(RUN_CODE_NAME)!
-    // The description labels the card (the bash description precedent); the
-    // program itself remains the expanded raw input.
-    expect(tool.presentCall?.({ code: 'return 1', description: 'Return the constant one' })).toEqual({
-      card: 'generic',
-      title: 'Return the constant one',
-      kind: 'execute',
-      rawInput: 'return 1',
-    })
+    try {
+      const code = 'return "````";\n// ```'
+      expect(ctx.tools.get(RUN_CODE_NAME)!.presentCall?.({ code, description: 'Return backticks' })).toEqual({
+        card: 'generic', title: 'Return backticks', kind: 'execute',
+        content: [{ type: 'text', text: `\`\`\`\`\`typescript\n${code}\n\`\`\`\`\`` }],
+      })
+    } finally {
+      await ctx.fiber.dispose()
+    }
   })
 
   it('rejects a whitespace-only description with a structured isError', async () => {

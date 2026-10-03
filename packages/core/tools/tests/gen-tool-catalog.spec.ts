@@ -31,11 +31,10 @@ describe('gen-tool-catalog collectToolCatalog', () => {
       'create_goal', 'edit', 'get_goal', 'glob', 'grep',
       'interrupt_agent', 'job_kill', 'job_list', 'job_output',
       'list_agents', 'list_mcp_resource_templates', 'list_mcp_resources',
-      'list_subagent_models', 'plugin_manager', 'present', 'pwsh', 'pwsh', 'ralph',
+      'list_subagent_models', 'plugin_manager', 'pwsh', 'pwsh',
       'read', 'read_image', 'read_mcp_resource', 'run_code', 'schedule_create', 'schedule_delete',
-      'schedule_list', 'send_message', 'skill',
-      'str_replace_editor', 'subagent', 'todo_write', 'tool_help',
-      'update_goal', 'web_fetch', 'web_search', 'workflow', 'write',
+      'schedule_list', 'send_message', 'skill', 'subagent',
+      'update_goal', 'web_fetch', 'web_search', 'write',
     ])
     // Every tool carries a JSON-Schema `parameters` object (what the model sees).
     for (const entry of catalog) {
@@ -47,13 +46,13 @@ describe('gen-tool-catalog collectToolCatalog', () => {
 
   it('resolves a runtime-spread enum to its literal members (the payoff over AST)', async () => {
     const catalog = await collectToolCatalog()
-    const todo = catalog
+    const runCode = catalog
       .flatMap(entry => entry.schemas)
-      .find(s => s.name === 'todo_write')
-    // `todo-todo` writes `enum: [...STATUSES]` — a source AST would see the
-    // spread, not the values. Booting yields the shipped enum literals.
-    const status = (((todo?.parameters as unknown as JsonSchema).properties?.todos)?.items)?.properties?.status
-    expect(status?.enum).toEqual(['pending', 'in_progress', 'completed'])
+      .find(s => s.name === 'run_code')
+    // `tools` writes `enum: [...ESCALATION_TARGETS]` — a source AST would see
+    // the spread, not the values. Booting yields the shipped enum literals.
+    const mode = (runCode?.parameters as unknown as JsonSchema).properties?.sandbox_permissions
+    expect(mode?.enum).toEqual(['workspace-write', 'danger-full-access'])
   })
 
   it('attributes each harvested tool with its registering plugin source', async () => {
@@ -79,15 +78,6 @@ describe('gen-tool-catalog collectToolCatalog', () => {
       if (oldPath === undefined) delete process.env.PATH
       else process.env.PATH = oldPath
     }
-  })
-
-  it('records the shipped `subagent_fork` alias in a note (config-driven tool name)', async () => {
-    // `tool-subagent`'s registered name is the load-time `toolName` config, so the shipped
-    // agents surface this one package as both `subagent` and `subagent_fork`.
-    const catalog = await collectToolCatalog()
-    const subagent = catalog.find(entry => entry.pkg === '@deepseek-ai/dsh-tool-subagent')
-    expect(subagent?.schemas.map(s => s.name)).toEqual(['list_subagent_models', 'subagent'])
-    expect(subagent?.note).toMatch(/subagent_fork/)
   })
 })
 

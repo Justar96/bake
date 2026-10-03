@@ -13,6 +13,7 @@ import { CONTEXT_WINDOW_EXCEEDED_CODE, EMPTY_RESPONSE_CODE, isContextWindowExcee
 import type { FinishReason, StreamChunk, TokenUsage, ToolCallId } from '@deepseek-ai/dsh-llm'
 import { isContextOverflow } from '@earendil-works/pi-ai/utils/overflow'
 import type { AssistantMessage, AssistantMessageEvent, Usage as PiUsage } from '@earendil-works/pi-ai'
+import { DEFAULT_MAX_TOOL_ARGUMENT_WHITESPACE } from './config.ts'
 import { toPiReplayState } from './replay.ts'
 
 /**
@@ -172,6 +173,45 @@ export function mapStopReason(message: AssistantMessage, contextWindow?: number)
 }
 
 /**
+ * Scan state for one streaming tool call's argument text, kept so each delta
+ * is read once: whether the scan is inside a JSON string (and just after a
+ * backslash there), and how many whitespace characters outside any string
+ * ended the text so far.
+ */
+interface ArgumentScan {
+  inString: boolean
+  escaped: boolean
+  trailingWhitespace: number
+}
+
+/**
+ * Advance one tool call's argument scan over the next delta. Only JSON
+ * whitespace outside strings counts: whitespace inside a string value is
+ * content the model may legitimately write, such as a file's indentation,
+ * while a runaway pads between tokens. Any other character outside a string
+ * resets the run.
+ * @param scan - the call's state, updated in place.
+ * @param delta - the next raw argument text.
+ */
+function scanArguments(scan: ArgumentScan, delta: string): void {
+  for (let position = 0; position < delta.length; position++) {
+    const code = delta.charCodeAt(position)
+    if (scan.inString) {
+      if (scan.escaped) scan.escaped = false
+      else if (code === 0x5C) scan.escaped = true
+      else if (code === 0x22) scan.inString = false
+      continue
+    }
+    if (code === 0x20 || code === 0x0A || code === 0x0D || code === 0x09) {
+      scan.trailingWhitespace++
+      continue
+    }
+    scan.trailingWhitespace = 0
+    if (code === 0x22) scan.inString = true
+  }
+}
+
+/**
  * Translate the pi-ai event stream into StreamChunks. pi-ai never throws
  * mid-stream — failures arrive as `error` events, which become error/aborted
  * `finish` chunks (the harness protocol's other error-delivery style).
@@ -180,19 +220,29 @@ export function mapStopReason(message: AssistantMessage, contextWindow?: number)
  * @param callerSignal - caller cancellation state; an aborted caller makes any
  *   in-band terminal error an aborted finish.
  * @param requestedModel - request model identity recorded for durable replay.
+ * @param maxToolArgumentWhitespace - longest run of whitespace outside JSON
+ *   strings a tool call's streamed arguments may end with. Some models finish
+ *   the arguments' last value, then stream whitespace for minutes without
+ *   closing the object; the run is the only sign, because every padding delta
+ *   resets the idle watchdog.
  * @returns the harness chunks, ending with `usage`, when the provider
  *   reported any, then `finish`; throws
- *   `LlmError` (`STREAM_CLOSED`) if the source ends without a terminal event.
+ *   `LlmError` (`STREAM_CLOSED`) if the source ends without a terminal event,
+ *   and `LlmError` (`TRANSPORT`) once a tool call's trailing whitespace
+ *   exceeds `maxToolArgumentWhitespace`. Throwing ends the iteration of
+ *   `events`; the caller's teardown aborts the request.
  */
 export async function* toStreamChunks(
   events: AsyncIterable<AssistantMessageEvent>,
   contextWindow?: number,
   callerSignal?: AbortSignal,
   requestedModel?: string,
+  maxToolArgumentWhitespace: number = DEFAULT_MAX_TOOL_ARGUMENT_WHITESPACE,
 ): AsyncGenerator<StreamChunk> {
   // pi-ai contentIndex ↔ our block index map 1:1 (both count blocks from 0
   // in stream order), but we track ids per index for tool calls.
   const toolIds = new Map<number, { id: string; name: string }>()
+  const scans = new Map<number, ArgumentScan>()
 
   for await (const event of events) {
     switch (event.type) {
@@ -227,6 +277,21 @@ export async function* toStreamChunks(
       }
       case 'toolcall_delta': {
         const known = toolIds.get(event.contentIndex)
+        let scan = scans.get(event.contentIndex)
+        if (scan === undefined) {
+          scan = { inString: false, escaped: false, trailingWhitespace: 0 }
+          scans.set(event.contentIndex, scan)
+        }
+        scanArguments(scan, event.delta)
+        if (scan.trailingWhitespace > maxToolArgumentWhitespace) {
+          // A broken response stream, not a refusal of the request: the same
+          // request usually completes, so it takes the transient code.
+          throw new LlmError(
+            `model "${requestedModel ?? event.partial.model}" streamed ${scan.trailingWhitespace} whitespace characters`
+            + ` after the arguments of tool call "${known?.name ?? ''}" without closing them`,
+            'TRANSPORT',
+          )
+        }
         yield {
           type: 'tool-call-delta',
           index: event.contentIndex,

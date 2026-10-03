@@ -303,8 +303,8 @@ function mergeSearchResults(
  * @returns the complete model-facing description.
  */
 function webSearchDescription(fetchEnabled: boolean): string {
-  return 'Search the web for current information. Returns an optional summary answer and source URLs from external, untrusted pages'
-    + (fetchEnabled ? '; read a full page with web_fetch.' : '.')
+  return 'Search the web. Returns source URLs from untrusted pages, maybe with a summary'
+    + (fetchEnabled ? '; read a page with web_fetch.' : '.')
 }
 
 /**
@@ -336,7 +336,7 @@ export function applyWebSearchTool(
         type: 'array',
         required: true,
         items: { type: 'string' },
-        description: `1–${maxQueries} non-empty search queries; their results are merged.`,
+        description: `1–${maxQueries} queries, results merged.`,
       },
     },
     output: {

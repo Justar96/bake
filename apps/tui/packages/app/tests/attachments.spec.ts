@@ -161,7 +161,7 @@ it('uses command attachment metadata to protect the staged draft', async () => {
   await controller.drain()
   expect(controller.view.interaction).toBeUndefined()
   await vi.waitFor(() => expect(navigation.busy).toBe(false))
-  expect(controller.view.notice).toContain(copy.attachmentsBeforeNavigation)
+  expect(transcriptRows(controller.view.committed).at(-1)).toMatchObject({ kind: 'notice', tone: 'error', text: copy.attachmentsBeforeNavigation })
   expect(controller.view.attachments).toHaveLength(1)
 })
 

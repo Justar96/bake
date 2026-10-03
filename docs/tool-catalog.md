@@ -18,25 +18,20 @@ This table connects model-visible tool names to the plugin package and service s
 | `@deepseek-ai/dsh-plugin-manager` | `plugin_manager` | `ctx.tools`, `ctx.pluginManager`, `ctx.sandboxPolicy` | `tool/call`, `tool/result`, `user/message` | - | - |
 | `@deepseek-ai/dsh-mcp-resources` | `list_mcp_resource_templates`, `list_mcp_resources`, `read_mcp_resource` | `ctx.tools`, `ctx.mcpResources` | `tool/call`, `tool/result` | - | - |
 | `@deepseek-ai/dsh-tool-ask-user` | `ask_user_question` | `ctx.tools`, `ctx.userQuestions` | `tool/call`, `tool/result after a UI/provider answers the question` | - | ask_user_question pauses the tool call until the active UI provider returns a human answer. |
-| `@deepseek-ai/dsh-tools` | `run_code`, `tool_help` | `ctx.tools`, `ctx.ptcRuntime (execution time)`, `ctx.systemPrompt` | `tool/call`, `one tool/ptc-dispatch-start + tool/ptc-dispatch pair per bridged sub-call`, `tool/result` | - | Owned by the tool registry as a reserved transport outside filterable capability layers under `mode: ptc` / `mode: both` (see the PTC mode Agent Note). Under `ptc` it is the registry's only wire contribution; the other visible capabilities are declared in a generated SDK section in the loaded runtime's language, and a program calls them through bindings scheduled under the native concurrency contract (submission-ordered starts and policy; concurrency-safe bodies overlap up to `maxParallelSubCalls`) that re-enter the complete guarded tool pipeline and link each nested execution to this outer result. `tool_help` is visible exactly while a visible tool declares `details`, a usage reference kept out of the native schema; it returns that reference, and under `ptc` the reference joins the tool's SDK documentation instead. |
+| `@deepseek-ai/dsh-tools` | `run_code` | `ctx.tools`, `ctx.ptcRuntime (execution time)`, `ctx.systemPrompt` | `tool/call`, `one tool/ptc-dispatch-start + tool/ptc-dispatch pair per bridged sub-call`, `tool/result` | - | Owned by the tool registry as a reserved transport outside filterable capability layers under `mode: ptc` / `mode: both` (see the PTC mode Agent Note). Under `ptc` it is the registry's only wire contribution; the other visible capabilities are declared in a generated SDK section in the loaded runtime's language, and a program calls them through bindings scheduled under the native concurrency contract (submission-ordered starts and policy; concurrency-safe bodies overlap up to `maxParallelSubCalls`) that re-enter the complete guarded tool pipeline and link each nested execution to this outer result. |
 | `@deepseek-ai/dsh-tool-bash` | `bash` | `ctx.tools`, `ctx.shell`, `ctx.shellEnv`, `ctx.jobs at call time for run_in_background` | `tool/call`, `tool/result` | - | The bash tool is the model-facing consumer of the bash executor seam. A `run_in_background` run registers with the generic `ctx.jobs` runtime and is collected/stopped through the `job_*` tools from `@deepseek-ai/dsh-tool-jobs`; the `enableRunInBackground` config (default true) removes the parameter entirely when disabled. |
-| `@deepseek-ai/dsh-tool-present` | `present` | `ctx.tools`, `ctx.fs`, `ctx.sessionProjections` | `tool/call`, `deliverables/presented after a successful final result`, `tool/result` | - | Deliveries belong to the calling Session; Web ui-deliverables supplies source-file opening and cards. |
 | `@deepseek-ai/dsh-tool-pwsh` | `pwsh` | `ctx.tools`, `ctx.shell`, `ctx.shellEnv`, `ctx.jobs at call time for run_in_background` | `tool/call`, `tool/result` | - | The pwsh tool is the PowerShell-dialect consumer of the bash executor seam for Windows compositions (a PowerShell executor such as `@deepseek-ai/dsh-pwsh-local` backs `ctx.shell`); it mirrors the bash tool call-for-call minus sandbox controls — `run_in_background` runs register with the generic `ctx.jobs` runtime and are collected/stopped through the `job_*` tools, and the managed `DSH_*` environment comes from `@deepseek-ai/dsh-shell-env`. Each call runs in a fresh process (no persistent PTY session), with native `C:\...` paths and `$env:NAME` variables. |
 | `@deepseek-ai/dsh-tool-cordis` | `cordis_inspect_list`, `cordis_inspect_query` | `ctx.tools`, `ctx.cordisInspect` | `tool/call`, `tool/result` | - | Creator mode provides two read-only runtime inspection tools. The Cordis host runner supplies the inspection registry; Client queries require a connected page. Author persistent changes as bundles and install them with plugin_manager. |
 | `@deepseek-ai/dsh-tool-bash-persistent` | `bash` | `ctx.tools`, `ctx.terminals`, `an owning Agent at execution time` | `tool/call`, `PTY shell state`, `tool/result` | - | One owner-isolated persistent bash tool; deployment composition supplies the PTY backend and may override the model-facing environment description. |
 | `@deepseek-ai/dsh-tool-pwsh-persistent` | `pwsh` | `ctx.tools`, `ctx.terminals`, `an owning Agent at execution time` | `tool/call`, `PTY shell state`, `tool/result` | - | One owner-isolated persistent pwsh tool, the Windows counterpart of the persistent bash tool; deployment composition supplies a pwsh-dialect PTY backend and may override the model-facing environment description. |
-| `@deepseek-ai/dsh-tool-str-replace-editor` | `str_replace_editor` | `ctx.tools`, `ctx.fs` | `tool/call`, `fs/observed after view presence/absence, edit absence, or successful mutation`, `tool/result` | - | Standalone view/create/unique literal replace/line insert tool over the filesystem seam; it composes with any shell or terminal API. |
 | `@deepseek-ai/dsh-tool-fs` | `edit`, `read`, `read_image`, `write` | `ctx.tools`, `ctx.fs`, `ctx.attachments (image-tool registration)`, `ctx.llm + an image-capable route (image-tool execution)` | `tool/call`, `fs/write-intent or fs/edit-intent for mutations`, `fs/observed after read presence/absence or successful file operation`, `durable attachment (read_image)`, `tool/result` | - | The read-before-write/edit policy is added by `@deepseek-ai/dsh-fs-observation-policy` (an `fs/*` event-gate plugin, no schema change); a deployment that loads these tools is expected to also load it. The image tool is not registered without `ctx.attachments`; its schema is route-independent, and execution refuses unless the exact routed model declares image input. |
 | `@deepseek-ai/dsh-tool-fs-search` | `glob`, `grep` | `ctx.tools`, `ctx.subprocess` | `tool/call`, `tool/result` | - | glob and grep are unconditional discovery tools that spawn the packaged ripgrep binary (`@vscode/ripgrep`) through ctx.subprocess as ordinary foreground calls (never background jobs) — no host `rg` install and no shell layer. The catalog uses `sampleOverCapGlobResults: true`; deployments must choose that behavior explicitly. Capped results save the complete formatted list through the optional ctx.spillStore backend; returned locators are follow-up-readable/searchable when the backend exposes local paths in co-located deployments. |
 | `@deepseek-ai/dsh-tool-goal` | `create_goal`, `get_goal`, `update_goal` | `ctx.tools`, `ctx.agents`, `ctx.goals`, `a calling Agent in an authorized open turn` | `tool/call`, `goal/change for mutations`, `tool/result` | - | create, edit, pause, and resume require direct-human root authority; complete and blocked also accept the exact current goal round. The default blocked lower bound is three admitted rounds. |
 | `@deepseek-ai/dsh-schedule` | `schedule_create`, `schedule_delete`, `schedule_list` | `ctx.tools`, `ctx.sessions`, `Session persistence`, `a future live root Agent` | `tool/call`, `schedule/change create or delete`, `tool/result` | - | Registered only inside live root Agent scopes created after the opt-in Schedule plugin loads. Version 1 accepts after_seconds, explicit absolute at, and bounded fixed-rate every_seconds, and discloses session-local delivery; management reads and mutations require the shared Session persistence barrier. |
-| `@deepseek-ai/dsh-tool-ralph` | `ralph` | `ctx.tools`, `ctx.workflowEngine`, `ctx.subagents`, `ctx.systemPrompt`, `a calling Agent (exec.agent parents every fresh round)` | `tool/call`, `tool/result`, `workflow and child session events during execution` | - | A fixed foreground workflow starts one fresh structured child per round; the model selects only the immutable objective and an optional round cap. |
 | `@deepseek-ai/dsh-tool-skill` | `skill` | `ctx.tools`, `ctx.agents`, `ctx.skills` | `tool/call`, `tool/result`, `user/message replacement catalogs via agent.inject()` | - | - |
-| `@deepseek-ai/dsh-tool-subagent` | `list_subagent_models`, `subagent` | `ctx.tools`, `ctx.subagents`, `ctx.llm for model discovery and selected-route validation` | `tool/call`, `tool/result`, `child session events through the chosen provider` | `subagent`, `subagent_fork` | The registered delegation name is the load-time `toolName` config (default `subagent`); the default schema above has model selection off, while the discovery schema is shown as the fixed companion available in an enabled Session. Web presets sample the Plugins preference for each new top-level Session and preserve that decision for its child Sessions; `subagent_fork` remains fixed-route. Each instance independently controls whether it reads model-selection settings and its background behavior through `modelSelectionSettings`, `backgroundMode`, and `enableRunInBackground`. |
+| `@deepseek-ai/dsh-tool-subagent` | `list_subagent_models`, `subagent` | `ctx.tools`, `ctx.subagents`, `ctx.llm for model discovery and selected-route validation` | `tool/call`, `tool/result`, `child session events through the chosen provider` | - | The registered delegation name is the load-time `toolName` config (default `subagent`); the default schema above has model selection off, while the discovery schema is shown as the fixed companion available in an enabled Session. Each instance independently controls whether it reads model-selection settings and its background behavior through `modelSelectionSettings`, `backgroundMode`, and `enableRunInBackground`. |
 | `@deepseek-ai/dsh-tool-subagent-control` | `interrupt_agent`, `list_agents`, `send_message` | `ctx.tools`, `ctx.subagents`, `ctx.agents and ctx.sessionProjections (list_agents only)` | `tool/call`, `tool/result`, `child session events through ctx.subagents` | - | The globally named control tools over continuable background subagents: provider-bound `tool-subagent` instances register distinct delegation tools, while this package registers `send_message` and `interrupt_agent` once, plus `list_agents` from its separately loaded `/list-agents` plugin (whose catalog rows use the sessionProjections and live Agent registries). |
 | `@deepseek-ai/dsh-tool-jobs` | `job_kill`, `job_list`, `job_output` | `ctx.tools`, `ctx.jobs` | `tool/call`, `tool/result`, `user/message via agent.inject() for background completion notices` | - | The kind-agnostic background-job controller: background bash commands, PTY sends, and subagents are read, listed, and killed through the same three tools. Loading the plugin attaches the controller that arms producers' `ctx.jobs.start()`. |
-| `@deepseek-ai/dsh-tool-todo` | `todo_write` | `ctx.tools`, `owning Agent session` | `tool/call`, `todo/write`, `tool/result` | - | todo_write is session-owned state; UIs render the latest todo/write event as a checklist. `allowParallelInProgress` is required with no default, so the catalog states its choice: `true`, whose description invites several `in_progress` items. A deployment choosing `false` receives the same tool with a description asking for exactly one active task. |
-| `@deepseek-ai/dsh-tool-workflow` | `workflow` | `ctx.tools`, `ctx.workflowEngine`, `a calling Agent (exec.agent parents the script children)` | `tool/call`, `tool/result` | - | - |
 | `@deepseek-ai/dsh-tool-web` | `web_fetch`, `web_search` | `ctx.tools`, `ctx.web` | `tool/call`, `tool/result` | - | web_search and web_fetch keep provider selection behind ctx.web so model-visible schemas stay stable across backend swaps. |
 
 <a id="deepseek-aidsh-plugin-manager"></a>
@@ -295,28 +290,7 @@ Execute a TypeScript program against the available tools. Takes two required arg
 
 Source: [`packages/core/tools/src/ptc.ts`](../packages/core/tools/src/ptc.ts)
 
-### `tool_help`
-
-Return the full usage reference of a tool whose description says to read it with tool_help first.
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "name": {
-      "type": "string",
-      "description": "Name of the tool."
-    }
-  },
-  "required": [
-    "name"
-  ]
-}
-```
-
-Source: [`packages/core/tools/src/tool-help.ts`](../packages/core/tools/src/tool-help.ts)
-
-Owned by the tool registry as a reserved transport outside filterable capability layers under `mode: ptc` / `mode: both` (see the PTC mode Agent Note). Under `ptc` it is the registry's only wire contribution; the other visible capabilities are declared in a generated SDK section in the loaded runtime's language, and a program calls them through bindings scheduled under the native concurrency contract (submission-ordered starts and policy; concurrency-safe bodies overlap up to `maxParallelSubCalls`) that re-enter the complete guarded tool pipeline and link each nested execution to this outer result. `tool_help` is visible exactly while a visible tool declares `details`, a usage reference kept out of the native schema; it returns that reference, and under `ptc` the reference joins the tool's SDK documentation instead.
+Owned by the tool registry as a reserved transport outside filterable capability layers under `mode: ptc` / `mode: both` (see the PTC mode Agent Note). Under `ptc` it is the registry's only wire contribution; the other visible capabilities are declared in a generated SDK section in the loaded runtime's language, and a program calls them through bindings scheduled under the native concurrency contract (submission-ordered starts and policy; concurrency-safe bodies overlap up to `maxParallelSubCalls`) that re-enter the complete guarded tool pipeline and link each nested execution to this outer result.
 
 <a id="deepseek-aidsh-tool-bash"></a>
 
@@ -324,31 +298,30 @@ Owned by the tool registry as a reserved transport outside filterable capability
 
 ### `bash`
 
-Run a command with `bash -c` and return its stdout and stderr. Each call starts a fresh shell, so directory changes and variables do not carry over to later calls. Avoid filesystem-wide `find` scans. A non-zero exit is reported in the result as `[exit code: N]`, not as a tool error. Long output is truncated to its tail, and the full output is saved to a file named in the result when possible. `$DSH_HOME` is the harness home directory and `$DSH_SESSION_ID` is this session's id. Run long builds and tests with `run_in_background`, which returns a job id at once; read output with `job_output` and stop with `job_kill`.
+Run `bash -c` in a fresh shell (cd and variables do not persist); returns stdout and stderr. Avoid filesystem-wide `find`. A non-zero exit shows as `[exit code: N]`, not a tool error. Long output keeps its tail; the result names a file with all of it. `$DSH_HOME`: harness home; `$DSH_SESSION_ID`: session id. Use `run_in_background` for long builds and tests, then `job_output` and `job_kill`.
 
 ```json
 {
   "type": "object",
   "properties": {
     "command": {
-      "type": "string",
-      "description": "The bash command to execute."
+      "type": "string"
     },
     "description": {
       "type": "string",
-      "description": "Short summary of what the command does, shown to the user."
+      "description": "Shown to the user."
     },
     "timeoutMs": {
       "type": "number",
-      "description": "Timeout in milliseconds, capped at the maximum; the command is killed when it expires."
+      "description": "Capped; kills the command on expiry."
     },
     "workdir": {
       "type": "string",
-      "description": "Directory to run this command in. Defaults to your working directory; a relative path resolves against it."
+      "description": "Defaults to the working directory."
     },
     "run_in_background": {
       "type": "boolean",
-      "description": "Run in the background, with no timeout."
+      "description": "No timeout."
     }
   },
   "required": [
@@ -360,49 +333,6 @@ Run a command with `bash -c` and return its stdout and stderr. Each call starts 
 Source: [`packages/shell/tool-bash/src/index.ts`](../packages/shell/tool-bash/src/index.ts)
 
 The bash tool is the model-facing consumer of the bash executor seam. A `run_in_background` run registers with the generic `ctx.jobs` runtime and is collected/stopped through the `job_*` tools from `@deepseek-ai/dsh-tool-jobs`; the `enableRunInBackground` config (default true) removes the parameter entirely when disabled.
-
-<a id="deepseek-aidsh-tool-present"></a>
-
-## `@deepseek-ai/dsh-tool-present`
-
-### `present`
-
-Deliver files the user asked to receive. After creating or updating such a file, however you made it, call present before your final reply; mentioning its path is not enough. The files must already exist where your file tools can see them. The user opens them in place, so leave them there.
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "files": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "path": {
-            "type": "string",
-            "description": "Path of an existing regular file, absolute or relative to the working directory."
-          },
-          "description": {
-            "type": "string",
-            "description": "Brief description for the user."
-          }
-        },
-        "required": [
-          "path"
-        ]
-      }
-    }
-  },
-  "required": [
-    "files"
-  ]
-}
-```
-
-Source: [`packages/deliverables/tool-present/src/index.ts`](../packages/deliverables/tool-present/src/index.ts)
-
-Deliveries belong to the calling Session; Web ui-deliverables supplies source-file opening and cards.
 
 <a id="deepseek-aidsh-tool-pwsh"></a>
 
@@ -558,119 +488,13 @@ Source: [`packages/shell/tool-pwsh-persistent/src/index.ts`](../packages/shell/t
 
 One owner-isolated persistent pwsh tool, the Windows counterpart of the persistent bash tool; deployment composition supplies a pwsh-dialect PTY backend and may override the model-facing environment description.
 
-<a id="deepseek-aidsh-tool-str-replace-editor"></a>
-
-## `@deepseek-ai/dsh-tool-str-replace-editor`
-
-### `str_replace_editor`
-
-Custom editing tool for viewing, creating and editing files
-* State is persistent across command calls and discussions with the user
-* If `path` is a file, `view` displays the result of applying `cat -n`. If `path` is a directory, `view` lists non-hidden files and directories up to 2 levels deep
-* The `create` command cannot be used if the specified `path` already exists as a file
-* If a `command` generates a long output, it will be truncated and marked with `<response clipped>`
-* A null placeholder for a parameter unused by the selected command is treated as omitted. Required parameters still need values; omit `str_replace.new_str` rather than setting it to null when deleting a match
-
-Notes for using the `str_replace` command:
-* The `old_str` parameter should match EXACTLY one or more consecutive lines from the original file. Be mindful of whitespaces!
-* If the `old_str` parameter is not unique in the file, the replacement will not be performed. Make sure to include enough context in `old_str` to make it unique
-* The `new_str` parameter should contain the edited lines that should replace the `old_str`
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "command": {
-      "type": "string",
-      "description": "The commands to run. Allowed options are: `view`, `create`, `str_replace`, `insert`.",
-      "enum": [
-        "view",
-        "create",
-        "str_replace",
-        "insert"
-      ]
-    },
-    "path": {
-      "type": "string",
-      "description": "Absolute path to file or directory, e.g. `/repo/file.py` or `/repo`."
-    },
-    "file_text": {
-      "oneOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "description": "Required string parameter of `create` command, with the content of the file to be created. A null placeholder is treated as omitted by commands that do not use this parameter."
-    },
-    "insert_line": {
-      "oneOf": [
-        {
-          "type": "integer"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "description": "Required integer parameter of `insert` command. The `new_str` will be inserted AFTER the line `insert_line` of `path`. A null placeholder is treated as omitted by commands that do not use this parameter."
-    },
-    "new_str": {
-      "oneOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "description": "Optional string parameter of `str_replace` command containing the new string (if omitted, no string will be added). Required string parameter of `insert` command containing the string to insert. A null placeholder is accepted only by commands that do not use this parameter."
-    },
-    "old_str": {
-      "oneOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "description": "Required string parameter of `str_replace` command containing the string in `path` to replace. A null placeholder is treated as omitted by commands that do not use this parameter."
-    },
-    "view_range": {
-      "oneOf": [
-        {
-          "type": "array",
-          "items": {
-            "type": "integer"
-          }
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "description": "Optional parameter of `view` command when `path` points to a file. If omitted or null, the full file is shown. If provided, the file will be shown in the indicated line number range, e.g. [11, 12] will show lines 11 and 12. Indexing at 1 to start. Setting `[start_line, -1]` shows all lines from `start_line` to the end of the file."
-    }
-  },
-  "required": [
-    "command",
-    "path"
-  ]
-}
-```
-
-Source: [`packages/fs/tool-str-replace-editor/src/index.ts`](../packages/fs/tool-str-replace-editor/src/index.ts)
-
-Standalone view/create/unique literal replace/line insert tool over the filesystem seam; it composes with any shell or terminal API.
-
 <a id="deepseek-aidsh-tool-fs"></a>
 
 ## `@deepseek-ai/dsh-tool-fs`
 
 ### `edit`
 
-Replace literal text in an existing UTF-8 text file. Each old_string must match the current file exactly once unless replace_all is set. Put several changes to one file in `edits`, each matched against the original.
+Replace exact text in a UTF-8 file; each old_string must match once unless replace_all. Batch one file's changes in `edits`, each matched against the original.
 
 ```json
 {
@@ -678,23 +502,21 @@ Replace literal text in an existing UTF-8 text file. Each old_string must match 
   "properties": {
     "file_path": {
       "type": "string",
-      "description": "Absolute path, or relative to the working directory."
+      "description": "Absolute, or relative to the working directory."
     },
     "old_string": {
       "type": "string",
-      "description": "Exact text to replace, including whitespace, without read's line numbers."
+      "description": "Exact, with whitespace; no read line numbers."
     },
     "new_string": {
-      "type": "string",
-      "description": "Replacement text; empty deletes the match."
+      "type": "string"
     },
     "replace_all": {
-      "type": "boolean",
-      "description": "Replace every occurrence."
+      "type": "boolean"
     },
     "edits": {
       "type": "array",
-      "description": "Several replacements, instead of old_string and new_string.",
+      "description": "Instead of old_string/new_string.",
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -726,7 +548,7 @@ Source: [`packages/fs/tool-fs/src/index.ts`](../packages/fs/tool-fs/src/index.ts
 
 ### `read`
 
-Read a UTF-8 text file as numbered lines, paged for long files. Unlike cat in a shell, it counts as a read for later `write` calls.
+Read a UTF-8 text file as numbered lines; unlike cat, it counts as a read for `write`.
 
 ```json
 {
@@ -734,15 +556,15 @@ Read a UTF-8 text file as numbered lines, paged for long files. Unlike cat in a 
   "properties": {
     "file_path": {
       "type": "string",
-      "description": "Absolute path, or relative to the working directory."
+      "description": "Absolute, or relative to the working directory."
     },
     "offset": {
       "type": "number",
-      "description": "1-based first line to return. Defaults to 1."
+      "description": "1-based."
     },
     "limit": {
       "type": "number",
-      "description": "Maximum number of lines to return. Defaults to 2000."
+      "description": "Maximum lines; default 2000."
     }
   },
   "required": [
@@ -755,7 +577,7 @@ Source: [`packages/fs/tool-fs/src/index.ts`](../packages/fs/tool-fs/src/index.ts
 
 ### `read_image`
 
-Read a PNG, JPEG, WebP, or GIF file and return the image. A path without an extension works; its format is detected from the content. Large images are downscaled automatically, so do not install image tools or make thumbnails just to view one. Requires a model that accepts image input.
+View a PNG, JPEG, WebP, or GIF file; format is detected from content and large images are downscaled, so do not make thumbnails. Needs an image-input model.
 
 ```json
 {
@@ -763,7 +585,7 @@ Read a PNG, JPEG, WebP, or GIF file and return the image. A path without an exte
   "properties": {
     "file_path": {
       "type": "string",
-      "description": "Absolute path, or relative to the working directory."
+      "description": "Absolute, or relative to the working directory."
     }
   },
   "required": [
@@ -776,7 +598,7 @@ Source: [`packages/fs/tool-fs/src/index.ts`](../packages/fs/tool-fs/src/index.ts
 
 ### `write`
 
-Create a UTF-8 text file or replace all of its content. Replacing an existing file requires a current read of it. For a partial change, edit avoids resending the whole file.
+Create or overwrite a UTF-8 file; overwriting requires a current read. Use edit for partial changes.
 
 ```json
 {
@@ -784,11 +606,10 @@ Create a UTF-8 text file or replace all of its content. Replacing an existing fi
   "properties": {
     "file_path": {
       "type": "string",
-      "description": "Absolute path, or relative to the working directory."
+      "description": "Absolute, or relative to the working directory."
     },
     "content": {
-      "type": "string",
-      "description": "Full UTF-8 text content to write."
+      "type": "string"
     }
   },
   "required": [
@@ -808,7 +629,7 @@ The read-before-write/edit policy is added by `@deepseek-ai/dsh-fs-observation-p
 
 ### `glob`
 
-Find files, not directories, whose paths match a glob pattern. It is a bounded, newest-first alternative to find in a shell: hidden and ignored files are included, but VCS metadata is not. Scope `path` to the repository, never `/` or `$HOME`. A result over 100 paths shows 100 sampled across top-level entries, says so, and reports where the full list was saved.
+Find files by glob, newest first, including hidden and ignored ones (not VCS metadata). Keep `path` in the repository, never `/` or `$HOME`. Past 100 paths it shows 100 sampled across top-level entries and names a file with all of them.
 
 ```json
 {
@@ -816,11 +637,11 @@ Find files, not directories, whose paths match a glob pattern. It is a bounded, 
   "properties": {
     "pattern": {
       "type": "string",
-      "description": "Glob pattern, e.g. \"**/*.ts\" or \"src/**/*.test.js\". A pattern without \"/\" matches file names at any depth, so \"*.ts\" searches the whole tree."
+      "description": "Without \"/\", matches file names at any depth."
     },
     "path": {
       "type": "string",
-      "description": "Directory to search. Defaults to the working directory; relative paths resolve against it."
+      "description": "Defaults to the working directory."
     }
   },
   "required": [
@@ -833,23 +654,22 @@ Source: [`packages/fs/tool-fs-search/src/index.ts`](../packages/fs/tool-fs-searc
 
 ### `grep`
 
-Search file contents with a ripgrep regular expression, as a bounded alternative to grep or rg in a shell. Hidden and ignored files are skipped unless path points at them. Scope `path` to the repository, never `/` or `$HOME`. Returns only the matching lines, numbered and grouped by file; read a matched file for surrounding context. Up to 250 matches are shown; a larger result says so and reports where the full list was saved.
+Search file contents by ripgrep regex; returns numbered matching lines by file. Skips hidden and ignored files unless path targets them. Keep `path` in the repository, never `/` or `$HOME`. Past 250 matches the result names a file with all of them.
 
 ```json
 {
   "type": "object",
   "properties": {
     "pattern": {
-      "type": "string",
-      "description": "Regular expression to search for (ripgrep syntax)."
+      "type": "string"
     },
     "path": {
       "type": "string",
-      "description": "File or directory to search. Defaults to the working directory; relative paths resolve against it."
+      "description": "File or directory; defaults to the working directory."
     },
     "include": {
       "type": "string",
-      "description": "One glob filter for which files to search (e.g. \"*.ts\", \"*.{js,jsx}\"). Not a list; negation is not supported."
+      "description": "One file glob, e.g. \"*.{js,jsx}\"; no lists or negation."
     }
   },
   "required": [
@@ -868,7 +688,7 @@ glob and grep are unconditional discovery tools that spawn the packaged ripgrep 
 
 ### `create_goal`
 
-Create the session's goal: a long-running objective that keeps going across automatic rounds until it is done. Call it only when the user explicitly asks for a goal in the current turn; never create one on your own initiative. A session has one goal at a time, and subagents cannot create goals.
+Create the session's single goal, pursued across automatic rounds. Only when the user explicitly asks for one this turn. Subagents cannot.
 
 ```json
 {
@@ -876,11 +696,11 @@ Create the session's goal: a long-running objective that keeps going across auto
   "properties": {
     "objective": {
       "type": "string",
-      "description": "The concrete objective, taken from the user's request."
+      "description": "From the user's request."
     },
     "max_goal_rounds": {
       "type": "number",
-      "description": "Optional limit on automatic rounds, as a positive integer."
+      "description": "Positive integer."
     }
   },
   "required": [
@@ -893,7 +713,7 @@ Source: [`packages/goal/tool-goal/src/index.ts`](../packages/goal/tool-goal/src/
 
 ### `get_goal`
 
-Return the session's current goal, or null: its id, revision, objective, phase, rounds started, round limit, any blocker, and whether it will continue automatically.
+Return the session's current goal, or null.
 
 ```json
 {
@@ -906,23 +726,20 @@ Source: [`packages/goal/tool-goal/src/index.ts`](../packages/goal/tool-goal/src/
 
 ### `update_goal`
 
-Change the current goal. First call get_goal and pass its exact goal_id and revision. edit, pause, and resume need a request from the user in the current turn; complete and blocked also work during an automatic goal round. When a session is reopened or forked, its goal stops running automatic rounds until the user asks to continue; then resume it. Mark the goal complete only when its objective is met. Mark it blocked only when the same concrete obstacle has persisted for at least 3 consecutive goal rounds; difficulty or remaining work is not an obstacle.
+Change the goal; first get_goal for its exact goal_id and revision. edit/pause/resume need a user request this turn; complete/blocked also work in automatic rounds. A reopened or forked session's goal stays paused until the user asks to continue; then resume. complete only when the objective is met; blocked only after the same concrete obstacle persisted at least 3 consecutive goal rounds (difficulty or remaining work is not one).
 
 ```json
 {
   "type": "object",
   "properties": {
     "goal_id": {
-      "type": "string",
-      "description": "The current goal's id."
+      "type": "string"
     },
     "revision": {
-      "type": "number",
-      "description": "The current goal's revision."
+      "type": "number"
     },
     "action": {
       "type": "string",
-      "description": "edit the objective or round limit, pause or resume automatic rounds, or mark the goal complete or blocked.",
       "enum": [
         "edit",
         "pause",
@@ -933,15 +750,15 @@ Change the current goal. First call get_goal and pass its exact goal_id and revi
     },
     "objective": {
       "type": "string",
-      "description": "The new objective; used only with action edit."
+      "description": "edit only."
     },
     "max_goal_rounds": {
       "type": "number",
-      "description": "The new round limit; used only with action edit."
+      "description": "edit only."
     },
     "blocked_reason": {
       "type": "string",
-      "description": "The concrete obstacle; required with action blocked and unused otherwise."
+      "description": "Required for blocked."
     }
   },
   "required": [
@@ -1053,44 +870,13 @@ Source: [`packages/schedule/schedule/src/tools.ts`](../packages/schedule/schedul
 
 Registered only inside live root Agent scopes created after the opt-in Schedule plugin loads. Version 1 accepts after_seconds, explicit absolute at, and bounded fixed-rate every_seconds, and discloses session-local delivery; management reads and mutations require the shared Session persistence barrier.
 
-<a id="deepseek-aidsh-tool-ralph"></a>
-
-## `@deepseek-ai/dsh-tool-ralph`
-
-### `ralph`
-
-Run a foreground fresh-agent Ralph loop toward one immutable objective. Use only when the direct human explicitly asks for Ralph or fresh-agent iteration. Each round opens a new child with no parent conversation or prior child session; the shared workspace is long-term memory, and only a bounded structured report crosses rounds. The call returns when a worker reports completion or a concrete blocker, or at the round limit. Ordinary long-running same-session work belongs to goal tools.
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "objective": {
-      "type": "string",
-      "description": "The immutable completion objective for every fresh Ralph round."
-    },
-    "maxRounds": {
-      "type": "number",
-      "description": "Optional positive safe-integer round cap, bounded by the deployment ceiling."
-    }
-  },
-  "required": [
-    "objective"
-  ]
-}
-```
-
-Source: [`packages/workflow/tool-ralph/src/index.ts`](../packages/workflow/tool-ralph/src/index.ts)
-
-A fixed foreground workflow starts one fresh structured child per round; the model selects only the immutable objective and an optional round cap.
-
 <a id="deepseek-aidsh-tool-skill"></a>
 
 ## `@deepseek-ai/dsh-tool-skill`
 
 ### `skill`
 
-Load the full instructions for an available skill. Call this with the exact skill name from the session skill catalog before acting on a task that names or clearly matches that skill.
+Load a skill's full instructions before acting on a task that names or clearly matches it.
 
 ```json
 {
@@ -1098,7 +884,7 @@ Load the full instructions for an available skill. Call this with the exact skil
   "properties": {
     "name": {
       "type": "string",
-      "description": "The exact skill name from the available skills list."
+      "description": "Exact name from the skill catalog."
     }
   },
   "required": [
@@ -1137,7 +923,7 @@ Source: [`packages/subagent/tool-subagent/src/list-models.ts`](../packages/subag
 
 ### `subagent`
 
-Delegate a self-contained task, such as research, a scoped implementation, or an analysis, to a subagent that works in its own context, so the work does not fill this conversation. You get its result, not its intermediate steps. It does not see this conversation, so give it a complete, standalone prompt. This call waits for the result by default. Set `run_in_background: true` to return a job id; collect with `job_output` and stop with `job_kill`.
+Delegate a self-contained task to a subagent with its own context; it does not see this conversation and returns only its result. Waits unless `run_in_background`, which returns a job id for `job_output`/`job_kill`.
 
 ```json
 {
@@ -1145,15 +931,14 @@ Delegate a self-contained task, such as research, a scoped implementation, or an
   "properties": {
     "description": {
       "type": "string",
-      "description": "A short (3-5 word) description of the delegated task, for display."
+      "description": "3-5 words, for display."
     },
     "prompt": {
       "type": "string",
-      "description": "The complete, self-contained task. The subagent does not see this conversation, so include everything it needs."
+      "description": "Standalone, with everything it needs."
     },
     "run_in_background": {
-      "type": "boolean",
-      "description": "Run as a background job and return its job id. Defaults to false; collect with job_output or stop with job_kill."
+      "type": "boolean"
     }
   },
   "required": [
@@ -1165,7 +950,7 @@ Delegate a self-contained task, such as research, a scoped implementation, or an
 
 Source: [`packages/subagent/tool-subagent/src/index.ts`](../packages/subagent/tool-subagent/src/index.ts)
 
-The registered delegation name is the load-time `toolName` config (default `subagent`); the default schema above has model selection off, while the discovery schema is shown as the fixed companion available in an enabled Session. Web presets sample the Plugins preference for each new top-level Session and preserve that decision for its child Sessions; `subagent_fork` remains fixed-route. Each instance independently controls whether it reads model-selection settings and its background behavior through `modelSelectionSettings`, `backgroundMode`, and `enableRunInBackground`.
+The registered delegation name is the load-time `toolName` config (default `subagent`); the default schema above has model selection off, while the discovery schema is shown as the fixed companion available in an enabled Session. Each instance independently controls whether it reads model-selection settings and its background behavior through `modelSelectionSettings`, `backgroundMode`, and `enableRunInBackground`.
 
 <a id="deepseek-aidsh-tool-subagent-control"></a>
 
@@ -1173,15 +958,14 @@ The registered delegation name is the load-time `toolName` config (default `suba
 
 ### `interrupt_agent`
 
-Stop the current turn of a continuable subagent below you by its agent id. It stays available for follow-ups and its own subagents keep running. The stop is requested, not awaited; interrupting a finished subagent does nothing.
+Request a stop of a continuable subagent's current turn; it stays available, and its own subagents keep running.
 
 ```json
 {
   "type": "object",
   "properties": {
     "agent_id": {
-      "type": "string",
-      "description": "The agent id of the subagent to interrupt."
+      "type": "string"
     }
   },
   "required": [
@@ -1194,7 +978,7 @@ Source: [`packages/subagent/tool-subagent-control/src/index.ts`](../packages/sub
 
 ### `list_agents`
 
-List the continuable subagents you started, with each one's agent id, label, and status: running, idle (between turns), or ready (saved and resumable; not a result to collect). Use it to look up ids, not to poll: you are notified when one finishes. Scope `descendants` adds deeper subagents with their parent's id and depth; only depth-1 entries can be messaged, but `interrupt_agent` can stop any of them.
+List your continuable subagents: agent id, label, status (running, idle, or ready = saved, resumable, not a result). For ids only; you are notified on finish. Only depth-1 entries take messages; `interrupt_agent` stops any.
 
 ```json
 {
@@ -1202,7 +986,7 @@ List the continuable subagents you started, with each one's agent id, label, and
   "properties": {
     "scope": {
       "type": "string",
-      "description": "children (default) lists your direct subagents; descendants lists every subagent below you.",
+      "description": "descendants adds deeper subagents.",
       "enum": [
         "children",
         "descendants"
@@ -1216,19 +1000,17 @@ Source: [`packages/subagent/tool-subagent-control/src/list-agents.ts`](../packag
 
 ### `send_message`
 
-Send a message to one of your direct continuable subagents by its agent id. If you are a continuable subagent, you can also message your parent. A working target reads the message at its next step; otherwise the message starts a new turn. You get delivery confirmation, not a reply, and an error means the message was not delivered.
+Message a direct continuable subagent, or your parent if you are one. A busy target reads it next step; an idle one starts a new turn. Confirms delivery; no reply.
 
 ```json
 {
   "type": "object",
   "properties": {
     "agent_id": {
-      "type": "string",
-      "description": "The agent id of a direct continuable subagent, or of your parent if you are a continuable subagent."
+      "type": "string"
     },
     "message": {
-      "type": "string",
-      "description": "The message to send."
+      "type": "string"
     }
   },
   "required": [
@@ -1248,7 +1030,7 @@ The globally named control tools over continuable background subagents: provider
 
 ### `job_kill`
 
-Stop a running background job. Jobs otherwise keep running after your turn ends, until they finish. Returns immediately; the job's status becomes `killed` once its work has stopped.
+Stop a background job (jobs outlive your turn).
 
 ```json
 {
@@ -1256,11 +1038,10 @@ Stop a running background job. Jobs otherwise keep running after your turn ends,
   "properties": {
     "job_id": {
       "type": "string",
-      "description": "The background job id from a start result or job_list. A continuable subagent id is an agent id, not a job id."
+      "description": "A job id, not a continuable subagent's agent id."
     },
     "reason": {
-      "type": "string",
-      "description": "Optional short reason for stopping the job."
+      "type": "string"
     }
   },
   "required": [
@@ -1273,7 +1054,7 @@ Source: [`packages/jobs/tool-jobs/src/index.ts`](../packages/jobs/tool-jobs/src/
 
 ### `job_list`
 
-List your background jobs, running and finished, with their ids, kinds, statuses, and labels.
+List your background jobs, running and finished.
 
 ```json
 {
@@ -1286,7 +1067,7 @@ Source: [`packages/jobs/tool-jobs/src/index.ts`](../packages/jobs/tool-jobs/src/
 
 ### `job_output`
 
-Read a background job's output. You receive a notice when a job finishes, so there is no need to poll or sleep while it runs. Jobs that stream output return what is new since your last read; other jobs return their result once they finish. Every reply ends with `[status: ...]`. Returns immediately unless `wait: true`.
+Read a background job's new output since your last read, or its result once done; ends with `[status: ...]`. You are notified when it finishes; do not poll or sleep.
 
 ```json
 {
@@ -1294,15 +1075,15 @@ Read a background job's output. You receive a notice when a job finishes, so the
   "properties": {
     "job_id": {
       "type": "string",
-      "description": "The background job id from a start result or job_list. A continuable subagent id is an agent id, not a job id."
+      "description": "A job id, not a continuable subagent's agent id."
     },
     "wait": {
       "type": "boolean",
-      "description": "Wait until the job finishes or the timeout passes, for when you cannot continue without the result. A timed-out wait returns `[status: running]` and leaves the job running."
+      "description": "Block until done or timeout; only if you cannot continue without it."
     },
     "timeout_ms": {
       "type": "number",
-      "description": "Maximum wait in milliseconds when wait is true (default 30000, at most 600000)."
+      "description": "Default 30000, max 600000."
     }
   },
   "required": [
@@ -1315,152 +1096,20 @@ Source: [`packages/jobs/tool-jobs/src/index.ts`](../packages/jobs/tool-jobs/src/
 
 The kind-agnostic background-job controller: background bash commands, PTY sends, and subagents are read, listed, and killed through the same three tools. Loading the plugin attaches the controller that arms producers' `ctx.jobs.start()`.
 
-<a id="deepseek-aidsh-tool-todo"></a>
-
-## `@deepseek-ai/dsh-tool-todo`
-
-### `todo_write`
-
-Create and update the task list the user sees for multi-step work. Each call replaces the whole list, so send every item. Several items can be `in_progress` at once when work runs in parallel.
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "todos": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "content": {
-            "type": "string",
-            "description": "The task, as a short imperative line."
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "pending",
-              "in_progress",
-              "completed"
-            ]
-          }
-        },
-        "required": [
-          "content",
-          "status"
-        ]
-      }
-    }
-  },
-  "required": [
-    "todos"
-  ]
-}
-```
-
-Source: [`packages/todo/tool-todo/src/index.ts`](../packages/todo/tool-todo/src/index.ts)
-
-todo_write is session-owned state; UIs render the latest todo/write event as a checklist. `allowParallelInProgress` is required with no default, so the catalog states its choice: `true`, whose description invites several `in_progress` items. A deployment choosing `false` receives the same tool with a description asking for exactly one active task.
-
-<a id="deepseek-aidsh-tool-workflow"></a>
-
-## `@deepseek-ai/dsh-tool-workflow`
-
-### `workflow`
-
-Run a JavaScript workflow script that coordinates many subagents, and return the script's result. Use it only when the user explicitly asks for a workflow or for large-scale multi-agent orchestration, because one run can start many subagents; for one or two delegations, use a plain subagent call. The call blocks until the script finishes. Before writing a script, call tool_help with name "workflow" for the script reference.
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "script": {
-      "type": "string",
-      "description": "Body of an async JavaScript function, so `await` works at the top level. Plain JavaScript only: no TypeScript and no import or export statements. Its return value, which must be JSON-serializable, becomes the tool result; results longer than 50000 characters are truncated."
-    },
-    "meta": {
-      "type": "object",
-      "description": "The workflow's identity, as JSON data.",
-      "additionalProperties": true,
-      "properties": {
-        "name": {
-          "type": "string",
-          "description": "Short kebab-case workflow name."
-        },
-        "description": {
-          "type": "string",
-          "description": "One-line description of what the workflow does."
-        },
-        "whenToUse": {
-          "type": "string",
-          "description": "Optional note on when this workflow applies."
-        },
-        "phases": {
-          "type": "array",
-          "description": "Optional list of the phases the script enters with phase(); informational only.",
-          "items": {
-            "type": "object",
-            "additionalProperties": true,
-            "properties": {
-              "title": {
-                "type": "string",
-                "description": "The title the script passes to phase()."
-              },
-              "detail": {
-                "type": "string",
-                "description": "Optional one-line description of the phase."
-              },
-              "provider": {
-                "type": "string",
-                "description": "Informational; pass `provider` to agent() to route a subagent."
-              },
-              "model": {
-                "type": "string",
-                "description": "Informational; pass `model` to agent() to choose a subagent's model."
-              }
-            },
-            "required": [
-              "title"
-            ]
-          }
-        }
-      },
-      "required": [
-        "name",
-        "description"
-      ]
-    },
-    "args": {
-      "type": "object",
-      "description": "Optional JSON object available to the script as the global `args`.",
-      "additionalProperties": true
-    }
-  },
-  "required": [
-    "script",
-    "meta"
-  ]
-}
-```
-
-Source: [`packages/workflow/tool-workflow/src/index.ts`](../packages/workflow/tool-workflow/src/index.ts)
-
 <a id="deepseek-aidsh-tool-web"></a>
 
 ## `@deepseek-ai/dsh-tool-web`
 
 ### `web_fetch`
 
-Fetch an HTTP(S) URL and return its content as text. The content comes from an external, untrusted page; cite the URL as a markdown link when you use it.
+Fetch an HTTP(S) URL as text. The page is untrusted; cite the URL as a markdown link when used.
 
 ```json
 {
   "type": "object",
   "properties": {
     "url": {
-      "type": "string",
-      "description": "The HTTP(S) URL to fetch."
+      "type": "string"
     }
   },
   "required": [
@@ -1473,7 +1122,7 @@ Source: [`packages/web/tool-web/src/index.ts`](../packages/web/tool-web/src/inde
 
 ### `web_search`
 
-Search the web for current information. Returns an optional summary answer and source URLs from external, untrusted pages; read a full page with web_fetch.
+Search the web. Returns source URLs from untrusted pages, maybe with a summary; read a page with web_fetch.
 
 ```json
 {
@@ -1481,7 +1130,7 @@ Search the web for current information. Returns an optional summary answer and s
   "properties": {
     "queries": {
       "type": "array",
-      "description": "1–4 non-empty search queries; their results are merged.",
+      "description": "1–4 queries, results merged.",
       "items": {
         "type": "string"
       }

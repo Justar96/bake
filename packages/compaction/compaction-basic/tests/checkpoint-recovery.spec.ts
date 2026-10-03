@@ -227,7 +227,6 @@ describe('checkpoint working-state sections', () => {
     expect(context).toEqual({
       readFiles: ['src/a.ts', 'shot.png'],
       modifiedFiles: ['src/b.ts', 'src/new.ts'],
-      todos: undefined,
     })
     expect(formatCheckpointContext(context)).toEqual([{
       type: 'text',
@@ -235,31 +234,24 @@ describe('checkpoint working-state sections', () => {
     }])
   })
 
-  it('keeps the latest todo list with an open item and drops an emptied or finished one', () => {
-    const open = collectCheckpointContext([assistantCalls([
-      { name: 'todo_write', args: { todos: [{ content: 'old', status: 'pending' }] } },
-      { name: 'todo_write', args: { todos: [
-        { content: '  Write   tests ', status: 'in_progress' },
-        { content: 'Ship', status: 'pending' },
-        { content: 'Plan', status: 'completed' },
-      ] } },
-      { name: 'todo_write', args: { todos: [{ content: 'bad', status: 'unknown' }] } },
-    ])])
-    expect(formatCheckpointContext(open)).toEqual([{
-      type: 'text',
-      text: '<todo-list>\n- [in_progress] Write tests\n- [pending] Ship\n- [completed] Plan\n</todo-list>',
-    }])
+  it('reads the file lists of a released checkpoint that also carries a todo list, and drops the list', () => {
+    // Checkpoints written before the todo list was removed end with a
+    // `<todo-list>` section; it is opaque text now and is not carried forward.
+    const prior = createUserMessage({
+      content: frameSummary([{ type: 'text', text: 'summary' }], [{
+        type: 'text',
+        text: '<read-files>\nold.ts\n</read-files>\n\n<todo-list>\n- [pending] Carry me\n</todo-list>',
+      }]),
+      source: compactCheckpointSource(CompactionId('released')),
+    })
 
-    const emptied = collectCheckpointContext([assistantCalls([
-      { name: 'todo_write', args: { todos: [{ content: 'a', status: 'pending' }] } },
-      { name: 'todo_write', args: { todos: [] } },
-    ])])
-    expect(emptied.todos).toBeUndefined()
-    const finished = collectCheckpointContext([assistantCalls([
-      { name: 'todo_write', args: { todos: [{ content: 'a', status: 'completed' }] } },
-    ])])
-    expect(finished.todos).toBeUndefined()
-    expect(formatCheckpointContext(finished)).toEqual([])
+    const context = collectCheckpointContext([
+      prior,
+      assistantCalls([{ name: 'todo_write', args: { todos: [{ content: 'Ship', status: 'pending' }] } }]),
+    ])
+
+    expect(context).toEqual({ readFiles: ['old.ts'], modifiedFiles: [] })
+    expect(formatCheckpointContext(context)).toEqual([{ type: 'text', text: '<read-files>\nold.ts\n</read-files>' }])
   })
 
   it('carries a prior checkpoint forward, with a later modification removing a read path', () => {
@@ -269,7 +261,6 @@ describe('checkpoint working-state sections', () => {
         formatCheckpointContext({
           readFiles: ['old-read.ts', 'later-edited.ts'],
           modifiedFiles: ['old-edit.ts'],
-          todos: [{ content: 'Carry me', status: 'pending' }],
         }),
       ),
       source: compactCheckpointSource(CompactionId('prior')),
@@ -283,7 +274,6 @@ describe('checkpoint working-state sections', () => {
     expect(context).toEqual({
       readFiles: ['old-read.ts'],
       modifiedFiles: ['old-edit.ts', 'later-edited.ts'],
-      todos: [{ content: 'Carry me', status: 'pending' }],
     })
   })
 
@@ -329,10 +319,6 @@ describe('checkpoint working-state sections', () => {
       '<modified-files>',
       'src/index.ts',
       '</modified-files>',
-      '',
-      '<todo-list>',
-      '- [in_progress] Fix bug',
-      '</todo-list>',
     ].join('\n'))).toBe(true)
   })
 })

@@ -48,12 +48,15 @@ bun run check          # workspace, tsconfig paths, TUI types, tests, peer ident
 bun run test           # TUI unit and spec tests
 bun run test:runtime <file-or-dir>   # focused shared-runtime tests (Vitest on Node)
 bun run test:e2e       # keyless PTY scenarios against the built profile
+bun run test:integration   # *.e2e.ts suites against built output (Vitest on Node)
 bun run lint           # Oxlint over apps, packages, and scripts
 ```
 
 `bun run check` runs every target it is given and lists the ones that failed, rather than stopping at the first.
 
 The PTY scenarios replay recorded model responses while running real tools, then check persisted sessions, screen contents, and terminal restoration. They need no model key and do not touch your Bake home.
+
+The integration suites (`*.e2e.ts`) boot the assembled profiles, the real sandbox backends, and the built libraries, so run them after `bun run build`. They remove every `*_API_KEY` variable first, which makes the provider smokes skip themselves. `DSH_E2E_LIVE=1 bun run test:integration` keeps the keys and makes real, billed model calls. Seatbelt suites run only on macOS, the ACL suite only on Windows, and the Landlock suites only on Linux after `bun native/system/scripts/build.ts` builds the `landlock-run` launcher, which needs `musl-gcc`; `bun run build` builds only the Node addon.
 
 For shorter iterations after a runtime build:
 

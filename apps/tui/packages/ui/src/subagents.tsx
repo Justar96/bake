@@ -38,32 +38,8 @@ export interface SubagentEntry {
   readonly outcome?: 'completed' | 'failed' | 'stopped'
   readonly detail: string
   readonly inspectable: boolean
-  /** Workflow name for a recorded member; absent for direct delegation. */
-  readonly workflow?: string
   /** A durable routing decision. Absent for historical children without one. */
   readonly routing?: SubagentRouting
-}
-
-/** Display fields derived from recorded workflow runs and the owning agent's activity. */
-export interface WorkflowEntry {
-  readonly id: string
-  readonly name: string
-  readonly state: 'working' | 'unfinished' | 'completed' | 'failed' | 'stopped'
-  readonly total: number
-  readonly completed: number
-}
-
-/** Keep active orchestration visible even before it publishes its first child. */
-function delegationTitle(entries: readonly SubagentEntry[], workflows: readonly WorkflowEntry[], copy: TuiCopy): string {
-  const active = workflows.filter(run => run.state === 'working')
-  if (active.length === 1) return `${copy.workflowTitle} ${active[0]!.name}`
-  if (active.length > 1 || entries.length === 0 && workflows.length > 0) return `${copy.workflowsTitle} ${workflows.length}`
-  return `${copy.subagentsTitle} ${entries.length}`
-}
-
-function workflowStatus(run: WorkflowEntry, copy: TuiCopy): string {
-  return copy[run.state === 'working' ? 'subagentWorking' : run.state === 'completed' ? 'subagentCompleted'
-    : run.state === 'failed' ? 'subagentFailed' : run.state === 'stopped' ? 'subagentStopped' : 'workflowUnfinished']
 }
 
 const STATE = {
@@ -123,8 +99,8 @@ function shortCounts(counts: SubagentCounts, copy: TuiCopy): readonly string[] {
 }
 
 /** The list's tab: its name, the number of children, and how many are working and done. */
-export function subagentTab(entries: readonly SubagentEntry[], copy: TuiCopy, workflows: readonly WorkflowEntry[] = []): string {
-  return [delegationTitle(entries, workflows, copy), ...shortCounts(subagentCounts(entries), copy)].join(' · ')
+export function subagentTab(entries: readonly SubagentEntry[], copy: TuiCopy): string {
+  return [`${copy.subagentsTitle} ${entries.length}`, ...shortCounts(subagentCounts(entries), copy)].join(' · ')
 }
 
 /**
@@ -135,33 +111,30 @@ export function subagentTab(entries: readonly SubagentEntry[], copy: TuiCopy, wo
  * rail, the name and the total, then how many children are working, how many
  * are done, and how many cannot be read, when any are, in lowercase:
  * `↳ Subagents 5 · 2 working · 2 done`.
- * An active workflow replaces the title with its name; member names stay in
- * the sheet. Dim, so it stays supporting material beside the draft.
+ * Dim, so it stays supporting material beside the draft.
  * `hint` names the key that opens the sheet at the right edge, given up as
  * {@link tailFits} decides, as the composer's hint is. Focused, the rail holds
  * `>`, the row is drawn at full strength, and the hint says what Enter does.
  *
  * @param props.entries - the children, in the catalog's order.
- * @param props.workflows - recorded run progress, including runs without children.
  * @param props.columns - row width.
  * @param props.focused - whether arrow-key focus is on the row.
  * @param props.hint - the key that opens the sheet.
- * @returns the row, or null when there are no children or workflows.
+ * @returns the row, or null when there are no children.
  */
-export function SubagentRow({ entries, workflows = [], copy, columns, focused = false, hint }: {
+export function SubagentRow({ entries, copy, columns, focused = false, hint }: {
   readonly entries: readonly SubagentEntry[]
-  readonly workflows?: readonly WorkflowEntry[] | undefined
   readonly copy: TuiCopy
   readonly columns: number
   readonly focused?: boolean
   readonly hint?: string | undefined
 }): React.ReactElement | null {
-  if (entries.length === 0 && workflows.length === 0 || columns <= 0) return null
+  if (entries.length === 0 || columns <= 0) return null
   const counts = subagentCounts(entries)
   const summary = [...shortCounts(counts, copy),
     counts.unreadable > 0 ? `${counts.unreadable} ${copy.subagentUnreadable}` : ''].filter(Boolean).join(' · ')
   const rail = Math.min(COLUMN.rail, columns)
-  const head = delegationTitle(entries, workflows, copy)
+  const head = `${copy.subagentsTitle} ${entries.length}`
   const tail = focused ? copy.subagentsOpen : hint
   // The key goes before the head or the counts would be cut.
   const text = `${head}${summary === '' ? '' : ` · ${summary}`}`
@@ -241,8 +214,8 @@ const SUBAGENT_BAR = 24
  * and its detail lines. The sheet keeps them together when they fit; longer
  * routing evidence remains reachable with the sheet's page keys.
  */
-export const subagentLine = (index: number, workflowCount = 0, routing?: SubagentRouting): readonly [number, number] => {
-  const first = SUBAGENT_LEAD + workflowCount + index
+export const subagentLine = (index: number, routing?: SubagentRouting): readonly [number, number] => {
+  const first = SUBAGENT_LEAD + index
   const detail = routingContent(routing)
   return [first, first + 1 + Number(detail.route !== undefined) + Number(detail.difficulty !== undefined) + detail.notes.length]
 }
@@ -317,18 +290,12 @@ function subagentSummary(entries: readonly SubagentEntry[], copy: TuiCopy): stri
  * @param entries - the children, in the catalog's order.
  * @param selected - index of the child under the pointer.
  */
-export function subagentSheet(entries: readonly SubagentEntry[], selected: number, copy: TuiCopy,
-  workflows: readonly WorkflowEntry[] = []): readonly SheetLine[] {
+export function subagentSheet(entries: readonly SubagentEntry[], selected: number, copy: TuiCopy): readonly SheetLine[] {
   const counts = subagentCounts(entries)
   return [
     { text: '', parts: [...sheetBar(counts.done, entries.length, SUBAGENT_BAR, PALETTE.done),
       { text: `  ${subagentSummary(entries, copy)}`, dim: true }] },
-    ...workflows.map((run): SheetLine => ({
-      text: `${copy.workflowTitle} ${run.name} · ${workflowStatus(run, copy)} · ${run.completed}/${run.total} ${copy.subagentCountDone}`,
-      ...run.state === 'working' ? { color: PALETTE.running } : run.state === 'failed' ? { color: PALETTE.failed } : {},
-      dim: run.state === 'completed',
-    })),
-    { text: entries.length === 0 ? copy.workflowNoChildren : copy.subagentChoose, dim: true },
+    { text: copy.subagentChoose, dim: true },
     { text: '' },
     ...entries.flatMap((entry, index): SheetLine[] => {
       const shape = GLYPH[entry.state]
@@ -340,8 +307,7 @@ export function subagentSheet(entries: readonly SubagentEntry[], selected: numbe
         { text: '', selected: current, glyph: shape.glyph, ...'color' in shape ? { glyphColor: shape.color } : {},
           parts: [{ text: entry.label, bold: entry.inspectable && !receded, dim: !entry.inspectable || receded, color: agentTone(index) },
             { text: `  ${subagentStatus(entry, copy)}`, ...color === undefined || receded ? { dim: true } : { color } },
-            ...routing === undefined ? [] : [{ text: ` · ${routing.text}`, ...routing.caution ? { color: PALETTE.waiting } : { dim: true } }],
-            ...workflows.length === 0 ? [] : [{ text: ` · ${entry.workflow === undefined ? copy.subagentDirect : `${copy.workflowTitle} ${entry.workflow}`}`, dim: true }] ] },
+            ...routing === undefined ? [] : [{ text: ` · ${routing.text}`, ...routing.caution ? { color: PALETTE.waiting } : { dim: true } }] ] },
         ...current ? [{ text: `${entry.detail} · ${entry.id}${entry.inspectable ? '' : ` · ${copy.subagentNoTranscript}`}`,
           selected: false, glyph: ' ', dim: true }] : [],
         ...current && entry.routing !== undefined ? routingDetails(entry.routing, copy) : [],

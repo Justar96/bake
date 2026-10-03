@@ -60,7 +60,7 @@ The tool's `presentResult` reads the logged report back with `shellChangesOf(res
 
 | Bound | Default | Beyond it |
 |---|---|---|
-| Time before the command | 200 ms | No report |
+| Time before the command | 500 ms | No report |
 | Time after the command | 750 ms | Files found so far, `timedOut` |
 | Files with hunks | 20 | Path and status only |
 | Files listed | 200 | `omittedFiles` |

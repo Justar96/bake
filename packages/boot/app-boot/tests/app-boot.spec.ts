@@ -608,7 +608,7 @@ describe('auditStartupEntries', () => {
     const original = new Error('todo apply failure')
     await auditStartupEntries(ctxWith([
       { options: { id: 'missing-tool', name: './missing.mjs' } },
-      { fiber: fiber(3, original), options: { id: 'tool-todo', name: '@deepseek-ai/dsh-tool-todo' } },
+      { fiber: fiber(3, original), options: { id: 'tool-sample', name: '@deepseek-ai/dsh-tool-sample' } },
       {
         fiber: fiber(0, undefined, { ready: {}, missing: {} }, ['ready']),
         options: { id: 'waiting-tool', name: './waiting.mjs' },
@@ -618,14 +618,14 @@ describe('auditStartupEntries', () => {
     expect(warn).toHaveBeenCalledWith([
       `${NAME}: warning: 3 entries did not activate`,
       'missing-tool (./missing.mjs): failed to import',
-      `tool-todo (@deepseek-ai/dsh-tool-todo): ${original.stack!}`,
+      `tool-sample (@deepseek-ai/dsh-tool-sample): ${original.stack!}`,
       'waiting-tool (./waiting.mjs): pending (waiting for service: missing)',
       '',
     ].join('\n'))
   })
 
   it.each([
-    { id: 'tool-todo', required: false },
+    { id: 'tool-sample', required: false },
     { id: 'agent-loop', required: true },
   ])('reports a throwing disabled expression on $id (required: $required)', async ({ id, required }) => {
     const error = new Error('disabled evaluation failed')
@@ -725,12 +725,12 @@ describe('auditStartupEntries', () => {
     const optionalError = new Error('todo unavailable')
     const error = await auditStartupEntries(ctxWith([
       { fiber: fiber(3, requiredError), options: { id, name: './required.mjs' } },
-      { fiber: fiber(3, optionalError), options: { id: 'tool-todo', name: '@deepseek-ai/dsh-tool-todo' } },
+      { fiber: fiber(3, optionalError), options: { id: 'tool-sample', name: '@deepseek-ai/dsh-tool-sample' } },
     ]), NAME, warn).catch((error: unknown) => error)
     expect(error).toBeInstanceOf(StartupError)
     expect((error as Error).message).toContain(`${NAME}: startup failed: 1 required plugin did not activate`)
     expect((error as Error).message).toContain(`  ${id} (required)\n    Package: ./required.mjs`)
-    expect((error as Error).message).toContain('  tool-todo\n    Package: @deepseek-ai/dsh-tool-todo')
+    expect((error as Error).message).toContain('  tool-sample\n    Package: @deepseek-ai/dsh-tool-sample')
     expect(((error as Error).cause as AggregateError).errors).toEqual([requiredError, optionalError])
     expect(warn).not.toHaveBeenCalled()
   })

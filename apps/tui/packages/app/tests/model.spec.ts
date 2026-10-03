@@ -362,3 +362,67 @@ describe('Shift-Tab thinking toggle', () => {
     expect(controller.view.notice).toBe(`${dictionaries.en.thinkingUnsupported}: mock/plain`)
   })
 })
+
+describe('/thinking', () => {
+  it('sets an effort by id or name, and default restores the provider default', async () => {
+    const { controller, selection, model, handle } = await connected()
+    controller.submit('/thinking high')
+    await controller.drain()
+    expect(selection.current).toEqual({ provider: 'mock', model: 'model', reasoningEffort: 'high' })
+    expect(outcome(controller)).toContain(`${dictionaries.en.thinking}: High`)
+    controller.submit('/thinking Low')
+    await controller.drain()
+    expect(selection.current?.reasoningEffort).toBe('low')
+    controller.submit('Think a little')
+    await handle.agent.whenIdle()
+    expect(model.requests.at(-1)).toMatchObject({ model: 'model', reasoningEffort: 'low' })
+    controller.submit('/thinking default')
+    await controller.drain()
+    expect(selection.current).toEqual({ provider: 'mock', model: 'model' })
+    expect(outcome(controller)).toContain(dictionaries.en.providerDefault)
+  })
+
+  it('refuses an effort the route does not offer, and a route without efforts', async () => {
+    const { controller, selection } = await connected()
+    controller.submit('/thinking extreme')
+    await controller.drain()
+    expect(outcome(controller)).toContain(`${dictionaries.en.unknownEffort}: low high default`)
+    expect(selection.current).toEqual({ provider: 'mock', model: 'model' })
+    controller.submit('/model mock/plain')
+    await controller.drain()
+    controller.submit('/thinking high')
+    await controller.drain()
+    expect(outcome(controller)).toContain(`${dictionaries.en.thinkingUnsupported}: mock/plain`)
+  })
+
+  it('chooses from the route\'s efforts without arguments', async () => {
+    const { controller, selection } = await connected()
+    await controller.drain()
+    controller.submit('/thinking')
+    await vi.waitFor(() => expect(controller.view.interaction).toBeDefined())
+    const prompt = controller.view.interaction!
+    expect(prompt).toMatchObject({ kind: 'select', title: dictionaries.en.thinkingTitle, initial: 'default' })
+    controller.interactions.answer(prompt.id, 'high')
+    await controller.drain()
+    expect(selection.current?.reasoningEffort).toBe('high')
+  })
+
+  it('changes the effort during a turn, from its next step, while /model refuses', async () => {
+    const { controller, selection, model, handle } = await connected()
+    await controller.drain()
+    const started = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    model.response = async function* () { started.resolve(); await release.promise; yield* textResponse('Finished') }
+    try {
+      controller.submit('Start a turn')
+      await started.promise
+      controller.submit('/model mock/model high')
+      await controller.drain()
+      expect(outcome(controller)).toContain(dictionaries.en.modelBusy)
+      controller.submit('/thinking high')
+      await controller.drain()
+      expect(outcome(controller)).toContain(`${dictionaries.en.thinking}: High · ${dictionaries.en.thinkingNextStep}`)
+      expect(selection.current?.reasoningEffort).toBe('high')
+    } finally { release.resolve(); await handle.agent.whenIdle() }
+  })
+})

@@ -91,7 +91,11 @@ export class Actions {
     const out: Row[] = settle ? [...block(this.held.splice(0))] : []
     if (settle) this.announced = []
     for (const row of rows) {
-      if (row.kind === 'tool-call') { this.held.push(row); continue }
+      if (row.kind === 'tool-call') {
+        // A nested completion can re-seed a start already held; see `project`.
+        if (row.rootCallId === undefined || !this.held.some(call => call.callId === row.callId)) this.held.push(row)
+        continue
+      }
       if (row.kind === 'tool-result') {
         const index = this.held.findIndex(call => call.callId === row.callId && call.result === undefined)
         if (index >= 0) {
@@ -124,10 +128,27 @@ export function foldEvent(event: SessionEvent, rows: readonly Row[], actions: Ac
 }
 
 /**
- * The block one step's calls print as.
+ * The block one step's calls print as. Nested dispatches attach to their
+ * recorded root; a missing root leaves the dispatch visible on its own.
  * @param calls - one step's calls, in order.
  * @returns nothing, the call alone, or a group of them.
  */
 function block(calls: readonly ToolCallRow[]): readonly Row[] {
-  return calls.length < 2 ? [...calls] : [{ kind: 'tool-group', calls: [...calls] }]
+  const ids = new Set(calls.map(call => call.callId))
+  const dispatches = new Map<string, ToolCallRow[]>()
+  const roots: ToolCallRow[] = []
+  for (const call of calls) {
+    const root = call.rootCallId
+    if (root === undefined || root === call.callId || !ids.has(root)) roots.push(call)
+    else {
+      const children = dispatches.get(root) ?? []
+      children.push(call)
+      dispatches.set(root, children)
+    }
+  }
+  const grouped = roots.map(call => {
+    const children = dispatches.get(call.callId)
+    return children === undefined ? call : { ...call, dispatches: children }
+  })
+  return grouped.length < 2 ? grouped : [{ kind: 'tool-group', calls: grouped }]
 }

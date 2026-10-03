@@ -57,7 +57,7 @@ async function mount(columns: number, rows: number, overrides: Partial<AppProps>
     files: { query: undefined, entries: [], loading: false, error: undefined }, onReferenceQuery: () => {},
     completion: { entries: [], loading: false, error: undefined }, completionLimit: 8, resultLines: 8,
     committed: emptyTranscript, live: [], pending: [], status: 'idle', stopping: false,
-    command: undefined, notice: undefined, interaction: undefined, todos: undefined,
+    command: undefined, notice: undefined, interaction: undefined,
     model: 'mock/model', cwd: '/workspace', sessionId: 'screen', copy: dictionaries.en,
     frame: 'round', quitting: false, context: undefined,
     onSubmit: () => {}, onCancel: () => {}, onInterrupt: () => {}, onAnswer: () => {},
@@ -481,22 +481,21 @@ describe('composer placement', () => {
   it.each([[80, 24], [40, 12], [80, 7]])('opens and closes a sheet over history without lifting the input at %ix%i', async (columns, rows) => {
     const committed = appendTranscript(emptyTranscript,
       Array.from({ length: 30 }, (_, index) => ({ kind: 'user' as const, text: `Prompt ${index}` })))
-    const todos = Array.from({ length: 8 }, (_, index) => ({ text: `Task ${index}`,
-      status: index === 0 ? 'completed' as const : index === 1 ? 'in_progress' as const : 'pending' as const }))
-    const ui = await mount(columns, rows, { committed, todos })
+    const goal = { objective: 'Ship it', phase: 'active' as const, armed: true, rounds: 3, maxRounds: 256 }
+    const ui = await mount(columns, rows, { committed, goal })
     await vi.waitFor(async () => expect((await ui.history()).join('\n')).toContain('Prompt 29'))
     const anchor = inputRow(await ui.screen())
     expect(anchor).toBeGreaterThanOrEqual(0)
     // The screen with the input's row left out, which the last case types into.
     const around = (screen: readonly string[]): string => screen.filter((_, row) => row !== anchor).join('\n')
-    for (const [open, close] of [['\x14', '\u001b'], ['\x14', '\x14'], ['\x14', '\u001bdraft']] as const) {
+    for (const [open, close] of [['\x0f', '\u001b'], ['\x0f', '\x0f'], ['\x0f', '\u001bdraft']] as const) {
       const before = await ui.screen()
       const opened = ui.stdout.chunks.length
       ui.stdin.write(open)
       await vi.waitFor(async () => expect((await ui.screen()).join('\n')).toContain(dictionaries.en.sheetClose))
       let screen = await ui.screen()
       // Under the newest line, over the controls when there is room for both.
-      expect(screen.join('\n')).toContain(' Tasks 1/8 ')
+      expect(screen.join('\n')).toContain(dictionaries.en.goalActive)
       if (inputRow(screen) >= 0) expect(inputRow(screen), screen.join('\n')).toBe(anchor)
       // Opening only grows the frame; the history it pushes up is not replayed.
       expect(ui.stdout.chunks.slice(opened).join('')).not.toContain('\u001b[2J')

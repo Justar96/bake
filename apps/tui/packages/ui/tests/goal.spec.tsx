@@ -19,7 +19,7 @@ function props(goal: GoalEntry, status: AppProps['status'] = 'idle'): AppProps {
     files: { query: undefined, entries: [], loading: false, error: undefined }, onReferenceQuery: () => {},
     completion: { entries: [], loading: false, error: undefined }, completionLimit: 8, resultLines: 8,
     committed: emptyTranscript, live: [], pending: [], status, stopping: false,
-    command: undefined, notice: undefined, interaction: undefined, todos: undefined,
+    command: undefined, notice: undefined, interaction: undefined,
     model: 'mock/model', cwd: '/workspace', sessionId: 'session-goal', copy, frame: 'round', quitting: false, context: undefined,
     goal, onSubmit: () => {}, onCancel: () => {}, onInterrupt: () => {}, onAnswer: () => {},
   }

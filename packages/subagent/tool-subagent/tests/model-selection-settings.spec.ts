@@ -505,7 +505,6 @@ it('reads the saved default depth at each delegation without remounting the tool
     ctx.subagents.registerProvider({
       name: 'capture-depth',
       capabilities: { agentOptions: true, outputSchema: true, depthLimit: true, toolFilter: true, persona: true },
-      inheritsParentContext: false,
       start: async (request) => {
         depths.push(request.maxDepth)
         return { id: SessionId(`depth-${depths.length}`), localAgent: undefined,

@@ -161,8 +161,8 @@ function validateClientHalvesDeclared(): string[] {
  * presets' skill catalogs and injected each `/skill` body twice.
  *
  * A preset's row counts whether or not the preset disables it. A preset that
- * turns a row off still receives the host's copy, as `ptc` once received the
- * host `workflow` tool its own disabled rows leave out.
+ * turns a row off still receives the host's copy, as `ptc` once received a
+ * host tool its own disabled rows left out.
  *
  * The host compositions are the shipped profiles that mount the preset roster.
  * @param repoRoot Repository root to scan.

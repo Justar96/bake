@@ -30,31 +30,27 @@ const testToolSignal = new AbortController().signal
 // Pinned model-visible text. The description is one run-in paragraph built
 // from these pieces and is the tool's only guidance (no system-prompt section);
 // the sandbox paragraph appears only with a confining executor.
-const BASH_DESCRIPTION_BASE = 'Run a command with `bash -c` and return its stdout and stderr. '
-  + 'Each call starts a fresh shell, so directory changes and variables do not carry over to later calls. '
-  + 'Avoid filesystem-wide `find` scans. '
-  + 'A non-zero exit is reported in the result as `[exit code: N]`, not as a tool error. '
-  + 'Long output is truncated to its tail, and the full output is saved to a file named in the result when possible. '
-  + '`$DSH_HOME` is the harness home directory and `$DSH_SESSION_ID` is this session\'s id. '
-const BASH_DESCRIPTION_BACKGROUND = 'Run long builds and tests with `run_in_background`, which returns a job id at once; '
-  + 'read output with `job_output` and stop with `job_kill`.'
-const BASH_DESCRIPTION_NO_BACKGROUND = 'Background execution is not available, so a command must finish within its timeout.'
-const BASH_DESCRIPTION_SANDBOX = ' Commands may run in a file sandbox; trying one it might block is safe. '
-  + 'A blocked file operation reports `[sandbox: file access denied under <mode> mode]`: '
-  + 'a policy denial, not a bug in the command, so do not work around it. '
-  + 'When a wider mode would let a denied command succeed, retry that same command once in the same turn '
-  + 'with the narrowest sufficient `sandbox_permissions` and a `justification`. '
-  + 'That retry itself asks the user for approval, so there is no need to ask in chat first. '
-  + 'Request a wider mode up front only when this session already denied the same access. '
-  + 'A rejection is final for that command: stop and explain. Other commands can still run or escalate.'
-const BASH_PARAMETER_DESCRIPTIONS = {
-  command: 'The bash command to execute.',
-  description: 'Short summary of what the command does, shown to the user.',
-  timeoutMs: 'Timeout in milliseconds, capped at the maximum; the command is killed when it expires.',
-  workdir: 'Directory to run this command in. Defaults to your working directory; a relative path resolves against it.',
-  run_in_background: 'Run in the background, with no timeout.',
-  sandbox_permissions: 'Wider sandbox mode for retrying a denied command.',
-  justification: 'One sentence telling the user why this command needs wider access.',
+const BASH_DESCRIPTION_BASE = 'Run `bash -c` in a fresh shell (cd and variables do not persist); returns stdout and stderr. '
+  + 'Avoid filesystem-wide `find`. A non-zero exit shows as `[exit code: N]`, not a tool error. '
+  + 'Long output keeps its tail; the result names a file with all of it. '
+  + '`$DSH_HOME`: harness home; `$DSH_SESSION_ID`: session id. '
+const BASH_DESCRIPTION_BACKGROUND = 'Use `run_in_background` for long builds and tests, then `job_output` and `job_kill`.'
+const BASH_DESCRIPTION_NO_BACKGROUND = 'No background execution: a command must finish within its timeout.'
+const BASH_DESCRIPTION_SANDBOX = ' A file sandbox may block commands; trying is safe. '
+  + '`[sandbox: file access denied under <mode> mode]` is a policy denial: do not work around it. '
+  + 'If a wider mode would help, retry the same command once this turn with the narrowest '
+  + '`sandbox_permissions` and a `justification`; that asks the user, so do not ask in chat. '
+  + 'Request wider access up front only after this session was denied the same access. '
+  + 'A rejection is final for that command.'
+// `command` is self-describing, so it carries no description.
+const BASH_PARAMETER_DESCRIPTIONS: Record<string, string | undefined> = {
+  command: undefined,
+  description: 'Shown to the user.',
+  timeoutMs: 'Capped; kills the command on expiry.',
+  workdir: 'Defaults to the working directory.',
+  run_in_background: 'No timeout.',
+  sandbox_permissions: 'For retrying a denied command.',
+  justification: 'One sentence for the user.',
 }
 
 /** Every parameter description of one schema, keyed by parameter name. */
@@ -64,7 +60,7 @@ function parameterDescriptions(schema: { parameters: { properties?: unknown } })
 }
 
 /** The pinned descriptions of the named parameters. */
-function pinnedParameters(...names: Array<keyof typeof BASH_PARAMETER_DESCRIPTIONS>): Record<string, string> {
+function pinnedParameters(...names: string[]): Record<string, string | undefined> {
   return Object.fromEntries(names.map(name => [name, BASH_PARAMETER_DESCRIPTIONS[name]]))
 }
 
@@ -1303,7 +1299,7 @@ describe('the model-facing bash tool builds its request from named args only (no
   it('names the harness environment variables useful to the model', async () => {
     const { ctx } = await setupRecording()
     const description = ctx.tools.get('bash')?.description ?? ''
-    expect(description).toContain('`$DSH_HOME` is the harness home directory and `$DSH_SESSION_ID` is this session\'s id.')
+    expect(description).toContain('`$DSH_HOME`: harness home; `$DSH_SESSION_ID`: session id.')
     // DSH_SHELL=1 only marks the process, so it is not described.
     expect(description).not.toContain('DSH_SHELL')
   })

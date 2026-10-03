@@ -9,7 +9,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type {
-  ContinuableCreateSpec,
   ResolvedSubagentStartRequest,
   SubagentCapabilities,
   SubagentProvider,
@@ -46,22 +45,18 @@ class SpawnInProcessProvider implements SubagentProvider {
     toolFilter: true,
     persona: true,
   }
-  // Context contract: a spawned child starts fresh — it never sees the parent conversation.
-  readonly inheritsParentContext = false
-
   constructor(readonly name: string) {}
 
   start(request: ResolvedSubagentStartRequest) {
-    // Fresh child: no seed. The shared driver mints ids, stamps cwd/lineage/
-    // depth, drives the one-shot (including the structured capture when the
-    // request carries an outputSchema), and maps the result.
-    return startInProcessRun(request, {})
+    // The shared driver mints ids, stamps cwd/lineage/depth, drives the
+    // one-shot (including the structured capture when the request carries an
+    // outputSchema), and maps the result.
+    return startInProcessRun(request)
   }
 
-  prepareContinuable(): Promise<ContinuableCreateSpec> {
-    // A spawned child starts fresh, so it contributes no seed; the continuation
-    // manager owns every later operation on it.
-    return Promise.resolve({})
+  prepareContinuable(): Promise<void> {
+    // The continuation manager owns every operation on a continuable child.
+    return Promise.resolve()
   }
 }
 

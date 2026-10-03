@@ -16,7 +16,7 @@ const live = mode === 'tool' ? [{ kind: 'tool-call', callId: 'c', tool: 'bash', 
 const props = (): any => ({ files: { query: undefined, entries: [], loading: false, error: undefined }, onReferenceQuery: () => {},
   completion: { entries: [], loading: false, error: undefined }, completionLimit: 8, resultLines: 8,
   committed, live, pending: [], status: 'running', stopping: false, command: undefined, notice: undefined, interaction: undefined,
-  todos: undefined, model: 'm/m', cwd: '/w', sessionId: 's', copy: dictionaries.en, frame: 'round', quitting: false, context: undefined,
+  model: 'm/m', cwd: '/w', sessionId: 's', copy: dictionaries.en, frame: 'round', quitting: false, context: undefined,
   clock, onSubmit() {}, onCancel() {}, onInterrupt() {}, onAnswer() {} })
 const ui = render(<App {...props()} />, { stdout: out as any, stderr: out as any, stdin: input as any, patchConsole: false, exitOnCtrlC: false, maxFps: 1e6 })
 const heap = () => { (globalThis as any).gc(); return Math.round(process.memoryUsage().heapUsed / 1e6) }

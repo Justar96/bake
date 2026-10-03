@@ -206,13 +206,13 @@ export class AgentPresets extends TypertRemoteService {
     // Advisory, not fatal: a synchronous `agent/created` listener that throws
     // VETOES publication, and this service must not, because composing an agent
     // outside the roster is legal — `recompose` binds exactly such a bare agent
-    // below, and the ACP, SDK-server, and headless entry points all create one.
+    // below, and the headless and desktop entry points create one.
     // The invariant companion is the check that fails loud, at assembly. Why an
     // unjoined agent matters at all has one home: the [Agent
     // Note](../../../../.agents/notes/implemented/architecture/2026-08-10-host-plane-ownership-after-presets.md).
     //
     // Known false positive: a session created bare and bound later by
-    // `recompose` is warned about once, before its first bind. Shipped Web
+    // `recompose` is warned about once, before its first bind. Shipped
     // sessions mount in `setup`, and children join through `composeFrom`
     // before publication.
     ctx.on('agent/created', ({ agent }) => {

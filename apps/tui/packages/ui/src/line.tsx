@@ -17,7 +17,7 @@ import { wrapDraft } from './editor.ts'
 import { sliceSpans } from './markdown.ts'
 import { chromeFor, COLUMN, COMPOSER_BUDGET, HINT_MIN_COLUMNS, MARKER, RULE, TREE, windowOf, type Budget, type ChromeLayout, type FrameStyle } from './layout.ts'
 import { PALETTE, type PaletteColor } from './palette.ts'
-import { fittedGroup, hintFor, isBlank, present, softBreaks, streamingThought, styleOf, tailLines, type ComposerState, type Hint, type LineStyle, type PresentedLine, type ResultBound, type Span } from './present.ts'
+import { fittedAction, fittedGroup, hintFor, isBlank, present, SCRIPT_TOOL, softBreaks, streamingThought, styleOf, tailLines, type ComposerState, type Hint, type LineStyle, type PresentedLine, type ResultBound, type Span } from './present.ts'
 import type { Row } from './rows.ts'
 import { FOLD_REST, foldFrame, FRAME_MS, formatElapsed, SPINNER_REST, spinnerFrame, type Clock, type Outcome, type Spinner, type TurnSummary } from './activity.ts'
 import { useBeat } from './beat.tsx'
@@ -280,6 +280,7 @@ export function LiveRegion({ rows, budget, frame, limit, result, clock }: {
   // it is the newest row; a finished thought folds to its transcript preview.
   const lines = tailLines(rows.flatMap((row, index) => row.kind === 'tool-group'
     ? fittedGroup(row.calls, result, limit, height, budget.output)
+    : row.kind === 'tool-call' && row.tool === SCRIPT_TOOL ? fittedAction(row, result, limit, height, budget.output)
     : row.kind !== 'reasoning' ? present(row, result, undefined, budget.measure)
       : index === rows.length - 1 ? streamingThought(row, result, limit, height, budget.measure)
         : present(row, result, line => wrappedRows(line, budget), budget.measure)), limit, height)

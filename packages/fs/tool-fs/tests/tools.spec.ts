@@ -139,14 +139,10 @@ function text(result: { content: { type: string; text?: string }[] }): string {
 
 /** The exact model-facing descriptions; they are the tools' only guidance. */
 const fsDescriptions = {
-  read: 'Read a UTF-8 text file as numbered lines, paged for long files. '
-    + 'Unlike cat in a shell, it counts as a read for later `write` calls.',
-  write: 'Create a UTF-8 text file or replace all of its content. '
-    + 'Replacing an existing file requires a current read of it. '
-    + 'For a partial change, edit avoids resending the whole file.',
-  edit: 'Replace literal text in an existing UTF-8 text file. '
-    + 'Each old_string must match the current file exactly once unless replace_all is set. '
-    + 'Put several changes to one file in `edits`, each matched against the original.',
+  read: 'Read a UTF-8 text file as numbered lines; unlike cat, it counts as a read for `write`.',
+  write: 'Create or overwrite a UTF-8 file; overwriting requires a current read. Use edit for partial changes.',
+  edit: 'Replace exact text in a UTF-8 file; each old_string must match once unless replace_all. '
+    + 'Batch one file\'s changes in `edits`, each matched against the original.',
 } as const
 
 describe('session cwd resolution', () => {
@@ -184,7 +180,7 @@ describe('registration', () => {
     const { ctx } = await setup()
     for (const schema of ctx.tools.schemas()) {
       const props = (schema.parameters as { properties: Record<string, { description?: string }> }).properties
-      expect(props['file_path']?.description).toBe('Absolute path, or relative to the working directory.')
+      expect(props['file_path']?.description).toBe('Absolute, or relative to the working directory.')
     }
   })
 
@@ -205,10 +201,11 @@ describe('registration', () => {
     for (const name of ['read', 'write', 'edit'] as const) {
       expect(schema(name)?.description).toBe(fsDescriptions[name])
     }
-    expect(props('edit')['old_string']?.description).toBe('Exact text to replace, including whitespace, without read\'s line numbers.')
-    expect(props('edit')['new_string']?.description).toBe('Replacement text; empty deletes the match.')
-    expect(props('edit')['replace_all']?.description).toBe('Replace every occurrence.')
-    expect(props('edit')['edits']?.description).toBe('Several replacements, instead of old_string and new_string.')
+    expect(props('edit')['old_string']?.description).toBe('Exact, with whitespace; no read line numbers.')
+    // Self-describing parameters carry no description.
+    expect(props('edit')['new_string']?.description).toBeUndefined()
+    expect(props('edit')['replace_all']?.description).toBeUndefined()
+    expect(props('edit')['edits']?.description).toBe('Instead of old_string/new_string.')
     expect((schema('edit')?.parameters as { required?: string[] }).required).toEqual(['file_path'])
   })
 
@@ -753,7 +750,7 @@ describe('read caps are plugin config', () => {
     expect(overCap.isError).toBe(true)
     expect(text(overCap)).toContain('less than or equal to 2')
     const readSchema = ctx.tools.schemas().find(s => s.name === 'read')
-    expect(JSON.stringify(readSchema)).toContain('Defaults to 2.')
+    expect(JSON.stringify(readSchema)).toContain('Maximum lines; default 2.')
   })
 
   it('a configured readMaxLineLength truncates lines at the configured length', async () => {
@@ -924,10 +921,8 @@ describe('sandbox escalation API (write/edit)', () => {
     for (const name of ['write', 'edit'] as const) {
       const props = fsSchema(ctx, name).parameters.properties
       expect(props['sandbox_permissions']?.enum).toEqual(['workspace-write', 'danger-full-access'])
-      expect(props['sandbox_permissions']?.description).toBe(
-        'Wider sandbox mode for one retry after the sandbox denied this operation; needs a justification and the user\'s approval.')
-      expect(props['justification']?.description).toBe(
-        'Required with sandbox_permissions: one sentence telling the user why this operation needs wider access.')
+      expect(props['sandbox_permissions']?.description).toBe('One retry after a sandbox denial; asks the user.')
+      expect(props['justification']?.description).toBe('One sentence for the user; required with sandbox_permissions.')
     }
   })
 

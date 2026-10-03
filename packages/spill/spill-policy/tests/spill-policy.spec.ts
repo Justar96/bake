@@ -21,22 +21,12 @@ import type { PostToolDecision, ToolExecution, ToolExecutionToken } from '@deeps
 import { SpillLocator, SpillStore } from '@deepseek-ai/dsh-spill'
 import type { SaveTextSpill, SpillRef } from '@deepseek-ai/dsh-spill'
 import * as SpillPolicy from '@deepseek-ai/dsh-spill-policy'
-import NodeRuntime, { type Config as NodeRuntimeConfig } from '@deepseek-ai/dsh-ptc-runtime-node'
-import FileSystem from '@deepseek-ai/dsh-fs-local'
-import Subprocess from '@deepseek-ai/dsh-subprocess-local'
-import Sandbox from '@deepseek-ai/dsh-sandbox-local'
-import SandboxPolicy from '@deepseek-ai/dsh-sandbox-policy'
-import SessionProjections from '@deepseek-ai/dsh-session-projection'
+import CodemodeRuntime, { type Config as CodemodeRuntimeConfig } from '@deepseek-ai/dsh-ptc-runtime-codemode'
 
-async function mountRuntime(ctx: Context, config: NodeRuntimeConfig = {}): Promise<void> {
+async function mountRuntime(ctx: Context, config: CodemodeRuntimeConfig = {}): Promise<void> {
   onTestFinished(async () => { await ctx.fiber.dispose() })
   if (!ctx.get('sessions')) await ctx.plugin(SessionStore)
-  if (!ctx.get('fs')) await ctx.plugin(FileSystem)
-  if (!ctx.get('subprocess')) await ctx.plugin(Subprocess)
-  if (!ctx.get('sandbox')) await ctx.plugin(Sandbox, {})
-  if (!ctx.get('sessionProjections')) await ctx.plugin(SessionProjections)
-  if (!ctx.get('sandboxPolicy')) await ctx.plugin(SandboxPolicy, { mode: 'danger-full-access' })
-  await ctx.plugin(NodeRuntime, config)
+  await ctx.plugin(CodemodeRuntime, config)
 }
 
 function observedAgent(ctx: Context, id: string, observe: (type: string, data: unknown) => void) {
@@ -252,7 +242,7 @@ describe('read skip', () => {
 })
 
 describe('the durable dispatch-log arm', () => {
-  /** Boot code mode + the policy + the Node runtime; run one program via the real bridge. */
+  /** Boot code mode + the policy + the QuickJS runtime; run one program via the real bridge. */
   async function runCodeWith(program: string, maxInlineBytes: number, extraTools: ToolDefinition[] = []) {
     const ctx = new Context()
     await ctx.plugin(SystemPrompt)

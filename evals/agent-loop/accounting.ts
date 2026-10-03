@@ -1,7 +1,13 @@
 /** Normalize captured provider counters; cache and reasoning are subsets, never extra output. */
 export function normalizeWire(api: string, events: readonly Record<string, any>[]) {
   if (events.length === 0) return undefined
-  const usage = Object.assign({}, ...events)
+  const merged = Object.assign({}, ...events)
+  // Chat Completions names the same counters prompt and completion tokens.
+  const usage = api === 'openai-completions' ? {
+    ...merged, input_tokens: merged.prompt_tokens, output_tokens: merged.completion_tokens,
+    input_tokens_details: { cached_tokens: merged.prompt_tokens_details?.cached_tokens ?? merged.prompt_cache_hit_tokens ?? 0 },
+    output_tokens_details: merged.completion_tokens_details,
+  } : merged
   const numeric = (key: string) => typeof usage[key] === 'number' && Number.isFinite(usage[key]) && usage[key] >= 0
   if (!numeric('input_tokens') || !numeric('output_tokens')) return undefined
   const cacheReadTokens = api === 'anthropic-messages' ? (usage.cache_read_input_tokens ?? 0) : (usage.input_tokens_details?.cached_tokens ?? 0)

@@ -130,6 +130,10 @@ export type Row =
 export interface ToolCallRow {
   readonly kind: 'tool-call'
   readonly callId: string
+  /** Root program owning a nested dispatch; opaque ids are paired by equality. */
+  readonly rootCallId?: string
+  /** Nested dispatches belonging to this root, in first-observed call order. */
+  readonly dispatches?: readonly ToolCallRow[]
   readonly tool: string
   readonly input: string
   readonly detail?: readonly CardLine[]
@@ -154,12 +158,14 @@ export interface ToolCallLive {
 }
 
 /**
- * The calls a row holds. The row itself for a call, and its calls for a group.
+ * Every call a row holds. Nested dispatches precede their owning root, so an
+ * active nested tool names the phase while its program waits for it.
  * @param row - any row.
  * @returns the calls, empty when the row is neither.
  */
 export const callsOf = (row: Row): readonly ToolCallRow[] =>
-  row.kind === 'tool-call' ? [row] : row.kind === 'tool-group' ? row.calls : []
+  (row.kind === 'tool-call' ? [row] : row.kind === 'tool-group' ? row.calls : [])
+    .flatMap(call => [...call.dispatches ?? [], call])
 
 /** How a call ended. A `tool-result` row's fields, without its identity. */
 export type ToolOutcome = Omit<Extract<Row, { readonly kind: 'tool-result' }>, 'kind' | 'callId'>

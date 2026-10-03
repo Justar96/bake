@@ -61,13 +61,11 @@ export class FsSandboxController {
       sandbox_permissions: {
         type: 'string',
         enum: [...this.escalationModes],
-        description: 'Wider sandbox mode for one retry after the sandbox denied this operation; '
-          + 'needs a justification and the user\'s approval.',
+        description: 'One retry after a sandbox denial; asks the user.',
       },
       justification: {
         type: 'string',
-        description: 'Required with sandbox_permissions: one sentence telling the user why this '
-          + 'operation needs wider access.',
+        description: 'One sentence for the user; required with sandbox_permissions.',
       },
     }
   }

@@ -53,6 +53,7 @@ import {
   type JsonlPhysicalIdentity,
   type PreparedJsonlMigration,
 } from './generation.ts'
+import { isENOENT } from '@deepseek-ai/dsh-util-values'
 
 export type { JsonlCompression } from './format.ts'
 
@@ -179,11 +180,6 @@ function fileRevision(identity: JsonlPhysicalIdentity): PersistenceRevision {
     identity.mtimeNs,
     identity.ctimeNs,
   ].join(':'))
-}
-
-/** Whether a filesystem error means absence; every non-ENOENT failure must surface. */
-function isENOENT(error: unknown): boolean {
-  return (error as NodeJS.ErrnoException | null)?.code === 'ENOENT'
 }
 
 /** Whether a filesystem-owned failure should retain its original errno and path. */

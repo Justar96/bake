@@ -284,24 +284,22 @@ describe('registration', () => {
     const { ctx } = await setup()
     const schema = (name: string) => ctx.tools.schemas().find(candidate => candidate.name === name)
     const props = (name: string) => (schema(name)?.parameters as { properties: Record<string, { description?: string }> }).properties
-    expect(props('glob')['pattern']?.description).toBe('Glob pattern, e.g. "**/*.ts" or "src/**/*.test.js". '
-      + 'A pattern without "/" matches file names at any depth, so "*.ts" searches the whole tree.')
-    expect(props('glob')['path']?.description).toBe('Directory to search. Defaults to the working directory; relative paths resolve against it.')
-    expect(schema('grep')?.description).toBe('Search file contents with a ripgrep regular expression, as a bounded alternative to grep or rg in a shell. '
-      + 'Hidden and ignored files are skipped unless path points at them. '
-      + 'Scope `path` to the repository, never `/` or `$HOME`. '
-      + 'Returns only the matching lines, numbered and grouped by file; read a matched file for surrounding context. '
-      + 'Up to 250 matches are shown; a larger result says so and reports where the full list was saved.')
-    expect(props('grep')['path']?.description).toBe('File or directory to search. Defaults to the working directory; relative paths resolve against it.')
+    expect(props('glob')['pattern']?.description).toBe('Without "/", matches file names at any depth.')
+    expect(props('glob')['path']?.description).toBe('Defaults to the working directory.')
+    expect(schema('grep')?.description).toBe('Search file contents by ripgrep regex; returns numbered matching lines by file. '
+      + 'Skips hidden and ignored files unless path targets them. Keep `path` in the repository, never `/` or `$HOME`. '
+      + 'Past 250 matches the result names a file with all of them.')
+    expect(props('grep')['pattern']?.description).toBeUndefined()
+    expect(props('grep')['path']?.description).toBe('File or directory; defaults to the working directory.')
+    expect(props('grep')['include']?.description).toBe('One file glob, e.g. "*.{js,jsx}"; no lists or negation.')
   })
 })
 
 /** The glob description for one over-cap behavior clause. */
 function globDescription(overCap: string): string {
-  return 'Find files, not directories, whose paths match a glob pattern. '
-    + 'It is a bounded, newest-first alternative to find in a shell: hidden and ignored files are included, but VCS metadata is not. '
-    + 'Scope `path` to the repository, never `/` or `$HOME`. '
-    + `A result over 100 paths ${overCap}, says so, and reports where the full list was saved.`
+  return 'Find files by glob, newest first, including hidden and ignored ones (not VCS metadata). '
+    + 'Keep `path` in the repository, never `/` or `$HOME`. '
+    + `Past 100 paths it ${overCap} and names a file with all of them.`
 }
 
 /** The prompt a bare system-prompt service renders, proving the tools add no section. */

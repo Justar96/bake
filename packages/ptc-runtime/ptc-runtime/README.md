@@ -23,7 +23,7 @@ Use `dsh-ptc-runtime` to run one model-written program against host-provided asy
 <a id="use-this-package"></a>
 ## Use this package
 
-Choose this package when you compose a deployment that executes model-written programs, consume `ctx.ptcRuntime` directly, or build a backend that runs programs. PTC mode in `dsh-tools` uses it for tool programs, and `dsh-workflow-ptc` uses it for workflow orchestration. Each consumer owns the content returned to its model.
+Choose this package when you compose a deployment that executes model-written programs, consume `ctx.ptcRuntime` directly, or build a backend that runs programs. PTC mode in `dsh-tools` uses it for tool programs. Each consumer owns the content returned to its model.
 
 ### Run a program
 
@@ -40,7 +40,7 @@ const result = await ctx.ptcRuntime.run(spec)
 
 ### Choose a backend
 
-Backends expose `language` and `isolation` as diagnostic descriptors; neither grants authority or proves confinement. [`dsh-ptc-runtime-codemode`](../ptc-runtime-codemode/README.md) executes erasable TypeScript in a fresh QuickJS WebAssembly VM on a worker thread, where the bindings are the only capability; it is the shipped `run_code` runtime. [`dsh-ptc-runtime-node`](../ptc-runtime-node/README.md) executes erasable TypeScript in a fresh managed Node process under the resolved sandbox policy; shipped compositions use it for workflow scripts. The private [`dsh-experimental-ptc-runtime-python`](../../experimental/ptc-runtime-python/README.md) provider executes Python in a fresh CPython subprocess without file confinement. `sandboxMode` advertises a provider's deployment file-policy mode, or is absent when that capability is unsupported.
+Backends expose `language` and `isolation` as diagnostic descriptors; neither grants authority or proves confinement. [`dsh-ptc-runtime-codemode`](../ptc-runtime-codemode/README.md) executes erasable TypeScript in a fresh QuickJS WebAssembly VM on a worker thread, where the bindings are the only capability; it is the shipped `run_code` runtime. `sandboxMode` advertises a provider's deployment file-policy mode, or is absent when that capability is unsupported.
 
 ### Name your bindings portably
 
@@ -62,11 +62,11 @@ This section explains the design behind the seam; observable behavior is fully c
 
 ### Design concept
 
-The package is the Service Definition role of the PTC execution capability seam ([capability seams](../../../.agents/notes/implemented/architecture/2026-06-13-capability-seams.md)): an abstract `PtcRuntime extends Service` registered as `ctx.ptcRuntime`, plus the vocabulary providers and consumers share. Providers subclass `PtcRuntime`, implement `resolve` and `run`, and register the service. PTC mode in `dsh-tools` owns tool bindings, while `dsh-workflow-ptc` owns workflow hooks and child agents. The runtime stays ignorant of tools and sessions by contract: it receives a program, named async bindings and resolved execution options, then returns captured output, the outcome and applicable sandbox facts.
+The package is the Service Definition role of the PTC execution capability seam ([capability seams](../../../.agents/notes/implemented/architecture/2026-06-13-capability-seams.md)): an abstract `PtcRuntime extends Service` registered as `ctx.ptcRuntime`, plus the vocabulary providers and consumers share. Providers subclass `PtcRuntime`, implement `resolve` and `run`, and register the service. PTC mode in `dsh-tools` owns tool bindings. The runtime stays ignorant of tools and sessions by contract: it receives a program, named async bindings and resolved execution options, then returns captured output, the outcome and applicable sandbox facts.
 
 ### Service API
 
-The readonly `timeout` descriptor exposes numeric `{ defaultMs, maxMs }` for consumer presentation; an absent descriptor means numeric overrides are unsupported. An omitted `timeoutMs` selects the provider default; a number requests a validated, capped elapsed budget; explicit `null` requests no elapsed deadline. A provider rejects choices it does not support. The Node workflow adapter requests `null`, while the model-facing `run_code` tool accepts only positive numeric overrides.
+The readonly `timeout` descriptor exposes numeric `{ defaultMs, maxMs }` for consumer presentation; an absent descriptor means numeric overrides are unsupported. An omitted `timeoutMs` selects the provider default, and a number requests a validated, capped elapsed budget. A provider rejects choices it does not support. The model-facing `run_code` tool accepts only positive numeric overrides.
 
 `executionInstructions` supplies provider-owned usage guidance, or an empty string when none is needed. Consumers can include it in their program presentation without identifying the provider from its language or isolation descriptor; PTC includes it in the logged `run_code` schema.
 
@@ -76,7 +76,7 @@ The exhaustive semantics live in the [PTC runtime subsystem reference](../../../
 
 ### Vocabulary
 
-`PtcRunRequest` carries the program, host bindings, cancellation and optional execution choices. `PtcRunSpec` requires the resolved cwd and an explicit numeric or null deadline choice. `PtcBindingNamespace` declares program globals and optional typed rejection constructors. `PtcRunResult` separates logs/value, failure and `PtcRunSandbox` facts; exact fields and provider obligations live in [`src/types.ts`](src/types.ts).
+`PtcRunRequest` carries the program, host bindings, cancellation and optional execution choices. `PtcRunSpec` requires the resolved cwd and a numeric deadline. `PtcBindingNamespace` declares program globals and optional typed rejection constructors. `PtcRunResult` separates logs/value, failure and `PtcRunSandbox` facts; exact fields and provider obligations live in [`src/types.ts`](src/types.ts).
 
 ### Portable identifiers
 
@@ -97,12 +97,10 @@ Binding-global and error-class names are language-portable: they must match the 
 <a id="further-exploration"></a>
 ## Further Exploration
 
-Read these when the package-level contract is not enough. They move from the PTC mode consumer to the backends and the capability-seam model.
+Read these when the package-level contract is not enough. They move from the PTC mode consumer to the backend and the capability-seam model.
 
 - [PTC mode Agent Note](../../../.agents/notes/implemented/feature/2026-06-15-ptc.md) — how the tool registry consumes `ctx.ptcRuntime` and presents `run_code` to the model.
 - [QuickJS backend](../ptc-runtime-codemode/README.md) — the shipped `run_code` execution backend.
-- [Node process backend](../ptc-runtime-node/README.md) — the sandboxed Node backend for workflow scripts.
-- [Experimental Python backend](../../experimental/ptc-runtime-python/README.md) — the private CPython subprocess provider and its fd-3 protocol.
 - [PTC runtime subsystem reference](../../../docs/subsystems/ptc-runtime.md) — request/result vocabulary, bindings, and the `ctx.ptcRuntime` cordis surface.
 - [Capability seams](../../../.agents/notes/implemented/architecture/2026-06-13-capability-seams.md) — the Service Definition / Service Provider / Consumer split.
 
@@ -111,7 +109,7 @@ Read these when the package-level contract is not enough. They move from the PTC
 <a id="model-experience"></a>
 ## Model Experience
 
-Indirectly, through PTC mode in `dsh-tools` and the workflow adapter, which present program outcomes through their own tool results.
+Indirectly, through PTC mode in `dsh-tools`, which presents program outcomes through its own tool results.
 
 #### KV Cache effect
 
@@ -126,7 +124,7 @@ These limits define what the seam cannot do; they are current package constraint
 
 - **`run()` is one-shot** — `logs` arrive only on the resolved `PtcRunResult`; the seam exposes no streaming-log or progress API for a live program's output.
 - **No state survives between runs** — every request runs against a fresh world; a persistent REPL-style kernel is deferred until a backend brings its own logging story.
-- **Providers have different confinement capabilities** — the shipped Node provider enforces a resolved file policy, while the private experimental Python provider rejects an explicit policy. No container provider is supplied.
+- **Providers have different confinement capabilities** — the QuickJS provider's only capability is its bindings, while the Node provider enforces a resolved file policy. No container provider is supplied.
 - **No uniform binding byte cap applies across providers** — each provider owns its transport limits; a binding can still allocate memory before its result reaches those limits.
 
 <a id="dev-note"></a>

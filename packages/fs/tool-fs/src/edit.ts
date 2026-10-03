@@ -163,20 +163,19 @@ export function applyEditTool(ctx: Context, sandbox: FsSandboxController): void 
     // description is resent with every request. Under the shipped
     // content-anchored policy the exact unique match is the precondition, so
     // the file need not have been read with `read`.
-    description: 'Replace literal text in an existing UTF-8 text file. '
-      + 'Each old_string must match the current file exactly once unless replace_all is set. '
-      + 'Put several changes to one file in `edits`, each matched against the original.',
+    description: 'Replace exact text in a UTF-8 file; each old_string must match once unless replace_all. '
+      + 'Batch one file\'s changes in `edits`, each matched against the original.',
     parameters: {
-      file_path: { type: 'string', required: true, description: 'Absolute path, or relative to the working directory.' },
+      file_path: { type: 'string', required: true, description: 'Absolute, or relative to the working directory.' },
       old_string: {
         type: 'string',
-        description: 'Exact text to replace, including whitespace, without read\'s line numbers.',
+        description: 'Exact, with whitespace; no read line numbers.',
       },
-      new_string: { type: 'string', description: 'Replacement text; empty deletes the match.' },
-      replace_all: { type: 'boolean', description: 'Replace every occurrence.' },
+      new_string: { type: 'string' },
+      replace_all: { type: 'boolean' },
       edits: {
         type: 'array',
-        description: 'Several replacements, instead of old_string and new_string.',
+        description: 'Instead of old_string/new_string.',
         items: {
           type: 'object',
           additionalProperties: false,
