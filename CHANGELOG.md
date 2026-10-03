@@ -4,6 +4,8 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-10-03
+
 - A user message with several text blocks, such as two Claude Code hook contexts or a prompt followed by its attachments, reaches the model as separate text parts instead of one string with the blocks run together. A tool result's text blocks stay apart the same way, joined with a newline on wires that take one string.
 - A shell command's change report may take up to 500 ms, instead of 200 ms, to read the workspace before the command starts, so the first command of a macOS session under `workspace-write` no longer loses its report to a cold start.
 - `/thinking [effort|default]` changes the reasoning effort without changing the model, also during a turn, from its next step; with no argument it opens a picker of the route's efforts. `/model` still waits for the turn and now says to use `/thinking` or Shift+Tab instead. The composer's key help names Shift+Tab.
