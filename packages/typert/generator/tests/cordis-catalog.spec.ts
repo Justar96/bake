@@ -99,11 +99,14 @@ describe('Typert-backed Cordis catalog', () => {
   })
 
   it('keeps a service\'s referenced types whole within a raised display budget', { timeout: 480_000 }, () => {
-    const registerProvider = ({ model }: ReturnType<typeof projectCordisCatalog>): CordisCatalogModel => {
-      const subagents = model.services.find(service => service.key === 'subagents')
-      if (subagents === undefined) throw new Error('subagents service is missing')
+    const createAgent = ({ model }: ReturnType<typeof projectCordisCatalog>): CordisCatalogModel => {
+      const agents = model.services.find(service => service.key === 'agents')
+      if (agents === undefined) throw new Error('agents service is missing')
       return {
-        services: [{ ...subagents, methods: subagents.methods.filter(method => /\bregisterProvider\b/u.test(method.signature)) }],
+        services: [{
+          ...agents,
+          methods: agents.methods.filter(method => /\bcreate\(options: CreateAgentOptions\)/u.test(method.signature)),
+        }],
         events: [],
       }
     }
@@ -112,14 +115,14 @@ describe('Typert-backed Cordis catalog', () => {
       expect(start, `${name} is rendered`).toBeGreaterThanOrEqual(0)
       return rendered.slice(start, rendered.indexOf('\n  },', start))
     }
-    // SessionEventMap, reached through SubagentProvider, outgrows the default budget.
+    // SessionEventMap, reached through CreateAgentOptions, outgrows the default budget.
     const narrow = projection()
-    expect(declarationOf(narrow.projector.renderRuntimeApi(registerProvider(narrow)), 'SessionEventMap'))
+    expect(declarationOf(narrow.projector.renderRuntimeApi(createAgent(narrow)), 'SessionEventMap'))
       .toContain('truncated')
     const wide = wideProjection()
-    const rendered = wide.projector.renderRuntimeApi(registerProvider(wide))
+    const rendered = wide.projector.renderRuntimeApi(createAgent(wide))
     expect(declarationOf(rendered, 'SessionEventMap')).not.toContain('truncated')
-    expect(rendered).toContain("name: 'SubagentProvider'")
+    expect(rendered).toContain("name: 'CreateAgentOptions'")
   })
 
   it('projects the Client face from workspace source', { timeout: 480_000 }, () => {

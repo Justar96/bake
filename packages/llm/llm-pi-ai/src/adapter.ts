@@ -64,6 +64,7 @@ import { createModels, getSupportedThinkingLevels } from './models.ts'
 import { messagesPayloadHook } from './payload.ts'
 import { fetchAnthropicSse, fetchOpenAiSse } from './sse.ts'
 import { toStreamChunks } from './stream.ts'
+import { offersStrictTools, strictArgumentRestorer, withStrictTools } from './strict-tools.ts'
 
 /** One resolution's frozen view: the profiles and the collection built from them. */
 interface PiAiSnapshot {
@@ -405,7 +406,7 @@ export class PiAiAdapter extends LlmAdapter {
       const transcript = profile.harnessInfo.get(model.id)
       // Body rewrites are spelled for Messages; a route mixing protocols sends others as built.
       const onPayload = model.api === 'anthropic-messages' ? messagesPayloadHook(profile) : undefined
-      const context = attachments === undefined
+      const converted = attachments === undefined
         ? toPiContext(options, undefined, onReplayDegrade, transcript)
         : await toPiContext({ ...options, signal: watchdog.signal }, {
           attachments,
@@ -417,6 +418,9 @@ export class PiAiAdapter extends LlmAdapter {
             maxBytes: profile.requestImageMaxBytes,
           },
         }, onReplayDegrade, transcript)
+      const strict = profile.strictTools === true && offersStrictTools(model)
+      const context = strict ? withStrictTools(converted) : converted
+      const restoreOmitted = strict ? strictArgumentRestorer(options.tools ?? []) : undefined
       const events = snapshot.models.streamSimple(model, context, {
         ...profileOptions(profile, reasoning, apiKey),
         ...options.temperature === undefined ? {} : { temperature: options.temperature },
@@ -431,7 +435,13 @@ export class PiAiAdapter extends LlmAdapter {
         // names are Harness-owned and therefore win collisions.
         headers: requestHeaders(profile.headers, options.sessionId === undefined ? undefined : String(options.sessionId)),
       })
-      const iterator = toStreamChunks(events, model.contextWindow, options.signal, model.id)[Symbol.asyncIterator]()
+      const iterator = toStreamChunks(
+        events,
+        model.contextWindow,
+        options.signal,
+        model.id,
+        profile.maxToolArgumentWhitespace,
+      )[Symbol.asyncIterator]()
       let exhausted = false
       try {
         while (true) {
@@ -442,7 +452,7 @@ export class PiAiAdapter extends LlmAdapter {
             exhausted = true
             return
           }
-          yield result.value
+          yield restoreOmitted === undefined ? result.value : restoreOmitted(result.value)
         }
       } finally {
         if (!exhausted) {

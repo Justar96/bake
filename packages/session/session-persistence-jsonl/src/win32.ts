@@ -13,6 +13,7 @@
 
 import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { join, parse, resolve, toNamespacedPath } from 'node:path'
+import { isENOENT } from '@deepseek-ai/dsh-util-values'
 
 type MoveFileExW = (existing: string, replacement: string, flags: number) => number
 type NativeHandle = bigint
@@ -121,10 +122,6 @@ function win32Error(syscall: string, win32Code: number, path: string, dest: stri
   error.dest = dest
   error.win32Code = win32Code
   return error
-}
-
-function isENOENT(error: unknown): boolean {
-  return (error as NodeJS.ErrnoException | null)?.code === 'ENOENT'
 }
 
 function isEEXIST(error: unknown): boolean {

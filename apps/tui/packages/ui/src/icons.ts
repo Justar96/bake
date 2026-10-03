@@ -6,7 +6,7 @@
  * dot: the head already names the tool, and a different shape per tool made
  * the rail busy without telling a reader anything the head did not. A shape
  * of its own is kept for a skill loaded into the conversation, a subagent
- * started, a message sent to one, and the task list, because those change
+ * started, a message sent to one, and a plugin's task list, because those change
  * what the session knows, who is doing the work, or what is left to do.
  * Every icon is one cell wide by `string-width`, sits alone in the rail, and
  * has no emoji presentation, for the reason `MARKER` gives. The tool name is
@@ -25,7 +25,7 @@ export const ICON = {
   spawn: '\u21b3',
   /** A message sent to a running subagent. */
   send: '\u2192',
-  /** A task list update. */
+  /** A task list update from a plugin's tool. */
   todo: '\u2610',
   /** Anything else. */
   other: MARKER.action,
@@ -38,9 +38,7 @@ export type Icon = typeof ICON[keyof typeof ICON]
 const NAMED: Readonly<Record<string, Icon>> = {
   skill: ICON.skill,
   subagent: ICON.spawn,
-  subagent_fork: ICON.spawn,
   send_message: ICON.send,
-  todo_write: ICON.todo,
 }
 
 /**

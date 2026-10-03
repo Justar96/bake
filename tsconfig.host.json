@@ -78,12 +78,6 @@
       "path": "./packages/context/session-reference/tsconfig.json"
     },
     {
-      "path": "./packages/context/time-context/tsconfig.json"
-    },
-    {
-      "path": "./packages/context/tmux-context/tsconfig.json"
-    },
-    {
       "path": "./packages/core/agent-default-model/tsconfig.json"
     },
     {
@@ -117,12 +111,6 @@
       "path": "./packages/credentials/credentials/tsconfig.json"
     },
     {
-      "path": "./packages/deliverables/tool-present/tsconfig.json"
-    },
-    {
-      "path": "./packages/experimental/ptc-runtime-python/tsconfig.json"
-    },
-    {
       "path": "./packages/extensions/cordis-host-runner/tsconfig.json"
     },
     {
@@ -130,9 +118,6 @@
     },
     {
       "path": "./packages/feedback/command-feedback/tsconfig.json"
-    },
-    {
-      "path": "./packages/feedback/message-feedback/tsconfig.json"
     },
     {
       "path": "./packages/fs/fs-local/tsconfig.json"
@@ -151,9 +136,6 @@
     },
     {
       "path": "./packages/fs/tool-fs/tsconfig.json"
-    },
-    {
-      "path": "./packages/fs/tool-str-replace-editor/tsconfig.json"
     },
     {
       "path": "./packages/goal/command-goal/tsconfig.json"
@@ -241,9 +223,6 @@
     },
     {
       "path": "./packages/ptc-runtime/ptc-runtime-codemode/tsconfig.json"
-    },
-    {
-      "path": "./packages/ptc-runtime/ptc-runtime-node/tsconfig.json"
     },
     {
       "path": "./packages/ptc-runtime/ptc-runtime/tsconfig.json"
@@ -390,9 +369,6 @@
       "path": "./packages/storage/storage/tsconfig.json"
     },
     {
-      "path": "./packages/subagent/subagent-fork-in-process/tsconfig.json"
-    },
-    {
       "path": "./packages/subagent/subagent-in-process-driver/tsconfig.json"
     },
     {
@@ -436,9 +412,6 @@
     },
     {
       "path": "./packages/test-support/remote-mock/tsconfig.json"
-    },
-    {
-      "path": "./packages/todo/tool-todo/tsconfig.json"
     },
     {
       "path": "./packages/typert/generator/tsconfig.json"
@@ -507,31 +480,7 @@
       "path": "./packages/web/web-search-deepseek/tsconfig.json"
     },
     {
-      "path": "./packages/web/web-search-exa/tsconfig.json"
-    },
-    {
       "path": "./packages/web/web/tsconfig.json"
-    },
-    {
-      "path": "./packages/webhook/webhook-github/tsconfig.json"
-    },
-    {
-      "path": "./packages/webhook/webhook/tsconfig.json"
-    },
-    {
-      "path": "./packages/workflow/tool-ralph/tsconfig.json"
-    },
-    {
-      "path": "./packages/workflow/tool-workflow/tsconfig.json"
-    },
-    {
-      "path": "./packages/workflow/workflow-ptc/tsconfig.json"
-    },
-    {
-      "path": "./packages/workflow/workflow/tsconfig.json"
-    },
-    {
-      "path": "./packages/workspace/workspace/tsconfig.json"
     },
     {
       "path": "./vendor/cordis/tsconfig.json"

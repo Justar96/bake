@@ -215,7 +215,7 @@ export function apply(ctx: Context, config: Config): void {
   // Independent of the route set: signing in is what makes a route worth
   // adding, so the flows are offered before any profile names their provider.
   // Scoped to the authorization seam rather than injected outright, because a
-  // composition without it (headless, ACP) simply has no surface to sign in
+  // composition without it (headless) simply has no surface to sign in
   // from, while everything else this plugin does still works.
   ctx.inject(['authorization'], (authorized) => { registerPiAiFlows(authorized, auth) })
   // The full installed catalog is configurable from the moment the plugin

@@ -29,20 +29,16 @@ export function apply(ctx: Context): void {
   ctx.tools.register(markAdjacentAgentSendMessageTool(defineTool({
     name: 'send_message',
     description:
-      'Send a message to one of your direct continuable subagents by its agent id. If you are a continuable '
-      + 'subagent, you can also message your parent. A working target reads the message at its next step; '
-      + 'otherwise the message starts a new turn. You get delivery confirmation, not a reply, and an error '
-      + 'means the message was not delivered.',
+      'Message a direct continuable subagent, or your parent if you are one. A busy target reads it next '
+      + 'step; an idle one starts a new turn. Confirms delivery; no reply.',
     parameters: {
       agent_id: {
         type: 'string',
         required: true,
-        description: 'The agent id of a direct continuable subagent, or of your parent if you are a continuable subagent.',
       },
       message: {
         type: 'string',
         required: true,
-        description: 'The message to send.',
       },
     },
     output: {
@@ -78,14 +74,12 @@ export function apply(ctx: Context): void {
   ctx.tools.register(defineTool({
     name: 'interrupt_agent',
     description:
-      'Stop the current turn of a continuable subagent below you by its agent id. It stays available for '
-      + 'follow-ups and its own subagents keep running. The stop is requested, not awaited; interrupting a '
-      + 'finished subagent does nothing.',
+      'Request a stop of a continuable subagent\'s current turn; it stays available, and its own '
+      + 'subagents keep running.',
     parameters: {
       agent_id: {
         type: 'string',
         required: true,
-        description: 'The agent id of the subagent to interrupt.',
       },
     },
     output: {

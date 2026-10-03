@@ -2,7 +2,7 @@
 
 The subagent seam lets an agent delegate work to a child agent. Like [bash](shell.md), it is **one optional capability**, not part of the agent loop, so its types live here rather than in [core.md](core.md). It differs from the other capability seams because **multiple provider implementations coexist** in one context, registered by name (`ctx.subagents`), while bash allows only one executor. Its registry follows the [LLM adapter registry](llm-streaming.md), not the single-service bash executor.
 
-Service Definition: [dsh-subagent](../../packages/subagent/subagent) (`ctx.subagents` + the vocabulary below). The in-process providers start fresh or history-seeded children; [dsh-tool-subagent](../../packages/subagent/tool-subagent/README.md) delegates to a configured provider, and [dsh-tool-subagent-control](../../packages/subagent/tool-subagent-control/README.md) provides follow-up, interruption, and listing. The service owns continuable-child orchestration and child discovery from the session store and optional persistence. The [subagent Agent Note](../../.agents/notes/implemented/feature/2026-06-21-subagent-capability-seam.md) records the service design.
+Service Definition: [dsh-subagent](../../packages/subagent/subagent) (`ctx.subagents` + the vocabulary below). The in-process provider starts fresh children; [dsh-tool-subagent](../../packages/subagent/tool-subagent/README.md) delegates to a configured provider, and [dsh-tool-subagent-control](../../packages/subagent/tool-subagent-control/README.md) provides follow-up, interruption, and listing. The service owns continuable-child orchestration and child discovery from the session store and optional persistence. The [subagent Agent Note](../../.agents/notes/implemented/feature/2026-06-21-subagent-capability-seam.md) records the service design.
 
 Sources: [`packages/subagent/subagent/src/types.ts`](../../packages/subagent/subagent/src/types.ts), [`packages/subagent/subagent/src/index.ts`](../../packages/subagent/subagent/src/index.ts), and [`packages/subagent/subagent/src/continuation.ts`](../../packages/subagent/subagent/src/continuation.ts)
 
@@ -131,7 +131,7 @@ persisted Session
        -> zero or more owned child Activations
 ```
 
-`SubagentRuntime.startContinuable()` reserves the stable child id, snapshots the versioned `subagent/descriptor` payload, asks the named provider for its detached `ContinuableCreateSpec`, creates the child Agent through a private activation-owner scope, establishes any continuable-parent ownership, and submits the initial prompt. It resolves with `{ childId, messageId }` when inbox acceptance yields the message id — without waiting for the turn to start or for the message to enter the Session log. Every failure before that acceptance rejects with neither id, disposing any created handle and rolling back the Activation and parent ownership.
+`SubagentRuntime.startContinuable()` reserves the stable child id, snapshots the versioned `subagent/descriptor` payload, asks the named provider to admit the child through `prepareContinuable`, creates the child Agent through a private activation-owner scope, establishes any continuable-parent ownership, and submits the initial prompt. It resolves with `{ childId, messageId }` when inbox acceptance yields the message id — without waiting for the turn to start or for the message to enter the Session log. Every failure before that acceptance rejects with neither id, disposing any created handle and rolling back the Activation and parent ownership.
 
 `SubagentRuntime.sendMessage()` is the sole model-authored message operation. It accepts the exact live sender plus a target id, permits only a direct parent or direct continuable child, derives sender attribution itself, and routes a direct-child target by Activation residency:
 
@@ -218,20 +218,18 @@ interface SubagentSettledMessageSource {
 }
 ```
 
-The provider participates only in preparing the initial creation spec, where `spawn` and `fork` differ. Its returned spec carries only detached provider-specific creation inputs — the optional parent-history seed — and no Agent, `AgentHandle`, prompt delivery, result, disposal, or resume operation. Cold resume does not dispatch through a provider at all: the manager folds the generic descriptor, calls `ctx.agents.resume()` through the same activation-owner scope, and submits the waiting turn.
+The provider participates only in admitting the initial creation: it receives no Agent, `AgentHandle`, prompt delivery, result, disposal, or resume operation, and returns nothing. Cold resume does not dispatch through a provider at all: the manager folds the generic descriptor, calls `ctx.agents.resume()` through the same activation-owner scope, and submits the waiting turn.
 
 ```ts type-equiv
 /**
- * What the continuation manager asks a provider for while materializing one
+ * What the continuation manager passes a provider while materializing one
  * continuable child's FIRST activation. The manager has already reserved the
- * durable child identity and owns every later operation, so this request
- * carries only what distinguishes a fresh child from one seeded with parent
- * history.
+ * durable child identity and owns every later operation.
  */
 interface ContinuableCreateRequest {
   /** The reserved durable child session id, for provider diagnostics. */
   readonly sessionId: SessionId
-  /** The delegating parent agent whose history a seeding provider reads. */
+  /** The delegating parent agent. */
   readonly parent: Agent
   /**
    * Caller cancellation, which owns preparation only until the manager accepts
@@ -241,26 +239,9 @@ interface ContinuableCreateRequest {
 }
 ```
 
-```ts type-equiv
-/**
- * A provider's detached contribution to one continuable child's creation. This
- * is DATA, never a capability: it carries no Agent, `AgentHandle`, prompt
- * delivery, result, disposal, or resume operation, because the continuation
- * manager owns the child's whole lifecycle after preparation.
- */
-interface ContinuableCreateSpec {
-  /**
-   * Completed-turn prefix of the parent's log to seed the child session with,
-   * or absent for a fresh child. Same durable contract as
-   * `CreateAgentOptions.seed`: contiguous from seq 0, lossless JSON, balanced.
-   */
-  readonly seed?: readonly SessionEvent[]
-}
-```
-
 The descriptor (`SubagentDescriptorData` in [descriptor.ts](../../packages/subagent/subagent/src/descriptor.ts)) is a mode-discriminated durable identity for every session-backed subagent. Both modes carry the provider name. A `one-shot` descriptor optionally carries a caller-owned display `label`; a `continuable` descriptor requires the delegation `description` as its durable creation label and additionally snapshots resolved child `agentOptions.provider`/`model`/`reasoningEffort` and optional `persona`/`toolFilter` for cold resume. It never snapshots the merge-extensible `AgentOptions` object, so an unrelated extension value cannot break continuation and a later composition input is a deliberate version change. It omits `subagentDepth` (cold resume trusts the persisted header's `delegationDepth` as the monotone floor) and `outputSchema` (one run or Activation's result contract, not durable identity).
 
-A local one-shot provider appends the descriptor inside the child's initial turn before its first request. The continuation manager appends the descriptor after any provider-supplied lineage and before the initial prompt is admitted; `Session.inheritedEventCount` remains the fork-lineage boundary: resume-time descriptor authority reads the child's own suffix, while the list-serving identity projection folds `subagent/descriptor` last-wins so the child's own descriptor overrides a fork-seeded ancestor's. A seeded cold list skips a cache hint until an authoritative observation supplies that exact cut. The event is log-only: no `surfaceOp`, never in model history, and retained across compaction by the append-only log. Malformed current-version descriptors are corrupt; unsupported versions cannot be classified by this runtime.
+A local one-shot provider appends the descriptor inside the child's initial turn before its first request. The continuation manager appends the descriptor before the initial prompt is admitted. New children are never seeded, but children recorded by earlier fork backends still open: `Session.inheritedEventCount` remains their fork-lineage boundary, resume-time descriptor authority reads the child's own suffix, and the list-serving identity projection folds `subagent/descriptor` last-wins so the child's own descriptor overrides a fork-seeded ancestor's. A seeded cold list skips a cache hint until an authoritative observation supplies that exact cut. The event is log-only: no `surfaceOp`, never in model history, and retained across compaction by the append-only log. Malformed current-version descriptors are corrupt; unsupported versions cannot be classified by this runtime.
 
 ## Durable enumeration: `listChildren()`, `listDescendants()`, and their entries
 
@@ -390,7 +371,7 @@ A local one-shot run MUST publish an ordinary child agent/session before `start(
 
 ## The provider contract: `SubagentProvider`
 
-Each provider is a named child-agent transport, and multiple providers may coexist. The service validates requested start-time capabilities before `start()`, and rejects a continuable start on a provider without `prepareContinuable`. `inheritsParentContext` describes only conversation seeding (`fork`: true; `spawn` and `acp`: false), allowing consumers to generate accurate model-facing wording without implying inherited tools, services, or authority. A provider whose one-shot route has static provider-owned defaults publishes optional immutable `agentRouteDefaults`, allowing a Consumer to merge model/tool overrides against the correct baseline before preflight.
+Each provider is a named child-agent transport, and multiple providers may coexist. The service validates requested start-time capabilities before `start()`, and rejects a continuable start on a provider without `prepareContinuable`. A provider whose one-shot route has static provider-owned defaults publishes optional immutable `agentRouteDefaults`, allowing a Consumer to merge model/tool overrides against the correct baseline before preflight.
 
 ```ts type-equiv
 /**
@@ -402,16 +383,10 @@ Each provider is a named child-agent transport, and multiple providers may coexi
  * settlement or cleanup to a sibling.
  */
 interface SubagentProvider {
-  /** Unique registry name (e.g. `spawn`, `fork`, `acp`). */
+  /** Unique registry name (e.g. `spawn`). */
   readonly name: string
   /** The start-time features this provider supports (see {@link SubagentCapabilities}). */
   readonly capabilities: SubagentCapabilities
-  /**
-   * Whether the child sees the parent's completed-turn prefix. This is descriptive, not a
-   * service-validated start capability: the model-facing tool derives truthful wording from it.
-   * It says nothing about tool registration, injected services, or authority inheritance.
-   */
-  readonly inheritsParentContext: boolean
   /**
    * Optional static provider-owned provider/model route for one-shot Agent
    * options. Consumers merge tool/model overrides over these values before
@@ -432,35 +407,31 @@ interface SubagentProvider {
    */
   start(request: ResolvedSubagentStartRequest): Promise<SubagentRun>
   /**
-   * OPTIONAL (continuable-creation capability): contribute the detached
-   * creation inputs that distinguish this provider's continuable children —
-   * only whether the child session is seeded with parent history. Method
-   * presence IS the capability: the service rejects continuable starts on
-   * providers without it, while a provider that has it may still serve
-   * ordinary one-shot delegations.
+   * OPTIONAL (continuable-creation capability): admit one continuable child
+   * before the continuation manager creates it. Method presence IS the
+   * capability: the service rejects continuable starts on providers without
+   * it, while a provider that has it may still serve ordinary one-shot
+   * delegations. Rejection aborts the start before any child session exists.
    *
    * This is the provider's ONLY participation in a continuable child. The
    * continuation manager owns identity reservation, composition, Agent
    * creation, prompt delivery, cold resume, ownership, and disposal, so a
    * provider never sees the child's Agent, handle, turns, or teardown.
-   * Distinct preparations may overlap; each follows its own signal and returns
-   * data belonging only to `request.sessionId`.
+   * Distinct preparations may overlap; each follows its own signal.
    */
-  prepareContinuable?(request: ContinuableCreateRequest): Promise<ContinuableCreateSpec>
+  prepareContinuable?(request: ContinuableCreateRequest): Promise<void>
 }
 ```
 
 Provider `start()` fulfills with a published run. The service mints a unique `runId`, snapshots `local` from the provider's exact `localAgent`, observes the result, emits `subagent/start`, and returns the same run; a `start()` rejection implies cleanup of unpublished resources and emits no lifecycle pair, while a post-publication result rejection closes the emitted pair. Each continuable Activation emits the same observe-only pair for its residency epoch, so a cold resume is a new epoch with its own `runId`. The paired `subagent/end` carries the same identity and the final output or infrastructure failure. Both events are observe-only and contain listener exceptions. Their `provider` field names the provider that started the run or Activation epoch; it does not claim that the provider remains registered when the edge is emitted.
 
-## In-process backends: permission, depth, and seed
+## In-process backends: permission and depth
 
-The spawn and fork backends create an ordinary one-shot agent through `parent.ctx`, pass cancellation into core creation, and dispose through `AgentHandle`; a continuable child is instead created by the continuation manager through its own activation-owner scope. Provider removal blocks new starts without revoking accepted runs. Each child gets a new flat scope rather than inheriting parent registrations. Permission, depth, and fork seeding reuse existing Session vocabulary:
+The spawn backend creates an ordinary one-shot agent through `parent.ctx`, pass cancellation into core creation, and dispose through `AgentHandle`; a continuable child is instead created by the continuation manager through its own activation-owner scope. Provider removal blocks new starts without revoking accepted runs. Each child gets a new flat scope and a fresh conversation rather than inheriting parent registrations or history. Permission and depth reuse existing Session vocabulary:
 
-- **Delegated permission** is captured before the first await. Auto and Full access parents append their captured `permission/preset` identity to the fresh child after fork seeding and sandbox/approval overrides. One-shot and continuable children share this path; cold resume reads only the child log. Read Only and Workspace Write retain the inherited sandbox override plus `approval: never`, so unmatched bundles remain `custom`. Each Auto child call is reviewed independently using existing `parentSession`, creation prompt, and authenticated human/direct-parent messages. The Auto review decision defines low/medium/high semantics; no delegation records, receipt, Header field, descriptor field, or Session format is added.
+- **Delegated permission** is captured before the first await. Auto and Full access parents append their captured `permission/preset` identity to the fresh child after the sandbox/approval overrides. One-shot and continuable children share this path; cold resume reads only the child log. Read Only and Workspace Write retain the inherited sandbox override plus `approval: never`, so unmatched bundles remain `custom`. Each Auto child call is reviewed independently using existing `parentSession`, creation prompt, and authenticated human/direct-parent messages. The Auto review decision defines low/medium/high semantics; no delegation records, receipt, Header field, descriptor field, or Session format is added.
 
 - **Delegation depth** is durable `SessionHeader.delegationDepth` plus the merge-extensible runtime field `AgentOptions.subagentDepth`; absence means top-level depth zero, and the greater present value is authoritative. The seam owns both fields — the loop neither sets nor reads them — so an in-process child persists parent depth + 1, cold resume cannot lower it, and every start rejects a derived depth outside the safe-integer domain or above a defined absolute `request.maxDepth` cap.
-- **Fork seeding** uses [`CreateAgentOptions.seed`](core.md#creation-and-ownership) (a `SessionEvent[]` prefix threaded through `AgentLoop.createAgent` → `ctx.sessions.prepare({ seed })`, the same primitive `ctx.agents.resume()` uses). The fork backend passes a *balanced completed-turn prefix* of the parent's log — the parent's events up to and including its last `turn/end` — so the seed is contiguous-from-0 and the [invariants](../../packages/runtime-diagnostics/invariants) replay accepts it (the in-flight, unbalanced turn is excluded).
-
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
 <a id="cordis-surface"></a>

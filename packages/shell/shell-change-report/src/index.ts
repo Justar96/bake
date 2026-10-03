@@ -123,7 +123,8 @@ export interface ChangeReportLimits {
 
 /** The default bounds. A rewrite of 10,000 lines stays within the diff budget by giving up its hunks. */
 export const DEFAULT_CHANGE_REPORT_LIMITS: Readonly<ChangeReportLimits> = Object.freeze({
-  beforeMs: 200,
+  // Two reads under macOS Seatbelt on a cold first call can exceed 200 ms.
+  beforeMs: 500,
   afterMs: 750,
   maxHunkFiles: 20,
   maxListedFiles: 200,

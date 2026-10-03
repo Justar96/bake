@@ -1,5 +1,5 @@
 ---
-description: "Session feedback: the `/feedback` command, the `sessionFeedback` Host Remote behind the Web feedback dialog, and the fixed category taxonomy; for users and maintainers choosing, composing, or debugging feedback capture."
+description: "Session feedback: the `/feedback` command, the `sessionFeedback` Host Remote, and the fixed category taxonomy; for users and maintainers choosing, composing, or debugging feedback capture."
 kind: "package-reference"
 ---
 
@@ -7,7 +7,7 @@ kind: "package-reference"
 
 ## Summary
 
-`dsh-command-feedback` lets a user tell the harness what they think of a session. Typing `/feedback` plus a remark records it and acknowledges the session and anonymous user ids; the Web feedback dialog records a category and an optional description through the `sessionFeedback` Host Remote. Recording is immediate and never starts model work: the model neither sees the remark nor is interrupted by it. The package also owns the fixed category taxonomy every feedback surface files under. It ships with the standard `dsh` base and needs no configuration; headless, ACP, and JSON-RPC entry points provide no slash commands.
+`dsh-command-feedback` lets a user tell the harness what they think of a session. Typing `/feedback` plus a remark records it and acknowledges the session and anonymous user ids; an integration can record a category and an optional description through the `sessionFeedback` Host Remote. Recording is immediate and never starts model work: the model neither sees the remark nor is interrupted by it. The package also owns the fixed category taxonomy every feedback surface files under. It ships with the standard `dsh` base and needs no configuration; the headless and desktop entry points provide no slash commands.
 
 ## Table of Contents
 
@@ -23,7 +23,7 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## Use this package
 
-Users can record feedback from the Web client out of the box: the `/feedback` command ships with the standard `dsh` base, needs no configuration, and works in any conversation. A custom app gets the same command by mounting the Session store, command registry, and this plugin together.
+Users can record feedback from the terminal app out of the box: the `/feedback` command ships with the standard `dsh` base, needs no configuration, and works in any conversation. A custom app gets the same command by mounting the Session store, command registry, and this plugin together.
 
 ### The `/feedback` command
 
@@ -36,10 +36,10 @@ Type `/feedback` followed by your remark and send it. A successful entry is ackn
 
 Surrounding whitespace is trimmed, but the remark is otherwise kept exactly as typed: no truncation, case folding, or command parsing — `/feedback /plan felt slow` records that literal text. Each command records its own entry; nothing is merged or replaced.
 
-<a id="the-web-feedback-dialog"></a>
-### The Web feedback dialog
+<a id="feedback-categories"></a>
+### Feedback categories
 
-In the Web client a bare `/feedback` — picked from the composer menu or typed and sent without text — opens the feedback dialog instead of the usage error. The dialog offers the seven categories below and a free-text box; every field is optional and an empty submission is accepted, and the conversation log travels with the recorded event as with every feedback event. It records through `sessionFeedback.record`, which appends the same `feedback/record` event without command bookkeeping and without an acknowledgement row; the dialog shows a toast instead.
+`sessionFeedback.record` accepts one of the seven categories below and an optional free-text description; every field is optional and an empty submission is accepted. It appends the same `feedback/record` event as the command, without command bookkeeping and without an acknowledgement row. The `/feedback` command records text only.
 
 | Category id | Meaning |
 |---|---|
@@ -51,11 +51,11 @@ In the Web client a bare `/feedback` — picked from the composer menu or typed 
 | `security-privacy-permission` | Security, privacy, and permissions |
 | `other` | Anything else |
 
-The ids are durable log vocabulary shared with per-message feedback; each surface owns its localized labels.
+The ids are durable log vocabulary, also carried by retired per-message feedback records in released Session logs; each surface owns its localized labels.
 
 ### Recording feedback from your own UI
 
-Feedback does not have to come from the slash command or the dialog: any UI, hook, or host integration can record a remark directly through `recordFeedback` or the `sessionFeedback` Remote, with the same guarantees and without a model turn. A custom app that wants the slash command mounts the Session store, the command registry, and this plugin; the Session store is what the `sessionFeedback` Remote resolves live Sessions from:
+Feedback does not have to come from the slash command: any UI, hook, or host integration can record a remark directly through `recordFeedback` or the `sessionFeedback` Remote, with the same guarantees and without a model turn. A custom app that wants the slash command mounts the Session store, the command registry, and this plugin; the Session store is what the `sessionFeedback` Remote resolves live Sessions from:
 
 ```yaml
 - id: session
@@ -66,7 +66,7 @@ Feedback does not have to come from the slash command or the dialog: any UI, hoo
   name: '@deepseek-ai/dsh-command-feedback'
 ```
 
-The Web client ships the command. Headless mode, ACP automation, and JSON-RPC provide no slash commands, so `/feedback` is unavailable there.
+The terminal app ships the command. Headless and desktop runs provide no slash commands, so `/feedback` is unavailable there.
 
 -----
 
@@ -78,7 +78,7 @@ The Web client ships the command. Headless mode, ACP automation, and JSON-RPC pr
 
 ### Design concept
 
-The remark is one append-only fact in the session log, owned by the event rather than by the trigger that produced it: feedback can arrive from the command, the dialog, or any integration, so the fact must not depend on the slash command. The command keeps its own bookkeeping payload-free, so the remark text exists in exactly one place in the log, and the event never surfaces to the model.
+The remark is one append-only fact in the session log, owned by the event rather than by the trigger that produced it: feedback can arrive from the command or any integration, so the fact must not depend on the slash command. The command keeps its own bookkeeping payload-free, so the remark text exists in exactly one place in the log, and the event never surfaces to the model.
 
 ### How a remark is recorded
 
@@ -104,7 +104,7 @@ Read these pages when the package-level contract is not enough. They cover the c
 - [dsh-commands](../../interaction/commands/README.md) — the registry that discovers the global command and its `recordInput` semantics.
 - [Session persistence subsystem](../../../docs/subsystems/persistence.md) — how appended events become durable and what a flush barrier means.
 - [Anonymous user identity](../../identity/anonymous-user-id/README.md) — the id the acknowledgement reports.
-- [Feedback package map](../README.md) — where log-only capture sits next to per-message feedback.
+- [Feedback package map](../README.md) — the feedback group this package belongs to.
 
 -----
 
@@ -115,7 +115,7 @@ Read these pages when the package-level contract is not enough. They cover the c
 
 #### What the model sees
 
-Nothing. The slash input, the dialog, `feedback/record`, and the acknowledgement are absent from model requests. The feedback event and registry lifecycle records are log-only and carry no `surfaceOp`, so they never reach the ordered surface, `deriveMessages()`, or a system prompt. Recording feedback during a turn does not change that turn's remaining requests.
+Nothing. The slash input, `feedback/record`, and the acknowledgement are absent from model requests. The feedback event and registry lifecycle records are log-only and carry no `surfaceOp`, so they never reach the ordered surface, `deriveMessages()`, or a system prompt. Recording feedback during a turn does not change that turn's remaining requests.
 
 #### Token effect
 
@@ -134,11 +134,10 @@ These limits define where session feedback is a poor fit or behaves differently 
 
 - **No feedback retrieval or management surface** — there is no retrieval, aggregation, or model-facing tool for `feedback/record`.
 - **Category and text only** — an entry carries at most one category and one free-text string, with no severity or referenced-event link.
-- **Live Sessions only through the Remote** — `sessionFeedback.record` answers `session-not-found` for a Session no live owner carries; the Web dialog reports that failure when its Session retires while it is open.
+- **Live Sessions only through the Remote** — `sessionFeedback.record` answers `session-not-found` for a Session no live owner carries.
 - **No amend or withdraw** — the session log is append-only and this package adds no tombstone, so a mistaken entry stays recorded and can only be superseded by a later one.
 - **No explicit durability barrier** — the acknowledgement follows the append, not a flush, so an entry recorded immediately before a crash can be lost with any other unflushed tail. A consumer that needs a barrier awaits `ctx.sessions.flush(session)`.
-- **No visible acknowledgement on a fresh session** — the web transcript renders command rows only once a session is active, so a typed `/feedback <text>` on a still-blank session records the event but shows no acknowledgement row; the dialog's toast does not depend on the transcript.
-- **Web only among the shipped entry points** — headless mode, ACP automation, and JSON-RPC provide no command adapter, so `/feedback` is unavailable there.
+- **Terminal only among the shipped entry points** — headless and desktop runs provide no command adapter, so `/feedback` is unavailable there.
 
 <a id="dev-note"></a>
 ### Dev Note

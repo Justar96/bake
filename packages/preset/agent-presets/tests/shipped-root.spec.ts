@@ -142,21 +142,6 @@ describe('the shipped preset root', () => {
     }
   })
 
-  it('omits the general workflow tool and its unused engine only from PTC', async () => {
-    const ptc = await shippedEntries('ptc')
-    expect(findEntry(ptc, 'tool-workflow')?.disabled).toBe(true)
-    expect(findEntry(ptc, 'workflow-ptc')?.disabled).toBe(true)
-
-    for (const id of ['standard', 'cordis']) {
-      const entries = await shippedEntries(id)
-      expect(findEntry(entries, 'tool-workflow')?.disabled, id).not.toBe(true)
-      expect(findEntry(entries, 'workflow-ptc')?.disabled, id).not.toBe(true)
-      // run_code uses the host QuickJS runtime; the workflow engine needs a Node process of its own.
-      expect(findEntry(entries, 'workflow-ptc-runtime'), id).toMatchObject({ isolate: { ptcRuntime: true } })
-      expect(findEntry(entries, 'workflow-node-runtime')?.name, id).toBe('@deepseek-ai/dsh-ptc-runtime-node')
-    }
-  })
-
   it('introduces Bake with the same persona and plan guidance in standard and PTC', async () => {
     const [standard, ptc] = await Promise.all([shippedEntries('standard'), shippedEntries('ptc')])
     expect(findEntry(standard, 'persona')?.config).toEqual({
@@ -166,7 +151,10 @@ describe('the shipped preset root', () => {
         + 'Follow the conventions of the surrounding code. '
         + 'Commit or push only when requested, and do not discard changes you did not make unless asked. '
         + 'Keep replies concise, factual, and neutral. '
-        + 'Report results and verification accurately, including failures and skipped checks.',
+        + 'Report results and verification accurately, including failures and skipped checks.\n\n'
+        + 'Work in as few model round trips as you can. Put independent tool calls in one response: read the files you need together, '
+        + 'and send an edit with the command that checks it, since calls in one response run in order. Make several changes to one file '
+        + 'in one edit call, and do not re-read a file to confirm an edit that succeeded.',
     })
     expect(findEntry(ptc, 'persona')?.config).toEqual(findEntry(standard, 'persona')?.config)
   })
@@ -186,12 +174,5 @@ describe('the shipped preset root', () => {
     expect(pluginSkill).toContain('ctx.commands.register(')
     expect(compositionSkill).toContain('Start Bake with `--preset <new-id>`')
     expect(`${pluginSkill}\n${compositionSkill}`).not.toMatch(/Harness Web UI|connected page|Web picker/u)
-  })
-
-  it('disables the ralph tool in every shipped preset that carries it', async () => {
-    for (const id of ['cordis', 'ptc', 'standard']) {
-      expect(findEntry(await shippedEntries(id), 'tool-ralph')?.disabled, id).toBe(true)
-    }
-    expect(findEntry(await shippedEntries('minimal'), 'tool-ralph')).toBeUndefined()
   })
 })

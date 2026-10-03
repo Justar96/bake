@@ -3,7 +3,6 @@ import React from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render } from '../../../tests/render.tsx'
 import { App, type AppProps } from '../src/app.tsx'
-import { Tasks } from '../src/tasks.tsx'
 import { InspectionBar, SubagentRow } from '../src/subagents.tsx'
 import { emptyTranscript } from '../src/transcript.ts'
 import { dictionaries } from '../src/copy.ts'
@@ -16,58 +15,6 @@ afterEach(cleanup)
 const statusRow = (frame: string | undefined) => (frame ?? '').split('\n').findLast(line => line.startsWith('  ')) ?? ''
 /** The subagents' row, under the input's base rule and over the status line, its icon in the rail. */
 const agentRow = (frame: string | undefined) => (frame ?? '').split('\n').find(line => /^[↳>] Subagents /u.test(line)) ?? ''
-
-it.each(['en'] as const)('shows workflow progress and distinguishes its members from direct delegation in %s', async locale => {
-  const copy = dictionaries[locale]
-  const ui = render(<App {...props({ copy, workflows: [{ id: 'run', name: 'review', state: 'working', completed: 1, total: 2 }],
-    subagents: [
-      { id: 'member', label: 'Review files', state: 'working', detail: 'One-shot · Inspect', workflow: 'review', inspectable: true },
-      { id: 'direct', label: 'Check docs', state: 'saved', outcome: 'completed', detail: 'Continuable', inspectable: true },
-    ],
-  })} />)
-  expect(ui.lastFrame()).toContain(`${copy.workflowTitle} review`)
-  ui.stdin.write('\x07')
-  await vi.waitFor(() => expect(ui.lastFrame()).toContain(`${copy.workflowTitle} review · ${copy.subagentWorking} · 1/2 ${copy.subagentCountDone}`))
-  expect(ui.lastFrame()).toContain(copy.subagentDirect)
-  expect(ui.lastFrame()).toContain('One-shot · Inspect')
-  await expect(ui.lastFrame() + '\n').toMatchFileSnapshot(`./expected/workflow.${locale}.txt`)
-})
-
-it('pages through workflow-only progress without a child selection', async () => {
-  const workflows = Array.from({ length: 40 }, (_, index) => ({ id: `run-${index + 1}`, name: `workflow-${index + 1}`, state: 'working' as const, completed: index, total: 40 }))
-  const ui = render(<App {...props({ workflows })} />)
-  ui.stdin.write('\x07')
-  await vi.waitFor(() => expect(ui.lastFrame()).toContain('Workflow workflow-1'))
-  expect(ui.lastFrame()).not.toContain('Workflow workflow-40')
-  ui.stdin.write('\x1b[6~')
-  await vi.waitFor(() => expect(ui.lastFrame()).toContain('Workflow workflow-14'))
-  ui.stdin.write('\x1b[F')
-  await vi.waitFor(() => expect(ui.lastFrame()).toContain('Workflow workflow-40'))
-})
-
-it('opens workflow progress before any child exists and preserves the draft', async () => {
-  const onInspectSubagent = vi.fn(), onSubmit = vi.fn()
-  const ui = render(<App {...props({ onInspectSubagent, onSubmit,
-    workflows: [{ id: 'run', name: 'audit', state: 'working', completed: 0, total: 0 }],
-  })} />)
-  expect(ui.lastFrame()).toContain('Workflow audit')
-  ui.stdin.write('draft')
-  await vi.waitFor(() => expect(ui.lastFrame()).toContain('draft'))
-  ui.stdin.write('\x07')
-  await vi.waitFor(() => expect(ui.lastFrame()).toContain(dictionaries.en.workflowNoChildren))
-  ui.stdin.write('\x1b[B\r')
-  expect(onInspectSubagent).not.toHaveBeenCalled()
-  expect(onSubmit).not.toHaveBeenCalled()
-  ui.stdin.write('\x1b')
-  await vi.waitFor(() => expect(ui.lastFrame()).not.toContain(dictionaries.en.sheetClose))
-  expect(ui.lastFrame()).toContain('draft')
-  for (const columns of [8, 20, 40, 80]) {
-    const row = renderToString(<SubagentRow entries={[]} workflows={[{ id: 'run', name: 'audit', state: 'working', completed: 0, total: 0 }]}
-      copy={dictionaries.en} columns={columns} />, { columns })
-    expect(row.split('\n')).toHaveLength(1)
-    expect(stringWidth(row)).toBeLessThanOrEqual(columns)
-  }
-})
 
 it.each(['en'] as const)('counts the children on one row under the input in %s', async locale => {
   const ui = render(<App {...props({ copy: dictionaries[locale], subagents: [
@@ -90,78 +37,26 @@ it.each(['en'] as const)('counts the children on one row under the input in %s',
   await expect(ui.lastFrame() + '\n').toMatchFileSnapshot(`./expected/subagents.${locale}.txt`)
 })
 
-const plan = [
-  { text: 'Read startup', status: 'completed' },
-  { text: 'Thread the home', status: 'in_progress' },
-  { text: 'Test it', status: 'pending' },
-] as const
-
-it('folds the task list into one row with its icon, count, progress, the current task, and its key', () => {
-  const frame = render(<App {...props({ todos: plan })} />).lastFrame() ?? ''
-  const row = frame.split('\n').find(line => line.startsWith('☐ Tasks'))!
-  expect(row).toMatch(/^☐ Tasks 1\/3 {2}━━━━──────── {2}▸ Thread the home +Ctrl\+T$/)
-  expect(frame).not.toContain('Read startup')
-  expect(frame).not.toContain('Test it')
-})
-
-it('names the next open task when none is in progress, and leaves once all are done', () => {
-  const draw = (todos: Parameters<typeof Tasks>[0]['todos'], columns = 60) =>
-    renderToString(<Tasks todos={todos} copy={dictionaries.en} columns={columns} hint="Ctrl+T" />, { columns })
-  expect(draw([{ text: 'Read startup', status: 'completed' }, { text: 'Test it', status: 'pending' }]))
-    .toMatch(/^☐ Tasks 1\/2 {2}━━━━━━────── {2}□ Test it +Ctrl\+T$/)
-  expect(draw(plan.map(item => ({ ...item, status: 'completed' as const })))).toBe('')
-  // Below 60 columns the key goes, as the composer's hint does.
-  expect(draw(plan, 59)).toBe('☐ Tasks 1/3  ━━━━────────  ▸ Thread the home')
-  // Above it, the key gives way before the task is cut below a few cells.
-  const long = [{ text: 'Thread the resolved home through startup and the session store', status: 'in_progress' as const }]
-  expect(draw(long, 60)).toMatch(/^☐ Tasks 0\/1 {2}─{12} {2}▸ Thread the resolved \S*… {2}Ctrl\+T$/)
-  expect(stringWidth(draw(long, 60))).toBe(60)
-  expect(draw(plan, 40)).not.toContain('Ctrl+T')
-  expect(draw(plan, 40)).toContain('▸ Thread')
-  for (const columns of [1, 12, 24, 40]) expect(stringWidth(draw(plan, columns)), `${columns}`).toBeLessThanOrEqual(columns)
-})
-
-it('selects the task row from the composer and opens the full list', async () => {
-  const onSubmit = vi.fn()
-  const ui = render(<App {...props({ todos: plan, onSubmit })} />)
-  ui.stdin.write('\x1b[A')
-  await vi.waitFor(() => expect(ui.lastFrame()).toMatch(/> Tasks .* Enter opens/))
-  ui.stdin.write('\r')
-  await vi.waitFor(() => expect(ui.lastFrame()).toContain(' Tasks 1/3 '))
-  expect(ui.lastFrame()).toMatch(/━+─+ {2}1\/3 done · 1 in progress · 1 left/)
-  for (const task of ['✓ 1 Read startup', '▸ 2 Thread the home', '□ 3 Test it']) expect(ui.lastFrame()).toContain(task)
-  ui.stdin.write('\x1b')
-  await vi.waitFor(() => expect(ui.lastFrame()).not.toContain(dictionaries.en.sheetClose))
-  expect(ui.lastFrame()).toMatch(/^☐ Tasks .*Ctrl\+T$/m)
-  expect(onSubmit).not.toHaveBeenCalled()
-})
-
-it('walks Up from the goal to the task row, Down back, and opens the list with Ctrl+T over a draft', async () => {
+it('walks Up to the goal and Down back, and opens its sheet with Ctrl+O over a draft', async () => {
   const goal = { objective: 'Ship it', phase: 'active' as const, armed: true, rounds: 2, maxRounds: 8 }
-  const ui = render(<App {...props({ todos: plan, goal })} />)
+  const ui = render(<App {...props({ goal })} />)
   ui.stdin.write('\x1b[A')
   await vi.waitFor(() => expect(ui.lastFrame()).toContain('> ● Goal 2/8'))
-  ui.stdin.write('\x1b[A')
-  await vi.waitFor(() => expect(ui.lastFrame()).toMatch(/> Tasks /))
-  expect(ui.lastFrame()).not.toContain('> ● Goal 2/8')
   ui.stdin.write('\x1b[B')
-  await vi.waitFor(() => expect(ui.lastFrame()).toContain('> ● Goal 2/8'))
-  ui.stdin.write('\x1b[B')
-  // Beside the task row the goal keeps its key and its count.
   await vi.waitFor(() => expect(ui.lastFrame()).toMatch(/ Ctrl\+O ● Goal 2\/8$/m))
   expect(ui.lastFrame()).not.toContain('> ● Goal 2/8')
   ui.stdin.write('Unsent draft')
   await vi.waitFor(() => expect(ui.lastFrame()).toContain('> Unsent draft▌'))
-  ui.stdin.write('\x14')
-  await vi.waitFor(() => expect(ui.lastFrame()).toContain('1/3 done'))
+  ui.stdin.write('\x0f')
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain(dictionaries.en.sheetClose))
   ui.stdin.write('\x1b')
   await vi.waitFor(() => expect(ui.lastFrame()).not.toContain(dictionaries.en.sheetClose))
   expect(ui.lastFrame()).toContain('> Unsent draft▌')
 })
 
-it('keeps one grammar around the composer once tasks, a goal, and subagents are all shown', () => {
+it('keeps one grammar around the composer once a goal and subagents are both shown', () => {
   const busy = {
-    todos: plan, goal: { objective: 'Ship it', phase: 'active' as const, armed: true, rounds: 3, maxRounds: 256 },
+    goal: { objective: 'Ship it', phase: 'active' as const, armed: true, rounds: 3, maxRounds: 256 },
     subagents: [{ id: 'child-1', label: 'Review tests', state: 'working' as const, detail: 'Continuable', inspectable: true }],
     context: { used: 45_000, window: 128_000 }, usage: { input: 1_234_000, output: 30_500, cached: 1_000_000 },
   }
@@ -171,13 +66,12 @@ it('keeps one grammar around the composer once tasks, a goal, and subagents are 
   expect(header).toMatch(/Ctrl\+O ● Goal 3\/256$/)
   expect(header).not.toContain('Ship it')
   expect(agentRow(frame)).toMatch(/^↳ Subagents 1 · 1 working +Ctrl\+G$/)
-  expect(frame).toMatch(/^☐ Tasks .*Ctrl\+T$/m)
   // The status line is one layout in every mode: every reading that fits stays.
   const status = '  model  ctx ~35% (45k/128k)  in 1.2M  out 30.5k  cache hit 81%  /workspace'
   expect(statusRow(frame)).toBe(status)
   expect(statusRow(render(<App {...props({ ...busy, goal: undefined })} />).lastFrame())).toBe(status)
   // One of them alone reads the same.
-  const alone = render(<App {...props({ ...busy, todos: undefined, subagents: [] })} />).lastFrame() ?? ''
+  const alone = render(<App {...props({ ...busy, subagents: [] })} />).lastFrame() ?? ''
   expect(alone).toMatch(/Ctrl\+O ● Goal 3\/256$/m)
   expect(alone).not.toContain('Ship it')
   expect(statusRow(alone)).toBe(status)
@@ -188,7 +82,7 @@ function props(overrides: Partial<AppProps> = {}): AppProps {
     files: { query: undefined, entries: [], loading: false, error: undefined }, onReferenceQuery: () => {},
     completion: { entries: [], loading: false, error: undefined }, completionLimit: 8, resultLines: 8,
     committed: emptyTranscript, live: [], pending: [], status: 'idle', stopping: false,
-    command: undefined, notice: undefined, interaction: undefined, todos: undefined,
+    command: undefined, notice: undefined, interaction: undefined,
     model: 'mock/model', cwd: '/workspace', sessionId: 'session-test',
     copy: dictionaries.en, frame: 'round', quitting: false, context: undefined,
     onSubmit: vi.fn(), onCancel: vi.fn(), onInterrupt: vi.fn(), onAnswer: vi.fn(), ...overrides,
@@ -452,53 +346,42 @@ it('summarises a crowded subagent sheet and gives only the selected child a deta
 
 it('toggles each sheet on its own key and cycles the open one with Tab both ways', async () => {
   const goal = { objective: 'Ship it', phase: 'active' as const, armed: true, rounds: 2, maxRounds: 8 }
-  const ui = render(<App {...props({ todos: plan, goal, subagents: [child] })} />)
+  const ui = render(<App {...props({ goal, subagents: [child] })} />)
   const current = (): string | undefined => {
     const frame = ui.lastFrame()!
     if (!frame.includes(dictionaries.en.sheetClose)) return undefined
-    return frame.includes('1/3 done') ? 'tasks'
-      : frame.includes('Review  Working') ? 'agents' : frame.includes('Objective') ? 'goal' : 'unknown'
+    return frame.includes('Review  Working') ? 'agents' : frame.includes('Objective') ? 'goal' : 'unknown'
   }
-  // Ctrl+T opens the task sheet and, pressed again, closes it rather than moving on.
-  ui.stdin.write('\x14')
-  await vi.waitFor(() => expect(current()).toBe('tasks'))
-  // Every view is named on the strip, the open one included, and Tab is named as the way between them.
-  expect(ui.lastFrame()).toMatch(/ Tasks 1\/3 {3}Subagents 1 · 1 working {3}Goal /)
-  expect(ui.lastFrame()).toContain('Tab next')
-  ui.stdin.write('\x14')
-  await vi.waitFor(() => expect(current()).toBeUndefined())
-  // Ctrl+G does the same for the subagents.
+  // Ctrl+G opens the subagents sheet and, pressed again, closes it rather than moving on.
   ui.stdin.write('\x07')
   await vi.waitFor(() => expect(current()).toBe('agents'))
+  // Every view is named on the strip, the open one included, and Tab is named as the way between them.
+  expect(ui.lastFrame()).toMatch(/ Subagents 1 · 1 working {3}Goal /)
+  expect(ui.lastFrame()).toContain('Tab next')
   ui.stdin.write('\x07')
   await vi.waitFor(() => expect(current()).toBeUndefined())
+  // Ctrl+O does the same for the goal.
+  ui.stdin.write('\x0f')
+  await vi.waitFor(() => expect(current()).toBe('goal'))
+  ui.stdin.write('\x0f')
+  await vi.waitFor(() => expect(current()).toBeUndefined())
   // Inside a sheet, Tab steps forward and wraps; Shift-Tab steps back.
-  ui.stdin.write('\x14')
-  await vi.waitFor(() => expect(current()).toBe('tasks'))
-  ui.stdin.write('\t')
+  ui.stdin.write('\x07')
   await vi.waitFor(() => expect(current()).toBe('agents'))
   ui.stdin.write('\t')
   await vi.waitFor(() => expect(current()).toBe('goal'))
   expect(ui.lastFrame()).toMatch(/━+─+ {2}round 2\/8/)
   ui.stdin.write('\t')
-  await vi.waitFor(() => expect(current()).toBe('tasks'))
+  await vi.waitFor(() => expect(current()).toBe('agents'))
   ui.stdin.write('\x1b[Z')
   await vi.waitFor(() => expect(current()).toBe('goal'))
   // Another sheet's key switches to it; its own key closes it.
-  ui.stdin.write('\x14')
-  await vi.waitFor(() => expect(current()).toBe('tasks'))
+  ui.stdin.write('\x07')
+  await vi.waitFor(() => expect(current()).toBe('agents'))
   ui.stdin.write('\x0f')
   await vi.waitFor(() => expect(current()).toBe('goal'))
   ui.stdin.write('\x0f')
   await vi.waitFor(() => expect(current()).toBeUndefined())
-})
-
-it('leaves Ctrl+T alone without a task list', async () => {
-  const ui = render(<App {...props({ subagents: [child] })} />)
-  ui.stdin.write('\x14')
-  ui.stdin.write('x')
-  await vi.waitFor(() => expect(ui.lastFrame()).toContain('> x▌'))
-  expect(ui.lastFrame()).not.toContain(dictionaries.en.sheetClose)
 })
 
 it('keeps Down in the composer while drafting', async () => {

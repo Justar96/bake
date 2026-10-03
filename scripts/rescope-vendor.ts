@@ -80,21 +80,11 @@ const GENERIC_SKIPS: readonly GenericSkip[] = [
   { file: 'vendor/schemastery/src/index.ts', upstream: ['schemastery'] },
   // Narrows a Standard Schema by the same upstream `vendor:` identifier.
   { file: 'vendor/loader/src/config/diff.ts', upstream: ['schemastery'] },
-  // Asserts the vendored-manifest table, which gains an upstream-name column.
-  { file: 'scripts/gen-third-party-notices.spec.ts', upstream: RENAMES.map(rename => rename.upstream) },
   // `cordis` is also an agent-preset id — the directory name under
   // packages/preset/agent-presets/presets/ — so in these files the bare name is
   // product data, not a package reference. Renaming it changed which preset
   // the creator flow stages and which id the roster reports.
-  { file: 'packages/client/ui-agent-preset/src/client/AgentPresetSection.tsx', upstream: ['cordis'] },
   { file: 'packages/preset/agent-presets/tests/shipped-root.spec.ts', upstream: ['cordis'] },
-  { file: 'packages/client/ui-agent-preset/src/client/index.ts', upstream: ['cordis'] },
-  { file: 'packages/client/ui-agent-preset/tests/apply.client.spec.ts', upstream: ['cordis'] },
-  { file: 'packages/client/ui-agent-preset/tests/locales.client.spec.ts', upstream: ['cordis'] },
-  { file: 'packages/client/ui-agent-preset/tests/section.client.spec.tsx', upstream: ['cordis'] },
-  { file: 'apps/cli/tests/web-agent-presets.e2e.ts', upstream: ['cordis'] },
-  { file: 'apps/cli/tests/profiles/web/tests/fixtures/creator-plugin-manager.mjs', upstream: ['cordis'] },
-  { file: 'apps/web/tests/agent-preset-authoring.e2e.ts', upstream: ['cordis'] },
   { file: 'packages/preset/agent-presets/tests/session.spec.ts', upstream: ['cordis'] },
   { file: 'apps/tui/packages/app/cordis.patch.yml', upstream: ['cordis'] },
   { file: 'apps/tui/packages/app/cordis.built.patch.yml', upstream: ['cordis'] },
@@ -116,11 +106,6 @@ const GENERIC_SKIPS: readonly GenericSkip[] = [
   // generated catalogs and every producer/consumer must preserve that wire id.
   { file: 'docs/event-producer-consumer.md', upstream: ['cordis'] },
   { file: 'docs/subsystems/extensions.md', upstream: ['cordis'] },
-  { file: 'packages/api/remotes/src/remote-events.ts', upstream: ['cordis'] },
-  { file: 'packages/extensions/cordis-client-runner/src/client/index.ts', upstream: ['cordis'] },
-  { file: 'packages/extensions/cordis-client-runner/src/client/runtime.ts', upstream: ['cordis'] },
-  { file: 'packages/extensions/cordis-client-runner/tests/orchestrator.client.spec.ts', upstream: ['cordis'] },
-  { file: 'packages/extensions/cordis-client-runner/tests/plugin.client.spec.ts', upstream: ['cordis'] },
   { file: 'packages/extensions/cordis-host-runner/src/index.ts', upstream: ['cordis'] },
   { file: 'packages/extensions/cordis-host-runner/src/inspect-registry.ts', upstream: ['cordis'] },
   { file: 'packages/extensions/cordis-host-runner/src/types.ts', upstream: ['cordis'] },
@@ -129,21 +114,7 @@ const GENERIC_SKIPS: readonly GenericSkip[] = [
   { file: 'packages/extensions/cordis-host-runner/tests/versioning.spec.ts', upstream: ['cordis'] },
   { file: 'packages/extensions/tool-cordis/src/api-catalog.ts', upstream: ['cordis'] },
   { file: 'packages/extensions/tool-cordis/src/providers.ts', upstream: ['cordis'] },
-  { file: 'packages/extensions/ui-cordis/src/client/index.ts', upstream: ['cordis'] },
-  { file: 'packages/extensions/ui-cordis/src/client/inventory.ts', upstream: ['cordis'] },
-  // `cordis/tree` is an Inspector observation topic, not a package subpath.
-  { file: 'packages/experimental/inspector/src/shared/bridge/messages/cordis.ts', upstream: ['cordis'] },
-  { file: 'packages/experimental/inspector/tests/cordis-query.host.spec.ts', upstream: ['cordis'] },
-  { file: 'packages/experimental/inspector/tests/cordis-tree.host.spec.ts', upstream: ['cordis'] },
-  { file: 'packages/experimental/inspector/tests/plugin.client.spec.ts', upstream: ['cordis'] },
   { file: 'scripts/gen-cordis-catalog.ts', upstream: ['cordis'] },
-  // The UI locale namespace and input-trigger source id are product keys.
-  { file: 'packages/client/ui-settings-plugin-inventory/src/client/PluginInventorySettingsTab.tsx', upstream: ['cordis'] },
-  { file: 'packages/extensions/ui-cordis/src/client/CordisActionRow.tsx', upstream: ['cordis'] },
-  { file: 'packages/extensions/ui-cordis/src/client/CordisDefineRow.tsx', upstream: ['cordis'] },
-  { file: 'packages/extensions/ui-cordis/src/client/CordisPanel.tsx', upstream: ['cordis'] },
-  { file: 'packages/extensions/ui-cordis/src/client/CordisRunRow.tsx', upstream: ['cordis'] },
-  { file: 'packages/extensions/ui-cordis/src/client/locales.ts', upstream: ['cordis'] },
 ]
 
 /** A string that must appear exactly `count` times once the rescope has run. */
@@ -218,34 +189,6 @@ const EXACT_EDITS: readonly ExactEdit[] = [
     file: 'docs/cookbook/adding-a-vendored-package.md',
     find: "keep upstream's `name`/`version`/`exports`/`type`",
     replace: "rescope the `name` ([mapping](../rescope.md)) while keeping upstream's `exports`/`type`",
-    expect: 1,
-  },
-  {
-    id: 'packed-install-registry-spec',
-    file: 'packages/sandbox/sandbox-local/tests/packed-install.e2e.ts',
-    find: `    // Peer ranges resolve to the tarballs; Cordis is pinned to their peer range. Do not omit optional
-    // dependencies because the launcher selects its OS/CPU package through one.
-    writeFileSync(join(consumerDir, 'package.json'), JSON.stringify({ name: 'dsh-packed-consumer', private: true, type: 'module' }))
-    const install = spawnSync('npm', ['install', '--no-audit', '--no-fund', ...tarballs, 'cordis@4.0.0-rc.7'], {`,
-    replace: `    // Peer ranges resolve to the tarballs, the framework peer included. Do not omit optional
-    // dependencies because the launcher selects its OS/CPU package through one.
-    writeFileSync(join(consumerDir, 'package.json'), JSON.stringify({ name: 'dsh-packed-consumer', private: true, type: 'module' }))
-    const install = spawnSync('npm', ['install', '--no-audit', '--no-fund', ...tarballs], {`,
-    expect: 1,
-  },
-  {
-    id: 'packed-install-module-doc',
-    file: 'packages/sandbox/sandbox-local/tests/packed-install.e2e.ts',
-    find: ` * Keyless publish-path rehearsal. It packs the provider, its workspace peers, and the current
- * repository's Landlock entry/platform packages, then installs those exact tarballs in an external
- * plain-Node consumer. The host launcher comes from the exact local tarballs, so no registry copy,
- * tsx, path mapping, or workspace resolution can hide missing files, dependency errors, or lost
- * executable modes.`,
-    replace: ` * Keyless publish-path rehearsal. It packs the provider, its workspace peers, the vendored framework
- * peer, and the current repository's Landlock entry/platform packages, then installs those exact
- * tarballs in an external plain-Node consumer. The host launcher comes from the exact local tarballs,
- * so no registry copy, tsx, path mapping, or workspace resolution can hide missing files, dependency
- * errors, or lost executable modes.`,
     expect: 1,
   },
   // The manifest table's name column plus the new upstream-name column, one edit per row.

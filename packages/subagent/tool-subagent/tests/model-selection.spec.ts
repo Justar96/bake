@@ -452,13 +452,6 @@ describe('dsh-tool-subagent model selection', () => {
     expect(starts).toBe(1)
   })
 
-  it('warns that changing a fork route can lose inherited-prefix reuse', async () => {
-    const ctx = await setup({ provider: 'mock', withModelSelection: true }, { inheritsParentContext: true })
-    const schema = ctx.tools.schemas(modelSelectionSetupAgent(ctx)).find(entry => entry.name === 'subagent')!
-    expect(schema.description).toContain('inherits this conversation')
-    expect(schema.description).toMatch(/ Changing the route may prevent cache reuse of the inherited conversation\.$/)
-  })
-
   it('propagates an exact-route resolver failure before child creation', async () => {
     let starts = 0
     const ctx = await setup({ provider: 'mock', withModelSelection: true }, { onStart: () => { starts += 1 } })

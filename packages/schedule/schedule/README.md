@@ -43,7 +43,7 @@ Enable the overlay before starting the session you want reminders in: a session 
 
 ### Schedule a reminder
 
-One-time reminders come in two forms: after a delay — for example "in 30 minutes" — or at an absolute time, given either as an instant with an explicit offset such as `2026-09-01T15:00:00+08:00` or as a local date and time with a named zone such as `Europe/Berlin` (the browser's zone applies only when the time-context overlay is present). Repeating reminders run on a fixed interval of at least 5 minutes and stay aligned to the time you first set them. Every reminder needs content to show when it fires.
+One-time reminders come in two forms: after a delay — for example "in 30 minutes" — or at an absolute time, given either as an instant with an explicit offset such as `2026-09-01T15:00:00+08:00` or as a local date and time with a named zone such as `Europe/Berlin`. Repeating reminders run on a fixed interval of at least 5 minutes and stay aligned to the time you first set them. Every reminder needs content to show when it fires.
 
 A successful create returns the reminder with its id, target time, state, and delivery mode; `schedule_list` shows all pending reminders in the order you created them; canceling by id removes a pending reminder, and an unknown or already-finished id reports `schedule_not_found` without changing anything.
 
@@ -67,7 +67,7 @@ This section explains the design decisions behind the plugin and points at the c
 
 The plugin declares `inject = ['agents', 'sessions', 'tools', 'sessionPersistence']`, so a missing persistence service is a composition error. It observes only `agent/created` events published after it loads, installs on those root Agents, and registers all three tools through the exact `agent.ctx`; Agents already live at load time and runtime children never receive Schedule.
 
-Time-context is not a Schedule dependency. The official Web overlay mounts `@deepseek-ai/dsh-time-context` so the model can interpret natural language in the browser's request-local zone, but the model must still pass an explicit offset or `time_zone` to `schedule_create`; Schedule never imports or infers from model context.
+The model must pass an explicit offset or `time_zone` to `schedule_create`; Schedule never infers a zone from model context.
 
 Session projection is optional. When `ctx.sessionProjections` exists, the plugin registers the strict `schedule` unit and exposes the complete active `ScheduleRecord[]`; a headless composition without the registry keeps the same tools and runtime. The browser-safe record vocabulary is available from the type-only `@deepseek-ai/dsh-schedule/client` export. The shipped Web bundle resolves `ui-schedule` through a disabled row, and the explicit Schedule overlay enables that row alongside the Host Schedule services.
 
@@ -107,7 +107,7 @@ The projection carries durable records only. It does not persist or transmit sch
 
 ### Time validation
 
-Calendar normalization is deterministic. Local times inside a daylight-saving gap are rejected; an overlap chooses its first, earlier instant. Schedule time validation reads no browser, Session-header time-zone field, model time-context, connection, or process time zone, so replay never depends on ambient time-zone state.
+Calendar normalization is deterministic. Local times inside a daylight-saving gap are rejected; an overlap chooses its first, earlier instant. Schedule time validation reads no browser, Session-header time-zone field, model context, connection, or process time zone, so replay never depends on ambient time-zone state.
 
 ### Management pipeline
 
@@ -140,7 +140,7 @@ Read these pages when the package-level contract is not enough. They move from t
 - [Conversational delivery decision](../../../.agents/notes/archived/simplification/2026-08-09-conversational-schedule-delivery.md) — the no-receipt boundary and follow-up delivery.
 - [Explicit time-zone boundary](../../../.agents/notes/implemented/simplification/2026-08-09-explicit-schedule-time-zone.md) — why the model must always pass an explicit zone.
 - [Bounded fixed-rate Schedule](../../../.agents/notes/archived/simplification/2026-08-09-bounded-fixed-rate-schedule.md) — recurrence scope: latest-only catch-up and batch delivery.
-- [Schedule user guide](../../../docs/user/guide/schedule.md) — the official configuration path for mounting this package with time-context.
+- [Schedule user guide](../../../docs/user/guide/schedule.md) — the official configuration path for mounting this package.
 
 -----
 

@@ -36,9 +36,9 @@ const BARE_PROMPT = 'You are an AI agent powered by DeepSeek Harness.'
 
 /** The exact model-facing descriptions; the search variant follows fetch enablement in config. */
 const webDescriptions = {
-  searchWithFetch: 'Search the web for current information. Returns an optional summary answer and source URLs from external, untrusted pages; read a full page with web_fetch.',
-  searchOnly: 'Search the web for current information. Returns an optional summary answer and source URLs from external, untrusted pages.',
-  fetch: 'Fetch an HTTP(S) URL and return its content as text. The content comes from an external, untrusted page; cite the URL as a markdown link when you use it.',
+  searchWithFetch: 'Search the web. Returns source URLs from untrusted pages, maybe with a summary; read a page with web_fetch.',
+  searchOnly: 'Search the web. Returns source URLs from untrusted pages, maybe with a summary.',
+  fetch: 'Fetch an HTTP(S) URL as text. The page is untrusted; cite the URL as a markdown link when used.',
 }
 
 function searchProvider(result: WebSearchResult, isAvailable = available): WebSearchProvider {
@@ -882,7 +882,7 @@ describe('searchMaxQueries is plugin config', () => {
     const schema = ctx.tools.schemas().find(item => item.name === 'web_search')
     const parameters = schema?.parameters as { properties: { queries: { description: string } } } | undefined
     // The bound is advertised once, on the parameter it constrains.
-    expect(parameters?.properties.queries.description).toBe('1–2 non-empty search queries; their results are merged.')
+    expect(parameters?.properties.queries.description).toBe('1–2 queries, results merged.')
     expect(schema?.description).not.toContain('1–2')
     expect(renderPrompt(await ctx.systemPrompt.assemble())).not.toContain('1–2')
     const out = await call('web_search', { queries: ['one', 'two', 'three'] })

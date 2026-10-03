@@ -19,9 +19,9 @@
 
 # Presets mount the agent's own rows. A host copy would reach every preset
 # agent: doubled where the preset mounts the row too (the skill catalog and
-# `/skill` bodies), leaked where it leaves the row out (`ptc`'s `workflow`,
-# every tool here for the shell-only `minimal`). Their services stay on the
-# host, as does the compaction trio for `/compact`.
+# `/skill` bodies), leaked where it leaves the row out (every tool here for
+# the shell-only `minimal`). Their services stay on the host, as does the
+# compaction trio for `/compact`.
 - id: agent-instructions
   disabled: true
 - id: tool-bash
@@ -45,14 +45,6 @@
 - id: tool-subagent-list-agents
   disabled: true
 - id: tool-subagent
-  disabled: true
-- id: tool-subagent-fork
-  disabled: true
-- id: workflow-ptc-runtime
-  disabled: true
-- id: tool-workflow
-  disabled: true
-- id: tool-todo
   disabled: true
 - id: tool-web
   disabled: true

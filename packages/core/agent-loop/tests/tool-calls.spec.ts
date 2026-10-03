@@ -1,6 +1,5 @@
 /**
  * Exercises scheduler ordering and cancellation with deterministic gated tools.
- * ACP expected outputs own transcript-facing coverage.
  */
 
 import { describe, expect, it, onTestFinished } from 'vitest'

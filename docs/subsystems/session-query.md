@@ -132,7 +132,7 @@ interface SessionEventSearchDocument extends SessionEventRecord {
 }
 ```
 
-`ctx.sessionQuery.filterSessions(filters)` applies `SessionResultFilter` to the complete logical corpus. Messages, tool calls/results, todos, and failure/status detail contribute semantic text; reasoning blocks, blocked prompts, structural events, and stream chunks do not.
+`ctx.sessionQuery.filterSessions(filters)` applies `SessionResultFilter` to the complete logical corpus. Messages, tool calls/results, and failure/status detail contribute semantic text; reasoning blocks, blocked prompts, structural events, and stream chunks do not.
 
 ## Full-text search pages
 

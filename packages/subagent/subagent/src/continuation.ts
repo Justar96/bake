@@ -19,7 +19,6 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import { ReasoningEffortId, contentHasImage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, MessageId, MessageSource } from '@deepseek-ai/dsh-llm'
-import { SessionLogOffset } from '@deepseek-ai/dsh-session'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import type { SessionObservation, SessionQueryEngine } from '@deepseek-ai/dsh-session-query'
@@ -45,7 +44,6 @@ import { isAdjacentAgentSendMessageTool } from './internal.ts'
 import type { ActivationObserver } from './lifecycle.ts'
 import type {
   ContinuableCreateRequest,
-  ContinuableCreateSpec,
   ContinuableStart,
   ContinuableStartSpec,
   SubagentInterruptAuthority,
@@ -67,8 +65,8 @@ type ChildDeliveryOptions =
 
 /** Package-private hooks supplied by the owning service. */
 interface ContinuationHost {
-  /** Resolve one provider's detached continuable-creation contribution. */
-  prepareContinuable(name: string, request: ContinuableCreateRequest): Promise<ContinuableCreateSpec>
+  /** Admit one continuable child through its provider. */
+  prepareContinuable(name: string, request: ContinuableCreateRequest): Promise<void>
   /** Build the lifecycle observer for one Activation residency epoch. */
   observeActivation(provider: string, childId: SessionId, parent: Agent): ActivationObserver
 }
@@ -135,7 +133,7 @@ export class SubagentContinuationManager {
     // but the service is also callable outside a turn.
     const releaseHold = this.activations.holdOwnership(parent, childId)
     try {
-      const prepared = await this.host.prepareContinuable(spec.provider, {
+      await this.host.prepareContinuable(spec.provider, {
         sessionId: childId,
         parent,
         signal: spec.signal,
@@ -143,8 +141,6 @@ export class SubagentContinuationManager {
       spec.signal.throwIfAborted()
       this.activations.assertAdmitting(parent)
 
-      const inheritedEventCount = SessionLogOffset(prepared.seed?.length ?? 0)
-      const seed = prepared.seed
       const messageId = await this.activations.locks.run(childId, async () => {
         spec.signal.throwIfAborted()
         this.activations.assertAdmitting(parent)
@@ -163,9 +159,7 @@ export class SubagentContinuationManager {
           provider: spec.provider,
           parent,
           create: {
-            seed,
-            meta: childSessionMeta(parent, childDepth, prepared.seed !== undefined),
-            inheritedEventCount,
+            meta: childSessionMeta(parent, childDepth),
             delegatedPolicies,
             descriptor,
           },

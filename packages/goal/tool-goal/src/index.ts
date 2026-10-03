@@ -44,13 +44,11 @@ const UPDATE_ACTIONS: UpdateAction[] = ['edit', 'pause', 'resume', 'complete', '
 
 /** The user owns the decision to start a goal; execution can only check that the user spoke this turn. */
 const CREATE_DESCRIPTION =
-  'Create the session\'s goal: a long-running objective that keeps going across automatic rounds '
-  + 'until it is done. Call it only when the user explicitly asks for a goal in the current turn; never '
-  + 'create one on your own initiative. A session has one goal at a time, and subagents cannot create goals.'
+  'Create the session\'s single goal, pursued across automatic rounds. Only when the user explicitly '
+  + 'asks for one this turn. Subagents cannot.'
 
 const GET_DESCRIPTION =
-  'Return the session\'s current goal, or null: its id, revision, objective, phase, rounds started, '
-  + 'round limit, any blocker, and whether it will continue automatically.'
+  'Return the session\'s current goal, or null.'
 
 /**
  * The `update_goal` description, carrying the whole goal policy with its deployment-selected blocked
@@ -59,12 +57,11 @@ const GET_DESCRIPTION =
  * @returns the composed description.
  */
 function updateDescription(blockedAfter: number): string {
-  return 'Change the current goal. First call get_goal and pass its exact goal_id and revision. edit, pause, '
-    + 'and resume need a request from the user in the current turn; complete and blocked also work during '
-    + 'an automatic goal round. When a session is reopened or forked, its goal stops running automatic '
-    + 'rounds until the user asks to continue; then resume it. Mark the goal complete only when its '
-    + 'objective is met. Mark it blocked only when the same concrete obstacle has persisted for at least '
-    + `${blockedAfter} consecutive goal rounds; difficulty or remaining work is not an obstacle.`
+  return 'Change the goal; first get_goal for its exact goal_id and revision. '
+    + 'edit/pause/resume need a user request this turn; complete/blocked also work in automatic rounds. '
+    + 'A reopened or forked session\'s goal stays paused until the user asks to continue; then resume. '
+    + 'complete only when the objective is met; blocked only after the same concrete obstacle persisted '
+    + `at least ${blockedAfter} consecutive goal rounds (difficulty or remaining work is not one).`
 }
 
 /** Canonical goal-tool output, matching the existing compact Native JSON. */
@@ -253,11 +250,11 @@ export function apply(ctx: Context, config: Config): void {
       objective: {
         type: 'string',
         required: true,
-        description: 'The concrete objective, taken from the user\'s request.',
+        description: 'From the user\'s request.',
       },
       max_goal_rounds: {
         type: 'number',
-        description: 'Optional limit on automatic rounds, as a positive integer.',
+        description: 'Positive integer.',
       },
     },
     output: GOAL_OUTPUT,
@@ -278,19 +275,18 @@ export function apply(ctx: Context, config: Config): void {
     name: 'update_goal',
     description: updateDescription(resolved.blockedAfterConsecutiveRounds),
     parameters: {
-      goal_id: { type: 'string', required: true, description: 'The current goal\'s id.' },
-      revision: { type: 'number', required: true, description: 'The current goal\'s revision.' },
+      goal_id: { type: 'string', required: true },
+      revision: { type: 'number', required: true },
       action: {
         type: 'string',
         required: true,
         enum: UPDATE_ACTIONS,
-        description: 'edit the objective or round limit, pause or resume automatic rounds, or mark the goal complete or blocked.',
       },
-      objective: { type: 'string', description: 'The new objective; used only with action edit.' },
-      max_goal_rounds: { type: 'number', description: 'The new round limit; used only with action edit.' },
+      objective: { type: 'string', description: 'edit only.' },
+      max_goal_rounds: { type: 'number', description: 'edit only.' },
       blocked_reason: {
         type: 'string',
-        description: 'The concrete obstacle; required with action blocked and unused otherwise.',
+        description: 'Required for blocked.',
       },
     },
     output: GOAL_OUTPUT,

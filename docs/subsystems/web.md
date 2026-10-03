@@ -1,6 +1,6 @@
 # Web Access
 
-Web access uses [dsh-web](../../packages/web/web) for search and fetch. Search providers are [Exa](../../packages/web/web-search-exa) and [DeepSeek](../../packages/web/web-search-deepseek); the [HTTP provider](../../packages/web/web-fetch-http) fetches pages, and [dsh-tool-web](../../packages/web/tool-web) exposes `web_search` and `web_fetch`.
+Web access uses [dsh-web](../../packages/web/web) for search and fetch. The search provider is [DeepSeek](../../packages/web/web-search-deepseek); the [HTTP provider](../../packages/web/web-fetch-http) fetches pages, and [dsh-tool-web](../../packages/web/tool-web) exposes `web_search` and `web_fetch`.
 
 Source: [`packages/web/web/src/types.ts`](../../packages/web/web/src/types.ts)
 
@@ -24,7 +24,7 @@ interface WebSearchRequest {
   /**
    * Upper bound on returned sources; the seam truncates to it. Omitted = no
    * bound. `dsh-tool-web` always sets it. A provider whose API supports a
-   * result-count control (Exa's `numResults`) should apply it at the request
+   * result-count control should apply it at the request
    * layer as a cost/latency optimization; the seam enforces the bound
    * regardless.
    */
@@ -35,7 +35,7 @@ interface WebSearchRequest {
 ```ts type-equiv
 /**
  * Normalized search outcome. `content` is optional provider-generated answer
- * text or summary (Exa and DeepSeek return none; Perplexity returns a
+ * text or summary (DeepSeek returns none; Perplexity returns a
  * generated answer).
  * `sources[]` is the portable citation shape. `truncated` is set by the seam
  * when it cut `sources[]` down to `maxResults`.

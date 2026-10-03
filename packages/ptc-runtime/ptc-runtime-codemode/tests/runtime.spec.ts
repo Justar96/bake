@@ -232,11 +232,11 @@ describe('limits', () => {
 })
 
 describe('cancellation and disposal', () => {
-  it.each([{}, { timeoutMs: null }] as const)('aborts a live program with the caller reason (%j)', async (timing) => {
+  it('aborts a live program with the caller reason', async () => {
     const { run } = await mountRuntime()
     const entered = Promise.withResolvers<null>()
     const controller = new AbortController()
-    const active = run({ ...timing, program: 'void tools.enter({}); for (;;) {}', signal: controller.signal, bindings: tools({ enter: async () => { entered.resolve(null); return null } }) })
+    const active = run({ program: 'void tools.enter({}); for (;;) {}', signal: controller.signal, bindings: tools({ enter: async () => { entered.resolve(null); return null } }) })
     await entered.promise
     controller.abort('stop')
     expect((await active).error).toEqual({ kind: 'abort', message: 'stop' })
@@ -274,7 +274,6 @@ describe('resolution and configuration', () => {
     expect(runtime.executionInstructions).toContain('fresh JavaScript sandbox')
     expect(runtime.resolve({ program: '', bindings: [] })).toMatchObject({ cwd: process.cwd(), timeoutMs: 1000 })
     expect(runtime.resolve({ program: '', bindings: [], timeoutMs: 60_000, cwd: '/work' })).toMatchObject({ cwd: '/work', timeoutMs: 5000 })
-    expect(runtime.resolve({ program: '', bindings: [], timeoutMs: null }).timeoutMs).toBeNull()
     expect(() => runtime.resolve({ program: '', bindings: [], timeoutMs: 0 })).toThrow('timeoutMs')
     expect(() => runtime.resolve({ program: '', bindings: [], cwd: 'relative' })).toThrow('absolute')
     expect(() => runtime.resolve({ program: '', bindings: [], sandboxPolicy: { mode: 'read-only', workspaceRoot: '/' } as never })).toThrow('sandbox policy is unsupported')

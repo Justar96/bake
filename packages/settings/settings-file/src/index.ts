@@ -16,7 +16,7 @@ import { Document, parseDocument } from 'yaml'
 import { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import { canonicalizeWatchPath, resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { SettingsProvider, type SettingsNamespace } from '@deepseek-ai/dsh-settings'
-import { deepEqualJson } from '@deepseek-ai/dsh-util-values'
+import { deepEqualJson, isENOENT } from '@deepseek-ai/dsh-util-values'
 
 /** Plugin config: file location and hot-reload behavior. */
 export interface Config {
@@ -90,11 +90,6 @@ function patchNode(document: Document, path: readonly string[], current: unknown
     return
   }
   if (!deepEqualJson(current, next)) document.setIn([...path], next)
-}
-
-/** Whether a filesystem error means absence; every non-ENOENT failure must surface. */
-function isENOENT(error: unknown): boolean {
-  return (error as NodeJS.ErrnoException | null)?.code === 'ENOENT'
 }
 
 /** Whether an exclusive file create found an existing document. */

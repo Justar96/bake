@@ -60,7 +60,7 @@ Mount the command registry, one condensation backend, and this plugin:
   name: '@deepseek-ai/dsh-command-compact'
 ```
 
-The shipped `dsh` base mounts it beside the default backend, and the Web client provides the command adapter. Automation surfaces that compose no command adapter keep automatic condensation only.
+The shipped `dsh` base mounts it beside the default backend, and the terminal app provides the command adapter. Automation surfaces that compose no command adapter keep automatic condensation only.
 
 ### What happens to the conversation
 

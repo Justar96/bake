@@ -8,7 +8,7 @@
  * select one by name.
  *
  * This package owns the Service Definition role of the capability seam. Service Providers
- * (`@deepseek-ai/dsh-subagent-spawn-in-process`, `-fork`, `-acp`) and the model-facing
+ * (`@deepseek-ai/dsh-subagent-spawn-in-process`) and the model-facing
  * consumer (`@deepseek-ai/dsh-tool-subagent`) are separate packages.
  *
  * Public operations express caller intent: `start` returns one published owned
@@ -53,7 +53,6 @@ import type {
 } from './control-types.ts'
 import type {
   ContinuableCreateRequest,
-  ContinuableCreateSpec,
   ContinuableStart,
   ContinuableStartSpec,
   ResolvedSubagentStartRequest,
@@ -84,7 +83,6 @@ export { AssistantOutputFold, finalAssistantOutput } from './assistant-output.ts
 export { SubagentRunId } from './types.ts'
 export type {
   ContinuableCreateRequest,
-  ContinuableCreateSpec,
   ContinuableStart,
   ContinuableStartSpec,
   ResolvedSubagentStartRequest,
@@ -620,14 +618,14 @@ export class SubagentRuntime extends TypertRemoteService {
   }
 
   /**
-   * Resolve one provider's detached continuable-creation contribution. Method
-   * presence on the provider IS the capability, so a provider without it is
-   * rejected before the manager reserves any child resources.
+   * Admit one continuable child through its provider. Method presence on the
+   * provider IS the capability, so a provider without it is rejected before
+   * the manager reserves any child resources.
    */
   private async prepareContinuable(
     name: string,
     request: ContinuableCreateRequest,
-  ): Promise<ContinuableCreateSpec> {
+  ): Promise<void> {
     const provider = this.expectProvider(name)
     if (provider.prepareContinuable === undefined) {
       throw new SubagentError(
@@ -636,7 +634,7 @@ export class SubagentRuntime extends TypertRemoteService {
         'UNSUPPORTED_CAPABILITY',
       )
     }
-    return provider.prepareContinuable(request)
+    await provider.prepareContinuable(request)
   }
 
   /** Look up a provider for dispatch or fail loud. */

@@ -40,7 +40,7 @@ Load the subagent service, an in-process or remote backend, and this tool; then 
 
 | Field | Default | Meaning |
 |---|---|---|
-| `provider` | required | Provider name on `ctx.subagents` (e.g. `spawn`, `fork`, `acp`) |
+| `provider` | required | Provider name on `ctx.subagents` (e.g. `spawn`) |
 | `toolName` | `subagent` | Model-facing tool name; distinct for every loaded instance |
 | `modelSelectionSettings` | `false` | Sample the Host's exact-route authorization preference for each top-level Session; a standing composition observes its Agents — a preset's own, or every Agent when mounted unscoped — while direct Agent setup passes its Session explicitly; requires provider `agentOptions` support |
 | `enableRunInBackground` | `true` | Expose `run_in_background`; disabling also rejects forced background calls |
@@ -110,9 +110,9 @@ A foreground call awaits `run.result`, maps every non-completed stop reason to a
 
 One-shot background registers a plain parent-owned Task whose done channel settles the start and keeps the stop reason and optional provider diagnostic in its detail. Continuable background calls `ctx.subagents.startContinuable()`, which resolves at inbox acceptance: the child owns its own turns from there, so the call neither waits for nor collects a result.
 
-### Context-sensitive wording
+### Delegation wording
 
-The tool's description derives from `provider.inheritsParentContext`: a fresh child gets "It does not see this conversation" wording, a forked child gets "inherits this conversation's completed turns, but not the current one" wording, so the model never restates or omits context that does not exist. The description is the only home for delegation guidance: the plugin registers no system-prompt section, so a tool restriction that hides the schema also hides the guidance.
+The tool's description says the child does not see this conversation, because every child starts with a fresh one, so the model writes a standalone prompt. The description is the only home for delegation guidance: the plugin registers no system-prompt section, so a tool restriction that hides the schema also hides the guidance.
 
 ### UI presentation
 
@@ -157,12 +157,12 @@ Read these pages when the package-level contract is not enough; they move from t
 
 #### What the model sees
 
-The generated default [`subagent` schema](../../../docs/tool-catalog.md#deepseek-aidsh-tool-subagent) under this instance's configured name while its provider exists. An enabled Session policy adds `provider`, `model`, and `reasoning_effort` plus inheritance and selection guidance; the provider must support `agentOptions`. Provider context inheritance changes the tool and prompt descriptions. Enabled background mode adds `run_in_background`: continuable mode documents its `true` default, the returned agent id, the completion notice, `send_message` follow-ups, starting independent subagents in one message, and the explicit foreground override, while one-shot mode documents its `false` default and the job id collected with `job_output` or stopped with `job_kill`. The delegation description also says that deployment policy bounds child depth, so a parent must give a child a complete task, cannot rely on recursive delegation, and should continue locally if a delegation is rejected for depth. The package adds no system-prompt section, so all of this guidance travels with the schema. With the default tool name `subagent`, the continuable description is:
+The generated default [`subagent` schema](../../../docs/tool-catalog.md#deepseek-aidsh-tool-subagent) under this instance's configured name while its provider exists. An enabled Session policy adds `provider`, `model`, and `reasoning_effort` plus inheritance and selection guidance; the provider must support `agentOptions`. Provider context inheritance changes the tool and prompt descriptions. Enabled background mode adds `run_in_background`: continuable mode documents its background default, the returned agent id, the completion notice, `send_message` follow-ups, starting independent subagents together, and when to pass `false`, while one-shot mode documents that the call waits unless `run_in_background` returns a job id for `job_output` or `job_kill`. The wording is kept terse because every parent request resends it. The package adds no system-prompt section, so all of this guidance travels with the schema. With the default tool name `subagent`, the continuable description is:
 
 ##### Continuable description
 
 ```markdown
-Delegate a self-contained task, such as research, a scoped implementation, or an analysis, to a subagent that works in its own context, so the work does not fill this conversation. You get its result, not its intermediate steps. It does not see this conversation, so give it a complete, standalone prompt. It runs in the background by default and returns its agent id right away. Start independent subagents in the same message and keep working while they run. When one finishes, you get a notice with its outcome and closing message. It stays available afterward: `send_message` steers it while it is running and otherwise starts a new turn. Set `run_in_background: false` only when your next step needs the result.
+Delegate a self-contained task to a subagent with its own context; it does not see this conversation and returns only its result. It runs in the background by default, returning its agent id: start independent ones together and keep working; you are notified when one finishes. `send_message` continues it later or steers it while running.
 ```
 
 #### Token effect
@@ -171,7 +171,7 @@ Fixed schema cost per parent request; model selection adds three parameters. Eac
 
 #### KV Cache effect
 
-Prefix-stable while provider instances and their configuration are unchanged. Adapter catalog changes do not alter the definition; a child route override may prevent a fork child from reusing the inherited parent prefix.
+Prefix-stable while provider instances and their configuration are unchanged. Adapter catalog changes do not alter the definition.
 
 ### Model selection and discovery
 
@@ -224,8 +224,7 @@ These limits define what this tool does not return or enforce; they are current 
 
 - **Background runs expose no result through this tool** — a one-shot task's final output is collected through the generic task surface, and a continuable child's output stays in its own session, read by its agent id. The settlement notice states how that child ended and carries nonempty text from its final assistant output, but it is not this call's return value and cannot be awaited here.
 - **Duplicate names across waiting instances are detected late** (`TODO(subagent-dup-toolname)`) — two instances with the same `toolName` collide only when their provider appears, and the duplicate-name failure rolls back that provider registration; failing earlier requires a registry of intended names.
-- **Shipped fork tools cannot select a child LLM route** — they inherit the parent's provider and model to keep the copied conversation prefix eligible for KV Cache reuse. Re-enable selection only when route changes preserve reuse or expose a bounded recomputation cost.
-- **Non-routing child policy is fixed per instance** — another persona, tool filter, or depth cap requires another distinctly named tool. LLM selection requires an enabled per-Session preference and a provider that advertises `agentOptions`; both in-process providers and DSH SDK advertise it, while ACP, Codex, and Claude Code reject it rather than ignore it.
+- **Non-routing child policy is fixed per instance** — another persona, tool filter, or depth cap requires another distinctly named tool. LLM selection requires an enabled per-Session preference and a provider that advertises `agentOptions`; the in-process provider and DSH SDK advertise it, while ACP, Codex, and Claude Code reject it rather than ignore it.
 
 <a id="dev-note"></a>
 ### Dev Note

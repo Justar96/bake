@@ -2,7 +2,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, AssistantStreamFrame } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { LlmModelReasoningInfo } from '@deepseek-ai/dsh-llm'
+import type { LlmModelReasoningInfo, LlmReasoningEffortInfo, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
 import { parseCommand, type CommandResult } from '@deepseek-ai/dsh-commands'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
@@ -25,7 +25,7 @@ import { LiveBlocks } from './live.ts'
 import { Printed } from './printed.ts'
 import { Interactions } from './interactions.ts'
 import { InputCatalog } from './catalog.ts'
-import { SubagentCatalog, subagentEntries, workflowEntries } from './subagents.ts'
+import { SubagentCatalog, subagentEntries } from './subagents.ts'
 import { subagentStatus } from '@dsh-tui/ui/subagents.tsx'
 import { SubagentInspection } from './inspection.ts'
 import { FileReferences } from './references.ts'
@@ -41,9 +41,9 @@ import type { ModelSelection, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-tool-subagent/model-selection-settings'
 // Empty type imports. Each declaration-merges a key into the projection map
-// (`contextPressure`, `todos`), and those keys are invisible here without them.
+// (`contextPressure`, `permissions`, `goal`), and those keys are invisible here
+// without them.
 import type {} from '@deepseek-ai/dsh-token-meter'
-import type {} from '@deepseek-ai/dsh-tool-todo/types'
 import type {} from '@deepseek-ai/dsh-permission-presets/types'
 import type {} from '@deepseek-ai/dsh-goal'
 
@@ -201,6 +201,17 @@ export class SessionController {
       handler: ({ rawInput, signal }) => this.runModel(rawInput.trim(), signal),
     })))
     this.off.push(agent.ctx.effect(() => commands.register({
+      name: 'thinking', description: copy.thinkingCommand, input: { hint: copy.thinkingHint,
+        choices: async (_agent, _partial, signal) => {
+          await this.reasoningLoad
+          signal.throwIfAborted()
+          const efforts = this.efforts()
+          return efforts === undefined || efforts.length === 0 ? []
+            : [...efforts.map(effort => ({ value: effort.id, description: effort.name })), { value: 'default', description: copy.providerDefault }]
+        } }, recordInput: false,
+      handler: ({ rawInput, signal }) => this.runThinking(rawInput.trim(), signal),
+    })))
+    this.off.push(agent.ctx.effect(() => commands.register({
       name: 'agents', description: copy.listSubagents, recordInput: false,
       handler: async ({ rawInput, signal }) => {
         const requested = rawInput.trim()
@@ -341,8 +352,8 @@ export class SessionController {
     if (projections === undefined) throw new Error('tui: sessionProjections is required')
     this.off.push(projections.onChanged((session, key) => {
       if (session !== agent.session) return
-      if (key === 'inbox' || key === 'contextPressure' || key === 'todos' || key === 'permissions' || key === 'goal'
-        || key === 'workflows' || key === 'subagentRoutingDecisions') this.repaint()
+      if (key === 'inbox' || key === 'contextPressure' || key === 'permissions' || key === 'goal'
+        || key === 'subagentRoutingDecisions') this.repaint()
     }))
     // Activation is process-local and is not written to the goal projection.
     // Create and resume arm the goal; pause disarms it. Those transitions
@@ -388,16 +399,11 @@ export class SessionController {
     const pending = (['next-step', 'next-turn'] as const).flatMap(target => inbox[target]
       .filter(message => message.source.kind === 'user')
       .map(message => ({ id: message.id, target, text: message.content.flatMap(block => block.type === 'text' ? [block.text] : []).join(''), attachments: attachmentSummaries(message.content) })))
-    const surface = projections?.snapshot(this.agent.session, ['contextPressure', 'tokenUsage', 'permissions', 'workflows', 'subagentRoutingDecisions']).values
+    const surface = projections?.snapshot(this.agent.session, ['contextPressure', 'tokenUsage', 'permissions', 'subagentRoutingDecisions']).values
     const pressure = surface?.contextPressure
-    // The agent's current list, not a log of writes to it. `todos` folds every
-    // `todo/write` to the latest whole list, which is the only version that
-    // is still current.
-    const todos = projections?.stateOf(this.agent.session, 'todos')
     const goal = this.goal()
     const children = this.subagents.view
-    const workflows = surface?.workflows ?? []
-    const subagents = subagentEntries(children, this.ctx, this.copy, workflows, surface?.subagentRoutingDecisions)
+    const subagents = subagentEntries(children, this.ctx, this.copy, surface?.subagentRoutingDecisions)
     const selected = this.selection?.current
     // A session can start on no model: nothing is the default until a sign-in.
     const model = selected !== undefined ? routeOf(selected)
@@ -414,10 +420,7 @@ export class SessionController {
       ...(this.autoCompacting ? { autoCompacting: true } : {}),
       notice: this.notice,
       interaction: this.interactions.current,
-      todos: todos === undefined || todos === null ? undefined
-        : todos.map(item => ({ text: item.content, status: item.status })),
       subagents,
-      workflows: workflowEntries(workflows, this.agent.status === 'running'),
       inspection: this.inspection?.view,
       ...goal === undefined ? {} : { goal },
       ...surface?.permissions === undefined ? {} : { permission: surface.permissions.currentValue },
@@ -556,7 +559,9 @@ export class SessionController {
     // Published before dispatch: the `command/run` the registry appends names
     // this command, and the event listener correlates it and its compaction.
     const command: CommandActivity = {
-      text, submitted, abort, done: Promise.resolve(), ...(parsed.name === 'compact' ? { compactPhase: 'preparing' as const } : {}),
+      text, submitted, abort, done: Promise.resolve(),
+      // A running turn makes `/compact` refuse as busy, so it shows no compaction over the turn.
+      ...(parsed.name === 'compact' && this.agent.status !== 'running' ? { compactPhase: 'preparing' as const } : {}),
     }
     this.command = command
     // Dispatched in the submitting turn, not a later one. Without attachments
@@ -601,25 +606,29 @@ export class SessionController {
   /**
    * Send the user's queued input now, the Alt-Up key: interrupt the running
    * turn it waits on, keeping plugin context queued, and start a turn with it
-   * at once. The oldest queued message opens the turn and the rest join its
-   * first step, in the order they were queued. While compaction runs the
+   * at once. The queued messages open that turn in the order they were
+   * queued. While compaction runs the
    * input already starts the turn after it, so it is left to.
    */
   sendPending(): void {
     if (this.closed || this.inspection !== undefined) return
     const agent = this.agent
     const pending = [...agent.inbox.nextStep, ...agent.inbox.nextTurn].filter(message => message.source.kind === 'user')
-    const [first, ...rest] = pending
-    if (first === undefined) { this.notify(this.copy.noPending); return }
+    const last = pending.at(-1)
+    if (last === undefined) { this.notify(this.copy.noPending); return }
     if (this.command?.compactPhase !== undefined) { this.notify(this.copy.pendingAfterCompaction); return }
     for (const message of pending) agent.inbox.remove(message.id)
     if (agent.status === 'running') {
       this.stopping = true
       agent.cancel({ kind: 'user' }, { keepInbox: true })
     }
-    // After the cancel, waking input waits for the aborted turn to settle and then opens the next.
-    agent.followup(first)
-    for (const message of rest) agent.send(message, 'next-step', false)
+    // A turn's first step claims all next-step input, then one queued turn.
+    // So every message but the last waits at next-step without waking, and
+    // the last wakes the driver: idle, it joins them at next-step; after the
+    // cancel, it is redirected to next-turn, claimed after them once the
+    // aborted turn settles. Either way the batch keeps its queued order.
+    for (const message of pending.slice(0, -1)) agent.send(message, 'next-step', false)
+    agent.steer(last)
     this.notify(this.copy.pendingSent)
   }
 
@@ -689,17 +698,74 @@ export class SessionController {
   cycleThinking(): void {
     const current = this.selection?.current
     if (current === undefined) { this.notify(this.copy.noModelSelection); return }
-    const route = routeOf(current)
-    const efforts = this.reasoning?.route === route ? this.reasoning.info?.efforts ?? [] : undefined
+    const efforts = this.efforts()
     if (efforts === undefined) { this.notify(this.copy.thinkingLoading); return }
-    if (efforts.length === 0) { this.notify(`${this.copy.thinkingUnsupported}: ${route}`); return }
+    if (efforts.length === 0) { this.notify(`${this.copy.thinkingUnsupported}: ${routeOf(current)}`); return }
     // Provider default first, then each effort in the adapter's order.
     const steps = [undefined, ...efforts.map(effort => effort.id)]
-    const next = steps[(steps.indexOf(current.reasoningEffort) + 1) % steps.length]
-    this.selection!.current = { provider: current.provider, model: current.model, ...next === undefined ? {} : { reasoningEffort: next } }
-    this.rememberSelection(this.selection!.current)
-    const label = next === undefined ? this.copy.providerDefault : efforts.find(effort => effort.id === next)?.name ?? next
-    this.notify(`${this.copy.thinking}: ${label}${this.agent.status === 'running' ? ` \u00b7 ${this.copy.thinkingNextStep}` : ''}`)
+    this.notify(this.setEffort(steps[(steps.indexOf(current.reasoningEffort) + 1) % steps.length], efforts))
+  }
+
+  /**
+   * The `/thinking` command: set the reasoning effort by name, or choose it
+   * from the route's efforts. Like Shift-Tab it keeps the model and may run
+   * during a turn, taking effect from its next step.
+   * @param input - an effort id or name, `default`, or nothing to choose.
+   * @param signal - owning command lifetime.
+   */
+  private async runThinking(input: string, signal: AbortSignal): Promise<CommandResult> {
+    const current = this.selection?.current
+    if (current === undefined) return { kind: 'error', text: this.copy.noModelSelection }
+    if (/\s/u.test(input)) return { kind: 'error', text: this.copy.thinkingUsage }
+    if (this.efforts() === undefined) await this.reasoningLoad
+    signal.throwIfAborted()
+    const efforts = this.efforts()
+    if (efforts === undefined) return { kind: 'error', text: this.copy.thinkingLoading }
+    if (efforts.length === 0) return { kind: 'error', text: `${this.copy.thinkingUnsupported}: ${routeOf(current)}` }
+    let asked = input.toLowerCase()
+    if (asked === '') {
+      const chosen = await this.interactions.choose({
+        title: this.copy.thinkingTitle, initial: current.reasoningEffort ?? 'default',
+        choices: [{ value: 'default', label: this.copy.providerDefault },
+          ...efforts.map(effort => ({ value: effort.id, label: effort.name, ...effort.description === undefined ? {} : { description: effort.description } }))],
+      }, signal)
+      signal.throwIfAborted()
+      if (chosen === undefined) return { kind: 'success', text: this.copy.thinkingCancelled }
+      asked = chosen.toLowerCase()
+    }
+    const effort = efforts.find(entry => entry.id.toLowerCase() === asked || entry.name.toLowerCase() === asked)
+    if (effort === undefined && asked !== 'default') {
+      return { kind: 'error', text: `${this.copy.unknownEffort}: ${[...efforts.map(entry => entry.id), 'default'].join(' ')}` }
+    }
+    // The route may have changed while the picker was open.
+    if (this.efforts() !== efforts) return { kind: 'error', text: this.copy.thinkingLoading }
+    return { kind: 'success', text: this.setEffort(effort?.id, efforts) }
+  }
+
+  /** The selected route's reasoning efforts, or undefined while they load. */
+  private efforts(): readonly LlmReasoningEffortInfo[] | undefined {
+    const current = this.selection?.current
+    if (current === undefined || this.reasoning?.route !== routeOf(current)) return undefined
+    return this.reasoning.info?.efforts ?? []
+  }
+
+  /**
+   * Keep the model and change only its effort, saved as the new-session
+   * default. The selection is read each time a step enters prompt assembly,
+   * and the next `request/header` records it.
+   * @param effort - an offered effort id, or undefined for the provider default.
+   * @param efforts - the route's offered efforts, for the label.
+   * @returns the confirmation the caller shows.
+   */
+  private setEffort(effort: ReasoningEffortId | undefined, efforts: readonly LlmReasoningEffortInfo[]): string {
+    const selection = this.selection!
+    const current = selection.current!
+    const next: ModelSelection = { provider: current.provider, model: current.model, ...effort === undefined ? {} : { reasoningEffort: effort } }
+    selection.current = next
+    this.rememberSelection(next)
+    this.repaint()
+    const label = effort === undefined ? this.copy.providerDefault : efforts.find(entry => entry.id === effort)?.name ?? effort
+    return `${this.copy.thinking}: ${label}${this.agent.status === 'running' ? ` \u00b7 ${this.copy.thinkingNextStep}` : ''}`
   }
 
   /**

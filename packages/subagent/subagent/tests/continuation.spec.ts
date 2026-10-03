@@ -12,7 +12,6 @@ import type { SessionEvent, SessionEventMap } from '@deepseek-ai/dsh-session'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import * as toolSchedule from '@deepseek-ai/dsh-schedule'
 import * as SubagentSpawn from '@deepseek-ai/dsh-subagent-spawn-in-process'
-import * as SubagentFork from '@deepseek-ai/dsh-subagent-fork-in-process'
 import type { ContentBlock, GenerateOptions, MessageId, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { ToolCallId, createUserMessage, LlmAdapter, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import { defineTool } from '@deepseek-ai/dsh-tools'
@@ -105,7 +104,7 @@ async function setupWith(
   if (options.sessionQuery !== false) await ctx.plugin(TestSessionQuery)
   await ctx.plugin(SubagentRuntime, options.maxActiveSubagents === undefined ? {} : { maxActiveSubagents: options.maxActiveSubagents })
   await ctx.plugin(SubagentSpawn, { providerName: 'spawn' })
-  await ctx.plugin(SubagentFork, { providerName: 'fork' })
+  await ctx.plugin(SubagentSpawn, { providerName: 'spawn-b' })
   ctx.llm.registerAdapter(['mock'], adapter)
   const parent = await ctx.agentLoop.create(SessionId('parent'), { provider: 'mock', model: 'mock' })
   return { ctx, parent, disposePersistence, root }
@@ -358,7 +357,7 @@ describe('continuable activation capacity', () => {
       const first = await ctx.subagents.startContinuable(startSpec(parent))
       const child = ctx.agents.get(first.childId)!
       await vi.waitFor(() => { expect(adapter.requests).toHaveLength(1) })
-      const nested = await ctx.subagents.startContinuable(startSpec(child, 'fork'))
+      const nested = await ctx.subagents.startContinuable(startSpec(child, 'spawn-b'))
       const sibling = await ctx.subagents.startContinuable(startSpec(parent))
       await expect(ctx.subagents.startContinuable(startSpec(ctx.agents.get(nested.childId)!)))
         .rejects.toMatchObject({ code: 'ACTIVATION_LIMIT_REACHED' })
@@ -564,7 +563,6 @@ describe('SubagentRuntime.startContinuable', () => {
     ctx.subagents.registerProvider({
       name: 'one-shot',
       capabilities: { agentOptions: false, outputSchema: false, depthLimit: false, toolFilter: false, persona: false },
-      inheritsParentContext: false,
       start,
     })
 
@@ -861,30 +859,6 @@ describe('SubagentRuntime.startContinuable', () => {
     await drainManager(fresh)
   })
 
-  it('continues turn numbering after an inherited fork prefix and pre-turn descriptor', async () => {
-    const { ctx, parent } = await setup([
-      textResponse('parent turn'),
-      textResponse('forked child'),
-    ])
-    // Complete one parent turn so fork has a prefix to contribute.
-    parent.followup(createUserMessage({ content: message('parent work'), source: { kind: 'user' } }))
-    await parent.whenIdle()
-
-    const started = await ctx.subagents.startContinuable(startSpec(parent, 'fork'))
-    await waitNoActivation(ctx, started.childId)
-
-    const loaded = await loadStoredSession(ctx.sessionPersistence, started.childId)
-    const descriptorIndex = loaded.events.findIndex(event => event.type === 'subagent/descriptor')
-    const childTurn = loaded.events.slice(descriptorIndex + 1)
-      .find(event => event.type === 'turn/start')
-    // The first child turn after the descriptor continues the inherited prefix
-    // rather than restarting at 1, so the replayed child log stays balanced.
-    expect(descriptorIndex).toBeGreaterThanOrEqual(0)
-    expect(childTurn?.type === 'turn/start' && childTurn.data.turn).toBe(2)
-    expect(loaded.meta.isSeeded).toBe(true)
-    expect(loaded.inheritedEventCount).toBeGreaterThan(0)
-  })
-
   it('records the declared persona in the descriptor and reapplies it on cold resume', async () => {
     const { ctx, parent } = await setup([textResponse('scoped'), textResponse('resumed')])
     const started = await ctx.subagents.startContinuable({
@@ -1099,9 +1073,8 @@ describe('direct-child Queue residency routing', () => {
     const disposeProvider = ctx.subagents.registerProvider({
       name: 'retired',
       capabilities: { agentOptions: false, outputSchema: false, depthLimit: false, toolFilter: false, persona: false },
-      inheritsParentContext: false,
       start: async () => { throw new Error('one-shot start is not used') },
-      prepareContinuable: () => Promise.resolve({}),
+      prepareContinuable: () => Promise.resolve(),
     })
     const starts: SubagentRunInfo[] = []
     const ends: SubagentRunEndInfo[] = []

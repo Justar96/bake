@@ -246,39 +246,16 @@ async function settleForegroundRun(run: SubagentRun): Promise<ForegroundToolResu
 }
 
 /**
- * Model-facing wording from the provider's conversation-history descriptor
- * ({@link SubagentProvider.inheritsParentContext}).
- * A fresh child needs a standalone prompt; a forked child already sees the
- * conversation's completed turns — telling the model to restate everything
- * (or, worse, that the child "does not see this conversation") would be false
- * for a fork.
- * @param inheritsConversation - whether the child's conversation is seeded
- *   with the parent's completed turns; this says nothing about tool, service,
- *   scope, or authority inheritance.
- * @returns the tool `description` and the `prompt` parameter description.
+ * Model-facing wording for the tool `description` and the `prompt` parameter:
+ * a child starts with a fresh conversation, so its prompt must stand alone.
  */
-function providerWording(inheritsConversation: boolean): { description: string; promptDescription: string } {
-  if (inheritsConversation) {
-    return {
-      description:
-        'Delegate a task to a subagent that inherits this conversation\'s completed turns, but not the '
-        + 'current one, for work that builds on this context, such as a review or a continuation. You get '
-        + 'its result, not its intermediate steps.',
-      promptDescription:
-        'The task. The subagent already sees this conversation\'s completed turns, so state only what is new.',
-    }
-  }
-  return {
-    description:
-      'Delegate a self-contained task, such as research, a scoped implementation, or an analysis, to a '
-      + 'subagent that works in its own context, so the work does not fill this conversation. You get its '
-      + 'result, not its intermediate steps. It does not see this conversation, so give it a complete, '
-      + 'standalone prompt.',
-    promptDescription:
-      'The complete, self-contained task. The subagent does not see this conversation, so include '
-      + 'everything it needs.',
-  }
-}
+const CHILD_WORDING = {
+  description:
+    'Delegate a self-contained task to a subagent with its own context; it does not see this '
+    + 'conversation and returns only its result.',
+  promptDescription:
+    'Standalone, with everything it needs.',
+} as const
 
 interface DelegationRunRequest {
   readonly run_in_background?: boolean
@@ -403,7 +380,7 @@ export function apply(ctx: Context, config: Config, session?: Session): void {
     let mounted: { subagentProvider: SubagentProvider; disposeTool: () => void } | undefined
     const mount = (subagentProvider: SubagentProvider): void => {
       assertSubagentProviderConfiguration(subagentProvider)
-      const wording = providerWording(subagentProvider.inheritsParentContext)
+      const wording = CHILD_WORDING
       const providerRouteDefaults = subagentProvider.agentRouteDefaults
       const defaultsDescription = providerRouteDefaults !== undefined
         ? 'the configured subagent defaults and this tool\'s default route'
@@ -411,9 +388,6 @@ export function apply(ctx: Context, config: Config, session?: Session): void {
       const choiceDescription = !modelSelectionEnabled
         ? ''
         : ` Model choice is optional: omit \`provider\`, \`model\`, and \`reasoning_effort\` to let the host choose; it may pick an allowed model and effort suited to the task, and otherwise uses ${defaultsDescription}. To choose, look up routes and efforts with \`list_subagent_models\`, then pass \`provider\` and \`model\` together. If you change the route without \`reasoning_effort\`, the new model's default effort applies.`
-          + (subagentProvider.inheritsParentContext
-            ? ' Changing the route may prevent cache reuse of the inherited conversation.'
-            : '')
       const disposeTool = runtimeCtx.tools.register(defineTool({
         name: toolName,
         // The description is the one home for delegation guidance: this plugin
@@ -424,14 +398,14 @@ export function apply(ctx: Context, config: Config, session?: Session): void {
           // a separately installed capability, so this promise holds whenever the
           // continuable background path is reachable at all.
           ? continuable
-            ? ' It runs in the background by default and returns its agent id right away. Start independent subagents in the same message and keep working while they run. When one finishes, you get a notice with its outcome and closing message. It stays available afterward: `send_message` steers it while it is running and otherwise starts a new turn. Set `run_in_background: false` only when your next step needs the result.'
-            : ' This call waits for the result by default. Set `run_in_background: true` to return a job id; collect with `job_output` and stop with `job_kill`.'
-          : ' This call waits for the subagent and returns its result.') + choiceDescription,
+            ? ' It runs in the background by default, returning its agent id: start independent ones together and keep working; you are notified when one finishes. `send_message` continues it later or steers it while running.'
+            : ' Waits unless `run_in_background`, which returns a job id for `job_output`/`job_kill`.'
+          : ' Waits for the subagent and returns its result.') + choiceDescription,
         parameters: {
           description: {
             type: 'string',
             required: true,
-            description: 'A short (3-5 word) description of the delegated task, for display.',
+            description: '3-5 words, for display.',
           },
           prompt: {
             type: 'string',
@@ -461,9 +435,7 @@ export function apply(ctx: Context, config: Config, session?: Session): void {
           ...backgroundEnabled ? {
             run_in_background: {
               type: 'boolean' as const,
-              description: continuable
-                ? 'Run in the background and return the agent id right away. Defaults to true; set false to wait for the result when your next step needs it.'
-                : 'Run as a background job and return its job id. Defaults to false; collect with job_output or stop with job_kill.',
+              ...continuable ? { description: 'false only when your next step needs the result.' } : {},
             },
           } : {},
         },

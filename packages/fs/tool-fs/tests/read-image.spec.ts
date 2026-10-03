@@ -798,12 +798,10 @@ describe('registration surface', () => {
   it('describes read_image to the model without implementation vocabulary', async () => {
     const ctx = await setup()
     const schema = ctx.tools.schemas().find(candidate => candidate.name === 'read_image')
-    expect(schema?.description).toBe('Read a PNG, JPEG, WebP, or GIF file and return the image. '
-      + 'A path without an extension works; its format is detected from the content. '
-      + 'Large images are downscaled automatically, so do not install image tools or make thumbnails just to view one. '
-      + 'Requires a model that accepts image input.')
+    expect(schema?.description).toBe('View a PNG, JPEG, WebP, or GIF file; format is detected from content and large images are '
+      + 'downscaled, so do not make thumbnails. Needs an image-input model.')
     const props = (schema?.parameters as { properties: Record<string, { description?: string }> } | undefined)?.properties
-    expect(props?.['file_path']?.description).toBe('Absolute path, or relative to the working directory.')
+    expect(props?.['file_path']?.description).toBe('Absolute, or relative to the working directory.')
   })
 })
 

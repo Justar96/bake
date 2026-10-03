@@ -11,10 +11,8 @@ import type { ScopeKey, ScopeLayer, Scoped } from '@deepseek-ai/dsh-scope'
 import type { ToolCallId, ContentBlock, ToolSchema } from '@deepseek-ai/dsh-llm'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
 import type { Agent, ToolProgress } from '@deepseek-ai/dsh-agent'
-import type { Session, UserMessage } from '@deepseek-ai/dsh-session'
+import type { UserMessage } from '@deepseek-ai/dsh-session'
 import { assertNever, deepFreeze, snapshotJsonValue, type JsonValue } from '@deepseek-ai/dsh-util-values'
-import type { PromptSection, ToolProviderResult } from '@deepseek-ai/dsh-system-prompt'
-import type { PtcRuntime } from '@deepseek-ai/dsh-ptc-runtime'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 // Type-only: makes `ctx.get('approval')` resolve to the ApprovalService
 // augmentation. The seam stays optional at runtime — see `serviceAsk`.
@@ -23,39 +21,16 @@ import type { ToolCallView, ToolResultView } from './presentation.ts'
 import { assertSupportedJsonSchema, validateJsonSchemaValue } from './json-schema.ts'
 import type { JsonSchemaNode } from './json-schema.ts'
 import { createRunCodeTool, RUN_CODE_NAME } from './ptc.ts'
-import { createToolHelpTool, TOOL_HELP_NAME } from './tool-help.ts'
-import type { PtcSdkLanguage } from './ptc.ts'
-import { renderToolsSdk } from './ts-types.ts'
-import type { ToolSdkSchema } from './ts-types.ts'
-import { renderToolsSdkPy } from './py-types.ts'
-
-/**
- * Language → SDK-section renderer. The registry looks up the loaded
- * `ctx.ptcRuntime.language` in this table when assembling the `tools:sdk`
- * section under a non-native mode; a runtime whose language is not a key
- * fails the assembly loudly (same idiom as `toolOrder` violations). Adding a
- * new backend language is three parallel edits — a {@link PtcSdkLanguage}
- * member, an entry here, and a `RUN_CODE_FLAVORS` entry in `ptc.ts` for
- * its `run_code` schema strings — plus the renderer function this table points
- * at. The `satisfies` clause pins this table's key set to that union, which
- * the flavor table is checked against too, so any of the three left out is a
- * typecheck failure. What no check reaches is the prose that names the values
- * instead of deriving them: the seam's `dsh-ptc-runtime` README, its
- * `PtcRuntime.language` JSDoc, and `docs/subsystems/ptc-runtime.md`,
- * plus this package's own README and the
- * {@link Config.mode} JSDoc.
- */
-/**
- * The model-facing statement of the `ptc` collapse. Names the consequence
- * (the call fails) and the route (inside the program), because a rule the
- * model can only discover by being denied is one it corrects too late.
- */
-const PTC_ONLY_INSTRUCTION = `\`${RUN_CODE_NAME}\` is the only tool you can call directly — a tool call naming any other tool fails. Reach every tool the SDK declares below from inside the program.`
-
-const SDK_RENDERERS: Record<string, (schemas: ToolSdkSchema[]) => string> = {
-  typescript: renderToolsSdk,
-  python: renderToolsSdkPy,
-} satisfies Record<PtcSdkLanguage, (schemas: ToolSdkSchema[]) => string>
+import {
+  collapseSection,
+  nearestPresentationMode,
+  requirePtcRuntime,
+  schemaOf,
+  sdkSection,
+  wireSchemas,
+  type SchemaPresentationSource,
+} from './schema-presentation.ts'
+import { TOOL_DUPLICATE_CALL, TurnRefusalLedger } from './turn-ledger.ts'
 
 export {
   defineTool,
@@ -98,7 +73,7 @@ export type { PtcDispatchEventData, PtcDispatchStartEventData } from './types.ts
 export type { ToolProgress } from '@deepseek-ai/dsh-agent'
 
 export { CodeRunFailedError, RUN_CODE_NAME } from './ptc.ts'
-export { TOOL_HELP_NAME } from './tool-help.ts'
+export { TOOL_DUPLICATE_CALL }
 export { jsonSchemaToTs, renderToolsSdk } from './ts-types.ts'
 export { jsonSchemaToPy, renderToolsSdkPy } from './py-types.ts'
 export { defineContentToolFixture, type ContentToolFixtureOptions } from './testing.ts'
@@ -225,14 +200,6 @@ export interface ToolOutputDefinition {
 export interface ToolDefinition extends ToolSchema {
   /** Mandatory canonical output declaration. */
   readonly output: ToolOutputDefinition
-  /**
-   * Usage reference kept out of the native schema, which is resent with every
-   * request. A scope that can see a tool with details also sees the reserved
-   * {@link TOOL_HELP_NAME} tool, which returns them; the description should
-   * tell the model to call it before first use. The PTC mode SDK appends the
-   * details to the binding's documentation instead. Must be non-empty when set.
-   */
-  readonly details?: string
   /**
    * Run one accepted call and return only its canonical lossless-JSON value.
    * Async work must observe or forward `exec.signal` and settle only after its
@@ -524,21 +491,6 @@ export const TOOL_ABORTED = 'ABORTED'
 
 /** Canonical error code for cancellation before a tool body was invoked. */
 export const TOOL_ABORTED_BEFORE_DISPATCH = 'ABORTED_BEFORE_DISPATCH'
-
-/**
- * Canonical error code for a model-direct call suppressed because an identical
- * call already met a deterministic refusal earlier in the same turn.
- */
-export const TOOL_DUPLICATE_CALL = 'DUPLICATE_TOOL_CALL'
-
-/**
- * Failure codes whose unchanged retry must fail the same way until another
- * tool call settles: the filesystem observation policy refuses an unread
- * (`FS_NOT_OBSERVED`) or stale (`FS_STALE_VERSION`) guarded mutation, and only
- * a later observation or mutation can change that verdict. The codes are
- * matched as strings so this package takes no filesystem dependency.
- */
-const REPEAT_REFUSAL_CODES: ReadonlySet<string> = new Set(['FS_NOT_OBSERVED', 'FS_STALE_VERSION'])
 
 /** Structured error metadata for a failed tool call (alongside the model-facing text). */
 export interface ToolErrorInfo {
@@ -919,15 +871,8 @@ export class ToolRuntime extends Service {
   private cancellationStates = new WeakMap<ToolRunContext, ToolCancellationState>()
   /** Definition-owned final content transform snapshotted before policy begins. */
   private contentFinalizers = new WeakMap<ToolRunContext, ToolDefinition['finalizeContent']>()
-  /**
-   * Refusals that an identical retry would repeat, keyed by call identity
-   * ({@link repeatKey}), for each Session with an open turn. `turn/start`
-   * opens an empty ledger and `turn/end` drops it, so suppression never spans
-   * turns and never applies outside one.
-   */
-  private readonly turnRefusals = new WeakMap<Session, Map<string, ToolFailure>>()
-  /** Executions answered from {@link turnRefusals} without dispatch. */
-  private readonly suppressedExecutions = new WeakSet<ToolExecution>()
+  /** Open-turn refusals an identical model-direct retry would repeat. */
+  private readonly turnRefusals = new TurnRefusalLedger()
   private readonly layers = new ScopedLayers(
     scope => new ToolLayer(scope),
     () => { this.ctx.emit('tools/change') },
@@ -942,8 +887,6 @@ export class ToolRuntime extends Service {
    * transport is stateless beyond its closures over `this`.
    */
   private ptcTransport: ToolDefinition | undefined
-  /** Reserved on-demand details reader, stateless beyond its closure over `this`. */
-  private readonly toolHelp: ToolDefinition = createToolHelpTool((name, scope) => this.view(scope).visible.get(name))
 
   constructor(ctx: Context, config: Config = {}) {
     super(ctx, 'tools')
@@ -951,69 +894,27 @@ export class ToolRuntime extends Service {
     // optional-input type for direct (non-Loader) construction in tests.
     this.defaultMode = config.mode ?? 'native'
     this.maxParallelSubCalls = resolveMaxParallelSubCalls(config.maxParallelSubCalls)
-    ctx.systemPrompt.tools(context => this.wireSchemas(context.scope))
+    ctx.systemPrompt.tools(context => wireSchemas(this.presentation(), context.scope))
     ctx.on('session/event', (session, event) => {
-      if (event.type === 'turn/start') this.turnRefusals.set(session, new Map())
-      else if (event.type === 'turn/end') this.turnRefusals.delete(session)
+      if (event.type === 'turn/start') this.turnRefusals.open(session)
+      else if (event.type === 'turn/end') this.turnRefusals.close(session)
     })
     if (this.defaultMode !== 'native') {
-      ctx.systemPrompt.section(this.collapseSection())
-      ctx.systemPrompt.section(this.sdkSection())
+      ctx.systemPrompt.section(collapseSection(this.presentation()))
+      ctx.systemPrompt.section(sdkSection(this.presentation()))
     }
   }
 
   /**
-   * The prompt statement of the `ptc` executor collapse, registered wherever
-   * {@link sdkSection} is and rendering empty outside an effective `ptc`.
-   *
-   * Every tool contributes its own guidance section naming its tool, none of
-   * them qualify how that tool is reached, and they all render before the SDK.
-   * Without this the model reads a catalog of tools it is told to use and no
-   * statement that only `run_code` may be called, so it emits a native call,
-   * receives `UNKNOWN_TOOL` for a tool the prompt just declared, and concludes
-   * the deployment is inconsistent. Its order places the rule before that
-   * guidance rather than after it.
-   *
-   * `both` renders empty: native calls do execute there, so the rule is false.
-   * @returns the section registration.
+   * The registry facts schema presentation reads, bound to this accessor so
+   * every read resolves through the calling context at use time.
    */
-  private collapseSection(): PromptSection {
+  private presentation(): SchemaPresentationSource {
     return {
-      name: 'tools:ptc-only',
-      order: this.ctx.systemPrompt.getSectionOrder('PTC_ONLY'),
-      // The SAME predicate the executor denies by, so the prompt cannot state
-      // a rule the registry does not enforce (see `collapses`).
-      text: context => this.modeFor(context.scope) === 'ptc' ? PTC_ONLY_INSTRUCTION : '',
-    }
-  }
-
-  /**
-   * The generated-SDK prompt section, registered globally by a PTC mode
-   * deployment and per scope by {@link presentAs}.
-   *
-   * The body regenerates from the CALLING scope, and renders empty for an
-   * agent presenting natively — an agent that opted out under a PTC mode
-   * deployment still sees the global registration, and an empty section is
-   * dropped from the rendered prompt.
-   * @returns the section registration.
-   */
-  private sdkSection(): PromptSection {
-    return {
-      name: 'tools:sdk',
-      order: this.ctx.systemPrompt.getSectionOrder('TOOLS_SDK'),
-      interpolate: false,
-      // Regenerate from the calling scope's visible tools in stable order.
-      text: (context) => {
-        const mode = this.modeFor(context.scope)
-        if (mode === 'native') return ''
-        const runtime = this.requirePtcRuntime(mode)
-        // Own-property read: a language like `toString`/`constructor` would
-        // otherwise resolve an inherited Object.prototype member as a renderer.
-        const render = SDK_RENDERERS[runtime.language]
-        /* v8 ignore next -- requirePtcRuntime rejects an unknown language before this runs. */
-        if (render === undefined) throw new Error(`dsh-tools: no SDK renderer for ${runtime.language}`)
-        return render(this.sdkSchemas(context.scope))
-      },
+      view: scope => this.view(scope),
+      modeFor: scope => this.modeFor(scope),
+      peekRuntime: () => this.ctx.get('ptcRuntime'),
+      sectionOrder: name => this.ctx.systemPrompt.getSectionOrder(name),
     }
   }
 
@@ -1024,16 +925,7 @@ export class ToolRuntime extends Service {
    * @returns the resolved presentation mode.
    */
   private modeFor(scope?: ScopeKey): ToolPresentationMode {
-    // Nearest scope wins along the chain: a preset's standing declaration
-    // covers every agent parented under it, and an agent's own (were one ever
-    // declared) would override its preset's. The mode decides what the model
-    // SEES, which is exactly the class of fact the chain inherits.
-    const layers = this.layers.chainLayers(scope)
-    for (let index = layers.length - 1; index >= 0; index -= 1) {
-      const mode = layers[index]?.mode
-      if (mode !== undefined) return mode
-    }
-    return this.defaultMode
+    return nearestPresentationMode(this.layers.chainLayers(scope), this.defaultMode)
   }
 
   /**
@@ -1047,7 +939,7 @@ export class ToolRuntime extends Service {
    */
   private requirePtcTransport(): ToolDefinition {
     this.ptcTransport ??= createRunCodeTool(this, {
-      requireRuntime: () => this.requirePtcRuntime(this.defaultMode),
+      requireRuntime: () => requirePtcRuntime(this.ctx.get('ptcRuntime'), this.defaultMode),
       peekApprover: () => this.ctx.get('approval'),
       resolveSandboxPolicy: (exec) => {
         const policy = this.ctx.get('sandboxPolicy')
@@ -1097,65 +989,12 @@ export class ToolRuntime extends Service {
       // shadows the global registration with an identical body, which costs
       // nothing and keeps one rule instead of a case analysis.
       if (mode !== 'native') {
-        yield ctx.systemPrompt.section(this.collapseSection())
-        yield ctx.systemPrompt.section(this.sdkSection())
+        yield ctx.systemPrompt.section(collapseSection(this.presentation()))
+        yield ctx.systemPrompt.section(sdkSection(this.presentation()))
       }
     }.bind(this), 'tools.presentAs()')
     // oxlint-disable-next-line typescript/no-misused-promises -- synchronous composite teardown
     return dispose
-  }
-
-  /**
-   * Build one scope's wire schemas and names for prompt-order validation.
-   * Restrictions do not make known tools invalid, but a mode collapse does.
-   */
-  private wireSchemas(scope?: ScopeKey): ToolProviderResult {
-    const view = this.view(scope)
-    const mode = this.modeFor(scope)
-    if (mode === 'native') {
-      const schemas = [...view.visible.values()].map(definition => this.schemaOf(definition, false))
-      return { schemas, knownNames: [...view.knownNames] }
-    }
-    // Validate the runtime language BEFORE projecting schemas: schemaOf reads
-    // run_code's language-aware description/parameters getters, whose own
-    // flavor-table guard would otherwise surface first. This keeps the
-    // renderer-table rejection the canonical assembly-time error for a
-    // language with no SDK renderer.
-    this.requirePtcRuntime(mode)
-    const schemas = [...view.visible.values()].map(definition => this.schemaOf(definition, false))
-    if (mode === 'ptc') {
-      return {
-        schemas: schemas.filter(schema => schema.name === RUN_CODE_NAME),
-        knownNames: [RUN_CODE_NAME],
-      }
-    }
-    return { schemas, knownNames: [...view.knownNames, RUN_CODE_NAME] }
-  }
-
-  /**
-   * Resolve the PTC runtime or throw the actionable misconfiguration error.
-   * Read at use time (assembly / run_code execution), NOT via static
-   * `inject`: an inject entry would hold `ctx.tools` — and every tool plugin
-   * behind it — hostage to a PTC runtime existing even under `mode:
-   * 'native'`.
-   *
-   * Assembly and `run_code` execution read separately, so the language is not
-   * bound to a request. Harmless while one published backend exists — both
-   * reads return the same flavor — but a reload that swapped in a second
-   * language between them would hand a program written against one SDK to the
-   * other. Binding it is deferred until a second backend ships (the first
-   * point it is testable).
-   */
-  private requirePtcRuntime(mode: ToolPresentationMode): PtcRuntime {
-    const runtime = this.ctx.get('ptcRuntime')
-    if (!runtime) {
-      throw new Error(`dsh-tools: mode "${mode}" requires a PTC runtime — load a ctx.ptcRuntime implementation (e.g. @deepseek-ai/dsh-ptc-runtime-codemode) or set tools mode to "native"`)
-    }
-    if (!Object.hasOwn(SDK_RENDERERS, runtime.language)) {
-      const known = Object.keys(SDK_RENDERERS).map(name => JSON.stringify(name)).join(', ')
-      throw new Error(`dsh-tools: no SDK renderer registered for runtime language ${JSON.stringify(runtime.language)} (known: ${known})`)
-    }
-    return runtime
   }
 
   /**
@@ -1178,17 +1017,11 @@ export class ToolRuntime extends Service {
       && (!Number.isFinite(timeoutMs) || timeoutMs <= 0)) {
       throw new TypeError(`tool "${name}" timeoutMs must be a positive finite number`)
     }
-    if (definition.details !== undefined && (typeof definition.details !== 'string' || definition.details.trim().length === 0)) {
-      throw new TypeError(`tool "${name}" details must be a non-empty string when given`)
-    }
     // Reserved unconditionally: any agent may select a code mode for itself,
     // so a name free to take under the deployment default would become a
     // collision the moment a preset mounted.
     if (name === RUN_CODE_NAME) {
       throw new Error(`tool name "${RUN_CODE_NAME}" is reserved for the PTC mode presentation transport and cannot be registered or shadowed`)
-    }
-    if (name === TOOL_HELP_NAME) {
-      throw new Error(`tool name "${TOOL_HELP_NAME}" is reserved for the registry's on-demand tool details and cannot be registered or shadowed`)
     }
     return this.layers.effect(
       this.ctx,
@@ -1220,9 +1053,6 @@ export class ToolRuntime extends Service {
     }
     if ([...allow ?? [], ...deny ?? []].includes(RUN_CODE_NAME)) {
       throw new Error(`tools.restrict() cannot name reserved PTC mode presentation transport "${RUN_CODE_NAME}"; restrict end-capability tools instead`)
-    }
-    if ([...allow ?? [], ...deny ?? []].includes(TOOL_HELP_NAME)) {
-      throw new Error(`tools.restrict() cannot name reserved "${TOOL_HELP_NAME}"; it follows the visibility of tools that declare details`)
     }
     const known = this.view(scope).restrictableNames
     const unknown = [...allow ?? [], ...deny ?? []].filter(name => !known.has(name))
@@ -1328,13 +1158,6 @@ export class ToolRuntime extends Service {
     if (this.modeFor(scope) !== 'native') {
       visible.set(RUN_CODE_NAME, this.requirePtcTransport())
     }
-    // The details reader follows the tools it serves: present exactly while a
-    // visible tool declares details, so a scope whose filter removed them also
-    // loses the reader, and no other scope's tools leak into this one.
-    if ([...visible.values()].some(definition => definition.details !== undefined)) {
-      knownNames.add(TOOL_HELP_NAME)
-      visible.set(TOOL_HELP_NAME, this.toolHelp)
-    }
     return { visible, knownNames, restrictableNames }
   }
 
@@ -1378,42 +1201,7 @@ export class ToolRuntime extends Service {
    * @returns one deep-cloned schema per visible tool.
    */
   schemas(scope?: ScopeKey): ToolSchema[] {
-    return [...this.view(scope).visible.values()].map(definition => this.schemaOf(definition, true))
-  }
-
-  /** Project visible callable tools onto the generated PTC mode SDK contract. */
-  private sdkSchemas(scope?: ScopeKey): ToolSdkSchema[] {
-    // The SDK is already prompt text, so a binding's details join its
-    // documentation there and the details reader is not a binding.
-    return [...this.view(scope).visible.values()]
-      .filter(definition => definition.name !== RUN_CODE_NAME && definition.name !== TOOL_HELP_NAME)
-      .map((definition): ToolSdkSchema => {
-        const output = snapshotJsonValue(definition.output.schema)
-        /* v8 ignore next -- registration already validated and retained this schema as lossless JSON. */
-        if (output === undefined) {
-          throw new Error(`tool "${definition.name}" output schema must be lossless JSON before SDK projection`)
-        }
-        const schema = this.schemaOf(definition, true)
-        return {
-          ...schema,
-          ...definition.details === undefined ? {} : { description: `${schema.description}\n\n${definition.details}` },
-          output,
-        }
-      })
-  }
-
-  /** Project one definition onto the model-facing schema fields. */
-  private schemaOf(definition: ToolDefinition, detachParameters: boolean): ToolSchema {
-    const { name, description, parameters } = definition
-    const detached = detachParameters ? snapshotJsonValue(parameters) : parameters
-    if (detached === undefined) {
-      throw new Error(`tool "${name}" parameters must be lossless JSON before schema projection`)
-    }
-    return {
-      name,
-      description,
-      parameters: detached,
-    }
+    return [...this.view(scope).visible.values()].map(definition => schemaOf(definition, true))
   }
 
   /**
@@ -1654,12 +1442,11 @@ export class ToolRuntime extends Service {
     if (this.callerCancelled(exec)) {
       return next({ kind: 'final-result', exec, result: toolAbortedBeforeDispatchResult() })
     }
-    const repeated = this.repeatedRefusal(exec)
-    if (repeated !== undefined) {
+    const duplicate = this.turnRefusals.suppress(exec)
+    if (duplicate !== undefined) {
       // Before policy: an approval prompt for a call that cannot succeed only
       // costs the user an answer. Post-execute still observes the result.
-      this.suppressedExecutions.add(exec)
-      return next({ kind: 'post-result', exec, result: duplicateCallResult(exec.name, repeated) })
+      return next({ kind: 'post-result', exec, result: duplicate })
     }
     try {
       const carrier = scopeTarget(this, exec.agent)
@@ -1844,50 +1631,9 @@ export class ToolRuntime extends Service {
     } catch (error: unknown) {
       finalResult = this.materializeFinalResult(this.withHalt(exec, toolErrorResult(error)))
     }
-    this.recordTurnOutcome(exec, finalResult)
+    this.turnRefusals.record(exec, finalResult)
     this.notifyResult(exec, finalResult)
     return finalResult
-  }
-
-  /**
-   * The open-turn refusal ledger that governs one execution, if any. Calls
-   * without an agent have no turn and are never suppressed.
-   */
-  private turnLedger(exec: ToolExecution): Map<string, ToolFailure> | undefined {
-    return exec.agent === undefined ? undefined : this.turnRefusals.get(exec.agent.session)
-  }
-
-  /**
-   * The earlier refusal an identical model-direct call would repeat. Nested
-   * transport sub-dispatches are never suppressed: a program's retry loop is
-   * its own logic, and its outer result reports what happened.
-   */
-  private repeatedRefusal(exec: ToolExecution): ToolFailure | undefined {
-    if (exec.parent !== undefined) return undefined
-    const key = repeatKey(exec)
-    return key === undefined ? undefined : this.turnLedger(exec)?.get(key)
-  }
-
-  /**
-   * Update the turn ledger at the commit point of one final result. A
-   * repeat-refusal is remembered for a model-direct call; every other settled
-   * call, including successes, other failures, and nested sub-dispatches,
-   * forgets all remembered refusals because it may have observed or changed
-   * the state that decided them. A suppressed duplicate changes nothing.
-   */
-  private recordTurnOutcome(exec: ToolExecution, result: ToolExecutionResult): void {
-    if (this.suppressedExecutions.has(exec)) return
-    const ledger = this.turnLedger(exec)
-    if (ledger === undefined) return
-    const code = result.isError ? result.error.info?.code : undefined
-    const key = exec.parent === undefined && code !== undefined && REPEAT_REFUSAL_CODES.has(code)
-      ? repeatKey(exec)
-      : undefined
-    if (key === undefined || !result.isError) {
-      ledger.clear()
-      return
-    }
-    ledger.set(key, result.error)
   }
 
   /**
@@ -2138,30 +1884,6 @@ export class ToolRuntime extends Service {
 /** Mint a same-process correlation token whose identity is its value. */
 function createExecutionToken(): ToolExecutionToken {
   return Symbol('dsh.tool.execution') as ToolExecutionToken
-}
-
-/**
- * Identity of one call for repeat detection: the tool name plus its
- * materialized arguments with object keys sorted, so key order never makes
- * two identical calls differ. Undefined when arguments failed to materialize.
- */
-function repeatKey(exec: ToolExecution): string | undefined {
-  if (exec.arguments === undefined) return undefined
-  return JSON.stringify([exec.name, exec.arguments], (_key, value: unknown) => {
-    if (value === null || typeof value !== 'object' || Array.isArray(value)) return value
-    const record = value as Record<string, unknown>
-    return Object.fromEntries(Object.keys(record).sort().map(name => [name, record[name]]))
-  })
-}
-
-/** Result for a model-direct call suppressed as a repeat of an earlier refusal. */
-function duplicateCallResult(name: string, prior: ToolFailure): ToolExecutionResult {
-  const message = `not run: this "${name}" call repeats one already refused this turn. Earlier refusal: ${prior.message}`
-  return {
-    content: [{ type: 'text', text: `Error: ${message}` }],
-    isError: true,
-    error: { message, info: { name: 'DuplicateToolCallError', code: TOOL_DUPLICATE_CALL } },
-  }
 }
 
 function toolErrorResult(error: unknown): ToolExecutionResult {

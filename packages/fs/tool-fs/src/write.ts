@@ -66,12 +66,10 @@ export function applyWriteTool(ctx: Context, sandbox: FsSandboxController): void
     // shipped composition mounts (see the README's read-before-write contract).
     // Descriptions are registration-time text, so the edit pointer stays even
     // where a scope hides edit; it remains true there.
-    description: 'Create a UTF-8 text file or replace all of its content. '
-      + 'Replacing an existing file requires a current read of it. '
-      + 'For a partial change, edit avoids resending the whole file.',
+    description: 'Create or overwrite a UTF-8 file; overwriting requires a current read. Use edit for partial changes.',
     parameters: {
-      file_path: { type: 'string', required: true, description: 'Absolute path, or relative to the working directory.' },
-      content: { type: 'string', required: true, description: 'Full UTF-8 text content to write.' },
+      file_path: { type: 'string', required: true, description: 'Absolute, or relative to the working directory.' },
+      content: { type: 'string', required: true },
       ...sandbox.escalationModes.length > 0 ? sandbox.schemaFields() : {},
     },
     output: {

@@ -384,6 +384,10 @@ export const PENDING_ARGUMENTS = '...'
 const opening = (lines: readonly PresentedLine[]): readonly PresentedLine[] =>
   lines.length === 0 ? [] : [BLANK, ...lines]
 
+/** A block's lines without the blank {@link opening} may have put before them. */
+const withoutOpening = (lines: readonly PresentedLine[]): readonly PresentedLine[] =>
+  lines[0] === BLANK ? lines.slice(1) : lines
+
 /** A continuation line. No marker, no verb, aligned under the argument. */
 const continuation = (text: string, tone: Tone): PresentedLine =>
   ({ marker: MARKER.none, verb: '', text, column: COLUMN.output, tone })
@@ -557,15 +561,21 @@ function changeSpans(line: CardLine, tone: Tone, tokens: readonly CodeToken[] | 
 
 /**
  * Display form of a tool name. Each word is capitalized and concatenated.
- * `bash` becomes `Bash`; `read_file` becomes `ReadFile`.
+ * `bash` becomes `Bash`; `read_file` becomes `ReadFile`. Code mode is named
+ * by the terminal's `Script` label rather than its transport name.
  * @param tool - tool name from the session log.
+ * @param script - locale-owned name for {@link SCRIPT_TOOL}; absent, it is named like any tool.
  * @returns the display name, or `tool` itself when it contains no words.
  */
-export function toolLabel(tool: string): string {
+export function toolLabel(tool: string, script?: string): string {
+  if (tool === SCRIPT_TOOL && script !== undefined) return script
   const label = tool.split(/[^\p{L}\p{N}]+/u).filter(word => word !== '')
     .map(word => word[0]!.toUpperCase() + word.slice(1)).join('')
   return label === '' ? tool : label
 }
+
+/** Transport name of code mode, whose call carries a program and its nested calls. */
+export const SCRIPT_TOOL = 'run_code'
 
 /**
  * Connector drawn in the verb column of the first output line, hanging that
@@ -601,7 +611,7 @@ function action(row: ToolCallRow, bound: ResultBound, cells?: number): readonly 
   const [first = '', ...rest] = linesOf(row.input)
   const title = bare(first, verb)
   // Arguments still streaming. Show `Name(...)` until the full argument arrives.
-  const name = toolLabel(row.tool)
+  const name = toolLabel(row.tool, bound.script)
   const text = title === '' ? name : `${name}(${title})`
   const after = outcome === undefined ? undefined : outcomeLines(outcome, verb, bound, title)
   // A count with no body rides on the head, so a read is one row. A change's
@@ -616,20 +626,87 @@ function action(row: ToolCallRow, bound: ResultBound, cells?: number): readonly 
     verb: '', text: inline.text, column: COLUMN.rail, wide: true, tone: 'plain',
     ...inline.spans.length === 0 ? {} : { spans: inline.spans },
   }
-  // Card lines describe the call, the way its description does. They stay
-  // quiet under the head unless they carry diff colour. They and any extra
-  // input lines share the output bound. A script the model wrote can be as
+  // Supporting call detail stays quiet; source keeps literal whitespace and
+  // full brightness, with syntax colour only on the lines the preview draws.
+  // Detail and extra input lines share the output bound. A script the model wrote can be as
   // long as a file, and it is printed under the head on every call. At least
   // one line of each is always shown, so a description survives a bound that
   // collapses the output.
   const limit = Math.max(1, bound.lines)
-  const described = cardLines(row.detail).map(line => line.tone === 'plain' ? { ...line, tone: 'quiet' as const } : line)
+  const described = drawnBody([row.detail], false, bound.code, plain => excerpt(plain, limit, bound, 'quiet', false).lines)
+    .map(line => line.tone === 'plain' && line.literal !== true ? { ...line, tone: 'quiet' as const } : line)
   const body = [
     ...excerpt(rest.map(text => continuation(text, 'plain')), limit, bound, 'plain', false).lines,
     ...excerpt(described, limit, bound, 'quiet', false).lines,
     ...liveTail(live?.tail, bound, cells),
+    ...dispatchLines(row.dispatches, bound, cells),
+    ...row.tool === SCRIPT_TOOL && bound.scriptOutput !== undefined && (after?.lines.length ?? 0) > 0 ? [continuation(bound.scriptOutput, 'quiet')] : [],
     ...after?.lines ?? []]
   return [head, ...connected(body)]
+}
+
+/** Nested tool activity stays inside the program that dispatched it, with explicit outcomes without colour. */
+function dispatchLines(calls: readonly ToolCallRow[] | undefined, bound: ResultBound, cells?: number): readonly PresentedLine[] {
+  return (calls ?? []).flatMap(call => action(call, bound, cells).map((line, index) => {
+    if (index > 0) return line
+    const tone = stateTone(call)
+    return {
+      ...tone === 'failed' ? failedHead(line) : line,
+      marker: MARKER.none, pulse: false, column: COLUMN.output,
+      verb: running(call) ? TREE.branch : tone === 'failed' ? VERB.error : VERB.done,
+      verbTone: running(call) ? 'quiet' : tone,
+    }
+  }))
+}
+
+/**
+ * Keep the script head visible while source and older nested calls yield to a short live window.
+ * @param row - a script call with its logged nested activity.
+ * @param bound - source and result preview policy.
+ * @param rows - physical rows available; a head taller than this is retained for the renderer to clip.
+ * @param height - physical height of each line, including wrapping.
+ * @param cells - width of live output, absent for the ordinary output cap.
+ * @returns fitted lines, prioritizing the script head and newest nested call.
+ */
+export function fittedAction(
+  row: ToolCallRow, bound: ResultBound, rows: number,
+  height: (line: PresentedLine) => number = () => 1, cells?: number,
+): readonly PresentedLine[] {
+  if (rows <= 0) return []
+  const calls = row.dispatches ?? []
+  // Every dispatch needs at least a head. Window before formatting, so fitting
+  // a long program cannot repeatedly walk its whole dispatch history.
+  const skipped = Math.max(0, calls.length - Math.floor(rows))
+  const earlier = (hidden: number): readonly PresentedLine[] =>
+    hidden > 0 ? [continuation(`+${hidden} ${bound.earlier ?? bound.more}`, 'quiet')] : []
+  // The head, a count of the `hidden` oldest nested calls, then the rest of the body.
+  const format = (call: ToolCallRow, hidden: number, preview: ResultBound): readonly PresentedLine[] => {
+    const [head, ...body] = action(hidden > 0 ? { ...call, dispatches: calls.slice(hidden) } : call, preview, cells)
+    return [head!, ...earlier(hidden), ...body]
+  }
+  const size = (lines: readonly PresentedLine[]): number => lines.reduce((sum, line) => sum + height(line), 0)
+  const blank = height(BLANK)
+  const whole = opening(format(row, skipped, bound))
+  if (size(whole) <= rows) return whole
+  const { detail: _detail, ...withoutSource } = row
+  const compact = { ...bound, lines: 0 }
+  const least = format(withoutSource, skipped, compact)
+  let used = size(least)
+  if (used + blank <= rows) return opening(least)
+  // Nested blocks are independent and their heads are never connected, so
+  // hiding one more subtracts exactly its own rows. Measure each once, and
+  // format only the layout that fits.
+  const nested = calls.map((call, index) => index < skipped ? [] : dispatchLines([call], compact, cells))
+  used -= size(earlier(skipped))
+  for (let hidden = skipped + 1; hidden < calls.length; hidden++) {
+    used -= size(nested[hidden - 1]!)
+    const total = used + size(earlier(hidden))
+    if (total + blank <= rows) return opening(format(withoutSource, hidden, compact))
+    if (total <= rows) return format(withoutSource, hidden, compact)
+  }
+  const head = least[0]!
+  const newest = nested.at(-1)?.[0]
+  return newest !== undefined && size([head, newest]) <= rows ? [head, newest] : [head]
 }
 
 /**
@@ -798,9 +875,13 @@ export function fittedGroup(
   cells?: number,
 ): readonly PresentedLine[] {
   const head = groupHead(calls, bound)
-  const bodies = calls.map(call => action(call, bound, cells))
-  const whole = opening([head, ...hang(bodies)])
   const size = (lines: readonly PresentedLine[]): number => lines.reduce((sum, line) => sum + height(line), 0)
+  const plain = calls.map(call => rows > 0 && call.tool === SCRIPT_TOOL ? undefined : action(call, bound, cells))
+  // A script windows its nested calls into the rows the step's other heads
+  // leave it, as it does on its own, so its history is not formatted only to fold.
+  const room = rows - height(BLANK) - height(head) - plain.reduce((sum, lines) => sum + (lines === undefined ? 0 : height(lines[0]!)), 0)
+  const bodies = plain.map((lines, index) => lines ?? withoutOpening(fittedAction(calls[index]!, bound, Math.max(1, room), height, cells)))
+  const whole = opening([head, ...hang(bodies)])
   if (rows <= 0 || size(whole) <= rows) return whole
   // Heights ignore the rail's marker, which never changes a line's width, so
   // each call is measured once however it ends up folded.
@@ -1155,6 +1236,10 @@ export interface ResultBound {
    * finished call to its head but hides none.
    */
   readonly earlier?: string
+  /** Locale-owned name for a code-mode call, as in `Script`; absent, it is labelled like any tool. */
+  readonly script?: string
+  /** Locale-owned label above a script's own result, as in `Script output`; absent, the result hangs unlabelled. */
+  readonly scriptOutput?: string
   /** Locale-owned noun for a count of the files a command changed, as in `3 files`; absent, a collapsed result leaves the count out. */
   readonly files?: string
   /** Locale-owned phrase for changed files a bound left out, as in `+2 more files`; absent, the count is drawn alone. */

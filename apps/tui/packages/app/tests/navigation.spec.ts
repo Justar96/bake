@@ -271,7 +271,9 @@ it.each(['running', 'pending'] as const)('refuses navigation while the old agent
   navigation.submit('/sessions')
   await first.drain()
   await vi.waitFor(() => expect(navigation.busy).toBe(false))
-  expect(first.view.notice).toContain(state === 'running' ? copy.sessionsIdle : copy.sessionsPending)
+  // The command itself fails, so its transcript record says why.
+  expect(transcriptRows(first.view.committed).at(-1)).toEqual({ kind: 'notice', placement: 'command', tone: 'error',
+    text: state === 'running' ? copy.sessionsIdle : copy.sessionsPending })
   expect(list).not.toHaveBeenCalled()
   expect(navigation.controller).toBe(first)
   if (state === 'running') { first.agent.cancel({ kind: 'user' }, { keepInbox: true }); await first.agent.whenIdle() }

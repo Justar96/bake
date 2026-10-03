@@ -57,8 +57,7 @@
     "ink": "catalog:",
     "jsonc-parser": "catalog:",
     "react": "catalog:",
-    "shiki": "^4.4.3",
-    "@deepseek-ai/dsh-tool-workflow": "workspace:^"
+    "shiki": "^4.4.3"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "workspace:^"
@@ -78,7 +77,6 @@
     "@deepseek-ai/dsh-llm-replay": "workspace:^",
     "@deepseek-ai/dsh-session-persistence-jsonl": "workspace:^",
     "@deepseek-ai/dsh-tool-skill": "workspace:^",
-    "@deepseek-ai/dsh-tool-todo": "workspace:^",
     "@types/bun": "catalog:",
     "@types/react": "catalog:"
   },

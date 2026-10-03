@@ -1,5 +1,5 @@
 ---
-description: "Shared in-process subagent run driver for maintainers and backend authors who need to understand or extend the spawn and fork run lifecycle."
+description: "Shared in-process subagent run driver for maintainers and backend authors who need to understand or extend the in-process run lifecycle."
 kind: "package-library"
 ---
 
@@ -7,7 +7,7 @@ kind: "package-library"
 
 ## Summary
 
-`dsh-subagent-in-process-driver` is the shared run driver behind the two in-process subagent backends: it creates one child agent through the host's agent factory, applies per-child customization, drives one task to completion, and returns the child's own final output with a single quiescent disposal path. Spawn calls it with no session seed; fork calls it with the parent's completed-turn prefix. It is a library, not a standalone feature: provider backends call `startInProcessRun`, and nothing in a composition configures it. Read this page to understand the run lifecycle both in-process backends share.
+`dsh-subagent-in-process-driver` is the shared run driver behind the in-process subagent backend: it creates one child agent through the host's agent factory, applies per-child customization, drives one task to completion, and returns the child's own final output with a single quiescent disposal path. It is a library, not a standalone feature: provider backends call `startInProcessRun`, and nothing in a composition configures it. Read this page to understand the in-process run lifecycle.
 
 ## Table of Contents
 
@@ -23,15 +23,11 @@ kind: "package-library"
 <a id="use-this-package"></a>
 ## Use this package
 
-You reach this package through a provider backend, not a composition: `dsh-subagent-spawn-in-process` and `dsh-subagent-fork-in-process` each call `startInProcessRun(request, options)` and own everything around it. This page documents the lifecycle both share so you can read one backend's behavior and reason about the other.
+You reach this package through a provider backend, not a composition: `dsh-subagent-spawn-in-process` calls `startInProcessRun(request)` and owns everything around it. This page documents the lifecycle the driver gives any in-process backend.
 
 ### What one run provides
 
 One call starts and drives one one-shot child. Fulfillment means the child is already published in `ctx.agents` and the caller owns the returned run; a rejected start has already quiesced the unpublished creation, so no half-created child survives. The run exposes the child's id and live agent, a `result` promise, and a `dispose()` that stops the loop, removes the agent and session, and unwinds scoped registrations.
-
-### The one input
-
-`InProcessRunOptions` is `{ seed?: SessionEvent[] }` — a fork seed of balanced parent events. Spawn omits it; fork supplies the completed-turn prefix and records its length so the result reader never mistakes seeded parent messages for child output.
 
 ### What the child gets
 
@@ -55,7 +51,7 @@ The driver follows this sequence:
 2. Create the child through the host agent factory with the caller's required signal threaded into the creation transaction.
 3. During that transaction's unpublished setup window, install the requested persona, tool restriction, and structured-output runtime.
 4. Publish the child, retain the returned handle, and drive one task.
-5. Read the child's own output — its last non-empty assistant message, or its accumulated assistant text when none exists — and the final durable turn reason from the complete owned run, excluding any fork seed.
+5. Read the child's own output — its last non-empty assistant message, or its accumulated assistant text when none exists — and the final durable turn reason from the complete owned run.
 
 ### Cancellation and ownership
 
@@ -82,9 +78,8 @@ The required request signal covers both startup and the live run. Before publica
 
 Read these pages when the package-level contract is not enough; they move from the shared subagent model to the backends built on this driver and the delegation-policy decision.
 
-- [Subagent subsystem](../../../docs/subsystems/subagent.md) — start requests, results, provider contract, and in-process depth and seed.
+- [Subagent subsystem](../../../docs/subsystems/subagent.md) — start requests, results, provider contract, and in-process permission and depth.
 - [dsh-subagent-spawn-in-process](../subagent-spawn-in-process/README.md) — the fresh-child backend built on this driver.
-- [dsh-subagent-fork-in-process](../subagent-fork-in-process/README.md) — the seeded-child backend built on this driver.
 - [Delegation-policy decision](../../../.agents/notes/implemented/feature/2026-07-25-subagent-policy-inheritance.md) — how parent sandbox and approval policy reach the child.
 
 -----
@@ -96,7 +91,7 @@ Read these pages when the package-level contract is not enough; they move from t
 
 #### What the model sees
 
-The shared driver sends the task verbatim as the child's user message and, when requested, shadows the persona and restricts global tool schemas, lookup, execution, and PTC mode SDK bindings in the unpublished child's fresh scope; parent restrictions are not inherited. Tool-guidance plugins can use the assembly scope to omit unavailable guidance; arbitrary static sections are not rewritten by the driver. Spawn supplies no history; fork supplies its balanced seed.
+The shared driver sends the task verbatim as the child's user message and, when requested, shadows the persona and restricts global tool schemas, lookup, execution, and PTC mode SDK bindings in the unpublished child's fresh scope; parent restrictions are not inherited. Tool-guidance plugins can use the assembly scope to omit unavailable guidance; arbitrary static sections are not rewritten by the driver. The child starts with no parent history.
 
 #### Token effect
 
@@ -144,7 +139,7 @@ Append-only; newly visible content follows the reusable request prefix and does 
 
 #### What the model sees
 
-The driver extracts only the child's own last assistant output or captured structured value; seeded parent messages and intermediate child work do not become the result.
+The driver extracts only the child's own last assistant output or captured structured value; intermediate child work does not become the result.
 
 #### Token effect
 

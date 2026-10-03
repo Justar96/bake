@@ -38,7 +38,7 @@ When you want to change when reminders fire or which tools they cover, mount the
   config:
     thresholds: [3, 5, 8]        # remind at 3, 5, and 8 consecutive repeats
     include: []                  # track every tool; list patterns to track only some
-    exclude: [todo_write]        # never track these tools
+    exclude: [job_output]        # never track these tools
     argumentsPreviewChars: 500   # cap on arguments shown in the detailed reminder
 ```
 
@@ -78,7 +78,7 @@ The guard is built on four commitments:
 
 Each agent's chain is keyed by `(tool name, canonical arguments)` — two calls with the same tool and canonically identical arguments (property order ignored) count as consecutive, and a different tracked call resets the count to 1. The chain lives in a `WeakMap<Agent, Chain>`.
 
-- **Untracked calls are transparent to the chain.** A call excluded by `include`/`exclude` neither increments nor resets the counter, so `grep X → todo_write → grep X` still counts as two consecutive `grep X` when `todo_write` is excluded — bookkeeping tools interleaved into a loop do not launder it.
+- **Untracked calls are transparent to the chain.** A call excluded by `include`/`exclude` neither increments nor resets the counter, so `grep X → job_output → grep X` still counts as two consecutive `grep X` when `job_output` is excluded — bookkeeping tools interleaved into a loop do not launder it.
 - **Denied calls count.** Detection sits on `tools/post-execute`, which also runs for calls a `tools/pre-execute` listener denied; a model hammering a denied call is exactly the loop worth breaking.
 - **Calls without an agent are ignored.** A direct `ctx.tools.execute()` caller has no model to remind and no live agent object to key on.
 - **Per-agent keying, reset on user prompts.** One agent's repetition never trips another's reminder; a user prompt (`agent/pre-step`) deletes the submitting agent's chain, and object lifetime bounds the weak entry without a disposal listener.

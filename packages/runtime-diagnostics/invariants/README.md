@@ -58,11 +58,11 @@ Each companion protects relationships its package owns, and a companion installs
 | `dsh-session`, `dsh-agent`, `dsh-scope`, `dsh-agent-loop` | Session log enclosure and call/result trace, agent-status transitions, scope-filtered dispatch subjects, loop-built request reconstruction |
 | `dsh-llm`, `dsh-llm-retry`, `dsh-tools`, `dsh-system-prompt` | LLM stream grammar, retry-failure shape, tool-pipeline stage pairing and frozen results, prompt-assembly section names |
 | `dsh-compaction`, `dsh-hook-protocol`, `dsh-sandbox-policy` | Compaction stream pairing, hook invocation/result pairing, sandbox mode values |
-| `dsh-fs`, `dsh-subagent`, `dsh-workflow`, `dsh-tool-workflow` | Filesystem event identity, subagent provider and start/end pairing, workflow lifecycle identity, workflow record shape |
+| `dsh-fs`, `dsh-subagent` | Filesystem event identity, subagent provider and start/end pairing |
 | `dsh-goal`, `dsh-goal-round-driver` | Durable goal-stream folds and reconstructed continuation prompts |
 | `dsh-permission-presets`, `dsh-user-approval`, `dsh-commands` | Preset references to live presets, approval asked/decided pairing, command run/done pairing |
-| `dsh-jobs`, `dsh-tool-todo`, `dsh-time-context` | Job snapshot field relationships, whole-list todo shape, durable clock readings |
-| `dsh-credentials`, `dsh-settings`, `dsh-storage-domain`, `dsh-workspace` | Commit events against the live service or memory state, entity-cache mirroring |
+| `dsh-jobs` | Job snapshot field relationships |
+| `dsh-credentials`, `dsh-settings`, `dsh-storage-domain` | Commit events against the live service or memory state, entity-cache mirroring |
 | `dsh-agent-presets`, `dsh-session-title`, `dsh-schedule` | Preset mount placement, title source citation, schedule stream |
 | `dsh-client-hmr`, `dsh-client-modules`, `dsh-client-runtime` | Browser/node-half stat-watcher lifecycle, boot entry graph, slot mutation versioning |
 

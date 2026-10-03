@@ -48,7 +48,8 @@ profiles**. Package bins, demos, and inline Cordis trees are rejected by
 
 ### 1.2 Upstream already expects a TUI
 
-Not speculation — it is in shipped code and docs:
+Not speculation — it is in shipped code and docs. The paths are upstream's when this was written;
+Bake has since removed several of them with the web client, desktop app, and ACP.
 
 - `apps/cli/src/args.ts`, `apps/cli/README.md`, `apps/cli/tests/expected/launcher-help.txt` use
   `dsh --profile tui` / `dsh tui --resume <session>` as the worked example of an installed,

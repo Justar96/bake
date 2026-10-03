@@ -280,15 +280,13 @@ export function applyGrepTool(ctx: Context, caps: GrepToolCaps): void {
     name: 'grep',
     // Descriptions are registration-time text, so the read pointer stays even
     // where a scope hides read; the sentence remains true there.
-    description: 'Search file contents with a ripgrep regular expression, as a bounded alternative to grep or rg in a shell. '
-      + 'Hidden and ignored files are skipped unless path points at them. '
-      + 'Scope `path` to the repository, never `/` or `$HOME`. '
-      + 'Returns only the matching lines, numbered and grouped by file; read a matched file for surrounding context. '
-      + `Up to ${caps.maxMatches} matches are shown; a larger result says so and reports where the full list was saved.`,
+    description: 'Search file contents by ripgrep regex; returns numbered matching lines by file. '
+      + 'Skips hidden and ignored files unless path targets them. Keep `path` in the repository, never `/` or `$HOME`. '
+      + `Past ${caps.maxMatches} matches the result names a file with all of them.`,
     parameters: {
-      pattern: { type: 'string', required: true, description: 'Regular expression to search for (ripgrep syntax).' },
-      path: { type: 'string', description: 'File or directory to search. Defaults to the working directory; relative paths resolve against it.' },
-      include: { type: 'string', description: 'One glob filter for which files to search (e.g. "*.ts", "*.{js,jsx}"). Not a list; negation is not supported.' },
+      pattern: { type: 'string', required: true },
+      path: { type: 'string', description: 'File or directory; defaults to the working directory.' },
+      include: { type: 'string', description: 'One file glob, e.g. "*.{js,jsx}"; no lists or negation.' },
     },
     timeoutMs: caps.timeoutMs,
     output: {

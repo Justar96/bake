@@ -18,12 +18,7 @@ import type {
 } from '@deepseek-ai/dsh-agent'
 import { errorChain } from '@deepseek-ai/dsh-llm'
 import type { MessageId } from '@deepseek-ai/dsh-llm'
-import type {
-  SessionEvent,
-  SessionId,
-  SessionLogOffset as SessionLogOffsetType,
-  UserMessage,
-} from '@deepseek-ai/dsh-session'
+import type { SessionId, UserMessage } from '@deepseek-ai/dsh-session'
 import type { ToolRestriction } from '@deepseek-ai/dsh-tools'
 import {
   appendDelegatedPolicyOverrides,
@@ -113,17 +108,14 @@ export interface MaterializeInputs {
   parent: Agent
   /**
    * Creation inputs; absent for a cold resume, which loads the persisted
-   * session — including the delegation policy events a fresh creation seeded,
+   * session — including the delegation policy events a fresh creation appended,
    * so a resume never re-captures the parent's policy.
    */
   create?: {
-    seed: readonly SessionEvent[] | undefined
     meta: NonNullable<CreateAgentOptions['meta']>
-    /** Exact parent-log prefix length inside {@link seed}. */
-    inheritedEventCount: SessionLogOffsetType
     /** Policy captured at delegation: the parent's sandbox override plus the approval pin. */
     delegatedPolicies: DelegatedPolicyOverrides
-    /** Child-owned composition record appended after the inherited marker. */
+    /** Child-owned composition record appended at creation. */
     descriptor: SubagentDescriptorData
   }
   agentOptions: AgentOptions
@@ -622,8 +614,8 @@ export class ContinuableActivationRegistry {
     const { childId, provider, parent, create } = inputs
     inputs.signal.throwIfAborted()
     const setup = (childCtx: Context, child: Agent): void => {
-      // Only fresh creation appends the descriptor and delegated policy after
-      // the inherited marker; a cold resume replays those persisted events.
+      // Only fresh creation appends the descriptor and delegated policy; a
+      // cold resume replays those persisted events.
       if (create !== undefined) {
         child.session.append('subagent/descriptor', create.descriptor)
         appendDelegatedPolicyOverrides(child.session, create.delegatedPolicies)
@@ -643,8 +635,6 @@ export class ContinuableActivationRegistry {
         sessionId: childId,
         parentAgent: parent,
         meta: create.meta,
-        ...(create.seed === undefined ? {} : { seed: create.seed }),
-        inheritedEventCount: create.inheritedEventCount,
         agentOptions: inputs.agentOptions,
         signal: inputs.signal,
         setup,

@@ -13,7 +13,7 @@ import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
 import type { SessionHandle } from '@deepseek-ai/dsh-session-persistence'
 
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
-import AgentLoop, { CONFIGURED_AGENT_IDENTITIES_KEY } from '@deepseek-ai/dsh-agent-loop'
+import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { MockAdapter, textResponse } from './mock-adapter.ts'
 
@@ -50,28 +50,6 @@ async function readStoredEvents(ctx: Context, sessionId: SessionId): Promise<rea
 }
 
 describe('config-driven session id', () => {
-  it('applies launcher identities by configured id without changing unmatched entries', async () => {
-    const ctx = await makeCoreContext()
-    ctx.provide(CONFIGURED_AGENT_IDENTITIES_KEY, {
-      fresh: { id: SessionId('launcher-fresh'), resume: false },
-      resumed: { id: SessionId('launcher-resumed'), resume: true },
-    })
-    await ctx.plugin(AgentLoop, {
-      agents: [
-        { id: 'fresh', sessionId: SessionId('config-fresh'), model: 'mock' },
-        { id: 'resumed', sessionId: SessionId('config-resumed'), model: 'mock' },
-        { id: 'unchanged', sessionId: SessionId('config-unchanged'), model: 'mock' },
-      ],
-    })
-    await expect.poll(() => ctx.agents.get(SessionId('launcher-fresh'))).toBeDefined()
-    expect(ctx.agents.get(SessionId('launcher-fresh'))?.session.id).toBe('launcher-fresh')
-    expect(ctx.agents.get(SessionId('launcher-resumed'))).toBeUndefined()
-    expect(ctx.agents.get(SessionId('config-resumed'))).toBeUndefined()
-    await expect.poll(() => ctx.agents.get(SessionId('config-unchanged'))).toBeDefined()
-    expect(ctx.agents.get(SessionId('config-unchanged'))?.session.id).toBe('config-unchanged')
-    await ctx.fiber.dispose()
-  })
-
   it('rejects an empty exact id before publishing an agent', async () => {
     const ctx = await makeCoreContext()
     await expect(ctx.plugin(AgentLoop, {

@@ -7,7 +7,7 @@ kind: "package-group"
 
 ## Summary
 
-The experimental group currently contains the CPython backend for the PTC runtime. Its contract can change without a stability promise; released products outside this group do not depend on it.
+The experimental group holds publicly installable pre-stable prototypes. It currently contains no packages. A package placed here can change its contract without a stability promise, and released products outside this group do not depend on it.
 
 ## Table of Contents
 
@@ -20,9 +20,7 @@ The experimental group currently contains the CPython backend for the PTC runtim
 <a id="packages"></a>
 ## Packages
 
-| Package | Role | ctx key |
-|---|---|---|
-| [`ptc-runtime-python`](ptc-runtime-python/README.md) | CPython subprocess backend for the PTC execution seam | `ctx.ptcRuntime` |
+None.
 
 -----
 

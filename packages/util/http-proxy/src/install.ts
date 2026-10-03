@@ -164,9 +164,9 @@ async function createPolicyDispatcher(policy: ProxyPolicy): Promise<Dispatcher> 
  * that proxies nothing installs a direct dispatcher and leaves the environment untouched.
  *
  * A worker thread has its own `globalThis` and so its own dispatcher; installing here does not
- * reach it. No worker installs one today: both this repository ships — the workflow engine and the
- * PTC runtime — evaluate model-authored scripts, which must not receive a proxy URL that may carry
- * credentials. A worker that needs the policy has to be handed one explicitly and install it itself.
+ * reach it. No worker installs one today: the PTC runtime this repository ships evaluates
+ * model-authored scripts, which must not receive a proxy URL that may carry credentials. A worker
+ * that needs the policy has to be handed one explicitly and install it itself.
  *
  * @param policy - the resolved policy to install.
  * @returns a disposer restoring the previous dispatcher, policy, and environment, then closing the agent.
@@ -253,7 +253,7 @@ async function installGlobalProxy(policy: ProxyPolicy): Promise<() => Promise<vo
  * child from starting. Without the flag such a child connects directly, as this process already
  * reported for that scheme, and `curl` still reads the value it was kept for.
  *
- * A worker thread is deliberately NOT served here — see the workflow engine, which runs
+ * A worker thread is deliberately NOT served here — see the PTC runtime, which runs
  * model-authored scripts and must not receive a proxy URL that may carry credentials.
  *
  * @returns names to apply to the child environment, where `undefined` means remove, or an empty

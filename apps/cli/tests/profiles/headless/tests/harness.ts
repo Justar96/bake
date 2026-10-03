@@ -11,7 +11,6 @@ import { LocalBashExecutor } from '@deepseek-ai/dsh-bash-local'
 import * as BashEnvPlugin from '@deepseek-ai/dsh-shell-env'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import * as ToolBash from '@deepseek-ai/dsh-tool-bash'
-import * as ToolTodo from '@deepseek-ai/dsh-tool-todo'
 import * as LlmPiAi from '@deepseek-ai/dsh-llm-pi-ai'
 import type { PiAiProviderProfile } from '@deepseek-ai/dsh-llm-pi-ai'
 import TokenMeter from '@deepseek-ai/dsh-token-meter'
@@ -23,7 +22,7 @@ import type { BasicCompactionConfig } from '@deepseek-ai/dsh-compaction-basic'
 
 /**
  * Shared harness for the headless-agent e2e suites: the full plugin stack
- * with the shipped DeepSeek route and the real bash + todo_write tools. Lives
+ * with the shipped DeepSeek route and the real bash tool. Lives
  * outside the *.e2e.ts pattern so importing it never re-registers another
  * file's tests.
  */
@@ -31,13 +30,6 @@ import type { BasicCompactionConfig } from '@deepseek-ai/dsh-compaction-basic'
 export const SYSTEM_PROMPT = 'You are a coding agent. Use bash for file operations '
   + 'with cat/grep/heredocs; check [exit code: N] markers, '
   + 'and report results briefly.'
-
-/** System prompt for the todo_write e2e: nudges the model to plan with the tool. */
-export const TODO_SYSTEM_PROMPT = 'You are a coding agent. For multi-step work, '
-  + 'use the todo_write tool to track a task list: send the WHOLE list each call, '
-  + 'mark every task being actively worked on in_progress (several at once when '
-  + 'work runs in parallel, at least one while work remains), and mark a task '
-  + 'completed as soon as it is done.'
 
 /** Options for {@link codingHarness}. */
 export interface CodingHarnessOptions {
@@ -97,7 +89,6 @@ export async function codingHarness(workdir: string, options: CodingHarnessOptio
   await ctx.plugin(BashEnvPlugin)
   await ctx.plugin(LocalBashExecutor, { cwd: workdir, timeoutMs: 30_000 })
   await ctx.plugin(ToolBash)
-  await ctx.plugin(ToolTodo, { allowParallelInProgress: true })
   // Compaction is opt-in: only the compaction e2e loads the reusable meter and backend.
   if (options.compact !== undefined) {
     await ctx.plugin(TokenMeter)

@@ -29,8 +29,8 @@ Mount this plugin when a deployment should export session records through OpenTe
 
 | `mode` | Behavior |
 |---|---|
-| `FEEDBACK_ONLY` | Default. Text feedback, rating creation/edit, note edit, and withdrawal release the unhanded prefix through that canonical feedback event; later records wait |
-| `DISABLED` | No coordinator, provider, processor, or exporter is constructed; no telemetry record leaves the process. Live feedback warns locally; cold mutations stay silent |
+| `FEEDBACK_ONLY` | Default. Text feedback releases the unhanded prefix through that canonical feedback event; later records wait |
+| `DISABLED` | No coordinator, provider, processor, or exporter is constructed; no telemetry record leaves the process. Live feedback warns locally |
 
 Programmatic TypeScript configuration uses the exported `SessionTelemetryMode` enum; raw string literals are not assignable. `FULL` is rejected, not an alias. The [`sharing` property](../session-telemetry/README.md#the-sharing-disclosure) reports `feedback-only` or `disabled`, not a delivery receipt. The `/feedback` acknowledgement reads it to say whether the session history is uploaded or stays in the local session log.
 
@@ -96,7 +96,7 @@ The backend is a thin adapter over the OTel JS SDK: it owns feedback authorizati
 
 ### Capture wiring
 
-The backend uses on-demand capture with stored history included. Only new own `feedback/record`, `feedback/message-put`, or `feedback/message-delete` events trigger live capture, bounded by that event. A cold `feedback/committed` notification supplies its committed canonical snapshot without publishing a live Session or Agent. Same-object handoff cursors suppress repeated capture. The backend implements no `flush()`; the SDK owns batching and shutdown drain.
+The backend uses on-demand capture with stored history included. Only a new own `feedback/record` event triggers live capture, bounded by that event. Same-object handoff cursors suppress repeated capture. The backend implements no `flush()`; the SDK owns batching and shutdown drain.
 
 ### Field mapping
 
@@ -136,9 +136,9 @@ These limits define where SDK behavior governs and where export guarantees end. 
 
 - **Upstream experimental tree** — `@opentelemetry/sdk-logs` is published from the upstream experimental tree; SDK API churn lands here and only here, while the seam contract does not move.
 - **Live-collector behavior belongs to the SDK exporter** — authentication, TLS, throttling, and other real OTLP deployment behavior follow the upstream SDK rather than a package-owned compatibility layer.
-- **Best-effort handoff** — new cold snapshots and a new feedback submission after restart can repeat prefixes; receivers deduplicate by Session id, format version, and event seq. There is no durable outbox, delivery watermark, automatic retry promise, or collector-acceptance guarantee. OTel and the opt-in DeepSeek API path can overlap. Withdrawal exports a deletion event, not remote erasure.
+- **Best-effort handoff** — a new feedback submission after restart can repeat prefixes; receivers deduplicate by Session id, format version, and event seq. There is no durable outbox, delivery watermark, automatic retry promise, or collector-acceptance guarantee. OTel and the opt-in DeepSeek API path can overlap.
 
-- **Backend availability** — feedback submitted while this plugin is disabled or unloaded is recorded locally but not automatically replayed when it returns. Capture requires the subscriber to remain mounted until it observes the submission; unloading during a pending cold write can miss its post-flush notification.
+- **Backend availability** — feedback submitted while this plugin is disabled or unloaded is recorded locally but not automatically replayed when it returns. Capture requires the subscriber to remain mounted until it observes the submission.
 
 <a id="dev-note"></a>
 ### Dev Note

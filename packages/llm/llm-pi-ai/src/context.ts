@@ -1,5 +1,7 @@
 /**
- * Harness request-history conversion into pi-ai's Context vocabulary.
+ * Harness request-history conversion into pi-ai's Context vocabulary. Text
+ * blocks in a user message or tool result stay separate pi-ai parts; only a
+ * system message, one rendered prompt, is joined into a string.
  *
  * @module dsh-llm-pi-ai/context
  */
@@ -26,7 +28,11 @@ import { toPiAssistant } from './replay.ts'
 import { longEdgeDimensions, requestImageDimensions } from '@deepseek-ai/dsh-attachment'
 import { DEFAULT_REQUEST_IMAGE_MAX_BYTES, DEFAULT_REQUEST_IMAGE_PIXEL_BUDGET } from './config.ts'
 
-/** Join the text blocks of a harness message. */
+/**
+ * Join the text blocks of a harness `system` message. A system prompt is one
+ * rendered document whose blocks carry their own spacing, and pi-ai's system
+ * slots take a single string.
+ */
 function flattenText(message: Message): string {
   return message.content
     .filter(block => block.type === 'text')
@@ -34,12 +40,20 @@ function flattenText(message: Message): string {
     .join('')
 }
 
+/**
+ * Non-empty text blocks as pi-ai parts, descending into nested tool results.
+ * Each block stays its own part, so two never run together on the wire.
+ */
+function textParts(blocks: readonly ContentBlock[]): TextContent[] {
+  return blocks.flatMap((block): TextContent[] => {
+    if (block.type === 'text') return block.text.length > 0 ? [{ type: 'text', text: block.text }] : []
+    return block.type === 'tool-result' ? textParts(block.content) : []
+  })
+}
 
-/** Flatten text recursively inside one tool result. */
-function toolResultText(blocks: readonly ContentBlock[]): string {
-  return blocks.map(block => block.type === 'text'
-    ? block.text
-    : block.type === 'tool-result' ? toolResultText(block.content) : '').join('')
+/** User text as pi-ai content: one block as a plain string, several as separate parts. */
+function userText(parts: TextContent[]): string | TextContent[] {
+  return parts.length > 1 ? parts : parts[0]?.text ?? ''
 }
 
 /** Reject image roles that pi-ai cannot replay before request-size offloading can replace them. */
@@ -93,7 +107,7 @@ async function userContent(
         break
     }
   }
-  if (content.every(block => block.type === 'text')) return content.map(block => block.text).join('')
+  if (content.every((block): block is TextContent => block.type === 'text')) return userText(content)
   return content
 }
 
@@ -301,18 +315,16 @@ function textOnlyContext(
       appendToolChanges(message, changes, messages)
       continue
     }
-    const text = flattenText(message)
+    const text = textParts(message.content.filter(block => block.type === 'text'))
     const results = message.content.filter(block => block.type === 'tool-result')
-    if (text.length > 0 || results.length === 0) messages.push({ role: 'user', content: text, timestamp: 0 })
+    if (text.length > 0 || results.length === 0) messages.push({ role: 'user', content: userText(text), timestamp: 0 })
     for (const result of results) {
+      const parts = textParts(result.content)
       messages.push({
         role: 'toolResult',
         toolCallId: result.toolCallId,
         toolName: toolNames.get(result.toolCallId) ?? 'unknown',
-        content: [{
-          type: 'text',
-          text: toolResultText(result.content) || '(no output)',
-        }],
+        content: parts.length > 0 ? parts : [{ type: 'text', text: '(no output)' }],
         isError: result.isError ?? false,
         timestamp: 0,
       })

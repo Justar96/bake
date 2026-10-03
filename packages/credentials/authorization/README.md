@@ -27,7 +27,7 @@ This package is the part of the product that obtains credentials a human must ha
 
 ### When to use it
 
-Use it whenever a credential can only be obtained by talking to a human — an OAuth-style sign-in, a one-time code, an account pick — and cannot be stored in configuration. If a credential is a fixed key a deployment can supply, store it with the credential seam instead. A headless or ACP composition can mount this package safely: it offers no flows of its own, so nothing asks a human to sign in unless a plugin registered a flow.
+Use it whenever a credential can only be obtained by talking to a human — an OAuth-style sign-in, a one-time code, an account pick — and cannot be stored in configuration. If a credential is a fixed key a deployment can supply, store it with the credential seam instead. A headless composition can mount this package safely: it offers no flows of its own, so nothing asks a human to sign in unless a plugin registered a flow.
 
 ### Registering a flow
 

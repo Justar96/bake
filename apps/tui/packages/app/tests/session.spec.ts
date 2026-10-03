@@ -249,6 +249,37 @@ describe('session wiring', () => {
     expect(rows).toContainEqual(expect.objectContaining({ kind: 'assistant', text: 'New course' }))
   })
 
+  it('keeps several queued messages in order when Alt-Up interrupts the turn', async () => {
+    const { handle, controller, model } = await connected()
+    const streaming = Promise.withResolvers<void>()
+    model.response = async function* (options) {
+      yield { type: 'block-start', index: 0, blockType: 'text' }
+      yield { type: 'text-delta', index: 0, text: 'Long answer' }
+      streaming.resolve()
+      await new Promise<void>(resolve => {
+        if (options.signal?.aborted) resolve()
+        else options.signal?.addEventListener('abort', () => resolve(), { once: true })
+      })
+      options.signal?.throwIfAborted()
+    }
+    controller.submit('Start a turn')
+    await streaming.promise
+    controller.submit('First steer')
+    controller.submit('Second steer')
+    controller.submit('Third steer')
+    const requests = model.requests.length
+    model.response = async function* () { yield* textResponse('New course') }
+    controller.sendPending()
+    await handle.agent.whenIdle()
+    // One request carries all three, as queued.
+    expect(model.requests).toHaveLength(requests + 1)
+    const sent = JSON.stringify(model.requests.at(-1)?.messages)
+    expect(sent.indexOf('First steer')).toBeLessThan(sent.indexOf('Second steer'))
+    expect(sent.indexOf('Second steer')).toBeLessThan(sent.indexOf('Third steer'))
+    const users = transcriptRows(controller.view.committed).filter(row => row.kind === 'user').map(row => row.text)
+    expect(users.slice(-3)).toEqual(['First steer', 'Second steer', 'Third steer'])
+  })
+
   it('does not replay settled text when a stream start is repeated', async () => {
     const { ctx, handle, controller, model } = await connected()
     const paused = Promise.withResolvers<void>()

@@ -58,7 +58,7 @@ async function mount(overrides: Partial<AppProps> = {}, columns = 60, rows = 18)
   let state: AppProps = {
     screen: 'fullscreen', frame: 'round', copy: dictionaries.en,
     committed: emptyTranscript, live: [], pending: [], status: 'idle', stopping: false,
-    command: undefined, notice: undefined, interaction: undefined, todos: undefined,
+    command: undefined, notice: undefined, interaction: undefined,
     model: 'mock/model', cwd: '/workspace', sessionId: 'fullscreen', quitting: false, context: undefined,
     files: { query: undefined, entries: [], loading: false, error: undefined }, onReferenceQuery: () => {},
     completion: { entries: [], loading: false, error: undefined }, completionLimit: 8, resultLines: 4,
@@ -163,8 +163,8 @@ it('scrolls by wheel rows without typing reports into the draft, and resumes fol
 })
 
 it('keeps bracketed paste owned while a fullscreen sheet is open', async () => {
-  const view = await mount({ todos: [{ text: 'Task', status: 'pending' }] })
-  view.input.send('\x14')
+  const view = await mount({ goal: { objective: 'Ship it', phase: 'active', armed: true, rounds: 2, maxRounds: 8 } })
+  view.input.send('\x0f')
   await view.check(lines => expect(lines.join('\n')).toContain(dictionaries.en.sheetClose))
   view.input.send('\x1b[200~ignored while the sheet is open\x1b[201~')
   await view.check(lines => {
@@ -378,15 +378,15 @@ it('presents only visited history and does not reread the prefix on appends', as
 
 it('gives sheets and approvals their keys and retains the parent draft after inspection', async () => {
   const answer = vi.fn()
-  const view = await mount({ committed: history(50), onAnswer: answer, todos: Array.from({ length: 20 }, (_, i) => ({ text: `Task ${i}`, status: 'pending' })) })
+  const view = await mount({ committed: history(50), onAnswer: answer, subagents: Array.from({ length: 20 }, (_, i) => ({ id: `c${i}`, label: `Agent ${i}`, state: 'saved', detail: 'Continuable', inspectable: true })) })
   view.input.send('draft')
   await view.check(lines => expect(lines.join('\n')).toContain('draft▌'))
-  view.input.send('\x14')
+  view.input.send('\x07')
   await view.check(lines => expect(lines.join('\n')).toContain(dictionaries.en.sheetClose))
   view.input.send('\x1b[6~')
-  await view.check(lines => expect(lines.join('\n')).toContain('Task 2'))
+  await view.check(lines => expect(lines.join('\n')).toContain('4-6/25'))
   view.input.send(wheel('down'))
-  await view.check(lines => expect(lines.join('\n')).toContain('Task 5'))
+  await view.check(lines => expect(lines.join('\n')).toMatch(/ (?!4-6)\d+-\d+\/25/))
   view.input.send('\x1b')
   await view.check(lines => { expect(lines.join('\n')).not.toContain(dictionaries.en.sheetClose); expect(lines.join('\n')).toContain('draft▌') })
   view.update({ inspection: { sessionId: 'child', label: 'Child', committed: history(100), live: [], status: 'idle', model: 'mock/model' } })

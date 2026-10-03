@@ -273,30 +273,43 @@ export function project(event: SessionEvent, projector: Projector): Projection {
       return event.data.text === undefined ? NONE
         : [{ kind: 'notice', placement: 'command', tone: event.data.kind === 'error' ? 'error' : 'info', text: event.data.text }]
 
-    case 'tool/call': {
-      const callId = String(event.data.callId)
-      const card = projector.cards.call(callId, event.data.name, event.data.arguments)
+    case 'tool/call':
+    case 'tool/ptc-dispatch-start': {
+      const nested = event.type === 'tool/ptc-dispatch-start'
+      const callId = String(nested ? event.data.subCallId : event.data.callId)
+      const args = nested ? JSON.stringify(event.data.arguments) ?? '' : event.data.arguments
+      const card = projector.cards.call(callId, event.data.name, args)
       return [{
         kind: 'tool-call',
         callId,
+        ...nested ? { rootCallId: String(event.data.rootCallId) } : {},
         tool: event.data.name,
         // Without a card the arguments are the headline, shown as text and not
         // as JSON. `Bash(echo ok)`, not `Bash({"command": "echo ok"})`.
-        input: card?.title ?? argumentsTitle(event.data.arguments),
+        input: card?.title ?? argumentsTitle(args),
         ...card === undefined || card.detail.length === 0 ? {} : { detail: card.detail },
       }]
     }
 
-    case 'tool/result': {
-      const block = event.data.message.content[0]
+    case 'tool/result':
+    case 'tool/ptc-dispatch': {
+      // Released logs can have completion records without start records. The
+      // completion carries the same call identity and arguments; seed its card
+      // before presenting the result when no start was seen. Actions pairs a
+      // repeated nested identity once, for a start whose card was evicted.
+      const dispatched = event.type === 'tool/ptc-dispatch' && !projector.cards.has(String(event.data.subCallId))
+        ? project({ ...event, type: 'tool/ptc-dispatch-start' }, projector) : NONE
+      const block = event.type === 'tool/result' ? event.data.message.content[0]
+        : { toolCallId: event.data.subCallId, isError: event.data.isError, content: event.data.content }
       if (block === undefined) return NONE
       const callId = String(block.toolCallId)
       const isError = block.isError === true
       const text = resultText(block.content)
+      const meta = event.type === 'tool/result' ? event.data.meta : undefined
       const card = projector.cards.result(callId, {
         content: [{ type: 'text', text }],
         isError,
-        ...event.data.meta === undefined ? {} : { meta: event.data.meta },
+        ...meta === undefined ? {} : { meta },
       })
       // A tool can complete normally while the work it ran fails. Shell tools
       // deliberately keep non-zero exits out of `isError` so the model gets a
@@ -304,7 +317,7 @@ export function project(event: SessionEvent, projector: Projector): Projection {
       // carries the structured `summary: 'failure'` instead. Keep the model
       // contract intact, but make the UI outcome reflect that failed work.
       const failedWork = card?.detail.some(line => line.summary === 'failure') === true
-      return [{
+      return [...dispatched, {
         kind: 'tool-result',
         callId,
         ok: !isError && !failedWork,

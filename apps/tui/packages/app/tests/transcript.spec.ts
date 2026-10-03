@@ -25,7 +25,7 @@ it('renders the shared bash recording in durable event order', async () => {
     files: { query: undefined, entries: [], loading: false, error: undefined }, onReferenceQuery: () => {},
     completion: { entries: [], loading: false, error: undefined }, completionLimit: 8, resultLines: 8,
     committed, live: [], pending: [], status: 'idle', stopping: false,
-    command: undefined, notice: undefined, interaction: undefined, context: undefined, todos: undefined,
+    command: undefined, notice: undefined, interaction: undefined, context: undefined,
     model: 'deepseek-official/deepseek-v4-flash', cwd: '/workspace', sessionId: 'recorded-session', copy: dictionaries.en, frame: 'round', quitting: false,
     onSubmit: () => {}, onCancel: () => {}, onInterrupt: () => {}, onAnswer: () => {},
   }))

@@ -10,7 +10,7 @@ import type { ZodType } from 'zod'
 import type { Branded } from '@deepseek-ai/dsh-brand'
 import { isAgentLoopRequest } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions } from '@deepseek-ai/dsh-llm'
-import { assertNever, deepFreeze } from '@deepseek-ai/dsh-util-values'
+import { assertNever, assertPositiveInteger, deepFreeze } from '@deepseek-ai/dsh-util-values'
 import type {
   Session,
   SessionEvent,
@@ -188,13 +188,6 @@ interface SessionTitleWorkState {
   active?: ActiveProviderWork
 }
 
-/** Validate one positive integer configuration field. */
-function assertPositiveInteger(name: keyof Config, value: number): void {
-  if (!Number.isInteger(value) || value <= 0) {
-    throw new Error(`session-title: ${name} must be a positive integer`)
-  }
-}
-
 /**
  * Convert title projection state into an immutable snapshot.
  * @param state - the title unit's folded state.
@@ -315,9 +308,9 @@ export class SessionTitleService extends Service {
       throw new Error('session-title: configuration is required')
     }
     const value = candidate as Config
-    assertPositiveInteger('fallbackMaxWords', value.fallbackMaxWords)
-    assertPositiveInteger('fallbackMaxBytes', value.fallbackMaxBytes)
-    assertPositiveInteger('maxTitleBytes', value.maxTitleBytes)
+    assertPositiveInteger('session-title: fallbackMaxWords', value.fallbackMaxWords)
+    assertPositiveInteger('session-title: fallbackMaxBytes', value.fallbackMaxBytes)
+    assertPositiveInteger('session-title: maxTitleBytes', value.maxTitleBytes)
     if (value.fallbackMaxBytes > value.maxTitleBytes) {
       throw new Error('session-title: fallbackMaxBytes must not exceed maxTitleBytes')
     }

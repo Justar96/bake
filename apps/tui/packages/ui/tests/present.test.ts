@@ -38,7 +38,7 @@ describe('verbFor', () => {
     expect(verbFor('grep')).toBe(VERB.find)
     expect(verbFor('web_fetch')).toBe(VERB.fetch)
     // A plan the agent rewrites is not an edit to the workspace.
-    expect(verbFor('todo_write')).toBe(VERB.plan)
+    expect(verbFor('update_plan')).toBe(VERB.plan)
   })
 
   test('falls back to a verb rather than showing an unknown tool name raw', () => {

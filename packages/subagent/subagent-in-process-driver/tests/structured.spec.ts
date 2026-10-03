@@ -73,8 +73,7 @@ async function setup(script: Script, options: SetupOptions = {}) {
   const disposeProvider = ctx.subagents.registerProvider({
     name: 'spawn',
     capabilities: { agentOptions: true, outputSchema: true, depthLimit: true, toolFilter: false, persona: false },
-    inheritsParentContext: false,
-    start: (request: ResolvedSubagentStartRequest) => startInProcessRun(request, {}),
+    start: (request: ResolvedSubagentStartRequest) => startInProcessRun(request),
   })
   ctx.llm.registerAdapter(['mock'], adapter)
   const parent = await ctx.agentLoop.create(SessionId('parent'), { provider: 'mock', model: 'mock' })

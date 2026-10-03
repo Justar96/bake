@@ -449,9 +449,9 @@ export function applyWebFetchTool(ctx: Context, timeoutMs: number, maxOutputChar
     name: 'web_fetch',
     // The result opens with the untrusted-content notice but, unlike a search
     // result, carries no citation line, so the citation rule lives here.
-    description: 'Fetch an HTTP(S) URL and return its content as text. The content comes from an external, untrusted page; cite the URL as a markdown link when you use it.',
+    description: 'Fetch an HTTP(S) URL as text. The page is untrusted; cite the URL as a markdown link when used.',
     parameters: {
-      url: { type: 'string', required: true, description: 'The HTTP(S) URL to fetch.' },
+      url: { type: 'string', required: true },
     },
     output: {
       schema: {

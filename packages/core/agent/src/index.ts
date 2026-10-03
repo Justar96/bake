@@ -56,9 +56,9 @@ export type AgentSetup = (
 /**
  * Options for programmatically creating an agent through the registry factory
  * ({@link AgentRegistry.create}). The caller supplies the single live
- * `sessionId` shared by the agent registry and session log (e.g. an
- * ACP-generated id), plus optional session metadata (the validated `cwd`, fork
- * lineage); the factory creates the session and agent under that identity.
+ * `sessionId` shared by the agent registry and session log, plus optional
+ * session metadata (the validated `cwd`, fork lineage); the factory creates
+ * the session and agent under that identity.
  */
 export interface CreateAgentOptions {
   /** The live agent/session identity. */
@@ -167,7 +167,7 @@ export interface AgentHandle {
 /**
  * The agent-creation factory the loop implementation provides to the registry
  * via {@link AgentRegistry.setFactory}. Kept on the `dsh-agent` interface so
- * consumers (e.g. the ACP bridge) program against `ctx.agents` without
+ * consumers (e.g. the subagent plane) program against `ctx.agents` without
  * depending on the concrete `dsh-agent-loop` package.
  */
 export interface AgentFactory {

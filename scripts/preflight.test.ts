@@ -14,7 +14,7 @@ describe('preflight', () => {
     const names = STEPS.map(step => step.name)
     expect(new Set(names).size).toBe(names.length)
     expect(selected([])).toEqual(names)
-    for (const gate of ['rescope-vendor', 'typecheck', 'lint', 'actionlint', 'build', 'tui-spec', 'runtime', 'e2e', 'verify-type-equiv',
+    for (const gate of ['rescope-vendor', 'typecheck', 'lint', 'actionlint', 'build', 'tui-spec', 'runtime', 'integration', 'e2e', 'verify-type-equiv',
       'verify-cordis-config', 'verify-package-invariants']) expect(names).toContain(gate)
   })
 
@@ -34,7 +34,7 @@ describe('preflight', () => {
     expect(selected(['--only', 'lint,typecheck'])).toEqual(['typecheck', 'lint', 'actionlint'])
     expect(selected(['--skip', 'e2e'])).not.toContain('e2e')
     const fast = selected(['--fast'])
-    for (const name of ['build', 'tui-spec', 'runtime', 'e2e']) expect(fast).not.toContain(name)
+    for (const name of ['build', 'tui-spec', 'runtime', 'integration', 'e2e']) expect(fast).not.toContain(name)
     expect(fast).toContain('typecheck')
     expect(fast).toContain('tui-layout')
   })
@@ -84,6 +84,7 @@ describe('preflight', () => {
       ' FAIL  packages/terminal/terminal-bash/tests/local.spec.ts > terminal-bash real shell > recognizes a foreground read',
       ' FAIL  packages/terminal/terminal-bash/tests/local.spec.ts > terminal-bash real shell > another case',
       ' FAIL  packages/ui/tests/placement.spec.tsx [ packages/ui/tests/placement.spec.tsx ]',
+      ' FAIL  apps/cli/tests/keyless-smoke.e2e.ts > keyless smoke > starts',
       '   FAIL  not/a/test.ts > indented differently',
       rule('Unhandled Errors'),
       '',
@@ -98,6 +99,7 @@ describe('preflight', () => {
     ].join('\n')
     expect(vitestFailures(log)).toEqual({ unattributed: 0, files: [
       '/repo/scripts/vitest-environment.compat.spec.ts',
+      'apps/cli/tests/keyless-smoke.e2e.ts',
       'packages/subagent/tool-subagent-control/tests/tool-subagent-control.spec.ts',
       'packages/terminal/terminal-bash/tests/local.spec.ts',
       'packages/ui/tests/placement.spec.tsx',
@@ -112,9 +114,12 @@ describe('preflight', () => {
 
   it('reruns failed files only for the Vitest steps', () => {
     const rerunnable = STEPS.filter(step => step.rerun !== undefined).map(step => step.name)
-    expect(rerunnable).toEqual(['tui-spec', 'runtime'])
+    expect(rerunnable).toEqual(['tui-spec', 'runtime', 'integration'])
     const runtime = STEPS.find(step => step.name === 'runtime')
     expect(runtime?.rerun?.(['a.spec.ts'])).toEqual(['node', 'node_modules/vitest/vitest.mjs', 'run', '--maxWorkers=1', 'a.spec.ts'])
+    const integration = STEPS.find(step => step.name === 'integration')
+    expect(integration?.rerun?.(['a.e2e.ts'])).toEqual(
+      ['node', 'node_modules/vitest/vitest.mjs', 'run', '--config', 'vitest.e2e.config.ts', '--maxWorkers=1', 'a.e2e.ts'])
   })
 
   it('names every Bun test file under scripts to bun test, and no Vitest spec', () => {

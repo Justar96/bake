@@ -16,8 +16,7 @@ import { createRequire } from 'node:module'
 import z from '@deepseek-ai/schemastery'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-command-feedback'
-import type {} from '@deepseek-ai/dsh-message-feedback'
-import { Session, type SessionEvent } from '@deepseek-ai/dsh-session'
+import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import {
   SessionTelemetryBackend,
   SessionTelemetryCoordinator,
@@ -49,15 +48,9 @@ export const DEFAULT_TELEMETRY_MODE = SessionTelemetryMode.FEEDBACK_ONLY
 const DISABLED_FEEDBACK_WARNING = 'OpenTelemetry session upload is DISABLED; this feedback is not uploaded through OpenTelemetry'
 const NON_CANONICAL_EVENT_WARNING = 'session telemetry ignored an event absent from the canonical session log'
 
-/** Only this Session's explicit feedback authorizes replay; fork seeds do not. */
+/** Only this Session's explicit feedback authorizes replay; inherited seed events do not. */
 function isFeedback(session: Session, event: SessionEvent): boolean {
-  if (event.seq < session.inheritedEventCount) return false
-  switch (event.type) {
-    case 'feedback/record': return true
-    case 'feedback/message-put':
-    case 'feedback/message-delete': return event.data.sessionId === session.id
-    default: return false
-  }
+  return event.seq >= session.inheritedEventCount && event.type === 'feedback/record'
 }
 
 /** Resolve the default and reject unknown runtime values before transport setup. */
@@ -251,17 +244,6 @@ export class OpenTelemetrySessionBackend extends SessionTelemetryBackend {
         return
       }
       coordinator.captureSession(session, event.seq)
-    })
-    ctx.on('feedback/committed', (inspection) => {
-      const snapshot = structuredClone(inspection)
-      const committed = snapshot.events.at(-1)
-      if (committed === undefined) return
-      const session = Session.fromRestore(
-        snapshot.meta.id, snapshot.events, snapshot.meta, snapshot.inheritedEventCount,
-        'detached', ctx.sessions.messageProjections,
-      )
-      // fromRestore appends a lifecycle marker that this submission did not commit.
-      if (isFeedback(session, committed)) coordinator.captureSession(session, committed.seq)
     })
   }
 

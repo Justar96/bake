@@ -43,16 +43,16 @@ describe('SystemPrompt tool order', () => {
   })
 
   it('applies a configured toolOrder: listed positions, rest at the rest entry lexicographically', async () => {
-    const ctx = await mount({ toolOrder: ['todo_write', TOOL_ORDER_REST, 'bash'] })
-    ctx.systemPrompt.tools(() => ({ schemas: [tool('bash'), tool('echo_b'), tool('todo_write'), tool('echo_a')] }))
-    expect(names(await ctx.systemPrompt.assemble())).toEqual(['todo_write', 'echo_a', 'echo_b', 'bash'])
+    const ctx = await mount({ toolOrder: ['plan_steps', TOOL_ORDER_REST, 'bash'] })
+    ctx.systemPrompt.tools(() => ({ schemas: [tool('bash'), tool('echo_b'), tool('plan_steps'), tool('echo_a')] }))
+    expect(names(await ctx.systemPrompt.assemble())).toEqual(['plan_steps', 'echo_a', 'echo_b', 'bash'])
   })
 
   it('rejects the assembly when toolOrder names a tool that is not registered (misconfiguration blocks work)', async () => {
-    const ctx = await mount({ toolOrder: ['todo_write', 'ghost', TOOL_ORDER_REST, 'wraith'] })
-    ctx.systemPrompt.tools(() => ({ schemas: [tool('bash'), tool('todo_write')] }))
+    const ctx = await mount({ toolOrder: ['plan_steps', 'ghost', TOOL_ORDER_REST, 'wraith'] })
+    ctx.systemPrompt.tools(() => ({ schemas: [tool('bash'), tool('plan_steps')] }))
     await expect(ctx.systemPrompt.assemble()).rejects.toThrow(
-      'toolOrder lists unregistered tools "ghost", "wraith"; known tools: bash, todo_write')
+      'toolOrder lists unregistered tools "ghost", "wraith"; known tools: bash, plan_steps')
   })
 
   it('names the single unregistered tool when no tools are registered at all', async () => {
@@ -97,7 +97,7 @@ describe('SystemPrompt tool order', () => {
 
   it.each([
     ['an empty list', []],
-    ['a list without the rest entry', ['bash', 'todo_write']],
+    ['a list without the rest entry', ['bash', 'plan_steps']],
   ])('rejects %s at load (the rest entry is required)', async (_case, toolOrder) => {
     await expect(new Context().plugin(SystemPrompt, { toolOrder })).rejects.toThrow(`must contain the "${TOOL_ORDER_REST}" rest entry`)
   })

@@ -221,14 +221,10 @@ describe('goal tool registration and presentation', () => {
   it('pins the model-facing tool descriptions and parameter guidance', async () => {
     const { ctx } = await harness()
     const schemas = new Map(ctx.tools.schemas().map(schema => [schema.name, schema]))
-    expect(schemas.get('get_goal')?.description).toBe(
-      'Return the session\'s current goal, or null: its id, revision, objective, phase, rounds started, '
-      + 'round limit, any blocker, and whether it will continue automatically.',
-    )
+    expect(schemas.get('get_goal')?.description).toBe('Return the session\'s current goal, or null.')
     expect(schemas.get('create_goal')?.description).toBe(
-      'Create the session\'s goal: a long-running objective that keeps going across automatic rounds '
-      + 'until it is done. Call it only when the user explicitly asks for a goal in the current turn; never '
-      + 'create one on your own initiative. A session has one goal at a time, and subagents cannot create goals.',
+      'Create the session\'s single goal, pursued across automatic rounds. Only when the user explicitly '
+      + 'asks for one this turn. Subagents cannot.',
     )
     expect(schemas.get('update_goal')?.description).toBe(updateGoalDescription(3))
     const descriptions = (name: string): Record<string, unknown> => Object.fromEntries(
@@ -236,28 +232,28 @@ describe('goal tool registration and presentation', () => {
         .map(([key, value]) => [key, value.description]),
     )
     expect(descriptions('create_goal')).toEqual({
-      objective: 'The concrete objective, taken from the user\'s request.',
-      max_goal_rounds: 'Optional limit on automatic rounds, as a positive integer.',
+      objective: 'From the user\'s request.',
+      max_goal_rounds: 'Positive integer.',
     })
+    // The id, revision, and action enum are self-describing.
     expect(descriptions('update_goal')).toEqual({
-      goal_id: 'The current goal\'s id.',
-      revision: 'The current goal\'s revision.',
-      action: 'edit the objective or round limit, pause or resume automatic rounds, or mark the goal complete or blocked.',
-      objective: 'The new objective; used only with action edit.',
-      max_goal_rounds: 'The new round limit; used only with action edit.',
-      blocked_reason: 'The concrete obstacle; required with action blocked and unused otherwise.',
+      goal_id: undefined,
+      revision: undefined,
+      action: undefined,
+      objective: 'edit only.',
+      max_goal_rounds: 'edit only.',
+      blocked_reason: 'Required for blocked.',
     })
   })
 })
 
 /** The exact `update_goal` description, which carries the goal policy, for one configured blocked threshold. */
 function updateGoalDescription(blockedAfter: number): string {
-  return 'Change the current goal. First call get_goal and pass its exact goal_id and revision. edit, pause, '
-    + 'and resume need a request from the user in the current turn; complete and blocked also work during '
-    + 'an automatic goal round. When a session is reopened or forked, its goal stops running automatic '
-    + 'rounds until the user asks to continue; then resume it. Mark the goal complete only when its '
-    + 'objective is met. Mark it blocked only when the same concrete obstacle has persisted for at least '
-    + `${blockedAfter} consecutive goal rounds; difficulty or remaining work is not an obstacle.`
+  return 'Change the goal; first get_goal for its exact goal_id and revision. '
+    + 'edit/pause/resume need a user request this turn; complete/blocked also work in automatic rounds. '
+    + 'A reopened or forked session\'s goal stays paused until the user asks to continue; then resume. '
+    + 'complete only when the objective is met; blocked only after the same concrete obstacle persisted '
+    + `at least ${blockedAfter} consecutive goal rounds (difficulty or remaining work is not one).`
 }
 
 describe('goal tool execution authority', () => {
