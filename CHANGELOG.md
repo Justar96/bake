@@ -4,6 +4,8 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 ## [Unreleased]
 
+- An unhandled promise rejection after startup no longer ends the session with status 1. Bake appends the error's name, message, and stack to an owner-only `rejections.<stamp>.<pid>.jsonl` file under `<Bake home>/diagnostics/` and logs it. The terminal shows `Internal error: <error> · the session continues · details in <file>` on its notice line, and `dsh headless` writes one `dsh: warning:` line to stderr. Each distinct error is shown once, and at most five a minute. A rejection during shutdown is recorded the same way and leaves the exit status alone. During startup an unhandled rejection still fails the launch, and an uncaught exception is still fatal at any time.
+
 ## [0.3.6] - 2026-10-04
 
 - Bake 0.3.5 on Windows starts again. The terminal imported the compaction settings package, which the Windows release did not install for it, so `bake` exited at once with status 1 and printed nothing; Linux and macOS installs found the package by chance. The release now checks that every package the terminal loads is declared and resolves in the platform's installed layout before it ships.

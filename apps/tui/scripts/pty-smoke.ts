@@ -26,7 +26,7 @@
  * @module tui-pty-smoke
  */
 
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
@@ -3505,6 +3505,56 @@ setInterval(() => {
     } finally {
       await tty.close()
     }
+  })
+
+scenario('late-rejection', 'an unhandled rejection after startup is recorded and named on the notice line, and the session'
+  + ' goes on to run a turn and quit with status 0', { replayOnly: true },
+  async run => {
+    // Polled, as in `fatal-exception`. Two rejections from one throw site: the
+    // second is a repeat, which is counted rather than recorded or shown again.
+    const preload = join(run.root, 'late-rejection.mjs')
+    const trigger = join(run.root, 'late-rejection.trigger')
+    await Bun.write(preload, `import { existsSync, rmSync } from 'node:fs'
+setInterval(() => {
+  if (!existsSync(${JSON.stringify(trigger)})) return
+  rmSync(${JSON.stringify(trigger)})
+  for (let count = 0; count < 2; count++) {
+    Promise.reject(Object.assign(new Error('PTY_LATE_REJECTION'), { token: 'PTY_REJECTION_FIELD' }))
+  }
+}, 20).unref()
+`)
+    await run.writeOverlay()
+    const diagnostics = join(run.home, 'diagnostics')
+    const recordsBefore = new Set(existsSync(diagnostics) ? readdirSync(diagnostics) : [])
+    const tty = new Terminal('late-rejection', run.command([], ['--import', preload]), run.workspace, run.env, run.options)
+    try {
+      await tty.ready()
+      const raised = tty.mark()
+      await Bun.write(trigger, '')
+      await tty.expect(`${dictionaries.en.unhandledRejection}: Error: PTY_LATE_REJECTION · ${dictionaries.en.unhandledRejectionContinues}`, raised)
+      tty.send(`${run.prompt}\r`, 'submit the recorded prompt after the rejection')
+      await tty.wait("the shell result and the model's DONE line", text => text.slice(raised).includes(SCREEN.toolResult) && DONE_LINE.test(text.slice(raised)))
+      await tty.follows(SCREEN.idle, SCREEN.toolResult)
+      const output = await tty.quit()
+      // Stderr shares the screen, so the launcher's fallback line never ran while the terminal was held.
+      tty.refuse('a warning line written over the frame', output.includes('dsh: warning'))
+    } catch (error) {
+      tty.save()
+      throw error
+    } finally {
+      await tty.close()
+    }
+    const files = readdirSync(diagnostics).filter(file => file.startsWith('rejections.') && !recordsBefore.has(file))
+    assert(files.length === 1, `expected one rejection record file, got ${files.join(', ') || 'none'}`)
+    const path = join(diagnostics, files[0]!)
+    if (process.platform !== 'win32') {
+      assert((statSync(path).mode & 0o777) === 0o600, `the record file is not owner-only: ${(statSync(path).mode & 0o777).toString(8)}`)
+    }
+    const text = readFileSync(path, 'utf8')
+    const records = text.trim().split('\n').map(line => JSON.parse(line))
+    assert(records.length === 1 && records[0].kind === 'unhandled-rejection' && records[0].error.message === 'PTY_LATE_REJECTION',
+           `the repeat was recorded again, or the first was not: ${text}`)
+    assert(!text.includes('PTY_REJECTION_FIELD'), 'the record kept an error property beyond its name, message, and stack')
   })
 
 scenario('hangup', 'a closed terminal or a repeated SIGHUP exits 129 once disposal stops a tool that ignores hangups,'

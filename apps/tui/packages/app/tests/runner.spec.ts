@@ -147,3 +147,26 @@ it('root fiber disposal awaits the drains owned by run()\'s own finally', async 
   await finished
   expect(order).toEqual(['drain-start', 'drain-end', 'disposed'])
 })
+
+it('names a rejection the launcher survived on the notice line, and leaves it to stderr once the terminal is released', async () => {
+  const fixture = await harness()
+  cleanup.push(fixture.dispose)
+  const input = new Input()
+  const output = new Output()
+  const error = new Output()
+  const io = { in: input, out: output, err: error, exit: vi.fn() } as unknown as TuiIo
+  vi.stubEnv('HOME', '/home/tester')
+  const finished = run(fixture.ctx, { screen: 'inline', composerFrame: 'auto', completionLimit: 8, resultLines: 8, attachmentMaxBytes: 1048576, attachmentLimit: 8, doubleInterruptMs: 500, credentialRefs: [] }, io)
+  cleanup.push(async () => { await fixture.ctx.fiber.dispose(); await finished })
+  await Promise.race([finished, vi.waitFor(() => expect(output.text).toContain('Session: '))])
+  const rejection = { summary: 'TypeError: late listener failed', record: '/home/tester/.bake/diagnostics/rejections.20261005.120000.42.jsonl' }
+  expect(fixture.ctx.bail('app/unhandled-rejection', rejection)).toBe(true)
+  // The notice wraps at the terminal's width, between its two halves.
+  await vi.waitFor(() => expect(output.text).toContain('Internal error: TypeError: late listener failed · the session continues · details in'))
+  expect(output.text).toContain('~/.bake/diagnostics/rejections.20261005.120000.42.jsonl')
+  // Stderr shares the screen, so nothing goes there while the terminal is held.
+  expect(error.frames).toEqual([])
+  await fixture.ctx.fiber.dispose()
+  await finished
+  expect(fixture.ctx.bail('app/unhandled-rejection', rejection)).toBeUndefined()
+})

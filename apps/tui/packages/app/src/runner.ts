@@ -22,6 +22,8 @@ import { sessionGitConfinement, WorkspaceGit } from './git.ts'
 import { cliProxyModelsInUse, cliProxyUpgradeNotice, refreshCliProxyModels, upgradeCliProxyRoute } from './cliproxyapi.ts'
 import type { CredentialTargetConfig, LoginSources, SignInFlowConfig } from './login.ts'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
+// Declares the launcher's `app/unhandled-rejection` event.
+import type {} from '@deepseek-ai/dsh-cmdline'
 
 /** The renderer component is loaded from its own artifact after the runner starts. */
 type AppComponent = ComponentType<AppProps>
@@ -273,6 +275,17 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
       alternateScreen: screen === 'fullscreen',
     })
     const initial = navigation.controller!
+    // A rejection the launcher survived goes on the notice line, since stderr
+    // shares the screen. Once the terminal is released, the launcher's own
+    // stderr line takes over.
+    ctx.on('app/unhandled-rejection', ({ summary, record }) => {
+      const active = navigation?.controller
+      if (terminalReleased || active === undefined) return undefined
+      const where = record === undefined ? ''
+        : ` · ${copy.unhandledRejectionRecord} ${compactPath(record, process.env['HOME'])}`
+      active.notify(`${copy.unhandledRejection}: ${summary} · ${copy.unhandledRejectionContinues}${where}`)
+      return true
+    })
     // Shown first, so a missing credential, which blocks every turn, replaces it.
     if (routeNotice !== undefined) initial.notify(routeNotice)
     startupReport = initial.reportCredentials().catch((error: unknown) => {

@@ -2673,6 +2673,14 @@ export const EVENT_API: readonly EventApiEntry[] = [
     parameters: [],
   },
   {
+    name: 'app/unhandled-rejection',
+    mode: 'bail',
+    signature: '\'app/unhandled-rejection\'(rejection: AppRejection): true | undefined',
+    summary: 'A surface may show an unhandled rejection the launcher survived after startup, once per distinct error.',
+    description: 'A surface may show an unhandled rejection the launcher survived after startup, once per distinct error. A listener that showed it returns true; when none does, the launcher writes one warning line to stderr.',
+    parameters: [{ name: 'rejection', description: 'The recorded rejection\'s summary and record path.' }],
+  },
+  {
     name: 'approval/request',
     mode: 'waterfall',
     signature: '\'approval/request\'( this: Scoped<Agent>, req: ApprovalRequestEvent, next: () => Promise<ApprovalOutcome>, ): Promise<ApprovalOutcome>',
@@ -3143,6 +3151,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ApiKeyRecord',
     declaration: 'export interface ApiKeyRecord {\n    readonly kind: \'api-key\';\n    readonly key?: string;\n    readonly env?: Readonly<Record<string, string>>;\n}',
+  },
+  {
+    name: 'AppRejection',
+    declaration: 'export interface AppRejection {\n    readonly summary: string;\n    readonly record?: string | undefined;\n}',
   },
   {
     name: 'ApprovalOutcome',

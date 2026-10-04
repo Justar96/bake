@@ -144,6 +144,26 @@ Drain plugin-owned work before the launcher unloads root services. @mode paralle
 
 Source: [`packages/core/agent-loop/src/index.ts`](../../packages/core/agent-loop/src/index.ts)
 
+<a id="appunhandled-rejection--bail"></a>
+
+#### `app/unhandled-rejection` — bail
+
+A surface may show an unhandled rejection the launcher survived after startup, once per distinct error. A listener that showed it returns true; when none does, the launcher writes one warning line to stderr.
+
+```ts cordis-catalog
+/**
+ * A surface may show an unhandled rejection the launcher survived after
+ * startup, once per distinct error. A listener that showed it returns
+ * true; when none does, the launcher writes one warning line to stderr.
+ * @mode bail
+ * @param rejection The recorded rejection's summary and record path.
+ * @returns true once a listener has shown it to the user.
+ */
+'app/unhandled-rejection'(rejection: AppRejection): true | undefined
+```
+
+Source: [`packages/boot/cmdline/src/index.ts`](../../packages/boot/cmdline/src/index.ts)
+
 <a id="hmr-events"></a>
 
 ### `hmr/*` events
