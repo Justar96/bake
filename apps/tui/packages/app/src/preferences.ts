@@ -5,9 +5,12 @@
  *
  * The panel lists sections. Session holds the default model (the session's
  * `/model` picker, which writes `agent-default-model`) and the default access
- * preset. Terminal holds this namespace. Agent, Routing, Shell, and Web search name the
+ * preset. Terminal holds this namespace. Agent, Compaction, Routing, Shell, and Web search name the
  * plugin settings a user reaches for most, with labels and steps of their
- * own. Advanced lists every registered namespace and edits its fields from
+ * own. Compaction puts the engine's paired fields in a reader's terms: one
+ * row each for where it starts and how much it keeps, taking a share of the
+ * context window or a token count, and writing whichever form was chosen in
+ * place of the other. Advanced lists every registered namespace and edits its fields from
  * the schema its owner registered, so a plugin's settings are reachable
  * without the panel knowing the plugin. Typing at the top searches every
  * setting in every section, and Tab and Shift-Tab move between the sections.
@@ -33,7 +36,9 @@ import type { SettingsDescriptor, SettingsProvider, SettingsScope } from '@deeps
 import type { CommandResult } from '@deepseek-ai/dsh-commands'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import { PERMISSION_SETTINGS_NAMESPACE } from '@deepseek-ai/dsh-permission-presets'
+import { COMPACTION_BASIC_SETTINGS_NAMESPACE, COMPACTION_DEFAULTS } from '@deepseek-ai/dsh-compaction-basic'
 import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
+import { formatTokens } from '@dsh-tui/ui/format.ts'
 import type { Choice } from '@dsh-tui/ui/picker.tsx'
 import { compactPath } from '@dsh-tui/ui/present.ts'
 import type { EditText } from './external-editor.ts'
@@ -77,6 +82,8 @@ interface Option {
   readonly label: string
   /** Secondary text in the value picker. */
   readonly description?: string
+  /** The value a reset returns to, which the value picker marks `Default`. */
+  readonly fallback?: boolean
 }
 
 /** How a typed value is read, for a setting that takes one. */
@@ -86,7 +93,9 @@ interface Typed {
   readonly max?: number
   readonly step?: number
   /** A number's unit, which also decides the suffixes it accepts. */
-  readonly unit?: 'ms' | 'bytes'
+  readonly unit?: 'ms' | 'bytes' | 'tokens'
+  /** What the typed-value row says it accepts, for text the setting reads itself. */
+  readonly hint?: string
 }
 
 /** One setting of a section, with the values it offers. */
@@ -240,13 +249,23 @@ interface Curated {
   readonly ns: string
   readonly path: readonly string[]
   readonly label: string
+  /** What the setting does, shown under the list while it is selected; absent, the owner's description. */
+  readonly about?: string
   /** Values offered before the typed one. */
   readonly steps?: readonly number[]
-  readonly unit?: 'ms' | 'bytes'
+  readonly unit?: 'ms' | 'bytes' | 'tokens'
   /** How a number reads; absent, by its unit. */
   readonly format?: (value: number) => string
   readonly status?: string
+  /** The number in force while neither the composition nor the user sets the field. */
+  readonly fallback?: number
 }
+
+/** One of the compaction engine's paired budgets: a share of the context window, or tokens. */
+type Budget = { readonly ratio: number } | { readonly tokens: number }
+
+/** The compaction engine's settings namespace, which the Compaction section edits in a reader's terms. */
+const COMPACTION = COMPACTION_BASIC_SETTINGS_NAMESPACE
 
 /** The `tui` namespace, the values this process launched with, and the `/settings` panel. */
 export class Preferences implements RecentModels {
@@ -379,8 +398,10 @@ export class Preferences implements RecentModels {
         ...sections.map(section => ({
           value: `${SECTION}${section.key}`, label: section.label, description: summaryOf(section),
           ...section.status === undefined ? {} : { status: statusOf(section.status, copy) },
+          ...changedIn(section) === 0 ? {} : { mark: CHANGED, detail: `${changedIn(section)} ${copy.settingsChangedCount}` },
         })),
-        ...resettable.length === 0 ? [] : [{ value: RESET, label: copy.settingsResetSection, pinned: true }],
+        ...resettable.length === 0 ? [] : [{ value: RESET, label: copy.settingsResetSection, pinned: true,
+          detail: `${resettable.length} ${copy.settingsChangedCount}` }],
       ]
       const listed = choices.filter(choice => choice.searchOnly !== true)
       if (listed.length === 0) return undefined
@@ -389,7 +410,7 @@ export class Preferences implements RecentModels {
         active: `${TAB}${keys[0]}`,
       }
       const picked = await interactions.choose({
-        title, choices, initial: initial !== undefined && listed.some(choice => choice.value === initial) ? initial : listed[0]!.value,
+        title, choices, marks: true, initial: initial !== undefined && listed.some(choice => choice.value === initial) ? initial : listed[0]!.value,
         ...warnings.length === 0 ? {} : { warning: warnings.join(' · ') },
         ...tabs === undefined ? {} : { tabs },
       }, signal)
@@ -465,16 +486,22 @@ export class Preferences implements RecentModels {
       if (next !== undefined) await save(copy, progress, () => setting.set(next))
       return
     }
+    // Every row says what the setting does, under the list, so the title only names it.
+    const about = setting.about === undefined ? {} : { detail: setting.about }
     const choices: Choice[] = [
-      ...setting.options.map(option => ({ value: option.value, label: option.label, current: option.value === setting.current,
-        ...option.description === undefined ? {} : { description: option.description } })),
-      ...setting.typed === undefined ? [] : [{ value: CUSTOM, label: copy.settingsCustom,
+      ...setting.options.map(option => {
+        const status = valueStatus(option.value === setting.current, option.fallback === true, copy)
+        return { value: option.value, label: option.label, current: option.value === setting.current, ...about, ...status === undefined ? {} : { status },
+          ...option.description === undefined ? {} : { description: option.description } }
+      }),
+      ...setting.typed === undefined ? [] : [{ value: CUSTOM, label: copy.settingsCustom, ...about,
         ...hintOf(setting.typed, copy) === undefined ? {} : { description: hintOf(setting.typed, copy)! } }],
-      ...setting.reset === undefined ? [] : [{ value: RESET, label: copy.settingsResetField, pinned: true }],
+      ...setting.reset === undefined ? [] : [{ value: RESET, label: copy.settingsResetField, pinned: true,
+        ...defaultOf(setting) === undefined ? {} : { detail: `${copy.settingsDefaultIs} ${defaultOf(setting)}` } }],
     ]
     // Nothing to pick from but typing: ask for the text at once.
     const value = choices.length === 1 && choices[0]!.value === CUSTOM ? CUSTOM : await interactions.choose({
-      title: setting.about === undefined ? setting.label : `${setting.label} · ${setting.about}`,
+      title: setting.label,
       initial: choices.some(choice => choice.value === setting.current) ? setting.current : choices[0]!.value,
       choices,
     }, signal)
@@ -522,21 +549,22 @@ export class Preferences implements RecentModels {
       { key: 'terminal', label: copy.settingsTerminal, settings: this.terminalRows(copy) },
       ...section('session', copy.settingsSession, [...this.modelRow(copy, session), ...this.permissionRow(copy, descriptors)]),
       ...section('agent', copy.settingsAgent, curated([
-        { ns: 'agent-loop', path: ['maxParallelToolCalls'], label: copy.settingsParallelTools, steps: [1, 2, 4, 8, 16] },
-        { ns: 'subagent', path: ['maxActiveSubagents'], label: copy.settingsSubagentsActive, steps: [1, 2, 4, 8, 16] },
-        { ns: 'subagent', path: ['maxDepth'], label: copy.settingsSubagentDepth, steps: [0, 1, 2, 3],
+        { ns: 'agent-loop', path: ['maxParallelToolCalls'], label: copy.settingsParallelTools, about: copy.settingsParallelToolsAbout, steps: [1, 2, 4, 8, 16] },
+        { ns: 'subagent', path: ['maxActiveSubagents'], label: copy.settingsSubagentsActive, about: copy.settingsSubagentsActiveAbout, steps: [1, 2, 4, 8, 16] },
+        { ns: 'subagent', path: ['maxDepth'], label: copy.settingsSubagentDepth, about: copy.settingsSubagentDepthAbout, steps: [0, 1, 2, 3],
           format: depth => depth === 0 ? copy.settingsSubagentDepthOff : String(depth) },
       ]).concat(this.subagentModelRows(copy, descriptors, session, interactions))),
+      ...section('compaction', copy.settingsCompaction, this.compactionRows(copy, descriptors, session, interactions)),
       ...section('routing', copy.settingsRouting, this.routingRows(copy, descriptors, session, interactions)),
       ...section('shell', copy.settingsShell, curated([
-        { ns: 'shell', path: ['timeoutMs'], label: copy.settingsShellTimeout, unit: 'ms', steps: [30_000, 60_000, 120_000, 300_000, 600_000] },
-        { ns: 'shell', path: ['maxTimeoutMs'], label: copy.settingsShellMaxTimeout, unit: 'ms', steps: [300_000, 600_000, 1_800_000, 3_600_000] },
-        { ns: 'shell', path: ['maxOutputBytes'], label: copy.settingsShellOutput, unit: 'bytes', steps: [16_000, 64_000, 256_000, 1_000_000] },
+        { ns: 'shell', path: ['timeoutMs'], label: copy.settingsShellTimeout, about: copy.settingsShellTimeoutAbout, unit: 'ms', steps: [30_000, 60_000, 120_000, 300_000, 600_000] },
+        { ns: 'shell', path: ['maxTimeoutMs'], label: copy.settingsShellMaxTimeout, about: copy.settingsShellMaxTimeoutAbout, unit: 'ms', steps: [300_000, 600_000, 1_800_000, 3_600_000] },
+        { ns: 'shell', path: ['maxOutputBytes'], label: copy.settingsShellOutput, about: copy.settingsShellOutputAbout, unit: 'bytes', steps: [16_000, 64_000, 256_000, 1_000_000] },
       ])),
       ...section('web', copy.settingsWeb, curated([
-        { ns: 'web-search-deepseek', path: ['maxUses'], label: copy.settingsWebUses, steps: [1, 3, 5, 10] },
-        { ns: 'web-search-deepseek', path: ['model'], label: copy.settingsWebModel },
-        { ns: 'web-search-deepseek', path: ['maxTokens'], label: copy.settingsWebTokens, steps: [1024, 2048, 4096, 8192] },
+        { ns: 'web-search-deepseek', path: ['maxUses'], label: copy.settingsWebUses, about: copy.settingsWebUsesAbout, steps: [1, 3, 5, 10] },
+        { ns: 'web-search-deepseek', path: ['model'], label: copy.settingsWebModel, about: copy.settingsWebModelAbout },
+        { ns: 'web-search-deepseek', path: ['maxTokens'], label: copy.settingsWebTokens, about: copy.settingsWebTokensAbout, steps: [1024, 2048, 4096, 8192] },
       ])),
       ...this.advanced(copy, descriptors, session, interactions),
     ]
@@ -550,7 +578,7 @@ export class Preferences implements RecentModels {
     const later = (changed: boolean): { status?: string } => changed ? { status: copy.settingsNextLaunch } : {}
     // The profile's value, marked in the value picker so a user can find the way back.
     const marked = (options: readonly Option[], fallback: string): readonly Option[] =>
-      options.map(option => option.value === fallback ? { ...option, description: copy.settingsDefault } : option)
+      options.map(option => option.value === fallback ? { ...option, fallback: true } : option)
     const row = <K extends keyof TuiSettings>(key: K, fields: Omit<Setting, 'key' | 'shown' | 'set' | 'reset'> & { shown?: string },
       read: (next: string) => TuiSettings[K]): Setting => ({
       ...fields, key,
@@ -560,30 +588,30 @@ export class Preferences implements RecentModels {
     })
     return [
       row('screen', {
-        label: copy.settingsScreen, current: value.screen,
+        label: copy.settingsScreen, about: copy.settingsScreenAbout, current: value.screen,
         options: marked([{ value: 'inline', label: copy.settingsScreenInline }, { value: 'fullscreen', label: copy.settingsScreenFullscreen }], base.screen),
         ...this.screenFlag !== undefined ? { status: copy.settingsByFlag } : later(value.screen !== launch.screen),
       }, next => next as TuiSettings['screen']),
       row('composerFrame', {
-        label: copy.settingsFrame, current: value.composerFrame,
+        label: copy.settingsFrame, about: copy.settingsFrameAbout, current: value.composerFrame,
         options: marked([{ value: 'auto', label: copy.settingsFrameAuto }, { value: 'round', label: copy.settingsFrameRound },
           { value: 'classic', label: copy.settingsFrameClassic }], base.composerFrame),
       }, next => next as TuiSettings['composerFrame']),
       row('goalObjective', {
-        label: copy.settingsGoalObjective, current: String(value.goalObjective), toggle: true,
+        label: copy.settingsGoalObjective, about: copy.settingsGoalObjectiveAbout, current: String(value.goalObjective), toggle: true,
         options: [{ value: 'false', label: copy.settingsOff }, { value: 'true', label: copy.settingsOn }],
       }, next => next === 'true'),
       row('resultLines', {
-        label: copy.settingsResultLines, current: String(value.resultLines), typed: { kind: 'number', min: 0, step: 1 },
+        label: copy.settingsResultLines, about: copy.settingsResultLinesAbout, current: String(value.resultLines), typed: { kind: 'number', min: 0, step: 1 },
         options: marked(steps([0, 2, 4, 8, 16, 32], value.resultLines, lines => lines === 0 ? copy.settingsResultLinesNone : String(lines)),
           String(base.resultLines)),
       }, Number),
       row('completionLimit', {
-        label: copy.settingsCompletionLimit, current: String(value.completionLimit), typed: { kind: 'number', min: 1, step: 1 },
+        label: copy.settingsCompletionLimit, about: copy.settingsCompletionLimitAbout, current: String(value.completionLimit), typed: { kind: 'number', min: 1, step: 1 },
         options: marked(steps([4, 6, 8, 12, 16], value.completionLimit), String(base.completionLimit)),
       }, Number),
       row('doubleInterruptMs', {
-        label: copy.settingsDoubleInterrupt, current: String(value.doubleInterruptMs), typed: { kind: 'number', min: 1, unit: 'ms' },
+        label: copy.settingsDoubleInterrupt, about: copy.settingsDoubleInterruptAbout, current: String(value.doubleInterruptMs), typed: { kind: 'number', min: 1, unit: 'ms' },
         options: marked(steps([1000, 2000, 3000, 5000], value.doubleInterruptMs, formatDuration), String(base.doubleInterruptMs)),
       }, Number),
     ]
@@ -618,7 +646,7 @@ export class Preferences implements RecentModels {
     const selected = defaults.currentSelection()
     const route = selected === undefined ? '' : `${selected.provider}/${selected.model}`
     return [{
-      key: 'defaultModel', label: copy.settingsModel, current: route, options: [],
+      key: 'defaultModel', label: copy.settingsModel, about: copy.settingsModelAbout, current: route, options: [],
       shown: selected === undefined ? copy.noModel
         : selected.reasoningEffort === undefined ? route : `${route} (${String(selected.reasoningEffort)})`,
       status: copy.settingsNewSessions, open,
@@ -634,6 +662,7 @@ export class Preferences implements RecentModels {
     if (field?.kind !== 'choice' || typeof field.value !== 'string') return []
     return [{
       ...this.fieldSetting(PERMISSION_SETTINGS_NAMESPACE, field, copy), key: 'defaultPreset', label: copy.settingsPermission,
+      about: copy.settingsPermissionAbout,
       options: field.choices!.map(option => ({ value: option.value, label: option.value,
         ...option.label === option.value ? {} : { description: option.label } })),
       shown: field.value, status: copy.settingsNewSessions,
@@ -646,17 +675,20 @@ export class Preferences implements RecentModels {
     const field = descriptor === undefined ? undefined
       : schemaFields(descriptor.schema, descriptor.value, descriptor.user).find(candidate => candidate.path.join('.') === entry.path.join('.'))
     if (descriptor === undefined || field === undefined || field.kind === 'other') return []
-    const setting = this.fieldSetting(entry.ns, field, copy, descriptor.applies === 'restart')
+    const own = this.fieldSetting(entry.ns, field, copy, descriptor.applies === 'restart')
+    const setting = entry.about === undefined ? own : { ...own, about: entry.about }
     const status = entry.status ?? setting.status
-    if (field.kind !== 'number' || typeof field.value !== 'number') {
+    const value = typeof field.value === 'number' ? field.value : entry.fallback
+    if (field.kind !== 'number' || value === undefined) {
       return [{ ...setting, key: `${entry.ns}.${entry.path.join('.')}`, label: entry.label, ...status === undefined ? {} : { status } }]
     }
     const show = entry.format ?? (entry.unit === 'ms' ? formatDuration : entry.unit === 'bytes' ? formatBytes : String)
-    const fallback = typeof field.default === 'number' ? String(field.default) : undefined
+    const marked = typeof field.default === 'number' ? field.default : entry.fallback
+    const fallback = marked === undefined ? undefined : String(marked)
     return [{
-      ...setting, key: `${entry.ns}.${entry.path.join('.')}`, label: entry.label, shown: show(field.value),
+      ...setting, key: `${entry.ns}.${entry.path.join('.')}`, label: entry.label, current: String(value), shown: show(value),
       options: steps((entry.steps ?? []).filter(value => (field.min === undefined || value >= field.min) && (field.max === undefined || value <= field.max)),
-        field.value, show).map(option => option.value === fallback ? { ...option, description: copy.settingsDefault } : option),
+        value, show).map(option => option.value === fallback ? { ...option, fallback: true } : option),
       typed: { kind: 'number', ...bounds(field), ...entry.unit === undefined ? {} : { unit: entry.unit } },
       ...status === undefined ? {} : { status },
     }]
@@ -669,7 +701,7 @@ export class Preferences implements RecentModels {
    */
   private subagentModelRows(copy: TuiCopy, descriptors: readonly SettingsDescriptor[], session: PanelSession,
     interactions: Interactions): readonly Setting[] {
-    const [toggle] = this.curated({ ns: SUBAGENT_MODELS, path: ['enabled'], label: copy.settingsSubagentModels,
+    const [toggle] = this.curated({ ns: SUBAGENT_MODELS, path: ['enabled'], label: copy.settingsSubagentModels, about: copy.settingsSubagentModelsAbout,
       status: copy.settingsNewSessions }, descriptors, copy)
     const selection = subagentSelection(descriptors)
     if (toggle === undefined || selection === undefined) return toggle === undefined ? [] : [toggle]
@@ -683,7 +715,7 @@ export class Preferences implements RecentModels {
       // Switched on from an empty list, it asks for the models first.
       selection.enabled || selection.allowedModels.length > 0 ? toggle : { ...toggle, open: choose(true) },
       {
-        key: `${SUBAGENT_MODELS}.allowedModels`, label: copy.settingsSubagentAllowed, current: '', options: [],
+        key: `${SUBAGENT_MODELS}.allowedModels`, label: copy.settingsSubagentAllowed, about: copy.settingsSubagentAllowedAbout, current: '', options: [],
         shown: selection.allowedModels.length === 0 ? copy.settingsSubagentAllowedNone : selection.allowedModels.map(routeText).join(', '),
         status: copy.settingsNewSessions, open: choose(false), set: () => Promise.resolve(),
         ...typeof user === 'object' && user !== null && Object.hasOwn(user, 'allowedModels')
@@ -731,7 +763,7 @@ export class Preferences implements RecentModels {
     }
     const INFER = '\u0000infer'
     const priorities: readonly Option[] = [
-      { value: INFER, label: copy.settingsRouterPriorityInfer, description: copy.settingsDefault },
+      { value: INFER, label: copy.settingsRouterPriorityInfer, fallback: true },
       { value: 'quality', label: copy.settingsRouterQualityPriority }, { value: 'cost', label: copy.settingsRouterCostPriority },
       { value: 'speed', label: copy.settingsRouterSpeedPriority }, { value: 'balanced', label: copy.settingsRouterBalanced },
     ]
@@ -1041,6 +1073,140 @@ export class Preferences implements RecentModels {
     }
   }
 
+  /**
+   * The Compaction section, when the compaction engine registered its
+   * namespace: whether it runs on its own, where it starts, how much it
+   * keeps, which model writes the summary and how long it may be, and the
+   * per-model rules, which open as JSON. Every engine in the process follows
+   * this one namespace, so a row changes the engine that compacts the session.
+   */
+  private compactionRows(copy: TuiCopy, descriptors: readonly SettingsDescriptor[], session: PanelSession,
+    interactions: Interactions): readonly Setting[] {
+    const descriptor = descriptors.find(entry => entry.ns === COMPACTION)
+    if (descriptor === undefined) return []
+    const service = this.service!
+    const value = record(descriptor.value)
+    const user = record(descriptor.user)
+    const tokens = (count: number): string => `${formatTokens(count)} ${copy.settingsTokens}`
+    const unset = (...keys: readonly string[]) => keys.map(key => ({ op: 'unset' as const, path: [key] }))
+    const resetting = (...keys: readonly string[]) => keys.some(key => Object.hasOwn(user, key))
+      ? { reset: () => service.mutate(COMPACTION, unset(...keys)) } : {}
+    const rows: Setting[] = [{
+      key: `${COMPACTION}.auto`, label: copy.settingsCompactionAuto, about: copy.settingsCompactionAutoAbout, toggle: true,
+      current: String(value.auto !== false), shown: value.auto === false ? copy.settingsOff : copy.settingsOn,
+      options: [{ value: 'false', label: copy.settingsOff }, { value: 'true', label: copy.settingsOn }],
+      // On is the composition's own switch, so it is stored as no value at all.
+      set: next => service.mutate(COMPACTION, next === 'true' ? unset('auto') : [{ op: 'set', path: ['auto'], value: false }]),
+      ...resetting('auto'),
+    }]
+    const threshold = budgetOf(value, 'thresholdRatio', 'thresholdTokens') ?? { ratio: COMPACTION_DEFAULTS.thresholdRatio }
+    const retain = budgetOf(value, 'retainRatio', 'retainTokens') ?? { ratio: COMPACTION_DEFAULTS.retainRatio }
+    // The engine refuses a tail as large as its threshold; said in the rows' own words before it is asked.
+    const ordered = (low: Budget, high: Budget): boolean => 'ratio' in low !== 'ratio' in high || amount(low) < amount(high)
+    const budget = (key: string, label: string, about: string, ratioKey: string, tokensKey: string,
+      ratios: readonly number[], fallback: number, fits: (next: Budget) => boolean): Setting => {
+      const base = record(descriptor.base)
+      const current = budgetOf(value, ratioKey, tokensKey) ?? { ratio: fallback }
+      const reset = budgetOf(base, ratioKey, tokensKey) ?? { ratio: fallback }
+      const show = (entry: Budget): string => 'ratio' in entry ? `${percent(entry.ratio)} ${copy.settingsOfContext}` : tokens(entry.tokens)
+      const listed: readonly Budget[] = [...new Set([...ratios, ...'ratio' in current ? [current.ratio] : []])]
+        .sort((left, right) => left - right).map(ratio => ({ ratio }))
+      return {
+        key: `${COMPACTION}.${key}`, label, about, current: budgetText(current), shown: show(current),
+        options: [...listed, ...'tokens' in current ? [current] : []].map(entry => ({
+          value: budgetText(entry), label: show(entry), ...budgetText(entry) === budgetText(reset) ? { fallback: true } : {},
+        })),
+        typed: { kind: 'string', hint: copy.settingsBudgetHint },
+        // The chosen form replaces the other, which the engine refuses beside it.
+        set: (text) => {
+          const next = readBudget(text)
+          if (next === undefined) return Promise.reject(new Error(copy.settingsBudgetInvalid))
+          if (!fits(next)) return Promise.reject(new Error(copy.settingsCompactionKeepBelow))
+          return service.mutate(COMPACTION, 'ratio' in next
+            ? [{ op: 'set', path: [ratioKey], value: next.ratio }, ...unset(tokensKey)]
+            : [{ op: 'set', path: [tokensKey], value: next.tokens }, ...unset(ratioKey)])
+        },
+        ...resetting(ratioKey, tokensKey),
+      }
+    }
+    rows.push(
+      budget('threshold', copy.settingsCompactionAt, copy.settingsCompactionAtAbout, 'thresholdRatio', 'thresholdTokens',
+        [0.5, 0.6, 0.7, 0.8, 0.9], COMPACTION_DEFAULTS.thresholdRatio, next => ordered(retain, next)),
+      budget('retain', copy.settingsCompactionKeep, copy.settingsCompactionKeepAbout, 'retainRatio', 'retainTokens',
+        [0.1, 0.16, 0.2, 0.25, 0.3], COMPACTION_DEFAULTS.retainRatio, next => ordered(next, threshold)),
+    )
+    const provider = typeof value.summarizationProvider === 'string' ? value.summarizationProvider : ''
+    const model = typeof value.summarizationModel === 'string' ? value.summarizationModel : ''
+    const route = provider === '' || model === '' ? '' : routeText({ provider, model })
+    const choose = (next: string): Promise<void> => {
+      if (next.trim() === '') return service.mutate(COMPACTION, unset('summarizationProvider', 'summarizationModel'))
+      const parsed = parseRoute(next.trim())
+      if (parsed === undefined) return Promise.reject(new Error(copy.settingsRouteInvalid))
+      return service.mutate(COMPACTION, [{ op: 'set', path: ['summarizationProvider'], value: parsed.provider },
+        { op: 'set', path: ['summarizationModel'], value: parsed.model }])
+    }
+    const list = session.listModels
+    rows.push({
+      key: `${COMPACTION}.model`, label: copy.settingsCompactionModel, about: copy.settingsCompactionModelAbout, current: route,
+      shown: route === '' ? copy.settingsCompactionSameModel : route,
+      options: [{ value: '', label: copy.settingsCompactionSameModel, fallback: true },
+        ...route === '' ? [] : [{ value: route, label: route }]],
+      typed: { kind: 'string', hint: copy.settingsRouteHint }, set: choose,
+      ...list === undefined ? {} : { open: (signal: AbortSignal) => this.chooseSummaryModel(copy, interactions, list, route, choose, signal) },
+      ...resetting('summarizationProvider', 'summarizationModel'),
+    })
+    rows.push(...this.curated({ ns: COMPACTION, path: ['maxTokens'], label: copy.settingsCompactionLimit, about: copy.settingsCompactionLimitAbout, unit: 'tokens',
+      steps: [2048, 4096, 8192, 16384], format: count => `${count} ${copy.settingsTokens}`, fallback: COMPACTION_DEFAULTS.maxTokens },
+    descriptors, copy))
+    const rules = schemaFields(descriptor.schema, descriptor.value, descriptor.user).find(field => field.path.join('.') === 'modelPolicies')
+    if (rules !== undefined) {
+      const count = Array.isArray(value.modelPolicies) ? value.modelPolicies.length : 0
+      rows.push({
+        ...this.fieldSetting(COMPACTION, rules, copy), key: `${COMPACTION}.rules`, label: copy.settingsCompactionRules,
+        about: copy.settingsCompactionRulesAbout,
+        shown: `${count === 0 ? copy.settingsCompactionRulesNone : `${count} ${count === 1 ? copy.settingsCompactionRule : copy.settingsCompactionRuleCount}`}`
+          + ` · ${this.editText === undefined ? copy.settingsInFile : copy.settingsInEditor}`,
+      })
+    }
+    return rows
+  }
+
+  /**
+   * Pick the model that writes summaries from the harness's model catalog,
+   * after the session's own, which is the default.
+   * @param route - the stored route, kept in the list when the catalog no longer has it.
+   * @param choose - saves a route, or the session's model for empty text.
+   */
+  private async chooseSummaryModel(copy: TuiCopy, interactions: Interactions,
+    list: (signal: AbortSignal) => Promise<ModelCatalog | undefined>, route: string,
+    choose: (route: string) => Promise<void>, signal: AbortSignal): Promise<CommandResult> {
+    const catalog = await list(signal)
+    signal.throwIfAborted()
+    if (catalog === undefined) return { kind: 'error', text: copy.noModelSelection }
+    const SAME = '\u0000same'
+    const routes = new Map<string, string | undefined>(route === '' ? [] : [[route, undefined]])
+    for (const entry of catalog.entries) {
+      if (parseRoute(entry.route) !== undefined) routes.set(entry.route, namesRoute(entry.name, entry.route) ? undefined : entry.name)
+    }
+    const current = route === '' ? SAME : route
+    const picked = await interactions.choose({
+      title: `${copy.settingsTitle} › ${copy.settingsCompaction} › ${copy.settingsCompactionModel}`, initial: current,
+      choices: [
+        { value: SAME, label: copy.settingsCompactionSameModel, current: current === SAME, status: valueStatus(current === SAME, true, copy)!,
+          detail: copy.settingsCompactionModelAbout },
+        ...[...routes].map(([value, name]) => ({ value, label: value, ...name === undefined ? {} : { description: name },
+          ...value === current ? { current: true, status: valueStatus(true, false, copy)! } : {}, detail: copy.settingsCompactionModelAbout })),
+      ],
+      ...catalog.unavailable.length === 0 ? {} : { warning: `${copy.modelCatalogError}: ${catalog.unavailable.join(', ')}` },
+    }, signal)
+    signal.throwIfAborted()
+    if (picked === undefined || picked === current) return { kind: 'success' }
+    try {
+      await choose(picked === SAME ? '' : picked)
+    } catch (error) { return { kind: 'error', text: failure(copy, error) } }
+    return { kind: 'success' }
+  }
+
   /** Advanced: schema fields, sharing the Agent section's model pickers and the Routing section's router pickers. */
   private advanced(copy: TuiCopy, descriptors: readonly SettingsDescriptor[], session: PanelSession,
     interactions: Interactions): readonly Section[] {
@@ -1082,7 +1248,7 @@ export class Preferences implements RecentModels {
       ...field.overridden ? { reset: () => service.mutate(ns, [{ op: 'unset', path: field.path }]) } : {},
     }
     const fallback = (options: readonly Option[], value: unknown): readonly Option[] => options
-      .map(option => option.value === String(value) ? { ...option, description: copy.settingsDefault } : option)
+      .map(option => option.value === String(value) ? { ...option, fallback: true } : option)
     switch (field.kind) {
       case 'boolean': return {
         ...common, current: String(field.value === true), toggle: true, shown: field.value === true ? copy.settingsOn : copy.settingsOff,
@@ -1096,7 +1262,7 @@ export class Preferences implements RecentModels {
       case 'number': {
         const known = [field.value, field.default].filter((value): value is number => typeof value === 'number')
         return {
-          ...common, current: String(field.value), shown: field.value === undefined ? copy.settingsEmpty : String(field.value),
+          ...common, current: String(field.value), shown: field.value === undefined ? copy.settingsNotSet : String(field.value),
           options: fallback(known.length === 0 ? [] : steps(known.slice(1), known[0]!), field.default),
           typed: { kind: 'number', ...bounds(field) }, set: next => write(Number(next)),
         }
@@ -1192,12 +1358,43 @@ function searchable(top: readonly Section[], copy: TuiCopy): readonly Choice[] {
   return walk(top, [], [])
 }
 
-/** A setting's row. */
+/** The rail mark of a setting the user changed, and of a section holding one. */
+const CHANGED = { glyph: '\u2022' } as const
+
+/**
+ * A setting's row: marked when the user changed it, and saying under the list
+ * what it does and, once changed, what a reset returns to.
+ */
 function settingChoice(setting: Setting, copy: TuiCopy, value: string): Choice {
+  const changed = setting.reset !== undefined
+  const fallback = defaultOf(setting)
+  const detail = [
+    setting.about,
+    !changed ? undefined : fallback === undefined ? copy.settingsChanged : `${copy.settingsChanged}; ${copy.settingsDefaultIs} ${fallback}`,
+  ].filter(part => part !== undefined && part !== '').join(' · ')
   return {
     value, label: setting.label, description: setting.shown,
     ...setting.status === undefined ? {} : { status: statusOf(setting.status, copy) },
+    ...changed ? { mark: CHANGED } : {},
+    ...detail === '' ? {} : { detail },
   }
+}
+
+/** What a reset returns a setting to, as its value list names it. */
+function defaultOf(setting: Setting): string | undefined {
+  return setting.options.find(option => option.fallback === true)?.label
+}
+
+/** How many settings the user changed in a section and the sections under it. */
+function changedIn(section: Section): number {
+  return section.settings.filter(setting => setting.reset !== undefined).length
+    + (section.sections ?? []).reduce((sum, inner) => sum + changedIn(inner), 0)
+}
+
+/** A value's standing in its list: the one in force, the default, or both. */
+function valueStatus(current: boolean, fallback: boolean, copy: TuiCopy): { readonly text: string, readonly tone?: 'done' } | undefined {
+  if (current) return { text: fallback ? `${copy.currentSelection} · ${copy.settingsDefault}` : copy.currentSelection, tone: 'done' }
+  return fallback ? { text: copy.settingsDefault } : undefined
 }
 
 /** A row's status. The wait for a restart is the one a user acts on, so it is coloured. */
@@ -1212,8 +1409,10 @@ function summaryOf(section: Section): string {
 
 /** What the typed-value row says it accepts. */
 function hintOf(typed: Typed, copy: TuiCopy): string | undefined {
+  if (typed.hint !== undefined) return typed.hint
   if (typed.unit === 'ms') return copy.settingsDurationHint
   if (typed.unit === 'bytes') return copy.settingsBytesHint
+  if (typed.unit === 'tokens') return copy.settingsTokensHint
   if (typed.kind !== 'number') return undefined
   const parts = [
     typed.min === undefined ? undefined : `${copy.settingsBelowMin} ${typed.min}`,
@@ -1224,12 +1423,55 @@ function hintOf(typed: Typed, copy: TuiCopy): string | undefined {
 
 /** Why a typed number was refused. */
 function problemText(problem: 'number' | 'min' | 'max' | 'step', typed: Typed, copy: TuiCopy): string {
+  const show = (value: number): string => typed.unit === 'ms' ? formatDuration(value) : typed.unit === 'bytes' ? formatBytes(value)
+    : typed.unit === 'tokens' ? formatTokens(value) : String(value)
   switch (problem) {
     case 'number': return copy.settingsNotNumber
-    case 'min': return `${copy.settingsBelowMin} ${typed.unit === 'ms' ? formatDuration(typed.min!) : typed.unit === 'bytes' ? formatBytes(typed.min!) : typed.min}`
-    case 'max': return `${copy.settingsAboveMax} ${typed.unit === 'ms' ? formatDuration(typed.max!) : typed.unit === 'bytes' ? formatBytes(typed.max!) : typed.max}`
+    case 'min': return `${copy.settingsBelowMin} ${show(typed.min!)}`
+    case 'max': return `${copy.settingsAboveMax} ${show(typed.max!)}`
     case 'step': return `${copy.settingsNotStep} ${typed.step}`
   }
+}
+
+/** A settings value's keys, or none when it is not an object. */
+function record(value: unknown): Readonly<Record<string, unknown>> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {}
+}
+
+/** The budget a section sets in either form; tokens win, as the engine refuses both. */
+function budgetOf(section: Readonly<Record<string, unknown>>, ratioKey: string, tokensKey: string): Budget | undefined {
+  const tokens = section[tokensKey]
+  if (typeof tokens === 'number') return { tokens }
+  const ratio = section[ratioKey]
+  return typeof ratio === 'number' ? { ratio } : undefined
+}
+
+/** A budget's number in its own form. */
+const amount = (budget: Budget): number => 'ratio' in budget ? budget.ratio : budget.tokens
+
+/** A budget as an option's value, which {@link readBudget} reads back. */
+function budgetText(budget: Budget): string {
+  return 'ratio' in budget ? percent(budget.ratio) : String(budget.tokens)
+}
+
+/** A share of the context window as a reader writes it: `80%`, `12.5%`. */
+function percent(ratio: number): string {
+  return `${Math.round(ratio * 1000) / 10}%`
+}
+
+/**
+ * A typed budget: a percent of the context window, such as `75%`, or a token
+ * count, such as `150000` or `150k`.
+ * @returns the budget, or undefined for text that is neither, or out of range.
+ */
+function readBudget(text: string): Budget | undefined {
+  const share = /^\s*(\d+(?:\.\d+)?)\s*%\s*$/u.exec(text)
+  if (share !== null) {
+    const ratio = Math.round(Number(share[1]) * 10) / 1000
+    return ratio > 0 && ratio <= 1 ? { ratio } : undefined
+  }
+  const read = parseNumber(text, { min: 1 }, 'tokens')
+  return 'value' in read && Number.isInteger(read.value) ? { tokens: read.value } : undefined
 }
 
 /** A field's bounds, for its typed value. */

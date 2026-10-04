@@ -153,6 +153,7 @@
         "@deepseek-ai/dsh-file-reference-local": "workspace:^",
         "@deepseek-ai/dsh-fs": "workspace:^",
         "@deepseek-ai/dsh-home-paths": "workspace:^",
+        "@deepseek-ai/dsh-jobs": "workspace:^",
         "@deepseek-ai/dsh-llm": "workspace:^",
         "@deepseek-ai/dsh-permission-presets": "workspace:^",
         "@deepseek-ai/dsh-sandbox": "workspace:^",

@@ -32,7 +32,7 @@ import { basename, dirname, join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import xterm, { type IBuffer } from '@xterm/headless'
 
-import { COLUMN, MARKER } from '../packages/ui/src/layout.ts'
+import { COLUMN, MARKER, TREE } from '../packages/ui/src/layout.ts'
 import { toolLabel } from '../packages/ui/src/present.ts'
 import { dictionaries } from '../packages/ui/src/copy.ts'
 import { FOLD_REST } from '../packages/ui/src/activity.ts'
@@ -85,12 +85,13 @@ const SCREEN = {
 
 /**
  * Match a selected row in a list, whose marker and rail width belong to `line.tsx`.
+ * A `/settings` row the user has changed carries a `•` after the marker; it is allowed, not required.
  *
  * @param name - the row's visible name.
  * @returns a pattern matching that row while it is selected.
  */
 function picked(name: string): RegExp {
-  return new RegExp(`\\${MARKER.selected}\\s+${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`)
+  return new RegExp(`\\${MARKER.selected}\\s+(?:\u2022 )?${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`)
 }
 
 /** How often a wait re-reads a predicate between chunks of output, for predicates that also read files. */
@@ -1535,7 +1536,7 @@ scenario('live-output', 'a slow real shell command shows its output under the ru
     })
   })
 
-scenario('code-mode', 'real QuickJS scripts show readable input, nested shell activity, results and captured errors in inline and fullscreen, including narrow resize and replay',
+scenario('code-mode', 'real QuickJS scripts show readable input, nested shell calls on a tree under the script, folded once they succeed, results and captured errors in inline and fullscreen, including narrow resize and replay',
   { replayOnly: true }, async run => {
     const override = join(run.root, 'code-mode-replay.json')
     const directories: string[] = []
@@ -1581,6 +1582,8 @@ try {
 console.log(['CODE', 'NESTED', 'OK'].join('_'))
 `)
         const command = `node ${basename(directory)}/gate.mjs`
+        // The script's one call closes its tree on the corner, its own marker past it.
+        const nestedHead = `${TREE.corner} ${MARKER.action} Bash(${command})`
         const successCode = `const nested = await tools.bash({\n  command: ${JSON.stringify(command)},\n  description: "Await code gate",\n  timeoutMs: ${run.options.budget * 1000}\n});\nconsole.log(["CODE", "LOG"].join("_"));\nreturn ["CODE", "VALUE"].join("_");`
         await Bun.write(override, JSON.stringify([
           modelCall('code-success', successCode, 'Gated code'),
@@ -1652,13 +1655,16 @@ console.log(['CODE', 'NESTED', 'OK'].join('_'))
             }
             await tty.wait('finished scripts retain the nested output, value, and captured error', async () => {
               const shown = (await capture()).join('\n')
-              return ['CODE_NESTED_OK', 'CODE_LOG', 'CODE_VALUE', 'CODE_ERROR', 'Captured output:', 'CODE_CAPTURED', 'CODE_MODE_DONE'].every(value => shown.includes(value))
+              return [`${successHead}  1 ${dictionaries.en.scriptCall}`, nestedHead, 'CODE_LOG', 'CODE_VALUE', dictionaries.en.scriptError, 'CODE_ERROR',
+                'Captured output:', 'CODE_CAPTURED', 'CODE_MODE_DONE'].every(value => shown.includes(value))
             })
             const lines = screen.all()
             for (const head of [successHead, errorHead, `Bash(${command})`]) {
               tty.check(`${head} is committed once`, lines.filter(line => line.includes(head)).length === 1)
             }
-            tty.check('nested output is committed once', lines.filter(line => line.includes('CODE_NESTED_OK')).length === 1)
+            // A nested call that succeeded folds to its head; its output stays in the log, checked below.
+            const nested = lines.findIndex(line => line.includes(nestedHead))
+            tty.check('the nested call hangs from its script on the tree, folded to its head', nested >= 0 && !lines[nested + 1]!.includes('CODE_NESTED_OK'))
             const errorRow = lines.findIndex(line => line.includes('CODE_ERROR'))
             const errorCell = screen.buffer.getLine(errorRow)?.getCell(lines[errorRow]!.indexOf('CODE_ERROR'))
             tty.check('the program error has failure emphasis', Boolean(errorCell?.isFgRGB()) && errorCell?.getFgColor() === Number.parseInt(PALETTE.failed.slice(1), 16))
@@ -1707,7 +1713,7 @@ console.log(['CODE', 'NESTED', 'OK'].join('_'))
               tty.send('\x1b[1;5H', 'Ctrl+Home shows the replayed script opening')
               await tty.wait('the replayed script opening in the fullscreen viewport', async () => {
                 const shown = await viewport()
-                return [successHead, `Bash(${command})`, 'CODE_NESTED_OK', 'CODE_VALUE'].every(value => shown.includes(value))
+                return [successHead, nestedHead, 'CODE_VALUE'].every(value => shown.includes(value))
               })
               tty.send('\x1b[1;5F', 'Ctrl+End shows the replayed script error')
               await tty.wait('the replayed script error in the fullscreen viewport', async () => {
@@ -1715,7 +1721,7 @@ console.log(['CODE', 'NESTED', 'OK'].join('_'))
                 return [errorHead, 'CODE_ERROR', 'CODE_CAPTURED', 'CODE_MODE_DONE'].every(value => shown.includes(value))
               })
             } else {
-              await tty.expect(successHead, errorHead, `Bash(${command})`, 'CODE_NESTED_OK', 'CODE_VALUE', 'CODE_ERROR', 'CODE_CAPTURED')
+              await tty.expect(successHead, errorHead, nestedHead, 'CODE_VALUE', 'CODE_ERROR', 'CODE_CAPTURED')
             }
             tty.check('NO_COLOR script replay emits no foreground colour', tty.raw.match(FOREGROUND) === null)
           })
@@ -2524,7 +2530,8 @@ scenario('settings', '/settings opens on its most general section, a choice is s
         const chosen = tty.mark()
         tty.send('\r', 'choose fullscreen')
         await tty.expect(copy.settingsNextLaunch, chosen)
-        await tty.wait('the screen row under the pointer again', text => picked(copy.settingsScreen).test(text.slice(chosen)))
+        // Back on the page, the changed setting is marked between the pointer and its name.
+        await tty.wait('the screen row under the pointer again, marked changed', text => picked(`\u2022 ${copy.settingsScreen}`).test(text.slice(chosen)))
         const closed = tty.mark()
         tty.send('\x1b', 'close the panel')
         await tty.expect(`${SCREEN.prompt}${SCREEN.caret}`, closed)
@@ -2545,6 +2552,55 @@ scenario('settings', '/settings opens on its most general section, a choice is s
         await tty.expect('BAKE')
         tty.check('--screen inline overrode the saved screen', !tty.raw.includes('\u001b[?1049h'))
       })
+    } finally {
+      if (original === undefined) rmSync(settingsPath, { force: true })
+      else await Bun.write(settingsPath, original)
+    }
+  })
+
+scenario('settings-compaction', '/settings has a compaction section that offers where compaction starts as a share of the context window, and saves the choice to the compaction section',
+  { replayOnly: true },
+  async run => {
+    const copy = dictionaries.en
+    const settingsPath = join(run.home, 'settings.yaml')
+    const original = existsSync(settingsPath) ? await Bun.file(settingsPath).text() : undefined
+    const share = (percent: number) => `${percent}% ${copy.settingsOfContext}`
+    try {
+      await run.terminal('settings-compaction', [], async tty => {
+        const start = tty.mark()
+        tty.send('/settings\r', 'open the settings panel')
+        await tty.expect(`${copy.settingsTitle} › ${copy.settingsTerminal}`, copy.settingsCompaction, start)
+        // Its tab follows Terminal, Session, and Agent.
+        for (const label of [copy.settingsSession, copy.settingsAgent]) {
+          const at = tty.mark()
+          tty.send('\t', `move to the ${label} section`)
+          await tty.expect(`${copy.settingsTitle} › ${label}`, at)
+        }
+        const section = tty.mark()
+        tty.send('\t', 'move to the compaction section')
+        await tty.expect(`${copy.settingsTitle} › ${copy.settingsCompaction}`, copy.settingsCompactionAuto, share(80), share(16), section)
+        const row = tty.mark()
+        tty.send('\x1b[B', 'point at where compaction starts')
+        await tty.wait('the threshold row to be selected', text => picked(copy.settingsCompactionAt).test(text.slice(row)))
+        const values = tty.mark()
+        tty.send('\r', 'open the threshold values')
+        // The engine's own default is in force, and marked as the default.
+        await tty.wait('the default share to be selected', text => picked(share(80)).test(text.slice(values)))
+        await tty.expect(copy.settingsDefault, copy.settingsCustom, values)
+        const down = tty.mark()
+        tty.send('\x1b[B', 'point at 90%')
+        await tty.wait('90% to be selected', text => picked(share(90)).test(text.slice(down)))
+        const chosen = tty.mark()
+        tty.send('\r', 'choose 90%')
+        await tty.wait('the threshold row marked changed and showing 90%', text =>
+          picked(`\u2022 ${copy.settingsCompactionAt}`).test(text.slice(chosen)) && text.slice(chosen).includes(share(90)))
+        const closed = tty.mark()
+        tty.send('\x1b', 'close the panel')
+        await tty.expect(`${SCREEN.prompt}${SCREEN.caret}`, closed)
+        await tty.expect(`${copy.settingsSaved} `, closed)
+      })
+      const saved = await Bun.file(settingsPath).text()
+      assert(/^compaction-basic:\n(?:[ \t].*\n)*?[ \t]+thresholdRatio: 0\.9$/mu.test(saved), `the threshold was not saved:\n${saved}`)
     } finally {
       if (original === undefined) rmSync(settingsPath, { force: true })
       else await Bun.write(settingsPath, original)

@@ -132,15 +132,16 @@ function constants(list: readonly unknown[], node: (ref: unknown) => SchemaNode 
  * Read a typed number within a field's bounds.
  * @param text - what the user typed.
  * @param field - the bounds and step.
- * @param unit - `ms` accepts `500ms`, `30s`, `2m`, `1h`; `bytes` accepts `512`, `64KB`, `1MB`; a plain number is in the unit.
+ * @param unit - `ms` accepts `500ms`, `30s`, `2m`, `1h`; `bytes` accepts `512`, `64KB`, `1MB`; `tokens` accepts `8192`, `8k`, `1m`; a plain number is in the unit.
  * @returns the number, or a reason it is not one the field takes.
  */
-export function parseNumber(text: string, field: Pick<SchemaField, 'min' | 'max' | 'step'>, unit?: 'ms' | 'bytes'):
+export function parseNumber(text: string, field: Pick<SchemaField, 'min' | 'max' | 'step'>, unit?: 'ms' | 'bytes' | 'tokens'):
   { readonly value: number } | { readonly problem: 'number' | 'min' | 'max' | 'step' } {
   const match = /^\s*(-?\d+(?:\.\d+)?)\s*([a-z]*)\s*$/iu.exec(text)
   if (match === null) return { problem: 'number' }
   const scale = unit === undefined ? { '': 1 }
     : unit === 'ms' ? { '': 1, ms: 1, s: 1_000, m: 60_000, h: 3_600_000 }
+      : unit === 'tokens' ? { '': 1, k: 1_000, m: 1_000_000 }
       : { '': 1, b: 1, kb: 1_000, k: 1_000, mb: 1_000_000, m: 1_000_000, gb: 1_000_000_000, g: 1_000_000_000 }
   const factor = (scale as Record<string, number>)[match[2]!.toLowerCase()]
   if (factor === undefined) return { problem: 'number' }

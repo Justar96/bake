@@ -71,17 +71,17 @@ All settings are optional. The defaults start condensing at 80% of the routed mo
 | `compactionRetries` | `1` | Extra condensation attempts after the first when pressure remains above threshold. |
 | `maxOverflowRetries` | `1` | Maximum retries after a confirmed context-window overflow; `0` disables recovery only. |
 | `modelPolicies` | `[]` | Per-route `{ provider, model?, ...partialPolicy }` overrides; an entry without `model` covers every model on that provider route. |
-| `auto` | `true` | Enable automatic condensation and overflow recovery; set `false` for manual-only operation. |
+| `auto` | `true` | Enable automatic condensation and overflow recovery; set `false` for manual-only operation. In settings, `false` switches it off and `true` defers to the composition. |
 
 An override applies field by field: the exact `provider` + `model` entry wins over the provider-wide entry for that provider, which wins over the top-level defaults. A threshold or retention form set at a more specific level replaces the inherited form as a unit, so an exact entry's `thresholdRatio` replaces a provider-wide `thresholdTokens`.
 
 Misconfiguration fails fast: an unknown setting, a second entry for the same provider and model, a second provider-wide entry for the same provider, both threshold forms or both retention forms together, or two ratios or two absolute budgets where retention is not below the threshold all reject the plugin at load. A pair that mixes a ratio with an absolute budget, and a `thresholdTokens` above the window, fail when that model is first used, because the comparison needs the model's context size.
 
-Interfaces can ask where condensation starts for a route. `pressureThreshold(route, contextWindow)` returns the resolved `thresholdTokens`, or `floor(contextWindow × thresholdRatio)`, after the route's `modelPolicies` overrides, the same figure the automatic check compares with the token meter's measurement. It returns `undefined` with `auto: false`, for an empty provider or model, and for a capacity, `thresholdTokens`, or `retainTokens` budget the automatic check would reject with a warning instead of condensing. The TUI shows this value beside context occupancy.
+Interfaces can ask where condensation starts for a route. `pressureThreshold(route, contextWindow)` returns the resolved `thresholdTokens`, or `floor(contextWindow × thresholdRatio)`, after the route's `modelPolicies` overrides, the same figure the automatic check compares with the token meter's measurement. It returns `undefined` with `auto: false` from the composition or settings, for an empty provider or model, and for a capacity, `thresholdTokens`, or `retainTokens` budget the automatic check would reject with a warning instead of condensing. The TUI shows this value beside context occupancy.
 
 ### Changing the policy from settings.yaml
 
-With a settings provider such as `dsh-settings-file` mounted (the shipped `dsh` base mounts it), the `compaction-basic` section of `settings.yaml` overrides the composition config field by field, and `/settings` lists it under Advanced. Every field above except `auto` is accepted; `auto` decides which listeners exist, so it stays in the composition. A list replaces the composed list wholesale, so a `modelPolicies` section must repeat any composed entries it keeps. A threshold or retention form set in settings replaces the composed one, so `thresholdTokens` in settings over a composed `thresholdRatio` is not a conflict. For example, to compact every model on a `cliproxyapi` route by token count:
+With a settings provider such as `dsh-settings-file` mounted (the shipped `dsh` base mounts it), the `compaction-basic` section of `settings.yaml` overrides the composition config field by field. The TUI's `/settings` edits it in its Compaction section, where each threshold and retention takes a percent of the context window or a token count, and lists every raw field under Advanced. Every field above is accepted. `auto: false` switches automatic condensation and overflow recovery off; `auto: true` leaves the composition's switch in charge, so it cannot turn on an engine the composition keeps manual-only, such as the terminal's host engine beside each preset's own. A list replaces the composed list wholesale, so a `modelPolicies` section must repeat any composed entries it keeps. A threshold or retention form set in settings replaces the composed one, so `thresholdTokens` in settings over a composed `thresholdRatio` is not a conflict. For example, to compact every model on a `cliproxyapi` route by token count:
 
 ```yaml
 # settings.yaml
@@ -97,7 +97,7 @@ compaction-basic:
       thresholdRatio: 0.7
 ```
 
-A saved change applies at the next pressure check, without a restart. A section that fails the rules above keeps the previous policy serving and logs a warning that names the failed rule; at startup the composition policy serves until the section is repaired.
+A saved change applies at the next pressure check, without a restart. Every engine in the process follows the one section: the first to load registers the namespace, and each later one, such as an agent preset's own engine beside the host's, resolves the same user section over its own composition entry whenever the stored section changes. The engine that compacts a session therefore serves the user's policy whichever engine registered it. A section that fails the rules above keeps the previous policy serving and logs a warning that names the failed rule; at startup the composition policy serves until the section is repaired.
 
 ### What happens when condensation runs
 

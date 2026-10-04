@@ -11,7 +11,7 @@
  * @module @dsh-tui/ui/activity
  */
 
-import { callsOf, type Row } from './rows.ts'
+import { callsOf, type Row, type ToolCallRow } from './rows.ts'
 import type { TuiCopy } from './copy.ts'
 import { PAST, VERB, type Verb } from './layout.ts'
 import { verbFor } from './present.ts'
@@ -31,7 +31,8 @@ export interface Clock {
 export type Phase =
   | { readonly kind: 'thinking' }
   | { readonly kind: 'writing' }
-  | { readonly kind: 'running', readonly tool: string }
+  /** `more` counts the other calls running alongside `tool`, as a batch's do; absent for none. */
+  | { readonly kind: 'running', readonly tool: string, readonly more?: number }
 
 /** Milliseconds per shared animation beat. Moving parts advance together. */
 export const FRAME_MS = 150
@@ -170,11 +171,21 @@ export function phaseOf(live: readonly Row[], lastCommitted: Row | undefined): P
   if (last?.kind === 'assistant') return { kind: 'writing' }
   // The oldest call still without a result. A finished call can sit behind
   // it in the live region, so the newest row is not necessarily the one running.
-  const running = live.flatMap(callsOf).find(call => call.result === undefined)
-  if (running !== undefined) return { kind: 'running', tool: running.tool }
-  const unfinished = last === undefined && lastCommitted !== undefined ? callsOf(lastCommitted).find(call => call.result === undefined) : undefined
-  if (unfinished !== undefined) return { kind: 'running', tool: unfinished.tool }
-  return undefined
+  const running = live.flatMap(callsOf).filter(call => call.result === undefined)
+  if (running.length > 0) return runningPhase(running)
+  const unfinished = last === undefined && lastCommitted !== undefined ? callsOf(lastCommitted).filter(call => call.result === undefined) : []
+  return unfinished.length > 0 ? runningPhase(unfinished) : undefined
+}
+
+/**
+ * The phase of calls without a result: the oldest names it, and the rest are
+ * counted. A program waiting on its nested call is not counted beside it.
+ * @param calls - the unfinished calls, oldest first, nested dispatches before their program.
+ */
+function runningPhase(calls: readonly ToolCallRow[]): Phase {
+  const nested = new Set(calls.flatMap(call => (call.dispatches ?? []).some(child => child.result === undefined) ? [call.callId] : []))
+  const more = calls.filter(call => !nested.has(call.callId)).length - 1
+  return { kind: 'running', tool: calls[0]!.tool, ...more > 0 ? { more } : {} }
 }
 
 /**
@@ -187,7 +198,7 @@ export function phaseLabel(phase: Phase | undefined, copy: TuiCopy): string | un
   if (phase === undefined) return undefined
   if (phase.kind === 'thinking') return copy.phaseThinking
   if (phase.kind === 'writing') return copy.phaseWriting
-  return `${copy.phaseRunning} ${phase.tool}`
+  return `${copy.phaseRunning} ${phase.tool}${phase.more === undefined ? '' : ` +${phase.more}`}`
 }
 
 /**
@@ -234,8 +245,8 @@ export function lastTurn(rows: readonly Row[]): readonly Row[] | undefined {
   return rows.slice(previous + 1, end + 1)
 }
 
-/** Verbs included in the summary, edits first. */
-const COUNTED: readonly Verb[] = [VERB.edit, VERB.run, VERB.read, VERB.find, VERB.fetch]
+/** Verbs included in the summary, edits first and delegations last. */
+const COUNTED: readonly Verb[] = [VERB.edit, VERB.run, VERB.read, VERB.find, VERB.fetch, VERB.spawn]
 
 /**
  * Summarize a finished turn from the rows it committed.

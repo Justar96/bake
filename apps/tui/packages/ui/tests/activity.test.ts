@@ -9,7 +9,7 @@ import {
   RATE_MIN_MS, RATE_MIN_TOKENS, rateLabel, turnSummary,
 } from '../src/activity.ts'
 import { dictionaries } from '../src/copy.ts'
-import type { Row } from '../src/rows.ts'
+import type { Row, ToolCallRow } from '../src/rows.ts'
 
 const copy = dictionaries.en
 const call: Row = { kind: 'tool-call', callId: 'c1', tool: 'bash', input: 'ls' }
@@ -135,6 +135,16 @@ describe('phase', () => {
     expect(phaseOf([], group)).toEqual({ kind: 'running', tool: 'bash' })
   })
 
+  it('counts the calls of a batch running beside the one it names, but not a program waiting on its own call', () => {
+    const running = (callId: string, tool: string): ToolCallRow => ({ kind: 'tool-call', callId, tool, input: '' })
+    const group: Row = { kind: 'tool-group', calls: [running('a', 'subagent'), running('b', 'subagent'), running('c', 'bash')] }
+    expect(phaseOf([group], undefined)).toEqual({ kind: 'running', tool: 'subagent', more: 2 })
+    expect(phaseOf([], group)).toEqual({ kind: 'running', tool: 'subagent', more: 2 })
+    const script: Row = { ...running('s', 'run_code'), dispatches: [{ ...running('n', 'read'), rootCallId: 's' }] }
+    expect(phaseOf([script], undefined)).toEqual({ kind: 'running', tool: 'read' })
+    expect(phaseLabel({ kind: 'running', tool: 'subagent', more: 2 }, copy)).toBe('running subagent +2')
+  })
+
   it('localizes each phase', () => {
     expect(phaseLabel({ kind: 'thinking' }, copy)).toBe('thinking')
     expect(phaseLabel({ kind: 'writing' }, copy)).toBe('writing')
@@ -155,6 +165,11 @@ describe('elapsed', () => {
 describe('turn summary', () => {
   const end = (tone: 'info' | 'warn' | 'error', text = 'x'): Row => ({ kind: 'notice', placement: 'turn-end', tone, text })
   const ran = (callId: string, tool: string, ok = true): Row => ({ kind: 'tool-call', callId, tool, input: '', result: { ok, text: '' } })
+
+  it('counts delegations after the other actions, and not as commands', () => {
+    expect(turnSummary([ran('a', 'subagent'), ran('b', 'bash'), ran('c', 'subagent'), end('info')], copy, undefined).details)
+      .toBe('ran 1 · spawned 2')
+  })
 
   it('counts actions by past verb, edits first, then failures', () => {
     const rows: Row[] = [

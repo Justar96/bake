@@ -61,7 +61,7 @@ export class ReplayCursor {
       }
       const line = this.pending[this.line]!
       const rows = lineHeight(line, budget)
-      const units = line.text.length + line.marker.length + line.verb.length + (line.gutter?.length ?? 0)
+      const units = line.text.length + line.marker.length + (line.branch?.length ?? 0) + line.verb.length + (line.gutter?.length ?? 0)
       if (lines.length > 0 && (height + rows > MAX_HEIGHT || text + units > MAX_TEXT)) break
       lines.push(line)
       height += rows

@@ -1,14 +1,14 @@
 
-● Script(Inspect project files)
+● Script(Inspect project files)  2 calls
+  · 1 failed
   ⎿      const paths = ["first.ts",
          "private.ts"];
          for (const path of paths) {
          +2 more lines
          }
          return "Inspection complete";
-  done   Read(first.ts)
-  ⎿      First file loaded
-  error  Read(private.ts)
-  ⎿      Permission denied
+  ├ ● Read(first.ts)  1 line
+  └ ● Read(private.ts)
+    ⎿    Permission denied
          Script output
          Inspection complete

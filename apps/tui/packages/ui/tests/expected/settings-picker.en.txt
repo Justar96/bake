@@ -1,0 +1,12 @@
+  note   Session: session-test
+
+╭──────────────────────────────────────────────────────────╮
+│ Settings › Shell                                         │
+│ > ▌Type to filter                                        │
+│ ▸ • Command timeout               5m                     │
+│     Longest timeout a command m…  10m                    │
+│     Without a detail              x                      │
+│   How long a command runs before it is stopped, unless   │
+│   it asks for longer · Changed; default 2m               │
+│ ↑↓ choose · Enter selects · Esc cancels              1/3 │
+╰──────────────────────────────────────────────────────────╯

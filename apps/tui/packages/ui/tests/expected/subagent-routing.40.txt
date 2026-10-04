@@ -1,19 +1,19 @@
 ╭──────────────────────────────────────╮
 │  Subagents                           │
-│ ────────────────────────  0/6 done … │
+│ ────────────────  0/6 done · 6 work… │
 │ Select a child to view its session.  │
 │ The parent keeps running.            │
 │                                      │
-│   ● Review  Working · Auto           │
-│   ● Coverage  Working · Auto · caut… │
-│ ▸ ● Continue  Working · Default · n… │
-│     One-shot · continue              │
-│     deepseek-official/deepseek-v4-fl │
-│     ash                              │
-│     Difficulty 0.20 · Default ·      │
-│     needs context                    │
-│     Objective needs earlier context. │
-│     missing conversation context     │
+│   ● Review      Working · Auto       │
+│   ● Coverage    Working · Auto · ca… │
+│ ▸ ● Continue    Working · Default ·… │
+│   │ One-shot · continue              │
+│   │ deepseek-official/deepseek-v4-fl │
+│   │ ash                              │
+│   │ Difficulty 0.20 · Default ·      │
+│   │ needs context                    │
+│   │ Objective needs earlier context. │
+│   └ missing conversation context     │
 │   ● Selected model  Working · Selec… │
 │   ● Default model  Working · Default │
 │   ● Older child  Working             │

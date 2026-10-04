@@ -2,11 +2,17 @@
  * Basic replay-aware compaction backend. Its pressure policy resolves over the
  * optional `compaction-basic` user-settings section, layered above the
  * composition entry, so a changed threshold, retention, or route policy
- * reaches the next pressure check without a restart:
+ * reaches the next pressure check without a restart. Every engine in a
+ * process follows the one section: the first to load registers it, and the
+ * rest, such as each agent preset's own engine beside the host's, read the
+ * same user layer over their own entries. `auto: false` there switches
+ * automatic compaction off; it cannot switch on an engine whose composition
+ * left it off:
  *
  * ```yaml
  * # settings.yaml
  * compaction-basic:
+ *   thresholdRatio: 0.7
  *   modelPolicies:
  *     # Every model on the cliproxyapi route compacts at 150k tokens.
  *     - provider: cliproxyapi
@@ -68,6 +74,8 @@ export type {
 
 /** User-settings namespace layered over the composition entry. */
 export const COMPACTION_BASIC_SETTINGS_NAMESPACE = 'compaction-basic'
+
+export { COMPACTION_DEFAULTS } from './config.ts'
 
 /** Resolve the exact provider/model durably routed for the latest request. */
 function routedTarget(
@@ -141,8 +149,11 @@ const SETTINGS_FIELDS = {
   modelPolicies: z.array(modelPolicy),
 }
 
-/** Schema of the `compaction-basic` settings section: every policy field except `auto`. */
-const SETTINGS_SCHEMA: z<BasicCompactionConfig> = z.object(SETTINGS_FIELDS)
+/**
+ * Schema of the `compaction-basic` settings section: every policy field, and
+ * `auto`, which the user may set false to switch automatic compaction off.
+ */
+const SETTINGS_SCHEMA: z<BasicCompactionConfig> = z.object({ ...SETTINGS_FIELDS, auto: z.boolean() })
 
 /** Top-level field pairs of which one layer may set only one. */
 const EXCLUSIVE_FORMS = [
@@ -158,8 +169,10 @@ const EXCLUSIVE_FORMS = [
  * arrives as both. The form the user set replaces the composed one, as a
  * more specific layer's form does inside `modelPolicies`; both forms set in
  * the user section itself still fail. `modelPolicies` replaces wholesale, so
- * no pair inside it spans layers. The schema passes unknown keys through, so
- * `auto` in the section is the user's and is refused rather than ignored.
+ * no pair inside it spans layers. The entry carries no `auto`, so an `auto`
+ * in the section is the user's: `false` switches automatic compaction off,
+ * and `true` leaves the composition's switch in charge, since an engine the
+ * composition keeps manual-only exists so that another engine compacts.
  * @param section - composition entry overlaid by the user section.
  * @param entry - composition entry the section was layered over.
  * @param auto - composition-owned automatic-compaction switch.
@@ -171,21 +184,20 @@ function resolveSettings(
   auto: boolean,
 ): ResolvedConfig {
   const name = `settings "${COMPACTION_BASIC_SETTINGS_NAMESPACE}"`
-  if ('auto' in section) {
-    throw new Error(`${name}: "auto" is fixed by the plugin's composition config; remove it from settings`)
-  }
+  const { auto: user, ...policy } = section
+  if (user !== undefined && typeof user !== 'boolean') throw new Error(`${name}: auto must be a boolean`)
   const yielded = new Set<string>()
   for (const [first, second] of EXCLUSIVE_FORMS) {
-    if (section[first] === undefined || section[second] === undefined) continue
+    if (policy[first] === undefined || policy[second] === undefined) continue
     // Only a key the composition alone set yields: equal to the entry's value
     // while the entry lacks the other form.
-    if (entry[second] === undefined && section[first] === entry[first]) yielded.add(first)
-    else if (entry[first] === undefined && section[second] === entry[second]) yielded.add(second)
+    if (entry[second] === undefined && policy[first] === entry[first]) yielded.add(first)
+    else if (entry[first] === undefined && policy[second] === entry[second]) yielded.add(second)
   }
   const layered = Object.fromEntries(
-    Object.entries(section).filter(([key]) => !yielded.has(key)),
+    Object.entries(policy).filter(([key]) => !yielded.has(key)),
   ) as BasicCompactionConfig
-  return resolveConfig({ ...layered, auto }, name)
+  return resolveConfig({ ...layered, auto: auto && user !== false }, name)
 }
 
 /**
@@ -229,10 +241,16 @@ export class BasicCompactionEngine extends CompactionEngine {
     }, 'compaction-basic: cancel summary retry waits')
     this.resolved = resolveConfig(config)
     const { auto } = this.resolved
-    // `auto` decides which listeners exist, so it stays composition-only; the
-    // section carries every field that is read per pressure check.
+    // The composition's `auto` decides which listeners exist; the section's
+    // can only switch them off, and they read it per check.
     const { auto: _auto, ...entry } = config
     ctx.inject(['settings'], (settingsCtx) => {
+      // Another engine registered the section first: follow it, or a setting
+      // would reach only that engine, which may not be the one compacting.
+      if (settingsCtx.settings.get(COMPACTION_BASIC_SETTINGS_NAMESPACE) !== undefined) {
+        this._followSettings(settingsCtx, entry, auto)
+        return
+      }
       let source: () => BasicCompactionConfig = () => entry
       let registering = true
       settingsCtx.settings.installSection(ctx, COMPACTION_BASIC_SETTINGS_NAMESPACE, SETTINGS_SCHEMA, entry, {
@@ -266,9 +284,43 @@ export class BasicCompactionEngine extends CompactionEngine {
   }
 
   /**
+   * Resolve the section another engine registered over this engine's own
+   * entry, now and whenever the stored section changes, as the registering
+   * engine does. Losing the settings service returns to the entry.
+   * @param settingsCtx - the settings injection's fiber, which owns the listener.
+   * @param entry - this engine's composition entry, without `auto`.
+   * @param auto - this engine's composition switch.
+   */
+  private _followSettings(settingsCtx: Context, entry: BasicCompactionConfig, auto: boolean): void {
+    const ns = COMPACTION_BASIC_SETTINGS_NAMESPACE
+    const apply = (section: BasicCompactionConfig): void => {
+      try {
+        this.resolved = resolveSettings(section, entry, auto)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        this.ctx.logger.warn(`compaction-basic: keeping the previous compaction policy: ${message}`)
+        return
+      }
+      this.warnedPressureConfigTargets.clear()
+    }
+    // The sections hold scalars and lists, which the settings service's
+    // layering replaces whole, so a shallow merge layers them as it does.
+    const read = (): BasicCompactionConfig => SETTINGS_SCHEMA({
+      ...entry,
+      ...settingsCtx.settings.describe().find(descriptor => descriptor.ns === ns)?.user as Record<string, unknown> | undefined,
+    } as never)
+    apply(read())
+    settingsCtx.on('settings/document-updated', (changed) => {
+      if (changed === ns) apply(read())
+    })
+    settingsCtx.effect(() => () => { apply(entry) }, 'compaction-basic: follow the settings section')
+  }
+
+  /**
    * Resolved and validated compaction configuration: the composition entry,
    * overlaid by the `compaction-basic` settings section while a settings
-   * service is mounted. Read afresh at every pressure check and summary.
+   * service is mounted. Read afresh at every pressure check and summary;
+   * `auto` is the composition's switch unless the section turned it off.
    */
   get config(): ResolvedConfig {
     return this.resolved
@@ -293,7 +345,8 @@ export class BasicCompactionEngine extends CompactionEngine {
       { agent, signal },
       next,
     ): Promise<PreStepDecision> => {
-      if (!signal.aborted) {
+      // The settings section may have switched automatic compaction off.
+      if (!signal.aborted && this.config.auto) {
         try {
           const result = await this.compactIfNeeded(agent, 'pressure', signal)
           if (result !== null) logResult(result, 'step pressure')
@@ -325,7 +378,7 @@ export class BasicCompactionEngine extends CompactionEngine {
       { agent, failure, signal },
       next,
     ) => {
-      if (failure.code !== CONTEXT_WINDOW_EXCEEDED_CODE || signal.aborted) return next()
+      if (failure.code !== CONTEXT_WINDOW_EXCEEDED_CODE || signal.aborted || !this.config.auto) return next()
       this.overflowAgents.set(agent.session, agent)
       const target = routedTarget(agent.session)
       if (target === undefined) return next()
@@ -584,8 +637,8 @@ export class BasicCompactionEngine extends CompactionEngine {
    * Resolve the exact route's merged policy the way the `agent/pre-step`
    * listener does: `thresholdTokens` when the policy sets it, otherwise
    * `floor(contextWindow × thresholdRatio)`, the figure it compares with the
-   * token meter's measurement. `auto: false` installs no
-   * listener, and an empty route is never compacted, so both answer
+   * token meter's measurement. `auto: false`, from the composition or the
+   * settings section, stops that listener, and an empty route is never compacted, so both answer
    * `undefined`. So does a capacity, absolute threshold, or absolute retention
    * that the listener would reject with a once-per-target warning instead of
    * compacting.

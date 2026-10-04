@@ -11,6 +11,7 @@ import {
 } from '../src/project.ts'
 import { PENDING_ARGUMENTS, present, RAW_LINE_CELLS } from '../src/present.ts'
 import { dictionaries } from '../src/copy.ts'
+import { formatRow } from '../src/plain.ts'
 
 /** Build a session event literal without restating the durable envelope. */
 const event = (partial: unknown): SessionEvent => partial as SessionEvent
@@ -31,6 +32,47 @@ describe('project', () => {
       type: 'user/message',
       data: { source: { kind: 'plugin' }, content: [{ type: 'text', text: 'AGENTS.md changed' }] },
     }), bare())).toEqual([])
+  })
+
+  it('marks a call that asked to run in the background, and no other', () => {
+    const call = (args: unknown) => project(event({ type: 'tool/call',
+      data: { turn: 1, step: 1, callId: 'c1', name: 'bash', arguments: JSON.stringify(args) } }), bare())[0]
+    expect(call({ command: 'npm run dev', run_in_background: true })).toMatchObject({ kind: 'tool-call', background: true })
+    expect(call({ command: 'make', run_in_background: false })).not.toHaveProperty('background')
+    expect(call({ command: 'echo run_in_background' })).not.toHaveProperty('background')
+  })
+
+  describe('a background job\'s completion notice', () => {
+    const notice = (text: string, summary: string, plugin = 'tool-jobs') => project(event({
+      type: 'user/message',
+      data: { source: { kind: 'plugin', plugin, form: 'notice', summary }, content: [{ type: 'text', text }] },
+    }), bare())
+    const finished = (status: string) =>
+      `background job bash-2 (bash: npm run dev) finished [status: ${status}]. Read its output with job_output.`
+
+    it('closes the job with its outcome, the command\'s exit code deciding success', () => {
+      expect(notice(finished('completed, exit code: 0'), 'ignored')).toEqual([{ kind: 'job-done', id: 'bash-2', tool: 'bash',
+        label: 'npm run dev', outcome: 'done', status: 'finished · exit code: 0' }])
+      expect(notice(finished('completed, exit code: 2'), '')[0]).toMatchObject({ outcome: 'failed', status: 'failed · exit code: 2' })
+      expect(notice(finished('killed, signal: SIGTERM'), '')[0]).toMatchObject({ outcome: 'stopped', status: 'stopped · signal: SIGTERM' })
+      expect(notice(finished('failed, spawn ENOENT'), '')[0]).toMatchObject({ outcome: 'failed', status: 'failed · spawn ENOENT' })
+    })
+
+    it('falls back to the summary when the text was cut, and drops anything else', () => {
+      expect(notice('background job bash-2\n[notice truncated]', 'bash npm run dev [status: completed, exit code: 0]'))
+        .toEqual([{ kind: 'job-done', tool: 'bash', label: 'npm run dev', outcome: 'done', status: 'finished · exit code: 0' }])
+      expect(notice('background job bash-2\n[notice truncated]', 'bash npm run dev with a very long tail…')).toEqual([])
+      expect(notice(finished('completed, exit code: 0'), 'x', 'repeat-tool-reminder')).toEqual([])
+    })
+
+    it('reads in plain text as a call naming its job', () => {
+      expect(formatRow(notice(finished('completed, exit code: 0'), '')[0]!)).toBe('◌ bash [bash-2](npm run dev) finished · exit code: 0')
+    })
+
+    it('keeps controls in a label as data', () => {
+      const [row] = notice('background job bash-1 (bash: echo \u001b[2Jhi) finished [status: completed, exit code: 0].', '')
+      expect(row).toMatchObject({ label: 'echo hi' })
+    })
   })
 
   it('separates reasoning from answer text, in order', () => {

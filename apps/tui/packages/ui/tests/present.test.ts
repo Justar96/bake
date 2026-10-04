@@ -44,6 +44,16 @@ describe('verbFor', () => {
   test('falls back to a verb rather than showing an unknown tool name raw', () => {
     expect(verbFor('some_new_tool')).toBe(VERB.run)
   })
+
+  test('names the actions with an icon of their own by the same words', () => {
+    expect(verbFor('subagent')).toBe(VERB.spawn)
+    expect(verbFor('SpawnWorker')).toBe(VERB.spawn)
+    expect(verbFor('send_message')).toBe(VERB.send)
+    expect(verbFor('skill')).toBe(VERB.load)
+    // A task list is still a plan, and a name that only shares a word still runs.
+    expect(verbFor('update_todos')).toBe(VERB.plan)
+    expect(verbFor('send_email')).toBe(VERB.run)
+  })
 })
 
 describe('compactModel', () => {
@@ -500,6 +510,27 @@ describe('present, grouping a step\'s calls', () => {
     expect(lines.filter(isBlank)).toHaveLength(1)
   })
 
+  test('badges each call with its own icon and state past the quiet branch', () => {
+    const spawn = (callId: string, input: string, result?: { ok: boolean, text: string }): ToolCallRow =>
+      ({ kind: 'tool-call', callId, tool: 'subagent', input, ...result === undefined ? {} : { result } })
+    const [, head, first, , second, third] = present({ kind: 'tool-group', calls: [
+      spawn('a', 'Review', { ok: true, text: 'fine' }), spawn('b', 'Audit'), spawn('c', 'Docs', { ok: false, text: 'boom' }),
+    ] }, failures)
+    // A step of delegations is counted as such, under their icon.
+    expect([head!.marker, head!.text, head!.pulse]).toEqual([ICON.spawn, 'spawn 3', true])
+    expect([first, second, third].map(line => [line!.marker, line!.markerTone, line!.pulse, line!.badge])).toEqual([
+      [TREE.branch, 'quiet', false, { glyph: ICON.spawn, tone: 'done' }],
+      [TREE.branch, 'quiet', false, { glyph: ICON.spawn, tone: 'strong', pulse: true }],
+      [TREE.corner, 'quiet', false, { glyph: ICON.spawn, tone: 'failed' }],
+    ])
+    const settled = present({ kind: 'tool-group', calls: [spawn('a', 'Review', { ok: true, text: '' }), spawn('b', 'Audit', { ok: true, text: '' })] }, failures)
+    expect(settled[1]!.text).toBe('spawned 2')
+    // A mixed step badges each call with its own kind.
+    const mixed = present({ kind: 'tool-group', calls: [ran('a', 'make'), spawn('b', 'Review', { ok: true, text: '' })] }, failures)
+    expect(mixed.filter(line => line.badge !== undefined).map(line => line.badge!.glyph)).toEqual([ICON.other, ICON.spawn])
+    expect(mixed[1]!.marker).toBe(ICON.other)
+  })
+
   test('counts in the present tense, and blinks only the head while a call runs', () => {
     const [, head, first, second] = present({ kind: 'tool-group', calls: [
       ran('a', 'make'), { kind: 'tool-call', callId: 'b', tool: 'bash', input: 'make test' },
@@ -509,6 +540,32 @@ describe('present, grouping a step\'s calls', () => {
     expect([first!.pulse, second!.pulse, second!.text]).toEqual([false, false, 'Bash(make test)'])
     // Calls of one kind give the head that kind's icon.
     expect(head!.marker).toBe(ICON.other)
+  })
+})
+
+describe('present, background work', () => {
+  const tagged: ResultBound = { ...live, background: 'background' }
+
+  test('heads a call left running in the background with its ring and a quiet tag', () => {
+    const [, head] = present({ kind: 'tool-call', callId: 'c1', tool: 'bash', input: 'npm run dev', background: true,
+      result: { ok: true, text: 'started background job bash-1' } }, tagged)
+    expect([head!.marker, head!.markerTone, head!.text]).toEqual([ICON.background, 'done', 'Bash(npm run dev)  background'])
+    expect(head!.spans?.at(-1)).toEqual({ length: '  background'.length, tone: 'quiet' })
+    // A delegation in the background keeps its own icon.
+    const [, spawn] = present({ kind: 'tool-call', callId: 'c2', tool: 'subagent', input: 'Review', background: true }, tagged)
+    expect(spawn!.marker).toBe(ICON.spawn)
+  })
+
+  test('closes the job as the call that started it, in its outcome\'s colour', () => {
+    const done = (outcome: 'done' | 'failed' | 'stopped', status: string) =>
+      present({ kind: 'job-done', id: 'bash-1', tool: 'bash', label: 'npm run dev', outcome, status }, tagged)
+    const [blank, head] = done('done', 'finished · exit code: 0')
+    expect(isBlank(blank!)).toBe(true)
+    expect([head!.marker, head!.markerTone, head!.text]).toEqual([ICON.background, 'done', 'Bash(npm run dev)  bash-1 finished · exit code: 0'])
+    expect(head!.spans).toEqual([{ length: 4, tone: 'strong' }, { length: 13, tone: 'plain' },
+      { length: '  bash-1 finished · exit code: 0'.length, tone: 'quiet' }])
+    expect(done('failed', 'failed · exit code: 1')[1]).toMatchObject({ markerTone: 'failed', spans: expect.arrayContaining([expect.objectContaining({ tone: 'failed' })]) })
+    expect(done('stopped', 'stopped · signal: SIGTERM')[1]!.markerTone).toBe('waiting')
   })
 })
 

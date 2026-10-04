@@ -352,6 +352,33 @@ describe('terminal composer', () => {
     expect(back.onCycleThinking).not.toHaveBeenCalled()
   })
 
+  it('says under a settings page what the selected setting does, marks the changed ones, and keeps the keys still', async () => {
+    const copy = dictionaries.en
+    const changed = `${copy.settingsShellTimeoutAbout} · ${copy.settingsChanged}; ${copy.settingsDefaultIs} 2m`
+    const interaction = { id: 16, kind: 'select' as const, title: `${copy.settingsTitle} › ${copy.settingsShell}`, initial: 'setting:timeout',
+      marks: true, choices: [
+        { value: 'setting:timeout', label: copy.settingsShellTimeout, description: '5m', mark: { glyph: '•' }, detail: changed },
+        { value: 'setting:max', label: copy.settingsShellMaxTimeout, description: '10m', detail: copy.settingsShellMaxTimeoutAbout },
+        { value: 'setting:none', label: 'Without a detail', description: 'x' },
+      ] }
+    const state = props({ copy, interaction })
+    const ui = renderAt(<App {...state} />, 60, 30)
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain(copy.pickerHelp))
+    await expect(ui.lastFrame() + '\n').toMatchFileSnapshot('./expected/settings-picker.en.txt')
+    const lines = (frame: string | undefined) => (frame ?? '').split('\n')
+    const keysAt = lines(ui.lastFrame()).findIndex(line => line.includes(copy.pickerHelp))
+    // The changed setting's mark stands in the rail before its label; the others keep the rail blank.
+    expect(lines(ui.lastFrame()).find(line => line.includes(copy.settingsShellTimeout))).toMatch(/▸ • Command timeout/u)
+    expect(lines(ui.lastFrame()).find(line => line.includes('Longest timeout'))).toMatch(/│ {5}Longest timeout/u)
+    ui.stdin.write('\u001b[B')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain(copy.settingsShellMaxTimeoutAbout))
+    expect(ui.lastFrame()).not.toContain(copy.settingsChanged)
+    ui.stdin.write('\u001b[B')
+    await vi.waitFor(() => expect(ui.lastFrame()).not.toContain(copy.settingsShellMaxTimeoutAbout))
+    // A choice without a detail leaves its rows blank, so the keys do not move.
+    expect(lines(ui.lastFrame()).findIndex(line => line.includes(copy.pickerHelp))).toBe(keysAt)
+  })
+
   it('ignores Tab in a picker without tabs', async () => {
     const state = props({ interaction: { id: 14, kind: 'select', title: 'Choose model', initial: 'mock/model',
       choices: [{ value: 'mock/model', label: 'mock/model' }] } })
