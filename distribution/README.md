@@ -12,7 +12,7 @@ BAKE_RELEASE_SIGNING_KEY_FILE=~/.config/bake/release-signing-key.pem bun run rel
 bun run release:verify-local
 ```
 
-`release:pack` creates `.artifacts/bake-release/<Bake version>/bake-v<Bake version>-<platform>.tar.gz`. It requires the root and CLI versions to match, copies the declared package payload roots, licenses, changelog, and built files, then runs a frozen production Bun install in a temporary workspace and boots that staged CLI. That install uses the linker the root `bunfig.toml` sets, so the archive's `node_modules` has the hoisted layout development and CI resolve through, and the stage's group and other write permission is cleared before the system `tar` records it. Installers and `bake update` only unpack the archive; nothing installs dependencies on a user's machine. `release:assemble` hashes every archive for the current Bake version, writes `distribution/host/public/latest.json` plus the versioned archives, and signs the manifest's exact bytes into `latest.json.sig`. The local check verifies that signature, rejects an archive with any group- or world-writable entry other than a symlink, serves those exact files over HTTP, runs the platform installer into temporary directories, checks that the installed `node_modules` has the workspace's layout, and boots the installed command. Windows archives are exempt from the permission check: `tar.exe` records every entry there as writable by all, and Windows ignores those bits when it unpacks. It then publishes a release one patch newer, built from the installed files and signed by a key of its own, and updates to it with `bake update`: it checks `bake update --check`, a refused update when the newer manifest's key is not trusted, the update itself, `bake --version`, where `current` points, and that the replaced release is still on disk. These generated paths are ignored by Git.
+`release:pack` creates `.artifacts/bake-release/<Bake version>/bake-v<Bake version>-<platform>.tar.gz`. It requires the root and CLI versions to match, copies the declared package payload roots, licenses, changelog, and built files, then runs a frozen production Bun install in a temporary workspace, boots that staged CLI, and loads the terminal's runner modules. Outside Windows that install uses the linker the root `bunfig.toml` sets, so the archive's `node_modules` has the hoisted layout development and CI resolve through. Windows keeps Bun's isolated layout, where a package resolves only the dependencies it declares, so a runtime import listed only under `devDependencies` fails there alone. Then the stage's group and other write permission is cleared before the system `tar` records it. Installers and `bake update` only unpack the archive; nothing installs dependencies on a user's machine. `release:assemble` hashes every archive for the current Bake version, writes `distribution/host/public/latest.json` plus the versioned archives, and signs the manifest's exact bytes into `latest.json.sig`. The local check verifies that signature, rejects an archive with any group- or world-writable entry other than a symlink, serves those exact files over HTTP, runs the platform installer into temporary directories, checks that the installed `node_modules` has the workspace's layout, and boots the installed command. Windows archives are exempt from the permission check: `tar.exe` records every entry there as writable by all, and Windows ignores those bits when it unpacks. It then publishes a release one patch newer, built from the installed files and signed by a key of its own, and updates to it with `bake update`: it checks `bake update --check`, a refused update when the newer manifest's key is not trusted, the update itself, `bake --version`, where `current` points, and that the replaced release is still on disk. These generated paths are ignored by Git.
 
 ### The release signing key
 
@@ -25,18 +25,23 @@ Build each target on its own host: `darwin-arm64`, `darwin-x64`, `linux-arm64`, 
 The [release workflow](../.github/workflows/release.yml) builds, checks, signs, and publishes every platform from one tag:
 
 ```sh
-git switch main && git pull --ff-only
+# on the branch that carries the release's last change, made from develop
 NEXT=0.1.2                           # choose a stable version newer than the current one
 bun run release:prepare "$NEXT"       # both manifests, bun.lock, and a CHANGELOG.md section
 # write the new section in CHANGELOG.md, then:
 bun run release:preflight --offline --tag "v$NEXT"
 git add package.json apps/cli/package.json bun.lock CHANGELOG.md
 git commit -m "release: $NEXT"
+git push -u origin HEAD
+gh pr create --base develop           # merge it, then:
+gh pr create --base main --head develop
+# once that pull request merges:
+git switch main && git pull --ff-only
 git tag "v$NEXT"
-git push --atomic origin HEAD "v$NEXT"
+git push origin "v$NEXT"
 ```
 
-Run these commands on the default branch after its normal checks pass. `release:prepare` moves the `[Unreleased]` changelog entry under the new version, or leaves a placeholder the release refuses. It accepts stable versions with canonical numbers, such as `0.1.1`. The atomic push makes the release commit and tag visible together. The pushed tag starts the workflow:
+`main` takes changes only through merge-commit pull requests from `develop`, so the release commit reaches it that way and the tag goes on `main`'s merge commit. If `evals/agent-loop/versions/unreleased/` exists, rename it to `v$NEXT` in the release commit as well. `release:prepare` moves the `[Unreleased]` changelog entry under the new version, or leaves a placeholder the release refuses. It accepts stable versions with canonical numbers, such as `0.1.1`. The pushed tag starts the workflow:
 
 1. **preflight** (`release:preflight`) checks that the tag points to a commit on the default branch, names the workspace version, and has a written changelog section. It compares the version with the signed download manifest, or with GitHub's latest published release when the download service is off. The deployed unsigned `0.1.0` manifest is the sole signing exception for the first transition.
 2. **build** runs on one runner per target — `ubuntu-24.04`, `ubuntu-24.04-arm`, `macos-15`, `macos-15-intel`, and `windows-latest` — because the native modules are compiled for the host. Each runner checks it builds its target, packs the archive, installs it with the real installer and updates through it with `bake update` (`release:verify-local`, signed with a throwaway key), and, outside Windows, runs the built-profile terminal scenarios. Every platform reports even when one fails, and publishing needs all five.
