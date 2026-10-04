@@ -4,6 +4,8 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-10-04
+
 - Compaction settings reach the engine that compacts a session. Every shipped preset that compacts runs its own engine beside the host's, and a `compaction-basic` setting reached only the host's, which the terminal keeps manual-only, so a saved threshold or retention never moved when the conversation compacted. Every engine now follows the one section, and the status line's compaction mark moves with it.
 - `/settings` has a Compaction tab after Agent: automatic compaction on or off, Compact at and Keep recent as a percent of the context window or a token count (`75%`, `150k`), the summary model from the `/model` catalog or the session's own, the summary length limit, and per-model rules as JSON. Choosing one form of a threshold or retention replaces the other, and Keep recent must stay below Compact at. `auto: false` in the `compaction-basic` settings section switches automatic compaction and overflow recovery off; `/compact` still works.
 - Tool calls in a step batch keep their own state icon past the tree, so a step with a running subagent and a finished one shows both. The step head counts the calls still running (`running subagent +2`), and spawned subagents, sent messages, and loaded skills read as such in the verb column.
