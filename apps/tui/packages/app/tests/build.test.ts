@@ -31,6 +31,35 @@ it('executes bundled JSX with external production React on Node', async () => {
   }
 }, 30_000)
 
+// The release installs production dependencies only, and on Windows into
+// Bun's isolated layout, where a built entry resolves just the packages
+// `@dsh-tui/app` declares. A hoisted checkout finds an undeclared one anyway.
+it('declares every package the built entries import at runtime', async () => {
+  const app = resolve(import.meta.dirname, '..')
+  const lib = join(app, 'lib')
+  await mkdir(lib, { recursive: true })
+  const root = await mkdtemp(join(lib, 'build-test-'))
+  roots.push(root)
+  const entries = ['index.ts', 'startup.ts', 'runner-loader.ts', 'ui-loader.ts', 'syntax-loader.ts']
+  const artifacts = await bundle(entries.map(entry => join(app, 'src', entry)), root)
+  const manifest = await Bun.file(join(app, 'package.json')).json() as Record<'dependencies' | 'peerDependencies', Record<string, string>>
+  const declared = new Set([...Object.keys(manifest.dependencies), ...Object.keys(manifest.peerDependencies)])
+  const imported = new Set<string>()
+  for (const artifact of artifacts) {
+    const code = await artifact.text()
+    // Static and literal dynamic imports of a bare package specifier; minified
+    // copy strings that follow the word `import` never form a package name.
+    for (const [, specifier] of code.matchAll(/\b(?:from|import)\s*\(?\s*["']((?:@[a-z0-9][\w.-]*\/)?[a-z0-9][\w.-]*(?::[\w./-]+|\/[\w./-]+)?)["']/gi)) {
+      if (specifier!.startsWith('node:')) continue
+      const parts = specifier!.split('/')
+      imported.add(parts[0]!.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0]!)
+    }
+  }
+  expect(imported).toContain('ink')
+  expect(imported).toContain('react')
+  expect([...imported].filter(name => !declared.has(name)).sort()).toEqual([])
+}, 30_000)
+
 it('isolates Bake profiles from upstream and respects an explicit data directory', () => {
   const home = join(tmpdir(), 'bake-user')
   const custom = join(tmpdir(), 'bake-custom')

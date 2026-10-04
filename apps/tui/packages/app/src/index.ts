@@ -55,13 +55,18 @@ export function apply(ctx: Context, config: Config): void {
   const exit = ctx.get('appExit')
   if (exit === undefined) throw new Error('tui-runner: the launcher must provide ctx.appExit')
   const io: TuiIo = { in: process.stdin, out: process.stdout, err: process.stderr, exit }
-  // `run` already reported this error on stderr as soon as it was caught,
-  // before its own drains ran; this handler only picks the exit code once
-  // the whole disposal that error triggered has settled.
+  // `run` reports its own failures on stderr as soon as they are caught,
+  // before its drains run; this handler only picks the exit code once the
+  // whole disposal that error triggered has settled.
   // Keep the production runner in its own artifact: loading the Ink graph as
   // part of this lightweight plugin entry would delay every other plugin.
   const runnerModule = './runner-loader' + '.js'
-  void import(runnerModule).then(({ run }: typeof import('./runner-loader.ts')) => run(ctx, config, io)).catch((error: unknown) => {
+  void import(runnerModule).then(({ run }: typeof import('./runner-loader.ts')) => run(ctx, config, io), (error: unknown) => {
+    // `run` never started, so nothing has explained the exit yet: a release
+    // missing one of the runner's packages would otherwise quit silently.
+    io.err.write(`dsh: could not load the terminal: ${error instanceof Error ? error.message : String(error)}\n`)
+    throw error
+  }).catch((error: unknown) => {
     io.exit(error instanceof SessionInUseError ? SESSION_IN_USE_EXIT : 1)
   })
 }
