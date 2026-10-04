@@ -332,6 +332,12 @@ export const VERB = {
   find: 'find',
   fetch: 'fetch',
   plan: 'plan',
+  /** A subagent started; the step hands work down. */
+  spawn: 'spawn',
+  /** A message sent to a running subagent. */
+  send: 'send',
+  /** A skill loaded into the conversation. */
+  load: 'load',
   ask: 'ask',
   note: 'note',
   error: 'error',
@@ -346,7 +352,9 @@ export type Verb = typeof VERB[keyof typeof VERB]
  *
  * The block keeps its place and its words. Only the verb changes tense. A
  * running `run` means work in progress. A finished `ran` means done, without
- * a second row saying so. Every form fits the verb column, including its gap.
+ * a second row saying so. A form the verb column draws, as an edited file's
+ * head does, fits it with its gap; the rest appear only in a step's tally
+ * and a turn's summary, where they run in the text.
  */
 export const PAST: Readonly<Record<Verb, string>> = {
   run: 'ran',
@@ -355,6 +363,9 @@ export const PAST: Readonly<Record<Verb, string>> = {
   find: 'found',
   fetch: 'got',
   plan: 'plan',
+  spawn: 'spawned',
+  send: 'sent',
+  load: 'loaded',
   ask: 'asked',
   note: 'note',
   error: 'error',

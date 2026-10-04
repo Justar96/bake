@@ -9,13 +9,13 @@ import React from 'react'
 import { Box, Text } from 'ink'
 import stringWidth from 'string-width'
 import wrapAnsi from 'wrap-ansi'
-import type { FrameStyle } from './layout.ts'
+import { TREE, type FrameStyle } from './layout.ts'
 import type { PaletteColor } from './palette.ts'
 
 /** One logical line of a sheet. It wraps to the sheet's width when drawn. */
 export interface SheetLine {
   readonly text: string
-  /** Leading shape. Wrapped rows hang past it, so the text keeps one edge. */
+  /** Leading shape. Wrapped rows hang past it, so the text keeps one edge; a tree's stem continues down them. */
   readonly glyph?: string
   readonly glyphColor?: PaletteColor
   readonly color?: PaletteColor
@@ -77,7 +77,7 @@ export function sheetBar(done: number, total: number, cells: number, color?: Pal
 }
 
 /** Widest a sheet grows. Past this, wrapped prose is harder to read than to scroll. */
-const SHEET_WIDTH = 80
+export const SHEET_WIDTH = 80
 
 /** Below five rows a frame and title would leave no room for the content. */
 const framed = (limit: number, columns: number): boolean => limit >= 5 && columns >= 4
@@ -101,8 +101,10 @@ export function sheetRows(lines: readonly SheetLine[], limit: number, columns: n
     const pointer = line.selected === undefined ? '' : POINTER.off
     const lead = `${pointer}${line.glyph === undefined ? '' : `${line.glyph} `}`
     if (line.text === '' || line.parts !== undefined) return [{ ...line, lead, first: true, line: number }]
+    // A tree's stem runs down every row of its line, so wrapped text stays on the branch it hangs from.
+    const hang = line.glyph === TREE.stem ? `${pointer}${TREE.stem} ` : ' '.repeat(stringWidth(lead))
     return wrapAnsi(line.text, Math.max(1, width - stringWidth(lead)), { hard: true, trim: false }).split('\n')
-      .map((text, index) => ({ ...line, text, first: index === 0, line: number, lead: index === 0 ? lead : ' '.repeat(stringWidth(lead)) }))
+      .map((text, index) => ({ ...line, text, first: index === 0, line: number, lead: index === 0 ? lead : hang }))
   })
 }
 

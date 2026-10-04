@@ -46,6 +46,9 @@ export function Line({ line, budget, frame, clock, window }: {
 }): React.ReactElement {
   const style = styleOf(line.tone)
   const marker = styleOf(line.markerTone ?? line.tone)
+  const badgeStyle = line.badge === undefined ? undefined : styleOf(line.badge.tone)
+  // A tree is structure, quiet as a step's is.
+  const tree = styleOf('quiet')
   // A verb with its own tone opens an action or reports its outcome, and is
   // bold regardless of colour.
   const verb = styleOf(line.verbTone ?? line.tone)
@@ -58,7 +61,7 @@ export function Line({ line, budget, frame, clock, window }: {
   // full foreground, which a nested run cannot do under a coloured parent.
   const colored = line.tone === 'body' && line.spans !== undefined ? {} : colorOf(style, zone)
   const placed = placement(line, budget)
-  const { rail, verb: verbWidth, width } = placed
+  const { rail, branch, badge, verb: verbWidth, width } = placed
   const content = window === undefined ? placed.content : windowContent(line, budget, window.offset, window.height)
   const text = window === undefined ? placed.text : content.text
   const first = window === undefined || window.offset === 0
@@ -74,12 +77,20 @@ export function Line({ line, budget, frame, clock, window }: {
             ? <Text bold={style.bold} {...colorOf(style)}>{line.marker}</Text>
             : <Text bold={marker.bold} dimColor={marker.dim} {...colorOf(marker)}>{line.marker}</Text>}
       </Box>}
+      {branch === 0 ? null : <Box width={branch} flexShrink={0}>
+        {!first ? null : <Text bold={tree.bold} dimColor={tree.dim} {...colorOf(tree)}>{line.branch}</Text>}
+      </Box>}
+      {badge === 0 || line.badge === undefined ? null : <Box width={badge} flexShrink={0}>
+        {!first ? null : line.badge.pulse === true
+          ? <Pulse glyph={line.badge.glyph} clock={clock} />
+          : <Text bold={badgeStyle!.bold} dimColor={badgeStyle!.dim} {...colorOf(badgeStyle!)}>{line.badge.glyph}</Text>}
+      </Box>}
       {indented && verbWidth > 0
         ? (
           <Box width={verbWidth} flexShrink={0}>
             {!first ? null : line.verb === '' && line.gutter !== undefined
               // Right-align the line number against the code, one space short of it.
-              ? <Text dimColor={style.dim} {...colorOf(style)}>{`${line.gutter.padStart(COLUMN.verb - 1)} `}</Text>
+              ? <Text dimColor={style.dim} {...colorOf(style)}>{`${line.gutter.padStart(verbWidth - 1)} `}</Text>
               // A verb with its own tone is bold, except the quiet connector.
               : <Text bold={verb.bold || (line.verbTone !== undefined && line.verbTone !== 'quiet')} dimColor={verb.dim} {...colorOf(verb)}>{line.verb}</Text>}
           </Box>
@@ -156,6 +167,10 @@ function Pulse({ glyph, clock }: { readonly glyph: string, readonly clock: Clock
 
 interface Placement {
   readonly rail: number
+  /** Cells a nested call's tree glyph and its gap take after the rail; zero without one, or without room for it. */
+  readonly branch: number
+  /** Cells the badge and its gap take after the rail; zero without one, or without room for it. */
+  readonly badge: number
   readonly verb: number
   readonly width: number
   readonly content: PresentedLine
@@ -176,8 +191,15 @@ function placement(line: PresentedLine, budget: Budget): Placement {
   if (cached?.columns === budget.columns && cached.measure === budget.measure) return cached
   const rail = line.flush === true ? 0 : Math.min(COLUMN.rail, Math.max(0, budget.columns - 1))
   const indented = line.column === COLUMN.output
-  const verb = indented && budget.columns - rail > COLUMN.verb ? COLUMN.verb : 0
-  const available = Math.max(1, budget.columns - rail - verb)
+  // A nested call's branch is taken from the verb column of an indented line,
+  // so its output stays at the output column.
+  const tree = line.branch === undefined || line.flush === true ? 0 : stringWidth(line.branch) + 1
+  const branch = budget.columns - rail > tree + 1 ? tree : 0
+  const verb = indented && budget.columns - rail > COLUMN.verb ? COLUMN.verb - branch : 0
+  // The badge gives way before the text would have no cell left.
+  const cells = line.badge === undefined || line.flush === true ? 0 : stringWidth(line.badge.glyph) + 1
+  const badge = budget.columns - rail - branch - verb > cells ? cells : 0
+  const available = Math.max(1, budget.columns - rail - branch - verb - badge)
   const width = line.flush === true || line.wide === true || (indented && line.prose !== true) ? available : Math.min(available, budget.measure)
   // A narrow window has no room for the verb column. Put its label in the
   // body instead of dropping it or letting a fixed-width gutter push text off screen.
@@ -185,7 +207,7 @@ function placement(line: PresentedLine, budget: Budget): Placement {
   const content: PresentedLine = !indented || verb > 0 || (line.verb === '' && line.gutter === undefined) ? line : { ...line, text: prefix + line.text,
     spans: [{ length: prefix.length, tone: line.verbTone ?? line.tone, bold: line.verb !== '' }, ...(line.spans ?? [])],
   }
-  const placed: Placement = { rail, verb, width, content,
+  const placed: Placement = { rail, branch, badge, verb, width, content,
     text: content.literal === true ? content.text : softBreaks(content.text, width),
     columns: budget.columns, measure: budget.measure }
   placements.set(line, placed)

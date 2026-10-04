@@ -1,7 +1,7 @@
 /** Rail icons for each kind of action. */
 import { describe, expect, test } from 'bun:test'
 import stringWidth from 'string-width'
-import { ICON, iconFor } from '../src/icons.ts'
+import { callIcon, ICON, iconFor } from '../src/icons.ts'
 import { MARKER, TREE } from '../src/layout.ts'
 
 describe('ICON', () => {
@@ -16,6 +16,14 @@ describe('ICON', () => {
   test('no icon reads as a prompt, a selection, or the tree', () => {
     const reserved: readonly string[] = [MARKER.prompt, MARKER.selected, MARKER.current, MARKER.waiting, ...Object.values(TREE)]
     for (const icon of Object.values(ICON)) expect(reserved).not.toContain(icon)
+  })
+})
+
+describe('callIcon', () => {
+  test('rings a call left running in the background, unless its tool has a shape of its own', () => {
+    expect(callIcon('bash', true)).toBe(ICON.background)
+    expect(callIcon('bash')).toBe(MARKER.action)
+    expect(callIcon('subagent', true)).toBe(ICON.spawn)
   })
 })
 

@@ -1,0 +1,17 @@
+
+● Script(Find TODOs)  12 calls · 1
+  failed
+  ⎿      for (const path of paths) {
+           const text = await
+         tools.read({ path });
+         }
+  ├ ● Read(src/m0.ts)  2 lines
+  ├ ● Read(src/m1.ts)  2 lines
+  ├ +3 more calls
+  ├ ● Read(src/m5.ts)
+  │ ⎿    Permission denied
+  ├ +4 more calls
+  ├ ● Read(src/m10.ts)  2 lines
+  └ ● Read(src/m11.ts)  2 lines
+         Script output
+         ["src/m3.ts"]

@@ -5,14 +5,15 @@
  * session, a sign-in target — is this one panel, so one set of keys and one
  * layout serve them all. Top to bottom, in the order it is used. What is
  * being chosen, the filter being typed, the choices under any group
- * headings, the selected choice's levels where the prompt has them, and the
- * keys.
+ * headings, the selected choice's levels where the prompt has them, what the
+ * selected choice is for where the choices say, and the keys.
  *
  * @module @dsh-tui/ui/picker
  */
 import React, { useRef, useState } from 'react'
 import { Box, Text, useInput, usePaste, useWindowSize } from 'ink'
 import stringWidth from 'string-width'
+import wrapAnsi from 'wrap-ansi'
 import type { TuiCopy } from './copy.ts'
 import { filterChoices, scrollTo, type Match } from './choices.ts'
 import { MARKER } from './layout.ts'
@@ -73,6 +74,17 @@ export interface Choice {
   readonly searchOnly?: boolean
   /** Session-only presentation role; the selected value remains the session id. */
   readonly role?: 'session-new' | 'session-current' | 'session-saved'
+  /** A glyph in the rail before the label, such as a setting's changed mark. Drawn where the prompt has `marks`. */
+  readonly mark?: ChoiceMark
+  /** What the choice is for, drawn under the list while it is selected. */
+  readonly detail?: string
+}
+
+/** A choice's glyph in the rail before its label. */
+export interface ChoiceMark {
+  readonly glyph: string
+  /** Its colour; absent, the picker's own. */
+  readonly tone?: 'done' | 'waiting' | 'failed'
 }
 
 /** One page beside the prompt's own, reached with Tab. */
@@ -111,6 +123,11 @@ export interface ChoicePrompt {
   readonly help?: string
   /** Take up to half the screen, for a list worth scanning, instead of a menu's rows. */
   readonly tall?: boolean
+  /**
+   * Keep a rail before the labels for the choices' marks, even while none
+   * has one, so a mark appearing after a change does not shift every row.
+   */
+  readonly marks?: boolean
 }
 
 /**
@@ -159,6 +176,11 @@ const TONES: Readonly<Record<NonNullable<ChoiceStatus['tone']>, PaletteColor>> =
  * level, and a level stepped to stays chosen on every other choice that
  * offers it. Facts give way from the right on a narrow terminal before a
  * label is cut too short to tell apart.
+ *
+ * When any choice has a `detail`, the rows under the list say what the
+ * selected one is for: two where the list leaves room for them, one where it
+ * would otherwise scroll, and blank for a choice without one, so moving the
+ * selection never moves the keys.
  *
  * @param props - choices, localized labels, row limit, and the acceptance callback.
  * @param props.limit - rows for the choices, including their headings, the
@@ -261,8 +283,14 @@ export function Picker({ prompt, copy, limit, onSelect }: {
   })
 
   const leveled = prompt.levels !== undefined && prompt.choices.some(choice => (choice.levels?.items.length ?? 0) > 0)
-  // Pinned rows and the levels row come out of the list's budget, but the list keeps at least one row.
-  const rows = Math.max(1, limit - pinned.length - (leveled ? 1 : 0))
+  // Sized over the unfiltered list, so typing a filter never changes the panel's height.
+  const unfiltered = visible(prompt.choices, '')
+  const scrolled = unfiltered.filter(choice => choice.pinned !== true)
+  const detailed = prompt.choices.some(choice => choice.detail !== undefined && choice.detail !== '')
+  const spare = limit - (leveled ? 1 : 0) - (unfiltered.length - scrolled.length) - linesOf(filterChoices(scrolled, ''), scrolled.length).length
+  const detailRows = !detailed ? 0 : spare >= 2 ? 2 : 1
+  // Pinned rows, the levels row, and the detail rows come out of the list's budget, but the list keeps at least one row.
+  const rows = Math.max(1, limit - pinned.length - (leveled ? 1 : 0) - detailRows)
   const lines = linesOf(matches, listed)
   const selectedLine = selectedIndex < listed ? lines.findIndex(line => line.kind === 'choice' && line.index === selectedIndex) : -1
   let scroll = scrollTo(top.current, selectedLine, lines.length, rows)
@@ -278,12 +306,12 @@ export function Picker({ prompt, copy, limit, onSelect }: {
   const hiddenBelow = choicesIn(lines.slice(scroll.top + scroll.count))
   // Scrolled into a run, the top edge carries the heading the window cut off.
   const carried = scroll.above > 0 && windowed[0]?.kind === 'choice' ? windowed[0].match.choice.group : undefined
-  const shownPinned = pinned.slice(0, Math.max(0, limit - scroll.count - (scroll.above > 0 ? 1 : 0) - (scroll.below > 0 ? 1 : 0) - (leveled ? 1 : 0)))
+  const shownPinned = pinned.slice(0, Math.max(0, limit - scroll.count - (scroll.above > 0 ? 1 : 0) - (scroll.below > 0 ? 1 : 0) - (leveled ? 1 : 0) - detailRows))
     .map((match, index) => ({ kind: 'choice' as const, match, index: listed + index }))
   // Size columns over every choice a filter may show, not only the visible
   // ones, so the columns stay put while the list scrolls or narrows.
   const sized = visible(prompt.choices, query)
-  const glyphs = sized.some(choice => choice.role !== undefined)
+  const glyphs = prompt.marks === true || sized.some(choice => choice.role !== undefined || choice.mark !== undefined)
   const statusWidth = Math.max(0, ...sized.map(choice => stringWidth(statusOf(choice, copy)?.text ?? '')))
   const widestLabel = Math.max(1, ...sized.map(choice => stringWidth(choice.label)))
   const roomFor = (facts: readonly number[]): number => Math.max(8, columns - FRAME - MARKER_WIDTH - (glyphs ? MARKER_WIDTH : 0)
@@ -319,11 +347,25 @@ export function Picker({ prompt, copy, limit, onSelect }: {
     {leveled && <Levels label={prompt.levels!.label} none={prompt.levels!.none} width={columns - FRAME}
       {...selectedChoice?.levels === undefined ? {} : { levels: selectedChoice.levels.items }}
       {...levelOf(selectedChoice) === undefined ? {} : { value: levelOf(selectedChoice)! }} />}
+    {detailRows > 0 && <Box height={detailRows} flexDirection="column">
+      {detailLines(selectedChoice?.detail ?? '', columns - FRAME - MARKER_WIDTH, detailRows).map((line, index) =>
+        <Text key={index} dimColor wrap="truncate-end">{`${' '.repeat(MARKER_WIDTH)}${line}`}</Text>)}
+    </Box>}
     <Box flexDirection="row">
       <Box flexGrow={1} flexShrink={1}><Text dimColor wrap="truncate-end">{prompt.help ?? (prompt.tabs === undefined ? copy.pickerHelp : copy.pickerTabsHelp)}</Text></Box>
       {matches.length > 0 && <Box flexShrink={0} marginLeft={GAP}><Text dimColor>{`${selectedIndex + 1}/${matches.length}`}</Text></Box>}
     </Box>
   </Box>
+}
+
+/**
+ * A detail wrapped to the rows it has, each starting flush at the labels'
+ * edge. The last row is cut where the text runs past it.
+ */
+function detailLines(text: string, width: number, rows: number): readonly string[] {
+  if (text === '') return []
+  const lines = wrapAnsi(text, Math.max(1, width), { hard: true, trim: true }).split('\n')
+  return lines.length <= rows ? lines : [...lines.slice(0, rows - 1), lines.slice(rows - 1).join(' ')]
 }
 
 /**
@@ -476,12 +518,15 @@ function Row({ match, active, copy, columns }: {
       <Text bold color={PALETTE.asking}>{active ? MARKER.selected : MARKER.none}</Text>
     </Box>
     {glyphs && <Box width={MARKER_WIDTH} flexShrink={0}>
+      {choice.mark !== undefined && role === undefined && <Text bold
+        color={choice.mark.tone === undefined ? PALETTE.asking : TONES[choice.mark.tone]}>{choice.mark.glyph}</Text>}
       {role !== undefined && <Text
         {...role === 'session-saved' ? { dimColor: true } : { color: role === 'session-current' ? PALETTE.done : PALETTE.asking }}>
         {role === 'session-new' ? '+' : role === 'session-current' ? '●' : '○'}
       </Text>}
     </Box>}
-    <Box flexShrink={0} {...labelWidth === undefined ? { flexGrow: 1 } : { width: labelWidth }}>
+    {/* A label cut short keeps the gap before the next column. */}
+    <Box flexShrink={0} {...labelWidth === undefined ? { flexGrow: 1 } : { width: labelWidth, paddingRight: GAP }}>
       <Text bold={active} wrap="truncate-end" {...tone}>{spans(choice.label, ranges)}</Text>
     </Box>
     {factWidths.map((width, column) => {

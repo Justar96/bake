@@ -18,6 +18,7 @@ const GUTTER: Record<Row['kind'], string> = {
   'rate': '~',
   'tool-call': '⚙',
   'tool-group': '⚙',
+  'job-done': '◌',
   'tool-result': '←',
   'notice': '!',
 }
@@ -45,6 +46,9 @@ export function formatRow(row: Row): string {
     }
     case 'tool-group':
       return row.calls.map(formatRow).join('\n')
+    case 'job-done':
+      // A call's grammar, its bracket naming the job instead of the call.
+      return `${gutter} ${row.tool}${row.id === undefined ? '' : ` [${row.id}]`}(${oneLine(row.label)}) ${row.status}`
     case 'rate':
       return `${gutter} ${row.tokens} tokens · ${row.ms} ms`
     case 'tool-result':

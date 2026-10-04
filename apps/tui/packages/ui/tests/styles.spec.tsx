@@ -103,7 +103,7 @@ it('dims reasoning and metadata, and gives actions and outcomes their palette we
   await expect(frame.replaceAll('\u001b', '<ESC>') + '\n').toMatchFileSnapshot('./expected/styles.txt')
 })
 
-it('draws a step\'s tree dim and uncoloured, and puts a failed call\'s failure in its head', () => {
+it('draws a step\'s tree dim and uncoloured, badges each call with its state, and puts a failed call\'s failure in its head', () => {
   const rows: Row[] = [{ kind: 'tool-group', calls: [
     { kind: 'tool-call', callId: 'a', tool: 'bash', input: 'make', result: { ok: true, text: 'one\ntwo' } },
     { kind: 'tool-call', callId: 'b', tool: 'bash', input: 'false', result: { ok: false, text: 'boom' } },
@@ -128,10 +128,11 @@ it('draws a step\'s tree dim and uncoloured, and puts a failed call\'s failure i
     expect(frame, glyph).toContain(`\u001b[2m${glyph}`)
     expect(frame, glyph).not.toMatch(new RegExp(`\\u001b\\[38;2;[0-9;]*m(?:\\u001b\\[[0-9;]*m)*${glyph}`))
   }
-  // The failed call reads as failed without the branch's colour: its name bold and red, its argument red.
-  expect(frame).toContain(`\u001b[2m\u2514\u001b[22m \u001b[1m${rgb(PALETTE.failed)}Bash\u001b[22m(false)\u001b[39m`)
-  // The call that finished well stays plain.
-  expect(frame).toContain('\u001b[1mBash\u001b[22m(make)')
+  // Past the quiet branch, each call keeps its own marker as a badge in its outcome's colour.
+  // The failed call reads as failed in its head too: its name bold and red, its argument red.
+  expect(frame).toContain(`\u001b[2m\u2514\u001b[22m ${rgb(PALETTE.failed)}${ICON.other}\u001b[39m \u001b[1m${rgb(PALETTE.failed)}Bash\u001b[22m(false)\u001b[39m`)
+  // The call that finished well has a green badge, and its head stays plain.
+  expect(frame).toContain(`\u001b[2m\u251c\u001b[22m \u001b[1m${rgb(PALETTE.done)}${ICON.other}\u001b[39m\u001b[22m \u001b[1mBash\u001b[22m(make)`)
 })
 
 it('colours the running header\'s word, leaves the rule bare, and keeps the status line neutral until a reading needs attention', () => {
@@ -260,7 +261,7 @@ it('colours the permission boundary beside a dim label without relying on colour
   }
 })
 
-it('dims the subagents row and draws each child in its own tone on the sheet', () => {
+it('dims the subagents row but its working rail, and draws each child in its own tone on the sheet', () => {
   const env: NodeJS.ProcessEnv = { ...process.env, FORCE_COLOR: '3', COLORTERM: 'truecolor' }
   delete env.NO_COLOR
   const frame = execFileSync(process.execPath, ['--import', 'tsx/esm', '--input-type=module', '--eval', `
@@ -273,8 +274,10 @@ it('dims the subagents row and draws each child in its own tone on the sheet', (
     process.stdout.write(renderToString(React.createElement(SubagentRow, { entries, copy: dictionaries.en, columns: 100 }), { columns: 100 }));
   `], { cwd: new URL('../../../../../', import.meta.url), env, encoding: 'utf8', timeout: 20_000 })
   const rgb = (hex: string) => `\u001b[38;2;${[1, 3, 5].map(index => Number.parseInt(hex.slice(index, index + 2), 16)).join(';')}m`
-  // Dim from the first cell, a count with no identity tone; names are the sheet's.
-  expect(frame.startsWith('\u001b[2m')).toBe(true)
+  // The rail takes the running colour while a child works; the counts are dim,
+  // with no identity tone, since names are the sheet's.
+  expect(frame.startsWith(`\u001b[1m${rgb(PALETTE.running)}\u21b3`)).toBe(true)
+  expect(frame).toContain('\u001b[2mSubagents 3 \u00b7 1 working')
   for (const tone of AGENT_TONES) expect(frame).not.toContain(rgb(tone))
   const entries = ['Review', 'Check', 'Audit'].map((label, index) =>
     ({ id: label, label, state: index === 0 ? 'working' as const : 'saved' as const, detail: '', inspectable: true }))

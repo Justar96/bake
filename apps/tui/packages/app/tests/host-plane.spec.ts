@@ -23,6 +23,7 @@ import { ToolCallId, type GenerateOptions, type Message, type StreamChunk } from
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import { defineContentToolFixture } from '@deepseek-ai/dsh-tools'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'
+import { transcriptRows } from '@dsh-tui/ui'
 import { SessionController } from '../src/controller.ts'
 import { openSession } from '../src/session.ts'
 import { ScriptedModel, textResponse } from './harness.ts'
@@ -290,4 +291,28 @@ it('starts a cordis session whose inspection tools reach the host registry', asy
   const result = (await session.events()).find(event => event.type === 'tool/result')
   expect(result?.data.message.content).toEqual([expect.objectContaining({ isError: false })])
   expect(JSON.stringify(result?.data.message.content)).toContain('listTools')
+})
+
+it('lists a background shell under the input while it runs, and closes it with a job row', async () => {
+  const { model, open } = await profile()
+  const call = { type: 'tool-call' as const, id: ToolCallId('call-background-1'), name: 'bash', arguments: JSON.stringify({ command: 'sleep 1', run_in_background: true }) }
+  model.response = async function* (options: GenerateOptions): AsyncGenerator<StreamChunk> {
+    // Start the job once, then answer its result and its completion notice.
+    if (JSON.stringify(options.messages).includes(call.id)) {
+      yield* textResponse('Recorded answer')
+      return
+    }
+    yield { type: 'block-start', index: 0, blockType: 'tool-call' }
+    yield { type: 'tool-call-delta', index: 0, id: call.id, name: call.name, argumentsDelta: call.arguments }
+    yield { type: 'block-end', index: 0, block: call }
+    yield { type: 'finish', reason: { kind: 'tool-calls' } }
+  }
+  const session = await open('standard')
+  await session.turn('Start a background sleep')
+  expect(session.controller.view.background).toEqual([{ id: expect.stringMatching(/^bash-\d+$/u), tool: 'bash', label: 'sleep 1', running: true }])
+  await vi.waitFor(() => {
+    expect(transcriptRows(session.controller.view.committed)).toContainEqual(
+      expect.objectContaining({ kind: 'job-done', tool: 'bash', label: 'sleep 1', outcome: 'done' }))
+  }, { timeout: 10000 })
+  expect(session.controller.view.background.filter(entry => entry.running)).toEqual([])
 })
