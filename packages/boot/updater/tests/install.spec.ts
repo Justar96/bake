@@ -6,7 +6,7 @@ import {
   acquireLock, currentOf, detectInstall, installRelease, LAUNCH_MARKER, pointAt, PRUNE_AFTER_MS, windowsLauncher,
   type ManagedInstall, type ReleaseManifest,
 } from '../src/index.ts'
-import { managedInstall, ReleaseHost, releaseArchive, Scratch, signingKey } from './fixture.ts'
+import { managedInstall, ReleaseHost, releaseArchive, Scratch, selfCheckingCommand, signingKey } from './fixture.ts'
 
 const scratches: Scratch[] = []
 afterEach(() => { for (const scratch of scratches.splice(0)) scratch.dispose() })
@@ -93,6 +93,39 @@ describe.skipIf(process.platform === 'win32')('installRelease', () => {
     await expect(install()).rejects.toThrow('did not start; the current install is unchanged')
     expect(readlinkSync(join(root, 'current'))).toBe(running)
     expect(readdirSync(join(root, 'versions'))).toHaveLength(1)
+  })
+
+  it('does not install a release that fails its launch check, and says why', async () => {
+    const scratch = new Scratch()
+    scratches.push(scratch)
+    const key = signingKey()
+    const host = new ReleaseHost()
+    const { root, running } = managedInstall(scratch, '0.3.6', releaseArchive(scratch, '0.3.6'))
+    const failing = 'console.error("dsh: self-check: terminal runner runner-loader: Cannot find package \'ink\'"); process.exitCode = 1\n'
+    const manifest = host.publish('0.4.0', 'linux-x64', releaseArchive(scratch, '0.4.0', failing), key)
+    await expect(installRelease({
+      base: host.base, keys: [key.publicKey], fetch: host.fetch, layout: detectInstall(running) as ManagedInstall, manifest,
+      artifact: manifest.artifacts['linux-x64']!, platform: 'linux',
+    })).rejects.toThrow('The downloaded Bake 0.4.0 did not start; the current install is unchanged: '
+      + 'dsh: self-check: terminal runner runner-loader: Cannot find package \'ink\'')
+    expect(readlinkSync(join(root, 'current'))).toBe(running)
+    expect(readdirSync(join(root, 'versions'))).toEqual([running.split('/').at(-1)])
+    expect(existsSync(join(root, 'update.lock'))).toBe(false)
+  })
+
+  it('installs a release newer than the check\'s introduction once its --self-check passes', async () => {
+    const scratch = new Scratch()
+    scratches.push(scratch)
+    const key = signingKey()
+    const host = new ReleaseHost()
+    const { root, running } = managedInstall(scratch, '0.3.6', releaseArchive(scratch, '0.3.6'))
+    const manifest = host.publish('0.4.0', 'linux-x64', releaseArchive(scratch, '0.4.0', selfCheckingCommand('0.4.0')), key)
+    const result = await installRelease({
+      base: host.base, keys: [key.publicKey], fetch: host.fetch, layout: detectInstall(running) as ManagedInstall, manifest,
+      artifact: manifest.artifacts['linux-x64']!, platform: 'linux',
+    })
+    expect(readlinkSync(join(root, 'current'))).toBe(join(root, 'versions', result.directory))
+    expect(result.directory).toMatch(/^0\.4\.0-/u)
   })
 
   it('clears what an interrupted update left in staging', async () => {

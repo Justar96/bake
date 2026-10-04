@@ -4,6 +4,9 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 ## [Unreleased]
 
+- `bake update` checks that a downloaded release launches before switching to it. Instead of only asking the new command for its version, it runs the release's own `--self-check`, which loads the shipped `tui` and `headless` profiles, the agent presets' plugins, and the terminal's runner modules as a launch does, in a private temporary home it removes afterwards, with no TTY, network, or model key, within 60 seconds. A release that would not start, as Bake 0.3.5 on Windows did, is refused, and the message after `the current install is unchanged:` now names what failed to load. `release:pack` runs the same check on every archive before it ships.
+- `bake update --rollback` returns the install to the newest release still installed that is older than the current one: right after an update, the release it replaced. It takes the update's lock, runs the same launch check on that release, says which versions it moved between, and leaves `current` where it was on any failure; with no older release installed it says there is nothing to roll back to and exits 1.
+
 ## [0.3.6] - 2026-10-04
 
 - Bake 0.3.5 on Windows starts again. The terminal imported the compaction settings package, which the Windows release did not install for it, so `bake` exited at once with status 1 and printed nothing; Linux and macOS installs found the package by chance. The release now checks that every package the terminal loads is declared and resolves in the platform's installed layout before it ships.

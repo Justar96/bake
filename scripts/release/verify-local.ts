@@ -2,7 +2,8 @@
 /**
  * Exercise the actual download server, installer, and updater against a
  * temporary home: install the staged release, then publish a newer one built
- * from it and update to that with `bake update`.
+ * from it and update to that with `bake update`, then return to the staged
+ * release with `bake update --rollback`.
  */
 
 import { generateKeyPairSync, sign } from 'node:crypto'
@@ -180,14 +181,32 @@ try {
   if (!updated.includes(`Updated Bake ${manifest.version} → ${newer.version}`)) throw new Error(`Unexpected update output: ${updated}`)
   const upgraded = await run([...bake, '--version'], updateEnv)
   if (!upgraded.includes(newer.version)) throw new Error(`The command still starts ${upgraded.trim()} after updating`)
-  const current = process.platform === 'win32'
+  const currentName = (): string | undefined => process.platform === 'win32'
     ? readFileSync(join(installRoot, 'current.txt'), 'utf8').trim()
     : readlinkSync(join(installRoot, 'current')).split(/[\\/]/).at(-1)
+  const current = currentName()
   if (current !== newer.directory) throw new Error(`current names ${current}, not ${newer.directory}`)
   if (!existsSync(join(installed, 'apps/cli/lib/bin.js'))) throw new Error('The update removed the release it replaced')
   const again = await run([...bake, 'update'], updateEnv)
   if (!again.includes(`Bake ${newer.version} is up to date`)) throw new Error(`Unexpected second update: ${again}`)
   console.log(`Verified bake update ${manifest.version} → ${newer.version} from ${newer.base}`)
+
+  // Return to the release the update replaced, after its own launch check.
+  const rolledBack = await run([...bake, 'update', '--rollback'], updateEnv)
+  if (!rolledBack.includes(`Rolled back Bake ${newer.version} → ${manifest.version}`)) {
+    throw new Error(`Unexpected rollback output: ${rolledBack}`)
+  }
+  const restored = await run([...bake, '--version'], updateEnv)
+  if (!restored.includes(manifest.version)) throw new Error(`The command starts ${restored.trim()} after rolling back`)
+  const installedName = installed.split(/[\\/]/).at(-1)
+  if (currentName() !== installedName) throw new Error(`current names ${currentName()}, not ${installedName}, after rolling back`)
+  if (!existsSync(join(installRoot, 'versions', newer.directory, 'apps/cli/lib/bin.js'))) {
+    throw new Error('The rollback removed the release it left')
+  }
+  // No older release is installed, so a second rollback fails and changes nothing.
+  await run([...bake, 'update', '--rollback'], updateEnv, ROOT, 1)
+  if (currentName() !== installedName) throw new Error(`A rollback with nothing to return to moved current to ${currentName()}`)
+  console.log(`Verified bake update --rollback ${newer.version} → ${manifest.version}`)
 } finally {
   for (const server of servers) server.kill()
   await Promise.all(servers.map(server => server.exited))
