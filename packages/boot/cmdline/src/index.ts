@@ -76,6 +76,18 @@ export interface AppReady {
   onReady(listener: () => void): () => void
 }
 
+/**
+ * An unhandled rejection the launcher survived after startup, already written
+ * to its diagnostic record. Carries no stack, cause, or error properties: a
+ * surface shows these two lines' worth and nothing more.
+ */
+export interface AppRejection {
+  /** The reason's error name and message on one line, without control characters, and bounded. */
+  readonly summary: string
+  /** Absolute path of the record file holding its stack; absent when none could be written. */
+  readonly record?: string | undefined
+}
+
 declare module '@deepseek-ai/cordis' {
   interface Context {
     /** The invocation's inner arguments; provided by a launcher before the tree mounts. */
@@ -84,6 +96,18 @@ declare module '@deepseek-ai/cordis' {
     appExit?: AppExit
     /** Successful startup signal; provided by a launcher before the tree mounts. */
     appReady?: AppReady
+  }
+
+  interface Events {
+    /**
+     * A surface may show an unhandled rejection the launcher survived after
+     * startup, once per distinct error. A listener that showed it returns
+     * true; when none does, the launcher writes one warning line to stderr.
+     * @mode bail
+     * @param rejection The recorded rejection's summary and record path.
+     * @returns true once a listener has shown it to the user.
+     */
+    'app/unhandled-rejection'(rejection: AppRejection): true | undefined
   }
 }
 

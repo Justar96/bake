@@ -1,7 +1,10 @@
 /** Text transformations are independent of terminal and harness state. */
 import { describe, expect, it } from 'bun:test'
 import stringWidth from 'string-width'
-import { composerText, cursorWindow, draftRows, eraseLast, draftAt, insertText, moveCursor, moveVertically, eraseAtCursor, TAB_COLUMNS, wrapDraft } from '../src/editor.ts'
+import {
+  atomRange, composerText, cursorWindow, draftRows, eraseLast, draftAt, insertText, moveCursor, moveToRowEdge, moveVertically, eraseAtCursor,
+  offsetAt, outsideAtoms, TAB_COLUMNS, wordStop, wrapDraft,
+} from '../src/editor.ts'
 
 it('keeps pasted lines and tabs while removing terminal controls', () => {
   expect(composerText('a\r\nb\rc\t\u0003\u0000')).toBe('a\nb\nc\t')
@@ -13,6 +16,9 @@ it('keeps a narrow input window around the caret', () => {
   expect(stringWidth(window.before) + 1 + stringWidth(window.after)).toBeLessThanOrEqual(10)
   expect(cursorWindow('', '0123456789', 5).before).toBe('')
   expect(cursorWindow('', '0123456789', 5).after).toContain('\u2026')
+  // The caret covers the grapheme after it; at the end it covers nothing.
+  expect(cursorWindow('ab', 'c👩🏽‍💻d', 20)).toEqual({ before: 'ab', under: 'c', after: '👩🏽‍💻d' })
+  expect(cursorWindow('ab', '', 20)).toEqual({ before: 'ab', under: '', after: '' })
 })
 
 it('backspaces one visible grapheme', () => {
@@ -60,7 +66,7 @@ it.each(['น้ำ', 'กี้', 'ກຳ', 'ດີ', 'ភា', 'မြ', 'e\u0
 })
 
 describe('wrapDraft', () => {
-  const wrap = (text: string, cursor: number, width: number) => wrapDraft(text, cursor, width, '|')
+  const wrap = (text: string, cursor: number, width: number) => wrapDraft(text, cursor, width, cell => `|${cell}`)
 
   it('breaks after whitespace and hangs it, so no wrapped row opens with a space', () => {
     // Laid out one column narrower than the row, which keeps the caret's column.
@@ -149,7 +155,7 @@ describe('wrapDraft', () => {
 describe('moveVertically', () => {
   // The caret's row and its offset within it, drawn as wrapDraft draws them.
   const shown = (text: string, cursor: number, width: number) => {
-    const { rows, caret } = wrapDraft(text, cursor, width, '|')
+    const { rows, caret } = wrapDraft(text, cursor, width, cell => `|${cell}`)
     return `${caret}:${rows[caret]}`
   }
   const move = (text: string, cursor: number, width: number, direction: 'up' | 'down', goal?: number) =>
@@ -211,5 +217,89 @@ describe('moveVertically', () => {
     expect(draftRows(text, 40)).toBe(3)
     expect(draftRows('alpha beta gamma', 11)).toBe(2)
     expect(draftRows('', 11)).toBe(1)
+  })
+})
+
+describe('wordStop', () => {
+  /** Every stop a run of word steps makes, from one end of the text, drawn with `|`. */
+  const walk = (text: string, direction: 'left' | 'right', atoms: readonly string[] = []) => {
+    let cursor = direction === 'left' ? text.length : 0
+    const stops: string[] = []
+    for (;;) {
+      const next = wordStop(text, cursor, direction, atoms)
+      if (next === cursor) return stops
+      cursor = next
+      stops.push(`${text.slice(0, cursor)}|${text.slice(cursor)}`)
+    }
+  }
+
+  it('skips whitespace, then one word', () => {
+    expect(walk('hello  world', 'left')).toEqual(['hello  |world', '|hello  world'])
+    expect(walk('hello  world', 'right')).toEqual(['hello|  world', 'hello  world|'])
+  })
+
+  it('stops at the punctuation inside a path, and steps over a run of it whole', () => {
+    expect(walk('src/main.ts --fix', 'left')).toEqual([
+      'src/main.ts --|fix', 'src/main.ts |--fix', 'src/main.|ts --fix', 'src/main|.ts --fix',
+      'src/|main.ts --fix', 'src|/main.ts --fix', '|src/main.ts --fix',
+    ])
+    expect(walk('x  ...  y', 'right')).toEqual(['x|  ...  y', 'x  ...|  y', 'x  ...  y|'])
+  })
+
+  it('splits text without spaces at Unicode word boundaries', () => {
+    expect(walk('你好世界 hi', 'left')).toEqual(['你好世界 |hi', '你好|世界 hi', '|你好世界 hi'])
+  })
+
+  it('crosses a line break alone, so a step never leaves its line otherwise', () => {
+    expect(walk('one\ntwo', 'left')).toEqual(['one\n|two', 'one|\ntwo', '|one\ntwo'])
+    expect(walk('one\ntwo', 'right')).toEqual(['one|\ntwo', 'one\n|two', 'one\ntwo|'])
+  })
+
+  it('crosses a placeholder whole', () => {
+    const atoms = ['[Image #1]']
+    expect(walk('a [Image #1] b', 'left', atoms)).toEqual(['a [Image #1] |b', 'a |[Image #1] b', '|a [Image #1] b'])
+    expect(walk('a [Image #1] b', 'right', atoms)).toEqual(['a| [Image #1] b', 'a [Image #1]| b', 'a [Image #1] b|'])
+  })
+
+  it('treats a whole line as one word when opaque', () => {
+    expect(wordStop('sk-live_abc def', 15, 'left', [], true)).toBe(0)
+    expect(wordStop('sk-live_abc def', 0, 'right', [], true)).toBe(15)
+  })
+})
+
+describe('placeholder ranges', () => {
+  it('widens a range to every placeholder it touches, and moves a caret out of one', () => {
+    const text = 'a [Image #1] b'
+    expect(atomRange(text, 4, 13, ['[Image #1]'])).toEqual({ start: 2, end: 13 })
+    expect(atomRange(text, 0, 5, ['[Image #1]'])).toEqual({ start: 0, end: 12 })
+    expect(atomRange(text, 0, 1, ['[Image #1]'])).toEqual({ start: 0, end: 1 })
+    expect(outsideAtoms(text, 5, ['[Image #1]'])).toBe(2)
+    expect(outsideAtoms(text, 12, ['[Image #1]'])).toBe(12)
+  })
+})
+
+describe('row edges and clicks', () => {
+  // 'alpha beta' / 'gamma ' / 'delta', as wrapDraft draws it at 11 columns.
+  const text = 'alpha beta gamma delta'
+  const shown = (cursor: number) => wrapDraft(text, cursor, 11, cell => `|${cell}`).rows.join(' / ')
+
+  it('reaches the edge of the drawn row, then of the logical line', () => {
+    expect(shown(moveToRowEdge(draftAt(text, 13), 11, 'start').cursor)).toBe('alpha beta / |gamma  / delta')
+    // A wrapped row's last place is the whitespace hanging past it.
+    expect(shown(moveToRowEdge(draftAt(text, 13), 11, 'end').cursor)).toBe('alpha beta / gamma|  / delta')
+    expect(moveToRowEdge(draftAt(text, 11), 11, 'start').cursor).toBe(0)
+    expect(moveToRowEdge(draftAt(text, 16), 11, 'end').cursor).toBe(text.length)
+    expect(moveToRowEdge(draftAt('one\ntwo', 5), 40, 'start').cursor).toBe(4)
+    expect(moveToRowEdge(draftAt('one\ntwo', 4), 40, 'start').cursor).toBe(4)
+  })
+
+  it('maps a cell of a drawn row to the offset before the grapheme there', () => {
+    expect(offsetAt(text, 11, 1, 2)).toBe(13)
+    expect(offsetAt(text, 11, 0, 50)).toBe(10)
+    expect(offsetAt(text, 11, 2, 50)).toBe(text.length)
+    expect(offsetAt(text, 11, 3, 0)).toBeUndefined()
+    // Column 1 is the second cell of 你, which a click places the caret before.
+    expect(offsetAt('你好', 40, 0, 1)).toBe(0)
+    expect(offsetAt('你好', 40, 0, 2)).toBe(1)
   })
 })

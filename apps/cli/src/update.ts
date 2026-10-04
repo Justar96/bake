@@ -1,5 +1,6 @@
 /**
- * `bake update`: replace a managed install with the newest signed release.
+ * `bake update`: replace a managed install with the newest signed release,
+ * or with `--rollback`, return it to an earlier release still installed.
  * @module @deepseek-ai/dsh/update
  */
 
@@ -7,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { startProgress, type ProgressTerminal } from './progress.ts'
 import {
-  detectInstall, markLaunched, selfUpdate, UpdateError, type InstallLayout, type InstallProgress,
+  detectInstall, markLaunched, rollbackRelease, selfUpdate, UpdateError, versionDirectory, type InstallLayout, type InstallProgress,
 } from '@deepseek-ai/dsh-updater'
 
 /** `--check` exit status when a newer release is available, so a script can tell it from "up to date" (0) and failure (1). */
@@ -59,14 +60,8 @@ function megabytes(bytes: number): string {
   return (bytes / 1_000_000).toFixed(1)
 }
 
-/**
- * Run `bake update`.
- * @param check - only report; never install.
- * @param running - the running Bake version.
- * @param io - where the report goes, and the environment and layout to act on.
- * @returns the process exit status.
- */
-export async function runUpdate(check: boolean, running: string, io: {
+/** Where `bake update` reports, and the environment and layout it acts on; each is injected by tests. */
+export interface UpdateIo {
   readonly out?: (line: string) => void
   readonly err?: (line: string) => void
   readonly env?: Record<string, string | undefined>
@@ -76,7 +71,21 @@ export async function runUpdate(check: boolean, running: string, io: {
   readonly fetch?: typeof fetch
   /** Where progress is drawn; the process's stderr unless `out` or `err` is given. */
   readonly terminal?: ProgressTerminal
-} = {}): Promise<number> {
+}
+
+/** The terminal progress is drawn on: the given one, stderr for the real command, nothing when a test captures the lines. */
+function progressTerminal(io: UpdateIo): ProgressTerminal {
+  return io.terminal ?? (io.out === undefined && io.err === undefined ? process.stderr : { write() {} })
+}
+
+/**
+ * Run `bake update`.
+ * @param check - only report; never install.
+ * @param running - the running Bake version.
+ * @param io - where the report goes, and the environment and layout to act on.
+ * @returns the process exit status.
+ */
+export async function runUpdate(check: boolean, running: string, io: UpdateIo = {}): Promise<number> {
   const out = io.out ?? (line => process.stdout.write(`${line}\n`))
   const err = io.err ?? (line => process.stderr.write(`${line}\n`))
   const env = io.env ?? process.env
@@ -91,8 +100,7 @@ export async function runUpdate(check: boolean, running: string, io: {
       ...io.fetch === undefined ? {} : { fetch: io.fetch },
       onFound: (version) => {
         found = version
-        const terminal = io.terminal ?? (io.out === undefined && io.err === undefined ? process.stderr : { write() {} })
-        progress = startProgress(terminal, env, ['update', `v${running} \u2192 v${version}`])
+        progress = startProgress(progressTerminal(io), env, ['update', `v${running} \u2192 v${version}`])
         if (!progress.animated) out(`Downloading Bake ${version}…`)
       },
       onProgress: (update) => {
@@ -135,6 +143,69 @@ export async function runUpdate(check: boolean, running: string, io: {
   } catch (error) {
     progress?.fail()
     if (io.signal?.aborted === true) { err('Update cancelled; the install is unchanged.'); return 1 }
+    if (error instanceof UpdateError) { err(error.message); return 1 }
+    throw error
+  } finally {
+    progress?.stop()
+  }
+}
+
+/**
+ * Run `bake update --rollback`: make the newest installed release older than
+ * the current one current again, after its launch check passes.
+ * @param io - where the report goes, and the environment and layout to act on.
+ * @returns the process exit status: 0 once `current` moved, 1 when it did not.
+ */
+export async function runRollback(io: UpdateIo = {}): Promise<number> {
+  const out = io.out ?? (line => process.stdout.write(`${line}\n`))
+  const err = io.err ?? (line => process.stderr.write(`${line}\n`))
+  const env = io.env ?? process.env
+  const layout = io.layout ?? detectInstall(releaseRoot())
+  const version = (directory: string): string => versionDirectory(directory)?.version ?? directory
+  let progress: ReturnType<typeof startProgress> | undefined
+  let target = ''
+  try {
+    const outcome = await rollbackRelease({
+      layout,
+      ...io.signal === undefined ? {} : { signal: io.signal },
+      onFound: (from, to) => {
+        target = version(to)
+        progress = startProgress(progressTerminal(io), env, ['rollback', `v${version(from)} \u2192 v${target}`])
+        if (!progress.animated) out(`Checking Bake ${target} in ${to}…`)
+      },
+      onProgress: () => {
+        progress?.step('Verifying', 'Verified')
+        progress?.note(`v${target} starts`)
+      },
+    })
+    switch (outcome.kind) {
+      case 'unmanaged':
+        err(`This Bake runs from ${outcome.running}, which the updater does not manage.`)
+        err('Only an install the installers made keeps earlier releases to return to.')
+        return 1
+      case 'none':
+        err(`Bake ${version(outcome.current)} is the oldest release installed; there is nothing to roll back to.`)
+        return 1
+      case 'rolled-back': {
+        const from = version(outcome.from)
+        const to = version(outcome.to)
+        const sessions = `New sessions start ${to}; sessions already open keep ${from}.`
+        const again = 'bake update installs the newest release again.'
+        if (progress?.animated === true) {
+          progress.finish({ title: `Rolled back Bake ${from} \u2192 ${to}`, next: [sessions, again] })
+          return 0
+        }
+        out(`Rolled back Bake ${from} → ${to} (${outcome.from} → ${outcome.to}). ${sessions}`)
+        out(again)
+        return 0
+      }
+      default:
+        outcome satisfies never
+        throw new Error(`bake update --rollback: unhandled outcome ${JSON.stringify(outcome)}`)
+    }
+  } catch (error) {
+    progress?.fail()
+    if (io.signal?.aborted === true) { err('Rollback cancelled; the install is unchanged.'); return 1 }
     if (error instanceof UpdateError) { err(error.message); return 1 }
     throw error
   } finally {

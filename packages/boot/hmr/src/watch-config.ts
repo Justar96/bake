@@ -26,6 +26,11 @@ async function findWatchRoot(filename: string): Promise<{ filename: string; root
 
 /**
  * Watch one patch path, including missing parents, and serialize refresh callbacks.
+ *
+ * Only changes after the watch starts are reported: a file that already exists is not, so the
+ * caller applies the state it registered against. Events observed before registration completes
+ * refresh once it does; a failed registration never starts a refresh, so its cleanup cannot wait
+ * on one that the caller's queue is holding.
  * @param ctx Context that owns watcher disposal and receives refresh failures.
  * @param filename Absolute patch-file path.
  * @param options Deployment watcher options; configuration watches enable write stabilization by default.
@@ -45,16 +50,15 @@ export async function watchConfig(
   const { cwd: _cwd, ignored: _ignored, ...watchOptions } = options
   const watcher = watch(target.root, {
     // Stabilized events bypass Chokidar's lossy 50 ms change-event throttle.
-    awaitWriteFinish: true, ...watchOptions, depth: target.depth, ignoreInitial: false,
+    awaitWriteFinish: true, ...watchOptions, depth: target.depth, ignoreInitial: true,
   })
   paths.add(target.filename)
   const state = { dirty: false }
+  // Refreshes start only between successful registration and the start of disposal.
+  let live = false
   let running: Promise<void> | undefined
-  const onChange = (path: string) => {
-    const observed = resolve(path)
-    if (observed !== filename && observed !== target.filename) return
-    state.dirty = true
-    if (running) return
+  const drain = () => {
+    if (!live || running || !state.dirty) return
     running = (async () => {
       while (state.dirty) {
         state.dirty = false
@@ -68,6 +72,12 @@ export async function watchConfig(
       }
     })().finally(() => { running = undefined })
   }
+  const onChange = (path: string) => {
+    const observed = resolve(path)
+    if (observed !== filename && observed !== target.filename) return
+    state.dirty = true
+    drain()
+  }
   watcher.on('add', onChange)
   watcher.on('change', onChange)
   watcher.on('unlink', onChange)
@@ -78,13 +88,17 @@ export async function watchConfig(
     if (pending) { pending = false; ready.reject(error) } else { ctx.logger.warn(error) }
   })
   const dispose = async () => {
+    live = false
     await watcher.close()
     paths.delete(target.filename)
     if (!inTransaction()) await running
   }
   try {
     await ready.promise
-    return ctx.effect(() => dispose, 'hmr.watchConfig()')
+    const disposer = ctx.effect(() => dispose, 'hmr.watchConfig()')
+    live = true
+    drain()
+    return disposer
   } catch (error) {
     await dispose()
     throw error

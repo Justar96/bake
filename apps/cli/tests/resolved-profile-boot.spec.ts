@@ -1,5 +1,5 @@
 /** Application-owned profiles share the named profile launch lifecycle. */
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -10,9 +10,12 @@ import {
   PluginPackages, type Profile,
 } from '@deepseek-ai/dsh-app-boot'
 import { installProxyFromEnvironment } from '@deepseek-ai/dsh-http-proxy'
+import type { AppRejection } from '@deepseek-ai/dsh-cmdline'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { runProfile } from '../src/profile-boot.ts'
 
+// The process guard stays out of the test process; its readiness switch is observed instead.
+const failLoud = vi.hoisted(() => ({ tolerateRejections: vi.fn() }))
 vi.mock('@deepseek-ai/dsh-app-boot', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@deepseek-ai/dsh-app-boot')>()
   return {
@@ -20,7 +23,7 @@ vi.mock('@deepseek-ai/dsh-app-boot', async (importOriginal) => {
     boot: vi.fn(),
     createProfileResolutionGeneration: vi.fn(actual.createProfileResolutionGeneration),
     healIsolatedProfileModuleFallback: vi.fn(actual.healIsolatedProfileModuleFallback),
-    installFailLoud: vi.fn(),
+    installFailLoud: vi.fn(() => Object.assign(() => {}, failLoud)),
   }
 })
 vi.mock('@deepseek-ai/dsh-http-proxy', () => ({ installProxyFromEnvironment: vi.fn() }))
@@ -85,6 +88,8 @@ describe('runProfile with an application-owned profile', () => {
       expect(disposeProxy).toHaveBeenCalledOnce()
       expect(boot).toHaveBeenCalledTimes(stage === 'composition' ? 0 : 1)
       expect(dispose).toHaveBeenCalledTimes(stage === 'composition' ? 0 : 1)
+      // A failed startup never leaves the fatal rule for rejections.
+      expect(failLoud.tolerateRejections).not.toHaveBeenCalled()
     } finally {
       await ctx.fiber.dispose()
     }
@@ -187,6 +192,62 @@ describe('runProfile with an application-owned profile', () => {
       await shutdown.shutdown(0)
       expect(dispose).toHaveBeenCalledOnce()
       expect(disposeProxy).toHaveBeenCalledOnce()
+    } finally {
+      await ctx.fiber.dispose()
+      process.exitCode = oldExitCode
+    }
+  })
+
+  it('reports a rejection after readiness, during disposal too, without changing the exit status', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'dsh-profile-late-rejection-'))
+    homes.push(home)
+    mkdirSync(join(home, 'runtime'))
+    writeFileSync(join(home, 'runtime/package.json'), '{"name":"test-runtime","version":"1.0.0"}')
+    writeFileSync(join(home, 'package.json'), '{"name":"test-bundle","version":"1.0.0"}')
+    vi.stubEnv('DSH_HOME', home)
+    vi.stubEnv('DSH_TELEMETRY_DISABLED', '1')
+    vi.spyOn(process, 'on').mockReturnValue(process)
+    const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+    const oldExitCode = process.exitCode
+    const ctx = new Context()
+    ctx.provide('loader', { create: vi.fn() })
+    ctx.provide('hmr', {})
+    vi.mocked(installProxyFromEnvironment).mockResolvedValue(vi.fn().mockResolvedValue(undefined))
+    vi.mocked(boot).mockImplementation(async (_name, _root, _patches, setup) => {
+      await setup?.(ctx)
+      // Until boot settles, a rejection still fails the launch.
+      expect(failLoud.tolerateRejections).not.toHaveBeenCalled()
+      return ctx
+    })
+    const profile: Profile = { name: 'desktop', dir: home, patchPath: join(home, 'cordis.patch.yml'), patches: [], layers: [] }
+    try {
+      const { shutdown } = await runProfile({
+        environment: createLaunchEnvironmentSnapshot([]), profile: 'desktop', patchFiles: [], args: [],
+        resolvedProfile: { profile, installAnchor: join(home, 'runtime/package.json') },
+      })
+      expect(failLoud.tolerateRejections).toHaveBeenCalledOnce()
+      const report = failLoud.tolerateRejections.mock.calls[0]![0] as (reason: unknown) => void
+      // A surface that shows the rejection keeps it off stderr.
+      const shown: AppRejection[] = []
+      const unlisten = ctx.on('app/unhandled-rejection', (rejection) => {
+        shown.push(rejection)
+        return true
+      })
+      report(new Error('late listener rejected'))
+      const directory = join(home, 'diagnostics')
+      const [file] = readdirSync(directory)
+      expect(shown).toEqual([{ summary: 'Error: late listener rejected', record: join(directory, file!) }])
+      expect(stderr).not.toHaveBeenCalled()
+      unlisten()
+      // Once the surface has gone, during disposal, the warning line carries it.
+      ctx.on('app/shutdown', () => { report(new Error('rejected during disposal')) })
+      await shutdown.shutdown(0)
+      expect(process.exitCode).toBe(0)
+      expect(stderr).toHaveBeenCalledWith('dsh: warning: unhandled rejection after startup: Error: rejected during disposal;'
+        + ` the session continues; details in ${join(directory, file!)}\n`)
+      const messages = readFileSync(join(directory, file!), 'utf8').trim().split('\n')
+        .map(line => (JSON.parse(line) as { error: { message: string } }).error.message)
+      expect(messages).toEqual(['late listener rejected', 'rejected during disposal'])
     } finally {
       await ctx.fiber.dispose()
       process.exitCode = oldExitCode

@@ -7,7 +7,7 @@ kind: "package-library"
 
 ## Summary
 
-Use `dsh-atomic-write` to replace a file without exposing partial content or following a symlinked temporary path. Its writer lock serializes read-modify-write cycles across processes so concurrent writers cannot overwrite one another with stale state. Each replacement uses caller-selected permission bits on a fresh inode, which safely narrows an existing file's permissions. A writer that dies while holding the lock does not block later writers: on Linux and macOS the lock is held under a kernel `flock`, so the next writer recovers it without operator action. This library accepts strings; it does not provide a `cordis.yml` plugin or crash durability because it does not call `fsync`.
+Use `dsh-atomic-write` to replace a file without exposing partial content or following a symlinked temporary path. Its writer lock serializes read-modify-write cycles across processes so concurrent writers cannot overwrite one another with stale state. Each replacement uses caller-selected permission bits on a fresh inode, which safely narrows an existing file's permissions. A writer that dies while holding the lock does not block later writers: on Linux and macOS the lock is held under a kernel `flock`, so the next writer recovers it without operator action. The replacement is synced to disk before it is published and its directory after, so a crash or power loss leaves either the old or the new complete file, never an empty or partial one. This library accepts strings; it does not provide a `cordis.yml` plugin.
 
 ## Table of Contents
 
@@ -34,7 +34,7 @@ declare const text: string
 await writeFileAtomic('/home/u/.dsh/settings.yaml', text, { mode: 0o600 })
 ```
 
-Parent directories are created as needed, and readers observe either the old or the new complete content. On Windows, transient replacement interference reported as `EACCES`, `EBUSY`, or `EPERM` is retried for a bounded interval; any remaining failure removes the temporary file and leaves the target untouched.
+Parent directories are created as needed, and readers observe either the old or the new complete content. Once the call resolves, the new content survives a crash or power loss. On Windows, transient replacement interference reported as `EACCES`, `EBUSY`, or `EPERM` is retried for a bounded interval; any remaining failure removes the temporary file and leaves the target untouched.
 
 ### Coordinating writers
 
@@ -80,7 +80,7 @@ The package is built on one separation: the atomic commit owns the swap, and the
 
 ### Write path
 
-`writeFileAtomic` writes a random-suffix sibling opened with exclusive create (`wx`), then renames it over the target. The exclusive open refuses to follow a symlink planted at a guessable temp path; the same-directory sibling keeps the rename on one filesystem; and the rename replaces a symlinked target itself instead of writing through to its referent. A Windows retry keeps the same complete sibling and uses bounded exponential backoff, so temporary use of the target by software outside the cooperative writer lock cannot turn a safe replacement into an immediate failure; the archived [retry decision record](../../../.agents/notes/archived/bug-fix/2026-08-29-windows-atomic-replace-retry.md) documents the original rationale and rejected alternatives.
+`writeFileAtomic` writes a random-suffix sibling opened with exclusive create (`wx`), syncs it with `fsync`, then renames it over the target and syncs the parent directory. Syncing the content first means a crash can never publish a renamed file whose data never reached the disk; syncing the directory makes the rename itself survive a power loss. A failure before the rename removes the sibling and leaves the target untouched. A directory sync that fails with an I/O error is reported even though the replacement is already visible, because it may not survive a crash; a filesystem or directory permission that cannot sync the directory at all, such as some FUSE and network mounts, leaves the rename as durable as that filesystem allows. The exclusive open refuses to follow a symlink planted at a guessable temp path; the same-directory sibling keeps the rename on one filesystem; and the rename replaces a symlinked target itself instead of writing through to its referent. A Windows retry keeps the same complete sibling and uses bounded exponential backoff, so temporary use of the target by software outside the cooperative writer lock cannot turn a safe replacement into an immediate failure; the archived [retry decision record](../../../.agents/notes/archived/bug-fix/2026-08-29-windows-atomic-replace-retry.md) documents the original rationale and rejected alternatives.
 
 `withFileLock` serializes writers through a `<filename>.lock` sibling created with `wx`. `EEXIST` identifies contention directly; `EPERM` does so only when a fresh `lstat` confirms the lock path exists, covering Windows exclusive-create behavior without hiding an unrelated permission failure. Contention backs off exponentially and fails when the per-call `waitMs` deadline (default two seconds) passes, with the same error in every configuration.
 
@@ -126,7 +126,7 @@ Nothing here enters a request prefix, so provider cache reuse is unaffected.
 
 These limits define where the package is not the right tool. They are current package constraints, not a task backlog.
 
-- **Atomic, not durable** — no `fsync` of the file or its directory, so after a crash the rename may be observed unwound. The file-backed stores here re-read and republish on boot, keeping durability the caller's policy.
+- **Windows syncs the content but not the rename** — Node cannot open a directory there, so a power loss just after a write may still find the previous complete file, never a partial one. A filesystem that refuses to sync directories behaves the same way.
 - **String content only** — no `Buffer` or stream form until a consumer needs one.
 - **Automatic lock recovery needs the native `flock`** — on Windows, without the native binding, or on a filesystem without `flock`, an orphaned lock sibling blocks writers until an operator removes it. So does an empty sibling left by a writer that died between creating the lock and writing its PID.
 - **Recovery assumes one host per lock directory** — a PID record from the earlier protocol carries no host, so a contender judges it by this host's process table. A live earlier-release writer on another host or in another PID namespace that shares the directory could lose its lock. A kernel-held record from another host is never recovered, including after the local hostname changes.
@@ -138,6 +138,6 @@ These limits define where the package is not the right tool. They are current pa
 <details>
 <summary>Working context for maintainers — click to expand</summary>
 
-A durability-replacement that `fsync`s the file and parent directory and preserves owner-only permissions on Windows remains open (tracked as `settings-atomic-durability` in source).
+Preserving owner-only permissions on Windows, where `mode` sets only the read-only attribute, remains open (tracked as `settings-windows-owner-only` in source).
 
 </details>

@@ -25,19 +25,40 @@ export class Scratch {
 }
 
 /**
- * A release tree whose command prints `printed` for `--version`, packed as
- * the release archive is.
+ * A release tree whose command prints `printed` for any argument, which
+ * answers both `--version` and `--self-check`, packed as the release archive is.
+ * @param command - the command's source instead, for a release that fails its check.
  * @returns the archive's bytes.
  */
-export function releaseArchive(scratch: Scratch, printed: string): Buffer {
-  const tree = mkdtempSync(join(scratch.root, 'tree-'))
-  mkdirSync(join(tree, 'apps/cli/lib'), { recursive: true })
-  writeFileSync(join(tree, 'apps/cli/lib/bin.js'), `console.log(${JSON.stringify(printed)})\n`)
+export function releaseArchive(scratch: Scratch, printed: string, command = `console.log(${JSON.stringify(printed)})\n`): Buffer {
+  const tree = releaseTree(mkdtempSync(join(scratch.root, 'tree-')), command)
   mkdirSync(join(tree, 'bin'))
   writeFileSync(join(tree, 'bin/bake'), '#!/bin/sh\n')
   const archive = join(scratch.root, `archive-${printed}-${Math.random().toString(16).slice(2)}.tar.gz`)
   execFileSync('tar', ['-czf', archive, '-C', tree, '.'])
   return readFileSync(archive)
+}
+
+/**
+ * Lay out a release directory whose command, `apps/cli/lib/bin.js`, is `command`.
+ * @returns the directory.
+ */
+export function releaseTree(directory: string, command: string): string {
+  mkdirSync(join(directory, 'apps/cli/lib'), { recursive: true })
+  writeFileSync(join(directory, 'apps/cli/lib/bin.js'), command)
+  return directory
+}
+
+/**
+ * A command that prints `version` for `--self-check` and fails anything else
+ * the way a launcher without the flag does, so a test sees which check ran.
+ */
+export function selfCheckingCommand(version: string): string {
+  return [
+    `if (process.argv[2] === '--self-check') console.log('Bake ${version} self-check passed')`,
+    'else { console.error(\'error: --profile <name> is required\'); process.exitCode = 1 }',
+    '',
+  ].join('\n')
 }
 
 /** An in-memory release host: `latest.json`, its signature, and archives. */

@@ -13,10 +13,10 @@ import { PALETTE } from '../src/palette.ts'
 import { statusFields, type StatusInput } from '../src/status-line.ts'
 import { FOLD_REST, SPINNER_REST } from '../src/activity.ts'
 import stringWidth from 'string-width'
+import { CARET, markCaret } from '../../../tests/caret.ts'
 
-const strip = (text: string): string => text.replace(/\u001B\[[0-9;]*m/g, '')
-/** The composer's drawn caret, the one glyph in the draft that is not ASCII. */
-const CARET = '\u258c'
+/** Plain text, with the caret's reverse-video cell marked as `CARET`. */
+const strip = (text: string): string => markCaret(text).replace(/\u001B\[[0-9;]*m/g, '')
 const at80 = budgetFor({ columns: 80, rows: 24 })
 /** Every result line drawn, so these tests assert placement and nothing else. */
 const shown: ResultBound = { lines: Number.MAX_SAFE_INTEGER, unit: 'lines', more: 'more lines' }
@@ -531,11 +531,12 @@ describe('Composer width and wrapping', () => {
 
   it('keeps every row in place as the caret moves beside the hint', () => {
     const text = 'word 你好 '.repeat(20).trim()
-    const rows = (cursor: number): string[] => strip(renderToString(
+    // The caret is only an attribute on a cell, so without styling every row reads the same.
+    const rows = (cursor: number): string[] => renderToString(
       <Composer
         columns={80} marker={MARKER.prompt} before={text.slice(0, cursor)} after={text.slice(cursor)} placeholder="Ask"
         hint="Enter sends"
-      />, { columns: 80 })).split('\n').map(row => row.replace('\u258c', '').replace('Enter sends', '').trimEnd())
+      />, { columns: 80 }).replace(/\u001B\[[0-9;]*m/g, '').split('\n').map(row => row.replace('Enter sends', '').trimEnd())
     const expected = rows(text.length)
     for (const cursor of [0, 7, 40, 101]) expect(rows(cursor)).toEqual(expected)
   })
@@ -676,7 +677,8 @@ describe('Composer window markers', () => {
     const top = draw(0)
     expect(top[0]).toMatch(/^> ▌line 0 +Enter sends$/)
     expect(top.at(-1)).toMatch(/^v line 4 +\+7 below$/)
-    for (const row of top) expect(stringWidth(row)).toBeLessThanOrEqual(80)
+    // The mark stands before the character the caret covers and takes no cell on screen.
+    for (const row of top) expect(stringWidth(row.replace(CARET, ''))).toBeLessThanOrEqual(80)
   })
 
   it('moves the window only when the caret would leave it', async () => {

@@ -65,6 +65,7 @@ const FIXTURE: Record<string, string> = {
     "import { Context } from '../../../vendor/cordis/src/context.ts'",
     'declare const app: { current?: Context }',
     "void app.current?.parallel('app/shutdown')",
+    "void app.current?.bail('app/bail-event')",
     '',
   ].join('\n'),
 }
@@ -90,6 +91,9 @@ function dispatchersOf(pkgs: readonly string[], event: string): string[] {
 describe('event relation call-site indexing', () => {
   it('finds a launcher dispatch through an optional Context receiver', () => {
     expect(dispatchersOf(['cli'], 'app/shutdown')).toEqual(['cli'])
+  })
+  it('finds a bail dispatch', () => {
+    expect(dispatchersOf(['cli'], 'app/bail-event')).toEqual(['cli'])
   })
   it('recovers a proven-local helper through the single-file fast path', () => {
     expect(dispatchersOf(['pkga', 'pkgb'], 'pkga/local-event')).toEqual(['pkga'])

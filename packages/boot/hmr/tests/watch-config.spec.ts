@@ -53,6 +53,25 @@ async function eventually(test: () => boolean, message: string): Promise<void> {
   }
 }
 
+/**
+ * Create a watched file until the watcher reports it. On macOS, Node runs a
+ * directory watch on an FSEvents stream that libuv starts on another thread
+ * after chokidar's `ready`, and an event before the stream runs is lost. Each
+ * retry removes the file and creates it again, so the event observed is still
+ * a creation. Retries wait longer than `awaitWriteFinish` holds an addition.
+ */
+async function createUntilObserved(create: () => void, remove: () => void, test: () => boolean, message: string): Promise<void> {
+  const deadline = Date.now() + 15_000
+  for (let attempt = 0; ; attempt += 1) {
+    if (attempt > 0) remove()
+    create()
+    const retry = Date.now() + 3_000
+    while (!test() && Date.now() < Math.min(retry, deadline)) await new Promise(resolve => setTimeout(resolve, 10))
+    if (test()) return
+    if (Date.now() >= deadline) throw new Error(message)
+  }
+}
+
 describe('HMR exact config paths', () => {
   afterEach(() => {
     for (const root of hmrRoots.splice(0)) rmSync(root, { recursive: true, force: true })
@@ -109,7 +128,7 @@ describe('HMR exact config paths', () => {
     }
   })
 
-  it('observes add, change, and unlink outside its module roots', { timeout: 20_000 }, async () => {
+  it('observes add, change, and unlink outside its module roots', { timeout: 45_000 }, async () => {
     const dir = mkdtempSync(join(tmpdir(), 'dsh-hmr-config-'))
     hmrRoots.push(dir)
     const filename = join(dir, 'plugins.yml')
@@ -125,18 +144,19 @@ describe('HMR exact config paths', () => {
         }
       })
 
-      writeFileSync(filename, 'one', { flag: 'wx' })
-      await eventually(() => observed.includes('one'), 'HMR did not observe config creation')
+      await createUntilObserved(() => { writeFileSync(filename, 'one', { flag: 'wx' }) }, () => { unlinkSync(filename) },
+        () => observed.includes('one'), 'HMR did not observe config creation')
       writeFileSync(filename, 'two')
       await eventually(() => observed.includes('two'), 'HMR did not observe config change')
       unlinkSync(filename)
-      await eventually(() => observed.includes('missing'), 'HMR did not observe config removal')
+      // A retried creation's own removal may report late; only one after the change counts.
+      await eventually(() => observed.lastIndexOf('missing') > observed.indexOf('two'), 'HMR did not observe config removal')
     } finally {
       await ctx.fiber.dispose()
     }
   })
 
-  it('observes creation when the config parent did not exist at registration', { timeout: 20_000 }, async () => {
+  it('observes creation when the config parent did not exist at registration', { timeout: 30_000 }, async () => {
     const root = mkdtempSync(join(tmpdir(), 'dsh-hmr-config-'))
     hmrRoots.push(root)
     const dir = join(root, 'later')
@@ -147,9 +167,8 @@ describe('HMR exact config paths', () => {
       await watchConfig(ctx, filename, {}, () => {
         observed.push(readFileSync(filename, 'utf8'))
       })
-      mkdirSync(dir)
-      writeFileSync(filename, 'created')
-      await eventually(() => observed.includes('created'), 'HMR did not observe config creation under a new parent')
+      await createUntilObserved(() => { mkdirSync(dir); writeFileSync(filename, 'created') }, () => { rmSync(dir, { recursive: true }) },
+        () => observed.includes('created'), 'HMR did not observe config creation under a new parent')
     } finally {
       await ctx.fiber.dispose()
     }
@@ -211,6 +230,65 @@ describe('HMR exact config paths', () => {
     await disposal
     expect(maxActive).toBe(1)
     expect(calls).toBe(2)
+  })
+
+  it('does not report a file that exists when the watch starts', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dsh-hmr-existing-'))
+    hmrRoots.push(dir)
+    const filename = join(dir, 'plugins.yml')
+    writeFileSync(filename, 'loaded')
+    const ctx = await bootHmr(dir)
+    onTestFinished(() => ctx.fiber.dispose())
+    const refresh = vi.fn()
+    // Chokidar reports its initial scan before `ready`, so registration has seen it.
+    await watchConfig(ctx, filename, {}, refresh)
+    expect(refresh).not.toHaveBeenCalled()
+  })
+
+  it('refreshes once for an event observed while registration completes', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dsh-hmr-registering-'))
+    hmrRoots.push(dir)
+    const filename = join(dir, 'plugins.yml')
+    const ctx = await bootHmr(dir)
+    onTestFinished(() => ctx.fiber.dispose())
+    const watcher = new FSWatcher()
+    const created = Promise.withResolvers<undefined>()
+    const previousFactory = configWatch.create
+    onTestFinished(() => { configWatch.create = previousFactory })
+    configWatch.create = () => { created.resolve(undefined); return watcher }
+    const refresh = vi.fn()
+    const registration = watchConfig(ctx, filename, {}, refresh)
+    await created.promise
+    watcher.emit('add', filename)
+    watcher.emit('change', filename)
+    expect(refresh).not.toHaveBeenCalled()
+    watcher.emit('ready')
+    await registration
+    expect(refresh).toHaveBeenCalledOnce()
+  })
+
+  it('fails registration on a disposed context without waiting for an observed event', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dsh-hmr-interrupted-'))
+    hmrRoots.push(dir)
+    const filename = join(dir, 'plugins.yml')
+    const fiber = new Context().plugin(() => {})
+    await fiber
+    const watcher = new FSWatcher()
+    const created = Promise.withResolvers<undefined>()
+    const previousFactory = configWatch.create
+    onTestFinished(() => { configWatch.create = previousFactory })
+    configWatch.create = () => { created.resolve(undefined); return watcher }
+    // HMR holds a refresh queued before application readiness until its own disposal runs.
+    const held = Promise.withResolvers<undefined>()
+    onTestFinished(() => { held.resolve(undefined) })
+    const refresh = vi.fn(() => held.promise)
+    const registration = watchConfig(fiber.ctx, filename, {}, refresh)
+    await created.promise
+    watcher.emit('add', filename)
+    await fiber.dispose()
+    watcher.emit('ready')
+    await expect(registration).rejects.toThrow('cannot create effect on inactive context')
+    expect(refresh).not.toHaveBeenCalled()
   })
 
   it('observes consecutive writes after the previous configuration was applied', async () => {

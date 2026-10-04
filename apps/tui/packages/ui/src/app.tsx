@@ -26,11 +26,11 @@ import { Installing } from './installing.tsx'
 import type { InstallStep } from './install-progress.ts'
 import { Scrollback, type Opening } from './scrollback.tsx'
 import type { Fullscreen as FullscreenComponent, TranscriptScroll } from './fullscreen.tsx'
-import { Chrome, Completion, composerHint, draftWidth, Line, LiveRegion, Notice, Panel, wrappedRows, type ActivityState } from './line.tsx'
+import { Chrome, Completion, composerHint, draftWidth, Line, LiveRegion, Notice, Panel, wrappedRows, type ActivityState, type DraftPointer } from './line.tsx'
 import { activityWord, phaseLabel, phaseOf, lastTurn, turnSummary, type Clock } from './activity.ts'
+import { ALT_WHEEL_FACTOR, WheelSteps, type WheelReports } from './wheel.ts'
 
 const Fullscreen = lazy(async () => ({ default: (await import('./fullscreen.tsx')).Fullscreen as typeof FullscreenComponent }))
-const WHEEL_ROWS = 3
 
 /** Display-only projection of one pending inbox message. */
 export interface PendingInput {
@@ -46,6 +46,12 @@ export { goalState, type GoalEntry } from './goal.ts'
 export interface AppProps {
   /** Inline scrollback by default; fullscreen owns a scrollable transcript. */
   readonly screen?: 'inline' | 'fullscreen'
+  /**
+   * How the terminal reports the mouse wheel in fullscreen: `lines`, already
+   * accelerated, as a local macOS terminal does, or `notches`, the default,
+   * which a fast spin accelerates. Read by {@link WheelSteps} with `clock`.
+   */
+  readonly wheelReports?: WheelReports
   /** Suppress composer edits while the application prepares a session handoff. */
   readonly inputBlocked?: boolean
   readonly attachments?: readonly AttachmentSummary[]
@@ -320,12 +326,16 @@ const SHEETS: readonly SheetKind[] = ['agents', 'goal']
 const MOUSE_REPORT = /^\[<(\d+);(\d+);(\d+)([Mm])$/
 /** The Shift, Meta, and Ctrl bits a report adds to its button code. */
 const MOUSE_MODIFIERS = 4 | 8 | 16
+/** The Meta bit, which terminals set for Alt. */
+const MOUSE_ALT = 8
 const WHEEL_UP = 64
 const WHEEL_DOWN = 65
 
 function SessionView(props: AppProps): React.ReactElement {
   const scroll = useRef<TranscriptScroll>(null)
+  const draftPointer = useRef<DraftPointer>(null)
   const fullscreen = props.screen === 'fullscreen'
+  const [wheel] = useState(() => new WheelSteps(props.wheelReports ?? 'notches'))
   const composer = useComposer(props.onSubmit, () => inputHistory(props.committed, props.pending), (props.attachments?.length ?? 0) > 0,
     '', key => props.onRemoveImage?.(key))
   const { copy, interaction } = props
@@ -424,17 +434,25 @@ function SessionView(props: AppProps): React.ReactElement {
   const entryRows = (entry: string): number => draftRows(entry, rowWidth(entry))
   // A wheel scrolls what the arrows would: an open sheet, else the transcript,
   // which it also scrolls under an interaction, since the wheel takes none of
-  // an interaction's keys. A click only reaches the jump-to-latest row.
-  const pointer = (code: number, row: number, pressed: boolean): void => {
+  // an interaction's keys. Alt moves five times as far. A click on the draft
+  // puts the caret there; elsewhere it only reaches the jump-to-latest row.
+  const pointer = (code: number, column: number, row: number, pressed: boolean): void => {
     const button = code & ~MOUSE_MODIFIERS
     const sheetOpen = sheetRef.current !== undefined
     if (button === WHEEL_UP || button === WHEEL_DOWN) {
-      const rows = (button === WHEEL_UP ? -1 : 1) * WHEEL_ROWS
+      const direction = button === WHEEL_UP ? -1 : 1
+      const rows = direction * wheel.rows(direction, props.clock?.now()) * ((code & MOUSE_ALT) === 0 ? 1 : ALT_WHEEL_FACTOR)
       if (sheetOpen) {
         setSheetFollowing(false)
         setSheetScroll(current => Math.max(0, Math.min(sheetMaxScroll, Math.min(current, sheetMaxScroll) + rows)))
       } else if ((!props.inputBlocked || props.inspectionParent !== undefined) && !composer.blocked) scroll.current?.scroll(rows)
-    } else if (button === 0 && pressed && !sheetOpen && interaction === undefined) scroll.current?.press(row)
+    } else if (button === 0 && pressed && !sheetOpen && interaction === undefined) {
+      const editable = props.inputBlocked !== true && props.inspection === undefined && !composer.blocked
+      const offset = editable ? draftPointer.current?.locate(column, row) : undefined
+      if (offset === undefined) { scroll.current?.press(row); return }
+      focusOn(undefined)
+      composer.place(offset)
+    }
   }
   // Keep bracketed paste enabled for the whole mounted terminal. Modal hooks
   // still receive their own paste events, while this listener ignores them;
@@ -460,7 +478,7 @@ function SessionView(props: AppProps): React.ReactElement {
     // text without their Escape. None may reach the composer.
     const mouse = MOUSE_REPORT.exec(text)
     if (mouse !== null) {
-      if (fullscreen) pointer(Number(mouse[1]), Number(mouse[3]) - 1, mouse[4] === 'M')
+      if (fullscreen) pointer(Number(mouse[1]), Number(mouse[2]) - 1, Number(mouse[3]) - 1, mouse[4] === 'M')
       return
     }
     if (key.ctrl && text === 'c') { props.onInterrupt(); return }
@@ -509,9 +527,17 @@ function SessionView(props: AppProps): React.ReactElement {
       props.onCancel(); return
     }
     if (fullscreen && interaction === undefined && (!props.inputBlocked || props.inspectionParent !== undefined)
-      && !composer.blocked && (key.pageUp || key.pageDown || (key.ctrl && (key.home || key.end)))) {
-      scroll.current?.move(key.pageUp ? 'up' : key.pageDown ? 'down' : key.home ? 'start' : 'end')
-      return
+      && !composer.blocked) {
+      if (key.pageUp || key.pageDown || (key.ctrl && (key.home || key.end))) {
+        scroll.current?.move(key.pageUp ? 'up' : key.pageDown ? 'down' : key.home ? 'start' : 'end')
+        return
+      }
+      // Ctrl+Shift+Up and Down too, for macOS, where Mission Control takes
+      // Ctrl+Up and Ctrl+Down. Alt+Up stays the steering key.
+      if (key.ctrl && !key.meta && (key.upArrow || key.downArrow)) {
+        scroll.current?.prompt(key.upArrow ? -1 : 1)
+        return
+      }
     }
     // Alt-Up sends steering now instead of at the next step: a typed draft is
     // submitted and sent, and with an empty draft the queued input is. It is
@@ -529,9 +555,13 @@ function SessionView(props: AppProps): React.ReactElement {
       }
       if (props.pending.length > 0) { props.onSendPending?.(); return }
     }
-    // Alt-Enter is the one Meta key the composer takes: a line break.
-    if (interaction !== undefined || props.inputBlocked === true || props.inspection !== undefined || composer.blocked
-      || (key.meta && !newline)) return
+    if (interaction !== undefined || props.inputBlocked === true || props.inspection !== undefined || composer.blocked) return
+    // Alt-Enter is a line break, taken below. Every other Meta key the
+    // composer takes edits by word; the rest do nothing.
+    if (key.meta && !newline) {
+      if (composer.editKey(text, key, rowWidth(composer.value))) focusOn(undefined)
+      return
+    }
     if (key.ctrl && text === 'o' && props.goal !== undefined) { toggleSheet('goal'); return }
     if (key.ctrl && text === 'g' && hasSubagents) { toggleSheet('agents'); return }
     if (key.ctrl && text === 'v' && props.onPasteImage !== undefined) {
@@ -565,7 +595,7 @@ function SessionView(props: AppProps): React.ReactElement {
     // Before the Ctrl guard, which a CSI-u Ctrl-J would otherwise stop at. A
     // read of line feeds is Ctrl-J pressed, once or more.
     if (newline) { composer.paste(text.startsWith('\n') ? text : '\n'); return }
-    if (composer.editKey(text, key)) return
+    if (composer.editKey(text, key, rowWidth(composer.value))) return
     if (key.ctrl) return
     if (choices !== undefined && (key.upArrow || key.downArrow || key.tab)) {
       if (choices.length === 0) return
@@ -869,6 +899,7 @@ function SessionView(props: AppProps): React.ReactElement {
         {interaction === undefined
           ? (
             <Chrome
+              pointer={draftPointer}
               // No state word. The header says what the session is doing.
               // The composer's placeholder and hint say whether it is idle.
               // One layout in every mode; the fields give way in their own

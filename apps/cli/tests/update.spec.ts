@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { detectInstall, hostTarget } from '@deepseek-ai/dsh-updater'
-import { runUpdate, UPDATE_AVAILABLE_EXIT } from '../src/update.ts'
+import { runRollback, runUpdate, UPDATE_AVAILABLE_EXIT } from '../src/update.ts'
 
 const roots: string[] = []
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
@@ -101,5 +101,77 @@ describe.skipIf(process.platform === 'win32')('runUpdate', () => {
     expect(lines[0]).toBe('This Bake runs from /src/bake, which the updater does not manage.')
     expect(lines[1]).toContain('git pull')
     await expect(run(true, checkout)).resolves.toBe(UPDATE_AVAILABLE_EXIT)
+  })
+})
+
+/** A managed install holding `releases`, each a version directory and its command, with `current` naming `current`. */
+function installed(releases: Record<string, string>, current: string) {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'bake-cli-rollback-')))
+  roots.push(root)
+  const install = join(root, 'install')
+  for (const [name, command] of Object.entries(releases)) {
+    mkdirSync(join(install, 'versions', name, 'apps/cli/lib'), { recursive: true })
+    writeFileSync(join(install, 'versions', name, 'apps/cli/lib/bin.js'), command)
+  }
+  symlinkSync(join(install, 'versions', current), join(install, 'current'))
+  const env = { DSH_HOME: join(root, 'home') }
+  const lines: string[] = []
+  const layout = detectInstall(join(install, 'versions', current))
+  const run = () => runRollback({ env, layout, out: line => lines.push(line), err: line => lines.push(line) })
+  return { install, env, layout, lines, run }
+}
+
+const OLD = '0.1.0-aaaaaaaaaaaa'
+const NEW = '0.2.0-bbbbbbbbbbbb'
+const prints = (version: string): string => `console.log(${JSON.stringify(version)})\n`
+
+describe.skipIf(process.platform === 'win32')('runRollback', () => {
+  it('returns to the earlier release and says which sessions it affects', async () => {
+    const { run, lines, install } = installed({ [OLD]: prints('0.1.0'), [NEW]: prints('0.2.0') }, NEW)
+    await expect(run()).resolves.toBe(0)
+    expect(readlinkSync(join(install, 'current'))).toBe(join(install, 'versions', OLD))
+    expect(lines).toEqual([
+      `Checking Bake 0.1.0 in ${OLD}…`,
+      `Rolled back Bake 0.2.0 → 0.1.0 (${NEW} → ${OLD}). New sessions start 0.1.0; sessions already open keep 0.2.0.`,
+      'bake update installs the newest release again.',
+    ])
+  })
+
+  it('draws the check and a summary on a terminal, instead of the plain report', async () => {
+    const { env, layout, lines } = installed({ [OLD]: prints('0.1.0'), [NEW]: prints('0.2.0') }, NEW)
+    const writes: string[] = []
+    const code = await runRollback({
+      env: { ...env, LANG: 'en_US.UTF-8', TERM: 'xterm-256color' }, layout,
+      out: line => lines.push(line), err: line => lines.push(line),
+      terminal: { isTTY: true, columns: 100, write: (text) => { writes.push(text) } },
+    })
+    expect(code).toBe(0)
+    const shown = writes.join('').replace(/\u001b\[[\d;]*m/gu, '')
+    expect(shown).toContain('BAKE  rollback \u00b7 v0.2.0 \u2192 v0.1.0')
+    expect(shown).toMatch(/\u2713 {2}Verified {12}v0\.1\.0 starts/u)
+    expect(shown).toMatch(/Rolled back Bake 0\.2\.0 \u2192 0\.1\.0 in <?\d/u)
+    expect(shown).toContain('bake update installs the newest release again.')
+    expect(lines).toEqual([])
+  })
+
+  it('says when there is nothing to roll back to, and fails', async () => {
+    const { run, lines, install } = installed({ [OLD]: prints('0.1.0') }, OLD)
+    await expect(run()).resolves.toBe(1)
+    expect(lines).toEqual(['Bake 0.1.0 is the oldest release installed; there is nothing to roll back to.'])
+    expect(readlinkSync(join(install, 'current'))).toBe(join(install, 'versions', OLD))
+  })
+
+  it('keeps the current release when the earlier one fails its check, and says why', async () => {
+    const { run, lines, install } = installed({ [OLD]: 'console.error(\'Error: boom\'); process.exitCode = 1\n', [NEW]: prints('0.2.0') }, NEW)
+    await expect(run()).resolves.toBe(1)
+    expect(lines.at(-1)).toBe('The earlier Bake 0.1.0 did not start; the current install is unchanged: Error: boom')
+    expect(readlinkSync(join(install, 'current'))).toBe(join(install, 'versions', NEW))
+  })
+
+  it('refuses a release the updater does not manage', async () => {
+    const lines: string[] = []
+    await expect(runRollback({ layout: { kind: 'unmanaged', running: '/src/bake' }, out: line => lines.push(line), err: line => lines.push(line) }))
+      .resolves.toBe(1)
+    expect(lines[0]).toBe('This Bake runs from /src/bake, which the updater does not manage.')
   })
 })

@@ -1,9 +1,10 @@
 /**
  * Atomic file replacement and writer coordination.
- * `writeFileAtomic` writes a random-suffix sibling with exclusive create and
- * the caller's permission bits, then renames it over the target, so readers
- * observe either the old or the new complete content and a replaced file ends
- * up with exactly the stated mode. `withFileLock` serializes cross-process
+ * `writeFileAtomic` writes and syncs a random-suffix sibling with exclusive
+ * create and the caller's permission bits, renames it over the target, and
+ * syncs the directory, so readers observe either the old or the new complete
+ * content, a crash never leaves a partial file, and a replaced file ends up
+ * with exactly the stated mode. `withFileLock` serializes cross-process
  * writers of one file through a `wx`-created `<file>.lock` sibling, held
  * under a kernel `flock` where the host supports one, so a read-modify-write
  * cycle can never resurrect a state another writer just replaced and a writer
@@ -13,7 +14,7 @@
  */
 
 import { randomBytes } from 'node:crypto'
-import { constants, lstat, mkdir, open, rename, rm, writeFile } from 'node:fs/promises'
+import { constants, lstat, mkdir, open, rename, rm } from 'node:fs/promises'
 import type { FileHandle } from 'node:fs/promises'
 import { hostname } from 'node:os'
 import { dirname } from 'node:path'
@@ -65,17 +66,57 @@ export interface WriteFileAtomicOptions {
 }
 
 /**
- * Replace `filename` with `content` in one atomic step, creating parent
- * directories. The content is first written to a random-suffix sibling opened
- * with exclusive create (`wx`): the open refuses to follow a symlink planted
- * at the temp path, and the fresh inode carries `options.mode` through the
- * rename, so replacing a wider-permission file narrows it without a chmod
- * race. The rename also replaces a symlinked target itself instead of writing
- * through to its referent, and the same-directory sibling keeps the rename on
- * one filesystem. Windows replacement retries transient `EACCES`, `EBUSY`,
- * and `EPERM` failures for a bounded interval while the complete temp file
- * remains the rename source. On any remaining failure the temp file is
- * removed and the failure rethrown. Crash durability (fsync) is out of scope.
+ * Directory-sync failures that mean the filesystem or the directory's
+ * permissions cannot sync it, not that synced data was lost: a FUSE or
+ * network mount may refuse `fsync` on a directory, and a directory the
+ * process may write but not read cannot be opened.
+ */
+const UNSYNCABLE_DIRECTORY_ERRORS: ReadonlySet<string> = new Set([
+  'EACCES', 'EINVAL', 'EISDIR', 'ENOSYS', 'ENOTSUP', 'EOPNOTSUPP', 'EPERM',
+])
+
+/**
+ * Sync `path`'s directory entries so a rename into it survives a power loss.
+ * Windows cannot open a directory for syncing and is skipped; a filesystem
+ * that cannot sync the directory leaves the rename as durable as it allows.
+ */
+async function syncDirectory(path: string): Promise<void> {
+  /* v8 ignore next -- Windows rejects directory opens; POSIX coverage exercises the sync. */
+  if (process.platform === 'win32') return
+  let handle: FileHandle
+  try {
+    handle = await open(path, 'r')
+  } catch (error) {
+    if (UNSYNCABLE_DIRECTORY_ERRORS.has(errorCode(error) ?? '')) return
+    throw error
+  }
+  try {
+    await handle.sync()
+  } catch (error) {
+    if (!UNSYNCABLE_DIRECTORY_ERRORS.has(errorCode(error) ?? '')) throw error
+  } finally {
+    await handle.close()
+  }
+}
+
+/**
+ * Replace `filename` with `content` in one atomic, crash-durable step,
+ * creating parent directories. The content is first written to a
+ * random-suffix sibling opened with exclusive create (`wx`): the open refuses
+ * to follow a symlink planted at the temp path, and the fresh inode carries
+ * `options.mode` through the rename, so replacing a wider-permission file
+ * narrows it without a chmod race. The sibling is synced to disk before the
+ * rename, so a crash can never publish an empty or partly written file, and
+ * the parent directory is synced after it, so the replacement survives a
+ * power loss once this resolves. The rename also replaces a symlinked target
+ * itself instead of writing through to its referent, and the same-directory
+ * sibling keeps the rename on one filesystem. Windows replacement retries
+ * transient `EACCES`, `EBUSY`, and `EPERM` failures for a bounded interval
+ * while the complete temp file remains the rename source. On any failure
+ * before the rename the temp file is removed, the target is untouched, and
+ * the failure rethrown. A directory sync that fails with an I/O error is
+ * rethrown although the replacement is already visible, because it may not
+ * survive a crash.
  * @param filename - final path receiving the content.
  * @param content - complete next file content.
  * @param options - permission bits for the replacement inode.
@@ -85,16 +126,23 @@ export async function writeFileAtomic(filename: string, content: string, options
     recursive: true,
     ...options.dirMode === undefined ? {} : { mode: options.dirMode },
   })
-  // TODO(settings-atomic-durability): Use a replacement that fsyncs the file
-  // and parent directory and preserves owner-only permissions on Windows.
+  // TODO(settings-windows-owner-only): Preserve owner-only permissions on
+  // Windows, where `mode` sets only the read-only attribute.
   const temp = `${filename}.${randomBytes(6).toString('hex')}.tmp`
   try {
-    await writeFile(temp, content, { mode: options.mode, flag: 'wx' })
+    const handle = await open(temp, 'wx', options.mode)
+    try {
+      await handle.writeFile(content, 'utf8')
+      await handle.sync()
+    } finally {
+      await handle.close()
+    }
     await renameAtomicTemp(temp, filename)
   } catch (error) {
     await rm(temp, { force: true })
     throw error
   }
+  await syncDirectory(dirname(filename))
 }
 
 /** Error code of a failed filesystem or lock call. */

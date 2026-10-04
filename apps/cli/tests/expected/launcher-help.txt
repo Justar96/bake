@@ -32,3 +32,4 @@ Examples:
   dsh plugin --profile tui add <package>    install a plugin into the tui profile
   dsh update                                install the newest Bake release
   dsh update --check                        only report whether a newer release exists
+  dsh update --rollback                     return to the newest earlier release installed

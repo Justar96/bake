@@ -10,6 +10,7 @@ import { appendTranscript, emptyTranscript } from '@dsh-tui/ui/transcript.ts'
 import type { Row } from '@dsh-tui/ui/rows.ts'
 import { frameOutput } from '../src/output.ts'
 import { Printed } from '../src/printed.ts'
+import { caretRow } from '../../../tests/caret.ts'
 
 class Input extends EventEmitter {
   isTTY = true
@@ -77,7 +78,7 @@ async function mount(overrides: Partial<AppProps> = {}, columns = 60, rows = 18)
     consumed = stdout.chunks.length
     if (text !== '') await new Promise<void>(resolve => terminal.write(text, resolve))
     const buffer = terminal.buffer.active
-    return Array.from({ length: stdout.rows }, (_, index) => buffer.getLine(buffer.viewportY + index)?.translateToString(true) ?? '')
+    return Array.from({ length: stdout.rows }, (_, index) => caretRow(buffer.getLine(buffer.viewportY + index), stdout.columns))
   }
   const check = async (assertion: (lines: readonly string[]) => void): Promise<string[]> => {
     let lines: string[] = []
@@ -131,7 +132,9 @@ it.each(['en'] as const)('pages history without moving the composer, holds appen
   await view.check(lines => expect(lines.join('\n')).not.toContain(`${copy.session}: fullscreen`))
 })
 
-const wheel = (direction: 'up' | 'down', column = 5, row = 5) => `\x1b[<${direction === 'up' ? 64 : 65};${column};${row}M`
+/** An SGR wheel report; `alt` sets the Meta bit terminals send for Alt. */
+const wheel = (direction: 'up' | 'down', column = 5, row = 5, alt = false) =>
+  `\x1b[<${(direction === 'up' ? 64 : 65) | (alt ? 8 : 0)};${column};${row}M`
 
 it('scrolls by wheel rows without typing reports into the draft, and resumes following at the bottom', async () => {
   const copy = dictionaries.en
@@ -144,20 +147,95 @@ it('scrolls by wheel rows without typing reports into the draft, and resumes fol
     expect(lines.join('\n')).toContain(copy.transcriptPaused)
     expect(lines.join('\n')).toContain(copy.transcriptLatest)
   })
-  // One notch is three rows, not a page: the view moved by exactly that.
-  expect(scrolled.slice(3, 10)).toEqual(initial.slice(0, 7))
+  // A notch on its own is one row, not a page: the view moved by exactly that.
+  expect(scrolled.slice(1, 10)).toEqual(initial.slice(0, 9))
   expect(caret(scrolled)).toBe(15)
   // A Shift-modified notch and a click's press and release are reports too.
   view.input.send('\x1b[<68;5;5M')
   view.input.send('\x1b[<0;5;5M')
   view.input.send('\x1b[<0;5;5m')
-  await view.check(lines => expect(lines.slice(6, 10)).toEqual(initial.slice(0, 4)))
+  await view.check(lines => expect(lines.slice(2, 10)).toEqual(initial.slice(0, 8)))
+  // Alt moves five times as far.
+  view.input.send(wheel('up', 5, 5, true))
+  await view.check(lines => expect(lines.slice(7, 10)).toEqual(initial.slice(0, 3)))
+  view.input.send(wheel('down', 5, 5, true))
   view.input.send(wheel('down'))
   view.input.send(wheel('down'))
   await view.check(lines => {
     expect(lines.join('\n')).toContain('History 79')
     expect(lines.join('\n')).toContain(copy.transcriptScroll)
     expect(lines.join('\n')).toContain('draft▌')
+    expect(lines.join('\n')).not.toContain('[<')
+  })
+})
+
+it('moves more rows a notch in a fast spin, timed by the clock', async () => {
+  let now = 0
+  const view = await mount({ committed: history(80), clock: { now: () => now, every: () => () => {} }, motion: false })
+  const initial = await view.check(lines => expect(lines.join('\n')).toContain('History 79'))
+  view.input.send(wheel('up'))
+  await view.check(lines => expect(lines.slice(1, 10)).toEqual(initial.slice(0, 9)))
+  // 20 ms after the first notch: five rows.
+  now = 20
+  view.input.send(wheel('up'))
+  await view.check(lines => expect(lines.slice(6, 10)).toEqual(initial.slice(0, 4)))
+})
+
+it('brings the previous and next prompts to the top, keeping the draft, and follows past the last', async () => {
+  const copy = dictionaries.en
+  const turns = Array.from({ length: 6 }, (_, turn): Row[] => [
+    { kind: 'user', text: `Prompt ${turn}` },
+    ...Array.from({ length: 20 }, (_, line): Row => ({ kind: 'notice', tone: 'info', text: `Answer ${turn}.${line}` })),
+  ]).flat()
+  const view = await mount({ committed: appendTranscript(emptyTranscript, turns) })
+  await view.check(lines => expect(lines.join('\n')).toContain('Answer 5.19'))
+  view.input.send('draft')
+  await view.check(lines => expect(lines.join('\n')).toContain('draft▌'))
+  const top = (lines: readonly string[]) => lines.slice(0, 3).join('\n')
+  view.input.send('\x1b[1;5A')
+  await view.check(lines => {
+    expect(top(lines)).toContain('Prompt 5')
+    expect(lines.join('\n')).toContain(copy.transcriptLatest)
+  })
+  // Ctrl+Shift+Up, for terminals that keep Ctrl+Up for themselves.
+  view.input.send('\x1b[1;6A')
+  await view.check(lines => expect(top(lines)).toContain('Prompt 4'))
+  view.input.send('\x1b[1;5B')
+  await view.check(lines => expect(top(lines)).toContain('Prompt 5'))
+  view.input.send('\x1b[1;5B')
+  await view.check(lines => {
+    expect(lines.join('\n')).toContain('Answer 5.19')
+    expect(lines.join('\n')).toContain(copy.transcriptScroll)
+    expect(lines.join('\n')).toContain('draft▌')
+  })
+  // Back past the first prompt reaches the session heading.
+  view.input.send('\x1b[1;5H')
+  await view.check(lines => expect(lines.join('\n')).toContain(`${copy.session}: fullscreen`))
+  view.input.send('\x1b[1;5B')
+  await view.check(lines => expect(top(lines)).toContain('Prompt 0'))
+  view.input.send('\x1b[1;5A')
+  await view.check(lines => expect(lines.join('\n')).toContain(`${copy.session}: fullscreen`))
+  expect(caret(await view.capture())).toBe(15)
+})
+
+it('puts the caret where a click lands in the draft, without typing the report', async () => {
+  const view = await mount({ committed: history(80) })
+  view.input.send('hello world')
+  const typed = await view.check(lines => expect(lines.join('\n')).toContain('> hello world▌'))
+  const row = caret(typed) + 1
+  // The rail takes two columns: column 9 holds the w.
+  view.input.send(`\x1b[<0;9;${row}M\x1b[<0;9;${row}m`)
+  await view.check(lines => expect(lines.join('\n')).toContain('> hello ▌world'))
+  // Past the text, the caret goes after it; on the rail, before it.
+  view.input.send(`\x1b[<0;30;${row}M`)
+  await view.check(lines => expect(lines.join('\n')).toContain('> hello world▌'))
+  view.input.send(`\x1b[<0;1;${row}M`)
+  await view.check(lines => expect(lines.join('\n')).toContain('> ▌hello world'))
+  // A click on the transcript leaves the caret where it is.
+  view.input.send('\x1b[<0;5;2M')
+  view.input.send('!')
+  await view.check(lines => {
+    expect(lines.join('\n')).toContain('> !▌hello world')
     expect(lines.join('\n')).not.toContain('[<')
   })
 })
@@ -416,7 +494,10 @@ it('restores the primary screen, its cursor, paste, and raw mode on exit', async
   const bytes = view.stdout.chunks.join('')
   expect(bytes).toContain('\x1b[?1049l')
   expect(bytes).toContain('\x1b[?2004l')
-  // The mouse is reported only while the alternate buffer is shown.
+  // The mouse is reported, and autowrap is off, only while the alternate buffer is shown.
   expect(bytes.indexOf('\x1b[?1000h\x1b[?1006h')).toBeGreaterThan(bytes.indexOf('\x1b[?1049h'))
-  expect(bytes.lastIndexOf('\x1b[?1006l\x1b[?1000l')).toBe(bytes.lastIndexOf('\x1b[?1049l') - '\x1b[?1006l\x1b[?1000l'.length)
+  expect(bytes.indexOf('\x1b[?7l')).toBeGreaterThan(bytes.indexOf('\x1b[?1049h'))
+  const release = '\x1b[?1006l\x1b[?1000l\x1b[?7h'
+  expect(bytes.lastIndexOf(release)).toBe(bytes.lastIndexOf('\x1b[?1049l') - release.length)
+  expect(bytes.lastIndexOf('\x1b[?7h')).toBeGreaterThan(bytes.lastIndexOf('\x1b[?7l'))
 })

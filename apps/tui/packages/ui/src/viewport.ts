@@ -100,6 +100,24 @@ export class Viewport {
     return { row, offset: row === this.end.row ? 0 : Math.max(0, offset) }
   }
 
+  /**
+   * The start of the nearest user prompt before or after a position. Reads
+   * only row kinds, so it measures and presents nothing.
+   * @param position - the current top of the view.
+   * @param direction - toward older output (-1) or newer (1). Going back from
+   *   inside a prompt's own rows reaches that prompt's start.
+   * @returns the prompt's first row, or undefined when none lies that way.
+   */
+  prompt(position: Position, direction: -1 | 1): Position | undefined {
+    const end = this.end.row
+    let row = Math.min(position.row, end)
+    if (direction > 0 || position.offset === 0 || row === end) row += direction
+    for (; row >= 0 && row < end; row += direction) {
+      if (this.rowAt(row)?.kind === 'user') return { row, offset: 0 }
+    }
+    return undefined
+  }
+
   /** Capture a text position so rewrapping keeps the same part of a message visible. */
   anchor(position: Position, budget: Budget, result: ResultBound): ReadingAnchor {
     if (position.row === this.end.row) return { ...position, source: undefined, line: 0, character: 0, columns: budget.columns }

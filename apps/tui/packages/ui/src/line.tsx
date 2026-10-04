@@ -10,10 +10,11 @@
  */
 
 import React from 'react'
-import { Box, Text } from 'ink'
+import { Box, Text, measureElement, type DOMElement } from 'ink'
 import stringWidth from 'string-width'
 import wrapAnsi from 'wrap-ansi'
-import { wrapDraft } from './editor.ts'
+import { caretCell } from './caret.ts'
+import { offsetAt, wrapDraft } from './editor.ts'
 import { sliceSpans } from './markdown.ts'
 import { chromeFor, COLUMN, COMPOSER_BUDGET, HINT_MIN_COLUMNS, MARKER, RULE, TREE, windowOf, type Budget, type ChromeLayout, type FrameStyle } from './layout.ts'
 import { PALETTE, type PaletteColor } from './palette.ts'
@@ -935,8 +936,9 @@ export function StatusBar({ fields, columns }: {
  * @param props.footer - one row drawn under the base rule, above the status
  *   line, from the rail's first column as the header is, so a standing row's
  *   icon sits in the rail; claimed by the caller like `children`.
+ * @param props.pointer - receives the draft's {@link DraftPointer}, for a click that places the caret.
  */
-export function Chrome({ status, columns, state, before, after, placeholder, hints, overflow, maxRows, frame, activity, standing, standingFocused, clock, motion, compact, layout = chromeFor(columns), children, footer }: {
+export function Chrome({ status, columns, state, before, after, placeholder, hints, overflow, maxRows, frame, activity, standing, standingFocused, clock, motion, compact, layout = chromeFor(columns), children, footer, pointer }: {
   readonly status: readonly StatusField[]
   readonly columns: number
   readonly state: Omit<ComposerState, 'drafting'>
@@ -956,6 +958,7 @@ export function Chrome({ status, columns, state, before, after, placeholder, hin
   readonly layout?: ChromeLayout
   readonly children?: React.ReactNode
   readonly footer?: (columns: number) => React.ReactNode
+  readonly pointer?: React.Ref<DraftPointer>
 }): React.ReactElement {
   const hint = composerHint(columns, { ...state, drafting: `${before}${after}` !== '' }, hints)
   // The draft's column, which the status line lines up with.
@@ -979,6 +982,7 @@ export function Chrome({ status, columns, state, before, after, placeholder, hin
         {...maxRows === undefined ? {} : { maxRows }}
         {...hint === undefined ? {} : { hint }}
         {...overflow === undefined ? {} : { overflow }}
+        {...pointer === undefined ? {} : { pointer }}
       />
       {layout.base && <Rule columns={columns} frame={frame} />}
       {footer !== undefined && <Box flexShrink={0}>{footer(Math.max(1, columns))}</Box>}
@@ -989,13 +993,25 @@ export function Chrome({ status, columns, state, before, after, placeholder, hin
   )
 }
 
+/** Where a click lands in the drawn draft. */
+export interface DraftPointer {
+  /**
+   * @param column - zero-based column in the layout region the composer is drawn in.
+   * @param row - zero-based row in that region; in fullscreen, the screen row.
+   * @returns the draft offset drawn at that cell, or undefined outside the draft's rows.
+   *   A cell in the rail reaches the row's start, and one past the text its last place.
+   */
+  locate(column: number, row: number): number | undefined
+}
+
 /**
  * Input window measured in terminal rows, following the cursor within wrapped text.
  *
  * The hint shares the caret's row. Wrapping precedes windowing, so Home, End,
  * Unicode input, and edits inside a long paragraph keep the caret visible.
- * The caret is laid out around the draft, not inside it, so moving through
- * the text leaves every row in place.
+ * The caret is drawn in reverse video over the character it precedes, not
+ * inserted into the text, so moving through the text leaves every row and
+ * every character in place.
  *
  * A draft taller than the window marks what it hides. `^` in the rail of the
  * first visible row says rows are hidden above, and `v` in the rail of the
@@ -1016,8 +1032,9 @@ export function Chrome({ status, columns, state, before, after, placeholder, hin
  * @param props.maxRows - maximum physical rows of the draft to display.
  * @param props.overflow - locale-owned words after the counts of rows hidden
  *   above and below; absent, the rail marks them without a count.
+ * @param props.pointer - receives the {@link DraftPointer} for the rows drawn.
  */
-export function Composer({ columns, marker, before, after, placeholder, hint, maxRows = COMPOSER_BUDGET, overflow }: {
+export function Composer({ columns, marker, before, after, placeholder, hint, maxRows = COMPOSER_BUDGET, overflow, pointer }: {
   readonly columns: number
   readonly marker: string
   readonly before: string
@@ -1026,13 +1043,14 @@ export function Composer({ columns, marker, before, after, placeholder, hint, ma
   readonly hint?: string
   readonly maxRows?: number
   readonly overflow?: { readonly above: string, readonly below: string }
+  readonly pointer?: React.Ref<DraftPointer>
 }): React.ReactElement {
   const empty = before === '' && after === ''
   const rail = Math.min(COLUMN.rail, Math.max(0, columns - 1))
   const slot = hint === undefined || hint === '' ? 0 : stringWidth(hint) + 2
   const showHint = slot > 0 && columns - rail - slot >= 1
   const width = draftWidth(columns, hint)
-  const { rows: lines, caret: caretRow } = wrapDraft(`${before}${after}`, before.length, width, CARET)
+  const { rows: lines, caret: caretRow } = wrapDraft(`${before}${after}`, before.length, width, caretCell)
   const height = Math.max(1, maxRows)
   // The window moves only when the caret would leave it, so Up inside a tall
   // draft moves the caret, not the text under it. Typing at the end still
@@ -1052,7 +1070,18 @@ export function Composer({ columns, marker, before, after, placeholder, hint, ma
     const room = slot - 2
     return text === undefined || stringWidth(text) > room ? undefined : text.padStart(text.length + room - stringWidth(text))
   }
-  return <Box flexDirection="column" width={columns} flexShrink={0}>
+  const box = React.useRef<DOMElement>(null)
+  React.useImperativeHandle(pointer, () => ({
+    locate(column, row) {
+      if (box.current === null) return undefined
+      // Measured on demand: a click arrives after the frame it aims at was laid out.
+      const origin = measureElement(box.current)
+      const index = row - origin.y
+      if (index < 0 || index >= visible.length) return undefined
+      return offsetAt(`${before}${after}`, width, start + index, Math.max(0, column - origin.x - rail))
+    },
+  }), [before, after, width, start, visible.length, rail])
+  return <Box ref={box} flexDirection="column" width={columns} flexShrink={0}>
     {visible.map((line, index) => {
       const absolute = start + index
       const promptLine = absolute === 0
@@ -1136,15 +1165,6 @@ export function draftWidth(columns: number, hint: string | undefined): number {
   const showHint = slot > 0 && columns - rail - slot >= 1
   return Math.max(1, columns - rail - (showHint ? slot - 1 : 0))
 }
-
-/**
- * Caret drawn in the composer.
- *
- * A Block Element, so East Asian Ambiguous. A CJK-configured terminal may draw
- * it two cells wide. That is accepted here and nowhere else, because the
- * alternative is an attribute that disappears exactly when colour does.
- */
-const CARET = '\u258c'
 
 /**
  * Candidate list above the composer.
