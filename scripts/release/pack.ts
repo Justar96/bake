@@ -115,6 +115,13 @@ try {
     })
     const output = await new Response(check.stdout).text()
     if (await check.exited !== 0 || !output.includes('Usage:')) throw new Error('Staged CLI did not boot')
+    // `--help` stops before the terminal loads its runner, which imports
+    // packages of its own; resolve them in this platform's installed layout.
+    const lazy = ['runner-loader', 'ui-loader', 'syntax-loader'].map(name => `./apps/tui/packages/app/lib/${name}.js`)
+    const load = Bun.spawn(['node', '--input-type=module', '-e', `for (const entry of ${JSON.stringify(lazy)}) await import(entry)`], {
+      cwd: stage, env: { ...process.env, DSH_HOME: home, NODE_ENV: 'production' }, stdout: 'inherit', stderr: 'inherit',
+    })
+    if (await load.exited !== 0) throw new Error('Staged terminal runner did not load')
   } finally {
     rmSync(home, { recursive: true, force: true })
   }

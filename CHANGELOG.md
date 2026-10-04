@@ -4,6 +4,9 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 ## [Unreleased]
 
+- Bake 0.3.5 on Windows starts again. The terminal imported the compaction settings package, which the Windows release did not install for it, so `bake` exited at once with status 1 and printed nothing; Linux and macOS installs found the package by chance. The release now checks that every package the terminal loads is declared and resolves in the platform's installed layout before it ships.
+- A terminal that cannot start says why instead of exiting silently: a runner module that fails to load prints `dsh: could not load the terminal: <reason>`, and `bake` with piped input prints that it needs an interactive terminal.
+
 ## [0.3.5] - 2026-10-04
 
 - Compaction settings reach the engine that compacts a session. Every shipped preset that compacts runs its own engine beside the host's, and a `compaction-basic` setting reached only the host's, which the terminal keeps manual-only, so a saved threshold or retention never moved when the conversation compacted. Every engine now follows the one section, and the status line's compaction mark moves with it.
