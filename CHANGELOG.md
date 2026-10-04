@@ -4,6 +4,8 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 ## [Unreleased]
 
+- Settings, credentials, and profile files are synced to disk when Bake saves them. On some filesystems, a crash or power loss right after a save could leave `settings.yaml` or `.credentials.yaml` empty, which Bake then read as no settings or no saved logins, and the next save made the loss permanent. A save now reaches the disk before it replaces the old file, so a crash leaves either the old or the new file whole.
+
 ## [0.3.6] - 2026-10-04
 
 - Bake 0.3.5 on Windows starts again. The terminal imported the compaction settings package, which the Windows release did not install for it, so `bake` exited at once with status 1 and printed nothing; Linux and macOS installs found the package by chance. The release now checks that every package the terminal loads is declared and resolves in the platform's installed layout before it ships.
