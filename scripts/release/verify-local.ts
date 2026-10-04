@@ -32,6 +32,18 @@ async function run(argv: string[], env: NodeJS.ProcessEnv, cwd = ROOT, expected 
   return stdout
 }
 
+/** `--help` loads no session, so taking longer means shutdown is waiting out its 5 s forced-exit grace. */
+const HELP_LIMIT_MS = 3_000
+
+/** Run a `--help` command and reject one that exceeds {@link HELP_LIMIT_MS}. */
+async function runHelp(argv: string[], env: NodeJS.ProcessEnv): Promise<string> {
+  const started = performance.now()
+  const output = await run(argv, env)
+  const elapsed = Math.round(performance.now() - started)
+  if (elapsed > HELP_LIMIT_MS) throw new Error(`${argv.join(' ')} took ${elapsed} ms; the limit is ${HELP_LIMIT_MS} ms`)
+  return output
+}
+
 /** Start the download server over `host`'s files, and return its origin. */
 async function serve(host: string): Promise<string> {
   const server = Bun.spawn(['node', join(host, 'server.mjs')], {
@@ -122,7 +134,7 @@ try {
     if (!config.includes('@deepseek-ai/dsh-base')) throw new Error('Windows profile routing failed')
     const defaultHome: NodeJS.ProcessEnv = { ...env, USERPROFILE: temporary }
     delete defaultHome.DSH_HOME
-    await run(['cmd.exe', '/c', join(binDir, 'bake.cmd'), '--help'], defaultHome)
+    await runHelp(['cmd.exe', '/c', join(binDir, 'bake.cmd'), '--help'], defaultHome)
   } else {
     const install = ['sh', '-c', 'curl -fsSL "$BAKE_RELEASE_BASE_URL/install.sh" | sh']
     await run(install, env)
@@ -131,11 +143,11 @@ try {
     if (!version.includes(manifest.version)) throw new Error('Installed command version mismatch')
     const config = await run([join(binDir, 'bake'), 'tui', '--dump-default-config'], env)
     if (!config.includes('@deepseek-ai/dsh-base')) throw new Error('Installed profile routing failed')
-    const help = await run([join(binDir, 'bake'), '--help'], env)
+    const help = await runHelp([join(binDir, 'bake'), '--help'], env)
     if (!help.includes('Usage:')) throw new Error('Installed command did not boot the terminal profile')
     const defaultHome: NodeJS.ProcessEnv = { ...env, HOME: temporary }
     delete defaultHome.DSH_HOME
-    await run([join(binDir, 'bake'), '--help'], defaultHome)
+    await runHelp([join(binDir, 'bake'), '--help'], defaultHome)
   }
   if (!existsSync(join(temporary, '.bake/profiles/tui/package.json'))) {
     throw new Error('Installed command did not use Bake as its default home')

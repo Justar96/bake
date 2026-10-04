@@ -14,6 +14,7 @@ import Include, { type PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import {
   boot,
+  isProfileGenerationApplied,
   loadOptionalPatches,
   loadOverlayPatches,
   PROFILE_PATCH_FILENAME,
@@ -338,6 +339,33 @@ describe('profile reconciliation settlement', () => {
     const ctx = await boot(NAME, join(dir, 'cordis.yml'), patches)
     onTestFinished(() => ctx.fiber.dispose())
     expect(await reconcileProfilePatches(ctx, patches, NAME)).toEqual(['missing-plugin (./missing.mjs): failed to import'])
+  })
+
+  it('reports whether the root Include already applies a freshly parsed generation', async () => {
+    const dir = tmp()
+    writeFileSync(join(dir, 'cordis.yml'), '[]\n')
+    writeFileSync(join(dir, 'noop.mjs'), 'export function apply() {}\n')
+    const file = join(dir, PROFILE_PATCH_FILENAME)
+    // The second patch targets the row the first inserts, which Include merges in place.
+    const generation = (value: number) => [
+      '- insert:',
+      '    - id: noop',
+      '      name: ./noop.mjs',
+      '      disabled: !!js "false"',
+      '- id: noop',
+      `  config: { value: ${value} }`,
+      '',
+    ].join('\n')
+    writeFileSync(file, generation(1))
+    const ctx = await boot(NAME, join(dir, 'cordis.yml'), loadOptionalPatches(NAME, file))
+    onTestFinished(() => ctx.fiber.dispose())
+    expect(isProfileGenerationApplied(ctx, loadOptionalPatches(NAME, file)!)).toBe(true)
+    writeFileSync(file, generation(2))
+    const edited = loadOptionalPatches(NAME, file)!
+    expect(isProfileGenerationApplied(ctx, edited)).toBe(false)
+    await reconcileProfilePatches(ctx, edited, NAME)
+    expect(isProfileGenerationApplied(ctx, loadOptionalPatches(NAME, file)!)).toBe(true)
+    expect(isProfileGenerationApplied(new Context(), [])).toBe(false)
   })
 
   it('rejects a context without the launcher root Include', async () => {

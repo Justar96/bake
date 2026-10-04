@@ -229,6 +229,9 @@ export function loadLayeredEnv(
 }
 
 const bootstrapIncludes = new WeakMap<Context, Entry>()
+// The last patch generation handed to each root Include, serialized first:
+// Include merges later patches into the rows an earlier patch inserted, in place.
+const appliedGenerations = new WeakMap<Context, string>()
 
 // The include's YAML dialect (`!!js` scalars become expression nodes the
 // Loader interpolates against each entry's injection-ready context), imported
@@ -257,6 +260,7 @@ export async function reconcileProfilePatches(
     fiber: row.fiber, failed: row.fiber.state === FiberState.FAILED || row.fiber.state === FiberState.DISPOSED,
   }])
   const { patches: _previous, ...includeConfig } = entry.options.config as Include.Config
+  appliedGenerations.set(ctx, JSON.stringify(patches))
   await entry.update({ config: { ...includeConfig, patches } })
   const results = await Promise.allSettled(previousFibers.map(({ fiber }) => fiber.await()))
   await ctx.loader.await()
@@ -269,6 +273,16 @@ export async function reconcileProfilePatches(
     if (result.status === 'rejected' && !previousFibers[index]?.failed) throw result.reason
   }
   return failures.map(inactiveDiagnostic)
+}
+
+/** Report whether the root Include already applies a patch generation.
+ * @param ctx Booted root context.
+ * @param patches Complete ordered patch list, as composed by `readProfilePatches()`.
+ * @returns `true` only when `patches` equals the generation `mountRootInclude()` or
+ * `reconcileProfilePatches()` last handed to `ctx`'s root Include.
+ */
+export function isProfileGenerationApplied(ctx: Context, patches: readonly PatchOptions[]): boolean {
+  return appliedGenerations.get(ctx) === JSON.stringify(patches)
 }
 
 /**
@@ -535,6 +549,8 @@ export async function mountRootInclude(
     path: pathToFileURL(absoluteConfigPath).href,
     ...patches.length > 0 ? { patches: [...patches] } : {},
   }
+  // Before creation: the included rows, HMR among them, start while it is in flight.
+  appliedGenerations.set(ctx, JSON.stringify(patches))
   const rootInclude: EntryOptions = {
     id: 'include',
     name: 'cordis:include',
@@ -548,8 +564,28 @@ export async function mountRootInclude(
   return entry
 }
 
-/** The two process events {@link installFailLoud} turns into a fatal exit. */
+/** The two process events {@link installFailLoud} handles. */
 export type FailLoudEvent = 'unhandledRejection' | 'uncaughtException'
+
+/**
+ * What {@link installFailLoud} returns. Calling it removes both handlers; its
+ * method ends the startup window for unhandled rejections.
+ */
+export interface FailLoudGuard {
+  /** Remove both process handlers. */
+  (): void
+  /**
+   * Stop treating unhandled rejections as fatal: each later one, other than a
+   * reason a boot diagnostic already reported, goes to `report` and the process
+   * keeps running. Uncaught exceptions stay fatal. A launcher calls this once
+   * startup has committed, so a rejection before then still fails the launch.
+   * A later call replaces the reporter; a fatal exit already in progress keeps
+   * swallowing rejections.
+   * @param report - receives each later rejection reason. A throw from it is
+   *   contained: the guard writes one labelled warning line to stderr instead.
+   */
+  tolerateRejections(report: (reason: unknown) => void): void
+}
 
 /**
  * The slice of `process` {@link installFailLoud} needs — injectable so tests
@@ -601,16 +637,20 @@ async function observeLoaderRejectionCheckpoint(reasons: readonly unknown[]): Pr
 export const FAIL_LOUD_RELEASE_TIMEOUT_MS = 2_000
 
 /**
- * Install before boot to turn an unhandled rejection or an uncaught exception,
- * at any point in the process lifetime, into one labelled stderr diagnostic and
- * `exit(1)`. A rejection already included by {@link auditStartupEntries} is
- * ignored during its process checkpoint; every other rejection and every
- * uncaught exception remains fatal. Control never returns to the failed
- * operation after either: only the throw site knows which state is intact, and
- * a listener that threw mid-update (a stream `'data'` handler, a half-applied
- * registry write) leaves silently wrong results behind if it were resumed. The
- * event loop keeps running only until the release hook settles or times out.
- * Stdout remains untouched; the returned function removes both handlers.
+ * Install before boot to turn an unhandled rejection or an uncaught exception
+ * into one labelled stderr diagnostic and `exit(1)`. A rejection already
+ * included by {@link auditStartupEntries} is ignored during its process
+ * checkpoint. Every other rejection is fatal until the launcher calls
+ * {@link FailLoudGuard.tolerateRejections}, and every uncaught exception is
+ * fatal for the life of the process. Control never returns to the failed
+ * operation after an exception: it unwound through whatever called the
+ * throwing callback, Node's own stream and timer code included, and a listener
+ * that threw mid-update (a stream `'data'` handler, a half-applied registry
+ * write) leaves silently wrong results behind if it were resumed. A rejection
+ * ended only the promise chain that dropped it, which is why a running app may
+ * survive one. The event loop keeps running only until the release hook
+ * settles or times out. Stdout remains untouched; calling the returned guard
+ * removes both handlers.
  *
  * The diagnostic is `util.inspect(err)`, not `err.stack`: a `node:fs` error's
  * `code`, `syscall`, and `path` and any `cause` chain are enumerable properties
@@ -638,14 +678,16 @@ export const FAIL_LOUD_RELEASE_TIMEOUT_MS = 2_000
  * @param release - optional teardown awaited before exit, used by a
  *   terminal-owning surface to restore the terminal. Its own failure is
  *   swallowed because the pending fatal exit already owns the outcome.
- * @returns the uninstaller that removes both handlers.
+ * @returns the guard: call it to remove both handlers, or switch rejections
+ *   out of the fatal path once startup has committed.
  */
 export function installFailLoud(
   binName: string,
   proc: FailLoudProcess = process,
   release?: () => Promise<void> | void,
-): () => void {
+): FailLoudGuard {
   let exiting = false
+  let tolerated: ((reason: unknown) => void) | undefined
   const report = (err: unknown, label: string): void => {
     // A release in flight already owns the exit. Swallow later failures
     // (teardown's own included) rather than reporting a second failure over the
@@ -677,8 +719,18 @@ export function installFailLoud(
     })()
   }
   const onRejection = (err: unknown): void => {
-    if (assembledActivationRejections.has(err)) return
-    // Label kept stable: the Web profile expected-output e2e tests match it.
+    if (assembledActivationRejections.has(err) || exiting) return
+    if (tolerated !== undefined) {
+      try {
+        tolerated(err)
+      } catch (reportError) {
+        // The reporter's own failure must neither end a running app nor hide the rejection it was given.
+        proc.stderr.write(`${binName}: warning: unhandled rejection after startup: ${firstLine(err)}`
+          + ` (reporting it failed: ${firstLine(reportError)})\n`)
+      }
+      return
+    }
+    // Before readiness every rejection fails the launch, hence "load"; app-boot's tests match the label.
     report(err, 'fatal load failure')
   }
   const onException = (err: unknown): void => { report(err, 'fatal uncaught exception') }
@@ -688,7 +740,21 @@ export function installFailLoud(
   }
   proc.on('unhandledRejection', onRejection)
   proc.on('uncaughtException', onException)
-  return uninstall
+  return Object.assign(uninstall, {
+    tolerateRejections(next: (reason: unknown) => void): void { tolerated = next },
+  })
+}
+
+/** One line naming a thrown value: an error's name and message, or the value as a string. Never throws. */
+function firstLine(value: unknown): string {
+  let text: string
+  try {
+    text = value instanceof Error ? `${value.name}: ${value.message}` : String(value)
+  } catch {
+    // A null-prototype object or a throwing toString has no string form.
+    text = typeof value
+  }
+  return text.split('\n', 1)[0] ?? ''
 }
 
 /**

@@ -2,7 +2,8 @@
  * Shared profile boot for every `dsh` surface: resolve the profile, stack its
  * patch layers (bundle layers in `dsh.profile.bundles` order, the profile's
  * own `cordis.patch.yml`, `--patch` overlays, the telemetry switch), mount the
- * tree over the profile's empty root config, and wire fail-loud plus bounded shutdown.
+ * tree over the profile's empty root config, and wire fail-loud until
+ * readiness, late-rejection reporting after it, and bounded shutdown.
  *
  * App flags are not the launcher's business: the invocation's inner arguments
  * are provided to the tree through `ctx.cmdlineArgs`, where any injected app
@@ -40,6 +41,7 @@ import { installProxyFromEnvironment } from '@deepseek-ai/dsh-http-proxy'
 import { DSH_LAUNCH_ENVIRONMENT_KEY, type LaunchEnvironmentSnapshot } from '@deepseek-ai/dsh-launch-environment'
 import type {} from '@deepseek-ai/dsh-agent-loop'
 import { provideCmdline, type AppReady } from '@deepseek-ai/dsh-cmdline'
+import { createLateRejectionReporter } from './late-rejections.ts'
 import { createProcessShutdown, type ProcessShutdown } from './process-shutdown.ts'
 import { tolerateLostTerminal } from './terminal-hangup.ts'
 
@@ -342,8 +344,21 @@ export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Con
       signalShutdown.abort()
       shutdown.hangup(129)
     })
-    installFailLoud(NAME, process, async () => {
+    const failLoud = installFailLoud(NAME, process, async () => {
       await dispose()
+    })
+    // Readiness ends the startup window: from then until exit, disposal
+    // included, a rejection is recorded and shown instead of being fatal, so
+    // one that arrives during a clean shutdown cannot turn its status into 1.
+    // Registered before the tree can subscribe, so no ready work runs under
+    // the fatal rule.
+    appReady.service.onReady(() => {
+      failLoud.tolerateRejections(createLateRejectionReporter({
+        directory: join(resolveDshHome(), 'diagnostics'),
+        present: rejection => app.current?.bail('app/unhandled-rejection', rejection) === true,
+        warn: (message) => { app.current?.logger(NAME).warn('%s', message) },
+        stderr: process.stderr,
+      }))
     })
 
     const rootConfig = join(composed.profile.dir, PROFILE_ROOT_FILENAME)

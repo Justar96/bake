@@ -81,6 +81,8 @@ The first threshold crossing creates `watchdog.<YYYYMMDD>.<HHMMSS>.<pid>.jsonl` 
 
 Each record also produces one warning on the Cordis logger named `runtime-watchdog`. Shipped profiles mount no console logger, so the file is the durable copy.
 
+The launcher, not this plugin, writes `rejections.<YYYYMMDD>.<HHMMSS>.<pid>.jsonl` into `$DSH_HOME/diagnostics` for unhandled rejections it survives after startup, whatever this plugin's `directory`; the [launcher README](../../../apps/cli/README.md#startup-and-shutdown) describes those records.
+
 Node's own diagnostics are armed only when they cannot leak into the workspace or disclose credentials:
 
 - **Fatal-error report.** With `fatalErrorReport`, and Node started with `--report-exclude-env`, a fatal error such as running out of heap writes Node's `report.<date>.<time>.<pid>.<thread>.<seq>.json` into `directory`. The report holds the JavaScript and native stacks, heap space statistics, resource usage, and libuv handles, without environment variables. Without the flag the plugin leaves `process.report` untouched and logs why; `--report-exclude-network` also keeps network interfaces out.

@@ -538,6 +538,82 @@ describe('installFailLoud', () => {
     expect(proc.exits).toEqual([1])
   })
 
+  // After readiness a stray rejection ended only its own promise chain; the
+  // launcher records and shows it while the session continues.
+  it('hands a rejection after readiness to the reporter without writing or exiting', () => {
+    const proc = fakeProc()
+    const release = vi.fn()
+    const guard = installFailLoud(NAME, proc, release)
+    const reported: unknown[] = []
+    guard.tolerateRejections((reason) => { reported.push(reason) })
+    const first = new Error('late listener rejected')
+    proc.rejection(first)
+    proc.rejection('plain reason')
+    expect(reported).toEqual([first, 'plain reason'])
+    expect(proc.written).toEqual([])
+    expect(proc.exits).toEqual([])
+    expect(release).not.toHaveBeenCalled()
+    // The guard still removes both handlers.
+    guard()
+    expect(proc.handlers).toHaveLength(0)
+  })
+
+  it('keeps an uncaught exception fatal after readiness', async () => {
+    const proc = fakeProc()
+    let released = false
+    const guard = installFailLoud(NAME, proc, async () => {
+      await Promise.resolve()
+      released = true
+    })
+    const reported: unknown[] = []
+    guard.tolerateRejections((reason) => { reported.push(reason) })
+    proc.exception(new Error('listener threw'))
+    expect(proc.written[0]).toContain(`${NAME}: fatal uncaught exception: `)
+    // A rejection during the fatal release is swallowed, not reported over the exit.
+    proc.rejection(new Error('rejected during release'))
+    expect(reported).toEqual([])
+    await vi.waitFor(() => { expect(proc.exits).toEqual([1]) })
+    expect(released).toBe(true)
+    expect(proc.written).toHaveLength(1)
+  })
+
+  it('contains a reporter that throws with one warning line and keeps running', () => {
+    const proc = fakeProc()
+    const guard = installFailLoud(NAME, proc)
+    guard.tolerateRejections(() => { throw new Error('record failed') })
+    proc.rejection(new Error('late failure\nsecond line'))
+    // A reason with no string form is named by its type.
+    proc.rejection(Object.create(null))
+    expect(proc.written).toEqual([
+      `${NAME}: warning: unhandled rejection after startup: Error: late failure (reporting it failed: Error: record failed)\n`,
+      `${NAME}: warning: unhandled rejection after startup: object (reporting it failed: Error: record failed)\n`,
+    ])
+    expect(proc.exits).toEqual([])
+  })
+
+  it('still ignores an activation rejection the boot audit reported after readiness', async () => {
+    const proc = fakeProc()
+    const guard = installFailLoud(NAME, proc)
+    const reported: unknown[] = []
+    guard.tolerateRejections((reason) => { reported.push(reason) })
+    const error = new Error('assembled activation failure')
+    const audit = auditStartupEntries({
+      loader: {
+        entries: () => [{
+          options: { id: 'broken', name: 'broken' },
+          fiber: { state: 3, inject: {}, ctx: { get: () => undefined }, await: async () => { throw error } },
+        }],
+      },
+    } as unknown as Context, NAME, vi.fn())
+    await Promise.resolve()
+    await Promise.resolve()
+    proc.rejection(error)
+    expect(reported).toEqual([])
+    await audit
+    proc.rejection(error)
+    expect(reported).toEqual([error])
+  })
+
   it('awaits the release hook for an uncaught exception as it does for a rejection', async () => {
     const proc = fakeProc()
     let released = false
