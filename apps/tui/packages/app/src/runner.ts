@@ -235,7 +235,13 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
   }
   const repaint = (): void => { if (!terminalReleased && !editing) ui?.rerender(element()) }
   try {
-    await ctx.get('loader')?.await()
+    // Disposal must end this wait. The tree it waits on includes this runner's
+    // fiber, whose unload waits for the `finally` below.
+    const stopped = new Promise<void>((resolve) => {
+      if (abort.signal.aborted) resolve()
+      else abort.signal.addEventListener('abort', () => { resolve() }, { once: true })
+    })
+    await Promise.race([ctx.get('loader')?.await(), stopped])
     abort.signal.throwIfAborted()
     // The screen holds for the life of the process; a change to it in
     // `/settings` is read at the next launch.

@@ -10,6 +10,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { withFileLock, writeFileAtomic } from '../src/index.ts'
 
 const state = vi.hoisted(() => ({
+  contentSyncFailure: undefined as string | undefined,
+  directoryOpenFailure: undefined as string | undefined,
+  directorySyncFailure: undefined as string | undefined,
+  /** Durability-relevant calls in order: each sync with the path its handle opened, and each rename. */
+  durability: [] as string[],
   flockBusy: 0,
   flockGate: undefined as { reached: () => void; release: Promise<unknown> } | undefined,
   flockUnavailable: false,
@@ -53,9 +58,23 @@ vi.mock('node:fs/promises', async (importOriginal) => {
         if (state.releaseLockBeforeProbe) await actual.rm(String(path))
         throw Object.assign(new Error('EPERM: injected exclusive-create failure'), { code: 'EPERM' })
       }
-      return actual.open(...args)
+      // writeFileAtomic opens its temp sibling with 'wx' and the directory it syncs with 'r'.
+      const injectedOpen = flags === 'r' ? state.directoryOpenFailure : undefined
+      if (injectedOpen !== undefined) {
+        throw Object.assign(new Error(`${injectedOpen}: injected directory open failure`), { code: injectedOpen })
+      }
+      const handle = await actual.open(...args)
+      const sync = handle.sync.bind(handle)
+      handle.sync = async () => {
+        state.durability.push(`sync ${String(path)}`)
+        const injected = flags === 'r' ? state.directorySyncFailure : flags === 'wx' ? state.contentSyncFailure : undefined
+        if (injected !== undefined) throw Object.assign(new Error(`${injected}: injected sync failure`), { code: injected })
+        return sync()
+      }
+      return handle
     }),
     rename: (async (...args: Parameters<typeof actual.rename>) => {
+      state.durability.push(`rename ${String(args[0])} ${String(args[1])}`)
       state.renameAttempts += 1
       const code = state.renameFailures.shift()
       if (code !== undefined) {
@@ -87,6 +106,10 @@ afterEach(async () => {
     if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
     await exited
   }))
+  state.contentSyncFailure = undefined
+  state.directoryOpenFailure = undefined
+  state.directorySyncFailure = undefined
+  state.durability.length = 0
   state.flockBusy = 0
   state.flockGate = undefined
   state.flockUnavailable = false
@@ -264,6 +287,63 @@ describe('writeFileAtomic', () => {
 
     await expect(writeFileAtomic(target, 'new', { mode: 0o600 })).rejects.toMatchObject({ code: 'EPERM' })
     expect(state.renameAttempts).toBe(1)
+  })
+
+  it('syncs the content before the rename publishes it', async () => {
+    const dir = await scratch()
+    const target = join(dir, 'document')
+    await writeFileAtomic(target, 'new', { mode: 0o600 })
+
+    const [contentSync, rename] = state.durability
+    const temp = contentSync?.slice('sync '.length) ?? ''
+    expect(dirname(temp)).toBe(dir)
+    expect(temp).toMatch(/\.tmp$/)
+    expect(rename).toBe(`rename ${temp} ${target}`)
+  })
+
+  it.skipIf(process.platform === 'win32')('syncs the parent directory after the rename', async () => {
+    const dir = await scratch()
+    const target = join(dir, 'nested', 'document')
+    await writeFileAtomic(target, 'new', { mode: 0o600 })
+
+    expect(state.durability.map(call => call.split(' ')[0])).toEqual(['sync', 'rename', 'sync'])
+    expect(state.durability[2]).toBe(`sync ${dirname(target)}`)
+  })
+
+  it('leaves the target untouched and no temp sibling when syncing the content fails', async () => {
+    const dir = await scratch()
+    const target = join(dir, 'document')
+    await writeFile(target, 'old')
+    state.contentSyncFailure = 'EIO'
+
+    await expect(writeFileAtomic(target, 'new', { mode: 0o600 })).rejects.toMatchObject({ code: 'EIO' })
+    expect(state.renameAttempts).toBe(0)
+    expect(await readFile(target, 'utf8')).toBe('old')
+    expect(await readdir(dir)).toEqual(['document'])
+  })
+
+  it.skipIf(process.platform === 'win32')('keeps the replacement when the filesystem cannot sync the directory', async () => {
+    const dir = await scratch()
+    const target = join(dir, 'document')
+    state.directorySyncFailure = 'EINVAL'
+    await writeFileAtomic(target, 'synced-refused', { mode: 0o600 })
+    expect(await readFile(target, 'utf8')).toBe('synced-refused')
+
+    state.directorySyncFailure = undefined
+    state.directoryOpenFailure = 'EACCES'
+    await writeFileAtomic(target, 'unreadable-directory', { mode: 0o600 })
+    expect(await readFile(target, 'utf8')).toBe('unreadable-directory')
+  })
+
+  it.skipIf(process.platform === 'win32')('reports a directory sync I/O error with the replacement already visible', async () => {
+    const dir = await scratch()
+    const target = join(dir, 'document')
+    await writeFile(target, 'old')
+    state.directorySyncFailure = 'EIO'
+
+    await expect(writeFileAtomic(target, 'new', { mode: 0o600 })).rejects.toMatchObject({ code: 'EIO' })
+    expect(await readFile(target, 'utf8')).toBe('new')
+    expect(await readdir(dir)).toEqual(['document'])
   })
 })
 
