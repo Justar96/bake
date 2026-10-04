@@ -89,15 +89,30 @@ export async function runCli(): Promise<void> {
       break
     }
     case 'update': {
-      const { runUpdate } = await import('./update.ts')
+      const { runRollback, runUpdate } = await import('./update.ts')
       const abort = new AbortController()
       const cancel = (): void => abort.abort()
       process.once('SIGINT', cancel)
       try {
-        process.exitCode = await runUpdate(invocation.check, version, { signal: abort.signal })
+        process.exitCode = invocation.rollback
+          ? await runRollback({ signal: abort.signal })
+          : await runUpdate(invocation.check, version, { signal: abort.signal })
       } finally {
         process.off('SIGINT', cancel)
       }
+      break
+    }
+    case 'self-check': {
+      // The renderer build a launch loads, chosen before anything imports React.
+      selectRendererBuild()
+      const { runSelfCheck } = await import('./self-check.ts')
+      const code = await runSelfCheck(version)
+      // Imported modules may hold handles open, and the check waits for
+      // nothing more: exit once its report has reached the pipes.
+      await Promise.all([process.stdout, process.stderr].map(stream => new Promise<void>((resolve) => {
+        stream.write('', () => resolve())
+      })))
+      process.exit(code)
       break
     }
     case 'dump-config': {

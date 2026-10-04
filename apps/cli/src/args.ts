@@ -12,11 +12,13 @@
  *
  * `dsh <name>` abbreviates `dsh --profile <name>`; `plugin` manages a profile's
  * plugin dependencies by forwarding to pnpm, and `update` replaces a managed
- * Bake install with the newest signed release.
+ * Bake install with the newest signed release, or returns it to an earlier
+ * one. The hidden `--self-check` loads what a launch loads and exits; the
+ * updater and the release pack run it on a release before trusting it.
  * @module @deepseek-ai/dsh/args
  */
 
-import { Command, CommanderError, InvalidArgumentError } from 'commander'
+import { Command, CommanderError, InvalidArgumentError, Option } from 'commander'
 
 /** Boot a named profile and hand it the invocation's inner arguments. */
 interface ProfileInvocation {
@@ -58,14 +60,24 @@ interface PluginInvocation {
   args: string[]
 }
 
-/** Update a managed install, or with `check`, only report whether one is available. */
+/**
+ * Update a managed install; with `check`, only report whether an update is
+ * available; with `rollback`, return to the newest earlier release installed.
+ */
 interface UpdateInvocation {
   mode: 'update'
   check: boolean
+  rollback: boolean
+}
+
+/** Load what launching this release loads, report, and exit. */
+interface SelfCheckInvocation {
+  mode: 'self-check'
 }
 
 /** The resolved `dsh` invocation. Help, version, and errors exit inside {@link parseDshArgs}. */
-export type DshInvocation = ProfileInvocation | DumpConfigInvocation | DumpConfigSchemaInvocation | PluginInvocation | UpdateInvocation
+export type DshInvocation =
+  | ProfileInvocation | DumpConfigInvocation | DumpConfigSchemaInvocation | PluginInvocation | UpdateInvocation | SelfCheckInvocation
 
 /** Launcher flags for profile boot and configuration dumps. */
 interface BootOptions {
@@ -74,6 +86,7 @@ interface BootOptions {
   dumpDefaultConfig?: boolean
   dumpConfigSchema?: boolean
   fromDefaultProfile?: string
+  selfCheck?: boolean
 }
 
 /**
@@ -100,6 +113,7 @@ Examples:
   dsh plugin --profile tui add <package>    install a plugin into the tui profile
   dsh update                                install the newest Bake release
   dsh update --check                        only report whether a newer release exists
+  dsh update --rollback                     return to the newest earlier release installed
 `
 
 /**
@@ -173,7 +187,15 @@ export function parseDshArgs(argv: readonly string[], version: string): DshInvoc
     .option('--dump-config', 'print the composed profile tree and exit')
     .option('--dump-config-schema', 'print JSON Schema for profile entries and patches without mounting')
     .option('--dump-default-config', 'print the profile tree without its user layer or --patch overlays and exit')
+    // For the updater and the release pack, which run it on a release they
+    // have not started yet; documented in the package README.
+    .addOption(new Option('--self-check', 'load the shipped profiles and the terminal runner, then exit').hideHelp())
     .action((args: string[], options: BootOptions & { profile?: string }) => {
+      if (options.selfCheck === true) {
+        if (argv.length !== 1) program.error('error: --self-check takes no other arguments')
+        resolved = { mode: 'self-check' }
+        return
+      }
       // With the app owning -h, the launcher's own help is what a bare
       // `dsh -h` (no profile to hand it to) must print.
       if (options.profile === undefined) {
@@ -202,7 +224,10 @@ export function parseDshArgs(argv: readonly string[], version: string): DshInvoc
     program.command('update')
       .description('replace this Bake install with the newest signed release; the running sessions keep their version')
       .option('--check', 'only report whether a newer release exists; exit 0 when up to date, 10 when one is available')
-      .action((options: { check?: boolean }) => { resolved = { mode: 'update', check: options.check === true } })
+      .addOption(new Option('--rollback', 'return to the newest installed release older than the current one').conflicts('check'))
+      .action((options: { check?: boolean; rollback?: boolean }) => {
+        resolved = { mode: 'update', check: options.check === true, rollback: options.rollback === true }
+      })
   }
 
   try {

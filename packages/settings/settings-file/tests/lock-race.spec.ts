@@ -30,12 +30,19 @@ vi.mock('node:fs/promises', async (importOriginal) => {
         state.failDocumentCreate = false
         throw Object.assign(new Error('ENOSPC: injected document create failure'), { code: 'ENOSPC' })
       }
-      if (state.failTempWrite && String(path).endsWith('.tmp')) {
-        state.failTempWrite = false
-        throw Object.assign(new Error('ENOSPC: injected writeFile failure'), { code: 'ENOSPC' })
-      }
       return (actual.writeFile as (path: unknown, ...args: never[]) => Promise<void>)(path, ...rest)
     }) as typeof actual.writeFile,
+    // The atomic replacement writes its temp sibling through the handle it syncs.
+    open: (async (...args: Parameters<typeof actual.open>) => {
+      const handle = await actual.open(...args)
+      if (state.failTempWrite && String(args[0]).endsWith('.tmp')) {
+        state.failTempWrite = false
+        handle.writeFile = async () => {
+          throw Object.assign(new Error('ENOSPC: injected writeFile failure'), { code: 'ENOSPC' })
+        }
+      }
+      return handle
+    }) as typeof actual.open,
   }
 })
 

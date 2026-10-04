@@ -21,6 +21,9 @@ const supported = new Set(['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x
 if (!supported.has(target)) throw new Error(`Unsupported release target: ${target}`)
 if (!isReleaseVersion(cli.version)) throw new Error('CLI version is not a release version')
 
+/** `--help` loads no session, so taking longer means shutdown is waiting out its 5 s forced-exit grace. */
+const HELP_LIMIT_MS = 3_000
+
 async function run(argv: string[], cwd: string): Promise<void> {
   const child = Bun.spawn(argv, { cwd, stdin: 'inherit', stdout: 'inherit', stderr: 'inherit' })
   const code = await child.exited
@@ -108,20 +111,28 @@ try {
     throw error
   }
 
+  // The check `bake update` runs on a downloaded release before switching to
+  // it: load both shipped profiles, the agent presets, and the terminal runner
+  // in this platform's installed layout. The check keeps its own private
+  // home; this one only receives the launcher's diagnostics directory.
   const home = mkdtempSync(join(tmpdir(), 'bake-pack-home-'))
   try {
-    const check = Bun.spawn(['node', 'apps/cli/lib/bin.js', '--profile', 'tui', '--help'], {
-      cwd: stage, env: { ...process.env, DSH_HOME: home }, stdout: 'pipe', stderr: 'inherit',
+    const check = Bun.spawn(['node', 'apps/cli/lib/bin.js', '--self-check'], {
+      cwd: stage, env: { ...process.env, DSH_HOME: home }, stdout: 'pipe', stderr: 'inherit', timeout: 120_000,
     })
     const output = await new Response(check.stdout).text()
-    if (await check.exited !== 0 || !output.includes('Usage:')) throw new Error('Staged CLI did not boot')
-    // `--help` stops before the terminal loads its runner, which imports
-    // packages of its own; resolve them in this platform's installed layout.
-    const lazy = ['runner-loader', 'ui-loader', 'syntax-loader'].map(name => `./apps/tui/packages/app/lib/${name}.js`)
-    const load = Bun.spawn(['node', '--input-type=module', '-e', `for (const entry of ${JSON.stringify(lazy)}) await import(entry)`], {
-      cwd: stage, env: { ...process.env, DSH_HOME: home, NODE_ENV: 'production' }, stdout: 'inherit', stderr: 'inherit',
+    if (await check.exited !== 0 || !output.split(/\s+/).includes(cli.version)) throw new Error(`Staged release failed its self-check: ${output.trim()}`)
+    console.log(output.trim())
+    // The self-check applies no plugin. `--help` boots the profile and disposes
+    // it, which must finish well inside the launcher's 5 s forced-exit grace.
+    const started = performance.now()
+    const help = Bun.spawn(['node', 'apps/cli/lib/bin.js', '--profile', 'tui', '--help'], {
+      cwd: stage, env: { ...process.env, DSH_HOME: home }, stdout: 'pipe', stderr: 'inherit',
     })
-    if (await load.exited !== 0) throw new Error('Staged terminal runner did not load')
+    const usage = await new Response(help.stdout).text()
+    if (await help.exited !== 0 || !usage.includes('Usage:')) throw new Error('Staged CLI did not boot')
+    const elapsed = Math.round(performance.now() - started)
+    if (elapsed > HELP_LIMIT_MS) throw new Error(`Staged CLI took ${elapsed} ms to print help; the limit is ${HELP_LIMIT_MS} ms`)
   } finally {
     rmSync(home, { recursive: true, force: true })
   }

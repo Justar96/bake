@@ -1,6 +1,6 @@
 /**
- * Bake's self-updater: check the signed release manifest, and install a
- * newer release beside the running one.
+ * Bake's self-updater: check the signed release manifest, install a newer
+ * release beside the running one, and roll back to an earlier one.
  *
  * Only a managed install — one the installers laid out under
  * `<root>/versions/` — is updated. The running release keeps running from its
@@ -25,3 +25,7 @@ export {
   statusOf, type RefreshOptions, type ReleaseStatus,
 } from './check.ts'
 export { selfUpdate, type SelfUpdateOptions, type UpdateOutcome } from './update.ts'
+export { rollbackRelease, rollbackTarget, type RollbackOptions, type RollbackOutcome } from './rollback.ts'
+export {
+  failureLine, LAST_RELEASE_WITHOUT_SELF_CHECK, LAUNCH_CHECK_TIMEOUT_MS, launchProblem, RELEASE_COMMAND, type LaunchCheck,
+} from './verify.ts'

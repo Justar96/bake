@@ -216,6 +216,7 @@ export const dictionaries = {
     modelCancelled: 'Model selection cancelled', modelUsage: 'Usage: /model [provider/model [effort]]',
     completionTitle: 'Commands and skills', completionHelp: '↑↓ choose · Tab completes · Esc closes', send: 'Enter sends',
     moreMatches: 'more, keep typing to narrow', moreLines: 'more lines', earlierCalls: 'earlier calls', attemptDiscarded: 'discarded: the text above was not kept', tabCompletes: 'Tab completes',
+    unhandledRejection: 'Internal error', unhandledRejectionContinues: 'the session continues', unhandledRejectionRecord: 'details in',
     filesTitle: 'Workspace files', file: 'File', directory: 'Directory', noFiles: 'No matching paths',
     filesLoading: 'Finding paths…', filesError: 'File discovery failed', filesUnavailable: 'This profile has no file-reference provider',
     skill: 'Skill', catalogLoading: 'Loading skills…', catalogError: 'Skill discovery failed',

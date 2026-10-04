@@ -7,7 +7,9 @@ import type { Include } from '@deepseek-ai/cordis-plugin-include'
 import { FSWatcher, watch, type ChokidarOptions } from 'chokidar'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { readFileSync, realpathSync } from 'node:fs'
-import { readProfileManifest, readProfilePatches, reconcileProfilePatches, PROFILE_PATCH_FILENAME } from '@deepseek-ai/dsh-app-boot'
+import {
+  isProfileGenerationApplied, readProfileManifest, readProfilePatches, reconcileProfilePatches, PROFILE_PATCH_FILENAME,
+} from '@deepseek-ai/dsh-app-boot'
 import type {} from '@deepseek-ai/dsh-cmdline'
 import { handleError } from './error.ts'
 import type {} from '@deepseek-ai/cordis-plugin-timer'
@@ -157,6 +159,7 @@ class Hmr extends Service {
   }
 
   /** Watch a configuration path through the same queue as module replacement.
+   * Only edits after the watch starts are reported; the caller applies the file as it found it.
    * @param filename Absolute path, which may not exist yet.
    * @param refresh Rebuilds configuration from its current files and awaits Loader completion.
    * @returns Disposer closing this registration and waiting for its pending refresh.
@@ -215,16 +218,18 @@ class Hmr extends Service {
       const patchFiles = [profile.patchPath, join(profile.home, PROFILE_PATCH_FILENAME)]
       let lastInputs: string | undefined
       let lastBundles = JSON.stringify(profile.startedBundles)
+      const readBundles = (): string => JSON.stringify(readProfileManifest('dsh', profile.dir).dsh?.profile?.bundles ?? [])
+      const readInputs = (bundles: string): string => JSON.stringify([bundles, ...patchFiles.map((filename) => {
+        try { return readFileSync(filename, 'utf8') }
+        catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+          throw error
+        }
+      })])
       const refresh = async (manifestOnly: boolean): Promise<void> => {
-        const bundles = JSON.stringify(readProfileManifest('dsh', profile.dir).dsh?.profile?.bundles ?? [])
+        const bundles = readBundles()
         if (manifestOnly && bundles === lastBundles) return
-        const inputs = JSON.stringify([bundles, ...patchFiles.map((filename) => {
-          try { return readFileSync(filename, 'utf8') }
-          catch (error) {
-            if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
-            throw error
-          }
-        })])
+        const inputs = readInputs(bundles)
         if (inputs === lastInputs) return
         const patches = readProfilePatches('dsh', profile)
         const warnings = await reconcileProfilePatches(this.ownerContext.root, patches, 'dsh')
@@ -234,6 +239,27 @@ class Hmr extends Service {
       }
       for (const filename of patchFiles) await this.watchConfig(filename, () => refresh(false))
       await this.watchConfig(manifestPath, () => refresh(true))
+      // The watches report only later edits, and boot composed the files before they started.
+      // Adopt the current inputs when they still compose to the generation boot applied;
+      // otherwise apply them once the application is ready.
+      const adoptStartupInputs = (): boolean => {
+        try {
+          const bundles = readBundles()
+          const inputs = readInputs(bundles)
+          if (!isProfileGenerationApplied(this.ownerContext.root, readProfilePatches('dsh', profile))) return false
+          // An edit during the comparison could pair these inputs with a different composition.
+          if (readInputs(readBundles()) !== inputs) return false
+          lastInputs = inputs
+          lastBundles = bundles
+          return true
+        } catch {
+          // The scheduled refresh reads the same files again and reports the failure.
+          return false
+        }
+      }
+      if (!adoptStartupInputs()) {
+        void this.runReload(() => refresh(false)).catch((error: unknown) => { this.ctx.logger.warn(error) })
+      }
     }
 
     const { loader } = this.ctx

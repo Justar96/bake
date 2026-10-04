@@ -5,7 +5,8 @@
  *
  * 1. Take the install lock, recovering one whose holder has exited.
  * 2. Stream the archive into `<root>/.staging/`, checking its size and hash.
- * 3. Unpack it there, then start the unpacked command and check its version.
+ * 3. Unpack it there, then run the unpacked release's launch check (see
+ *    {@link launchProblem}).
  * 4. Rename the unpacked tree into `versions/`, on the same filesystem.
  * 5. Move `current`: an atomic link rename on Unix, an atomic pointer-file
  *    rename on Windows.
@@ -17,12 +18,13 @@
  */
 
 import { createHash, randomBytes } from 'node:crypto'
-import { execFile, spawn } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { createWriteStream, existsSync, lstatSync, readFileSync } from 'node:fs'
 import { mkdir, readdir, rename, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { archiveUrl, UpdateError, type ReleaseArtifact, type ReleaseManifest, type ReleaseSource } from './manifest.ts'
 import { CURRENT_POINTER, currentOf, directoryFor, versionDirectory, type ManagedInstall } from './layout.ts'
+import { launchProblem } from './verify.ts'
 
 /** A lock older than this is abandoned whatever its process id says: no install takes half an hour. */
 const LOCK_STALE_MS = 30 * 60 * 1000
@@ -30,15 +32,13 @@ const LOCK_STALE_MS = 30 * 60 * 1000
 export const PRUNE_AFTER_MS = 7 * 24 * 60 * 60 * 1000
 /** File each launch touches in its own version directory, so pruning can tell an idle release from a running one. */
 export const LAUNCH_MARKER = '.last-launch'
-/** Bound on starting the unpacked command to read its version. */
-const SMOKE_TIMEOUT_MS = 60_000
 
 /** Where an install has got to, for a surface that shows it. */
 export type InstallProgress =
   /** Archive bytes received so far, out of the manifest's stated size. */
   | { readonly phase: 'download'; readonly received: number; readonly total: number }
   | { readonly phase: 'unpack' }
-  /** Starting the unpacked command to check its version. */
+  /** Running the release's launch check. */
   | { readonly phase: 'verify' }
 
 /** Everything one install needs, injected so tests own every effect. */
@@ -46,7 +46,7 @@ export interface InstallOptions extends ReleaseSource {
   readonly layout: ManagedInstall
   readonly manifest: ReleaseManifest
   readonly artifact: ReleaseArtifact
-  /** Node executable that starts the unpacked command; the running one by default. */
+  /** Node executable that runs the release's launch check; the running one by default. */
   readonly node?: string
   /** Time source, for the lock's age. */
   readonly now?: () => number
@@ -88,7 +88,8 @@ export async function installRelease(options: InstallOptions): Promise<InstallRe
     const directory = directoryFor(manifest.version, artifact.sha256)
     const destination = join(layout.root, 'versions', directory)
     const node = options.node ?? process.execPath
-    if (!await starts(node, destination, manifest.version)) {
+    const check = { node, version: manifest.version, signal: options.signal }
+    if (await launchProblem({ ...check, release: destination }) !== undefined) {
       const work = join(staging, randomBytes(6).toString('hex'))
       await mkdir(work, { recursive: true })
       const archive = join(work, artifact.file)
@@ -98,11 +99,12 @@ export async function installRelease(options: InstallOptions): Promise<InstallRe
       options.onProgress?.({ phase: 'unpack' })
       await run(platform === 'win32' ? 'tar.exe' : 'tar', ['-xzf', archive, '-C', unpacked], options.signal)
       options.onProgress?.({ phase: 'verify' })
-      if (!await starts(node, unpacked, manifest.version)) {
-        throw new UpdateError(`The downloaded Bake ${manifest.version} did not start; the current install is unchanged`)
+      const problem = await launchProblem({ ...check, release: unpacked })
+      if (problem !== undefined) {
+        throw new UpdateError(`The downloaded Bake ${manifest.version} did not start; the current install is unchanged: ${problem}`)
       }
-      // A directory that exists but did not start is a damaged copy: set it
-      // aside under staging rather than install over it.
+      // A directory that exists but failed its check is a damaged copy: set
+      // it aside under staging rather than install over it.
       if (existsSync(destination)) await rename(destination, join(work, 'damaged'))
       await rename(unpacked, destination)
       await rm(work, { recursive: true, force: true })
@@ -195,23 +197,6 @@ async function downloadArchive(options: InstallOptions, path: string): Promise<v
   }
   if (size !== artifact.size) throw new UpdateError(`${artifact.file} is ${size} bytes, not the ${artifact.size} the release manifest says`)
   if (hash.digest('hex') !== artifact.sha256) throw new UpdateError(`${artifact.file} did not match the release manifest's SHA-256`)
-}
-
-/** Whether the command in `release` starts and reports `version`. */
-async function starts(node: string, release: string, version: string): Promise<boolean> {
-  const bin = join(release, 'apps/cli/lib/bin.js')
-  if (!existsSync(bin)) return false
-  try {
-    const output = await new Promise<string>((resolve, reject) => {
-      execFile(node, [bin, '--version'], { timeout: SMOKE_TIMEOUT_MS, windowsHide: true }, (error, stdout) => {
-        if (error === null) resolve(stdout)
-        else reject(error)
-      })
-    })
-    return output.trim().split(/\s+/).includes(version)
-  } catch {
-    return false
-  }
 }
 
 function run(command: string, args: readonly string[], signal: AbortSignal | undefined): Promise<void> {
