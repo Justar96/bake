@@ -15,6 +15,7 @@ import { InteractionView, type Interaction, type InteractionAnswer } from './int
 import { budgetFor, selectionWindow, type Budget, type FrameStyle, type WindowSize } from './layout.ts'
 import { present, type Highlight, type ResultBound } from './present.ts'
 import { PALETTE, type PaletteColor } from './palette.ts'
+import { BackgroundRow, type BackgroundEntry } from './background.tsx'
 import { InspectionBar, SubagentRow, subagentLine, subagentSheet, subagentTab, type SubagentEntry } from './subagents.tsx'
 import { goalSheet, goalState, type GoalEntry } from './goal.ts'
 import type { GitState } from './git.ts'
@@ -77,6 +78,8 @@ export interface AppProps {
   readonly interaction: Interaction | undefined
   /** Child identities and activity from the Harness catalog, including saved history. */
   readonly subagents?: readonly SubagentEntry[]
+  /** The agent's background jobs from the job registry, oldest first; a row under the input lists them while any runs. */
+  readonly background?: readonly BackgroundEntry[]
   /** Read-only child session; the parent composer stays mounted while it is open. */
   readonly inspection?: {
     readonly sessionId: string
@@ -686,7 +689,8 @@ function SessionView(props: AppProps): React.ReactElement {
   // Memoized so the committed transcript is not re-rendered on every frame.
   const result = useMemo<ResultBound>(
     () => ({ lines: props.resultLines, unit: copy.cardLines, single: copy.cardLine, more: copy.moreLines, failures: copy.summaryFailures, earlier: copy.earlierCalls,
-      script: copy.scriptLabel, scriptOutput: copy.scriptOutput,
+      script: copy.scriptLabel, scriptOutput: copy.scriptOutput, scriptError: copy.scriptError,
+      call: copy.scriptCall, calls: copy.scriptCalls, moreCalls: copy.moreCalls, background: copy.backgroundTag,
       files: copy.cardFiles, moreFiles: copy.moreFiles, moreFile: copy.moreFile, ...props.highlight === undefined ? {} : { code: props.highlight } }),
     [props.resultLines, props.highlight, copy])
   // Decided once per mount. A session with no history when it opens gets the
@@ -718,6 +722,9 @@ function SessionView(props: AppProps): React.ReactElement {
   // before anything above the input, so the input's row never depends on
   // what streams over it.
   const subagentLimit = claim((hasSubagents || props.inspectionParent !== undefined) && interaction === undefined ? 1 : 0)
+  // Running background work, under the subagents row; it yields first.
+  const backgroundLimit = claim(props.inspectionParent === undefined && interaction === undefined
+    && props.background?.some(entry => entry.running) === true ? 1 : 0)
   // An open sheet takes every row the interaction leaves. Below five it
   // replaces the whole region, composer included, so it can still be read.
   const sheetColor = (kind: SheetKind): PaletteColor =>
@@ -743,7 +750,7 @@ function SessionView(props: AppProps): React.ReactElement {
       : {
         color: sheetColor(sheet), keys: sheetKeys(sheet),
         ...sheet === 'goal' ? { lines: goalSheet(props.goal!, copy) }
-          : { lines: subagentSheet(props.subagents ?? [], agentIndex, copy), ...subagentFollow },
+          : { lines: subagentSheet(props.subagents ?? [], agentIndex, copy, size.columns), ...subagentFollow },
       }
   const sheetLimit = claim(sheetView === undefined ? 0 : unclaimed)
   const sheetStandalone = sheetView !== undefined && sheetLimit < 5
@@ -896,11 +903,14 @@ function SessionView(props: AppProps): React.ReactElement {
               clock={clock}
               motion={animate !== undefined}
               compact={screenReader}
-              {...subagentLimit === 0 ? {} : { footer: (columns: number) => props.inspectionParent === undefined
-                ? <SubagentRow entries={props.subagents ?? []} copy={copy} columns={columns} focused={focus === 'subagents'}
-                  hint={copy.subagentsKey} />
-                : <InspectionBar label={props.inspectionLabel ?? props.sessionId} entries={props.subagents ?? []} id={props.sessionId}
-                  working={props.status === 'running'} copy={copy} columns={columns} /> }}
+              {...subagentLimit + backgroundLimit === 0 ? {} : { footer: (columns: number) => <Box flexDirection="column" flexShrink={0}>
+                {subagentLimit > 0 && (props.inspectionParent === undefined
+                  ? <SubagentRow entries={props.subagents ?? []} copy={copy} columns={columns} focused={focus === 'subagents'}
+                    hint={copy.subagentsKey} />
+                  : <InspectionBar label={props.inspectionLabel ?? props.sessionId} entries={props.subagents ?? []} id={props.sessionId}
+                    working={props.status === 'running'} copy={copy} columns={columns} />)}
+                {backgroundLimit > 0 && <BackgroundRow entries={props.background ?? []} copy={copy} columns={columns} />}
+              </Box> }}
             >
               {panels}
             </Chrome>

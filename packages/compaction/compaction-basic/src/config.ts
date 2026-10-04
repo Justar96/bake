@@ -17,11 +17,12 @@ import type {
   ResolvedThreshold,
 } from './types.ts'
 
-/** Default request-pressure fraction for every routed model. */
-const DEFAULT_THRESHOLD_RATIO = 0.8
-
-/** Default verbatim-tail fraction for every routed model. */
-const DEFAULT_RETAIN_RATIO = 0.16
+/**
+ * The policy an empty configuration resolves to: pressure at 80% of the
+ * routed context window, the newest 16% kept verbatim, and an 8192-token
+ * summary. Settings surfaces show it as what a reset returns to.
+ */
+export const COMPACTION_DEFAULTS = { thresholdRatio: 0.8, retainRatio: 0.16, maxTokens: 8192 } as const
 
 /** Fields shared by top-level defaults and per-route overrides. */
 const POLICY_CONFIG_KEYS = [
@@ -80,8 +81,8 @@ export function resolveConfig(
     throw new Error(`${name}: auto must be a boolean`)
   }
 
-  const threshold = resolveThreshold(config, { thresholdRatio: DEFAULT_THRESHOLD_RATIO })
-  const retention = resolveRetention(config, { retainRatio: DEFAULT_RETAIN_RATIO })
+  const threshold = resolveThreshold(config, { thresholdRatio: COMPACTION_DEFAULTS.thresholdRatio })
+  const retention = resolveRetention(config, { retainRatio: COMPACTION_DEFAULTS.retainRatio })
   validateThresholdRetention(threshold, retention, name)
   const modelPolicies = resolveModelPolicies(config.modelPolicies, name)
   for (const [index, policy] of modelPolicies.entries()) {
@@ -102,7 +103,7 @@ export function resolveConfig(
     ...retention,
     summarizationProvider: config.summarizationProvider ?? '',
     summarizationModel: config.summarizationModel ?? '',
-    maxTokens: config.maxTokens ?? 8192,
+    maxTokens: config.maxTokens ?? COMPACTION_DEFAULTS.maxTokens,
     compactionRetries: config.compactionRetries ?? 1,
     maxOverflowRetries: config.maxOverflowRetries ?? 1,
     modelPolicies,

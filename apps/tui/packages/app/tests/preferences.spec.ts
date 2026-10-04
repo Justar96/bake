@@ -14,6 +14,11 @@ import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'
 import { stepTab, type ChoicePrompt } from '@dsh-tui/ui/picker.tsx'
 import SubagentModelSelection from '@deepseek-ai/dsh-tool-subagent/model-selection-settings'
+import BasicCompactionEngine from '@deepseek-ai/dsh-compaction-basic'
+import LlmRuntime from '@deepseek-ai/dsh-llm'
+import SessionStore from '@deepseek-ai/dsh-session'
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
+import TokenMeter from '@deepseek-ai/dsh-token-meter'
 import type { Interactions } from '../src/interactions.ts'
 import { Preferences, SETTINGS_NAMESPACE, type TuiSettings } from '../src/preferences.ts'
 import { formatBytes, formatDuration, parseNumber, schemaFields } from '../src/schema-fields.ts'
@@ -128,9 +133,20 @@ describe('Preferences', () => {
       description: copy.settingsScreenFullscreen, status: { text: copy.settingsNextLaunch },
     })
     expect(page.choices.find(choice => choice.value === 'setting:goalObjective')?.description).toBe(copy.settingsOn)
-    // The value picker marks what is in force, and the profile's value.
-    expect(prompts[2]!.choices.find(choice => choice.current === true)?.value).toBe('inline')
-    expect(prompts[2]!.choices.find(choice => choice.value === 'inline')?.description).toBe(copy.settingsDefault)
+    // A changed setting is marked, and says under the list what it does and what a reset returns to.
+    expect(page.marks).toBe(true)
+    expect(page.choices.find(choice => choice.value === 'setting:screen')).toMatchObject({
+      mark: { glyph: '\u2022' },
+      detail: `${copy.settingsScreenAbout} · ${copy.settingsChanged}; ${copy.settingsDefaultIs} ${copy.settingsScreenInline}`,
+    })
+    expect(page.choices.find(choice => choice.value === 'setting:composerFrame')).toMatchObject({ detail: copy.settingsFrameAbout })
+    expect(page.choices.find(choice => choice.value === 'setting:composerFrame')).not.toHaveProperty('mark')
+    // The value picker names the setting, and says what is in force and what is the profile's in one column.
+    expect(prompts[2]!.title).toBe(copy.settingsScreen)
+    expect(prompts[2]!.choices.find(choice => choice.current === true)).toMatchObject({
+      value: 'inline', status: { text: `${copy.currentSelection} · ${copy.settingsDefault}`, tone: 'done' }, detail: copy.settingsScreenAbout,
+    })
+    expect(prompts[2]!.choices.find(choice => choice.value === 'fullscreen')).not.toHaveProperty('status')
   })
 
   it('closes without a message when nothing changed, and offers no reset over defaults', async () => {
@@ -309,7 +325,7 @@ describe('Preferences', () => {
     ])
     // Steps in the setting's unit, the schema's default marked, and a typed value last.
     expect(prompts[2]!.choices.map(choice => choice.label)).toEqual(['30s', '1m', '2m', '5m', '10m', copy.settingsCustom])
-    expect(prompts[2]!.choices.find(choice => choice.label === '2m')).toMatchObject({ current: true, description: copy.settingsDefault })
+    expect(prompts[2]!.choices.find(choice => choice.label === '2m')).toMatchObject({ current: true, status: { text: `${copy.currentSelection} · ${copy.settingsDefault}` } })
     expect(prompts[7]!.warning).toBe(`${copy.settingsFailed}: timeoutMs exceeds maxTimeoutMs`)
     expect(MemoryProvider.doc['shell']).toEqual({ timeoutMs: 300_000, maxOutputBytes: 256_000 })
     expect(MemoryProvider.doc['agent-loop']).toEqual({ maxParallelToolCalls: 8 })
@@ -346,8 +362,9 @@ describe('Preferences', () => {
       ['apiKey', copy.settingsSecretSet], ['mode', 'Fast answers'], ['verbose', copy.settingsOff],
       ['limits.retries', '2'], ['hosts', `[0] · ${copy.settingsInFile}`], ['label', copy.settingsEmpty],
     ])
-    // The owner's description titles the value list.
-    expect(prompts[6]!.title).toBe('limits.retries · Retries before giving up')
+    // The owner's description says under the value list what the field does.
+    expect(prompts[6]!.title).toBe('limits.retries')
+    expect(prompts[6]!.choices[0]?.detail).toBe('Retries before giving up')
     expect(prompts[7]!.warning).toBe(`limits.retries: ${copy.settingsAboveMax} 9`)
     // A string with nothing to pick from asks for its text at once.
     expect(typed.at(-1)).toEqual({ kind: 'text', message: 'label' })
@@ -519,6 +536,116 @@ describe('Preferences', () => {
     await run(preferences, plain.interactions)
     expect(plain.prompts[1]!.choices.filter(choice => choice.value.startsWith('setting:subagent')).map(choice => choice.label))
       .toEqual([copy.settingsSubagentModels])
+  })
+})
+
+describe('compaction settings', () => {
+  const ROUTE = { provider: 'deepseek', model: 'deepseek-chat' }
+
+  /** The real engine, so its own rules judge each save. */
+  async function compaction() {
+    const mounted = await mount()
+    const { ctx } = mounted
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(SessionProjectionRegistry)
+    await ctx.plugin(TokenMeter)
+    await ctx.plugin(BasicCompactionEngine, {})
+    await vi.waitFor(() => expect(ctx.settings.describe().some(entry => entry.ns === 'compaction-basic')).toBe(true))
+    const engine = () => ctx.get('compaction') as unknown as BasicCompactionEngine
+    return { ...mounted, threshold: () => engine().pressureThreshold(ROUTE, 100_000), engine }
+  }
+  const rows = (prompt: ChoicePrompt) => prompt.choices.filter(choice => choice.searchOnly !== true)
+    .map(choice => [choice.label, choice.description])
+
+  it('names where compaction starts and what it keeps in a reader\'s terms, and writes one form in place of the other', async () => {
+    const { preferences, threshold } = await compaction()
+    const { interactions, prompts, typed } = scripted(
+      pick('tab:compaction'),
+      pick('setting:compaction-basic.threshold'), labelled(copy.settingsCustom), { typed: '60k' },
+      pick('setting:compaction-basic.threshold'), labelled(`70% ${copy.settingsOfContext}`),
+      pick('setting:compaction-basic.retain'), labelled(copy.settingsCustom), { typed: '12.5%' },
+      // Neither a percent nor a count; then a tail the engine refuses beside its threshold.
+      pick('setting:compaction-basic.retain'), labelled(copy.settingsCustom), { typed: 'lots' },
+      pick('setting:compaction-basic.retain'), labelled(copy.settingsCustom), { typed: '90%' },
+      back,
+    )
+    expect(threshold()).toBe(80_000)
+    await run(preferences, interactions)
+    expect(rows(prompts[1]!)).toEqual([
+      [copy.settingsCompactionAuto, copy.settingsOn],
+      [copy.settingsCompactionAt, `80% ${copy.settingsOfContext}`],
+      [copy.settingsCompactionKeep, `16% ${copy.settingsOfContext}`],
+      [copy.settingsCompactionModel, copy.settingsCompactionSameModel],
+      [copy.settingsCompactionLimit, `8192 ${copy.settingsTokens}`],
+      [copy.settingsCompactionRules, `${copy.settingsCompactionRulesNone} · ${copy.settingsInFile}`],
+    ])
+    // Shares of the window, the engine's default marked, and a typed value that takes either form.
+    expect(prompts[2]!.choices.map(choice => choice.label)).toEqual([
+      ...['50%', '60%', '70%', '80%', '90%'].map(share => `${share} ${copy.settingsOfContext}`), copy.settingsCustom])
+    expect(prompts[2]!.choices.find(choice => choice.current === true)).toMatchObject({
+      label: `80% ${copy.settingsOfContext}`, status: { text: `${copy.currentSelection} · ${copy.settingsDefault}` }, detail: copy.settingsCompactionAtAbout,
+    })
+    expect(typed[0]!.message).toBe(`${copy.settingsCompactionAt} · ${copy.settingsBudgetHint}`)
+    expect(rows(prompts[3]!)[1]).toEqual([copy.settingsCompactionAt, `60k ${copy.settingsTokens}`])
+    // A token count stays among the choices, after the shares, and the section offers a way back.
+    expect(prompts[4]!.choices.map(choice => choice.label).slice(5)).toEqual([`60k ${copy.settingsTokens}`, copy.settingsCustom, copy.settingsResetField])
+    expect(prompts[4]!.choices.find(choice => choice.current === true)?.label).toBe(`60k ${copy.settingsTokens}`)
+    expect(prompts[9]!.warning).toBe(`${copy.settingsFailed}: ${copy.settingsBudgetInvalid}`)
+    expect(prompts[11]!.warning).toBe(`${copy.settingsFailed}: ${copy.settingsCompactionKeepBelow}`)
+    expect(MemoryProvider.doc['compaction-basic']).toEqual({ thresholdRatio: 0.7, retainRatio: 0.125 })
+    expect(threshold()).toBe(70_000)
+  })
+
+  it('switches automatic compaction off and back, and resets the section to the engine\'s defaults', async () => {
+    MemoryProvider.doc = { 'compaction-basic': { thresholdTokens: 50_000 } }
+    const { preferences, threshold, engine } = await compaction()
+    expect(threshold()).toBe(50_000)
+    const { interactions, prompts } = scripted(
+      pick('tab:compaction'), pick('setting:compaction-basic.auto'), back,
+    )
+    await run(preferences, interactions)
+    expect(MemoryProvider.doc['compaction-basic']).toEqual({ thresholdTokens: 50_000, auto: false })
+    expect(engine().config.auto).toBe(false)
+    expect(threshold()).toBeUndefined()
+    expect(rows(prompts.at(-1)!)[0]).toEqual([copy.settingsCompactionAuto, copy.settingsOff])
+
+    const again = scripted(
+      pick('tab:compaction'), pick('setting:compaction-basic.auto'),
+      pick('\u0000reset'), pick('reset'), back,
+    )
+    await run(preferences, again.interactions)
+    expect(MemoryProvider.doc['compaction-basic']).toEqual({})
+    expect(threshold()).toBe(80_000)
+  })
+
+  it('picks the summary model from the catalog after the session\'s own, and returns to the session\'s', async () => {
+    const { preferences, engine } = await compaction()
+    const listModels = vi.fn(() => Promise.resolve({ entries: [
+      { route: 'deepseek/deepseek-v4-flash', name: 'deepseek-v4-flash', current: true },
+      { route: 'openrouter/anthropic/claude', name: 'Claude via OpenRouter', current: false },
+    ], unavailable: [] }))
+    const { interactions, prompts } = scripted(
+      pick('tab:compaction'), pick('setting:compaction-basic.model'), pick('openrouter/anthropic/claude'),
+      pick('setting:compaction-basic.model'), labelled(copy.settingsCompactionSameModel), back,
+    )
+    await run(preferences, interactions, { listModels })
+    expect(prompts[2]!.title).toBe(`${copy.settingsTitle} › ${copy.settingsCompaction} › ${copy.settingsCompactionModel}`)
+    expect(prompts[2]!.choices.map(choice => [choice.label, choice.description, choice.status?.text])).toEqual([
+      [copy.settingsCompactionSameModel, undefined, `${copy.currentSelection} · ${copy.settingsDefault}`],
+      ['deepseek/deepseek-v4-flash', undefined, undefined], ['openrouter/anthropic/claude', 'Claude via OpenRouter', undefined],
+    ])
+    expect(rows(prompts[3]!)[3]).toEqual([copy.settingsCompactionModel, 'openrouter/anthropic/claude'])
+    expect(prompts[4]!.choices.find(choice => choice.current === true)?.label).toBe('openrouter/anthropic/claude')
+    expect(MemoryProvider.doc['compaction-basic']).toEqual({})
+    expect(engine().config).toMatchObject({ summarizationProvider: '', summarizationModel: '' })
+  })
+
+  it('is absent without the compaction engine', async () => {
+    const { preferences } = await mount()
+    const { interactions, prompts } = scripted(back)
+    await run(preferences, interactions)
+    expect(prompts[0]!.tabs?.items.map(tab => tab.value)).not.toContain('tab:compaction')
   })
 })
 

@@ -111,12 +111,40 @@ describe('compaction-basic settings section', () => {
     expect(threshold(bench, ROUTE)).toBe(150_000)
   })
 
-  it('refuses `auto` in the section because it is composition-only', async () => {
-    const bench = await boot({ auto: true })
-
-    await expect(bench.ctx.settings.update(NS, { auto: false } as never))
-      .rejects.toThrow(/"auto" is fixed by the plugin's composition config/)
+  it('switches automatic compaction off from the section, but never on over a manual-only composition', async () => {
+    const bench = await boot({})
     expect(bench.engine().config.auto).toBe(true)
+
+    await bench.ctx.settings.update(NS, { auto: false })
+    expect(bench.engine().config.auto).toBe(false)
+    expect(threshold(bench, ROUTE)).toBeUndefined()
+
+    await bench.ctx.settings.mutate(NS, [{ op: 'unset', path: ['auto'] }])
+    expect(threshold(bench, ROUTE)).toBe(160_000)
+
+    const manual = await boot({ auto: false }, { stored: { [NS]: { auto: true } } })
+    expect(manual.engine().config.auto).toBe(false)
+  })
+
+  it('serves every engine in the process from the section the first one registered', async () => {
+    const bench = await boot({})
+    // A preset's own engine beside the host's, in a realm of its own.
+    const preset = bench.ctx.isolate('compaction')
+    await preset.plugin(BasicCompactionEngine, { thresholdRatio: 0.6 }).await()
+    const follower = (): BasicCompactionEngine => preset.get('compaction') as unknown as BasicCompactionEngine
+    expect(follower()).not.toBe(bench.engine())
+    expect(follower().pressureThreshold(ROUTE, WINDOW)).toBe(120_000)
+
+    await bench.ctx.settings.update(NS, { thresholdTokens: 100_000 })
+    // The user's form replaces the follower's own composed ratio, as it does the owner's.
+    expect(follower().pressureThreshold(ROUTE, WINDOW)).toBe(100_000)
+    expect(threshold(bench, ROUTE)).toBe(100_000)
+
+    await bench.ctx.settings.update(NS, { auto: false })
+    expect(follower().pressureThreshold(ROUTE, WINDOW)).toBeUndefined()
+
+    await bench.settingsFiber.dispose()
+    expect(follower().pressureThreshold(ROUTE, WINDOW)).toBe(120_000)
   })
 
   it('keeps the composition policy over a section invalid at startup, and accepts its repair', async () => {

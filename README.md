@@ -2,13 +2,11 @@
 
 Bake is a keyboard-driven coding agent for the terminal. It streams the model's answer as it arrives, runs shell and file tools inside a sandbox, and saves every session as an append-only log you can resume.
 
-- **Slash commands** for models, sign-in, sessions, goals, plan mode, compaction, and permissions, with argument completion.
-- **Long-running work**: goals that continue across rounds, a task list, and subagents.
-- **Sandboxed tools**: bash or PowerShell, file reads and edits, search, and web fetch, each gated by a permission preset.
-- **Sessions you keep**: resume by id or pick from a list; context is compacted when it fills up.
+- **Slash commands** for models and reasoning effort, sign-in, sessions, goals, compaction, permissions, and settings, with argument completion.
+- **Long-running work**: goals that continue across rounds, subagents you can watch from the input row, and shell commands left running in the background.
+- **Sandboxed tools**: bash or PowerShell, file reads and edits, search, and web search and fetch, each gated by a permission preset.
+- **Sessions you keep**: resume by id or pick from a list; context is compacted when it fills up, at a threshold you can set.
 - **Skills and attachments**: invoke project or user skills as `/name`, and attach images and files to a prompt.
-
-Bake is built on the [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) agent runtime. See [Acknowledgements](#acknowledgements).
 
 ## Install
 
@@ -53,9 +51,9 @@ The [release manifest](https://bake.justar.dev/latest.json) lists the current ve
 bake
 ```
 
-Bake has no default provider: sign in with `/login` (DeepSeek, CLIProxyAPI, OpenAI, Anthropic, GitHub Copilot, OpenRouter, Kimi, or xAI), and the first sign-in selects its model. An exported `DEEPSEEK_API_KEY` counts as signed in. Type `/` to browse commands, `/help` for the list, and `@` to reference a file. `bake --help` shows the launch options, such as `--resume <id>`.
+Bake has no default provider: sign in with `/login` (DeepSeek, CLIProxyAPI, OpenAI, Anthropic, GitHub Copilot, OpenRouter, Kimi, or xAI), and the first sign-in selects its model. An exported `DEEPSEEK_API_KEY` counts as signed in; choose its model with `/model`. Type `/` to browse commands, `/help` for the list, and `@` to reference a file. `/settings` changes the screen mode, the default model and permissions, compaction, and tool limits. `bake --help` shows the launch options, such as `--resume <id>`.
 
-Bake keeps sessions, credentials, and profiles in `~/.bake`. Set `DSH_HOME` to use a different directory. Bake never reads or migrates DeepSeek Harness's `~/.dsh`.
+Bake keeps sessions, credentials, and profiles in `~/.bake`. Set `DSH_HOME` to use a different directory.
 
 ## Update
 
@@ -63,13 +61,13 @@ Bake keeps sessions, credentials, and profiles in `~/.bake`. Set `DSH_HOME` to u
 bake update
 ```
 
-`bake update` downloads the latest release, verifies it the same way the installer does, and switches only after the new version starts. The previous version stays on disk. `bake update --check` only reports: it exits 0 when current, 10 when a newer release exists, and 1 on failure. The status line also shows when an update is available, checking hourly and again ten minutes after a failed check; run `/update` in the terminal to install it without leaving the session. The download service counts each install that checks as one active install that day, as a daily hash of its address that never leaves the service. Set `BAKE_NO_UPDATE_CHECK=1` to turn the check off, and with it the count.
+`bake update` downloads the latest release, verifies it the same way the installer does, and switches only after the new version starts. The previous version stays on disk; older releases no `bake` has started for a week are removed. `bake update --check` only reports: it exits 0 when current, 10 when a newer release exists, and 1 on failure. The status line also shows when an update is available, checking hourly and again ten minutes after a failed check; run `/update` in the terminal to install it without leaving the session. The download service counts each install that checks as one active install that day: it sends a salted hash of the requesting address, which changes daily, to its activity counter at gissx.org, and the address itself never leaves the service. Set `BAKE_NO_UPDATE_CHECK=1` to turn the background check off, and with it the daily count; `bake update` and `/update` still contact the service when you run them.
 
 Installs of 0.1.0 have no `bake update`; run the installer once more to move to the updatable layout.
 
 ## Uninstall
 
-Delete the install directory and the `bake` link: `~/.local/share/bake` and `~/.local/bin/bake`, or `%LOCALAPPDATA%\Bake` on Windows. Delete `~/.bake` too to remove sessions and stored credentials.
+Delete the install directory and the `bake` link: `~/.local/share/bake` and `~/.local/bin/bake`, or `%LOCALAPPDATA%\Bake` on Windows, where you also remove its `bin` entry from the user `PATH`. Delete `~/.bake` too to remove sessions and stored credentials.
 
 ## Documentation
 
@@ -81,9 +79,13 @@ Delete the install directory and the `bake` link: `~/.local/share/bake` and `~/.
 
 ## Acknowledgements
 
-Bake is built on [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), DeepSeek's MIT-licensed agent harness. Its agent loop, session log, sandbox, tools, and Cordis plugin runtime are the foundation Bake runs on, and we are grateful to its authors. Bake adds its own terminal interface, distribution, and changes; upstream fixes are reviewed and ported selectively, never merged automatically.
+Bake is a fork of [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), DeepSeek's MIT-licensed agent harness. Its agent loop, session log, sandbox, and Cordis plugin runtime are still the foundation Bake runs on. Since the fork, Bake has built its own terminal interface and distribution, dropped upstream's web client, desktop app, and SDKs, and reworked much of the runtime; upstream fixes are reviewed and ported selectively, never merged automatically. Shared runtime packages keep their original `@deepseek-ai/*` names so those fixes stay easy to port.
 
-Bake is an independent project. It is not an official DeepSeek product and is not endorsed by DeepSeek. "DeepSeek Harness" is a trademark of DeepSeek; see its [brand guidelines](BRAND_GUIDELINES.md). Shared runtime packages keep their original `@deepseek-ai/*` names so upstream fixes stay easy to port.
+Bake reaches every model through [pi](https://github.com/earendil-works/pi), also MIT-licensed: `pi-ai` connects each provider, `pi-codemode` runs code mode's scripts, and `pi-mcp` connects MCP servers.
+
+Thank you to the authors of both projects.
+
+Bake is an independent project. It is not an official DeepSeek product, and it is not endorsed by DeepSeek or by pi's authors. "DeepSeek Harness" is a trademark of DeepSeek; see its [brand guidelines](BRAND_GUIDELINES.md).
 
 ## License
 

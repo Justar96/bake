@@ -6,9 +6,11 @@
  * dot: the head already names the tool, and a different shape per tool made
  * the rail busy without telling a reader anything the head did not. A shape
  * of its own is kept for a skill loaded into the conversation, a subagent
- * started, a message sent to one, and a plugin's task list, because those change
- * what the session knows, who is doing the work, or what is left to do.
- * Every icon is one cell wide by `string-width`, sits alone in the rail, and
+ * started, a message sent to one, a plugin's task list, and work left
+ * running in the background, because those change what the session knows,
+ * who is doing the work, what is left to do, or what is still running.
+ * Every icon is one cell wide by `string-width`, sits alone in the rail, or
+ * just past a step's tree branch when the call is one of a batch, and
  * has no emoji presentation, for the reason `MARKER` gives. The tool name is
  * still written in the head, so the icon never carries meaning on its own.
  *
@@ -27,6 +29,11 @@ export const ICON = {
   send: '\u2192',
   /** A task list update from a plugin's tool. */
   todo: '\u2610',
+  /**
+   * Work a call started in the background, and that work's end. A dotted
+   * ring: the call's own dot, with the work no longer held in it.
+   */
+  background: '\u25cc',
   /** Anything else. */
   other: MARKER.action,
 } as const
@@ -53,6 +60,19 @@ const GUESSED: readonly (readonly [readonly (readonly string[])[], Icon])[] = [
   [[['skill']], ICON.skill],
   [[['todo'], ['todos']], ICON.todo],
 ]
+
+/**
+ * Icon for one call: the background ring for a tool with no shape of its
+ * own that started background work, else its tool's icon. A delegation in
+ * the background keeps `↳`, since who does the work is what changed.
+ * @param tool - tool name from the session log.
+ * @param background - whether the call ran in the background.
+ * @returns the rail icon for the call's head.
+ */
+export function callIcon(tool: string, background = false): Icon {
+  const icon = iconFor(tool)
+  return background && icon === ICON.other ? ICON.background : icon
+}
 
 /**
  * Icon for what a tool does, from its name.

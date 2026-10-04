@@ -26,6 +26,7 @@ import { Printed } from './printed.ts'
 import { Interactions } from './interactions.ts'
 import { InputCatalog } from './catalog.ts'
 import { SubagentCatalog, subagentEntries } from './subagents.ts'
+import { listBackground } from './background.ts'
 import { subagentStatus } from '@dsh-tui/ui/subagents.tsx'
 import { SubagentInspection } from './inspection.ts'
 import { FileReferences } from './references.ts'
@@ -343,6 +344,12 @@ export class SessionController {
       this.progress.progress(payload.callId, payload.progress.output)
       this.repaint()
     }))
+    // A job's start commits with its call's result, which repaints; its end
+    // is announced by the registry alone, often while the agent is idle.
+    const jobs = ctx.get('jobs')
+    if (jobs !== undefined) this.off.push(jobs.onJobDone((_snapshot, owner) => {
+      if (owner === agent) this.repaint()
+    }))
     this.off.push(ctx.on('agent/tool-executed', payload => {
       if (payload.agent !== agent) return
       this.progress.finished(payload.callId, !payload.isError)
@@ -421,6 +428,7 @@ export class SessionController {
       notice: this.notice,
       interaction: this.interactions.current,
       subagents,
+      background: listBackground(this.ctx, this.agent),
       inspection: this.inspection?.view,
       ...goal === undefined ? {} : { goal },
       ...surface?.permissions === undefined ? {} : { permission: surface.permissions.currentValue },

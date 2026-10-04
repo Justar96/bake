@@ -3,8 +3,8 @@
  * `dsh-base` with the terminal bundle's patch applied by the Loader's own patch
  * semantics, mounted through the Loader. Automatic compaction reaches a preset
  * agent only through its preset's own engine, a preset without one never
- * compacts on its own, and `/compact` works under both. Only the model is
- * scripted.
+ * compacts on its own, `/compact` works under both, and the user's settings
+ * section reaches the engine that compacts. Only the model is scripted.
  */
 import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -14,6 +14,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { applyEntryPatches, entryListSchema, type PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 import { Group, type EntryOptions } from '@deepseek-ai/cordis-plugin-loader'
 import { SHIPPED_PRESET_ROOT } from '@deepseek-ai/dsh-agent-presets'
+import { SettingsProvider, type SettingsNamespace } from '@deepseek-ai/dsh-settings'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'
@@ -60,6 +61,17 @@ async function shipped(preset: string): Promise<EntryOptions[]> {
 const CHUNK = 'Older conversation history that the summary can fold. '.repeat(135)
 const TURNS = 5
 
+/** A settings store over one in-memory document, standing in for the settings file. */
+class MemorySettings extends SettingsProvider {
+  static doc: Record<string, unknown> = {}
+  readonly writable = true
+  protected load(): Promise<Record<string, unknown>> { return Promise.resolve(structuredClone(MemorySettings.doc)) }
+  protected persist(ns: SettingsNamespace, section: Record<string, unknown>): Promise<void> {
+    MemorySettings.doc[ns] = structuredClone(section)
+    return Promise.resolve()
+  }
+}
+
 const cleanup: (() => Promise<void>)[] = []
 afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await dispose() })
 
@@ -84,10 +96,15 @@ it('turns the host engine manual in both terminal patches, and leaves headless a
  * compaction group verbatim, and `minimal`, the shipped `minimal` composition
  * without the persistent shell, which needs terminal services the harness
  * does not mount.
+ * @param settings - mount a settings store holding this document first.
  */
-async function terminal() {
+async function terminal(settings?: Record<string, unknown>) {
   const fixture = await harness()
   cleanup.push(fixture.dispose)
+  if (settings !== undefined) {
+    MemorySettings.doc = structuredClone(settings)
+    await fixture.ctx.plugin(MemorySettings)
+  }
   // Bare row names resolve from the Loader's base, here the fixture root, as
   // the launcher's resolve from the installation. Removing the root unlinks it.
   await mkdir(join(fixture.root, 'node_modules'))
@@ -216,4 +233,25 @@ it('never compacts a minimal-preset agent on its own, and /compact reaches the h
   await manual.turn(CHUNK)
   expect(compactions(await manual.compact())).toEqual([null])
   expect(calls({ pressure: hostPressure, manual: hostManual })).toEqual({ pressure: 0, manual: 1 })
+})
+
+it('applies the user\'s compaction settings to the standard preset\'s own engine, and stops it compacting when switched off', async () => {
+  const { ctx, host, open } = await terminal({ 'compaction-basic': { thresholdRatio: 0.5 } })
+  const route = { provider: 'mock', model: 'model' }
+  const session = await open('standard')
+  const own = session.engine
+  if (own === undefined) throw new Error('the standard preset did not mount its own engine')
+  // The host engine registered the section; the preset's engine follows it.
+  expect(own).not.toBe(host)
+  expect(own.pressureThreshold(route, 8192)).toBe(4096)
+  await session.turn(CHUNK)
+  expect(session.controller.view.context).toMatchObject({ window: 8192, compactAt: 4096 })
+
+  await ctx.settings.update('compaction-basic', { auto: false })
+  expect(own.pressureThreshold(route, 8192)).toBeUndefined()
+  const pressure = vi.spyOn(own, 'compactIfNeeded')
+  for (let turn = 2; turn <= TURNS; turn++) await session.turn(CHUNK)
+  expect(pressure).not.toHaveBeenCalled()
+  expect(compactions(await session.events())).toEqual([])
+  expect(session.controller.view.context).not.toHaveProperty('compactAt')
 })

@@ -77,6 +77,7 @@ interface ResolvedPolicyFields {
 /** Validated immutable config whose target-specific defaults remain unresolved. */
 export type ResolvedConfig = ResolvedPolicyFields & ResolvedThreshold & ResolvedRetention & {
   readonly modelPolicies: readonly Readonly<ModelCompactPolicyConfig>[]
+  /** Whether automatic compaction runs: the composition's switch, unless settings turned it off. */
   readonly auto: boolean
 }
 

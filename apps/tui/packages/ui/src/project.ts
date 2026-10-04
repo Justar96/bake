@@ -229,6 +229,59 @@ export function announcedCalls(event: SessionEvent): readonly ToolCallRow[] {
 const NONE_CALLS: readonly ToolCallRow[] = []
 
 /**
+ * Whether a call's arguments ask for background execution, the flag every
+ * shell and delegation tool shares. Only the argument the model sent is
+ * read: a tool that backgrounds by default is not marked.
+ * @param args - the call's logged arguments, as JSON text.
+ */
+function inBackground(args: string): boolean {
+  if (!args.includes('run_in_background')) return false
+  try {
+    const parsed: unknown = JSON.parse(args)
+    return typeof parsed === 'object' && parsed !== null && (parsed as { run_in_background?: unknown }).run_in_background === true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The completion notice `tool-jobs` delivers when background work settles.
+ * Its text names the job whole, `background job bash-1 (bash: npm run dev)
+ * finished [status: completed, exit code: 0]. …`; its summary, the fallback
+ * for a text cut to the job's byte cap, drops the id and is itself cut at a
+ * fixed length. The status is that plugin's `statusLine`.
+ */
+const JOB_TEXT = /^background job (\S+) \((\S+): ([\s\S]*)\) finished \[status: (\w+)(?:, ([^\]]*))?\]/u
+const JOB_SUMMARY = /^(\S+) ([\s\S]*) \[status: (\w+)(?:, ([^\]]*))?\]$/u
+
+/**
+ * Project a job's completion notice; every other synthetic context stays out of the transcript.
+ * @param source - the message's recorded source.
+ * @param text - the notice's model-facing text.
+ * @param copy - localized words for how a job ended.
+ * @returns the job's row, or none for any other source or a notice in neither shape.
+ */
+function jobDone(source: Extract<SessionEvent, { type: 'user/message' }>['data']['source'], text: string, copy: TuiCopy): Projection {
+  if (source.kind !== 'plugin' || !('plugin' in source) || source.plugin !== 'tool-jobs'
+    || !('form' in source) || source.form !== 'notice') return NONE
+  const whole = JOB_TEXT.exec(text)
+  const short = whole === null ? JOB_SUMMARY.exec(source.summary) : null
+  const [id, tool, label, status, detail] = whole !== null ? whole.slice(1)
+    : short !== null ? [undefined, ...short.slice(1)] : []
+  if (tool === undefined || label === undefined || status === undefined) return NONE
+  // A command's own exit code says whether its work succeeded; the job completed either way.
+  const exit = detail === undefined ? undefined : /^exit code: (-?\d+)$/u.exec(detail)?.[1]
+  const outcome = status === 'killed' ? 'stopped' : status === 'failed' || (exit !== undefined && exit !== '0') ? 'failed' : 'done'
+  const word = outcome === 'done' ? copy.jobFinished : outcome === 'stopped' ? copy.jobStopped : copy.jobFailed
+  const said = detail === undefined ? '' : oneLine(detail)
+  return [{
+    kind: 'job-done', tool: oneLine(tool), label: oneLine(label), outcome,
+    ...id === undefined ? {} : { id: oneLine(id) },
+    status: said === '' ? word : `${word} \u00b7 ${said}`,
+  }]
+}
+
+/**
  * Project one session event into transcript rows.
  *
  * `SessionEventMap` is merge-extensible, so an unrecognized event type is not
@@ -246,7 +299,7 @@ export function project(event: SessionEvent, projector: Projector): Projection {
       // `source` separates a human prompt from synthetic context the loop
       // injects (file-change notices, skill content, goal continuations).
       // Only the human's own words belong in the transcript as a user row.
-      if (event.data.source.kind !== 'user') return NONE
+      if (event.data.source.kind !== 'user') return jobDone(event.data.source, textOf(event.data.content), projector.copy)
       const text = textOf(event.data.content)
       const attachments = attachmentSummaries(event.data.content)
       return text === '' && attachments.length === 0 ? NONE : [{ kind: 'user', text, ...attachments.length === 0 ? {} : { attachments } }]
@@ -288,6 +341,7 @@ export function project(event: SessionEvent, projector: Projector): Projection {
         // as JSON. `Bash(echo ok)`, not `Bash({"command": "echo ok"})`.
         input: card?.title ?? argumentsTitle(args),
         ...card === undefined || card.detail.length === 0 ? {} : { detail: card.detail },
+        ...!nested && inBackground(args) ? { background: true as const } : {},
       }]
     }
 

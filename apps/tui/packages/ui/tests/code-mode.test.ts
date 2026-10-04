@@ -67,11 +67,15 @@ describe('code-mode transcript', () => {
     expect(call.result?.text).toBe('All inspected')
     const lines = present(call, bound)
     const texts = lines.map(line => line.text)
-    expect(texts.indexOf('Read(first.ts)')).toBeLessThan(texts.indexOf('Read(second.ts)'))
+    // A call that succeeded folds to its head and size; a failure keeps its error.
+    expect(texts.indexOf('Read(first.ts)  1 line')).toBeLessThan(texts.indexOf('Read(second.ts)'))
+    expect(texts).not.toContain('Loaded first file')
     expect(texts.indexOf('Permission denied')).toBeLessThan(texts.indexOf(copy.scriptOutput))
     expect(texts.indexOf(copy.scriptOutput)).toBeLessThan(texts.indexOf('All inspected'))
-    expect(texts.filter(text => text === 'Script(Inspect project files)')).toHaveLength(1)
-    expect(lines.find(line => line.text === 'Read(second.ts)')?.tone).toBe('failed')
+    expect(texts.filter(text => text === 'Script(Inspect project files)  2 calls \u00b7 1 failed')).toHaveLength(1)
+    const failed = lines.find(line => line.text === 'Read(second.ts)')
+    expect(failed).toMatchObject({ tone: 'failed', branch: '\u2514', badge: { tone: 'failed' } })
+    expect(lines.find(line => line.text === 'Permission denied')?.branch).toBe(' ')
     expect(turnSummary([call], copy, undefined).details).toBe('ran 1 · read 2 · 1 failed')
   })
 
@@ -115,7 +119,7 @@ describe('code-mode transcript', () => {
       { callId: 'first', tool: 'read', input: 'first.ts', result: { ok: true, text: 'Loaded first file' } },
     ])
     const texts = present(withoutStart[0]!, bound).map(line => line.text)
-    expect(texts).toContain('Read(first.ts)')
+    expect(texts).toContain('Read(first.ts)  1 line')
     expect(texts).not.toContain('[first]')
   })
 
@@ -125,7 +129,58 @@ describe('code-mode transcript', () => {
       { callId: 'first', tool: 'read', input: 'first.ts', result: { ok: !isError, text: '' } },
     ])
     const lines = present(row!, bound)
-    expect(lines.find(line => line.text === 'Read(first.ts)')?.verb).toBe(isError ? 'error' : 'done')
+    expect(lines.find(line => line.text === 'Read(first.ts)')?.badge?.tone).toBe(isError ? 'failed' : 'done')
+  })
+
+  it('prints a long script with its first and last calls, its failures, and a count of the rest', () => {
+    const events = [root(), ...Array.from({ length: 12 }, (_, index) => [
+      dispatch('tool/ptc-dispatch-start', `f${index}`),
+      dispatch('tool/ptc-dispatch', `f${index}`, { isError: index === 5, content: [{ type: 'text', text: index === 5 ? 'Permission denied' : 'Loaded' }] }),
+    ]).flat(), ended]
+    const [row] = replay(events)
+    const texts = present(row!, bound).map(line => line.text)
+    expect(texts.filter(text => text.startsWith('Read(') || text.startsWith('+'))).toEqual([
+      'Read(f0.ts)  1 line', 'Read(f1.ts)  1 line', `+3 ${copy.moreCalls}`, 'Read(f5.ts)', `+4 ${copy.moreCalls}`,
+      'Read(f10.ts)  1 line', 'Read(f11.ts)  1 line',
+    ])
+    expect(texts).toContain('Script(Inspect project files)  12 calls \u00b7 1 failed')
+    // Without the phrase for the count, every call is printed.
+    const whole = present(row!, { ...bound, moreCalls: undefined }).filter(line => line.text.startsWith('Read('))
+    expect(whole).toHaveLength(12)
+  })
+
+  it('draws a lone folded call instead of a count of one, and formats only the calls it prints', () => {
+    const [row] = project(root(), seam())
+    let reads = 0
+    const dispatches: ToolCallRow[] = Array.from({ length: 10_000 }, (_, index) => ({
+      kind: 'tool-call', callId: `child-${index}`, tool: 'read',
+      get input() { reads++; return `file-${index}.ts` },
+      result: { ok: true, text: 'Loaded' },
+    }))
+    const texts = present({ ...row as ToolCallRow, dispatches, result: { ok: true, text: 'done' } }, bound).map(line => line.text)
+    expect(texts).toContain(`+9996 ${copy.moreCalls}`)
+    expect(reads).toBeLessThan(20)
+    const five = present({ ...row as ToolCallRow, dispatches: dispatches.slice(0, 5), result: { ok: true, text: 'done' } }, bound)
+    expect(five.filter(line => line.text.startsWith('Read('))).toHaveLength(5)
+  })
+
+  it('labels a failed script\'s result as its error', () => {
+    const failed = event('tool/result', { message: { content: [{ toolCallId: 'script', isError: true, content: [{ type: 'text', text: 'Error: boom' }] }] } })
+    const [row] = replay([root(), failed])
+    const texts = present(row!, bound).map(line => line.text)
+    expect(texts).toContain(copy.scriptError)
+    expect(texts).not.toContain(copy.scriptOutput)
+  })
+
+  it('blinks a running nested call on its branch and does not count failures before the script ends', () => {
+    const view = seam()
+    const actions = new Actions()
+    for (const item of [root(), dispatch('tool/ptc-dispatch-start', 'first'),
+      dispatch('tool/ptc-dispatch', 'first', { isError: true, content: [{ type: 'text', text: 'Permission denied' }] }),
+      dispatch('tool/ptc-dispatch-start', 'second')]) foldEvent(item, project(item, view), actions)
+    const lines = fittedAction(actions.pending[0] as ToolCallRow, bound, 20)
+    expect(lines.find(line => line.text === 'Read(second.ts)')).toMatchObject({ branch: '\u2514', badge: { pulse: true } })
+    expect(lines.find(line => line.text.startsWith('Script('))?.text).toBe('Script(Inspect project files)  2 calls')
   })
 
   it.each([6, 40])('windows a large dispatch history before formatting a %i-row live frame', rows => {
@@ -138,7 +193,7 @@ describe('code-mode transcript', () => {
     }))
     const lines = fittedAction({ ...row as ToolCallRow, dispatches }, bound, rows)
     expect(lines.length).toBeLessThanOrEqual(rows)
-    expect(lines.some(line => line.text === 'Script(Inspect project files)')).toBe(true)
+    expect(lines.some(line => line.text.startsWith('Script(Inspect project files)'))).toBe(true)
     expect(lines.some(line => line.text.startsWith('Read(file-9999.ts)'))).toBe(true)
     // Each nested call in the window is formatted a fixed number of times, not once per fold.
     expect(reads).toBeLessThan(rows * 8)
@@ -155,7 +210,7 @@ describe('code-mode transcript', () => {
     const other: ToolCallRow = { kind: 'tool-call', callId: 'other', tool: 'read', input: 'b.ts', result: { ok: true, text: 'Loaded' } }
     const lines = fittedGroup([{ ...row as ToolCallRow, dispatches }, other], bound, 12)
     expect(lines.length).toBeLessThanOrEqual(12)
-    expect(lines.some(line => line.text === 'Script(Inspect project files)')).toBe(true)
+    expect(lines.some(line => line.text.startsWith('Script(Inspect project files)'))).toBe(true)
     expect(lines.some(line => line.text.startsWith('Read(file-9999.ts)'))).toBe(true)
     expect(lines.some(line => line.text.startsWith('Read(b.ts)'))).toBe(true)
     expect(reads).toBeLessThan(100)

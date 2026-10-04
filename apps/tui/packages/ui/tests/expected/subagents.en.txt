@@ -4,5 +4,5 @@
 ────────────────────────────────────────────────────────────────────────────────────────────────────
 > ▌Ask anything · / commands · @ files
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-↳ Subagents 5 · 1 working · 1 done · 1 unreadable                                             Ctrl+G
+↳ Subagents 5 · 1 working · 1 done · 1 failed · 1 unreadable                                  Ctrl+G
   model  /workspace

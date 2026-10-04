@@ -6,8 +6,9 @@ import { SCRIPT_TOOL, type ResultBound } from '../../src/present.ts'
 
 export const copy = dictionaries.en
 export const bound: ResultBound = {
-  lines: 4, unit: copy.cardLines, more: copy.moreLines, earlier: copy.earlierCalls,
-  script: copy.scriptLabel, scriptOutput: copy.scriptOutput,
+  lines: 4, unit: copy.cardLines, single: copy.cardLine, more: copy.moreLines, earlier: copy.earlierCalls,
+  script: copy.scriptLabel, scriptOutput: copy.scriptOutput, scriptError: copy.scriptError,
+  call: copy.scriptCall, calls: copy.scriptCalls, moreCalls: copy.moreCalls, failures: copy.summaryFailures,
 }
 export const event = (type: string, data: unknown): SessionEvent => ({ type, data }) as SessionEvent
 

@@ -14,10 +14,10 @@
 import wrapAnsi from 'wrap-ansi'
 import { markdownLines, sliceSpans } from './markdown.ts'
 import { clipCells, outputLines, outputSpans, toolText } from './tool-output.ts'
-import { iconFor, ICON } from './icons.ts'
+import { callIcon, iconFor, ICON } from './icons.ts'
 import { COLUMN, MARKER, PAST, TREE, VERB, type Verb } from './layout.ts'
 import { PALETTE, type PaletteColor } from './palette.ts'
-import { formatAttachment, type CardChanges, type CardFileChange, type CardLine, type Row, type ToolCallRow, type ToolOutcome } from './rows.ts'
+import { formatAttachment, type CardChanges, type CardFileChange, type CardLine, type JobDoneRow, type Row, type ToolCallRow, type ToolOutcome } from './rows.ts'
 
 /** How a line is emphasized. Colour is chosen by the component layer. */
 export type Tone =
@@ -39,6 +39,8 @@ export type Tone =
   | 'failed'
   /** A question awaiting an answer. */
   | 'asking'
+  /** Work that was stopped before it finished, neither done nor failed. */
+  | 'waiting'
   /** A line a change introduced. */
   | 'added'
   /** A line a change took away. */
@@ -143,6 +145,7 @@ export function styleOf(tone: Tone): LineStyle {
     case 'done': return { color: PALETTE.done, dim: false, bold: true }
     case 'failed': return { color: PALETTE.failed, dim: false, bold: false }
     case 'asking': return { color: PALETTE.asking, dim: false, bold: false }
+    case 'waiting': return { color: PALETTE.waiting, dim: false, bold: false }
     // Both sides of a diff keep full weight. Dimming the removed side would
     // make a deletion look like supporting detail.
     case 'added': return { color: PALETTE.done, dim: false, bold: false }
@@ -179,6 +182,20 @@ export interface PresentedLine {
   /** Whether the marker blinks, which it does while its action runs. */
   readonly pulse?: boolean
   /**
+   * A call's own marker, drawn after the rail where a step's tree has taken
+   * the rail from it. It keeps the state a lone call's marker shows:
+   * blinking while the call runs, then its outcome's colour. Wrapped rows
+   * hang past it, so the call's text keeps one edge.
+   */
+  readonly badge?: Badge
+  /**
+   * A quiet tree glyph drawn after the rail, before any badge, for a call
+   * nested one level inside another, as a script's calls are. The rail is
+   * left to the block the line belongs to. An indented line gives the
+   * glyph's cells from its verb column, so its text keeps the output column.
+   */
+  readonly branch?: string
+  /**
    * Whether the line is part of a tool result's preview. Its plain text is
    * drawn in the softer output grey.
    */
@@ -207,6 +224,13 @@ export interface PresentedLine {
    * wrapping, measuring, and the plain-text form all use one string.
    */
   readonly spans?: readonly Span[]
+}
+
+/** A call's marker moved out of the rail; see {@link PresentedLine.badge}. */
+export interface Badge {
+  readonly glyph: string
+  readonly tone: Tone
+  readonly pulse?: boolean
 }
 
 /** A run of a line's text with its own emphasis. */
@@ -285,11 +309,18 @@ export function verbFor(tool: string): Verb {
   return familyOf(tool) ?? VERB.run
 }
 
+/** Verbs of the actions that have an icon of their own; see `ICON`. */
+const FAMILY_OF_ICON: ReadonlyMap<string, Verb> = new Map([[ICON.spawn, VERB.spawn], [ICON.send, VERB.send], [ICON.skill, VERB.load]])
+
 /** The verb a tool's name implies, or undefined when it names none of the families. */
 function familyOf(tool: string): Verb | undefined {
   const name = tool.toLowerCase()
   // Checked before `write`. Rewriting a plan is not an edit to the workspace.
   if (name.includes('todo') || name.includes('plan')) return VERB.plan
+  // A tool with an icon of its own names its verb by the same words, so a
+  // step of delegations counts `spawn 3`, not `run 3`.
+  const family = FAMILY_OF_ICON.get(iconFor(tool))
+  if (family !== undefined) return family
   if (name.includes('bash') || name.includes('shell') || name.includes('exec')) return VERB.run
   if (name.includes('write') || name.includes('edit') || name.includes('patch')) return VERB.edit
   if (name.includes('read') || name.includes('cat') || name.includes('view')) return VERB.read
@@ -302,9 +333,10 @@ function familyOf(tool: string): Verb | undefined {
  * Verbs whose output is worth a preview once they finish.
  *
  * File, search, and web snippets share the configured bound with command
- * output and edits; plan updates retain their dedicated presentation.
+ * output and edits, as do a delegation's, a message's, and a skill's
+ * answers; plan updates retain their dedicated presentation.
  */
-const PREVIEWED: ReadonlySet<Verb> = new Set([VERB.run, VERB.edit, VERB.read, VERB.find, VERB.fetch])
+const PREVIEWED: ReadonlySet<Verb> = new Set([VERB.run, VERB.edit, VERB.read, VERB.find, VERB.fetch, VERB.spawn, VERB.send, VERB.load])
 
 /**
  * Cells one line of a result without a card may take before it is cut.
@@ -598,12 +630,19 @@ export const CONNECTOR = '\u23bf'
  * commit stops blinking and takes its outcome's colour. The logged result
  * replaces both.
  *
+ * A script's head also counts the calls it made, and its failed ones once it
+ * has finished, as a step's head does.
+ *
  * @param row - the call, including its outcome when one exists.
  * @param bound - how much of the outcome to preview.
  * @param cells - cells a live output line may take, absent for {@link RAW_LINE_CELLS}.
+ * @param dispatched - the script's calls as drawn; absent, every call {@link nestedLines} keeps.
  * @returns the block's lines, without the opening blank.
  */
-function action(row: ToolCallRow, bound: ResultBound, cells?: number): readonly PresentedLine[] {
+function action(
+  row: ToolCallRow, bound: ResultBound, cells?: number,
+  dispatched: readonly PresentedLine[] = nestedLines(row.dispatches ?? [], bound, cells),
+): readonly PresentedLine[] {
   const family = familyOf(row.tool)
   const verb = family ?? VERB.run
   const outcome = row.result
@@ -618,9 +657,14 @@ function action(row: ToolCallRow, bound: ResultBound, cells?: number): readonly 
   // size does the same, so an edit reports how large it was.
   const named: Styled = { text, spans: [{ length: name.length, tone: 'strong' },
     ...text.length === name.length ? [] : [{ length: text.length - name.length, tone: 'plain' as const }]] }
-  const inline = after?.inline === undefined ? named : beside(named, after.inline)
+  // Work left running says so beside the call, ahead of what the start reported.
+  const tagged = row.background !== true || bound.background === undefined ? named
+    : beside(named, { text: bound.background, spans: [{ length: bound.background.length, tone: 'quiet' }] })
+  const tallied = row.dispatches === undefined ? undefined : callTally(row, bound)
+  const counted = tallied === undefined ? tagged : beside(tagged, tallied)
+  const inline = after?.inline === undefined ? counted : beside(counted, after.inline)
   const head: PresentedLine = {
-    marker: iconFor(row.tool),
+    marker: callIcon(row.tool, row.background === true),
     markerTone: stateTone(row),
     ...running(row) ? { pulse: true } : {},
     verb: '', text: inline.text, column: COLUMN.rail, wide: true, tone: 'plain',
@@ -639,25 +683,129 @@ function action(row: ToolCallRow, bound: ResultBound, cells?: number): readonly 
     ...excerpt(rest.map(text => continuation(text, 'plain')), limit, bound, 'plain', false).lines,
     ...excerpt(described, limit, bound, 'quiet', false).lines,
     ...liveTail(live?.tail, bound, cells),
-    ...dispatchLines(row.dispatches, bound, cells),
-    ...row.tool === SCRIPT_TOOL && bound.scriptOutput !== undefined && (after?.lines.length ?? 0) > 0 ? [continuation(bound.scriptOutput, 'quiet')] : [],
+    ...dispatched,
+    ...row.tool === SCRIPT_TOOL && bound.scriptOutput !== undefined && (after?.lines.length ?? 0) > 0
+      ? [continuation(outcome?.ok === false ? bound.scriptError ?? bound.scriptOutput : bound.scriptOutput, 'quiet')] : [],
     ...after?.lines ?? []]
   return [head, ...connected(body)]
 }
 
-/** Nested tool activity stays inside the program that dispatched it, with explicit outcomes without colour. */
-function dispatchLines(calls: readonly ToolCallRow[] | undefined, bound: ResultBound, cells?: number): readonly PresentedLine[] {
-  return (calls ?? []).flatMap(call => action(call, bound, cells).map((line, index) => {
-    if (index > 0) return line
-    const tone = stateTone(call)
-    return {
-      ...tone === 'failed' ? failedHead(line) : line,
-      marker: MARKER.none, pulse: false, column: COLUMN.output,
-      verb: running(call) ? TREE.branch : tone === 'failed' ? VERB.error : VERB.done,
-      verbTone: running(call) ? 'quiet' : tone,
-    }
-  }))
+/**
+ * How many calls a script made, and how many failed once it has finished, as
+ * in `13 calls · 1 failed`. While the script runs, a call that failed is
+ * already red on its own row, and the count follows its step's head in
+ * waiting for the end.
+ * @param row - a script call with its nested calls.
+ * @param bound - the locale's nouns for a count of calls and of failures.
+ * @returns the tally for the head, or nothing without the nouns or the calls.
+ */
+function callTally(row: ToolCallRow, bound: ResultBound): Styled | undefined {
+  const calls = row.dispatches ?? []
+  if (calls.length === 0 || bound.calls === undefined) return undefined
+  const count = `${calls.length} ${calls.length === 1 ? bound.call ?? bound.calls : bound.calls}`
+  const failed = running(row) || bound.failures === undefined ? 0 : calls.filter(call => stateTone(call) === 'failed').length
+  const failures = failed === 0 ? '' : ` \u00b7 ${failed} ${bound.failures}`
+  return { text: count + failures, spans: [{ length: count.length, tone: 'quiet' },
+    ...failures === '' ? [] : [{ length: failures.length, tone: 'failed' as const }]] }
 }
+
+/**
+ * The end of background work, headed as the call that started it so the two
+ * read as one job: `◌ Bash(npm run dev)  bash-1 finished · exit code: 0`.
+ * Its marker is the job's outcome, as a finished call's is: green, red when
+ * the work failed, and the waiting yellow when it was stopped.
+ * @param row - the job's completion.
+ * @param bound - the locale's name for code mode.
+ * @returns the one line it prints as.
+ */
+function jobHead(row: JobDoneRow, bound: ResultBound): PresentedLine {
+  const name = toolLabel(row.tool, bound.script)
+  const call = `${name}(${row.label})`
+  const status = row.id === undefined ? row.status : `${row.id} ${row.status}`
+  const tone: Tone = row.outcome === 'failed' ? 'failed' : 'quiet'
+  return {
+    marker: callIcon(row.tool, true),
+    markerTone: row.outcome === 'done' ? 'done' : row.outcome === 'failed' ? 'failed' : 'waiting',
+    verb: '', text: `${call}  ${status}`, column: COLUMN.rail, wide: true, tone: 'plain',
+    spans: [{ length: name.length, tone: 'strong' }, { length: call.length - name.length, tone: 'plain' }, { length: status.length + 2, tone }],
+  }
+}
+
+/** Calls a printed script keeps at each end, around the count its middle folds into. */
+const NESTED_ENDS = 2
+
+/** Failed calls a printed script keeps from its folded middle, where they are the news. */
+const NESTED_FAILURES = 3
+
+/**
+ * A script's calls as its block prints them, hung from it one level in.
+ *
+ * A script can loop over every file in a workspace, and each call it makes
+ * would otherwise print its own block. The first {@link NESTED_ENDS} and the
+ * last are kept, with what the middle held as one `+N more calls` branch, so
+ * the reader sees how the program started and how it ended. Calls that
+ * failed or never finished are news, and up to {@link NESTED_FAILURES} of
+ * them stay where they were. A count that would stand for one call costs the
+ * row it saves, so that call is drawn instead. Each call is in the session log.
+ *
+ * @param calls - the script's calls, in the order it made them.
+ * @param bound - how much of each outcome to preview, and the words for the count.
+ * @param cells - cells a running call's live output line may take.
+ * @returns the calls' lines, possibly empty.
+ */
+function nestedLines(calls: readonly ToolCallRow[], bound: ResultBound, cells?: number): readonly PresentedLine[] {
+  const ends = calls.length - NESTED_ENDS
+  let news = 0
+  const kept = calls.map((call, index) => index < NESTED_ENDS || index >= ends || bound.moreCalls === undefined
+    || (stateTone(call) !== 'done' && news++ < NESTED_FAILURES))
+  // A lone folded call is drawn instead of a count of one.
+  const shown = kept.map((keep, index) => keep || (kept[index - 1] !== false && kept[index + 1] !== false))
+  const entries: (ToolCallRow | number)[] = []
+  for (const [index, call] of calls.entries()) {
+    if (shown[index]) entries.push(call)
+    else if (typeof entries.at(-1) === 'number') entries[entries.length - 1] = (entries.at(-1) as number) + 1
+    else entries.push(1)
+  }
+  return entries.flatMap((entry, index) => {
+    const last = index === entries.length - 1
+    return typeof entry === 'number' ? [foldedCalls(`+${entry} ${bound.moreCalls}`, last)] : nestedCall(entry, bound, last, cells)
+  })
+}
+
+/**
+ * One of a script's calls, on a branch of the tree one level in.
+ *
+ * It reads as a call in a step does: its own marker as a badge past the
+ * branch, blinking while it runs, then green or red, and a failed call's
+ * head red as well. A call that succeeded folds to its head, a size beside
+ * it; the script's own result is what it worked toward. A failed call keeps
+ * its error under it, and a running one its newest output.
+ *
+ * @param call - the nested call.
+ * @param bound - how much of a failure or live output to preview.
+ * @param last - whether it closes the tree, which takes the corner.
+ * @param cells - cells a live output line may take.
+ * @returns its head, then any lines hung from it.
+ */
+function nestedCall(call: ToolCallRow, bound: ResultBound, last: boolean, cells?: number): readonly PresentedLine[] {
+  const folded = stateTone(call) === 'done'
+  const [head, ...body] = action(call, folded ? { ...bound, lines: 0 } : bound, cells, [])
+  return [{
+    ...head!.markerTone === 'failed' ? failedHead(head!) : head!,
+    marker: MARKER.none, markerTone: 'quiet', pulse: false, branch: last ? TREE.corner : TREE.branch,
+    badge: { glyph: head!.marker, tone: head!.markerTone ?? 'strong', ...head!.pulse === true ? { pulse: true } : {} },
+  }, ...folded ? [] : body.map(line => ({ ...line, branch: last ? MARKER.none : TREE.stem }))]
+}
+
+/**
+ * A count of a script's calls left out, as a branch of its tree.
+ * @param text - the count, as in `+9 more calls`.
+ * @param last - whether it closes the tree.
+ * @returns the line.
+ */
+const foldedCalls = (text: string, last: boolean): PresentedLine => ({
+  marker: MARKER.none, branch: last ? TREE.corner : TREE.branch, verb: '', text, column: COLUMN.rail, tone: 'quiet',
+})
 
 /**
  * Keep the script head visible while source and older nested calls yield to a short live window.
@@ -677,13 +825,12 @@ export function fittedAction(
   // Every dispatch needs at least a head. Window before formatting, so fitting
   // a long program cannot repeatedly walk its whole dispatch history.
   const skipped = Math.max(0, calls.length - Math.floor(rows))
+  // The oldest `hidden` calls fold into one branch opening the tree, which never closes it.
   const earlier = (hidden: number): readonly PresentedLine[] =>
-    hidden > 0 ? [continuation(`+${hidden} ${bound.earlier ?? bound.more}`, 'quiet')] : []
-  // The head, a count of the `hidden` oldest nested calls, then the rest of the body.
-  const format = (call: ToolCallRow, hidden: number, preview: ResultBound): readonly PresentedLine[] => {
-    const [head, ...body] = action(hidden > 0 ? { ...call, dispatches: calls.slice(hidden) } : call, preview, cells)
-    return [head!, ...earlier(hidden), ...body]
-  }
+    hidden > 0 ? [foldedCalls(`+${hidden} ${bound.earlier ?? bound.more}`, false)] : []
+  // The head still counts every call; only the tree under it is windowed.
+  const format = (call: ToolCallRow, hidden: number, preview: ResultBound): readonly PresentedLine[] => action(call, preview, cells,
+    [...earlier(hidden), ...calls.slice(hidden).flatMap((nested, index) => nestedCall(nested, preview, hidden + index === calls.length - 1, cells))])
   const size = (lines: readonly PresentedLine[]): number => lines.reduce((sum, line) => sum + height(line), 0)
   const blank = height(BLANK)
   const whole = opening(format(row, skipped, bound))
@@ -693,10 +840,10 @@ export function fittedAction(
   const least = format(withoutSource, skipped, compact)
   let used = size(least)
   if (used + blank <= rows) return opening(least)
-  // Nested blocks are independent and their heads are never connected, so
-  // hiding one more subtracts exactly its own rows. Measure each once, and
+  // Nested blocks are independent, and the tree's glyphs never change a
+  // line's width, so hiding one more subtracts exactly its own rows. Measure each once, and
   // format only the layout that fits.
-  const nested = calls.map((call, index) => index < skipped ? [] : dispatchLines([call], compact, cells))
+  const nested = calls.map((call, index) => index < skipped ? [] : nestedCall(call, compact, index === calls.length - 1, cells))
   used -= size(earlier(skipped))
   for (let hidden = skipped + 1; hidden < calls.length; hidden++) {
     used -= size(nested[hidden - 1]!)
@@ -704,9 +851,13 @@ export function fittedAction(
     if (total + blank <= rows) return opening(format(withoutSource, hidden, compact))
     if (total <= rows) return format(withoutSource, hidden, compact)
   }
+  // Last, the head gives up its count of calls, which can wrap it past the window.
   const head = least[0]!
+  const { detail: _source, dispatches: _calls, ...alone } = row
+  const plain = action(alone, compact, cells, [])[0]!
   const newest = nested.at(-1)?.[0]
-  return newest !== undefined && size([head, newest]) <= rows ? [head, newest] : [head]
+  const ladder = [...newest === undefined ? [] : [[head, newest], [plain, newest]], [head]]
+  return ladder.find(lines => size(lines) <= rows) ?? [plain]
 }
 
 /**
@@ -760,7 +911,8 @@ function liveTail(tail: readonly string[] | undefined, bound: ResultBound, cells
  */
 function connected(body: readonly PresentedLine[]): readonly PresentedLine[] {
   const [first, ...rest] = body
-  if (first === undefined || first.verb !== '' || first.gutter !== undefined) return body
+  // A script's tree hangs from its head by its own branches.
+  if (first === undefined || first.verb !== '' || first.gutter !== undefined || first.branch !== undefined) return body
   return [{ ...first, verb: CONNECTOR, verbTone: 'quiet' }, ...rest]
 }
 
@@ -768,12 +920,14 @@ function connected(body: readonly PresentedLine[]): readonly PresentedLine[] {
  * Render one step's calls as one block. A head counts them, then each
  * call hangs from it, joined by the tree in the rail.
  *
- * Each call's branch takes its marker's place in the rail. The tree is
+ * Each call's branch takes the rail, and the call's own marker moves just
+ * past it as a badge, so every call of a batch still says whether it is
+ * running, finished, or failed, and what kind of call it is. The tree is
  * structure, so every branch, stem, and connector is quiet and holds still;
- * a failed call's head turns red instead. The verb, argument, and output
- * keep their columns. The head's marker is the step's state. It is running while
- * any call is running, red when one failed. Calls are not separated by a
- * blank row. They were one model decision, and the tree stem is what shows that.
+ * the badge is what blinks, and a failed call's head turns red as well.
+ * The head's marker is the step's state. It is running while any call is
+ * running, red when one failed. Calls are not separated by a blank row.
+ * They were one model decision, and the tree stem is what shows that.
  *
  * @param calls - the step's calls, in the order the model made them.
  * @param bound - how much of each outcome to preview.
@@ -816,11 +970,13 @@ function groupHead(calls: readonly ToolCallRow[], bound: ResultBound): Presented
 function hang(bodies: readonly (readonly PresentedLine[])[]): readonly PresentedLine[] {
   return bodies.flatMap((lines, index) => {
     const last = index === bodies.length - 1
-    // Only the step's head blinks. A blinking branch would open a gap in the tree.
-    // In a batch only the head carries an icon; each branch is the tree alone,
-    // and the tree is structure, so every glyph of it is quiet.
+    // A blinking branch would open a gap in the tree, so the tree holds still
+    // and is quiet throughout. The call's marker, state and all, becomes its
+    // badge. A line drawn without a marker, such as the `+N earlier` summary,
+    // takes none.
     return lines.map((line, row) => row === 0
-      ? { ...line.markerTone === 'failed' ? failedHead(line) : line, marker: last ? TREE.corner : TREE.branch, markerTone: 'quiet' as const, pulse: false }
+      ? { ...line.markerTone === 'failed' ? failedHead(line) : line, marker: last ? TREE.corner : TREE.branch, markerTone: 'quiet' as const, pulse: false,
+        ...line.marker === MARKER.none ? {} : { badge: { glyph: line.marker, tone: line.markerTone ?? 'strong', ...line.pulse === true ? { pulse: true } : {} } } }
       : { ...line, marker: last ? MARKER.none : TREE.stem, markerTone: 'quiet' as const })
   })
 }
@@ -1240,12 +1396,25 @@ export interface ResultBound {
   readonly script?: string
   /** Locale-owned label above a script's own result, as in `Script output`; absent, the result hangs unlabelled. */
   readonly scriptOutput?: string
+  /** Locale-owned label above a failed script's error, as in `Script error`; absent, {@link ResultBound.scriptOutput} serves. */
+  readonly scriptError?: string
+  /** Locale-owned noun for a script's calls, as in `13 calls`; absent, a script's head does not count them. */
+  readonly calls?: string
+  /** Locale-owned noun for one call, as in `1 call`; absent, {@link ResultBound.calls} serves. */
+  readonly call?: string
+  /**
+   * Locale-owned phrase for a printed script's calls folded between its first
+   * and last, as in `+9 more calls`; absent, every call is printed.
+   */
+  readonly moreCalls?: string
   /** Locale-owned noun for a count of the files a command changed, as in `3 files`; absent, a collapsed result leaves the count out. */
   readonly files?: string
   /** Locale-owned phrase for changed files a bound left out, as in `+2 more files`; absent, the count is drawn alone. */
   readonly moreFiles?: string
   /** Locale-owned phrase for one changed file left out, as in `+1 more file`; absent, {@link ResultBound.moreFiles} serves. */
   readonly moreFile?: string
+  /** Locale-owned tag on a call that started background work, as in `background`; absent, only its icon says so. */
+  readonly background?: string
 }
 
 /**
@@ -1395,6 +1564,9 @@ export function present(row: Row, result: ResultBound, wrap?: (line: PresentedLi
 
     case 'tool-group':
       return opening(group(row.calls, result, outputCells(width)))
+
+    case 'job-done':
+      return opening([jobHead(row, result)])
 
     case 'tool-result': {
       const tone: Tone = row.ok ? 'plain' : 'failed'

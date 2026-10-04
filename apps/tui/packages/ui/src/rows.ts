@@ -79,6 +79,13 @@ export type Row =
    */
   | { readonly kind: 'tool-group', readonly calls: readonly ToolCallRow[] }
   /**
+   * Background work a call started has finished: the completion notice the
+   * job controller delivered to the agent, which the log records as plugin
+   * context. Drawn as the head of the call that started it, so the two read
+   * as one job's start and end.
+   */
+  | JobDoneRow
+  /**
    * A tool result. Its call id and outcome precede the output, including when
    * the output is empty. `text` is the raw model-facing result, empty when
    * the presenter supplied a card instead. `detail` is that card's lines.
@@ -139,11 +146,31 @@ export interface ToolCallRow {
   readonly detail?: readonly CardLine[]
   readonly result?: ToolOutcome
   /**
+   * The call asked to run in the background (`run_in_background`), so its
+   * result only acknowledges the start, and the work's end arrives later as
+   * a {@link JobDoneRow}.
+   */
+  readonly background?: true
+  /**
    * What the runtime said about the call while it waits for its result.
    * Process-local and never on a committed row: the logged result replaces
    * it, and a replayed session has none.
    */
   readonly live?: ToolCallLive
+}
+
+/** A background job's completion, as its notice recorded it. */
+export interface JobDoneRow {
+  readonly kind: 'job-done'
+  /** The registry's `<kind>-N` id, when the notice names one. */
+  readonly id?: string
+  /** The producer kind, a tool name such as `bash`. */
+  readonly tool: string
+  /** The producer's one-line label: a command, or a delegated task. */
+  readonly label: string
+  readonly outcome: 'done' | 'failed' | 'stopped'
+  /** How it ended, localized, with the producer's detail such as `exit code: 0`. */
+  readonly status: string
 }
 
 /** A running call's process-local state, projected from runtime events. */
@@ -252,5 +279,5 @@ export type NoticeTone = 'info' | 'warn' | 'error'
  * @returns whether `row` has a `text` field.
  */
 export function hasText(row: Row): row is Extract<Row, { text: string }> {
-  return row.kind !== 'tool-call' && row.kind !== 'tool-group' && row.kind !== 'command' && row.kind !== 'rate'
+  return row.kind !== 'tool-call' && row.kind !== 'tool-group' && row.kind !== 'command' && row.kind !== 'rate' && row.kind !== 'job-done'
 }

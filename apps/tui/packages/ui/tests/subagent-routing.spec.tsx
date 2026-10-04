@@ -70,6 +70,38 @@ it('keeps routing warnings distinct from a successful child outcome and uses wor
   expect(row.parts?.at(-1)).toEqual({ text: ' · Auto · cautious', color: PALETTE.waiting })
 })
 
+it('marks each child by its outcome, lines statuses up in one column, and hangs details from the tree', () => {
+  const rest = { detail: 'One-shot', inspectable: true } as const
+  const entries: readonly SubagentEntry[] = [
+    { ...rest, id: 'a', label: 'Review', state: 'working' },
+    { ...rest, id: 'b', label: 'Check types', state: 'saved', outcome: 'completed' },
+    { ...rest, id: 'c', label: 'Docs', state: 'saved', outcome: 'failed' },
+    { ...rest, id: 'd', label: 'Lint', state: 'live', outcome: 'stopped' },
+    { ...rest, id: 'e', label: 'Lost', state: 'issue', inspectable: false },
+    { ...rest, id: 'f', label: 'Resident', state: 'live' },
+    { ...rest, id: 'g', label: 'Saved', state: 'saved' },
+  ]
+  const lines = subagentSheet(entries, 0, dictionaries.en)
+  const rows = lines.filter(line => line.selected !== undefined && line.parts !== undefined)
+  // Without colour, each glyph still says how the child ended, as the header's marks do.
+  expect(rows.map(line => [line.glyph, line.glyphColor])).toEqual([
+    ['●', PALETTE.running], ['✓', PALETTE.done], ['✗', PALETTE.failed], ['■', PALETTE.waiting],
+    ['?', PALETTE.waiting], ['●', PALETTE.asking], ['○', undefined],
+  ])
+  // Every status starts in the same column, the outcome in its colour and residency dim beside it.
+  const starts = rows.map(line => stringWidth(line.parts![0]!.text) + line.parts![1]!.text.search(/\S/u))
+  expect(new Set(starts)).toEqual(new Set([stringWidth('Check types') + 2]))
+  expect(rows[2]!.parts!.slice(1).map(part => [part.text.trim(), part.color, part.dim])).toEqual([
+    ['Failed', PALETTE.failed, undefined], ['· Saved', undefined, true]])
+  // Only the selected child has details, hung from its glyph and closed by the corner.
+  expect(lines.slice(4, 5).map(line => [line.glyph, lineText(line)])).toEqual([['└', 'One-shot · a']])
+  // The summary's counts are drawn in their states' colours.
+  expect(lines[0]!.parts!.filter(part => part.color === PALETTE.failed).map(part => part.text)).toEqual(['1 failed'])
+  // A narrow sheet keeps the name column to a third of it, so long names push only themselves.
+  const narrow = subagentSheet([...entries, { ...rest, id: 'h', label: 'A much longer child name', state: 'working' }], -1, dictionaries.en, 40)
+  expect(narrow.find(line => line.parts?.[0]?.text === 'Review')!.parts![1]!.text).toMatch(/^ {6}Working$/u)
+})
+
 it('distinguishes a retained fallback from an ordinary default without requiring colour', () => {
   const entry = children()[0]!
   const normal = subagentSheet([{ ...entry, routing: { source: 'default' } }], -1, dictionaries.en).at(-1)!
@@ -88,7 +120,7 @@ it.each(['auto', 'explicit'] as const)('keeps recorded %s provenance when option
 
 it.each([40, 80])('wraps the selected route and explanation within %i columns', async columns => {
   const entries = children()
-  const lines = subagentSheet(entries, 2, dictionaries.en)
+  const lines = subagentSheet(entries, 2, dictionaries.en, columns)
   const frame = renderToString(<Sheet tabs={[{ label: 'Subagents', color: PALETTE.asking, current: true }]}
     color={PALETTE.asking} lines={lines} keys="Enter opens" columns={columns} limit={24} offset={0}
     follow={subagentLine(2, entries[2]!.routing)} frame="round" />, { columns })

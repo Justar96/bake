@@ -25,10 +25,10 @@ it.each(['en'] as const)('counts the children on one row under the input in %s',
     { id: 'child-5', label: 'Lost', state: 'issue', detail: 'Unreadable', inspectable: false },
   ] })} />)
   const copy = dictionaries[locale]
-  // Names are the sheet's; the row counts what is working, what is done, and what
-  // cannot be read, in lowercase and without a colon, and names its key at the right edge.
+  // Names are the sheet's; the row counts what is working, what is done, what failed,
+  // and what cannot be read, in lowercase and without a colon, and names its key at the right edge.
   expect(agentRow(ui.lastFrame())).toMatch(new RegExp(
-    `^↳ ${copy.subagentsTitle} 5 · 1 ${copy.subagentCountWorking} · 1 ${copy.subagentCountDone} · 1 ${copy.subagentUnreadable} +Ctrl\\+G$`, 'u'))
+    `^↳ ${copy.subagentsTitle} 5 · 1 ${copy.subagentCountWorking} · 1 ${copy.subagentCountDone} · 1 ${copy.subagentCountFailed} · 1 ${copy.subagentUnreadable} +Ctrl\\+G$`, 'u'))
   expect(statusRow(ui.lastFrame())).not.toContain(dictionaries[locale].subagentsTitle)
   // The row sits between the base rule and the status line.
   const lines = (ui.lastFrame() ?? '').split('\n')
@@ -52,6 +52,24 @@ it('walks Up to the goal and Down back, and opens its sheet with Ctrl+O over a d
   ui.stdin.write('\x1b')
   await vi.waitFor(() => expect(ui.lastFrame()).not.toContain(dictionaries.en.sheetClose))
   expect(ui.lastFrame()).toContain('> Unsent draft▌')
+})
+
+it('lists running background work under the subagents row, and only while something runs', () => {
+  const child = { id: 'child-1', label: 'Review tests', state: 'working' as const, detail: 'Continuable', inspectable: true }
+  const background = [
+    { id: 'bash-1', tool: 'bash', label: 'npm run dev', running: true },
+    { id: 'bash-2', tool: 'bash', label: 'make', running: false },
+    { id: 'bash-3', tool: 'bash', label: 'bun test --watch', running: true },
+  ]
+  const lines = (render(<App {...props({ subagents: [child], background })} />).lastFrame() ?? '').split('\n')
+  // The newest running job is named by its id, since that is what `job_kill` takes.
+  expect(lines.at(-2)).toBe('◌ Background · 2 running · bash-3 bun test --watch')
+  expect(lines.at(-3)).toBe(agentRow(lines.join('\n')))
+  expect(lines.at(-4)).toMatch(/^─+$/)
+  // Finished work said how it ended in the transcript, so the row leaves with it.
+  const settled = render(<App {...props({ background: background.map(entry => ({ ...entry, running: false })) })} />).lastFrame() ?? ''
+  expect(settled).not.toContain('Background')
+  expect(settled.split('\n').at(-2)).toMatch(/^─+$/)
 })
 
 it('keeps one grammar around the composer once a goal and subagents are both shown', () => {
@@ -309,7 +327,7 @@ it('selects the subagents row with Down, and moves the pointer past a child with
   await vi.waitFor(() => expect(agentRow(ui.lastFrame())).toMatch(/^> Subagents 2 · 1 working · 1 done +Enter opens$/))
   ui.stdin.write('\r')
   // The pointer starts on the first child it can open.
-  await vi.waitFor(() => expect(ui.lastFrame()).toContain('▸ ○ Earlier  Completed · Saved'))
+  await vi.waitFor(() => expect(ui.lastFrame()).toContain('▸ ✓ Earlier  Completed · Saved'))
   expect(ui.lastFrame()).not.toContain('Remote run')
   ui.stdin.write('\x1b[A')
   await vi.waitFor(() => expect(ui.lastFrame()).toContain('▸ ● remote'))
