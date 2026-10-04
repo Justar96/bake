@@ -7,6 +7,7 @@ import type { Highlight } from '@dsh-tui/ui/present.ts'
 import { dictionaries, type TuiCopy } from '@dsh-tui/ui/copy.ts'
 import type { FrameStyle } from '@dsh-tui/ui/layout.ts'
 import type { Clock } from '@dsh-tui/ui/activity.ts'
+import { wheelReports } from '@dsh-tui/ui/wheel.ts'
 import { resolveFrame } from './frame.ts'
 import { frameOutput, type FrameOutput } from './output.ts'
 import { editExternally, holdInput, type EditText, type SuspendTerminal } from './external-editor.ts'
@@ -113,6 +114,8 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
   let ui: Instance | undefined
   // NO_COLOR suppresses text styling and animated indicators for this terminal.
   const motion = (process.env['NO_COLOR'] ?? '') === ''
+  // Whether the terminal accelerates the wheel itself, read once like the frame.
+  const wheel = wheelReports(process.env, process.platform)
   // Settled once the loader has, when the settings document has been read.
   let screen: 'inline' | 'fullscreen' = 'inline'
   let output: FrameOutput | undefined
@@ -216,6 +219,7 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
     const branch = cwd === undefined ? undefined : git.follow(cwd, sessionGitConfinement(ctx, active.agent.session))
     return React.createElement(TerminalOwner, { bind: bindSuspend }, React.createElement(View, {
       ...active.view, key: active.agent.id, inputBlocked: navigation.busy, copy, frame: frame(), clock: systemClock, motion, screen,
+      wheelReports: wheel,
       quitting: quitTimer !== undefined, completionLimit: settings.completionLimit, resultLines: settings.resultLines,
       goalObjective: settings.goalObjective,
       highlight, version, ...updates.state === undefined ? {} : { update: updates.state },

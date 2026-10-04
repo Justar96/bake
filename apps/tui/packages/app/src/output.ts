@@ -24,7 +24,8 @@
  * above it can fill.
  *
  * Fullscreen shares batching and style filtering, but retains Ink's positioned
- * updates. Its alternate buffer starts at home and never erases shell scrollback.
+ * updates. Its alternate buffer starts at home, turns autowrap off, and never
+ * erases shell scrollback.
  *
  * @module @dsh-tui/app/output
  */
@@ -44,6 +45,20 @@ const END_SYNC = `${CSI}?2026l`
  */
 const MOUSE_ON = `${CSI}?1000h${CSI}?1006h`
 const MOUSE_OFF = `${CSI}?1006l${CSI}?1000l`
+/**
+ * Autowrap (DECAWM). Off in the alternate buffer, so a row the terminal draws
+ * wider than Ink measured it, as a character whose width they disagree on
+ * can, is clipped at the right edge. Wrapped, it would push every row below
+ * it down a row and scroll the fixed screen until the next full redraw.
+ */
+const AUTOWRAP_OFF = `${CSI}?7l`
+const AUTOWRAP_ON = `${CSI}?7h`
+
+/** One SGR sequence: text styling, which `NO_COLOR` removes. */
+const STYLE = /\x1b\[[\d;:]*m/g
+/** Reverse video, which `NO_COLOR` keeps: it is no colour, and the input caret is drawn with it. */
+const REVERSE_ON = `${CSI}7m`
+const REVERSE_OFF = `${CSI}27m`
 
 /** `ansi-escapes` `cursorNextLine`. Down one row to its first column, without scrolling. */
 const NEXT_LINE = `${CSI}E`
@@ -190,10 +205,11 @@ export interface FrameOutput {
  * @param out - the terminal's stdout.
  * @param err - the terminal's stderr, which shares the screen with it.
  * @param styles - retain SGR styling. False implements `NO_COLOR` for rendered
- *   text without changing cursor, erase, paste, or synchronization controls.
+ *   text, keeping only reverse video, without changing cursor, erase, paste,
+ *   or synchronization controls.
  * @param screen - fullscreen batches writes without moving the shell cursor or
  *   converting positioned updates into terminal scrolling, and reports the
- *   mouse while the alternate buffer is shown.
+ *   mouse and clips rows at the right edge while the alternate buffer is shown.
  * @returns the wrapped streams and a synchronous flush.
  */
 export function frameOutput(out: NodeJS.WriteStream, err: NodeJS.WriteStream, styles = true, screen: 'inline' | 'fullscreen' = 'inline'): FrameOutput {
@@ -225,15 +241,17 @@ export function frameOutput(out: NodeJS.WriteStream, err: NodeJS.WriteStream, st
       } else if (stream === out) {
         // The alternate buffer can inherit the shell's cursor column. Home
         // only after entering it; never move the saved primary-screen cursor.
-        // Mouse reports live exactly as long as the alternate buffer, so every
-        // path that restores the shell screen also returns the mouse to it.
-        text = clearFirst(text).replaceAll(`${CSI}?1049h`, `${CSI}?1049h${CSI}2J${CSI}H${MOUSE_ON}`)
-          .replaceAll(`${CSI}?1049l`, `${MOUSE_OFF}${CSI}?1049l`)
+        // Mouse reports and the clipped right edge live exactly as long as the
+        // alternate buffer, so every path that restores the shell screen,
+        // including the handoff to an external editor, also restores them.
+        text = clearFirst(text).replaceAll(`${CSI}?1049h`, `${CSI}?1049h${CSI}2J${CSI}H${AUTOWRAP_OFF}${MOUSE_ON}`)
+          .replaceAll(`${CSI}?1049l`, `${MOUSE_OFF}${AUTOWRAP_ON}${CSI}?1049l`)
           .replaceAll(`${CSI}3J`, '')
       }
       // Ink's Chalk version does not honor NO_COLOR on a TTY. Filter only
       // text styling here. Stripping all ANSI would break terminal ownership.
-      if (!styles) text = text.replace(/\x1b\[[\d;:]*m/g, '')
+      // Reverse video is not colour, and the input caret is drawn with it.
+      if (!styles) text = text.replace(STYLE, code => code === REVERSE_ON || code === REVERSE_OFF ? code : '')
       stream.write(text, error => {
         for (const callback of callbacks) callback(error)
       })

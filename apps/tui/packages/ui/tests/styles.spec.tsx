@@ -33,7 +33,8 @@ it('draws the rule dim and leaves the draft in the terminal\'s own foreground at
     // No background anywhere, and the draft carries no colour of its own, so
     // it reads on a light theme as well as a dark one.
     expect(frame).not.toMatch(/\u001b\[48[;:]/)
-    expect(rows[3]).toContain(' hello▌')
+    // The caret is a reverse-video cell after the text, in no colour of its own.
+    expect(rows[3]).toContain(' hello\u001b[7m \u001b[27m')
     expect(rows[3]).not.toMatch(/\u001b\[38[;:][0-9;:]*mhello/)
     expect(rows[4]).toBe(`\u001b[2m${'\u2500'.repeat(columns)}\u001b[22m`)
   }

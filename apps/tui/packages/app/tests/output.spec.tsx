@@ -11,6 +11,7 @@ import type { Row } from '@dsh-tui/ui'
 import { frameOutput, scrolling } from '../src/output.ts'
 import { LiveBlocks } from '../src/live.ts'
 import { Printed } from '../src/printed.ts'
+import { caretRow } from '../../../tests/caret.ts'
 
 class Input extends EventEmitter {
   isTTY = true
@@ -64,7 +65,7 @@ async function turn(wrapped: boolean): Promise<{ readonly deficit: number, reado
   })
   disposers.push(() => { instance.unmount(); instance.cleanup() })
   const filled = () => Array.from({ length: ROWS }, (_, row) =>
-    terminal.buffer.active.getLine(terminal.buffer.active.viewportY + row)?.translateToString(true) ?? '')
+    caretRow(terminal.buffer.active.getLine(terminal.buffer.active.viewportY + row), terminal.cols))
     .filter(line => line.trim() !== '').length
   let consumed = 0
   let deficit = 0
@@ -105,21 +106,22 @@ async function turn(wrapped: boolean): Promise<{ readonly deficit: number, reado
   return {
     deficit,
     screens: stdout.writes.length,
-    history: Array.from({ length: buffer.length }, (_, row) => buffer.getLine(row)?.translateToString(true) ?? ''),
+    history: Array.from({ length: buffer.length }, (_, row) => caretRow(buffer.getLine(row), terminal.cols)),
   }
 }
 
 describe('frame output', () => {
-  it('removes styles for NO_COLOR while preserving terminal controls and write order', () => {
+  it('removes styles but reverse video for NO_COLOR while preserving terminal controls and write order', () => {
     const stdout = new Output(80, 24)
     const stderr = new Output(80, 24)
     const output = frameOutput(stdout as unknown as NodeJS.WriteStream, stderr as unknown as NodeJS.WriteStream, false)
     const modes = '\x1b[?2026h\x1b[?25l\x1b[?2004h'
     output.out.write(modes + '\x1b[38;2;96;165;250mfile.ts\x1b[39m\n')
     output.err.write('\x1b[31merror\x1b[0m\n')
-    output.out.write('\x1b[2A\x1b[1mbold\x1b[22m\x1b[?2026l')
+    output.out.write('\x1b[2A\x1b[1mbold\x1b[22m\x1b[7m \x1b[27m\x1b[?2026l')
     output.flush()
-    expect(stdout.writes).toEqual(['\x1b[24B' + modes + 'file.ts\n', '\x1b[2Abold\x1b[?2026l'])
+    // Reverse video, which draws the caret, is no colour and stays.
+    expect(stdout.writes).toEqual(['\x1b[24B' + modes + 'file.ts\n', '\x1b[2Abold\x1b[7m \x1b[27m\x1b[?2026l'])
     expect(stderr.writes).toEqual(['error\n'])
   })
 
@@ -228,7 +230,7 @@ async function session(columns: number, rows: number) {
     consumed = stdout.writes.length
     if (bytes !== '') await new Promise<void>(resolve => terminal.write(bytes, resolve))
     const buffer = terminal.buffer.active
-    return Array.from({ length: stdout.rows }, (_, row) => buffer.getLine(buffer.viewportY + row)?.translateToString(true) ?? '')
+    return Array.from({ length: stdout.rows }, (_, row) => caretRow(buffer.getLine(buffer.viewportY + row), terminal.cols))
   }
   return {
     screen,
@@ -254,7 +256,7 @@ async function session(columns: number, rows: number) {
     async history(): Promise<string[]> {
       await screen()
       const buffer = terminal.buffer.active
-      return Array.from({ length: buffer.length }, (_, row) => buffer.getLine(row)?.translateToString(true) ?? '')
+      return Array.from({ length: buffer.length }, (_, row) => caretRow(buffer.getLine(row), terminal.cols))
     },
   }
 }

@@ -37,6 +37,7 @@ import { toolLabel } from '../packages/ui/src/present.ts'
 import { dictionaries } from '../packages/ui/src/copy.ts'
 import { FOLD_REST } from '../packages/ui/src/activity.ts'
 import { MARKDOWN, PALETTE } from '../packages/ui/src/palette.ts'
+import { CARET, caretRow, caretRows, markCaret } from '../tests/caret.ts'
 
 const ROOT = resolve(import.meta.dir, '../../..')
 const FIXTURE = join(ROOT, 'snapshots/session/bash-tool-turn/session.v3.jsonl')
@@ -56,8 +57,11 @@ const ARTIFACTS = join(ROOT, 'apps/tui/.smoke')
 const MODELS = ['deepseek-v4-flash', 'deepseek-flash', 'tui-picked-model', 'gpt-test', 'claude-test'] as const
 
 const SCREEN = {
-  /** `line.tsx` draws the caret instead of using inverse video, which `NO_COLOR` would erase. */
-  caret: '\u258c',
+  /**
+   * The caret is a reverse-video cell. The screen text marks it with this
+   * glyph, in place of a blank cell or before the character it covers.
+   */
+  caret: CARET,
   /**
    * The status line, which opens at the draft's column with the selected
    * model's name and no label. It is drawn from the first frame, whatever
@@ -272,9 +276,13 @@ class Terminal {
     return this.output
   }
 
-  /** The child's output so far with ANSI escapes removed. */
+  /**
+   * The child's output so far with ANSI escapes removed and each possible
+   * caret marked (see `tests/caret.ts`). Under `NO_COLOR`, one reversed
+   * character of a diff is marked too; read diffs through a `Screen`.
+   */
   get text(): string {
-    return this.stripped ??= Bun.stripANSI(this.output)
+    return this.stripped ??= Bun.stripANSI(markCaret(this.output))
   }
 
   /** How the child ended, or `undefined` while it runs. */
@@ -837,17 +845,17 @@ class Screen {
 
   /** One row's text, counted from the top of the scrollback. */
   text(row: number): string {
-    return this.buffer.getLine(row)?.translateToString(true) ?? ''
+    return caretRow(this.buffer.getLine(row), this.terminal.cols)
   }
 
-  /** The rows in view, top first. */
+  /** The rows in view, top first, with only the input's caret marked. */
   viewport(): string[] {
-    return Array.from({ length: this.terminal.rows }, (_, row) => this.text(this.buffer.viewportY + row))
+    return caretRows(Array.from({ length: this.terminal.rows }, (_, row) => this.buffer.getLine(this.buffer.viewportY + row)), this.terminal.cols)
   }
 
-  /** Every row, scrollback included. */
+  /** Every row, scrollback included, with only the input's caret marked. */
   all(): string[] {
-    return Array.from({ length: this.buffer.length }, (_, row) => this.text(row))
+    return caretRows(Array.from({ length: this.buffer.length }, (_, row) => this.buffer.getLine(row)), this.terminal.cols)
   }
 
   resize(cols: number, rows: number): void {
@@ -1416,7 +1424,17 @@ scenario('shell-edit', 'files a real shell command changes are drawn under its o
       delete run.env.FORCE_COLOR
       await run.writeOverlay()
       await run.terminal('shell-edit-resume', ['--resume', log[0].id], async tty => {
-        await tty.expect('edited config.js', '1 - const retries = 3', '1 + const retries = 5', 'edited extra.js  new', 'SHELL_EDIT_DONE')
+        // Without colour the changed digit is reversed like the caret, so the
+        // screen, which tells them apart, is read instead of the stream.
+        const screen = new Screen()
+        try {
+          await tty.wait('the replayed changes', async () => {
+            await screen.feed(tty.raw)
+            const shown = screen.all().join('\n')
+            return ['edited config.js', '1 - const retries = 3', '1 + const retries = 5', 'edited extra.js  new', 'SHELL_EDIT_DONE']
+              .every(needle => shown.includes(needle))
+          })
+        } finally { screen.dispose() }
       })
     } finally {
       for (const key of Object.keys(run.env)) if (!(key in saved)) delete run.env[key]
@@ -1879,7 +1897,18 @@ scenario('fullscreen', 'alternate-screen scrolling, pinned input, resize, replay
             await terminal.wait('the first prompt in the viewport', async () => (await capture(terminal.raw)).some(line => line.includes('Show the fullscreen transcript.')))
             terminal.send('\x1b[1;5F', 'Ctrl+End resumes following')
             await terminal.wait('the newest output again', async () => (await capture(terminal.raw)).some(line => line.includes('FULLSCREEN_DONE')))
-            terminal.send('\x1b[<64;10;10M', 'the wheel scrolls up three rows')
+            terminal.send('\x1b[1;5A', 'Ctrl+Up brings the prompt to the top')
+            await terminal.wait('the prompt at the top of the viewport', async () => {
+              const rows = await capture(terminal.raw)
+              return rows.slice(0, 3).some(line => line.includes('Show the fullscreen transcript.'))
+                && rows.some(line => line.includes(dictionaries.en.transcriptLatest)) && rows.at(-3)?.includes(SCREEN.caret) === true
+            })
+            terminal.send('\x1b[1;5B', 'Ctrl+Down past the last prompt follows output')
+            await terminal.wait('the newest output after the last prompt', async () => {
+              const rows = await capture(terminal.raw)
+              return rows.some(line => line.includes('FULLSCREEN_DONE')) && rows.some(line => line.includes(dictionaries.en.transcriptScroll))
+            })
+            terminal.send('\x1b[<72;10;10M', 'an Alt wheel notch scrolls up five rows')
             await terminal.wait('the jump-to-latest offer over older output', async () => {
               const rows = await capture(terminal.raw)
               return rows.some(line => line.includes(dictionaries.en.transcriptLatest)) && !rows.some(line => line.includes('FULLSCREEN_DONE'))
@@ -3078,9 +3107,15 @@ scenario('rendering', 'preserved scrollback after resize and a visible caret in 
         assert(history.filter(line => line === '  DONE').length === 1, 'resize lost or duplicated the resumed answer')
         tty.send(`\x1b[200~START ${'word '.repeat(100)}END\x1b[201~`, 'a wrapped draft')
         await tty.wait('end of the wrapped draft', async () => (await shown()).includes(`END${SCREEN.caret}`))
-        tty.send('\x1b[H', 'Home inside the wrapped draft')
+        tty.send('\x1b[H', 'Home to the start of the wrapped row')
+        await tty.wait('caret at the start of the last row', async () => {
+          const visible = (await shown()).split('\n')
+          // After the rail, which marks the rows hidden above with `^`.
+          return visible.some(line => line.slice(2).startsWith(SCREEN.caret) && line.includes('END'))
+        })
+        tty.send('\x1b[H', 'Home again, to the start of the draft')
         await tty.wait('caret at the start of the wrapped draft', async () => (await shown()).includes(`${SCREEN.caret}START`))
-        tty.send('\x1b[F', 'End inside the wrapped draft')
+        tty.send('\x1b[F\x1b[F', 'End twice: the row, then the draft')
         await tty.wait('caret returns to the end', async () => (await shown()).includes(`END${SCREEN.caret}`))
         const expanded = await resize(120, 40)
         await tty.wait('expanded composer keeps its draft', async () => {

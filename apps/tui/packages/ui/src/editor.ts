@@ -34,6 +34,15 @@ export function draftAt(text: string, cursor = text.length): Draft {
 }
 
 /**
+ * ASCII punctuation that ends a word inside one Unicode word, such as the dots
+ * of a path, the hyphen of kebab-case, or the slash of a URL, so a word step
+ * stops at each part. Adapted from pi's word navigation (MIT, Mario Zechner).
+ */
+const PUNCTUATION = /[(){}[\]<>.,;:'"!?+\-=*/\\|&%^$#@~`]/u
+const PUNCTUATION_ALL = new RegExp(PUNCTUATION.source, 'gu')
+const WHITESPACE = /\s/u
+
+/**
  * The span of the placeholder a cursor step or erase would enter.
  * @param text - complete draft.
  * @param cursor - UTF-16 cursor offset.
@@ -78,6 +87,95 @@ export function moveCursor(draft: Draft, direction: 'left' | 'right' | 'home' | 
     previous = segment.index
   }
   return { text, cursor: direction === 'left' ? previous : text.length }
+}
+
+/**
+ * Move a cursor that falls strictly inside a placeholder to the placeholder's start.
+ * @param text - complete draft.
+ * @param cursor - UTF-16 offset at a grapheme boundary.
+ * @param atoms - placeholders that edit as one character.
+ * @returns the cursor, outside every placeholder.
+ */
+export function outsideAtoms(text: string, cursor: number, atoms: readonly string[]): number {
+  const atom = atomAt(text, cursor, atoms, 'forward')
+  return atom !== undefined && atom.start < cursor ? atom.start : cursor
+}
+
+/**
+ * Widen a range so it removes any placeholder it touches whole.
+ * @param text - complete draft.
+ * @param start - first UTF-16 offset of the range.
+ * @param end - offset after the range.
+ * @param atoms - placeholders that edit as one character.
+ * @returns the widened range.
+ */
+export function atomRange(text: string, start: number, end: number, atoms: readonly string[]): { readonly start: number, readonly end: number } {
+  const first = atomAt(text, start, atoms, 'forward')
+  const last = atomAt(text, end, atoms, 'backward')
+  return {
+    start: first !== undefined && first.start < start ? first.start : start,
+    end: last !== undefined && last.end > end ? last.end : end,
+  }
+}
+
+/**
+ * Where a word step from the cursor lands.
+ *
+ * A step skips whitespace, then one word, one run of punctuation, or one
+ * placeholder. Inside a word, ASCII punctuation such as the dots of a path
+ * is a stop of its own. Unicode word boundaries split CJK, Thai, and other
+ * scripts without spaces. The step stays inside its logical line: at a line's
+ * edge it crosses the line break alone.
+ *
+ * @param text - complete draft.
+ * @param cursor - UTF-16 offset at a grapheme boundary.
+ * @param direction - toward the start or the end of the draft.
+ * @param atoms - placeholders a step crosses whole.
+ * @param opaque - treat each line as one word, so a masked secret's word boundaries are not revealed.
+ * @returns the new offset, at a grapheme boundary.
+ */
+export function wordStop(text: string, cursor: number, direction: 'left' | 'right', atoms: readonly string[] = [], opaque = false): number {
+  const lineStart = text.lastIndexOf('\n', cursor - 1) + 1
+  const next = text.indexOf('\n', cursor)
+  const lineEnd = next < 0 ? text.length : next
+  if (direction === 'left') {
+    if (cursor === lineStart) return Math.max(0, cursor - 1)
+    if (opaque) return lineStart
+    let at = cursor
+    while (at > lineStart && WHITESPACE.test(text[at - 1]!)) at--
+    if (at === lineStart) return at
+    const atom = atomAt(text, at, atoms, 'backward')
+    if (atom !== undefined) return atom.start
+    const segments = [...words.segment(text.slice(lineStart, at))]
+    const last = segments.at(-1)!
+    if (last.isWordLike === true) {
+      // After the last punctuation that leaves part of the word to cross.
+      const inner = [...last.segment.matchAll(PUNCTUATION_ALL)]
+        .map(match => match.index + match[0].length).filter(end => end < last.segment.length)
+      return lineStart + last.index + (inner.at(-1) ?? 0)
+    }
+    let index = segments.length - 1
+    while (index >= 0 && segments[index]!.isWordLike !== true && !WHITESPACE.test(segments[index]!.segment)
+      && atomAt(text, lineStart + segments[index]!.index + segments[index]!.segment.length, atoms, 'backward') === undefined) index--
+    return lineStart + (index < 0 ? 0 : segments[index]!.index + segments[index]!.segment.length)
+  }
+  if (cursor === lineEnd) return Math.min(text.length, cursor + 1)
+  if (opaque) return lineEnd
+  let at = cursor
+  while (at < lineEnd && WHITESPACE.test(text[at]!)) at++
+  if (at === lineEnd) return at
+  const atom = atomAt(text, at, atoms, 'forward')
+  if (atom !== undefined) return atom.end
+  let offset = at
+  for (const segment of words.segment(text.slice(at, lineEnd))) {
+    if (offset === at && segment.isWordLike === true) {
+      const match = PUNCTUATION.exec(segment.segment)
+      return at + (match === null || match.index === 0 ? segment.segment.length : match.index)
+    }
+    if (segment.isWordLike === true || WHITESPACE.test(segment.segment) || atomAt(text, offset, atoms, 'forward') !== undefined) break
+    offset += segment.segment.length
+  }
+  return offset
 }
 
 /**
@@ -141,6 +239,14 @@ interface Cell {
 }
 
 /**
+ * Draw a caret over one drawn cell.
+ * @param cell - the cell's text: a grapheme, the spaces a tab expands to, or
+ *   empty after a row's text and for whitespace hanging past its end.
+ * @returns the cell as drawn with the caret.
+ */
+export type DrawCaret = (cell: string) => string
+
+/**
  * Wrap a draft the way an editor wraps, not the way a paragraph wraps.
  *
  * Rows break after whitespace. Whitespace at a break hangs past the row
@@ -151,17 +257,17 @@ interface Cell {
  * and is split only between graphemes.
  *
  * The layout is computed without the caret and one column narrower than
- * `width`. The caret is then drawn into the column that remains. Moving the
- * caret through a draft never reflows it, and a caret at the end of a full
- * row still fits on that row.
+ * `width`. The caret is drawn over the cell it precedes, or into the column
+ * that remains after a row's text. Moving the caret through a draft never
+ * reflows it, and a caret at the end of a full row still fits on that row.
  *
  * @param text - complete draft, as `composerText` leaves it.
  * @param cursor - UTF-16 offset of the caret, at a grapheme boundary.
  * @param width - columns available to each row, caret included.
- * @param caret - one-column glyph drawn at the cursor.
+ * @param caret - draws the caret over the cell at the cursor.
  * @returns the rows, each at most `width` columns, and the caret's row.
  */
-export function wrapDraft(text: string, cursor: number, width: number, caret: string): WrappedDraft {
+export function wrapDraft(text: string, cursor: number, width: number, caret: DrawCaret): WrappedDraft {
   const { rows, ends } = layoutDraft(text, width)
   let caretRow = ends.find(end => end.offset === cursor)?.row ?? 0
   let caretCell = Number.POSITIVE_INFINITY
@@ -172,7 +278,10 @@ export function wrapDraft(text: string, cursor: number, width: number, caret: st
   return {
     rows: rows.map((row, index) => {
       const cells = row.map(cell => cell.text)
-      if (index === caretRow) cells.splice(Math.min(caretCell, cells.length), 0, caret)
+      if (index === caretRow) {
+        if (caretCell < cells.length) cells[caretCell] = caret(cells[caretCell]!)
+        else cells.push(caret(''))
+      }
       return cells.join('')
     }),
     caret: caretRow,
@@ -193,7 +302,9 @@ export function draftRows(text: string, width: number): number {
 export interface CursorWindow {
   /** Display text before the caret, including an ellipsis when text is hidden. */
   readonly before: string
-  /** Display text after the caret, including an ellipsis when text is hidden. */
+  /** The grapheme the caret covers, or empty at the end of the visible text. */
+  readonly under: string
+  /** Display text after the caret's grapheme, including an ellipsis when text is hidden. */
   readonly after: string
 }
 
@@ -239,9 +350,11 @@ export function cursorWindow(before: string, after: string, width: number): Curs
   }
   const hiddenBefore = window.start > 0
   const hiddenAfter = window.end < segments.length
+  const under = window.end > cursor ? segments[cursor]! : ''
   return {
     before: `${hiddenBefore ? '\u2026' : ''}${segments.slice(window.start, cursor).join('')}`,
-    after: `${segments.slice(cursor, window.end).join('')}${hiddenAfter ? '\u2026' : ''}`,
+    under,
+    after: `${segments.slice(cursor + (under === '' ? 0 : 1), window.end).join('')}${hiddenAfter ? '\u2026' : ''}`,
   }
 }
 
@@ -266,8 +379,61 @@ export function cursorWindow(before: string, after: string, width: number): Curs
  */
 export function moveVertically(draft: Draft, width: number, direction: 'up' | 'down', goal?: number):
   { readonly draft: Draft, readonly goal: number } | undefined {
-  const { rows, ends } = layoutDraft(draft.text, width)
-  const places = rows.map((row, index) => {
+  const places = rowStops(draft.text, width)
+  const from = places.findIndex(stops => stops.some(stop => stop.offset === draft.cursor))
+  const to = from + (direction === 'up' ? -1 : 1)
+  if (from < 0 || to < 0 || to >= places.length) return undefined
+  const column = goal ?? places[from]!.find(stop => stop.offset === draft.cursor)!.column
+  return { draft: { text: draft.text, cursor: landing(places[to]!, column) }, goal: column }
+}
+
+/**
+ * Move the caret to the start or end of the screen row it is on, then, from
+ * there, to the start or end of its logical line.
+ *
+ * Rows are the ones {@link wrapDraft} draws at the same width. A wrapped
+ * row's end is the start of the next row, so its last place is before its
+ * last grapheme, which on a row broken at a space is the space hanging past
+ * the row.
+ *
+ * @param draft - text and a cursor at a grapheme boundary.
+ * @param width - columns available to each row, caret included.
+ * @param edge - the row's start or end.
+ * @returns the moved draft.
+ */
+export function moveToRowEdge(draft: Draft, width: number, edge: 'start' | 'end'): Draft {
+  const stops = rowStops(draft.text, width).find(row => row.some(stop => stop.offset === draft.cursor))
+  const target = edge === 'start' ? stops?.[0]?.offset : stops?.at(-1)?.offset
+  if (target === undefined || target === draft.cursor) return moveCursor(draft, edge === 'start' ? 'home' : 'end')
+  return { text: draft.text, cursor: target }
+}
+
+/**
+ * The draft offset under a screen cell of the drawn rows, as a click places the caret.
+ * @param text - complete draft.
+ * @param width - columns available to each row, caret included.
+ * @param row - zero-based index into the rows {@link wrapDraft} draws.
+ * @param column - zero-based cell within the row; past its text reaches the row's last place.
+ * @returns the offset before the grapheme drawn at that cell, or undefined past the last row.
+ */
+export function offsetAt(text: string, width: number, row: number, column: number): number | undefined {
+  const stops = rowStops(text, width)[row]
+  return stops === undefined ? undefined : landing(stops, column)
+}
+
+/** A place the caret can rest on a drawn row, and its cell. */
+interface Stop {
+  readonly offset: number
+  readonly column: number
+}
+
+/**
+ * The caret's places on each drawn row: before each cell, and after the text
+ * of a logical line's last row.
+ */
+function rowStops(text: string, width: number): readonly (readonly Stop[])[] {
+  const { rows, ends } = layoutDraft(text, width)
+  return rows.map((row, index) => {
     let column = 0
     const stops = row.map(cell => {
       const stop = { offset: cell.offset, column }
@@ -277,13 +443,13 @@ export function moveVertically(draft: Draft, width: number, direction: 'up' | 'd
     const end = ends.find(line => line.row === index)
     return end === undefined ? stops : [...stops, { offset: end.offset, column }]
   })
-  const from = places.findIndex(stops => stops.some(stop => stop.offset === draft.cursor))
-  const to = from + (direction === 'up' ? -1 : 1)
-  if (from < 0 || to < 0 || to >= places.length) return undefined
-  const column = goal ?? places[from]!.find(stop => stop.offset === draft.cursor)!.column
-  let landing = places[to]![0]!
-  for (const stop of places[to]!) if (stop.column <= column) landing = stop
-  return { draft: { text: draft.text, cursor: landing.offset }, goal: column }
+}
+
+/** The last place in a row that is not right of a column, so a wide character is never split. */
+function landing(stops: readonly Stop[], column: number): number {
+  let offset = stops[0]!.offset
+  for (const stop of stops) if (stop.column <= column) offset = stop.offset
+  return offset
 }
 
 /**

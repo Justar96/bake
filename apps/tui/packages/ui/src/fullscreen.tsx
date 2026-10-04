@@ -15,16 +15,30 @@ import { Welcome } from './welcome.tsx'
 
 /** Scroll actions routed after modal keys and before composer editing. */
 export interface TranscriptScroll {
-  /** Page half a viewport, or reach either end; `end` follows output again. */
+  /** Page by a viewport less {@link PAGE_OVERLAP} rows, or reach either end; `end` follows output again. */
   move(direction: 'up' | 'down' | 'start' | 'end'): void
+  /**
+   * Bring the previous or next user prompt to the top. Past the first prompt
+   * this reaches the beginning; past the last it follows output again.
+   */
+  prompt(direction: -1 | 1): void
   /** Move by terminal rows, negative toward older output, as a mouse wheel does. */
   scroll(rows: number): void
   /** A primary click on a zero-based screen row; the jump-to-latest row follows output. */
   press(row: number): void
 }
 
-/** Terminal rows one wheel notch moves. */
-export const WHEEL_ROWS = 3
+/**
+ * Rows a page keeps from the one before it, so reading continues from text
+ * already seen. A short viewport still moves at least half its height.
+ */
+const PAGE_OVERLAP = 4
+
+/**
+ * @param room - transcript rows on screen.
+ * @returns the rows PgUp and PgDn move.
+ */
+const pageRows = (room: number): number => Math.max(1, Math.ceil(room / 2), room - PAGE_OVERLAP)
 
 /**
  * Keep controls at the bottom while rendering only the visible transcript.
@@ -89,7 +103,10 @@ export function Fullscreen({ transcript, live, heading, opening, budget, result,
   useImperativeHandle(ref, () => ({
     move(direction) {
       go(current => direction === 'end' ? undefined : direction === 'start' ? { row: 0, offset: 0 }
-        : viewport.move(current, (direction === 'up' ? -1 : 1) * Math.max(1, Math.floor(room / 2)), budget, result))
+        : viewport.move(current, (direction === 'up' ? -1 : 1) * pageRows(room), budget, result))
+    },
+    prompt(direction) {
+      go(current => viewport.prompt(current, direction) ?? (direction < 0 ? { row: 0, offset: 0 } : undefined))
     },
     scroll(rows) { go(current => viewport.move(current, rows, budget, result)) },
     press(row) { if (hint > 0 && row === room && position !== undefined) setPosition(undefined) },

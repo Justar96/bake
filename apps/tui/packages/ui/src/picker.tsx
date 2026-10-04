@@ -18,6 +18,7 @@ import type { TuiCopy } from './copy.ts'
 import { filterChoices, scrollTo, type Match } from './choices.ts'
 import { MARKER } from './layout.ts'
 import { PALETTE, type PaletteColor } from './palette.ts'
+import { caretCell } from './caret.ts'
 import { composerText, eraseLast } from './editor.ts'
 
 /** A choice's standing, drawn in its own aligned column. `Current`, `Configured`. */
@@ -336,7 +337,7 @@ export function Picker({ prompt, copy, limit, onSelect }: {
     {prompt.warning !== undefined && <Text color={PALETTE.waiting}>{prompt.warning}</Text>}
     <Text wrap="truncate-end">
       <Text bold color={PALETTE.asking}>{`${MARKER.prompt} `}</Text>
-      {query}▌{query === '' && <Text dimColor>{copy.pickerFilter}</Text>}
+      {query}{caretCell('')}{query === '' && <Text dimColor>{copy.pickerFilter}</Text>}
     </Text>
     {scroll.above > 0 && <Edge arrow="↑" count={hiddenAbove} copy={copy} {...carried === undefined ? {} : { group: carried }} />}
     {[...windowed, ...shownPinned].map(line => line.kind === 'group'

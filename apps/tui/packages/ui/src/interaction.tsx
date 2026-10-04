@@ -6,6 +6,7 @@ import wrapAnsi from 'wrap-ansi'
 import type { AskUserQuestionAnswer, AskUserQuestionAnswerItem, AskUserQuestionItem } from '@deepseek-ai/dsh-user-questions'
 import type { TuiCopy } from './copy.ts'
 import { isNewline, useComposer } from './composer.ts'
+import { caretBefore, caretCell } from './caret.ts'
 import { cursorWindow } from './editor.ts'
 import { MARKER } from './layout.ts'
 import { PALETTE } from './palette.ts'
@@ -130,16 +131,17 @@ function LoginView({ interaction, copy, columns, onAnswer }: {
     if (completed.current) return
     completed.current = true
     onAnswer(interaction.id, input)
-  }, undefined, interaction.fallback !== undefined, interaction.initial ?? '')
+  }, undefined, interaction.fallback !== undefined, interaction.initial ?? '', undefined, { opaque: interaction.secret === true })
   const change = (): void => { setNudged(false); setEdited(true) }
   usePaste(text => { change(); composer.paste(text) })
   useInput((text, key) => {
     const newline = isNewline(text, key)
-    if ((key.meta && !newline) || key.escape) return
+    if (key.escape) return
+    const was = composer.value
     // Before the Ctrl guard, which a CSI-u Ctrl-J would otherwise stop at.
     if (newline) { change(); composer.paste(text.startsWith('\n') ? text : '\n'); return }
     if (key.return && composer.value.trim() === '' && interaction.fallback === undefined) { setNudged(true); return }
-    if (composer.editKey(text, key)) { if (key.backspace || key.delete) change(); return }
+    if (composer.editKey(text, key) || key.meta) { if (composer.value !== was) change(); return }
     if (key.ctrl) return
     if (!key.return) change()
     composer.type(key.return ? '\n' : text)
@@ -166,7 +168,7 @@ function LoginView({ interaction, copy, columns, onAnswer }: {
     {interaction.title !== undefined && <Text bold wrap="truncate-end">{interaction.message}</Text>}
     <Text wrap="truncate-end">
       <Text bold color={PALETTE.asking}>{`${MARKER.prompt} `}</Text>
-      {field.before}▌{field.after}
+      {field.before}{caretCell(field.under)}{field.after}
       {empty && shadow !== undefined ? <Text dimColor>{shadow}</Text> : null}
     </Text>
     {interaction.hint !== undefined && <Text dimColor wrap="truncate-end">{`  ${interaction.hint}`}</Text>}
@@ -283,7 +285,12 @@ function QuestionPage({ question, number, count, copy, limit, height, columns, o
   usePaste(text => { setNudged(false); focus(other); composer.pasteBlock(text) })
   useInput((text, key) => {
     const newline = isNewline(text, key)
-    if ((key.meta && !newline) || key.escape) return
+    if (key.escape) return
+    // Word editing in the answer's own field; no other Meta key does anything.
+    if (key.meta && !newline) {
+      if (cursor.current === other && composer.editKey(text, key)) setNudged(false)
+      return
+    }
     if (key.return && !newline) { submit(); return }
     if (key.pageUp || (key.shift && key.upArrow)) { scrollDetail(-detailPage); return }
     if (key.pageDown || (key.shift && key.downArrow)) { scrollDetail(detailPage); return }
@@ -365,7 +372,7 @@ function QuestionPage({ question, number, count, copy, limit, height, columns, o
       <Text dimColor={focused !== other}>{numbered(other)}</Text>
       <Text bold={focused === other} {...focused === other ? { color: PALETTE.asking } : {}}>{`${copy.customAnswer}: `}</Text>
       {focused === other
-        ? <>{composer.before}▌{composer.after}{custom === '' ? <Text dimColor>{copy.customAnswerHint}</Text> : null}</>
+        ? <>{composer.before}{caretBefore(composer.after)}{custom === '' ? <Text dimColor>{copy.customAnswerHint}</Text> : null}</>
         : custom === '' ? <Text dimColor>{copy.customAnswerHint}</Text> : custom}
     </Text>}
     {footerRows > 0 && <Box flexDirection="row" marginTop={gaps > 0 ? 1 : 0}>
