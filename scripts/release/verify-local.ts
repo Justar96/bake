@@ -35,8 +35,14 @@ async function run(argv: string[], env: NodeJS.ProcessEnv, cwd = ROOT, expected 
 /** `--help` loads no session, so taking longer means shutdown is waiting out its 5 s forced-exit grace. */
 const HELP_LIMIT_MS = 3_000
 
-/** Run a `--help` command and reject one that exceeds {@link HELP_LIMIT_MS}. */
+/**
+ * Run a `--help` command twice and reject a second run that exceeds
+ * {@link HELP_LIMIT_MS}. Only the second is timed: the first boot in a home
+ * reads every module cold, which on a fresh Windows runner, scanning each new
+ * file, has taken 14 s. The forced-exit wait delays every run alike.
+ */
 async function runHelp(argv: string[], env: NodeJS.ProcessEnv): Promise<string> {
+  await run(argv, env)
   const started = performance.now()
   const output = await run(argv, env)
   const elapsed = Math.round(performance.now() - started)
@@ -76,11 +82,12 @@ async function publishNewer(archive: string, target: string): Promise<{ base: st
   const tree = join(temporary, 'newer')
   const tar = process.platform === 'win32' ? 'tar.exe' : 'tar'
   // Unpacked, not copied from the install: Bun's cpSync recreates Windows
-  // directory links as file links, which Node cannot resolve through. For the
-  // same links, Windows unpacks with tar.exe: Bun.Archive skips them there.
+  // directory links as file links, which Node cannot resolve through. Unpacked
+  // with tar, as the installers and the updater do, not Bun.Archive: that
+  // skips those links, and hard links too. The archive records a hard link
+  // wherever `bun install` linked two packages' files to one cache file.
   mkdirSync(tree)
-  if (process.platform === 'win32') await run([tar, '-xzf', archive, '-C', tree], process.env)
-  else await new Bun.Archive(await Bun.file(archive).bytes()).extract(tree)
+  await run([tar, '-xzf', archive, '-C', tree], process.env)
   for (const manifest of VERSIONED_MANIFESTS) {
     const path = join(tree, manifest)
     writeFileSync(path, readFileSync(path, 'utf8').replace(`"version": "${stagedVersion}"`, `"version": "${version}"`))
