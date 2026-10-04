@@ -4,6 +4,7 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 ## [Unreleased]
 
+- Settings, credentials, and profile files are synced to disk when Bake saves them. On some filesystems, a crash or power loss right after a save could leave `settings.yaml` or `.credentials.yaml` empty, which Bake then read as no settings or no saved logins, and the next save made the loss permanent. A save now reaches the disk before it replaces the old file, so a crash leaves either the old or the new file whole.
 - `bake --help`, a mistyped option such as `bake tui --bogus`, and Ctrl+C or SIGTERM in the first moments of a launch end in about 0.4 s instead of about 5.3 s. Shutdown waited for a configuration reload that could start only once the terminal was up, and the terminal runner waited for its own teardown, so each of these exits lasted until the launcher's 5-second forced exit. Startup also no longer reapplies the `cordis.patch.yml` files it has just loaded.
 
 ## [0.3.6] - 2026-10-04
