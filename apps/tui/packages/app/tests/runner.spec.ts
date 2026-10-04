@@ -1,6 +1,7 @@
 /** Terminal modes are restored through normal exit and Cordis's fatal-release path. */
 import { EventEmitter } from 'node:events'
 import { afterEach, expect, it, vi } from 'vitest'
+import type { Context } from '@deepseek-ai/cordis'
 import { run, type TuiIo } from '../src/runner.ts'
 import { SessionNavigation } from '../src/navigation.ts'
 import { harness } from './harness.ts'
@@ -110,6 +111,33 @@ it.each(['stdin', 'stdout'])('refuses piped %s before acquiring terminal modes',
   expect(output.frames).toEqual([])
   // The plugin entry exits without a message of its own, so the refusal says why.
   expect(error.text).toBe('dsh: tui needs an interactive terminal; use dsh --profile headless for scripted runs\n')
+})
+
+it('stops waiting for the plugin tree when disposed during startup', async () => {
+  const fixture = await harness()
+  cleanup.push(fixture.dispose)
+  const input = new Input()
+  const output = new Output()
+  const error = new Output()
+  const exit = vi.fn()
+  const io = { in: input, out: output, err: error, exit } as unknown as TuiIo
+  // A row that settles only once the runner has stopped, like a launch whose
+  // tree disposal waits on the runner's own terminal owner.
+  const runnerStopped = Promise.withResolvers<void>()
+  cleanup.push(async () => { runnerStopped.resolve() })
+  fixture.ctx.loader.builtins['after-runner'] = { apply: () => runnerStopped.promise }
+  void fixture.ctx.loader.create({ name: 'cordis:after-runner' })
+  let finished: Promise<void> | undefined
+  const runner = fixture.ctx.plugin({
+    apply: (ctx: Context) => { finished = run(ctx, { screen: 'inline', composerFrame: 'auto', completionLimit: 8, resultLines: 8, attachmentMaxBytes: 1048576, attachmentLimit: 8, doubleInterruptMs: 500, credentialRefs: [] }, io) },
+  })
+  await runner
+  await runner.dispose()
+  runnerStopped.resolve()
+  await finished
+  expect(output.frames).toEqual([])
+  expect(input.isRaw).toBe(false)
+  expect(exit).not.toHaveBeenCalled()
 })
 
 it('root fiber disposal awaits the drains owned by run()\'s own finally', async () => {

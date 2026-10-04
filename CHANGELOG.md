@@ -4,6 +4,8 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 ## [Unreleased]
 
+- `bake --help`, a mistyped option such as `bake tui --bogus`, and Ctrl+C or SIGTERM in the first moments of a launch end in about 0.4 s instead of about 5.3 s. Shutdown waited for a configuration reload that could start only once the terminal was up, and the terminal runner waited for its own teardown, so each of these exits lasted until the launcher's 5-second forced exit. Startup also no longer reapplies the `cordis.patch.yml` files it has just loaded.
+
 ## [0.3.6] - 2026-10-04
 
 - Bake 0.3.5 on Windows starts again. The terminal imported the compaction settings package, which the Windows release did not install for it, so `bake` exited at once with status 1 and printed nothing; Linux and macOS installs found the package by chance. The release now checks that every package the terminal loads is declared and resolves in the platform's installed layout before it ships.

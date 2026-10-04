@@ -36,6 +36,7 @@ Hot reload service with Cordis-compatible module configuration and events.
 runExclusive<T>(operation: () => Promise<T>): Promise<T>
 
 /** Watch a configuration path through the same queue as module replacement.
+ * Only edits after the watch starts are reported; the caller applies the file as it found it.
  * @param filename Absolute path, which may not exist yet.
  * @param refresh Rebuilds configuration from its current files and awaits Loader completion.
  * @returns Disposer closing this registration and waiting for its pending refresh.

@@ -882,7 +882,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'async watchConfig(filename: string, refresh: () => Promise<void>): Promise<() => Promise<void>>',
-        description: 'Watch a configuration path through the same queue as module replacement.',
+        description: 'Watch a configuration path through the same queue as module replacement. Only edits after the watch starts are reported; the caller applies the file as it found it.',
         parameters: [{ name: 'filename', description: 'Absolute path, which may not exist yet.' }, { name: 'refresh', description: 'Rebuilds configuration from its current files and awaits Loader completion.' }],
         returns: 'Disposer closing this registration and waiting for its pending refresh.',
       },

@@ -229,6 +229,9 @@ export function loadLayeredEnv(
 }
 
 const bootstrapIncludes = new WeakMap<Context, Entry>()
+// The last patch generation handed to each root Include, serialized first:
+// Include merges later patches into the rows an earlier patch inserted, in place.
+const appliedGenerations = new WeakMap<Context, string>()
 
 // The include's YAML dialect (`!!js` scalars become expression nodes the
 // Loader interpolates against each entry's injection-ready context), imported
@@ -257,6 +260,7 @@ export async function reconcileProfilePatches(
     fiber: row.fiber, failed: row.fiber.state === FiberState.FAILED || row.fiber.state === FiberState.DISPOSED,
   }])
   const { patches: _previous, ...includeConfig } = entry.options.config as Include.Config
+  appliedGenerations.set(ctx, JSON.stringify(patches))
   await entry.update({ config: { ...includeConfig, patches } })
   const results = await Promise.allSettled(previousFibers.map(({ fiber }) => fiber.await()))
   await ctx.loader.await()
@@ -269,6 +273,16 @@ export async function reconcileProfilePatches(
     if (result.status === 'rejected' && !previousFibers[index]?.failed) throw result.reason
   }
   return failures.map(inactiveDiagnostic)
+}
+
+/** Report whether the root Include already applies a patch generation.
+ * @param ctx Booted root context.
+ * @param patches Complete ordered patch list, as composed by `readProfilePatches()`.
+ * @returns `true` only when `patches` equals the generation `mountRootInclude()` or
+ * `reconcileProfilePatches()` last handed to `ctx`'s root Include.
+ */
+export function isProfileGenerationApplied(ctx: Context, patches: readonly PatchOptions[]): boolean {
+  return appliedGenerations.get(ctx) === JSON.stringify(patches)
 }
 
 /**
@@ -535,6 +549,8 @@ export async function mountRootInclude(
     path: pathToFileURL(absoluteConfigPath).href,
     ...patches.length > 0 ? { patches: [...patches] } : {},
   }
+  // Before creation: the included rows, HMR among them, start while it is in flight.
+  appliedGenerations.set(ctx, JSON.stringify(patches))
   const rootInclude: EntryOptions = {
     id: 'include',
     name: 'cordis:include',

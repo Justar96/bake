@@ -21,6 +21,9 @@ const supported = new Set(['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x
 if (!supported.has(target)) throw new Error(`Unsupported release target: ${target}`)
 if (!isReleaseVersion(cli.version)) throw new Error('CLI version is not a release version')
 
+/** `--help` loads no session, so taking longer means shutdown is waiting out its 5 s forced-exit grace. */
+const HELP_LIMIT_MS = 3_000
+
 async function run(argv: string[], cwd: string): Promise<void> {
   const child = Bun.spawn(argv, { cwd, stdin: 'inherit', stdout: 'inherit', stderr: 'inherit' })
   const code = await child.exited
@@ -110,11 +113,14 @@ try {
 
   const home = mkdtempSync(join(tmpdir(), 'bake-pack-home-'))
   try {
+    const started = performance.now()
     const check = Bun.spawn(['node', 'apps/cli/lib/bin.js', '--profile', 'tui', '--help'], {
       cwd: stage, env: { ...process.env, DSH_HOME: home }, stdout: 'pipe', stderr: 'inherit',
     })
     const output = await new Response(check.stdout).text()
     if (await check.exited !== 0 || !output.includes('Usage:')) throw new Error('Staged CLI did not boot')
+    const elapsed = Math.round(performance.now() - started)
+    if (elapsed > HELP_LIMIT_MS) throw new Error(`Staged CLI took ${elapsed} ms to print help; the limit is ${HELP_LIMIT_MS} ms`)
     // `--help` stops before the terminal loads its runner, which imports
     // packages of its own; resolve them in this platform's installed layout.
     const lazy = ['runner-loader', 'ui-loader', 'syntax-loader'].map(name => `./apps/tui/packages/app/lib/${name}.js`)
