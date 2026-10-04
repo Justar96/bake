@@ -102,11 +102,14 @@ it.each(['stdin', 'stdout'])('refuses piped %s before acquiring terminal modes',
   input.isTTY = stream !== 'stdin'
   const output = new Output()
   output.isTTY = stream !== 'stdout'
+  const error = new Output()
   await expect(run(fixture.ctx, { screen: 'fullscreen', composerFrame: 'auto', completionLimit: 8, resultLines: 8, attachmentMaxBytes: 1048576, attachmentLimit: 8, doubleInterruptMs: 500, credentialRefs: [] }, {
-    in: input, out: output, err: output, exit: vi.fn(),
+    in: input, out: output, err: error, exit: vi.fn(),
   } as unknown as TuiIo)).rejects.toThrow('interactive terminal')
   expect(input.isRaw).toBe(false)
   expect(output.frames).toEqual([])
+  // The plugin entry exits without a message of its own, so the refusal says why.
+  expect(error.text).toBe('dsh: tui needs an interactive terminal; use dsh --profile headless for scripted runs\n')
 })
 
 it('root fiber disposal awaits the drains owned by run()\'s own finally', async () => {

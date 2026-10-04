@@ -95,7 +95,12 @@ export interface TuiIo {
  * @param io - terminal streams and launcher exit callback.
  */
 export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promise<void> {
-  if (io.in.isTTY !== true || io.out.isTTY !== true) throw new Error('tui needs an interactive terminal; use dsh --profile headless for scripted runs')
+  if (io.in.isTTY !== true || io.out.isTTY !== true) {
+    // Before the `try` below, which reports the failures it catches.
+    const message = 'tui needs an interactive terminal; use dsh --profile headless for scripted runs'
+    io.err.write(`dsh: ${message}\n`)
+    throw new Error(message)
+  }
   const abort = new AbortController()
   const done = Promise.withResolvers<void>()
   let App: AppComponent | undefined
