@@ -424,6 +424,97 @@ describe('terminal composer', () => {
     await vi.waitFor(() => expect(state.onSubmit).toHaveBeenCalledExactlyOnceWith('中zb'))
   })
 
+  // `▌` standing in for a space is the caret on that space (see tests/caret.ts).
+  it('moves by word with Ctrl, Alt, and Alt+B/F, and Ctrl+A reaches the line start', async () => {
+    const state = props()
+    const ui = render(<App {...state} />)
+    const shows = (draft: string) => vi.waitFor(() => expect(ui.lastFrame()).toContain(`> ${draft}`))
+    ui.stdin.write('run src/app.ts now')
+    await shows('run src/app.ts now▌')
+    ui.stdin.write('\u001b[1;5D')
+    await shows('run src/app.ts ▌now')
+    // A path stops at its punctuation.
+    ui.stdin.write('\u001b[1;3D')
+    await shows('run src/app.▌ts now')
+    ui.stdin.write('\u001bb')
+    await shows('run src/app▌.ts now')
+    ui.stdin.write('\u001bf')
+    await shows('run src/app.▌ts now')
+    ui.stdin.write('\u001b[1;5C')
+    await shows('run src/app.ts▌now')
+    ui.stdin.write('\u0001')
+    await shows('▌run src/app.ts now')
+    ui.stdin.write('\u0005')
+    await shows('run src/app.ts now▌')
+  })
+
+  it('kills words and lines into a ring that yanks them back, and undoes each edit', async () => {
+    const state = props()
+    const ui = render(<App {...state} />)
+    const shows = (draft: string) => vi.waitFor(() => expect(ui.lastFrame()).toContain(`> ${draft}`))
+    ui.stdin.write('alpha beta gamma')
+    await shows('alpha beta gamma▌')
+    // Ctrl+W, then Alt+Backspace: consecutive kills join one entry, in order.
+    ui.stdin.write('\u0017')
+    await shows('alpha beta ▌')
+    ui.stdin.write('\u001b\u007f')
+    await shows('alpha ▌')
+    ui.stdin.write('\u0019')
+    await shows('alpha beta gamma▌')
+    // Alt+D, then Ctrl+K, from the start: a second entry.
+    ui.stdin.write('\u0001\u001bd')
+    await shows('▌beta gamma')
+    ui.stdin.write('\u000b')
+    await shows(`▌${dictionaries.en.prompt}`)
+    ui.stdin.write('\u0019')
+    await shows('alpha beta gamma▌')
+    // Alt+Y right after a yank swaps in the older kill.
+    ui.stdin.write('\u001by')
+    await shows('beta gamma▌')
+    // Ctrl+- undoes the swap, then the yank.
+    ui.stdin.write('\u001f')
+    await shows('alpha beta gamma▌')
+    ui.stdin.write('\u001f')
+    await shows(`▌${dictionaries.en.prompt}`)
+    // Ctrl+U kills to the line's start, then the line break before it.
+    ui.stdin.write('one\u001b\rtwo')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('  two▌'))
+    ui.stdin.write('\u0015')
+    await vi.waitFor(() => expect(ui.lastFrame()).not.toContain('two'))
+    ui.stdin.write('\u0015')
+    await shows('one▌')
+    ui.stdin.write('\r')
+    await vi.waitFor(() => expect(state.onSubmit).toHaveBeenCalledExactlyOnceWith('one'))
+  })
+
+  it('yanks a killed paste placeholder back as the paste, after a submission too', async () => {
+    const state = props()
+    const ui = render(<App {...state} />)
+    const pasted = Array.from({ length: 4 }, (_, index) => `line ${index}`).join('\n')
+    ui.stdin.write(`\u001b[200~${pasted}\u001b[201~`)
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('> [Pasted text #1 +3 lines]▌'))
+    ui.stdin.write('\u0015')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain(`> ▌${dictionaries.en.prompt}`))
+    ui.stdin.write('first')
+    ui.stdin.write('\r')
+    await vi.waitFor(() => expect(state.onSubmit).toHaveBeenCalledExactlyOnceWith('first'))
+    ui.stdin.write('\u0019')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('> [Pasted text #1 +3 lines]▌'))
+    ui.stdin.write('\r')
+    await vi.waitFor(() => expect(state.onSubmit).toHaveBeenLastCalledWith(pasted))
+  })
+
+  it('undoes a word typed after a space as one step', async () => {
+    const state = props()
+    const ui = render(<App {...state} />)
+    for (const character of 'hello world') ui.stdin.write(character)
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('> hello world▌'))
+    ui.stdin.write('\u001f')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('> hello▌'))
+    ui.stdin.write('\u001f')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain(`> ▌${dictionaries.en.prompt}`))
+  })
+
   it('inserts Shift-Enter and multiline paste at the cursor without submitting', async () => {
     const state = props()
     const ui = render(<App {...state} />)
@@ -697,6 +788,26 @@ describe('terminal composer', () => {
     await vi.waitFor(() => expect(state.onSubmit).toHaveBeenCalledExactlyOnceWith('[Image #1]/tmp/gone.png'))
   })
 
+  it('unstages an image a kill removes, and neither yank nor undo brings its placeholder back', async () => {
+    const onRemoveImage = vi.fn()
+    const state = props({ onPasteImage: async () => 'a', onRemoveImage })
+    const ui = render(<App {...state} />)
+    ui.stdin.write('see ')
+    ui.stdin.write('\u0016')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('> see [Image #1]▌'))
+    ui.stdin.write(' here')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('> see [Image #1] here▌'))
+    ui.stdin.write('\u0015')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain(`> ▌${dictionaries.en.prompt}`))
+    expect(onRemoveImage).toHaveBeenCalledExactlyOnceWith('a')
+    ui.stdin.write('\u0019')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('> see  here▌'))
+    ui.stdin.write('\u001f\u001f')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('> see  here▌'))
+    expect(ui.lastFrame()).not.toContain('[Image #1]')
+    expect(onRemoveImage).toHaveBeenCalledOnce()
+  })
+
   it('keeps a fragmented multiline paste in the draft until Enter', async () => {
     const state = props()
     const ui = render(<App {...state} />)
@@ -768,6 +879,33 @@ describe('terminal composer', () => {
     ui.stdin.write('\u001b[A')
     await vi.waitFor(() => expect(ui.lastFrame()).toContain('> ▌'))
     expect(ui.lastFrame()).not.toContain('private-test-value')
+  })
+
+  it('edits a sign-in field by word, and a masked one by its whole line', async () => {
+    const url = props({ interaction: { kind: 'login', id: 8, message: 'Base URL', secret: false, initial: 'http://localhost:8317/v1' } })
+    const ui = render(<App {...url} />)
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('> http://localhost:8317/v1▌'))
+    ui.stdin.write('\u0017')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('> http://localhost:8317/▌'))
+    // The slash is a stop of its own, then the port.
+    ui.stdin.write('\u001bb')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('> http://localhost:8317▌/'))
+    ui.stdin.write('\u001bb')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('> http://localhost:▌8317/'))
+    ui.unmount()
+    const key = props({ interaction: { kind: 'login', id: 9, message: 'API key', secret: true } })
+    const masked = render(<App {...key} />)
+    masked.stdin.write('\u001b[200~sk-live_abc\u001b[201~')
+    await vi.waitFor(() => expect(masked.lastFrame()).toContain('\u2022'.repeat(11)))
+    // A word step would show where the dashes and underscores are.
+    masked.stdin.write('\u001b[1;5D')
+    await vi.waitFor(() => expect(masked.lastFrame()).toContain(`> ▌${'\u2022'.repeat(11)}`))
+    masked.stdin.write('\u001b[1;5C\u0017')
+    await vi.waitFor(() => expect(masked.lastFrame()).not.toContain('\u2022'))
+    masked.stdin.write('\u001f')
+    await vi.waitFor(() => expect(masked.lastFrame()).toContain('\u2022'.repeat(11)))
+    masked.stdin.write('\r')
+    await vi.waitFor(() => expect(key.onAnswer).toHaveBeenCalledWith(9, 'sk-live_abc'))
   })
 
   it.each(['en'] as const)('shows pending input and interruption state in %s', async locale => {
@@ -846,6 +984,23 @@ describe('terminal composer', () => {
     ui.stdin.write('\u001b[B\r')
     await vi.waitFor(() => expect(state.onAnswer).toHaveBeenCalledWith(4, { answers: [
       { id: 'choice', selected: [], custom: 'A different approach' },
+    ] }))
+  })
+
+  it('edits the Other answer by word, with the caret over the character it precedes', async () => {
+    const state = props({ interaction: { id: 6, kind: 'questions', questions: [{
+      id: 'choice', question: 'Choose an approach', options: [{ label: 'A' }],
+    }] } })
+    const ui = render(<App {...state} />)
+    ui.stdin.write('A different approach')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('Other answer: A different approach▌'))
+    ui.stdin.write('\u001b[1;3D')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('Other answer: A different ▌approach'))
+    ui.stdin.write('\u001b\u007f')
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain('Other answer: A ▌approach'))
+    ui.stdin.write('\r')
+    await vi.waitFor(() => expect(state.onAnswer).toHaveBeenCalledWith(6, { answers: [
+      { id: 'choice', selected: [], custom: 'A approach' },
     ] }))
   })
 

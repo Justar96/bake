@@ -2,7 +2,8 @@
 /**
  * Exercise the actual download server, installer, and updater against a
  * temporary home: install the staged release, then publish a newer one built
- * from it and update to that with `bake update`.
+ * from it and update to that with `bake update`, then return to the staged
+ * release with `bake update --rollback`.
  */
 
 import { generateKeyPairSync, sign } from 'node:crypto'
@@ -29,6 +30,18 @@ async function run(argv: string[], env: NodeJS.ProcessEnv, cwd = ROOT, expected 
   ])
   if (code !== expected) throw new Error(`${argv.join(' ')} exited ${code}, not ${expected}: ${stderr}`)
   return stdout
+}
+
+/** `--help` loads no session, so taking longer means shutdown is waiting out its 5 s forced-exit grace. */
+const HELP_LIMIT_MS = 3_000
+
+/** Run a `--help` command and reject one that exceeds {@link HELP_LIMIT_MS}. */
+async function runHelp(argv: string[], env: NodeJS.ProcessEnv): Promise<string> {
+  const started = performance.now()
+  const output = await run(argv, env)
+  const elapsed = Math.round(performance.now() - started)
+  if (elapsed > HELP_LIMIT_MS) throw new Error(`${argv.join(' ')} took ${elapsed} ms; the limit is ${HELP_LIMIT_MS} ms`)
+  return output
 }
 
 /** Start the download server over `host`'s files, and return its origin. */
@@ -121,7 +134,7 @@ try {
     if (!config.includes('@deepseek-ai/dsh-base')) throw new Error('Windows profile routing failed')
     const defaultHome: NodeJS.ProcessEnv = { ...env, USERPROFILE: temporary }
     delete defaultHome.DSH_HOME
-    await run(['cmd.exe', '/c', join(binDir, 'bake.cmd'), '--help'], defaultHome)
+    await runHelp(['cmd.exe', '/c', join(binDir, 'bake.cmd'), '--help'], defaultHome)
   } else {
     const install = ['sh', '-c', 'curl -fsSL "$BAKE_RELEASE_BASE_URL/install.sh" | sh']
     await run(install, env)
@@ -130,11 +143,11 @@ try {
     if (!version.includes(manifest.version)) throw new Error('Installed command version mismatch')
     const config = await run([join(binDir, 'bake'), 'tui', '--dump-default-config'], env)
     if (!config.includes('@deepseek-ai/dsh-base')) throw new Error('Installed profile routing failed')
-    const help = await run([join(binDir, 'bake'), '--help'], env)
+    const help = await runHelp([join(binDir, 'bake'), '--help'], env)
     if (!help.includes('Usage:')) throw new Error('Installed command did not boot the terminal profile')
     const defaultHome: NodeJS.ProcessEnv = { ...env, HOME: temporary }
     delete defaultHome.DSH_HOME
-    await run([join(binDir, 'bake'), '--help'], defaultHome)
+    await runHelp([join(binDir, 'bake'), '--help'], defaultHome)
   }
   if (!existsSync(join(temporary, '.bake/profiles/tui/package.json'))) {
     throw new Error('Installed command did not use Bake as its default home')
@@ -180,14 +193,32 @@ try {
   if (!updated.includes(`Updated Bake ${manifest.version} → ${newer.version}`)) throw new Error(`Unexpected update output: ${updated}`)
   const upgraded = await run([...bake, '--version'], updateEnv)
   if (!upgraded.includes(newer.version)) throw new Error(`The command still starts ${upgraded.trim()} after updating`)
-  const current = process.platform === 'win32'
+  const currentName = (): string | undefined => process.platform === 'win32'
     ? readFileSync(join(installRoot, 'current.txt'), 'utf8').trim()
     : readlinkSync(join(installRoot, 'current')).split(/[\\/]/).at(-1)
+  const current = currentName()
   if (current !== newer.directory) throw new Error(`current names ${current}, not ${newer.directory}`)
   if (!existsSync(join(installed, 'apps/cli/lib/bin.js'))) throw new Error('The update removed the release it replaced')
   const again = await run([...bake, 'update'], updateEnv)
   if (!again.includes(`Bake ${newer.version} is up to date`)) throw new Error(`Unexpected second update: ${again}`)
   console.log(`Verified bake update ${manifest.version} → ${newer.version} from ${newer.base}`)
+
+  // Return to the release the update replaced, after its own launch check.
+  const rolledBack = await run([...bake, 'update', '--rollback'], updateEnv)
+  if (!rolledBack.includes(`Rolled back Bake ${newer.version} → ${manifest.version}`)) {
+    throw new Error(`Unexpected rollback output: ${rolledBack}`)
+  }
+  const restored = await run([...bake, '--version'], updateEnv)
+  if (!restored.includes(manifest.version)) throw new Error(`The command starts ${restored.trim()} after rolling back`)
+  const installedName = installed.split(/[\\/]/).at(-1)
+  if (currentName() !== installedName) throw new Error(`current names ${currentName()}, not ${installedName}, after rolling back`)
+  if (!existsSync(join(installRoot, 'versions', newer.directory, 'apps/cli/lib/bin.js'))) {
+    throw new Error('The rollback removed the release it left')
+  }
+  // No older release is installed, so a second rollback fails and changes nothing.
+  await run([...bake, 'update', '--rollback'], updateEnv, ROOT, 1)
+  if (currentName() !== installedName) throw new Error(`A rollback with nothing to return to moved current to ${currentName()}`)
+  console.log(`Verified bake update --rollback ${newer.version} → ${manifest.version}`)
 } finally {
   for (const server of servers) server.kill()
   await Promise.all(servers.map(server => server.exited))

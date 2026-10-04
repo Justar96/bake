@@ -70,13 +70,21 @@ describe('parseDshArgs', () => {
     }
   })
 
-  it('reserves leading update for the self-updater, with only its own --check', () => {
-    expect(parse(['update'])).toEqual({ mode: 'update', check: false })
-    expect(parse(['update', '--check'])).toEqual({ mode: 'update', check: true })
+  it('reserves leading update for the self-updater, with only its own --check and --rollback', () => {
+    expect(parse(['update'])).toEqual({ mode: 'update', check: false, rollback: false })
+    expect(parse(['update', '--check'])).toEqual({ mode: 'update', check: true, rollback: false })
+    expect(parse(['update', '--rollback'])).toEqual({ mode: 'update', check: false, rollback: true })
+    expect(exitCode(['update', '--rollback', '--check'])).toBe(1)
     // A profile named update stays reachable by its full flag.
     expect(parse(['--profile', 'update'])).toMatchObject({ mode: 'profile', profile: 'update' })
     expect(exitCode(['update', '--force'])).toBe(1)
     expect(exitCode(['update', 'now'])).toBe(1)
+  })
+
+  it('takes --self-check alone, for the updater and release packing', () => {
+    expect(parse(['--self-check'])).toEqual({ mode: 'self-check' })
+    expect(exitCode(['--self-check', '--profile', 'tui'])).toBe(1)
+    expect(exitCode(['--self-check', 'task'])).toBe(1)
   })
 
   it('reserves leading plugin for management and forwards later command names', () => {

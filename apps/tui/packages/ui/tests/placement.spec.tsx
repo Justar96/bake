@@ -9,6 +9,7 @@ import { dictionaries } from '../src/copy.ts'
 import { appendTranscript, emptyTranscript } from '../src/transcript.ts'
 import type { Row, ToolCallRow } from '../src/rows.ts'
 import { FOLD_REST, SPINNER_REST } from '../src/activity.ts'
+import { caretRow } from '../../../tests/caret.ts'
 
 class Input extends EventEmitter {
   isTTY = true
@@ -77,7 +78,7 @@ async function mount(columns: number, rows: number, overrides: Partial<AppProps>
       .replaceAll(NEXT_LINE, '\r\n')
     consumed = stdout.chunks.length
     if (bytes !== '') await new Promise<void>(resolve => terminal.write(bytes, resolve))
-    return Array.from({ length: stdout.rows }, (_, row) => terminal.buffer.active.getLine(terminal.buffer.active.viewportY + row)?.translateToString(true) ?? '')
+    return Array.from({ length: stdout.rows }, (_, row) => caretRow(terminal.buffer.active.getLine(terminal.buffer.active.viewportY + row), terminal.cols))
   }
   /** A repaint writes over two frames, a throttle window apart; read the screen once it settles. */
   async function settle(): Promise<string[]> {
@@ -93,7 +94,7 @@ async function mount(columns: number, rows: number, overrides: Partial<AppProps>
     stdin, stdout, screen, settle,
     async history(): Promise<string[]> {
       await screen()
-      return Array.from({ length: terminal.buffer.active.length }, (_, row) => terminal.buffer.active.getLine(row)?.translateToString(true) ?? '')
+      return Array.from({ length: terminal.buffer.active.length }, (_, row) => caretRow(terminal.buffer.active.getLine(row), terminal.cols))
     },
     async resize(columns: number, rows: number): Promise<string[]> {
       terminal.resize(columns, rows)
@@ -340,11 +341,18 @@ describe('composer placement', () => {
     await ui.screen()
     ui.stdin.write(`\u001b[200~START ${'你好 word '.repeat(50)} END\u001b[201~`)
     await vi.waitFor(async () => expect((await ui.screen()).join('\n')).toContain('END▌'))
+    // Home reaches the start of the caret's row, and from there the draft's.
+    ui.stdin.write('\u001b[H')
+    await vi.waitFor(async () => expect((await ui.screen()).join('\n')).toContain('  ▌你好 word 你好 word 你好 word  END'))
     ui.stdin.write('\u001b[H')
     await vi.waitFor(async () => expect((await ui.screen()).join('\n')).toContain('▌START'))
     await expect(snapshotOf(await ui.screen())).toMatchFileSnapshot('./expected/composer-wrapped-home.txt')
     for (let index = 0; index < 100; index++) ui.stdin.write('\u001b[C')
     await vi.waitFor(async () => expect((await ui.screen()).join('\n')).toContain('▌'))
+    expect((await ui.screen()).join('\n')).not.toContain('END')
+    // End reaches the end of the caret's row first, which still hides the draft's end.
+    ui.stdin.write('\u001b[F')
+    await vi.waitFor(async () => expect((await ui.screen()).find(line => line.includes('▌'))).toMatch(/▌ ?$/))
     expect((await ui.screen()).join('\n')).not.toContain('END')
     ui.stdin.write('\u001b[F')
     await vi.waitFor(async () => expect((await ui.screen()).join('\n')).toContain('END▌'))

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { expect, test } from 'bun:test'
 import xterm from '@xterm/headless'
 import { dictionaries } from '../../ui/src/copy.ts'
+import { caretRow } from '../../../tests/caret.ts'
 
 const harness = resolve(import.meta.dirname, '../../harness')
 
@@ -45,7 +46,7 @@ for (const locale of ['en'] as const) test.skipIf(process.platform !== 'darwin' 
         pending = ''
         if (bytes !== '') await new Promise<void>(resolve => screen.write(bytes, resolve))
         return Array.from({ length: screen.rows }, (_, row) =>
-          screen.buffer.active.getLine(screen.buffer.active.viewportY + row)?.translateToString(true) ?? '')
+          caretRow(screen.buffer.active.getLine(screen.buffer.active.viewportY + row), screen.cols))
       }
       const painted = async (description: string, predicate: (lines: string[]) => boolean): Promise<string[]> => {
         const deadline = performance.now() + 10_000
@@ -91,7 +92,7 @@ for (const locale of ['en'] as const) test.skipIf(process.platform !== 'darwin' 
             await Bun.file(join(import.meta.dirname, 'expected', `preview-short.${locale}.txt`)).text())
         }
         const history = Array.from({ length: screen.buffer.active.length }, (_, row) =>
-          screen.buffer.active.getLine(row)?.translateToString(true) ?? '').join('\n')
+          caretRow(screen.buffer.active.getLine(row), screen.cols)).join('\n')
         expect(history.split('● preview-probe')).toHaveLength(2)
         expect(history.split(copy.previewAccepted)).toHaveLength(2)
         child.terminal!.write('\u001b[A')

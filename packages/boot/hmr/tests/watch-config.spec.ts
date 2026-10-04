@@ -232,6 +232,65 @@ describe('HMR exact config paths', () => {
     expect(calls).toBe(2)
   })
 
+  it('does not report a file that exists when the watch starts', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dsh-hmr-existing-'))
+    hmrRoots.push(dir)
+    const filename = join(dir, 'plugins.yml')
+    writeFileSync(filename, 'loaded')
+    const ctx = await bootHmr(dir)
+    onTestFinished(() => ctx.fiber.dispose())
+    const refresh = vi.fn()
+    // Chokidar reports its initial scan before `ready`, so registration has seen it.
+    await watchConfig(ctx, filename, {}, refresh)
+    expect(refresh).not.toHaveBeenCalled()
+  })
+
+  it('refreshes once for an event observed while registration completes', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dsh-hmr-registering-'))
+    hmrRoots.push(dir)
+    const filename = join(dir, 'plugins.yml')
+    const ctx = await bootHmr(dir)
+    onTestFinished(() => ctx.fiber.dispose())
+    const watcher = new FSWatcher()
+    const created = Promise.withResolvers<undefined>()
+    const previousFactory = configWatch.create
+    onTestFinished(() => { configWatch.create = previousFactory })
+    configWatch.create = () => { created.resolve(undefined); return watcher }
+    const refresh = vi.fn()
+    const registration = watchConfig(ctx, filename, {}, refresh)
+    await created.promise
+    watcher.emit('add', filename)
+    watcher.emit('change', filename)
+    expect(refresh).not.toHaveBeenCalled()
+    watcher.emit('ready')
+    await registration
+    expect(refresh).toHaveBeenCalledOnce()
+  })
+
+  it('fails registration on a disposed context without waiting for an observed event', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dsh-hmr-interrupted-'))
+    hmrRoots.push(dir)
+    const filename = join(dir, 'plugins.yml')
+    const fiber = new Context().plugin(() => {})
+    await fiber
+    const watcher = new FSWatcher()
+    const created = Promise.withResolvers<undefined>()
+    const previousFactory = configWatch.create
+    onTestFinished(() => { configWatch.create = previousFactory })
+    configWatch.create = () => { created.resolve(undefined); return watcher }
+    // HMR holds a refresh queued before application readiness until its own disposal runs.
+    const held = Promise.withResolvers<undefined>()
+    onTestFinished(() => { held.resolve(undefined) })
+    const refresh = vi.fn(() => held.promise)
+    const registration = watchConfig(fiber.ctx, filename, {}, refresh)
+    await created.promise
+    watcher.emit('add', filename)
+    await fiber.dispose()
+    watcher.emit('ready')
+    await expect(registration).rejects.toThrow('cannot create effect on inactive context')
+    expect(refresh).not.toHaveBeenCalled()
+  })
+
   it('observes consecutive writes after the previous configuration was applied', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'dsh-hmr-consecutive-'))
     hmrRoots.push(dir)
