@@ -246,6 +246,11 @@ export interface Span {
   readonly strikethrough?: boolean
   /** Drawn with foreground and background swapped. The words an edit changed. */
   readonly inverse?: boolean
+  /**
+   * Inside a fullscreen selection: reverse video written into the text, so it
+   * shows on a terminal Chalk reads as colourless. Set only while drawing.
+   */
+  readonly selected?: boolean
 }
 
 /**

@@ -9,6 +9,7 @@ import type { FrameStyle } from '@dsh-tui/ui/layout.ts'
 import type { Clock } from '@dsh-tui/ui/activity.ts'
 import { wheelReports } from '@dsh-tui/ui/wheel.ts'
 import { resolveFrame } from './frame.ts'
+import { writeClipboardText } from './clipboard.ts'
 import { frameOutput, type FrameOutput } from './output.ts'
 import { editExternally, holdInput, type EditText, type SuspendTerminal } from './external-editor.ts'
 import { Preferences } from './preferences.ts'
@@ -234,6 +235,8 @@ export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promi
       onCycleThinking: () => { active.cycleThinking() },
       onSubmit: text => navigation?.submit(text) ?? false, onCancel: () => navigation?.cancel(),
       onPasteImage: source => active.pasteImage(source), onRemoveImage: key => { active.removeImage(key) },
+      // OSC 52 goes through the renderer's stream, between frames, never past it.
+      onCopy: text => writeClipboardText(text, terminalReleased ? undefined : sequence => { output?.out.write(sequence) }),
       onInterrupt: interrupt, onSendPending: () => { active.sendPending() }, onQuitDismiss: dismissQuit, onAnswer: (id, answer) => active.interactions.answer(id, answer),
     }))
   }
