@@ -5,14 +5,14 @@ import type {
   ConnectionGenerationSource,
   ConnectionHostInfo,
   ConnectionHandle,
-} from '@deepseek-ai/dsh-client-connection/client'
+} from 'bake-client-connection/client'
 import type {
   TypertClientEventListener,
   TypertOwnedValue,
   TypertRemoteEvent,
-} from '@deepseek-ai/dsh-typert-protocol'
-import { isTypertOwnedValue } from '@deepseek-ai/dsh-typert-protocol'
-import { randomUUID } from '@deepseek-ai/dsh-util-crypto'
+} from 'bake-typert-protocol'
+import { isTypertOwnedValue } from 'bake-typert-protocol'
+import { randomUUID } from 'bake-util-crypto'
 import {
   REMOTE_EVENT_RESULT_ENDPOINT,
   REMOTE_EVENT_STREAM_ENDPOINT,

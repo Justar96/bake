@@ -3,11 +3,11 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { SessionLogOffset, SessionSeq } from 'bake-session'
 import type { Session, SessionEvent, SessionHeader, SessionId , SessionLogOffset as SessionLogOffsetType , SessionSeqCursor } from 'bake-session'
-import type SessionPersistence from '@deepseek-ai/dsh-session-persistence'
+import type SessionPersistence from 'bake-session-persistence'
 import type {
   SessionPersistenceRevision,
   SessionPersistenceSnapshot,
-} from '@deepseek-ai/dsh-session-persistence'
+} from 'bake-session-persistence'
 import type { ProjectionSnapshot } from '@deepseek-ai/dsh-session-projection'
 import type {} from '@deepseek-ai/dsh-session-projection-cache'
 import { SESSION_QUERY_DEFAULT_PREPARED_SESSION_CACHE_SIZE, SessionQueryError } from './config.ts'

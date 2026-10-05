@@ -27,7 +27,7 @@
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'
-import type { CredentialKey } from '@deepseek-ai/dsh-credentials'
+import type { CredentialKey } from 'bake-credentials'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
 
 import type {

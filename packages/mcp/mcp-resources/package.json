@@ -36,14 +36,14 @@
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
-    "@deepseek-ai/dsh-ptc-runtime": "workspace:^",
+    "bake-ptc-runtime": "workspace:^",
     "bake-scope": "workspace:^",
     "bake-tools": "workspace:^",
     "bake-system-prompt": "workspace:^",
     "bake-agent": "workspace:^"
   },
   "dependencies": {
-    "@deepseek-ai/dsh-util-values": "workspace:^"
+    "bake-util-values": "workspace:^"
   },
   "peerDependenciesMeta": {
     "bake-system-prompt": {

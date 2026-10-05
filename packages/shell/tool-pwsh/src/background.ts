@@ -5,8 +5,8 @@
  * @module @deepseek-ai/dsh-tool-pwsh/background
  */
 
-import type { ShellProcess } from '@deepseek-ai/dsh-shell'
-import type { JobHooks, JobOutcome } from '@deepseek-ai/dsh-jobs'
+import type { ShellProcess } from 'bake-shell'
+import type { JobHooks, JobOutcome } from 'bake-jobs'
 
 /* jscpd:ignore-start -- deliberate twin of dsh-tool-bash/background.ts (Agent Note). */
 

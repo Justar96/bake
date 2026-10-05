@@ -7,7 +7,7 @@
  * ordering. Each provider owns its storage runtime; this suite pins the
  * equivalent observable behavior the seam requires.
  *
- * @module @deepseek-ai/dsh-session-persistence/tests/live-write-contract
+ * @module bake-session-persistence/tests/live-write-contract
  */
 
 import { describe, expect, it, vi } from 'vitest'

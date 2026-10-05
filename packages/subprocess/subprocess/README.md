@@ -3,7 +3,7 @@ description: "The subprocess service (ctx.subprocess) for composition authors an
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-subprocess
+# bake-subprocess
 
 ## Summary
 
@@ -61,7 +61,7 @@ Reads are offset-based and non-consuming: a background reader and a final batch 
 <a id="using-a-control-pipe"></a>
 ### Using a control pipe
 
-Set `stdio.control: 'pipe'` to receive a separate raw `Duplex` in `handle.control`. The Node child opens fd 7 with `openInheritedControlChannel()` from `@deepseek-ai/dsh-subprocess/control`; this helper consumes the provider-owned `DSH_SUBPROCESS_CONTROL=pipe` marker. Callers cannot supply that marker through `env`. Control bytes never enter stdout/stderr collectors. The consumer owns framing, validation, backpressure, and closing its endpoint; provider disposal destroys any endpoint remaining after process teardown. Omitting the request returns `control: undefined`. This channel is available only for ordinary processes, and carries no authority to bypass tool approval.
+Set `stdio.control: 'pipe'` to receive a separate raw `Duplex` in `handle.control`. The Node child opens fd 7 with `openInheritedControlChannel()` from `bake-subprocess/control`; this helper consumes the provider-owned `DSH_SUBPROCESS_CONTROL=pipe` marker. Callers cannot supply that marker through `env`. Control bytes never enter stdout/stderr collectors. The consumer owns framing, validation, backpressure, and closing its endpoint; provider disposal destroys any endpoint remaining after process teardown. Omitting the request returns `control: undefined`. This channel is available only for ordinary processes, and carries no authority to bypass tool approval.
 
 ### Managing process lifetime
 
@@ -93,7 +93,7 @@ This section explains the design decisions behind the seam and points at the cod
 
 ### Design concept
 
-The seam is built on one separation: the service owns process coordinates and lifetime; consumers own what a process means and every default that shapes one. That is why the spawn request is fully explicit — no hidden subprocess-service default — and why `SubprocessOutcome` carries exit facts only: callers own deadlines, teardown ladders, and cause classification. The `dsh-shell` request/spec split is the owning template.
+The seam is built on one separation: the service owns process coordinates and lifetime; consumers own what a process means and every default that shapes one. That is why the spawn request is fully explicit — no hidden subprocess-service default — and why `SubprocessOutcome` carries exit facts only: callers own deadlines, teardown ladders, and cause classification. The `bake-shell` request/spec split is the owning template.
 
 ### Source map
 

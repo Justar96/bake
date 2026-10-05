@@ -1,7 +1,7 @@
 /**
  * `@file` token grammar used by the terminal composer.
  *
- * @module @deepseek-ai/dsh-file-reference/grammar
+ * @module bake-file-reference/grammar
  */
 
 import type { FileReferenceCandidate } from './types.ts'

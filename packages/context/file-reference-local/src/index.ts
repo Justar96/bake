@@ -10,7 +10,7 @@ import type { Agent } from 'bake-agent'
 import FileReferenceService, {
   FILE_REFERENCE_PROMPT,
   type FileReferenceCandidate,
-} from '@deepseek-ai/dsh-file-reference'
+} from 'bake-file-reference'
 import type {} from 'bake-tools'
 import {
   DEFAULT_FILE_SEARCH_EXCLUDED_DIRECTORIES,
@@ -27,8 +27,8 @@ export {
   WorkspaceFileSearch,
 } from './search.ts'
 export type { FileSearchConfig } from './search.ts'
-export { FILE_REFERENCE_PROMPT } from '@deepseek-ai/dsh-file-reference'
-export { activeAtToken, formatFileMention } from '@deepseek-ai/dsh-file-reference/grammar'
+export { FILE_REFERENCE_PROMPT } from 'bake-file-reference'
+export { activeAtToken, formatFileMention } from 'bake-file-reference/grammar'
 
 /** Local file-reference discovery configuration. */
 export interface Config {

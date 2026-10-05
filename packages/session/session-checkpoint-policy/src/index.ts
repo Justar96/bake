@@ -9,7 +9,7 @@ import type { Session } from 'bake-session'
 import type { StreamChunk } from '@deepseek-ai/dsh-llm'
 import { TOOL_ABORTED_BEFORE_DISPATCH, type ToolExecutionResult } from 'bake-tools'
 import type { PreStepDecision } from 'bake-agent'
-import type {} from '@deepseek-ai/dsh-session-persistence'
+import type {} from 'bake-session-persistence'
 
 /** Cordis plugin name used by Loader diagnostics. */
 export const name = 'session-checkpoint-policy'

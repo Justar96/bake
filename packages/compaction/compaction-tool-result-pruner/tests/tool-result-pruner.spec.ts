@@ -10,7 +10,7 @@ import SessionStore, {
 } from 'bake-session'
 import type { SurfaceEvent } from 'bake-session'
 import * as SessionInvariant from 'bake-session/invariant'
-import InvariantRegistry from '@deepseek-ai/dsh-invariants'
+import InvariantRegistry from 'bake-invariants'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import TokenMeter from '@deepseek-ai/dsh-token-meter'
 import ToolResultPruner, {

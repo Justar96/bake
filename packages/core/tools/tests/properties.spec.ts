@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from 'vitest'
 import fc from 'fast-check'
-import { isJsonValue } from '@deepseek-ai/dsh-util-values'
+import { isJsonValue } from 'bake-util-values'
 import { parameterSchemaSpecToJsonSchema, validateArgs } from 'bake-tools'
 import type { ParameterPropertySpec, ParameterSchemaSpec, ValueSchemaSpec } from 'bake-tools'
 

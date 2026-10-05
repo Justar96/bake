@@ -3,7 +3,7 @@ description: "Scriptable OpenAI-compatible fault server for testing LLM adapters
 kind: "package-library"
 ---
 
-# @deepseek-ai/dsh-llm-mock-server
+# bake-llm-mock-server
 
 ## Summary
 

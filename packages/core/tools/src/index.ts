@@ -12,7 +12,7 @@ import type { ToolCallId, ContentBlock, ToolSchema } from '@deepseek-ai/dsh-llm'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
 import type { Agent, ToolProgress } from 'bake-agent'
 import type { UserMessage } from 'bake-session'
-import { assertNever, deepFreeze, snapshotJsonValue, type JsonValue } from '@deepseek-ai/dsh-util-values'
+import { assertNever, deepFreeze, snapshotJsonValue, type JsonValue } from 'bake-util-values'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 // Type-only: makes `ctx.get('approval')` resolve to the ApprovalService
 // augmentation. The seam stays optional at runtime — see `serviceAsk`.

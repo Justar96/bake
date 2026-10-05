@@ -63,7 +63,7 @@ This section explains how the backend is built and where the behavior in [Use th
 
 ### Design concept
 
-One separation: this backend contributes only the provider registration and the decision to start fresh, while every run mechanic — depth checking, child creation, per-child customization, structured output, cancellation, result reading, and disposal — lives in `dsh-subagent-in-process-driver`. The agent factory's creation transaction owns the unpublished setup window and its rollback; after publication the caller owns the run.
+One separation: this backend contributes only the provider registration and the decision to start fresh, while every run mechanic — depth checking, child creation, per-child customization, structured output, cancellation, result reading, and disposal — lives in `bake-subagent-in-process-driver`. The agent factory's creation transaction owns the unpublished setup window and its rollback; after publication the caller owns the run.
 
 ### Source map
 
@@ -90,7 +90,7 @@ The child gets a fresh flat registration scope: parent tool restrictions and aut
 Read these pages when the package-level contract is not enough; they move from the shared subagent model to the sibling backends and exhaustive configuration.
 
 - [Subagent subsystem](../../../docs/subsystems/subagent.md) — start requests, results, live runs, and the provider contract.
-- [dsh-subagent-in-process-driver](../subagent-in-process-driver/README.md) — the shared run driver this backend calls.
+- [bake-subagent-in-process-driver](../subagent-in-process-driver/README.md) — the shared run driver this backend calls.
 - [dsh-tool-subagent](../tool-subagent/README.md) — the model-facing delegation tool that reaches this provider.
 - [Generated configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-subagent-spawn-in-process) — every accepted config field and its source declaration.
 

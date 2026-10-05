@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import type { SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
+import type { SandboxPolicy } from 'bake-sandbox'
 import { SessionId } from 'bake-session'
 import { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
 
@@ -24,7 +24,7 @@ const mockState = vi.hoisted(() => ({
   disposeFailure: undefined as Error | undefined,
 }))
 
-vi.mock('@deepseek-ai/dsh-sandbox-windows-acl', () => {
+vi.mock('bake-sandbox-windows-acl', () => {
   class MockAclWriteGrant {
     readonly writeSid: string
     readonly added: Array<{ path: string; standing: boolean }> = []

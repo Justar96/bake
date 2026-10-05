@@ -5,7 +5,7 @@
 
 /* jscpd:ignore-start */
 import type { Context } from '@deepseek-ai/cordis'
-import type { InvariantFailure, InvariantInstaller } from '@deepseek-ai/dsh-invariants'
+import type { InvariantFailure, InvariantInstaller } from 'bake-invariants'
 import { SessionSeq } from 'bake-session'
 import type { Session, SessionEvent } from 'bake-session'
 

@@ -1,11 +1,11 @@
 /**
  * Bounded, hardened `git` reads for a change report, and the parser for the
  * `status --porcelain=v2 -z` records they return.
- * @module @deepseek-ai/dsh-shell-change-report/git
+ * @module bake-shell-change-report/git
  */
 
 import { spawn } from 'node:child_process'
-import { scrubbedParentEnv } from '@deepseek-ai/dsh-subprocess'
+import { scrubbedParentEnv } from 'bake-subprocess'
 
 /**
  * Wrap a git argv for confinement. A sandboxed command can write `.git/config`

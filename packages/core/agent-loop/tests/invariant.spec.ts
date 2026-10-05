@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import SessionStore, { SessionId } from 'bake-session'
-import InvariantRegistry from '@deepseek-ai/dsh-invariants'
+import InvariantRegistry from 'bake-invariants'
 import * as AgentLoopInvariant from 'bake-agent-loop/invariant'
 import { createUserMessage, markAgentLoopRequest, type GenerateOptions  } from '@deepseek-ai/dsh-llm'
 

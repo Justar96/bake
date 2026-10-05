@@ -2,7 +2,7 @@
 
 import type { Context, Fiber } from '@deepseek-ai/cordis'
 import type { Session, SessionEvent, SessionHeader, SessionId , SessionLogOffset } from 'bake-session'
-import type SessionPersistence from '@deepseek-ai/dsh-session-persistence'
+import type SessionPersistence from 'bake-session-persistence'
 import type { SessionRecord } from './types.ts'
 import { SessionQueryError } from './config.ts'
 import { readColdSessionLog, type ColdSessionLog } from './cold-read.ts'

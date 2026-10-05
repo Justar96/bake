@@ -33,19 +33,19 @@
   "peerDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
     "bake-agent": "workspace:^",
-    "@deepseek-ai/dsh-invariants": "workspace:^",
+    "bake-invariants": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
     "bake-scope": "workspace:^",
     "bake-session": "workspace:^",
-    "@deepseek-ai/dsh-session-persistence": "workspace:^",
+    "bake-session-persistence": "workspace:^",
     "@deepseek-ai/dsh-session-projection": "workspace:^",
-    "@deepseek-ai/dsh-settings": "workspace:^",
+    "bake-settings": "workspace:^",
     "bake-system-prompt": "workspace:^",
     "bake-tools": "workspace:^"
   },
   "dependencies": {
-    "@deepseek-ai/dsh-brand": "workspace:^",
-    "@deepseek-ai/dsh-util-values": "workspace:^",
+    "bake-brand": "workspace:^",
+    "bake-util-values": "workspace:^",
     "@deepseek-ai/schemastery": "workspace:^",
     "zod": "catalog:"
   },
@@ -53,14 +53,14 @@
     "@deepseek-ai/cordis": "workspace:^",
     "@deepseek-ai/dsh-llm-pi-ai": "workspace:^",
     "bake-agent": "workspace:^",
-    "@deepseek-ai/dsh-invariants": "workspace:^",
+    "bake-invariants": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
     "bake-scope": "workspace:^",
     "bake-session": "workspace:^",
-    "@deepseek-ai/dsh-session-persistence": "workspace:^",
+    "bake-session-persistence": "workspace:^",
     "@deepseek-ai/dsh-session-persistence-jsonl": "workspace:^",
     "@deepseek-ai/dsh-session-projection": "workspace:^",
-    "@deepseek-ai/dsh-settings": "workspace:^",
+    "bake-settings": "workspace:^",
     "bake-system-prompt": "workspace:^",
     "bake-tools": "workspace:^"
   }

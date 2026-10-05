@@ -5,7 +5,7 @@
  * @module @deepseek-ai/dsh-hooks-codex/config
  */
 
-import { matcherDiagnostic, type MatcherGroup } from '@deepseek-ai/dsh-hook-protocol'
+import { matcherDiagnostic, type MatcherGroup } from 'bake-hook-protocol'
 
 /** The five Codex hook points this bridge supports. */
 export const CODEX_EVENTS = ['PreToolUse', 'PostToolUse', 'SessionStart', 'UserPromptSubmit', 'Stop'] as const

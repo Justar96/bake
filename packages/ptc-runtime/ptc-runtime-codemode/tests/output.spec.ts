@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { PtcJsonValue } from '@deepseek-ai/dsh-ptc-runtime'
+import type { PtcJsonValue } from 'bake-ptc-runtime'
 import { OutputLedger, jsonStringBytesUpTo, jsonValueBytesUpTo, truncateJsonStringBytes } from '../src/output.ts'
 
 describe('JSON byte accounting', () => {

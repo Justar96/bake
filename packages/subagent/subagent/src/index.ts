@@ -31,16 +31,16 @@
 
 import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import type {} from '@deepseek-ai/dsh-settings'
-import type {} from '@deepseek-ai/dsh-attachment'
+import type {} from 'bake-settings'
+import type {} from 'bake-attachment'
 import { scopeTarget } from 'bake-scope'
 import type { Scoped } from 'bake-scope'
 import { assertObjectJsonSchema } from 'bake-tools'
 import type { ContentBlock, MessageId, MessageSource } from '@deepseek-ai/dsh-llm'
 import type { Agent } from 'bake-agent'
 import type { SessionId } from 'bake-session'
-import { canonicalClientTimeZone } from '@deepseek-ai/dsh-util-time'
-import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
+import { canonicalClientTimeZone } from 'bake-util-time'
+import { Remote, RemoteError, TypertRemoteService } from 'bake-typert-protocol'
 import {
   catalogView, rejectCatalogRead, rejectPrompt, validateControlRequest,
 } from './control.ts'

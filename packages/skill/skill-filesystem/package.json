@@ -27,7 +27,7 @@
   ],
   "license": "MIT",
   "peerDependencies": {
-    "@deepseek-ai/dsh-fs": "workspace:^",
+    "bake-fs": "workspace:^",
     "@deepseek-ai/dsh-home-paths": "workspace:^",
     "@deepseek-ai/dsh-skill": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
@@ -38,7 +38,7 @@
     "yaml": "catalog:"
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-fs": "workspace:^",
+    "bake-fs": "workspace:^",
     "@deepseek-ai/dsh-home-paths": "workspace:^",
     "@deepseek-ai/dsh-skill": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"

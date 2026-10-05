@@ -40,10 +40,10 @@
     }
   },
   "dependencies": {
-    "@deepseek-ai/dsh-brand": "workspace:^",
+    "bake-brand": "workspace:^",
     "@deepseek-ai/dsh-cmdline": "workspace:^",
     "@deepseek-ai/dsh-tool-subagent": "workspace:^",
-    "@deepseek-ai/dsh-util-values": "workspace:^",
+    "bake-util-values": "workspace:^",
     "@deepseek-ai/schemastery": "workspace:^",
     "commander": "catalog:"
   },
@@ -54,11 +54,11 @@
     "bake-agent-default-model": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
     "bake-session": "workspace:^",
-    "@deepseek-ai/dsh-session-persistence": "workspace:^",
-    "@deepseek-ai/dsh-session-query": "workspace:^",
-    "@deepseek-ai/dsh-fs": "workspace:^",
+    "bake-session-persistence": "workspace:^",
+    "bake-session-query": "workspace:^",
+    "bake-fs": "workspace:^",
     "bake-agent-loop": "workspace:^",
-    "@deepseek-ai/dsh-jobs": "workspace:^"
+    "bake-jobs": "workspace:^"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
@@ -66,12 +66,12 @@
     "bake-agent": "workspace:^",
     "bake-agent-default-model": "workspace:^",
     "bake-agent-loop": "workspace:^",
-    "@deepseek-ai/dsh-agent-loop-testkit": "workspace:^",
+    "bake-agent-loop-testkit": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
     "bake-session": "workspace:^",
-    "@deepseek-ai/dsh-session-persistence": "workspace:^",
-    "@deepseek-ai/dsh-session-query": "workspace:^",
-    "@deepseek-ai/dsh-fs": "workspace:^",
-    "@deepseek-ai/dsh-jobs": "workspace:^"
+    "bake-session-persistence": "workspace:^",
+    "bake-session-query": "workspace:^",
+    "bake-fs": "workspace:^",
+    "bake-jobs": "workspace:^"
   }
 }

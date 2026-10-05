@@ -4,8 +4,8 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import { FsError } from '@deepseek-ai/dsh-fs'
-import type { FsInfo, FsTarget } from '@deepseek-ai/dsh-fs'
+import { FsError } from 'bake-fs'
+import type { FsInfo, FsTarget } from 'bake-fs'
 import type { ToolExecution } from 'bake-tools'
 import { sessionResolveOptions } from './session-cwd.ts'
 

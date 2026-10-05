@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import * as SessionTitleInvariantCompanion from '@deepseek-ai/dsh-session-title/invariant'
-import InvariantRegistry, { InvariantError } from '@deepseek-ai/dsh-invariants'
+import InvariantRegistry, { InvariantError } from 'bake-invariants'
 import SessionStore, { SessionId, SessionSeq } from 'bake-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 

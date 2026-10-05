@@ -1,6 +1,6 @@
 /** Canonical current-surface fold shared by exact session reads. */
 
-import { currentSessionMessageProjections } from '@deepseek-ai/dsh-session-format-catalog/message-projections'
+import { currentSessionMessageProjections } from 'bake-session-format-catalog/message-projections'
 import { foldSurface, isSurfaceEvent, snapshotSessionEvent } from 'bake-session'
 import type {
   SessionEvent,

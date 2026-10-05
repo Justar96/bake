@@ -2,7 +2,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { Session, SessionEvent } from 'bake-session'
-import type { InvariantFailure, InvariantInstaller } from '@deepseek-ai/dsh-invariants'
+import type { InvariantFailure, InvariantInstaller } from 'bake-invariants'
 import { AUTO_PRESET } from './index.ts'
 
 const PACKAGE_NAME = '@deepseek-ai/dsh-permission-presets'

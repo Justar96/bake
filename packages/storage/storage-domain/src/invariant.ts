@@ -10,7 +10,7 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import type { InvariantFailure, InvariantInstaller } from '@deepseek-ai/dsh-invariants'
+import type { InvariantFailure, InvariantInstaller } from 'bake-invariants'
 import type { DomainChanged } from './events.ts'
 
 const PACKAGE_NAME = '@deepseek-ai/dsh-storage-domain'

@@ -19,16 +19,16 @@ import type {
   SessionId,
   SessionLogOffset as SessionLogOffsetType,
 } from 'bake-session'
-import { parseSessionFormatLogFilename, sessionFormatLogFilename, SessionFormatUnsupportedMigrationError } from '@deepseek-ai/dsh-session-format'
-import type { SessionFormatEvent } from '@deepseek-ai/dsh-session-format'
-import type { SessionFormatRecovery, SessionFormatRestore } from '@deepseek-ai/dsh-session-format'
-import { sessionFormatCatalog } from '@deepseek-ai/dsh-session-format-catalog'
-import { assertV3RowAdmission } from '@deepseek-ai/dsh-session-format-v2-to-v3'
+import { parseSessionFormatLogFilename, sessionFormatLogFilename, SessionFormatUnsupportedMigrationError } from 'bake-session-format'
+import type { SessionFormatEvent } from 'bake-session-format'
+import type { SessionFormatRecovery, SessionFormatRestore } from 'bake-session-format'
+import { sessionFormatCatalog } from 'bake-session-format-catalog'
+import { assertV3RowAdmission } from 'bake-session-format-v2-to-v3'
 import {
   SessionFormatUnsupportedError,
   sessionFormatVersionRefusal,
   type SessionStorageMetadata,
-} from '@deepseek-ai/dsh-session-persistence'
+} from 'bake-session-persistence'
 
 /** Physical encoding selected for JSONL session artifacts. */
 export type JsonlCompression = 'zstd' | 'none'

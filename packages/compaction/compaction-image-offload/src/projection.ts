@@ -4,7 +4,7 @@ import type { Message } from '@deepseek-ai/dsh-llm'
 import type { SessionSeq } from 'bake-session/types'
 import type { SessionMessageProjection } from 'bake-session/surface'
 import { offloadMessageImages } from './project-message.ts'
-import { isRecord } from '@deepseek-ai/dsh-util-values'
+import { isRecord } from 'bake-util-values'
 
 /** Exact input-image occurrences selected by one durable offload decision. */
 export interface ImageOffloadTarget {

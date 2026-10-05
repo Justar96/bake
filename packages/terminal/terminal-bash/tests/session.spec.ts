@@ -7,7 +7,7 @@ import type {
   SubprocessOutcome,
   SubprocessTerminalHandle,
   SubprocessTerminalSignal,
-} from '@deepseek-ai/dsh-subprocess'
+} from 'bake-subprocess'
 import { TerminalError } from '@deepseek-ai/dsh-terminal'
 import type {
   ProcessIdentity,

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
+import { RemoteError } from 'bake-typert-protocol'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-api-remotes/client'
 import {
   RemoteStreamCarrierError,

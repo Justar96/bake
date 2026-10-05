@@ -8,7 +8,7 @@
  */
 
 import z from '@deepseek-ai/schemastery'
-import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
+import { MAX_TIMER_DELAY_MS } from 'bake-timeout'
 import { EMPTY_RESPONSE_CODE } from './error.ts'
 import type { LlmFailure } from './types.ts'
 

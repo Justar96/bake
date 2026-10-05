@@ -1,6 +1,6 @@
 /**
  * `LocalSpillStore`: the host-filesystem implementation of the
- * `@deepseek-ai/dsh-spill` storage seam. Persists oversized text to a
+ * `bake-spill` storage seam. Persists oversized text to a
  * private, session-scoped file (see `./store.ts` for the traversal-safe naming
  * and exclusive owner-only write) and returns a path locator plus local
  * read/grep retrieval guidance. After activation it runs one best-effort
@@ -13,8 +13,8 @@ import { Context } from '@deepseek-ai/cordis'
 import { resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import z from '@deepseek-ai/schemastery'
-import { SpillLocator, SpillStore } from '@deepseek-ai/dsh-spill'
-import type { SaveTextSpill, SpillRef } from '@deepseek-ai/dsh-spill'
+import { SpillLocator, SpillStore } from 'bake-spill'
+import type { SaveTextSpill, SpillRef } from 'bake-spill'
 import { gatherSweepRoots, sweepSpillRoots } from './cleanup.ts'
 import type { SweepRoot, WarnFn } from './cleanup.ts'
 import { privateRoot, saveTextFile } from './store.ts'

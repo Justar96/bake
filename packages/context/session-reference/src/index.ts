@@ -8,7 +8,7 @@
 import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { Agent, PreStepDecision } from 'bake-agent'
-import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
+import { Remote, TypertRemoteService } from 'bake-typert-protocol'
 import { createUserMessage, freezeMessage, LlmError } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, LlmResolvedModelInfo, UserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionLogOffset } from 'bake-session'
@@ -20,7 +20,7 @@ import type {} from '@deepseek-ai/dsh-session-projection-cache'
 import type {} from '@deepseek-ai/dsh-session-title'
 import type {} from '@deepseek-ai/dsh-subagent'
 import type {} from 'bake-system-prompt'
-import type { SessionRecord, SessionSurfaceSnapshot } from '@deepseek-ai/dsh-session-query'
+import type { SessionRecord, SessionSurfaceSnapshot } from 'bake-session-query'
 import { prepareReferenceOmission, REFERENCE_WARNING } from './spill.ts'
 import {
   DEFAULT_CANDIDATE_LIMIT,

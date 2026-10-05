@@ -355,7 +355,7 @@ it('refuses management bundle disablement and permits repeated bundle selections
 })
 
 it.each([
-  '@deepseek-ai/dsh-host-plugin-inventory',
+  'bake-host-plugin-inventory',
   '@deepseek-ai/dsh-typert-registry',
   '@deepseek-ai/dsh-api-remotes',
 ])('protects the management dependency %s and its containing bundle', async (name) => {

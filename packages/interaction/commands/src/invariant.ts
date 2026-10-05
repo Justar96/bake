@@ -6,7 +6,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { Session, SessionEvent } from 'bake-session'
-import type { InvariantFailure, InvariantInstaller } from '@deepseek-ai/dsh-invariants'
+import type { InvariantFailure, InvariantInstaller } from 'bake-invariants'
 
 const PACKAGE_NAME = '@deepseek-ai/dsh-commands'
 

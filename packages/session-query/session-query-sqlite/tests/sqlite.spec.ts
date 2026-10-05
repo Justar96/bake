@@ -12,7 +12,7 @@ import SessionPersistence, {
   SessionPersistenceNotFoundError,
   SessionPersistenceRevision,
   SessionReadOnlyError,
-} from '@deepseek-ai/dsh-session-persistence'
+} from 'bake-session-persistence'
 import type {
   SessionAccess,
   SessionHandle,
@@ -20,7 +20,7 @@ import type {
   SessionHandleReadResult,
   SessionPersistenceListOptions,
   SessionPersistenceSnapshot,
-} from '@deepseek-ai/dsh-session-persistence'
+} from 'bake-session-persistence'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import SqliteSessionQueryEngine, {
   SESSION_QUERY_SQLITE_SCHEMA_VERSION,
@@ -32,7 +32,7 @@ import {
   type SessionAvailability,
   type SessionQueryErrorCode,
   type SessionSearchRequest,
-} from '@deepseek-ai/dsh-session-query'
+} from 'bake-session-query'
 
 const temporaryDirectories: string[] = []
 

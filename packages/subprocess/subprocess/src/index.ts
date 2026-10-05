@@ -5,7 +5,7 @@
  * shell semantics, deadlines, protocol framing, terminal readiness, and
  * presentation belong to consumers. The local implementation lives in
  * `@deepseek-ai/dsh-subprocess-local`.
- * @module @deepseek-ai/dsh-subprocess
+ * @module bake-subprocess
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'

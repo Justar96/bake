@@ -36,7 +36,7 @@
     "@deepseek-ai/cordis-plugin-loader": "workspace:^",
     "bake-agent": "workspace:^",
     "bake-agent-loop": "workspace:^",
-    "@deepseek-ai/dsh-agent-loop-testkit": "workspace:^",
+    "bake-agent-loop-testkit": "workspace:^",
     "@deepseek-ai/dsh-commands": "workspace:^",
     "@deepseek-ai/dsh-goal": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",

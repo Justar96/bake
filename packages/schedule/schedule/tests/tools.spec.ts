@@ -10,7 +10,7 @@ import ToolRuntime from 'bake-tools'
 import type { ToolExecutionResult } from 'bake-tools'
 import { registerScheduleTools } from '../src/tools.ts'
 import { runScheduleTransaction } from '../src/transaction.ts'
-import { unsupportedInbox } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { unsupportedInbox } from 'bake-agent-loop-testkit'
 
 const signal = new AbortController().signal
 const contexts: Context[] = []

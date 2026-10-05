@@ -5,15 +5,15 @@ import type { ToolSchema } from '@deepseek-ai/dsh-llm'
 import { createScope } from 'bake-scope'
 import type { Scope } from 'bake-scope'
 import SystemPrompt, { renderPrompt } from 'bake-system-prompt'
-import { PtcRuntime } from '@deepseek-ai/dsh-ptc-runtime'
-import type { PtcRunRequest, PtcRunResult } from '@deepseek-ai/dsh-ptc-runtime'
+import { PtcRuntime } from 'bake-ptc-runtime'
+import type { PtcRunRequest, PtcRunResult } from 'bake-ptc-runtime'
 import ToolRuntime, { CodeRunFailedError, RUN_CODE_NAME, TOOL_ABORTED_BEFORE_DISPATCH, defineContentToolFixture, defineTool } from 'bake-tools'
 import type { Config, JsonSchemaNode, PostToolDecision, ToolExecutionResult } from 'bake-tools'
 import type { Agent } from 'bake-agent'
 import { Session, SessionId } from 'bake-session'
 import ApprovalService, { type ApprovalOutcome, type ApprovalRequest } from '@deepseek-ai/dsh-user-approval'
 import type { SessionEventMap } from 'bake-session'
-import type { JsonValue } from '@deepseek-ai/dsh-util-values'
+import type { JsonValue } from 'bake-util-values'
 import SandboxPolicy from '@deepseek-ai/dsh-sandbox-policy'
 import SessionProjections from '@deepseek-ai/dsh-session-projection'
 
@@ -29,7 +29,7 @@ const testToolSignal = new AbortController().signal
 
 /** A scriptable in-repo PtcRuntime: each test sets `behavior` to drive the bindings however it needs. */
 class FakeRuntime extends PtcRuntime {
-  resolve(request: import('@deepseek-ai/dsh-ptc-runtime').PtcRunRequest): import('@deepseek-ai/dsh-ptc-runtime').PtcRunSpec { return { ...request, cwd: request.cwd ?? process.cwd(), timeoutMs: request.timeoutMs ?? 120_000 } }
+  resolve(request: import('bake-ptc-runtime').PtcRunRequest): import('bake-ptc-runtime').PtcRunSpec { return { ...request, cwd: request.cwd ?? process.cwd(), timeoutMs: request.timeoutMs ?? 120_000 } }
 
   readonly language: string
   readonly isolation = 'fake'

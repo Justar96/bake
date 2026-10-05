@@ -3,7 +3,7 @@
  * job ids, session-scoped access, lifecycle state, completion listeners, and
  * owner cleanup while producers retain their execution resources. The
  * process-local registry lives in `@deepseek-ai/dsh-jobs-local`.
- * @module @deepseek-ai/dsh-jobs
+ * @module bake-jobs
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'
@@ -62,7 +62,7 @@ export abstract class JobRegistry extends Service {
     // would register a ctx.jobs with no method implementations and fail far
     // from the misconfiguration. Fail loud at load instead.
     if (new.target === JobRegistry) {
-      throw new Error('@deepseek-ai/dsh-jobs is the abstract job registry seam; load an implementation such as @deepseek-ai/dsh-jobs-local instead')
+      throw new Error('bake-jobs is the abstract job registry seam; load an implementation such as @deepseek-ai/dsh-jobs-local instead')
     }
     super(ctx, 'jobs')
   }

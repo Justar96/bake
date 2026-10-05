@@ -7,7 +7,7 @@
  */
 
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
-import type { JobOutcome } from '@deepseek-ai/dsh-jobs'
+import type { JobOutcome } from 'bake-jobs'
 import type { SubagentResult, SubagentRun } from './types.ts'
 
 /** Flatten a child's final output blocks to the task's final text. */

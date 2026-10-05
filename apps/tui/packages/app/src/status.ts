@@ -3,7 +3,7 @@ import type { ContextPressureProjection, TokenUsageProjection } from '@deepseek-
 import type { ContextUsage, TokenTotals } from '@dsh-tui/ui/format.ts'
 import type { GoalEntry } from '@dsh-tui/ui/goal.ts'
 import type { GoalView } from '@deepseek-ai/dsh-goal'
-import type { CompactionEngine } from '@deepseek-ai/dsh-compaction'
+import type { CompactionEngine } from 'bake-compaction'
 
 /**
  * Map the goal service view onto the header's display entry.

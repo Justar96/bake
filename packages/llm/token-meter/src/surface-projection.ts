@@ -18,7 +18,7 @@
 import { deriveEventMessage, isSurfaceEvent, SessionSeq } from 'bake-session'
 import type { SessionEvent } from 'bake-session'
 // Type-only: the `compaction/*` SessionEventMap merges (shadow-price events).
-import type {} from '@deepseek-ai/dsh-compaction'
+import type {} from 'bake-compaction'
 import { estimateMessage } from './estimate.ts'
 
 /**

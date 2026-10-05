@@ -1,5 +1,5 @@
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
-import type { PtcRunResult } from '@deepseek-ai/dsh-ptc-runtime'
+import type { PtcRunResult } from 'bake-ptc-runtime'
 import { mountRuntime, tools } from './setup.ts'
 
 /** Serialized size of a result's logs plus its completion or diagnostic, as the output budget counts it. */

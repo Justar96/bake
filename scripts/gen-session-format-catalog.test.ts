@@ -22,7 +22,7 @@ function fixture(edges: Array<[number, number]>): string {
   const catalogDependencies: Record<string, string> = {}
   for (const [from, to] of edges) {
     const dir = join(root, `packages/session/session-format-v${from}-to-v${to}`)
-    const name = `@deepseek-ai/dsh-session-format-v${from}-to-v${to}`
+    const name = `bake-session-format-v${from}-to-v${to}`
     mkdirSync(dir, { recursive: true })
     catalogDependencies[name] = 'workspace:^'
     writeFileSync(join(dir, 'package.json'), JSON.stringify({
@@ -36,10 +36,10 @@ function fixture(edges: Array<[number, number]>): string {
         targetRestorer: `restoreReleasedV${to}Artifact`,
       } },
       dependencies: from === 0
-        ? { '@deepseek-ai/dsh-session-format': 'workspace:^' }
+        ? { 'bake-session-format': 'workspace:^' }
         : {
-          '@deepseek-ai/dsh-session-format': 'workspace:^',
-          [`@deepseek-ai/dsh-session-format-v${from - 1}-to-v${from}`]: 'workspace:^',
+          'bake-session-format': 'workspace:^',
+          [`bake-session-format-v${from - 1}-to-v${from}`]: 'workspace:^',
         },
     }))
   }
@@ -93,7 +93,7 @@ describe('session format catalog generator', () => {
     const output = renderSessionFormatCatalog(declarations, version)
 
     expect(declarations.map(item => [item.from, item.to])).toEqual([[0, 1], [1, 2]])
-    expect(output).toContain("from '@deepseek-ai/dsh-session-format-v0-to-v1'")
+    expect(output).toContain("from 'bake-session-format-v0-to-v1'")
     expect(output).toContain('currentVersion: 2')
     expect(output).toContain('currentEncoder: releasedV2SessionFormatCodec')
     expect(output).toContain('restoreReleasedV2Artifact(artifact, KNOWN_SESSION_EVENT_TYPES)')
@@ -124,11 +124,11 @@ describe('session format catalog generator', () => {
   it('requires every later edge to depend on the package that owns its source codec', () => {
     const root = fixture([[0, 1], [1, 2]])
     const manifest = edgeManifest(root, 1, 2)
-    delete manifest.value.dependencies['@deepseek-ai/dsh-session-format-v0-to-v1']
+    delete manifest.value.dependencies['bake-session-format-v0-to-v1']
     writeFileSync(manifest.path, JSON.stringify(manifest.value))
 
     expect(() => collectSessionFormatMigrations(root, 2))
-      .toThrow(/must depend on @deepseek-ai\/dsh-session-format-v0-to-v1/)
+      .toThrow(/must depend on bake-session-format-v0-to-v1/)
   })
 
   it('requires the package name to identify its declared adjacent edge', () => {
@@ -138,7 +138,7 @@ describe('session format catalog generator', () => {
     writeFileSync(manifest.path, JSON.stringify(manifest.value))
 
     expect(() => collectSessionFormatMigrations(root, 2))
-      .toThrow(/name must be @deepseek-ai\/dsh-session-format-v1-to-v2/)
+      .toThrow(/name must be bake-session-format-v1-to-v2/)
   })
 
   it('requires the catalog to share the installed Session package as a peer', () => {

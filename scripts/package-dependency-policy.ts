@@ -31,11 +31,11 @@ const CONFIGURATION_ONLY_DEV_DEPENDENCIES = {
 
 /** Workspace packages whose complete runtime surface is safe across duplicate installations. */
 const DUPLICATE_SAFE_PACKAGES: readonly string[] = [
-  '@deepseek-ai/dsh-brand',
-  '@deepseek-ai/dsh-lazy-require',
-  '@deepseek-ai/dsh-typert-protocol',
-  '@deepseek-ai/dsh-util-crypto',
-  '@deepseek-ai/dsh-util-values',
+  'bake-brand',
+  'bake-lazy-require',
+  'bake-typert-protocol',
+  'bake-util-crypto',
+  'bake-util-values',
 ]
 
 /**
@@ -45,20 +45,20 @@ const DUPLICATE_SAFE_PACKAGES: readonly string[] = [
  * prominent heading in the pull request description.
  */
 const SAFE_HOST_DEPENDENCY_EXPORTS = {
-  '@deepseek-ai/dsh-credentials': ['credentialKey'],
-  '@deepseek-ai/dsh-deque': ['Deque'],
+  'bake-credentials': ['credentialKey'],
+  'bake-deque': ['Deque'],
   '@deepseek-ai/dsh-llm': ['callConfigEquals'],
-  '@deepseek-ai/dsh-session-format': ['sessionFormatLogFilename'],
-  '@deepseek-ai/dsh-timeout': ['MAX_TIMER_DELAY_MS'],
+  'bake-session-format': ['sessionFormatLogFilename'],
+  'bake-timeout': ['MAX_TIMER_DELAY_MS'],
   '@deepseek-ai/schemastery': ['default'],
 } as const satisfies HostDependencyExports
 
 /** Runtime exports that require every consumer to resolve the provider's shared peer instance. */
 const PEER_REQUIRED_HOST_EXPORTS = {
-  '@deepseek-ai/dsh-subprocess': ['SubprocessExecutableNotFoundError'],
+  'bake-subprocess': ['SubprocessExecutableNotFoundError'],
   'bake-scope': ['carrierKeyOf', 'scopeOf', 'scopeTarget'],
   'bake-session': ['SESSION_FORMAT_VERSION'],
-  '@deepseek-ai/dsh-session-persistence': ['SessionPersistenceNotFoundError'],
+  'bake-session-persistence': ['SessionPersistenceNotFoundError'],
 } as const satisfies HostDependencyExports
 
 /** Exact import specifier to reviewed runtime exports. */

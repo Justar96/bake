@@ -6,7 +6,7 @@
  * @module dsh-llm-pi-ai/context
  */
 
-import { brandString } from '@deepseek-ai/dsh-brand'
+import { brandString } from 'bake-brand'
 import { contentHasImage, IMAGE_OFFLOAD_REQUIRED_CODE, LlmError, offloadedImageText, projectOffloadedImages, requestImageHandleText, requiredImageOffload } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, GenerateOptions, ImageAttachmentAccessResolver, Message, ToolCallId } from '@deepseek-ai/dsh-llm'
 import type {
@@ -15,7 +15,7 @@ import type {
   ImageAttachmentRef,
   ImageRequestTarget,
   RequestImageAttachment,
-} from '@deepseek-ai/dsh-attachment'
+} from 'bake-attachment'
 import type {
   Context as PiContext,
   ImageContent,
@@ -25,7 +25,7 @@ import type {
   Tool as PiTool,
 } from '@earendil-works/pi-ai'
 import { toPiAssistant } from './replay.ts'
-import { longEdgeDimensions, requestImageDimensions } from '@deepseek-ai/dsh-attachment'
+import { longEdgeDimensions, requestImageDimensions } from 'bake-attachment'
 import { DEFAULT_REQUEST_IMAGE_MAX_BYTES, DEFAULT_REQUEST_IMAGE_PIXEL_BUDGET } from './config.ts'
 
 /**

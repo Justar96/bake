@@ -3,7 +3,7 @@ description: "The user-settings service for plugin authors and maintainers regis
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-settings
+# bake-settings
 
 ## Summary
 

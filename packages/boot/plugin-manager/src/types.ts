@@ -1,8 +1,8 @@
 /** Public plugin management records shared with clients. */
-import type { Branded } from '@deepseek-ai/dsh-brand'
-import type { PluginInventoryEntry } from '@deepseek-ai/dsh-host-plugin-inventory/types'
-export type { PluginEntryId } from '@deepseek-ai/dsh-host-plugin-inventory/types'
-import type { PluginEntryId } from '@deepseek-ai/dsh-host-plugin-inventory/types'
+import type { Branded } from 'bake-brand'
+import type { PluginInventoryEntry } from 'bake-host-plugin-inventory/types'
+export type { PluginEntryId } from 'bake-host-plugin-inventory/types'
+import type { PluginEntryId } from 'bake-host-plugin-inventory/types'
 
 /** Reasons a profile control cannot modify its target. */
 export type ReadOnlyReason = 'management-required' | 'unaddressable'

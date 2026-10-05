@@ -1,6 +1,6 @@
 /** Shared event metadata and semantic-document projection. */
 
-import { currentSessionMessageProjections } from '@deepseek-ai/dsh-session-format-catalog/message-projections'
+import { currentSessionMessageProjections } from 'bake-session-format-catalog/message-projections'
 import { foldSurface } from 'bake-session'
 import type { SessionEvent, SessionId, SessionSeq } from 'bake-session'
 import type { SessionEventRecord, SessionEventSearchDocument, SessionEventSurface } from './types.ts'

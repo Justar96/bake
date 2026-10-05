@@ -1,7 +1,7 @@
 /** Package-owned prompt-assembly invariants. @module bake-system-prompt/invariant */
 
 import type { Context } from '@deepseek-ai/cordis'
-import type { InvariantFailure, InvariantInstaller } from '@deepseek-ai/dsh-invariants'
+import type { InvariantFailure, InvariantInstaller } from 'bake-invariants'
 import type { PromptAssembly } from './index.ts'
 
 const PACKAGE_NAME = 'bake-system-prompt'

@@ -7,9 +7,9 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import { AttachmentError } from '@deepseek-ai/dsh-attachment'
+import { AttachmentError } from 'bake-attachment'
 import type { SessionId } from 'bake-session'
-import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
+import { RemoteError } from 'bake-typert-protocol'
 import { z } from 'zod'
 import type { SubagentCatalog, SubagentListEntry } from './control-types.ts'
 import { SubagentError } from './error.ts'

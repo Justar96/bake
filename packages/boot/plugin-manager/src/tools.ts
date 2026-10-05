@@ -1,10 +1,10 @@
 /** Agent-facing current-profile management using the same service as Web controls. */
-import { assertNever } from '@deepseek-ai/dsh-util-values'
+import { assertNever } from 'bake-util-values'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from './index.ts'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type {} from '@deepseek-ai/dsh-user-approval'
-import { approveEscalation } from '@deepseek-ai/dsh-sandbox'
+import { approveEscalation } from 'bake-sandbox'
 import type { PluginEntryId } from './types.ts'
 import { defineTool } from 'bake-tools'
 

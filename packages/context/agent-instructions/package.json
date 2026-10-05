@@ -29,7 +29,7 @@
   "peerDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
     "bake-agent": "workspace:^",
-    "@deepseek-ai/dsh-fs": "workspace:^",
+    "bake-fs": "workspace:^",
     "@deepseek-ai/dsh-home-paths": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
     "bake-session": "workspace:^",
@@ -37,7 +37,7 @@
     "bake-tools": "workspace:^"
   },
   "dependencies": {
-    "@deepseek-ai/dsh-util-values": "workspace:^",
+    "bake-util-values": "workspace:^",
     "@deepseek-ai/schemastery": "workspace:^"
   },
   "devDependencies": {
@@ -45,8 +45,8 @@
     "@deepseek-ai/cordis-plugin-loader": "workspace:^",
     "bake-agent": "workspace:^",
     "bake-agent-loop": "workspace:^",
-    "@deepseek-ai/dsh-agent-loop-testkit": "workspace:^",
-    "@deepseek-ai/dsh-fs": "workspace:^",
+    "bake-agent-loop-testkit": "workspace:^",
+    "bake-fs": "workspace:^",
     "@deepseek-ai/dsh-fs-local": "workspace:^",
     "@deepseek-ai/dsh-home-paths": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",

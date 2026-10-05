@@ -5,7 +5,7 @@ import type { Events } from '@deepseek-ai/cordis'
 import type { Agent } from 'bake-agent'
 import { scopeTarget } from 'bake-scope'
 import * as ScopeInvariant from 'bake-scope/invariant'
-import InvariantRegistry from '@deepseek-ai/dsh-invariants'
+import InvariantRegistry from 'bake-invariants'
 
 async function setup(): Promise<Context> {
   const ctx = new Context()

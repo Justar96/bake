@@ -7,8 +7,8 @@
  */
 
 import { Context } from '@deepseek-ai/cordis'
-import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
-import { deepFreeze } from '@deepseek-ai/dsh-util-values'
+import { Remote, RemoteError, TypertRemoteService } from 'bake-typert-protocol'
+import { deepFreeze } from 'bake-util-values'
 import type {
   GenerateOptions,
   LlmConfigurableProvider,
@@ -37,7 +37,7 @@ import { normalizeApiKey } from './api-key.ts'
 import {
   contentHasFile, contentHasImage, fileHandleText, projectFilesToText, projectImagesForTextModel,
 } from './content.ts'
-import type { FileAttachmentRef } from '@deepseek-ai/dsh-attachment'
+import type { FileAttachmentRef } from 'bake-attachment'
 import { projectToolUpdates } from './tool-updates.ts'
 
 export * from './attribution.ts'

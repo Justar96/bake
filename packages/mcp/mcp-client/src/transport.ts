@@ -7,7 +7,7 @@
  */
 
 import { StdioTransport, StreamableHttpTransport, type McpTransport } from '@earendil-works/pi-mcp'
-import { scrubbedParentEnv } from '@deepseek-ai/dsh-subprocess'
+import { scrubbedParentEnv } from 'bake-subprocess'
 import type { Config } from './index.ts'
 
 /**

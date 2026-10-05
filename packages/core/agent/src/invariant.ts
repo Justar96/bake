@@ -1,7 +1,7 @@
 /** Package-owned agent lifecycle invariants. @module bake-agent/invariant */
 
 import type { Context } from '@deepseek-ai/cordis'
-import type { InvariantInstaller } from '@deepseek-ai/dsh-invariants'
+import type { InvariantInstaller } from 'bake-invariants'
 import type { Agent, AgentStatus } from 'bake-agent'
 
 const PACKAGE_NAME = 'bake-agent'

@@ -12,15 +12,15 @@ import AgentRegistry from 'bake-agent'
 import type { Agent } from 'bake-agent'
 import TerminalSessionService from '@deepseek-ai/dsh-terminal'
 import * as TerminalLocal from '@deepseek-ai/dsh-terminal-bash'
-import SandboxProvider from '@deepseek-ai/dsh-sandbox'
-import type { ConfinedArgv, SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
+import SandboxProvider from 'bake-sandbox'
+import type { ConfinedArgv, SandboxPolicy } from 'bake-sandbox'
 import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import SystemPrompt from 'bake-system-prompt'
 import ToolRuntime from 'bake-tools'
 import * as ToolBashPersistent from '@deepseek-ai/dsh-tool-bash-persistent'
-import { unsupportedInbox } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { unsupportedInbox } from 'bake-agent-loop-testkit'
 
 let root: string | undefined
 let context: Context | undefined

@@ -44,7 +44,7 @@ The single config field toggles background support.
 | Field | Default | Meaning |
 |---|---|---|
 | `enableRunInBackground` | `true` | Expose `run_in_background`; when `false`, forced background calls are rejected |
-| `changeReport` | `true` | Show the workspace files a foreground call changed under its output, through [`dsh-shell-change-report`](../shell-change-report/README.md); display only, so the model's result is the same either way |
+| `changeReport` | `true` | Show the workspace files a foreground call changed under its output, through [`bake-shell-change-report`](../shell-change-report/README.md); display only, so the model's result is the same either way |
 
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-tool-bash) is the exhaustive source for every accepted field and its JSDoc; the generated [tool catalog](../../../docs/tool-catalog.md#deepseek-aidsh-tool-bash) carries the full argument schema.
 
@@ -63,7 +63,7 @@ When the mounted executor confines commands (for example `dsh-bash-sandbox`), a 
 
 ### What can go wrong
 
-A composition with no executor provider never activates the tool. Background calls without the job runtime fail with `background jobs unavailable: load @deepseek-ai/dsh-jobs and @deepseek-ai/dsh-tool-jobs`, and `sandbox_permissions` without a sandboxing executor fails with `sandbox_permissions is not available in this composition (no sandboxing executor to escalate)`. `enableRunInBackground: false` removes the parameter and rejects a forced background call at execution time.
+A composition with no executor provider never activates the tool. Background calls without the job runtime fail with `background jobs unavailable: load bake-jobs and @deepseek-ai/dsh-tool-jobs`, and `sandbox_permissions` without a sandboxing executor fails with `sandbox_permissions is not available in this composition (no sandboxing executor to escalate)`. `enableRunInBackground: false` removes the parameter and rejects a forced background call at execution time.
 
 -----
 
@@ -97,7 +97,7 @@ The tool resolves the workdir before `ctx.shell.resolve()` runs: an explicit rel
 
 ### Rendering story
 
-The result text is stdout, then a marked `[stderr]` section, then conditional markers: truncation notice, sandbox denial (plus the same-turn escalation hint when the composition advertises escalation), timeout, signal, and exit code — each on its own line. The exit marker doubles as the UI card's exit-status pill: the shared `parseExitStatus` from `dsh-shell` consumes it from the output body, so replay shows the pill without duplicating the marker.
+The result text is stdout, then a marked `[stderr]` section, then conditional markers: truncation notice, sandbox denial (plus the same-turn escalation hint when the composition advertises escalation), timeout, signal, and exit code — each on its own line. The exit marker doubles as the UI card's exit-status pill: the shared `parseExitStatus` from `bake-shell` consumes it from the output body, so replay shows the pill without duplicating the marker.
 
 </details>
 
@@ -167,7 +167,7 @@ Append-only; newly visible content follows the reusable request prefix and does 
 
 #### What the model sees
 
-Validation and policy failures are normalized as `Error: <message>`. This package's stable messages are `invalid command: expected a non-empty string`, `invalid timeoutMs: expected a positive number, got <value>`, `invalid <timeout|timeout_ms>: expected a positive number of milliseconds for timeoutMs, got <value>`, the escalation pairing failures, `run_in_background is disabled for this deployment (enableRunInBackground: false)`, `background jobs unavailable: load @deepseek-ai/dsh-jobs and @deepseek-ai/dsh-tool-jobs`, `sandbox_permissions is not available in this composition (no sandboxing executor to escalate)`, the approval availability/rejection/cancellation variants, and `tool call aborted`.
+Validation and policy failures are normalized as `Error: <message>`. This package's stable messages are `invalid command: expected a non-empty string`, `invalid timeoutMs: expected a positive number, got <value>`, `invalid <timeout|timeout_ms>: expected a positive number of milliseconds for timeoutMs, got <value>`, the escalation pairing failures, `run_in_background is disabled for this deployment (enableRunInBackground: false)`, `background jobs unavailable: load bake-jobs and @deepseek-ai/dsh-tool-jobs`, `sandbox_permissions is not available in this composition (no sandboxing executor to escalate)`, the approval availability/rejection/cancellation variants, and `tool call aborted`.
 
 #### Token effect
 

@@ -4,7 +4,7 @@
  * recovery, raw piped streams, and managed-range termination. Command
  * defaulting, shell semantics, protocol framing, and presentation belong to
  * consumers such as the bash executor seam.
- * @module dsh-subprocess/types
+ * @module bake-subprocess/types
  */
 
 import type { Duplex, Readable, Writable } from 'node:stream'
@@ -71,7 +71,7 @@ export interface SubprocessStdio {
 /**
  * A fully-specified spawn request. This seam applies no defaults: every
  * disposition, limit, and directory is explicit, so the caller's own config —
- * not a hidden subprocess-service default — decides them (the `dsh-shell`
+ * not a hidden subprocess-service default — decides them (the `bake-shell`
  * request/spec split is the owning template).
  */
 export interface SubprocessSpawnSpec {

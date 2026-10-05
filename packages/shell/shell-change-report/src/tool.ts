@@ -2,12 +2,12 @@
  * What a shell tool needs around one call: a report window that follows the
  * call's file policy, the running-jobs flag, and the terminal card's section.
  * Shared by `tool-bash` and `tool-pwsh`.
- * @module @deepseek-ai/dsh-shell-change-report/tool
+ * @module bake-shell-change-report/tool
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import type {} from '@deepseek-ai/dsh-jobs'
-import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
+import type {} from 'bake-jobs'
+import type { SandboxExecutionPolicy } from 'bake-sandbox'
 import { beginChangeReport } from './index.ts'
 import type { ChangeWindow, ConfineArgv, ShellChanges } from './index.ts'
 import type { TerminalChanges, ToolExecution } from 'bake-tools'

@@ -419,7 +419,7 @@ Two large discriminated unions are the ones consumers `switch` over most: **`Str
 
 IDs passed between packages are **branded** — structurally strings, but non-interchangeable at the type level (a `SessionId` cannot be passed where a `ToolCallId` is expected). Construction uses the shared `brandString<T>()` helper or an owner-defined validating factory; comparison, logging, and JSON behave as ordinary strings.
 
-The `Branded<B>` primitive and stateless constructor live in [dsh-brand](../../packages/util/brand), which has no harness capability dependency. `brandString<T>()` applies a compile-time-only string brand.
+The `Branded<B>` primitive and stateless constructor live in [bake-brand](../../packages/util/brand), which has no harness capability dependency. `brandString<T>()` applies a compile-time-only string brand.
 
 Source: [`packages/util/brand/src/index.ts`](../../packages/util/brand/src/index.ts)
 

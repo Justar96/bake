@@ -8,18 +8,18 @@ import SessionPersistence, {
   SessionPersistenceNotFoundError,
   SessionPersistenceRevision,
   SessionReadOnlyError,
-} from '@deepseek-ai/dsh-session-persistence'
+} from 'bake-session-persistence'
 import type {
   SessionAccess,
   SessionHandle,
   SessionHandleReadOptions,
   SessionHandleReadResult,
   SessionPersistenceSnapshot,
-} from '@deepseek-ai/dsh-session-persistence'
+} from 'bake-session-persistence'
 import SessionQueryEngine, {
   SESSION_QUERY_DEFAULT_PERSISTED_INSPECT_CONCURRENCY,
   type SessionQueryErrorCode,
-} from '@deepseek-ai/dsh-session-query'
+} from 'bake-session-query'
 import { SessionTitleService } from '@deepseek-ai/dsh-session-title'
 import { TestSessionQueryEngine } from './test-service.ts'
 

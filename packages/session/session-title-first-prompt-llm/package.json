@@ -26,7 +26,7 @@
     "@deepseek-ai/dsh-llm": "workspace:^",
     "bake-session": "workspace:^",
     "@deepseek-ai/dsh-session-title": "workspace:^",
-    "@deepseek-ai/dsh-session-title-llm": "workspace:^",
+    "bake-session-title-llm": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   },
   "dependencies": {
@@ -39,7 +39,7 @@
     "@deepseek-ai/dsh-llm-pi-ai": "workspace:^",
     "bake-session": "workspace:^",
     "@deepseek-ai/dsh-session-title": "workspace:^",
-    "@deepseek-ai/dsh-session-title-llm": "workspace:^",
+    "bake-session-title-llm": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^",
     "@deepseek-ai/dsh-session-projection": "workspace:^",
     "bake-agent-loop": "workspace:^"

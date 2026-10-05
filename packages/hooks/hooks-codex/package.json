@@ -31,7 +31,7 @@
   },
   "peerDependencies": {
     "bake-agent": "workspace:^",
-    "@deepseek-ai/dsh-hook-protocol": "workspace:^",
+    "bake-hook-protocol": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
     "bake-session": "workspace:^",
     "bake-tools": "workspace:^",
@@ -41,11 +41,11 @@
   "devDependencies": {
     "bake-agent": "workspace:^",
     "bake-agent-loop": "workspace:^",
-    "@deepseek-ai/dsh-agent-loop-testkit": "workspace:^",
-    "@deepseek-ai/dsh-shell": "workspace:^",
+    "bake-agent-loop-testkit": "workspace:^",
+    "bake-shell": "workspace:^",
     "@deepseek-ai/dsh-bash-local": "workspace:^",
     "@deepseek-ai/dsh-subprocess-local": "workspace:^",
-    "@deepseek-ai/dsh-hook-protocol": "workspace:^",
+    "bake-hook-protocol": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
     "bake-session": "workspace:^",
     "@deepseek-ai/dsh-session-persistence-jsonl": "workspace:^",

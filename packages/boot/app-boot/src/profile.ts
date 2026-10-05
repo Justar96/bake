@@ -495,8 +495,8 @@ function resolveModuleFallbackEntries(
   // map itself (first resolution wins, matching Node's own nearest-wins).
   const queue: { anchor: string; manifest: ProfileManifest }[] = [{ anchor: installAnchor, manifest: appManifest }]
   for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
-    // Peer dependencies participate: Service Definition packages (dsh-subprocess,
-    // dsh-compaction, ...) are peers of their implementations, never plain
+    // Peer dependencies participate: Service Definition packages (bake-subprocess,
+    // bake-compaction, ...) are peers of their implementations, never plain
     // dependencies, yet out-of-tree plugins import them directly.
     /* v8 ignore next -- a real app manifest always declares dependencies */
     for (const dep of profileDependencyNames(next.manifest)) {

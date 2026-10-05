@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from 'bake-agent'
-import { JobId, JobRegistry } from '@deepseek-ai/dsh-jobs'
-import type { JobDoneListener, JobRead, JobSnapshot, JobStart } from '@deepseek-ai/dsh-jobs'
+import { JobId, JobRegistry } from 'bake-jobs'
+import type { JobDoneListener, JobRead, JobSnapshot, JobStart } from 'bake-jobs'
 
 /**
  * Minimal concrete registry: one canned record. The Service Definition owns the contract

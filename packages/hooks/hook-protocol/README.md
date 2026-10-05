@@ -3,11 +3,11 @@ description: "The shared hook rules behind the Claude Code and Codex bridges —
 kind: "package-library"
 ---
 
-# @deepseek-ai/dsh-hook-protocol
+# bake-hook-protocol
 
 ## Summary
 
-`dsh-hook-protocol` makes both bridges handle your hooks identically: it defines what a hook can do and what happens when it runs. You never install or configure it yourself — choose `dsh-hooks-claude-code` or `dsh-hooks-codex`, point it at your existing `hooks.json`, and these rules apply to your hooks. Through either bridge, a hook can block a prompt or tool call with a message the model sees, attach extra context to the conversation, or ask the run to stop. Only command hooks run; `http`, `mcp_tool`, `prompt`, and `agent` handlers are skipped with a warning.
+`bake-hook-protocol` makes both bridges handle your hooks identically: it defines what a hook can do and what happens when it runs. You never install or configure it yourself — choose `dsh-hooks-claude-code` or `dsh-hooks-codex`, point it at your existing `hooks.json`, and these rules apply to your hooks. Through either bridge, a hook can block a prompt or tool call with a message the model sees, attach extra context to the conversation, or ask the run to stop. Only command hooks run; `http`, `mcp_tool`, `prompt`, and `agent` handlers are skipped with a warning.
 
 ## Table of Contents
 
@@ -58,7 +58,7 @@ This section explains the design decisions behind the library and points at the 
 
 ### Processing pipeline
 
-The library is a chain of single-purpose steps, one function each: validate the matcher pattern, run the command through the `dsh-shell` executor, decode the outcome, merge every matched hook's outcome into one most-restrictive result, and record the durable `hook/*` event pair. The matcher's `mode` parameter is the single axis the dialects differ on — `claude-code` interprets a pattern as literal alternatives or a regex, `codex` always as an unanchored regex. Every step degrades to a contained outcome instead of throwing, so a hook can never crash the calling turn: an invalid regex is a non-match, an executor rejection becomes a `HookOutput` with no exit code, exit 2 blocks with stderr as the reason, and every other failure stays non-blocking. Merging applies `deny > ask > allow` precedence, keeps the first `continue: false` stop sticky, and accumulates context in hook order. Detached runs are tracked so `fiber.dispose()` reaches quiescence, and the invariant companion rejects `hook/*` records outside an open turn. The steps live in [`src/matcher.ts`](src/matcher.ts), [`src/runner.ts`](src/runner.ts), [`src/codec.ts`](src/codec.ts), [`src/merge.ts`](src/merge.ts), [`src/events.ts`](src/events.ts), [`src/detached.ts`](src/detached.ts), and [`src/invariant.ts`](src/invariant.ts).
+The library is a chain of single-purpose steps, one function each: validate the matcher pattern, run the command through the `bake-shell` executor, decode the outcome, merge every matched hook's outcome into one most-restrictive result, and record the durable `hook/*` event pair. The matcher's `mode` parameter is the single axis the dialects differ on — `claude-code` interprets a pattern as literal alternatives or a regex, `codex` always as an unanchored regex. Every step degrades to a contained outcome instead of throwing, so a hook can never crash the calling turn: an invalid regex is a non-match, an executor rejection becomes a `HookOutput` with no exit code, exit 2 blocks with stderr as the reason, and every other failure stays non-blocking. Merging applies `deny > ask > allow` precedence, keeps the first `continue: false` stop sticky, and accumulates context in hook order. Detached runs are tracked so `fiber.dispose()` reaches quiescence, and the invariant companion rejects `hook/*` records outside an open turn. The steps live in [`src/matcher.ts`](src/matcher.ts), [`src/runner.ts`](src/runner.ts), [`src/codec.ts`](src/codec.ts), [`src/merge.ts`](src/merge.ts), [`src/events.ts`](src/events.ts), [`src/detached.ts`](src/detached.ts), and [`src/invariant.ts`](src/invariant.ts).
 
 ### `hook/*` session events
 
@@ -69,7 +69,7 @@ Invocation and result records must sit inside an open turn: `UserPromptSubmit`, 
 ### Design philosophy
 
 - **One axis of difference collapsed into `mode`.** The dialects differ only in how a matcher pattern is interpreted, so the matcher takes the mode as a parameter instead of duplicating the engine.
-- **The executor owns process control.** Commands run through the `dsh-shell` executor rather than a bespoke spawn: the executor already provides the scrubbed-but-overridable environment, process-group cancellation, and timeout the protocol needs.
+- **The executor owns process control.** Commands run through the `bake-shell` executor rather than a bespoke spawn: the executor already provides the scrubbed-but-overridable environment, process-group cancellation, and timeout the protocol needs.
 - **Never throw into the loop.** Every failure mode — malformed JSON, an invalid regex, an executor rejection — degrades to a contained outcome or a non-match, so a hook can never crash the calling turn.
 - **Log-only, turn-enclosed events.** The `hook/*` records are durable evidence of what ran and what it decided; they are not surface events, and the invariant companion rejects them outside an open turn.
 

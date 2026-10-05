@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-hook-protocol",
+  "name": "bake-hook-protocol",
   "description": "Shared Claude Code / Codex hook wire protocol: matcher engine, stdin/exit-code/stdout codec, multi-hook merge, and hook/* session events",
   "version": "0.1.6-alpha.2",
   "publishConfig": {
@@ -32,14 +32,14 @@
   ],
   "license": "MIT",
   "peerDependencies": {
-    "@deepseek-ai/dsh-shell": "workspace:^",
-    "@deepseek-ai/dsh-invariants": "workspace:^",
+    "bake-shell": "workspace:^",
+    "bake-invariants": "workspace:^",
     "bake-session": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-shell": "workspace:^",
-    "@deepseek-ai/dsh-invariants": "workspace:^",
+    "bake-shell": "workspace:^",
+    "bake-invariants": "workspace:^",
     "bake-session": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   }

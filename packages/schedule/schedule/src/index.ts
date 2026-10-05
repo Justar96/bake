@@ -5,7 +5,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from 'bake-agent'
-import type {} from '@deepseek-ai/dsh-session-persistence'
+import type {} from 'bake-session-persistence'
 // Type-only: resolves ctx.sessionProjections for the optional projection child.
 import type {} from '@deepseek-ai/dsh-session-projection'
 import { scheduleProjectionDefinition } from './projection.ts'

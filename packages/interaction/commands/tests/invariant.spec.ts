@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import * as CommandInvariant from '@deepseek-ai/dsh-commands/invariant'
-import InvariantRegistry, { InvariantError } from '@deepseek-ai/dsh-invariants'
+import InvariantRegistry, { InvariantError } from 'bake-invariants'
 import SessionStore, { SessionId, SessionSeq, type Session } from 'bake-session'
 import { CommandId } from '@deepseek-ai/dsh-commands'
 

@@ -13,7 +13,7 @@ import ToolRuntime, {
   type InferArgs, type ParameterSchemaSpec, type PreToolDecision, type PostToolDecision,
   type JsonSchemaNode, type ToolDefinition, type ToolDispatchExecution, type ToolExecutionResult, type ToolExecutionToken,
 } from 'bake-tools'
-import type { JsonValue } from '@deepseek-ai/dsh-util-values'
+import type { JsonValue } from 'bake-util-values'
 
 const testToolSignal = new AbortController().signal
 

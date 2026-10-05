@@ -1,6 +1,6 @@
 /**
  * `SandboxedFileSystem`: the sandbox-enforcing implementation of the
- * `@deepseek-ai/dsh-fs` Service Definition. It extends `LocalFileSystem` so all
+ * `bake-fs` Service Definition. It extends `LocalFileSystem` so all
  * text-storage mechanics — resolve, stat, read/stream, list, the atomic
  * write and the read-match-write edit critical section — are the local
  * implementation's, verbatim; this package adds only the per-call POLICY fence
@@ -29,10 +29,10 @@
 import { Context } from '@deepseek-ai/cordis'
 import { LocalFileSystem } from '@deepseek-ai/dsh-fs-local'
 import type { Config as LocalConfig } from '@deepseek-ai/dsh-fs-local'
-import { FsError } from '@deepseek-ai/dsh-fs'
-import type { FsEditIntent, FsEditOutcome, FsEditRequest, FsTarget, FsWriteIntent, FsWriteOutcome } from '@deepseek-ai/dsh-fs'
-import { writableRoots } from '@deepseek-ai/dsh-sandbox'
-import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
+import { FsError } from 'bake-fs'
+import type { FsEditIntent, FsEditOutcome, FsEditRequest, FsTarget, FsWriteIntent, FsWriteOutcome } from 'bake-fs'
+import { writableRoots } from 'bake-sandbox'
+import type { SandboxExecutionPolicy, SandboxMode } from 'bake-sandbox'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import { isPathUnder } from './containment.ts'
 

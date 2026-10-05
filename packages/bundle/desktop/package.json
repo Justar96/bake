@@ -34,7 +34,7 @@
     }
   },
   "dependencies": {
-    "@deepseek-ai/dsh-brand": "workspace:^",
+    "bake-brand": "workspace:^",
     "@deepseek-ai/dsh-cmdline": "workspace:^"
   },
   "peerDependencies": {
@@ -42,7 +42,7 @@
     "@deepseek-ai/cordis-plugin-loader": "workspace:^",
     "bake-agent": "workspace:^",
     "bake-agent-default-model": "workspace:^",
-    "@deepseek-ai/dsh-fs": "workspace:^",
+    "bake-fs": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
     "@deepseek-ai/dsh-permission-presets": "workspace:^",
     "bake-session": "workspace:^",
@@ -54,10 +54,10 @@
     "@deepseek-ai/cordis-plugin-loader": "workspace:^",
     "bake-agent": "workspace:^",
     "bake-agent-default-model": "workspace:^",
-    "@deepseek-ai/dsh-fs": "workspace:^",
+    "bake-fs": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
-    "@deepseek-ai/dsh-llm-mock-server": "workspace:^",
-    "@deepseek-ai/dsh-loader-smoke": "workspace:^",
+    "bake-llm-mock-server": "workspace:^",
+    "bake-loader-smoke": "workspace:^",
     "@deepseek-ai/dsh-permission-presets": "workspace:^",
     "bake-session": "workspace:^",
     "bake-tools": "workspace:^",

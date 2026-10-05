@@ -3,7 +3,7 @@ import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import { agentEvents } from 'bake-agent'
 import AgentLoop from 'bake-agent-loop'
-import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { mountAgentLoopTestDependencies } from 'bake-agent-loop-testkit'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import { SessionLogOffset, SessionId } from 'bake-session'
 import type { SessionEvent, SessionHeader } from 'bake-session'
@@ -11,8 +11,8 @@ import {
   SessionPersistence,
   SessionPersistenceNotFoundError,
   SessionPersistenceRevision,
-} from '@deepseek-ai/dsh-session-persistence'
-import type { SessionAccess, SessionHandle, SessionPersistenceSnapshot } from '@deepseek-ai/dsh-session-persistence'
+} from 'bake-session-persistence'
+import type { SessionAccess, SessionHandle, SessionPersistenceSnapshot } from 'bake-session-persistence'
 import * as toolSchedule from '../src/index.ts'
 
 interface StoredProbeSession {

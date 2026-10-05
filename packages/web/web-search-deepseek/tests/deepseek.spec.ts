@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
-import { credentialRef } from '@deepseek-ai/dsh-credentials'
+import { credentialRef } from 'bake-credentials'
 import LocalCredentialProvider from '@deepseek-ai/dsh-credentials-local'
 import WebRuntime, { WebError } from '@deepseek-ai/dsh-web'
 import {

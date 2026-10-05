@@ -8,7 +8,7 @@
  * vocabulary, freshness, and torn-tail repair. Backend-specific behavior
  * (file layout, encodings, artifact export) stays in each backend's own spec.
  *
- * @module @deepseek-ai/dsh-session-persistence/tests/contract
+ * @module bake-session-persistence/tests/contract
  */
 
 import { describe, expect, it } from 'vitest'

@@ -19,7 +19,7 @@ import SystemPrompt from 'bake-system-prompt'
 import ToolRuntime from 'bake-tools'
 import type { ToolExecutionResult } from 'bake-tools'
 import * as toolGoal from '@deepseek-ai/dsh-tool-goal'
-import { createInboxStub } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { createInboxStub } from 'bake-agent-loop-testkit'
 
 const testToolSignal = new AbortController().signal
 

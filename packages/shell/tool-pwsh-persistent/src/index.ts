@@ -9,9 +9,9 @@ import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { Agent } from 'bake-agent'
-import { truncateWithoutSplittingSurrogatePair } from '@deepseek-ai/dsh-output-retention'
+import { truncateWithoutSplittingSurrogatePair } from 'bake-output-retention'
 import type { TerminalReadResult, TerminalSendResult, TerminalSessionId } from '@deepseek-ai/dsh-terminal'
-import { deadline, timeoutOf } from '@deepseek-ai/dsh-timeout'
+import { deadline, timeoutOf } from 'bake-timeout'
 import { defineTool } from 'bake-tools'
 
 // TODO: Replace the file-search advice; arbitrary command output need not come from a searchable file.

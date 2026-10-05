@@ -11,8 +11,8 @@ import type { Agent, AgentStatus } from 'bake-agent'
 import CommandRuntime from '@deepseek-ai/dsh-commands'
 import SessionStore, { SessionId } from 'bake-session'
 import * as CommandFeedback from '@deepseek-ai/dsh-command-feedback'
-import { getOrCreateAnonymousUserId } from '@deepseek-ai/dsh-anonymous-user-id'
-import { unsupportedInbox } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { getOrCreateAnonymousUserId } from 'bake-anonymous-user-id'
+import { unsupportedInbox } from 'bake-agent-loop-testkit'
 
 let root: string | undefined
 let context: Context | undefined

@@ -4,11 +4,11 @@
  */
 
 import { KNOWN_SESSION_EVENT_TYPES } from 'bake-session'
-import { createSessionFormatCatalog } from '@deepseek-ai/dsh-session-format'
+import { createSessionFormatCatalog } from 'bake-session-format'
 import { validateInstalledCurrentSessionArtifact, validateInstalledCurrentSessionHeader } from './current.ts'
-import { releasedV0SessionFormatCodec, releasedV1SessionFormatCodec, sessionFormatV0ToV1 } from '@deepseek-ai/dsh-session-format-v0-to-v1'
-import { releasedV2SessionFormatCodec, sessionFormatV1ToV2 } from '@deepseek-ai/dsh-session-format-v1-to-v2'
-import { assertReleasedV3Header, releasedV3SessionFormatCodec, restoreReleasedV3Artifact, sessionFormatV2ToV3 } from '@deepseek-ai/dsh-session-format-v2-to-v3'
+import { releasedV0SessionFormatCodec, releasedV1SessionFormatCodec, sessionFormatV0ToV1 } from 'bake-session-format-v0-to-v1'
+import { releasedV2SessionFormatCodec, sessionFormatV1ToV2 } from 'bake-session-format-v1-to-v2'
+import { assertReleasedV3Header, releasedV3SessionFormatCodec, restoreReleasedV3Artifact, sessionFormatV2ToV3 } from 'bake-session-format-v2-to-v3'
 
 /** Physical codec dispatch and complete adjacent chain, independent of mounted plugins. */
 export const sessionFormatCatalog = createSessionFormatCatalog({

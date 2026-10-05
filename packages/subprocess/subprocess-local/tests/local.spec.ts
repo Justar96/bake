@@ -7,23 +7,23 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { Context } from '@deepseek-ai/cordis'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
-import type { SubprocessSpawnSpec, SubprocessTerminalHandle, SubprocessTerminalSpawnSpec } from '@deepseek-ai/dsh-subprocess'
+import type { SubprocessSpawnSpec, SubprocessTerminalHandle, SubprocessTerminalSpawnSpec } from 'bake-subprocess'
 import { childEnv } from '../src/spawn.ts'
 import { signalLinuxDirectProcess } from '../src/linux-scope.ts'
 
 function mockWin32ForIsolatedRuntime(): void {
-  vi.doMock('@deepseek-ai/dsh-win32-process', () => ({
+  vi.doMock('bake-win32-process', () => ({
     loadWin32ProcessBindings: vi.fn(),
     probeCurrentTokenJobSupport: vi.fn(),
   }))
 }
 
 function unmockWin32ForIsolatedRuntime(): void {
-  vi.doUnmock('@deepseek-ai/dsh-win32-process')
+  vi.doUnmock('bake-win32-process')
 }
 
 function mockNodePtyForIsolatedRuntime(spawn: unknown): void {
-  vi.doMock('@deepseek-ai/dsh-lazy-require', () => ({
+  vi.doMock('bake-lazy-require', () => ({
     createLazyRequire: (specifier: string) => () => {
       if (specifier === 'node-pty') return { spawn }
       throw new Error(`unexpected lazy dependency ${specifier}`)
@@ -32,7 +32,7 @@ function mockNodePtyForIsolatedRuntime(spawn: unknown): void {
 }
 
 function unmockLazyRequireForIsolatedRuntime(): void {
-  vi.doUnmock('@deepseek-ai/dsh-lazy-require')
+  vi.doUnmock('bake-lazy-require')
 }
 
 function spec(command: string, overrides: Partial<SubprocessSpawnSpec> = {}): SubprocessSpawnSpec {

@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createUserMessage, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import type { AgentHandle, AssistantStreamFrame } from 'bake-agent'
-import { brandString } from '@deepseek-ai/dsh-brand'
+import { brandString } from 'bake-brand'
 import type { SessionId } from 'bake-session'
 import { transcriptRows } from '@dsh-tui/ui'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'

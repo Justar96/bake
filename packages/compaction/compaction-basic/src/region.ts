@@ -13,8 +13,8 @@ import {
   compactCheckpointSource,
   toolPairingBalancedAfter,
   toolPairingBalancedBefore,
-} from '@deepseek-ai/dsh-compaction'
-import type { CompactionResult } from '@deepseek-ai/dsh-compaction'
+} from 'bake-compaction'
+import type { CompactionResult } from 'bake-compaction'
 import type { CommandId } from '@deepseek-ai/dsh-commands/brand'
 import { createUserMessage, errorChain } from '@deepseek-ai/dsh-llm'
 import type { Message, UserMessage } from '@deepseek-ai/dsh-llm'
@@ -27,7 +27,7 @@ import { frameSummary } from './summarizer.ts'
 import type { SummarizationInput, SummaryResult } from './summarizer.ts'
 import { isContextOverflow, summaryRetryDelay, waitForRetry } from './summary-retry.ts'
 import type { SummaryRetryPlan } from './summary-retry.ts'
-import { errorMessage } from '@deepseek-ai/dsh-util-values'
+import { errorMessage } from 'bake-util-values'
 
 interface RegionDependencies {
   readonly meter: TokenMeter

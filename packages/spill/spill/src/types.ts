@@ -3,10 +3,10 @@
  * lives in `./index.ts`, implementations in sibling packages
  * (`@deepseek-ai/dsh-spill-local` first).
  *
- * @module @deepseek-ai/dsh-spill/types
+ * @module bake-spill/types
  */
 
-import type { Branded } from '@deepseek-ai/dsh-brand'
+import type { Branded } from 'bake-brand'
 import type { ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { SessionId } from 'bake-session'
 

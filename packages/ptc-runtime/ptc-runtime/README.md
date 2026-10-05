@@ -3,11 +3,11 @@ description: "Abstract PTC execution seam (`ctx.ptcRuntime`) for users and maint
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-ptc-runtime
+# bake-ptc-runtime
 
 ## Summary
 
-Use `dsh-ptc-runtime` to run one model-written program against host-provided asynchronous functions through a configured backend. A request returns a lossless-JSON value, ordered per-channel logs, or a structured error; program failures resolve in the result, while rejected promises indicate caller misuse. Each run is isolated from prior runs, and the runtime has no knowledge of tools or sessions. Choose an execution backend separately; its language and isolation descriptors identify the required source language and execution substrate but do not themselves promise a security boundary.
+Use `bake-ptc-runtime` to run one model-written program against host-provided asynchronous functions through a configured backend. A request returns a lossless-JSON value, ordered per-channel logs, or a structured error; program failures resolve in the result, while rejected promises indicate caller misuse. Each run is isolated from prior runs, and the runtime has no knowledge of tools or sessions. Choose an execution backend separately; its language and isolation descriptors identify the required source language and execution substrate but do not themselves promise a security boundary.
 
 ## Table of Contents
 

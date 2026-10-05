@@ -46,9 +46,9 @@
   "peerDependencies": {
     "@deepseek-ai/dsh-commands": "workspace:^",
     "bake-session": "workspace:^",
-    "@deepseek-ai/dsh-anonymous-user-id": "workspace:^",
+    "bake-anonymous-user-id": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^",
-    "@deepseek-ai/dsh-typert-protocol": "workspace:^"
+    "bake-typert-protocol": "workspace:^"
   },
   "dependencies": {
     "zod": "catalog:"
@@ -57,13 +57,13 @@
     "@deepseek-ai/cordis-plugin-include": "workspace:^",
     "@deepseek-ai/cordis-plugin-loader": "workspace:^",
     "bake-agent": "workspace:^",
-    "@deepseek-ai/dsh-agent-loop-testkit": "workspace:^",
+    "bake-agent-loop-testkit": "workspace:^",
     "@deepseek-ai/dsh-commands": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
     "bake-session": "workspace:^",
-    "@deepseek-ai/dsh-anonymous-user-id": "workspace:^",
+    "bake-anonymous-user-id": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^",
-    "@deepseek-ai/dsh-typert-protocol": "workspace:^",
-    "@deepseek-ai/dsh-session-telemetry": "workspace:^"
+    "bake-typert-protocol": "workspace:^",
+    "bake-session-telemetry": "workspace:^"
   }
 }

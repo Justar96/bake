@@ -8,8 +8,8 @@ import { Context } from '@deepseek-ai/cordis'
 import type { EntryOptions } from '@deepseek-ai/cordis-plugin-loader'
 import type { PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 import z from '@deepseek-ai/schemastery'
-import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
-import { pluginEntryId, readPluginInventory } from '@deepseek-ai/dsh-host-plugin-inventory'
+import { TypertRemoteService, Remote } from 'bake-typert-protocol'
+import { pluginEntryId, readPluginInventory } from 'bake-host-plugin-inventory'
 import {
   readProfileManifest, resolveBundleDir, loadOverlayPatches, composeEntries,
   reconcileProfilePatches, readProfilePatches, PROFILE_TEMPLATES, bundlePatchPaths,
@@ -45,11 +45,11 @@ export interface Config {
 const protectedModules = new Set([
   '@deepseek-ai/dsh-plugin-manager', '@deepseek-ai/cordis-plugin-loader',
   '@deepseek-ai/cordis-plugin-include', '@deepseek-ai/dsh-api-gateway',
-  '@deepseek-ai/dsh-host-webserver', '@deepseek-ai/dsh-client-modules',
+  'bake-host-webserver', '@deepseek-ai/dsh-client-modules',
   '@deepseek-ai/dsh-client-ui-settings-plugin-inventory', '@deepseek-ai/dsh-client-ui-plugin-manager',
-  '@deepseek-ai/dsh-host-plugin-inventory', '@deepseek-ai/dsh-typert-registry',
+  'bake-host-plugin-inventory', '@deepseek-ai/dsh-typert-registry',
   '@deepseek-ai/dsh-api-remotes',
-  '@deepseek-ai/cordis-plugin-timer', '@deepseek-ai/dsh-client-connection',
+  '@deepseek-ai/cordis-plugin-timer', 'bake-client-connection',
   '@deepseek-ai/dsh-host-frontend-static', 'bake-tools',
   '@deepseek-ai/dsh-hmr',
 ])

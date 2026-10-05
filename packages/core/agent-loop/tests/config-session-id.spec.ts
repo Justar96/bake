@@ -10,7 +10,7 @@ import type { SessionEvent } from 'bake-session'
 import SystemPrompt from 'bake-system-prompt'
 import ToolRuntime from 'bake-tools'
 import AgentRegistry, { type Agent } from 'bake-agent'
-import type { SessionHandle } from '@deepseek-ai/dsh-session-persistence'
+import type { SessionHandle } from 'bake-session-persistence'
 
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import AgentLoop from 'bake-agent-loop'

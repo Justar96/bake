@@ -8,7 +8,7 @@ import type { Agent } from 'bake-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { Message } from '@deepseek-ai/dsh-llm'
 import type { Session, UserMessage } from 'bake-session'
-import type { FileSystem, FsVersion } from '@deepseek-ai/dsh-fs'
+import type { FileSystem, FsVersion } from 'bake-fs'
 import type { ResolvedConfig } from './config.ts'
 import { instructionContentSha1, trimmedInstructionDigest } from './digest.ts'
 import {
@@ -30,7 +30,7 @@ import {
   type ChangeRenderItem,
   type AgentInstructionChange,
 } from './render.ts'
-import { isRecord } from '@deepseek-ai/dsh-util-values'
+import { isRecord } from 'bake-util-values'
 
 export const name = 'agent-instructions'
 

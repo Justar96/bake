@@ -74,7 +74,7 @@ describe('typertPlugin', () => {
 
   it('skips outputs that do not identify a Typert contributor', async () => {
     const plugin = typertPlugin()
-    expect(plugin.name).toBe('dsh-typert-generator')
+    expect(plugin.name).toBe('bake-typert-generator')
     plugin.writeBundle({})
 
     const root = await workspace()
@@ -174,7 +174,7 @@ describe('typertPlugin', () => {
 
   it('emits every explicit workspace contributor once from a host-only prepass', async () => {
     const root = await workspace()
-    const trigger = await packageOutput(root, 'generator', { name: '@deepseek-ai/dsh-typert-generator' })
+    const trigger = await packageOutput(root, 'generator', { name: 'bake-typert-generator' })
     await packageOutput(root, 'core/tools', {
       name: 'bake-tools',
       exports: { './typert': './lib/typert.host.js' },

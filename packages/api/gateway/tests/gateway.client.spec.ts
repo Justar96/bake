@@ -1,16 +1,16 @@
-import { RemoteError, typertOwnedValue } from '@deepseek-ai/dsh-typert-protocol'
+import { RemoteError, typertOwnedValue } from 'bake-typert-protocol'
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { Fiber } from '@deepseek-ai/cordis'
 import { describe, expect, expectTypeOf, it, vi } from 'vitest'
 import { z } from 'zod'
-import { RemoteMock } from '@deepseek-ai/dsh-remote-mock'
+import { RemoteMock } from 'bake-remote-mock'
 import {
   apply as applyConnection,
   type ClientTransportHooks,
   type ConnectionGeneration,
   type ConnectionGenerationSource,
   type ConnectionHandle,
-} from '@deepseek-ai/dsh-client-connection/client'
+} from 'bake-client-connection/client'
 import type {
   InvocationDescriptor,
   RemoteResult,
@@ -20,7 +20,7 @@ import type {
   TypertLookup,
   TypertRemoteScopeApi,
   TypertRemoteNamespace,
-} from '@deepseek-ai/dsh-typert-protocol'
+} from 'bake-typert-protocol'
 import TypertRegistry from '@deepseek-ai/dsh-typert-registry'
 import type { ClientRemote } from '../src/client/index.ts'
 import { apply, inject, RemoteStream } from '../src/client/index.ts'
@@ -73,7 +73,7 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
-declare module '@deepseek-ai/dsh-typert-protocol' {
+declare module 'bake-typert-protocol' {
   interface TypertRemoteEventSelection extends
     Record<'fixture/changed' | 'fixture/idle' | 'fixture/approval', true> {}
 

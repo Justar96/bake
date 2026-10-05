@@ -9,7 +9,7 @@ import { Context, FiberState, Service } from '@deepseek-ai/cordis'
 import { randomUUID } from 'node:crypto'
 import z from '@deepseek-ai/schemastery'
 import { z as zod } from 'zod'
-import { brandString } from '@deepseek-ai/dsh-brand'
+import { brandString } from 'bake-brand'
 import type {
   Agent,
   AgentFactory,
@@ -22,15 +22,15 @@ import type {
   TurnBoundaryProjection,
 } from 'bake-agent'
 import { errorChain, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
-import type {} from '@deepseek-ai/dsh-settings'
+import type {} from 'bake-settings'
 import { interruptedTurnClosers, SessionLogOffset, SessionPreparation, SessionSeq } from 'bake-session'
 import type { Session, SessionHeader, SessionId } from 'bake-session'
 import type {} from 'bake-system-prompt'
 import type {} from 'bake-tools'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
-import { SessionPersistenceNotFoundError } from '@deepseek-ai/dsh-session-persistence'
-import type { SessionHandle, SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
+import { SessionPersistenceNotFoundError } from 'bake-session-persistence'
+import type { SessionHandle, SessionPersistence } from 'bake-session-persistence'
 import { ReactLoopAgent } from './agent.ts'
 import { inboxProjectionDefinition } from './inbox.ts'
 import { DEFAULT_MAX_PARALLEL_TOOL_CALLS } from './constants.ts'
@@ -815,7 +815,7 @@ export class AgentLoop extends Service implements AgentFactory {
   async resume(ownerCtx: Context, options: ResumeAgentOptions): Promise<AgentHandle> {
     const persistence = this.runtime.ctx.get('sessionPersistence')
     if (persistence === undefined) {
-      throw new Error('cannot resume: session persistence is not configured (load a dsh-session-persistence backend)')
+      throw new Error('cannot resume: session persistence is not configured (load a bake-session-persistence backend)')
     }
     return this.resumeWith(ownerCtx, persistence, options)
   }

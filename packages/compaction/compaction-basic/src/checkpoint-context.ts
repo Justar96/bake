@@ -9,7 +9,7 @@
  * @module @deepseek-ai/dsh-compaction-basic/checkpoint-context
  */
 
-import { isCompactCheckpointSource } from '@deepseek-ai/dsh-compaction'
+import { isCompactCheckpointSource } from 'bake-compaction'
 import type { ContentBlock, Message, TextBlock } from '@deepseek-ai/dsh-llm'
 
 /** Most paths listed per file section; older paths beyond it are counted, not listed. */

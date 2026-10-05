@@ -24,9 +24,9 @@ import {
   type SessionTelemetryRecord,
   type SessionTelemetrySeverity,
   type SessionTelemetrySharingStatus,
-} from '@deepseek-ai/dsh-session-telemetry'
+} from 'bake-session-telemetry'
 import { APP_IDENTITY } from '@deepseek-ai/dsh-llm'
-import { getOrCreateAnonymousUserId } from '@deepseek-ai/dsh-anonymous-user-id'
+import { getOrCreateAnonymousUserId } from 'bake-anonymous-user-id'
 import type { LoggerProvider, BatchLogRecordProcessorOptions } from '@opentelemetry/sdk-logs'
 import type { OTLPExporterNodeConfigBase } from '@opentelemetry/otlp-exporter-base'
 import type { SeverityNumber, AnyValue } from '@opentelemetry/api-logs'

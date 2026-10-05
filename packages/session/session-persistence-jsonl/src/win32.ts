@@ -13,7 +13,7 @@
 
 import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { join, parse, resolve, toNamespacedPath } from 'node:path'
-import { isENOENT } from '@deepseek-ai/dsh-util-values'
+import { isENOENT } from 'bake-util-values'
 
 type MoveFileExW = (existing: string, replacement: string, flags: number) => number
 type NativeHandle = bigint

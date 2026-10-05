@@ -78,7 +78,7 @@ This section explains the design decisions behind the policy; the observable beh
 
 ### Design philosophy
 
-The policy is deliberately narrow: it only decides **when** to spill and composes the notice. It registers no service, owns no storage, and owns no preview mechanics — `TextRetainer` from `dsh-output-retention` builds the head/tail preview. Two invariants shape the code: the model-facing replacement never exceeds `maxInlineBytes` (the notice's byte cost is reserved out of the budget first), and a spill failure never changes the tool call's outcome.
+The policy is deliberately narrow: it only decides **when** to spill and composes the notice. It registers no service, owns no storage, and owns no preview mechanics — `TextRetainer` from `bake-output-retention` builds the head/tail preview. Two invariants shape the code: the model-facing replacement never exceeds `maxInlineBytes` (the notice's byte cost is reserved out of the budget first), and a spill failure never changes the tool call's outcome.
 
 ### The two arms
 
@@ -113,7 +113,7 @@ Read these pages when the package-level contract is not enough.
 
 - [Spill storage service](../spill/README.md) — the `saveText` contract behind the policy's replacement.
 - [dsh-spill-local](../spill-local/README.md) — the local backend that stores the spilled text.
-- [dsh-output-retention](../../util/output-retention/README.md) — the preview mechanics (`TextRetainer`) the policy composes.
+- [bake-output-retention](../../util/output-retention/README.md) — the preview mechanics (`TextRetainer`) the policy composes.
 - [Tool output spill decision](../../../.agents/notes/implemented/architecture/2026-07-08-tool-output-spill-files.md) — the capability boundary and design rationale.
 
 -----

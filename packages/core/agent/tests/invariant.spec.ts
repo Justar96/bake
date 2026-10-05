@@ -3,7 +3,7 @@ import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from 'bake-agent'
 import * as AgentInvariant from 'bake-agent/invariant'
 import { scopeTarget } from 'bake-scope'
-import InvariantRegistry from '@deepseek-ai/dsh-invariants'
+import InvariantRegistry from 'bake-invariants'
 
 async function setup(): Promise<Context> {
   const ctx = new Context()

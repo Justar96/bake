@@ -19,7 +19,7 @@ import { scopeOf } from 'bake-scope'
 import { assertSupportedJsonSchema, defineTool } from 'bake-tools'
 import type { ToolDefinition } from 'bake-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
-import { hasPlainArrayPrototype, isIntrinsicObjectPrototype, type JsonValue } from '@deepseek-ai/dsh-util-values'
+import { hasPlainArrayPrototype, isIntrinsicObjectPrototype, type JsonValue } from 'bake-util-values'
 
 const DYNAMIC_TOOL = Symbol('cordis-host-runner.dynamic-tool')
 const SCHEMA_TYPES = new Set<unknown>(['string', 'number', 'integer', 'boolean', 'null', 'object', 'array', 'json'])

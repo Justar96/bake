@@ -21,7 +21,7 @@
  * @module @deepseek-ai/dsh-subagent/descriptor
  */
 
-import { isRecord, snapshotJsonValue } from '@deepseek-ai/dsh-util-values'
+import { isRecord, snapshotJsonValue } from 'bake-util-values'
 import type { SessionEvent } from 'bake-session'
 import type { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { ToolRestriction } from 'bake-tools'

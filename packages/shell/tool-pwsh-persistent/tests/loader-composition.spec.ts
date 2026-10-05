@@ -14,15 +14,15 @@ import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import type { Agent } from 'bake-agent'
 import TerminalSessionService from '@deepseek-ai/dsh-terminal'
 import * as TerminalBash from '@deepseek-ai/dsh-terminal-bash'
-import SandboxProvider from '@deepseek-ai/dsh-sandbox'
-import type { ConfinedArgv, SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
+import SandboxProvider from 'bake-sandbox'
+import type { ConfinedArgv, SandboxPolicy } from 'bake-sandbox'
 import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
 import LocalSubprocessService from '@deepseek-ai/dsh-subprocess-local'
 import { resolvePwshPath } from '@deepseek-ai/dsh-pwsh-local/src/resolve.ts'
 import SystemPrompt from 'bake-system-prompt'
 import ToolRegistry from 'bake-tools'
 import * as ToolPwshPersistent from '@deepseek-ai/dsh-tool-pwsh-persistent'
-import { unsupportedInbox } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { unsupportedInbox } from 'bake-agent-loop-testkit'
 
 const hasPwsh = spawnSync(
   resolvePwshPath(), ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', '$true'],

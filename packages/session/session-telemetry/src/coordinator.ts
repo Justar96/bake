@@ -11,7 +11,7 @@
  * stop-on-throw) or touch the agent loop. Composed by a backend in its
  * constructor.
  *
- * @module @deepseek-ai/dsh-session-telemetry/coordinator
+ * @module bake-session-telemetry/coordinator
  */
 
 import type { Context } from '@deepseek-ai/cordis'

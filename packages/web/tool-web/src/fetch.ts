@@ -11,7 +11,7 @@ import { gfm } from '@joplin/turndown-plugin-gfm'
 import { defineTool } from 'bake-tools'
 import type { GenericCallView, ToolResult, WebFetchResultView } from 'bake-tools'
 import type { WebFetchBody, WebFetchResult } from '@deepseek-ai/dsh-web'
-import { assertNever, type JsonValue } from '@deepseek-ai/dsh-util-values'
+import { assertNever, type JsonValue } from 'bake-util-values'
 import { EXTERNAL_WEB_CONTENT_NOTICE } from './trust.ts'
 
 /**

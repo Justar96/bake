@@ -3,8 +3,8 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Session, SessionEvent } from 'bake-session'
 import type { LlmFailure } from '@deepseek-ai/dsh-llm'
-import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
-import type { InvariantFailure, InvariantInstaller } from '@deepseek-ai/dsh-invariants'
+import { MAX_TIMER_DELAY_MS } from 'bake-timeout'
+import type { InvariantFailure, InvariantInstaller } from 'bake-invariants'
 import { providerForOpenStep } from './history.ts'
 import type {} from './index.ts'
 

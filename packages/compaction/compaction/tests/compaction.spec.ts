@@ -6,12 +6,12 @@ import {
   CompactionEngine,
   compactCheckpointSource,
   isCompactCheckpointSource,
-} from '@deepseek-ai/dsh-compaction'
-import type { CompactionResult, CompactionTrigger } from '@deepseek-ai/dsh-compaction'
+} from 'bake-compaction'
+import type { CompactionResult, CompactionTrigger } from 'bake-compaction'
 import { Session, SessionId } from 'bake-session'
 import type { SessionSeq } from 'bake-session'
-import type { CompactionAgentContext } from '@deepseek-ai/dsh-compaction'
-import type { ManualCompactAgentContext } from '@deepseek-ai/dsh-compaction'
+import type { CompactionAgentContext } from 'bake-compaction'
+import type { ManualCompactAgentContext } from 'bake-compaction'
 
 /**
  * A trivial concrete CompactionEngine implementing the abstract contract. The

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import BasicCompactionEngine from '@deepseek-ai/dsh-compaction-basic'
 import type { BasicCompactionConfig } from '@deepseek-ai/dsh-compaction-basic'
-import { compactCheckpointSource, CompactionId } from '@deepseek-ai/dsh-compaction'
+import { compactCheckpointSource, CompactionId } from 'bake-compaction'
 import {
   collectCheckpointContext,
   formatCheckpointContext,

@@ -7,7 +7,7 @@ import SessionPersistence, {
   SessionPersistenceNotFoundError,
   SessionPersistenceRevision,
   SessionReadOnlyError,
-} from '@deepseek-ai/dsh-session-persistence'
+} from 'bake-session-persistence'
 import type {
   SessionAccess,
   SessionHandle,
@@ -15,7 +15,7 @@ import type {
   SessionHandleReadResult,
   SessionPersistenceSnapshot,
   SessionPersistenceStatOptions,
-} from '@deepseek-ai/dsh-session-persistence'
+} from 'bake-session-persistence'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { describe, expect, it, vi } from 'vitest'
 import { SessionObservationReader } from '../src/observation.ts'

@@ -55,6 +55,6 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
-    "@deepseek-ai/dsh-typert-protocol": "workspace:^"
+    "bake-typert-protocol": "workspace:^"
   }
 }

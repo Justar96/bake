@@ -15,8 +15,8 @@ import type { AuthContext, Credential, CredentialInfo, CredentialStore } from '@
 import type { Context } from '@deepseek-ai/cordis'
 import {
   credentialKey, credentialKeyId, credentialKeyScope, credentialRef, isCredentialKeySegment, isCredentialRefName,
-} from '@deepseek-ai/dsh-credentials'
-import type { CredentialKey, CredentialProvider, CredentialRecord } from '@deepseek-ai/dsh-credentials'
+} from 'bake-credentials'
+import type { CredentialKey, CredentialProvider, CredentialRecord } from 'bake-credentials'
 import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 import { LlmError } from '@deepseek-ai/dsh-llm'
 

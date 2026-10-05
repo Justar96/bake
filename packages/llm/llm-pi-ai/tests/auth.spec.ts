@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import LocalCredentialProvider from '@deepseek-ai/dsh-credentials-local'
-import { credentialKey, credentialRef } from '@deepseek-ai/dsh-credentials'
+import { credentialKey, credentialRef } from 'bake-credentials'
 import { authContextFrom, credentialStoreFrom, recordKeyFor } from '../src/auth.ts'
 
 const CODEX = recordKeyFor('openai-codex')

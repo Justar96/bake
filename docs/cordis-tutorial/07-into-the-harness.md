@@ -8,7 +8,7 @@ Create `greet-tool.ts` in `tmp/cordis-tutorial`:
 
 ```ts
 import type { Context } from '@deepseek-ai/cordis'
-import { brandString } from '@deepseek-ai/dsh-brand'
+import { brandString } from 'bake-brand'
 import { defineTool } from 'bake-tools'
 import type { ToolCallId } from '@deepseek-ai/dsh-llm'
 

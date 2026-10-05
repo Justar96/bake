@@ -9,7 +9,7 @@ import type {
   SubagentRunInfo,
 } from '@deepseek-ai/dsh-subagent'
 import * as SubagentInvariant from '@deepseek-ai/dsh-subagent/invariant'
-import InvariantRegistry from '@deepseek-ai/dsh-invariants'
+import InvariantRegistry from 'bake-invariants'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 
 async function setup(): Promise<Context> {

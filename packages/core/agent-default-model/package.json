@@ -32,13 +32,13 @@
   "peerDependencies": {
     "bake-agent": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
-    "@deepseek-ai/dsh-settings": "workspace:^",
+    "bake-settings": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   },
   "devDependencies": {
     "bake-agent": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
-    "@deepseek-ai/dsh-settings": "workspace:^",
+    "bake-settings": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   }
 }

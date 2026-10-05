@@ -7,8 +7,8 @@ import CommandRuntime from '@deepseek-ai/dsh-commands'
 import SessionStore, { foldSurface, Session, SessionId } from 'bake-session'
 import * as commandFeedback from '@deepseek-ai/dsh-command-feedback'
 import type { FeedbackRecord } from '@deepseek-ai/dsh-command-feedback/types'
-import { remoteMethods } from '@deepseek-ai/dsh-typert-protocol'
-import { unsupportedInbox } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { remoteMethods } from 'bake-typert-protocol'
+import { unsupportedInbox } from 'bake-agent-loop-testkit'
 
 const { USER_ID, getOrCreateAnonymousUserId } = vi.hoisted(() => {
   const USER_ID = '01234567-89ab-4cde-8f01-23456789abcd'
@@ -17,7 +17,7 @@ const { USER_ID, getOrCreateAnonymousUserId } = vi.hoisted(() => {
 
 const LOCAL = commandFeedback.sharingNotice(undefined)
 
-vi.mock('@deepseek-ai/dsh-anonymous-user-id', () => ({
+vi.mock('bake-anonymous-user-id', () => ({
   getOrCreateAnonymousUserId,
 }))
 

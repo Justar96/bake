@@ -15,7 +15,7 @@ import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
 import z from '@deepseek-ai/schemastery'
-import { type SettingsScope } from '@deepseek-ai/dsh-settings'
+import { type SettingsScope } from 'bake-settings'
 import FileSettingsProvider from '../src/index.ts'
 
 interface ThemeConfig {

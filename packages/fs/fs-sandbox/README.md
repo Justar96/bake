@@ -86,7 +86,7 @@ The residual resolve-to-syscall TOCTOU is narrowed by re-canonicalizing immediat
 Read these pages when the package-level contract is not enough. They move from this backend to the shared policy home and the confinement decisions behind it.
 
 - [Filesystem subsystem](../../../docs/subsystems/filesystem.md) — exhaustive provider contract, policy events, and error taxonomy.
-- [dsh-fs](../fs/README.md) — the `ctx.fs` contract this backend implements.
+- [bake-fs](../fs/README.md) — the `ctx.fs` contract this backend implements.
 - [fs-local](../fs-local/README.md) — the local backend this one extends.
 - [sandbox-policy](../../sandbox/sandbox-policy/README.md) — the shared per-session policy resolver this backend requires.
 - [Process sandbox subsystem](../../../docs/subsystems/sandbox.md) — modes, per-call policy, and fail-closed errors.

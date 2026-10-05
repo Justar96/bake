@@ -9,7 +9,7 @@ The owner is a Host-side Cordis service: extend `TypertRemoteService` so the ser
 ```ts
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from 'bake-agent'
-import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
+import { Remote, TypertRemoteService } from 'bake-typert-protocol'
 
 /** One stored note as a Client reads it. */
 export interface NoteRow {
@@ -58,9 +58,9 @@ A code reads `<domain>/<reason>`, and its declaration has four placement rules:
 - A local failure that never crosses the wire stays out of the code table; express it with the caller's own type.
 
 ```ts
-import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
+import { RemoteError } from 'bake-typert-protocol'
 
-declare module '@deepseek-ai/dsh-typert-protocol' {
+declare module 'bake-typert-protocol' {
   interface RemoteErrorDetailsMap {
     /** No stored note carries that id. */
     'note/not-found': { readonly noteId: string }
@@ -95,8 +95,8 @@ export async function rename(noteId: string, title: string): Promise<void> {
     "./typert": { "types": "./lib/typert.host.d.ts", "default": "./lib/typert.host.js" },
     "./remote": { "types": "./lib/typert.remote-client.d.ts", "default": "./lib/typert.remote-client.js" }
   },
-  "peerDependencies": { "@deepseek-ai/dsh-typert-protocol": "workspace:^" },
-  "devDependencies": { "@deepseek-ai/dsh-typert-protocol": "workspace:^" }
+  "peerDependencies": { "bake-typert-protocol": "workspace:^" },
+  "devDependencies": { "bake-typert-protocol": "workspace:^" }
 }
 ```
 
@@ -149,7 +149,7 @@ export function hostLabel(): string {
 On the owner side, assert the code that was thrown: recover the failure with `remoteErrorOf` after catching, then compare `code` and the details fields you care about with `toMatchObject` — never deep-compare the error object with `toEqual`, and never assert `instanceof`.
 
 ```ts
-import { remoteErrorOf } from '@deepseek-ai/dsh-typert-protocol'
+import { remoteErrorOf } from 'bake-typert-protocol'
 import { expect, it } from 'vitest'
 
 declare function rename(noteId: string, title: string): Promise<void>

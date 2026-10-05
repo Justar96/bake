@@ -5,7 +5,7 @@
  * @module @deepseek-ai/dsh-ptc-runtime-codemode/output
  */
 
-import type { PtcJsonValue, PtcRunFailure, PtcRunResult } from '@deepseek-ai/dsh-ptc-runtime'
+import type { PtcJsonValue, PtcRunFailure, PtcRunResult } from 'bake-ptc-runtime'
 
 /** JSON's two-character escapes for control characters; every other control character takes six. */
 const SHORT_ESCAPES = new Set([0x08, 0x09, 0x0a, 0x0c, 0x0d])

@@ -31,7 +31,7 @@
     "bake-agent": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
     "bake-session": "workspace:^",
-    "@deepseek-ai/dsh-session-persistence": "workspace:^",
+    "bake-session-persistence": "workspace:^",
     "bake-tools": "workspace:^"
   },
   "devDependencies": {
@@ -39,10 +39,10 @@
     "@deepseek-ai/cordis-plugin-loader": "workspace:^",
     "bake-agent": "workspace:^",
     "bake-agent-loop": "workspace:^",
-    "@deepseek-ai/dsh-agent-loop-testkit": "workspace:^",
+    "bake-agent-loop-testkit": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
     "bake-session": "workspace:^",
-    "@deepseek-ai/dsh-session-persistence": "workspace:^",
+    "bake-session-persistence": "workspace:^",
     "@deepseek-ai/dsh-session-persistence-jsonl": "workspace:^",
     "@deepseek-ai/dsh-session-projection": "workspace:^",
     "bake-system-prompt": "workspace:^",

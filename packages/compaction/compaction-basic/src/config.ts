@@ -5,7 +5,7 @@
  */
 
 import type { LlmCallConfig } from '@deepseek-ai/dsh-llm'
-import { deepFreeze } from '@deepseek-ai/dsh-util-values'
+import { deepFreeze } from 'bake-util-values'
 import type {
   BasicCompactionConfig,
   CompactionPolicyConfig,

@@ -55,8 +55,8 @@ import type {
   ResolvedRetryPolicy,
   StreamChunk,
 } from '@deepseek-ai/dsh-llm'
-import type { AttachmentStore, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
-import { idleWatchdog, timeoutOf } from '@deepseek-ai/dsh-timeout'
+import type { AttachmentStore, ImageAttachmentRef } from 'bake-attachment'
+import { idleWatchdog, timeoutOf } from 'bake-timeout'
 import { requestImageMaxDimensionFor } from './config.ts'
 import type { ResolvedPiAiProviderProfile } from './config.ts'
 import { toPiContext } from './context.ts'

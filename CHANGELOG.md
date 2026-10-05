@@ -6,6 +6,7 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 - Closing a terminal flushes the session and stops managed tools even when a terminal I/O error arrives before `SIGHUP`; that error no longer races shutdown through the fatal-exception handler.
 - Core workspace packages use `bake-<name>` names, including `bake-agent`, `bake-session`, and `bake-tools`. Custom plugins and profile rows that import these packages must use the new names; the core package README lists all eight. The workspace generators, dependency graphs, license checks, and terminal build support both Bake and retained upstream package names.
+- Internal workspace libraries, the 48 packages no profile loads by name, use `bake-<name>` names as well, for example `bake-fs`, `bake-session-format`, `bake-shell`, and `bake-util-values`. Custom plugins that import them must use the new names; plugin and bundle packages keep their `@deepseek-ai/dsh-<name>` names for now. Session logs, tool text, and other model-visible output are unchanged.
 
 ## [0.3.8] - 2026-10-05
 

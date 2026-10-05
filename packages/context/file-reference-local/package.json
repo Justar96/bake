@@ -36,14 +36,14 @@
   },
   "peerDependencies": {
     "bake-agent": "workspace:^",
-    "@deepseek-ai/dsh-file-reference": "workspace:^",
+    "bake-file-reference": "workspace:^",
     "bake-system-prompt": "workspace:^",
     "bake-tools": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   },
   "devDependencies": {
     "bake-agent": "workspace:^",
-    "@deepseek-ai/dsh-file-reference": "workspace:^",
+    "bake-file-reference": "workspace:^",
     "bake-system-prompt": "workspace:^",
     "bake-tools": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"

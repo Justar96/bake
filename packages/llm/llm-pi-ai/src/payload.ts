@@ -9,7 +9,7 @@
  */
 
 import type { PiAiMessagesWire, ResolvedPiAiProviderProfile } from './config.ts'
-import { isRecord } from '@deepseek-ai/dsh-util-values'
+import { isRecord } from 'bake-util-values'
 
 /**
  * Name of the never-callable deferred tool pi-ai declares beside native tool

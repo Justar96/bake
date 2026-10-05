@@ -3,7 +3,7 @@
 import { Readable } from 'node:stream'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { brandString } from '@deepseek-ai/dsh-brand'
+import { brandString } from 'bake-brand'
 import AgentRegistry from 'bake-agent'
 import type {
   Agent,
@@ -18,9 +18,9 @@ import SessionStore from 'bake-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import type { Session, SessionId, UserMessage } from 'bake-session'
 import { SESSION_IN_USE_EXIT } from '@deepseek-ai/dsh-cmdline'
-import { SessionAlreadyOwnedError } from '@deepseek-ai/dsh-session-persistence'
-import { SessionQueryError } from '@deepseek-ai/dsh-session-query'
-import { createInboxStub } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { SessionAlreadyOwnedError } from 'bake-session-persistence'
+import { SessionQueryError } from 'bake-session-query'
+import { createInboxStub } from 'bake-agent-loop-testkit'
 import { apply, Config } from '../src/index.ts'
 import { internals } from '../src/runner-internals.ts'
 

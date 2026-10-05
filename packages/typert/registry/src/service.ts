@@ -29,7 +29,7 @@ import type {
   TypertRegistryChange,
   TypertRegistryListener,
   TypertRegistryContract,
-} from '@deepseek-ai/dsh-typert-protocol'
+} from 'bake-typert-protocol'
 import type {
   TypertContribution,
   TypertFace,

@@ -1,7 +1,7 @@
 /** Package-owned scoped-dispatch invariants. @module bake-scope/invariant */
 
 import type { Context } from '@deepseek-ai/cordis'
-import type { InvariantInstaller } from '@deepseek-ai/dsh-invariants'
+import type { InvariantInstaller } from 'bake-invariants'
 import { carrierKeyOf, isScopeCarrier } from 'bake-scope'
 import { scopedSubjectResolverFor } from './scoped-events.generated.ts'
 

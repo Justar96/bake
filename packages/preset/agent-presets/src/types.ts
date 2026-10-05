@@ -33,7 +33,7 @@ export interface AgentPresetRoster {
   readonly modeSelectionEnabled: boolean
 }
 
-declare module '@deepseek-ai/dsh-typert-protocol' {
+declare module 'bake-typert-protocol' {
   interface RemoteErrorDetailsMap {
     /** No configured root supplies the requested id. */
     'agent-preset/not-found': { readonly agentPreset: string; readonly available: readonly string[] }

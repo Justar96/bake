@@ -36,24 +36,24 @@ Every directly consumed workspace package has an owning reference below. Type-on
 | `dsh-session` | [Session](../../packages/core/session/README.md) | Branded identity, committed events, durable header and sequence order |
 | `dsh-session-projection` | [Projections](../../packages/session/session-projection/README.md) | Read authoritative inbox and preset; subscribe without mutating values |
 | `dsh-permission-presets` | [Permissions](../../packages/interaction/permission-presets/README.md) | Typed `permissions` projection for the current session's access indicator |
-| `dsh-session-query` | [Query](../../packages/session-query/session-query/README.md) | Disposable consistent history observation |
-| `dsh-session-persistence` | [Persistence](../../packages/session/session-persistence/README.md) | Exact resume requires durable storage |
+| `bake-session-query` | [Query](../../packages/session-query/session-query/README.md) | Disposable consistent history observation |
+| `bake-session-persistence` | [Persistence](../../packages/session/session-persistence/README.md) | Exact resume requires durable storage |
 | `dsh-session-persistence-jsonl` | [JSONL](../../packages/session/session-persistence-jsonl/README.md) | Isolated durable integration fixtures and PTY comparison |
 | `dsh-llm` | [LLM](../../packages/llm/llm/README.md) | Identified user messages and streaming `BlockAssembler` |
-| `dsh-compaction` | [Compaction](../../packages/compaction/compaction/README.md) | Typed compaction marker; ignore replacement tool rows |
+| `bake-compaction` | [Compaction](../../packages/compaction/compaction/README.md) | Typed compaction marker; ignore replacement tool rows |
 | `dsh-commands` | [Commands](../../packages/interaction/commands/README.md) | Parse and execute registered commands; preserve durable command output |
 | `dsh-user-approval` | [Approval](../../packages/interaction/user-approval/README.md) | Scoped single-use decisions and cancellation |
 | `dsh-user-questions` | [Questions](../../packages/interaction/user-questions/README.md) | Exact question ids, labels, custom answers, and complete plan detail |
 | `dsh-authorization` | [Authorization](../../packages/credentials/authorization/README.md) | List flows, present prompts, pass command cancellation |
-| `dsh-credentials` | [Credentials](../../packages/credentials/credentials/README.md) | Describe configured/writable references and store secret values |
+| `bake-credentials` | [Credentials](../../packages/credentials/credentials/README.md) | Describe configured/writable references and store secret values |
 | `dsh-cmdline` | [Command line](../../packages/boot/cmdline/README.md) | Parse flags and use the launcher-owned exit callback |
-| `dsh-file-reference` | [Reference service and grammar](../../packages/context/file-reference/README.md) | Cancellable scoped discovery; pure token detection and canonical mention formatting |
+| `bake-file-reference` | [Reference service and grammar](../../packages/context/file-reference/README.md) | Cancellable scoped discovery; pure token detection and canonical mention formatting |
 | `dsh-file-reference-local` | [Local provider](../../packages/context/file-reference-local/README.md) | Profile composition supplies workspace path search and model guidance |
-| `dsh-fs` | [Filesystem](../../packages/fs/fs/README.md) | Resolve the actual process workspace path |
-| `dsh-util-values` | [Value utilities](../../packages/util/values/README.md) | Exhaustive terminal row rendering with `assertNever` |
-| `dsh-brand` | [Brands](../../packages/util/brand/README.md) | Preserve opaque Session ids |
+| `bake-fs` | [Filesystem](../../packages/fs/fs/README.md) | Resolve the actual process workspace path |
+| `bake-util-values` | [Value utilities](../../packages/util/values/README.md) | Exhaustive terminal row rendering with `assertNever` |
+| `bake-brand` | [Brands](../../packages/util/brand/README.md) | Preserve opaque Session ids |
 | `dsh-agent-loop` | [Agent loop](../../packages/core/agent-loop/README.md) | Real loop in integration tests |
-| `dsh-agent-loop-testkit` | [Loop test support](../../packages/test-support/agent-loop-testkit/README.md) | Compose isolated real loop dependencies |
+| `bake-agent-loop-testkit` | [Loop test support](../../packages/test-support/agent-loop-testkit/README.md) | Compose isolated real loop dependencies |
 | `dsh-llm-replay` | [Recorded replay](../../packages/test-support/llm-replay/README.md) | Restore the shared Session fixture and replay through the built profile |
 | `@dsh-tui/ui` | [Presentation](packages/ui/README.md) | Pure typed terminal components and event projection |
 

@@ -15,7 +15,7 @@ import { defineTool } from 'bake-tools'
 import type { Agent, AgentOptions } from 'bake-agent'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, LlmCallConfig } from '@deepseek-ai/dsh-llm'
-import type { JsonValue } from '@deepseek-ai/dsh-util-values'
+import type { JsonValue } from 'bake-util-values'
 import { SessionSeq } from 'bake-session'
 import type { Session, SessionId } from 'bake-session'
 import {
@@ -24,7 +24,7 @@ import {
   settleRun,
 } from '@deepseek-ai/dsh-subagent'
 import type { SubagentProvider, SubagentResult, SubagentRun } from '@deepseek-ai/dsh-subagent'
-import type { JobOutcome } from '@deepseek-ai/dsh-jobs'
+import type { JobOutcome } from 'bake-jobs'
 import {
   assertAllowedModelSelection,
   hasConfiguredLlmSelection,

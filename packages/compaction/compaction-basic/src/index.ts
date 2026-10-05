@@ -29,15 +29,15 @@
 
 import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { CompactionEngine, ManualCompactionError } from '@deepseek-ai/dsh-compaction'
-import type { CompactionResult, CompactionTrigger } from '@deepseek-ai/dsh-compaction'
+import { CompactionEngine, ManualCompactionError } from 'bake-compaction'
+import type { CompactionResult, CompactionTrigger } from 'bake-compaction'
 import type { Session, SessionSeq } from 'bake-session'
 import { CONTEXT_WINDOW_EXCEEDED_CODE } from '@deepseek-ai/dsh-llm'
 import type { LlmCallConfig } from '@deepseek-ai/dsh-llm'
-import { assertNever } from '@deepseek-ai/dsh-util-values'
+import { assertNever } from 'bake-util-values'
 import type { Agent, PreStepDecision } from 'bake-agent'
 import type { CommandId } from '@deepseek-ai/dsh-commands/brand'
-import type {} from '@deepseek-ai/dsh-settings'
+import type {} from 'bake-settings'
 // Type-only: makes the optional sibling service available to `ctx.get()`.
 import type {} from '@deepseek-ai/dsh-compaction-tool-result-pruner'
 import {

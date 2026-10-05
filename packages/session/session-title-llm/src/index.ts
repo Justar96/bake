@@ -1,15 +1,15 @@
 /**
  * Shared route, framing, timeout, assembly, and validation policy for
  * model-backed session-title providers.
- * @module @deepseek-ai/dsh-session-title-llm
+ * @module bake-session-title-llm
  */
 
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { createUserMessage, BlockAssembler } from '@deepseek-ai/dsh-llm'
 import type { FinishReason, GenerateOptions, Message } from '@deepseek-ai/dsh-llm'
-import { deadline, MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
-import { assertPositiveInteger, deepFreeze } from '@deepseek-ai/dsh-util-values'
+import { deadline, MAX_TIMER_DELAY_MS } from 'bake-timeout'
+import { assertPositiveInteger, deepFreeze } from 'bake-util-values'
 import type { SessionSeq } from 'bake-session'
 import {
   normalizeSessionTitle,

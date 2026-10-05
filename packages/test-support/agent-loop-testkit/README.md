@@ -3,11 +3,11 @@ description: "Prerequisite mounting, production AgentLoop drivers, and explicit 
 kind: "package-library"
 ---
 
-# @deepseek-ai/dsh-agent-loop-testkit
+# bake-agent-loop-testkit
 
 ## Summary
 
-Use `dsh-agent-loop-testkit` to give AgentLoop tests the standard prerequisites and a production loop driver without repeating setup. The harness creates real Agents and exposes Inbox input claiming for tests of durable events, recovery, notifications, and claim behavior. For consumer tests that need only queue editing, choose the process-local Inbox stub; choose the fail-fast Inbox when pending input must never be touched. Tests still own adapters, optional plugins, load order, and context disposal, and the package adds no model-visible behavior.
+Use `bake-agent-loop-testkit` to give AgentLoop tests the standard prerequisites and a production loop driver without repeating setup. The harness creates real Agents and exposes Inbox input claiming for tests of durable events, recovery, notifications, and claim behavior. For consumer tests that need only queue editing, choose the process-local Inbox stub; choose the fail-fast Inbox when pending input must never be touched. Tests still own adapters, optional plugins, load order, and context disposal, and the package adds no model-visible behavior.
 
 ## Table of Contents
 
@@ -35,7 +35,7 @@ import { SessionId, type UserMessage } from 'bake-session'
 import {
   mountAgentLoopTestDependencies,
   mountAgentLoopTestHarness,
-} from '@deepseek-ai/dsh-agent-loop-testkit'
+} from 'bake-agent-loop-testkit'
 
 const ctx = new Context()
 
@@ -56,7 +56,7 @@ The dependency helper forwards system-prompt and tool-registry configuration thr
 Use `createInboxStub()` when the test subject needs mutable pending lists but does not exercise durability, projection validation, live Inbox notifications, or the driver's claim policy. The stub implements the public queue operations with two process-local arrays and never writes to a Session. Use `unsupportedInbox()` when the test subject must not touch pending input; every mutation throws at the first unexpected dependency.
 
 ```ts
-import { createInboxStub } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { createInboxStub } from 'bake-agent-loop-testkit'
 
 const agent = {
   // ...

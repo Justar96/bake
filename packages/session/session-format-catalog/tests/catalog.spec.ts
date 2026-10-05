@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { SessionFormatEvent } from '@deepseek-ai/dsh-session-format'
+import type { SessionFormatEvent } from 'bake-session-format'
 import { sessionFormatCatalog } from '../src/index.ts'
 import { currentSessionMessageProjections } from '../src/message-projections.ts'
 import { MESSAGE_PROJECTION_EVENT_TYPES } from 'bake-session/src/known-event-types.ts'

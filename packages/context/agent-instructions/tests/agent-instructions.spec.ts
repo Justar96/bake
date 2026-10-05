@@ -10,7 +10,7 @@ import SessionStore, { SessionId, SessionSeq, type SessionEvent, type SurfaceInt
 import AgentRegistry, { agentEvents, type Agent } from 'bake-agent'
 import AgentLoop, { turnBoundaryProjectionDefinition } from 'bake-agent-loop'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import { FileSystem, FsTargetKey, FsVersion } from '@deepseek-ai/dsh-fs'
+import { FileSystem, FsTargetKey, FsVersion } from 'bake-fs'
 import type {
   FsDirEntry,
   FsEditOutcome,
@@ -20,7 +20,7 @@ import type {
   FsTarget,
   FsWriteIntent,
   FsWriteOutcome,
-} from '@deepseek-ai/dsh-fs'
+} from 'bake-fs'
 import LocalFileSystem from '@deepseek-ai/dsh-fs-local'
 import SystemPrompt from 'bake-system-prompt'
 import ToolRuntime, { defineContentToolFixture } from 'bake-tools'
@@ -46,7 +46,7 @@ import { MockAdapter, textResponse, toolCallResponse } from '../../../core/agent
 import {
   mountAgentLoopTestDependencies,
   mountAgentLoopTestHarness,
-} from '@deepseek-ai/dsh-agent-loop-testkit'
+} from 'bake-agent-loop-testkit'
 
 /** Per-candidate reconciliation scope key: directory paired with the file name. */
 const sk = (directory: string, candidateName: string): string => candidateScopeKey(directory, candidateName)

@@ -10,7 +10,7 @@
  * @module @deepseek-ai/dsh-goal/types
  */
 
-import type { Branded } from '@deepseek-ai/dsh-brand'
+import type { Branded } from 'bake-brand'
 import type { SessionId } from 'bake-session/types'
 
 /** Identifies one goal across its durable revisions. */

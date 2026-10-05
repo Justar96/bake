@@ -38,17 +38,17 @@
   "license": "MIT",
   "peerDependencies": {
     "bake-agent": "workspace:^",
-    "@deepseek-ai/dsh-invariants": "workspace:^",
+    "bake-invariants": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
     "bake-session": "workspace:^",
     "@deepseek-ai/dsh-session-projection": "workspace:^",
     "bake-scope": "workspace:^",
-    "@deepseek-ai/dsh-settings": "workspace:^",
+    "bake-settings": "workspace:^",
     "@deepseek-ai/dsh-subagent": "workspace:^",
-    "@deepseek-ai/dsh-jobs": "workspace:^",
+    "bake-jobs": "workspace:^",
     "bake-tools": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^",
-    "@deepseek-ai/dsh-credentials": "workspace:^"
+    "bake-credentials": "workspace:^"
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "workspace:^",
@@ -57,22 +57,22 @@
   "devDependencies": {
     "@deepseek-ai/cordis-plugin-loader": "workspace:^",
     "bake-agent": "workspace:^",
-    "@deepseek-ai/dsh-invariants": "workspace:^",
+    "bake-invariants": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
     "bake-session": "workspace:^",
     "bake-scope": "workspace:^",
-    "@deepseek-ai/dsh-session-persistence": "workspace:^",
+    "bake-session-persistence": "workspace:^",
     "@deepseek-ai/dsh-session-persistence-jsonl": "workspace:^",
-    "@deepseek-ai/dsh-settings": "workspace:^",
+    "bake-settings": "workspace:^",
     "@deepseek-ai/dsh-subagent": "workspace:^",
     "@deepseek-ai/dsh-subagent-spawn-in-process": "workspace:^",
     "bake-system-prompt": "workspace:^",
-    "@deepseek-ai/dsh-jobs": "workspace:^",
+    "bake-jobs": "workspace:^",
     "@deepseek-ai/dsh-jobs-local": "workspace:^",
     "@deepseek-ai/dsh-tool-jobs": "workspace:^",
     "bake-tools": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^",
     "@deepseek-ai/dsh-session-projection": "workspace:^",
-    "@deepseek-ai/dsh-credentials": "workspace:^"
+    "bake-credentials": "workspace:^"
   }
 }

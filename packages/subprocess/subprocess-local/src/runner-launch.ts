@@ -5,10 +5,10 @@ import { accessSync, constants as fsConstants, lstatSync, statSync } from 'node:
 import { extname, isAbsolute } from 'node:path'
 import { inspect } from 'node:util'
 import { fileURLToPath } from 'node:url'
-import type { SubprocessSpawnSpec } from '@deepseek-ai/dsh-subprocess'
+import type { SubprocessSpawnSpec } from 'bake-subprocess'
 import { childEnv } from './spawn.ts'
 import { controlEnvironment } from './control-spawn.ts'
-import { SUBPROCESS_CONTROL_FD } from '@deepseek-ai/dsh-subprocess/control'
+import { SUBPROCESS_CONTROL_FD } from 'bake-subprocess/control'
 
 /** The one private environment variable consumed before target state is restored. */
 export const SUBPROCESS_RUNNER_ENV = 'DSH_SUBPROCESS_RUNNER' as const

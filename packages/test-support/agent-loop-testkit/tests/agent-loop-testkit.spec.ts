@@ -14,7 +14,7 @@ function message(text: string) {
   return createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } })
 }
 
-describe('dsh-agent-loop-testkit', () => {
+describe('bake-agent-loop-testkit', () => {
   it('rejects mutations through an unsupported Agent stub Inbox', () => {
     const inbox = unsupportedInbox()
 

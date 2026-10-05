@@ -8,13 +8,13 @@
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import { isAbsolute } from 'node:path'
-import { brandString } from '@deepseek-ai/dsh-brand'
-import { assertNever, deepFreeze, snapshotJsonValue } from '@deepseek-ai/dsh-util-values'
+import { brandString } from 'bake-brand'
+import { assertNever, deepFreeze, snapshotJsonValue } from 'bake-util-values'
 import { scopeOf, scopeTarget } from 'bake-scope'
 import type { Scoped } from 'bake-scope'
 import type { Message, ToolHistory } from '@deepseek-ai/dsh-llm'
 import { SESSION_FORMAT_VERSION, SessionLogOffset, SessionSeq } from './types.ts'
-import type { TypertLookup } from '@deepseek-ai/dsh-typert-protocol'
+import type { TypertLookup } from 'bake-typert-protocol'
 import type { CreateSessionOptions, EpochHeader, PrepareSessionOptions, RequestContext, SessionEvent, SessionEventMap, SessionEventType, SessionHeader, SessionId, SessionSeedEventState, SurfaceIntent, SurfaceEventType } from './types.ts'
 import { SurfaceManager, validateSessionEventData, validateSurfaceMetadata } from './surface.ts'
 import type { SessionSurface, SessionMessageProjection } from './surface.ts'
@@ -83,7 +83,7 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
-declare module '@deepseek-ai/dsh-typert-protocol' {
+declare module 'bake-typert-protocol' {
   interface TypertLookupMap {
     session: TypertLookup<Session, SessionId>
   }

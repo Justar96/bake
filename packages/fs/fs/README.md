@@ -3,11 +3,11 @@ description: "The ctx.fs filesystem service contract for deployments choosing or
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-fs
+# bake-fs
 
 ## Summary
 
-Use `dsh-fs` when an application needs consistent filesystem operations across host, confined, or remote execution environments. It lets consumers resolve stable file identities, map shared host files where supported, perform bounded text and byte reads, list directories, and apply atomic text writes and literal edits. Version guards are optional, so a backend works without policy enforcement; callers can supply a guard to reject a mutation after the file changes. Choose `fs-local` or `fs-sandbox` for host execution. Model-facing filesystem tools are provided separately by `dsh-tool-fs`.
+Use `bake-fs` when an application needs consistent filesystem operations across host, confined, or remote execution environments. It lets consumers resolve stable file identities, map shared host files where supported, perform bounded text and byte reads, list directories, and apply atomic text writes and literal edits. Version guards are optional, so a backend works without policy enforcement; callers can supply a guard to reject a mutation after the file changes. Choose `fs-local` or `fs-sandbox` for host execution. Model-facing filesystem tools are provided separately by `dsh-tool-fs`.
 
 ## Table of Contents
 
@@ -23,7 +23,7 @@ Use `dsh-fs` when an application needs consistent filesystem operations across h
 <a id="use-this-package"></a>
 ## Use this package
 
-You rarely load `dsh-fs` directly: you mount a backend that registers as `ctx.fs`, then either call the service from your own plugin or let the `dsh-tool-fs` tools call it for you. This page serves the two audiences that do touch it — deployments choosing a backend, and developers implementing or consuming the contract.
+You rarely load `bake-fs` directly: you mount a backend that registers as `ctx.fs`, then either call the service from your own plugin or let the `dsh-tool-fs` tools call it for you. This page serves the two audiences that do touch it — deployments choosing a backend, and developers implementing or consuming the contract.
 
 ### Choosing and mounting a backend
 
@@ -65,7 +65,7 @@ Every ordinary operation starts with `resolve(path, { cwd })`, which produces a 
 
 ### The `fs/*` policy events
 
-The package declares three events so the emitter (`dsh-tool-fs`) and the policy listener (`dsh-fs-observation-policy`) share a vocabulary without the emitter depending on the policy plugin. `fs/write-intent` and `fs/edit-intent` are single-slot decision waterfalls: the first listener decides outright and never calls `next()`. `fs/observed` is a fire-and-forget recording event carrying an `FsObservation` — present with a version, or confirmed absent. The events carry only `dsh-fs` vocabulary plus an opaque `object` actor.
+The package declares three events so the emitter (`dsh-tool-fs`) and the policy listener (`dsh-fs-observation-policy`) share a vocabulary without the emitter depending on the policy plugin. `fs/write-intent` and `fs/edit-intent` are single-slot decision waterfalls: the first listener decides outright and never calls `next()`. `fs/observed` is a fire-and-forget recording event carrying an `FsObservation` — present with a version, or confirmed absent. The events carry only `bake-fs` vocabulary plus an opaque `object` actor.
 
 ### Invariants
 

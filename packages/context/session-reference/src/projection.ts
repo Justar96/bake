@@ -1,9 +1,9 @@
 /** Current-surface projection and byte-bounded rendering. */
 
-import { isCompactCheckpointSource } from '@deepseek-ai/dsh-compaction'
-import type { SessionSurfaceSnapshot } from '@deepseek-ai/dsh-session-query'
-import { TextRetainer } from '@deepseek-ai/dsh-output-retention'
-import { assertNever } from '@deepseek-ai/dsh-util-values'
+import { isCompactCheckpointSource } from 'bake-compaction'
+import type { SessionSurfaceSnapshot } from 'bake-session-query'
+import { TextRetainer } from 'bake-output-retention'
+import { assertNever } from 'bake-util-values'
 import { SessionSeq } from 'bake-session'
 import type { OptionalSessionSeq, SessionId } from 'bake-session'
 import { stringifyTagSafeJson } from './serialization.ts'

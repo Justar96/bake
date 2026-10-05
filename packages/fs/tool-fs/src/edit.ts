@@ -9,7 +9,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from 'bake-tools'
 import type { DiffCallView, DiffResultView, ToolResult } from 'bake-tools'
-import type { FsEditBasis, FsEditRequest } from '@deepseek-ai/dsh-fs'
+import type { FsEditBasis, FsEditRequest } from 'bake-fs'
 import { computeHunkDiffs, diffsFromMeta } from './diff.ts'
 import { remediateFsError } from './error.ts'
 import { sessionResolveOptions } from './session-cwd.ts'

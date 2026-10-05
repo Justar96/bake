@@ -19,7 +19,7 @@
  */
 
 import type { Session } from 'bake-session'
-import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
+import type { SandboxMode } from 'bake-sandbox'
 
 declare module 'bake-session/types' {
   interface SessionEventMap {

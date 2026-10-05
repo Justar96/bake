@@ -23,8 +23,8 @@ import {
   SessionAlreadyExistsError,
   SessionAlreadyOwnedError,
   SessionPersistenceNotFoundError,
-} from '@deepseek-ai/dsh-session-persistence'
-import type { SessionHandle, SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
+} from 'bake-session-persistence'
+import type { SessionHandle, SessionPersistence } from 'bake-session-persistence'
 import JsonlSessionPersistence from '../src/index.ts'
 import { LEASE_FILENAME, SessionWriteLease } from '../src/lease.ts'
 import { LIVE_WRITE_BATCH_MAX_DELAY_MS, type JsonlSessionHandle } from '../src/storage.ts'
