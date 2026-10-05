@@ -21,7 +21,7 @@ bun run start
 
 `bun install` also installs the Lefthook Git hooks. `start` runs the existing build output without rebuilding; it needs an interactive terminal. `bun run start --help` prints the TUI flags without starting a session.
 
-Source runs use the same home as an installed `bake`: `~/.bake`, or the directory in `DSH_HOME`. An override selects that directory's existing profiles and sessions, not only its credentials. Existing `~/.dsh` data is never moved or changed.
+Source runs use the same home as an installed `bake`: `~/.bake`, or the directory in `BAKE_HOME`. An override selects that directory's existing profiles and sessions, not only its credentials. Existing `~/.dsh` data is never moved or changed.
 
 For real model requests, sign in with `/login` or set `DEEPSEEK_API_KEY` in the environment or in a gitignored `.env` at the repository root. To use another DeepSeek endpoint, set `baseURL` on the `deepseek-official` route under `llm-pi-ai` in `settings.yaml`, as the [model configuration guide](user/guide/providers.md) shows. Never commit keys or `.env`.
 

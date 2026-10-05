@@ -230,11 +230,14 @@ describe('the Windows pointer', () => {
 
   it('starts Node with report and diagnostic flags, after creating the diagnostics directory', () => {
     const lines = windowsLauncher('C:\\Program Files\\Bake').split('\r\n')
-    const flags = 'node --report-exclude-env --report-exclude-network "--diagnostic-dir=%DSH_HOME%\\diagnostics" "%BAKE_CLI%"'
+    const flags = 'node --report-exclude-env --report-exclude-network "--diagnostic-dir=%BAKE_HOME%\\diagnostics" "%BAKE_CLI%"'
     expect(lines.filter(line => line.startsWith('node '))).toEqual([`${flags} --profile tui %*`, `${flags} %*`])
-    const home = lines.indexOf('if not defined DSH_HOME set "DSH_HOME=%USERPROFILE%\\.bake"')
-    const create = lines.indexOf('if not exist "%DSH_HOME%\\diagnostics\\" mkdir "%DSH_HOME%\\diagnostics" 2>nul')
-    expect(home).toBeGreaterThan(-1)
+    const legacy = lines.indexOf('if not defined BAKE_HOME if defined DSH_HOME set "BAKE_HOME=%DSH_HOME%"')
+    const home = lines.indexOf('if not defined BAKE_HOME set "BAKE_HOME=%USERPROFILE%\\.bake"')
+    const create = lines.indexOf('if not exist "%BAKE_HOME%\\diagnostics\\" mkdir "%BAKE_HOME%\\diagnostics" 2>nul')
+    expect(legacy).toBeGreaterThan(-1)
+    expect(home).toBeGreaterThan(legacy)
+    expect(lines).toContain('set "DSH_HOME=%BAKE_HOME%"')
     expect(create).toBeGreaterThan(home)
     expect(lines.findIndex(line => line.startsWith('node '))).toBeGreaterThan(create)
     expect(lines.some(line => line.includes('NODE_OPTIONS'))).toBe(false)

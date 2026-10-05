@@ -656,8 +656,8 @@ class Run {
     this.overlay = join(root, 'replay.patch.yml')
     mkdirSync(this.workspace, { recursive: true })
     // `Bun.Terminal` does not export TERM to the child, so the environment names the terminal.
-    this.env = { ...process.env as Record<string, string>, DSH_HOME: this.home,
-                 DSH_AGENTS_HOME: join(root, 'agents'), TERM: 'xterm-256color', NO_COLOR: '1' }
+    this.env = { ...process.env as Record<string, string>, BAKE_HOME: this.home, DSH_HOME: this.home,
+                 BAKE_AGENTS_HOME: join(root, 'agents'), DSH_AGENTS_HOME: join(root, 'agents'), TERM: 'xterm-256color', NO_COLOR: '1' }
     // Replay must not pick up a developer's provider key; CI detection stays intact.
     delete this.env.DEEPSEEK_API_KEY
     delete this.env.CLIPROXYAPI_API_KEY
@@ -1177,8 +1177,8 @@ scenario('thinking', 'selected and provider-default thinking levels follow model
 
 scenario('permissions', 'workspace-write default, the access mode where a session opens, command feedback at narrow widths, and durable session selection', { replayOnly: true },
   async run => {
-    const override = run.env.DSH_PERMISSION_MODE
-    delete run.env.DSH_PERMISSION_MODE
+    const overrides = { BAKE_PERMISSION_MODE: run.env.BAKE_PERMISSION_MODE, DSH_PERMISSION_MODE: run.env.DSH_PERMISSION_MODE }
+    for (const name of Object.keys(overrides)) Reflect.deleteProperty(run.env, name)
     const access = dictionaries.en.permission
     /**
      * Drive one terminal. `opened` finds the mode where the session opens, in
@@ -1237,13 +1237,15 @@ scenario('permissions', 'workspace-write default, the access mode where a sessio
       for (const record of [await events(path), fresh]) {
         assert(!record.some(e => e.type === 'request/header'), 'permission commands unexpectedly called the model')
       }
-      run.env.DSH_PERMISSION_MODE = 'read-only'
+      run.env.BAKE_PERMISSION_MODE = 'read-only'
       await run.terminal('permissions-override', [], tty => inspect(tty, async ({ opened }) => {
         await opened('read-only')
       }))
     } finally {
-      if (override === undefined) delete run.env.DSH_PERMISSION_MODE
-      else run.env.DSH_PERMISSION_MODE = override
+      for (const [name, value] of Object.entries(overrides)) {
+        if (value === undefined) Reflect.deleteProperty(run.env, name)
+        else run.env[name] = value
+      }
     }
   })
 
@@ -3850,7 +3852,7 @@ async function main(): Promise<void> {
       + '  --only NAME       run this scenario and its prerequisites; repeatable\n'
       + '  --list            print the scenarios and exit\n'
       + '  --trace           print each step to stderr as it is satisfied\n'
-      + '  --keep-home       keep the temporary DSH_HOME and workspace for inspection\n'
+      + '  --keep-home       keep the temporary BAKE_HOME and workspace for inspection\n'
       + '  --step-timeout N  how long one step may take (default: 30)\n'
       + '  --budget N        how long one terminal may take (default: 120)\n'
       + '  [node]            the node binary to run the product with (default: node)\n')

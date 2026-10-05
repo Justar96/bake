@@ -53,7 +53,7 @@ bake
 
 Bake has no default provider: sign in with `/login` (DeepSeek, CLIProxyAPI, OpenAI, Anthropic, GitHub Copilot, OpenRouter, Kimi, or xAI), and the first sign-in selects its model. An exported `DEEPSEEK_API_KEY` counts as signed in; choose its model with `/model`. Type `/` to browse commands, `/help` for the list, and `@` to reference a file. `/settings` changes the screen mode, the default model and permissions, compaction, and tool limits. `bake --help` shows the launch options, such as `--resume <id>`.
 
-Bake keeps sessions, credentials, and profiles in `~/.bake`. Set `DSH_HOME` to use a different directory.
+Bake keeps sessions, credentials, and profiles in `~/.bake`. Set `BAKE_HOME` to use a different directory; the earlier `DSH_HOME` name still works when `BAKE_HOME` is unset, as does each `DSH_` spelling of a `BAKE_` setting.
 
 ## Update
 

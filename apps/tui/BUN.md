@@ -29,7 +29,7 @@ bun run start
 ./tui/scripts/tui.ts perf --workload fresh --workload typical --samples 3 --output /tmp/bake-bun-native-production.json
 ```
 
-The [development guide](../../CONTRIBUTING.md) owns the build/run workflow. `start` uses existing artifacts; `dev:tui` rebuilds the workspace before starting the agent. Bake's profile commands use `~/.bake` unless `DSH_HOME` is set. `dev` runs the separate hot component preview. The performance command accepts `--mode development` for a controlled baseline; it uses the same bundler and inputs. Production compilation reduces bundle size and development-renderer work. It does not bound the allocations required to render a complete history; the large-history failure remains recorded in the performance report.
+The [development guide](../../CONTRIBUTING.md) owns the build/run workflow. `start` uses existing artifacts; `dev:tui` rebuilds the workspace before starting the agent. Bake's profile commands use `~/.bake` unless `BAKE_HOME` is set. `dev` runs the separate hot component preview. The performance command accepts `--mode development` for a controlled baseline; it uses the same bundler and inputs. Production compilation reduces bundle size and development-renderer work. It does not bound the allocations required to render a complete history; the large-history failure remains recorded in the performance report.
 
 The [build test](packages/app/tests/build.test.ts) executes compiled JSX under Node with external production React and rejects a missing entry. Restoring development bundling makes its production-runtime assertion fail. Strict tooling programs include the shared build, dispatcher, diagnostic, and Bun test drivers; Bun declarations are workspace development dependencies.
 

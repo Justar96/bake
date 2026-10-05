@@ -118,7 +118,7 @@ DeepSeek caches request prefixes automatically and does not need the scaffolding
 
 The rewrites run on the request body after pi-ai builds it, together with the `adaptiveThinkingType` respelling. They change message boundaries and metadata only, not text.
 
-Change one field of the shipped route through the `llm-pi-ai:` section of `$DSH_HOME/settings.yaml`, which merges per route and field, for example `baseURL` to reach a proxy. A Cordis `--patch` row for this plugin replaces its whole `config`, the shipped route included. pi-ai's own `deepseek` catalog route, which speaks Chat Completions, stays available beside it once given an `apiKeyEnv`.
+Change one field of the shipped route through the `llm-pi-ai:` section of `$BAKE_HOME/settings.yaml`, which merges per route and field, for example `baseURL` to reach a proxy. A Cordis `--patch` row for this plugin replaces its whole `config`, the shipped route included. pi-ai's own `deepseek` catalog route, which speaks Chat Completions, stays available beside it once given an `apiKeyEnv`.
 
 <a id="declare-in-history-updates"></a>
 ### Declare in-history updates

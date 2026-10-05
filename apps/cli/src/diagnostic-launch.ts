@@ -16,13 +16,18 @@ const SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const
  * @returns once this process can load the application; a restarted parent exits.
  */
 export async function restartWithDiagnostics(): Promise<void> {
-  const configured = process.env.DSH_HOME
-  if (configured !== undefined && configured.trim() === '') throw new Error('DSH_HOME must name a directory or be unset')
+  // BAKE_HOME selects the home; DSH_HOME, its earlier name, is read only when
+  // BAKE_HOME is unset. Both are set to the result, so every reader agrees.
+  const name = process.env.BAKE_HOME !== undefined ? 'BAKE_HOME' : 'DSH_HOME'
+  const configured = process.env[name]
+  if (configured !== undefined && configured.trim() === '') throw new Error(`${name} must name a directory or be unset`)
   let home = configured ?? join(homedir(), '.bake')
   if (home === '~') home = homedir()
   else if (home.startsWith('~/') || home.startsWith('~\\')) home = join(homedir(), home.slice(2))
-  process.env.DSH_HOME = resolve(home)
-  const directory = join(process.env.DSH_HOME, 'diagnostics')
+  const resolvedHome = resolve(home)
+  process.env.BAKE_HOME = resolvedHome
+  process.env.DSH_HOME = resolvedHome
+  const directory = join(resolvedHome, 'diagnostics')
 
   const options = new Map<string, string>()
   for (let index = 0; index < process.execArgv.length; index++) {
@@ -38,7 +43,7 @@ export async function restartWithDiagnostics(): Promise<void> {
     && startedDirectory !== undefined && resolve(startedDirectory) === directory) return
 
   const script = process.argv[1]
-  if (script === undefined) throw new Error('dsh: cannot restart without an entry script')
+  if (script === undefined) throw new Error('bake: cannot restart without an entry script')
   try { mkdirSync(directory, { recursive: true, mode: 0o700 }) } catch {
     // Diagnostics are optional; an unwritable directory must not prevent launch.
   }

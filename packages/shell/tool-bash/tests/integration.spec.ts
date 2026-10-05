@@ -94,14 +94,16 @@ async function pollUntil(predicate: () => boolean, timeoutMs = 5_000): Promise<v
 }
 
 describe('bash tool through the agent loop', () => {
-  it('first-turn bash receives session identity in a scrubbed DSH_* namespace', async () => {
+  it('first-turn bash receives session identity in scrubbed DSH_* and BAKE_* namespaces', async () => {
     const root = mkdtempSync(join(tmpdir(), 'dsh-bash-session-env-'))
     dirs.push(root)
     const dshHome = join(root, 'dsh-home')
     vi.stubEnv('DSH_STALE_PARENT', 'stale')
+    vi.stubEnv('BAKE_STALE_PARENT', 'stale')
     const adapter = new MockAdapter([
       toolCallResponse('call-1', 'bash', {
-        command: 'printf \'%s\\n%s\\n%s\\n%s\\n\' "$DSH_HOME" "$DSH_SHELL" "$DSH_SESSION_ID" "${DSH_STALE_PARENT-unset}"',
+        command: 'printf \'%s\\n\' "$DSH_HOME" "$DSH_SHELL" "$DSH_SESSION_ID" "${DSH_STALE_PARENT-unset}" '
+          + '"$BAKE_HOME" "$BAKE_SHELL" "$BAKE_SESSION_ID" "${BAKE_STALE_PARENT-unset}"',
         description: 'inspect session environment',
       }),
       textResponse('Session environment inspected.'),
@@ -117,7 +119,7 @@ describe('bash tool through the agent loop', () => {
     await waitForIdle(ctx, agent)
 
     const result = findEvent(events(agent), 'tool/result')
-    expect(resultText(result)).toBe(`${dshHome}\n1\nsession-env-id\nunset\n`)
+    expect(resultText(result)).toBe(`${dshHome}\n1\nsession-env-id\nunset\n`.repeat(2))
     await handle.dispose()
   })
 

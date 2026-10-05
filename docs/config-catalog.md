@@ -38,7 +38,7 @@ Requires: `sessionProjections`
 ```ts config-catalog
 /** User-facing workspace instruction loader configuration. */
 export interface Config {
-  /** Harness home containing the fixed user-global `AGENTS.md`; defaults to `$DSH_HOME` or `~/.dsh`. */
+  /** Harness home containing the fixed user-global `AGENTS.md`; defaults to `$BAKE_HOME`, `$DSH_HOME`, or `~/.dsh`. */
   dshHome?: string
   /** Directory entries that identify the project root while walking upward from the session cwd. */
   projectRootMarkers?: string[]
@@ -200,7 +200,7 @@ Source: [`packages/api/settings-controller/src/index.ts:36`](../packages/api/set
 ```ts config-catalog
 /** Local attachment backend configuration. */
 export interface Config {
-  /** Explicit harness home; omitted follows `DSH_HOME`, then `~/.dsh`. */
+  /** Explicit harness home; omitted follows `BAKE_HOME`, `DSH_HOME`, then `~/.dsh`. */
   dshHome?: string
   /** Maximum encoded bytes accepted for one submitted image. Default: 20 MiB. */
   maxImageBytes?: number
@@ -252,7 +252,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/shell/bash-local/src/index.ts:41`](../packages/shell/bash-local/src/index.ts)
+Source: [`packages/shell/bash-local/src/index.ts:42`](../packages/shell/bash-local/src/index.ts)
 
 <a id="bake-bash-sandbox"></a>
 
@@ -425,7 +425,7 @@ Source: [`packages/extensions/cordis-host-runner/src/index.ts:87`](../packages/e
 export interface Config {
   /** Credentials document path; defaults to `.credentials.yaml` under the harness home. */
   path?: string
-  /** Harness home used when `path` is omitted; defaults to `$DSH_HOME` or `~/.dsh`. */
+  /** Harness home used when `path` is omitted; defaults to `$BAKE_HOME`, `$DSH_HOME`, or `~/.dsh`. */
   dshHome?: string
   /** Watch the document and hot-publish external edits; defaults to true. */
   watch?: boolean
@@ -1415,7 +1415,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/shell/pwsh-local/src/index.ts:58`](../packages/shell/pwsh-local/src/index.ts)
+Source: [`packages/shell/pwsh-local/src/index.ts:59`](../packages/shell/pwsh-local/src/index.ts)
 
 <a id="bake-pwsh-sandbox"></a>
 
@@ -1779,7 +1779,7 @@ Source: [`packages/session/session-title-first-prompt-llm/src/index.ts:15`](../p
 export interface Config {
   /** Settings document path; defaults to `settings.yaml` under the harness home. */
   path?: string
-  /** Harness home used when `path` is omitted; defaults to `$DSH_HOME` or `~/.dsh`. */
+  /** Harness home used when `path` is omitted; defaults to `$BAKE_HOME`, `$DSH_HOME`, or `~/.dsh`. */
   dshHome?: string
   /** Watch the document and hot-publish external edits; defaults to true. */
   watch?: boolean
@@ -1797,7 +1797,7 @@ Source: [`packages/settings/settings-file/src/index.ts:22`](../packages/settings
 ```ts config-catalog
 /** Plugin config (all optional — the built-in facts resolve without defaults). */
 export interface Config {
-  /** DeepSeek Harness home directory exposed as `DSH_HOME`; defaults to `$DSH_HOME` or `~/.dsh`. */
+  /** DeepSeek Harness home directory exposed as `DSH_HOME` and `BAKE_HOME`; defaults to `$BAKE_HOME`, `$DSH_HOME`, or `~/.dsh`. */
   dshHome?: string
 }
 ```
@@ -1831,9 +1831,9 @@ export interface Config {
   providerName?: string
   /** Whether project and user roots are included around custom roots. */
   includeDefaultRoots?: boolean
-  /** DeepSeek Harness config root. Defaults to `$DSH_HOME` or `~/.dsh`. */
+  /** DeepSeek Harness config root. Defaults to `$BAKE_HOME`, `$DSH_HOME`, or `~/.dsh`. */
   dshHome?: string
-  /** Shared agent config root. Defaults to `$DSH_AGENTS_HOME` or `~/.agents`. */
+  /** Shared agent config root. Defaults to `$BAKE_AGENTS_HOME`, `$DSH_AGENTS_HOME`, or `~/.agents`. */
   agentsHome?: string
   /** Additional skill roots scanned after project roots and before user roots. */
   customSkillDirs?: string[]
@@ -1849,7 +1849,10 @@ export interface Config {
   watchMaxProjects?: number
   /** Whether watched symbolic links follow their target files. */
   watchFollowSymlinks?: boolean
-  /** Bundled skill root; defaults to `$DSH_BUNDLED_SKILL_DIR` when default roots are included, otherwise mounts none. */
+  /**
+   * Bundled skill root; defaults to `$BAKE_BUNDLED_SKILL_DIR` (or `$DSH_BUNDLED_SKILL_DIR`)
+   * when default roots are included, otherwise mounts none.
+   */
   bundledSkillDir?: string
 }
 ```

@@ -40,15 +40,15 @@ export const INHERITED_NODE_ENV = 'DSH_INHERITED_NODE_ENV'
  * The development build records a `performance.measure` entry for nearly
  * every component render, and Node keeps each entry until someone clears
  * them. A session that redraws for hours holds millions, and the heap runs
- * out. `DSH_RENDERER=development` keeps the development build on purpose,
- * as the performance baseline does.
+ * out. `BAKE_RENDERER=development` (or `DSH_RENDERER`) keeps the development
+ * build on purpose, as the performance baseline does.
  *
  * Must run before anything imports `react` or `ink`.
  * @param env - the process environment to update.
  */
 export function selectRendererBuild(env: NodeJS.ProcessEnv = process.env): void {
   if (env[INHERITED_NODE_ENV] === undefined) env[INHERITED_NODE_ENV] = env.NODE_ENV === undefined ? '-' : `=${env.NODE_ENV}`
-  env.NODE_ENV = env.DSH_RENDERER === 'development' ? 'development' : 'production'
+  env.NODE_ENV = (env.BAKE_RENDERER ?? env.DSH_RENDERER) === 'development' ? 'development' : 'production'
 }
 
 /**

@@ -17,7 +17,7 @@ Never commit credentials or `.env`, never overwrite recorded session generations
 Bake is built on [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). A checkout may add it as the read-only `upstream` remote; `origin` is Bake.
 
 - Review upstream releases and port fixes selectively, together with their tests and license notices. Never merge from or push to `upstream` automatically, and do not open pull requests upstream on Bake's behalf.
-- Map upstream imports and Loader rows from `@deepseek-ai/dsh-<name>` to `bake-<name>` for every package whose manifest declares a `bake-` name, which covers every runtime package under `packages/`. Keep the CLI, terminal, and vendored names as declared in their manifests. The [legacy package-name map](packages/boot/app-boot/README.md#renamed-packages) lists every renamed package.
+- Map upstream imports and Loader rows from `@deepseek-ai/dsh-<name>` to `bake-<name>` for every runtime package under `packages/`, `@deepseek-ai/dsh` to `bake-cli`, and `@dsh-tui/<name>` to `bake-tui-<name>`. Keep vendored and native names as declared in their manifests. The [legacy package-name map](packages/boot/app-boot/README.md#renamed-packages) lists every renamed package.
 - Before pruning dependencies, inspect package imports, TypeScript references, and profile YAML. Review session-format migrations before adopting persistence changes.
 - After porting a fix, rebuild the affected runtime packages and rerun their focused tests and terminal scenarios.
 

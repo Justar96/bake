@@ -5,14 +5,14 @@ The `bake-cli` launcher starts Bake's Node runtime through a named Cordis profil
 <a id="profile-boot"></a>
 ## Profile boot
 
-Each profile keeps its bundle list and optional `cordis.patch.yml` under `$DSH_HOME/profiles/<name>`. The launcher applies bundle, profile, home, and invocation patches in that order. First use initializes a shipped profile; an existing profile keeps its selected bundles. A missing bundle fails startup.
+Each profile keeps its bundle list and optional `cordis.patch.yml` under `$BAKE_HOME/profiles/<name>`. The launcher applies bundle, profile, home, and invocation patches in that order. First use initializes a shipped profile; an existing profile keeps its selected bundles. A missing bundle fails startup.
 
 The launcher parses its own profile flags and forwards the remaining arguments to the application. `--from-default-profile <template>` creates a custom profile from a shipped template; `--dump-default-config` and `--dump-config` inspect composition without starting the agent.
 
 <a id="source-execution"></a>
 ## Source execution
 
-From the repository root, `bun run build` builds the Node runtime and TUI, and `bun run start` launches the built terminal agent. `bun run dsh` runs the built profile launcher. Bake uses `~/.bake` unless `DSH_HOME` selects another home. External profile package installation remains pnpm-managed and is separate from the Bun source workspace.
+From the repository root, `bun run build` builds the Node runtime and TUI, and `bun run start` launches the built terminal agent. `bun run dsh` runs the built profile launcher. Bake uses `~/.bake` unless `BAKE_HOME` selects another home. External profile package installation remains pnpm-managed and is separate from the Bun source workspace.
 
 <a id="startup-diagnostics"></a>
 ## Startup diagnostics

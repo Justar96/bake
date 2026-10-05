@@ -19,6 +19,7 @@ import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { SHELL_SETTINGS_NAMESPACE, ShellExecutor, watchOutput } from 'bake-shell'
 import type { ShellExecRequest, ShellExecSpec, ShellProcess, ShellProcessRead, ShellRunResult, CollectedOutput } from 'bake-shell'
+import { withBakeEnvironmentNames } from 'bake-subprocess'
 import type { SubprocessCollect, SubprocessHandle, SubprocessOutputReader, SubprocessSpawnSpec } from 'bake-subprocess'
 import type {} from 'bake-settings'
 import { clampTimeout, deadline, MAX_TIMER_DELAY_MS, timeoutOf } from 'bake-timeout'
@@ -240,7 +241,8 @@ export class PwshLocalExecutor extends ShellExecutor {
       },
       graceMs: this.config.graceMs,
       signal,
-      env: { ...ENV_OVERRIDES, ...spec.env, ...spec.dshEnv },
+      // The trusted dshEnv snapshot, under its DSH_* and BAKE_* names, merges last.
+      env: { ...ENV_OVERRIDES, ...spec.env, ...spec.dshEnv === undefined ? {} : withBakeEnvironmentNames(spec.dshEnv) },
     }
   }
 

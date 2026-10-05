@@ -24,12 +24,15 @@ export const BUILT_ENV = { NODE_ENV: BUILD_MODE } as const
 /**
  * Select Bake's data directory and production renderer without changing the caller's environment.
  * @param home - operating-system user home.
- * @param env - inherited environment; an explicit DSH_HOME remains authoritative.
- * @returns overrides for a built profile launch, isolated from upstream's default home.
+ * @param env - inherited environment; an explicit BAKE_HOME, or else DSH_HOME, remains authoritative.
+ * @returns overrides for a built profile launch, isolated from upstream's default home, naming the home under both names.
  */
-export function profileEnvironment(home: string, env: NodeJS.ProcessEnv): typeof BUILT_ENV & { DSH_HOME: string } {
-  if (env.DSH_HOME !== undefined && env.DSH_HOME.trim() === '') throw new Error('DSH_HOME must name a directory or be unset')
-  return { ...BUILT_ENV, DSH_HOME: env.DSH_HOME ?? join(home, '.bake') }
+export function profileEnvironment(home: string, env: NodeJS.ProcessEnv): typeof BUILT_ENV & { BAKE_HOME: string; DSH_HOME: string } {
+  const name = env.BAKE_HOME !== undefined ? 'BAKE_HOME' : 'DSH_HOME'
+  const configured = env[name]
+  if (configured !== undefined && configured.trim() === '') throw new Error(`${name} must name a directory or be unset`)
+  const selected = configured ?? join(home, '.bake')
+  return { ...BUILT_ENV, BAKE_HOME: selected, DSH_HOME: selected }
 }
 
 /**
@@ -38,7 +41,7 @@ export function profileEnvironment(home: string, env: NodeJS.ProcessEnv): typeof
  * variables or network interfaces, and Node's diagnostic files in
  * `<home>/diagnostics`, created owner-only here. Node arguments rather than
  * `NODE_OPTIONS`, which the agent's subprocesses would inherit.
- * @param home - the Bake home of the launch, its DSH_HOME.
+ * @param home - the Bake home of the launch, its BAKE_HOME.
  * @returns Node arguments to place before the entry script.
  */
 export function diagnosticArguments(home: string): string[] {

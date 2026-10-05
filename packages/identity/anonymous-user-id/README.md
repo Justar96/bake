@@ -7,7 +7,7 @@ kind: "package-library"
 
 ## Summary
 
-DeepSeek Harness uses one anonymous identifier per harness home to correlate telemetry and feedback from the same installation without identifying the user. The random UUID is stored in `$DSH_HOME/.anonymous-user-id` (`$DSH_HOME` defaults to `~/.dsh`), persists across restarts, and is regenerated after you delete the file. Different harness homes use different identifiers, and the value contains no machine or account data. Built-in features create and attach it automatically; package consumers can reuse the same value for installation-scoped correlation, but cannot join records across homes.
+DeepSeek Harness uses one anonymous identifier per harness home to correlate telemetry and feedback from the same installation without identifying the user. The random UUID is stored in `$BAKE_HOME/.anonymous-user-id` (`$BAKE_HOME` defaults to `~/.dsh`), persists across restarts, and is regenerated after you delete the file. Different harness homes use different identifiers, and the value contains no machine or account data. Built-in features create and attach it automatically; package consumers can reuse the same value for installation-scoped correlation, but cannot join records across homes.
 
 ## Table of Contents
 
@@ -29,12 +29,12 @@ When you want the records your installation sends out to be recognizable as comi
 
 Two things your installation sends out carry the same id, so records line up across them:
 
-- **Session telemetry** — when you configure a collector with `DSH_TELEMETRY_OTLP_URL`, its exports carry the id as the `user.id` resource attribute, so the collector can group an installation's records. Bake configures none by default.
+- **Session telemetry** — when you configure a collector with `BAKE_TELEMETRY_OTLP_URL`, its exports carry the id as the `user.id` resource attribute, so the collector can group an installation's records. Bake configures none by default.
 - **Feedback** — each feedback acknowledgement names the anonymous installation that recorded it.
 
 ### Observing and resetting the id
 
-The id lives in `$DSH_HOME/.anonymous-user-id` (`$DSH_HOME` defaults to `~/.dsh`) as a plain UUID text file. Delete that file to get a fresh id at the next launch; the running process keeps its current id until it exits. Separate harness homes keep separate ids, and no machine or account detail ever goes into the value.
+The id lives in `$BAKE_HOME/.anonymous-user-id` (`$BAKE_HOME` defaults to `~/.dsh`) as a plain UUID text file. Delete that file to get a fresh id at the next launch; the running process keeps its current id until it exits. Separate harness homes keep separate ids, and no machine or account detail ever goes into the value.
 
 ### Using it in your own package
 
@@ -91,7 +91,7 @@ The file is a bare UUID line named by `ANONYMOUS_USER_ID_FILE_NAME`, validated a
 Read these pages when the package-level contract is not enough. They move from the identity group map to the home-path resolution this package builds on and the features that use the id.
 
 - [identity group map](../README.md) — the sibling packages and group scope.
-- [bake-home-paths](../../util/home-paths/README.md) — owns `$DSH_HOME` and `~/.dsh` resolution.
+- [bake-home-paths](../../util/home-paths/README.md) — owns `$BAKE_HOME` and `~/.dsh` resolution.
 - [bake-session-telemetry-otel](../../session/session-telemetry-otel/README.md) — reports the id as the OTel Resource `user.id`.
 - [bake-command-feedback](../../feedback/command-feedback/README.md) — embeds the id in the feedback acknowledgement.
 - [Session telemetry subsystem](../../../docs/subsystems/session-telemetry.md) — the telemetry seam and its backend contract.
@@ -116,7 +116,7 @@ These limits describe when the id is a poor fit or needs special attention. They
 
 - **No recovery after deletion** — losing the file mints a new anonymous identity by design; recovery would require stable derivation material that weakens anonymity.
 - **Best-effort concurrency** — a reader landing in the narrow interval between a concurrent process's exclusive create and completed write can use a different in-memory UUID for that run; later launches converge on the persisted value.
-- **No cross-home identity** — different `$DSH_HOME` values cannot be correlated.
+- **No cross-home identity** — different `$BAKE_HOME` values cannot be correlated.
 - **Deleting the file does not reset the current process** — memoization keeps the run's id until the next launch.
 
 <a id="dev-note"></a>

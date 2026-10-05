@@ -11,6 +11,7 @@ import {
   dshHomeDisplay,
   dshHomePath,
   expandHomePath,
+  readBakeEnv,
   resolveDshHome,
 } from 'bake-home-paths'
 
@@ -44,6 +45,22 @@ describe('dsh path helpers', () => {
   it('treats an empty or whitespace-only DSH_HOME as unset', () => {
     expect(resolveDshHome(undefined, { DSH_HOME: '' })).toBe(defaultDshHome())
     expect(resolveDshHome(undefined, { DSH_HOME: '   ' })).toBe(defaultDshHome())
+  })
+
+  it('reads BAKE_HOME before DSH_HOME, skipping a blank BAKE_HOME', () => {
+    const bakeHome = join(homedir(), 'env-bake')
+    const envHome = join(homedir(), 'env-dsh')
+
+    expect(resolveDshHome(undefined, { BAKE_HOME: '~/env-bake', DSH_HOME: '~/env-dsh' })).toBe(bakeHome)
+    expect(resolveDshHome(undefined, { BAKE_HOME: ' ', DSH_HOME: '~/env-dsh' })).toBe(envHome)
+    expect(resolveDshHome('/tmp/explicit-dsh', { BAKE_HOME: '~/env-bake' })).toBe(resolve('/tmp/explicit-dsh'))
+  })
+
+  it('reads a BAKE_ setting before its DSH_ spelling', () => {
+    expect(readBakeEnv('PERMISSION_MODE', { BAKE_PERMISSION_MODE: 'read-only', DSH_PERMISSION_MODE: 'danger-full-access' })).toBe('read-only')
+    expect(readBakeEnv('PERMISSION_MODE', { DSH_PERMISSION_MODE: 'danger-full-access' })).toBe('danger-full-access')
+    expect(readBakeEnv('PERMISSION_MODE', { BAKE_PERMISSION_MODE: '' })).toBe('')
+    expect(readBakeEnv('PERMISSION_MODE', {})).toBeUndefined()
   })
 
   it('joins child segments onto the resolved DSH_HOME', () => {

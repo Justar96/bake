@@ -76,11 +76,14 @@ it('declares every package the built entries import at runtime', async () => {
 it('isolates Bake profiles from upstream and respects an explicit data directory', () => {
   const home = join(tmpdir(), 'bake-user')
   const custom = join(tmpdir(), 'bake-custom')
-  expect(profileEnvironment(home, {})).toEqual({ NODE_ENV: 'production', DSH_HOME: join(home, '.bake') })
+  expect(profileEnvironment(home, {})).toEqual({ NODE_ENV: 'production', BAKE_HOME: join(home, '.bake'), DSH_HOME: join(home, '.bake') })
   const env = { DSH_HOME: custom, NODE_ENV: 'development' }
-  expect(profileEnvironment(home, env)).toEqual({ NODE_ENV: 'production', DSH_HOME: custom })
+  expect(profileEnvironment(home, env)).toEqual({ NODE_ENV: 'production', BAKE_HOME: custom, DSH_HOME: custom })
   expect(env).toEqual({ DSH_HOME: custom, NODE_ENV: 'development' })
+  expect(profileEnvironment(home, { BAKE_HOME: custom, DSH_HOME: join(home, 'other') }))
+    .toEqual({ NODE_ENV: 'production', BAKE_HOME: custom, DSH_HOME: custom })
   expect(() => profileEnvironment(home, { DSH_HOME: '' })).toThrow('DSH_HOME must name a directory or be unset')
+  expect(() => profileEnvironment(home, { BAKE_HOME: ' ' })).toThrow('BAKE_HOME must name a directory or be unset')
 })
 
 it('starts Node with the release launchers\' diagnostic flags under a created Bake-home directory', async () => {

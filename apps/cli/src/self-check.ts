@@ -61,7 +61,8 @@ export async function runSelfCheck(version: string, output: SelfCheckOutput = {
   err: line => void process.stderr.write(`${line}\n`),
 }): Promise<number> {
   const home = mkdtempSync(join(tmpdir(), 'bake-self-check-'))
-  const callerHome = process.env.DSH_HOME
+  const callerHomes = { BAKE_HOME: process.env.BAKE_HOME, DSH_HOME: process.env.DSH_HOME }
+  process.env.BAKE_HOME = home
   process.env.DSH_HOME = home
   // oxlint-disable-next-line typescript/unbound-method -- Saved only for exact restoration, never called unbound.
   const stdoutWrite = process.stdout.write
@@ -89,8 +90,10 @@ export async function runSelfCheck(version: string, output: SelfCheckOutput = {
     }
   } finally {
     process.stdout.write = stdoutWrite
-    if (callerHome === undefined) delete process.env.DSH_HOME
-    else process.env.DSH_HOME = callerHome
+    for (const [name, value] of Object.entries(callerHomes)) {
+      if (value === undefined) Reflect.deleteProperty(process.env, name)
+      else process.env[name] = value
+    }
     rmSync(home, { recursive: true, force: true, maxRetries: 3 })
   }
   if (problems.length > 0) {

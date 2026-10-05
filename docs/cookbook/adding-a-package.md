@@ -1,6 +1,6 @@
 # Cookbook: adding a workspace package
 
-Add a workspace package under its owning group. Runtime packages use `bake-<name>`. The [legacy package-name map](../../packages/boot/app-boot/README.md#renamed-packages) lists the upstream `@deepseek-ai/dsh-<name>` name each renamed package replaced.
+Add a workspace package under its owning group. Runtime packages use `bake-<name>`, and the CLI and terminal packages use `bake-cli` and `bake-tui-<name>`. The [legacy package-name map](../../packages/boot/app-boot/README.md#renamed-packages) lists the upstream name each renamed package replaced.
 
 ## 1. Create the package
 

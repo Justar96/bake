@@ -293,7 +293,7 @@ async function e2e(args: string[]): Promise<void> {
  */
 async function launch(args: string[]): Promise<void> {
   const env = profileEnvironment(homedir(), process.env)
-  await must(['node', ...diagnosticArguments(env.DSH_HOME), CLI, ...args], { env })
+  await must(['node', ...diagnosticArguments(env.BAKE_HOME), CLI, ...args], { env })
 }
 
 /** Print what this dispatcher can run. */

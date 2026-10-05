@@ -74,8 +74,9 @@ export interface WebRuntimeConfig {
 export class WebRuntime extends Service {
   /**
    * Provider selection config. Operational env overrides feed the SAME fields:
-   * `$DSH_WEB_SEARCH_PROVIDER` / `$DSH_WEB_FETCH_PROVIDER` are equivalent to
-   * `searchProvider` / `fetchProvider` and are NOT a hidden priority chain.
+   * `$BAKE_WEB_SEARCH_PROVIDER` / `$BAKE_WEB_FETCH_PROVIDER` (or their earlier
+   * `DSH_` spellings) are equivalent to `searchProvider` / `fetchProvider` and
+   * are NOT a hidden priority chain.
    */
   static Config: z<WebRuntimeConfig> = z.object({
     searchProvider: z.string(),
@@ -89,8 +90,9 @@ export class WebRuntime extends Service {
 
   constructor(ctx: Context, config: WebRuntimeConfig = {}) {
     super(ctx, 'web')
-    this.searchProviderId = config.searchProvider ?? process.env.DSH_WEB_SEARCH_PROVIDER
-    this.fetchProviderId = config.fetchProvider ?? process.env.DSH_WEB_FETCH_PROVIDER
+    const env = process.env
+    this.searchProviderId = config.searchProvider ?? env.BAKE_WEB_SEARCH_PROVIDER ?? env.DSH_WEB_SEARCH_PROVIDER
+    this.fetchProviderId = config.fetchProvider ?? env.BAKE_WEB_FETCH_PROVIDER ?? env.DSH_WEB_FETCH_PROVIDER
   }
 
   /**

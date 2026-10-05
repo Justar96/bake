@@ -22,7 +22,7 @@ import { deepEqualJson, isENOENT } from 'bake-util-values'
 export interface Config {
   /** Settings document path; defaults to `settings.yaml` under the harness home. */
   path?: string
-  /** Harness home used when `path` is omitted; defaults to `$DSH_HOME` or `~/.dsh`. */
+  /** Harness home used when `path` is omitted; defaults to `$BAKE_HOME`, `$DSH_HOME`, or `~/.dsh`. */
   dshHome?: string
   /** Watch the document and hot-publish external edits; defaults to true. */
   watch?: boolean

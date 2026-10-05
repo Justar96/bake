@@ -36,7 +36,7 @@ import {
   type ProfileResolutionGeneration,
   type ProfileResolutionMode,
 } from 'bake-app-boot'
-import { resolveDshHome } from 'bake-home-paths'
+import { readBakeEnv, resolveDshHome } from 'bake-home-paths'
 import { installProxyFromEnvironment } from 'bake-http-proxy'
 import { DSH_LAUNCH_ENVIRONMENT_KEY, type LaunchEnvironmentSnapshot } from 'bake-launch-environment'
 import type {} from 'bake-agent-loop'
@@ -74,7 +74,7 @@ function createAppReady(): { service: AppReady; commit(): void } {
 /**
  * The home-level user patch layer (`$DSH_HOME/cordis.patch.yml`), applied
  * over every profile's own layer. Resolved per call, not at module load:
- * `$DSH_HOME` may be set by the test or launcher after import.
+ * `$BAKE_HOME` or `$DSH_HOME` may be set by the test or launcher after import.
  * @returns the absolute patch-file path.
  */
 export function homePatchPath(): string {
@@ -373,7 +373,7 @@ export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Con
       installAnchor: options.resolvedProfile?.installAnchor ?? INSTALL_ANCHOR,
       startedBundles: composed.profile.layers.map(layer => layer.packageName),
       cwd: process.cwd(), home: resolveDshHome(),
-      overlays: composed.overlays, telemetryDisabledEnv: process.env.DSH_TELEMETRY_DISABLED,
+      overlays: composed.overlays, telemetryDisabledEnv: readBakeEnv('TELEMETRY_DISABLED'),
     }
     const ctx = await boot(NAME, rootConfig, readProfilePatches(NAME, profileContext, composed.profile), async (hostCtx) => {
       app.current = hostCtx

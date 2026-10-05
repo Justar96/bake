@@ -15,7 +15,21 @@ export const DSH_HOME_DIR_NAME = '.dsh'
 export const DEFAULT_DSH_HOME_DISPLAY = `~/${DSH_HOME_DIR_NAME}`
 
 /** Environment variable that overrides the default DeepSeek Harness home. */
+export const BAKE_HOME_ENV = 'BAKE_HOME'
+
+/** Earlier name of {@link BAKE_HOME_ENV}, read when that is unset or blank. */
 export const DSH_HOME_ENV = 'DSH_HOME'
+
+/**
+ * Read one Bake setting from the environment: `BAKE_<name>`, or the earlier
+ * `DSH_<name>` spelling when `BAKE_<name>` is unset.
+ * @param name - the setting's name without its prefix, such as `PERMISSION_MODE`.
+ * @param env - environment mapping to read; defaults to `process.env`.
+ * @returns the value, or undefined when neither name is set.
+ */
+export function readBakeEnv(name: string, env: Record<string, string | undefined> = process.env): string | undefined {
+  return env[`BAKE_${name}`] ?? env[`DSH_${name}`]
+}
 
 /**
  * Give a native filesystem watcher one canonical spelling of a path, even
@@ -76,17 +90,17 @@ export function expandHomePath(path: string): string {
 /**
  * Resolve the single-root DeepSeek Harness home.
  *
- * Precedence, highest first: an explicit configured path, `$DSH_HOME`, then
- * `~/.dsh`. The harness keeps all user data under one root. An empty or
- * whitespace-only `$DSH_HOME` is treated as unset, so a blank override never
- * resolves the home to the current working directory.
+ * Precedence, highest first: an explicit configured path, `$BAKE_HOME`,
+ * `$DSH_HOME`, then `~/.dsh`. The harness keeps all user data under one root.
+ * An empty or whitespace-only variable is treated as unset, so a blank
+ * override never resolves the home to the current working directory.
  * @param configured - explicit harness-home override, which has highest precedence.
- * @param env - environment mapping used to read `DSH_HOME`.
+ * @param env - environment mapping used to read `BAKE_HOME` and `DSH_HOME`.
  * @returns the normalized absolute harness home path.
  */
 export function resolveDshHome(configured?: string, env: Record<string, string | undefined> = process.env): string {
-  const fromEnv = env[DSH_HOME_ENV]
-  const selected = configured ?? (fromEnv !== undefined && fromEnv.trim().length > 0 ? fromEnv : defaultDshHome())
+  const fromEnv = [env[BAKE_HOME_ENV], env[DSH_HOME_ENV]].find(value => value !== undefined && value.trim().length > 0)
+  const selected = configured ?? fromEnv ?? defaultDshHome()
   return resolve(expandHomePath(selected))
 }
 
@@ -114,7 +128,10 @@ export function dshCachePath(optionsOrSegment: { dshHome?: string } | string = {
  * Describe a resolved harness home symbolically for user-facing display.
  *
  * It never returns an absolute machine path: the default home is labelled
- * `~/.dsh`, and any configured home is labelled `$DSH_HOME`.
+ * `~/.dsh`, and any configured home is labelled `$DSH_HOME`, whether
+ * `BAKE_HOME` or `DSH_HOME` selected it. The label reaches model-visible
+ * text, such as the user-global instruction file's path, so it keeps the
+ * earlier name.
  * @param resolvedHome - the absolute path returned by {@link resolveDshHome}.
  * @returns `~/.dsh` for the default home, otherwise `$DSH_HOME`.
  */

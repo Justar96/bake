@@ -11,7 +11,7 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import { proxyEnvironmentForChild } from 'bake-http-proxy'
 import { DSH_ENV_PREFIX } from './types.ts'
-import type { SubprocessHandle, SubprocessSpawnSpec } from './types.ts'
+import type { DshEnvironment, SubprocessHandle, SubprocessSpawnSpec } from './types.ts'
 import type { SubprocessTerminalEnvironment, SubprocessTerminalHandle, SubprocessTerminalSpawnSpec } from './types.ts'
 
 export { DSH_ENV_PREFIX } from './types.ts'
@@ -47,6 +47,25 @@ export type {
 export const SENSITIVE_ENV_PATTERN = /KEY|PASSWORD|SECRET|TOKEN/i
 
 /**
+ * Prefix of the Bake spelling of each managed {@link DSH_ENV_PREFIX} name.
+ * A child receives every managed fact under both prefixes, and the ambient
+ * scrub removes both.
+ */
+export const BAKE_ENV_PREFIX = 'BAKE_' as const
+
+/**
+ * Add the `BAKE_<name>` spelling of every managed `DSH_<name>` fact, so a
+ * child reads the same value under either name.
+ * @param env - managed facts keyed by their `DSH_*` names.
+ * @returns a fresh map holding each fact under both prefixes.
+ */
+export function withBakeEnvironmentNames(env: DshEnvironment): Record<string, string> {
+  const named: Record<string, string> = { ...env }
+  for (const [key, value] of Object.entries(env)) named[BAKE_ENV_PREFIX + key.slice(DSH_ENV_PREFIX.length)] = value
+  return named
+}
+
+/**
  * Where the CLI keeps the caller's own `NODE_ENV` after choosing the
  * renderer's build; see `selectRendererBuild` in `bake-cli`.
  */
@@ -54,14 +73,14 @@ export const INHERITED_NODE_ENV = 'DSH_INHERITED_NODE_ENV'
 
 /**
  * The ambient parent environment minus credential-shaped names and minus all
- * `DSH_*` names — the canonical base every harness child starts from. `PATH`,
- * `HOME`, locale, and proxy variables survive, so child CLIs run normally;
- * harness identity never leaks implicitly (a deliberately forwarded
- * credential or current `DSH_*` fact goes through the spec's explicit `env`,
- * which merges after this scrub). Both scrubs match case-insensitively:
- * Windows environment names are case-insensitive, so a parent `dsh_*` entry
- * would otherwise survive and read back as `$env:DSH_*` in the child;
- * deliberate lowercase `dsh_*` names on POSIX are implausible. Exported as a plain function so spawners
+ * `DSH_*` and `BAKE_*` names — the canonical base every harness child starts
+ * from. `PATH`, `HOME`, locale, and proxy variables survive, so child CLIs
+ * run normally; harness identity never leaks implicitly (a deliberately
+ * forwarded credential or current `DSH_*` fact goes through the spec's
+ * explicit `env`, which merges after this scrub). The scrubs match
+ * case-insensitively: Windows environment names are case-insensitive, so a
+ * parent `dsh_*` entry would otherwise survive and read back as `$env:DSH_*`
+ * in the child; deliberate lowercase `dsh_*` names on POSIX are implausible. Exported as a plain function so spawners
  * that cannot route through the service (node-pty backends, SDK-managed
  * transports) share the one scrub definition.
  *
@@ -72,7 +91,9 @@ export const INHERITED_NODE_ENV = 'DSH_INHERITED_NODE_ENV'
 export function scrubbedParentEnv(): Record<string, string> {
   const env: Record<string, string> = {}
   for (const [key, value] of Object.entries(process.env)) {
-    if (value !== undefined && !SENSITIVE_ENV_PATTERN.test(key) && !key.toUpperCase().startsWith(DSH_ENV_PREFIX)) env[key] = value
+    const upper = key.toUpperCase()
+    if (value === undefined || SENSITIVE_ENV_PATTERN.test(key)) continue
+    if (!upper.startsWith(DSH_ENV_PREFIX) && !upper.startsWith(BAKE_ENV_PREFIX)) env[key] = value
   }
   // The CLI loads its renderer's production build by setting NODE_ENV, and
   // records the caller's own value first (`=` and the value, `-` for unset).

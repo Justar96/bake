@@ -118,7 +118,7 @@ try {
   const home = mkdtempSync(join(tmpdir(), 'bake-pack-home-'))
   try {
     const check = Bun.spawn(['node', 'apps/cli/lib/bin.js', '--self-check'], {
-      cwd: stage, env: { ...process.env, DSH_HOME: home }, stdout: 'pipe', stderr: 'inherit', timeout: 120_000,
+      cwd: stage, env: { ...process.env, BAKE_HOME: home, DSH_HOME: home }, stdout: 'pipe', stderr: 'inherit', timeout: 120_000,
     })
     const output = await new Response(check.stdout).text()
     if (await check.exited !== 0 || !output.split(/\s+/).includes(cli.version)) throw new Error(`Staged release failed its self-check: ${output.trim()}`)
@@ -127,7 +127,7 @@ try {
     // it, which must finish well inside the launcher's 5 s forced-exit grace.
     const started = performance.now()
     const help = Bun.spawn(['node', 'apps/cli/lib/bin.js', '--profile', 'tui', '--help'], {
-      cwd: stage, env: { ...process.env, DSH_HOME: home }, stdout: 'pipe', stderr: 'inherit',
+      cwd: stage, env: { ...process.env, BAKE_HOME: home, DSH_HOME: home }, stdout: 'pipe', stderr: 'inherit',
     })
     const usage = await new Response(help.stdout).text()
     if (await help.exited !== 0 || !usage.includes('Usage:')) throw new Error('Staged CLI did not boot')

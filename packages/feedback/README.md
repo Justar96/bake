@@ -22,7 +22,7 @@ The feedback group collects human opinions about the harness's work: users submi
 |---|---|
 | [`command-feedback`](command-feedback/README.md) | Session-level feedback: the `/feedback` command, the `sessionFeedback` Remote, and the fixed category taxonomy, all without a model turn |
 
-Session remarks are a one-way signal: recording one is safe at any point in a conversation and never changes what the model sees. With a feedback-gated sharing policy, recording a session remark is what releases the session for sharing. Bake ships no sharing destination, so feedback stays in the local session log until you configure a telemetry collector with `DSH_TELEMETRY_OTLP_URL`.
+Session remarks are a one-way signal: recording one is safe at any point in a conversation and never changes what the model sees. With a feedback-gated sharing policy, recording a session remark is what releases the session for sharing. Bake ships no sharing destination, so feedback stays in the local session log until you configure a telemetry collector with `BAKE_TELEMETRY_OTLP_URL`.
 
 <a id="related-documentation"></a>
 ## Related documentation

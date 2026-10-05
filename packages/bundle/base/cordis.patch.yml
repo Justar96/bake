@@ -81,7 +81,7 @@
     - id: llm-retry
       name: 'bake-llm-retry'
 
-    # User-settings document (`$DSH_HOME/settings.yaml`, hot-reloaded): a
+    # User-settings document (`$BAKE_HOME/settings.yaml`, hot-reloaded): a
     # `llm-pi-ai:` section there overrides the adapter entry below without a
     # restart. Bake has no web client; this file is edited
     # directly or through the TUI's settings surface.
@@ -89,7 +89,7 @@
       name: 'bake-settings-file'
 
     # Credential sources: inherited environment over the managed
-    # `$DSH_HOME/.credentials.yaml`, with project and user `.env` fallbacks.
+    # `$BAKE_HOME/.credentials.yaml`, with project and user `.env` fallbacks.
     # Adapters resolve references per request; only the managed document is
     # written back, and it is never materialized into the process environment.
     - id: credentials
@@ -210,14 +210,15 @@
     # Session upload has no default destination. Without an endpoint, `mode`
     # falls back to DISABLED: the backend builds no exporter, reports
     # `sharing: 'disabled'`, and `/feedback` says the feedback stays in the
-    # local session log. DSH_TELEMETRY_OTLP_URL (a full OTLP/HTTP logs URL)
-    # enables upload to that URL only, in DSH_TELEMETRY_MODE (default
-    # FEEDBACK_ONLY). OTel then releases a Session-log prefix only after
-    # explicit user feedback, regardless of model provider; ordinary activity
-    # never triggers capture. A non-empty DSH_TELEMETRY_DISABLED — any value,
+    # local session log. BAKE_TELEMETRY_OTLP_URL (a full OTLP/HTTP logs URL)
+    # enables upload to that URL only, in BAKE_TELEMETRY_MODE (default
+    # FEEDBACK_ONLY); each BAKE_ name falls back to its earlier DSH_ spelling.
+    # OTel then releases a Session-log prefix only after explicit user
+    # feedback, regardless of model provider; ordinary activity never
+    # triggers capture. A non-empty BAKE_TELEMETRY_DISABLED — any value,
     # including '0'/'false' — opts the process out even with a URL set (the
     # launchers patch the row disabled; config cannot disable a row). Exports
-    # carry the harness home's anonymous user id ($DSH_HOME/.anonymous-user-id,
+    # carry the harness home's anonymous user id ($BAKE_HOME/.anonymous-user-id,
     # random UUID; delete the file to reset the identity) as the Resource's
     # user.id. The exporter/processor values normally bound the shutdown drain
     # to ~1s against an unreachable collector: exporter.timeoutMillis is both
@@ -231,13 +232,13 @@
     - id: session-telemetry-otel
       name: 'bake-session-telemetry-otel'
       config:
-        mode: !!js "process.env.DSH_TELEMETRY_OTLP_URL ? process.env.DSH_TELEMETRY_MODE || 'FEEDBACK_ONLY' : 'DISABLED'"
+        mode: !!js "(process.env.BAKE_TELEMETRY_OTLP_URL ?? process.env.DSH_TELEMETRY_OTLP_URL) ? (process.env.BAKE_TELEMETRY_MODE ?? process.env.DSH_TELEMETRY_MODE) || 'FEEDBACK_ONLY' : 'DISABLED'"
         shutdownTimeoutMillis: 3000
         exporter:
           # TODO(bake): Bake's own OTLP logs endpoint goes here, in place of the
-          # empty default. `mode` keys on DSH_TELEMETRY_OTLP_URL alone, so give
+          # empty default. `mode` keys on BAKE_TELEMETRY_OTLP_URL alone, so give
           # it the same fallback when this default gets a URL.
-          url: !!js process.env.DSH_TELEMETRY_OTLP_URL || ''
+          url: !!js (process.env.BAKE_TELEMETRY_OTLP_URL ?? process.env.DSH_TELEMETRY_OTLP_URL) || ''
           compression: gzip
           timeoutMillis: 1000
         processor:
@@ -248,7 +249,7 @@
 
     # Process health for long sessions: sustained event-loop delay and heap use
     # near V8's limit append rate-limited records to
-    # `$DSH_HOME/diagnostics/watchdog.<date>.<time>.<pid>.jsonl`. Nothing reaches
+    # `$BAKE_HOME/diagnostics/watchdog.<date>.<time>.<pid>.jsonl`. Nothing reaches
     # stdout, stderr, or the model. Node's fatal-error report is directed there
     # only when Node runs with --report-exclude-env, since otherwise it can carry
     # environment variables. Near-limit heap snapshots stay off: they are
@@ -270,7 +271,7 @@
     - id: sandbox-policy
       name: 'bake-sandbox-policy'
       config:
-        mode: !!js process.env.DSH_PERMISSION_MODE ?? 'workspace-write'
+        mode: !!js process.env.BAKE_PERMISSION_MODE ?? process.env.DSH_PERMISSION_MODE ?? 'workspace-write'
         workspaceRoot: !!js process.cwd()
 
     - id: bash-sandbox
@@ -286,12 +287,12 @@
     - id: approval
       name: 'bake-user-approval'
       config:
-        policy: !!js "(process.env.DSH_PERMISSION_MODE ?? 'workspace-write') === 'danger-full-access' ? 'never' : 'ask'"
+        policy: !!js "(process.env.BAKE_PERMISSION_MODE ?? process.env.DSH_PERMISSION_MODE ?? 'workspace-write') === 'danger-full-access' ? 'never' : 'ask'"
 
     - id: permission
       name: 'bake-permission-presets'
       config:
-        defaultPreset: !!js process.env.DSH_PERMISSION_MODE ?? 'workspace-write'
+        defaultPreset: !!js process.env.BAKE_PERMISSION_MODE ?? process.env.DSH_PERMISSION_MODE ?? 'workspace-write'
         presets:
           read-only:
             sandbox: read-only

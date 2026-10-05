@@ -257,7 +257,7 @@ async function renameRetrying(from: string, to: string): Promise<void> {
  * updater of a release that already writes that text.
  *
  * Node starts with `--report-exclude-env --report-exclude-network` and
- * `--diagnostic-dir=%DSH_HOME%\diagnostics`, which the launcher creates: the
+ * `--diagnostic-dir=%BAKE_HOME%\diagnostics`, which the launcher creates: the
  * runtime watchdog arms fatal-error reports only when environment variables
  * are excluded from them on the command line, and heap snapshots only when
  * the diagnostic directory is its own. They are Node arguments rather than
@@ -268,12 +268,14 @@ async function renameRetrying(from: string, to: string): Promise<void> {
  */
 export function windowsLauncher(root: string): string {
   const literal = root.replaceAll('%', '%%')
-  const node = 'node --report-exclude-env --report-exclude-network "--diagnostic-dir=%DSH_HOME%\\diagnostics" "%BAKE_CLI%"'
+  const node = 'node --report-exclude-env --report-exclude-network "--diagnostic-dir=%BAKE_HOME%\\diagnostics" "%BAKE_CLI%"'
   return [
     '@echo off',
     'setlocal',
-    'if not defined DSH_HOME set "DSH_HOME=%USERPROFILE%\\.bake"',
-    'if not exist "%DSH_HOME%\\diagnostics\\" mkdir "%DSH_HOME%\\diagnostics" 2>nul',
+    'if not defined BAKE_HOME if defined DSH_HOME set "BAKE_HOME=%DSH_HOME%"',
+    'if not defined BAKE_HOME set "BAKE_HOME=%USERPROFILE%\\.bake"',
+    'set "DSH_HOME=%BAKE_HOME%"',
+    'if not exist "%BAKE_HOME%\\diagnostics\\" mkdir "%BAKE_HOME%\\diagnostics" 2>nul',
     `set "BAKE_RELEASE_ROOT=${literal}"`,
     'set "BAKE_CURRENT="',
     `set /p BAKE_CURRENT=<"%BAKE_RELEASE_ROOT%\\${CURRENT_POINTER}"`,

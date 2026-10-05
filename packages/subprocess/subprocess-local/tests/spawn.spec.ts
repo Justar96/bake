@@ -50,6 +50,7 @@ function shellArgv(command: string): string[] {
     case 'echo "$EXTRA_ONE/$EXTRA_TWO"': return node('console.log(process.env.EXTRA_ONE + "/" + process.env.EXTRA_TWO)')
     case 'echo "$EXPLICIT_OVERRIDE_PASSWORD"': return node('console.log(process.env.EXPLICIT_OVERRIDE_PASSWORD)')
     case 'echo "${SUBPROCESS_TOMBSTONE_PROBE:-absent}"': return node('console.log(process.env.SUBPROCESS_TOMBSTONE_PROBE ?? "absent")')
+    case 'echo "${BAKE_STALE:-absent}"': return node('console.log(process.env.BAKE_STALE ?? "absent")')
     case 'echo "[${DSH_STALE:-absent}|$DSH_SHELL|$DSH_SESSION_ID]"':
       return node('console.log("[" + [process.env.DSH_STALE ?? "absent", process.env.DSH_SHELL, process.env.DSH_SESSION_ID].join("|") + "]")')
     case 'echo "[${DSH_TEST_API_KEY:-absent}|${DSH_TEST_TOKEN:-absent}|${SUBPROCESS_TEST_PASSWORD:-absent}|${DSH_TEST_PLAIN:-absent}]"':
@@ -1489,6 +1490,16 @@ describe('environment and spill-file hardening', () => {
       delete process.env.DSH_TEST_TOKEN
       delete process.env.SUBPROCESS_TEST_PASSWORD
       delete process.env.DSH_TEST_PLAIN
+    }
+  })
+
+  it('scrubs ambient BAKE_* entries as it does DSH_* ones', async () => {
+    process.env.BAKE_STALE = 'old-value'
+    try {
+      const result = await finish(spawnSubprocess(spec('echo "${BAKE_STALE:-absent}"')))
+      expect(result.stdout.text.trim()).toBe('absent')
+    } finally {
+      delete process.env.BAKE_STALE
     }
   })
 
