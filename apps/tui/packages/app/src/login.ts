@@ -11,7 +11,7 @@
  * offers and drives whichever kind the user picked, so a provider added by a
  * patch appears here without a code change.
  *
- * @module @deepseek-ai/dsh-tui-app/login
+ * @module bake-tui-app/login
  */
 
 import type { Context } from '@deepseek-ai/cordis'
