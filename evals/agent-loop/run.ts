@@ -10,7 +10,9 @@
  *              cliproxyapi id from ~/.bake/settings.yaml, or a DeepSeek id
  *              (deepseek/<id>, or a bare deepseek-* id the gateway lacks);
  *              a trailing @<effort> replaces the default effort
- * EVAL_CASES   scenario names (default: the standard suite)
+ * EVAL_CASES   scenario names or set names, `standard` or `extended` (default: the standard suite)
+ * EVAL_ROSTER  `headless` (default) runs the headless bundle's tool configs; `tui`
+ *              applies the terminal standard preset's to every Bake arm
  * EVAL_TRIALS  trials per scenario (default 3)
  * EVAL_OUTPUT  raw output directory (default .preflight/evals/agent-loop/<time>)
  * EVAL_EXTRA_<ARM>  optional JSON array of extra overlay rows for one arm
@@ -27,6 +29,15 @@ import { tmpdir } from 'node:os'
 import { createHash } from 'node:crypto'
 import YAML from 'yaml'
 import { reconcile } from './accounting.ts'
+import { compositionCheck, ROSTERS, rosterOverlay, systemPromptOf, systemPromptOverlay, type Roster } from './composition.ts'
+import {
+  backgroundStarts, compactions, editCheckSplits, excessRequests, normalizeBake, normalizePi, orientationCalls, ranCheck,
+  requestsOverFloor, routingDecisions, runawayAbort, shellEdits, verifiedBeforeFinal,
+} from './metrics.ts'
+import {
+  CASE_SETS, capMsFor, checkCommandFor, CONTEXT_WINDOWS, fixture, maxRequestsFor, piCompactionFor, prompts, REQUEST_FLOORS, requestCaps,
+  requestFloorFor, STANDARD_CASES, usesAgentInstructions, validate, wallClockCaps,
+} from './scenarios.ts'
 import { DEEPSEEK_ANTHROPIC_BASE_URL, deepseekProfile } from '../../packages/llm/llm-pi-ai/tests/deepseek-profile.ts'
 import { parseCredentialsDocument } from '../../packages/credentials/credentials-local/src/index.ts'
 
@@ -58,7 +69,8 @@ function merge(base: Record<string, unknown>, extra: Record<string, unknown>): R
   return out
 }
 
-interface Arm { kind: 'bake' | 'pi'; root: string; bin?: string; version?: string; extra: unknown[]; settings: string; llmDeepseek: boolean }
+/** `composition` holds a Bake arm's overlay rows read from its own checkout: its system prompt and the roster's tool configs. */
+interface Arm { kind: 'bake' | 'pi'; root: string; bin?: string; version?: string; extra: unknown[]; settings: string; llmDeepseek: boolean; composition: unknown[] }
 /** Resolve `pi` or `pi:<bin>` to the CLI and the package directory that ships it. */
 function piArm(spec: string): Arm {
   const named = spec.slice('pi'.length).replace(/^:/, '') || Bun.which('pi')
@@ -67,8 +79,10 @@ function piArm(spec: string): Arm {
   let root = dirname(bin)
   while (!existsSync(join(root, 'package.json')) && dirname(root) !== root) root = dirname(root)
   const version = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version as string
-  return { kind: 'pi', root, bin, version, extra: [], settings: '{}', llmDeepseek: false }
+  return { kind: 'pi', root, bin, version, extra: [], settings: '{}', llmDeepseek: false, composition: [] }
 }
+const roster = (process.env.EVAL_ROSTER ?? 'headless') as Roster
+if (!ROSTERS.includes(roster)) throw new Error(`EVAL_ROSTER must be one of ${ROSTERS.join(', ')}`)
 const ARMS: Record<string, Arm> = Object.fromEntries((process.env.EVAL_ARMS ?? '').split(',').filter(Boolean).map(entry => {
   const [name, root] = entry.split('=')
   if (!name || !root) throw new Error(`EVAL_ARMS entry "${entry}" is not name=checkout`)
@@ -76,7 +90,10 @@ const ARMS: Record<string, Arm> = Object.fromEntries((process.env.EVAL_ARMS ?? '
   if (!existsSync(join(root, 'apps/cli/lib/bin.js'))) throw new Error(`arm ${name}: ${root} has no built apps/cli/lib/bin.js; run bun run build there`)
   const settings = process.env[`EVAL_SETTINGS_${name.toUpperCase()}`] ?? '{}'
   JSON.parse(settings)
-  return [name, { kind: 'bake', root: resolve(root), extra: JSON.parse(process.env[`EVAL_EXTRA_${name.toUpperCase()}`] ?? '[]'), settings, llmDeepseek: shipsLlmDeepseek(root) }]
+  return [name, {
+    kind: 'bake', root: resolve(root), extra: JSON.parse(process.env[`EVAL_EXTRA_${name.toUpperCase()}`] ?? '[]'), settings, llmDeepseek: shipsLlmDeepseek(root),
+    composition: [systemPromptOverlay(root), ...rosterOverlay(root, roster)],
+  }]
 }))
 const armNames = Object.keys(ARMS)
 if (armNames.length < 2) throw new Error('EVAL_ARMS needs at least two name=checkout pairs, for example base=../bake-v0.2.0,candidate=.')
@@ -87,9 +104,9 @@ const MODEL_SETS: Record<string, string[]> = {
 }
 const models = [...new Set((process.env.EVAL_MODELS ?? 'standard,extended').split(',').filter(Boolean)
   .flatMap(entry => MODEL_SETS[entry] ?? [entry]))]
-/** The standard suite every recorded version runs; duplicate_recovery is an opt-in stress case. */
-const STANDARD_CASES = ['no_tools', 'ordinary_edit', 'path_discovery', 'stale_edit', 'unprompted_edit', 'multi_site_edit', 'multi_file_edit', 'shell_then_edit']
-const cases = (process.env.EVAL_CASES ?? STANDARD_CASES.join(',')).split(',')
+const cases = [...new Set((process.env.EVAL_CASES ?? STANDARD_CASES.join(',')).split(',').filter(Boolean)
+  .flatMap(entry => CASE_SETS[entry] ?? [entry]))]
+for (const scenario of cases) if (prompts[scenario] === undefined) throw new Error(`EVAL_CASES names unknown scenario ${scenario}`)
 const trials = Number(process.env.EVAL_TRIALS ?? 3)
 const settings = YAML.parse(readFileSync(join(process.env.HOME!, '.bake/settings.yaml'), 'utf8'))
 const original = settings['llm-pi-ai'].providers.cliproxyapi
@@ -220,139 +237,30 @@ function credential(name: string): string {
 }
 for (const route of routes) if (routes.filter(other => other.model === route.model).length > 1) throw new Error(`EVAL_MODELS names ${route.model} through two providers`)
 const summaries: any[] = []
-const capMs = 180_000
-const maxRequestsFor = (scenario: string) => scenario.startsWith('delegation') ? 40 : 14
 const maxLogicalTokens = Number(process.env.EVAL_MAX_TOKENS ?? 5_000_000)
 const hash = (text: string) => createHash('sha256').update(text).digest('hex')
-const baseCode = 'function roundMoney(value) {\n  return Math.floor(value * 100) / 100;\n}\nmodule.exports = { roundMoney };\n'
-const fixedTests = (file: string) => `const assert = require('node:assert/strict');\nconst { roundMoney } = require('./${file}');\nfor (const [input, expected] of [[1.236,1.24],[2.994,2.99],[0.019,0.02],[-1.236,-1.24],[0,0]]) assert.equal(roundMoney(input), expected);\nconsole.log('FIXTURE_PASS');\n`
-const natural = ' Work only inside this fixture. Do not delegate, install packages, use the network, modify test.cjs, or make commits. Run node test.cjs to verify and give a brief final result.'
-const common = ' Work only inside this fixture. Do not delegate, install packages, use the network, modify test.cjs, or make commits. Use the read and edit tools for source-file changes. Run node test.cjs to verify and give a brief final result.'
-const prompts: Record<string, string> = {
-  no_tools: 'Reply exactly TOKEN_CONTROL_OK. Do not call any tools.',
-  ordinary_edit: 'Fix roundMoney in src/money.js: it should round to the nearest cent, matching Math.round(value * 100) / 100. The tests in test.cjs describe the required behavior.' + common,
-  path_discovery: 'Fix roundMoney so it rounds to the nearest cent, matching Math.round(value * 100) / 100. An old ticket points to src/money.js, but the module may have moved. Locate the current implementation and use test.cjs to verify.' + common,
-  stale_edit: 'Read src/money.js with the read tool, then fix roundMoney to round to the nearest cent, matching Math.round(value * 100) / 100. Another writer may update this file while you work; preserve any added comments.' + common,
-  unprompted_edit: 'Fix roundMoney in src/money.js: it should round to the nearest cent, matching Math.round(value * 100) / 100.' + natural,
-  multi_site_edit: 'In src/config.js set DEFAULT_PORT to 8080, DEFAULT_HOST to \'0.0.0.0\', and RETRIES to 3.' + natural,
-  multi_file_edit: 'Fix two bugs: roundMoney in src/money.js must round to the nearest cent (Math.round(value * 100) / 100), and formatMoney in src/format.js must show two decimals with a leading $ sign.' + natural,
-  shell_then_edit: 'Read src/money.js, then run node scripts/stamp.cjs (it adds a build header to the file that must be kept), then fix roundMoney to round to the nearest cent, matching Math.round(value * 100) / 100.' + natural,
-  delegation: 'Use the subagent tool for this task: delegate to one subagent the job of reading notes/a.txt and notes/b.txt and returning each file\'s single line of text, labelled a and b. Then write summary.txt in this directory with the a line followed by the b line, one per line. Work only inside this fixture. Do not install packages, use the network, or make commits. Give a brief final result.',
-  // The delegation task with the route left to the host, so every delegation reaches the task router when one is on.
-  delegation_auto: 'Use the subagent tool for this task: delegate to one subagent the job of reading notes/a.txt and notes/b.txt and returning each file\'s single line of text, labelled a and b. Leave provider, model, and reasoning_effort unset so the host chooses the subagent\'s route. Then write summary.txt in this directory with the a line followed by the b line, one per line. Work only inside this fixture. Do not install packages, use the network, or make commits. Give a brief final result.',
-  duplicate_recovery: 'Exercise a guarded-edit recovery case. Before reading or running any other tool, attempt the same edit of src/money.js three times: replace "Math.floor(value * 100) / 100" with "Math.round(value * 100) / 100". Make these three edit calls consecutive, even if a call is refused. Then recover from any refusal and finish the correction.' + common,
-}
-/**
- * The subagent routing decisions a run's session logs recorded: who chose each
- * child's route, the route, and the router's fallback flag, assessment status,
- * and one-line reason.
- */
-function routingDecisions(dir: string): { source: string; model: string | null; effort: string | null; routerFallback: boolean | null; routerStatus: string | null; routerReason: string | null }[] {
+/** Every event the run's session logs recorded, for routing decisions and compactions. */
+function sessionEvents(dir: string): { type?: string; data?: any }[] {
   if (!existsSync(dir)) return []
   return readdirSync(dir, { recursive: true, encoding: 'utf8' }).filter(path => path.endsWith('.jsonl'))
     .flatMap(path => readFileSync(join(dir, path), 'utf8').split('\n').filter(Boolean))
     .map(line => JSON.parse(line) as { type?: string; data?: any })
-    .filter(event => event.type === 'subagent/routing-decision')
-    .map(({ data }) => ({ source: data.source, model: data.route?.model ?? null, effort: data.route?.reasoningEffort ?? null,
-      routerFallback: data.router?.fallback ?? null, routerStatus: data.router?.assessment?.status ?? null,
-      routerReason: typeof data.router?.reason === 'string' ? data.router.reason.slice(0, 120) : null }))
 }
-
-function persona(root: string): string {
-  const source = readFileSync(join(root, 'packages/preset/agent-presets/presets/standard/agent.cordis.yml'), 'utf8')
-  const start = source.indexOf('    prefix: |-\n') + '    prefix: |-\n'.length
-  return source.slice(start).split('\n- id:')[0]!.split('\n').map(line => line.startsWith('      ') ? line.slice(6) : line).join('\n').trim()
-}
-const configCode = "const DEFAULT_PORT = 3000\nconst DEFAULT_HOST = 'localhost'\nconst RETRIES = 1\nfunction url() {\n  return `http://${DEFAULT_HOST}:${DEFAULT_PORT}`\n}\nmodule.exports = { DEFAULT_PORT, DEFAULT_HOST, RETRIES, url }\n"
-const configTests = "const assert = require('node:assert/strict');\nconst c = require('./src/config.js');\nassert.equal(c.DEFAULT_PORT, 8080); assert.equal(c.DEFAULT_HOST, '0.0.0.0'); assert.equal(c.RETRIES, 3);\nassert.equal(c.url(), 'http://0.0.0.0:8080');\nconsole.log('FIXTURE_PASS');\n"
-const formatCode = "function formatMoney(value) {\n  return value.toFixed(1)\n}\nmodule.exports = { formatMoney }\n"
-const multiTests = fixedTests('src/money.js').replace("console.log('FIXTURE_PASS');", "const { formatMoney } = require('./src/format.js');\nassert.equal(formatMoney(3), '$3.00'); assert.equal(formatMoney(2.5), '$2.50');\nconsole.log('FIXTURE_PASS');")
-const stampScript = "const fs = require('node:fs');\nconst p = 'src/money.js';\nconst s = fs.readFileSync(p, 'utf8');\nif (!s.startsWith('// build: 42')) fs.writeFileSync(p, '// build: 42\\n' + s);\n"
-const DELEGATION_LINES = { a: 'ALPHA-7F3Q', b: 'BRAVO-2K9X' }
-/** The test file each scenario validates against, unchanged by the agent. */
-function testsFor(scenario: string, file: string): string {
-  if (scenario === 'multi_site_edit') return configTests
-  if (scenario === 'multi_file_edit') return multiTests
-  return fixedTests(file)
-}
-function fixture(root: string, scenario: string) {
-  const workspace = join(root, 'workspace')
-  mkdirSync(workspace)
-  const file = scenario === 'path_discovery' ? 'packages/billing/money.js' : scenario === 'multi_site_edit' ? 'src/config.js' : 'src/money.js'
-  if (scenario === 'multi_site_edit') {
-    mkdirSync(join(workspace, 'src'), { recursive: true })
-    writeFileSync(join(workspace, file), configCode)
-    writeFileSync(join(workspace, 'test.cjs'), configTests)
-    return { workspace, file }
-  }
-  if (scenario === 'multi_file_edit') {
-    mkdirSync(join(workspace, 'src'), { recursive: true })
-    writeFileSync(join(workspace, 'src/money.js'), baseCode)
-    writeFileSync(join(workspace, 'src/format.js'), formatCode)
-    writeFileSync(join(workspace, 'test.cjs'), multiTests)
-    return { workspace, file }
-  }
-  if (scenario.startsWith('delegation')) {
-    mkdirSync(join(workspace, 'notes'), { recursive: true })
-    writeFileSync(join(workspace, 'notes/a.txt'), `${DELEGATION_LINES.a}\n`)
-    writeFileSync(join(workspace, 'notes/b.txt'), `${DELEGATION_LINES.b}\n`)
-    return { workspace, file: 'summary.txt' }
-  }
-  if (scenario === 'shell_then_edit') {
-    mkdirSync(join(workspace, 'scripts'), { recursive: true })
-    writeFileSync(join(workspace, 'scripts/stamp.cjs'), stampScript)
-  }
-  if (scenario !== 'no_tools') {
-    mkdirSync(join(workspace, file, '..'), { recursive: true })
-    writeFileSync(join(workspace, file), baseCode)
-    writeFileSync(join(workspace, 'test.cjs'), fixedTests(file))
-    if (scenario === 'path_discovery') {
-      for (let i = 0; i < 40; i++) {
-        mkdirSync(join(workspace, `packages/utility${i}`), { recursive: true })
-        writeFileSync(join(workspace, `packages/utility${i}/index.js`), `module.exports = { fixtureNumber: ${i} };\n`)
-      }
-    }
-  }
-  return { workspace, file }
+/**
+ * Point the route's model entry at a smaller context window, so a scenario
+ * reaches compaction. Returns false where the arm's route has no `llm-pi-ai`
+ * model entry to carry it (the retired `llm-deepseek` adapter).
+ */
+function withContextWindow(settings: Record<string, any>, provider: string, contextWindow: number): boolean {
+  const models = settings['llm-pi-ai']?.providers?.[provider]?.models
+  if (!Array.isArray(models) || models.length === 0) return false
+  for (const model of models) model.contextWindow = contextWindow
+  return true
 }
 function wireUsage(data: any): any | undefined {
   const usage = data?.response?.usage ?? data?.message?.usage ?? data?.usage
   if (usage == null) return undefined
   return { event: data.type ?? 'usage', ...usage }
-}
-/** Steps, calls, and results in one shape, whichever agent produced the event stream. */
-interface Normalized {
-  final: string
-  steps: { usage?: Record<string, number> }[]
-  calls: { tool: string; input: any; callId: string }[]
-  results: { callId: string; status: 'ok' | 'error'; result: string }[]
-}
-/** Bake's headless `--json` stream is already in this shape. */
-function normalizeBake(events: any[]): Normalized {
-  return {
-    final: events.findLast(event => event.type === 'final')?.text ?? '',
-    steps: events.filter(event => event.type === 'status' && event.phase === 'step_end'),
-    calls: events.filter(event => event.type === 'tool_call'),
-    results: events.filter(event => event.type === 'tool_result'),
-  }
-}
-/** pi's `--mode json` stream: each assistant `message_end` is one model request. */
-function normalizePi(events: any[]): Normalized {
-  const assistant = events.filter(event => event.type === 'message_end' && event.message?.role === 'assistant').map(event => event.message)
-  const text = (content: unknown) => Array.isArray(content)
-    ? content.filter((block: any) => block?.type === 'text').map((block: any) => block.text).join('') : String(content ?? '')
-  return {
-    final: text(assistant.at(-1)?.content).trim(),
-    steps: assistant.map(message => ({ usage: message.usage === undefined ? undefined : {
-      inputTokens: message.usage.input ?? 0, outputTokens: message.usage.output ?? 0,
-      cacheReadTokens: message.usage.cacheRead ?? 0, cacheWriteTokens: message.usage.cacheWrite ?? 0,
-      totalTokens: message.usage.totalTokens ?? 0,
-    } })),
-    calls: events.filter(event => event.type === 'tool_execution_start' && event.parentToolCallId === undefined)
-      .map(event => ({ tool: event.toolName, input: event.args, callId: event.toolCallId })),
-    results: events.filter(event => event.type === 'tool_execution_end' && event.parentToolCallId === undefined)
-      .map(event => ({ callId: event.toolCallId, status: event.isError ? 'error' : 'ok', result: text(event.result?.content) })),
-  }
 }
 async function run(route: Route, scenario: string, trial: number, variant: string) {
   const arm = ARMS[variant]!
@@ -363,7 +271,11 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
   const savedPath = join(out, `${label}.json`)
   if (existsSync(savedPath)) { const saved = JSON.parse(readFileSync(savedPath, 'utf8')); summaries.push(saved); return saved }
   const root = mkdtempSync(join(tmpdir(), 'bake-token-eval-'))
-  const { workspace, file } = fixture(root, scenario)
+  const built = fixture(root, scenario)
+  const { workspace, file } = built
+  const contextWindow = CONTEXT_WINDOWS[scenario]
+  // The rendered system prompt of the agent's first request: the composition this sample measured.
+  let systemPrompt: string | null = null
   const home = join(root, 'home'); mkdirSync(home, { mode: 0o700 })
   const wire: any[] = []
   const events: any[] = []
@@ -397,6 +309,7 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
         anthropicBeta: request.headers.get('anthropic-beta'), userAgent: request.headers.get('user-agent'),
       }
       wire.push(rec)
+      if (wire.length === 1) systemPrompt = systemPromptOf(payload)
       if (scenario === 'no_tools' && trial === 0 && wire.length === 1) writeFileSync(join(out, `${label}.request.json`), body)
       if (scenario === 'ordinary_edit' && trial === 0) writeFileSync(join(out, `${label}.request-${wire.length}.json`), body)
       console.log(JSON.stringify({ progress: label, request: wire.length, bytes: rec.requestBytes }))
@@ -470,31 +383,41 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
     const writeOnce = `if (changed) return;\n changed = true;\n writeFileSync(${JSON.stringify(join(workspace, file))}, '// EXTERNAL_CHANGE_KEEP\\n' + readFileSync(${JSON.stringify(join(workspace, file))}, 'utf8'));\n writeFileSync(${JSON.stringify(injectionPath)}, JSON.stringify({ injected: true }));`
     const target = (path: string) => `resolve(${JSON.stringify(workspace)}, ${path} ?? '') === ${JSON.stringify(join(workspace, file))}`
     let command: string[]
+    // Whether this sample's route carries the scenario's smaller context window.
+    let contextWindowApplied = false
     const env: Record<string, string | undefined> = { ...process.env, NO_COLOR: '1' }
     delete env.DEEPSEEK_API_KEY
     if (piRoute !== undefined) {
       const agentDir = join(root, 'pi-agent'); mkdirSync(agentDir, { mode: 0o700 })
       writeFileSync(join(agentDir, 'models.json'), JSON.stringify({ providers: { eval: {
-        baseUrl: `${server.url.origin}/upstream`, api: piRoute.api, apiKey: '$EVAL_API_KEY', models: [piRoute.model],
+        baseUrl: `${server.url.origin}/upstream`, api: piRoute.api, apiKey: '$EVAL_API_KEY',
+        models: [contextWindow === undefined ? piRoute.model : { ...piRoute.model, contextWindow }],
       } } }), { mode: 0o600 })
       // Bake arms run with retries off; pi's agent-level retry would hide failed requests from the pair.
-      writeFileSync(join(agentDir, 'settings.json'), JSON.stringify({ quietStartup: true, retry: { enabled: false } }))
+      // A forced window also gets compaction settings that mirror Bake's policy at that window.
+      writeFileSync(join(agentDir, 'settings.json'), JSON.stringify({
+        quietStartup: true, retry: { enabled: false }, ...contextWindow === undefined ? {} : { compaction: piCompactionFor(contextWindow) },
+      }))
       writeFileSync(hookPath, `import { readFileSync, writeFileSync } from 'node:fs';\nimport { resolve } from 'node:path';\nexport default function (pi) {\n let changed = false;\n pi.on('tool_result', (event) => {\n if (event.toolName !== 'read' || event.isError || !(${target('event.input?.path')})) return;\n ${writeOnce}\n });\n}\n`)
+      contextWindowApplied = contextWindow !== undefined
       Object.assign(env, { PI_CODING_AGENT_DIR: agentDir, PI_OFFLINE: '1', EVAL_API_KEY: credential(piRoute.keyName) })
-      command = [arm.bin!, '--mode', 'json', '--no-session', '--no-extensions', '--no-skills', '--no-prompt-templates', '--no-themes', '--no-context-files',
+      command = [arm.bin!, '--mode', 'json', '--no-session', '--no-extensions', '--no-skills', '--no-prompt-templates', '--no-themes',
+        ...usesAgentInstructions(scenario) ? [] : ['--no-context-files'],
         '--model', `eval/${model}`, '--thinking', route.effort, ...(scenario === 'stale_edit' ? ['-e', hookPath] : []), prompts[scenario]!]
     } else {
+      const routeSettings = route.settings(`${server.url.origin}/upstream`, arm.llmDeepseek)
+      if (contextWindow !== undefined) contextWindowApplied = withContextWindow(routeSettings, route.provider, contextWindow)
       writeFileSync(join(home, 'settings.yaml'), YAML.stringify({
-        ...merge(route.settings(`${server.url.origin}/upstream`, arm.llmDeepseek),
-          JSON.parse(arm.settings.replaceAll('$PROVIDER', route.provider).replaceAll('$MODEL', model))),
+        ...merge(routeSettings, JSON.parse(arm.settings.replaceAll('$PROVIDER', route.provider).replaceAll('$MODEL', model))),
         permission: { defaultPreset: 'danger-full-access' },
       }), { mode: 0o600 })
       copyFileSync(credentialFile, join(home, '.credentials.yaml'))
       writeFileSync(hookPath, `import { readFileSync, writeFileSync } from 'node:fs';\nimport { resolve } from 'node:path';\nexport const name = 'token-evaluation-external-writer';\nexport function apply(ctx) {\n let changed = false;\n ctx.on('tools/result', (exec, result) => {\n if (exec.name !== 'read' || result.isError || !(${target('exec.arguments?.file_path')})) return;\n ${writeOnce}\n });\n}\n`)
       const overlay = [
-        { id: 'system-prompt', config: { personaPrefix: persona(arm.root) } },
+        ...arm.composition,
         { id: 'session-title-llm', disabled: true },
-        { id: 'agent-instructions', disabled: true },
+        // Ambient AGENTS stay out, except where the scenario's own AGENTS.md is the point.
+        ...usesAgentInstructions(scenario) ? [] : [{ id: 'agent-instructions', disabled: true }],
         { id: 'session-persistence-jsonl', config: { root: join(root, 'sessions'), compression: 'none' } },
         ...(scenario === 'stale_edit' ? [{ insert: [{ id: 'token-evaluation-external-writer', name: hookPath }] }] : []),
         ...arm.extra,
@@ -517,7 +440,7 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
     })
     child.stderr!.setEncoding('utf8')
     child.stderr!.on('data', chunk => { stderr += chunk })
-    deadline = setTimeout(() => terminate('wall_clock_limit'), capMs)
+    deadline = setTimeout(() => terminate('wall_clock_limit'), capMsFor(scenario))
     ;({ code, signal } = await new Promise<{ code: number | null; signal: string | null }>((resolve, reject) => {
       child!.once('error', reject)
       child!.once('close', (code, signal) => resolve({ code, signal }))
@@ -529,38 +452,42 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
     let usageComplete = steps.length > 0 && steps.every(step => step.usage !== undefined)
     for (const step of steps) if (step.usage !== undefined) for (const key of Object.keys(usage)) usage[key as keyof typeof usage] += step.usage[key] ?? 0
     if (wire.some(request => request.status !== 200 || request.usage.length === 0)) usageComplete = false
-    let validated = scenario === 'no_tools' && final.trim() === 'TOKEN_CONTROL_OK' && calls.length === 0
-    let source = ''
-    let testsUnchanged: boolean | null = null
-    let testExit: number | null = null
-    if (scenario.startsWith('delegation')) {
-      source = existsSync(join(workspace, file)) ? readFileSync(join(workspace, file), 'utf8') : ''
-      validated = code === 0 && (byTool.subagent ?? 0) > 0
-        && source.trim().split(/\r?\n/).map(line => line.trim()).join('\n') === `${DELEGATION_LINES.a}\n${DELEGATION_LINES.b}`
-    } else if (scenario !== 'no_tools') {
-      source = readFileSync(join(workspace, file), 'utf8')
-      testsUnchanged = readFileSync(join(workspace, 'test.cjs'), 'utf8') === testsFor(scenario, file)
-      const validation = Bun.spawnSync(['node', 'test.cjs'], { cwd: workspace, stdout: 'pipe', stderr: 'pipe', timeout: 5000 })
-      testExit = validation.exitCode
-      validated = validation.exitCode === 0 && testsUnchanged
-        && (scenario !== 'stale_edit' || (existsSync(injectionPath) && source.includes('EXTERNAL_CHANGE_KEEP')))
-        && (scenario !== 'shell_then_edit' || source.startsWith('// build: 42'))
-    }
+    const { validated, source, testsUnchanged, testExit, fixturesUnchanged } = validate(scenario, built, {
+      code, final, toolCalls: calls.length, subagentCalls: byTool.subagent ?? 0, injectionPath,
+    })
+    const check = checkCommandFor(scenario)
+    const logged = piRoute === undefined ? sessionEvents(join(root, 'sessions')) : []
+    const workspaces = [workspace, realpathSync(workspace)]
     const toolErrors = results.filter(result => result.status === 'error').map(result => result.result)
     const summary = {
       label, model, provider: piRoute === undefined ? route.provider : 'eval', agent: arm.kind, api, effort: route.effort, scenario, trial, variant, code, signal, abortCause: abortCause ?? null,
-      success: code === 0 && validated, validated, testsUnchanged, testExit,
+      success: code === 0 && validated, validated, testsUnchanged, testExit, fixturesUnchanged,
       injectedStale: scenario === 'stale_edit' && existsSync(injectionPath),
       elapsedMs: Math.round(performance.now() - started), requests: wire.length, steps: steps.length,
       toolCalls: calls.length, byTool, toolErrors: toolErrors.length,
       duplicateRefusals: toolErrors.filter(text => /identical to one already refused|repeats one already refused/.test(text)).length,
       guardRefusals: toolErrors.filter(text => /has not been read|changed since it was read/.test(text)).length,
-      shellEdits: calls.filter(call => call.tool === 'bash' && /python3?\b[\s\S]*(write_text|\.write\(|open\([^)]*['"]w)|sed\s+-[a-zA-Z]*i|perl\s+-[a-zA-Z]*i|>\s*src\//.test(call.input?.command ?? '')).length,
+      shellEdits: shellEdits(calls),
       toolHelpCalls: byTool.tool_help ?? 0,
       multiEditCalls: calls.filter(call => call.tool === 'edit' && Array.isArray(call.input?.edits)).length,
       editedLineEchoes: results.filter(result => String(result.result).includes('The edited lines now read')).length,
       subagentCalls: byTool.subagent ?? 0,
-      routingDecisions: routingDecisions(join(root, 'sessions')),
+      routingDecisions: routingDecisions(logged),
+      roster: arm.kind === 'pi' ? null : roster,
+      // The rendered prompt and whether it is the shipped composition; pi brings its own prompt, so it is not checked.
+      systemPrompt,
+      composition: arm.kind === 'pi' || systemPrompt === null ? null : compositionCheck(systemPrompt, workspaces),
+      requestFloor: requestFloorFor(scenario),
+      excessRequests: excessRequests(wire.length, requestFloorFor(scenario)),
+      requestsOverFloor: requestsOverFloor(wire.length, requestFloorFor(scenario)),
+      editCheckSplits: editCheckSplits(calls, check),
+      orientationCalls: orientationCalls(calls, workspaces),
+      ranCheck: ranCheck(calls, check),
+      verifiedBeforeFinal: verifiedBeforeFinal(calls, check),
+      backgroundStarts: backgroundStarts(calls),
+      contextWindow: contextWindowApplied ? contextWindow : null,
+      compactions: piRoute === undefined ? compactions(logged) : null,
+      runawayAbort: runawayAbort([stderr, final, ...events.filter(event => event.type === 'unparsed').map(event => event.text)]),
       cache: (() => {
         const logical = usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens
         const perStep = steps.map(step => step.usage === undefined ? null : ({ read: step.usage.cacheReadTokens ?? 0, write: step.usage.cacheWriteTokens ?? 0, uncached: step.usage.inputTokens ?? 0 }))
@@ -586,6 +513,7 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
     writeFileSync(join(out, `${label}.events.jsonl`), events.map(event => JSON.stringify(event)).join('\n') + '\n')
     summaries.push(summary)
     writeFileSync(join(out, 'results.json'), JSON.stringify(summaries, null, 2) + '\n')
+    if (summary.composition?.ok === false) console.log(JSON.stringify({ label, composition: summary.composition }))
     console.log(JSON.stringify({ label, success: summary.success, requests: wire.length, tools: calls.length, errors: toolErrors.length, tokens: summary.logicalTotalTokens, uncached: usage.inputTokens, cached: usage.cacheReadTokens, complete: usageComplete, seconds: Math.round(summary.elapsedMs / 1000) }))
     return summary
   } finally {
@@ -607,13 +535,17 @@ writeFileSync(join(out, 'design.json'), JSON.stringify({
   arms: Object.fromEntries(armNames.map(name => [name, ARMS[name]])),
   revisions: Object.fromEntries(armNames.map(name => [name, revisionOf(ARMS[name]!)])),
   startedAt: new Date().toISOString(),
-  node: Bun.spawnSync(['node', '--version']).stdout.toString().trim(), models: routes.map(route => route.model), cases, trials,
+  node: Bun.spawnSync(['node', '--version']).stdout.toString().trim(), models: routes.map(route => route.model), cases, trials, roster,
   routes: Object.fromEntries(routes.map(route => [route.model, { provider: route.provider, api: route.api, effort: route.effort }])),
-  effort: 'medium where the model offers it; DeepSeek runs at high, its default, having no medium', maxOutputTokens: 8192, capMs, maxRequests: { default: 14, delegation: 40, delegation_auto: 40 }, maxLogicalTokens,
+  effort: 'medium where the model offers it; DeepSeek runs at high, its default, having no medium', maxOutputTokens: 8192, capMs: wallClockCaps().default, capMsByScenario: wallClockCaps(), maxRequests: requestCaps(), requestFloors: REQUEST_FLOORS, contextWindows: CONTEXT_WINDOWS, maxLogicalTokens,
+  // pi's compaction settings for each forced window, mirroring Bake's default threshold and retained tail; pi's defaults would compact before every request.
+  piCompaction: Object.fromEntries(Object.entries(CONTEXT_WINDOWS).map(([scenario, contextWindow]) => [scenario, piCompactionFor(contextWindow)])),
   retryPolicy: { mode: 'normal', maxRetries: 0 },
   gateway: override === undefined ? null : new URL(override.baseUrl).origin,
-  composition: 'Built headless CLI, with each revision standard-preset persona; host tools retained. Session title and ambient AGENTS disabled equally.'
-    + (armNames.some(name => ARMS[name]!.kind === 'pi') ? ' A pi arm runs pi --mode json with its own system prompt and default tools, no session, extensions, skills, prompt templates, or context files, agent-level retry off, and pi\'s own wire for each model; it skips scenarios that need a Bake-only tool.' : ''),
+  composition: 'Built headless CLI with each revision\'s own headless system-prompt config (harness opener off, working-directory suffix) and its standard-preset persona prefix; host tools retained.'
+    + (roster === 'tui' ? ' Roster tui: the standard preset\'s tool-fs, tool-fs-search, and tool-result-pruner configs and the terminal spill-policy inline cap; ask_user_question stays out, having no one to answer it headless.' : ' Roster headless: the headless bundle\'s own tool configs.')
+    + ' Session title and ambient AGENTS disabled equally; instructions_file keeps agent-instructions for its own AGENTS.md.'
+    + (armNames.some(name => ARMS[name]!.kind === 'pi') ? ' A pi arm runs pi --mode json with its own system prompt and default tools, no session, extensions, skills, prompt templates, or context files, agent-level retry off, and pi\'s own wire for each model; it skips scenarios that need a Bake-only tool. Where a scenario forces a context window, pi gets the same window and compaction settings that mirror Bake\'s policy at it (piCompaction).' : ''),
   cache: 'Fresh process/home/workspace/session per sample; provider cache is observed, not assumed cold. Pair order alternates by trial and scenario.',
   endpoint: 'Agent exits; external Node test passes without test modification; injected external comment is preserved.',
   tokenAccounting: 'Provider total_tokens is authoritative. Gemini via Responses may report reasoning outside output_tokens; recorded separately and reconciled against raw SSE. Anthropic-format totals, DeepSeek\'s included, are the sum of input, cache reads/writes, and output.',
@@ -630,7 +562,10 @@ for (const route of routes) {
       for (const variant of order) {
         if (ARMS[variant]!.kind === 'pi' && piUnsupported(scenario)) continue
         if (summaries.reduce((sum, sample) => sum + sample.logicalTotalTokens, 0) > maxLogicalTokens) throw new Error('Evaluation token limit reached; partial results retained')
-        pair.push(await run(route, scenario, trial, variant))
+        const sample = await run(route, scenario, trial, variant)
+        pair.push(sample)
+        // A Bake prompt that is not the shipped composition invalidates every sample after it; stop before spending more.
+        if (sample.composition?.ok === false) throw new Error(`${sample.label}: the rendered system prompt is not the shipped composition (${JSON.stringify(sample.composition)}); partial results retained`)
       }
       if (scenario === 'no_tools' && pair.every(sample => !sample.success && (sample.requests === 0 || sample.rawProviderUsage.some((request: any) => request.status !== 200)))) {
         console.log(JSON.stringify({ model, blocked: 'both control samples failed before a usable response; remaining cells skipped' }))

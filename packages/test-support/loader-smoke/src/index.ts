@@ -22,6 +22,17 @@ export {
   type FixtureTurnOptions,
   type FixtureTurnResult,
 } from './agent-turn.ts'
+export {
+  MODEL_SURFACE_TASK,
+  modelSurfaceSizes,
+  normalizeModelSurface,
+  pathPlaceholders,
+  plantModelSurfaceWorkspace,
+  renderModelSurface,
+  type ModelSurfacePlaceholder,
+  type ModelSurfaceRequest,
+  type ModelSurfaceSizes,
+} from './model-surface.ts'
 
 const DEFAULT_PROCESS_TIMEOUT_MS = 30_000
 

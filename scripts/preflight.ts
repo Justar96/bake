@@ -230,6 +230,12 @@ export const STEPS: readonly Step[] = [
     command: () => bun('test', '--parallel', '--timeout=30000', ...bunTests('scripts')),
   },
   {
+    name: 'evals-unit', phase: 'static', group: 'unit',
+    summary: 'eval runner unit tests and fixture dry checks under bun test',
+    // A separate run: sharing the scripts-unit worker left it spinning in a synchronous spawn on Linux CI.
+    command: () => bun('test', '--parallel', '--timeout=30000', ...bunTests('evals')),
+  },
+  {
     name: 'build', phase: 'build', group: 'build', needsBuild: true,
     summary: 'native addon, runtime libraries, and the TUI bundle',
     command: () => bun('run', 'build'),

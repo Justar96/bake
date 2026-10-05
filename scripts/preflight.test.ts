@@ -1,4 +1,5 @@
 import { readdirSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
 import {
   bunTests, changelogGap, parseOptions, runtimeArgs, selectSteps, STEPS, strayBuildOutput, vitestFailures, type Scope,
@@ -122,14 +123,17 @@ describe('preflight', () => {
       ['node', 'node_modules/vitest/vitest.mjs', 'run', '--config', 'vitest.e2e.config.ts', '--maxWorkers=1', 'a.e2e.ts'])
   })
 
-  it('names every Bun test file under scripts to bun test, and no Vitest spec', () => {
-    const onDisk = readdirSync(import.meta.dirname, { recursive: true, encoding: 'utf8' })
+  it('names every Bun test file under scripts and evals to bun test, and no Vitest spec', () => {
+    const onDisk = (directory: string) => readdirSync(join(import.meta.dirname, '..', directory), { recursive: true, encoding: 'utf8' })
       .map(path => path.replaceAll('\\', '/'))
       .filter(path => path.endsWith('.test.ts') && !path.split('/').includes('node_modules'))
-      .map(path => `./scripts/${path}`).sort()
-    expect(onDisk).toContain('./scripts/preflight.test.ts')
-    expect(bunTests('scripts')).toEqual(onDisk)
-    const unit = STEPS.find(step => step.name === 'scripts-unit')?.command?.(parseOptions([]), scope([]))
-    expect(unit).toEqual(['bun', 'test', '--parallel', '--timeout=30000', ...onDisk])
+      .map(path => `./${directory}/${path}`).sort()
+    expect(onDisk('scripts')).toContain('./scripts/preflight.test.ts')
+    expect(onDisk('evals')).toContain('./evals/agent-loop/metrics.test.ts')
+    expect(bunTests('scripts')).toEqual(onDisk('scripts'))
+    expect(bunTests('evals')).toEqual(onDisk('evals'))
+    const command = (name: string) => STEPS.find(step => step.name === name)?.command?.(parseOptions([]), scope([]))
+    expect(command('scripts-unit')).toEqual(['bun', 'test', '--parallel', '--timeout=30000', ...onDisk('scripts')])
+    expect(command('evals-unit')).toEqual(['bun', 'test', '--parallel', '--timeout=30000', ...onDisk('evals')])
   })
 })
