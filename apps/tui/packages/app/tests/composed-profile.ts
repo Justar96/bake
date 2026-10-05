@@ -1,11 +1,13 @@
 /**
  * The terminal profile as it ships, mounted in-process for specs that read
- * what its agents send: `bake-base` with the terminal bundle's patch applied
- * by the Loader's own patch semantics, every row the composition leaves
+ * what its agents send: the bundles of the shipped `tui` profile template,
+ * each with the patch its manifest declares, applied by the Loader's own
+ * patch semantics, every row the composition leaves
  * active mounted through the Loader, and the shipped presets the runner
  * offers. Only the model, the persistence root, the workspace, and the
  * terminal surface itself are replaced.
  */
+import { readFileSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -15,6 +17,7 @@ import { expect, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Include, { applyEntryPatches, entryListSchema, type PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 import Loader, { Group } from '@deepseek-ai/cordis-plugin-loader'
+import { bundlePatchPaths, PROFILE_TEMPLATES, resolveBundleDir, type ProfileManifest } from 'bake-app-boot'
 import { dshHomePath } from 'bake-home-paths'
 import type { SessionEvent } from 'bake-session'
 import { dictionaries } from 'bake-tui-ui/copy.ts'
@@ -24,8 +27,28 @@ import { ScriptedModel } from './harness.ts'
 
 export const REPOSITORY = fileURLToPath(new URL('../../../../../', import.meta.url))
 
-/** The layers the shipped `tui` profile applies over its empty root, in order. */
-export const LAYERS = ['packages/bundle/base/cordis.patch.yml', 'apps/tui/packages/app/cordis.built.patch.yml']
+/** Where the launcher resolves a profile's bundles from: the installed CLI's manifest. */
+const INSTALL_ANCHOR = join(REPOSITORY, 'apps/cli/package.json')
+
+/** The bundles the shipped `tui` profile template lists, in layer order. */
+export const STARTED_BUNDLES: readonly string[] = (() => {
+  const template = PROFILE_TEMPLATES.tui
+  if (template === undefined) throw new Error('no shipped tui profile template')
+  return template.bundles
+})()
+
+/**
+ * The patch files the shipped `tui` profile applies over its empty root, in
+ * order: each template bundle resolved from the installation as the launcher
+ * resolves it, then expanded by its own `dsh.bundle.patch` declaration.
+ */
+export const LAYERS: readonly string[] = STARTED_BUNDLES.flatMap(name => {
+  const packageDir = resolveBundleDir('composed-profile', name, INSTALL_ANCHOR, REPOSITORY)
+  const manifest = JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8')) as ProfileManifest
+  const bundle = manifest.dsh?.bundle
+  if (bundle === undefined) throw new Error(`profile bundle ${name} declares no dsh.bundle`)
+  return bundlePatchPaths(packageDir, bundle)
+})
 
 /** The presets the terminal runner offers. */
 export type ShippedPreset = 'standard' | 'ptc' | 'minimal' | 'cordis'
@@ -41,7 +64,7 @@ export interface ComposedProfileOptions {
 /** @returns the shipped layers, parsed. */
 export async function shippedLayers(): Promise<PatchOptions[][]> {
   return Promise.all(LAYERS.map(async path =>
-    yaml.load(await readFile(join(REPOSITORY, path), 'utf8'), { schema: entryListSchema }) as PatchOptions[]))
+    yaml.load(await readFile(path, 'utf8'), { schema: entryListSchema }) as PatchOptions[]))
 }
 
 /**
@@ -87,8 +110,8 @@ export async function composedProfile(cleanup: (() => Promise<void>)[], options:
   const profileDir = join(home, 'profiles', 'tui')
   ctx.provide('profileContext', {
     name: 'tui', dir: profileDir, patchPath: join(profileDir, 'cordis.patch.yml'),
-    installAnchor: join(REPOSITORY, 'apps/cli/package.json'), cwd: workspace, home,
-    startedBundles: ['bake-base', 'bake-tui-app'], overlays: [], telemetryDisabledEnv: undefined,
+    installAnchor: INSTALL_ANCHOR, cwd: workspace, home,
+    startedBundles: [...STARTED_BUNDLES], overlays: [], telemetryDisabledEnv: undefined,
   })
   await ctx.plugin(Loader)
   ctx.loader.builtins.include = Include

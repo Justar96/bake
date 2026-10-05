@@ -189,6 +189,7 @@
         "@types/react": "catalog:",
         "bake-agent-loop": "workspace:^",
         "bake-agent-loop-testkit": "workspace:^",
+        "bake-app-boot": "workspace:^",
         "bake-attachment-local": "workspace:^",
         "bake-command-compact": "workspace:^",
         "bake-command-goal": "workspace:^",

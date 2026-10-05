@@ -20,6 +20,9 @@
       "path": "packages/ui"
     },
     {
+      "path": "../../packages/boot/app-boot"
+    },
+    {
       "path": "../../packages/test-support/agent-loop-testkit"
     },
     {
