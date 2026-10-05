@@ -26,7 +26,7 @@ evals/agent-loop/
 
 ## When to record
 
-Record an eval for any change that can alter what a model sees or how many round trips a task takes. That includes prompts and personas; tool names, schemas, descriptions, arguments, results, and errors; context assembly, compaction, and caching; the agent loop; and LLM adapters. A change limited to the terminal UI, docs, or tests needs none.
+Record an eval for any change that can alter what a model sees or how many round trips a task takes. That includes prompts and personas; tool names, schemas, descriptions, arguments, results, and errors; context assembly, compaction, and caching; the agent loop; and LLM adapters. A change limited to the terminal UI, docs, or tests needs none. A diff in the [model-surface snapshots](../docs/testing.md#pin-the-model-surface), which pin each shipped composition's first request, means the change reached the model and needs a record; a change to how the snapshots are rendered does not.
 
 ## Run
 
