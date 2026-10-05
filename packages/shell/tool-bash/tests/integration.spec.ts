@@ -99,11 +99,12 @@ describe('bash tool through the agent loop', () => {
     dirs.push(root)
     const dshHome = join(root, 'dsh-home')
     vi.stubEnv('DSH_STALE_PARENT', 'stale')
-    vi.stubEnv('BAKE_STALE_PARENT', 'stale')
+    // An outer terminal's PTY id is a managed fact this bash call does not set.
+    vi.stubEnv('BAKE_PTY_SESSION_ID', 'stale')
     const adapter = new MockAdapter([
       toolCallResponse('call-1', 'bash', {
         command: 'printf \'%s\\n\' "$DSH_HOME" "$DSH_SHELL" "$DSH_SESSION_ID" "${DSH_STALE_PARENT-unset}" '
-          + '"$BAKE_HOME" "$BAKE_SHELL" "$BAKE_SESSION_ID" "${BAKE_STALE_PARENT-unset}"',
+          + '"$BAKE_HOME" "$BAKE_SHELL" "$BAKE_SESSION_ID" "${BAKE_PTY_SESSION_ID-unset}"',
         description: 'inspect session environment',
       }),
       textResponse('Session environment inspected.'),

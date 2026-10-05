@@ -75,7 +75,7 @@ A terminal request can opt into `shellActivity`. `inspectActivity()` combines su
 
 ### Environment every child starts from
 
-Children never inherit the harness's ambient secrets: credential-shaped names and ambient `DSH_*` facts are scrubbed, and the caller's explicit `env` merges after that scrub. A deliberately forwarded credential or a current `DSH_*` deployment fact still reaches the child; an explicit `undefined` tombstone removes an ordinary ambient entry.
+Children never inherit the harness's ambient secrets: credential-shaped names, ambient `DSH_*` facts, and the `BAKE_*` spellings of managed facts (`BAKE_HOME`, `BAKE_SHELL`, `BAKE_SESSION_ID`, `BAKE_PTY_SESSION_ID`, and each name `withBakeEnvironmentNames` has produced) are scrubbed, and the caller's explicit `env` merges after that scrub. Other `BAKE_*` names, such as `BAKE_NO_UPDATE_CHECK`, are user settings and pass through. A deliberately forwarded credential or a current `DSH_*` deployment fact still reaches the child; an explicit `undefined` tombstone removes an ordinary ambient entry.
 
 ### What can go wrong
 

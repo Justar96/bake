@@ -50,7 +50,8 @@ function shellArgv(command: string): string[] {
     case 'echo "$EXTRA_ONE/$EXTRA_TWO"': return node('console.log(process.env.EXTRA_ONE + "/" + process.env.EXTRA_TWO)')
     case 'echo "$EXPLICIT_OVERRIDE_PASSWORD"': return node('console.log(process.env.EXPLICIT_OVERRIDE_PASSWORD)')
     case 'echo "${SUBPROCESS_TOMBSTONE_PROBE:-absent}"': return node('console.log(process.env.SUBPROCESS_TOMBSTONE_PROBE ?? "absent")')
-    case 'echo "${BAKE_STALE:-absent}"': return node('console.log(process.env.BAKE_STALE ?? "absent")')
+    case 'echo "[${BAKE_SESSION_ID:-absent}|${BAKE_NO_UPDATE_CHECK:-absent}]"':
+      return node('console.log("[" + [process.env.BAKE_SESSION_ID ?? "absent", process.env.BAKE_NO_UPDATE_CHECK ?? "absent"].join("|") + "]")')
     case 'echo "[${DSH_STALE:-absent}|$DSH_SHELL|$DSH_SESSION_ID]"':
       return node('console.log("[" + [process.env.DSH_STALE ?? "absent", process.env.DSH_SHELL, process.env.DSH_SESSION_ID].join("|") + "]")')
     case 'echo "[${DSH_TEST_API_KEY:-absent}|${DSH_TEST_TOKEN:-absent}|${SUBPROCESS_TEST_PASSWORD:-absent}|${DSH_TEST_PLAIN:-absent}]"':
@@ -1493,13 +1494,15 @@ describe('environment and spill-file hardening', () => {
     }
   })
 
-  it('scrubs ambient BAKE_* entries as it does DSH_* ones', async () => {
-    process.env.BAKE_STALE = 'old-value'
+  it('scrubs the ambient BAKE_ spelling of a managed fact and keeps a BAKE_ user setting', async () => {
+    process.env.BAKE_SESSION_ID = 'old-value'
+    process.env.BAKE_NO_UPDATE_CHECK = '1'
     try {
-      const result = await finish(spawnSubprocess(spec('echo "${BAKE_STALE:-absent}"')))
-      expect(result.stdout.text.trim()).toBe('absent')
+      const result = await finish(spawnSubprocess(spec('echo "[${BAKE_SESSION_ID:-absent}|${BAKE_NO_UPDATE_CHECK:-absent}]"')))
+      expect(result.stdout.text.trim()).toBe('[absent|1]')
     } finally {
-      delete process.env.BAKE_STALE
+      delete process.env.BAKE_SESSION_ID
+      delete process.env.BAKE_NO_UPDATE_CHECK
     }
   })
 

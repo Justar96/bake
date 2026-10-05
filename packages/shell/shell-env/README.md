@@ -76,7 +76,7 @@ This section explains the design decisions behind the registry and points at the
 
 ### Design philosophy
 
-- **Trusted namespace, rebuilt per call.** The environment is a Harness-owned `DSH_*` namespace: the shell executor discards inherited `DSH_*` and `BAKE_*` values and merges the registry's current snapshot for each execution, so nested harnesses and concurrent parent/child agents cannot leak stale identities, and `process.env` is never modified.
+- **Trusted namespace, rebuilt per call.** The environment is a Harness-owned `DSH_*` namespace: the shell executor discards inherited `DSH_*` values and the `BAKE_*` spellings of managed facts (`BAKE_HOME`, `BAKE_SHELL`, `BAKE_SESSION_ID`, `BAKE_PTY_SESSION_ID`, and each contributed fact once a call has received it), and merges the registry's current snapshot for each execution, so nested harnesses and concurrent parent/child agents cannot leak stale identities, and `process.env` is never modified.
 - **Declared ownership, loud conflicts.** Contributors declare their keys up front so duplicate ownership is detected before the first command; resolvers may only return declared keys.
 - **Built-ins stay here.** `DSH_HOME`, `DSH_SHELL`, and `DSH_SESSION_ID` are reserved for the registry; contributors cannot claim them.
 
