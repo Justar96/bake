@@ -4,10 +4,10 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Agent } from 'bake-agent'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
-import { defineTool } from '@deepseek-ai/dsh-tools'
-import type { GenericCallView } from '@deepseek-ai/dsh-tools'
+import { defineTool } from 'bake-tools'
+import type { GenericCallView } from 'bake-tools'
 import {
   allocateScheduleId,
   createAfterScheduleRecord,

@@ -4,7 +4,7 @@
 import type { Context, FiberState } from '@deepseek-ai/cordis'
 import { installFailLoud, loadEnv, resolveConfigPath } from '@deepseek-ai/dsh-app-boot'
 import { runFixtureTurn } from '@deepseek-ai/dsh-loader-smoke'
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import type { SessionEvent } from 'bake-session'
 import { bootProductionProfile } from './production-profile.ts'
 
 const NAME = 'headless-test-driver'

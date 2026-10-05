@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { scopeTarget } from '@deepseek-ai/dsh-scope'
-import { SessionId } from '@deepseek-ai/dsh-session'
+import { scopeTarget } from 'bake-scope'
+import { SessionId } from 'bake-session'
 import SubagentRuntime, { SubagentRunId } from '@deepseek-ai/dsh-subagent'
 import type {
   SubagentProvider,

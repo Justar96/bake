@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { PtcRunResult } from '@deepseek-ai/dsh-ptc-runtime'
 import { mountRuntime, tools } from './setup.ts'
 
@@ -223,11 +223,43 @@ describe('limits', () => {
   })
 
   it('times out a busy program and one waiting on a binding', async () => {
-    const { run } = await mountRuntime()
-    const busy = await run({ program: 'console.log("start"); for (;;) {}', bindings: [], timeoutMs: 300 })
-    expect(busy).toEqual({ logs: ['start'], error: { kind: 'timeout', message: 'execution deadline reached (300ms)' } })
-    const waiting = await run({ program: 'await tools.wait({})', bindings: tools({ wait: () => new Promise(() => {}) }), timeoutMs: 300 })
-    expect(waiting.error?.kind).toBe('timeout')
+    const { ctx, run } = await mountRuntime()
+    const busyEntered = Promise.withResolvers<null>()
+    const waitingEntered = Promise.withResolvers<null>()
+    const release = Promise.withResolvers<null>()
+    const enter = vi.fn(async () => { busyEntered.resolve(null); return null })
+    const wait = vi.fn(() => { waitingEntered.resolve(null); return release.promise })
+    const cleanup = async () => {
+      release.resolve(null)
+      try {
+        await ctx.fiber.dispose()
+      } finally {
+        vi.useRealTimers()
+      }
+    }
+    onTestFinished(cleanup)
+    // The deadline includes startup. Observe real worker entry before advancing
+    // the host clock so these cases exercise execution and binding waits.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const busy = run({
+        program: 'console.log("start"); void tools.enter({}); for (;;) {}',
+        bindings: tools({ enter }),
+        timeoutMs: 300,
+      })
+      await busyEntered.promise
+      expect(enter).toHaveBeenCalledOnce()
+      vi.advanceTimersByTime(300)
+      expect(await busy).toEqual({ logs: ['start'], error: { kind: 'timeout', message: 'execution deadline reached (300ms)' } })
+
+      const waiting = run({ program: 'await tools.wait({})', bindings: tools({ wait }), timeoutMs: 300 })
+      await waitingEntered.promise
+      expect(wait).toHaveBeenCalledOnce()
+      vi.advanceTimersByTime(300)
+      expect((await waiting).error?.kind).toBe('timeout')
+    } finally {
+      await cleanup()
+    }
   })
 })
 

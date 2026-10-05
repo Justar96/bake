@@ -2,7 +2,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { InvariantFailure, InvariantInstaller } from '@deepseek-ai/dsh-invariants'
-import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
+import type { Session, SessionEvent } from 'bake-session'
 import { applyGoalEvent, emptyGoalFoldState } from './fold.ts'
 import type { GoalFoldState } from './fold.ts'
 

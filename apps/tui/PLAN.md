@@ -183,8 +183,8 @@ Two API details cost three iterations and are worth recording:
 |---|---|
 | `@deepseek-ai/dsh` | 0.1.5-rc.2 |
 | `@deepseek-ai/dsh-base` | 0.0.1-rc.1 |
-| `@deepseek-ai/dsh-agent` | 0.1.0-rc.6 |
-| `@deepseek-ai/dsh-session` | 0.0.1-rc.1 |
+| `bake-agent` | 0.1.0-rc.6 |
+| `bake-session` | 0.0.1-rc.1 |
 | `@deepseek-ai/dsh-app-boot` | 0.1.0-rc.6 |
 | `@deepseek-ai/dsh-headless` | 0.0.1-rc.1 |
 | `@deepseek-ai/dsh-client-store` | 0.1.2-alpha.2 |
@@ -328,7 +328,7 @@ Every seam below is an existing, documented upstream API. Nothing here requires 
 | **Approvals** | `ctx.on('approval/request', handler)` | a **waterfall** — `ApprovalService.decide` dispatches `ctx.waterfall(scopeTarget(agent, agent), 'approval/request', req, fallback)`. A listener that does not answer **must call `next()`**. Throwing or missing answerers fail closed as `'unavailable'`; the policy `'never'` is decided before dispatch and never reaches us. |
 | Slash commands | `ctx.commands` (`CommandRuntime`, `parseCommand`) | same literal commands as Web and ACP |
 | Skills | `ctx.skills` via `/name` | `ui-skill` documents identical resolution across surfaces |
-| Model / reasoning effort | `installModelSelection` (`@deepseek-ai/dsh-agent`) | as headless does |
+| Model / reasoning effort | `installModelSelection` (`bake-agent`) | as headless does |
 | Flags (`--resume`, …) | `ctx.cmdline` → own startup service | mirrors `headless-startup`/`headless-runner`; per AGENTS.md defaulting is an explicit `resolve(request): Spec` step |
 | Fatal teardown | `installFailLoud('dsh', process, release)` | `release` restores the terminal; awaited under `FAIL_LOUD_RELEASE_TIMEOUT_MS` (2s) |
 

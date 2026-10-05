@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session'
+import { SESSION_FORMAT_VERSION } from 'bake-session'
 import { SessionFormatUnsupportedMigrationError } from '@deepseek-ai/dsh-session-format-catalog'
 import { expectedUnsupported, unversionedProtocolFixtures } from './session-format-corpus-inventory.ts'
 import { parseSessionLog } from '../src/index.ts'

@@ -1,7 +1,7 @@
 /** Synthetic workloads retain complete replayable histories with reproducible input. */
 import { expect, it } from 'vitest'
 import { parseSessionLog } from '@deepseek-ai/dsh-llm-replay'
-import { Session } from '@deepseek-ai/dsh-session'
+import { Session } from 'bake-session'
 import { history, reply } from '../performance/history.ts'
 import { summarize, WORKLOADS, type Sample } from '../performance/report.ts'
 

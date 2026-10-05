@@ -1,9 +1,9 @@
 import { createUserMessage, createMessage } from '@deepseek-ai/dsh-llm'
 import { describe, expect, it, vi } from 'vitest'
 import { Context, type Fiber } from '@deepseek-ai/cordis'
-import SessionStore, { SessionLogOffset, SessionSeq, SESSION_FORMAT_VERSION, SessionId } from '@deepseek-ai/dsh-session'
+import SessionStore, { SessionLogOffset, SessionSeq, SESSION_FORMAT_VERSION, SessionId } from 'bake-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import type { SessionEvent, SessionHeader, SessionId as SessionIdType } from '@deepseek-ai/dsh-session'
+import type { SessionEvent, SessionHeader, SessionId as SessionIdType } from 'bake-session'
 import SessionPersistence, {
   SessionPersistenceNotFoundError,
   SessionPersistenceRevision,

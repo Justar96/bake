@@ -1,5 +1,5 @@
 /** Fixed synthetic histories for measuring built terminal resume without user data. */
-import { Session, SessionId, SESSION_FORMAT_VERSION, type SessionHeader } from '@deepseek-ai/dsh-session'
+import { Session, SessionId, SESSION_FORMAT_VERSION, type SessionHeader } from 'bake-session'
 import { createAssistantMessage, createUserMessage, createSystemMessage, createToolResultMessage, ToolCallId, MessageId, type StreamChunk, type ContentBlock } from '@deepseek-ai/dsh-llm'
 import { AssistantStreamAccumulator } from '@deepseek-ai/dsh-llm/assistant-stream'
 

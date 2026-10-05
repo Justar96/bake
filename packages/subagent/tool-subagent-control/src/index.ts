@@ -11,9 +11,9 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { brandString } from '@deepseek-ai/dsh-brand'
-import { defineTool } from '@deepseek-ai/dsh-tools'
+import { defineTool } from 'bake-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
-import type { SessionId } from '@deepseek-ai/dsh-session'
+import type { SessionId } from 'bake-session'
 import type {} from '@deepseek-ai/dsh-subagent'
 import { markAdjacentAgentSendMessageTool } from '@deepseek-ai/dsh-subagent/internal'
 import { presentInterruptCall, presentSendMessageCall } from './presentation.ts'

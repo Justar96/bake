@@ -135,11 +135,11 @@ export function collectSessionFormatMigrations(
     throw new Error(`gen-session-format-catalog: migration inventory does not end exactly at current v${currentVersion}`)
   }
   const catalog = readJson(resolve(scanRoot, 'packages/session/session-format-catalog/package.json'))
-  if (catalog.dependencies?.['@deepseek-ai/dsh-session'] !== undefined
-    || catalog.peerDependencies?.['@deepseek-ai/dsh-session'] === undefined
-    || catalog.devDependencies?.['@deepseek-ai/dsh-session'] === undefined) {
+  if (catalog.dependencies?.['bake-session'] !== undefined
+    || catalog.peerDependencies?.['bake-session'] === undefined
+    || catalog.devDependencies?.['bake-session'] === undefined) {
     throw new Error(
-      'gen-session-format-catalog: catalog must share @deepseek-ai/dsh-session through peer + dev dependencies',
+      'gen-session-format-catalog: catalog must share bake-session through peer + dev dependencies',
     )
   }
   for (const [index, declaration] of declarations.entries()) {
@@ -202,7 +202,7 @@ export function renderSessionFormatCatalog(
     ' * The direct imports make historical readability independent of mounted plugins.',
     ' */',
     '',
-    "import { KNOWN_SESSION_EVENT_TYPES } from '@deepseek-ai/dsh-session'",
+    "import { KNOWN_SESSION_EVENT_TYPES } from 'bake-session'",
     "import { createSessionFormatCatalog } from '@deepseek-ai/dsh-session-format'",
     "import { validateInstalledCurrentSessionArtifact, validateInstalledCurrentSessionHeader } from './current.ts'",
     ...imports,

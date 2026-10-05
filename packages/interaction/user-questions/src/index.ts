@@ -8,9 +8,9 @@
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'
-import type {} from '@deepseek-ai/dsh-agent'
+import type {} from 'bake-agent'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
-import { scopeTarget } from '@deepseek-ai/dsh-scope'
+import { scopeTarget } from 'bake-scope'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {

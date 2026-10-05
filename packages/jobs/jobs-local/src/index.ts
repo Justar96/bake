@@ -11,9 +11,9 @@
 
 import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import type { Agent } from '@deepseek-ai/dsh-agent'
-import { AnonymousEntries, ScopedLayers, scopeOf } from '@deepseek-ai/dsh-scope'
-import type { ScopeLayer } from '@deepseek-ai/dsh-scope'
+import type { Agent } from 'bake-agent'
+import { AnonymousEntries, ScopedLayers, scopeOf } from 'bake-scope'
+import type { ScopeLayer } from 'bake-scope'
 import { deadline, timeoutOf } from '@deepseek-ai/dsh-timeout'
 import { JobRegistry, JobId } from '@deepseek-ai/dsh-jobs'
 import type {
@@ -404,7 +404,7 @@ export class LocalJobRegistry extends JobRegistry {
     const ownerId = owner.id
     const agents = this.selfCtx.get('agents')
     if (agents === undefined) {
-      throw new Error('background job ownership requires the agent registry (load @deepseek-ai/dsh-agent)')
+      throw new Error('background job ownership requires the agent registry (load bake-agent)')
     }
     if (agents.get(ownerId) !== owner) {
       throw new Error(`agent "${ownerId}" is not the registered agent instance (background job owner must be live)`)

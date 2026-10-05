@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-scope",
+  "name": "bake-scope",
   "description": "Scoped-context registration primitive (scope tags, scope-filtered event dispatch) for the DeepSeek Harness",
   "version": "0.1.6-alpha.2",
   "publishConfig": {

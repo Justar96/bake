@@ -1,6 +1,6 @@
 import { Context } from '@deepseek-ai/cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
-import AgentLoop from '@deepseek-ai/dsh-agent-loop'
+import type { Agent } from 'bake-agent'
+import AgentLoop from 'bake-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { LocalBashExecutor } from '@deepseek-ai/dsh-bash-local'
 import * as BashEnvPlugin from '@deepseek-ai/dsh-shell-env'

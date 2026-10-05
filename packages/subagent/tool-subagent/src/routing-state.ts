@@ -2,12 +2,12 @@
 
 import { z } from 'zod'
 import type { ToolCallId } from '@deepseek-ai/dsh-llm'
-import type { Session, SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
+import type { Session, SessionId, SessionLogOffset } from 'bake-session'
 import type SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
 import type { SubagentRoutingDecision } from './types.ts'
 
-declare module '@deepseek-ai/dsh-session/types' {
+declare module 'bake-session/types' {
   interface SessionEventMap {
     /** A successfully admitted child's route decision; no surfaceOp, so it never enters model history. */
     'subagent/routing-decision': SubagentRoutingDecision

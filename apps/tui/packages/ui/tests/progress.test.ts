@@ -1,7 +1,7 @@
 /** Running calls' live output and finish, projected over the live rows and drawn, under `bun test` because both are pure. */
 
 import { describe, expect, it } from 'bun:test'
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import type { SessionEvent } from 'bake-session'
 import { Actions, foldEvent } from '../src/actions.ts'
 import { fittedGroup, present, type ResultBound } from '../src/present.ts'
 import { CallProgress, LIVE_TAIL_LINES, outputTail } from '../src/progress.ts'

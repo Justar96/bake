@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-agent-tool-presentation",
+  "name": "bake-agent-tool-presentation",
   "description": "Agent-plane presentation selector: composes one agent's tools as PTC mode, native, or both",
   "version": "0.1.6-alpha.2",
   "publishConfig": {
@@ -30,16 +30,16 @@
     "@deepseek-ai/schemastery": "workspace:^"
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh-tools": "workspace:^",
+    "bake-tools": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-agent": "workspace:^",
+    "bake-agent": "workspace:^",
     "@deepseek-ai/dsh-ptc-runtime": "workspace:^",
-    "@deepseek-ai/dsh-scope": "workspace:^",
-    "@deepseek-ai/dsh-session": "workspace:^",
-    "@deepseek-ai/dsh-system-prompt": "workspace:^",
-    "@deepseek-ai/dsh-tools": "workspace:^",
+    "bake-scope": "workspace:^",
+    "bake-session": "workspace:^",
+    "bake-system-prompt": "workspace:^",
+    "bake-tools": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   }
 }

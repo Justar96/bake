@@ -11,11 +11,11 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { isDeepStrictEqual } from 'node:util'
-import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
+import type { Agent, PreStepDecision } from 'bake-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { Session, UserMessage } from '@deepseek-ai/dsh-session'
+import type { Session, UserMessage } from 'bake-session'
 import type {} from '@deepseek-ai/dsh-session-projection'
-import type { ToolExecution, ToolExecutionResult, ToolExecutionToken } from '@deepseek-ai/dsh-tools'
+import type { ToolExecution, ToolExecutionResult, ToolExecutionToken } from 'bake-tools'
 import { Config, resolveConfig, workspaceBaselineIdentity, type ResolvedConfig } from './config.ts'
 import { findProjectRoot, loadBaselineInstructionSet } from './files.ts'
 import {

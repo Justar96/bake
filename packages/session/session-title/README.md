@@ -34,7 +34,7 @@ Titles come from three sources, newest wins. The built-in fallback derives from 
 All limits are required; the library supplies no defaults. Mount the service with the three bounds:
 
 ```yaml
-- name: '@deepseek-ai/dsh-session'
+- name: 'bake-session'
 - name: '@deepseek-ai/dsh-session-title'
   config:
     fallbackMaxWords: 8

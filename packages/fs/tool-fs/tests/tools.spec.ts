@@ -9,10 +9,10 @@ import { PtcRuntime } from '@deepseek-ai/dsh-ptc-runtime'
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
-import { turnBoundaryProjectionDefinition } from '@deepseek-ai/dsh-agent-loop'
+import { turnBoundaryProjectionDefinition } from 'bake-agent-loop'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
-import SystemPrompt, { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
-import ToolRuntime, { type ToolResult } from '@deepseek-ai/dsh-tools'
+import SystemPrompt, { renderPrompt } from 'bake-system-prompt'
+import ToolRuntime, { type ToolResult } from 'bake-tools'
 import { FileSystem, FsError, FsTargetKey, FsVersion } from '@deepseek-ai/dsh-fs'
 import type {
   FsDirEntry,
@@ -34,7 +34,7 @@ import { sessionCwd } from '../src/session-cwd.ts'
 import ApprovalService from '@deepseek-ai/dsh-user-approval'
 import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
-import { SessionId, SessionLogOffset, SessionSeq } from '@deepseek-ai/dsh-session'
+import { SessionId, SessionLogOffset, SessionSeq } from 'bake-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 
 const testToolSignal = new AbortController().signal

@@ -7,12 +7,12 @@
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'
-import type { SessionEvent, SessionHeader, SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
+import type { SessionEvent, SessionHeader, SessionId, SessionLogOffset } from 'bake-session'
 import type { SessionHandle, SessionAccess } from './handle.ts'
 import type { SessionPersistenceRevision } from './revision.ts'
 
 // Re-export the metadata vocabulary so Consumers import it from the Service Definition.
-export type { SessionHeader } from '@deepseek-ai/dsh-session'
+export type { SessionHeader } from 'bake-session'
 export { SessionPersistenceRevision } from './revision.ts'
 export type {
   SessionAccess,

@@ -11,8 +11,8 @@
  */
 
 import { z } from 'zod'
-import { SessionLogOffset, SessionSeq } from '@deepseek-ai/dsh-session'
-import type { SessionId, SessionSeqCursor } from '@deepseek-ai/dsh-session'
+import { SessionLogOffset, SessionSeq } from 'bake-session'
+import type { SessionId, SessionSeqCursor } from 'bake-session'
 import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
 
 /**

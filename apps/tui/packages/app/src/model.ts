@@ -1,5 +1,5 @@
 /** Model discovery and selection validation delegated to the Harness LLM catalog. */
-import type { ModelSelection } from '@deepseek-ai/dsh-agent'
+import type { ModelSelection } from 'bake-agent'
 import type { LlmModelInfo, LlmRuntime, LlmModelReasoningInfo, LlmResolvedModelInfo } from '@deepseek-ai/dsh-llm'
 import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
 import { formatTokens } from '@dsh-tui/ui/format.ts'

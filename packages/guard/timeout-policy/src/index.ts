@@ -13,7 +13,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { deadline, timeoutOf } from '@deepseek-ai/dsh-timeout'
-import type { ToolExecutionResult } from '@deepseek-ai/dsh-tools'
+import type { ToolExecutionResult } from 'bake-tools'
 
 /**
  * The code owned by this plugin, used BOTH as the internal {@link deadline}

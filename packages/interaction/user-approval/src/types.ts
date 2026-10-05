@@ -6,8 +6,8 @@
  */
 
 import type { Branded } from '@deepseek-ai/dsh-brand'
-import type { Scoped } from '@deepseek-ai/dsh-scope'
-import type { Agent } from '@deepseek-ai/dsh-agent/types'
+import type { Scoped } from 'bake-scope'
+import type { Agent } from 'bake-agent/types'
 import type { ToolCallId } from '@deepseek-ai/dsh-llm/brand'
 
 /**
@@ -31,7 +31,7 @@ export function ApprovalRequestId(id: string): ApprovalRequestId {
  */
 export type ApprovalOutcome = 'allowed-once' | 'rejected' | 'cancelled' | 'unavailable'
 
-declare module '@deepseek-ai/dsh-session/types' {
+declare module 'bake-session/types' {
   interface SessionEventMap {
     /**
      * An approval question was put to the answerer chain — log-only audit
@@ -78,7 +78,7 @@ declare module '@deepseek-ai/cordis' {
     /**
      * Ask composed answerers for one decision. Return an outcome to claim the
      * request or call `next()` to delegate. Scope-filtered dispatch
-     * (`@deepseek-ai/dsh-scope`): agent-scoped listeners receive only that agent.
+     * (`bake-scope`): agent-scoped listeners receive only that agent.
      * @param req - pending approval request.
      * @mode waterfall
      */

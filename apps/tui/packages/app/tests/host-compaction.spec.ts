@@ -16,7 +16,7 @@ import { Group, type EntryOptions } from '@deepseek-ai/cordis-plugin-loader'
 import { SHIPPED_PRESET_ROOT } from '@deepseek-ai/dsh-agent-presets'
 import { SettingsProvider, type SettingsNamespace } from '@deepseek-ai/dsh-settings'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import type { SessionEvent } from 'bake-session'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'
 import { SessionController } from '../src/controller.ts'
 import { openSession } from '../src/session.ts'
@@ -107,8 +107,7 @@ async function terminal(settings?: Record<string, unknown>) {
   }
   // Bare row names resolve from the Loader's base, here the fixture root, as
   // the launcher's resolve from the installation. Removing the root unlinks it.
-  await mkdir(join(fixture.root, 'node_modules'))
-  await symlink(join(REPOSITORY, 'node_modules', '@deepseek-ai'), join(fixture.root, 'node_modules', '@deepseek-ai'), 'junction')
+  await symlink(join(REPOSITORY, 'node_modules'), join(fixture.root, 'node_modules'), 'junction')
   fixture.ctx.loader.builtins.group = Group
 
   const group = (await shipped('standard')).find(row => row.id === 'compaction')

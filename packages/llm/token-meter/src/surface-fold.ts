@@ -14,8 +14,8 @@
  * @module @deepseek-ai/dsh-token-meter/surface-fold
  */
 
-import { deriveEventMessage } from '@deepseek-ai/dsh-session'
-import type { SessionSeq, SurfaceEvent } from '@deepseek-ai/dsh-session'
+import { deriveEventMessage } from 'bake-session'
+import type { SessionSeq, SurfaceEvent } from 'bake-session'
 import type { ContentBlock, ImageBlock, Message } from '@deepseek-ai/dsh-llm'
 import { estimateMessage, estimateStructuralBlock } from './estimate.ts'
 

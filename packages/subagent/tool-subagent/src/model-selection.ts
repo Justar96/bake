@@ -2,7 +2,7 @@
 
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { LlmCallConfig, LlmRuntime } from '@deepseek-ai/dsh-llm'
-import type { AgentOptions } from '@deepseek-ai/dsh-agent'
+import type { AgentOptions } from 'bake-agent'
 import z from '@deepseek-ai/schemastery'
 
 /** One exact child LLM route authorized by a user setting. */

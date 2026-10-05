@@ -2,7 +2,7 @@
  * Concrete agent-loop plugin: creates scoped ReactLoopAgents, publishes them
  * through the agent/session registries, and owns their ordered teardown.
  *
- * @module @deepseek-ai/dsh-agent-loop
+ * @module bake-agent-loop
  */
 
 import { Context, FiberState, Service } from '@deepseek-ai/cordis'
@@ -20,13 +20,13 @@ import type {
   ResumeAgentOptions,
   SessionStartSource,
   TurnBoundaryProjection,
-} from '@deepseek-ai/dsh-agent'
+} from 'bake-agent'
 import { errorChain, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-settings'
-import { interruptedTurnClosers, SessionLogOffset, SessionPreparation, SessionSeq } from '@deepseek-ai/dsh-session'
-import type { Session, SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
-import type {} from '@deepseek-ai/dsh-system-prompt'
-import type {} from '@deepseek-ai/dsh-tools'
+import { interruptedTurnClosers, SessionLogOffset, SessionPreparation, SessionSeq } from 'bake-session'
+import type { Session, SessionHeader, SessionId } from 'bake-session'
+import type {} from 'bake-system-prompt'
+import type {} from 'bake-tools'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
 import { SessionPersistenceNotFoundError } from '@deepseek-ai/dsh-session-persistence'

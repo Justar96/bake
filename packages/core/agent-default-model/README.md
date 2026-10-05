@@ -3,11 +3,11 @@ description: "The deployment default model selection for users and maintainers c
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-agent-default-model
+# bake-agent-default-model
 
 ## Summary
 
-`dsh-agent-default-model` gives newly created agents a shared default provider and model when their sessions do not specify one, or reports that there is none. Use it to choose the starting model once for all supported agent entry points, including `dsh --profile headless`. When settings are available, users can override the configured selection, including reasoning effort, and saved changes apply to subsequent reads. The default is process-wide; per-session model selection remains the responsibility of the entry point that creates the agent.
+`bake-agent-default-model` gives newly created agents a shared default provider and model when their sessions do not specify one, or reports that there is none. Use it to choose the starting model once for all supported agent entry points, including `dsh --profile headless`. When settings are available, users can override the configured selection, including reasoning effort, and saved changes apply to subsequent reads. The default is process-wide; per-session model selection remains the responsibility of the entry point that creates the agent.
 
 ## Table of Contents
 
@@ -30,7 +30,7 @@ Mount this package wherever agents are created without an explicit model route. 
 The composition entry is the base of the default: it names a provider and model together, or neither, and stays usable without any settings provider. Bake's base profile names neither, so no provider is the default: a new install starts without a model, and the selection the user saves after signing in becomes the default.
 
 ```yaml
-- name: '@deepseek-ai/dsh-agent-default-model'
+- name: 'bake-agent-default-model'
   config:
     provider: deepseek
     model: deepseek-chat
@@ -41,7 +41,7 @@ The composition entry is the base of the default: it names a provider and model 
 | `provider` | absent | Registered provider route for fresh agents; set together with `model` |
 | `model` | absent | Provider-owned model id for fresh agents; set together with `provider` |
 
-The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-agent-default-model) is the exhaustive source for every accepted field. `reasoningEffort` is deliberately not a config field: it belongs to the settings layer, so a complete saved selection can clear an effort when the next selected model has none, while a composition value would be inherited again.
+The generated [configuration catalog](../../../docs/config-catalog.md#bake-agent-default-model) is the exhaustive source for every accepted field. `reasoningEffort` is deliberately not a config field: it belongs to the settings layer, so a complete saved selection can clear an effort when the next selected model has none, while a composition value would be inherited again.
 
 ### Read and change the default
 
@@ -90,7 +90,7 @@ The package-level contract is enough for most consumers; read these when you nee
 
 - [Core subsystem](../../../docs/subsystems/core.md) — the `Agent` handle and `AgentOptions` route selection.
 - [agent-loop package](../agent-loop/README.md) — how agents resolve provider and model at request time.
-- [Generated configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-agent-default-model) — every accepted config field and its source declaration.
+- [Generated configuration catalog](../../../docs/config-catalog.md#bake-agent-default-model) — every accepted config field and its source declaration.
 - [Core group map](../README.md) — how the core packages compose.
 
 -----

@@ -19,8 +19,8 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import { z } from 'zod'
-import SessionStore, { SESSION_FORMAT_VERSION, SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
-import type { SessionHeader } from '@deepseek-ai/dsh-session'
+import SessionStore, { SESSION_FORMAT_VERSION, SessionId, SessionLogOffset } from 'bake-session'
+import type { SessionHeader } from 'bake-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
 import Storage from '@deepseek-ai/dsh-storage'
@@ -44,7 +44,7 @@ declare module '@deepseek-ai/dsh-session-projection/types' {
   }
 }
 
-declare module '@deepseek-ai/dsh-session/types' {
+declare module 'bake-session/types' {
   interface SessionEventMap {
     'fixtures-test/set-title': { title: string }
   }

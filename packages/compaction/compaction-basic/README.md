@@ -34,7 +34,7 @@ With the default settings you get four behaviors: automatic condensation as the 
 Mount session storage, token measurement, the optional pruner, this backend, and optionally the on-demand command:
 
 ```yaml
-- name: '@deepseek-ai/dsh-session'
+- name: 'bake-session'
 - name: '@deepseek-ai/dsh-token-meter'
 - name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
 - name: '@deepseek-ai/dsh-compaction-basic'

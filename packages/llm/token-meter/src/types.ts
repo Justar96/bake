@@ -5,7 +5,7 @@
  */
 
 import type { TokenUsage } from '@deepseek-ai/dsh-llm'
-import type { SessionLogOffset, SessionSeq } from '@deepseek-ai/dsh-session/types'
+import type { SessionLogOffset, SessionSeq } from 'bake-session/types'
 
 export type { ContextBreakdownProjection, ContextPressureProjection, TokenUsageProjection } from './projection.ts'
 

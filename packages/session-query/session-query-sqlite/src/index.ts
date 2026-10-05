@@ -5,11 +5,11 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto'
-import { SESSION_FORMAT_VERSION, SessionSeq } from '@deepseek-ai/dsh-session'
+import { SESSION_FORMAT_VERSION, SessionSeq } from 'bake-session'
 import type { DatabaseSync } from 'node:sqlite'
 import { Context, Service, type Fiber } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import type { Session, SessionEvent, SessionHeader, SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
+import type { Session, SessionEvent, SessionHeader, SessionId, SessionLogOffset } from 'bake-session'
 import type SessionPersistence from '@deepseek-ai/dsh-session-persistence'
 import type {
   SessionPersistenceRevision,

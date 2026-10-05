@@ -22,7 +22,7 @@ import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
+import type { Session, SessionEvent } from 'bake-session'
 
 /** Cordis plugin name used by loader diagnostics. */
 export const name = 'tui-recorder'

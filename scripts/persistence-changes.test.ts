@@ -536,10 +536,10 @@ describe('persistence changes current-tree commands', () => {
     writeFileSync(join(physical, 'format.ts'), "interface HeaderLine { type: 'session'; version: number; id: string; delegationDepth: number }; export {}\n")
     const session = join(root, 'packages/core/session/src')
     mkdirSync(session, { recursive: true })
-    writeFileSync(join(session, '../package.json'), JSON.stringify({ name: '@deepseek-ai/dsh-session' }))
+    writeFileSync(join(session, '../package.json'), JSON.stringify({ name: 'bake-session' }))
     writeFileSync(join(root, 'tsconfig.host.json'), JSON.stringify({ compilerOptions: {
       target: 'ESNext', module: 'ESNext', moduleResolution: 'Bundler', types: [], skipLibCheck: true,
-      paths: { '@deepseek-ai/dsh-session/types': ['./packages/core/session/src/types.ts'] },
+      paths: { 'bake-session/types': ['./packages/core/session/src/types.ts'] },
     } }))
     const source = [
       '/** Stored header. */', 'export interface SessionHeader { version: 3; id: string }',

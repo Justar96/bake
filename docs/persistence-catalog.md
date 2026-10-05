@@ -331,7 +331,7 @@ Source: [`packages/core/session/src/types.ts:327`](../packages/core/session/src/
   commandId: CommandId
   kind: 'success' | 'error'
   text?: string
-  sourceEventSeq?: import('@deepseek-ai/dsh-session/types').SessionSeq
+  sourceEventSeq?: import('bake-session/types').SessionSeq
 }
 ```
 

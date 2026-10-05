@@ -4,7 +4,7 @@ import { isDeepStrictEqual } from 'node:util'
 import type { Context } from '@deepseek-ai/cordis'
 import { foldGoal, type FoldedGoal, type GoalMessageSource, type GoalView } from '@deepseek-ai/dsh-goal'
 import type { InvariantFailure, InvariantInstaller } from '@deepseek-ai/dsh-invariants'
-import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
+import type { Session, SessionEvent } from 'bake-session'
 import { renderGoalRoundPrompt } from './prompt.ts'
 
 const PACKAGE_NAME = '@deepseek-ai/dsh-goal-round-driver'

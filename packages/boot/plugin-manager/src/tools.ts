@@ -6,7 +6,7 @@ import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type {} from '@deepseek-ai/dsh-user-approval'
 import { approveEscalation } from '@deepseek-ai/dsh-sandbox'
 import type { PluginEntryId } from './types.ts'
-import { defineTool } from '@deepseek-ai/dsh-tools'
+import { defineTool } from 'bake-tools'
 
 /** Required services for the management tool. */
 export const inject = ['tools', 'pluginManager', 'sandboxPolicy']

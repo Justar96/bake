@@ -2,7 +2,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { createMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
-import { Session, SessionId } from '@deepseek-ai/dsh-session'
+import { Session, SessionId } from 'bake-session'
 
 export const name = 'session-reference-source-fixture'
 export const inject = ['sessions']

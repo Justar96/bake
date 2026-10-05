@@ -14,12 +14,12 @@
 import { readFileSync } from 'node:fs'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
+import type { Agent, PreStepDecision } from 'bake-agent'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, MessageSource } from '@deepseek-ai/dsh-llm'
-import type { UserMessage } from '@deepseek-ai/dsh-session'
-import type { PostToolDecision, PreToolDecision, ToolExecution, ToolExecutionResult } from '@deepseek-ai/dsh-tools'
+import type { UserMessage } from 'bake-session'
+import type { PostToolDecision, PreToolDecision, ToolExecution, ToolExecutionResult } from 'bake-tools'
 import {
   appendHookInvoked,
   appendHookResult,

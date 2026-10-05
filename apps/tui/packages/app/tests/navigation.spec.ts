@@ -2,7 +2,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import { CommandId } from '@deepseek-ai/dsh-commands'
-import type { SessionId } from '@deepseek-ai/dsh-session'
+import type { SessionId } from 'bake-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { transcriptRows } from '@dsh-tui/ui'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'

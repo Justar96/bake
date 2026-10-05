@@ -1,9 +1,9 @@
 /** Fresh-session creation and exact persisted-session adoption. */
 import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
-import { installModelSelection, type Agent, type AgentHandle, type ModelSelectionRef } from '@deepseek-ai/dsh-agent'
+import { installModelSelection, type Agent, type AgentHandle, type ModelSelectionRef } from 'bake-agent'
 import { brandString } from '@deepseek-ai/dsh-brand'
-import type { SessionId } from '@deepseek-ai/dsh-session'
+import type { SessionId } from 'bake-session'
 import type {} from '@deepseek-ai/dsh-agent-presets'
 import { SessionAlreadyOwnedError } from '@deepseek-ai/dsh-session-persistence'
 import type {} from '@deepseek-ai/dsh-session-projection'

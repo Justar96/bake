@@ -7,9 +7,9 @@ import SessionStore, {
   Session,
   SessionId,
   SessionSeq,
-} from '@deepseek-ai/dsh-session'
-import type { SurfaceEvent } from '@deepseek-ai/dsh-session'
-import * as SessionInvariant from '@deepseek-ai/dsh-session/invariant'
+} from 'bake-session'
+import type { SurfaceEvent } from 'bake-session'
+import * as SessionInvariant from 'bake-session/invariant'
 import InvariantRegistry from '@deepseek-ai/dsh-invariants'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import TokenMeter from '@deepseek-ai/dsh-token-meter'

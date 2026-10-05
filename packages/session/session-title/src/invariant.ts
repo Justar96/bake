@@ -6,8 +6,8 @@
 /* jscpd:ignore-start */
 import type { Context } from '@deepseek-ai/cordis'
 import type { InvariantFailure, InvariantInstaller } from '@deepseek-ai/dsh-invariants'
-import { SessionSeq } from '@deepseek-ai/dsh-session'
-import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
+import { SessionSeq } from 'bake-session'
+import type { Session, SessionEvent } from 'bake-session'
 
 const PACKAGE_NAME = '@deepseek-ai/dsh-session-title'
 

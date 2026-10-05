@@ -14,11 +14,11 @@ import { assertNever, assertPositiveInteger, deepFreeze } from '@deepseek-ai/dsh
 import type {
   Session,
   SessionEvent,
-} from '@deepseek-ai/dsh-session'
-import { SessionSeq } from '@deepseek-ai/dsh-session'
+} from 'bake-session'
+import { SessionSeq } from 'bake-session'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
-import type {} from '@deepseek-ai/dsh-agent'
+import type {} from 'bake-agent'
 export type {
   SessionTitleEventData,
   SessionTitleModelIdentity,
@@ -68,7 +68,7 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
-declare module '@deepseek-ai/dsh-session/types' {
+declare module 'bake-session/types' {
   interface SessionEventMap {
     /**
      * Latest-wins session title snapshot. Log-only: it never enters the model

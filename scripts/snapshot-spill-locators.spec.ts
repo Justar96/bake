@@ -1,7 +1,7 @@
 import { Context } from '@deepseek-ai/cordis'
 import { LocalSpillStore } from '@deepseek-ai/dsh-spill-local'
 import { LocalFileSystem } from '@deepseek-ai/dsh-fs-local'
-import { SessionId } from '@deepseek-ai/dsh-session'
+import { SessionId } from 'bake-session'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'

@@ -17,7 +17,7 @@ import { CommandDefinitionId } from '@deepseek-ai/dsh-commands/brand'
 import z from '@deepseek-ai/schemastery'
 import { z as zod } from 'zod'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
-import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
+import type { Session, SessionEvent } from 'bake-session'
 import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import { SANDBOX_MODES, setSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
 // Side-effect type import: declaration-merges `ctx.shell` (the capability fact
@@ -46,7 +46,7 @@ declare module '@deepseek-ai/dsh-session-projection/types' {
   }
 }
 
-declare module '@deepseek-ai/dsh-session/types' {
+declare module 'bake-session/types' {
   interface SessionEventMap {
     /**
      * Records the selected preset as durable, log-only user intent. The knob

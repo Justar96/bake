@@ -1,7 +1,7 @@
 /** The TUI reads child identities from the real Harness subagent listing. */
 import { expect, it, vi } from 'vitest'
 import SubagentRuntime, { SUBAGENT_DESCRIPTOR_VERSION, type SubagentResult } from '@deepseek-ai/dsh-subagent'
-import { SessionId } from '@deepseek-ai/dsh-session'
+import { SessionId } from 'bake-session'
 import { transcriptRows } from '@dsh-tui/ui'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'
 import { childOutcome } from '../src/subagents.ts'

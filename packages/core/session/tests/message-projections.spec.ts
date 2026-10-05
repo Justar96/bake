@@ -7,7 +7,7 @@ import type { SessionEvent, SessionMessageProjection } from '../src/index.ts'
 import { MESSAGE_PROJECTION_EVENT_TYPES } from '../src/known-event-types.ts'
 import { SurfaceManager } from '../src/surface.ts'
 
-declare module '@deepseek-ai/dsh-session/types' {
+declare module 'bake-session/types' {
   interface SessionEventMap {
     'test/project': { seq: SessionSeq; text: string }
   }

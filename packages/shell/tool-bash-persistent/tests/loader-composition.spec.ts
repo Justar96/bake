@@ -7,9 +7,9 @@ import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
-import { SESSION_FORMAT_VERSION, Session, SessionId } from '@deepseek-ai/dsh-session'
-import AgentRegistry from '@deepseek-ai/dsh-agent'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import { SESSION_FORMAT_VERSION, Session, SessionId } from 'bake-session'
+import AgentRegistry from 'bake-agent'
+import type { Agent } from 'bake-agent'
 import TerminalSessionService from '@deepseek-ai/dsh-terminal'
 import * as TerminalLocal from '@deepseek-ai/dsh-terminal-bash'
 import SandboxProvider from '@deepseek-ai/dsh-sandbox'
@@ -17,8 +17,8 @@ import type { ConfinedArgv, SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
-import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
-import ToolRuntime from '@deepseek-ai/dsh-tools'
+import SystemPrompt from 'bake-system-prompt'
+import ToolRuntime from 'bake-tools'
 import * as ToolBashPersistent from '@deepseek-ai/dsh-tool-bash-persistent'
 import { unsupportedInbox } from '@deepseek-ai/dsh-agent-loop-testkit'
 
@@ -74,9 +74,9 @@ suite('persistent Bash through a real cordis.yml Loader composition', () => {
     root = await mkdtemp(join(tmpdir(), 'dsh-persistent-bash-loader-'))
     const configPath = join(root, 'cordis.yml')
     await writeFile(configPath, [
-      "- name: '@deepseek-ai/dsh-agent'",
-      "- name: '@deepseek-ai/dsh-system-prompt'",
-      "- name: '@deepseek-ai/dsh-tools'",
+      "- name: 'bake-agent'",
+      "- name: 'bake-system-prompt'",
+      "- name: 'bake-tools'",
       "- name: '@deepseek-ai/dsh-terminal'",
       "- name: '@deepseek-ai/dsh-test-sandbox'",
       "- name: '@deepseek-ai/dsh-session-projection'",
@@ -109,9 +109,9 @@ suite('persistent Bash through a real cordis.yml Loader composition', () => {
     await context.plugin(Loader)
     context.loader.builtins.include = Include
     const modules = new Map<string, unknown>([
-      ['@deepseek-ai/dsh-agent', AgentRegistry],
-      ['@deepseek-ai/dsh-system-prompt', SystemPrompt],
-      ['@deepseek-ai/dsh-tools', ToolRuntime],
+      ['bake-agent', AgentRegistry],
+      ['bake-system-prompt', SystemPrompt],
+      ['bake-tools', ToolRuntime],
       ['@deepseek-ai/dsh-terminal', TerminalSessionService],
       ['@deepseek-ai/dsh-test-sandbox', PassthroughSandbox],
       ['@deepseek-ai/dsh-session-projection', SessionProjectionRegistry],

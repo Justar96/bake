@@ -61,7 +61,7 @@ export async function bundle(entries: readonly string[], outdir: string, mode: B
     // @dsh-tui/ui is inlined; the host's packages retain their module identity.
     // Shiki loads each grammar by dynamic import, which an unsplit bundle
     // would inline. Every bundled language, loaded or not.
-    external: ['@deepseek-ai/*', 'ink', 'react', 'commander', 'shiki'], naming: '[name].js',
+    external: ['@deepseek-ai/*', 'bake-*', 'ink', 'react', 'commander', 'shiki'], naming: '[name].js',
     jsx: { runtime: 'automatic', development: mode === 'development' },
     define: { 'process.env.NODE_ENV': JSON.stringify(mode) }, minify: mode === 'production',
   })

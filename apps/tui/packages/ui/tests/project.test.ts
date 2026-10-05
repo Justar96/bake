@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, it } from 'bun:test'
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import type { SessionEvent } from 'bake-session'
 import stringWidth from 'string-width'
 import {
   announcedCalls, argumentsTitle, HEADLINE_CELLS, outputRate, project, projector, type Projector,

@@ -183,7 +183,7 @@
 # rather than assuming it: a deployment that composes no TypeScript runtime
 # fails this preset at mount, naming this id, instead of at the first request.
 - id: tool-presentation
-  name: '@deepseek-ai/dsh-agent-tool-presentation'
+  name: 'bake-agent-tool-presentation'
   config:
     mode: ptc
 

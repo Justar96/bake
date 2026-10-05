@@ -26,7 +26,7 @@
 import type { Branded } from '@deepseek-ai/dsh-brand'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm/types'
 import type { MessageId, ToolCallId } from '@deepseek-ai/dsh-llm/brand'
-import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { SessionId } from 'bake-session/types'
 
 /** Complete model selection a web client recorded for one Session. */
 export interface RetiredModelSelection {
@@ -161,7 +161,7 @@ declare module '@deepseek-ai/dsh-llm' {
   }
 }
 
-declare module '@deepseek-ai/dsh-session/types' {
+declare module 'bake-session/types' {
   interface SessionEventMap {
     /** Model selection a web client requested for later prompt assembly. Log-only. */
     'model/selection': RetiredModelSelection

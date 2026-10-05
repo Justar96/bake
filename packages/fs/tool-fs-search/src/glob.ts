@@ -11,8 +11,8 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { sep } from 'node:path'
-import { defineTool } from '@deepseek-ai/dsh-tools'
-import type { GenericCallView, SearchResultView, ToolResult } from '@deepseek-ai/dsh-tools'
+import { defineTool } from 'bake-tools'
+import type { GenericCallView, SearchResultView, ToolResult } from 'bake-tools'
 import type { SpillRef } from '@deepseek-ai/dsh-spill'
 import { runRipgrep, toWorkdirRelative, trySaveFormattedResult } from './search-core.ts'
 import { globSearchMeta, searchViewFromMeta } from './presentation.ts'

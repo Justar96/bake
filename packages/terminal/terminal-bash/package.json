@@ -27,11 +27,11 @@
   ],
   "license": "MIT",
   "peerDependencies": {
-    "@deepseek-ai/dsh-agent": "workspace:^",
+    "bake-agent": "workspace:^",
     "@deepseek-ai/dsh-terminal": "workspace:^",
     "@deepseek-ai/dsh-sandbox": "workspace:^",
     "@deepseek-ai/dsh-sandbox-policy": "workspace:^",
-    "@deepseek-ai/dsh-session": "workspace:^",
+    "bake-session": "workspace:^",
     "@deepseek-ai/dsh-subprocess": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^",
     "@deepseek-ai/dsh-session-projection": "workspace:^"
@@ -43,12 +43,12 @@
     "@xterm/headless": "catalog:"
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-agent": "workspace:^",
+    "bake-agent": "workspace:^",
     "@deepseek-ai/dsh-agent-loop-testkit": "workspace:^",
     "@deepseek-ai/dsh-terminal": "workspace:^",
     "@deepseek-ai/dsh-sandbox": "workspace:^",
     "@deepseek-ai/dsh-sandbox-policy": "workspace:^",
-    "@deepseek-ai/dsh-session": "workspace:^",
+    "bake-session": "workspace:^",
     "@deepseek-ai/dsh-subprocess": "workspace:^",
     "@deepseek-ai/dsh-subprocess-local": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"

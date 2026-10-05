@@ -1,6 +1,6 @@
 /** Enforced current-writer majority and retained migration coverage. */
 
-import { SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session'
+import { SESSION_FORMAT_VERSION } from 'bake-session'
 
 /** Retained-generation manifest describing the released behavior a generation preserves. */
 type SnapshotSessionFormatManifest = Readonly<Record<string, unknown>>

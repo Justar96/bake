@@ -8,7 +8,7 @@
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'
-import type { Session, SessionSeq } from '@deepseek-ai/dsh-session'
+import type { Session, SessionSeq } from 'bake-session'
 import type { CommandId } from '@deepseek-ai/dsh-commands/brand'
 import type { CompactionResult } from './types.ts'
 

@@ -7,11 +7,11 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import type {} from '@deepseek-ai/dsh-agent'
+import type {} from 'bake-agent'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import type {} from '@deepseek-ai/dsh-settings'
 import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
-import type {} from '@deepseek-ai/dsh-session'
+import type {} from 'bake-session'
 import type {} from '@deepseek-ai/dsh-web'
 import {
   DeepSeekSearchProvider,

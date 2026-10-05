@@ -15,11 +15,11 @@ import type {
   AgentHandle,
   AgentOptions,
   CreateAgentOptions,
-} from '@deepseek-ai/dsh-agent'
+} from 'bake-agent'
 import { errorChain } from '@deepseek-ai/dsh-llm'
 import type { MessageId } from '@deepseek-ai/dsh-llm'
-import type { SessionId, UserMessage } from '@deepseek-ai/dsh-session'
-import type { ToolRestriction } from '@deepseek-ai/dsh-tools'
+import type { SessionId, UserMessage } from 'bake-session'
+import type { ToolRestriction } from 'bake-tools'
 import {
   appendDelegatedPolicyOverrides,
   applyChildComposition,

@@ -13,10 +13,10 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { createToolResultMessage, type ToolCallBlock } from '@deepseek-ai/dsh-llm'
-import type { Session, SessionSeq, UserMessage } from '@deepseek-ai/dsh-session'
-import { TOOL_ABORTED_BEFORE_DISPATCH, TOOL_RUNTIME_SCHEDULER, type ToolExecutionInput, type ToolExecutionMode, type ToolExecutionResult, type ToolHalt, type ToolRunContext, type ToolRuntimeScheduler } from '@deepseek-ai/dsh-tools'
+import type { Session, SessionSeq, UserMessage } from 'bake-session'
+import { TOOL_ABORTED_BEFORE_DISPATCH, TOOL_RUNTIME_SCHEDULER, type ToolExecutionInput, type ToolExecutionMode, type ToolExecutionResult, type ToolHalt, type ToolRunContext, type ToolRuntimeScheduler } from 'bake-tools'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
-import type { ToolProgress } from '@deepseek-ai/dsh-agent'
+import type { ToolProgress } from 'bake-agent'
 import { ProgressThrottle } from './tool-progress.ts'
 
 /** One tool call after argument parsing, ready to schedule. */

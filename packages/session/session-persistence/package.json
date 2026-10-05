@@ -29,14 +29,14 @@
   "peerDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
     "@deepseek-ai/dsh-brand": "workspace:^",
-    "@deepseek-ai/dsh-session": "workspace:^",
+    "bake-session": "workspace:^",
     "@deepseek-ai/dsh-timeout": "workspace:^"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
     "@deepseek-ai/dsh-brand": "workspace:^",
-    "@deepseek-ai/dsh-scope": "workspace:^",
-    "@deepseek-ai/dsh-session": "workspace:^",
+    "bake-scope": "workspace:^",
+    "bake-session": "workspace:^",
     "@deepseek-ai/dsh-timeout": "workspace:^"
   },
   "dependencies": {

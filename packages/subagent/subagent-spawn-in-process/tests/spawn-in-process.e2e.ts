@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
 import { spawnHarness, waitForIdle } from './harness.ts'
-import { SessionId } from '@deepseek-ai/dsh-session'
+import { SessionId } from 'bake-session'
 
 /** Key-gated smoke for a real parent delegating filesystem work to a real child. */
 

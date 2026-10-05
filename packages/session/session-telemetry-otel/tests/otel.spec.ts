@@ -17,7 +17,7 @@ import { getOrCreateAnonymousUserId } from '@deepseek-ai/dsh-anonymous-user-id'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import { recordFeedback } from '@deepseek-ai/dsh-command-feedback'
 import { createAssistantMessage } from '@deepseek-ai/dsh-llm'
-import SessionStore, { SESSION_FORMAT_VERSION, Session, SessionId, SessionSeq } from '@deepseek-ai/dsh-session'
+import SessionStore, { SESSION_FORMAT_VERSION, Session, SessionId, SessionSeq } from 'bake-session'
 import OpenTelemetrySessionBackend, { Config, DEFAULT_TELEMETRY_MODE, SessionTelemetryMode } from '../src/index.ts'
 
 interface Capture {

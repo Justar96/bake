@@ -5,7 +5,7 @@
  */
 
 import type { Branded } from '@deepseek-ai/dsh-brand'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Agent } from 'bake-agent'
 
 /** Internal exported basis for the public `TerminalSessionId` type/value pair. */
 export type TerminalSessionIdValue = Branded<'TerminalSessionId'>

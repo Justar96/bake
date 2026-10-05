@@ -11,8 +11,8 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
 import type { PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 import { boot, loadOverlayPatches } from '@deepseek-ai/dsh-app-boot'
-import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
-import ToolRuntime from '@deepseek-ai/dsh-tools'
+import SystemPrompt from 'bake-system-prompt'
+import ToolRuntime from 'bake-tools'
 import * as McpClient from '@deepseek-ai/dsh-mcp-client/src/index.ts'
 
 interface ExampleContract {

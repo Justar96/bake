@@ -12,8 +12,8 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { ToolSchema } from '@deepseek-ai/dsh-llm'
-import type { ToolExecution, ToolRunContext } from '@deepseek-ai/dsh-tools'
-import { ToolArgsError, validateJsonSchemaValue, type ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
+import type { ToolExecution, ToolRunContext } from 'bake-tools'
+import { ToolArgsError, validateJsonSchemaValue, type ObjectJsonSchema } from 'bake-tools'
 
 /** The model-facing tool name a structured child must call to finish. */
 export const STRUCTURED_OUTPUT_TOOL = 'structured_output'

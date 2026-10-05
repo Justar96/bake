@@ -7,7 +7,7 @@ import {
 } from '@deepseek-ai/dsh-goal'
 import * as GoalInvariantCompanion from '@deepseek-ai/dsh-goal/invariant'
 import InvariantRegistry, { InvariantError } from '@deepseek-ai/dsh-invariants'
-import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
+import SessionStore, { SessionId } from 'bake-session'
 
 const change: GoalSnapshotChangeMeta = {
   kind: 'goal/change',

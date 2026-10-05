@@ -20,16 +20,18 @@ Use the core packages to build or extend an agent that records durable session h
 <a id="packages"></a>
 ## Packages
 
+Use the full package names below in imports. For plugin packages, use the same names in the `name` field of custom Loader rows. Service keys such as `ctx.sessions` and `ctx.tools`, configuration row IDs, and settings section names remain unchanged.
+
 | Package | Role | ctx key |
 |---|---|---|
-| [`scope/`](scope/README.md) | Scoped registration and event routing that isolate one agent's contributions | library — no ctx key |
-| [`session/`](session/README.md) | The append-only session event log every agent's history derives from | `ctx.sessions` |
-| [`system-prompt/`](system-prompt/README.md) | System-prompt assembly from ordered sections, tool schemas, and variables | `ctx.systemPrompt` |
-| [`tools/`](tools/README.md) | The tool registry and guarded execution pipeline the loop dispatches through | `ctx.tools` |
-| [`agent-tool-presentation/`](agent-tool-presentation/README.md) | Per-agent tool-presentation selector for presets | no ctx key |
-| [`agent/`](agent/README.md) | The `Agent` handle plugins program against, plus its live registry and events | `ctx.agents` |
-| [`agent-default-model/`](agent-default-model/README.md) | The deployment default model selection entry points apply to fresh agents | `ctx.agentDefaultModel` |
-| [`agent-loop/`](agent-loop/README.md) | The default agent driver: creates agents and runs the turn and step lifecycle | `ctx.agentLoop` |
+| [`bake-scope`](scope/README.md) | Scoped registration and event routing that isolate one agent's contributions | library — no ctx key |
+| [`bake-session`](session/README.md) | The append-only session event log every agent's history derives from | `ctx.sessions` |
+| [`bake-system-prompt`](system-prompt/README.md) | System-prompt assembly from ordered sections, tool schemas, and variables | `ctx.systemPrompt` |
+| [`bake-tools`](tools/README.md) | The tool registry and guarded execution pipeline the loop dispatches through | `ctx.tools` |
+| [`bake-agent-tool-presentation`](agent-tool-presentation/README.md) | Per-agent tool-presentation selector for presets | no ctx key |
+| [`bake-agent`](agent/README.md) | The `Agent` handle plugins program against, plus its live registry and events | `ctx.agents` |
+| [`bake-agent-default-model`](agent-default-model/README.md) | The deployment default model selection entry points apply to fresh agents | `ctx.agentDefaultModel` |
+| [`bake-agent-loop`](agent-loop/README.md) | The default agent driver: creates agents and runs the turn and step lifecycle | `ctx.agentLoop` |
 
 `scope` supplies the shared scoping primitive; `agent` owns the public `Agent` contract, while `agent-loop` is its default implementation, so extension plugins depend on `agent` and the driver stays swappable. `agent-default-model` owns the deployment selection an entry point applies when a session has none of its own. Runnable compositions live under [`packages/bundle`](../bundle/README.md); this group owns only the swappable spine pieces.
 

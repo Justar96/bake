@@ -1,7 +1,7 @@
 import { Context } from '@deepseek-ai/cordis'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import SessionStore, { SessionLogOffset, SessionSeq, SESSION_FORMAT_VERSION, SessionId } from '@deepseek-ai/dsh-session'
-import type { SessionEvent, SessionHeader, SessionId as SessionIdType } from '@deepseek-ai/dsh-session'
+import SessionStore, { SessionLogOffset, SessionSeq, SESSION_FORMAT_VERSION, SessionId } from 'bake-session'
+import type { SessionEvent, SessionHeader, SessionId as SessionIdType } from 'bake-session'
 import SessionPersistence, {
   SessionPersistenceCorruptionError,
   SessionPersistenceNotFoundError,

@@ -3,11 +3,11 @@ description: "The agent-plane presentation selector for users and maintainers ch
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-agent-tool-presentation
+# bake-agent-tool-presentation
 
 ## Summary
 
-Use `dsh-agent-tool-presentation` in an [agent preset](../../preset/agent-presets/README.md) to fix whether models see every native tool schema, only `run_code` with a generated SDK, or both forms. Each preset can choose independently, so native and PTC agents can share one process without sharing tool catalogs. Selecting `ptc` or `both` requires a compatible PTC runtime; a deployment without one rejects the preset at mount time before its first prompt. The `mode` field is required when this package is present, while omitting the package keeps the deployment default.
+Use `bake-agent-tool-presentation` in an [agent preset](../../preset/agent-presets/README.md) to fix whether models see every native tool schema, only `run_code` with a generated SDK, or both forms. Each preset can choose independently, so native and PTC agents can share one process without sharing tool catalogs. Selecting `ptc` or `both` requires a compatible PTC runtime; a deployment without one rejects the preset at mount time before its first prompt. The `mode` field is required when this package is present, while omitting the package keeps the deployment default.
 
 ## Table of Contents
 
@@ -23,12 +23,12 @@ Use `dsh-agent-tool-presentation` in an [agent preset](../../preset/agent-preset
 <a id="use-this-package"></a>
 ## Use this package
 
-Add this row to an agent preset to fix how every agent joined to that preset sees its tools. `native` presents each visible tool schema as a function definition; `ptc` presents only the `run_code` transport plus a generated SDK and the rule that only `run_code` may be called directly; `both` presents both forms. Agents that declare nothing get the deployment-wide `mode` on the [`dsh-tools`](../tools/README.md) row.
+Add this row to an agent preset to fix how every agent joined to that preset sees its tools. `native` presents each visible tool schema as a function definition; `ptc` presents only the `run_code` transport plus a generated SDK and the rule that only `run_code` may be called directly; `both` presents both forms. Agents that declare nothing get the deployment-wide `mode` on the [`bake-tools`](../tools/README.md) row.
 
 ### Add the row to a preset
 
 ```yaml
-- name: '@deepseek-ai/dsh-agent-tool-presentation'
+- name: 'bake-agent-tool-presentation'
   config:
     mode: ptc
 ```
@@ -37,11 +37,11 @@ Add this row to an agent preset to fix how every agent joined to that preset see
 |---|---|---|
 | `mode` | required | `native` — every schema; `ptc` — `run_code` plus generated SDK; `both` — both forms |
 
-The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-agent-tool-presentation) is the exhaustive source for every accepted field. `mode` is required rather than defaulted because a preset without this row inherits the deployment default.
+The generated [configuration catalog](../../../docs/config-catalog.md#bake-agent-tool-presentation) is the exhaustive source for every accepted field. `mode` is required rather than defaulted because a preset without this row inherits the deployment default.
 
 ### What PTC mode requires
 
-Selecting `ptc` or `both` needs a composed PTC runtime (`ctx.ptcRuntime`) whose language has a registered SDK renderer — the TypeScript runtime ships via [`dsh-ptc-runtime-codemode`](../../ptc-runtime/ptc-runtime-codemode/README.md), and both the TypeScript and Python SDK renderers are built into `dsh-tools`. A preset that selects a PTC mode against a deployment composing no such runtime refuses to mount, naming this row, so the failure lands where the operator can act instead of at the session's first request.
+Selecting `ptc` or `both` needs a composed PTC runtime (`ctx.ptcRuntime`) whose language has a registered SDK renderer — the TypeScript runtime ships via [`dsh-ptc-runtime-codemode`](../../ptc-runtime/ptc-runtime-codemode/README.md), and both the TypeScript and Python SDK renderers are built into `bake-tools`. A preset that selects a PTC mode against a deployment composing no such runtime refuses to mount, naming this row, so the failure lands where the operator can act instead of at the session's first request.
 
 ### One presentation per agent
 
@@ -66,7 +66,7 @@ The tool registry cannot move into a preset: its consumers are all host-plane �
 | File | Role |
 |---|---|
 | [`src/index.ts`](src/index.ts) | Plugin entry: `mode` config, `apply` wiring `ctx.tools.presentAs` for the mounting scope |
-| — | No runtime invariant companion is published; this package makes exactly one scoped call into `ctx.tools` and owns no event or snapshot of its own; the relation it establishes — which presentation one agent's assembly uses — is the tool registry's to hold, and `dsh-tools` observes it there. |
+| — | No runtime invariant companion is published; this package makes exactly one scoped call into `ctx.tools` and owns no event or snapshot of its own; the relation it establishes — which presentation one agent's assembly uses — is the tool registry's to hold, and `bake-tools` observes it there. |
 
 ### Behavior notes
 
@@ -92,7 +92,7 @@ The package-level contract is enough for most consumers; read these when you nee
 <a id="model-experience"></a>
 ## Model Experience
 
-Indirectly, through the tool presentation it selects in `dsh-tools` — the row only chooses between the two projections `dsh-tools` owns and registers no prompt, schema, or result of its own.
+Indirectly, through the tool presentation it selects in `bake-tools` — the row only chooses between the two projections `bake-tools` owns and registers no prompt, schema, or result of its own.
 
 #### KV Cache effect
 

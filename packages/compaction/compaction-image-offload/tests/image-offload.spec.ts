@@ -5,8 +5,8 @@
 
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import AgentLoop from '@deepseek-ai/dsh-agent-loop'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import AgentLoop from 'bake-agent-loop'
+import type { Agent } from 'bake-agent'
 import BasicCompactionEngine from '@deepseek-ai/dsh-compaction-basic'
 import TokenMeter from '@deepseek-ai/dsh-token-meter'
 import { ImageVariantId } from '@deepseek-ai/dsh-attachment'
@@ -15,8 +15,8 @@ import { toPiContext } from '@deepseek-ai/dsh-llm-pi-ai/src/context.ts'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { createAssistantMessage, createToolResultMessage, createUserMessage, IMAGE_OFFLOAD_REQUIRED_CODE, LlmAdapter, LlmError, ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
-import { isReplacementSurfaceEvent, SessionId } from '@deepseek-ai/dsh-session'
-import type { Session } from '@deepseek-ai/dsh-session'
+import { isReplacementSurfaceEvent, SessionId } from 'bake-session'
+import type { Session } from 'bake-session'
 import * as offload from '../src/index.ts'
 
 type ScriptEntry = StreamChunk[] | (() => never)

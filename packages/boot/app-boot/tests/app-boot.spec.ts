@@ -865,7 +865,7 @@ describe('auditStartupEntries', () => {
     const warn = vi.fn()
     const error = await auditStartupEntries(ctxWith([
       { fiber: fiber(0, undefined, { webServer: {} }), options: { id: 'web-runtime', name: './web.mjs' } },
-      { fiber: fiber(3, original), options: { id: 'agent-loop', name: '@deepseek-ai/dsh-agent-loop' } },
+      { fiber: fiber(3, original), options: { id: 'agent-loop', name: 'bake-agent-loop' } },
       { fiber: fiber(0, undefined, { webRuntime: {} }), options: { id: 'connection', name: './connection.mjs' } },
       { fiber: fiber(0), options: { id: 'unknown', name: './unknown.mjs' } },
     ]), NAME, warn).catch((error: unknown) => error)
@@ -875,7 +875,7 @@ describe('auditStartupEntries', () => {
 
       Failed plugins (1):
         agent-loop (required)
-          Package: @deepseek-ai/dsh-agent-loop
+          Package: bake-agent-loop
           Error: listen EADDRINUSE: address already in use 127.0.0.1:3080
               at Server.listen (node:net:1:2)
 
@@ -1007,12 +1007,12 @@ describe('boot', () => {
     const dir = tmp()
     const harness = tmp()
     const absolutePlugin = join(dir, 'absolute.mjs')
-    const shadow = join(dir, 'node_modules', '@deepseek-ai', 'dsh-system-prompt')
-    const harnessPlugin = join(harness, 'node_modules', '@deepseek-ai', 'dsh-system-prompt')
+    const shadow = join(dir, 'node_modules', 'bake-system-prompt')
+    const harnessPlugin = join(harness, 'node_modules', 'bake-system-prompt')
     mkdirSync(shadow, { recursive: true })
     mkdirSync(harnessPlugin, { recursive: true })
     writeFileSync(join(shadow, 'package.json'), JSON.stringify({
-      name: '@deepseek-ai/dsh-system-prompt',
+      name: 'bake-system-prompt',
       type: 'module',
       exports: './index.mjs',
     }))
@@ -1023,7 +1023,7 @@ describe('boot', () => {
       '',
     ].join('\n'))
     writeFileSync(join(harnessPlugin, 'package.json'), JSON.stringify({
-      name: '@deepseek-ai/dsh-system-prompt',
+      name: 'bake-system-prompt',
       type: 'module',
       exports: './index.mjs',
     }))
@@ -1037,7 +1037,7 @@ describe('boot', () => {
     writeFileSync(absolutePlugin, 'export function apply(ctx) { ctx.provide("absolutePluginLoaded", true) }\n')
     const entries = [
       '- id: prompt',
-      "  name: '@deepseek-ai/dsh-system-prompt'",
+      "  name: 'bake-system-prompt'",
       '- id: relative',
       "  name: './relative.mjs'",
     ]

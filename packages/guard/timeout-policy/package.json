@@ -29,13 +29,13 @@
   "peerDependencies": {
     "@deepseek-ai/dsh-llm": "workspace:^",
     "@deepseek-ai/dsh-timeout": "workspace:^",
-    "@deepseek-ai/dsh-tools": "workspace:^",
+    "bake-tools": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   },
   "devDependencies": {
     "@deepseek-ai/dsh-llm": "workspace:^",
     "@deepseek-ai/dsh-timeout": "workspace:^",
-    "@deepseek-ai/dsh-tools": "workspace:^",
+    "bake-tools": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   }
 }

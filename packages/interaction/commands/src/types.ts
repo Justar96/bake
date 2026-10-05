@@ -7,7 +7,7 @@
  * @module @deepseek-ai/dsh-commands/types
  */
 
-import type { SessionSeq } from '@deepseek-ai/dsh-session/types'
+import type { SessionSeq } from 'bake-session/types'
 import type { CommandDefinitionId, CommandId } from './brand.ts'
 import type { EncodedImageAttachment } from '@deepseek-ai/dsh-attachment/types'
 
@@ -99,7 +99,7 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
-declare module '@deepseek-ai/dsh-session/types' {
+declare module 'bake-session/types' {
   interface SessionEventMap {
     /**
      * A resolved slash command entered its handler. Log-only (never model
@@ -122,7 +122,7 @@ declare module '@deepseek-ai/dsh-session/types' {
       commandId: CommandId
       kind: 'success' | 'error'
       text?: string
-      sourceEventSeq?: import('@deepseek-ai/dsh-session/types').SessionSeq
+      sourceEventSeq?: import('bake-session/types').SessionSeq
     }
   }
 }

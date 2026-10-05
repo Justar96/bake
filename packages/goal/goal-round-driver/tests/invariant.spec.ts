@@ -9,7 +9,7 @@ import {
 import * as GoalSessionInvariant from '@deepseek-ai/dsh-goal-round-driver/invariant'
 import { renderGoalRoundPrompt } from '@deepseek-ai/dsh-goal-round-driver'
 import InvariantRegistry, { InvariantError } from '@deepseek-ai/dsh-invariants'
-import SessionStore, { SessionId, type Session } from '@deepseek-ai/dsh-session'
+import SessionStore, { SessionId, type Session } from 'bake-session'
 
 const change: GoalSnapshotChangeMeta = {
   kind: 'goal/change',

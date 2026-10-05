@@ -9,7 +9,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
-import type { ToolExecution } from '@deepseek-ai/dsh-tools'
+import type { ToolExecution } from 'bake-tools'
 import { resolveRgPath, runRipgrep } from '@deepseek-ai/dsh-tool-fs-search'
 
 // Any access to the mocked module's surface throws — the shape a missing

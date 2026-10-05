@@ -9,26 +9,6 @@ This file is GENERATED from source (`scripts/gen-config-catalog.ts`) and checked
 
 A `Requires:` line lists the service keys the plugin `inject`s: its `cordis.yml` tree must also load providers for those services. Scope is the harness tier (`packages/`); the vendored cordis plugins a config tree may also load (the console logger, …) are pinned upstream source ([vendoring policy](../vendor/README.md)) and not catalogued here.
 
-<a id="deepseek-aidsh-agent-default-model"></a>
-
-## `@deepseek-ai/dsh-agent-default-model`
-
-```ts config-catalog
-/**
- * Composition entry for the default model selection. Absent, no provider is
- * the default: entry points start without a model until the user picks one,
- * and a saved selection is the only default there is.
- */
-export interface Config {
-  /** Registered provider route. */
-  provider?: string
-  /** Provider-owned model id. */
-  model?: string
-}
-```
-
-Source: [`packages/core/agent-default-model/src/index.ts:48`](../packages/core/agent-default-model/src/index.ts)
-
 <a id="deepseek-aidsh-agent-instructions"></a>
 
 ## `@deepseek-ai/dsh-agent-instructions`
@@ -60,38 +40,6 @@ export interface Config {
 ```
 
 Source: [`packages/context/agent-instructions/src/config.ts:18`](../packages/context/agent-instructions/src/config.ts)
-
-<a id="deepseek-aidsh-agent-loop"></a>
-
-## `@deepseek-ai/dsh-agent-loop`
-
-Requires: `agents` · `sessions` · `llm` · `tools` · `systemPrompt` · `sessionProjections`
-
-```ts config-catalog
-/** Agent-loop plugin configuration. */
-export interface Config {
-  /**
-   * Maximum parallel-safe calls in flight per agent step. `1` is serial;
-   * omission defaults to {@link DEFAULT_MAX_PARALLEL_TOOL_CALLS}.
-   */
-  maxParallelToolCalls?: number
-  /** Agents created or resumed at plugin startup. */
-  agents: (AgentOptions & {
-    /** Stable config label used in logs and as the fresh combined-id prefix. */
-    id: string
-    /** Optional stable identity; remounts resume its materialized history, while first use creates it fresh. */
-    sessionId?: SessionId
-    /** Optional workspace for a fresh session. */
-    cwd?: string
-    /** Persisted session to resume instead of creating a fresh session. */
-    resumeSessionId?: SessionId
-  })[]
-}
-```
-
-Depends on: [`AgentOptions`](subsystems/core.md) · [`SessionId`](subsystems/core.md)
-
-Source: [`packages/core/agent-loop/src/index.ts:274`](../packages/core/agent-loop/src/index.ts)
 
 <a id="deepseek-aidsh-agent-presets"></a>
 
@@ -138,30 +86,6 @@ export type PresetTrust = 'system' | 'user'
 ```
 
 Source: [`packages/preset/agent-presets/src/preset.ts:52`](../packages/preset/agent-presets/src/preset.ts)
-
-<a id="deepseek-aidsh-agent-tool-presentation"></a>
-
-## `@deepseek-ai/dsh-agent-tool-presentation`
-
-Requires: `tools`
-
-```ts config-catalog
-/** Plugin config. */
-export interface Config {
-  /**
-   * The form this agent's model sees. `native` sends every visible schema,
-   * `ptc` sends only `run_code` plus a generated SDK, `both` sends both.
-   * Required rather than defaulted: the deployment default is what a preset
-   * without this row already gets, so an omitted value would mean the row was
-   * composed for nothing.
-   */
-  mode: ToolPresentationMode
-}
-```
-
-Depends on: [`ToolPresentationMode`](subsystems/tools.md)
-
-Source: [`packages/core/agent-tool-presentation/src/index.ts:38`](../packages/core/agent-tool-presentation/src/index.ts)
 
 <a id="deepseek-aidsh-api-gateway"></a>
 
@@ -1981,38 +1905,6 @@ export interface Config {
 
 Source: [`packages/subagent/subagent-spawn-in-process/src/index.ts:24`](../packages/subagent/subagent-spawn-in-process/src/index.ts)
 
-<a id="deepseek-aidsh-system-prompt"></a>
-
-## `@deepseek-ai/dsh-system-prompt`
-
-```ts config-catalog
-/** Plugin config: the deployment-authored fragment of the system prompt (see {@link Config.personaPrefix} for its contract). */
-export interface Config {
-  /** Include the fixed DeepSeek Harness identity before the deployment persona (default true). */
-  includeHarnessIdentity?: boolean
-  /** Include dynamic runtime-context snapshots in model history (default true). */
-  includeRuntimeContext?: boolean
-  /**
-   * Deployment-wide persona prefix template before first-party guidance. A scoped section named
-   * `deployment:persona-prefix` shadows it; `{{variable}}` references are strict.
-   */
-  personaPrefix?: string
-  /**
-   * Persona suffix template after first-party guidance. A scoped `deployment:persona-suffix`
-   * section shadows it; `{{variable}}` references are strict. Defaults to empty.
-   */
-  personaSuffix?: string
-  /**
-   * Model-facing tool names in order, with {@link TOOL_ORDER_REST} exactly once.
-   * Invalid fields fail at load and unknown names fail at assembly; known names
-   * hidden in one scope may be absent there. Omitted means lexicographic order.
-   */
-  toolOrder?: string[]
-}
-```
-
-Source: [`packages/core/system-prompt/src/index.ts:231`](../packages/core/system-prompt/src/index.ts)
-
 <a id="deepseek-aidsh-terminal-bash"></a>
 
 ## `@deepseek-ai/dsh-terminal-bash`
@@ -2388,42 +2280,6 @@ export interface Config {
 
 Source: [`packages/web/tool-web/src/index.ts:38`](../packages/web/tool-web/src/index.ts)
 
-<a id="deepseek-aidsh-tools"></a>
-
-## `@deepseek-ai/dsh-tools`
-
-Requires: `systemPrompt`
-
-```ts config-catalog
-/** Plugin config: how the registered tools are presented to the model. */
-export interface Config {
-  /**
-   * Model presentation. `native` (default) sends every visible schema; `ptc`
-   * sends only `run_code` plus a generated SDK prompt and collapses the
-   * executor to the same surface (a model-direct call may only name
-   * `run_code`; `run_code` SDK sub-dispatches keep every visible tool); `both`
-   * sends both forms. PTC mode requires a `ctx.ptcRuntime` whose `language`
-   * has a registered SDK renderer (TypeScript or Python) and fail prompt
-   * assembly when it is absent or has no renderer. Under `ptc`, native names
-   * in `toolOrder` are invalid.
-   */
-  mode?: ToolPresentationMode
-  /**
-   * Concurrency cap for a `run_code` program's overlapping sub-calls
-   * (default 10, the loop scheduler's own default). Sub-calls follow the
-   * native scheduling contract — only calls whose tools classify
-   * concurrency-safe overlap; exclusive calls form barriers — so `1`
-   * restores strictly serial dispatch. Must be a positive integer.
-   */
-  maxParallelSubCalls?: number
-}
-
-/** How the registry presents its tools to the model (see {@link Config.mode}). */
-export type ToolPresentationMode = 'native' | 'ptc' | 'both'
-```
-
-Source: [`packages/core/tools/src/index.ts:702`](../packages/core/tools/src/index.ts)
-
 <a id="deepseek-aidsh-typert-loader"></a>
 
 ## `@deepseek-ai/dsh-typert-loader`
@@ -2544,11 +2400,154 @@ export interface Config {
 
 Source: [`packages/web/web-search-deepseek/src/index.ts:46`](../packages/web/web-search-deepseek/src/index.ts)
 
+<a id="bake-agent-default-model"></a>
+
+## `bake-agent-default-model`
+
+```ts config-catalog
+/**
+ * Composition entry for the default model selection. Absent, no provider is
+ * the default: entry points start without a model until the user picks one,
+ * and a saved selection is the only default there is.
+ */
+export interface Config {
+  /** Registered provider route. */
+  provider?: string
+  /** Provider-owned model id. */
+  model?: string
+}
+```
+
+Source: [`packages/core/agent-default-model/src/index.ts:48`](../packages/core/agent-default-model/src/index.ts)
+
+<a id="bake-agent-loop"></a>
+
+## `bake-agent-loop`
+
+Requires: `agents` · `sessions` · `llm` · `tools` · `systemPrompt` · `sessionProjections`
+
+```ts config-catalog
+/** Agent-loop plugin configuration. */
+export interface Config {
+  /**
+   * Maximum parallel-safe calls in flight per agent step. `1` is serial;
+   * omission defaults to {@link DEFAULT_MAX_PARALLEL_TOOL_CALLS}.
+   */
+  maxParallelToolCalls?: number
+  /** Agents created or resumed at plugin startup. */
+  agents: (AgentOptions & {
+    /** Stable config label used in logs and as the fresh combined-id prefix. */
+    id: string
+    /** Optional stable identity; remounts resume its materialized history, while first use creates it fresh. */
+    sessionId?: SessionId
+    /** Optional workspace for a fresh session. */
+    cwd?: string
+    /** Persisted session to resume instead of creating a fresh session. */
+    resumeSessionId?: SessionId
+  })[]
+}
+```
+
+Depends on: [`AgentOptions`](subsystems/core.md) · [`SessionId`](subsystems/core.md)
+
+Source: [`packages/core/agent-loop/src/index.ts:274`](../packages/core/agent-loop/src/index.ts)
+
+<a id="bake-agent-tool-presentation"></a>
+
+## `bake-agent-tool-presentation`
+
+Requires: `tools`
+
+```ts config-catalog
+/** Plugin config. */
+export interface Config {
+  /**
+   * The form this agent's model sees. `native` sends every visible schema,
+   * `ptc` sends only `run_code` plus a generated SDK, `both` sends both.
+   * Required rather than defaulted: the deployment default is what a preset
+   * without this row already gets, so an omitted value would mean the row was
+   * composed for nothing.
+   */
+  mode: ToolPresentationMode
+}
+```
+
+Depends on: [`ToolPresentationMode`](subsystems/tools.md)
+
+Source: [`packages/core/agent-tool-presentation/src/index.ts:38`](../packages/core/agent-tool-presentation/src/index.ts)
+
+<a id="bake-system-prompt"></a>
+
+## `bake-system-prompt`
+
+```ts config-catalog
+/** Plugin config: the deployment-authored fragment of the system prompt (see {@link Config.personaPrefix} for its contract). */
+export interface Config {
+  /** Include the fixed DeepSeek Harness identity before the deployment persona (default true). */
+  includeHarnessIdentity?: boolean
+  /** Include dynamic runtime-context snapshots in model history (default true). */
+  includeRuntimeContext?: boolean
+  /**
+   * Deployment-wide persona prefix template before first-party guidance. A scoped section named
+   * `deployment:persona-prefix` shadows it; `{{variable}}` references are strict.
+   */
+  personaPrefix?: string
+  /**
+   * Persona suffix template after first-party guidance. A scoped `deployment:persona-suffix`
+   * section shadows it; `{{variable}}` references are strict. Defaults to empty.
+   */
+  personaSuffix?: string
+  /**
+   * Model-facing tool names in order, with {@link TOOL_ORDER_REST} exactly once.
+   * Invalid fields fail at load and unknown names fail at assembly; known names
+   * hidden in one scope may be absent there. Omitted means lexicographic order.
+   */
+  toolOrder?: string[]
+}
+```
+
+Source: [`packages/core/system-prompt/src/index.ts:231`](../packages/core/system-prompt/src/index.ts)
+
+<a id="bake-tools"></a>
+
+## `bake-tools`
+
+Requires: `systemPrompt`
+
+```ts config-catalog
+/** Plugin config: how the registered tools are presented to the model. */
+export interface Config {
+  /**
+   * Model presentation. `native` (default) sends every visible schema; `ptc`
+   * sends only `run_code` plus a generated SDK prompt and collapses the
+   * executor to the same surface (a model-direct call may only name
+   * `run_code`; `run_code` SDK sub-dispatches keep every visible tool); `both`
+   * sends both forms. PTC mode requires a `ctx.ptcRuntime` whose `language`
+   * has a registered SDK renderer (TypeScript or Python) and fail prompt
+   * assembly when it is absent or has no renderer. Under `ptc`, native names
+   * in `toolOrder` are invalid.
+   */
+  mode?: ToolPresentationMode
+  /**
+   * Concurrency cap for a `run_code` program's overlapping sub-calls
+   * (default 10, the loop scheduler's own default). Sub-calls follow the
+   * native scheduling contract — only calls whose tools classify
+   * concurrency-safe overlap; exclusive calls form barriers — so `1`
+   * restores strictly serial dispatch. Must be a positive integer.
+   */
+  maxParallelSubCalls?: number
+}
+
+/** How the registry presents its tools to the model (see {@link Config.mode}). */
+export type ToolPresentationMode = 'native' | 'ptc' | 'both'
+```
+
+Source: [`packages/core/tools/src/index.ts:702`](../packages/core/tools/src/index.ts)
+
 ## Loadable plugins with no config
 
 These load from a `cordis.yml` entry with no `config:` block; they declare no configuration API.
 
-- `@deepseek-ai/dsh-agent` ([`packages/core/agent/src/index.ts`](../packages/core/agent/src/index.ts))
 - `@deepseek-ai/dsh-authorization` — requires `credentials` ([`packages/credentials/authorization/src/index.ts`](../packages/credentials/authorization/src/index.ts))
 - `@deepseek-ai/dsh-command-compact` — requires `commands` · `compaction` ([`packages/compaction/command-compact/src/index.ts`](../packages/compaction/command-compact/src/index.ts))
 - `@deepseek-ai/dsh-command-feedback` — requires `commands` ([`packages/feedback/command-feedback/src/index.ts`](../packages/feedback/command-feedback/src/index.ts))
@@ -2560,7 +2559,6 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-llm` ([`packages/llm/llm/src/index.ts`](../packages/llm/llm/src/index.ts))
 - `@deepseek-ai/dsh-mcp-resources` — requires `tools` ([`packages/mcp/mcp-resources/src/index.ts`](../packages/mcp/mcp-resources/src/index.ts))
 - `@deepseek-ai/dsh-schedule` — requires `agents` · `sessions` · `tools` · `sessionPersistence` ([`packages/schedule/schedule/src/index.ts`](../packages/schedule/schedule/src/index.ts))
-- `@deepseek-ai/dsh-session` ([`packages/core/session/src/index.ts`](../packages/core/session/src/index.ts))
 - `@deepseek-ai/dsh-session-checkpoint-policy` — requires `llm` · `sessionPersistence` · `sessions` · `tools` ([`packages/session/session-checkpoint-policy/src/index.ts`](../packages/session/session-checkpoint-policy/src/index.ts))
 - `@deepseek-ai/dsh-session-projection` ([`packages/session/session-projection/src/index.ts`](../packages/session/session-projection/src/index.ts))
 - `@deepseek-ai/dsh-skill-badge` — requires `skills` ([`packages/skill/skill-badge/src/index.ts`](../packages/skill/skill-badge/src/index.ts))
@@ -2572,6 +2570,8 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-tool-cordis` — requires `tools` · `systemPrompt` · `cordisInspect` ([`packages/extensions/tool-cordis/src/index.ts`](../packages/extensions/tool-cordis/src/index.ts))
 - `@deepseek-ai/dsh-tool-subagent-control` — requires `tools` · `subagents` ([`packages/subagent/tool-subagent-control/src/index.ts`](../packages/subagent/tool-subagent-control/src/index.ts))
 - `@deepseek-ai/dsh-user-questions` ([`packages/interaction/user-questions/src/index.ts`](../packages/interaction/user-questions/src/index.ts))
+- `bake-agent` ([`packages/core/agent/src/index.ts`](../packages/core/agent/src/index.ts))
+- `bake-session` ([`packages/core/session/src/index.ts`](../packages/core/session/src/index.ts))
 
 ## Seam packages (not directly loadable)
 
@@ -2618,7 +2618,6 @@ Imported as libraries by other packages; a `cordis.yml` cannot load them.
 - `@deepseek-ai/dsh-package-manifest` ([`packages/util/package-manifest/src/index.ts`](../packages/util/package-manifest/src/index.ts))
 - `@deepseek-ai/dsh-remote-mock` ([`packages/test-support/remote-mock/src/index.ts`](../packages/test-support/remote-mock/src/index.ts))
 - `@deepseek-ai/dsh-sandbox-windows-acl` ([`packages/sandbox/sandbox-windows-acl/src/index.ts`](../packages/sandbox/sandbox-windows-acl/src/index.ts))
-- `@deepseek-ai/dsh-scope` ([`packages/core/scope/src/index.ts`](../packages/core/scope/src/index.ts))
 - `@deepseek-ai/dsh-session-format` ([`packages/session/session-format/src/index.ts`](../packages/session/session-format/src/index.ts))
 - `@deepseek-ai/dsh-session-format-catalog` ([`packages/session/session-format-catalog/src/index.ts`](../packages/session/session-format-catalog/src/index.ts))
 - `@deepseek-ai/dsh-session-format-v0-to-v1` ([`packages/session/session-format-v0-to-v1/src/index.ts`](../packages/session/session-format-v0-to-v1/src/index.ts))
@@ -2637,3 +2636,4 @@ Imported as libraries by other packages; a `cordis.yml` cannot load them.
 - `@deepseek-ai/dsh-util-time` ([`packages/util/time/src/index.ts`](../packages/util/time/src/index.ts))
 - `@deepseek-ai/dsh-util-values` ([`packages/util/values/src/index.ts`](../packages/util/values/src/index.ts))
 - `@deepseek-ai/dsh-win32-process` ([`packages/subprocess/win32-process/src/index.ts`](../packages/subprocess/win32-process/src/index.ts))
+- `bake-scope` ([`packages/core/scope/src/index.ts`](../packages/core/scope/src/index.ts))

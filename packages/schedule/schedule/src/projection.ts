@@ -4,8 +4,8 @@
  */
 
 import { z } from 'zod'
-import { SessionLogOffset } from '@deepseek-ai/dsh-session'
-import type { SessionLogOffset as SessionLogOffsetType } from '@deepseek-ai/dsh-session'
+import { SessionLogOffset } from 'bake-session'
+import type { SessionLogOffset as SessionLogOffsetType } from 'bake-session'
 import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
 import { applyScheduleChanges, decodeScheduleChange } from './domain.ts'
 import type { FoldedSchedules } from './domain.ts'

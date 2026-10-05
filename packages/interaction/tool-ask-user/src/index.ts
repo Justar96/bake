@@ -7,7 +7,7 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import { defineTool } from '@deepseek-ai/dsh-tools'
+import { defineTool } from 'bake-tools'
 import '@deepseek-ai/dsh-user-questions'
 import { presentAskCall, presentAskResult } from './presentation.ts'
 

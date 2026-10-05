@@ -1,7 +1,7 @@
 /** Running calls' live output and finish reach the live rows, and the logged result replaces them. */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ToolCallId, type StreamChunk } from '@deepseek-ai/dsh-llm'
-import { defineContentToolFixture } from '@deepseek-ai/dsh-tools'
+import { defineContentToolFixture } from 'bake-tools'
 import { transcriptRows } from '@dsh-tui/ui'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'
 import type { Row, ToolCallRow } from '@dsh-tui/ui/rows.ts'

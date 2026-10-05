@@ -11,14 +11,14 @@ import { basename, resolve } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import LlmRuntime from '@deepseek-ai/dsh-llm'
 import type { ToolSchema } from '@deepseek-ai/dsh-llm'
-import AgentRegistry from '@deepseek-ai/dsh-agent'
-import type { Agent } from '@deepseek-ai/dsh-agent'
-import { createScope } from '@deepseek-ai/dsh-scope'
-import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
+import AgentRegistry from 'bake-agent'
+import type { Agent } from 'bake-agent'
+import { createScope } from 'bake-scope'
+import SessionStore, { SessionId } from 'bake-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import GoalService from '@deepseek-ai/dsh-goal'
-import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
-import ToolRuntime, { type Config as ToolsConfig } from '@deepseek-ai/dsh-tools'
+import SystemPrompt from 'bake-system-prompt'
+import ToolRuntime, { type Config as ToolsConfig } from 'bake-tools'
 import LocalBashExecutor from '@deepseek-ai/dsh-bash-local'
 import * as BashEnvPlugin from '@deepseek-ai/dsh-shell-env'
 import { PwshLocalExecutor } from '@deepseek-ai/dsh-pwsh-local'
@@ -217,7 +217,7 @@ const TOOL_PACKAGES: ToolPackage[] = [
       'ask_user_question pauses the tool call until the active UI provider returns a human answer.',
   },
   {
-    pkg: '@deepseek-ai/dsh-tools',
+    pkg: 'bake-tools',
     dir: 'tools',
     source: 'packages/core/tools/src/ptc.ts',
     requires: ['ctx.tools', 'ctx.ptcRuntime (execution time)', 'ctx.systemPrompt'],

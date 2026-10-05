@@ -8,14 +8,14 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
-import { agentEvents, type Agent } from '@deepseek-ai/dsh-agent'
+import { agentEvents, type Agent } from 'bake-agent'
 import { createUserMessage, ToolCallId } from '@deepseek-ai/dsh-llm'
-import * as systemPromptPlugin from '@deepseek-ai/dsh-system-prompt'
-import * as toolsPlugin from '@deepseek-ai/dsh-tools'
+import * as systemPromptPlugin from 'bake-system-prompt'
+import * as toolsPlugin from 'bake-tools'
 import * as fsPlugin from '@deepseek-ai/dsh-fs-local'
 import * as toolFsPlugin from '@deepseek-ai/dsh-tool-fs'
-import * as sessionPlugin from '@deepseek-ai/dsh-session'
-import { Session, SessionId } from '@deepseek-ai/dsh-session'
+import * as sessionPlugin from 'bake-session'
+import { Session, SessionId } from 'bake-session'
 import * as queryPlugin from '@deepseek-ai/dsh-session-query-sqlite'
 import * as referencePlugin from '@deepseek-ai/dsh-session-reference'
 import * as spillPlugin from '@deepseek-ai/dsh-spill-local'
@@ -44,9 +44,9 @@ describe('session-reference real Loader composition', () => {
     await ctx.plugin(Loader)
     ctx.loader.builtins.include = Include
     const modules = new Map<string, unknown>([
-      ['@deepseek-ai/dsh-session', sessionPlugin],
-      ['@deepseek-ai/dsh-system-prompt', systemPromptPlugin],
-      ['@deepseek-ai/dsh-tools', toolsPlugin],
+      ['bake-session', sessionPlugin],
+      ['bake-system-prompt', systemPromptPlugin],
+      ['bake-tools', toolsPlugin],
       ['@deepseek-ai/dsh-fs-local', fsPlugin],
       ['@deepseek-ai/dsh-tool-fs', toolFsPlugin],
       ['@deepseek-ai/dsh-session-query-sqlite', queryPlugin],

@@ -22,8 +22,8 @@ import {
   type SessionEvent,
   type SessionSeq as SessionSeqType,
   type SessionSeqCursor,
-} from '@deepseek-ai/dsh-session'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+} from 'bake-session'
+import type { Agent } from 'bake-agent'
 import type { SessionTelemetrySink, SessionTelemetryRecord, SessionTelemetrySeverity } from './index.ts'
 
 /** Whether capture follows live events or reads the canonical log only when requested. */

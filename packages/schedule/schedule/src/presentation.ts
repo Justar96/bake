@@ -10,7 +10,7 @@
  * @module @deepseek-ai/dsh-schedule/src/presentation
  */
 
-import type { GenericResultView, ToolResult } from '@deepseek-ai/dsh-tools'
+import type { GenericResultView, ToolResult } from 'bake-tools'
 
 /** The reminder fields a summary reads from one canonical view. */
 interface ReminderSummary {

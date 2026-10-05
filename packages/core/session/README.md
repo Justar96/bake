@@ -3,11 +3,11 @@ description: "The event-sourced session log and in-memory store for users and ma
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-session
+# bake-session
 
 ## Summary
 
-`dsh-session` records every model-visible fact in an append-only session log and derives model history from that record. Consumers can inspect, replay, fork, and flush sessions while preserving historical events; compaction hides superseded entries from the active conversation without deleting them. Sessions remain in memory unless a persistence backend is added, and durability checkpoints wait for configured backends. Choose this package wherever an agent needs a reconstructable session record; it does not call models.
+`bake-session` records every model-visible fact in an append-only session log and derives model history from that record. Consumers can inspect, replay, fork, and flush sessions while preserving historical events; compaction hides superseded entries from the active conversation without deleting them. Sessions remain in memory unless a persistence backend is added, and durability checkpoints wait for configured backends. Choose this package wherever an agent needs a reconstructable session record; it does not call models.
 
 ## Table of Contents
 
@@ -23,7 +23,7 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## Use this package
 
-Mount `dsh-session` wherever a session must exist. It creates and holds event-sourced `Session` instances in memory; durable storage is layered on by a persistence plugin that subscribes to the `session/event` feed.
+Mount `bake-session` wherever a session must exist. It creates and holds event-sourced `Session` instances in memory; durable storage is layered on by a persistence plugin that subscribes to the `session/event` feed.
 
 ### Create and inspect sessions
 

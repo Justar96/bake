@@ -1,5 +1,5 @@
 /** Explicit file reads and prompt admission through the Agent's Harness services. */
-import type { Agent, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
+import type { Agent, ModelSelectionRef } from 'bake-agent'
 import type { FileBlock, ImageBlock } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-fs'
 import type { ImageMediaType, SaveImageAttachment } from '@deepseek-ai/dsh-attachment'

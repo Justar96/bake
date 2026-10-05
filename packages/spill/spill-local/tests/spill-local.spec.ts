@@ -16,7 +16,7 @@ import { realpath } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, join, normalize } from 'node:path'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
-import { SessionId } from '@deepseek-ai/dsh-session'
+import { SessionId } from 'bake-session'
 import type { SaveTextSpill } from '@deepseek-ai/dsh-spill'
 import LocalSpillStore, {
   DEFAULT_ROOT_PREFIX,

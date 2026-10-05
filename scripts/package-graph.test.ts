@@ -11,16 +11,16 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
 
-function fixture(packages: Readonly<Record<string, readonly string[]>>): string {
+function fixture(packages: Readonly<Record<string, readonly string[]>>, names: Readonly<Record<string, string>> = {}): string {
   const root = mkdtempSync(join(tmpdir(), 'dsh-package-graph-'))
   roots.push(root)
   for (const [name, dependencies] of Object.entries(packages)) {
     const directory = join(root, 'packages', 'client', name)
     mkdirSync(directory, { recursive: true })
     writeFileSync(join(directory, 'package.json'), `${JSON.stringify({
-      name: `@deepseek-ai/dsh-${name}`,
+      name: names[name] ?? `@deepseek-ai/dsh-${name}`,
       peerDependencies: Object.fromEntries(dependencies.map(dependency => [
-        `@deepseek-ai/dsh-${dependency}`,
+        names[dependency] ?? `@deepseek-ai/dsh-${dependency}`,
         'workspace:^',
       ])),
     }, null, 2)}\n`)
@@ -34,6 +34,42 @@ describe('collectPackageGraph', () => {
 
     expect(collectPackageGraph(root, ['client'], 'fixture').map(pkg => pkg.short))
       .toEqual(['foundation', 'feature', 'application'])
+  })
+
+  it('resolves mixed namespaces through full manifest names', () => {
+    const root = fixture({ application: ['feature'], feature: ['foundation'], foundation: [] }, {
+      foundation: 'bake-foundation', application: 'bake-application',
+    })
+
+    expect(collectPackageGraph(root, ['client'], 'fixture').map(({ name, deps }) => ({ name, deps })))
+      .toEqual([
+        { name: 'bake-foundation', deps: [] },
+        { name: '@deepseek-ai/dsh-feature', deps: ['foundation'] },
+        { name: 'bake-application', deps: ['feature'] },
+      ])
+  })
+
+  it('rejects a stale namespace even when its short name exists', () => {
+    const root = fixture({ consumer: ['stale'], foundation: [] }, {
+      foundation: 'bake-foundation', stale: '@deepseek-ai/dsh-foundation',
+    })
+
+    expect(() => collectPackageGraph(root, ['client'], 'fixture'))
+      .toThrow('fixture: @deepseek-ai/dsh-consumer references missing in-repo peer @deepseek-ai/dsh-foundation')
+  })
+
+  it('rejects ambiguous graph labels across namespaces', () => {
+    const root = fixture({ foundation: [], duplicate: [] }, { duplicate: 'bake-foundation' })
+
+    expect(() => collectPackageGraph(root, ['client'], 'fixture'))
+      .toThrow('duplicate graph label foundation')
+  })
+
+  it('rejects a missing Bake peer by its full name', () => {
+    const root = fixture({ consumer: ['missing'] }, { missing: 'bake-missing' })
+
+    expect(() => collectPackageGraph(root, ['client'], 'fixture'))
+      .toThrow('fixture: @deepseek-ai/dsh-consumer references missing in-repo peer bake-missing')
   })
 
   it('keeps a dependency cycle together and before its consumers', () => {

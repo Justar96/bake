@@ -20,8 +20,8 @@ import Include, { applyEntryPatches, entryListSchema, type PatchOptions } from '
 import Loader, { Group } from '@deepseek-ai/cordis-plugin-loader'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import { ToolCallId, type GenerateOptions, type Message, type StreamChunk } from '@deepseek-ai/dsh-llm'
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
-import { defineContentToolFixture } from '@deepseek-ai/dsh-tools'
+import type { SessionEvent } from 'bake-session'
+import { defineContentToolFixture } from 'bake-tools'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'
 import { transcriptRows } from '@dsh-tui/ui'
 import { SessionController } from '../src/controller.ts'
@@ -85,8 +85,7 @@ async function profile() {
 
   // Bare row names resolve from the Loader's base, here the private root, as
   // the launcher's resolve from the installation. Removing the root unlinks it.
-  await mkdir(join(root, 'node_modules'))
-  await symlink(join(REPOSITORY, 'node_modules', '@deepseek-ai'), join(root, 'node_modules', '@deepseek-ai'), 'junction')
+  await symlink(join(REPOSITORY, 'node_modules'), join(root, 'node_modules'), 'junction')
   ctx.baseUrl = pathToFileURL(root).href + '/'
   ctx.provide('dshHomePath', dshHomePath)
   // What the launcher provides a profile it starts, here a private one. The

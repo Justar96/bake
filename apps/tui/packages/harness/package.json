@@ -11,7 +11,7 @@
     "react": "catalog:"
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-session": "workspace:^",
+    "bake-session": "workspace:^",
     "@deepseek-ai/schemastery": "workspace:^",
     "@types/react": "catalog:"
   },

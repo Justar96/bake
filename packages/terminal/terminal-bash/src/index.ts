@@ -5,8 +5,8 @@
  */
 
 import { Context } from '@deepseek-ai/cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
-import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
+import type { Agent } from 'bake-agent'
+import type { Session, SessionEvent } from 'bake-session'
 import { TerminalBackendCleanupError } from '@deepseek-ai/dsh-terminal'
 import type { TerminalBackend, TerminalBackendSpawnSpec, TerminalSendOperation } from '@deepseek-ai/dsh-terminal'
 import type { SubprocessTerminalHandle, SubprocessTerminalSpawnSpec } from '@deepseek-ai/dsh-subprocess'

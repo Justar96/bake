@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { SESSION_FORMAT_VERSION, SessionSeq } from '@deepseek-ai/dsh-session'
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import { SESSION_FORMAT_VERSION, SessionSeq } from 'bake-session'
+import type { SessionEvent } from 'bake-session'
 import { CompactionId } from '@deepseek-ai/dsh-compaction'
 import LlmRuntime, {
   AssistantStreamAccumulator,

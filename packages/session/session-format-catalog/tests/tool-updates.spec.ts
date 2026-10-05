@@ -1,8 +1,8 @@
 /** Vocabulary growth preserves V3 grammar and requires older readers to refuse the new event. */
 import { expect, it } from 'vitest'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import { Session, SessionId, SessionLogOffset, KNOWN_SESSION_EVENT_TYPES } from '@deepseek-ai/dsh-session'
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import { Session, SessionId, SessionLogOffset, KNOWN_SESSION_EVENT_TYPES } from 'bake-session'
+import type { SessionEvent } from 'bake-session'
 import { restoreReleasedV3Artifact } from '@deepseek-ai/dsh-session-format-v2-to-v3'
 import { sessionFormatCatalog } from '../src/index.ts'
 

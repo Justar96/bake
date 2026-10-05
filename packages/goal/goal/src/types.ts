@@ -11,7 +11,7 @@
  */
 
 import type { Branded } from '@deepseek-ai/dsh-brand'
-import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { SessionId } from 'bake-session/types'
 
 /** Identifies one goal across its durable revisions. */
 export type GoalId = Branded<'GoalId'>
