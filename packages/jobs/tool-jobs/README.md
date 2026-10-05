@@ -27,13 +27,13 @@ Load this plugin in any composition where the agent should start, observe, and s
 
 ### The three tools
 
-- `job_output(job_id, wait?, timeout_ms?)` — Read a job's output. Stream jobs return only the output since the previous read; final-output jobs return their result after settlement. Every response ends with `[status: ...]`. Reads are non-blocking unless `wait: true`, which waits up to the configured cap and leaves a still-running job alive on timeout. The description tells the model that a completion notice arrives on its own, so it need not poll or sleep, and the `timeout_ms` description states the configured default wait and cap.
+- `job_output(job_id, wait?, timeout_ms?)` — Read a job's output. Stream jobs return only the output since the previous read; final-output jobs return their result after settlement. Every response ends with `[status: ...]`. Reads are non-blocking unless `wait: true`, which waits up to the configured cap and leaves a still-running job alive on timeout. The description tells the model that a completion notice arrives on its own, so it need not poll or sleep; under `wakeup` delivery it adds that the notice starts a new turn, so the model should end its turn rather than wait. The `timeout_ms` description states the configured default wait and cap. A read that finds the job still running adds `next`, rendered after the status line, telling the model to end its turn if nothing else needs doing, but only when the completion would reopen that owner: under `wakeup` delivery, with a wake left in its budget. A turn held open by repeated waits otherwise keeps the session busy, and the terminal spinning, for as long as the job runs.
 - `job_list()` — List your background jobs with their ids, kinds, statuses, and labels, one per line: `<id> [<kind>] <status> — <label>`.
 - `job_kill(job_id, reason?)` — Request cancellation of a running job immediately; the job settles as `killed` once its work actually stops. A terminal job returns its current snapshot, and the optional reason is recorded and forwarded to the job. The description tells the model that jobs otherwise keep running after its turn ends, because only completion, a kill, or owner disposal ends them.
 
 Use the background job id from a start result or `job_list` with `job_output` and `job_kill`. A continuable subagent returns an agent id for the subagent control tools, not a job id. An unknown job error points back to `job_list` and says that a continuable subagent's result arrives as a notice when it finishes, since models otherwise call `job_output` to wait on one.
 
-The three tools return `{ text, job }`, `PublicJobSnapshot[]`, and `{ outcome: 'cancellation-requested' | 'already-finished', job }` respectively. A public snapshot carries id, kind, label, status/detail, and start/finish times and omits ownership and notification bookkeeping. All three render through generic UI cards: `read` for output and list, `execute` for kill.
+The three tools return `{ text, job, next? }`, `PublicJobSnapshot[]`, and `{ outcome: 'cancellation-requested' | 'already-finished', job }` respectively. A public snapshot carries id, kind, label, status/detail, and start/finish times and omits ownership and notification bookkeeping. All three render through generic UI cards: `read` for output and list, `execute` for kill.
 
 ### Completion notices
 
@@ -52,7 +52,7 @@ Loading the plugin with no config is the common path; a `waitTimeoutMs` above `m
 | Field | Default | Meaning |
 |---|---|---|
 | `waitTimeoutMs` | `30,000` | Wait used when `wait: true` omits `timeout_ms` |
-| `maxWaitTimeoutMs` | `600,000` | Cap for model-supplied waits; larger values clamp down to it |
+| `maxWaitTimeoutMs` | `60,000` | Cap for model-supplied waits; larger values clamp down to it. Longer work is awaited by ending the turn |
 | `completionDelivery` | `wakeup` | `wakeup` opens a turn on an idle owner; `quiet` leaves the notice pending |
 | `maxConsecutiveWakes` | `3` | Turns one owner may open by wake before notices degrade to injection |
 

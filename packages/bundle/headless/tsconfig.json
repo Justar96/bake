@@ -43,6 +43,9 @@
     },
     {
       "path": "../../core/agent-loop"
+    },
+    {
+      "path": "../../jobs/jobs"
     }
   ]
 }
