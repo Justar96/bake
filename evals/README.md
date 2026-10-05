@@ -14,7 +14,7 @@ evals/agent-loop/
   rules.ts        the paired statistics and the regression rule
   accounting.ts   provider usage normalization
   sim-router.ts   simulated task router for routing edge cases
-  *.test.ts       unit tests and fixture dry checks, run by the preflight scripts-unit step
+  *.test.ts       unit tests and fixture dry checks, run by the preflight evals-unit step
   versions/
     v0.2.0/release/                       a release's own baseline
     unreleased/<YYYY-MM-DD>-<topic>/      one change since the last release
