@@ -4,6 +4,8 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 ## [Unreleased]
 
+- Closing a terminal flushes the session and stops managed tools even when a terminal I/O error arrives before `SIGHUP`; that error no longer races shutdown through the fatal-exception handler.
+
 ## [0.3.8] - 2026-10-05
 
 - A `bash` or `pwsh` call's command is coloured as shell or PowerShell, on the call's head and on any lines under it, so a multi-line command such as `python3 -c "…"` reads apart from the output that follows. A failed call in a step gives up the colour so its head reads wholly red.

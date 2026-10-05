@@ -43,7 +43,7 @@ import type {} from '@deepseek-ai/dsh-agent-loop'
 import { provideCmdline, type AppReady } from '@deepseek-ai/dsh-cmdline'
 import { createLateRejectionReporter } from './late-rejections.ts'
 import { createProcessShutdown, type ProcessShutdown } from './process-shutdown.ts'
-import { tolerateLostTerminal } from './terminal-hangup.ts'
+import { tolerateLostTerminal, watchTerminalHangup } from './terminal-hangup.ts'
 
 const NAME = 'dsh'
 
@@ -302,6 +302,7 @@ export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Con
   const packaged = (process as NodeJS.Process & { pkg?: unknown }).pkg !== undefined
   const resolutionMode = packaged ? 'runtime' : options.resolutionMode ?? 'runtime'
   const app: { current?: Context } = {}
+  let stopWatchingTerminal: (() => void) | undefined
   let disposal: Promise<void> | undefined
   const dispose = (): Promise<void> => disposal ??= (async () => {
     const failures: unknown[] = []
@@ -309,6 +310,7 @@ export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Con
       async () => { await app.current?.parallel('app/shutdown') },
       () => app.current?.fiber.dispose(),
       disposeProxy,
+      () => { stopWatchingTerminal?.() },
     ]) {
       try { await release() } catch (error) { failures.push(error) }
     }
@@ -339,11 +341,13 @@ export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Con
     // and stop managed subprocesses. Writes to the lost terminal now fail, so
     // stdio errors are dropped before disposal writes anything. A repeated
     // SIGHUP joins the running disposal instead of forcing exit.
-    process.on('SIGHUP', () => {
+    const hangup = (): void => {
       tolerateLostTerminal()
       signalShutdown.abort()
       shutdown.hangup(129)
-    })
+    }
+    process.on('SIGHUP', hangup)
+    stopWatchingTerminal = watchTerminalHangup(hangup)
     const failLoud = installFailLoud(NAME, process, async () => {
       await dispose()
     })
