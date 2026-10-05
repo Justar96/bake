@@ -13,7 +13,7 @@ import { createRequire } from 'node:module'
 import { basename, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { withFileLock } from 'bake-atomic-write'
-import { afterAll, describe, expect, it, onTestFinished } from 'vitest'
+import { afterAll, describe, expect, it, onTestFinished, vi } from 'vitest'
 import {
   composeEntries,
   healProfilesModuleFallback,
@@ -434,34 +434,45 @@ describe('legacy bundle names', () => {
     const dir = tmp()
     const path = join(dir, 'package.json')
     writeFileSync(path, JSON.stringify(legacyManifest))
-    let release!: () => void
-    let acquired!: () => void
-    const lockAcquired = new Promise<void>((resolve) => { acquired = resolve })
-    const held = withFileLock(path, () => new Promise<void>((resolve) => {
-      release = resolve
-      acquired()
-    }))
-    await lockAcquired
-    const lines: string[] = []
-    let settled = false
-    const migration = migrateProfileManifest('t', dir, line => lines.push(line)).finally(() => { settled = true })
-    // The lock holder commits a plugin change while the migration waits for the lock.
-    const changed = { ...legacyManifest, dsh: { profile: { bundles: [...legacyManifest.dsh.profile.bundles, 'added-bundle'] } } }
-    writeFileSync(path, JSON.stringify(changed))
-    // Several lock retry intervals pass without the migration writing or settling.
-    await new Promise(resolve => setTimeout(resolve, 100))
-    expect(settled).toBe(false)
-    expect(readProfileManifest('t', dir)).toEqual(changed)
-    expect(lines).toEqual([])
-    release()
-    await held
-
-    expect(await migration).toBe(true)
-    expect(readProfileManifest('t', dir)).toEqual({
-      ...changed,
-      bake: { profile: { bundles: ['bake-base', 'bake-tui-app', 'custom-bundle', 'added-bundle'] } },
+    const release = Promise.withResolvers<undefined>()
+    const acquired = Promise.withResolvers<undefined>()
+    const held = withFileLock(path, () => {
+      acquired.resolve(undefined)
+      return release.promise
     })
-    expect(existsSync(`${path}.lock`)).toBe(false)
+    const lines: string[] = []
+    let migration: Promise<boolean> | undefined
+    const retry = Promise.withResolvers<'waiting'>()
+    const setTimeout = globalThis.setTimeout
+    const timer = vi.spyOn(globalThis, 'setTimeout').mockImplementation((callback, delay, ...args) => {
+      // Observe real lock contention without advancing or delaying the runtime's clock.
+      if (delay === 20) retry.resolve('waiting')
+      return setTimeout(callback, delay, ...args)
+    })
+    try {
+      await Promise.race([acquired.promise, held])
+      migration = migrateProfileManifest('t', dir, line => lines.push(line))
+      expect(await Promise.race([retry.promise, migration])).toBe('waiting')
+      expect(readProfileManifest('t', dir)).toEqual(legacyManifest)
+      expect(lines).toEqual([])
+
+      // The plugin writer commits after the migration's unlocked read.
+      const changed = { ...legacyManifest, dsh: { profile: { bundles: [...legacyManifest.dsh.profile.bundles, 'added-bundle'] } } }
+      writeFileSync(path, JSON.stringify(changed))
+      release.resolve(undefined)
+      await held
+
+      expect(await migration).toBe(true)
+      expect(readProfileManifest('t', dir)).toEqual({
+        ...changed,
+        bake: { profile: { bundles: ['bake-base', 'bake-tui-app', 'custom-bundle', 'added-bundle'] } },
+      })
+      expect(existsSync(`${path}.lock`)).toBe(false)
+    } finally {
+      timer.mockRestore()
+      release.resolve(undefined)
+      await Promise.allSettled([held, migration])
+    }
   })
 
   it('reads bake.profile before dsh.profile', () => {

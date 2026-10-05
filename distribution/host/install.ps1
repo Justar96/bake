@@ -133,7 +133,20 @@ process.exit(signed ? 0 : 1)
   $cmd = Join-Path $binDir 'bake.cmd'
   [IO.File]::WriteAllText($cmd, $commandText, [Text.Encoding]::ASCII)
   # Bake Desktop runs `dsh --profile desktop`, so dsh.cmd is the same launcher.
-  [IO.File]::WriteAllText((Join-Path $binDir 'dsh.cmd'), $commandText, [Text.Encoding]::ASCII)
+  $aliasPath = Join-Path $binDir 'dsh.cmd'
+  if (Test-Path -LiteralPath $aliasPath) {
+    if (-not (Test-Path -LiteralPath $aliasPath -PathType Leaf) -or [IO.File]::ReadAllText($aliasPath) -ne $commandText) {
+      Write-Warning "$aliasPath already exists; Bake Desktop needs dsh to start Bake."
+    }
+  } else {
+    $aliasFile = [IO.File]::Open($aliasPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write)
+    try {
+      $aliasBytes = [Text.Encoding]::ASCII.GetBytes($commandText)
+      $aliasFile.Write($aliasBytes, 0, $aliasBytes.Length)
+    } finally {
+      $aliasFile.Dispose()
+    }
+  }
   if ($env:BAKE_SKIP_PATH_UPDATE -ne '1') {
     $pathParts = [Environment]::GetEnvironmentVariable('Path', 'User') -split ';'
     if ($pathParts -notcontains $binDir) {

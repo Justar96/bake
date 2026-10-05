@@ -8,7 +8,7 @@ These third-party configurations are provided as interoperability examples only.
 
 DSH parses the selected Cordis overlay, starts a configured stdio command or connects to a configured Streamable HTTP URL, discovers MCP tools, and exposes them as `mcp__<serverName>__<tool>`. DSH does **not** download the server, initialize its database, choose its model or embedding provider, create a cloud account, migrate vendor data, or supervise a separate HTTP service. For stdio, the generic client launches and stops the child with the DSH plugin lifecycle; for HTTP, the upstream service must already be running.
 
-The stdio bridge deliberately removes ambient variables whose names usually identify credentials all `DSH_*` variables, and the `BAKE_*` spellings of the session facts Bake gives shell commands, such as `BAKE_SESSION_ID`, before launching a child; other ambient variables remain inherited. Each example adds only the baseline override it needs. If an optional upstream feature needs another secret, add that variable to the row's `config.env` instead of putting the secret directly in YAML.
+The stdio bridge deliberately removes ambient variables whose names usually identify credentials, all `DSH_*` variables, and the `BAKE_*` spellings of the session facts Bake gives shell commands, such as `BAKE_SESSION_ID`, before launching a child; other ambient variables remain inherited. Each example adds only the baseline override it needs. If an optional upstream feature needs another secret, add that variable to the row's `config.env` instead of putting the secret directly in YAML.
 
 ## Choose one
 

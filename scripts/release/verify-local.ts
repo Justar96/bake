@@ -141,6 +141,12 @@ try {
     if (!config.includes('bake-base')) throw new Error('Windows profile routing failed')
     const alias = await run(['cmd.exe', '/c', join(binDir, 'dsh.cmd'), '--version'], env)
     if (!alias.includes(manifest.version)) throw new Error('Installed Windows dsh alias version mismatch')
+    const foreignAlias = '@echo off\r\necho foreign-dsh\r\n'
+    writeFileSync(join(binDir, 'dsh.cmd'), foreignAlias)
+    await run(install, installEnv)
+    if (readFileSync(join(binDir, 'dsh.cmd'), 'utf8') !== foreignAlias) {
+      throw new Error('Windows installer replaced an existing dsh command')
+    }
     const defaultHome: NodeJS.ProcessEnv = { ...env, USERPROFILE: temporary }
     delete defaultHome.BAKE_HOME
     delete defaultHome.DSH_HOME
