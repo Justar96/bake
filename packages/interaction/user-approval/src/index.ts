@@ -7,12 +7,12 @@
 import { randomUUID } from 'node:crypto'
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Agent } from 'bake-agent'
 import { createUserMessage, type ToolCallId } from '@deepseek-ai/dsh-llm'
-import { scopeTarget } from '@deepseek-ai/dsh-scope'
-import type { Session } from '@deepseek-ai/dsh-session'
-import { SessionSeq } from '@deepseek-ai/dsh-session'
-import type {} from '@deepseek-ai/dsh-system-prompt'
+import { scopeTarget } from 'bake-scope'
+import type { Session } from 'bake-session'
+import { SessionSeq } from 'bake-session'
+import type {} from 'bake-system-prompt'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -20,7 +20,7 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
-declare module '@deepseek-ai/dsh-session/types' {
+declare module 'bake-session/types' {
   interface SessionEventMap {
     /**
      * The session's approval policy was switched — log-only, durable,

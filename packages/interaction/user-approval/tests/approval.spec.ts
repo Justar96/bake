@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Agent } from 'bake-agent'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
-import { carrierKeyOf, createScope } from '@deepseek-ai/dsh-scope'
-import type { Scope } from '@deepseek-ai/dsh-scope'
-import SessionStore, { Session, SessionId } from '@deepseek-ai/dsh-session'
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
-import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
+import { carrierKeyOf, createScope } from 'bake-scope'
+import type { Scope } from 'bake-scope'
+import SessionStore, { Session, SessionId } from 'bake-session'
+import type { SessionEvent } from 'bake-session'
+import SystemPrompt from 'bake-system-prompt'
 import ApprovalService, { ApprovalOutcome, ApprovalRequest, setApprovalPolicy } from '@deepseek-ai/dsh-user-approval'
 
 /**

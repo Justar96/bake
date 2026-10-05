@@ -28,8 +28,8 @@ const CONFIG = join(ROOT, 'tsconfig.base.json')
 const BEGIN = '      // BEGIN generated package aliases — bun run gen-tsconfig-paths'
 const END = '      // END generated package aliases'
 
-/** Package-name prefix the expanded aliases cover. */
-const PREFIX = '@deepseek-ai/dsh-'
+/** Package-name prefixes the expanded aliases cover. */
+const PREFIXES = ['@deepseek-ai/dsh-', 'bake-']
 
 /** One workspace package the generated region maps. */
 interface PackageAlias {
@@ -68,7 +68,7 @@ interface WorkspacePackage {
 
 /**
  * Walk `packages/<group>/<directory>` once, in a stable order.
- * @returns Every directory whose manifest names a `@deepseek-ai/dsh-` package and that carries `src`.
+ * @returns Every directory whose manifest names a supported workspace package and that carries `src`.
  */
 function workspacePackages(): WorkspacePackage[] {
   const packages = join(ROOT, 'packages')
@@ -79,7 +79,7 @@ function workspacePackages(): WorkspacePackage[] {
     for (const directory of readdirSync(groupDir).sort()) {
       const packageDir = join(groupDir, directory)
       const name = packageName(join(packageDir, 'package.json'))
-      if (name === undefined || !name.startsWith(PREFIX)) continue
+      if (name === undefined || !PREFIXES.some(prefix => name.startsWith(prefix))) continue
       if (existsSync(join(packageDir, 'src'))) found.push({ group, directory, packageDir, name })
     }
   }
@@ -91,8 +91,9 @@ function workspacePackages(): WorkspacePackage[] {
  *
  * A wildcard substituted the specifier's suffix into `packages/<group>/<suffix>/src`,
  * so it only ever resolved a package whose declared name is exactly
- * `@deepseek-ai/dsh-<directory>`. Packages named after something other than
- * their directory already carry a hand-written alias and are skipped here.
+ * `@deepseek-ai/dsh-<directory>`. Bake packages use `bake-<directory>`.
+ * Packages named after something other than their directory already carry a
+ * hand-written alias and are skipped here.
  *
  * @returns Aliases sorted by specifier.
  * @throws When two package directories claim one specifier, which the removed
@@ -101,7 +102,7 @@ function workspacePackages(): WorkspacePackage[] {
 export function collectPackageAliases(): PackageAlias[] {
   const bySpecifier = new Map<string, PackageAlias & { directory: string }>()
   for (const { group, directory, packageDir, name } of workspacePackages()) {
-    if (name !== `${PREFIX}${directory}`) continue
+    if (!PREFIXES.some(prefix => name === `${prefix}${directory}`)) continue
     const previous = bySpecifier.get(name)
     if (previous !== undefined) {
       throw new Error(
@@ -129,7 +130,7 @@ export function collectPackageAliases(): PackageAlias[] {
  * alias can — but they still have to be mapped by something, because deleting
  * the group wildcards removed the fallback that used to catch them.
  *
- * @returns Declared names of every `@deepseek-ai/dsh-` package carrying a `src` directory.
+ * @returns Declared names of every supported workspace package carrying a `src` directory.
  */
 export function collectPackageNames(): string[] {
   return workspacePackages()
@@ -144,7 +145,7 @@ export function collectPackageNames(): string[] {
  */
 export function mappedSpecifiers(text: string): Set<string> {
   const keys = new Set<string>()
-  for (const match of text.matchAll(/^\s*"(@deepseek-ai\/dsh-[^"/]+)":/gm)) {
+  for (const match of text.matchAll(/^\s*"((?:@deepseek-ai\/dsh-|bake-)[^"/]+)":/gm)) {
     const key = match[1]
     if (key !== undefined) keys.add(key)
   }
@@ -217,7 +218,7 @@ function handWrittenSpecifiers(text: string): Set<string> {
   const end = text.indexOf(END)
   const outside = begin < 0 || end < begin ? text : text.slice(0, begin) + text.slice(end)
   const keys = new Set<string>()
-  for (const match of outside.matchAll(/^\s*"(@deepseek-ai\/[^"]+)":/gm)) {
+  for (const match of outside.matchAll(/^\s*"((?:@deepseek-ai\/|bake-)[^"]+)":/gm)) {
     const key = match[1]
     if (key !== undefined) keys.add(key)
   }
@@ -232,7 +233,7 @@ function handWrittenSpecifiers(text: string): Set<string> {
  */
 export function removeMissingAliases(text: string, root: string): string {
   return text.split('\n').filter((line) => {
-    const encoded = /^\s*"@deepseek-ai\/[^\"]+": (\[[^\]]+\]),?$/.exec(line)?.[1]
+    const encoded = /^\s*"(?:@deepseek-ai\/|bake-)[^\"]+": (\[[^\]]+\]),?$/.exec(line)?.[1]
     if (encoded === undefined) return true
     const paths = JSON.parse(encoded) as string[]
     return paths.some(path => existsSync(resolve(root, path.replace(/\*.*$/, ''))))

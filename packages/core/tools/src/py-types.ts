@@ -11,7 +11,7 @@
  * alongside it and it is one of two. Object-shaped arguments and outputs therefore render as one
  * named `TypedDict` per tool (and per nested object), not an opaque `dict[str, Any]`, so the
  * shape survives into the program under the mode that has nothing else to carry it.
- * @module @deepseek-ai/dsh-tools/src/py-types
+ * @module bake-tools/src/py-types
  */
 
 import { assertSupportedJsonSchema } from './json-schema.ts'

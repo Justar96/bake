@@ -1,6 +1,6 @@
 /** Read-only observation of a child transcript. The subagent keeps its own handle. */
 import type { Context } from '@deepseek-ai/cordis'
-import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
+import type { SessionEvent, SessionId } from 'bake-session'
 import type { ProjectionSnapshot } from '@deepseek-ai/dsh-session-projection'
 import type {} from '@deepseek-ai/dsh-token-meter'
 import type {} from '@deepseek-ai/dsh-permission-presets/types'

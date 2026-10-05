@@ -34,22 +34,22 @@
   "peerDependencies": {
     "@deepseek-ai/dsh-llm": "workspace:^",
     "@deepseek-ai/dsh-output-retention": "workspace:^",
-    "@deepseek-ai/dsh-session": "workspace:^",
+    "bake-session": "workspace:^",
     "@deepseek-ai/dsh-spill": "workspace:^",
-    "@deepseek-ai/dsh-tools": "workspace:^",
+    "bake-tools": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "workspace:^"
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-agent": "workspace:^",
+    "bake-agent": "workspace:^",
     "@deepseek-ai/dsh-ptc-runtime-codemode": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
     "@deepseek-ai/dsh-output-retention": "workspace:^",
-    "@deepseek-ai/dsh-session": "workspace:^",
+    "bake-session": "workspace:^",
     "@deepseek-ai/dsh-spill": "workspace:^",
-    "@deepseek-ai/dsh-tools": "workspace:^",
+    "bake-tools": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   }
 }

@@ -6,7 +6,7 @@
  * @module @deepseek-ai/dsh-tool-subagent/src/presentation
  */
 
-import type { GenericCallView } from '@deepseek-ai/dsh-tools'
+import type { GenericCallView } from 'bake-tools'
 
 /** Characters a title may take: a card header or a log line. */
 const TITLE_CHARS = 80

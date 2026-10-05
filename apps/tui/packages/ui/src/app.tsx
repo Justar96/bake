@@ -1,7 +1,7 @@
 /** Terminal view over committed history, live presentation, and harness-owned state. */
 import React, { lazy, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Box, Text, useApp, useInput, useIsScreenReaderEnabled, usePaste, useWindowSize } from 'ink'
-import type { AgentStatus } from '@deepseek-ai/dsh-agent'
+import type { AgentStatus } from 'bake-agent'
 import { formatAttachment, type AttachmentSummary, type Row } from './rows.ts'
 import { transcriptRows, type Transcript } from './transcript.ts'
 import type { TuiCopy } from './copy.ts'

@@ -4,6 +4,8 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 ## [Unreleased]
 
+- Core workspace packages use `bake-<name>` names, including `bake-agent`, `bake-session`, and `bake-tools`. Custom plugins and profile rows that import these packages must use the new names; the core package README lists all eight. The workspace generators, dependency graphs, license checks, and terminal build support both Bake and retained upstream package names.
+
 ## [0.3.8] - 2026-10-05
 
 - A `bash` or `pwsh` call's command is coloured as shell or PowerShell, on the call's head and on any lines under it, so a multi-line command such as `python3 -c "…"` reads apart from the output that follows. A failed call in a step gives up the colour so its head reads wholly red.

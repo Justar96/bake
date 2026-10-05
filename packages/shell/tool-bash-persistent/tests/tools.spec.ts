@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
-import { SESSION_FORMAT_VERSION, Session, SessionId } from '@deepseek-ai/dsh-session'
-import AgentRegistry from '@deepseek-ai/dsh-agent'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import { SESSION_FORMAT_VERSION, Session, SessionId } from 'bake-session'
+import AgentRegistry from 'bake-agent'
+import type { Agent } from 'bake-agent'
 import TerminalSessionService from '@deepseek-ai/dsh-terminal'
 import type {
   TerminalBackend,
@@ -15,8 +15,8 @@ import type {
   TerminalSignal,
   TerminalWaitReason,
 } from '@deepseek-ai/dsh-terminal'
-import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
-import ToolRuntime from '@deepseek-ai/dsh-tools'
+import SystemPrompt from 'bake-system-prompt'
+import ToolRuntime from 'bake-tools'
 import * as ToolBashPersistent from '@deepseek-ai/dsh-tool-bash-persistent'
 import { unsupportedInbox } from '@deepseek-ai/dsh-agent-loop-testkit'
 

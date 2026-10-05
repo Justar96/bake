@@ -59,7 +59,7 @@ Feedback does not have to come from the slash command: any UI, hook, or host int
 
 ```yaml
 - id: session
-  name: '@deepseek-ai/dsh-session'
+  name: 'bake-session'
 - id: commands
   name: '@deepseek-ai/dsh-commands'
 - id: command-feedback

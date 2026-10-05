@@ -1,6 +1,6 @@
 /** Abortable, ordered human-interaction requests for one terminal owner. */
 import type { Context } from '@deepseek-ai/cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Agent } from 'bake-agent'
 import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 import { UserQuestionError } from '@deepseek-ai/dsh-user-questions'
 import type { ChoicePrompt } from '@dsh-tui/ui/picker.tsx'

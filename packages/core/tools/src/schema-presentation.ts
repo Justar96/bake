@@ -7,10 +7,10 @@
  * @module
  */
 
-import type { ScopeKey } from '@deepseek-ai/dsh-scope'
+import type { ScopeKey } from 'bake-scope'
 import type { ToolSchema } from '@deepseek-ai/dsh-llm'
 import { snapshotJsonValue } from '@deepseek-ai/dsh-util-values'
-import type { PromptSection, ToolProviderResult } from '@deepseek-ai/dsh-system-prompt'
+import type { PromptSection, ToolProviderResult } from 'bake-system-prompt'
 import type { PtcRuntime } from '@deepseek-ai/dsh-ptc-runtime'
 import type { ToolDefinition, ToolPresentationMode } from './index.ts'
 import { RUN_CODE_NAME } from './ptc.ts'

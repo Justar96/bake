@@ -1,7 +1,7 @@
 /**
  * Durable Tool event vocabulary shared with type-only consumers.
  *
- * @module @deepseek-ai/dsh-tools/types
+ * @module bake-tools/types
  */
 
 import type { ToolCallId } from '@deepseek-ai/dsh-llm/brand'
@@ -24,7 +24,7 @@ export interface PtcDispatchEventData extends PtcDispatchStartEventData {
   error?: { name: string; code: string; reason?: string }
 }
 
-declare module '@deepseek-ai/dsh-session/types' {
+declare module 'bake-session/types' {
   interface SessionEventMap {
     /**
      * One sub-dispatch STARTING inside a `run_code` program: the parent

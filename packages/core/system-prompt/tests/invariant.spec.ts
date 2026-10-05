@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import type { PromptAssembly } from '@deepseek-ai/dsh-system-prompt'
-import * as SystemPromptInvariant from '@deepseek-ai/dsh-system-prompt/invariant'
+import type { PromptAssembly } from 'bake-system-prompt'
+import * as SystemPromptInvariant from 'bake-system-prompt/invariant'
 import InvariantRegistry from '@deepseek-ai/dsh-invariants'
 
 async function setup(): Promise<Context> {

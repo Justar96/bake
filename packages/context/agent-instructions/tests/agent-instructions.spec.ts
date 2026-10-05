@@ -6,9 +6,9 @@ import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import * as AgentInstructions from '@deepseek-ai/dsh-agent-instructions'
 import LlmRuntime, { createUserMessage, ToolCallId, type Message, type StreamChunk } from '@deepseek-ai/dsh-llm'
-import SessionStore, { SessionId, SessionSeq, type SessionEvent, type SurfaceIntent, type UserMessage } from '@deepseek-ai/dsh-session'
-import AgentRegistry, { agentEvents, type Agent } from '@deepseek-ai/dsh-agent'
-import AgentLoop, { turnBoundaryProjectionDefinition } from '@deepseek-ai/dsh-agent-loop'
+import SessionStore, { SessionId, SessionSeq, type SessionEvent, type SurfaceIntent, type UserMessage } from 'bake-session'
+import AgentRegistry, { agentEvents, type Agent } from 'bake-agent'
+import AgentLoop, { turnBoundaryProjectionDefinition } from 'bake-agent-loop'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { FileSystem, FsTargetKey, FsVersion } from '@deepseek-ai/dsh-fs'
 import type {
@@ -22,12 +22,12 @@ import type {
   FsWriteOutcome,
 } from '@deepseek-ai/dsh-fs'
 import LocalFileSystem from '@deepseek-ai/dsh-fs-local'
-import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
-import ToolRuntime, { defineContentToolFixture } from '@deepseek-ai/dsh-tools'
+import SystemPrompt from 'bake-system-prompt'
+import ToolRuntime, { defineContentToolFixture } from 'bake-tools'
 import type {
   ToolExecution,
   ToolExecutionToken,
-} from '@deepseek-ai/dsh-tools'
+} from 'bake-tools'
 import * as ToolFs from '@deepseek-ai/dsh-tool-fs'
 import {
   discoverBaselineInstructionFiles,

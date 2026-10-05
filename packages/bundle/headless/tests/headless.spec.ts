@@ -4,19 +4,19 @@ import { Readable } from 'node:stream'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { brandString } from '@deepseek-ai/dsh-brand'
-import AgentRegistry from '@deepseek-ai/dsh-agent'
+import AgentRegistry from 'bake-agent'
 import type {
   Agent,
   AgentHandle,
   AssistantStreamFrame,
   CreateAgentOptions,
   ResumeAgentOptions,
-} from '@deepseek-ai/dsh-agent'
-import AgentDefaultModelConfig from '@deepseek-ai/dsh-agent-default-model'
+} from 'bake-agent'
+import AgentDefaultModelConfig from 'bake-agent-default-model'
 import { LlmAttemptId, ToolCallId, createAssistantMessage, createToolResultMessage, type StreamChunk } from '@deepseek-ai/dsh-llm'
-import SessionStore from '@deepseek-ai/dsh-session'
+import SessionStore from 'bake-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import type { Session, SessionId, UserMessage } from '@deepseek-ai/dsh-session'
+import type { Session, SessionId, UserMessage } from 'bake-session'
 import { SESSION_IN_USE_EXIT } from '@deepseek-ai/dsh-cmdline'
 import { SessionAlreadyOwnedError } from '@deepseek-ai/dsh-session-persistence'
 import { SessionQueryError } from '@deepseek-ai/dsh-session-query'

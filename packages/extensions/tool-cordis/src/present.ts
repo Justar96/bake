@@ -1,5 +1,5 @@
 /** Pure replay-safe render intents for runtime inspection. */
-import type { GenericCallView } from '@deepseek-ai/dsh-tools'
+import type { GenericCallView } from 'bake-tools'
 
 /**
  * Render provider-directory inspection.

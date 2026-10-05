@@ -4,10 +4,10 @@
  * @module @deepseek-ai/dsh-agent-instructions/state
  */
 
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Agent } from 'bake-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { Message } from '@deepseek-ai/dsh-llm'
-import type { Session, UserMessage } from '@deepseek-ai/dsh-session'
+import type { Session, UserMessage } from 'bake-session'
 import type { FileSystem, FsVersion } from '@deepseek-ai/dsh-fs'
 import type { ResolvedConfig } from './config.ts'
 import { instructionContentSha1, trimmedInstructionDigest } from './digest.ts'

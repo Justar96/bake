@@ -9,7 +9,7 @@
 import type { PromptContentPart } from '@deepseek-ai/dsh-attachment/types'
 import type { Branded } from '@deepseek-ai/dsh-brand'
 import type { MessageId } from '@deepseek-ai/dsh-llm/brand'
-import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { SessionId } from 'bake-session/types'
 
 /**
  * Client-minted identity of one browser prompt, persisted on the exact accepted

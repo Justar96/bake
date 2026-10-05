@@ -6,10 +6,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
-import AgentRegistry from '@deepseek-ai/dsh-agent'
-import type { Agent, AgentStatus } from '@deepseek-ai/dsh-agent'
+import AgentRegistry from 'bake-agent'
+import type { Agent, AgentStatus } from 'bake-agent'
 import CommandRuntime from '@deepseek-ai/dsh-commands'
-import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
+import SessionStore, { SessionId } from 'bake-session'
 import * as CommandFeedback from '@deepseek-ai/dsh-command-feedback'
 import { getOrCreateAnonymousUserId } from '@deepseek-ai/dsh-anonymous-user-id'
 import { unsupportedInbox } from '@deepseek-ai/dsh-agent-loop-testkit'
@@ -56,8 +56,8 @@ describe('/feedback real Loader composition through cordis.yml', () => {
     vi.stubEnv('DSH_HOME', root)
     const configPath = join(root, 'cordis.yml')
     await writeFile(configPath, [
-      "- name: '@deepseek-ai/dsh-agent'",
-      "- name: '@deepseek-ai/dsh-session'",
+      "- name: 'bake-agent'",
+      "- name: 'bake-session'",
       "- name: '@deepseek-ai/dsh-commands'",
       "- name: '@deepseek-ai/dsh-command-feedback'",
       '',
@@ -68,8 +68,8 @@ describe('/feedback real Loader composition through cordis.yml', () => {
     await context.plugin(Loader)
     context.loader.builtins.include = Include
     const modules = new Map<string, unknown>([
-      ['@deepseek-ai/dsh-agent', AgentRegistry],
-      ['@deepseek-ai/dsh-session', SessionStore],
+      ['bake-agent', AgentRegistry],
+      ['bake-session', SessionStore],
       ['@deepseek-ai/dsh-commands', CommandRuntime],
       ['@deepseek-ai/dsh-command-feedback', CommandFeedback],
     ])

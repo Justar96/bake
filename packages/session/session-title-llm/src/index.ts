@@ -10,7 +10,7 @@ import { createUserMessage, BlockAssembler } from '@deepseek-ai/dsh-llm'
 import type { FinishReason, GenerateOptions, Message } from '@deepseek-ai/dsh-llm'
 import { deadline, MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
 import { assertPositiveInteger, deepFreeze } from '@deepseek-ai/dsh-util-values'
-import type { SessionSeq } from '@deepseek-ai/dsh-session'
+import type { SessionSeq } from 'bake-session'
 import {
   normalizeSessionTitle,
   SessionTitleProviderId,
@@ -39,7 +39,7 @@ export interface SessionTitleLlmRequestEventData {
   readonly maxTokens: number
 }
 
-declare module '@deepseek-ai/dsh-session/types' {
+declare module 'bake-session/types' {
   interface SessionEventMap {
     /** Log-only pre-dispatch record of one session-title model request. */
     'session/title-llm-request': SessionTitleLlmRequestEventData

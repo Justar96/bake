@@ -1,8 +1,8 @@
 /** Durable composition of historical chunk collapse and V3 system/reference migration. */
 
 import { Context } from '@deepseek-ai/cordis'
-import { Session, SessionId, SessionLogOffset, SessionSeq } from '@deepseek-ai/dsh-session'
-import type { SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session'
+import { Session, SessionId, SessionLogOffset, SessionSeq } from 'bake-session'
+import type { SessionEvent, SessionHeader } from 'bake-session'
 import { createSessionFormatCatalog } from '@deepseek-ai/dsh-session-format'
 import { releasedV0SessionFormatCodec, releasedV1SessionFormatCodec, sessionFormatV0ToV1 } from '@deepseek-ai/dsh-session-format-v0-to-v1'
 import {

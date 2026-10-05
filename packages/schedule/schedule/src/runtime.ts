@@ -4,7 +4,7 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Agent } from 'bake-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { EveryScheduleRecord, OneShotScheduleRecord } from './types.ts'
 import {

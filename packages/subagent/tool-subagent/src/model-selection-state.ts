@@ -1,12 +1,12 @@
 /** Durable per-session state for the user-controlled model-selection opt-in. */
 
 import { z as zod } from 'zod'
-import type { Session } from '@deepseek-ai/dsh-session'
+import type { Session } from 'bake-session'
 import type SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
 import { assertAllowedModelRoutes, type AllowedModelRoute } from './model-selection.ts'
 
-declare module '@deepseek-ai/dsh-session/types' {
+declare module 'bake-session/types' {
   interface SessionEventMap {
     /**
      * Records that this session's delegation tool exposes child provider,

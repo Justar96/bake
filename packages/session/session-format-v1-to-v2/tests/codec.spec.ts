@@ -7,7 +7,7 @@ import type {
   SessionFormatJsonObject,
   SessionFormatRecovery,
 } from '@deepseek-ai/dsh-session-format'
-import { decodeSeqRanges as decodeCurrentSeqRanges } from '@deepseek-ai/dsh-session'
+import { decodeSeqRanges as decodeCurrentSeqRanges } from 'bake-session'
 import { releasedV2SessionFormatCodec } from '@deepseek-ai/dsh-session-format-v1-to-v2'
 
 const minimalPhysicalHeader = {

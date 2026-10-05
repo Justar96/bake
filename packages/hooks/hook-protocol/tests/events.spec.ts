@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { Session, SessionId } from '@deepseek-ai/dsh-session'
+import { Session, SessionId } from 'bake-session'
 import { appendHookInvoked, appendHookResult, summarizeStderr, type HookOutput } from '@deepseek-ai/dsh-hook-protocol'
 
 /** A {@link HookOutput} with the required stream fields defaulted. */

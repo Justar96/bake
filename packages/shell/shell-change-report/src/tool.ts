@@ -10,7 +10,7 @@ import type {} from '@deepseek-ai/dsh-jobs'
 import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
 import { beginChangeReport } from './index.ts'
 import type { ChangeWindow, ConfineArgv, ShellChanges } from './index.ts'
-import type { TerminalChanges, ToolExecution } from '@deepseek-ai/dsh-tools'
+import type { TerminalChanges, ToolExecution } from 'bake-tools'
 
 /**
  * Open a report window around one call, or none.

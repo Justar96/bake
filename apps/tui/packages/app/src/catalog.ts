@@ -1,6 +1,6 @@
 /** Session-scoped command and skill discovery. Harness providers own catalog contents. */
 import type { Context } from '@deepseek-ai/cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Agent } from 'bake-agent'
 import type { CommandArgumentChoice } from '@deepseek-ai/dsh-commands/types'
 import { isUserInvocable } from '@deepseek-ai/dsh-skill'
 import type { Completion, CompletionCatalog } from '@dsh-tui/ui/completion.ts'

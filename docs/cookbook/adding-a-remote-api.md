@@ -8,7 +8,7 @@ The owner is a Host-side Cordis service: extend `TypertRemoteService` so the ser
 
 ```ts
 import type { Context } from '@deepseek-ai/cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Agent } from 'bake-agent'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 
 /** One stored note as a Client reads it. */

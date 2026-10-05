@@ -11,15 +11,15 @@ import type {
   RetryPolicyConfig,
   StreamChunk,
 } from '@deepseek-ai/dsh-llm'
-import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
+import SessionStore, { SessionId } from 'bake-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import type { SessionEvent, SessionEventMap } from '@deepseek-ai/dsh-session'
+import type { SessionEvent, SessionEventMap } from 'bake-session'
 import type { LlmRetryEventData } from '@deepseek-ai/dsh-llm-retry/types'
-import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
-import ToolRuntime, { defineContentToolFixture } from '@deepseek-ai/dsh-tools'
-import AgentRegistry from '@deepseek-ai/dsh-agent'
-import type { Agent, RequestErrorAction } from '@deepseek-ai/dsh-agent'
-import AgentLoop from '@deepseek-ai/dsh-agent-loop'
+import SystemPrompt from 'bake-system-prompt'
+import ToolRuntime, { defineContentToolFixture } from 'bake-tools'
+import AgentRegistry from 'bake-agent'
+import type { Agent, RequestErrorAction } from 'bake-agent'
+import AgentLoop from 'bake-agent-loop'
 import * as retry from '../src/index.ts'
 
 type ScriptEntry = Error | Iterable<StreamChunk> | AsyncIterable<StreamChunk>

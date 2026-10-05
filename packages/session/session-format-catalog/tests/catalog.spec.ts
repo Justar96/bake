@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest'
 import type { SessionFormatEvent } from '@deepseek-ai/dsh-session-format'
 import { sessionFormatCatalog } from '../src/index.ts'
 import { currentSessionMessageProjections } from '../src/message-projections.ts'
-import { MESSAGE_PROJECTION_EVENT_TYPES } from '@deepseek-ai/dsh-session/src/known-event-types.ts'
+import { MESSAGE_PROJECTION_EVENT_TYPES } from 'bake-session/src/known-event-types.ts'
 import { validateInstalledCurrentSessionArtifact } from '../src/current.ts'
-import { Session, SessionId } from '@deepseek-ai/dsh-session'
+import { Session, SessionId } from 'bake-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 
 function deepFreeze<T>(value: T): T {

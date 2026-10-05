@@ -7,7 +7,7 @@ import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
 import LlmRuntime from '@deepseek-ai/dsh-llm'
-import SessionStore from '@deepseek-ai/dsh-session'
+import SessionStore from 'bake-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import TokenMeter from '@deepseek-ai/dsh-token-meter'
 import BasicCompactionEngine from '@deepseek-ai/dsh-compaction-basic'
@@ -40,7 +40,7 @@ async function loadYaml(
   context.loader.builtins.include = Include
   const modules = new Map<string, unknown>([
     ['@deepseek-ai/dsh-llm', LlmRuntime],
-    ['@deepseek-ai/dsh-session', SessionStore],
+    ['bake-session', SessionStore],
     ['@deepseek-ai/dsh-session-projection', SessionProjectionRegistry],
     ['@deepseek-ai/dsh-token-meter', TokenMeter],
     ['@deepseek-ai/dsh-compaction-tool-result-pruner', ToolResultPruner],
@@ -66,7 +66,7 @@ describe('real Loader composition', () => {
   it('loads the shipped token-meter, pruning, and compaction-basic YAML order', async () => {
     const loaded = await loadYaml([
       "- name: '@deepseek-ai/dsh-llm'",
-      "- name: '@deepseek-ai/dsh-session'",
+      "- name: 'bake-session'",
       "- name: '@deepseek-ai/dsh-session-projection'",
       "- name: '@deepseek-ai/dsh-token-meter'",
       "- name: '@deepseek-ai/dsh-compaction-tool-result-pruner'",
@@ -97,7 +97,7 @@ describe('real Loader composition', () => {
   it('layers a settings.yaml route-wide policy over the composed compaction entry', async () => {
     const loaded = await loadYaml(dir => [
       "- name: '@deepseek-ai/dsh-llm'",
-      "- name: '@deepseek-ai/dsh-session'",
+      "- name: 'bake-session'",
       "- name: '@deepseek-ai/dsh-session-projection'",
       "- name: '@deepseek-ai/dsh-token-meter'",
       "- name: '@deepseek-ai/dsh-settings-file'",

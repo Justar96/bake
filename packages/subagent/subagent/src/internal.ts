@@ -4,10 +4,10 @@
  * @module @deepseek-ai/dsh-subagent/internal
  */
 
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Agent } from 'bake-agent'
 import type { ContentBlock, MessageId, MessageSource } from '@deepseek-ai/dsh-llm'
-import type { SessionId } from '@deepseek-ai/dsh-session'
-import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
+import type { SessionId } from 'bake-session'
+import type { ToolDefinition } from 'bake-tools'
 import type SubagentRuntime from './index.ts'
 import type { SubagentDelivery } from './inbox.ts'
 

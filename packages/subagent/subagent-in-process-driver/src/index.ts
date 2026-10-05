@@ -14,9 +14,9 @@
 import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import { brandString } from '@deepseek-ai/dsh-brand'
-import { foldConsumedWork } from '@deepseek-ai/dsh-agent'
-import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent'
-import type { SessionId, TurnEndReason } from '@deepseek-ai/dsh-session'
+import { foldConsumedWork } from 'bake-agent'
+import type { Agent, AgentHandle } from 'bake-agent'
+import type { SessionId, TurnEndReason } from 'bake-session'
 import { createUserMessage, type ContentBlock } from '@deepseek-ai/dsh-llm'
 import {
   appendDelegatedPolicyOverrides,

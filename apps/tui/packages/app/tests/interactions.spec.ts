@@ -1,7 +1,7 @@
 /** Human decisions use the production scoped waterfalls and cancellation semantics. */
 import { afterEach, expect, it, vi } from 'vitest'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Agent } from 'bake-agent'
 import { openSession } from '../src/session.ts'
 import { Interactions } from '../src/interactions.ts'
 import { harness } from './harness.ts'

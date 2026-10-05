@@ -12,7 +12,7 @@ This permission gate is one example of a hook plugin. It returns a typed decisio
 
 ```ts
 import type { Context } from '@deepseek-ai/cordis'
-import type { PreToolDecision, ToolExecution } from '@deepseek-ai/dsh-tools'
+import type { PreToolDecision, ToolExecution } from 'bake-tools'
 
 declare function isAllowed(exec: ToolExecution): Promise<boolean>
 
@@ -38,7 +38,7 @@ A terminal UI consumer renders durable `session/event` records alongside transie
 import type { Context } from '@deepseek-ai/cordis'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { SessionId } from '@deepseek-ai/dsh-session'
+import type { SessionId } from 'bake-session'
 
 declare function render(text: string): void
 declare function onUserInput(handler: (text: string) => void): void

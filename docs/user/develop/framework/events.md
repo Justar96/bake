@@ -120,7 +120,7 @@ This plugin logs tool calls and results:
 
 ```ts
 import type { Context } from '@deepseek-ai/cordis'
-import '@deepseek-ai/dsh-tools'
+import 'bake-tools'
 
 export const name = 'tool-logger'
 

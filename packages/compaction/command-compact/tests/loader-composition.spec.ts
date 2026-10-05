@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Agent } from 'bake-agent'
 import CommandRuntime from '@deepseek-ai/dsh-commands'
 import {
   CompactionId,
@@ -17,7 +17,7 @@ import {
   type ManualCompactAgentContext,
 } from '@deepseek-ai/dsh-compaction'
 import * as commandCompact from '@deepseek-ai/dsh-command-compact'
-import { Session, SessionId, SessionSeq } from '@deepseek-ai/dsh-session'
+import { Session, SessionId, SessionSeq } from 'bake-session'
 
 const COMPACTION_ID = CompactionId('loader-command-compact-test')
 

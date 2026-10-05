@@ -13,7 +13,7 @@ Business services use `@Remote` or `@RemoteScope` to select the methods exposed 
 Services normally extend `TypertRemoteService` so the constructor explicitly binds the Cordis service key and default Remote namespace. A service that already has another base class can instead declare `readonly typertRemote = bindTypertRemote(this, serviceKey)`; both forms leave an inspectable public binding and do not depend on the compiler injecting a symbol into the constructor.
 
 ```ts
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Agent } from 'bake-agent'
 import { TypertRemoteService, Remote, RemoteScope } from '@deepseek-ai/dsh-typert-protocol'
 import type { Context } from '@deepseek-ai/cordis'
 
@@ -56,7 +56,7 @@ Remote methods may return a value synchronously or return a Promise. For coopera
 The Client uses concrete functions on ordinary objects, not a JavaScript Proxy. Each namespace is a traced Cordis child Service registered as `remote.<namespace>`; `ctx.remote.$mount()` mounts a contribution, and the namespace unloads after its last method is withdrawn. A business package that reads `ctx.remote.<namespace>` declares both `remote` and `remote.<namespace>` in its own `inject`. A call is scoped when a Client Context adapter registered through `ctx.typert.contexts.registerClient()` reports an identity for the calling Context. When an `@Remote` method has exactly one lookup parameter and a same-named `TypertContextMap` uses the same wire identity, the generated scoped signature omits that identity parameter. `@RemoteScope` generates only the scoped invocation interface. Every generated unary method resolves to a `RemoteResult<T>`.
 
 ```ts ignore-check
-import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { SessionId } from 'bake-session/types'
 import type { ClientRemote } from '@deepseek-ai/dsh-api-gateway/client'
 import type { TypertRemoteScopeApi } from '@deepseek-ai/dsh-typert-protocol'
 import type { Context } from '@deepseek-ai/cordis'
@@ -81,7 +81,7 @@ No application assembles the Client face today. Business packages still publish 
 | Shared | `@deepseek-ai/dsh-typert-protocol` | Declares decorators, Gateway bindings, merge-extensible protocol maps, invocation descriptors, and provider types; starts no TypeScript analysis and registers no Cordis services |
 | Build | `@deepseek-ai/dsh-typert-generator` | Strictly analyzes Remote signatures, the type graph, lookups, Contexts, and source locations from the Host `ts.Program`, then generates Host and Host-for-Client artifacts |
 | Host | `@deepseek-ai/dsh-typert-registry` and Loader | Places generated Host descriptors, schemas, and business-package registrations in `ctx.typert`, and holds lookup and Context providers |
-| Host | `@deepseek-ai/dsh-agent` and `@deepseek-ai/dsh-session` | Register the `agent` and `session` lookups and the `agent` Host Context |
+| Host | `bake-agent` and `bake-session` | Register the `agent` and `session` lookups and the `agent` Host Context |
 | Host | `@deepseek-ai/dsh-api-gateway` | Provides `ctx.typertGateway`, claims Remote endpoints, validates request values, resolves objects or Contexts, and invokes live Cordis services |
 | Client | `@deepseek-ai/dsh-api-gateway/client` | Provides `ctx.remote` and `remote.<namespace>` child Services, mounts generated descriptors as concrete methods, and initiates and cancels calls through the Connection |
 | Both | `@deepseek-ai/dsh-client-connection` | Provides the RPC carrier, request correlation, trust boundary, cancellation, response envelope, and the `/api` HTTP bridge |
@@ -120,7 +120,7 @@ The Connection performs the unified trust check for `/api` before the HTTP bridg
 
 For every call, the Gateway resolves the descriptor and live service from the current registries instead of caching business objects. It requires the fields in `args` to match the descriptor, allowing only optional JSON fields to be omitted, resolves the receiver, checks the service binding, decodes wire values with codecs, resolves objects through registered lookup providers, and invokes the service method targeted by the binding. It returns the business result without decoding it. A missing provider, unknown identity, binding mismatch, missing or extra argument, codec failure, or missing method fails before business code runs.
 
-The lookup provider's `register()` supplies both the stable declaration and the default resolver; `configure()` supplies a resolver owned by Host composition that may execute asynchronously and is scoped to an effect lifetime. Configuration may precede provider mounting; without a provider, invocation still fails with `gateway/lookup-unavailable`, and unloading the configuration restores the provider's default policy. `@deepseek-ai/dsh-agent` and `@deepseek-ai/dsh-session` register the default `agent` and `session` resolvers, which return only a live Agent or Session from their stores; no package calls `configure()` today. A resolver that throws a `RemoteError` keeps its code on the wire, any other resolver throw becomes `gateway/lookup-failed`, and an unresolved identity fails with `gateway/lookup-not-found`; only an unclassified throw folds into `gateway/internal`.
+The lookup provider's `register()` supplies both the stable declaration and the default resolver; `configure()` supplies a resolver owned by Host composition that may execute asynchronously and is scoped to an effect lifetime. Configuration may precede provider mounting; without a provider, invocation still fails with `gateway/lookup-unavailable`, and unloading the configuration restores the provider's default policy. `bake-agent` and `bake-session` register the default `agent` and `session` resolvers, which return only a live Agent or Session from their stores; no package calls `configure()` today. A resolver that throws a `RemoteError` keeps its code on the wire, any other resolver throw becomes `gateway/lookup-failed`, and an unresolved identity fails with `gateway/lookup-not-found`; only an unclassified throw folds into `gateway/internal`.
 
 Unloading a Client contribution removes its descriptors and concrete methods together, aborts its in-flight calls, and makes stale method handles retained by external code fail further calls. A strict endpoint withdrawn on the Host also does not degrade to SRC inference, preventing a hot unload from silently weakening validation.
 

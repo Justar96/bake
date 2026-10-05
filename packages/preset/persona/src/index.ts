@@ -15,8 +15,8 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import type {} from '@deepseek-ai/dsh-system-prompt'
-import { PERSONA_PREFIX_SECTION, PERSONA_SUFFIX_SECTION } from '@deepseek-ai/dsh-system-prompt'
+import type {} from 'bake-system-prompt'
+import { PERSONA_PREFIX_SECTION, PERSONA_SUFFIX_SECTION } from 'bake-system-prompt'
 
 export { PERSONA_PREFIX_SECTION, PERSONA_SUFFIX_SECTION }
 

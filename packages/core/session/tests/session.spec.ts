@@ -10,8 +10,8 @@ import SessionStore, {
   SessionLogOffset,
   SessionSeq,
   snapshotSessionEvent,
-} from '@deepseek-ai/dsh-session'
-import type { CreateSessionOptions, SessionEventType, SessionHeader, SessionSurface } from '@deepseek-ai/dsh-session'
+} from 'bake-session'
+import type { CreateSessionOptions, SessionEventType, SessionHeader, SessionSurface } from 'bake-session'
 
 describe('Session', () => {
   it('exposes one stable readonly surface view', () => {

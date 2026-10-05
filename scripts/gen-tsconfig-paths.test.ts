@@ -6,6 +6,7 @@ import {
   collectPackageNames,
   mappedSpecifiers,
   renderAliases,
+  removeMissingAliases,
   uncoveredPackages,
   writeRegion,
 } from './gen-tsconfig-paths.ts'
@@ -16,9 +17,9 @@ describe('generated tsconfig package aliases', () => {
   it('maps each package to its own source directory', () => {
     const aliases = collectPackageAliases()
     expect(aliases.length).toBeGreaterThan(100)
-    const session = aliases.find(alias => alias.specifier === '@deepseek-ai/dsh-session')
+    const session = aliases.find(alias => alias.specifier === 'bake-session')
     expect(session).toEqual({
-      specifier: '@deepseek-ai/dsh-session',
+      specifier: 'bake-session',
       source: './packages/core/session/src',
       hasInvariant: true,
     })
@@ -27,19 +28,22 @@ describe('generated tsconfig package aliases', () => {
     // Only packages named after their directory: the rest carry hand-written
     // aliases, because the removed wildcards could never have resolved them.
     expect(aliases.some(alias => alias.specifier === '@deepseek-ai/dsh-typert-protocol')).toBe(false)
+    expect(aliases.some(alias => alias.specifier === '@deepseek-ai/dsh-llm')).toBe(true)
   })
 
   it('yields to a hand-written alias and closes without a trailing comma', () => {
     const aliases = [
       { specifier: '@deepseek-ai/dsh-a', source: './packages/g/a/src', hasInvariant: true },
-      { specifier: '@deepseek-ai/dsh-b', source: './packages/g/b/src', hasInvariant: false },
+      { specifier: 'bake-b', source: './packages/g/b/src', hasInvariant: true },
+      { specifier: '@deepseek-ai/dsh-c', source: './packages/g/c/src', hasInvariant: false },
     ]
-    const body = renderAliases(aliases, new Set(['@deepseek-ai/dsh-a']))
+    const body = renderAliases(aliases, new Set(['@deepseek-ai/dsh-a', 'bake-b/invariant']))
 
     // The hand-written bare alias is skipped; its /invariant sibling is not.
     expect(body).toBe([
       '      "@deepseek-ai/dsh-a/invariant": ["./packages/g/a/src/invariant.ts"]',
-      '      "@deepseek-ai/dsh-b": ["./packages/g/b/src"]',
+      '      "bake-b": ["./packages/g/b/src"]',
+      '      "@deepseek-ai/dsh-c": ["./packages/g/c/src"]',
     ].join(',\n'))
     expect(body.endsWith(',')).toBe(false)
   })
@@ -76,6 +80,36 @@ describe('generated tsconfig package aliases', () => {
     )).toEqual(['@deepseek-ai/dsh-b'])
 
     expect(uncoveredPackages(['@deepseek-ai/dsh-a'], new Set(['@deepseek-ai/dsh-a']))).toEqual([])
+  })
+
+  it('recognizes bare aliases for both package name families', () => {
+    const config = [
+      '      "bake-session": ["./packages/core/session/src"],',
+      '      "bake-session/invariant": ["./packages/core/session/src/invariant.ts"],',
+      '      "@deepseek-ai/dsh-llm": ["./packages/llm/llm/src"],',
+      '      "@deepseek-ai/dsh-llm/invariant": ["./packages/llm/llm/src/invariant.ts"],',
+      '      "other-package": ["./other/src"]',
+    ].join('\n')
+
+    expect(mappedSpecifiers(config)).toEqual(new Set(['bake-session', '@deepseek-ai/dsh-llm']))
+    expect(uncoveredPackages(['bake-session', 'bake-unmapped'], mappedSpecifiers(config)))
+      .toEqual(['bake-unmapped'])
+  })
+
+  it('prunes absent sources for both name families while preserving other aliases', () => {
+    const lines = [
+      '      "bake-session": ["./packages/core/session/src"],',
+      '      "bake-missing": ["./packages/core/session/src/absent-alias-test"],',
+      '      "@deepseek-ai/dsh-llm": ["./packages/llm/llm/src"],',
+      '      "@deepseek-ai/dsh-missing": ["./packages/llm/llm/src/absent-alias-test"],',
+      '      "bake-session/*": ["./packages/core/session/src/*"],',
+      '      "bake-fallback": ["./absent-alias-test", "./packages/core/session/src"],',
+      '      "other-package": ["./absent-alias-test"]',
+    ]
+
+    expect(removeMissingAliases(lines.join('\n'), root)).toBe(
+      [lines[0], lines[2], lines[4], lines[5], lines[6]].join('\n'),
+    )
   })
 
   it('covers every workspace package in the committed config', () => {

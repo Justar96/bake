@@ -13,7 +13,7 @@ import type {
   SessionSeq,
   OptionalSessionSeq,
   SurfaceEvent,
-} from '@deepseek-ai/dsh-session'
+} from 'bake-session'
 import type { SessionTitleSnapshot } from '@deepseek-ai/dsh-session-title'
 import type { SessionSearchCursor } from './cursor.ts'
 

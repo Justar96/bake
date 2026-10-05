@@ -7,10 +7,10 @@
 import { createHash } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
-import { defineTool } from '@deepseek-ai/dsh-tools'
+import type { Agent, PreStepDecision } from 'bake-agent'
+import { defineTool } from 'bake-tools'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import { SessionSeq, type UserMessage } from '@deepseek-ai/dsh-session'
+import { SessionSeq, type UserMessage } from 'bake-session'
 import {
   escapeText,
   isModelInvocable,

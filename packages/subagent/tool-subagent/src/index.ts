@@ -10,14 +10,14 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { scopeChainOf, scopeOf } from '@deepseek-ai/dsh-scope'
-import { defineTool } from '@deepseek-ai/dsh-tools'
-import type { Agent, AgentOptions } from '@deepseek-ai/dsh-agent'
+import { scopeChainOf, scopeOf } from 'bake-scope'
+import { defineTool } from 'bake-tools'
+import type { Agent, AgentOptions } from 'bake-agent'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, LlmCallConfig } from '@deepseek-ai/dsh-llm'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
-import { SessionSeq } from '@deepseek-ai/dsh-session'
-import type { Session, SessionId } from '@deepseek-ai/dsh-session'
+import { SessionSeq } from 'bake-session'
+import type { Session, SessionId } from 'bake-session'
 import {
   assertSubagentMaxDepth,
   parentAgentOptionsForDelegation,

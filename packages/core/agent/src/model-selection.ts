@@ -1,6 +1,6 @@
 /**
  * Agent-scoped model selection shared by runtime entry points.
- * @module @deepseek-ai/dsh-agent/model-selection
+ * @module bake-agent/model-selection
  */
 
 import type { Context } from '@deepseek-ai/cordis'

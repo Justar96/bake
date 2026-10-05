@@ -3,11 +3,11 @@ description: "The scoped-registration library for plugin authors and maintainers
 kind: "package-library"
 ---
 
-# @deepseek-ai/dsh-scope
+# bake-scope
 
 ## Summary
 
-`dsh-scope` lets plugin authors give each agent or group an isolated contribution set with a shared lifetime. Child scopes inherit ancestor contributions, with the nearest definition taking precedence, while ancestor scopes can observe descendant activity; neither relationship works in reverse. Disposing a scope removes everything owned by it. Use this dependency-free library when per-agent or per-group isolation must work without depending on the agent loop or presets.
+`bake-scope` lets plugin authors give each agent or group an isolated contribution set with a shared lifetime. Child scopes inherit ancestor contributions, with the nearest definition taking precedence, while ancestor scopes can observe descendant activity; neither relationship works in reverse. Disposing a scope removes everything owned by it. Use this dependency-free library when per-agent or per-group isolation must work without depending on the agent loop or presets.
 
 ## Table of Contents
 
@@ -22,7 +22,7 @@ kind: "package-library"
 <a id="use-this-package"></a>
 ## Use this package
 
-Plugin authors use `dsh-scope` to give one agent (or one group) its own registration world. The registries in the core group build on it — a tool registered through `agent.ctx` is visible only to that agent — and the same primitive serves any custom registry or scope-filtered event.
+Plugin authors use `bake-scope` to give one agent (or one group) its own registration world. The registries in the core group build on it — a tool registered through `agent.ctx` is visible only to that agent — and the same primitive serves any custom registry or scope-filtered event.
 
 ### Mint a scope
 

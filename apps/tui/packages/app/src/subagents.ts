@@ -1,7 +1,7 @@
 /** Session-scoped child listing backed by the Harness subagent service. */
 import type { Context } from '@deepseek-ai/cordis'
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { SessionEvent } from 'bake-session'
+import type { Agent } from 'bake-agent'
 import type { SubagentRunInfo } from '@deepseek-ai/dsh-subagent'
 import type { SubagentRoutingDecision } from '@deepseek-ai/dsh-tool-subagent'
 import type { SubagentEntry } from '@dsh-tui/ui/subagents.tsx'

@@ -19,13 +19,13 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { snapshotJsonValue } from '@deepseek-ai/dsh-util-values'
-import { SessionLogOffset } from '@deepseek-ai/dsh-session'
+import { SessionLogOffset } from 'bake-session'
 import type {
   Session,
   SessionEvent,
   SessionHeader,
   SessionId,
-} from '@deepseek-ai/dsh-session'
+} from 'bake-session'
 import type {
   ProjectionCheckpoint,
   ProjectionSnapshot,

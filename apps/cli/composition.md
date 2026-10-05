@@ -18,7 +18,7 @@ flowchart LR
   cfg --> plugin_dsh_base_hmr
   plugin_dsh_base_llm["llm<br/>@deepseek-ai/dsh-llm"]
   cfg --> plugin_dsh_base_llm
-  plugin_dsh_base_session["session<br/>@deepseek-ai/dsh-session"]
+  plugin_dsh_base_session["session<br/>bake-session"]
   cfg --> plugin_dsh_base_session
   plugin_dsh_base_typert["typert<br/>@deepseek-ai/dsh-typert-registry"]
   cfg --> plugin_dsh_base_typert
@@ -32,9 +32,9 @@ flowchart LR
   cfg --> plugin_dsh_base_session_title_llm
   plugin_dsh_base_user_questions["user-questions<br/>@deepseek-ai/dsh-user-questions"]
   cfg --> plugin_dsh_base_user_questions
-  plugin_dsh_base_agent["agent<br/>@deepseek-ai/dsh-agent"]
+  plugin_dsh_base_agent["agent<br/>bake-agent"]
   cfg --> plugin_dsh_base_agent
-  plugin_dsh_base_agent_default_model["agent-default-model<br/>@deepseek-ai/dsh-agent-default-model"]
+  plugin_dsh_base_agent_default_model["agent-default-model<br/>bake-agent-default-model"]
   cfg --> plugin_dsh_base_agent_default_model
   plugin_dsh_base_jobs["jobs<br/>@deepseek-ai/dsh-jobs-local"]
   cfg --> plugin_dsh_base_jobs
@@ -162,11 +162,11 @@ flowchart LR
   cfg --> plugin_dsh_base_tool_web
   plugin_dsh_base_mcp_resources["mcp-resources<br/>@deepseek-ai/dsh-mcp-resources"]
   cfg --> plugin_dsh_base_mcp_resources
-  plugin_dsh_base_tools["tools<br/>@deepseek-ai/dsh-tools"]
+  plugin_dsh_base_tools["tools<br/>bake-tools"]
   cfg --> plugin_dsh_base_tools
-  plugin_dsh_base_system_prompt["system-prompt<br/>@deepseek-ai/dsh-system-prompt"]
+  plugin_dsh_base_system_prompt["system-prompt<br/>bake-system-prompt"]
   cfg --> plugin_dsh_base_system_prompt
-  plugin_dsh_base_agent_loop["agent-loop<br/>@deepseek-ai/dsh-agent-loop"]
+  plugin_dsh_base_agent_loop["agent-loop<br/>bake-agent-loop"]
   cfg --> plugin_dsh_base_agent_loop
   plugin_dsh_base_fs_sandbox["fs-sandbox<br/>@deepseek-ai/dsh-fs-sandbox"]
   cfg --> plugin_dsh_base_fs_sandbox
@@ -179,15 +179,15 @@ flowchart LR
 | `timer` | `@deepseek-ai/cordis-plugin-timer` |
 | `hmr` | `@deepseek-ai/dsh-hmr` |
 | `llm` | `@deepseek-ai/dsh-llm` |
-| `session` | `@deepseek-ai/dsh-session` |
+| `session` | `bake-session` |
 | `typert` | `@deepseek-ai/dsh-typert-registry` |
 | `typert-loader` | `@deepseek-ai/dsh-typert-loader` |
 | `typert-gateway` | `@deepseek-ai/dsh-api-gateway` |
 | `session-title` | `@deepseek-ai/dsh-session-title` |
 | `session-title-llm` | `@deepseek-ai/dsh-session-title-first-prompt-llm` |
 | `user-questions` | `@deepseek-ai/dsh-user-questions` |
-| `agent` | `@deepseek-ai/dsh-agent` |
-| `agent-default-model` | `@deepseek-ai/dsh-agent-default-model` |
+| `agent` | `bake-agent` |
+| `agent-default-model` | `bake-agent-default-model` |
 | `jobs` | `@deepseek-ai/dsh-jobs-local` |
 | `llm-retry` | `@deepseek-ai/dsh-llm-retry` |
 | `settings` | `@deepseek-ai/dsh-settings-file` |
@@ -251,9 +251,9 @@ flowchart LR
 | `web-fetch-http` | `@deepseek-ai/dsh-web-fetch-http` |
 | `tool-web` | `@deepseek-ai/dsh-tool-web` |
 | `mcp-resources` | `@deepseek-ai/dsh-mcp-resources` |
-| `tools` | `@deepseek-ai/dsh-tools` |
-| `system-prompt` | `@deepseek-ai/dsh-system-prompt` |
-| `agent-loop` | `@deepseek-ai/dsh-agent-loop` |
+| `tools` | `bake-tools` |
+| `system-prompt` | `bake-system-prompt` |
+| `agent-loop` | `bake-agent-loop` |
 | `fs-sandbox` | `@deepseek-ai/dsh-fs-sandbox` |
 
 Source config: [`packages/bundle/base/cordis.patch.yml`](../../packages/bundle/base/cordis.patch.yml).

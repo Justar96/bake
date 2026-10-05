@@ -49,7 +49,7 @@ Use `list_plugins` or `list_bundles` to obtain exact identifiers for existing in
 Register model-facing capabilities with `ctx.tools.register(defineTool(...))`. The tool schema is sent to the model automatically. Return the value declared by `output.schema`, keep human-readable rendering in `output.render`, and honor `exec.signal` while doing work:
 
 ```js
-import { defineTool } from '@deepseek-ai/dsh-tools'
+import { defineTool } from 'bake-tools'
 
 export const name = 'my-tools'
 export const inject = ['tools']

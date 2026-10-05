@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-session",
+  "name": "bake-session",
   "description": "Event-sourced session store for the DeepSeek Harness",
   "version": "0.1.6-alpha.2",
   "publishConfig": {
@@ -41,12 +41,12 @@
   ],
   "license": "MIT",
   "peerDependencies": {
-    "@deepseek-ai/dsh-scope": "workspace:^",
+    "bake-scope": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   },
   "devDependencies": {
     "@deepseek-ai/dsh-invariants": "workspace:^",
-    "@deepseek-ai/dsh-scope": "workspace:^",
+    "bake-scope": "workspace:^",
     "@deepseek-ai/dsh-typert-protocol": "workspace:^",
     "@deepseek-ai/dsh-typert-registry": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"

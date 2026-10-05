@@ -17,7 +17,7 @@
  * @module @dsh-tui/ui/cards
  */
 
-import type { FileDiff, TerminalChanges, TerminalFileChange, ToolCallView, ToolResult, ToolResultView } from '@deepseek-ai/dsh-tools'
+import type { FileDiff, TerminalChanges, TerminalFileChange, ToolCallView, ToolResult, ToolResultView } from 'bake-tools'
 import { diffArrays, diffWordsWithSpace } from 'diff'
 import type { TuiCopy } from './copy.ts'
 import type { CardChanges, CardLine } from './rows.ts'

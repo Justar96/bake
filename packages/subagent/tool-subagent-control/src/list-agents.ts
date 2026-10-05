@@ -8,9 +8,9 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import { defineTool } from '@deepseek-ai/dsh-tools'
-import type { Agent } from '@deepseek-ai/dsh-agent'
-import type { SessionId } from '@deepseek-ai/dsh-session'
+import { defineTool } from 'bake-tools'
+import type { Agent } from 'bake-agent'
+import type { SessionId } from 'bake-session'
 import type { SubagentDescendantListEntry, SubagentListEntry } from '@deepseek-ai/dsh-subagent'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
 import { presentListAgentsCall } from './presentation.ts'

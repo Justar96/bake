@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { installProxyFromEnvironment } from '@deepseek-ai/dsh-http-proxy'
 import { recordFeedback } from '@deepseek-ai/dsh-command-feedback'
 import { Context } from '@deepseek-ai/cordis'
-import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
+import SessionStore, { SessionId } from 'bake-session'
 import OpenTelemetrySessionBackend, { SessionTelemetryMode } from '../src/index.ts'
 
 const seen: string[] = []

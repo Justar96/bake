@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { createScope, type Scope } from '@deepseek-ai/dsh-scope'
+import { createScope, type Scope } from 'bake-scope'
 import TurndownService from 'turndown'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
-import SystemPrompt, { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
-import ToolRuntime, { type ToolExecutionResult } from '@deepseek-ai/dsh-tools'
+import SystemPrompt, { renderPrompt } from 'bake-system-prompt'
+import ToolRuntime, { type ToolExecutionResult } from 'bake-tools'
 import WebRuntime from '@deepseek-ai/dsh-web'
 import type { WebSearchProvider, WebSearchResult } from '@deepseek-ai/dsh-web'
 import * as ToolWeb from '@deepseek-ai/dsh-tool-web'
@@ -24,7 +24,7 @@ import {
   WEB_SEARCH_MAX_RESULTS,
 } from '@deepseek-ai/dsh-tool-web'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
-import type { ToolResult } from '@deepseek-ai/dsh-tools'
+import type { ToolResult } from 'bake-tools'
 import { parseSearchArgs } from '../src/search.ts'
 
 const testToolSignal = new AbortController().signal

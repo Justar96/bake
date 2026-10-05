@@ -11,7 +11,7 @@ import { basename, join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
-import { SessionId } from '@deepseek-ai/dsh-session'
+import { SessionId } from 'bake-session'
 import { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
 
 /** Cross-file state shared with the vi.mock factory (hoisting contract). */

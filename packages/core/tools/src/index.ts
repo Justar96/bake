@@ -1,17 +1,17 @@
 /**
  * Tool registry, model presentation modes, and pre/guard/around/post/result
  * execution pipeline.
- * @module @deepseek-ai/dsh-tools
+ * @module bake-tools
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { AnonymousEntries, NamedEntries, ScopedLayers, scopeOf, scopeTarget } from '@deepseek-ai/dsh-scope'
-import type { ScopeKey, ScopeLayer, Scoped } from '@deepseek-ai/dsh-scope'
+import { AnonymousEntries, NamedEntries, ScopedLayers, scopeOf, scopeTarget } from 'bake-scope'
+import type { ScopeKey, ScopeLayer, Scoped } from 'bake-scope'
 import type { ToolCallId, ContentBlock, ToolSchema } from '@deepseek-ai/dsh-llm'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
-import type { Agent, ToolProgress } from '@deepseek-ai/dsh-agent'
-import type { UserMessage } from '@deepseek-ai/dsh-session'
+import type { Agent, ToolProgress } from 'bake-agent'
+import type { UserMessage } from 'bake-session'
 import { assertNever, deepFreeze, snapshotJsonValue, type JsonValue } from '@deepseek-ai/dsh-util-values'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 // Type-only: makes `ctx.get('approval')` resolve to the ApprovalService
@@ -70,7 +70,7 @@ export {
 
 export type { PtcDispatchEventData, PtcDispatchStartEventData } from './types.ts'
 /** The progress snapshot a body publishes through {@link ToolRunContext.reportProgress}. */
-export type { ToolProgress } from '@deepseek-ai/dsh-agent'
+export type { ToolProgress } from 'bake-agent'
 
 export { CodeRunFailedError, RUN_CODE_NAME } from './ptc.ts'
 export { TOOL_DUPLICATE_CALL }
@@ -79,7 +79,7 @@ export { jsonSchemaToPy, renderToolsSdkPy } from './py-types.ts'
 export { defineContentToolFixture, type ContentToolFixtureOptions } from './testing.ts'
 
 // The render-intent vocabulary a tool declares via `presentCall`/`presentResult`
-// lives in its own UI-facing module; re-export it so `@deepseek-ai/dsh-tools`
+// lives in its own UI-facing module; re-export it so `bake-tools`
 // stays the single public API for tool producers and UI adapters.
 export type {
   ToolCallKind,
@@ -122,7 +122,7 @@ declare module '@deepseek-ai/cordis' {
      * stops the turn once the current tool batch settles. Async gates must observe
      * `exec.signal`; the registry rechecks cancellation after they settle but
      * never abandons their promise.
-     * Scope-filtered dispatch (`@deepseek-ai/dsh-scope`): agent-scoped listeners receive only that agent's calls.
+     * Scope-filtered dispatch (`bake-scope`): agent-scoped listeners receive only that agent's calls.
      * @param exec - the pending call (name, parsed arguments, caller agent).
      * @mode waterfall
      */
@@ -133,7 +133,7 @@ declare module '@deepseek-ai/cordis' {
      * identity remains immutable. The registry re-fuses the original caller
      * signal before the body, so replacement cannot detach caller cancellation;
      * wrappers must still restore their signal and reach quiescence.
-     * Scope-filtered dispatch (`@deepseek-ai/dsh-scope`): agent-scoped listeners receive only that agent's calls.
+     * Scope-filtered dispatch (`bake-scope`): agent-scoped listeners receive only that agent's calls.
      * @param exec - the allowed call about to dispatch (name, parsed arguments, caller agent, signal).
      * @mode waterfall
      */
@@ -145,7 +145,7 @@ declare module '@deepseek-ai/cordis' {
      * listeners must observe `exec.signal`; after they settle, caller
      * cancellation replaces only a successful accepted outcome with the code
      * selected by whether the tool body was invoked.
-     * Scope-filtered dispatch (`@deepseek-ai/dsh-scope`): agent-scoped listeners receive only that agent's calls.
+     * Scope-filtered dispatch (`bake-scope`): agent-scoped listeners receive only that agent's calls.
      * @param exec - the call that just ran (name, parsed arguments, caller agent).
      * @param result - the dispatch outcome a listener may accept, replace, or block.
      * @mode waterfall
@@ -160,14 +160,14 @@ declare module '@deepseek-ai/cordis' {
      * logged copy is affected — the program already received the complete
      * value, and the model sees neither. A throwing listener is contained:
      * the bridge falls back to logging the original settled content.
-     * Scope-filtered dispatch (`@deepseek-ai/dsh-scope`): agent-scoped listeners receive only that agent's dispatches.
+     * Scope-filtered dispatch (`bake-scope`): agent-scoped listeners receive only that agent's dispatches.
      * @param dispatch - the parent execution, sub-call identity, and the settled content to log.
      * @mode waterfall
      */
     'tools/ptc-dispatch-log'(this: Scoped<ToolRuntime>, dispatch: PtcDispatchLog, next: () => Promise<ContentBlock[]>): Promise<ContentBlock[]>
     /**
      * Observe the frozen, lossless-JSON final outcome. Listener failures are contained.
-     * Scope-filtered dispatch (`@deepseek-ai/dsh-scope`): keyed by `exec.agent`.
+     * Scope-filtered dispatch (`bake-scope`): keyed by `exec.agent`.
      * @param exec - the execution object that traversed the pipeline.
      * @param result - a deep-frozen snapshot of the final returned result.
      * @mode emit

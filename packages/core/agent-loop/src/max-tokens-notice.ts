@@ -7,7 +7,7 @@
  */
 
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { UserMessage } from '@deepseek-ai/dsh-session'
+import type { UserMessage } from 'bake-session'
 
 /** Source stamped on the notice so derived history does not present it as a user prompt. */
 const SOURCE = '@deepseek-ai/dsh-agent-loop'

@@ -15,14 +15,14 @@ import type {
   Session,
   SessionEvent,
   SessionLogOffset as SessionLogOffsetType,
-} from '@deepseek-ai/dsh-session'
+} from 'bake-session'
 import {
   canonicalHeader,
   headerEquals,
   isSurfaceEvent,
   SessionLogOffset,
   SessionSeq,
-} from '@deepseek-ai/dsh-session'
+} from 'bake-session'
 // Type-only: activates the `ctx.sessionProjections` Context declaration.
 import type {} from '@deepseek-ai/dsh-session-projection'
 import type {

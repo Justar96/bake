@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Agent } from 'bake-agent'
 import { JobId, JobRegistry } from '@deepseek-ai/dsh-jobs'
 import type { JobDoneListener, JobRead, JobSnapshot, JobStart } from '@deepseek-ai/dsh-jobs'
 

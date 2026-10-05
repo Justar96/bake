@@ -5,7 +5,7 @@
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Agent } from 'bake-agent'
 import { TerminalBackendCleanupError } from './types.ts'
 import type {
   TerminalBackend,

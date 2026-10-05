@@ -13,7 +13,7 @@
  * @module @dsh-tui/ui/progress
  */
 
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import type { SessionEvent } from 'bake-session'
 import { SETTLES } from './actions.ts'
 import type { Row, ToolCallLive, ToolCallRow } from './rows.ts'
 

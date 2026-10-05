@@ -22,11 +22,11 @@
  */
 
 import { isRecord, snapshotJsonValue } from '@deepseek-ai/dsh-util-values'
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import type { SessionEvent } from 'bake-session'
 import type { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
-import type { ToolRestriction } from '@deepseek-ai/dsh-tools'
+import type { ToolRestriction } from 'bake-tools'
 
-declare module '@deepseek-ai/dsh-session/types' {
+declare module 'bake-session/types' {
   interface SessionEventMap {
     /**
      * Durable identity and lifecycle mode of a session-backed subagent child,

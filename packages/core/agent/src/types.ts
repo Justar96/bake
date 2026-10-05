@@ -1,11 +1,11 @@
 /**
  * Durable agent session-event vocabulary shared with type-only consumers.
  *
- * @module @deepseek-ai/dsh-agent/types
+ * @module bake-agent/types
  */
 
 import type { UserMessage } from '@deepseek-ai/dsh-llm/types'
-import type { OptionalSessionSeq, SessionId, SessionSeq } from '@deepseek-ai/dsh-session/types'
+import type { OptionalSessionSeq, SessionId, SessionSeq } from 'bake-session/types'
 import type { TypertContext, TypertLookup } from '@deepseek-ai/dsh-typert-protocol'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 
@@ -77,7 +77,7 @@ export interface TurnBoundaryProjection {
   readonly lastTurn: number
 }
 
-declare module '@deepseek-ai/dsh-session/types' {
+declare module 'bake-session/types' {
   interface SessionEventMap {
     /**
      * One normalized mutation of an agent's durable pending-message lists.

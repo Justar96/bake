@@ -19,13 +19,13 @@
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { ZodType } from 'zod'
-import { SessionLogOffset, SessionSeq } from '@deepseek-ai/dsh-session'
+import { SessionLogOffset, SessionSeq } from 'bake-session'
 import type {
   Session,
   SessionEvent,
   SessionHeader,
   SessionSeqCursor,
-} from '@deepseek-ai/dsh-session'
+} from 'bake-session'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {

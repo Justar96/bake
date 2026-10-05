@@ -12,15 +12,15 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
-import AgentRegistry from '@deepseek-ai/dsh-agent'
-import type { Agent } from '@deepseek-ai/dsh-agent'
-import AgentLoop from '@deepseek-ai/dsh-agent-loop'
+import AgentRegistry from 'bake-agent'
+import type { Agent } from 'bake-agent'
+import AgentLoop from 'bake-agent-loop'
 import LlmRuntime, { createUserMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
-import { bindScopeParent, createScope, scopeOf } from '@deepseek-ai/dsh-scope'
-import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
+import { bindScopeParent, createScope, scopeOf } from 'bake-scope'
+import SessionStore, { SessionId } from 'bake-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
-import ToolRuntime from '@deepseek-ai/dsh-tools'
+import SystemPrompt from 'bake-system-prompt'
+import ToolRuntime from 'bake-tools'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import * as Spawn from '@deepseek-ai/dsh-subagent-spawn-in-process'
 import * as ToolSubagent from '../src/index.ts'
@@ -73,12 +73,12 @@ async function load(url: string, cancel = false) {
   const path = join(directory, 'cordis.yml')
   const modules = new Map<string, unknown>([
     ['@deepseek-ai/dsh-llm', LlmRuntime],
-    ['@deepseek-ai/dsh-session', SessionStore],
+    ['bake-session', SessionStore],
     ['@deepseek-ai/dsh-session-projection', SessionProjectionRegistry],
-    ['@deepseek-ai/dsh-system-prompt', SystemPrompt],
-    ['@deepseek-ai/dsh-tools', ToolRuntime],
-    ['@deepseek-ai/dsh-agent', AgentRegistry],
-    ['@deepseek-ai/dsh-agent-loop', AgentLoop],
+    ['bake-system-prompt', SystemPrompt],
+    ['bake-tools', ToolRuntime],
+    ['bake-agent', AgentRegistry],
+    ['bake-agent-loop', AgentLoop],
     ['@deepseek-ai/dsh-subagent', SubagentRuntime],
     ['@deepseek-ai/dsh-subagent-spawn-in-process', Spawn],
     ['@deepseek-ai/dsh-tool-subagent/model-selection-settings', SubagentModelSelection],
@@ -88,7 +88,7 @@ async function load(url: string, cancel = false) {
     config: { provider: 'spawn', modelSelectionSettings: true, enableRunInBackground: false },
   } : name === '@deepseek-ai/dsh-tool-subagent/model-selection-settings' ? {
     config: { enabled: true, allowedModels: ALLOWED, router: { enabled: true, url, timeoutMs: 5000 } },
-  } : name === '@deepseek-ai/dsh-agent-loop' ? { config: { agents: [] } } : {} }))
+  } : name === 'bake-agent-loop' ? { config: { agents: [] } } : {} }))
   // JSON is valid YAML and leaves the test-owned endpoint and paths unambiguous.
   await writeFile(path, JSON.stringify(entries))
   owner = new Context()

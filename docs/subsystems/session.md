@@ -915,7 +915,7 @@ Source: [`packages/core/session/src/index.ts`](../../packages/core/session/src/i
 
 #### `session/created` — emit
 
-Creation announcement during session publication. A synchronous throw vetoes and rolls back with a paired disposal; detach requested during dispatch is deferred. A returned-promise rejection is logged but cannot retroactively veto this synchronous boundary. Scope-filtered dispatch (`@deepseek-ai/dsh-scope`): agent-scoped listeners receive only sessions entered through that agent's context.
+Creation announcement during session publication. A synchronous throw vetoes and rolls back with a paired disposal; detach requested during dispatch is deferred. A returned-promise rejection is logged but cannot retroactively veto this synchronous boundary. Scope-filtered dispatch (`bake-scope`): agent-scoped listeners receive only sessions entered through that agent's context.
 
 ```ts cordis-catalog
 /**
@@ -923,7 +923,7 @@ Creation announcement during session publication. A synchronous throw vetoes and
  * back with a paired disposal; detach requested during dispatch is deferred.
  * A returned-promise rejection is logged but cannot retroactively veto this
  * synchronous boundary.
- * Scope-filtered dispatch (`@deepseek-ai/dsh-scope`): agent-scoped listeners
+ * Scope-filtered dispatch (`bake-scope`): agent-scoped listeners
  * receive only sessions entered through that agent's context.
  * @param session - the session just entered and announced.
  * @dshScopeScan unsupported
@@ -940,14 +940,14 @@ Source: [`packages/core/session/src/index.ts`](../../packages/core/session/src/i
 
 #### `session/disposed` — emit
 
-Emitted once when an announced session leaves the store, including publication rollback, but never for an entry whose creation announcement did not begin. Listener failures are logged and contained. Scope-filtered dispatch (`@deepseek-ai/dsh-scope`) reuses the owner scope.
+Emitted once when an announced session leaves the store, including publication rollback, but never for an entry whose creation announcement did not begin. Listener failures are logged and contained. Scope-filtered dispatch (`bake-scope`) reuses the owner scope.
 
 ```ts cordis-catalog
 /**
  * Emitted once when an announced session leaves the store, including
  * publication rollback, but never for an entry whose creation announcement
  * did not begin. Listener failures are logged and contained.
- * Scope-filtered dispatch (`@deepseek-ai/dsh-scope`) reuses the owner scope.
+ * Scope-filtered dispatch (`bake-scope`) reuses the owner scope.
  * @param session - the session that is no longer live in the store.
  * @dshScopeScan unsupported
  * @mode emit
@@ -963,14 +963,14 @@ Source: [`packages/core/session/src/index.ts`](../../packages/core/session/src/i
 
 #### `session/event` — emit
 
-Post-commit, fire-and-forget append feed. The listener snapshot resolves before the log push, but callbacks run after it; observer failures are logged and contained without making the committed append fail. Scope-filtered dispatch (`@deepseek-ai/dsh-scope`): agent-scoped listeners receive only events from sessions entered through that agent's context.
+Post-commit, fire-and-forget append feed. The listener snapshot resolves before the log push, but callbacks run after it; observer failures are logged and contained without making the committed append fail. Scope-filtered dispatch (`bake-scope`): agent-scoped listeners receive only events from sessions entered through that agent's context.
 
 ```ts cordis-catalog
 /**
  * Post-commit, fire-and-forget append feed. The listener snapshot resolves
  * before the log push, but callbacks run after it; observer failures are
  * logged and contained without making the committed append fail.
- * Scope-filtered dispatch (`@deepseek-ai/dsh-scope`): agent-scoped listeners
+ * Scope-filtered dispatch (`bake-scope`): agent-scoped listeners
  * receive only events from sessions entered through that agent's context.
  * @param session - the session whose log grew.
  * @param event - the appended event, exactly as recorded.
@@ -988,13 +988,13 @@ Source: [`packages/core/session/src/index.ts`](../../packages/core/session/src/i
 
 #### `session/flush` — parallel
 
-Awaited parallel durability checkpoint: every listener runs and the caller awaits all of them, with no waterfall veto. Scope-filtered dispatch (`@deepseek-ai/dsh-scope`) reuses the session's owner scope.
+Awaited parallel durability checkpoint: every listener runs and the caller awaits all of them, with no waterfall veto. Scope-filtered dispatch (`bake-scope`) reuses the session's owner scope.
 
 ```ts cordis-catalog
 /**
  * Awaited parallel durability checkpoint: every listener runs and the
  * caller awaits all of them, with no waterfall veto. Scope-filtered dispatch
- * (`@deepseek-ai/dsh-scope`) reuses the session's owner scope.
+ * (`bake-scope`) reuses the session's owner scope.
  * @param session - the session whose buffered events must reach durable storage.
  * @dshScopeScan unsupported
  * @mode parallel

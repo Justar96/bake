@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { HarnessError, ToolCallId } from '@deepseek-ai/dsh-llm'
-import SessionStore, { type Session } from '@deepseek-ai/dsh-session'
-import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
-import type { Agent } from '@deepseek-ai/dsh-agent'
-import ToolRuntime, { defineTool, TOOL_DUPLICATE_CALL, type ToolExecutionToken } from '@deepseek-ai/dsh-tools'
+import SessionStore, { type Session } from 'bake-session'
+import SystemPrompt from 'bake-system-prompt'
+import type { Agent } from 'bake-agent'
+import ToolRuntime, { defineTool, TOOL_DUPLICATE_CALL, type ToolExecutionToken } from 'bake-tools'
 
 const signal = new AbortController().signal
 

@@ -8,7 +8,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
-import type { Session } from '@deepseek-ai/dsh-session'
+import type { Session } from 'bake-session'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { parseGitStatus, sessionGitConfinement, WorkspaceGit, type GitConfinement } from '../src/git.ts'
 

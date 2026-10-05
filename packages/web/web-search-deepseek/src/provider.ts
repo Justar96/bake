@@ -14,7 +14,7 @@ import type {
   WebSearchSource,
 } from '@deepseek-ai/dsh-web'
 import type { CredentialRef } from '@deepseek-ai/dsh-credentials'
-import type {} from '@deepseek-ai/dsh-session'
+import type {} from 'bake-session'
 import type {
   AnthropicError,
   AnthropicResponse,
@@ -76,7 +76,7 @@ export interface DeepSeekSearchLlmRequest {
   }
 }
 
-declare module '@deepseek-ai/dsh-session/types' {
+declare module 'bake-session/types' {
   interface SessionEventMap {
     /** Secret-free auxiliary DeepSeek search request recorded before dispatch. */
     'web/deepseek-search-llm-request': DeepSeekSearchLlmRequest
