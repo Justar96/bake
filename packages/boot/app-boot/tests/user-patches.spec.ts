@@ -14,6 +14,7 @@ import Include, { type PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import {
   boot,
+  composeEntries,
   isProfileGenerationApplied,
   loadOptionalPatches,
   loadOverlayPatches,
@@ -124,6 +125,48 @@ describe('loadOptionalPatches', () => {
     expect(patches?.[1]?.insert?.[0]?.name).toBe(pathToFileURL(join(dir, 'rule.mjs')).href)
     expect((patches?.[1]?.insert?.[1]?.config as { name: string }[])[0]?.name)
       .toBe(pathToFileURL(join(dir, '..', 'child.mjs')).href)
+  })
+
+  it('renames legacy package names in rows and assertions, warning once per name and file', () => {
+    const dir = tmp()
+    const patchPath = join(dir, PROFILE_PATCH_FILENAME)
+    writeFileSync(patchPath, [
+      '- id: llm',
+      "  name: '@deepseek-ai/dsh-llm-pi-ai'",
+      '  config: { v: 2 }',
+      '- insert:',
+      '    - id: control',
+      "      name: '@deepseek-ai/dsh-tool-subagent-control/list-agents'",
+      '    - id: nested',
+      '      name: cordis:group',
+      '      group: true',
+      '      config:',
+      '        - id: child',
+      "          name: '@deepseek-ai/dsh-llm-pi-ai'",
+      '        - id: kept',
+      "          name: '@deepseek-ai/cordis-plugin-timer'",
+      '',
+    ].join('\n'))
+    const lines: string[] = []
+
+    const patches = loadOptionalPatches(NAME, patchPath, line => lines.push(line)) ?? []
+    loadOverlayPatches(NAME, patchPath, line => lines.push(line))
+
+    expect(composeEntries([[{ insert: [{ id: 'llm', name: 'bake-llm-pi-ai', config: { v: 1 } }] }], patches])).toEqual([
+      { id: 'llm', name: 'bake-llm-pi-ai', config: { v: 2 } },
+      { id: 'control', name: 'bake-tool-subagent-control/list-agents' },
+      { id: 'nested', name: 'cordis:group', group: true, config: [
+        { id: 'child', name: 'bake-llm-pi-ai' },
+        { id: 'kept', name: '@deepseek-ai/cordis-plugin-timer' },
+      ] },
+    ])
+    expect(lines).toEqual([
+      `${NAME}: warning: ${patchPath} names @deepseek-ai/dsh-llm-pi-ai, which is now bake-llm-pi-ai; `
+      + 'use the new name, as the old one is deprecated and will stop working in a later release',
+      `${NAME}: warning: ${patchPath} names @deepseek-ai/dsh-tool-subagent-control/list-agents, `
+      + 'which is now bake-tool-subagent-control/list-agents; '
+      + 'use the new name, as the old one is deprecated and will stop working in a later release',
+    ])
   })
 
   it('fails loud on an unreadable file (a present user patch layer is never skipped)', () => {

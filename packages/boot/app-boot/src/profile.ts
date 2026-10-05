@@ -24,10 +24,12 @@
  * @module bake-app-boot/profile
  */
 
+import { randomBytes } from 'node:crypto'
 import { createRequire } from 'node:module'
 import {
-  existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync,
-  symlinkSync, unlinkSync, writeFileSync,
+  closeSync, constants as fsConstants, copyFileSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync,
+  readFileSync, readdirSync, readlinkSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync,
+  writeSync,
 } from 'node:fs'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -38,6 +40,7 @@ import { resolveDshHome } from 'bake-home-paths'
 import type { DshBundleManifest, DshPackageManifest } from 'bake-package-manifest'
 import { resolve as resolvePackage, type Package as ResolvePackageManifest } from 'resolve.exports'
 import { loadOverlayPatches } from './index.ts'
+import { currentPackageName, LEGACY_PACKAGE_NAMES } from './legacy-package-names.ts'
 import {
   canonicalLinkPath,
   isPackagedExecutable,
@@ -126,6 +129,11 @@ export interface ProfileResolutionEntry {
   readonly declarer: string
   /** Whether every profile or only the active profile receives this fallback. */
   readonly scope: 'installation' | 'profile'
+  /**
+   * Current package name when `name` is a deprecated legacy name: the entry
+   * aliases that package, and requests for `name` resolve as requests for it.
+   */
+  readonly renamedTo?: string
 }
 
 /** Complete immutable fallback table for one profile launch. */
@@ -480,6 +488,7 @@ function resolveModuleFallbackEntries(
   packageDirs: ReadonlyMap<string, string>
   declarers: ReadonlyMap<string, string>
   versions: ReadonlyMap<string, string | undefined>
+  renamed: ReadonlyMap<string, string>
 } {
   const appManifest = readModuleFallbackManifest(installAnchor)
   const links = new Map<string, string>()
@@ -513,6 +522,17 @@ function resolveModuleFallbackEntries(
       queue.push({ anchor: manifestPath, manifest })
     }
   }
+  // Deprecated legacy names alias the installed package that replaced them,
+  // so out-of-tree plugins that still import an old name share its instance.
+  const renamed = new Map<string, string>()
+  for (const [legacy, current] of LEGACY_PACKAGE_NAMES) {
+    const dir = links.get(current)
+    if (dir === undefined || links.has(legacy)) continue
+    renamed.set(legacy, current)
+    links.set(legacy, dir)
+    declarers.set(legacy, declarers.get(current) as string)
+    versions.set(legacy, versions.get(current))
+  }
   const entries = !materialize
     ? []
     : !isPackagedExecutable()
@@ -523,7 +543,7 @@ function resolveModuleFallbackEntries(
           ? []
           : [{ kind: 'proxy' as const, packageName, version: source.version, targets: source.targets }]
       })
-  return { entries, packageNames: new Set(links.keys()), packageDirs: links, declarers, versions }
+  return { entries, packageNames: new Set(links.keys()), packageDirs: links, declarers, versions, renamed }
 }
 
 /** Return whether one existing fallback entry already matches its resolved installation generation. */
@@ -569,7 +589,10 @@ export interface ProfileModuleFallbackOptions {
  * enter pkg's virtual filesystem. Missing packages carried only by selected
  * bundles are linked through a profile-owned directory into that profile's
  * `node_modules`; pnpm-managed entries remain authoritative, and another
- * profile's links cannot change its resolution.
+ * profile's links cannot change its resolution. Each deprecated legacy name
+ * of an installed renamed package gets its own entry, linked to the current
+ * package, so an out-of-tree plugin importing the old name loads the same
+ * module instance.
  * @param options - installation anchor, optional loaded profile, and Harness home.
  * @returns the computed fallback generation after optional materialization.
  */
@@ -580,7 +603,7 @@ export async function healProfilesModuleFallback(
   const profilesDir = join(home, PROFILES_DIR)
   const modulesDir = join(profilesDir, 'node_modules')
   if (materialize) mkdirSync(modulesDir, { recursive: true })
-  const { entries, packageNames, packageDirs, declarers, versions } = resolveModuleFallbackEntries(installAnchor, materialize)
+  const { entries, packageNames, packageDirs, declarers, versions, renamed } = resolveModuleFallbackEntries(installAnchor, materialize)
   if (materialize && !moduleFallbackCurrent(modulesDir, entries)) {
     await withFileLock(modulesDir, () => {
       if (!moduleFallbackCurrent(modulesDir, entries)) healProfilesModuleFallbackLocked(entries, modulesDir)
@@ -598,10 +621,14 @@ export async function healProfilesModuleFallback(
     profileDir: profile?.dir,
     localPackageNames: Object.freeze(localPackageNames),
     entries: Object.freeze([
-      ...[...packageDirs].map(([name, packageDir]) => Object.freeze({
-        name, packageDir, version: versions.get(name),
-        declarer: declarers.get(name) as string, scope: 'installation' as const,
-      })),
+      ...[...packageDirs].map(([name, packageDir]) => {
+        const renamedTo = renamed.get(name)
+        return Object.freeze({
+          name, packageDir, version: versions.get(name),
+          declarer: declarers.get(name) as string, scope: 'installation' as const,
+          ...renamedTo === undefined ? {} : { renamedTo },
+        })
+      }),
       ...[...profilePackages].map(([name, packageDir]) => Object.freeze({
         name, packageDir, version: profileVersions.get(name),
         declarer: profileDeclarers.get(name) as string, scope: 'profile' as const,
@@ -782,6 +809,83 @@ export function writeProfileManifest(dir: string, manifest: ProfileManifest): vo
   writeFileSync(join(dir, 'package.json'), JSON.stringify(manifest, undefined, 2) + '\n')
 }
 
+/** Suffix of the copy {@link migrateProfileManifest} keeps of a manifest it rewrites. */
+export const PROFILE_MANIFEST_BACKUP_SUFFIX = '.bak'
+
+/** Profile manifests whose legacy bundle names were already reported, so a reload does not repeat the warning. */
+const reportedLegacyManifests = new Set<string>()
+
+function writeStderrLine(line: string): void {
+  process.stderr.write(`${line}\n`)
+}
+
+/** Replace `path` with `content` through a synced exclusive sibling, so a reader never sees part of it. */
+function replaceFileSync(path: string, content: string): void {
+  const temp = `${path}.${randomBytes(6).toString('hex')}.tmp`
+  try {
+    const fd = openSync(temp, 'wx')
+    try {
+      writeSync(fd, content)
+      fsyncSync(fd)
+    } finally {
+      closeSync(fd)
+    }
+    renameSync(temp, path)
+  } catch (error) {
+    rmSync(temp, { force: true })
+    throw error
+  }
+}
+
+/**
+ * Rewrite renamed package names in a profile's `dsh.profile.bundles` list to
+ * their current names, once. The original manifest is copied beside it with
+ * {@link PROFILE_MANIFEST_BACKUP_SUFFIX} (an existing copy is kept), the new
+ * manifest replaces it atomically, and one line names the renames. A profile
+ * without legacy bundle names is left untouched. A failed rewrite is reported
+ * and leaves the file as it was; the profile loader still maps the legacy
+ * names for that launch.
+ * @param binName - the diagnostic prefix on the reported line.
+ * @param dir - the profile directory.
+ * @param log - sink for the one-line report; defaults to stderr.
+ * @returns whether the manifest was rewritten.
+ */
+export function migrateProfileManifest(
+  binName: string, dir: string, log: (line: string) => void = writeStderrLine,
+): boolean {
+  const path = join(dir, 'package.json')
+  let manifest: ProfileManifest
+  try {
+    manifest = readProfileManifest(binName, dir)
+  } catch {
+    // The loader reports an unreadable manifest with its own diagnostic.
+    return false
+  }
+  const bundles = manifest.dsh?.profile?.bundles
+  if (!Array.isArray(bundles) || !bundles.some(name => LEGACY_PACKAGE_NAMES.has(name))) return false
+  const renamed = bundles.filter(name => LEGACY_PACKAGE_NAMES.has(name))
+  const migrated: ProfileManifest = {
+    ...manifest,
+    dsh: { ...manifest.dsh, profile: { ...manifest.dsh?.profile, bundles: bundles.map(currentPackageName) } },
+  }
+  const backup = path + PROFILE_MANIFEST_BACKUP_SUFFIX
+  const renames = renamed.map(name => `${name} -> ${currentPackageName(name)}`).join(', ')
+  try {
+    try {
+      copyFileSync(path, backup, fsConstants.COPYFILE_EXCL)
+    } catch (error) {
+      // An earlier copy is the older, more original one; keep it.
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+    }
+    replaceFileSync(path, JSON.stringify(migrated, undefined, 2) + '\n')
+  } catch (error) {
+    log(`${binName}: warning: could not rename legacy bundles in ${path} (${renames}): ${String(error)}`)
+    return false
+  }
+  log(`${binName}: renamed legacy bundles in profile ${basename(dir)}: ${renames}; the previous manifest is ${backup}`)
+  return true
+}
+
 /**
  * Resolve a package's root directory from one anchor without depending on the
  * package exporting `./package.json` (`require.resolve` would need that):
@@ -831,21 +935,35 @@ export function resolveBundleDir(
 /**
  * Load an already initialized profile directory without resolving it through
  * the shared Harness home. This is used by application-owned profiles whose
- * package project and lifecycle belong to that application.
+ * package project and lifecycle belong to that application. Renamed bundle
+ * names resolve to their current packages with one deprecation line; the
+ * manifest itself is not rewritten.
  * @param binName - the diagnostic prefix on thrown errors.
  * @param dir - absolute profile package directory.
  * @param installAnchor - absolute path of the owning dsh app's package.json.
- * @param options - `userLayer: false` skips reading `cordis.patch.yml`.
+ * @param options - `userLayer: false` skips reading `cordis.patch.yml`;
+ * `warn` receives the deprecation line instead of stderr.
  * @returns the resolved bundle layers and optional user patch layer.
  */
 export function loadProfileDirectory(
   binName: string,
   dir: string,
   installAnchor: string,
-  options: { userLayer?: boolean } = {},
+  options: { userLayer?: boolean; warn?: (line: string) => void } = {},
 ): Profile {
   const manifest = readProfileManifest(binName, dir)
-  const bundles = manifest.dsh?.profile?.bundles ?? []
+  const declared = manifest.dsh?.profile?.bundles ?? []
+  const legacy = declared.filter(name => LEGACY_PACKAGE_NAMES.has(name))
+  const manifestPath = join(dir, 'package.json')
+  if (legacy.length > 0 && !reportedLegacyManifests.has(manifestPath)) {
+    reportedLegacyManifests.add(manifestPath)
+    const renames = legacy.map(name => `${name} -> ${currentPackageName(name)}`).join(', ')
+    ;(options.warn ?? writeStderrLine)(
+      `${binName}: warning: profile ${manifestPath} names renamed bundles (${renames}); `
+      + 'the old names are deprecated and will stop working in a later release',
+    )
+  }
+  const bundles = declared.map(currentPackageName)
   const layers = bundles.map((packageName): ProfileLayer => {
     const packageDir = resolveBundleDir(binName, packageName, installAnchor, dir)
     const bundleManifest = JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8')) as ProfileManifest
@@ -854,11 +972,13 @@ export function loadProfileDirectory(
       throw new Error(`${binName}: profile bundle ${JSON.stringify(packageName)} declares no dsh.bundle in its package.json`)
     }
     const patchPaths = bundlePatchPaths(packageDir, bundle)
-    return { packageName, packageDir, patchPaths, patches: patchPaths.flatMap(file => loadOverlayPatches(binName, file)) }
+    return {
+      packageName, packageDir, patchPaths, patches: patchPaths.flatMap(file => loadOverlayPatches(binName, file, options.warn)),
+    }
   })
   const patchPath = join(dir, PROFILE_PATCH_FILENAME)
   const patches = options.userLayer !== false && existsSync(patchPath)
-    ? loadOverlayPatches(binName, patchPath)
+    ? loadOverlayPatches(binName, patchPath, options.warn)
     : []
   return { name: basename(dir), dir, layers, patchPath, patches }
 }
@@ -867,19 +987,21 @@ export function loadProfileDirectory(
  * Load a profile: resolve every `dsh.profile.bundles` entry to its patch
  * layer and parse the profile's own patch file. A listed bundle without a
  * `dsh.bundle` manifest fails loud — naming a bundle-less package as a layer
- * is a misconfiguration, not "no patches".
+ * is a misconfiguration, not "no patches". An existing manifest that still
+ * lists renamed bundles is migrated first ({@link migrateProfileManifest}).
  * @param binName - the diagnostic prefix on thrown errors.
  * @param name - the profile name.
  * @param installAnchor - absolute path of the dsh app's package.json (first resolution anchor).
  * @param home - the Harness home; defaults to {@link resolveDshHome}.
  * @param options - `userLayer: false` skips reading `cordis.patch.yml`, so a
  * bundles-only consumer (`--dump-default-config`, a recovery diagnostic)
- * cannot fail on a broken user layer.
+ * cannot fail on a broken user layer; `warn` receives migration and
+ * deprecation lines instead of stderr.
  * @returns the loaded profile (empty `patches` when the user layer is skipped).
  */
 export function loadProfile(
   binName: string, name: string, installAnchor: string, home: string = resolveDshHome(),
-  options: { userLayer?: boolean } = {},
+  options: { userLayer?: boolean; warn?: (line: string) => void } = {},
 ): Profile {
   const dir = resolveProfileDir(name, home)
   if (!existsSync(join(dir, 'package.json'))) {
@@ -890,6 +1012,8 @@ export function loadProfile(
       )
     }
     initProfile(dir, template.bundles)
+  } else {
+    migrateProfileManifest(binName, dir, options.warn)
   }
   return loadProfileDirectory(binName, dir, installAnchor, options)
 }

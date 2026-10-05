@@ -54,9 +54,20 @@ Your machine-local preferences also live in the Harness home:
 
 The enabled `bake-hmr` plugin watches the profile manifest and both user patch files, re-reads the ordered bundle layers, and applies the [reload failure policy](#startup-and-reload-failures). [DSH HMR](../hmr/README.md) serializes these reloads with [Plugin Manager](../plugin-manager/README.md) configuration writes; package operations run outside its queue. The launcher does not install HMR or watchers; disabled or absent HMR means changes require restart.
 
-Inserted plugin names may be absolute filesystem paths, file URLs, or package specifiers. Patch loading converts absolute paths and patch-relative `./` or `../` paths to file URLs within `insert` rows and their nested groups; existing-entry name assertions and replacement `config` values remain literal.
+Inserted plugin names may be absolute filesystem paths, file URLs, or package specifiers. Patch loading renames [deprecated package names](#renamed-packages), then converts absolute paths and patch-relative `./` or `../` paths to file URLs within `insert` rows and their nested groups; existing-entry name assertions and replacement `config` values remain literal.
 
 Before mounting profile rows, the `dsh` launcher computes one immutable package-resolution generation from the installation and ordered bundle dependency graphs. Runtime mode is the default: it installs the generation through Node's ESM and CommonJS resolvers without creating fallback links. Plain Node callers of `runProfile` may explicitly select link mode to materialize the generation, dual mode to materialize and verify it, or runtime mode. Packaged executables and the Electron Host always use runtime mode.
+
+<a id="renamed-packages"></a>
+#### Renamed packages
+
+Bake renamed its runtime packages from `@deepseek-ai/dsh-<name>` to `bake-<name>`. [`src/legacy-package-names.ts`](src/legacy-package-names.ts) maps every old name to its replacement (`LEGACY_PACKAGE_NAMES`, `currentPackageName`, `renamedModuleSpecifier`), and boot accepts the old names in three places:
+
+- **Profile manifests.** `loadProfile` rewrites old names in `dsh.profile.bundles` once (`migrateProfileManifest`): it copies the manifest to `package.json.bak`, replaces it atomically, and prints one line naming the renames. An application-owned profile loaded with `loadProfileDirectory` is not rewritten; its old names resolve for that launch with one deprecation warning.
+- **Patch files.** Bundle patches, the profile and home `cordis.patch.yml` layers, and `--patch` overlays rename rows and name assertions that use an old name, including subpaths such as `@deepseek-ai/dsh-tool-subagent-control/list-agents`. Each old name prints one warning per file naming its replacement.
+- **Module imports.** The package-resolution generation adds an entry for each old name of an installed renamed package. An out-of-tree plugin that imports `@deepseek-ai/dsh-llm` or one of its subpaths gets the `bake-llm` module instance, through the runtime resolver or a fallback link in link and dual modes. Its own profile-local packages still take precedence.
+
+The old names are deprecated and slated for removal in a later release.
 
 ### Previewing the effective configuration
 
@@ -133,7 +144,8 @@ The exports each own one stage of the boot: config resolution and snapshot repla
 | File | Role |
 |---|---|
 | [`src/index.ts`](src/index.ts) | Boot helpers: config resolution, environment loading, fail-loud guard, activation audit, patch parsing, config dump |
-| [`src/profile.ts`](src/profile.ts) | Profile discovery, initialization, bundle resolution, module fallback |
+| [`src/profile.ts`](src/profile.ts) | Profile discovery, initialization, legacy manifest migration, bundle resolution, module fallback |
+| [`src/legacy-package-names.ts`](src/legacy-package-names.ts) | Deprecated upstream package names and their replacements |
 | [`src/config-schema/`](src/config-schema/) | Profile schema generation, discovery, native projection, and result types |
 | [`src/profile-resolution/`](src/profile-resolution/) | Runtime resolver, package-metadata service, and built Worker bootstrap |
 | — | No runtime invariant companion is published; one registration owns each resolver generation, and dual mode compares the independently materialized result at resolution time. |

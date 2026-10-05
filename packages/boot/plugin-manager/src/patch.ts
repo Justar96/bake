@@ -1,7 +1,7 @@
 /** Comment-preserving profile plugin enablement edits. */
 import { readFile } from 'node:fs/promises'
 import { isMap, isSeq, parseDocument } from 'yaml'
-import { loadOptionalPatches } from 'bake-app-boot'
+import { loadOptionalPatches, renamedModuleSpecifier } from 'bake-app-boot'
 import { writeFileAtomic } from 'bake-atomic-write'
 
 /** Replace the last matching override or append one after existing insertions.
@@ -25,12 +25,15 @@ export async function writePluginEnabled(filename: string, id: string, name: str
   const error = document.errors[0]
   if (error !== undefined) throw error
   if (!isSeq(document.contents)) throw new Error('Profile patch must be a YAML sequence')
-  loadOptionalPatches('dsh', filename)
+  // Validation only: boot already reported any legacy names in this file.
+  loadOptionalPatches('dsh', filename, () => {})
   const items = document.contents.items
   const target = items.findLast((item, index) => {
     if (!isMap(item) || document.getIn([index, 'id']) !== id || item.has('insert')) return false
     const expectedName = document.getIn([index, 'name'])
+    // A deprecated legacy name asserts the same row as its current name.
     return !expectedName || expectedName === name
+      || (typeof expectedName === 'string' && renamedModuleSpecifier(expectedName) === name)
   })
   if (isMap(target)) {
     if (document.getIn([items.indexOf(target), 'disabled']) === !enabled) return false

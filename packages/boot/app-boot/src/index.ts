@@ -17,10 +17,12 @@ import Include, { applyEntryPatches, entryListSchema, type PatchOptions } from '
 import Group from '@deepseek-ai/cordis-plugin-group'
 import { dshHomePath, resolveDshHome } from 'bake-home-paths'
 import { createLaunchEnvironmentSnapshot, type LaunchEnvironmentSnapshot } from 'bake-launch-environment'
+import { renamedModuleSpecifier } from './legacy-package-names.ts'
 export { readProfilePatches, resolveTelemetryPatch, type ProfileContext, type ProfilePnpmInvocation } from './profile-context.ts'
 export { generateConfigSchema, type ConfigSchemaDump, type NativeConfigSchema } from './config-schema/index.ts'
 export { createConfigProjector, LOADER_EXPRESSION_SCHEMA, type ConfigProjection } from './config-schema/projector.ts'
 export { isNativeConfigSchema } from './config-schema/native.ts'
+export { currentPackageName, LEGACY_PACKAGE_NAMES, renamedModuleSpecifier } from './legacy-package-names.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -40,6 +42,8 @@ export {
   initProfile,
   loadProfile,
   loadProfileDirectory,
+  migrateProfileManifest,
+  PROFILE_MANIFEST_BACKUP_SUFFIX,
   PROFILE_PATCH_FILENAME,
   PROFILE_TEMPLATES,
   PROFILES_DIR,
@@ -292,11 +296,16 @@ export function isProfileGenerationApplied(ctx: Context, patches: readonly Patch
  * file means "no layer"; an unreadable, unparsable, or non-array file throws —
  * a present patch file that cannot apply is a misconfiguration and must fail
  * loud at boot, never be silently skipped.
+ * Rows and name assertions that use a deprecated legacy package name are
+ * renamed to the current package, with one warning per name and file.
  * @param binName - the diagnostic prefix on the thrown error.
  * @param file - absolute path of the patch file.
+ * @param warn - sink for legacy package name deprecations; defaults to stderr.
  * @returns the parsed patches, or `undefined` when the file does not exist.
  */
-export function loadOptionalPatches(binName: string, file: string): PatchOptions[] | undefined {
+export function loadOptionalPatches(
+  binName: string, file: string, warn?: (line: string) => void,
+): PatchOptions[] | undefined {
   let content: string
   try {
     content = readFileSync(file, 'utf8')
@@ -304,7 +313,7 @@ export function loadOptionalPatches(binName: string, file: string): PatchOptions
     if ((error as NodeJS.ErrnoException | null)?.code === 'ENOENT') return undefined
     throw new Error(`${binName}: failed to read patches ${file}: ${String(error)}`)
   }
-  return parsePatchList(binName, file, content, 'patches')
+  return parsePatchList(binName, file, content, 'patches', warn)
 }
 
 /**
@@ -314,16 +323,55 @@ export function loadOptionalPatches(binName: string, file: string): PatchOptions
  * is a misconfiguration, not "no overlay".
  * @param binName - the diagnostic prefix on the thrown error.
  * @param file - absolute path of the overlay file.
+ * @param warn - sink for legacy package name deprecations; defaults to stderr.
  * @returns the parsed patch list.
  */
-export function loadOverlayPatches(binName: string, file: string): PatchOptions[] {
+export function loadOverlayPatches(binName: string, file: string, warn?: (line: string) => void): PatchOptions[] {
   let content: string
   try {
     content = readFileSync(file, 'utf8')
   } catch (error) {
     throw new Error(`${binName}: failed to read overlay ${file}: ${String(error)}`)
   }
-  return parsePatchList(binName, file, content, 'overlay')
+  return parsePatchList(binName, file, content, 'overlay', warn)
+}
+
+function writeStderrLine(line: string): void {
+  process.stderr.write(`${line}\n`)
+}
+
+/** Legacy names already reported per patch file, so a reload does not repeat the warning. */
+const reportedLegacyNames = new Set<string>()
+
+/**
+ * Rename Loader rows and patch name assertions that use a deprecated legacy
+ * package name to the current package, so every layer composes, patches, and
+ * imports one spelling. Each legacy name is reported once per file.
+ */
+function renameLegacyPluginNames(
+  patches: PatchOptions[], binName: string, file: string, warn: (line: string) => void,
+): void {
+  const rename = (row: { name?: unknown }): void => {
+    if (typeof row.name !== 'string') return
+    const current = renamedModuleSpecifier(row.name)
+    if (current === undefined) return
+    const key = `${file}\0${row.name}`
+    if (!reportedLegacyNames.has(key)) {
+      reportedLegacyNames.add(key)
+      warn(`${binName}: warning: ${file} names ${row.name}, which is now ${current}; `
+        + 'use the new name, as the old one is deprecated and will stop working in a later release')
+    }
+    row.name = current
+  }
+  const visit = (entry: EntryOptions): void => {
+    rename(entry)
+    if (entry.group && Array.isArray(entry.config)) entry.config.forEach(visit)
+  }
+  for (const patch of patches) {
+    rename(patch)
+    patch.insert?.forEach(visit)
+    if (patch.group === true && Array.isArray(patch.config)) (patch.config as EntryOptions[]).forEach(visit)
+  }
 }
 
 /** Convert inserted filesystem paths to file URLs, anchoring relative paths beside the patch; keep assertion names literal. */
@@ -349,10 +397,11 @@ function anchorInsertedPluginNames(patches: PatchOptions[], file: string): Patch
  * @param file - the source path, quoted in errors.
  * @param content - the file's text.
  * @param label - what to call this list in errors (`patches`, `overlay`).
+ * @param warn - sink for legacy package name deprecations; defaults to stderr.
  * @returns the parsed patch list.
  */
 function parsePatchList(
-  binName: string, file: string, content: string, label: string,
+  binName: string, file: string, content: string, label: string, warn: (line: string) => void = writeStderrLine,
 ): PatchOptions[] {
   let parsed: unknown
   try {
@@ -368,6 +417,7 @@ function parsePatchList(
       throw new Error(`${binName}: ${label} entry ${index + 1} in ${file} must be a mapping (a loader patch entry)`)
     }
   })
+  renameLegacyPluginNames(parsed as PatchOptions[], binName, file, warn)
   return anchorInsertedPluginNames(parsed as PatchOptions[], file)
 }
 
