@@ -9,29 +9,15 @@
  * body once each, only `run_code` for `ptc`, only the shell for `minimal`,
  * and a `cordis` session that starts at all.
  */
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
-import * as yaml from 'js-yaml'
 import { afterEach, expect, it, vi } from 'vitest'
-import { Context } from '@deepseek-ai/cordis'
-import Include, { applyEntryPatches, entryListSchema, type PatchOptions } from '@deepseek-ai/cordis-plugin-include'
-import Loader, { Group } from '@deepseek-ai/cordis-plugin-loader'
-import { dshHomePath } from 'bake-home-paths'
+import { applyEntryPatches } from '@deepseek-ai/cordis-plugin-include'
 import { ToolCallId, type GenerateOptions, type Message, type StreamChunk } from 'bake-llm'
-import type { SessionEvent } from 'bake-session'
 import { defineContentToolFixture } from 'bake-tools'
-import { dictionaries } from 'bake-tui-ui/copy.ts'
 import { transcriptRows } from 'bake-tui-ui'
-import { SessionController } from '../src/controller.ts'
-import { openSession } from '../src/session.ts'
-import { ScriptedModel, textResponse } from './harness.ts'
-
-const REPOSITORY = fileURLToPath(new URL('../../../../../', import.meta.url))
-
-/** The layers the shipped `tui` profile applies over its empty root, in order. */
-const LAYERS = ['packages/bundle/base/cordis.patch.yml', 'apps/tui/packages/app/cordis.built.patch.yml']
+import { composedProfile, shippedLayers } from './composed-profile.ts'
+import { textResponse } from './harness.ts'
 
 /** Markers the workspace plants where only a host row would put them in front of `minimal`. */
 const INSTRUCTIONS_MARKER = 'PLANE_INSTRUCTIONS_MARKER'
@@ -49,84 +35,20 @@ afterEach(async () => {
 })
 
 /**
- * Boot the composed profile in a private home and workspace.
+ * Boot the composed profile with a workspace holding marked instructions and one marked skill.
  * @returns the settled root context, the scripted model, and a session opener.
  */
 async function profile() {
-  const root = await mkdtemp(join(tmpdir(), 'dsh-tui-plane-'))
-  const ctx = new Context()
-  cleanup.push(async () => { await ctx.fiber.dispose(); await rm(root, { recursive: true, force: true }) })
-  const workspace = join(root, 'workspace')
-  await mkdir(join(workspace, '.agents', 'skills', SKILL), { recursive: true })
-  // Skill discovery must stop here even when an ancestor of the temp root is a repository.
-  await mkdir(join(workspace, '.git'))
-  await writeFile(join(workspace, 'AGENTS.md'), `# Rules\n\n${INSTRUCTIONS_MARKER}: keep answers short.\n`)
-  await writeFile(join(workspace, '.agents', 'skills', SKILL, 'SKILL.md'),
-    `---\nname: ${SKILL}\ndescription: ${SKILL_MARKER} a workspace skill.\n---\n\nPLANE_SKILL_BODY: answer in one word.\n`)
-  vi.stubEnv('DSH_HOME', join(root, 'home'))
-  vi.stubEnv('DSH_AGENTS_HOME', join(root, 'agents'))
-
-  const layers = await Promise.all(LAYERS.map(async path =>
-    yaml.load(await readFile(join(REPOSITORY, path), 'utf8'), { schema: entryListSchema }) as PatchOptions[]))
-  // What this test replaces: the terminal surface, the network model routes
-  // and exporter, the title model call, the profile reload watcher, storage,
-  // and the workspace.
-  const overlay: PatchOptions[] = [
-    ...['tui-startup', 'tui-runner', 'llm-pi-ai', 'session-title-llm', 'session-telemetry-otel', 'hmr']
-      .map(id => ({ id, disabled: true })),
-    { id: 'agent-default-model', config: { provider: 'mock', model: 'model' } },
-    { id: 'session-persistence-jsonl', config: { root: join(root, 'sessions'), compression: 'none' } },
-    { id: 'fs-sandbox', config: { cwd: workspace } },
-    { id: 'sandbox-policy', config: { mode: 'workspace-write', workspaceRoot: workspace } },
-  ]
-  const skipped: string[] = []
-  const rows = applyEntryPatches([], [...layers.flat(), ...overlay], message => { skipped.push(message) })
-  expect(skipped).toEqual([])
-
-  // Bare row names resolve from the Loader's base, here the private root, as
-  // the launcher's resolve from the installation. Removing the root unlinks it.
-  await symlink(join(REPOSITORY, 'node_modules'), join(root, 'node_modules'), 'junction')
-  ctx.baseUrl = pathToFileURL(root).href + '/'
-  ctx.provide('dshHomePath', dshHomePath)
-  // What the launcher provides a profile it starts, here a private one. The
-  // plugin manager mounts only under it, and the `cordis` preset's tool needs it.
-  const profileDir = join(root, 'home', 'profiles', 'tui')
-  ctx.provide('profileContext', {
-    name: 'tui', dir: profileDir, patchPath: join(profileDir, 'cordis.patch.yml'),
-    installAnchor: join(REPOSITORY, 'apps/cli/package.json'), cwd: workspace, home: join(root, 'home'),
-    startedBundles: ['bake-base', 'bake-tui-app'], overlays: [], telemetryDisabledEnv: undefined,
+  return composedProfile(cleanup, {
+    plant: async (workspace) => {
+      await mkdir(join(workspace, '.agents', 'skills', SKILL), { recursive: true })
+      // Skill discovery must stop here even when an ancestor of the temp root is a repository.
+      await mkdir(join(workspace, '.git'))
+      await writeFile(join(workspace, 'AGENTS.md'), `# Rules\n\n${INSTRUCTIONS_MARKER}: keep answers short.\n`)
+      await writeFile(join(workspace, '.agents', 'skills', SKILL, 'SKILL.md'),
+        `---\nname: ${SKILL}\ndescription: ${SKILL_MARKER} a workspace skill.\n---\n\nPLANE_SKILL_BODY: answer in one word.\n`)
+    },
   })
-  await ctx.plugin(Loader)
-  ctx.loader.builtins.include = Include
-  ctx.loader.builtins.group = Group
-  for (const row of rows) await ctx.loader.create(row)
-  await ctx.loader.await()
-
-  const model = new ScriptedModel()
-  ctx.llm.registerAdapter(['mock'], model)
-
-  const open = async (preset: 'standard' | 'ptc' | 'minimal' | 'cordis') => {
-    let controller!: SessionController
-    const handle = await openSession(ctx, { preset }, new AbortController().signal, agent => {
-      controller = new SessionController(ctx, agent, dictionaries.en, { refs: [] }, () => {},
-        { attachmentMaxBytes: 1048576, attachmentLimit: 8 })
-    })
-    cleanup.push(async () => { controller.close(); await controller.drain(); await handle.dispose() })
-    await controller.replay(new AbortController().signal)
-    const turn = async (text: string) => {
-      const before = model.requests.length
-      expect(controller.submit(text)).toBe(true)
-      await vi.waitFor(() => { expect(model.requests.length).toBeGreaterThan(before) })
-      await handle.agent.whenIdle()
-      return model.requests.slice(before)
-    }
-    const events = async (): Promise<readonly SessionEvent[]> => {
-      using observation = await ctx.sessionQuery.observeSession(handle.agent.id, { projectionMode: 'none' })
-      return [...observation.events]
-    }
-    return { controller, agent: handle.agent, turn, events }
-  }
-  return { ctx, model, open, workspace }
 }
 
 /** @returns one message's text. */
@@ -147,8 +69,7 @@ function system(request: GenerateOptions): string {
 }
 
 it('keeps only the compaction rows and the preset services on the terminal host plane', async () => {
-  const layers = await Promise.all(LAYERS.map(async path =>
-    yaml.load(await readFile(join(REPOSITORY, path), 'utf8'), { schema: entryListSchema }) as PatchOptions[]))
+  const layers = await shippedLayers()
   const rows = applyEntryPatches([], layers.flat(), () => {})
   const active = (id: string) => {
     const row = rows.find(entry => entry.id === id)

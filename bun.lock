@@ -195,6 +195,7 @@
         "bake-fs-local": "workspace:^",
         "bake-goal": "workspace:^",
         "bake-llm-replay": "workspace:^",
+        "bake-loader-smoke": "workspace:^",
         "bake-session-persistence-jsonl": "workspace:^",
         "bake-tool-skill": "workspace:^",
       },
