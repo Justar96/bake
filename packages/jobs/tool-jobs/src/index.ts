@@ -31,7 +31,11 @@ export type CompletionDelivery = 'quiet' | 'wakeup'
 export interface Config {
   /** Wait duration applied when `job_output` sets `wait` without `timeout_ms` (default 30s). */
   waitTimeoutMs?: number
-  /** Hard cap on any single wait; a larger model-supplied `timeout_ms` is clamped down to it (default 10min). */
+  /**
+   * Hard cap on any single wait; a larger model-supplied `timeout_ms` is
+   * clamped down to it (default 60s). Longer work is awaited by ending the
+   * turn, which the completion notice reopens, not by holding a turn open.
+   */
   maxWaitTimeoutMs?: number
   /** Whether a completion opens a turn on an idle owner (default `wakeup`). */
   completionDelivery?: CompletionDelivery
@@ -46,7 +50,7 @@ export interface Config {
 
 export const Config: z<Config> = z.object({
   waitTimeoutMs: z.number().min(1).default(30_000),
-  maxWaitTimeoutMs: z.number().min(1).default(600_000),
+  maxWaitTimeoutMs: z.number().min(1).default(60_000),
   completionDelivery: z.union(['quiet', 'wakeup'] as const).default('wakeup'),
   maxConsecutiveWakes: z.number().min(1).default(3),
 })
@@ -83,6 +87,26 @@ const PUBLIC_JOB_SCHEMA = {
     finishedAt: { type: 'integer' },
   },
 } as const
+
+/** What `job_output` returns: new output, the job's state, and what to do while it still runs. */
+interface JobOutputValue {
+  text: string
+  job: PublicJobSnapshot
+  next?: string
+}
+
+/**
+ * Told to the model when a read finds the job still running and its
+ * completion would reopen an idle turn. A turn held open by repeated waits
+ * keeps the session busy for as long as the job runs.
+ */
+const STILL_RUNNING = 'Still running. Its completion notice will start your next turn; '
+  + 'if nothing else needs doing now, end your turn instead of waiting.'
+
+/** The status line closing a `job_output` result, and the guidance after it. */
+function outputTrailer(value: JobOutputValue): string {
+  return value.next === undefined ? statusLine(value.job) : `${statusLine(value.job)}\n${value.next}`
+}
 
 /** Remove job ownership and notification bookkeeping from a registry snapshot. */
 function publicJob(snapshot: JobSnapshot): PublicJobSnapshot {
@@ -214,7 +238,7 @@ function presentJobCall(title: string, kind: 'read' | 'execute', rawInput?: stri
 
 export function apply(ctx: Context, config: Config): void {
   const waitDefault = config.waitTimeoutMs ?? 30_000
-  const waitCap = config.maxWaitTimeoutMs ?? 600_000
+  const waitCap = config.maxWaitTimeoutMs ?? 60_000
   const delivery = config.completionDelivery ?? 'wakeup'
   const wakeBudget = config.maxConsecutiveWakes ?? 3
 
@@ -252,10 +276,10 @@ export function apply(ctx: Context, config: Config): void {
     if (exec.name === 'job_output' && !result.isError) {
       // This definition owns and schema-validates the canonical value. Preserve
       // its output/status split only while policy left the default rendering intact.
-      const value = result.value as unknown as { text: string; job: PublicJobSnapshot }
+      const value = result.value as unknown as JobOutputValue
       const body = value.text.length > 0 ? value.text : '(no new output)'
       const content = body.endsWith('\n') ? body.slice(0, -1) : body
-      const suffix = `\n${statusLine(value.job)}`
+      const suffix = `\n${outputTrailer(value)}`
       if (rawSingleText(result.content) === `${content}${suffix}`) {
         return [{
           type: 'text',
@@ -302,17 +326,28 @@ export function apply(ctx: Context, config: Config): void {
     owner.inject(message)
   })
 
+  /**
+   * Whether a completion would open a turn on this owner were it idle now, so
+   * a still-running read can tell the model to end its turn instead of waiting.
+   * @param owner - the reading agent, absent for a call outside one.
+   * @returns true under `wakeup` delivery with a wake left in the owner's budget.
+   */
+  const wakes = (owner: Agent | undefined): boolean =>
+    owner !== undefined && delivery === 'wakeup' && (spentWakes.get(owner) ?? 0) < wakeBudget
+
   ctx.tools.register(defineTool({
     name: 'job_output',
     // The completion notice below is this plugin's own delivery, so the
-    // description can promise it whenever the tool is registered.
+    // description can promise it whenever the tool is registered. Under
+    // `wakeup` it also reopens an idle owner, so the turn need not stay open.
     description: 'Read a background job\'s new output since your last read, or its result once done; ends with '
-      + '`[status: ...]`. You are notified when it finishes; do not poll or sleep.',
+      + '`[status: ...]`. You are notified when it finishes; do not poll or sleep.'
+      + (delivery === 'wakeup' ? ' The notice starts a new turn if yours has ended, so end your turn rather than wait.' : ''),
     // A timed-out wait returns job state rather than a TOOL_TIMEOUT error, so
     // this tool owns its deadline instead of using ToolDefinition.timeoutMs.
     parameters: {
       job_id: { type: 'string', required: true, description: JOB_ID_DESCRIPTION },
-      wait: { type: 'boolean', description: 'Block until done or timeout; only if you cannot continue without it.' },
+      wait: { type: 'boolean', description: 'Block until done or timeout; only for a job about to finish that you cannot continue without.' },
       timeout_ms: { type: 'number', description: `Default ${waitDefault}, max ${waitCap}.` },
     },
     finalizeContent: finalizeJobContent,
@@ -323,12 +358,13 @@ export function apply(ctx: Context, config: Config): void {
         properties: {
           text: { type: 'string', required: true },
           job: { ...PUBLIC_JOB_SCHEMA, required: true },
+          next: { type: 'string' },
         },
       },
       render: (_args, value) => {
         const body = value.text.length > 0 ? value.text : '(no new output)'
         const separator = body.endsWith('\n') ? '' : '\n'
-        return [{ type: 'text', text: `${body}${separator}${statusLine(value.job)}` }]
+        return [{ type: 'text', text: `${body}${separator}${outputTrailer(value)}` }]
       },
     },
     async execute(args, exec) {
@@ -339,7 +375,9 @@ export function apply(ctx: Context, config: Config): void {
           await ctx.jobs.wait(id, timeout, exec.agent, exec.signal)
         }
         const read = ctx.jobs.read(id, exec.agent)
-        return { text: read.text, job: publicJob(read.snapshot) }
+        const job = publicJob(read.snapshot)
+        const live = job.status === 'running' || job.status === 'stopping'
+        return { text: read.text, job, ...live && wakes(exec.agent) ? { next: STILL_RUNNING } : {} }
       } catch (error) {
         explainUnknownJob(error, id)
       }

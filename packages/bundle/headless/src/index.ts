@@ -19,6 +19,7 @@ import type { Agent, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 import { NO_DEFAULT_MODEL_MESSAGE } from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-agent-loop'
 import type {} from '@deepseek-ai/dsh-fs'
+import type {} from '@deepseek-ai/dsh-jobs'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
 import { SessionSeq } from '@deepseek-ai/dsh-session'
@@ -48,12 +49,23 @@ export interface Config {
   sessionId?: string
   /** Whether stdout carries the machine-readable event stream instead of final text. */
   json?: boolean
+  /**
+   * Longest the run waits, in milliseconds, for background jobs its Agent still
+   * owns once its turn ends, and for the turns their completions open. A job
+   * that never ends, such as a dev server, is then stopped with the run. 0 does
+   * not wait. Defaults to 600000 (10 minutes).
+   */
+  jobWaitMs?: number
 }
+
+/** Default {@link Config.jobWaitMs}: as long as one `job_output` wait could once hold a turn. */
+const JOB_WAIT_MS = 600_000
 
 export const Config: z<Config> = z.object({
   task: z.string(),
   sessionId: z.string(),
   json: z.boolean(),
+  jobWaitMs: z.number().min(0).default(JOB_WAIT_MS),
 })
 
 /**
@@ -342,6 +354,53 @@ function fail(io: HeadlessIo, error: unknown, json: boolean): void {
  * @param config - task, optional exact Session identity, and output mode.
  * @param io - process-facing effects.
  */
+/** How often a run left waiting on background jobs checks whether they have settled. */
+const JOB_POLL_MS = 250
+
+/**
+ * Wait out the Agent's background jobs before the run reports.
+ *
+ * A turn may end while its jobs run, trusting their completion notices to open
+ * the turns that use the results. The process must outlive those jobs and
+ * turns, or disposal would cancel the work the answer depends on. The registry
+ * is polled, not waited on: a registry wait marks the job reported, which
+ * suppresses the very notice that reopens the turn.
+ *
+ * The wait is bounded, since a job may never end on its own. A turn a
+ * completion opened still runs to its end past the limit; no later job is
+ * waited on.
+ * @param ctx - the runner's context, whose `jobs` service may be absent.
+ * @param agent - the Agent this run owns.
+ * @param stopping - aborted when the process is asked to stop.
+ * @param limitMs - longest wait for jobs, in milliseconds.
+ * @returns how many jobs were still running when the limit ran out.
+ */
+async function settleJobs(ctx: Context, agent: Agent, stopping: AbortSignal, limitMs: number): Promise<number> {
+  const jobs = ctx.get('jobs')
+  if (jobs === undefined) return 0
+  const running = (): number => jobs.list(agent).filter(job => job.status === 'running' || job.status === 'stopping').length
+  const deadline = Date.now() + limitMs
+  while (running() > 0 && !stopping.aborted) {
+    while (running() > 0 && !stopping.aborted) {
+      const left = deadline - Date.now()
+      if (left <= 0) return running()
+      await new Promise<void>((resolve) => {
+        const done = (): void => {
+          clearTimeout(timer)
+          stopping.removeEventListener('abort', done)
+          resolve()
+        }
+        const timer = setTimeout(done, Math.min(JOB_POLL_MS, left))
+        stopping.addEventListener('abort', done, { once: true })
+      })
+    }
+    // A settlement opens its notice's turn synchronously, so the Agent is
+    // already busy here when one was woken; that turn may start more jobs.
+    await agent.whenIdle()
+  }
+  return 0
+}
+
 async function run(ctx: Context, config: Config, io: HeadlessIo, stopping: AbortSignal): Promise<void> {
   // Loader siblings mount concurrently. Await the complete application before
   // creating an Agent so its scoped tools and adapters are not half-composed.
@@ -409,6 +468,11 @@ async function run(ctx: Context, config: Config, io: HeadlessIo, stopping: Abort
         source: { kind: 'user' },
       }))
       await agent.whenIdle()
+      const waitMs = config.jobWaitMs ?? JOB_WAIT_MS
+      const left = await settleJobs(ctx, agent, stopping, waitMs)
+      if (left > 0) {
+        io.stderr.write(`dsh: warning: ${String(left)} background job${left === 1 ? '' : 's'} still running after ${String(waitMs / 1000)} s; stopping ${left === 1 ? 'it' : 'them'} with the run\n`)
+      }
     } finally {
       stopReasoning?.()
     }
