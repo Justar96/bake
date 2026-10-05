@@ -27,17 +27,17 @@
   ],
   "license": "MIT",
   "peerDependencies": {
-    "@deepseek-ai/dsh-shell": "workspace:^",
+    "bake-shell": "workspace:^",
     "@deepseek-ai/dsh-bash-local": "workspace:^",
-    "@deepseek-ai/dsh-sandbox": "workspace:^",
+    "bake-sandbox": "workspace:^",
     "@deepseek-ai/dsh-sandbox-policy": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-shell": "workspace:^",
+    "bake-shell": "workspace:^",
     "@deepseek-ai/dsh-bash-local": "workspace:^",
     "@deepseek-ai/dsh-subprocess-local": "workspace:^",
-    "@deepseek-ai/dsh-sandbox": "workspace:^",
+    "bake-sandbox": "workspace:^",
     "@deepseek-ai/dsh-sandbox-local": "workspace:^",
     "@deepseek-ai/dsh-sandbox-policy": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^",

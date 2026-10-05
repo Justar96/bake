@@ -13,7 +13,7 @@ import { agentEvents } from 'bake-agent'
 import type { Agent } from 'bake-agent'
 import { SessionSeq } from 'bake-session'
 import type { Session, SessionEvent, SessionLogOffset } from 'bake-session'
-import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
+import { TypertRemoteService, Remote } from 'bake-typert-protocol'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
 import {

@@ -5,11 +5,11 @@
  * observed-state policy stay in consumer and policy plugins; `editText`
  * remains here so version check, literal match, and rewrite share one critical
  * section.
- * @module @deepseek-ai/dsh-fs
+ * @module bake-fs
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'
-import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
+import type { SandboxExecutionPolicy, SandboxMode } from 'bake-sandbox'
 import { FsError } from './types.ts'
 import type {
   FsDirEntry,

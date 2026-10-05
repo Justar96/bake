@@ -13,12 +13,12 @@
 
 import { basename, extname } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
-import { AttachmentError, AttachmentId } from '@deepseek-ai/dsh-attachment'
-import type { AttachmentStore, ImageAttachmentRef, ImageMediaType } from '@deepseek-ai/dsh-attachment'
+import { AttachmentError, AttachmentId } from 'bake-attachment'
+import type { AttachmentStore, ImageAttachmentRef, ImageMediaType } from 'bake-attachment'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { defineTool } from 'bake-tools'
 import type { GenericCallView, ToolExecution } from 'bake-tools'
-import type {} from '@deepseek-ai/dsh-fs'
+import type {} from 'bake-fs'
 import { resolveRegularReadTarget } from './read-target.ts'
 
 /** Extensions `read_image` accepts; magic-byte validation at the attachment service stays authoritative. */

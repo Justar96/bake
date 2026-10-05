@@ -95,7 +95,7 @@ The matcher subject is the tool name (`PreToolUse` / `PostToolUse`), the session
 
 ### Detached runs and disposal
 
-The three emit points (`SessionStart`, `SubagentStart`, `SubagentStop`) run detached — no extension point awaits them. Each run chain is tracked, and disposing the bridge aborts still-running hook processes, then drains the continuations before the dispose resolves (`createDetachedRuns` in `dsh-hook-protocol`).
+The three emit points (`SessionStart`, `SubagentStart`, `SubagentStop`) run detached — no extension point awaits them. Each run chain is tracked, and disposing the bridge aborts still-running hook processes, then drains the continuations before the dispose resolves (`createDetachedRuns` in `bake-hook-protocol`).
 
 ### Design philosophy
 

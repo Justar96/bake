@@ -15,7 +15,7 @@ import {
   type CompactionResult,
   type CompactionTrigger,
   type ManualCompactAgentContext,
-} from '@deepseek-ai/dsh-compaction'
+} from 'bake-compaction'
 import * as commandCompact from '@deepseek-ai/dsh-command-compact'
 import { Session, SessionId, SessionSeq } from 'bake-session'
 

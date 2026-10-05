@@ -27,7 +27,7 @@ Mount this package when a composition needs ranked full-text search over session
 
 ### When to choose it
 
-Choose it when you want full-text recall over prior sessions with ranking and paging. Choose it together with `dsh-session-query` and the session service; a persistence backend is optional but recommended so persisted history is searchable after restarts. Avoid pointing `path` at the session-persistence database — this package owns a separate derived index.
+Choose it when you want full-text recall over prior sessions with ranking and paging. Choose it together with `bake-session-query` and the session service; a persistence backend is optional but recommended so persisted history is searchable after restarts. Avoid pointing `path` at the session-persistence database — this package owns a separate derived index.
 
 ### Minimal configuration
 
@@ -116,7 +116,7 @@ The database carries an application id and schema version 8. Opening refuses a f
 Read these pages when the package-level contract is not enough. They move from the shared query service to the type-level contract and the design evidence.
 
 - [Session Query subsystem reference](../../../docs/subsystems/session-query.md) — the full type-level contract this backend implements.
-- [dsh-session-query](../session-query/README.md) — the service definition: exact reads and filters this backend inherits.
+- [bake-session-query](../session-query/README.md) — the service definition: exact reads and filters this backend inherits.
 - [SQLite FTS5 session search](../../../.agents/notes/archived/feature/2026-07-10-sqlite-session-query-provider.md) — search semantics, reconciliation, and the tokenizer decision.
 - [JSONL session persistence](../../session/session-persistence-jsonl/README.md) — the authoritative Session store this disposable index observes; keep its root separate from this package's database path.
 

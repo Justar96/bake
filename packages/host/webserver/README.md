@@ -3,11 +3,11 @@ description: "The web GUI host's HTTP server: named-route and upgrade registrati
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-host-webserver
+# bake-host-webserver
 
 ## Summary
 
-Browsers reach the web GUI over HTTP through `dsh-host-webserver`: a `node:http` server where other plugins register named routes, upgrade routes, index startup inputs, and one fallback handler. It knows no harness concepts and serves no files — the `/api` bridge, plugin bundles, the HMR event stream, and the SPA dist belong to the plugins that register them. Route matching is fixed: exact over the whole table, then longest prefix, then the fallback handler. It serves browsers only; Electron loads dist over `file://` and carries fetch over an IPC bridge.
+Browsers reach the web GUI over HTTP through `bake-host-webserver`: a `node:http` server where other plugins register named routes, upgrade routes, index startup inputs, and one fallback handler. It knows no harness concepts and serves no files — the `/api` bridge, plugin bundles, the HMR event stream, and the SPA dist belong to the plugins that register them. Route matching is fixed: exact over the whole table, then longest prefix, then the fallback handler. It serves browsers only; Electron loads dist over `file://` and carries fetch over an IPC bridge.
 
 ## Table of Contents
 
@@ -28,7 +28,7 @@ Compose the webserver as the HTTP transport of a browser-facing host, then let t
 ### Minimal configuration
 
 ```yaml
-- name: '@deepseek-ai/dsh-host-webserver'
+- name: 'bake-host-webserver'
   config:
     host: 127.0.0.1
     port: 3000
@@ -107,7 +107,7 @@ None; this package neither assembles nor sends a provider request.
 
 These limits define where the server is intentionally minimal. They are current package constraints, not a task backlog.
 
-- **No server-wide TLS, authentication, or origin policy** — route owners such as `dsh-client-connection` enforce their own request policy. Binding a non-loopback address still exposes unprotected routes and static assets to that network.
+- **No server-wide TLS, authentication, or origin policy** — route owners such as `bake-client-connection` enforce their own request policy. Binding a non-loopback address still exposes unprotected routes and static assets to that network.
 - **Socket options are fixed** — config selects the bind host and port, while backlog and other socket settings remain internal until a deployment needs them.
 
 <a id="dev-note"></a>

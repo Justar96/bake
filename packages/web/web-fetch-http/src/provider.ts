@@ -8,7 +8,7 @@
 
 import { WebError } from '@deepseek-ai/dsh-web'
 import type { WebFetchBody, WebFetchProvider, WebFetchRequest, WebFetchResult } from '@deepseek-ai/dsh-web'
-import { deadline, timeoutOf } from '@deepseek-ai/dsh-timeout'
+import { deadline, timeoutOf } from 'bake-timeout'
 import type { Response } from 'undici'
 import { proxyRouteFor } from '@deepseek-ai/dsh-http-proxy'
 import { isNonPublicIpLiteral, publicHttpNetwork } from './network.ts'

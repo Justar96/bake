@@ -3,11 +3,11 @@ description: "Shared in-process subagent run driver for maintainers and backend 
 kind: "package-library"
 ---
 
-# @deepseek-ai/dsh-subagent-in-process-driver
+# bake-subagent-in-process-driver
 
 ## Summary
 
-`dsh-subagent-in-process-driver` is the shared run driver behind the in-process subagent backend: it creates one child agent through the host's agent factory, applies per-child customization, drives one task to completion, and returns the child's own final output with a single quiescent disposal path. It is a library, not a standalone feature: provider backends call `startInProcessRun`, and nothing in a composition configures it. Read this page to understand the in-process run lifecycle.
+`bake-subagent-in-process-driver` is the shared run driver behind the in-process subagent backend: it creates one child agent through the host's agent factory, applies per-child customization, drives one task to completion, and returns the child's own final output with a single quiescent disposal path. It is a library, not a standalone feature: provider backends call `startInProcessRun`, and nothing in a composition configures it. Read this page to understand the in-process run lifecycle.
 
 ## Table of Contents
 

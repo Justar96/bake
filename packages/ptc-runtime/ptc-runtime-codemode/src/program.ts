@@ -7,7 +7,7 @@
  */
 
 import { stripTypeScriptTypes } from 'node:module'
-import type { PtcBindingNamespace } from '@deepseek-ai/dsh-ptc-runtime'
+import type { PtcBindingNamespace } from 'bake-ptc-runtime'
 import { CODEMODE_SCRIPT_PREFIX } from './protocol.ts'
 import type { ProgramLayout } from './protocol.ts'
 

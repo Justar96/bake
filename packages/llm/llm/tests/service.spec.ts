@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { AttachmentId } from '@deepseek-ai/dsh-attachment'
+import { AttachmentId } from 'bake-attachment'
 import LlmRuntime, {
   errorChain,
   GenerateOptions,

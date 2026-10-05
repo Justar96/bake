@@ -4,16 +4,16 @@
  */
 
 import { Context } from '@deepseek-ai/cordis'
-import { randomUUID } from '@deepseek-ai/dsh-util-crypto'
+import { randomUUID } from 'bake-util-crypto'
 import type { Agent } from 'bake-agent'
-import { AttachmentError, admitEncodedImages } from '@deepseek-ai/dsh-attachment'
-import type { EncodedImageAttachment, FileAttachmentRef, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment/types'
+import { AttachmentError, admitEncodedImages } from 'bake-attachment'
+import type { EncodedImageAttachment, FileAttachmentRef, ImageAttachmentRef } from 'bake-attachment/types'
 import type { FileBlock, ImageBlock } from '@deepseek-ai/dsh-llm'
 import { NamedEntries, ScopedLayers } from 'bake-scope'
 import type { ScopeKey, ScopeLayer } from 'bake-scope'
 import { SessionSeq } from 'bake-session'
 import type { Session, SessionEvent, SessionEventMap } from 'bake-session'
-import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
+import { TypertRemoteService, Remote } from 'bake-typert-protocol'
 import { CommandId } from './brand.ts'
 import type { CommandDefinitionId } from './brand.ts'
 import type {

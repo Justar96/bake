@@ -9,8 +9,8 @@ import SystemPrompt from 'bake-system-prompt'
 import ToolRuntime from 'bake-tools'
 import AgentRegistry from 'bake-agent'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import { SettingsProvider } from '@deepseek-ai/dsh-settings'
-import type { SettingsNamespace } from '@deepseek-ai/dsh-settings'
+import { SettingsProvider } from 'bake-settings'
+import type { SettingsNamespace } from 'bake-settings'
 import AgentLoop, { AGENT_LOOP_SETTINGS_NAMESPACE } from 'bake-agent-loop'
 
 /** The smallest real provider: one in-memory document, always writable. */

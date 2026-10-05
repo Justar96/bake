@@ -33,8 +33,8 @@
   "license": "MIT",
   "peerDependencies": {
     "bake-agent": "workspace:^",
-    "@deepseek-ai/dsh-invariants": "workspace:^",
-    "@deepseek-ai/dsh-sandbox": "workspace:^",
+    "bake-invariants": "workspace:^",
+    "bake-sandbox": "workspace:^",
     "bake-session": "workspace:^",
     "bake-system-prompt": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^",
@@ -46,8 +46,8 @@
   },
   "devDependencies": {
     "bake-agent": "workspace:^",
-    "@deepseek-ai/dsh-invariants": "workspace:^",
-    "@deepseek-ai/dsh-sandbox": "workspace:^",
+    "bake-invariants": "workspace:^",
+    "bake-sandbox": "workspace:^",
     "bake-session": "workspace:^",
     "bake-system-prompt": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^",

@@ -23,7 +23,7 @@ import {
   errorChain,
   markAgentLoopRequest,
 } from '@deepseek-ai/dsh-llm'
-import { assertNever, deepFreeze } from '@deepseek-ai/dsh-util-values'
+import { assertNever, deepFreeze } from 'bake-util-values'
 import type { Scope } from 'bake-scope'
 import { createScope } from 'bake-scope'
 import type { EpochHeader, RequestContext, Session, SessionId, SessionSeq, TurnEndReason, UserMessage } from 'bake-session'

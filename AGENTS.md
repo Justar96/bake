@@ -69,7 +69,7 @@ Every version keeps its agent-loop metrics so the next one can be checked for re
 
 ## Engineering
 
-- Use ESM and strict TypeScript throughout. Local relative imports use `.ts`; cross-package imports use declared package names. Core packages use `bake-<name>`; other runtime packages retain their declared names until explicitly migrated. When porting fixes, map upstream core imports to the Bake package names and preserve vendored `@deepseek-ai/*` identifiers.
+- Use ESM and strict TypeScript throughout. Local relative imports use `.ts`; cross-package imports use declared package names. New packages, core packages, and internal libraries use `bake-<name>`; existing plugin and bundle packages retain their declared names until explicitly migrated. When porting fixes, map upstream imports of migrated packages to the Bake package names and preserve vendored `@deepseek-ai/*` identifiers.
 - Extend behavior through Cordis plugins and documented events, not ad hoc hooks. Registrations are effects that must supply disposers; waterfall listeners call `next()` when delegating.
 - Model-visible input must be reconstructable from the session log. Preserve released data and migration behavior; consult [session format status](docs/session-format-status.md) before any persistence change.
 - Read [defensive patterns](docs/defensive-patterns.md) before lifecycle or concurrency work. Teardown must await owned work, restore terminal state, and leave no late callbacks.

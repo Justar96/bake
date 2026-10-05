@@ -3,11 +3,11 @@ description: "Shared compaction contract for backend implementers and deployers:
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-compaction
+# bake-compaction
 
 ## Summary
 
-`dsh-compaction` lets a long session condense its older history into a single summary message, keep the recent conversation intact, and continue as if the summary had always been there — with a backend such as `dsh-compaction-basic` and the optional `/compact` command. The shadowed content stays in the session log, so replaying the session deterministically reproduces the same condensed conversation. Reach for this package when you implement a condensation backend, build something that triggers condensation, or need to recognize condensed messages — it performs no condensation itself. Choose the shipped backend when you want the feature working out of the box.
+`bake-compaction` lets a long session condense its older history into a single summary message, keep the recent conversation intact, and continue as if the summary had always been there — with a backend such as `dsh-compaction-basic` and the optional `/compact` command. The shadowed content stays in the session log, so replaying the session deterministically reproduces the same condensed conversation. Reach for this package when you implement a condensation backend, build something that triggers condensation, or need to recognize condensed messages — it performs no condensation itself. Choose the shipped backend when you want the feature working out of the box.
 
 ## Table of Contents
 

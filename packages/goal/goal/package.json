@@ -55,12 +55,12 @@
   "peerDependencies": {
     "bake-agent": "workspace:^",
     "@deepseek-ai/dsh-session-projection": "workspace:^",
-    "@deepseek-ai/dsh-brand": "workspace:^",
-    "@deepseek-ai/dsh-invariants": "workspace:^",
+    "bake-brand": "workspace:^",
+    "bake-invariants": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
     "bake-scope": "workspace:^",
     "bake-session": "workspace:^",
-    "@deepseek-ai/dsh-typert-protocol": "workspace:^",
+    "bake-typert-protocol": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   },
   "dependencies": {
@@ -70,19 +70,19 @@
   "devDependencies": {
     "bake-agent": "workspace:^",
     "bake-agent-loop": "workspace:^",
-    "@deepseek-ai/dsh-agent-loop-testkit": "workspace:^",
+    "bake-agent-loop-testkit": "workspace:^",
     "@deepseek-ai/dsh-bash-local": "workspace:^",
     "@deepseek-ai/dsh-session-projection": "workspace:^",
-    "@deepseek-ai/dsh-brand": "workspace:^",
-    "@deepseek-ai/dsh-invariants": "workspace:^",
+    "bake-brand": "workspace:^",
+    "bake-invariants": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
-    "@deepseek-ai/dsh-loader-smoke": "workspace:^",
+    "bake-loader-smoke": "workspace:^",
     "bake-scope": "workspace:^",
     "bake-session": "workspace:^",
     "@deepseek-ai/dsh-session-checkpoint-policy": "workspace:^",
     "@deepseek-ai/dsh-session-persistence-jsonl": "workspace:^",
     "@deepseek-ai/dsh-subprocess-local": "workspace:^",
-    "@deepseek-ai/dsh-typert-protocol": "workspace:^",
+    "bake-typert-protocol": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   }
 }

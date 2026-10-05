@@ -28,7 +28,7 @@
   "license": "MIT",
   "peerDependencies": {
     "@deepseek-ai/dsh-commands": "workspace:^",
-    "@deepseek-ai/dsh-compaction": "workspace:^",
+    "bake-compaction": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   },
   "devDependencies": {
@@ -36,7 +36,7 @@
     "@deepseek-ai/cordis-plugin-loader": "workspace:^",
     "bake-agent": "workspace:^",
     "@deepseek-ai/dsh-commands": "workspace:^",
-    "@deepseek-ai/dsh-compaction": "workspace:^",
+    "bake-compaction": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
     "bake-session": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"

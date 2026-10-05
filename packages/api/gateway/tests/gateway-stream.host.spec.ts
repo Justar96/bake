@@ -3,9 +3,9 @@ import { once } from 'node:events'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import WebSocket, { type RawData } from 'ws'
 import { Context, Service, symbols } from '@deepseek-ai/cordis'
-import { apply as applyConnection, inject as connectionInject } from '@deepseek-ai/dsh-client-connection'
-import WebServer from '@deepseek-ai/dsh-host-webserver'
-import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
+import { apply as applyConnection, inject as connectionInject } from 'bake-client-connection'
+import WebServer from 'bake-host-webserver'
+import { MAX_TIMER_DELAY_MS } from 'bake-timeout'
 import {
   bindTypertRemote,
   Remote,
@@ -13,10 +13,10 @@ import {
   type TypertContextMap,
   type TypertContextWire,
   RemoteError,
-} from '@deepseek-ai/dsh-typert-protocol'
+} from 'bake-typert-protocol'
 import TypertRegistry from '@deepseek-ai/dsh-typert-registry'
 
-declare module '@deepseek-ai/dsh-typert-protocol' {
+declare module 'bake-typert-protocol' {
   interface RemoteErrorDetailsMap {
     'fixture/rejected': { readonly retryable: boolean }
     'fixture/broken': { readonly count: bigint }

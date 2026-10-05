@@ -2,8 +2,8 @@
 
 import { interruptedTurnClosers } from 'bake-session'
 import type { SessionEvent, SessionHeader, SessionId, SessionLogOffset, SessionSeedEventState } from 'bake-session'
-import type SessionPersistence from '@deepseek-ai/dsh-session-persistence'
-import type { SessionHandleReadResult } from '@deepseek-ai/dsh-session-persistence'
+import type SessionPersistence from 'bake-session-persistence'
+import type { SessionHandleReadResult } from 'bake-session-persistence'
 
 /** A stored session log balanced for read-only viewing. */
 export interface ColdSessionLog {

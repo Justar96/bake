@@ -28,25 +28,25 @@
   "license": "MIT",
   "peerDependencies": {
     "bake-agent": "workspace:^",
-    "@deepseek-ai/dsh-credentials": "workspace:^",
+    "bake-credentials": "workspace:^",
     "@deepseek-ai/dsh-launch-environment": "workspace:^",
     "bake-session": "workspace:^",
     "@deepseek-ai/dsh-web": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^",
-    "@deepseek-ai/dsh-settings": "workspace:^"
+    "bake-settings": "workspace:^"
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "workspace:^"
   },
   "devDependencies": {
     "bake-agent": "workspace:^",
-    "@deepseek-ai/dsh-credentials": "workspace:^",
+    "bake-credentials": "workspace:^",
     "@deepseek-ai/dsh-credentials-local": "workspace:^",
     "@deepseek-ai/dsh-launch-environment": "workspace:^",
     "bake-session": "workspace:^",
     "@deepseek-ai/dsh-web": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^",
-    "@deepseek-ai/dsh-settings": "workspace:^",
+    "bake-settings": "workspace:^",
     "@deepseek-ai/dsh-http-proxy": "workspace:^"
   }
 }

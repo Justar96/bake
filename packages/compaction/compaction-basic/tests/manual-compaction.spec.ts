@@ -2,16 +2,16 @@ import { imageOffloadProjection } from '@deepseek-ai/dsh-compaction-image-offloa
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import AgentLoop from 'bake-agent-loop'
-import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
-import InvariantRegistry from '@deepseek-ai/dsh-invariants'
+import { mountAgentLoopTestDependencies } from 'bake-agent-loop-testkit'
+import InvariantRegistry from 'bake-invariants'
 import { CommandId } from '@deepseek-ai/dsh-commands/brand'
 import * as SessionInvariant from 'bake-session/invariant'
 import * as AgentInvariant from 'bake-agent/invariant'
 import * as AgentLoopInvariant from 'bake-agent-loop/invariant'
-import * as CompactionInvariant from '@deepseek-ai/dsh-compaction/invariant'
+import * as CompactionInvariant from 'bake-compaction/invariant'
 import { BasicCompactionEngine } from '@deepseek-ai/dsh-compaction-basic'
-import { CompactionId, isCompactCheckpointSource, ManualCompactionError } from '@deepseek-ai/dsh-compaction'
-import type { CompactionResult } from '@deepseek-ai/dsh-compaction'
+import { CompactionId, isCompactCheckpointSource, ManualCompactionError } from 'bake-compaction'
+import type { CompactionResult } from 'bake-compaction'
 import {
   createAssistantMessage,
   createUserMessage,

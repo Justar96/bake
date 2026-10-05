@@ -9,7 +9,7 @@ import type { GoalRef } from '@deepseek-ai/dsh-goal'
 import SessionStore, { Session, SessionId, type SessionEvent } from 'bake-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import * as commandGoal from '@deepseek-ai/dsh-command-goal'
-import { createInboxStub } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { createInboxStub } from 'bake-agent-loop-testkit'
 
 interface Harness {
   readonly ctx: Context

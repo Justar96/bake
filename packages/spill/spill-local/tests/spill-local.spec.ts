@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, join, normalize } from 'node:path'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import { SessionId } from 'bake-session'
-import type { SaveTextSpill } from '@deepseek-ai/dsh-spill'
+import type { SaveTextSpill } from 'bake-spill'
 import LocalSpillStore, {
   DEFAULT_ROOT_PREFIX,
   discoverDefaultRoots,

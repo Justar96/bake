@@ -1,7 +1,7 @@
 /** Read-only Host and Client runtime API discovery for plugin development. */
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from 'bake-agent'
-import type { JsonValue } from '@deepseek-ai/dsh-util-values'
+import type { JsonValue } from 'bake-util-values'
 import { defineTool } from 'bake-tools'
 import type { ToolExecution } from 'bake-tools'
 import { presentInspectListCall, presentInspectQueryCall } from './present.ts'

@@ -6,7 +6,7 @@
 
 import { Service, type Context } from '@deepseek-ai/cordis'
 import { createScope, NamedEntries, ScopedLayers, scopeOf, type ScopeKey, type ScopeLayer } from 'bake-scope'
-import type { JsonValue } from '@deepseek-ai/dsh-util-values'
+import type { JsonValue } from 'bake-util-values'
 import type { ToolExecution } from 'bake-tools'
 import type {} from 'bake-system-prompt'
 import { registerResourceTools } from './tools.ts'

@@ -10,7 +10,7 @@
 
 export {}
 
-import type { Branded } from '@deepseek-ai/dsh-brand'
+import type { Branded } from 'bake-brand'
 import type { OptionalSessionSeq, SessionSeq } from 'bake-session/types'
 
 /** Identifies one session-title provider registration. */

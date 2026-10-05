@@ -90,7 +90,7 @@ The matcher subject is the tool name (`PreToolUse` / `PostToolUse`) or the sessi
 
 ### Detached runs and disposal
 
-`SessionStart` is the one emit point and runs detached — no extension point awaits it. Each run chain is tracked, and disposing the bridge aborts a still-running hook process, then drains the continuation before the dispose resolves (`createDetachedRuns` in `dsh-hook-protocol`).
+`SessionStart` is the one emit point and runs detached — no extension point awaits it. Each run chain is tracked, and disposing the bridge aborts a still-running hook process, then drains the continuation before the dispose resolves (`createDetachedRuns` in `bake-hook-protocol`).
 
 ### Design philosophy
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import type { CredentialInfo } from '@deepseek-ai/dsh-credentials/types'
-import { remoteErrorOf, remoteMethods } from '@deepseek-ai/dsh-typert-protocol'
+import type { CredentialInfo } from 'bake-credentials/types'
+import { remoteErrorOf, remoteMethods } from 'bake-typert-protocol'
 import CredentialsController from '../src/credentials.ts'
 import { MemoryCredentials } from '../../../credentials/credentials/tests/memory.ts'
 

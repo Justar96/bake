@@ -8,7 +8,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { SettingsProvider, type SettingsNamespace } from '@deepseek-ai/dsh-settings'
+import { SettingsProvider, type SettingsNamespace } from 'bake-settings'
 import Defaults from 'bake-agent-default-model'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'

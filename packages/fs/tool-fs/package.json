@@ -31,10 +31,10 @@
     "@deepseek-ai/schemastery": "workspace:^"
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh-attachment": "workspace:^",
-    "@deepseek-ai/dsh-fs": "workspace:^",
+    "bake-attachment": "workspace:^",
+    "bake-fs": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
-    "@deepseek-ai/dsh-sandbox": "workspace:^",
+    "bake-sandbox": "workspace:^",
     "@deepseek-ai/dsh-sandbox-policy": "workspace:^",
     "bake-session": "workspace:^",
     "bake-tools": "workspace:^",
@@ -44,14 +44,14 @@
   "devDependencies": {
     "bake-agent": "workspace:^",
     "bake-agent-loop": "workspace:^",
-    "@deepseek-ai/dsh-agent-loop-testkit": "workspace:^",
-    "@deepseek-ai/dsh-attachment": "workspace:^",
-    "@deepseek-ai/dsh-fs": "workspace:^",
+    "bake-agent-loop-testkit": "workspace:^",
+    "bake-attachment": "workspace:^",
+    "bake-fs": "workspace:^",
     "@deepseek-ai/dsh-fs-local": "workspace:^",
     "@deepseek-ai/dsh-fs-observation-policy": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
     "@deepseek-ai/dsh-llm-pi-ai": "workspace:^",
-    "@deepseek-ai/dsh-sandbox": "workspace:^",
+    "bake-sandbox": "workspace:^",
     "@deepseek-ai/dsh-sandbox-policy": "workspace:^",
     "bake-session": "workspace:^",
     "bake-system-prompt": "workspace:^",
@@ -60,6 +60,6 @@
     "@deepseek-ai/cordis": "workspace:^",
     "@deepseek-ai/dsh-session-projection": "workspace:^",
     "bake-scope": "workspace:^",
-    "@deepseek-ai/dsh-ptc-runtime": "workspace:^"
+    "bake-ptc-runtime": "workspace:^"
   }
 }

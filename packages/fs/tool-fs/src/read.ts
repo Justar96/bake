@@ -7,7 +7,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from 'bake-tools'
 import type { GenericCallView, ReadResultView, ToolResult } from 'bake-tools'
-import type {} from '@deepseek-ai/dsh-fs'
+import type {} from 'bake-fs'
 import { buildWindow, formatReadOutput, langFromPath, readMetaFromMeta } from './read-render.ts'
 import { resolveRegularReadTarget } from './read-target.ts'
 

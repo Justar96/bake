@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-session-format-catalog",
+  "name": "bake-session-format-catalog",
   "description": "Build-static first-party Session format codec and migration catalog",
   "version": "0.1.6-alpha.2",
   "publishConfig": {
@@ -32,22 +32,22 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "@deepseek-ai/dsh-session-format": "workspace:^",
-    "@deepseek-ai/dsh-session-format-v0-to-v1": "workspace:^",
-    "@deepseek-ai/dsh-session-format-v1-to-v2": "workspace:^",
-    "@deepseek-ai/dsh-session-format-v2-to-v3": "workspace:^",
+    "bake-session-format": "workspace:^",
+    "bake-session-format-v0-to-v1": "workspace:^",
+    "bake-session-format-v1-to-v2": "workspace:^",
+    "bake-session-format-v2-to-v3": "workspace:^",
     "@deepseek-ai/dsh-compaction-image-offload": "workspace:^"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
     "bake-session": "workspace:^",
-    "@deepseek-ai/dsh-brand": "workspace:^",
+    "bake-brand": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
     "bake-session": "workspace:^",
-    "@deepseek-ai/dsh-brand": "workspace:^",
+    "bake-brand": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^"
   }
 }

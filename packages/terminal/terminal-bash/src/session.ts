@@ -2,12 +2,12 @@
 
 import { Buffer } from 'node:buffer'
 import type { IDisposable, Terminal as HeadlessTerminalType } from '@xterm/headless'
-import { createLazyRequire } from '@deepseek-ai/dsh-lazy-require'
+import { createLazyRequire } from 'bake-lazy-require'
 import type {
   SubprocessOutcome,
   SubprocessTerminalForeground,
   SubprocessTerminalHandle,
-} from '@deepseek-ai/dsh-subprocess'
+} from 'bake-subprocess'
 import { TerminalError } from '@deepseek-ai/dsh-terminal'
 import type {
   TerminalBackendSession,

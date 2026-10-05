@@ -13,7 +13,7 @@ import type {
   WebSearchResult,
   WebSearchSource,
 } from '@deepseek-ai/dsh-web'
-import type { CredentialRef } from '@deepseek-ai/dsh-credentials'
+import type { CredentialRef } from 'bake-credentials'
 import type {} from 'bake-session'
 import type {
   AnthropicError,

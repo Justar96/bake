@@ -13,13 +13,13 @@
  * touches the disk once, and a file deleted mid-run keeps the process's id
  * until the next launch.
  *
- * @module @deepseek-ai/dsh-anonymous-user-id
+ * @module bake-anonymous-user-id
  */
 
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import type { Branded } from '@deepseek-ai/dsh-brand'
+import type { Branded } from 'bake-brand'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 
 /** A harness-home-scoped anonymous user id (random UUID v4). */

@@ -3,11 +3,11 @@ description: "Endpoint-named mock for Typert Remote traffic: a table of unary an
 kind: "package-library"
 ---
 
-# @deepseek-ai/dsh-remote-mock
+# bake-remote-mock
 
 ## Summary
 
-`dsh-remote-mock` lets tests configure Host responses through `mock.remote.<namespace>.<method>` using native Vitest mock methods. The same functions answer direct calls and real Connection traffic; reusable tables supply default responses, and explicitly declared streams support test-driven frames and cancellation. Missing responses fail the call and are reported again by `assertNoUnmatched()` at teardown. The package runs without a business Host in Node or a browser page, imports no DOM, React, or Node modules, and is consumed from `devDependencies` only.
+`bake-remote-mock` lets tests configure Host responses through `mock.remote.<namespace>.<method>` using native Vitest mock methods. The same functions answer direct calls and real Connection traffic; reusable tables supply default responses, and explicitly declared streams support test-driven frames and cancellation. Missing responses fail the call and are reported again by `assertNoUnmatched()` at teardown. The package runs without a business Host in Node or a browser page, imports no DOM, React, or Node modules, and is consumed from `devDependencies` only.
 
 ## Table of Contents
 

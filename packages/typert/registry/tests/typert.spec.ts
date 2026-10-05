@@ -12,10 +12,10 @@ import type {
   TypertContext,
   TypertLookup,
   TypertRemoteContribution,
-} from '@deepseek-ai/dsh-typert-protocol'
+} from 'bake-typert-protocol'
 import { apply as applyClientRegistry, inject as clientRegistryInject } from '../src/client/index.ts'
 
-declare module '@deepseek-ai/dsh-typert-protocol' {
+declare module 'bake-typert-protocol' {
   interface TypertLookupMap {
     fixture: TypertLookup<{ readonly id: string }, string>
   }

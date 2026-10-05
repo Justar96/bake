@@ -29,15 +29,15 @@
   "peerDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
     "bake-agent": "workspace:^",
-    "@deepseek-ai/dsh-jobs": "workspace:^",
+    "bake-jobs": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
-    "@deepseek-ai/dsh-sandbox": "workspace:^",
+    "bake-sandbox": "workspace:^",
     "@deepseek-ai/dsh-sandbox-policy": "workspace:^",
-    "@deepseek-ai/dsh-shell": "workspace:^",
+    "bake-shell": "workspace:^",
     "@deepseek-ai/dsh-shell-env": "workspace:^",
     "bake-tools": "workspace:^",
     "@deepseek-ai/dsh-user-approval": "workspace:^",
-    "@deepseek-ai/dsh-shell-change-report": "workspace:^"
+    "bake-shell-change-report": "workspace:^"
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "workspace:^"
@@ -47,21 +47,21 @@
     "bake-agent": "workspace:^",
     "bake-agent-loop": "workspace:^",
     "@deepseek-ai/dsh-app-boot": "workspace:^",
-    "@deepseek-ai/dsh-jobs": "workspace:^",
+    "bake-jobs": "workspace:^",
     "@deepseek-ai/dsh-jobs-local": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
-    "@deepseek-ai/dsh-loader-smoke": "workspace:^",
+    "bake-loader-smoke": "workspace:^",
     "@deepseek-ai/dsh-pwsh-local": "workspace:^",
-    "@deepseek-ai/dsh-sandbox": "workspace:^",
+    "bake-sandbox": "workspace:^",
     "@deepseek-ai/dsh-sandbox-policy": "workspace:^",
     "@deepseek-ai/dsh-session-projection": "workspace:^",
-    "@deepseek-ai/dsh-shell": "workspace:^",
+    "bake-shell": "workspace:^",
     "@deepseek-ai/dsh-shell-env": "workspace:^",
     "@deepseek-ai/dsh-subprocess-local": "workspace:^",
     "bake-system-prompt": "workspace:^",
     "@deepseek-ai/dsh-tool-jobs": "workspace:^",
     "bake-tools": "workspace:^",
     "@deepseek-ai/dsh-user-approval": "workspace:^",
-    "@deepseek-ai/dsh-shell-change-report": "workspace:^"
+    "bake-shell-change-report": "workspace:^"
   }
 }

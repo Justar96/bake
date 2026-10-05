@@ -10,13 +10,13 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { delimiter as pathDelimiter } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
-import type {} from '@deepseek-ai/dsh-compaction'
+import type {} from 'bake-compaction'
 import { SESSION_FORMAT_VERSION, SessionLogOffset, type SessionEvent } from 'bake-session'
 import type { SessionLogOffset as SessionLogOffsetType } from 'bake-session'
 import {
   SessionFormatUnsupportedMigrationError,
   sessionFormatCatalog,
-} from '@deepseek-ai/dsh-session-format-catalog'
+} from 'bake-session-format-catalog'
 import type {
   ContentBlock,
   GenerateOptions,
@@ -33,7 +33,7 @@ import type {
   ToolUpdate,
 } from '@deepseek-ai/dsh-llm'
 import { LlmAdapter, LlmError, ReasoningEffortId, expandAssistantStream, offloadedImageText, requestImageHandleText, resolveRetryPolicy } from '@deepseek-ai/dsh-llm'
-import { assertNever, isRecord } from '@deepseek-ai/dsh-util-values'
+import { assertNever, isRecord } from 'bake-util-values'
 
 const PACKED_CHUNK_ROW_TYPES = new Set(['text-chunks', 'reasoning-chunks', 'tool-call-chunks'])
 

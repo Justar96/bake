@@ -33,7 +33,7 @@
     "client": {
       "inject": [
         "@deepseek-ai/dsh-typert-registry",
-        "@deepseek-ai/dsh-client-connection"
+        "bake-client-connection"
       ],
       "platform": "web",
       "immediately": true
@@ -51,22 +51,22 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "@deepseek-ai/dsh-deque": "workspace:^",
-    "@deepseek-ai/dsh-timeout": "workspace:^",
+    "bake-deque": "workspace:^",
+    "bake-timeout": "workspace:^",
     "@deepseek-ai/schemastery": "workspace:^",
     "ws": "catalog:",
-    "@deepseek-ai/dsh-typert-protocol": "workspace:^"
+    "bake-typert-protocol": "workspace:^"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "workspace:^"
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-brand": "workspace:^",
-    "@deepseek-ai/dsh-client-connection": "workspace:^",
-    "@deepseek-ai/dsh-host-webserver": "workspace:^",
-    "@deepseek-ai/dsh-remote-mock": "workspace:^",
+    "bake-brand": "workspace:^",
+    "bake-client-connection": "workspace:^",
+    "bake-host-webserver": "workspace:^",
+    "bake-remote-mock": "workspace:^",
     "@deepseek-ai/dsh-typert-registry": "workspace:^",
-    "@deepseek-ai/dsh-util-crypto": "workspace:^",
+    "bake-util-crypto": "workspace:^",
     "@types/ws": "catalog:",
     "@deepseek-ai/cordis": "workspace:^",
     "zod": "catalog:"

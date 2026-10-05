@@ -5,7 +5,7 @@
  * @module @deepseek-ai/dsh-user-approval/types
  */
 
-import type { Branded } from '@deepseek-ai/dsh-brand'
+import type { Branded } from 'bake-brand'
 import type { Scoped } from 'bake-scope'
 import type { Agent } from 'bake-agent/types'
 import type { ToolCallId } from '@deepseek-ai/dsh-llm/brand'

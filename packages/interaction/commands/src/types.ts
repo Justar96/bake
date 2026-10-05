@@ -9,7 +9,7 @@
 
 import type { SessionSeq } from 'bake-session/types'
 import type { CommandDefinitionId, CommandId } from './brand.ts'
-import type { EncodedImageAttachment } from '@deepseek-ai/dsh-attachment/types'
+import type { EncodedImageAttachment } from 'bake-attachment/types'
 
 /** One browser-submitted command attachment: encoded image input or a staged file receipt. */
 export type CommandSubmitAttachment =

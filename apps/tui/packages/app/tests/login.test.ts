@@ -1,7 +1,7 @@
 /** Sign-in targets, their typed names, refused answers asked again, and signing out. */
 import { describe, expect, it } from 'bun:test'
 import type { Context } from '@deepseek-ai/cordis'
-import { credentialKey } from '@deepseek-ai/dsh-credentials'
+import { credentialKey } from 'bake-credentials'
 import { availableSelection, findTarget, listTargets, login, logout, startingModel, type LoginPrompt, type LoginSources } from '../src/login.ts'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'
 

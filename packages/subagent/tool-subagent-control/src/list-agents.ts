@@ -12,7 +12,7 @@ import { defineTool } from 'bake-tools'
 import type { Agent } from 'bake-agent'
 import type { SessionId } from 'bake-session'
 import type { SubagentDescendantListEntry, SubagentListEntry } from '@deepseek-ai/dsh-subagent'
-import { assertNever } from '@deepseek-ai/dsh-util-values'
+import { assertNever } from 'bake-util-values'
 import { presentListAgentsCall } from './presentation.ts'
 
 export const name = 'tool-subagent-list-agents'

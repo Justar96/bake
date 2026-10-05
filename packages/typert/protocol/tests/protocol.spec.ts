@@ -14,7 +14,7 @@ import {
   type TypertForwardableEventEntry,
   type TypertLookup,
   type TypertRemoteEvent,
-} from '@deepseek-ai/dsh-typert-protocol'
+} from 'bake-typert-protocol'
 
 const REMOTE_METHOD_DESCRIPTOR_KEY = '@deepseek-ai/dsh-typert-protocol/remote-methods'
 
@@ -61,7 +61,7 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
-declare module '@deepseek-ai/dsh-typert-protocol' {
+declare module 'bake-typert-protocol' {
   interface TypertLookupMap {
     metaFixture: TypertLookup<MetaFixtureSubject, string>
   }

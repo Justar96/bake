@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-brand",
+  "name": "bake-brand",
   "description": "Stateless branded primitive types for the DeepSeek Harness",
   "version": "0.1.6-alpha.2",
   "publishConfig": {

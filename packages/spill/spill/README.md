@@ -3,11 +3,11 @@ description: "The spill storage service: save oversized tool text or captured se
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-spill
+# bake-spill
 
 ## Summary
 
-`dsh-spill` lets plugins and tools save oversized text through the public `ctx.spillStore` API and receive an opaque locator, exact byte count, and retrieval guidance. Choose it when full results must remain retrievable without filling model context. Configure `dsh-spill-local` for local persistence, and add `dsh-spill-policy` when oversized tool results should become bounded previews. The API does not offer retention, replacement, retrieval, or search operations. A save rejects on storage failure, leaving the caller to keep the content inline or fail.
+`bake-spill` lets plugins and tools save oversized text through the public `ctx.spillStore` API and receive an opaque locator, exact byte count, and retrieval guidance. Choose it when full results must remain retrievable without filling model context. Configure `dsh-spill-local` for local persistence, and add `dsh-spill-policy` when oversized tool results should become bounded previews. The API does not offer retention, replacement, retrieval, or search operations. A save rejects on storage failure, leaving the caller to keep the content inline or fail.
 
 ## Table of Contents
 
@@ -110,7 +110,7 @@ Read these pages when the package-level contract is not enough. They move from t
 - [Spill package map](../README.md) — the three-package family and each role.
 - [dsh-spill-local](../spill-local/README.md) — the shipped local filesystem backend.
 - [dsh-spill-policy](../spill-policy/README.md) — the policy that decides when a final result is too large.
-- [dsh-output-retention](../../util/output-retention/README.md) — the preview mechanics behind the policy.
+- [bake-output-retention](../../util/output-retention/README.md) — the preview mechanics behind the policy.
 - [Tool output spill decision](../../../.agents/notes/implemented/architecture/2026-07-08-tool-output-spill-files.md) — the capability boundary and design rationale.
 
 -----

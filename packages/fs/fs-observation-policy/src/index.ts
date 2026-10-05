@@ -11,8 +11,8 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { FsError } from '@deepseek-ai/dsh-fs'
-import type { FsEditIntent, FsObservation, FsTarget, FsWriteIntent } from '@deepseek-ai/dsh-fs'
+import { FsError } from 'bake-fs'
+import type { FsEditIntent, FsObservation, FsTarget, FsWriteIntent } from 'bake-fs'
 import type { FsObservationActor } from './types.ts'
 
 export type { FsObservationActor } from './types.ts'

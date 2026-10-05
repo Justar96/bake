@@ -1,7 +1,7 @@
 /**
  * Service Definition for combined session-history reads, filters, and full-text search.
  *
- * @module @deepseek-ai/dsh-session-query
+ * @module bake-session-query
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'

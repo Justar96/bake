@@ -5,7 +5,7 @@ import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import SessionStore, { Session, SessionId } from 'bake-session'
 import type { ToolExecution, ToolExecutionResult, ToolExecutionToken } from 'bake-tools'
 import * as ToolsInvariant from 'bake-tools/invariant'
-import InvariantRegistry from '@deepseek-ai/dsh-invariants'
+import InvariantRegistry from 'bake-invariants'
 
 const testToolSignal = new AbortController().signal
 

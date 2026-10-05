@@ -1,7 +1,7 @@
 import { Buffer } from 'node:buffer'
 import { PassThrough } from 'node:stream'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { SubprocessOutcome, SubprocessTerminalHandle } from '@deepseek-ai/dsh-subprocess'
+import type { SubprocessOutcome, SubprocessTerminalHandle } from 'bake-subprocess'
 import type { TerminalReadRequest } from '@deepseek-ai/dsh-terminal'
 import type { ResolvedConfig } from '../src/config.ts'
 import { LocalPtySession } from '../src/session.ts'

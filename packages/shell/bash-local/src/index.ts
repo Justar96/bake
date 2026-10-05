@@ -11,11 +11,11 @@
 
 import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { SHELL_SETTINGS_NAMESPACE, ShellExecutor, watchOutput } from '@deepseek-ai/dsh-shell'
-import type { ShellExecRequest, ShellExecSpec, ShellProcess, ShellProcessRead, ShellRunResult, CollectedOutput } from '@deepseek-ai/dsh-shell'
-import type { SubprocessCollect, SubprocessHandle, SubprocessOutputReader, SubprocessSpawnSpec } from '@deepseek-ai/dsh-subprocess'
-import type {} from '@deepseek-ai/dsh-settings'
-import { clampTimeout, deadline, MAX_TIMER_DELAY_MS, timeoutOf } from '@deepseek-ai/dsh-timeout'
+import { SHELL_SETTINGS_NAMESPACE, ShellExecutor, watchOutput } from 'bake-shell'
+import type { ShellExecRequest, ShellExecSpec, ShellProcess, ShellProcessRead, ShellRunResult, CollectedOutput } from 'bake-shell'
+import type { SubprocessCollect, SubprocessHandle, SubprocessOutputReader, SubprocessSpawnSpec } from 'bake-subprocess'
+import type {} from 'bake-settings'
+import { clampTimeout, deadline, MAX_TIMER_DELAY_MS, timeoutOf } from 'bake-timeout'
 
 /**
  * Model-friendly environment overrides: disable colors, pagers, and

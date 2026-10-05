@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-compaction",
+  "name": "bake-compaction",
   "description": "Abstract compaction service seam (ctx.compaction) for the DeepSeek Harness",
   "version": "0.1.6-alpha.2",
   "publishConfig": {
@@ -41,17 +41,17 @@
   ],
   "license": "MIT",
   "peerDependencies": {
-    "@deepseek-ai/dsh-brand": "workspace:^",
+    "bake-brand": "workspace:^",
     "@deepseek-ai/dsh-commands": "workspace:^",
-    "@deepseek-ai/dsh-invariants": "workspace:^",
+    "bake-invariants": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
     "bake-session": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-brand": "workspace:^",
+    "bake-brand": "workspace:^",
     "@deepseek-ai/dsh-commands": "workspace:^",
-    "@deepseek-ai/dsh-invariants": "workspace:^",
+    "bake-invariants": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
     "bake-session": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"

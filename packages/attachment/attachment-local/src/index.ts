@@ -3,7 +3,7 @@
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { AttachmentStore } from '@deepseek-ai/dsh-attachment'
+import { AttachmentStore } from 'bake-attachment'
 import type {
   FileAttachmentRef,
   ImageAttachmentLimits,
@@ -13,7 +13,7 @@ import type {
   SaveFileAttachment,
   SaveImageAttachment,
   StoredImageAttachment,
-} from '@deepseek-ai/dsh-attachment'
+} from 'bake-attachment'
 import { dshCachePath, resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import type { NormalizationPolicy } from './normalization.ts'
 import { CompressionLimiter, compressionFailure } from './compression-limiter.ts'

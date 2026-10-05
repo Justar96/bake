@@ -20,7 +20,7 @@ import { posix, win32 } from 'node:path'
 import {
   appendItem, appendMember, blockJson, inlineJson, layoutOf, member, parseJsonc, valueOf, type JsonNode, type Layout,
 } from './jsonc.ts'
-import { isRecord } from '@deepseek-ai/dsh-util-values'
+import { isRecord } from 'bake-util-values'
 
 /** What Shift+Enter should send: ESC CR, which Bake reads as Alt+Enter. */
 export const NEWLINE_SEQUENCE = '\x1b\r'

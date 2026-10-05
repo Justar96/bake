@@ -5,7 +5,7 @@
  * @module @deepseek-ai/dsh-authorization/types
  */
 
-import type { CredentialKey } from '@deepseek-ai/dsh-credentials/types'
+import type { CredentialKey } from 'bake-credentials/types'
 
 /** One way a flow can obtain its credential, named by the flow that offers it. */
 export interface AuthorizationMethod {

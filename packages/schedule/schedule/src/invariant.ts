@@ -5,7 +5,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { Session, SessionEvent } from 'bake-session'
-import type { InvariantFailure, InvariantInstaller } from '@deepseek-ai/dsh-invariants'
+import type { InvariantFailure, InvariantInstaller } from 'bake-invariants'
 import { foldScheduleEvents, ScheduleLogError } from './domain.ts'
 
 const PACKAGE_NAME = '@deepseek-ai/dsh-schedule'

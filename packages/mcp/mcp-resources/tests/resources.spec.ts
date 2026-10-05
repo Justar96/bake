@@ -6,7 +6,7 @@ import ToolRuntime, { defineTool, type Config as ToolConfig } from 'bake-tools'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { Agent } from 'bake-agent'
 import { bindScopeParent, createScope, type Scope } from 'bake-scope'
-import { PtcRuntime, type PtcRunRequest, type PtcRunResult, type PtcRunSpec } from '@deepseek-ai/dsh-ptc-runtime'
+import { PtcRuntime, type PtcRunRequest, type PtcRunResult, type PtcRunSpec } from 'bake-ptc-runtime'
 import McpResources, { type McpResourceProvider } from '../src/index.ts'
 
 const resourceToolNames = ['list_mcp_resources', 'list_mcp_resource_templates', 'read_mcp_resource']

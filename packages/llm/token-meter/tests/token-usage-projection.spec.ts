@@ -8,7 +8,7 @@ import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import TokenMeter from '@deepseek-ai/dsh-token-meter'
 import type { ContextPressureProjection, TokenUsageProjection } from '@deepseek-ai/dsh-token-meter/client'
 import { RetryId } from '@deepseek-ai/dsh-llm-retry'
-import { CompactionId } from '@deepseek-ai/dsh-compaction'
+import { CompactionId } from 'bake-compaction'
 
 const ZERO: TokenUsageProjection = {
   uncachedInputTokens: 0,

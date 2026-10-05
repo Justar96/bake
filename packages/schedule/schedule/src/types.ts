@@ -3,7 +3,7 @@
  * @module @deepseek-ai/dsh-schedule
  */
 
-import type { Branded } from '@deepseek-ai/dsh-brand'
+import type { Branded } from 'bake-brand'
 import type {} from 'bake-session/types'
 
 /** Stable reminder identity that is unique and never reused within one session. */

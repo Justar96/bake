@@ -11,11 +11,11 @@
 
 import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
-import { brandString } from '@deepseek-ai/dsh-brand'
+import { brandString } from 'bake-brand'
 import { installModelSelection } from 'bake-agent'
 import type { Agent, AssistantStreamFrame, ModelSelectionRef } from 'bake-agent'
 import { NO_DEFAULT_MODEL_MESSAGE } from 'bake-agent-default-model'
-import type {} from '@deepseek-ai/dsh-fs'
+import type {} from 'bake-fs'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { Session, SessionEvent, SessionId } from 'bake-session'
 import type { PreToolDecision } from 'bake-tools'

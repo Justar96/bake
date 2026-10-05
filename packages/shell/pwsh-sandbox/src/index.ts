@@ -13,8 +13,8 @@
  */
 
 import { Context } from '@deepseek-ai/cordis'
-import type { ShellExecRequest, ShellExecSpec, ShellProcess, ShellRunResult } from '@deepseek-ai/dsh-shell'
-import { SandboxUnavailableError } from '@deepseek-ai/dsh-sandbox'
+import type { ShellExecRequest, ShellExecSpec, ShellProcess, ShellRunResult } from 'bake-shell'
+import { SandboxUnavailableError } from 'bake-sandbox'
 import type {
   ConfinedArgv,
   ConfinedSandboxMode,
@@ -23,7 +23,7 @@ import type {
   SandboxExecutionPolicy,
   SandboxMode,
   SandboxPolicy,
-} from '@deepseek-ai/dsh-sandbox'
+} from 'bake-sandbox'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import { PwshLocalExecutor } from '@deepseek-ai/dsh-pwsh-local'
 import type { Config as LocalConfig } from '@deepseek-ai/dsh-pwsh-local'

@@ -3,8 +3,8 @@ import { Context } from '@deepseek-ai/cordis'
 import { createUserMessage, ToolCallId, type ContentBlock, type GenerateOptions } from '@deepseek-ai/dsh-llm'
 import { SessionId } from 'bake-session'
 import AgentLoop from 'bake-agent-loop'
-import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
-import InvariantRegistry from '@deepseek-ai/dsh-invariants'
+import { mountAgentLoopTestDependencies } from 'bake-agent-loop-testkit'
+import InvariantRegistry from 'bake-invariants'
 import type {} from 'bake-system-prompt'
 import * as SessionInvariant from 'bake-session/invariant'
 import * as AgentInvariant from 'bake-agent/invariant'
@@ -63,7 +63,7 @@ async function setup(script: Script, options: SetupOptions = {}) {
     ctx.provide('ptcRuntime', {
       language: 'typescript',
       isolation: 'test',
-      resolve: (request: import('@deepseek-ai/dsh-ptc-runtime').PtcRunRequest) => ({ ...request, cwd: request.cwd ?? process.cwd(), timeoutMs: 120_000 }),
+      resolve: (request: import('bake-ptc-runtime').PtcRunRequest) => ({ ...request, cwd: request.cwd ?? process.cwd(), timeoutMs: 120_000 }),
       run: options.codeRun ?? (() => Promise.resolve({ logs: [] })),
     } as never)
   }

@@ -13,7 +13,7 @@ import type {
   SubagentCapabilities,
   SubagentProvider,
 } from '@deepseek-ai/dsh-subagent'
-import { startInProcessRun } from '@deepseek-ai/dsh-subagent-in-process-driver'
+import { startInProcessRun } from 'bake-subagent-in-process-driver'
 
 export const name = 'subagent-spawn-in-process'
 // `tools` is deliberately not injected: the child factory already provides it during setup,

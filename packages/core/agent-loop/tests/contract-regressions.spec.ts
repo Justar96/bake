@@ -7,7 +7,7 @@ import ToolRuntime, { defineContentToolFixture, type PostToolDecision } from 'ba
 import AgentRegistry, { type Agent } from 'bake-agent'
 import AgentLoop from 'bake-agent-loop'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import InvariantRegistry from '@deepseek-ai/dsh-invariants'
+import InvariantRegistry from 'bake-invariants'
 import * as SessionInvariant from 'bake-session/invariant'
 import * as AgentInvariant from 'bake-agent/invariant'
 import * as AgentLoopInvariant from 'bake-agent-loop/invariant'

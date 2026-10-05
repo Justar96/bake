@@ -16,12 +16,12 @@
 import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from 'bake-agent'
-import { brandString } from '@deepseek-ai/dsh-brand'
+import { brandString } from 'bake-brand'
 import { ReasoningEffortId, contentHasImage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, MessageId, MessageSource } from '@deepseek-ai/dsh-llm'
 import type { SessionId } from 'bake-session'
-import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
-import type { SessionObservation, SessionQueryEngine } from '@deepseek-ai/dsh-session-query'
+import type { SessionPersistence } from 'bake-session-persistence'
+import type { SessionObservation, SessionQueryEngine } from 'bake-session-query'
 import {
   childSessionMeta,
   captureDelegatedPolicyOverrides,

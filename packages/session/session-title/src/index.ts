@@ -7,10 +7,10 @@ import { Context, FiberState, Service, type Fiber } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { z as zod } from 'zod'
 import type { ZodType } from 'zod'
-import type { Branded } from '@deepseek-ai/dsh-brand'
+import type { Branded } from 'bake-brand'
 import { isAgentLoopRequest } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions } from '@deepseek-ai/dsh-llm'
-import { assertNever, assertPositiveInteger, deepFreeze } from '@deepseek-ai/dsh-util-values'
+import { assertNever, assertPositiveInteger, deepFreeze } from 'bake-util-values'
 import type {
   Session,
   SessionEvent,

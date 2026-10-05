@@ -33,9 +33,9 @@
   "license": "MIT",
   "peerDependencies": {
     "@deepseek-ai/dsh-llm": "workspace:^",
-    "@deepseek-ai/dsh-output-retention": "workspace:^",
+    "bake-output-retention": "workspace:^",
     "bake-session": "workspace:^",
-    "@deepseek-ai/dsh-spill": "workspace:^",
+    "bake-spill": "workspace:^",
     "bake-tools": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   },
@@ -46,9 +46,9 @@
     "bake-agent": "workspace:^",
     "@deepseek-ai/dsh-ptc-runtime-codemode": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
-    "@deepseek-ai/dsh-output-retention": "workspace:^",
+    "bake-output-retention": "workspace:^",
     "bake-session": "workspace:^",
-    "@deepseek-ai/dsh-spill": "workspace:^",
+    "bake-spill": "workspace:^",
     "bake-tools": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   }

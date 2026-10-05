@@ -2,12 +2,12 @@
 import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import { installModelSelection, type Agent, type AgentHandle, type ModelSelectionRef } from 'bake-agent'
-import { brandString } from '@deepseek-ai/dsh-brand'
+import { brandString } from 'bake-brand'
 import type { SessionId } from 'bake-session'
 import type {} from '@deepseek-ai/dsh-agent-presets'
-import { SessionAlreadyOwnedError } from '@deepseek-ai/dsh-session-persistence'
+import { SessionAlreadyOwnedError } from 'bake-session-persistence'
 import type {} from '@deepseek-ai/dsh-session-projection'
-import type {} from '@deepseek-ai/dsh-fs'
+import type {} from 'bake-fs'
 import { availableSelection, type LoginSources } from './login.ts'
 
 /** Explicit session choices resolved before the renderer mounts. */

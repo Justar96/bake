@@ -12,7 +12,7 @@ import GoalService, {
   foldGoal,
 } from '@deepseek-ai/dsh-goal'
 import type { GoalChangeMeta, GoalRef, GoalSnapshotChangeMeta } from '@deepseek-ai/dsh-goal'
-import { createInboxStub } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { createInboxStub } from 'bake-agent-loop-testkit'
 
 interface StubAgent {
   agent: Agent

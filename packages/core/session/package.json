@@ -45,15 +45,15 @@
     "@deepseek-ai/cordis": "workspace:^"
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-invariants": "workspace:^",
+    "bake-invariants": "workspace:^",
     "bake-scope": "workspace:^",
-    "@deepseek-ai/dsh-typert-protocol": "workspace:^",
+    "bake-typert-protocol": "workspace:^",
     "@deepseek-ai/dsh-typert-registry": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   },
   "dependencies": {
     "@deepseek-ai/dsh-llm": "workspace:^",
-    "@deepseek-ai/dsh-brand": "workspace:^",
-    "@deepseek-ai/dsh-util-values": "workspace:^"
+    "bake-brand": "workspace:^",
+    "bake-util-values": "workspace:^"
   }
 }

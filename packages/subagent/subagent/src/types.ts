@@ -10,7 +10,7 @@
  */
 
 import type { Agent, AgentOptions } from 'bake-agent'
-import type { Branded } from '@deepseek-ai/dsh-brand'
+import type { Branded } from 'bake-brand'
 import type { ContentBlock, MessageId } from '@deepseek-ai/dsh-llm'
 import type { SessionId } from 'bake-session'
 import type { ObjectJsonSchema, ToolRestriction } from 'bake-tools'

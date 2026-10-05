@@ -3,7 +3,7 @@ description: "The shell executor seam for developers and maintainers choosing, c
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-shell
+# bake-shell
 
 ## Summary
 

@@ -3,7 +3,7 @@ import { zstdDecompressSync } from 'node:zlib'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { runLoaderSmoke } from '@deepseek-ai/dsh-loader-smoke'
+import { runLoaderSmoke } from 'bake-loader-smoke'
 import type { SessionEvent } from 'bake-session'
 import { scanZstdFrames } from '@deepseek-ai/dsh-session-persistence-jsonl/src/zstd.js'
 

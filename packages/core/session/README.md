@@ -95,7 +95,7 @@ The package is built on event sourcing: a `Session` is an append-only log of typ
 | [`src/types.ts`](src/types.ts) | `SessionEventMap`, `SessionEvent`, `UserMessage`, `SessionHeader`, `TurnEndReasonMap` |
 | [`src/surface.ts`](src/surface.ts) | Ordered surface projection, replacement validation, `deriveEventMessage` |
 | [`src/request-header.ts`](src/request-header.ts) | `request/header` folding and reconstruction |
-| [`dsh-util-values`](../../util/values/README.md) | Shared lossless JSON validation and detached snapshots |
+| [`bake-util-values`](../../util/values/README.md) | Shared lossless JSON validation and detached snapshots |
 | [`src/repair.ts`](src/repair.ts) | Cold repair of crash-orphaned logs |
 | [`src/invariant.ts`](src/invariant.ts) | Invariant companion: seq, turn/step enclosure, tool call/result pairing |
 

@@ -8,7 +8,7 @@ import type { Agent } from 'bake-agent'
 import SessionStore, { SessionId } from 'bake-session'
 import SystemPrompt, { renderPrompt } from 'bake-system-prompt'
 import ToolRegistry, { defineContentToolFixture } from 'bake-tools'
-import { FILE_REFERENCE_PROMPT } from '@deepseek-ai/dsh-file-reference'
+import { FILE_REFERENCE_PROMPT } from 'bake-file-reference'
 import LocalFileReferenceService, { WorkspaceFileSearch } from '../src/index.ts'
 
 const roots: string[] = []

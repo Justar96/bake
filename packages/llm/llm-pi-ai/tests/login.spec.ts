@@ -6,7 +6,7 @@ import { Context } from '@deepseek-ai/cordis'
 import AuthorizationService from '@deepseek-ai/dsh-authorization'
 import type { AuthorizationInteraction, AuthorizationNotice, AuthorizationPrompt } from '@deepseek-ai/dsh-authorization'
 import LocalCredentialProvider from '@deepseek-ai/dsh-credentials-local'
-import type { CredentialKey } from '@deepseek-ai/dsh-credentials'
+import type { CredentialKey } from 'bake-credentials'
 import type { AuthEvent, AuthInteraction, AuthPrompt, AuthType, Credential } from '@earendil-works/pi-ai'
 
 const login = vi.hoisted(() => vi.fn())

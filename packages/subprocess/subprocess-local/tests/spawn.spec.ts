@@ -12,8 +12,8 @@ import {
   taskkillProcessTree,
   validateSubprocessSpec,
 } from '../src/spawn.ts'
-import type { SubprocessHandle, SubprocessOutputReader } from '@deepseek-ai/dsh-subprocess'
-import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
+import type { SubprocessHandle, SubprocessOutputReader } from 'bake-subprocess'
+import { MAX_TIMER_DELAY_MS } from 'bake-timeout'
 import { waitWithAbort } from '../src/managed-owner.ts'
 
 vi.mock('node:child_process', async (importOriginal) => {

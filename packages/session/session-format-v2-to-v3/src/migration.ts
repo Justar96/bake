@@ -1,16 +1,16 @@
 /** Streaming system-prompt promotion followed by canonical V3 envelope conversion. */
 
 import { createHash } from 'node:crypto'
-import { SessionFormatError, SessionFormatUnsupportedMigrationError, defineSessionFormatMigration, sessionFormatCount } from '@deepseek-ai/dsh-session-format'
-import type { SessionFormatEvent, SessionFormatEventRun, SessionFormatJsonObject, SessionFormatJsonValue, SessionFormatMigrationContext, SessionFormatMigrationStage, SessionFormatMigrationStageInput } from '@deepseek-ai/dsh-session-format'
-import { assertReleasedV2Header } from '@deepseek-ai/dsh-session-format-v1-to-v2'
+import { SessionFormatError, SessionFormatUnsupportedMigrationError, defineSessionFormatMigration, sessionFormatCount } from 'bake-session-format'
+import type { SessionFormatEvent, SessionFormatEventRun, SessionFormatJsonObject, SessionFormatJsonValue, SessionFormatMigrationContext, SessionFormatMigrationStage, SessionFormatMigrationStageInput } from 'bake-session-format'
+import { assertReleasedV2Header } from 'bake-session-format-v1-to-v2'
 import { assertEvent, canonicalizeTransformedEvent, record, SURFACE_TYPES } from './payload.ts'
 import { remapEvent } from './references.ts'
 import { assertReleasedV3Header } from './validation.ts'
 
 /** Promote system prompts, remap audited references, and canonicalize envelopes and PTC vocabulary. */
 export const sessionFormatV2ToV3 = defineSessionFormatMigration({
-  name: '@deepseek-ai/dsh-session-format-v2-to-v3',
+  name: 'bake-session-format-v2-to-v3',
   fromVersion: 2,
   toVersion: 3,
   migrateHeader(header) {

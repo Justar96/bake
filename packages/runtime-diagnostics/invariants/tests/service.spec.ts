@@ -3,7 +3,7 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import InvariantRegistry, {
   InvariantError,
   type Config,
-} from '@deepseek-ai/dsh-invariants'
+} from 'bake-invariants'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {

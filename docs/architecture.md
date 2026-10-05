@@ -49,4 +49,4 @@ The live region stays within the terminal row budget; committed transcript rows 
 
 ## Upstream adoption
 
-Bake's core packages use `bake-<name>`. Other shared runtime packages retain their existing names, and recorded session evidence stays intact. The [contributor guide](../CONTRIBUTING.md#upstream-deepseek-harness) owns import mapping and release review. Upstream's Web, Desktop, SDK, and publication workflows are not Bake application requirements.
+Bake's core packages and internal libraries use `bake-<name>`. Plugin and bundle packages retain their existing names, and recorded session evidence stays intact. The [contributor guide](../CONTRIBUTING.md#upstream-deepseek-harness) owns import mapping and release review. Upstream's Web, Desktop, SDK, and publication workflows are not Bake application requirements.

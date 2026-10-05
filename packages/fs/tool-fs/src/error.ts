@@ -5,7 +5,7 @@
  * @module @deepseek-ai/dsh-tool-fs/src/error
  */
 
-import { FsError } from '@deepseek-ai/dsh-fs'
+import { FsError } from 'bake-fs'
 
 /**
  * Render the stable model-facing diagnostic for a guarded-mutation failure.

@@ -10,7 +10,7 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import { brandString } from '@deepseek-ai/dsh-brand'
+import { brandString } from 'bake-brand'
 import { defineTool } from 'bake-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { SessionId } from 'bake-session'

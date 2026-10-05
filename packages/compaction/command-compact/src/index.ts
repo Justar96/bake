@@ -5,7 +5,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { CommandDefinitionId } from '@deepseek-ai/dsh-commands/brand'
-import { ManualCompactionError } from '@deepseek-ai/dsh-compaction'
+import { ManualCompactionError } from 'bake-compaction'
 import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 
 export const name = 'command-compact'

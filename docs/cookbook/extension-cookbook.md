@@ -36,7 +36,7 @@ A terminal UI consumer renders durable `session/event` records alongside transie
 
 ```ts
 import type { Context } from '@deepseek-ai/cordis'
-import { brandString } from '@deepseek-ai/dsh-brand'
+import { brandString } from 'bake-brand'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { SessionId } from 'bake-session'
 

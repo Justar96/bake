@@ -3,7 +3,7 @@ description: "The Windows write-restriction sandbox backend for users and mainta
 kind: "package-library"
 ---
 
-# @deepseek-ai/dsh-sandbox-windows-acl
+# bake-sandbox-windows-acl
 
 ## Summary
 
@@ -37,7 +37,7 @@ Choose it for Windows compositions that confine subprocess file effects under `r
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { AclSandbox, tempWriteSid, workspaceWriteSid } from '@deepseek-ai/dsh-sandbox-windows-acl'
+import { AclSandbox, tempWriteSid, workspaceWriteSid } from 'bake-sandbox-windows-acl'
 
 const workspaceRoot = process.cwd()
 const tempDir = mkdtempSync(join(tmpdir(), 'dsh-'))
@@ -85,7 +85,7 @@ This section explains the restricted-token mechanism, the token lists, the runne
 
 ### Mechanism
 
-The caller's token is duplicated into a `WRITE_RESTRICTED` token whose restricting SIDs carry separate workspace and private-temp capabilities. Windows performs the access check twice — once against the normal SIDs, once against the restricting SIDs — and grants write-class access only where both checks pass. The workspace SID is derived deterministically from the canonical workspace path (`workspaceWriteSid`), so the workspace-root ACE materializes once per workspace per machine and every later session, call, or restart hits the exact-ACE skip. Each live session/workspace pair instead receives a random private temp directory and a SID derived from that path (`tempWriteSid`), so sessions share the intended workspace authority without inheriting one another's temp authority. Every policy-specific Win32 call and every process primitive from [`dsh-win32-process`](../../subprocess/win32-process/README.md) is checked; failures throw `Win32Error` carrying the API name, exact code, system text, and failing context — fail-closed by construction.
+The caller's token is duplicated into a `WRITE_RESTRICTED` token whose restricting SIDs carry separate workspace and private-temp capabilities. Windows performs the access check twice — once against the normal SIDs, once against the restricting SIDs — and grants write-class access only where both checks pass. The workspace SID is derived deterministically from the canonical workspace path (`workspaceWriteSid`), so the workspace-root ACE materializes once per workspace per machine and every later session, call, or restart hits the exact-ACE skip. Each live session/workspace pair instead receives a random private temp directory and a SID derived from that path (`tempWriteSid`), so sessions share the intended workspace authority without inheriting one another's temp authority. Every policy-specific Win32 call and every process primitive from [`bake-win32-process`](../../subprocess/win32-process/README.md) is checked; failures throw `Win32Error` carrying the API name, exact code, system text, and failing context — fail-closed by construction.
 
 ### Modes and token lists
 
@@ -121,7 +121,7 @@ When launched with the subprocess control marker, the runner forwards fd 7 throu
 
 ### Header verification and source map
 
-The sandbox-owned SID, ACL, token, file, and lock declarations are checked against Windows headers by [`verify/abi-probe.cpp`](verify/abi-probe.cpp). The shared process, stdio, and Job ABI is owned and verified by [`@deepseek-ai/dsh-win32-process`](../../subprocess/win32-process/README.md#header-verification).
+The sandbox-owned SID, ACL, token, file, and lock declarations are checked against Windows headers by [`verify/abi-probe.cpp`](verify/abi-probe.cpp). The shared process, stdio, and Job ABI is owned and verified by [`bake-win32-process`](../../subprocess/win32-process/README.md#header-verification).
 
 | File | Role |
 |---|---|
@@ -151,7 +151,7 @@ Start with the subsystem reference for the shared vocabulary, then the provider 
 <a id="model-experience"></a>
 ## Model Experience
 
-Indirectly, through [`dsh-bash-sandbox`](../../shell/bash-sandbox/README.md), [`dsh-pwsh-sandbox`](../../shell/pwsh-sandbox/README.md), and their tools, which render this backend's partial-enforcement and denial facts (the confined stderr the tool layer classifies through `denialSignatures`) while the [`dsh-sandbox`](../sandbox/README.md) seam owns the `SANDBOX_UNAVAILABLE` text and `sandbox-local` owns runner selection.
+Indirectly, through [`dsh-bash-sandbox`](../../shell/bash-sandbox/README.md), [`dsh-pwsh-sandbox`](../../shell/pwsh-sandbox/README.md), and their tools, which render this backend's partial-enforcement and denial facts (the confined stderr the tool layer classifies through `denialSignatures`) while the [`bake-sandbox`](../sandbox/README.md) seam owns the `SANDBOX_UNAVAILABLE` text and `sandbox-local` owns runner selection.
 
 #### KV Cache effect
 

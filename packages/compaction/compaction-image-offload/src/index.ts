@@ -9,7 +9,7 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import type {} from '@deepseek-ai/dsh-compaction'
+import type {} from 'bake-compaction'
 import type { RequestErrorAction } from 'bake-agent'
 import { IMAGE_OFFLOAD_REQUIRED_CODE, LlmError } from '@deepseek-ai/dsh-llm'
 import { offloadOldestImages } from './image-offload.ts'

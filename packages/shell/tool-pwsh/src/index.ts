@@ -14,7 +14,7 @@
  * `ctx.approval`), and the bash marker/truncation rendering story. UI
  * presentation mirrors the bash tool's too: a completed foreground call is
  * a terminal card with the parsed exit-status pill, using the shared
- * exit-status parse from `@deepseek-ai/dsh-shell`.
+ * exit-status parse from `bake-shell`.
  *
  * @module @deepseek-ai/dsh-tool-pwsh
  */
@@ -26,20 +26,20 @@ import { defineTool, TOOL_ABORTED } from 'bake-tools'
 import type { GenericCallView, TerminalCallView, ToolExecution, ToolResult, ToolResultView } from 'bake-tools'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
 import type { Agent } from 'bake-agent'
-import type {} from '@deepseek-ai/dsh-jobs'
+import type {} from 'bake-jobs'
 import type {} from '@deepseek-ai/dsh-shell-env'
 import type {} from '@deepseek-ai/dsh-user-approval'
-import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
-import { ESCALATION_TARGETS, approveEscalation, validateEscalationArgs } from '@deepseek-ai/dsh-sandbox'
+import type { SandboxExecutionPolicy, SandboxMode } from 'bake-sandbox'
+import { ESCALATION_TARGETS, approveEscalation, validateEscalationArgs } from 'bake-sandbox'
 import type { SandboxPolicyService } from '@deepseek-ai/dsh-sandbox-policy'
-import type { ShellRunResult } from '@deepseek-ai/dsh-shell'
-import { parseExitStatus } from '@deepseek-ai/dsh-shell'
-import { openChangeReport, shellChangesOf, terminalChanges, withRunningJobs } from '@deepseek-ai/dsh-shell-change-report'
+import type { ShellRunResult } from 'bake-shell'
+import { parseExitStatus } from 'bake-shell'
+import { openChangeReport, shellChangesOf, terminalChanges, withRunningJobs } from 'bake-shell-change-report'
 import { processJob } from './background.ts'
 import { renderPwshProcessRead, renderPwshResult } from './render.ts'
 import type { RenderablePwshResult } from './render.ts'
 
-declare module '@deepseek-ai/dsh-jobs' {
+declare module 'bake-jobs' {
   interface JobKindMap {
     pwsh: 'pwsh'
   }

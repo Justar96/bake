@@ -28,17 +28,17 @@
   "license": "MIT",
   "peerDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
-    "@deepseek-ai/dsh-ptc-runtime": "workspace:^",
-    "@deepseek-ai/dsh-timeout": "workspace:^"
+    "bake-ptc-runtime": "workspace:^",
+    "bake-timeout": "workspace:^"
   },
   "dependencies": {
-    "@deepseek-ai/dsh-util-values": "workspace:^",
+    "bake-util-values": "workspace:^",
     "@deepseek-ai/schemastery": "workspace:^",
     "@earendil-works/pi-codemode": "1.0.0"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
-    "@deepseek-ai/dsh-ptc-runtime": "workspace:^",
-    "@deepseek-ai/dsh-timeout": "workspace:^"
+    "bake-ptc-runtime": "workspace:^",
+    "bake-timeout": "workspace:^"
   }
 }

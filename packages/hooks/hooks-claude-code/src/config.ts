@@ -6,7 +6,7 @@
  * @module @deepseek-ai/dsh-hooks-claude-code/config
  */
 
-import { matcherDiagnostic, type MatcherGroup } from '@deepseek-ai/dsh-hook-protocol'
+import { matcherDiagnostic, type MatcherGroup } from 'bake-hook-protocol'
 
 const CLAUDE_EVENTS = [
   'SessionStart',

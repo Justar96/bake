@@ -18,7 +18,7 @@ import type {
 import SystemPrompt from 'bake-system-prompt'
 import ToolRuntime from 'bake-tools'
 import * as ToolBashPersistent from '@deepseek-ai/dsh-tool-bash-persistent'
-import { unsupportedInbox } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { unsupportedInbox } from 'bake-agent-loop-testkit'
 
 const contexts: Context[] = []
 let callNumber = 0

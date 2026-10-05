@@ -21,7 +21,7 @@ import {
   SessionPersistenceNotFoundError,
   SessionPersistenceRevision,
   SessionReadOnlyError,
-} from '@deepseek-ai/dsh-session-persistence'
+} from 'bake-session-persistence'
 import type {
   SessionAccess,
   SessionHandle,
@@ -29,7 +29,7 @@ import type {
   SessionHandleFlushOptions,
   SessionHandleReadOptions,
   SessionHandleReadResult,
-} from '@deepseek-ai/dsh-session-persistence'
+} from 'bake-session-persistence'
 import type { SessionWriteLease } from './lease.ts'
 
 /** Maximum intentional wait before a routed live session batch starts writing. */

@@ -19,7 +19,7 @@ import { Context, type Fiber } from '@deepseek-ai/cordis'
 import { Include } from '@deepseek-ai/cordis-plugin-include'
 import type { EntryTree } from '@deepseek-ai/cordis-plugin-loader'
 import { scopeOf, scopeParentOf, type ScopeKey } from 'bake-scope'
-import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
+import { RemoteError } from 'bake-typert-protocol'
 import type { AgentPreset } from './preset.ts'
 import { classifyRowSpecifier } from './specifier.ts'
 
@@ -146,7 +146,7 @@ const mounts = new Set<PresetMount>()
  *
  * Pruning therefore has to happen on a path this module owns. Reading is one
  * such path, but not a reliable one: the only production reader is the
- * invariant companion's service listener, and `dsh-invariants` is a
+ * invariant companion's service listener, and `bake-invariants` is a
  * development composition — a shipped host never loads it. Mounting is the
  * other, and it is the one every session takes, which bounds the set at one
  * generation of dead records rather than one per session ever composed. Each

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import SessionStore, { type Session, type SessionEvent } from 'bake-session'
-import InvariantRegistry, { InvariantError } from '@deepseek-ai/dsh-invariants'
+import InvariantRegistry, { InvariantError } from 'bake-invariants'
 import * as SandboxPolicyInvariant from '@deepseek-ai/dsh-sandbox-policy/invariant'
 
 async function setup(): Promise<Context> {

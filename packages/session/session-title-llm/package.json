@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-session-title-llm",
+  "name": "bake-session-title-llm",
   "description": "Shared LLM generation policy for DeepSeek Harness session-title providers",
   "version": "0.1.6-alpha.2",
   "publishConfig": {
@@ -31,10 +31,10 @@
     "@deepseek-ai/dsh-llm": "workspace:^",
     "bake-session": "workspace:^",
     "@deepseek-ai/dsh-session-title": "workspace:^",
-    "@deepseek-ai/dsh-timeout": "workspace:^"
+    "bake-timeout": "workspace:^"
   },
   "dependencies": {
-    "@deepseek-ai/dsh-util-values": "workspace:^",
+    "bake-util-values": "workspace:^",
     "@deepseek-ai/schemastery": "workspace:^"
   },
   "devDependencies": {
@@ -42,6 +42,6 @@
     "@deepseek-ai/dsh-llm": "workspace:^",
     "bake-session": "workspace:^",
     "@deepseek-ai/dsh-session-title": "workspace:^",
-    "@deepseek-ai/dsh-timeout": "workspace:^"
+    "bake-timeout": "workspace:^"
   }
 }

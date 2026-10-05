@@ -16,7 +16,7 @@ kind: "package-library"
 ## Skeleton
 
 ```markdown
-# @deepseek-ai/dsh-<name>
+# bake-<name>
 
 ## Summary
 

@@ -35,7 +35,7 @@
   },
   "devDependencies": {
     "bake-agent": "workspace:^",
-    "@deepseek-ai/dsh-ptc-runtime": "workspace:^",
+    "bake-ptc-runtime": "workspace:^",
     "bake-scope": "workspace:^",
     "bake-session": "workspace:^",
     "bake-system-prompt": "workspace:^",

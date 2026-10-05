@@ -3,7 +3,7 @@ description: "Durable image and file attachments for users and maintainers attac
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-attachment
+# bake-attachment
 
 ## Summary
 

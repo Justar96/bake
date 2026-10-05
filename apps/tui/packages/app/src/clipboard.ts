@@ -3,7 +3,7 @@ import { execFile, spawn } from 'node:child_process'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { ImageMediaType } from '@deepseek-ai/dsh-attachment'
+import type { ImageMediaType } from 'bake-attachment'
 
 /** An image the clipboard held. */
 export interface ClipboardImage {

@@ -10,7 +10,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, AgentOptions, CreateAgentOptions } from 'bake-agent'
-import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
+import type { SandboxMode } from 'bake-sandbox'
 import type { Session } from 'bake-session'
 import type {} from 'bake-system-prompt'
 import type { ToolRestriction } from 'bake-tools'

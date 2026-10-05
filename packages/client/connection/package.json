@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-client-connection",
+  "name": "bake-client-connection",
   "description": "Authenticated RPC transport and generation lifecycle",
   "version": "0.1.6-alpha.2",
   "publishConfig": {
@@ -34,7 +34,7 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@deepseek-ai/dsh-credentials": "workspace:^",
+    "bake-credentials": "workspace:^",
     "@deepseek-ai/schemastery": "workspace:^",
     "zod": "catalog:"
   },
@@ -48,9 +48,9 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
-    "@deepseek-ai/dsh-attachment": "workspace:^",
-    "@deepseek-ai/dsh-brand": "workspace:^",
-    "@deepseek-ai/dsh-host-webserver": "workspace:^",
+    "bake-attachment": "workspace:^",
+    "bake-brand": "workspace:^",
+    "bake-host-webserver": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
     "bake-session": "workspace:^"
   }

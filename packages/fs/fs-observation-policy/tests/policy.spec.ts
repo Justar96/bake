@@ -2,8 +2,8 @@
 
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { FsTargetKey, FsVersion } from '@deepseek-ai/dsh-fs'
-import type { FsEditIntent, FsObservation, FsTarget, FsWriteIntent } from '@deepseek-ai/dsh-fs'
+import { FsTargetKey, FsVersion } from 'bake-fs'
+import type { FsEditIntent, FsObservation, FsTarget, FsWriteIntent } from 'bake-fs'
 import * as FsPolicy from '@deepseek-ai/dsh-fs-observation-policy'
 import type { FsObservationActor } from '@deepseek-ai/dsh-fs-observation-policy'
 

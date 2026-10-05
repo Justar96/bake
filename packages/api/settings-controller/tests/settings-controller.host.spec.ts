@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import type { SettingsDescriptor } from '@deepseek-ai/dsh-settings'
-import { RemoteError, remoteErrorOf, remoteMethods } from '@deepseek-ai/dsh-typert-protocol'
+import type { SettingsDescriptor } from 'bake-settings'
+import { RemoteError, remoteErrorOf, remoteMethods } from 'bake-typert-protocol'
 import SettingsController from '../src/index.ts'
 import { MemorySettings } from '../../../settings/settings/tests/memory.ts'
 

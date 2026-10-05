@@ -64,17 +64,17 @@
     "@deepseek-ai/cordis": "workspace:^"
   },
   "dependencies": {
-    "@deepseek-ai/dsh-util-crypto": "workspace:^",
+    "bake-util-crypto": "workspace:^",
     "@deepseek-ai/schemastery": "workspace:^",
     "zod": "catalog:",
-    "@deepseek-ai/dsh-timeout": "workspace:^",
-    "@deepseek-ai/dsh-brand": "workspace:^",
-    "@deepseek-ai/dsh-util-values": "workspace:^",
-    "@deepseek-ai/dsh-typert-protocol": "workspace:^"
+    "bake-timeout": "workspace:^",
+    "bake-brand": "workspace:^",
+    "bake-util-values": "workspace:^",
+    "bake-typert-protocol": "workspace:^"
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-attachment": "workspace:^",
-    "@deepseek-ai/dsh-invariants": "workspace:^",
+    "bake-attachment": "workspace:^",
+    "bake-invariants": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   }
 }

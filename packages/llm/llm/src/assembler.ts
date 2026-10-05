@@ -6,8 +6,8 @@
  * @module @deepseek-ai/dsh-llm/assembler
  */
 
-import { brandString } from '@deepseek-ai/dsh-brand'
-import { assertNever } from '@deepseek-ai/dsh-util-values'
+import { brandString } from 'bake-brand'
+import { assertNever } from 'bake-util-values'
 import type { ToolCallId } from './brand.ts'
 import { createMessage } from './message.ts'
 import type { Message, MessageSource } from './message.ts'

@@ -5,13 +5,13 @@ import type { FinishReason, GenerateOptions, StreamChunk } from '@deepseek-ai/ds
 import SessionStore, { SessionId } from 'bake-session'
 import { SessionTitleProviderId } from '@deepseek-ai/dsh-session-title'
 import type { SessionTitleProviderRequest } from '@deepseek-ai/dsh-session-title'
-import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
+import { MAX_TIMER_DELAY_MS } from 'bake-timeout'
 import {
   generateSessionTitleWithLlm,
   resolveSessionTitleLlmConfig,
   SESSION_TITLE_TIMEOUT_CODE,
-} from '@deepseek-ai/dsh-session-title-llm'
-import type { SessionTitleLlmConfig } from '@deepseek-ai/dsh-session-title-llm'
+} from 'bake-session-title-llm'
+import type { SessionTitleLlmConfig } from 'bake-session-title-llm'
 
 class RecordingAdapter extends LlmAdapter {
   readonly requests: GenerateOptions[] = []

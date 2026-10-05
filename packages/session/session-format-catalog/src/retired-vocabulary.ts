@@ -21,9 +21,9 @@
  * an entry only with the Session-format version bump and migration that
  * retires its records.
  *
- * @module @deepseek-ai/dsh-session-format-catalog/retired-vocabulary
+ * @module bake-session-format-catalog/retired-vocabulary
  */
-import type { Branded } from '@deepseek-ai/dsh-brand'
+import type { Branded } from 'bake-brand'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm/types'
 import type { MessageId, ToolCallId } from '@deepseek-ai/dsh-llm/brand'
 import type { SessionId } from 'bake-session/types'

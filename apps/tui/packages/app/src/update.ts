@@ -12,7 +12,7 @@ import {
   cachedUpdate, checksDisabled, compareVersions, currentVersion, detectInstall, FAILED_CHECK_RETRY_MS, hostTarget,
   refreshCheck, releaseSource, selfUpdate, UpdateError, type InstallProgress,
 } from '@deepseek-ai/dsh-updater'
-import { assertNever } from '@deepseek-ai/dsh-util-values'
+import { assertNever } from 'bake-util-values'
 import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
 import type { InstallStep } from '@dsh-tui/ui/install-progress.ts'
 

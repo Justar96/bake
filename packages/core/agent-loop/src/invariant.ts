@@ -5,7 +5,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { isAgentLoopRequest, type GenerateOptions } from '@deepseek-ai/dsh-llm'
-import type { InvariantFailure, InvariantInstaller } from '@deepseek-ai/dsh-invariants'
+import type { InvariantFailure, InvariantInstaller } from 'bake-invariants'
 import { foldRequestHeader } from 'bake-session'
 
 const PACKAGE_NAME = 'bake-agent-loop'

@@ -20,8 +20,8 @@ import { once } from 'node:events'
 import { gunzipSync } from 'node:zlib'
 import { resolveConfigPath, resolveTelemetryPatch } from '@deepseek-ai/dsh-app-boot'
 import type {} from '@deepseek-ai/dsh-command-feedback'
-import type {} from '@deepseek-ai/dsh-session-telemetry'
-import { runFixtureTurn } from '@deepseek-ai/dsh-loader-smoke'
+import type {} from 'bake-session-telemetry'
+import { runFixtureTurn } from 'bake-loader-smoke'
 import { bootProductionProfile } from '../../../../test-support/loader-smoke/tests/fixtures/production-profile.ts'
 
 const configPath = process.argv[2]

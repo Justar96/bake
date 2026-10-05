@@ -5,7 +5,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { PtcRuntime } from '@deepseek-ai/dsh-ptc-runtime'
+import { PtcRuntime } from 'bake-ptc-runtime'
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
@@ -13,7 +13,7 @@ import { turnBoundaryProjectionDefinition } from 'bake-agent-loop'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import SystemPrompt, { renderPrompt } from 'bake-system-prompt'
 import ToolRuntime, { type ToolResult } from 'bake-tools'
-import { FileSystem, FsError, FsTargetKey, FsVersion } from '@deepseek-ai/dsh-fs'
+import { FileSystem, FsError, FsTargetKey, FsVersion } from 'bake-fs'
 import type {
   FsDirEntry,
   FsEditIntent,
@@ -24,7 +24,7 @@ import type {
   FsTarget,
   FsWriteIntent,
   FsWriteOutcome,
-} from '@deepseek-ai/dsh-fs'
+} from 'bake-fs'
 import * as FsPolicy from '@deepseek-ai/dsh-fs-observation-policy'
 import * as ToolFs from '@deepseek-ai/dsh-tool-fs'
 import { STREAM_MIN_SIZE } from '../src/read.ts'
@@ -32,7 +32,7 @@ import { formatReadOutput } from '../src/read-render.ts'
 import type { FileReadOutcome } from '../src/read-render.ts'
 import { sessionCwd } from '../src/session-cwd.ts'
 import ApprovalService from '@deepseek-ai/dsh-user-approval'
-import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
+import type { SandboxExecutionPolicy, SandboxMode } from 'bake-sandbox'
 import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
 import { SessionId, SessionLogOffset, SessionSeq } from 'bake-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
@@ -1042,7 +1042,7 @@ describe('sandbox escalation API (write/edit)', () => {
 
 /** Schema assembly only: these cases never execute user code. */
 class SchemaOnlyPtcRuntime extends PtcRuntime {
-  resolve(request: import('@deepseek-ai/dsh-ptc-runtime').PtcRunRequest): import('@deepseek-ai/dsh-ptc-runtime').PtcRunSpec { return { ...request, cwd: request.cwd ?? process.cwd(), timeoutMs: request.timeoutMs ?? 120_000 } }
+  resolve(request: import('bake-ptc-runtime').PtcRunRequest): import('bake-ptc-runtime').PtcRunSpec { return { ...request, cwd: request.cwd ?? process.cwd(), timeoutMs: request.timeoutMs ?? 120_000 } }
 
   readonly language = 'typescript'
   readonly isolation = 'fake'

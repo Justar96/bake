@@ -2,8 +2,8 @@
 
 import { Context } from '@deepseek-ai/cordis'
 import { SessionId } from 'bake-session'
-import type { SessionFormatJsonObject } from '@deepseek-ai/dsh-session-format'
-import { SessionFormatUnsupportedError } from '@deepseek-ai/dsh-session-persistence'
+import type { SessionFormatJsonObject } from 'bake-session-format'
+import { SessionFormatUnsupportedError } from 'bake-session-persistence'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
@@ -58,7 +58,7 @@ const migrationRefusals = [
     tail: { type: 'session-log-deepseek/delivery-accepted', data: {
       sessionId: id, throughSeq: prefix.length - 1, sessionFormatVersion: 3,
     } },
-    diagnostic: '@deepseek-ai/dsh-session-format-v2-to-v3 refuses this format v2 Session: format v2 delivery marker claims target format v3',
+    diagnostic: 'bake-session-format-v2-to-v3 refuses this format v2 Session: format v2 delivery marker claims target format v3',
   },
   {
     name: 'source message colliding with the generated system ID',

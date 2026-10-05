@@ -8,7 +8,7 @@
  * and the bytes captured before the command. A file that was clean takes its
  * previous content from the index blob. Every phase has a time budget, and
  * running out of time degrades the report instead of the command.
- * @module @deepseek-ai/dsh-shell-change-report
+ * @module bake-shell-change-report
  */
 
 import { createHash } from 'node:crypto'
@@ -16,7 +16,7 @@ import { copyFile, lstat, mkdtemp, open, realpath, rm } from 'node:fs/promises'
 import type { BigIntStats } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, relative, resolve } from 'node:path'
-import { deadline, timeoutOf } from '@deepseek-ai/dsh-timeout'
+import { deadline, timeoutOf } from 'bake-timeout'
 import { createGitRead, parseStatus } from './git.ts'
 import type { ConfineArgv, GitRead, StatusEntry, StatusSnapshot } from './git.ts'
 import { boundedHunks } from './hunks.ts'

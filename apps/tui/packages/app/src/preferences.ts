@@ -32,7 +32,7 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import type { SettingsDescriptor, SettingsProvider, SettingsScope } from '@deepseek-ai/dsh-settings'
+import type { SettingsDescriptor, SettingsProvider, SettingsScope } from 'bake-settings'
 import type { CommandResult } from '@deepseek-ai/dsh-commands'
 import type {} from 'bake-agent-default-model'
 import { PERMISSION_SETTINGS_NAMESPACE } from '@deepseek-ai/dsh-permission-presets'

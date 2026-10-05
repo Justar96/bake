@@ -14,7 +14,7 @@ import type {
   TerminalSessionStatus,
   TerminalSignal,
 } from '@deepseek-ai/dsh-terminal'
-import { unsupportedInbox } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { unsupportedInbox } from 'bake-agent-loop-testkit'
 
 const agentScopeDisposers = new WeakMap<Agent, () => Promise<void>>()
 const ptyServiceDisposers = new WeakMap<Context, () => Promise<void>>()

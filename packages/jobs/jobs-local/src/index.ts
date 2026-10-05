@@ -14,11 +14,11 @@ import z from '@deepseek-ai/schemastery'
 import type { Agent } from 'bake-agent'
 import { AnonymousEntries, ScopedLayers, scopeOf } from 'bake-scope'
 import type { ScopeLayer } from 'bake-scope'
-import { deadline, timeoutOf } from '@deepseek-ai/dsh-timeout'
-import { JobRegistry, JobId } from '@deepseek-ai/dsh-jobs'
+import { deadline, timeoutOf } from 'bake-timeout'
+import { JobRegistry, JobId } from 'bake-jobs'
 import type {
   JobDoneListener, JobKind, JobOutcome, JobRead, JobSnapshot, JobStart, JobStatus,
-} from '@deepseek-ai/dsh-jobs'
+} from 'bake-jobs'
 
 /** Timeout code that distinguishes a bounded wait from caller cancellation. */
 export const TASK_WAIT_TIMEOUT = 'TASK_WAIT_TIMEOUT'
@@ -83,7 +83,7 @@ class JobLayer implements ScopeLayer {
 
 /**
  * The in-memory `jobs` registry. See the Service Definition contract in
- * `@deepseek-ai/dsh-jobs` for the ownership, isolation, and lifecycle
+ * `bake-jobs` for the ownership, isolation, and lifecycle
  * semantics this implementation honors.
  */
 export class LocalJobRegistry extends JobRegistry {

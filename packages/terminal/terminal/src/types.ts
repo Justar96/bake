@@ -4,7 +4,7 @@
  * @module @deepseek-ai/dsh-terminal/types
  */
 
-import type { Branded } from '@deepseek-ai/dsh-brand'
+import type { Branded } from 'bake-brand'
 import type { Agent } from 'bake-agent'
 
 /** Internal exported basis for the public `TerminalSessionId` type/value pair. */
@@ -31,7 +31,7 @@ export type TerminalWaitReason = 'stdin_read' | 'inferred_idle' | 'timeout' | 's
 /**
  * Signals the model-facing PTY surface permits for foreground process groups.
  * Kept member-identical to `SubprocessTerminalSignal` in
- * `@deepseek-ai/dsh-subprocess` without a cross-seam dependency; change both together.
+ * `bake-subprocess` without a cross-seam dependency; change both together.
  */
 export type TerminalSignal = 'SIGINT' | 'SIGTERM' | 'SIGKILL' | 'SIGTSTP' | 'SIGHUP'
 

@@ -1,15 +1,15 @@
 /**
  * Package-owned relational invariants for the session event log. Load this
- * companion beside `@deepseek-ai/dsh-invariants` to enable the checks.
+ * companion beside `bake-invariants` to enable the checks.
  *
  * @module bake-session/invariant
  */
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { ToolCallId } from '@deepseek-ai/dsh-llm'
-import type { InvariantFailure, InvariantInstaller } from '@deepseek-ai/dsh-invariants'
+import type { InvariantFailure, InvariantInstaller } from 'bake-invariants'
 import type { Session, SessionEvent, SessionSeqCursor } from 'bake-session'
-import { assertNever } from '@deepseek-ai/dsh-util-values'
+import { assertNever } from 'bake-util-values'
 import { TOOL_NOT_STARTED } from './repair.ts'
 
 const PACKAGE_NAME = 'bake-session'

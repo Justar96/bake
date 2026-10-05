@@ -38,7 +38,7 @@
   },
   "devDependencies": {
     "bake-agent": "workspace:^",
-    "@deepseek-ai/dsh-agent-loop-testkit": "workspace:^",
+    "bake-agent-loop-testkit": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
     "bake-scope": "workspace:^",
     "bake-session": "workspace:^",

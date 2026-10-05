@@ -15,7 +15,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execa } from 'execa'
 import { describe, expect, it, onTestFinished } from 'vitest'
-import { resolveExampleLaunch } from '@deepseek-ai/dsh-loader-smoke'
+import { resolveExampleLaunch } from 'bake-loader-smoke'
 import { PROCESS_SHUTDOWN_TIMEOUT_MS } from '../src/process-shutdown.ts'
 import { deepseekEndpointSettings } from './fixtures/deepseek-endpoint.ts'
 

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import { deepFreeze } from '@deepseek-ai/dsh-util-values'
+import { deepFreeze } from 'bake-util-values'
 import SessionStore, { Session, SessionId, SessionSeq, SessionLogOffset, foldSurface, deriveEventMessage } from '../src/index.ts'
 import type { SessionEvent, SessionMessageProjection } from '../src/index.ts'
 import { MESSAGE_PROJECTION_EVENT_TYPES } from '../src/known-event-types.ts'

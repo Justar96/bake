@@ -3,7 +3,7 @@ description: "Read-only projection of the current Cordis Loader plugin state wit
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-host-plugin-inventory
+# bake-host-plugin-inventory
 
 ## Summary
 

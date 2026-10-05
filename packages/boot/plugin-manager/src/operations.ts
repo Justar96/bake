@@ -7,7 +7,7 @@ import {
   DEFAULT_PROFILE_BUNDLES, bundlePatchPaths, initProfile, PROFILE_TEMPLATES, readProfileManifest,
   resolveBundleDir, resolveProfileDir, loadOverlayPatches, type ProfileManifest,
 } from '@deepseek-ai/dsh-app-boot'
-import { scrubbedParentEnv } from '@deepseek-ai/dsh-subprocess'
+import { scrubbedParentEnv } from 'bake-subprocess'
 import type { PackageResult } from './types.ts'
 
 /** Profile and invocation locations supplied by the launcher. */

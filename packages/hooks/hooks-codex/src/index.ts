@@ -4,7 +4,7 @@
  * matchers, snake_case payloads without a trailing newline, no hook environment
  * or command substitution, and no pre-tool approval or rewrite path; only
  * blocking decisions are honored. Shared execution and parsing live in
- * `dsh-hook-protocol`.
+ * `bake-hook-protocol`.
  * @module @deepseek-ai/dsh-hooks-codex
  */
 
@@ -32,7 +32,7 @@ import {
   type HookOutput,
   type MatcherGroup,
   type MergedHookOutcome,
-} from '@deepseek-ai/dsh-hook-protocol'
+} from 'bake-hook-protocol'
 import { parseCodexConfig, type CodexHookConfig } from './config.ts'
 /* jscpd:ignore-end */
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import InvariantRegistry, { InvariantError } from '@deepseek-ai/dsh-invariants'
+import InvariantRegistry, { InvariantError } from 'bake-invariants'
 import SessionStore, { SessionId, SessionLogOffset, SessionSeq } from 'bake-session'
 import type { SessionEvent } from 'bake-session'
 import * as scheduleInvariant from '../src/invariant.ts'

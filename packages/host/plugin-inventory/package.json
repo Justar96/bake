@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-host-plugin-inventory",
+  "name": "bake-host-plugin-inventory",
   "description": "Read-only projection of current Cordis Loader plugin state",
   "version": "0.1.6-alpha.2",
   "publishConfig": {
@@ -34,7 +34,7 @@
   "peerDependencies": {
     "@deepseek-ai/cordis-plugin-loader": "workspace:^",
     "@deepseek-ai/dsh-agent-presets": "workspace:^",
-    "@deepseek-ai/dsh-brand": "workspace:^",
+    "bake-brand": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   },
   "peerDependenciesMeta": {
@@ -45,7 +45,7 @@
   "devDependencies": {
     "@deepseek-ai/cordis-plugin-loader": "workspace:^",
     "@deepseek-ai/dsh-agent-presets": "workspace:^",
-    "@deepseek-ai/dsh-brand": "workspace:^",
+    "bake-brand": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   }
 }

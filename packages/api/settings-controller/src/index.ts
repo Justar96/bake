@@ -4,7 +4,7 @@
  * `ctx.settings`, owned by the class below; and `credentials`, mounted from
  * here as its own plugin.
  *
- * @module @deepseek-ai/dsh-api-settings-controller
+ * @module bake-api-settings-controller
  */
 
 import { dirname } from 'node:path'
@@ -16,13 +16,13 @@ import {
   canOpenNativePath,
   openNativePath,
   openNativeTextFile,
-} from '@deepseek-ai/dsh-native-command'
-import type { SettingsDescriptor, SettingsPathOp, SettingsProvider } from '@deepseek-ai/dsh-settings'
+} from 'bake-native-command'
+import type { SettingsDescriptor, SettingsPathOp, SettingsProvider } from 'bake-settings'
 import type {
   SettingsDescribeValue, SettingsNamespaceView, SettingsPathOpView,
-} from '@deepseek-ai/dsh-settings/types'
-import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
-import type { JsonValue } from '@deepseek-ai/dsh-util-values'
+} from 'bake-settings/types'
+import { Remote, RemoteError, TypertRemoteService } from 'bake-typert-protocol'
+import type { JsonValue } from 'bake-util-values'
 import { z } from 'zod'
 import { CredentialsController } from './credentials.ts'
 import type { AgentPresetDirectoryOpenValue, SettingsDocumentOpenValue } from './types.ts'

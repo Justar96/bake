@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { SessionSeq, SessionId } from 'bake-session'
 import type { SessionEvent, SessionHeader } from 'bake-session'
-import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
+import type { SessionPersistence } from 'bake-session-persistence'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import {
   generationLogPath, logPath, scanLog, sessionDir, toHeaderLine, type JsonlCompression,

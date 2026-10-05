@@ -4,7 +4,7 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import type { InvariantInstaller } from '@deepseek-ai/dsh-invariants'
+import type { InvariantInstaller } from 'bake-invariants'
 // Type-only: resolves the `system-prompt/assemble` waterfall this companion
 // joins, and the `agent` field `dsh-agent` merges into its context.
 import type {} from 'bake-system-prompt'

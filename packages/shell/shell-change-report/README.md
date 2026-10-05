@@ -3,11 +3,11 @@ description: "The workspace files a shell command changed while it ran, for main
 kind: "package-library"
 ---
 
-# @deepseek-ai/dsh-shell-change-report
+# bake-shell-change-report
 
 ## Summary
 
-`dsh-shell-change-report` finds the workspace files a shell command changed while it ran, so a terminal can show a shell edit the way it shows an `edit` call. It reads git before and after the command, with hardened and time-bounded reads. It returns the changed files with contextual hunks, bounded so the session log stays small. The report is for display only: the shell tools attach it as `tool/result.meta`, and the model never receives it. `tool-bash` and `tool-pwsh` use it; it registers no service and has no `ctx` key.
+`bake-shell-change-report` finds the workspace files a shell command changed while it ran, so a terminal can show a shell edit the way it shows an `edit` call. It reads git before and after the command, with hardened and time-bounded reads. It returns the changed files with contextual hunks, bounded so the session log stays small. The report is for display only: the shell tools attach it as `tool/result.meta`, and the model never receives it. `tool-bash` and `tool-pwsh` use it; it registers no service and has no `ctx` key.
 
 ## Table of Contents
 
@@ -26,7 +26,7 @@ kind: "package-library"
 A shell tool opens a window before it runs a foreground command and closes it afterwards. `openChangeReport` decides from the call's file policy whether to report the call, and how to confine the git reads. `finish` returns the report or `undefined`, and `release` closes a window without comparing, as an aborted command does.
 
 ```ts
-import { openChangeReport, withRunningJobs } from '@deepseek-ai/dsh-shell-change-report'
+import { openChangeReport, withRunningJobs } from 'bake-shell-change-report'
 
 const window = await openChangeReport(ctx, exec, policy, workdir)
 try {

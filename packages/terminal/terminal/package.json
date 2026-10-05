@@ -28,13 +28,13 @@
   "license": "MIT",
   "peerDependencies": {
     "bake-agent": "workspace:^",
-    "@deepseek-ai/dsh-brand": "workspace:^",
+    "bake-brand": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   },
   "devDependencies": {
     "bake-agent": "workspace:^",
-    "@deepseek-ai/dsh-agent-loop-testkit": "workspace:^",
-    "@deepseek-ai/dsh-brand": "workspace:^",
+    "bake-agent-loop-testkit": "workspace:^",
+    "bake-brand": "workspace:^",
     "bake-session": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   }

@@ -7,10 +7,10 @@
 
 import { randomUUID } from 'node:crypto'
 import { Context, Service, symbols } from '@deepseek-ai/cordis'
-import type { ConnectionRpcHandler } from '@deepseek-ai/dsh-client-connection'
-import { Deque } from '@deepseek-ai/dsh-deque'
-import type { WebUpgradeRoute } from '@deepseek-ai/dsh-host-webserver'
-import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
+import type { ConnectionRpcHandler } from 'bake-client-connection'
+import { Deque } from 'bake-deque'
+import type { WebUpgradeRoute } from 'bake-host-webserver'
+import { MAX_TIMER_DELAY_MS } from 'bake-timeout'
 import z from '@deepseek-ai/schemastery'
 export type { TypertGatewayFaultDetails } from './remote-error-codes.ts'
 import {
@@ -21,7 +21,7 @@ import {
   type InvocationParameterDescriptor,
   type TypertCodec,
   type TypertGatewayBinding,
-} from '@deepseek-ai/dsh-typert-protocol'
+} from 'bake-typert-protocol'
 import type {
   InvokeRemoteRequest,
   TypertGateway,

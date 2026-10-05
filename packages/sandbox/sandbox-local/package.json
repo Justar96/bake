@@ -29,19 +29,19 @@
   "peerDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
-    "@deepseek-ai/dsh-sandbox": "workspace:^",
+    "bake-sandbox": "workspace:^",
     "bake-session": "workspace:^"
   },
   "dependencies": {
-    "@deepseek-ai/dsh-sandbox-windows-acl": "workspace:^",
-    "@deepseek-ai/dsh-util-values": "workspace:^",
+    "bake-sandbox-windows-acl": "workspace:^",
+    "bake-util-values": "workspace:^",
     "@deepseek-ai/node-addon-system": "workspace:^",
     "@deepseek-ai/schemastery": "workspace:^"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
-    "@deepseek-ai/dsh-sandbox": "workspace:^",
+    "bake-sandbox": "workspace:^",
     "bake-session": "workspace:^"
   }
 }

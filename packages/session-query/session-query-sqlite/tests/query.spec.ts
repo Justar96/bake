@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { SessionId } from 'bake-session'
-import { SessionSearchCursor, type SessionQueryErrorCode } from '@deepseek-ai/dsh-session-query'
+import { SessionSearchCursor, type SessionQueryErrorCode } from 'bake-session-query'
 import {
   buildEventWhere,
   buildSessionWhere,

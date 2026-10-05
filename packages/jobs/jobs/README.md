@@ -3,11 +3,11 @@ description: "The background-job registry contract for users and maintainers com
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-jobs
+# bake-jobs
 
 ## Summary
 
-`dsh-jobs` lets tools keep long-running work active while an agent continues. Each job receives a stable `<kind>-N` id, and its owning agent can read output, wait with a timeout, or request cancellation. Ownership is scoped to the agent session, so other agents cannot inspect or stop the job; completion arrives as an in-session notice without polling. Background jobs can start only when the deployment supplies job execution.
+`bake-jobs` lets tools keep long-running work active while an agent continues. Each job receives a stable `<kind>-N` id, and its owning agent can read output, wait with a timeout, or request cancellation. Ownership is scoped to the agent session, so other agents cannot inspect or stop the job; completion arrives as an in-session notice without polling. Background jobs can start only when the deployment supplies job execution.
 
 ## Table of Contents
 

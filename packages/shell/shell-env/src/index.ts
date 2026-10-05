@@ -10,8 +10,8 @@
 
 import { Service, type Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { DSH_ENV_PREFIX } from '@deepseek-ai/dsh-shell'
-import type { DshEnvironment, DshEnvironmentKey } from '@deepseek-ai/dsh-shell'
+import { DSH_ENV_PREFIX } from 'bake-shell'
+import type { DshEnvironment, DshEnvironmentKey } from 'bake-shell'
 import { DSH_HOME_ENV, resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import type { ToolExecution } from 'bake-tools'
 

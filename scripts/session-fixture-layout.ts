@@ -10,10 +10,10 @@ import {
   type SessionEvent,
 } from 'bake-session'
 import type { SessionLogOffset as SessionLogOffsetType } from 'bake-session'
-import { sessionFormatCatalog } from '@deepseek-ai/dsh-session-format-catalog'
-import { SessionFormatEventCollector, type SessionFormatArtifactDecoder, type SessionFormatCodec } from '@deepseek-ai/dsh-session-format'
-import { releasedV0SessionFormatCodec, releasedV1SessionFormatCodec } from '@deepseek-ai/dsh-session-format-v0-to-v1'
-import { releasedV2SessionFormatCodec } from '@deepseek-ai/dsh-session-format-v1-to-v2'
+import { sessionFormatCatalog } from 'bake-session-format-catalog'
+import { SessionFormatEventCollector, type SessionFormatArtifactDecoder, type SessionFormatCodec } from 'bake-session-format'
+import { releasedV0SessionFormatCodec, releasedV1SessionFormatCodec } from 'bake-session-format-v0-to-v1'
+import { releasedV2SessionFormatCodec } from 'bake-session-format-v1-to-v2'
 
 const historicalCodecs: readonly SessionFormatCodec[] = [
   releasedV0SessionFormatCodec, releasedV1SessionFormatCodec, releasedV2SessionFormatCodec,

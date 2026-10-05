@@ -53,9 +53,9 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "@deepseek-ai/dsh-brand": "workspace:^",
-    "@deepseek-ai/dsh-chunked-list": "workspace:^",
-    "@deepseek-ai/dsh-util-values": "workspace:^",
+    "bake-brand": "workspace:^",
+    "bake-chunked-list": "workspace:^",
+    "bake-util-values": "workspace:^",
     "@deepseek-ai/schemastery": "workspace:^",
     "zod": "catalog:"
   },
@@ -63,25 +63,25 @@
     "@deepseek-ai/cordis": "workspace:^",
     "bake-agent": "workspace:^",
     "@deepseek-ai/dsh-agent-presets": "workspace:^",
-    "@deepseek-ai/dsh-attachment": "workspace:^",
-    "@deepseek-ai/dsh-invariants": "workspace:^",
-    "@deepseek-ai/dsh-jobs": "workspace:^",
+    "bake-attachment": "workspace:^",
+    "bake-invariants": "workspace:^",
+    "bake-jobs": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
-    "@deepseek-ai/dsh-sandbox": "workspace:^",
+    "bake-sandbox": "workspace:^",
     "@deepseek-ai/dsh-sandbox-policy": "workspace:^",
     "bake-scope": "workspace:^",
     "bake-session": "workspace:^",
-    "@deepseek-ai/dsh-session-persistence": "workspace:^",
+    "bake-session-persistence": "workspace:^",
     "@deepseek-ai/dsh-session-projection": "workspace:^",
     "@deepseek-ai/dsh-session-projection-cache": "workspace:^",
-    "@deepseek-ai/dsh-session-query": "workspace:^",
+    "bake-session-query": "workspace:^",
     "bake-system-prompt": "workspace:^",
     "bake-tools": "workspace:^",
-    "@deepseek-ai/dsh-typert-protocol": "workspace:^",
+    "bake-typert-protocol": "workspace:^",
     "@deepseek-ai/dsh-user-approval": "workspace:^",
-    "@deepseek-ai/dsh-util-time": "workspace:^",
+    "bake-util-time": "workspace:^",
     "@deepseek-ai/dsh-permission-presets": "workspace:^",
-    "@deepseek-ai/dsh-settings": "workspace:^"
+    "bake-settings": "workspace:^"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/dsh-agent-presets": {
@@ -90,13 +90,13 @@
     "@deepseek-ai/dsh-permission-presets": {
       "optional": true
     },
-    "@deepseek-ai/dsh-sandbox": {
+    "bake-sandbox": {
       "optional": true
     },
     "@deepseek-ai/dsh-sandbox-policy": {
       "optional": true
     },
-    "@deepseek-ai/dsh-session-persistence": {
+    "bake-session-persistence": {
       "optional": true
     },
     "@deepseek-ai/dsh-session-projection": {
@@ -105,16 +105,16 @@
     "@deepseek-ai/dsh-session-projection-cache": {
       "optional": true
     },
-    "@deepseek-ai/dsh-session-query": {
+    "bake-session-query": {
       "optional": true
     },
-    "@deepseek-ai/dsh-jobs": {
+    "bake-jobs": {
       "optional": true
     },
     "@deepseek-ai/dsh-user-approval": {
       "optional": true
     },
-    "@deepseek-ai/dsh-settings": {
+    "bake-settings": {
       "optional": true
     }
   },
@@ -122,28 +122,28 @@
     "@deepseek-ai/cordis": "workspace:^",
     "bake-agent": "workspace:^",
     "@deepseek-ai/dsh-agent-presets": "workspace:^",
-    "@deepseek-ai/dsh-attachment": "workspace:^",
-    "@deepseek-ai/dsh-invariants": "workspace:^",
-    "@deepseek-ai/dsh-jobs": "workspace:^",
+    "bake-attachment": "workspace:^",
+    "bake-invariants": "workspace:^",
+    "bake-jobs": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
-    "@deepseek-ai/dsh-sandbox": "workspace:^",
+    "bake-sandbox": "workspace:^",
     "@deepseek-ai/dsh-sandbox-policy": "workspace:^",
     "@deepseek-ai/dsh-schedule": "workspace:^",
     "bake-scope": "workspace:^",
     "bake-session": "workspace:^",
-    "@deepseek-ai/dsh-session-persistence": "workspace:^",
+    "bake-session-persistence": "workspace:^",
     "@deepseek-ai/dsh-session-projection": "workspace:^",
     "@deepseek-ai/dsh-session-projection-cache": "workspace:^",
-    "@deepseek-ai/dsh-session-query": "workspace:^",
+    "bake-session-query": "workspace:^",
     "@deepseek-ai/dsh-storage": "workspace:^",
     "@deepseek-ai/dsh-storage-domain": "workspace:^",
     "@deepseek-ai/dsh-storage-json": "workspace:^",
     "bake-system-prompt": "workspace:^",
     "bake-tools": "workspace:^",
-    "@deepseek-ai/dsh-typert-protocol": "workspace:^",
+    "bake-typert-protocol": "workspace:^",
     "@deepseek-ai/dsh-user-approval": "workspace:^",
-    "@deepseek-ai/dsh-util-time": "workspace:^",
+    "bake-util-time": "workspace:^",
     "@deepseek-ai/dsh-permission-presets": "workspace:^",
-    "@deepseek-ai/dsh-settings": "workspace:^"
+    "bake-settings": "workspace:^"
   }
 }

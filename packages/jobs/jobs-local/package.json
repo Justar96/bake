@@ -29,8 +29,8 @@
   "peerDependencies": {
     "bake-agent": "workspace:^",
     "bake-scope": "workspace:^",
-    "@deepseek-ai/dsh-jobs": "workspace:^",
-    "@deepseek-ai/dsh-timeout": "workspace:^",
+    "bake-jobs": "workspace:^",
+    "bake-timeout": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   },
   "dependencies": {
@@ -40,12 +40,12 @@
     "@deepseek-ai/cordis-plugin-include": "workspace:^",
     "@deepseek-ai/cordis-plugin-loader": "workspace:^",
     "bake-agent": "workspace:^",
-    "@deepseek-ai/dsh-agent-loop-testkit": "workspace:^",
-    "@deepseek-ai/dsh-brand": "workspace:^",
+    "bake-agent-loop-testkit": "workspace:^",
+    "bake-brand": "workspace:^",
     "bake-scope": "workspace:^",
     "bake-session": "workspace:^",
-    "@deepseek-ai/dsh-jobs": "workspace:^",
-    "@deepseek-ai/dsh-timeout": "workspace:^",
+    "bake-jobs": "workspace:^",
+    "bake-timeout": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   }
 }

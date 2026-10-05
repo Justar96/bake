@@ -1,4 +1,4 @@
-/** Attachment failure class. @module @deepseek-ai/dsh-attachment/error */
+/** Attachment failure class. @module bake-attachment/error */
 
 const IMAGE_ADMISSION_ERROR_CODES = [
   'TOO_MANY_IMAGES',

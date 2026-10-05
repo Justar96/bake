@@ -1,18 +1,18 @@
 import { describe, expect, expectTypeOf, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { AttachmentId } from '@deepseek-ai/dsh-attachment'
+import { AttachmentId } from 'bake-attachment'
 import BasicCompactionEngine from '@deepseek-ai/dsh-compaction-basic'
 import type { BasicCompactionConfig } from '@deepseek-ai/dsh-compaction-basic'
 import { selectCompactableRange } from '@deepseek-ai/dsh-compaction-basic/src/region.ts'
 import { frameSummary } from '@deepseek-ai/dsh-compaction-basic/src/summarizer.ts'
 import type { SummarizationInput, SummaryResult } from '@deepseek-ai/dsh-compaction-basic/src/summarizer.ts'
-import { CompactionId, toolPairingBalancedAfter, toolPairingBalancedBefore } from '@deepseek-ai/dsh-compaction'
+import { CompactionId, toolPairingBalancedAfter, toolPairingBalancedBefore } from 'bake-compaction'
 import {
   resolveCompactSpec,
   resolveConfig,
   resolveTargetPolicy,
 } from '@deepseek-ai/dsh-compaction-basic/src/config.ts'
-import type { CompactionResult } from '@deepseek-ai/dsh-compaction'
+import type { CompactionResult } from 'bake-compaction'
 import LlmRuntime, { createUserMessage, ToolCallId, CONTEXT_WINDOW_EXCEEDED_CODE, createSystemMessage, createToolResultMessage, LlmAdapter , createMessage } from '@deepseek-ai/dsh-llm'
 import type {
   ContentBlock,

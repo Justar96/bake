@@ -30,7 +30,7 @@ import { mkdir, open, stat } from 'node:fs/promises'
 import type { FileHandle } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tryLockExclusive } from '@deepseek-ai/node-addon-system/flock'
-import { SessionAlreadyOwnedError } from '@deepseek-ai/dsh-session-persistence'
+import { SessionAlreadyOwnedError } from 'bake-session-persistence'
 import type { SessionId } from 'bake-session'
 import { acquireLockHandleWin32, releaseLockHandleWin32, type Win32LockHandle } from './win32.ts'
 

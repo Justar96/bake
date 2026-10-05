@@ -44,7 +44,7 @@ import { Document, isMap, isScalar, parseDocument, type YAMLError } from 'yaml'
 import { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import { canonicalizeWatchPath, resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
-import { CredentialProvider, credentialRef, parseCredentialKey } from '@deepseek-ai/dsh-credentials'
+import { CredentialProvider, credentialRef, parseCredentialKey } from 'bake-credentials'
 import type {
   ApiKeyRecord,
   CredentialInfo,
@@ -54,7 +54,7 @@ import type {
   CredentialRecordInfo,
   CredentialRef,
   ResolvedCredential,
-} from '@deepseek-ai/dsh-credentials'
+} from 'bake-credentials'
 import type { LaunchEnvironmentEntry } from '@deepseek-ai/dsh-launch-environment'
 
 /** Basename of the credentials document inside the harness home. */

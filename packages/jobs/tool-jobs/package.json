@@ -32,18 +32,18 @@
   "peerDependencies": {
     "bake-agent": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
-    "@deepseek-ai/dsh-output-retention": "workspace:^",
-    "@deepseek-ai/dsh-jobs": "workspace:^",
+    "bake-output-retention": "workspace:^",
+    "bake-jobs": "workspace:^",
     "bake-tools": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   },
   "devDependencies": {
     "bake-agent": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
-    "@deepseek-ai/dsh-output-retention": "workspace:^",
+    "bake-output-retention": "workspace:^",
     "bake-session": "workspace:^",
     "bake-system-prompt": "workspace:^",
-    "@deepseek-ai/dsh-jobs": "workspace:^",
+    "bake-jobs": "workspace:^",
     "@deepseek-ai/dsh-jobs-local": "workspace:^",
     "bake-tools": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"

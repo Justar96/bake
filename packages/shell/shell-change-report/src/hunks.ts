@@ -1,7 +1,7 @@
 /**
  * Time-bounded contextual hunks between two texts, in the shape the `edit`
  * diff card draws.
- * @module @deepseek-ai/dsh-shell-change-report/hunks
+ * @module bake-shell-change-report/hunks
  */
 
 import { structuredPatch } from 'diff'

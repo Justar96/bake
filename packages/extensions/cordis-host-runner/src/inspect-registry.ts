@@ -3,7 +3,7 @@
 import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from 'bake-agent'
-import { snapshotJsonValue, type JsonValue } from '@deepseek-ai/dsh-util-values'
+import { snapshotJsonValue, type JsonValue } from 'bake-util-values'
 import { assertSupportedJsonSchema, validateJsonSchemaValue } from 'bake-tools'
 import type { JsonSchemaNode } from 'bake-tools'
 import type {

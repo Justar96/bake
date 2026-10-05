@@ -9,7 +9,7 @@ import { constants as bufferConstants } from 'node:buffer'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import z from '@deepseek-ai/schemastery'
-import { checkEditGuard, FileSystem, FsError, FsVersion } from '@deepseek-ai/dsh-fs'
+import { checkEditGuard, FileSystem, FsError, FsVersion } from 'bake-fs'
 import type {
   FsDirEntry,
   FsEditIntent,
@@ -20,7 +20,7 @@ import type {
   FsTarget,
   FsWriteIntent,
   FsWriteOutcome,
-} from '@deepseek-ai/dsh-fs'
+} from 'bake-fs'
 import {
   applyLiteralEdits,
   listDirectory,

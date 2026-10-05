@@ -13,10 +13,10 @@
  * hands the closure down, so this package never depends on the approval or
  * agent packages.
  *
- * @module dsh-sandbox/escalation
+ * @module bake-sandbox/escalation
  */
 
-import { assertNever } from '@deepseek-ai/dsh-util-values'
+import { assertNever } from 'bake-util-values'
 import type { SandboxMode } from './index.ts'
 
 /**

@@ -7,7 +7,7 @@ import {
   SessionLogOffset,
 } from 'bake-session'
 import type { SessionEvent, SessionHeader } from 'bake-session'
-import type { SessionFormatArtifact, SessionFormatHeader } from '@deepseek-ai/dsh-session-format'
+import type { SessionFormatArtifact, SessionFormatHeader } from 'bake-session-format'
 import { currentSessionMessageProjections } from './message-projections.ts'
 
 /**

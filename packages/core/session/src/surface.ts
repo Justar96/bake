@@ -16,7 +16,7 @@ import type {
   SurfaceEvent,
   SurfaceOp,
 } from './types.ts'
-import { isRecord } from '@deepseek-ai/dsh-util-values'
+import { isRecord } from 'bake-util-values'
 
 /** Readonly history immediately before a message-projection event. */
 export interface SessionMessageProjectionContext {

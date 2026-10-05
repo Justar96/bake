@@ -10,9 +10,9 @@
  * @module @deepseek-ai/dsh-tool-pwsh/render
  */
 
-import type { ShellProcessRead, ShellSandboxInfo, CollectedOutput } from '@deepseek-ai/dsh-shell'
-import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
-import { escalationHintMarker, sandboxDenialMarker } from '@deepseek-ai/dsh-sandbox'
+import type { ShellProcessRead, ShellSandboxInfo, CollectedOutput } from 'bake-shell'
+import type { SandboxMode } from 'bake-sandbox'
+import { escalationHintMarker, sandboxDenialMarker } from 'bake-sandbox'
 
 /* jscpd:ignore-start -- deliberate twin of dsh-tool-bash/render.ts (Agent Note). */
 

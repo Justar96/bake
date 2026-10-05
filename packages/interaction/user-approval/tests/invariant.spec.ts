@@ -3,7 +3,7 @@ import { Context } from '@deepseek-ai/cordis'
 import SessionStore, { Session, SessionId, SessionSeq } from 'bake-session'
 import { ApprovalRequestId } from '@deepseek-ai/dsh-user-approval'
 import * as ApprovalInvariant from '@deepseek-ai/dsh-user-approval/invariant'
-import InvariantRegistry from '@deepseek-ai/dsh-invariants'
+import InvariantRegistry from 'bake-invariants'
 
 async function setup(): Promise<Context> {
   const ctx = new Context()

@@ -31,7 +31,7 @@ import type {
   SearchLineMatch,
   SearchResultView,
 } from 'bake-tools'
-import type { RetainedItems } from '@deepseek-ai/dsh-output-retention'
+import type { RetainedItems } from 'bake-output-retention'
 import type { GrepMatch } from './search-core.ts'
 
 /**

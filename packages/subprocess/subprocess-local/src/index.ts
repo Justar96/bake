@@ -16,15 +16,15 @@ import type { Duplex } from 'node:stream'
 import { Context } from '@deepseek-ai/cordis'
 import type * as NodePty from 'node-pty'
 import type { IPtyForkOptions } from 'node-pty'
-import { createLazyRequire } from '@deepseek-ai/dsh-lazy-require'
-import { SubprocessRuntime, SubprocessExecutableNotFoundError } from '@deepseek-ai/dsh-subprocess'
+import { createLazyRequire } from 'bake-lazy-require'
+import { SubprocessRuntime, SubprocessExecutableNotFoundError } from 'bake-subprocess'
 import type {
   SubprocessHandle,
   SubprocessSpawnSpec,
   SubprocessTerminalHandle,
   SubprocessTerminalEnvironment,
   SubprocessTerminalSpawnSpec,
-} from '@deepseek-ai/dsh-subprocess'
+} from 'bake-subprocess'
 import {
   bindManagedProcess,
   childEnv,
