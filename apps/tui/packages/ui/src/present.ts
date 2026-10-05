@@ -653,10 +653,16 @@ function action(
   const name = toolLabel(row.tool, bound.script)
   const text = title === '' ? name : `${name}(${title})`
   const after = outcome === undefined ? undefined : outcomeLines(outcome, verb, bound, title)
+  const shell = shellSource(row.tool)
+  const command = shell === undefined || title === '' || bound.code === undefined ? undefined
+    : bound.code([title, ...rest], shell)
+  const titled = command?.[0] === undefined ? undefined : sourceSpans({ text: title }, command[0])
   // A count with no body rides on the head, so a read is one row. A change's
   // size does the same, so an edit reports how large it was.
   const named: Styled = { text, spans: [{ length: name.length, tone: 'strong' },
-    ...text.length === name.length ? [] : [{ length: text.length - name.length, tone: 'plain' as const }]] }
+    ...text.length === name.length ? []
+      : titled === undefined ? [{ length: text.length - name.length, tone: 'plain' as const }]
+        : [{ length: 1, tone: 'plain' as const }, ...titled, { length: 1, tone: 'plain' as const }]] }
   // Work left running says so beside the call, ahead of what the start reported.
   const tagged = row.background !== true || bound.background === undefined ? named
     : beside(named, { text: bound.background, spans: [{ length: bound.background.length, tone: 'quiet' }] })
@@ -680,7 +686,8 @@ function action(
   const described = drawnBody([row.detail], false, bound.code, plain => excerpt(plain, limit, bound, 'quiet', false).lines)
     .map(line => line.tone === 'plain' && line.literal !== true ? { ...line, tone: 'quiet' as const } : line)
   const body = [
-    ...excerpt(rest.map(text => continuation(text, 'plain')), limit, bound, 'plain', false).lines,
+    ...excerpt(rest.map((text, index) => commandLine(text, command?.[index + 1])),
+      limit, bound, 'plain', false).lines,
     ...excerpt(described, limit, bound, 'quiet', false).lines,
     ...liveTail(live?.tail, bound, cells),
     ...dispatched,
@@ -688,6 +695,30 @@ function action(
       ? [continuation(outcome?.ok === false ? bound.scriptError ?? bound.scriptOutput : bound.scriptOutput, 'quiet')] : [],
     ...after?.lines ?? []]
   return [head, ...connected(body)]
+}
+
+/**
+ * The file name a shell tool's command is highlighted as, so its grammar
+ * colours the command apart from the output under it.
+ * @param tool - tool name from the session log.
+ * @returns a path naming the shell's language, or undefined for any other tool.
+ */
+function shellSource(tool: string): string | undefined {
+  const name = tool.toLowerCase()
+  if (name === 'bash' || name === 'sh' || name === 'zsh' || name === 'shell') return 'command.sh'
+  if (name === 'pwsh' || name === 'powershell') return 'command.ps1'
+  return undefined
+}
+
+/**
+ * A command's line after its first, under the head it continues.
+ * @param text - the line as the model wrote it.
+ * @param tokens - its syntax tokens, absent when the command is not highlighted.
+ * @returns the continuation line, in source colour when highlighted.
+ */
+function commandLine(text: string, tokens: readonly CodeToken[] | undefined): PresentedLine {
+  const line = continuation(text, 'plain')
+  return tokens === undefined ? line : { ...line, literal: true, spans: sourceSpans({ text }, tokens) }
 }
 
 /**
@@ -934,7 +965,8 @@ function connected(body: readonly PresentedLine[]): readonly PresentedLine[] {
  * @returns the block's lines, without the opening blank.
  */
 function group(calls: readonly ToolCallRow[], bound: ResultBound, cells?: number): readonly PresentedLine[] {
-  return [groupHead(calls, bound), ...hang(calls.map(call => action(call, bound, cells)))]
+  const head = groupHead(calls, bound)
+  return [head, ...hang(head.marker, calls.map(call => action(call, bound, cells)))]
 }
 
 /**
@@ -964,19 +996,25 @@ function groupHead(calls: readonly ToolCallRow[], bound: ResultBound): Presented
 
 /**
  * Hang each call's lines from the block's head on the tree in the rail.
+ * @param shared - the block head's icon.
  * @param bodies - each call's lines, head first, in order.
  * @returns the lines, each call's head on a branch and the last on the corner.
  */
-function hang(bodies: readonly (readonly PresentedLine[])[]): readonly PresentedLine[] {
+function hang(shared: string, bodies: readonly (readonly PresentedLine[])[]): readonly PresentedLine[] {
   return bodies.flatMap((lines, index) => {
     const last = index === bodies.length - 1
     // A blinking branch would open a gap in the tree, so the tree holds still
     // and is quiet throughout. The call's marker, state and all, becomes its
     // badge. A line drawn without a marker, such as the `+N earlier` summary,
-    // takes none.
+    // takes none. A call that finished cleanly under the head's own icon only
+    // repeats what the head says, so the tool's name stands alone; running,
+    // failed, and other kinds of call keep the badge that tells them apart.
+    // Its cell stays, blank, so names do not shift as their calls finish.
+    const repeated = (line: PresentedLine): boolean => line.markerTone === 'done' && line.pulse !== true && line.marker === shared
     return lines.map((line, row) => row === 0
       ? { ...line.markerTone === 'failed' ? failedHead(line) : line, marker: last ? TREE.corner : TREE.branch, markerTone: 'quiet' as const, pulse: false,
-        ...line.marker === MARKER.none ? {} : { badge: { glyph: line.marker, tone: line.markerTone ?? 'strong', ...line.pulse === true ? { pulse: true } : {} } } }
+        ...line.marker === MARKER.none ? {} : { badge: repeated(line) ? { glyph: ' ', tone: 'quiet' as const }
+          : { glyph: line.marker, tone: line.markerTone ?? 'strong', ...line.pulse === true ? { pulse: true } : {} } } }
       : { ...line, marker: last ? MARKER.none : TREE.stem, markerTone: 'quiet' as const })
   })
 }
@@ -995,7 +1033,8 @@ function failedHead(line: PresentedLine): PresentedLine {
   return {
     ...line, tone: 'failed',
     ...line.spans === undefined ? {} : { spans: line.spans.map(span => span.tone === 'strong' ? { ...span, tone: 'failed' as const, bold: true }
-      : span.tone === 'plain' ? { ...span, tone: 'failed' as const } : span) },
+      // A highlighted command gives up its syntax colour, so the whole head reads red.
+      : span.tone === 'plain' ? (({ color: _, ...rest }) => ({ ...rest, tone: 'failed' as const }))(span) : span) },
   }
 }
 
@@ -1037,7 +1076,7 @@ export function fittedGroup(
   // leave it, as it does on its own, so its history is not formatted only to fold.
   const room = rows - height(BLANK) - height(head) - plain.reduce((sum, lines) => sum + (lines === undefined ? 0 : height(lines[0]!)), 0)
   const bodies = plain.map((lines, index) => lines ?? withoutOpening(fittedAction(calls[index]!, bound, Math.max(1, room), height, cells)))
-  const whole = opening([head, ...hang(bodies)])
+  const whole = opening([head, ...hang(head.marker, bodies)])
   if (rows <= 0 || size(whole) <= rows) return whole
   // Heights ignore the rail's marker, which never changes a line's width, so
   // each call is measured once however it ends up folded.
@@ -1048,9 +1087,9 @@ export function fittedGroup(
     index < count && settled(calls[index]!) ? lines.slice(0, 1) : lines
   for (let count = 1; count <= calls.length; count++) {
     const used = fixed + bodies.reduce((sum, _, index) => sum + (index < count ? folded[index]! : full[index]!), 0)
-    if (used <= rows) return [BLANK, head, ...hang(bodies.map((lines, index) => fold(lines, index, count)))]
+    if (used <= rows) return [BLANK, head, ...hang(head.marker, bodies.map((lines, index) => fold(lines, index, count)))]
   }
-  if (bound.earlier === undefined) return [BLANK, head, ...hang(bodies.map(lines => lines.slice(0, 1)))]
+  if (bound.earlier === undefined) return [BLANK, head, ...hang(head.marker, bodies.map(lines => lines.slice(0, 1)))]
   // The summary is a branch of its own, so the tree is still one step.
   const summary = (hidden: number): PresentedLine => ({
     marker: MARKER.none, verb: '', text: `+${hidden} ${bound.earlier}`, column: COLUMN.rail, tone: 'quiet',
@@ -1059,16 +1098,16 @@ export function fittedGroup(
   while (hidden < calls.length - 1
     && fixed + height(summary(hidden)) + folded.slice(hidden).reduce((sum, rows) => sum + rows, 0) > rows) hidden++
   const kept = bodies.slice(hidden).map((lines, index) => fold(lines, index + hidden, calls.length))
-  const least = [BLANK, head, ...hang([[summary(hidden)], ...kept])]
+  const least = [BLANK, head, ...hang(head.marker, [[summary(hidden)], ...kept])]
   if (size(least) <= rows) return least
   // A window too short for even that keeps what says the most per row. The
   // step's head, then the newest call's own head line, then the count of the
   // rest, and gives up the blank that opens the block before any of them.
   const newest = bodies.at(-1)!.slice(0, 1)
   const ladder = [
-    [BLANK, head, ...hang([[summary(calls.length - 1)], newest])],
-    [head, ...hang([[summary(calls.length - 1)], newest])],
-    [head, ...hang([newest])],
+    [BLANK, head, ...hang(head.marker, [[summary(calls.length - 1)], newest])],
+    [head, ...hang(head.marker, [[summary(calls.length - 1)], newest])],
+    [head, ...hang(head.marker, [newest])],
   ]
   return ladder.find(lines => size(lines) <= rows) ?? [head]
 }

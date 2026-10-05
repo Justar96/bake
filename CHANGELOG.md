@@ -4,6 +4,10 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 ## [Unreleased]
 
+- A `bash` or `pwsh` call's command is coloured as shell or PowerShell, on the call's head and on any lines under it, so a multi-line command such as `python3 -c "…"` reads apart from the output that follows. A failed call in a step gives up the colour so its head reads wholly red.
+- In a step of several calls, a call that finished cleanly under the step's own icon no longer repeats that icon past its branch; running, failed, and other kinds of call keep theirs. The cell stays blank, so names do not shift as calls finish.
+- Fullscreen's hint row sits at the right edge while following output, apart from the transcript, with each key at full brightness and what it does dimmed.
+
 ## [0.3.7] - 2026-10-04
 
 - Settings, credentials, and profile files are synced to disk when Bake saves them. On some filesystems, a crash or power loss right after a save could leave `settings.yaml` or `.credentials.yaml` empty, which Bake then read as no settings or no saved logins, and the next save made the loss permanent. A save now reaches the disk before it replaces the old file, so a crash leaves either the old or the new file whole.
