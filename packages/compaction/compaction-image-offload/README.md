@@ -23,7 +23,7 @@ Image-heavy conversations continue when older images exceed a model route's budg
 <a id="use-this-package"></a>
 ## Use this package
 
-Mount this plugin in every composition that runs the agent loop with an image-capable route. The shipped `dsh` base does. Without it, an `IMAGE_OFFLOAD_REQUIRED` failure reaches ordinary recovery and ends the turn as an error. The plugin has no configuration: the pi-ai adapter enforces its base64 bound and reports the count it needs offloaded.
+Mount this plugin in every composition that runs the agent loop with an image-capable route. The shipped `bake` base does. Without it, an `IMAGE_OFFLOAD_REQUIRED` failure reaches ordinary recovery and ends the turn as an error. The plugin has no configuration: the pi-ai adapter enforces its base64 bound and reports the count it needs offloaded.
 
 ### Minimal configuration
 

@@ -1,5 +1,5 @@
 ---
-description: "Long-lived bridge that lets the Bake Desktop app drive one dsh Agent: streamed output, forwarded approvals, and three permission tiers, for desktop integrators."
+description: "Long-lived bridge that lets the Bake Desktop app drive one Bake Agent: streamed output, forwarded approvals, and three permission tiers, for desktop integrators."
 kind: "package-bundle"
 ---
 

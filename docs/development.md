@@ -37,7 +37,7 @@ For real model requests, sign in with `/login` or set `DEEPSEEK_API_KEY` in the 
 
 The preview accepts input for layout testing but does not submit tasks. Ctrl-C exits the preview; the real agent needs two Ctrl-C presses to quit. Stop the real agent before rebuilding its files.
 
-`bun run dsh --help` exposes the built profile and plugin launcher with the same Bake home. External profile-plugin installation stays separate from Bun's source workspace.
+`bun run bake --help` exposes the built profile and plugin launcher with the same Bake home. External profile-plugin installation stays separate from Bun's source workspace.
 
 ## Checks
 

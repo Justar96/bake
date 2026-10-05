@@ -10,7 +10,7 @@ packages/<group>/<pkg>/
   tsconfig.json    # extends ../../../tsconfig.base.json, rootDir src,
                    # outDir lib/types, references: ../../../vendor/cosmokit,
                    # ../../../vendor/cordis (+ ../../../vendor/schemastery if
-                   # you use Config, + ../../<group>/<dep> for each dsh dep)
+                   # you use Config, + ../../<group>/<dep> for each Bake dep)
   src/index.ts     # service default export or plugin (name/inject/apply/Config)
   README.md        # service API, events, extension points, design notes,
                    # + gated Model Experience context blocks or short form

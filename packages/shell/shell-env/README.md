@@ -27,7 +27,7 @@ Load this plugin in any composition that mounts a model shell tool (`bake-tool-b
 
 ### What every shell call receives
 
-Every call receives `DSH_HOME` (the absolute Harness home), `DSH_SHELL=1`, and, for agent calls, `DSH_SESSION_ID` (the calling session's id).
+Every call receives `DSH_HOME` (the absolute Harness home), `DSH_SHELL=1`, and, for agent calls, `DSH_SESSION_ID` (the calling session's id). The shell executors also export each managed `DSH_*` fact under its `BAKE_*` name, so `BAKE_HOME`, `BAKE_SHELL`, and `BAKE_SESSION_ID` carry the same values; contributors still declare and return `DSH_*` keys.
 
 ### Adding your own environment facts
 
@@ -52,11 +52,11 @@ Contributors must declare every key they return; returning an undeclared or non-
 
 ### Choosing the Harness home
 
-The single config field picks the home directory exposed as `DSH_HOME`; the default resolution order is the `dshHome` config, then ambient `$DSH_HOME`, then `~/.dsh`.
+The single config field picks the home directory exposed as `DSH_HOME`; the default resolution order is the `dshHome` config, then ambient `$BAKE_HOME`, then `$DSH_HOME`, then `~/.dsh`.
 
 | Field | Default | Meaning |
 |---|---|---|
-| `dshHome` | `$DSH_HOME`, then `~/.dsh` | Absolute Harness home exposed as `DSH_HOME` |
+| `dshHome` | `$BAKE_HOME`, then `$DSH_HOME`, then `~/.dsh` | Absolute Harness home exposed as `DSH_HOME` |
 
 The generated [configuration catalog](../../../docs/config-catalog.md#bake-shell-env) is the exhaustive source for every accepted field and its JSDoc.
 
@@ -76,7 +76,7 @@ This section explains the design decisions behind the registry and points at the
 
 ### Design philosophy
 
-- **Trusted namespace, rebuilt per call.** The environment is a Harness-owned `DSH_*` namespace: the shell executor discards inherited `DSH_*` values and merges the registry's current snapshot for each execution, so nested harnesses and concurrent parent/child agents cannot leak stale identities, and `process.env` is never modified.
+- **Trusted namespace, rebuilt per call.** The environment is a Harness-owned `DSH_*` namespace: the shell executor discards inherited `DSH_*` and `BAKE_*` values and merges the registry's current snapshot for each execution, so nested harnesses and concurrent parent/child agents cannot leak stale identities, and `process.env` is never modified.
 - **Declared ownership, loud conflicts.** Contributors declare their keys up front so duplicate ownership is detected before the first command; resolvers may only return declared keys.
 - **Built-ins stay here.** `DSH_HOME`, `DSH_SHELL`, and `DSH_SESSION_ID` are reserved for the registry; contributors cannot claim them.
 

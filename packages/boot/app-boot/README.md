@@ -1,5 +1,5 @@
 ---
-description: "Shared Loader boot support for dsh profiles: environment layers, patches, diagnostics, and configuration preview."
+description: "Shared Loader boot support for Bake profiles: environment layers, patches, diagnostics, and configuration preview."
 kind: "package-library"
 ---
 
@@ -7,7 +7,7 @@ kind: "package-library"
 
 ## Summary
 
-`bake-app-boot` is the shared Loader boot library behind `dsh` profiles. It loads environment layers, composes profile bundles and patches, boots every plugin, and returns the running app or identifies the failed plugin and cause. Product applications use the `dsh` launcher instead of publishing separate bins; direct-config helpers remain only for lower-level embedders and tests. You can preview the effective configuration before booting, configure HMR through profile YAML, and let a terminal-owning app restore its terminal before a fatal exit.
+`bake-app-boot` is the shared Loader boot library behind `bake` profiles. It loads environment layers, composes profile bundles and patches, boots every plugin, and returns the running app or identifies the failed plugin and cause. Product applications use the `bake` launcher instead of publishing separate bins; direct-config helpers remain only for lower-level embedders and tests. You can preview the effective configuration before booting, configure HMR through profile YAML, and let a terminal-owning app restore its terminal before a fatal exit.
 
 ## Table of Contents
 
@@ -27,7 +27,7 @@ Starting an app with this package is a small, explicit entry point: you give it 
 
 ### When to use it
 
-Use it when implementing the shared `dsh` launcher or embedding its lower-level boot helpers. Product features belong in profile bundles instead of new application bins; code that only adds plugins to an already-running app mounts those plugins directly.
+Use it when implementing the shared `bake` launcher or embedding its lower-level boot helpers. Product features belong in profile bundles instead of new application bins; code that only adds plugins to an already-running app mounts those plugins directly.
 
 ### Starting the app
 
@@ -38,14 +38,14 @@ installFailLoud('dsh')
 const ctx = await boot('dsh', resolveConfigPath(argv[2], process.env.DSH_SNAPSHOT))
 ```
 
-`installFailLoud` reports an unhandled rejection or uncaught exception to stderr with `util.inspect`, waits up to two seconds for the app's release hook, then exits 1. Control never returns to the failed operation; the event loop runs only until release settles or times out. A launcher ends that rule for rejections once its app is ready by calling the returned guard's `tolerateRejections(report)`: each later rejection goes to `report` and the process keeps running, because a rejection ended only the promise chain that dropped it. The `dsh` launcher does this when it commits readiness, and [records and shows each late rejection](../../../apps/cli/README.md#startup-and-shutdown). An uncaught exception stays fatal for the life of the process, since it unwound through whatever called the throwing callback. With that entry point, startup keeps every plugin that can activate. An enabled failed plugin produces a labelled warning. A failed required entry makes startup dispose the whole app and exit nonzero; required ids absent from a profile and disabled required entries do not affect startup. The global required list includes `agent-loop`, `tui-startup`, `tui-runner`, and `headless-runner`, plus recognized external application endpoint ids. Missing or disabled ids do not require a profile to mount that application.
+`installFailLoud` reports an unhandled rejection or uncaught exception to stderr with `util.inspect`, waits up to two seconds for the app's release hook, then exits 1. Control never returns to the failed operation; the event loop runs only until release settles or times out. A launcher ends that rule for rejections once its app is ready by calling the returned guard's `tolerateRejections(report)`: each later rejection goes to `report` and the process keeps running, because a rejection ended only the promise chain that dropped it. The `bake` launcher does this when it commits readiness, and [records and shows each late rejection](../../../apps/cli/README.md#startup-and-shutdown). An uncaught exception stays fatal for the life of the process, since it unwound through whatever called the throwing callback. With that entry point, startup keeps every plugin that can activate. An enabled failed plugin produces a labelled warning. A failed required entry makes startup dispose the whole app and exit nonzero; required ids absent from a profile and disabled required entries do not affect startup. The global required list includes `agent-loop`, `tui-startup`, `tui-runner`, and `headless-runner`, plus recognized external application endpoint ids. Missing or disabled ids do not require a profile to mount that application.
 
 <a id="profiles"></a>
 ### Profiles
 
 Import profile and bundle declaration types from [`bake-package-manifest`](../../util/package-manifest/README.md). App-boot adapts `DshPackageManifest` to `ProfileManifest` with optional package identity because local profiles need no published version. App-boot owns profile loading, JSON validation, and resolved runtime data.
 
-Bake ships `tui` and `headless` profile templates. Each profile lives at `$BAKE_HOME/profiles/<name>` and combines ordered bundles with its own `cordis.patch.yml`; YAML controls HMR. `tui` selects base and `bake-tui-app`, while headless selects base and its one-shot runner. `dsh --profile <name> --from-default-profile <template>` initializes a new custom profile from a shipped template. A bundle's `dsh.bundle.patch` accepts one path or an ordered list of paths, relative to its package root. Each file's patch list is applied in order. Existing profile bundle lists remain unchanged. A missing bundle or one without a patch declaration fails startup loudly. `loadProfileDirectory` loads an already initialized directory directly.
+Bake ships `tui` and `headless` profile templates. Each profile lives at `$BAKE_HOME/profiles/<name>` and combines ordered bundles with its own `cordis.patch.yml`; YAML controls HMR. `tui` selects base and `bake-tui-app`, while headless selects base and its one-shot runner. `bake --profile <name> --from-default-profile <template>` initializes a new custom profile from a shipped template. A bundle's `dsh.bundle.patch` accepts one path or an ordered list of paths, relative to its package root. Each file's patch list is applied in order. Existing profile bundle lists remain unchanged. A missing bundle or one without a patch declaration fails startup loudly. `loadProfileDirectory` loads an already initialized directory directly.
 
 Your machine-local preferences also live in the Harness home:
 
@@ -99,7 +99,7 @@ After the Loader settles, app-boot warns when only optional entries are inactive
 | Asynchronous `apply()` throws | Warn after settlement; continue | Stop startup after settlement | Report the error after settlement; keep successful siblings; corrected config can activate |
 | An injected service is unavailable | Warn; continue while the entry waits for its dependencies | Stop startup | Keep the entry waiting; adding the missing provider can activate it |
 | HTTP port binding fails | Warn; continue without that endpoint | Stop startup | Keep the process running without the failed endpoint; corrected config can restore it |
-| Detached asynchronous work outside the `apply()` return Promise produces an unhandled rejection | Fatal: dispose the app and exit nonzero | Fatal: dispose the app and exit nonzero | Under the `dsh` launcher, after readiness: record and show it, and keep running, regardless of entry id; fatal under a bin that never calls `tolerateRejections` |
+| Detached asynchronous work outside the `apply()` return Promise produces an unhandled rejection | Fatal: dispose the app and exit nonzero | Fatal: dispose the app and exit nonzero | Under the `bake` launcher, after readiness: record and show it, and keep running, regardless of entry id; fatal under a bin that never calls `tolerateRejections` |
 | A synchronous callback or timer throws an uncaught exception | Fatal: release the app and exit nonzero | Fatal: release the app and exit nonzero | Fatal: release the app and exit nonzero, regardless of entry id |
 | Entry is absent or explicitly disabled | Ignore it | Ignore it | Do not activate it; no required-startup audit |
 
@@ -126,7 +126,7 @@ This section explains how the outcomes above are realized and points at the code
 - **Two Loader builtins.** `mountRootInclude` registers `cordis:include` and `cordis:group` as Loader builtins: a group row gives one `isolate` realm to a provider and its consumers together, and an agent preset outside this workspace cannot resolve `@deepseek-ai/cordis-plugin-group` by name. Both load through the ambient module pipeline rather than the included tree's own specifier resolution.
 - **Consumer-owned strictness.** Ordinary Loader groups keep successful siblings. App-boot applies the global required-entry policy after initial settlement; agent presets and dynamic multi-entry compositions own and dispose their separate generation when they require all-or-nothing setup. App-boot reads failed fibers to report their recorded errors and coalesces duplicate Loader rejection notifications through one process checkpoint.
 - **One fallback generation.** The installation-first and ordered-bundle breadth-first traversal produces both the runtime table and the retained disk materializer. Runtime mode creates no resolution links and ignores stale projections at their former lookup positions. External bare targets selected by package `imports` use the same package order, while Node retains mapping, conditions, and exact target resolution. Link mode materializes the same table; dual mode also compares Node's disk result with the table. A complete successor may add package names atomically, while changing or removing an existing mapping requires restart.
-- **Application-owned profiles.** Link mode projects missing installation and bundle packages inside the profile without writing a shared Harness-home fallback. Runtime mode supplies the same installation and bundle generation without creating links. Package operations remove only profile links owned by dsh; pnpm-managed entries remain untouched.
+- **Application-owned profiles.** Link mode projects missing installation and bundle packages inside the profile without writing a shared Harness-home fallback. Runtime mode supplies the same installation and bundle generation without creating links. Package operations remove only profile links owned by Bake; pnpm-managed entries remain untouched.
 - **Owned Workers.** Worker build banners import `bake-app-boot/worker/profile-resolution-bootstrap` before bundled business code. Each Worker installs the structured-cloned generation in its own isolate. The bootstrap bundle has no static package imports. Source Worker entries retain their self-contained dependency closure, and third-party Workers receive no injection.
 - **Update completion.** App boot observes restart failures through the `internal/update` waterfall. Live patch reloads wait for the tree's fibers before auditing activation; `Fiber.update()` and `Entry.update()` alone do not establish restart success.
 - **One rejection checkpoint.** `inactiveEntries` keeps the exact reasons it folds into the boot diagnostic visible through the next process rejection checkpoint, so `installFailLoud` coalesces Loader's duplicate notification, before and after readiness, while unrelated unhandled rejections remain fatal until the launcher tolerates them.
@@ -160,9 +160,9 @@ The exports each own one stage of the boot: config resolution and snapshot repla
 Read these pages when the package-level contract is not enough. They move from the shared boot mechanics to the composition model and the decision evidence behind it.
 
 - [Cordis primer](../../../docs/cordis-primer.md) — Loader, `!!js` config expressions, and include/group semantics.
-- [dsh app](../../../apps/cli/README.md) — the `dsh` bin that consumes these helpers.
+- [Bake CLI](../../../apps/cli/README.md) — the `bake` bin that consumes these helpers.
 - [bake-cmdline](../cmdline/README.md) — the launcher-to-app command-line handoff the bins use.
-- [Profile bundles](../../bundle/README.md) — installable patch layers composed into `dsh --profile`.
+- [Profile bundles](../../bundle/README.md) — installable patch layers composed into `bake --profile`.
 - [bake-home-paths](../../util/home-paths/README.md) — the Harness-home resolver (`resolveDshHome`).
 - [Configuration source ownership](../../../.agents/notes/implemented/architecture/2026-08-04-configuration-source-ownership.md) — why a discovered file may not decide bootstrap behavior.
 - [Profile plugin bundles](../../../.agents/notes/implemented/architecture/2026-08-05-profile-plugin-bundles.md) — the profile and bundle composition design.

@@ -23,7 +23,7 @@ Use this package to apply one outbound HTTP proxy policy to Harness requests tha
 <a id="use-this-package"></a>
 ## Use this package
 
-Nothing to mount, and nothing to configure. The `dsh` launcher resolves and installs the policy for every profile before the first plugin loads, so a user who exports `HTTPS_PROXY` is proxied everywhere. This is a library rather than a plugin because transport policy has one answer per process: there is no second implementation to swap and no scope narrower than the process to give one.
+Nothing to mount, and nothing to configure. The `bake` launcher resolves and installs the policy for every profile before the first plugin loads, so a user who exports `HTTPS_PROXY` is proxied everywhere. This is a library rather than a plugin because transport policy has one answer per process: there is no second implementation to swap and no scope narrower than the process to give one.
 
 ### Writing a new outbound call
 

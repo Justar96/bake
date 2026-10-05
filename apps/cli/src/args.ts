@@ -1,5 +1,5 @@
 /**
- * Commander adapter for the `dsh` command line.
+ * Commander adapter for the `bake` command line, which the `dsh` alias also runs.
  *
  * The launcher parses only what it owns — which profile to boot, which extra
  * patch overlays to apply, and the config dumps — and hands **everything after
@@ -7,10 +7,10 @@
  * their own flag families and print their own `--help` (see
  * `bake-cmdline`). Launcher flags therefore come first: the first
  * token this parser does not recognize starts the inner arguments, so
- * `dsh --profile tui --resume abc` boots the tui profile with `--resume abc`,
- * and `dsh --profile tui -h` prints the terminal app's help, not this one's.
+ * `bake --profile tui --resume abc` boots the tui profile with `--resume abc`,
+ * and `bake --profile tui -h` prints the terminal app's help, not this one's.
  *
- * `dsh <name>` abbreviates `dsh --profile <name>`; `plugin` manages a profile's
+ * `bake <name>` abbreviates `bake --profile <name>`; `plugin` manages a profile's
  * plugin dependencies by forwarding to pnpm, and `update` replaces a managed
  * Bake install with the newest signed release, or returns it to an earlier
  * one. The hidden `--self-check` loads what a launch loads and exits; the
@@ -75,7 +75,7 @@ interface SelfCheckInvocation {
   mode: 'self-check'
 }
 
-/** The resolved `dsh` invocation. Help, version, and errors exit inside {@link parseDshArgs}. */
+/** The resolved `bake` invocation. Help, version, and errors exit inside {@link parseDshArgs}. */
 export type DshInvocation =
   | ProfileInvocation | DumpConfigInvocation | DumpConfigSchemaInvocation | PluginInvocation | UpdateInvocation | SelfCheckInvocation
 
@@ -103,17 +103,17 @@ function selectProfile(value: string, previous?: string): string {
 /** The launcher's own help text; each app prints its own. */
 const HELP_EXAMPLES = `
 Examples:
-  dsh tui                                  boot Bake's terminal profile
-  dsh rescue --from-default-profile tui
+  bake tui                                 boot Bake's terminal profile
+  bake rescue --from-default-profile tui
                                             create rescue from the terminal template, then boot it
-  dsh headless "run the tests"              answer one task, print the result, and exit
-  dsh tui --patch ./extra.yml               boot a custom profile with one extra overlay
-  dsh tui --resume <session>                arguments after the launcher flags reach the app
-  dsh tui --help                            the terminal app's own flags and help
-  dsh plugin --profile tui add <package>    install a plugin into the tui profile
-  dsh update                                install the newest Bake release
-  dsh update --check                        only report whether a newer release exists
-  dsh update --rollback                     return to the newest earlier release installed
+  bake headless "run the tests"             answer one task, print the result, and exit
+  bake tui --patch ./extra.yml              boot a custom profile with one extra overlay
+  bake tui --resume <session>               arguments after the launcher flags reach the app
+  bake tui --help                           the terminal app's own flags and help
+  bake plugin --profile tui add <package>   install a plugin into the tui profile
+  bake update                               install the newest Bake release
+  bake update --check                       only report whether a newer release exists
+  bake update --rollback                    return to the newest earlier release installed
 `
 
 /**
@@ -166,22 +166,22 @@ export function parseDshArgs(argv: readonly string[], version: string): DshInvoc
   // inferred type would be circular through its own chain.
   const program: Command = new Command()
   program
-    .name('dsh')
+    .name('bake')
     .version(version, '-V, --version', 'output the version number')
-    .usage('[--profile] <name> [options] [app-args...]\n       dsh plugin --profile <name> <pnpm-args...>')
-    .description('Bake profile launcher: compose the terminal agent or a headless task from plugin bundles.')
+    .usage('[--profile] <name> [options] [app-args...]\n       bake plugin --profile <name> <pnpm-args...>')
+    .description('Bake profile launcher: compose the terminal agent or a headless task from plugin bundles; `dsh` is an alias.')
     .addHelpText('after', HELP_EXAMPLES)
     .exitOverride()
     // The launcher's flags come first and end at the first token it does not
     // know; everything from there on belongs to the booted app, including
-    // its -h. `dsh -h` with no profile still prints this help, below.
+    // its -h. `bake -h` with no profile still prints this help, below.
     .helpOption(false)
     .helpCommand(false)
     .allowUnknownOption()
     .passThroughOptions()
     .enablePositionalOptions()
-    .argument('[args...]', 'arguments for the booted profile\'s app (see: dsh --profile <name> --help)')
-    .option('--profile <name>', 'the profile under $DSH_HOME/profiles to boot', selectProfile)
+    .argument('[args...]', 'arguments for the booted profile\'s app (see: bake --profile <name> --help)')
+    .option('--profile <name>', 'the profile under $BAKE_HOME/profiles to boot', selectProfile)
     .option('--from-default-profile <name>', 'initialize a new custom profile from a shipped profile template')
     .option('--patch <path>', 'extra patch-list overlay applied after the profile layer (repeatable)', collect)
     .option('--dump-config', 'print the composed profile tree and exit')

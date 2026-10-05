@@ -23,7 +23,7 @@ This package keeps long agent conversations working near the model's context lim
 <a id="use-this-package"></a>
 ## Use this package
 
-Mount this package to get automatic conversation condensation in a composition that already provides an LLM, session storage, and token measurement. The shipped `dsh` base enables it by default; mount it explicitly to control when condensation starts.
+Mount this package to get automatic conversation condensation in a composition that already provides an LLM, session storage, and token measurement. The shipped `bake` base enables it by default; mount it explicitly to control when condensation starts.
 
 ### What you get
 
@@ -81,7 +81,7 @@ Interfaces can ask where condensation starts for a route. `pressureThreshold(rou
 
 ### Changing the policy from settings.yaml
 
-With a settings provider such as `bake-settings-file` mounted (the shipped `dsh` base mounts it), the `compaction-basic` section of `settings.yaml` overrides the composition config field by field. The TUI's `/settings` edits it in its Compaction section, where each threshold and retention takes a percent of the context window or a token count, and lists every raw field under Advanced. Every field above is accepted. `auto: false` switches automatic condensation and overflow recovery off; `auto: true` leaves the composition's switch in charge, so it cannot turn on an engine the composition keeps manual-only, such as the terminal's host engine beside each preset's own. A list replaces the composed list wholesale, so a `modelPolicies` section must repeat any composed entries it keeps. A threshold or retention form set in settings replaces the composed one, so `thresholdTokens` in settings over a composed `thresholdRatio` is not a conflict. For example, to compact every model on a `cliproxyapi` route by token count:
+With a settings provider such as `bake-settings-file` mounted (the shipped `bake` base mounts it), the `compaction-basic` section of `settings.yaml` overrides the composition config field by field. The TUI's `/settings` edits it in its Compaction section, where each threshold and retention takes a percent of the context window or a token count, and lists every raw field under Advanced. Every field above is accepted. `auto: false` switches automatic condensation and overflow recovery off; `auto: true` leaves the composition's switch in charge, so it cannot turn on an engine the composition keeps manual-only, such as the terminal's host engine beside each preset's own. A list replaces the composed list wholesale, so a `modelPolicies` section must repeat any composed entries it keeps. A threshold or retention form set in settings replaces the composed one, so `thresholdTokens` in settings over a composed `thresholdRatio` is not a conflict. For example, to compact every model on a `cliproxyapi` route by token count:
 
 ```yaml
 # settings.yaml

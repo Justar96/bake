@@ -140,7 +140,7 @@ Changing only a Remote method's implementation body without changing its contrac
 bun run build:lib:host
 ```
 
-`bun run build` runs the same phase before building the TUI. `bun run typecheck` runs `tsc -b tsconfig.host.json` and the TUI type check but not tsdown, so it does not regenerate Typert artifacts. `bun run start` and `bun run dsh` launch the built CLI rather than a source Host, so they use the strict descriptors from the last build.
+`bun run build` runs the same phase before building the TUI. `bun run typecheck` runs `tsc -b tsconfig.host.json` and the TUI type check but not tsdown, so it does not regenerate Typert artifacts. `bun run start` and `bun run bake` launch the built CLI rather than a source Host, so they use the strict descriptors from the last build.
 
 ## Boundaries
 

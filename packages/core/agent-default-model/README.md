@@ -7,7 +7,7 @@ kind: "package-reference"
 
 ## Summary
 
-`bake-agent-default-model` gives newly created agents a shared default provider and model when their sessions do not specify one, or reports that there is none. Use it to choose the starting model once for all supported agent entry points, including `dsh --profile headless`. When settings are available, users can override the configured selection, including reasoning effort, and saved changes apply to subsequent reads. The default is process-wide; per-session model selection remains the responsibility of the entry point that creates the agent.
+`bake-agent-default-model` gives newly created agents a shared default provider and model when their sessions do not specify one, or reports that there is none. Use it to choose the starting model once for all supported agent entry points, including `bake --profile headless`. When settings are available, users can override the configured selection, including reasoning effort, and saved changes apply to subsequent reads. The default is process-wide; per-session model selection remains the responsibility of the entry point that creates the agent.
 
 ## Table of Contents
 

@@ -6,7 +6,7 @@ The workspace pins stable **Bun 1.4.2** in `package.json`. The [Bun bundler](htt
 
 ## Runtime ownership
 
-Bun may run tooling that stays outside the dsh process. Harness runs on Node: `app-boot` uses `node-addon-require-builtin` to reach V8 current-context symbols for `internal/modules/esm/loader`. Bun's JavaScriptCore engine cannot load that V8 integration. Moving the agent process to Bun would require changing and validating that loader integration.
+Bun may run tooling that stays outside the Bake process. Harness runs on Node: `app-boot` uses `node-addon-require-builtin` to reach V8 current-context symbols for `internal/modules/esm/loader`. Bun's JavaScriptCore engine cannot load that V8 integration. Moving the agent process to Bun would require changing and validating that loader integration.
 
 | Work | Runtime and benefit |
 |---|---|
@@ -47,4 +47,4 @@ Bun does not export the terminal's `name` option as `TERM`, so both drivers set 
 
 Bun coverage reporting can help identify missing pure-projection cases before adopting a coverage threshold. Coverage policy needs its own focused change and negative control. JUnit output becomes useful when a TUI CI job consumes it. Test sharding or concurrency should follow measured suite cost, especially because process-level performance samples must run without competing CPU-heavy jobs.
 
-`--packages=external` is unsuitable here: it would also externalize `bake-tui-ui`, which must be inlined. `--compile` creates a Bun executable, while the application is an in-process Node plugin loaded through a `dsh` profile. Bun's root workspace settings are independent of the runtime's external-profile package-manager configuration.
+`--packages=external` is unsuitable here: it would also externalize `bake-tui-ui`, which must be inlined. `--compile` creates a Bun executable, while the application is an in-process Node plugin loaded through a `bake` profile. Bun's root workspace settings are independent of the runtime's external-profile package-manager configuration.

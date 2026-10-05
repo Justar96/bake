@@ -20,6 +20,7 @@ interface Launch {
   script: string
   argv: string[]
   home: string | null
+  legacyHome?: string | null
   nodeOptions: string | null
   excludeEnv: boolean
   excludeNetwork: boolean

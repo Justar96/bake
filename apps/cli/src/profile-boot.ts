@@ -81,7 +81,7 @@ export function homePatchPath(): string {
   return join(resolveDshHome(), PROFILE_PATCH_FILENAME)
 }
 
-/** Absolute path of this dsh installation's package.json (both anchors: src/ and lib/ sit one level under apps/cli). */
+/** Absolute path of this Bake installation's package.json (both anchors: src/ and lib/ sit one level under apps/cli). */
 export const INSTALL_ANCHOR = fileURLToPath(new URL('../package.json', import.meta.url))
 
 /** The empty root entry list every profile tree patches over. */
@@ -258,7 +258,7 @@ async function composeProfile(
 export interface ResolvedProfileRuntime {
   /** Profile already loaded from the application's own directory. */
   profile: Profile
-  /** Absolute package.json path of the application's dsh installation. */
+  /** Absolute package.json path of the application's Bake installation. */
   installAnchor: string
 }
 

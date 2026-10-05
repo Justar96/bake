@@ -304,7 +304,8 @@ run the app
   dev [args]         component loop under Bun: no harness, no agent, no key
                      (--replay watches rows arrive)
   app [args]         run the built Node TUI; run bun run build first
-  dsh [args]         built profile/plugin CLI using Bake's home (~/.bake by default)
+  bake [args]        built profile/plugin CLI using Bake's home (~/.bake by default);
+                     'dsh' is the same command
   build              bundle the plugin and recorder for Node with production React
 
 verify
@@ -333,6 +334,7 @@ try {
       requireBuilt([CLI, ...builtApp()])
       await launch(['--profile', 'tui', ...args])
       break
+    case 'bake':
     case 'dsh':
       requireBuilt([CLI])
       await launch(args)

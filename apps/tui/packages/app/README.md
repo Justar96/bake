@@ -7,7 +7,7 @@ kind: "package-bundle"
 
 ## Summary
 
-This private workspace bundle adds a terminal runner and flag provider to a base-backed `dsh` profile. It records session composition, resumes exact persisted sessions, and routes human input through harness services. The runtime is Node; Ink owns terminal modes. The bundle is developed inside this checkout and is not published independently.
+This private workspace bundle adds a terminal runner and flag provider to a base-backed `bake` profile. It records session composition, resumes exact persisted sessions, and routes human input through harness services. The runtime is Node; Ink owns terminal modes. The bundle is developed inside this checkout and is not published independently.
 
 ## Table of Contents
 

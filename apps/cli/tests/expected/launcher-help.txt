@@ -1,16 +1,16 @@
-Usage: dsh [--profile] <name> [options] [app-args...]
-       dsh plugin --profile <name> <pnpm-args...>
+Usage: bake [--profile] <name> [options] [app-args...]
+       bake plugin --profile <name> <pnpm-args...>
 
 Bake profile launcher: compose the terminal agent or a headless task from plugin
-bundles.
+bundles; `dsh` is an alias.
 
 Arguments:
   args                           arguments for the booted profile's app (see:
-                                 dsh --profile <name> --help)
+                                 bake --profile <name> --help)
 
 Options:
   -V, --version                  output the version number
-  --profile <name>               the profile under $DSH_HOME/profiles to boot
+  --profile <name>               the profile under $BAKE_HOME/profiles to boot
   --from-default-profile <name>  initialize a new custom profile from a shipped
                                  profile template
   --patch <path>                 extra patch-list overlay applied after the
@@ -22,14 +22,14 @@ Options:
                                  or --patch overlays and exit
 
 Examples:
-  dsh tui                                  boot Bake's terminal profile
-  dsh rescue --from-default-profile tui
+  bake tui                                 boot Bake's terminal profile
+  bake rescue --from-default-profile tui
                                             create rescue from the terminal template, then boot it
-  dsh headless "run the tests"              answer one task, print the result, and exit
-  dsh tui --patch ./extra.yml               boot a custom profile with one extra overlay
-  dsh tui --resume <session>                arguments after the launcher flags reach the app
-  dsh tui --help                            the terminal app's own flags and help
-  dsh plugin --profile tui add <package>    install a plugin into the tui profile
-  dsh update                                install the newest Bake release
-  dsh update --check                        only report whether a newer release exists
-  dsh update --rollback                     return to the newest earlier release installed
+  bake headless "run the tests"             answer one task, print the result, and exit
+  bake tui --patch ./extra.yml              boot a custom profile with one extra overlay
+  bake tui --resume <session>               arguments after the launcher flags reach the app
+  bake tui --help                           the terminal app's own flags and help
+  bake plugin --profile tui add <package>   install a plugin into the tui profile
+  bake update                               install the newest Bake release
+  bake update --check                       only report whether a newer release exists
+  bake update --rollback                    return to the newest earlier release installed

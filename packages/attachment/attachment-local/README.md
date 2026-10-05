@@ -7,7 +7,7 @@ kind: "package-reference"
 
 ## Summary
 
-Store images and generic file attachments durably below `BAKE_HOME` on the machine running DSH. Images are validated, normalized for model requests, and cached per route; generic files are preserved byte-for-byte without admission limits. Identical bytes are stored once even when uploads use different display names, image reads verify stored bytes against their references, and admitted images remain readable if limits later tighten. The shipped `dsh` composition uses this package without configuration. Objects remain local to one machine and are never deleted automatically.
+Store images and generic file attachments durably below `BAKE_HOME` on the machine running DSH. Images are validated, normalized for model requests, and cached per route; generic files are preserved byte-for-byte without admission limits. Identical bytes are stored once even when uploads use different display names, image reads verify stored bytes against their references, and admitted images remain readable if limits later tighten. The shipped `bake` composition uses this package without configuration. Objects remain local to one machine and are never deleted automatically.
 
 ## Table of Contents
 

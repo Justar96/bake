@@ -31,10 +31,10 @@ Choose Schedule when you want reminders delivered as messages in the same live c
 
 ### Enable Schedule
 
-Add the Schedule overlay to a `dsh web` session; the reminder tools then appear in the conversation and the model can use them right away:
+Add the Schedule overlay to a `bake web` session; the reminder tools then appear in the conversation and the model can use them right away:
 
 ```sh
-dsh web --patch apps/cli/config/examples/schedule/cordis.yml
+bake web --patch apps/cli/config/examples/schedule/cordis.yml
 ```
 
 Success looks like this: ask the model "remind me in 10 minutes to review the PR", and it replies with the reminder's id, its target time, and a `scheduled` state. If storage cannot be confirmed at that moment, the tool reports `persistence_uncertain` and suggests re-listing instead of claiming success.

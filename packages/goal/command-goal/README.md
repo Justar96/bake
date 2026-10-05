@@ -61,7 +61,7 @@ The command injects the commands registry and the goal service. A custom app mou
   name: 'bake-command-goal'
 ```
 
-The shipped `dsh` base enables the persisted-goal stack and this command.
+The shipped `bake` base enables the persisted-goal stack and this command.
 
 -----
 

@@ -101,7 +101,7 @@ export interface TuiIo {
 export async function run(ctx: Context, config: RunnerOptions, io: TuiIo): Promise<void> {
   if (io.in.isTTY !== true || io.out.isTTY !== true) {
     // Before the `try` below, which reports the failures it catches.
-    const message = 'tui needs an interactive terminal; use dsh --profile headless for scripted runs'
+    const message = 'tui needs an interactive terminal; use bake --profile headless for scripted runs'
     io.err.write(`dsh: ${message}\n`)
     throw new Error(message)
   }
