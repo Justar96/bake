@@ -11,10 +11,10 @@ const installAnchor = fileURLToPath(new URL('../package.json', import.meta.url))
 const resourcePackage = 'bake-mcp-resources'
 
 describe('shipped MCP resource composition', () => {
-  it.each(Object.keys(PROFILE_TEMPLATES))('%s carries one shared resource consumer without a server', (name) => {
+  it.each(Object.keys(PROFILE_TEMPLATES))('%s carries one shared resource consumer without a server', async (name) => {
     const home = mkdtempSync(join(tmpdir(), 'dsh-profile-mcp-'))
     try {
-      const profile = loadProfile('dsh', name, installAnchor, home)
+      const profile = await loadProfile('dsh', name, installAnchor, home)
       const warnings: string[] = []
       const rows = composeEntries([
         ...profile.layers.map(layer => layer.patches),

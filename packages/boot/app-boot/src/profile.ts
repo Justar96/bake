@@ -24,16 +24,14 @@
  * @module bake-app-boot/profile
  */
 
-import { randomBytes } from 'node:crypto'
 import { createRequire } from 'node:module'
 import {
-  closeSync, constants as fsConstants, copyFileSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync,
-  readFileSync, readdirSync, readlinkSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync,
-  writeSync,
+  constants as fsConstants, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync,
+  rmSync, statSync, symlinkSync, unlinkSync, writeFileSync,
 } from 'node:fs'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { withFileLock } from 'bake-atomic-write'
+import { withFileLock, writeFileAtomic } from 'bake-atomic-write'
 import type { EntryOptions } from '@deepseek-ai/cordis-plugin-loader'
 import { applyEntryPatches, type PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 import { resolveDshHome } from 'bake-home-paths'
@@ -78,21 +76,18 @@ export function profileBundles(manifest: ProfileManifest): string[] {
 
 /**
  * Return a copy of a profile manifest whose bundle list is `bundles`, kept
- * under `bake.profile`. A `dsh.profile` the manifest still carries moves
- * there, and an emptied `dsh` object is dropped.
+ * under `bake.profile`. Without a `bake.profile`, the new one starts from the
+ * fields of `dsh.profile`. A `dsh.profile` block is never changed or removed:
+ * releases from before `bake.profile` read only that block, so after
+ * `bake update --rollback` they still boot the profile with the bundle list
+ * and legacy names it last held.
  * @param manifest - the profile manifest.
  * @param bundles - the bundle list to declare.
  * @returns the updated manifest; `manifest` itself is not changed.
  */
 export function withProfileBundles(manifest: ProfileManifest, bundles: readonly string[]): ProfileManifest {
-  const { dsh, ...rest } = manifest
-  const previous = manifest.bake?.profile ?? dsh?.profile
-  const next: ProfileManifest = { ...rest, bake: { ...manifest.bake, profile: { ...previous, bundles: [...bundles] } } }
-  if (dsh !== undefined) {
-    const { profile: _moved, ...remaining } = dsh
-    if (Object.keys(remaining).length > 0) next.dsh = remaining
-  }
-  return next
+  const previous = manifest.bake?.profile ?? manifest.dsh?.profile
+  return { ...manifest, bake: { ...manifest.bake, profile: { ...previous, bundles: [...bundles] } } }
 }
 
 /**
@@ -849,74 +844,81 @@ function writeStderrLine(line: string): void {
   process.stderr.write(`${line}\n`)
 }
 
-/** Replace `path` with `content` through a synced exclusive sibling, so a reader never sees part of it. */
-function replaceFileSync(path: string, content: string): void {
-  const temp = `${path}.${randomBytes(6).toString('hex')}.tmp`
-  try {
-    const fd = openSync(temp, 'wx')
-    try {
-      writeSync(fd, content)
-      fsyncSync(fd)
-    } finally {
-      closeSync(fd)
-    }
-    renameSync(temp, path)
-  } catch (error) {
-    rmSync(temp, { force: true })
-    throw error
-  }
-}
-
 /**
- * Bring a released profile manifest up to date, once: move its bundle list
- * from `dsh.profile` to `bake.profile` and rewrite renamed package names in it
- * to their current names. The original manifest is copied beside it with
- * {@link PROFILE_MANIFEST_BACKUP_SUFFIX} (an existing copy is kept), the new
- * manifest replaces it atomically, and one line names the changes. A current
- * profile is left untouched. A failed rewrite is reported and leaves the file
- * as it was; the profile loader still reads `dsh.profile` and maps the legacy
- * names for that launch.
+ * Bring a released profile manifest up to date, once: write its bundle list
+ * under `bake.profile`, with renamed package names rewritten to their current
+ * names. A `dsh.profile` block stays as it was, legacy names included, so a
+ * release from before `bake.profile` still boots the profile after
+ * `bake update --rollback`; current readers prefer `bake.profile`
+ * ({@link profileBundles}). The read-modify-write runs under the same
+ * `package.json` writer lock as the plugin manager, so a concurrent
+ * `bake plugin` change is neither lost nor overwritten. The original manifest
+ * is copied beside it with {@link PROFILE_MANIFEST_BACKUP_SUFFIX} (an existing
+ * copy is kept), the new manifest replaces it atomically with the original's
+ * permission bits, and one line names the changes. A current profile is left
+ * untouched. A failed rewrite, including a lock wait that times out, is
+ * reported and leaves the file as it was; the profile loader still reads
+ * `dsh.profile` and maps the legacy names for that launch.
  * @param binName - the diagnostic prefix on the reported line.
  * @param dir - the profile directory.
  * @param log - sink for the one-line report; defaults to stderr.
  * @returns whether the manifest was rewritten.
  */
-export function migrateProfileManifest(
+export async function migrateProfileManifest(
   binName: string, dir: string, log: (line: string) => void = writeStderrLine,
-): boolean {
+): Promise<boolean> {
   const path = join(dir, 'package.json')
+  // A current or unreadable manifest needs no lock; most boots stop here.
+  let pending = planProfileMigration(binName, dir)
+  if (pending === undefined) return false
+  try {
+    return await withFileLock(path, async () => {
+      // Plan again from the locked read: a plugin change may have landed since the first one.
+      pending = planProfileMigration(binName, dir)
+      if (pending === undefined) return false
+      const backup = path + PROFILE_MANIFEST_BACKUP_SUFFIX
+      try {
+        copyFileSync(path, backup, fsConstants.COPYFILE_EXCL)
+      } catch (error) {
+        // An earlier copy is the older, more original one; keep it.
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+      }
+      const content = JSON.stringify(pending.manifest, undefined, 2) + '\n'
+      await writeFileAtomic(path, content, { mode: statSync(path).mode & 0o777 })
+      log(`${binName}: migrated profile ${basename(dir)}: ${pending.renames}; the previous manifest is ${backup}`)
+      return true
+    })
+  } catch (error) {
+    log(`${binName}: warning: could not migrate profile manifest ${path} (${pending.renames}): ${String(error)}`)
+    return false
+  }
+}
+
+/** The rewrite {@link migrateProfileManifest} would make, and the changes it names. */
+interface ProfileMigration {
+  readonly manifest: ProfileManifest
+  readonly renames: string
+}
+
+/** Read a profile manifest and plan its migration; undefined when it is current, missing, or unreadable. */
+function planProfileMigration(binName: string, dir: string): ProfileMigration | undefined {
   let manifest: ProfileManifest
   try {
     manifest = readProfileManifest(binName, dir)
   } catch {
-    // The loader reports an unreadable manifest with its own diagnostic.
-    return false
+    // The loader reports a missing or unreadable manifest with its own diagnostic.
+    return undefined
   }
   const bundles = profileBundles(manifest)
-  if (!Array.isArray(bundles)) return false
+  if (!Array.isArray(bundles)) return undefined
   const moved = manifest.bake?.profile === undefined && manifest.dsh?.profile !== undefined
   const renamed = bundles.filter(name => LEGACY_PACKAGE_NAMES.has(name))
-  if (!moved && renamed.length === 0) return false
-  const migrated = withProfileBundles(manifest, bundles.map(currentPackageName))
-  const backup = path + PROFILE_MANIFEST_BACKUP_SUFFIX
+  if (!moved && renamed.length === 0) return undefined
   const renames = [
     ...moved ? ['dsh.profile -> bake.profile'] : [],
     ...renamed.map(name => `${name} -> ${currentPackageName(name)}`),
   ].join(', ')
-  try {
-    try {
-      copyFileSync(path, backup, fsConstants.COPYFILE_EXCL)
-    } catch (error) {
-      // An earlier copy is the older, more original one; keep it.
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-    }
-    replaceFileSync(path, JSON.stringify(migrated, undefined, 2) + '\n')
-  } catch (error) {
-    log(`${binName}: warning: could not migrate profile manifest ${path} (${renames}): ${String(error)}`)
-    return false
-  }
-  log(`${binName}: migrated profile ${basename(dir)}: ${renames}; the previous manifest is ${backup}`)
-  return true
+  return { manifest: withProfileBundles(manifest, bundles.map(currentPackageName)), renames }
 }
 
 /**
@@ -1025,7 +1027,8 @@ export function loadProfileDirectory(
  * layer and parse the profile's own patch file. A listed bundle without a
  * `dsh.bundle` manifest fails loud — naming a bundle-less package as a layer
  * is a misconfiguration, not "no patches". An existing manifest that still
- * lists renamed bundles is migrated first ({@link migrateProfileManifest}).
+ * lists renamed bundles is migrated first ({@link migrateProfileManifest}),
+ * under the profile's `package.json` writer lock.
  * @param binName - the diagnostic prefix on thrown errors.
  * @param name - the profile name.
  * @param installAnchor - absolute path of the Bake app's package.json (first resolution anchor).
@@ -1036,10 +1039,10 @@ export function loadProfileDirectory(
  * deprecation lines instead of stderr.
  * @returns the loaded profile (empty `patches` when the user layer is skipped).
  */
-export function loadProfile(
+export async function loadProfile(
   binName: string, name: string, installAnchor: string, home: string = resolveDshHome(),
   options: { userLayer?: boolean; warn?: (line: string) => void } = {},
-): Profile {
+): Promise<Profile> {
   const dir = resolveProfileDir(name, home)
   if (!existsSync(join(dir, 'package.json'))) {
     const template = PROFILE_TEMPLATES[name]
@@ -1050,7 +1053,7 @@ export function loadProfile(
     }
     initProfile(dir, template.bundles)
   } else {
-    migrateProfileManifest(binName, dir, options.warn)
+    await migrateProfileManifest(binName, dir, options.warn)
   }
   return loadProfileDirectory(binName, dir, installAnchor, options)
 }

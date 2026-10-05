@@ -73,7 +73,7 @@ export async function runSelfCheck(version: string, output: SelfCheckOutput = {
   try {
     const terminal = await check(problems, 'terminal package', async () => createRequire(INSTALL_ANCHOR).resolve('bake-tui-app/package.json'))
     for (const name of SELF_CHECK_PROFILES) {
-      const profile = await check(problems, `${name} profile`, async () => prepareProfile(name))
+      const profile = await check(problems, `${name} profile`, () => prepareProfile(name))
       if (profile === undefined) continue
       await check(problems, `${name} profile`, () => loadTree(problems, `${name} profile`, profile,
         collectConfigDumpLayers(profile, false, []).map(layer => layer.patches)))

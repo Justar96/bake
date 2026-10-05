@@ -27,7 +27,7 @@ export async function runDumpConfigSchema(
   patches: readonly string[],
   fromDefaultProfile?: string,
 ): Promise<void> {
-  const loaded = prepareProfile(profile, true, fromDefaultProfile)
+  const loaded = await prepareProfile(profile, true, fromDefaultProfile)
   const layers = collectConfigDumpLayers(loaded, false, patches)
   // oxlint-disable-next-line typescript/unbound-method -- Saved only for exact restoration, never called unbound.
   const stdoutWrite = process.stdout.write

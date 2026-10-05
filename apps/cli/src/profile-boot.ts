@@ -206,9 +206,9 @@ export function initializeProfileFromDefault(
  * @returns the loaded profile.
  * @throws when explicit initialization names an unknown template or an existing profile.
  */
-export function prepareProfile(name: string, userLayer = true, fromDefaultProfile?: string): Profile {
+export async function prepareProfile(name: string, userLayer = true, fromDefaultProfile?: string): Promise<Profile> {
   if (fromDefaultProfile !== undefined) initializeProfileFromDefault(name, fromDefaultProfile)
-  const profile = loadProfile(NAME, name, INSTALL_ANCHOR, undefined, { userLayer })
+  const profile = await loadProfile(NAME, name, INSTALL_ANCHOR, undefined, { userLayer })
   writeProfileRootConfig(profile.dir)
   return profile
 }
@@ -224,7 +224,7 @@ interface ComposedProfile {
 
 /**
  * Load `name` and compose its effective patch stack: bundle layers in
- * `dsh.profile.bundles` order (a base-backed profile gets the base bundle's
+ * `bake.profile.bundles` order (a base-backed profile gets the base bundle's
  * platform-gated shell rows), the profile's user layer, the home-level user
  * layer (`$DSH_HOME/cordis.patch.yml` — machine-local preferences that apply
  * to every profile, so it outranks the per-profile layer), `--patch` overlays,
@@ -243,7 +243,7 @@ async function composeProfile(
   fromDefaultProfile?: string,
   resolvedProfile?: ResolvedProfileRuntime,
 ): Promise<ComposedProfile> {
-  const profile = resolvedProfile?.profile ?? prepareProfile(name, true, fromDefaultProfile)
+  const profile = resolvedProfile?.profile ?? await prepareProfile(name, true, fromDefaultProfile)
   if (resolvedProfile !== undefined) writeProfileRootConfig(profile.dir)
   const resolutionOptions = { installAnchor: resolvedProfile?.installAnchor ?? INSTALL_ANCHOR, profile }
   if (resolvedProfile !== undefined && resolutionMode !== 'runtime') healIsolatedProfileModuleFallback(resolvedProfile)

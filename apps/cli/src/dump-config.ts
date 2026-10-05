@@ -28,14 +28,15 @@ const NAME = 'dsh'
  * never parsed).
  * @param patches - `--patch` overlay paths, in argv order.
  * @param fromDefaultProfile - shipped template used once to initialize a missing profile.
+ * @returns after the dump is written.
  */
-export function runDumpConfig(
+export async function runDumpConfig(
   profile: string,
   defaultOnly: boolean,
   patches: readonly string[],
   fromDefaultProfile?: string,
-): void {
-  const loaded = prepareProfile(profile, !defaultOnly, fromDefaultProfile)
+): Promise<void> {
+  const loaded = await prepareProfile(profile, !defaultOnly, fromDefaultProfile)
   const layers = collectConfigDumpLayers(loaded, defaultOnly, patches)
   // The dump anchors on the same empty root file the boot includes.
   process.stdout.write(renderConfigDump(NAME, join(loaded.dir, PROFILE_ROOT_FILENAME), layers))
