@@ -2,7 +2,7 @@
 import { expect, test } from 'bun:test'
 import { createHash, generateKeyPairSync, sign } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
@@ -35,14 +35,21 @@ test.skipIf(process.platform === 'win32' || process.platform === 'darwin')('inst
       if (path === `/releases/0.1.0/${file}`) return new Response(archive)
       return new Response('', { status: 404 })
     } })
-    for (const mode of ['tty', 'pipe', 'failure'] as const) {
+    for (const mode of ['tty', 'pipe', 'own-link', 'foreign-link', 'failure'] as const) {
       reject = mode === 'failure'
+      const piped = mode !== 'tty' && mode !== 'failure'
       const install = join(root, mode)
       const binDir = join(root, `${mode}-bin`)
       // The piped run meets a dsh the installer did not make, which it must keep.
       if (mode === 'pipe') {
         mkdirSync(binDir)
         writeFileSync(join(binDir, 'dsh'), '#!/bin/sh\necho upstream\n', { mode: 0o755 })
+      }
+      const aliasTarget = join(mode === 'foreign-link' ? join(root, 'other-install') : install, 'current/bin/bake')
+      if (mode === 'own-link' || mode === 'foreign-link') {
+        mkdirSync(binDir)
+        // Even a dangling link belongs to its original install.
+        symlinkSync(aliasTarget, join(binDir, 'dsh'))
       }
       let terminalOutput = ''
       const terminalClosed = Promise.withResolvers<undefined>()
@@ -51,7 +58,7 @@ test.skipIf(process.platform === 'win32' || process.platform === 'darwin')('inst
           BAKE_RELEASE_BASE_URL: server.url.toString().replace(/\/$/, ''),
           BAKE_RELEASE_PUBLIC_KEY: pair.publicKey.export({ type: 'spki', format: 'der' }).toString('base64'),
           BAKE_INSTALL_ROOT: install, BAKE_BIN_DIR: binDir },
-        ...(mode === 'pipe' ? { stdout: 'pipe' as const, stderr: 'pipe' as const }
+        ...(piped ? { stdout: 'pipe' as const, stderr: 'pipe' as const }
           : { terminal: { cols: 80, rows: 24,
             data: (_terminal, bytes) => { terminalOutput += Buffer.from(bytes).toString() },
             exit: () => terminalClosed.resolve(undefined),
@@ -61,7 +68,7 @@ test.skipIf(process.platform === 'win32' || process.platform === 'darwin')('inst
       try {
         const [code, stdout, stderr] = await Promise.all([child.exited,
           child.stdout ? new Response(child.stdout).text() : '', child.stderr ? new Response(child.stderr).text() : ''])
-        if (mode !== 'pipe') await terminalClosed.promise
+        if (!piped) await terminalClosed.promise
         expect(child.signalCode).toBeNull()
         const output = terminalOutput + stdout + stderr
         if (mode === 'failure') {
@@ -78,9 +85,13 @@ test.skipIf(process.platform === 'win32' || process.platform === 'darwin')('inst
           if (mode === 'pipe') {
             expect(readFileSync(join(binDir, 'dsh'), 'utf8')).toBe('#!/bin/sh\necho upstream\n')
             expect(output).toContain(`${join(binDir, 'dsh')} exists and is not a Bake-managed link`)
+          } else if (mode === 'foreign-link') {
+            expect(readlinkSync(join(binDir, 'dsh'))).toBe(aliasTarget)
+            expect(output).toContain(`${join(binDir, 'dsh')} exists and is not a Bake-managed link`)
           } else {
             // Bake Desktop starts Bake as `dsh --profile desktop`.
             expect(readlinkSync(join(binDir, 'dsh'))).toBe(join(install, 'current/bin/bake'))
+            expect(output).not.toContain('exists and is not a Bake-managed link')
           }
           if (mode === 'tty') {
             for (const done of ['Verified release', 'Downloaded', 'Checked SHA-256', 'Installed', 'Linked']) {

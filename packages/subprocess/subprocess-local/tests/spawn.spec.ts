@@ -1495,14 +1495,13 @@ describe('environment and spill-file hardening', () => {
   })
 
   it('scrubs the ambient BAKE_ spelling of a managed fact and keeps a BAKE_ user setting', async () => {
-    process.env.BAKE_SESSION_ID = 'old-value'
-    process.env.BAKE_NO_UPDATE_CHECK = '1'
     try {
+      vi.stubEnv('BAKE_SESSION_ID', 'old-value')
+      vi.stubEnv('BAKE_NO_UPDATE_CHECK', '1')
       const result = await finish(spawnSubprocess(spec('echo "[${BAKE_SESSION_ID:-absent}|${BAKE_NO_UPDATE_CHECK:-absent}]"')))
       expect(result.stdout.text.trim()).toBe('[absent|1]')
     } finally {
-      delete process.env.BAKE_SESSION_ID
-      delete process.env.BAKE_NO_UPDATE_CHECK
+      vi.unstubAllEnvs()
     }
   })
 

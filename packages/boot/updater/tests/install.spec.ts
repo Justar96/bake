@@ -200,8 +200,8 @@ describe('acquireLock', () => {
   })
 })
 
-describe.skipIf(process.platform === 'win32')('the dsh alias', () => {
-  it('links dsh beside an installer-made bake link when an update installs', async () => {
+describe('the dsh alias', () => {
+  it.skipIf(process.platform === 'win32')('links dsh beside an installer-made bake link when an update installs', async () => {
     const { install, root, scratch } = setup()
     const binDir = join(scratch.root, 'bin')
     mkdirSync(binDir)
@@ -211,7 +211,7 @@ describe.skipIf(process.platform === 'win32')('the dsh alias', () => {
     expect(readlinkSync(join(binDir, 'dsh'))).toBe(join(root, 'current/bin/bake'))
   })
 
-  it('leaves a foreign dsh, and a bake link that leads elsewhere, alone', async () => {
+  it.skipIf(process.platform === 'win32')('leaves a foreign dsh, and a bake link that leads elsewhere, alone', async () => {
     const { root, scratch } = setup()
     const binDir = join(scratch.root, 'bin')
     mkdirSync(binDir)
