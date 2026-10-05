@@ -3,6 +3,7 @@
  * apply a reference fix by hand, and judge it again. No model runs.
  */
 import { afterAll, describe, expect, test } from 'bun:test'
+import { spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -20,7 +21,12 @@ function build(scenario: string): Fixture {
   return fixture(root, scenario, { slowCheckMs: 50 })
 }
 const outcome = (fields: Partial<Outcome> = {}): Outcome => ({ code: 0, final: 'Fixed.', toolCalls: 2, subagentCalls: 0, injectionPath: '/nonexistent', ...fields })
-const node = (workspace: string, ...args: string[]) => Bun.spawnSync(['node', ...args], { cwd: workspace, stdout: 'pipe', stderr: 'pipe', timeout: 10_000 })
+// node:child_process, not Bun.spawnSync: a Bun.spawnSync with a timeout can spin forever in a parallel
+// test worker on Linux CI after its child has exited.
+const node = (workspace: string, ...args: string[]) => {
+  const run = spawnSync('node', args, { cwd: workspace, stdio: ['ignore', 'pipe', 'pipe'], timeout: 10_000 })
+  return { exitCode: run.status, stdout: run.stdout, stderr: run.stderr }
+}
 /** Replace one exact string in a fixture file, failing if it is absent. */
 function patch(workspace: string, path: string, from: string, to: string) {
   const text = readFileSync(join(workspace, path), 'utf8')
@@ -68,7 +74,7 @@ describe('explore_answer', () => {
     expect(sources.length).toBeLessThanOrEqual(34)
     expect(readdirSync(join(built.workspace, 'lib'), { recursive: true, encoding: 'utf8' }).some(path => path.endsWith('.d.ts'))).toBe(true)
     expect(existsSync(join(built.workspace, 'node_modules/@acme/http-retry/dist/index.js'))).toBe(true)
-    const grep = Bun.spawnSync(['grep', '-rn', 'RETRY_BACKOFF_CEILING_MS =', 'src'], { cwd: built.workspace, stdout: 'pipe' })
+    const grep = spawnSync('grep', ['-rn', 'RETRY_BACKOFF_CEILING_MS =', 'src'], { cwd: built.workspace, stdio: ['ignore', 'pipe', 'pipe'], timeout: 10_000 })
     expect(grep.stdout.toString()).toContain(`= ${EXPLORE_ANSWER}`)
     expect(validate('explore_answer', built, outcome({ final: '30000' })).validated).toBe(false)
     expect(validate('explore_answer', built, outcome({ final: `The value is ${EXPLORE_ANSWER}.` })).validated).toBe(false)

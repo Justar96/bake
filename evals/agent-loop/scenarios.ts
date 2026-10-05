@@ -5,6 +5,7 @@
  * fixture directory it is given, so tests can build a fixture and judge it
  * without a model.
  */
+import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
@@ -408,11 +409,11 @@ export function validate(scenario: string, built: Fixture, outcome: Outcome): Ve
     return { validated: outcome.final.trim() === EXPLORE_ANSWER && treeDigest(workspace) === built.digest, source, testsUnchanged: null, testExit: null, fixturesUnchanged: null }
   }
   const testsUnchanged = existsSync(join(workspace, 'test.cjs')) && readFileSync(join(workspace, 'test.cjs'), 'utf8') === testsFor(scenario, file)
-  const validation = Bun.spawnSync(['node', 'test.cjs'], { cwd: workspace, stdout: 'pipe', stderr: 'pipe', timeout: 5000 })
-  const testExit = validation.exitCode
+  const validation = spawnSync('node', ['test.cjs'], { cwd: workspace, stdio: ['ignore', 'pipe', 'pipe'], timeout: 5000 })
+  const testExit = validation.status
   const read = (path: string) => existsSync(join(workspace, path)) ? readFileSync(join(workspace, path), 'utf8') : ''
   const unchanged = fixturesUnchanged(built)
-  const validated = validation.exitCode === 0 && testsUnchanged && unchanged !== false
+  const validated = validation.status === 0 && testsUnchanged && unchanged !== false
     && (scenario !== 'stale_edit' || (existsSync(outcome.injectionPath) && source.includes('EXTERNAL_CHANGE_KEEP')))
     && (scenario !== 'shell_then_edit' || source.startsWith('// build: 42'))
     && (scenario !== 'background_test' || outcome.final.includes(slowCheckLine()))
