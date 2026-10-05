@@ -1067,7 +1067,7 @@ Source: [`packages/jobs/tool-jobs/src/index.ts`](../packages/jobs/tool-jobs/src/
 
 ### `job_output`
 
-Read a background job's new output since your last read, or its result once done; ends with `[status: ...]`. You are notified when it finishes; do not poll or sleep.
+Read a background job's new output since your last read, or its result once done; ends with `[status: ...]`. You are notified when it finishes; do not poll or sleep. The notice starts a new turn if yours has ended, so end your turn rather than wait.
 
 ```json
 {
@@ -1079,11 +1079,11 @@ Read a background job's new output since your last read, or its result once done
     },
     "wait": {
       "type": "boolean",
-      "description": "Block until done or timeout; only if you cannot continue without it."
+      "description": "Block until done or timeout; only for a job about to finish that you cannot continue without."
     },
     "timeout_ms": {
       "type": "number",
-      "description": "Default 30000, max 600000."
+      "description": "Default 30000, max 60000."
     }
   },
   "required": [

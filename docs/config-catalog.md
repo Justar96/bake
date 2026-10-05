@@ -549,7 +549,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/bundle/headless/src/index.ts:44`](../packages/bundle/headless/src/index.ts)
+Source: [`packages/bundle/headless/src/index.ts:45`](../packages/bundle/headless/src/index.ts)
 
 <a id="deepseek-aidsh-hmr"></a>
 
@@ -2196,7 +2196,11 @@ Requires: `tools` · `jobs`
 export interface Config {
   /** Wait duration applied when `job_output` sets `wait` without `timeout_ms` (default 30s). */
   waitTimeoutMs?: number
-  /** Hard cap on any single wait; a larger model-supplied `timeout_ms` is clamped down to it (default 10min). */
+  /**
+   * Hard cap on any single wait; a larger model-supplied `timeout_ms` is
+   * clamped down to it (default 60s). Longer work is awaited by ending the
+   * turn, which the completion notice reopens, not by holding a turn open.
+   */
   maxWaitTimeoutMs?: number
   /** Whether a completion opens a turn on an idle owner (default `wakeup`). */
   completionDelivery?: CompletionDelivery

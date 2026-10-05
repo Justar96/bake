@@ -7,6 +7,8 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 - A `bash` or `pwsh` call's command is coloured as shell or PowerShell, on the call's head and on any lines under it, so a multi-line command such as `python3 -c "…"` reads apart from the output that follows. A failed call in a step gives up the colour so its head reads wholly red.
 - In a step of several calls, a call that finished cleanly under the step's own icon no longer repeats that icon past its branch; running, failed, and other kinds of call keep theirs. The cell stays blank, so names do not shift as calls finish.
 - Fullscreen's hint row sits at the right edge while following output, apart from the transcript, with each key at full brightness and what it does dimmed.
+- The agent no longer holds its turn open waiting on a background job. A `job_output` read that finds the job still running tells the model to end its turn when nothing else needs doing, because the job's completion notice starts the next one, and a single `wait` lasts at most 60 seconds instead of 10 minutes (`maxWaitTimeoutMs`). The terminal goes idle with the job in its Background row instead of spinning for as long as the job runs. The guidance is left out when no completion would reopen the turn: under `completionDelivery: quiet`, or once the owner's consecutive wakes are spent.
+- `dsh headless` waits for the background jobs its agent still owns, and for the turns their completions open, before it reports and exits, so a turn that ends while its job runs no longer loses that job.
 
 ## [0.3.7] - 2026-10-04
 

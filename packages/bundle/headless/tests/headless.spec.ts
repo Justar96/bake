@@ -290,6 +290,31 @@ describe('headless runner', () => {
     await test.ctx.fiber.dispose()
   })
 
+  it('waits out background jobs and the turns their completions open before it reports', async () => {
+    let live = false
+    let turns = 0
+    const test = await bench({
+      afterPrompt(session, message, agent) {
+        turns += 1
+        if (turns > 1) {
+          appendTurn(session, turns, message, 'build passed', true)
+          return
+        }
+        // The turn ends while its job runs; the completion reopens it.
+        appendTurn(session, 1, message, 'started the build in the background', true)
+        live = true
+        setTimeout(() => {
+          live = false
+          agent.followup({ ...message, id: 'notice', source: { kind: 'plugin', plugin: 'tool-jobs', form: 'notice', summary: 'done' } } as UserMessage)
+        }, 20)
+      },
+    })
+    test.ctx.provide('jobs', { list: () => live ? [{ status: 'running' }] : [] } as never)
+    const result = await test.run()
+    expect([result.code, result.out, turns]).toEqual([0, 'build passed\n', 2])
+    await test.ctx.fiber.dispose()
+  })
+
   describe('a run the process stops', () => {
     /** One turn whose Agent was disposed mid-step, as shutdown leaves it. */
     function disposedTurn(session: Session, message: UserMessage): void {

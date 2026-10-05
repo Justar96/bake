@@ -19,6 +19,7 @@ import type { Agent, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 import { NO_DEFAULT_MODEL_MESSAGE } from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-agent-loop'
 import type {} from '@deepseek-ai/dsh-fs'
+import type {} from '@deepseek-ai/dsh-jobs'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
 import { SessionSeq } from '@deepseek-ai/dsh-session'
@@ -342,6 +343,43 @@ function fail(io: HeadlessIo, error: unknown, json: boolean): void {
  * @param config - task, optional exact Session identity, and output mode.
  * @param io - process-facing effects.
  */
+/** How often a run left waiting on background jobs checks whether they have settled. */
+const JOB_POLL_MS = 250
+
+/**
+ * Wait out the Agent's background jobs before the run reports.
+ *
+ * A turn may end while its jobs run, trusting their completion notices to open
+ * the turns that use the results. The process must outlive those jobs and
+ * turns, or disposal would cancel the work the answer depends on. The registry
+ * is polled, not waited on: a registry wait marks the job reported, which
+ * suppresses the very notice that reopens the turn.
+ * @param ctx - the runner's context, whose `jobs` service may be absent.
+ * @param agent - the Agent this run owns.
+ * @param stopping - aborted when the process is asked to stop.
+ */
+async function settleJobs(ctx: Context, agent: Agent, stopping: AbortSignal): Promise<void> {
+  const jobs = ctx.get('jobs')
+  if (jobs === undefined) return
+  const live = (): boolean => jobs.list(agent).some(job => job.status === 'running' || job.status === 'stopping')
+  while (live() && !stopping.aborted) {
+    while (live() && !stopping.aborted) {
+      await new Promise<void>((resolve) => {
+        const done = (): void => {
+          clearTimeout(timer)
+          stopping.removeEventListener('abort', done)
+          resolve()
+        }
+        const timer = setTimeout(done, JOB_POLL_MS)
+        stopping.addEventListener('abort', done, { once: true })
+      })
+    }
+    // A settlement opens its notice's turn synchronously, so the Agent is
+    // already busy here when one was woken; that turn may start more jobs.
+    await agent.whenIdle()
+  }
+}
+
 async function run(ctx: Context, config: Config, io: HeadlessIo, stopping: AbortSignal): Promise<void> {
   // Loader siblings mount concurrently. Await the complete application before
   // creating an Agent so its scoped tools and adapters are not half-composed.
@@ -409,6 +447,7 @@ async function run(ctx: Context, config: Config, io: HeadlessIo, stopping: Abort
         source: { kind: 'user' },
       }))
       await agent.whenIdle()
+      await settleJobs(ctx, agent, stopping)
     } finally {
       stopReasoning?.()
     }
