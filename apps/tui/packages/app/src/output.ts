@@ -39,12 +39,13 @@ const CLEAR_TERMINAL = `${CSI}2J${CSI}3J${CSI}H`
 /** End of a synchronized update. What it presents must already be complete. */
 const END_SYNC = `${CSI}?2026l`
 /**
- * Report button presses and the wheel (1000) in SGR encoding (1006), which
- * has no coordinate limit. Motion stays unreported. Terminals keep native
+ * Report presses, releases, and the wheel (1000), and motion while a button is
+ * held (1002), in SGR encoding (1006), which has no coordinate limit. A drag
+ * selects the transcript's text for Bake to copy. Terminals keep native
  * selection on Shift-drag, or Option-drag on macOS.
  */
-const MOUSE_ON = `${CSI}?1000h${CSI}?1006h`
-const MOUSE_OFF = `${CSI}?1006l${CSI}?1000l`
+const MOUSE_ON = `${CSI}?1000h${CSI}?1002h${CSI}?1006h`
+const MOUSE_OFF = `${CSI}?1006l${CSI}?1002l${CSI}?1000l`
 /**
  * Autowrap (DECAWM). Off in the alternate buffer, so a row the terminal draws
  * wider than Ink measured it, as a character whose width they disagree on

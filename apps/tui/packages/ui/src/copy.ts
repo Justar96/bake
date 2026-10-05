@@ -31,6 +31,7 @@ export const dictionaries = {
     sheetClose: 'Esc closes', sheetScroll: '↑↓ scroll', sheetCycle: 'Tab next', sheetSelect: '↑↓ select',
     sheetPages: 'PgUp/PgDn scroll',
     transcriptScroll: 'Wheel/PgUp/PgDn scroll · Ctrl+↑↓ prompts · Ctrl+Home first',
+    selectionCopied: 'Copied', selectionCopyFailed: 'Copy failed',
     transcriptPaused: 'History · Ctrl+↑↓ prompts',
     transcriptLatest: '↓ Latest · Ctrl+End', transcriptUnseen: '↓ New output · Ctrl+End',
     goalObjective: 'Objective',

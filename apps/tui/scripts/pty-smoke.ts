@@ -1854,7 +1854,7 @@ scenario('arrow-wave', 'the single-line kneading spinner loops in place and yiel
     }
   })
 
-scenario('fullscreen', 'alternate-screen scrolling, pinned input, resize, replay, and shell restoration',
+scenario('fullscreen', 'alternate-screen scrolling, pinned input, word copy, resize, replay, and shell restoration',
   { replayOnly: true }, async run => {
     const answer = Array.from({ length: 100 }, (_, index) => `Fullscreen paragraph ${index}.`).join('\n\n') + '\n\nFULLSCREEN_DONE'
     const override = join(run.root, 'fullscreen-replay.json')
@@ -1866,6 +1866,10 @@ scenario('fullscreen', 'alternate-screen scrolling, pinned input, resize, replay
     ] }]))
     const before = await run.logs()
     await run.writeOverlay(override, { paceMs: 1 })
+    // A copy goes to the terminal through OSC 52, as over SSH, never to the
+    // clipboard of the machine running the scenario.
+    const sshTty = run.env.SSH_TTY
+    run.env.SSH_TTY = '/dev/pts/bake-smoke'
     try {
       const drive = async (label: string, resume?: string): Promise<void> => {
         const screen = new Screen()
@@ -1921,6 +1925,17 @@ scenario('fullscreen', 'alternate-screen scrolling, pinned input, resize, replay
               return rows.some(line => line.includes('FULLSCREEN_DONE')) && rows.some(line => line.includes(dictionaries.en.transcriptScroll))
                 && !rows.join('\n').includes('[<')
             })
+            const shown = await capture(terminal.raw)
+            const doneRow = shown.findIndex(line => line.includes('FULLSCREEN_DONE'))
+            const doneColumn = shown[doneRow]!.indexOf('FULLSCREEN_DONE') + 3
+            const click = `\x1b[<0;${doneColumn};${doneRow + 1}M\x1b[<0;${doneColumn};${doneRow + 1}m`
+            terminal.send(click + click, 'a double click selects a word and copies it')
+            await terminal.wait('the word sent to the terminal clipboard and the copy confirmed', async () => {
+              const rows = await capture(terminal.raw)
+              return terminal.raw.includes(`\x1b]52;c;${Buffer.from('FULLSCREEN_DONE').toString('base64')}\x07`)
+                && rows.some(line => line.includes(dictionaries.en.selectionCopied)) && !rows.join('\n').includes('[<')
+            })
+            terminal.send('\x1b', 'Escape drops the selection')
             screen.resize(40,12)
             terminal.resize(40,12)
             await terminal.wait('the resized fullscreen keeps its last answer and composer', async () => {
@@ -1941,7 +1956,11 @@ scenario('fullscreen', 'alternate-screen scrolling, pinned input, resize, replay
       const texts = log.filter(e => e.type === 'assistant/message').flatMap(e => e.data.message.content.filter((block: any) => block.type === 'text').map((block: any) => block.text))
       assert(texts.includes(answer), 'fullscreen changed the persisted assistant answer')
       await drive('fullscreen-resume', log[0].id)
-    } finally { await run.writeOverlay() }
+    } finally {
+      if (sshTty === undefined) delete run.env.SSH_TTY
+      else run.env.SSH_TTY = sshTty
+      await run.writeOverlay()
+    }
   })
 
 scenario('markdown', 'streamed Markdown keeps semantic colours, formats once, survives resize and uncoloured resume, and preserves the logged source',

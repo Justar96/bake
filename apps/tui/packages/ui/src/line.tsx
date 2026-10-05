@@ -13,11 +13,12 @@ import React from 'react'
 import { Box, Text, measureElement, type DOMElement } from 'ink'
 import stringWidth from 'string-width'
 import wrapAnsi from 'wrap-ansi'
-import { caretCell } from './caret.ts'
+import { CARET_OFF, CARET_ON, caretCell } from './caret.ts'
 import { offsetAt, wrapDraft } from './editor.ts'
 import { sliceSpans } from './markdown.ts'
 import { chromeFor, COLUMN, COMPOSER_BUDGET, HINT_MIN_COLUMNS, MARKER, RULE, TREE, windowOf, type Budget, type ChromeLayout, type FrameStyle } from './layout.ts'
 import { PALETTE, type PaletteColor } from './palette.ts'
+import { columnOffsets, invertSpans } from './selection.ts'
 import { fittedAction, fittedGroup, hintFor, isBlank, present, SCRIPT_TOOL, softBreaks, streamingThought, styleOf, tailLines, type ComposerState, type Hint, type LineStyle, type PresentedLine, type ResultBound, type Span } from './present.ts'
 import type { Row } from './rows.ts'
 import { FOLD_REST, foldFrame, FRAME_MS, formatElapsed, SPINNER_REST, spinnerFrame, type Clock, type Outcome, type Spinner, type TurnSummary } from './activity.ts'
@@ -35,8 +36,9 @@ import { FIELD_GAP, fitStatus, type StatusField } from './status-line.ts'
  * @param props.line - the placed line.
  * @param props.budget - budgets for the current terminal size.
  * @param props.frame - line glyphs this terminal can draw, for a turn divider.
+ * @param props.selected - cells of a one-row window a fullscreen selection covers, drawn reversed.
  */
-export function Line({ line, budget, frame, clock, window }: {
+export function Line({ line, budget, frame, clock, window, selected }: {
   readonly line: PresentedLine
   readonly budget: Budget
   readonly frame: FrameStyle
@@ -44,6 +46,7 @@ export function Line({ line, budget, frame, clock, window }: {
   readonly clock?: Clock | undefined
   /** Physical rows to render when a fullscreen viewport intersects this line. */
   readonly window?: { readonly offset: number, readonly height: number }
+  readonly selected?: { readonly from: number, readonly to: number } | undefined
 }): React.ReactElement {
   const style = styleOf(line.tone)
   const marker = styleOf(line.markerTone ?? line.tone)
@@ -66,44 +69,112 @@ export function Line({ line, budget, frame, clock, window }: {
   const content = window === undefined ? placed.content : windowContent(line, budget, window.offset, window.height)
   const text = window === undefined ? placed.text : content.text
   const first = window === undefined || window.offset === 0
+  // A selected prefix cell is reversed in its box's own style; the box keeps its width.
+  const prefix = (glyph: string, at: number, cells: number, props: React.ComponentProps<typeof Text>): React.ReactElement | null =>
+    selected === undefined || selected.to <= at || selected.from >= at + cells ? null
+      : <Cells text={glyph} width={cells} from={selected.from - at} to={selected.to - at} props={props} />
+  const textAt = rail + branch + badge + (indented ? verbWidth : 0)
+  const body = line.divider ? RULE[frame].line.repeat(width) : text
+  const marked = selected === undefined || selected.to <= textAt ? undefined
+    : columnOffsets(body, Math.max(0, selected.from - textAt), selected.to - textAt)
+  const runs = marked === undefined || marked.end <= marked.start ? content.spans
+    : invertSpans(line.divider ? undefined : content.spans, body.length, line.tone, marked.start, marked.end)
   return (
     // `flexShrink={0}`. Inside a region held at a fixed height, a shrinkable
     // line lets Yoga squash every line a little instead of pushing the oldest
     // ones off the top, which drops lines out of the middle of the stream.
     <Box flexDirection="row" flexShrink={0}>
       {rail === 0 ? null : <Box width={rail} flexShrink={0}>
-        {!first ? null : line.pulse === true
+        {prefix(first ? line.marker : '', 0, rail, { bold: (line.markerTone === undefined ? style : marker).bold, dimColor: line.markerTone === undefined ? false : marker.dim, ...colorOf(line.markerTone === undefined ? style : marker) })
+          ?? (!first ? null : line.pulse === true
           ? <Pulse glyph={line.marker} clock={clock} />
           : line.markerTone === undefined
             ? <Text bold={style.bold} {...colorOf(style)}>{line.marker}</Text>
-            : <Text bold={marker.bold} dimColor={marker.dim} {...colorOf(marker)}>{line.marker}</Text>}
+            : <Text bold={marker.bold} dimColor={marker.dim} {...colorOf(marker)}>{line.marker}</Text>)}
       </Box>}
       {branch === 0 ? null : <Box width={branch} flexShrink={0}>
-        {!first ? null : <Text bold={tree.bold} dimColor={tree.dim} {...colorOf(tree)}>{line.branch}</Text>}
+        {prefix(first ? line.branch ?? '' : '', rail, branch, { bold: tree.bold, dimColor: tree.dim, ...colorOf(tree) })
+          ?? (!first ? null : <Text bold={tree.bold} dimColor={tree.dim} {...colorOf(tree)}>{line.branch}</Text>)}
       </Box>}
       {badge === 0 || line.badge === undefined ? null : <Box width={badge} flexShrink={0}>
-        {!first ? null : line.badge.pulse === true
-          ? <Pulse glyph={line.badge.glyph} clock={clock} />
-          : <Text bold={badgeStyle!.bold} dimColor={badgeStyle!.dim} {...colorOf(badgeStyle!)}>{line.badge.glyph}</Text>}
+        {prefix(first ? line.badge.glyph : '', rail + branch, badge, { bold: badgeStyle!.bold, dimColor: badgeStyle!.dim, ...colorOf(badgeStyle!) })
+          ?? (!first ? null : line.badge.pulse === true
+            ? <Pulse glyph={line.badge.glyph} clock={clock} />
+            : <Text bold={badgeStyle!.bold} dimColor={badgeStyle!.dim} {...colorOf(badgeStyle!)}>{line.badge.glyph}</Text>)}
       </Box>}
       {indented && verbWidth > 0
         ? (
           <Box width={verbWidth} flexShrink={0}>
-            {!first ? null : line.verb === '' && line.gutter !== undefined
+            {prefix(first ? verbText(line, verbWidth) : '', rail + branch + badge, verbWidth, line.verb === '' && line.gutter !== undefined
+              ? { dimColor: style.dim, ...colorOf(style) }
+              : { bold: verb.bold || (line.verbTone !== undefined && line.verbTone !== 'quiet'), dimColor: verb.dim, ...colorOf(verb) })
+              ?? (!first ? null : line.verb === '' && line.gutter !== undefined
               // Right-align the line number against the code, one space short of it.
               ? <Text dimColor={style.dim} {...colorOf(style)}>{`${line.gutter.padStart(verbWidth - 1)} `}</Text>
               // A verb with its own tone is bold, except the quiet connector.
-              : <Text bold={verb.bold || (line.verbTone !== undefined && line.verbTone !== 'quiet')} dimColor={verb.dim} {...colorOf(verb)}>{line.verb}</Text>}
+              : <Text bold={verb.bold || (line.verbTone !== undefined && line.verbTone !== 'quiet')} dimColor={verb.dim} {...colorOf(verb)}>{line.verb}</Text>)}
           </Box>
           )
         : null}
       <Box width={width}>
         <Text bold={style.bold} dimColor={style.dim} italic={style.italic === true} wrap="wrap" {...colored}>
-          {line.divider ? RULE[frame].line.repeat(width) : content.spans === undefined ? text : spansOf({ ...content, text }, zone)}
+          {runs === undefined ? body : spansOf({ ...content, text: body, spans: runs }, zone)}
         </Text>
       </Box>
     </Box>
   )
+}
+
+/**
+ * Text in reverse video. The codes are written into the text, as the caret's
+ * are, because Chalk drops Ink's `inverse` on a terminal it reads as colourless.
+ */
+const reverse = (text: string): string => text === '' ? '' : `${CARET_ON}${text}${CARET_OFF}`
+
+/** The verb column's text as drawn: a right-aligned line number, or the verb. */
+const verbText = (line: PresentedLine, width: number): string =>
+  line.verb === '' && line.gutter !== undefined ? `${line.gutter.padStart(width - 1)} ` : line.verb
+
+/** Text padded with spaces to a number of cells. */
+const padCells = (text: string, cells: number): string => text + ' '.repeat(Math.max(0, cells - stringWidth(text)))
+
+/**
+ * A prefix box's text with the cells a selection covers reversed. Its blank
+ * cells are drawn too, so a selection across the rail reads as one band.
+ */
+function Cells({ text, width, from, to, props }: {
+  readonly text: string
+  readonly width: number
+  readonly from: number
+  readonly to: number
+  readonly props: React.ComponentProps<typeof Text>
+}): React.ReactElement {
+  const padded = padCells(text, width)
+  const { start, end } = columnOffsets(padded, Math.max(0, from), Math.min(width, to))
+  return <Text {...props}>{padded.slice(0, start)}{reverse(padded.slice(start, end))}{padded.slice(end)}</Text>
+}
+
+/**
+ * One terminal row of a line as `Line` draws it, without styling: its rail
+ * marker, tree branch, badge, and verb on the first row, padded to their
+ * columns, then the row's text. What a fullscreen selection copies and the
+ * text a double click finds its word in.
+ * @param line - the placed line.
+ * @param budget - budgets for the current terminal size.
+ * @param frame - line glyphs, for a divider.
+ * @param offset - which wrapped row.
+ * @returns the row's text.
+ */
+export function rowText(line: PresentedLine, budget: Budget, frame: FrameStyle, offset: number): string {
+  const placed = placement(line, budget)
+  const first = offset === 0
+  const verbWidth = line.column === COLUMN.output ? placed.verb : 0
+  const body = line.divider === true ? RULE[frame].line.repeat(placed.width) : wrappedRows(line, budget)[offset] ?? ''
+  return padCells(placed.rail === 0 ? '' : first ? line.marker : '', placed.rail)
+    + padCells(placed.branch === 0 || !first ? '' : line.branch ?? '', placed.branch)
+    + padCells(placed.badge === 0 || !first ? '' : line.badge?.glyph ?? '', placed.badge)
+    + padCells(verbWidth === 0 || !first ? '' : verbText(line, verbWidth), verbWidth)
+    + body
 }
 
 // `exactOptionalPropertyTypes` rejects an explicit `undefined`, so a missing
@@ -129,7 +200,7 @@ function spansOf(line: PresentedLine, zone = false): React.ReactNode[] {
     parts.push(
       <Text key={index} bold={span.bold === true || style.bold} dimColor={style.dim} italic={span.italic === true || style.italic === true}
         underline={span.underline === true} strikethrough={span.strikethrough === true} inverse={span.inverse === true} {...color}>
-        {line.text.slice(offset, offset + span.length)}
+        {span.selected === true ? reverse(line.text.slice(offset, offset + span.length)) : line.text.slice(offset, offset + span.length)}
       </Text>,
     )
     offset += span.length

@@ -4,6 +4,15 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-10-05
+
+- A `bash` or `pwsh` call's command is coloured as shell or PowerShell, on the call's head and on any lines under it, so a multi-line command such as `python3 -c "…"` reads apart from the output that follows. A failed call in a step gives up the colour so its head reads wholly red.
+- In a step of several calls, a call that finished cleanly under the step's own icon no longer repeats that icon past its branch; running, failed, and other kinds of call keep theirs. The cell stays blank, so names do not shift as calls finish.
+- Fullscreen's hint row sits at the right edge while following output, apart from the transcript, with each key at full brightness and what it does dimmed.
+- The agent no longer holds its turn open waiting on a background job. A `job_output` read that finds the job still running tells the model to end its turn when nothing else needs doing, because the job's completion notice starts the next one, and a single `wait` lasts at most 60 seconds instead of 10 minutes (`maxWaitTimeoutMs`). The terminal goes idle with the job in its Background row instead of spinning for as long as the job runs. The guidance is left out when no completion would reopen the turn: under `completionDelivery: quiet`, or once the owner's consecutive wakes are spent.
+- `dsh headless` waits for the background jobs its agent still owns, and for the turns their completions open, before it reports and exits, so a turn that ends while its job runs no longer loses that job. The wait lasts at most 10 minutes (`jobWaitMs`, 0 to not wait), so a job that never ends, such as a dev server, does not hang the run. Past the limit the run writes a `dsh: warning:` line, reports, and stops the jobs.
+- Fullscreen selects and copies text with the mouse. Drag across the transcript to select it, double-click a word (a path or hyphenated name whole), or triple-click a row; the selection is drawn in reverse video and copied on release, each row trimmed at its end, and the hint row says `Copied` or `Copy failed`. A drag held on the top or bottom row scrolls on, Escape clears the selection, and the selection stays on its text while output arrives. Bake copies with `pbcopy`, `clip`, `wl-copy`, `xclip`, or `xsel`, and through the terminal with OSC 52 over SSH, under Windows Terminal in WSL, or when no tool works. Shift-drag, or Option-drag on macOS, still selects with the terminal itself.
+
 ## [0.3.7] - 2026-10-04
 
 - Settings, credentials, and profile files are synced to disk when Bake saves them. On some filesystems, a crash or power loss right after a save could leave `settings.yaml` or `.credentials.yaml` empty, which Bake then read as no settings or no saved logins, and the next save made the loss permanent. A save now reaches the disk before it replaces the old file, so a crash leaves either the old or the new file whole.

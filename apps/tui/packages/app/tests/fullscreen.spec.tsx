@@ -8,6 +8,7 @@ import { App, type AppProps } from '@dsh-tui/ui/app.tsx'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'
 import { appendTranscript, emptyTranscript } from '@dsh-tui/ui/transcript.ts'
 import type { Row } from '@dsh-tui/ui/rows.ts'
+import type { Clock } from '@dsh-tui/ui/activity.ts'
 import { frameOutput } from '../src/output.ts'
 import { Printed } from '../src/printed.ts'
 import { caretRow } from '../../../tests/caret.ts'
@@ -482,6 +483,99 @@ it('gives sheets and approvals their keys and retains the parent draft after ins
   await view.check(lines => expect(lines.join('\n')).toContain('draft▌'))
 })
 
+/** A clock whose repeating timers run only when a test ticks them. */
+function manualClock() {
+  const timers = new Set<{ readonly ms: number, readonly tick: () => void }>()
+  return {
+    now: 0,
+    timers,
+    clock(): Clock { return { now: () => this.now, every: (ms, tick) => { const timer = { ms, tick }; timers.add(timer); return () => { timers.delete(timer) } } } },
+    tick(ms: number) { for (const timer of [...timers]) if (timer.ms === ms) timer.tick() },
+  }
+}
+/** An SGR report of the left button: a press, a move while held, or a release, at one-based cells. */
+const mouse = (kind: 'press' | 'drag' | 'release', column: number, row: number) =>
+  `\x1b[<${kind === 'drag' ? 32 : 0};${column};${row}${kind === 'release' ? 'm' : 'M'}`
+/** Whether the cell at a zero-based row and column is drawn reversed. */
+const reversed = (terminal: xterm.Terminal, row: number, column: number) =>
+  terminal.buffer.active.getLine(terminal.buffer.active.viewportY + row)?.getCell(column)?.isInverse() !== 0
+
+it('selects transcript text by dragging, reverses it in place, and copies it on release', async () => {
+  const copy = dictionaries.en
+  const time = manualClock()
+  const onCopy = vi.fn(async (_text: string) => true)
+  const view = await mount({ committed: history(80), clock: time.clock(), motion: false, onCopy })
+  await view.check(lines => expect(lines[0]).toBe('  note   History 69'))
+  // From the H of row 0 to the y of row 2.
+  view.input.send(mouse('press', 10, 1))
+  view.input.send(mouse('drag', 16, 3))
+  await view.check(() => {
+    expect(reversed(view.terminal, 0, 9)).toBe(true)
+    expect(reversed(view.terminal, 0, 8)).toBe(false)
+    expect(reversed(view.terminal, 1, 0)).toBe(true)
+    expect(reversed(view.terminal, 2, 15)).toBe(true)
+    expect(reversed(view.terminal, 2, 16)).toBe(false)
+  })
+  expect(onCopy).not.toHaveBeenCalled()
+  view.input.send(mouse('release', 16, 3))
+  await view.check(lines => expect(lines[11]).toContain(copy.selectionCopied))
+  expect(onCopy).toHaveBeenCalledWith('History 69\n  note   History 70\n  note   History')
+  // The selection stays drawn until Escape, which then leaves the turn alone.
+  expect(reversed(view.terminal, 1, 0)).toBe(true)
+  view.input.send('\x1b')
+  await view.check(() => expect(reversed(view.terminal, 1, 0)).toBe(false))
+  time.tick(1500)
+  await view.check(lines => expect(lines[11]).toContain(copy.transcriptScroll))
+  // A click on its own selects and copies nothing.
+  view.input.send(mouse('press', 10, 1) + mouse('release', 10, 1))
+  await view.check(() => expect(reversed(view.terminal, 0, 9)).toBe(false))
+  expect(onCopy).toHaveBeenCalledTimes(1)
+})
+
+it('takes a word on a double click and a row on a triple click', async () => {
+  const time = manualClock()
+  const onCopy = vi.fn(async (_text: string) => true)
+  const onCancel = vi.fn()
+  const view = await mount({ committed: history(80), clock: time.clock(), motion: false, onCopy, onCancel })
+  await view.check(lines => expect(lines[0]).toBe('  note   History 69'))
+  const click = mouse('press', 12, 1) + mouse('release', 12, 1)
+  view.input.send(click)
+  time.now = 100
+  view.input.send(click)
+  await view.check(() => expect(onCopy).toHaveBeenLastCalledWith('History'))
+  time.now = 200
+  view.input.send(click)
+  await view.check(() => expect(onCopy).toHaveBeenLastCalledWith('  note   History 69'))
+  // Too slow for a double click: a click again.
+  time.now = 2000
+  view.input.send(click)
+  time.now = 3000
+  view.input.send(click)
+  await view.check(() => expect(reversed(view.terminal, 0, 9)).toBe(false))
+  expect(onCopy).toHaveBeenCalledTimes(2)
+  view.input.send('\x1b')
+  await vi.waitFor(() => expect(onCancel).toHaveBeenCalled())
+})
+
+it('scrolls on while a drag is held at the top edge, and says when the copy failed', async () => {
+  const copy = dictionaries.en
+  const time = manualClock()
+  const onCopy = vi.fn(async (_text: string) => false)
+  const view = await mount({ committed: history(80), clock: time.clock(), motion: false, onCopy })
+  await view.check(lines => expect(lines[0]).toBe('  note   History 69'))
+  view.input.send(mouse('press', 20, 3))
+  view.input.send(mouse('drag', 10, 1))
+  time.tick(50)
+  time.tick(50)
+  await view.check(lines => expect(lines[0]).toBe('  note   History 67'))
+  view.input.send(mouse('release', 10, 1))
+  await view.check(lines => expect(lines[11]).toContain(copy.selectionCopyFailed))
+  expect(onCopy).toHaveBeenCalledWith('History 67\n  note   History 68\n  note   History 69\n  note   History 70\n  note   History 71')
+  // Released, the edge no longer scrolls.
+  time.tick(50)
+  await view.check(lines => expect(lines[0]).toBe('  note   History 67'))
+})
+
 it('restores the primary screen, its cursor, paste, and raw mode on exit', async () => {
   const view = await mount({ committed: history(80) })
   view.resize(40,12)
@@ -495,9 +589,9 @@ it('restores the primary screen, its cursor, paste, and raw mode on exit', async
   expect(bytes).toContain('\x1b[?1049l')
   expect(bytes).toContain('\x1b[?2004l')
   // The mouse is reported, and autowrap is off, only while the alternate buffer is shown.
-  expect(bytes.indexOf('\x1b[?1000h\x1b[?1006h')).toBeGreaterThan(bytes.indexOf('\x1b[?1049h'))
+  expect(bytes.indexOf('\x1b[?1000h\x1b[?1002h\x1b[?1006h')).toBeGreaterThan(bytes.indexOf('\x1b[?1049h'))
   expect(bytes.indexOf('\x1b[?7l')).toBeGreaterThan(bytes.indexOf('\x1b[?1049h'))
-  const release = '\x1b[?1006l\x1b[?1000l\x1b[?7h'
+  const release = '\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[?7h'
   expect(bytes.lastIndexOf(release)).toBe(bytes.lastIndexOf('\x1b[?1049l') - release.length)
   expect(bytes.lastIndexOf('\x1b[?7h')).toBeGreaterThan(bytes.lastIndexOf('\x1b[?7l'))
 })

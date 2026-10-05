@@ -25,6 +25,14 @@ export interface VisibleLine {
   readonly height: number
 }
 
+/** One terminal row of the transcript: its line, its wrapped row in that line, and where it is. */
+export interface PhysicalRow {
+  readonly key: string
+  readonly line: PresentedLine
+  readonly offset: number
+  readonly position: Position
+}
+
 interface Measured {
   readonly lines: readonly PresentedLine[]
   readonly heights: readonly number[]
@@ -187,6 +195,26 @@ export class Viewport {
       }
     }
     return visible
+  }
+
+  /**
+   * Each physical row from `from` through `to`, inclusive: the line that draws
+   * it, which of that line's wrapped rows it is, and its position. What a
+   * fullscreen selection copies, however far it runs past the view.
+   */
+  between(from: Position, to: Position, budget: Budget, result: ResultBound): PhysicalRow[] {
+    const rows: PhysicalRow[] = []
+    for (let row = from.row; row <= to.row && row < this.end.row; row++) {
+      const measured = this.measure(row, budget, result)
+      let at = 0
+      for (let index = 0; index < measured.lines.length; index++) {
+        for (let offset = 0; offset < measured.heights[index]!; offset++, at++) {
+          if ((row === from.row && at < from.offset) || (row === to.row && at > to.offset)) continue
+          rows.push({ key: `${row}:${index}`, line: measured.lines[index]!, offset, position: { row, offset: at } })
+        }
+      }
+    }
+    return rows
   }
 
   private measure(index: number, budget: Budget, result: ResultBound): Measured {

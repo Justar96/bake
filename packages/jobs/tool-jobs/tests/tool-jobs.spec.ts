@@ -181,11 +181,12 @@ describe('tool-jobs setup', () => {
     )
     expect(schemas.get('job_output')?.description).toBe(
       'Read a background job\'s new output since your last read, or its result once done; ends with '
-      + '`[status: ...]`. You are notified when it finishes; do not poll or sleep.',
+      + '`[status: ...]`. You are notified when it finishes; do not poll or sleep. '
+      + 'The notice starts a new turn if yours has ended, so end your turn rather than wait.',
     )
     expect(parameterDescriptions('job_output')).toEqual({
       job_id: 'A job id, not a continuable subagent\'s agent id.',
-      wait: 'Block until done or timeout; only if you cannot continue without it.',
+      wait: 'Block until done or timeout; only for a job about to finish that you cannot continue without.',
       timeout_ms: 'Default 5000, max 60000.',
     })
     expect(schemas.get('job_list')?.description).toBe('List your background jobs, running and finished.')
@@ -213,7 +214,7 @@ describe('tool-jobs setup', () => {
     expect(ctx.tools.get('job_output')).toBeDefined()
     const outputParameters = ctx.tools.schemas().find(schema => schema.name === 'job_output')?.parameters['properties']
     expect((outputParameters as Record<string, { description?: string }>)['timeout_ms']?.description)
-      .toBe('Default 30000, max 600000.')
+      .toBe('Default 30000, max 60000.')
     expect(() => ctx.jobs.start(producer().spec)).not.toThrow()
   })
 })
@@ -597,6 +598,38 @@ describe('completion notices across scoped mounts', () => {
     } finally {
       await dispose()
     }
+  })
+})
+
+describe('job_output while the job still runs', () => {
+  const STILL = 'Still running. Its completion notice will start your next turn; '
+    + 'if nothing else needs doing now, end your turn instead of waiting.'
+
+  it('tells its owner to end the turn, since the completion reopens it', async () => {
+    const { ctx } = await setup()
+    const owner = await fakeAgent(ctx, 'sess-1')
+    const p = producer({ owner })
+    ctx.jobs.start(p.spec)
+    expect(text(await call(ctx, 'job_output', { job_id: 'bash-1' }, owner))).toBe(`(no new output)\n[status: running]\n${STILL}`)
+    // A finished job has nothing left to wait for.
+    p.settle({ status: 'completed', detail: 'exit code: 0' })
+    await tick()
+    expect(text(await call(ctx, 'job_output', { job_id: 'bash-1' }, owner))).toBe('(no new output)\n[status: completed, exit code: 0]')
+  })
+
+  it('says nothing about ending the turn when no completion would reopen it', async () => {
+    const quiet = await setup({ completionDelivery: 'quiet' })
+    const owner = await fakeAgent(quiet.ctx, 'sess-1')
+    quiet.ctx.jobs.start(producer({ owner }).spec)
+    expect(text(await call(quiet.ctx, 'job_output', { job_id: 'bash-1' }, owner))).toBe('(no new output)\n[status: running]')
+    expect(quiet.ctx.tools.schemas().find(schema => schema.name === 'job_output')?.description).not.toContain('end your turn')
+
+    // A spent wake budget leaves the next notice injected, so the turn must stay open.
+    const spent = await setup({ maxConsecutiveWakes: 1 })
+    const idle = await fakeAgent(spent.ctx, 'sess-2', { status: 'idle' })
+    await settleTasks(spent.ctx, idle, 1)
+    spent.ctx.jobs.start(producer({ owner: idle }).spec)
+    expect(text(await call(spent.ctx, 'job_output', { job_id: 'bash-2' }, idle))).toBe('(no new output)\n[status: running]')
   })
 })
 

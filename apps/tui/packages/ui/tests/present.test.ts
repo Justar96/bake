@@ -465,6 +465,18 @@ describe('present, reporting an action', () => {
     expect(text(call('bash', 'make', { ok: true, text: 'a\nb\nc\nd' }))).toEqual(['Bash(make)', 'a', 'b', 'c', 'd'])
   })
 
+  test('colours a shell command as shell, head and continuation alike', () => {
+    const highlight: Highlight = (lines, path) => path === 'command.sh'
+      ? lines.map(text => [{ length: text.length, color: '#2aa198' }]) : undefined
+    const [, head, next] = present({ kind: 'tool-call', callId: 'c1', tool: 'bash', input: 'python3 -c "\nprint(1)"' }, { ...live, code: highlight })
+    expect(head!.spans).toEqual([{ length: 4, tone: 'strong' }, { length: 1, tone: 'plain' },
+      { length: 'python3 -c "'.length, tone: 'plain', color: '#2aa198' }, { length: 1, tone: 'plain' }])
+    expect([next!.text, next!.literal, next!.spans]).toEqual(['print(1)"', true, [{ length: 9, tone: 'plain', color: '#2aa198' }]])
+    // Another tool's input is not shell.
+    const [, read] = present({ kind: 'tool-call', callId: 'c2', tool: 'read', input: 'Read a.md' }, { ...live, code: highlight })
+    expect(read!.spans?.some(span => span.color !== undefined)).toBe(false)
+  })
+
   test('bounds a long input under its head as it bounds output', () => {
     const script = Array.from({ length: 10 }, (_, index) => `step ${index}`).join('\n')
     expect(text(call('bash', `sh <<EOF\n${script}\nEOF`))).toEqual(['Bash(sh <<EOF)', 'step 0', 'step 1', '+8 more lines', 'EOF'])
@@ -519,15 +531,16 @@ describe('present, grouping a step\'s calls', () => {
     // A step of delegations is counted as such, under their icon.
     expect([head!.marker, head!.text, head!.pulse]).toEqual([ICON.spawn, 'spawn 3', true])
     expect([first, second, third].map(line => [line!.marker, line!.markerTone, line!.pulse, line!.badge])).toEqual([
-      [TREE.branch, 'quiet', false, { glyph: ICON.spawn, tone: 'done' }],
+      // Finished cleanly under the head's own icon, the badge would repeat the head; its cell stays blank.
+      [TREE.branch, 'quiet', false, { glyph: ' ', tone: 'quiet' }],
       [TREE.branch, 'quiet', false, { glyph: ICON.spawn, tone: 'strong', pulse: true }],
       [TREE.corner, 'quiet', false, { glyph: ICON.spawn, tone: 'failed' }],
     ])
     const settled = present({ kind: 'tool-group', calls: [spawn('a', 'Review', { ok: true, text: '' }), spawn('b', 'Audit', { ok: true, text: '' })] }, failures)
     expect(settled[1]!.text).toBe('spawned 2')
-    // A mixed step badges each call with its own kind.
+    // A mixed step badges each call whose kind differs from the head's.
     const mixed = present({ kind: 'tool-group', calls: [ran('a', 'make'), spawn('b', 'Review', { ok: true, text: '' })] }, failures)
-    expect(mixed.filter(line => line.badge !== undefined).map(line => line.badge!.glyph)).toEqual([ICON.other, ICON.spawn])
+    expect(mixed.filter(line => line.badge !== undefined).map(line => line.badge!.glyph)).toEqual([' ', ICON.spawn])
     expect(mixed[1]!.marker).toBe(ICON.other)
   })
 
@@ -745,8 +758,9 @@ describe('present, drawing what a command changed', () => {
 
   test('highlights the drawn changes, and only those, under a failed command', () => {
     const seen: string[] = []
-    const highlight: Highlight = lines => {
-      seen.push(...lines)
+    const highlight: Highlight = (lines, path) => {
+      // The command's own head is highlighted as shell, apart from its changes.
+      if (path !== 'command.sh') seen.push(...lines)
       return lines.map(text => [{ length: text.length, color: '#268bd2' }])
     }
     const many = file('a.js', Array.from({ length: 6 }, (_, index) => change('added', `line ${index}`, index + 1)))

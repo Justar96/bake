@@ -9,7 +9,7 @@
 08 |  note   History 77|
 09 |  note   History 78|
 10 |  note   History 79|
-11 |Wheel/PgUp/PgDn scroll · Ctrl+↑↓ prompts · Ctrl+Home first|
+11 |  Wheel/PgUp/PgDn scroll · Ctrl+↑↓ prompts · Ctrl+Home first|
 12 ||
 13 ||
 14 |────────────────────────────────────────────────────────────|

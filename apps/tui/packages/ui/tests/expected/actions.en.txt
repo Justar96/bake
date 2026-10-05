@@ -3,7 +3,7 @@
 ● Read both files, then summarize.
 
 ● read 2 · 1 failed
-├ ● ReadFile(notes.md)
+├   ReadFile(notes.md)
 │ ⎿      Notes loaded.
 └ ● ReadFile(private.md)
   ⎿      Permission denied

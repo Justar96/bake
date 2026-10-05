@@ -29,7 +29,7 @@
     },
     "apps/cli": {
       "name": "@deepseek-ai/dsh",
-      "version": "0.3.7",
+      "version": "0.3.8",
       "bin": {
         "dsh": "lib/bin.js",
       },
@@ -636,6 +636,7 @@
         "@deepseek-ai/dsh-agent-loop": "workspace:^",
         "@deepseek-ai/dsh-agent-loop-testkit": "workspace:^",
         "@deepseek-ai/dsh-fs": "workspace:^",
+        "@deepseek-ai/dsh-jobs": "workspace:^",
         "@deepseek-ai/dsh-llm": "workspace:^",
         "@deepseek-ai/dsh-session": "workspace:^",
         "@deepseek-ai/dsh-session-persistence": "workspace:^",
@@ -648,6 +649,7 @@
         "@deepseek-ai/dsh-agent-default-model": "workspace:^",
         "@deepseek-ai/dsh-agent-loop": "workspace:^",
         "@deepseek-ai/dsh-fs": "workspace:^",
+        "@deepseek-ai/dsh-jobs": "workspace:^",
         "@deepseek-ai/dsh-llm": "workspace:^",
         "@deepseek-ai/dsh-session": "workspace:^",
         "@deepseek-ai/dsh-session-persistence": "workspace:^",
