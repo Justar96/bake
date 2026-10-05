@@ -1,6 +1,6 @@
 # Cookbook: adding a workspace package
 
-Add a workspace package under its owning group. Core packages and internal libraries use `bake-<name>`; plugin and bundle packages retain their existing manifest names until migrated. Use the [core package map](../../packages/core/README.md#packages) when importing a renamed package.
+Add a workspace package under its owning group. New packages use `bake-<name>`, as do the core packages and internal libraries; existing plugin and bundle packages retain their manifest names until migrated. Use the [core package map](../../packages/core/README.md#packages) when importing a renamed package.
 
 ## 1. Create the package
 

@@ -112,12 +112,11 @@
       "@deepseek-ai/dsh-client-*/invariant": ["./packages/client/*/src/invariant.ts"],
       "@deepseek-ai/dsh-headless/startup": ["./packages/bundle/headless/src/startup.ts"],
       "@deepseek-ai/dsh-client-*/client": ["./packages/client/*/src/client"],
-      // One wildcard maps every @deepseek-ai/dsh-<name> to its source. Package
-      // dir names are unique across groups, so first-on-disk-wins resolution is
-      // unambiguous; adding a package under an existing group needs no edit
-      // here. The aggregates' project references (tsconfig.host.json /
-      // tsconfig.client.json) stay explicit — TS project references have no
-      // wildcard form.
+      // The generated region below maps each package named exactly bake-<dir>
+      // or @deepseek-ai/dsh-<dir>; packages named otherwise keep the
+      // hand-written aliases here. The aggregates' project references
+      // (tsconfig.host.json / tsconfig.client.json) stay explicit — TS project
+      // references have no wildcard form.
       "bake-host-webserver": ["./packages/host/webserver/src"],
       "@deepseek-ai/dsh-plugin-manager": ["./packages/boot/plugin-manager/src"],
       "@deepseek-ai/dsh-plugin-manager/types": ["./packages/boot/plugin-manager/src/types.ts"],
