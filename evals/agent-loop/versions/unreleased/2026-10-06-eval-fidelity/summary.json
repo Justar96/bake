@@ -1,0 +1,2933 @@
+{
+  "title": "Baseline under the shipped system prompt (eval fidelity)",
+  "version": "v0.3.5+286e8c894e",
+  "arms": {
+    "base": {
+      "version": "v0.3.5+ea221e7bfb",
+      "revision": {
+        "root": "/home/jt-devnet/bake/.agents/worktrees/eval-base",
+        "commit": "ea221e7bfb05ebe822fa91593639667d1fbca87c",
+        "dirty": false
+      }
+    },
+    "candidate": {
+      "version": "v0.3.5+286e8c894e",
+      "revision": {
+        "root": "/home/jt-devnet/bake/.agents/worktrees/eval-cand",
+        "commit": "286e8c894e79a6d8e16e719deb707981eed431a3",
+        "dirty": false
+      }
+    }
+  },
+  "candidate": "candidate",
+  "bases": [
+    "v0.3.5+ea221e7bfb"
+  ],
+  "models": [
+    "claude-opus-5-5",
+    "claude-sonnet-5-5",
+    "deepseek-flash",
+    "deepseek-v4-pro",
+    "gemini-3.8-flash-medium",
+    "gpt-6.1-sol"
+  ],
+  "scenarios": [
+    "multi_file_edit",
+    "multi_site_edit",
+    "no_tools",
+    "ordinary_edit",
+    "path_discovery",
+    "shell_then_edit",
+    "stale_edit",
+    "unprompted_edit"
+  ],
+  "trials": 3,
+  "startedAt": "2026-10-05T18:55:53.126Z",
+  "harness": "evals/agent-loop/run.ts",
+  "note": "First record under the fixed eval composition (#48): each arm now runs its headless bundle system-prompt row with only the persona swapped, so the prompt is what Bake ships (no DeepSeek Harness opener, with the working-directory line). Both arms carry the same model surface: #48 changed only the eval harness and tests, and #49 only the installers. This is a same-surface paired run that sets the absolute baseline for the prompt and tool-surface phases; absolute counts are not comparable with earlier records, whose prompts differed by two lines. It also measures the noise floor: on identical code, the token intervals of deepseek-flash (-7.9%), gemini-3.8-flash-medium (-4.1%), and gpt-6.1-sol (-8.2%) exclude zero, so for those models a paired token change within about 10% is not evidence of an effect; Claude stays within 2%. All 7 failures are gpt-6.1-sol whitespace runaways after edit arguments (5 base, 2 candidate), caught by the llm-pi-ai guard: model behavior on identical code. Loop shape baseline: edit/check splits 16, 21, and 19 of 21 for deepseek-flash, deepseek-v4-pro, and gpt-6.1-sol, against 0 to 1 for Claude and Gemini. Standard suite, standard and extended model sets, 3 trials, headless roster.",
+  "settings": {
+    "effort": "medium where the model offers it; DeepSeek runs at high, its default, having no medium",
+    "maxOutputTokens": 8192,
+    "capMs": 180000,
+    "maxRequests": {
+      "default": 14,
+      "delegation": 40,
+      "delegation_auto": 40,
+      "explore_answer": 20,
+      "test_fix_loop": 20,
+      "noisy_failure": 16,
+      "background_test": 20,
+      "edit_recovery": 16,
+      "long_session": 30
+    },
+    "roster": "headless",
+    "capMsByScenario": {
+      "default": 180000,
+      "background_test": 240000,
+      "long_session": 360000
+    },
+    "requestFloors": {
+      "no_tools": 1,
+      "ordinary_edit": 3,
+      "path_discovery": 4,
+      "stale_edit": 3,
+      "unprompted_edit": 3,
+      "multi_site_edit": 3,
+      "multi_file_edit": 3,
+      "shell_then_edit": 3,
+      "delegation": 3,
+      "delegation_auto": 3,
+      "duplicate_recovery": 5,
+      "large_file_edit": 4,
+      "explore_answer": 2,
+      "test_fix_loop": 3,
+      "unprompted_verify": 3,
+      "noisy_failure": 3,
+      "background_test": 4,
+      "instructions_file": 3,
+      "edit_recovery": 3,
+      "long_session": 13
+    },
+    "contextWindows": {
+      "long_session": 16000
+    }
+  },
+  "regressionRule": "all tasks, per model: total tokens with the 95% interval above zero; requests up more than 10% with the 95% interval above zero; failures +2 or more; any tool-error increase",
+  "regressions": [],
+  "perModel": {
+    "claude-opus-5-5": {
+      "samples": 24,
+      "successes": 24,
+      "firstRequestBytes": 12156,
+      "toolSchemaChars": 10659,
+      "meanTotalTokensPerTask": 16768,
+      "meanRequestsPerTask": 3.19,
+      "cacheReadShare": 0.92,
+      "toolErrors": 0,
+      "loop": {
+        "measured": 21,
+        "excessRequests": 1,
+        "belowFloor": 0,
+        "editCheckSplits": 0,
+        "orientationCalls": 0,
+        "verifiedBeforeFinal": [
+          21,
+          21
+        ],
+        "runaways": 0,
+        "compositionFailures": 0
+      },
+      "comparisons": {
+        "v0.3.5+ea221e7bfb": {
+          "all tasks": {
+            "cells": 21,
+            "pairs": 21,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": 1.7,
+              "lo": -0.2,
+              "hi": 5.3
+            },
+            "logicalInputTokens": {
+              "pct": 1.7,
+              "lo": -0.1,
+              "hi": 5.3
+            },
+            "uncachedInputTokens": {
+              "pct": 1.8,
+              "lo": -0.8,
+              "hi": 5.3
+            },
+            "requests": [
+              66,
+              67
+            ],
+            "requestsChange": {
+              "pct": 1.5,
+              "lo": 0,
+              "hi": 4.7
+            },
+            "excessRequests": [
+              0,
+              1
+            ],
+            "editCheckSplits": [
+              0,
+              0
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              72,
+              75
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0.921,
+              0.92
+            ]
+          },
+          "multi_file_edit": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": 1,
+              "lo": -0.2,
+              "hi": 3.1
+            },
+            "logicalInputTokens": {
+              "pct": 0.7,
+              "lo": -0.1,
+              "hi": 2.2
+            },
+            "uncachedInputTokens": {
+              "pct": 9.3,
+              "lo": -1.4,
+              "hi": 28.6
+            },
+            "requests": [
+              9,
+              9
+            ],
+            "requestsChange": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "excessRequests": [
+              0,
+              0
+            ],
+            "editCheckSplits": [
+              0,
+              0
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              6,
+              8
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0.922,
+              0.915
+            ]
+          },
+          "multi_site_edit": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": 0,
+              "lo": -0.1,
+              "hi": 0.1
+            },
+            "logicalInputTokens": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0.1
+            },
+            "uncachedInputTokens": {
+              "pct": 0.3,
+              "lo": -0.3,
+              "hi": 1
+            },
+            "requests": [
+              9,
+              9
+            ],
+            "requestsChange": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "excessRequests": [
+              0,
+              0
+            ],
+            "editCheckSplits": [
+              0,
+              0
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              9,
+              9
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0.922,
+              0.922
+            ]
+          },
+          "ordinary_edit": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": 0.2,
+              "lo": -0.3,
+              "hi": 0.9
+            },
+            "logicalInputTokens": {
+              "pct": 0.1,
+              "lo": -0.2,
+              "hi": 0.5
+            },
+            "uncachedInputTokens": {
+              "pct": 1.1,
+              "lo": -2.5,
+              "hi": 5.7
+            },
+            "requests": [
+              9,
+              9
+            ],
+            "requestsChange": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "excessRequests": [
+              0,
+              0
+            ],
+            "editCheckSplits": [
+              0,
+              0
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              12,
+              12
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0.914,
+              0.913
+            ]
+          },
+          "path_discovery": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": -0.2,
+              "lo": -0.3,
+              "hi": 0
+            },
+            "logicalInputTokens": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "uncachedInputTokens": {
+              "pct": -0.2,
+              "lo": -0.3,
+              "hi": 0
+            },
+            "requests": [
+              12,
+              12
+            ],
+            "requestsChange": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "excessRequests": [
+              0,
+              0
+            ],
+            "editCheckSplits": [
+              0,
+              0
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              15,
+              15
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0.926,
+              0.926
+            ]
+          },
+          "shell_then_edit": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": 11.5,
+              "lo": -1.7,
+              "hi": 36.5
+            },
+            "logicalInputTokens": {
+              "pct": 11.9,
+              "lo": -1.1,
+              "hi": 36.9
+            },
+            "uncachedInputTokens": {
+              "pct": 4,
+              "lo": -6.3,
+              "hi": 18.4
+            },
+            "requests": [
+              9,
+              10
+            ],
+            "requestsChange": {
+              "pct": 11.1,
+              "lo": 0,
+              "hi": 33.3
+            },
+            "excessRequests": [
+              0,
+              1
+            ],
+            "editCheckSplits": [
+              0,
+              0
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              12,
+              13
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0.913,
+              0.919
+            ]
+          },
+          "stale_edit": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": 0,
+              "lo": -0.2,
+              "hi": 0.2
+            },
+            "logicalInputTokens": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0.1
+            },
+            "uncachedInputTokens": {
+              "pct": 0.2,
+              "lo": -0.2,
+              "hi": 0.5
+            },
+            "requests": [
+              9,
+              9
+            ],
+            "requestsChange": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "excessRequests": [
+              0,
+              0
+            ],
+            "editCheckSplits": [
+              0,
+              0
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              9,
+              9
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0.92,
+              0.92
+            ]
+          },
+          "unprompted_edit": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": -0.3,
+              "lo": -0.4,
+              "hi": 0
+            },
+            "logicalInputTokens": {
+              "pct": -0.1,
+              "lo": -0.2,
+              "hi": 0
+            },
+            "uncachedInputTokens": {
+              "pct": -1.8,
+              "lo": -2.8,
+              "hi": -0.1
+            },
+            "requests": [
+              9,
+              9
+            ],
+            "requestsChange": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "excessRequests": [
+              0,
+              0
+            ],
+            "editCheckSplits": [
+              0,
+              0
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              9,
+              9
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0.925,
+              0.926
+            ]
+          }
+        }
+      }
+    },
+    "claude-sonnet-5-5": {
+      "samples": 24,
+      "successes": 24,
+      "firstRequestBytes": 12160,
+      "toolSchemaChars": 10659,
+      "meanTotalTokensPerTask": 16171,
+      "meanRequestsPerTask": 3.14,
+      "cacheReadShare": 0.928,
+      "toolErrors": 0,
+      "loop": {
+        "measured": 21,
+        "excessRequests": 0,
+        "belowFloor": 0,
+        "editCheckSplits": 0,
+        "orientationCalls": 0,
+        "verifiedBeforeFinal": [
+          21,
+          21
+        ],
+        "runaways": 0,
+        "compositionFailures": 0
+      },
+      "comparisons": {
+        "v0.3.5+ea221e7bfb": {
+          "all tasks": {
+            "cells": 21,
+            "pairs": 21,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": 0.1,
+              "lo": -0.1,
+              "hi": 0.2
+            },
+            "logicalInputTokens": {
+              "pct": 0.1,
+              "lo": 0,
+              "hi": 0.2
+            },
+            "uncachedInputTokens": {
+              "pct": 0.7,
+              "lo": -0.8,
+              "hi": 2
+            },
+            "requests": [
+              66,
+              66
+            ],
+            "requestsChange": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "excessRequests": [
+              0,
+              0
+            ],
+            "editCheckSplits": [
+              0,
+              0
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              67,
+              66
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0.929,
+              0.928
+            ]
+          },
+          "multi_file_edit": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": -0.1,
+              "lo": -0.2,
+              "hi": 0
+            },
+            "logicalInputTokens": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "uncachedInputTokens": {
+              "pct": -0.1,
+              "lo": -0.1,
+              "hi": -0.1
+            },
+            "requests": [
+              9,
+              9
+            ],
+            "requestsChange": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "excessRequests": [
+              0,
+              0
+            ],
+            "editCheckSplits": [
+              0,
+              0
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              6,
+              6
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0.943,
+              0.943
+            ]
+          },
+          "multi_site_edit": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "logicalInputTokens": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "uncachedInputTokens": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "requests": [
+              9,
+              9
+            ],
+            "requestsChange": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "excessRequests": [
+              0,
+              0
+            ],
+            "editCheckSplits": [
+              0,
+              0
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              9,
+              9
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0.924,
+              0.924
+            ]
+          },
+          "ordinary_edit": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": 0,
+              "lo": -0.1,
+              "hi": 0.1
+            },
+            "logicalInputTokens": {
+              "pct": 0,
+              "lo": -0.2,
+              "hi": 0.1
+            },
+            "uncachedInputTokens": {
+              "pct": -0.1,
+              "lo": -0.9,
+              "hi": 0.6
+            },
+            "requests": [
+              9,
+              9
+            ],
+            "requestsChange": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "excessRequests": [
+              0,
+              0
+            ],
+            "editCheckSplits": [
+              0,
+              0
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              12,
+              12
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0.916,
+              0.916
+            ]
+          },
+          "path_discovery": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": 0.3,
+              "lo": -0.1,
+              "hi": 1
+            },
+            "logicalInputTokens": {
+              "pct": 0.2,
+              "lo": 0,
+              "hi": 0.6
+            },
+            "uncachedInputTokens": {
+              "pct": 1.4,
+              "lo": -0.1,
+              "hi": 4.2
+            },
+            "requests": [
+              12,
+              12
+            ],
+            "requestsChange": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "excessRequests": [
+              0,
+              0
+            ],
+            "editCheckSplits": [
+              0,
+              0
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              12,
+              12
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0.936,
+              0.936
+            ]
+          },
+          "shell_then_edit": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": 0,
+              "lo": -0.1,
+              "hi": 0.2
+            },
+            "logicalInputTokens": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0.1
+            },
+            "uncachedInputTokens": {
+              "pct": 0.4,
+              "lo": -0.2,
+              "hi": 1.5
+            },
+            "requests": [
+              9,
+              9
+            ],
+            "requestsChange": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "excessRequests": [
+              0,
+              0
+            ],
+            "editCheckSplits": [
+              0,
+              0
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              12,
+              12
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0.916,
+              0.916
+            ]
+          },
+          "stale_edit": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": 0.5,
+              "lo": 0.4,
+              "hi": 0.5
+            },
+            "logicalInputTokens": {
+              "pct": 0.5,
+              "lo": 0.4,
+              "hi": 0.5
+            },
+            "uncachedInputTokens": {
+              "pct": 6.4,
+              "lo": 6.1,
+              "hi": 6.7
+            },
+            "requests": [
+              9,
+              9
+            ],
+            "requestsChange": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "excessRequests": [
+              0,
+              0
+            ],
+            "editCheckSplits": [
+              0,
+              0
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              9,
+              9
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0.926,
+              0.921
+            ]
+          },
+          "unprompted_edit": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": -0.3,
+              "lo": -0.8,
+              "hi": 0
+            },
+            "logicalInputTokens": {
+              "pct": -0.1,
+              "lo": -0.3,
+              "hi": 0
+            },
+            "uncachedInputTokens": {
+              "pct": -4.4,
+              "lo": -11.6,
+              "hi": -0.1
+            },
+            "requests": [
+              9,
+              9
+            ],
+            "requestsChange": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "excessRequests": [
+              0,
+              0
+            ],
+            "editCheckSplits": [
+              0,
+              0
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              7,
+              6
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0.939,
+              0.942
+            ]
+          }
+        }
+      }
+    },
+    "deepseek-flash": {
+      "samples": 24,
+      "successes": 24,
+      "firstRequestBytes": 12014,
+      "toolSchemaChars": 10622,
+      "meanTotalTokensPerTask": 15075,
+      "meanRequestsPerTask": 3.95,
+      "cacheReadShare": 0.728,
+      "toolErrors": 0,
+      "loop": {
+        "measured": 21,
+        "excessRequests": 17,
+        "belowFloor": 0,
+        "editCheckSplits": 16,
+        "orientationCalls": 0,
+        "verifiedBeforeFinal": [
+          21,
+          21
+        ],
+        "runaways": 0,
+        "compositionFailures": 0
+      },
+      "comparisons": {
+        "v0.3.5+ea221e7bfb": {
+          "all tasks": {
+            "cells": 21,
+            "pairs": 21,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": -7.9,
+              "lo": -14.1,
+              "hi": -1.6
+            },
+            "logicalInputTokens": {
+              "pct": -8.1,
+              "lo": -14.5,
+              "hi": -1.5
+            },
+            "uncachedInputTokens": {
+              "pct": -1.8,
+              "lo": -4.3,
+              "hi": 1
+            },
+            "requests": [
+              89,
+              83
+            ],
+            "requestsChange": {
+              "pct": -6.7,
+              "lo": -12.2,
+              "hi": -1.2
+            },
+            "excessRequests": [
+              23,
+              17
+            ],
+            "editCheckSplits": [
+              20,
+              16
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              97,
+              90
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0.746,
+              0.728
+            ]
+          },
+          "multi_file_edit": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": 9.2,
+              "lo": 0.2,
+              "hi": 33.1
+            },
+            "logicalInputTokens": {
+              "pct": 9.8,
+              "lo": 0.1,
+              "hi": 35.8
+            },
+            "uncachedInputTokens": {
+              "pct": 1.1,
+              "lo": 0.4,
+              "hi": 2.3
+            },
+            "requests": [
+              11,
+              12
+            ],
+            "requestsChange": {
+              "pct": 9.1,
+              "lo": 0,
+              "hi": 33.3
+            },
+            "excessRequests": [
+              2,
+              3
+            ],
+            "editCheckSplits": [
+              2,
+              3
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              18,
+              16
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0.711,
+              0.734
+            ]
+          },
+          "multi_site_edit": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": -0.9,
+              "lo": -2.5,
+              "hi": 0.2
+            },
+            "logicalInputTokens": {
+              "pct": -0.9,
+              "lo": -2.8,
+              "hi": 0.1
+            },
+            "uncachedInputTokens": {
+              "pct": 0,
+              "lo": -6.7,
+              "hi": 6.7
+            },
+            "requests": [
+              12,
+              12
+            ],
+            "requestsChange": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "excessRequests": [
+              3,
+              3
+            ],
+            "editCheckSplits": [
+              3,
+              3
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              12,
+              11
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0.728,
+              0.725
+            ]
+          },
+          "ordinary_edit": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": -1.7,
+              "lo": -5.3,
+              "hi": 0.4
+            },
+            "logicalInputTokens": {
+              "pct": -1.1,
+              "lo": -3.6,
+              "hi": 0.3
+            },
+            "uncachedInputTokens": {
+              "pct": -1,
+              "lo": -2,
+              "hi": -0.2
+            },
+            "requests": [
+              12,
+              12
+            ],
+            "requestsChange": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "excessRequests": [
+              3,
+              3
+            ],
+            "editCheckSplits": [
+              3,
+              3
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              12,
+              12
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0.73,
+              0.73
+            ]
+          },
+          "path_discovery": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": -7.8,
+              "lo": -26,
+              "hi": 10.5
+            },
+            "logicalInputTokens": {
+              "pct": -8.2,
+              "lo": -26.5,
+              "hi": 10.3
+            },
+            "uncachedInputTokens": {
+              "pct": -2.9,
+              "lo": -12.3,
+              "hi": 13.1
+            },
+            "requests": [
+              15,
+              14
+            ],
+            "requestsChange": {
+              "pct": -6.7,
+              "lo": -20,
+              "hi": 0
+            },
+            "excessRequests": [
+              3,
+              2
+            ],
+            "editCheckSplits": [
+              3,
+              2
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              17,
+              16
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0.777,
+              0.764
+            ]
+          },
+          "shell_then_edit": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": -15,
+              "lo": -22.4,
+              "hi": -1.1
+            },
+            "logicalInputTokens": {
+              "pct": -15.1,
+              "lo": -22,
+              "hi": -1.5
+            },
+            "uncachedInputTokens": {
+              "pct": -3,
+              "lo": -6.6,
+              "hi": -0.5
+            },
+            "requests": [
+              15,
+              13
+            ],
+            "requestsChange": {
+              "pct": -13.3,
+              "lo": -20,
+              "hi": 0
+            },
+            "excessRequests": [
+              6,
+              4
+            ],
+            "editCheckSplits": [
+              3,
+              3
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              16,
+              14
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0.785,
+              0.754
+            ]
+          },
+          "stale_edit": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": -20.4,
+              "lo": -31.9,
+              "hi": -0.4
+            },
+            "logicalInputTokens": {
+              "pct": -20.9,
+              "lo": -32.7,
+              "hi": -0.4
+            },
+            "uncachedInputTokens": {
+              "pct": -5.7,
+              "lo": -11.3,
+              "hi": -1.4
+            },
+            "requests": [
+              12,
+              10
+            ],
+            "requestsChange": {
+              "pct": -16.7,
+              "lo": -25,
+              "hi": 0
+            },
+            "excessRequests": [
+              3,
+              1
+            ],
+            "editCheckSplits": [
+              3,
+              1
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              11,
+              9
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0.734,
+              0.683
+            ]
+          },
+          "unprompted_edit": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": -16.5,
+              "lo": -25.7,
+              "hi": 0.7
+            },
+            "logicalInputTokens": {
+              "pct": -17.3,
+              "lo": -26.8,
+              "hi": 0.9
+            },
+            "uncachedInputTokens": {
+              "pct": -1,
+              "lo": -4.9,
+              "hi": 6.9
+            },
+            "requests": [
+              12,
+              10
+            ],
+            "requestsChange": {
+              "pct": -16.7,
+              "lo": -25,
+              "hi": 0
+            },
+            "excessRequests": [
+              3,
+              1
+            ],
+            "editCheckSplits": [
+              3,
+              1
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              11,
+              12
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0.731,
+              0.679
+            ]
+          }
+        }
+      }
+    },
+    "deepseek-v4-pro": {
+      "samples": 24,
+      "successes": 24,
+      "firstRequestBytes": 12016,
+      "toolSchemaChars": 10622,
+      "meanTotalTokensPerTask": 17194,
+      "meanRequestsPerTask": 4.38,
+      "cacheReadShare": 0.763,
+      "toolErrors": 0,
+      "loop": {
+        "measured": 21,
+        "excessRequests": 26,
+        "belowFloor": 0,
+        "editCheckSplits": 21,
+        "orientationCalls": 0,
+        "verifiedBeforeFinal": [
+          21,
+          21
+        ],
+        "runaways": 0,
+        "compositionFailures": 0
+      },
+      "comparisons": {
+        "v0.3.5+ea221e7bfb": {
+          "all tasks": {
+            "cells": 21,
+            "pairs": 21,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": 0.6,
+              "lo": -1.9,
+              "hi": 4.1
+            },
+            "logicalInputTokens": {
+              "pct": 0.9,
+              "lo": -1.6,
+              "hi": 4.3
+            },
+            "uncachedInputTokens": {
+              "pct": 0,
+              "lo": -1,
+              "hi": 1.1
+            },
+            "requests": [
+              91,
+              92
+            ],
+            "requestsChange": {
+              "pct": 1.1,
+              "lo": 0,
+              "hi": 3.3
+            },
+            "excessRequests": [
+              25,
+              26
+            ],
+            "editCheckSplits": [
+              21,
+              21
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              97,
+              91
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0.761,
+              0.763
+            ]
+          },
+          "multi_file_edit": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": -0.1,
+              "lo": -2.5,
+              "hi": 2.4
+            },
+            "logicalInputTokens": {
+              "pct": 0.2,
+              "lo": -1.8,
+              "hi": 2.4
+            },
+            "uncachedInputTokens": {
+              "pct": 1.8,
+              "lo": 0,
+              "hi": 2.8
+            },
+            "requests": [
+              12,
+              12
+            ],
+            "requestsChange": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "excessRequests": [
+              3,
+              3
+            ],
+            "editCheckSplits": [
+              3,
+              3
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              16,
+              14
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0.743,
+              0.739
+            ]
+          },
+          "multi_site_edit": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": -1.3,
+              "lo": -4.8,
+              "hi": 3.7
+            },
+            "logicalInputTokens": {
+              "pct": -1.1,
+              "lo": -4.8,
+              "hi": 3.9
+            },
+            "uncachedInputTokens": {
+              "pct": -0.9,
+              "lo": -5.4,
+              "hi": 4.7
+            },
+            "requests": [
+              12,
+              12
+            ],
+            "requestsChange": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "excessRequests": [
+              3,
+              3
+            ],
+            "editCheckSplits": [
+              3,
+              3
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              11,
+              10
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0.742,
+              0.742
+            ]
+          },
+          "ordinary_edit": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": 0,
+              "lo": -0.1,
+              "hi": 0
+            },
+            "logicalInputTokens": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "uncachedInputTokens": {
+              "pct": 0,
+              "lo": -0.2,
+              "hi": 0.2
+            },
+            "requests": [
+              12,
+              12
+            ],
+            "requestsChange": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "excessRequests": [
+              3,
+              3
+            ],
+            "editCheckSplits": [
+              3,
+              3
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              12,
+              12
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0.734,
+              0.734
+            ]
+          },
+          "path_discovery": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": -0.4,
+              "lo": -2.4,
+              "hi": 2.7
+            },
+            "logicalInputTokens": {
+              "pct": 0,
+              "lo": -1.5,
+              "hi": 2.5
+            },
+            "uncachedInputTokens": {
+              "pct": -0.8,
+              "lo": -1.6,
+              "hi": 0.2
+            },
+            "requests": [
+              15,
+              15
+            ],
+            "requestsChange": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "excessRequests": [
+              3,
+              3
+            ],
+            "editCheckSplits": [
+              3,
+              3
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              19,
+              18
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0.788,
+              0.79
+            ]
+          },
+          "shell_then_edit": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": 5.4,
+              "lo": -8.3,
+              "hi": 25.9
+            },
+            "logicalInputTokens": {
+              "pct": 5.7,
+              "lo": -7.5,
+              "hi": 26.5
+            },
+            "uncachedInputTokens": {
+              "pct": 0.6,
+              "lo": -2.1,
+              "hi": 5.5
+            },
+            "requests": [
+              16,
+              17
+            ],
+            "requestsChange": {
+              "pct": 6.3,
+              "lo": 0,
+              "hi": 20
+            },
+            "excessRequests": [
+              7,
+              8
+            ],
+            "editCheckSplits": [
+              3,
+              3
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              19,
+              17
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0.806,
+              0.815
+            ]
+          },
+          "stale_edit": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": -1.2,
+              "lo": -2.5,
+              "hi": 0.4
+            },
+            "logicalInputTokens": {
+              "pct": -0.8,
+              "lo": -1.7,
+              "hi": 0.2
+            },
+            "uncachedInputTokens": {
+              "pct": -0.9,
+              "lo": -3.2,
+              "hi": 0.7
+            },
+            "requests": [
+              12,
+              12
+            ],
+            "requestsChange": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "excessRequests": [
+              3,
+              3
+            ],
+            "editCheckSplits": [
+              3,
+              3
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              9,
+              9
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0.74,
+              0.74
+            ]
+          },
+          "unprompted_edit": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": 0.2,
+              "lo": -1.8,
+              "hi": 4.2
+            },
+            "logicalInputTokens": {
+              "pct": 0.1,
+              "lo": -1.8,
+              "hi": 4
+            },
+            "uncachedInputTokens": {
+              "pct": 0.5,
+              "lo": -0.4,
+              "hi": 1.4
+            },
+            "requests": [
+              12,
+              12
+            ],
+            "requestsChange": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "excessRequests": [
+              3,
+              3
+            ],
+            "editCheckSplits": [
+              3,
+              3
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              11,
+              11
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0.74,
+              0.739
+            ]
+          }
+        }
+      }
+    },
+    "gemini-3.8-flash-medium": {
+      "samples": 24,
+      "successes": 24,
+      "firstRequestBytes": 11878,
+      "toolSchemaChars": 10320,
+      "meanTotalTokensPerTask": 11412,
+      "meanRequestsPerTask": 3.29,
+      "cacheReadShare": 0,
+      "toolErrors": 0,
+      "loop": {
+        "measured": 21,
+        "excessRequests": 3,
+        "belowFloor": 0,
+        "editCheckSplits": 1,
+        "orientationCalls": 0,
+        "verifiedBeforeFinal": [
+          21,
+          21
+        ],
+        "runaways": 0,
+        "compositionFailures": 0
+      },
+      "comparisons": {
+        "v0.3.5+ea221e7bfb": {
+          "all tasks": {
+            "cells": 21,
+            "pairs": 21,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": -4.1,
+              "lo": -7.6,
+              "hi": -1
+            },
+            "logicalInputTokens": {
+              "pct": -3.7,
+              "lo": -7.6,
+              "hi": -0.6
+            },
+            "uncachedInputTokens": {
+              "pct": -3.7,
+              "lo": -7.6,
+              "hi": -0.6
+            },
+            "requests": [
+              71,
+              69
+            ],
+            "requestsChange": {
+              "pct": -2.8,
+              "lo": -6.8,
+              "hi": 0
+            },
+            "excessRequests": [
+              5,
+              3
+            ],
+            "editCheckSplits": [
+              2,
+              1
+            ],
+            "orientationCalls": [
+              1,
+              0
+            ],
+            "toolCalls": [
+              99,
+              96
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0,
+              0
+            ]
+          },
+          "multi_file_edit": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": -0.5,
+              "lo": -1.8,
+              "hi": 1.3
+            },
+            "logicalInputTokens": {
+              "pct": -0.4,
+              "lo": -1.1,
+              "hi": 0.6
+            },
+            "uncachedInputTokens": {
+              "pct": -0.4,
+              "lo": -1.1,
+              "hi": 0.6
+            },
+            "requests": [
+              11,
+              11
+            ],
+            "requestsChange": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "excessRequests": [
+              2,
+              2
+            ],
+            "editCheckSplits": [
+              1,
+              1
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              18,
+              18
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0,
+              0
+            ]
+          },
+          "multi_site_edit": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": -0.4,
+              "lo": -1.5,
+              "hi": 0.1
+            },
+            "logicalInputTokens": {
+              "pct": 0,
+              "lo": -0.1,
+              "hi": 0.2
+            },
+            "uncachedInputTokens": {
+              "pct": 0,
+              "lo": -0.1,
+              "hi": 0.2
+            },
+            "requests": [
+              9,
+              9
+            ],
+            "requestsChange": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "excessRequests": [
+              0,
+              0
+            ],
+            "editCheckSplits": [
+              0,
+              0
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              12,
+              12
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0,
+              0
+            ]
+          },
+          "ordinary_edit": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": -10.3,
+              "lo": -25.1,
+              "hi": -0.3
+            },
+            "logicalInputTokens": {
+              "pct": -10.5,
+              "lo": -26,
+              "hi": -0.1
+            },
+            "uncachedInputTokens": {
+              "pct": -10.5,
+              "lo": -26,
+              "hi": -0.1
+            },
+            "requests": [
+              10,
+              9
+            ],
+            "requestsChange": {
+              "pct": -10,
+              "lo": -25,
+              "hi": 0
+            },
+            "excessRequests": [
+              1,
+              0
+            ],
+            "editCheckSplits": [
+              1,
+              0
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              12,
+              12
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0,
+              0
+            ]
+          },
+          "path_discovery": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": -3.6,
+              "lo": -8.9,
+              "hi": 0
+            },
+            "logicalInputTokens": {
+              "pct": -3.6,
+              "lo": -8.7,
+              "hi": -0.1
+            },
+            "uncachedInputTokens": {
+              "pct": -3.6,
+              "lo": -8.7,
+              "hi": -0.1
+            },
+            "requests": [
+              12,
+              12
+            ],
+            "requestsChange": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "excessRequests": [
+              0,
+              0
+            ],
+            "editCheckSplits": [
+              0,
+              0
+            ],
+            "orientationCalls": [
+              1,
+              0
+            ],
+            "toolCalls": [
+              17,
+              16
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0,
+              0
+            ]
+          },
+          "shell_then_edit": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": -12.6,
+              "lo": -20.3,
+              "hi": -5.8
+            },
+            "logicalInputTokens": {
+              "pct": -11,
+              "lo": -23,
+              "hi": -4.4
+            },
+            "uncachedInputTokens": {
+              "pct": -11,
+              "lo": -23,
+              "hi": -4.4
+            },
+            "requests": [
+              11,
+              10
+            ],
+            "requestsChange": {
+              "pct": -9.1,
+              "lo": -25,
+              "hi": 0
+            },
+            "excessRequests": [
+              2,
+              1
+            ],
+            "editCheckSplits": [
+              0,
+              0
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              17,
+              15
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0,
+              0
+            ]
+          },
+          "stale_edit": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": -1.7,
+              "lo": -4.4,
+              "hi": 0.7
+            },
+            "logicalInputTokens": {
+              "pct": -1.4,
+              "lo": -4.1,
+              "hi": 0.1
+            },
+            "uncachedInputTokens": {
+              "pct": -1.4,
+              "lo": -4.1,
+              "hi": 0.1
+            },
+            "requests": [
+              9,
+              9
+            ],
+            "requestsChange": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "excessRequests": [
+              0,
+              0
+            ],
+            "editCheckSplits": [
+              0,
+              0
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              11,
+              10
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0,
+              0
+            ]
+          },
+          "unprompted_edit": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": 2.5,
+              "lo": -0.4,
+              "hi": 6.8
+            },
+            "logicalInputTokens": {
+              "pct": 2.4,
+              "lo": -0.3,
+              "hi": 7.5
+            },
+            "uncachedInputTokens": {
+              "pct": 2.4,
+              "lo": -0.3,
+              "hi": 7.5
+            },
+            "requests": [
+              9,
+              9
+            ],
+            "requestsChange": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "excessRequests": [
+              0,
+              0
+            ],
+            "editCheckSplits": [
+              0,
+              0
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              12,
+              13
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0,
+              0
+            ]
+          }
+        }
+      }
+    },
+    "gpt-6.1-sol": {
+      "samples": 24,
+      "successes": 22,
+      "firstRequestBytes": 11854,
+      "toolSchemaChars": 10320,
+      "meanTotalTokensPerTask": 11680,
+      "meanRequestsPerTask": 4.47,
+      "cacheReadShare": 0.572,
+      "toolErrors": 0,
+      "loop": {
+        "measured": 21,
+        "excessRequests": 25,
+        "belowFloor": 2,
+        "editCheckSplits": 19,
+        "orientationCalls": 0,
+        "verifiedBeforeFinal": [
+          19,
+          19
+        ],
+        "runaways": 2,
+        "compositionFailures": 0
+      },
+      "comparisons": {
+        "v0.3.5+ea221e7bfb": {
+          "all tasks": {
+            "cells": 21,
+            "pairs": 15,
+            "failures": [
+              5,
+              2
+            ],
+            "totalTokens": {
+              "pct": -8.2,
+              "lo": -12.9,
+              "hi": -2.4
+            },
+            "logicalInputTokens": {
+              "pct": -8.3,
+              "lo": -13.2,
+              "hi": -2.4
+            },
+            "uncachedInputTokens": {
+              "pct": -1.1,
+              "lo": -26.5,
+              "hi": 30.9
+            },
+            "requests": [
+              69,
+              68
+            ],
+            "requestsChange": {
+              "pct": -1.4,
+              "lo": -4.3,
+              "hi": 0
+            },
+            "excessRequests": [
+              22,
+              21
+            ],
+            "editCheckSplits": [
+              15,
+              15
+            ],
+            "orientationCalls": [
+              1,
+              0
+            ],
+            "toolCalls": [
+              57,
+              56
+            ],
+            "toolErrors": [
+              1,
+              0
+            ],
+            "cacheReadShare": [
+              0.605,
+              0.573
+            ]
+          },
+          "multi_file_edit": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": -8.7,
+              "lo": -14.9,
+              "hi": 1.3
+            },
+            "logicalInputTokens": {
+              "pct": -8.9,
+              "lo": -15.2,
+              "hi": 1.1
+            },
+            "uncachedInputTokens": {
+              "pct": 8.8,
+              "lo": -17.3,
+              "hi": 48.1
+            },
+            "requests": [
+              15,
+              15
+            ],
+            "requestsChange": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "excessRequests": [
+              6,
+              6
+            ],
+            "editCheckSplits": [
+              3,
+              3
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              12,
+              12
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0.61,
+              0.534
+            ]
+          },
+          "multi_site_edit": {
+            "cells": 3,
+            "pairs": 2,
+            "failures": [
+              1,
+              0
+            ],
+            "totalTokens": {
+              "pct": 0,
+              "lo": -15.2,
+              "hi": 17.9
+            },
+            "logicalInputTokens": {
+              "pct": 0,
+              "lo": -15.6,
+              "hi": 18.4
+            },
+            "uncachedInputTokens": {
+              "pct": 70.8,
+              "lo": 17.6,
+              "hi": 115.8
+            },
+            "requests": [
+              8,
+              8
+            ],
+            "requestsChange": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "excessRequests": [
+              2,
+              2
+            ],
+            "editCheckSplits": [
+              2,
+              2
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              6,
+              6
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0.693,
+              0.475
+            ]
+          },
+          "ordinary_edit": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": -10,
+              "lo": -15,
+              "hi": -0.5
+            },
+            "logicalInputTokens": {
+              "pct": -10.1,
+              "lo": -15.2,
+              "hi": -0.3
+            },
+            "uncachedInputTokens": {
+              "pct": -5.1,
+              "lo": -14.2,
+              "hi": 1.7
+            },
+            "requests": [
+              12,
+              12
+            ],
+            "requestsChange": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "excessRequests": [
+              3,
+              3
+            ],
+            "editCheckSplits": [
+              3,
+              3
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              12,
+              12
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0.53,
+              0.503
+            ]
+          },
+          "path_discovery": {
+            "cells": 3,
+            "pairs": 2,
+            "failures": [
+              1,
+              0
+            ],
+            "totalTokens": {
+              "pct": -18,
+              "lo": -20.9,
+              "hi": -14.4
+            },
+            "logicalInputTokens": {
+              "pct": -18.4,
+              "lo": -21.2,
+              "hi": -14.8
+            },
+            "uncachedInputTokens": {
+              "pct": -2.7,
+              "lo": -77,
+              "hi": 276.7
+            },
+            "requests": [
+              11,
+              10
+            ],
+            "requestsChange": {
+              "pct": -9.1,
+              "lo": -16.7,
+              "hi": 0
+            },
+            "excessRequests": [
+              3,
+              2
+            ],
+            "editCheckSplits": [
+              2,
+              2
+            ],
+            "orientationCalls": [
+              1,
+              0
+            ],
+            "toolCalls": [
+              9,
+              8
+            ],
+            "toolErrors": [
+              1,
+              0
+            ],
+            "cacheReadShare": [
+              0.744,
+              0.695
+            ]
+          },
+          "shell_then_edit": {
+            "cells": 3,
+            "pairs": 3,
+            "failures": [
+              0,
+              0
+            ],
+            "totalTokens": {
+              "pct": -10.3,
+              "lo": -15.6,
+              "hi": -0.3
+            },
+            "logicalInputTokens": {
+              "pct": -10.4,
+              "lo": -15.7,
+              "hi": -0.2
+            },
+            "uncachedInputTokens": {
+              "pct": 2.4,
+              "lo": -48.6,
+              "hi": 50.3
+            },
+            "requests": [
+              15,
+              15
+            ],
+            "requestsChange": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "excessRequests": [
+              6,
+              6
+            ],
+            "editCheckSplits": [
+              3,
+              3
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              12,
+              12
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0.592,
+              0.534
+            ]
+          },
+          "stale_edit": {
+            "cells": 3,
+            "pairs": 2,
+            "failures": [
+              1,
+              1
+            ],
+            "totalTokens": {
+              "pct": 8.1,
+              "lo": 0,
+              "hi": 17.6
+            },
+            "logicalInputTokens": {
+              "pct": 8.3,
+              "lo": -0.1,
+              "hi": 18.1
+            },
+            "uncachedInputTokens": {
+              "pct": -52.7,
+              "lo": -59.6,
+              "hi": -32.9
+            },
+            "requests": [
+              8,
+              8
+            ],
+            "requestsChange": {
+              "pct": 0,
+              "lo": 0,
+              "hi": 0
+            },
+            "excessRequests": [
+              2,
+              2
+            ],
+            "editCheckSplits": [
+              2,
+              2
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              6,
+              6
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              0.438,
+              0.754
+            ]
+          },
+          "unprompted_edit": {
+            "cells": 3,
+            "pairs": 0,
+            "failures": [
+              2,
+              1
+            ],
+            "totalTokens": null,
+            "logicalInputTokens": null,
+            "uncachedInputTokens": null,
+            "requests": [
+              0,
+              0
+            ],
+            "requestsChange": null,
+            "excessRequests": [
+              0,
+              0
+            ],
+            "editCheckSplits": [
+              0,
+              0
+            ],
+            "orientationCalls": [
+              0,
+              0
+            ],
+            "toolCalls": [
+              0,
+              0
+            ],
+            "toolErrors": [
+              0,
+              0
+            ],
+            "cacheReadShare": [
+              null,
+              null
+            ]
+          }
+        }
+      }
+    }
+  }
+}
