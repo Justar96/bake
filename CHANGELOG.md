@@ -4,6 +4,8 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-10-05
+
 - A `bash` or `pwsh` call's command is coloured as shell or PowerShell, on the call's head and on any lines under it, so a multi-line command such as `python3 -c "…"` reads apart from the output that follows. A failed call in a step gives up the colour so its head reads wholly red.
 - In a step of several calls, a call that finished cleanly under the step's own icon no longer repeats that icon past its branch; running, failed, and other kinds of call keep theirs. The cell stays blank, so names do not shift as calls finish.
 - Fullscreen's hint row sits at the right edge while following output, apart from the transcript, with each key at full brightness and what it does dimmed.
