@@ -49,12 +49,23 @@ export interface Config {
   sessionId?: string
   /** Whether stdout carries the machine-readable event stream instead of final text. */
   json?: boolean
+  /**
+   * Longest the run waits, in milliseconds, for background jobs its Agent still
+   * owns once its turn ends, and for the turns their completions open. A job
+   * that never ends, such as a dev server, is then stopped with the run. 0 does
+   * not wait. Defaults to 600000 (10 minutes).
+   */
+  jobWaitMs?: number
 }
+
+/** Default {@link Config.jobWaitMs}: as long as one `job_output` wait could once hold a turn. */
+const JOB_WAIT_MS = 600_000
 
 export const Config: z<Config> = z.object({
   task: z.string(),
   sessionId: z.string(),
   json: z.boolean(),
+  jobWaitMs: z.number().min(0).default(JOB_WAIT_MS),
 })
 
 /**
@@ -354,23 +365,32 @@ const JOB_POLL_MS = 250
  * turns, or disposal would cancel the work the answer depends on. The registry
  * is polled, not waited on: a registry wait marks the job reported, which
  * suppresses the very notice that reopens the turn.
+ *
+ * The wait is bounded, since a job may never end on its own. A turn a
+ * completion opened still runs to its end past the limit; no later job is
+ * waited on.
  * @param ctx - the runner's context, whose `jobs` service may be absent.
  * @param agent - the Agent this run owns.
  * @param stopping - aborted when the process is asked to stop.
+ * @param limitMs - longest wait for jobs, in milliseconds.
+ * @returns how many jobs were still running when the limit ran out.
  */
-async function settleJobs(ctx: Context, agent: Agent, stopping: AbortSignal): Promise<void> {
+async function settleJobs(ctx: Context, agent: Agent, stopping: AbortSignal, limitMs: number): Promise<number> {
   const jobs = ctx.get('jobs')
-  if (jobs === undefined) return
-  const live = (): boolean => jobs.list(agent).some(job => job.status === 'running' || job.status === 'stopping')
-  while (live() && !stopping.aborted) {
-    while (live() && !stopping.aborted) {
+  if (jobs === undefined) return 0
+  const running = (): number => jobs.list(agent).filter(job => job.status === 'running' || job.status === 'stopping').length
+  const deadline = Date.now() + limitMs
+  while (running() > 0 && !stopping.aborted) {
+    while (running() > 0 && !stopping.aborted) {
+      const left = deadline - Date.now()
+      if (left <= 0) return running()
       await new Promise<void>((resolve) => {
         const done = (): void => {
           clearTimeout(timer)
           stopping.removeEventListener('abort', done)
           resolve()
         }
-        const timer = setTimeout(done, JOB_POLL_MS)
+        const timer = setTimeout(done, Math.min(JOB_POLL_MS, left))
         stopping.addEventListener('abort', done, { once: true })
       })
     }
@@ -378,6 +398,7 @@ async function settleJobs(ctx: Context, agent: Agent, stopping: AbortSignal): Pr
     // already busy here when one was woken; that turn may start more jobs.
     await agent.whenIdle()
   }
+  return 0
 }
 
 async function run(ctx: Context, config: Config, io: HeadlessIo, stopping: AbortSignal): Promise<void> {
@@ -447,7 +468,11 @@ async function run(ctx: Context, config: Config, io: HeadlessIo, stopping: Abort
         source: { kind: 'user' },
       }))
       await agent.whenIdle()
-      await settleJobs(ctx, agent, stopping)
+      const waitMs = config.jobWaitMs ?? JOB_WAIT_MS
+      const left = await settleJobs(ctx, agent, stopping, waitMs)
+      if (left > 0) {
+        io.stderr.write(`dsh: warning: ${String(left)} background job${left === 1 ? '' : 's'} still running after ${String(waitMs / 1000)} s; stopping ${left === 1 ? 'it' : 'them'} with the run\n`)
+      }
     } finally {
       stopReasoning?.()
     }

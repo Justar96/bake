@@ -48,6 +48,7 @@ interface BenchOptions {
   readStdin?: () => Promise<string>
   sessionId?: string
   json?: boolean
+  jobWaitMs?: number
   observe?: () => Promise<ObservationStub>
   /** Leave the query service unmounted to exercise the fail-loud path. */
   omitSessionQuery?: boolean
@@ -224,6 +225,7 @@ async function bench(script: Script, options: BenchOptions = {}): Promise<{
         ...options.useStdin === true ? {} : { task: options.task ?? 'do the thing' },
         ...options.sessionId === undefined ? {} : { sessionId: options.sessionId },
         ...options.json === undefined ? {} : { json: options.json },
+        ...options.jobWaitMs === undefined ? {} : { jobWaitMs: options.jobWaitMs },
       })
       return { code: await exited, out, err, order }
     },
@@ -312,6 +314,19 @@ describe('headless runner', () => {
     test.ctx.provide('jobs', { list: () => live ? [{ status: 'running' }] : [] } as never)
     const result = await test.run()
     expect([result.code, result.out, turns]).toEqual([0, 'build passed\n', 2])
+    await test.ctx.fiber.dispose()
+  })
+
+  it('stops waiting for a job that never ends once jobWaitMs runs out, and says so', async () => {
+    const test = await bench({
+      afterPrompt(session, message) { appendTurn(session, 1, message, 'started the dev server', true) },
+    }, { jobWaitMs: 50 })
+    test.ctx.provide('jobs', { list: () => [{ status: 'running' }] } as never)
+    const started = Date.now()
+    const result = await test.run()
+    expect([result.code, result.out]).toEqual([0, 'started the dev server\n'])
+    expect(result.err).toBe('dsh: warning: 1 background job still running after 0.05 s; stopping it with the run\n')
+    expect(Date.now() - started).toBeLessThan(5_000)
     await test.ctx.fiber.dispose()
   })
 
@@ -1229,9 +1244,10 @@ describe('headless runner', () => {
     expect(() => { apply(ctx, { task: 't' }) }).toThrow('must provide ctx.appExit')
   })
 
-  it('validates config: the task and run options are optional', () => {
-    expect(new Config({})).toEqual({})
-    expect(new Config({ task: 'x', sessionId: 'session-x', json: true }))
-      .toEqual({ task: 'x', sessionId: 'session-x', json: true })
+  it('validates config: the task and run options are optional, and the job wait has a bound', () => {
+    expect(new Config({})).toEqual({ jobWaitMs: 600_000 })
+    expect(new Config({ task: 'x', sessionId: 'session-x', json: true, jobWaitMs: 0 }))
+      .toEqual({ task: 'x', sessionId: 'session-x', json: true, jobWaitMs: 0 })
+    expect(() => new Config({ jobWaitMs: -1 })).toThrow()
   })
 })

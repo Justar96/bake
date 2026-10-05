@@ -546,6 +546,13 @@ export interface Config {
   sessionId?: string
   /** Whether stdout carries the machine-readable event stream instead of final text. */
   json?: boolean
+  /**
+   * Longest the run waits, in milliseconds, for background jobs its Agent still
+   * owns once its turn ends, and for the turns their completions open. A job
+   * that never ends, such as a dev server, is then stopped with the run. 0 does
+   * not wait. Defaults to 600000 (10 minutes).
+   */
+  jobWaitMs?: number
 }
 ```
 
