@@ -34,7 +34,7 @@ library you call; everything is a plugin contributing into a `ctx` tree.
 
 | Path | Contents |
 |---|---|
-| `packages/*/*` | ~60 groups of `@deepseek-ai/dsh-<name>` workspaces (core/session, llm, shell, tools, sandbox, skill, subagent, api, client, host, …) |
+| `packages/*/*` | ~60 groups of `bake-<name>` workspaces (core/session, llm, shell, tools, sandbox, skill, subagent, api, client, host, …) |
 | `apps/cli` | the only supported Node application launcher: the `dsh` bin |
 | `packages/bundle/*` | profile bundles (`base`, `web-app`, `headless`, `acp-app`, `sdk-app`, `sdk-minimal`), each declaring `dsh.bundle.patch` |
 | `apps/web`, `apps/desktop` | browser GUI and its Electron shell |
