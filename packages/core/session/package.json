@@ -48,11 +48,11 @@
     "bake-invariants": "workspace:^",
     "bake-scope": "workspace:^",
     "bake-typert-protocol": "workspace:^",
-    "@deepseek-ai/dsh-typert-registry": "workspace:^",
+    "bake-typert-registry": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   },
   "dependencies": {
-    "@deepseek-ai/dsh-llm": "workspace:^",
+    "bake-llm": "workspace:^",
     "bake-brand": "workspace:^",
     "bake-util-values": "workspace:^"
   }

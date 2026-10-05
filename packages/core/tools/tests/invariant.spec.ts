@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { scopeTarget } from 'bake-scope'
-import { ToolCallId } from '@deepseek-ai/dsh-llm'
+import { ToolCallId } from 'bake-llm'
 import SessionStore, { Session, SessionId } from 'bake-session'
 import type { ToolExecution, ToolExecutionResult, ToolExecutionToken } from 'bake-tools'
 import * as ToolsInvariant from 'bake-tools/invariant'

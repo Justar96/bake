@@ -9,7 +9,7 @@
 
 import { Command, Option } from 'commander'
 import type { Context } from '@deepseek-ai/cordis'
-import { parseCmdline } from '@deepseek-ai/dsh-cmdline'
+import { parseCmdline } from 'bake-cmdline'
 
 /** Stable Cordis plugin name. */
 export const name = 'tui-startup'

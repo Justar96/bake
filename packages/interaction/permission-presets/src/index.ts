@@ -9,26 +9,26 @@
  * side exposes a process catalog plus the current-value-only `permissions`
  * Session projection; the write side ships as the `/permission` command.
  *
- * @module dsh-permission-presets
+ * @module bake-permission-presets
  */
 
 import { Context } from '@deepseek-ai/cordis'
-import { CommandDefinitionId } from '@deepseek-ai/dsh-commands/brand'
+import { CommandDefinitionId } from 'bake-commands/brand'
 import z from '@deepseek-ai/schemastery'
 import { z as zod } from 'zod'
 import { Remote, TypertRemoteService } from 'bake-typert-protocol'
 import type { Session, SessionEvent } from 'bake-session'
 import type { SandboxMode } from 'bake-sandbox'
-import { SANDBOX_MODES, setSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
+import { SANDBOX_MODES, setSandboxMode } from 'bake-sandbox-policy'
 // Side-effect type import: declaration-merges `ctx.shell` (the capability fact
 // `sandboxMode` this service reads), without a value dependency on the seam.
 import type {} from 'bake-shell'
-import type { ApprovalPolicy } from '@deepseek-ai/dsh-user-approval'
-import { APPROVAL_POLICIES, setApprovalPolicy } from '@deepseek-ai/dsh-user-approval'
+import type { ApprovalPolicy } from 'bake-user-approval'
+import { APPROVAL_POLICIES, setApprovalPolicy } from 'bake-user-approval'
 import type {} from 'bake-settings'
 // Type-only: resolves the required projection service and optional settings/command children.
-import type {} from '@deepseek-ai/dsh-session-projection'
-import type {} from '@deepseek-ai/dsh-commands'
+import type {} from 'bake-session-projection'
+import type {} from 'bake-commands'
 import type { PermissionCatalog, PermissionSelection, PresetOption } from './types.ts'
 
 export type * from './types.ts'
@@ -39,7 +39,7 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
-declare module '@deepseek-ai/dsh-session-projection/types' {
+declare module 'bake-session-projection/types' {
   interface SessionProjectionStateMap {
     /** Latest logged permission overrides and constructor-seed status. */
     permissions: PermissionProjectionState

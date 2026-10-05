@@ -31,8 +31,8 @@ The boot group launches profile applications and manages their installed composi
 
 - [dsh app](../../apps/cli/README.md) — the `dsh` bin that consumes these helpers for its boot sequence.
 - [Profile bundles](../bundle/README.md) — installable patch layers that `dsh --profile` compositions mount.
-- [dsh-home-paths](../util/home-paths/README.md) — the harness-home resolver both packages build on.
-- [dsh-cmdline](cmdline/README.md) — how an app owns its flag family instead of the launcher.
+- [bake-home-paths](../util/home-paths/README.md) — the harness-home resolver both packages build on.
+- [bake-cmdline](cmdline/README.md) — how an app owns its flag family instead of the launcher.
 
 - [Profile management](../../docs/subsystems/boot.md) — service methods and result records.
 

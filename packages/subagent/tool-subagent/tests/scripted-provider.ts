@@ -1,7 +1,7 @@
 /** Package-local scripted child boundary for deterministic tool-subagent tests. */
 
 import type { Context } from '@deepseek-ai/cordis'
-import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock } from 'bake-llm'
 import { SessionId } from 'bake-session'
 import type {
   SubagentCapabilities,
@@ -10,7 +10,7 @@ import type {
   SubagentRun,
   SubagentStartRequest,
   SubagentStopReason,
-} from '@deepseek-ai/dsh-subagent'
+} from 'bake-subagent'
 
 const DEFAULT_CAPABILITIES: SubagentCapabilities = {
   agentOptions: true,

@@ -1,6 +1,6 @@
 import { describe, expectTypeOf, it } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
-import { ToolCallId } from '@deepseek-ai/dsh-llm'
+import { ToolCallId } from 'bake-llm'
 import { defineTool } from 'bake-tools'
 import type {
   ToolDispatchExecution,

@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-tool-bash-persistent",
+  "name": "bake-tool-bash-persistent",
   "description": "Model-facing owner-scoped persistent Bash tool backed by the Harness PTY service",
   "version": "0.1.6-alpha.2",
   "publishConfig": {
@@ -28,7 +28,7 @@
   "peerDependencies": {
     "bake-agent": "workspace:^",
     "bake-output-retention": "workspace:^",
-    "@deepseek-ai/dsh-terminal": "workspace:^",
+    "bake-terminal": "workspace:^",
     "bake-timeout": "workspace:^",
     "bake-tools": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
@@ -42,17 +42,17 @@
     "bake-agent": "workspace:^",
     "bake-output-retention": "workspace:^",
     "bake-agent-loop-testkit": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
-    "@deepseek-ai/dsh-terminal": "workspace:^",
-    "@deepseek-ai/dsh-terminal-bash": "workspace:^",
+    "bake-llm": "workspace:^",
+    "bake-terminal": "workspace:^",
+    "bake-terminal-bash": "workspace:^",
     "bake-sandbox": "workspace:^",
-    "@deepseek-ai/dsh-sandbox-policy": "workspace:^",
+    "bake-sandbox-policy": "workspace:^",
     "bake-session": "workspace:^",
-    "@deepseek-ai/dsh-subprocess-local": "workspace:^",
+    "bake-subprocess-local": "workspace:^",
     "bake-system-prompt": "workspace:^",
     "bake-timeout": "workspace:^",
     "bake-tools": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^",
-    "@deepseek-ai/dsh-session-projection": "workspace:^"
+    "bake-session-projection": "workspace:^"
   }
 }

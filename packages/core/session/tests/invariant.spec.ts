@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { createScope, scopeTarget } from 'bake-scope'
-import { createSystemMessage, createUserMessage, ToolCallId, createMessage, createToolResultMessage, freezeMessage } from '@deepseek-ai/dsh-llm'
+import { createSystemMessage, createUserMessage, ToolCallId, createMessage, createToolResultMessage, freezeMessage } from 'bake-llm'
 import SessionStore, { SessionId, SessionSeq, TOOL_NOT_STARTED } from 'bake-session'
 import * as SessionInvariant from 'bake-session/invariant'
 import InvariantRegistry, { InvariantError } from 'bake-invariants'

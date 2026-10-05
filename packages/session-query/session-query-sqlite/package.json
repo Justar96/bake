@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-session-query-sqlite",
+  "name": "bake-session-query-sqlite",
   "description": "Concrete ctx.sessionQuery backend with SQLite FTS5 search",
   "version": "0.1.6-alpha.2",
   "publishConfig": {
@@ -44,9 +44,9 @@
     "@deepseek-ai/cordis-plugin-loader": "workspace:^",
     "bake-session": "workspace:^",
     "bake-session-persistence": "workspace:^",
-    "@deepseek-ai/dsh-session-persistence-jsonl": "workspace:^",
+    "bake-session-persistence-jsonl": "workspace:^",
     "bake-session-query": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^",
-    "@deepseek-ai/dsh-session-projection": "workspace:^"
+    "bake-session-projection": "workspace:^"
   }
 }

@@ -3,7 +3,7 @@ description: "Automatic conversation condensation for deployments choosing, tuni
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-compaction-basic
+# bake-compaction-basic
 
 ## Summary
 
@@ -35,16 +35,16 @@ Mount session storage, token measurement, the optional pruner, this backend, and
 
 ```yaml
 - name: 'bake-session'
-- name: '@deepseek-ai/dsh-token-meter'
-- name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
-- name: '@deepseek-ai/dsh-compaction-basic'
-- name: '@deepseek-ai/dsh-command-compact'
+- name: 'bake-token-meter'
+- name: 'bake-compaction-tool-result-pruner'
+- name: 'bake-compaction-basic'
+- name: 'bake-command-compact'
 ```
 
 You can verify success by watching the conversation continue past the point where it would otherwise overflow, and by running `/compact` for an immediate condensation. If the composition lacks an LLM, session storage, or token measurement, the plugin fails to load. One backend can serve models with different context sizes; give each route its own threshold and retention with a per-model override:
 
 ```yaml
-- name: '@deepseek-ai/dsh-compaction-basic'
+- name: 'bake-compaction-basic'
   config:
     thresholdRatio: 0.8
     retainRatio: 0.16
@@ -57,7 +57,7 @@ You can verify success by watching the conversation continue past the point wher
 
 ### Tuning when condensation starts
 
-All settings are optional. The defaults start condensing at 80% of the routed model's context window and keep the newest 16% verbatim; the table below is the complete policy surface, and the generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-compaction-basic) is the exhaustive source.
+All settings are optional. The defaults start condensing at 80% of the routed model's context window and keep the newest 16% verbatim; the table below is the complete policy surface, and the generated [configuration catalog](../../../docs/config-catalog.md#bake-compaction-basic) is the exhaustive source.
 
 | Field | Default | Meaning |
 |---|---|---|
@@ -81,7 +81,7 @@ Interfaces can ask where condensation starts for a route. `pressureThreshold(rou
 
 ### Changing the policy from settings.yaml
 
-With a settings provider such as `dsh-settings-file` mounted (the shipped `dsh` base mounts it), the `compaction-basic` section of `settings.yaml` overrides the composition config field by field. The TUI's `/settings` edits it in its Compaction section, where each threshold and retention takes a percent of the context window or a token count, and lists every raw field under Advanced. Every field above is accepted. `auto: false` switches automatic condensation and overflow recovery off; `auto: true` leaves the composition's switch in charge, so it cannot turn on an engine the composition keeps manual-only, such as the terminal's host engine beside each preset's own. A list replaces the composed list wholesale, so a `modelPolicies` section must repeat any composed entries it keeps. A threshold or retention form set in settings replaces the composed one, so `thresholdTokens` in settings over a composed `thresholdRatio` is not a conflict. For example, to compact every model on a `cliproxyapi` route by token count:
+With a settings provider such as `bake-settings-file` mounted (the shipped `dsh` base mounts it), the `compaction-basic` section of `settings.yaml` overrides the composition config field by field. The TUI's `/settings` edits it in its Compaction section, where each threshold and retention takes a percent of the context window or a token count, and lists every raw field under Advanced. Every field above is accepted. `auto: false` switches automatic condensation and overflow recovery off; `auto: true` leaves the composition's switch in charge, so it cannot turn on an engine the composition keeps manual-only, such as the terminal's host engine beside each preset's own. A list replaces the composed list wholesale, so a `modelPolicies` section must repeat any composed entries it keeps. A threshold or retention form set in settings replaces the composed one, so `thresholdTokens` in settings over a composed `thresholdRatio` is not a conflict. For example, to compact every model on a `cliproxyapi` route by token count:
 
 ```yaml
 # settings.yaml
@@ -109,11 +109,11 @@ If the summary request itself is too large for the summarizing model, condensati
 
 ### On-demand condensation with /compact
 
-With `dsh-command-compact` mounted, type `/compact` in a chat UI to condense immediately, even below the pressure threshold. The command reports how many history items were condensed and the estimated tokens saved. While the agent is mid-turn or condensation is already running, `/compact` reports that condensation is unavailable; prompts you send while it runs are accepted and start after it finishes.
+With `bake-command-compact` mounted, type `/compact` in a chat UI to condense immediately, even below the pressure threshold. The command reports how many history items were condensed and the estimated tokens saved. While the agent is mid-turn or condensation is already running, `/compact` reports that condensation is unavailable; prompts you send while it runs are accepted and start after it finishes.
 
 ### Trimming oversized tool outputs
 
-Mount `dsh-compaction-tool-result-pruner` before this package to trim oversized tool results as part of condensation. Trimming makes no model call and can remove the need to summarize at all: when the trimmed conversation lands below the prune-only ceiling, halfway between the retained tail and the threshold, condensation skips the summary. A trim that clears the threshold by less still summarizes in the same pass, because each rewrite invalidates the provider's prompt cache and a barely-sufficient trim would trigger another rewrite a few steps later. Trimming only runs after a condensation trigger qualifies — a below-pressure conversation is never touched.
+Mount `bake-compaction-tool-result-pruner` before this package to trim oversized tool results as part of condensation. Trimming makes no model call and can remove the need to summarize at all: when the trimmed conversation lands below the prune-only ceiling, halfway between the retained tail and the threshold, condensation skips the summary. A trim that clears the threshold by less still summarizes in the same pass, because each rewrite invalidates the provider's prompt cache and a barely-sufficient trim would trigger another rewrite a few steps later. Trimming only runs after a condensation trigger qualifies — a below-pressure conversation is never touched.
 
 -----
 
@@ -148,7 +148,7 @@ The auxiliary call also carries `session.toolHistory()`. Native tool updates are
 
 ### The region transaction
 
-A failed summary request is handled in this order. Under overflow recovery and `compactNow()`, a failure whose code the summarizing provider's `retryPolicy` lists as retryable (every code under an `always` policy, except `CONTEXT_WINDOW_EXCEEDED`) is retried after `retryDelayMs()` from `@deepseek-ai/dsh-llm`, at most `min(maxRetries, 3)` times; a provider-requested delay above a normal policy's ceiling ends the retries. The wait aborts with the transaction's signal or the plugin's disposal. Pressure compaction passes no retry plan. Next, failed summary requests dispatch synchronous `compaction/summary-error` after checking cancellation and selection stability. A recovery listener must record a durable input change before requesting retry. The backend re-derives the selected messages and refreshes their token prices and shrink baseline. The image-offload plugin owns image selection; its recorded omissions remain effective if the summary later fails or is cancelled.
+A failed summary request is handled in this order. Under overflow recovery and `compactNow()`, a failure whose code the summarizing provider's `retryPolicy` lists as retryable (every code under an `always` policy, except `CONTEXT_WINDOW_EXCEEDED`) is retried after `retryDelayMs()` from `bake-llm`, at most `min(maxRetries, 3)` times; a provider-requested delay above a normal policy's ceiling ends the retries. The wait aborts with the transaction's signal or the plugin's disposal. Pressure compaction passes no retry plan. Next, failed summary requests dispatch synchronous `compaction/summary-error` after checking cancellation and selection stability. A recovery listener must record a durable input change before requesting retry. The backend re-derives the selected messages and refreshes their token prices and shrink baseline. The image-offload plugin owns image selection; its recorded omissions remain effective if the summary later fails or is cancelled.
 
 When no listener repairs a `CONTEXT_WINDOW_EXCEEDED` summary failure, the transaction prepares a bounded attempt: the same span serialized by `boundedSummarizationInput()` as one transcript user message, without the system head or tool schemas, then up to `MAX_SUMMARY_RANGE_HALVINGS` (3) attempts over the older half of the previous span, each cut at the latest balanced boundary. A shortened span is the span the checkpoint replaces, and its shadowed seqs and prices are re-derived. Every failed attempt is logged as a warning; the `compaction/summary` record does not say which form produced the summary.
 
@@ -188,7 +188,7 @@ Read these pages when the package-level contract is not enough; they move from t
 - [Tool-result pruner](../compaction-tool-result-pruner/README.md) — the optional companion that trims oversized tool outputs first.
 - [Human /compact command](../command-compact/README.md) — on-demand condensation without waiting for pressure.
 - [Token meter](../../llm/token-meter/README.md) — the measurement service that decides when to condense.
-- [Generated configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-compaction-basic) — every accepted config field and its source declaration.
+- [Generated configuration catalog](../../../docs/config-catalog.md#bake-compaction-basic) — every accepted config field and its source declaration.
 
 -----
 

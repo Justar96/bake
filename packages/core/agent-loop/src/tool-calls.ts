@@ -12,7 +12,7 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import { createToolResultMessage, type ToolCallBlock } from '@deepseek-ai/dsh-llm'
+import { createToolResultMessage, type ToolCallBlock } from 'bake-llm'
 import type { Session, SessionSeq, UserMessage } from 'bake-session'
 import { TOOL_ABORTED_BEFORE_DISPATCH, TOOL_RUNTIME_SCHEDULER, type ToolExecutionInput, type ToolExecutionMode, type ToolExecutionResult, type ToolHalt, type ToolRunContext, type ToolRuntimeScheduler } from 'bake-tools'
 import { assertNever } from 'bake-util-values'

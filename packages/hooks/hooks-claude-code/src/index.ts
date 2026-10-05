@@ -5,16 +5,16 @@
  * mapping; shared execution and parsing live in `bake-hook-protocol`.
  * `updatedInput` is logged and warned but not honored. Bespoke behavior should
  * use typed native plugins on the same extension points.
- * @module @deepseek-ai/dsh-hooks-claude-code
+ * @module bake-hooks-claude-code
  */
 
 import { readFileSync } from 'node:fs'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { Agent, PreStepDecision, TurnBoundaryProjection } from 'bake-agent'
-import type {} from '@deepseek-ai/dsh-session-projection'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock, MessageSource } from '@deepseek-ai/dsh-llm'
+import type {} from 'bake-session-projection'
+import { createUserMessage } from 'bake-llm'
+import type { ContentBlock, MessageSource } from 'bake-llm'
 import type { UserMessage } from 'bake-session'
 import type { PostToolDecision, PreToolDecision, ToolExecution, ToolExecutionResult, ToolHalt } from 'bake-tools'
 import {
@@ -32,7 +32,7 @@ import {
 } from 'bake-hook-protocol'
 // Pulls in the declaration-merged subagent events and the identity pairing their
 // start/end edges.
-import type { SubagentRunId } from '@deepseek-ai/dsh-subagent'
+import type { SubagentRunId } from 'bake-subagent'
 import { parseClaudeCodeConfig, type ClaudeCodeHookConfig } from './config.ts'
 
 export const name = 'hooks-claude-code'

@@ -5,7 +5,7 @@
  * @module bake-tools/src/presentation
  */
 
-import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock } from 'bake-llm'
 
 /**
  * Category of a tool call, used by a UI to pick an icon or treatment. The
@@ -354,7 +354,7 @@ export interface ReadResultView {
 
 /**
  * One citeable source in a completed {@link WebSearchResultView}, the faithful
- * projection of one web-search source. The presentation projection of `dsh-web`'s
+ * projection of one web-search source. The presentation projection of `bake-web`'s
  * `WebSearchSource`: that Service Definition type is authoritative (core cannot depend
  * on the web Service Definition, so the two are declared separately and MUST evolve together).
  * A web tool projects this shape through `output.presentationMeta` because the

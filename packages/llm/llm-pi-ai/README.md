@@ -3,11 +3,11 @@ description: "The pi-ai-backed multi-provider adapter for users and maintainers 
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-llm-pi-ai
+# bake-llm-pi-ai
 
 ## Summary
 
-`@deepseek-ai/dsh-llm-pi-ai` routes model requests to multiple pi-ai providers, OpenAI-compatible gateways, or self-hosted servers from one configuration. Installed pi-ai providers supply endpoint, protocol, and model-catalog defaults; custom routes can declare those values without code changes. Profiles and credentials are resolved for each request, so settings changes take effect on the next request without a restart. Supported providers can use stored OAuth or interactive-key sign-in with cross-process refresh locking. The package may start with no routes and activate when user settings add them.
+`bake-llm-pi-ai` routes model requests to multiple pi-ai providers, OpenAI-compatible gateways, or self-hosted servers from one configuration. Installed pi-ai providers supply endpoint, protocol, and model-catalog defaults; custom routes can declare those values without code changes. Profiles and credentials are resolved for each request, so settings changes take effect on the next request without a restart. Supported providers can use stored OAuth or interactive-key sign-in with cross-process refresh locking. The package may start with no routes and activate when user settings add them.
 
 ## Table of Contents
 
@@ -34,7 +34,7 @@ This is the base composition's only LLM adapter: it serves DeepSeek through the 
 Each profile may set a `retryPolicy`; omission uses normal mode with five retries. `apiKeyEnv` is a credential reference resolved per request through the harness credential seam, so no secret enters the configuration file; a reference that resolves to nothing fails the request with `MISSING_CREDENTIAL`. Omitting it leaves the route configured-but-keyless, which for an installed catalog route defers to pi-ai's provider-native ambient discovery.
 
 ```yaml
-- name: '@deepseek-ai/dsh-llm-pi-ai'
+- name: 'bake-llm-pi-ai'
   config:
     providers:
       openai:
@@ -83,7 +83,7 @@ Each profile may set a `retryPolicy`; omission uses normal mode with five retrie
 | `requestImageMaxDimension` | `2000` on `anthropic-messages` models, none elsewhere | Long-edge cap for each request image, applied after the pixel budget; a set value applies to every model on the route |
 | `requestImageMaxBytes` | `1 MiB` | Encoded-byte target for each request image before base64 expansion |
 | `maxRequestImageBytes` | `20 MiB` | Aggregate base64 image-payload bound; a request whose retained images exceed it fails with `IMAGE_OFFLOAD_REQUIRED` |
-| `retryPolicy` | normal, 5 retries | Provider-owned retry policy executed by `dsh-llm-retry` |
+| `retryPolicy` | normal, 5 retries | Provider-owned retry policy executed by `bake-llm-retry` |
 | `adaptiveThinkingType` | `adaptive` | Thinking spelling for `anthropic-messages` models with `compat.forceAdaptiveThinking`; `enabled` respells it for endpoints that accept only `enabled` and `disabled` |
 | `messagesWire` | all off | Request-body rewrites for `anthropic-messages` models: `dropDeferredToolPlaceholder`, `stripCacheControl`, and `mergeAdjacentRoles`; refused on a route with no such model |
 | `strictTools` | off | Strict JSON-schema tool declarations for `openai-responses` and `openai-completions` models whose `compat.supportsStrictMode` is true; refused on a route with no such model. See [Strict tool declarations](#strict-tool-declarations) |
@@ -104,7 +104,7 @@ llm-pi-ai:
 
 A `models` entry also accepts `description`, a one-line summary model selectors show, and the transcript-update declarations described in [Declare in-history updates](#declare-in-history-updates).
 
-The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-llm-pi-ai) is the exhaustive source for every accepted field and its JSDoc.
+The generated [configuration catalog](../../../docs/config-catalog.md#bake-llm-pi-ai) is the exhaustive source for every accepted field and its JSDoc.
 
 ### Use DeepSeek
 
@@ -210,10 +210,10 @@ Successful assistant responses store a versioned, lossless-JSON replay state bes
 
 Read these pages when the package-level contract is not enough. They move from the service contract to the streaming protocol and the shared configuration.
 
-- [dsh-llm service](../llm/README.md) — the provider-neutral service this adapter registers on.
+- [bake-llm service](../llm/README.md) — the provider-neutral service this adapter registers on.
 - [LLM streaming subsystem](../../../docs/subsystems/llm-streaming.md) — the `StreamChunk` protocol and adapter contract.
 - [llm-retry](../llm-retry/README.md) — the retry executor that applies each profile's `retryPolicy`.
-- [Generated configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-llm-pi-ai) — every accepted config field and its source declaration.
+- [Generated configuration catalog](../../../docs/config-catalog.md#bake-llm-pi-ai) — every accepted config field and its source declaration.
 
 -----
 
@@ -224,7 +224,7 @@ Read these pages when the package-level contract is not enough. They move from t
 
 #### What the model sees
 
-The selected catalog model receives one system prompt (`GenerateOptions.system`, otherwise the text of a leading `system` history message; a leading system message with empty text sends none), the remaining history, tools, and sampling fields supported by pi-ai's common streaming API. A user message with one text block sends it as plain text; one with several, such as two hook contexts or a prompt followed by attachments, sends each block as its own text part, so no two run together. A tool result's text blocks, nested results included, likewise stay separate parts, which pi-ai joins with a newline on wires that take one string. A system message's blocks are one rendered prompt and are joined as written. Each retained image is preceded by text naming its complete attachment id and actual request dimensions. Its request version is derived from the stored normalized attachment when the request is built: the route's `requestImagePixelBudget` first, then its `requestImageMaxDimension` long-edge cap. A model speaking `anthropic-messages` defaults to a 2000 px cap, Anthropic's per-side limit for a request carrying more than 20 images, so a long image history stays accepted. When the current execution filesystem maps the attachment provider's host object, the text also carries a read-only normalized-object path and warns that normalization or request projection may have resized or re-encoded the upload. Each occurrence selected by a logged image-offload decision keeps its own identity and currently resolved access in replacement text, and its normalized attachment is not read or transformed. When the retained occurrences' exact base64 payload still exceeds the route's `maxRequestImageBytes`, the call fails with `IMAGE_OFFLOAD_REQUIRED` so `dsh-compaction-image-offload` records the selected occurrences in an `image/offload` event and retries the step. Provider-native replay metadata is restored only when the adapter validates it for the historical content. On a `strictTools` route, a model that takes strict declarations sees each tool whose schema has a strict form marked `strict: true`, with every property required and the optional ones nullable.
+The selected catalog model receives one system prompt (`GenerateOptions.system`, otherwise the text of a leading `system` history message; a leading system message with empty text sends none), the remaining history, tools, and sampling fields supported by pi-ai's common streaming API. A user message with one text block sends it as plain text; one with several, such as two hook contexts or a prompt followed by attachments, sends each block as its own text part, so no two run together. A tool result's text blocks, nested results included, likewise stay separate parts, which pi-ai joins with a newline on wires that take one string. A system message's blocks are one rendered prompt and are joined as written. Each retained image is preceded by text naming its complete attachment id and actual request dimensions. Its request version is derived from the stored normalized attachment when the request is built: the route's `requestImagePixelBudget` first, then its `requestImageMaxDimension` long-edge cap. A model speaking `anthropic-messages` defaults to a 2000 px cap, Anthropic's per-side limit for a request carrying more than 20 images, so a long image history stays accepted. When the current execution filesystem maps the attachment provider's host object, the text also carries a read-only normalized-object path and warns that normalization or request projection may have resized or re-encoded the upload. Each occurrence selected by a logged image-offload decision keeps its own identity and currently resolved access in replacement text, and its normalized attachment is not read or transformed. When the retained occurrences' exact base64 payload still exceeds the route's `maxRequestImageBytes`, the call fails with `IMAGE_OFFLOAD_REQUIRED` so `bake-compaction-image-offload` records the selected occurrences in an `image/offload` event and retries the step. Provider-native replay metadata is restored only when the adapter validates it for the historical content. On a `strictTools` route, a model that takes strict declarations sees each tool whose schema has a strict form marked `strict: true`, with every property required and the optional ones nullable.
 
 A model that declares `systemPromptUpdate: in-history` sees a later system prompt as a system message at its place in history; one that declares `toolUpdate: in-history` sees the tools it started with, later tools marked for deferred loading, pi-ai's `__pi_deferred_placeholder__` tool, and each tool change as a system message after its anchoring user turn. On `deepseek-official`, thinking is requested as `enabled` with the selected effort, and `off` sends `disabled`. Its `messagesWire` switches remove the placeholder tool and every `cache_control` marker, and join adjacent same-role messages, so the user prompt and the runtime context that follows it reach the model as one user message with both text blocks.
 

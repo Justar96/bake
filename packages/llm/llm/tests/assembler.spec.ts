@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { BlockAssembler, ToolCallId, type StreamChunk } from '@deepseek-ai/dsh-llm'
+import { BlockAssembler, ToolCallId, type StreamChunk } from 'bake-llm'
 
 describe('BlockAssembler', () => {
   it('assembles interleaved text, reasoning, and tool-call deltas', () => {

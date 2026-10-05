@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { ToolCallId } from '@deepseek-ai/dsh-llm'
+import { ToolCallId } from 'bake-llm'
 import { SESSION_FORMAT_VERSION, Session, SessionId } from 'bake-session'
 import AgentRegistry from 'bake-agent'
 import type { Agent } from 'bake-agent'
-import TerminalSessionService from '@deepseek-ai/dsh-terminal'
+import TerminalSessionService from 'bake-terminal'
 import type {
   TerminalBackend,
   TerminalBackendSession,
@@ -14,10 +14,10 @@ import type {
   TerminalSessionStatus,
   TerminalSignal,
   TerminalWaitReason,
-} from '@deepseek-ai/dsh-terminal'
+} from 'bake-terminal'
 import SystemPrompt from 'bake-system-prompt'
 import ToolRuntime from 'bake-tools'
-import * as ToolBashPersistent from '@deepseek-ai/dsh-tool-bash-persistent'
+import * as ToolBashPersistent from 'bake-tool-bash-persistent'
 import { unsupportedInbox } from 'bake-agent-loop-testkit'
 
 const contexts: Context[] = []

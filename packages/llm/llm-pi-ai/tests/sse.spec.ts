@@ -1,6 +1,6 @@
 /** Proxy framing through the installed parser, SDK, and Harness adapter. */
 import { afterEach, describe, expect, it } from 'vitest'
-import { createUserMessage, type StreamChunk } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, type StreamChunk } from 'bake-llm'
 import { normalizeAnthropicSse, normalizeOpenAiSse } from '../src/sse.ts'
 import { PiAiAdapter } from '../src/adapter.ts'
 import { resolveProfiles } from '../src/config.ts'

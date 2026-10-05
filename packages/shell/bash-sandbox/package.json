@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-bash-sandbox",
+  "name": "bake-bash-sandbox",
   "description": "Sandbox-consuming implementation of the DeepSeek Harness bash executor seam (confines every command via ctx.sandbox, reports denial/enforcement result facts)",
   "version": "0.1.6-alpha.2",
   "publishConfig": {
@@ -28,20 +28,20 @@
   "license": "MIT",
   "peerDependencies": {
     "bake-shell": "workspace:^",
-    "@deepseek-ai/dsh-bash-local": "workspace:^",
+    "bake-bash-local": "workspace:^",
     "bake-sandbox": "workspace:^",
-    "@deepseek-ai/dsh-sandbox-policy": "workspace:^",
+    "bake-sandbox-policy": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   },
   "devDependencies": {
     "bake-shell": "workspace:^",
-    "@deepseek-ai/dsh-bash-local": "workspace:^",
-    "@deepseek-ai/dsh-subprocess-local": "workspace:^",
+    "bake-bash-local": "workspace:^",
+    "bake-subprocess-local": "workspace:^",
     "bake-sandbox": "workspace:^",
-    "@deepseek-ai/dsh-sandbox-local": "workspace:^",
-    "@deepseek-ai/dsh-sandbox-policy": "workspace:^",
+    "bake-sandbox-local": "workspace:^",
+    "bake-sandbox-policy": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^",
     "@deepseek-ai/node-addon-system": "workspace:^",
-    "@deepseek-ai/dsh-session-projection": "workspace:^"
+    "bake-session-projection": "workspace:^"
   }
 }

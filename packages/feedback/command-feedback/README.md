@@ -3,11 +3,11 @@ description: "Session feedback: the `/feedback` command, the `sessionFeedback` H
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-command-feedback
+# bake-command-feedback
 
 ## Summary
 
-`dsh-command-feedback` lets a user tell the harness what they think of a session. Typing `/feedback` plus a remark records it and acknowledges the session and anonymous user ids; an integration can record a category and an optional description through the `sessionFeedback` Host Remote. Recording is immediate and never starts model work: the model neither sees the remark nor is interrupted by it. The package also owns the fixed category taxonomy every feedback surface files under. It ships with the standard `dsh` base and needs no configuration; the headless and desktop entry points provide no slash commands.
+`bake-command-feedback` lets a user tell the harness what they think of a session. Typing `/feedback` plus a remark records it and acknowledges the session and anonymous user ids; an integration can record a category and an optional description through the `sessionFeedback` Host Remote. Recording is immediate and never starts model work: the model neither sees the remark nor is interrupted by it. The package also owns the fixed category taxonomy every feedback surface files under. It ships with the standard `dsh` base and needs no configuration; the headless and desktop entry points provide no slash commands.
 
 ## Table of Contents
 
@@ -61,9 +61,9 @@ Feedback does not have to come from the slash command: any UI, hook, or host int
 - id: session
   name: 'bake-session'
 - id: commands
-  name: '@deepseek-ai/dsh-commands'
+  name: 'bake-commands'
 - id: command-feedback
-  name: '@deepseek-ai/dsh-command-feedback'
+  name: 'bake-command-feedback'
 ```
 
 The terminal app ships the command. Headless and desktop runs provide no slash commands, so `/feedback` is unavailable there.
@@ -101,7 +101,7 @@ The producer trims the text, records blank text as absent, and writes one event 
 
 Read these pages when the package-level contract is not enough. They cover the command registry, persistence, and identity facts this capture path relies on.
 
-- [dsh-commands](../../interaction/commands/README.md) — the registry that discovers the global command and its `recordInput` semantics.
+- [bake-commands](../../interaction/commands/README.md) — the registry that discovers the global command and its `recordInput` semantics.
 - [Session persistence subsystem](../../../docs/subsystems/persistence.md) — how appended events become durable and what a flush barrier means.
 - [Anonymous user identity](../../identity/anonymous-user-id/README.md) — the id the acknowledgement reports.
 - [Feedback package map](../README.md) — the feedback group this package belongs to.

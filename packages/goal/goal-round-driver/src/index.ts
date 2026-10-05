@@ -1,15 +1,15 @@
 /**
  * Same-session goal-round driver over public agent, session, and goal services.
- * @module @deepseek-ai/dsh-goal-round-driver
+ * @module bake-goal-round-driver
  */
 
 import { isDeepStrictEqual } from 'node:util'
 import { FiberState } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, PreStepDecision } from 'bake-agent'
-import type { GoalMessageSource, GoalRef, GoalView } from '@deepseek-ai/dsh-goal'
-import { createUserMessage, lastAssistantStreamChunk } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock, MessageId, MessageSource } from '@deepseek-ai/dsh-llm'
+import type { GoalMessageSource, GoalRef, GoalView } from 'bake-goal'
+import { createUserMessage, lastAssistantStreamChunk } from 'bake-llm'
+import type { ContentBlock, MessageId, MessageSource } from 'bake-llm'
 import type { Session, SessionEvent, UserMessage } from 'bake-session'
 import { renderGoalRoundPrompt } from './prompt.ts'
 

@@ -11,10 +11,10 @@ import type {
 } from '@earendil-works/pi-mcp'
 import { InMemoryTransport, McpServer } from '@modelcontextprotocol/server'
 import { serveStdio } from '@modelcontextprotocol/server/stdio'
-import { ToolCallId } from '@deepseek-ai/dsh-llm'
+import { ToolCallId } from 'bake-llm'
 import SystemPrompt from 'bake-system-prompt'
 import ToolRuntime from 'bake-tools'
-import McpResources from '@deepseek-ai/dsh-mcp-resources'
+import McpResources from 'bake-mcp-resources'
 import { startConnection, resolveReconnectPolicy } from '../src/connection.ts'
 import type { Config } from '../src/index.ts'
 

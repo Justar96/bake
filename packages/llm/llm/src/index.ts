@@ -3,7 +3,7 @@
  * API. Exports the `LlmRuntime` default, the abstract `LlmAdapter` for
  * provider backends, and `BlockAssembler` for chunk assembly.
  *
- * @module @deepseek-ai/dsh-llm
+ * @module bake-llm
  */
 
 import { Context } from '@deepseek-ai/cordis'
@@ -1014,7 +1014,7 @@ export class LlmRuntime extends TypertRemoteService {
       return undefined
     }
     if (hostPath === undefined) return undefined
-    // Structural face: dsh-llm cannot depend on the filesystem package, and
+    // Structural face: bake-llm cannot depend on the filesystem package, and
     // only this one mapping method is consumed.
     const fs = this.ctx.get('fs') as { processPathFromHostPath(hostPath: string): string | undefined } | undefined
     return fs?.processPathFromHostPath(hostPath)

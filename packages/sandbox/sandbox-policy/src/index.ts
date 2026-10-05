@@ -17,7 +17,7 @@
  * reads session state once at each operation boundary; executors and providers
  * remain session-free.
  *
- * @module @deepseek-ai/dsh-sandbox-policy
+ * @module bake-sandbox-policy
  */
 
 import { isAbsolute } from 'node:path'
@@ -27,7 +27,7 @@ import z from '@deepseek-ai/schemastery'
 import type {} from 'bake-agent'
 import type { SandboxExecutionPolicy, SandboxMode } from 'bake-sandbox'
 import type { Session } from 'bake-session'
-import type {} from '@deepseek-ai/dsh-session-projection'
+import type {} from 'bake-session-projection'
 import type {} from 'bake-system-prompt'
 
 export { SANDBOX_MODES, setSandboxMode } from './session-mode.ts'
@@ -94,7 +94,7 @@ const sandboxModeStateSchema = zod.union([
 ]).nullable()
 
 type SandboxModeState = zod.infer<typeof sandboxModeStateSchema>
-declare module '@deepseek-ai/dsh-session-projection/types' {
+declare module 'bake-session-projection/types' {
   interface SessionProjectionStateMap {
     /** Last logged sandbox-mode override, or null before one (deployment default applies at resolve time). */
     sandboxMode: SandboxModeState

@@ -8,15 +8,15 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { AnonymousEntries, NamedEntries, ScopedLayers, scopeOf, scopeTarget } from 'bake-scope'
 import type { ScopeKey, ScopeLayer, Scoped } from 'bake-scope'
-import type { ToolCallId, ContentBlock, ToolSchema } from '@deepseek-ai/dsh-llm'
-import { HarnessError } from '@deepseek-ai/dsh-llm'
+import type { ToolCallId, ContentBlock, ToolSchema } from 'bake-llm'
+import { HarnessError } from 'bake-llm'
 import type { Agent, ToolProgress } from 'bake-agent'
 import type { UserMessage } from 'bake-session'
 import { assertNever, deepFreeze, snapshotJsonValue, type JsonValue } from 'bake-util-values'
-import type {} from '@deepseek-ai/dsh-sandbox-policy'
+import type {} from 'bake-sandbox-policy'
 // Type-only: makes `ctx.get('approval')` resolve to the ApprovalService
 // augmentation. The seam stays optional at runtime — see `serviceAsk`.
-import type {} from '@deepseek-ai/dsh-user-approval'
+import type {} from 'bake-user-approval'
 import type { ToolCallView, ToolResultView } from './presentation.ts'
 import { assertSupportedJsonSchema, validateJsonSchemaValue } from './json-schema.ts'
 import type { JsonSchemaNode } from './json-schema.ts'
@@ -225,7 +225,7 @@ export interface ToolDefinition extends ToolSchema {
   finalizeContent?(exec: Readonly<ToolExecution>, result: Readonly<ToolExecutionResult>): ContentBlock[] | undefined
   /**
    * Cooperative tool-call timeout budget in milliseconds. Omit for no deadline.
-   * Enforced by `@deepseek-ai/dsh-tool-call-timeout-policy` (a `tools/execute` wrapper); it
+   * Enforced by `bake-tool-call-timeout-policy` (a `tools/execute` wrapper); it
    * is NEVER sent to the model — `schemas()` whitelists only name/description/
    * parameters. Declaring it asserts this tool forwards `exec.signal` to a
    * cooperative implementation that can reach quiescence when the signal aborts.

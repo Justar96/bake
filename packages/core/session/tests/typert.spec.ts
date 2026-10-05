@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import SessionStore, { SessionId } from 'bake-session'
-import TypertRegistry from '@deepseek-ai/dsh-typert-registry'
+import TypertRegistry from 'bake-typert-registry'
 
 describe('Session Typert provider', () => {
   it('contributes live Session lookup in either service load order', async () => {

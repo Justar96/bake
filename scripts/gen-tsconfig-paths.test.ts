@@ -28,7 +28,7 @@ describe('generated tsconfig package aliases', () => {
     // Only packages named after their directory: the rest carry hand-written
     // aliases, because the removed wildcards could never have resolved them.
     expect(aliases.some(alias => alias.specifier === 'bake-typert-protocol')).toBe(false)
-    expect(aliases.some(alias => alias.specifier === '@deepseek-ai/dsh-llm')).toBe(true)
+    expect(aliases.some(alias => alias.specifier === 'bake-llm')).toBe(true)
   })
 
   it('yields to a hand-written alias and closes without a trailing comma', () => {
@@ -86,12 +86,12 @@ describe('generated tsconfig package aliases', () => {
     const config = [
       '      "bake-session": ["./packages/core/session/src"],',
       '      "bake-session/invariant": ["./packages/core/session/src/invariant.ts"],',
-      '      "@deepseek-ai/dsh-llm": ["./packages/llm/llm/src"],',
-      '      "@deepseek-ai/dsh-llm/invariant": ["./packages/llm/llm/src/invariant.ts"],',
+      '      "bake-llm": ["./packages/llm/llm/src"],',
+      '      "bake-llm/invariant": ["./packages/llm/llm/src/invariant.ts"],',
       '      "other-package": ["./other/src"]',
     ].join('\n')
 
-    expect(mappedSpecifiers(config)).toEqual(new Set(['bake-session', '@deepseek-ai/dsh-llm']))
+    expect(mappedSpecifiers(config)).toEqual(new Set(['bake-session', 'bake-llm']))
     expect(uncoveredPackages(['bake-session', 'bake-unmapped'], mappedSpecifiers(config)))
       .toEqual(['bake-unmapped'])
   })
@@ -100,7 +100,7 @@ describe('generated tsconfig package aliases', () => {
     const lines = [
       '      "bake-session": ["./packages/core/session/src"],',
       '      "bake-missing": ["./packages/core/session/src/absent-alias-test"],',
-      '      "@deepseek-ai/dsh-llm": ["./packages/llm/llm/src"],',
+      '      "bake-llm": ["./packages/llm/llm/src"],',
       '      "@deepseek-ai/dsh-missing": ["./packages/llm/llm/src/absent-alias-test"],',
       '      "bake-session/*": ["./packages/core/session/src/*"],',
       '      "bake-fallback": ["./absent-alias-test", "./packages/core/session/src"],',

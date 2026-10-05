@@ -1,4 +1,4 @@
-import { ToolCallId, createUserMessage, expandAssistantStream } from '@deepseek-ai/dsh-llm'
+import { ToolCallId, createUserMessage, expandAssistantStream } from 'bake-llm'
 /**
  * Tests for the queue-aware `Agent.cancel()` primitive. The default clears
  * queued and steering work, while `keepInbox` preserves pending input for a
@@ -10,13 +10,13 @@ import { ToolCallId, createUserMessage, expandAssistantStream } from '@deepseek-
 
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import LlmRuntime from '@deepseek-ai/dsh-llm'
+import LlmRuntime from 'bake-llm'
 import SessionStore, { Session, SessionId, SessionLogOffset, TurnEndReason } from 'bake-session'
 import SystemPrompt from 'bake-system-prompt'
 import ToolRuntime, { defineContentToolFixture, TOOL_ABORTED_BEFORE_DISPATCH } from 'bake-tools'
 import AgentRegistry, { type Agent, type AgentCancelCause } from 'bake-agent'
 import AgentLoop from 'bake-agent-loop'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
+import SessionProjectionRegistry from 'bake-session-projection'
 import { MockAdapter, textResponse, toolCallResponse } from './mock-adapter.ts'
 
 function driverDone(agent: Agent): Promise<void> {
@@ -695,7 +695,7 @@ describe('Agent.cancel()', () => {
     const ctx = await harness(adapter)
     const agent = await ctx.agentLoop.create(SessionId('recovery-cancel'), { provider: 'mock', model: 'mock' })
     // Cancellation lands while agent/request-error is in flight — the window
-    // dsh-llm-retry opens when its backoff waits after appending llm/retry.
+    // bake-llm-retry opens when its backoff waits after appending llm/retry.
     ctx.on('agent/request-error', async ({ agent: subject }) => {
       if (subject === agent) subject.cancel({ kind: 'user' })
     })

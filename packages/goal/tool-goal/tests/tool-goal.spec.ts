@@ -4,21 +4,21 @@ import Loader from '@deepseek-ai/cordis-plugin-loader'
 import AgentRegistry, { agentEvents } from 'bake-agent'
 import type { Agent, AgentStatus, Inbox } from 'bake-agent'
 import { turnBoundaryProjectionDefinition } from 'bake-agent-loop'
-import GoalService, { GoalId } from '@deepseek-ai/dsh-goal'
-import type { GoalRef } from '@deepseek-ai/dsh-goal'
-import { createUserMessage, ToolCallId } from '@deepseek-ai/dsh-llm'
-import type { MessageSource } from '@deepseek-ai/dsh-llm'
+import GoalService, { GoalId } from 'bake-goal'
+import type { GoalRef } from 'bake-goal'
+import { createUserMessage, ToolCallId } from 'bake-llm'
+import type { MessageSource } from 'bake-llm'
 import SessionStore, {
   SESSION_FORMAT_VERSION,
   Session,
   SessionId,
   SessionLogOffset,
 } from 'bake-session'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
+import SessionProjectionRegistry from 'bake-session-projection'
 import SystemPrompt from 'bake-system-prompt'
 import ToolRuntime from 'bake-tools'
 import type { ToolExecutionResult } from 'bake-tools'
-import * as toolGoal from '@deepseek-ai/dsh-tool-goal'
+import * as toolGoal from 'bake-tool-goal'
 import { createInboxStub } from 'bake-agent-loop-testkit'
 
 const testToolSignal = new AbortController().signal

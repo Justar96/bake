@@ -4,12 +4,12 @@
  * vocabulary and pi-ai's `AuthInteraction`; nothing above it knows which
  * library ran the conversation.
  *
- * @module dsh-llm-pi-ai/login
+ * @module bake-llm-pi-ai/login
  */
 
 import type { AuthEvent, AuthPrompt, AuthType, Provider } from '@earendil-works/pi-ai'
 import type { Context } from '@deepseek-ai/cordis'
-import type { AuthorizationMethod, AuthorizationPrompt, AuthorizationSession } from '@deepseek-ai/dsh-authorization'
+import type { AuthorizationMethod, AuthorizationPrompt, AuthorizationSession } from 'bake-authorization'
 import { isCredentialKeySegment } from 'bake-credentials'
 import { catalogProvider, catalogProviderIds } from './catalog.ts'
 import { recordKeyFor } from './auth.ts'

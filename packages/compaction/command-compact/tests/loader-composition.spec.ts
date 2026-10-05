@@ -7,7 +7,7 @@ import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
 import type { Agent } from 'bake-agent'
-import CommandRuntime from '@deepseek-ai/dsh-commands'
+import CommandRuntime from 'bake-commands'
 import {
   CompactionId,
   CompactionEngine,
@@ -16,7 +16,7 @@ import {
   type CompactionTrigger,
   type ManualCompactAgentContext,
 } from 'bake-compaction'
-import * as commandCompact from '@deepseek-ai/dsh-command-compact'
+import * as commandCompact from 'bake-command-compact'
 import { Session, SessionId, SessionSeq } from 'bake-session'
 
 const COMPACTION_ID = CompactionId('loader-command-compact-test')
@@ -84,9 +84,9 @@ describe('command-compact real Loader composition', () => {
     root = await mkdtemp(join(tmpdir(), 'dsh-command-compact-loader-'))
     const configPath = join(root, 'cordis.yml')
     await writeFile(configPath, [
-      "- name: '@deepseek-ai/dsh-commands'",
+      "- name: 'bake-commands'",
       "- name: '@test/compact-backend'",
-      "- name: '@deepseek-ai/dsh-command-compact'",
+      "- name: 'bake-command-compact'",
       '',
     ].join('\n'))
 
@@ -95,9 +95,9 @@ describe('command-compact real Loader composition', () => {
     await context.plugin(Loader)
     context.loader.builtins.include = Include
     const modules = new Map<string, unknown>([
-      ['@deepseek-ai/dsh-commands', CommandRuntime],
+      ['bake-commands', CommandRuntime],
       ['@test/compact-backend', LoaderCompactionEngine],
-      ['@deepseek-ai/dsh-command-compact', commandCompact],
+      ['bake-command-compact', commandCompact],
     ])
     context.loader.internal = {
       version: 'v2',

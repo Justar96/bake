@@ -3,12 +3,12 @@
  * row both the listing and the browser catalog answer with, plus the
  * browser-facing control surface's prompt, receipts, and failures.
  *
- * @module @deepseek-ai/dsh-subagent/control-types
+ * @module bake-subagent/control-types
  */
 
 import type { PromptContentPart } from 'bake-attachment/types'
 import type { Branded } from 'bake-brand'
-import type { MessageId } from '@deepseek-ai/dsh-llm/brand'
+import type { MessageId } from 'bake-llm/brand'
 import type { SessionId } from 'bake-session/types'
 
 /**

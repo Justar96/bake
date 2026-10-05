@@ -1,7 +1,7 @@
 /**
  * Concrete session-query service with SQLite FTS5 over the live-preferred corpus.
  *
- * @module @deepseek-ai/dsh-session-query-sqlite
+ * @module bake-session-query-sqlite
  */
 
 import { createHash, randomUUID } from 'node:crypto'

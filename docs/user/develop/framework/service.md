@@ -117,7 +117,7 @@ This prevents a plugin from calling a service that no longer exists.
   isolate:
     shell: true
   config:
-    - name: '@deepseek-ai/dsh-bash-local'
+    - name: 'bake-bash-local'
       config:
         timeoutMs: 5000
     - name: './src/plugin-a.ts'
@@ -128,7 +128,7 @@ This prevents a plugin from calling a service that no longer exists.
   isolate:
     shell: true
   config:
-    - name: '@deepseek-ai/dsh-bash-local'
+    - name: 'bake-bash-local'
       config:
         timeoutMs: 60000
     - name: './src/plugin-b.ts'

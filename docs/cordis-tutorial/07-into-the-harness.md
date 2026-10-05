@@ -10,7 +10,7 @@ Create `greet-tool.ts` in `tmp/cordis-tutorial`:
 import type { Context } from '@deepseek-ai/cordis'
 import { brandString } from 'bake-brand'
 import { defineTool } from 'bake-tools'
-import type { ToolCallId } from '@deepseek-ai/dsh-llm'
+import type { ToolCallId } from 'bake-llm'
 
 export const name = 'greet-tool'
 export const inject = ['tools']

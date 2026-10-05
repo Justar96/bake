@@ -3,7 +3,7 @@
  * events in immutable generation files under one directory per session and serves the handle-based
  * `SessionPersistence` API: `create`/`open` return per-session handles, and
  * every read validates the same fail-closed storage contract.
- * @module @deepseek-ai/dsh-session-persistence-jsonl
+ * @module bake-session-persistence-jsonl
  */
 
 import { Context } from '@deepseek-ai/cordis'

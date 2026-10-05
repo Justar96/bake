@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Agent } from 'bake-agent'
-import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import { ReasoningEffortId } from 'bake-llm'
 import { Session, SessionId } from 'bake-session'
 import { resolveChildAgentOptions } from '../src/child-agent.ts'
 

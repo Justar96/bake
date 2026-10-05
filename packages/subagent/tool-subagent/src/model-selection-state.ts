@@ -2,8 +2,8 @@
 
 import { z as zod } from 'zod'
 import type { Session } from 'bake-session'
-import type SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
+import type SessionProjectionRegistry from 'bake-session-projection'
+import type { ProjectionDefinition } from 'bake-session-projection'
 import { assertAllowedModelRoutes, type AllowedModelRoute } from './model-selection.ts'
 
 declare module 'bake-session/types' {
@@ -21,7 +21,7 @@ declare module 'bake-session/types' {
   }
 }
 
-declare module '@deepseek-ai/dsh-session-projection/types' {
+declare module 'bake-session-projection/types' {
   interface SessionProjectionStateMap {
     /** Exact routes authorized for child LLM selection, or null when disabled. */
     subagentModelSelectionPolicy: AllowedModelRoute[] | null

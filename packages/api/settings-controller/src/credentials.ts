@@ -123,7 +123,7 @@ export class CredentialsController extends TypertRemoteService {
     if (credentials === undefined) {
       throw new RemoteError(
         'gateway/internal',
-        'credentials service is absent: this deployment does not mount a credential provider (e.g. @deepseek-ai/dsh-credentials-local) in its composition',
+        'credentials service is absent: this deployment does not mount a credential provider (e.g. bake-credentials-local) in its composition',
         {},
       )
     }

@@ -1,9 +1,9 @@
 /** Slash discovery and dispatch use the same scoped services as Harness clients. */
 import { afterEach, expect, it, vi } from 'vitest'
-import Skills, { type SkillCandidate } from '@deepseek-ai/dsh-skill'
-import * as ToolSkill from '@deepseek-ai/dsh-tool-skill'
-import Goals from '@deepseek-ai/dsh-goal'
-import * as CommandGoal from '@deepseek-ai/dsh-command-goal'
+import Skills, { type SkillCandidate } from 'bake-skill'
+import * as ToolSkill from 'bake-tool-skill'
+import Goals from 'bake-goal'
+import * as CommandGoal from 'bake-command-goal'
 import { SessionId } from 'bake-session'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'
 import { SessionController } from '../src/controller.ts'

@@ -2,15 +2,15 @@ import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { scopeTarget } from 'bake-scope'
 import { SessionId } from 'bake-session'
-import SubagentRuntime, { SubagentRunId } from '@deepseek-ai/dsh-subagent'
+import SubagentRuntime, { SubagentRunId } from 'bake-subagent'
 import type {
   SubagentProvider,
   SubagentRunEndInfo,
   SubagentRunInfo,
-} from '@deepseek-ai/dsh-subagent'
-import * as SubagentInvariant from '@deepseek-ai/dsh-subagent/invariant'
+} from 'bake-subagent'
+import * as SubagentInvariant from 'bake-subagent/invariant'
 import InvariantRegistry from 'bake-invariants'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
+import SessionProjectionRegistry from 'bake-session-projection'
 
 async function setup(): Promise<Context> {
   const ctx = new Context()

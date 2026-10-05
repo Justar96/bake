@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import SessionStore, { SessionId, type Session } from 'bake-session'
-import { createUserMessage, ProviderRequestId } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, ProviderRequestId } from 'bake-llm'
 import { MAX_TIMER_DELAY_MS } from 'bake-timeout'
 import InvariantRegistry from 'bake-invariants'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
+import SessionProjectionRegistry from 'bake-session-projection'
 import AgentRegistry from 'bake-agent'
-import * as RetryInvariant from '@deepseek-ai/dsh-llm-retry/invariant'
+import * as RetryInvariant from 'bake-llm-retry/invariant'
 import * as retry from '../src/index.ts'
-import { RetryId } from '@deepseek-ai/dsh-llm-retry'
+import { RetryId } from 'bake-llm-retry'
 import { providerForOpenStep } from '../src/history.ts'
 
 async function setup(): Promise<Context> {

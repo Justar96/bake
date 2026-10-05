@@ -3,11 +3,11 @@ description: "The session-projection registry for developers serving whole curre
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-session-projection
+# bake-session-projection
 
 ## Summary
 
-Use `dsh-session-projection` when clients need current per-session state—such as goals, permissions, or conversation statistics—without replaying the raw event log. Domains define synchronous projections from committed session events, and clients receive complete, schema-validated JSON values through snapshots and change notifications. Snapshots identify the last event reflected by every returned value, so carriers can pair state with the matching history cut. Projection state can be checkpointed for faster cold reads, while host-only projections remain private to the host.
+Use `bake-session-projection` when clients need current per-session state—such as goals, permissions, or conversation statistics—without replaying the raw event log. Domains define synchronous projections from committed session events, and clients receive complete, schema-validated JSON values through snapshots and change notifications. Snapshots identify the last event reflected by every returned value, so carriers can pair state with the matching history cut. Projection state can be checkpointed for faster cold reads, while host-only projections remain private to the host.
 
 ## Table of Contents
 
@@ -23,7 +23,7 @@ Use `dsh-session-projection` when clients need current per-session state—such 
 <a id="use-this-package"></a>
 ## Use this package
 
-Mount `dsh-session-projection` wherever client carriers need current values of log-derived session state. Domain plugins register units; carriers read snapshots and subscribe to the change feed; neither knows the other.
+Mount `bake-session-projection` wherever client carriers need current values of log-derived session state. Domain plugins register units; carriers read snapshots and subscribe to the change feed; neither knows the other.
 
 ### When to choose it
 
@@ -126,7 +126,7 @@ These limits define where the projection registry needs care at scale. They are 
 - **Every tail page carries every client-visible key** — there is no per-key opt-out or lazy-key request shape yet; acceptable while values are UI-scale whole states, revisit if a domain's value grows large.
 - **The unit table is process-wide, so key presence is not a per-session capability signal** — a key registered by any agent preset appears in every session's snapshot; a client must read the value rather than treat an absent key as absence of the feature.
 - **Eager drive touches every unit per event** — cheap by construction (whole-value rule and state/view reference gates), but a hot path would justify per-unit event-type prefilters.
-- **Registry cells live in memory only** — a restart rebuilds by folding the log on first touch; compositions that mount `dsh-session-projection-cache` seed that fold from persisted rows instead.
+- **Registry cells live in memory only** — a restart rebuilds by folding the log on first touch; compositions that mount `bake-session-projection-cache` seed that fold from persisted rows instead.
 - **Synchronous unit discipline is only partially mechanical** — `wire.viewSchema.parse` rejects a Promise-returning view, but an `apply` that blocks or reads torn non-session state is a review concern.
 
 <a id="dev-note"></a>

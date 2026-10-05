@@ -8,7 +8,7 @@
  */
 
 import type { ScopeKey } from 'bake-scope'
-import type { ToolSchema } from '@deepseek-ai/dsh-llm'
+import type { ToolSchema } from 'bake-llm'
 import { snapshotJsonValue } from 'bake-util-values'
 import type { PromptSection, ToolProviderResult } from 'bake-system-prompt'
 import type { PtcRuntime } from 'bake-ptc-runtime'
@@ -200,7 +200,7 @@ export function wireSchemas(source: SchemaPresentationSource, scope?: ScopeKey):
  */
 export function requirePtcRuntime(runtime: PtcRuntime | undefined, mode: ToolPresentationMode): PtcRuntime {
   if (!runtime) {
-    throw new Error(`dsh-tools: mode "${mode}" requires a PTC runtime — load a ctx.ptcRuntime implementation (e.g. @deepseek-ai/dsh-ptc-runtime-codemode) or set tools mode to "native"`)
+    throw new Error(`dsh-tools: mode "${mode}" requires a PTC runtime — load a ctx.ptcRuntime implementation (e.g. bake-ptc-runtime-codemode) or set tools mode to "native"`)
   }
   if (!Object.hasOwn(SDK_RENDERERS, runtime.language)) {
     const known = Object.keys(SDK_RENDERERS).map(name => JSON.stringify(name)).join(', ')

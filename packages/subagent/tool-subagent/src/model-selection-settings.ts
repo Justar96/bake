@@ -3,7 +3,7 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type {} from 'bake-settings'
-import type { LlmRuntime } from '@deepseek-ai/dsh-llm'
+import type { LlmRuntime } from 'bake-llm'
 import { credentialRef, isCredentialRefName, type CredentialProvider } from 'bake-credentials'
 import {
   describeRoutes,

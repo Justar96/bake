@@ -4,20 +4,20 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
-import { createLaunchEnvironmentSnapshot } from '@deepseek-ai/dsh-launch-environment'
+import { createLaunchEnvironmentSnapshot } from 'bake-launch-environment'
 import {
   boot, composeEntries, createProfileResolutionGeneration, healIsolatedProfileModuleFallback,
   PluginPackages, type Profile,
-} from '@deepseek-ai/dsh-app-boot'
-import { installProxyFromEnvironment } from '@deepseek-ai/dsh-http-proxy'
-import type { AppRejection } from '@deepseek-ai/dsh-cmdline'
+} from 'bake-app-boot'
+import { installProxyFromEnvironment } from 'bake-http-proxy'
+import type { AppRejection } from 'bake-cmdline'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { runProfile } from '../src/profile-boot.ts'
 
 // The process guard stays out of the test process; its readiness switch is observed instead.
 const failLoud = vi.hoisted(() => ({ tolerateRejections: vi.fn() }))
-vi.mock('@deepseek-ai/dsh-app-boot', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@deepseek-ai/dsh-app-boot')>()
+vi.mock('bake-app-boot', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('bake-app-boot')>()
   return {
     ...actual,
     boot: vi.fn(),
@@ -26,7 +26,7 @@ vi.mock('@deepseek-ai/dsh-app-boot', async (importOriginal) => {
     installFailLoud: vi.fn(() => Object.assign(() => {}, failLoud)),
   }
 })
-vi.mock('@deepseek-ai/dsh-http-proxy', () => ({ installProxyFromEnvironment: vi.fn() }))
+vi.mock('bake-http-proxy', () => ({ installProxyFromEnvironment: vi.fn() }))
 
 const homes: string[] = []
 afterEach(() => {

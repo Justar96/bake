@@ -98,7 +98,7 @@ export abstract class FileSystem extends Service {
    * `undefined` when it does not confine at all — the capability fact the tool
    * layer reads to advertise the escalation fields honestly (mirrors
    * `ShellExecutor.sandboxMode`). The base class and the bare local backend
-   * report `undefined`; a sandboxing backend (`@deepseek-ai/dsh-fs-sandbox`)
+   * report `undefined`; a sandboxing backend (`bake-fs-sandbox`)
    * overrides it with the deployment default. A session override may make the
    * effective mode narrower or wider, so strict escalation widening is checked
    * per call rather than encoded in this default-relative fact.

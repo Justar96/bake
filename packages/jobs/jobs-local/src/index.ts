@@ -6,7 +6,7 @@
  * Registrations outlive producer and controller fibers. Agent or service
  * disposal cancels live work and awaits compliant producers; a throwing
  * teardown cancel force-fails only the record and reports a possible orphan.
- * @module @deepseek-ai/dsh-jobs-local
+ * @module bake-jobs-local
  */
 
 import { Context } from '@deepseek-ai/cordis'

@@ -1,7 +1,7 @@
 /** Model choices commit atomically through the live Harness selection reference. */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ModelSelectionRef } from 'bake-agent'
-import { ReasoningEffortId, type LlmResolvedModelInfo } from '@deepseek-ai/dsh-llm'
+import { ReasoningEffortId, type LlmResolvedModelInfo } from 'bake-llm'
 import { formatRow, transcriptRows } from '@dsh-tui/ui'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'
 import { openSession } from '../src/session.ts'

@@ -34,12 +34,12 @@ Use a credential store whenever configuration must stay free of secret values: s
 Load the local store package with a document path:
 
 ```yaml
-- name: '@deepseek-ai/dsh-credentials-local'
+- name: 'bake-credentials-local'
   config:
     path: /absolute/path/to/.credentials.yaml
 ```
 
-The local store README owns the full configuration surface; the generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-credentials-local) is the exhaustive field list.
+The local store README owns the full configuration surface; the generated [configuration catalog](../../../docs/config-catalog.md#bake-credentials-local) is the exhaustive field list.
 
 ### Storing, checking, and removing keys
 

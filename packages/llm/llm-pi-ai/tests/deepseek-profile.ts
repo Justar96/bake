@@ -8,7 +8,7 @@
 
 import { readFileSync } from 'node:fs'
 import * as yaml from 'js-yaml'
-import type { PiAiProviderProfile } from '@deepseek-ai/dsh-llm-pi-ai'
+import type { PiAiProviderProfile } from 'bake-llm-pi-ai'
 
 /**
  * The patch's Loader expressions are opaque here: only the `llm-pi-ai` row is

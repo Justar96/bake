@@ -10,9 +10,9 @@ import { expect, it, onTestFinished, vi } from 'vitest'
 import {
   boot, composeEntries, initProfile, readProfilePatches, readProfileManifest, reconcileProfilePatches,
   type ProfileContext,
-} from '@deepseek-ai/dsh-app-boot'
+} from 'bake-app-boot'
 import PluginManager, { type Config, type PluginChange, type PluginInstallLogChunk, type PluginInstallProgress, type PluginInstallRequestId } from '../src/index.ts'
-import Hmr from '@deepseek-ai/dsh-hmr'
+import Hmr from 'bake-hmr'
 import Timer from '@deepseek-ai/cordis-plugin-timer'
 import type { PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 import { Group } from '@deepseek-ai/cordis-plugin-loader'
@@ -356,7 +356,7 @@ it('refuses management bundle disablement and permits repeated bundle selections
 
 it.each([
   'bake-host-plugin-inventory',
-  '@deepseek-ai/dsh-typert-registry',
+  'bake-typert-registry',
   '@deepseek-ai/dsh-api-remotes',
 ])('protects the management dependency %s and its containing bundle', async (name) => {
   const { ctx, manager, bundle, profile, dir } = await fixture('startup')

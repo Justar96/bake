@@ -1,14 +1,14 @@
 /**
  * Generic-task adaptation for background pwsh process handles — the shell-agnostic
- * twin of `dsh-tool-bash`'s background adaptation.
+ * twin of `bake-tool-bash`'s background adaptation.
  *
- * @module @deepseek-ai/dsh-tool-pwsh/background
+ * @module bake-tool-pwsh/background
  */
 
 import type { ShellProcess } from 'bake-shell'
 import type { JobHooks, JobOutcome } from 'bake-jobs'
 
-/* jscpd:ignore-start -- deliberate twin of dsh-tool-bash/background.ts (Agent Note). */
+/* jscpd:ignore-start -- deliberate twin of bake-tool-bash/background.ts (Agent Note). */
 
 /**
  * Map a settled background process onto the generic task-outcome vocabulary:

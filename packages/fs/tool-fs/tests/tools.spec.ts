@@ -10,7 +10,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 import { turnBoundaryProjectionDefinition } from 'bake-agent-loop'
-import { ToolCallId } from '@deepseek-ai/dsh-llm'
+import { ToolCallId } from 'bake-llm'
 import SystemPrompt, { renderPrompt } from 'bake-system-prompt'
 import ToolRuntime, { type ToolResult } from 'bake-tools'
 import { FileSystem, FsError, FsTargetKey, FsVersion } from 'bake-fs'
@@ -25,17 +25,17 @@ import type {
   FsWriteIntent,
   FsWriteOutcome,
 } from 'bake-fs'
-import * as FsPolicy from '@deepseek-ai/dsh-fs-observation-policy'
-import * as ToolFs from '@deepseek-ai/dsh-tool-fs'
+import * as FsPolicy from 'bake-fs-observation-policy'
+import * as ToolFs from 'bake-tool-fs'
 import { STREAM_MIN_SIZE } from '../src/read.ts'
 import { formatReadOutput } from '../src/read-render.ts'
 import type { FileReadOutcome } from '../src/read-render.ts'
 import { sessionCwd } from '../src/session-cwd.ts'
-import ApprovalService from '@deepseek-ai/dsh-user-approval'
+import ApprovalService from 'bake-user-approval'
 import type { SandboxExecutionPolicy, SandboxMode } from 'bake-sandbox'
-import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
+import SandboxPolicyService from 'bake-sandbox-policy'
 import { SessionId, SessionLogOffset, SessionSeq } from 'bake-session'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
+import SessionProjectionRegistry from 'bake-session-projection'
 
 const testToolSignal = new AbortController().signal
 

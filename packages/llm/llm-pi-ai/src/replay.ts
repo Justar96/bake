@@ -5,11 +5,11 @@
  * module stores only the provider-native metadata needed to reconstruct a
  * pi-ai assistant message on a later request.
  *
- * @module dsh-llm-pi-ai/replay
+ * @module bake-llm-pi-ai/replay
  */
 
-import { LlmError } from '@deepseek-ai/dsh-llm'
-import type { Message, ModelMessageSource, ReplayEnvelope } from '@deepseek-ai/dsh-llm'
+import { LlmError } from 'bake-llm'
+import type { Message, ModelMessageSource, ReplayEnvelope } from 'bake-llm'
 import type { Api, AssistantMessage, JsonObject, Usage as PiUsage } from '@earendil-works/pi-ai'
 
 /** Per-block half of the pi-ai replay envelope, one entry per content block. */

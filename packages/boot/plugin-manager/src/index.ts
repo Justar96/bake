@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import { readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
-import { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
+import { withFileLock, writeFileAtomic } from 'bake-atomic-write'
 import { Context } from '@deepseek-ai/cordis'
 import type { EntryOptions } from '@deepseek-ai/cordis-plugin-loader'
 import type { PatchOptions } from '@deepseek-ai/cordis-plugin-include'
@@ -13,9 +13,9 @@ import { pluginEntryId, readPluginInventory } from 'bake-host-plugin-inventory'
 import {
   readProfileManifest, resolveBundleDir, loadOverlayPatches, composeEntries,
   reconcileProfilePatches, readProfilePatches, PROFILE_TEMPLATES, bundlePatchPaths,
-} from '@deepseek-ai/dsh-app-boot'
-import type {} from '@deepseek-ai/dsh-hmr'
-import type { ProfileContext, ProfileManifest } from '@deepseek-ai/dsh-app-boot'
+} from 'bake-app-boot'
+import type {} from 'bake-hmr'
+import type { ProfileContext, ProfileManifest } from 'bake-app-boot'
 import { bundleManifest, runProfilePnpm, saveManifest, viewProfilePackage } from './operations.ts'
 import { classifyInstallFailure } from './install-failure.ts'
 import { InvalidInstallSpecError, parseInstallSpec } from './install-spec.ts'
@@ -43,15 +43,15 @@ export interface Config {
 }
 
 const protectedModules = new Set([
-  '@deepseek-ai/dsh-plugin-manager', '@deepseek-ai/cordis-plugin-loader',
-  '@deepseek-ai/cordis-plugin-include', '@deepseek-ai/dsh-api-gateway',
+  'bake-plugin-manager', '@deepseek-ai/cordis-plugin-loader',
+  '@deepseek-ai/cordis-plugin-include', 'bake-api-gateway',
   'bake-host-webserver', '@deepseek-ai/dsh-client-modules',
   '@deepseek-ai/dsh-client-ui-settings-plugin-inventory', '@deepseek-ai/dsh-client-ui-plugin-manager',
-  'bake-host-plugin-inventory', '@deepseek-ai/dsh-typert-registry',
+  'bake-host-plugin-inventory', 'bake-typert-registry',
   '@deepseek-ai/dsh-api-remotes',
   '@deepseek-ai/cordis-plugin-timer', 'bake-client-connection',
   '@deepseek-ai/dsh-host-frontend-static', 'bake-tools',
-  '@deepseek-ai/dsh-hmr',
+  'bake-hmr',
 ])
 
 /** The profile files an installation writes and a failed or cancelled one restores. */

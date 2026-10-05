@@ -21,7 +21,7 @@ import { launchWindowsJob } from '../src/windows-job.ts'
 
 const repoRoot = resolve(import.meta.dirname, '../../../..')
 const sourceRunner = resolve(repoRoot, 'packages/subprocess/subprocess-local/src/bin.ts')
-const builtRunner = fileURLToPath(import.meta.resolve('@deepseek-ai/dsh-subprocess-local/runner'))
+const builtRunner = fileURLToPath(import.meta.resolve('bake-subprocess-local/runner'))
 
 function targetEnv(): Record<string, string> {
   return {

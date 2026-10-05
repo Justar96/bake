@@ -8,7 +8,7 @@ import ToolRuntime from 'bake-tools'
 import type { PreToolDecision, ToolDefinition, ToolExecution, ToolExecutionInput, ToolExecutionToken } from 'bake-tools'
 import type { Agent } from 'bake-agent'
 
-import { ToolCallId } from '@deepseek-ai/dsh-llm'
+import { ToolCallId } from 'bake-llm'
 import type { SessionId } from 'bake-session'
 
 const testToolSignal = new AbortController().signal

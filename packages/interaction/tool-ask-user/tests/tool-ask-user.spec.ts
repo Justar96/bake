@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { ToolCallId } from '@deepseek-ai/dsh-llm'
+import { ToolCallId } from 'bake-llm'
 import AgentRegistry, { type Agent } from 'bake-agent'
 import SystemPrompt from 'bake-system-prompt'
 import ToolRuntime from 'bake-tools'
 import UserQuestionService, {
   type AskUserQuestionAnswer,
   type AskUserQuestionRequest,
-} from '@deepseek-ai/dsh-user-questions'
-import * as toolAskUser from '@deepseek-ai/dsh-tool-ask-user'
+} from 'bake-user-questions'
+import * as toolAskUser from 'bake-tool-ask-user'
 
 const testToolSignal = new AbortController().signal
 

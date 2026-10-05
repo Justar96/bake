@@ -1,5 +1,5 @@
 /**
- * User patch-layer behavior of `dsh-app-boot`: the optional patch-list loader
+ * User patch-layer behavior of `bake-app-boot`: the optional patch-list loader
  * (a profile's `cordis.patch.yml`) and `boot()` applying the user layer over
  * a real Loader tree with live file watching.
  */
@@ -52,7 +52,7 @@ describe('loadOptionalPatches', () => {
       '    model: !!js process.env.DSH_SPEC_MODEL',
       '- insert:',
       '    - id: llm',
-      "      name: '@deepseek-ai/dsh-llm-pi-ai'",
+      "      name: 'bake-llm-pi-ai'",
       '',
     ].join('\n'))
     const patches = loadOptionalPatches(NAME, join(dir, PROFILE_PATCH_FILENAME))

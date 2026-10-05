@@ -11,7 +11,7 @@
  * @module dsh-tools/json-schema
  */
 
-import { HarnessError } from '@deepseek-ai/dsh-llm'
+import { HarnessError } from 'bake-llm'
 import {
   assertNever,
   hasPlainArrayPrototype,

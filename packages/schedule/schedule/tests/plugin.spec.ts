@@ -4,7 +4,7 @@ import Loader from '@deepseek-ai/cordis-plugin-loader'
 import { agentEvents } from 'bake-agent'
 import AgentLoop from 'bake-agent-loop'
 import { mountAgentLoopTestDependencies } from 'bake-agent-loop-testkit'
-import { ToolCallId } from '@deepseek-ai/dsh-llm'
+import { ToolCallId } from 'bake-llm'
 import { SessionLogOffset, SessionId } from 'bake-session'
 import type { SessionEvent, SessionHeader } from 'bake-session'
 import {

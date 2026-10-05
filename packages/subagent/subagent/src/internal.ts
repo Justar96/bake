@@ -1,11 +1,11 @@
 /**
  * Continuation integration markers and host adapters outside the public
  * Service Definition and model-facing Agent messaging contract.
- * @module @deepseek-ai/dsh-subagent/internal
+ * @module bake-subagent/internal
  */
 
 import type { Agent } from 'bake-agent'
-import type { ContentBlock, MessageId, MessageSource } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock, MessageId, MessageSource } from 'bake-llm'
 import type { SessionId } from 'bake-session'
 import type { ToolDefinition } from 'bake-tools'
 import type SubagentRuntime from './index.ts'

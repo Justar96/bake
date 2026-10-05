@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import SessionStore, { Session, SessionId, SessionSeq } from 'bake-session'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage } from 'bake-llm'
 import { CompactionId, compactCheckpointSource } from 'bake-compaction'
 import * as CompactionInvariant from 'bake-compaction/invariant'
-import { CommandId } from '@deepseek-ai/dsh-commands/brand'
+import { CommandId } from 'bake-commands/brand'
 import InvariantRegistry from 'bake-invariants'
 
 async function setup(): Promise<Context> {

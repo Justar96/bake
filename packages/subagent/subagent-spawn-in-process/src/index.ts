@@ -3,7 +3,7 @@
  * `ctx.subagents` that runs each child as a fresh child {@link Agent} on the same cordis
  * context (its own session, own system prompt, zero parent context). The cheapest transport,
  * reusing the agent factory's quiescent teardown.
- * @module @deepseek-ai/dsh-subagent-spawn-in-process
+ * @module bake-subagent-spawn-in-process
  */
 
 import type { Context } from '@deepseek-ai/cordis'
@@ -12,7 +12,7 @@ import type {
   ResolvedSubagentStartRequest,
   SubagentCapabilities,
   SubagentProvider,
-} from '@deepseek-ai/dsh-subagent'
+} from 'bake-subagent'
 import { startInProcessRun } from 'bake-subagent-in-process-driver'
 
 export const name = 'subagent-spawn-in-process'

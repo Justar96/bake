@@ -6,7 +6,7 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import type { ToolCallId } from '@deepseek-ai/dsh-llm'
+import type { ToolCallId } from 'bake-llm'
 import type { InvariantFailure, InvariantInstaller } from 'bake-invariants'
 import type { Session, SessionEvent, SessionSeqCursor } from 'bake-session'
 import { assertNever } from 'bake-util-values'

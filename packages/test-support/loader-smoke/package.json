@@ -33,16 +33,16 @@
   "peerDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
     "bake-agent": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
+    "bake-llm": "workspace:^",
     "bake-session": "workspace:^",
-    "@deepseek-ai/dsh-http-proxy": "workspace:^"
+    "bake-http-proxy": "workspace:^"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
     "bake-agent": "workspace:^",
-    "@deepseek-ai/dsh-app-boot": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
+    "bake-app-boot": "workspace:^",
+    "bake-llm": "workspace:^",
     "bake-session": "workspace:^",
-    "@deepseek-ai/dsh-http-proxy": "workspace:^"
+    "bake-http-proxy": "workspace:^"
   }
 }

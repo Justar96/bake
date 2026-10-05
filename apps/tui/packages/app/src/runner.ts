@@ -25,7 +25,7 @@ import { cliProxyModelsInUse, cliProxyUpgradeNotice, refreshCliProxyModels, upgr
 import type { CredentialTargetConfig, LoginSources, SignInFlowConfig } from './login.ts'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 // Declares the launcher's `app/unhandled-rejection` event.
-import type {} from '@deepseek-ai/dsh-cmdline'
+import type {} from 'bake-cmdline'
 
 /** The renderer component is loaded from its own artifact after the runner starts. */
 type AppComponent = ComponentType<AppProps>

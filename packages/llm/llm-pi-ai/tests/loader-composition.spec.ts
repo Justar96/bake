@@ -17,11 +17,11 @@ import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
 import type { ImageAttachmentRef } from 'bake-attachment'
-import LocalAttachments from '@deepseek-ai/dsh-attachment-local'
-import LlmRuntime, { createMessage, createUserMessage, userAgent } from '@deepseek-ai/dsh-llm'
-import LocalCredentialProvider from '@deepseek-ai/dsh-credentials-local'
-import FileSettingsProvider from '@deepseek-ai/dsh-settings-file'
-import * as LlmPiAi from '@deepseek-ai/dsh-llm-pi-ai'
+import LocalAttachments from 'bake-attachment-local'
+import LlmRuntime, { createMessage, createUserMessage, userAgent } from 'bake-llm'
+import LocalCredentialProvider from 'bake-credentials-local'
+import FileSettingsProvider from 'bake-settings-file'
+import * as LlmPiAi from 'bake-llm-pi-ai'
 import { assemble } from './assemble.ts'
 import { encodedDimensions, solidPng, wireImages } from './image-fixtures.ts'
 import { anthropicTextWire, closeMockServers, mockServer, textEvents } from './mock-server.ts'
@@ -59,19 +59,19 @@ async function loadComposition(): Promise<{ ctx: Context; settingsPath: string }
     '- id: llm',
     "  name: 'test-llm-service'",
     '- id: settings',
-    "  name: '@deepseek-ai/dsh-settings-file'",
+    "  name: 'bake-settings-file'",
     '  config:',
     `    path: ${JSON.stringify(settingsPath)}`,
     '    debounceMs: 10',
     '- id: credentials',
-    "  name: '@deepseek-ai/dsh-credentials-local'",
+    "  name: 'bake-credentials-local'",
     '  config:',
     `    path: ${JSON.stringify(join(root, '.credentials.yaml'))}`,
     '    debounceMs: 10',
     '- id: llm-pi-ai',
-    "  name: '@deepseek-ai/dsh-llm-pi-ai'",
+    "  name: 'bake-llm-pi-ai'",
     '- id: attachment-local',
-    "  name: '@deepseek-ai/dsh-attachment-local'",
+    "  name: 'bake-attachment-local'",
     '  config:',
     `    dshHome: ${JSON.stringify(join(root, 'home'))}`,
     '',
@@ -84,10 +84,10 @@ async function loadComposition(): Promise<{ ctx: Context; settingsPath: string }
   ctx.loader.builtins.include = Include
   const modules = new Map<string, unknown>([
     ['test-llm-service', LlmRuntime],
-    ['@deepseek-ai/dsh-settings-file', FileSettingsProvider],
-    ['@deepseek-ai/dsh-credentials-local', LocalCredentialProvider],
-    ['@deepseek-ai/dsh-llm-pi-ai', LlmPiAi],
-    ['@deepseek-ai/dsh-attachment-local', LocalAttachments],
+    ['bake-settings-file', FileSettingsProvider],
+    ['bake-credentials-local', LocalCredentialProvider],
+    ['bake-llm-pi-ai', LlmPiAi],
+    ['bake-attachment-local', LocalAttachments],
   ])
   ctx.loader.internal = {
     version: 'v2',

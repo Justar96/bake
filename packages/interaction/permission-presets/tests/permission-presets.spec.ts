@@ -4,13 +4,13 @@ import SessionStore, {
   Session,
   SessionId,
 } from 'bake-session'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
+import SessionProjectionRegistry from 'bake-session-projection'
 import type { SandboxMode } from 'bake-sandbox'
-import type { ApprovalPolicy } from '@deepseek-ai/dsh-user-approval'
+import type { ApprovalPolicy } from 'bake-user-approval'
 import PermissionPresetService, {
   AUTO_PRESET, CUSTOM_PRESET, PERMISSION_SETTINGS_NAMESPACE,
-} from '@deepseek-ai/dsh-permission-presets'
-import type { Config } from '@deepseek-ai/dsh-permission-presets'
+} from 'bake-permission-presets'
+import type { Config } from 'bake-permission-presets'
 import { SettingsProvider } from 'bake-settings'
 import type { SettingsNamespace } from 'bake-settings'
 

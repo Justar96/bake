@@ -3,11 +3,11 @@ description: "The filesystem observation policy plugin for deployments and maint
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-fs-observation-policy
+# bake-fs-observation-policy
 
 ## Summary
 
-`dsh-fs-observation-policy` makes filesystem tools require an agent to read a file before overwriting it, and rejects an overwrite when the file has changed since that read, with a clear instruction to re-read and retry. Edits are content-anchored by default: a literal replacement whose text matches exactly once applies to the current file, read or not, and the tool shows the edited lines when the agent had not seen them. Reading a missing path authorizes guarded creation, while concurrent creation remains protected. Choose it for deployments that want no-clobber writes; resumed sessions must read targets again because observations are not persisted.
+`bake-fs-observation-policy` makes filesystem tools require an agent to read a file before overwriting it, and rejects an overwrite when the file has changed since that read, with a clear instruction to re-read and retry. Edits are content-anchored by default: a literal replacement whose text matches exactly once applies to the current file, read or not, and the tool shows the edited lines when the agent had not seen them. Reading a missing path authorizes guarded creation, while concurrent creation remains protected. Choose it for deployments that want no-clobber writes; resumed sessions must read targets again because observations are not persisted.
 
 ## Table of Contents
 
@@ -23,16 +23,16 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## Use this package
 
-Load this plugin alongside a `ctx.fs` backend and the `dsh-tool-fs` tools when a deployment wants the model to read a file before it can overwrite it. The plugin injects no service; it only listens for the `fs/*` events the tools dispatch. Its one setting, `editGuard`, defaults to `anchored`; `version` restores the read-before-edit refusal.
+Load this plugin alongside a `ctx.fs` backend and the `bake-tool-fs` tools when a deployment wants the model to read a file before it can overwrite it. The plugin injects no service; it only listens for the `fs/*` events the tools dispatch. Its one setting, `editGuard`, defaults to `anchored`; `version` restores the read-before-edit refusal.
 
 ### Minimal composition
 
 Load a backend, then this plugin, then the tools. The policy listener should be the first decider registered for the `fs/*`-intent slots.
 
 ```yaml
-- name: '@deepseek-ai/dsh-fs-local'
-- name: '@deepseek-ai/dsh-fs-observation-policy'
-- name: '@deepseek-ai/dsh-tool-fs'
+- name: 'bake-fs-local'
+- name: 'bake-fs-observation-policy'
+- name: 'bake-tool-fs'
 ```
 
 ### What changes for the model
@@ -57,7 +57,7 @@ This section explains the design decisions behind the policy plugin and points a
 
 The plugin is built on two ideas:
 
-- **Event gate, not method service.** The plugin influences the world only through the `fs/*` events, so it registers no `ctx.fsPolicy` service and has no public methods. Removing it cannot break `dsh-tool-fs` at a service-injection boundary — the tool falls through to the bare provider.
+- **Event gate, not method service.** The plugin influences the world only through the `fs/*` events, so it registers no `ctx.fsPolicy` service and has no public methods. Removing it cannot break `bake-tool-fs` at a service-injection boundary — the tool falls through to the bare provider.
 - **Observed state is a prior-observation record.** A weak owner-to-target map holds three logical states — unseen, confirmed absent, or present at a version. The plugin performs no filesystem I/O of its own; it converts recorded state into the provider's optional guard, and the provider performs the atomic freshness check.
 
 ### Source map
@@ -105,7 +105,7 @@ Read these pages when the package-level contract is not enough. They move from t
 
 #### What the model sees
 
-This plugin adds no prompt or schema. Under the default guard, an unread `replace_all` edit fails with `FS_NOT_OBSERVED`; under `editGuard: version`, it rejects any edit without a prior observation with code `FS_NOT_OBSERVED` and policy reason `edit requires reading "<path>" first`, and editing a target observed absent returns `FS_NOT_FOUND`. Guarded mutations whose positive observation is stale propagate the provider-owned `FS_STALE_VERSION` error. [`dsh-tool-fs`](../tool-fs/README.md) owns the model-facing error wrapper: it normalizes every `FS_NOT_OBSERVED` source to `cannot modify "<path>": file has not been read — read the file, then retry`, while `FS_STALE_VERSION` retains the provider reason and adds `— re-read the file, then retry`; both preserve the code and original cause. Following the stale remedy on an externally deleted target records absence: the next guarded write may recreate it with `createIfAbsent`, while the provider atomically preserves any concurrent creator.
+This plugin adds no prompt or schema. Under the default guard, an unread `replace_all` edit fails with `FS_NOT_OBSERVED`; under `editGuard: version`, it rejects any edit without a prior observation with code `FS_NOT_OBSERVED` and policy reason `edit requires reading "<path>" first`, and editing a target observed absent returns `FS_NOT_FOUND`. Guarded mutations whose positive observation is stale propagate the provider-owned `FS_STALE_VERSION` error. [`bake-tool-fs`](../tool-fs/README.md) owns the model-facing error wrapper: it normalizes every `FS_NOT_OBSERVED` source to `cannot modify "<path>": file has not been read — read the file, then retry`, while `FS_STALE_VERSION` retains the provider reason and adds `— re-read the file, then retry`; both preserve the code and original cause. Following the stale remedy on an externally deleted target records absence: the next guarded write may recreate it with `createIfAbsent`, while the provider atomically preserves any concurrent creator.
 
 #### Token effect
 

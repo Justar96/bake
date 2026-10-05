@@ -7,7 +7,7 @@ kind: "package-reference"
 
 ## Summary
 
-`bake-session-query` lets application code list, filter, read, and search session history. Reads prefer live sessions over persisted copies and return detached clones from one consistent observation. Exact reads and filters work with any supported storage setup; ranked full-text search requires a backend such as `dsh-session-query-sqlite`. Use it when application code needs programmatic access to the history presented to the model.
+`bake-session-query` lets application code list, filter, read, and search session history. Reads prefer live sessions over persisted copies and return detached clones from one consistent observation. Exact reads and filters work with any supported storage setup; ranked full-text search requires a backend such as `bake-session-query-sqlite`. Use it when application code needs programmatic access to the history presented to the model.
 
 ## Table of Contents
 
@@ -23,7 +23,7 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## Use this package
 
-Use `ctx.sessionQuery` from application code when you need to read or search session history without touching the session service or a storage backend directly. The service is provided by a concrete backend plugin — the shipped composition mounts `@deepseek-ai/dsh-session-query-sqlite` ([README](../session-query-sqlite/README.md)) — so this package is never mounted alone. Everything below is available on `ctx.sessionQuery` once a backend is composed.
+Use `ctx.sessionQuery` from application code when you need to read or search session history without touching the session service or a storage backend directly. The service is provided by a concrete backend plugin — the shipped composition mounts `bake-session-query-sqlite` ([README](../session-query-sqlite/README.md)) — so this package is never mounted alone. Everything below is available on `ctx.sessionQuery` once a backend is composed.
 
 ### What you can do
 
@@ -115,7 +115,7 @@ The decision history lives in the [unified service decision](../../../.agents/no
 Read these pages when the package-level contract is not enough. They move from the shared query vocabulary to the concrete backend and the decision evidence.
 
 - [Session Query subsystem reference](../../../docs/subsystems/session-query.md) — the full type-level contract: records, filters, search pages, and errors.
-- [dsh-session-query-sqlite](../session-query-sqlite/README.md) — the shipped full-text backend and its index lifecycle.
+- [bake-session-query-sqlite](../session-query-sqlite/README.md) — the shipped full-text backend and its index lifecycle.
 - [Session query relationship tracing](../../../.agents/notes/archived/feature/2026-07-13-session-query-tracing.md) — trace semantics and the validation boundary.
 - [SQLite FTS5 session search](../../../.agents/notes/archived/feature/2026-07-10-sqlite-session-query-provider.md) — how the search surface is implemented and reconciled.
 

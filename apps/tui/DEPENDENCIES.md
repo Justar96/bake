@@ -11,7 +11,7 @@ This reference records the APIs used by the TUI and their documentation sources,
 | `@types/react` | 19.3.0, npm latest | [React types](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/react): declared by both TUI packages, including the application’s React imports. |
 | Commander | 15.0.0, npm latest | [Versioned API](https://github.com/tj/commander.js/tree/v15.0.0#readme): `Command`, typed `opts`, `option`, and `error`; harness `parseCmdline` owns launch integration. |
 | Shiki | 4.4.3, locked | [Bundles](https://shiki.style/guide/bundles), [regex engines](https://shiki.style/guide/regex-engines): the application's `syntax.ts` builds a `createHighlighterCore` with the forgiving JavaScript engine and Solarized Dark, loads grammars from `shiki/langs`, and reads `codeToTokensBase` colours and font styles. The TUI build keeps it external, since an unsplit bundle would inline every grammar. |
-| jsdiff (`diff`) | 9.0.0, shared with `dsh-tool-fs` | [API](https://github.com/kpdecker/jsdiff#readme): `diffArrays` splits a hunk's sides into its separate changes, and `diffWordsWithSpace` finds the changed words of an edited line. |
+| jsdiff (`diff`) | 9.0.0, shared with `bake-tool-fs` | [API](https://github.com/kpdecker/jsdiff#readme): `diffArrays` splits a hunk's sides into its separate changes, and `diffWordsWithSpace` finds the changed words of an edited line. |
 | ink-testing-library | 4.0.0, npm latest | [API](https://github.com/vadimdemedes/ink-testing-library#readme): Node component rendering, input writes, captured frames, and cleanup. |
 | TypeScript | upstream-pinned 6.0.3 | [Project references](https://www.typescriptlang.org/docs/handbook/project-references.html), [TSConfig](https://www.typescriptlang.org/tsconfig/): dedicated application/UI projects and a no-emit test project preserve strict checking. npm latest is 7.0.2; this TUI does not change the upstream compiler. |
 | Vitest | upstream-pinned 4.1.8 | [Current guide](https://vitest.dev/guide/), [configuration](https://vitest.dev/config/), [assertions](https://vitest.dev/api/expect): Node forks, isolated resources, observable readiness, and recorded file expectations. npm latest is 5.0.1; the upstream test runner stays pinned. |
@@ -30,31 +30,31 @@ Every directly consumed workspace package has an owning reference below. Type-on
 | Cordis Include | [Include](../../vendor/include/README.md) | Real preset composition in isolated tests |
 | Schemastery | [Vendored schema API](../../vendor/schemastery/README.md), [upstream API](https://github.com/shigma/schemastery) | Validate optional choices and resolve defaults before `run` |
 | `dsh-agent` | [Agent](../../packages/core/agent/README.md) | Create/resume handles, model selection, status, steering, cancellation, stream frames |
-| `dsh-agent-presets` | [Presets](../../packages/preset/agent-presets/README.md) | Resolve and mount composition, record selection, read the recorded preset |
-| `dsh-tool-subagent` | [Subagents](../../packages/subagent/tool-subagent/README.md) | Profile patch mounts its model-selection settings prerequisite |
+| `bake-agent-presets` | [Presets](../../packages/preset/agent-presets/README.md) | Resolve and mount composition, record selection, read the recorded preset |
+| `bake-tool-subagent` | [Subagents](../../packages/subagent/tool-subagent/README.md) | Profile patch mounts its model-selection settings prerequisite |
 | `dsh-agent-default-model` | [Default model](../../packages/core/agent-default-model/README.md) | Resolve the configured model route; real provider in test fixtures |
 | `dsh-session` | [Session](../../packages/core/session/README.md) | Branded identity, committed events, durable header and sequence order |
-| `dsh-session-projection` | [Projections](../../packages/session/session-projection/README.md) | Read authoritative inbox and preset; subscribe without mutating values |
-| `dsh-permission-presets` | [Permissions](../../packages/interaction/permission-presets/README.md) | Typed `permissions` projection for the current session's access indicator |
+| `bake-session-projection` | [Projections](../../packages/session/session-projection/README.md) | Read authoritative inbox and preset; subscribe without mutating values |
+| `bake-permission-presets` | [Permissions](../../packages/interaction/permission-presets/README.md) | Typed `permissions` projection for the current session's access indicator |
 | `bake-session-query` | [Query](../../packages/session-query/session-query/README.md) | Disposable consistent history observation |
 | `bake-session-persistence` | [Persistence](../../packages/session/session-persistence/README.md) | Exact resume requires durable storage |
-| `dsh-session-persistence-jsonl` | [JSONL](../../packages/session/session-persistence-jsonl/README.md) | Isolated durable integration fixtures and PTY comparison |
-| `dsh-llm` | [LLM](../../packages/llm/llm/README.md) | Identified user messages and streaming `BlockAssembler` |
+| `bake-session-persistence-jsonl` | [JSONL](../../packages/session/session-persistence-jsonl/README.md) | Isolated durable integration fixtures and PTY comparison |
+| `bake-llm` | [LLM](../../packages/llm/llm/README.md) | Identified user messages and streaming `BlockAssembler` |
 | `bake-compaction` | [Compaction](../../packages/compaction/compaction/README.md) | Typed compaction marker; ignore replacement tool rows |
-| `dsh-commands` | [Commands](../../packages/interaction/commands/README.md) | Parse and execute registered commands; preserve durable command output |
-| `dsh-user-approval` | [Approval](../../packages/interaction/user-approval/README.md) | Scoped single-use decisions and cancellation |
-| `dsh-user-questions` | [Questions](../../packages/interaction/user-questions/README.md) | Exact question ids, labels, custom answers, and complete plan detail |
-| `dsh-authorization` | [Authorization](../../packages/credentials/authorization/README.md) | List flows, present prompts, pass command cancellation |
+| `bake-commands` | [Commands](../../packages/interaction/commands/README.md) | Parse and execute registered commands; preserve durable command output |
+| `bake-user-approval` | [Approval](../../packages/interaction/user-approval/README.md) | Scoped single-use decisions and cancellation |
+| `bake-user-questions` | [Questions](../../packages/interaction/user-questions/README.md) | Exact question ids, labels, custom answers, and complete plan detail |
+| `bake-authorization` | [Authorization](../../packages/credentials/authorization/README.md) | List flows, present prompts, pass command cancellation |
 | `bake-credentials` | [Credentials](../../packages/credentials/credentials/README.md) | Describe configured/writable references and store secret values |
-| `dsh-cmdline` | [Command line](../../packages/boot/cmdline/README.md) | Parse flags and use the launcher-owned exit callback |
+| `bake-cmdline` | [Command line](../../packages/boot/cmdline/README.md) | Parse flags and use the launcher-owned exit callback |
 | `bake-file-reference` | [Reference service and grammar](../../packages/context/file-reference/README.md) | Cancellable scoped discovery; pure token detection and canonical mention formatting |
-| `dsh-file-reference-local` | [Local provider](../../packages/context/file-reference-local/README.md) | Profile composition supplies workspace path search and model guidance |
+| `bake-file-reference-local` | [Local provider](../../packages/context/file-reference-local/README.md) | Profile composition supplies workspace path search and model guidance |
 | `bake-fs` | [Filesystem](../../packages/fs/fs/README.md) | Resolve the actual process workspace path |
 | `bake-util-values` | [Value utilities](../../packages/util/values/README.md) | Exhaustive terminal row rendering with `assertNever` |
 | `bake-brand` | [Brands](../../packages/util/brand/README.md) | Preserve opaque Session ids |
 | `dsh-agent-loop` | [Agent loop](../../packages/core/agent-loop/README.md) | Real loop in integration tests |
 | `bake-agent-loop-testkit` | [Loop test support](../../packages/test-support/agent-loop-testkit/README.md) | Compose isolated real loop dependencies |
-| `dsh-llm-replay` | [Recorded replay](../../packages/test-support/llm-replay/README.md) | Restore the shared Session fixture and replay through the built profile |
+| `bake-llm-replay` | [Recorded replay](../../packages/test-support/llm-replay/README.md) | Restore the shared Session fixture and replay through the built profile |
 | `@dsh-tui/ui` | [Presentation](packages/ui/README.md) | Pure typed terminal components and event projection |
 
 The recorded bash scenario is shared read-only from [its owner](../../snapshots/session/bash-tool-turn/snapshot.yml). TUI transcript expectations and profile-driving tests live under `apps/tui/`; no upstream fixture generations are modified.

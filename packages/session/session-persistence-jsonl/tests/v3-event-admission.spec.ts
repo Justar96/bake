@@ -1,7 +1,7 @@
 import { Context } from '@deepseek-ai/cordis'
 import { SessionId, SessionSeq } from 'bake-session'
 import { SessionFormatUnsupportedError } from 'bake-session-persistence'
-import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import JsonlSessionPersistence from 'bake-session-persistence-jsonl'
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'

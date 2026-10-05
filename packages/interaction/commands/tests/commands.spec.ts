@@ -4,7 +4,7 @@ import { createScope } from 'bake-scope'
 import type { Scope } from 'bake-scope'
 import type { Agent } from 'bake-agent'
 import SessionStore, { SessionId } from 'bake-session'
-import CommandRuntime, { CommandDefinitionId, parseCommand, type CommandDefinition } from '@deepseek-ai/dsh-commands'
+import CommandRuntime, { CommandDefinitionId, parseCommand, type CommandDefinition } from 'bake-commands'
 import { AttachmentStore } from 'bake-attachment'
 
 function command(name: string, text = `ran:${name}`): CommandDefinition {

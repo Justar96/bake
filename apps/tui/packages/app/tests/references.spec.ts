@@ -2,7 +2,7 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
-import LocalFileReferences from '@deepseek-ai/dsh-file-reference-local'
+import LocalFileReferences from 'bake-file-reference-local'
 import type { FileReferenceCandidate } from 'bake-file-reference/types'
 import { SessionId } from 'bake-session'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'

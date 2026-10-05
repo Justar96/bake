@@ -1,4 +1,4 @@
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage } from 'bake-llm'
 /**
  * Loop-level tool-order determinism: the request/header event — and therefore the frozen
  * request the adapter receives — carries the assembly's canonical tool order (system-prompt's
@@ -9,7 +9,7 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import LlmRuntime from '@deepseek-ai/dsh-llm'
+import LlmRuntime from 'bake-llm'
 import SessionStore, { SessionId, foldRequestHeader } from 'bake-session'
 import SystemPrompt, { TOOL_ORDER_REST } from 'bake-system-prompt'
 import type { Config as SystemPromptConfig } from 'bake-system-prompt'
@@ -17,7 +17,7 @@ import ToolRuntime, { defineContentToolFixture } from 'bake-tools'
 import AgentRegistry, { type Agent } from 'bake-agent'
 
 import AgentLoop from 'bake-agent-loop'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
+import SessionProjectionRegistry from 'bake-session-projection'
 import { MockAdapter, textResponse } from './mock-adapter.ts'
 
 async function harness(adapter: MockAdapter, toolOrder?: SystemPromptConfig['toolOrder']) {

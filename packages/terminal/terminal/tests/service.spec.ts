@@ -3,7 +3,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { Session, SessionId } from 'bake-session'
 import AgentRegistry from 'bake-agent'
 import type { Agent } from 'bake-agent'
-import TerminalSessionService, { TerminalBackendCleanupError, TerminalError, TerminalSessionId } from '@deepseek-ai/dsh-terminal'
+import TerminalSessionService, { TerminalBackendCleanupError, TerminalError, TerminalSessionId } from 'bake-terminal'
 import type {
   TerminalBackend,
   TerminalBackendSession,
@@ -13,7 +13,7 @@ import type {
   TerminalSessionId as TerminalSessionIdType,
   TerminalSessionStatus,
   TerminalSignal,
-} from '@deepseek-ai/dsh-terminal'
+} from 'bake-terminal'
 import { unsupportedInbox } from 'bake-agent-loop-testkit'
 
 const agentScopeDisposers = new WeakMap<Agent, () => Promise<void>>()

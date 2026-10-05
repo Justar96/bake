@@ -1,6 +1,6 @@
 /**
- * Package-owned invariant companion for `@deepseek-ai/dsh-agent-presets`.
- * @module @deepseek-ai/dsh-agent-presets/invariant
+ * Package-owned invariant companion for `bake-agent-presets`.
+ * @module bake-agent-presets/invariant
  */
 
 import type { Context } from '@deepseek-ai/cordis'
@@ -12,9 +12,9 @@ import type {} from 'bake-agent'
 // Imported through the package name, not `./mount.ts`: a module shared between
 // the two build entry points becomes a third chunk that the published `files`
 // list does not carry, which `verify-built-package-invariants` rejects.
-import { leakedServices, livePresetMounts } from '@deepseek-ai/dsh-agent-presets'
+import { leakedServices, livePresetMounts } from 'bake-agent-presets'
 
-const PACKAGE_NAME = '@deepseek-ai/dsh-agent-presets'
+const PACKAGE_NAME = 'bake-agent-presets'
 
 /** Cordis companion plugin name. */
 export const name = 'agent-presets-invariant'

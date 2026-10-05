@@ -2,7 +2,7 @@
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { AppRejection } from '@deepseek-ai/dsh-cmdline'
+import type { AppRejection } from 'bake-cmdline'
 import { afterAll, describe, expect, it } from 'vitest'
 import {
   createLateRejectionReporter, LATE_REJECTION_BURST, LATE_REJECTION_WINDOW_MS, warningLine,

@@ -6,7 +6,7 @@
  * @module dsh-agent-loop/max-tokens-notice
  */
 
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage } from 'bake-llm'
 import type { UserMessage } from 'bake-session'
 
 /** Source stamped on the notice so derived history does not present it as a user prompt. */

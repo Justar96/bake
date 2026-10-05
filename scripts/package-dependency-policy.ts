@@ -11,7 +11,7 @@ const CLIENT_FACE_EXCLUDE: readonly string[] = [
 
 /** Host-only packages whose peer relays are deliberately flattened. */
 const HOST_DEPENDENCY_PACKAGES: readonly string[] = [
-  '@deepseek-ai/dsh-llm',
+  'bake-llm',
   'bake-session',
 ]
 
@@ -47,7 +47,7 @@ const DUPLICATE_SAFE_PACKAGES: readonly string[] = [
 const SAFE_HOST_DEPENDENCY_EXPORTS = {
   'bake-credentials': ['credentialKey'],
   'bake-deque': ['Deque'],
-  '@deepseek-ai/dsh-llm': ['callConfigEquals'],
+  'bake-llm': ['callConfigEquals'],
   'bake-session-format': ['sessionFormatLogFilename'],
   'bake-timeout': ['MAX_TIMER_DELAY_MS'],
   '@deepseek-ai/schemastery': ['default'],

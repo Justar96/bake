@@ -1,5 +1,5 @@
 /**
- * Profile machinery of `dsh-app-boot`: directory resolution and init,
+ * Profile machinery of `bake-app-boot`: directory resolution and init,
  * manifest round-trips, two-anchor bundle resolution, patch-layer loading,
  * empty-root composition, and the installation module-fallback healing.
  */
@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { withFileLock } from '@deepseek-ai/dsh-atomic-write'
+import { withFileLock } from 'bake-atomic-write'
 import { afterAll, describe, expect, it } from 'vitest'
 import {
   composeEntries,
@@ -182,15 +182,15 @@ describe('initProfile', () => {
   it('creates manifest, user patch layer, and pnpm workspace once, never overwriting', () => {
     const home = tmp()
     const dir = resolveProfileDir('tui', home)
-    initProfile(dir, ['@deepseek-ai/dsh-base'])
+    initProfile(dir, ['bake-base'])
     const manifest = readProfileManifest('t', dir)
-    expect(manifest.dsh?.profile?.bundles).toEqual(['@deepseek-ai/dsh-base'])
+    expect(manifest.dsh?.profile?.bundles).toEqual(['bake-base'])
     expect(readFileSync(join(dir, PROFILE_PATCH_FILENAME), 'utf8')).toContain('[]')
     expect(readFileSync(join(dir, 'pnpm-workspace.yaml'), 'utf8')).toContain('nodeLinker: hoisted')
     // Re-init keeps user edits.
     writeFileSync(join(dir, PROFILE_PATCH_FILENAME), '- id: x\n  config: {}\n')
     initProfile(dir, ['other'])
-    expect(readProfileManifest('t', dir).dsh?.profile?.bundles).toEqual(['@deepseek-ai/dsh-base'])
+    expect(readProfileManifest('t', dir).dsh?.profile?.bundles).toEqual(['bake-base'])
     expect(readFileSync(join(dir, PROFILE_PATCH_FILENAME), 'utf8')).toContain('- id: x')
   })
 })
@@ -313,12 +313,12 @@ describe('loadProfile', () => {
     expect(() => loadProfile('t', 'custom', anchor, home))
       .toThrow('profile "custom" does not exist')
     expect(PROFILE_TEMPLATES).toEqual({
-      tui: { bundles: ['@deepseek-ai/dsh-base', '@dsh-tui/app'] },
-      headless: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-headless'] },
-      desktop: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-desktop'] },
+      tui: { bundles: ['bake-base', '@dsh-tui/app'] },
+      headless: { bundles: ['bake-base', 'bake-headless'] },
+      desktop: { bundles: ['bake-base', 'bake-desktop'] },
     })
     const shippedAnchor = stageInstallation({
-      '@deepseek-ai/dsh-base': { patch: '[]\n' },
+      'bake-base': { patch: '[]\n' },
       '@dsh-tui/app': { patch: '[]\n' },
     })
     expect(loadProfile('t', 'tui', shippedAnchor, home).layers.map(layer => layer.packageName))

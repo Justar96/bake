@@ -1,6 +1,6 @@
 /** The `/model` sheet's order, Recent list, and rows, apart from any catalog. */
 import { describe, expect, it } from 'bun:test'
-import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import { ReasoningEffortId } from 'bake-llm'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'
 import { AGENT_TONES, CONTEXT_RAMP, PALETTE } from '@dsh-tui/ui/palette.ts'
 import { modelSheetPrompt, newestFirst, versionOf, withRecent, RECENT_MODELS, type ModelSheet, type SheetModel } from '../src/model.ts'

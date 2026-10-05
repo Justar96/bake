@@ -18,8 +18,8 @@ import { SANDBOX_UNAVAILABLE, SandboxUnavailableError } from 'bake-sandbox'
 import type { SandboxPolicy } from 'bake-sandbox'
 import {
   LocalSandboxProvider,
-} from '@deepseek-ai/dsh-sandbox-local'
-import type { Config } from '@deepseek-ai/dsh-sandbox-local'
+} from 'bake-sandbox-local'
+import type { Config } from 'bake-sandbox-local'
 import { bwrapProfileArgs, landlockProfileArgs, seatbeltProfileArgs } from '../src/profiles.ts'
 
 const RO: SandboxPolicy = { mode: 'read-only', workspaceRoot: '/ws' }

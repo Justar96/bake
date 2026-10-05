@@ -17,7 +17,7 @@ import {
   type SessionEvent,
   type SessionHeader,
 } from 'bake-session'
-import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import JsonlSessionPersistence from 'bake-session-persistence-jsonl'
 import {
   generationLogFilename,
   generationLogPath,

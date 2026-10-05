@@ -7,8 +7,8 @@
  * @module bake-compaction/types
  */
 
-import type { ContentBlock, TokenUsage } from '@deepseek-ai/dsh-llm'
-import type { CommandId } from '@deepseek-ai/dsh-commands/brand'
+import type { ContentBlock, TokenUsage } from 'bake-llm'
+import type { CommandId } from 'bake-commands/brand'
 import type { SessionSeq } from 'bake-session/types'
 import type { CompactionId } from './brand.ts'
 

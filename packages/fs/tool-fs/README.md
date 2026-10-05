@@ -3,11 +3,11 @@ description: "The model-facing read, read_image, write, and edit tools for users
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-tool-fs
+# bake-tool-fs
 
 ## Summary
 
-Use `dsh-tool-fs` to let a model read UTF-8 files with line numbers, read supported images, create or atomically replace files, and apply targeted literal edits. Results are capped, and failures provide stable error codes and recovery instructions. Add `dsh-fs-observation-policy` when writes and edits must follow a successful read; without it, mutations remain atomic but are unconditional. Image reads require durable attachment storage and an image-capable routed model. Choose the sibling discovery package for glob or grep searches.
+Use `bake-tool-fs` to let a model read UTF-8 files with line numbers, read supported images, create or atomically replace files, and apply targeted literal edits. Results are capped, and failures provide stable error codes and recovery instructions. Add `bake-fs-observation-policy` when writes and edits must follow a successful read; without it, mutations remain atomic but are unconditional. Image reads require durable attachment storage and an image-capable routed model. Choose the sibling discovery package for glob or grep searches.
 
 ## Table of Contents
 
@@ -30,9 +30,9 @@ Mount the tools after a `ctx.fs` backend and, for read-before-write/edit behavio
 A backend, the policy plugin, then the tools; the attachment store is optional and enables `read_image`.
 
 ```yaml
-- name: '@deepseek-ai/dsh-fs-local'
-- name: '@deepseek-ai/dsh-fs-observation-policy'
-- name: '@deepseek-ai/dsh-tool-fs'
+- name: 'bake-fs-local'
+- name: 'bake-fs-observation-policy'
+- name: 'bake-tool-fs'
 ```
 
 The policy plugin is optional: without it the tools run against the bare provider (unconditional write, overwrite, and edit with no observed-state). A deployment that loads these tools is expected to also load it, so the behavior is read-before-write/edit. `read_image` registers only while a durable `ctx.attachments` service is mounted; execution additionally refuses on a route whose exact model does not declare image input, so a text route's durable history stays free of image blocks.
@@ -59,7 +59,7 @@ All keys are optional; the defaults are the shipped read caps.
 | `readMaxBytes` | `51200` | Byte cap on one `read` call's selected lines; overflow ends the window with a capped footer |
 | `readStreamMinSize` | `10485760` | Files at or above this size (or of unknown size) stream instead of loading whole into memory |
 
-The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-tool-fs) is the exhaustive source for every accepted field and its JSDoc.
+The generated [configuration catalog](../../../docs/config-catalog.md#bake-tool-fs) is the exhaustive source for every accepted field and its JSDoc.
 
 ### Policy and sandbox behavior
 
@@ -120,7 +120,7 @@ Read these pages when the package-level contract is not enough. They move from t
 - [fs-local](../fs-local/README.md) — the host-filesystem backend these tools run against.
 - [fs-sandbox](../fs-sandbox/README.md) — the sandbox-enforcing backend that adds the escalation fields.
 - [fs-observation-policy](../fs-observation-policy/README.md) — the policy plugin that guards mutations through the `fs/*` events.
-- [Generated tool catalog](../../../docs/tool-catalog.md#deepseek-aidsh-tool-fs) — the exhaustive schemas this package registers.
+- [Generated tool catalog](../../../docs/tool-catalog.md#bake-tool-fs) — the exhaustive schemas this package registers.
 
 -----
 
@@ -131,7 +131,7 @@ Read these pages when the package-level contract is not enough. They move from t
 
 #### What the model sees
 
-The model sees the generated [`read`, `read_image`, `write`, and `edit` schemas](../../../docs/tool-catalog.md#deepseek-aidsh-tool-fs), with snake_case arguments. The package adds no system-prompt section: each tool's description and parameters are its only guidance, and they are also the SDK documentation behind `run_code` in PTC mode. The `read` description says that, unlike a shell `cat`, a read counts for later `write` and `edit` calls. The `write` description states the observation-policy guard: replacing an existing file requires a current read. The `edit` description states the exact-once match and the `edits` form, and does not steer the model away from editing through the shell. `edit`'s `old_string` carries the exact-once rule and says to leave out the line numbers `read` adds. Descriptions are registration-time text, so `write` still points at `edit` where a scope hides `edit`. Every `file_path` is described as an absolute path or one relative to the working directory, which is the calling session's cwd. The image tool appears only while a durable attachment store is mounted; its schema is route-independent, and the strict gate refuses at execution. Scoped tool restrictions can remove any definition for one agent.
+The model sees the generated [`read`, `read_image`, `write`, and `edit` schemas](../../../docs/tool-catalog.md#bake-tool-fs), with snake_case arguments. The package adds no system-prompt section: each tool's description and parameters are its only guidance, and they are also the SDK documentation behind `run_code` in PTC mode. The `read` description says that, unlike a shell `cat`, a read counts for later `write` and `edit` calls. The `write` description states the observation-policy guard: replacing an existing file requires a current read. The `edit` description states the exact-once match and the `edits` form, and does not steer the model away from editing through the shell. `edit`'s `old_string` carries the exact-once rule and says to leave out the line numbers `read` adds. Descriptions are registration-time text, so `write` still points at `edit` where a scope hides `edit`. Every `file_path` is described as an absolute path or one relative to the working directory, which is the calling session's cwd. The image tool appears only while a durable attachment store is mounted; its schema is route-independent, and the strict gate refuses at execution. Scoped tool restrictions can remove any definition for one agent.
 
 #### Token effect
 
@@ -204,14 +204,14 @@ Append-only; newly visible content follows the reusable request prefix and does 
 
 These limits define when the tool suite is a poor fit or needs special operational care. They are current package constraints, not a general filesystem comparison or a task backlog.
 
-- **No model-facing directory listing ships** — `ctx.fs.listDir` serves provider code such as skill discovery, while the sibling `dsh-tool-fs-search` package supplies ripgrep-backed `glob` and `grep` rather than extending the filesystem seam.
+- **No model-facing directory listing ships** — `ctx.fs.listDir` serves provider code such as skill discovery, while the sibling `bake-tool-fs-search` package supplies ripgrep-backed `glob` and `grep` rather than extending the filesystem seam.
 - **`read` handles UTF-8 text files only** — images use the separate `read_image` tool; PDF, audio, and video remain deferred. A directory target is `FS_NOT_REGULAR_FILE`.
 - **Extension-declared media type** — an extension selects the declared type and the attachment store's magic-byte validation stays authoritative; a correctly formatted image under a wrong extension is refused with the rename remedy rather than sniffed. Only a path with no extension is identified from its file signature.
 - **Object paths re-enter source admission** — `read_image` on a normalized attachment object re-admits its bytes as a new source, so a deployment whose `maxImageBytes`/`maxMessageImageBytes` sit below the normalized-image byte budget can refuse an object path that `ctx.attachments.readImage` still serves; shipped defaults keep the normalized budget (4 MiB) far under the source caps (20 MiB).
 - **Inline image preview rides the UI composition** — the tool-result card renders the image through the browser's `tool.call.images` slot, which the attachment presentation plugin fills; a UI without that plugin shows the result's envelope text instead.
 - **No attachment-region tool** — an agent may crop an image through another available tool when it has a filesystem path; a pasted or dragged image without a path cannot be re-read at higher resolution.
 - **No timeout surface** — `read`/`write`/`edit` take no timeout argument and declare no timeout budget; cancellation rides `exec.signal` only ([provider rationale](../README.md)).
-- **Descriptions assume the observation policy** — the `read`, `write`, and `edit` descriptions state the read-before-write/edit guard, which only `dsh-fs-observation-policy` enforces. A composition without that plugin still shows the statement, so the model may read before a mutation it could have made directly; it is never told a guarded change is safe.
+- **Descriptions assume the observation policy** — the `read`, `write`, and `edit` descriptions state the read-before-write/edit guard, which only `bake-fs-observation-policy` enforces. A composition without that plugin still shows the statement, so the model may read before a mutation it could have made directly; it is never told a guarded change is safe.
 
 <a id="dev-note"></a>
 ### Dev Note

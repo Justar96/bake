@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-desktop",
+  "name": "bake-desktop",
   "description": "The Bake Desktop bundle: a long-lived protocol bridge that drives one Agent for the desktop app, forwards approvals, and applies its permission tiers",
   "version": "0.1.6-alpha.2",
   "publishConfig": {
@@ -35,7 +35,7 @@
   },
   "dependencies": {
     "bake-brand": "workspace:^",
-    "@deepseek-ai/dsh-cmdline": "workspace:^"
+    "bake-cmdline": "workspace:^"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
@@ -43,11 +43,11 @@
     "bake-agent": "workspace:^",
     "bake-agent-default-model": "workspace:^",
     "bake-fs": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
-    "@deepseek-ai/dsh-permission-presets": "workspace:^",
+    "bake-llm": "workspace:^",
+    "bake-permission-presets": "workspace:^",
     "bake-session": "workspace:^",
     "bake-tools": "workspace:^",
-    "@deepseek-ai/dsh-user-approval": "workspace:^"
+    "bake-user-approval": "workspace:^"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
@@ -55,12 +55,12 @@
     "bake-agent": "workspace:^",
     "bake-agent-default-model": "workspace:^",
     "bake-fs": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
+    "bake-llm": "workspace:^",
     "bake-llm-mock-server": "workspace:^",
     "bake-loader-smoke": "workspace:^",
-    "@deepseek-ai/dsh-permission-presets": "workspace:^",
+    "bake-permission-presets": "workspace:^",
     "bake-session": "workspace:^",
     "bake-tools": "workspace:^",
-    "@deepseek-ai/dsh-user-approval": "workspace:^"
+    "bake-user-approval": "workspace:^"
   }
 }

@@ -8,9 +8,9 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import SystemPrompt from 'bake-system-prompt'
 import ToolRuntime from 'bake-tools'
-import McpResources from '@deepseek-ai/dsh-mcp-resources'
-import { ToolCallId } from '@deepseek-ai/dsh-llm'
-import type { Config } from '@deepseek-ai/dsh-mcp-client'
+import McpResources from 'bake-mcp-resources'
+import { ToolCallId } from 'bake-llm'
+import type { Config } from 'bake-mcp-client'
 
 // ---- Mock pi-mcp ----
 
@@ -87,8 +87,8 @@ vi.mock('@earendil-works/pi-mcp', () => ({
 
 // vi.mock is hoisted above static imports, so the modules under test see the
 // mocked client even through a static import.
-import { apply } from '@deepseek-ai/dsh-mcp-client/src/index.ts'
-import { RECONNECT_DEFAULTS, resolveReconnectPolicy, startConnection } from '@deepseek-ai/dsh-mcp-client/src/connection.ts'
+import { apply } from 'bake-mcp-client/src/index.ts'
+import { RECONNECT_DEFAULTS, resolveReconnectPolicy, startConnection } from 'bake-mcp-client/src/connection.ts'
 
 // ---- Helpers ----
 

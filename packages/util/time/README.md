@@ -44,7 +44,7 @@ import { canonicalClientTimeZone } from 'bake-util-time'
 <a id="model-experience"></a>
 ## Model Experience
 
-None directly. `dsh-subagent` canonicalizes a client zone with it before recording that zone on a child Session; no shipped plugin renders the zone into model-visible text.
+None directly. `bake-subagent` canonicalizes a client zone with it before recording that zone on a child Session; no shipped plugin renders the zone into model-visible text.
 
 #### KV Cache effect
 

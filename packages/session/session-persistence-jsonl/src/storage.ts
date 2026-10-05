@@ -10,7 +10,7 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import { errorChain } from '@deepseek-ai/dsh-llm'
+import { errorChain } from 'bake-llm'
 import type { Session, SessionEvent, SessionHeader, SessionId, SessionLogOffset } from 'bake-session'
 import {
   assertContiguous,

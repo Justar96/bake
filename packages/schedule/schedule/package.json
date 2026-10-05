@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-schedule",
+  "name": "bake-schedule",
   "description": "Agent-scoped durable after, at, and fixed-rate reminders over the session event log",
   "version": "0.1.6-alpha.2",
   "publishConfig": {
@@ -40,10 +40,10 @@
     "bake-agent": "workspace:^",
     "bake-brand": "workspace:^",
     "bake-invariants": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
+    "bake-llm": "workspace:^",
     "bake-session": "workspace:^",
     "bake-session-persistence": "workspace:^",
-    "@deepseek-ai/dsh-session-projection": "workspace:^",
+    "bake-session-projection": "workspace:^",
     "bake-tools": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   },
@@ -57,11 +57,11 @@
     "bake-agent-loop-testkit": "workspace:^",
     "bake-brand": "workspace:^",
     "bake-invariants": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
+    "bake-llm": "workspace:^",
     "bake-session": "workspace:^",
     "bake-session-persistence": "workspace:^",
-    "@deepseek-ai/dsh-session-persistence-jsonl": "workspace:^",
-    "@deepseek-ai/dsh-session-projection": "workspace:^",
+    "bake-session-persistence-jsonl": "workspace:^",
+    "bake-session-projection": "workspace:^",
     "bake-system-prompt": "workspace:^",
     "bake-tools": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"

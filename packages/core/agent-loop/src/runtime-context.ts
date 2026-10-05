@@ -5,8 +5,8 @@
  * @module bake-agent-loop/runtime-context
  */
 
-import { createSystemMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { ContextSnapshotSection, Message } from '@deepseek-ai/dsh-llm'
+import { createSystemMessage, createUserMessage } from 'bake-llm'
+import type { ContextSnapshotSection, Message } from 'bake-llm'
 import type { Session, SessionEvent, SessionSeq, SurfaceIntent, SystemMessage, UserMessage } from 'bake-session'
 import { isReplacementSurfaceEvent } from 'bake-session'
 import type { Context } from '@deepseek-ai/cordis'

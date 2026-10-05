@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { StreamChunk, TokenUsage } from '@deepseek-ai/dsh-llm'
+import type { StreamChunk, TokenUsage } from 'bake-llm'
 import type { SessionEvent } from 'bake-session'
 import { deriveTurnTokenUsage } from '../src/turn-usage.ts'
 

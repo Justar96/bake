@@ -31,7 +31,7 @@ it('warns when MCP discovery exceeds the client page limit and completes the hea
   })
   expect(stdout).toBe('CLI tool round trip complete: CLI_TOOL_ROUND_TRIP\n')
   expect(stderr).toContain('dsh: warning: 1 entry did not activate')
-  expect(stderr).toContain('mcp-pagination-limit (@deepseek-ai/dsh-mcp-client)')
+  expect(stderr).toContain('mcp-pagination-limit (bake-mcp-client)')
   expect(stderr).toContain('initial connection or tool synchronization failed')
   const cause = stderr.split('\n').find(line => line.includes('tools/list exceeded'))
   await expect(`${cause}\n`).toMatchFileSnapshot(expectedPath)

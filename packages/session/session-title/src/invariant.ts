@@ -1,6 +1,6 @@
 /**
- * Package-owned invariant companion for `@deepseek-ai/dsh-session-title`.
- * @module @deepseek-ai/dsh-session-title/invariant
+ * Package-owned invariant companion for `bake-session-title`.
+ * @module bake-session-title/invariant
  */
 
 /* jscpd:ignore-start */
@@ -9,7 +9,7 @@ import type { InvariantFailure, InvariantInstaller } from 'bake-invariants'
 import { SessionSeq } from 'bake-session'
 import type { Session, SessionEvent } from 'bake-session'
 
-const PACKAGE_NAME = '@deepseek-ai/dsh-session-title'
+const PACKAGE_NAME = 'bake-session-title'
 
 /** Cordis companion plugin name. */
 export const name = 'session-title-invariant'

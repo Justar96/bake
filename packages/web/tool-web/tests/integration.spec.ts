@@ -1,7 +1,7 @@
 /**
- * Integration: the real fetch backend (`dsh-web-fetch-http`) + a stub search provider + the
- * real seam (`dsh-web`) + the model tool (`dsh-tool-web`) + the tool-call timeout policy
- * (`dsh-tool-call-timeout-policy`), exercised through `ctx.tools.execute()` — nothing bypasses
+ * Integration: the real fetch backend (`bake-web-fetch-http`) + a stub search provider + the
+ * real seam (`bake-web`) + the model tool (`bake-tool-web`) + the tool-call timeout policy
+ * (`bake-tool-call-timeout-policy`), exercised through `ctx.tools.execute()` — nothing bypasses
  * the tool registry. Fetch verifies world effects against loopback HTTP with public-address
  * resolution replaced by the fixture address; search runs through the seam against a stub
  * provider.
@@ -11,14 +11,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { AddressInfo } from 'node:net'
 import { Context } from '@deepseek-ai/cordis'
-import { ToolCallId } from '@deepseek-ai/dsh-llm'
+import { ToolCallId } from 'bake-llm'
 import SystemPrompt from 'bake-system-prompt'
 import ToolRuntime, { type ToolExecutionResult } from 'bake-tools'
-import WebRuntime from '@deepseek-ai/dsh-web'
-import type { WebSearchProvider } from '@deepseek-ai/dsh-web'
-import * as WebFetchLocal from '@deepseek-ai/dsh-web-fetch-http'
-import * as ToolWeb from '@deepseek-ai/dsh-tool-web'
-import * as TimeoutPolicy from '@deepseek-ai/dsh-tool-call-timeout-policy'
+import WebRuntime from 'bake-web'
+import type { WebSearchProvider } from 'bake-web'
+import * as WebFetchLocal from 'bake-web-fetch-http'
+import * as ToolWeb from 'bake-tool-web'
+import * as TimeoutPolicy from 'bake-tool-call-timeout-policy'
 import { publicHttpNetwork } from '../../web-fetch-http/src/network.ts'
 
 const testToolSignal = new AbortController().signal
@@ -158,7 +158,7 @@ describe('tool-call timeout returns TOOL_TIMEOUT (deadline wins over a slow fetc
   it('returns a structured TOOL_TIMEOUT (not the provider WEB_FETCH_TIMEOUT) when the tool-call budget wins', async () => {
     const out = await tctx.tools.execute({ signal: testToolSignal, callId: ToolCallId('slow-1'), name: 'web_fetch', arguments: { url: slowBase } })
     expect(out.isError).toBe(true)
-    // The outer tool-call deadline won: TOOL_TIMEOUT, owned by dsh-tool-call-timeout-policy,
+    // The outer tool-call deadline won: TOOL_TIMEOUT, owned by bake-tool-call-timeout-policy,
     // NOT the provider's own WEB_FETCH_TIMEOUT (its 30s backstop never fired).
     expect(out.error?.info?.code).toBe('TOOL_TIMEOUT')
     const text = out.content.map(b => (b.type === 'text' ? b.text : '')).join('')

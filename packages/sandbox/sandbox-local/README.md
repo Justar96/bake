@@ -3,11 +3,11 @@ description: "Local per-platform sandbox backends for users and maintainers choo
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-sandbox-local
+# bake-sandbox-local
 
 ## Summary
 
-`dsh-sandbox-local` confines commands and their descendants on Linux, macOS, and Windows while sharing the host kernel and filesystem. It chooses a supported platform runner automatically and fails with `SANDBOX_UNAVAILABLE` when none is usable, so commands never silently run without confinement. Each execution reports `full` or `partial` enforcement plus denial and runner-failure signatures, allowing callers to distinguish an unavailable or broken sandbox from a policy denial. Choose it for host-local bash or pwsh execution; use a container or remote executor when the process needs an isolated environment.
+`bake-sandbox-local` confines commands and their descendants on Linux, macOS, and Windows while sharing the host kernel and filesystem. It chooses a supported platform runner automatically and fails with `SANDBOX_UNAVAILABLE` when none is usable, so commands never silently run without confinement. Each execution reports `full` or `partial` enforcement plus denial and runner-failure signatures, allowing callers to distinguish an unavailable or broken sandbox from a policy denial. Choose it for host-local bash or pwsh execution; use a container or remote executor when the process needs an isolated environment.
 
 ## Table of Contents
 
@@ -35,7 +35,7 @@ Load the sandbox service and mount the provider; the defaults below are the sele
 
 ```yaml
 - id: sandbox
-  name: '@deepseek-ai/dsh-sandbox-local'
+  name: 'bake-sandbox-local'
 ```
 
 | Field | Default | Meaning |
@@ -44,7 +44,7 @@ Load the sandbox service and mount the provider; the defaults below are the sele
 | `runnerFailureSignatures` | `[]` | Case-insensitive stderr substrings identifying the custom runner's own failure dialect; required with `runnerCommand` |
 | `probeTimeoutMs` | `5,000` | Timeout for each functional probe of a competing runner candidate |
 
-The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-sandbox-local) is the exhaustive source for every accepted field and its JSDoc.
+The generated [configuration catalog](../../../docs/config-catalog.md#bake-sandbox-local) is the exhaustive source for every accepted field and its JSDoc.
 
 ### Confined execution and enforcement
 
@@ -112,7 +112,7 @@ Start with the subsystem reference for the shared vocabulary, then the seam cont
 <a id="model-experience"></a>
 ## Model Experience
 
-Indirectly, through [`dsh-bash-sandbox`](../../shell/bash-sandbox/README.md) and [`dsh-tool-bash`](../../shell/tool-bash/README.md), which render this provider's enforcement and denial facts, while the [`bake-sandbox`](../sandbox/README.md) seam owns the `SANDBOX_UNAVAILABLE` text and this provider owns runner selection, and profiles stay outside context.
+Indirectly, through [`bake-bash-sandbox`](../../shell/bash-sandbox/README.md) and [`bake-tool-bash`](../../shell/tool-bash/README.md), which render this provider's enforcement and denial facts, while the [`bake-sandbox`](../sandbox/README.md) seam owns the `SANDBOX_UNAVAILABLE` text and this provider owns runner selection, and profiles stay outside context.
 
 #### KV Cache effect
 

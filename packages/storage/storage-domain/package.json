@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-storage-domain",
+  "name": "bake-storage-domain",
   "description": "Domain data form (ctx.storage.domain): schema-validated, event-emitting KV domains over storage backends for the DeepSeek Harness",
   "version": "0.1.6-alpha.2",
   "publishConfig": {
@@ -33,7 +33,7 @@
   "license": "MIT",
   "peerDependencies": {
     "bake-invariants": "workspace:^",
-    "@deepseek-ai/dsh-storage": "workspace:^",
+    "bake-storage": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   },
   "dependencies": {
@@ -42,7 +42,7 @@
   },
   "devDependencies": {
     "bake-invariants": "workspace:^",
-    "@deepseek-ai/dsh-storage": "workspace:^",
+    "bake-storage": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   }
 }

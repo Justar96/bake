@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { createSystemMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createSystemMessage, createUserMessage } from 'bake-llm'
 import SessionStore, { SessionId, SessionSeq } from 'bake-session'
 import type { Session, SurfaceIntent } from 'bake-session'
 import { SystemPromptProjection } from '../src/runtime-context.ts'

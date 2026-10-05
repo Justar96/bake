@@ -891,7 +891,7 @@ describe('auditStartupEntries', () => {
   it('rejects a required entry pending on an injected service', async () => {
     await expect(auditStartupEntries(ctxWith([{
       fiber: fiber(0, undefined, { headlessStartup: {} }),
-      options: { id: 'headless-runner', name: '@deepseek-ai/dsh-headless' },
+      options: { id: 'headless-runner', name: 'bake-headless' },
     }]), NAME, vi.fn())).rejects.toThrow(
       'headless-runner (required)  headlessStartup',
     )

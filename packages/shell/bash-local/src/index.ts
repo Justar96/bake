@@ -6,7 +6,7 @@
  * classification, the model-friendly terminal environment, and the model-facing
  * stdout/stderr merge for background reads. Execution policy belongs in
  * `tools/pre-execute` or a sandboxing executor.
- * @module @deepseek-ai/dsh-bash-local
+ * @module bake-bash-local
  */
 
 import { Context } from '@deepseek-ai/cordis'

@@ -11,7 +11,7 @@ import { dirname } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 // Type-only: resolves the `agentPresets` Context augmentation this controller reads.
-import type {} from '@deepseek-ai/dsh-agent-presets'
+import type {} from 'bake-agent-presets'
 import {
   canOpenNativePath,
   openNativePath,
@@ -291,7 +291,7 @@ export class SettingsController extends TypertRemoteService {
     if (settings === undefined) {
       throw new RemoteError(
         'gateway/internal',
-        'settings service is absent: this deployment does not mount a settings provider (e.g. @deepseek-ai/dsh-settings-file) in its composition',
+        'settings service is absent: this deployment does not mount a settings provider (e.g. bake-settings-file) in its composition',
         {},
       )
     }

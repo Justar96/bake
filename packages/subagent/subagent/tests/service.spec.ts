@@ -2,7 +2,7 @@ import { describe, expect, expectTypeOf, it, onTestFinished, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { type Agent } from 'bake-agent'
 
-import { HarnessError, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import { HarnessError, ReasoningEffortId } from 'bake-llm'
 import { carrierKeyOf } from 'bake-scope'
 import SubagentRuntime, {
   foldSubagentDescriptor,
@@ -17,9 +17,9 @@ import SubagentRuntime, {
   type SubagentRun,
   type SubagentRunEndInfo,
   type SubagentStartRequest,
-} from '@deepseek-ai/dsh-subagent'
+} from 'bake-subagent'
 import { Session, SessionId, type SessionEvent } from 'bake-session'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
+import SessionProjectionRegistry from 'bake-session-projection'
 
 function fakeParent(id = 'parent-1'): Agent {
   return { id: SessionId(id) } as unknown as Agent

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Context, Service } from '@deepseek-ai/cordis'
 import SessionStore, { SessionSeq, type Session, type SessionEvent } from 'bake-session'
-import * as PermissionInvariant from '@deepseek-ai/dsh-permission-presets/invariant'
+import * as PermissionInvariant from 'bake-permission-presets/invariant'
 import InvariantRegistry from 'bake-invariants'
 
 class PermissionProbe extends Service {

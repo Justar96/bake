@@ -1,6 +1,6 @@
 /** The TUI reads child identities from the real Harness subagent listing. */
 import { expect, it, vi } from 'vitest'
-import SubagentRuntime, { SUBAGENT_DESCRIPTOR_VERSION, type SubagentResult } from '@deepseek-ai/dsh-subagent'
+import SubagentRuntime, { SUBAGENT_DESCRIPTOR_VERSION, type SubagentResult } from 'bake-subagent'
 import { SessionId } from 'bake-session'
 import { transcriptRows } from '@dsh-tui/ui'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'
@@ -8,9 +8,9 @@ import { childOutcome } from '../src/subagents.ts'
 import { SessionController } from '../src/controller.ts'
 import { openSession } from '../src/session.ts'
 import { harness } from './harness.ts'
-import { createUserMessage, ToolCallId } from '@deepseek-ai/dsh-llm'
-import TokenMeter from '@deepseek-ai/dsh-token-meter'
-import * as ToolSubagent from '@deepseek-ai/dsh-tool-subagent'
+import { createUserMessage, ToolCallId } from 'bake-llm'
+import TokenMeter from 'bake-token-meter'
+import * as ToolSubagent from 'bake-tool-subagent'
 
 it('reads routing decisions from the parent projection and restores them without changing the root model', async () => {
   const fixture = await harness()

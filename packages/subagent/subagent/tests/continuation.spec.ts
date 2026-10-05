@@ -9,11 +9,11 @@ import AgentLoop from 'bake-agent-loop'
 import { mountAgentLoopTestDependencies } from 'bake-agent-loop-testkit'
 import { SessionId } from 'bake-session'
 import type { SessionEvent, SessionEventMap } from 'bake-session'
-import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
-import * as toolSchedule from '@deepseek-ai/dsh-schedule'
-import * as SubagentSpawn from '@deepseek-ai/dsh-subagent-spawn-in-process'
-import type { ContentBlock, GenerateOptions, MessageId, StreamChunk } from '@deepseek-ai/dsh-llm'
-import { ToolCallId, createUserMessage, LlmAdapter, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import JsonlSessionPersistence from 'bake-session-persistence-jsonl'
+import * as toolSchedule from 'bake-schedule'
+import * as SubagentSpawn from 'bake-subagent-spawn-in-process'
+import type { ContentBlock, GenerateOptions, MessageId, StreamChunk } from 'bake-llm'
+import { ToolCallId, createUserMessage, LlmAdapter, ReasoningEffortId } from 'bake-llm'
 import { defineTool } from 'bake-tools'
 import InvariantRegistry from 'bake-invariants'
 import { MockAdapter, maxTokensResponse, textResponse, toolCallResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
@@ -2780,7 +2780,7 @@ describe('continuable settlement delivery', () => {
       { chunks: textResponse('parent ack') },
     ])
     const { ctx, parent } = await setupWith(adapter)
-    // The shipped durability checkpoint (`dsh-session-checkpoint-policy`) is
+    // The shipped durability checkpoint (`bake-session-checkpoint-policy`) is
     // fail-closed at the step boundary, so a rejected write ends the turn after
     // it claimed its messages and before it entered a step.
     ctx.on('agent/pre-step', async ({ agent: subject, turn }, next) => {

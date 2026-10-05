@@ -3,7 +3,7 @@ import { Context } from '@deepseek-ai/cordis'
 import SessionStore, { SessionId } from 'bake-session'
 import InvariantRegistry from 'bake-invariants'
 import * as AgentLoopInvariant from 'bake-agent-loop/invariant'
-import { createUserMessage, markAgentLoopRequest, type GenerateOptions  } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, markAgentLoopRequest, type GenerateOptions  } from 'bake-llm'
 
 async function setup(): Promise<Context> {
   const ctx = new Context()

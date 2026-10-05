@@ -8,7 +8,7 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { AnonymousEntries, NamedEntries, ScopedLayers, scopeTarget } from 'bake-scope'
 import type { ScopeKey, ScopeLayer, Scoped } from 'bake-scope'
-import type { ContextSnapshotSection, ToolSchema } from '@deepseek-ai/dsh-llm'
+import type { ContextSnapshotSection, ToolSchema } from 'bake-llm'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {

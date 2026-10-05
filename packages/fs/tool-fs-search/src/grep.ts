@@ -8,7 +8,7 @@
  * `--json` record parsing, per-line preview retention, match retention,
  * grouping, and formatting; process concerns stay behind `ctx.subprocess`.
  *
- * @module @deepseek-ai/dsh-tool-fs-search/grep
+ * @module bake-tool-fs-search/grep
  */
 
 import type { Context } from '@deepseek-ai/cordis'

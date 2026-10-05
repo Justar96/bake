@@ -1,6 +1,6 @@
 /** Browser-safe durable image selection declaration and pure replay definition. */
 
-import type { Message } from '@deepseek-ai/dsh-llm'
+import type { Message } from 'bake-llm'
 import type { SessionSeq } from 'bake-session/types'
 import type { SessionMessageProjection } from 'bake-session/surface'
 import { offloadMessageImages } from './project-message.ts'

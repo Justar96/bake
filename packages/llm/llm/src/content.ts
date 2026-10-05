@@ -1,4 +1,4 @@
-/** Content-block structure helpers. @module @deepseek-ai/dsh-llm/content */
+/** Content-block structure helpers. @module bake-llm/content */
 
 import type { ContentBlock, ImageBlock, LlmImageRequestBudget } from './types.ts'
 import type { Message } from './message.ts'

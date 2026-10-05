@@ -5,7 +5,7 @@ import { Context } from '@deepseek-ai/cordis'
 import AgentDefaultModelConfig, { AGENT_DEFAULT_MODEL_SETTINGS_NAMESPACE } from '../src/index.ts'
 import { SettingsProvider } from 'bake-settings'
 import type { SettingsNamespace } from 'bake-settings'
-import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import { ReasoningEffortId } from 'bake-llm'
 
 /** The smallest real provider: one in-memory document, always writable. */
 class MemorySettings extends SettingsProvider {

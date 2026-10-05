@@ -11,7 +11,7 @@
  * @module @dsh-tui/app/live
  */
 
-import type { StreamChunk } from '@deepseek-ai/dsh-llm'
+import type { StreamChunk } from 'bake-llm'
 import type { Row } from '@dsh-tui/ui/rows.ts'
 import { PENDING_ARGUMENTS } from '@dsh-tui/ui/present.ts'
 

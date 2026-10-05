@@ -28,12 +28,12 @@
   "license": "MIT",
   "peerDependencies": {
     "bake-brand": "workspace:^",
-    "@deepseek-ai/dsh-home-paths": "workspace:^",
+    "bake-home-paths": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   },
   "devDependencies": {
     "bake-brand": "workspace:^",
-    "@deepseek-ai/dsh-home-paths": "workspace:^",
+    "bake-home-paths": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   }
 }

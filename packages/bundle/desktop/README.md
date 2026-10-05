@@ -3,11 +3,11 @@ description: "Long-lived bridge that lets the Bake Desktop app drive one dsh Age
 kind: "package-bundle"
 ---
 
-# @deepseek-ai/dsh-desktop
+# bake-desktop
 
 ## Summary
 
-`dsh-desktop` is the bundle the Bake Desktop app launches: `dsh --profile desktop` keeps one process alive for a workspace, drives one root Agent, and exchanges protocol messages with the desktop. It streams assistant text, reports tool calls and token usage, forwards every approval question to the desktop's approval card, and applies the desktop's permission tier (read-only, normal, or full access). It also reports harness spans, so a desktop trace follows one turn from the user's click through the model request and each tool call. The boundary: one root Agent per process, driven only by the desktop protocol.
+`bake-desktop` is the bundle the Bake Desktop app launches: `dsh --profile desktop` keeps one process alive for a workspace, drives one root Agent, and exchanges protocol messages with the desktop. It streams assistant text, reports tool calls and token usage, forwards every approval question to the desktop's approval card, and applies the desktop's permission tier (read-only, normal, or full access). It also reports harness spans, so a desktop trace follows one turn from the user's click through the model request and each tool call. The boundary: one root Agent per process, driven only by the desktop protocol.
 
 ## Table of Contents
 
@@ -53,7 +53,7 @@ Every approval question for the root Agent becomes an `approval.request` carryin
 
 ### When to use it
 
-Use this profile when an application owns the conversation and the user interface: it needs streamed text, approval questions it can show, and a permission tier it can switch. Use `dsh-headless` for one task from a script, and the terminal profile for interactive use.
+Use this profile when an application owns the conversation and the user interface: it needs streamed text, approval questions it can show, and a permission tier it can switch. Use `bake-headless` for one task from a script, and the terminal profile for interactive use.
 
 -----
 
@@ -92,9 +92,9 @@ No runtime invariant companion is published; the bridge owns no durable Session 
 <a id="further-exploration"></a>
 ## Further Exploration
 
-- [`@deepseek-ai/dsh-headless`](../headless/README.md) — the one-shot runner this bridge is modelled on.
-- [`@deepseek-ai/dsh-permission-presets`](../../interaction/permission-presets/README.md) — the presets each tier selects.
-- [`@deepseek-ai/dsh-user-approval`](../../interaction/user-approval/README.md) — the approval service whose questions the bridge answers.
+- [`bake-headless`](../headless/README.md) — the one-shot runner this bridge is modelled on.
+- [`bake-permission-presets`](../../interaction/permission-presets/README.md) — the presets each tier selects.
+- [`bake-user-approval`](../../interaction/user-approval/README.md) — the approval service whose questions the bridge answers.
 
 -----
 

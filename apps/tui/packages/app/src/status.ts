@@ -1,8 +1,8 @@
 /** Display readings derived from the current session's Harness projections. */
-import type { ContextPressureProjection, TokenUsageProjection } from '@deepseek-ai/dsh-token-meter/client'
+import type { ContextPressureProjection, TokenUsageProjection } from 'bake-token-meter/client'
 import type { ContextUsage, TokenTotals } from '@dsh-tui/ui/format.ts'
 import type { GoalEntry } from '@dsh-tui/ui/goal.ts'
-import type { GoalView } from '@deepseek-ai/dsh-goal'
+import type { GoalView } from 'bake-goal'
 import type { CompactionEngine } from 'bake-compaction'
 
 /**

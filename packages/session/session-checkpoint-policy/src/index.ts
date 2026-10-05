@@ -1,12 +1,12 @@
 /**
  * Semantic durability checkpoints for model requests, top-level tool dispatch,
  * and completed agent steps.
- * @module @deepseek-ai/dsh-session-checkpoint-policy
+ * @module bake-session-checkpoint-policy
  */
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { Session } from 'bake-session'
-import type { StreamChunk } from '@deepseek-ai/dsh-llm'
+import type { StreamChunk } from 'bake-llm'
 import { TOOL_ABORTED_BEFORE_DISPATCH, type ToolExecutionResult } from 'bake-tools'
 import type { PreStepDecision } from 'bake-agent'
 import type {} from 'bake-session-persistence'

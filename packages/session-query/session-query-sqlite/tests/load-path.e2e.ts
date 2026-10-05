@@ -1,17 +1,17 @@
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage } from 'bake-llm'
 /**
  * Keyless real-Loader-path smoke for the combined SQLite session-query service.
  *
- * @module @deepseek-ai/dsh-session-query-sqlite/tests/load-path
+ * @module bake-session-query-sqlite/tests/load-path
  */
 
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import SessionStore, { SessionSeq, SESSION_FORMAT_VERSION, SessionId } from 'bake-session'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
-import SqliteSessionQueryEngine, * as queryModule from '@deepseek-ai/dsh-session-query-sqlite'
+import SessionProjectionRegistry from 'bake-session-projection'
+import JsonlSessionPersistence from 'bake-session-persistence-jsonl'
+import SqliteSessionQueryEngine, * as queryModule from 'bake-session-query-sqlite'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -30,7 +30,7 @@ async function temporaryPath(name: string): Promise<string> {
   return join(directory, name)
 }
 
-describe('dsh-session-query-sqlite real Loader path', () => {
+describe('bake-session-query-sqlite real Loader path', () => {
   it('unwraps, mounts, and searches the real persistence backend', async () => {
     const persistenceRoot = await temporaryPath('canonical')
     const searchPath = await temporaryPath('derived.db')

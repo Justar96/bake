@@ -3,11 +3,11 @@ description: "The model-facing bash tool for users and maintainers choosing, con
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-tool-bash
+# bake-tool-bash
 
 ## Summary
 
-`dsh-tool-bash` lets an agent run one-shot `bash` commands and receive stdout, stderr, and exit markers. Each call uses a fresh shell, so cwd, variables, and functions do not persist; `run_in_background` starts long-running work that the agent can inspect with `job_output` and stop with `job_kill`. Commands receive the managed `DSH_*` environment, and sandbox denials can be retried once with wider `sandbox_permissions`, a `justification`, and user approval. Non-zero exits are reported as results, so the agent decides how to respond; use an executor such as `dsh-bash-local` or `dsh-bash-sandbox` and load `dsh-shell-env`.
+`bake-tool-bash` lets an agent run one-shot `bash` commands and receive stdout, stderr, and exit markers. Each call uses a fresh shell, so cwd, variables, and functions do not persist; `run_in_background` starts long-running work that the agent can inspect with `job_output` and stop with `job_kill`. Commands receive the managed `DSH_*` environment, and sandbox denials can be retried once with wider `sandbox_permissions`, a `justification`, and user approval. Non-zero exits are reported as results, so the agent decides how to respond; use an executor such as `bake-bash-local` or `bake-bash-sandbox` and load `bake-shell-env`.
 
 ## Table of Contents
 
@@ -23,20 +23,20 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## Use this package
 
-Load this plugin in any composition where the agent should run bash commands: it registers the `bash` tool once an executor provider and the `dsh-shell-env` registry are mounted, and stays pending until the `tools`, `shell`, and `shellEnv` services exist.
+Load this plugin in any composition where the agent should run bash commands: it registers the `bash` tool once an executor provider and the `bake-shell-env` registry are mounted, and stays pending until the `tools`, `shell`, and `shellEnv` services exist.
 
 ### Minimal configuration
 
 The common path is an executor provider, the environment registry, and this tool; add the job runtime when the agent may run commands in the background.
 
 ```yaml
-- name: '@deepseek-ai/dsh-bash-local'
-- name: '@deepseek-ai/dsh-shell-env'
-- name: '@deepseek-ai/dsh-tool-bash'
+- name: 'bake-bash-local'
+- name: 'bake-shell-env'
+- name: 'bake-tool-bash'
 
 # Optional: background jobs
-- name: '@deepseek-ai/dsh-jobs-local'
-- name: '@deepseek-ai/dsh-tool-jobs'
+- name: 'bake-jobs-local'
+- name: 'bake-tool-jobs'
 ```
 
 The single config field toggles background support.
@@ -46,7 +46,7 @@ The single config field toggles background support.
 | `enableRunInBackground` | `true` | Expose `run_in_background`; when `false`, forced background calls are rejected |
 | `changeReport` | `true` | Show the workspace files a foreground call changed under its output, through [`bake-shell-change-report`](../shell-change-report/README.md); display only, so the model's result is the same either way |
 
-The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-tool-bash) is the exhaustive source for every accepted field and its JSDoc; the generated [tool catalog](../../../docs/tool-catalog.md#deepseek-aidsh-tool-bash) carries the full argument schema.
+The generated [configuration catalog](../../../docs/config-catalog.md#bake-tool-bash) is the exhaustive source for every accepted field and its JSDoc; the generated [tool catalog](../../../docs/tool-catalog.md#bake-tool-bash) carries the full argument schema.
 
 ### Running a command
 
@@ -55,15 +55,15 @@ The tool executes `bash -c <command>` and returns the combined output. Commands 
 <a id="running-long-commands-in-the-background"></a>
 ### Running long commands in the background
 
-Passing `run_in_background: true` admits a job and returns its id immediately; confinement preparation may still be pending, and no background execution timeout applies. Output is empty until the process is available. Job cancellation aborts preparation and stops any process that arrives afterward; startup failure settles the admitted job as failed. The agent reads its output with `job_output` (non-blocking unless `wait: true`), lists jobs with `job_list`, and stops it with `job_kill`; a finished job notifies the owning agent in-session. Background support needs the generic job runtime (`dsh-jobs-local`) and its control tools (`dsh-tool-jobs`) mounted.
+Passing `run_in_background: true` admits a job and returns its id immediately; confinement preparation may still be pending, and no background execution timeout applies. Output is empty until the process is available. Job cancellation aborts preparation and stops any process that arrives afterward; startup failure settles the admitted job as failed. The agent reads its output with `job_output` (non-blocking unless `wait: true`), lists jobs with `job_list`, and stops it with `job_kill`; a finished job notifies the owning agent in-session. Background support needs the generic job runtime (`bake-jobs-local`) and its control tools (`bake-tool-jobs`) mounted.
 
 ### Sandboxed execution and escalation
 
-When the mounted executor confines commands (for example `dsh-bash-sandbox`), a blocked file operation is reported as `[sandbox: file access denied under <mode> mode]` — a policy denial, not a command failure. The model may then retry the exact same command once in the same turn with `sandbox_permissions` (the narrowest wider mode that suffices) and a one-sentence `justification`; the approval prompt raised by that retry is how the user consents. Request wider access only after a real denial, or up front when the session already denied the same access; a rejected escalation is final for that command, while other commands may still run or escalate. Whether the session can request approval at all is stated by the approval policy's runtime context, so the tool description does not repeat it. Repeating the current mode runs without approval, while a narrower target fails before execution. Without `sandbox_permissions`, `justification` may be omitted, empty, or whitespace-only; a non-empty reason without a mode is rejected. Repeating the effective mode also permits an omitted or blank reason. A different requested mode requires a non-empty reason; widening still requires approval.
+When the mounted executor confines commands (for example `bake-bash-sandbox`), a blocked file operation is reported as `[sandbox: file access denied under <mode> mode]` — a policy denial, not a command failure. The model may then retry the exact same command once in the same turn with `sandbox_permissions` (the narrowest wider mode that suffices) and a one-sentence `justification`; the approval prompt raised by that retry is how the user consents. Request wider access only after a real denial, or up front when the session already denied the same access; a rejected escalation is final for that command, while other commands may still run or escalate. Whether the session can request approval at all is stated by the approval policy's runtime context, so the tool description does not repeat it. Repeating the current mode runs without approval, while a narrower target fails before execution. Without `sandbox_permissions`, `justification` may be omitted, empty, or whitespace-only; a non-empty reason without a mode is rejected. Repeating the effective mode also permits an omitted or blank reason. A different requested mode requires a non-empty reason; widening still requires approval.
 
 ### What can go wrong
 
-A composition with no executor provider never activates the tool. Background calls without the job runtime fail with `background jobs unavailable: load bake-jobs and @deepseek-ai/dsh-tool-jobs`, and `sandbox_permissions` without a sandboxing executor fails with `sandbox_permissions is not available in this composition (no sandboxing executor to escalate)`. `enableRunInBackground: false` removes the parameter and rejects a forced background call at execution time.
+A composition with no executor provider never activates the tool. Background calls without the job runtime fail with `background jobs unavailable: load bake-jobs and bake-tool-jobs`, and `sandbox_permissions` without a sandboxing executor fails with `sandbox_permissions is not available in this composition (no sandboxing executor to escalate)`. `enableRunInBackground: false` removes the parameter and rejects a forced background call at execution time.
 
 -----
 
@@ -113,8 +113,8 @@ Read these pages when the package-level contract is not enough. They move from t
 - [shell-env](../shell-env/README.md) — the managed `DSH_*` environment every call receives.
 - [tool-jobs](../../jobs/tool-jobs/README.md) — `job_output`, `job_list`, and `job_kill` controls for background runs.
 - [sandbox Agent Note](../../../.agents/notes/implemented/feature/2026-07-06-sandbox.md) — escalation and mode-switching rationale.
-- [Generated tool catalog](../../../docs/tool-catalog.md#deepseek-aidsh-tool-bash) — the exact `bash` argument schema.
-- [Generated configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-tool-bash) — every accepted config field and its source declaration.
+- [Generated tool catalog](../../../docs/tool-catalog.md#bake-tool-bash) — the exact `bash` argument schema.
+- [Generated configuration catalog](../../../docs/config-catalog.md#bake-tool-bash) — every accepted config field and its source declaration.
 
 -----
 
@@ -125,7 +125,7 @@ Read these pages when the package-level contract is not enough. They move from t
 
 #### What the model sees
 
-The model sees the generated [`bash` schema](../../../docs/tool-catalog.md#deepseek-aidsh-tool-bash). Its description is the tool's only guidance: this plugin contributes no system-prompt section, so an agent whose tool restriction hides `bash` sees nothing about it, and in PTC tools mode the same text documents the generated SDK function. The description keeps commands scoped to the current repository, points at `rg --files`, `glob`, or `grep` instead of filesystem-wide `find` scans, and tells the model to put builds and tests that may outlast their timeout in background jobs when that capability is enabled. `run_in_background` appears only when this producer enables it; `sandbox_permissions`, `justification`, and the description's sandbox paragraph (denial marker and escalation rules) appear only when the mounted executor advertises sandboxing, because only a confining executor can report a denial. The policy owner states the current sandbox mode and approval policy through its runtime context rather than changing this description. Agent-scoped tool restrictions can remove the definition for that agent.
+The model sees the generated [`bash` schema](../../../docs/tool-catalog.md#bake-tool-bash). Its description is the tool's only guidance: this plugin contributes no system-prompt section, so an agent whose tool restriction hides `bash` sees nothing about it, and in PTC tools mode the same text documents the generated SDK function. The description keeps commands scoped to the current repository, points at `rg --files`, `glob`, or `grep` instead of filesystem-wide `find` scans, and tells the model to put builds and tests that may outlast their timeout in background jobs when that capability is enabled. `run_in_background` appears only when this producer enables it; `sandbox_permissions`, `justification`, and the description's sandbox paragraph (denial marker and escalation rules) appear only when the mounted executor advertises sandboxing, because only a confining executor can report a denial. The policy owner states the current sandbox mode and approval policy through its runtime context rather than changing this description. Agent-scoped tool restrictions can remove the definition for that agent.
 
 #### Token effect
 
@@ -139,7 +139,7 @@ Prefix-stable while visibility, background support, and executor sandbox capabil
 
 #### What the model sees
 
-The renderer emits the data-dependent stdout tail, then optional `[stderr]` and the stderr tail. With no output it emits exactly `(no output)`. Conditional lines are exactly `[output truncated; full output: <path-or-(unavailable)>]`, `[sandbox: file access denied under <mode> mode]`, `[timed out after <timeoutMs>ms]`, `[killed by signal: <signal>]`, and `[exit code: <exitCode>]`; the sandbox escalation and runner-failure lines are quoted in [`dsh-bash-sandbox`](../bash-sandbox/README.md).
+The renderer emits the data-dependent stdout tail, then optional `[stderr]` and the stderr tail. With no output it emits exactly `(no output)`. Conditional lines are exactly `[output truncated; full output: <path-or-(unavailable)>]`, `[sandbox: file access denied under <mode> mode]`, `[timed out after <timeoutMs>ms]`, `[killed by signal: <signal>]`, and `[exit code: <exitCode>]`; the sandbox escalation and runner-failure lines are quoted in [`bake-bash-sandbox`](../bash-sandbox/README.md).
 
 #### Token effect
 
@@ -153,7 +153,7 @@ Append-only; newly visible content follows the reusable request prefix and does 
 
 #### What the model sees
 
-Start returns exactly `started background job <jobId>`. This producer supplies incremental process output, optional `[some output was dropped from memory; full output: <paths-or-(unavailable)>]`, sandbox facts, and terminal detail such as `exit code: <exitCode>` or `signal: <signal>` to the generic job runtime. [`dsh-tool-jobs`](../../jobs/tool-jobs/README.md) owns the visible status line, completion notice, listing, and cancellation response.
+Start returns exactly `started background job <jobId>`. This producer supplies incremental process output, optional `[some output was dropped from memory; full output: <paths-or-(unavailable)>]`, sandbox facts, and terminal detail such as `exit code: <exitCode>` or `signal: <signal>` to the generic job runtime. [`bake-tool-jobs`](../../jobs/tool-jobs/README.md) owns the visible status line, completion notice, listing, and cancellation response.
 
 #### Token effect
 
@@ -167,7 +167,7 @@ Append-only; newly visible content follows the reusable request prefix and does 
 
 #### What the model sees
 
-Validation and policy failures are normalized as `Error: <message>`. This package's stable messages are `invalid command: expected a non-empty string`, `invalid timeoutMs: expected a positive number, got <value>`, `invalid <timeout|timeout_ms>: expected a positive number of milliseconds for timeoutMs, got <value>`, the escalation pairing failures, `run_in_background is disabled for this deployment (enableRunInBackground: false)`, `background jobs unavailable: load bake-jobs and @deepseek-ai/dsh-tool-jobs`, `sandbox_permissions is not available in this composition (no sandboxing executor to escalate)`, the approval availability/rejection/cancellation variants, and `tool call aborted`.
+Validation and policy failures are normalized as `Error: <message>`. This package's stable messages are `invalid command: expected a non-empty string`, `invalid timeoutMs: expected a positive number, got <value>`, `invalid <timeout|timeout_ms>: expected a positive number of milliseconds for timeoutMs, got <value>`, the escalation pairing failures, `run_in_background is disabled for this deployment (enableRunInBackground: false)`, `background jobs unavailable: load bake-jobs and bake-tool-jobs`, `sandbox_permissions is not available in this composition (no sandboxing executor to escalate)`, the approval availability/rejection/cancellation variants, and `tool call aborted`.
 
 #### Token effect
 

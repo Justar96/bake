@@ -1,6 +1,6 @@
 /**
  * REAL-composition tier for the shipped telemetry row: the headless profile
- * over dsh-base, booted through the Loader in a child process with a local
+ * over bake-base, booted through the Loader in a child process with a local
  * OTLP collector. Session upload has no default destination; only
  * `DSH_TELEMETRY_OTLP_URL` turns it on, and `DSH_TELEMETRY_DISABLED` still
  * turns it off. `/feedback` tells the user which of these applies.
@@ -11,7 +11,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { LOADER_SMOKE_TEST_TIMEOUT_MS, runLoaderSmoke } from 'bake-loader-smoke'
-import { sharingNotice } from '@deepseek-ai/dsh-command-feedback'
+import { sharingNotice } from 'bake-command-feedback'
 
 const driver = fileURLToPath(new URL('./fixtures/driver.ts', import.meta.url))
 const configPath = fileURLToPath(new URL('./fixtures/telemetry.patch.yml', import.meta.url))

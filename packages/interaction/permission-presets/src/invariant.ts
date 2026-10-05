@@ -1,11 +1,11 @@
-/** Package-owned permission-preset event invariants. @module @deepseek-ai/dsh-permission-presets/invariant */
+/** Package-owned permission-preset event invariants. @module bake-permission-presets/invariant */
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { Session, SessionEvent } from 'bake-session'
 import type { InvariantFailure, InvariantInstaller } from 'bake-invariants'
 import { AUTO_PRESET } from './index.ts'
 
-const PACKAGE_NAME = '@deepseek-ai/dsh-permission-presets'
+const PACKAGE_NAME = 'bake-permission-presets'
 
 /** Cordis companion plugin name. */
 export const name = 'permission-presets-invariant'

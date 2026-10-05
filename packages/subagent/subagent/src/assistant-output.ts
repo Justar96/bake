@@ -7,10 +7,10 @@
  * select the accumulated assistant text. Selection is independent of the
  * run's stop reason.
  *
- * @module @deepseek-ai/dsh-subagent/assistant-output
+ * @module bake-subagent/assistant-output
  */
 
-import { joinAssistantStreamText, type ContentBlock } from '@deepseek-ai/dsh-llm'
+import { joinAssistantStreamText, type ContentBlock } from 'bake-llm'
 import type { SessionEvent } from 'bake-session'
 
 /**

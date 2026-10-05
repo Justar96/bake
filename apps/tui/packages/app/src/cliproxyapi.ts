@@ -1,7 +1,7 @@
 /** CLIProxyAPI connection setup for Bake's built-in pi-ai route. */
 import type { Context } from '@deepseek-ai/cordis'
 import { credentialRef } from 'bake-credentials'
-import { normalizeApiKey } from '@deepseek-ai/dsh-llm'
+import { normalizeApiKey } from 'bake-llm'
 import type {} from 'bake-settings'
 import type {} from 'bake-agent-default-model'
 import type { TuiCopy } from '@dsh-tui/ui/copy.ts'

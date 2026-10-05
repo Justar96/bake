@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-agent-instructions",
+  "name": "bake-agent-instructions",
   "description": "Workspace context loader for AGENTS.md/CLAUDE.md instruction files",
   "version": "0.1.6-alpha.2",
   "publishConfig": {
@@ -30,10 +30,10 @@
     "@deepseek-ai/cordis": "workspace:^",
     "bake-agent": "workspace:^",
     "bake-fs": "workspace:^",
-    "@deepseek-ai/dsh-home-paths": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
+    "bake-home-paths": "workspace:^",
+    "bake-llm": "workspace:^",
     "bake-session": "workspace:^",
-    "@deepseek-ai/dsh-session-projection": "workspace:^",
+    "bake-session-projection": "workspace:^",
     "bake-tools": "workspace:^"
   },
   "dependencies": {
@@ -47,14 +47,14 @@
     "bake-agent-loop": "workspace:^",
     "bake-agent-loop-testkit": "workspace:^",
     "bake-fs": "workspace:^",
-    "@deepseek-ai/dsh-fs-local": "workspace:^",
-    "@deepseek-ai/dsh-home-paths": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
-    "@deepseek-ai/dsh-llm-pi-ai": "workspace:^",
+    "bake-fs-local": "workspace:^",
+    "bake-home-paths": "workspace:^",
+    "bake-llm": "workspace:^",
+    "bake-llm-pi-ai": "workspace:^",
     "bake-session": "workspace:^",
-    "@deepseek-ai/dsh-session-projection": "workspace:^",
+    "bake-session-projection": "workspace:^",
     "bake-system-prompt": "workspace:^",
-    "@deepseek-ai/dsh-tool-fs": "workspace:^",
+    "bake-tool-fs": "workspace:^",
     "bake-tools": "workspace:^"
   }
 }

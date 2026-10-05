@@ -9,7 +9,7 @@ import { mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { CHECK_CACHE, CHECK_INTERVAL_MS, hostTarget } from '@deepseek-ai/dsh-updater'
+import { CHECK_CACHE, CHECK_INTERVAL_MS, hostTarget } from 'bake-updater'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'
 import { progressStep, Updates } from '../src/update.ts'
 import type { InstallStep } from '@dsh-tui/ui/install-progress.ts'

@@ -3,10 +3,10 @@ import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import AgentRegistry from 'bake-agent'
 import type { Agent, AgentStatus } from 'bake-agent'
-import CommandRuntime from '@deepseek-ai/dsh-commands'
+import CommandRuntime from 'bake-commands'
 import SessionStore, { foldSurface, Session, SessionId } from 'bake-session'
-import * as commandFeedback from '@deepseek-ai/dsh-command-feedback'
-import type { FeedbackRecord } from '@deepseek-ai/dsh-command-feedback/types'
+import * as commandFeedback from 'bake-command-feedback'
+import type { FeedbackRecord } from 'bake-command-feedback/types'
 import { remoteMethods } from 'bake-typert-protocol'
 import { unsupportedInbox } from 'bake-agent-loop-testkit'
 
@@ -87,7 +87,7 @@ function feedbackTexts(session: Session): (string | undefined)[] {
   return feedbackRecords(session).map(record => record.text)
 }
 
-describe('@deepseek-ai/dsh-command-feedback registration', () => {
+describe('bake-command-feedback registration', () => {
   it('registers one global command with Loader-safe exports and disposes it', async () => {
     const test = await harness()
     expect(commandFeedback.name).toBe('command-feedback')

@@ -3,11 +3,11 @@ description: "Global send_message, interrupt_agent, and list_agents tools for us
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-tool-subagent-control
+# bake-tool-subagent-control
 
 ## Summary
 
-`dsh-tool-subagent-control` adds the global control tools for continuable children: `send_message` steers between a direct parent and child, `interrupt_agent` stops a child's current turn while keeping its inbox and descendants intact, and `list_agents` (from the separately loadable `list-agents` plugin) lists continuable children by agent id and label. Parents and continuable children inherit the same `send_message` definition and ordering, so model communication adds no child-only tool schema. No tool's presence decides whether a delegation tool starts continuable work.
+`bake-tool-subagent-control` adds the global control tools for continuable children: `send_message` steers between a direct parent and child, `interrupt_agent` stops a child's current turn while keeping its inbox and descendants intact, and `list_agents` (from the separately loadable `list-agents` plugin) lists continuable children by agent id and label. Parents and continuable children inherit the same `send_message` definition and ordering, so model communication adds no child-only tool schema. No tool's presence decides whether a delegation tool starts continuable work.
 
 ## Table of Contents
 
@@ -30,14 +30,14 @@ Mount this package in any composition with continuable children the model should
 Load the subagent service, a backend, the delegation tool, and this package. Adding the separate list plugin exposes all three tools:
 
 ```yaml
-- name: '@deepseek-ai/dsh-subagent'
-- name: '@deepseek-ai/dsh-subagent-spawn-in-process'
-- name: '@deepseek-ai/dsh-tool-subagent'
+- name: 'bake-subagent'
+- name: 'bake-subagent-spawn-in-process'
+- name: 'bake-tool-subagent'
   config:
     provider: spawn
     backgroundMode: continuable
-- name: '@deepseek-ai/dsh-tool-subagent-control'
-- name: '@deepseek-ai/dsh-tool-subagent-control/list-agents'
+- name: 'bake-tool-subagent-control'
+- name: 'bake-tool-subagent-control/list-agents'
 ```
 
 This package takes no configuration: the root plugin provides `send_message` and `interrupt_agent`, and the list plugin provides `list_agents`.
@@ -99,8 +99,8 @@ Each tool declares a pure `presentCall`, so a UI titles the call instead of prin
 Read these pages when the package-level contract is not enough; they move from the tool schemas to the continuation service behind them.
 
 - [Subagent subsystem](../../../docs/subsystems/subagent.md) — continuable children, activations, inbox, interrupt, and follow-up authority.
-- [dsh-tool-subagent](../tool-subagent/README.md) — the delegation tool that starts continuable children.
-- [Generated tool catalog](../../../docs/tool-catalog.md#deepseek-aidsh-tool-subagent-control) — the three tool schemas.
+- [bake-tool-subagent](../tool-subagent/README.md) — the delegation tool that starts continuable children.
+- [Generated tool catalog](../../../docs/tool-catalog.md#bake-tool-subagent-control) — the three tool schemas.
 
 -----
 
@@ -111,7 +111,7 @@ Read these pages when the package-level contract is not enough; they move from t
 
 #### What the model sees
 
-The generated [schemas](../../../docs/tool-catalog.md#deepseek-aidsh-tool-subagent-control): `send_message` takes `agent_id` and `message`; `interrupt_agent` takes `agent_id`; `list_agents` takes the optional `scope` enum. All three name agents by the same agent id that a continuable delegation returns and that settlement notices and `list_agents` rows show; job ids belong only to one-shot background jobs. The descriptions state the model-facing contract without service vocabulary: statuses and what a message does to each, delivery-only confirmation, direct-subagent-only messaging, and interrupting the current turn of any continuable descendant.
+The generated [schemas](../../../docs/tool-catalog.md#bake-tool-subagent-control): `send_message` takes `agent_id` and `message`; `interrupt_agent` takes `agent_id`; `list_agents` takes the optional `scope` enum. All three name agents by the same agent id that a continuable delegation returns and that settlement notices and `list_agents` rows show; job ids belong only to one-shot background jobs. The descriptions state the model-facing contract without service vocabulary: statuses and what a message does to each, delivery-only confirmation, direct-subagent-only messaging, and interrupting the current turn of any continuable descendant.
 
 #### Token effect
 

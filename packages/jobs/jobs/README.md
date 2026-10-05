@@ -23,11 +23,11 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## Use this package
 
-Use this package when you are composing a background-job capability or writing a producer that registers long work. The package itself defines the contract; a composition gets the feature by loading an implementation such as `dsh-jobs-local` and, for the model side, `dsh-tool-jobs`.
+Use this package when you are composing a background-job capability or writing a producer that registers long work. The package itself defines the contract; a composition gets the feature by loading an implementation such as `bake-jobs-local` and, for the model side, `bake-tool-jobs`.
 
 ### What a background job gives you
 
-A producer registers work with a kind and a one-line label; the registry returns a `<kind>-N` id such as `bash-1`. Anyone who owns the job can read output, list jobs, wait up to a timeout for settlement, and request cancellation — each call returns a fresh snapshot of the job's status, from `running` and `stopping` to the terminal `completed`, `killed`, or `failed`. When a job settles, the owning agent is notified through the completion listener that `dsh-tool-jobs` turns into an in-session notice, so no polling is needed. A producer may attach an optional byte cap so each complete model-facing output read or completion notice stays bounded.
+A producer registers work with a kind and a one-line label; the registry returns a `<kind>-N` id such as `bash-1`. Anyone who owns the job can read output, list jobs, wait up to a timeout for settlement, and request cancellation — each call returns a fresh snapshot of the job's status, from `running` and `stopping` to the terminal `completed`, `killed`, or `failed`. When a job settles, the owning agent is notified through the completion listener that `bake-tool-jobs` turns into an in-session notice, so no polling is needed. A producer may attach an optional byte cap so each complete model-facing output read or completion notice stays bounded.
 
 ### The ownership boundary
 
@@ -35,16 +35,16 @@ A job belongs to the agent session that started it: another agent cannot read or
 
 ### Starting background work needs a controller
 
-A producer can start work only while a controller that serves the owner is attached — loading `dsh-tool-jobs` attaches one. An agent whose composition loads no controller cannot start background work; `start()` fails with a message that names the missing controller rather than starting work the agent could never collect or stop.
+A producer can start work only while a controller that serves the owner is attached — loading `bake-tool-jobs` attaches one. An agent whose composition loads no controller cannot start background work; `start()` fails with a message that names the missing controller rather than starting work the agent could never collect or stop.
 
 ### Smallest working composition
 
 ```yaml
-- name: '@deepseek-ai/dsh-jobs-local'
-- name: '@deepseek-ai/dsh-tool-jobs'
+- name: 'bake-jobs-local'
+- name: 'bake-tool-jobs'
 ```
 
-Loading these two plugins on a harness base that already provides the agent, tools, and system-prompt services gives the full feature: `dsh-jobs-local` provides the in-process background-job registry, and `dsh-tool-jobs` provides the `job_output`, `job_list`, and `job_kill` tools plus completion-notice delivery.
+Loading these two plugins on a harness base that already provides the agent, tools, and system-prompt services gives the full feature: `bake-jobs-local` provides the in-process background-job registry, and `bake-tool-jobs` provides the `job_output`, `job_list`, and `job_kill` tools plus completion-notice delivery.
 
 ### What can go wrong
 

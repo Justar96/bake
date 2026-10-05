@@ -40,17 +40,17 @@
  * replaced content still has its replacement bounded, and value replacements
  * and `block` decisions pass through unchanged.
  *
- * @module @deepseek-ai/dsh-spill-policy
+ * @module bake-spill-policy
  */
 
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock } from 'bake-llm'
 import { TextRetainer } from 'bake-output-retention'
 import type { Omitted } from 'bake-output-retention'
 import type { SaveTextSpill, SpillRef } from 'bake-spill'
 import type { SessionId } from 'bake-session'
-import type { ToolCallId } from '@deepseek-ai/dsh-llm'
+import type { ToolCallId } from 'bake-llm'
 import type { PostToolDecision, ToolExecution } from 'bake-tools'
 import type { SpillPolicyExec } from './types.ts'
 import { formatSpillNotice } from './notice.ts'

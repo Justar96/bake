@@ -35,14 +35,14 @@ Mount the service with a backend and a confined executor; the [base bundle](../.
 
 ```yaml
 - id: sandbox
-  name: '@deepseek-ai/dsh-sandbox-local'     # the per-platform backend provider (ctx.sandbox)
+  name: 'bake-sandbox-local'     # the per-platform backend provider (ctx.sandbox)
 - id: sandbox-policy
-  name: '@deepseek-ai/dsh-sandbox-policy'    # the deployment default mode and workspace-write root
+  name: 'bake-sandbox-policy'    # the deployment default mode and workspace-write root
   config:
     mode: workspace-write                    # the deployment default every session starts from
     workspaceRoot: !!js process.cwd()        # the boundary workspace-write may write under
 - id: bash
-  name: '@deepseek-ai/dsh-bash-sandbox'      # the confined executor behind ctx.shell
+  name: 'bake-bash-sandbox'      # the confined executor behind ctx.shell
 ```
 
 With this composition, a bash call runs confined under `workspace-write`: writes inside the workspace succeed, writes outside it are denied, and the model can recover through the escalation flow below.
@@ -125,7 +125,7 @@ Start with the subsystem reference for the exhaustive contract, then the backend
 
 #### What the model sees
 
-Through [`dsh-bash-sandbox`](../../shell/bash-sandbox/README.md) and [`dsh-tool-bash`](../../shell/tool-bash/README.md), a requested confined mode with no usable backend produces code `SANDBOX_UNAVAILABLE` and the exact error below; an execution-time runner failure appends ` Runner failure: <detail>`.
+Through [`bake-bash-sandbox`](../../shell/bash-sandbox/README.md) and [`bake-tool-bash`](../../shell/tool-bash/README.md), a requested confined mode with no usable backend produces code `SANDBOX_UNAVAILABLE` and the exact error below; an execution-time runner failure appends ` Runner failure: <detail>`.
 
 ##### Exact error
 

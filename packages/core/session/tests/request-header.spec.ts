@@ -3,8 +3,8 @@
 import { describe, expect, it } from 'vitest'
 import { Session, SessionId, SessionSeq, canonicalHeader, foldRequestHeader, headerEquals } from 'bake-session'
 import type { EpochHeader, SessionEvent } from 'bake-session'
-import { createUserMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
-import type { ToolSchema } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, ReasoningEffortId } from 'bake-llm'
+import type { ToolSchema } from 'bake-llm'
 
 const CONFIG = { provider: 'mock', model: 'm' }
 

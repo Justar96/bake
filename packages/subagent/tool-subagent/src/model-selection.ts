@@ -1,7 +1,7 @@
 /** Child LLM route selection for the subagent tool. */
 
-import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
-import type { LlmCallConfig, LlmRuntime } from '@deepseek-ai/dsh-llm'
+import { ReasoningEffortId } from 'bake-llm'
+import type { LlmCallConfig, LlmRuntime } from 'bake-llm'
 import type { AgentOptions } from 'bake-agent'
 import z from '@deepseek-ai/schemastery'
 

@@ -1,6 +1,6 @@
 /** A session with no default provider starts on no model, and its first sign-in chooses one. */
 import { afterEach, expect, it, vi } from 'vitest'
-import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import { ReasoningEffortId } from 'bake-llm'
 import type { ModelSelectionRef } from 'bake-agent'
 import { formatRow, transcriptRows } from '@dsh-tui/ui'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'

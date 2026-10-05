@@ -5,9 +5,9 @@ import { Context } from '@deepseek-ai/cordis'
 import type { Fiber } from '@deepseek-ai/cordis'
 import { SettingsProvider } from 'bake-settings'
 import type { SettingsNamespace } from 'bake-settings'
-import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
+import LocalSubprocessRuntime from 'bake-subprocess-local'
 import { SHELL_SETTINGS_NAMESPACE } from 'bake-shell'
-import { LocalBashExecutor } from '@deepseek-ai/dsh-bash-local'
+import { LocalBashExecutor } from 'bake-bash-local'
 
 /** The smallest real provider: one in-memory document, always writable. */
 class MemorySettings extends SettingsProvider {

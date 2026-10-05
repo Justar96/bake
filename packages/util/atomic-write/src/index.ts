@@ -10,7 +10,7 @@
  * cycle can never resurrect a state another writer just replaced and a writer
  * that dies holding the lock never blocks the next one; readers stay
  * lock-free because the rename commit is atomic.
- * @module @deepseek-ai/dsh-atomic-write
+ * @module bake-atomic-write
  */
 
 import { randomBytes } from 'node:crypto'

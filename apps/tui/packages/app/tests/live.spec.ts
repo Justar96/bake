@@ -1,7 +1,7 @@
 /** What the live region shows while an attempt is still streaming. */
 import { describe, expect, it } from 'vitest'
-import { ToolCallId } from '@deepseek-ai/dsh-llm'
-import type { StreamChunk } from '@deepseek-ai/dsh-llm'
+import { ToolCallId } from 'bake-llm'
+import type { StreamChunk } from 'bake-llm'
 import { PENDING_ARGUMENTS, present, toolLabel, type ResultBound } from '@dsh-tui/ui/present.ts'
 import { iconFor } from '@dsh-tui/ui/icons.ts'
 import { LiveBlocks } from '../src/live.ts'

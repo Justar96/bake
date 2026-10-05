@@ -54,7 +54,7 @@ describe('Bake and DSH package license gate', () => {
       name: 'bake', license: 'MIT', workspaces: ['packages/*/*', 'vendor/*'],
     })
     writeManifest(root, 'packages/core/agent/package.json', { name: 'bake-agent', license: 'BSD-3-Clause' })
-    writeManifest(root, 'packages/llm/llm/package.json', { name: '@deepseek-ai/dsh-llm' })
+    writeManifest(root, 'packages/llm/llm/package.json', { name: 'bake-llm' })
     writeManifest(root, 'vendor/cordis/package.json', { name: '@deepseek-ai/cordis', license: 'BSD-3-Clause' })
     writeManifest(root, 'vendor/other/package.json', { name: 'bakery', license: 'BSD-3-Clause' })
 
@@ -62,7 +62,7 @@ describe('Bake and DSH package license gate', () => {
       packageCount: 3,
       failures: [
         'packages/core/agent/package.json: bake-agent must declare "license": "MIT"; found "BSD-3-Clause".',
-        'packages/llm/llm/package.json: @deepseek-ai/dsh-llm must declare "license": "MIT"; found undefined.',
+        'packages/llm/llm/package.json: bake-llm must declare "license": "MIT"; found undefined.',
       ],
     })
   })

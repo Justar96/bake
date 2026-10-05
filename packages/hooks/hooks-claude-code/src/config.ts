@@ -3,7 +3,7 @@
  * Only command hooks run; other hook types are returned as skipped so the
  * bridge can warn. Plugin-root and project-directory substitutions are applied
  * to commands at parse time.
- * @module @deepseek-ai/dsh-hooks-claude-code/config
+ * @module bake-hooks-claude-code/config
  */
 
 import { matcherDiagnostic, type MatcherGroup } from 'bake-hook-protocol'

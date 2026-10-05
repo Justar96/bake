@@ -45,13 +45,13 @@
     "bake-agent": "workspace:^",
     "bake-ptc-runtime": "workspace:^",
     "bake-invariants": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
+    "bake-llm": "workspace:^",
     "bake-scope": "workspace:^",
     "bake-session": "workspace:^",
     "bake-system-prompt": "workspace:^",
-    "@deepseek-ai/dsh-user-approval": "workspace:^",
+    "bake-user-approval": "workspace:^",
     "bake-sandbox": "workspace:^",
-    "@deepseek-ai/dsh-sandbox-policy": "workspace:^"
+    "bake-sandbox-policy": "workspace:^"
   },
   "dependencies": {
     "bake-brand": "workspace:^",
@@ -63,13 +63,13 @@
     "bake-agent": "workspace:^",
     "bake-ptc-runtime": "workspace:^",
     "bake-invariants": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
+    "bake-llm": "workspace:^",
     "bake-scope": "workspace:^",
     "bake-session": "workspace:^",
-    "@deepseek-ai/dsh-session-projection": "workspace:^",
+    "bake-session-projection": "workspace:^",
     "bake-system-prompt": "workspace:^",
-    "@deepseek-ai/dsh-user-approval": "workspace:^",
+    "bake-user-approval": "workspace:^",
     "bake-sandbox": "workspace:^",
-    "@deepseek-ai/dsh-sandbox-policy": "workspace:^"
+    "bake-sandbox-policy": "workspace:^"
   }
 }

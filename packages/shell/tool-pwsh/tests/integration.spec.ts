@@ -1,5 +1,5 @@
 /**
- * Integration tests: the REAL `@deepseek-ai/dsh-pwsh-local` executor plus the
+ * Integration tests: the REAL `bake-pwsh-local` executor plus the
  * `pwsh` tool, exercised through `ctx.tools.execute()` with a real PowerShell
  * process. These verify the world — actual commands run, stdout/stderr come
  * back, exit codes render, timeouts abort, background jobs settle through the
@@ -15,15 +15,15 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { Context } from '@deepseek-ai/cordis'
-import { ToolCallId } from '@deepseek-ai/dsh-llm'
+import { ToolCallId } from 'bake-llm'
 import SystemPrompt from 'bake-system-prompt'
 import ToolRuntime, { TOOL_ABORTED } from 'bake-tools'
-import LocalJobRegistry from '@deepseek-ai/dsh-jobs-local'
-import * as ToolJobs from '@deepseek-ai/dsh-tool-jobs'
-import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
-import { PwshLocalExecutor, resolvePwshPath } from '@deepseek-ai/dsh-pwsh-local'
-import * as ToolPwsh from '@deepseek-ai/dsh-tool-pwsh'
-import * as BashEnvPlugin from '@deepseek-ai/dsh-shell-env'
+import LocalJobRegistry from 'bake-jobs-local'
+import * as ToolJobs from 'bake-tool-jobs'
+import LocalSubprocessRuntime from 'bake-subprocess-local'
+import { PwshLocalExecutor, resolvePwshPath } from 'bake-pwsh-local'
+import * as ToolPwsh from 'bake-tool-pwsh'
+import * as BashEnvPlugin from 'bake-shell-env'
 
 const testToolSignal = new AbortController().signal
 

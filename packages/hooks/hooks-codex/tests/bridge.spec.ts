@@ -1,4 +1,4 @@
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage } from 'bake-llm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -10,9 +10,9 @@ import { defineContentToolFixture } from 'bake-tools'
 import type { Agent } from 'bake-agent'
 import AgentLoop from 'bake-agent-loop'
 import { mountAgentLoopTestDependencies } from 'bake-agent-loop-testkit'
-import { LocalBashExecutor } from '@deepseek-ai/dsh-bash-local'
-import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
-import * as HooksCodex from '@deepseek-ai/dsh-hooks-codex'
+import { LocalBashExecutor } from 'bake-bash-local'
+import LocalSubprocessRuntime from 'bake-subprocess-local'
+import * as HooksCodex from 'bake-hooks-codex'
 import { MockAdapter, textResponse, toolCallResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
 
 /**

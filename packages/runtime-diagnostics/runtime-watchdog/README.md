@@ -3,7 +3,7 @@ description: "Process health diagnostics for long sessions: event-loop delay and
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-runtime-watchdog
+# bake-runtime-watchdog
 
 ## Summary
 
@@ -35,7 +35,7 @@ The base bundle mounts this row:
 
 ```yaml
 - id: runtime-watchdog
-  name: '@deepseek-ai/dsh-runtime-watchdog'
+  name: 'bake-runtime-watchdog'
   config:
     directory: !!js dshHomePath('diagnostics')
 ```
@@ -61,7 +61,7 @@ A patch replaces the row's whole `config`, so an override restates `directory`:
 | `fatalErrorReport` | `true` | Direct Node's fatal-error report into `directory` when Node runs with `--report-exclude-env` |
 | `heapSnapshots` | `0` | Near-limit heap snapshots V8 may write into `directory` when Node's `--diagnostic-dir` is `directory`; `0` disables them |
 
-A relative `directory` fails at startup, because it would resolve inside the workspace. The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-runtime-watchdog) documents every accepted value.
+A relative `directory` fails at startup, because it would resolve inside the workspace. The generated [configuration catalog](../../../docs/config-catalog.md#bake-runtime-watchdog) documents every accepted value.
 
 ### What you get
 
@@ -132,9 +132,9 @@ This section explains how the watchdog measures, decides, and records, and point
 
 Read these pages when the package-level contract is not enough. They move from the composition that mounts the watchdog to the Node facilities it configures.
 
-- [dsh-base bundle](../../bundle/base/README.md) — the shared row every profile inherits.
+- [bake-base bundle](../../bundle/base/README.md) — the shared row every profile inherits.
 - [App boot fail-loud](../../boot/app-boot/README.md#use-this-package) — why a throwing timer callback would end the process.
-- [Generated configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-runtime-watchdog) — every accepted config field and its source declaration.
+- [Generated configuration catalog](../../../docs/config-catalog.md#bake-runtime-watchdog) — every accepted config field and its source declaration.
 - [Node.js diagnostic report](https://nodejs.org/api/report.html) — the report's contents and the `--report-exclude-*` flags.
 - [runtime-diagnostics group map](../README.md) — the sibling invariant checks.
 

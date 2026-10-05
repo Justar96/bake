@@ -10,8 +10,8 @@
  * execute through `ctx.subprocess.spawn()` with fixed ripgrep argv templates —
  * never `ctx.shell`, never `ctx.shell.start()`, never a model-visible background
  * task. The tool layer owns schemas, argument validation, argv construction
- * ({@link module:@deepseek-ai/dsh-tool-fs-search/glob} /
- * {@link module:@deepseek-ai/dsh-tool-fs-search/grep}), result parsing,
+ * ({@link module:bake-tool-fs-search/glob} /
+ * {@link module:bake-tool-fs-search/grep}), result parsing,
  * retention, formatted-result spill, and timeout declaration; the subprocess
  * seam owns spawn execution, process-tree termination, environment scrubbing,
  * and raw output capture. The package injects `tools` and `subprocess` —
@@ -23,7 +23,7 @@
  * filesystem `read` root are the same workspace — a documented v1 deployment
  * requirement, not runtime-validated.
  *
- * @module @deepseek-ai/dsh-tool-fs-search
+ * @module bake-tool-fs-search
  */
 
 import type { Context } from '@deepseek-ai/cordis'
@@ -89,7 +89,7 @@ export interface Config {
   stderrMaxBytes?: number
   /**
    * Cooperative tool-call timeout budget (ms) on both tools, enforced by
-   * `@deepseek-ai/dsh-tool-call-timeout-policy` through `exec.signal`.
+   * `bake-tool-call-timeout-policy` through `exec.signal`.
    */
   timeoutMs?: number
 }

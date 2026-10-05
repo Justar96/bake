@@ -5,7 +5,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from 'bake-agent'
-import { createUserMessage, expandAssistantStream, type TokenUsage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, expandAssistantStream, type TokenUsage } from 'bake-llm'
 import type { SessionEvent } from 'bake-session'
 
 /** Result envelope consumed only by snapshot and composition tests. */

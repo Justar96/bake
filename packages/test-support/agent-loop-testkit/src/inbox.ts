@@ -1,5 +1,5 @@
 import type { Inbox, InboxTarget } from 'bake-agent'
-import type { MessageId } from '@deepseek-ai/dsh-llm'
+import type { MessageId } from 'bake-llm'
 import type { UserMessage } from 'bake-session'
 
 /**

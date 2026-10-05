@@ -1,4 +1,4 @@
-/** Package-owned approval audit-stream invariants. @module @deepseek-ai/dsh-user-approval/invariant */
+/** Package-owned approval audit-stream invariants. @module bake-user-approval/invariant */
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { Session, SessionEvent } from 'bake-session'
@@ -6,7 +6,7 @@ import type { InvariantFailure, InvariantInstaller } from 'bake-invariants'
 import type { ApprovalRequestId } from './index.ts'
 import { APPROVAL_POLICIES } from './index.ts'
 
-const PACKAGE_NAME = '@deepseek-ai/dsh-user-approval'
+const PACKAGE_NAME = 'bake-user-approval'
 const APPROVAL_OUTCOMES = ['allowed-once', 'rejected', 'cancelled', 'unavailable'] as const
 
 /** Cordis companion plugin name. */

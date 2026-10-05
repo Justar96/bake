@@ -9,8 +9,8 @@ import { basename, dirname, join, relative, resolve } from 'node:path'
 import { readFileSync, realpathSync } from 'node:fs'
 import {
   isProfileGenerationApplied, readProfileManifest, readProfilePatches, reconcileProfilePatches, PROFILE_PATCH_FILENAME,
-} from '@deepseek-ai/dsh-app-boot'
-import type {} from '@deepseek-ai/dsh-cmdline'
+} from 'bake-app-boot'
+import type {} from 'bake-cmdline'
 import { handleError } from './error.ts'
 import type {} from '@deepseek-ai/cordis-plugin-timer'
 import { fileURLToPath, pathToFileURL } from 'node:url'

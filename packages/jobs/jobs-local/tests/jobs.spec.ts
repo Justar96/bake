@@ -7,7 +7,7 @@ import { bindScopeParent, createScope, scopeOf } from 'bake-scope'
 import type { ScopeKey } from 'bake-scope'
 import { JobId } from 'bake-jobs'
 import type { JobHooks, JobKind, JobOutcome, JobSnapshot, JobStart } from 'bake-jobs'
-import LocalJobRegistry, { type Config as JobsConfig } from '@deepseek-ai/dsh-jobs-local'
+import LocalJobRegistry, { type Config as JobsConfig } from 'bake-jobs-local'
 import { unsupportedInbox } from 'bake-agent-loop-testkit'
 
 declare module 'bake-jobs' {

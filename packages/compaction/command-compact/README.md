@@ -3,11 +3,11 @@ description: "The on-demand /compact command for interactive compositions: what 
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-command-compact
+# bake-command-compact
 
 ## Summary
 
-`dsh-command-compact` adds a `/compact` command to chat UIs: type it and the conversation condenses on demand — the older history is replaced by one summary even before automatic pressure triggers. The command works with any condensation backend and does not consume a model turn; after it finishes you see how many history items were condensed and the estimated tokens saved. While the agent is mid-turn or condensation is already running, it tells you condensation is unavailable. Prompts you send while it runs stay queued and start after it finishes.
+`bake-command-compact` adds a `/compact` command to chat UIs: type it and the conversation condenses on demand — the older history is replaced by one summary even before automatic pressure triggers. The command works with any condensation backend and does not consume a model turn; after it finishes you see how many history items were condensed and the estimated tokens saved. While the agent is mid-turn or condensation is already running, it tells you condensation is unavailable. Prompts you send while it runs stay queued and start after it finishes.
 
 ## Table of Contents
 
@@ -53,11 +53,11 @@ Mount the command registry, one condensation backend, and this plugin:
 
 ```yaml
 - id: commands
-  name: '@deepseek-ai/dsh-commands'
+  name: 'bake-commands'
 - id: compaction-basic
-  name: '@deepseek-ai/dsh-compaction-basic'
+  name: 'bake-compaction-basic'
 - id: command-compact
-  name: '@deepseek-ai/dsh-command-compact'
+  name: 'bake-command-compact'
 ```
 
 The shipped `dsh` base mounts it beside the default backend, and the terminal app provides the command adapter. Automation surfaces that compose no command adapter keep automatic condensation only.

@@ -51,7 +51,7 @@
     "bake-attachment": "workspace:^",
     "bake-brand": "workspace:^",
     "bake-host-webserver": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
+    "bake-llm": "workspace:^",
     "bake-session": "workspace:^"
   }
 }

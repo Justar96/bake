@@ -10,9 +10,9 @@ import type {
   SaveImageAttachment,
   StoredImageAttachment,
 } from 'bake-attachment'
-import LlmRuntime, { createUserMessage, ToolCallId } from '@deepseek-ai/dsh-llm'
-import type { Message, ToolSchema } from '@deepseek-ai/dsh-llm'
-import * as LlmPiAi from '@deepseek-ai/dsh-llm-pi-ai'
+import LlmRuntime, { createUserMessage, ToolCallId } from 'bake-llm'
+import type { Message, ToolSchema } from 'bake-llm'
+import * as LlmPiAi from 'bake-llm-pi-ai'
 import type { PiAiReplayResponse } from '../src/replay.ts'
 import { assemble, type AssembledResult } from './assemble.ts'
 

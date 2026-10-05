@@ -2,7 +2,7 @@
  * Live Typert Remote dispatch over Cordis Services and registered providers.
  * Unary transport and response envelopes belong to Connection; live Remote
  * streams use the Gateway-owned WebSocket mux.
- * @module @deepseek-ai/dsh-api-gateway
+ * @module bake-api-gateway
  */
 
 import { randomUUID } from 'node:crypto'

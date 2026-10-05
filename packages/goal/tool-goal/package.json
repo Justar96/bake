@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-tool-goal",
+  "name": "bake-tool-goal",
   "description": "Model-facing same-session goal tools with execution-time authority checks",
   "version": "0.1.6-alpha.2",
   "publishConfig": {
@@ -28,12 +28,12 @@
   "license": "MIT",
   "peerDependencies": {
     "bake-agent": "workspace:^",
-    "@deepseek-ai/dsh-goal": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
+    "bake-goal": "workspace:^",
+    "bake-llm": "workspace:^",
     "bake-session": "workspace:^",
     "bake-tools": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^",
-    "@deepseek-ai/dsh-session-projection": "workspace:^"
+    "bake-session-projection": "workspace:^"
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "workspace:^"
@@ -43,12 +43,12 @@
     "bake-agent": "workspace:^",
     "bake-agent-loop-testkit": "workspace:^",
     "bake-agent-loop": "workspace:^",
-    "@deepseek-ai/dsh-goal": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
+    "bake-goal": "workspace:^",
+    "bake-llm": "workspace:^",
     "bake-session": "workspace:^",
     "bake-system-prompt": "workspace:^",
     "bake-tools": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^",
-    "@deepseek-ai/dsh-session-projection": "workspace:^"
+    "bake-session-projection": "workspace:^"
   }
 }

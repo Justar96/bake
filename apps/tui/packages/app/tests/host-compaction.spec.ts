@@ -1,6 +1,6 @@
 /**
  * The host compaction rows as the shipped terminal profile composes them:
- * `dsh-base` with the terminal bundle's patch applied by the Loader's own patch
+ * `bake-base` with the terminal bundle's patch applied by the Loader's own patch
  * semantics, mounted through the Loader. Automatic compaction reaches a preset
  * agent only through its preset's own engine, a preset without one never
  * compacts on its own, `/compact` works under both, and the user's settings
@@ -13,9 +13,9 @@ import * as yaml from 'js-yaml'
 import { afterEach, expect, it, vi } from 'vitest'
 import { applyEntryPatches, entryListSchema, type PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 import { Group, type EntryOptions } from '@deepseek-ai/cordis-plugin-loader'
-import { SHIPPED_PRESET_ROOT } from '@deepseek-ai/dsh-agent-presets'
+import { SHIPPED_PRESET_ROOT } from 'bake-agent-presets'
 import { SettingsProvider, type SettingsNamespace } from 'bake-settings'
-import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
+import type { GenerateOptions, StreamChunk } from 'bake-llm'
 import type { SessionEvent } from 'bake-session'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'
 import { SessionController } from '../src/controller.ts'
@@ -41,7 +41,7 @@ async function load(path: string): Promise<unknown> {
   return yaml.load(await readFile(path, 'utf8'), { schema: entryListSchema })
 }
 
-/** @returns the rows `dsh-base` inserts, after the named layer's patch. */
+/** @returns the rows `bake-base` inserts, after the named layer's patch. */
 async function composed(layer: Exclude<keyof typeof LAYERS, 'base'>): Promise<EntryOptions[]> {
   const patches = await Promise.all([LAYERS.base, LAYERS[layer]].map(async path => await load(join(REPOSITORY, path)) as PatchOptions[]))
   return applyEntryPatches([], patches.flat(), () => {})
@@ -122,7 +122,7 @@ async function terminal(settings?: Record<string, unknown>) {
   const rows = await composed('built')
   for (const id of HOST_ROWS) {
     const row = rows.find(entry => entry.id === id)
-    if (row === undefined) throw new Error(`dsh-base must insert ${id}`)
+    if (row === undefined) throw new Error(`bake-base must insert ${id}`)
     await fixture.ctx.loader.create(row)
   }
   await fixture.ctx.loader.await()

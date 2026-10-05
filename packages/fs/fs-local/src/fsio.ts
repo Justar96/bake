@@ -1,8 +1,8 @@
 /**
  * Cordis-free local filesystem mechanics. This provider layer returns validated UTF-8 text,
- * streams large files, and rejects binary data; line windows belong to `dsh-tool-fs`. Writes
+ * streams large files, and rejects binary data; line windows belong to `bake-tool-fs`. Writes
  * stage an exclusive owner-only file in a private sibling directory and atomically publish it.
- * @module @deepseek-ai/dsh-fs-local/fsio
+ * @module bake-fs-local/fsio
  */
 
 import { randomUUID } from 'node:crypto'

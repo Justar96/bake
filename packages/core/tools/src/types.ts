@@ -4,8 +4,8 @@
  * @module bake-tools/types
  */
 
-import type { ToolCallId } from '@deepseek-ai/dsh-llm/brand'
-import type { ContentBlock } from '@deepseek-ai/dsh-llm/types'
+import type { ToolCallId } from 'bake-llm/brand'
+import type { ContentBlock } from 'bake-llm/types'
 
 /** Payload recorded when one nested PTC mode Tool dispatch starts. */
 export interface PtcDispatchStartEventData {

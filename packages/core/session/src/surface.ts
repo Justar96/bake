@@ -5,7 +5,7 @@
  * @module bake-session/surface
  */
 
-import type { Message } from '@deepseek-ai/dsh-llm'
+import type { Message } from 'bake-llm'
 import { validateToolUpdateData } from './tool-history.ts'
 import { SessionLogOffset, SessionSeq } from './types.ts'
 import { KNOWN_SESSION_EVENT_TYPES, MESSAGE_PROJECTION_EVENT_TYPES } from './known-event-types.ts'

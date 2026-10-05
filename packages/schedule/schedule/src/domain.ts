@@ -1,6 +1,6 @@
 /**
  * Strict Schedule decoding, replay, time validation, and framing.
- * @module @deepseek-ai/dsh-schedule
+ * @module bake-schedule
  */
 
 import { SessionLogOffset } from 'bake-session'

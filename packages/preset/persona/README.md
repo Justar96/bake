@@ -3,11 +3,11 @@ description: "The composable persona row presets mount to give one agent its own
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-persona
+# bake-persona
 
 ## Summary
 
-`dsh-persona` gives one agent its own persona: a preset mounts this composable row to register persona prefix and suffix sections, shadowing the deployment-wide defaults for that session. It can also make the prefix the session's complete system prompt, suppressing every other section, and can turn off dynamic runtime-context snapshots for the session. Mount it inside a preset composition — mounting it globally collides with the prompt registry's own persona registration and fails loud. Without this row, a preset could change an agent's tools but never its identity.
+`bake-persona` gives one agent its own persona: a preset mounts this composable row to register persona prefix and suffix sections, shadowing the deployment-wide defaults for that session. It can also make the prefix the session's complete system prompt, suppressing every other section, and can turn off dynamic runtime-context snapshots for the session. Mount it inside a preset composition — mounting it globally collides with the prompt registry's own persona registration and fails loud. Without this row, a preset could change an agent's tools but never its identity.
 
 ## Table of Contents
 
@@ -28,7 +28,7 @@ Mount this row inside a preset composition to give that preset's sessions their 
 ### Configuration
 
 ```yaml
-- name: '@deepseek-ai/dsh-persona'
+- name: 'bake-persona'
   config:
     prefix: You are a terse systems engineer who answers in short commands.
 ```
@@ -40,7 +40,7 @@ Mount this row inside a preset composition to give that preset's sessions their 
 | `complete` | `false` | Use only the rendered prefix as the system prompt; ignore the suffix |
 | `includeRuntimeContext` | `true` | Include dynamic runtime-context snapshots for this agent scope; false suppresses every context contribution without disabling its owning services |
 
-The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-persona) is the exhaustive source for every accepted field and its JSDoc.
+The generated [configuration catalog](../../../docs/config-catalog.md#bake-persona) is the exhaustive source for every accepted field and its JSDoc.
 
 ### Persona behavior
 
@@ -84,7 +84,7 @@ Read these pages when the package-level contract is not enough; they move from t
 
 - [agent-presets package](../agent-presets/README.md) — the preset composition this row mounts into.
 - [System prompt subsystem](../../../docs/subsystems/system-prompt.md) — sections, assembly, and the persona slot this row shadows.
-- [Generated configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-persona) — every accepted config field and its source declaration.
+- [Generated configuration catalog](../../../docs/config-catalog.md#bake-persona) — every accepted config field and its source declaration.
 
 -----
 

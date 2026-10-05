@@ -5,7 +5,7 @@
  * Background policy is selected by this plugin's configuration: one-shot
  * calls own a plain Task, while continuable calls use
  * `ctx.subagents.startContinuable()`.
- * @module @deepseek-ai/dsh-tool-subagent
+ * @module bake-tool-subagent
  */
 
 import type { Context } from '@deepseek-ai/cordis'
@@ -13,8 +13,8 @@ import z from '@deepseek-ai/schemastery'
 import { scopeChainOf, scopeOf } from 'bake-scope'
 import { defineTool } from 'bake-tools'
 import type { Agent, AgentOptions } from 'bake-agent'
-import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock, LlmCallConfig } from '@deepseek-ai/dsh-llm'
+import { ReasoningEffortId } from 'bake-llm'
+import type { ContentBlock, LlmCallConfig } from 'bake-llm'
 import type { JsonValue } from 'bake-util-values'
 import { SessionSeq } from 'bake-session'
 import type { Session, SessionId } from 'bake-session'
@@ -22,8 +22,8 @@ import {
   assertSubagentMaxDepth,
   parentAgentOptionsForDelegation,
   settleRun,
-} from '@deepseek-ai/dsh-subagent'
-import type { SubagentProvider, SubagentResult, SubagentRun } from '@deepseek-ai/dsh-subagent'
+} from 'bake-subagent'
+import type { SubagentProvider, SubagentResult, SubagentRun } from 'bake-subagent'
 import type { JobOutcome } from 'bake-jobs'
 import {
   assertAllowedModelSelection,
@@ -658,7 +658,7 @@ export function apply(ctx: Context, config: Config, session?: Session): void {
   if (settings === undefined) {
     throw new Error(
       'tool-subagent: `modelSelectionSettings` requires '
-      + '@deepseek-ai/dsh-tool-subagent/model-selection-settings in the Host scope',
+      + 'bake-tool-subagent/model-selection-settings in the Host scope',
     )
   }
   const selectForSession = (target: Session): ModelSelectionPolicy | undefined => {

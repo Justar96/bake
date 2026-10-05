@@ -18,7 +18,7 @@
  * agent factory's `setup(agentCtx)` hook is the one supported call site,
  * because only there is the join installed while the agent is still
  * unpublished, so a rejected composition rolls the whole creation back.
- * @module @deepseek-ai/dsh-agent-presets
+ * @module bake-agent-presets
  */
 
 import { stat } from 'node:fs/promises'
@@ -29,15 +29,15 @@ import { Remote, RemoteError, TypertRemoteService } from 'bake-typert-protocol'
 import { bindScopeParent, createScope, scopeOf, type Scope, type ScopeKey, type ScopeParentBinding } from 'bake-scope'
 // Type-only: resolves the `agent/created` lifecycle event this service watches.
 import type {} from 'bake-agent'
-import type {} from '@deepseek-ai/dsh-app-boot'
+import type {} from 'bake-app-boot'
 import type { Agent } from 'bake-agent'
 import type { AgentPresetDocument, AgentPresetRoster } from './types.ts'
-import type {} from '@deepseek-ai/dsh-session-projection'
+import type {} from 'bake-session-projection'
 // Type-only: resolves the registry notification emitted after scope reparenting.
 import type {} from 'bake-tools'
 import type SettingsService from 'bake-settings'
 import type { SettingsScope } from 'bake-settings'
-import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
+import { dshHomePath } from 'bake-home-paths'
 import { discoverPresets, SHIPPED_PRESET_ROOT, USER_PRESET_DIR } from './discovery.ts'
 import { copyComposition, deleteComposition, presetExists, readComposition } from './authoring.ts'
 import { livePresetMounts, mountPreset, serviceForAgent, standingMountFor } from './mount.ts'
@@ -785,7 +785,7 @@ export class AgentPresets extends TypertRemoteService {
       const current = await compositionStamp(preset.path)
       if (current === undefined || sameStamp(mounted.stamp, current)) return mounted
       // TODO: reclaim the superseded generation once the last agent joined to
-      // it is gone. The subtree is not inert — `dsh-skill-filesystem` watches its
+      // it is gone. The subtree is not inert — `bake-skill-filesystem` watches its
       // roots — and the settings-page authoring flow turns "a composition
       // changed" into a per-save event. This needs a joined-agent count on
       // StandingMount, incremented in `mount`/`composeFrom`/`recompose` and

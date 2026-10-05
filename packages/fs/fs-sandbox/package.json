@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-fs-sandbox",
+  "name": "bake-fs-sandbox",
   "description": "Sandbox-enforcing implementation of the DeepSeek Harness filesystem seam: fences write/edit by the per-call sandbox mode (read-only denies mutation, workspace-write contains it to the workspace + temp roots) while reads pass through",
   "version": "0.1.6-alpha.2",
   "publishConfig": {
@@ -28,17 +28,17 @@
   "license": "MIT",
   "peerDependencies": {
     "bake-fs": "workspace:^",
-    "@deepseek-ai/dsh-fs-local": "workspace:^",
+    "bake-fs-local": "workspace:^",
     "bake-sandbox": "workspace:^",
-    "@deepseek-ai/dsh-sandbox-policy": "workspace:^",
+    "bake-sandbox-policy": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   },
   "devDependencies": {
     "bake-fs": "workspace:^",
-    "@deepseek-ai/dsh-fs-local": "workspace:^",
+    "bake-fs-local": "workspace:^",
     "bake-sandbox": "workspace:^",
-    "@deepseek-ai/dsh-sandbox-policy": "workspace:^",
+    "bake-sandbox-policy": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^",
-    "@deepseek-ai/dsh-session-projection": "workspace:^"
+    "bake-session-projection": "workspace:^"
   }
 }

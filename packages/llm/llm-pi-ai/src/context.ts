@@ -3,12 +3,12 @@
  * blocks in a user message or tool result stay separate pi-ai parts; only a
  * system message, one rendered prompt, is joined into a string.
  *
- * @module dsh-llm-pi-ai/context
+ * @module bake-llm-pi-ai/context
  */
 
 import { brandString } from 'bake-brand'
-import { contentHasImage, IMAGE_OFFLOAD_REQUIRED_CODE, LlmError, offloadedImageText, projectOffloadedImages, requestImageHandleText, requiredImageOffload } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock, GenerateOptions, ImageAttachmentAccessResolver, Message, ToolCallId } from '@deepseek-ai/dsh-llm'
+import { contentHasImage, IMAGE_OFFLOAD_REQUIRED_CODE, LlmError, offloadedImageText, projectOffloadedImages, requestImageHandleText, requiredImageOffload } from 'bake-llm'
+import type { ContentBlock, GenerateOptions, ImageAttachmentAccessResolver, Message, ToolCallId } from 'bake-llm'
 import type {
   AttachmentId,
   AttachmentStore,

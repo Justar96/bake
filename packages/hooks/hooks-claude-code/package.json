@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-hooks-claude-code",
+  "name": "bake-hooks-claude-code",
   "description": "Bridge plugin: run a Claude Code hooks.json / settings hook config on the DeepSeek Harness interception seams",
   "version": "0.1.6-alpha.2",
   "publishConfig": {
@@ -32,27 +32,27 @@
   "peerDependencies": {
     "bake-agent": "workspace:^",
     "bake-hook-protocol": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
+    "bake-llm": "workspace:^",
     "bake-session": "workspace:^",
-    "@deepseek-ai/dsh-subagent": "workspace:^",
+    "bake-subagent": "workspace:^",
     "bake-tools": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^",
-    "@deepseek-ai/dsh-session-projection": "workspace:^"
+    "bake-session-projection": "workspace:^"
   },
   "devDependencies": {
     "bake-agent": "workspace:^",
     "bake-agent-loop": "workspace:^",
     "bake-agent-loop-testkit": "workspace:^",
     "bake-shell": "workspace:^",
-    "@deepseek-ai/dsh-bash-local": "workspace:^",
-    "@deepseek-ai/dsh-subprocess-local": "workspace:^",
+    "bake-bash-local": "workspace:^",
+    "bake-subprocess-local": "workspace:^",
     "bake-hook-protocol": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
+    "bake-llm": "workspace:^",
     "bake-session": "workspace:^",
-    "@deepseek-ai/dsh-session-persistence-jsonl": "workspace:^",
-    "@deepseek-ai/dsh-subagent": "workspace:^",
+    "bake-session-persistence-jsonl": "workspace:^",
+    "bake-subagent": "workspace:^",
     "bake-tools": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^",
-    "@deepseek-ai/dsh-session-projection": "workspace:^"
+    "bake-session-projection": "workspace:^"
   }
 }

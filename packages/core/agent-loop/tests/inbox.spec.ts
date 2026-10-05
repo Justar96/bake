@@ -1,9 +1,9 @@
 import { Context } from '@deepseek-ai/cordis'
 import { agentEvents, type Agent } from 'bake-agent'
-import { createUserMessage, freezeMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, freezeMessage } from 'bake-llm'
 import SessionStore, { Session, SessionId } from 'bake-session'
 import type { UserMessage } from 'bake-session'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
+import SessionProjectionRegistry from 'bake-session-projection'
 import { describe, expect, it, onTestFinished } from 'vitest'
 import { inboxProjectionDefinition, ReactLoopInbox } from '../src/inbox.ts'
 

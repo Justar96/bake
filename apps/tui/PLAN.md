@@ -150,7 +150,7 @@ TUI-PROBE: missing  (4): sessionProjection, agentPresets, cmdline, workspace
 
 1. **An out-of-tree `.ts` plugin loads from source with no build and no publishing** — `./probe.ts` in a
    `--patch` overlay resolved to a `file://` URL and executed. The §8.1 dev loop is real.
-2. **The core TUI seams are already in `dsh-base`**: `commands`, `approval`, `skills`, `sessionQuery`,
+2. **The core TUI seams are already in `bake-base`**: `commands`, `approval`, `skills`, `sessionQuery`,
    `agents`, `sessions`. No upstream change is needed to reach any of them.
 3. **Some services are not base rows**, and the `tui` patch must add what it wants. This settles
    [open question 1](#14-open-questions): "the TUI composition, which has no presets" describes base
@@ -182,13 +182,13 @@ Two API details cost three iterations and are worth recording:
 | Package | npm `latest` |
 |---|---|
 | `@deepseek-ai/dsh` | 0.1.5-rc.2 |
-| `@deepseek-ai/dsh-base` | 0.0.1-rc.1 |
+| `bake-base` | 0.0.1-rc.1 |
 | `bake-agent` | 0.1.0-rc.6 |
 | `bake-session` | 0.0.1-rc.1 |
-| `@deepseek-ai/dsh-app-boot` | 0.1.0-rc.6 |
-| `@deepseek-ai/dsh-headless` | 0.0.1-rc.1 |
+| `bake-app-boot` | 0.1.0-rc.6 |
+| `bake-headless` | 0.0.1-rc.1 |
 | `@deepseek-ai/dsh-client-store` | 0.1.2-alpha.2 |
-| `@deepseek-ai/dsh-api-gateway` | 0.0.1-rc.1 |
+| `bake-api-gateway` | 0.0.1-rc.1 |
 | `@deepseek-ai/cordis` | 4.0.2 |
 
 **Consequence:** a truly out-of-tree package cannot be built against published versions today. Develop
@@ -218,7 +218,7 @@ All verified locally on bun 1.3.14:
 │  dsh --profile tui                                                 │
 │    app-boot → package-resolution generation → mounts the tree      │
 │                                                                    │
-│    @deepseek-ai/dsh-base rows  (agent-loop, session, llm, tools…)  │
+│    bake-base rows  (agent-loop, session, llm, tools…)  │
 │    @dsh-tui/app rows:                                              │
 │      tui-startup   cmdline flags → ctx.tuiStartup                  │
 │      tui-runner    owns stdin raw mode + the `release` teardown    │
@@ -267,7 +267,7 @@ the maximum honest extraction, not a wish list.
 | `bun install` at the repo root | The root is pnpm's: `overrides`, `link:vendor/*`, `patches/`, `onlyBuiltDependencies`, `peerDependencyRules`, and the `@pnpm/exe` pin do not transfer, and CI is pnpm. Two lockfiles in one tree is a support hazard. Root stays pnpm, always. |
 | `bun install` for `tui/` | Not while `tui/` is a pnpm workspace member ([§2.4](#24-published-package-state)). Returns at M7 if the package moves to its own repo. |
 | `bun test` for anything touching dsh services | Those tests must run on the runtime we ship to. Node + vitest, no exceptions. |
-| `bun --hot` for the plugin itself | dsh ships its own HMR (`dsh-hmr` watches the profile manifest and both patch files). Use the platform's reload, not a second one. |
+| `bun --hot` for the plugin itself | dsh ships its own HMR (`bake-hmr` watches the profile manifest and both patch files). Use the platform's reload, not a second one. |
 | `bun build --compile` | Single-binary distribution is an Option-2 feature. Node is required regardless, so it buys nothing here. |
 
 ### 4.3 The rule that keeps this honest
@@ -293,7 +293,7 @@ tui/
   experiments/             throwaway probes (probe.ts, probe.patch.yml)
   packages/
     app/                   @dsh-tui/app — the bundle: cordis.patch.yml + startup + runner
-      cordis.patch.yml     rows over @deepseek-ai/dsh-base
+      cordis.patch.yml     rows over bake-base
       src/index.ts         tui-runner: terminal ownership, lifecycle, release hook
       src/startup.ts       tui-startup: cmdline flags → ctx.tuiStartup
       src/session.ts       agent creation / adoption / resume
@@ -408,7 +408,7 @@ It is the first thing to run once Node is back, and M0's acceptance criterion.
 |---|---|---|
 | Component | `bun --hot tui/harness/dev.tsx` | sub-second, no dsh, no key |
 | Pure logic | `bun test tui/packages/ui` | ~100ms |
-| Integration | `dsh --profile tui` with `dsh-hmr` enabled | seconds; HMR watches the profile manifest and both patch files |
+| Integration | `dsh --profile tui` with `bake-hmr` enabled | seconds; HMR watches the profile manifest and both patch files |
 
 -----
 

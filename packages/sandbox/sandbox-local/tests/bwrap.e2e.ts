@@ -6,13 +6,13 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { SandboxPolicy } from 'bake-sandbox'
-import { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
+import { LocalSandboxProvider } from 'bake-sandbox-local'
 import { bwrapProfileArgs } from '../src/profiles.ts'
 
 /**
  * Keyless backend integration through `confine()` and a real bwrap process. With no rung forced,
  * a passing probe must select the first rung. Tests assert world effects, wrap shape, and that the
- * kernel denial matches the advertised dialect; consumer coverage lives in dsh-bash-sandbox.
+ * kernel denial matches the advertised dialect; consumer coverage lives in bake-bash-sandbox.
  * Skips when bwrap or user namespaces are unavailable. HOME-based workspaces avoid bwrap's
  * ephemeral `/tmp`, so workspace-write actually proves the workspace-root rebind.
  */

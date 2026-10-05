@@ -1,4 +1,4 @@
-# The dsh-base bundle patch: the shared core of each base-backed profile, applied as
+# The bake-base bundle patch: the shared core of each base-backed profile, applied as
 # ONE insert over the empty profile root. Later bundle patches and the user's
 # profile cordis.patch.yml address these rows by id, with the last write
 # winning per row.
@@ -14,11 +14,11 @@
 
 - insert:
     - id: tool-plugin-manager
-      name: '@deepseek-ai/dsh-plugin-manager/tools'
+      name: 'bake-plugin-manager/tools'
       disabled: true
 
     - id: plugin-manager
-      name: '@deepseek-ai/dsh-plugin-manager'
+      name: 'bake-plugin-manager'
       disabled: !!js "!ctx.get('profileContext')"
 
     - id: timer
@@ -26,35 +26,35 @@
 
     # Profile configuration reloads by default; module roots are opt-in.
     - id: hmr
-      name: '@deepseek-ai/dsh-hmr'
+      name: 'bake-hmr'
       disabled: !!js "!ctx.get('profileContext')"
       config:
         root: []
 
     - id: llm
-      name: '@deepseek-ai/dsh-llm'
+      name: 'bake-llm'
 
     - id: session
       name: 'bake-session'
 
     - id: typert
-      name: '@deepseek-ai/dsh-typert-registry'
+      name: 'bake-typert-registry'
 
     - id: typert-loader
-      name: '@deepseek-ai/dsh-typert-loader'
+      name: 'bake-typert-loader'
 
     - id: typert-gateway
-      name: '@deepseek-ai/dsh-api-gateway'
+      name: 'bake-api-gateway'
 
     - id: session-title
-      name: '@deepseek-ai/dsh-session-title'
+      name: 'bake-session-title'
       config:
         fallbackMaxWords: 5
         fallbackMaxBytes: 40
         maxTitleBytes: 80
 
     - id: session-title-llm
-      name: '@deepseek-ai/dsh-session-title-first-prompt-llm'
+      name: 'bake-session-title-first-prompt-llm'
       config:
         targetWords: 5
         targetCjkCharacters: 10
@@ -63,7 +63,7 @@
         timeoutMs: 60000
 
     - id: user-questions
-      name: '@deepseek-ai/dsh-user-questions'
+      name: 'bake-user-questions'
 
     - id: agent
       name: 'bake-agent'
@@ -76,24 +76,24 @@
       name: 'bake-agent-default-model'
 
     - id: jobs
-      name: '@deepseek-ai/dsh-jobs-local'
+      name: 'bake-jobs-local'
 
     - id: llm-retry
-      name: '@deepseek-ai/dsh-llm-retry'
+      name: 'bake-llm-retry'
 
     # User-settings document (`$DSH_HOME/settings.yaml`, hot-reloaded): a
     # `llm-pi-ai:` section there overrides the adapter entry below without a
     # restart. Bake has no web client; this file is edited
     # directly or through the TUI's settings surface.
     - id: settings
-      name: '@deepseek-ai/dsh-settings-file'
+      name: 'bake-settings-file'
 
     # Credential sources: inherited environment over the managed
     # `$DSH_HOME/.credentials.yaml`, with project and user `.env` fallbacks.
     # Adapters resolve references per request; only the managed document is
     # written back, and it is never materialized into the process environment.
     - id: credentials
-      name: '@deepseek-ai/dsh-credentials-local'
+      name: 'bake-credentials-local'
 
     # The LLM adapter. It ships one route, DeepSeek over its Anthropic-format
     # Messages endpoint; further routes register live when a `llm-pi-ai:` settings
@@ -105,7 +105,7 @@
     # the latest system message as the whole prompt and accepts native tool
     # changes, which the two in-history declarations state per model.
     - id: llm-pi-ai
-      name: '@deepseek-ai/dsh-llm-pi-ai'
+      name: 'bake-llm-pi-ai'
       config:
         providers:
           deepseek-official:
@@ -150,7 +150,7 @@
                   max: max
 
     - id: session-persistence-jsonl
-      name: '@deepseek-ai/dsh-session-persistence-jsonl'
+      name: 'bake-session-persistence-jsonl'
       config:
         root: !!js dshHomePath('sessions')
 
@@ -158,7 +158,7 @@
     # keep content-addressed references that this shared backend resolves for
     # provider requests and authorized history reads.
     - id: attachment-local
-      name: '@deepseek-ai/dsh-attachment-local'
+      name: 'bake-attachment-local'
 
     # Full-text session search is opt-in. `openAt: never` keeps
     # ctx.sessionQuery mounted — exact reads, titles, and lineage traces
@@ -169,7 +169,7 @@
     # `first-search` or `startup` in a later patch layer (profile
     # cordis.patch.yml or a --patch overlay), typically with a durable `path`.
     - id: session-query-sqlite
-      name: '@deepseek-ai/dsh-session-query-sqlite'
+      name: 'bake-session-query-sqlite'
       config:
         path: ':memory:'
         openAt: never
@@ -178,22 +178,22 @@
     # through its registered units, so the `list_agents` surface below fails
     # loud without it; web layers reuse this same mount for list rows.
     - id: session-projection
-      name: '@deepseek-ai/dsh-session-projection'
+      name: 'bake-session-projection'
 
     # Durable KV storage: the storage hub, the json backend, and the
     # schema-validated domain form over them. Session-layer persistence (the
     # projection cache below; workspace in web layers)
     # routes through this stack, so it belongs to the shared base.
     - id: storage
-      name: '@deepseek-ai/dsh-storage'
+      name: 'bake-storage'
 
     - id: storage-json
-      name: '@deepseek-ai/dsh-storage-json'
+      name: 'bake-storage-json'
       config:
         root: !!js dshHomePath('storages')
 
     - id: storage-domain
-      name: '@deepseek-ai/dsh-storage-domain'
+      name: 'bake-storage-domain'
       config:
         backend: json
 
@@ -202,7 +202,7 @@
     # checkpoint document per session), serving the session listing's
     # projection column.
     - id: session-projection-cache
-      name: '@deepseek-ai/dsh-session-projection-cache'
+      name: 'bake-session-projection-cache'
       config:
         writeEveryEvents: 200
         writeIntervalMs: 5000
@@ -229,7 +229,7 @@
     # promise never settles. Every CLI exit path drains it by disposing the root
     # on SIGINT/SIGTERM.
     - id: session-telemetry-otel
-      name: '@deepseek-ai/dsh-session-telemetry-otel'
+      name: 'bake-session-telemetry-otel'
       config:
         mode: !!js "process.env.DSH_TELEMETRY_OTLP_URL ? process.env.DSH_TELEMETRY_MODE || 'FEEDBACK_ONLY' : 'DISABLED'"
         shutdownTimeoutMillis: 3000
@@ -254,42 +254,42 @@
     # environment variables. Near-limit heap snapshots stay off: they are
     # heap-sized, pause the process, and need Node's --diagnostic-dir to match.
     - id: runtime-watchdog
-      name: '@deepseek-ai/dsh-runtime-watchdog'
+      name: 'bake-runtime-watchdog'
       config:
         directory: !!js dshHomePath('diagnostics')
 
     - id: subprocess
-      name: '@deepseek-ai/dsh-subprocess-local'
+      name: 'bake-subprocess-local'
 
     # Every shipped CLI mode starts with the same file-effect boundary.
     # The environment remains an explicit deployment override; otherwise fresh
     # sessions pin workspace-write + ask through the permission service below.
     - id: sandbox
-      name: '@deepseek-ai/dsh-sandbox-local'
+      name: 'bake-sandbox-local'
 
     - id: sandbox-policy
-      name: '@deepseek-ai/dsh-sandbox-policy'
+      name: 'bake-sandbox-policy'
       config:
         mode: !!js process.env.DSH_PERMISSION_MODE ?? 'workspace-write'
         workspaceRoot: !!js process.cwd()
 
     - id: bash-sandbox
-      name: '@deepseek-ai/dsh-bash-sandbox'
+      name: 'bake-bash-sandbox'
       disabled: !!js process.platform === 'win32'
       config:
         timeoutMs: 60000
 
     - id: pwsh-sandbox
-      name: '@deepseek-ai/dsh-pwsh-sandbox'
+      name: 'bake-pwsh-sandbox'
       disabled: !!js process.platform !== 'win32'
 
     - id: approval
-      name: '@deepseek-ai/dsh-user-approval'
+      name: 'bake-user-approval'
       config:
         policy: !!js "(process.env.DSH_PERMISSION_MODE ?? 'workspace-write') === 'danger-full-access' ? 'never' : 'ask'"
 
     - id: permission
-      name: '@deepseek-ai/dsh-permission-presets'
+      name: 'bake-permission-presets'
       config:
         defaultPreset: !!js process.env.DSH_PERMISSION_MODE ?? 'workspace-write'
         presets:
@@ -304,92 +304,92 @@
             approval: never
 
     - id: shell-env
-      name: '@deepseek-ai/dsh-shell-env'
+      name: 'bake-shell-env'
 
     - id: tool-bash
-      name: '@deepseek-ai/dsh-tool-bash'
+      name: 'bake-tool-bash'
       disabled: !!js process.platform === 'win32'
 
     - id: tool-pwsh
-      name: '@deepseek-ai/dsh-tool-pwsh'
+      name: 'bake-tool-pwsh'
       disabled: !!js process.platform !== 'win32'
 
     - id: tool-jobs
-      name: '@deepseek-ai/dsh-tool-jobs'
+      name: 'bake-tool-jobs'
 
     - id: fs-observation-policy
-      name: '@deepseek-ai/dsh-fs-observation-policy'
+      name: 'bake-fs-observation-policy'
 
     - id: tool-fs
-      name: '@deepseek-ai/dsh-tool-fs'
+      name: 'bake-tool-fs'
 
     - id: tool-fs-search
-      name: '@deepseek-ai/dsh-tool-fs-search'
+      name: 'bake-tool-fs-search'
       config:
         sampleOverCapGlobResults: false
 
     - id: agent-instructions
-      name: '@deepseek-ai/dsh-agent-instructions'
+      name: 'bake-agent-instructions'
       config:
         maxBytes: 65536
 
     - id: skill
-      name: '@deepseek-ai/dsh-skill'
+      name: 'bake-skill'
 
     - id: skill-filesystem
-      name: '@deepseek-ai/dsh-skill-filesystem'
+      name: 'bake-skill-filesystem'
 
     - id: skill-badge
-      name: '@deepseek-ai/dsh-skill-badge'
+      name: 'bake-skill-badge'
       disabled: true
 
     - id: tool-skill
-      name: '@deepseek-ai/dsh-tool-skill'
+      name: 'bake-tool-skill'
 
     - id: commands
-      name: '@deepseek-ai/dsh-commands'
+      name: 'bake-commands'
 
     - id: command-feedback
-      name: '@deepseek-ai/dsh-command-feedback'
+      name: 'bake-command-feedback'
 
     - id: goal
-      name: '@deepseek-ai/dsh-goal'
+      name: 'bake-goal'
 
     - id: goal-round-driver
-      name: '@deepseek-ai/dsh-goal-round-driver'
+      name: 'bake-goal-round-driver'
 
     - id: command-goal
-      name: '@deepseek-ai/dsh-command-goal'
+      name: 'bake-command-goal'
 
     - id: token-meter
-      name: '@deepseek-ai/dsh-token-meter'
+      name: 'bake-token-meter'
 
     - id: compaction-basic
-      name: '@deepseek-ai/dsh-compaction-basic'
+      name: 'bake-compaction-basic'
 
     # Human `/compact`: one useful reduction below the automatic threshold. Backend
     # independent, so it follows whichever compaction service this leaf mounts.
     - id: command-compact
-      name: '@deepseek-ai/dsh-command-compact'
+      name: 'bake-command-compact'
 
     - id: subagent
-      name: '@deepseek-ai/dsh-subagent'
+      name: 'bake-subagent'
 
     - id: subagent-spawn-in-process
-      name: '@deepseek-ai/dsh-subagent-spawn-in-process'
+      name: 'bake-subagent-spawn-in-process'
       config:
         providerName: spawn
 
     # Continuable background children are selected per delegation tool. The
     # separately loaded follow-up tool registers the one global `send_message`.
     - id: tool-subagent-control
-      name: '@deepseek-ai/dsh-tool-subagent-control'
+      name: 'bake-tool-subagent-control'
 
     - id: tool-subagent-list-agents
-      name: '@deepseek-ai/dsh-tool-subagent-control/list-agents'
+      name: 'bake-tool-subagent-control/list-agents'
 
     - id: tool-subagent
-      name: '@deepseek-ai/dsh-tool-subagent'
+      name: 'bake-tool-subagent'
       config:
         provider: spawn
         toolName: subagent
@@ -398,27 +398,27 @@
     # `run_code` programs run in a fresh QuickJS VM whose only capability is
     # the tool bindings; nested calls keep each tool's own policy and approval.
     - id: ptc-runtime
-      name: '@deepseek-ai/dsh-ptc-runtime-codemode'
+      name: 'bake-ptc-runtime-codemode'
 
     - id: timeout-policy
-      name: '@deepseek-ai/dsh-tool-call-timeout-policy'
+      name: 'bake-tool-call-timeout-policy'
 
     - id: spill-local
-      name: '@deepseek-ai/dsh-spill-local'
+      name: 'bake-spill-local'
 
     - id: spill-policy
-      name: '@deepseek-ai/dsh-spill-policy'
+      name: 'bake-spill-policy'
       config:
         maxInlineBytes: 50000
 
     # Durability checkpoints before each model request and top-level dispatch.
     - id: session-checkpoint-policy
-      name: '@deepseek-ai/dsh-session-checkpoint-policy'
+      name: 'bake-session-checkpoint-policy'
 
     # Compacts oversized tool results before the broader conversation compactor
     # runs, preserving the model-visible result within the configured budget.
     - id: tool-result-pruner
-      name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+      name: 'bake-compaction-tool-result-pruner'
       config:
         thresholdChars: 8192
         headChars: 4096
@@ -427,16 +427,16 @@
     # When an image-capable route rejects a request as over its image budget,
     # replace the oldest images with placeholders on the surface and retry.
     - id: image-offload
-      name: '@deepseek-ai/dsh-compaction-image-offload'
+      name: 'bake-compaction-image-offload'
 
     # Persisted same-session goals reach the model and the slash menu here; the
     # domain, driver, and `/goal` command are above.
     - id: tool-goal
-      name: '@deepseek-ai/dsh-tool-goal'
+      name: 'bake-tool-goal'
 
     # Consecutive-repeat reminders on the tool chain.
     - id: repeat-tool-reminder
-      name: '@deepseek-ai/dsh-repeat-tool-reminder'
+      name: 'bake-repeat-tool-reminder'
       config:
         thresholds: [3, 5, 8]
         argumentsPreviewChars: 500
@@ -453,27 +453,27 @@
     # shipped DeepSeek route gets 60s while the provider-neutral tool default
     # remains 30s.
     - id: web
-      name: '@deepseek-ai/dsh-web'
+      name: 'bake-web'
       config:
         searchProvider: deepseek-official
         fetchProvider: http
 
     - id: web-search-deepseek
-      name: '@deepseek-ai/dsh-web-search-deepseek'
+      name: 'bake-web-search-deepseek'
       config:
         apiKeyEnv: DEEPSEEK_API_KEY
 
     - id: web-fetch-http
-      name: '@deepseek-ai/dsh-web-fetch-http'
+      name: 'bake-web-fetch-http'
 
     - id: tool-web
-      name: '@deepseek-ai/dsh-tool-web'
+      name: 'bake-tool-web'
       config:
         fetch: true
         searchTimeoutMs: 60000
 
     - id: mcp-resources
-      name: '@deepseek-ai/dsh-mcp-resources'
+      name: 'bake-mcp-resources'
 
     # ── rows every mode mounts, whose values each overlay may state ──────────────
 
@@ -499,4 +499,4 @@
     # The sandboxed filesystem provider. `cwd` defaults to `process.cwd()`; an
     # overlay can pin another workspace.
     - id: fs-sandbox
-      name: '@deepseek-ai/dsh-fs-sandbox'
+      name: 'bake-fs-sandbox'

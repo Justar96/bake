@@ -3,11 +3,11 @@ description: "The human-facing /goal slash command for users and maintainers cho
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-command-goal
+# bake-command-goal
 
 ## Summary
 
-`dsh-command-goal` gives users the `/goal` command to create, edit, pause, resume, clear, and inspect the current goal directly in an interactive UI. Commands and their direct output stay in the UI and do not enter model requests. Accepted changes persist, and ordered image or file attachments on a create or edit become one ordinary user message that later goal rounds can read. Use this package in interactive deployments with a command adapter; headless and automation apps without one do not need it.
+`bake-command-goal` gives users the `/goal` command to create, edit, pause, resume, clear, and inspect the current goal directly in an interactive UI. Commands and their direct output stay in the UI and do not enter model requests. Accepted changes persist, and ordered image or file attachments on a create or edit become one ordinary user message that later goal rounds can read. Use this package in interactive deployments with a command adapter; headless and automation apps without one do not need it.
 
 ## Table of Contents
 
@@ -25,7 +25,7 @@ kind: "package-reference"
 
 The `/goal` command advertises `clear`, `edit`, `pause`, and `resume` as argument choices. A free-form objective remains valid; the handler owns the grammar and state checks.
 
-Use `dsh-command-goal` in interactive deployments that mount a command adapter — the terminal app is the reference. It gives users direct control over the goal lifecycle without a model turn: commands execute in the UI command plane and the adapter renders their results directly.
+Use `bake-command-goal` in interactive deployments that mount a command adapter — the terminal app is the reference. It gives users direct control over the goal lifecycle without a model turn: commands execute in the UI command plane and the adapter renders their results directly.
 
 ### Command reference
 
@@ -54,11 +54,11 @@ The command injects the commands registry and the goal service. A custom app mou
 
 ```yaml
 - id: commands
-  name: '@deepseek-ai/dsh-commands'
+  name: 'bake-commands'
 - id: goal
-  name: '@deepseek-ai/dsh-goal'
+  name: 'bake-goal'
 - id: command-goal
-  name: '@deepseek-ai/dsh-command-goal'
+  name: 'bake-command-goal'
 ```
 
 The shipped `dsh` base enables the persisted-goal stack and this command.

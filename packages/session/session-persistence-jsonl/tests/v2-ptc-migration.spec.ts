@@ -3,7 +3,7 @@
 import { Context } from '@deepseek-ai/cordis'
 import { Session, SessionId } from 'bake-session'
 import type { SessionFormatEvent } from 'bake-session-format'
-import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import JsonlSessionPersistence from 'bake-session-persistence-jsonl'
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'

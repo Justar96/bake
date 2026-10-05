@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-runtime-watchdog",
+  "name": "bake-runtime-watchdog",
   "description": "Process health diagnostics for long sessions: event-loop delay and heap sampling, rate-limited records, and fatal-error reports under the Harness home",
   "version": "0.1.6-alpha.2",
   "publishConfig": {
@@ -34,6 +34,6 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
-    "@deepseek-ai/dsh-app-boot": "workspace:^"
+    "bake-app-boot": "workspace:^"
   }
 }

@@ -1,4 +1,4 @@
-/** Local durable attachment backend rooted below `DSH_HOME`. @module @deepseek-ai/dsh-attachment-local */
+/** Local durable attachment backend rooted below `DSH_HOME`. @module bake-attachment-local */
 
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
@@ -14,7 +14,7 @@ import type {
   SaveImageAttachment,
   StoredImageAttachment,
 } from 'bake-attachment'
-import { dshCachePath, resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import { dshCachePath, resolveDshHome } from 'bake-home-paths'
 import type { NormalizationPolicy } from './normalization.ts'
 import { CompressionLimiter, compressionFailure } from './compression-limiter.ts'
 import { commitPreparedImageFile, normalizedImagePath, prepareImageFile, readImageFile, validateImageFile } from './store.ts'

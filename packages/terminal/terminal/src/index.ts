@@ -1,7 +1,7 @@
 /**
  * Owner-scoped persistent PTY registry. Backends own terminal mechanics while
  * this service owns ids, publication, authorization, and awaited cleanup.
- * @module @deepseek-ai/dsh-terminal
+ * @module bake-terminal
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'

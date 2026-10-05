@@ -21,7 +21,7 @@ import type {
   TypertRemoteScopeApi,
   TypertRemoteNamespace,
 } from 'bake-typert-protocol'
-import TypertRegistry from '@deepseek-ai/dsh-typert-registry'
+import TypertRegistry from 'bake-typert-registry'
 import type { ClientRemote } from '../src/client/index.ts'
 import { apply, inject, RemoteStream } from '../src/client/index.ts'
 import {

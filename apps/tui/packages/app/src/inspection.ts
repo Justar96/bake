@@ -1,9 +1,9 @@
 /** Read-only observation of a child transcript. The subagent keeps its own handle. */
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionEvent, SessionId } from 'bake-session'
-import type { ProjectionSnapshot } from '@deepseek-ai/dsh-session-projection'
-import type {} from '@deepseek-ai/dsh-token-meter'
-import type {} from '@deepseek-ai/dsh-permission-presets/types'
+import type { ProjectionSnapshot } from 'bake-session-projection'
+import type {} from 'bake-token-meter'
+import type {} from 'bake-permission-presets/types'
 import { Actions, foldEvent } from '@dsh-tui/ui/actions.ts'
 import { CallProgress } from '@dsh-tui/ui/progress.ts'
 import { project, projector } from '@dsh-tui/ui/project.ts'

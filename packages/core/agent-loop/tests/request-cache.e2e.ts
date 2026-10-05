@@ -1,16 +1,16 @@
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage } from 'bake-llm'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import LlmRuntime from '@deepseek-ai/dsh-llm'
+import LlmRuntime from 'bake-llm'
 import SessionStore, { SessionId } from 'bake-session'
 import SystemPrompt from 'bake-system-prompt'
 import ToolRuntime, { defineContentToolFixture } from 'bake-tools'
 import AgentRegistry, { type Agent } from 'bake-agent'
 
 import AgentLoop from 'bake-agent-loop'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import * as LlmPiAi from '@deepseek-ai/dsh-llm-pi-ai'
-import type { PiAiProviderProfile } from '@deepseek-ai/dsh-llm-pi-ai'
+import SessionProjectionRegistry from 'bake-session-projection'
+import * as LlmPiAi from 'bake-llm-pi-ai'
+import type { PiAiProviderProfile } from 'bake-llm-pi-ai'
 
 /**
  * With-key proof that log-derived requests translate into real provider cache hits: a

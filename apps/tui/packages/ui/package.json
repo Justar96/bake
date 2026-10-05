@@ -25,11 +25,11 @@
   "devDependencies": {
     "@xterm/headless": "catalog:",
     "bake-agent": "workspace:^",
-    "@deepseek-ai/dsh-commands": "workspace:^",
+    "bake-commands": "workspace:^",
     "bake-compaction": "workspace:^",
     "bake-session": "workspace:^",
     "bake-tools": "workspace:^",
-    "@deepseek-ai/dsh-user-questions": "workspace:^",
+    "bake-user-questions": "workspace:^",
     "@types/react": "catalog:",
     "ink-testing-library": "^4.0.0",
     "@types/mdast": "catalog:"

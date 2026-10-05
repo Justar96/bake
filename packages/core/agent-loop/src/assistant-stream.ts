@@ -11,7 +11,7 @@ import {
   type StreamChunk,
   type TokenUsage,
   type ToolCallBlock,
-} from '@deepseek-ai/dsh-llm'
+} from 'bake-llm'
 import type { AssistantStreamFrame } from 'bake-agent'
 import type { SessionEventMap, SessionId, SessionSeq } from 'bake-session'
 

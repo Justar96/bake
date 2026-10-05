@@ -37,7 +37,7 @@ A terminal UI consumer renders durable `session/event` records alongside transie
 ```ts
 import type { Context } from '@deepseek-ai/cordis'
 import { brandString } from 'bake-brand'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage } from 'bake-llm'
 import type { SessionId } from 'bake-session'
 
 declare function render(text: string): void
@@ -66,7 +66,7 @@ A *protocol driver* adapts a wire peer to `ctx.agents`; it may serve a UI or an 
 
 ```ts
 import type { Context } from '@deepseek-ai/cordis'
-import { expandAssistantStream } from '@deepseek-ai/dsh-llm'
+import { expandAssistantStream } from 'bake-llm'
 
 export const name = 'my-protocol-bridge'
 export const inject = ['agents', 'sessions', 'sessionPersistence']
@@ -100,11 +100,11 @@ Every product feature maps to a listener on a documented extension point — the
 
 | Product feature | Plugin mechanism |
 |---|---|
-| Hook system (user + project level) | listeners on `agent/created`, `agent/pre-step`, `agent/request`, `tools/pre-execute`, `tools/post-execute`, and `agent/turn-stopping`; the waterfalls return typed decisions, while `agent/turn-stopping` may steer another step; the `dsh-hooks-claude-code` / `dsh-hooks-codex` bridges map hook config files onto these extension points |
-| `/goal` | `ctx.goals` owns durable state, `dsh-goal-round-driver` schedules same-session rounds through the public `Agent`, and separate command/tool producers expose human/model control |
+| Hook system (user + project level) | listeners on `agent/created`, `agent/pre-step`, `agent/request`, `tools/pre-execute`, `tools/post-execute`, and `agent/turn-stopping`; the waterfalls return typed decisions, while `agent/turn-stopping` may steer another step; the `bake-hooks-claude-code` / `bake-hooks-codex` bridges map hook config files onto these extension points |
+| `/goal` | `ctx.goals` owns durable state, `bake-goal-round-driver` schedules same-session rounds through the public `Agent`, and separate command/tool producers expose human/model control |
 | `/loop` | on the `turn/end` session event, `followup()` the next iteration; or force-continue |
 | Queued + steering messages | core `Agent.followup()` / `Agent.steer()` |
-| Context compaction (auto + manual) | the `ctx.compaction` seam + `dsh-compaction-basic`; automatic pressure runs on serial `agent/pre-step`, canonical overflow recovery runs on `agent/request-error`, and manual callers use the same compact service ([compaction Agent Note](../../.agents/notes/implemented/feature/2026-06-18-compaction-capability-seam.md)) |
+| Context compaction (auto + manual) | the `ctx.compaction` seam + `bake-compaction-basic`; automatic pressure runs on serial `agent/pre-step`, canonical overflow recovery runs on `agent/request-error`, and manual callers use the same compact service ([compaction Agent Note](../../.agents/notes/implemented/feature/2026-06-18-compaction-capability-seam.md)) |
 | System prompt configurability | `ctx.systemPrompt.section()` with ordering and scope-local shadowing |
 | AGENTS.md (root) | a section provider reading the file |
 | AGENTS.md (subdir, on-touch) + file-change notices | `agent.inject()` from a watcher / tool-result listener |
@@ -113,14 +113,14 @@ Every product feature maps to a listener on a documented extension point — the
 | Tool deadline / retry / metrics | wrap core dispatch with `tools/execute`; a wrapper may replace `exec.signal`, delegate, and inspect the normalized result in one lexical lifetime |
 | Final tool-result metrics / audit / capture | observe immutable authoritative outcomes with `tools/result`; use `tools/post-execute` instead only when the plugin must transform the result or attach context |
 | Monotonic terminal turn policy | call `ToolExecution.concludeTurn()` from the successful terminal tool; later tool calls in the same response remain guardable, and the loop stops after the step |
-| Subprocess sandbox (landlock / sandbox-exec) | use a `ctx.sandbox` backend through `dsh-bash-sandbox`; use `tools/pre-execute` for capability-level denial |
+| Subprocess sandbox (landlock / sandbox-exec) | use a `ctx.sandbox` backend through `bake-bash-sandbox`; use `tools/pre-execute` for capability-level denial |
 | Permission system / AskUserQuestion | return `ask` from `tools/pre-execute` and answer through `ctx.approval`; register a separate model-facing ask tool for ordinary user questions |
-| Sub-agent delegation | the `ctx.subagents` provider registry (`dsh-subagent-spawn-in-process`) + `dsh-tool-subagent` exposing one configured provider to the model |
+| Sub-agent delegation | the `ctx.subagents` provider registry (`bake-subagent-spawn-in-process`) + `bake-tool-subagent` exposing one configured provider to the model |
 | MCP | one plugin per server: discover tools → `ctx.tools.register()` |
 | Skills | section + tool registration; `inject()` skill content on invocation |
 | Memory | section provider + tool |
 | Scheduled tasks (cron) | a plugin registers model-callable scheduling tools; timer fires → `followup(…, {source: {kind: 'plugin', plugin: 'schedule'}})` when idle / `inject()` notification when busy |
 | UI (GUI; CLI emits JSONL) | listen to `agent/assistant-stream` for live chunks and `session/event` for durable settlements, boundaries, and tool activity; input → `followup()` |
 | SessionTelemetryBackend / replayable trace | `session/event` → JSONL; replay = `sessions.create(id, { seed })` |
-| Model adapters | `LlmAdapter` subclass via `registerAdapter` (`dsh-llm-pi-ai`) |
+| Model adapters | `LlmAdapter` subclass via `registerAdapter` (`bake-llm-pi-ai`) |
 | Plugin hot-reload | every registration is a `ctx.effect` → vendored HMR just works |

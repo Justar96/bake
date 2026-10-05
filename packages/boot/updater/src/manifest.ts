@@ -1,7 +1,7 @@
 /**
  * The signed release manifest: what `latest.json` may say, and proof that
  * the release owner said it.
- * @module @deepseek-ai/dsh-updater/manifest
+ * @module bake-updater/manifest
  */
 
 import { createPublicKey, verify } from 'node:crypto'

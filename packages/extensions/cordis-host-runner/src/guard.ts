@@ -10,7 +10,7 @@
  * VM-realm schemas and canonical values are rebuilt as host objects, while rendered content and
  * presentation metadata are shape-checked before entering the registry. Common JSON-Schema spellings are normalized when they
  * have one meaning; invalid vocabulary fails during registration with a teaching error.
- * @module @deepseek-ai/dsh-cordis-host-runner/guard
+ * @module bake-cordis-host-runner/guard
  */
 
 import { Context } from '@deepseek-ai/cordis'
@@ -18,7 +18,7 @@ import type { Plugin } from '@deepseek-ai/cordis'
 import { scopeOf } from 'bake-scope'
 import { assertSupportedJsonSchema, defineTool } from 'bake-tools'
 import type { ToolDefinition } from 'bake-tools'
-import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock } from 'bake-llm'
 import { hasPlainArrayPrototype, isIntrinsicObjectPrototype, type JsonValue } from 'bake-util-values'
 
 const DYNAMIC_TOOL = Symbol('cordis-host-runner.dynamic-tool')

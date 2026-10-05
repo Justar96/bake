@@ -29,9 +29,9 @@
   "peerDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
     "bake-agent": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
+    "bake-llm": "workspace:^",
     "bake-session": "workspace:^",
-    "@deepseek-ai/dsh-subagent": "workspace:^",
+    "bake-subagent": "workspace:^",
     "bake-system-prompt": "workspace:^",
     "bake-tools": "workspace:^"
   },
@@ -42,18 +42,18 @@
     "bake-agent": "workspace:^",
     "bake-agent-loop": "workspace:^",
     "bake-agent-loop-testkit": "workspace:^",
-    "@deepseek-ai/dsh-agent-presets": "workspace:^",
-    "@deepseek-ai/dsh-fs-sandbox": "workspace:^",
+    "bake-agent-presets": "workspace:^",
+    "bake-fs-sandbox": "workspace:^",
     "bake-invariants": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
-    "@deepseek-ai/dsh-sandbox-policy": "workspace:^",
+    "bake-llm": "workspace:^",
+    "bake-sandbox-policy": "workspace:^",
     "bake-session": "workspace:^",
-    "@deepseek-ai/dsh-session-projection": "workspace:^",
-    "@deepseek-ai/dsh-subagent": "workspace:^",
+    "bake-session-projection": "workspace:^",
+    "bake-subagent": "workspace:^",
     "bake-system-prompt": "workspace:^",
-    "@deepseek-ai/dsh-tool-fs": "workspace:^",
+    "bake-tool-fs": "workspace:^",
     "bake-tools": "workspace:^",
-    "@deepseek-ai/dsh-user-approval": "workspace:^"
+    "bake-user-approval": "workspace:^"
   },
   "dependencies": {
     "bake-brand": "workspace:^"

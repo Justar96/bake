@@ -20,8 +20,8 @@ import { fileURLToPath } from 'node:url'
 import yaml from 'js-yaml'
 import { entryListSchema } from '@deepseek-ai/cordis-plugin-include'
 import { evaluate } from '@deepseek-ai/cordis-plugin-loader'
-import { SHIPPED_PRESET_ROOT } from '@deepseek-ai/dsh-agent-presets'
-import { composeEntries, initProfile, loadProfile, PROFILE_TEMPLATES, PROFILES_DIR } from '@deepseek-ai/dsh-app-boot'
+import { SHIPPED_PRESET_ROOT } from 'bake-agent-presets'
+import { composeEntries, initProfile, loadProfile, PROFILE_TEMPLATES, PROFILES_DIR } from 'bake-app-boot'
 
 /**
  * The effective disabled state of one row on one platform: a `!!js` expression
@@ -87,7 +87,7 @@ describe('the shipped shell composition (real bundle layers)', () => {
       // dependency closure into the profile's node_modules, so every bare
       // plugin name in the base patch must resolve from there.
       const cliManifest = JSON.parse(readFileSync(anchor, 'utf8')) as { dependencies?: Record<string, string> }
-      for (const bundle of [...PROFILE_TEMPLATES[name]!.bundles, '@deepseek-ai/dsh-pwsh-sandbox', '@deepseek-ai/dsh-tool-pwsh']) {
+      for (const bundle of [...PROFILE_TEMPLATES[name]!.bundles, 'bake-pwsh-sandbox', 'bake-tool-pwsh']) {
         expect(cliManifest.dependencies?.[bundle], `cold-start closure must reach ${bundle}`).toBeDefined()
       }
       expect(warnings).toEqual([])
@@ -96,7 +96,7 @@ describe('the shipped shell composition (real bundle layers)', () => {
 
   it('base-only profiles carry both stacks with the same platform gating', () => {
     home = mkdtempSync(join(tmpdir(), 'dsh-windows-home-'))
-    initProfile(join(home, PROFILES_DIR, 'base-only'), ['@deepseek-ai/dsh-base'])
+    initProfile(join(home, PROFILES_DIR, 'base-only'), ['bake-base'])
     const profile = loadProfile('dsh', 'base-only', anchor, home)
     const warnings: string[] = []
     const rows = composeEntries(

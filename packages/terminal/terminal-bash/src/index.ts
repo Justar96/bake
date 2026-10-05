@@ -1,19 +1,19 @@
 /**
  * Persistent shell PTY backend over the subprocess terminal primitive, shared
  * sandbox policy, bounded output, and provider-owned session cleanup.
- * @module @deepseek-ai/dsh-terminal-bash
+ * @module bake-terminal-bash
  */
 
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from 'bake-agent'
 import type { Session, SessionEvent } from 'bake-session'
-import { TerminalBackendCleanupError } from '@deepseek-ai/dsh-terminal'
-import type { TerminalBackend, TerminalBackendSpawnSpec, TerminalSendOperation } from '@deepseek-ai/dsh-terminal'
+import { TerminalBackendCleanupError } from 'bake-terminal'
+import type { TerminalBackend, TerminalBackendSpawnSpec, TerminalSendOperation } from 'bake-terminal'
 import type { SubprocessTerminalHandle, SubprocessTerminalSpawnSpec } from 'bake-subprocess'
 import type { SandboxExecutionPolicy } from 'bake-sandbox'
-import type {} from '@deepseek-ai/dsh-sandbox-policy'
-import type {} from '@deepseek-ai/dsh-session-projection'
-import { ENCODING_PREAMBLE } from '@deepseek-ai/dsh-pwsh-local'
+import type {} from 'bake-sandbox-policy'
+import type {} from 'bake-session-projection'
+import { ENCODING_PREAMBLE } from 'bake-pwsh-local'
 import { type Config, type ResolvedConfig, resolveConfig, type ShellDialect, validateConfig } from './config.ts'
 import { LocalPtySession } from './session.ts'
 import { CONTROLLED_PROMPT } from './sanitize.ts'

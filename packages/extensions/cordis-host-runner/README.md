@@ -3,11 +3,11 @@ description: "Host half of dynamic Cordis packages for agents and maintainers ch
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-cordis-host-runner
+# bake-cordis-host-runner
 
 ## Summary
 
-`dsh-cordis-host-runner` exposes runtime inspection and keeps process-local dynamic definitions available to programmatic callers and browser controls. Host halves run in a `node:vm` realm; browser halves use the Client runner and approval UI. Definitions disappear on restart. Agents discover APIs through `tool-cordis` and install persistent bundles through Plugin Manager; no model tool creates dynamic definitions.
+`bake-cordis-host-runner` exposes runtime inspection and keeps process-local dynamic definitions available to programmatic callers and browser controls. Host halves run in a `node:vm` realm; browser halves use the Client runner and approval UI. Definitions disappear on restart. Agents discover APIs through `tool-cordis` and install persistent bundles through Plugin Manager; no model tool creates dynamic definitions.
 
 ## Table of Contents
 
@@ -28,7 +28,7 @@ Mount this plugin for the inspection registry or programmatic dynamic-package li
 ### Minimal configuration
 
 ```yaml
-- name: '@deepseek-ai/dsh-cordis-host-runner'
+- name: 'bake-cordis-host-runner'
   config:
     vmTimeoutMs: 5000
 ```
@@ -37,7 +37,7 @@ Mount this plugin for the inspection registry or programmatic dynamic-package li
 |---|---|---|
 | `vmTimeoutMs` | `5000` | Milliseconds the synchronous portion of a host half may run in the vm before evaluation is aborted |
 
-The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-cordis-host-runner) is the exhaustive source for every accepted field.
+The generated [configuration catalog](../../../docs/config-catalog.md#bake-cordis-host-runner) is the exhaustive source for every accepted field.
 
 ### What a run does
 
@@ -91,7 +91,7 @@ The runner is built on two separations. **Registry and sandbox are one service.*
 Read these pages when the package-level contract is not enough. They move from the runner to the tools that call it, the browser half that answers it, and the generated surface.
 
 - [Tool package](../tool-cordis/README.md) — the read-only tools that use its inspection registry.
-- [Generated configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-cordis-host-runner) — every accepted config field.
+- [Generated configuration catalog](../../../docs/config-catalog.md#bake-cordis-host-runner) — every accepted config field.
 - [Extensions subsystem](../../../docs/subsystems/extensions.md) — the generated `ctx.cordisInspect` and `ctx.dynamicCordisRunner` API and `cordis/*` events.
 - [Self-referential Cordis toolset Agent Note](../../../.agents/notes/implemented/feature/2026-07-08-self-referential-cordis-toolset.md) — sandbox semantics, lifecycle, and composition rationale.
 

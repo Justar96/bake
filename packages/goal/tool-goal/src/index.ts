@@ -1,14 +1,14 @@
 /**
  * Model-facing `get_goal`, `create_goal`, and `update_goal` tools over the
  * persisted same-session goal domain.
- * @module @deepseek-ai/dsh-tool-goal
+ * @module bake-tool-goal
  */
 
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { GoalId } from '@deepseek-ai/dsh-goal'
-import type { GoalRef, GoalView } from '@deepseek-ai/dsh-goal'
-import { boundContextSummary, createUserMessage, HarnessError } from '@deepseek-ai/dsh-llm'
+import { GoalId } from 'bake-goal'
+import type { GoalRef, GoalView } from 'bake-goal'
+import { boundContextSummary, createUserMessage, HarnessError } from 'bake-llm'
 import { defineTool } from 'bake-tools'
 import type { GenericCallView } from 'bake-tools'
 import {

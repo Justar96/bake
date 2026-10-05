@@ -6,12 +6,12 @@
  */
 
 import { setTimeout as sleep } from 'node:timers/promises'
-import type { CommandResult } from '@deepseek-ai/dsh-commands'
-import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import type { CommandResult } from 'bake-commands'
+import { resolveDshHome } from 'bake-home-paths'
 import {
   cachedUpdate, checksDisabled, compareVersions, currentVersion, detectInstall, FAILED_CHECK_RETRY_MS, hostTarget,
   refreshCheck, releaseSource, selfUpdate, UpdateError, type InstallProgress,
-} from '@deepseek-ai/dsh-updater'
+} from 'bake-updater'
 import { assertNever } from 'bake-util-values'
 import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
 import type { InstallStep } from '@dsh-tui/ui/install-progress.ts'

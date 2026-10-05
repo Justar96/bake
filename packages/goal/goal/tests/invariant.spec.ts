@@ -1,11 +1,11 @@
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage } from 'bake-llm'
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import {
   GoalId,
   type GoalSnapshotChangeMeta,
-} from '@deepseek-ai/dsh-goal'
-import * as GoalInvariantCompanion from '@deepseek-ai/dsh-goal/invariant'
+} from 'bake-goal'
+import * as GoalInvariantCompanion from 'bake-goal/invariant'
 import InvariantRegistry, { InvariantError } from 'bake-invariants'
 import SessionStore, { SessionId } from 'bake-session'
 
@@ -54,7 +54,7 @@ describe('goal stream invariants', () => {
       session.append('goal/change', { ...change, extra: true } as never)
     }).toThrow(expect.objectContaining<Partial<InvariantError>>({
       code: 'INVARIANT',
-      packageName: '@deepseek-ai/dsh-goal',
+      packageName: 'bake-goal',
     }))
     expect(session.seq).toBe(0)
     expect(() => {

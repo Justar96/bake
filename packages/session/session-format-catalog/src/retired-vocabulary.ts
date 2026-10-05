@@ -24,8 +24,8 @@
  * @module bake-session-format-catalog/retired-vocabulary
  */
 import type { Branded } from 'bake-brand'
-import type { ContentBlock } from '@deepseek-ai/dsh-llm/types'
-import type { MessageId, ToolCallId } from '@deepseek-ai/dsh-llm/brand'
+import type { ContentBlock } from 'bake-llm/types'
+import type { MessageId, ToolCallId } from 'bake-llm/brand'
 import type { SessionId } from 'bake-session/types'
 
 /** Complete model selection a web client recorded for one Session. */
@@ -142,7 +142,7 @@ export interface RetiredTeamMessageSource {
   readonly senderName: string
 }
 
-declare module '@deepseek-ai/dsh-llm' {
+declare module 'bake-llm' {
   interface MessageSourceMap {
     /** A web client's prompt correlation and optional validated time zone. */
     'user-rpc': { kind: 'user'; rpcId: RetiredSessionRequestId; clientTimeZone?: string }

@@ -6,7 +6,7 @@
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { SessionId } from 'bake-session'
-import { foldSessionTitle } from '@deepseek-ai/dsh-session-title'
+import { foldSessionTitle } from 'bake-session-title'
 import type {
   SessionEventSearchPage,
   SessionEventSearchRequest,

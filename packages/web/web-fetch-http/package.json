@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-web-fetch-http",
+  "name": "bake-web-fetch-http",
   "description": "Anonymous public HTTP(S) fetch provider for the DeepSeek Harness web capability seam (ctx.web)",
   "version": "0.1.6-alpha.2",
   "publishConfig": {
@@ -29,8 +29,8 @@
   "peerDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
     "bake-timeout": "workspace:^",
-    "@deepseek-ai/dsh-web": "workspace:^",
-    "@deepseek-ai/dsh-http-proxy": "workspace:^"
+    "bake-web": "workspace:^",
+    "bake-http-proxy": "workspace:^"
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "workspace:^",
@@ -40,7 +40,7 @@
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
     "bake-timeout": "workspace:^",
-    "@deepseek-ai/dsh-web": "workspace:^",
-    "@deepseek-ai/dsh-http-proxy": "workspace:^"
+    "bake-web": "workspace:^",
+    "bake-http-proxy": "workspace:^"
   }
 }

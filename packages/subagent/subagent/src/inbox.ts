@@ -1,7 +1,7 @@
 /**
  * Activation-local admission around one continuable subagent's Agent inbox.
  *
- * @module @deepseek-ai/dsh-subagent/inbox
+ * @module bake-subagent/inbox
  */
 
 import type { Agent } from 'bake-agent'

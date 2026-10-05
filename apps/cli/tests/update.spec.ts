@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSyn
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { detectInstall, hostTarget } from '@deepseek-ai/dsh-updater'
+import { detectInstall, hostTarget } from 'bake-updater'
 import { runRollback, runUpdate, UPDATE_AVAILABLE_EXIT } from '../src/update.ts'
 
 const roots: string[] = []

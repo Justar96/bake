@@ -11,16 +11,16 @@
 
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import LlmRuntime from '@deepseek-ai/dsh-llm'
-import { createUserMessage, LlmAdapter } from '@deepseek-ai/dsh-llm'
-import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
+import LlmRuntime from 'bake-llm'
+import { createUserMessage, LlmAdapter } from 'bake-llm'
+import type { GenerateOptions, StreamChunk } from 'bake-llm'
 import SessionStore, { SessionId } from 'bake-session'
 import SystemPrompt from 'bake-system-prompt'
 import ToolRuntime from 'bake-tools'
 import AgentRegistry, { type Agent } from 'bake-agent'
 
 import AgentLoop from 'bake-agent-loop'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
+import SessionProjectionRegistry from 'bake-session-projection'
 import fc from 'fast-check'
 
 /** A never-exhausting adapter: every model call returns the same short reply. */

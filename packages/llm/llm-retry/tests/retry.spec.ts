@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { Fiber } from '@deepseek-ai/cordis'
-import LlmRuntime, { createUserMessage, ToolCallId, EMPTY_RESPONSE_CODE, LlmAdapter, LlmError, expandAssistantStream, resolveRetryPolicy  } from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { createUserMessage, ToolCallId, EMPTY_RESPONSE_CODE, LlmAdapter, LlmError, expandAssistantStream, resolveRetryPolicy  } from 'bake-llm'
 import type {
   AlwaysRetryPolicyConfig,
   BackoffConfig,
@@ -10,11 +10,11 @@ import type {
   ResolvedRetryPolicy,
   RetryPolicyConfig,
   StreamChunk,
-} from '@deepseek-ai/dsh-llm'
+} from 'bake-llm'
 import SessionStore, { SessionId } from 'bake-session'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
+import SessionProjectionRegistry from 'bake-session-projection'
 import type { SessionEvent, SessionEventMap } from 'bake-session'
-import type { LlmRetryEventData } from '@deepseek-ai/dsh-llm-retry/types'
+import type { LlmRetryEventData } from 'bake-llm-retry/types'
 import SystemPrompt from 'bake-system-prompt'
 import ToolRuntime, { defineContentToolFixture } from 'bake-tools'
 import AgentRegistry from 'bake-agent'

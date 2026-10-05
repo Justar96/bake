@@ -8,9 +8,9 @@ import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
 import AgentRegistry from 'bake-agent'
 import type { Agent, AgentStatus } from 'bake-agent'
-import CommandRuntime from '@deepseek-ai/dsh-commands'
+import CommandRuntime from 'bake-commands'
 import SessionStore, { SessionId } from 'bake-session'
-import * as CommandFeedback from '@deepseek-ai/dsh-command-feedback'
+import * as CommandFeedback from 'bake-command-feedback'
 import { getOrCreateAnonymousUserId } from 'bake-anonymous-user-id'
 import { unsupportedInbox } from 'bake-agent-loop-testkit'
 
@@ -58,8 +58,8 @@ describe('/feedback real Loader composition through cordis.yml', () => {
     await writeFile(configPath, [
       "- name: 'bake-agent'",
       "- name: 'bake-session'",
-      "- name: '@deepseek-ai/dsh-commands'",
-      "- name: '@deepseek-ai/dsh-command-feedback'",
+      "- name: 'bake-commands'",
+      "- name: 'bake-command-feedback'",
       '',
     ].join('\n'))
 
@@ -70,8 +70,8 @@ describe('/feedback real Loader composition through cordis.yml', () => {
     const modules = new Map<string, unknown>([
       ['bake-agent', AgentRegistry],
       ['bake-session', SessionStore],
-      ['@deepseek-ai/dsh-commands', CommandRuntime],
-      ['@deepseek-ai/dsh-command-feedback', CommandFeedback],
+      ['bake-commands', CommandRuntime],
+      ['bake-command-feedback', CommandFeedback],
     ])
     context.loader.internal = {
       version: 'v2',

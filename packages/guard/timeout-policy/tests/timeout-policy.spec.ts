@@ -1,5 +1,5 @@
 /**
- * Unit + real-load-path coverage for @deepseek-ai/dsh-tool-call-timeout-policy. The
+ * Unit + real-load-path coverage for bake-tool-call-timeout-policy. The
  * timeout-wins cases drive the deadline under fake timers (deterministic — no
  * wall-clock race) and use a COOPERATIVE tool that settles only when its
  * `exec.signal` aborts, mirroring how a real capability forwards the signal and
@@ -9,11 +9,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
-import { ToolCallId, HarnessError } from '@deepseek-ai/dsh-llm'
+import { ToolCallId, HarnessError } from 'bake-llm'
 import SystemPrompt from 'bake-system-prompt'
 import ToolRuntime, { defineContentToolFixture, TOOL_ABORTED, type ToolExecutionInput, type PostToolDecision } from 'bake-tools'
-import * as timeoutPolicy from '@deepseek-ai/dsh-tool-call-timeout-policy'
-import { TOOL_TIMEOUT } from '@deepseek-ai/dsh-tool-call-timeout-policy'
+import * as timeoutPolicy from 'bake-tool-call-timeout-policy'
+import { TOOL_TIMEOUT } from 'bake-tool-call-timeout-policy'
 
 const testToolSignal = new AbortController().signal
 
@@ -217,7 +217,7 @@ describe('timeout-policy disposal (HMR safety)', () => {
   })
 })
 
-describe('dsh-tool-call-timeout-policy real-load-path guard', () => {
+describe('bake-tool-call-timeout-policy real-load-path guard', () => {
   it('has no default export and keeps name/inject through unwrapExports', () => {
     expect('default' in timeoutPolicy).toBe(false)
     const loader = Object.create(Loader.prototype) as Loader

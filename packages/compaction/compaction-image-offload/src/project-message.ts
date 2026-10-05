@@ -1,6 +1,6 @@
 /** Immutable application of the image occurrences recorded by image/offload. */
 
-import type { ContentBlock, Message } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock, Message } from 'bake-llm'
 import { deepFreeze } from 'bake-util-values'
 
 /**

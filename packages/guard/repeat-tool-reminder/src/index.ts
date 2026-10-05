@@ -3,14 +3,14 @@
  * with logged model context without vetoing or rewriting calls. Configuration
  * and chain semantics live in the package README; rationale lives in the
  * repeat-tool-reminder Agent Note.
- * @module @deepseek-ai/dsh-repeat-tool-reminder
+ * @module bake-repeat-tool-reminder
  */
 
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { Agent, PreStepDecision } from 'bake-agent'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { MessageSource } from '@deepseek-ai/dsh-llm'
+import { createUserMessage } from 'bake-llm'
+import type { MessageSource } from 'bake-llm'
 import type { UserMessage } from 'bake-session'
 import type { PostToolDecision, ToolExecution } from 'bake-tools'
 

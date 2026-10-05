@@ -3,11 +3,11 @@
  */
 
 import { z } from 'zod'
-import { lastAssistantStreamChunk, type TokenUsage } from '@deepseek-ai/dsh-llm'
-import type {} from '@deepseek-ai/dsh-llm-retry/types'
+import { lastAssistantStreamChunk, type TokenUsage } from 'bake-llm'
+import type {} from 'bake-llm-retry/types'
 import { SessionSeq } from 'bake-session'
 import type { SessionEvent } from 'bake-session'
-import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
+import type { ProjectionDefinition } from 'bake-session-projection'
 import type { ContextPressureProjection, TokenUsageProjection } from './projection.ts'
 import { foldSurfaceProjection } from './surface-projection.ts'
 
@@ -93,7 +93,7 @@ function usageOf(event: SessionEvent): TokenUsage | undefined {
   return lastAssistantStreamChunk(event.data.stream, 'usage')?.usage
 }
 
-declare module '@deepseek-ai/dsh-session-projection/types' {
+declare module 'bake-session-projection/types' {
   interface SessionProjectionStateMap {
     tokenUsage: TokenUsageState
     contextPressure: ContextPressureState

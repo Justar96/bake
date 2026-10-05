@@ -16,13 +16,13 @@
  * artifact is the formatted result saved through `ctx.spillStore.saveText()`
  * ({@link trySaveFormattedResult}).
  *
- * @module @deepseek-ai/dsh-tool-fs-search/search-core
+ * @module bake-tool-fs-search/search-core
  */
 
 import { existsSync } from 'node:fs'
 import { isAbsolute, join, parse, relative, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
-import { HarnessError } from '@deepseek-ai/dsh-llm'
+import { HarnessError } from 'bake-llm'
 import { ItemRetainer, TextRetainer } from 'bake-output-retention'
 import type { RetainedItems } from 'bake-output-retention'
 import type { SubprocessHandle, SubprocessOutcome, SubprocessOutputRead, SubprocessSpawnSpec } from 'bake-subprocess'
@@ -38,7 +38,7 @@ export const RAW_OUTPUT_MAX_BYTES = 20_000_000
 /**
  * Default cooperative tool-call timeout budget in milliseconds (the `timeoutMs`
  * config), attached to both tool definitions for
- * `@deepseek-ai/dsh-tool-call-timeout-policy` to enforce through `exec.signal`.
+ * `bake-tool-call-timeout-policy` to enforce through `exec.signal`.
  */
 export const SEARCH_TIMEOUT_MS = 30_000
 
@@ -59,7 +59,7 @@ export const SEARCH_GRACE_MS = 3_000
  * serialize to hundreds of kilobytes, and `meta` is persisted with the session
  * log and copied again when compaction prunes the result. It never reaches the
  * model, so the cap bounds the log, not the request. A deployment's final output budget
- * (`dsh-spill-policy`) only shrinks a result's `content`, never its `meta`, so the
+ * (`bake-spill-policy`) only shrinks a result's `content`, never its `meta`, so the
  * projection owns this cap. 64 KiB holds the full default-capped result of a
  * typical search while bounding the pathological one.
  */
@@ -197,7 +197,7 @@ export function resolveRgPath(): Promise<string> {
  * complete raw stdout. The working directory is the calling agent's session
  * cwd (`exec.agent.session.header.cwd`) when available, else
  * `process.cwd()`. `exec.signal` is forwarded so the cooperative tool timeout
- * (`@deepseek-ai/dsh-tool-call-timeout-policy`) and caller cancellation terminate the
+ * (`bake-tool-call-timeout-policy`) and caller cancellation terminate the
  * process tree.
  *
  * The spawn is unconfined (a plain `ctx.subprocess` call), so `--no-config`
@@ -340,9 +340,9 @@ export function previewLine(line: string, maxBytes: number): string {
 /**
  * Apply the shared inline cap to a canonical `grep` match list: preview each
  * retained line to `maxLineBytes` and keep the first `maxMatches`. The single
- * retention pass both the model-facing render ({@link module:@deepseek-ai/dsh-tool-fs-search/grep}
+ * retention pass both the model-facing render ({@link module:bake-tool-fs-search/grep}
  * `formatGrepOutput`) and the search-card projection
- * ({@link module:@deepseek-ai/dsh-tool-fs-search/presentation} `grepSearchMeta`)
+ * ({@link module:bake-tool-fs-search/presentation} `grepSearchMeta`)
  * consume, so text and card never disagree about which matches survived.
  *
  * @param matches - every match the search parsed (the canonical value's matches).

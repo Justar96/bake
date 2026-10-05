@@ -44,11 +44,11 @@ Every execution starts from a `ShellExecRequest` with optional fields; the execu
 
 ### Choosing and composing an executor
 
-The seam is not an executor: mount exactly one provider per composition, and the tools work unchanged. On POSIX, `dsh-bash-local` runs commands as fresh `bash -c` processes and `dsh-bash-sandbox` confines every command through the sandbox capability; on Windows, `dsh-pwsh-local` and `dsh-pwsh-sandbox` are the counterparts. The `bash` and `pwsh` tools advertise escalation fields only while a sandboxing executor is mounted. The smallest composition is the executor alone:
+The seam is not an executor: mount exactly one provider per composition, and the tools work unchanged. On POSIX, `bake-bash-local` runs commands as fresh `bash -c` processes and `bake-bash-sandbox` confines every command through the sandbox capability; on Windows, `bake-pwsh-local` and `bake-pwsh-sandbox` are the counterparts. The `bash` and `pwsh` tools advertise escalation fields only while a sandboxing executor is mounted. The smallest composition is the executor alone:
 
 ```yaml
 - id: bash
-  name: '@deepseek-ai/dsh-bash-local'
+  name: 'bake-bash-local'
   config:
     cwd: /path/to/workspace
 ```
@@ -111,7 +111,7 @@ Read these pages when the seam contract is not enough. They move from the shared
 <a id="model-experience"></a>
 ## Model Experience
 
-Indirectly, through `dsh-tool-bash`, which turns executor output and sandbox facts into guidance and retained tool-result tokens.
+Indirectly, through `bake-tool-bash`, which turns executor output and sandbox facts into guidance and retained tool-result tokens.
 
 #### KV Cache effect
 

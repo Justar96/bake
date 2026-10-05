@@ -6,7 +6,7 @@
  * need not be re-read; `editGuard: version` restores the read-before-edit refusal. Without
  * this plugin, tools retain the bare provider's unconditional mutation behavior. See the package
  * README for composition rules.
- * @module @deepseek-ai/dsh-fs-observation-policy
+ * @module bake-fs-observation-policy
  */
 
 import type { Context } from '@deepseek-ai/cordis'

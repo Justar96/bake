@@ -9,7 +9,7 @@ import {
   createUserMessage,
   type LlmCallConfig,
   type ReasoningEffortId,
-} from '@deepseek-ai/dsh-llm'
+} from 'bake-llm'
 import type { PreStepDecision } from './runtime-types.ts'
 
 /** Complete provider, model, and optional reasoning effort selected for one live Agent. */

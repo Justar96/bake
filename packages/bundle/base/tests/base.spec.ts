@@ -11,8 +11,8 @@ import * as yaml from 'js-yaml'
 import { Context } from '@deepseek-ai/cordis'
 import { entryListSchema } from '@deepseek-ai/cordis-plugin-include'
 import { evaluate } from '@deepseek-ai/cordis-plugin-loader'
-import LlmRuntime from '@deepseek-ai/dsh-llm'
-import * as LlmPiAi from '@deepseek-ai/dsh-llm-pi-ai'
+import LlmRuntime from 'bake-llm'
+import * as LlmPiAi from 'bake-llm-pi-ai'
 
 interface BaseRow {
   id?: string
@@ -32,7 +32,7 @@ function baseRows(): BaseRow[] {
   return (parsed as { insert?: BaseRow[] }[]).flatMap(patch => patch.insert ?? [])
 }
 
-describe('dsh-base bundle', () => {
+describe('bake-base bundle', () => {
   it('declares a parseable patch list through the dsh.bundle.patch manifest field', () => {
     const root = fileURLToPath(new URL('..', import.meta.url))
     const manifest = JSON.parse(
@@ -64,7 +64,7 @@ describe('dsh-base bundle', () => {
     expect(rows.find(row => row.id === 'tool-web')?.config).toMatchObject({ fetch: true })
     expect(manifest.dependencies).not.toHaveProperty('@deepseek-ai/dsh-subagent-codex')
     expect(manifest.dependencies).not.toHaveProperty('@deepseek-ai/dsh-subagent-claude-code')
-    expect(manifest.dependencies).toHaveProperty('@deepseek-ai/dsh-web-fetch-http')
+    expect(manifest.dependencies).toHaveProperty('bake-web-fetch-http')
   })
 
   it('uploads sessions only to an OTLP endpoint the user configures', () => {
@@ -95,7 +95,7 @@ describe('dsh-base bundle', () => {
     const rows = baseRows()
     expect(rows.map(row => row.name)).not.toContain('@deepseek-ai/dsh-llm-deepseek')
     const row = rows.find(candidate => candidate.id === 'llm-pi-ai')
-    expect(row?.name).toBe('@deepseek-ai/dsh-llm-pi-ai')
+    expect(row?.name).toBe('bake-llm-pi-ai')
     const ctx = new Context()
     onTestFinished(() => ctx.fiber.dispose())
     await ctx.plugin(LlmRuntime)

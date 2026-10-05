@@ -1,10 +1,10 @@
 /**
  * Resource-result projection keeps binary payloads out of model history.
  *
- * @module @deepseek-ai/dsh-mcp-resources
+ * @module bake-mcp-resources
  */
 
-import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock } from 'bake-llm'
 import type { JsonValue } from 'bake-util-values'
 
 /**

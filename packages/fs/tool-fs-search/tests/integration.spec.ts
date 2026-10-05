@@ -15,11 +15,11 @@ import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
-import { ToolCallId } from '@deepseek-ai/dsh-llm'
+import { ToolCallId } from 'bake-llm'
 import SystemPrompt from 'bake-system-prompt'
 import ToolRuntime, { TOOL_ABORTED_BEFORE_DISPATCH } from 'bake-tools'
-import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
-import * as ToolFsSearch from '@deepseek-ai/dsh-tool-fs-search'
+import LocalSubprocessRuntime from 'bake-subprocess-local'
+import * as ToolFsSearch from 'bake-tool-fs-search'
 
 const testToolSignal = new AbortController().signal
 

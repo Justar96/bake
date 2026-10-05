@@ -10,10 +10,10 @@ import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import SystemPrompt from 'bake-system-prompt'
 import ToolRuntime from 'bake-tools'
-import WebRuntime from '@deepseek-ai/dsh-web'
-import * as toolWeb from '@deepseek-ai/dsh-tool-web'
+import WebRuntime from 'bake-web'
+import * as toolWeb from 'bake-tool-web'
 
-describe('dsh-tool-web real-load-path guard', () => {
+describe('bake-tool-web real-load-path guard', () => {
   it('has no default export and keeps name/inject/Config through unwrapExports', () => {
     expect('default' in toolWeb).toBe(false)
 

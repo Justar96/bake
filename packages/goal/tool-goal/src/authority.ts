@@ -2,11 +2,11 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from 'bake-agent'
-import type { GoalView } from '@deepseek-ai/dsh-goal'
-import { HarnessError } from '@deepseek-ai/dsh-llm'
+import type { GoalView } from 'bake-goal'
+import { HarnessError } from 'bake-llm'
 import type { SessionEvent, SessionSeq } from 'bake-session'
 import type { ToolRunContext } from 'bake-tools'
-import type {} from '@deepseek-ai/dsh-session-projection'
+import type {} from 'bake-session-projection'
 
 /** The calling agent plus the immutable event cut and open-turn start seq used for authority checks. */
 export interface GoalToolExecution {

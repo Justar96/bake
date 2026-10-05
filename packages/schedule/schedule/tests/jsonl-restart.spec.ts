@@ -7,9 +7,9 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import AgentLoop from 'bake-agent-loop'
 import { mountAgentLoopTestDependencies } from 'bake-agent-loop-testkit'
-import { LlmAdapter, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm'
+import { LlmAdapter, type GenerateOptions, type StreamChunk } from 'bake-llm'
 import SessionStore, { SessionId } from 'bake-session'
-import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import JsonlSessionPersistence from 'bake-session-persistence-jsonl'
 import * as toolSchedule from '../src/index.ts'
 import {
   ScheduleId,

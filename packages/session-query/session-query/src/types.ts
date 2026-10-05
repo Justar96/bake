@@ -14,7 +14,7 @@ import type {
   OptionalSessionSeq,
   SurfaceEvent,
 } from 'bake-session'
-import type { SessionTitleSnapshot } from '@deepseek-ai/dsh-session-title'
+import type { SessionTitleSnapshot } from 'bake-session-title'
 import type { SessionSearchCursor } from './cursor.ts'
 
 export type { SessionSearchCursor } from './cursor.ts'

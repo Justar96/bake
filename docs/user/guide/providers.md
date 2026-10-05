@@ -4,7 +4,7 @@ This guide assumes you started Bake through the [root README](../../../README.md
 
 ## Configure DeepSeek
 
-DeepSeek is the built-in `deepseek-official` route of [`dsh-llm-pi-ai`](../../../packages/llm/llm-pi-ai/README.md), which reaches DeepSeek's Anthropic Messages endpoint at `https://api.deepseek.com/anthropic` with the key in `DEEPSEEK_API_KEY`. Set that variable, or run `/login deepseek` in the terminal to store the key in `$DSH_HOME/.credentials.yaml`, where settings retain only its credential reference.
+DeepSeek is the built-in `deepseek-official` route of [`bake-llm-pi-ai`](../../../packages/llm/llm-pi-ai/README.md), which reaches DeepSeek's Anthropic Messages endpoint at `https://api.deepseek.com/anthropic` with the key in `DEEPSEEK_API_KEY`. Set that variable, or run `/login deepseek` in the terminal to store the key in `$DSH_HOME/.credentials.yaml`, where settings retain only its credential reference.
 
 The route serves two models, each with a 1M-token context window and the reasoning efforts `off`, `low`, `high`, and `max`, starting at `high`:
 
@@ -61,7 +61,7 @@ If no model is selected, the composer refuses to send until you sign in with `/l
 
 ## Advanced configuration
 
-The generated [plugin configuration catalog](../../config-catalog.md) lists every supported field and default for every plugin; [`dsh-llm-pi-ai`](../../config-catalog.md#deepseek-aidsh-llm-pi-ai) is the provider section this page configures. The [`dsh-llm-pi-ai`](../../../packages/llm/llm-pi-ai/README.md) reference owns direct `settings.yaml` configuration, catalog resolution, reasoning controls, credentials, and adapter errors.
+The generated [plugin configuration catalog](../../config-catalog.md) lists every supported field and default for every plugin; [`bake-llm-pi-ai`](../../config-catalog.md#bake-llm-pi-ai) is the provider section this page configures. The [`bake-llm-pi-ai`](../../../packages/llm/llm-pi-ai/README.md) reference owns direct `settings.yaml` configuration, catalog resolution, reasoning controls, credentials, and adapter errors.
 
 ::: tip Additional settings
 Besides the fields above, `$DSH_HOME/settings.yaml` configures each model's context window, max output tokens, and input types, along with reasoning effort levels, request-compatibility switches, headers, timeouts, and retry policy. The adapter re-reads it on the next request, so nothing needs a restart. The subsections below cover the fields most gateways need.
@@ -194,7 +194,7 @@ What neither sets keeps the installed catalog's value for that model, and what t
 
 Each switch belongs to the protocols that declare it, so a switch valid on one `api` may be refused on another — the message names what that protocol does offer. Like `input` above, a switch states a claim about your endpoint rather than checking it: setting one your gateway does not actually need simply sends a different request.
 
-Every switch, its accepted values, and the protocols that take it are listed under `PiAiCompatProfile` in the [generated `dsh-llm-pi-ai` configuration reference](../../config-catalog.md#deepseek-aidsh-llm-pi-ai) — which is derived from the source, so it cannot fall behind what the adapter accepts.
+Every switch, its accepted values, and the protocols that take it are listed under `PiAiCompatProfile` in the [generated `bake-llm-pi-ai` configuration reference](../../config-catalog.md#bake-llm-pi-ai) — which is derived from the source, so it cannot fall behind what the adapter accepts.
 
 ## Troubleshooting
 

@@ -4,8 +4,8 @@ import {
   resolveRetryPolicy,
   retryDelayMs,
   RetryPolicySchema,
-} from '@deepseek-ai/dsh-llm'
-import type { RetryPolicyConfig } from '@deepseek-ai/dsh-llm'
+} from 'bake-llm'
+import type { RetryPolicyConfig } from 'bake-llm'
 import { MAX_TIMER_DELAY_MS } from 'bake-timeout'
 
 describe('provider retry policy', () => {

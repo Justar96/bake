@@ -11,12 +11,12 @@ When a capability is general enough to need replaceable providers, such as Bash 
 The Bash execution capability consists of:
 
 - **Service Definition** (`bake-shell`) — defines the Cordis service and Bash request and result types
-- **Service Provider** (`dsh-bash-local`) — executes commands on the local machine
-- **Consumer** (`dsh-tool-bash`) — exposes the capability as a model-callable tool
+- **Service Provider** (`bake-bash-local`) — executes commands on the local machine
+- **Consumer** (`bake-tool-bash`) — exposes the capability as a model-callable tool
 
 ```
 ┌─────────────┐     ┌──────────────────┐     ┌──────────────┐
-│ bake-shell  │────▶│  dsh-bash-local  │     │ dsh-tool-bash│
+│ bake-shell  │────▶│  bake-bash-local  │     │ bake-tool-bash│
 │(definition) │     │    (provider)     │     │(consumer/tool)│
 └─────────────┘     └──────────────────┘     └──────────────┘
        ▲                                            │
@@ -32,7 +32,7 @@ One Service Definition can have multiple providers selected through `cordis.yml`
 
 ```yaml
 # Local execution
-- name: '@deepseek-ai/dsh-bash-local'
+- name: 'bake-bash-local'
 
 # Replace this row with another package that provides the same service.
 ```

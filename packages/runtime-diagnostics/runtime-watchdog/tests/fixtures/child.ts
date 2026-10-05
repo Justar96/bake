@@ -1,6 +1,6 @@
 /** Boot a Loader composition that mounts the watchdog, then stall the event loop or exhaust the heap. */
 
-import { boot } from '@deepseek-ai/dsh-app-boot'
+import { boot } from 'bake-app-boot'
 import * as RuntimeWatchdog from '../../src/index.ts'
 
 const [configPath, scenario] = process.argv.slice(2)

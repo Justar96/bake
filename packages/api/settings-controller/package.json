@@ -49,7 +49,7 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
-    "@deepseek-ai/dsh-agent-presets": "workspace:^",
+    "bake-agent-presets": "workspace:^",
     "bake-credentials": "workspace:^",
     "bake-native-command": "workspace:^",
     "bake-session": "workspace:^",
@@ -58,7 +58,7 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
-    "@deepseek-ai/dsh-agent-presets": "workspace:^",
+    "bake-agent-presets": "workspace:^",
     "bake-credentials": "workspace:^",
     "bake-native-command": "workspace:^",
     "bake-session": "workspace:^",

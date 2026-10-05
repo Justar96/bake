@@ -9,55 +9,55 @@
 import { globSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, resolve } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
-import LlmRuntime from '@deepseek-ai/dsh-llm'
-import type { ToolSchema } from '@deepseek-ai/dsh-llm'
+import LlmRuntime from 'bake-llm'
+import type { ToolSchema } from 'bake-llm'
 import AgentRegistry from 'bake-agent'
 import type { Agent } from 'bake-agent'
 import { createScope } from 'bake-scope'
 import SessionStore, { SessionId } from 'bake-session'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import GoalService from '@deepseek-ai/dsh-goal'
+import SessionProjectionRegistry from 'bake-session-projection'
+import GoalService from 'bake-goal'
 import SystemPrompt from 'bake-system-prompt'
 import ToolRuntime, { type Config as ToolsConfig } from 'bake-tools'
-import LocalBashExecutor from '@deepseek-ai/dsh-bash-local'
-import * as BashEnvPlugin from '@deepseek-ai/dsh-shell-env'
-import { PwshLocalExecutor } from '@deepseek-ai/dsh-pwsh-local'
-import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
-import LocalFileSystem from '@deepseek-ai/dsh-fs-local'
+import LocalBashExecutor from 'bake-bash-local'
+import * as BashEnvPlugin from 'bake-shell-env'
+import { PwshLocalExecutor } from 'bake-pwsh-local'
+import LocalSubprocessRuntime from 'bake-subprocess-local'
+import LocalFileSystem from 'bake-fs-local'
 import { AttachmentStore } from 'bake-attachment'
 import type { ImageAttachmentLimits, ImageAttachmentRef, SaveImageAttachment, StoredImageAttachment } from 'bake-attachment'
-import UserQuestionService from '@deepseek-ai/dsh-user-questions'
-import WebRuntime from '@deepseek-ai/dsh-web'
-import * as WebSearchDeepSeek from '@deepseek-ai/dsh-web-search-deepseek'
-import * as WebFetchLocal from '@deepseek-ai/dsh-web-fetch-http'
-import SubagentRuntime from '@deepseek-ai/dsh-subagent'
-import type { SubagentProvider } from '@deepseek-ai/dsh-subagent'
-import * as ToolSubagentControl from '@deepseek-ai/dsh-tool-subagent-control'
-import * as ToolSubagentListAgents from '@deepseek-ai/dsh-tool-subagent-control/list-agents'
-import SkillRegistry from '@deepseek-ai/dsh-skill'
-import * as SkillFileSystem from '@deepseek-ai/dsh-skill-filesystem'
-import LocalJobRegistry from '@deepseek-ai/dsh-jobs-local'
-import * as ToolAskUser from '@deepseek-ai/dsh-tool-ask-user'
-import * as ToolBash from '@deepseek-ai/dsh-tool-bash'
-import * as ToolPwsh from '@deepseek-ai/dsh-tool-pwsh'
-import * as ToolBashPersistent from '@deepseek-ai/dsh-tool-bash-persistent'
-import * as ToolPwshPersistent from '@deepseek-ai/dsh-tool-pwsh-persistent'
-import CordisHostRunner from '@deepseek-ai/dsh-cordis-host-runner'
-import * as ToolCordis from '@deepseek-ai/dsh-tool-cordis'
-import * as ToolFs from '@deepseek-ai/dsh-tool-fs'
-import * as ToolFsSearch from '@deepseek-ai/dsh-tool-fs-search'
-import TerminalSessionService from '@deepseek-ai/dsh-terminal'
-import * as ToolGoal from '@deepseek-ai/dsh-tool-goal'
-import * as ToolSchedule from '@deepseek-ai/dsh-schedule'
-import * as ToolSkill from '@deepseek-ai/dsh-tool-skill'
-import * as ToolJobs from '@deepseek-ai/dsh-tool-jobs'
-import type PluginManager from '@deepseek-ai/dsh-plugin-manager'
-import * as PluginManagerTools from '@deepseek-ai/dsh-plugin-manager/tools'
-import SandboxPolicy from '@deepseek-ai/dsh-sandbox-policy'
-import McpResources from '@deepseek-ai/dsh-mcp-resources'
-import * as ToolSubagent from '@deepseek-ai/dsh-tool-subagent'
+import UserQuestionService from 'bake-user-questions'
+import WebRuntime from 'bake-web'
+import * as WebSearchDeepSeek from 'bake-web-search-deepseek'
+import * as WebFetchLocal from 'bake-web-fetch-http'
+import SubagentRuntime from 'bake-subagent'
+import type { SubagentProvider } from 'bake-subagent'
+import * as ToolSubagentControl from 'bake-tool-subagent-control'
+import * as ToolSubagentListAgents from 'bake-tool-subagent-control/list-agents'
+import SkillRegistry from 'bake-skill'
+import * as SkillFileSystem from 'bake-skill-filesystem'
+import LocalJobRegistry from 'bake-jobs-local'
+import * as ToolAskUser from 'bake-tool-ask-user'
+import * as ToolBash from 'bake-tool-bash'
+import * as ToolPwsh from 'bake-tool-pwsh'
+import * as ToolBashPersistent from 'bake-tool-bash-persistent'
+import * as ToolPwshPersistent from 'bake-tool-pwsh-persistent'
+import CordisHostRunner from 'bake-cordis-host-runner'
+import * as ToolCordis from 'bake-tool-cordis'
+import * as ToolFs from 'bake-tool-fs'
+import * as ToolFsSearch from 'bake-tool-fs-search'
+import TerminalSessionService from 'bake-terminal'
+import * as ToolGoal from 'bake-tool-goal'
+import * as ToolSchedule from 'bake-schedule'
+import * as ToolSkill from 'bake-tool-skill'
+import * as ToolJobs from 'bake-tool-jobs'
+import type PluginManager from 'bake-plugin-manager'
+import * as PluginManagerTools from 'bake-plugin-manager/tools'
+import SandboxPolicy from 'bake-sandbox-policy'
+import McpResources from 'bake-mcp-resources'
+import * as ToolSubagent from 'bake-tool-subagent'
 import { registerListSubagentModels } from '../packages/subagent/tool-subagent/src/list-models.ts'
-import * as ToolWeb from '@deepseek-ai/dsh-tool-web'
+import * as ToolWeb from 'bake-tool-web'
 import { githubSlug } from './verify-md-links.ts'
 
 /** Attachment seam marker that makes the attachments-conditional `read_image` schema harvestable. */
@@ -178,7 +178,7 @@ export interface ToolPackage {
  */
 const TOOL_PACKAGES: ToolPackage[] = [
   {
-    pkg: '@deepseek-ai/dsh-plugin-manager',
+    pkg: 'bake-plugin-manager',
     dir: 'plugin-manager',
     source: 'packages/boot/plugin-manager/src/tools.ts',
     requires: ['ctx.tools', 'ctx.pluginManager', 'ctx.sandboxPolicy'],
@@ -191,7 +191,7 @@ const TOOL_PACKAGES: ToolPackage[] = [
     },
   },
   {
-    pkg: '@deepseek-ai/dsh-mcp-resources',
+    pkg: 'bake-mcp-resources',
     dir: 'mcp-resources',
     source: 'packages/mcp/mcp-resources/src/tools.ts',
     requires: ['ctx.tools', 'ctx.mcpResources'],
@@ -204,7 +204,7 @@ const TOOL_PACKAGES: ToolPackage[] = [
     },
   },
   {
-    pkg: '@deepseek-ai/dsh-tool-ask-user',
+    pkg: 'bake-tool-ask-user',
     dir: 'tool-ask-user',
     source: 'packages/interaction/tool-ask-user/src/index.ts',
     requires: ['ctx.tools', 'ctx.userQuestions'],
@@ -231,7 +231,7 @@ const TOOL_PACKAGES: ToolPackage[] = [
       'Owned by the tool registry as a reserved transport outside filterable capability layers under `mode: ptc` / `mode: both` (see the PTC mode Agent Note). Under `ptc` it is the registry\'s only wire contribution; the other visible capabilities are declared in a generated SDK section in the loaded runtime\'s language, and a program calls them through bindings scheduled under the native concurrency contract (submission-ordered starts and policy; concurrency-safe bodies overlap up to `maxParallelSubCalls`) that re-enter the complete guarded tool pipeline and link each nested execution to this outer result.',
   },
   {
-    pkg: '@deepseek-ai/dsh-tool-bash',
+    pkg: 'bake-tool-bash',
     dir: 'tool-bash',
     source: 'packages/shell/tool-bash/src/index.ts',
     requires: ['ctx.tools', 'ctx.shell', 'ctx.shellEnv', 'ctx.jobs at call time for run_in_background'],
@@ -243,10 +243,10 @@ const TOOL_PACKAGES: ToolPackage[] = [
       await ctx.plugin(ToolBash)
     },
     note:
-      'The bash tool is the model-facing consumer of the bash executor seam. A `run_in_background` run registers with the generic `ctx.jobs` runtime and is collected/stopped through the `job_*` tools from `@deepseek-ai/dsh-tool-jobs`; the `enableRunInBackground` config (default true) removes the parameter entirely when disabled.',
+      'The bash tool is the model-facing consumer of the bash executor seam. A `run_in_background` run registers with the generic `ctx.jobs` runtime and is collected/stopped through the `job_*` tools from `bake-tool-jobs`; the `enableRunInBackground` config (default true) removes the parameter entirely when disabled.',
   },
   {
-    pkg: '@deepseek-ai/dsh-tool-pwsh',
+    pkg: 'bake-tool-pwsh',
     dir: 'tool-pwsh',
     source: 'packages/shell/tool-pwsh/src/index.ts',
     requires: ['ctx.tools', 'ctx.shell', 'ctx.shellEnv', 'ctx.jobs at call time for run_in_background'],
@@ -261,10 +261,10 @@ const TOOL_PACKAGES: ToolPackage[] = [
       await ctx.plugin(ToolPwsh)
     },
     note:
-      'The pwsh tool is the PowerShell-dialect consumer of the bash executor seam for Windows compositions (a PowerShell executor such as `@deepseek-ai/dsh-pwsh-local` backs `ctx.shell`); it mirrors the bash tool call-for-call minus sandbox controls — `run_in_background` runs register with the generic `ctx.jobs` runtime and are collected/stopped through the `job_*` tools, and the managed `DSH_*` environment comes from `@deepseek-ai/dsh-shell-env`. Each call runs in a fresh process (no persistent PTY session), with native `C:\\...` paths and `$env:NAME` variables.',
+      'The pwsh tool is the PowerShell-dialect consumer of the bash executor seam for Windows compositions (a PowerShell executor such as `bake-pwsh-local` backs `ctx.shell`); it mirrors the bash tool call-for-call minus sandbox controls — `run_in_background` runs register with the generic `ctx.jobs` runtime and are collected/stopped through the `job_*` tools, and the managed `DSH_*` environment comes from `bake-shell-env`. Each call runs in a fresh process (no persistent PTY session), with native `C:\\...` paths and `$env:NAME` variables.',
   },
   {
-    pkg: '@deepseek-ai/dsh-tool-cordis',
+    pkg: 'bake-tool-cordis',
     dir: 'tool-cordis',
     source: 'packages/extensions/tool-cordis/src/index.ts',
     requires: ['ctx.tools', 'ctx.cordisInspect'],
@@ -277,7 +277,7 @@ const TOOL_PACKAGES: ToolPackage[] = [
       'Creator mode provides two read-only runtime inspection tools. The Cordis host runner supplies the inspection registry; Client queries require a connected page. Author persistent changes as bundles and install them with plugin_manager.',
   },
   {
-    pkg: '@deepseek-ai/dsh-tool-bash-persistent',
+    pkg: 'bake-tool-bash-persistent',
     dir: 'tool-bash-persistent',
     source: 'packages/shell/tool-bash-persistent/src/index.ts',
     requires: ['ctx.tools', 'ctx.terminals', 'an owning Agent at execution time'],
@@ -290,7 +290,7 @@ const TOOL_PACKAGES: ToolPackage[] = [
       'One owner-isolated persistent bash tool; deployment composition supplies the PTY backend and may override the model-facing environment description.',
   },
   {
-    pkg: '@deepseek-ai/dsh-tool-pwsh-persistent',
+    pkg: 'bake-tool-pwsh-persistent',
     dir: 'tool-pwsh-persistent',
     source: 'packages/shell/tool-pwsh-persistent/src/index.ts',
     requires: ['ctx.tools', 'ctx.terminals', 'an owning Agent at execution time'],
@@ -303,7 +303,7 @@ const TOOL_PACKAGES: ToolPackage[] = [
       'One owner-isolated persistent pwsh tool, the Windows counterpart of the persistent bash tool; deployment composition supplies a pwsh-dialect PTY backend and may override the model-facing environment description.',
   },
   {
-    pkg: '@deepseek-ai/dsh-tool-fs',
+    pkg: 'bake-tool-fs',
     dir: 'tool-fs',
     source: 'packages/fs/tool-fs/src/index.ts',
     requires: ['ctx.tools', 'ctx.fs', 'ctx.attachments (image-tool registration)', 'ctx.llm + an image-capable route (image-tool execution)'],
@@ -317,10 +317,10 @@ const TOOL_PACKAGES: ToolPackage[] = [
       await ctx.plugin(ToolFs)
     },
     note:
-      'The read-before-write/edit policy is added by `@deepseek-ai/dsh-fs-observation-policy` (an `fs/*` event-gate plugin, no schema change); a deployment that loads these tools is expected to also load it. The image tool is not registered without `ctx.attachments`; its schema is route-independent, and execution refuses unless the exact routed model declares image input.',
+      'The read-before-write/edit policy is added by `bake-fs-observation-policy` (an `fs/*` event-gate plugin, no schema change); a deployment that loads these tools is expected to also load it. The image tool is not registered without `ctx.attachments`; its schema is route-independent, and execution refuses unless the exact routed model declares image input.',
   },
   {
-    pkg: '@deepseek-ai/dsh-tool-fs-search',
+    pkg: 'bake-tool-fs-search',
     dir: 'tool-fs-search',
     source: 'packages/fs/tool-fs-search/src/index.ts',
     requires: ['ctx.tools', 'ctx.subprocess'],
@@ -338,7 +338,7 @@ const TOOL_PACKAGES: ToolPackage[] = [
       'glob and grep are unconditional discovery tools that spawn the packaged ripgrep binary (`@vscode/ripgrep`) through ctx.subprocess as ordinary foreground calls (never background jobs) — no host `rg` install and no shell layer. The catalog uses `sampleOverCapGlobResults: true`; deployments must choose that behavior explicitly. Capped results save the complete formatted list through the optional ctx.spillStore backend; returned locators are follow-up-readable/searchable when the backend exposes local paths in co-located deployments.',
   },
   {
-    pkg: '@deepseek-ai/dsh-tool-goal',
+    pkg: 'bake-tool-goal',
     dir: 'tool-goal',
     source: 'packages/goal/tool-goal/src/index.ts',
     requires: ['ctx.tools', 'ctx.agents', 'ctx.goals', 'a calling Agent in an authorized open turn'],
@@ -352,7 +352,7 @@ const TOOL_PACKAGES: ToolPackage[] = [
       'create, edit, pause, and resume require direct-human root authority; complete and blocked also accept the exact current goal round. The default blocked lower bound is three admitted rounds.',
   },
   {
-    pkg: '@deepseek-ai/dsh-schedule',
+    pkg: 'bake-schedule',
     dir: 'schedule',
     source: 'packages/schedule/schedule/src/tools.ts',
     requires: ['ctx.tools', 'ctx.sessions', 'Session persistence', 'a future live root Agent'],
@@ -373,7 +373,7 @@ const TOOL_PACKAGES: ToolPackage[] = [
       + 'management reads and mutations require the shared Session persistence barrier.',
   },
   {
-    pkg: '@deepseek-ai/dsh-tool-skill',
+    pkg: 'bake-tool-skill',
     dir: 'tool-skill',
     source: 'packages/skill/tool-skill/src/index.ts',
     requires: ['ctx.tools', 'ctx.agents', 'ctx.skills'],
@@ -389,7 +389,7 @@ const TOOL_PACKAGES: ToolPackage[] = [
     },
   },
   {
-    pkg: '@deepseek-ai/dsh-tool-subagent',
+    pkg: 'bake-tool-subagent',
     dir: 'tool-subagent',
     source: {
       list_subagent_models: 'packages/subagent/tool-subagent/src/list-models.ts',
@@ -408,7 +408,7 @@ const TOOL_PACKAGES: ToolPackage[] = [
       'The registered delegation name is the load-time `toolName` config (default `subagent`); the default schema above has model selection off, while the discovery schema is shown as the fixed companion available in an enabled Session. Each instance independently controls whether it reads model-selection settings and its background behavior through `modelSelectionSettings`, `backgroundMode`, and `enableRunInBackground`.',
   },
   {
-    pkg: '@deepseek-ai/dsh-tool-subagent-control',
+    pkg: 'bake-tool-subagent-control',
     dir: 'tool-subagent-control',
     source: {
       interrupt_agent: 'packages/subagent/tool-subagent-control/src/index.ts',
@@ -429,7 +429,7 @@ const TOOL_PACKAGES: ToolPackage[] = [
       'The globally named control tools over continuable background subagents: provider-bound `tool-subagent` instances register distinct delegation tools, while this package registers `send_message` and `interrupt_agent` once, plus `list_agents` from its separately loaded `/list-agents` plugin (whose catalog rows use the sessionProjections and live Agent registries).',
   },
   {
-    pkg: '@deepseek-ai/dsh-tool-jobs',
+    pkg: 'bake-tool-jobs',
     dir: 'tool-jobs',
     source: 'packages/jobs/tool-jobs/src/index.ts',
     requires: ['ctx.tools', 'ctx.jobs'],
@@ -442,7 +442,7 @@ const TOOL_PACKAGES: ToolPackage[] = [
       'The kind-agnostic background-job controller: background bash commands, PTY sends, and subagents are read, listed, and killed through the same three tools. Loading the plugin attaches the controller that arms producers\' `ctx.jobs.start()`.',
   },
   {
-    pkg: '@deepseek-ai/dsh-tool-web',
+    pkg: 'bake-tool-web',
     dir: 'tool-web',
     source: 'packages/web/tool-web/src/index.ts',
     requires: ['ctx.tools', 'ctx.web'],

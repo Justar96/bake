@@ -6,7 +6,7 @@ import TypertRegistry, {
   typertKey,
   typertPackageKey,
   type TypertContribution,
-} from '@deepseek-ai/dsh-typert-registry'
+} from 'bake-typert-registry'
 import type {
   InvocationDescriptor,
   TypertContext,

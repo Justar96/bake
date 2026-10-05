@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-mcp-resources",
+  "name": "bake-mcp-resources",
   "description": "Scoped MCP resource discovery and reading through shared model tools",
   "version": "0.1.6-alpha.2",
   "publishConfig": {
@@ -28,14 +28,14 @@
   "license": "MIT",
   "peerDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
+    "bake-llm": "workspace:^",
     "bake-scope": "workspace:^",
     "bake-system-prompt": "workspace:^",
     "bake-tools": "workspace:^"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
+    "bake-llm": "workspace:^",
     "bake-ptc-runtime": "workspace:^",
     "bake-scope": "workspace:^",
     "bake-tools": "workspace:^",

@@ -4,20 +4,20 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
-import { ToolCallId, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import { ToolCallId, ReasoningEffortId } from 'bake-llm'
 import SystemPrompt from 'bake-system-prompt'
 import ToolRuntime, { TOOL_ABORTED_BEFORE_DISPATCH } from 'bake-tools'
 import { assembleContextFor, type Agent } from 'bake-agent'
 import AgentRegistry from 'bake-agent'
 import AgentLoop from 'bake-agent-loop'
 import { mountAgentLoopTestDependencies } from 'bake-agent-loop-testkit'
-import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import SubagentRuntime from '@deepseek-ai/dsh-subagent'
-import type { SubagentStartRequest } from '@deepseek-ai/dsh-subagent'
-import LocalJobRegistry from '@deepseek-ai/dsh-jobs-local'
-import * as SubagentSpawn from '@deepseek-ai/dsh-subagent-spawn-in-process'
-import * as ToolJobs from '@deepseek-ai/dsh-tool-jobs'
+import JsonlSessionPersistence from 'bake-session-persistence-jsonl'
+import SessionProjectionRegistry from 'bake-session-projection'
+import SubagentRuntime from 'bake-subagent'
+import type { SubagentStartRequest } from 'bake-subagent'
+import LocalJobRegistry from 'bake-jobs-local'
+import * as SubagentSpawn from 'bake-subagent-spawn-in-process'
+import * as ToolJobs from 'bake-tool-jobs'
 import { MockAdapter, textResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
 import { loadStoredSession } from '../../subagent/tests/persistence-helpers.ts'
 import * as mock from './scripted-provider.ts'
@@ -41,7 +41,7 @@ async function projectedContext(): Promise<Context> {
 }
 
 /**
- * Drives the REAL plugin body: mounts `dsh-tool-subagent` on a real
+ * Drives the REAL plugin body: mounts `bake-tool-subagent` on a real
  * `ToolRuntime` + `SubagentRuntime`, with a package-local scripted child
  * boundary, and invokes the registered `subagent` tool through
  * `ctx.tools.execute`. Everything downstream of the child boundary is the
@@ -49,7 +49,7 @@ async function projectedContext(): Promise<Context> {
  */
 
 
-describe('dsh-tool-subagent', () => {
+describe('bake-tool-subagent', () => {
   it('rejects continuable background policy when the provider cannot prepare continuable children', async () => {
     let failure: unknown
     try {
@@ -823,7 +823,7 @@ describe('dsh-tool-subagent', () => {
   })
 })
 
-describe('dsh-tool-subagent background mode', () => {
+describe('bake-tool-subagent background mode', () => {
   /** A live parent with a dedicated scope fiber for structural task cleanup. */
   async function ownerAgent(ctx: Context, sessionId: string, inject: (...args: unknown[]) => void = () => {}): Promise<Agent> {
     const scopeFiber = ctx.plugin(() => {})
@@ -1192,7 +1192,7 @@ describe('dsh-tool-subagent background mode', () => {
 
 })
 
-describe('dsh-tool-subagent continuable background mode', () => {
+describe('bake-tool-subagent continuable background mode', () => {
   const roots: string[] = []
   const contexts: Context[] = []
   afterEach(async () => {

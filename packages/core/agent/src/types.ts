@@ -4,7 +4,7 @@
  * @module bake-agent/types
  */
 
-import type { UserMessage } from '@deepseek-ai/dsh-llm/types'
+import type { UserMessage } from 'bake-llm/types'
 import type { OptionalSessionSeq, SessionId, SessionSeq } from 'bake-session/types'
 import type { TypertContext, TypertLookup } from 'bake-typert-protocol'
 import type { JsonValue } from 'bake-util-values'
@@ -46,7 +46,7 @@ export interface InboxWireState {
   readonly 'next-step': readonly JsonValue[]
 }
 
-declare module '@deepseek-ai/dsh-session-projection/types' {
+declare module 'bake-session-projection/types' {
   interface SessionProjectionStateMap {
     /** Pending agent input reconstructed from durable inbox splices. */
     inbox: InboxState

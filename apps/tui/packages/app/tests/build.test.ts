@@ -34,7 +34,7 @@ it('executes bundled JSX with external production React on Node', async () => {
 it('keeps Bake and retained runtime package imports external, including subpaths', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bake-external-test-'))
   roots.push(root)
-  const packages = ['bake-agent', 'bake-session/events', '@deepseek-ai/dsh-llm', '@deepseek-ai/cordis']
+  const packages = ['bake-agent', 'bake-session/events', 'bake-llm', '@deepseek-ai/cordis']
   const entry = join(root, 'singletons.ts')
   await writeFile(entry, packages.map((name, index) => `export { value as value${index} } from ${JSON.stringify(name)};`).join('\n'))
 

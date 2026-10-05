@@ -23,7 +23,7 @@
  * so a configuration change rebuilds the collection without forgetting who is
  * signed in.
  *
- * @module dsh-llm-pi-ai/adapter
+ * @module bake-llm-pi-ai/adapter
  */
 
 import type {
@@ -43,7 +43,7 @@ import {
   LlmAdapter,
   LlmError,
   ReasoningEffortId,
-} from '@deepseek-ai/dsh-llm'
+} from 'bake-llm'
 import type {
   GenerateOptions,
   ImageAttachmentAccess,
@@ -54,7 +54,7 @@ import type {
   ReasoningEffortId as ReasoningEffortIdType,
   ResolvedRetryPolicy,
   StreamChunk,
-} from '@deepseek-ai/dsh-llm'
+} from 'bake-llm'
 import type { AttachmentStore, ImageAttachmentRef } from 'bake-attachment'
 import { idleWatchdog, timeoutOf } from 'bake-timeout'
 import { requestImageMaxDimensionFor } from './config.ts'

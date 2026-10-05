@@ -1,4 +1,4 @@
-/** Client-safe question, answer, and event types. @module @deepseek-ai/dsh-user-questions/types */
+/** Client-safe question, answer, and event types. @module bake-user-questions/types */
 
 import type { Scoped } from 'bake-scope'
 import type { Agent } from 'bake-agent/types'

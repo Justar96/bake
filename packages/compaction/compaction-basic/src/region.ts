@@ -2,7 +2,7 @@
  * Surface retention selection and the shared log-recorded compaction
  * transaction for automatic open-turn and manual idle-session compaction.
  *
- * @module @deepseek-ai/dsh-compaction-basic/region
+ * @module bake-compaction-basic/region
  */
 
 import { randomUUID } from 'node:crypto'
@@ -15,10 +15,10 @@ import {
   toolPairingBalancedBefore,
 } from 'bake-compaction'
 import type { CompactionResult } from 'bake-compaction'
-import type { CommandId } from '@deepseek-ai/dsh-commands/brand'
-import { createUserMessage, errorChain } from '@deepseek-ai/dsh-llm'
-import type { Message, UserMessage } from '@deepseek-ai/dsh-llm'
-import type { TokenMeasurement, TokenMeter } from '@deepseek-ai/dsh-token-meter'
+import type { CommandId } from 'bake-commands/brand'
+import { createUserMessage, errorChain } from 'bake-llm'
+import type { Message, UserMessage } from 'bake-llm'
+import type { TokenMeasurement, TokenMeter } from 'bake-token-meter'
 import { SessionSeq, type Session, type SessionEvent } from 'bake-session'
 import type { Agent } from 'bake-agent'
 import { boundedSummarizationInput } from './bounded-input.ts'

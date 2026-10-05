@@ -37,7 +37,7 @@ pnpm run mock:llm \
   --partial-text "discard this half"
 ```
 
-Point a real adapter at the server through an OpenAI Chat Completions route of `dsh-llm-pi-ai`, which appends `/chat/completions` to the configured base. In `$DSH_HOME/settings.yaml`:
+Point a real adapter at the server through an OpenAI Chat Completions route of `bake-llm-pi-ai`, which appends `/chat/completions` to the configured base. In `$DSH_HOME/settings.yaml`:
 
 ```yaml
 llm-pi-ai:

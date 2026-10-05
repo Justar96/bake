@@ -1,6 +1,6 @@
 import { Context } from '@deepseek-ai/cordis'
 import Timer from '@deepseek-ai/cordis-plugin-timer'
-import { ToolCallId } from '@deepseek-ai/dsh-llm'
+import { ToolCallId } from 'bake-llm'
 import SystemPrompt from 'bake-system-prompt'
 import ToolRegistry from 'bake-tools'
 import type { ToolDefinition, ToolExecutionResult } from 'bake-tools'

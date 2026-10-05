@@ -7,13 +7,13 @@
  * contracts; this module is a pure type/value/predicate outlet (no cordis
  * imports, no module augmentation) so client and wire programs can name the
  * checkpoint source without loading the host plugin's Context merges — the
- * `dsh-commands/brand` shape.
+ * `bake-commands/brand` shape.
  *
  * @module bake-compaction/checkpoint
  */
 
-import type { MessageSource } from '@deepseek-ai/dsh-llm/message'
-import type { CommandId } from '@deepseek-ai/dsh-commands/brand'
+import type { MessageSource } from 'bake-llm/message'
+import type { CommandId } from 'bake-commands/brand'
 import type { CompactionId } from './brand.ts'
 
 const COMPACT_CHECKPOINT_MARKER = Object.freeze({ kind: 'plugin', plugin: 'compact' } as const)

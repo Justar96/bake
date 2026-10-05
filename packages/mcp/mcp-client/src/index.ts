@@ -10,7 +10,7 @@
  * disposing the old instance and creating a new one; identical `serverName`
  * reproduces identical public tool names.
  *
- * @module @deepseek-ai/dsh-mcp-client
+ * @module bake-mcp-client
  */
 
 import type { Context } from '@deepseek-ai/cordis'

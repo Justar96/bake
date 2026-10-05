@@ -5,7 +5,7 @@
  * are untouched, so the model-visible request stays reconstructable from the
  * session log and the same profile.
  *
- * @module dsh-llm-pi-ai/payload
+ * @module bake-llm-pi-ai/payload
  */
 
 import type { PiAiMessagesWire, ResolvedPiAiProviderProfile } from './config.ts'

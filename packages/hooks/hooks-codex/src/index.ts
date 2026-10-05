@@ -5,7 +5,7 @@
  * or command substitution, and no pre-tool approval or rewrite path; only
  * blocking decisions are honored. Shared execution and parsing live in
  * `bake-hook-protocol`.
- * @module @deepseek-ai/dsh-hooks-codex
+ * @module bake-hooks-codex
  */
 
 // Each dialect bridge keeps its complete dependency list visible at the entry
@@ -15,9 +15,9 @@ import { readFileSync } from 'node:fs'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { Agent, PreStepDecision } from 'bake-agent'
-import type {} from '@deepseek-ai/dsh-session-projection'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock, MessageSource } from '@deepseek-ai/dsh-llm'
+import type {} from 'bake-session-projection'
+import { createUserMessage } from 'bake-llm'
+import type { ContentBlock, MessageSource } from 'bake-llm'
 import type { UserMessage } from 'bake-session'
 import type { PostToolDecision, PreToolDecision, ToolExecution, ToolExecutionResult } from 'bake-tools'
 import {

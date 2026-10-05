@@ -765,7 +765,7 @@ describe('spill failure reporting without an owner logger', () => {
       expect(result.stdout.truncated).toBe(true)
       expect(result.stdout.text).toContain('line-0200')
       expect(result.stdout.spillPath).toBeUndefined()
-      const lines = stderr.mock.calls.map(call => String(call[0])).filter(line => line.includes('dsh-subprocess-local:'))
+      const lines = stderr.mock.calls.map(call => String(call[0])).filter(line => line.includes('bake-subprocess-local:'))
       expect(lines).toHaveLength(1)
       expect(lines[0]).toContain('stdout spill failed; only the in-memory tail is retained')
       expect(lines[0]).toContain('ENOENT')
@@ -973,7 +973,7 @@ describe.skipIf(process.platform === 'win32')('tree-survivor escalation (termina
 
   it('service teardown awaits tree survivors, not just handle settlement', async () => {
     const { Context } = await import('@deepseek-ai/cordis')
-    const { default: LocalSubprocessRuntime } = await import('@deepseek-ai/dsh-subprocess-local')
+    const { default: LocalSubprocessRuntime } = await import('bake-subprocess-local')
     const ctx = new Context()
     const fiber = await ctx.plugin(LocalSubprocessRuntime)
     ;(ctx.subprocess as InstanceType<typeof LocalSubprocessRuntime>).internals = { spillDir }

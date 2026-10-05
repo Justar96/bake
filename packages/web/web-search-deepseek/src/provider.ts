@@ -3,16 +3,16 @@
  * `web_search_20250305` server tool. Each search costs a model turn, but returns structured
  * result blocks; absence of those blocks is an error rather than a prose-scraping fallback.
  * The wire format and native `fetch` client are provider-private and do not use `ctx.llm`.
- * @module @deepseek-ai/dsh-web-search-deepseek/provider
+ * @module bake-web-search-deepseek/provider
  */
 
-import { WebError } from '@deepseek-ai/dsh-web'
+import { WebError } from 'bake-web'
 import type {
   WebSearchProvider,
   WebSearchRequest,
   WebSearchResult,
   WebSearchSource,
-} from '@deepseek-ai/dsh-web'
+} from 'bake-web'
 import type { CredentialRef } from 'bake-credentials'
 import type {} from 'bake-session'
 import type {

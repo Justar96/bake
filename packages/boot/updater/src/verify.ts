@@ -12,7 +12,7 @@
  * directory inside a scratch directory removed afterwards, whether the check
  * finished, failed, or was stopped at its time limit.
  *
- * @module @deepseek-ai/dsh-updater/verify
+ * @module bake-updater/verify
  */
 
 import { spawn } from 'node:child_process'

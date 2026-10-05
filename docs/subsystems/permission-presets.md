@@ -1,6 +1,6 @@
 # Permission Presets
 
-The permission-preset layer of [dsh-permission-presets](../../packages/interaction/permission-presets) (`ctx.permissionPresets`) combines [sandbox mode](sandbox.md) and [approval policy](approval.md) into named presets. Its table owns future-session defaults; the layer itself does not enforce policy. The [package README](../../packages/interaction/permission-presets/README.md) owns composition status and limitations.
+The permission-preset layer of [bake-permission-presets](../../packages/interaction/permission-presets) (`ctx.permissionPresets`) combines [sandbox mode](sandbox.md) and [approval policy](approval.md) into named presets. Its table owns future-session defaults; the layer itself does not enforce policy. The [package README](../../packages/interaction/permission-presets/README.md) owns composition status and limitations.
 
 Source: [`packages/interaction/permission-presets/src/index.ts`](../../packages/interaction/permission-presets/src/index.ts)
 
@@ -68,7 +68,7 @@ interface PresetOption {
 
 ## Switching and the `permission/preset` event
 
-`set(session, name)` resolves the preset (unknown names throw), runs Auto admission when applicable, appends a log-only `permission/preset` event unless `name` is already the effective preset, then writes each knob through its own setter — `setSandboxMode` from [dsh-sandbox-policy](../../packages/sandbox/sandbox-policy) and `setApprovalPolicy` from [dsh-user-approval](../../packages/interaction/user-approval) — only when that knob's effective value changes. The selection event precedes the knob events in the same turn, and re-selecting the effective preset appends nothing.
+`set(session, name)` resolves the preset (unknown names throw), runs Auto admission when applicable, appends a log-only `permission/preset` event unless `name` is already the effective preset, then writes each knob through its own setter — `setSandboxMode` from [bake-sandbox-policy](../../packages/sandbox/sandbox-policy) and `setApprovalPolicy` from [bake-user-approval](../../packages/interaction/user-approval) — only when that knob's effective value changes. The selection event precedes the knob events in the same turn, and re-selecting the effective preset appends nothing.
 
 `permission/preset` is durable, log-only user intent: it stays out of the model transcript (the knob events own the model-visible consequences through their consumers), and it exists so `current()` can preserve which preset the user chose when two presets share a bundle. The `permissions` projection folds that selection with both knob events and retains the `session/end-seed` boundary used to distinguish a restored empty seed from a fresh session; replay needs no catch-up state or raw-log rescan. A restored `auto` selection requires the live Auto registration before Agent publication. The complete event declaration is in the [persistence log event catalog](../persistence-catalog.md); the method signatures are in the generated [service catalog](#ctxpermissionpresets--permissionpresetservice).
 

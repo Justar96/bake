@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context, FiberState, type Plugin } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
-import type { AgentPresets } from '@deepseek-ai/dsh-agent-presets'
+import type { AgentPresets } from 'bake-agent-presets'
 import { readPluginInventory } from '../src/index.ts'
 
 const contexts: Context[] = []

@@ -1,6 +1,6 @@
 /**
  * Client-safe wire vocabulary of the dynamic Cordis plugin runner.
- * @module @deepseek-ai/dsh-cordis-host-runner/types
+ * @module bake-cordis-host-runner/types
  */
 
 import type { Branded } from 'bake-brand'

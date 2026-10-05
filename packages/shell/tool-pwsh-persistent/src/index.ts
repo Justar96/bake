@@ -2,7 +2,7 @@
    the PowerShell counterpart shares the session registry, polling loop, and reset contract by design. */
 /**
  * Model-facing persistent `pwsh` tool over the owner-scoped PTY seam.
- * @module @deepseek-ai/dsh-tool-pwsh-persistent
+ * @module bake-tool-pwsh-persistent
  */
 
 import { randomUUID } from 'node:crypto'
@@ -10,7 +10,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { Agent } from 'bake-agent'
 import { truncateWithoutSplittingSurrogatePair } from 'bake-output-retention'
-import type { TerminalReadResult, TerminalSendResult, TerminalSessionId } from '@deepseek-ai/dsh-terminal'
+import type { TerminalReadResult, TerminalSendResult, TerminalSessionId } from 'bake-terminal'
 import { deadline, timeoutOf } from 'bake-timeout'
 import { defineTool } from 'bake-tools'
 

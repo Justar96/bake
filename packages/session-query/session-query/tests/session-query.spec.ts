@@ -1,8 +1,8 @@
-import { createUserMessage, createMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, createMessage } from 'bake-llm'
 import { describe, expect, it, vi } from 'vitest'
 import { Context, type Fiber } from '@deepseek-ai/cordis'
 import SessionStore, { SessionLogOffset, SessionSeq, SESSION_FORMAT_VERSION, SessionId } from 'bake-session'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
+import SessionProjectionRegistry from 'bake-session-projection'
 import type { SessionEvent, SessionHeader, SessionId as SessionIdType } from 'bake-session'
 import SessionPersistence, {
   SessionPersistenceNotFoundError,
@@ -20,7 +20,7 @@ import SessionQueryEngine, {
   SESSION_QUERY_DEFAULT_PERSISTED_INSPECT_CONCURRENCY,
   type SessionQueryErrorCode,
 } from 'bake-session-query'
-import { SessionTitleService } from '@deepseek-ai/dsh-session-title'
+import { SessionTitleService } from 'bake-session-title'
 import { TestSessionQueryEngine } from './test-service.ts'
 
 const TITLE_SERVICE_CONFIG = { fallbackMaxWords: 8, fallbackMaxBytes: 64, maxTitleBytes: 256 }

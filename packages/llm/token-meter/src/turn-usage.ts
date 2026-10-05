@@ -1,6 +1,6 @@
-import { lastAssistantStreamChunk } from '@deepseek-ai/dsh-llm/assistant-stream'
-import type { AssistantMessage, TokenUsage } from '@deepseek-ai/dsh-llm/types'
-import type {} from '@deepseek-ai/dsh-llm-retry/types'
+import { lastAssistantStreamChunk } from 'bake-llm/assistant-stream'
+import type { AssistantMessage, TokenUsage } from 'bake-llm/types'
+import type {} from 'bake-llm-retry/types'
 import type { SessionEvent } from 'bake-session/types'
 
 /** One provider/model route that contributed a billed request attempt. */

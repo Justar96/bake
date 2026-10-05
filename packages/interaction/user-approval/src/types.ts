@@ -2,13 +2,13 @@
  * Wire-safe approval identifiers and outcome vocabulary, free of
  * cordis/service imports so browser type chains can
  * consume them without loading this package's Context augmentation.
- * @module @deepseek-ai/dsh-user-approval/types
+ * @module bake-user-approval/types
  */
 
 import type { Branded } from 'bake-brand'
 import type { Scoped } from 'bake-scope'
 import type { Agent } from 'bake-agent/types'
-import type { ToolCallId } from '@deepseek-ai/dsh-llm/brand'
+import type { ToolCallId } from 'bake-llm/brand'
 
 /**
  * Pairs one `approval/asked` audit event with its `approval/decided`.

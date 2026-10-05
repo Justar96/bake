@@ -3,11 +3,11 @@ description: "The runtime Typert registry: stores generated package reflection, 
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-typert-registry
+# bake-typert-registry
 
 ## Summary
 
-`dsh-typert-registry` makes generated Typert artifacts queryable at runtime: each package's reflection, lazy Zod schema factories, and Remote invocation descriptors live under stable keys. A schema is materialized and cached when a consumer first requests it. Registrations are atomic and fiber-scoped: a contribution lands whole or not at all and is withdrawn automatically when the registering component unloads. The same service hosts the lookup and scoped-Context provider registries that Remote calls resolve through. It performs no TypeScript analysis and generates no schemas; the generator and the loader handle those.
+`bake-typert-registry` makes generated Typert artifacts queryable at runtime: each package's reflection, lazy Zod schema factories, and Remote invocation descriptors live under stable keys. A schema is materialized and cached when a consumer first requests it. Registrations are atomic and fiber-scoped: a contribution lands whole or not at all and is withdrawn automatically when the registering component unloads. The same service hosts the lookup and scoped-Context provider registries that Remote calls resolve through. It performs no TypeScript analysis and generates no schemas; the generator and the loader handle those.
 
 ## Table of Contents
 
@@ -30,7 +30,7 @@ Mount the registry in any Host or Client composition that stores or consumes gen
 Load the registry plugin; the Client face is installed the same way by the Client runtime's own metadata, and both faces run the same implementation:
 
 ```yaml
-- name: '@deepseek-ai/dsh-typert-registry'
+- name: 'bake-typert-registry'
 ```
 
 ### Querying schemas and reflection

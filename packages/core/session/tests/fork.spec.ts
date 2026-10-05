@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { createUserMessage, ToolCallId , createMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, ToolCallId , createMessage } from 'bake-llm'
 import SessionStore, { Session, SessionForkError, SessionId, SessionLogOffset, SessionSeq } from 'bake-session'
 import type { SessionEvent, TurnEndReason } from 'bake-session'
 

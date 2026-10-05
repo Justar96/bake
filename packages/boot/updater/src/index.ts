@@ -6,7 +6,7 @@
  * `<root>/versions/` — is updated. The running release keeps running from its
  * own directory; the next launch starts the new one.
  *
- * @module @deepseek-ai/dsh-updater
+ * @module bake-updater
  */
 
 export { compareVersions, isReleaseVersion, VERSION_PATTERN } from './version.ts'

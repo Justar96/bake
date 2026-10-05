@@ -1,18 +1,18 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { ToolCallId } from '@deepseek-ai/dsh-llm'
+import { ToolCallId } from 'bake-llm'
 import SystemPrompt from 'bake-system-prompt'
 import ToolRuntime from 'bake-tools'
 import AgentRegistry, { emitAgentEvent } from 'bake-agent'
 import type { Agent } from 'bake-agent'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage } from 'bake-llm'
 import { SessionId } from 'bake-session'
 import { bindScopeParent, createScope, scopeOf } from 'bake-scope'
 import { JobId } from 'bake-jobs'
-import LocalJobRegistry from '@deepseek-ai/dsh-jobs-local'
+import LocalJobRegistry from 'bake-jobs-local'
 import type { JobHooks, JobOutcome, JobSnapshot, JobStart } from 'bake-jobs'
-import * as ToolJobs from '@deepseek-ai/dsh-tool-jobs'
-import { statusLine } from '@deepseek-ai/dsh-tool-jobs'
+import * as ToolJobs from 'bake-tool-jobs'
+import { statusLine } from 'bake-tool-jobs'
 
 const testToolSignal = new AbortController().signal
 

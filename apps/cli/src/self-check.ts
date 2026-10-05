@@ -26,7 +26,7 @@ import { pathToFileURL } from 'node:url'
 import * as yaml from 'js-yaml'
 import { entryListSchema, type PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 import type { EntryOptions } from '@deepseek-ai/cordis-plugin-loader'
-import { generateConfigSchema, type Profile } from '@deepseek-ai/dsh-app-boot'
+import { generateConfigSchema, type Profile } from 'bake-app-boot'
 import { collectConfigDumpLayers } from './dump-config.ts'
 import { INSTALL_ANCHOR, prepareProfile } from './profile-boot.ts'
 
@@ -140,7 +140,7 @@ async function loadTree(problems: string[], label: string, profile: Profile, lay
  * @returns the layer: one group per preset.
  */
 function presetLayer(terminal: string): PatchOptions[] {
-  const root = join(dirname(createRequire(terminal).resolve('@deepseek-ai/dsh-agent-presets/package.json')), 'presets')
+  const root = join(dirname(createRequire(terminal).resolve('bake-agent-presets/package.json')), 'presets')
   const insert: EntryOptions[] = []
   for (const id of readdirSync(root).sort()) {
     const composition = join(root, id, 'agent.cordis.yml')

@@ -2,7 +2,7 @@
  * One update run, shared by `bake update` and the terminal app's `/update`:
  * check the signed manifest, record the answer, and install a newer release.
  * Each surface words the outcome itself.
- * @module @deepseek-ai/dsh-updater/update
+ * @module bake-updater/update
  */
 
 import { existsSync } from 'node:fs'

@@ -12,7 +12,7 @@
  * A running process has already resolved its own version directory, so it
  * keeps running from it while `current` moves.
  *
- * @module @deepseek-ai/dsh-updater/layout
+ * @module bake-updater/layout
  */
 
 import { existsSync, readFileSync, readlinkSync, realpathSync } from 'node:fs'

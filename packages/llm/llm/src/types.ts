@@ -51,7 +51,7 @@ export interface LlmFailure {
   /**
    * With code `IMAGE_OFFLOAD_REQUIRED`: how many more of the oldest retained
    * image occurrences the route needs offloaded before the same request fits
-   * its exact byte accounting. `dsh-compaction-image-offload` records the
+   * its exact byte accounting. `bake-compaction-image-offload` records the
    * selected occurrences in an `image/offload` event and retries the step.
    */
   readonly offloadImages?: number
