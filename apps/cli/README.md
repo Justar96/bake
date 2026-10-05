@@ -1,10 +1,10 @@
 # Bake profile launcher
 
-The `@deepseek-ai/dsh` package launches Bake's Node process through named Cordis profiles. `tui` starts the terminal agent; `headless` runs a single task and exits; `desktop` is the long-lived bridge the Bake Desktop app launches. Each profile initializes on first use. The package identifier and `dsh` command remain compatible with the shared runtime's package resolution.
+The `bake-cli` package launches Bake's Node process through named Cordis profiles. `tui` starts the terminal agent; `headless` runs a single task and exits; `desktop` is the long-lived bridge the Bake Desktop app launches. Each profile initializes on first use. The package identifier and `dsh` command remain compatible with the shared runtime's package resolution.
 
 ## Profiles
 
-Each `$DSH_HOME/profiles/<name>` contains a package manifest listing ordered bundles and an optional user `cordis.patch.yml`. The terminal template selects `bake-base` and `@dsh-tui/app`. The headless template selects base and `bake-headless`, and the desktop template selects base and `bake-desktop`.
+Each `$DSH_HOME/profiles/<name>` contains a package manifest listing ordered bundles and an optional user `cordis.patch.yml`. The terminal template selects `bake-base` and `bake-tui-app`. The headless template selects base and `bake-headless`, and the desktop template selects base and `bake-desktop`.
 
 Layers apply in order: bundle patches, profile patch, home patch, then invocation `--patch` files. Missing bundles fail loudly. Existing user profiles keep their bundle selection; startup does not rewrite it to match a template.
 

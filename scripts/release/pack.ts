@@ -95,7 +95,7 @@ try {
   // to fill in: the updater and the installer then write the same launcher.
   writeFileSync(join(stage, 'bin/bake-launcher.cmd.template'), windowsLauncher(LAUNCHER_ROOT))
   chmodSync(join(stage, 'bin/bake'), 0o755)
-  const install = ['bun', 'install', '--production', '--filter', '@deepseek-ai/dsh']
+  const install = ['bun', 'install', '--production', '--filter', 'bake-cli']
   try {
     await run([...install, '--frozen-lockfile'], stage)
   } catch (error) {

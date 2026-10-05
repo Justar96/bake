@@ -9,7 +9,7 @@
  * exits. The file lives in a private temporary directory that is removed
  * whether or not the edit succeeds.
  *
- * @module @dsh-tui/app/external-editor
+ * @module bake-tui-app/external-editor
  */
 import { spawn } from 'node:child_process'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'

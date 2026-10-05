@@ -4,8 +4,8 @@ import type { SessionEvent } from 'bake-session'
 import type { Agent } from 'bake-agent'
 import type { SubagentRunInfo } from 'bake-subagent'
 import type { SubagentRoutingDecision } from 'bake-tool-subagent'
-import type { SubagentEntry } from '@dsh-tui/ui/subagents.tsx'
-import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
+import type { SubagentEntry } from 'bake-tui-ui/subagents.tsx'
+import type { TuiCopy } from 'bake-tui-ui/copy.ts'
 
 type SubagentListEntry = Awaited<ReturnType<NonNullable<Context['subagents']>['listChildren']>>[number]
 

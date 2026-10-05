@@ -4,7 +4,7 @@
  * whose lazy config waits for that service, so Loader resolves the runner's
  * `!!js` expressions only after the flags exist.
  *
- * @module @dsh-tui/app/startup
+ * @module bake-tui-app/startup
  */
 
 import { Command, Option } from 'commander'

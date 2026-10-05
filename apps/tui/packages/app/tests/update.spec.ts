@@ -10,9 +10,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CHECK_CACHE, CHECK_INTERVAL_MS, hostTarget } from 'bake-updater'
-import { dictionaries } from '@dsh-tui/ui/copy.ts'
+import { dictionaries } from 'bake-tui-ui/copy.ts'
 import { progressStep, Updates } from '../src/update.ts'
-import type { InstallStep } from '@dsh-tui/ui/install-progress.ts'
+import type { InstallStep } from 'bake-tui-ui/install-progress.ts'
 
 const copy = dictionaries.en
 const roots: string[] = []

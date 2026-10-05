@@ -30,7 +30,7 @@ function createWorkspace(): string {
 describe('Bake and DSH package license gate', () => {
   it('checks root, unhyphenated CLI, and dsh-prefixed package names while ignoring other families', () => {
     const root = createWorkspace()
-    writeManifest(root, 'apps/cli/package.json', { name: '@deepseek-ai/dsh', license: 'MIT' })
+    writeManifest(root, 'apps/cli/package.json', { name: 'bake-cli', license: 'MIT' })
     writeManifest(root, 'packages/core/agent/package.json', {
       name: '@deepseek-ai/dsh-agent',
       license: 'BSD-3-Clause',

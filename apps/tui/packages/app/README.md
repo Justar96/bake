@@ -3,7 +3,7 @@ description: "Interactive terminal profile with durable session resume, scoped h
 kind: "package-bundle"
 ---
 
-# @dsh-tui/app
+# bake-tui-app
 
 ## Summary
 

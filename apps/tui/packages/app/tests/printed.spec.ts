@@ -1,6 +1,6 @@
 /** Streamed text printed ahead of its commit, folded from the rows it is handed. */
 import { describe, expect, it as test } from 'vitest'
-import type { Row } from '@dsh-tui/ui'
+import type { Row } from 'bake-tui-ui'
 import { Printed } from '../src/printed.ts'
 import type { KeyedRow } from '../src/live.ts'
 import { present, type PresentedLine } from '../../ui/src/present.ts'

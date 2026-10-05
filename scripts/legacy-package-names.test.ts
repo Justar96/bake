@@ -10,9 +10,10 @@ import {
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 
-/** Declared names of the runtime packages under `packages/<group>/<pkg>`. */
+/** Declared names of the runtime packages under `packages/<group>/<pkg>` and the applications under `apps/`. */
 function runtimePackageNames(): Set<string> {
-  return new Set(globSync('packages/*/*/package.json', { cwd: ROOT }).map(path => (
+  const manifests = ['packages/*/*/package.json', 'apps/cli/package.json', 'apps/tui/packages/*/package.json']
+  return new Set(manifests.flatMap(pattern => globSync(pattern, { cwd: ROOT })).map(path => (
     JSON.parse(readFileSync(`${ROOT}/${path}`, 'utf8')) as { name: string }
   ).name))
 }
@@ -28,7 +29,7 @@ test('every renamed runtime package keeps its upstream name as an alias', () => 
   const missing = [...runtimePackageNames()].filter(name => name.startsWith('bake-') && !aliased.has(name))
   expect(missing).toEqual([])
   for (const [legacy, current] of LEGACY_PACKAGE_NAMES) {
-    if (current.startsWith('bake-') && legacy.startsWith('@deepseek-ai/')) {
+    if (legacy.startsWith('@deepseek-ai/dsh-')) {
       expect(legacy).toBe(`@deepseek-ai/dsh-${current.slice('bake-'.length)}`)
     }
   }
@@ -41,7 +42,10 @@ test('maps package names and subpaths without matching name prefixes', () => {
     .toBe('bake-tool-subagent-control/list-agents')
   expect(renamedModuleSpecifier('@deepseek-ai/dsh-session-format')).toBe('bake-session-format')
   expect(renamedModuleSpecifier('@deepseek-ai/dsh-session-formats')).toBeUndefined()
-  expect(renamedModuleSpecifier('@deepseek-ai/dsh')).toBeUndefined()
+  expect(renamedModuleSpecifier('@deepseek-ai/dsh')).toBe('bake-cli')
+  expect(renamedModuleSpecifier('@deepseek-ai/dsh/profile-boot')).toBe('bake-cli/profile-boot')
+  expect(renamedModuleSpecifier('@dsh-tui/app/lib/runner.js')).toBe('bake-tui-app/lib/runner.js')
+  expect(renamedModuleSpecifier('@dsh-tui/apps')).toBeUndefined()
   expect(renamedModuleSpecifier('bake-base')).toBeUndefined()
   expect(renamedModuleSpecifier('@deepseek-ai')).toBeUndefined()
 })

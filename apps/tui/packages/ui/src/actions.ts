@@ -24,7 +24,7 @@
  * event's rows, live or replayed, so a resumed session prints the same blocks
  * a live one did.
  *
- * @module @dsh-tui/ui/actions
+ * @module bake-tui-ui/actions
  */
 
 import type { SessionEvent } from 'bake-session'

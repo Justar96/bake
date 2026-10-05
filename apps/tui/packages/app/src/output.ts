@@ -27,7 +27,7 @@
  * updates. Its alternate buffer starts at home, turns autowrap off, and never
  * erases shell scrollback.
  *
- * @module @dsh-tui/app/output
+ * @module bake-tui-app/output
  */
 
 const CSI = '\u001B['

@@ -1,5 +1,5 @@
 {
-  "name": "@dsh-tui/app",
+  "name": "bake-tui-app",
   "description": "The dsh interactive terminal surface: profile patch layer, flag parsing, and the session runner",
   "version": "0.0.0",
   "private": true,
@@ -54,7 +54,7 @@
     "bake-user-questions": "workspace:^",
     "bake-util-values": "workspace:^",
     "@deepseek-ai/schemastery": "workspace:^",
-    "@dsh-tui/ui": "workspace:^",
+    "bake-tui-ui": "workspace:^",
     "commander": "catalog:",
     "ink": "catalog:",
     "jsonc-parser": "catalog:",

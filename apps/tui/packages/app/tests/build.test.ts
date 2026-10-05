@@ -46,7 +46,7 @@ it('keeps Bake and retained runtime package imports external, including subpaths
 
 // The release installs production dependencies only, and on Windows into
 // Bun's isolated layout, where a built entry resolves just the packages
-// `@dsh-tui/app` declares. A hoisted checkout finds an undeclared one anyway.
+// `bake-tui-app` declares. A hoisted checkout finds an undeclared one anyway.
 it('declares every package the built entries import at runtime', async () => {
   const app = resolve(import.meta.dirname, '..')
   const lib = join(app, 'lib')

@@ -7,11 +7,11 @@
  * prefix from the committed projection. The Session log retains the full text.
  * An abandoned attempt stays in scrollback with the controller's discard notice.
  *
- * @module @dsh-tui/app/printed
+ * @module bake-tui-app/printed
  */
 
-import { finishedMarkdown } from '@dsh-tui/ui/markdown.ts'
-import type { Row } from '@dsh-tui/ui/rows.ts'
+import { finishedMarkdown } from 'bake-tui-ui/markdown.ts'
+import type { Row } from 'bake-tui-ui/rows.ts'
 import type { KeyedRow } from './live.ts'
 
 /** Text printed from one block, in stream order. */

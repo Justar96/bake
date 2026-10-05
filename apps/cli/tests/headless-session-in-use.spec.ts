@@ -17,7 +17,7 @@ import { SESSION_IN_USE_EXIT } from 'bake-cmdline'
 import { LOADER_SMOKE_TEST_TIMEOUT_MS, resolveExampleLaunch } from 'bake-loader-smoke'
 import { SESSION_FORMAT_VERSION, SessionId, SessionSeq } from 'bake-session'
 import Persistence from 'bake-session-persistence-jsonl'
-import { dictionaries } from '@dsh-tui/ui/copy.ts'
+import { dictionaries } from 'bake-tui-ui/copy.ts'
 import { deepseekEndpointSettings } from './fixtures/deepseek-endpoint.ts'
 
 const dshBinScript = fileURLToPath(new URL('../src/bin.ts', import.meta.url))

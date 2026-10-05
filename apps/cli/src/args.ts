@@ -15,7 +15,7 @@
  * Bake install with the newest signed release, or returns it to an earlier
  * one. The hidden `--self-check` loads what a launch loads and exits; the
  * updater and the release pack run it on a release before trusting it.
- * @module @deepseek-ai/dsh/args
+ * @module bake-cli/args
  */
 
 import { Command, CommanderError, InvalidArgumentError, Option } from 'commander'

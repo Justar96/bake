@@ -48,7 +48,7 @@ export const SENSITIVE_ENV_PATTERN = /KEY|PASSWORD|SECRET|TOKEN/i
 
 /**
  * Where the CLI keeps the caller's own `NODE_ENV` after choosing the
- * renderer's build; see `selectRendererBuild` in `@deepseek-ai/dsh`.
+ * renderer's build; see `selectRendererBuild` in `bake-cli`.
  */
 export const INHERITED_NODE_ENV = 'DSH_INHERITED_NODE_ENV'
 

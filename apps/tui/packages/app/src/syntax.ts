@@ -16,13 +16,13 @@
  * they are left uncoloured. The presentation layer draws them in the line's
  * own tone, and comments are dimmed.
  *
- * @module @dsh-tui/app/syntax
+ * @module bake-tui-app/syntax
  */
 
 import { createHighlighterCore, type HighlighterCore, type LanguageInput } from 'shiki/core'
 import { createJavaScriptRegexEngine } from 'shiki/engine/javascript'
 import { bundledLanguages, bundledLanguagesInfo } from 'shiki/langs'
-import type { CodeToken, Highlight } from '@dsh-tui/ui/present.ts'
+import type { CodeToken, Highlight } from 'bake-tui-ui/present.ts'
 
 /** Languages loaded before the first frame. These are what an agent in a repository edits most. */
 const PRELOADED = ['typescript', 'tsx', 'javascript', 'jsx', 'json', 'markdown', 'python', 'rust', 'go', 'yaml', 'shellscript', 'css', 'html', 'toml'] as const

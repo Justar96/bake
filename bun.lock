@@ -28,9 +28,10 @@
       },
     },
     "apps/cli": {
-      "name": "@deepseek-ai/dsh",
+      "name": "bake-cli",
       "version": "0.3.8",
       "bin": {
+        "bake": "lib/bin.js",
         "dsh": "lib/bin.js",
       },
       "dependencies": {
@@ -39,7 +40,6 @@
         "@deepseek-ai/cordis-plugin-loader": "workspace:^",
         "@deepseek-ai/cordis-plugin-timer": "workspace:^",
         "@deepseek-ai/schemastery": "workspace:^",
-        "@dsh-tui/app": "workspace:^",
         "bake-agent-instructions": "workspace:^",
         "bake-agent-tool-presentation": "workspace:^",
         "bake-app-boot": "workspace:^",
@@ -91,13 +91,13 @@
         "bake-tool-subagent": "workspace:^",
         "bake-tool-subagent-control": "workspace:^",
         "bake-tool-web": "workspace:^",
+        "bake-tui-app": "workspace:^",
         "bake-updater": "workspace:^",
         "commander": "catalog:",
         "js-yaml": "catalog:",
         "node-addon-require-builtin": "catalog:",
       },
       "devDependencies": {
-        "@dsh-tui/ui": "workspace:^",
         "@types/js-yaml": "catalog:",
         "@types/ws": "catalog:",
         "ajv": "catalog:",
@@ -128,17 +128,17 @@
         "bake-subprocess-local": "workspace:^",
         "bake-system-prompt": "workspace:^",
         "bake-tools": "workspace:^",
+        "bake-tui-ui": "workspace:^",
         "bake-user-approval": "workspace:^",
         "execa": "catalog:",
         "ws": "catalog:",
       },
     },
     "apps/tui/packages/app": {
-      "name": "@dsh-tui/app",
+      "name": "bake-tui-app",
       "version": "0.0.0",
       "dependencies": {
         "@deepseek-ai/schemastery": "workspace:^",
-        "@dsh-tui/ui": "workspace:^",
         "bake-agent": "workspace:^",
         "bake-agent-default-model": "workspace:^",
         "bake-agent-presets": "workspace:^",
@@ -170,6 +170,7 @@
         "bake-subagent": "workspace:^",
         "bake-token-meter": "workspace:^",
         "bake-tool-subagent": "workspace:^",
+        "bake-tui-ui": "workspace:^",
         "bake-updater": "workspace:^",
         "bake-user-approval": "workspace:^",
         "bake-user-questions": "workspace:^",
@@ -202,10 +203,10 @@
       },
     },
     "apps/tui/packages/harness": {
-      "name": "@dsh-tui/harness",
+      "name": "bake-tui-harness",
       "version": "0.0.0",
       "dependencies": {
-        "@dsh-tui/ui": "workspace:^",
+        "bake-tui-ui": "workspace:^",
         "ink": "catalog:",
         "react": "catalog:",
       },
@@ -219,7 +220,7 @@
       },
     },
     "apps/tui/packages/ui": {
-      "name": "@dsh-tui/ui",
+      "name": "bake-tui-ui",
       "version": "0.0.0",
       "dependencies": {
         "bake-file-reference": "workspace:^",
@@ -4043,8 +4044,8 @@
   "patchedDependencies": {
     "ink@7.1.1": "patches/ink@7.1.1.patch",
     "slice-ansi@9.0.1": "patches/slice-ansi@9.0.1.patch",
-    "string-width@8.2.2": "patches/string-width@8.2.2.patch",
     "node-pty@1.2.0-beta.15": "patches/node-pty@1.2.0-beta.15.patch",
+    "string-width@8.2.2": "patches/string-width@8.2.2.patch",
   },
   "catalog": {
     "@types/bun": "1.4.2",
@@ -4153,8 +4154,6 @@
 
     "@deepseek-ai/cosmokit": ["@deepseek-ai/cosmokit@workspace:vendor/cosmokit"],
 
-    "@deepseek-ai/dsh": ["@deepseek-ai/dsh@workspace:apps/cli"],
-
     "@deepseek-ai/node-addon-system": ["@deepseek-ai/node-addon-system@workspace:native/system/packages/entry"],
 
     "@deepseek-ai/node-addon-system-darwin-arm64": ["@deepseek-ai/node-addon-system-darwin-arm64@workspace:native/system/packages/darwin-arm64"],
@@ -4168,12 +4167,6 @@
     "@deepseek-ai/node-addon-system-workspace": ["@deepseek-ai/node-addon-system-workspace@workspace:native/system"],
 
     "@deepseek-ai/schemastery": ["@deepseek-ai/schemastery@workspace:vendor/schemastery"],
-
-    "@dsh-tui/app": ["@dsh-tui/app@workspace:apps/tui/packages/app"],
-
-    "@dsh-tui/harness": ["@dsh-tui/harness@workspace:apps/tui/packages/harness"],
-
-    "@dsh-tui/ui": ["@dsh-tui/ui@workspace:apps/tui/packages/ui"],
 
     "@earendil-works/pi-ai": ["@earendil-works/pi-ai@1.0.0", "", { "dependencies": { "@anthropic-ai/sdk": "0.124.0", "@aws-sdk/client-bedrock-runtime": "3.1127.0", "@earendil-works/pi-telemetry": "^1.0.0", "@google/genai": "2.21.0", "@smithy/node-http-handler": "4.12.1", "http-proxy-agent": "9.1.0", "https-proxy-agent": "9.1.0", "openai": "7.19.0", "partial-json": "0.1.7", "typebox": "1.3.27" }, "bin": { "pi-ai": "dist/cli.js" } }, "sha512-3/W1vdDaVtpeMd23ElvJC12HLA5yS/BGqqcXF+0SK082dN7cbgNcCwguTBRBC258Ke8SzSvUW1B75iAf8w8IxA=="],
 
@@ -4831,6 +4824,8 @@
 
     "bake-chunked-list": ["bake-chunked-list@workspace:packages/util/chunked-list"],
 
+    "bake-cli": ["bake-cli@workspace:apps/cli"],
+
     "bake-client-connection": ["bake-client-connection@workspace:packages/client/connection"],
 
     "bake-cmdline": ["bake-cmdline@workspace:packages/boot/cmdline"],
@@ -5076,6 +5071,12 @@
     "bake-tool-web": ["bake-tool-web@workspace:packages/web/tool-web"],
 
     "bake-tools": ["bake-tools@workspace:packages/core/tools"],
+
+    "bake-tui-app": ["bake-tui-app@workspace:apps/tui/packages/app"],
+
+    "bake-tui-harness": ["bake-tui-harness@workspace:apps/tui/packages/harness"],
+
+    "bake-tui-ui": ["bake-tui-ui@workspace:apps/tui/packages/ui"],
 
     "bake-typert-generator": ["bake-typert-generator@workspace:packages/typert/generator"],
 

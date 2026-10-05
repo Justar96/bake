@@ -2,7 +2,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from 'bake-agent'
 import type { JobSnapshot } from 'bake-jobs'
-import type { BackgroundEntry } from '@dsh-tui/ui/background.tsx'
+import type { BackgroundEntry } from 'bake-tui-ui/background.tsx'
 
 /**
  * Producer kinds the background row leaves out: a delegated child has the

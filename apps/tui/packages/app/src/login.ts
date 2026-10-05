@@ -20,10 +20,10 @@ import { credentialKeyId, credentialKeyScope, credentialRef, type CredentialKey 
 import { normalizeApiKey } from 'bake-llm'
 import type { AuthorizationNotice, AuthorizationPrompt } from 'bake-authorization/types'
 import type {} from 'bake-authorization'
-import { suggestCommand } from '@dsh-tui/ui/completion.ts'
-import type { LoginField } from '@dsh-tui/ui/interaction.tsx'
+import { suggestCommand } from 'bake-tui-ui/completion.ts'
+import type { LoginField } from 'bake-tui-ui/interaction.tsx'
 import { CLIPROXYAPI_ID, CLIPROXYAPI_KEY, cliProxyEndpoints, configureCliProxyApi, type CliProxySetupCopy } from './cliproxyapi.ts'
-import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
+import type { TuiCopy } from 'bake-tui-ui/copy.ts'
 
 /**
  * One key reference the composition offers, as its profile names it: the

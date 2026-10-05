@@ -5,7 +5,7 @@
  * terminal owner supplies. That purity is what lets the component harness run under Bun with no
  * harness runtime, and it is a constraint, not an accident.
  *
- * @module @dsh-tui/ui
+ * @module bake-tui-ui
  */
 
 export { App, goalState, RowView } from './app.tsx'

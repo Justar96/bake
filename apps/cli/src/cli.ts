@@ -1,7 +1,7 @@
 /**
  * Command-line dispatch for dsh, loaded by the `bin` entry once the module
  * compile cache is on.
- * @module @deepseek-ai/dsh/cli
+ * @module bake-cli/cli
  */
 
 /* v8 ignore file -- built-bin acceptance exercises this dispatch. */

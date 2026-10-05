@@ -1,7 +1,7 @@
 /**
  * `bake update`: replace a managed install with the newest signed release,
  * or with `--rollback`, return it to an earlier release still installed.
- * @module @deepseek-ai/dsh/update
+ * @module bake-cli/update
  */
 
 import { fileURLToPath } from 'node:url'

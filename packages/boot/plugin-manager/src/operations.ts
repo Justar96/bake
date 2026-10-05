@@ -4,8 +4,8 @@ import { mkdir, mkdtemp, open } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { withFileLock, writeFileAtomic } from 'bake-atomic-write'
 import {
-  DEFAULT_PROFILE_BUNDLES, bundlePatchPaths, initProfile, PROFILE_TEMPLATES, readProfileManifest,
-  resolveBundleDir, resolveProfileDir, loadOverlayPatches, type ProfileManifest,
+  DEFAULT_PROFILE_BUNDLES, bundlePatchPaths, initProfile, PROFILE_TEMPLATES, profileBundles, readProfileManifest,
+  resolveBundleDir, resolveProfileDir, loadOverlayPatches, withProfileBundles, type ProfileManifest,
 } from 'bake-app-boot'
 import { scrubbedParentEnv } from 'bake-subprocess'
 import type { PackageResult } from './types.ts'
@@ -73,7 +73,7 @@ async function reconcile(before: ProfileManifest, dir: string, anchor: string, o
   const after = readProfileManifest('dsh', dir)
   const dependencies = Object.keys(after.dependencies ?? {})
   const beforeDeps = new Set(Object.keys(before.dependencies ?? {}))
-  const previous = after.dsh?.profile?.bundles ?? []
+  const previous = profileBundles(after)
   const bundles = previous.filter((name) => {
     if (!beforeDeps.has(name) && !dependencies.includes(name)) return true
     return dependencies.includes(name) && bundleManifest(name, dir, anchor) !== undefined
@@ -91,8 +91,7 @@ async function reconcile(before: ProfileManifest, dir: string, anchor: string, o
     }
   }
   if (JSON.stringify(previous) === JSON.stringify(bundles)) return
-  after.dsh = { ...after.dsh, profile: { ...after.dsh?.profile, bundles } }
-  await saveManifest(dir, after)
+  await saveManifest(dir, withProfileBundles(after, bundles))
 }
 
 /** Execute pnpm inside a profile whose caller already holds the profile write lock.

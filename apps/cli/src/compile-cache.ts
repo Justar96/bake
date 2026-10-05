@@ -5,7 +5,7 @@
  * reuses their compiled code from disk instead of compiling them again on
  * every launch. The cache only speeds up modules loaded after it is enabled,
  * so the `bin` entry enables it before it imports anything else.
- * @module @deepseek-ai/dsh/compile-cache
+ * @module bake-cli/compile-cache
  */
 
 import { lstatSync, mkdirSync } from 'node:fs'

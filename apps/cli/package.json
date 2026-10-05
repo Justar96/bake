@@ -1,6 +1,6 @@
 {
-  "name": "@deepseek-ai/dsh",
-  "description": "dsh CLI: profile launch, plugin management, and configuration inspection",
+  "name": "bake-cli",
+  "description": "Bake CLI: profile launch, plugin management, and configuration inspection",
   "version": "0.3.8",
   "publishConfig": {
     "access": "public"
@@ -12,6 +12,7 @@
   },
   "type": "module",
   "bin": {
+    "bake": "lib/bin.js",
     "dsh": "lib/bin.js"
   },
   "files": [
@@ -29,7 +30,7 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@dsh-tui/app": "workspace:^",
+    "bake-tui-app": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^",
     "bake-hmr": "workspace:^",
     "@deepseek-ai/cordis-plugin-include": "workspace:^",
@@ -120,7 +121,7 @@
     "bake-system-prompt": "workspace:^",
     "bake-tools": "workspace:^",
     "bake-user-approval": "workspace:^",
-    "@dsh-tui/ui": "workspace:^",
+    "bake-tui-ui": "workspace:^",
     "@types/js-yaml": "catalog:",
     "@types/ws": "catalog:",
     "ajv": "catalog:",

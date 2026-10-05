@@ -219,7 +219,7 @@ All verified locally on bun 1.3.14:
 │    app-boot → package-resolution generation → mounts the tree      │
 │                                                                    │
 │    bake-base rows  (agent-loop, session, llm, tools…)  │
-│    @dsh-tui/app rows:                                              │
+│    bake-tui-app rows:                                              │
 │      tui-startup   cmdline flags → ctx.tuiStartup                  │
 │      tui-runner    owns stdin raw mode + the `release` teardown    │
 │      tui-ui        Ink root, transcript, composer, approvals       │
@@ -292,12 +292,12 @@ tui/
   README.md                how to run it (M1)
   experiments/             throwaway probes (probe.ts, probe.patch.yml)
   packages/
-    app/                   @dsh-tui/app — the bundle: cordis.patch.yml + startup + runner
+    app/                   bake-tui-app — the bundle: cordis.patch.yml + startup + runner
       cordis.patch.yml     rows over bake-base
       src/index.ts         tui-runner: terminal ownership, lifecycle, release hook
       src/startup.ts       tui-startup: cmdline flags → ctx.tuiStartup
       src/session.ts       agent creation / adoption / resume
-    ui/                    @dsh-tui/ui — Ink components, pure over props
+    ui/                    bake-tui-ui — Ink components, pure over props
       src/transcript.tsx   <Static> committed rows
       src/live.tsx         in-flight turn region
       src/composer.tsx     input, slash commands, references
@@ -308,7 +308,7 @@ tui/
     fixtures/*.jsonl       recorded session-event streams
 ```
 
-`@dsh-tui/ui` is pure: no Cordis, no Node built-ins, no I/O. That purity is what makes the Bun harness
+`bake-tui-ui` is pure: no Cordis, no Node built-ins, no I/O. That purity is what makes the Bun harness
 and `bun test` possible, and it is worth defending.
 
 `pnpm-workspace.yaml` gains one line: `- tui/packages/*`.

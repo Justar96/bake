@@ -4,8 +4,8 @@ import React from 'react'
 import { afterEach, expect, it } from 'vitest'
 import { cleanup, render } from '../../../tests/render.tsx'
 import { parseSessionLog } from 'bake-llm-replay'
-import { Actions, App, appendTranscript, emptyTranscript, formatRow, project, projector, transcriptRows } from '@dsh-tui/ui'
-import { dictionaries } from '@dsh-tui/ui/copy.ts'
+import { Actions, App, appendTranscript, emptyTranscript, formatRow, project, projector, transcriptRows } from 'bake-tui-ui'
+import { dictionaries } from 'bake-tui-ui/copy.ts'
 
 afterEach(cleanup)
 

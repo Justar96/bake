@@ -15,7 +15,7 @@
  * for its sessions, the same way, then the terminal runner's modules, which
  * the terminal loads only once it starts. No plugin is applied, so the check
  * needs no TTY, network, or model key, and it ends once the imports settle.
- * @module @deepseek-ai/dsh/self-check
+ * @module bake-cli/self-check
  */
 
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
@@ -36,7 +36,7 @@ const NAME = 'dsh'
 export const SELF_CHECK_PROFILES = ['tui', 'headless'] as const
 
 /**
- * The terminal runner's modules under `@dsh-tui/app/lib/`: its entry imports
+ * The terminal runner's modules under `bake-tui-app/lib/`: its entry imports
  * `runner-loader` once the terminal starts, and the runner imports the other
  * two beside itself.
  */
@@ -70,7 +70,7 @@ export async function runSelfCheck(version: string, output: SelfCheckOutput = {
   const problems: string[] = []
   let presets = 0
   try {
-    const terminal = await check(problems, 'terminal package', async () => createRequire(INSTALL_ANCHOR).resolve('@dsh-tui/app/package.json'))
+    const terminal = await check(problems, 'terminal package', async () => createRequire(INSTALL_ANCHOR).resolve('bake-tui-app/package.json'))
     for (const name of SELF_CHECK_PROFILES) {
       const profile = await check(problems, `${name} profile`, async () => prepareProfile(name))
       if (profile === undefined) continue
@@ -136,7 +136,7 @@ async function loadTree(problems: string[], label: string, profile: Profile, lay
  * A mounted preset resolves a package row from the host composition, as these
  * groups at the profile's root do, and a relative row from its own directory,
  * which this layer writes into the row as a file URL.
- * @param terminal - `@dsh-tui/app`'s manifest, which depends on the presets package.
+ * @param terminal - `bake-tui-app`'s manifest, which depends on the presets package.
  * @returns the layer: one group per preset.
  */
 function presetLayer(terminal: string): PatchOptions[] {

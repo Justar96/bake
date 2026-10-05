@@ -18,7 +18,7 @@
  * The comment and trailing-comma rules are VS Code's "JSON with Comments"
  * mode: https://code.visualstudio.com/docs/languages/json#_json-with-comments
  *
- * @module @dsh-tui/app/jsonc
+ * @module bake-tui-app/jsonc
  */
 // The package's bare specifier resolves to its UMD main, whose lazy
 // `require('./impl/format')` cannot resolve from the bundled runner; the ESM

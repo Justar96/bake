@@ -172,10 +172,19 @@ const RENAMED_DSH_PACKAGES = [
   'win32-process',
 ] as const
 
+/** Application packages whose upstream names do not follow the `@deepseek-ai/dsh-<name>` pattern. */
+const RENAMED_APPLICATION_PACKAGES = [
+  ['@deepseek-ai/dsh', 'bake-cli'],
+  ['@dsh-tui/app', 'bake-tui-app'],
+  ['@dsh-tui/harness', 'bake-tui-harness'],
+  ['@dsh-tui/ui', 'bake-tui-ui'],
+] as const
+
 /** Legacy package name → current package name, for every renamed workspace package. */
-export const LEGACY_PACKAGE_NAMES: ReadonlyMap<string, string> = new Map(
-  RENAMED_DSH_PACKAGES.map(name => [`@deepseek-ai/dsh-${name}`, `bake-${name}`]),
-)
+export const LEGACY_PACKAGE_NAMES: ReadonlyMap<string, string> = new Map([
+  ...RENAMED_DSH_PACKAGES.map((name): [string, string] => [`@deepseek-ai/dsh-${name}`, `bake-${name}`]),
+  ...RENAMED_APPLICATION_PACKAGES,
+])
 
 /**
  * Split a bare module specifier into its package name and subpath.

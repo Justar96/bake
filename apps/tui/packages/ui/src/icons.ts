@@ -14,7 +14,7 @@
  * has no emoji presentation, for the reason `MARKER` gives. The tool name is
  * still written in the head, so the icon never carries meaning on its own.
  *
- * @module @dsh-tui/ui/icons
+ * @module bake-tui-ui/icons
  */
 
 import { MARKER } from './layout.ts'

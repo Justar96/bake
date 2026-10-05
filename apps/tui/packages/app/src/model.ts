@@ -1,10 +1,10 @@
 /** Model discovery and selection validation delegated to the Harness LLM catalog. */
 import type { ModelSelection } from 'bake-agent'
 import type { LlmModelInfo, LlmRuntime, LlmModelReasoningInfo, LlmResolvedModelInfo } from 'bake-llm'
-import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
-import { formatTokens } from '@dsh-tui/ui/format.ts'
-import { thinkingTone } from '@dsh-tui/ui/palette.ts'
-import type { Choice, ChoicePrompt } from '@dsh-tui/ui/picker.tsx'
+import type { TuiCopy } from 'bake-tui-ui/copy.ts'
+import { formatTokens } from 'bake-tui-ui/format.ts'
+import { thinkingTone } from 'bake-tui-ui/palette.ts'
+import type { Choice, ChoicePrompt } from 'bake-tui-ui/picker.tsx'
 
 /**
  * Format a model selection for the composer and status line.

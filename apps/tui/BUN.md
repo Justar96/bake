@@ -21,7 +21,7 @@ CI reads the Bun pin from `package.json`. Workspace checks reject unpinned versi
 
 ## Shared production build
 
-[`scripts/build.ts`](scripts/build.ts) owns the app, recorder, and diagnostic bundling options. It inlines `@dsh-tui/ui` and keeps `@deepseek-ai/*`, `bake-*`, Ink, React, Commander, and Shiki external, preserving host singleton identity. Production bundles compile with production JSX and minification. The dispatcher supplies `NODE_ENV=production` to built app, recorder, and PTY launches so external React and Ink use the same mode.
+[`scripts/build.ts`](scripts/build.ts) owns the app, recorder, and diagnostic bundling options. It inlines `bake-tui-ui` and keeps `@deepseek-ai/*`, `bake-*`, Ink, React, Commander, and Shiki external, preserving host singleton identity. Production bundles compile with production JSX and minification. The dispatcher supplies `NODE_ENV=production` to built app, recorder, and PTY launches so external React and Ink use the same mode.
 
 ```sh
 bun run build
@@ -47,4 +47,4 @@ Bun does not export the terminal's `name` option as `TERM`, so both drivers set 
 
 Bun coverage reporting can help identify missing pure-projection cases before adopting a coverage threshold. Coverage policy needs its own focused change and negative control. JUnit output becomes useful when a TUI CI job consumes it. Test sharding or concurrency should follow measured suite cost, especially because process-level performance samples must run without competing CPU-heavy jobs.
 
-`--packages=external` is unsuitable here: it would also externalize `@dsh-tui/ui`, which must be inlined. `--compile` creates a Bun executable, while the application is an in-process Node plugin loaded through a `dsh` profile. Bun's root workspace settings are independent of the runtime's external-profile package-manager configuration.
+`--packages=external` is unsuitable here: it would also externalize `bake-tui-ui`, which must be inlined. `--compile` creates a Bun executable, while the application is an in-process Node plugin loaded through a `dsh` profile. Bun's root workspace settings are independent of the runtime's external-profile package-manager configuration.

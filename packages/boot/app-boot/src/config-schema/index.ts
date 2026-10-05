@@ -1,7 +1,7 @@
 /** Profile schema generation: composition diagnostics, runtime resolution, and boot-free discovery. */
 
 import type { PatchOptions } from '@deepseek-ai/cordis-plugin-include'
-import { composeEntries, createProfileResolutionGeneration, readProfileManifest, type Profile } from '../profile.ts'
+import { composeEntries, createProfileResolutionGeneration, profileBundles, readProfileManifest, type Profile } from '../profile.ts'
 import { collectConfigSchemas } from './collect.ts'
 import type { ConfigSchemaDiagnostic, ConfigSchemaDump } from './types.ts'
 export type { ConfigSchemaDump, NativeConfigSchema } from './types.ts'
@@ -28,7 +28,7 @@ export async function generateConfigSchema(
   const manifest = readProfileManifest(binName, profile.dir)
   const diagnostics: ConfigSchemaDiagnostic[] = []
   const loaded = new Set(profile.layers.map(layer => layer.packageName))
-  for (const packageName of manifest.dsh?.profile?.bundles ?? []) {
+  for (const packageName of profileBundles(manifest)) {
     if (!loaded.has(packageName)) diagnostics.push({
       level: 'error',
       message: `Selected profile bundle ${JSON.stringify(packageName)} could not be loaded; repair or remove its bundle selection.`,

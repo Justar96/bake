@@ -14,7 +14,7 @@
  * back to the raw arguments and result text. So does a generic result that
  * omits its `content`, which the contract defines as "render the raw result".
  *
- * @module @dsh-tui/ui/cards
+ * @module bake-tui-ui/cards
  */
 
 import type { FileDiff, TerminalChanges, TerminalFileChange, ToolCallView, ToolResult, ToolResultView } from 'bake-tools'

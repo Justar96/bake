@@ -15,7 +15,7 @@
  * terminal can draw; nothing here reads the process, the clock, or the
  * environment. Every glyph is one cell wide, so a row's length is its width.
  *
- * @module @dsh-tui/ui/install-progress
+ * @module bake-tui-ui/install-progress
  */
 import { PALETTE, PROGRESS_TONES } from './palette.ts'
 

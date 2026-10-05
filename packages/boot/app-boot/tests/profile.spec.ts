@@ -10,7 +10,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { withFileLock } from 'bake-atomic-write'
 import { afterAll, describe, expect, it, onTestFinished } from 'vitest'
@@ -25,10 +25,12 @@ import {
   PROFILE_MANIFEST_BACKUP_SUFFIX,
   PROFILE_PATCH_FILENAME,
   PROFILE_TEMPLATES,
+  profileBundles,
   readProfileManifest,
   readProfilePatches,
   resolveBundleDir,
   resolveProfileDir,
+  withProfileBundles,
   writeProfileManifest,
   type Profile,
 } from '../src/index.ts'
@@ -186,13 +188,14 @@ describe('initProfile', () => {
     const dir = resolveProfileDir('tui', home)
     initProfile(dir, ['bake-base'])
     const manifest = readProfileManifest('t', dir)
-    expect(manifest.dsh?.profile?.bundles).toEqual(['bake-base'])
+    expect(manifest).toMatchObject({ name: 'bake-profile-tui', bake: { profile: { bundles: ['bake-base'] } } })
+    expect(manifest.dsh).toBeUndefined()
     expect(readFileSync(join(dir, PROFILE_PATCH_FILENAME), 'utf8')).toContain('[]')
     expect(readFileSync(join(dir, 'pnpm-workspace.yaml'), 'utf8')).toContain('nodeLinker: hoisted')
     // Re-init keeps user edits.
     writeFileSync(join(dir, PROFILE_PATCH_FILENAME), '- id: x\n  config: {}\n')
     initProfile(dir, ['other'])
-    expect(readProfileManifest('t', dir).dsh?.profile?.bundles).toEqual(['bake-base'])
+    expect(readProfileManifest('t', dir).bake?.profile?.bundles).toEqual(['bake-base'])
     expect(readFileSync(join(dir, PROFILE_PATCH_FILENAME), 'utf8')).toContain('- id: x')
   })
 })
@@ -200,8 +203,8 @@ describe('initProfile', () => {
 describe('manifest round-trip', () => {
   it('writes and reads back, and fails loud on a broken manifest', () => {
     const dir = tmp()
-    writeProfileManifest(dir, { name: 'p', dsh: { profile: { bundles: ['a'] } } })
-    expect(readProfileManifest('t', dir).dsh?.profile?.bundles).toEqual(['a'])
+    writeProfileManifest(dir, { name: 'p', bake: { profile: { bundles: ['a'] } } })
+    expect(readProfileManifest('t', dir).bake?.profile?.bundles).toEqual(['a'])
     writeFileSync(join(dir, 'package.json'), '[]')
     expect(() => readProfileManifest('t', dir)).toThrow('must hold a JSON object')
     expect(() => readProfileManifest('t', join(dir, 'nope'))).toThrow('failed to read profile manifest')
@@ -253,7 +256,7 @@ describe('loadProfile', () => {
     expect(profile.layers.map(layer => layer.packageName)).toEqual(['bundle-a'])
   })
 
-  it('resolves each dsh.profile.bundles entry to its patch layer in order, plus the user layer', () => {
+  it('resolves each bake.profile.bundles entry to its patch layer in order, plus the user layer', () => {
     const anchor = stageInstallation({
       'bundle-a': { patch: '- insert:\n    - id: a\n      name: pkg-a\n' },
       'bundle-b': { patch: '- id: a\n  config:\n    v: 2\n' },
@@ -305,7 +308,7 @@ describe('loadProfile', () => {
       { id: 'a', name: pathToFileURL(join(bundleDir, 'local.js')).href, config: { v: 2 } },
       { id: 'b', name: pathToFileURL(join(bundleDir, 'layers', 'local.js')).href },
     ])
-    writeFileSync(join(dir, 'package.json'), JSON.stringify({ dsh: { profile: { bundles: ['broken'] } } }))
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ bake: { profile: { bundles: ['broken'] } } }))
     expect(() => loadProfile('t', 'demo', anchor, home)).toThrow('dsh.bundle.patch must be a file path or a list of file paths')
   })
 
@@ -315,17 +318,17 @@ describe('loadProfile', () => {
     expect(() => loadProfile('t', 'custom', anchor, home))
       .toThrow('profile "custom" does not exist')
     expect(PROFILE_TEMPLATES).toEqual({
-      tui: { bundles: ['bake-base', '@dsh-tui/app'] },
+      tui: { bundles: ['bake-base', 'bake-tui-app'] },
       headless: { bundles: ['bake-base', 'bake-headless'] },
       desktop: { bundles: ['bake-base', 'bake-desktop'] },
     })
     const shippedAnchor = stageInstallation({
       'bake-base': { patch: '[]\n' },
-      '@dsh-tui/app': { patch: '[]\n' },
+      'bake-tui-app': { patch: '[]\n' },
     })
     expect(loadProfile('t', 'tui', shippedAnchor, home).layers.map(layer => layer.packageName))
       .toEqual(PROFILE_TEMPLATES.tui!.bundles)
-    expect(readProfileManifest('t', resolveProfileDir('tui', home)).dsh?.profile?.bundles)
+    expect(readProfileManifest('t', resolveProfileDir('tui', home)).bake?.profile?.bundles)
       .toEqual(PROFILE_TEMPLATES.tui!.bundles)
   })
 
@@ -335,7 +338,7 @@ describe('loadProfile', () => {
     const dir = resolveProfileDir('headless', home)
     initProfile(dir, ['custom-bundle'])
     loadProfile('t', 'headless', anchor, home)
-    expect(readProfileManifest('t', dir).dsh?.profile?.bundles).toEqual(['custom-bundle'])
+    expect(readProfileManifest('t', dir).bake?.profile?.bundles).toEqual(['custom-bundle'])
   })
 
   it('fails loud when a listed bundle declares no dsh.bundle', () => {
@@ -358,7 +361,7 @@ describe('legacy bundle names', () => {
   it('migrates a released profile manifest once, keeping a backup and logging one line', () => {
     const anchor = stageInstallation({
       'bake-base': { patch: '[]\n' },
-      '@dsh-tui/app': { patch: '[]\n' },
+      'bake-tui-app': { patch: '[]\n' },
       'custom-bundle': { patch: '[]\n' },
     })
     const home = tmp()
@@ -370,14 +373,16 @@ describe('legacy bundle names', () => {
 
     const profile = loadProfile('t', 'tui', anchor, home, { warn: line => lines.push(line) })
 
-    expect(profile.layers.map(layer => layer.packageName)).toEqual(['bake-base', '@dsh-tui/app', 'custom-bundle'])
+    expect(profile.layers.map(layer => layer.packageName)).toEqual(['bake-base', 'bake-tui-app', 'custom-bundle'])
+    const { dsh: _legacy, ...unchanged } = legacyManifest
     expect(readProfileManifest('t', dir)).toEqual({
-      ...legacyManifest,
-      dsh: { profile: { bundles: ['bake-base', '@dsh-tui/app', 'custom-bundle'] } },
+      ...unchanged,
+      bake: { profile: { bundles: ['bake-base', 'bake-tui-app', 'custom-bundle'] } },
     })
     expect(readFileSync(join(dir, `package.json${PROFILE_MANIFEST_BACKUP_SUFFIX}`), 'utf8')).toBe(original)
     expect(lines).toEqual([
-      `t: renamed legacy bundles in profile tui: @deepseek-ai/dsh-base -> bake-base; the previous manifest is ${join(dir, 'package.json.bak')}`,
+      't: migrated profile tui: dsh.profile -> bake.profile, @deepseek-ai/dsh-base -> bake-base, @dsh-tui/app -> bake-tui-app; '
+      + `the previous manifest is ${join(dir, 'package.json.bak')}`,
     ])
 
     loadProfile('t', 'tui', anchor, home, { warn: line => lines.push(line) })
@@ -395,6 +400,29 @@ describe('legacy bundle names', () => {
     const migrated = readFileSync(join(dir, 'package.json'), 'utf8')
     expect(migrateProfileManifest('t', dir, () => {})).toBe(false)
     expect(readFileSync(join(dir, 'package.json'), 'utf8')).toBe(migrated)
+  })
+
+  it('moves a dsh.profile with current names to bake.profile and keeps other dsh fields', () => {
+    const dir = tmp()
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({
+      name: 'p', dsh: { manifestVersion: 1, profile: { bundles: ['bake-base'] } },
+    }))
+    const lines: string[] = []
+    expect(migrateProfileManifest('t', dir, line => lines.push(line))).toBe(true)
+    expect(readProfileManifest('t', dir)).toEqual({
+      name: 'p', dsh: { manifestVersion: 1 }, bake: { profile: { bundles: ['bake-base'] } },
+    })
+    expect(lines).toEqual([
+      `t: migrated profile ${basename(dir)}: dsh.profile -> bake.profile; the previous manifest is ${join(dir, 'package.json.bak')}`,
+    ])
+  })
+
+  it('reads bake.profile before dsh.profile', () => {
+    expect(profileBundles({ bake: { profile: { bundles: ['new'] } }, dsh: { profile: { bundles: ['old'] } } })).toEqual(['new'])
+    expect(profileBundles({ dsh: { profile: { bundles: ['old'] } } })).toEqual(['old'])
+    expect(profileBundles({})).toEqual([])
+    expect(withProfileBundles({ name: 'p', dsh: { profile: { bundles: ['old'] } } }, ['next']))
+      .toEqual({ name: 'p', bake: { profile: { bundles: ['next'] } } })
   })
 
   // A read-only directory refuses the backup and the replacement; root and Windows ignore the mode.
@@ -415,8 +443,9 @@ describe('legacy bundle names', () => {
     expect(profile.layers.map(layer => layer.packageName)).toEqual(['bake-base'])
     expect(readProfileManifest('t', dir).dsh?.profile?.bundles).toEqual(['@deepseek-ai/dsh-base'])
     expect(lines).toHaveLength(2)
-    expect(lines[0]).toMatch(/^t: warning: could not rename legacy bundles in .*\(@deepseek-ai\/dsh-base -> bake-base\)/u)
-    expect(lines[1]).toContain('names renamed bundles (@deepseek-ai/dsh-base -> bake-base)')
+    expect(lines[0]).toMatch(/^t: warning: could not migrate profile manifest .*\(dsh\.profile -> bake\.profile, /u)
+    expect(lines[0]).toContain('@deepseek-ai/dsh-base -> bake-base)')
+    expect(lines[1]).toContain('uses renamed names (dsh.profile -> bake.profile, @deepseek-ai/dsh-base -> bake-base)')
   })
 
   it('maps an application-owned profile in memory without rewriting it', () => {
@@ -432,7 +461,7 @@ describe('legacy bundle names', () => {
     expect(profile.layers.map(layer => layer.packageName)).toEqual(['bake-desktop'])
     expect(readFileSync(join(dir, 'package.json'), 'utf8')).toBe(before)
     expect(lines).toEqual([
-      `managed app: warning: profile ${join(dir, 'package.json')} names renamed bundles `
+      `managed app: warning: profile ${join(dir, 'package.json')} uses renamed names `
       + '(@deepseek-ai/dsh-desktop -> bake-desktop); the old names are deprecated and will stop working in a later release',
     ])
   })

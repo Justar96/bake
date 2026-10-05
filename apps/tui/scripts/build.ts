@@ -58,7 +58,7 @@ export function diagnosticArguments(home: string): string[] {
 export async function bundle(entries: readonly string[], outdir: string, mode: BuildMode = BUILD_MODE): Promise<Bun.BuildArtifact[]> {
   const result = await Bun.build({
     entrypoints: entries.map(entry => resolve(entry)), outdir, target: 'node', format: 'esm',
-    // @dsh-tui/ui is inlined; the host's packages retain their module identity.
+    // bake-tui-ui is inlined; the host's packages retain their module identity.
     // Shiki loads each grammar by dynamic import, which an unsplit bundle
     // would inline. Every bundled language, loaded or not.
     external: ['@deepseek-ai/*', 'bake-*', 'ink', 'react', 'commander', 'shiki'], naming: '[name].js',

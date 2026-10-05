@@ -7,7 +7,7 @@
  * forget one, so a single stray rejection would otherwise end a long session.
  * The process guard keeps such rejections fatal until readiness, where a
  * failed plugin is a failed launch; afterwards it hands them here.
- * @module @deepseek-ai/dsh/late-rejections
+ * @module bake-cli/late-rejections
  */
 
 import { appendFileSync, mkdirSync } from 'node:fs'

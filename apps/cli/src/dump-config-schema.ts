@@ -1,7 +1,7 @@
 /**
  * Schema-dump entry: inspect the composed profile without applying its plugins.
  * Imports and lazy schema builders execute trusted module code.
- * @module @deepseek-ai/dsh/dump-config-schema
+ * @module bake-cli/dump-config-schema
  */
 
 /* v8 ignore file -- built-bin acceptance drives schema collection and output. */
