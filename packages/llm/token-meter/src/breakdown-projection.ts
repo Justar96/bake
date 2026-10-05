@@ -5,7 +5,7 @@
  */
 
 import { z } from 'zod'
-import { canonicalHeader, isSurfaceEvent, SessionSeq } from '@deepseek-ai/dsh-session'
+import { canonicalHeader, isSurfaceEvent, SessionSeq } from 'bake-session'
 import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
 import { estimateToolsTokens } from './estimate.ts'
 import { commitSurfaceTokens, planSurfaceTokens } from './surface-fold.ts'

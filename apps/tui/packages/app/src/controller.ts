@@ -1,11 +1,11 @@
 /** Session observers and human actions shared by the renderer and integration tests. */
 import type { Context } from '@deepseek-ai/cordis'
-import type { Agent, AssistantStreamFrame } from '@deepseek-ai/dsh-agent'
+import type { Agent, AssistantStreamFrame } from 'bake-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { LlmModelReasoningInfo, LlmReasoningEffortInfo, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
 import { parseCommand, type CommandResult } from '@deepseek-ai/dsh-commands'
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import type { SessionEvent } from 'bake-session'
 import type {} from '@deepseek-ai/dsh-session-query'
 import type {} from '@deepseek-ai/dsh-compaction'
 import type {} from '@deepseek-ai/dsh-agent-presets'
@@ -38,8 +38,8 @@ import { processHost, terminalSetup, type TerminalHost } from './terminal-setup.
 import { listRoutes, loadModelSheet, modelSheetPrompt, namesRoute, routeOf, resolveRoute, resolveSelection,
   type ModelCatalog, type RecentModels } from './model.ts'
 import type { RouterAccountControls, RouteView } from './preferences.ts'
-import type { ModelSelection, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
-import type {} from '@deepseek-ai/dsh-agent-default-model'
+import type { ModelSelection, ModelSelectionRef } from 'bake-agent'
+import type {} from 'bake-agent-default-model'
 import type {} from '@deepseek-ai/dsh-tool-subagent/model-selection-settings'
 // Empty type imports. Each declaration-merges a key into the projection map
 // (`contextPressure`, `permissions`, `goal`), and those keys are invisible here

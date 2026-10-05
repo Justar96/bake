@@ -27,7 +27,7 @@ import { ItemRetainer, TextRetainer } from '@deepseek-ai/dsh-output-retention'
 import type { RetainedItems } from '@deepseek-ai/dsh-output-retention'
 import type { SubprocessHandle, SubprocessOutcome, SubprocessOutputRead, SubprocessSpawnSpec } from '@deepseek-ai/dsh-subprocess'
 import type { SaveTextSpill, SpillRef } from '@deepseek-ai/dsh-spill'
-import type { ToolExecution } from '@deepseek-ai/dsh-tools'
+import type { ToolExecution } from 'bake-tools'
 
 /**
  * Default cap on the complete raw `rg` stdout the tools will parse (the

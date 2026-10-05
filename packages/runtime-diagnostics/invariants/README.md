@@ -75,7 +75,7 @@ A companion is a normal plugin you mount beside the registry. It declares any se
 ```ts
 import type { Context } from '@deepseek-ai/cordis'
 import InvariantRegistry from '@deepseek-ai/dsh-invariants'
-import * as SessionInvariant from '@deepseek-ai/dsh-session/invariant'
+import * as SessionInvariant from 'bake-session/invariant'
 
 declare const ctx: Context
 

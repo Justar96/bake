@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import SessionStore, { Session, SessionId, SessionSeq } from '@deepseek-ai/dsh-session'
+import SessionStore, { Session, SessionId, SessionSeq } from 'bake-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { CompactionId, compactCheckpointSource } from '@deepseek-ai/dsh-compaction'
 import * as CompactionInvariant from '@deepseek-ai/dsh-compaction/invariant'

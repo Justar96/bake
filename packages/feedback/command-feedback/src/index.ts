@@ -11,7 +11,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { CommandDefinitionId } from '@deepseek-ai/dsh-commands/brand'
 import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
-import type { Session } from '@deepseek-ai/dsh-session'
+import type { Session } from 'bake-session'
 import type { SessionTelemetrySharingStatus } from '@deepseek-ai/dsh-session-telemetry'
 import { getOrCreateAnonymousUserId } from '@deepseek-ai/dsh-anonymous-user-id'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'

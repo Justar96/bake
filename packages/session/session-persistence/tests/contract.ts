@@ -12,8 +12,8 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { SessionSeq, SESSION_FORMAT_VERSION, SessionId } from '@deepseek-ai/dsh-session'
-import type { SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session'
+import { SessionSeq, SESSION_FORMAT_VERSION, SessionId } from 'bake-session'
+import type { SessionEvent, SessionHeader } from 'bake-session'
 import { MessageId, freezeMessage } from '@deepseek-ai/dsh-llm'
 import {
   SessionAlreadyExistsError,

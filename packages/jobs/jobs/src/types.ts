@@ -4,8 +4,8 @@
  * @module @deepseek-ai/dsh-jobs/types
  */
 
-import type { Agent } from '@deepseek-ai/dsh-agent'
-import type { SessionId } from '@deepseek-ai/dsh-session'
+import type { Agent } from 'bake-agent'
+import type { SessionId } from 'bake-session'
 import type { JobId } from './brand.ts'
 
 export { JobId } from './brand.ts'

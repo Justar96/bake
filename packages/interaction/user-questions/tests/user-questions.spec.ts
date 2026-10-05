@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
+import AgentRegistry, { type Agent } from 'bake-agent'
 import UserQuestionService, {
   UserQuestionError,
   type AskUserQuestionAnswer,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { ToolCallId, type ContentBlock } from '@deepseek-ai/dsh-llm'
-import { SessionId } from '@deepseek-ai/dsh-session'
+import { SessionId } from 'bake-session'
 import { createSettlementMessage, withContinuableReturnGuidance } from '../src/continuation-messages.ts'
 
 const childId = SessionId('settled-child')

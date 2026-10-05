@@ -6,7 +6,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { McpResourceProvider } from '@deepseek-ai/dsh-mcp-resources'
-import type {} from '@deepseek-ai/dsh-system-prompt'
+import type {} from 'bake-system-prompt'
 
 /** Connection-owned values used by the resource and prompt consumers. */
 export interface ServerContext {

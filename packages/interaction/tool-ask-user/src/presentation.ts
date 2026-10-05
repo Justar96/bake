@@ -8,7 +8,7 @@
  * @module @deepseek-ai/dsh-tool-ask-user/src/presentation
  */
 
-import type { GenericCallView, GenericResultView, ToolResult } from '@deepseek-ai/dsh-tools'
+import type { GenericCallView, GenericResultView, ToolResult } from 'bake-tools'
 
 /** The fields a title reads from one validated question. */
 export interface AskedQuestion {

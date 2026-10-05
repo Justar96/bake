@@ -9,7 +9,7 @@
  * @module @deepseek-ai/dsh-tool-goal/src/presentation
  */
 
-import type { GenericResultView, ToolResult } from '@deepseek-ai/dsh-tools'
+import type { GenericResultView, ToolResult } from 'bake-tools'
 
 /** The goal fields a summary reads from one canonical result. */
 interface GoalSummary {

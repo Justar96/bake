@@ -8,11 +8,11 @@
 import { globSync, readFileSync } from 'node:fs'
 import { dirname, resolve, sep } from 'node:path'
 
-const SCOPE = '@deepseek-ai/dsh-'
+const PACKAGE_PREFIX = /^(?:@deepseek-ai\/dsh-|bake-)/
 
-/** One harness package and its in-repo peer-dependency edges. */
+/** One runtime package and its in-repo peer-dependency edges. */
 export interface PackageGraphNode {
-  /** Package name with the `@deepseek-ai/dsh-` prefix removed. */
+  /** Stable graph label without the runtime package prefix. */
   short: string
   /** Full npm package name. */
   name: string
@@ -25,7 +25,7 @@ export interface PackageGraphNode {
 }
 
 /**
- * Read every harness package manifest and return dependency-first graph nodes.
+ * Read every runtime package manifest and return dependency-first graph nodes.
  * @param root - absolute repository root.
  * @param groupOrder - caller-specific tiebreak order for packages in the same dependency layer.
  * @param gate - command name used in structural error messages.
@@ -34,38 +34,49 @@ export interface PackageGraphNode {
  */
 export function collectPackageGraph(root: string, groupOrder: readonly string[], gate: string): PackageGraphNode[] {
   const packages: PackageGraphNode[] = []
+  const peers = new Map<string, string[]>()
+  const byName = new Map<string, PackageGraphNode>()
+  const byShort = new Map<string, PackageGraphNode>()
   for (const rel of globSync('packages/*/*/package.json', { cwd: root }).map(path => path.split(sep).join('/')).sort()) {
     const json = JSON.parse(readFileSync(resolve(root, rel), 'utf8')) as {
       name: string
       peerDependencies?: Record<string, string>
     }
-    if (!json.name.startsWith(SCOPE)) continue
+    if (!PACKAGE_PREFIX.test(json.name)) continue
     const [, group, leaf] = rel.split('/')
     if (group === undefined || leaf === undefined) throw new Error(`${gate}: unexpected package path ${rel}`)
-    const deps = Object.keys(json.peerDependencies ?? {})
-      .filter(dep => dep.startsWith(SCOPE))
-      .map(dep => dep.slice(SCOPE.length))
-      .sort()
-    packages.push({
-      short: json.name.slice(SCOPE.length),
+    const node: PackageGraphNode = {
+      short: json.name.replace(PACKAGE_PREFIX, ''),
       name: json.name,
       group,
       rel: dirname(rel),
-      deps,
-    })
+      deps: [],
+    }
+    const duplicate = byShort.get(node.short)
+    if (duplicate !== undefined) {
+      throw new Error(`${gate}: duplicate graph label ${node.short} in ${duplicate.rel} and ${node.rel}`)
+    }
+    packages.push(node)
+    byName.set(node.name, node)
+    byShort.set(node.short, node)
+    peers.set(node.name, Object.keys(json.peerDependencies ?? {}))
+  }
+  for (const pkg of packages) {
+    for (const name of peers.get(pkg.name) ?? []) {
+      const dependency = byName.get(name)
+      if (dependency !== undefined) {
+        pkg.deps.push(dependency.short)
+      } else if (PACKAGE_PREFIX.test(name)) {
+        throw new Error(`${gate}: ${pkg.name} references missing in-repo peer ${name}`)
+      }
+    }
+    pkg.deps.sort()
   }
   return topoSort(packages, groupOrder, gate)
 }
 
 function topoSort(packages: PackageGraphNode[], groupOrder: readonly string[], gate: string): PackageGraphNode[] {
   const byName = new Map(packages.map(pkg => [pkg.short, pkg]))
-  for (const pkg of packages) {
-    for (const dependency of pkg.deps) {
-      if (!byName.has(dependency)) {
-        throw new Error(`${gate}: ${pkg.name} references missing in-repo peer ${SCOPE}${dependency}`)
-      }
-    }
-  }
   const remaining = new Map(byName)
   const placed = new Set<string>()
   const out: PackageGraphNode[] = []

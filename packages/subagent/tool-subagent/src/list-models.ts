@@ -3,7 +3,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type LlmRuntime from '@deepseek-ai/dsh-llm'
 import type { LlmProviderInfo } from '@deepseek-ai/dsh-llm'
-import { defineTool } from '@deepseek-ai/dsh-tools'
+import { defineTool } from 'bake-tools'
 import { allowedRoutesText, withoutBlankRoute } from './model-selection.ts'
 import type { ModelSelectionPolicy } from './model-selection.ts'
 import { presentModelListCall } from './presentation.ts'

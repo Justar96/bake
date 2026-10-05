@@ -3294,7 +3294,7 @@ scenario('navigate', 'session picker cancellation, a new session, and switching 
  */
 const LOCK_HOLDER = `
 import { Context } from '@deepseek-ai/cordis'
-import { SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session'
+import { SESSION_FORMAT_VERSION } from 'bake-session'
 import Persistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 const [root, id, cwd] = process.argv.slice(1)
 const ctx = new Context()

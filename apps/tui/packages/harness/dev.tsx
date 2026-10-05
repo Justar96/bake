@@ -20,7 +20,7 @@
 import { readFileSync } from 'node:fs'
 import React, { useEffect, useMemo, useState } from 'react'
 import { render } from 'ink'
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import type { SessionEvent } from 'bake-session'
 import { Actions, App, appendTranscript, emptyTranscript, foldEvent, project, projector } from '@dsh-tui/ui'
 import type { Row } from '@dsh-tui/ui'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'

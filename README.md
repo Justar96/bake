@@ -79,7 +79,7 @@ Delete the install directory and the `bake` link: `~/.local/share/bake` and `~/.
 
 ## Acknowledgements
 
-Bake is a fork of [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), DeepSeek's MIT-licensed agent harness. Its agent loop, session log, sandbox, and Cordis plugin runtime are still the foundation Bake runs on. Since the fork, Bake has built its own terminal interface and distribution, dropped upstream's web client, desktop app, and SDKs, and reworked much of the runtime; upstream fixes are reviewed and ported selectively, never merged automatically. Shared runtime packages keep their original `@deepseek-ai/*` names so those fixes stay easy to port.
+Bake is a fork of [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), DeepSeek's MIT-licensed agent harness. Its agent loop, session log, sandbox, and Cordis plugin runtime are still the foundation Bake runs on. Since the fork, Bake has built its own terminal interface and distribution, dropped upstream's web client, desktop app, and SDKs, and reworked much of the runtime; upstream fixes are reviewed and ported selectively, never merged automatically. Core runtime packages use `bake-<name>`; other runtime and vendored packages retain their declared names. The [contributor guide](CONTRIBUTING.md#upstream-deepseek-harness) describes the import mapping for upstream fixes.
 
 Bake reaches every model through [pi](https://github.com/earendil-works/pi), also MIT-licensed: `pi-ai` connects each provider, `pi-codemode` runs code mode's scripts, and `pi-mcp` connects MCP servers.
 

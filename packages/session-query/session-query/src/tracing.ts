@@ -1,11 +1,11 @@
 /** Canonical current-surface fold shared by exact session reads. */
 
 import { currentSessionMessageProjections } from '@deepseek-ai/dsh-session-format-catalog/message-projections'
-import { foldSurface, isSurfaceEvent, snapshotSessionEvent } from '@deepseek-ai/dsh-session'
+import { foldSurface, isSurfaceEvent, snapshotSessionEvent } from 'bake-session'
 import type {
   SessionEvent,
   SurfaceEvent,
-} from '@deepseek-ai/dsh-session'
+} from 'bake-session'
 import { SessionQueryError } from './config.ts'
 
 /**

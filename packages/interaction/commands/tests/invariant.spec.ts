@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import * as CommandInvariant from '@deepseek-ai/dsh-commands/invariant'
 import InvariantRegistry, { InvariantError } from '@deepseek-ai/dsh-invariants'
-import SessionStore, { SessionId, SessionSeq, type Session } from '@deepseek-ai/dsh-session'
+import SessionStore, { SessionId, SessionSeq, type Session } from 'bake-session'
 import { CommandId } from '@deepseek-ai/dsh-commands'
 
 async function mount(installCompanion = true): Promise<{ ctx: Context; session: Session }> {

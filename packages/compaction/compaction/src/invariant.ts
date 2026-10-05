@@ -1,9 +1,9 @@
 /** Package-owned compaction log-stream invariants. @module @deepseek-ai/dsh-compaction/invariant */
 
 import type { Context } from '@deepseek-ai/cordis'
-import { isReplacementSurfaceEvent, SessionSeq } from '@deepseek-ai/dsh-session'
-import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
-import { SurfaceManager } from '@deepseek-ai/dsh-session/surface'
+import { isReplacementSurfaceEvent, SessionSeq } from 'bake-session'
+import type { Session, SessionEvent } from 'bake-session'
+import { SurfaceManager } from 'bake-session/surface'
 import type { InvariantFailure, InvariantInstaller } from '@deepseek-ai/dsh-invariants'
 import type { CompactionId } from './brand.ts'
 import { isCompactCheckpointSource } from './checkpoint.ts'

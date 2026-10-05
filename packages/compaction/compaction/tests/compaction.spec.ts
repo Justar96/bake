@@ -8,8 +8,8 @@ import {
   isCompactCheckpointSource,
 } from '@deepseek-ai/dsh-compaction'
 import type { CompactionResult, CompactionTrigger } from '@deepseek-ai/dsh-compaction'
-import { Session, SessionId } from '@deepseek-ai/dsh-session'
-import type { SessionSeq } from '@deepseek-ai/dsh-session'
+import { Session, SessionId } from 'bake-session'
+import type { SessionSeq } from 'bake-session'
 import type { CompactionAgentContext } from '@deepseek-ai/dsh-compaction'
 import type { ManualCompactAgentContext } from '@deepseek-ai/dsh-compaction'
 

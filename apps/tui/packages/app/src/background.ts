@@ -1,6 +1,6 @@
 /** The agent's background jobs, read from the host job registry for the row under the input. */
 import type { Context } from '@deepseek-ai/cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Agent } from 'bake-agent'
 import type { JobSnapshot } from '@deepseek-ai/dsh-jobs'
 import type { BackgroundEntry } from '@dsh-tui/ui/background.tsx'
 

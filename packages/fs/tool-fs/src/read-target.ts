@@ -6,7 +6,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { FsError } from '@deepseek-ai/dsh-fs'
 import type { FsInfo, FsTarget } from '@deepseek-ai/dsh-fs'
-import type { ToolExecution } from '@deepseek-ai/dsh-tools'
+import type { ToolExecution } from 'bake-tools'
 import { sessionResolveOptions } from './session-cwd.ts'
 
 /**

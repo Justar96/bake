@@ -191,7 +191,7 @@ export type AgentCancelCause =
   | { readonly kind: 'parent' }
   /**
    * A tool policy or hook halted the turn through a tool decision's `halt`
-   * (`@deepseek-ai/dsh-tools` `ToolHalt`); `reason` is the halt's recorded
+   * (`bake-tools` `ToolHalt`); `reason` is the halt's recorded
    * reason, shown to the user and never to the model.
    */
   | { readonly kind: 'hook'; readonly reason: string }

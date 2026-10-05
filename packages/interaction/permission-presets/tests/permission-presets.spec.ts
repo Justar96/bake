@@ -3,7 +3,7 @@ import { Context } from '@deepseek-ai/cordis'
 import SessionStore, {
   Session,
   SessionId,
-} from '@deepseek-ai/dsh-session'
+} from 'bake-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import type { ApprovalPolicy } from '@deepseek-ai/dsh-user-approval'

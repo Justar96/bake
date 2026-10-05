@@ -14,8 +14,8 @@ import SessionStore, {
   SessionId,
   SessionLogOffset,
   type SessionEvent,
-} from '@deepseek-ai/dsh-session'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+} from 'bake-session'
+import type { Agent } from 'bake-agent'
 import {
   SessionTelemetryCoordinator,
   type SessionTelemetrySink,
@@ -23,7 +23,7 @@ import {
   type SessionTelemetryRecord,
 } from '../src/index.ts'
 
-declare module '@deepseek-ai/dsh-session/types' {
+declare module 'bake-session/types' {
   interface SessionEventMap {
     /**
      * Test-only merged event proving unknown types flow through unchanged.

@@ -31,6 +31,19 @@ it('executes bundled JSX with external production React on Node', async () => {
   }
 }, 30_000)
 
+it('keeps Bake and retained runtime package imports external, including subpaths', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bake-external-test-'))
+  roots.push(root)
+  const packages = ['bake-agent', 'bake-session/events', '@deepseek-ai/dsh-llm', '@deepseek-ai/cordis']
+  const entry = join(root, 'singletons.ts')
+  await writeFile(entry, packages.map((name, index) => `export { value as value${index} } from ${JSON.stringify(name)};`).join('\n'))
+
+  const artifacts = await bundle([entry], root)
+  const output = artifacts.find(artifact => basename(artifact.path) === 'singletons.js')!
+  const code = await output.text()
+  for (const name of packages) expect(code).toContain(JSON.stringify(name))
+})
+
 // The release installs production dependencies only, and on Windows into
 // Bun's isolated layout, where a built entry resolves just the packages
 // `@dsh-tui/app` declares. A hoisted checkout finds an undeclared one anyway.

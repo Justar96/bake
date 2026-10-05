@@ -13,12 +13,12 @@ import { Context, FiberState } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
 import LlmRuntime from '@deepseek-ai/dsh-llm'
-import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
+import SessionStore, { SessionId } from 'bake-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
-import ToolRuntime from '@deepseek-ai/dsh-tools'
-import AgentRegistry from '@deepseek-ai/dsh-agent'
-import AgentLoop from '@deepseek-ai/dsh-agent-loop'
+import SystemPrompt from 'bake-system-prompt'
+import ToolRuntime from 'bake-tools'
+import AgentRegistry from 'bake-agent'
+import AgentLoop from 'bake-agent-loop'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import AgentPresets, { COMPOSITION_FILE, METADATA_FILE } from '@deepseek-ai/dsh-agent-presets'
 import type { Config } from '@deepseek-ai/dsh-agent-presets'
@@ -29,7 +29,7 @@ import { livePresetMounts } from '../src/mount.ts'
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), 'fixtures')
 const SYSTEM_ROOT = { path: join(FIXTURES, 'system'), trust: 'system' as const }
 // A row naming a package installed beside the harness, the way authored rows do.
-const VALID = '- id: prompt\n  name: \'@deepseek-ai/dsh-system-prompt\'\n'
+const VALID = '- id: prompt\n  name: \'bake-system-prompt\'\n'
 
 const contexts: Context[] = []
 
@@ -213,10 +213,10 @@ describe('AgentPresets.compositionInventory', () => {
     await writeFile(join(userRoot, 'documented', COMPOSITION_FILE), [
       VALID.trimEnd(),
       '- id: gated',
-      '  name: \'@deepseek-ai/dsh-system-prompt\'',
+      '  name: \'bake-system-prompt\'',
       '  disabled: !!js 1 === 1',
       '- id: undecidable',
-      '  name: \'@deepseek-ai/dsh-system-prompt\'',
+      '  name: \'bake-system-prompt\'',
       '  disabled: !!js nothing.here',
     ].join('\n'))
     await writeFile(join(userRoot, 'documented', METADATA_FILE), 'name: 我的模式\n')
@@ -249,14 +249,14 @@ describe('AgentPresets.compositionInventory', () => {
         name: '我的模式',
         isDefault: false,
         rows: [
-          { entryId: 'prompt', moduleName: '@deepseek-ai/dsh-system-prompt', enabled: true },
+          { entryId: 'prompt', moduleName: 'bake-system-prompt', enabled: true },
           // The platform-gate shape: the service evaluates it with the
           // Loader's own scope, so the file answer matches a mount's.
-          { entryId: 'gated', moduleName: '@deepseek-ai/dsh-system-prompt', enabled: false, condition: '1 === 1' },
+          { entryId: 'gated', moduleName: 'bake-system-prompt', enabled: false, condition: '1 === 1' },
           // An expression the evaluator refuses stays a mount's decision.
           {
             entryId: 'undecidable',
-            moduleName: '@deepseek-ai/dsh-system-prompt',
+            moduleName: 'bake-system-prompt',
             enabled: 'conditional',
             condition: 'nothing.here',
           },

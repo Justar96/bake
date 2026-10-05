@@ -1,5 +1,5 @@
 /** Shared code-mode fixtures: the presentation bound, event builder, and a `run_code` presenter shaped like the real one. */
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import type { SessionEvent } from 'bake-session'
 import type { ToolLookup } from '../../src/cards.ts'
 import { dictionaries } from '../../src/copy.ts'
 import { SCRIPT_TOOL, type ResultBound } from '../../src/present.ts'

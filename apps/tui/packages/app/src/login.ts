@@ -15,7 +15,7 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import type { ModelSelection } from '@deepseek-ai/dsh-agent'
+import type { ModelSelection } from 'bake-agent'
 import { credentialKeyId, credentialKeyScope, credentialRef, type CredentialKey } from '@deepseek-ai/dsh-credentials'
 import { normalizeApiKey } from '@deepseek-ai/dsh-llm'
 import type { AuthorizationNotice, AuthorizationPrompt } from '@deepseek-ai/dsh-authorization/types'

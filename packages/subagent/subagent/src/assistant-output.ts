@@ -11,7 +11,7 @@
  */
 
 import { joinAssistantStreamText, type ContentBlock } from '@deepseek-ai/dsh-llm'
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import type { SessionEvent } from 'bake-session'
 
 /**
  * Incremental fold of the selection rule, for backends that observe a child's

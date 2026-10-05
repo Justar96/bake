@@ -7,7 +7,7 @@
 
 import type { UserMessage } from '@deepseek-ai/dsh-llm/message'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm/types'
-import type { OptionalSessionSeq, SessionId } from '@deepseek-ai/dsh-session/types'
+import type { OptionalSessionSeq, SessionId } from 'bake-session/types'
 
 /** Durable source session, cited event seqs, and snapshot facts for prepared cross-session context. */
 export interface SessionReferenceSource {

@@ -5,8 +5,8 @@ import { appendFile, mkdtemp, mkdir, rm, readFile, writeFile, readdir, stat, sym
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 import { scheduler } from 'node:timers/promises'
-import { SESSION_FORMAT_VERSION, SessionLogOffset, SessionSeq, SessionId } from '@deepseek-ai/dsh-session'
-import type { SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session'
+import { SESSION_FORMAT_VERSION, SessionLogOffset, SessionSeq, SessionId } from 'bake-session'
+import type { SessionEvent, SessionHeader } from 'bake-session'
 import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import {
@@ -20,7 +20,7 @@ import {
 import { runLiveWritePathContract } from '../../session-persistence/tests/live-write-contract.ts'
 import { LIVE_WRITE_BATCH_MAX_DELAY_MS, type JsonlSessionHandle } from '../src/storage.ts'
 import { JsonlGenerationSourceChangedError } from '../src/generation.ts'
-import SessionStore from '@deepseek-ai/dsh-session'
+import SessionStore from 'bake-session'
 
 const statRace = vi.hoisted(() => ({
   path: undefined as string | undefined,

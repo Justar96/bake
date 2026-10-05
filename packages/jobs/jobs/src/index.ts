@@ -7,7 +7,7 @@
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Agent } from 'bake-agent'
 import type { JobDoneListener, JobId, JobRead, JobSnapshot, JobStart } from './types.ts'
 
 export { JobId } from './types.ts'

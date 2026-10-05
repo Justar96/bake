@@ -9,12 +9,12 @@
 
 import type { ContentBlock, TokenUsage } from '@deepseek-ai/dsh-llm'
 import type { CommandId } from '@deepseek-ai/dsh-commands/brand'
-import type { SessionSeq } from '@deepseek-ai/dsh-session/types'
+import type { SessionSeq } from 'bake-session/types'
 import type { CompactionId } from './brand.ts'
 
 export type { CompactionId }
 
-declare module '@deepseek-ai/dsh-session/types' {
+declare module 'bake-session/types' {
   interface SessionEventMap {
     /**
      * Marks the start of a compaction — log-only, holds the lock until

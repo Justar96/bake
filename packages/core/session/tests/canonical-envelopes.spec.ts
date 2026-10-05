@@ -14,7 +14,7 @@ import SessionStore, {
   type SurfaceEventType,
   type SurfaceIntent,
   type SurfaceOp,
-} from '@deepseek-ai/dsh-session'
+} from 'bake-session'
 
 const id = SessionId('canonical-envelopes')
 const header = { version: SESSION_FORMAT_VERSION, id, createdAt: 1, isSeeded: false } as const

@@ -35,11 +35,11 @@
     "zod": "catalog:"
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh-session": "workspace:^",
+    "bake-session": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-session": "workspace:^",
+    "bake-session": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   }
 }

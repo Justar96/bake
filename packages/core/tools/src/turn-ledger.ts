@@ -5,7 +5,7 @@
  * @module
  */
 
-import type { Session } from '@deepseek-ai/dsh-session'
+import type { Session } from 'bake-session'
 import type { ToolExecution, ToolExecutionResult, ToolFailure } from './index.ts'
 
 /**

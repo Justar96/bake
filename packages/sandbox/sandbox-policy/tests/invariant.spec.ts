@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import SessionStore, { type Session, type SessionEvent } from '@deepseek-ai/dsh-session'
+import SessionStore, { type Session, type SessionEvent } from 'bake-session'
 import InvariantRegistry, { InvariantError } from '@deepseek-ai/dsh-invariants'
 import * as SandboxPolicyInvariant from '@deepseek-ai/dsh-sandbox-policy/invariant'
 

@@ -29,7 +29,7 @@
   "peerDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
-    "@deepseek-ai/dsh-tools": "workspace:^",
+    "bake-tools": "workspace:^",
     "@deepseek-ai/dsh-web": "workspace:^"
   },
   "dependencies": {
@@ -40,17 +40,17 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
-    "@deepseek-ai/dsh-agent": "workspace:^",
+    "bake-agent": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
-    "@deepseek-ai/dsh-session": "workspace:^",
+    "bake-session": "workspace:^",
     "@deepseek-ai/dsh-spill-local": "workspace:^",
     "@deepseek-ai/dsh-spill-policy": "workspace:^",
-    "@deepseek-ai/dsh-system-prompt": "workspace:^",
+    "bake-system-prompt": "workspace:^",
     "@deepseek-ai/dsh-tool-call-timeout-policy": "workspace:^",
-    "@deepseek-ai/dsh-tools": "workspace:^",
+    "bake-tools": "workspace:^",
     "@deepseek-ai/dsh-web": "workspace:^",
     "@deepseek-ai/dsh-web-fetch-http": "workspace:^",
     "@types/turndown": "^5.0.6",
-    "@deepseek-ai/dsh-scope": "workspace:^"
+    "bake-scope": "workspace:^"
   }
 }

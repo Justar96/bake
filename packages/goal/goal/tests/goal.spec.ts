@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import AgentRegistry, { agentEvents } from '@deepseek-ai/dsh-agent'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import AgentRegistry, { agentEvents } from 'bake-agent'
+import type { Agent } from 'bake-agent'
 import { createUserMessage, HarnessError } from '@deepseek-ai/dsh-llm'
-import SessionStore, { Session, SessionId, type UserMessage } from '@deepseek-ai/dsh-session'
+import SessionStore, { Session, SessionId, type UserMessage } from 'bake-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import GoalService, {
   GoalError,
@@ -71,7 +71,7 @@ function stubAgentForSession(session: Session, suppliedCtx?: Context): StubAgent
 /** Build a registry-compatible agent around a fresh session. */
 function stubAgent(
   rawId: string,
-  seed?: readonly import('@deepseek-ai/dsh-session').SessionEvent[],
+  seed?: readonly import('bake-session').SessionEvent[],
   ctx?: Context,
 ): StubAgent {
   const session = ctx === undefined

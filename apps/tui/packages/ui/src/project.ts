@@ -13,7 +13,7 @@
  * @module @dsh-tui/ui/project
  */
 
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import type { SessionEvent } from 'bake-session'
 // Empty type imports. Each declaration-merges the events projected below into
 // `SessionEventMap`, and those arms are invisible here without them.
 import type {} from '@deepseek-ai/dsh-commands'

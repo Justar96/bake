@@ -5,10 +5,10 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import type { Session } from '@deepseek-ai/dsh-session'
+import type { Session } from 'bake-session'
 import type { StreamChunk } from '@deepseek-ai/dsh-llm'
-import { TOOL_ABORTED_BEFORE_DISPATCH, type ToolExecutionResult } from '@deepseek-ai/dsh-tools'
-import type { PreStepDecision } from '@deepseek-ai/dsh-agent'
+import { TOOL_ABORTED_BEFORE_DISPATCH, type ToolExecutionResult } from 'bake-tools'
+import type { PreStepDecision } from 'bake-agent'
 import type {} from '@deepseek-ai/dsh-session-persistence'
 
 /** Cordis plugin name used by Loader diagnostics. */

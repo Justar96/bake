@@ -4,8 +4,8 @@
  * @module @deepseek-ai/dsh-subagent/inbox
  */
 
-import type { Agent } from '@deepseek-ai/dsh-agent'
-import type { UserMessage } from '@deepseek-ai/dsh-session'
+import type { Agent } from 'bake-agent'
+import type { UserMessage } from 'bake-session'
 import type { SubagentPromptRequest } from './control-types.ts'
 import { SubagentError } from './error.ts'
 

@@ -2,7 +2,7 @@
  * Crash-recovery repair for an interrupted session log. It preserves a fully
  * written final turn and supplies the missing tool, step, and turn boundaries
  * needed to resume with a provider-valid transcript.
- * @module @deepseek-ai/dsh-session/repair
+ * @module bake-session/repair
  */
 
 import { brandString } from '@deepseek-ai/dsh-brand'

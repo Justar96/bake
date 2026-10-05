@@ -9,7 +9,7 @@ import { contentHasImage, createUserMessage, BlockAssembler, LlmError } from '@d
 import type {
   ContentBlock, FinishReason, GenerateOptions, Message, TokenUsage, ToolSchema,
 } from '@deepseek-ai/dsh-llm'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Agent } from 'bake-agent'
 
 interface SummaryConfig {
   readonly summarizationProvider: string

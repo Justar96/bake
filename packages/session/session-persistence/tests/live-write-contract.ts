@@ -12,8 +12,8 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
-import { SessionId } from '@deepseek-ai/dsh-session'
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import { SessionId } from 'bake-session'
+import type { SessionEvent } from 'bake-session'
 import type { SessionPersistence } from '../src/index.ts'
 
 /** One mounted backend under a session store, plus same-storage remount support. */

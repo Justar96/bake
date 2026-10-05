@@ -3,11 +3,11 @@ description: "The default agent driver for users and maintainers choosing, confi
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-agent-loop
+# bake-agent-loop
 
 ## Summary
 
-`dsh-agent-loop` creates fresh agents or resumes persisted sessions, then drives each turn through model requests, streamed responses, tool execution, and durable session history. Mount it for standard agent compositions; declarative entries start agents at boot, while the public `ctx.agents` API supports programmatic creation and resume. `maxParallelToolCalls` limits concurrent parallel-safe calls, and exclusive calls retain ordering. Cancellation preserves streamed text already delivered to the user. Choose a custom `Agent` implementation only when the standard "call model, run tools, repeat" lifecycle is insufficient.
+`bake-agent-loop` creates fresh agents or resumes persisted sessions, then drives each turn through model requests, streamed responses, tool execution, and durable session history. Mount it for standard agent compositions; declarative entries start agents at boot, while the public `ctx.agents` API supports programmatic creation and resume. `maxParallelToolCalls` limits concurrent parallel-safe calls, and exclusive calls retain ordering. Cancellation preserves streamed text already delivered to the user. Choose a custom `Agent` implementation only when the standard "call model, run tools, repeat" lifecycle is insufficient.
 
 ## Table of Contents
 
@@ -23,14 +23,14 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## Use this package
 
-Mount `dsh-agent-loop` in any composition that should run agents. It supplies the driver behind `ctx.agents` and starts agents declared in its config; [`dsh-base`](../../bundle/base/README.md) mounts it as an explicit row.
+Mount `bake-agent-loop` in any composition that should run agents. It supplies the driver behind `ctx.agents` and starts agents declared in its config; [`dsh-base`](../../bundle/base/README.md) mounts it as an explicit row.
 
 ### Configure declarative agents
 
 Agents declared in the config start automatically when the plugin loads. Each entry needs an `id` label; a model call additionally requires both `provider` and `model` (`agent/request` may supply a missing pair before dispatch).
 
 ```yaml
-- name: '@deepseek-ai/dsh-agent-loop'
+- name: 'bake-agent-loop'
   config:
     maxParallelToolCalls: 10
     agents:
@@ -52,7 +52,7 @@ Agents declared in the config start automatically when the plugin loads. Each en
 | `agents[].sessionId` | — | Exact identity: first use creates, a remount resumes materialized history |
 | `agents[].resumeSessionId` | — | Load this persisted session instead of creating one; mutually exclusive with `sessionId` |
 
-The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-agent-loop) is the exhaustive source for every accepted field. The adapter validates the effective reasoning effort and the loop records it in the request header. `maxParallelToolCalls` is also the whole `agent-loop` settings section, so a user layer over this entry caps the next tool group without a restart.
+The generated [configuration catalog](../../../docs/config-catalog.md#bake-agent-loop) is the exhaustive source for every accepted field. The adapter validates the effective reasoning effort and the loop records it in the request header. `maxParallelToolCalls` is also the whole `agent-loop` settings section, so a user layer over this entry caps the next tool group without a restart.
 
 ### Create or resume agents programmatically
 

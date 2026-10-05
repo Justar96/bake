@@ -1,7 +1,7 @@
 /** Real JSONL publication and provider-neutral message preservation across the V2 PTC rename. */
 
 import { Context } from '@deepseek-ai/cordis'
-import { Session, SessionId } from '@deepseek-ai/dsh-session'
+import { Session, SessionId } from 'bake-session'
 import type { SessionFormatEvent } from '@deepseek-ai/dsh-session-format'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import { createHash } from 'node:crypto'

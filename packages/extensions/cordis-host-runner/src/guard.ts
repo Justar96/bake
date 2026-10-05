@@ -15,9 +15,9 @@
 
 import { Context } from '@deepseek-ai/cordis'
 import type { Plugin } from '@deepseek-ai/cordis'
-import { scopeOf } from '@deepseek-ai/dsh-scope'
-import { assertSupportedJsonSchema, defineTool } from '@deepseek-ai/dsh-tools'
-import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
+import { scopeOf } from 'bake-scope'
+import { assertSupportedJsonSchema, defineTool } from 'bake-tools'
+import type { ToolDefinition } from 'bake-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { hasPlainArrayPrototype, isIntrinsicObjectPrototype, type JsonValue } from '@deepseek-ai/dsh-util-values'
 

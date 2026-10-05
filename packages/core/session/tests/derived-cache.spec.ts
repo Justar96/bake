@@ -6,7 +6,7 @@ import { createUserMessage, createMessage } from '@deepseek-ai/dsh-llm'
  */
 
 import { describe, expect, it } from 'vitest'
-import { Session, SessionId } from '@deepseek-ai/dsh-session'
+import { Session, SessionId } from 'bake-session'
 
 function userText(session: Session, text: string): void {
   session.append('user/message', createUserMessage({
