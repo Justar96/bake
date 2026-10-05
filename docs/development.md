@@ -121,7 +121,7 @@ Useful references while working in the runtime:
 
 ## Conventions
 
-- ESM and strict TypeScript throughout. Local relative imports use `.ts`; cross-package imports use declared package names. Core packages and internal libraries use `bake-<name>`; plugin, bundle, and vendored packages retain their declared names. Map upstream imports of migrated packages to the `bake-<name>` declared in each manifest; the [core package map](../packages/core/README.md#packages) lists the core ones.
+- ESM and strict TypeScript throughout. Local relative imports use `.ts`; cross-package imports use declared package names. Runtime packages under `packages/` use `bake-<name>`; the CLI, terminal, and vendored packages retain their declared names. Map upstream imports of migrated packages to the `bake-<name>` declared in each manifest; the [legacy package-name map](../packages/boot/app-boot/README.md#renamed-packages) lists every renamed package.
 - The shared Node runtime builds through `tsconfig.host.json`; package `tsconfig.json` files reference their workspace dependencies. When you add or remove a package, update its references and run `bun run gen-workspace` and `bun run gen-tsconfig-paths`.
 - External dependency versions shared by two or more manifests live once in the root `package.json` `catalog`, and each manifest references them as `"catalog:"`. To add or upgrade one, edit the catalog entry and run `bun install`, then commit `bun.lock` with it; `bun run verify-workspace` rejects shared literal ranges, missing entries, and unused entries. `vendor/` manifests and peer ranges keep literal ranges.
 - Product text shown in the TUI lives in [`apps/tui/packages/ui/src/copy.ts`](../apps/tui/packages/ui/src/copy.ts).
