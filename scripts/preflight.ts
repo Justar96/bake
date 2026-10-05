@@ -224,10 +224,10 @@ export const STEPS: readonly Step[] = [
   },
   {
     name: 'scripts-unit', phase: 'static', group: 'unit',
-    summary: 'workspace, generator, and release tooling tests under bun test',
+    summary: 'workspace, generator, release, and eval tooling tests under bun test',
     // Named files: a `bun test` filter also matches `.spec.` files, which run on Node.
     // `--parallel` gives each file its own global; the timeout is the Vitest budget these tests had.
-    command: () => bun('test', '--parallel', '--timeout=30000', ...bunTests('scripts')),
+    command: () => bun('test', '--parallel', '--timeout=30000', ...bunTests('scripts'), ...bunTests('evals')),
   },
   {
     name: 'build', phase: 'build', group: 'build', needsBuild: true,

@@ -6,10 +6,15 @@ Every Bake version records what its agent loop costs on a fixed task suite, meas
 
 ```text
 evals/agent-loop/
-  run.ts          paired runner: arms, scenarios, fixtures, wire capture
+  run.ts          paired runner: arms, routes, the capturing proxy, sample summaries
+  scenarios.ts    each scenario's prompt, fixture, success predicate, request floor and cap
+  composition.ts  each arm's overlay rows, read from its own checkout, and the rendered-prompt check
+  metrics.ts      loop-shape metrics from a sample's event stream
   record.ts       raw output to a committed record and a regression check
+  rules.ts        the paired statistics and the regression rule
   accounting.ts   provider usage normalization
   sim-router.ts   simulated task router for routing edge cases
+  *.test.ts       unit tests and fixture dry checks, run by the preflight scripts-unit step
   versions/
     v0.2.0/release/                       a release's own baseline
     unreleased/<YYYY-MM-DD>-<topic>/      one change since the last release
@@ -55,7 +60,8 @@ DeepSeek offers `low`, `high`, and `max` but no `medium`, so it runs at `high`, 
 |---|---|
 | `EVAL_ARMS` | `name=checkout` pairs, two or more; `name=pi` or `name=pi:<bin>` is the pi coding agent instead of a checkout |
 | `EVAL_MODELS` | model ids or set names, default `standard,extended`; a bare id is a `cliproxyapi` model, and `deepseek/<id>`, or a bare `deepseek-*` id the gateway does not list, is a DeepSeek model; a trailing `@<effort>`, as in `gemini-3.8-flash-high@high`, replaces the model's default effort |
-| `EVAL_CASES` | scenarios; the default is the standard suite below |
+| `EVAL_CASES` | scenario names or set names, `standard` or `extended`; the default is the standard suite below |
+| `EVAL_ROSTER` | `headless`, the default, runs the headless bundle's own tool configs; `tui` gives every Bake arm the terminal's, as described under [Composition](#composition) |
 | `EVAL_TRIALS` | trials per scenario, default 3 |
 | `EVAL_OUTPUT` | raw output directory |
 | `EVAL_GATEWAY` | a JSON file of `{ baseUrl, apiKey }`, such as pi's `~/.pi/agent/cliproxyapi.json`, that replaces the `cliproxyapi` upstream and key for every arm; the proxy swaps each arm's key for this one, so both arms reach one upstream with one account. DeepSeek routes are unaffected |
@@ -77,6 +83,37 @@ DeepSeek offers `low`, `high`, and `max` but no `medium`, so it runs at `high`, 
 
 A sample succeeds when the agent exits cleanly and an external check passes. That check is the exact `no_tools` reply, the fixture's `node test.cjs` with the test file unmodified, or the expected `summary.txt`. Where a scenario injects content, that content must also be kept.
 
+### Extended scenarios
+
+The `extended` set is opt-in (`EVAL_CASES=extended`, or any of its names) and stays out of the default suite, so records of the standard suite remain comparable. Its scenarios aim at regressions the standard suite cannot see in prompts and tools.
+
+| Scenario | What it checks | Success also needs |
+|---|---|---|
+| `large_file_edit` | a bug near the end of a 1,392-line, 43 KB module, named by symbol only | |
+| `explore_answer` | a question about a built TypeScript project, answerable by grep, with a stale `lib/` build (`*.js`, `*.d.ts`) and a `node_modules` dependency naming the same constant among about 30 source files | a final reply of exactly `47250` after trimming, and no file changed |
+| `test_fix_loop` | two chained bugs: the second assertion fails only once the first bug is fixed | |
+| `unprompted_verify` | the `roundMoney` fix with no mention of tests; `ranCheck` and `verifiedBeforeFinal` record whether the agent ran `node test.cjs` on its own | |
+| `noisy_failure` | a test that prints about 74 KB of interleaved stdout and stderr, with one `ASSERTION FAILED` line in the middle | |
+| `background_test` | a 20-second `slow-check.cjs` the prompt asks to start in the background while the agent fixes `roundMoney`; `backgroundStarts` counts `run_in_background` calls | the line `slow-check.cjs` prints, quoted in the final reply |
+| `instructions_file` | an `AGENTS.md` that names `node scripts/check.cjs --all` as the project's only accepted check; this scenario alone keeps `agent-instructions` mounted, and a pi arm keeps its context files | the stamp that check writes matches the final source, so it ran after the last edit |
+| `edit_recovery` | the obvious `old_string` appears twice, in `roundMoney` and `truncateMoney` | `truncateMoney` still truncates |
+| `long_session` | ten 5.7 KB notes to read in full, a `codes.txt` built from them, then the `roundMoney` fix, with the route's `contextWindow` forced to 16,000 tokens so compaction runs mid-task; `compactions` counts completed summaries | the ten codes in `codes.txt` |
+
+Most scenarios keep the 14-request cap; `explore_answer`, `test_fix_loop`, and `background_test` allow 20, `noisy_failure` and `edit_recovery` 16, and `long_session` 30, which also counts its summary requests. `background_test` may run 240 s and `long_session` 360 s instead of 180 s. An arm whose route still goes through the retired `llm-deepseek` adapter cannot take the forced window, so its `long_session` samples record `contextWindow: null`. `ask_user_question` is never in the roster: a headless run has no one to answer it.
+
+`bun test ./evals` builds every fixture, judges it untouched and after a hand-applied reference fix, and checks the sizes above, without a model.
+
+## Composition
+
+Each Bake arm runs its own built headless CLI under an overlay that `composition.ts` reads from that arm's checkout, so an older revision is measured as it shipped. A Cordis patch replaces a row's whole `config`, so every overlay row restates the config it needs:
+
+- `system-prompt` is the headless bundle's own row, with the harness opener off (`includeHarnessIdentity: false`) and the `Your working directory is {{cwd}}.` suffix, and with the persona prefix replaced by that arm's standard-preset persona.
+- With `EVAL_ROSTER=tui`, `tool-fs` (`readMaxBytes: 16384`), `tool-fs-search`, and `tool-result-pruner` (8,192, 4,096, and 1,024 characters) take the standard preset's configs, and `spill-policy` takes the terminal profile's inline cap (`maxInlineBytes: 16384` in `apps/tui/packages/app/cordis.built.patch.yml`, against the base bundle's 50,000). A checkout whose terminal patch sets no cap keeps the base bundle's.
+
+Rows are found by id, so a checkout from before the `bake-*` rename, with `@deepseek-ai/dsh-*` row names, composes the same way. The runner captures the system prompt of each sample's first request in the raw sample (`systemPrompt`), and `composition` records whether it has the `powered by DeepSeek Harness` opener and the working-directory line. A Bake sample whose prompt fails that check stops the run, keeping the samples so far. `design.json` and every sample record the roster.
+
+Records made before this composition, up to and including `versions/unreleased/2026-10-05-bake-core-names`, set only `personaPrefix` on `system-prompt`, which replaced the bundle row's config. Their prompts open with `You are an AI agent powered by DeepSeek Harness.` and lack the working-directory line, so their first requests differ from what Bake ships by those two lines. Both arms of each such record carried the same difference, so its paired comparisons stand. Its absolute counts, such as first-request bytes, are not comparable with later records; compare versions only through a new paired run.
+
 ## Comparing with pi
 
 An arm named `pi` (or `pi:<path to the CLI>`) runs the installed pi coding agent through the same capturing proxy, fixtures, and checks, so a record can compare Bake with pi on tool calls, round trips, tokens, and cache reads. Each sample runs `pi --mode json` in a private agent directory whose `models.json` points one `eval` provider at the proxy. pi keeps its own system prompt and default tools (`read`, `bash`, `edit`, `write`), with no session, extensions, skills, prompt templates, or context files, and agent-level retry is off as in the Bake arms. A `cliproxyapi` model uses the same gateway wire and model metadata as the Bake arm. A DeepSeek model uses pi's own DeepSeek catalog entry, which is Chat Completions at `api.deepseek.com`, so the two arms reach DeepSeek over different wires. The pi arm passes `CLIPROXYAPI_API_KEY` or `DEEPSEEK_API_KEY` from the environment, or from the reference of that name in `~/.bake/.credentials.yaml`. It skips the delegation scenarios, which need tools pi does not ship, so leave them out of `EVAL_CASES`. The stale writer runs as a pi extension on pi's `tool_result` event.
@@ -89,6 +126,23 @@ EVAL_ARMS=bake=.,pi=pi EVAL_MODELS=gpt-6.1-sol EVAL_CASES=no_tools,ordinary_edit
 When the default gateway serves one agent but not the other, as when a subscription bills pi's requests as third-party extra usage, point both arms at a gateway that serves both with `EVAL_GATEWAY`, rather than giving the arms different upstreams.
 
 Record such a run with `--candidate bake --base pi`. The regression rule still applies, but a comparison with pi measures two agents rather than one change, so its record is evidence for where Bake costs more, not a gate.
+
+## Metrics
+
+Besides tokens, requests, tool calls, and errors, every sample records these loop-shape metrics, and `samples.jsonl` keeps them. A check call is a `bash` or `pwsh` call that runs the scenario's check: `node test.cjs`, or `node scripts/check.cjs` in `instructions_file`. An edit is an `edit` or `write` call, or a shell command that writes a source file (the `shellEdits` pattern).
+
+| Metric | Definition |
+|---|---|
+| `excessRequests` | requests above the scenario's floor in `REQUEST_FLOORS` (`requestFloor`), the fewest a run that batches independent calls needs; never negative |
+| `editCheckSplits` | steps whose calls are all edits, followed by a step whose first call is the check: a round trip saved by sending the check with the edit |
+| `orientationCalls` | `pwd`, `ls` or `tree` without a path or at the workspace root, `find` at the root, or `glob` without a path, made before the first `read` (or in the whole sample, if it never reads) |
+| `ranCheck` | whether any call ran the check |
+| `verifiedBeforeFinal` | whether a check call came at or after the last edit; null when the sample made no edit |
+| `backgroundStarts` | shell calls started with `run_in_background` |
+| `compactions` | completed summarizing compactions (`compaction/summary`) and compactions that ended in an error, from the session log |
+| `runaway` | the llm-pi-ai whitespace-runaway guard aborted a tool call's stream; such a failure is recorded as `runaway` rather than its exit code |
+
+`summary.json` adds, per model, a `loop` block for the candidate (the sums of these metrics, `verifiedBeforeFinal` as verified over edited samples, runaways, and samples whose composition check failed) and, in each comparison, `requestsChange` (the paired change in requests with its interval), `excessRequests`, `editCheckSplits`, and `orientationCalls`. Existing fields keep their names and meaning. `REPORT.md` shows the requests change next to the request counts and a loop-shape table. Samples recorded before these metrics existed carry nulls and are left out of the loop sums.
 
 ## Record
 
@@ -106,6 +160,7 @@ Labels name what an arm measured: a tag such as `v0.2.0`, `<tag>+<short commit>`
 `record.ts` flags a regression when, over all tasks for one model:
 
 - total tokens rose, with the whole 95% interval above zero;
+- requests rose by more than 10%, with the whole 95% interval above zero;
 - the candidate failed at least two more runs than the base; or
 - tool errors rose.
 
@@ -115,4 +170,4 @@ Labels name what an arm measured: a tag such as `v0.2.0`, `<tag>+<short commit>`
 
 - Never edit or delete a committed record, and move one only when a release renames `unreleased`. A mistaken record is superseded by a new one whose note says why. `--replace` exists only for re-recording your own unmerged record.
 - Keep raw output out of git. A record carries counters and one-line error texts only.
-- Keep the suite stable. A new scenario joins the default list in its own change, so later records compare like with like, and its first record says it is new.
+- Keep the suite stable. A new scenario joins the default list in its own change, so later records compare like with like, and its first record says it is new. The `extended` set is opt-in for the same reason.
