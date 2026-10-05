@@ -235,7 +235,10 @@ describe('the Windows pointer', () => {
     const legacy = lines.indexOf('if not defined BAKE_HOME if defined DSH_HOME set "BAKE_HOME=%DSH_HOME%"')
     const home = lines.indexOf('if not defined BAKE_HOME set "BAKE_HOME=%USERPROFILE%\\.bake"')
     const create = lines.indexOf('if not exist "%BAKE_HOME%\\diagnostics\\" mkdir "%BAKE_HOME%\\diagnostics" 2>nul')
-    expect(legacy).toBeGreaterThan(-1)
+    // A whitespace-only BAKE_HOME counts as unset, as resolveDshHome reads it.
+    const blank = lines.indexOf('if defined BAKE_HOME if "%BAKE_HOME: =%"=="" set "BAKE_HOME="')
+    expect(blank).toBeGreaterThan(-1)
+    expect(legacy).toBeGreaterThan(blank)
     expect(home).toBeGreaterThan(legacy)
     expect(lines).toContain('set "DSH_HOME=%BAKE_HOME%"')
     expect(create).toBeGreaterThan(home)

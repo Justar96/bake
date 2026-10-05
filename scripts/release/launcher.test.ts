@@ -108,6 +108,15 @@ describe.skipIf(process.platform === 'win32')('the POSIX launcher', () => {
     const started = await launch([command, '--help'], { PATH: process.env.PATH, HOME: root, DSH_HOME: home })
     expect(started).toMatchObject({ execArgv: [...FLAGS, `--diagnostic-dir=${home}/diagnostics`], home, legacyHome: home })
   })
+
+  test.each(['', '  '])('treats a blank BAKE_HOME (%j) as unset', async (blank) => {
+    const { root, command } = install()
+    const home = join(root, 'earlier home')
+    const started = await launch([command, '--help'], { PATH: process.env.PATH, HOME: root, BAKE_HOME: blank, DSH_HOME: home })
+    expect(started).toMatchObject({ execArgv: [...FLAGS, `--diagnostic-dir=${home}/diagnostics`], home, legacyHome: home })
+    const fallback = await launch([command, '--help'], { PATH: process.env.PATH, HOME: root, BAKE_HOME: blank })
+    expect(fallback).toMatchObject({ home: join(root, '.bake'), legacyHome: join(root, '.bake') })
+  })
 })
 
 describe.skipIf(process.platform !== 'win32')('the Windows launchers', () => {

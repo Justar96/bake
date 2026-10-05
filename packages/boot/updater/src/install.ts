@@ -272,6 +272,7 @@ export function windowsLauncher(root: string): string {
   return [
     '@echo off',
     'setlocal',
+    'if defined BAKE_HOME if "%BAKE_HOME: =%"=="" set "BAKE_HOME="',
     'if not defined BAKE_HOME if defined DSH_HOME set "BAKE_HOME=%DSH_HOME%"',
     'if not defined BAKE_HOME set "BAKE_HOME=%USERPROFILE%\\.bake"',
     'set "DSH_HOME=%BAKE_HOME%"',

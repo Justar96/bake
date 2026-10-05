@@ -89,6 +89,47 @@ describe('bake-base bundle', () => {
     expect(resolveWith({ DSH_TELEMETRY_OTLP_URL: endpoint })).toEqual({ mode: 'FEEDBACK_ONLY', url: endpoint })
     expect(resolveWith({ DSH_TELEMETRY_OTLP_URL: endpoint, DSH_TELEMETRY_MODE: 'DISABLED' }))
       .toEqual({ mode: 'DISABLED', url: endpoint })
+    // BAKE_ names come first; a blank one counts as unset.
+    expect(resolveWith({ BAKE_TELEMETRY_OTLP_URL: endpoint, BAKE_TELEMETRY_MODE: 'DISABLED' }))
+      .toEqual({ mode: 'DISABLED', url: endpoint })
+    expect(resolveWith({ BAKE_TELEMETRY_OTLP_URL: ' ', DSH_TELEMETRY_OTLP_URL: endpoint, BAKE_TELEMETRY_MODE: '' }))
+      .toEqual({ mode: 'FEEDBACK_ONLY', url: endpoint })
+  })
+
+  it('reads the tools mode in the headless and desktop layers from BAKE_TOOLS_MODE, or DSH_TOOLS_MODE when that is unset or blank', () => {
+    for (const bundle of ['headless', 'desktop']) {
+      const parsed = yaml.load(readFileSync(resolve(root(), '..', bundle, 'cordis.patch.yml'), 'utf8'), { schema: entryListSchema })
+      if (!Array.isArray(parsed)) throw new TypeError(`${bundle} patch must parse to a patch list`)
+      const tools = (parsed as BaseRow[]).find(row => row.id === 'tools')
+      const expression = (tools?.config?.mode as { __jsExpr?: string } | undefined)?.__jsExpr
+      if (expression === undefined) throw new Error(`the ${bundle} tools row must derive mode from the environment`)
+      const resolveWith = (env: Record<string, string>): unknown => evaluate({ process: { env } }, expression)
+      expect(resolveWith({})).toBeUndefined()
+      expect(resolveWith({ BAKE_TOOLS_MODE: 'native', DSH_TOOLS_MODE: 'ptc' })).toBe('native')
+      expect(resolveWith({ BAKE_TOOLS_MODE: ' ', DSH_TOOLS_MODE: 'ptc' })).toBe('ptc')
+    }
+  })
+
+  it('reads the permission mode from BAKE_PERMISSION_MODE, or DSH_PERMISSION_MODE when that is unset or blank', () => {
+    const rows = baseRows()
+    const expression = (id: string, key: string): string => {
+      const value = (rows.find(row => row.id === id)?.config as Record<string, { __jsExpr?: string }> | undefined)?.[key]?.__jsExpr
+      if (value === undefined) throw new Error(`row ${id} must derive ${key} from the environment`)
+      return value
+    }
+    const resolveWith = (env: Record<string, string>) => ({
+      mode: evaluate({ process: { env } }, expression('sandbox-policy', 'mode')) as unknown,
+      policy: evaluate({ process: { env } }, expression('approval', 'policy')) as unknown,
+      preset: evaluate({ process: { env } }, expression('permission', 'defaultPreset')) as unknown,
+    })
+    expect(resolveWith({})).toEqual({ mode: 'workspace-write', policy: 'ask', preset: 'workspace-write' })
+    expect(resolveWith({ BAKE_PERMISSION_MODE: 'read-only', DSH_PERMISSION_MODE: 'danger-full-access' }))
+      .toEqual({ mode: 'read-only', policy: 'ask', preset: 'read-only' })
+    for (const blank of ['', '  ']) {
+      expect(resolveWith({ BAKE_PERMISSION_MODE: blank, DSH_PERMISSION_MODE: 'danger-full-access' }))
+        .toEqual({ mode: 'danger-full-access', policy: 'never', preset: 'danger-full-access' })
+      expect(resolveWith({ BAKE_PERMISSION_MODE: blank })).toEqual({ mode: 'workspace-write', policy: 'ask', preset: 'workspace-write' })
+    }
   })
 
   it('serves DeepSeek through the pi-ai adapter with its in-history capabilities', async () => {

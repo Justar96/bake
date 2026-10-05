@@ -22,13 +22,18 @@ export const DSH_HOME_ENV = 'DSH_HOME'
 
 /**
  * Read one Bake setting from the environment: `BAKE_<name>`, or the earlier
- * `DSH_<name>` spelling when `BAKE_<name>` is unset.
+ * `DSH_<name>` spelling when `BAKE_<name>` is unset, empty, or only
+ * whitespace, the same rule {@link resolveDshHome} applies to the home. An
+ * opt-out flag that any non-empty value enables, such as
+ * `TELEMETRY_DISABLED`, is therefore on when either name holds one.
  * @param name - the setting's name without its prefix, such as `PERMISSION_MODE`.
  * @param env - environment mapping to read; defaults to `process.env`.
- * @returns the value, or undefined when neither name is set.
+ * @returns the `BAKE_` value when it is not blank, else the `DSH_` value as set,
+ * or undefined when neither is set.
  */
 export function readBakeEnv(name: string, env: Record<string, string | undefined> = process.env): string | undefined {
-  return env[`BAKE_${name}`] ?? env[`DSH_${name}`]
+  const preferred = env[`BAKE_${name}`]
+  return preferred !== undefined && preferred.trim().length > 0 ? preferred : env[`DSH_${name}`]
 }
 
 /**

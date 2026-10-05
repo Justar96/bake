@@ -37,6 +37,10 @@ printf '%s\n' \
 
 Under Electron the desktop launches the same entry in a utility process, and every message travels as one string on the process's message port. Without that port the bridge reads newline-delimited JSON on stdin and writes it on stdout, which is how tests and benchmarks drive it. It announces `ready` once the composition is settled, answers `init` with `initialized`, and exits when stdin closes or a `shutdown` arrives.
 
+### Environment
+
+The process reads each product setting from its `BAKE_*` name first and falls back to the `DSH_*` name, so an app that still sets only `DSH_HOME`, `DSH_TOOLS_MODE`, or `DSH_PERMISSION_MODE` keeps working. A blank or whitespace-only `BAKE_*` value counts as unset: the `DSH_*` value, or the default when that is unset too, applies. An opt-out that any non-empty value enables, such as `TELEMETRY_DISABLED`, takes effect under either name, so clearing `BAKE_TELEMETRY_DISABLED` does not override `DSH_TELEMETRY_DISABLED=1`. The `--profile desktop` launch command works as both `bake` and `dsh`.
+
 ### Permission tiers
 
 | Tier | Preset | What asks | What is refused |

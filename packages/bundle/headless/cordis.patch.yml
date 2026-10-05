@@ -21,7 +21,7 @@
 - id: tools
   config:
     # Keep the same temporary process-wide PTC mode opt-in as the Web surface.
-    mode: !!js process.env.BAKE_TOOLS_MODE ?? process.env.DSH_TOOLS_MODE
+    mode: !!js "(process.env.BAKE_TOOLS_MODE?.trim() ? process.env.BAKE_TOOLS_MODE : process.env.DSH_TOOLS_MODE)"
 
 # The base row restated with model selection, so a run honors the user's
 # `subagent-model-selection` setting, task router included, as the terminal

@@ -9,7 +9,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { loadLayeredEnv, StartupError } from 'bake-app-boot'
-import { resolveDshHome } from 'bake-home-paths'
+import { readBakeEnv, resolveDshHome } from 'bake-home-paths'
 import { parseDshArgs } from './args.ts'
 import { reportStartupFailure } from './startup-diagnostics.ts'
 
@@ -48,7 +48,7 @@ export const INHERITED_NODE_ENV = 'DSH_INHERITED_NODE_ENV'
  */
 export function selectRendererBuild(env: NodeJS.ProcessEnv = process.env): void {
   if (env[INHERITED_NODE_ENV] === undefined) env[INHERITED_NODE_ENV] = env.NODE_ENV === undefined ? '-' : `=${env.NODE_ENV}`
-  env.NODE_ENV = (env.BAKE_RENDERER ?? env.DSH_RENDERER) === 'development' ? 'development' : 'production'
+  env.NODE_ENV = readBakeEnv('RENDERER', env) === 'development' ? 'development' : 'production'
 }
 
 /**

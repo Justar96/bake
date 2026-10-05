@@ -17,8 +17,9 @@ const SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const
  */
 export async function restartWithDiagnostics(): Promise<void> {
   // BAKE_HOME selects the home; DSH_HOME, its earlier name, is read only when
-  // BAKE_HOME is unset. Both are set to the result, so every reader agrees.
-  const name = process.env.BAKE_HOME !== undefined ? 'BAKE_HOME' : 'DSH_HOME'
+  // BAKE_HOME is unset or blank, as resolveDshHome reads them. Both are set
+  // to the result, so every reader agrees.
+  const name = process.env.BAKE_HOME?.trim() ? 'BAKE_HOME' : 'DSH_HOME'
   const configured = process.env[name]
   if (configured !== undefined && configured.trim() === '') throw new Error(`${name} must name a directory or be unset`)
   let home = configured ?? join(homedir(), '.bake')
