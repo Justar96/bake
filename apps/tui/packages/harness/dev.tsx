@@ -11,7 +11,7 @@
  *
  * This runs under Bun while the product runs under Node. That is safe for
  * exactly one reason. Everything it renders is pure over props. Terminal
- * ownership, the agent, and every service live in `@dsh-tui/app`, which this
+ * ownership, the agent, and every service live in `bake-tui-app`, which this
  * file never imports.
  *
  * @module tui-harness
@@ -21,12 +21,12 @@ import { readFileSync } from 'node:fs'
 import React, { useEffect, useMemo, useState } from 'react'
 import { render } from 'ink'
 import type { SessionEvent } from 'bake-session'
-import { Actions, App, appendTranscript, emptyTranscript, foldEvent, project, projector } from '@dsh-tui/ui'
-import type { Row } from '@dsh-tui/ui'
-import { dictionaries } from '@dsh-tui/ui/copy.ts'
-import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
-import type { Clock } from '@dsh-tui/ui/activity.ts'
-import { compactPath } from '@dsh-tui/ui/present.ts'
+import { Actions, App, appendTranscript, emptyTranscript, foldEvent, project, projector } from 'bake-tui-ui'
+import type { Row } from 'bake-tui-ui'
+import { dictionaries } from 'bake-tui-ui/copy.ts'
+import type { TuiCopy } from 'bake-tui-ui/copy.ts'
+import type { Clock } from 'bake-tui-ui/activity.ts'
+import { compactPath } from 'bake-tui-ui/present.ts'
 
 /**
  * The turn header's clock, supplied the way the product supplies it. There
@@ -78,7 +78,7 @@ function staticProps(copy: TuiCopy) {
     sessionId: 'session-harness',
     context: undefined,
     copy,
-    // The shipped frame. `@dsh-tui/app` resolves this from the terminal, and
+    // The shipped frame. `bake-tui-app` resolves this from the terminal, and
     // this file never imports it. A developer iterating on components sees
     // the frame the product draws wherever the environment allows it.
     frame: 'round' as const,

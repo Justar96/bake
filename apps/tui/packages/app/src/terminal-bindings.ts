@@ -4,7 +4,7 @@
  * reads the environment and the files, and writes the result.
  *
  * Bake reads ESC CR, what Alt+Enter sends, as "insert a new line"
- * (`isNewline` in `@dsh-tui/ui/composer.ts`). Most terminals send Shift+Enter
+ * (`isNewline` in `bake-tui-ui/composer.ts`). Most terminals send Shift+Enter
  * as a bare CR, the same byte as Enter, and Bake cannot switch on the kitty
  * keyboard protocol that would tell them apart, so the fix is in the
  * terminal: bind Shift+Enter to send ESC CR.
@@ -14,7 +14,7 @@
  * overwritten. A file whose syntax this module cannot follow safely is left
  * for the user, with the lines to add.
  *
- * @module @dsh-tui/app/terminal-bindings
+ * @module bake-tui-app/terminal-bindings
  */
 import { posix, win32 } from 'node:path'
 import {

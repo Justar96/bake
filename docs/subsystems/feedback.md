@@ -71,7 +71,7 @@ type SessionFeedbackRecordResult =
 
 A remark is appended to the live Session's log and flushed on the Session's own schedule. The package publishes the Host `sessionFeedback.record` unary Remote contract through `TypertRemoteService` and `@Remote`; the generated Cordis API below is the method-level authority.
 
-By default, feedback stays in the local session log. Recording feedback does not trigger an LLM request. The [OTel backend](../../packages/session/session-telemetry-otel/README.md) has no default endpoint; once `DSH_TELEMETRY_OTLP_URL` names a collector, it releases the canonical prefix through recorded feedback to that collector, for every provider. The command acknowledgement confirms recording, identifies the Session and anonymous user, and states whether the telemetry backend uploads the session history or the feedback stays local; it does not report delivery.
+By default, feedback stays in the local session log. Recording feedback does not trigger an LLM request. The [OTel backend](../../packages/session/session-telemetry-otel/README.md) has no default endpoint; once `BAKE_TELEMETRY_OTLP_URL` names a collector, it releases the canonical prefix through recorded feedback to that collector, for every provider. The command acknowledgement confirms recording, identifies the Session and anonymous user, and states whether the telemetry backend uploads the session history or the feedback stays local; it does not report delivery.
 
 Released Session logs can also carry per-message `feedback/message-put` and `feedback/message-delete` records. No plugin writes them now; they stay readable through the [retired vocabulary](../../packages/session/session-format-catalog/src/retired-vocabulary.ts).
 

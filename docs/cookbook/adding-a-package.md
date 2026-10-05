@@ -1,6 +1,6 @@
 # Cookbook: adding a workspace package
 
-Add a workspace package under its owning group. Runtime packages use `bake-<name>`. The [legacy package-name map](../../packages/boot/app-boot/README.md#renamed-packages) lists the upstream `@deepseek-ai/dsh-<name>` name each renamed package replaced.
+Add a workspace package under its owning group. Runtime packages use `bake-<name>`, and the CLI and terminal packages use `bake-cli` and `bake-tui-<name>`. The [legacy package-name map](../../packages/boot/app-boot/README.md#renamed-packages) lists the upstream name each renamed package replaced.
 
 ## 1. Create the package
 
@@ -10,7 +10,7 @@ packages/<group>/<pkg>/
   tsconfig.json    # extends ../../../tsconfig.base.json, rootDir src,
                    # outDir lib/types, references: ../../../vendor/cosmokit,
                    # ../../../vendor/cordis (+ ../../../vendor/schemastery if
-                   # you use Config, + ../../<group>/<dep> for each dsh dep)
+                   # you use Config, + ../../<group>/<dep> for each Bake dep)
   src/index.ts     # service default export or plugin (name/inject/apply/Config)
   README.md        # service API, events, extension points, design notes,
                    # + gated Model Experience context blocks or short form

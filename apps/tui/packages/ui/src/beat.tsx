@@ -15,7 +15,7 @@
  * one commit that re-renders only the parts reading it. Its children are the
  * same element on every beat, and React skips them.
  *
- * @module @dsh-tui/ui/beat
+ * @module bake-tui-ui/beat
  */
 
 import React, { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'

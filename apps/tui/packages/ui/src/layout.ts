@@ -7,7 +7,7 @@
  * viewport height, so one region overrunning its share degrades the entire
  * surface. See `apps/tui/DESIGN-LAYOUT.md` for the measurements behind each rule.
  *
- * @module @dsh-tui/ui/layout
+ * @module bake-tui-ui/layout
  */
 
 /**

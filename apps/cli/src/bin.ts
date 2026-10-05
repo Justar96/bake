@@ -5,7 +5,7 @@
  * Only Node built-ins load before the module compile cache is on. The
  * dispatch, and the profile graph behind it, are imported afterwards from
  * `cli.ts`, so they compile from, or into, the cache.
- * @module @deepseek-ai/dsh/bin
+ * @module bake-cli/bin
  */
 
 /* v8 ignore file -- bin.spec.ts exercises this self-executing entry in Node. */

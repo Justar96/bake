@@ -7,7 +7,7 @@ kind: "package-group"
 
 ## Summary
 
-The `attachment/` group provides durable image attachments: attach images to prompts and commands, and the harness saves them on your machine, shows them again in conversation history, and sends them to the model in later turns. The shipped `dsh` composition enables this with no setup. The capability and its storage are split across two packages, described below. Stored images survive restarts and are never deleted automatically, and only raster image formats are supported.
+The `attachment/` group provides durable image attachments: attach images to prompts and commands, and the harness saves them on your machine, shows them again in conversation history, and sends them to the model in later turns. The shipped `bake` composition enables this with no setup. The capability and its storage are split across two packages, described below. Stored images survive restarts and are never deleted automatically, and only raster image formats are supported.
 
 ## Table of Contents
 
@@ -25,7 +25,7 @@ These two packages provide durable image attachments; each README describes what
 | Package | Role | ctx key |
 |---|---|---|
 | [`attachment/`](attachment/README.md) | Image attachments for prompts and commands that persist and come back in history | `ctx.attachments` |
-| [`attachment-local/`](attachment-local/README.md) | Stores your attached images on this machine below `DSH_HOME` | registers on `ctx.attachments` |
+| [`attachment-local/`](attachment-local/README.md) | Stores your attached images on this machine below `BAKE_HOME` | registers on `ctx.attachments` |
 
 -----
 

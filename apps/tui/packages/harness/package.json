@@ -1,12 +1,12 @@
 {
-  "name": "@dsh-tui/harness",
+  "name": "bake-tui-harness",
   "description": "Component development loop: replays recorded sessions through the real projection and shell, with no harness runtime",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "license": "MIT",
   "dependencies": {
-    "@dsh-tui/ui": "workspace:^",
+    "bake-tui-ui": "workspace:^",
     "ink": "catalog:",
     "react": "catalog:"
   },

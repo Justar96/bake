@@ -13,7 +13,7 @@ Bake removed upstream's web client, desktop app, ACP, Python SDK, docs website, 
 
 ## Workspace
 
-Bun is the single toolchain for this workspace: it owns dependency installation, `bun.lock`, workspace scripts, builds, hooks, and CI. Reproduce a checkout with `bun install --frozen-lockfile`, and do not add a root pnpm or npm lockfile. The agent process itself runs on Node, with Bun building and launching it. The runtime's external-profile package manager is a separate concern and does not belong to this workspace. Bake launch commands default to `~/.bake`; setting `DSH_HOME` selects a different home instead, without migrating upstream data.
+Bun is the single toolchain for this workspace: it owns dependency installation, `bun.lock`, workspace scripts, builds, hooks, and CI. Reproduce a checkout with `bun install --frozen-lockfile`, and do not add a root pnpm or npm lockfile. The agent process itself runs on Node, with Bun building and launching it. The runtime's external-profile package manager is a separate concern and does not belong to this workspace. Bake launch commands default to `~/.bake`; setting `BAKE_HOME` selects a different home instead, without migrating upstream data. Bake reads each `BAKE_<name>` environment setting first and falls back to its `DSH_<name>` spelling, so `DSH_HOME` still works when `BAKE_HOME` is unset.
 
 - `apps/tui/packages/app/`: profile composition, agent control, terminal lifecycle.
 - `apps/tui/packages/ui/`: side-effect-free Ink components, projection, layout, localized copy.
@@ -69,7 +69,7 @@ Every version keeps its agent-loop metrics so the next one can be checked for re
 
 ## Engineering
 
-- Use ESM and strict TypeScript throughout. Local relative imports use `.ts`; cross-package imports use declared package names. Runtime packages under `packages/` use `bake-<name>`; the CLI and terminal packages retain their declared names until explicitly migrated. When porting fixes, map upstream `@deepseek-ai/dsh-<name>` imports to `bake-<name>` and preserve vendored `@deepseek-ai/*` identifiers. Add each rename to the legacy package-name map in `packages/boot/app-boot/src/legacy-package-names.ts`.
+- Use ESM and strict TypeScript throughout. Local relative imports use `.ts`; cross-package imports use declared package names. Every workspace package outside `vendor/` and `native/` uses a `bake-` name: runtime packages under `packages/` use `bake-<name>`, the CLI is `bake-cli`, and the terminal packages are `bake-tui-<name>`. When porting fixes, map upstream `@deepseek-ai/dsh-<name>` imports to `bake-<name>`, `@deepseek-ai/dsh` to `bake-cli`, and `@dsh-tui/<name>` to `bake-tui-<name>`, and preserve vendored `@deepseek-ai/*` identifiers. Add each rename to the legacy package-name map in `packages/boot/app-boot/src/legacy-package-names.ts`.
 - Extend behavior through Cordis plugins and documented events, not ad hoc hooks. Registrations are effects that must supply disposers; waterfall listeners call `next()` when delegating.
 - Model-visible input must be reconstructable from the session log. Preserve released data and migration behavior; consult [session format status](docs/session-format-status.md) before any persistence change.
 - Read [defensive patterns](docs/defensive-patterns.md) before lifecycle or concurrency work. Teardown must await owned work, restore terminal state, and leave no late callbacks.

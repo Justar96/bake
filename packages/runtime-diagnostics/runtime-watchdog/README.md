@@ -7,7 +7,7 @@ kind: "package-reference"
 
 ## Summary
 
-This package leaves evidence when a long session slows down, grows toward V8's heap limit, or dies of a fatal error. It samples Node's event-loop delay, V8 heap use, and resident memory every ten seconds on an unreferenced timer. When the event loop stays delayed, or the heap reaches a high fraction of its limit, it appends a rate-limited JSON record to a file under `$DSH_HOME/diagnostics`. When Node runs with the flags that keep secrets and network data out of them, it also directs Node's fatal-error report, and optionally a near-limit heap snapshot, into that directory. It writes nothing to stdout, stderr, the session log, or model context. The `dsh` base bundle mounts it for every profile.
+This package leaves evidence when a long session slows down, grows toward V8's heap limit, or dies of a fatal error. It samples Node's event-loop delay, V8 heap use, and resident memory every ten seconds on an unreferenced timer. When the event loop stays delayed, or the heap reaches a high fraction of its limit, it appends a rate-limited JSON record to a file under `$BAKE_HOME/diagnostics`. When Node runs with the flags that keep secrets and network data out of them, it also directs Node's fatal-error report, and optionally a near-limit heap snapshot, into that directory. It writes nothing to stdout, stderr, the session log, or model context. The `bake` base bundle mounts it for every profile.
 
 ## Table of Contents
 
@@ -81,7 +81,7 @@ The first threshold crossing creates `watchdog.<YYYYMMDD>.<HHMMSS>.<pid>.jsonl` 
 
 Each record also produces one warning on the Cordis logger named `runtime-watchdog`. Shipped profiles mount no console logger, so the file is the durable copy.
 
-The launcher, not this plugin, writes `rejections.<YYYYMMDD>.<HHMMSS>.<pid>.jsonl` into `$DSH_HOME/diagnostics` for unhandled rejections it survives after startup, whatever this plugin's `directory`; the [launcher README](../../../apps/cli/README.md#startup-and-shutdown) describes those records.
+The launcher, not this plugin, writes `rejections.<YYYYMMDD>.<HHMMSS>.<pid>.jsonl` into `$BAKE_HOME/diagnostics` for unhandled rejections it survives after startup, whatever this plugin's `directory`; the [launcher README](../../../apps/cli/README.md#startup-and-shutdown) describes those records.
 
 Node's own diagnostics are armed only when they cannot leak into the workspace or disclose credentials:
 
@@ -91,7 +91,7 @@ Node's own diagnostics are armed only when they cannot leak into the workspace o
 Launch Node with the flags as command-line arguments, not through `NODE_OPTIONS`, which the agent's subprocesses would inherit:
 
 ```sh
-node --report-exclude-env --report-exclude-network --diagnostic-dir="$DSH_HOME/diagnostics" apps/cli/lib/bin.js --profile tui
+node --report-exclude-env --report-exclude-network --diagnostic-dir="$BAKE_HOME/diagnostics" apps/cli/lib/bin.js --profile tui
 ```
 
 -----
@@ -155,7 +155,7 @@ None; sampling and records never touch a model request.
 
 These limits describe what the watchdog does not capture or control. They are current package constraints, not a task backlog.
 
-- **Forensics depend on launch flags** — Bake's launchers (`bake`, `bake.cmd`, and the development launcher) pass `--report-exclude-env --report-exclude-network --diagnostic-dir=$DSH_HOME/diagnostics`, so they arm fatal-error reports; heap snapshots still need `heapSnapshots` above 0. The npm `dsh` bin and direct `node apps/cli/lib/bin.js` entry restart Node with these arguments when needed. Custom embedders must supply them themselves.
+- **Forensics depend on launch flags** — Bake's launchers (`bake`, `bake.cmd`, and the development launcher) pass `--report-exclude-env --report-exclude-network --diagnostic-dir=$BAKE_HOME/diagnostics`, so they arm fatal-error reports; heap snapshots still need `heapSnapshots` above 0. The npm `bake` bin and direct `node apps/cli/lib/bin.js` entry restart Node with these arguments when needed. Custom embedders must supply them themselves.
 - **An armed heap snapshot stays armed** — V8 has no way to cancel `setHeapSnapshotNearHeapLimit()`, so disposal or a configuration reload leaves it armed until the process exits.
 - **Nothing prunes the directory** — record files and reports accumulate across processes. Each record file stays small under the rate limit and each report is tens of kilobytes, but every snapshot is heap-sized.
 - **Growth below the threshold is not recorded** — steady heap growth under `heapFraction` leaves no record, and resident memory outside the V8 heap has no threshold; it appears only inside records.

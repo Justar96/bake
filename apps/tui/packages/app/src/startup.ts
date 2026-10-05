@@ -4,7 +4,7 @@
  * whose lazy config waits for that service, so Loader resolves the runner's
  * `!!js` expressions only after the flags exist.
  *
- * @module @dsh-tui/app/startup
+ * @module bake-tui-app/startup
  */
 
 import { Command, Option } from 'commander'
@@ -37,7 +37,7 @@ export interface TuiStartupValues {
  */
 function tuiCommand(): Command {
   return new Command()
-    .name('dsh --profile tui')
+    .name('bake --profile tui')
     .description('Work with the agent in an interactive terminal session.')
     .helpOption('-h, --help', 'show this help')
     .option('--resume <id>', 'adopt and replay the persisted Session with this id (alias: --session-id)')
@@ -47,9 +47,9 @@ function tuiCommand(): Command {
     .addOption(new Option('--screen <mode>', 'terminal renderer (default: inline)').choices(['inline', 'fullscreen']))
     .addHelpText('after', `
 Examples:
-  dsh tui                        start a new session
-  dsh tui --resume session-…     continue a stored session
-  dsh tui --preset minimal       start with a smaller tool roster
+  bake tui                       start a new session
+  bake tui --resume session-…    continue a stored session
+  bake tui --preset minimal      start with a smaller tool roster
 `)
 }
 

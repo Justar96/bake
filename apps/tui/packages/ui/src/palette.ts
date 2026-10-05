@@ -16,7 +16,7 @@
  * highlighter. It names the token kind, not a state, and it keeps the semantic
  * tone of diff signs and changed words.
  *
- * @module @dsh-tui/ui/palette
+ * @module bake-tui-ui/palette
  */
 
 /**

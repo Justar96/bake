@@ -1,5 +1,5 @@
 ---
-description: "The shared dsh core: model access, tools, durable sessions, and safety defaults for every dsh --profile surface, for users composing or customizing a profile."
+description: "The shared Bake core: model access, tools, durable sessions, and safety defaults for every bake --profile surface, for users composing or customizing a profile."
 kind: "package-bundle"
 ---
 
@@ -7,7 +7,7 @@ kind: "package-bundle"
 
 ## Summary
 
-Every base-backed `dsh --profile` surface runs on `bake-base`, so those surfaces share a model connection, the full tool set, durable session history, and workspace safety defaults. You rarely touch this bundle directly — shipped base-backed profiles already include it, and a custom base-backed profile names it first. When you need different defaults, change your profile patch or add a later bundle; this package is not a library you import.
+Every base-backed `bake --profile` surface runs on `bake-base`, so those surfaces share a model connection, the full tool set, durable session history, and workspace safety defaults. You rarely touch this bundle directly — shipped base-backed profiles already include it, and a custom base-backed profile names it first. When you need different defaults, change your profile patch or add a later bundle; this package is not a library you import.
 
 ## Table of Contents
 
@@ -23,7 +23,7 @@ Every base-backed `dsh --profile` surface runs on `bake-base`, so those surfaces
 <a id="use-this-package"></a>
 ## Use this package
 
-You get the dsh core automatically: the shipped `tui`, `headless`, and `desktop` profiles already include it, and a custom profile names it as its first bundle. After that, everything works with no further configuration.
+You get the Bake core automatically: the shipped `tui`, `headless`, and `desktop` profiles already include it, and a custom profile names it as its first bundle. After that, everything works with no further configuration.
 
 ### A minimal custom profile
 
@@ -33,7 +33,7 @@ To build a profile on the shared core, create a profile with a `package.json` th
 {
   "name": "my-profile",
   "private": true,
-  "dsh": {
+  "bake": {
     "profile": {
       "bundles": ["bake-base"]
     }
@@ -41,17 +41,17 @@ To build a profile on the shared core, create a profile with a `package.json` th
 }
 ```
 
-Run `dsh --profile my-profile "your task"` and you get a working agent with model access, tools, persistence, and the default permission policy. The shipped `tui`, `headless`, and `desktop` profiles are created for you on first use. To add more bundles, run `dsh plugin --profile <name> add <package>`; in-box bundles resolve from the dsh installation. The profile contract is documented in the [app-boot profile section](../../boot/app-boot/README.md).
+Run `bake --profile my-profile "your task"` and you get a working agent with model access, tools, persistence, and the default permission policy. The shipped `tui`, `headless`, and `desktop` profiles are created for you on first use. To add more bundles, run `bake plugin --profile <name> add <package>`; in-box bundles resolve from the Bake installation. The profile contract is documented in the [app-boot profile section](../../boot/app-boot/README.md).
 
 ### What you get
 
-Out of the box, every profile built on this core provides: a DeepSeek model connection (the provider and model are configurable, and you can enable extra providers from your settings), the full tool set — file editing, shell commands, web search, public HTTP(S) fetch, subagents, task and goal tracking — durable sessions that survive restarts, and the default `workspace-write` permission preset with `ask` approvals. It confines writes to the workspace and permitted temporary directories; requests for wider access require approval. Explicit `DSH_PERMISSION_MODE` or permission-default settings override the new-session default, while resumed sessions keep their recorded mode. Web fetch runs without per-call approval; its provider rejects non-public destinations. Feedback stays in the Session log, and session history is not shared by default. [OTel session upload](../../session/session-telemetry-otel/README.md) has no default destination: it stays `DISABLED` until you set `DSH_TELEMETRY_OTLP_URL` to an OTLP/HTTP logs endpoint of your own. With a URL set, it uploads only to that URL, in `DSH_TELEMETRY_MODE` (default `FEEDBACK_ONLY`), for every model provider: new text feedback releases the complete canonical prefix through that event, including context. Later records wait for the next explicit feedback; sending an authorized batch needs no further interaction or model call. A non-empty `DSH_TELEMETRY_DISABLED` turns upload off even when a URL is set.
+Out of the box, every profile built on this core provides: a DeepSeek model connection (the provider and model are configurable, and you can enable extra providers from your settings), the full tool set — file editing, shell commands, web search, public HTTP(S) fetch, subagents, task and goal tracking — durable sessions that survive restarts, and the default `workspace-write` permission preset with `ask` approvals. It confines writes to the workspace and permitted temporary directories; requests for wider access require approval. Explicit `BAKE_PERMISSION_MODE` or permission-default settings override the new-session default, while resumed sessions keep their recorded mode. Web fetch runs without per-call approval; its provider rejects non-public destinations. Feedback stays in the Session log, and session history is not shared by default. [OTel session upload](../../session/session-telemetry-otel/README.md) has no default destination: it stays `DISABLED` until you set `BAKE_TELEMETRY_OTLP_URL` to an OTLP/HTTP logs endpoint of your own. With a URL set, it uploads only to that URL, in `BAKE_TELEMETRY_MODE` (default `FEEDBACK_ONLY`), for every model provider: new text feedback releases the complete canonical prefix through that event, including context. Later records wait for the next explicit feedback; sending an authorized batch needs no further interaction or model call. A non-empty `BAKE_TELEMETRY_DISABLED` turns upload off even when a URL is set.
 
 File editing uses `read`, `write`, and `edit`.
 
 The bundle mounts [MCP resources](../../mcp/mcp-resources/README.md) once. Configure only [MCP client entries](../../mcp/mcp-client/README.md) for the servers you need. Clients mounted by another provider also count as configured in their scope. Callers with no configured server in scope receive no MCP tools or prompt text.
 
-The [runtime watchdog](../../runtime-diagnostics/runtime-watchdog/README.md) records sustained event-loop delay and heap use near V8's limit under `$DSH_HOME/diagnostics`. It writes nothing to the terminal or the model context.
+The [runtime watchdog](../../runtime-diagnostics/runtime-watchdog/README.md) records sustained event-loop delay and heap use near V8's limit under `$BAKE_HOME/diagnostics`. It writes nothing to the terminal or the model context.
 
 ### Shell tools per platform
 

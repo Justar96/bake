@@ -57,7 +57,7 @@ Every canonical [session event](session.md), including each `assistant/message` 
 
 ## The sharing disclosure
 
-Every backend exposes its deployment-selected mode through the required abstract `sharing` member on `ctx.sessionTelemetry` ([Service Definition README](../../packages/session/session-telemetry/README.md#the-sharing-disclosure)). This is neither a per-Session admission decision nor a delivery receipt. The `/feedback` acknowledgement reads it to say whether the session history is uploaded or stays in the local session log. Bake's shipped profiles configure no collector, so the OTel backend reports `disabled` until `DSH_TELEMETRY_OTLP_URL` is set.
+Every backend exposes its deployment-selected mode through the required abstract `sharing` member on `ctx.sessionTelemetry` ([Service Definition README](../../packages/session/session-telemetry/README.md#the-sharing-disclosure)). This is neither a per-Session admission decision nor a delivery receipt. The `/feedback` acknowledgement reads it to say whether the session history is uploaded or stays in the local session log. Bake's shipped profiles configure no collector, so the OTel backend reports `disabled` until `BAKE_TELEMETRY_OTLP_URL` is set.
 
 ```ts type-equiv
 /**

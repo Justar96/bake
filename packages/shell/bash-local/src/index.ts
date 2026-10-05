@@ -13,6 +13,7 @@ import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { SHELL_SETTINGS_NAMESPACE, ShellExecutor, watchOutput } from 'bake-shell'
 import type { ShellExecRequest, ShellExecSpec, ShellProcess, ShellProcessRead, ShellRunResult, CollectedOutput } from 'bake-shell'
+import { withBakeEnvironmentNames } from 'bake-subprocess'
 import type { SubprocessCollect, SubprocessHandle, SubprocessOutputReader, SubprocessSpawnSpec } from 'bake-subprocess'
 import type {} from 'bake-settings'
 import { clampTimeout, deadline, MAX_TIMER_DELAY_MS, timeoutOf } from 'bake-timeout'
@@ -194,9 +195,10 @@ export class LocalBashExecutor extends ShellExecutor {
       graceMs: this.config.graceMs,
       signal,
       // One explicit env map for the seam, layered so the trusted dshEnv
-      // snapshot beats both the caller's env and the terminal overrides; the
-      // subprocess service merges the whole map after its ambient scrub.
-      env: { ...ENV_OVERRIDES, ...spec.env, ...spec.dshEnv },
+      // snapshot, under its DSH_* and BAKE_* names, beats both the caller's
+      // env and the terminal overrides; the subprocess service merges the
+      // whole map after its ambient scrub.
+      env: { ...ENV_OVERRIDES, ...spec.env, ...spec.dshEnv === undefined ? {} : withBakeEnvironmentNames(spec.dshEnv) },
     }
   }
 

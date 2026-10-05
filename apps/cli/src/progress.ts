@@ -2,7 +2,7 @@
 import {
   ansi, colorDepthFor, formatSeconds, headerLine, liveRow, nextLine, PROGRESS_FRAME_MS, progressGlyphsFor, stepLine, summaryLine,
   type Run,
-} from '@dsh-tui/ui/install-progress.ts'
+} from 'bake-tui-ui/install-progress.ts'
 
 export interface ProgressTerminal {
   readonly isTTY?: boolean

@@ -74,8 +74,9 @@ export interface WebRuntimeConfig {
 export class WebRuntime extends Service {
   /**
    * Provider selection config. Operational env overrides feed the SAME fields:
-   * `$DSH_WEB_SEARCH_PROVIDER` / `$DSH_WEB_FETCH_PROVIDER` are equivalent to
-   * `searchProvider` / `fetchProvider` and are NOT a hidden priority chain.
+   * `$BAKE_WEB_SEARCH_PROVIDER` / `$BAKE_WEB_FETCH_PROVIDER` (or their earlier
+   * `DSH_` spellings) are equivalent to `searchProvider` / `fetchProvider` and
+   * are NOT a hidden priority chain.
    */
   static Config: z<WebRuntimeConfig> = z.object({
     searchProvider: z.string(),
@@ -89,8 +90,8 @@ export class WebRuntime extends Service {
 
   constructor(ctx: Context, config: WebRuntimeConfig = {}) {
     super(ctx, 'web')
-    this.searchProviderId = config.searchProvider ?? process.env.DSH_WEB_SEARCH_PROVIDER
-    this.fetchProviderId = config.fetchProvider ?? process.env.DSH_WEB_FETCH_PROVIDER
+    this.searchProviderId = config.searchProvider ?? providerFromEnv('WEB_SEARCH_PROVIDER')
+    this.fetchProviderId = config.fetchProvider ?? providerFromEnv('WEB_FETCH_PROVIDER')
   }
 
   /**
@@ -166,6 +167,15 @@ export class WebRuntime extends Service {
 interface ResolvableProvider {
   readonly id: string
   available(): boolean
+}
+
+/**
+ * Read a provider selection from the environment: `BAKE_<name>`, or `DSH_<name>`
+ * when `BAKE_<name>` is unset or blank, as `readBakeEnv` in `bake-home-paths` reads.
+ */
+function providerFromEnv(name: string): string | undefined {
+  const preferred = process.env[`BAKE_${name}`]
+  return preferred !== undefined && preferred.trim().length > 0 ? preferred : process.env[`DSH_${name}`]
 }
 
 /** Resolve the selected provider or throw the matching {@link WebError}. */

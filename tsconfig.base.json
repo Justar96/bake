@@ -28,7 +28,7 @@
     // not declaration path aliases, keep each package/vendor source compiled
     // under its own tsconfig boundary.
     "paths": {
-      "@deepseek-ai/dsh/profile-boot": ["./apps/cli/src/profile-boot.ts"],
+      "bake-cli/profile-boot": ["./apps/cli/src/profile-boot.ts"],
 
       "bake-subprocess-local/output": ["./packages/subprocess/subprocess-local/src/output.ts"],
       "@deepseek-ai/cordis": ["./vendor/cordis/src"],

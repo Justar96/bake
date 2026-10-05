@@ -1,4 +1,4 @@
-# The @dsh-tui/app patch: the interactive terminal surface over a base-backed
+# The bake-tui-app patch: the interactive terminal surface over a base-backed
 # profile. Applied after the profile's own bundle layers, so rows here override
 # theirs by id, with the profile patch and any --patch overlays still to come.
 #

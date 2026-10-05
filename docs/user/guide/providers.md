@@ -1,10 +1,10 @@
 # Configure models
 
-This guide assumes you started Bake through the [root README](../../../README.md#get-started). Sign in with `/login`, choose a model with `/model`, and configure routes in `$DSH_HOME/settings.yaml`. Settings changes take effect on the next request without a restart.
+This guide assumes you started Bake through the [root README](../../../README.md#get-started). Sign in with `/login`, choose a model with `/model`, and configure routes in `$BAKE_HOME/settings.yaml`. Settings changes take effect on the next request without a restart.
 
 ## Configure DeepSeek
 
-DeepSeek is the built-in `deepseek-official` route of [`bake-llm-pi-ai`](../../../packages/llm/llm-pi-ai/README.md), which reaches DeepSeek's Anthropic Messages endpoint at `https://api.deepseek.com/anthropic` with the key in `DEEPSEEK_API_KEY`. Set that variable, or run `/login deepseek` in the terminal to store the key in `$DSH_HOME/.credentials.yaml`, where settings retain only its credential reference.
+DeepSeek is the built-in `deepseek-official` route of [`bake-llm-pi-ai`](../../../packages/llm/llm-pi-ai/README.md), which reaches DeepSeek's Anthropic Messages endpoint at `https://api.deepseek.com/anthropic` with the key in `DEEPSEEK_API_KEY`. Set that variable, or run `/login deepseek` in the terminal to store the key in `$BAKE_HOME/.credentials.yaml`, where settings retain only its credential reference.
 
 The route serves two models, each with a 1M-token context window and the reasoning efforts `off`, `low`, `high`, and `max`, starting at `high`:
 
@@ -17,7 +17,7 @@ The route serves two models, each with a 1M-token context window and the reasoni
 
 A reasoning level other than `off` turns thinking on and sends the level as the request's effort; `off` turns thinking off.
 
-To change the endpoint, the starting effort, or any other field, add a `deepseek-official` route under `llm-pi-ai` in `$DSH_HOME/settings.yaml`. It merges into the built-in route field by field, so it names only what changes:
+To change the endpoint, the starting effort, or any other field, add a `deepseek-official` route under `llm-pi-ai` in `$BAKE_HOME/settings.yaml`. It merges into the built-in route field by field, so it names only what changes:
 
 ```yaml
 llm-pi-ai:
@@ -35,7 +35,7 @@ Run `/login` and pick a provider: besides DeepSeek and CLIProxyAPI, it offers Op
 
 ## Add a custom provider
 
-Add a route under `llm-pi-ai` in `$DSH_HOME/settings.yaml` for a company gateway, a self-hosted server, or a provider absent from the installed catalog. Give it a lowercase provider id, a base URL, an API protocol, a credential reference, and at least one model:
+Add a route under `llm-pi-ai` in `$BAKE_HOME/settings.yaml` for a company gateway, a self-hosted server, or a provider absent from the installed catalog. Give it a lowercase provider id, a base URL, an API protocol, a credential reference, and at least one model:
 
 ```yaml
 llm-pi-ai:
@@ -64,7 +64,7 @@ If no model is selected, the composer refuses to send until you sign in with `/l
 The generated [plugin configuration catalog](../../config-catalog.md) lists every supported field and default for every plugin; [`bake-llm-pi-ai`](../../config-catalog.md#bake-llm-pi-ai) is the provider section this page configures. The [`bake-llm-pi-ai`](../../../packages/llm/llm-pi-ai/README.md) reference owns direct `settings.yaml` configuration, catalog resolution, reasoning controls, credentials, and adapter errors.
 
 ::: tip Additional settings
-Besides the fields above, `$DSH_HOME/settings.yaml` configures each model's context window, max output tokens, and input types, along with reasoning effort levels, request-compatibility switches, headers, timeouts, and retry policy. The adapter re-reads it on the next request, so nothing needs a restart. The subsections below cover the fields most gateways need.
+Besides the fields above, `$BAKE_HOME/settings.yaml` configures each model's context window, max output tokens, and input types, along with reasoning effort levels, request-compatibility switches, headers, timeouts, and retry policy. The adapter re-reads it on the next request, so nothing needs a restart. The subsections below cover the fields most gateways need.
 :::
 
 ### Image input
@@ -118,7 +118,7 @@ Both fields state a claim about your endpoint rather than checking it. A model t
 
 ### Reasoning effort
 
-The `/model` picker offers reasoning levels for a model that declares them. A built-in provider's models inherit their levels from the installed catalog. A model you enter by hand declares none, so the picker offers no levels for it and the endpoint's own default decides whether the model thinks. Declare the levels with `reasoningEfforts` in `$DSH_HOME/settings.yaml`:
+The `/model` picker offers reasoning levels for a model that declares them. A built-in provider's models inherit their levels from the installed catalog. A model you enter by hand declares none, so the picker offers no levels for it and the endpoint's own default decides whether the model thinks. Declare the levels with `reasoningEfforts` in `$BAKE_HOME/settings.yaml`:
 
 ```yaml
 llm-pi-ai:
@@ -164,7 +164,7 @@ llm-pi-ai:
 
 A gateway can hold a working key at a reachable address and still refuse every request. pi-ai decides the shape of a request — which role carries the system prompt, which field caps the output, how a thinking level travels — from the endpoint's URL, and an address it does not recognize is addressed as though it were OpenAI itself. Most OpenAI-compatible gateways refuse at least one thing OpenAI accepts.
 
-Two account for most of it. A model that declares reasoning has its system prompt sent as `role: "developer"`, which many gateways reject outright, and the output cap is sent as `max_completion_tokens`, which a server that only knows `max_tokens` refuses. Correct them on the route in `$DSH_HOME/settings.yaml`:
+Two account for most of it. A model that declares reasoning has its system prompt sent as `role: "developer"`, which many gateways reject outright, and the output cap is sent as `max_completion_tokens`, which a server that only knows `max_tokens` refuses. Correct them on the route in `$BAKE_HOME/settings.yaml`:
 
 ```yaml
 llm-pi-ai:

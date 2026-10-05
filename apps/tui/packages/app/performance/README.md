@@ -26,7 +26,7 @@ Use a checkout with built shared libraries, the Bun version pinned in the root `
 bun apps/tui/scripts/tui.ts perf --workload fresh --workload typical --samples 3 --output /tmp/bake-bun-native-production.json
 ```
 
-The coordinator and native PTY run on Bun; the shared application bundler supplies the measured artifacts. Fixture authoring and every measured Harness process run on the selected Node binary. Each invocation creates private bundles, profiles, workspaces, and session stores; it cleans those resources after success or failure. The built `dsh --profile tui` launch uses the application's actual composition patch and the Harness replay adapter. No installed user profile changes.
+The coordinator and native PTY run on Bun; the shared application bundler supplies the measured artifacts. Fixture authoring and every measured Harness process run on the selected Node binary. Each invocation creates private bundles, profiles, workspaces, and session stores; it cleans those resources after success or failure. The built `bake --profile tui` launch uses the application's actual composition patch and the Harness replay adapter. No installed user profile changes.
 
 `--workload` selects a workload and may repeat; omitting it runs all six workloads. `--node` selects the measured runtime. `--mode production` is the default and matches the built application. `--mode development` selects an unminified development baseline with development React/Ink:
 

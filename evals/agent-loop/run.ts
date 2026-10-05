@@ -500,7 +500,7 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
         ...arm.extra,
       ]
       const patch = join(root, 'evaluation.patch.json'); writeFileSync(patch, JSON.stringify(overlay))
-      Object.assign(env, { DSH_HOME: home, DSH_AGENTS_HOME: join(root, 'agents') })
+      Object.assign(env, { BAKE_HOME: home, DSH_HOME: home, BAKE_AGENTS_HOME: join(root, 'agents'), DSH_AGENTS_HOME: join(root, 'agents') })
       command = ['node', join(arm.root, 'apps/cli/lib/bin.js'), 'headless', '--patch', patch, '--json', prompts[scenario]!]
     }
     child = spawn(command[0]!, command.slice(1), {

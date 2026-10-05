@@ -17,7 +17,7 @@ function workspace(version: string, changelog: string): string {
   roots.push(root)
   mkdirSync(join(root, 'apps/cli'), { recursive: true })
   writeFileSync(join(root, 'package.json'), `{\n  "name": "bake",\n  "version": "${version}",\n  "private": true\n}\n`)
-  writeFileSync(join(root, 'apps/cli/package.json'), `{\n  "name": "@deepseek-ai/dsh",\n  "version": "${version}"\n}\n`)
+  writeFileSync(join(root, 'apps/cli/package.json'), `{\n  "name": "bake-cli",\n  "version": "${version}"\n}\n`)
   writeFileSync(join(root, 'CHANGELOG.md'), changelog)
   return root
 }

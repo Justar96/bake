@@ -22,6 +22,14 @@ export interface DshPackageManifest {
   engines?: DshEnginesManifest
   /** DSH-specific author declarations. */
   dsh?: DshManifest
+  /** Bake-specific declarations; a profile directory's bundle composition lives here. */
+  bake?: BakeManifest
+}
+
+/** Fields under `package.json.bake`. */
+export interface BakeManifest {
+  /** Profile metadata consumed by the profile launcher; it replaces `dsh.profile`. */
+  profile?: DshProfileManifest
 }
 
 /** Public author fields under `package.json.dsh`; a package may declare several roles. */
@@ -30,7 +38,11 @@ export interface DshManifest {
   manifestVersion?: 1
   /** Bundle metadata consumed by the profile launcher. */
   bundle?: DshBundleManifest
-  /** Profile metadata consumed by the profile launcher. */
+  /**
+   * Profile metadata from manifests written before `bake.profile`. The
+   * profile launcher reads it only when `bake.profile` is absent and moves it
+   * there when it loads the profile.
+   */
   profile?: DshProfileManifest
   /** Client module loading and build metadata. */
   client?: DshClientManifest

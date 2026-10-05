@@ -1,7 +1,7 @@
 /** CLIProxyAPI setup and model mapping without network or credential fixtures. */
 import { describe, expect, it, mock } from 'bun:test'
 import type { Context } from '@deepseek-ai/cordis'
-import { dictionaries } from '@dsh-tui/ui/copy.ts'
+import { dictionaries } from 'bake-tui-ui/copy.ts'
 import {
   CliProxyCheckError, cliProxyApi, cliProxyEndpoints, cliProxyFailureText, cliProxyModels, cliProxyUpgradeNotice,
   cliProxyModelsInUse, configureCliProxyApi, fetchCliProxyModels, planCliProxyRouteUpgrade, refreshCliProxyModels, upgradeCliProxyRoute,

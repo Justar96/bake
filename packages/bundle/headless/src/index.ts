@@ -421,7 +421,7 @@ async function run(ctx: Context, config: Config, io: HeadlessIo, stopping: Abort
     ? await internals.readStdin()
     : config.task
   if (task.trim() === '') {
-    throw new Error('a task is required, for example: dsh --profile headless "run the tests"')
+    throw new Error('a task is required, for example: bake --profile headless "run the tests"')
   }
 
   // No provider is the default. A new run needs the selection a user saved;

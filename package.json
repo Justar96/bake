@@ -108,6 +108,7 @@
     "verify-type-equiv": "bun scripts/verify-type-equiv.ts",
     "verify-cordis-config": "bun scripts/verify-cordis-config.ts",
     "verify-package-invariants": "bun scripts/verify-package-invariants.ts",
+    "bake": "bun apps/tui/scripts/tui.ts bake",
     "dsh": "bun apps/tui/scripts/tui.ts dsh",
     "postinstall": "lefthook install"
   },

@@ -1,5 +1,5 @@
 {
-  "name": "@dsh-tui/ui",
+  "name": "bake-tui-ui",
   "description": "Terminal presentation for the dsh TUI: session-event projection and row rendering, pure over props",
   "version": "0.0.0",
   "private": true,

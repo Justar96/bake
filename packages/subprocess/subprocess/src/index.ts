@@ -11,7 +11,7 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import { proxyEnvironmentForChild } from 'bake-http-proxy'
 import { DSH_ENV_PREFIX } from './types.ts'
-import type { SubprocessHandle, SubprocessSpawnSpec } from './types.ts'
+import type { DshEnvironment, SubprocessHandle, SubprocessSpawnSpec } from './types.ts'
 import type { SubprocessTerminalEnvironment, SubprocessTerminalHandle, SubprocessTerminalSpawnSpec } from './types.ts'
 
 export { DSH_ENV_PREFIX } from './types.ts'
@@ -47,21 +47,58 @@ export type {
 export const SENSITIVE_ENV_PATTERN = /KEY|PASSWORD|SECRET|TOKEN/i
 
 /**
+ * Prefix of the Bake spelling of each managed {@link DSH_ENV_PREFIX} name.
+ * A child receives every managed fact under both prefixes, and the ambient
+ * scrub removes both spellings of a managed fact. Other `BAKE_*` names are
+ * user settings, such as `BAKE_NO_UPDATE_CHECK`, and pass through.
+ */
+export const BAKE_ENV_PREFIX = 'BAKE_' as const
+
+/**
+ * The `BAKE_*` spellings of the managed facts: the shell-env built-ins
+ * (`HOME`, `SHELL`, `SESSION_ID`), the terminal's `PTY_SESSION_ID`, and every
+ * other name {@link withBakeEnvironmentNames} has produced in this process.
+ * An outer harness's value for one of them must not reach a child that this
+ * harness gives no value.
+ */
+const managedBakeNames = new Set<string>(
+  ['HOME', 'SHELL', 'SESSION_ID', 'PTY_SESSION_ID'].map(suffix => BAKE_ENV_PREFIX + suffix),
+)
+
+/**
+ * Add the `BAKE_<name>` spelling of every managed `DSH_<name>` fact, so a
+ * child reads the same value under either name. Each `BAKE_*` name it
+ * produces joins the managed names that {@link scrubbedParentEnv} removes.
+ * @param env - managed facts keyed by their `DSH_*` names.
+ * @returns a fresh map holding each fact under both prefixes.
+ */
+export function withBakeEnvironmentNames(env: DshEnvironment): Record<string, string> {
+  const named: Record<string, string> = { ...env }
+  for (const [key, value] of Object.entries(env)) {
+    const bakeName = BAKE_ENV_PREFIX + key.slice(DSH_ENV_PREFIX.length)
+    managedBakeNames.add(bakeName)
+    named[bakeName] = value
+  }
+  return named
+}
+
+/**
  * Where the CLI keeps the caller's own `NODE_ENV` after choosing the
- * renderer's build; see `selectRendererBuild` in `@deepseek-ai/dsh`.
+ * renderer's build; see `selectRendererBuild` in `bake-cli`.
  */
 export const INHERITED_NODE_ENV = 'DSH_INHERITED_NODE_ENV'
 
 /**
- * The ambient parent environment minus credential-shaped names and minus all
- * `DSH_*` names — the canonical base every harness child starts from. `PATH`,
- * `HOME`, locale, and proxy variables survive, so child CLIs run normally;
- * harness identity never leaks implicitly (a deliberately forwarded
- * credential or current `DSH_*` fact goes through the spec's explicit `env`,
- * which merges after this scrub). Both scrubs match case-insensitively:
- * Windows environment names are case-insensitive, so a parent `dsh_*` entry
- * would otherwise survive and read back as `$env:DSH_*` in the child;
- * deliberate lowercase `dsh_*` names on POSIX are implausible. Exported as a plain function so spawners
+ * The ambient parent environment minus credential-shaped names, all `DSH_*`
+ * names, and the `BAKE_*` spellings of the managed facts — the canonical base
+ * every harness child starts from. `PATH`, `HOME`, locale, proxy variables,
+ * and `BAKE_*` user settings such as `BAKE_RELEASE_BASE_URL` survive, so child
+ * CLIs run normally; harness identity never leaks implicitly (a deliberately
+ * forwarded credential or current `DSH_*` fact goes through the spec's
+ * explicit `env`, which merges after this scrub). The scrubs match
+ * case-insensitively: Windows environment names are case-insensitive, so a
+ * parent `dsh_*` entry would otherwise survive and read back as `$env:DSH_*`
+ * in the child; deliberate lowercase `dsh_*` names on POSIX are implausible. Exported as a plain function so spawners
  * that cannot route through the service (node-pty backends, SDK-managed
  * transports) share the one scrub definition.
  *
@@ -72,7 +109,9 @@ export const INHERITED_NODE_ENV = 'DSH_INHERITED_NODE_ENV'
 export function scrubbedParentEnv(): Record<string, string> {
   const env: Record<string, string> = {}
   for (const [key, value] of Object.entries(process.env)) {
-    if (value !== undefined && !SENSITIVE_ENV_PATTERN.test(key) && !key.toUpperCase().startsWith(DSH_ENV_PREFIX)) env[key] = value
+    const upper = key.toUpperCase()
+    if (value === undefined || SENSITIVE_ENV_PATTERN.test(key)) continue
+    if (!upper.startsWith(DSH_ENV_PREFIX) && !managedBakeNames.has(upper)) env[key] = value
   }
   // The CLI loads its renderer's production build by setting NODE_ENV, and
   // records the caller's own value first (`=` and the value, `-` for unset).

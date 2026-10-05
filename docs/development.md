@@ -21,7 +21,7 @@ bun run start
 
 `bun install` also installs the Lefthook Git hooks. `start` runs the existing build output without rebuilding; it needs an interactive terminal. `bun run start --help` prints the TUI flags without starting a session.
 
-Source runs use the same home as an installed `bake`: `~/.bake`, or the directory in `DSH_HOME`. An override selects that directory's existing profiles and sessions, not only its credentials. Existing `~/.dsh` data is never moved or changed.
+Source runs use the same home as an installed `bake`: `~/.bake`, or the directory in `BAKE_HOME`. An override selects that directory's existing profiles and sessions, not only its credentials. Existing `~/.dsh` data is never moved or changed.
 
 For real model requests, sign in with `/login` or set `DEEPSEEK_API_KEY` in the environment or in a gitignored `.env` at the repository root. To use another DeepSeek endpoint, set `baseURL` on the `deepseek-official` route under `llm-pi-ai` in `settings.yaml`, as the [model configuration guide](user/guide/providers.md) shows. Never commit keys or `.env`.
 
@@ -37,7 +37,7 @@ For real model requests, sign in with `/login` or set `DEEPSEEK_API_KEY` in the 
 
 The preview accepts input for layout testing but does not submit tasks. Ctrl-C exits the preview; the real agent needs two Ctrl-C presses to quit. Stop the real agent before rebuilding its files.
 
-`bun run dsh --help` exposes the built profile and plugin launcher with the same Bake home. External profile-plugin installation stays separate from Bun's source workspace.
+`bun run bake --help` exposes the built profile and plugin launcher with the same Bake home. External profile-plugin installation stays separate from Bun's source workspace.
 
 ## Checks
 
@@ -121,7 +121,7 @@ Useful references while working in the runtime:
 
 ## Conventions
 
-- ESM and strict TypeScript throughout. Local relative imports use `.ts`; cross-package imports use declared package names. Runtime packages under `packages/` use `bake-<name>`; the CLI, terminal, and vendored packages retain their declared names. Map upstream imports of migrated packages to the `bake-<name>` declared in each manifest; the [legacy package-name map](../packages/boot/app-boot/README.md#renamed-packages) lists every renamed package.
+- ESM and strict TypeScript throughout. Local relative imports use `.ts`; cross-package imports use declared package names. Every workspace package outside `vendor/` and `native/` uses a `bake-` name: `bake-<name>` under `packages/`, `bake-cli`, and `bake-tui-<name>`; vendored packages retain their declared names. Map upstream imports of migrated packages to the `bake-<name>` declared in each manifest; the [legacy package-name map](../packages/boot/app-boot/README.md#renamed-packages) lists every renamed package.
 - The shared Node runtime builds through `tsconfig.host.json`; package `tsconfig.json` files reference their workspace dependencies. When you add or remove a package, update its references and run `bun run gen-workspace` and `bun run gen-tsconfig-paths`.
 - External dependency versions shared by two or more manifests live once in the root `package.json` `catalog`, and each manifest references them as `"catalog:"`. To add or upgrade one, edit the catalog entry and run `bun install`, then commit `bun.lock` with it; `bun run verify-workspace` rejects shared literal ranges, missing entries, and unused entries. `vendor/` manifests and peer ranges keep literal ranges.
 - Product text shown in the TUI lives in [`apps/tui/packages/ui/src/copy.ts`](../apps/tui/packages/ui/src/copy.ts).

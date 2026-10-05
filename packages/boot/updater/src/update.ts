@@ -6,6 +6,7 @@
  */
 
 import { existsSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { hostTarget, recordCheck, statusOf, type ReleaseStatus } from './check.ts'
 import { installRelease, type InstallProgress, type InstallResult } from './install.ts'
@@ -76,9 +77,15 @@ export async function selfUpdate(options: SelfUpdateOptions): Promise<UpdateOutc
   options.onFound?.(version)
   const result = await installRelease({
     ...source, layout, manifest: status.manifest, artifact: status.artifact,
-    launcher: windowsLauncherPath(layout.root, env), onProgress: options.onProgress,
+    launcher: windowsLauncherPath(layout.root, env), binDir: unixBinDir(env), onProgress: options.onProgress,
   })
   return { kind: 'installed', version, result }
+}
+
+/** Unix: where the installer linked `bake`, as `install.sh` chooses it. */
+function unixBinDir(env: Record<string, string | undefined>): string | undefined {
+  if (process.platform === 'win32') return undefined
+  return env['BAKE_BIN_DIR'] || join(homedir(), '.local', 'bin')
 }
 
 /**

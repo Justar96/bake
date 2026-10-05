@@ -3,9 +3,9 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from 'bake-agent'
 import type { ApprovalOutcome } from 'bake-user-approval'
 import { UserQuestionError } from 'bake-user-questions'
-import type { ChoicePrompt } from '@dsh-tui/ui/picker.tsx'
+import type { ChoicePrompt } from 'bake-tui-ui/picker.tsx'
 import type { LoginPrompt } from './login.ts'
-import type { Interaction, InteractionAnswer } from '@dsh-tui/ui/interaction.tsx'
+import type { Interaction, InteractionAnswer } from 'bake-tui-ui/interaction.tsx'
 
 interface Pending {
   readonly view: Interaction

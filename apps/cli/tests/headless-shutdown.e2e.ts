@@ -70,10 +70,10 @@ async function runHeadlessPtySmoke(): Promise<string> {
     const profileDir = join(home, 'profiles', 'headless')
     await mkdir(profileDir, { recursive: true })
     await writeFile(join(profileDir, 'package.json'), JSON.stringify({
-      name: 'dsh-profile-headless',
+      name: 'bake-profile-headless',
       private: true,
       dependencies: {},
-      dsh: { profile: { bundles: ['bake-base', 'bake-headless'] } },
+      bake: { profile: { bundles: ['bake-base', 'bake-headless'] } },
     }, undefined, 2))
     await writeFile(join(profileDir, 'cordis.patch.yml'), [
       '- insert:',

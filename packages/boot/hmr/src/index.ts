@@ -8,7 +8,7 @@ import { FSWatcher, watch, type ChokidarOptions } from 'chokidar'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { readFileSync, realpathSync } from 'node:fs'
 import {
-  isProfileGenerationApplied, readProfileManifest, readProfilePatches, reconcileProfilePatches, PROFILE_PATCH_FILENAME,
+  isProfileGenerationApplied, profileBundles, readProfileManifest, readProfilePatches, reconcileProfilePatches, PROFILE_PATCH_FILENAME,
 } from 'bake-app-boot'
 import type {} from 'bake-cmdline'
 import { handleError } from './error.ts'
@@ -218,7 +218,7 @@ class Hmr extends Service {
       const patchFiles = [profile.patchPath, join(profile.home, PROFILE_PATCH_FILENAME)]
       let lastInputs: string | undefined
       let lastBundles = JSON.stringify(profile.startedBundles)
-      const readBundles = (): string => JSON.stringify(readProfileManifest('dsh', profile.dir).dsh?.profile?.bundles ?? [])
+      const readBundles = (): string => JSON.stringify(profileBundles(readProfileManifest('bake', profile.dir)))
       const readInputs = (bundles: string): string => JSON.stringify([bundles, ...patchFiles.map((filename) => {
         try { return readFileSync(filename, 'utf8') }
         catch (error) {
@@ -231,8 +231,8 @@ class Hmr extends Service {
         if (manifestOnly && bundles === lastBundles) return
         const inputs = readInputs(bundles)
         if (inputs === lastInputs) return
-        const patches = readProfilePatches('dsh', profile)
-        const warnings = await reconcileProfilePatches(this.ownerContext.root, patches, 'dsh')
+        const patches = readProfilePatches('bake', profile)
+        const warnings = await reconcileProfilePatches(this.ownerContext.root, patches, 'bake')
         lastInputs = inputs
         lastBundles = bundles
         for (const diagnostic of warnings) this.ctx.logger.warn(diagnostic)
@@ -246,7 +246,7 @@ class Hmr extends Service {
         try {
           const bundles = readBundles()
           const inputs = readInputs(bundles)
-          if (!isProfileGenerationApplied(this.ownerContext.root, readProfilePatches('dsh', profile))) return false
+          if (!isProfileGenerationApplied(this.ownerContext.root, readProfilePatches('bake', profile))) return false
           // An edit during the comparison could pair these inputs with a different composition.
           if (readInputs(readBundles()) !== inputs) return false
           lastInputs = inputs

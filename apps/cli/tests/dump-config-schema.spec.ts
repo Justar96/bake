@@ -57,10 +57,10 @@ async function createFixture(modules: Record<string, string>, patches: string): 
   }
   await writeFile(join(moduleDir, 'cordis.patch.yml'), patches)
   await writeFile(join(profile, 'package.json'), JSON.stringify({
-    name: 'dsh-profile-schema-acceptance',
+    name: 'bake-profile-schema-acceptance',
     private: true,
     dependencies: { [packageName]: '1.0.0' },
-    dsh: { profile: { bundles: [packageName] } },
+    bake: { profile: { bundles: [packageName] } },
   }))
   await writeFile(join(profile, 'cordis.patch.yml'), '[]\n')
   return { root, home, profile }
@@ -321,7 +321,7 @@ describe.skipIf(!builtArtifactsExist)('dsh --dump-config-schema assembled output
     await writeFile(join(fixture.profile, 'package.json'), JSON.stringify({
       private: true,
       dependencies: { [packageName]: '1.0.0' },
-      dsh: { profile: { bundles: [packageName, missingBundle] } },
+      bake: { profile: { bundles: [packageName, missingBundle] } },
     }))
     const result = await dump(fixture)
     expect(result.exitCode, result.stderr).toBe(1)

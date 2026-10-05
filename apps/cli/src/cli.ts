@@ -1,7 +1,7 @@
 /**
  * Command-line dispatch for dsh, loaded by the `bin` entry once the module
  * compile cache is on.
- * @module @deepseek-ai/dsh/cli
+ * @module bake-cli/cli
  */
 
 /* v8 ignore file -- built-bin acceptance exercises this dispatch. */
@@ -9,7 +9,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { loadLayeredEnv, StartupError } from 'bake-app-boot'
-import { resolveDshHome } from 'bake-home-paths'
+import { readBakeEnv, resolveDshHome } from 'bake-home-paths'
 import { parseDshArgs } from './args.ts'
 import { reportStartupFailure } from './startup-diagnostics.ts'
 
@@ -40,15 +40,15 @@ export const INHERITED_NODE_ENV = 'DSH_INHERITED_NODE_ENV'
  * The development build records a `performance.measure` entry for nearly
  * every component render, and Node keeps each entry until someone clears
  * them. A session that redraws for hours holds millions, and the heap runs
- * out. `DSH_RENDERER=development` keeps the development build on purpose,
- * as the performance baseline does.
+ * out. `BAKE_RENDERER=development` (or `DSH_RENDERER`) keeps the development
+ * build on purpose, as the performance baseline does.
  *
  * Must run before anything imports `react` or `ink`.
  * @param env - the process environment to update.
  */
 export function selectRendererBuild(env: NodeJS.ProcessEnv = process.env): void {
   if (env[INHERITED_NODE_ENV] === undefined) env[INHERITED_NODE_ENV] = env.NODE_ENV === undefined ? '-' : `=${env.NODE_ENV}`
-  env.NODE_ENV = env.DSH_RENDERER === 'development' ? 'development' : 'production'
+  env.NODE_ENV = readBakeEnv('RENDERER', env) === 'development' ? 'development' : 'production'
 }
 
 /**
@@ -117,7 +117,7 @@ export async function runCli(): Promise<void> {
     }
     case 'dump-config': {
       const { runDumpConfig } = await import('./dump-config.ts')
-      runDumpConfig(
+      await runDumpConfig(
         invocation.profile,
         invocation.defaultOnly,
         invocation.patches,

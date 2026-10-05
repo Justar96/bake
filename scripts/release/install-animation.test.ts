@@ -9,7 +9,7 @@ import { join, resolve } from 'node:path'
 // FIXME: on macOS runners this times out with the installer still running
 // under Bun.Terminal; the Linux run covers the installer's output until the
 // hang is diagnosed on a Mac.
-test.skipIf(process.platform === 'win32' || process.platform === 'darwin')('installer clears progress on success and signature failure, and stays plain through pipes', async () => {
+test.skipIf(process.platform === 'win32' || process.platform === 'darwin')('installer links bake and dsh, clears progress on success and signature failure, and stays plain through pipes', async () => {
   const root = mkdtempSync(join(tmpdir(), 'bake-install-animation-'))
   const tree = join(root, 'tree')
   const pair = generateKeyPairSync('ed25519')
@@ -38,13 +38,19 @@ test.skipIf(process.platform === 'win32' || process.platform === 'darwin')('inst
     for (const mode of ['tty', 'pipe', 'failure'] as const) {
       reject = mode === 'failure'
       const install = join(root, mode)
+      const binDir = join(root, `${mode}-bin`)
+      // The piped run meets a dsh the installer did not make, which it must keep.
+      if (mode === 'pipe') {
+        mkdirSync(binDir)
+        writeFileSync(join(binDir, 'dsh'), '#!/bin/sh\necho upstream\n', { mode: 0o755 })
+      }
       let terminalOutput = ''
       const terminalClosed = Promise.withResolvers<undefined>()
       const child = Bun.spawn(['sh', resolve(import.meta.dir, '../../distribution/host/install.sh')], {
         env: { ...process.env, TERM: 'xterm-256color', CI: '', BAKE_NO_ANIMATION: '', NO_COLOR: '1',
           BAKE_RELEASE_BASE_URL: server.url.toString().replace(/\/$/, ''),
           BAKE_RELEASE_PUBLIC_KEY: pair.publicKey.export({ type: 'spki', format: 'der' }).toString('base64'),
-          BAKE_INSTALL_ROOT: install, BAKE_BIN_DIR: join(root, `${mode}-bin`) },
+          BAKE_INSTALL_ROOT: install, BAKE_BIN_DIR: binDir },
         ...(mode === 'pipe' ? { stdout: 'pipe' as const, stderr: 'pipe' as const }
           : { terminal: { cols: 80, rows: 24,
             data: (_terminal, bytes) => { terminalOutput += Buffer.from(bytes).toString() },
@@ -68,6 +74,14 @@ test.skipIf(process.platform === 'win32' || process.platform === 'darwin')('inst
         } else {
           expect(code).toBe(0)
           expect(readlinkSync(join(install, 'current'))).toContain(`0.1.0-${sha256.slice(0, 12)}`)
+          expect(readlinkSync(join(binDir, 'bake'))).toBe(join(install, 'current/bin/bake'))
+          if (mode === 'pipe') {
+            expect(readFileSync(join(binDir, 'dsh'), 'utf8')).toBe('#!/bin/sh\necho upstream\n')
+            expect(output).toContain(`${join(binDir, 'dsh')} exists and is not a Bake-managed link`)
+          } else {
+            // Bake Desktop starts Bake as `dsh --profile desktop`.
+            expect(readlinkSync(join(binDir, 'dsh'))).toBe(join(install, 'current/bin/bake'))
+          }
           if (mode === 'tty') {
             for (const done of ['Verified release', 'Downloaded', 'Checked SHA-256', 'Installed', 'Linked']) {
               expect(output).toMatch(new RegExp(`[\u2713+] {2}${done}`, 'u'))

@@ -127,7 +127,7 @@ try {
   const binDir = join(temporary, 'bin')
   const env: NodeJS.ProcessEnv = {
     ...process.env, ...trust, BAKE_RELEASE_BASE_URL: base, BAKE_INSTALL_ROOT: installRoot,
-    BAKE_BIN_DIR: binDir, BAKE_SKIP_PATH_UPDATE: '1', DSH_HOME: join(temporary, 'home'), BAKE_NO_UPDATE_CHECK: '1',
+    BAKE_BIN_DIR: binDir, BAKE_SKIP_PATH_UPDATE: '1', BAKE_HOME: join(temporary, 'home'), BAKE_NO_UPDATE_CHECK: '1',
   }
   if (process.platform === 'win32') {
     const install = ['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
@@ -139,7 +139,10 @@ try {
     if (!version.includes(manifest.version)) throw new Error('Installed Windows command version mismatch')
     const config = await run(['cmd.exe', '/c', join(binDir, 'bake.cmd'), 'tui', '--dump-default-config'], env)
     if (!config.includes('bake-base')) throw new Error('Windows profile routing failed')
+    const alias = await run(['cmd.exe', '/c', join(binDir, 'dsh.cmd'), '--version'], env)
+    if (!alias.includes(manifest.version)) throw new Error('Installed Windows dsh alias version mismatch')
     const defaultHome: NodeJS.ProcessEnv = { ...env, USERPROFILE: temporary }
+    delete defaultHome.BAKE_HOME
     delete defaultHome.DSH_HOME
     await runHelp(['cmd.exe', '/c', join(binDir, 'bake.cmd'), '--help'], defaultHome)
   } else {
@@ -150,9 +153,12 @@ try {
     if (!version.includes(manifest.version)) throw new Error('Installed command version mismatch')
     const config = await run([join(binDir, 'bake'), 'tui', '--dump-default-config'], env)
     if (!config.includes('bake-base')) throw new Error('Installed profile routing failed')
+    const alias = await run([join(binDir, 'dsh'), '--version'], env)
+    if (!alias.includes(manifest.version)) throw new Error('Installed dsh alias version mismatch')
     const help = await runHelp([join(binDir, 'bake'), '--help'], env)
     if (!help.includes('Usage:')) throw new Error('Installed command did not boot the terminal profile')
     const defaultHome: NodeJS.ProcessEnv = { ...env, HOME: temporary }
+    delete defaultHome.BAKE_HOME
     delete defaultHome.DSH_HOME
     await runHelp([join(binDir, 'bake'), '--help'], defaultHome)
   }

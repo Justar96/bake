@@ -56,10 +56,10 @@ it('activates newly installed bundles and leaves retained disabled dependencies 
   install(dir, 'disabled')
   command.run.mockImplementationOnce(() => result(0, 'installed', () =>{  install(dir, 'new-bundle') }))
   expect(await runPluginCommand(context, ['add', 'new-bundle'], { execution: 'service', outputBytes: 100 })).toMatchObject({ exitCode: 0 })
-  expect(readProfileManifest('test', dir).dsh?.profile?.bundles).toEqual(['new-bundle'])
+  expect(readProfileManifest('test', dir).bake?.profile?.bundles).toEqual(['new-bundle'])
   command.run.mockImplementationOnce(() => result(0, 'updated'))
   await runPluginCommand(context, ['update'], { execution: 'service', outputBytes: 100 })
-  expect(readProfileManifest('test', dir).dsh?.profile?.bundles).toEqual(['new-bundle'])
+  expect(readProfileManifest('test', dir).bake?.profile?.bundles).toEqual(['new-bundle'])
 })
 
 it('can install without activation and bounds output while retaining the complete log', async () => {
@@ -68,7 +68,7 @@ it('can install without activation and bounds output while retaining the complet
   const outcome = await runProfilePnpm(context, ['add', './extra'], { execution: 'service', outputBytes: 4, activateNewBundles: false })
   expect(outcome).toMatchObject({ exitCode: 0, output: '6789', truncated: true })
   expect(readFileSync(outcome.logPath, 'utf8')).toBe('0123456789')
-  expect(readProfileManifest('test', dir).dsh?.profile?.bundles).toEqual([])
+  expect(readProfileManifest('test', dir).bake?.profile?.bundles).toEqual([])
   expect(command.run.mock.calls[0]?.[1]).toEqual(['add', join(context.cwd, 'extra')])
 })
 
@@ -80,9 +80,9 @@ it.each([runPluginCommand, runProfilePnpm])('installs into the supplied applicat
   const outcome = await run({ ...context, dir }, ['add', 'extra'], { execution: 'service', outputBytes: 100 })
   expect(outcome.exitCode).toBe(0)
   expect(command.run.mock.calls[0]?.[2]).toMatchObject({ cwd: dir })
-  expect(readProfileManifest('test', dir).dsh?.profile?.bundles).toEqual(['extra'])
+  expect(readProfileManifest('test', dir).bake?.profile?.bundles).toEqual(['extra'])
   expect(readProfileManifest('test', namedDir).dependencies).not.toHaveProperty('extra')
-  expect(readProfileManifest('test', namedDir).dsh?.profile?.bundles).toEqual([])
+  expect(readProfileManifest('test', namedDir).bake?.profile?.bundles).toEqual([])
 })
 
 it('retains partial package-manager changes after failure without activating them', async () => {
@@ -90,7 +90,7 @@ it('retains partial package-manager changes after failure without activating the
   command.run.mockImplementationOnce(() => result(1, 'installation failed', () =>{  install(dir, 'partial') }))
   expect(await runProfilePnpm(context, ['add', 'partial'], { execution: 'service', outputBytes: 100 })).toMatchObject({ exitCode: 1 })
   expect(readProfileManifest('test', dir).dependencies).toEqual({ partial: '1' })
-  expect(readProfileManifest('test', dir).dsh?.profile?.bundles).toEqual([])
+  expect(readProfileManifest('test', dir).bake?.profile?.bundles).toEqual([])
 })
 
 
@@ -102,7 +102,7 @@ it('initializes missing profiles under the same lock and reports initialization'
     await runPluginCommand({ ...context, profile }, ['root'], {
       execution: 'service', outputBytes: 100, lockWaitMs: 1000, onOutput: (text) => { messages.push(text) },
     })
-    expect(readProfileManifest('test', join(home, 'profiles', profile)).dsh?.profile?.bundles).toContain('bake-base')
+    expect(readProfileManifest('test', join(home, 'profiles', profile)).bake?.profile?.bundles).toContain('bake-base')
   }
   expect(messages.filter(text => text.includes('initialized profile'))).toHaveLength(2)
 })
@@ -111,7 +111,7 @@ it('retains built-in layers, removes deleted dependencies and warns about plain 
   const { context, dir } = fixture()
   install(dir, 'removed')
   const manifest = readProfileManifest('test', dir)
-  manifest.dsh = { profile: { bundles: ['builtin', 'removed'] } }
+  manifest.bake = { profile: { bundles: ['builtin', 'removed'] } }
   writeFileSync(join(dir, 'package.json'), JSON.stringify(manifest))
   const messages: string[] = []
   command.run.mockImplementationOnce(() => result(0, '', () => {
@@ -122,7 +122,7 @@ it('retains built-in layers, removes deleted dependencies and warns about plain 
     writeFileSync(join(dir, 'package.json'), JSON.stringify(after))
   }))
   await runPluginCommand(context, ['remove', 'removed'], { execution: 'service', outputBytes: 100, onOutput: (text) => { messages.push(text) } })
-  expect(readProfileManifest('test', dir).dsh?.profile?.bundles).toEqual(['builtin'])
+  expect(readProfileManifest('test', dir).bake?.profile?.bundles).toEqual(['builtin'])
   expect(messages.join('')).toContain('plain dependency')
 })
 
@@ -132,11 +132,11 @@ it('preserves a package-manager selected new bundle without adding it twice', as
   command.run.mockImplementationOnce(() => result(0, '', () => {
     install(dir, 'new')
     const manifest = readProfileManifest('test', dir)
-    manifest.dsh = { profile: { bundles: ['new'] } }
+    manifest.bake = { profile: { bundles: ['new'] } }
     writeFileSync(join(dir, 'package.json'), JSON.stringify(manifest))
   }))
   await runProfilePnpm(context, ['add', 'new'], { execution: 'service', outputBytes: 100 })
-  expect(readProfileManifest('test', dir).dsh?.profile?.bundles).toEqual(['new'])
+  expect(readProfileManifest('test', dir).bake?.profile?.bundles).toEqual(['new'])
 })
 
 it.each([

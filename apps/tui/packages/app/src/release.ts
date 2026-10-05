@@ -5,7 +5,7 @@
  * this module's directory in the source tree (`packages/app/src`) and in the build output
  * (`packages/app/lib`), so the source launch and the built profile agree.
  *
- * @module @dsh-tui/app/release
+ * @module bake-tui-app/release
  */
 
 import { readFileSync } from 'node:fs'

@@ -9,7 +9,7 @@ export HTTPS_PROXY=http://127.0.0.1:7890
 export HTTP_PROXY=http://127.0.0.1:7890
 ```
 
-Put both lines in your shell profile so every `dsh` invocation inherits them, or in `$DSH_HOME/.env` (`~/.dsh/.env` by default) next to your API key; an exported variable always wins over that file. A project's own `.env` cannot set them: it arrives with `git clone`, and DSH refuses to start rather than let a repository decide where your traffic goes.
+Put both lines in your shell profile so every `bake` invocation inherits them, or in `$BAKE_HOME/.env` (`~/.dsh/.env` by default) next to your API key; an exported variable always wins over that file. A project's own `.env` cannot set them: it arrives with `git clone`, and DSH refuses to start rather than let a repository decide where your traffic goes.
 
 A proxy that needs credentials takes them in the URL: `http://user:password@proxy.example:8080`. DSH never prints the URL back: a diagnostic names the variable it rejected, so neither the username nor the password appears anywhere.
 
@@ -53,7 +53,7 @@ You do not need to list `localhost` or `127.0.0.1`. DSH always bypasses loopback
 export NODE_EXTRA_CA_CERTS=/path/to/corporate-ca.pem
 ```
 
-Node reads that variable only at process start, so export it before running `dsh`.
+Node reads that variable only at process start, so export it before running `bake`.
 
 **Tools DSH runs for you follow the same proxy.** Commands in the bash tool, `git`, `gh`, and MCP servers started as child processes all inherit these variables. A child that is itself a Node program honors them only on Node 22.21 or later; an older Node connects directly. If one of your proxy variables holds a value DSH rejected — a SOCKS URL, say — Node-based tools also connect directly rather than fail to start, while `curl` and `git` still read that value.
 
@@ -65,7 +65,7 @@ Not every request DSH makes goes through the proxy:
 
 - **Anything on this machine.** Loopback is always direct: `localhost`, the whole `127.0.0.0/8` range, `::1`, and `0.0.0.0`. A proxy cannot usefully reach a service that only listens locally.
 - **Code the model writes.** PTC runtime programs receive no proxy settings, so model-authored scripts cannot read a proxy URL that may carry a password. Direct requests must configure any required proxy themselves and remain subject to the execution sandbox.
-- **Session telemetry you configure.** Telemetry is off unless you set `DSH_TELEMETRY_OTLP_URL` to a collector of your own. When you do, the OTLP exporter uses Node's own HTTP client rather than the one a proxy configures, so it connects to that URL directly and simply fails where direct egress is blocked. Nothing you do in DSH depends on it. Unset the URL or set `DSH_TELEMETRY_DISABLED=1` to turn it off again.
+- **Session telemetry you configure.** Telemetry is off unless you set `BAKE_TELEMETRY_OTLP_URL` to a collector of your own. When you do, the OTLP exporter uses Node's own HTTP client rather than the one a proxy configures, so it connects to that URL directly and simply fails where direct egress is blocked. Nothing you do in DSH depends on it. Unset the URL or set `BAKE_TELEMETRY_DISABLED=1` to turn it off again.
 - **`web_fetch` to a literal private address.** A URL naming an address like `http://10.0.0.5/` is refused rather than handed to the proxy, the same refusal it gets with no proxy configured.
 
 ## Check that it worked
@@ -73,7 +73,7 @@ Not every request DSH makes goes through the proxy:
 Ask the agent to fetch a page and watch your proxy application's connection log:
 
 ```sh
-dsh --profile headless "fetch https://example.com and tell me the page title"
+bake --profile headless "fetch https://example.com and tell me the page title"
 ```
 
 If the request does not appear there, confirm the variables survive into DSH's own environment:

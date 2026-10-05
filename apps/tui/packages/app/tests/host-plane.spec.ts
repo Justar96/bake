@@ -22,8 +22,8 @@ import { dshHomePath } from 'bake-home-paths'
 import { ToolCallId, type GenerateOptions, type Message, type StreamChunk } from 'bake-llm'
 import type { SessionEvent } from 'bake-session'
 import { defineContentToolFixture } from 'bake-tools'
-import { dictionaries } from '@dsh-tui/ui/copy.ts'
-import { transcriptRows } from '@dsh-tui/ui'
+import { dictionaries } from 'bake-tui-ui/copy.ts'
+import { transcriptRows } from 'bake-tui-ui'
 import { SessionController } from '../src/controller.ts'
 import { openSession } from '../src/session.ts'
 import { ScriptedModel, textResponse } from './harness.ts'
@@ -94,7 +94,7 @@ async function profile() {
   ctx.provide('profileContext', {
     name: 'tui', dir: profileDir, patchPath: join(profileDir, 'cordis.patch.yml'),
     installAnchor: join(REPOSITORY, 'apps/cli/package.json'), cwd: workspace, home: join(root, 'home'),
-    startedBundles: ['bake-base', '@dsh-tui/app'], overlays: [], telemetryDisabledEnv: undefined,
+    startedBundles: ['bake-base', 'bake-tui-app'], overlays: [], telemetryDisabledEnv: undefined,
   })
   await ctx.plugin(Loader)
   ctx.loader.builtins.include = Include

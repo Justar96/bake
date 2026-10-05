@@ -23,7 +23,7 @@ Check each material statement against its strongest owner. Use package metadata 
 
 For every operational claim — a CLI command, a config snippet, a default value, an error message, a platform difference — the evidence is running it, not reading it. Execute the exact command or mount the exact configuration against the current checkout before the page may state its behavior; quote only observed output, warnings, and failures. Claims that depend on unavailable keys or networks name their verification owner instead of asserting behavior. For pre-existing pages, compare against latest `origin/master` and re-verify stale statements against code.
 
-Classify the package before reviewing its install guidance: `dsh.bundle.patch` in `package.json` makes it a bundle (installable via `dsh plugin --profile <name> add <package>`, the only shape that command activates as a layer); an `apply` export or default service export makes it a plugin (mounted as a `cordis.yml` row); a plain module API makes it a library (a dependency with no install path). Reject install guidance written for another shape.
+Classify the package before reviewing its install guidance: `dsh.bundle.patch` in `package.json` makes it a bundle (installable via `bake plugin --profile <name> add <package>`, the only shape that command activates as a layer); an `apply` export or default service export makes it a plugin (mounted as a `cordis.yml` row); a plain module API makes it a library (a dependency with no install path). Reject install guidance written for another shape.
 
 Retain a statement only when it helps the target reader act, reason, or avoid misuse. Move rationale, history, test walkthroughs, duplicate catalogs, and unrelated package detail to their owners.
 
@@ -35,7 +35,7 @@ Require the following without forcing one universal internal heading set:
 - a three-to-five-sentence English Summary of at most 100 `wc -w`-style words that says what the subject DOES for its user or agent reader, with a linked Table of Contents;
 - controlled English with explicit actors, stable terms, direct verbs, separated instructions and conditions, and unchanged modality;
 - when to choose or avoid the package;
-- a smallest safe configuration or usage path when one exists — for a bundle, the verified `dsh plugin` install path; for a library, the consumer entry point; never profile-install guidance for a shape that does not take it;
+- a smallest safe configuration or usage path when one exists — for a bundle, the verified `bake plugin` install path; for a library, the consumer entry point; never profile-install guidance for a shape that does not take it;
 - observable behavior, failures, durability, security, and performance limits relevant to consumers;
 - developer-facing ownership and data/lifecycle design at concept level — overall design, architecture, hand-waving dataflow — that cannot be recovered cheaply from public types, with code links for exact detail;
 - canonical Model Experience and Known Limitations sections required by package policy;

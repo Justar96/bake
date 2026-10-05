@@ -10,7 +10,7 @@
  * fixtures and out of the Bun harness. The localized labels are a parameter
  * for that reason, not a reason to project elsewhere.
  *
- * @module @dsh-tui/ui/project
+ * @module bake-tui-ui/project
  */
 
 import type { SessionEvent } from 'bake-session'

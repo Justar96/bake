@@ -5,7 +5,7 @@
  * Pure, so the picker's behaviour is testable without a terminal, and the
  * same rules can serve any list a user filters by typing.
  *
- * @module @dsh-tui/ui/choices
+ * @module bake-tui-ui/choices
  */
 
 /** The text of a choice that a query is matched against. */

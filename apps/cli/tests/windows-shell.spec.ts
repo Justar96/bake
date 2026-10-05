@@ -50,10 +50,10 @@ describe('the shipped shell composition (real bundle layers)', () => {
 
   it.each(Object.keys(PROFILE_TEMPLATES))(
     'composes the confined pwsh roster on win32 and the bash roster on POSIX from the same rows (%s)',
-    (name) => {
+    async (name) => {
       home = mkdtempSync(join(tmpdir(), 'dsh-windows-home-'))
       initProfile(join(home, PROFILES_DIR, name), [...PROFILE_TEMPLATES[name]!.bundles])
-      const profile = loadProfile('dsh', name, anchor, home)
+      const profile = await loadProfile('dsh', name, anchor, home)
       const warnings: string[] = []
       const rows = composeEntries(
         profile.layers.map(layer => layer.patches),
@@ -94,10 +94,10 @@ describe('the shipped shell composition (real bundle layers)', () => {
     },
   )
 
-  it('base-only profiles carry both stacks with the same platform gating', () => {
+  it('base-only profiles carry both stacks with the same platform gating', async () => {
     home = mkdtempSync(join(tmpdir(), 'dsh-windows-home-'))
     initProfile(join(home, PROFILES_DIR, 'base-only'), ['bake-base'])
-    const profile = loadProfile('dsh', 'base-only', anchor, home)
+    const profile = await loadProfile('dsh', 'base-only', anchor, home)
     const warnings: string[] = []
     const rows = composeEntries(
       profile.layers.map(layer => layer.patches),

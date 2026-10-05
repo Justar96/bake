@@ -7,7 +7,7 @@ kind: "package-reference"
 
 ## Summary
 
-`bake-session-telemetry-otel` exports session records through the OTel JS SDK only after new explicit feedback, for all users and providers, including `deepseek-official`. `FEEDBACK_ONLY` releases the canonical prefix through that feedback, including context; later records wait for the next explicit feedback. `DISABLED` constructs no transport. SDK batching can finish an authorized upload without another user interaction or model call. Deployments own their redaction rules. Bake's shipped profiles give it no endpoint, so it stays `DISABLED` until `DSH_TELEMETRY_OTLP_URL` names a collector you run.
+`bake-session-telemetry-otel` exports session records through the OTel JS SDK only after new explicit feedback, for all users and providers, including `deepseek-official`. `FEEDBACK_ONLY` releases the canonical prefix through that feedback, including context; later records wait for the next explicit feedback. `DISABLED` constructs no transport. SDK batching can finish an authorized upload without another user interaction or model call. Deployments own their redaction rules. Bake's shipped profiles give it no endpoint, so it stays `DISABLED` until `BAKE_TELEMETRY_OTLP_URL` names a collector you run.
 
 ## Table of Contents
 
@@ -36,7 +36,7 @@ Programmatic TypeScript configuration uses the exported `SessionTelemetryMode` e
 
 ### In Bake's shipped profiles
 
-The [base bundle](../../bundle/base/README.md) mounts this backend without a default endpoint. While `DSH_TELEMETRY_OTLP_URL` is unset or empty, the row resolves `mode` to `DISABLED` whatever `DSH_TELEMETRY_MODE` says: nothing is uploaded, `sharing` reports `disabled`, and `/feedback` says the feedback stays in the local session log. Setting `DSH_TELEMETRY_OTLP_URL` to a full OTLP/HTTP logs URL enables upload to that URL only, in `DSH_TELEMETRY_MODE` (default `FEEDBACK_ONLY`). A non-empty `DSH_TELEMETRY_DISABLED` unmounts the row even when a URL is set.
+The [base bundle](../../bundle/base/README.md) mounts this backend without a default endpoint. While `BAKE_TELEMETRY_OTLP_URL` is unset or empty, the row resolves `mode` to `DISABLED` whatever `BAKE_TELEMETRY_MODE` says: nothing is uploaded, `sharing` reports `disabled`, and `/feedback` says the feedback stays in the local session log. Setting `BAKE_TELEMETRY_OTLP_URL` to a full OTLP/HTTP logs URL enables upload to that URL only, in `BAKE_TELEMETRY_MODE` (default `FEEDBACK_ONLY`). A non-empty `BAKE_TELEMETRY_DISABLED` unmounts the row even when a URL is set.
 
 ### Minimal configuration
 
@@ -86,7 +86,7 @@ This section explains the backend's composition; the observable behavior is full
 
 ### Design concept
 
-The backend is a thin adapter over the OTel JS SDK: it owns feedback authorization, resource identity, and an outer shutdown deadline. Canonical ledger records use the `bake-session-telemetry-otel` instrumentation scope; this backend captures no operational records. Resource identity carries `service.name`/`service.version` from `bake-llm`'s `APP_IDENTITY` plus the anonymous `user.id` (from `$DSH_HOME/.anonymous-user-id`), once per export batch rather than per record.
+The backend is a thin adapter over the OTel JS SDK: it owns feedback authorization, resource identity, and an outer shutdown deadline. Canonical ledger records use the `bake-session-telemetry-otel` instrumentation scope; this backend captures no operational records. Resource identity carries `service.name`/`service.version` from `bake-llm`'s `APP_IDENTITY` plus the anonymous `user.id` (from `$BAKE_HOME/.anonymous-user-id`), once per export batch rather than per record.
 
 ### Source map
 

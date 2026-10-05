@@ -8,12 +8,12 @@
  * obligation. Nothing here is written anywhere. Keeping the calls is what
  * shows the turn as busy while the model is calling tools.
  *
- * @module @dsh-tui/app/live
+ * @module bake-tui-app/live
  */
 
 import type { StreamChunk } from 'bake-llm'
-import type { Row } from '@dsh-tui/ui/rows.ts'
-import { PENDING_ARGUMENTS } from '@dsh-tui/ui/present.ts'
+import type { Row } from 'bake-tui-ui/rows.ts'
+import { PENDING_ARGUMENTS } from 'bake-tui-ui/present.ts'
 
 /** One block being assembled, before it is known whether the stream completes. */
 interface OpenBlock {

@@ -223,7 +223,10 @@ export async function runLoaderSmoke(options: LoaderSmokeOptions): Promise<Loade
       ...options.mode !== undefined ? { mode: options.mode } : {},
       tsconfigPath: options.tsconfigPath,
       env: {
+        // Both spellings, so an ambient BAKE_* name cannot redirect the child.
+        BAKE_HOME: join(cwd, '.dsh'),
         DSH_HOME: join(cwd, '.dsh'),
+        BAKE_AGENTS_HOME: join(cwd, '.agents'),
         DSH_AGENTS_HOME: join(cwd, '.agents'),
         ...options.env,
       },

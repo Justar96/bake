@@ -4,6 +4,7 @@
  */
 
 export type {
+  BakeManifest,
   DshBundleManifest,
   DshClientManifest,
   DshEnginesManifest,

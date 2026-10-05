@@ -8,7 +8,7 @@
  * App flags are not the launcher's business: the invocation's inner arguments
  * are provided to the tree through `ctx.cmdlineArgs`, where any injected app
  * plugin may read the same immutable snapshot.
- * @module @deepseek-ai/dsh/profile-boot
+ * @module bake-cli/profile-boot
  */
 
 import { randomBytes } from 'node:crypto'
@@ -36,7 +36,7 @@ import {
   type ProfileResolutionGeneration,
   type ProfileResolutionMode,
 } from 'bake-app-boot'
-import { resolveDshHome } from 'bake-home-paths'
+import { readBakeEnv, resolveDshHome } from 'bake-home-paths'
 import { installProxyFromEnvironment } from 'bake-http-proxy'
 import { DSH_LAUNCH_ENVIRONMENT_KEY, type LaunchEnvironmentSnapshot } from 'bake-launch-environment'
 import type {} from 'bake-agent-loop'
@@ -74,14 +74,14 @@ function createAppReady(): { service: AppReady; commit(): void } {
 /**
  * The home-level user patch layer (`$DSH_HOME/cordis.patch.yml`), applied
  * over every profile's own layer. Resolved per call, not at module load:
- * `$DSH_HOME` may be set by the test or launcher after import.
+ * `$BAKE_HOME` or `$DSH_HOME` may be set by the test or launcher after import.
  * @returns the absolute patch-file path.
  */
 export function homePatchPath(): string {
   return join(resolveDshHome(), PROFILE_PATCH_FILENAME)
 }
 
-/** Absolute path of this dsh installation's package.json (both anchors: src/ and lib/ sit one level under apps/cli). */
+/** Absolute path of this Bake installation's package.json (both anchors: src/ and lib/ sit one level under apps/cli). */
 export const INSTALL_ANCHOR = fileURLToPath(new URL('../package.json', import.meta.url))
 
 /** The empty root entry list every profile tree patches over. */
@@ -206,9 +206,9 @@ export function initializeProfileFromDefault(
  * @returns the loaded profile.
  * @throws when explicit initialization names an unknown template or an existing profile.
  */
-export function prepareProfile(name: string, userLayer = true, fromDefaultProfile?: string): Profile {
+export async function prepareProfile(name: string, userLayer = true, fromDefaultProfile?: string): Promise<Profile> {
   if (fromDefaultProfile !== undefined) initializeProfileFromDefault(name, fromDefaultProfile)
-  const profile = loadProfile(NAME, name, INSTALL_ANCHOR, undefined, { userLayer })
+  const profile = await loadProfile(NAME, name, INSTALL_ANCHOR, undefined, { userLayer })
   writeProfileRootConfig(profile.dir)
   return profile
 }
@@ -224,7 +224,7 @@ interface ComposedProfile {
 
 /**
  * Load `name` and compose its effective patch stack: bundle layers in
- * `dsh.profile.bundles` order (a base-backed profile gets the base bundle's
+ * `bake.profile.bundles` order (a base-backed profile gets the base bundle's
  * platform-gated shell rows), the profile's user layer, the home-level user
  * layer (`$DSH_HOME/cordis.patch.yml` — machine-local preferences that apply
  * to every profile, so it outranks the per-profile layer), `--patch` overlays,
@@ -243,7 +243,7 @@ async function composeProfile(
   fromDefaultProfile?: string,
   resolvedProfile?: ResolvedProfileRuntime,
 ): Promise<ComposedProfile> {
-  const profile = resolvedProfile?.profile ?? prepareProfile(name, true, fromDefaultProfile)
+  const profile = resolvedProfile?.profile ?? await prepareProfile(name, true, fromDefaultProfile)
   if (resolvedProfile !== undefined) writeProfileRootConfig(profile.dir)
   const resolutionOptions = { installAnchor: resolvedProfile?.installAnchor ?? INSTALL_ANCHOR, profile }
   if (resolvedProfile !== undefined && resolutionMode !== 'runtime') healIsolatedProfileModuleFallback(resolvedProfile)
@@ -258,7 +258,7 @@ async function composeProfile(
 export interface ResolvedProfileRuntime {
   /** Profile already loaded from the application's own directory. */
   profile: Profile
-  /** Absolute package.json path of the application's dsh installation. */
+  /** Absolute package.json path of the application's Bake installation. */
   installAnchor: string
 }
 
@@ -373,7 +373,7 @@ export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Con
       installAnchor: options.resolvedProfile?.installAnchor ?? INSTALL_ANCHOR,
       startedBundles: composed.profile.layers.map(layer => layer.packageName),
       cwd: process.cwd(), home: resolveDshHome(),
-      overlays: composed.overlays, telemetryDisabledEnv: process.env.DSH_TELEMETRY_DISABLED,
+      overlays: composed.overlays, telemetryDisabledEnv: readBakeEnv('TELEMETRY_DISABLED'),
     }
     const ctx = await boot(NAME, rootConfig, readProfilePatches(NAME, profileContext, composed.profile), async (hostCtx) => {
       app.current = hostCtx

@@ -55,6 +55,6 @@ Every directly consumed workspace package has an owning reference below. Type-on
 | `dsh-agent-loop` | [Agent loop](../../packages/core/agent-loop/README.md) | Real loop in integration tests |
 | `bake-agent-loop-testkit` | [Loop test support](../../packages/test-support/agent-loop-testkit/README.md) | Compose isolated real loop dependencies |
 | `bake-llm-replay` | [Recorded replay](../../packages/test-support/llm-replay/README.md) | Restore the shared Session fixture and replay through the built profile |
-| `@dsh-tui/ui` | [Presentation](packages/ui/README.md) | Pure typed terminal components and event projection |
+| `bake-tui-ui` | [Presentation](packages/ui/README.md) | Pure typed terminal components and event projection |
 
 The recorded bash scenario is shared read-only from [its owner](../../snapshots/session/bash-tool-turn/snapshot.yml). TUI transcript expectations and profile-driving tests live under `apps/tui/`; no upstream fixture generations are modified.

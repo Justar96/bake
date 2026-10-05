@@ -1,7 +1,7 @@
 /**
  * The status line's git field: the session workspace's branch and uncommitted
  * changes, read with `git status` in the background for the life of the process.
- * @module @dsh-tui/app/git
+ * @module bake-tui-app/git
  */
 
 import { spawn } from 'node:child_process'
@@ -9,7 +9,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from 'bake-sandbox'
 import type {} from 'bake-sandbox-policy'
 import type { Session } from 'bake-session'
-import type { GitState } from '@dsh-tui/ui/git.ts'
+import type { GitState } from 'bake-tui-ui/git.ts'
 
 /** What the reads use besides the working tree; injected so tests own it. */
 export interface WorkspaceGitOptions {

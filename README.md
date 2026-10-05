@@ -53,7 +53,7 @@ bake
 
 Bake has no default provider: sign in with `/login` (DeepSeek, CLIProxyAPI, OpenAI, Anthropic, GitHub Copilot, OpenRouter, Kimi, or xAI), and the first sign-in selects its model. An exported `DEEPSEEK_API_KEY` counts as signed in; choose its model with `/model`. Type `/` to browse commands, `/help` for the list, and `@` to reference a file. `/settings` changes the screen mode, the default model and permissions, compaction, and tool limits. `bake --help` shows the launch options, such as `--resume <id>`.
 
-Bake keeps sessions, credentials, and profiles in `~/.bake`. Set `DSH_HOME` to use a different directory.
+Bake keeps sessions, credentials, and profiles in `~/.bake`. Set `BAKE_HOME` to use a different directory; the earlier `DSH_HOME` name still works when `BAKE_HOME` is unset, as does each `DSH_` spelling of a `BAKE_` setting.
 
 ## Update
 
@@ -67,7 +67,7 @@ Installs of 0.1.0 have no `bake update`; run the installer once more to move to 
 
 ## Uninstall
 
-Delete the install directory and the `bake` link: `~/.local/share/bake` and `~/.local/bin/bake`, or `%LOCALAPPDATA%\Bake` on Windows, where you also remove its `bin` entry from the user `PATH`. Delete `~/.bake` too to remove sessions and stored credentials.
+Delete the install directory and the `bake` and `dsh` links: `~/.local/share/bake`, `~/.local/bin/bake`, and `~/.local/bin/dsh`, or `%LOCALAPPDATA%\Bake` on Windows, where you also remove its `bin` entry from the user `PATH`. Delete `~/.bake` too to remove sessions and stored credentials.
 
 ## Documentation
 
@@ -79,7 +79,7 @@ Delete the install directory and the `bake` link: `~/.local/share/bake` and `~/.
 
 ## Acknowledgements
 
-Bake is a fork of [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), DeepSeek's MIT-licensed agent harness. Its agent loop, session log, sandbox, and Cordis plugin runtime are still the foundation Bake runs on. Since the fork, Bake has built its own terminal interface and distribution, dropped upstream's web client, desktop app, and SDKs, and reworked much of the runtime; upstream fixes are reviewed and ported selectively, never merged automatically. Runtime packages under `packages/` use `bake-<name>`; the CLI, terminal, and vendored packages retain their declared names. The [contributor guide](CONTRIBUTING.md#upstream-deepseek-harness) describes the import mapping for upstream fixes.
+Bake is a fork of [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), DeepSeek's MIT-licensed agent harness. Its agent loop, session log, sandbox, and Cordis plugin runtime are still the foundation Bake runs on. Since the fork, Bake has built its own terminal interface and distribution, dropped upstream's web client, desktop app, and SDKs, and reworked much of the runtime; upstream fixes are reviewed and ported selectively, never merged automatically. Every workspace package outside `vendor/` and `native/` uses a `bake-` name: `bake-<name>` under `packages/`, `bake-cli`, and `bake-tui-<name>`; vendored packages retain their declared names. The [contributor guide](CONTRIBUTING.md#upstream-deepseek-harness) describes the import mapping for upstream fixes.
 
 Bake reaches every model through [pi](https://github.com/earendil-works/pi), also MIT-licensed: `pi-ai` connects each provider, `pi-codemode` runs code mode's scripts, and `pi-mcp` connects MCP servers.
 

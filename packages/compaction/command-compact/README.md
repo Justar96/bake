@@ -23,7 +23,7 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## Use this package
 
-Type `/compact` in a chat UI when the conversation has grown long and you want to condense it immediately. The shipped `dsh` base mounts the command next to the default backend, so it is usually already available.
+Type `/compact` in a chat UI when the conversation has grown long and you want to condense it immediately. The shipped `bake` base mounts the command next to the default backend, so it is usually already available.
 
 ### Using the command
 
@@ -60,7 +60,7 @@ Mount the command registry, one condensation backend, and this plugin:
   name: 'bake-command-compact'
 ```
 
-The shipped `dsh` base mounts it beside the default backend, and the terminal app provides the command adapter. Automation surfaces that compose no command adapter keep automatic condensation only.
+The shipped `bake` base mounts it beside the default backend, and the terminal app provides the command adapter. Automation surfaces that compose no command adapter keep automatic condensation only.
 
 ### What happens to the conversation
 

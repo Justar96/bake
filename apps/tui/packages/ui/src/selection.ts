@@ -10,7 +10,7 @@
  * Adapted from the fullscreen selection of pi's `TuiAltScreen` (MIT, Mario
  * Zechner, https://github.com/earendil-works/pi).
  *
- * @module @dsh-tui/ui/selection
+ * @module bake-tui-ui/selection
  */
 import stringWidth from 'string-width'
 import type { Span } from './present.ts'

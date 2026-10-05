@@ -11,6 +11,7 @@ import {
   dshHomeDisplay,
   dshHomePath,
   expandHomePath,
+  readBakeEnv,
   resolveDshHome,
 } from 'bake-home-paths'
 
@@ -44,6 +45,32 @@ describe('dsh path helpers', () => {
   it('treats an empty or whitespace-only DSH_HOME as unset', () => {
     expect(resolveDshHome(undefined, { DSH_HOME: '' })).toBe(defaultDshHome())
     expect(resolveDshHome(undefined, { DSH_HOME: '   ' })).toBe(defaultDshHome())
+  })
+
+  it('reads BAKE_HOME before DSH_HOME, skipping a blank BAKE_HOME', () => {
+    const bakeHome = join(homedir(), 'env-bake')
+    const envHome = join(homedir(), 'env-dsh')
+
+    expect(resolveDshHome(undefined, { BAKE_HOME: '~/env-bake', DSH_HOME: '~/env-dsh' })).toBe(bakeHome)
+    expect(resolveDshHome(undefined, { BAKE_HOME: ' ', DSH_HOME: '~/env-dsh' })).toBe(envHome)
+    expect(resolveDshHome('/tmp/explicit-dsh', { BAKE_HOME: '~/env-bake' })).toBe(resolve('/tmp/explicit-dsh'))
+  })
+
+  it('reads a BAKE_ setting before its DSH_ spelling', () => {
+    expect(readBakeEnv('PERMISSION_MODE', { BAKE_PERMISSION_MODE: 'read-only', DSH_PERMISSION_MODE: 'danger-full-access' })).toBe('read-only')
+    expect(readBakeEnv('PERMISSION_MODE', { DSH_PERMISSION_MODE: 'danger-full-access' })).toBe('danger-full-access')
+    expect(readBakeEnv('PERMISSION_MODE', { BAKE_PERMISSION_MODE: '' })).toBeUndefined()
+    expect(readBakeEnv('PERMISSION_MODE', {})).toBeUndefined()
+  })
+
+  it('treats a blank BAKE_ setting as unset, as resolveDshHome treats BAKE_HOME', () => {
+    for (const blank of ['', ' ', '\t']) {
+      expect(readBakeEnv('TOOLS_MODE', { BAKE_TOOLS_MODE: blank, DSH_TOOLS_MODE: 'ptc' })).toBe('ptc')
+    }
+    // An opt-out that any non-empty value enables takes effect under either name.
+    expect(readBakeEnv('TELEMETRY_DISABLED', { BAKE_TELEMETRY_DISABLED: '', DSH_TELEMETRY_DISABLED: '1' })).toBe('1')
+    expect(readBakeEnv('TELEMETRY_DISABLED', { BAKE_TELEMETRY_DISABLED: '1' })).toBe('1')
+    expect(readBakeEnv('TELEMETRY_DISABLED', { BAKE_TELEMETRY_DISABLED: '1', DSH_TELEMETRY_DISABLED: '' })).toBe('1')
   })
 
   it('joins child segments onto the resolved DSH_HOME', () => {

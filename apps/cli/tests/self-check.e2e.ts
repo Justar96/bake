@@ -49,7 +49,7 @@ async function release(missing?: string): Promise<string> {
   const link = async (name: string): Promise<void> => {
     if (name === missing) return
     const target = join(modules, name)
-    if (name === '@dsh-tui/app') {
+    if (name === 'bake-tui-app') {
       const app = join(repoRoot, 'apps/tui/packages/app')
       await mkdir(target, { recursive: true })
       for (const entry of ['package.json', 'cordis.built.patch.yml', 'lib']) await cp(join(app, entry), join(target, entry), { recursive: true })

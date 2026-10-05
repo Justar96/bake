@@ -25,7 +25,7 @@ interface DemoPolicy {
 
 /** The public product launcher is the only package bin. */
 const MANIFEST_BIN_ALLOWLIST = new Map<string, ManifestBin>([
-  ['apps/cli/package.json', { dsh: 'lib/bin.js' }],
+  ['apps/cli/package.json', { bake: 'lib/bin.js', dsh: 'lib/bin.js' }],
 ])
 
 /** Every JavaScript executable in an application or packaging workspace has one explicit role. */

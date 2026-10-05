@@ -48,10 +48,10 @@ describe('initializeProfileFromDefault', () => {
         const dir = resolveProfileDir('custom', home)
         const manifest = readProfileManifest('test', dir)
         expect(manifest).toEqual({
-          name: 'dsh-profile-custom',
+          name: 'bake-profile-custom',
           private: true,
           dependencies: {},
-          dsh: { profile: { bundles: [...template.bundles] } },
+          bake: { profile: { bundles: [...template.bundles] } },
         })
         expect(readFileSync(join(dir, PROFILE_PATCH_FILENAME), 'utf8')).toContain('[]')
         expect(readFileSync(join(dir, 'pnpm-workspace.yaml'), 'utf8')).toContain('nodeLinker: hoisted')
@@ -73,7 +73,7 @@ describe('initializeProfileFromDefault', () => {
       const targetDir = resolveProfileDir('rescue', home)
       const target = readProfileManifest('test', targetDir)
       expect(target.dependencies).toEqual({})
-      expect(target.dsh?.profile).toEqual({
+      expect(target.bake?.profile).toEqual({
         bundles: [...PROFILE_TEMPLATES.tui!.bundles],
       })
       expect(readFileSync(join(targetDir, PROFILE_PATCH_FILENAME), 'utf8')).not.toContain('local-only')
@@ -147,7 +147,7 @@ describe('initializeProfileFromDefault', () => {
       writeFileSync(gate, '')
       const results = await Promise.all(children)
       expect(results.map(result => result.exitCode).sort()).toEqual([0, 1])
-      expect(readProfileManifest('test', resolveProfileDir('rescue', home)).dsh?.profile)
+      expect(readProfileManifest('test', resolveProfileDir('rescue', home)).bake?.profile)
         .toEqual(PROFILE_TEMPLATES.tui)
     } finally {
       for (const child of children) child.kill('SIGKILL')

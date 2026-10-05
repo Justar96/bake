@@ -76,7 +76,7 @@ export async function bootProductionProfile(options: ProductionProfileOptions): 
       throw new Error(`${options.binName}: test overlay path must end in .patch.yml: ${path}`)
     }
   }
-  const profile = loadProfile(options.binName, options.profile, installAnchor, undefined, { userLayer: false })
+  const profile = await loadProfile(options.binName, options.profile, installAnchor, undefined, { userLayer: false })
   const rootConfig = join(profile.dir, 'cordis.yml')
   await writeFile(rootConfig, '[]\n')
 

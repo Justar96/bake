@@ -37,7 +37,7 @@ export interface HeadlessStartupValues {
  */
 function headlessCommand(): Command {
   return new Command()
-    .name('dsh --profile headless')
+    .name('bake --profile headless')
     .description('Answer one task and exit; the answer goes to stdout and diagnostics to stderr.')
     .helpOption('-h, --help', 'show this help')
     .option('--json', 'write newline-delimited run events to stdout instead of the final message')
@@ -47,10 +47,10 @@ function headlessCommand(): Command {
     .argument('[task...]', 'the task text; multiple words are joined by spaces, and `-` reads stdin')
     .addHelpText('after', `
 Examples:
-  dsh --profile headless "run the tests"          answer one task and exit
-  echo "run the tests" | dsh --profile headless   read the task from stdin
-  dsh --profile headless --json "run the tests"   emit machine-readable run events
-  dsh --profile headless --resume session-… "continue"   resume an existing Session
+  bake --profile headless "run the tests"         answer one task and exit
+  echo "run the tests" | bake --profile headless  read the task from stdin
+  bake --profile headless --json "run the tests"  emit machine-readable run events
+  bake --profile headless --resume session-… "continue"  resume an existing Session
 `)
 }
 
@@ -101,11 +101,11 @@ export function apply(ctx: Context): void {
     }
     const joined = program.args.join(' ')
     if (program.args.length > 0 && joined.trim() === '') {
-      program.error('error: a task is required, for example: dsh --profile headless "run the tests"')
+      program.error('error: a task is required, for example: bake --profile headless "run the tests"')
     }
     const task = program.args.length === 0 ? undefined : joined
     if (task === undefined && internals.stdinIsTty()) {
-      program.error('error: a task is required, for example: dsh --profile headless "run the tests"')
+      program.error('error: a task is required, for example: bake --profile headless "run the tests"')
     }
     const options = program.opts<{ json?: boolean; resume?: string; sessionId?: string }>()
     if (options.resume !== undefined && options.sessionId !== undefined) {

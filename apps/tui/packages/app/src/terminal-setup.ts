@@ -12,16 +12,16 @@
  * and the edits are in `terminal-bindings.ts`; this module reads, asks, and
  * writes.
  *
- * @module @dsh-tui/app/terminal-setup
+ * @module bake-tui-app/terminal-setup
  */
 import { constants } from 'node:fs'
 import { copyFile, readFile, realpath, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { writeFileAtomic } from 'bake-atomic-write'
 import type { CommandResult } from 'bake-commands'
-import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
-import type { ChoicePrompt } from '@dsh-tui/ui/picker.tsx'
-import { compactPath } from '@dsh-tui/ui/present.ts'
+import type { TuiCopy } from 'bake-tui-ui/copy.ts'
+import type { ChoicePrompt } from 'bake-tui-ui/picker.tsx'
+import { compactPath } from 'bake-tui-ui/present.ts'
 import {
   configFiles, detectTerminal, editConfig, EDITORS, findBinding, MANUAL_SNIPPETS, TERMINAL_NAMES,
   type Format, type Found, type Place, type TerminalId,

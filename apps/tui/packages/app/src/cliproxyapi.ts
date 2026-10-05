@@ -4,7 +4,7 @@ import { credentialRef } from 'bake-credentials'
 import { normalizeApiKey } from 'bake-llm'
 import type {} from 'bake-settings'
 import type {} from 'bake-agent-default-model'
-import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
+import type { TuiCopy } from 'bake-tui-ui/copy.ts'
 import type { LoginPrompt } from './login.ts'
 
 export const CLIPROXYAPI_ID = 'cliproxyapi'

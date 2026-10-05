@@ -11,7 +11,7 @@
  * place and gives way at its own rank ({@link RANK}), whole or to a shorter
  * complete reading, never cut mid-number.
  *
- * @module @dsh-tui/ui/status-line
+ * @module bake-tui-ui/status-line
  */
 
 import stringWidth from 'string-width'

@@ -1,8 +1,8 @@
 /** Cancellable path discovery delegated to the session's Harness provider. */
 import type { Agent } from 'bake-agent'
 import type {} from 'bake-file-reference'
-import type { FileCatalog } from '@dsh-tui/ui/completion.ts'
-import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
+import type { FileCatalog } from 'bake-tui-ui/completion.ts'
+import type { TuiCopy } from 'bake-tui-ui/copy.ts'
 
 /** One terminal's active file query; discovery never changes the session log. */
 export class FileReferences {

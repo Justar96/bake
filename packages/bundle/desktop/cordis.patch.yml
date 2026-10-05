@@ -18,7 +18,7 @@
 
 - id: tools
   config:
-    mode: !!js process.env.DSH_TOOLS_MODE
+    mode: !!js "(process.env.BAKE_TOOLS_MODE?.trim() ? process.env.BAKE_TOOLS_MODE : process.env.DSH_TOOLS_MODE)"
 
 - insert:
     - id: desktop-bridge

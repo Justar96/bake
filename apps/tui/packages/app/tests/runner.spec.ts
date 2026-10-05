@@ -110,7 +110,7 @@ it.each(['stdin', 'stdout'])('refuses piped %s before acquiring terminal modes',
   expect(input.isRaw).toBe(false)
   expect(output.frames).toEqual([])
   // The plugin entry exits without a message of its own, so the refusal says why.
-  expect(error.text).toBe('dsh: tui needs an interactive terminal; use dsh --profile headless for scripted runs\n')
+  expect(error.text).toBe('dsh: tui needs an interactive terminal; use bake --profile headless for scripted runs\n')
 })
 
 it('stops waiting for the plugin tree when disposed during startup', async () => {
