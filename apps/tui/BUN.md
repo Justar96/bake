@@ -21,7 +21,7 @@ CI reads the Bun pin from `package.json`. Workspace checks reject unpinned versi
 
 ## Shared production build
 
-[`scripts/build.ts`](scripts/build.ts) owns the app, recorder, and diagnostic bundling options. It inlines `@dsh-tui/ui` and keeps `@deepseek-ai/*`, Ink, React, and Commander external, preserving host singleton identity. Production bundles compile with production JSX and minification. The dispatcher supplies `NODE_ENV=production` to built app, recorder, and PTY launches so external React and Ink use the same mode.
+[`scripts/build.ts`](scripts/build.ts) owns the app, recorder, and diagnostic bundling options. It inlines `@dsh-tui/ui` and keeps `@deepseek-ai/*`, `bake-*`, Ink, React, Commander, and Shiki external, preserving host singleton identity. Production bundles compile with production JSX and minification. The dispatcher supplies `NODE_ENV=production` to built app, recorder, and PTY launches so external React and Ink use the same mode.
 
 ```sh
 bun run build
