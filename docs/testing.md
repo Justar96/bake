@@ -26,7 +26,7 @@ Two expected-output suites pin what each shipped composition sends on its first 
 | Suite | Compositions | Snapshots | Gate |
 |---|---|---|---|
 | [`apps/cli/tests/profiles/model-surface.expected.e2e.ts`](../apps/cli/tests/profiles/model-surface.expected.e2e.ts) | `headless` and `desktop`, launched from the built CLI | `apps/cli/tests/profiles/expected/model-surface/` | `integration` |
-| [`apps/tui/packages/app/tests/model-surface.spec.ts`](../apps/tui/packages/app/tests/model-surface.spec.ts) | the terminal profile with each preset: `standard`, `ptc`, `cordis`, `minimal` | `apps/tui/packages/app/tests/expected/model-surface/` | `tui-spec` |
+| [`apps/tui/packages/app/tests/model-surface.spec.ts`](../apps/tui/packages/app/tests/model-surface.spec.ts) | the terminal profile with each shipped preset: `standard`, `ptc`, `minimal`, and the Cordis plugin-management preset | `apps/tui/packages/app/tests/expected/model-surface/` | `tui-spec` |
 
 Both drive the real composition to its first request through a keyless adapter, so no test code assembles a prompt. They plant a fixed workspace (an `AGENTS.md`, one skill, and a `.git` boundary) and replace the workspace, homes, temporary directory, model id, and dates with placeholders such as `<cwd>` and `<model>`. The snapshots record the provider-neutral request every adapter receives, not one provider's wire body. Windows ships `pwsh` instead of `bash`, so the cases skip there.
 

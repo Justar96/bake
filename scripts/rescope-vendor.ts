@@ -99,13 +99,11 @@ const GENERIC_SKIPS: readonly GenericSkip[] = [
   { file: 'apps/cli/tests/windows-shell.spec.ts', upstream: ['cordis'] },
   // Opens a session under the `cordis` preset id, which the scoped name would not select.
   { file: 'apps/tui/packages/app/tests/host-plane.spec.ts', upstream: ['cordis'] },
-  // The model-surface helper and spec open each shipped preset by id, the
-  // snapshot pins the `cordis` preset's own prompt verbatim, and the testing
-  // policy lists the presets the snapshots cover.
+  // The model-surface helper and spec open each shipped preset by id, and the
+  // snapshot pins the `cordis` preset's own prompt verbatim.
   { file: 'apps/tui/packages/app/tests/composed-profile.ts', upstream: ['cordis'] },
   { file: 'apps/tui/packages/app/tests/model-surface.spec.ts', upstream: ['cordis'] },
   { file: 'apps/tui/packages/app/tests/expected/model-surface/cordis.md', upstream: ['cordis'] },
-  { file: 'docs/testing.md', upstream: ['cordis'] },
   // GROUP_ORDER holds `packages/<group>/` directory names, not package names.
   { file: 'scripts/gen-module-graph.ts', upstream: ['cordis'] },
   { file: 'scripts/gen-doc-graphs.ts', upstream: ['cordis'] },
