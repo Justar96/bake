@@ -52,6 +52,11 @@ export interface AppProps {
    * which a fast spin accelerates. Read by {@link WheelSteps} with `clock`.
    */
   readonly wheelReports?: WheelReports
+  /**
+   * Put text selected in fullscreen on the clipboard, resolving whether it got
+   * there. Absent, a selection is drawn but not copied.
+   */
+  readonly onCopy?: (text: string) => Promise<boolean>
   /** Suppress composer edits while the application prepares a session handoff. */
   readonly inputBlocked?: boolean
   readonly attachments?: readonly AttachmentSummary[]
@@ -328,6 +333,8 @@ const MOUSE_REPORT = /^\[<(\d+);(\d+);(\d+)([Mm])$/
 const MOUSE_MODIFIERS = 4 | 8 | 16
 /** The Meta bit, which terminals set for Alt. */
 const MOUSE_ALT = 8
+/** The bit a report sets while a held button moves, under button-motion tracking. */
+const MOUSE_MOTION = 32
 const WHEEL_UP = 64
 const WHEEL_DOWN = 65
 
@@ -435,11 +442,15 @@ function SessionView(props: AppProps): React.ReactElement {
   // A wheel scrolls what the arrows would: an open sheet, else the transcript,
   // which it also scrolls under an interaction, since the wheel takes none of
   // an interaction's keys. Alt moves five times as far. A click on the draft
-  // puts the caret there; elsewhere it only reaches the jump-to-latest row.
+  // puts the caret there; elsewhere a press, drag, and release select the
+  // transcript's text, and a press reaches the jump-to-latest row.
   const pointer = (code: number, column: number, row: number, pressed: boolean): void => {
-    const button = code & ~MOUSE_MODIFIERS
+    const button = code & ~MOUSE_MODIFIERS & ~MOUSE_MOTION
     const sheetOpen = sheetRef.current !== undefined
-    if (button === WHEEL_UP || button === WHEEL_DOWN) {
+    if (button === 0 && (code & MOUSE_MOTION) !== 0) {
+      if (pressed) scroll.current?.pointer('drag', column, row)
+    } else if (button === 0 && !pressed) scroll.current?.pointer('release', column, row)
+    else if (button === WHEEL_UP || button === WHEEL_DOWN) {
       const direction = button === WHEEL_UP ? -1 : 1
       const rows = direction * wheel.rows(direction, props.clock?.now()) * ((code & MOUSE_ALT) === 0 ? 1 : ALT_WHEEL_FACTOR)
       if (sheetOpen) {
@@ -449,7 +460,7 @@ function SessionView(props: AppProps): React.ReactElement {
     } else if (button === 0 && pressed && !sheetOpen && interaction === undefined) {
       const editable = props.inputBlocked !== true && props.inspection === undefined && !composer.blocked
       const offset = editable ? draftPointer.current?.locate(column, row) : undefined
-      if (offset === undefined) { scroll.current?.press(row); return }
+      if (offset === undefined) { scroll.current?.pointer('press', column, row); return }
       focusOn(undefined)
       composer.place(offset)
     }
@@ -523,6 +534,8 @@ function SessionView(props: AppProps): React.ReactElement {
     const newline = isNewline(text, key)
     if (key.escape) {
       if (focusRef.current !== undefined) { focusOn(undefined); return }
+      // A selection is dropped before Escape reaches the menu or the turn.
+      if (fullscreen && scroll.current?.deselect() === true) return
       if (choices !== undefined) { updateMenu('', true); return }
       props.onCancel(); return
     }
@@ -955,7 +968,8 @@ function SessionView(props: AppProps): React.ReactElement {
         </>
   return <Beat clock={clock}>{fullscreen
     ? <React.Suspense fallback={controlsView}><Fullscreen ref={scroll} transcript={props.committed} live={props.live} heading={heading} opening={opening}
-        budget={budget} result={result} copy={copy} frame={props.frame} size={size} clock={animate}>{controlsView}</Fullscreen></React.Suspense>
+        budget={budget} result={result} copy={copy} frame={props.frame} size={size} clock={animate}
+        timers={clock} onCopy={props.onCopy}>{controlsView}</Fullscreen></React.Suspense>
     : <Scrollback transcript={props.committed} heading={heading} opening={opening} budget={budget} result={result}
         copy={copy} frame={props.frame} size={size} repainting={repainting}>{controlsView}</Scrollback>}
   </Beat>

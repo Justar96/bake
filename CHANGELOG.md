@@ -7,6 +7,7 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 - A `bash` or `pwsh` call's command is coloured as shell or PowerShell, on the call's head and on any lines under it, so a multi-line command such as `python3 -c "…"` reads apart from the output that follows. A failed call in a step gives up the colour so its head reads wholly red.
 - In a step of several calls, a call that finished cleanly under the step's own icon no longer repeats that icon past its branch; running, failed, and other kinds of call keep theirs. The cell stays blank, so names do not shift as calls finish.
 - Fullscreen's hint row sits at the right edge while following output, apart from the transcript, with each key at full brightness and what it does dimmed.
+- Fullscreen selects and copies text with the mouse. Drag across the transcript to select it, double-click a word (a path or hyphenated name whole), or triple-click a row; the selection is drawn in reverse video and copied on release, each row trimmed at its end, and the hint row says `Copied` or `Copy failed`. A drag held on the top or bottom row scrolls on, Escape clears the selection, and the selection stays on its text while output arrives. Bake copies with `pbcopy`, `clip`, `wl-copy`, `xclip`, or `xsel`, and through the terminal with OSC 52 over SSH, under Windows Terminal in WSL, or when no tool works. Shift-drag, or Option-drag on macOS, still selects with the terminal itself.
 
 ## [0.3.7] - 2026-10-04
 

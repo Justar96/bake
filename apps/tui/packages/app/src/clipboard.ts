@@ -1,5 +1,5 @@
-/** Read an image from the system clipboard through the platform's own clipboard tools. */
-import { execFile } from 'node:child_process'
+/** Read an image from, and write text to, the system clipboard through the platform's own clipboard tools. */
+import { execFile, spawn } from 'node:child_process'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -95,4 +95,82 @@ export async function readClipboardImage(signal: AbortSignal, options: {
     return type === undefined ? undefined
       : nonEmpty(await exec('xclip', ['-selection', 'clipboard', '-t', type, '-o'], signal), type)
   })
+}
+
+/**
+ * Run one program with input on its standard input.
+ * @param file - program name, looked up on PATH.
+ * @param args - its arguments.
+ * @param input - written to the program, then closed.
+ * @returns settles when the program exits; rejects when it is missing or fails.
+ */
+export type FeedProgram = (file: string, args: readonly string[], input: Uint8Array) => Promise<void>
+
+/** Longest a clipboard tool may take; one that hangs reads as failed. */
+const FEED_MS = 5_000
+
+const feed: FeedProgram = (file, args, input) => new Promise((resolve, reject) => {
+  const child = spawn(file, [...args], { stdio: ['pipe', 'ignore', 'ignore'], windowsHide: true, timeout: FEED_MS })
+  child.once('error', reject)
+  child.once('close', code => { if (code === 0) resolve(); else reject(new Error(`${file} exited with ${String(code)}`)) })
+  child.stdin.once('error', () => {})
+  child.stdin.end(input)
+})
+
+/**
+ * The OSC 52 sequence that asks the terminal itself to set its clipboard,
+ * which reaches the local clipboard over SSH and inside multiplexers that
+ * forward it.
+ * @param text - the text to copy.
+ * @returns the escape sequence, written through the renderer's stream.
+ */
+export const osc52 = (text: string): string => `\u001B]52;c;${Buffer.from(text, 'utf8').toString('base64')}\u0007`
+
+/** `clip` reads UTF-16 when the input starts with its byte order mark, and the console code page otherwise. */
+const utf16 = (text: string): Uint8Array => Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(text, 'utf16le')])
+
+/**
+ * Put text on the clipboard.
+ *
+ * Over SSH the terminal's own clipboard is the user's, so OSC 52 goes first.
+ * Otherwise macOS uses `pbcopy`, Windows `clip`, Wayland `wl-copy`, and X11
+ * `xclip` then `xsel`. WSL uses OSC 52 under Windows Terminal, which honours
+ * it, and `clip.exe` elsewhere. When no tool succeeds, OSC 52 is the last
+ * resort; a terminal that ignores it gives no sign, so it counts as copied.
+ *
+ * @param text - the text to copy.
+ * @param terminal - writes an escape sequence to the terminal, or absent where there is none.
+ * @param options - the platform, environment, and program runner; this process's by default.
+ * @returns whether the text was handed to a clipboard.
+ */
+export async function writeClipboardText(text: string, terminal: ((sequence: string) => void) | undefined, options: {
+  readonly platform?: NodeJS.Platform
+  readonly env?: NodeJS.ProcessEnv
+  readonly feed?: FeedProgram
+} = {}): Promise<boolean> {
+  const platform = options.platform ?? process.platform
+  const env = options.env ?? process.env
+  const exec = options.feed ?? feed
+  const set = (name: string): boolean => (env[name] ?? '') !== ''
+  const terminalCopy = (): boolean => {
+    if (terminal === undefined) return false
+    terminal(osc52(text))
+    return true
+  }
+  if (set('SSH_TTY') || set('SSH_CONNECTION')) return terminalCopy()
+  const utf8 = new TextEncoder().encode(text)
+  const tools: [string, readonly string[], Uint8Array][] = platform === 'darwin' ? [['pbcopy', [], utf8]]
+    : platform === 'win32' ? [['clip', [], utf16(text)]]
+      : set('WSL_DISTRO_NAME') ? set('WT_SESSION') ? [] : [['clip.exe', [], utf16(text)]]
+        : [
+            ...set('WAYLAND_DISPLAY') ? [['wl-copy', [], utf8] as [string, readonly string[], Uint8Array]] : [],
+            ['xclip', ['-selection', 'clipboard'], utf8], ['xsel', ['--clipboard', '--input'], utf8],
+          ]
+  for (const [file, args, input] of tools) {
+    try {
+      await exec(file, args, input)
+      return true
+    } catch { /* The next tool, then OSC 52. */ }
+  }
+  return terminalCopy()
 }
