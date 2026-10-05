@@ -1,5 +1,5 @@
 
-<ESC>[38;2;239;68;68m●<ESC>[39m <ESC>[1mBash<ESC>[22m(sed -i 's/= 3/= 5/' a.js && cp t b.js && node t.cjs)<ESC>[38;2;34;197;94m  +2<ESC>[39m <ESC>[38;2;239;68;68m−1  exit 1<ESC>[39m
+<ESC>[38;2;239;68;68m●<ESC>[39m <ESC>[1mBash<ESC>[22m(<ESC>[38;2;38;139;210msed<ESC>[39m <ESC>[38;2;203;75;22m-i<ESC>[39m <ESC>[38;2;42;161;152m's/= 3/= 5/'<ESC>[39m <ESC>[38;2;42;161;152ma.js<ESC>[39m && <ESC>[38;2;38;139;210mcp<ESC>[39m <ESC>[38;2;42;161;152mt<ESC>[39m <ESC>[38;2;42;161;152mb.js<ESC>[39m && <ESC>[38;2;38;139;210mnode<ESC>[39m <ESC>[38;2;42;161;152mt.cjs<ESC>[39m)<ESC>[38;2;34;197;94m  +2<ESC>[39m <ESC>[38;2;239;68;68m−1  exit 1<ESC>[39m
 <ESC>[38;2;239;68;68m <ESC>[39m <ESC>[2m⎿<ESC>[22m      <ESC>[38;2;239;68;68mTAP version 13<ESC>[39m
 <ESC>[38;2;239;68;68m <ESC>[39m        <ESC>[38;2;239;68;68mnot ok 1 - retries<ESC>[39m
 <ESC>[38;2;239;68;68m <ESC>[39m        <ESC>[38;2;239;68;68m+5 more lines<ESC>[39m
@@ -11,7 +11,7 @@
   <ESC>[1medited<ESC>[22m <ESC>[38;2;96;165;250mb.js<ESC>[38;2;180;184;191m<ESC>[2m  new<ESC>[22m<ESC>[39m
 <ESC>[38;2;34;197;94m <ESC>[39m <ESC>[38;2;34;197;94m     1 + <ESC>[38;2;133;153;0mmodule<ESC>[38;2;34;197;94m.<ESC>[38;2;133;153;0mexports<ESC>[38;2;34;197;94m <ESC>[38;2;133;153;0m=<ESC>[38;2;34;197;94m {}<ESC>[39m
 
-<ESC>[1m<ESC>[38;2;34;197;94m●<ESC>[39m<ESC>[22m <ESC>[1mBash<ESC>[22m(python3 rewrite.py)<ESC>[38;2;239;68;68m  −2<ESC>[39m
+<ESC>[1m<ESC>[38;2;34;197;94m●<ESC>[39m<ESC>[22m <ESC>[1mBash<ESC>[22m(<ESC>[38;2;38;139;210mpython3<ESC>[39m <ESC>[38;2;42;161;152mrewrite.py<ESC>[39m)<ESC>[38;2;239;68;68m  −2<ESC>[39m
   <ESC>[1medited<ESC>[22m <ESC>[38;2;96;165;250mlogo.png<ESC>[38;2;180;184;191m<ESC>[2m  binary<ESC>[22m<ESC>[39m
   <ESC>[1medited<ESC>[22m <ESC>[38;2;96;165;250mdocs/new-name.md<ESC>[38;2;180;184;191m<ESC>[2m  renamed from docs/old-name.md<ESC>[22m<ESC>[39m
   <ESC>[1medited<ESC>[22m <ESC>[38;2;96;165;250mgen/schema.json<ESC>[38;2;180;184;191m<ESC>[2m  too large<ESC>[22m<ESC>[39m
@@ -20,7 +20,7 @@
 <ESC>[38;2;239;68;68m <ESC>[39m <ESC>[38;2;239;68;68m     2 - second<ESC>[39m
          <ESC>[2mmay include other activity<ESC>[22m
 
-<ESC>[1m<ESC>[38;2;34;197;94m●<ESC>[39m<ESC>[22m <ESC>[1mBash<ESC>[22m(npm run format)<ESC>[38;2;34;197;94m  +7<ESC>[39m <ESC>[38;2;239;68;68m−7<ESC>[39m
+<ESC>[1m<ESC>[38;2;34;197;94m●<ESC>[39m<ESC>[22m <ESC>[1mBash<ESC>[22m(<ESC>[38;2;38;139;210mnpm<ESC>[39m <ESC>[38;2;42;161;152mrun<ESC>[39m <ESC>[38;2;42;161;152mformat<ESC>[39m)<ESC>[38;2;34;197;94m  +7<ESC>[39m <ESC>[38;2;239;68;68m−7<ESC>[39m
   <ESC>[2m⎿<ESC>[22m      <ESC>[38;2;180;184;191mformatted 9 files<ESC>[39m
   <ESC>[1medited<ESC>[22m <ESC>[38;2;96;165;250msrc/f0.ts<ESC>[39m
 <ESC>[38;2;239;68;68m <ESC>[39m <ESC>[38;2;239;68;68m     1 - let <ESC>[38;2;38;139;210mv0<ESC>[38;2;239;68;68m <ESC>[38;2;133;153;0m=<ESC>[38;2;239;68;68m <ESC>[7m1<ESC>[39m<ESC>[27m
@@ -31,7 +31,7 @@
          <ESC>[2m+7 more files<ESC>[22m
          <ESC>[2mmay be incomplete<ESC>[22m
 
-<ESC>[1m<ESC>[38;2;34;197;94m●<ESC>[39m<ESC>[22m <ESC>[1mBash<ESC>[22m(printf ...)<ESC>[38;2;34;197;94m  +2<ESC>[39m <ESC>[38;2;239;68;68m−1<ESC>[39m
+<ESC>[1m<ESC>[38;2;34;197;94m●<ESC>[39m<ESC>[22m <ESC>[1mBash<ESC>[22m(<ESC>[38;2;38;139;210mprintf<ESC>[39m <ESC>[38;2;42;161;152m...<ESC>[39m)<ESC>[38;2;34;197;94m  +2<ESC>[39m <ESC>[38;2;239;68;68m−1<ESC>[39m
   <ESC>[1medited<ESC>[22m <ESC>[38;2;96;165;250mraw.txt<ESC>[39m
 <ESC>[38;2;239;68;68m <ESC>[39m <ESC>[38;2;239;68;68m     1 - level    <ESC>[7mone<ESC>[27m of the config<ESC>[39m
 <ESC>[38;2;34;197;94m <ESC>[39m <ESC>[38;2;34;197;94m     1 + level    <ESC>[7mtwo<ESC>[27m of the config<ESC>[39m

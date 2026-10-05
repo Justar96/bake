@@ -129,11 +129,11 @@ it('draws a step\'s tree dim and uncoloured, badges each call with its state, an
     expect(frame, glyph).toContain(`\u001b[2m${glyph}`)
     expect(frame, glyph).not.toMatch(new RegExp(`\\u001b\\[38;2;[0-9;]*m(?:\\u001b\\[[0-9;]*m)*${glyph}`))
   }
-  // Past the quiet branch, each call keeps its own marker as a badge in its outcome's colour.
-  // The failed call reads as failed in its head too: its name bold and red, its argument red.
+  // Past the quiet branch, a failed call keeps its marker as a badge in the failed colour.
+  // It reads as failed in its head too: its name bold and red, its argument red.
   expect(frame).toContain(`\u001b[2m\u2514\u001b[22m ${rgb(PALETTE.failed)}${ICON.other}\u001b[39m \u001b[1m${rgb(PALETTE.failed)}Bash\u001b[22m(false)\u001b[39m`)
-  // The call that finished well has a green badge, and its head stays plain.
-  expect(frame).toContain(`\u001b[2m\u251c\u001b[22m \u001b[1m${rgb(PALETTE.done)}${ICON.other}\u001b[39m\u001b[22m \u001b[1mBash\u001b[22m(make)`)
+  // The call that finished well under the head's own icon leaves its badge cell blank, and its head stays plain.
+  expect(frame).toContain(`\u001b[2m\u251c\u001b[22m \u001b[2m \u001b[22m \u001b[1mBash\u001b[22m(make)`)
 })
 
 it('colours the running header\'s word, leaves the rule bare, and keeps the status line neutral until a reading needs attention', () => {

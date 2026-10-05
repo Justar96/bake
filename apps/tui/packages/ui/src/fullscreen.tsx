@@ -122,14 +122,32 @@ export function Fullscreen({ transcript, live, heading, opening, budget, result,
               window={{ offset: item.offset, height: item.height }} />)}
       </Box>
       {hint > 0 && (position === undefined
-        ? <Text dimColor wrap="truncate-end">{copy.transcriptScroll}</Text>
+        // Set to the right, apart from the transcript's left edge, so it does
+        // not read as the last line of output.
+        ? <Box justifyContent="flex-end" flexShrink={0}><Text wrap="truncate-end"><KeyHints text={copy.transcriptScroll} /></Text></Box>
         // The way back leads, so a narrow row truncates the keys instead. One
         // unpadded row: a full-width one would rewrap when the terminal narrows.
         : <Text wrap="truncate-end">
             <Text bold color={unseen ? PALETTE.waiting : PALETTE.asking}>{unseen ? copy.transcriptUnseen : copy.transcriptLatest}</Text>
-            <Text dimColor>{`  ${copy.transcriptPaused}`}</Text>
+            <Text>{'  '}</Text><KeyHints text={copy.transcriptPaused} />
           </Text>)}
     </Box>
     <Box flexDirection="column" flexShrink={0} maxHeight={size.rows} overflow="hidden">{children}</Box>
   </Box>
+}
+
+/**
+ * A `·`-separated hint line with each key at full brightness and what it does
+ * dimmed, so the keys stand out from their descriptions. A part's key is its
+ * first word; a part of one word is all description.
+ */
+function KeyHints({ text }: { readonly text: string }): React.ReactElement {
+  return <>{text.split(' \u00b7 ').map((part, index) => {
+    const space = part.indexOf(' ')
+    return <React.Fragment key={index}>
+      {index === 0 ? null : <Text dimColor>{' \u00b7 '}</Text>}
+      {space < 0 ? <Text dimColor>{part}</Text>
+        : <><Text>{part.slice(0, space)}</Text><Text dimColor>{part.slice(space)}</Text></>}
+    </React.Fragment>
+  })}</>
 }
