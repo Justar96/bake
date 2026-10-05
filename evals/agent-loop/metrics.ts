@@ -89,27 +89,76 @@ export function editCheckSplits(calls: readonly Call[], check: RegExp): number {
 const atRoot = (path: unknown, workspaces: readonly string[]) => path === undefined || path === null || path === ''
   || path === '.' || path === './' || workspaces.some(workspace => path === workspace || path === `${workspace}/`)
 
-/** Whether one shell command only orients: `pwd`, or `ls`, `tree`, or `find` at the workspace root. */
-function orientingCommand(command: string, workspaces: readonly string[]): boolean {
-  // A leading `cd` only picks the directory the listing runs in.
-  const segments = command.split(/&&|\|\||;|\|/).map(segment => segment.trim()).filter(segment => segment !== '' && !/^cd(\s|$)/.test(segment))
-  if (segments.length === 0) return false
-  const [first, ...rest] = segments[0]!.split(/\s+/)
+/** A shell command's words, with surrounding quotes stripped; enough for the simple commands these metrics classify. */
+const wordsOf = (segment: string) => segment.split(/\s+/).filter(Boolean).map(word => word.replace(/^(['"])(.*)\1$/, '$2'))
+/** A command's simple commands: split on `&&`, `||`, and `;`, each kept whole with its pipeline. */
+const commandsOf = (command: string) => command.split(/&&|\|\||;/).map(part => part.trim()).filter(Boolean)
+/** A leading `cd` only picks the directory the next command runs in. */
+const isCd = (segment: string) => /^cd(\s|$)/.test(segment)
+
+/** `find` options that filter by name or path, which make the call a search rather than a listing. */
+const FIND_FILTERS = new Set(['-name', '-iname', '-path', '-ipath', '-wholename', '-iwholename', '-regex', '-iregex'])
+
+/** Whether one pipeline stage only lists: `pwd`, or `ls`, `tree`, or an unfiltered `find`, at the workspace root. */
+function listingSegment(segment: string, workspaces: readonly string[]): boolean {
+  const [first, ...rest] = wordsOf(segment)
   const paths = rest.filter(word => !word.startsWith('-'))
   if (first === 'pwd') return true
   if (first === 'ls' || first === 'tree') return paths.length === 0 || paths.every(path => atRoot(path, workspaces))
-  if (first === 'find') return atRoot(paths[0], workspaces)
+  if (first === 'find') return !rest.some(word => FIND_FILTERS.has(word)) && atRoot(paths[0], workspaces)
   return false
 }
 
+/** Whether a shell command only orients: every stage other than a `cd` is a listing. */
+function orientingCommand(command: string, workspaces: readonly string[]): boolean {
+  const segments = command.split(/&&|\|\||;|\|/).map(segment => segment.trim()).filter(segment => segment !== '' && !isCd(segment))
+  return segments.length > 0 && segments.every(segment => listingSegment(segment, workspaces))
+}
+
 /**
- * Orientation calls: `pwd`, `ls`, or a `find` or `glob` at the workspace root,
- * made before the first `read` (or anywhere, when the sample never reads).
+ * Whether a shell command reads a file: `cat`, `head`, `tail`, `less`, or
+ * `sed -n` with a file operand, as the first stage of one of its pipelines.
+ * A later stage reads its input, not a file.
+ */
+export function readsFile(command: string): boolean {
+  return commandsOf(command).filter(part => !isCd(part)).some(part => {
+    const [first, ...rest] = wordsOf(part.split('|')[0]!)
+    const operands: string[] = []
+    for (let index = 0; index < rest.length; index++) {
+      const word = rest[index]!
+      // `head -n 5` and `tail -c 100` take a value that is not a file.
+      if ((first === 'head' || first === 'tail') && (word === '-n' || word === '-c')) { index++; continue }
+      if (word.startsWith('-') && word !== '-') continue
+      if (word.startsWith('>') || word.startsWith('<') || word === '2>&1') break
+      operands.push(word)
+    }
+    if (first === 'cat' || first === 'head' || first === 'tail' || first === 'less') return operands.some(word => word !== '-')
+    // `sed -n` takes its script first, so a file is a second operand.
+    if (first === 'sed') return rest.includes('-n') && operands.length >= 2
+    return false
+  })
+}
+
+/** Whether a glob pattern lists rather than searches: `*` or `**`, or `*` or `*.ext` under an optional `**` directory prefix, with no name stem. */
+export const isBareGlob = (pattern: unknown) => typeof pattern === 'string'
+  && /^(?:\.\/)?(?:\*\*|(?:\*\*\/)?\*(?:\.(?:\w+|\{\w+(?:,\w+)*\}))?)$/.test(pattern)
+
+/** Whether a call reads a file: the `read` tool, or a shell command that prints one. */
+const isRead = (call: Call) => call.tool === 'read' || readsFile(commandOf(call))
+
+/**
+ * Orientation calls: `pwd`, `ls`, `tree`, or a `find` without a name or path
+ * filter, at the workspace root and alone in their command but for `cd`; an
+ * `ls` tool call at the root; or a `glob` at the root whose pattern names no
+ * file stem. Counted before the first read, by the `read` tool or a shell
+ * `cat`, `head`, `tail`, `less`, or `sed -n` (or anywhere, when the sample
+ * never reads).
  */
 export function orientationCalls(calls: readonly Call[], workspaces: readonly string[]): number {
-  const firstRead = calls.findIndex(call => call.tool === 'read')
+  const firstRead = calls.findIndex(isRead)
   return calls.slice(0, firstRead === -1 ? calls.length : firstRead).filter(call => {
-    if (call.tool === 'glob' || call.tool === 'ls') return atRoot(call.input?.path, workspaces)
+    if (call.tool === 'ls') return atRoot(call.input?.path, workspaces)
+    if (call.tool === 'glob') return atRoot(call.input?.path, workspaces) && isBareGlob(call.input?.pattern)
     const command = commandOf(call)
     return command !== '' && orientingCommand(command, workspaces)
   }).length
@@ -128,8 +177,10 @@ export function verifiedBeforeFinal(calls: readonly Call[], check: RegExp): bool
   return calls.some((call, index) => index >= lastEdit && isCheck(call, check))
 }
 
-/** Requests above the scenario's floor. */
-export const excessRequests = (requests: number, floor: number) => Math.max(0, requests - floor)
+/** Requests minus the scenario's floor, unclamped: a negative value means a sample beat the floor, so the floor is set too high. */
+export const requestsOverFloor = (requests: number, floor: number) => requests - floor
+/** Requests above the scenario's floor, never negative. */
+export const excessRequests = (requests: number, floor: number) => Math.max(0, requestsOverFloor(requests, floor))
 
 /** Shell calls started with `run_in_background`. */
 export const backgroundStarts = (calls: readonly Call[]) => calls.filter(call => SHELL_TOOLS.has(call.tool) && call.input?.run_in_background === true).length

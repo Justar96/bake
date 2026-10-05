@@ -32,11 +32,11 @@ import { reconcile } from './accounting.ts'
 import { compositionCheck, ROSTERS, rosterOverlay, systemPromptOf, systemPromptOverlay, type Roster } from './composition.ts'
 import {
   backgroundStarts, compactions, editCheckSplits, excessRequests, normalizeBake, normalizePi, orientationCalls, ranCheck,
-  routingDecisions, runawayAbort, shellEdits, verifiedBeforeFinal,
+  requestsOverFloor, routingDecisions, runawayAbort, shellEdits, verifiedBeforeFinal,
 } from './metrics.ts'
 import {
-  CASE_SETS, capMsFor, checkCommandFor, CONTEXT_WINDOWS, fixture, maxRequestsFor, prompts, REQUEST_FLOORS, requestCaps, requestFloorFor,
-  STANDARD_CASES, usesAgentInstructions, validate, wallClockCaps,
+  CASE_SETS, capMsFor, checkCommandFor, CONTEXT_WINDOWS, fixture, maxRequestsFor, piCompactionFor, prompts, REQUEST_FLOORS, requestCaps,
+  requestFloorFor, STANDARD_CASES, usesAgentInstructions, validate, wallClockCaps,
 } from './scenarios.ts'
 import { DEEPSEEK_ANTHROPIC_BASE_URL, deepseekProfile } from '../../packages/llm/llm-pi-ai/tests/deepseek-profile.ts'
 import { parseCredentialsDocument } from '../../packages/credentials/credentials-local/src/index.ts'
@@ -394,7 +394,10 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
         models: [contextWindow === undefined ? piRoute.model : { ...piRoute.model, contextWindow }],
       } } }), { mode: 0o600 })
       // Bake arms run with retries off; pi's agent-level retry would hide failed requests from the pair.
-      writeFileSync(join(agentDir, 'settings.json'), JSON.stringify({ quietStartup: true, retry: { enabled: false } }))
+      // A forced window also gets compaction settings that mirror Bake's policy at that window.
+      writeFileSync(join(agentDir, 'settings.json'), JSON.stringify({
+        quietStartup: true, retry: { enabled: false }, ...contextWindow === undefined ? {} : { compaction: piCompactionFor(contextWindow) },
+      }))
       writeFileSync(hookPath, `import { readFileSync, writeFileSync } from 'node:fs';\nimport { resolve } from 'node:path';\nexport default function (pi) {\n let changed = false;\n pi.on('tool_result', (event) => {\n if (event.toolName !== 'read' || event.isError || !(${target('event.input?.path')})) return;\n ${writeOnce}\n });\n}\n`)
       contextWindowApplied = contextWindow !== undefined
       Object.assign(env, { PI_CODING_AGENT_DIR: agentDir, PI_OFFLINE: '1', EVAL_API_KEY: credential(piRoute.keyName) })
@@ -449,7 +452,7 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
     let usageComplete = steps.length > 0 && steps.every(step => step.usage !== undefined)
     for (const step of steps) if (step.usage !== undefined) for (const key of Object.keys(usage)) usage[key as keyof typeof usage] += step.usage[key] ?? 0
     if (wire.some(request => request.status !== 200 || request.usage.length === 0)) usageComplete = false
-    const { validated, source, testsUnchanged, testExit } = validate(scenario, built, {
+    const { validated, source, testsUnchanged, testExit, fixturesUnchanged } = validate(scenario, built, {
       code, final, toolCalls: calls.length, subagentCalls: byTool.subagent ?? 0, injectionPath,
     })
     const check = checkCommandFor(scenario)
@@ -458,7 +461,7 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
     const toolErrors = results.filter(result => result.status === 'error').map(result => result.result)
     const summary = {
       label, model, provider: piRoute === undefined ? route.provider : 'eval', agent: arm.kind, api, effort: route.effort, scenario, trial, variant, code, signal, abortCause: abortCause ?? null,
-      success: code === 0 && validated, validated, testsUnchanged, testExit,
+      success: code === 0 && validated, validated, testsUnchanged, testExit, fixturesUnchanged,
       injectedStale: scenario === 'stale_edit' && existsSync(injectionPath),
       elapsedMs: Math.round(performance.now() - started), requests: wire.length, steps: steps.length,
       toolCalls: calls.length, byTool, toolErrors: toolErrors.length,
@@ -476,6 +479,7 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
       composition: arm.kind === 'pi' || systemPrompt === null ? null : compositionCheck(systemPrompt, workspaces),
       requestFloor: requestFloorFor(scenario),
       excessRequests: excessRequests(wire.length, requestFloorFor(scenario)),
+      requestsOverFloor: requestsOverFloor(wire.length, requestFloorFor(scenario)),
       editCheckSplits: editCheckSplits(calls, check),
       orientationCalls: orientationCalls(calls, workspaces),
       ranCheck: ranCheck(calls, check),
@@ -534,12 +538,14 @@ writeFileSync(join(out, 'design.json'), JSON.stringify({
   node: Bun.spawnSync(['node', '--version']).stdout.toString().trim(), models: routes.map(route => route.model), cases, trials, roster,
   routes: Object.fromEntries(routes.map(route => [route.model, { provider: route.provider, api: route.api, effort: route.effort }])),
   effort: 'medium where the model offers it; DeepSeek runs at high, its default, having no medium', maxOutputTokens: 8192, capMs: wallClockCaps().default, capMsByScenario: wallClockCaps(), maxRequests: requestCaps(), requestFloors: REQUEST_FLOORS, contextWindows: CONTEXT_WINDOWS, maxLogicalTokens,
+  // pi's compaction settings for each forced window, mirroring Bake's default threshold and retained tail; pi's defaults would compact before every request.
+  piCompaction: Object.fromEntries(Object.entries(CONTEXT_WINDOWS).map(([scenario, contextWindow]) => [scenario, piCompactionFor(contextWindow)])),
   retryPolicy: { mode: 'normal', maxRetries: 0 },
   gateway: override === undefined ? null : new URL(override.baseUrl).origin,
   composition: 'Built headless CLI with each revision\'s own headless system-prompt config (harness opener off, working-directory suffix) and its standard-preset persona prefix; host tools retained.'
     + (roster === 'tui' ? ' Roster tui: the standard preset\'s tool-fs, tool-fs-search, and tool-result-pruner configs and the terminal spill-policy inline cap; ask_user_question stays out, having no one to answer it headless.' : ' Roster headless: the headless bundle\'s own tool configs.')
     + ' Session title and ambient AGENTS disabled equally; instructions_file keeps agent-instructions for its own AGENTS.md.'
-    + (armNames.some(name => ARMS[name]!.kind === 'pi') ? ' A pi arm runs pi --mode json with its own system prompt and default tools, no session, extensions, skills, prompt templates, or context files, agent-level retry off, and pi\'s own wire for each model; it skips scenarios that need a Bake-only tool.' : ''),
+    + (armNames.some(name => ARMS[name]!.kind === 'pi') ? ' A pi arm runs pi --mode json with its own system prompt and default tools, no session, extensions, skills, prompt templates, or context files, agent-level retry off, and pi\'s own wire for each model; it skips scenarios that need a Bake-only tool. Where a scenario forces a context window, pi gets the same window and compaction settings that mirror Bake\'s policy at it (piCompaction).' : ''),
   cache: 'Fresh process/home/workspace/session per sample; provider cache is observed, not assumed cold. Pair order alternates by trial and scenario.',
   endpoint: 'Agent exits; external Node test passes without test modification; injected external comment is preserved.',
   tokenAccounting: 'Provider total_tokens is authoritative. Gemini via Responses may report reasoning outside output_tokens; recorded separately and reconciled against raw SSE. Anthropic-format totals, DeepSeek\'s included, are the sum of input, cache reads/writes, and output.',

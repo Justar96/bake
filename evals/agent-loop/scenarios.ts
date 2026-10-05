@@ -8,6 +8,7 @@
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
+import { COMPACTION_DEFAULTS } from '../../packages/compaction/compaction-basic/src/config.ts'
 
 /** The standard suite every recorded version runs; `duplicate_recovery` and the delegation cases are opt-in. */
 export const STANDARD_CASES = ['no_tools', 'ordinary_edit', 'path_discovery', 'stale_edit', 'unprompted_edit', 'multi_site_edit', 'multi_file_edit', 'shell_then_edit']
@@ -51,7 +52,7 @@ export const prompts: Record<string, string> = {
   background_test: 'Do two independent jobs. First start node slow-check.cjs in the background: it takes about 20 seconds, so do not wait for it idly. While it runs, ' + roundMoneyTask.replace('Fix', 'fix') + ' Run node test.cjs to verify that fix. Then collect the output of slow-check.cjs and quote the line it prints in your final answer. Work only inside this fixture. Do not delegate, install packages, use the network, modify test.cjs or slow-check.cjs, or make commits.',
   instructions_file: roundMoneyTask + ' Work only inside this fixture. Do not delegate, install packages, use the network, modify test.cjs or anything under scripts/, or make commits. Verify the change the way this project requires and give a brief final result.',
   edit_recovery: roundMoneyTask + ' truncateMoney must keep truncating.' + common,
-  long_session: 'This task has three steps; finish all of them. 1. Read notes/part-01.md through notes/part-10.md in full with the read tool, in order. Each holds one line that starts with "Checkpoint code:". 2. Write codes.txt in this directory with the ten codes in file order, one per line and nothing else. 3. ' + roundMoneyTask + ' Work only inside this fixture. Do not delegate, install packages, use the network, modify test.cjs, or make commits. Run node test.cjs to verify and give a brief final result.',
+  long_session: `This task has three steps; finish all of them. 1. Read ${noteNames()[0]} in full with the read tool. Each of the ten notes holds one line that starts with "Checkpoint code:" and ends by naming the next note; read them one at a time in that chain until a note says it is the last. 2. Write codes.txt in this directory with the ten codes in chain order, one per line and nothing else. 3. ` + roundMoneyTask + ' Work only inside this fixture. Do not delegate, install packages, use the network, modify test.cjs, or make commits. Run node test.cjs to verify and give a brief final result.',
 }
 
 /** Scenarios whose run needs more than the default 14 model requests. */
@@ -74,29 +75,32 @@ export const wallClockCaps = () => ({ default: 180_000, ...WALL_CLOCK_CAPS })
  * The fewest model requests a competent run of each scenario needs: one per
  * response that must see an earlier tool result, plus the final reply. A run
  * that batches independent calls as the persona asks reaches it;
- * `excessRequests` is what a sample made beyond it.
+ * `excessRequests` is what a sample made beyond it, and `requestsOverFloor`
+ * the same difference unclamped, so a floor set too high shows as a negative.
  */
 export const REQUEST_FLOORS: Record<string, number> = {
   no_tools: 1,
   ordinary_edit: 3, // read; edit with the test; final
   path_discovery: 4, // search; read; edit with the test; final
-  stale_edit: 4, // read; refused edit or re-read after the external write; edit with the test; final
+  stale_edit: 3, // read, after which the writer injects its comment; edit with the test; final
   unprompted_edit: 3,
   multi_site_edit: 3,
   multi_file_edit: 3, // both reads together; both edits with the test; final
-  shell_then_edit: 4, // read with the stamp; re-read the stamped file; edit with the test; final
+  shell_then_edit: 3, // read with the stamp; edit with the test; final
   delegation: 3, // subagent; write summary.txt; final
   delegation_auto: 3,
   duplicate_recovery: 5, // three scripted edits; read; edit with the test; final
   large_file_edit: 4, // search for the symbol; read its range; edit with the test; final
   explore_answer: 2, // search; final
-  test_fix_loop: 5, // read with the test; first fix with the test; read the second file; second fix with the test; final
+  test_fix_loop: 3, // both modules with the test; both fixes with the test; final
   unprompted_verify: 3,
   noisy_failure: 3, // test with the read of the module; edit with the test; final
   background_test: 4, // start the check with the read; edit with the test; collect the check; final
   instructions_file: 3,
   edit_recovery: 3,
-  long_session: 5, // the ten reads; codes.txt with the money read; edit with the test; final; plus one summary request
+  // Ten chained reads, the first with the money read and the second with the
+  // edit and its test; codes.txt; final; plus at least one summary request.
+  long_session: 13,
 }
 /** The request floor of a scenario; one with none declared has floor 1, so its excess is every request after the first. */
 export const requestFloorFor = (scenario: string) => REQUEST_FLOORS[scenario] ?? 1
@@ -104,12 +108,34 @@ export const requestFloorFor = (scenario: string) => REQUEST_FLOORS[scenario] ??
 /** Model context window forced onto the route for a scenario, so compaction runs inside the request cap. */
 export const CONTEXT_WINDOWS: Record<string, number> = { long_session: 16_000 }
 
+/**
+ * Bake's compaction policy at a context window: compaction-basic's default
+ * threshold, where condensing starts, and the recent tokens it keeps verbatim.
+ */
+export function compactionBudget(contextWindow: number) {
+  return {
+    thresholdTokens: Math.floor(contextWindow * COMPACTION_DEFAULTS.thresholdRatio),
+    retainTokens: Math.floor(contextWindow * COMPACTION_DEFAULTS.retainRatio),
+  }
+}
+/**
+ * pi's compaction settings for a forced context window, mirroring Bake's
+ * policy: pi compacts above `contextWindow - reserveTokens` and keeps
+ * `keepRecentTokens` verbatim. Its default reserve (16,384) exceeds a
+ * 16,000-token window, so without these it would compact before every request.
+ */
+export function piCompactionFor(contextWindow: number) {
+  const { thresholdTokens, retainTokens } = compactionBudget(contextWindow)
+  return { reserveTokens: contextWindow - thresholdTokens, keepRecentTokens: retainTokens }
+}
+
 /** Whether a scenario keeps `agent-instructions` mounted, so the agent reads the fixture's AGENTS.md. */
 export const usesAgentInstructions = (scenario: string) => scenario === 'instructions_file'
 
 /** The shell command that counts as running a scenario's check, for the verification metrics. */
 export function checkCommandFor(scenario: string): RegExp {
-  if (scenario === 'instructions_file') return /\bnode\s+(?:\.\/)?scripts\/check\.cjs\b/
+  // The project check counts only with `--all`, in the same command; without it the script exits before checking.
+  if (scenario === 'instructions_file') return /\bnode\s+(?:\.\/)?scripts\/check\.cjs\b[^\n;&|]*\s--all\b/
   return /\bnode\s+(?:\.\/)?test\.cjs\b/
 }
 
@@ -193,13 +219,42 @@ const twinTests = fixedTests('src/money.js').replace("console.log('FIXTURE_PASS'
 export function checkpointCodes(): string[] {
   return Array.from({ length: 10 }, (_, index) => 'CP-' + hash(`checkpoint-${index + 1}`).slice(0, 6).toUpperCase())
 }
-/** One note of about 5.7 KB, under the pruner's 8,192-character threshold, with its code mid-file. */
-function note(index: number, code: string): string {
+/**
+ * The path of each `long_session` note, in chain order. The names are hashed
+ * so the next one is known only from the note before it: a run reads one note
+ * per response instead of all ten in one batch.
+ */
+export function noteNames(): string[] {
+  return Array.from({ length: 10 }, (_, index) => `notes/ledger-${hash(`note-${index + 1}`).slice(0, 6)}.md`)
+}
+/**
+ * The token arithmetic `long_session` is sized by, at about four characters a
+ * token (the token meter's estimate) and Bake's default policy on the forced
+ * 16,000-token window: compaction starts at 12,800 tokens and keeps the newest
+ * 2,560 verbatim, and it never splits one response's tool calls from their
+ * results, so each response's reads are one indivisible batch.
+ *
+ * - The fixed prefix (system prompt, tool schemas, and the task) is about
+ *   4,500 tokens, and the route keeps an 8,192-token output cap.
+ * - Each note is about 4.4 KB, so one read (call, numbered lines, and framing)
+ *   is about 1,200 tokens. That is under the 2,560-token retained tail, so the
+ *   newest batch stays verbatim and the older ones form a region to summarize.
+ *   The prefix, one batch, and the output cap (4,500 + 1,200 + 8,192 = 13,892)
+ *   fit the window, and the largest request, one batch past the threshold
+ *   (12,800 + 1,200 = 14,000), still leaves room for a reply.
+ * - The ten batches total about 12,000 tokens, so the session reaches the
+ *   threshold around the seventh note (4,500 + 7 × 1,200 = 12,900) and
+ *   compacts at least once before the last.
+ */
+export const LONG_SESSION_BUDGET = { prefixTokens: 4_500, maxOutputTokens: 8_192, notes: 10 }
+/** One note of about 4.4 KB, under the pruner's 8,192-character threshold, with its code mid-file and the next note's path at the end. */
+function note(index: number, code: string, next: string | undefined): string {
   const paragraph = (n: number) => `Section ${index}.${n}. The ledger reconciler compares each batch against the upstream journal, marks drifted rows for review, and records the operator who cleared them. Batches older than the retention window are archived with their checksums so a later audit can replay them.\n\n`
   const lines = [`# Ledger notes, part ${String(index).padStart(2, '0')}\n\n`]
-  for (let n = 1; n <= 9; n++) lines.push(paragraph(n))
+  for (let n = 1; n <= 7; n++) lines.push(paragraph(n))
   lines.push(`Checkpoint code: ${code}\n\n`)
-  for (let n = 10; n <= 21; n++) lines.push(paragraph(n))
+  for (let n = 8; n <= 16; n++) lines.push(paragraph(n))
+  lines.push(next === undefined ? 'This is the last note.\n' : `Next note: ${next}\n`)
   return lines.join('')
 }
 
@@ -228,10 +283,24 @@ export function treeDigest(dir: string): string {
   return hash(entries.join('\n'))
 }
 
-/** A built fixture: its workspace, the file the scenario judges, and, for a read-only scenario, the digest it must keep. */
-export interface Fixture { workspace: string; file: string; digest?: string }
+/**
+ * A built fixture: its workspace, the file the scenario judges, for a
+ * read-only scenario the digest it must keep, and the hash of each fixture
+ * file the agent must not change, such as a check script the predicate trusts.
+ */
+export interface Fixture { workspace: string; file: string; digest?: string; protected?: Record<string, string> }
 /** Options a test passes to shorten a fixture; a live run uses the defaults. */
 export interface FixtureOptions { slowCheckMs?: number }
+
+/** The hash of each named workspace file, as it stands now. */
+function protect(workspace: string, paths: readonly string[]): Record<string, string> {
+  return Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(workspace, path), 'utf8'))]))
+}
+/** Whether every protected file still exists with the hash it had when the fixture was built; null when none is protected. */
+export function fixturesUnchanged(built: Fixture): boolean | null {
+  if (built.protected === undefined) return null
+  return Object.entries(built.protected).every(([path, digest]) => existsSync(join(built.workspace, path)) && hash(readFileSync(join(built.workspace, path), 'utf8')) === digest)
+}
 
 /** Build a scenario's workspace under `root`. */
 export function fixture(root: string, scenario: string, options: FixtureOptions = {}): Fixture {
@@ -254,18 +323,18 @@ export function fixture(root: string, scenario: string, options: FixtureOptions 
     case 'background_test':
       write('src/money.js', baseCode); write('test.cjs', fixedTests('src/money.js'))
       write('src/report.js', reportCode); write('slow-check.cjs', slowCheck(options.slowCheckMs ?? SLOW_CHECK_MS))
-      return { workspace, file: 'src/money.js' }
+      return { workspace, file: 'src/money.js', protected: protect(workspace, ['slow-check.cjs', 'src/report.js']) }
     case 'instructions_file':
       write('src/money.js', baseCode); write('test.cjs', fixedTests('src/money.js'))
       write('AGENTS.md', agentsFile); write('scripts/check.cjs', checkScript)
-      return { workspace, file: 'src/money.js' }
+      return { workspace, file: 'src/money.js', protected: protect(workspace, ['scripts/check.cjs', 'AGENTS.md']) }
     case 'edit_recovery':
       write('src/money.js', twinCode); write('test.cjs', twinTests)
       return { workspace, file: 'src/money.js' }
     case 'long_session':
       write('src/money.js', baseCode); write('test.cjs', fixedTests('src/money.js'))
-      checkpointCodes().forEach((code, index) => write(`notes/part-${String(index + 1).padStart(2, '0')}.md`, note(index + 1, code)))
-      return { workspace, file: 'src/money.js' }
+      checkpointCodes().forEach((code, index) => write(noteNames()[index]!, note(index + 1, code, noteNames()[index + 1])))
+      return { workspace, file: 'src/money.js', protected: protect(workspace, noteNames()) }
   }
   const file = scenario === 'path_discovery' ? 'packages/billing/money.js' : scenario === 'multi_site_edit' ? 'src/config.js' : 'src/money.js'
   if (scenario === 'multi_site_edit') {
@@ -302,6 +371,7 @@ export function fixture(root: string, scenario: string, options: FixtureOptions 
       }
     }
   }
+  if (scenario === 'shell_then_edit') return { workspace, file, protected: protect(workspace, ['scripts/stamp.cjs']) }
   return { workspace, file }
 }
 
@@ -318,35 +388,36 @@ export interface Outcome {
   /** The marker the stale writer leaves once it has injected its comment. */
   injectionPath: string
 }
-/** A scenario's verdict, and the file contents and test result it rests on. */
-export interface Verdict { validated: boolean; source: string; testsUnchanged: boolean | null; testExit: number | null }
+/** A scenario's verdict, and the file contents, test result, and protected-fixture check it rests on. */
+export interface Verdict { validated: boolean; source: string; testsUnchanged: boolean | null; testExit: number | null; fixturesUnchanged: boolean | null }
 
 /** Judge a finished sample against its fixture; the agent's exit code is checked by the caller, except where a predicate names it. */
 export function validate(scenario: string, built: Fixture, outcome: Outcome): Verdict {
   const { workspace, file } = built
   if (scenario === 'no_tools') {
-    return { validated: outcome.final.trim() === 'TOKEN_CONTROL_OK' && outcome.toolCalls === 0, source: '', testsUnchanged: null, testExit: null }
+    return { validated: outcome.final.trim() === 'TOKEN_CONTROL_OK' && outcome.toolCalls === 0, source: '', testsUnchanged: null, testExit: null, fixturesUnchanged: null }
   }
   if (scenario.startsWith('delegation')) {
     const source = existsSync(join(workspace, file)) ? readFileSync(join(workspace, file), 'utf8') : ''
     const validated = outcome.code === 0 && outcome.subagentCalls > 0
       && source.trim().split(/\r?\n/).map(line => line.trim()).join('\n') === `${DELEGATION_LINES.a}\n${DELEGATION_LINES.b}`
-    return { validated, source, testsUnchanged: null, testExit: null }
+    return { validated, source, testsUnchanged: null, testExit: null, fixturesUnchanged: null }
   }
   const source = existsSync(join(workspace, file)) ? readFileSync(join(workspace, file), 'utf8') : ''
   if (scenario === 'explore_answer') {
-    return { validated: outcome.final.trim() === EXPLORE_ANSWER && treeDigest(workspace) === built.digest, source, testsUnchanged: null, testExit: null }
+    return { validated: outcome.final.trim() === EXPLORE_ANSWER && treeDigest(workspace) === built.digest, source, testsUnchanged: null, testExit: null, fixturesUnchanged: null }
   }
   const testsUnchanged = existsSync(join(workspace, 'test.cjs')) && readFileSync(join(workspace, 'test.cjs'), 'utf8') === testsFor(scenario, file)
   const validation = Bun.spawnSync(['node', 'test.cjs'], { cwd: workspace, stdout: 'pipe', stderr: 'pipe', timeout: 5000 })
   const testExit = validation.exitCode
   const read = (path: string) => existsSync(join(workspace, path)) ? readFileSync(join(workspace, path), 'utf8') : ''
-  const validated = validation.exitCode === 0 && testsUnchanged
+  const unchanged = fixturesUnchanged(built)
+  const validated = validation.exitCode === 0 && testsUnchanged && unchanged !== false
     && (scenario !== 'stale_edit' || (existsSync(outcome.injectionPath) && source.includes('EXTERNAL_CHANGE_KEEP')))
     && (scenario !== 'shell_then_edit' || source.startsWith('// build: 42'))
     && (scenario !== 'background_test' || outcome.final.includes(slowCheckLine()))
     // The stamp is the hash of the source the project check last passed on, so it matches only when that check ran after the last edit.
     && (scenario !== 'instructions_file' || read('.check-stamp') === hash(source))
     && (scenario !== 'long_session' || read('codes.txt').split(/\r?\n/).map(line => line.trim()).filter(Boolean).join('\n') === checkpointCodes().join('\n'))
-  return { validated, source, testsUnchanged, testExit }
+  return { validated, source, testsUnchanged, testExit, fixturesUnchanged: unchanged }
 }

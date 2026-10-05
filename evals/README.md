@@ -94,12 +94,12 @@ The `extended` set is opt-in (`EVAL_CASES=extended`, or any of its names) and st
 | `test_fix_loop` | two chained bugs: the second assertion fails only once the first bug is fixed | |
 | `unprompted_verify` | the `roundMoney` fix with no mention of tests; `ranCheck` and `verifiedBeforeFinal` record whether the agent ran `node test.cjs` on its own | |
 | `noisy_failure` | a test that prints about 74 KB of interleaved stdout and stderr, with one `ASSERTION FAILED` line in the middle | |
-| `background_test` | a 20-second `slow-check.cjs` the prompt asks to start in the background while the agent fixes `roundMoney`; `backgroundStarts` counts `run_in_background` calls | the line `slow-check.cjs` prints, quoted in the final reply |
-| `instructions_file` | an `AGENTS.md` that names `node scripts/check.cjs --all` as the project's only accepted check; this scenario alone keeps `agent-instructions` mounted, and a pi arm keeps its context files | the stamp that check writes matches the final source, so it ran after the last edit |
+| `background_test` | a 20-second `slow-check.cjs` the prompt asks to start in the background while the agent fixes `roundMoney`; `backgroundStarts` counts `run_in_background` calls | the line `slow-check.cjs` prints, quoted in the final reply; `slow-check.cjs` and `src/report.js` unchanged |
+| `instructions_file` | an `AGENTS.md` that names `node scripts/check.cjs --all` as the project's only accepted check; this scenario alone keeps `agent-instructions` mounted, and a pi arm keeps its context files | the stamp that check writes matches the final source, so it ran after the last edit; `scripts/check.cjs` and `AGENTS.md` unchanged |
 | `edit_recovery` | the obvious `old_string` appears twice, in `roundMoney` and `truncateMoney` | `truncateMoney` still truncates |
-| `long_session` | ten 5.7 KB notes to read in full, a `codes.txt` built from them, then the `roundMoney` fix, with the route's `contextWindow` forced to 16,000 tokens so compaction runs mid-task; `compactions` counts completed summaries | the ten codes in `codes.txt` |
+| `long_session` | ten 4.4 KB notes chained by hashed names, each naming the next, so they are read one per response; a `codes.txt` built from them; then the `roundMoney` fix. The route's `contextWindow` is forced to 16,000 tokens: each read is about 1,200 tokens, under the 2,560-token tail compaction keeps, and the session crosses the 12,800-token threshold around the seventh note. `compactions` counts completed summaries | the ten codes in `codes.txt`; the notes unchanged |
 
-Most scenarios keep the 14-request cap; `explore_answer`, `test_fix_loop`, and `background_test` allow 20, `noisy_failure` and `edit_recovery` 16, and `long_session` 30, which also counts its summary requests. `background_test` may run 240 s and `long_session` 360 s instead of 180 s. An arm whose route still goes through the retired `llm-deepseek` adapter cannot take the forced window, so its `long_session` samples record `contextWindow: null`. `ask_user_question` is never in the roster: a headless run has no one to answer it.
+Most scenarios keep the 14-request cap; `explore_answer`, `test_fix_loop`, and `background_test` allow 20, `noisy_failure` and `edit_recovery` 16, and `long_session` 30, which also counts its summary requests. `background_test` may run 240 s and `long_session` 360 s instead of 180 s. An arm whose route still goes through the retired `llm-deepseek` adapter cannot take the forced window, so its `long_session` samples record `contextWindow: null`. A pi arm gets the same forced window and compaction settings that mirror Bake's default policy at it (`reserveTokens` 3,200 and `keepRecentTokens` 2,560 at 16,000 tokens); `design.json` records them as `piCompaction`. Where a predicate trusts a fixture file, such as a check script, the fixture records each such file's hash and the sample fails if one changed; `fixturesUnchanged` records the result, null where nothing is protected. `ask_user_question` is never in the roster: a headless run has no one to answer it.
 
 `bun test ./evals` builds every fixture, judges it untouched and after a hand-applied reference fix, and checks the sizes above, without a model.
 
@@ -129,13 +129,14 @@ Record such a run with `--candidate bake --base pi`. The regression rule still a
 
 ## Metrics
 
-Besides tokens, requests, tool calls, and errors, every sample records these loop-shape metrics, and `samples.jsonl` keeps them. A check call is a `bash` or `pwsh` call that runs the scenario's check: `node test.cjs`, or `node scripts/check.cjs` in `instructions_file`. An edit is an `edit` or `write` call, or a shell command that writes a source file (the `shellEdits` pattern).
+Besides tokens, requests, tool calls, and errors, every sample records these loop-shape metrics, and `samples.jsonl` keeps them. A check call is a `bash` or `pwsh` call that runs the scenario's check: `node test.cjs`, or `node scripts/check.cjs --all` in `instructions_file`. An edit is an `edit` or `write` call, or a shell command that writes a source file (the `shellEdits` pattern).
 
 | Metric | Definition |
 |---|---|
 | `excessRequests` | requests above the scenario's floor in `REQUEST_FLOORS` (`requestFloor`), the fewest a run that batches independent calls needs; never negative |
+| `requestsOverFloor` | requests minus the floor, unclamped: a negative value means the sample beat the floor, so the floor is set too high; the `loop` block counts such samples as `belowFloor` |
 | `editCheckSplits` | steps whose calls are all edits, followed by a step whose first call is the check: a round trip saved by sending the check with the edit |
-| `orientationCalls` | `pwd`, `ls` or `tree` without a path or at the workspace root, `find` at the root, or `glob` without a path, made before the first `read` (or in the whole sample, if it never reads) |
+| `orientationCalls` | a shell command whose every stage but `cd` is `pwd`, `ls` or `tree` without a path or at the workspace root, or `find` at the root with no `-name` or `-path` filter; an `ls` call at the root; or a `glob` at the root whose pattern is a bare listing (`*`, `**`, `**/*`, `**/*.ext`, no name stem). Counted before the first read, by `read` or by a shell `cat`, `head`, `tail`, `less`, or `sed -n` on a file (or in the whole sample, if it never reads) |
 | `ranCheck` | whether any call ran the check |
 | `verifiedBeforeFinal` | whether a check call came at or after the last edit; null when the sample made no edit |
 | `backgroundStarts` | shell calls started with `run_in_background` |

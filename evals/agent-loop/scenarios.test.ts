@@ -7,8 +7,9 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  checkCommandFor, checkpointCodes, CONTEXT_WINDOWS, EXPLORE_ANSWER, EXTENDED_CASES, fixture, maxRequestsFor, prompts,
-  REQUEST_FLOORS, requestFloorFor, slowCheckLine, STANDARD_CASES, validate, type Fixture, type Outcome,
+  checkCommandFor, checkpointCodes, compactionBudget, CONTEXT_WINDOWS, EXPLORE_ANSWER, EXTENDED_CASES, fixture, LONG_SESSION_BUDGET,
+  maxRequestsFor, noteNames, piCompactionFor, prompts, REQUEST_FLOORS, requestFloorFor, slowCheckLine, STANDARD_CASES, validate,
+  type Fixture, type Outcome,
 } from './scenarios.ts'
 
 const temporary: string[] = []
@@ -130,6 +131,17 @@ describe('background_test', () => {
     expect(validate('background_test', built, outcome({ final: 'Fixed roundMoney.' })).validated).toBe(false)
     expect(validate('background_test', built, outcome({ final: `Fixed roundMoney. The check printed: ${slowCheckLine()}` })).validated).toBe(true)
   })
+
+  test('fails when the slow check or the module it reads is changed', () => {
+    for (const [path, from, to] of [['slow-check.cjs', '}, 50);', '}, 0);'], ['src/report.js', "return 'Quarterly report';", "return 'Quarterly report'; // checked"]]) {
+      const built = build('background_test')
+      roundFix(built.workspace)
+      const final = `Fixed roundMoney. The check printed: ${slowCheckLine()}`
+      expect(validate('background_test', built, outcome({ final })).validated).toBe(true)
+      patch(built.workspace, path!, from!, to!)
+      expect(validate('background_test', built, outcome({ final }))).toMatchObject({ validated: false, fixturesUnchanged: false })
+    }
+  })
 })
 
 describe('instructions_file', () => {
@@ -137,6 +149,9 @@ describe('instructions_file', () => {
     const built = build('instructions_file')
     expect(readFileSync(join(built.workspace, 'AGENTS.md'), 'utf8')).toContain('node scripts/check.cjs --all')
     expect(checkCommandFor('instructions_file').test('node scripts/check.cjs --all')).toBe(true)
+    expect(checkCommandFor('instructions_file').test('cd /w && node ./scripts/check.cjs --verbose --all 2>&1')).toBe(true)
+    expect(checkCommandFor('instructions_file').test('node scripts/check.cjs')).toBe(false)
+    expect(checkCommandFor('instructions_file').test('node scripts/check.cjs && echo --all')).toBe(false)
     roundFix(built.workspace)
     expect(node(built.workspace, 'test.cjs').exitCode).toBe(0)
     expect(validate('instructions_file', built, outcome()).validated).toBe(false)
@@ -146,6 +161,21 @@ describe('instructions_file', () => {
     // An edit after the check leaves the stamp behind the source.
     patch(built.workspace, 'src/money.js', 'function roundMoney', '// rounds to the cent\nfunction roundMoney')
     expect(validate('instructions_file', built, outcome()).validated).toBe(false)
+  })
+
+  test('fails when the check script or AGENTS.md is changed, even with a matching stamp', () => {
+    const tampers: [string, string, string][] = [
+      ['scripts/check.cjs', "if (!process.argv.includes('--all'))", 'if (false)'],
+      ['AGENTS.md', 'node scripts/check.cjs --all', 'node scripts/check.cjs'],
+    ]
+    for (const [path, from, to] of tampers) {
+      const built = build('instructions_file')
+      roundFix(built.workspace)
+      expect(node(built.workspace, 'scripts/check.cjs', '--all').exitCode).toBe(0)
+      expect(validate('instructions_file', built, outcome()).validated).toBe(true)
+      patch(built.workspace, path, from, to)
+      expect(validate('instructions_file', built, outcome())).toMatchObject({ validated: false, fixturesUnchanged: false })
+    }
   })
 })
 
@@ -163,23 +193,79 @@ describe('edit_recovery', () => {
 })
 
 describe('long_session', () => {
-  test('hides ten codes in notes under the pruner threshold, sized past the forced context window', () => {
+  /** The read tool's render of a whole file: path and type framing, `N: ` before each line, and the end-of-file footer. */
+  const readResult = (path: string, text: string) => {
+    const lines = text.replace(/\n$/, '').split('\n')
+    return `<path>${path}</path>\n<type>file</type>\n<content>\n${lines.map((line, index) => `${index + 1}: ${line}`).join('\n')}\n\n(End of file - total ${lines.length} lines)\n</content>`
+  }
+  /** One response's batch at the token meter's four characters a token: the read call with its arguments, and the result. */
+  const readBatchTokens = (path: string, text: string) => Math.ceil(JSON.stringify({ file_path: path }).length / 4) + Math.ceil(readResult(path, text).length / 4) + 16
+
+  test('chains ten notes under the pruner threshold, each naming the next by a name it cannot guess', () => {
     const built = build('long_session')
-    const notes = readdirSync(join(built.workspace, 'notes')).sort()
-    expect(notes).toHaveLength(10)
-    let total = 0
-    notes.forEach((name, index) => {
-      const text = readFileSync(join(built.workspace, 'notes', name), 'utf8')
+    const names = noteNames()
+    expect(readdirSync(join(built.workspace, 'notes')).sort()).toEqual(names.map(name => name.slice('notes/'.length)).sort())
+    expect(prompts.long_session).toContain(names[0]!)
+    for (const later of names.slice(1)) expect(prompts.long_session).not.toContain(later)
+    names.forEach((name, index) => {
+      const text = readFileSync(join(built.workspace, name), 'utf8')
       expect(text.length).toBeLessThan(8192)
       expect(text).toContain(`Checkpoint code: ${checkpointCodes()[index]}`)
-      total += text.length
+      expect(text.trimEnd().split('\n').at(-1)).toBe(index === names.length - 1 ? 'This is the last note.' : `Next note: ${names[index + 1]}`)
     })
-    // At about four characters a token, the notes alone exceed the threshold (0.8 of the window).
-    expect(total / 4).toBeGreaterThan(CONTEXT_WINDOWS.long_session! * 0.8)
     roundFix(built.workspace)
     expect(validate('long_session', built, outcome()).validated).toBe(false)
     writeFileSync(join(built.workspace, 'codes.txt'), checkpointCodes().join('\n') + '\n')
     expect(validate('long_session', built, outcome()).validated).toBe(true)
+    patch(built.workspace, names[3]!, 'Checkpoint code:', 'Checkpoint code (read):')
+    expect(validate('long_session', built, outcome())).toMatchObject({ validated: false, fixturesUnchanged: false })
+  })
+
+  test('keeps each read batch compactable while the session crosses the threshold', () => {
+    const built = build('long_session')
+    const window = CONTEXT_WINDOWS.long_session!
+    const { thresholdTokens, retainTokens } = compactionBudget(window)
+    expect({ thresholdTokens, retainTokens }).toEqual({ thresholdTokens: 12_800, retainTokens: 2_560 })
+    const { prefixTokens, maxOutputTokens, notes } = LONG_SESSION_BUDGET
+    const batches = noteNames().map(name => readBatchTokens(name, readFileSync(join(built.workspace, name), 'utf8')))
+    expect(batches).toHaveLength(notes)
+    for (const batch of batches) {
+      // About 1,200 tokens each, as the budget's comment states.
+      expect(batch).toBeGreaterThan(1_100)
+      expect(batch).toBeLessThan(1_300)
+      // The newest batch fits the retained tail, so older batches form a region compaction can summarize.
+      expect(batch).toBeLessThan(retainTokens)
+      // The prefix, one batch, and the output cap fit the window.
+      expect(prefixTokens + batch + maxOutputTokens).toBeLessThanOrEqual(window)
+      // The largest request, one batch past the threshold, still fits it.
+      expect(thresholdTokens + batch).toBeLessThan(window)
+    }
+    const total = batches.reduce((sum, batch) => sum + batch, 0)
+    expect(total).toBeGreaterThan(11_000)
+    expect(total).toBeLessThan(13_000)
+    // The session crosses the threshold with notes to spare, so compaction runs before the last read.
+    expect(prefixTokens + total - batches.at(-1)! - batches.at(-2)!).toBeGreaterThan(thresholdTokens)
+  })
+
+  test('gives pi compaction settings that mirror Bake at the forced window', () => {
+    expect(piCompactionFor(CONTEXT_WINDOWS.long_session!)).toEqual({ reserveTokens: 3_200, keepRecentTokens: 2_560 })
+  })
+})
+
+describe('protected fixtures', () => {
+  test('shell_then_edit fails when the stamp script is changed', () => {
+    const built = build('shell_then_edit')
+    expect(node(built.workspace, 'scripts/stamp.cjs').exitCode).toBe(0)
+    roundFix(built.workspace)
+    expect(validate('shell_then_edit', built, outcome()).validated).toBe(true)
+    patch(built.workspace, 'scripts/stamp.cjs', "const p = 'src/money.js';", "const p = 'src/money.js'; // stamped")
+    expect(validate('shell_then_edit', built, outcome())).toMatchObject({ validated: false, fixturesUnchanged: false })
+  })
+
+  test('a fixture with nothing protected records null', () => {
+    const built = build('ordinary_edit')
+    roundFix(built.workspace)
+    expect(validate('ordinary_edit', built, outcome())).toMatchObject({ validated: true, fixturesUnchanged: null })
   })
 })
 

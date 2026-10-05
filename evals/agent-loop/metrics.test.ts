@@ -1,8 +1,8 @@
 /** Loop-shape metrics over synthetic Bake and pi event streams. */
 import { describe, expect, test } from 'bun:test'
 import {
-  backgroundStarts, type Call, compactions, editCheckSplits, excessRequests, normalizeBake, normalizePi, orientationCalls, ranCheck,
-  runawayAbort, shellEdits, verifiedBeforeFinal,
+  backgroundStarts, type Call, compactions, editCheckSplits, excessRequests, isBareGlob, normalizeBake, normalizePi, orientationCalls, ranCheck,
+  readsFile, requestsOverFloor, runawayAbort, shellEdits, verifiedBeforeFinal,
 } from './metrics.ts'
 
 const TEST = /\bnode\s+(?:\.\/)?test\.cjs\b/
@@ -68,17 +68,48 @@ describe('edit/check splits', () => {
 })
 
 describe('orientation calls', () => {
-  test('count pwd, ls, find, and glob at the root before the first read', () => {
+  test('count pwd, root listings, an unfiltered find, and a bare glob before the first read', () => {
     const calls = [
-      bash(0, 'pwd'), bash(0, 'ls -la'), bash(0, `cd ${WORKSPACE} && ls`), bash(0, 'find . -name "*.js"'), call(0, 'glob', { pattern: '**/*.js' }),
+      bash(0, 'pwd'), bash(0, 'ls -la'), bash(0, `cd ${WORKSPACE} && ls`), bash(0, 'find . -type f'), bash(0, 'pwd && ls && tree'),
+      call(0, 'glob', { pattern: '**/*.js' }), call(0, 'glob', { pattern: '*' }), call(0, 'glob', { pattern: '**' }), call(0, 'glob', { pattern: '**/*' }),
       call(1, 'read', { file_path: 'src/money.js' }), bash(2, 'ls'),
     ]
-    expect(orientationCalls(calls, [WORKSPACE])).toBe(5)
+    expect(orientationCalls(calls, [WORKSPACE])).toBe(9)
+  })
+
+  test('do not count a glob whose pattern names a file stem, such as the path_discovery search', () => {
+    expect(orientationCalls([call(0, 'glob', { pattern: '**/money.js' })], [WORKSPACE])).toBe(0)
+    expect(orientationCalls([call(0, 'glob', { pattern: 'src/*.js' }), call(0, 'glob', { pattern: '**/test*' })], [WORKSPACE])).toBe(0)
+    expect(isBareGlob('**/*.{js,ts}')).toBe(true)
+    expect(isBareGlob('**/money.js')).toBe(false)
+  })
+
+  test('do not count a find with a name or path filter', () => {
+    const calls = [bash(0, 'find . -name "*.js"'), bash(0, 'find . -path "*/billing/*"'), bash(0, 'find . -iname money.js')]
+    expect(orientationCalls(calls, [WORKSPACE])).toBe(0)
+  })
+
+  test('do not count a shell command with any stage beyond a listing', () => {
+    const calls = [bash(0, 'ls && node test.cjs'), bash(0, 'ls | head'), bash(0, 'pwd; grep -rn roundMoney .'), bash(0, `cd ${WORKSPACE} && cat test.cjs`)]
+    expect(orientationCalls(calls, [WORKSPACE])).toBe(0)
   })
 
   test('do not count a listing of a subdirectory, a search, or a targeted glob', () => {
-    const calls = [bash(0, 'ls src'), bash(0, 'find src -name "*.js"'), call(0, 'grep', { pattern: 'roundMoney' }), call(0, 'glob', { pattern: '*.js', path: 'src' }), bash(0, 'node test.cjs')]
+    const calls = [bash(0, 'ls src'), bash(0, 'find src -type f'), call(0, 'grep', { pattern: 'roundMoney' }), call(0, 'glob', { pattern: '*.js', path: 'src' }), bash(0, 'node test.cjs')]
     expect(orientationCalls(calls, [WORKSPACE])).toBe(0)
+  })
+
+  test('end the window at a shell read of a file', () => {
+    for (const read of ['cat src/money.js', 'head -n 20 src/money.js', 'tail -5 test.cjs', "sed -n '1,40p' src/money.js", 'less src/money.js', `cd ${WORKSPACE} && cat test.cjs | grep assert`]) {
+      expect(orientationCalls([bash(0, 'ls'), bash(1, read), bash(2, 'ls'), bash(2, 'pwd')], [WORKSPACE])).toBe(1)
+    }
+  })
+
+  test('do not take a write, a filter on piped input, or sed without -n for a read', () => {
+    for (const command of ["cat > src/money.js <<'EOF'", 'ls | head -n 5', 'ls | tail -3', "sed -i 's/a/b/' src/money.js", "printf x | sed -n '1p'"]) {
+      expect(readsFile(command)).toBe(false)
+    }
+    expect(orientationCalls([bash(0, "cat > notes.txt <<'EOF'"), bash(1, 'ls')], [WORKSPACE])).toBe(1)
   })
 })
 
@@ -103,9 +134,11 @@ describe('verification', () => {
 })
 
 describe('counters', () => {
-  test('excess requests are those above the floor, never negative', () => {
+  test('excess requests are those above the floor, never negative; requests over the floor keep the sign', () => {
     expect(excessRequests(7, 3)).toBe(4)
     expect(excessRequests(2, 3)).toBe(0)
+    expect(requestsOverFloor(7, 3)).toBe(4)
+    expect(requestsOverFloor(2, 3)).toBe(-1)
   })
 
   test('background starts count shell calls run in the background', () => {

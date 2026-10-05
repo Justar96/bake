@@ -81,6 +81,8 @@ function compact(sample: Sample) {
     roster: sample.roster ?? null,
     compositionOk: sample.composition?.ok ?? null,
     requestFloor: sample.requestFloor ?? null, excessRequests: sample.excessRequests ?? null,
+    requestsOverFloor: sample.requestsOverFloor ?? (typeof sample.requestFloor === 'number' ? sample.requests - sample.requestFloor : null),
+    fixturesUnchanged: sample.fixturesUnchanged ?? null,
     editCheckSplits: sample.editCheckSplits ?? null, orientationCalls: sample.orientationCalls ?? null,
     ranCheck: sample.ranCheck ?? null, verifiedBeforeFinal: sample.verifiedBeforeFinal ?? null,
     backgroundStarts: sample.backgroundStarts ?? null, compactions: sample.compactions ?? null,
@@ -133,7 +135,7 @@ const groups: Record<string, (scenario: string) => boolean> = {
 
 /**
  * The candidate's loop shape on one model, over every task sample: requests
- * above each scenario's floor, edit/check splits, orientation calls, how many
+ * above each scenario's floor, samples below it, edit/check splits, orientation calls, how many
  * edited samples checked after their last edit, and guard-aborted runs.
  * Samples recorded before these metrics existed count as unmeasured.
  */
@@ -145,6 +147,8 @@ function loopShape(own: Compact[]) {
   return {
     measured: measured.length,
     excessRequests: sum(sample => sample.excessRequests),
+    // Samples that beat their scenario's floor: each one shows a floor set too high.
+    belowFloor: measured.filter(sample => sample.requestsOverFloor !== null && sample.requestsOverFloor < 0).length,
     editCheckSplits: sum(sample => sample.editCheckSplits),
     orientationCalls: sum(sample => sample.orientationCalls),
     verifiedBeforeFinal: [edited.filter(sample => sample.verifiedBeforeFinal === true).length, edited.length],
