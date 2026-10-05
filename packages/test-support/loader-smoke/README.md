@@ -49,6 +49,10 @@ Profile integration drivers use the repository-only `tests/fixtures/production-p
 
 `runFixtureTurn(ctx, options)` drives one task through exactly one configured root agent: it waits for the task to reach the durable inbox, forwards canonical events to your observer, flushes the session, and returns the final assistant text plus accumulated usage. Example-local drivers keep configuration, rendering, and assertion ownership.
 
+### Pinning a model surface
+
+`renderModelSurface` turns one captured first request into a Markdown snapshot: measured sizes, request settings, each message's exact text, and each tool's description and JSON schema in request order. `normalizeModelSurface` keeps only the model-visible fields and replaces machine-specific values first; `pathPlaceholders` expands one path into every spelling a request can carry (its real path and both slash forms), and ISO dates always become `<date>`. `plantModelSurfaceWorkspace` writes the fixed workspace the scenarios share, and `MODEL_SURFACE_TASK` is their first message. A subprocess profile captures its request through the repository-only `tests/fixtures/surface-capture-llm.ts` adapter, which writes the first agent-loop request to the file named by `BAKE_SURFACE_CAPTURE`. The [model-surface snapshots](../../../docs/testing.md#pin-the-model-surface) are the consumers.
+
 ### Source or built mode
 
 `resolveExampleLaunch` picks the artifact an example bin boots from. `src` mode runs the bin under tsx with `TSX_TSCONFIG_PATH` set, so workspace imports resolve through the tsconfig `paths` map — the zero-build dev path. `lib` mode runs the built `lib/` bin under plain Node, so bare package plugins resolve through real package `exports`, exactly as an installed consumer resolves them. The mode comes from an explicit value or `DSH_EXAMPLE_MODE` (CI sets `lib`, dev leaves it unset); anything else fails loud.
@@ -80,7 +84,9 @@ The harness is built on one separation: the smoke runs in a child process under 
 | [`src/index.ts`](src/index.ts) | Mode resolver, `runLoaderSmoke` subprocess harness, options and result types |
 | [`src/agent-turn.ts`](src/agent-turn.ts) | `runFixtureTurn` direct-agent driver and result envelope |
 | — | No runtime invariant companion is published; this test-support package owns no production event stream or mutable data; consuming test suites exercise its behavior. |
+| [`src/model-surface.ts`](src/model-surface.ts) | Model-surface workspace, normalization, sizes, and Markdown rendering |
 | [`tests/fixtures/production-profile.ts`](tests/fixtures/production-profile.ts) | Repository-only shipped-profile composition helper for integration fixtures |
+| [`tests/fixtures/surface-capture-llm.ts`](tests/fixtures/surface-capture-llm.ts) | Repository-only keyless adapter that records a profile's first agent-loop request |
 
 </details>
 
