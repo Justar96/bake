@@ -7,6 +7,39 @@ const tolerant = new WeakSet<object>()
 const ignore = (): void => {}
 
 /**
+ * Detect terminal loss even when a stream error arrives before SIGHUP.
+ * Only streams that are terminals at registration participate; redirected
+ * pipes retain their ordinary error behavior. Unrelated errors still reach
+ * existing listeners, or throw when this watcher is their only listener.
+ * @param hangup - the same bounded shutdown handler used for SIGHUP.
+ * @param stdio - process streams to observe.
+ * @returns an idempotent disposer that removes only these watchers.
+ * @throws after removing installed watchers if a stream cannot be acquired.
+ */
+export function watchTerminalHangup(hangup: () => void, stdio: HangupStdio = process): () => void {
+  const releases: (() => void)[] = []
+  const dispose = (): void => { for (const release of releases) release() }
+  try {
+    for (const name of ['stdout', 'stderr', 'stdin'] as const) {
+      const stream = stdio[name]
+      if (stream.isTTY !== true) continue
+      const onError = (error: unknown): void => {
+        const code = typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined
+        if (code === 'EIO' || code === 'EPIPE') hangup()
+        else if (stream.listenerCount('error') === 1) throw error
+      }
+      // Inspect listeners before a once-listener removes itself during emission.
+      stream.prependListener('error', onError)
+      releases.push(() => { stream.off('error', onError) })
+    }
+  } catch (error) {
+    dispose()
+    throw error
+  }
+  return dispose
+}
+
+/**
  * Keep the process's own stdio failures from ending shutdown once the terminal is gone.
  *
  * A hung-up terminal fails every later write with EIO, and a closed pipe reader

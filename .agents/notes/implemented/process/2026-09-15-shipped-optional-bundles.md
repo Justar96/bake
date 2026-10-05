@@ -4,24 +4,22 @@ Status: implemented
 
 ## Problem
 
-The Web plugin page manages only the bundles a person installed into the profile. An official experimental layer such as Agent Teams had to be found on npm and installed by name before it could be switched on, and [default-product isolation](2026-09-12-default-product-experimental-isolation.md) kept every experimental package out of the installation's runtime dependencies, so nothing shipped with dsh could offer it.
+A bundle installed with the application should be available to a profile without another registry download. Installation ownership must also prevent the profile manager from removing an application dependency.
 
 ## Decision
 
-The launcher names in `OPTIONAL_BUNDLES` (`packages/boot/app-boot/src/profile.ts`, beside the profile templates) the bundles the installation ships for a person to switch on. Each must be a runtime dependency of `apps/cli` that declares `dsh.bundle.patch`, and no shipped profile template selects it. The plugin manager's `listBundles` reports such a bundle as `optional`: switched off until selected, never removable, resolved from the installation like any installation-supplied bundle. The Web plugin page opens its Official group with the optional bundles, tagged beta where the feature is one, ahead of the profile's own installed bundles.
+The plugin manager discovers bundles from the installation's dependencies and the profile's selected and installed packages. An installation dependency that declares `dsh.bundle.patch` and appears in no shipped profile template is `optional`, unless it protects the manager itself. It stays inactive until selected and cannot be removed from the installation. The [plugin-manager README](../../../../packages/boot/plugin-manager/README.md) owns the current API.
 
-Default-product isolation keeps its rules with one declared exception: an optional bundle's dependency graph is outside the default product. The static gate skips the `dependencies` edge from `@deepseek-ai/dsh` to a listed bundle and still rejects a runtime import, a shipped composition, a preset, or a default template that names it, an experimental dependency the list does not name, and a listed name that is not a runtime dependency or not a bundle. The workspace-constraints check accepts the same `dependencies` edges and no other runtime section, and the packed-install release check skips them from the installed entry package while requiring each listed bundle to be installed.
-
-Agent Teams ships this way, as `@deepseek-ai/dsh-experimental-agent-team-profile` and `@deepseek-ai/dsh-experimental-agent-team-web-profile`. Auto review is a published experimental package the page's install guide names as its example, not an optional bundle.
+The installation manifest controls which bundles the product supplies. A bundle's own metadata identifies its patch but does not grant installation ownership. Packages without a bundle patch are omitted unless selected, in which case the manager reports a `not-bundle` problem.
 
 ## Alternatives considered
 
-**A catalog of installable official bundles.** The page would offer names to install from the registry on demand. That keeps the installation unchanged but needs network access at the moment of switching on and a version pin per release.
+**A catalog of installable official bundles.** Offering registry names on demand keeps the installation smaller but requires network access when a person activates the bundle and a version pin per release.
 
-**A flag on the bundle package.** A `dsh.bundle.optional` declaration would let any published bundle claim a place in the installation; the launcher's own list keeps the choice with the product.
-
-**A list in the installation's manifest.** `dsh.optionalBundles` in `apps/cli/package.json` was the first form; the maintainers keep product decisions in code, where the list is typed, read once, and shared by the manager and the gates.
+**A flag on the bundle package.** A `dsh.bundle.optional` declaration would let any published bundle claim installation status. Deriving ownership from the installation's dependencies keeps that choice with the product.
 
 ## Consequences
 
-Optional bundles are downloaded with the product and stay inactive until selected; the runtime isolation smokes still observe no experimental module in a default composition. Switching on an optional Web layer loads its client plugin through the live client module graph. A bundle that needs a companion layer, such as the Agent Teams Web layer over its Host layer, says so in its description; the manager does not select companions automatically.
+Installation-provided bundles can be selected without downloading them again. The manager preserves installation ownership while allowing profile activation. It does not select companion bundles automatically; a bundle that requires another layer must document that requirement.
+
+The [manager tests](../../../../packages/boot/plugin-manager/tests/manager.spec.ts) exercise discovery, activation, removal refusal, and omission of an unselected installation dependency without a bundle patch.
