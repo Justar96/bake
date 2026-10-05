@@ -38,10 +38,10 @@
   "license": "MIT",
   "peerDependencies": {
     "bake-invariants": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
+    "bake-llm": "workspace:^",
     "bake-scope": "workspace:^",
     "bake-session": "workspace:^",
-    "@deepseek-ai/dsh-session-projection": "workspace:^",
+    "bake-session-projection": "workspace:^",
     "bake-system-prompt": "workspace:^",
     "bake-typert-protocol": "workspace:^",
     "bake-util-values": "workspace:^",
@@ -49,13 +49,13 @@
   },
   "devDependencies": {
     "bake-invariants": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
+    "bake-llm": "workspace:^",
     "bake-scope": "workspace:^",
     "bake-session": "workspace:^",
-    "@deepseek-ai/dsh-session-projection": "workspace:^",
+    "bake-session-projection": "workspace:^",
     "bake-system-prompt": "workspace:^",
     "bake-typert-protocol": "workspace:^",
-    "@deepseek-ai/dsh-typert-registry": "workspace:^",
+    "bake-typert-registry": "workspace:^",
     "bake-util-values": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   }

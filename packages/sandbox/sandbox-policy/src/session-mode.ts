@@ -15,7 +15,7 @@
  * filesystem alike), so it lives here in the policy package rather than in any
  * one capability's seam.
  *
- * @module dsh-sandbox-policy/session-mode
+ * @module bake-sandbox-policy/session-mode
  */
 
 import type { Session } from 'bake-session'

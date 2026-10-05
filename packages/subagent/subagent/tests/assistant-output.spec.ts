@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock } from 'bake-llm'
 import type { SessionEvent } from 'bake-session'
 import { AssistantOutputFold, finalAssistantOutput } from '../src/assistant-output.ts'
 

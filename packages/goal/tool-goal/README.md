@@ -3,11 +3,11 @@ description: "The model-facing goal tools for users and maintainers choosing, co
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-tool-goal
+# bake-tool-goal
 
 ## Summary
 
-`dsh-tool-goal` lets a model read the session's persisted goal, create a long-running goal when the user explicitly asks for one, and update it. The model never creates a goal on its own initiative. Creating, editing, pausing, or resuming requires a direct request in a top-level agent turn; completing or blocking also works in an autonomous goal round. Updates require the exact goal id and revision returned by a prior read. `resume` rearms active-but-disarmed or blocked goals, while users resume durable paused goals through Web or `/goal resume`. Autonomous blocking requires the same condition for a configurable threshold of three consecutive rounds by default.
+`bake-tool-goal` lets a model read the session's persisted goal, create a long-running goal when the user explicitly asks for one, and update it. The model never creates a goal on its own initiative. Creating, editing, pausing, or resuming requires a direct request in a top-level agent turn; completing or blocking also works in an autonomous goal round. Updates require the exact goal id and revision returned by a prior read. `resume` rearms active-but-disarmed or blocked goals, while users resume durable paused goals through Web or `/goal resume`. Autonomous blocking requires the same condition for a configurable threshold of three consecutive rounds by default.
 
 ## Table of Contents
 
@@ -23,7 +23,7 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## Use this package
 
-Mount `dsh-tool-goal` beside the goal service when the model should create goals the user explicitly asks for and update persisted goals. The tools are the model-facing half of the goal surface; the `/goal` command is the human-facing half, and the continuation driver uses the same tools to complete or block goals at the end of autonomous rounds.
+Mount `bake-tool-goal` beside the goal service when the model should create goals the user explicitly asks for and update persisted goals. The tools are the model-facing half of the goal surface; the `/goal` command is the human-facing half, and the continuation driver uses the same tools to complete or block goals at the end of autonomous rounds.
 
 ### Tools
 
@@ -41,12 +41,12 @@ Call `get_goal` before `update_goal` and copy the exact `goal_id` and `revision`
 
 ```yaml
 - id: tool-goal
-  name: '@deepseek-ai/dsh-tool-goal'
+  name: 'bake-tool-goal'
   config:
     blockedAfterConsecutiveRounds: 3
 ```
 
-The value must be a positive safe integer. It supplies both the hard lower bound on model self-blocking and the number named in the `update_goal` description. The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-tool-goal) is the exhaustive source for every accepted field.
+The value must be a positive safe integer. It supplies both the hard lower bound on model self-blocking and the number named in the `update_goal` description. The generated [configuration catalog](../../../docs/config-catalog.md#bake-tool-goal) is the exhaustive source for every accepted field.
 
 ### Authority rules
 
@@ -96,7 +96,7 @@ The tools are the model-facing half of the goal surface; read these pages for th
 
 - [Goal service](../goal/README.md) — the goal state and lifecycle the tools mutate.
 - [Goal group map](../README.md) — the goal packages and how they compose.
-- [Generated tool catalog](../../../docs/tool-catalog.md#deepseek-aidsh-tool-goal) — the exact schemas the model receives.
+- [Generated tool catalog](../../../docs/tool-catalog.md#bake-tool-goal) — the exact schemas the model receives.
 - [Goal-tool Agent Note](../../../.agents/notes/implemented/feature/2026-07-19-model-facing-goal-tools.md) — the authority split and UX decisions.
 
 -----
@@ -108,7 +108,7 @@ The tools are the model-facing half of the goal surface; read these pages for th
 
 #### What the model sees
 
-The generated [`get_goal`, `create_goal`, and `update_goal` schemas](../../../docs/tool-catalog.md#deepseek-aidsh-tool-goal), which carry the whole goal policy; the package adds no system-prompt text. The catalog shows the default threshold of 3, and the `update_goal` description names the configured `blockedAfterConsecutiveRounds` instead. Successful results are compact JSON. A mutation appends the goal domain's durable `goal/change` event without queuing model context. `activation` in a result is a live observation and never becomes replay authority. Durable paused resume fails with `GOAL_TOOL_RESUME_PAUSED`, whose message says only the user can resume a paused goal.
+The generated [`get_goal`, `create_goal`, and `update_goal` schemas](../../../docs/tool-catalog.md#bake-tool-goal), which carry the whole goal policy; the package adds no system-prompt text. The catalog shows the default threshold of 3, and the `update_goal` description names the configured `blockedAfterConsecutiveRounds` instead. Successful results are compact JSON. A mutation appends the goal domain's durable `goal/change` event without queuing model context. `activation` in a result is a live observation and never becomes replay authority. Durable paused resume fails with `GOAL_TOOL_RESUME_PAUSED`, whose message says only the user can resume a paused goal.
 
 #### Token effect
 
@@ -127,7 +127,7 @@ These limits define when the goal tools are a poor fit or need special care. The
 
 - **The explicit-request rule remains model judgment** — execution can prove that the current turn contains a direct user message, not that the message explicitly asked for a goal; the `create_goal` description is the only guard against a self-initiated goal.
 - **Same-condition blocking remains model judgment** — the runtime enforces distinct admitted-round count, not semantic equivalence of obstacles; an independent evaluator is deferred.
-- **No scheduling or direct human rendering** — these tools mutate state only; the same-session driver and `dsh-command-goal` are independent consumers of the same domain.
+- **No scheduling or direct human rendering** — these tools mutate state only; the same-session driver and `bake-command-goal` are independent consumers of the same domain.
 - **Goal-round authority requires a driver** — the autonomous `complete`/`blocked` path is dormant unless a continuation driver admits goal-sourced user turns; mounting this tool package alone does not create them.
 
 <a id="dev-note"></a>

@@ -8,7 +8,7 @@
  */
 
 import type { ScopeKey } from 'bake-scope'
-import type { ToolSchema } from '@deepseek-ai/dsh-llm'
+import type { ToolSchema } from 'bake-llm'
 import { snapshotJsonValue } from 'bake-util-values'
 import type { PromptSection, ToolProviderResult } from 'bake-system-prompt'
 import type { PtcRuntime } from 'bake-ptc-runtime'

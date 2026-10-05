@@ -7,18 +7,18 @@ import type { SessionEvent } from 'bake-session'
 import type { Agent } from 'bake-agent'
 import AgentLoop from 'bake-agent-loop'
 import { mountAgentLoopTestDependencies } from 'bake-agent-loop-testkit'
-import { LocalBashExecutor } from '@deepseek-ai/dsh-bash-local'
-import * as BashEnvPlugin from '@deepseek-ai/dsh-shell-env'
-import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
-import * as ToolBash from '@deepseek-ai/dsh-tool-bash'
-import * as LlmPiAi from '@deepseek-ai/dsh-llm-pi-ai'
-import type { PiAiProviderProfile } from '@deepseek-ai/dsh-llm-pi-ai'
-import TokenMeter from '@deepseek-ai/dsh-token-meter'
-import ToolResultPruner from '@deepseek-ai/dsh-compaction-tool-result-pruner'
-import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
-import * as SessionCheckpointPolicy from '@deepseek-ai/dsh-session-checkpoint-policy'
-import { BasicCompactionEngine } from '@deepseek-ai/dsh-compaction-basic'
-import type { BasicCompactionConfig } from '@deepseek-ai/dsh-compaction-basic'
+import { LocalBashExecutor } from 'bake-bash-local'
+import * as BashEnvPlugin from 'bake-shell-env'
+import LocalSubprocessRuntime from 'bake-subprocess-local'
+import * as ToolBash from 'bake-tool-bash'
+import * as LlmPiAi from 'bake-llm-pi-ai'
+import type { PiAiProviderProfile } from 'bake-llm-pi-ai'
+import TokenMeter from 'bake-token-meter'
+import ToolResultPruner from 'bake-compaction-tool-result-pruner'
+import JsonlSessionPersistence from 'bake-session-persistence-jsonl'
+import * as SessionCheckpointPolicy from 'bake-session-checkpoint-policy'
+import { BasicCompactionEngine } from 'bake-compaction-basic'
+import type { BasicCompactionConfig } from 'bake-compaction-basic'
 
 /**
  * Shared harness for the headless-agent e2e suites: the full plugin stack
@@ -52,11 +52,11 @@ export interface CodingHarnessOptions {
 
 /** The `deepseek-official` profile in the base bundle's `llm-pi-ai` row, parsed once. */
 const SHIPPED_DEEPSEEK: PiAiProviderProfile = (() => {
-  const patchPath = createRequire(import.meta.url).resolve('@deepseek-ai/dsh-base/cordis.patch.yml')
+  const patchPath = createRequire(import.meta.url).resolve('bake-base/cordis.patch.yml')
   const patches = yaml.load(readFileSync(patchPath, 'utf8'), { schema: entryListSchema }) as { insert?: { id?: string; config?: unknown }[] }[]
   const row = patches.flatMap(patch => patch.insert ?? []).find(entry => entry.id === 'llm-pi-ai')
   const profile = (row?.config as { providers?: Record<string, PiAiProviderProfile> } | undefined)?.providers?.['deepseek-official']
-  if (profile === undefined) throw new Error('dsh-base cordis.patch.yml ships no llm-pi-ai deepseek-official profile')
+  if (profile === undefined) throw new Error('bake-base cordis.patch.yml ships no llm-pi-ai deepseek-official profile')
   return profile
 })()
 

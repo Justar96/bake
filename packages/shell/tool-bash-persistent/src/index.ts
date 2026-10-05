@@ -1,6 +1,6 @@
 /**
  * Model-facing persistent `bash` tool over the owner-scoped PTY seam.
- * @module @deepseek-ai/dsh-tool-bash-persistent
+ * @module bake-tool-bash-persistent
  */
 
 import { randomUUID } from 'node:crypto'
@@ -8,7 +8,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { Agent } from 'bake-agent'
 import { truncateWithoutSplittingSurrogatePair } from 'bake-output-retention'
-import type { TerminalReadResult, TerminalSessionId } from '@deepseek-ai/dsh-terminal'
+import type { TerminalReadResult, TerminalSessionId } from 'bake-terminal'
 import { deadline, timeoutOf } from 'bake-timeout'
 import { defineTool } from 'bake-tools'
 

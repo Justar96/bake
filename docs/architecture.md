@@ -6,7 +6,7 @@ Bake is a terminal application over a Cordis plugin runtime. Read this map befor
 
 Bun manages the source workspace and builds the application. Supported Node application launches go through `dsh` profiles. The shipped profiles are `tui`, for interactive terminal sessions, and `headless`, for one task. Custom composition remains a profile plus ordered patches, not an additional executable or inline application tree.
 
-The terminal profile stacks [`dsh-base`](../packages/bundle/base/README.md) and [`@dsh-tui/app`](../apps/tui/packages/app/README.md). Base supplies models, tools, persistence, sandbox policy, settings, and credentials. The TUI supplies agent selection, terminal ownership, user input, and presentation. The [launcher](../apps/cli/README.md) owns profile initialization and argument forwarding.
+The terminal profile stacks [`bake-base`](../packages/bundle/base/README.md) and [`@dsh-tui/app`](../apps/tui/packages/app/README.md). Base supplies models, tools, persistence, sandbox policy, settings, and credentials. The TUI supplies agent selection, terminal ownership, user input, and presentation. The [launcher](../apps/cli/README.md) owns profile initialization and argument forwarding.
 
 Each profile lists its bundles under `dsh.profile.bundles`. Composition applies bundle patches, the profile patch, the home patch, and invocation patches in that order. YAML controls HMR. Existing profile manifests retain their user-selected bundles.
 

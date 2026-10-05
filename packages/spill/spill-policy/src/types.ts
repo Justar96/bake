@@ -5,9 +5,9 @@
  * `bake-tools`' `ToolExecution` satisfies this shape, so the policy
  * reads `exec` straight through without importing `dsh-tools` or `dsh-agent`.
  * Only the session HEADER id is read — the same identity every other subsystem
- * keys off (see `dsh-tool-bash`'s owner derivation).
+ * keys off (see `bake-tool-bash`'s owner derivation).
  *
- * @module @deepseek-ai/dsh-spill-policy/types
+ * @module bake-spill-policy/types
  */
 
 import type { SessionId } from 'bake-session'

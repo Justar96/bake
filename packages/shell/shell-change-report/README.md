@@ -115,7 +115,7 @@ jsdiff is quadratic on dissimilar inputs: a full rewrite of 10,000 lines took 9.
 ## Further Exploration
 
 - [Shell change report Agent Note](../../../.agents/notes/implemented/feature/2026-10-01-shell-change-report.md) — the design, the alternatives it beat, and its risks.
-- [`dsh-tool-bash`](../tool-bash/README.md) and [`dsh-tool-pwsh`](../tool-pwsh/README.md) — the tools that open a window around each foreground call.
+- [`bake-tool-bash`](../tool-bash/README.md) and [`bake-tool-pwsh`](../tool-pwsh/README.md) — the tools that open a window around each foreground call.
 - [`dsh-tools`](../../core/tools/README.md#host-presentation-descriptors) — `presentResultMeta`, the channel the report travels through.
 
 -----

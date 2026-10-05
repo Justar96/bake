@@ -1,4 +1,4 @@
-import type { ToolCallId } from '@deepseek-ai/dsh-llm'
+import type { ToolCallId } from 'bake-llm'
 import type { SessionSeq } from 'bake-session/types'
 
 /** Character-budget policy for deterministic tool-result pruning. */

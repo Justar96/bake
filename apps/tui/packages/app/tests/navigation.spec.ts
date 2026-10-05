@@ -1,9 +1,9 @@
 /** Session handoff, rollback, and cancellation through real Harness lifecycle services. */
 import { afterEach, expect, it, vi } from 'vitest'
 import { brandString } from 'bake-brand'
-import { CommandId } from '@deepseek-ai/dsh-commands'
+import { CommandId } from 'bake-commands'
 import type { SessionId } from 'bake-session'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage } from 'bake-llm'
 import { transcriptRows } from '@dsh-tui/ui'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'
 import { SessionNavigation } from '../src/navigation.ts'

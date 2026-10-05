@@ -6,7 +6,7 @@
 
 /* v8 ignore file -- built-bin acceptance drives schema collection and output. */
 
-import { generateConfigSchema, type ConfigSchemaDump } from '@deepseek-ai/dsh-app-boot'
+import { generateConfigSchema, type ConfigSchemaDump } from 'bake-app-boot'
 import { collectConfigDumpLayers } from './dump-config.ts'
 import { INSTALL_ANCHOR, prepareProfile } from './profile-boot.ts'
 

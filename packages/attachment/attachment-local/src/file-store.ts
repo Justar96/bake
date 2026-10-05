@@ -1,4 +1,4 @@
-/** Verbatim content-addressed local file storage. @module @deepseek-ai/dsh-attachment-local/file-store */
+/** Verbatim content-addressed local file storage. @module bake-attachment-local/file-store */
 
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'

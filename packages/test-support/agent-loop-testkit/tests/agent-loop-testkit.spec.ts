@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage } from 'bake-llm'
 import { Session, SessionId, SessionSeq } from 'bake-session'
 import { renderPrompt } from 'bake-system-prompt'
 import {

@@ -3,7 +3,7 @@ import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { Context } from '@deepseek-ai/cordis'
-import { createUserMessage, ToolCallId, type Message } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, ToolCallId, type Message } from 'bake-llm'
 import { createScope, type Scope } from 'bake-scope'
 import {
   SESSION_FORMAT_VERSION, Session, SessionId, type SessionEvent, type UserMessage,
@@ -11,9 +11,9 @@ import {
 import SystemPrompt, { renderPrompt } from 'bake-system-prompt'
 import ToolRuntime, { defineContentToolFixture } from 'bake-tools'
 import AgentRegistry, { agentEvents, type Agent, type PreStepDecision } from 'bake-agent'
-import SkillRegistry from '@deepseek-ai/dsh-skill'
-import * as SkillFileSystem from '@deepseek-ai/dsh-skill-filesystem'
-import * as toolSkill from '@deepseek-ai/dsh-tool-skill'
+import SkillRegistry from 'bake-skill'
+import * as SkillFileSystem from 'bake-skill-filesystem'
+import * as toolSkill from 'bake-tool-skill'
 import { unsupportedInbox } from 'bake-agent-loop-testkit'
 
 const testToolSignal = new AbortController().signal
@@ -170,7 +170,7 @@ async function mintAgentScope(ctx: Context, subject: string | Agent): Promise<{ 
   return { agent, scope }
 }
 
-describe('dsh-tool-skill', () => {
+describe('bake-tool-skill', () => {
   it('registers the skill tool schema and removes it on dispose', async () => {
     const ctx = new Context()
     await ctx.plugin(SystemPrompt)

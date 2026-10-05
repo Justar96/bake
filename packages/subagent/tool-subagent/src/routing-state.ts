@@ -1,10 +1,10 @@
 /** Parent-owned, log-only route decisions for child inspection and Session replay. */
 
 import { z } from 'zod'
-import type { ToolCallId } from '@deepseek-ai/dsh-llm'
+import type { ToolCallId } from 'bake-llm'
 import type { Session, SessionId, SessionLogOffset } from 'bake-session'
-import type SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
+import type SessionProjectionRegistry from 'bake-session-projection'
+import type { ProjectionDefinition } from 'bake-session-projection'
 import type { SubagentRoutingDecision } from './types.ts'
 
 declare module 'bake-session/types' {
@@ -19,7 +19,7 @@ interface RoutingState {
   readonly decisions: Record<string, SubagentRoutingDecision>
 }
 
-declare module '@deepseek-ai/dsh-session-projection/types' {
+declare module 'bake-session-projection/types' {
   interface SessionProjectionMap {
     /** Display decisions indexed by direct-child id, including after Session restoration. */
     subagentRoutingDecisions: Record<string, SubagentRoutingDecision>

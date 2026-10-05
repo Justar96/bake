@@ -10,8 +10,8 @@ export type {
 } from '../rpc.ts'
 export { RpcId, transportError } from '../rpc.ts'
 export type { SessionId, SessionEvent } from 'bake-session/types'
-export type { MessageId } from '@deepseek-ai/dsh-llm/brand'
-export type { ContentBlock, StreamChunk } from '@deepseek-ai/dsh-llm/types'
+export type { MessageId } from 'bake-llm/brand'
+export type { ContentBlock, StreamChunk } from 'bake-llm/types'
 
 import type { RpcResponse, RpcResult } from '../rpc.ts'
 

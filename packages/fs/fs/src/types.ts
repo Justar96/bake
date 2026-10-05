@@ -5,7 +5,7 @@
  * @module bake-fs/types
  */
 
-import { HarnessError } from '@deepseek-ai/dsh-llm'
+import { HarnessError } from 'bake-llm'
 import type { Branded } from 'bake-brand'
 
 /**

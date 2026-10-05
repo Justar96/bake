@@ -1,5 +1,5 @@
 import { Context } from '@deepseek-ai/cordis'
-import { LocalSubprocessRuntime } from '@deepseek-ai/dsh-subprocess-local'
+import { LocalSubprocessRuntime } from 'bake-subprocess-local'
 import { SUBPROCESS_CONTROL_ENV } from 'bake-subprocess/control'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'

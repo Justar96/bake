@@ -33,7 +33,7 @@ const PREFIXES = ['@deepseek-ai/dsh-', 'bake-']
 
 /** One workspace package the generated region maps. */
 interface PackageAlias {
-  /** Bare specifier, e.g. `@deepseek-ai/dsh-session`. */
+  /** Bare specifier, e.g. `bake-session`. */
   readonly specifier: string
   /** Repository-relative source directory, e.g. `./packages/session/session/src`. */
   readonly source: string

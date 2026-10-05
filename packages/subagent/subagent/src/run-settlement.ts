@@ -3,10 +3,10 @@
  * the one-shot background path uses Jobs; continuable children have no Task,
  * no per-message result, and no Task cancellation.
  *
- * @module @deepseek-ai/dsh-subagent/run-settlement
+ * @module bake-subagent/run-settlement
  */
 
-import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock } from 'bake-llm'
 import type { JobOutcome } from 'bake-jobs'
 import type { SubagentResult, SubagentRun } from './types.ts'
 

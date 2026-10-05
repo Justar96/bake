@@ -1,8 +1,8 @@
 /** Model-facing discovery of LLM routes available to child Agents. */
 
 import type { Context } from '@deepseek-ai/cordis'
-import type LlmRuntime from '@deepseek-ai/dsh-llm'
-import type { LlmProviderInfo } from '@deepseek-ai/dsh-llm'
+import type LlmRuntime from 'bake-llm'
+import type { LlmProviderInfo } from 'bake-llm'
 import { defineTool } from 'bake-tools'
 import { allowedRoutesText, withoutBlankRoute } from './model-selection.ts'
 import type { ModelSelectionPolicy } from './model-selection.ts'

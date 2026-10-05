@@ -35,12 +35,12 @@ import {
   type Profile,
   type ProfileResolutionGeneration,
   type ProfileResolutionMode,
-} from '@deepseek-ai/dsh-app-boot'
-import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
-import { installProxyFromEnvironment } from '@deepseek-ai/dsh-http-proxy'
-import { DSH_LAUNCH_ENVIRONMENT_KEY, type LaunchEnvironmentSnapshot } from '@deepseek-ai/dsh-launch-environment'
+} from 'bake-app-boot'
+import { resolveDshHome } from 'bake-home-paths'
+import { installProxyFromEnvironment } from 'bake-http-proxy'
+import { DSH_LAUNCH_ENVIRONMENT_KEY, type LaunchEnvironmentSnapshot } from 'bake-launch-environment'
 import type {} from 'bake-agent-loop'
-import { provideCmdline, type AppReady } from '@deepseek-ai/dsh-cmdline'
+import { provideCmdline, type AppReady } from 'bake-cmdline'
 import { createLateRejectionReporter } from './late-rejections.ts'
 import { createProcessShutdown, type ProcessShutdown } from './process-shutdown.ts'
 import { tolerateLostTerminal, watchTerminalHangup } from './terminal-hangup.ts'

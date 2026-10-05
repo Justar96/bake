@@ -23,12 +23,12 @@
  * })
  * ```
  *
- * @module @deepseek-ai/dsh-authorization
+ * @module bake-authorization
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { CredentialKey } from 'bake-credentials'
-import { HarnessError } from '@deepseek-ai/dsh-llm'
+import { HarnessError } from 'bake-llm'
 
 import type {
   AuthorizationEntry, AuthorizationMethod, AuthorizationNotice, AuthorizationOutcome, AuthorizationPrompt,

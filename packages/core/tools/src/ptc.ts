@@ -7,12 +7,12 @@
  */
 
 import { brandString } from 'bake-brand'
-import { createUserMessage, HarnessError } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock, ToolCallId, ToolSchema } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, HarnessError } from 'bake-llm'
+import type { ContentBlock, ToolCallId, ToolSchema } from 'bake-llm'
 import type { PtcBindingFunction, PtcRunResult, PtcRunSandbox, PtcRuntime } from 'bake-ptc-runtime'
 import { approveEscalation, ESCALATION_TARGETS, validateEscalationArgs } from 'bake-sandbox'
 import type { SandboxExecutionPolicy } from 'bake-sandbox'
-import type { ApprovalService } from '@deepseek-ai/dsh-user-approval'
+import type { ApprovalService } from 'bake-user-approval'
 import { deepFreeze, snapshotJsonValue, type JsonValue } from 'bake-util-values'
 import { defineTool, parameterSchemaSpecToJsonSchema } from './schema.ts'
 import { TOOL_RUNTIME_SCHEDULER } from './index.ts'

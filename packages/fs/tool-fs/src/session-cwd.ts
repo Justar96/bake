@@ -4,7 +4,7 @@
  * `read`/`write`/`edit` act on its workspace, not the server's launch directory.
  * Non-agent calls return `undefined`, leaving the fallback in the provider rather than reading
  * `process.cwd()` at the tool boundary.
- * @module @deepseek-ai/dsh-tool-fs/session-cwd
+ * @module bake-tool-fs/session-cwd
  */
 
 import type { ToolExecution } from 'bake-tools'

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { type Agent } from 'bake-agent'
-import SubagentRuntime, { type SubagentStartRequest } from '@deepseek-ai/dsh-subagent'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
+import SubagentRuntime, { type SubagentStartRequest } from 'bake-subagent'
+import SessionProjectionRegistry from 'bake-session-projection'
 import { SessionId } from 'bake-session'
 import * as scripted from './scripted-provider.ts'
 

@@ -1,6 +1,6 @@
 /** Validation and reconstruction of logged native tool updates. */
 
-import type { ToolHistory, ToolSchema } from '@deepseek-ai/dsh-llm'
+import type { ToolHistory, ToolSchema } from 'bake-llm'
 import { deepFreeze } from 'bake-util-values'
 import type { SessionEvent, SessionSeq } from './types.ts'
 import type { SurfaceManager } from './surface.ts'

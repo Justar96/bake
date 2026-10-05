@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Context, Service } from '@deepseek-ai/cordis'
 import { AttachmentId, AttachmentStore, ImageVariantId } from 'bake-attachment'
-import LocalAttachments from '@deepseek-ai/dsh-attachment-local'
+import LocalAttachments from 'bake-attachment-local'
 import type {
   ImageAttachmentLimits,
   ImageAttachmentRef,
@@ -13,9 +13,9 @@ import type {
   SaveImageAttachment,
   StoredImageAttachment,
 } from 'bake-attachment'
-import LlmRuntime, { createUserMessage, CONTEXT_WINDOW_EXCEEDED_CODE, LlmError, ReasoningEffortId, userAgent } from '@deepseek-ai/dsh-llm'
-import * as LlmPiAi from '@deepseek-ai/dsh-llm-pi-ai'
-import { PiAiAdapter } from '@deepseek-ai/dsh-llm-pi-ai'
+import LlmRuntime, { createUserMessage, CONTEXT_WINDOW_EXCEEDED_CODE, LlmError, ReasoningEffortId, userAgent } from 'bake-llm'
+import * as LlmPiAi from 'bake-llm-pi-ai'
+import { PiAiAdapter } from 'bake-llm-pi-ai'
 import { MAX_TIMER_DELAY_MS } from 'bake-timeout'
 import { getBuiltinModels } from '@earendil-works/pi-ai/providers/all'
 import { DEFAULT_MAX_REQUEST_IMAGE_BYTES, resolveProfiles } from '../src/config.ts'

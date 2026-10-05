@@ -3,11 +3,11 @@ description: "Shared Loader boot support for dsh profiles: environment layers, p
 kind: "package-library"
 ---
 
-# @deepseek-ai/dsh-app-boot
+# bake-app-boot
 
 ## Summary
 
-`dsh-app-boot` is the shared Loader boot library behind `dsh` profiles. It loads environment layers, composes profile bundles and patches, boots every plugin, and returns the running app or identifies the failed plugin and cause. Product applications use the `dsh` launcher instead of publishing separate bins; direct-config helpers remain only for lower-level embedders and tests. You can preview the effective configuration before booting, configure HMR through profile YAML, and let a terminal-owning app restore its terminal before a fatal exit.
+`bake-app-boot` is the shared Loader boot library behind `dsh` profiles. It loads environment layers, composes profile bundles and patches, boots every plugin, and returns the running app or identifies the failed plugin and cause. Product applications use the `dsh` launcher instead of publishing separate bins; direct-config helpers remain only for lower-level embedders and tests. You can preview the effective configuration before booting, configure HMR through profile YAML, and let a terminal-owning app restore its terminal before a fatal exit.
 
 ## Table of Contents
 
@@ -43,7 +43,7 @@ const ctx = await boot('dsh', resolveConfigPath(argv[2], process.env.DSH_SNAPSHO
 <a id="profiles"></a>
 ### Profiles
 
-Import profile and bundle declaration types from [`@deepseek-ai/dsh-package-manifest`](../../util/package-manifest/README.md). App-boot adapts `DshPackageManifest` to `ProfileManifest` with optional package identity because local profiles need no published version. App-boot owns profile loading, JSON validation, and resolved runtime data.
+Import profile and bundle declaration types from [`bake-package-manifest`](../../util/package-manifest/README.md). App-boot adapts `DshPackageManifest` to `ProfileManifest` with optional package identity because local profiles need no published version. App-boot owns profile loading, JSON validation, and resolved runtime data.
 
 Bake ships `tui` and `headless` profile templates. Each profile lives at `$DSH_HOME/profiles/<name>` and combines ordered bundles with its own `cordis.patch.yml`; YAML controls HMR. `tui` selects base and `@dsh-tui/app`, while headless selects base and its one-shot runner. `dsh --profile <name> --from-default-profile <template>` initializes a new custom profile from a shipped template. A bundle's `dsh.bundle.patch` accepts one path or an ordered list of paths, relative to its package root. Each file's patch list is applied in order. Existing profile bundle lists remain unchanged. A missing bundle or one without a patch declaration fails startup loudly. `loadProfileDirectory` loads an already initialized directory directly.
 
@@ -52,11 +52,22 @@ Your machine-local preferences also live in the Harness home:
 - **`.env`** — your ordinary environment layers: the invoking directory's file outranks the Harness-home file, and both sit below the inherited environment. Variables that decide how the process starts (`PATH`, `DSH_*`, `XDG_*` and similar) are rejected from files: export them instead. The four proxy names (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`) are accepted from the Harness-home file only, never from the invoking directory's, which arrives with a clone. For a non-product bin that just wants one directory's `.env`, a missing file is fine and an unloadable one prints one labelled warning line.
 - **`cordis.patch.yml`** — your tweak layer, applied after every bundle layer (per-profile first, then the home-level file, which therefore outranks it): replace one entry's whole config (restating the fields you keep), insert new entries, or interpolate `!!js` expressions at boot. A patch naming an entry that does not exist prints a stderr warning; an empty or comments-only file fails boot — disable the layer with `[]` instead.
 
-The enabled `dsh-hmr` plugin watches the profile manifest and both user patch files, re-reads the ordered bundle layers, and applies the [reload failure policy](#startup-and-reload-failures). [DSH HMR](../hmr/README.md) serializes these reloads with [Plugin Manager](../plugin-manager/README.md) configuration writes; package operations run outside its queue. The launcher does not install HMR or watchers; disabled or absent HMR means changes require restart.
+The enabled `bake-hmr` plugin watches the profile manifest and both user patch files, re-reads the ordered bundle layers, and applies the [reload failure policy](#startup-and-reload-failures). [DSH HMR](../hmr/README.md) serializes these reloads with [Plugin Manager](../plugin-manager/README.md) configuration writes; package operations run outside its queue. The launcher does not install HMR or watchers; disabled or absent HMR means changes require restart.
 
-Inserted plugin names may be absolute filesystem paths, file URLs, or package specifiers. Patch loading converts absolute paths and patch-relative `./` or `../` paths to file URLs within `insert` rows and their nested groups; existing-entry name assertions and replacement `config` values remain literal.
+Inserted plugin names may be absolute filesystem paths, file URLs, or package specifiers. Patch loading renames [deprecated package names](#renamed-packages), then converts absolute paths and patch-relative `./` or `../` paths to file URLs within `insert` rows and their nested groups; existing-entry name assertions and replacement `config` values remain literal.
 
 Before mounting profile rows, the `dsh` launcher computes one immutable package-resolution generation from the installation and ordered bundle dependency graphs. Runtime mode is the default: it installs the generation through Node's ESM and CommonJS resolvers without creating fallback links. Plain Node callers of `runProfile` may explicitly select link mode to materialize the generation, dual mode to materialize and verify it, or runtime mode. Packaged executables and the Electron Host always use runtime mode.
+
+<a id="renamed-packages"></a>
+#### Renamed packages
+
+Bake renamed its runtime packages from `@deepseek-ai/dsh-<name>` to `bake-<name>`. [`src/legacy-package-names.ts`](src/legacy-package-names.ts) maps every old name to its replacement (`LEGACY_PACKAGE_NAMES`, `currentPackageName`, `renamedModuleSpecifier`), and boot accepts the old names in three places:
+
+- **Profile manifests.** `loadProfile` rewrites old names in `dsh.profile.bundles` once (`migrateProfileManifest`): it copies the manifest to `package.json.bak`, replaces it atomically, and prints one line naming the renames. An application-owned profile loaded with `loadProfileDirectory` is not rewritten; its old names resolve for that launch with one deprecation warning.
+- **Patch files.** Bundle patches, the profile and home `cordis.patch.yml` layers, and `--patch` overlays rename rows and name assertions that use an old name, including subpaths such as `@deepseek-ai/dsh-tool-subagent-control/list-agents`. Each old name prints one warning per file naming its replacement.
+- **Module imports.** The package-resolution generation adds an entry for each old name of an installed renamed package. An out-of-tree plugin that imports `@deepseek-ai/dsh-llm` or one of its subpaths gets the `bake-llm` module instance, through the runtime resolver or a fallback link in link and dual modes. Its own profile-local packages still take precedence.
+
+The old names are deprecated and slated for removal in a later release.
 
 ### Previewing the effective configuration
 
@@ -116,7 +127,7 @@ This section explains how the outcomes above are realized and points at the code
 - **Consumer-owned strictness.** Ordinary Loader groups keep successful siblings. App-boot applies the global required-entry policy after initial settlement; agent presets and dynamic multi-entry compositions own and dispose their separate generation when they require all-or-nothing setup. App-boot reads failed fibers to report their recorded errors and coalesces duplicate Loader rejection notifications through one process checkpoint.
 - **One fallback generation.** The installation-first and ordered-bundle breadth-first traversal produces both the runtime table and the retained disk materializer. Runtime mode creates no resolution links and ignores stale projections at their former lookup positions. External bare targets selected by package `imports` use the same package order, while Node retains mapping, conditions, and exact target resolution. Link mode materializes the same table; dual mode also compares Node's disk result with the table. A complete successor may add package names atomically, while changing or removing an existing mapping requires restart.
 - **Application-owned profiles.** Link mode projects missing installation and bundle packages inside the profile without writing a shared Harness-home fallback. Runtime mode supplies the same installation and bundle generation without creating links. Package operations remove only profile links owned by dsh; pnpm-managed entries remain untouched.
-- **Owned Workers.** Worker build banners import `@deepseek-ai/dsh-app-boot/worker/profile-resolution-bootstrap` before bundled business code. Each Worker installs the structured-cloned generation in its own isolate. The bootstrap bundle has no static package imports. Source Worker entries retain their self-contained dependency closure, and third-party Workers receive no injection.
+- **Owned Workers.** Worker build banners import `bake-app-boot/worker/profile-resolution-bootstrap` before bundled business code. Each Worker installs the structured-cloned generation in its own isolate. The bootstrap bundle has no static package imports. Source Worker entries retain their self-contained dependency closure, and third-party Workers receive no injection.
 - **Update completion.** App boot observes restart failures through the `internal/update` waterfall. Live patch reloads wait for the tree's fibers before auditing activation; `Fiber.update()` and `Entry.update()` alone do not establish restart success.
 - **One rejection checkpoint.** `inactiveEntries` keeps the exact reasons it folds into the boot diagnostic visible through the next process rejection checkpoint, so `installFailLoud` coalesces Loader's duplicate notification, before and after readiness, while unrelated unhandled rejections remain fatal until the launcher tolerates them.
 - **Rejections after readiness.** `tolerateRejections` swaps the rejection path's fatal report for the launcher's reporter and leaves the exception path alone. A fatal exit already in progress keeps swallowing later rejections, and a reporter that throws is contained to one `<bin>: warning:` stderr line, so neither a late reporter nor its failure can end the process.
@@ -133,7 +144,8 @@ The exports each own one stage of the boot: config resolution and snapshot repla
 | File | Role |
 |---|---|
 | [`src/index.ts`](src/index.ts) | Boot helpers: config resolution, environment loading, fail-loud guard, activation audit, patch parsing, config dump |
-| [`src/profile.ts`](src/profile.ts) | Profile discovery, initialization, bundle resolution, module fallback |
+| [`src/profile.ts`](src/profile.ts) | Profile discovery, initialization, legacy manifest migration, bundle resolution, module fallback |
+| [`src/legacy-package-names.ts`](src/legacy-package-names.ts) | Deprecated upstream package names and their replacements |
 | [`src/config-schema/`](src/config-schema/) | Profile schema generation, discovery, native projection, and result types |
 | [`src/profile-resolution/`](src/profile-resolution/) | Runtime resolver, package-metadata service, and built Worker bootstrap |
 | — | No runtime invariant companion is published; one registration owns each resolver generation, and dual mode compares the independently materialized result at resolution time. |
@@ -149,9 +161,9 @@ Read these pages when the package-level contract is not enough. They move from t
 
 - [Cordis primer](../../../docs/cordis-primer.md) — Loader, `!!js` config expressions, and include/group semantics.
 - [dsh app](../../../apps/cli/README.md) — the `dsh` bin that consumes these helpers.
-- [dsh-cmdline](../cmdline/README.md) — the launcher-to-app command-line handoff the bins use.
+- [bake-cmdline](../cmdline/README.md) — the launcher-to-app command-line handoff the bins use.
 - [Profile bundles](../../bundle/README.md) — installable patch layers composed into `dsh --profile`.
-- [dsh-home-paths](../../util/home-paths/README.md) — the Harness-home resolver (`resolveDshHome`).
+- [bake-home-paths](../../util/home-paths/README.md) — the Harness-home resolver (`resolveDshHome`).
 - [Configuration source ownership](../../../.agents/notes/implemented/architecture/2026-08-04-configuration-source-ownership.md) — why a discovered file may not decide bootstrap behavior.
 - [Profile plugin bundles](../../../.agents/notes/implemented/architecture/2026-08-05-profile-plugin-bundles.md) — the profile and bundle composition design.
 - [User-patch HMR tests](../../../.agents/notes/implemented/testing/2026-09-09-user-patch-hmr-test-delivery.md) — ownership of live-patch behavior and native filesystem delivery.

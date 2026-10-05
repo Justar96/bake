@@ -1,6 +1,6 @@
 # Session Feedback
 
-[`@deepseek-ai/dsh-command-feedback`](../../packages/feedback/command-feedback) owns `/feedback`, the immutable Session-level remark it records as `feedback/record`, and the `FeedbackCategory` taxonomy a remark is filed under. The event is log-only and never enters model context.
+[`bake-command-feedback`](../../packages/feedback/command-feedback) owns `/feedback`, the immutable Session-level remark it records as `feedback/record`, and the `FeedbackCategory` taxonomy a remark is filed under. The event is log-only and never enters model context.
 
 ## Public types
 

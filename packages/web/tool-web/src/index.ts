@@ -3,12 +3,12 @@
  * descriptions, validation, limits, and presentation, never concrete providers. Enablement
  * controls tool registration; an enabled tool remains visible when its provider is unavailable
  * and fails with a structured error at execution time.
- * @module @deepseek-ai/dsh-tool-web
+ * @module bake-tool-web
  */
 
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import type {} from '@deepseek-ai/dsh-web'
+import type {} from 'bake-web'
 import { applyWebSearchTool, WEB_SEARCH_MAX_QUERIES, WEB_SEARCH_MAX_RESULTS } from './search.ts'
 import { applyWebFetchTool } from './fetch.ts'
 import { assertPositiveInteger } from 'bake-util-values'
@@ -72,7 +72,7 @@ type ResolvedConfig = Required<Config>
  * system-prompt section, so their text varies only with this config. Each
  * tool's cooperative timeout budget (`fetchTimeoutMs`/`searchTimeoutMs`,
  * default 30000) is resolved here and attached to the tool as
- * `ToolDefinition.timeoutMs` for `@deepseek-ai/dsh-tool-call-timeout-policy` to
+ * `ToolDefinition.timeoutMs` for `bake-tool-call-timeout-policy` to
  * enforce. The registrations are fiber-scoped effects that the registry removes
  * on dispose, so no manual teardown is needed.
  */

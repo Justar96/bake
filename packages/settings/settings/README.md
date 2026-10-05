@@ -34,12 +34,12 @@ Choose settings when a plugin's configuration should be changeable at runtime â€
 The service stores nothing by itself; mount a provider such as the shipped file-backed one:
 
 ```yaml
-- name: '@deepseek-ai/dsh-settings-file'
+- name: 'bake-settings-file'
   config:
     path: /absolute/path/to/settings.yaml
 ```
 
-`ctx.settings` appears once the provider is live. The provider README owns the full configuration surface; the generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-settings-file) lists every accepted field.
+`ctx.settings` appears once the provider is live. The provider README owns the full configuration surface; the generated [configuration catalog](../../../docs/config-catalog.md#bake-settings-file) lists every accepted field.
 
 ### Registering a namespace
 

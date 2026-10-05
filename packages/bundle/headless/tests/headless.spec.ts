@@ -13,11 +13,11 @@ import type {
   ResumeAgentOptions,
 } from 'bake-agent'
 import AgentDefaultModelConfig from 'bake-agent-default-model'
-import { LlmAttemptId, ToolCallId, createAssistantMessage, createToolResultMessage, type StreamChunk } from '@deepseek-ai/dsh-llm'
+import { LlmAttemptId, ToolCallId, createAssistantMessage, createToolResultMessage, type StreamChunk } from 'bake-llm'
 import SessionStore from 'bake-session'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
+import SessionProjectionRegistry from 'bake-session-projection'
 import type { Session, SessionId, UserMessage } from 'bake-session'
-import { SESSION_IN_USE_EXIT } from '@deepseek-ai/dsh-cmdline'
+import { SESSION_IN_USE_EXIT } from 'bake-cmdline'
 import { SessionAlreadyOwnedError } from 'bake-session-persistence'
 import { SessionQueryError } from 'bake-session-query'
 import { createInboxStub } from 'bake-agent-loop-testkit'
@@ -119,7 +119,7 @@ function appendTurn(
   })
 }
 
-/** Append the preset-selection event owned by dsh-agent-presets. */
+/** Append the preset-selection event owned by bake-agent-presets. */
 function selectPreset(session: Session, agentPreset: string): void {
   const target = session as unknown as { append(type: string, data: unknown): void }
   target.append('agent-preset/selected', { agentPreset })

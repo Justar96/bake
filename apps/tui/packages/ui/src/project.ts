@@ -16,7 +16,7 @@
 import type { SessionEvent } from 'bake-session'
 // Empty type imports. Each declaration-merges the events projected below into
 // `SessionEventMap`, and those arms are invisible here without them.
-import type {} from '@deepseek-ai/dsh-commands'
+import type {} from 'bake-commands'
 import type {} from 'bake-compaction'
 import stringWidth from 'string-width'
 import { ToolCards, type ToolLookup } from './cards.ts'

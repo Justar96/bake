@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage } from 'bake-llm'
 import SessionStore, { SessionId } from 'bake-session'
 import { RuntimeContextProjection } from '../src/runtime-context.ts'
 

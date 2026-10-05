@@ -1,4 +1,4 @@
-# The dsh-headless bundle patch: one-shot task mode directly over dsh-base.
+# The bake-headless bundle patch: one-shot task mode directly over bake-base.
 # It mounts no Host, HTTP server, Web runtime, or browser plugin. An ordinary
 # provider plugin injects `cmdlineArgs`, parses the task positional
 # (`dsh --profile headless "<task>"`), the `--resume` (alias `--session-id`)
@@ -37,14 +37,14 @@
 
 - insert:
     - id: subagent-model-selection-settings
-      name: '@deepseek-ai/dsh-tool-subagent/model-selection-settings'
+      name: 'bake-tool-subagent/model-selection-settings'
 
     - id: headless-startup
-      name: '@deepseek-ai/dsh-headless/startup'
+      name: 'bake-headless/startup'
 
     # Reads its task and run options from the ordinary headlessStartup provider.
     - id: headless-runner
-      name: '@deepseek-ai/dsh-headless'
+      name: 'bake-headless'
       inject: [headlessStartup]
       config:
         task: !!js ctx.headlessStartup.task

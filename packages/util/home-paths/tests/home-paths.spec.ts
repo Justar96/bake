@@ -12,7 +12,7 @@ import {
   dshHomePath,
   expandHomePath,
   resolveDshHome,
-} from '@deepseek-ai/dsh-home-paths'
+} from 'bake-home-paths'
 
 afterEach(() => {
   vi.unstubAllEnvs()

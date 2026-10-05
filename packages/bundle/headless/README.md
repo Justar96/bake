@@ -3,11 +3,11 @@ description: "One-shot task mode for dsh: run a single task from the command lin
 kind: "package-bundle"
 ---
 
-# @deepseek-ai/dsh-headless
+# bake-headless
 
 ## Summary
 
-`dsh-headless` runs one dsh task from the command line and prints the final answer, then exits — no GUI, no server, no browser. Type `dsh --profile headless "run the tests"` and the agent handles it with the same model, tools, and safety defaults as every other surface. It suits scripts, CI, and one-off jobs: it opens no ports and leaves nothing running behind. It also offers a JSON event stream (`--json`) and `--resume` to resume a conversation. Exit code 0 means the task completed; 1 means it aborted or errored; 75 means the `--resume` Session is open in another Bake process. The boundary: one task per invocation, no interactive follow-up.
+`bake-headless` runs one dsh task from the command line and prints the final answer, then exits — no GUI, no server, no browser. Type `dsh --profile headless "run the tests"` and the agent handles it with the same model, tools, and safety defaults as every other surface. It suits scripts, CI, and one-off jobs: it opens no ports and leaves nothing running behind. It also offers a JSON event stream (`--json`) and `--resume` to resume a conversation. Exit code 0 means the task completed; 1 means it aborted or errored; 75 means the `--resume` Session is open in another Bake process. The boundary: one task per invocation, no interactive follow-up.
 
 ## Table of Contents
 
@@ -45,7 +45,7 @@ The task and run options are supplied through three settings:
 | `sessionId` | `session-<uuid>` | Exact Session identity to adopt; an unknown id fails |
 | `json` | `false` | Project the run as newline-delimited events on stdout |
 
-The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-headless) is the exhaustive source for every accepted field and its JSDoc.
+The generated [configuration catalog](../../../docs/config-catalog.md#bake-headless) is the exhaustive source for every accepted field and its JSDoc.
 
 Delegation follows the same `subagent-model-selection` setting in `settings.yaml` as the terminal profile. While it is enabled, the `subagent` tool offers the agent the setting's allowed routes, and with its `router` on, a delegation that names no route asks the router for one. Each new Session records the setting as it starts, so editing it affects later runs only; a resumed Session keeps what it recorded.
 
@@ -81,11 +81,11 @@ The runner awaits the complete application (`ctx.get('loader')?.await()`) so the
 
 ### Patch surface over base
 
-The patch rides over `dsh-base`: it inherits the projection cache and shared PTC runtime, sets the Bake coding persona prefix and separate cwd suffix on the base `system-prompt` row and omits the harness identity opener, keeps the same temporary process-wide PTC mode opt-in (`DSH_TOOLS_MODE`) as the Web surface, restates the base `tool-subagent` row with `modelSelectionSettings: true` and mounts the `subagent-model-selection` settings plugin that row waits for, disables the shared HMR row, and mounts the startup provider and the runner. The cache checkpoints each persisted one-shot session for later consumers; its durability barrier flushes each covered log prefix before publishing the cache row and may split otherwise coalesced JSONL runs. The startup provider ([`src/startup.ts`](src/startup.ts)) injects `ctx.cmdlineArgs` ([`dsh-cmdline`](../../boot/cmdline/README.md)), reads the positional argument and the `--resume`/`--json` options, prints the app's `--help`, and provides `headlessStartup`; the runner injects that service and reads its task and run options from lazy config.
+The patch rides over `bake-base`: it inherits the projection cache and shared PTC runtime, sets the Bake coding persona prefix and separate cwd suffix on the base `system-prompt` row and omits the harness identity opener, keeps the same temporary process-wide PTC mode opt-in (`DSH_TOOLS_MODE`) as the Web surface, restates the base `tool-subagent` row with `modelSelectionSettings: true` and mounts the `subagent-model-selection` settings plugin that row waits for, disables the shared HMR row, and mounts the startup provider and the runner. The cache checkpoints each persisted one-shot session for later consumers; its durability barrier flushes each covered log prefix before publishing the cache row and may split otherwise coalesced JSONL runs. The startup provider ([`src/startup.ts`](src/startup.ts)) injects `ctx.cmdlineArgs` ([`bake-cmdline`](../../boot/cmdline/README.md)), reads the positional argument and the `--resume`/`--json` options, prints the app's `--help`, and provides `headlessStartup`; the runner injects that service and reads its task and run options from lazy config.
 
 ### Exit mapping
 
-A completed final `turn/end` exits 0; any other outcome — aborted, error, or no turn in the owned interval — exits 1. An `error` reason also writes `dsh: <code>: <message>` to stderr. A direct driver failure (for example, Agent creation or an unusable `--resume`) writes `dsh: <message>` to stderr and exits 1, and in `--json` mode also emits an `error` event. A run the process stops before its turn finishes is not a failure: SIGTERM, SIGINT, or SIGHUP, or anything else that disposes the Agent. The runner writes `dsh: stopped before the task finished; continue it with --resume <id>` to stderr, emits no `error` or `final` event, and exits with the signal's code (0, 130, or 129). Disposal closes the Session, which drains its log, so the hint resumes it. An answer the turn finished before the stop is still printed. The exception is a `--resume` Session whose write lock another process holds: the runner turns the persistence refusal into [`dsh-cmdline`](../../boot/cmdline/README.md)'s `SessionInUseError`, reports it the same way, and exits with `SESSION_IN_USE_EXIT` (75), as the terminal profile does for the same refusal. An error a plugin leaves unhandled after startup does not fail the run: the launcher records it and writes one `dsh: warning: unhandled rejection after startup: …` line to stderr, and the run continues to its own exit status; see [startup and shutdown](../../../apps/cli/README.md#startup-and-shutdown).
+A completed final `turn/end` exits 0; any other outcome — aborted, error, or no turn in the owned interval — exits 1. An `error` reason also writes `dsh: <code>: <message>` to stderr. A direct driver failure (for example, Agent creation or an unusable `--resume`) writes `dsh: <message>` to stderr and exits 1, and in `--json` mode also emits an `error` event. A run the process stops before its turn finishes is not a failure: SIGTERM, SIGINT, or SIGHUP, or anything else that disposes the Agent. The runner writes `dsh: stopped before the task finished; continue it with --resume <id>` to stderr, emits no `error` or `final` event, and exits with the signal's code (0, 130, or 129). Disposal closes the Session, which drains its log, so the hint resumes it. An answer the turn finished before the stop is still printed. The exception is a `--resume` Session whose write lock another process holds: the runner turns the persistence refusal into [`bake-cmdline`](../../boot/cmdline/README.md)'s `SessionInUseError`, reports it the same way, and exits with `SESSION_IN_USE_EXIT` (75), as the terminal profile does for the same refusal. An error a plugin leaves unhandled after startup does not fail the run: the launcher records it and writes one `dsh: warning: unhandled rejection after startup: …` line to stderr, and the run continues to its own exit status; see [startup and shutdown](../../../apps/cli/README.md#startup-and-shutdown).
 
 ### Source map
 
@@ -94,7 +94,7 @@ A completed final `turn/end` exits 0; any other outcome — aborted, error, or n
 | [`src/index.ts`](src/index.ts) | The `headless-runner` plugin: run flow, session resolution, output contract, exit mapping |
 | [`src/startup.ts`](src/startup.ts) | The `headless-startup` provider: task positional, `--resume`, `--json`, and `--help` |
 | [`src/json-stream.ts`](src/json-stream.ts) | The `--json` projection: event vocabulary, commit-point emission, string bounding |
-| [`cordis.patch.yml`](cordis.patch.yml) | The one-shot patch over `dsh-base` |
+| [`cordis.patch.yml`](cordis.patch.yml) | The one-shot patch over `bake-base` |
 | — | No runtime invariant companion is published; the runner's observable contract (provider reasoning on stderr, final text on stdout, exit code by turn-end reason) is process-level and owned by the launcher e2e; it registers nothing and holds no mutable relation to audit inside the tree. |
 | [`tests/headless.spec.ts`](tests/headless.spec.ts) | Run flow, aggregation, flush, session adoption, and exit mapping |
 | [`tests/json-stream.spec.ts`](tests/json-stream.spec.ts) | Projection ordering, commit-point emission, bounding, and disposal |
@@ -114,9 +114,9 @@ No invariant companion is published because the runner's observable contract (fi
 Read these pages when you want to go deeper into the shared core, the sibling GUI, or the command-line handoff.
 
 - [Bundle package map](../README.md) — the surfaces built on the same core.
-- [dsh-base](../base/README.md) — the shared core headless runs on.
-- [dsh-cmdline](../../boot/cmdline/README.md) — how the launcher hands the command line to the app.
-- [Generated configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-headless) — every accepted config field and its source declaration.
+- [bake-base](../base/README.md) — the shared core headless runs on.
+- [bake-cmdline](../../boot/cmdline/README.md) — how the launcher hands the command line to the app.
+- [Generated configuration catalog](../../../docs/config-catalog.md#bake-headless) — every accepted config field and its source declaration.
 
 -----
 

@@ -4,7 +4,7 @@
  * Remote request and result types. Types only; the runtime category tuple is
  * exported by the package entry, and a browser plugin imports types alone
  * because its bundle may not carry Host values.
- * @module @deepseek-ai/dsh-command-feedback/types
+ * @module bake-command-feedback/types
  */
 
 import type { SessionId } from 'bake-session/types'

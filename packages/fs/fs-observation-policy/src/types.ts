@@ -7,7 +7,7 @@
  * re-used from `bake-fs`; this package owns only the observed-state
  * owner structure on top of it.
  *
- * @module @deepseek-ai/dsh-fs-observation-policy/types
+ * @module bake-fs-observation-policy/types
  */
 
 /**

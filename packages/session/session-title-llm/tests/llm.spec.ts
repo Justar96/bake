@@ -1,10 +1,10 @@
 import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it, vi } from 'vitest'
-import LlmRuntime, { createUserMessage, ToolCallId, isAgentLoopRequest, LlmAdapter  } from '@deepseek-ai/dsh-llm'
-import type { FinishReason, GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { createUserMessage, ToolCallId, isAgentLoopRequest, LlmAdapter  } from 'bake-llm'
+import type { FinishReason, GenerateOptions, StreamChunk } from 'bake-llm'
 import SessionStore, { SessionId } from 'bake-session'
-import { SessionTitleProviderId } from '@deepseek-ai/dsh-session-title'
-import type { SessionTitleProviderRequest } from '@deepseek-ai/dsh-session-title'
+import { SessionTitleProviderId } from 'bake-session-title'
+import type { SessionTitleProviderRequest } from 'bake-session-title'
 import { MAX_TIMER_DELAY_MS } from 'bake-timeout'
 import {
   generateSessionTitleWithLlm,

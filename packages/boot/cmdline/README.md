@@ -3,11 +3,11 @@ description: "App-owned command lines for dsh app bins: your app parses its own 
 kind: "package-library"
 ---
 
-# @deepseek-ai/dsh-cmdline
+# bake-cmdline
 
 ## Summary
 
-`dsh-cmdline` lets an app parse its own flags, `--help`, and errors from the arguments left unchanged after launcher flags. Parsed values can override configuration defaults without rewriting configuration. The app can also request process exit through the launcher's shutdown path. Use this package for app bins with their own command-line interface. It adds no prompt, schema, or model-visible content.
+`bake-cmdline` lets an app parse its own flags, `--help`, and errors from the arguments left unchanged after launcher flags. Parsed values can override configuration defaults without rewriting configuration. The app can also request process exit through the launcher's shutdown path. Use this package for app bins with their own command-line interface. It adds no prompt, schema, or model-visible content.
 
 ## Table of Contents
 
@@ -108,8 +108,8 @@ The parse path is one small family with two owners: `provideCmdline` freezes the
 
 Read these pages when the package-level contract is not enough. They move from the handoff mechanism to the apps that consume it.
 
-- [dsh-app-boot](../app-boot/README.md) — the boot sequence that provides these launcher values.
-- [dsh-headless bundle](../../bundle/headless/README.md) — the one-shot runner that reads its task from the command line.
+- [bake-app-boot](../app-boot/README.md) — the boot sequence that provides these launcher values.
+- [bake-headless bundle](../../bundle/headless/README.md) — the one-shot runner that reads its task from the command line.
 
 -----
 

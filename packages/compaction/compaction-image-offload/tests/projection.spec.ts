@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { createAssistantMessage, createToolResultMessage, createUserMessage, ToolCallId } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock, ImageBlock } from '@deepseek-ai/dsh-llm'
+import { createAssistantMessage, createToolResultMessage, createUserMessage, ToolCallId } from 'bake-llm'
+import type { ContentBlock, ImageBlock } from 'bake-llm'
 import { deriveEventMessage, foldSurface, Session, SessionId, SessionLogOffset, SessionSeq } from 'bake-session'
 import type { SessionEvent, SessionEventMap } from 'bake-session'
 import { imageOffloadProjection } from '../src/projection.ts'

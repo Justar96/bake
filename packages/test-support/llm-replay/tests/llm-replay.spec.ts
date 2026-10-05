@@ -16,7 +16,7 @@ import LlmRuntime, {
   GenerateOptions,
   LlmAdapter,
   StreamChunk,
-} from '@deepseek-ai/dsh-llm'
+} from 'bake-llm'
 import {
   type Config,
   type ReplayEntry,

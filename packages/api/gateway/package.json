@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-api-gateway",
+  "name": "bake-api-gateway",
   "description": "Typert Remote Host dispatcher and Client API endpoint",
   "version": "0.1.6-alpha.2",
   "publishConfig": {
@@ -32,7 +32,7 @@
   "dsh": {
     "client": {
       "inject": [
-        "@deepseek-ai/dsh-typert-registry",
+        "bake-typert-registry",
         "bake-client-connection"
       ],
       "platform": "web",
@@ -65,7 +65,7 @@
     "bake-client-connection": "workspace:^",
     "bake-host-webserver": "workspace:^",
     "bake-remote-mock": "workspace:^",
-    "@deepseek-ai/dsh-typert-registry": "workspace:^",
+    "bake-typert-registry": "workspace:^",
     "bake-util-crypto": "workspace:^",
     "@types/ws": "catalog:",
     "@deepseek-ai/cordis": "workspace:^",

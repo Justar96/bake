@@ -9,7 +9,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from 'bake-tools'
 import type { GenericCallView, ToolResult, WebSearchResultView, WebSource } from 'bake-tools'
 import type { JsonValue } from 'bake-util-values'
-import type { WebSearchResult, WebSearchSource } from '@deepseek-ai/dsh-web'
+import type { WebSearchResult, WebSearchSource } from 'bake-web'
 import { EXTERNAL_WEB_CONTENT_NOTICE } from './trust.ts'
 
 /**
@@ -317,7 +317,7 @@ function webSearchDescription(fetchEnabled: boolean): string {
  * @param maxQueries - the deployment's query cap enforced before provider calls
  *   and advertised once, in the `queries` parameter description.
  * @param timeoutMs - the cooperative tool-call budget (ms) attached as the tool's
- *   `ToolDefinition.timeoutMs` for `@deepseek-ai/dsh-tool-call-timeout-policy` to enforce.
+ *   `ToolDefinition.timeoutMs` for `bake-tool-call-timeout-policy` to enforce.
  * @param fetchEnabled - whether the same plugin config registers `web_fetch`,
  *   which selects the description variant (see {@link webSearchDescription}).
  */

@@ -9,7 +9,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Scoped } from 'bake-scope'
 import type {
   LlmAttemptId, LlmCallConfig, LlmFailure, MessageId, ReasoningEffortId, ResolvedRetryPolicy, StreamChunk, ToolCallId,
-} from '@deepseek-ai/dsh-llm'
+} from 'bake-llm'
 import type { AgentCancelCause, Session, SessionSeq, UserMessage } from 'bake-session'
 export type { AgentCancelCause } from 'bake-session'
 import type { Agent, InboxTarget } from './types.ts'

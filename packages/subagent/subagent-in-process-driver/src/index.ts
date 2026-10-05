@@ -17,7 +17,7 @@ import { brandString } from 'bake-brand'
 import { foldConsumedWork } from 'bake-agent'
 import type { Agent, AgentHandle } from 'bake-agent'
 import type { SessionId, TurnEndReason } from 'bake-session'
-import { createUserMessage, type ContentBlock } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, type ContentBlock } from 'bake-llm'
 import {
   appendDelegatedPolicyOverrides,
   applyChildComposition,
@@ -27,14 +27,14 @@ import {
   finalAssistantOutput,
   resolveChildAgentOptions,
   resolveChildDepth,
-} from '@deepseek-ai/dsh-subagent'
+} from 'bake-subagent'
 import type {
   ResolvedSubagentStartRequest,
   SubagentDescriptorData,
   SubagentResult,
   SubagentRun,
   SubagentStopReason,
-} from '@deepseek-ai/dsh-subagent'
+} from 'bake-subagent'
 import {
   attachStructuredRuntime,
   type StructuredAttachment,

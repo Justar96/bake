@@ -3,11 +3,11 @@ description: "The file-backed settings provider for users and maintainers choosi
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-settings-file
+# bake-settings-file
 
 ## Summary
 
-`dsh-settings-file` keeps every namespace's user settings in one YAML or JSON document, by default `settings.yaml` under the harness home: users can edit the document directly — changes take effect live — or write through the service, which merges concurrent edits safely. YAML writes preserve comments, anchors, and formatting on every untouched node, and a section owned by a plugin that is not loaded is never dropped. Boot fails loud on an invalid document; a live reload that fails keeps the last good sections and warns rather than taking the process down.
+`bake-settings-file` keeps every namespace's user settings in one YAML or JSON document, by default `settings.yaml` under the harness home: users can edit the document directly — changes take effect live — or write through the service, which merges concurrent edits safely. YAML writes preserve comments, anchors, and formatting on every untouched node, and a section owned by a plugin that is not loaded is never dropped. Boot fails loud on an invalid document; a live reload that fails keeps the last good sections and warns rather than taking the process down.
 
 ## Table of Contents
 
@@ -32,7 +32,7 @@ Choose it as the default user-settings store: one human-readable document that u
 ### Minimal configuration
 
 ```yaml
-- name: '@deepseek-ai/dsh-settings-file'
+- name: 'bake-settings-file'
   config:
     path: /absolute/path/to/settings.yaml
 ```
@@ -44,7 +44,7 @@ Choose it as the default user-settings store: one human-readable document that u
 | `watch` | `true` | Watch the document and hot-publish external edits |
 | `debounceMs` | `100` | Watcher write-settle window, in milliseconds |
 
-The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-settings-file) is the exhaustive source for every accepted field and its JSDoc.
+The generated [configuration catalog](../../../docs/config-catalog.md#bake-settings-file) is the exhaustive source for every accepted field and its JSDoc.
 
 ### Editing the document
 
@@ -112,7 +112,7 @@ Read these pages when the provider-level contract is not enough. They move from 
 - [Settings package map](../README.md) — the two packages of the user-settings capability.
 - [Atomic write](../../util/atomic-write/README.md) — the writer lock and atomic replacement every write uses.
 - [Home paths](../../util/home-paths/README.md) — `$DSH_HOME` resolution and canonical watch paths.
-- [Generated configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-settings-file) — every accepted config field and its source declaration.
+- [Generated configuration catalog](../../../docs/config-catalog.md#bake-settings-file) — every accepted config field and its source declaration.
 
 -----
 

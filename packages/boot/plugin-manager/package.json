@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-plugin-manager",
+  "name": "bake-plugin-manager",
   "description": "Current-profile plugin and bundle management shared by dsh CLI, Web and agent tools",
   "version": "0.1.6-alpha.2",
   "publishConfig": {
@@ -52,8 +52,8 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "@deepseek-ai/dsh-app-boot": "workspace:^",
-    "@deepseek-ai/dsh-atomic-write": "workspace:^",
+    "bake-app-boot": "workspace:^",
+    "bake-atomic-write": "workspace:^",
     "@deepseek-ai/schemastery": "workspace:^",
     "execa": "catalog:",
     "yaml": "catalog:",
@@ -67,17 +67,17 @@
     "bake-subprocess": "workspace:^",
     "bake-typert-protocol": "workspace:^",
     "bake-tools": "workspace:^",
-    "@deepseek-ai/dsh-hmr": "workspace:^",
+    "bake-hmr": "workspace:^",
     "bake-brand": "workspace:^",
-    "@deepseek-ai/dsh-sandbox-policy": "workspace:^",
+    "bake-sandbox-policy": "workspace:^",
     "bake-sandbox": "workspace:^",
-    "@deepseek-ai/dsh-user-approval": "workspace:^"
+    "bake-user-approval": "workspace:^"
   },
   "peerDependenciesMeta": {
-    "@deepseek-ai/dsh-hmr": {
+    "bake-hmr": {
       "optional": true
     },
-    "@deepseek-ai/dsh-user-approval": {
+    "bake-user-approval": {
       "optional": true
     }
   },
@@ -89,14 +89,14 @@
     "bake-typert-protocol": "workspace:^",
     "bake-tools": "workspace:^",
     "bake-system-prompt": "workspace:^",
-    "@deepseek-ai/dsh-hmr": "workspace:^",
+    "bake-hmr": "workspace:^",
     "@deepseek-ai/cordis-plugin-timer": "workspace:^",
     "bake-brand": "workspace:^",
-    "@deepseek-ai/dsh-sandbox-policy": "workspace:^",
+    "bake-sandbox-policy": "workspace:^",
     "bake-agent": "workspace:^",
     "bake-session": "workspace:^",
-    "@deepseek-ai/dsh-session-projection": "workspace:^",
+    "bake-session-projection": "workspace:^",
     "bake-sandbox": "workspace:^",
-    "@deepseek-ai/dsh-user-approval": "workspace:^"
+    "bake-user-approval": "workspace:^"
   }
 }

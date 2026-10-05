@@ -3,7 +3,7 @@ description: "Run TypeScript programs in fresh WebAssembly QuickJS VMs on worker
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-ptc-runtime-codemode
+# bake-ptc-runtime-codemode
 
 ## Summary
 
@@ -28,7 +28,7 @@ Mount this provider in any composition; it injects no services. PTC mode in `dsh
 ### Configuration
 
 ```yaml
-- name: '@deepseek-ai/dsh-ptc-runtime-codemode'
+- name: 'bake-ptc-runtime-codemode'
   config:
     timeoutMs: 120000
     maxTimeoutMs: 600000
@@ -47,7 +47,7 @@ Mount this provider in any composition; it injects no services. PTC mode in `dsh
 | `maxMessageBytes` | `134,217,728` | Serialized bytes of one binding call's arguments and of all outstanding binding arguments |
 | `maxPendingCalls` | `128` | Maximum simultaneous host binding calls |
 
-The [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-ptc-runtime-codemode) defines accepted config fields. `resolve(request)` supplies the cwd and the numeric deadline. It rejects an explicit `sandboxPolicy`, because programs have no file access to confine, and it advertises no `sandboxMode`. `run(spec)` accepts resolved inputs and does not fill missing values.
+The [configuration catalog](../../../docs/config-catalog.md#bake-ptc-runtime-codemode) defines accepted config fields. `resolve(request)` supplies the cwd and the numeric deadline. It rejects an explicit `sandboxPolicy`, because programs have no file access to confine, and it advertises no `sandboxMode`. `run(spec)` accepts resolved inputs and does not fill missing values.
 
 ### Execution and results
 

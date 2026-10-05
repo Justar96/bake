@@ -11,10 +11,10 @@
  *
  * Reconstruction reads the `agentPreset` Session projection, never the header
  * alone.
- * @module @deepseek-ai/dsh-agent-presets/session
+ * @module bake-agent-presets/session
  */
 
-import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
+import type { ProjectionDefinition } from 'bake-session-projection'
 import { z } from 'zod'
 
 declare module 'bake-session/types' {

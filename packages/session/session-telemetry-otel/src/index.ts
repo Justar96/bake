@@ -9,13 +9,13 @@
  * capture mode and an outer shutdown deadline: the SDK's export timeout does
  * not bound its preceding `forceFlush()` wait.
  *
- * @module @deepseek-ai/dsh-session-telemetry-otel
+ * @module bake-session-telemetry-otel
  */
 
 import { createRequire } from 'node:module'
 import z from '@deepseek-ai/schemastery'
 import type { Context } from '@deepseek-ai/cordis'
-import type {} from '@deepseek-ai/dsh-command-feedback'
+import type {} from 'bake-command-feedback'
 import type { Session, SessionEvent } from 'bake-session'
 import {
   SessionTelemetryBackend,
@@ -25,14 +25,14 @@ import {
   type SessionTelemetrySeverity,
   type SessionTelemetrySharingStatus,
 } from 'bake-session-telemetry'
-import { APP_IDENTITY } from '@deepseek-ai/dsh-llm'
+import { APP_IDENTITY } from 'bake-llm'
 import { getOrCreateAnonymousUserId } from 'bake-anonymous-user-id'
 import type { LoggerProvider, BatchLogRecordProcessorOptions } from '@opentelemetry/sdk-logs'
 import type { OTLPExporterNodeConfigBase } from '@opentelemetry/otlp-exporter-base'
 import type { SeverityNumber, AnyValue } from '@opentelemetry/api-logs'
 
 // The package's own manifest is the single source of the instrumentation-scope
-// version (same pattern as dsh-llm's attribution identity).
+// version (same pattern as bake-llm's attribution identity).
 const require = createRequire(import.meta.url)
 const { version } = require('../package.json') as { version: string }
 

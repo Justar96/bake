@@ -4,7 +4,7 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import { isAgentLoopRequest, type GenerateOptions } from '@deepseek-ai/dsh-llm'
+import { isAgentLoopRequest, type GenerateOptions } from 'bake-llm'
 import type { InvariantFailure, InvariantInstaller } from 'bake-invariants'
 import { foldRequestHeader } from 'bake-session'
 

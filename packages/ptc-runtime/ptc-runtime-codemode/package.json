@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-ptc-runtime-codemode",
+  "name": "bake-ptc-runtime-codemode",
   "description": "QuickJS WebAssembly implementation of the DeepSeek Harness PTC execution capability",
   "version": "0.1.6-alpha.2",
   "publishConfig": {

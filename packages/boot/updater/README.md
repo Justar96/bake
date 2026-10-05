@@ -3,11 +3,11 @@ description: "Bake's self-updater: verify the signed release manifest, install a
 kind: "package-library"
 ---
 
-# @deepseek-ai/dsh-updater
+# bake-updater
 
 ## Summary
 
-`@deepseek-ai/dsh-updater` is the code behind `bake update`, the terminal's `/update`, and its update notice. It trusts a release manifest only when a known Ed25519 key signed its exact bytes, installs a newer release into its own version directory beside the running one, runs that release's launch check, and moves the install's `current` pointer as its last step, so an interrupted or failed update leaves the old release in place. `bake update --rollback` moves `current` back to an earlier release still installed, after the same check. It updates only an install the installers laid out; a source checkout is left alone. Use it as a direct library dependency, not through `cordis.yml`.
+`bake-updater` is the code behind `bake update`, the terminal's `/update`, and its update notice. It trusts a release manifest only when a known Ed25519 key signed its exact bytes, installs a newer release into its own version directory beside the running one, runs that release's launch check, and moves the install's `current` pointer as its last step, so an interrupted or failed update leaves the old release in place. `bake update --rollback` moves `current` back to an earlier release still installed, after the same check. It updates only an install the installers laid out; a source checkout is left alone. Use it as a direct library dependency, not through `cordis.yml`.
 
 ## Table of Contents
 

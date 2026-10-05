@@ -14,14 +14,14 @@
  * error. The module owns no catalog state and does not consult Activation,
  * Agent-registry, continuation-manager, or provider state.
  *
- * @module @deepseek-ai/dsh-subagent
+ * @module bake-subagent
  */
 
 import type { Context } from '@deepseek-ai/cordis'
 import { SessionLogOffset } from 'bake-session'
 import type { Session, SessionHeader, SessionId } from 'bake-session'
-import type { SessionProjectionRegistry } from '@deepseek-ai/dsh-session-projection'
-import type { SessionProjectionCache } from '@deepseek-ai/dsh-session-projection-cache'
+import type { SessionProjectionRegistry } from 'bake-session-projection'
+import type { SessionProjectionCache } from 'bake-session-projection-cache'
 import type { SessionObservation, SessionQueryEngine } from 'bake-session-query'
 import type { SubagentListEntry } from './control-types.ts'
 import { SubagentError } from './error.ts'

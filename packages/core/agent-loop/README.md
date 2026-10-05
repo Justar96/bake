@@ -23,7 +23,7 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## Use this package
 
-Mount `bake-agent-loop` in any composition that should run agents. It supplies the driver behind `ctx.agents` and starts agents declared in its config; [`dsh-base`](../../bundle/base/README.md) mounts it as an explicit row.
+Mount `bake-agent-loop` in any composition that should run agents. It supplies the driver behind `ctx.agents` and starts agents declared in its config; [`bake-base`](../../bundle/base/README.md) mounts it as an explicit row.
 
 ### Configure declarative agents
 

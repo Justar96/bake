@@ -8,8 +8,8 @@ import type {
   SessionPersistenceRevision,
   SessionPersistenceSnapshot,
 } from 'bake-session-persistence'
-import type { ProjectionSnapshot } from '@deepseek-ai/dsh-session-projection'
-import type {} from '@deepseek-ai/dsh-session-projection-cache'
+import type { ProjectionSnapshot } from 'bake-session-projection'
+import type {} from 'bake-session-projection-cache'
 import { SESSION_QUERY_DEFAULT_PREPARED_SESSION_CACHE_SIZE, SessionQueryError } from './config.ts'
 import { readColdSessionLog, type ColdSessionLog } from './cold-read.ts'
 

@@ -1,12 +1,12 @@
 /**
- * @deepseek-ai/dsh-desktop — the long-lived bridge between Bake and the Bake
+ * bake-desktop — the long-lived bridge between Bake and the Bake
  * Desktop app. It speaks the desktop protocol (./protocol.ts) over the
  * utility-process message port or stdio, drives one root Agent per process,
  * streams its output, forwards approval questions to the desktop, applies the
  * desktop's permission tier, and reports harness spans for the desktop's
  * trace view.
  *
- * @module @deepseek-ai/dsh-desktop
+ * @module bake-desktop
  */
 
 import { randomUUID } from 'node:crypto'
@@ -16,15 +16,15 @@ import { installModelSelection } from 'bake-agent'
 import type { Agent, AssistantStreamFrame, ModelSelectionRef } from 'bake-agent'
 import { NO_DEFAULT_MODEL_MESSAGE } from 'bake-agent-default-model'
 import type {} from 'bake-fs'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage } from 'bake-llm'
 import type { Session, SessionEvent, SessionId } from 'bake-session'
 import type { PreToolDecision } from 'bake-tools'
-import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
-import type {} from '@deepseek-ai/dsh-permission-presets'
+import type { ApprovalOutcome } from 'bake-user-approval'
+import type {} from 'bake-permission-presets'
 // Empty type imports carry the loader Context merge for the settlement await
 // and the cmdline Context merge for the appExit host value.
 import type {} from '@deepseek-ai/cordis-plugin-loader'
-import type {} from '@deepseek-ai/dsh-cmdline'
+import type {} from 'bake-cmdline'
 import { classifyTool, TIER_PRESET } from './permission.ts'
 import {
   type ApprovalDecision,
@@ -275,7 +275,7 @@ class DesktopBridge {
     if (selection === undefined) throw new Error(NO_DEFAULT_MODEL_MESSAGE)
     const agentOptions = { provider: selection.provider, model: selection.model }
     // This bundle composes no preset roster; model-facing rows read the
-    // global layer, as in dsh-headless.
+    // global layer, as in bake-headless.
     const setup = (agentCtx: Context): void => {
       const selected: ModelSelectionRef = { current: selection, assembled: undefined }
       installModelSelection(agentCtx, selected)

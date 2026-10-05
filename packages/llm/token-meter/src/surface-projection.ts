@@ -12,7 +12,7 @@
  * armed claim folds with zero delta because bounded state cannot reconstruct
  * the replaced range; this preserves replay at the cost of possible drift.
  *
- * @module @deepseek-ai/dsh-token-meter/surface-projection
+ * @module bake-token-meter/surface-projection
  */
 
 import { deriveEventMessage, isSurfaceEvent, SessionSeq } from 'bake-session'

@@ -1,6 +1,6 @@
 /**
  * Plugin-owned human-command registry shared by interactive UI adapters.
- * @module @deepseek-ai/dsh-commands
+ * @module bake-commands
  */
 
 import { Context } from '@deepseek-ai/cordis'
@@ -8,7 +8,7 @@ import { randomUUID } from 'bake-util-crypto'
 import type { Agent } from 'bake-agent'
 import { AttachmentError, admitEncodedImages } from 'bake-attachment'
 import type { EncodedImageAttachment, FileAttachmentRef, ImageAttachmentRef } from 'bake-attachment/types'
-import type { FileBlock, ImageBlock } from '@deepseek-ai/dsh-llm'
+import type { FileBlock, ImageBlock } from 'bake-llm'
 import { NamedEntries, ScopedLayers } from 'bake-scope'
 import type { ScopeKey, ScopeLayer } from 'bake-scope'
 import { SessionSeq } from 'bake-session'

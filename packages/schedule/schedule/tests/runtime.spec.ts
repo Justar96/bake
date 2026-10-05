@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry from 'bake-agent'
 import type { Agent, AgentCancelCause, InboxTarget } from 'bake-agent'
-import type { UserMessage } from '@deepseek-ai/dsh-llm'
+import type { UserMessage } from 'bake-llm'
 import SessionStore, { SessionId } from 'bake-session'
 import {
   ScheduleId,

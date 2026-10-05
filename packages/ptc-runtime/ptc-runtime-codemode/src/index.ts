@@ -2,7 +2,7 @@
  * QuickJS provider for the PTC execution seam. Each program runs in a fresh
  * WebAssembly QuickJS VM on its own worker thread through pi-codemode; the
  * declared bindings are the program's only capability.
- * @module @deepseek-ai/dsh-ptc-runtime-codemode
+ * @module bake-ptc-runtime-codemode
  */
 
 import { isAbsolute } from 'node:path'

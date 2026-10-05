@@ -4,12 +4,12 @@ import { tmpdir } from 'node:os'
 import { afterAll, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
-import * as AgentInstructions from '@deepseek-ai/dsh-agent-instructions'
-import LlmRuntime, { createUserMessage, ToolCallId, type Message, type StreamChunk } from '@deepseek-ai/dsh-llm'
+import * as AgentInstructions from 'bake-agent-instructions'
+import LlmRuntime, { createUserMessage, ToolCallId, type Message, type StreamChunk } from 'bake-llm'
 import SessionStore, { SessionId, SessionSeq, type SessionEvent, type SurfaceIntent, type UserMessage } from 'bake-session'
 import AgentRegistry, { agentEvents, type Agent } from 'bake-agent'
 import AgentLoop, { turnBoundaryProjectionDefinition } from 'bake-agent-loop'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
+import SessionProjectionRegistry from 'bake-session-projection'
 import { FileSystem, FsTargetKey, FsVersion } from 'bake-fs'
 import type {
   FsDirEntry,
@@ -21,19 +21,19 @@ import type {
   FsWriteIntent,
   FsWriteOutcome,
 } from 'bake-fs'
-import LocalFileSystem from '@deepseek-ai/dsh-fs-local'
+import LocalFileSystem from 'bake-fs-local'
 import SystemPrompt from 'bake-system-prompt'
 import ToolRuntime, { defineContentToolFixture } from 'bake-tools'
 import type {
   ToolExecution,
   ToolExecutionToken,
 } from 'bake-tools'
-import * as ToolFs from '@deepseek-ai/dsh-tool-fs'
+import * as ToolFs from 'bake-tool-fs'
 import {
   discoverBaselineInstructionFiles,
   loadBaselineInstructions,
   renderAgentInstructions,
-} from '@deepseek-ai/dsh-agent-instructions'
+} from 'bake-agent-instructions'
 import {
   applyInstructionVersionUpdates,
   baselineInstructionState,
@@ -667,7 +667,7 @@ describe('workspace context instruction discovery', () => {
       vi.stubEnv('DSH_HOME', '')
       vi.resetModules()
       vi.doMock('node:os', () => ({ homedir: () => home }))
-      const isolated = await import('@deepseek-ai/dsh-agent-instructions')
+      const isolated = await import('bake-agent-instructions')
       const files = await isolated.discoverBaselineInstructionFiles({ cwd: root })
 
       expect(files.map(file => file.displayPath)).toEqual(['~/.dsh/AGENTS.md'])
@@ -688,7 +688,7 @@ describe('workspace context instruction discovery', () => {
 
       vi.resetModules()
       vi.doMock('node:os', () => ({ homedir: () => home }))
-      const isolated = await import('@deepseek-ai/dsh-agent-instructions')
+      const isolated = await import('bake-agent-instructions')
       const files = await isolated.discoverBaselineInstructionFiles({ cwd: root, dshHome: '~/.dsh' })
 
       expect(files).toEqual([{ absolutePath: join(home, '.dsh/AGENTS.md'), displayPath: '~/.dsh/AGENTS.md' }])
@@ -2524,7 +2524,7 @@ describe('workspace context request injection', () => {
           },
         }
       })
-      const isolated = await import('@deepseek-ai/dsh-agent-instructions')
+      const isolated = await import('bake-agent-instructions')
       await isolated.loadBaselineInstructions({ cwd: root, dshHome: home, maxBytes: 65536 })
       observedStats.clear()
       await isolated.loadBaselineInstructions({ cwd: root, dshHome: home, maxBytes: 65536 })
@@ -2557,7 +2557,7 @@ describe('workspace context request injection', () => {
           },
         }
       })
-      const isolated = await import('@deepseek-ai/dsh-agent-instructions')
+      const isolated = await import('bake-agent-instructions')
 
       const rendered = await isolated.loadBaselineInstructions({ cwd: root, dshHome: home, maxBytes: 65536 })
 
@@ -2594,7 +2594,7 @@ describe('workspace context request injection', () => {
           },
         }
       })
-      const isolated = await import('@deepseek-ai/dsh-agent-instructions')
+      const isolated = await import('bake-agent-instructions')
 
       await expect(isolated.loadBaselineInstructions({ cwd, dshHome: home, maxBytes: 65536 }))
         .rejects.toBe(failure)

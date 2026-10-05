@@ -3,13 +3,13 @@
 
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { createMessage, createSystemMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock, ToolSchema } from '@deepseek-ai/dsh-llm'
+import { createMessage, createSystemMessage, createUserMessage } from 'bake-llm'
+import type { ContentBlock, ToolSchema } from 'bake-llm'
 import SessionStore, { SessionLogOffset, SessionSeq } from 'bake-session'
 import type { Session, SessionEvent, SessionSeq as SessionSeqType } from 'bake-session'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import TokenMeter from '@deepseek-ai/dsh-token-meter'
-import type { ContextBreakdownProjection } from '@deepseek-ai/dsh-token-meter/client'
+import SessionProjectionRegistry from 'bake-session-projection'
+import TokenMeter from 'bake-token-meter'
+import type { ContextBreakdownProjection } from 'bake-token-meter/client'
 import { CompactionId } from 'bake-compaction'
 import { contextBreakdownProjectionDefinition } from '../src/breakdown-projection.ts'
 import {

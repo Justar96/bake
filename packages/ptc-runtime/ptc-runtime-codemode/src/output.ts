@@ -2,7 +2,7 @@
  * Outer-output accounting shared by the host and the worker thread: exact JSON
  * byte costs and the combined result ledger. Pure and erasable, so Node's type
  * stripping can load it in the worker during source runs.
- * @module @deepseek-ai/dsh-ptc-runtime-codemode/output
+ * @module bake-ptc-runtime-codemode/output
  */
 
 import type { PtcJsonValue, PtcRunFailure, PtcRunResult } from 'bake-ptc-runtime'

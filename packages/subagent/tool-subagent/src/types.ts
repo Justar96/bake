@@ -1,6 +1,6 @@
 /** Display-only evidence captured when a child is admitted; never part of model history. */
 
-import type { ToolCallId } from '@deepseek-ai/dsh-llm'
+import type { ToolCallId } from 'bake-llm'
 import type { SessionId } from 'bake-session'
 
 /** An optional ing assessment, with finite normalized difficulty and bounded explanatory text. */

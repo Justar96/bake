@@ -18,7 +18,7 @@
 # A service row here MUST sit inside a group carrying an `isolate` realm.
 # Without one it publishes into the root realm, where it is process-global
 # rather than per-session and the second session mounting this preset collides
-# with the first; `dsh-agent-presets` rejects that at mount. `true` means an
+# with the first; `bake-agent-presets` rejects that at mount. `true` means an
 # entry-local realm — one private instance per mounted session, which is the
 # default this deployment wants. A shared label would instead pool one instance
 # across every session naming it.
@@ -28,7 +28,7 @@
 # The preset's own persona, shadowing the deployment default for this agent.
 # `{{model}}` and `{{cwd}}` resolve from the agent's own route and workspace.
 - id: persona
-  name: '@deepseek-ai/dsh-persona'
+  name: 'bake-persona'
   config:
     suffix: Your working directory is {{cwd}}.
     prefix: |-
@@ -39,7 +39,7 @@
       Work in as few model round trips as you can. Put independent tool calls in one response: read the files you need together, and send an edit with the command that checks it, since calls in one response run in order. Make several changes to one file in one edit call, and do not re-read a file to confirm an edit that succeeded.
 
 - id: agent-instructions
-  name: '@deepseek-ai/dsh-agent-instructions'
+  name: 'bake-agent-instructions'
   config:
     maxBytes: 65536
 
@@ -52,11 +52,11 @@
 # registry from here; their executors (`bash-sandbox`/`pwsh-sandbox`) are
 # host-plane too.
 - id: tool-bash
-  name: '@deepseek-ai/dsh-tool-bash'
+  name: 'bake-tool-bash'
   disabled: !!js process.platform === 'win32'
 
 - id: tool-pwsh
-  name: '@deepseek-ai/dsh-tool-pwsh'
+  name: 'bake-tool-pwsh'
   disabled: !!js process.platform !== 'win32'
 
 # ── filesystem ──────────────────────────────────────────────────────────────
@@ -64,12 +64,12 @@
 # Both register into the host `tools` registry and provide nothing, so
 # they need no realm. The `fs` service and its policy stay in the host.
 - id: tool-fs
-  name: '@deepseek-ai/dsh-tool-fs'
+  name: 'bake-tool-fs'
   config:
     readMaxBytes: 16384
 
 - id: tool-fs-search
-  name: '@deepseek-ai/dsh-tool-fs-search'
+  name: 'bake-tool-fs-search'
   config:
     sampleOverCapGlobResults: false
 
@@ -83,7 +83,7 @@
 # owning agent anyway, so one host instance serves every session. What a preset
 # chooses is whether its agent can collect and stop background work at all.
 - id: tool-jobs
-  name: '@deepseek-ai/dsh-tool-jobs'
+  name: 'bake-tool-jobs'
 
 # ── skills ──────────────────────────────────────────────────────────────────
 
@@ -93,10 +93,10 @@
 # `tool-skill` gives them the catalog and loader; the merged catalog also
 # carries whatever the deployment registered globally (repository plugins).
 - id: skill-filesystem
-  name: '@deepseek-ai/dsh-skill-filesystem'
+  name: 'bake-skill-filesystem'
 
 - id: tool-skill
-  name: '@deepseek-ai/dsh-tool-skill'
+  name: 'bake-tool-skill'
 
 # ── goals ───────────────────────────────────────────────────────────────────
 
@@ -104,10 +104,10 @@
 # can resolve them. The human command and model-facing tool register into this
 # preset's scoped layers.
 - id: command-goal
-  name: '@deepseek-ai/dsh-command-goal'
+  name: 'bake-command-goal'
 
 - id: tool-goal
-  name: '@deepseek-ai/dsh-tool-goal'
+  name: 'bake-tool-goal'
 
 # ── compaction ──────────────────────────────────────────────────────────────
 
@@ -128,13 +128,13 @@
     toolResultPruner: true
   config:
     - id: compaction-basic
-      name: '@deepseek-ai/dsh-compaction-basic'
+      name: 'bake-compaction-basic'
 
     - id: command-compact
-      name: '@deepseek-ai/dsh-command-compact'
+      name: 'bake-command-compact'
 
     - id: tool-result-pruner
-      name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+      name: 'bake-compaction-tool-result-pruner'
       config:
         thresholdChars: 8192
         headChars: 4096
@@ -151,13 +151,13 @@
   group: true
   config:
     - id: tool-subagent-control
-      name: '@deepseek-ai/dsh-tool-subagent-control'
+      name: 'bake-tool-subagent-control'
 
     - id: tool-subagent-list-agents
-      name: '@deepseek-ai/dsh-tool-subagent-control/list-agents'
+      name: 'bake-tool-subagent-control/list-agents'
 
     - id: tool-subagent
-      name: '@deepseek-ai/dsh-tool-subagent'
+      name: 'bake-tool-subagent'
       config:
         provider: spawn
         toolName: subagent
@@ -167,12 +167,12 @@
 # ── remaining model-facing rows ─────────────────────────────────────────────
 
 - id: tool-ask-user
-  name: '@deepseek-ai/dsh-tool-ask-user'
+  name: 'bake-tool-ask-user'
 
 # The `web` service and its search provider stay in the host composition; only
 # the model-facing tool is per-session.
 - id: tool-web
-  name: '@deepseek-ai/dsh-tool-web'
+  name: 'bake-tool-web'
   config:
     fetch: true
     searchTimeoutMs: 60000
@@ -188,5 +188,5 @@
     mode: ptc
 
 - id: tool-plugin-manager
-  name: '@deepseek-ai/dsh-plugin-manager/tools'
+  name: 'bake-plugin-manager/tools'
   disabled: true

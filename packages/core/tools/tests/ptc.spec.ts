@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { createUserMessage, ToolCallId  } from '@deepseek-ai/dsh-llm'
-import type { ToolSchema } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, ToolCallId  } from 'bake-llm'
+import type { ToolSchema } from 'bake-llm'
 import { createScope } from 'bake-scope'
 import type { Scope } from 'bake-scope'
 import SystemPrompt, { renderPrompt } from 'bake-system-prompt'
@@ -11,11 +11,11 @@ import ToolRuntime, { CodeRunFailedError, RUN_CODE_NAME, TOOL_ABORTED_BEFORE_DIS
 import type { Config, JsonSchemaNode, PostToolDecision, ToolExecutionResult } from 'bake-tools'
 import type { Agent } from 'bake-agent'
 import { Session, SessionId } from 'bake-session'
-import ApprovalService, { type ApprovalOutcome, type ApprovalRequest } from '@deepseek-ai/dsh-user-approval'
+import ApprovalService, { type ApprovalOutcome, type ApprovalRequest } from 'bake-user-approval'
 import type { SessionEventMap } from 'bake-session'
 import type { JsonValue } from 'bake-util-values'
-import SandboxPolicy from '@deepseek-ai/dsh-sandbox-policy'
-import SessionProjections from '@deepseek-ai/dsh-session-projection'
+import SandboxPolicy from 'bake-sandbox-policy'
+import SessionProjections from 'bake-session-projection'
 
 const testToolSignal = new AbortController().signal
 
@@ -1579,7 +1579,11 @@ describe('the run_code dispatch bridge', () => {
     await ctx.plugin(ToolRuntime, { mode: 'ptc' })
     const result = await runCode(ctx, 'program')
     expect(result.isError).toBe(true)
-    expect((result.content[0] as { text: string }).text).toContain('requires a PTC runtime')
+    // Model-visible tool error text: keep it byte-identical to released builds.
+    expect((result.content[0] as { text: string }).text).toContain(
+      'dsh-tools: mode "ptc" requires a PTC runtime — load a ctx.ptcRuntime implementation'
+      + ' (e.g. @deepseek-ai/dsh-ptc-runtime-codemode) or set tools mode to "native"',
+    )
   })
 
   it.each(['typescript', 'python'])('presents the description over the program with its runtime language (%s)', async (language) => {

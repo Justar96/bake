@@ -6,7 +6,7 @@ import AuthorizationService, {
   type AuthorizationFlow,
   type AuthorizationInteraction,
   type AuthorizationSession,
-} from '@deepseek-ai/dsh-authorization'
+} from 'bake-authorization'
 import { MemoryCredentials } from './memory.ts'
 
 const KEY = credentialKey('llm-pi-ai', 'openai-codex')

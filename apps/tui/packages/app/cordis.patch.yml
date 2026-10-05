@@ -83,14 +83,14 @@
 
 - insert:
     - id: file-reference-local
-      name: '@deepseek-ai/dsh-file-reference-local'
+      name: 'bake-file-reference-local'
 
     # The `cordisInspect` registry that the `cordis` preset's inspection tools
     # register into and query. It is one registry for the whole process, so it
     # sits on the host plane rather than in the preset. It adds no tool or
     # prompt, so other presets see nothing of it.
     - id: cordis-host-runner
-      name: '@deepseek-ai/dsh-cordis-host-runner'
+      name: 'bake-cordis-host-runner'
 
     # Agent presets, so the session mounts `standard` — this profile's own
     # roster. Not a base row. `default` names the preset the runner mounts
@@ -100,20 +100,20 @@
     # `cmdlineArgs` needs no row: the launcher provides it, which is why the
     # headless bundle also injects it without inserting a provider.
     - id: agent-presets
-      name: '@deepseek-ai/dsh-agent-presets'
+      name: 'bake-agent-presets'
       config:
         default: standard
 
     # The `standard` preset's subagent row requires this settings plugin in
     # the Host scope.
     - id: subagent-model-selection-settings
-      name: '@deepseek-ai/dsh-tool-subagent/model-selection-settings'
+      name: 'bake-tool-subagent/model-selection-settings'
 
     # The authorization seam: `llm-pi-ai` registers one sign-in flow per
     # provider pi-ai ships a login for (OAuth or an interactive key prompt),
     # and `/login` runs them. The credential it stores needs `credentials`.
     - id: authorization
-      name: '@deepseek-ai/dsh-authorization'
+      name: 'bake-authorization'
 
     # argv → ctx.tuiStartup, before the runner resolves its lazy config.
     - id: tui-startup

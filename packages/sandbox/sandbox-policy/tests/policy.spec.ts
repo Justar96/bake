@@ -11,8 +11,8 @@ import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from 'bake-agent'
 import { SESSION_FORMAT_VERSION, Session, SessionId } from 'bake-session'
-import SandboxPolicyService, { SANDBOX_MODES, setSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
+import SandboxPolicyService, { SANDBOX_MODES, setSandboxMode } from 'bake-sandbox-policy'
+import SessionProjectionRegistry from 'bake-session-projection'
 import SystemPrompt, { renderContextSnapshot, renderPrompt } from 'bake-system-prompt'
 
 async function mounted(config: { mode?: 'read-only' | 'workspace-write' | 'danger-full-access'; workspaceRoot?: string } = {}) {

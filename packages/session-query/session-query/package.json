@@ -28,33 +28,33 @@
   "license": "MIT",
   "peerDependencies": {
     "bake-brand": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
+    "bake-llm": "workspace:^",
     "bake-session": "workspace:^",
-    "@deepseek-ai/dsh-session-title": "workspace:^",
+    "bake-session-title": "workspace:^",
     "bake-session-persistence": "workspace:^",
-    "@deepseek-ai/dsh-session-projection": "workspace:^",
-    "@deepseek-ai/dsh-session-projection-cache": "workspace:^",
+    "bake-session-projection": "workspace:^",
+    "bake-session-projection-cache": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   },
   "peerDependenciesMeta": {
     "bake-session-persistence": {
       "optional": true
     },
-    "@deepseek-ai/dsh-session-projection": {
+    "bake-session-projection": {
       "optional": true
     },
-    "@deepseek-ai/dsh-session-projection-cache": {
+    "bake-session-projection-cache": {
       "optional": true
     }
   },
   "devDependencies": {
     "bake-brand": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
+    "bake-llm": "workspace:^",
     "bake-session": "workspace:^",
-    "@deepseek-ai/dsh-session-title": "workspace:^",
+    "bake-session-title": "workspace:^",
     "bake-session-persistence": "workspace:^",
-    "@deepseek-ai/dsh-session-projection": "workspace:^",
-    "@deepseek-ai/dsh-session-projection-cache": "workspace:^",
+    "bake-session-projection": "workspace:^",
+    "bake-session-projection-cache": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   },
   "dependencies": {

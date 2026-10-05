@@ -3,7 +3,7 @@
  * program in a strict async function whose parameters are the declared
  * binding namespaces and error classes, behind the binding prelude that runs
  * inside the QuickJS VM.
- * @module @deepseek-ai/dsh-ptc-runtime-codemode/program
+ * @module bake-ptc-runtime-codemode/program
  */
 
 import { stripTypeScriptTypes } from 'node:module'

@@ -1,7 +1,7 @@
 /**
  * Local-filesystem implementation of `ctx.fileReferences`.
  *
- * @module @deepseek-ai/dsh-file-reference-local
+ * @module bake-file-reference-local
  */
 
 import { Context } from '@deepseek-ai/cordis'

@@ -7,7 +7,7 @@ kind: "package-reference"
 
 ## Summary
 
-`bake-compaction` lets a long session condense its older history into a single summary message, keep the recent conversation intact, and continue as if the summary had always been there — with a backend such as `dsh-compaction-basic` and the optional `/compact` command. The shadowed content stays in the session log, so replaying the session deterministically reproduces the same condensed conversation. Reach for this package when you implement a condensation backend, build something that triggers condensation, or need to recognize condensed messages — it performs no condensation itself. Choose the shipped backend when you want the feature working out of the box.
+`bake-compaction` lets a long session condense its older history into a single summary message, keep the recent conversation intact, and continue as if the summary had always been there — with a backend such as `bake-compaction-basic` and the optional `/compact` command. The shadowed content stays in the session log, so replaying the session deterministically reproduces the same condensed conversation. Reach for this package when you implement a condensation backend, build something that triggers condensation, or need to recognize condensed messages — it performs no condensation itself. Choose the shipped backend when you want the feature working out of the box.
 
 ## Table of Contents
 
@@ -27,7 +27,7 @@ Decide first what you need. The shipped backend plus the `/compact` command give
 
 ### When to choose it
 
-Choose `dsh-compaction-basic` when a model-written summary fits your needs: you get condensation automatically as the conversation grows, and on demand through `dsh-command-compact`. Choose this package when you write a backend with a different summarizer — a fixed template or a remote service — or when you build something that triggers condensation programmatically. Do not mount it alone: without a backend nothing condenses.
+Choose `bake-compaction-basic` when a model-written summary fits your needs: you get condensation automatically as the conversation grows, and on demand through `bake-command-compact`. Choose this package when you write a backend with a different summarizer — a fixed template or a remote service — or when you build something that triggers condensation programmatically. Do not mount it alone: without a backend nothing condenses.
 
 ### What condensation looks like
 
@@ -35,11 +35,11 @@ When condensation runs, the selected older span of the conversation is replaced 
 
 ### Turning condensation on
 
-Mount the shipped backend to register the condensation service, and add `dsh-command-compact` for the on-demand command:
+Mount the shipped backend to register the condensation service, and add `bake-command-compact` for the on-demand command:
 
 ```yaml
-- name: '@deepseek-ai/dsh-compaction-basic'
-- name: '@deepseek-ai/dsh-command-compact'
+- name: 'bake-compaction-basic'
+- name: 'bake-command-compact'
 ```
 
 With these two rows the feature is on: the conversation condenses automatically as it grows, and `/compact` condenses immediately on request and reports how many history items were replaced. If no backend is mounted, nothing condenses and `/compact` fails; the full dependency chain for the shipped backend is in its own README.
@@ -67,7 +67,7 @@ This section explains the contract in API terms and the design decisions behind 
 The seam is built on one split and three commitments:
 
 - **Abstract contract, concrete backends.** The interface states what condensation does; providers own policy, retention, and summarization so each role evolves and swaps independently.
-- **Session and LLM vocabulary are part of the contract.** The operations act on a `Session` and the summary uses `ContentBlock`, so the Service Definition depends on `dsh-session` and `dsh-llm` despite the general Cordis-only guidance — a deliberate deviation recorded in the [compaction capability-seam Agent Note](../../../.agents/notes/implemented/feature/2026-06-18-compaction-capability-seam.md).
+- **Session and LLM vocabulary are part of the contract.** The operations act on a `Session` and the summary uses `ContentBlock`, so the Service Definition depends on `dsh-session` and `bake-llm` despite the general Cordis-only guidance — a deliberate deviation recorded in the [compaction capability-seam Agent Note](../../../.agents/notes/implemented/feature/2026-06-18-compaction-capability-seam.md).
 - **The log-recorded bracket is the lock.** `compaction/start` is appended before summarization yields and `compaction/end` releases; every failure makes exactly one close attempt, and a failed close leaves the unmatched start as the intentional busy signal.
 - **The surface is mutated exactly once.** The summary rides on a `user/message` replacement inside the bracket; all `compaction/*` events stay log-only.
 
@@ -79,7 +79,7 @@ A backend that summarizes through `ctx.llm.stream()` must forward the abort sign
 
 ### Manual failure taxonomy
 
-The synchronous `compaction/summary-error` waterfall lets a backend request durable input recovery for a failed summary and an explicit selection. A listener returns true only after recording progress, or calls `next()` to delegate. The backend checks cancellation and selection stability before dispatch, then re-derives and re-prices input before retrying. The event declaration documents its payload; image policy belongs to `dsh-compaction-image-offload`.
+The synchronous `compaction/summary-error` waterfall lets a backend request durable input recovery for a failed summary and an explicit selection. A listener returns true only after recording progress, or calls `next()` to delegate. The backend checks cancellation and selection stability before dispatch, then re-derives and re-prices input before retrying. The event declaration documents its payload; image policy belongs to `bake-compaction-image-offload`.
 
 Expected manual failures throw `ManualCompactionError` with a stable `code` from a small closed set; only failures after the `compaction/start` marker are recorded — as a `compaction/end` carrying the error — while a `busy` rejection or pre-start cancellation leaves no record. The per-code semantics live in the [compaction subsystem reference](../../../docs/subsystems/compaction.md).
 

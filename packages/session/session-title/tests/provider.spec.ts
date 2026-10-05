@@ -1,16 +1,16 @@
 import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it, vi } from 'vitest'
-import LlmRuntime, { createUserMessage, markAgentLoopRequest } from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { createUserMessage, markAgentLoopRequest } from 'bake-llm'
 import { deepFreeze } from 'bake-util-values'
 import SessionStore, { SessionId, SessionSeq } from 'bake-session'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
+import SessionProjectionRegistry from 'bake-session-projection'
 import { turnBoundaryProjectionDefinition } from 'bake-agent-loop'
 import SessionTitleService, {
   SessionTitleProviderId,
   type SessionTitleProvider,
   type SessionTitleProviderRequest,
   type SessionTitleProviderResult,
-} from '@deepseek-ai/dsh-session-title'
+} from 'bake-session-title'
 
 const CONFIG = {
   fallbackMaxWords: 5,

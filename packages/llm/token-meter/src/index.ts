@@ -1,14 +1,14 @@
 /**
  * Single replay-aware token-meter service for request and surface pressure.
  *
- * @module @deepseek-ai/dsh-token-meter
+ * @module bake-token-meter
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'
-import type {} from '@deepseek-ai/dsh-compaction-image-offload/projection'
+import type {} from 'bake-compaction-image-offload/projection'
 import z from '@deepseek-ai/schemastery'
-import { assembleAssistantStream } from '@deepseek-ai/dsh-llm'
-import type { LlmImageRequestPricing, LlmRuntime, Message, TokenUsage } from '@deepseek-ai/dsh-llm'
+import { assembleAssistantStream } from 'bake-llm'
+import type { LlmImageRequestPricing, LlmRuntime, Message, TokenUsage } from 'bake-llm'
 import { deepFreeze } from 'bake-util-values'
 import type {
   EpochHeader,
@@ -24,7 +24,7 @@ import {
   SessionSeq,
 } from 'bake-session'
 // Type-only: activates the `ctx.sessionProjections` Context declaration.
-import type {} from '@deepseek-ai/dsh-session-projection'
+import type {} from 'bake-session-projection'
 import type {
   TokenMeasurement,
   TokenMeasurementBaseline,

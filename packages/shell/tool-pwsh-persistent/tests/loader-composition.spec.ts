@@ -7,21 +7,21 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
-import { ToolCallId } from '@deepseek-ai/dsh-llm'
+import { ToolCallId } from 'bake-llm'
 import { SESSION_FORMAT_VERSION, Session, SessionId } from 'bake-session'
 import AgentRegistry from 'bake-agent'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
+import SessionProjectionRegistry from 'bake-session-projection'
 import type { Agent } from 'bake-agent'
-import TerminalSessionService from '@deepseek-ai/dsh-terminal'
-import * as TerminalBash from '@deepseek-ai/dsh-terminal-bash'
+import TerminalSessionService from 'bake-terminal'
+import * as TerminalBash from 'bake-terminal-bash'
 import SandboxProvider from 'bake-sandbox'
 import type { ConfinedArgv, SandboxPolicy } from 'bake-sandbox'
-import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
-import LocalSubprocessService from '@deepseek-ai/dsh-subprocess-local'
-import { resolvePwshPath } from '@deepseek-ai/dsh-pwsh-local/src/resolve.ts'
+import SandboxPolicyService from 'bake-sandbox-policy'
+import LocalSubprocessService from 'bake-subprocess-local'
+import { resolvePwshPath } from 'bake-pwsh-local/src/resolve.ts'
 import SystemPrompt from 'bake-system-prompt'
 import ToolRegistry from 'bake-tools'
-import * as ToolPwshPersistent from '@deepseek-ai/dsh-tool-pwsh-persistent'
+import * as ToolPwshPersistent from 'bake-tool-pwsh-persistent'
 import { unsupportedInbox } from 'bake-agent-loop-testkit'
 
 const hasPwsh = spawnSync(
@@ -82,15 +82,15 @@ describe.skipIf(!hasPwsh)('persistent pwsh through a real cordis.yml Loader comp
       "- name: 'bake-agent'",
       "- name: 'bake-system-prompt'",
       "- name: 'bake-tools'",
-      "- name: '@deepseek-ai/dsh-terminal'",
+      "- name: 'bake-terminal'",
       "- name: '@deepseek-ai/dsh-test-sandbox'",
-      "- name: '@deepseek-ai/dsh-session-projection'",
-      "- name: '@deepseek-ai/dsh-sandbox-policy'",
+      "- name: 'bake-session-projection'",
+      "- name: 'bake-sandbox-policy'",
       '  config:',
       '    mode: danger-full-access',
       `    workspaceRoot: ${JSON.stringify(root)}`,
-      "- name: '@deepseek-ai/dsh-subprocess-local'",
-      "- name: '@deepseek-ai/dsh-terminal-bash'",
+      "- name: 'bake-subprocess-local'",
+      "- name: 'bake-terminal-bash'",
       '  config:',
       '    shellDialect: pwsh',
       '    pollIntervalMs: 10',
@@ -102,13 +102,13 @@ describe.skipIf(!hasPwsh)('persistent pwsh through a real cordis.yml Loader comp
       // PSReadLine + Defender) inside the tool deadline; a 60s bound on the
       // fully loaded self-hosted Windows pool is exceeded often enough to
       // reset the session mid-test (2026-09-01, two runs ~62s each). 300s
-      // matches the dsh-tool-pwsh-persistent product default; the
-      // dsh-terminal-bash value bounds one send plus the complete startup
+      // matches the bake-tool-pwsh-persistent product default; the
+      // bake-terminal-bash value bounds one send plus the complete startup
       // sequence, so it covers the same cold start (its 30s product default
       // would not).
       '    timeoutMs: 300000',
       '    disposeGraceMs: 500',
-      "- name: '@deepseek-ai/dsh-tool-pwsh-persistent'",
+      "- name: 'bake-tool-pwsh-persistent'",
       '  config:',
       '    timeoutMs: 300000',
       '',
@@ -122,13 +122,13 @@ describe.skipIf(!hasPwsh)('persistent pwsh through a real cordis.yml Loader comp
       ['bake-agent', AgentRegistry],
       ['bake-system-prompt', SystemPrompt],
       ['bake-tools', ToolRegistry],
-      ['@deepseek-ai/dsh-terminal', TerminalSessionService],
+      ['bake-terminal', TerminalSessionService],
       ['@deepseek-ai/dsh-test-sandbox', PassthroughSandbox],
-      ['@deepseek-ai/dsh-session-projection', SessionProjectionRegistry],
-      ['@deepseek-ai/dsh-sandbox-policy', SandboxPolicyService],
-      ['@deepseek-ai/dsh-subprocess-local', LocalSubprocessService],
-      ['@deepseek-ai/dsh-terminal-bash', TerminalBash],
-      ['@deepseek-ai/dsh-tool-pwsh-persistent', ToolPwshPersistent],
+      ['bake-session-projection', SessionProjectionRegistry],
+      ['bake-sandbox-policy', SandboxPolicyService],
+      ['bake-subprocess-local', LocalSubprocessService],
+      ['bake-terminal-bash', TerminalBash],
+      ['bake-tool-pwsh-persistent', ToolPwshPersistent],
     ])
     context.loader.internal = {
       version: 'v2',

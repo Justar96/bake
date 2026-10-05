@@ -6,7 +6,7 @@
  * argument validation, argv construction, result parsing, inline sampling,
  * and formatting; process concerns (spawn execution, tree termination,
  * environment scrubbing, output capture) stay behind `ctx.subprocess`.
- * @module @deepseek-ai/dsh-tool-fs-search/glob
+ * @module bake-tool-fs-search/glob
  */
 
 import type { Context } from '@deepseek-ai/cordis'

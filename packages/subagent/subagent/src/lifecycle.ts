@@ -11,13 +11,13 @@
  * between this module and one in-package caller, not something a plugin may
  * depend on.
  *
- * @module @deepseek-ai/dsh-subagent/lifecycle
+ * @module bake-subagent/lifecycle
  */
 
 import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from 'bake-agent'
-import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock } from 'bake-llm'
 import { foldConsumedWork } from 'bake-agent'
 import { SessionLogOffset } from 'bake-session'
 import type { SessionEvent, SessionId, SessionLogOffset as SessionLogOffsetType } from 'bake-session'

@@ -1,13 +1,13 @@
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage } from 'bake-llm'
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import {
   GoalId,
   type GoalSnapshotChangeMeta,
   type GoalView,
-} from '@deepseek-ai/dsh-goal'
-import * as GoalSessionInvariant from '@deepseek-ai/dsh-goal-round-driver/invariant'
-import { renderGoalRoundPrompt } from '@deepseek-ai/dsh-goal-round-driver'
+} from 'bake-goal'
+import * as GoalSessionInvariant from 'bake-goal-round-driver/invariant'
+import { renderGoalRoundPrompt } from 'bake-goal-round-driver'
 import InvariantRegistry, { InvariantError } from 'bake-invariants'
 import SessionStore, { SessionId, type Session } from 'bake-session'
 
@@ -95,7 +95,7 @@ describe('goal-round-driver prompt invariants', () => {
       appendRound(session, 2, [{ type: 'text', text: 'counterfeit continuation' }])
     }).toThrow(expect.objectContaining<Partial<InvariantError>>({
       code: 'INVARIANT',
-      packageName: '@deepseek-ai/dsh-goal-round-driver',
+      packageName: 'bake-goal-round-driver',
     }))
   })
 
@@ -110,7 +110,7 @@ describe('goal-round-driver prompt invariants', () => {
         source,
       }), { surfaceOp: 'append' })
     }).toThrow(expect.objectContaining<Partial<InvariantError>>({
-      packageName: '@deepseek-ai/dsh-goal-round-driver',
+      packageName: 'bake-goal-round-driver',
     }))
   })
 
@@ -122,7 +122,7 @@ describe('goal-round-driver prompt invariants', () => {
 
     await expect(ctx.plugin(GoalSessionInvariant)).rejects.toMatchObject({
       code: 'INVARIANT',
-      packageName: '@deepseek-ai/dsh-goal-round-driver',
+      packageName: 'bake-goal-round-driver',
     })
   })
 })

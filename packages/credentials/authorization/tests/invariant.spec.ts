@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { credentialKey } from 'bake-credentials'
 import InvariantRegistry from 'bake-invariants'
-import AuthorizationService from '@deepseek-ai/dsh-authorization'
+import AuthorizationService from 'bake-authorization'
 import * as AuthorizationInvariant from '../src/invariant.ts'
 import { MemoryCredentials } from './memory.ts'
 
@@ -81,7 +81,7 @@ describe('authorization invariant companion', () => {
     await ctx.plugin(AuthorizationInvariant)
 
     expect(() => {
-      ctx.invariants.register('@deepseek-ai/dsh-authorization', () => {})
+      ctx.invariants.register('bake-authorization', () => {})
     }).toThrow(/already registered/)
   })
 })

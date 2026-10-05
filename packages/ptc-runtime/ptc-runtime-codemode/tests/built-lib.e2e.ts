@@ -21,7 +21,7 @@ describe.skipIf(!built)('built lib real load path (plain node)', () => {
     // plain `-e` string that wraps its body in an async function.
     const script = `(async () => {
       const { Context } = await import('@deepseek-ai/cordis')
-      const { default: CodemodePtcRuntime } = await import('@deepseek-ai/dsh-ptc-runtime-codemode')
+      const { default: CodemodePtcRuntime } = await import('bake-ptc-runtime-codemode')
       const ctx = new Context()
       await ctx.plugin(CodemodePtcRuntime, {})
       const bindings = [{

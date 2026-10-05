@@ -5,7 +5,7 @@
  * POSIX owners stage TERM before KILL; Windows owners terminate immediately.
  * This layer reacts to an abort signal; callers own deadlines, teardown
  * ladders, and cause classification.
- * @module dsh-subprocess-local/spawn
+ * @module bake-subprocess-local/spawn
  */
 
 import { type ChildProcess, type SpawnOptions, spawn, spawnSync } from 'node:child_process'

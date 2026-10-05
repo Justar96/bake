@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-permission-presets",
+  "name": "bake-permission-presets",
   "description": "User-facing permission presets (ctx.permissionPresets) for the DeepSeek Harness: one product-level Permissions select bundling the sandbox-mode and approval-policy knobs, written through to their own session events",
   "version": "0.1.6-alpha.2",
   "publishConfig": {
@@ -54,15 +54,15 @@
   "license": "MIT",
   "peerDependencies": {
     "bake-shell": "workspace:^",
-    "@deepseek-ai/dsh-commands": "workspace:^",
+    "bake-commands": "workspace:^",
     "bake-invariants": "workspace:^",
     "bake-sandbox": "workspace:^",
-    "@deepseek-ai/dsh-sandbox-policy": "workspace:^",
+    "bake-sandbox-policy": "workspace:^",
     "bake-session": "workspace:^",
-    "@deepseek-ai/dsh-session-projection": "workspace:^",
+    "bake-session-projection": "workspace:^",
     "bake-settings": "workspace:^",
     "bake-typert-protocol": "workspace:^",
-    "@deepseek-ai/dsh-user-approval": "workspace:^",
+    "bake-user-approval": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   },
   "dependencies": {
@@ -71,15 +71,15 @@
   },
   "devDependencies": {
     "bake-shell": "workspace:^",
-    "@deepseek-ai/dsh-commands": "workspace:^",
+    "bake-commands": "workspace:^",
     "bake-invariants": "workspace:^",
     "bake-sandbox": "workspace:^",
-    "@deepseek-ai/dsh-sandbox-policy": "workspace:^",
+    "bake-sandbox-policy": "workspace:^",
     "bake-session": "workspace:^",
-    "@deepseek-ai/dsh-session-projection": "workspace:^",
+    "bake-session-projection": "workspace:^",
     "bake-settings": "workspace:^",
     "bake-typert-protocol": "workspace:^",
-    "@deepseek-ai/dsh-user-approval": "workspace:^",
+    "bake-user-approval": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   }
 }

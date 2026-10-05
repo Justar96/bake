@@ -1,13 +1,13 @@
 /**
- * @deepseek-ai/dsh-headless — one-shot direct Agent driver. The bundle patch
- * rides over dsh-base without Host, HTTP, or browser plugins; this runner
+ * bake-headless — one-shot direct Agent driver. The bundle patch
+ * rides over bake-base without Host, HTTP, or browser plugins; this runner
  * creates one Agent through the core registry (or adopts the exact Session a
  * `--resume` names), drives the task to quiescence, streams provider
  * reasoning to stderr, flushes its Session, prints the final assistant text to
  * stdout, and exits. With `--json` it projects the run as newline-delimited
  * events instead of the final text.
  *
- * @module @deepseek-ai/dsh-headless
+ * @module bake-headless
  */
 
 import { randomUUID } from 'node:crypto'
@@ -20,14 +20,14 @@ import { NO_DEFAULT_MODEL_MESSAGE } from 'bake-agent-default-model'
 import type {} from 'bake-agent-loop'
 import type {} from 'bake-fs'
 import type {} from 'bake-jobs'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage } from 'bake-llm'
 import { assertNever } from 'bake-util-values'
 import { SessionSeq } from 'bake-session'
 import type { Session, SessionEvent, SessionId, SessionLogOffset } from 'bake-session'
 import { SessionAlreadyOwnedError } from 'bake-session-persistence'
 import { SessionQueryError } from 'bake-session-query'
 // The cmdline import also carries the Context merge for the appExit host value.
-import { SESSION_IN_USE_EXIT, SessionInUseError } from '@deepseek-ai/dsh-cmdline'
+import { SESSION_IN_USE_EXIT, SessionInUseError } from 'bake-cmdline'
 // Empty type imports carry the loader Context merge for the settlement await
 // and the sessionQuery Context merge for exact Session adoption.
 import type {} from '@deepseek-ai/cordis-plugin-loader'
@@ -213,7 +213,7 @@ function* liveEvents(session: Session): Generator<SessionEvent> {
 function currentPreset(header: AdoptableHeader, events: Iterable<SessionEvent>, sessionId: SessionId): string | undefined {
   let preset = header.agentPreset
   for (const event of events) {
-    // Owned by dsh-agent-presets, which this bundle does not compose, so the
+    // Owned by bake-agent-presets, which this bundle does not compose, so the
     // event is read structurally rather than through its module augmentation.
     const candidate = event as unknown as { type: string; data?: { agentPreset?: unknown } }
     if (candidate.type !== 'agent-preset/selected') continue
@@ -281,7 +281,7 @@ async function resolveAgent(
   // query service, so every --resume run requires it.
   const query = ctx.get('sessionQuery')
   if (query === undefined) {
-    throw new Error('headless --resume requires the sessionQuery service; dsh-base provides it')
+    throw new Error('headless --resume requires the sessionQuery service; bake-base provides it')
   }
   const live = agents.get(sessionId)
   if (live !== undefined) {
@@ -432,7 +432,7 @@ async function run(ctx: Context, config: Config, io: HeadlessIo, stopping: Abort
   // This bundle composes no preset roster, so the model-facing rows sit in the
   // host plane and the agent reads them from the global layer. A deployment
   // that DOES configure one has to join it here first
-  // (@deepseek-ai/dsh-agent-presets README, "Composing a child agent").
+  // (bake-agent-presets README, "Composing a child agent").
   const setup = (agentCtx: Context, agent: Agent): void => {
     const recorded = agent.session.requestHeader()?.config
     const current = selection ?? (recorded === undefined ? undefined : { provider: recorded.provider, model: recorded.model })

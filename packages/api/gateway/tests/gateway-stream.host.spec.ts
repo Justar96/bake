@@ -14,7 +14,7 @@ import {
   type TypertContextWire,
   RemoteError,
 } from 'bake-typert-protocol'
-import TypertRegistry from '@deepseek-ai/dsh-typert-registry'
+import TypertRegistry from 'bake-typert-registry'
 
 declare module 'bake-typert-protocol' {
   interface RemoteErrorDetailsMap {
@@ -29,7 +29,7 @@ import TypertGatewayService, {
   type TypertRemoteEventDispatch,
   type TypertRemoteEventInvocation,
   type TypertRemoteEventOutcome,
-} from '@deepseek-ai/dsh-api-gateway'
+} from 'bake-api-gateway'
 import { z } from 'zod'
 import type {
   RemoteEventClientId,

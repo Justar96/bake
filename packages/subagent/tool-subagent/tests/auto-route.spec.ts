@@ -3,10 +3,10 @@ import { createServer } from 'node:http'
 import type { IncomingHttpHeaders, Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { Context } from '@deepseek-ai/cordis'
-import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import { ReasoningEffortId } from 'bake-llm'
 import type { Agent } from 'bake-agent'
 import { SessionId } from 'bake-session'
-import type { SubagentStartRequest } from '@deepseek-ai/dsh-subagent'
+import type { SubagentStartRequest } from 'bake-subagent'
 import { MockAdapter } from '../../../core/agent-loop/tests/mock-adapter.ts'
 import { MemoryCredentials } from '../../../credentials/credentials/tests/memory.ts'
 import { credentialRef } from 'bake-credentials'
@@ -103,7 +103,7 @@ describe('routerTaskExcerpt', () => {
   })
 })
 
-describe('dsh-tool-subagent task router', () => {
+describe('bake-tool-subagent task router', () => {
   it('records a bounded assessment and resolved effort without changing model-visible output', async () => {
     const router = await startRouter(() => ({ body: {
       provider: 'alpha', model: 'fast-model', reason: `\u001b${'R'.repeat(1000)}`,

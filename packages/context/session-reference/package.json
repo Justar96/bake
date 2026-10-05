@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-session-reference",
+  "name": "bake-session-reference",
   "description": "Cross-session snapshot references and durable untrusted model context (ctx.sessionReferenceResolver)",
   "version": "0.1.6-alpha.2",
   "publishConfig": {
@@ -53,15 +53,15 @@
     "@deepseek-ai/cordis": "workspace:^",
     "bake-agent": "workspace:^",
     "bake-compaction": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
+    "bake-llm": "workspace:^",
     "bake-output-retention": "workspace:^",
     "bake-session": "workspace:^",
-    "@deepseek-ai/dsh-session-projection": "workspace:^",
-    "@deepseek-ai/dsh-session-projection-cache": "workspace:^",
+    "bake-session-projection": "workspace:^",
+    "bake-session-projection-cache": "workspace:^",
     "bake-session-query": "workspace:^",
-    "@deepseek-ai/dsh-session-title": "workspace:^",
+    "bake-session-title": "workspace:^",
     "bake-spill": "workspace:^",
-    "@deepseek-ai/dsh-subagent": "workspace:^",
+    "bake-subagent": "workspace:^",
     "bake-system-prompt": "workspace:^",
     "bake-typert-protocol": "workspace:^"
   },
@@ -69,7 +69,7 @@
     "bake-spill": {
       "optional": true
     },
-    "@deepseek-ai/dsh-session-projection-cache": {
+    "bake-session-projection-cache": {
       "optional": true
     }
   },
@@ -79,20 +79,20 @@
     "@deepseek-ai/cordis-plugin-loader": "workspace:^",
     "bake-agent": "workspace:^",
     "bake-compaction": "workspace:^",
-    "@deepseek-ai/dsh-fs-local": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
+    "bake-fs-local": "workspace:^",
+    "bake-llm": "workspace:^",
     "bake-output-retention": "workspace:^",
     "bake-session": "workspace:^",
-    "@deepseek-ai/dsh-session-projection": "workspace:^",
-    "@deepseek-ai/dsh-session-projection-cache": "workspace:^",
+    "bake-session-projection": "workspace:^",
+    "bake-session-projection-cache": "workspace:^",
     "bake-session-query": "workspace:^",
-    "@deepseek-ai/dsh-session-query-sqlite": "workspace:^",
-    "@deepseek-ai/dsh-session-title": "workspace:^",
+    "bake-session-query-sqlite": "workspace:^",
+    "bake-session-title": "workspace:^",
     "bake-spill": "workspace:^",
-    "@deepseek-ai/dsh-subagent": "workspace:^",
-    "@deepseek-ai/dsh-spill-local": "workspace:^",
+    "bake-subagent": "workspace:^",
+    "bake-spill-local": "workspace:^",
     "bake-system-prompt": "workspace:^",
-    "@deepseek-ai/dsh-tool-fs": "workspace:^",
+    "bake-tool-fs": "workspace:^",
     "bake-tools": "workspace:^",
     "bake-typert-protocol": "workspace:^"
   }

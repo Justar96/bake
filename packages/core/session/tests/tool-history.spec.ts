@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { createUserMessage, MessageId, projectToolUpdates } from '@deepseek-ai/dsh-llm'
-import type { ToolSchema } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, MessageId, projectToolUpdates } from 'bake-llm'
+import type { ToolSchema } from 'bake-llm'
 import { Session, SessionId, SessionSeq, canonicalHeader } from '../src/index.ts'
 import type { RequestHeaderReason, SessionEvent } from '../src/index.ts'
 

@@ -17,7 +17,7 @@
  * stops managing DACLs itself. The rung reports partial enforcement because
  * WRITE_RESTRICTED must retain Everyone in its
  * restricting list and NTFS hard links alias one file object across paths.
- * @module @deepseek-ai/dsh-sandbox-local
+ * @module bake-sandbox-local
  */
 
 import { spawnSync } from 'node:child_process'

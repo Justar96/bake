@@ -16,8 +16,8 @@ import {
   type TypertLookup,
   type TypertLookupProvider,
 } from 'bake-typert-protocol'
-import TypertRegistry, { type TypertContribution } from '@deepseek-ai/dsh-typert-registry'
-import TypertGatewayService, { TypertGatewayError } from '@deepseek-ai/dsh-api-gateway'
+import TypertRegistry, { type TypertContribution } from 'bake-typert-registry'
+import TypertGatewayService, { TypertGatewayError } from 'bake-api-gateway'
 import { provideBrowserCredentials } from './browser-credentials.ts'
 
 interface FixtureAgent {

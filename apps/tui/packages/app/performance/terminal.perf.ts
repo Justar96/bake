@@ -78,7 +78,7 @@ try {
       const home = join(root, 'home')
       const profile = join(home, 'profiles/tui')
       await mkdir(profile, { recursive: true })
-      await writeFile(join(profile, 'package.json'), JSON.stringify({ name: 'tui-perf-profile', private: true, dsh: { profile: { bundles: ['@deepseek-ai/dsh-base'] } } }))
+      await writeFile(join(profile, 'package.json'), JSON.stringify({ name: 'tui-perf-profile', private: true, dsh: { profile: { bundles: ['bake-base'] } } }))
       const composition = join(root, 'tui.patch.yml')
       await writeFile(composition, sourcePatch.replace('./lib/index.js', JSON.stringify(join(bundle, 'index.js'))).replace('./lib/startup.js', JSON.stringify(join(bundle, 'startup.js'))))
       const patch = join(root, 'profile.json')

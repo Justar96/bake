@@ -12,7 +12,7 @@
  * and only the target path is untrusted, so canonicalize-then-contain is the
  * complete answer to this surface. This is containment, not a security
  * boundary; kernel-grade isolation of untrusted CODE stays `ctx.shell`'s job
- * (`@deepseek-ai/dsh-bash-sandbox`). The residual
+ * (`bake-bash-sandbox`). The residual
  * TOCTOU (an ancestor symlink swapped between the containment re-check and the
  * syscall) is narrowed by re-canonicalizing immediately before delegating and
  * is accepted for this threat model.
@@ -23,17 +23,17 @@
  * `danger-full-access` delegates unfenced. A denial throws the structured
  * `FS_SANDBOX_DENIED`.
  *
- * @module @deepseek-ai/dsh-fs-sandbox
+ * @module bake-fs-sandbox
  */
 
 import { Context } from '@deepseek-ai/cordis'
-import { LocalFileSystem } from '@deepseek-ai/dsh-fs-local'
-import type { Config as LocalConfig } from '@deepseek-ai/dsh-fs-local'
+import { LocalFileSystem } from 'bake-fs-local'
+import type { Config as LocalConfig } from 'bake-fs-local'
 import { FsError } from 'bake-fs'
 import type { FsEditIntent, FsEditOutcome, FsEditRequest, FsTarget, FsWriteIntent, FsWriteOutcome } from 'bake-fs'
 import { writableRoots } from 'bake-sandbox'
 import type { SandboxExecutionPolicy, SandboxMode } from 'bake-sandbox'
-import type {} from '@deepseek-ai/dsh-sandbox-policy'
+import type {} from 'bake-sandbox-policy'
 import { isPathUnder } from './containment.ts'
 
 /**
@@ -46,9 +46,9 @@ export type Config = LocalConfig
 
 /**
  * Sandbox-enforcing filesystem backend. Registers as `ctx.fs` (loading it
- * INSTEAD OF `dsh-fs-local`, together with a `ctx.sandboxPolicy`, is the whole
+ * INSTEAD OF `bake-fs-local`, together with a `ctx.sandboxPolicy`, is the whole
  * swap — the model-facing tools are untouched). Its configured default mode is
- * the capability fact exposed by {@link sandboxMode}; `dsh-tool-fs` resolves
+ * the capability fact exposed by {@link sandboxMode}; `bake-tool-fs` resolves
  * each session's mode and cwd into a policy for every mutation, while an
  * approved escalation may stamp a strictly wider mode for one call.
  */

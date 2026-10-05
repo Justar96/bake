@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { SandboxProvider } from 'bake-sandbox'
 import type { ConfinedArgv, SandboxPolicy } from 'bake-sandbox'
-import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
+import LocalSubprocessRuntime from 'bake-subprocess-local'
 
 export const name = 'snapshot-pending-confinement'
 

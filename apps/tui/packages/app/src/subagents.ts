@@ -2,8 +2,8 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionEvent } from 'bake-session'
 import type { Agent } from 'bake-agent'
-import type { SubagentRunInfo } from '@deepseek-ai/dsh-subagent'
-import type { SubagentRoutingDecision } from '@deepseek-ai/dsh-tool-subagent'
+import type { SubagentRunInfo } from 'bake-subagent'
+import type { SubagentRoutingDecision } from 'bake-tool-subagent'
 import type { SubagentEntry } from '@dsh-tui/ui/subagents.tsx'
 import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
 

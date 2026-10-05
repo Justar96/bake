@@ -2,7 +2,7 @@
  * Register a DeepSeek-backed provider in `ctx.web`. It calls the Anthropic-compatible Messages API
  * with native `web_search_20250305`. The provider reuses `DEEPSEEK_API_KEY` but not
  * `DEEPSEEK_BASE_URL`; auxiliary search has its own endpoint configuration.
- * @module @deepseek-ai/dsh-web-search-deepseek
+ * @module bake-web-search-deepseek
  */
 
 import type { Context } from '@deepseek-ai/cordis'
@@ -10,9 +10,9 @@ import z from '@deepseek-ai/schemastery'
 import type {} from 'bake-agent'
 import { credentialRef } from 'bake-credentials'
 import type {} from 'bake-settings'
-import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
+import { launchEnvironmentOf } from 'bake-launch-environment'
 import type {} from 'bake-session'
-import type {} from '@deepseek-ai/dsh-web'
+import type {} from 'bake-web'
 import {
   DeepSeekSearchProvider,
   DEEPSEEK_DEFAULT_API_VERSION,

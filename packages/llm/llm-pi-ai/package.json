@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-llm-pi-ai",
+  "name": "bake-llm-pi-ai",
   "description": "pi-ai-backed LLM adapter for the Bake LLM seam: DeepSeek and every other configured provider route",
   "version": "0.1.6-alpha.2",
   "publishConfig": {
@@ -29,11 +29,11 @@
   "peerDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
     "bake-attachment": "workspace:^",
-    "@deepseek-ai/dsh-authorization": "workspace:^",
+    "bake-authorization": "workspace:^",
     "bake-credentials": "workspace:^",
     "bake-fs": "workspace:^",
-    "@deepseek-ai/dsh-launch-environment": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
+    "bake-launch-environment": "workspace:^",
+    "bake-llm": "workspace:^",
     "bake-settings": "workspace:^",
     "bake-timeout": "workspace:^"
   },
@@ -47,14 +47,14 @@
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
     "bake-attachment": "workspace:^",
-    "@deepseek-ai/dsh-authorization": "workspace:^",
+    "bake-authorization": "workspace:^",
     "bake-credentials": "workspace:^",
     "bake-fs": "workspace:^",
-    "@deepseek-ai/dsh-launch-environment": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
+    "bake-launch-environment": "workspace:^",
+    "bake-llm": "workspace:^",
     "bake-settings": "workspace:^",
     "bake-timeout": "workspace:^",
-    "@deepseek-ai/dsh-http-proxy": "workspace:^",
+    "bake-http-proxy": "workspace:^",
     "@types/js-yaml": "catalog:",
     "js-yaml": "catalog:"
   }

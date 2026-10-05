@@ -1,12 +1,12 @@
 /** Session-scoped command and skill discovery. Harness providers own catalog contents. */
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from 'bake-agent'
-import type { CommandArgumentChoice } from '@deepseek-ai/dsh-commands/types'
-import { isUserInvocable } from '@deepseek-ai/dsh-skill'
+import type { CommandArgumentChoice } from 'bake-commands/types'
+import { isUserInvocable } from 'bake-skill'
 import type { Completion, CompletionCatalog } from '@dsh-tui/ui/completion.ts'
 import type { TuiCopy } from '@dsh-tui/ui/copy.ts'
-import type {} from '@deepseek-ai/dsh-agent-presets'
-import type {} from '@deepseek-ai/dsh-commands'
+import type {} from 'bake-agent-presets'
+import type {} from 'bake-commands'
 
 /** Cancelable catalog observations belonging to one terminal session. */
 export class InputCatalog {

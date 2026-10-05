@@ -8,7 +8,7 @@
  *
  * Erasable TypeScript with relative `.ts` imports only, so source runs load it
  * through Node's type stripping and builds bundle it as `lib/worker.js`.
- * @module @deepseek-ai/dsh-ptc-runtime-codemode/worker
+ * @module bake-ptc-runtime-codemode/worker
  */
 
 import { parentPort, workerData } from 'node:worker_threads'

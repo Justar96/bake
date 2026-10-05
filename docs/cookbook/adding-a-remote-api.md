@@ -110,7 +110,7 @@ Fixed Host facts come from `ctx.remote.$host`: `home` and `isLoopback` are plain
 
 ```ts ignore-check
 import type { Context } from '@deepseek-ai/cordis'
-import { isRemoteFailure } from '@deepseek-ai/dsh-api-gateway/client'
+import { isRemoteFailure } from 'bake-api-gateway/client'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 
 export const inject = ['remote', 'remote.notes']

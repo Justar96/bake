@@ -2,7 +2,7 @@
  * Parse Codex's five-event hook subset into shared {@link MatcherGroup}s. Only synchronous command
  * hooks run; other types and `async: true` commands are recorded as skipped. Codex performs no
  * command substitution.
- * @module @deepseek-ai/dsh-hooks-codex/config
+ * @module bake-hooks-codex/config
  */
 
 import { matcherDiagnostic, type MatcherGroup } from 'bake-hook-protocol'

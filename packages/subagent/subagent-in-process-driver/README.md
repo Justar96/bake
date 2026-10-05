@@ -23,7 +23,7 @@ kind: "package-library"
 <a id="use-this-package"></a>
 ## Use this package
 
-You reach this package through a provider backend, not a composition: `dsh-subagent-spawn-in-process` calls `startInProcessRun(request)` and owns everything around it. This page documents the lifecycle the driver gives any in-process backend.
+You reach this package through a provider backend, not a composition: `bake-subagent-spawn-in-process` calls `startInProcessRun(request)` and owns everything around it. This page documents the lifecycle the driver gives any in-process backend.
 
 ### What one run provides
 
@@ -79,7 +79,7 @@ The required request signal covers both startup and the live run. Before publica
 Read these pages when the package-level contract is not enough; they move from the shared subagent model to the backends built on this driver and the delegation-policy decision.
 
 - [Subagent subsystem](../../../docs/subsystems/subagent.md) — start requests, results, provider contract, and in-process permission and depth.
-- [dsh-subagent-spawn-in-process](../subagent-spawn-in-process/README.md) — the fresh-child backend built on this driver.
+- [bake-subagent-spawn-in-process](../subagent-spawn-in-process/README.md) — the fresh-child backend built on this driver.
 - [Delegation-policy decision](../../../.agents/notes/implemented/feature/2026-07-25-subagent-policy-inheritance.md) — how parent sandbox and approval policy reach the child.
 
 -----
@@ -125,7 +125,7 @@ Prefix-stable inside the child while the structured-output instruction and schem
 
 #### What the model sees
 
-Through `dsh-tool-subagent`, invalid depth state becomes exactly `Error: agent subagentDepth must be a non-negative safe integer`, `Error: subagent child depth exceeds the safe-integer range`, or `Error: subagent depth <attempted> exceeds maxDepth <max>`. A pre-publication cancellation passes its abort reason through the registry's `Error: <message>` wrapper.
+Through `bake-tool-subagent`, invalid depth state becomes exactly `Error: agent subagentDepth must be a non-negative safe integer`, `Error: subagent child depth exceeds the safe-integer range`, or `Error: subagent depth <attempted> exceeds maxDepth <max>`. A pre-publication cancellation passes its abort reason through the registry's `Error: <message>` wrapper.
 
 #### Token effect
 

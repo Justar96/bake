@@ -16,10 +16,10 @@ import LlmRuntime, {
   LlmError,
   ReasoningEffortId,
   ToolCallId,
-} from '@deepseek-ai/dsh-llm'
-import type { GenerateOptions, Message, ToolDeclaration } from '@deepseek-ai/dsh-llm'
-import { PiAiAdapter } from '@deepseek-ai/dsh-llm-pi-ai'
-import type { PiAiModelProfile } from '@deepseek-ai/dsh-llm-pi-ai'
+} from 'bake-llm'
+import type { GenerateOptions, Message, ToolDeclaration } from 'bake-llm'
+import { PiAiAdapter } from 'bake-llm-pi-ai'
+import type { PiAiModelProfile } from 'bake-llm-pi-ai'
 import { PiAiCatalogError, resolveRouteModels } from '../src/catalog.ts'
 import { resolveProfiles } from '../src/config.ts'
 import { toPiContext } from '../src/context.ts'

@@ -1,5 +1,5 @@
-import { AssistantStreamAccumulator } from '@deepseek-ai/dsh-llm'
-import type { AssistantStreamRecord } from '@deepseek-ai/dsh-llm'
+import { AssistantStreamAccumulator } from 'bake-llm'
+import type { AssistantStreamRecord } from 'bake-llm'
 import {
   SessionFormatUnsupportedMigrationError,
   defineSessionFormatMigration,

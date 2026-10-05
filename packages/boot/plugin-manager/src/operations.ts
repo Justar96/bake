@@ -2,11 +2,11 @@
 import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, open } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
-import { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
+import { withFileLock, writeFileAtomic } from 'bake-atomic-write'
 import {
   DEFAULT_PROFILE_BUNDLES, bundlePatchPaths, initProfile, PROFILE_TEMPLATES, readProfileManifest,
   resolveBundleDir, resolveProfileDir, loadOverlayPatches, type ProfileManifest,
-} from '@deepseek-ai/dsh-app-boot'
+} from 'bake-app-boot'
 import { scrubbedParentEnv } from 'bake-subprocess'
 import type { PackageResult } from './types.ts'
 

@@ -1,4 +1,4 @@
-# The dsh-desktop bundle patch: a long-lived protocol bridge over dsh-base for
+# The bake-desktop bundle patch: a long-lived protocol bridge over bake-base for
 # the Bake Desktop app. It mounts no Host, HTTP server, or browser plugin. The
 # desktop launches the process with the workspace as its working directory,
 # speaks the protocol over the Electron utility-process message port (or
@@ -22,7 +22,7 @@
 
 - insert:
     - id: desktop-bridge
-      name: '@deepseek-ai/dsh-desktop'
+      name: 'bake-desktop'
 
 - id: hmr
   disabled: true

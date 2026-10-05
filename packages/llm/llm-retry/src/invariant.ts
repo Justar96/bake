@@ -1,14 +1,14 @@
-/** Package-owned durable retry-event invariants. @module @deepseek-ai/dsh-llm-retry/invariant */
+/** Package-owned durable retry-event invariants. @module bake-llm-retry/invariant */
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { Session, SessionEvent } from 'bake-session'
-import type { LlmFailure } from '@deepseek-ai/dsh-llm'
+import type { LlmFailure } from 'bake-llm'
 import { MAX_TIMER_DELAY_MS } from 'bake-timeout'
 import type { InvariantFailure, InvariantInstaller } from 'bake-invariants'
 import { providerForOpenStep } from './history.ts'
 import type {} from './index.ts'
 
-const PACKAGE_NAME = '@deepseek-ai/dsh-llm-retry'
+const PACKAGE_NAME = 'bake-llm-retry'
 
 /** Cordis companion plugin name. */
 export const name = 'llm-retry-invariant'

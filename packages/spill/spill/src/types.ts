@@ -1,13 +1,13 @@
 /**
  * Vocabulary for the spill storage Service Definition. Types only — the abstract service
  * lives in `./index.ts`, implementations in sibling packages
- * (`@deepseek-ai/dsh-spill-local` first).
+ * (`bake-spill-local` first).
  *
  * @module bake-spill/types
  */
 
 import type { Branded } from 'bake-brand'
-import type { ToolCallId } from '@deepseek-ai/dsh-llm'
+import type { ToolCallId } from 'bake-llm'
 import type { SessionId } from 'bake-session'
 
 /**

@@ -18,12 +18,12 @@
  * durable descriptor, so it neither restores the prior budget nor inherits
  * the parent's current one; the resumed route's defaults apply instead.
  *
- * @module @deepseek-ai/dsh-subagent/descriptor
+ * @module bake-subagent/descriptor
  */
 
 import { isRecord, snapshotJsonValue } from 'bake-util-values'
 import type { SessionEvent } from 'bake-session'
-import type { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import type { ReasoningEffortId } from 'bake-llm'
 import type { ToolRestriction } from 'bake-tools'
 
 declare module 'bake-session/types' {

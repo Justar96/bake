@@ -23,7 +23,7 @@
  * the lock file: every acquired lock belongs to a materialized or
  * materializing session, and the surviving file keeps the stable inode later
  * POSIX lockers verify against.
- * @module @deepseek-ai/dsh-session-persistence-jsonl/lease
+ * @module bake-session-persistence-jsonl/lease
  */
 
 import { mkdir, open, stat } from 'node:fs/promises'

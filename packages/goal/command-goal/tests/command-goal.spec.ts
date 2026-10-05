@@ -3,12 +3,12 @@ import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import AgentRegistry from 'bake-agent'
 import type { Agent, AgentStatus } from 'bake-agent'
-import CommandRuntime from '@deepseek-ai/dsh-commands'
-import GoalService from '@deepseek-ai/dsh-goal'
-import type { GoalRef } from '@deepseek-ai/dsh-goal'
+import CommandRuntime from 'bake-commands'
+import GoalService from 'bake-goal'
+import type { GoalRef } from 'bake-goal'
 import SessionStore, { Session, SessionId, type SessionEvent } from 'bake-session'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import * as commandGoal from '@deepseek-ai/dsh-command-goal'
+import SessionProjectionRegistry from 'bake-session-projection'
+import * as commandGoal from 'bake-command-goal'
 import { createInboxStub } from 'bake-agent-loop-testkit'
 
 interface Harness {
@@ -88,7 +88,7 @@ function ref(goal: NonNullable<ReturnType<GoalService['get']>>): GoalRef {
   return { id: goal.id, revision: goal.revision }
 }
 
-describe('@deepseek-ai/dsh-command-goal registration', () => {
+describe('bake-command-goal registration', () => {
   it('registers one global command with Loader-safe exports and disposes it', async () => {
     const test = await harness()
     expect(commandGoal.name).toBe('command-goal')

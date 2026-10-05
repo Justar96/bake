@@ -4,12 +4,12 @@
  * producers. It also delivers unreported completions to the owning agent:
  * injected into a busy owner's next step, or opening a turn on an idle one
  * under the default `wakeup` delivery, bounded per owner.
- * @module @deepseek-ai/dsh-tool-jobs
+ * @module bake-tool-jobs
  */
 
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { boundContextSummary, createUserMessage, type ContentBlock } from '@deepseek-ai/dsh-llm'
+import { boundContextSummary, createUserMessage, type ContentBlock } from 'bake-llm'
 import { TextRetainer } from 'bake-output-retention'
 import { defineTool } from 'bake-tools'
 import type { GenericCallView, ToolDefinition, ToolExecution } from 'bake-tools'

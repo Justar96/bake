@@ -1,6 +1,6 @@
 /**
  * Log-backed session title service, deterministic fallback, and provider contract.
- * @module @deepseek-ai/dsh-session-title
+ * @module bake-session-title
  */
 
 import { Context, FiberState, Service, type Fiber } from '@deepseek-ai/cordis'
@@ -8,16 +8,16 @@ import z from '@deepseek-ai/schemastery'
 import { z as zod } from 'zod'
 import type { ZodType } from 'zod'
 import type { Branded } from 'bake-brand'
-import { isAgentLoopRequest } from '@deepseek-ai/dsh-llm'
-import type { GenerateOptions } from '@deepseek-ai/dsh-llm'
+import { isAgentLoopRequest } from 'bake-llm'
+import type { GenerateOptions } from 'bake-llm'
 import { assertNever, assertPositiveInteger, deepFreeze } from 'bake-util-values'
 import type {
   Session,
   SessionEvent,
 } from 'bake-session'
 import { SessionSeq } from 'bake-session'
-import type {} from '@deepseek-ai/dsh-session-projection'
-import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
+import type {} from 'bake-session-projection'
+import type { ProjectionDefinition } from 'bake-session-projection'
 import type {} from 'bake-agent'
 export type {
   SessionTitleEventData,

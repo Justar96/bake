@@ -4,7 +4,7 @@
  * Format packages transform parsed JSON values. This module owns the physical
  * encoding, exact source identity, immutable generation files, and exclusive
  * current-generation publication for both configured JSONL suffixes.
- * @module @deepseek-ai/dsh-session-persistence-jsonl/generation
+ * @module bake-session-persistence-jsonl/generation
  */
 
 import { currentSessionMessageProjections } from 'bake-session-format-catalog/message-projections'
@@ -27,7 +27,7 @@ import { isDeepStrictEqual } from 'node:util'
 import { constants, createZstdCompress } from 'node:zlib'
 import { Session } from 'bake-session'
 import type { SessionEvent } from 'bake-session'
-import { BlockAssembler, expandAssistantStream } from '@deepseek-ai/dsh-llm'
+import { BlockAssembler, expandAssistantStream } from 'bake-llm'
 import type {
   SessionFormatArtifact,
   SessionFormatJsonValue,

@@ -20,7 +20,7 @@ import {
   freezeMessage,
   ToolCallId,
   MessageId,
-} from '@deepseek-ai/dsh-llm'
+} from 'bake-llm'
 
 type TestSurfaceOp = 'append' | { op: 'replace'; startSeq: number; endSeq: number }
 

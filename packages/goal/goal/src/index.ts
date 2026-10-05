@@ -1,7 +1,7 @@
 /**
  * Same-session goal domain: event-sourced state, compare-and-set mutations,
  * and process-local continuation activation.
- * @module @deepseek-ai/dsh-goal
+ * @module bake-goal
  */
 
 import { randomUUID } from 'node:crypto'
@@ -14,8 +14,8 @@ import type { Agent } from 'bake-agent'
 import { SessionSeq } from 'bake-session'
 import type { Session, SessionEvent, SessionLogOffset } from 'bake-session'
 import { TypertRemoteService, Remote } from 'bake-typert-protocol'
-import type {} from '@deepseek-ai/dsh-session-projection'
-import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
+import type {} from 'bake-session-projection'
+import type { ProjectionDefinition } from 'bake-session-projection'
 import {
   applyGoalEvent,
   goalChangeRef,

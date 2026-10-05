@@ -1,5 +1,5 @@
 /**
- * The terminal profile's host plane as it ships: `dsh-base` with the terminal
+ * The terminal profile's host plane as it ships: `bake-base` with the terminal
  * bundle's patch applied by the Loader's own patch semantics, every row the
  * composition leaves active mounted through the Loader, and the shipped
  * presets the runner offers. Only the model, the persistence root, the
@@ -18,8 +18,8 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Include, { applyEntryPatches, entryListSchema, type PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 import Loader, { Group } from '@deepseek-ai/cordis-plugin-loader'
-import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
-import { ToolCallId, type GenerateOptions, type Message, type StreamChunk } from '@deepseek-ai/dsh-llm'
+import { dshHomePath } from 'bake-home-paths'
+import { ToolCallId, type GenerateOptions, type Message, type StreamChunk } from 'bake-llm'
 import type { SessionEvent } from 'bake-session'
 import { defineContentToolFixture } from 'bake-tools'
 import { dictionaries } from '@dsh-tui/ui/copy.ts'
@@ -94,7 +94,7 @@ async function profile() {
   ctx.provide('profileContext', {
     name: 'tui', dir: profileDir, patchPath: join(profileDir, 'cordis.patch.yml'),
     installAnchor: join(REPOSITORY, 'apps/cli/package.json'), cwd: workspace, home: join(root, 'home'),
-    startedBundles: ['@deepseek-ai/dsh-base', '@dsh-tui/app'], overlays: [], telemetryDisabledEnv: undefined,
+    startedBundles: ['bake-base', '@dsh-tui/app'], overlays: [], telemetryDisabledEnv: undefined,
   })
   await ctx.plugin(Loader)
   ctx.loader.builtins.include = Include

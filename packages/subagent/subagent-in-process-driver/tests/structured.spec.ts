@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { createUserMessage, ToolCallId, type ContentBlock, type GenerateOptions } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, ToolCallId, type ContentBlock, type GenerateOptions } from 'bake-llm'
 import { SessionId } from 'bake-session'
 import AgentLoop from 'bake-agent-loop'
 import { mountAgentLoopTestDependencies } from 'bake-agent-loop-testkit'
@@ -12,7 +12,7 @@ import * as AgentLoopInvariant from 'bake-agent-loop/invariant'
 import SubagentRuntime, {
   type ResolvedSubagentStartRequest,
   type SubagentStartRequest,
-} from '@deepseek-ai/dsh-subagent'
+} from 'bake-subagent'
 import type { Config as ToolConfig, ObjectJsonSchema } from 'bake-tools'
 import { defineContentToolFixture, RUN_CODE_NAME } from 'bake-tools'
 import { MockAdapter, textResponse, toolCallResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'

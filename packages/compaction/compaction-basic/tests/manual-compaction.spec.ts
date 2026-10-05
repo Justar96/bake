@@ -1,38 +1,38 @@
-import { imageOffloadProjection } from '@deepseek-ai/dsh-compaction-image-offload/projection'
+import { imageOffloadProjection } from 'bake-compaction-image-offload/projection'
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import AgentLoop from 'bake-agent-loop'
 import { mountAgentLoopTestDependencies } from 'bake-agent-loop-testkit'
 import InvariantRegistry from 'bake-invariants'
-import { CommandId } from '@deepseek-ai/dsh-commands/brand'
+import { CommandId } from 'bake-commands/brand'
 import * as SessionInvariant from 'bake-session/invariant'
 import * as AgentInvariant from 'bake-agent/invariant'
 import * as AgentLoopInvariant from 'bake-agent-loop/invariant'
 import * as CompactionInvariant from 'bake-compaction/invariant'
-import { BasicCompactionEngine } from '@deepseek-ai/dsh-compaction-basic'
+import { BasicCompactionEngine } from 'bake-compaction-basic'
 import { CompactionId, isCompactCheckpointSource, ManualCompactionError } from 'bake-compaction'
 import type { CompactionResult } from 'bake-compaction'
 import {
   createAssistantMessage,
   createUserMessage,
   LlmAdapter,
-} from '@deepseek-ai/dsh-llm'
+} from 'bake-llm'
 import type {
   ContentBlock,
   LlmResolvedModelInfo,
   Message,
   StreamChunk,
   TokenUsage,
-} from '@deepseek-ai/dsh-llm'
+} from 'bake-llm'
 import SessionStore, { Session, SessionId, type SessionEvent } from 'bake-session'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import LlmRuntime from '@deepseek-ai/dsh-llm'
-import TokenMeter from '@deepseek-ai/dsh-token-meter'
+import SessionProjectionRegistry from 'bake-session-projection'
+import LlmRuntime from 'bake-llm'
+import TokenMeter from 'bake-token-meter'
 import type { Agent } from 'bake-agent'
 import type {
   SummarizationInput,
   SummaryResult,
-} from '@deepseek-ai/dsh-compaction-basic/src/summarizer.ts'
+} from 'bake-compaction-basic/src/summarizer.ts'
 
 const MODEL = 'mock'
 const SIGNAL = new AbortController().signal

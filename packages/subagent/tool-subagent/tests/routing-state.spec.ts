@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { ToolCallId } from '@deepseek-ai/dsh-llm'
+import { ToolCallId } from 'bake-llm'
 import { Session, SessionId, SessionLogOffset } from 'bake-session'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
+import SessionProjectionRegistry from 'bake-session-projection'
 import { recordSubagentRoutingDecision, subagentRoutingDecision, subagentRoutingProjectionDefinition } from '../src/routing-state.ts'
 import type { SubagentRoutingDecision } from '../src/types.ts'
 

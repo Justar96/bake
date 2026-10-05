@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-tool-fs",
+  "name": "bake-tool-fs",
   "description": "Model-facing filesystem tools (read, write, edit) over the DeepSeek Harness filesystem seam (ctx.fs)",
   "version": "0.1.6-alpha.2",
   "publishConfig": {
@@ -33,12 +33,12 @@
   "peerDependencies": {
     "bake-attachment": "workspace:^",
     "bake-fs": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
+    "bake-llm": "workspace:^",
     "bake-sandbox": "workspace:^",
-    "@deepseek-ai/dsh-sandbox-policy": "workspace:^",
+    "bake-sandbox-policy": "workspace:^",
     "bake-session": "workspace:^",
     "bake-tools": "workspace:^",
-    "@deepseek-ai/dsh-user-approval": "workspace:^",
+    "bake-user-approval": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   },
   "devDependencies": {
@@ -47,18 +47,18 @@
     "bake-agent-loop-testkit": "workspace:^",
     "bake-attachment": "workspace:^",
     "bake-fs": "workspace:^",
-    "@deepseek-ai/dsh-fs-local": "workspace:^",
-    "@deepseek-ai/dsh-fs-observation-policy": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
-    "@deepseek-ai/dsh-llm-pi-ai": "workspace:^",
+    "bake-fs-local": "workspace:^",
+    "bake-fs-observation-policy": "workspace:^",
+    "bake-llm": "workspace:^",
+    "bake-llm-pi-ai": "workspace:^",
     "bake-sandbox": "workspace:^",
-    "@deepseek-ai/dsh-sandbox-policy": "workspace:^",
+    "bake-sandbox-policy": "workspace:^",
     "bake-session": "workspace:^",
     "bake-system-prompt": "workspace:^",
     "bake-tools": "workspace:^",
-    "@deepseek-ai/dsh-user-approval": "workspace:^",
+    "bake-user-approval": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^",
-    "@deepseek-ai/dsh-session-projection": "workspace:^",
+    "bake-session-projection": "workspace:^",
     "bake-scope": "workspace:^",
     "bake-ptc-runtime": "workspace:^"
   }

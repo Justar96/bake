@@ -2,10 +2,10 @@ import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from 'bake-agent'
 import AgentLoop from 'bake-agent-loop'
 import { mountAgentLoopTestDependencies } from 'bake-agent-loop-testkit'
-import LocalFileSystem from '@deepseek-ai/dsh-fs-local'
-import * as FsPolicy from '@deepseek-ai/dsh-fs-observation-policy'
-import * as ToolFs from '@deepseek-ai/dsh-tool-fs'
-import * as LlmPiAi from '@deepseek-ai/dsh-llm-pi-ai'
+import LocalFileSystem from 'bake-fs-local'
+import * as FsPolicy from 'bake-fs-observation-policy'
+import * as ToolFs from 'bake-tool-fs'
+import * as LlmPiAi from 'bake-llm-pi-ai'
 
 /**
  * Build the real fs-tool stack for with-key e2e tests. Agents have no session

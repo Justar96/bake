@@ -1,10 +1,10 @@
 /**
  * Load-time validation and routed-model policy resolution for compaction-basic.
  *
- * @module @deepseek-ai/dsh-compaction-basic/config
+ * @module bake-compaction-basic/config
  */
 
-import type { LlmCallConfig } from '@deepseek-ai/dsh-llm'
+import type { LlmCallConfig } from 'bake-llm'
 import { deepFreeze } from 'bake-util-values'
 import type {
   BasicCompactionConfig,

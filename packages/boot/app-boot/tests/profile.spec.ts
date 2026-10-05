@@ -1,19 +1,19 @@
 /**
- * Profile machinery of `dsh-app-boot`: directory resolution and init,
+ * Profile machinery of `bake-app-boot`: directory resolution and init,
  * manifest round-trips, two-anchor bundle resolution, patch-layer loading,
  * empty-root composition, and the installation module-fallback healing.
  */
 
 import {
-  existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync,
-  unlinkSync, writeFileSync,
+  chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync,
+  rmSync, symlinkSync, unlinkSync, writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { withFileLock } from '@deepseek-ai/dsh-atomic-write'
-import { afterAll, describe, expect, it } from 'vitest'
+import { withFileLock } from 'bake-atomic-write'
+import { afterAll, describe, expect, it, onTestFinished } from 'vitest'
 import {
   composeEntries,
   healProfilesModuleFallback,
@@ -21,6 +21,8 @@ import {
   initProfile,
   loadProfile,
   loadProfileDirectory,
+  migrateProfileManifest,
+  PROFILE_MANIFEST_BACKUP_SUFFIX,
   PROFILE_PATCH_FILENAME,
   PROFILE_TEMPLATES,
   readProfileManifest,
@@ -182,15 +184,15 @@ describe('initProfile', () => {
   it('creates manifest, user patch layer, and pnpm workspace once, never overwriting', () => {
     const home = tmp()
     const dir = resolveProfileDir('tui', home)
-    initProfile(dir, ['@deepseek-ai/dsh-base'])
+    initProfile(dir, ['bake-base'])
     const manifest = readProfileManifest('t', dir)
-    expect(manifest.dsh?.profile?.bundles).toEqual(['@deepseek-ai/dsh-base'])
+    expect(manifest.dsh?.profile?.bundles).toEqual(['bake-base'])
     expect(readFileSync(join(dir, PROFILE_PATCH_FILENAME), 'utf8')).toContain('[]')
     expect(readFileSync(join(dir, 'pnpm-workspace.yaml'), 'utf8')).toContain('nodeLinker: hoisted')
     // Re-init keeps user edits.
     writeFileSync(join(dir, PROFILE_PATCH_FILENAME), '- id: x\n  config: {}\n')
     initProfile(dir, ['other'])
-    expect(readProfileManifest('t', dir).dsh?.profile?.bundles).toEqual(['@deepseek-ai/dsh-base'])
+    expect(readProfileManifest('t', dir).dsh?.profile?.bundles).toEqual(['bake-base'])
     expect(readFileSync(join(dir, PROFILE_PATCH_FILENAME), 'utf8')).toContain('- id: x')
   })
 })
@@ -313,12 +315,12 @@ describe('loadProfile', () => {
     expect(() => loadProfile('t', 'custom', anchor, home))
       .toThrow('profile "custom" does not exist')
     expect(PROFILE_TEMPLATES).toEqual({
-      tui: { bundles: ['@deepseek-ai/dsh-base', '@dsh-tui/app'] },
-      headless: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-headless'] },
-      desktop: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-desktop'] },
+      tui: { bundles: ['bake-base', '@dsh-tui/app'] },
+      headless: { bundles: ['bake-base', 'bake-headless'] },
+      desktop: { bundles: ['bake-base', 'bake-desktop'] },
     })
     const shippedAnchor = stageInstallation({
-      '@deepseek-ai/dsh-base': { patch: '[]\n' },
+      'bake-base': { patch: '[]\n' },
       '@dsh-tui/app': { patch: '[]\n' },
     })
     expect(loadProfile('t', 'tui', shippedAnchor, home).layers.map(layer => layer.packageName))
@@ -342,6 +344,97 @@ describe('loadProfile', () => {
     const dir = resolveProfileDir('demo', home)
     initProfile(dir, ['not-a-bundle'])
     expect(() => loadProfile('t', 'demo', anchor, home)).toThrow('declares no dsh.bundle')
+  })
+})
+
+describe('legacy bundle names', () => {
+  const legacyManifest = {
+    name: 'dsh-profile-tui',
+    private: true,
+    dependencies: { 'example-plugin': '1.0.0' },
+    dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@dsh-tui/app', 'custom-bundle'] } },
+  }
+
+  it('migrates a released profile manifest once, keeping a backup and logging one line', () => {
+    const anchor = stageInstallation({
+      'bake-base': { patch: '[]\n' },
+      '@dsh-tui/app': { patch: '[]\n' },
+      'custom-bundle': { patch: '[]\n' },
+    })
+    const home = tmp()
+    const dir = resolveProfileDir('tui', home)
+    mkdirSync(dir, { recursive: true })
+    const original = JSON.stringify(legacyManifest)
+    writeFileSync(join(dir, 'package.json'), original)
+    const lines: string[] = []
+
+    const profile = loadProfile('t', 'tui', anchor, home, { warn: line => lines.push(line) })
+
+    expect(profile.layers.map(layer => layer.packageName)).toEqual(['bake-base', '@dsh-tui/app', 'custom-bundle'])
+    expect(readProfileManifest('t', dir)).toEqual({
+      ...legacyManifest,
+      dsh: { profile: { bundles: ['bake-base', '@dsh-tui/app', 'custom-bundle'] } },
+    })
+    expect(readFileSync(join(dir, `package.json${PROFILE_MANIFEST_BACKUP_SUFFIX}`), 'utf8')).toBe(original)
+    expect(lines).toEqual([
+      `t: renamed legacy bundles in profile tui: @deepseek-ai/dsh-base -> bake-base; the previous manifest is ${join(dir, 'package.json.bak')}`,
+    ])
+
+    loadProfile('t', 'tui', anchor, home, { warn: line => lines.push(line) })
+    expect(lines).toHaveLength(1)
+    expect(readdirSync(dir).filter(name => name.endsWith('.tmp'))).toEqual([])
+  })
+
+  it('keeps an earlier backup and leaves a manifest without legacy names untouched', () => {
+    const dir = tmp()
+    writeFileSync(join(dir, 'package.json'), JSON.stringify(legacyManifest))
+    writeFileSync(join(dir, 'package.json.bak'), 'older backup')
+    expect(migrateProfileManifest('t', dir, () => {})).toBe(true)
+    expect(readFileSync(join(dir, 'package.json.bak'), 'utf8')).toBe('older backup')
+
+    const migrated = readFileSync(join(dir, 'package.json'), 'utf8')
+    expect(migrateProfileManifest('t', dir, () => {})).toBe(false)
+    expect(readFileSync(join(dir, 'package.json'), 'utf8')).toBe(migrated)
+  })
+
+  // A read-only directory refuses the backup and the replacement; root and Windows ignore the mode.
+  const readOnlyDirectories = process.platform !== 'win32' && process.getuid?.() !== 0
+  it.runIf(readOnlyDirectories)('reports a failed rewrite and still loads the profile under current names', () => {
+    const anchor = stageInstallation({ 'bake-base': { patch: '[]\n' } })
+    const home = tmp()
+    const dir = resolveProfileDir('demo', home)
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ dsh: { profile: { bundles: ['@deepseek-ai/dsh-base'] } } }))
+    writeFileSync(join(dir, PROFILE_PATCH_FILENAME), '[]\n')
+    chmodSync(dir, 0o500)
+    onTestFinished(() => { chmodSync(dir, 0o700) })
+    const lines: string[] = []
+
+    const profile = loadProfile('t', 'demo', anchor, home, { warn: line => lines.push(line) })
+
+    expect(profile.layers.map(layer => layer.packageName)).toEqual(['bake-base'])
+    expect(readProfileManifest('t', dir).dsh?.profile?.bundles).toEqual(['@deepseek-ai/dsh-base'])
+    expect(lines).toHaveLength(2)
+    expect(lines[0]).toMatch(/^t: warning: could not rename legacy bundles in .*\(@deepseek-ai\/dsh-base -> bake-base\)/u)
+    expect(lines[1]).toContain('names renamed bundles (@deepseek-ai/dsh-base -> bake-base)')
+  })
+
+  it('maps an application-owned profile in memory without rewriting it', () => {
+    const anchor = stageInstallation({ 'bake-desktop': { patch: '[]\n' } })
+    const dir = join(tmp(), 'managed', 'desktop')
+    initProfile(dir, ['@deepseek-ai/dsh-desktop'])
+    const before = readFileSync(join(dir, 'package.json'), 'utf8')
+    const lines: string[] = []
+
+    const profile = loadProfileDirectory('managed app', dir, anchor, { warn: line => lines.push(line) })
+    loadProfileDirectory('managed app', dir, anchor, { warn: line => lines.push(line) })
+
+    expect(profile.layers.map(layer => layer.packageName)).toEqual(['bake-desktop'])
+    expect(readFileSync(join(dir, 'package.json'), 'utf8')).toBe(before)
+    expect(lines).toEqual([
+      `managed app: warning: profile ${join(dir, 'package.json')} names renamed bundles `
+      + '(@deepseek-ai/dsh-desktop -> bake-desktop); the old names are deprecated and will stop working in a later release',
+    ])
   })
 })
 

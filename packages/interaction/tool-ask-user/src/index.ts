@@ -3,12 +3,12 @@
  * The tool pauses until a UI provider returns a human answer, then feeds that
  * answer back into the agent loop as an ordinary tool result.
  *
- * @module @deepseek-ai/dsh-tool-ask-user
+ * @module bake-tool-ask-user
  */
 
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from 'bake-tools'
-import '@deepseek-ai/dsh-user-questions'
+import 'bake-user-questions'
 import { presentAskCall, presentAskResult } from './presentation.ts'
 
 export const name = 'tool-ask-user'

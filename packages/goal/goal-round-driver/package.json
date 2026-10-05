@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-goal-round-driver",
+  "name": "bake-goal-round-driver",
   "description": "Race-fenced same-session goal-round driver",
   "version": "0.1.6-alpha.2",
   "publishConfig": {
@@ -33,9 +33,9 @@
   "license": "MIT",
   "peerDependencies": {
     "bake-agent": "workspace:^",
-    "@deepseek-ai/dsh-goal": "workspace:^",
+    "bake-goal": "workspace:^",
     "bake-invariants": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
+    "bake-llm": "workspace:^",
     "bake-session": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   },
@@ -43,13 +43,13 @@
     "bake-agent": "workspace:^",
     "bake-agent-loop": "workspace:^",
     "bake-agent-loop-testkit": "workspace:^",
-    "@deepseek-ai/dsh-goal": "workspace:^",
+    "bake-goal": "workspace:^",
     "bake-invariants": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
+    "bake-llm": "workspace:^",
     "bake-session": "workspace:^",
     "bake-system-prompt": "workspace:^",
     "bake-tools": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^",
-    "@deepseek-ai/dsh-session-projection": "workspace:^"
+    "bake-session-projection": "workspace:^"
   }
 }

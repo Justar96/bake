@@ -8,10 +8,10 @@ import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
 import AgentRegistry from 'bake-agent'
 import AgentLoop from 'bake-agent-loop'
-import LlmRuntime, { createUserMessage, LlmAdapter, LlmError, resolveRetryPolicy  } from '@deepseek-ai/dsh-llm'
-import type { GenerateOptions, ResolvedRetryPolicy, StreamChunk } from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { createUserMessage, LlmAdapter, LlmError, resolveRetryPolicy  } from 'bake-llm'
+import type { GenerateOptions, ResolvedRetryPolicy, StreamChunk } from 'bake-llm'
 import SessionStore, { SessionId } from 'bake-session'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
+import SessionProjectionRegistry from 'bake-session-projection'
 import SystemPrompt from 'bake-system-prompt'
 import ToolRuntime from 'bake-tools'
 import * as retry from '../src/index.ts'
@@ -59,13 +59,13 @@ async function loadYaml(lines: readonly string[]): Promise<Context> {
   await context.plugin(Loader)
   context.loader.builtins.include = Include
   const modules = new Map<string, unknown>([
-    ['@deepseek-ai/dsh-llm', LlmRuntime],
+    ['bake-llm', LlmRuntime],
     ['bake-session', SessionStore],
-    ['@deepseek-ai/dsh-session-projection', SessionProjectionRegistry],
+    ['bake-session-projection', SessionProjectionRegistry],
     ['bake-system-prompt', SystemPrompt],
     ['bake-tools', ToolRuntime],
     ['bake-agent', AgentRegistry],
-    ['@deepseek-ai/dsh-llm-retry', retry],
+    ['bake-llm-retry', retry],
     ['bake-agent-loop', AgentLoop],
   ])
   context.loader.internal = {
@@ -89,13 +89,13 @@ describe('real Loader composition', () => {
   // to trip the default 5s budget on cold caches.
   it('loads provider-supplied policy and records recovery through the shipping loop', { timeout: 60_000 }, async () => {
     const loaded = await loadYaml([
-      "- name: '@deepseek-ai/dsh-llm'",
+      "- name: 'bake-llm'",
       "- name: 'bake-session'",
-      "- name: '@deepseek-ai/dsh-session-projection'",
+      "- name: 'bake-session-projection'",
       "- name: 'bake-system-prompt'",
       "- name: 'bake-tools'",
       "- name: 'bake-agent'",
-      "- name: '@deepseek-ai/dsh-llm-retry'",
+      "- name: 'bake-llm-retry'",
       "- name: 'bake-agent-loop'",
     ])
 

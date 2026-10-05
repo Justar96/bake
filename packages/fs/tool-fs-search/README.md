@@ -3,11 +3,11 @@ description: "The model-facing glob and grep discovery tools for users and maint
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-tool-fs-search
+# bake-tool-fs-search
 
 ## Summary
 
-Use `dsh-tool-fs-search` to give models `glob` file discovery and `grep` content search over a local workspace. Searches need no host `rg` installation or filesystem provider and return workdir-relative results. `glob` lists the newest files first and includes hidden and ignored files while excluding VCS metadata; `grep` skips hidden and ignored files unless its `path` names them. Configurable caps bound inline output; with an optional spill store, capped results remain fully recoverable. Choose the sibling `dsh-tool-fs` package for reading, writing, or editing files.
+Use `bake-tool-fs-search` to give models `glob` file discovery and `grep` content search over a local workspace. Searches need no host `rg` installation or filesystem provider and return workdir-relative results. `glob` lists the newest files first and includes hidden and ignored files while excluding VCS metadata; `grep` skips hidden and ignored files unless its `path` names them. Configurable caps bound inline output; with an optional spill store, capped results remain fully recoverable. Choose the sibling `bake-tool-fs` package for reading, writing, or editing files.
 
 ## Table of Contents
 
@@ -30,11 +30,11 @@ Mount the tools after a `ctx.subprocess` backend; no host `rg` install is needed
 A subprocess backend, then the tools; the spill backend is optional and makes capped results fully recoverable.
 
 ```yaml
-- name: '@deepseek-ai/dsh-subprocess-local'
-- name: '@deepseek-ai/dsh-tool-fs-search'
+- name: 'bake-subprocess-local'
+- name: 'bake-tool-fs-search'
   config:
     sampleOverCapGlobResults: false
-- name: '@deepseek-ai/dsh-spill-local'
+- name: 'bake-spill-local'
 ```
 
 `sampleOverCapGlobResults` is required and has no fallback: deployments choose the over-cap ordering contract explicitly. When formatted spill succeeds, both modes preserve the complete sorted list in the spill artifact.
@@ -64,7 +64,7 @@ Routine budgets stay out of the model-facing schema: a model that needs surround
 | `stderrMaxBytes` | `65536` | Diagnostic-tail budget for `rg` stderr |
 | `searchMetaMaxBytes` | `65536` | Max bytes of one search's serialized `presentationMeta`; trailing groups/paths drop past it |
 
-The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-tool-fs-search) is the exhaustive source for every accepted field and its JSDoc.
+The generated [configuration catalog](../../../docs/config-catalog.md#bake-tool-fs-search) is the exhaustive source for every accepted field and its JSDoc.
 
 ### Deployment requirement
 
@@ -121,7 +121,7 @@ Read these pages when the package-level contract is not enough. They move from t
 - [Subprocess capability](../../../docs/subsystems/subprocess.md) — the spawn seam these tools execute through.
 - [Spill store](../../spill/spill/README.md) — the optional backend that makes capped results fully recoverable.
 - [Timeout utility](../../util/timeout/README.md) — the `MAX_TIMER_DELAY_MS` bound on the terminate grace.
-- [Generated tool catalog](../../../docs/tool-catalog.md#deepseek-aidsh-tool-fs-search) — the exhaustive schemas this package registers.
+- [Generated tool catalog](../../../docs/tool-catalog.md#bake-tool-fs-search) — the exhaustive schemas this package registers.
 
 -----
 
@@ -132,7 +132,7 @@ Read these pages when the package-level contract is not enough. They move from t
 
 #### What the model sees
 
-The package adds no system-prompt section: each tool's description and parameters are its only guidance, and they are also the SDK documentation behind `run_code` in PTC mode. The glob description presents it as a bounded, newest-first alternative to a shell `find`, asks the model to keep `path` inside the repository or a known subtree, recommends it before content searches when the path is uncertain, rejects filesystem-wide roots as a workflow, and states the configured over-cap behavior; its `pattern` parameter explains that a pattern without `/` matches file names at any depth. The grep description presents it as a bounded alternative to a shell `grep` or `rg`, recommends `glob` first when the path or file type is uncertain, asks for a scoped path and one include filter, says it returns only matching lines, and points at `read` for surrounding context. Descriptions are registration-time text, so that pointer stays where a scope hides `read`. `path` on both tools is described as defaulting to the working directory. The generated [`glob` and `grep` schemas](../../../docs/tool-catalog.md#deepseek-aidsh-tool-fs-search) use `sampleOverCapGlobResults: true`; the tools are registered unconditionally.
+The package adds no system-prompt section: each tool's description and parameters are its only guidance, and they are also the SDK documentation behind `run_code` in PTC mode. The glob description presents it as a bounded, newest-first alternative to a shell `find`, asks the model to keep `path` inside the repository or a known subtree, recommends it before content searches when the path is uncertain, rejects filesystem-wide roots as a workflow, and states the configured over-cap behavior; its `pattern` parameter explains that a pattern without `/` matches file names at any depth. The grep description presents it as a bounded alternative to a shell `grep` or `rg`, recommends `glob` first when the path or file type is uncertain, asks for a scoped path and one include filter, says it returns only matching lines, and points at `read` for surrounding context. Descriptions are registration-time text, so that pointer stays where a scope hides `read`. `path` on both tools is described as defaulting to the working directory. The generated [`glob` and `grep` schemas](../../../docs/tool-catalog.md#bake-tool-fs-search) use `sampleOverCapGlobResults: true`; the tools are registered unconditionally.
 
 #### Token effect
 

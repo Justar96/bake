@@ -8,7 +8,7 @@
  * home; decide at resolution time
  * ([regrouping Agent Note](../../../../.agents/notes/archived/architecture/2026-07-29-package-regrouping.md)).
  *
- * @module @deepseek-ai/dsh-tool-call-timeout-policy
+ * @module bake-tool-call-timeout-policy
  */
 
 import type { Context } from '@deepseek-ai/cordis'

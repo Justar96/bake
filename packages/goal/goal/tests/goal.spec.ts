@@ -2,16 +2,16 @@ import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry, { agentEvents } from 'bake-agent'
 import type { Agent } from 'bake-agent'
-import { createUserMessage, HarnessError } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, HarnessError } from 'bake-llm'
 import SessionStore, { Session, SessionId, type UserMessage } from 'bake-session'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
+import SessionProjectionRegistry from 'bake-session-projection'
 import GoalService, {
   GoalError,
   GoalId,
   decodeGoalChange,
   foldGoal,
-} from '@deepseek-ai/dsh-goal'
-import type { GoalChangeMeta, GoalRef, GoalSnapshotChangeMeta } from '@deepseek-ai/dsh-goal'
+} from 'bake-goal'
+import type { GoalChangeMeta, GoalRef, GoalSnapshotChangeMeta } from 'bake-goal'
 import { createInboxStub } from 'bake-agent-loop-testkit'
 
 interface StubAgent {

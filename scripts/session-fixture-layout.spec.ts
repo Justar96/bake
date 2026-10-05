@@ -1,8 +1,8 @@
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { createAssistantMessage } from '@deepseek-ai/dsh-llm'
+import { createAssistantMessage } from 'bake-llm'
 import { SESSION_FORMAT_VERSION, SessionSeq, type SessionEvent } from 'bake-session'
-import { parseSessionLog } from '@deepseek-ai/dsh-llm-replay'
+import { parseSessionLog } from 'bake-llm-replay'
 import {
   canonicalSessionFixture,
   inspectSessionFixtureLayouts,

@@ -1,7 +1,7 @@
 /**
  * Three shared tools adapt model arguments to scoped resource operations.
  *
- * @module @deepseek-ai/dsh-mcp-resources
+ * @module bake-mcp-resources
  */
 
 import type { Context } from '@deepseek-ai/cordis'

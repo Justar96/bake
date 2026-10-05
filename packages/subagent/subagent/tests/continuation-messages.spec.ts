@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ToolCallId, type ContentBlock } from '@deepseek-ai/dsh-llm'
+import { ToolCallId, type ContentBlock } from 'bake-llm'
 import { SessionId } from 'bake-session'
 import { createSettlementMessage, withContinuableReturnGuidance } from '../src/continuation-messages.ts'
 

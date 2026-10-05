@@ -57,10 +57,10 @@ The Client uses concrete functions on ordinary objects, not a JavaScript Proxy. 
 
 ```ts ignore-check
 import type { SessionId } from 'bake-session/types'
-import type { ClientRemote } from '@deepseek-ai/dsh-api-gateway/client'
+import type { ClientRemote } from 'bake-api-gateway/client'
 import type { TypertRemoteScopeApi } from 'bake-typert-protocol'
 import type { Context } from '@deepseek-ai/cordis'
-import type {} from '@deepseek-ai/dsh-goal/remote'
+import type {} from 'bake-goal/remote'
 
 export const inject = ['remote', 'remote.goals']
 
@@ -72,7 +72,7 @@ await ctx.remote.goals.create(agentId, { objective: 'ship it' })
 await agentCtx.remote.goals.create({ objective: 'ship it' })
 ```
 
-No application assembles the Client face today. Business packages still publish `./remote` contributions, but nothing outside `packages/api/gateway/tests` imports them or calls `ctx.remote.$mount()`, and no package registers a Client Context adapter. The Client statements on this page describe `@deepseek-ai/dsh-api-gateway/client` as its source and tests define it.
+No application assembles the Client face today. Business packages still publish `./remote` contributions, but nothing outside `packages/api/gateway/tests` imports them or calls `ctx.remote.$mount()`, and no package registers a Client Context adapter. The Client statements on this page describe `bake-api-gateway/client` as its source and tests define it.
 
 ## Component responsibilities
 
@@ -80,10 +80,10 @@ No application assembles the Client face today. Business packages still publish 
 |---|---|---|
 | Shared | `bake-typert-protocol` | Declares decorators, Gateway bindings, merge-extensible protocol maps, invocation descriptors, and provider types; starts no TypeScript analysis and registers no Cordis services |
 | Build | `bake-typert-generator` | Strictly analyzes Remote signatures, the type graph, lookups, Contexts, and source locations from the Host `ts.Program`, then generates Host and Host-for-Client artifacts |
-| Host | `@deepseek-ai/dsh-typert-registry` and Loader | Places generated Host descriptors, schemas, and business-package registrations in `ctx.typert`, and holds lookup and Context providers |
+| Host | `bake-typert-registry` and Loader | Places generated Host descriptors, schemas, and business-package registrations in `ctx.typert`, and holds lookup and Context providers |
 | Host | `bake-agent` and `bake-session` | Register the `agent` and `session` lookups and the `agent` Host Context |
-| Host | `@deepseek-ai/dsh-api-gateway` | Provides `ctx.typertGateway`, claims Remote endpoints, validates request values, resolves objects or Contexts, and invokes live Cordis services |
-| Client | `@deepseek-ai/dsh-api-gateway/client` | Provides `ctx.remote` and `remote.<namespace>` child Services, mounts generated descriptors as concrete methods, and initiates and cancels calls through the Connection |
+| Host | `bake-api-gateway` | Provides `ctx.typertGateway`, claims Remote endpoints, validates request values, resolves objects or Contexts, and invokes live Cordis services |
+| Client | `bake-api-gateway/client` | Provides `ctx.remote` and `remote.<namespace>` child Services, mounts generated descriptors as concrete methods, and initiates and cancels calls through the Connection |
 | Both | `bake-client-connection` | Provides the RPC carrier, request correlation, trust boundary, cancellation, response envelope, and the `/api` HTTP bridge |
 
 The API Gateway package owns the Host dispatcher and Client Remote endpoint as peer entries compiled by separate projects, `tsconfig.host.json` and `tsconfig.client.json`, so the two never enter the same `ts.Program`. The Host entry does not import the Client Cordis `Context` merge, and the Client entry does not import the Host Gateway service.

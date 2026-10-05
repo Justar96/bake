@@ -3,7 +3,7 @@
  * `bake.turn` per turn, parented on the `traceparent` of the user message
  * that started it, with its steps, model requests, tool calls, and approval
  * waits nested inside.
- * @module @deepseek-ai/dsh-desktop/spans
+ * @module bake-desktop/spans
  */
 
 import { randomBytes } from 'node:crypto'

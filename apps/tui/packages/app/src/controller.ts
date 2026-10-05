@@ -1,15 +1,15 @@
 /** Session observers and human actions shared by the renderer and integration tests. */
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, AssistantStreamFrame } from 'bake-agent'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { LlmModelReasoningInfo, LlmReasoningEffortInfo, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import { createUserMessage } from 'bake-llm'
+import type { LlmModelReasoningInfo, LlmReasoningEffortInfo, ReasoningEffortId } from 'bake-llm'
 import { assertNever } from 'bake-util-values'
-import { parseCommand, type CommandResult } from '@deepseek-ai/dsh-commands'
+import { parseCommand, type CommandResult } from 'bake-commands'
 import type { SessionEvent } from 'bake-session'
 import type {} from 'bake-session-query'
 import type {} from 'bake-compaction'
-import type {} from '@deepseek-ai/dsh-agent-presets'
-import type {} from '@deepseek-ai/dsh-session-projection'
+import type {} from 'bake-agent-presets'
+import type {} from 'bake-session-projection'
 import { attachmentSummaries } from '@dsh-tui/ui/rows.ts'
 import { Actions, foldEvent } from '@dsh-tui/ui/actions.ts'
 import { CallProgress } from '@dsh-tui/ui/progress.ts'
@@ -40,13 +40,13 @@ import { listRoutes, loadModelSheet, modelSheetPrompt, namesRoute, routeOf, reso
 import type { RouterAccountControls, RouteView } from './preferences.ts'
 import type { ModelSelection, ModelSelectionRef } from 'bake-agent'
 import type {} from 'bake-agent-default-model'
-import type {} from '@deepseek-ai/dsh-tool-subagent/model-selection-settings'
+import type {} from 'bake-tool-subagent/model-selection-settings'
 // Empty type imports. Each declaration-merges a key into the projection map
 // (`contextPressure`, `permissions`, `goal`), and those keys are invisible here
 // without them.
-import type {} from '@deepseek-ai/dsh-token-meter'
-import type {} from '@deepseek-ai/dsh-permission-presets/types'
-import type {} from '@deepseek-ai/dsh-goal'
+import type {} from 'bake-token-meter'
+import type {} from 'bake-permission-presets/types'
+import type {} from 'bake-goal'
 
 /** The one command this terminal runs at a time. */
 interface CommandActivity {

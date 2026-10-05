@@ -6,22 +6,22 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { createUserMessage, BlockAssembler } from '@deepseek-ai/dsh-llm'
-import type { FinishReason, GenerateOptions, Message } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, BlockAssembler } from 'bake-llm'
+import type { FinishReason, GenerateOptions, Message } from 'bake-llm'
 import { deadline, MAX_TIMER_DELAY_MS } from 'bake-timeout'
 import { assertPositiveInteger, deepFreeze } from 'bake-util-values'
 import type { SessionSeq } from 'bake-session'
 import {
   normalizeSessionTitle,
   SessionTitleProviderId,
-} from '@deepseek-ai/dsh-session-title'
+} from 'bake-session-title'
 import type {
   SessionTitleAutomaticMode,
   SessionTitleModelIdentity,
   SessionTitleProviderRequest,
   SessionTitleProviderResult,
   SessionTitleUserMessage,
-} from '@deepseek-ai/dsh-session-title'
+} from 'bake-session-title'
 
 /** Exact model-visible request recorded before one auxiliary title dispatch. */
 export interface SessionTitleLlmRequestEventData {

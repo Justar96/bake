@@ -6,11 +6,11 @@
  * the model sees. A section a prior checkpoint carries that this module does
  * not read, such as an older checkpoint's `<todo-list>`, is not carried forward.
  *
- * @module @deepseek-ai/dsh-compaction-basic/checkpoint-context
+ * @module bake-compaction-basic/checkpoint-context
  */
 
 import { isCompactCheckpointSource } from 'bake-compaction'
-import type { ContentBlock, Message, TextBlock } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock, Message, TextBlock } from 'bake-llm'
 
 /** Most paths listed per file section; older paths beyond it are counted, not listed. */
 export const MAX_LISTED_FILES = 50

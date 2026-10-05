@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { launchProblem } from '@deepseek-ai/dsh-updater'
+import { launchProblem } from 'bake-updater'
 
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url))
 const built = existsSync(join(repoRoot, 'apps/cli/lib/bin.js')) && existsSync(join(repoRoot, 'apps/tui/packages/app/lib/runner-loader.js'))
@@ -85,9 +85,9 @@ describe.skipIf(!built || process.platform === 'win32')('dsh --self-check', () =
   })
 
   it('names the package missing from the layout, as Bake 0.3.5 on Windows lacked one', async () => {
-    const directory = await release('@deepseek-ai/dsh-compaction-basic')
+    const directory = await release('bake-compaction-basic')
     expect(await check(directory))
-      .toMatch(/^dsh: self-check: tui profile: @deepseek-ai\/dsh-compaction-basic: .*'@deepseek-ai\/dsh-compaction-basic'/u)
+      .toMatch(/^dsh: self-check: tui profile: bake-compaction-basic: .*'bake-compaction-basic'/u)
     expect(await leftovers()).toEqual([])
   })
 
@@ -98,9 +98,9 @@ describe.skipIf(!built || process.platform === 'win32')('dsh --self-check', () =
   })
 
   it('names a missing package only a shipped agent preset mounts', async () => {
-    const directory = await release('@deepseek-ai/dsh-tool-cordis')
+    const directory = await release('bake-tool-cordis')
     expect(await check(directory))
-      .toMatch(/^dsh: self-check: agent presets: @deepseek-ai\/dsh-tool-cordis: .*'@deepseek-ai\/dsh-tool-cordis'/u)
+      .toMatch(/^dsh: self-check: agent presets: bake-tool-cordis: .*'bake-tool-cordis'/u)
     expect(await leftovers()).toEqual([])
   })
 

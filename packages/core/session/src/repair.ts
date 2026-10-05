@@ -6,7 +6,7 @@
  */
 
 import { brandString } from 'bake-brand'
-import type { MessageId, ToolCallId, ToolResultMessage } from '@deepseek-ai/dsh-llm'
+import type { MessageId, ToolCallId, ToolResultMessage } from 'bake-llm'
 import { deepFreeze } from 'bake-util-values'
 import { SessionSeq } from './types.ts'
 import type { SessionEvent, SessionSeq as SessionSeqType } from './types.ts'

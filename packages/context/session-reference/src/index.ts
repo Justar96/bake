@@ -2,23 +2,23 @@
  * Cross-session snapshot preparation. Hosts adapt mentions into structured
  * references; this service owns exact reads, projection, budgets, and durable context.
  *
- * @module @deepseek-ai/dsh-session-reference
+ * @module bake-session-reference
  */
 
 import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { Agent, PreStepDecision } from 'bake-agent'
 import { Remote, TypertRemoteService } from 'bake-typert-protocol'
-import { createUserMessage, freezeMessage, LlmError } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock, LlmResolvedModelInfo, UserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, freezeMessage, LlmError } from 'bake-llm'
+import type { ContentBlock, LlmResolvedModelInfo, UserMessage } from 'bake-llm'
 import { SessionLogOffset } from 'bake-session'
 import type { SessionId } from 'bake-session'
 // Type-only: the `title` projection key plus the live registry and durable
 // cache Context merges — the two projection faces discovery labels from.
-import type { ProjectionSnapshot } from '@deepseek-ai/dsh-session-projection'
-import type {} from '@deepseek-ai/dsh-session-projection-cache'
-import type {} from '@deepseek-ai/dsh-session-title'
-import type {} from '@deepseek-ai/dsh-subagent'
+import type { ProjectionSnapshot } from 'bake-session-projection'
+import type {} from 'bake-session-projection-cache'
+import type {} from 'bake-session-title'
+import type {} from 'bake-subagent'
 import type {} from 'bake-system-prompt'
 import type { SessionRecord, SessionSurfaceSnapshot } from 'bake-session-query'
 import { prepareReferenceOmission, REFERENCE_WARNING } from './spill.ts'

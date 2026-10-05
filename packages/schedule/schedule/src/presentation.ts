@@ -7,7 +7,7 @@
  * changes the JSON the model receives. A failure, a stable error value, or
  * text that is not a canonical value keeps the generic rendering of the raw
  * result.
- * @module @deepseek-ai/dsh-schedule/src/presentation
+ * @module bake-schedule/src/presentation
  */
 
 import type { GenericResultView, ToolResult } from 'bake-tools'

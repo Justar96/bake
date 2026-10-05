@@ -13,7 +13,7 @@ import {
   ReasoningEffortId,
   type LlmCallConfig,
   type UserMessage,
-} from '@deepseek-ai/dsh-llm'
+} from 'bake-llm'
 import { Session, SessionId } from 'bake-session'
 
 const SIGNAL = new AbortController().signal

@@ -8,14 +8,14 @@
  * image-reading tool is useful only when the exact calling route can inspect
  * its result, so unknown capability refuses instead of relying on an adapter
  * failure after filesystem and attachment work.
- * @module @deepseek-ai/dsh-tool-fs/src/read-image
+ * @module bake-tool-fs/src/read-image
  */
 
 import { basename, extname } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { AttachmentError, AttachmentId } from 'bake-attachment'
 import type { AttachmentStore, ImageAttachmentRef, ImageMediaType } from 'bake-attachment'
-import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock } from 'bake-llm'
 import { defineTool } from 'bake-tools'
 import type { GenericCallView, ToolExecution } from 'bake-tools'
 import type {} from 'bake-fs'

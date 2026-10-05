@@ -1,6 +1,6 @@
 /** Durable session identity, command dispatch, and live state through real harness services. */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createUserMessage, type StreamChunk } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, type StreamChunk } from 'bake-llm'
 import type { AgentHandle, AssistantStreamFrame } from 'bake-agent'
 import { brandString } from 'bake-brand'
 import type { SessionId } from 'bake-session'

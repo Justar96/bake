@@ -40,7 +40,7 @@ const result = await ctx.ptcRuntime.run(spec)
 
 ### Choose a backend
 
-Backends expose `language` and `isolation` as diagnostic descriptors; neither grants authority or proves confinement. [`dsh-ptc-runtime-codemode`](../ptc-runtime-codemode/README.md) executes erasable TypeScript in a fresh QuickJS WebAssembly VM on a worker thread, where the bindings are the only capability; it is the shipped `run_code` runtime. `sandboxMode` advertises a provider's deployment file-policy mode, or is absent when that capability is unsupported.
+Backends expose `language` and `isolation` as diagnostic descriptors; neither grants authority or proves confinement. [`bake-ptc-runtime-codemode`](../ptc-runtime-codemode/README.md) executes erasable TypeScript in a fresh QuickJS WebAssembly VM on a worker thread, where the bindings are the only capability; it is the shipped `run_code` runtime. `sandboxMode` advertises a provider's deployment file-policy mode, or is absent when that capability is unsupported.
 
 ### Name your bindings portably
 

@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-spill-policy",
+  "name": "bake-spill-policy",
   "description": "Tool-result spill policy for the DeepSeek Harness — replaces oversized plain-text tool results with a retained preview plus a spill-file path (no service API)",
   "version": "0.1.6-alpha.2",
   "publishConfig": {
@@ -32,7 +32,7 @@
   ],
   "license": "MIT",
   "peerDependencies": {
-    "@deepseek-ai/dsh-llm": "workspace:^",
+    "bake-llm": "workspace:^",
     "bake-output-retention": "workspace:^",
     "bake-session": "workspace:^",
     "bake-spill": "workspace:^",
@@ -44,8 +44,8 @@
   },
   "devDependencies": {
     "bake-agent": "workspace:^",
-    "@deepseek-ai/dsh-ptc-runtime-codemode": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
+    "bake-ptc-runtime-codemode": "workspace:^",
+    "bake-llm": "workspace:^",
     "bake-output-retention": "workspace:^",
     "bake-session": "workspace:^",
     "bake-spill": "workspace:^",

@@ -6,8 +6,8 @@ import type {
   ImageRequestTarget,
   RequestImageAttachment,
 } from 'bake-attachment'
-import { ToolCallId, createMessage, createUserMessage, offloadedImageText } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock, GenerateOptions, Message } from '@deepseek-ai/dsh-llm'
+import { ToolCallId, createMessage, createUserMessage, offloadedImageText } from 'bake-llm'
+import type { ContentBlock, GenerateOptions, Message } from 'bake-llm'
 import { requestImageTarget, toPiContext } from '../src/context.ts'
 import type { PiImageRequestContext } from '../src/context.ts'
 import { toPiAssistant } from '../src/replay.ts'

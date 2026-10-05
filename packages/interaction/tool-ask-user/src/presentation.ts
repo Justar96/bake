@@ -5,7 +5,7 @@
  * has scrolled into the transcript. Both are pure over the logged arguments
  * and the model-facing result, so a replayed session draws the same card, and
  * neither changes the canonical `answers` JSON the model receives.
- * @module @deepseek-ai/dsh-tool-ask-user/src/presentation
+ * @module bake-tool-ask-user/src/presentation
  */
 
 import type { GenericCallView, GenericResultView, ToolResult } from 'bake-tools'

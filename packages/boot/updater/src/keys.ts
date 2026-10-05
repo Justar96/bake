@@ -1,6 +1,6 @@
 /**
  * The public keys a Bake release manifest must be signed by.
- * @module @deepseek-ai/dsh-updater/keys
+ * @module bake-updater/keys
  */
 
 /**

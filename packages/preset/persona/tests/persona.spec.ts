@@ -2,8 +2,8 @@ import { Context } from '@deepseek-ai/cordis'
 import SystemPrompt, { renderPrompt } from 'bake-system-prompt'
 import { createScope, type ScopeKey } from 'bake-scope'
 import { describe, expect, it } from 'vitest'
-import * as Persona from '@deepseek-ai/dsh-persona'
-import { PERSONA_SUFFIX_SECTION, PERSONA_PREFIX_SECTION } from '@deepseek-ai/dsh-persona'
+import * as Persona from 'bake-persona'
+import { PERSONA_SUFFIX_SECTION, PERSONA_PREFIX_SECTION } from 'bake-persona'
 
 async function harness(deploymentPersona: string): Promise<Context> {
   const ctx = new Context()

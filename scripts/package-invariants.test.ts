@@ -125,7 +125,7 @@ describe('package invariant gate', () => {
   })
 
   it('accepts development-only invariants for configured Host dependencies', () => {
-    expect(collectPackageInvariantViolations(fixture({ packageName: '@deepseek-ai/dsh-llm' }))).toEqual([])
+    expect(collectPackageInvariantViolations(fixture({ packageName: 'bake-llm' }))).toEqual([])
   })
 
   it('accepts development-only invariants for client packages', () => {

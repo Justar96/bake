@@ -53,7 +53,7 @@ const seq = brandNumber<SessionSeq>(7)
 
 ### When to brand
 
-Brand values that cross package boundaries and could plausibly be confused — `ToolCallId` in `dsh-llm`, the shared agent/session `SessionId` in `dsh-session`, `JobId` in `bake-jobs`, and `SessionSeq` versus `SessionLogOffset` in `dsh-session`. Values that stay local or cannot be confused do not need this abstraction.
+Brand values that cross package boundaries and could plausibly be confused — `ToolCallId` in `bake-llm`, the shared agent/session `SessionId` in `dsh-session`, `JobId` in `bake-jobs`, and `SessionSeq` versus `SessionLogOffset` in `dsh-session`. Values that stay local or cannot be confused do not need this abstraction.
 
 -----
 

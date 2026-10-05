@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage } from 'bake-llm'
 import { Session, SessionId } from 'bake-session'
 import type { TurnEndReason } from 'bake-session'
 import { foldConsumedWork } from 'bake-agent'

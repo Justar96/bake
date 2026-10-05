@@ -7,7 +7,7 @@
 import { spawn } from 'node:child_process'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from 'bake-sandbox'
-import type {} from '@deepseek-ai/dsh-sandbox-policy'
+import type {} from 'bake-sandbox-policy'
 import type { Session } from 'bake-session'
 import type { GitState } from '@dsh-tui/ui/git.ts'
 

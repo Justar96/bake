@@ -11,7 +11,7 @@
  * process. One row per composition, not one per session.
  *
  * A PTC mode needs a TypeScript PTC runtime, which is a host-plane service
- * ([`dsh-ptc-runtime-codemode`](../../../ptc-runtime/ptc-runtime-codemode/README.md)).
+ * ([`bake-ptc-runtime-codemode`](../../../ptc-runtime/ptc-runtime-codemode/README.md)).
  * This row therefore waits for it rather than assuming it: a preset selecting
  * PTC mode against a deployment that composes no runtime fails at mount, named
  * in the preset's own activation audit, instead of at the first prompt.
@@ -65,7 +65,7 @@ export function apply(ctx: Context, config: Config): void {
     return
   }
   // The wait is the loud failure: an entry still pending on `ptcRuntime` is
-  // what `dsh-agent-presets` reports as an unusable row, naming this id.
+  // what `bake-agent-presets` reports as an unusable row, naming this id.
   ctx.inject(['ptcRuntime'], (runtimeCtx: Context) => {
     runtimeCtx.tools.presentAs(config.mode)
   })

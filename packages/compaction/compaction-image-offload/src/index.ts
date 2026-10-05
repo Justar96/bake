@@ -5,13 +5,13 @@
  * and retries through the agent or compaction summary error waterfall. Every route
  * sends placeholder text for those occurrences in subsequent requests.
  *
- * @module @deepseek-ai/dsh-compaction-image-offload
+ * @module bake-compaction-image-offload
  */
 
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from 'bake-compaction'
 import type { RequestErrorAction } from 'bake-agent'
-import { IMAGE_OFFLOAD_REQUIRED_CODE, LlmError } from '@deepseek-ai/dsh-llm'
+import { IMAGE_OFFLOAD_REQUIRED_CODE, LlmError } from 'bake-llm'
 import { offloadOldestImages } from './image-offload.ts'
 import { imageOffloadProjection } from './projection.ts'
 

@@ -1,13 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from 'bake-agent'
-import { ToolCallId } from '@deepseek-ai/dsh-llm'
+import { ToolCallId } from 'bake-llm'
 import { carrierKeyOf, createScope } from 'bake-scope'
 import type { Scope } from 'bake-scope'
 import SessionStore, { Session, SessionId } from 'bake-session'
 import type { SessionEvent } from 'bake-session'
 import SystemPrompt from 'bake-system-prompt'
-import ApprovalService, { ApprovalOutcome, ApprovalRequest, setApprovalPolicy } from '@deepseek-ai/dsh-user-approval'
+import ApprovalService, { ApprovalOutcome, ApprovalRequest, setApprovalPolicy } from 'bake-user-approval'
 
 /**
  * A minimal Agent stand-in — the service only reaches `agent.session.append`

@@ -6,7 +6,7 @@
  * read/grep retrieval guidance. After activation it runs one best-effort
  * startup sweep that reclaims spill files older than `cleanupPeriodDays`.
  *
- * @module @deepseek-ai/dsh-spill-local
+ * @module bake-spill-local
  */
 
 import { Context } from '@deepseek-ai/cordis'

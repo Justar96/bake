@@ -3,7 +3,7 @@ description: "The SQLite FTS5 full-text search backend for session history, for 
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-session-query-sqlite
+# bake-session-query-sqlite
 
 ## Summary
 
@@ -33,7 +33,7 @@ Choose it when you want full-text recall over prior sessions with ranking and pa
 
 ```yaml
 - name: 'bake-session'
-- name: '@deepseek-ai/dsh-session-query-sqlite'
+- name: 'bake-session-query-sqlite'
   config:
     path: /absolute/path/to/session-search.db
 ```
@@ -50,7 +50,7 @@ Choose it when you want full-text recall over prior sessions with ranking and pa
 | `persistedReadConcurrency` | `4` | Concurrent persisted-log reads for inherited batch reads |
 | `preparedSessionCacheSize` | `5` | Cold prepared-Session observations the inherited `observeSession` reader retains for reuse |
 
-The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-session-query-sqlite) is the exhaustive source for every accepted field and its JSDoc.
+The generated [configuration catalog](../../../docs/config-catalog.md#bake-session-query-sqlite) is the exhaustive source for every accepted field and its JSDoc.
 
 ### Search behavior
 

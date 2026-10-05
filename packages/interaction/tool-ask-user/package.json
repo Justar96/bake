@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-tool-ask-user",
+  "name": "bake-tool-ask-user",
   "description": "Model-facing ask_user_question tool over the ctx.userQuestions seam",
   "version": "0.1.6-alpha.2",
   "publishConfig": {
@@ -29,15 +29,15 @@
   "peerDependencies": {
     "bake-agent": "workspace:^",
     "bake-tools": "workspace:^",
-    "@deepseek-ai/dsh-user-questions": "workspace:^",
+    "bake-user-questions": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   },
   "devDependencies": {
     "bake-agent": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
+    "bake-llm": "workspace:^",
     "bake-system-prompt": "workspace:^",
     "bake-tools": "workspace:^",
-    "@deepseek-ai/dsh-user-questions": "workspace:^",
+    "bake-user-questions": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   }
 }

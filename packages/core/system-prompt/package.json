@@ -33,7 +33,7 @@
   "license": "MIT",
   "peerDependencies": {
     "bake-invariants": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
+    "bake-llm": "workspace:^",
     "bake-scope": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   },
@@ -42,7 +42,7 @@
   },
   "devDependencies": {
     "bake-invariants": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
+    "bake-llm": "workspace:^",
     "bake-scope": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   }

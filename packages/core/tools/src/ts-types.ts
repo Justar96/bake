@@ -6,7 +6,7 @@
  * @module bake-tools/src/ts-types
  */
 
-import type { ToolSchema } from '@deepseek-ai/dsh-llm'
+import type { ToolSchema } from 'bake-llm'
 import { assertSupportedJsonSchema } from './json-schema.ts'
 import type { JsonSchemaNode, JsonSchemaScalar } from './json-schema.ts'
 /** Internal PTC mode projection: the model-facing schema plus the canonical output schema. */

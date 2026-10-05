@@ -11,8 +11,8 @@
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
-import { createUserMessage, ToolCallId } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, ToolCallId } from 'bake-llm'
+import type { ContentBlock } from 'bake-llm'
 import SessionStore, { SessionId } from 'bake-session'
 import SystemPrompt from 'bake-system-prompt'
 import ToolRuntime, { defineContentToolFixture } from 'bake-tools'
@@ -20,8 +20,8 @@ import type { ToolDefinition } from 'bake-tools'
 import type { PostToolDecision, ToolExecution, ToolExecutionToken } from 'bake-tools'
 import { SpillLocator, SpillStore } from 'bake-spill'
 import type { SaveTextSpill, SpillRef } from 'bake-spill'
-import * as SpillPolicy from '@deepseek-ai/dsh-spill-policy'
-import CodemodeRuntime, { type Config as CodemodeRuntimeConfig } from '@deepseek-ai/dsh-ptc-runtime-codemode'
+import * as SpillPolicy from 'bake-spill-policy'
+import CodemodeRuntime, { type Config as CodemodeRuntimeConfig } from 'bake-ptc-runtime-codemode'
 
 async function mountRuntime(ctx: Context, config: CodemodeRuntimeConfig = {}): Promise<void> {
   onTestFinished(async () => { await ctx.fiber.dispose() })

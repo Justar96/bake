@@ -87,7 +87,7 @@ Read these when the server contract is not enough: the subsystem reference, then
 
 - [HTTP server subsystem](../../../docs/subsystems/web-server.md) — routes, matching order, and the config the server accepts.
 - Web config-tree boot and transport layering — why feature plugins own every route.
-- [Generated configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-host-webserver) — every accepted config field and its source declaration.
+- [Generated configuration catalog](../../../docs/config-catalog.md#bake-host-webserver) — every accepted config field and its source declaration.
 
 -----
 

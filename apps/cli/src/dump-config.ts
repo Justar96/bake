@@ -14,7 +14,7 @@ import {
   renderConfigDump,
   type ConfigDumpLayer,
   type Profile,
-} from '@deepseek-ai/dsh-app-boot'
+} from 'bake-app-boot'
 import { homePatchPath, prepareProfile, PROFILE_ROOT_FILENAME } from './profile-boot.ts'
 
 const NAME = 'dsh'

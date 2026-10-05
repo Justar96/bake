@@ -1,6 +1,6 @@
 {
-  "name": "@deepseek-ai/dsh-headless",
-  "description": "The dsh one-shot bundle: a direct core Agent/Session runner over dsh-base with no Host, HTTP, or browser layer",
+  "name": "bake-headless",
+  "description": "The dsh one-shot bundle: a direct core Agent/Session runner over bake-base with no Host, HTTP, or browser layer",
   "version": "0.1.6-alpha.2",
   "publishConfig": {
     "access": "public"
@@ -41,8 +41,8 @@
   },
   "dependencies": {
     "bake-brand": "workspace:^",
-    "@deepseek-ai/dsh-cmdline": "workspace:^",
-    "@deepseek-ai/dsh-tool-subagent": "workspace:^",
+    "bake-cmdline": "workspace:^",
+    "bake-tool-subagent": "workspace:^",
     "bake-util-values": "workspace:^",
     "@deepseek-ai/schemastery": "workspace:^",
     "commander": "catalog:"
@@ -52,7 +52,7 @@
     "@deepseek-ai/cordis-plugin-loader": "workspace:^",
     "bake-agent": "workspace:^",
     "bake-agent-default-model": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
+    "bake-llm": "workspace:^",
     "bake-session": "workspace:^",
     "bake-session-persistence": "workspace:^",
     "bake-session-query": "workspace:^",
@@ -67,7 +67,7 @@
     "bake-agent-default-model": "workspace:^",
     "bake-agent-loop": "workspace:^",
     "bake-agent-loop-testkit": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
+    "bake-llm": "workspace:^",
     "bake-session": "workspace:^",
     "bake-session-persistence": "workspace:^",
     "bake-session-query": "workspace:^",

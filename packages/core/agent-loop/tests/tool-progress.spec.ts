@@ -6,14 +6,14 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { createUserMessage, ToolCallId, type StreamChunk } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, ToolCallId, type StreamChunk } from 'bake-llm'
 import SessionStore, { SessionId } from 'bake-session'
 import SystemPrompt from 'bake-system-prompt'
-import LlmRuntime from '@deepseek-ai/dsh-llm'
+import LlmRuntime from 'bake-llm'
 import ToolRuntime, { defineContentToolFixture, type ToolRunContext } from 'bake-tools'
 import AgentRegistry, { TOOL_PROGRESS_MAX_CHARS, type Agent, type ToolProgress } from 'bake-agent'
 import AgentLoop from 'bake-agent-loop'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
+import SessionProjectionRegistry from 'bake-session-projection'
 import { boundProgress, ProgressThrottle } from '../src/tool-progress.ts'
 import { MockAdapter, textResponse } from './mock-adapter.ts'
 

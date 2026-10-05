@@ -3,11 +3,11 @@ description: "An immutable snapshot of this run's environment that remembers whi
 kind: "package-library"
 ---
 
-# @deepseek-ai/dsh-launch-environment
+# bake-launch-environment
 
 ## Summary
 
-Use `@deepseek-ai/dsh-launch-environment` to resolve launch-time environment values without trusting the flattened `process.env`. It freezes inherited process values, the invocation directory's `.env`, and the Harness home's `.env`, then returns the winning value and its source in a fixed trust order. Callers can exclude layers for sensitive lookups; an omitted layer stays unreachable regardless of later ordering changes. The snapshot is immutable, but every layer is still copied into `process.env`, so it does not isolate subprocesses. Import it as a library; it cannot be mounted from `cordis.yml`.
+Use `bake-launch-environment` to resolve launch-time environment values without trusting the flattened `process.env`. It freezes inherited process values, the invocation directory's `.env`, and the Harness home's `.env`, then returns the winning value and its source in a fixed trust order. Callers can exclude layers for sensitive lookups; an omitted layer stays unreachable regardless of later ordering changes. The snapshot is immutable, but every layer is still copied into `process.env`, so it does not isolate subprocesses. Import it as a library; it cannot be mounted from `cordis.yml`.
 
 ## Table of Contents
 
@@ -27,7 +27,7 @@ Resolve user-facing values through the snapshot instead of `process.env` wheneve
 ### Resolving a value
 
 ```ts
-import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
+import { launchEnvironmentOf } from 'bake-launch-environment'
 
 declare const ctx: import('@deepseek-ai/cordis').Context
 const apiKey = launchEnvironmentOf(ctx).get('DEEPSEEK_API_KEY')?.value

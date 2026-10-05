@@ -3,10 +3,10 @@
  * pure context-breakdown projection, so both surfaces price identical content
  * to identical numbers.
  *
- * @module @deepseek-ai/dsh-token-meter/estimate
+ * @module bake-token-meter/estimate
  */
 
-import type { ContentBlock, Message } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock, Message } from 'bake-llm'
 import type { EpochHeader } from 'bake-session'
 
 /** Fixed text-density estimate used until exact tokenization is needed. */

@@ -55,7 +55,7 @@
     "slice-ansi@9.0.1": "patches/slice-ansi@9.0.1.patch"
   },
   "trustedDependencies": [
-    "@deepseek-ai/dsh-subprocess-local",
+    "bake-subprocess-local",
     "esbuild",
     "koffi",
     "lefthook",

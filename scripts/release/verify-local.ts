@@ -138,7 +138,7 @@ try {
     const version = await run(['cmd.exe', '/c', join(binDir, 'bake.cmd'), '--version'], env)
     if (!version.includes(manifest.version)) throw new Error('Installed Windows command version mismatch')
     const config = await run(['cmd.exe', '/c', join(binDir, 'bake.cmd'), 'tui', '--dump-default-config'], env)
-    if (!config.includes('@deepseek-ai/dsh-base')) throw new Error('Windows profile routing failed')
+    if (!config.includes('bake-base')) throw new Error('Windows profile routing failed')
     const defaultHome: NodeJS.ProcessEnv = { ...env, USERPROFILE: temporary }
     delete defaultHome.DSH_HOME
     await runHelp(['cmd.exe', '/c', join(binDir, 'bake.cmd'), '--help'], defaultHome)
@@ -149,7 +149,7 @@ try {
     const version = await run([join(binDir, 'bake'), '--version'], env)
     if (!version.includes(manifest.version)) throw new Error('Installed command version mismatch')
     const config = await run([join(binDir, 'bake'), 'tui', '--dump-default-config'], env)
-    if (!config.includes('@deepseek-ai/dsh-base')) throw new Error('Installed profile routing failed')
+    if (!config.includes('bake-base')) throw new Error('Installed profile routing failed')
     const help = await runHelp([join(binDir, 'bake'), '--help'], env)
     if (!help.includes('Usage:')) throw new Error('Installed command did not boot the terminal profile')
     const defaultHome: NodeJS.ProcessEnv = { ...env, HOME: temporary }

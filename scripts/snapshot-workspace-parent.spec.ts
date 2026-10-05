@@ -3,10 +3,10 @@ import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink } from 'node:fs/prom
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join, parse } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
-import { SandboxedFileSystem } from '@deepseek-ai/dsh-fs-sandbox'
+import { SandboxedFileSystem } from 'bake-fs-sandbox'
 import { canonicalPath } from 'bake-sandbox'
-import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
+import SandboxPolicyService from 'bake-sandbox-policy'
+import SessionProjectionRegistry from 'bake-session-projection'
 import { describe, expect, it } from 'vitest'
 import { assertWorkspaceOutsideTemp, outsideTempWorkspaceParent } from './snapshot-workspace-parent.ts'
 

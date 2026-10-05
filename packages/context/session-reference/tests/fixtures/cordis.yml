@@ -1,17 +1,17 @@
 - name: 'bake-session'
 - name: 'bake-system-prompt'
 - name: 'bake-tools'
-- name: '@deepseek-ai/dsh-fs-local'
-- name: '@deepseek-ai/dsh-tool-fs'
-- name: '@deepseek-ai/dsh-session-query-sqlite'
+- name: 'bake-fs-local'
+- name: 'bake-tool-fs'
+- name: 'bake-session-query-sqlite'
   config:
     path: ':memory:'
     openAt: never
-- name: '@deepseek-ai/dsh-session-reference'
+- name: 'bake-session-reference'
   config:
     maxReferenceBytes: 360
 - name: './source-session.ts'
-- name: '@deepseek-ai/dsh-spill-local'
+- name: 'bake-spill-local'
   config:
     root: '{{spillRoot}}'
     cleanupPeriodDays: 0

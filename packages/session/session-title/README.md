@@ -3,11 +3,11 @@ description: "Log-backed session titles for users and maintainers choosing a tit
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-session-title
+# bake-session-title
 
 ## Summary
 
-Use `dsh-session-title` to give each session a client-visible title from the first eligible human message, an optional asynchronous generator, or an explicit user rename. Accepted titles persist through replay, resume, and paging but never enter model input. Automatic generation never delays the main agent response, and newer title requests supersede older work. Choose the package when clients need durable titles with configurable length limits and a deliberate `refresh()` path for regenerating them.
+Use `bake-session-title` to give each session a client-visible title from the first eligible human message, an optional asynchronous generator, or an explicit user rename. Accepted titles persist through replay, resume, and paging but never enter model input. Automatic generation never delays the main agent response, and newer title requests supersede older work. Choose the package when clients need durable titles with configurable length limits and a deliberate `refresh()` path for regenerating them.
 
 ## Table of Contents
 
@@ -35,7 +35,7 @@ All limits are required; the library supplies no defaults. Mount the service wit
 
 ```yaml
 - name: 'bake-session'
-- name: '@deepseek-ai/dsh-session-title'
+- name: 'bake-session-title'
   config:
     fallbackMaxWords: 8
     fallbackMaxBytes: 96
@@ -48,7 +48,7 @@ All limits are required; the library supplies no defaults. Mount the service wit
 | `fallbackMaxBytes` | required | Maximum UTF-8 bytes in the fallback; must not exceed `maxTitleBytes` |
 | `maxTitleBytes` | required | Maximum UTF-8 bytes accepted from any source |
 
-The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-session-title) is the exhaustive source for every accepted field and its JSDoc.
+The generated [configuration catalog](../../../docs/config-catalog.md#bake-session-title) is the exhaustive source for every accepted field and its JSDoc.
 
 ### Adding a provider
 

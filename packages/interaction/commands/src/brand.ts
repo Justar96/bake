@@ -4,9 +4,9 @@
  * The `Branded<B>` primitive lives in `bake-brand`; this module
  * is a pure type/constructor outlet (no cordis imports, no module
  * augmentation) so wire and client programs can name the brand without
- * loading the host plugin's Context merges — the `dsh-llm/brand` shape.
+ * loading the host plugin's Context merges — the `bake-llm/brand` shape.
  *
- * @module @deepseek-ai/dsh-commands/brand
+ * @module bake-commands/brand
  */
 
 import type { Branded } from 'bake-brand'

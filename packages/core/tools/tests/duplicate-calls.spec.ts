@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { HarnessError, ToolCallId } from '@deepseek-ai/dsh-llm'
+import { HarnessError, ToolCallId } from 'bake-llm'
 import SessionStore, { type Session } from 'bake-session'
 import SystemPrompt from 'bake-system-prompt'
 import type { Agent } from 'bake-agent'

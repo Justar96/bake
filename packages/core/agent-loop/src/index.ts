@@ -21,14 +21,14 @@ import type {
   SessionStartSource,
   TurnBoundaryProjection,
 } from 'bake-agent'
-import { errorChain, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import { errorChain, ReasoningEffortId } from 'bake-llm'
 import type {} from 'bake-settings'
 import { interruptedTurnClosers, SessionLogOffset, SessionPreparation, SessionSeq } from 'bake-session'
 import type { Session, SessionHeader, SessionId } from 'bake-session'
 import type {} from 'bake-system-prompt'
 import type {} from 'bake-tools'
-import type {} from '@deepseek-ai/dsh-session-projection'
-import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
+import type {} from 'bake-session-projection'
+import type { ProjectionDefinition } from 'bake-session-projection'
 import { SessionPersistenceNotFoundError } from 'bake-session-persistence'
 import type { SessionHandle, SessionPersistence } from 'bake-session-persistence'
 import { ReactLoopAgent } from './agent.ts'

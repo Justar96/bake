@@ -1,6 +1,6 @@
 /**
  * Durable and model-facing Schedule value types.
- * @module @deepseek-ai/dsh-schedule
+ * @module bake-schedule
  */
 
 import type { Branded } from 'bake-brand'
@@ -220,7 +220,7 @@ declare module 'bake-session/types' {
   }
 }
 
-declare module '@deepseek-ai/dsh-session-projection/types' {
+declare module 'bake-session-projection/types' {
   interface SessionProjectionMap {
     /** Complete active reminders owned by this Session's post-fork suffix. */
     schedule: readonly ScheduleRecord[]

@@ -6,7 +6,7 @@
  * every mutable residency decision to this registry, so delivery and teardown
  * share one child lock and one Activation map.
  *
- * @module @deepseek-ai/dsh-subagent/continuation-activation
+ * @module bake-subagent/continuation-activation
  */
 
 import type { Context } from '@deepseek-ai/cordis'
@@ -16,8 +16,8 @@ import type {
   AgentOptions,
   CreateAgentOptions,
 } from 'bake-agent'
-import { errorChain } from '@deepseek-ai/dsh-llm'
-import type { MessageId } from '@deepseek-ai/dsh-llm'
+import { errorChain } from 'bake-llm'
+import type { MessageId } from 'bake-llm'
 import type { SessionId, UserMessage } from 'bake-session'
 import type { ToolRestriction } from 'bake-tools'
 import {

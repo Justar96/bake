@@ -1,12 +1,12 @@
 /**
  * Session-visible workspace instruction state and dynamic reconciliation.
  *
- * @module @deepseek-ai/dsh-agent-instructions/state
+ * @module bake-agent-instructions/state
  */
 
 import type { Agent } from 'bake-agent'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { Message } from '@deepseek-ai/dsh-llm'
+import { createUserMessage } from 'bake-llm'
+import type { Message } from 'bake-llm'
 import type { Session, UserMessage } from 'bake-session'
 import type { FileSystem, FsVersion } from 'bake-fs'
 import type { ResolvedConfig } from './config.ts'
@@ -46,7 +46,7 @@ export interface AgentInstructionSource {
   changes: AgentInstructionChange[]
 }
 
-declare module '@deepseek-ai/dsh-llm' {
+declare module 'bake-llm' {
   interface MessageSourceMap {
     'agent-instructions': AgentInstructionSource
   }

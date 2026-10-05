@@ -14,7 +14,7 @@
  * An interruption at any point before step 5 leaves `current` naming the old
  * release, and the next run clears the staging directory under the lock.
  *
- * @module @deepseek-ai/dsh-updater/install
+ * @module bake-updater/install
  */
 
 import { createHash, randomBytes } from 'node:crypto'

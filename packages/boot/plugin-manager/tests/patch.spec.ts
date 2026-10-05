@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { expect, it, onTestFinished } from 'vitest'
 import { applyEntryPatches } from '@deepseek-ai/cordis-plugin-include'
-import { loadOptionalPatches } from '@deepseek-ai/dsh-app-boot'
+import { loadOptionalPatches } from 'bake-app-boot'
 import { writePluginEnabled } from '../src/patch.ts'
 
 async function fixture(text?: string): Promise<string> {

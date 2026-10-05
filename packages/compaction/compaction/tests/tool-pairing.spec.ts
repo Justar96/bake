@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createUserMessage, ToolCallId , createMessage, createToolResultMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, ToolCallId , createMessage, createToolResultMessage } from 'bake-llm'
 import { toolPairingBalancedAfter, toolPairingBalancedBefore } from 'bake-compaction'
 import { Session, SessionId, SessionSeq } from 'bake-session'
 import type { SessionEvent, SessionSeq as SessionSeqType } from 'bake-session'
