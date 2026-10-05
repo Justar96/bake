@@ -17,7 +17,7 @@ export {
 export { DEFAULT_RELEASE_BASE_URL, GITHUB_RELEASE_BASE_URL, RELEASE_PUBLIC_KEYS, releaseSource } from './keys.ts'
 export { CURRENT_POINTER, currentOf, currentVersion, detectInstall, directoryFor, versionDirectory, type InstallLayout, type ManagedInstall } from './layout.ts'
 export {
-  acquireLock, installRelease, LAUNCH_MARKER, markLaunched, pointAt, PRUNE_AFTER_MS, windowsLauncher,
+  acquireLock, addDshAlias, installRelease, LAUNCH_MARKER, markLaunched, pointAt, PRUNE_AFTER_MS, windowsLauncher,
   type InstallOptions, type InstallProgress, type InstallResult,
 } from './install.ts'
 export {

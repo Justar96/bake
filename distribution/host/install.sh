@@ -153,6 +153,19 @@ elif [ -e "$bin_dir/bake" ]; then
   exit 1
 fi
 mv -f "$bin_dir/.bake-$$" "$bin_dir/bake"
+# Bake Desktop runs `dsh --profile desktop`, so dsh is a second link to the
+# same launcher. A dsh this installer did not make, such as an upstream
+# DeepSeek Harness install, stays in place.
+dsh_target=
+if [ -L "$bin_dir/dsh" ]; then dsh_target=$(readlink "$bin_dir/dsh"); fi
+case $dsh_target in
+  */current/bin/bake) rm "$bin_dir/dsh" ;;
+esac
+if [ -e "$bin_dir/dsh" ] || [ -L "$bin_dir/dsh" ]; then
+  echo "$bin_dir/dsh exists and is not a Bake-managed link; Bake Desktop needs dsh to start Bake." >&2
+else
+  ln -s "$install_root/current/bin/bake" "$bin_dir/dsh"
+fi
 report note "$bin_dir/bake"
 
 }

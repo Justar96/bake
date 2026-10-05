@@ -139,6 +139,8 @@ try {
     if (!version.includes(manifest.version)) throw new Error('Installed Windows command version mismatch')
     const config = await run(['cmd.exe', '/c', join(binDir, 'bake.cmd'), 'tui', '--dump-default-config'], env)
     if (!config.includes('bake-base')) throw new Error('Windows profile routing failed')
+    const alias = await run(['cmd.exe', '/c', join(binDir, 'dsh.cmd'), '--version'], env)
+    if (!alias.includes(manifest.version)) throw new Error('Installed Windows dsh alias version mismatch')
     const defaultHome: NodeJS.ProcessEnv = { ...env, USERPROFILE: temporary }
     delete defaultHome.BAKE_HOME
     delete defaultHome.DSH_HOME
@@ -151,6 +153,8 @@ try {
     if (!version.includes(manifest.version)) throw new Error('Installed command version mismatch')
     const config = await run([join(binDir, 'bake'), 'tui', '--dump-default-config'], env)
     if (!config.includes('bake-base')) throw new Error('Installed profile routing failed')
+    const alias = await run([join(binDir, 'dsh'), '--version'], env)
+    if (!alias.includes(manifest.version)) throw new Error('Installed dsh alias version mismatch')
     const help = await runHelp([join(binDir, 'bake'), '--help'], env)
     if (!help.includes('Usage:')) throw new Error('Installed command did not boot the terminal profile')
     const defaultHome: NodeJS.ProcessEnv = { ...env, HOME: temporary }

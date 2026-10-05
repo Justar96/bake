@@ -20,8 +20,8 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { createWriteStream, existsSync, lstatSync, readFileSync } from 'node:fs'
-import { mkdir, readdir, rename, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { lstat, mkdir, readdir, realpath, rename, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 import { archiveUrl, UpdateError, type ReleaseArtifact, type ReleaseManifest, type ReleaseSource } from './manifest.ts'
 import { CURRENT_POINTER, currentOf, directoryFor, versionDirectory, type ManagedInstall } from './layout.ts'
 import { launchProblem } from './verify.ts'
@@ -54,6 +54,8 @@ export interface InstallOptions extends ReleaseSource {
   readonly platform?: NodeJS.Platform
   /** Windows: the `bake.cmd` that launched this process, to bring onto the pointer form. */
   readonly launcher?: string | undefined
+  /** Unix: the directory where the installer linked `bake`, which also receives the `dsh` alias. */
+  readonly binDir?: string | undefined
   /** Called as the install moves on, and for each downloaded chunk; the caller throttles what it draws. */
   readonly onProgress?: ((progress: InstallProgress) => void) | undefined
 }
@@ -114,6 +116,7 @@ export async function installRelease(options: InstallOptions): Promise<InstallRe
     const launcherPending = platform === 'win32' && options.launcher !== undefined
       ? await migrateLauncher(options.launcher, layout.root)
       : false
+    await addDshAlias(platform, layout.root, options.launcher, options.binDir)
     await rm(staging, { recursive: true, force: true })
     const pruned = await prune(layout.root, new Set([directory, previous, versionOf(layout.running)].filter(name => name !== undefined)),
       (options.now ?? Date.now)())
@@ -321,6 +324,44 @@ async function migrateLauncher(launcher: string, root: string): Promise<boolean>
   helper.on('error', () => {})
   helper.unref()
   return true
+}
+
+/**
+ * Give an install made before the `dsh` alias existed the alias the
+ * installers now create beside `bake`: Bake Desktop starts Bake as
+ * `dsh --profile desktop`. On Windows that is `dsh.cmd`, the launcher text,
+ * beside the running launcher; on Unix, a `dsh` link to the same target as
+ * the `bake` link in `binDir`, made only when that link leads to this
+ * install's current release. An existing file of either name is left alone:
+ * a running `cmd.exe` may be reading it, and a `dsh` this install did not make
+ * belongs to something else. Best effort; the installers create the alias too.
+ * @param platform - the platform whose launcher form applies.
+ * @param root - the install root.
+ * @param launcher - Windows: the launcher that started this process.
+ * @param binDir - Unix: the directory holding the installer's `bake` link.
+ */
+export async function addDshAlias(
+  platform: NodeJS.Platform, root: string, launcher: string | undefined, binDir: string | undefined,
+): Promise<void> {
+  try {
+    if (platform === 'win32') {
+      if (launcher === undefined) return
+      for (const name of ['bake.cmd', 'dsh.cmd']) {
+        const path = join(dirname(launcher), name)
+        if (!existsSync(path)) await writeFile(path, windowsLauncher(root), { flag: 'wx' })
+      }
+      return
+    }
+    if (binDir === undefined) return
+    const bake = join(binDir, 'bake')
+    const target = join(root, 'current', 'bin', 'bake')
+    if (!(await lstat(bake)).isSymbolicLink() || await realpath(bake) !== await realpath(target)) return
+    const alias = join(binDir, 'dsh')
+    if (await lstat(alias).then(() => true, () => false)) return
+    await symlink(target, alias)
+  } catch {
+    // The installers create the alias as well; an update never fails over it.
+  }
 }
 
 /**

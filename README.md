@@ -67,7 +67,7 @@ Installs of 0.1.0 have no `bake update`; run the installer once more to move to 
 
 ## Uninstall
 
-Delete the install directory and the `bake` link: `~/.local/share/bake` and `~/.local/bin/bake`, or `%LOCALAPPDATA%\Bake` on Windows, where you also remove its `bin` entry from the user `PATH`. Delete `~/.bake` too to remove sessions and stored credentials.
+Delete the install directory and the `bake` and `dsh` links: `~/.local/share/bake`, `~/.local/bin/bake`, and `~/.local/bin/dsh`, or `%LOCALAPPDATA%\Bake` on Windows, where you also remove its `bin` entry from the user `PATH`. Delete `~/.bake` too to remove sessions and stored credentials.
 
 ## Documentation
 

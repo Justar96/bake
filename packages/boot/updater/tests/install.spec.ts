@@ -1,9 +1,11 @@
 /** An update installs beside the running release and moves `current` last, or changes nothing. */
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import {
+  existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, utimesSync, writeFileSync,
+} from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
-  acquireLock, currentOf, detectInstall, installRelease, LAUNCH_MARKER, pointAt, PRUNE_AFTER_MS, windowsLauncher,
+  acquireLock, addDshAlias, currentOf, detectInstall, installRelease, LAUNCH_MARKER, pointAt, PRUNE_AFTER_MS, windowsLauncher,
   type ManagedInstall, type ReleaseManifest,
 } from '../src/index.ts'
 import { managedInstall, ReleaseHost, releaseArchive, Scratch, selfCheckingCommand, signingKey } from './fixture.ts'
@@ -195,6 +197,50 @@ describe('acquireLock', () => {
     writeFileSync(lock, 'garbage')
     await (await acquireLock(scratch.root))()
     expect(existsSync(lock)).toBe(false)
+  })
+})
+
+describe.skipIf(process.platform === 'win32')('the dsh alias', () => {
+  it('links dsh beside an installer-made bake link when an update installs', async () => {
+    const { install, root, scratch } = setup()
+    const binDir = join(scratch.root, 'bin')
+    mkdirSync(binDir)
+    symlinkSync(join(root, 'current/bin/bake'), join(binDir, 'bake'))
+    await install({ binDir })
+    // Bake Desktop starts Bake as `dsh --profile desktop`.
+    expect(readlinkSync(join(binDir, 'dsh'))).toBe(join(root, 'current/bin/bake'))
+  })
+
+  it('leaves a foreign dsh, and a bake link that leads elsewhere, alone', async () => {
+    const { root, scratch } = setup()
+    const binDir = join(scratch.root, 'bin')
+    mkdirSync(binDir)
+    symlinkSync(join(root, 'current/bin/bake'), join(binDir, 'bake'))
+    writeFileSync(join(binDir, 'dsh'), 'upstream\n')
+    await addDshAlias('linux', root, undefined, binDir)
+    expect(readFileSync(join(binDir, 'dsh'), 'utf8')).toBe('upstream\n')
+
+    const other = join(scratch.root, 'other-bin')
+    mkdirSync(other)
+    writeFileSync(join(scratch.root, 'elsewhere'), '#!/bin/sh\n')
+    symlinkSync(join(scratch.root, 'elsewhere'), join(other, 'bake'))
+    await addDshAlias('linux', root, undefined, other)
+    expect(existsSync(join(other, 'dsh'))).toBe(false)
+  })
+
+  it('writes a missing dsh.cmd beside the Windows launcher and keeps an existing one', async () => {
+    const scratch = new Scratch()
+    scratches.push(scratch)
+    const binDir = join(scratch.root, 'bin')
+    mkdirSync(binDir)
+    const launcher = join(binDir, 'bake.cmd')
+    writeFileSync(launcher, windowsLauncher(scratch.root))
+    await addDshAlias('win32', scratch.root, launcher, undefined)
+    expect(readFileSync(join(binDir, 'dsh.cmd'), 'utf8')).toBe(windowsLauncher(scratch.root))
+
+    writeFileSync(join(binDir, 'dsh.cmd'), 'running\r\n')
+    await addDshAlias('win32', scratch.root, launcher, undefined)
+    expect(readFileSync(join(binDir, 'dsh.cmd'), 'utf8')).toBe('running\r\n')
   })
 })
 

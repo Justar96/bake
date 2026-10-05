@@ -132,6 +132,8 @@ process.exit(signed ? 0 : 1)
   $commandText = [IO.File]::ReadAllText($template).Replace('@@BAKE_RELEASE_ROOT@@', $installRoot.Replace('%', '%%'))
   $cmd = Join-Path $binDir 'bake.cmd'
   [IO.File]::WriteAllText($cmd, $commandText, [Text.Encoding]::ASCII)
+  # Bake Desktop runs `dsh --profile desktop`, so dsh.cmd is the same launcher.
+  [IO.File]::WriteAllText((Join-Path $binDir 'dsh.cmd'), $commandText, [Text.Encoding]::ASCII)
   if ($env:BAKE_SKIP_PATH_UPDATE -ne '1') {
     $pathParts = [Environment]::GetEnvironmentVariable('Path', 'User') -split ';'
     if ($pathParts -notcontains $binDir) {
