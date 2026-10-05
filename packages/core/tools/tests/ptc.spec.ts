@@ -1579,7 +1579,11 @@ describe('the run_code dispatch bridge', () => {
     await ctx.plugin(ToolRuntime, { mode: 'ptc' })
     const result = await runCode(ctx, 'program')
     expect(result.isError).toBe(true)
-    expect((result.content[0] as { text: string }).text).toContain('requires a PTC runtime')
+    // Model-visible tool error text: keep it byte-identical to released builds.
+    expect((result.content[0] as { text: string }).text).toContain(
+      'dsh-tools: mode "ptc" requires a PTC runtime — load a ctx.ptcRuntime implementation'
+      + ' (e.g. @deepseek-ai/dsh-ptc-runtime-codemode) or set tools mode to "native"',
+    )
   })
 
   it.each(['typescript', 'python'])('presents the description over the program with its runtime language (%s)', async (language) => {
