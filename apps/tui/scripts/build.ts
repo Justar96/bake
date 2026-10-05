@@ -52,6 +52,18 @@ export function diagnosticArguments(home: string): string[] {
 }
 
 /**
+ * Keep the host's `bake-*` runtime packages external, so they retain their
+ * module identity, while the TUI's own `bake-tui-*` packages are inlined:
+ * `bake-tui-ui` ships TypeScript sources that Node cannot load.
+ */
+const RUNTIME_PACKAGES_EXTERNAL: Bun.BunPlugin = {
+  name: 'bake-runtime-packages-external',
+  setup(build) {
+    build.onResolve({ filter: /^bake-(?!tui-)/ }, ({ path }) => ({ path, external: true }))
+  },
+}
+
+/**
  * Bundle Bake code while keeping runtime singletons and the renderer external.
  * @param entries - entry files, resolved from the caller's working directory.
  * @param outdir - private or ordinary build output directory.
@@ -61,10 +73,10 @@ export function diagnosticArguments(home: string): string[] {
 export async function bundle(entries: readonly string[], outdir: string, mode: BuildMode = BUILD_MODE): Promise<Bun.BuildArtifact[]> {
   const result = await Bun.build({
     entrypoints: entries.map(entry => resolve(entry)), outdir, target: 'node', format: 'esm',
-    // bake-tui-ui is inlined; the host's packages retain their module identity.
     // Shiki loads each grammar by dynamic import, which an unsplit bundle
     // would inline. Every bundled language, loaded or not.
-    external: ['@deepseek-ai/*', 'bake-*', 'ink', 'react', 'commander', 'shiki'], naming: '[name].js',
+    external: ['@deepseek-ai/*', 'ink', 'react', 'commander', 'shiki'], naming: '[name].js',
+    plugins: [RUNTIME_PACKAGES_EXTERNAL],
     jsx: { runtime: 'automatic', development: mode === 'development' },
     define: { 'process.env.NODE_ENV': JSON.stringify(mode) }, minify: mode === 'production',
   })
