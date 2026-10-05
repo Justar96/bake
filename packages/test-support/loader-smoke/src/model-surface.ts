@@ -18,14 +18,14 @@ import type { GenerateOptions } from 'bake-llm'
 
 /** The parts of one request a model sees; transport fields such as `signal` are left out. */
 export type ModelSurfaceRequest = Pick<GenerateOptions,
-  'messages' | 'tools' | 'toolHistory' | 'toolUpdates' | 'reasoningEffort' | 'maxTokens' | 'temperature' | 'stop'>
+  'system' | 'messages' | 'tools' | 'toolHistory' | 'toolUpdates' | 'reasoningEffort' | 'maxTokens' | 'temperature' | 'stop'>
 
 /** One literal value and the placeholder that replaces it. */
 export type ModelSurfacePlaceholder = readonly [value: string, placeholder: string]
 
 /** Measured sizes of a normalized model surface, in UTF-16 code units (JavaScript string length). */
 export interface ModelSurfaceSizes {
-  /** Text of every system-role message, joined by newlines. */
+  /** The `system` field, then the text of every system-role message, joined by newlines. */
   readonly systemChars: number
   /** Compact `JSON.stringify` of the tool declarations, in request order. */
   readonly toolJsonChars: number
@@ -111,6 +111,7 @@ export function normalizeModelSurface(
 ): ModelSurfaceRequest {
   const ordered = [...placeholders].sort((left, right) => right[0].length - left[0].length)
   const visible: ModelSurfaceRequest = {
+    ...request.system === undefined ? {} : { system: request.system },
     // Message ids and sources are log metadata no adapter sends as text.
     messages: request.messages.map(message => ({ role: message.role, content: message.content }) as typeof message),
     ...request.tools === undefined ? {} : { tools: request.tools },
@@ -141,7 +142,10 @@ function messageText(message: SurfaceMessage): string {
  * @returns its sizes.
  */
 export function modelSurfaceSizes(request: ModelSurfaceRequest): ModelSurfaceSizes {
-  const system = request.messages.filter(message => message.role === 'system').map(messageText).join('\n')
+  const system = [
+    ...request.system === undefined ? [] : [request.system],
+    ...request.messages.filter(message => message.role === 'system').map(messageText),
+  ].join('\n')
   const context = request.messages.filter(message => message.role !== 'system').map(messageText).join('\n')
   return {
     systemChars: system.length,
@@ -164,9 +168,10 @@ function sameJson(left: unknown, right: unknown): boolean {
 }
 
 /**
- * Render a normalized surface as Markdown: sizes, request settings, every
- * message in order with its exact text, and every tool in order with its
- * exact description and parameter schema.
+ * Render a normalized surface as Markdown: sizes, request settings, the
+ * `system` field when the request sets one, every message in order with its
+ * exact text, and every tool in order with its exact description and
+ * parameter schema.
  * @param title - the composition's name.
  * @param request - a request from {@link normalizeModelSurface}.
  * @returns the snapshot text, ending in one newline.
@@ -193,9 +198,9 @@ export function renderModelSurface(title: string, request: ModelSurfaceRequest):
       temperature: request.temperature ?? null,
       stop: request.stop ?? null,
     }, null, 2), 'json'),
-    '',
-    '## Messages',
   ]
+  if (request.system !== undefined) out.push('', '## System', '', fenced(request.system))
+  out.push('', '## Messages')
   request.messages.forEach((message, index) => {
     out.push('', `### ${String(index + 1)}. ${message.role}`, '', fenced(messageText(message)))
   })
