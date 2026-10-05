@@ -16,6 +16,11 @@ concurrency:
 # A merged pull request was already checked on its merge ref, and the release
 # tag pushed alongside it builds and tests every platform again, so its merge
 # commit on main is skipped. Direct pushes to main still run.
+#
+# A pull request from develop to main runs Linux alone. Every change it carries
+# already ran on every platform in its own pull request, and the release tag
+# after it builds and checks every platform again. Only the combination of
+# those changes is new, which no earlier run has tested, so the Linux jobs stay.
 jobs:
   # Both jobs run `bun run preflight`, the command contributors run before a
   # pull request, split so the whole runtime suite runs beside the rest.
@@ -24,7 +29,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: ${{ fromJSON(github.event_name == 'pull_request' && github.base_ref == 'main' && github.head_ref == 'develop'
+          && github.event.pull_request.head.repo.full_name == github.repository
+          && '["ubuntu-latest"]' || '["ubuntu-latest", "macos-latest"]') }}
         part:
           - name: checks
             args: --full --skip runtime
@@ -80,7 +87,10 @@ jobs:
           include-hidden-files: true
 
   windows-release:
-    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Merge pull request ')
+    if: >-
+      (github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Merge pull request '))
+      && !(github.event_name == 'pull_request' && github.base_ref == 'main' && github.head_ref == 'develop'
+      && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: windows-latest
     timeout-minutes: 20
     steps:

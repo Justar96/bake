@@ -100,7 +100,7 @@ The hooks do not run the build, the Node suites, or the PTY scenarios; run `bun 
 
 ### CI
 
-[`ci.yml`](../.github/workflows/ci.yml) runs `bun run preflight --full` on Linux and macOS for pull requests and direct pushes to `main`, in two jobs per system: the whole runtime suite, and every other gate. It skips a pull request's merge commit on `main`, which its pull request run already checked. `main` takes changes only through merge-commit pull requests from `develop`: its ruleset requires the `develop only` check from [`main-source.yml`](../.github/workflows/main-source.yml), which fails a pull request from any other branch. [`release.yml`](../.github/workflows/release.yml) builds, signs, and publishes release archives; the [release guide](../distribution/README.md) covers the process.
+[`ci.yml`](../.github/workflows/ci.yml) runs `bun run preflight --full` on Linux and macOS for pull requests and direct pushes to `main`, in two jobs per system: the whole runtime suite, and every other gate. It skips a pull request's merge commit on `main`, which its pull request run already checked. A pull request from `develop` to `main` runs only the Linux jobs: each change it carries already ran on every platform in its own pull request, and the release tag that follows builds and checks every platform again. `main` takes changes only through merge-commit pull requests from `develop`: its ruleset requires the `develop only` check from [`main-source.yml`](../.github/workflows/main-source.yml), which fails a pull request from any other branch. [`release.yml`](../.github/workflows/release.yml) builds, signs, and publishes release archives; the [release guide](../distribution/README.md) covers the process.
 
 ## Repository layout
 
