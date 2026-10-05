@@ -1,5 +1,5 @@
 ---
-description: "The DeepSeek Harness package workspace: how the npm packages under packages/ are grouped, what each group owns, and the conventions that bind them."
+description: "The Bake package workspace: how the npm packages under packages/ are grouped, what each group owns, and the conventions that bind them."
 kind: "package-group"
 ---
 
@@ -45,7 +45,6 @@ Every package lives in exactly one group; new packages join existing groups, and
 | [`context/`](context/README.md) | Model-visible request context: workspace instructions, file and session references |
 | [`subagent/`](subagent/README.md) | Subagent capability family: provider-registry contract and model-facing delegation tools |
 | [`jobs/`](jobs/README.md) | Generic background-job runtime and model-facing job control tools |
-| [`experimental/`](experimental/README.md) | Pre-stable prototypes with explicit private exceptions |
 | [`web/`](web/README.md) | Web capability family: seam, search/fetch providers, model-facing web tools |
 | [`attachment/`](attachment/README.md) | Durable attachment identity, validation, local content-addressed storage |
 | [`spill/`](spill/README.md) | Spill capability family: storage seam, local impl, tool-result spill policy |
@@ -73,7 +72,7 @@ Every package lives in exactly one group; new packages join existing groups, and
 <a id="release-expectations"></a>
 ## Release expectations
 
-Most groups are product — stable API. The exceptions: `experimental/` publishes without stability or support promises, and `test-support/`, `runtime-diagnostics/`, and `util/` are support with lower compatibility expectations.
+Most groups provide stable product APIs. The `test-support/`, `runtime-diagnostics/`, and `util/` groups provide supporting infrastructure with lower compatibility expectations.
 
 -----
 
