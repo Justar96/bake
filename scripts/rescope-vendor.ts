@@ -104,6 +104,9 @@ const GENERIC_SKIPS: readonly GenericSkip[] = [
   { file: 'apps/tui/packages/app/tests/composed-profile.ts', upstream: ['cordis'] },
   { file: 'apps/tui/packages/app/tests/model-surface.spec.ts', upstream: ['cordis'] },
   { file: 'apps/tui/packages/app/tests/expected/model-surface/cordis.md', upstream: ['cordis'] },
+  // Migration ownership and support decisions name the shipped preset by id.
+  { file: 'docs/roadmap/rust-0.4/scope-00/inventory.json', upstream: ['cordis'] },
+  { file: 'docs/roadmap/rust-0.4/scope-00/support.md', upstream: ['cordis'] },
   // GROUP_ORDER holds `packages/<group>/` directory names, not package names.
   { file: 'scripts/gen-module-graph.ts', upstream: ['cordis'] },
   { file: 'scripts/gen-doc-graphs.ts', upstream: ['cordis'] },
