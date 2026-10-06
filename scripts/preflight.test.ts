@@ -46,18 +46,20 @@ describe('preflight', () => {
     expect(() => parseOptions(['--base'])).toThrow(/needs a value/u)
   })
 
-  it('checks the Rust workspace before its PTY scenarios and excludes both from --fast', () => {
-    expect(selected(['--only', 'native'])).toEqual(['rust', 'rust-pty'])
+  it('checks the Rust workspace before its PTY and comparison scenarios and excludes them from --fast', () => {
+    expect(selected(['--only', 'native'])).toEqual(['rust', 'rust-pty', 'rust-conformance'])
     expect(selected(['--fast', '--only', 'native'])).toEqual([])
     expect(STEPS.find(step => step.name === 'rust')?.command?.(parseOptions([]), scope([])))
       .toEqual(['bun', 'run', 'check:rust'])
     expect(STEPS.find(step => step.name === 'rust-pty')?.command?.(parseOptions([]), scope([])))
       .toEqual(process.platform === 'win32' ? { skip: 'native ConPTY scenarios are not implemented' } : ['bun', 'run', 'test:rust:pty'])
+    expect(STEPS.find(step => step.name === 'rust-conformance')?.command?.(parseOptions([]), scope([])))
+      .toEqual(['bun', 'run', 'test:rust:conformance'])
   })
 
-  it('blocks PTY checks after their own build fails, without blocking the other workspace', () => {
-    for (const step of STEPS.filter(entry => ['e2e', 'rust-pty'].includes(entry.name))) {
-      const owner = step.name === 'rust-pty' ? 'rust' : 'build'
+  it('blocks artifact checks after their own build fails, without blocking the other workspace', () => {
+    for (const step of STEPS.filter(entry => ['e2e', 'rust-pty', 'rust-conformance'].includes(entry.name))) {
+      const owner = step.name === 'e2e' ? 'build' : 'rust'
       const other = owner === 'rust' ? 'build' : 'rust'
       expect(failedBuild(step, new Map([[owner, { outcome: 'fail' }], [other, { outcome: 'pass' }]]))).toBe(owner)
       expect(failedBuild(step, new Map([[owner, { outcome: 'pass' }], [other, { outcome: 'fail' }]]))).toBeUndefined()

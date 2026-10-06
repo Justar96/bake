@@ -75,8 +75,11 @@ On Unix, SIGINT, SIGTERM, and SIGHUP are handled while the preview runs. Raw mod
 |---|---|
 | `crates/bake-tui` | `editor` (pure draft and wrapping), `app` (preview state and keys), `render` (Ratatui drawing), and the terminal owner |
 | `crates/bake-cli` | The `bake-rs` binary: argument parsing, terminal checks, exit statuses |
+| `crates/bake-conformance` | A synthetic fixture runner for the [migration comparison harness](../conformance/README.md); no agent runtime |
 
 Dependencies are pinned exactly in `Cargo.toml` and locked in `Cargo.lock`: Ratatui 0.30.2 with only its `crossterm` feature, Crossterm 0.29.0, unicode-segmentation 1.13.3, unicode-width 0.2.2, and on Unix signal-hook 0.3.18, which Crossterm already uses. `ratatui-crossterm` enables Crossterm's default features; `cargo tree --locked -i crossterm` shows one Crossterm version.
+
+The conformance runner uses Serde 1.0.229 and serde_json 1.0.151 for its separate, versioned test input. These dependencies do not connect the preview to a model or session store.
 
 ## Checks
 
@@ -91,3 +94,5 @@ cargo build --workspace --locked
 Unit tests cover grapheme editing (including deletions that join neighboring graphemes), input cleanup, undo bounds, draft limits, wrapping and caret placement, refused submission, read-only inspection, draft restoration after navigation, selection by id, and rendering at 40×12, 80×24, 120×36, and every size up to 12×8 with Ratatui's `TestBackend`. A unit test covers the stream check for each combination of terminal and non-terminal input and output, and `crates/bake-cli/tests/cli.rs` runs the built binary without a terminal to check help, version, argument errors, and the refusal to start. Terminal-mode restoration in a real PTY is checked by the repository's PTY scenarios, not by these tests.
 
 From the repository root, `bun run preflight --only native` runs those Cargo checks and `bun run test:rust:pty` against the built binary. The PTY driver checks composer input, caret and undo preservation through inspection, refused submission, multiline paste, resize, and terminal restoration after Ctrl+C, SIGINT, SIGTERM, and SIGHUP. A Linux process-stop barrier exercises a shrink and grow that reach the application as one resize. That barrier is skipped on macOS; all native PTY scenarios are skipped on Windows until ConPTY coverage is implemented. Cargo checks run on Linux, macOS, and Windows in CI.
+
+The native preflight group also runs `bun run test:rust:conformance` on all three operating systems. It compares the built Rust fixture runner with the TypeScript arm and independently observes final files. See the [harness guide](../conformance/README.md) for its synthetic scope, deliberate mismatches, and report format.

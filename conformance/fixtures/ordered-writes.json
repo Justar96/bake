@@ -1,0 +1,24 @@
+{
+  "schema": "bake/synthetic-conformance/fixture",
+  "version": 1,
+  "id": "ordered-writes",
+  "input": {
+    "schema": "bake/synthetic-conformance/input",
+    "version": 1,
+    "prompts": ["Apply two writes in order.\n"],
+    "events": [{ "type": "first", "ordinal": 1 }, { "type": "second", "ordinal": 2 }],
+    "permissions": [{ "id": "edit", "path": "ordered.txt", "decision": "allow" }],
+    "writes": [
+      { "path": "ordered.txt", "text": "first\n", "permission": "edit" },
+      { "path": "ordered.txt", "text": "second\n", "permission": "edit" }
+    ]
+  },
+  "initialFiles": [],
+  "protectedFiles": [],
+  "expected": {
+    "prompts": ["Apply two writes in order.\n"],
+    "events": [{ "type": "first", "ordinal": 1 }, { "type": "second", "ordinal": 2 }],
+    "permissions": [{ "id": "edit", "path": "ordered.txt", "decision": "allow" }],
+    "files": [{ "path": "ordered.txt", "hex": "7365636f6e640a" }]
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "schema": "bake/synthetic-conformance/fixture",
+  "version": 1,
+  "id": "allow-write",
+  "input": {
+    "schema": "bake/synthetic-conformance/input",
+    "version": 1,
+    "prompts": ["Bake fixture — กา 👩‍💻\r\nkeep trailing space \n", ""],
+    "events": [
+      { "type": "synthetic/start", "data": { "id": "root", "ordinal": 1 } },
+      { "type": "synthetic/write-requested", "data": { "id": "edit-1", "parent": "root", "ordinal": 2 } },
+      { "type": "synthetic/finish", "data": { "id": "root", "ordinal": 3 } }
+    ],
+    "permissions": [{ "id": "edit-1", "path": "src/result.txt", "decision": "allow" }],
+    "writes": [{ "path": "src/result.txt", "text": "ready\n", "permission": "edit-1" }]
+  },
+  "initialFiles": [
+    { "path": "src/result.txt", "hex": "70656e64696e670a" },
+    { "path": "check.txt", "hex": "666978747572652d6f776e65640a" },
+    { "path": "binary.dat", "hex": "0001ff80" }
+  ],
+  "protectedFiles": ["check.txt", "binary.dat"],
+  "expected": {
+    "prompts": ["Bake fixture — กา 👩‍💻\r\nkeep trailing space \n", ""],
+    "events": [
+      { "type": "synthetic/start", "data": { "id": "root", "ordinal": 1 } },
+      { "type": "synthetic/write-requested", "data": { "id": "edit-1", "parent": "root", "ordinal": 2 } },
+      { "type": "synthetic/finish", "data": { "id": "root", "ordinal": 3 } }
+    ],
+    "permissions": [{ "id": "edit-1", "path": "src/result.txt", "decision": "allow" }],
+    "files": [
+      { "path": "src/result.txt", "hex": "72656164790a" },
+      { "path": "check.txt", "hex": "666978747572652d6f776e65640a" },
+      { "path": "binary.dat", "hex": "0001ff80" }
+    ]
+  }
+}
