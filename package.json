@@ -108,6 +108,9 @@
     "verify-type-equiv": "bun scripts/verify-type-equiv.ts",
     "verify-cordis-config": "bun scripts/verify-cordis-config.ts",
     "verify-package-invariants": "bun scripts/verify-package-invariants.ts",
+    "gen-rust-migration-inventory": "bun scripts/rust-migration-inventory.ts --write",
+    "verify-rust-migration-inventory": "bun scripts/rust-migration-inventory.ts --check",
+    "migration:baseline": "bun scripts/rust-migration-baseline.ts",
     "bake": "bun apps/tui/scripts/tui.ts bake",
     "dsh": "bun apps/tui/scripts/tui.ts dsh",
     "postinstall": "lefthook install"

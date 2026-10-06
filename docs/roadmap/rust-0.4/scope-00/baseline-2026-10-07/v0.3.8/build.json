@@ -1,0 +1,42 @@
+{
+  "schema": "bake/rust-migration/check-result",
+  "schemaVersion": 1,
+  "scope": "00",
+  "kind": "check-result",
+  "id": "build",
+  "argv": [
+    "bun",
+    "run",
+    "build"
+  ],
+  "cwd": ".",
+  "source": {
+    "commit": "dcb26d756e008a3d17c057a6b153933c018c275d",
+    "sourceDigest": "933773046a7c1c0e4f49bfe0db1406fac2dfc88c449bd190f72f57f88c6bfcb7"
+  },
+  "environment": {
+    "platform": "linux",
+    "arch": "x64",
+    "osRelease": "7.2.8-200.fc44.x86_64",
+    "tools": {
+      "bun": "1.4.2",
+      "node": "v26.10.0",
+      "git": "git version 2.56.0"
+    }
+  },
+  "startedAt": "2026-10-06T20:09:47.123Z",
+  "durationMs": 2404,
+  "timeoutMs": 3600000,
+  "exitCode": 0,
+  "signal": null,
+  "timedOut": false,
+  "interrupted": false,
+  "descendantsRemained": false,
+  "sourceUnchanged": true,
+  "log": {
+    "file": "build.log",
+    "sha256": "5fea6122e1cb1bb4beeb95304695e75fdcacb8d37d0b7e8e43e727005785716d",
+    "bytes": 95828
+  },
+  "outcome": "passed"
+}
