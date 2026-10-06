@@ -4,7 +4,7 @@
 
 Scope 00 fixes what the Rust migration must preserve and the TypeScript evidence it will compare against. It belongs to the [Bake 0.4 Rust migration roadmap](../README.md#00--support-decisions-and-baseline); the roadmap's [verification contract](../verification.md#evidence-required-for-every-scope) defines what closes it.
 
-**State: In progress, 2026-10-07.** The inventory and baseline tooling are implemented on `feat/rust-scope-00-baseline`. Nothing here qualifies a Rust behavior. The comparison sources are `v0.3.8` (`dcb26d756e`, whose tree equals `develop` commit `a1ec50245e`) and `origin/develop` at `ae5eb51ab6`.
+**State: In progress, 2026-10-07.** The inventory and initial baseline tooling landed in [PR #51](https://github.com/Justar96/bake/pull/51). Nothing here qualifies a Rust behavior. The initial comparison sources are `v0.3.8` (`dcb26d756e`, whose tree equals `develop` commit `a1ec50245e`) and `origin/develop` at `ae5eb51ab6`. A [separate terminal record](terminal-2026-10-07/README.md) measures shutdown and latency distributions with the extended diagnostic.
 
 ## Table of Contents
 
@@ -16,13 +16,14 @@ Scope 00 fixes what the Rust migration must preserve and the TypeScript evidence
 
 ## Deliverables and status
 
-The scope has three deliverables, reviewed in the roadmap's PR order: support decisions first, then the inventory, then the baseline.
+Review the core deliverables in the roadmap's PR order: support decisions first, then the inventory, then the baseline. The terminal direction and additional measurements refine that baseline for the later UI scopes.
 
 | Deliverable | Location | State |
 |---|---|---|
 | Support and release decisions, acceptance matrix | [support.md](support.md) | Draft written; owner decisions open in [its decision register](support.md#decision-register) |
 | Machine-readable inventory of packages, profiles, tools, and tests with their owning scope | [inventory.json](inventory.json), generated and checked by [rust-migration-inventory.ts](../../../../scripts/rust-migration-inventory.ts) | Implemented, with tests for missing, stale, malformed, and unclassified entries |
 | Frozen TypeScript baseline record: commits, build provenance, focused oracle results, startup/RSS/shutdown and terminal workloads | [2026-10-07 evidence](baseline-2026-10-07/README.md), produced with [baseline tooling](../../../../scripts/rust-migration-baseline.ts) | Both pinned sources rebuilt, 85 focused tests passed per source, and 36 terminal samples completed; full qualification remains open |
+| Terminal direction and additional measurement endpoints | [Native terminal direction](../terminal.md), [shutdown evidence](terminal-2026-10-07/README.md) | Familiar layout and improved agent/composer criteria recorded; 18 additional TypeScript samples completed with shutdown timing and latency distributions |
 
 ## What is implemented and what is missing
 
@@ -35,10 +36,11 @@ The inventory assigns owning scopes and dispositions to 167 packages, 808 test f
 - `apps/tui/scripts/check-docs.ts` includes `docs/roadmap/` Markdown in `bun run doc-sync` link checking.
 - The baseline tool captures source and dependency digests from a clean, pinned worktree. It records each executed command separately and rejects modified source, tampered records, and unsafe output paths. A source record never claims a build or test passed.
 - The exact `v0.3.8` revision predates model-surface snapshots. Its source record names that absence; missing inputs in other revisions remain errors.
+- The terminal diagnostic measures clean shutdown from the second interrupt to observed Node exit and reports latency distributions. Failed samples are excluded; [the new record](terminal-2026-10-07/README.md) keeps the initial reports unchanged.
 
 **Missing before scope 00 can close:**
 
-- Complete baseline qualification beyond the [initial measurements](baseline-2026-10-07/README.md#remaining-evidence): interleaved samples, noise characterization, process-tree memory, shutdown timing, and frozen performance budgets.
+- Complete baseline qualification beyond the [initial measurements](baseline-2026-10-07/README.md#remaining-evidence) and [shutdown observations](terminal-2026-10-07/README.md#remaining-evidence): interleaved samples, noise characterization, process-tree memory, idle CPU, shutdown on the other targets, and frozen performance budgets.
 - Minimum OS, kernel, libc, and macOS deployment versions for each release target.
 - Owner answers to the decisions in [the decision register](support.md#decision-register), including the triage of unreleased `develop` work and the 0.3 support window.
 - A test run against the external Bake Desktop consumer, or a named qualification owner for it.
