@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, readdir, readFile, readlink, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, readlink, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import {
   ConformanceSetupError, launch, listFixtures, MAX_TIMEOUT_MS, MAX_WORKSPACE_ENTRIES, runConformance, snapshotWorkspace, summarize,
   typescriptArm, type ArmSpec, type ConformanceReport, type RunOptions,
@@ -108,14 +108,20 @@ describe('runConformance', () => {
 
   test('children get a minimal environment with private homes inside a removed root', async () => {
     const marker = join(root, 'env.json')
-    const { report } = await run([fault('env', marker)])
+    let parent = tempRoot
+    if (posix) {
+      parent = join(root, 'linked-runs')
+      await symlink(tempRoot, parent, 'dir')
+    }
+    const { report } = await run([fault('env', marker)], [ALLOW], { tempRoot: parent })
     expect(report.ok).toBe(true)
     const { env, cwd } = JSON.parse(await readFile(marker, 'utf8')) as { env: Record<string, string>; cwd: string }
     const allowed = ['PATH', 'HOME', 'BAKE_HOME', 'DSH_HOME', 'TMPDIR', 'TMP', 'TEMP', 'USERPROFILE', 'SystemRoot', 'windir', 'ComSpec', 'PATHEXT']
     expect(Object.keys(env).filter(key => !allowed.some(name => name.toLowerCase() === key.toLowerCase()))).toEqual([])
-    expect(env.BAKE_HOME!.startsWith(tempRoot)).toBe(true)
+    expect(env.BAKE_HOME!.startsWith(`${parent}${sep}`)).toBe(true)
     expect(env.DSH_HOME).toBe(env.BAKE_HOME)
-    expect(cwd.startsWith(tempRoot)).toBe(true)
+    // cwd resolves directory aliases, including macOS's /var -> /private/var.
+    expect(cwd.startsWith(`${await realpath(parent)}${sep}`)).toBe(true)
     expect(await stat(cwd).catch(() => null)).toBeNull()
   }, BUDGET)
 
