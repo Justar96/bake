@@ -6,7 +6,7 @@ description: "Measure built TUI startup, long-session resume, input latency, and
 
 ## Summary
 
-Measure a fresh TUI process, resume mixed histories, and type during a paced response without an API key or user data. Reports retain individual samples, per-workload medians, and failures. This local diagnostic has no calibrated timing thresholds and does not qualify CI performance.
+Measure a fresh TUI process, resume mixed histories, and type during a paced response without an API key or user data. Reports retain individual samples, per-workload medians and latency distributions, and failures. This local diagnostic has no calibrated timing thresholds and does not qualify CI performance.
 
 ## Table of Contents
 
@@ -36,7 +36,7 @@ bun apps/tui/scripts/tui.ts perf --mode development --workload fresh --workload 
 
 `--app-artifacts <directory>` measures saved `index.js`, `startup.js`, `runner-loader.js`, `ui-loader.js`, and `syntax-loader.js` application bundles with the current fixture writer. The driver copies the bundles into its private application directory so dependencies resolve normally. Supply artifacts built for the selected mode and keep their optional `metadata.json` alongside them to record provenance. Without this option, the driver builds the application from the checkout.
 
-`--cpu-profile <directory>` enables Node CPU profiling for each sample. Profiled timings include profiling overhead and should remain separate from ordinary samples. A timeout, crash, missing historical answer, repeated historical answer, missing final delta, or unclean exit fails the sample. The diagnostic continues remaining samples, updates the JSON report after each one, and exits nonzero if any failed. Ctrl-C or SIGTERM interrupts observations, drains the current process, and stops remaining samples with a nonzero exit and an interrupted report. Inspect each failure before comparing medians.
+`--cpu-profile <directory>` enables Node CPU profiling for each sample. Profiled timings include profiling overhead and should remain separate from ordinary samples. A timeout, crash, missing historical answer, repeated historical answer, missing final delta, or unclean exit fails the sample. A sample is recorded as complete only after its clean exit. The diagnostic continues remaining samples, updates the JSON report after each one, and exits nonzero if any failed. Ctrl-C or SIGTERM interrupts observations, drains the current process, and stops remaining samples with a nonzero exit and an interrupted report. Inspect each failure before comparing medians.
 
 <a id="measurement-reference"></a>
 
@@ -53,9 +53,12 @@ The report's artifact hashes identify the private bundle, startup module, fixtur
 | `liveInputMs` | Draft input after the first response delta, through its composer echo. |
 | `firstDeltaMs` | Prompt submission through the first visible synthetic delta. |
 | `streamMs` | Prompt submission through the final delta and subsequent idle status. Includes intentional 10 ms replay pacing. |
+| `shutdownMs` | Second Ctrl-C write through the measured Node process's observed exit, timed when Bun's exit promise settles rather than at the observation poll. The wait for the quit hint after the first Ctrl-C is excluded. An exit observed before measurement starts, a nonzero exit, fatal signal, or PTY read failure fails the sample and records no duration. |
 | Memory | `readyMemory` and `settledMemory` capture main-isolate heap before/after forced GC at readiness and after streaming, with session state reachable. Summary `retainedHeapMiB` and `settledRetainedHeapMiB` use the respective post-GC values; worker heaps are excluded. |
 | `peakRssMiB` | Main Node process lifetime maximum observed after streaming, including worker threads; excludes the Bun coordinator and separate descendant processes. |
 | Output | `initialBytes`, `idleBytes`, and `streamBytes` count PTY bytes through readiness, subsequent idle typing, and streaming. `historyMarkerOccurrences` counts history markers beyond the bounded capture tail. |
+
+Each workload summary keeps its medians and adds `distributions` for `initialInputMs`, `firstInputMs`, `readyMs`, `maxIdleInputMs` (each sample's maximum idle input), `liveInputMs`, `firstDeltaMs`, `streamMs`, and `shutdownMs`. Each distribution reports `samples`, `min`, `median`, `p95`, `max`, and `mad`, computed from completed samples only. `median` averages the two middle values for an even count, like the summary medians. `p95` uses nearest rank, the ceil(0.95 n)-th smallest value, so it equals `max` below 20 samples. `mad` is the unscaled median absolute deviation from `median`. A workload without completed samples reports `samples: 0` and null statistics. Distributions describe local spread; they are not timing thresholds.
 
 The driver latches paste-mode registration as bytes arrive, including split escape sequences, so registration survives eviction from the bounded output tail. First input can precede complete replay; readiness additionally requires every history marker. Marker counts and identities remain observable throughout the sample.
 
@@ -78,7 +81,7 @@ The [fixture author](history.ts) constructs fixed Session events through Harness
 
 Each ordinary answer ends in a unique history marker. Each `large-output` answer contains sixteen 4096-byte sections with one marker per section, covering all 64 KiB. If the last turn has tools, its final tool result adds one marker after the result text, so readiness includes trailing tool output. Every expected marker must appear exactly once across resume, typing, and streaming.
 
-These are synthetic workload labels, not claims about observed user-session distributions. Reports include exact event, delta, compact-record, and tool counts; UTF-8 byte totals for prompts, answers, reasoning, and tool output; maximum answer size; marker counts; and persisted byte size. Every successful sample must observe the final model delta, return to idle, and exit cleanly. [Fixture tests](../tests/performance.spec.ts) verify deterministic replay and failure aggregation; [PTY lifecycle tests](../tests/performance-terminal.test.ts) cover readiness after output-tail eviction, failed exits, fatal signals, cancellation, and teardown after timeout.
+These are synthetic workload labels, not claims about observed user-session distributions. Reports include exact event, delta, compact-record, and tool counts; UTF-8 byte totals for prompts, answers, reasoning, and tool output; maximum answer size; marker counts; and persisted byte size. Every successful sample must observe the final model delta, return to idle, and exit cleanly. [Fixture tests](../tests/performance.spec.ts) verify deterministic replay, failure aggregation, and distribution statistics; [PTY lifecycle tests](../tests/performance-terminal.test.ts) cover readiness after output-tail eviction, shutdown timing through a delayed exit, failed exits, fatal signals, cancellation, and teardown after timeout.
 
 <a id="renderer-memory"></a>
 

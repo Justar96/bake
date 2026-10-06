@@ -1,0 +1,8 @@
+{
+  "platform": "linux",
+  "arch": "x64",
+  "osRelease": "7.2.8-200.fc44.x86_64",
+  "cpuModel": "Intel(R) Core(TM) i9-14900KS",
+  "logicalCpus": 32,
+  "totalMemoryBytes": 202261168128
+}

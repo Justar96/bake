@@ -10,6 +10,7 @@ Port Bake's runtime and terminal application to Rust in a sequence of independen
 
 - [Release lines and change policy](#release-lines-and-change-policy)
 - [Target architecture](#target-architecture)
+- [Terminal direction](terminal.md)
 - [Linear development sequence](#linear-development-sequence)
 - [Scope specifications](#scope-specifications)
 - [PR and completion rules](#pr-and-completion-rules)
@@ -67,6 +68,8 @@ flowchart TD
 Preserve behavior, without reproducing all 157 package boundaries. An agent task owns inbox transitions and durable event ordering. Bounded concurrent work returns results to that owner; only the owner commits them. Cancellation must stop new work and await owned work. Explicit ordered middleware must preserve Cordis waterfall delegation and halt behavior. Disposing a Rust object alone is not proof that asynchronous children have stopped.
 
 Candidate foundations are Cargo, Serde, Tokio, and a Ratatui/Crossterm terminal implementation. Cargo supports a shared workspace lockfile; Serde permits explicit wire representations; Tokio documents cancellation followed by waiting for task completion; Ratatui separates rendering from terminal backends. These are starting points for scope 01 and scope 14 experiments, not evidence of Bake compatibility. See the official [Cargo workspace reference](https://doc.rust-lang.org/cargo/reference/workspaces.html), [Serde representation reference](https://serde.rs/enum-representations.html), [Tokio shutdown guide](https://tokio.rs/tokio/topics/shutdown), and [Ratatui backend guide](https://ratatui.rs/concepts/backends/). Pin versions, supported Rust version, platform features, and licenses only after those experiments.
+
+The [terminal direction](terminal.md) keeps the current transcript and composer layout recognizable, with cleaner presentation and clearer agent selection, status, and input focus. Ratatui with Crossterm is the starting stack; the renderer and candidate editor widget must pass Bake's inline, Unicode, draft-preservation, and terminal-restoration cases before adoption.
 
 Keep `run_code`'s JavaScript semantics through an explicitly confined embedded engine; moving the host to Rust does not authorize changing the model's programming language. Treat arbitrary Cordis JavaScript, executable YAML, npm plugins, and Electron message ports as separate compatibility decisions. An optional legacy whole-profile process may bridge development, but it cannot count as native parity or silently become the implementation behind a supposedly native profile. Scope 00 resolves the shipped support matrix; scopes 05, 12, and 13 prove it.
 
@@ -243,7 +246,7 @@ Each scope below specifies implementation, review order, and observable proof. T
 
 ### 14 — Terminal engine and rendering
 
-**Implement:** terminal acquisition/release, inline scrollback, fullscreen viewport, input decoding, grapheme-aware editor, cell measurement, Markdown/tables/code, selection/copy, resize, and authoritative session/live-stream presentation. Validate the renderer choice against inline behavior early; an alternate-screen demo is insufficient.
+**Implement:** terminal acquisition/release, inline scrollback, fullscreen viewport, input decoding, grapheme-aware editor, cell measurement, Markdown/tables/code, selection/copy, resize, and authoritative session/live-stream presentation. Follow the [crate selection and composer requirements](terminal.md#rust-crate-selection). Validate the renderer choice against inline behavior early; an alternate-screen demo is insufficient.
 
 **PR order:** terminal lease/input → editor/Unicode → transcript/rendering → fullscreen/mouse/resize. Port observable layout obligations from [layout design](../../../apps/tui/DESIGN-LAYOUT.md); do not translate React components mechanically.
 
@@ -253,7 +256,7 @@ Each scope below specifies implementation, review order, and observable proof. T
 
 ### 15 — Interactive workflows
 
-**Implement:** completion, history/drafts, slash commands, session picker/navigation, model/effort selection, provider login, permission/settings sheets, approvals/questions, skill invocation, attachments, goals, subagent inspection, update notices, and terminal setup/external-editor handoff.
+**Implement:** completion, history/drafts, slash commands, session picker/navigation, model/effort selection, provider login, permission/settings sheets, approvals/questions, skill invocation, attachments, goals, subagent inspection, update notices, and terminal setup/external-editor handoff. Apply the [agent-handling direction](terminal.md#agent-handling) and its explicit focus, destination, and draft-preservation acceptance cases.
 
 **PR order:** session/composer flows → model/settings/login → human interactions → orchestration/attachments → remaining commands. Keep UI copy centralized and English; render runtime projections for activity, inbox, permissions, and context pressure.
 

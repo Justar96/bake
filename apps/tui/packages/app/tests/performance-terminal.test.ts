@@ -47,9 +47,38 @@ function interactiveExit(exit: string): string {
 it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')('accepts native PTY shutdown after Node exits successfully', async () => {
   const { tty } = await terminal(interactiveExit('process.exit(0)'))
   await tty.wait('fixture ready', () => tty.clean.includes('READY'))
-  await tty.quit()
+  const shutdownMs = await tty.quit()
+  expect(Number.isFinite(shutdownMs)).toBe(true)
+  expect(shutdownMs).toBeGreaterThan(0)
   await tty.close()
   expect(() => process.kill(tty.pid, 0)).toThrow()
+})
+
+it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')('times shutdown from the second interrupt through the reaped exit', async () => {
+  // Independent delays expose both an early endpoint and an included confirmation wait.
+  // Lower bounds allow arbitrary host scheduling delays.
+  const { tty } = await terminal(`
+    process.stdin.setRawMode(true)
+    process.stdin.resume()
+    let interrupts = 0
+    process.stdin.on('data', input => {
+      if (!input.includes(3)) return
+      if (++interrupts === 1) setTimeout(() => process.stdout.write(${JSON.stringify(dictionaries.en.quit)}), 300)
+      else {
+        process.stdout.write('EXITING')
+        setTimeout(() => process.exit(0), 300)
+      }
+    })
+    process.stdout.write('READY')
+  `)
+  await tty.wait('fixture ready', () => tty.clean.includes('READY'))
+  const start = performance.now()
+  const shutdownMs = await tty.quit()
+  const handshakeMs = performance.now() - start
+  expect(tty.clean).toContain('EXITING')
+  expect(() => process.kill(tty.pid, 0)).toThrow()
+  expect(shutdownMs).toBeGreaterThanOrEqual(250)
+  expect(handshakeMs - shutdownMs).toBeGreaterThanOrEqual(250)
 })
 
 it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')('rejects a PTY read failure while Node remains alive', async () => {

@@ -1,0 +1,42 @@
+{
+  "schema": "bake/rust-migration/check-result",
+  "schemaVersion": 1,
+  "scope": "00",
+  "kind": "check-result",
+  "id": "terminal-tests",
+  "argv": [
+    "bun",
+    "test",
+    "apps/tui/packages/app/tests/performance-terminal.test.ts"
+  ],
+  "cwd": ".",
+  "source": {
+    "commit": "c45b16127d3803cc2f656fce2be052225c86d058",
+    "sourceDigest": "31e4d756539098852cad9bba30621c8dea03885febf462c1896d33bf670f92dd"
+  },
+  "environment": {
+    "platform": "linux",
+    "arch": "x64",
+    "osRelease": "7.2.8-200.fc44.x86_64",
+    "tools": {
+      "bun": "1.4.2",
+      "node": "v26.10.0",
+      "git": "git version 2.56.0"
+    }
+  },
+  "startedAt": "2026-10-06T20:43:33.542Z",
+  "durationMs": 1033,
+  "timeoutMs": 3600000,
+  "exitCode": 0,
+  "signal": null,
+  "timedOut": false,
+  "interrupted": false,
+  "descendantsRemained": false,
+  "sourceUnchanged": true,
+  "log": {
+    "file": "terminal-tests.log",
+    "sha256": "f094e7beeb9d12906b814880c98e22f0e645876446de28a56721faf9e65b37fd",
+    "bytes": 1102
+  },
+  "outcome": "passed"
+}

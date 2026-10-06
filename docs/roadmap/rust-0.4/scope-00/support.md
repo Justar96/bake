@@ -53,6 +53,7 @@ Scope 01 may start on the settled rows. Scope 00 stays open until every **Owner 
 | D16 | Platforms | Scope-00 default | The five release targets are the native matrix. Minimum OS, kernel, libc, and macOS versions are missing evidence. |
 | D17 | Code mode | Scope-00 default | `run_code` keeps its language: model-written TypeScript in a confined QuickJS VM with the same bindings and limits. |
 | D18 | Performance budgets | Scope-00 default | Budgets come from the scope-00 baseline and are frozen before any candidate measurement. No numbers are set yet. |
+| D19 | Native TUI direction | Decided by request | Keep the current UI recognizable, with cleaner presentation and better agent/composer handling. The [terminal direction](../terminal.md) defines the acceptance cases and the Ratatui/Crossterm starting stack for scopes 14–15. |
 
 ## Shipped surface
 
@@ -287,7 +288,7 @@ Each row is one support entry. Rows link to their current oracle tests, and scop
 | A14 | Code mode | [codemode tests](../../../../packages/ptc-runtime/ptc-runtime-codemode/tests/) | Native host with an embedded JavaScript engine | 12 | Limits, nested approvals, and denied ambient access match | Engine not chosen |
 | A15 | Telemetry, feedback, identity, diagnostics | [otel](../../../../packages/session/session-telemetry-otel/tests/), [feedback](../../../../packages/feedback/command-feedback/tests/), [identity](../../../../packages/identity/anonymous-user-id/tests/), [watchdog](../../../../packages/runtime-diagnostics/runtime-watchdog/tests/) | Native; watchdog re-measured | 13 | No export without consent; bounded shutdown; no credentials in diagnostics | Native measurement design |
 | A16 | Install, update, rollback, aliases | [updater tests](../../../../packages/boot/updater/tests/), [release script tests](../../../../scripts/release/) | Native plus transition | 16 | Old updater to 0.4 and back; held Windows files; `dsh` link kept | Oldest supported updater not chosen |
-| A17 | Performance | [terminal performance driver](../../../../apps/tui/packages/app/performance/README.md) | Baseline first | 00, 17 | Frozen budgets from repeated baseline runs | Baseline not captured |
+| A17 | Performance | [terminal performance driver](../../../../apps/tui/packages/app/performance/README.md) | Baseline first | 00, 17 | Frozen budgets from repeated baseline runs | [Initial measurements](baseline-2026-10-07/README.md) and [shutdown observations](terminal-2026-10-07/README.md) captured; full qualification and budgets remain open |
 | A18 | Removed products | — | Excluded | — | No restored web, ACP, SDK, upstream desktop, or docs site | — |
 
 ## Native consumer coverage gaps
