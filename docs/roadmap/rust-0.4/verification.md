@@ -142,7 +142,7 @@ Use barriers and explicit lifecycle signals for races. Register cleanup immediat
 
 Use property tests for pure admission/reduction, bounded fuzzing for JSONL/SSE/terminal/protocol parsers, and deterministic fault injection for persistence/publication/process ownership. Choose iteration/time budgets in the owning PR and record them. A test failure is investigated before adding retries, widening timeouts, weakening assertions, or serializing a whole suite.
 
-Once scope 01 lands, its native verification path should include locked builds, Rust formatting/lints, unit/integration/property tests, and relevant conformance fixtures. Exact Cargo/test-wrapper commands belong to that implemented scope and its CI, not invented runnable instructions in this planning document. Keep current Bun/Node checks until the consumers they protect are retired through scope 17.
+Scope 01's opt-in [native workspace](../../../rust/README.md) provides locked builds, Rust formatting/lints, unit tests, and preview PTY checks. Shared conformance fixtures and the native eval arm remain open. Exact Cargo/test-wrapper commands belong to the workspace README and its CI. Keep current Bun/Node checks until the consumers they protect are retired through scope 17.
 
 ## Planning-session evidence
 
@@ -174,7 +174,7 @@ bun run test:runtime \
 
 Logs for this local run are ignored artifacts: `.preflight/rust-roadmap-build.log`, `.preflight/rust-roadmap-runtime.log`, `.preflight/rust-roadmap-model-surface.log`, and `.preflight/rust-roadmap-lint.log`. Both test invocations reported a Vite configuration deprecation notice about `vite-tsconfig-paths`; no test failed or skipped in these selections.
 
-The full runtime suite, full preflight, PTY suite, live provider calls, paired paid-model evals, macOS/Windows tests, final release artifacts, and external Bake Desktop consumer were not run for this documentation change. No Rust implementation exists to test. Scope 00 still owes the comprehensive frozen baseline; these focused checks do not close it.
+The full runtime suite, full preflight, PTY suite, live provider calls, paired paid-model evals, macOS/Windows tests, final release artifacts, and external Bake Desktop consumer were not run in this planning session. There was no Rust implementation in its source baseline. Scope 00 still owes the comprehensive frozen baseline; these focused checks do not close it.
 
 ## Dev Note
 

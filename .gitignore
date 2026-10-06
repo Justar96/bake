@@ -54,3 +54,4 @@ apps/tui/.smoke/
 
 # bun run preflight logs
 .preflight/
+rust/target/

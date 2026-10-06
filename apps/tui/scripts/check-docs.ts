@@ -8,6 +8,7 @@ const root = resolve(import.meta.dirname, '../../..')
 const entryDocs = [
   'README.md', 'CONTRIBUTING.md', 'AGENTS.md', 'docs/architecture.md', 'apps/cli/README.md',
   'packages/boot/app-boot/README.md', 'packages/boot/plugin-manager/README.md', 'native/system/README.md',
+  'rust/README.md',
 ]
 // Git, not ripgrep: every checkout has it, and it applies the same ignore rules.
 const files = [...entryDocs, ...execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '--', 'apps/tui/*.md', 'docs/roadmap/*.md'],

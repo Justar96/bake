@@ -2,7 +2,7 @@ import { readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
 import {
-  bunTests, changelogGap, parseOptions, runtimeArgs, selectSteps, STEPS, strayBuildOutput, vitestFailures, type Scope,
+  bunTests, changelogGap, failedBuild, parseOptions, runtimeArgs, selectSteps, STEPS, strayBuildOutput, vitestFailures, type Scope,
 } from './preflight.ts'
 
 const scope = (files: readonly string[]): Scope => ({ base: 'origin/develop', mergeBase: 'abc123', files })
@@ -44,6 +44,25 @@ describe('preflight', () => {
     expect(() => parseOptions(['--only', 'nope'])).toThrow(/unknown step or group nope/u)
     expect(() => parseOptions(['--bogus'])).toThrow(/unknown argument/u)
     expect(() => parseOptions(['--base'])).toThrow(/needs a value/u)
+  })
+
+  it('checks the Rust workspace before its PTY scenarios and excludes both from --fast', () => {
+    expect(selected(['--only', 'native'])).toEqual(['rust', 'rust-pty'])
+    expect(selected(['--fast', '--only', 'native'])).toEqual([])
+    expect(STEPS.find(step => step.name === 'rust')?.command?.(parseOptions([]), scope([])))
+      .toEqual(['bun', 'run', 'check:rust'])
+    expect(STEPS.find(step => step.name === 'rust-pty')?.command?.(parseOptions([]), scope([])))
+      .toEqual(process.platform === 'win32' ? { skip: 'native ConPTY scenarios are not implemented' } : ['bun', 'run', 'test:rust:pty'])
+  })
+
+  it('blocks PTY checks after their own build fails, without blocking the other workspace', () => {
+    for (const step of STEPS.filter(entry => ['e2e', 'rust-pty'].includes(entry.name))) {
+      const owner = step.name === 'rust-pty' ? 'rust' : 'build'
+      const other = owner === 'rust' ? 'build' : 'rust'
+      expect(failedBuild(step, new Map([[owner, { outcome: 'fail' }], [other, { outcome: 'pass' }]]))).toBe(owner)
+      expect(failedBuild(step, new Map([[owner, { outcome: 'pass' }], [other, { outcome: 'fail' }]]))).toBeUndefined()
+      expect(failedBuild(step, new Map())).toBeUndefined()
+    }
   })
 
   it('runs the runtime tests the change reaches, all of them when the change can move any, or none', () => {

@@ -52,7 +52,7 @@ Ratatui with Crossterm is the first implementation choice because Bake needs reu
 | Events and terminal modes | Crossterm, through Ratatui's supported backend | One compatible Crossterm dependency version must own input and raw mode. Verify acquisition, cancellation, and restoration on POSIX and Windows ConPTY. |
 | Draft behavior | A pure Bake-owned editor model | The [widget qualification](scope-00/editor-2026-10-07/README.md) found 15 mismatches in `ratatui-textarea` 0.9.3, including grapheme editing and caret width. Render Bake's model with Ratatui and keep terminal effects outside it. |
 
-The official backend guide warns that incompatible Crossterm versions have separate event queues and raw-mode tracking. Pin compatible crate versions, features, licenses, and a Rust minimum version when the renderer experiment passes; verify the resolved dependency graph then. The editor qualification's manifest and lockfile are frozen experiment records, separate from the planned native workspace and shipped dependencies.
+The official backend guide warns that incompatible Crossterm versions have separate event queues and raw-mode tracking. The opt-in [native workspace](../../../rust/README.md) pins the preview's toolchain and dependencies; its locked dependency graph must contain one Crossterm version. The editor qualification's manifest and lockfile remain frozen experiment records, separate from that workspace and shipped dependencies.
 
 The first renderer experiment must exercise variable-height inline content and terminal reflow. If Ratatui's inline facilities cannot meet those obligations, evaluate a small Bake-owned inline writer over its buffers and Crossterm before committing to a larger frontend. Keep any such writer responsible for output only; agent and editor state stay with their existing owners.
 
@@ -78,6 +78,8 @@ The [PTY driver](../../../apps/tui/scripts/pty-smoke.ts) owns the named scenario
 Preserve the [linear scope sequence](README.md#linear-development-sequence). Scope 00 records this direction and the TypeScript oracle. Scope 01 provides shared fixtures and comparison drivers. Scope 11 owns durable orchestration. Scope 14 implements terminal ownership, the editor, transcript output, and viewport behavior; scope 15 connects the interactive workflows.
 
 A crate or renderer prototype may run earlier in an isolated development path. It neither changes the shipped launcher nor closes a later scope. Keep the current UI runnable until the native frontend satisfies the accepted behavior and intentional differences have their own reviewed tests.
+
+The fullscreen [Rust preview](../../../rust/README.md) is this early path: `bun run dev:rust` launches a draft editor, fixed sample-agent list, and read-only inspector. It has no runtime connection, inline mode, session persistence, or native workflow parity. Its unit and PTY checks qualify only that supported subset; the full acceptance scenarios above remain open.
 
 ## Dev Note
 

@@ -60,10 +60,12 @@ export interface Step {
   readonly name: string
   readonly phase: Phase
   /** Selectable group; `--only` and `--skip` accept a group or a step name. */
-  readonly group: 'hygiene' | 'generated' | 'types' | 'lint' | 'unit' | 'build' | 'tui' | 'runtime' | 'e2e'
+  readonly group: 'hygiene' | 'generated' | 'types' | 'lint' | 'unit' | 'build' | 'tui' | 'runtime' | 'e2e' | 'native'
   readonly summary: string
   /** Whether the step reads build output, and is skipped under `--fast`. */
   readonly needsBuild?: boolean
+  /** Build that owns this step's artifacts; defaults to the TypeScript `build` step. */
+  readonly buildStep?: 'build' | 'rust'
   /** A command to run, or undefined with a reason to skip it for this run. */
   readonly command?: (options: Options, scope: Scope) => readonly string[] | { readonly skip: string }
   /** A check done in-process instead of a command. */
@@ -241,6 +243,11 @@ export const STEPS: readonly Step[] = [
     summary: 'native addon, runtime libraries, and the TUI bundle',
     command: () => bun('run', 'build'),
   },
+  {
+    name: 'rust', phase: 'build', group: 'native', needsBuild: true,
+    summary: 'locked Rust preview format, lint, tests, and build',
+    command: () => bun('run', 'check:rust'),
+  },
   ...(['peers', 'unit', 'layout', 'docs', 'spec'] as const).map((target): Step => ({
     name: `tui-${target}`, phase: 'tui', group: 'tui',
     summary: `TUI check target \`${target}\``,
@@ -270,7 +277,20 @@ export const STEPS: readonly Step[] = [
     command: () => process.platform === 'win32' ? { skip: 'the PTY driver needs a POSIX terminal' }
       : bun('apps/tui/scripts/tui.ts', 'e2e', '--no-build'),
   },
+  {
+    name: 'rust-pty', phase: 'e2e', group: 'native', needsBuild: true, buildStep: 'rust',
+    summary: 'Rust preview input, resize, inspection, and terminal restoration',
+    command: () => process.platform === 'win32' ? { skip: 'native ConPTY scenarios are not implemented' }
+      : bun('run', 'test:rust:pty'),
+  },
 ]
+
+/** A failed artifact producer prevents a dependent check from testing an older build. */
+export function failedBuild(step: Step, results: ReadonlyMap<string, Pick<Result, 'outcome'>>): string | undefined {
+  if (step.needsBuild !== true || step.phase === 'build') return undefined
+  const build = step.buildStep ?? 'build'
+  return results.get(build)?.outcome === 'fail' ? build : undefined
+}
 
 /** Parse the command line. */
 export function parseOptions(argv: readonly string[]): Options {
@@ -449,8 +469,9 @@ async function main(argv: readonly string[]): Promise<number> {
         return
       }
       // Nothing after a failed build can be trusted to test this tree.
-      if (entry.step.needsBuild === true && entry.step.phase !== 'build' && results.get('build')?.outcome === 'fail') {
-        report(entry.step, { outcome: 'skip', seconds: 0, note: 'the build failed' })
+      const failed = failedBuild(entry.step, results)
+      if (failed !== undefined) {
+        report(entry.step, { outcome: 'skip', seconds: 0, note: `the ${failed} step failed` })
         return
       }
       // A step run alone can take minutes; say what is running meanwhile.
