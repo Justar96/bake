@@ -306,4 +306,4 @@ During coexistence, run the current Bake gates for affected TypeScript paths and
 
 ## Dev Note
 
-The next actionable work is scope 00. Crate names, compatibility adapters, branch/channel changes, and performance budgets are proposals until their owning scope accepts them. This roadmap provides no calendar commitment and makes no claim that a Rust build or migration test exists today.
+Scope 00 still owns the remaining compatibility decisions and baseline extraction. Scope 01 has the opt-in workspace and preview; shared comparators and native eval-arm support remain open. Proposed runtime crates, compatibility adapters, branch/channel changes, and performance budgets require acceptance in their owning scopes. This roadmap provides no calendar commitment.
