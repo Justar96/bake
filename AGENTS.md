@@ -13,7 +13,7 @@ Bake removed upstream's web client, desktop app, ACP, Python SDK, docs website, 
 
 ## Workspace
 
-Bun is the single toolchain for this workspace: it owns dependency installation, `bun.lock`, workspace scripts, builds, hooks, and CI. Reproduce a checkout with `bun install --frozen-lockfile`, and do not add a root pnpm or npm lockfile. The agent process itself runs on Node, with Bun building and launching it. The runtime's external-profile package manager is a separate concern and does not belong to this workspace. Bake launch commands default to `~/.bake`; setting `BAKE_HOME` selects a different home instead, without migrating upstream data. Bake reads each `BAKE_<name>` environment setting first and falls back to its `DSH_<name>` spelling, so `DSH_HOME` still works when `BAKE_HOME` is unset.
+Bun owns the TypeScript workspace: dependency installation, `bun.lock`, workspace scripts, builds, and hooks. Reproduce a checkout with `bun install --frozen-lockfile`, and do not add a root pnpm or npm lockfile. The separate, opt-in `rust/` workspace uses Cargo, its own `Cargo.lock`, and the toolchain pinned in `rust/rust-toolchain.toml`; run Cargo from that directory so the pin applies. Its preview is excluded from the 0.3 launcher and release archives. The shipped agent process runs on Node, with Bun building and launching it. The runtime's external-profile package manager is a separate concern and does not belong to this workspace. Bake launch commands default to `~/.bake`; setting `BAKE_HOME` selects a different home instead, without migrating upstream data. Bake reads each `BAKE_<name>` environment setting first and falls back to its `DSH_<name>` spelling, so `DSH_HOME` still works when `BAKE_HOME` is unset.
 
 - `apps/tui/packages/app/`: profile composition, agent control, terminal lifecycle.
 - `apps/tui/packages/ui/`: side-effect-free Ink components, projection, layout, localized copy.
@@ -32,6 +32,8 @@ bun run build             # Node runtime and TUI artifacts
 bun run start             # built terminal agent
 bun run dev               # hot component preview, no agent or model key
 bun run dev:tui           # build and run the real Node agent
+bun run dev:rust          # build and run the Rust TUI preview (no model connection)
+bun run check:rust        # locked Rust format, lint, test, and build checks
 bun run check             # TUI types, tests, layout, peer identity, and docs
 bun run test              # pure and Node integration tests
 bun run test:runtime <file>  # focused shared-runtime tests
@@ -44,7 +46,7 @@ bun run eval              # live paired agent-loop eval; needs a model route
 bun run eval:record       # commit an eval's metrics and flag regressions
 ```
 
-Run the checks relevant to your change while you work, and `bun run preflight` before a PR; it reports every gate instead of stopping at the first failure. Any terminal behavior change also requires the built-profile PTY scenarios. Tests that use Cordis or Ink run on Node; pure modules and tooling tests run on Bun. Report only what you actually ran, including failures and skipped checks. Never bypass hooks without explicit approval.
+Run the checks relevant to your change while you work, and `bun run preflight` before a PR; it reports every gate instead of stopping at the first failure. Full preflight requires the pinned Rust toolchain; `--fast` excludes native builds and PTY scenarios. Any terminal behavior change also requires the built-profile PTY scenarios. Tests that use Cordis or Ink run on Node; pure modules and tooling tests run on Bun; native workspace tests run under Cargo. Report only what you actually ran, including failures and skipped checks. Never bypass hooks without explicit approval.
 
 ## Branches and releases
 
@@ -69,7 +71,7 @@ Every version keeps its agent-loop metrics so the next one can be checked for re
 
 ## Engineering
 
-- Use ESM and strict TypeScript throughout. Local relative imports use `.ts`; cross-package imports use declared package names. Every workspace package outside `vendor/` and `native/` uses a `bake-` name: runtime packages under `packages/` use `bake-<name>`, the CLI is `bake-cli`, and the terminal packages are `bake-tui-<name>`. When porting fixes, map upstream `@deepseek-ai/dsh-<name>` imports to `bake-<name>`, `@deepseek-ai/dsh` to `bake-cli`, and `@dsh-tui/<name>` to `bake-tui-<name>`, and preserve vendored `@deepseek-ai/*` identifiers. Add each rename to the legacy package-name map in `packages/boot/app-boot/src/legacy-package-names.ts`.
+- Use ESM and strict TypeScript in the TypeScript workspace. Rust belongs under `rust/`, with formatting and Clippy checks; keep terminal effects separate from pure editor and view state. Local TypeScript relative imports use `.ts`; cross-package imports use declared package names. Every workspace package outside `vendor/` and `native/` uses a `bake-` name: runtime packages under `packages/` use `bake-<name>`, the CLI is `bake-cli`, and the terminal packages are `bake-tui-<name>`. When porting fixes, map upstream `@deepseek-ai/dsh-<name>` imports to `bake-<name>`, `@deepseek-ai/dsh` to `bake-cli`, and `@dsh-tui/<name>` to `bake-tui-<name>`, and preserve vendored `@deepseek-ai/*` identifiers. Add each rename to the legacy package-name map in `packages/boot/app-boot/src/legacy-package-names.ts`.
 - Extend behavior through Cordis plugins and documented events, not ad hoc hooks. Registrations are effects that must supply disposers; waterfall listeners call `next()` when delegating.
 - Model-visible input must be reconstructable from the session log. Preserve released data and migration behavior; consult [session format status](docs/session-format-status.md) before any persistence change.
 - Read [defensive patterns](docs/defensive-patterns.md) before lifecycle or concurrency work. Teardown must await owned work, restore terminal state, and leave no late callbacks.

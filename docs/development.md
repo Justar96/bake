@@ -2,13 +2,14 @@
 
 This guide covers building Bake from source, the day-to-day development loops, the checks to run before a change lands, and where code lives. [`CONTRIBUTING.md`](../CONTRIBUTING.md) covers how changes are reviewed and how upstream DeepSeek Harness fixes are ported. [`AGENTS.md`](../AGENTS.md) holds the engineering rules every change follows.
 
-The proposed [0.4 Rust migration roadmap](roadmap/rust-0.4/README.md) defines sequential implementation scopes and test evidence while 0.3.x receives bug fixes. Its native toolchain and release-policy changes are planned work; this guide describes the current Bun/Node workflow.
+The [0.4 Rust migration roadmap](roadmap/rust-0.4/README.md) defines sequential implementation scopes and test evidence while 0.3.x receives bug fixes. The opt-in [Rust TUI preview](../rust/README.md) runs separately from the shipped Bun/Node application. Release-policy changes remain planned work.
 
 ## Prerequisites
 
 - **Bun**, at the version pinned in [`package.json`](../package.json) (`packageManager`). Bun owns dependency installation, `bun.lock`, workspace scripts, builds, and Git hooks. Do not add a pnpm or npm lockfile.
 - **Node.js 24 or newer.** The agent itself runs on Node, because its boot loader depends on V8 internals that Bun's engine lacks. Never substitute `bun --bun` for the Node process.
 - **A C/C++ toolchain with Node headers** for the native modules.
+- **Rustup** for the native preview and full preflight. Running Cargo from `rust/` selects the compiler, formatter, and Clippy pinned in `rust/rust-toolchain.toml`.
 - **Linux or macOS for the terminal scenarios.** Builds, type checks, and unit tests also run on Windows, but the PTY scenarios (`bun run test:e2e`) need Linux or macOS. WSL 2 works; keep the checkout inside the Linux filesystem and install dependencies separately there.
 
 ## First build
@@ -28,6 +29,8 @@ Source runs use the same home as an installed `bake`: `~/.bake`, or the director
 For real model requests, sign in with `/login` or set `DEEPSEEK_API_KEY` in the environment or in a gitignored `.env` at the repository root. To use another DeepSeek endpoint, set `baseURL` on the `deepseek-official` route under `llm-pi-ai` in `settings.yaml`, as the [model configuration guide](user/guide/providers.md) shows. Never commit keys or `.env`.
 
 ## Development loops
+
+Run `bun run dev:rust` from the repository root to build and launch the native TUI preview. It supports editing and sample-agent inspection without a model connection, credentials, or session writes. See [its controls and limits](../rust/README.md) before treating it as an agent. `bun run check:rust` checks its locked workspace; `bun run test:rust:pty` exercises the built binary on Linux or macOS.
 
 | Work | Command | Behavior |
 |---|---|---|
@@ -88,6 +91,7 @@ bun run verify             # every CI gate with the whole runtime suite (preflig
 - **generated**: every `verify-*` script, so the workspace manifests, tsconfig paths, config, tool, and Cordis catalogs, doc graphs, module graph, and pasted types match their sources. `verify-cordis-config` also keeps Loader row metadata static and requires each named plugin to resolve from the manifest that owns the row; it also fails when a profile that mounts agent presets runs one of their rows on its host plane as well, whether the preset enables that row or disables it, unless the script's `SHARED_PLANE_ROWS` list names the row with the reason both copies are harmless. `verify-package-invariants` requires each package's invariant companion to be wired completely, or its omission to be explained in the package README.
 - **types**, **lint** (Oxlint, and actionlint over the workflows when it is on `PATH`), and the Bun-run tooling tests.
 - **build**, then the TUI check targets, the runtime suite, and the PTY scenarios against what it built. The runtime step runs the specs the change reaches through the import graph (`vitest --changed`), the whole suite when a workspace or config file changed, and nothing when no runtime source changed. `--full` always runs the whole suite.
+- **native**: Cargo formatting, Clippy, tests, and a locked build, followed by the Rust preview PTY scenarios. `--fast` skips these; `--only native` runs them on their own. ConPTY scenarios remain open and are explicitly skipped on Windows.
 
 When a Vitest step fails, the files that failed are run again on their own. Files that pass alone make the step a `WARN` naming them, since real-process tests can miss a deadline on a busy machine; any that fail again make it a `FAIL`, and so does an unhandled error Vitest could not tie to a test file, since no rerun can clear it. Every gate runs even after one fails, and the summary lists each result. A failing gate's output is in `.preflight/<step>.log`, and its last lines are printed at the end. `--only` and `--skip` take step or group names; `--list` prints them. Fix what fails, or say in the pull request which gate failed and why it is unrelated to the change.
 
@@ -102,7 +106,7 @@ The hooks do not run the build, the Node suites, or the PTY scenarios; run `bun 
 
 ### CI
 
-[`ci.yml`](../.github/workflows/ci.yml) runs `bun run preflight --full` on Linux and macOS for pull requests and direct pushes to `main`, in two jobs per system: the whole runtime suite, and every other gate. It skips a pull request's merge commit on `main`, which its pull request run already checked. A pull request from `develop` to `main` runs only the Linux jobs: each change it carries already ran on every platform in its own pull request, and the release tag that follows builds and checks every platform again. `main` takes changes only through merge-commit pull requests from `develop`: its ruleset requires the `develop only` check from [`main-source.yml`](../.github/workflows/main-source.yml), which fails a pull request from any other branch. [`release.yml`](../.github/workflows/release.yml) builds, signs, and publishes release archives; the [release guide](../distribution/README.md) covers the process.
+[`ci.yml`](../.github/workflows/ci.yml) runs `bun run preflight --full` on Linux and macOS for pull requests and direct pushes to `main`, split into the runtime suite and the remaining TypeScript gates. Separate Linux, macOS, and Windows jobs run `bun run preflight --only native` for the Rust workspace. It skips a pull request's merge commit on `main`, which its pull request run already checked. A pull request from `develop` to `main` runs only the Linux jobs: each change it carries already ran on every platform in its own pull request, and the release tag that follows builds and checks every platform again. `main` takes changes only through merge-commit pull requests from `develop`: its ruleset requires the `develop only` check from [`main-source.yml`](../.github/workflows/main-source.yml), which fails a pull request from any other branch. [`release.yml`](../.github/workflows/release.yml) builds, signs, and publishes release archives; the [release guide](../distribution/README.md) covers the process.
 
 ## Repository layout
 
@@ -111,6 +115,7 @@ The hooks do not run the build, the Node suites, or the PTY scenarios; run `bun 
 | [`apps/tui/`](../apps/tui/DESIGN.md) | The terminal application: `packages/app` (profile composition, agent control, terminal lifecycle), `packages/ui` (side-effect-free Ink components, projection, layout, localized copy), `packages/harness` (component development and recording), fixtures, and dev tools. |
 | [`apps/cli/`](../apps/cli/README.md) | Node launcher for the `tui` and `headless` profiles, and external-plugin management. |
 | [`packages/`](../packages/README.md) | The shared agent runtime: agent loop, sessions, models, tools, sandbox, and plugin services. Read the [architecture](architecture.md) before changing it. |
+| [`rust/`](../rust/README.md) | Opt-in Cargo workspace and native TUI preview; excluded from 0.3 release archives. |
 | [`native/`](../native/README.md), [`vendor/`](../vendor/README.md) | Native support and pinned Cordis sources. Preserve their licenses and upstream attribution. |
 | [`distribution/`](../distribution/README.md) | Release packaging, signing, and the download service. |
 | [`snapshots/`](../snapshots/AGENTS.md) | Recorded session evidence, including retained historical generations. |

@@ -1,0 +1,18 @@
+[workspace]
+resolver = "3"
+members = ["crates/bake-cli", "crates/bake-tui"]
+
+[workspace.package]
+version = "0.4.0-dev"
+edition = "2024"
+rust-version = "1.99"
+license = "MIT"
+publish = false
+
+[workspace.dependencies]
+bake-tui = { path = "crates/bake-tui" }
+ratatui = { version = "=0.30.2", default-features = false, features = ["crossterm"] }
+crossterm = { version = "=0.29.0", default-features = false, features = ["bracketed-paste", "events"] }
+signal-hook = { version = "=0.3.18", default-features = false }
+unicode-segmentation = "=1.13.3"
+unicode-width = "=0.2.2"

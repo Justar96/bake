@@ -4,7 +4,7 @@
 
 Port Bake's runtime and terminal application to Rust in a sequence of independently reviewable scopes. Keep 0.3.x on bug fixes while the native implementation develops. The target for 0.4.0 is a native default with proven session, tool, provider, terminal, and Desktop compatibility. Later 0.4.x releases can improve performance and features after that baseline is established.
 
-**Status: scope 00 in progress, 2026-10-07. The Rust implementation and subsequent scopes remain planned.** The analysis uses `origin/develop` at `ae5eb51ab61f2266b0fc2ff52f2f14b9f3a9a917`, whose product manifests say 0.3.8. A version in a manifest does not establish release publication. [Codebase analysis](analysis.md) records the source findings; [verification](verification.md) defines the evidence required to close each scope and distinguishes tests run during planning from future tests. Scope 00 tracks inventory, compatibility decisions, and reproducible baseline evidence under `scope-00/`.
+**Status: scopes 00 and 01 in progress, 2026-10-07.** The opt-in [Rust workspace and TUI preview](../../../rust/README.md) provide a runnable native executable, editor, sample-agent views, and platform checks. The preview has no model or tool connection and does not qualify the later terminal scopes. The analysis uses `origin/develop` at `ae5eb51ab61f2266b0fc2ff52f2f14b9f3a9a917`, whose product manifests say 0.3.8. A version in a manifest does not establish release publication. [Codebase analysis](analysis.md) records the source findings; [verification](verification.md) defines the evidence required to close each scope and distinguishes tests run during planning from future tests. Scope 00 tracks inventory, compatibility decisions, and reproducible baseline evidence under `scope-00/`.
 
 ## Table of Contents
 
@@ -36,7 +36,7 @@ Review already-landed, unreleased `develop` work in scope 00: decide which chang
 
 ## Target architecture
 
-The proposed implementation uses a Cargo workspace under `rust/`. Bun continues to own the existing TypeScript workspace and its lockfile; Cargo owns Rust dependencies and `rust/Cargo.lock`. Scope 01 updates the toolchain rules explicitly. No root npm or pnpm lockfile is introduced.
+The opt-in implementation uses a Cargo workspace under `rust/`. Bun owns the existing TypeScript workspace and its lockfile; Cargo owns Rust dependencies and `rust/Cargo.lock`. [AGENTS](../../../AGENTS.md#workspace) describes the separate toolchains. No root npm or pnpm lockfile is introduced.
 
 Use a small number of crates organized by ownership, with modules inside them. The names below are proposed responsibilities, not existing packages or a requirement to create every crate immediately.
 
@@ -82,7 +82,7 @@ The effort bands are relative: **M** is a bounded subsystem; **L** spans multipl
 | Scope | Deliverable | Band | Exit evidence | State |
 |---|---|---|---|---|
 | 00 | Approved support decisions and frozen comparison baseline | L | Complete behavior inventory and repeatable TypeScript oracle | In progress |
-| 01 | Rust workspace and conformance drivers | M | Native test executable and deliberately failing comparator controls | Planned |
+| 01 | Rust workspace and conformance drivers | M | Native test executable and deliberately failing comparator controls | In progress: workspace and preview; shared comparators and native eval arm remain open |
 | 02 | Session types and pure projections | L | Historical replay and reconstructed-request equivalence | Planned |
 | 03 | Persistence, migrations, locking, and queries | XL | Cross-runtime reads/writes, crash recovery, writer exclusion | Planned |
 | 04 | Host processes and sandbox enforcement | XL | Real denied effects and process-tree quiescence on each OS | Planned |
@@ -306,4 +306,4 @@ During coexistence, run the current Bake gates for affected TypeScript paths and
 
 ## Dev Note
 
-The next actionable work is scope 00. Crate names, compatibility adapters, branch/channel changes, and performance budgets are proposals until their owning scope accepts them. This roadmap provides no calendar commitment and makes no claim that a Rust build or migration test exists today.
+Scope 00 still owns the remaining compatibility decisions and baseline extraction. Scope 01 has the opt-in workspace and preview; shared comparators and native eval-arm support remain open. Proposed runtime crates, compatibility adapters, branch/channel changes, and performance budgets require acceptance in their owning scopes. This roadmap provides no calendar commitment.

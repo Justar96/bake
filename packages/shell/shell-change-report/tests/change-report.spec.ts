@@ -4,11 +4,12 @@
  * degrades and stays hardened.
  */
 import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { beginChangeReport, boundedHunks, parseStatus, type ChangeReportOptions, type ShellChanges } from '../src/index.ts'
+import racyIndex from './fixtures/racy-index.json' with { type: 'json' }
 
 const roots: string[] = []
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
@@ -79,6 +80,29 @@ describe('beginChangeReport', () => {
     expect(changes?.files).toEqual([{
       path: 'b.js', status: 'modified', added: 1, removed: 1,
       hunks: [{ oldText: 'module.exports = 2', newText: 'module.exports = 3', oldStart: 1, newStart: 1 }],
+    }])
+  })
+
+  it.each(racyIndex.cases)('detects same-size edits sharing the index timestamp: $name', async (scenario) => {
+    const { repo, git } = repository()
+    const file = join(repo, 'b.js')
+    const timestamp = racyIndex.indexMtimeSeconds
+    // Reproduce a coarse stat cache without depending on how fast the host writes.
+    git('config', 'core.trustctime', 'false')
+    git('config', 'core.checkStat', 'minimal')
+    writeFileSync(file, racyIndex.indexedText)
+    utimesSync(file, timestamp, timestamp)
+    git('add', 'b.js')
+    utimesSync(join(repo, '.git/index'), timestamp, timestamp)
+    writeFileSync(file, scenario.beforeText)
+    utimesSync(file, timestamp, timestamp)
+    const changes = await report(repo, () => {
+      writeFileSync(file, racyIndex.afterText)
+      utimesSync(file, scenario.afterMtimeSeconds, scenario.afterMtimeSeconds)
+    })
+    expect(changes?.files).toEqual([{
+      path: 'b.js', status: 'modified', added: 1, removed: 1,
+      hunks: [{ oldText: scenario.expectedOldText, newText: 'module.exports = 3', oldStart: 1, newStart: 1 }],
     }])
   })
 
