@@ -203,6 +203,7 @@ export const STEPS: readonly Step[] = [
     ['type-equiv', 'types pasted in docs match their declarations'],
     ['cordis-config', 'Loader rows keep static metadata and resolve from their owner'],
     ['package-invariants', 'invariant companions are wired, or their omission is explained'],
+    ['rust-migration-inventory', 'Rust migration ownership covers the current packages, profiles, tools, and tests'],
   ] as const).map(([name, summary]): Step => ({
     name: `verify-${name}`, phase: 'static', group: 'generated', summary,
     command: () => bun('run', `verify-${name}`),

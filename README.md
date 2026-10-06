@@ -75,6 +75,7 @@ Delete the install directory and its `bake` link: `~/.local/share/bake` and `~/.
 - [Terminal application](apps/tui/packages/app/README.md): commands, keys, and session navigation.
 - [TUI design](apps/tui/DESIGN.md), including its [known limits](apps/tui/DESIGN.md#10-limits).
 - [Development guide](docs/development.md): building from source, test loops, and repository layout.
+- [0.4 Rust migration roadmap](docs/roadmap/rust-0.4/README.md): proposed development scopes, 0.3.x maintenance policy, and required test evidence.
 - [Contributing](CONTRIBUTING.md) and the [changelog](CHANGELOG.md).
 
 ## Acknowledgements

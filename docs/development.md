@@ -2,6 +2,8 @@
 
 This guide covers building Bake from source, the day-to-day development loops, the checks to run before a change lands, and where code lives. [`CONTRIBUTING.md`](../CONTRIBUTING.md) covers how changes are reviewed and how upstream DeepSeek Harness fixes are ported. [`AGENTS.md`](../AGENTS.md) holds the engineering rules every change follows.
 
+The proposed [0.4 Rust migration roadmap](roadmap/rust-0.4/README.md) defines sequential implementation scopes and test evidence while 0.3.x receives bug fixes. Its native toolchain and release-policy changes are planned work; this guide describes the current Bun/Node workflow.
+
 ## Prerequisites
 
 - **Bun**, at the version pinned in [`package.json`](../package.json) (`packageManager`). Bun owns dependency installation, `bun.lock`, workspace scripts, builds, and Git hooks. Do not add a pnpm or npm lockfile.
