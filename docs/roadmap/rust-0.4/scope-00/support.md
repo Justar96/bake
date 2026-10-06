@@ -4,7 +4,7 @@
 
 This page lists what Bake ships today, what the Rust 0.4 line must preserve, and which questions only the product owner can answer. The inventory comes from source at `origin/develop` `ae5eb51ab6` and the `v0.3.8` tag `dcb26d756e`, read on 2026-10-07. It belongs to [scope 00](README.md) of the [Rust migration roadmap](../README.md).
 
-The default is conservative: every behavior the final 0.3 release ships is the 0.4.0 parity target, and nothing is dropped without an approved, documented support change. This page tests nothing, and no Rust code exists yet. Provider, platform, and Desktop rows say what evidence is missing; none claims native parity.
+The default is conservative: every behavior the final 0.3 release ships is the 0.4.0 parity target, and nothing is dropped without an approved, documented support change. This page tests nothing; isolated qualification probes do not constitute a native implementation. Provider, platform, and Desktop rows say what evidence is missing; none claims native parity.
 
 ## Table of Contents
 

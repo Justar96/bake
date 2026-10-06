@@ -2,7 +2,7 @@
 
 ## Summary
 
-Keep Bake's familiar transcript and bottom composer while making agent activity, keyboard focus, and message destinations easier to understand. Use Ratatui with Crossterm as the starting stack for the Rust frontend. Qualify inline scrollback and editor behavior before adopting dependencies. This page defines planned acceptance criteria for [scopes 14 and 15](README.md#14--terminal-engine-and-rendering); the shipped TypeScript UI remains the comparison oracle.
+Keep Bake's familiar transcript and bottom composer while making agent activity, keyboard focus, and message destinations easier to understand. Use Ratatui with Crossterm as the starting stack and a pure Bake-owned editor model for the composer. Qualify inline scrollback and editor behavior before adopting the native frontend. This page defines acceptance criteria for [scopes 14 and 15](README.md#14--terminal-engine-and-rendering); the shipped TypeScript UI remains the comparison oracle.
 
 ## Table of Contents
 
@@ -50,10 +50,9 @@ Ratatui with Crossterm is the first implementation choice because Bake needs reu
 |---|---|---|
 | Rendering and layout | [Ratatui](https://ratatui.rs/concepts/backends/) | Its [inline viewport](https://docs.rs/ratatui/latest/ratatui/enum.Viewport.html) must preserve the bottom composer, bounded live region, committed rows, and resize behavior in a real PTY. A fullscreen demo does not qualify inline mode. |
 | Events and terminal modes | Crossterm, through Ratatui's supported backend | One compatible Crossterm dependency version must own input and raw mode. Verify acquisition, cancellation, and restoration on POSIX and Windows ConPTY. |
-| Draft editor widget | [ratatui-textarea](https://docs.rs/ratatui-textarea/latest/ratatui_textarea/) as a candidate | Its multiline editing, wrapping, selection, and undo/redo must fit Bake's grapheme, shortcut, placeholder, and history tests without a second competing editor state. |
-| Draft behavior | A pure Bake editor model if the widget cannot meet those tests | Render that model with Ratatui; keep terminal effects outside it. Avoid a permanent widget fork merely to recover Bake's existing editing semantics. |
+| Draft behavior | A pure Bake-owned editor model | The [widget qualification](scope-00/editor-2026-10-07/README.md) found 15 mismatches in `ratatui-textarea` 0.9.3, including grapheme editing and caret width. Render Bake's model with Ratatui and keep terminal effects outside it. |
 
-The official backend guide warns that incompatible Crossterm versions have separate event queues and raw-mode tracking. Pin compatible crate versions, features, licenses, and a Rust minimum version when the experiment passes; verify the resolved dependency graph then. This page does not introduce a Cargo dependency or claim that crate features prove Bake compatibility.
+The official backend guide warns that incompatible Crossterm versions have separate event queues and raw-mode tracking. Pin compatible crate versions, features, licenses, and a Rust minimum version when the renderer experiment passes; verify the resolved dependency graph then. The editor qualification's manifest and lockfile are frozen experiment records, separate from the planned native workspace and shipped dependencies.
 
 The first renderer experiment must exercise variable-height inline content and terminal reflow. If Ratatui's inline facilities cannot meet those obligations, evaluate a small Bake-owned inline writer over its buffers and Crossterm before committing to a larger frontend. Keep any such writer responsible for output only; agent and editor state stay with their existing owners.
 
