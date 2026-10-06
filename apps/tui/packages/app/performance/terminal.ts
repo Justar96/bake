@@ -10,6 +10,8 @@ export class Terminal {
   private readonly child: Bun.Subprocess
   private readonly done: Promise<number>
   private exit: { code: number; signal: NodeJS.Signals | null } | undefined
+  /** Monotonic time at which `exited` settled, before any 2 ms observation poll. */
+  private exitedAt: number | undefined
   private streamError = false
   private markerTail = ''
   private sampleNumber = 0
@@ -56,6 +58,7 @@ export class Terminal {
     } })
     // Bun leaves `exitCode` null after a signal. `exited` settles for both exit forms.
     this.done = this.child.exited.then(code => {
+      this.exitedAt = performance.now()
       this.exit = { code, signal: this.child.signalCode }
       return code
     })
@@ -121,16 +124,22 @@ export class Terminal {
 
   /**
    * Exercise normal terminal shutdown and require the measured Node process to exit cleanly.
-   * @returns after Node exits. `close` releases the terminal separately.
+   * The quit-confirmation wait after the first Ctrl-C is not timed.
+   * @returns milliseconds from the second Ctrl-C write through Bun's observed child exit.
+   * @throws when the hint never appears, Node exits before measurement starts, or exit is nonzero, by signal, or after a PTY read failure.
+   *   No duration is returned for an unclean exit. `close` releases the terminal separately.
    */
-  async quit(): Promise<void> {
+  async quit(): Promise<number> {
     this.text = ''
     this.send('\x03')
     await this.wait('quit hint', () => this.clean.includes(dictionaries.en.quit))
+    if (this.exit !== undefined) throw new Error('Node exited before the shutdown measurement started')
+    const start = performance.now()
     this.send('\x03')
     await this.wait('clean process exit', () => this.exit !== undefined)
     const code = await this.done
     if (code !== 0 || this.child.signalCode !== null || this.streamError) throw new Error(`Unclean exit: ${JSON.stringify({ code, signal: this.child.signalCode, streamError: this.streamError })}`)
+    return this.exitedAt! - start
   }
 
   /**

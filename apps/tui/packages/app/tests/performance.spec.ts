@@ -3,7 +3,7 @@ import { expect, it } from 'vitest'
 import { parseSessionLog } from 'bake-llm-replay'
 import { Session } from 'bake-session'
 import { history, reply } from '../performance/history.ts'
-import { summarize, WORKLOADS, type Sample } from '../performance/report.ts'
+import { distribution, summarize, WORKLOADS, type Sample } from '../performance/report.ts'
 
 function restore(fixture: ReturnType<typeof history>): Session {
   const text = [JSON.stringify({ type: 'session', ...fixture.header }), ...fixture.events.map(event => JSON.stringify(event)), ''].join('\n')
@@ -59,10 +59,31 @@ it('includes the last visible delta before the terminal finish', () => {
 it('keeps failed samples out of medians and distinguishes all-failed workloads', () => {
   const memory = { beforeGc: process.memoryUsage(), afterGc: process.memoryUsage(), resources: process.resourceUsage(), cpu: process.cpuUsage(), sequence: 1 }
   const sample: Sample = { workload: 'fresh', iteration: 0, dimensions: { ...history(0, '/synthetic-workspace').dimensions, fileBytes: 0, sessionId: 'synthetic' },
-    initialInputMs: 5, firstInputMs: 80, historyMarkersAtFirstInput: 0, readyMs: 100, idleInputMs: [1, 7, 2], idleBytes: 0, initialBytes: 1000, firstDeltaMs: 10, liveInputMs: 3, streamMs: 1500, streamBytes: 0,
+    initialInputMs: 5, firstInputMs: 80, historyMarkersAtFirstInput: 0, readyMs: 100, idleInputMs: [1, 7, 2], idleBytes: 0, initialBytes: 1000, firstDeltaMs: 10, liveInputMs: 3, streamMs: 1500, streamBytes: 0, shutdownMs: 40,
     historyMarkerOccurrences: 0, readyMemory: memory, settledMemory: memory }
   const results = summarize([sample, { ...sample, iteration: 1, firstInputMs: 120, readyMs: 300, initialBytes: 3000 },
     { workload: 'fresh', iteration: 2, error: 'failed' }, { workload: 'tail', iteration: 0, error: 'failed' }])
   expect(results[0]).toMatchObject({ workload: 'fresh', completed: 2, failed: 1, firstInputMs: 100, readyMs: 200, maxIdleInputMs: 7, initialBytes: 2000 })
   expect(results[1]).toMatchObject({ workload: 'tail', completed: 0, failed: 1, firstInputMs: null, readyMs: null, retainedHeapMiB: null, settledRetainedHeapMiB: null, initialBytes: null })
+})
+
+it('summarizes shutdown and latency spread only from completed samples', () => {
+  const memory = { beforeGc: process.memoryUsage(), afterGc: process.memoryUsage(), resources: process.resourceUsage(), cpu: process.cpuUsage(), sequence: 1 }
+  const sample: Sample = { workload: 'fresh', iteration: 0, dimensions: { ...history(0, '/synthetic-workspace').dimensions, fileBytes: 0, sessionId: 'synthetic' },
+    initialInputMs: 5, firstInputMs: 80, historyMarkersAtFirstInput: 0, readyMs: 100, idleInputMs: [1, 7, 2], idleBytes: 0, initialBytes: 1000, firstDeltaMs: 10, liveInputMs: 3, streamMs: 1500, streamBytes: 0, shutdownMs: 40,
+    historyMarkerOccurrences: 0, readyMemory: memory, settledMemory: memory }
+  const [fresh, tail] = summarize([sample, { ...sample, iteration: 1, shutdownMs: 70, idleInputMs: [9] }, { ...sample, iteration: 2, shutdownMs: 50 },
+    { workload: 'fresh', iteration: 3, error: 'Unclean exit: {"code":7,"signal":null,"streamError":false}' }, { workload: 'tail', iteration: 0, error: 'failed' }])
+  expect(fresh).toMatchObject({ completed: 3, failed: 1, shutdownMs: 50 })
+  expect(fresh!.distributions.shutdownMs).toEqual({ samples: 3, min: 40, median: 50, p95: 70, max: 70, mad: 10 })
+  expect(fresh!.distributions.maxIdleInputMs).toEqual({ samples: 3, min: 7, median: 7, p95: 9, max: 9, mad: 0 })
+  expect(tail!.shutdownMs).toBeNull()
+  for (const spread of Object.values(tail!.distributions)) expect(spread).toEqual({ samples: 0, min: null, median: null, p95: null, max: null, mad: null })
+})
+
+it('takes the nearest-rank 95th percentile and the unscaled median absolute deviation', () => {
+  const twenty = Array.from({ length: 20 }, (_, index) => 20 - index)
+  expect(distribution(twenty)).toEqual({ samples: 20, min: 1, median: 10.5, p95: 19, max: 20, mad: 5 })
+  expect(distribution([4, 1, 100, 2])).toEqual({ samples: 4, min: 1, median: 3, p95: 100, max: 100, mad: 1.5 })
+  expect(distribution([8])).toEqual({ samples: 1, min: 8, median: 8, p95: 8, max: 8, mad: 0 })
 })

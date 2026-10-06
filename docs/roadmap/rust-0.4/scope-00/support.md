@@ -53,6 +53,7 @@ Scope 01 may start on the settled rows. Scope 00 stays open until every **Owner 
 | D16 | Platforms | Scope-00 default | The five release targets are the native matrix. Minimum OS, kernel, libc, and macOS versions are missing evidence. |
 | D17 | Code mode | Scope-00 default | `run_code` keeps its language: model-written TypeScript in a confined QuickJS VM with the same bindings and limits. |
 | D18 | Performance budgets | Scope-00 default | Budgets come from the scope-00 baseline and are frozen before any candidate measurement. No numbers are set yet. |
+| D19 | Native TUI direction | Decided by request | Keep the current UI recognizable, with cleaner presentation and better agent/composer handling. The [terminal direction](../terminal.md) defines the acceptance cases and the Ratatui/Crossterm starting stack for scopes 14–15. |
 
 ## Shipped surface
 
