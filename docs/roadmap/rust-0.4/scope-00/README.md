@@ -24,6 +24,7 @@ Review the core deliverables in the roadmap's PR order: support decisions first,
 | Machine-readable inventory of packages, profiles, tools, and tests with their owning scope | [inventory.json](inventory.json), generated and checked by [rust-migration-inventory.ts](../../../../scripts/rust-migration-inventory.ts) | Implemented, with tests for missing, stale, malformed, and unclassified entries |
 | Frozen TypeScript baseline record: commits, build provenance, focused oracle results, startup/RSS/shutdown and terminal workloads | [2026-10-07 evidence](baseline-2026-10-07/README.md), produced with [baseline tooling](../../../../scripts/rust-migration-baseline.ts) | Both pinned sources rebuilt, 85 focused tests passed per source, and 36 terminal samples completed; full qualification remains open |
 | Terminal direction and additional measurement endpoints | [Native terminal direction](../terminal.md), [shutdown evidence](terminal-2026-10-07/README.md) | Familiar layout and improved agent/composer criteria recorded; 18 additional TypeScript samples completed with shutdown timing and latency distributions |
+| Composer dependency qualification | [Editor probe](editor-2026-10-07/README.md) | The tested widget produced 15 mismatches and three passes; the native composer will use a pure Bake-owned editor model |
 
 ## What is implemented and what is missing
 

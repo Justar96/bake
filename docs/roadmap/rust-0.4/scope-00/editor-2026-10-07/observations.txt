@@ -1,0 +1,83 @@
+FAIL G1 right over emoji ZWJ+skin tone
+    oracle: editor.test.ts:33-34
+    want:   "a👩🏽\u{200d}💻"
+    got:    "a👩"
+FAIL G2 backspace emoji
+    oracle: editor.test.ts:36
+    want:   ("ae\u{301}z", "a")
+    got:    ("a👩🏽\u{200d}e\u{301}z", "a👩🏽\u{200d}")
+FAIL G3 forward-delete e+combining acute
+    oracle: editor.test.ts:35
+    want:   "a👩🏽\u{200d}💻z"
+    got:    "a👩🏽\u{200d}💻\u{301}z"
+FAIL G4 right over น้ำ
+    oracle: editor.test.ts:59
+    want:   "aน\u{e49}ำ"
+    got:    "aน"
+FAIL G5 backspace น้ำ
+    oracle: editor.test.ts:61
+    want:   "az"
+    got:    "aน\u{e49}z"
+FAIL G4 right over ກຳ
+    oracle: editor.test.ts:59
+    want:   "aກຳ"
+    got:    "aກ"
+FAIL G5 backspace ກຳ
+    oracle: editor.test.ts:61
+    want:   "az"
+    got:    "aກz"
+FAIL G6 ZWJ insertion caret outside cluster
+    oracle: editor.test.ts:51
+    want:   ("👩\u{200d}💻", "👩\u{200d}💻")
+    got:    ("👩\u{200d}💻", "👩\u{200d}")
+INFO W0: unicode-width 0.2.2 str width of 👩🏽‍💻 = 2, per-char sum = 6
+INFO W1 ratatui buffer row: "x👩🏽\u{200d}💻"
+FAIL W1 caret cell after x+emoji (Bake: 1 + 2 cells)
+    oracle: editor.test.ts:20 / caret.test.ts:9 (string-width = 2)
+    want:   3
+    got:    7
+FAIL W2 wrap "alpha beta gamma" at 11
+    oracle: editor.test.ts:73,108,119-120
+    want:   ["alpha beta", "gamma"]
+    got:    ["alpha beta", " gamma"]
+PASS W2 wrap "你好世界你好" at 6
+    oracle: editor.test.ts:73,108,119-120
+    want:   ["你好", "世界", "你好"]
+    got:    ["你好", "世界", "你好"]
+FAIL W2 wrap "ภาษาไทยทดสอบ" at 9
+    oracle: editor.test.ts:73,108,119-120
+    want:   ["ภาษาไทย", "ทดสอบ"]
+    got:    ["ภาษาไทยท", "ดสอบ"]
+FAIL W2 wrap "ພາສາລາວທ\u{ebb}ດສອບ" at 9
+    oracle: editor.test.ts:73,108,119-120
+    want:   ["ພາສາລາວ", "ທ\u{ebb}ດສອບ"]
+    got:    ["ພາສາລາວທ\u{ebb}", "ດສອບ"]
+FAIL V1 down within wrapped line
+    oracle: editor.test.ts:174
+    want:   "alpha beta ga"
+    got:    "alpha beta g"
+PASS V2 down never splits wide char
+    oracle: editor.test.ts:192
+    want:   "abcd\n你"
+    got:    "abcd\n你"
+FAIL V3 goal column survives short row
+    oracle: editor.test.ts:205-212
+    want:   "long line here\nab\nanother lo"
+    got:    "long line here\nab\nan"
+INFO V4 first row Up: cursor DataCursor(0, 2) -> DataCursor(0, 2) (no-op; Bake returns undefined so history recalls, editor.test.ts:183)
+PASS K1 word-left walk "src/main.ts --fix"
+    oracle: editor.test.ts:242-250
+    want:   ["src/main.ts --|fix", "src/main.ts |--fix", "src/main.|ts --fix", "src/main|.ts --fix", "src/|main.ts --fix", "src|/main.ts --fix", "|src/main.ts --fix"]
+    got:    ["src/main.ts --|fix", "src/main.ts |--fix", "src/main.|ts --fix", "src/main|.ts --fix", "src/|main.ts --fix", "src|/main.ts --fix", "|src/main.ts --fix"]
+FAIL K1 word-left walk "你好世界 hi"
+    oracle: editor.test.ts:242-250
+    want:   ["你好世界 |hi", "你好|世界 hi", "|你好世界 hi"]
+    got:    ["你好世界 |hi", "|你好世界 hi"]
+INFO B Enter: input() modified=true -> "ab\ncx\n"|"d"  (Bake: submit)
+INFO B Ctrl-U: input() modified=true -> "ab\nc"|"d"  (Bake: kill to line start)
+INFO B Ctrl-J: input() modified=true -> "ab\n"|"d"  (Bake: insert newline)
+INFO B Ctrl-Y: input() modified=true -> "ab\ncxY"|"d"  (Bake: yank kill ring)
+INFO B input_without_shortcuts Ctrl-U: text "ab" (ignored, so Bake can own it)
+
+15 mismatch(es) against Bake oracles
+exit=1
