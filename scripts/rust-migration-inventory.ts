@@ -142,6 +142,7 @@ const PACKAGE_OVERRIDES: Readonly<Record<string, Partial<Rule>>> = {
 
 /** Tests outside any workspace package, by area; the first matching prefix wins. */
 const TEST_AREAS: readonly (Rule & { readonly id: string; readonly prefixes: readonly string[] })[] = [
+  { id: 'scripts:conformance', prefixes: ['scripts/rust-conformance/'], scopes: ['01'], disposition: 'reuse-oracle', reason: 'Synthetic comparison fixtures and observation checks qualify the migration harness, not runtime parity.' },
   { id: 'scripts:migration', prefixes: ['scripts/rust-migration-'], scopes: ['00'], disposition: 'replace-tooling', reason: 'Scope-00 migration bookkeeping; retired with the TypeScript oracle in scope 17.' },
   { id: 'scripts:release', prefixes: ['scripts/release/'], scopes: ['16'], disposition: 'replace-tooling', reason: 'Release packing, installers, and manifest tooling; scope 16 changes the archive layout for native artifacts.' },
   { id: 'scripts:persistence', prefixes: ['scripts/persistence-', 'scripts/render-persistence-schema', 'scripts/gen-session-format-catalog', 'scripts/session-', 'scripts/snapshot-'], scopes: ['02', '03'], disposition: 'reuse-oracle', reason: 'Pins released Session formats, persistence digests, and frozen fixture layout that native readers must honor.' },

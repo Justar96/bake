@@ -1,0 +1,44 @@
+{
+  "schema": "bake/synthetic-conformance/fixture",
+  "version": 1,
+  "id": "deny-write",
+  "input": {
+    "schema": "bake/synthetic-conformance/input",
+    "version": 1,
+    "prompts": ["Preserve the existing file.\n"],
+    "events": [
+      { "type": "synthetic/start", "data": { "id": "root", "ordinal": 1 } },
+      { "type": "synthetic/denied", "data": { "id": "edit-1", "ordinal": 2 } },
+      { "type": "synthetic/finish", "data": { "id": "root", "ordinal": 3 } }
+    ],
+    "permissions": [
+      { "id": "edit-1", "path": "src/result.txt", "decision": "deny" },
+      { "id": "create-1", "path": "denied.txt", "decision": "deny" }
+    ],
+    "writes": [
+      { "path": "src/result.txt", "text": "forbidden\n", "permission": "edit-1" },
+      { "path": "denied.txt", "text": "forbidden\n", "permission": "create-1" }
+    ]
+  },
+  "initialFiles": [
+    { "path": "src/result.txt", "hex": "6f726967696e616c0a" },
+    { "path": "check.txt", "hex": "666978747572652d6f776e65640a" }
+  ],
+  "protectedFiles": ["check.txt"],
+  "expected": {
+    "prompts": ["Preserve the existing file.\n"],
+    "events": [
+      { "type": "synthetic/start", "data": { "id": "root", "ordinal": 1 } },
+      { "type": "synthetic/denied", "data": { "id": "edit-1", "ordinal": 2 } },
+      { "type": "synthetic/finish", "data": { "id": "root", "ordinal": 3 } }
+    ],
+    "permissions": [
+      { "id": "edit-1", "path": "src/result.txt", "decision": "deny" },
+      { "id": "create-1", "path": "denied.txt", "decision": "deny" }
+    ],
+    "files": [
+      { "path": "src/result.txt", "hex": "6f726967696e616c0a" },
+      { "path": "check.txt", "hex": "666978747572652d6f776e65640a" }
+    ]
+  }
+}

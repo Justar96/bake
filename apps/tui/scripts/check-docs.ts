@@ -8,8 +8,13 @@ const root = resolve(import.meta.dirname, '../../..')
 const entryDocs = [
   'README.md', 'CONTRIBUTING.md', 'AGENTS.md', 'docs/architecture.md', 'apps/cli/README.md',
   'packages/boot/app-boot/README.md', 'packages/boot/plugin-manager/README.md', 'native/system/README.md',
-  'rust/README.md',
+  'rust/README.md', 'conformance/README.md',
 ]
+const missing = entryDocs.filter(file => !existsSync(resolve(root, file)))
+if (missing.length > 0) {
+  for (const file of missing) console.error(`Required documentation is missing: ${file}`)
+  process.exit(1)
+}
 // Git, not ripgrep: every checkout has it, and it applies the same ignore rules.
 const files = [...entryDocs, ...execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '--', 'apps/tui/*.md', 'docs/roadmap/*.md'],
   { cwd: root, encoding: 'utf8' }).trim().split('\n')].map(file => resolve(root, file)).filter(file => existsSync(file))

@@ -245,7 +245,7 @@ export const STEPS: readonly Step[] = [
   },
   {
     name: 'rust', phase: 'build', group: 'native', needsBuild: true,
-    summary: 'locked Rust preview format, lint, tests, and build',
+    summary: 'locked Rust workspace format, lint, tests, and build',
     command: () => bun('run', 'check:rust'),
   },
   ...(['peers', 'unit', 'layout', 'docs', 'spec'] as const).map((target): Step => ({
@@ -282,6 +282,11 @@ export const STEPS: readonly Step[] = [
     summary: 'Rust preview input, resize, inspection, and terminal restoration',
     command: () => process.platform === 'win32' ? { skip: 'native ConPTY scenarios are not implemented' }
       : bun('run', 'test:rust:pty'),
+  },
+  {
+    name: 'rust-conformance', phase: 'e2e', group: 'native', needsBuild: true, buildStep: 'rust',
+    summary: 'synthetic TypeScript/Rust comparison fixtures and observed file effects',
+    command: () => bun('run', 'test:rust:conformance'),
   },
 ]
 

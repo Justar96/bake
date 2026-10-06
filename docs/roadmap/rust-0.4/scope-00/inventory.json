@@ -279,6 +279,9 @@
     "pty:workflow": {
       "reason": "Interactive workflow whose externally visible success condition needs a native PTY counterpart."
     },
+    "scripts:conformance": {
+      "reason": "Synthetic comparison fixtures and observation checks qualify the migration harness, not runtime parity."
+    },
     "scripts:cordis": {
       "reason": "Cordis composition, configuration, and package-invariant gates over TypeScript packages; native composition needs its own validation."
     },
@@ -1315,6 +1318,10 @@
     {"path":"scripts/repo-files.spec.ts","lane":"vitest-runtime","owner":"scripts:workspace","scopes":["01"],"disposition":"replace-tooling","basis":"scripts:workspace"},
     {"path":"scripts/rescope-vendor.test.ts","lane":"bun-scripts","owner":"scripts:workspace","scopes":["01"],"disposition":"replace-tooling","basis":"scripts:workspace"},
     {"path":"scripts/run-oxlint.test.ts","lane":"bun-scripts","owner":"scripts:workspace","scopes":["01"],"disposition":"replace-tooling","basis":"scripts:workspace"},
+    {"path":"scripts/rust-conformance/compare.test.ts","lane":"bun-scripts","owner":"scripts:conformance","scopes":["01"],"disposition":"reuse-oracle","basis":"scripts:conformance"},
+    {"path":"scripts/rust-conformance/driver.test.ts","lane":"bun-scripts","owner":"scripts:conformance","scopes":["01"],"disposition":"reuse-oracle","basis":"scripts:conformance"},
+    {"path":"scripts/rust-conformance/fixture.test.ts","lane":"bun-scripts","owner":"scripts:conformance","scopes":["01"],"disposition":"reuse-oracle","basis":"scripts:conformance"},
+    {"path":"scripts/rust-conformance/runner.test.ts","lane":"bun-scripts","owner":"scripts:conformance","scopes":["01"],"disposition":"reuse-oracle","basis":"scripts:conformance"},
     {"path":"scripts/rust-migration-baseline.test.ts","lane":"bun-scripts","owner":"scripts:migration","scopes":["00"],"disposition":"replace-tooling","basis":"scripts:migration"},
     {"path":"scripts/rust-migration-inventory.test.ts","lane":"bun-scripts","owner":"scripts:migration","scopes":["00"],"disposition":"replace-tooling","basis":"scripts:migration"},
     {"path":"scripts/session-fixture-layout.spec.ts","lane":"vitest-runtime","owner":"scripts:persistence","scopes":["02","03"],"disposition":"reuse-oracle","basis":"scripts:persistence"},

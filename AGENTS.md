@@ -34,6 +34,7 @@ bun run dev               # hot component preview, no agent or model key
 bun run dev:tui           # build and run the real Node agent
 bun run dev:rust          # build and run the Rust TUI preview (no model connection)
 bun run check:rust        # locked Rust format, lint, test, and build checks
+bun run test:rust:conformance  # synthetic TypeScript/Rust comparison fixtures (build Rust first)
 bun run check             # TUI types, tests, layout, peer identity, and docs
 bun run test              # pure and Node integration tests
 bun run test:runtime <file>  # focused shared-runtime tests

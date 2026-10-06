@@ -142,7 +142,7 @@ Use barriers and explicit lifecycle signals for races. Register cleanup immediat
 
 Use property tests for pure admission/reduction, bounded fuzzing for JSONL/SSE/terminal/protocol parsers, and deterministic fault injection for persistence/publication/process ownership. Choose iteration/time budgets in the owning PR and record them. A test failure is investigated before adding retries, widening timeouts, weakening assertions, or serializing a whole suite.
 
-Scope 01's opt-in [native workspace](../../../rust/README.md) provides locked builds, Rust formatting/lints, unit tests, and preview PTY checks. Shared conformance fixtures and the native eval arm remain open. Exact Cargo/test-wrapper commands belong to the workspace README and its CI. Keep current Bun/Node checks until the consumers they protect are retired through scope 17.
+Scope 01's opt-in [native workspace](../../../rust/README.md) provides locked builds, Rust formatting/lints, unit tests, and preview PTY checks. The [synthetic comparison harness](../../../conformance/README.md) runs shared fixtures through TypeScript and Rust and checks prompt bytes, event order, permission records, and independently observed file effects. Its deliberate mismatches qualify the comparators, not runtime parity. Real-runtime fixture extraction, the native eval arm, and the qualification ledger remain open. Exact Cargo/test-wrapper commands belong to the workspace README and its CI. Keep current Bun/Node checks until the consumers they protect are retired through scope 17.
 
 ## Planning-session evidence
 

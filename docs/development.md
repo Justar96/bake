@@ -32,6 +32,8 @@ For real model requests, sign in with `/login` or set `DEEPSEEK_API_KEY` in the 
 
 Run `bun run dev:rust` from the repository root to build and launch the native TUI preview. It supports editing and sample-agent inspection without a model connection, credentials, or session writes. See [its controls and limits](../rust/README.md) before treating it as an agent. `bun run check:rust` checks its locked workspace; `bun run test:rust:pty` exercises the built binary on Linux or macOS.
 
+After the Rust build, `bun run test:rust:conformance` runs the [shared synthetic comparison fixtures](../conformance/README.md). It checks prompt bytes, event order, permission records, and actual files against independent expected values and both runners. These fixtures qualify the comparison tooling, not Bake runtime parity.
+
 | Work | Command | Behavior |
 |---|---|---|
 | Ink components | `bun run dev` | Hot-reloads a recorded component preview; no agent, network, or model key. |
@@ -91,7 +93,7 @@ bun run verify             # every CI gate with the whole runtime suite (preflig
 - **generated**: every `verify-*` script, so the workspace manifests, tsconfig paths, config, tool, and Cordis catalogs, doc graphs, module graph, and pasted types match their sources. `verify-cordis-config` also keeps Loader row metadata static and requires each named plugin to resolve from the manifest that owns the row; it also fails when a profile that mounts agent presets runs one of their rows on its host plane as well, whether the preset enables that row or disables it, unless the script's `SHARED_PLANE_ROWS` list names the row with the reason both copies are harmless. `verify-package-invariants` requires each package's invariant companion to be wired completely, or its omission to be explained in the package README.
 - **types**, **lint** (Oxlint, and actionlint over the workflows when it is on `PATH`), and the Bun-run tooling tests.
 - **build**, then the TUI check targets, the runtime suite, and the PTY scenarios against what it built. The runtime step runs the specs the change reaches through the import graph (`vitest --changed`), the whole suite when a workspace or config file changed, and nothing when no runtime source changed. `--full` always runs the whole suite.
-- **native**: Cargo formatting, Clippy, tests, and a locked build, followed by the Rust preview PTY scenarios. `--fast` skips these; `--only native` runs them on their own. ConPTY scenarios remain open and are explicitly skipped on Windows.
+- **native**: Cargo formatting, Clippy, tests, and a locked build, followed by the Rust preview PTY scenarios and the synthetic TypeScript/Rust comparison fixtures. `--fast` skips these; `--only native` runs them on their own. ConPTY scenarios remain open and are explicitly skipped on Windows; the comparison fixtures run on all three operating systems.
 
 When a Vitest step fails, the files that failed are run again on their own. Files that pass alone make the step a `WARN` naming them, since real-process tests can miss a deadline on a busy machine; any that fail again make it a `FAIL`, and so does an unhandled error Vitest could not tie to a test file, since no rerun can clear it. Every gate runs even after one fails, and the summary lists each result. A failing gate's output is in `.preflight/<step>.log`, and its last lines are printed at the end. `--only` and `--skip` take step or group names; `--list` prints them. Fix what fails, or say in the pull request which gate failed and why it is unrelated to the change.
 
@@ -116,6 +118,7 @@ The hooks do not run the build, the Node suites, or the PTY scenarios; run `bun 
 | [`apps/cli/`](../apps/cli/README.md) | Node launcher for the `tui` and `headless` profiles, and external-plugin management. |
 | [`packages/`](../packages/README.md) | The shared agent runtime: agent loop, sessions, models, tools, sandbox, and plugin services. Read the [architecture](architecture.md) before changing it. |
 | [`rust/`](../rust/README.md) | Opt-in Cargo workspace and native TUI preview; excluded from 0.3 release archives. |
+| [`conformance/`](../conformance/README.md) | Shared synthetic migration fixtures; the TypeScript driver lives under `scripts/rust-conformance/`. |
 | [`native/`](../native/README.md), [`vendor/`](../vendor/README.md) | Native support and pinned Cordis sources. Preserve their licenses and upstream attribution. |
 | [`distribution/`](../distribution/README.md) | Release packaging, signing, and the download service. |
 | [`snapshots/`](../snapshots/AGENTS.md) | Recorded session evidence, including retained historical generations. |
