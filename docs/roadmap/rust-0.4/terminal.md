@@ -2,7 +2,7 @@
 
 ## Summary
 
-Keep Bake's familiar transcript and bottom composer while making agent activity, keyboard focus, and message destinations easier to understand. Use Ratatui with Crossterm as the starting stack and a pure Bake-owned editor model for the composer. Qualify inline scrollback and editor behavior before adopting the native frontend. This page defines acceptance criteria for [scopes 14 and 15](README.md#14--terminal-engine-and-rendering); the shipped TypeScript UI remains the comparison oracle.
+Keep Bake's familiar transcript and bottom composer while making agent activity, keyboard focus, and message destinations easier to understand. Use Ratatui with Crossterm as the starting stack and a pure Bake-owned editor model for the composer. Qualify inline scrollback and editor behavior before adopting the native frontend. This page defines acceptance criteria for [scopes 14 and 15](README.md#14--terminal-engine-and-rendering); the shipped TypeScript UI remains the comparison oracle. The [native terminal design](tui-design.md) proposes the screens, composer, and architecture that implement them.
 
 ## Table of Contents
 
