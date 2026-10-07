@@ -318,7 +318,8 @@ Colour marks code, so it is used only where the transcript shows code in a known
 | What a script returned | TypeScript | A JavaScript value; a failed script's error stays red |
 | A shell call's command | Shell | The program, its flags, strings, variables, and operators |
 | An edit's diff | From the file's extension | TypeScript and JavaScript, Rust, or shell; any other file is plain. Side by side, each side is lexed on its own, as the two versions of the file |
-| Program output, answers, reasoning | none | Not code in a known language |
+| A shell call's output | Its command's own look | A search's `path:line:` (path magenta `#f0abfc`, numbers green `#86efac`), a test runner's markers and counts (pass green, fail red `#f87171` and bold, skip yellow, zero counts and timings dim), `git status --short` codes, and `error:` or `warning:` labels from any command. Bake runs commands with `NO_COLOR=1` and `TERM=dumb`, so the look is recognised from the output's shape; output that carries SGR colour keeps it instead, mapped to sixteen colours on an ANSI terminal and dropped under `NO_COLOR`. Every escape and control character is removed from all tool output, as the TypeScript `toolText` strips ANSI |
+| Other tools' output, answers, reasoning | none | Not code in a known language |
 
 | Token | Colour | Sixteen colours |
 |---|---|---|

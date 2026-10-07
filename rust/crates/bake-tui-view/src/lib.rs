@@ -16,6 +16,7 @@ pub mod keys;
 pub mod layout;
 pub mod mode;
 pub mod render;
+pub mod shell_output;
 pub mod state;
 pub mod status;
 pub mod syntax;

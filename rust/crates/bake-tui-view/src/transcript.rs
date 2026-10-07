@@ -23,6 +23,7 @@ use crate::activity::Tones;
 use crate::copy;
 use crate::diff::{self, Change, DiffLine, DiffRow, SplitRow};
 use crate::editor;
+use crate::shell_output::{self, Family, Styled};
 use crate::syntax::{self, Carry, Lang};
 
 /// Column a user's words, reasoning, answers, and call marks start at.
@@ -102,7 +103,10 @@ pub fn sample_session() -> Vec<Row> {
             r#"rg -n "commands.register" -g '*.ts'"#,
             CallState::Done,
             None,
-            &["packages/app/src/controller.ts:45", "packages/app/src/controller.ts:52"],
+            &[
+                "packages/app/src/controller.ts:45:  commands.register(open);",
+                "packages/app/src/controller.ts:52:  commands.register(close);",
+            ],
         ),
         call("Read", "packages/app/src/controller.ts", CallState::Done, Some("412 lines"), &[]),
         Row::Answer(
@@ -1173,7 +1177,21 @@ fn present_call(
     let edit = kind(tool) == Kind::Edit;
     // Without a summary of its own, an edit says what it added and removed,
     // and any other call with output says how much.
-    let counted = output.iter().filter(|line| !line.trim().is_empty()).count();
+    // Escapes and control characters never reach the screen. A shell
+    // command's output keeps its own colour, or takes the colour its shape
+    // implies; any other tool's output is plain.
+    let shell = kind(tool) == Kind::Shell;
+    let family = if shell {
+        shell_output::family(argument)
+    } else {
+        Family::Other
+    };
+    let cleaned: Vec<Styled> = output
+        .iter()
+        .map(|line| shell_output::styled(line, family, look.tones))
+        .collect();
+    let texts: Vec<String> = cleaned.iter().map(|line| line.text.clone()).collect();
+    let counted = texts.iter().filter(|line| !line.trim().is_empty()).count();
     let status = match summary {
         Some(summary) => status_spans(summary, quiet, look),
         None if edit => diff_counts(output, look),
@@ -1193,17 +1211,31 @@ fn present_call(
         lines.extend(diff_view(output, lang, width, look, gutter));
         return lines;
     }
-    for item in preview(output) {
+    // The preview keeps lines in order, so each is found from where the
+    // last one was.
+    let mut at = 0;
+    for item in preview(&texts) {
         match item {
-            Preview::Line(text) => lines.extend(hang(
-                &text,
-                width,
-                BODY,
-                gutter(),
-                gutter(),
-                output_tone(look.tones),
-            )),
+            Preview::Line(text) => {
+                let found = (at..texts.len()).find(|&i| texts[i] == text).unwrap_or(at);
+                at = found + 1;
+                let runs = if shell {
+                    cleaned.get(found).map_or(&[][..], |line| &line.runs[..])
+                } else {
+                    &[]
+                };
+                lines.extend(hang_runs(
+                    &text,
+                    runs,
+                    output_tone(look.tones),
+                    width,
+                    BODY,
+                    gutter(),
+                    gutter(),
+                ));
+            }
             Preview::More(count) => {
+                at += count;
                 let mut spans = gutter();
                 spans.push(Span::styled(
                     format!("{} {count} {}", marks.more, copy::MORE_LINES),
@@ -1909,8 +1941,12 @@ mod tests {
             all[user + 4],
             r#"  ✓ Bash: rg -n "commands.register" -g '*.ts'  2 lines"#
         );
-        assert_eq!(all[user + 5], "  │ packages/app/src/controller.ts:45");
-        assert_eq!(all[user + 6], "  │ packages/app/src/controller.ts:52");
+        assert!(
+            all[user + 5] == "  │ packages/app/src/controller.ts:45:  commands.register(open);"
+        );
+        assert!(
+            all[user + 6] == "  │ packages/app/src/controller.ts:52:  commands.register(close);"
+        );
         // Each call stands apart from the next, so its box does too.
         assert_eq!(all[user + 7], "");
         assert_eq!(
@@ -2766,5 +2802,63 @@ mod tests {
         t.rows.push(Row::Answer("more".into()));
         t.resize(80, 10, PLAIN);
         assert_eq!(t.heights.len(), t.rows.len());
+    }
+
+    #[test]
+    fn shell_output_takes_the_colours_its_command_would_print() {
+        let rows = sample_session();
+        let look = Look {
+            tones: Tones::TrueColor,
+            ..PLAIN
+        };
+        let all: Vec<Line> = (0..rows.len())
+            .flat_map(|i| present(&rows, i, 84, look))
+            .collect();
+        // A search's path is magenta and its line number green.
+        assert_eq!(
+            fg_of(&all, "packages/app/src/controller.ts"),
+            Some(Color::Rgb(0xf0, 0xab, 0xfc))
+        );
+        assert_eq!(fg_of(&all, "45"), Some(Color::Rgb(0x86, 0xef, 0xac)));
+        // A test run's failure is red and bold, a zero count recedes.
+        let fail = all
+            .iter()
+            .flat_map(|l| &l.spans)
+            .find(|s| s.content == "1 fail")
+            .unwrap();
+        assert_eq!(fail.style.fg, Some(Color::Rgb(0xf8, 0x71, 0x71)));
+        assert!(fail.style.add_modifier.contains(Modifier::BOLD));
+        let zero = all
+            .iter()
+            .flat_map(|l| &l.spans)
+            .find(|s| s.content == "0 fail")
+            .unwrap();
+        assert!(zero.style.add_modifier.contains(Modifier::DIM));
+    }
+
+    #[test]
+    fn output_never_carries_an_escape_and_only_a_shell_keeps_its_colour() {
+        let call = |tool: &str| Row::Call {
+            tool: tool.into(),
+            argument: "x".into(),
+            state: CallState::Done,
+            summary: None,
+            output: vec!["\u{1b}[31mred\u{1b}[0m\u{1b}[2J\tend".into()],
+        };
+        let look = Look {
+            tones: Tones::TrueColor,
+            ..PLAIN
+        };
+        for (tool, coloured) in [("Bash", true), ("Read", false)] {
+            let rows = vec![call(tool)];
+            let lines = present(&rows, 0, 40, look);
+            assert_eq!(lines[2].to_string().trim_end(), "    red    end", "{tool}");
+            let red = lines[2]
+                .spans
+                .iter()
+                .find(|s| s.content == "red")
+                .map(|s| s.style.fg);
+            assert_eq!(red == Some(Some(Color::Indexed(1))), coloured, "{tool}");
+        }
     }
 }
