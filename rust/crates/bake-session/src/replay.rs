@@ -26,8 +26,8 @@
 //!    and a torn tail, then a seeded header or a nonzero inherited cut.
 //! 3. Subset qualification of every row, and the step and settlement
 //!    coordinates. Each step yields one request per settlement with its
-//!    coordinate: a failed or aborted dispatch settles as
-//!    `assistant/attempt`, whether or not the step retried.
+//!    coordinate. Both `assistant/message` and `assistant/attempt` supply
+//!    cutoffs, including interrupted messages.
 //! 4. Each prefix that ends before a settlement: per event, the -0 check that
 //!    is exactly the lossless snapshot for scan-admitted rows, number and
 //!    depth qualification of projected payloads, the Session construction

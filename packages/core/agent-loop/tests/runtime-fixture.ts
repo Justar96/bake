@@ -449,13 +449,12 @@ export function encodeLog(header: SessionHeader, events: readonly SessionEvent[]
 /**
  * Rebuild each dispatched request from committed log bytes alone: the
  * messages a fresh Session derives from the prefix ending before one Assistant
- * settlement, and the request header folded over the same prefix. A recorded
- * dispatch settles as `assistant/message`, or as `assistant/attempt` when its
- * stream failed or was aborted, whether or not the step then retried, so a
- * step yields one request per recorded settlement with its coordinate; a
- * step with no recorded settlement is refused. This mirrors how the loop
- * assembles a request; the expected file, not this function, is the independent
- * specification.
+ * settlement, and the request header folded over the same prefix. Both
+ * `assistant/message` and `assistant/attempt` supply cutoffs, including
+ * interrupted messages. A step yields one request per recorded settlement
+ * with its coordinate; a step with no recorded settlement is refused.
+ * This mirrors how the loop assembles a request; the expected file, not this
+ * function, is the independent specification.
  * @param log - a complete current-format log.
  * @returns for each `step/start` in log order, one projected request per later
  * settlement with its coordinate, in log order.

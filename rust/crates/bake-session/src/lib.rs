@@ -22,8 +22,9 @@
 //! request before each recorded Assistant settlement in such a log, failed
 //! attempts included, as the TypeScript test helper `replayRequests` does,
 //! including tool history across request headers, and refuses input outside
-//! its subset; its requests are not restored Session state. None reads a file, restores a Session, or encodes a log. The crate
-//! is unstable and unshipped; nothing in the workspace depends on it.
+//! its subset; its requests are not restored Session state. None reads a file,
+//! restores a Session, or encodes a log. The crate is unstable and unshipped;
+//! nothing in the workspace depends on it.
 
 mod envelope;
 mod replay;
