@@ -24,14 +24,13 @@ const FIXTURE_EXPECTED: &str =
 const LOG_BYTES: usize = 4533;
 const EXPECTED_BYTES: usize = 2775;
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 52;
+const CASE_COUNT: usize = 94;
 const MAX_EDITS: usize = 8;
 const SOURCE_BUDGET: usize = 64;
-const LIMITS: [&str; 13] = [
+const LIMITS: [&str; 12] = [
     "seeded-header",
     "event-type",
     "ignorable",
-    "replacement",
     "number",
     "depth",
     "coordinate",
@@ -42,7 +41,7 @@ const LIMITS: [&str; 13] = [
     "header",
     "codec",
 ];
-const SEED_CHECKS: [(&str, SeedRejection); 14] = [
+const SEED_CHECKS: [(&str, SeedRejection); 22] = [
     ("message-identity", SeedRejection::MessageIdentity),
     ("message-role", SeedRejection::MessageRole),
     ("message-source", SeedRejection::MessageSource),
@@ -63,6 +62,14 @@ const SEED_CHECKS: [(&str, SeedRejection); 14] = [
     ),
     ("header-reason", SeedRejection::HeaderReason),
     ("header-starts-series", SeedRejection::HeaderStartsSeries),
+    ("replace-start", SeedRejection::ReplaceStart),
+    ("replace-end", SeedRejection::ReplaceEnd),
+    ("replace-order", SeedRejection::ReplaceOrder),
+    ("replace-sources", SeedRejection::ReplaceSources),
+    ("tool-result-span", SeedRejection::ToolResultSpan),
+    ("tool-result-target", SeedRejection::ToolResultTarget),
+    ("tool-result-rest", SeedRejection::ToolResultRest),
+    ("system-head", SeedRejection::SystemHead),
 ];
 
 fn repo_path(relative: &str) -> PathBuf {
@@ -363,7 +370,6 @@ fn classify(refusal: &ReplayRefusal) -> String {
                 ReplayLimit::SeededHeader => "seeded-header",
                 ReplayLimit::EventType => "event-type",
                 ReplayLimit::Ignorable => "ignorable",
-                ReplayLimit::Replacement => "replacement",
                 ReplayLimit::Number => "number",
                 ReplayLimit::Depth => "depth",
                 ReplayLimit::Coordinate => "coordinate",

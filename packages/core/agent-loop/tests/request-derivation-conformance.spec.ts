@@ -24,17 +24,18 @@ const FIXTURE_EXPECTED = 'conformance/runtime/request-reconstruction/tool-call-t
 const LOG_SHA256 = 'a7a8222990ef9f4c4f00a051c019de86d3156ca7f6c3c0d28af4be4cc3fbe657'
 const EXPECTED_SHA256 = '460b031e6fd308bd9ac3fd97834aad64729b2384f0f3e803c424d7502f9dfa02'
 /** Both harnesses pin the table size, so a dropped case fails. */
-const CASE_COUNT = 52
+const CASE_COUNT = 94
 /** Bounds each case's input edits. */
 const MAX_EDITS = 8
 const LIMITS = [
-  'seeded-header', 'event-type', 'ignorable', 'replacement', 'number', 'depth', 'coordinate',
+  'seeded-header', 'event-type', 'ignorable', 'number', 'depth', 'coordinate',
   'repeated-coordinate', 'header-change', 'config-member', 'tool-schema', 'header', 'codec',
 ]
 const SEED_CHECKS = [
   'message-identity', 'message-role', 'message-source', 'message-content', 'model-source', 'tool-source',
   'tool-result-block', 'tool-call-id', 'settlement', 'header-provider-model', 'header-reasoning-effort',
-  'header-adapter-defaults', 'header-reason', 'header-starts-series',
+  'header-adapter-defaults', 'header-reason', 'header-starts-series', 'replace-start', 'replace-end',
+  'replace-order', 'replace-sources', 'tool-result-span', 'tool-result-target', 'tool-result-rest', 'system-head',
 ]
 const CAUSES = ['header', 'codec', ...SEED_CHECKS.map(check => `seed/${check}`), 'no-later-settlement', 'no-request-header']
 
@@ -269,16 +270,21 @@ function loadTable() {
   return { cases, log, expectedBytes, fixtureLines }
 }
 
-/** The helper's outcome; an error that is not an `Error` fails the case. */
+/**
+ * The helper's outcome; an error that is not an `Error` fails the case.
+ * Normalization runs outside the `try`, so a non-generated message ID fails
+ * the case instead of passing as a helper rejection.
+ */
 function replay(lines: readonly string[]): Outcome {
+  let requests: ReturnType<typeof replayRequests>
   try {
-    const requests = normalizeRequests(replayRequests(Buffer.from(`${lines.join('\n')}\n`)))
-    return { outcome: 'requests', requests }
+    requests = replayRequests(Buffer.from(`${lines.join('\n')}\n`))
   } catch (error) {
     if (!(error instanceof Error)) throw error
     if (error.constructor === TypeError) return { outcome: 'rejected', class: 'TypeError' }
     return { outcome: 'rejected', message: error.message }
   }
+  return { outcome: 'requests', requests: normalizeRequests(requests) }
 }
 
 const { cases, log, expectedBytes, fixtureLines } = loadTable()
