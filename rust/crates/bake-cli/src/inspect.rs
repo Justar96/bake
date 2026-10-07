@@ -1,12 +1,13 @@
-//! `bake-rs session inspect`: restore one explicitly named Session log,
-//! read-only, and describe it as one JSON record.
+//! `bake-rs session inspect`: restore one Session log, read-only, and
+//! describe it as one JSON record.
 //!
-//! The file's canonical name selects plain or Zstd decoding, and only a
-//! current-format name is opened. The read is bounded by `--max-bytes` and
+//! An explicitly named file's canonical name selects plain or Zstd decoding,
+//! and only a current-format name is opened; that form checks no stored
+//! identity or generation. The lookup form, in [`crate::lookup`], finds the
+//! file by root and id first. Either read is bounded by `--max-bytes` and
 //! refused when the opened file's observed metadata changes while it is read.
-//! This is a diagnostic, not a production reader: it checks no stored
-//! identity or generation, takes no lease, and never truncates, repairs, or
-//! migrates the log.
+//! This is a diagnostic, not a production reader: it takes no lease and never
+//! truncates, repairs, or migrates the log.
 
 use std::ffi::OsString;
 use std::fs::{File, Metadata, OpenOptions};
@@ -16,8 +17,8 @@ use std::path::Path;
 use bake_session::{
     CURRENT_SESSION_FORMAT_VERSION, EnvelopeLimit, HeaderOrigin, HeaderRefusal, OffloadRejection,
     PathPlatform, Rejection, RestoreLimit, RestoreRefusal, RestoredLog, ScanLimit, ScanRefusal,
-    SeedRejection, SourceEventSeqsLimit, SubsetLimit, Unsupported, V3Limit, ZstdRefusal,
-    restore_plain_log, restore_zstd_log,
+    SeedRejection, SourceEventSeqsLimit, StagedLog, SubsetLimit, Unsupported, V3Limit, ZstdRefusal,
+    stage_plain_log, stage_zstd_log,
 };
 use serde_json::{Value, json};
 
@@ -32,7 +33,27 @@ pub struct InspectArgs {
     pub max_bytes: u64,
     /// Bounds each event's expanded `sourceEventSeqs`.
     pub max_source_seqs: u64,
-    pub path: OsString,
+    pub target: Target,
+}
+
+/// Which Session log `session inspect` reads.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Target {
+    /// One explicitly named log file; its name selects the decoder.
+    File(OsString),
+    /// The Session with this id in a root, found as the JSONL backend finds it.
+    Lookup(LookupArgs),
+}
+
+/// The operands of the lookup form.
+#[derive(Debug, PartialEq, Eq)]
+pub struct LookupArgs {
+    pub root: OsString,
+    /// Non-empty UTF-8.
+    pub id: String,
+    pub encoding: Encoding,
+    /// Bounds the directory entries the lookup reads.
+    pub max_entries: u64,
 }
 
 /// What a canonical log name selects.
@@ -43,7 +64,7 @@ pub enum Encoding {
 }
 
 impl Encoding {
-    const fn label(self) -> &'static str {
+    pub(crate) const fn label(self) -> &'static str {
         match self {
             Self::None => "none",
             Self::Zstd => "zstd",
@@ -120,16 +141,13 @@ pub fn inspect(args: &InspectArgs) -> Outcome {
 }
 
 fn run(args: &InspectArgs) -> Result<(Value, u8), String> {
-    let path = Path::new(&args.path);
+    let path = match &args.target {
+        Target::File(path) => Path::new(path),
+        Target::Lookup(lookup) => return crate::lookup::run(args, lookup),
+    };
     let encoding = canonical_encoding(path)?;
     let bytes = read_bounded(path, args.max_bytes)?;
-    let source_budget = usize::try_from(args.max_source_seqs).unwrap_or(usize::MAX);
-    let max_plaintext_bytes = usize::try_from(args.max_bytes).unwrap_or(usize::MAX);
-    let platform = PathPlatform::host();
-    let restored = match encoding {
-        Encoding::None => restore_plain_log(&bytes, platform, source_budget),
-        Encoding::Zstd => restore_zstd_log(&bytes, platform, source_budget, max_plaintext_bytes),
-    };
+    let restored = stage(&bytes, encoding, args).and_then(StagedLog::restore);
     let mut record = json!({
         "status": if restored.is_ok() { "restored" } else { "refused" },
         "encoding": encoding.label(),
@@ -147,6 +165,26 @@ fn run(args: &InspectArgs) -> Result<(Value, u8), String> {
             Ok((record, 3))
         }
     }
+}
+
+/// Decode and scan a current-format log under the command's budgets, without
+/// validating its events.
+pub(crate) fn stage(
+    bytes: &[u8],
+    encoding: Encoding,
+    args: &InspectArgs,
+) -> Result<StagedLog, RestoreRefusal> {
+    let source_budget = usize::try_from(args.max_source_seqs).unwrap_or(usize::MAX);
+    let platform = PathPlatform::host();
+    match encoding {
+        Encoding::None => stage_plain_log(bytes, platform, source_budget),
+        Encoding::Zstd => stage_zstd_log(bytes, platform, source_budget, plaintext_budget(args)),
+    }
+}
+
+/// `--max-bytes` as the cumulative decoded plaintext budget.
+pub(crate) fn plaintext_budget(args: &InspectArgs) -> usize {
+    usize::try_from(args.max_bytes).unwrap_or(usize::MAX)
 }
 
 /// The encoding a current-format name selects; any other name is refused
@@ -176,14 +214,43 @@ fn canonical_encoding(path: &Path) -> Result<Encoding, String> {
 
 /// Read at most `max_bytes` from the regular file at `path`, refusing a
 /// larger file or one whose observed metadata changes during the read.
-fn read_bounded(path: &Path, max_bytes: u64) -> Result<Vec<u8>, String> {
+pub(crate) fn read_bounded(path: &Path, max_bytes: u64) -> Result<Vec<u8>, String> {
+    read_bounded_or_missing(path, max_bytes).map_err(ReadFailure::into_message)
+}
+
+/// Why [`read_bounded_or_missing`] read nothing.
+pub(crate) enum ReadFailure {
+    /// Opening the path reported that it does not exist, as for a dangling link.
+    Missing(String),
+    Other(String),
+}
+
+impl ReadFailure {
+    pub(crate) fn into_message(self) -> String {
+        match self {
+            Self::Missing(message) | Self::Other(message) => message,
+        }
+    }
+}
+
+/// [`read_bounded`], keeping an absent path apart from every other failure
+/// by its I/O error kind. The diagnostics are the same.
+pub(crate) fn read_bounded_or_missing(path: &Path, max_bytes: u64) -> Result<Vec<u8>, ReadFailure> {
     let file = open_read_only(path).map_err(|error| {
         if std::fs::metadata(path).is_ok_and(|metadata| !metadata.is_file()) {
-            not_regular(path)
+            ReadFailure::Other(not_regular(path))
+        } else if error.kind() == io::ErrorKind::NotFound {
+            ReadFailure::Missing(format!("cannot open {path:?}: {error}"))
         } else {
-            format!("cannot open {path:?}: {error}")
+            ReadFailure::Other(format!("cannot open {path:?}: {error}"))
         }
     })?;
+    read_open(path, &file, max_bytes).map_err(ReadFailure::Other)
+}
+
+/// Read the opened file within `max_bytes`, refusing an irregular file or
+/// one whose observed metadata changes during the read.
+fn read_open(path: &Path, file: &File, max_bytes: u64) -> Result<Vec<u8>, String> {
     let read_error = |error: io::Error| format!("cannot read {path:?}: {error}");
     let before = file.metadata().map_err(read_error)?;
     if !before.is_file() {
@@ -198,8 +265,7 @@ fn read_bounded(path: &Path, max_bytes: u64) -> Result<Vec<u8>, String> {
     // The buffer grows only as bytes arrive; reading one byte past the budget
     // detects growth.
     let mut bytes = Vec::new();
-    (&file)
-        .take(max_bytes.saturating_add(1))
+    file.take(max_bytes.saturating_add(1))
         .read_to_end(&mut bytes)
         .map_err(read_error)?;
     let after = file.metadata().map_err(read_error)?;
@@ -215,7 +281,7 @@ fn not_regular(path: &Path) -> String {
 
 /// Open read-only. On Unix the open does not block, so a FIFO is refused by
 /// the regular-file check instead of waiting for a writer.
-fn open_read_only(path: &Path) -> io::Result<File> {
+pub(crate) fn open_read_only(path: &Path) -> io::Result<File> {
     let mut options = OpenOptions::new();
     options.read(true);
     #[cfg(unix)]
@@ -254,7 +320,7 @@ impl Stamp {
     }
 }
 
-fn restored_fields(restored: &RestoredLog) -> serde_json::Map<String, Value> {
+pub(crate) fn restored_fields(restored: &RestoredLog) -> serde_json::Map<String, Value> {
     let stored = restored.stored();
     let header = stored.header();
     let torn = restored.torn().map(|tail| {
@@ -302,27 +368,40 @@ fn restored_fields(restored: &RestoredLog) -> serde_json::Map<String, Value> {
 
 /// How a refusal is classified for the record's `kind`.
 #[derive(Clone, Copy)]
-enum Kind {
+pub(crate) enum Kind {
     /// The log is malformed or fails a check the production reader applies.
     Invalid,
     /// The production reader refuses to interpret the log.
     Unsupported,
     /// This preview cannot reproduce the production outcome; none is claimed.
     NativeLimit,
+    /// No Session with the requested id exists in the root.
+    NotFound,
 }
 
-struct Refusal {
-    kind: Kind,
-    message: String,
+impl Kind {
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::Invalid => "invalid",
+            Self::Unsupported => "unsupported",
+            Self::NativeLimit => "native-limit",
+            Self::NotFound => "not-found",
+        }
+    }
+}
+
+pub(crate) struct Refusal {
+    pub(crate) kind: Kind,
+    pub(crate) message: String,
     /// An event record's line, counted from 1 after the header record.
-    line: Option<u64>,
-    seq: Option<u64>,
+    pub(crate) line: Option<u64>,
+    pub(crate) seq: Option<u64>,
     /// A physical byte offset in the file.
-    offset: Option<usize>,
+    pub(crate) offset: Option<usize>,
 }
 
 impl Refusal {
-    const fn new(kind: Kind, message: String) -> Self {
+    pub(crate) const fn new(kind: Kind, message: String) -> Self {
         Self {
             kind,
             message,
@@ -336,11 +415,7 @@ impl Refusal {
 fn refusal_fields(refusal: &RestoreRefusal, args: &InspectArgs) -> Value {
     let refusal = describe(refusal, args);
     json!({
-        "kind": match refusal.kind {
-            Kind::Invalid => "invalid",
-            Kind::Unsupported => "unsupported",
-            Kind::NativeLimit => "native-limit",
-        },
+        "kind": refusal.kind.label(),
         "message": refusal.message,
         "line": refusal.line,
         "seq": refusal.seq,
@@ -348,7 +423,7 @@ fn refusal_fields(refusal: &RestoreRefusal, args: &InspectArgs) -> Value {
     })
 }
 
-fn describe(refusal: &RestoreRefusal, args: &InspectArgs) -> Refusal {
+pub(crate) fn describe(refusal: &RestoreRefusal, args: &InspectArgs) -> Refusal {
     use Kind::{Invalid, NativeLimit};
     match refusal {
         RestoreRefusal::Scan(scan) => describe_scan(scan, args),

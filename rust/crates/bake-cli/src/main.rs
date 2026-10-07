@@ -1,13 +1,14 @@
 //! `bake-rs`: entry point for Bake's native terminal preview.
 
 mod inspect;
+mod lookup;
 
 use std::ffi::{OsStr, OsString};
 use std::io::{self, IsTerminal, Write};
 use std::process::ExitCode;
 
 use bake_tui::PreviewExit;
-use inspect::{InspectArgs, MAX_BUDGET, Outcome, parse_count};
+use inspect::{Encoding, InspectArgs, LookupArgs, MAX_BUDGET, Outcome, Target, parse_count};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -18,6 +19,9 @@ Usage:
   bake-rs preview      Open the fullscreen preview in an interactive terminal
   bake-rs session inspect --max-bytes <N> --max-source-seqs <N> [--] <file>
                        Describe one Session log as JSON, read-only
+  bake-rs session inspect --root <dir> --id <id> --max-bytes <N>
+      --max-source-seqs <N> --max-entries <N> [--compression none|zstd]
+                       Find one Session in a root and describe it, read-only
   bake-rs --help       Show this help
   bake-rs --version    Show the version
 
@@ -30,26 +34,40 @@ bake-rs session inspect: describe one Session log (Rust preview)
 
 Usage:
   bake-rs session inspect --max-bytes <N> --max-source-seqs <N> [--] <file>
+  bake-rs session inspect --root <dir> --id <id> --max-bytes <N>
+      --max-source-seqs <N> --max-entries <N> [--compression none|zstd]
 
 Options:
   --max-bytes <N>        Largest file size, and largest decoded Zstd size
   --max-source-seqs <N>  Largest expanded sourceEventSeqs list of one event
+  --root <dir>           Session root to search; only with --id
+  --id <id>              Session id to find; only with --root
+  --max-entries <N>      Most directory entries the lookup reads
+  --compression <mode>   none or zstd, the root's encoding (default zstd)
   --                     End the options, as before a path starting with '-'
   -h, --help             Show this help
 
-Both budgets are required positive integers no greater than 9007199254740991.
+Budgets are required positive integers no greater than 9007199254740991.
 <file> must be named session.v3.jsonl or session.v3.jsonl.zstd; the name
 selects plain or Zstd decoding. Other format versions are refused without
 opening the file.
 
-The command opens only the named file, read-only, restores it as the Session
-read path does, and prints one JSON record: counts, the header, recovery and
-closer metadata, but no message or tool content. It does not truncate, repair,
-migrate, or resume the Session, check its stored identity, or read the Bake
-home, configuration, or credentials.
+With --root and --id, the command finds the Session as the JSONL backend
+does: it refuses a root holding the flat legacy layout or the other
+compression, a duplicate or missing id, and another format version, then
+reads the newest generation, checks its stored identity, and restores it.
+Windows roots and directory names outside the supported path subset are
+native-limit refusals; see rust/README.md.
+
+The command opens only what it reads, read-only, restores the log as the
+Session read path does, and prints one JSON record: counts, the header,
+recovery and closer metadata, but no message or tool content. It does not
+truncate, repair, migrate, or resume the Session, and does not read the Bake
+home, configuration, or credentials. A named file's stored identity is not
+checked.
 
 Exit status: 0 restored, 3 refused log (a JSON record on standard output),
-1 unreadable file or unsupported name, 2 usage error.
+1 unreadable file or directory or unsupported name, 2 usage error.
 ";
 
 const KNOWN: &[&str] = &["-h", "--help", "help", "-V", "--version", "preview"];
@@ -130,6 +148,10 @@ fn parse_session(args: &[OsString]) -> Result<Command, String> {
     }
     let mut max_bytes = None;
     let mut max_source_seqs = None;
+    let mut max_entries = None;
+    let mut root = None;
+    let mut id = None;
+    let mut compression = None;
     let mut path = None;
     let mut options = true;
     let mut rest = rest.iter();
@@ -140,8 +162,10 @@ fn parse_session(args: &[OsString]) -> Result<Command, String> {
                 options = false;
                 continue;
             }
-            Some("--max-bytes") => Some(("--max-bytes", &mut max_bytes)),
-            Some("--max-source-seqs") => Some(("--max-source-seqs", &mut max_source_seqs)),
+            Some(
+                option @ ("--max-bytes" | "--max-source-seqs" | "--max-entries" | "--root" | "--id"
+                | "--compression"),
+            ) => Some(option),
             Some(flag @ ("-h" | "--help")) => {
                 return Err(format!(
                     "option '{flag}' must be the only operand of 'session inspect'"
@@ -155,34 +179,113 @@ fn parse_session(args: &[OsString]) -> Result<Command, String> {
             }
             _ => None,
         };
-        if let Some((option, slot)) = slot {
-            let value = rest
-                .next()
-                .ok_or_else(|| format!("option '{option}' needs a value"))?;
-            if slot.is_some() {
-                return Err(format!("option '{option}' was given more than once"));
+        let Some(option) = slot else {
+            if path.is_some() {
+                return Err(format!(
+                    "unexpected argument {} for 'session inspect'",
+                    quoted(arg)
+                ));
             }
-            *slot = Some(value.to_str().and_then(parse_count).ok_or_else(|| {
-                format!(
-                    "option '{option}' needs a positive decimal integer no greater than \
-                     {MAX_BUDGET}, not {}",
-                    quoted(value)
-                )
-            })?);
-        } else if path.is_some() {
-            return Err(format!(
-                "unexpected argument {} for 'session inspect'",
-                quoted(arg)
-            ));
-        } else {
             path = Some(arg.clone());
+            continue;
+        };
+        let value = rest
+            .next()
+            .ok_or_else(|| format!("option '{option}' needs a value"))?;
+        let given = match option {
+            "--max-bytes" => set_count(&mut max_bytes, option, value)?,
+            "--max-source-seqs" => set_count(&mut max_source_seqs, option, value)?,
+            "--max-entries" => set_count(&mut max_entries, option, value)?,
+            "--root" => {
+                // The TypeScript backend's root is a JavaScript string.
+                if value.to_str().is_none() {
+                    return Err(format!(
+                        "option '--root' needs a UTF-8 path, not {}",
+                        quoted(value)
+                    ));
+                }
+                root.replace(value.clone()).is_some()
+            }
+            "--id" => {
+                let text = value
+                    .to_str()
+                    .filter(|text| !text.is_empty())
+                    .ok_or_else(|| {
+                        format!(
+                            "option '--id' needs a non-empty UTF-8 Session id, not {}",
+                            quoted(value)
+                        )
+                    })?;
+                id.replace(text.to_owned()).is_some()
+            }
+            _ => {
+                let encoding = match value.to_str() {
+                    Some("none") => Encoding::None,
+                    Some("zstd") => Encoding::Zstd,
+                    _ => {
+                        return Err(format!(
+                            "option '--compression' needs none or zstd, not {}",
+                            quoted(value)
+                        ));
+                    }
+                };
+                compression.replace(encoding).is_some()
+            }
+        };
+        if given {
+            return Err(format!("option '{option}' was given more than once"));
         }
     }
+    let max_bytes = max_bytes.ok_or("missing required option '--max-bytes'")?;
+    let max_source_seqs = max_source_seqs.ok_or("missing required option '--max-source-seqs'")?;
+    let target = match (root, id, path) {
+        (Some(_), Some(_), Some(path)) => {
+            return Err(format!(
+                "unexpected argument {} for 'session inspect' with '--root' and '--id'",
+                quoted(&path)
+            ));
+        }
+        (Some(root), Some(id), None) => Target::Lookup(LookupArgs {
+            root,
+            id,
+            encoding: compression.unwrap_or(Encoding::Zstd),
+            max_entries: max_entries.ok_or("missing required option '--max-entries'")?,
+        }),
+        (Some(_), None, _) => return Err("option '--root' needs '--id'".into()),
+        (None, Some(_), _) => return Err("option '--id' needs '--root'".into()),
+        (None, None, path) => {
+            for (option, given) in [
+                ("--max-entries", max_entries.is_some()),
+                ("--compression", compression.is_some()),
+            ] {
+                if given {
+                    return Err(format!("option '{option}' needs '--root' and '--id'"));
+                }
+            }
+            Target::File(path.ok_or("missing the Session log path")?)
+        }
+    };
     Ok(Command::Inspect(InspectArgs {
-        max_bytes: max_bytes.ok_or("missing required option '--max-bytes'")?,
-        max_source_seqs: max_source_seqs.ok_or("missing required option '--max-source-seqs'")?,
-        path: path.ok_or("missing the Session log path")?,
+        max_bytes,
+        max_source_seqs,
+        target,
     }))
+}
+
+/// Parse one budget into its slot; `Ok(true)` when the slot was already set.
+fn set_count(slot: &mut Option<u64>, option: &str, value: &OsStr) -> Result<bool, String> {
+    if slot.is_some() {
+        return Ok(true);
+    }
+    let count = value.to_str().and_then(parse_count).ok_or_else(|| {
+        format!(
+            "option '{option}' needs a positive decimal integer no greater than \
+             {MAX_BUDGET}, not {}",
+            quoted(value)
+        )
+    })?;
+    *slot = Some(count);
+    Ok(false)
 }
 
 fn is_help(arg: &OsStr) -> bool {
@@ -293,7 +396,7 @@ mod tests {
         Command::Inspect(InspectArgs {
             max_bytes,
             max_source_seqs,
-            path: path.into(),
+            target: Target::File(path.into()),
         })
     }
 
@@ -393,6 +496,131 @@ mod tests {
     }
 
     #[test]
+    fn repeated_budgets_keep_the_existing_usage_error_order() {
+        for option in ["--max-bytes", "--max-source-seqs", "--max-entries"] {
+            assert_eq!(
+                parse_strs(&["session", "inspect", option, "1", option, "bad"]),
+                Err(format!("option '{option}' was given more than once"))
+            );
+            assert_eq!(
+                parse_strs(&["session", "inspect", option, "1", option]),
+                Err(format!("option '{option}' needs a value"))
+            );
+        }
+    }
+
+    #[test]
+    fn the_lookup_form_takes_a_root_an_id_and_three_budgets() {
+        let lookup = |encoding| {
+            Ok(Command::Inspect(InspectArgs {
+                max_bytes: 7,
+                max_source_seqs: 9,
+                target: Target::Lookup(LookupArgs {
+                    root: "r".into(),
+                    id: "a1".into(),
+                    encoding,
+                    max_entries: 5,
+                }),
+            }))
+        };
+        let base = [
+            "session",
+            "inspect",
+            "--id",
+            "a1",
+            "--max-entries",
+            "5",
+            "--max-bytes",
+            "7",
+            "--root",
+            "r",
+            "--max-source-seqs",
+            "9",
+        ];
+        assert_eq!(parse_strs(&base), lookup(Encoding::Zstd));
+        for (mode, encoding) in [("none", Encoding::None), ("zstd", Encoding::Zstd)] {
+            let args: Vec<&str> = base
+                .iter()
+                .copied()
+                .chain(["--compression", mode])
+                .collect();
+            assert_eq!(parse_strs(&args), lookup(encoding));
+        }
+        let without = |option: &str| -> Vec<&str> {
+            let at = base.iter().position(|arg| *arg == option).unwrap();
+            let mut args = base.to_vec();
+            args.drain(at..at + 2);
+            args
+        };
+        for (args, error) in [
+            (without("--root"), "option '--id' needs '--root'"),
+            (without("--id"), "option '--root' needs '--id'"),
+            (
+                without("--max-entries"),
+                "missing required option '--max-entries'",
+            ),
+            (
+                without("--max-source-seqs"),
+                "missing required option '--max-source-seqs'",
+            ),
+        ] {
+            assert_eq!(parse_strs(&args), Err(error.into()), "{args:?}");
+        }
+        let with = |extra: &[&'static str]| -> Vec<&str> {
+            base.iter().copied().chain(extra.iter().copied()).collect()
+        };
+        for (args, error) in [
+            (
+                with(&["d/session.v3.jsonl"]),
+                "unexpected argument 'd/session.v3.jsonl' for 'session inspect' with '--root' and '--id'",
+            ),
+            (
+                with(&["--compression", "zst"]),
+                "option '--compression' needs none or zstd, not 'zst'",
+            ),
+            (
+                with(&["--root", "s"]),
+                "option '--root' was given more than once",
+            ),
+            (
+                with(&["--id", "b"]),
+                "option '--id' was given more than once",
+            ),
+            (
+                without("--max-entries")
+                    .into_iter()
+                    .chain(["--max-entries", "0"])
+                    .collect(),
+                "option '--max-entries' needs a positive decimal integer no greater than 9007199254740991, not '0'",
+            ),
+        ] {
+            assert_eq!(parse_strs(&args), Err(error.into()), "{args:?}");
+        }
+        let mut empty_id = base.to_vec();
+        empty_id[3] = "";
+        assert_eq!(
+            parse_strs(&empty_id),
+            Err("option '--id' needs a non-empty UTF-8 Session id, not ''".into())
+        );
+        for (option, value) in [("--max-entries", "5"), ("--compression", "none")] {
+            assert_eq!(
+                parse_strs(&[
+                    "session",
+                    "inspect",
+                    "--max-bytes",
+                    "7",
+                    "--max-source-seqs",
+                    "9",
+                    option,
+                    value,
+                    "f"
+                ]),
+                Err(format!("option '{option}' needs '--root' and '--id'"))
+            );
+        }
+    }
+
+    #[test]
     fn budgets_are_positive_safe_decimal_integers() {
         assert_eq!(parse_count("1"), Some(1));
         assert_eq!(parse_count("9007199254740991"), Some(MAX_BUDGET));
@@ -475,8 +703,29 @@ mod tests {
             Ok(Command::Inspect(InspectArgs {
                 max_bytes: 2,
                 max_source_seqs: 1,
-                path: path.clone()
+                target: Target::File(path.clone())
             }))
+        );
+        let root = [
+            "session",
+            "inspect",
+            "--id",
+            "a1",
+            "--max-bytes",
+            "1",
+            "--max-source-seqs",
+            "1",
+            "--max-entries",
+            "1",
+            "--root",
+        ]
+        .into_iter()
+        .map(OsString::from)
+        .chain([OsString::from_vec(b"r\xff".to_vec())])
+        .collect::<Vec<_>>();
+        assert_eq!(
+            parse(&root).map_err(|usage| usage.message),
+            Err("option '--root' needs a UTF-8 path, not \"r\\xFF\"".into())
         );
         assert_eq!(
             parse(&args(OsString::from_vec(vec![0xff]), path)).map_err(|usage| usage.message),
