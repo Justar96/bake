@@ -8,12 +8,14 @@
 //! helper then constructs a Session from each request's prefix. Session
 //! construction validates each prefix event's envelope, message, settlement,
 //! and request-header fields, and its surface transition, including the rule
-//! that only a `system/message` may replace the system head. The helper skips
+//! that a replacement starting at a `system/message` in node 0 must be one
+//! `system/message` over exactly that node. The helper skips
 //! full restoration (`restoreReleasedV3Artifact`) and with it the restored
-//! vocabulary, step and turn relationships, tool lifecycles, and the
-//! protected-first-head rule, so it accepts an unknown required event type.
+//! vocabulary, step and turn relationships, tool lifecycles, compaction
+//! records, and restoration's stricter protected-first-head rules, so it
+//! accepts an unknown required event type and some logs restoration refuses.
 //! Requests derived here therefore carry no restoration claim. This subset
-//! instead admits only its own 12 event types and refuses every replacement.
+//! instead admits only its own 16 event types.
 //!
 //! [`replay_requests`] runs the same stages in the same order:
 //!
@@ -23,31 +25,48 @@
 //!    coordinates.
 //! 4. Each prefix that ends before a step's settlement: number qualification,
 //!    the Session construction checks the codec does not already cover, and
-//!    the [`RequestFold`].
+//!    the [`RequestFold`], which plans each surface replacement against the
+//!    current nodes before it changes them.
 //!
 //! Rows at or after the last cut are never checked by Session construction,
-//! as in the helper. For rows of the 12 subset types, the codec already
-//! proves the envelope fields, sequence contiguity, the `surfaceOp` marker and its
-//! eligibility, source references, and the `request/header` and `tool/result`
-//! rules of `validateSessionEventData`. Its `system/message` checks imply
-//! every Session check of that type. Those obligations are delegated, not
-//! repeated.
+//! as in the helper, so a codec-admitted row there that Session construction
+//! would refuse, such as an invalid replacement, does not refuse the log. A
+//! codec-invalid row anywhere still does. For rows of the 16 subset types, the codec already
+//! proves the envelope fields, sequence contiguity, the `surfaceOp` marker and
+//! its eligibility, an exact replacement shape with earlier endpoints, the
+//! event-local source rules (non-empty, unique, earlier, none on an Assistant
+//! message), and the `request/header` and `tool/result` rules of
+//! `validateSessionEventData`. Its `system/message` checks imply every
+//! Session check of that type. The four compaction types are known log-only
+//! types: neither the codec nor Session construction applies
+//! compaction-specific payload or relationship validation, so derivation does
+//! not either, and admitting one does not establish that it is valid. Their
+//! payloads still pass the prefix number and depth qualification that stands
+//! in for Session construction's lossless JSON snapshot. Those obligations
+//! are delegated, not repeated. Locating endpoints and checking source
+//! coverage and the tool-result and system-head rules need the current nodes,
+//! so the fold runs them.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Map, Value};
 
-use crate::request::{Fact, FoldRefusal, Request, RequestFold, SurfaceKind};
+use crate::request::{Fact, FoldRefusal, Request, RequestFold, SurfaceKind, SurfaceOp};
 use crate::{
     HeaderRefusal, MAX_SAFE_INTEGER, PathPlatform, V3CodecEvent, V3RowRefusal, decode_v3_row,
     read_header_record,
 };
 
 /// The event types this subset admits: those of the committed
-/// request-reconstruction fixture.
-const SUBSET_TYPES: [&str; 12] = [
+/// request-reconstruction fixture, and the compaction records written beside
+/// surface replacements.
+const SUBSET_TYPES: [&str; 16] = [
     "agent/inbox/spliced",
     "assistant/message",
+    "compaction/end",
+    "compaction/prune",
+    "compaction/start",
+    "compaction/summary",
     "request/context",
     "request/header",
     "step/end",
@@ -104,7 +123,9 @@ pub enum ReplayRefusal {
 }
 
 /// A Session construction check that rejected a prefix event, in the order
-/// `assertCurrentLlmShape` in `packages/core/session/src/index.ts` runs them.
+/// Session construction runs them: `assertCurrentLlmShape` in
+/// `packages/core/session/src/index.ts`, then the surface replacement checks
+/// of `planSurfaceEvent` in `packages/core/session/src/surface.ts`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SeedRejection {
     /// The message is not an object with a non-empty string `id`.
@@ -139,6 +160,24 @@ pub enum SeedRejection {
     HeaderReason,
     /// A present `startsSeries` is not `true`.
     HeaderStartsSeries,
+    /// A replacement's `startSeq` is not a current surface node.
+    ReplaceStart,
+    /// A replacement's `endSeq` is not a current surface node.
+    ReplaceEnd,
+    /// A replacement's start node sits after its end node.
+    ReplaceOrder,
+    /// A replacement's `sourceEventSeqs` omit a node it shadows.
+    ReplaceSources,
+    /// A `tool/result` replacement shadows more than one node.
+    ToolResultSpan,
+    /// A `tool/result` replacement shadows a node of another type.
+    ToolResultTarget,
+    /// A `tool/result` replacement changes a member other than its result
+    /// block's `content`.
+    ToolResultRest,
+    /// A replacement covering a `system/message` at node 0 is not one
+    /// `system/message` over exactly that node.
+    SystemHead,
 }
 
 /// Input this subset does not derive, whatever TypeScript does with it.
@@ -147,14 +186,12 @@ pub enum ReplayLimit {
     /// The header is seeded. Seeded logs need an inherited cut and the codec's
     /// `finish` checks, which this subset does not implement.
     SeededHeader,
-    /// A row type outside the fixture's 12 types, including ignorable
+    /// A row type outside this subset's 16 types, including ignorable
     /// unknown types, `assistant/attempt`, tool updates, message projections,
     /// and `session/end-seed`.
     EventType,
     /// A row carries `ignorable`.
     Ignorable,
-    /// A surface row replaces a range instead of appending.
-    Replacement,
     /// A prefix payload holds a number other than a safe integer. JavaScript's
     /// rounding, -0, and underflow cannot be decided from a parsed `f64`.
     Number,
@@ -214,9 +251,6 @@ pub fn replay_requests(
         if envelope.ignorable {
             return Err(limit(Some(seq), ReplayLimit::Ignorable));
         }
-        if envelope.surface_op.is_some_and(|op| *op != "append") {
-            return Err(limit(Some(seq), ReplayLimit::Replacement));
-        }
         if !matches!(envelope.event_type, "step/start" | "assistant/message") {
             continue;
         }
@@ -248,10 +282,9 @@ pub fn replay_requests(
         if cut_set.contains(&seq) {
             snapshots.insert(seq, fold.request());
         }
-        if let Err(refusal) = admit(event).and_then(|fact| {
-            fold.append(fact)
-                .map_err(|FoldRefusal::HeaderChange| limit(Some(seq), ReplayLimit::HeaderChange))
-        }) {
+        if let Err(refusal) =
+            admit(event).and_then(|fact| fold.append(fact).map_err(|refusal| folded(seq, refusal)))
+        {
             failure = Some((seq, refusal));
             break;
         }
@@ -283,6 +316,21 @@ const fn seed(seq: u64, rejection: SeedRejection) -> ReplayRefusal {
     ReplayRefusal::Seed { seq, rejection }
 }
 
+const fn folded(seq: u64, refusal: FoldRefusal) -> ReplayRefusal {
+    let rejection = match refusal {
+        FoldRefusal::HeaderChange => return limit(Some(seq), ReplayLimit::HeaderChange),
+        FoldRefusal::ReplaceStart => SeedRejection::ReplaceStart,
+        FoldRefusal::ReplaceEnd => SeedRejection::ReplaceEnd,
+        FoldRefusal::ReplaceOrder => SeedRejection::ReplaceOrder,
+        FoldRefusal::ReplaceSources => SeedRejection::ReplaceSources,
+        FoldRefusal::ToolResultSpan => SeedRejection::ToolResultSpan,
+        FoldRefusal::ToolResultTarget => SeedRejection::ToolResultTarget,
+        FoldRefusal::ToolResultRest => SeedRejection::ToolResultRest,
+        FoldRefusal::SystemHead => SeedRejection::SystemHead,
+    };
+    seed(seq, rejection)
+}
+
 fn safe_count(value: Option<&Value>) -> Option<u64> {
     value
         .and_then(Value::as_u64)
@@ -306,18 +354,36 @@ fn admit(event: &V3CodecEvent<'_>) -> Result<Fact, ReplayRefusal> {
     let seq = envelope.seq;
     let data = envelope.data;
     qualify_payload(data).map_err(|refusal| limit(Some(seq), refusal))?;
-    let surface = |kind, message: &Value, role| {
-        let message = message_shape(message, role).map_err(|rejection| seed(seq, rejection))?;
+    // The codec proved the marker: `"append"`, or an exact replacement whose
+    // endpoints are safe integers.
+    let op = match envelope.surface_op {
+        Some(Value::Object(replace)) => SurfaceOp::Replace {
+            start: replace["startSeq"].as_u64().expect("codec-proved endpoint"),
+            end: replace["endSeq"].as_u64().expect("codec-proved endpoint"),
+            sources: envelope.source_event_seqs.clone().unwrap_or_default(),
+        },
+        _ => SurfaceOp::Append,
+    };
+    let surface = |kind, message: &Value, role, payload: &Value| {
+        message_shape(message, role).map_err(|rejection| seed(seq, rejection))?;
         Ok(Fact::Surface {
+            seq,
             kind,
-            message: message.clone(),
+            op: op.clone(),
+            // `message_shape` proved the message an object, and the codec
+            // proved a tool result's data one.
+            payload: payload.as_object().expect("object payload").clone(),
         })
     };
     match envelope.event_type {
-        "system/message" => surface(SurfaceKind::System, &data["message"], "system"),
-        "user/message" => surface(SurfaceKind::User, data, "user"),
+        "system/message" => {
+            let message = &data["message"];
+            surface(SurfaceKind::System, message, "system", message)
+        }
+        "user/message" => surface(SurfaceKind::User, data, "user", data),
         "assistant/message" => {
-            let fact = surface(SurfaceKind::Assistant, &data["message"], "assistant")?;
+            let message = &data["message"];
+            let fact = surface(SurfaceKind::Assistant, message, "assistant", message)?;
             let source = &data["message"]["source"];
             if source["kind"] != "model"
                 || !non_empty_string(source.get("provider"))
@@ -331,7 +397,7 @@ fn admit(event: &V3CodecEvent<'_>) -> Result<Fact, ReplayRefusal> {
             Ok(fact)
         }
         "tool/result" => {
-            let fact = surface(SurfaceKind::ToolResult, &data["message"], "user")?;
+            let fact = surface(SurfaceKind::ToolResult, &data["message"], "user", data)?;
             tool_result(&data["message"]).map_err(|rejection| seed(seq, rejection))?;
             Ok(fact)
         }
