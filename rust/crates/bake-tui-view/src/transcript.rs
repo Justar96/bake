@@ -940,6 +940,155 @@ fn diff_line(
     rows
 }
 
+/// Cells a call's text area needs before an edit's diff goes side by side,
+/// so each side keeps about 46 cells.
+pub const SPLIT_MIN: usize = 100;
+/// The divider between a split diff's sides.
+const DIVIDER: &str = " │ ";
+
+/// One side of a diff line, `cells` wide, its wrapped rows hung past the
+/// sign column: the sign in its colour, the code in
+/// syntax colour, dim when removed, and in a box a changed row's tint across
+/// the whole side. Without a box, the line takes green or red whole. Every
+/// row is padded to `cells`.
+fn pane(
+    text: &str,
+    lang: Option<Lang>,
+    carry: &mut Carry,
+    cells: usize,
+    look: Look,
+) -> (Vec<Line<'static>>, Option<Color>) {
+    let text = expand_tabs(text);
+    let sign = text.as_bytes().first().copied().unwrap_or(b' ');
+    let tint = if boxes(look) { diff_tint(sign) } else { None };
+    let mut rows = if boxes(look) {
+        let base = if sign == b'-' {
+            dim()
+        } else {
+            output_tone(look.tones)
+        };
+        let mut runs = vec![(0..usize::from(!text.is_empty()), diff_style(&text, look))];
+        let code = text.get(1..).unwrap_or_default();
+        runs.extend(
+            code_runs(code, lang, carry, look.tones)
+                .into_iter()
+                .map(|(range, style)| (range.start + 1..range.end + 1, style)),
+        );
+        hang_runs(&text, &runs, base, cells, 1, Vec::new(), vec![pad(1)])
+    } else {
+        hang(
+            &text,
+            cells,
+            1,
+            Vec::new(),
+            vec![pad(1)],
+            diff_style(&text, look),
+        )
+    };
+    for row in &mut rows {
+        if let Some(tint) = tint {
+            for span in &mut row.spans {
+                span.style = span.style.bg(tint);
+            }
+        }
+        let used = row.width();
+        row.spans.push(filler(cells.saturating_sub(used), tint));
+    }
+    (rows, tint)
+}
+
+/// Blank cells, tinted when the side they continue is.
+fn filler(cells: usize, tint: Option<Color>) -> Span<'static> {
+    let style = tint.map_or(Style::new(), |tint| Style::new().bg(tint));
+    Span::styled(" ".repeat(cells), style)
+}
+
+/// The rows of a diff paired for a split view: context on both sides, and a
+/// run of removed lines beside the run of added lines that follows it. A
+/// line with no partner leaves the other side empty.
+pub fn pairs(lines: &[String]) -> Vec<(Option<&str>, Option<&str>)> {
+    let sign = |line: &String| line.as_bytes().first().copied();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < lines.len() {
+        let removed = lines[i..]
+            .iter()
+            .take_while(|l| sign(l) == Some(b'-'))
+            .count();
+        let added = lines[i + removed..]
+            .iter()
+            .take_while(|l| sign(l) == Some(b'+'))
+            .count();
+        if removed + added == 0 {
+            out.push((Some(lines[i].as_str()), Some(lines[i].as_str())));
+            i += 1;
+            continue;
+        }
+        for k in 0..removed.max(added) {
+            out.push((
+                (k < removed).then(|| lines[i + k].as_str()),
+                (k < added).then(|| lines[i + removed + k].as_str()),
+            ));
+        }
+        i += removed + added;
+    }
+    out
+}
+
+/// An edit's diff side by side: the old file on the left, the new on the
+/// right, a dim divider between them, each side lexed on its own. Each side
+/// wraps within its half, and a row is as tall as its taller side, the
+/// shorter one keeping its tint. A fold reads across both sides.
+fn split_diff(
+    output: &[String],
+    lang: Option<Lang>,
+    width: usize,
+    look: Look,
+    lead: impl Fn() -> Vec<Span<'static>>,
+    more: impl Fn(usize) -> Line<'static>,
+) -> Vec<Line<'static>> {
+    let room = width.saturating_sub(BODY + DIVIDER.width());
+    let (left_cells, right_cells) = (room / 2, room - room / 2);
+    let (mut old, mut new) = (Carry::default(), Carry::default());
+    let mut lines = Vec::new();
+    let mut segment: Vec<String> = Vec::new();
+    let mut flush = |segment: &mut Vec<String>, lines: &mut Vec<Line<'static>>| {
+        for (left, right) in pairs(segment) {
+            let (l, lt) = left.map_or((Vec::new(), None), |t| {
+                pane(t, lang, &mut old, left_cells, look)
+            });
+            let (r, rt) = right.map_or((Vec::new(), None), |t| {
+                pane(t, lang, &mut new, right_cells, look)
+            });
+            for k in 0..l.len().max(r.len()) {
+                let mut spans = lead();
+                match l.get(k) {
+                    Some(row) => spans.extend(row.spans.iter().cloned()),
+                    None => spans.push(filler(left_cells, lt)),
+                }
+                spans.push(Span::styled(DIVIDER, dim()));
+                match r.get(k) {
+                    Some(row) => spans.extend(row.spans.iter().cloned()),
+                    None => spans.push(filler(right_cells, rt)),
+                }
+                lines.push(Line::from(spans));
+            }
+        }
+        segment.clear();
+    };
+    for item in preview(output) {
+        match item {
+            Preview::Line(text) => segment.push(text),
+            Preview::More(count) => {
+                flush(&mut segment, &mut lines);
+                lines.push(more(count));
+            }
+        }
+    }
+    flush(&mut segment, &mut lines);
+    lines
+}
+
 /// A diff line's colour: green for an added line, red for a removed one, and
 /// the output tone for context.
 fn diff_style(line: &str, look: Look) -> Style {
@@ -1025,6 +1174,19 @@ fn present_call(
         None
     };
     let mut carry = Carry::default();
+    // A wide edit reads side by side; a narrow one stays unified.
+    if edit && width >= SPLIT_MIN {
+        let more = |count: usize| {
+            let mut spans = gutter();
+            spans.push(Span::styled(
+                format!("{} {count} {}", marks.more, copy::MORE_LINES),
+                dim(),
+            ));
+            Line::from(spans)
+        };
+        lines.extend(split_diff(output, lang, width, look, gutter, more));
+        return lines;
+    }
     for item in preview(output) {
         match item {
             Preview::Line(text) if edit => {
@@ -2339,5 +2501,98 @@ mod tests {
             ),
             "  Bake · Rust preview"
         );
+    }
+
+    #[test]
+    fn diff_lines_pair_removed_runs_with_the_added_runs_after_them() {
+        let lines: Vec<String> = [" a", "-b", "-c", "+B", " d", "+e", "-f"]
+            .map(str::to_owned)
+            .to_vec();
+        assert_eq!(
+            pairs(&lines),
+            [
+                (Some(" a"), Some(" a")),
+                (Some("-b"), Some("+B")),
+                (Some("-c"), None),
+                (Some(" d"), Some(" d")),
+                (None, Some("+e")),
+                (Some("-f"), None),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_wide_edit_reads_side_by_side_and_a_narrow_one_unified() {
+        let rows = sample_session();
+        let index = rows
+            .iter()
+            .position(|r| matches!(r, Row::Call { tool, .. } if tool == "Edit"))
+            .unwrap();
+        let look = Look {
+            tones: Tones::TrueColor,
+            ..PLAIN
+        };
+        // 104 columns leave the call 102 cells: each side takes 47.
+        let wide = present(&rows, index, 104, look);
+        let side =
+            |left: &str, right: &str| format!("    {left:<47} │ {right}").trim_end().to_owned();
+        assert_eq!(
+            text(&wide)[3..6],
+            [
+                side(
+                    "   const fields = split(line);",
+                    "   const fields = split(line);"
+                ),
+                side(
+                    "-  if (quote) fields.push(rest);",
+                    "+  if (quote) throw new"
+                ),
+                side("", r#" SyntaxError("unterminated quote");"#),
+            ]
+        );
+        assert!(
+            wide[1..].iter().all(|l| l.width() == 104),
+            "the box fills every row"
+        );
+        // The removed side and the added side keep their own tint, the
+        // added side's down the row it wraps onto, and the left blank beside
+        // that wrap continues the removed line's tint.
+        let tint = |line: &Line, x: usize| {
+            let mut at = 0;
+            line.spans
+                .iter()
+                .find(|s| {
+                    at += s.width();
+                    at > x
+                })
+                .and_then(|s| s.style.bg)
+        };
+        let (red, green) = (
+            Some(Color::Rgb(0x3d, 0x25, 0x29)),
+            Some(Color::Rgb(0x21, 0x3a, 0x2c)),
+        );
+        assert_eq!((tint(&wide[4], 6), tint(&wide[4], 60)), (red, green));
+        assert_eq!((tint(&wide[5], 6), tint(&wide[5], 60)), (red, green));
+        // The context row keeps the box's colour on both sides.
+        assert_eq!(tint(&wide[3], 60), Some(Color::Rgb(0x25, 0x28, 0x2f)));
+        // Narrower, the same edit is unified.
+        let narrow = text(&present(&rows, index, 100, look));
+        assert_eq!(narrow[4], "    -  if (quote) fields.push(rest);");
+    }
+
+    #[test]
+    fn a_split_diff_without_a_box_keeps_the_gutter() {
+        let rows = sample_session();
+        let index = rows
+            .iter()
+            .position(|r| matches!(r, Row::Call { tool, .. } if tool == "Edit"))
+            .unwrap();
+        let lines = text(&present(&rows, index, 104, PLAIN));
+        assert!(
+            lines[2].starts_with("  │    const fields"),
+            "{:?}",
+            lines[2]
+        );
+        assert!(lines[3].starts_with("  │ -  if (quote)") && lines[3].contains("│ +  if (quote)"));
     }
 }

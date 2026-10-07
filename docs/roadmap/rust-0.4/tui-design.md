@@ -17,6 +17,7 @@ Status: proposed. The [Rust preview](../../../rust/README.md) implements the com
 - [Layout planner](#layout-planner)
 - [Transcript viewport](#transcript-viewport)
 - [Code mode](#code-mode)
+- [Side-by-side diff](#side-by-side-diff)
 - [Syntax colour](#syntax-colour)
 - [Architecture](#architecture)
 - [Preview status](#preview-status)
@@ -282,6 +283,22 @@ A `run_code` call, a program the model writes in TypeScript and runs in the conf
 
 The preview draws one finished sample script. These remain: a running script's live window, which keeps the head and the newest calls when the live region is short (the TypeScript `fittedAction`), approvals raised by a script's calls, and the session log as the source of the calls.
 
+## Side-by-side diff
+
+An edit's diff is side by side when the call's text area is at least 100 cells wide, so each side keeps about 46 cells, and unified below that; a resize switches between them on the next frame.
+
+```
+  ✓ Edit: src/parser.ts  +1 -1
+       const fields = split(line);                     │    const fields = split(line);
+    -  if (quote) fields.push(rest);                   │ +  if (quote) throw new SyntaxError("unterminated
+                                                       │  quote");
+       return fields;                                  │    return fields;
+```
+
+- **Pairing.** A context line is on both sides. A run of removed lines sits beside the run of added lines that follows it, line by line; a line with no partner leaves the other side blank. A fold, `⋯ N more lines`, spans both sides.
+- **Wrapping.** Each side wraps within its half and never truncates. Its wrapped rows hang one cell past the sign column, so the `+` and `-` column stays clear. A row is as tall as its taller side, and the shorter side keeps its tint down the row.
+- **Colour.** In a box, a removed side is tinted red and an added side green, each across its whole half, with the box's grey framing them; the divider `│` is dim. Without a box, each side's line takes green or red whole.
+
 ## Syntax colour
 
 Colour marks code, so it is used only where the transcript shows code in a known language, and every other row stays in the output tone. A lexer splits each line into tokens without changing a byte, so colour cannot change a cell width or a wrap; a token a wrap splits keeps its colour on every row.
@@ -291,7 +308,7 @@ Colour marks code, so it is used only where the transcript shows code in a known
 | A code-mode script's source | TypeScript | Lexed in order across every line, so a block comment or template string that opens on a folded line still colours the lines shown after it |
 | What a script returned | TypeScript | A JavaScript value; a failed script's error stays red |
 | A shell call's command | Shell | The program, its flags, strings, variables, and operators |
-| An edit's diff | From the file's extension | TypeScript and JavaScript, Rust, or shell; any other file is plain |
+| An edit's diff | From the file's extension | TypeScript and JavaScript, Rust, or shell; any other file is plain. Side by side, each side is lexed on its own, as the two versions of the file |
 | Program output, answers, reasoning | none | Not code in a known language |
 
 | Token | Colour | Sixteen colours |
