@@ -191,6 +191,8 @@ pub enum PreviewExit {
 /// What the loop receives from the threads that feed it.
 enum Source {
     Msg(Msg),
+    // Only Unix forwards signals; elsewhere, only tests send one.
+    #[cfg_attr(not(unix), allow(dead_code))]
     Signal(i32),
     Failed(io::Error),
 }
@@ -592,11 +594,16 @@ mod signals {
 
     use super::Source;
 
-    pub struct Forwarder;
+    /// Forwards nothing: the console's Ctrl+C reaches the preview as a key
+    /// in raw mode. It holds its sender for as long as the Unix forwarder's
+    /// thread would, so the channel closes at the same point on every OS.
+    pub struct Forwarder {
+        _sender: Sender<Source>,
+    }
 
     impl Forwarder {
-        pub fn start(_sender: Sender<Source>) -> io::Result<Self> {
-            Ok(Self)
+        pub fn start(sender: Sender<Source>) -> io::Result<Self> {
+            Ok(Self { _sender: sender })
         }
     }
 }
