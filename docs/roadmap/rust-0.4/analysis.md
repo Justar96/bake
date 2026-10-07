@@ -63,6 +63,8 @@ Other hazards include safe-integer limits, negative zero rejection, missing fiel
 
 Cordis provides scoped registrations, service availability, ordered events, and effect disposal. The replacement needs equivalent ownership rules, not a global bag of callbacks. Every agent, process, request, watcher, timer, VM, and subscription needs one owner and a completion signal. Cancellation without joining owned work can leave a child writing after the parent has closed its session or released the terminal. The source obligations are summarized in [defensive patterns](../../defensive-patterns.md).
 
+Rust can organize these guarantees around fewer owners and explicit interfaces. For example, one agent task can append an inbox event, update its inbox, and then publish the resulting view. Keeping that sequence within the owner prevents the frontend from observing a partially updated view.
+
 Keep durable event order separate from task completion order. A Rust channel does not by itself preserve the scheduler's policy checks, exclusive barriers, or model-ordered commits. Crash recovery must distinguish a call that never started from one with unknown external effects; automatically retrying both could duplicate writes.
 
 ### Provider migration exceeds three HTTP clients

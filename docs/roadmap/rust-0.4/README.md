@@ -65,7 +65,9 @@ flowchart TD
     SESSION --> STORAGE[Generation storage and writer lease]
 ```
 
-Preserve behavior, without reproducing all 157 package boundaries. An agent task owns inbox transitions and durable event ordering. Bounded concurrent work returns results to that owner; only the owner commits them. Cancellation must stop new work and await owned work. Explicit ordered middleware must preserve Cordis waterfall delegation and halt behavior. Disposing a Rust object alone is not proof that asynchronous children have stopped.
+Design the native core around ownership and small typed interfaces. Use Bake's TypeScript implementation and the upstream [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) and [pi](https://github.com/earendil-works/pi) repositories as references for behavior and implementation. Upstream remains read-only; Bake chooses its own Rust crate, module, and composition boundaries. Preserve behavior, released data, model-visible contracts, and the [support decisions](scope-00/support.md#decision-register). An agent task owns inbox transitions and durable event ordering. Bounded concurrent work returns results to that owner; only the owner commits them. Cancellation must stop new work and await owned work. Native extension points must preserve each shipped consumer's ordering, rewrite, delegation, and halt behavior. Qualify the composition mechanism against those consumers. Disposing a Rust object alone is not proof that asynchronous children have stopped.
+
+Historical Session codecs, adjacent migrations, and exact legacy diagnostics belong at the Session import boundary. The core consumes admitted current-format events. Conformance oracles scoped to a TypeScript function qualify that boundary; runtime interfaces follow their consumers and the proofs in each scope.
 
 Candidate foundations are Cargo, Serde, Tokio, and a Ratatui/Crossterm terminal implementation. Cargo supports a shared workspace lockfile; Serde permits explicit wire representations; Tokio documents cancellation followed by waiting for task completion; Ratatui separates rendering from terminal backends. These are starting points for scope 01 and scope 14 experiments, not evidence of Bake compatibility. See the official [Cargo workspace reference](https://doc.rust-lang.org/cargo/reference/workspaces.html), [Serde representation reference](https://serde.rs/enum-representations.html), [Tokio shutdown guide](https://tokio.rs/tokio/topics/shutdown), and [Ratatui backend guide](https://ratatui.rs/concepts/backends/). Pin versions, supported Rust version, platform features, and licenses only after those experiments.
 
@@ -156,9 +158,9 @@ Each scope below specifies implementation, review order, and observable proof. T
 
 ### 05 — Composition, settings, credentials, and lifecycle
 
-**Implement:** typed service registration, agent-scoped resolution, reversible registration handles, ordered middleware, asynchronous close, settings watching, credential precedence, managed secret writes, profile layers, preset configuration, and known legacy names. Define validated native configuration and the detection and migration reporting for dynamic JavaScript and npm profiles, which 0.4 does not run. Preserve whole-row patch replacement versus field-wise settings merging.
+**Implement:** scoped ownership of dependencies and contributions, their agent-scoped visibility and availability, ordered extension points, asynchronous close, settings watching, credential precedence, managed secret writes, profile layers, preset configuration, and known legacy names. Define validated native configuration and the detection and migration reporting for dynamic JavaScript and npm profiles, which 0.4 does not run. Preserve whole-row patch replacement versus field-wise settings merging.
 
-**PR order:** lifecycle/services → static configuration and profiles → settings/credentials → migration reporting for unsupported dynamic constructs. Detect unsupported constructs before an agent starts, without executing them or rewriting the profile.
+**PR order:** lifecycle/ownership → static configuration and profiles → settings/credentials → migration reporting for unsupported dynamic constructs. Detect unsupported constructs before an agent starts, without executing them or rewriting the profile.
 
 **Proof:** layer precedence and reload tests, dependency loss during a call, re-registration without duplicate listeners, partial-startup failure, scoped visibility, canceled secret prompts, secret redaction, file permissions, and old config surviving rollback. Test that unsupported custom profiles are refused through their real entry path, with no file changed. Anchors: [boot](../../../packages/boot/app-boot/tests/), [credentials](../../../packages/credentials/credentials-local/tests/), [settings](../../../packages/settings/settings-file/tests/), and [presets](../../../packages/preset/agent-presets/tests/).
 
@@ -166,7 +168,7 @@ Each scope below specifies implementation, review order, and observable proof. T
 
 ### 06 — Provider-neutral model runtime
 
-**Implement:** immutable prepared calls, message/block assembly, live versus durable streams, finish/failure normalization, token accounting, route metadata, retry middleware, deadlines, and cancellation. Keep the distinction between provider failures and defects in runtime consumers.
+**Implement:** immutable prepared calls, message/block assembly, live versus durable streams, finish/failure normalization, token accounting, route metadata, retry scheduling, deadlines, and cancellation. Keep the distinction between provider failures and defects in runtime consumers.
 
 **PR order:** model types/assembly → streamed runtime → retry/default-resolution integration.
 
