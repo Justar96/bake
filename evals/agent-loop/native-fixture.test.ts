@@ -235,8 +235,10 @@ describe('runNativeFixture', () => {
       for (const observed of [arm, check]) {
         expect(observed.cwd).toBe(join(runRoot, 'workspace'))
         expect(observed.paths).toEqual(paths)
+        // CoreFoundation can add its text-encoding setting after exec on macOS.
+        const names = observed.names.filter(name => process.platform !== 'darwin' || name !== '__CF_USER_TEXT_ENCODING')
         // On Windows libuv adds required system variables such as SYSTEMROOT to any child environment.
-        if (posix) expect(observed.names).toEqual(allowed)
+        if (posix) expect(names).toEqual(allowed)
         else expect(observed.names.filter(name => /KEY|TOKEN|SECRET|PASSWORD/i.test(name))).toEqual([])
       }
     }
