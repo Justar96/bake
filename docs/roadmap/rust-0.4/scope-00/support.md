@@ -4,14 +4,14 @@
 
 This page lists what Bake ships today, what the Rust 0.4 line must preserve, and which questions only the product owner can answer. The inventory comes from source at `origin/develop` `ae5eb51ab6` and the `v0.3.8` tag `dcb26d756e`, read on 2026-10-07. It belongs to [scope 00](README.md) of the [Rust migration roadmap](../README.md).
 
-The default is conservative: every behavior the final 0.3 release ships is the 0.4.0 parity target, and nothing is dropped without an approved, documented support change. This page tests nothing; isolated qualification probes do not constitute a native implementation. Provider, platform, and Desktop rows say what evidence is missing; none claims native parity.
+The default is conservative: every behavior the final 0.3 release ships is the 0.4.0 parity target, and nothing is dropped without an approved, documented support change. The approved exception is the whole-profile Node/TypeScript runtime: 0.4 ships Rust only, so custom Cordis/JavaScript profiles need migration ([D5](#decision-register)). This page tests nothing; isolated qualification probes do not constitute a native implementation. Provider, platform, and Desktop rows say what evidence is missing; none claims native parity.
 
 ## Table of Contents
 
 - [How to read decisions](#how-to-read-decisions)
 - [Decision register](#decision-register)
 - [Shipped surface](#shipped-surface)
-- [Compatibility and native extension strategy](#compatibility-and-native-extension-strategy)
+- [Profile migration and native extension strategy](#profile-migration-and-native-extension-strategy)
 - [Unreleased develop work](#unreleased-develop-work)
 - [Release lines and support window](#release-lines-and-support-window)
 - [Incremental delivery under the develop to main rule](#incremental-delivery-under-the-develop-to-main-rule)
@@ -39,16 +39,16 @@ Scope 01 may start on the settled rows. Scope 00 stays open until every **Owner 
 | D2 | Parity target | Scope-00 default | Every behavior the final 0.3 release ships is the 0.4.0 target. A narrower target needs an owner-approved support change, release notes, and a migration path. |
 | D3 | Removed products | Decided by request | The web client, upstream desktop app, ACP, Python SDK, docs site, and upstream automation stay removed ([AGENTS](../../../../AGENTS.md#porting-from-upstream)). The `desktop` bundle is Bake's own and is kept. |
 | D4 | Session data | Scope-00 default | Keep Session format 3, its adjacent migrations, and the retired vocabulary. A Rust port is not a reason for a format change. |
-| D5 | Legacy whole-profile runtime | Scope-00 default for development; **Owner decision** for shipping | During development, the TypeScript runtime stays runnable. For 0.4.0, the recommendation is to ship it in the archive as an explicit, labelled compatibility runtime for the 0.3 support window ([strategy](#compatibility-and-native-extension-strategy)). |
+| D5 | TypeScript runtime and custom profiles | Decided by request, 2026-10-07 | The product owner approved: "Ship Rust only; custom JavaScript profiles would need migration." 0.4 ships no bundled or explicitly selectable Node/TypeScript compatibility runtime. During development the TypeScript runtime stays runnable as the comparison oracle. A custom Cordis/JavaScript profile needs migration; Bake never silently rewrites or executes a construct the native runtime does not support ([strategy](#profile-migration-and-native-extension-strategy)). This decision alone drops no provider, Desktop support, `run_code` language, legacy name, persisted data, or update and rollback obligation. |
 | D6 | Native extension protocol | **Owner decision** | Recommendation: 0.4.0 offers MCP servers and hook processes as its native extension surfaces and adds no new plugin API. A versioned out-of-process protocol is designed in a later 0.4.x release, around named consumers. |
-| D7 | Cordis preset and Cordis tooling | **Owner decision** | Recommendation: the `cordis` preset, `cordis_inspect_*`, `plugin_manager`, and the Cordis host runner run only in the legacy runtime in 0.4.0. They remain available there, so this is not a removal. |
-| D8 | Provider breadth | Scope-00 default for the target; **Owner decision** for tiers | Every route reachable today is the target. The [provider section](#provider-routes-and-authentication) recommends qualification tiers and a visible legacy fallback for unported catalog APIs. |
-| D9 | Bake Desktop launch | **Owner decision**, with the Desktop maintainers | Keep `dsh --profile desktop` and protocol version 1. Recommendation: Desktop spawns the native executable over stdio, or a small JavaScript utility-process shim bridges `parentPort` to that stdio. Either path needs a test with the real Desktop consumer. |
+| D7 | Cordis preset and Cordis tooling | **Owner decision** | The `cordis` preset, `cordis_inspect_*`, `plugin_manager`, the Cordis host runner, and `bake plugin` operate on JavaScript plugins that 0.4 cannot run ([D5](#decision-register)). Each needs a designed migration or native replacement, or a separately approved support change under [D2](#decision-register). None is approved for removal yet. |
+| D8 | Provider breadth | Scope-00 default for the target; **Owner decision** for tiers | Every route reachable today is the target. The [provider section](#provider-routes-and-authentication) recommends qualification tiers. Each family needs native qualification or a separately approved support change; no Node fallback discharges it. |
+| D9 | Bake Desktop launch | **Owner decision**, with the Desktop maintainers | Keep `dsh --profile desktop` and protocol version 1. How Desktop launches the native executable is open; candidates include spawning it over stdio or bridging Electron `parentPort` to that stdio, and none is chosen. Bake's TypeScript runtime cannot serve as the bridge ([D5](#decision-register)). The chosen path needs a test with the real Desktop consumer. |
 | D10 | Legacy names | Scope-00 default; removal timing is an **Owner decision** | Keep the `dsh` alias, `DSH_*` fallbacks, `dsh.profile`, project `.dsh/skills`, and legacy package aliases through the 0.3 support window. Never remove them in the cutover PR. |
 | D11 | Default home for direct entries | **Owner decision** | The release launcher resolves `BAKE_HOME`, then `DSH_HOME`, then `~/.bake`. The shared helper still defaults to `~/.dsh` when no launcher has set either variable. Recommendation: native uses the launcher rule everywhere and never reads `~/.dsh` implicitly. |
 | D12 | Unreleased `develop` work | **Owner decision** | Recommendation: release it as the last feature-bearing 0.3 patch (0.3.9), after the gates in [the triage table](#unreleased-develop-work). Then freeze 0.3 to bug fixes and use that tag as the oracle. |
 | D13 | 0.3 maintenance channel and window | **Owner decision**; duration open | Recommended design in [release lines](#release-lines-and-support-window). Implement it in a separate governance PR before the 0.4 default switch. |
-| D14 | Packaging and Node | **Owner decision** | Recommendation: native default needs no Node. The legacy runtime and the old-updater transition keep a Node-launchable `apps/cli/lib/bin.js` and the installer's existing Node 24 requirement for that path only. |
+| D14 | Packaging and Node | **Owner decision** for the transition | Shipped 0.4 artifacts are Rust only and need no Node ([D5](#decision-register)). The transition from released 0.3 launchers and updaters, which launch-check `apps/cli/lib/bin.js` with Node, is not designed yet; it must end in Rust-only shipped artifacts ([packaging](#packaging-update-and-rollback)). |
 | D15 | Telemetry and feedback | Scope-00 default | Keep export disabled without a configured collector, both opt-out spellings, local-only feedback, and `BAKE_NO_UPDATE_CHECK`. |
 | D16 | Platforms | Scope-00 default | The five release targets are the native matrix. Minimum OS, kernel, libc, and macOS versions are missing evidence. |
 | D17 | Code mode | Scope-00 default | `run_code` keeps its language: model-written TypeScript in a confined QuickJS VM with the same bindings and limits. |
@@ -57,7 +57,7 @@ Scope 01 may start on the settled rows. Scope 00 stays open until every **Owner 
 
 ## Shipped surface
 
-Each subsection lists one product surface, links its source, and gives its 0.4 disposition. "Native parity" means the Rust implementation must match current behavior. "Legacy runtime" means the whole profile runs in the retained TypeScript runtime, with a visible label.
+Each subsection lists one product surface, links its source, and gives its 0.4 disposition. "Native parity" means the Rust implementation must match current behavior. "Migration" means 0.4 cannot run the surface as it is, because it needs the Node/TypeScript runtime that 0.4 does not ship ([D5](#decision-register)); its migration or replacement path is still to be designed.
 
 ### Profiles
 
@@ -68,7 +68,7 @@ Each subsection lists one product surface, links its source, and gives its 0.4 d
 | `tui` | `bake-base`, `bake-tui-app` | `bake tui`; inline or fullscreen Ink terminal | [App tests](../../../../apps/tui/packages/app/tests/), the 42 scenarios in the [PTY driver](../../../../apps/tui/scripts/pty-smoke.ts), and [preset model surfaces](../../../../apps/tui/packages/app/tests/expected/model-surface/) | Native parity (scopes 13–15) |
 | `headless` | `bake-base`, `bake-headless` | `bake headless <task>`; answer on stdout, or NDJSON events with `--json`; diagnostics on stderr | [Built-profile tests](../../../../apps/cli/tests/profiles/) and [model surface](../../../../apps/cli/tests/profiles/expected/model-surface/headless.md) | Native parity (scopes 09, 13) |
 | `desktop` | `bake-base`, `bake-desktop` | The separate Bake Desktop app runs `dsh --profile desktop`; NDJSON stdio or Electron `parentPort` ([transport](../../../../packages/bundle/desktop/src/transport.ts)), `PROTOCOL_VERSION = 1` ([protocol](../../../../packages/bundle/desktop/src/protocol.ts)) | [Desktop tests](../../../../packages/bundle/desktop/tests/) and [model surface](../../../../apps/cli/tests/profiles/expected/model-surface/desktop.md); the external consumer is untested | Native parity plus a launch adapter (scope 13, [D9](#decision-register)) |
-| Custom profile | User-chosen bundles, user patch layer, pnpm-installed plugins | `bake <name>` | [Profile tests](../../../../packages/boot/app-boot/tests/profile.spec.ts) | Native when every row is native-recognized; otherwise legacy runtime ([strategy](#compatibility-and-native-extension-strategy)) |
+| Custom profile | User-chosen bundles, user patch layer, pnpm-installed plugins | `bake <name>` | [Profile tests](../../../../packages/boot/app-boot/tests/profile.spec.ts) | Native when every row is native-recognized; otherwise refused before startup and reported for migration ([strategy](#profile-migration-and-native-extension-strategy)) |
 
 ### Presets and model-facing tools
 
@@ -80,7 +80,7 @@ The [shipped presets](../../../../packages/preset/agent-presets/presets/) are `s
 | `headless` and `desktop` (20 each) | The `standard` set without `ask_user_question` | Native parity |
 | `ptc` (1) | `run_code`, which exposes the standard tools as bindings | Native parity, keeping the embedded JavaScript engine ([D17](#decision-register)) |
 | `minimal` (1) | `bash` from the persistent shell (`pwsh` on Windows) | Native parity |
-| `cordis` (24) | The `standard` set plus `cordis_inspect_list`, `cordis_inspect_query`, and `plugin_manager` | Legacy runtime in 0.4.0 ([D7](#decision-register)) |
+| `cordis` (24) | The `standard` set plus `cordis_inspect_list`, `cordis_inspect_query`, and `plugin_manager` | Migration ([D7](#decision-register)) |
 | MCP tools, conditional | `mcp__<server>__<tool>` when a profile configures [MCP servers](../../../../packages/mcp/mcp-client/README.md); none ship enabled | Native parity |
 
 The tools come from these packages: [shell](../../../../packages/shell/), [filesystem](../../../../packages/fs/), [jobs](../../../../packages/jobs/), [goals](../../../../packages/goal/), [subagents](../../../../packages/subagent/), [skills](../../../../packages/skill/), [user questions](../../../../packages/interaction/), [web](../../../../packages/web/), [code mode](../../../../packages/ptc-runtime/), [Cordis tooling](../../../../packages/extensions/), [plugin manager](../../../../packages/boot/plugin-manager/), and [MCP](../../../../packages/mcp/). Any change to their text or schemas needs a paired eval record under the [eval policy](../../../../evals/README.md).
@@ -92,7 +92,7 @@ Both bin names run [one launcher](../../../../apps/cli/src/args.ts), which parse
 | Owner | Surface | Disposition |
 |---|---|---|
 | Launcher | `bake`/`dsh`, `[--profile] <name>`, `--from-default-profile <name>`, repeatable `--patch <path>`, `--dump-config`, `--dump-default-config`, `--dump-config-schema`, `-V/--version`, launcher `-h` only when no profile is given, hidden `--self-check` | Native parity |
-| `plugin` | `bake plugin --profile <name> <pnpm args>` forwards to host pnpm and reports exit 127 when pnpm is absent ([source](../../../../apps/cli/src/plugin.ts)) | Legacy runtime; native profiles reject npm plugins before boot ([strategy](#compatibility-and-native-extension-strategy)) |
+| `plugin` | `bake plugin --profile <name> <pnpm args>` forwards to host pnpm and reports exit 127 when pnpm is absent ([source](../../../../apps/cli/src/plugin.ts)) | Migration ([D7](#decision-register)); native profiles reject npm plugins before boot ([strategy](#profile-migration-and-native-extension-strategy)) |
 | `update` | `bake update`, `--check` (exit 0 when current, 10 when newer, 1 on failure), `--rollback` | Native parity plus transition work ([packaging](#packaging-update-and-rollback)) |
 | `tui` app | `--resume <id>`, hidden `--session-id`, `--preset <name>`, `--screen inline\|fullscreen` ([source](../../../../apps/tui/packages/app/src/startup.ts)) | Native parity |
 | `headless` app | `[task...]`, `-` reads stdin, `--json`, `--resume <id>`, hidden `--session-id`; a busy session exits 75 ([source](../../../../packages/bundle/headless/src/startup.ts), [test](../../../../apps/cli/tests/headless-session-in-use.spec.ts)) | Native parity |
@@ -127,7 +127,7 @@ Bake routes every model request through [`bake-llm-pi-ai`](../../../../packages/
 **Recommendation ([D8](#decision-register), owner decision).**
 
 - **Tier 1, required for the 0.4.0 default:** `deepseek-official`, the three generic protocols with custom base URLs and proxies, CLIProxyAPI, environment and managed-key resolution, and every OAuth flow the terminal offers. Each needs sanitized wire fixtures and a key-gated smoke test.
-- **Tier 2, catalog APIs outside the generic three:** port each family natively, or keep it on the legacy runtime. A native session that selects an unported route, at startup or through `/model`, must refuse visibly and name the legacy command. It must never silently re-route. Dropping a family is a support change under [D2](#decision-register).
+- **Tier 2, catalog APIs outside the generic three:** port and qualify each family natively. Until a family is qualified, a native session that selects it, at startup or through `/model`, must refuse visibly and never silently re-route. No Node fallback exists in 0.4 ([D5](#decision-register)). Dropping a family is a support change under [D2](#decision-register).
 - No route is claimed as qualified until its own fixtures and smoke tests pass. Missing credentials are recorded as missing evidence.
 
 ### Executable YAML, custom plugins, and extensions
@@ -137,11 +137,11 @@ Profiles are Cordis compositions. Bundle and user patch layers accept `!!js` exp
 | Construct | Current behavior | Disposition |
 |---|---|---|
 | Shipped bundle `!!js` | Evaluated at load | Native: translate the exact shipped expressions into typed configuration. Pin them by row id and source text, so any edit to a bundle is detected. |
-| User `!!js`, unknown package rows, custom bundles | Evaluated or loaded by Cordis | Legacy runtime, detected before any agent starts and before any profile file is rewritten |
-| npm plugins installed with `bake plugin` | Resolved through the profile's `node_modules` and the shared fallback | Legacy runtime |
+| User `!!js`, unknown package rows, custom bundles | Evaluated or loaded by Cordis | Migration; detected and reported before any agent starts, without executing or rewriting the construct |
+| npm plugins installed with `bake plugin` | Resolved through the profile's `node_modules` and the shared fallback | Migration ([D7](#decision-register)) |
 | [Hooks](../../../../packages/hooks/): Claude Code and Codex configurations | Optional plugins that run external hook processes | Native parity; external processes are already language-neutral |
 | [MCP client](../../../../packages/mcp/mcp-client/README.md) | Optional rows; stdio and Streamable HTTP | Native parity |
-| [Plugin manager](../../../../packages/boot/plugin-manager/README.md), [Cordis host runner](../../../../packages/extensions/cordis-host-runner/README.md), [Cordis tools](../../../../packages/extensions/tool-cordis/README.md) | JavaScript runtime inspection and profile mutation | Legacy runtime ([D7](#decision-register)) |
+| [Plugin manager](../../../../packages/boot/plugin-manager/README.md), [Cordis host runner](../../../../packages/extensions/cordis-host-runner/README.md), [Cordis tools](../../../../packages/extensions/tool-cordis/README.md) | JavaScript runtime inspection and profile mutation | Migration ([D7](#decision-register)) |
 
 ### Settings, home, environment, and legacy names
 
@@ -205,25 +205,25 @@ The current archive contains the Node launcher. The installers ([sh](../../../..
 
 Obligations for 0.4:
 
-1. A released 0.3 updater must be able to install, launch-check, and roll back the 0.4.0 archive. Either keep a Node-launchable `apps/cli/lib/bin.js` that passes `--self-check`, or ship a preparatory 0.3.x updater first. Both need a test that starts from the oldest supported 0.3 updater.
+1. A released 0.3 updater must be able to install, launch-check, and roll back the 0.4.0 archive, and the route must still leave the shipped 0.4 artifacts Rust only ([D14](#decision-register)). A preparatory 0.3.x updater is one candidate; the route is not chosen. It needs a test that starts from the oldest supported 0.3 updater.
 2. `bake update --rollback` from 0.4 must return to a working 0.3 release, and that release must read every [persisted domain](#persisted-data) 0.4 wrote.
 3. The `dsh` link, `dsh.cmd`, and user-owned aliases survive install, update, and rollback.
 4. No archive may overwrite `latest.json` with an older version, and a maintenance manifest can never replace the stable one ([D13](#decision-register)).
 
-## Compatibility and native extension strategy
+## Profile migration and native extension strategy
 
-This is the recommended design for [D5](#decision-register), [D6](#decision-register), and [D7](#decision-register). The legacy runtime is chosen per profile, before startup, and labelled. It is never chosen per plugin and never silent.
+[D5](#decision-register) is decided: 0.4 ships Rust only, and a profile the native runtime cannot run needs migration. [D6](#decision-register) and [D7](#decision-register) remain recommendations. The TypeScript runtime stays runnable in development as the comparison oracle; no shipped command selects it.
 
-**Profile classification.** Before any agent starts, the native launcher composes the profile's layers and checks every row and expression against a closed table of native-recognized rows. Each row in that table is pinned by package name, row id, and the exact source text of any shipped `!!js`. If every row matches, the profile runs natively. Otherwise the launcher reports the first unrecognized construct and its file. It runs the legacy runtime only when the user has opted that profile in, through a mechanism scope 05 will define. `--dump-config` and `--self-check` report which runtime a profile selects.
+**Profile classification.** Before any agent starts, the native launcher composes the profile's layers and checks every row and expression against a closed table of native-recognized rows. Each row in that table is pinned by package name, row id, and the exact source text of any shipped `!!js`. If every row matches, the profile runs natively. Otherwise the launcher reports the first unrecognized construct and its file and does not start the profile. It never executes the construct and never rewrites the profile to remove it. The migration path for such profiles is still to be designed. `--dump-config` and `--self-check` report whether a profile is native-recognized.
 
 **Boundaries that hold regardless of implementation:**
 
-- **Native code cannot transparently host arbitrary Cordis JavaScript.** Cordis plugins depend on scoped services, waterfall events, the Loader, and in-process module identity. A JSON-RPC shim around individual plugins would not reproduce those semantics. Arbitrary plugins therefore run only inside a whole legacy profile.
-- **The Electron utility process needs integration work.** Bake Desktop can deliver messages through `process.parentPort`, which exists only inside an Electron utility process running JavaScript. A native executable cannot be that process. Desktop must spawn the native child over stdio, or a JavaScript shim must run in the utility process and bridge `parentPort` to the native child's stdio. Either choice needs a test against the real Desktop consumer.
+- **Native code cannot transparently host arbitrary Cordis JavaScript.** Cordis plugins depend on scoped services, waterfall events, the Loader, and in-process module identity. A JSON-RPC shim around individual plugins would not reproduce those semantics. Arbitrary plugins therefore need migration to a native surface; 0.4 does not run them.
+- **The Electron utility process needs integration work.** Bake Desktop can deliver messages through `process.parentPort`, which exists only inside an Electron utility process running JavaScript. A native executable cannot be that process. The launch path is open ([D9](#decision-register)); whichever path the Desktop maintainers approve needs a test against the real Desktop consumer.
 - **Code mode stays JavaScript.** `run_code` executes model-written TypeScript in a confined QuickJS VM ([codemode](../../../../packages/ptc-runtime/ptc-runtime-codemode/README.md)). A native host embeds an equivalent confined engine. It does not change the language the model writes.
-- **Legacy is not parity.** Work that runs in the legacy runtime never closes a native scope. A native profile never delegates to it internally.
+- **Development comparison.** Work that runs in the TypeScript runtime never closes a native scope. A native profile never delegates to it.
 
-**Native extension surfaces in 0.4.0:** MCP servers (stdio and Streamable HTTP) and hook processes. Both are already out-of-process and language-neutral. A versioned native plugin protocol, covering tool, command, and prompt contributions with explicit lifetimes, is recommended for a later 0.4.x release. It must be designed around named consumers, and its catalog must be generated from its real interface, never from the Cordis API catalog.
+**Recommended native extension surfaces in 0.4.0 ([D6](#decision-register)):** MCP servers (stdio and Streamable HTTP) and hook processes. Both are already out-of-process and language-neutral. A versioned native plugin protocol, covering tool, command, and prompt contributions with explicit lifetimes, is recommended for a later 0.4.x release. It must be designed around named consumers, and its catalog must be generated from its real interface, never from the Cordis API catalog.
 
 ## Unreleased develop work
 
@@ -272,15 +272,15 @@ Each row is one support entry. Rows link to their current oracle tests, and scop
 
 | ID | Entry | Current oracle | Disposition | Scope | Acceptance evidence | Gap |
 |---|---|---|---|---|---|---|
-| A1 | `tui` profile, all four presets | PTY driver, app tests, preset model surfaces | Native; `cordis` preset legacy | 13–15 | Every PTY scenario mapped to a native counterpart with the same success condition; byte-identical model surface per preset | No Windows ConPTY scenarios |
+| A1 | `tui` profile, all four presets | PTY driver, app tests, preset model surfaces | Native; `cordis` preset needs migration ([D7](#decision-register)) | 13–15 | Every PTY scenario mapped to a native counterpart with the same success condition; byte-identical model surface per preset | No Windows ConPTY scenarios |
 | A2 | `headless` profile | Built-profile tests, headless model surface | Native | 09, 13 | Flags, stdin, `--json` events, exit 75, signal exits, resume | None identified |
-| A3 | `desktop` profile and protocol v1 | Desktop tests, desktop model surface | Native plus launch adapter | 13 | ready/init/message/cancel/shutdown, approval withdrawal, spans, launched by the real Desktop app | External consumer never tested |
-| A4 | Launcher, `plugin`, `update`, dumps, `--self-check` | [CLI tests](../../../../apps/cli/tests/), help snapshot | Native; `plugin` legacy | 13, 16 | Help, errors, and exit codes match; self-check runs under an old updater | — |
+| A3 | `desktop` profile and protocol v1 | Desktop tests, desktop model surface | Native plus Desktop launch integration ([D9](#decision-register)) | 13 | ready/init/message/cancel/shutdown, approval withdrawal, spans, launched by the real Desktop app | External consumer never tested |
+| A4 | Launcher, `plugin`, `update`, dumps, `--self-check` | [CLI tests](../../../../apps/cli/tests/), help snapshot | Native; `plugin` needs migration ([D7](#decision-register)) | 13, 16 | Help, errors, and exit codes match; self-check runs under an old updater | — |
 | A5 | Model-facing tools and text | Model-surface snapshots, tool package tests | Native, byte-identical | 08–12 | Exact schemas, results, and errors; paired eval record | Windows `pwsh` roster not snapshotted |
 | A6 | Generic protocols, `deepseek-official`, CLIProxyAPI | [pi-ai tests](../../../../packages/llm/llm-pi-ai/tests/), [CLIProxyAPI test](../../../../apps/tui/packages/app/tests/cliproxyapi.test.ts) | Native, Tier 1 | 06–07 | Wire fixtures, local stream replay, key-gated smoke tests | No live smoke on record |
-| A7 | Catalog APIs outside the generic three | Catalog tests only | Tier 2: native port or legacy, owner decision | 07 | Per-family fixtures, or an approved support change | No per-family fixtures |
+| A7 | Catalog APIs outside the generic three | Catalog tests only | Tier 2: native port, or an approved support change | 07 | Per-family fixtures, or an approved support change | No per-family fixtures |
 | A8 | Login: API key, OAuth, device code | [login spec](../../../../packages/llm/llm-pi-ai/tests/login.spec.ts), [terminal login](../../../../apps/tui/packages/app/tests/login.test.ts) | Native | 05, 07, 15 | Cancel exposes no secret; refresh races; failed refresh | No recorded provider OAuth wire flow |
-| A9 | Profile composition, `!!js`, npm plugins | [boot tests](../../../../packages/boot/app-boot/tests/), [plugin manager tests](../../../../packages/boot/plugin-manager/tests/) | Native classification; legacy runtime for the rest | 05, 12 | Unrecognized construct detected before any agent or file write; real fixture plugins load, unload, and reload in legacy | No corpus of real third-party plugins |
+| A9 | Profile composition, `!!js`, npm plugins | [boot tests](../../../../packages/boot/app-boot/tests/), [plugin manager tests](../../../../packages/boot/plugin-manager/tests/) | Native classification; migration for the rest | 05, 12 | Unrecognized construct detected before any agent or file write, and never executed or rewritten; real fixture plugins exercise the chosen migration path | No corpus of real third-party plugins |
 | A10 | Home, environment, legacy names | Home-path and launcher tests, legacy map test | Native parity | 05, 13 | Isolated-home launcher runs, blank values, `DSH_*`-only environments | — |
 | A11 | Persisted domains | Persistence, projection cache, credentials, settings, attachment tests | Native read and write; 0.3 reads 0.4 output | 02–05, 10 | Two-direction tests per domain against every release in the rollback set | Rollback set not chosen |
 | A12 | Sandbox per OS | [sandbox](../../../../packages/sandbox/sandbox-local/tests/), [subprocess](../../../../packages/subprocess/subprocess-local/tests/) | Native parity | 04 | Real denied effects and no surviving processes on each OS and backend | Landlock-only and Windows host runs |
@@ -296,13 +296,13 @@ Each row is one support entry. Rows link to their current oracle tests, and scop
 These consumers or behaviors have no test that a native implementation could be checked against today:
 
 - **Bake Desktop:** the external app, its Electron utility-process launch, and its pinned protocol copy. Access to that checkout is a dependency.
-- **Third-party plugins and user `!!js` layers:** no fixture corpus exists. Real plugins are needed to test legacy classification and lifecycle.
+- **Third-party plugins and user `!!js` layers:** no fixture corpus exists. Real plugins are needed to test classification and migration.
 - **Catalog providers:** no live smoke tests and no per-family wire fixtures for the ten non-generic API families. pi-ai's nine OAuth providers have no recorded flows. Bedrock and Vertex authentication goes through their SDKs and has not been inventoried per provider.
 - **Windows terminal:** the PTY driver is POSIX-only, and no ConPTY scenario exists.
 - **Old updaters:** no test runs a released 0.3 updater against a changed archive layout.
 - **Retained `api`, `client`, `host`, and `typert` packages:** `bake-typert-registry`, `bake-typert-loader`, and `bake-api-gateway` are composed in the base bundle. Their consumers, including the `sessionFeedback` Host Remote, have not been traced.
 - **Terminal setup:** edits to external terminal configuration files have no cross-runtime test.
-- **`bake plugin`:** depends on pnpm being installed on the host. There is no decision yet on how a native install provides it.
+- **`bake plugin`:** depends on pnpm being installed on the host and installs JavaScript plugins that 0.4 cannot run. Its migration or replacement is undecided ([D7](#decision-register)).
 - **Platform minimums:** no recorded minimum OS, kernel, glibc, or macOS deployment target.
 - **Performance:** the instrumentation is Node-specific, and several interactive workloads are excluded.
 

@@ -87,7 +87,7 @@ MCP similarly delegates to an SDK and registers server-qualified tools with scop
 
 The [plugin manager](../../../packages/boot/plugin-manager/README.md), [Cordis host runner](../../../packages/extensions/cordis-host-runner/README.md), and [Cordis tool](../../../packages/extensions/tool-cordis/README.md) expose JavaScript package and runtime operations. Arbitrary plugins can depend on Cordis services and lifecycle behavior that cannot be transparently represented by a small JSON-RPC adapter.
 
-Recommended development approach: keep the old whole-profile runtime runnable while built-ins become native; design a versioned extension protocol only around concrete consumers. Before release, either migrate the supported plugin/preset behavior, provide a clearly identified compatibility path with tests, or obtain an explicit support-change decision. Never feed an obsolete Cordis API catalog to the model while executing an unrelated native interface.
+The product owner decided on 2026-10-07 that 0.4 ships Rust only ([D5](scope-00/support.md#decision-register)): no Node/TypeScript compatibility runtime ships, so custom Cordis/JavaScript profiles need migration. The old whole-profile runtime stays runnable in development as the comparison oracle. Design a versioned extension protocol only around concrete consumers. Before release, the Cordis preset, tools, and plugin manager each need a migration or native replacement, or an explicit support-change decision. Never feed an obsolete Cordis API catalog to the model while executing an unrelated native interface.
 
 ### Bake Desktop is a retained consumer
 
@@ -103,7 +103,7 @@ The existing [PTY driver](../../../apps/tui/scripts/pty-smoke.ts) exercises real
 
 ### Upgrade and rollback depend on archive layout
 
-The [updater launch check](../../../packages/boot/updater/src/verify.ts) looks for `apps/cli/lib/bin.js` and launches it with Node. Merely replacing the release archive with a Rust executable would fail this check on old installs. A supported transition may retain a small Node entry shim, deliver a preparatory updater fix, or use another explicitly tested route. Pick the route before native packaging is finalized.
+The [updater launch check](../../../packages/boot/updater/src/verify.ts) looks for `apps/cli/lib/bin.js` and launches it with Node. Merely replacing the release archive with a Rust executable would fail this check on old installs. The route is open, and it must end in Rust-only shipped artifacts ([D14](scope-00/support.md#decision-register)). Pick and test it before native packaging is finalized.
 
 The [manifest](../../../packages/boot/updater/src/manifest.ts) is signed over its exact bytes and names one product version with platform artifacts. The release workflow and updater do not currently implement independent 0.3/0.4 channels. Native rollback must verify credentials, profile manifests, settings, session generations, attachment references, and indexes as well as the executable pointer.
 
@@ -125,7 +125,7 @@ This map assigns every direct shared package group to a migration owner. It iden
 | `fs`, `shell`, `interaction`, `spill`, `guard` | Port tools, permissions, questions, errors, progress and bounds | 04, 08, 15 |
 | `preset`, `context`, `skill`, `attachment`, `compaction` | Preserve composition and model-facing context | 05, 10 |
 | `subagent`, `goal`, `jobs`, `schedule` | Port durable orchestration and restart behavior | 11 |
-| `mcp`, `web`, `hooks`, `ptc-runtime`, `extensions` | Native integrations or explicitly approved compatibility | 12 |
+| `mcp`, `web`, `hooks`, `ptc-runtime`, `extensions` | Native integrations; Cordis extensions need migration or an approved support change | 12 |
 | `api`, `client`, `host`, `typert` | Trace retained consumers; preserve required wire/API behavior; replace TS-specific generation where justified | 13 |
 | `bundle`, CLI | Native profiles and supported launch contracts, including Desktop | 09, 13 |
 | `runtime-diagnostics`, `feedback`, Session telemetry | Preserve opt-outs, local feedback, bounded shutdown, identity/redaction; replace V8-specific measurements with native measurements | 13, 17 |
@@ -153,7 +153,7 @@ Scope 00 must settle these points in a concrete support matrix. Recommended defa
 |---|---|---|
 | Native completion | Native standard, minimal, and code-mode agent paths plus terminal/headless/Desktop; explicit disposition for the Cordis preset and custom plugins | Per-profile command/tool/config/provider inventory |
 | Session version | Preserve current format 3 unless a separately justified structural change is required | Cross-runtime write/read/reconstruction and historical migration tests |
-| Extension strategy | Built-ins in Rust; retain explicit legacy whole-profile compatibility during development; version a native extension protocol around known consumers | Real plugin lifecycle and migration fixtures; support-change decision if parity is narrowed |
+| Extension strategy | Built-ins in Rust; ship Rust only, with migration for custom Cordis/JavaScript profiles (decided); keep TypeScript as the development oracle; version a native extension protocol around known consumers | Real plugin lifecycle and migration fixtures; support-change decision if parity is narrowed |
 | Desktop integration | Coordinate native child spawning or test an Electron port-to-stdio adapter | Separate Desktop consumer test on supported hosts |
 | Provider breadth | Inventory catalog routes as well as three generic wire overrides; preserve claimed login flows | Fixture and live-smoke matrix with no implicit unsupported routes |
 | 0.3 maintenance | Bug fixes only; define post-0.4 maintenance PRs and separate update channel before cutover | Branch-policy and signed-channel release rehearsal |

@@ -64,7 +64,7 @@ export interface Rule {
   readonly pending?: string
 }
 
-const PENDING_EXTENSIONS = 'Extension strategy: native protocol, legacy whole-profile compatibility, or approved support change.'
+const PENDING_EXTENSIONS = 'Rust-only shipping is decided; design custom-profile migration and native extension replacements, or obtain an approved support change.'
 const PENDING_TRANSPORT = 'Trace retained api/client/host/typert consumers before porting or removing them.'
 
 const transportConsumers: Rule = { scopes: ['13'], disposition: 'port-contract', reason: 'Gateway, connection, host, and type-runtime transports; preserve required wire behavior for retained consumers only.', pending: PENDING_TRANSPORT }
