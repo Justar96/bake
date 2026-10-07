@@ -63,6 +63,13 @@ pub const ERROR: &str = "error";
 pub const HINT_FOLLOWING: &[(&str, &str)] = &[("Wheel/PgUp", "scroll"), ("Ctrl+↑", "prompts")];
 /// While reading history, how much lies below: `12 lines below`.
 pub const LINES_BELOW: &str = "lines below";
+/// The slash menu's words: its key on the box's edge, the count of matches
+/// it leaves out, and its empty state.
+pub const TAB_COMPLETES: &str = "Tab completes";
+pub const MORE_MATCHES: &str = "more, keep typing to narrow";
+pub const NO_COMPLETIONS: &str = "No matching commands";
+/// A command submitted in the preview, which has no command service.
+pub const NO_COMMANDS: &str = "Commands are not available in this preview";
 /// The attachments panel's title, before the count, and its footer.
 pub const ATTACHMENTS_TITLE: &str = "Staged attachments";
 pub const ATTACHMENTS_HELP: &str = "Erase a placeholder to unstage its image";

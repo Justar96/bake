@@ -129,6 +129,8 @@ pub enum Action {
     /// Ctrl+P and Ctrl+N: input history at once, from any row.
     RecallOlder,
     RecallNewer,
+    /// Tab: fill in the menu's selected command, or type a tab without one.
+    Complete,
     /// Ctrl+V: stage the clipboard's image.
     PasteImage,
     /// Ctrl+A and Ctrl+E: the logical line's start and end, past any row.
@@ -326,6 +328,7 @@ pub const BINDINGS: &[Binding] = &[
     ),
     bind(S::Inspect, K::Esc, ANY, ANY, A::ReturnToComposer),
     bind(S::Inspect, K::Tab, ANY, ANY, A::ReturnToAgentList),
+    bind(S::Composer, K::Tab, ANY, ANY, A::Complete),
 ];
 
 /// The first binding for `input` in `scope`, or one that applies anywhere.
@@ -379,7 +382,7 @@ mod tests {
     #[test]
     fn a_key_binds_only_in_its_own_scope() {
         let tab = KeyInput::plain(Key::Tab);
-        assert_eq!(action(Scope::Composer, tab), None);
+        assert_eq!(action(Scope::Composer, tab), Some(Action::Complete));
         assert_eq!(action(Scope::Inspect, tab), Some(Action::ReturnToAgentList));
         // Ctrl+G opens the agent list and closes it again.
         let ctrl_g = KeyInput::new(Key::Char('g'), Mods::CTRL);

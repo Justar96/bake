@@ -7,6 +7,7 @@
 //! change terminal modes, read input, start threads, or read a clock.
 
 pub mod activity;
+pub mod completion;
 pub mod composer;
 mod copy;
 pub mod diff;

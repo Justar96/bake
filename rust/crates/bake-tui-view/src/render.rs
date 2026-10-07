@@ -11,6 +11,7 @@ use ratatui_core::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
 use crate::activity::{self, Hue, Tones};
+use crate::completion;
 use crate::composer::{self, Edge};
 use crate::copy;
 use crate::editor::{self, display};
@@ -53,6 +54,7 @@ pub fn render(app: &mut State, frame: &mut Frame) {
             standing: true,
             notice: u16::from(app.notice.is_some() || app.quitting()),
             panel: panel_rows(app.attachments.len()),
+            menu: menu_rows(app),
         },
     );
 
@@ -66,6 +68,7 @@ pub fn render(app: &mut State, frame: &mut Frame) {
     let gap = next(rows.gap);
     let panel = next(rows.panel);
     let notice = next(rows.notice);
+    let menu_area = next(rows.menu);
     let bar = next(rows.bar);
     let rule = next(rows.top_edge);
     let band = next(rows.composer);
@@ -98,6 +101,7 @@ pub fn render(app: &mut State, frame: &mut Frame) {
             Notice::ReadOnly => copy::READ_ONLY,
             Notice::DraftLimit => copy::DRAFT_LIMIT,
             Notice::NoClipboardImage => copy::NO_CLIPBOARD_IMAGE,
+            Notice::NoCommands => copy::NO_COMMANDS,
         };
         line(
             buf,
@@ -106,6 +110,7 @@ pub fn render(app: &mut State, frame: &mut Frame) {
         );
     }
     render_attachments(app, inset(panel), buf);
+    render_menu(app, inset(menu_area), buf);
     let columns = area.width;
     render_bar(app, inset(bar), buf);
     render_agents_row(columns, inset(agents), buf);
@@ -138,7 +143,18 @@ pub fn render(app: &mut State, frame: &mut Frame) {
     let below_label = if below > 0 {
         Some(format!("+{below} {}", copy::BELOW))
     } else {
-        mode.hint.filter(|_| !listing).map(str::to_owned)
+        // While the menu offers commands, its key takes the hint's place.
+        let completing = app.menu().is_some_and(|menu| !menu.entries.is_empty());
+        mode.hint
+            .filter(|_| !listing)
+            .map(|hint| {
+                if completing {
+                    copy::TAB_COMPLETES
+                } else {
+                    hint
+                }
+            })
+            .map(str::to_owned)
     };
     composer::edge(buf, rule, glyphs, Edge::Top, closed, above_label.as_deref());
     composer::edge(
@@ -341,6 +357,122 @@ fn bar_left(app: &State) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
             ],
             vec![Span::styled(format!("  {}", copy::INSPECT_KEYS), dim())],
         ),
+    }
+}
+
+/// Rows the slash menu wants: up to [`completion::MENU_ROWS`] commands and
+/// a count of the rest, one row saying nothing matches, or, once the menu
+/// has closed on a typed command, its usage line.
+fn menu_rows(app: &State) -> u16 {
+    match app.menu() {
+        Some(menu) => {
+            let count = menu.entries.len();
+            let rows =
+                count.min(completion::MENU_ROWS) + usize::from(count > completion::MENU_ROWS);
+            u16::try_from(rows.max(1)).unwrap_or(u16::MAX)
+        }
+        None if app.focus == Focus::Composer => {
+            u16::from(completion::usage(app.draft.text()).is_some())
+        }
+        None => 0,
+    }
+}
+
+/// The slash menu above the bar, as the oracle's `Completion` draws it: a
+/// `▸` on the selected row, the names in a column sized to the longest, and
+/// each command's hint and description after it, dim unless selected. More
+/// commands than rows keep the selected one in view and count the rest.
+fn render_menu(app: &State, area: Rect, buf: &mut Buffer) {
+    if area.is_empty() {
+        return;
+    }
+    let asking = tone_style(Tone::Asking, app.tones);
+    let Some(menu) = app.menu() else {
+        if let Some(command) = completion::usage(app.draft.text()) {
+            let text = format!(
+                "/{} {}  {}",
+                command.name,
+                command.hint.unwrap_or_default(),
+                command.description
+            );
+            line(
+                buf,
+                Rect::new(area.x, area.y, area.width, 1),
+                Line::styled(text, dim()),
+            );
+        }
+        return;
+    };
+    if menu.entries.is_empty() {
+        line(
+            buf,
+            Rect::new(area.x, area.y, area.width, 1),
+            Line::styled(copy::NO_COMPLETIONS, dim()),
+        );
+        return;
+    }
+    let rows = usize::from(area.height);
+    let count = menu.entries.len();
+    let shown = if count > rows {
+        rows.saturating_sub(1).max(1)
+    } else {
+        count
+    };
+    let first = (menu.selected + 1).saturating_sub(shown).min(count - shown);
+    let names = menu
+        .entries
+        .iter()
+        .map(|c| c.name.len() + 1)
+        .max()
+        .unwrap_or(0);
+    let column = (names + 2).clamp(8, 40);
+    let marker = if app.frame == FrameStyle::Classic {
+        ">"
+    } else {
+        "▸"
+    };
+    for (i, command) in menu.entries.iter().enumerate().skip(first).take(shown) {
+        let active = i == menu.selected;
+        let name = format!("/{}", command.name);
+        let about = match command.hint {
+            Some(hint) => format!("{hint}  {}", command.description),
+            None => command.description.to_owned(),
+        };
+        let pad = column.saturating_sub(name.len());
+        let content = Line::from(vec![
+            Span::styled(
+                if active {
+                    format!("{marker} ")
+                } else {
+                    "  ".into()
+                },
+                asking.add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("{name}{}", " ".repeat(pad)),
+                if active {
+                    asking.add_modifier(Modifier::BOLD)
+                } else {
+                    Style::new()
+                },
+            ),
+            Span::styled(about, if active { Style::new() } else { dim() }),
+        ]);
+        let y = area.y + (i - first) as u16;
+        line(buf, Rect::new(area.x, y, area.width, 1), content);
+    }
+    if shown < count {
+        let y = area.y + shown as u16;
+        if y < area.bottom() {
+            line(
+                buf,
+                Rect::new(area.x, y, area.width, 1),
+                Line::styled(
+                    format!("  +{} {}", count - shown, copy::MORE_MATCHES),
+                    dim(),
+                ),
+            );
+        }
     }
 }
 
@@ -1885,6 +2017,48 @@ mod tests {
         );
         let (rows, _) = draw(&mut app, 80, 24);
         assert!(!rows.iter().any(|r| r.contains("Staged attachments")));
+    }
+
+    #[test]
+    fn the_slash_menu_sits_above_the_bar_and_keeps_its_selection_in_view() {
+        let mut app = State::default();
+        key(&mut app, Key::Char('/'));
+        let (rows, _) = draw(&mut app, 80, 30);
+        let bar = row_index(&rows, "no model");
+        // Eight of thirteen commands, the frequent ones first, then a count.
+        let first = row_index(&rows, "/model");
+        assert_eq!(first + 9, bar);
+        assert!(rows[first].starts_with("  ▸ /model     [provider/model [effort]]  Choose model"));
+        assert!(rows[first + 1].starts_with("    /resume    Browse sessions"));
+        assert_eq!(
+            rows[first + 8].trim_end(),
+            "    +5 more, keep typing to narrow"
+        );
+        // The box's edge names the menu's key.
+        assert!(rows.iter().any(|r| r.contains("Tab completes")));
+        // Up from the first wraps to the last, which scrolls into view.
+        key(&mut app, Key::Up);
+        let (rows, _) = draw(&mut app, 80, 30);
+        assert!(rows[bar - 2].starts_with("  ▸ /thinking"));
+        assert!(!rows.iter().any(|r| r.contains("/model")));
+        // Nothing matching says so in one row.
+        key(&mut app, Key::Char('z'));
+        let (rows, _) = draw(&mut app, 80, 30);
+        assert_eq!(rows[bar - 1].trim_end(), "  No matching commands");
+        assert!(!rows.iter().any(|r| r.contains("Tab completes")));
+        // A typed command with a hint shows its usage once the menu closes.
+        update(
+            &mut app,
+            Msg::Key(KeyInput::new(Key::Char('u'), Mods::CTRL)),
+        );
+        for c in "/goal ".chars() {
+            key(&mut app, Key::Char(c));
+        }
+        let (rows, _) = draw(&mut app, 80, 30);
+        assert_eq!(
+            rows[bar - 1].trim_end(),
+            "  /goal [objective|clear]  Set or view the goal for a long-running task"
+        );
     }
 
     #[test]

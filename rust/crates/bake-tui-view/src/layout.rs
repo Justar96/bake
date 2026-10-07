@@ -22,10 +22,12 @@ pub struct Needs {
     pub notice: u16,
     /// Rows the attachments panel wants; zero without staged images.
     pub panel: u16,
+    /// Rows the slash menu or a command's usage line wants; zero without.
+    pub menu: u16,
 }
 
 /// Rows granted to each region, top to bottom as drawn: body, gap, panel,
-/// notice,
+/// notice, the slash menu,
 /// the bar, which holds the activity and the status line, the box's top
 /// edge, the draft, its bottom edge, and the standing row.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -34,6 +36,7 @@ pub struct Rows {
     pub gap: u16,
     pub panel: u16,
     pub notice: u16,
+    pub menu: u16,
     pub bar: u16,
     pub top_edge: u16,
     pub composer: u16,
@@ -47,6 +50,7 @@ impl Rows {
             + self.gap
             + self.panel
             + self.notice
+            + self.menu
             + self.bar
             + self.top_edge
             + self.composer
@@ -84,6 +88,7 @@ pub fn plan(height: u16, needs: Needs) -> Rows {
         composer + bar + top_edge + bottom_edge + standing + gap,
     )));
     let notice = take(needs.notice);
+    let menu = take(needs.menu);
     let panel = take(needs.panel);
     let body = take(u16::MAX);
     Rows {
@@ -91,6 +96,7 @@ pub fn plan(height: u16, needs: Needs) -> Rows {
         gap,
         panel,
         notice,
+        menu,
         bar,
         top_edge,
         composer: composer + more,
@@ -114,6 +120,7 @@ mod tests {
             standing: true,
             notice: 1,
             panel: 0,
+            menu: 0,
         }
     }
 
@@ -174,6 +181,7 @@ mod tests {
                 standing: false,
                 notice: 0,
                 panel: 0,
+                menu: 0,
             },
         );
         assert_eq!((rows.standing, rows.gap, rows.body), (0, 1, 1));

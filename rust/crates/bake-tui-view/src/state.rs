@@ -5,6 +5,7 @@
 use std::time::Duration;
 
 use crate::activity::{self, Tones};
+use crate::completion::{self, Command};
 use crate::composer::ComposerWindow;
 use crate::editor::Draft;
 use crate::frame::FrameStyle;
@@ -186,6 +187,22 @@ impl Spot {
 /// the TypeScript `doubleInterruptMs` default.
 pub const QUIT_WINDOW: Duration = Duration::from_millis(2000);
 
+/// The slash menu as drawn: the matching commands and the selected one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Menu {
+    pub entries: Vec<Command>,
+    pub selected: usize,
+}
+
+/// What the slash menu remembers about the draft and caret it was last
+/// changed at.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct MenuMemory {
+    at: Option<(String, usize)>,
+    selected: Option<&'static str>,
+    dismissed: bool,
+}
+
 /// How long the scroll indicator says whether a selection was copied.
 pub const COPIED: Duration = Duration::from_millis(1500);
 
@@ -252,6 +269,8 @@ pub enum Notice {
     DraftLimit,
     /// Ctrl+V, or an empty paste, found no image on the clipboard.
     NoClipboardImage,
+    /// A slash command was submitted; the preview runs none.
+    NoCommands,
 }
 
 /// Where a pasted image is read from: the clipboard, or a file whose path
@@ -353,6 +372,9 @@ pub struct State {
     pub attachments: Vec<(u32, Image)>,
     /// Images staged so far; the next takes the next id.
     images: u32,
+    /// The slash menu's selection and whether Esc closed it, for the draft
+    /// and caret they were made at. Any edit or move starts the menu over.
+    menu: MenuMemory,
     /// Whether a press on the scrollbar is being dragged.
     pub(crate) dragging: bool,
     /// While a first Ctrl+C is armed, when it lapses; a second before then
@@ -396,9 +418,30 @@ impl State {
             copied: None,
             attachments: Vec::new(),
             images: 0,
+            menu: MenuMemory::default(),
             dragging: false,
             quit_until: None,
         }
+    }
+
+    /// The slash menu, while the draft up to the caret is a leading slash
+    /// token and Esc has not closed it there.
+    pub fn menu(&self) -> Option<Menu> {
+        if self.focus != Focus::Composer {
+            return None;
+        }
+        let (draft, caret) = (self.draft.text(), self.draft.caret());
+        let here = self.menu.at == Some((draft.to_owned(), caret));
+        if here && self.menu.dismissed {
+            return None;
+        }
+        let entries = completion::matches(draft, caret)?;
+        let selected = here
+            .then_some(self.menu.selected)
+            .flatten()
+            .and_then(|name| entries.iter().position(|c| c.name == name))
+            .unwrap_or(0);
+        Some(Menu { entries, selected })
     }
 
     /// Whether a second Ctrl+C would quit now.
@@ -831,6 +874,61 @@ fn key(state: &mut State, input: KeyInput) -> Vec<Effect> {
     Vec::new()
 }
 
+/// Up, Down, Tab, and Enter while the slash menu is open. Returns `false`
+/// when the key is the composer's: without a menu, or Enter on a bare `/`
+/// with nothing to choose, which the composer submits.
+fn menu_key(state: &mut State, bound: Option<Action>) -> bool {
+    let Some(menu) = state.menu() else {
+        return false;
+    };
+    let choice = menu.entries.get(menu.selected).copied();
+    match bound {
+        Some(Action::CaretUp | Action::CaretDown) => {
+            let count = menu.entries.len();
+            if count > 0 {
+                let step = if bound == Some(Action::CaretUp) {
+                    count - 1
+                } else {
+                    1
+                };
+                let next = menu.entries[(menu.selected + step) % count].name;
+                state.menu = MenuMemory {
+                    at: Some((state.draft.text().to_owned(), state.draft.caret())),
+                    selected: Some(next),
+                    dismissed: false,
+                };
+            }
+            true
+        }
+        Some(Action::Complete) => {
+            if let Some(choice) = choice {
+                let (text, caret) = completion::complete(state.draft.text(), &choice);
+                state.draft.replace(&text, caret);
+            }
+            true
+        }
+        // Enter takes the selected command: one that needs an argument is
+        // filled in to type it, and any other is submitted as its name.
+        Some(Action::Submit) => {
+            let Some(choice) = choice else {
+                return state.draft.text() == "/";
+            };
+            let (text, caret) = completion::complete(state.draft.text(), &choice);
+            if completion::requires_input(&choice) {
+                state.draft.replace(&text, caret);
+                return true;
+            }
+            let name = text.trim_end();
+            if state.draft.text() != name {
+                state.draft.replace(name, name.len());
+            }
+            state.notice = Some(Notice::NoCommands);
+            true
+        }
+        _ => false,
+    }
+}
+
 /// Inserts pasted text at the caret, a long paste as a placeholder.
 fn paste_text(state: &mut State, text: &str) {
     let complete = state.draft.paste_block(text);
@@ -863,6 +961,28 @@ fn unstage(state: &mut State) {
 }
 
 fn composer_key(state: &mut State, bound: Option<Action>, input: KeyInput) {
+    // Esc drops a selection, then closes the menu until the draft or the
+    // caret changes, before it stops anything.
+    if bound == Some(Action::Interrupt) {
+        if state.selecting.clear() {
+            return;
+        }
+        if state.menu().is_some() {
+            state.menu = MenuMemory {
+                at: Some((state.draft.text().to_owned(), state.draft.caret())),
+                selected: None,
+                dismissed: true,
+            };
+            return;
+        }
+    }
+    if matches!(
+        bound,
+        Some(Action::CaretUp | Action::CaretDown | Action::Complete | Action::Submit)
+    ) && menu_key(state, bound)
+    {
+        return;
+    }
     let draft = &mut state.draft;
     let complete = match bound {
         Some(Action::ToggleAgentList) => {
@@ -871,8 +991,8 @@ fn composer_key(state: &mut State, bound: Option<Action>, input: KeyInput) {
             return;
         }
         // Esc stops a sample the way it interrupts a turn or cancels compaction.
-        // Esc drops a selection before it stops anything.
-        Some(Action::Interrupt) if state.selecting.clear() => return,
+        // Without a menu, Tab types a tab, as the oracle's composer does.
+        Some(Action::Complete) => draft.type_text("\t"),
         Some(Action::Interrupt) => {
             end_turn(state, Outcome::Interrupted);
             state.activity = None;
@@ -884,7 +1004,11 @@ fn composer_key(state: &mut State, bound: Option<Action>, input: KeyInput) {
             return;
         }
         Some(Action::Submit) => {
-            state.notice = Some(Notice::NoModel);
+            state.notice = Some(if draft.text().starts_with('/') {
+                Notice::NoCommands
+            } else {
+                Notice::NoModel
+            });
             return;
         }
         Some(Action::PageUp) => return state.transcript.scroll_up(state.transcript.page()),
@@ -1410,6 +1534,81 @@ mod tests {
         assert!(state.attachments.is_empty());
         chord(&mut state, Key::Char('y'), Mods::CTRL);
         assert!(!state.draft.text().contains("[Image"));
+    }
+
+    fn menu_names(state: &State) -> Option<(Vec<&'static str>, &'static str)> {
+        state.menu().map(|menu| {
+            let names: Vec<_> = menu.entries.iter().map(|c| c.name).collect();
+            let selected = names[menu.selected];
+            (names, selected)
+        })
+    }
+
+    #[test]
+    fn the_slash_menu_selects_completes_and_closes_as_the_oracle_does() {
+        let mut state = State::default();
+        type_str(&mut state, "/lo");
+        assert_eq!(menu_names(&state), Some((vec!["login", "logout"], "login")));
+        // Down and Up cycle the selection instead of moving the caret.
+        press(&mut state, Key::Down);
+        assert_eq!(menu_names(&state).unwrap().1, "logout");
+        press(&mut state, Key::Down);
+        assert_eq!(menu_names(&state).unwrap().1, "login");
+        press(&mut state, Key::Up);
+        assert_eq!(menu_names(&state).unwrap().1, "logout");
+        // Tab fills it in with a space, and the menu gives way to its usage.
+        press(&mut state, Key::Tab);
+        assert_eq!((state.draft.text(), state.draft.caret()), ("/logout ", 8));
+        assert!(state.menu().is_none());
+        assert_eq!(
+            completion::usage(state.draft.text()).map(|c| c.name),
+            Some("logout")
+        );
+        // One undo takes the completion back; at the same draft and caret
+        // the menu keeps the selection it had there.
+        chord(&mut state, Key::Char('-'), Mods::CTRL);
+        assert_eq!(menu_names(&state).unwrap().1, "logout");
+        // Esc closes it until the draft changes; the next key reopens it.
+        press(&mut state, Key::Esc);
+        assert!(state.menu().is_none());
+        type_str(&mut state, "g");
+        assert_eq!(menu_names(&state), Some((vec!["login", "logout"], "login")));
+    }
+
+    #[test]
+    fn enter_on_the_menu_runs_a_command_or_fills_one_that_needs_input() {
+        let mut state = State::default();
+        type_str(&mut state, "/mo");
+        press(&mut state, Key::Enter);
+        assert_eq!(state.draft.text(), "/model");
+        assert_eq!(state.notice, Some(Notice::NoCommands));
+        // A command that cannot run bare is filled in for its argument.
+        chord(&mut state, Key::Char('u'), Mods::CTRL);
+        type_str(&mut state, "/att");
+        press(&mut state, Key::Enter);
+        assert_eq!(state.draft.text(), "/attach ");
+        // With nothing to choose, Enter submits what was typed; a bare `/`
+        // does nothing.
+        chord(&mut state, Key::Char('u'), Mods::CTRL);
+        type_str(&mut state, "/zz");
+        state.notice = None;
+        press(&mut state, Key::Enter);
+        assert_eq!(state.notice, Some(Notice::NoCommands));
+        chord(&mut state, Key::Char('u'), Mods::CTRL);
+        type_str(&mut state, "/");
+        state.notice = None;
+        press(&mut state, Key::Enter);
+        assert_eq!(
+            (state.draft.text(), state.notice),
+            ("/model", Some(Notice::NoCommands))
+        );
+        // Without a menu Tab types a tab, and plain text still has no model.
+        chord(&mut state, Key::Char('u'), Mods::CTRL);
+        type_str(&mut state, "a");
+        press(&mut state, Key::Tab);
+        assert_eq!(state.draft.text(), "a\t");
+        press(&mut state, Key::Enter);
+        assert_eq!(state.notice, Some(Notice::NoModel));
     }
 
     #[test]

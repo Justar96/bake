@@ -206,6 +206,14 @@ impl Draft {
         self.paste(&token) && complete
     }
 
+    /// Replaces the whole text with `text` and puts the caret at byte
+    /// `caret`, as one undo step: a completion's edit.
+    pub fn replace(&mut self, text: &str, caret: usize) {
+        self.checkpoint(EditKind::Block);
+        self.text = sanitize(text);
+        self.caret = self.outside_atoms(caret.min(self.text.len()));
+    }
+
     /// Inserts the placeholder of staged image `id` at the caret, as one
     /// undo step, and returns it.
     pub fn attach(&mut self, id: u32) -> String {

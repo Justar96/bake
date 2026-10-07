@@ -222,6 +222,13 @@ await scenario('composer, agent inspection, paste, and resize', async (preview) 
     preview.send('\x7f')
     await preview.wait('image unstaged', () => !preview.screen.includes('Staged attachments') && !preview.screen.includes('[Image'))
   } finally { await rm(imageDir, { recursive: true }) }
+  // A leading slash opens the command menu; Tab fills in the selected command and its usage replaces the menu.
+  preview.send('\x01\x0b/go')
+  await preview.wait('slash menu', () => /▸ \/goal +\[objective\|clear\]/u.test(preview.screen) && preview.screen.includes('Tab completes'))
+  preview.send('\t')
+  await preview.wait('command completed', () => preview.screen.includes('❯ /goal') && preview.screen.includes('/goal [objective|clear]  Set or view the goal'))
+  preview.send('\r')
+  await preview.wait('command refused', () => preview.screen.includes('Commands are not available in this preview'))
   await preview.quit()
 })
 
