@@ -12,6 +12,8 @@ mod copy;
 pub mod editor;
 pub mod frame;
 pub mod keys;
+pub mod layout;
 pub mod mode;
 pub mod render;
 pub mod state;
+pub mod status;

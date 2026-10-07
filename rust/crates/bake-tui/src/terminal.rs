@@ -21,6 +21,7 @@ use bake_tui_view::activity::Tones;
 use bake_tui_view::frame;
 use bake_tui_view::render::render;
 use bake_tui_view::state::{Effect, Msg, State, update};
+use bake_tui_view::status;
 use crossterm::cursor::Show;
 use crossterm::event::{self, DisableBracketedPaste, EnableBracketedPaste};
 use crossterm::execute;
@@ -219,6 +220,7 @@ pub fn run_preview() -> io::Result<PreviewExit> {
     let mut session = TerminalSession::acquire()?;
     let env = |name: &str| std::env::var(name).ok();
     let mut state = State::new(frame::resolve(env, cfg!(windows)), Tones::resolve(env));
+    state.cwd = working_directory(env);
     // Started only once raw mode is on, so it never reads cooked input.
     let outcome = Reader::start(sender).and_then(|reader| {
         let outcome = run_loop(&mut session, &mut state, &inputs, Instant::now());
@@ -282,6 +284,16 @@ fn run_loop(
             }
         }
     }
+}
+
+/// The working directory for the status line, under home as `~`; empty when
+/// it cannot be read, so the status line leaves it out.
+fn working_directory(env: impl Fn(&str) -> Option<String>) -> String {
+    let Ok(cwd) = std::env::current_dir() else {
+        return String::new();
+    };
+    let home = env(if cfg!(windows) { "USERPROFILE" } else { "HOME" });
+    status::home_relative(&cwd.to_string_lossy(), home.as_deref())
 }
 
 fn input_stopped() -> io::Error {

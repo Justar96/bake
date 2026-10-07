@@ -108,6 +108,22 @@ pub struct SampleActivity {
     pub started: Duration,
 }
 
+/// How a sample turn ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Outcome {
+    /// It ran to its end; Ctrl+T moved on to a compaction.
+    Completed,
+    /// Esc stopped it.
+    Interrupted,
+}
+
+/// The header's line about the last sample turn, held until the next starts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TurnSummary {
+    pub outcome: Outcome,
+    pub elapsed: Duration,
+}
+
 /// Presentation state: the parent draft, keyboard focus, one notice, the
 /// sample activity, the composer window, and the terminal's capabilities.
 /// Navigation never replaces the draft, so its caret and undo survive it.
@@ -118,6 +134,11 @@ pub struct State {
     pub selected: &'static str,
     pub notice: Option<Notice>,
     pub activity: Option<SampleActivity>,
+    /// How the last sample turn ended.
+    pub summary: Option<TurnSummary>,
+    /// The working directory as the status line reads it, already shortened
+    /// against home by the terminal owner; empty when unknown.
+    pub cwd: String,
     /// Glyphs for the composer box, chosen once before the first frame.
     pub frame: FrameStyle,
     /// Colours the activity line may use; [`Tones::None`] also stops its shimmer.
@@ -145,6 +166,8 @@ impl State {
             selected: SAMPLE_AGENTS[0].id,
             notice: None,
             activity: None,
+            summary: None,
+            cwd: String::new(),
             frame,
             tones,
             now: Duration::ZERO,
@@ -219,6 +242,7 @@ fn composer_key(state: &mut State, bound: Option<Action>, input: KeyInput) {
         }
         // Esc stops a sample the way it interrupts a turn or cancels compaction.
         Some(Action::Interrupt) => {
+            end_turn(state, Outcome::Interrupted);
             state.activity = None;
             state.notice = None;
             return;
@@ -302,9 +326,11 @@ fn inspect_key(state: &mut State, bound: Option<Action>) {
 /// Each sample starts its own clock, as a compaction does after a turn.
 fn toggle_activity(state: &mut State) {
     state.notice = None;
+    end_turn(state, Outcome::Completed);
     state.activity = match state.activity.map(|sample| sample.kind) {
         None => {
             state.samples = state.samples.wrapping_add(1);
+            state.summary = None;
             Some(SampleActivity {
                 kind: SampleKind::Turn,
                 word: activity::pick(activity::WORDS, &format!("sample-{}", state.samples)),
@@ -318,6 +344,18 @@ fn toggle_activity(state: &mut State) {
         }),
         Some(SampleKind::Compaction) => None,
     };
+}
+
+/// Records how a running sample turn ended; anything else is left alone.
+fn end_turn(state: &mut State, outcome: Outcome) {
+    if let Some(sample) = state.activity
+        && sample.kind == SampleKind::Turn
+    {
+        state.summary = Some(TurnSummary {
+            outcome,
+            elapsed: state.now.saturating_sub(sample.started),
+        });
+    }
 }
 
 /// Moves the selection by identity, so a reordered list keeps the same agent.
@@ -487,6 +525,38 @@ mod tests {
             assert_eq!(state.activity, None);
         }
         assert_eq!((state.draft.text(), state.draft.caret()), ("keep", 4));
+    }
+
+    #[test]
+    fn a_finished_turn_leaves_its_outcome_until_the_next_turn_starts() {
+        let mut state = State::default();
+        let ctrl_t = |state: &mut State, secs| {
+            update(state, Msg::Tick(Duration::from_secs(secs)));
+            chord(state, Key::Char('t'), Mods::CTRL);
+        };
+        ctrl_t(&mut state, 1);
+        ctrl_t(&mut state, 9);
+        let completed = Some(TurnSummary {
+            outcome: Outcome::Completed,
+            elapsed: Duration::from_secs(8),
+        });
+        assert_eq!(state.summary, completed);
+        // Ending the compaction, by Ctrl+T or Esc, keeps the turn's outcome.
+        ctrl_t(&mut state, 12);
+        assert_eq!(state.summary, completed);
+        ctrl_t(&mut state, 20);
+        assert_eq!(state.summary, None);
+        update(&mut state, Msg::Tick(Duration::from_secs(23)));
+        press(&mut state, Key::Esc);
+        assert_eq!(
+            state.summary,
+            Some(TurnSummary {
+                outcome: Outcome::Interrupted,
+                elapsed: Duration::from_secs(3),
+            })
+        );
+        press(&mut state, Key::Esc);
+        assert_eq!(state.summary.map(|s| s.outcome), Some(Outcome::Interrupted));
     }
 
     #[test]

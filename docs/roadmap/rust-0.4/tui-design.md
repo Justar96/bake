@@ -319,7 +319,7 @@ Qualifying a renderer for inline mode remains open work; this page does not choo
 
 ## Preview status
 
-The [Rust preview](../../../rust/README.md) implements the [composer shape](#shape), `wrapDraft`'s wrapping without dictionary word boundaries, the caret-independent layout, the persistent window with hidden-row counts on the edges, D1's window height, the notice above the header, the frame fallback, the text [activity line](#activity-line) with its shimmer, for a sample turn and a sample compaction that Ctrl+T steps through, the [modes table](#modes) for idle, running, compacting, and inspection, batched input with one synchronized repaint per batch, and autowrap turned off while it owns the screen. These gaps from the oracle remain:
+The [Rust preview](../../../rust/README.md) implements the [composer shape](#shape), `wrapDraft`'s wrapping without dictionary word boundaries, the caret-independent layout, the persistent window with hidden-row counts on the edges, D1's window height, the notice above the header, the frame fallback, the text [activity line](#activity-line) with its shimmer, for a sample turn and a sample compaction that Ctrl+T steps through, the [modes table](#modes) for idle, running, compacting, and inspection, the [layout planner](#layout-planner)'s claim order for the regions the preview has, status fitting by rank with the preview's fields, a sample turn's outcome held in the header, standing-row keys that give way below 60 columns, batched input with one synchronized repaint per batch, and autowrap turned off while it owns the screen. These gaps from the oracle remain:
 
 | Preview behavior | Oracle behavior | Source |
 |---|---|---|
@@ -329,6 +329,8 @@ The [Rust preview](../../../rust/README.md) implements the [composer shape](#sha
 | Every wake draws a frame | A batch of runtime updates alone draws at most every 16 ms | `terminal.rs`, `run_loop`; there is no runtime port yet |
 | The idle placeholder names editing keys: `Type a draft · Alt+Enter newline · Ctrl+Z undo` | `Ask anything · / commands · @ files` | `copy.rs`, `PLACEHOLDER`; the preview has no commands or file mentions |
 | Enter shows the no-model notice in every mode, and Alt+↑ does nothing | Enter starts, steers, or queues a turn by mode; Alt+↑ sends steering now | `state.rs`, `composer_key`; there is no runtime port yet |
+| The status line reads `no model  rust preview  Ctrl+C quits` and the working directory | Model, thinking level, context, git, token totals, update notice, and working directory | `status.rs`, `preview_fields`; the fields need a runtime |
+| The header has no standing state on its right, only the preview's `Tab sample agents` key | The goal sits at the right and steps down its readings as the row narrows | `render.rs`, `render_header`; goals arrive with the runtime |
 | The completion and masked sign-in modes do not exist | Each has its own row in the modes table | `mode.rs`, `Mode`; they arrive with completion and sign-in |
 
 ## Delivery slices
@@ -337,7 +339,7 @@ These slices are ordered PRs inside [scope 14](README.md#14--terminal-engine-and
 
 1. **Split and update loop.** Implemented. `bake-tui-view` holds the `Msg`/`Effect` update function and the key-binding table; `bake-tui` decodes input and runs the channel-driven loop. The preview's tests moved with the code, and the screen is unchanged. `Msg` has no mouse or runtime variant until slices 4 and 6 add them, and `Effect` has only `Quit`.
 2. **Composer parity.** Implemented for the idle, running, compacting, and inspection rows of the modes table, driven by the sample activity; the box, wrapping, tab stops, caret column, window, and edge labels came before it. The completion and sign-in rows wait for slice 5 and provider login.
-3. **Chrome.** The layout planner, the header's activity line and summary, the rules with frame glyphs, status fitting by rank, and the standing rows.
+3. **Chrome.** Implemented for what the preview can show: the layout planner, the header's activity line and a sample turn's summary, the edges with frame glyphs, status fitting by rank, and the agents row's key rule. Summary counts, the goal's standing state, and the runtime's status fields wait for the runtime port.
 4. **Transcript.** The fixture port, row presentation for prose, user turns, and tool cards, the fullscreen viewport with its anchor and keys, and live rows.
 5. **Panels.** Completion with a sample catalog, notices, double-press Ctrl+C, pending input, and attachments.
 6. **Pointer and resilience.** Mouse wheel, click-to-caret, selection and copy, resize during streams, and broken-pipe handling.
