@@ -10,8 +10,9 @@
  * cannot drift from the path it reproduces. A `rust` override names a native
  * limit, or the internal cause Rust reports for a rejection; TypeScript still
  * asserts its own outcome. Refusal classes and messages belong to this
- * helper; the file backend adds path context and wraps scan errors as
- * SessionPersistenceCorruptionError. Each case edits one capture as text.
+ * helper; the file backend adds path context to unsupported-format refusals
+ * and wraps other scan failures as SessionPersistenceCorruptionError.
+ * Each case edits one capture as text.
  */
 
 import { createHash } from 'node:crypto'
