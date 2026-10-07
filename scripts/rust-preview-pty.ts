@@ -199,9 +199,9 @@ await scenario('transcript pages, jumps between prompts, and follows output agai
   await preview.wait('parser turn at the top', () => /^> Run the parser tests/u.test(preview.screen))
   preview.send('\x1b[1;5A')
   await preview.wait('code-mode block', () => /^> Find TODO comments/u.test(preview.screen)
-    && /\{\} Codemode: Find TODOs +13 calls · 1 failed/u.test(preview.screen)
-    && /╰ \{\} tools\.read ×12 .+11 done · 1 failed/u.test(preview.screen)
-    && /\{\} src\/m5\.ts +Permission denied/u.test(preview.screen))
+    && /✓ Codemode: Find TODOs +13 calls · 1 failed/u.test(preview.screen)
+    && /╰ ✓ tools\.read ×12 .+11 done · 1 failed/u.test(preview.screen)
+    && /✗ src\/m5\.ts +Permission denied/u.test(preview.screen))
   preview.send('\x1b[1;5H')
   await preview.wait('transcript start', () => /^ {2}Bake · Rust preview/mu.test(preview.screen))
   preview.send('\x1b[1;5B')
@@ -212,9 +212,9 @@ await scenario('transcript pages, jumps between prompts, and follows output agai
   // Wide enough, an edit's numbered diff goes side by side; narrow again, it is unified. Without truecolor
   // there is no box, so the gutter takes the cell before the diff.
   await preview.resize(120, 30)
-  await preview.wait('side-by-side diff', () => /^ {2}[│ ] {2}42 [-▎] {3}if \(quote\) fields\.push\(rest\); +│ 42 [+▎] {3}if \(quote\) throw/mu.test(preview.screen))
+  await preview.wait('side-by-side diff', () => /^ {2}[│ ] 42 [-▎] {3}if \(quote\) fields\.push\(rest\); +│ 42 [+▎] {3}if \(quote\) throw/mu.test(preview.screen))
   await preview.resize(80, 30)
-  await preview.wait('unified diff', () => /^ {2}[│ ] {2}42 [+▎] {3}if \(quote\) throw/mu.test(preview.screen))
+  await preview.wait('unified diff', () => /^ {2}[│ ] 42 [+▎] {3}if \(quote\) throw/mu.test(preview.screen))
   await preview.quit()
 })
 
@@ -250,18 +250,18 @@ await scenario('sample activity is text that advances on its own, then compacts,
   await preview.wait('sample turn', () => /^ {2}\S+… {2}thinking · 0s +no model/mu.test(preview.screen) && preview.screen.includes('Esc interrupts')
     && preview.screen.includes('Enter steers the next step'))
   // The turn runs a code-mode script: its dot blinks on its own, shown and then a blank in place.
-  await preview.wait('running script shown', () => /^ {2}\{\} Codemode: Read every manifest, then build/mu.test(preview.screen))
-  await preview.wait('running script blinks', () => /^ {5}Codemode: Read every manifest, then build/mu.test(preview.screen))
-  await preview.wait('running script shown again', () => /^ {2}\{\} Codemode: Read every manifest, then build/mu.test(preview.screen))
+  await preview.wait('running script shown', () => /^ {2}● Codemode: Read every manifest, then build/mu.test(preview.screen))
+  await preview.wait('running script blinks', () => /^ {4}Codemode: Read every manifest, then build/mu.test(preview.screen))
+  await preview.wait('running script shown again', () => /^ {2}● Codemode: Read every manifest, then build/mu.test(preview.screen))
   // Its calls arrive on the clock, and the build runs last until the turn ends.
-  await preview.wait('script calls arrive', () => /\{\} packages\/goal\/package\.json +Permission denied/u.test(preview.screen)
-    && /╰ (?:\{\}| {2}) tools\.bash +bun run build/u.test(preview.screen))
+  await preview.wait('script calls arrive', () => /✗ packages\/goal\/package\.json +Permission denied/u.test(preview.screen)
+    && /╰ [● ] tools\.bash +bun run build/u.test(preview.screen))
   // No key is pressed: the loop's own timer must redraw the elapsed time.
   await preview.wait('elapsed time advances', () => preview.screen.includes('thinking · 1s'))
   assert(!/[\u2800-\u28ff]/u.test(preview.screen), 'the activity drew a spinner glyph')
   preview.send('\x14')
   // The settled block outgrows the screen; its foot shows the build and what the program returned.
-  await preview.wait('script settles with the turn', () => /╰ \{\} tools\.bash +bun run build +exit 0/u.test(preview.screen) && /return +\{ manifests: 12, exitCode: 0 \}/u.test(preview.screen))
+  await preview.wait('script settles with the turn', () => /╰ ✓ tools\.bash +bun run build +exit 0/u.test(preview.screen) && /return +\{ manifests: 12, exitCode: 0 \}/u.test(preview.screen))
   await preview.wait('sample compaction', () => preview.screen.includes('Compacting history…  preparing · 0s')
     && preview.screen.includes('Compacting… Enter queues · Esc cancels') && !preview.screen.includes('Esc interrupts'))
   preview.send('\x1b')
