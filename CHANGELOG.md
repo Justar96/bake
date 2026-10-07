@@ -4,6 +4,7 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 ## [Unreleased]
 
+- Development: the opt-in Rust preview splits its pure view into `bake-tui-view` and frames the composer in a rounded box with its hints on the edges. It adds a sample transcript with calls, diffs, and a code-mode script, a scrollbar, wheel scrolling, mouse selection and copy, readline editing with a yank ring, prompt recall, collapsed pastes, staged images, a slash-command menu over a sample catalog, and a double Ctrl+C to quit. It still runs no model or tools.
 - Development: the opt-in Rust preview adds `bake-rs session inspect` to read an explicitly named current-format plain or Zstd Session log and print its header, counts, and recovery metadata as JSON. Both input and decoded data have caller-supplied limits; the command leaves the file unchanged.
 
 - Shell change reports detect same-size edits made within Git's timestamp precision and show the bytes present before the command, including files that were already dirty.
