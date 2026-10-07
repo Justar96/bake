@@ -1,9 +1,12 @@
-//! Bake's native terminal preview: a pure draft editor and preview state,
-//! a Ratatui renderer, and the terminal owner that runs them.
+//! Bake's native terminal preview: the terminal owner, input decoding, the
+//! event loop that drives the pure view in `bake-tui-view`, and the runtime
+//! port with its scripted fixture.
 
-pub mod app;
-pub mod editor;
-pub mod render;
+mod clipboard;
+mod fixture;
+mod git;
+mod input;
+mod port;
 mod terminal;
 
 pub use terminal::{PreviewExit, TerminalSession, run_preview};

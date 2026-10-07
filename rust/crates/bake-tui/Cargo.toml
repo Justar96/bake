@@ -7,10 +7,9 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+bake-tui-view.workspace = true
 ratatui.workspace = true
 crossterm.workspace = true
-unicode-segmentation.workspace = true
-unicode-width.workspace = true
 
 [target.'cfg(unix)'.dependencies]
-signal-hook.workspace = true
+signal-hook = { workspace = true, features = ["iterator"] }

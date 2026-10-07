@@ -21,7 +21,8 @@ class Preview {
   private parsed = Promise.resolve()
   private code: number | undefined
   private streamStatus: number | undefined
-  private raw = ''
+  /** Everything the preview wrote, its last MiB, for sequences the screen does not show. */
+  raw = ''
 
   constructor(cwd: string) {
     const decoder = new TextDecoder()
@@ -29,7 +30,9 @@ class Preview {
     // lets us read cooked modes before the native process can enable raw mode.
     this.process = Bun.spawn(['sh', '-c', 'read -r ready; exec "$1" preview', 'rust-preview-pty', binary], {
       cwd,
-      env: { PATH: process.env.PATH, TERM: 'xterm-256color', LANG: 'C.UTF-8' },
+      // SSH_TTY sends a copy to the terminal as OSC 52, which the driver
+      // reads, instead of to this machine's clipboard.
+      env: { PATH: process.env.PATH, TERM: 'xterm-256color', LANG: 'C.UTF-8', SSH_TTY: '/dev/pts/bake-pty' },
       terminal: {
         cols: 80, rows: 24,
         data: (_terminal, bytes) => {
@@ -70,8 +73,10 @@ class Preview {
   }
 
   async ready(): Promise<void> {
-    await this.wait('Rust preview ready', () => this.terminal.buffer.active.type === 'alternate' && /Rust preview/iu.test(this.screen)
-      && this.raw.includes('\x1b[?2004h'))
+    await this.wait('Rust preview ready', () => this.terminal.buffer.active.type === 'alternate'
+      // The sample session's newest lines and the composer show on the first frame.
+      && this.screen.includes('rejects it before splitting.') && this.screen.includes('❯ Type a draft')
+      && this.raw.includes('\x1b[?2004h') && this.raw.includes('\x1b[?1000h\x1b[?1002h\x1b[?1006h'))
     assert.notDeepEqual(this.modes(), this.initialModes, 'preview did not acquire raw mode')
   }
 
@@ -101,13 +106,21 @@ class Preview {
 
   async quit(signal?: 'SIGINT' | 'SIGTERM' | 'SIGHUP'): Promise<void> {
     if (signal === 'SIGTERM') {
-      this.send('\t')
-      await this.wait('agent list with hidden cursor', () => this.screen.includes('Sample agents · fixed examples')
+      this.send('\x07')
+      await this.wait('agent list with hidden cursor', () => this.screen.includes('Fixed examples · nothing is running')
         && this.raw.lastIndexOf('\x1b[?25l') > this.raw.lastIndexOf('\x1b[?25h'))
     }
-    if (signal === undefined) this.send('\x03')
-    else this.process.kill(signal)
+    if (signal === undefined) {
+      // The first Ctrl+C only arms the quit; the second, inside its window, quits.
+      this.send('\x03')
+      await this.wait('quit armed', () => this.screen.includes('Press Ctrl-C again to quit'))
+      assert.equal(this.code, undefined, 'one Ctrl+C quit the preview')
+      this.send('\x03')
+    } else this.process.kill(signal)
     await this.wait('preview process and PTY exit', () => this.code !== undefined && this.streamStatus !== undefined)
+    // The wait read the parse queue before its last output arrived; the
+    // stream has ended now, so this queue holds every byte the preview wrote.
+    await this.parsed
     assert.equal(await this.exited, signal === 'SIGTERM' ? 143 : signal === 'SIGHUP' ? 129 : signal === 'SIGINT' ? 130 : 0)
     assert.equal(this.process.signalCode, null)
     // Linux reports EIO when the last slave closes, including a clean exit.
@@ -115,6 +128,10 @@ class Preview {
     assert.deepEqual(this.modes(), this.initialModes, 'terminal mode flags were not restored')
     assert.equal(this.terminal.buffer.active.type, 'normal', 'alternate screen was not released')
     assert(this.raw.lastIndexOf('\x1b[?2004l') > this.raw.lastIndexOf('\x1b[?2004h'), 'paste mode was not released')
+    assert(this.raw.lastIndexOf('\x1b[?7h') > this.raw.lastIndexOf('\x1b[?7l'), 'autowrap was not restored')
+    for (const mode of ['1000', '1002', '1006'])
+      assert(this.raw.lastIndexOf(`\x1b[?${mode}l`) > this.raw.lastIndexOf(`\x1b[?${mode}h`), `mouse mode ${mode} was not released`)
+    assert(this.raw.lastIndexOf('\x1b[?2026l') > this.raw.lastIndexOf('\x1b[?2026h'), 'synchronized output was left open')
     assert(this.raw.lastIndexOf('\x1b[?25h') > this.raw.lastIndexOf('\x1b[?25l'), 'cursor was not restored')
     assert.throws(() => process.kill(this.process.pid, 0), 'application remains alive after exit')
   }
@@ -158,28 +175,186 @@ if (process.platform === 'win32') throw new Error('Rust PTY scenarios require PO
 await scenario('composer, agent inspection, paste, and resize', async (preview) => {
   preview.send('draftAB\x1b[D')
   await preview.wait('typed draft', () => preview.screen.includes('draftAB'))
-  preview.send('\t')
-  await preview.wait('sample agent picker', () => /sample agents/iu.test(preview.screen))
+  preview.send('\x07')
+  await preview.wait('sample agent picker', () => preview.screen.includes('Fixed examples · nothing is running'))
   preview.send('\x1b[B\r')
-  await preview.wait('read-only inspection', () => preview.screen.includes('Read-only. Typing here'))
+  await preview.wait('read-only inspection', () => preview.screen.includes('typing never reaches an agent'))
   preview.send('forbidden\x1b')
-  await preview.wait('return to composer', () => !preview.screen.includes('Read-only. Typing here') && preview.screen.includes('draftAB'))
+  await preview.wait('return to composer', () => !preview.screen.includes('typing never reaches an agent') && preview.screen.includes('draftAB'))
   preview.send('X')
   await preview.wait('restored caret', () => preview.screen.includes('draftAXB'))
   assert(!preview.screen.includes('forbidden'), 'inspection accepted draft input')
-  preview.send('\x1a')
+  preview.send('\x1f')
   await preview.wait('undo after inspection', () => preview.screen.includes('draftAB') && !preview.screen.includes('draftAXB'))
-  preview.send('\r')
-  await preview.wait('refused submission', () => /not available/iu.test(preview.screen))
-  assert(preview.screen.includes('draftAB'), 'refused submission cleared the draft')
   preview.send('\x1b[200~line one\r\nline two\x1b[201~')
   await preview.wait('multiline paste', () => preview.screen.includes('line one') && preview.screen.includes('line two'))
   await preview.resize(40, 12)
   await preview.wait('narrow draft', () => preview.screen.includes('line two'))
   await preview.resize(80, 24)
   await preview.wait('resized draft', () => preview.screen.includes('line one') && preview.screen.includes('line two'))
-  preview.send('\x1a')
+  preview.send('\x1f')
   await preview.wait('atomic paste undo', () => preview.screen.includes('draftAB') && !preview.screen.includes('line one'))
+  // Readline keys: Ctrl+A, then Ctrl+E and Ctrl+W kill the word, and Ctrl+Y puts it back.
+  preview.send('\x01X')
+  await preview.wait('line start', () => preview.screen.includes('❯ XdraftAB'))
+  preview.send('\x05 tail\x17')
+  await preview.wait('word killed', () => preview.screen.includes('❯ XdraftAB ') && !preview.screen.includes('tail'))
+  preview.send('\x19')
+  await preview.wait('kill yanked', () => preview.screen.includes('❯ XdraftAB tail'))
+  // Up on a one-row draft recalls the newest prompt; Down restores the draft.
+  preview.send('\x1b[A')
+  await preview.wait('prompt recalled', () => preview.screen.includes('❯ Run the parser tests') && !preview.screen.includes('XdraftAB'))
+  preview.send('\x1b[B')
+  await preview.wait('draft restored', () => preview.screen.includes('❯ XdraftAB tail'))
+  // A paste of three lines or more collapses into one placeholder, which Backspace removes whole.
+  preview.send('\x1b[200~one\ntwo\nthree\nfour\x1b[201~')
+  await preview.wait('collapsed paste', () => preview.screen.includes('❯ XdraftAB tail[Pasted text #1 +3 lines]'))
+  preview.send('\x7f')
+  await preview.wait('placeholder erased', () => !preview.screen.includes('Pasted text') && preview.screen.includes('❯ XdraftAB tail'))
+  // A pasted image path stages the image behind a placeholder, listed above the bar; Backspace unstages it.
+  const imageDir = await mkdtemp(join(tmpdir(), 'bake-rust-image-'))
+  try {
+    const png = Buffer.concat([Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex'), Buffer.from([0, 0, 0, 3, 0, 0, 0, 2]), Buffer.alloc(16)])
+    await writeFile(join(imageDir, 'shot.png'), png)
+    preview.send(`\x1b[200~${join(imageDir, 'shot.png')}\x1b[201~`)
+    await preview.wait('image staged', () => preview.screen.includes('❯ XdraftAB tail[Image #2]')
+      && preview.screen.includes('Staged attachments: 1') && preview.screen.includes('1. shot.png · image/png · 40 B · 3×2'))
+    preview.send('\x7f')
+    await preview.wait('image unstaged', () => !preview.screen.includes('Staged attachments') && !preview.screen.includes('[Image'))
+  } finally { await rm(imageDir, { recursive: true }) }
+  // A leading slash opens the command menu; Tab fills in the selected command and its usage replaces the menu.
+  preview.send('\x01\x0b/go')
+  await preview.wait('slash menu', () => /▸ \/goal +\[objective\|clear\]/u.test(preview.screen) && preview.screen.includes('Tab completes'))
+  preview.send('\t')
+  await preview.wait('command completed', () => preview.screen.includes('❯ /goal') && preview.screen.includes('/goal [objective|clear]  Set or view the goal'))
+  preview.send('\r')
+  await preview.wait('command refused', () => preview.screen.includes('Commands are not available in this preview'))
+  await preview.quit()
+})
+
+await scenario('transcript pages, jumps between prompts, and follows output again', async (preview) => {
+  preview.send('keep')
+  await preview.wait('following output', () => preview.screen.includes('PgUp scroll · Ctrl+↑ prompts') && preview.screen.includes('before splitting.'))
+  preview.send('\x1b[5~')
+  await preview.wait('reading history', () => /↓ \d+ lines below · Ctrl\+End/u.test(preview.screen) && !preview.screen.includes('before splitting.'))
+  // Two prompts back from the newest lines is the code-mode turn: its program, its call sites, and what it returned.
+  preview.send('\x1b[1;5F\x1b[1;5A')
+  await preview.wait('parser turn at the top', () => /^> Run the parser tests/u.test(preview.screen))
+  preview.send('\x1b[1;5A')
+  await preview.wait('code-mode block', () => /^> Find TODO comments/u.test(preview.screen)
+    && /(?:✓|\{\}) Codemode: Find TODOs +13 calls · 1 failed/u.test(preview.screen)
+    && /╰ ✓ tools\.read ×12 .+11 done · 1 failed/u.test(preview.screen)
+    && /✗ src\/m5\.ts +Permission denied/u.test(preview.screen))
+  preview.send('\x1b[1;5H')
+  await preview.wait('transcript start', () => /^ {2}Bake · Rust preview/mu.test(preview.screen))
+  preview.send('\x1b[1;5B')
+  await preview.wait('next prompt at the top', () => /^> Find where the session controller/u.test(preview.screen))
+  preview.send('\x1b[1;5F')
+  await preview.wait('following again', () => preview.screen.includes('PgUp scroll') && preview.screen.includes('before splitting.'))
+  assert(preview.screen.includes('❯ keep'), 'transcript navigation changed the draft')
+  // Wide enough, an edit's numbered diff goes side by side; narrow again, it is unified. Without truecolor
+  // there is no box, so the gutter takes the cell before the diff.
+  await preview.resize(120, 30)
+  await preview.wait('side-by-side diff', () => /^ {2}[│ ] 42 [-▎] {3}if \(quote\) fields\.push\(rest\); +│ 42 [+▎] {3}if \(quote\) throw/mu.test(preview.screen))
+  await preview.resize(80, 30)
+  await preview.wait('unified diff', () => /^ {2}[│ ] 42 [+▎] {3}if \(quote\) throw/mu.test(preview.screen))
+  await preview.quit()
+})
+
+await scenario('the wheel scrolls the transcript and the scrollbar takes clicks and drags', async (preview) => {
+  // SGR reports: button 64 is the wheel toward older output, 65 toward newer; 0 the primary button.
+  const sgr = (button: number, column: number, row: number, press = true) => `\x1b[<${button};${column};${row}${press ? 'M' : 'm'}`
+  await preview.wait('scrollbar', () => preview.screen.split('\n').some(line => line.endsWith('┃') || line.endsWith('#')))
+  preview.send(sgr(64, 10, 5).repeat(3))
+  await preview.wait('wheel scrolled back', () => /↓ \d+ lines below · Ctrl\+End/u.test(preview.screen))
+  // The pill sits on the row just above the status bar, and a press on it follows output.
+  const lines = preview.screen.split('\n')
+  const pillRow = lines.findIndex(line => line.includes(' lines below · Ctrl+End'))
+  assert(lines[pillRow + 1]?.includes('no model'), 'the scroll pill is not just above the status bar')
+  const pillLine = lines[pillRow] ?? ''
+  const pillColumn = [...pillLine.slice(0, pillLine.indexOf('↓'))].length
+  preview.send(sgr(0, pillColumn + 2, pillRow + 1) + sgr(0, pillColumn + 2, pillRow + 1, false))
+  await preview.wait('pill pressed', () => preview.screen.includes('Wheel/PgUp scroll'))
+  preview.send(sgr(64, 10, 5).repeat(3))
+  await preview.wait('wheel scrolled back again', () => /↓ \d+ lines below · Ctrl\+End/u.test(preview.screen))
+  preview.send(sgr(65, 10, 5).repeat(40))
+  await preview.wait('wheel back to the newest line', () => preview.screen.includes('Wheel/PgUp scroll'))
+  // A press at the head of the scrollbar's track goes to the start; the bar is the last column.
+  preview.send(sgr(0, 80, 1) + sgr(0, 80, 1, false))
+  await preview.wait('scrollbar press at the head', () => /^ {2}Bake · Rust preview/mu.test(preview.screen))
+  // Dragged from the head past the foot, the transcript follows output again.
+  preview.send(sgr(0, 80, 1) + sgr(32, 40, 30) + sgr(0, 40, 30, false))
+  await preview.wait('scrollbar dragged to the foot', () => preview.screen.includes('Wheel/PgUp scroll'))
+  // A press on the draft puts the caret on the cell it hit: typing lands before `world`.
+  preview.send('hello world')
+  await preview.wait('typed draft', () => preview.screen.includes('❯ hello world'))
+  const draftLines = preview.screen.split('\n')
+  const draftRow = draftLines.findIndex(line => line.includes('❯ hello world'))
+  const draftLine = draftLines[draftRow] ?? ''
+  const worldColumn = [...draftLine.slice(0, draftLine.indexOf('world'))].length
+  preview.send(sgr(0, worldColumn + 1, draftRow + 1) + sgr(0, worldColumn + 1, draftRow + 1, false) + 'big ')
+  await preview.wait('caret placed by a press', () => preview.screen.includes('❯ hello big world'))
+  // A double click in the transcript selects a word and copies it on release, through OSC 52 here.
+  const textLines = preview.screen.split('\n')
+  const wordRow = textLines.findIndex(line => line.includes('before splitting.'))
+  const wordLine = textLines[wordRow] ?? ''
+  const wordColumn = [...wordLine.slice(0, wordLine.indexOf('splitting'))].length + 3
+  const click = sgr(0, wordColumn, wordRow + 1) + sgr(0, wordColumn, wordRow + 1, false)
+  preview.send(click + click)
+  const copied = `\x1b]52;c;${Buffer.from('splitting').toString('base64')}\x07`
+  await preview.wait('word copied', () => preview.raw.includes(copied) && preview.screen.includes('Copied'))
+  await preview.wait('copy notice gone', () => !preview.screen.includes('Copied'))
+  await preview.quit()
+})
+
+await scenario('sample activity is text that advances on its own, then compacts, and stops', async (preview) => {
+  preview.send('\x14')
+  await preview.wait('sample turn', () => /^ {2}\S+… {2}thinking · 0s +no model/mu.test(preview.screen) && preview.screen.includes('Esc interrupts')
+    && preview.screen.includes('Enter steers the next step'))
+  // The turn runs a code-mode script: its dot blinks on its own, shown and then a blank in place.
+  await preview.wait('running script shown', () => /^ {2}(?:●|\{\}) Codemode: Read every manifest, then build/mu.test(preview.screen))
+  await preview.wait('running script blinks', () => /^ {4,5}Codemode: Read every manifest, then build/mu.test(preview.screen))
+  await preview.wait('running script shown again', () => /^ {2}(?:●|\{\}) Codemode: Read every manifest, then build/mu.test(preview.screen))
+  // Its calls arrive on the clock, and the build runs last until the turn ends.
+  await preview.wait('script calls arrive', () => /✗ packages\/goal\/package\.json +Permission denied/u.test(preview.screen)
+    && /╰ [● ] tools\.bash +bun run build/u.test(preview.screen))
+  // No key is pressed: the loop's own timer must redraw the elapsed time.
+  await preview.wait('elapsed time advances', () => preview.screen.includes('thinking · 1s'))
+  assert(!/[\u2800-\u28ff]/u.test(preview.screen), 'the activity drew a spinner glyph')
+  preview.send('\x14')
+  // The settled block outgrows the screen; its foot shows the build and what the program returned.
+  await preview.wait('script settles with the turn', () => /╰ ✓ tools\.bash +bun run build +exit 0/u.test(preview.screen) && /return +\{ manifests: 12, exitCode: 0 \}/u.test(preview.screen))
+  await preview.wait('sample compaction', () => preview.screen.includes('Compacting history…  preparing · 0s')
+    && preview.screen.includes('Compacting… Enter queues · Esc cancels') && !preview.screen.includes('Esc interrupts'))
+  preview.send('\x1b')
+  // The compaction ends. The bar keeps the turn's outcome on its left and the
+  // status, no model and then the directory, right-aligned on the same row.
+  await preview.wait('sample stopped', () => /^ {2}✓ Completed {2}\d+s +no model {2}\S+$/mu.test(preview.screen)
+    && !preview.screen.includes('Compacting'))
+  await preview.quit()
+})
+
+await scenario('a prompt runs a fixture turn that streams, completes, takes a steer, and stops on Esc', async (preview) => {
+  preview.send('hello fixture\r')
+  // The prompt shows once the runtime commits it, and the draft is empty again.
+  await preview.wait('turn started', () => /^> hello fixture +[│┃]$/mu.test(preview.screen)
+    && preview.screen.includes('Esc interrupts') && preview.screen.includes('Enter steers the next step'))
+  await preview.wait('turn completed', () => preview.screen.includes('no model or tool ran.')
+    && /^ {2}✓ Completed {2}\d+s/mu.test(preview.screen) && preview.screen.includes('❯ Type a draft'))
+  assert.equal(preview.screen.split('no model or tool ran.').length - 1, 1, 'the streamed answer was drawn twice')
+  preview.send('again\r')
+  await preview.wait('call running', () => preview.screen.includes('running bash'))
+  // A prompt sent while the turn runs waits above the bar until Alt+↑ sends it.
+  preview.send('later\r')
+  await preview.wait('pending input', () => preview.screen.includes('Pending input')
+    && preview.screen.includes('Next step: later') && preview.screen.includes('Alt+↑ sends it now'))
+  preview.send('\x1b[1;3A')
+  await preview.wait('pending sent', () => preview.screen.includes('Sent queued input now')
+    && /^> later +[│┃]$/mu.test(preview.screen) && !preview.screen.includes('Pending input'))
+  await preview.wait('steered turn running', () => preview.screen.includes('running bash'))
+  preview.send('\x1b')
+  await preview.wait('turn interrupted', () => /^ {2}■ Interrupted/mu.test(preview.screen)
+    && /Bash: true +interrupted/u.test(preview.screen))
   await preview.quit()
 })
 
