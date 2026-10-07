@@ -96,7 +96,6 @@ pub fn render(app: &mut State, frame: &mut Frame) {
         let text = match kind {
             Notice::NoModel => copy::NO_MODEL,
             Notice::ReadOnly => copy::READ_ONLY,
-            Notice::ListKeys => copy::LIST_KEYS,
             Notice::DraftLimit => copy::DRAFT_LIMIT,
             Notice::NoClipboardImage => copy::NO_CLIPBOARD_IMAGE,
         };

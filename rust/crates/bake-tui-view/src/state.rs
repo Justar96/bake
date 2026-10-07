@@ -249,7 +249,6 @@ impl Focus {
 pub enum Notice {
     NoModel,
     ReadOnly,
-    ListKeys,
     DraftLimit,
     /// Ctrl+V, or an empty paste, found no image on the clipboard.
     NoClipboardImage,
@@ -477,7 +476,9 @@ pub fn update(state: &mut State, msg: Msg) -> Vec<Effect> {
                 }
                 paste_text(state, &text);
             }
-            Focus::AgentList => state.notice = Some(Notice::ListKeys),
+            // The list's keys are on the bar; a paste there is ignored, as
+            // the oracle ignores one while a sheet is open.
+            Focus::AgentList => {}
             Focus::Inspect(_) => state.notice = Some(Notice::ReadOnly),
         },
         Msg::Resize { cols, .. } => {
@@ -1014,7 +1015,8 @@ fn list_key(state: &mut State, bound: Option<Action>) {
             state.focus = Focus::Composer;
             state.notice = None;
         }
-        _ => state.notice = Some(Notice::ListKeys),
+        // Other keys do nothing: the bar already names the list's keys.
+        _ => {}
     }
 }
 
@@ -1194,8 +1196,10 @@ mod tests {
             press(&mut state, Key::Down);
         }
         assert_eq!(state.selected, SAMPLE_AGENTS.last().unwrap().id);
+        // Typing and pasting are ignored, with no notice repeating the bar.
         type_str(&mut state, "q");
-        assert_eq!(state.notice, Some(Notice::ListKeys));
+        update(&mut state, Msg::Paste("pasted".into()));
+        assert_eq!(state.notice, None);
         assert!(state.draft.is_empty());
         chord(&mut state, Key::Char('g'), Mods::CTRL);
         assert_eq!(state.focus, Focus::Composer);

@@ -79,7 +79,6 @@ pub const BELOW: &str = "below";
 pub const NO_MODEL: &str = "Model connection is not available in this preview. Your draft is kept.";
 pub const READ_ONLY: &str =
     "Read-only inspection: input does not reach any agent or your draft. Esc returns.";
-pub const LIST_KEYS: &str = "↑↓ select · Enter inspect · Esc returns to the draft.";
 pub const DRAFT_LIMIT: &str = "Draft limit reached; the rest of the input was not added.";
 /// The agents: the standing row's label, the list's subtitle, and what
 /// inspection says about input and the draft.

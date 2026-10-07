@@ -359,10 +359,14 @@ pub fn box_colour(state: CallState, tones: Tones) -> Option<Color> {
 }
 
 /// Makes `lines` a card: a padding row above and below, and every row
-/// filled with `bg` across the full `width`.
+/// filled with `bg` across the full `width`. A call of one line, such as a
+/// read or a search that found nothing to show, stays one tinted row, so a
+/// run of them reads as a list rather than a stack of boxes.
 fn card(lines: &mut Vec<Line<'static>>, width: usize, bg: Color) {
-    lines.insert(0, Line::default());
-    lines.push(Line::default());
+    if lines.len() > 1 {
+        lines.insert(0, Line::default());
+        lines.push(Line::default());
+    }
     boxed(lines, width, bg);
 }
 
@@ -2789,11 +2793,12 @@ mod tests {
         };
         let on = present(&rows, 0, 40, look);
         let off = present(&rows, 0, 40, Look { lit: false, ..look });
-        // In its box: a padding row, the call, and a padding row.
-        assert_eq!(text(&on), ["", "  ● Bash: bun run build", ""]);
-        assert_eq!(text(&off), ["", "    Bash: bun run build", ""]);
-        assert_eq!(on[1].width(), off[1].width());
-        let mark = on[1].spans.iter().find(|s| s.content == "●").unwrap();
+        // A call of one line is one tinted row, without padding rows.
+        assert_eq!(text(&on), ["  ● Bash: bun run build"]);
+        assert_eq!(text(&off), ["    Bash: bun run build"]);
+        assert_eq!(on[0].width(), off[0].width());
+        assert!(on[0].spans.iter().all(|s| s.style.bg.is_some()));
+        let mark = on[0].spans.iter().find(|s| s.content == "●").unwrap();
         assert_eq!(mark.style.fg, Some(Color::Rgb(0xff, 0xff, 0xff)));
         // Shown for one pulse, hidden for the next; the loop wakes at each change.
         assert!(lit(Duration::ZERO) && lit(Duration::from_millis(599)));
