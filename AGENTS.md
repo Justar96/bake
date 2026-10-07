@@ -51,9 +51,11 @@ Run the checks relevant to your change while you work, and `bun run preflight` b
 
 ## Branches and releases
 
-`develop` is where work lands; `main` holds released code. [CONTRIBUTING.md](CONTRIBUTING.md) covers pull requests and [distribution/README.md](distribution/README.md#release-with-github-actions) the release workflow.
+`develop` is where work lands; `main` holds released code; `rust/0.4.0` collects the Rust 0.4 port. [CONTRIBUTING.md](CONTRIBUTING.md) covers pull requests and [distribution/README.md](distribution/README.md#release-with-github-actions) the release workflow.
 
-- Start every change, hotfixes included, on a new branch from an up-to-date `origin/develop`, and open its pull request against `develop`. Never commit to `main` or `develop` directly.
+- Start every change, hotfixes included, on a new branch from an up-to-date `origin/develop`, and open its pull request against `develop`. Never commit to `main`, `develop`, or `rust/0.4.0` directly.
+- Rust port work, a change under the [0.4 roadmap](docs/roadmap/rust-0.4/README.md), starts instead from an up-to-date `origin/rust/0.4.0` and targets it. CI runs its native job on every OS and its TypeScript checks on Linux only as far as its files need. A pull request from `rust/0.4.0` into `develop` brings the line over with a merge commit and full CI; a pull request from `develop` into `rust/0.4.0` brings 0.3 fixes forward. A 0.3 fix still lands on `develop` first.
+- Split dependent changes into a stack of pull requests, each based on the one below, and link them with `gh stack link --base <trunk> <bottom> … <top>` so GitHub owns their order. The [stack review guide](docs/cookbook/responding-to-pr-review-on-a-stack.md) covers review fixes, and the `dsh-merging-stacked-prs` skill covers landing with `gh stack merge`.
 - `main` accepts only a merge-commit pull request from `develop`, which the `develop only` check enforces. Open one only to ship a release.
 - To release, finish the change on its branch, then:
   1. Run `bun run release:prepare <version>`. Check the changelog section it writes, and rename `evals/agent-loop/versions/unreleased/` to `v<version>` if it exists.
