@@ -204,6 +204,21 @@ fn opens_section(previous: Option<&Row>, _row: &Row) -> bool {
     previous.is_some()
 }
 
+/// Whether calls are drawn in boxes: on a truecolor terminal.
+fn boxes(look: Look) -> bool {
+    look.tones == Tones::TrueColor
+}
+
+/// The gutter a call's output hangs from: the rule without a box, and a
+/// blank inside one, where the box already holds the call together.
+fn gutter(look: Look) -> &'static str {
+    if boxes(look) {
+        " "
+    } else {
+        look.marks().gutter
+    }
+}
+
 /// The background of a call's box: a soft grey a few steps above a dark
 /// terminal's own, and a faint red for a call that failed. Only a truecolor
 /// terminal draws it; sixteen colours have no step that subtle, and
@@ -213,6 +228,14 @@ pub fn box_colour(state: CallState, tones: Tones) -> Option<Color> {
         CallState::Failed => Color::Rgb(0x2e, 0x22, 0x25),
         CallState::Running | CallState::Done => Color::Rgb(0x25, 0x28, 0x2f),
     })
+}
+
+/// Makes `lines` a card: a padding row above and below, and every row
+/// filled with `bg` across the full `width`.
+fn card(lines: &mut Vec<Line<'static>>, width: usize, bg: Color) {
+    lines.insert(0, Line::default());
+    lines.push(Line::default());
+    boxed(lines, width, bg);
 }
 
 /// Fills `lines` with `bg` across the full `width`, under every span that
@@ -346,8 +369,13 @@ impl Look {
 
 /// Cells the tool name's column takes, its gap included, so arguments align.
 pub const TOOL_WIDTH: usize = 6;
-/// Column a call's output starts at, after the gutter at [`RAIL`] + 2.
-pub const OUTPUT: usize = 6;
+/// Column everything inside a call starts at: its output, a diff, a
+/// script's source, and the counts of what is folded away. Column [`RAIL`]
+/// holds the call's structure: its state mark, the gutter, a script's tree,
+/// and the arrow before its result.
+pub const BODY: usize = 4;
+/// Cells a call's text keeps clear of the box's right edge.
+pub const BOX_PAD: usize = 2;
 
 /// `text` wrapped at `width` less `indent`; each row after the first opens
 /// with `rest`, the first with `first`.
@@ -402,6 +430,12 @@ pub fn present(rows: &[Row], index: usize, width: usize, look: Look) -> Vec<Line
         lines.push(Line::default());
     }
     let rail = || vec![pad(RAIL)];
+    // Inside a box, a call's text keeps clear of the box's right edge.
+    let inner = if boxes(look) {
+        width.saturating_sub(BOX_PAD).max(1)
+    } else {
+        width
+    };
     match row {
         Row::Welcome => {
             lines.push(Line::from(vec![
@@ -447,11 +481,11 @@ pub fn present(rows: &[Row], index: usize, width: usize, look: Look) -> Vec<Line
                 *state,
                 summary.as_deref(),
                 output,
-                width,
+                inner,
                 look,
             );
             if let Some(bg) = box_colour(*state, look.tones) {
-                boxed(&mut block, width, bg);
+                card(&mut block, width, bg);
             }
             lines.extend(block);
         }
@@ -468,11 +502,11 @@ pub fn present(rows: &[Row], index: usize, width: usize, look: Look) -> Vec<Line
                 *state,
                 calls,
                 result.as_deref(),
-                width,
+                inner,
                 look,
             );
             if let Some(bg) = box_colour(*state, look.tones) {
-                boxed(&mut block, width, bg);
+                card(&mut block, width, bg);
             }
             lines.extend(block);
         }
@@ -717,12 +751,8 @@ fn present_call(
             .unwrap_or_default(),
     };
     ride(&mut lines, status, under, width);
-    let gutter = || {
-        vec![
-            pad(RAIL + 2),
-            Span::styled(format!("{} ", marks.gutter), quiet),
-        ]
-    };
+    let glyph = gutter(look);
+    let gutter = || vec![pad(RAIL), Span::styled(format!("{glyph} "), quiet)];
     for item in preview(output) {
         match item {
             Preview::Line(text) => {
@@ -731,7 +761,7 @@ fn present_call(
                 } else {
                     output_tone(look.tones)
                 };
-                lines.extend(hang(&text, width, OUTPUT, gutter(), gutter(), style))
+                lines.extend(hang(&text, width, BODY, gutter(), gutter(), style))
             }
             Preview::More(count) => {
                 let mut spans = gutter();
@@ -836,14 +866,14 @@ fn present_script(
         }
         ride(&mut lines, tally, under, width);
     }
-    lines.extend(numbered(source, width, marks));
+    lines.extend(numbered(source, width, look));
     let entries = tree(calls);
     for (i, entry) in entries.iter().enumerate() {
         let last = i + 1 == entries.len();
         let glyph = if last { marks.corner } else { marks.branch };
-        let lead = vec![pad(RAIL + 2), Span::styled(format!("{glyph} "), dim())];
+        let lead = vec![pad(RAIL), Span::styled(format!("{glyph} "), dim())];
         let rest = vec![
-            pad(RAIL + 2),
+            pad(RAIL),
             Span::styled(format!("{} ", if last { " " } else { marks.stem }), dim()),
         ];
         match entry {
@@ -889,19 +919,14 @@ fn present_script(
             Style::new()
         };
         let returned: Vec<String> = result.lines().map(str::to_owned).collect();
-        let mark = || {
-            vec![
-                pad(RAIL + 2),
-                Span::styled(format!("{} ", marks.result), dim()),
-            ]
-        };
+        let mark = || vec![pad(RAIL), Span::styled(format!("{} ", marks.result), dim())];
         let mut first = true;
         for item in preview(&returned) {
-            let lead = if first { mark() } else { vec![pad(OUTPUT)] };
+            let lead = if first { mark() } else { vec![pad(BODY)] };
             first = false;
             match item {
                 Preview::Line(text) => {
-                    lines.extend(hang(&text, width, OUTPUT, lead, vec![pad(OUTPUT)], style))
+                    lines.extend(hang(&text, width, BODY, lead, vec![pad(BODY)], style))
                 }
                 Preview::More(count) => {
                     let mut spans = lead;
@@ -919,19 +944,19 @@ fn present_script(
 
 /// A script's source as the block previews it: each line after its number,
 /// dim, and long sources as their first and last lines around a count.
-fn numbered(source: &[String], width: usize, marks: &Marks) -> Vec<Line<'static>> {
+fn numbered(source: &[String], width: usize, look: Look) -> Vec<Line<'static>> {
+    let marks = look.marks();
+    let rule = || vec![pad(RAIL), Span::styled(format!("{} ", gutter(look)), dim())];
     let digits = source.len().to_string().len();
-    let indent = RAIL + 2 + digits + 2;
+    let indent = BODY + digits + 2;
     let mut lines = Vec::new();
     let mut number = 0;
     for item in preview_all(source) {
         match item {
             Preview::Line(text) => {
                 number += 1;
-                let lead = vec![
-                    pad(RAIL + 2),
-                    Span::styled(format!("{number:>digits$}  "), dim()),
-                ];
+                let mut lead = rule();
+                lead.push(Span::styled(format!("{number:>digits$}  "), dim()));
                 lines.extend(hang(
                     &text,
                     width,
@@ -943,13 +968,12 @@ fn numbered(source: &[String], width: usize, marks: &Marks) -> Vec<Line<'static>
             }
             Preview::More(count) => {
                 number += count;
-                lines.push(Line::from(vec![
-                    pad(RAIL + 2),
-                    Span::styled(
-                        format!("{} {count} {}", marks.more, copy::MORE_LINES),
-                        dim(),
-                    ),
-                ]));
+                let mut spans = rule();
+                spans.push(Span::styled(
+                    format!("{} {count} {}", marks.more, copy::MORE_LINES),
+                    dim(),
+                ));
+                lines.push(Line::from(spans));
             }
         }
     }
@@ -1305,8 +1329,8 @@ mod tests {
             all[user + 4],
             r#"  ✓ Bash  rg -n "commands.register" -g '*.ts'  2 lines"#
         );
-        assert_eq!(all[user + 5], "    │ packages/app/src/controller.ts:45");
-        assert_eq!(all[user + 6], "    │ packages/app/src/controller.ts:52");
+        assert_eq!(all[user + 5], "  │ packages/app/src/controller.ts:45");
+        assert_eq!(all[user + 6], "  │ packages/app/src/controller.ts:52");
         // Each call stands apart from the next, so its box does too.
         assert_eq!(all[user + 7], "");
         assert_eq!(
@@ -1338,11 +1362,11 @@ mod tests {
         assert_eq!(
             lines[2..],
             [
-                "    │ bun test v1.3.0",
-                "    │ tests/parser.test.ts:",
-                "    │ ⋯ 4 more lines",
-                "    │  3 pass",
-                "    │  1 fail",
+                "  │ bun test v1.3.0",
+                "  │ tests/parser.test.ts:",
+                "  │ ⋯ 4 more lines",
+                "  │  3 pass",
+                "  │  1 fail",
             ]
         );
         let lines = |n: usize| (0..n).map(|i| format!("l{i}")).collect::<Vec<_>>();
@@ -1374,7 +1398,7 @@ mod tests {
         );
         assert!(all.iter().any(|l| l.starts_with("| Run the parser tests")));
         assert!(all.iter().any(|l| l.starts_with("  x Bash  bun test")));
-        assert!(all.iter().any(|l| l == "    | ... 4 more lines"));
+        assert!(all.iter().any(|l| l == "  | ... 4 more lines"));
     }
 
     #[test]
@@ -1403,8 +1427,8 @@ mod tests {
                 "          three",
                 "          four",
                 "          1 line",
-                "    │ 0123456789ab",
-                "    │ cdef",
+                "  │ 0123456789abcd",
+                "  │ ef",
             ]
         );
     }
@@ -1514,34 +1538,34 @@ mod tests {
             [
                 String::new(),
                 then("  ✓ Script  Find TODOs", "13 calls · 1 failed"),
-                "    1  const found = [];".into(),
-                r#"    2  for (const path of await tools.glob({ pattern: "src/**/*.ts" })) {"#
+                "  │ 1  const found = [];".into(),
+                r#"  │ 2  for (const path of await tools.glob({ pattern: "src/**/*.ts" })) {"#
                     .into(),
-                "    ⋯ 2 more lines".into(),
-                "    5  }".into(),
-                "    6  return found;".into(),
-                then("    ├ ✓ Glob  src/**/*.ts", "12 files"),
-                then("    ├ ✓ Read  src/m0.ts", "2 lines"),
-                "    ├ ⋯ 4 more calls".into(),
-                then("    ├ ✗ Read  src/m5.ts", "Permission denied"),
-                "    ├ ⋯ 4 more calls".into(),
-                then("    ├ ✓ Read  src/m10.ts", "2 lines"),
-                then("    └ ✓ Read  src/m11.ts", "2 lines"),
-                r#"    → ["src/m3.ts", "src/m9.ts"]"#.into(),
+                "  │ ⋯ 2 more lines".into(),
+                "  │ 5  }".into(),
+                "  │ 6  return found;".into(),
+                then("  ├ ✓ Glob  src/**/*.ts", "12 files"),
+                then("  ├ ✓ Read  src/m0.ts", "2 lines"),
+                "  ├ ⋯ 4 more calls".into(),
+                then("  ├ ✗ Read  src/m5.ts", "Permission denied"),
+                "  ├ ⋯ 4 more calls".into(),
+                then("  ├ ✓ Read  src/m10.ts", "2 lines"),
+                then("  └ ✓ Read  src/m11.ts", "2 lines"),
+                r#"  → ["src/m3.ts", "src/m9.ts"]"#.into(),
             ]
         );
     }
 
     #[test]
     fn a_narrow_script_keeps_its_tree_unbroken() {
-        let lines = script_lines(40, PLAIN);
+        let lines = script_lines(38, PLAIN);
         let failed = lines.iter().position(|l| l.contains("src/m5.ts")).unwrap();
         // The error moves under its call's argument, and the stem runs beside it.
         assert_eq!(
             lines[failed + 1],
-            format!("    │{}Permission denied", " ".repeat(9))
+            format!("  │{}Permission denied", " ".repeat(9))
         );
-        assert!(lines.iter().all(|l| l.width() <= 40));
+        assert!(lines.iter().all(|l| l.width() <= 38));
         let classic = Look {
             classic: true,
             ..PLAIN
@@ -1554,9 +1578,9 @@ mod tests {
         assert!(
             ascii
                 .iter()
-                .any(|l| l.starts_with("    ` + Read  src/m11.ts"))
+                .any(|l| l.starts_with("  ` + Read  src/m11.ts"))
         );
-        assert!(ascii.iter().any(|l| l.starts_with(r#"    > ["src/m3.ts""#)));
+        assert!(ascii.iter().any(|l| l.starts_with(r#"  > ["src/m3.ts""#)));
     }
 
     #[test]
@@ -1613,10 +1637,11 @@ mod tests {
         };
         let on = present(&rows, 0, 40, look);
         let off = present(&rows, 0, 40, Look { lit: false, ..look });
-        assert_eq!(text(&on), ["  ● Bash  bun run build"]);
-        assert_eq!(text(&off), ["    Bash  bun run build"]);
-        assert_eq!(on[0].width(), off[0].width());
-        let mark = on[0].spans.iter().find(|s| s.content == "●").unwrap();
+        // In its box: a padding row, the call, and a padding row.
+        assert_eq!(text(&on), ["", "  ● Bash  bun run build", ""]);
+        assert_eq!(text(&off), ["", "    Bash  bun run build", ""]);
+        assert_eq!(on[1].width(), off[1].width());
+        let mark = on[1].spans.iter().find(|s| s.content == "●").unwrap();
         assert_eq!(mark.style.fg, Some(Color::Rgb(0xff, 0xff, 0xff)));
         // Shown for one pulse, hidden for the next; the loop wakes at each change.
         assert!(lit(Duration::ZERO) && lit(Duration::from_millis(599)));
@@ -1700,13 +1725,19 @@ mod tests {
             text(&lines),
             [
                 "",
+                "",
                 "  ✓ Edit  src/parser.ts  +1 -1",
-                "    │    const fields = split(line);",
-                "    │ -  if (quote) fields.push(rest);",
-                r#"    │ +  if (quote) throw new SyntaxError("unterminated quote");"#,
-                "    │    return fields;",
+                "       const fields = split(line);",
+                "    -  if (quote) fields.push(rest);",
+                r#"    +  if (quote) throw new SyntaxError("unterminated quote");"#,
+                "       return fields;",
+                "",
             ]
         );
+        // In a box the diff sits at the body column, under the tool name,
+        // with no gutter; without one, the gutter holds it together.
+        let plain = text(&present(&rows, index, 80, PLAIN));
+        assert_eq!(plain[3], "  │ -  if (quote) fields.push(rest);");
         let style = |line: &Line, content: &str| {
             line.spans
                 .iter()
@@ -1714,19 +1745,19 @@ mod tests {
                 .map(|s| s.style)
                 .unwrap()
         };
-        let head = &lines[1];
+        let head = &lines[2];
         assert_eq!(style(head, "Edit  ").fg, Some(Color::Rgb(0xa7, 0x8b, 0xfa)));
         assert!(style(head, "src/").add_modifier.contains(Modifier::DIM));
         assert_eq!(style(head, "parser.ts").fg, None);
         assert_eq!(style(head, "+1").fg, Some(Color::Rgb(0x22, 0xc5, 0x5e)));
         assert_eq!(style(head, "-1").fg, Some(Color::Rgb(0xef, 0x44, 0x44)));
         assert_eq!(
-            style(&lines[3], "-  if (quote) fields.push(rest);").fg,
+            style(&lines[4], "-  if (quote) fields.push(rest);").fg,
             Some(Color::Rgb(0xef, 0x44, 0x44))
         );
         assert_eq!(
             style(
-                &lines[4],
+                &lines[5],
                 r#"+  if (quote) throw new SyntaxError("unterminated quote");"#
             )
             .fg,
@@ -1787,5 +1818,35 @@ mod tests {
                     .all(|s| s.style.bg.is_none())
             );
         }
+    }
+
+    #[test]
+    fn a_boxed_call_keeps_its_text_clear_of_the_right_edge() {
+        let rows = vec![Row::Call {
+            tool: "Bash".into(),
+            argument: "x".into(),
+            state: CallState::Done,
+            summary: None,
+            output: vec!["0123456789abcdefghij".into()],
+        }];
+        let look = Look {
+            tones: Tones::TrueColor,
+            ..PLAIN
+        };
+        let lines = present(&rows, 0, 20, look);
+        // Text wraps two cells short of the edge, so the status moves under
+        // the argument; the box still fills the row.
+        assert_eq!(
+            text(&lines),
+            [
+                "",
+                "  ✓ Bash  x",
+                "          1 line",
+                "    0123456789abcd",
+                "    efghij",
+                ""
+            ]
+        );
+        assert!(lines.iter().all(|l| l.width() == 20));
     }
 }
