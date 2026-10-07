@@ -1,12 +1,11 @@
 //! Draws [`State`] into a Ratatui frame. Rows from the top: body, gap, notice,
-//! header, status, the composer box (top edge, draft rows, bottom edge), and
-//! the sample-agents row, in the heights [`crate::layout::plan`] grants them.
-
-use std::time::Duration;
+//! the bar (activity and status), the composer box (top edge, draft rows,
+//! bottom edge), and the sample-agents row, in the heights
+//! [`crate::layout::plan`] grants them.
 
 use ratatui_core::buffer::Buffer;
 use ratatui_core::layout::{Position, Rect};
-use ratatui_core::style::{Color, Modifier, Style, Stylize};
+use ratatui_core::style::{Color, Modifier, Style};
 use ratatui_core::terminal::Frame;
 use ratatui_core::text::{Line, Span};
 use ratatui_core::widgets::Widget;
@@ -19,9 +18,7 @@ use crate::copy;
 use crate::editor::{self, display};
 use crate::layout::{self, Needs};
 use crate::mode::{self, HINT_MIN_COLUMNS};
-use crate::state::{
-    Focus, Notice, Outcome, SAMPLE_AGENTS, SampleActivity, SampleKind, State, agent,
-};
+use crate::state::{Focus, Notice, Outcome, SAMPLE_AGENTS, SampleKind, State, agent};
 use crate::status::{self, Tone};
 
 /// Cells between the terminal's edges and rows drawn outside the box, so
@@ -63,8 +60,7 @@ pub fn render(app: &mut State, frame: &mut Frame) {
     let body = next(rows.body);
     next(rows.gap);
     let notice = next(rows.notice);
-    let header = next(rows.header);
-    let status = next(rows.status);
+    let bar = next(rows.bar);
     let rule = next(rows.top_edge);
     let band = next(rows.composer);
     let base_rule = next(rows.bottom_edge);
@@ -94,9 +90,8 @@ pub fn render(app: &mut State, frame: &mut Frame) {
         );
     }
     let columns = area.width;
-    render_header(app, columns, inset(header), buf);
+    render_bar(app, inset(bar), buf);
     render_agents_row(columns, inset(agents), buf);
-    render_status(app, inset(status), buf);
 
     let visible = usize::from(band.height);
     let total = draft.rows.len();
@@ -218,92 +213,104 @@ fn split_row(buf: &mut Buffer, columns: u16, area: Rect, left: Line, right: Line
     }
 }
 
-/// The activity line: the word, shimmering, then its phase and elapsed time,
-/// dim. The right-hand hint gives way first, then the phase and time, so
-/// the word is never cut for them.
-fn activity_row(buf: &mut Buffer, columns: u16, area: Rect, app: &State, sample: SampleActivity) {
-    let elapsed = app.now.saturating_sub(sample.started);
-    let (hue, phases) = match sample.kind {
-        SampleKind::Turn => (Hue::Running, copy::SAMPLE_PHASES),
-        SampleKind::Compaction => (Hue::Compacting, copy::COMPACTING_PHASES),
-    };
-    let step = elapsed.as_secs() / copy::PHASE_SECONDS;
-    let phase = phases[step as usize % phases.len()];
-    let details = format!("{phase} · {}", activity::format_elapsed(elapsed));
-    let word = format!("{}…", sample.word);
-    let mut spans = activity::shimmer_spans(&word, elapsed, app.tones, hue, app.tones.moves());
-    if word.width() + 2 + details.width() <= usize::from(area.width) {
-        spans.push(Span::raw("  "));
-        spans.push(Span::styled(details.to_owned(), dim()));
+/// The bar above the composer: what the session is doing on the left, and
+/// the status fields right-aligned beside it.
+///
+/// The left side is the sample's word with its phase and time, a finished
+/// turn's outcome with its time, or what the list or inspection shows. Its
+/// head is never cut; its tail gives way first, then status fields by rank,
+/// then the status line whole. Right-aligned, the status does not move when
+/// the left side appears or changes.
+fn render_bar(app: &State, area: Rect, buf: &mut Buffer) {
+    if area.is_empty() {
+        return;
     }
-    split_row(
-        buf,
-        columns,
-        area,
-        Line::from(spans),
-        Line::styled(copy::TAB_HINT, dim()),
-    );
-}
-
-/// How the last sample turn ended, held until the next one starts: the
-/// outcome's glyph and word in its colour, then the elapsed time, dim, which
-/// gives way first.
-fn summary_row(buf: &mut Buffer, columns: u16, area: Rect, outcome: Outcome, elapsed: Duration) {
-    let (head, color) = match outcome {
-        Outcome::Completed => (format!("✓ {}", copy::COMPLETED), Color::Green),
-        Outcome::Interrupted => (format!("■ {}", copy::INTERRUPTED), Color::Yellow),
-    };
-    let details = activity::format_elapsed(elapsed);
-    let mut spans = vec![Span::styled(head.clone(), Style::new().fg(color).bold())];
-    if head.width() + 2 + details.width() <= usize::from(area.width) {
-        spans.push(Span::styled(format!("  {details}"), dim()));
+    let (head, tail) = bar_left(app);
+    let fields = status::fields(&app.status);
+    let width = usize::from(area.width);
+    let head_width = Line::from(head.clone()).width();
+    let tail_width = Line::from(tail.clone()).width();
+    let mut levels = vec![(head_width + tail_width, true)];
+    if tail_width > 0 {
+        levels.push((head_width, false));
     }
-    split_row(
-        buf,
-        columns,
-        area,
-        Line::from(spans),
-        Line::styled(copy::TAB_HINT, dim()),
-    );
-}
-
-fn render_header(app: &State, columns: u16, area: Rect, buf: &mut Buffer) {
-    match app.focus {
-        Focus::Composer => match app.activity {
-            Some(sample) => activity_row(buf, columns, area, app, sample),
-            None => match app.summary {
-                Some(summary) => {
-                    summary_row(buf, columns, area, summary.outcome, summary.elapsed);
-                }
-                None => split_row(
-                    buf,
-                    columns,
-                    area,
-                    Line::from(copy::HEADER_COMPOSER.bold()),
-                    Line::styled(copy::TAB_HINT, dim()),
-                ),
-            },
-        },
-        Focus::AgentList => split_row(
+    for (left_width, with_tail) in levels {
+        let room = width.saturating_sub(left_width + if left_width > 0 { 2 } else { 0 });
+        let fitted = status::fit(&fields, room);
+        let status_width = status::fitted_width(&fitted);
+        if status_width > room || left_width > width {
+            continue;
+        }
+        let mut spans = head.clone();
+        if with_tail {
+            spans.extend(tail);
+        }
+        line(buf, area, Line::from(spans));
+        let mut right = Vec::new();
+        for (i, field) in fitted.iter().enumerate() {
+            if i > 0 {
+                right.push(Span::raw(" ".repeat(status::FIELD_GAP)));
+            }
+            for part in status::drawn(field) {
+                right.push(Span::styled(part.text, tone_style(part.tone, app.tones)));
+            }
+        }
+        let x = area.x + (width - status_width) as u16;
+        line(
             buf,
-            columns,
-            area,
-            Line::from(copy::HEADER_LIST.bold()),
-            Line::styled(copy::HEADER_LIST_HINT, dim()),
+            Rect::new(x, area.y, status_width as u16, 1),
+            Line::from(right),
+        );
+        return;
+    }
+    // Not even the head beside the narrowest status: the head alone.
+    line(buf, area, Line::from(head));
+}
+
+/// The bar's left side as a head that stays and a tail that gives way.
+fn bar_left(app: &State) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
+    match app.focus {
+        Focus::Composer => match (app.activity, app.summary) {
+            (Some(sample), _) => {
+                let elapsed = app.now.saturating_sub(sample.started);
+                let (hue, phases) = match sample.kind {
+                    SampleKind::Turn => (Hue::Running, copy::SAMPLE_PHASES),
+                    SampleKind::Compaction => (Hue::Compacting, copy::COMPACTING_PHASES),
+                };
+                let step = elapsed.as_secs() / copy::PHASE_SECONDS;
+                let phase = phases[step as usize % phases.len()];
+                let word = format!("{}…", sample.word);
+                let head =
+                    activity::shimmer_spans(&word, elapsed, app.tones, hue, app.tones.moves());
+                let details = format!("  {phase} · {}", activity::format_elapsed(elapsed));
+                (head, vec![Span::styled(details, dim())])
+            }
+            (None, Some(summary)) => {
+                let (head, color) = match summary.outcome {
+                    Outcome::Completed => (format!("✓ {}", copy::COMPLETED), Color::Green),
+                    Outcome::Interrupted => (format!("■ {}", copy::INTERRUPTED), Color::Yellow),
+                };
+                let details = format!("  {}", activity::format_elapsed(summary.elapsed));
+                (
+                    vec![Span::styled(head, Style::new().fg(color).bold())],
+                    vec![Span::styled(details, dim())],
+                )
+            }
+            (None, None) => (Vec::new(), Vec::new()),
+        },
+        Focus::AgentList => (
+            vec![Span::styled(copy::HEADER_LIST, Style::new().bold())],
+            vec![Span::styled(format!("  {}", copy::HEADER_LIST_HINT), dim())],
         ),
         Focus::Inspect(id) => {
             let name = agent(id).map_or(id, |a| a.name);
-            split_row(
-                buf,
-                columns,
-                area,
-                Line::from(vec![
-                    "Inspecting ".bold(),
+            (
+                vec![
+                    Span::styled("Inspecting ", Style::new().bold()),
                     Span::styled(name, accent().bold()),
-                    Span::styled(" · read-only", dim()),
-                ]),
-                Line::styled(copy::HEADER_INSPECT_HINT, dim()),
-            );
+                ],
+                vec![Span::styled(" · read-only", dim())],
+            )
         }
     }
 }
@@ -340,27 +347,6 @@ fn tone_style(tone: Tone, tones: Tones) -> Style {
         Tones::Ansi => Style::new().fg(ansi),
         Tones::None => Style::new(),
     }
-}
-
-/// The status fields fitted to the row by rank, two spaces apart.
-fn render_status(app: &State, area: Rect, buf: &mut Buffer) {
-    if area.is_empty() {
-        return;
-    }
-    let fields = status::fields(&app.status);
-    let mut spans = Vec::new();
-    for (i, fitted) in status::fit(&fields, usize::from(area.width))
-        .iter()
-        .enumerate()
-    {
-        if i > 0 {
-            spans.push(Span::raw(" ".repeat(status::FIELD_GAP)));
-        }
-        for part in status::drawn(fitted) {
-            spans.push(Span::styled(part.text, tone_style(part.tone, app.tones)));
-        }
-    }
-    line(buf, area, Line::from(spans));
 }
 
 fn render_body(app: &State, area: Rect, buf: &mut Buffer) {
@@ -424,7 +410,9 @@ mod tests {
     use crate::activity::Tones;
     use crate::frame::FrameStyle;
     use crate::keys::{Key, KeyInput, Mods};
-    use crate::state::{Msg, update};
+    use std::time::Duration;
+
+    use crate::state::{Msg, SampleActivity, update};
 
     /// Columns where boxed draft text starts.
     const TEXT_X: u16 = 4;
@@ -481,9 +469,9 @@ mod tests {
             assert!(rows.iter().any(|r| r.contains("Sample agents")));
             let prompt = row_index(&rows, "│ ❯ Type a draft");
             assert_eq!(cursor, Position::new(TEXT_X, prompt as u16));
-            assert!(row_index(&rows, "model not connected") < prompt);
-            // Status sits on the box's top edge; the agents row ends the screen.
-            assert!(rows[prompt - 2].starts_with("  no model"));
+            // Idle, the bar above the box holds the status alone, right-aligned.
+            assert!(rows[prompt - 2].ends_with("no model  "));
+            assert!(rows[prompt - 2].starts_with("    "));
             assert!(rows[usize::from(h) - 1].contains("↳ Sample agents"));
         }
     }
@@ -497,14 +485,12 @@ mod tests {
         assert_eq!(rows[prompt - 1], format!("╭{}╮", "─".repeat(38)));
         assert_eq!(rows[prompt], format!("│ ❯ hello{}│", " ".repeat(30)));
         assert_eq!(rows[prompt + 1], format!("╰{}╯", "─".repeat(38)));
-        // Header, status, and the agents row start where the prompt does.
-        assert!(rows[prompt - 3].starts_with("  Rust preview"));
-        assert_eq!(rows[prompt - 2].trim_end(), "  no model");
+        // The bar and the agents row align with the box's contents.
+        assert_eq!(rows[prompt - 2], format!("{}no model  ", " ".repeat(30)));
         assert!(rows[prompt + 2].starts_with("  ↳ Sample agents"));
-        // Right-hand keys end where the box's contents do.
+        // Right-hand text ends where the box's contents do.
         let (rows, _) = draw(&mut app, 80, 24);
         let prompt = row_index(&rows, "❯ hello");
-        assert!(rows[prompt - 3].ends_with("Tab sample agents  "));
         assert!(rows[prompt + 2].ends_with("Tab  "));
     }
 
@@ -521,15 +507,15 @@ mod tests {
     }
 
     #[test]
-    fn refused_submission_shows_the_notice_above_the_header() {
+    fn refused_submission_shows_the_notice_above_the_bar() {
         let mut app = State::default();
         app.draft.type_text("keep me");
         key(&mut app, Key::Enter);
         let (rows, cursor) = draw(&mut app, 80, 24);
         let notice = row_index(&rows, "Model connection is not available");
-        let header = row_index(&rows, "Rust preview · model not connected");
+        let bar = row_index(&rows, "no model");
         let prompt = row_index(&rows, "❯ keep me");
-        assert!(notice < header && header < prompt);
+        assert!(notice < bar && bar + 2 == prompt);
         assert_eq!(cursor, Position::new(TEXT_X + 7, prompt as u16));
     }
 
@@ -667,8 +653,10 @@ mod tests {
         app.now = Duration::from_millis(6_500);
         let (rows, _) = draw(&mut app, 80, 24);
         let header = row_index(&rows, "Kneading…");
+        // The activity and the status share the bar above the box.
         assert!(rows[header].starts_with("  Kneading…  writing · 5s"));
-        assert!(rows[header].ends_with("Tab sample agents  "));
+        assert!(rows[header].ends_with("  no model  "));
+        assert_eq!(row_index(&rows, "❯") - 2, header);
         assert!(
             rows.iter()
                 .any(|r| r.starts_with('╰') && r.contains(" Esc interrupts "))
@@ -676,7 +664,13 @@ mod tests {
         // No glyph stands for the activity: the words carry it.
         let braille = |c: char| ('\u{2800}'..='\u{28FF}').contains(&c);
         assert!(!rows.iter().any(|r| r.chars().any(braille)));
-        // Narrow, the phase and time give way before the word.
+        // Narrow, the phase and time give way before the status, which goes
+        // before the word.
+        let (rows, _) = draw(&mut app, 30, 12);
+        assert_eq!(
+            rows[row_index(&rows, "Kneading…")].trim_end(),
+            "  Kneading…         no model"
+        );
         let (rows, _) = draw(&mut app, 20, 12);
         assert_eq!(
             rows[row_index(&rows, "Kneading…")].trim_end(),
@@ -842,7 +836,7 @@ mod tests {
         let (rows, _) = draw(&mut app, 80, 24);
         let header = row_index(&rows, "Interrupted");
         assert!(rows[header].starts_with("  ■ Interrupted  3s"));
-        assert!(rows[header].ends_with("Tab sample agents  "));
+        assert!(rows[header].ends_with("  no model  "));
         // The next turn replaces it; a completed one reads as such.
         ctrl_t(&mut app);
         update(&mut app, Msg::Tick(Duration::from_secs(9)));
@@ -851,7 +845,7 @@ mod tests {
         let (rows, _) = draw(&mut app, 80, 24);
         assert!(rows[row_index(&rows, "Completed")].starts_with("  ✓ Completed  5s"));
         assert!(!rows.iter().any(|r| r.contains("Interrupted")));
-        // Narrow, the time gives way before the outcome.
+        // Narrow, the time and then the status give way before the outcome.
         let (rows, _) = draw(&mut app, 18, 12);
         assert_eq!(
             rows[row_index(&rows, "Completed")].trim_end(),
@@ -863,16 +857,13 @@ mod tests {
     fn row_keys_give_way_below_sixty_columns() {
         let mut app = State::default();
         let (rows, _) = draw(&mut app, 60, 24);
-        assert!(rows[row_index(&rows, "Rust preview ·")].ends_with("Tab sample agents  "));
         assert!(rows[row_index(&rows, "↳ Sample agents")].ends_with("Tab  "));
         let (rows, _) = draw(&mut app, 59, 24);
-        for label in ["Rust preview ·", "↳ Sample agents"] {
-            assert!(!rows[row_index(&rows, label)].contains("Tab"), "{rows:#?}");
-        }
+        assert!(!rows[row_index(&rows, "↳ Sample agents")].contains("Tab"));
     }
 
     #[test]
-    fn the_status_line_sits_above_the_box_and_fits_its_fields_by_rank() {
+    fn the_bar_shares_the_activity_and_the_consolidated_status() {
         let mut app = State::default();
         app.status = status::StatusInput {
             model: Some("deepseek-official/deepseek-v4-flash".into()),
@@ -888,31 +879,40 @@ mod tests {
             cwd: "~/projects/bake".into(),
             ascii: false,
         };
-        let status_row = |rows: &[String]| rows[row_index(rows, "❯") - 2].trim_end().to_owned();
-        let (rows, _) = draw(&mut app, 90, 24);
+        let bar = |rows: &[String]| rows[row_index(rows, "❯") - 2].trim_end().to_owned();
+        let (rows, _) = draw(&mut app, 80, 24);
         assert_eq!(
-            status_row(&rows),
-            "  deepseek-v4-flash  think high  ctx ~11% (15.2k/128k)  ⎇ main  ~/projects/bake"
+            bar(&rows),
+            format!(
+                "{}deepseek-v4-flash high  ctx ~11% (15.2k/128k)  ~/projects/bake ⎇ main",
+                " ".repeat(9)
+            )
         );
-        let (rows, _) = draw(&mut app, 52, 24);
-        assert_eq!(
-            status_row(&rows),
-            "  deepseek-v4-flash  think high  ctx ~11%  ⎇ main"
+        // A running turn takes the left; the status keeps its right edge and
+        // gives way by rank to make room.
+        app.now = Duration::from_secs(2);
+        ctrl_t(&mut app);
+        let (rows, _) = draw(&mut app, 80, 24);
+        let row = bar(&rows);
+        assert!(row.starts_with("  "), "{row}");
+        assert!(
+            row.ends_with("deepseek-v4-flash high  ctx ~11%  …cts/bake ⎇ main"),
+            "{row}"
         );
-        // The level takes its tone; the label beside it is dim.
+        assert!(row.contains("…  thinking · 0s  "), "{row}");
+        // The level takes its tone; the context's label is dim.
         app.tones = Tones::TrueColor;
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
         terminal.draw(|f| render(&mut app, f)).unwrap();
-        let (rows, _) = draw(&mut app, 80, 24);
         let y = (row_index(&rows, "❯") - 2) as u16;
-        let x = 2 + "deepseek-v4-flash  think ".len() as u16;
+        let x_of = |needle: &str| row.find(needle).unwrap() as u16;
         let buffer = terminal.backend().buffer();
         assert_eq!(
-            buffer[(x, y)].style().fg,
+            buffer[(x_of(" high") + 1, y)].style().fg,
             Some(Color::Rgb(0x0e, 0xa5, 0xe9))
         );
         assert!(
-            buffer[(x - 2, y)]
+            buffer[(x_of("ctx"), y)]
                 .style()
                 .add_modifier
                 .contains(Modifier::DIM)

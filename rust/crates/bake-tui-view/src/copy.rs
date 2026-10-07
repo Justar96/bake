@@ -6,11 +6,8 @@ pub const INTRO: &[&str] = &[
     "",
     "Press Tab to inspect a sample agent. Esc brings you back to your draft.",
 ];
-pub const HEADER_COMPOSER: &str = "Rust preview · model not connected";
 pub const HEADER_LIST: &str = "Sample agents";
 pub const HEADER_LIST_HINT: &str = "↑↓ select · Enter inspect · Esc back";
-pub const HEADER_INSPECT_HINT: &str = "Esc back to draft";
-pub const TAB_HINT: &str = "Tab sample agents";
 /// The idle placeholder's parts. The preview has no commands or file
 /// mentions to name, so it names its editing keys instead.
 pub const PLACEHOLDER: &[&str] = &["Type a draft", "Alt+Enter newline", "Ctrl+Z undo"];
@@ -45,9 +42,8 @@ pub const INSPECT_READ_ONLY: &str =
 pub const INSPECT_RETURN: &str = "Esc returns to the draft · Tab returns to the list.";
 pub const STATE: &str = "static sample";
 /// The status line's model field while no model is selected, and the dim
-/// labels before the thinking level and the context reading.
+/// label before the context reading.
 pub const NO_MODEL_FIELD: &str = "no model";
-pub const THINK: &str = "think";
 pub const CONTEXT: &str = "ctx";
 /// The header's word for a sample turn that ran to its end, and for one Esc stopped.
 pub const COMPLETED: &str = "Completed";

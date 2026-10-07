@@ -23,15 +23,14 @@ pub struct Needs {
 }
 
 /// Rows granted to each region, top to bottom as drawn: body, gap, notice,
-/// header, status, the box's top edge, the draft, its bottom edge, and the
-/// standing row.
+/// the bar, which holds the activity and the status line, the box's top
+/// edge, the draft, its bottom edge, and the standing row.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Rows {
     pub body: u16,
     pub gap: u16,
     pub notice: u16,
-    pub header: u16,
-    pub status: u16,
+    pub bar: u16,
     pub top_edge: u16,
     pub composer: u16,
     pub bottom_edge: u16,
@@ -43,8 +42,7 @@ impl Rows {
         self.body
             + self.gap
             + self.notice
-            + self.header
-            + self.status
+            + self.bar
             + self.top_edge
             + self.composer
             + self.bottom_edge
@@ -52,13 +50,14 @@ impl Rows {
     }
 }
 
-/// Grants rows in claim order: the draft's first row, the header, status,
-/// the box's top edge and then its bottom edge, the standing row, the gap,
+/// Grants rows in claim order: the draft's first row, the bar, the box's top
+/// edge and then its bottom edge, the standing row, the gap,
 /// further draft rows up to [`composer::window_rows`] while the body keeps
 /// [`MIN_BODY_ROWS`], panels such as the notice, and the body last.
 ///
-/// This reproduces the TypeScript collapse: the gap, the bottom edge, the top
-/// edge, status, and then the header give way before the input. Claiming the
+/// This follows the TypeScript collapse: the gap, the bottom edge, the top
+/// edge, and then the bar give way before the input; the bar holds both the
+/// TypeScript header and status line, so they go together. Claiming the
 /// top edge first means a short terminal loses the open edge, and the box
 /// closes only when both edges have rows.
 pub fn plan(height: u16, needs: Needs) -> Rows {
@@ -69,8 +68,7 @@ pub fn plan(height: u16, needs: Needs) -> Rows {
         got
     };
     let composer = take(1);
-    let header = take(1);
-    let status = take(1);
+    let bar = take(1);
     let top_edge = take(1);
     let bottom_edge = take(1);
     let standing = take(u16::from(needs.standing));
@@ -78,7 +76,7 @@ pub fn plan(height: u16, needs: Needs) -> Rows {
     let extra = needs.draft_rows.clamp(1, composer::window_rows(height)) - 1;
     let more = take(extra.min(left_after_body(
         height,
-        composer + header + status + top_edge + bottom_edge + standing + gap,
+        composer + bar + top_edge + bottom_edge + standing + gap,
     )));
     let notice = take(needs.notice);
     let body = take(u16::MAX);
@@ -86,8 +84,7 @@ pub fn plan(height: u16, needs: Needs) -> Rows {
         body,
         gap,
         notice,
-        header,
-        status,
+        bar,
         top_edge,
         composer: composer + more,
         bottom_edge,
@@ -125,14 +122,13 @@ mod tests {
 
     #[test]
     fn short_terminals_give_up_chrome_in_the_typescript_order() {
-        // Each row of height adds the next claimant: composer, header, status,
-        // top edge, bottom edge, standing row, gap, then the notice.
+        // Each row of height adds the next claimant: composer, bar, top edge,
+        // bottom edge, standing row, gap, then the notice.
         let shown = |height| {
             let r = plan(height, needs(1));
             [
                 r.composer,
-                r.header,
-                r.status,
+                r.bar,
                 r.top_edge,
                 r.bottom_edge,
                 r.standing,
@@ -141,22 +137,21 @@ mod tests {
                 r.body,
             ]
         };
-        assert_eq!(shown(1), [1, 0, 0, 0, 0, 0, 0, 0, 0]);
-        assert_eq!(shown(2), [1, 1, 0, 0, 0, 0, 0, 0, 0]);
-        assert_eq!(shown(3), [1, 1, 1, 0, 0, 0, 0, 0, 0]);
-        assert_eq!(shown(4), [1, 1, 1, 1, 0, 0, 0, 0, 0]);
-        assert_eq!(shown(5), [1, 1, 1, 1, 1, 0, 0, 0, 0]);
-        assert_eq!(shown(7), [1, 1, 1, 1, 1, 1, 1, 0, 0]);
-        assert_eq!(shown(8), [1, 1, 1, 1, 1, 1, 1, 1, 0]);
-        assert_eq!(shown(9), [1, 1, 1, 1, 1, 1, 1, 1, 1]);
+        assert_eq!(shown(1), [1, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(shown(2), [1, 1, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(shown(3), [1, 1, 1, 0, 0, 0, 0, 0]);
+        assert_eq!(shown(4), [1, 1, 1, 1, 0, 0, 0, 0]);
+        assert_eq!(shown(6), [1, 1, 1, 1, 1, 1, 0, 0]);
+        assert_eq!(shown(7), [1, 1, 1, 1, 1, 1, 1, 0]);
+        assert_eq!(shown(8), [1, 1, 1, 1, 1, 1, 1, 1]);
     }
 
     #[test]
     fn the_draft_grows_before_the_notice_and_keeps_the_body_minimum() {
         let rows = plan(12, needs(10));
-        // 7 chrome rows, then 2 draft rows leave the body its 3 rows; the
+        // 6 chrome rows, then 3 draft rows leave the body its 3 rows; the
         // notice, claimed after the draft, may take one of them.
-        assert_eq!((rows.composer, rows.notice, rows.body), (3, 1, 2));
+        assert_eq!((rows.composer, rows.notice, rows.body), (4, 1, 2));
         let rows = plan(24, needs(10));
         assert_eq!((rows.composer, rows.notice), (5, 1));
         assert!(rows.body >= MIN_BODY_ROWS);
@@ -165,7 +160,7 @@ mod tests {
     #[test]
     fn without_a_standing_row_its_row_goes_to_the_others() {
         let rows = plan(
-            7,
+            6,
             Needs {
                 draft_rows: 1,
                 standing: false,

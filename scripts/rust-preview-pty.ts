@@ -187,7 +187,7 @@ await scenario('composer, agent inspection, paste, and resize', async (preview) 
 
 await scenario('sample activity is text that advances on its own, then compacts, and stops', async (preview) => {
   preview.send('\x14')
-  await preview.wait('sample turn', () => preview.screen.includes('thinking · 0s') && preview.screen.includes('Esc interrupts')
+  await preview.wait('sample turn', () => /^ {2}\S+… {2}thinking · 0s +no model/mu.test(preview.screen) && preview.screen.includes('Esc interrupts')
     && preview.screen.includes('Enter steers the next step'))
   // No key is pressed: the loop's own timer must redraw the elapsed time.
   await preview.wait('elapsed time advances', () => preview.screen.includes('thinking · 1s'))
@@ -196,9 +196,10 @@ await scenario('sample activity is text that advances on its own, then compacts,
   await preview.wait('sample compaction', () => preview.screen.includes('Compacting history…  preparing · 0s')
     && preview.screen.includes('Compacting… Enter queues · Esc cancels') && !preview.screen.includes('Esc interrupts'))
   preview.send('\x1b')
-  // The compaction ends; the header keeps the turn's outcome, and the status line reports no model, then the directory.
-  await preview.wait('sample stopped', () => /✓ Completed {2}\d+s/u.test(preview.screen) && !preview.screen.includes('Compacting')
-    && /^ {2}no model {2}\S/mu.test(preview.screen))
+  // The compaction ends. The bar keeps the turn's outcome on its left and the
+  // status, no model and then the directory, right-aligned on the same row.
+  await preview.wait('sample stopped', () => /^ {2}✓ Completed {2}\d+s +no model {2}\S+$/mu.test(preview.screen)
+    && !preview.screen.includes('Compacting'))
   await preview.quit()
 })
 

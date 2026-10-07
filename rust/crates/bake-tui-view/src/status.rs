@@ -150,17 +150,24 @@ pub fn form_width(form: &[Part]) -> usize {
 /// minimum for it. A field cut from its end counts at its minimum after its
 /// rank and gets back whatever is left. Below the widths every rank leaves,
 /// the caller clips the row.
+///
+/// A filler with a second reading fills only in its first. At its rank it
+/// steps to the second, a fixed reading that gives way at its own rank, as
+/// the location field steps from `~/bake ⎇ main` to `⎇ main`.
 pub fn fit(fields: &[Field], room: usize) -> Vec<Fitted> {
     let mut form = vec![0usize; fields.len()];
     let mut shrunk = vec![false; fields.len()];
     let shown = |form: &[usize], i: usize| form[i] < fields[i].forms.len();
     let full = |form: &[usize], i: usize| form_width(&fields[i].forms[form[i]]);
-    let filler = |i: usize| matches!(fields[i].shrink, Some(s) if s.kind == ShrinkKind::Fill);
+    let filler = |form: &[usize], i: usize| {
+        form[i] == 0 && matches!(fields[i].shrink, Some(s) if s.kind == ShrinkKind::Fill)
+    };
     // Cells a field counts for while ranks apply: the filler its minimum
     // until its rank and nothing after it, a field cut from its end its
     // minimum after its rank, and every other field its reading.
     let demand = |form: &[usize], shrunk: &[bool], i: usize| match fields[i].shrink {
         None => full(form, i),
+        Some(s) if s.kind == ShrinkKind::Fill && form[i] > 0 => full(form, i),
         Some(s) if s.kind == ShrinkKind::Fill => {
             if shrunk[i] {
                 0
@@ -209,7 +216,7 @@ pub fn fit(fields: &[Field], room: usize) -> Vec<Fitted> {
     }
     // Lay out every field but the filler at its reading, give the one cut
     // from its end back what is left, then put the filler in the rest.
-    let placed = |i: usize| shown(&form, i) && !filler(i) && demand(&form, &shrunk, i) > 0;
+    let placed = |i: usize| shown(&form, i) && !filler(&form, i) && demand(&form, &shrunk, i) > 0;
     let count = (0..fields.len()).filter(|&i| placed(i)).count();
     let fixed: usize = (0..fields.len())
         .filter(|&i| placed(i))
@@ -238,7 +245,7 @@ pub fn fit(fields: &[Field], room: usize) -> Vec<Fitted> {
         }
         let parts = field.forms[form[i]].clone();
         let whole = full(&form, i);
-        if filler(i) {
+        if filler(&form, i) {
             let gap = if used > 0 { FIELD_GAP } else { 0 };
             let left = room.saturating_sub(used + gap);
             let min = field.shrink.map_or(0, |s| s.min);
@@ -426,91 +433,129 @@ pub fn thinking_tone(level: &str) -> Tone {
     }
 }
 
-/// The status line's fields, in display order.
+/// The status line's fields, in display order: the model with its thinking
+/// level, the context reading, and the location, which is the working
+/// directory with the branch after it.
 pub fn fields(input: &StatusInput) -> Vec<Field> {
-    let mut fields = vec![match &input.model {
-        // It leads because it is what the row exists to say; it needs no label.
-        Some(model) => Field {
-            forms: vec![vec![Part::new(compact_model(model), Tone::Plain)]],
-            yields: Vec::new(),
-            shrink: Some(Shrink {
-                kind: ShrinkKind::End,
-                rank: rank::MODEL,
-                min: MODEL_MIN,
-            }),
-        },
-        None => Field {
+    let mut fields = vec![model_field(input)];
+    if let Some(usage) = input.context {
+        fields.push(context_field(usage));
+    }
+    if let Some(field) = location_field(input) {
+        fields.push(field);
+    }
+    fields
+}
+
+/// `deepseek-v4-flash high`: the level reads as the model's, so it needs no
+/// label. It gives way first, and then the model is cut from its end.
+fn model_field(input: &StatusInput) -> Field {
+    let Some(model) = &input.model else {
+        return Field {
             forms: vec![vec![Part::new(copy::NO_MODEL_FIELD, Tone::Waiting)]],
             yields: Vec::new(),
             shrink: None,
-        },
-    }];
-    if let Some(level) = &input.thinking {
-        fields.push(Field {
-            forms: vec![vec![
-                Part::new(format!("{} ", copy::THINK), Tone::Dim),
-                Part::new(level.as_str(), thinking_tone(level)),
-            ]],
-            yields: vec![rank::THINKING],
-            shrink: None,
-        });
-    }
-    if let Some(usage) = input.context {
-        let percent = context_percent(usage);
-        let tone = context_tone(percent);
-        let label = Part::new(format!("{} ", copy::CONTEXT), Tone::Dim);
-        let absolute = format!(
-            "~{percent}% ({}/{})",
-            format_tokens(usage.used),
-            format_tokens(usage.window)
-        );
-        // The absolute count goes first, except near the limit, where it is
-        // among the last; the percentage never yields.
-        let absolute_rank = if percent >= CONTEXT_FULL {
-            rank::CONTEXT_ABSOLUTE_FULL
-        } else if percent >= CONTEXT_WARN {
-            rank::CONTEXT_ABSOLUTE_WARM
-        } else {
-            rank::CONTEXT_ABSOLUTE
         };
-        fields.push(Field {
-            forms: vec![
-                vec![label.clone(), Part::new(absolute, tone)],
-                vec![label, Part::new(format!("~{percent}%"), tone)],
-            ],
-            yields: vec![absolute_rank],
-            shrink: None,
-        });
+    };
+    let name = Part::new(compact_model(model), Tone::Plain);
+    let mut forms = Vec::new();
+    let mut yields = Vec::new();
+    if let Some(level) = &input.thinking {
+        forms.push(vec![
+            name.clone(),
+            Part::new(format!(" {level}"), thinking_tone(level)),
+        ]);
+        yields.push(rank::THINKING);
     }
-    if let Some(branch) = &input.branch {
-        let mut form = Vec::new();
-        if !input.ascii {
-            form.push(Part::new("⎇ ", Tone::Dim));
-        }
+    forms.push(vec![name]);
+    Field {
+        forms,
+        yields,
+        shrink: Some(Shrink {
+            kind: ShrinkKind::End,
+            rank: rank::MODEL,
+            min: MODEL_MIN,
+        }),
+    }
+}
+
+/// `ctx ~11% (15.2k/128k)`. The absolute count goes first, except near the
+/// limit, where it is among the last; the percentage never yields.
+fn context_field(usage: ContextUsage) -> Field {
+    let percent = context_percent(usage);
+    let tone = context_tone(percent);
+    let label = Part::new(format!("{} ", copy::CONTEXT), Tone::Dim);
+    let absolute = format!(
+        "~{percent}% ({}/{})",
+        format_tokens(usage.used),
+        format_tokens(usage.window)
+    );
+    let absolute_rank = if percent >= CONTEXT_FULL {
+        rank::CONTEXT_ABSOLUTE_FULL
+    } else if percent >= CONTEXT_WARN {
+        rank::CONTEXT_ABSOLUTE_WARM
+    } else {
+        rank::CONTEXT_ABSOLUTE
+    };
+    Field {
+        forms: vec![
+            vec![label.clone(), Part::new(absolute, tone)],
+            vec![label, Part::new(format!("~{percent}%"), tone)],
+        ],
+        yields: vec![absolute_rank],
+        shrink: None,
+    }
+}
+
+/// `~/bake ⎇ main`: where the session works, read as one place. The
+/// directory fills what the other fields leave, cut from its start so the
+/// branch at its end stays; at its rank the field steps to the branch alone,
+/// which gives way at the branch's rank. Either half may be absent.
+fn location_field(input: &StatusInput) -> Option<Field> {
+    let branch = input.branch.as_ref().map(|branch| {
         let name = if branch.detached {
             format!("({})", branch.name)
         } else {
             branch.name.clone()
         };
-        form.push(Part::new(name, Tone::Plain));
-        fields.push(Field {
-            forms: vec![form],
+        let glyph = if input.ascii { "on " } else { "⎇ " };
+        vec![Part::new(glyph, Tone::Dim), Part::new(name, Tone::Plain)]
+    });
+    let fill = |min: usize| {
+        Some(Shrink {
+            kind: ShrinkKind::Fill,
+            rank: rank::CWD,
+            min,
+        })
+    };
+    match (input.cwd.is_empty(), branch) {
+        (true, None) => None,
+        (true, Some(branch)) => Some(Field {
+            forms: vec![branch],
             yields: vec![rank::BRANCH],
             shrink: None,
-        });
-    }
-    if !input.cwd.is_empty() {
-        fields.push(Field {
+        }),
+        (false, None) => Some(Field {
             forms: vec![vec![Part::new(input.cwd.as_str(), Tone::Dim)]],
             yields: Vec::new(),
-            shrink: Some(Shrink {
-                kind: ShrinkKind::Fill,
-                rank: rank::CWD,
-                min: CWD_MIN,
-            }),
-        });
+            shrink: fill(CWD_MIN),
+        }),
+        (false, Some(branch)) => {
+            let mut whole = vec![Part::new(format!("{} ", input.cwd), Tone::Dim)];
+            whole.extend(branch.iter().cloned());
+            Some(Field {
+                forms: vec![whole, branch.clone()],
+                yields: vec![rank::CWD, rank::BRANCH],
+                // The directory's few cells, and the branch whole.
+                shrink: fill(CWD_MIN + 1 + form_width(&branch)),
+            })
+        }
     }
-    fields
+}
+
+/// Cells the fitted fields take, gaps included.
+pub fn fitted_width(fitted: &[Fitted]) -> usize {
+    fitted.iter().map(|f| f.width).sum::<usize>() + fitted.len().saturating_sub(1) * FIELD_GAP
 }
 
 #[cfg(test)]
@@ -695,61 +740,81 @@ mod tests {
     }
 
     #[test]
-    fn names_the_model_level_context_branch_and_directory() {
+    fn reads_as_three_consolidated_fields() {
         let fields = fields(&full());
         let firsts: Vec<_> = fields.iter().map(|f| text(&f.forms[0])).collect();
         assert_eq!(
             firsts,
             [
-                "deepseek-v4-flash",
-                "think high",
+                "deepseek-v4-flash high",
                 "ctx ~11% (15.2k/128k)",
-                "⎇ main",
-                "~/bake"
+                "~/bake ⎇ main"
             ]
         );
-        assert_eq!(fields[1].forms[0][1].tone, Tone::Asking);
-        assert_eq!(fields[2].forms[0][0].tone, Tone::Dim);
-        assert_eq!(fields[2].forms[0][1].tone, Tone::Plain);
+        assert_eq!(fields[0].forms[0][1].tone, Tone::Asking);
+        assert_eq!(fields[1].forms[0][0].tone, Tone::Dim);
+        assert_eq!(fields[1].forms[0][1].tone, Tone::Plain);
         assert_eq!(
             row(&fields, 80),
-            "deepseek-v4-flash  think high  ctx ~11% (15.2k/128k)  ⎇ main  ~/bake"
+            "deepseek-v4-flash high  ctx ~11% (15.2k/128k)  ~/bake ⎇ main"
         );
     }
 
     #[test]
     fn leaves_out_what_the_session_does_not_have() {
-        let input = StatusInput {
-            cwd: "~/bake".into(),
-            ..StatusInput::default()
-        };
-        assert_eq!(row(&fields(&input), 80), "no model  ~/bake");
-        assert_eq!(fields(&input)[0].forms[0][0].tone, Tone::Waiting);
-        let detached = StatusInput {
-            branch: Some(Branch {
-                name: "1a2b3c4".into(),
-                detached: true,
+        let only = |input: StatusInput| row(&fields(&input), 80);
+        assert_eq!(
+            only(StatusInput {
+                cwd: "~/bake".into(),
+                ..StatusInput::default()
             }),
-            ascii: true,
-            ..StatusInput::default()
-        };
-        assert_eq!(row(&fields(&detached), 80), "no model  (1a2b3c4)");
+            "no model  ~/bake"
+        );
+        assert_eq!(
+            fields(&StatusInput::default())[0].forms[0][0].tone,
+            Tone::Waiting
+        );
+        assert_eq!(
+            only(StatusInput {
+                branch: Some(Branch {
+                    name: "1a2b3c4".into(),
+                    detached: true,
+                }),
+                ascii: true,
+                ..StatusInput::default()
+            }),
+            "no model  on (1a2b3c4)"
+        );
+        let mut no_level = full();
+        no_level.thinking = None;
+        assert_eq!(fields(&no_level)[0].forms.len(), 1);
     }
 
     #[test]
-    fn narrowing_gives_up_the_count_directory_branch_and_level_in_turn() {
-        let fields = fields(&full());
+    fn narrowing_cuts_the_directory_then_drops_the_branch_and_the_level() {
+        let mut input = full();
+        input.cwd = "~/projects/bake".into();
+        let fields = fields(&input);
         assert_eq!(
-            row(&fields, 60),
-            "deepseek-v4-flash  think high  ctx ~11%  ⎇ main  ~/bake"
+            row(&fields, 70),
+            "deepseek-v4-flash high  ctx ~11% (15.2k/128k)  ~/projects/bake ⎇ main"
         );
+        // The count goes first, then the directory is cut from its start.
         assert_eq!(
-            row(&fields, 48),
-            "deepseek-v4-flash  think high  ctx ~11%  ⎇ main"
+            row(&fields, 50),
+            "deepseek-v4-flash high  ctx ~11%  …cts/bake ⎇ main"
         );
-        assert_eq!(row(&fields, 40), "deepseek-v4-flash  think high  ctx ~11%");
-        assert_eq!(row(&fields, 30), "deepseek-v4-flash  ctx ~11%");
+        // It keeps six cells of the directory, or steps to the branch alone.
+        assert_eq!(
+            row(&fields, 47),
+            "deepseek-v4-flash high  ctx ~11%  …/bake ⎇ main"
+        );
+        assert_eq!(row(&fields, 46), "deepseek-v4-flash high  ctx ~11%  ⎇ main");
+        // Then the branch goes, and then the level, as in the TypeScript ranks.
+        assert_eq!(row(&fields, 37), "deepseek-v4-flash high  ctx ~11%");
+        assert_eq!(row(&fields, 28), "deepseek-v4-flash  ctx ~11%");
         assert_eq!(row(&fields, 20), "deepseek-…  ctx ~11%");
+        assert_eq!(fitted_width(&fit(&fields, 20)), 20);
     }
 
     #[test]
@@ -760,8 +825,12 @@ mod tests {
             window: 128_000,
         });
         let fields = fields(&input);
-        assert_eq!(fields[2].forms[0][1].tone, Tone::Ramp(3));
-        assert_eq!(row(&fields, 44), "deepseek-v4-flash  ctx ~93% (120k/128k)");
+        assert_eq!(fields[1].forms[0][1].tone, Tone::Ramp(3));
+        assert_eq!(
+            row(&fields, 44),
+            "deepseek-v4-flash high  ctx ~93% (120k/128k)"
+        );
+        assert_eq!(row(&fields, 43), "deepseek-v4-flash  ctx ~93% (120k/128k)");
     }
 
     #[test]

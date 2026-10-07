@@ -29,9 +29,9 @@ Every rule below is testable. Each rule names a behavior that a buffer or PTY te
 
 1. **Input comes first.** A key changes the draft and reaches the screen before any runtime, transcript, or measurement work. The input reader never waits on the runtime, and a frame that contains an edit is drawn without waiting for the coalescing interval.
 2. **Nothing locks input.** Every panel, sheet, picker, and inspection closes with Esc, and focus returns to where the user opened it. Streaming, replay, and resize never drop or reorder keys.
-3. **Things leave the way they came.** Input panels open above the header and give their rows back to the transcript when they close. A key that opens a sheet also closes it. Leaving a child restores the parent draft, caret, undo history, and reading position.
-4. **Every screen answers three questions.** What am I looking at: the header names the agent and its activity. What will Enter do: the placeholder or the box's bottom edge says. How do I get out: Esc always has a named destination.
-5. **Motion is restrained.** Only the shimmer across the header's activity word and its seconds move. Nothing animates on a keystroke. With motion off, under `NO_COLOR`, or with a screen reader, state changes are discrete and the word holds still.
+3. **Things leave the way they came.** Input panels open above the bar and give their rows back to the transcript when they close. A key that opens a sheet also closes it. Leaving a child restores the parent draft, caret, undo history, and reading position.
+4. **Every screen answers three questions.** What am I looking at: the bar names the activity and where the session stands. What will Enter do: the placeholder or the box's bottom edge says. How do I get out: Esc always has a named destination.
+5. **Motion is restrained.** Only the shimmer across the bar's activity word and its seconds move. Nothing animates on a keystroke. With motion off, under `NO_COLOR`, or with a screen reader, state changes are discrete and the word holds still.
 6. **One grammar.** The rail markers, verbs, palette roles, and the "same family, one weight heavier" relation between `›` (a user's words) and `❯` (where the user types) stay as the [layout design](../../../apps/tui/DESIGN-LAYOUT.md#the-composer-is-the-same-family-one-weight-heavier) defines them.
 
 ## Screen anatomy
@@ -43,7 +43,7 @@ Every row aligns to four edges:
 | Edge | Column | Holds |
 |---|---|---|
 | Rail | 0 | Transcript markers (`›`, `●`, `*`) and the box's left side |
-| Prompt | 2 | The composer's `❯`, `^`, and `v`, and the first cell of every row drawn outside the box: header, panels, standing rows, status |
+| Prompt | 2 | The composer's `❯`, `^`, and `v`, and the first cell of every row drawn outside the box: the bar, panels, and standing rows |
 | Text | 4 in the box, 2 in the transcript | Draft and prose; tool output hangs from `⎿` as the [verb column](../../../apps/tui/DESIGN-LAYOUT.md#ascii-only-and-actions-are-named-rather-than-pictured) defines |
 | Right | last column less 2 | The end of right-aligned keys and hints outside the box, level with the box's inner padding |
 
@@ -59,19 +59,18 @@ Idle, after a turn:
   Two registrations, both through ctx.effect.
                                                   PgUp scroll · Ctrl+↑ prompts
 
-  ✓ Completed  42s · read 1 · ran 1 · 42 tok/s             Ctrl+O ● Goal 3/256
-  deepseek-v4-flash  think high  ctx ~12% (15k/128k)  ⎇ main  ~/bake
+  ✓ Completed  42s · read 1    deepseek-v4-flash high  ctx ~12%  ~/bake ⎇ main
 ╭──────────────────────────────────────────────────────────────────────────────╮
 │ ❯ Ask anything · / commands · @ files                                        │
 ╰──────────────────────────────────────────────────────────────────────────────╯
   ↳ Subagents 2 · 1 working · 1 done                                    Ctrl+G
+  ● Goal 3/256 · writing tests                                          Ctrl+O
 ```
 
 Running, with a draft taller than its window; the activity is words alone, the hidden-row count and the mode hint ride the box's edges:
 
 ```
-  Kneading…  running bash · 12s                            Ctrl+O ● Goal 3/256
-  deepseek-v4-flash  think high  ctx ~14% (18k/128k)  ⎇ main  ~/bake
+  Kneading…  running bash · 12s       deepseek-v4-flash high  ctx ~14%  ⎇ main
 ╭─────────────────────────────────────────────────────────────────── +2 above ─╮
 │ ^ Then thread the value through startup.ts and the session store, and add a  │
 │   regression test that sets both DSH_HOME and --home to prove which one      │
@@ -81,14 +80,14 @@ Running, with a draft taller than its window; the activity is words alone, the h
 ╰───────────────────────────────────────────────────────────── Esc interrupts ─╯
 ```
 
-Completion open; the panel sits on the header, nearest the token that opened it:
+Completion open; the panel sits on the bar, nearest the token that opened it:
 
 ```
 * /changelog  Show what changed in this Bake version
   /model      Choose model and reasoning effort
   /thinking   Change reasoning effort, also during a turn
   +14 more — keep typing to narrow
-  ✓ Completed  42s · read 1 · ran 1                        Ctrl+O ● Goal 3/256
+  ✓ Completed  42s · read 1    deepseek-v4-flash high  ctx ~12%  ~/bake ⎇ main
 ╭──────────────────────────────────────────────────────────────────────────────╮
 │ ❯ /▏                                                                         │
 ╰────────────────────────────────────────────────────────────────── ↑↓ select ─╯
@@ -116,7 +115,7 @@ Each difference from the TypeScript frontend needs its own reviewed acceptance c
 | D4 | Child inspection shows the kept parent draft, dim, with `draft kept · Esc returns` on the box's bottom edge | Inspection must state where input goes and that the draft is safe ([agent handling](terminal.md#agent-handling)) | The existing inspection case, plus a buffer check that the dim draft matches the parent draft byte for byte |
 | D5 | A rounded box frames the draft in place of the two bare rules; rows outside it are inset two cells to align with its contents; hidden-row counts and mode hints sit on its edges instead of a right-hand slot beside the caret | The input reads as one control distinct from the transcript. The box spends the rules' two rows and no more, and hints on the edges take no column from the draft, so a mode change never rewraps it | Buffer tests of the box at every width from 1 to 200, the classic frame, and edge labels that drop whole; PTY resize scenarios |
 | D6 | The header's activity is text alone: no spinner glyph for a turn or for compaction. A band of light sweeps across the activity word, and the word list grows from 12 verbs to 32 | Words say what is happening without a symbol a terminal could measure differently, and a larger list keeps consecutive turns distinct | Pure tests pin the sweep, the colour levels, and the word choice; a PTY scenario checks that elapsed time advances without input and that no Braille glyph is drawn |
-| D7 | The status line sits directly above the composer box instead of under it, and is minimal: model, thinking level, context occupancy, git branch, and working directory. Git change counts, token totals, the cache hit, and the update notice are not shown | The readings that decide the next prompt sit next to where it is typed; the counts and totals that change on every turn are left to their own views | Pure tests of each field, its tone, and its rank; buffer tests that the row is on the box's top edge at every width; the TypeScript `fitStatus` cases |
+| D7 | The header and the status line share one row directly above the composer box, the bar: the activity or the last turn's outcome on the left, the status right-aligned. The status is minimal and consolidated into three fields: the model with its thinking level (`deepseek-v4-flash high`), the context reading (`ctx ~11% (15.2k/128k)`), and the location, the directory with its branch (`~/bake ⎇ main`). Git change counts, token totals, the cache hit, and the update notice are not shown, and the goal moves to a standing row under the box | One row says what the session is doing and where it stands, next to where the next prompt is typed, and the box gains a row of transcript. Right-aligned, the status does not move when the activity starts or ends | Pure tests of each field, its tone, and its rank, including the TypeScript `fitStatus` cases; buffer tests that the activity and status share the row and give way in order; a PTY check of the shared row |
 
 ## Composer
 
@@ -192,10 +191,10 @@ Paste placeholders, image placeholders, and completed mentions are atomic spans 
 
 ## Activity line
 
-The header says what the session is doing in words alone, at the prompt column: the turn's word with an ellipsis, then its phase and elapsed time, dim. `Kneading…  running bash · 12s`. No glyph stands beside it, so the row has no symbol whose width a terminal could measure differently.
+The bar above the box says what the session is doing in words alone, at the prompt column, with the status line right-aligned beside it ([D7](#intentional-differences)): the turn's word with an ellipsis, then its phase and elapsed time, dim. `Kneading…  running bash · 12s`. No glyph stands beside it, so the row has no symbol whose width a terminal could measure differently.
 
 - **Words.** One verb is chosen per turn by the TypeScript `activityWord` hash of a seed fixed for the turn, from 32 baking verbs: the 12 the TypeScript copy names and 20 more. Each names active work. None says the turn is resting or done, and `Laminating` stays with compaction.
-- **Phase and time.** The phase follows `phaseOf` (`thinking`, `writing`, `running <tool> +N`), and elapsed time reads `8s` or `1m 05s`. On a narrow header the right-hand keys give way first, then the phase and time together; the word is never cut for them.
+- **Phase and time.** The phase follows `phaseOf` (`thinking`, `writing`, `running <tool> +N`), and elapsed time reads `8s` or `1m 05s`. On a narrow bar the phase and time give way first, then status fields by their ranks, then the status line whole; the word is never cut for them.
 - **Shimmer.** A band of light three graphemes wide sweeps across the word, left to right, one grapheme every 70 ms, then the word rests unlit for twelve beats. On a truecolor terminal (`COLORTERM` of `truecolor` or `24bit`) the band blends from the running orange `#f97316` to the palette's glint `#fff7ed`. Otherwise it steps through yellow, light yellow, and bold bright white. The phase and time never shimmer.
 - **Motion off.** Under `NO_COLOR` the word is bold in the terminal's foreground and holds still, and only the seconds change, once a second. Under a screen reader the line changes only when its words do.
 - **Compaction.** `Compacting history…` takes the same row in the compacting blue `#3b82f6`, its band blending toward `#dbeafe` (blue, light blue, and bright white without truecolor), and returns to the turn's word when compaction settles.
@@ -203,7 +202,7 @@ The header says what the session is doing in words alone, at the prompt column: 
 
 ## Panels above the input
 
-Input panels belong to the input, not to the conversation. They stack between the blank row that opens the controls and the header, in the TypeScript order, top to bottom:
+Input panels belong to the input, not to the conversation. They stack between the blank row that opens the controls and the bar, in the TypeScript order, top to bottom:
 
 1. Pending input
 2. Staged attachments
@@ -224,18 +223,17 @@ One pure function turns the terminal size and the presentation state into row co
 | Claim order | Region | Rows |
 |---|---|---|
 | 1 | Composer, first row | 1 |
-| 2 | Header | 1 |
-| 3 | Status | 1 |
-| 4 | Interaction | Its need; never yields |
-| 5 | Box top edge, then bottom edge | 1 each |
-| 6 | Subagents row, then background row | 1 each, while present |
-| 7 | Gap above the controls | 1 |
-| 8 | Further draft rows | Up to the window maximum, keeping the transcript's minimum |
-| 9 | Quit feedback, completion, usage, pending, attachments, command, notice | Each its derived limit |
-| 10 | Transcript hint row | 1 |
-| 11 | Transcript viewport | The rest |
+| 2 | Bar: activity and status | 1 |
+| 3 | Interaction | Its need; never yields |
+| 4 | Box top edge, then bottom edge | 1 each |
+| 5 | Subagents row, goal row, then background row | 1 each, while present |
+| 6 | Gap above the controls | 1 |
+| 7 | Further draft rows | Up to the window maximum, keeping the transcript's minimum |
+| 8 | Quit feedback, completion, usage, pending, attachments, command, notice | Each its derived limit |
+| 9 | Transcript hint row | 1 |
+| 10 | Transcript viewport | The rest |
 
-This order reproduces the TypeScript collapse: gap, bottom edge, top edge, status, and then header give way before the input. Claiming the edges together means a short terminal loses the open edge first, and the box closes only when both edges have rows. A width change never changes a row count by itself, because every chrome row is one row at any width.
+This order follows the TypeScript collapse: gap, bottom edge, top edge, and then the bar give way before the input. The bar holds both the TypeScript header and status line, so they go together. Claiming the edges together means a short terminal loses the open edge first, and the box closes only when both edges have rows. A width change never changes a row count by itself, because every chrome row is one row at any width.
 
 ## Transcript viewport
 
@@ -320,7 +318,7 @@ Qualifying a renderer for inline mode remains open work; this page does not choo
 
 ## Preview status
 
-The [Rust preview](../../../rust/README.md) implements the [composer shape](#shape), `wrapDraft`'s wrapping without dictionary word boundaries, the caret-independent layout, the persistent window with hidden-row counts on the edges, D1's window height, the notice above the header, the frame fallback, the text [activity line](#activity-line) with its shimmer, for a sample turn and a sample compaction that Ctrl+T steps through, the [modes table](#modes) for idle, running, compacting, and inspection, the [layout planner](#layout-planner)'s claim order for the regions the preview has, status fitting by rank with the preview's fields, a sample turn's outcome held in the header, standing-row keys that give way below 60 columns, batched input with one synchronized repaint per batch, and autowrap turned off while it owns the screen. These gaps from the oracle remain:
+The [Rust preview](../../../rust/README.md) implements the [composer shape](#shape), `wrapDraft`'s wrapping without dictionary word boundaries, the caret-independent layout, the persistent window with hidden-row counts on the edges, D1's window height, the notice above the header, the frame fallback, the text [activity line](#activity-line) with its shimmer, for a sample turn and a sample compaction that Ctrl+T steps through, the [modes table](#modes) for idle, running, compacting, and inspection, the [layout planner](#layout-planner)'s claim order for the regions the preview has, the bar that shares the activity with the consolidated status, status fitting by rank, a sample turn's outcome held on the bar, standing-row keys that give way below 60 columns, batched input with one synchronized repaint per batch, and autowrap turned off while it owns the screen. These gaps from the oracle remain:
 
 | Preview behavior | Oracle behavior | Source |
 |---|---|---|
@@ -331,7 +329,7 @@ The [Rust preview](../../../rust/README.md) implements the [composer shape](#sha
 | The idle placeholder names editing keys: `Type a draft · Alt+Enter newline · Ctrl+Z undo` | `Ask anything · / commands · @ files` | `copy.rs`, `PLACEHOLDER`; the preview has no commands or file mentions |
 | Enter shows the no-model notice in every mode, and Alt+↑ does nothing | Enter starts, steers, or queues a turn by mode; Alt+↑ sends steering now | `state.rs`, `composer_key`; there is no runtime port yet |
 | The status line reads `no model`, the branch, and the directory | It also names the model, thinking level, and context occupancy | `status.rs`, `fields`; those readings need a runtime |
-| The header has no standing state on its right, only the preview's `Tab sample agents` key | The goal sits at the right and steps down its readings as the row narrows | `render.rs`, `render_header`; goals arrive with the runtime |
+| There is no goal row | The goal has its own standing row under the box ([D7](#intentional-differences)) | `render.rs`; goals arrive with the runtime |
 | The completion and masked sign-in modes do not exist | Each has its own row in the modes table | `mode.rs`, `Mode`; they arrive with completion and sign-in |
 
 ## Delivery slices
