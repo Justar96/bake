@@ -412,11 +412,11 @@ The [Rust preview](../../../rust/README.md) implements the [composer shape](#sha
 
 | Preview behavior | Oracle behavior | Source |
 |---|---|---|
-| Tab opens the sample-agent list | Tab accepts completion; Ctrl+G opens the subagent sheet, and Down from an empty composer selects the subagents row | `keys.rs`, `BINDINGS` |
+| Ctrl+G opens the sample-agent list; Tab does nothing in the composer, and Down from an empty composer does nothing | Tab accepts completion; Ctrl+G opens the subagent sheet, and Down from an empty composer selects the subagents row | `keys.rs`, `BINDINGS` |
 | A word in Thai, Lao, Khmer, or Myanmar splits between graphemes | Those scripts break at dictionary word boundaries | `editor.rs`, `layout` |
 | The caret is the terminal cursor | D2 proposes the same; the oracle draws a reverse-video cell | `render.rs`, `render` |
 | Every wake draws a frame | A batch of runtime updates alone draws at most every 16 ms | `terminal.rs`, `run_loop`; there is no runtime port yet |
-| The idle placeholder names editing keys: `Type a draft · Alt+Enter newline · Ctrl+Z undo` | `Ask anything · / commands · @ files` | `copy.rs`, `PLACEHOLDER`; the preview has no commands or file mentions |
+| The idle placeholder names editing keys: `Type a draft · Alt+Enter newline · Ctrl+- undo` | `Ask anything · / commands · @ files` | `copy.rs`, `PLACEHOLDER`; the preview has no commands or file mentions |
 | Enter shows the no-model notice in every mode, and Alt+↑ does nothing | Enter starts, steers, or queues a turn by mode; Alt+↑ sends steering now | `state.rs`, `composer_key`; there is no runtime port yet |
 | The status line reads `no model`, the branch, and the directory | It also names the model, thinking level, and context occupancy | `status.rs`, `fields`; those readings need a runtime |
 | The transcript is a fixed sample; nothing streams | Committed batches and live rows from the runtime | `transcript.rs`, `sample_session`; there is no runtime port yet |
@@ -433,7 +433,7 @@ These slices are ordered PRs inside [scope 14](README.md#14--terminal-engine-and
 2. **Composer parity.** Implemented for the idle, running, compacting, and inspection rows of the modes table, driven by the sample activity; the box, wrapping, tab stops, caret column, window, and edge labels came before it. The completion and sign-in rows wait for slice 5 and provider login.
 3. **Chrome.** Implemented for what the preview can show: the layout planner, the header's activity line and a sample turn's summary, the edges with frame glyphs, status fitting by rank, and the agents row's key rule. Summary counts, the goal's standing state, and the runtime's status fields wait for the runtime port.
 4. **Transcript.** Implemented for a fixed sample session: row presentation for prose, user turns, reasoning, tool calls with previewed output, and a finished code-mode script, and the fullscreen viewport with its anchor, paging, prompt jumps, following, and hint row. The scrollbar and the mouse wheel are implemented. The fixture port from the TypeScript transcript, live rows, and the presentation cache remain.
-5. **Panels.** Completion with a sample catalog, notices, double-press Ctrl+C, pending input, and attachments.
+5. **Panels.** Completion with a sample catalog, notices, double-press Ctrl+C, pending input, and attachments. Double-press Ctrl+C is implemented: the first press shows `Press Ctrl-C again to quit` in the notice's row for the TypeScript `doubleInterruptMs` default of two seconds, a second press within them quits, and any other key dismisses it. The key table follows the oracle's too: Ctrl+G toggles the agent list, and undo is Ctrl+-, Ctrl+_, or Ctrl+/.
 6. **Pointer and resilience.** Mouse wheel, click-to-caret, selection and copy, resize during streams, and broken-pipe handling.
 7. **Inline qualification.** The renderer experiment that [the terminal direction](terminal.md#rust-crate-selection) requires.
 

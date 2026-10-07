@@ -49,7 +49,7 @@ pub fn render(app: &mut State, frame: &mut Frame) {
         Needs {
             draft_rows: u16::try_from(draft.rows.len()).unwrap_or(u16::MAX),
             standing: true,
-            notice: u16::from(app.notice.is_some()),
+            notice: u16::from(app.notice.is_some() || app.quitting()),
         },
     );
 
@@ -79,7 +79,15 @@ pub fn render(app: &mut State, frame: &mut Frame) {
     let buf = frame.buffer_mut();
     app.latest = None;
     render_body(app, body, gap, buf);
-    if let Some(kind) = app.notice {
+    // The prompt to press Ctrl+C again takes the notice's row while it is
+    // armed; the notice returns when it lapses.
+    if app.quitting() {
+        line(
+            buf,
+            inset(notice),
+            Line::styled(copy::QUIT, tone_style(Tone::Waiting, app.tones)),
+        );
+    } else if let Some(kind) = app.notice {
         let text = match kind {
             Notice::NoModel => copy::NO_MODEL,
             Notice::ReadOnly => copy::READ_ONLY,
@@ -337,7 +345,7 @@ fn render_agents_row(columns: u16, area: Rect, buf: &mut Buffer) {
                 dim(),
             ),
         ]),
-        Line::styled("Tab", dim()),
+        Line::styled(copy::AGENTS_KEY, dim()),
     );
 }
 
@@ -706,7 +714,7 @@ mod tests {
     use crate::keys::{Key, KeyInput, Mods};
     use std::time::Duration;
 
-    use crate::state::{Mouse, MouseKind, Msg, SampleActivity, update};
+    use crate::state::{Mouse, MouseKind, Msg, QUIT_WINDOW, SampleActivity, update};
 
     /// Columns where boxed draft text starts.
     const TEXT_X: u16 = 4;
@@ -789,7 +797,7 @@ mod tests {
         // Right-hand text ends where the box's contents do.
         let (rows, _) = draw(&mut app, 80, 24);
         let prompt = row_index(&rows, "❯ hello");
-        assert!(rows[prompt + 2].ends_with("Tab  "));
+        assert!(rows[prompt + 2].ends_with("Ctrl+G  "));
     }
 
     #[test]
@@ -908,7 +916,10 @@ mod tests {
     fn inspector_says_read_only_and_hides_the_caret_from_the_draft() {
         let mut app = State::default();
         app.draft.type_text("draft");
-        key(&mut app, Key::Tab);
+        update(
+            &mut app,
+            Msg::Key(KeyInput::new(Key::Char('g'), Mods::CTRL)),
+        );
         key(&mut app, Key::Enter);
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
         terminal.draw(|f| render(&mut app, f)).unwrap();
@@ -1035,7 +1046,10 @@ mod tests {
     #[test]
     fn agent_list_marks_the_selected_row() {
         let mut app = State::default();
-        key(&mut app, Key::Tab);
+        update(
+            &mut app,
+            Msg::Key(KeyInput::new(Key::Char('g'), Mods::CTRL)),
+        );
         key(&mut app, Key::Down);
         let (rows, _) = draw(&mut app, 60, 24);
         let at = |needle| row_index(&rows, needle);
@@ -1069,7 +1083,7 @@ mod tests {
     fn each_mode_names_what_enter_does_and_its_key() {
         let mut app = State::default();
         let (prompt, bottom) = composer_rows(&mut app, 80);
-        assert!(prompt.starts_with("│ ❯ Type a draft · Alt+Enter newline · Ctrl+Z undo"));
+        assert!(prompt.starts_with("│ ❯ Type a draft · Alt+Enter newline · Ctrl+- undo"));
         assert_eq!(bottom, format!("╰{}╯", "─".repeat(78)));
         key(&mut app, Key::Char('x'));
         assert!(composer_rows(&mut app, 80).1.ends_with("─ Enter sends ─╯"));
@@ -1093,7 +1107,10 @@ mod tests {
         assert_eq!(bottom, format!("╰{}╯", "─".repeat(78)));
 
         ctrl_t(&mut app);
-        key(&mut app, Key::Tab);
+        update(
+            &mut app,
+            Msg::Key(KeyInput::new(Key::Char('g'), Mods::CTRL)),
+        );
         key(&mut app, Key::Enter);
         let (prompt, bottom) = composer_rows(&mut app, 80);
         assert!(prompt.starts_with("│ ❯ Read-only · Esc returns to parent"));
@@ -1189,9 +1206,9 @@ mod tests {
     fn row_keys_give_way_below_sixty_columns() {
         let mut app = State::default();
         let (rows, _) = draw(&mut app, 60, 24);
-        assert!(rows[row_index(&rows, "Agents  2 samples")].ends_with("Tab  "));
+        assert!(rows[row_index(&rows, "Agents  2 samples")].ends_with("Ctrl+G  "));
         let (rows, _) = draw(&mut app, 59, 24);
-        assert!(!rows[row_index(&rows, "Agents  2 samples")].contains("Tab"));
+        assert!(!rows[row_index(&rows, "Agents  2 samples")].contains("Ctrl+G"));
     }
 
     #[test]
@@ -1356,7 +1373,10 @@ mod tests {
             "down to the bottom follows again"
         );
         // In the agent list, the wheel steps the selection.
-        key(&mut app, Key::Tab);
+        update(
+            &mut app,
+            Msg::Key(KeyInput::new(Key::Char('g'), Mods::CTRL)),
+        );
         update(&mut app, mouse(MouseKind::WheelDown, 10, 5, 40_000));
         assert_eq!(app.selected, "sample-reviewer");
         update(&mut app, mouse(MouseKind::WheelUp, 10, 5, 41_000));
@@ -1495,6 +1515,23 @@ mod tests {
         assert_eq!(pill(12, true, 30).unwrap(), " ↓ New output · Ctrl+End ");
         assert_eq!(pill(12, true, 15).unwrap(), " ↓ New output ");
         assert_eq!(pill(12, false, 4), None);
+    }
+
+    #[test]
+    fn an_armed_quit_asks_for_a_second_press_above_the_bar() {
+        let mut app = State::default();
+        update(&mut app, Msg::Key(KeyInput::plain(Key::Enter)));
+        let ctrl_c = Msg::Key(KeyInput::new(Key::Char('c'), Mods::CTRL));
+        update(&mut app, ctrl_c.clone());
+        let (rows, _) = draw(&mut app, 80, 24);
+        let prompt = row_index(&rows, "Press Ctrl-C again to quit");
+        assert_eq!(prompt + 1, row_index(&rows, "no model"));
+        assert!(!rows.iter().any(|r| r.contains("not available")));
+        // Once it lapses, the notice it covered is back.
+        update(&mut app, Msg::Tick(QUIT_WINDOW));
+        let (rows, _) = draw(&mut app, 80, 24);
+        assert!(!rows.iter().any(|r| r.contains("again to quit")));
+        assert!(rows.iter().any(|r| r.contains("not available")));
     }
 
     #[test]

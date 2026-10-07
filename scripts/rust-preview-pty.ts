@@ -103,12 +103,17 @@ class Preview {
 
   async quit(signal?: 'SIGINT' | 'SIGTERM' | 'SIGHUP'): Promise<void> {
     if (signal === 'SIGTERM') {
-      this.send('\t')
+      this.send('\x07')
       await this.wait('agent list with hidden cursor', () => this.screen.includes('Fixed examples · nothing is running')
         && this.raw.lastIndexOf('\x1b[?25l') > this.raw.lastIndexOf('\x1b[?25h'))
     }
-    if (signal === undefined) this.send('\x03')
-    else this.process.kill(signal)
+    if (signal === undefined) {
+      // The first Ctrl+C only arms the quit; the second, inside its window, quits.
+      this.send('\x03')
+      await this.wait('quit armed', () => this.screen.includes('Press Ctrl-C again to quit'))
+      assert.equal(this.code, undefined, 'one Ctrl+C quit the preview')
+      this.send('\x03')
+    } else this.process.kill(signal)
     await this.wait('preview process and PTY exit', () => this.code !== undefined && this.streamStatus !== undefined)
     assert.equal(await this.exited, signal === 'SIGTERM' ? 143 : signal === 'SIGHUP' ? 129 : signal === 'SIGINT' ? 130 : 0)
     assert.equal(this.process.signalCode, null)
@@ -164,7 +169,7 @@ if (process.platform === 'win32') throw new Error('Rust PTY scenarios require PO
 await scenario('composer, agent inspection, paste, and resize', async (preview) => {
   preview.send('draftAB\x1b[D')
   await preview.wait('typed draft', () => preview.screen.includes('draftAB'))
-  preview.send('\t')
+  preview.send('\x07')
   await preview.wait('sample agent picker', () => preview.screen.includes('Fixed examples · nothing is running'))
   preview.send('\x1b[B\r')
   await preview.wait('read-only inspection', () => preview.screen.includes('typing never reaches an agent'))
@@ -173,7 +178,7 @@ await scenario('composer, agent inspection, paste, and resize', async (preview) 
   preview.send('X')
   await preview.wait('restored caret', () => preview.screen.includes('draftAXB'))
   assert(!preview.screen.includes('forbidden'), 'inspection accepted draft input')
-  preview.send('\x1a')
+  preview.send('\x1f')
   await preview.wait('undo after inspection', () => preview.screen.includes('draftAB') && !preview.screen.includes('draftAXB'))
   preview.send('\r')
   await preview.wait('refused submission', () => /not available/iu.test(preview.screen))
@@ -184,7 +189,7 @@ await scenario('composer, agent inspection, paste, and resize', async (preview) 
   await preview.wait('narrow draft', () => preview.screen.includes('line two'))
   await preview.resize(80, 24)
   await preview.wait('resized draft', () => preview.screen.includes('line one') && preview.screen.includes('line two'))
-  preview.send('\x1a')
+  preview.send('\x1f')
   await preview.wait('atomic paste undo', () => preview.screen.includes('draftAB') && !preview.screen.includes('line one'))
   await preview.quit()
 })

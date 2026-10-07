@@ -154,7 +154,7 @@ mod tests {
         let parts = copy::PLACEHOLDER;
         assert_eq!(
             placeholder(parts, 80, 74),
-            "Type a draft · Alt+Enter newline · Ctrl+Z undo"
+            "Type a draft · Alt+Enter newline · Ctrl+- undo"
         );
         assert_eq!(
             placeholder(parts, 80, 40),

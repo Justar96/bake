@@ -530,7 +530,8 @@ mod tests {
                 Source::Msg(Msg::Resize { cols: 40, rows: 12 }),
                 Source::Msg(Msg::Paste("bc".into())),
             ],
-            vec![key('d'), ctrl('c'), key('e')],
+            // The second Ctrl+C quits; the key after it is never applied.
+            vec![key('d'), ctrl('c'), ctrl('c'), key('e')],
         ]);
         assert_eq!(run(&mut screen, &inputs).unwrap(), PreviewExit::Quit);
         let frames: Vec<_> = screen
@@ -566,7 +567,7 @@ mod tests {
     #[test]
     fn a_long_burst_draws_after_each_full_batch() {
         let burst = (0..MAX_BATCH + 4).map(|_| key('z')).collect();
-        let (mut screen, inputs) = Scripted::new(vec![burst, vec![], vec![ctrl('c')]]);
+        let (mut screen, inputs) = Scripted::new(vec![burst, vec![], vec![ctrl('c'), ctrl('c')]]);
         assert_eq!(run(&mut screen, &inputs).unwrap(), PreviewExit::Quit);
         let lengths: Vec<_> = screen.frames.iter().map(|(text, ..)| text.len()).collect();
         assert_eq!(lengths, [0, MAX_BATCH, MAX_BATCH + 4]);
@@ -586,6 +587,7 @@ mod tests {
             if self.frames.len() == 1 {
                 self.sender.send(ctrl('t')).unwrap();
             } else if self.frames.len() > 2 {
+                self.sender.send(ctrl('c')).unwrap();
                 self.sender.send(ctrl('c')).unwrap();
             }
             Ok(())

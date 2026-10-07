@@ -97,8 +97,11 @@ pub enum Scope {
 /// What a bound key asks the view to do.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
+    /// Ctrl+C: the first press arms a quit, a second within
+    /// [`crate::state::QUIT_WINDOW`] quits. It never interrupts a turn.
     Quit,
-    OpenAgentList,
+    /// Ctrl+G: opens the agent list from the composer and closes it again.
+    ToggleAgentList,
     /// Esc in the composer: stops the activity and dismisses the notice.
     Interrupt,
     ToggleSampleActivity,
@@ -155,7 +158,13 @@ const ANY: Mods = Mods::NONE;
 /// to the focus's default: typing in the composer, and a hint elsewhere.
 pub const BINDINGS: &[Binding] = &[
     bind(S::Anywhere, K::Char('c'), Mods::CTRL, ANY, A::Quit),
-    bind(S::Composer, K::Tab, ANY, ANY, A::OpenAgentList),
+    bind(
+        S::Composer,
+        K::Char('g'),
+        Mods::CTRL,
+        Mods::ALT,
+        A::ToggleAgentList,
+    ),
     bind(S::Composer, K::Esc, ANY, ANY, A::Interrupt),
     bind(
         S::Composer,
@@ -167,7 +176,12 @@ pub const BINDINGS: &[Binding] = &[
     bind(S::Composer, K::Enter, Mods::ALT, ANY, A::Newline),
     bind(S::Composer, K::Char('j'), Mods::CTRL, ANY, A::Newline),
     bind(S::Composer, K::Enter, ANY, ANY, A::Submit),
-    bind(S::Composer, K::Char('z'), Mods::CTRL, ANY, A::Undo),
+    // Ctrl+-, Ctrl+_, and Ctrl+/ send the unit separator, which legacy
+    // decoding reads as Ctrl+7; a terminal reporting keys in full names them.
+    bind(S::Composer, K::Char('-'), Mods::CTRL, Mods::ALT, A::Undo),
+    bind(S::Composer, K::Char('_'), Mods::CTRL, Mods::ALT, A::Undo),
+    bind(S::Composer, K::Char('/'), Mods::CTRL, Mods::ALT, A::Undo),
+    bind(S::Composer, K::Char('7'), Mods::CTRL, Mods::ALT, A::Undo),
     bind(S::Composer, K::Backspace, ANY, ANY, A::Backspace),
     bind(S::Composer, K::Delete, ANY, ANY, A::Delete),
     bind(S::Composer, K::Left, ANY, ANY, A::Left),
@@ -184,7 +198,13 @@ pub const BINDINGS: &[Binding] = &[
     bind(S::AgentList, K::Down, ANY, ANY, A::SelectNext),
     bind(S::AgentList, K::Enter, ANY, ANY, A::InspectSelected),
     bind(S::AgentList, K::Esc, ANY, ANY, A::ReturnToComposer),
-    bind(S::AgentList, K::Tab, ANY, ANY, A::ReturnToComposer),
+    bind(
+        S::AgentList,
+        K::Char('g'),
+        Mods::CTRL,
+        Mods::ALT,
+        A::ReturnToComposer,
+    ),
     bind(S::Inspect, K::Esc, ANY, ANY, A::ReturnToComposer),
     bind(S::Inspect, K::Tab, ANY, ANY, A::ReturnToAgentList),
 ];
@@ -240,12 +260,30 @@ mod tests {
     #[test]
     fn a_key_binds_only_in_its_own_scope() {
         let tab = KeyInput::plain(Key::Tab);
-        assert_eq!(action(Scope::Composer, tab), Some(Action::OpenAgentList));
+        assert_eq!(action(Scope::Composer, tab), None);
+        assert_eq!(action(Scope::Inspect, tab), Some(Action::ReturnToAgentList));
+        // Ctrl+G opens the agent list and closes it again.
+        let ctrl_g = KeyInput::new(Key::Char('g'), Mods::CTRL);
         assert_eq!(
-            action(Scope::AgentList, tab),
+            action(Scope::Composer, ctrl_g),
+            Some(Action::ToggleAgentList)
+        );
+        assert_eq!(
+            action(Scope::AgentList, ctrl_g),
             Some(Action::ReturnToComposer)
         );
-        assert_eq!(action(Scope::Inspect, tab), Some(Action::ReturnToAgentList));
+        // Undo is the unit separator however the terminal names it; Ctrl+Z
+        // is not bound.
+        for c in ['-', '_', '/', '7'] {
+            assert_eq!(
+                action(Scope::Composer, KeyInput::new(Key::Char(c), Mods::CTRL)),
+                Some(Action::Undo)
+            );
+        }
+        assert_eq!(
+            action(Scope::Composer, KeyInput::new(Key::Char('z'), Mods::CTRL)),
+            None
+        );
         assert_eq!(action(Scope::Composer, KeyInput::plain(Key::Up)), None);
         // Ctrl+Home reaches the transcript's start; Home alone, the line's.
         let home = |mods| action(Scope::Composer, KeyInput::new(Key::Home, mods));

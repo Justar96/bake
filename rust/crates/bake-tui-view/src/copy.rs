@@ -9,7 +9,7 @@ pub const INTRO: &[&str] = &[
 pub const HEADER_LIST_HINT: &str = "↑↓ select · Enter inspect · Esc back";
 /// The idle placeholder's parts. The preview has no commands or file
 /// mentions to name, so it names its editing keys instead.
-pub const PLACEHOLDER: &[&str] = &["Type a draft", "Alt+Enter newline", "Ctrl+Z undo"];
+pub const PLACEHOLDER: &[&str] = &["Type a draft", "Alt+Enter newline", "Ctrl+- undo"];
 /// While a turn runs, Enter steers instead of sending.
 pub const PLACEHOLDER_RUNNING: &[&str] = &["Enter steers the next step · Alt+↑ sends now"];
 /// While history is compacted, Enter queues a prompt to run afterwards.
@@ -75,6 +75,10 @@ pub const DRAFT_LIMIT: &str = "Draft limit reached; the rest of the input was no
 /// The agents: the standing row's label, the list's subtitle, and what
 /// inspection says about input and the draft.
 pub const AGENTS: &str = "Agents";
+/// The key that opens the agent list, at the right of the agents row.
+pub const AGENTS_KEY: &str = "Ctrl+G";
+/// Shown while a first Ctrl+C is armed.
+pub const QUIT: &str = "Press Ctrl-C again to quit";
 pub const AGENTS_SUMMARY: &str = "samples · none running";
 pub const LIST_SUBTITLE: &str = "Fixed examples · nothing is running";
 pub const INSPECT_READ_ONLY: &str = "Read only · typing never reaches an agent or your draft";

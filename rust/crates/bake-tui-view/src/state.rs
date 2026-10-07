@@ -81,6 +81,10 @@ impl Spot {
     }
 }
 
+/// How long a first Ctrl+C waits for a second before the quit is disarmed:
+/// the TypeScript `doubleInterruptMs` default.
+pub const QUIT_WINDOW: Duration = Duration::from_millis(2000);
+
 /// Requests the terminal owner performs on the view's behalf.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Effect {
@@ -216,6 +220,9 @@ pub struct State {
     pub latest: Option<Spot>,
     /// Whether a press on the scrollbar is being dragged.
     pub(crate) dragging: bool,
+    /// While a first Ctrl+C is armed, when it lapses; a second before then
+    /// quits. The prompt to press again shows until then.
+    pub quit_until: Option<Duration>,
 }
 
 impl Default for State {
@@ -248,7 +255,13 @@ impl State {
             track: None,
             latest: None,
             dragging: false,
+            quit_until: None,
         }
+    }
+
+    /// Whether a second Ctrl+C would quit now.
+    pub fn quitting(&self) -> bool {
+        self.quit_until.is_some_and(|until| self.now < until)
     }
 
     /// The composer's mode: inspection, else what the sample activity
@@ -279,7 +292,13 @@ impl State {
             .then(|| transcript::next_pulse(self.now));
         // The turn's script changes when its next call starts or settles.
         let script = self.live_elapsed().and_then(live::next);
-        activity.into_iter().chain(blink).chain(script).min()
+        let quit = self.quit_until.map(|until| until.saturating_sub(self.now));
+        activity
+            .into_iter()
+            .chain(blink)
+            .chain(script)
+            .chain(quit)
+            .min()
     }
 
     /// Time since the sample turn started, while its script runs.
@@ -305,6 +324,9 @@ pub fn update(state: &mut State, msg: Msg) -> Vec<Effect> {
         Msg::Resize { .. } => {}
         Msg::Tick(now) => {
             state.now = now;
+            if !state.quitting() {
+                state.quit_until = None;
+            }
             advance_script(state);
         }
         Msg::Mouse(mouse) => pointer(state, mouse),
@@ -364,9 +386,17 @@ fn pointer(state: &mut State, mouse: Mouse) {
 
 fn key(state: &mut State, input: KeyInput) -> Vec<Effect> {
     let bound = keys::action(state.focus.scope(), input);
+    // A first Ctrl+C arms the quit and a second within the window quits, so
+    // a stray press never ends the session. Any other key disarms it and
+    // then does what it does.
     if bound == Some(Action::Quit) {
-        return vec![Effect::Quit];
+        if state.quitting() {
+            return vec![Effect::Quit];
+        }
+        state.quit_until = Some(state.now + QUIT_WINDOW);
+        return Vec::new();
     }
+    state.quit_until = None;
     match state.focus {
         Focus::Composer => composer_key(state, bound, input),
         Focus::AgentList => list_key(state, bound),
@@ -378,7 +408,7 @@ fn key(state: &mut State, input: KeyInput) -> Vec<Effect> {
 fn composer_key(state: &mut State, bound: Option<Action>, input: KeyInput) {
     let draft = &mut state.draft;
     let complete = match bound {
-        Some(Action::OpenAgentList) => {
+        Some(Action::ToggleAgentList) => {
             state.focus = Focus::AgentList;
             state.notice = None;
             return;
@@ -604,13 +634,13 @@ mod tests {
         press(&mut state, Key::Left);
         let before = (state.draft.text().to_owned(), state.draft.caret());
 
-        press(&mut state, Key::Tab);
+        chord(&mut state, Key::Char('g'), Mods::CTRL);
         press(&mut state, Key::Down);
         press(&mut state, Key::Enter);
         assert_eq!(state.focus, Focus::Inspect("sample-reviewer"));
         type_str(&mut state, "zz");
         press(&mut state, Key::Backspace);
-        chord(&mut state, Key::Char('z'), Mods::CTRL);
+        chord(&mut state, Key::Char('-'), Mods::CTRL);
         update(&mut state, Msg::Paste("pasted".into()));
         press(&mut state, Key::Enter);
         assert_eq!(state.notice, Some(Notice::ReadOnly));
@@ -618,14 +648,14 @@ mod tests {
         press(&mut state, Key::Esc);
         assert_eq!(state.focus, Focus::Composer);
         assert_eq!((state.draft.text().to_owned(), state.draft.caret()), before);
-        chord(&mut state, Key::Char('z'), Mods::CTRL);
+        chord(&mut state, Key::Char('-'), Mods::CTRL);
         assert_eq!(state.draft.text(), "abc");
     }
 
     #[test]
     fn list_selection_follows_identity_and_stops_at_the_ends() {
         let mut state = State::default();
-        press(&mut state, Key::Tab);
+        chord(&mut state, Key::Char('g'), Mods::CTRL);
         press(&mut state, Key::Up);
         assert_eq!(state.selected, "sample-explorer");
         for _ in 0..5 {
@@ -635,13 +665,13 @@ mod tests {
         type_str(&mut state, "q");
         assert_eq!(state.notice, Some(Notice::ListKeys));
         assert!(state.draft.is_empty());
-        press(&mut state, Key::Tab);
+        chord(&mut state, Key::Char('g'), Mods::CTRL);
         assert_eq!(state.focus, Focus::Composer);
         assert_eq!(state.selected, SAMPLE_AGENTS.last().unwrap().id);
     }
 
     #[test]
-    fn ctrl_c_requests_quit_from_every_focus_and_changes_nothing() {
+    fn a_second_ctrl_c_quits_from_every_focus_and_changes_nothing() {
         for focus in [
             Focus::Composer,
             Focus::AgentList,
@@ -653,6 +683,9 @@ mod tests {
             };
             type_str(&mut state, "x");
             let before = (state.focus, state.notice, state.draft.text().to_owned());
+            // The first press only arms the quit.
+            assert!(chord(&mut state, Key::Char('c'), Mods::CTRL).is_empty());
+            assert!(state.quitting());
             assert_eq!(
                 chord(&mut state, Key::Char('c'), Mods::CTRL),
                 [Effect::Quit]
@@ -662,6 +695,33 @@ mod tests {
                 before
             );
         }
+    }
+
+    #[test]
+    fn an_armed_quit_lapses_with_its_window_or_at_any_other_key() {
+        let mut state = State::default();
+        chord(&mut state, Key::Char('c'), Mods::CTRL);
+        // The loop wakes when the window ends, and the prompt goes with it.
+        assert_eq!(state.next_change(), Some(QUIT_WINDOW));
+        update(
+            &mut state,
+            Msg::Tick(QUIT_WINDOW - Duration::from_millis(1)),
+        );
+        assert!(state.quitting());
+        update(&mut state, Msg::Tick(QUIT_WINDOW));
+        assert!(!state.quitting() && state.quit_until.is_none());
+        assert_eq!(state.next_change(), None);
+        assert!(chord(&mut state, Key::Char('c'), Mods::CTRL).is_empty());
+        // Another key disarms it and still does what it does.
+        type_str(&mut state, "a");
+        assert!(!state.quitting());
+        assert_eq!(state.draft.text(), "a");
+        assert!(chord(&mut state, Key::Char('c'), Mods::CTRL).is_empty());
+        // Ctrl+C never interrupts a turn; Esc does.
+        chord(&mut state, Key::Char('t'), Mods::CTRL);
+        assert_eq!(state.mode(), Mode::Running);
+        chord(&mut state, Key::Char('c'), Mods::CTRL);
+        assert_eq!(state.mode(), Mode::Running);
     }
 
     #[test]
@@ -793,7 +853,7 @@ mod tests {
     fn inspection_is_its_own_mode_whatever_the_session_does() {
         let mut state = State::default();
         chord(&mut state, Key::Char('t'), Mods::CTRL);
-        press(&mut state, Key::Tab);
+        chord(&mut state, Key::Char('g'), Mods::CTRL);
         assert_eq!(state.mode(), Mode::Running);
         press(&mut state, Key::Enter);
         assert_eq!(state.mode(), Mode::Inspecting);
