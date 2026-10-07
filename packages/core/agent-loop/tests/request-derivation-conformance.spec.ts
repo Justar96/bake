@@ -24,7 +24,7 @@ const FIXTURE_EXPECTED = 'conformance/runtime/request-reconstruction/tool-call-t
 const LOG_SHA256 = 'a7a8222990ef9f4c4f00a051c019de86d3156ca7f6c3c0d28af4be4cc3fbe657'
 const EXPECTED_SHA256 = '460b031e6fd308bd9ac3fd97834aad64729b2384f0f3e803c424d7502f9dfa02'
 /** Both harnesses pin the table size, so a dropped case fails. */
-const CASE_COUNT = 158
+const CASE_COUNT = 184
 /** Bounds each case's input edits. */
 const MAX_EDITS = 8
 const LIMITS = [
@@ -32,7 +32,7 @@ const LIMITS = [
   'repeated-coordinate', 'config-member', 'tool-schema', 'header', 'codec',
 ]
 const SEED_CHECKS = [
-  'message-identity', 'message-role', 'message-source', 'message-content', 'model-source', 'tool-source',
+  'lossless-json', 'message-identity', 'message-role', 'message-source', 'message-content', 'model-source', 'tool-source',
   'tool-result-block', 'tool-call-id', 'settlement', 'header-provider-model', 'header-reasoning-effort',
   'header-adapter-defaults', 'header-reason', 'header-starts-series', 'tool-update-data', 'non-surface-marker',
   'replace-start', 'replace-end', 'replace-order', 'replace-sources', 'tool-result-span', 'tool-result-target',

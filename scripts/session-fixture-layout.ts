@@ -41,6 +41,7 @@ export interface SessionFixtureLayout {
 const REQUEST_RECONSTRUCTION_LOGS: ReadonlySet<string> = new Set([
   'conformance/runtime/request-reconstruction/tool-call-turn/session.jsonl',
   'conformance/runtime/request-reconstruction/dynamic-tools/session.jsonl',
+  'conformance/runtime/request-reconstruction/retry-attempt/session.jsonl',
 ])
 
 /**

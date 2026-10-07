@@ -3,7 +3,8 @@
  * turn of the original THEOREM (`request-reconstruction.spec.ts`), which
  * remains the oracle for its full three-request scenario; `dynamic-tools` adds,
  * removes, and restores a tool across three turns, and `tool-updates.spec.ts`
- * remains the oracle for tool-update routes. The live composed loop must
+ * remains the oracle for tool-update routes; `retry-attempt` retries a failed
+ * model request with another model, one request per settlement. The live composed loop must
  * dispatch exactly each hand-written `expected-requests.json`, and each
  * committed `session.jsonl`, a byte-exact capture of one such run, must
  * replay to the same requests. Only generated message ids, and in
@@ -16,7 +17,7 @@
 import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { describe, expect, it } from 'vitest'
-import { Session, SessionId, SESSION_FORMAT_VERSION } from 'bake-session'
+import { Session, SessionId, SESSION_FORMAT_VERSION, foldRequestHeader } from 'bake-session'
 import type { SessionEvent } from 'bake-session'
 import { snapshotJsonValue, type JsonValue } from 'bake-util-values'
 import { scanLog } from 'bake-session-persistence-jsonl/src/format.ts'
@@ -32,6 +33,7 @@ import {
   projectRequest,
   replayRequests,
   runDynamicToolsScenario,
+  runRetryAttemptScenario,
   runToolCallTurn,
   toolCallTurnScript,
 } from './runtime-fixture.ts'
@@ -348,5 +350,140 @@ describe('dynamic-tools negative controls', () => {
     expect(() => normalizeAnchoredRequests(withAnchor('message-4'))).toThrow(`${where}: expected a generated message id, got "message-4"`)
     expect(() => normalizeAnchoredRequests(withAnchor(null))).toThrow(`${where}: expected a generated message id, got null`)
     expect(() => normalizeAnchoredRequests([{ ...raw[0]!, toolUpdates: [] }])).toThrow('requests[0].toolUpdates is not normalized')
+  })
+})
+
+const RETRY_LOG_SHA256 = 'cd79f036ffd20337af3393ab1dcfb57f62aa7434129a6ec3ddea9398c9a7a2db'
+const RETRY_ROWS = 14
+
+/** The retry log's header, context, and settlement rows. */
+function retryRows(events: readonly SessionEvent[]) {
+  return {
+    headers: events.flatMap(event => event.type === 'request/header'
+      ? [[event.seq, event.data.reason, event.data.header.config.model, Object.hasOwn(event.data, 'startsSeries')]]
+      : []),
+    contexts: events.flatMap(event => event.type === 'request/context' ? [[event.seq, event.data]] : []),
+    settlements: events.flatMap(event => event.type === 'assistant/attempt' || event.type === 'assistant/message'
+      ? [[event.seq, event.type]]
+      : []),
+    absent: events.filter(event => event.type === 'request/tool-update').length
+      + events.filter(event => event.type === 'system/message').length - 1,
+  }
+}
+
+const RETRY_ROWS_EXPECTED = {
+  headers: [[6, 'initial', 'mock', false], [9, 'change', 'mock-b', false]],
+  contexts: [[7, { provider: 'mock', model: 'mock' }], [10, { provider: 'mock', model: 'mock-b' }]],
+  settlements: [[8, 'assistant/attempt'], [11, 'assistant/message']],
+  absent: 0,
+}
+
+/** Replace the whole row with seq `seq`. */
+function replaceRow(log: Buffer, seq: number, row: object): Buffer {
+  const lines = log.toString('utf8').split('\n')
+  expect(lines[seq + 1]).toMatch(new RegExp(`^\\{"type":"[^"]+","seq":${seq},`))
+  lines[seq + 1] = JSON.stringify(row)
+  return Buffer.from(lines.join('\n'))
+}
+
+describe('retry-attempt request-reconstruction fixture', () => {
+  it('dispatches exactly the independently specified requests, which its own log replays', async ({ signal }) => {
+    const { expected } = await readFixture('retry-attempt')
+    const capture = await runRetryAttemptScenario(signal)
+
+    expect(capture.decisions).toEqual(['retry'])
+    expect(capture.requests).toHaveLength(2)
+    expect(capture.events).toHaveLength(RETRY_ROWS)
+    expect(retryRows(capture.events)).toEqual(RETRY_ROWS_EXPECTED)
+    expect(capture.events.at(-1)).toMatchObject({ type: 'turn/end', data: { reason: { kind: 'completed' } } })
+    for (const request of capture.requests) expect(request.toolUpdates).toBeUndefined()
+    expect(compareJson(expected, liveRequests(capture), 'requests')).toEqual({ outcome: 'pass' })
+    const ownLog = Buffer.from(encodeLog(capture.header, capture.events))
+    expect(compareJson(expected, normalizeRequests(replayRequests(ownLog)), 'requests')).toEqual({ outcome: 'pass' })
+  })
+
+  it('dispatches identical normalized requests from two private runs', async ({ signal }) => {
+    const first = liveRequests(await runRetryAttemptScenario(signal))
+    const second = liveRequests(await runRetryAttemptScenario(signal))
+    expect(JSON.stringify(second)).toBe(JSON.stringify(first))
+  })
+
+  it('stores a complete current-format Session that replays to the expected requests', async () => {
+    const fixture = await readFixture('retry-attempt')
+    expect(createHash('sha256').update(fixture.log).digest('hex')).toBe(RETRY_LOG_SHA256)
+    const { meta, events, committedBytes, inheritedEventCount } = scanLog(fixture.log)
+    expect(meta.version).toBe(SESSION_FORMAT_VERSION)
+    expect([meta.isSeeded, inheritedEventCount, committedBytes]).toEqual([false, 0, fixture.log.length])
+    expect(events).toHaveLength(RETRY_ROWS)
+    expect(retryRows(events)).toEqual(RETRY_ROWS_EXPECTED)
+    expect(() => Session.create(SessionId(meta.id), events, meta)).not.toThrow()
+    expect(compareBytes(fixture.log, Buffer.from(encodeLog(meta, events)))).toEqual({ outcome: 'pass' })
+    expect(compareJson(fixture.expected, normalizeRequests(replayRequests(fixture.log)), 'requests')).toEqual({ outcome: 'pass' })
+  })
+
+  it('unwinds through disposal when the idle wait is aborted before the turn or at the retry', async () => {
+    const reason = new Error('test aborted')
+    await expect(runRetryAttemptScenario(AbortSignal.abort(reason))).rejects.toBe(reason)
+    const controller = new AbortController()
+    await expect(runRetryAttemptScenario(controller.signal, { onRetry: () => controller.abort(reason) })).rejects.toBe(reason)
+  })
+
+  it('bounds wrong retry decisions by the script and the listener', async ({ signal }) => {
+    const { expected } = await readFixture('retry-attempt')
+    const none = await runRetryAttemptScenario(signal, { retries: 0 })
+    expect(none.decisions).toEqual(['delegate'])
+    expect(compareJson(expected, liveRequests(none), 'requests')).toEqual({ outcome: 'fail', detail: 'requests: expected 2 items, got 1' })
+    const twice = await runRetryAttemptScenario(signal, { failures: 2, retries: 2 })
+    expect(twice.decisions).toEqual(['retry', 'retry'])
+    expect(compareJson(expected, liveRequests(twice), 'requests')).toEqual({ outcome: 'fail', detail: 'requests: expected 2 items, got 3' })
+    // Two requests equal to the expectation, but the second also fails and the turn ends in error.
+    const exhausted = await runRetryAttemptScenario(signal, { failures: 2, retries: 1 })
+    expect(exhausted.decisions).toEqual(['retry', 'delegate'])
+    expect(compareJson(expected, liveRequests(exhausted), 'requests')).toEqual({ outcome: 'pass' })
+    expect(exhausted.events.at(-1)).toMatchObject({ type: 'turn/end', data: { reason: { kind: 'error' } } })
+  })
+})
+
+describe('retry-attempt negative controls', () => {
+  it('without the attempt settlement, one request replays', async () => {
+    const fixture = await readFixture('retry-attempt')
+    const withoutAttempt = replaceRow(fixture.log, 8, { type: 'request/context', seq: 8, time: 1, data: { provider: 'mock', model: 'mock' } })
+    expect(compareJson(fixture.expected, normalizeRequests(replayRequests(withoutAttempt)), 'requests')).toEqual({
+      outcome: 'fail',
+      detail: 'requests: expected 2 items, got 1',
+    })
+  })
+
+  it('a second cut before the changed header replays the first model', async () => {
+    const fixture = await readFixture('retry-attempt')
+    const { meta, events } = scanLog(fixture.log)
+    const prefix = events.slice(0, 9)
+    const header = foldRequestHeader(prefix)!
+    const early = Session.create(SessionId(meta.id), prefix, meta)
+    const request = normalizeRequests([{
+      ...header.config,
+      messages: snapshotJsonValue<unknown>(early.deriveMessages()) as JsonValue,
+      toolHistory: snapshotJsonValue<unknown>(early.toolHistory()) as JsonValue,
+      ...header.tools !== undefined ? { tools: header.tools as unknown as JsonValue } : {},
+      sessionId: meta.id,
+    }])
+    expect(compareJson(fixture.expected[1]!, request[0]!, 'requests[1]')).toEqual({
+      outcome: 'fail',
+      detail: 'requests[1].model: expected "mock-b", got "mock"',
+    })
+  })
+
+  it('an attempt inside a prefix must have a stream array and lossless JSON', async () => {
+    const fixture = await readFixture('retry-attempt')
+    const { events } = scanLog(fixture.log)
+    const attempt = events[8]!
+    for (const [stream, message] of [
+      [{}, 'seed assistant/attempt at index 8 has invalid settlement fields'],
+      [[{ dt: -0 }], 'seed event at index 8 is not losslessly JSON-serializable'],
+    ] as const) {
+      const mutated = replaceRow(fixture.log, 8, { ...attempt, data: { ...attempt.data, stream } })
+        .toString('utf8').replace('"dt":0', '"dt":-0')
+      expect(() => replayRequests(Buffer.from(mutated))).toThrow(message)
+    }
   })
 })

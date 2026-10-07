@@ -7,16 +7,17 @@
 //! catalog's transformed validation is the identity for current input. The
 //! helper then refuses a log with bytes after the decoded prefix or a seeded
 //! one, and constructs a Session from each request's prefix. Session
-//! construction validates each prefix event's envelope, message, settlement,
-//! and request-header fields, and its surface transition, including the rule
-//! that a replacement starting at a `system/message` in node 0 must be one
-//! `system/message` over exactly that node. The helper skips
-//! full restoration (`restoreReleasedV3Artifact`) and with it the restored
-//! vocabulary, step and turn relationships, tool lifecycles, compaction
-//! records, and restoration's stricter protected-first-head rules, so it
-//! accepts an unknown required event type and some logs restoration refuses.
-//! Requests derived here therefore carry no restoration claim. This subset
-//! instead admits only its own 17 event types.
+//! construction snapshots each prefix event as lossless JSON, then validates
+//! its envelope, message, settlement, and request-header fields, and its
+//! surface transition, including the rule that a replacement starting at a
+//! `system/message` in node 0 must be one `system/message` over exactly that
+//! node. The helper skips full restoration (`restoreReleasedV3Artifact`) and
+//! with it the restored vocabulary, step and turn relationships, tool
+//! lifecycles, compaction records, and restoration's stricter
+//! protected-first-head rules, so it accepts an unknown required event type
+//! and some logs restoration refuses. Requests derived here therefore carry no
+//! restoration claim. This subset admits the 60 known event types other than
+//! `image/offload` and `session/end-seed`, and no `ignorable` row.
 //!
 //! [`replay_requests`] runs the same stages in the same order:
 //!
@@ -24,47 +25,54 @@
 //! 2. Uncommitted trailing bytes, including any record after the first issue
 //!    and a torn tail, then a seeded header or a nonzero inherited cut.
 //! 3. Subset qualification of every row, and the step and settlement
-//!    coordinates.
-//! 4. Each prefix that ends before a step's settlement: number qualification,
-//!    the Session construction checks the codec does not already cover, and
-//!    the [`RequestFold`], which plans each surface replacement and checks
-//!    each tool update against the current state before it changes them.
+//!    coordinates. Each step yields one request per settlement with its
+//!    coordinate: a failed or aborted dispatch settles as
+//!    `assistant/attempt`, whether or not the step retried.
+//! 4. Each prefix that ends before a settlement: per event, the -0 check that
+//!    is exactly the lossless snapshot for scan-admitted rows, number and
+//!    depth qualification of projected payloads, the Session construction
+//!    checks the codec does not already cover, and the [`RequestFold`], which
+//!    plans each surface replacement and checks each tool update against the
+//!    current state before it changes them.
 //!
 //! Rows at or after the last cut are never checked by Session construction,
 //! as in the helper, so a codec-admitted row there that Session construction
-//! would refuse, such as an invalid replacement, does not refuse the log. A
-//! codec-invalid row anywhere still does: it ends the scan's prefix, so its
-//! bytes are uncommitted, unless it is a `turn/end` and the scan throws. For
-//! rows of the 16 subset types
-//! other than `request/tool-update`, the codec already proves the envelope
-//! fields, sequence contiguity, the `surfaceOp` marker and
-//! its eligibility, an exact replacement shape with earlier endpoints, the
-//! event-local source rules (non-empty, unique, earlier, none on an Assistant
-//! message), and the `request/header` and `tool/result` rules of
-//! `validateSessionEventData`. Its `system/message` checks imply every
-//! Session check of that type. The four compaction types are known log-only
-//! types: neither the codec nor Session construction applies
-//! compaction-specific payload or relationship validation, so derivation does
-//! not either, and admitting one does not establish that it is valid. Their
-//! payloads still pass the prefix number and depth qualification that stands
-//! in for Session construction's lossless JSON snapshot. Those obligations
-//! are delegated, not repeated. Locating endpoints and checking source
-//! coverage and the tool-result and system-head rules need the current nodes,
-//! so the fold runs them.
+//! would refuse, such as an invalid replacement or a -0, does not refuse the
+//! log. A codec-invalid row anywhere still does: it ends the scan's prefix, so
+//! its bytes are uncommitted, unless it is a `turn/end` and the scan throws.
+//! For the surface types and every known type the codec classifies, the codec
+//! already proves the envelope fields, sequence contiguity, the `surfaceOp`
+//! marker and its eligibility, an exact replacement shape with earlier
+//! endpoints, the event-local source rules (non-empty, unique, earlier, none
+//! on an Assistant message), and the `request/header` and `tool/result` rules
+//! of `validateSessionEventData`. Its `system/message` checks imply every
+//! Session check of that type. Session construction applies no
+//! type-specific check to the other known non-surface types, such as the
+//! permission and sandbox knobs, titles, hooks, compaction records, and retry
+//! records, except the attempt's settlement fields, so derivation does not
+//! either, and admitting one does not establish that it is valid. Those
+//! obligations are delegated, not repeated. Locating endpoints and checking
+//! source coverage and the tool-result and system-head rules need the current
+//! nodes, so the fold runs them.
 //!
-//! The codec treats `request/tool-update` as opaque: it checks the envelope
-//! fields and decodes any `sourceEventSeqs` like every row's, but proves
-//! nothing about its payload or marker eligibility, so a `surfaceOp` of any
-//! value reaches Session construction. Derivation therefore runs every Session
-//! check for the type, in Session construction's order:
-//! `validateToolUpdateData`, the refusal of `surfaceOp` and `sourceEventSeqs`
-//! on a type that is not surface-eligible, whose values are never read, and
+//! Projected payloads, those of the surface messages, request headers, and
+//! tool updates, admit only safe integers and at most 64 nested containers,
+//! because their values reach request JSON and its copies. Other payloads
+//! reach no request, so any number except -0 and any depth the scan parsed is
+//! admitted, as the lossless snapshot admits them.
+//!
+//! The codec treats `request/tool-update` and five other known types
+//! (`deliverables/presented`, `image/offload`, `subagent/catalog`,
+//! `subagent/routing-decision`, and `workspace/changes`) as opaque: it checks
+//! the envelope fields and decodes any `sourceEventSeqs` like every row's, but
+//! proves nothing about the payload or marker eligibility, so a `surfaceOp` of
+//! any value reaches Session construction. Derivation therefore refuses either
+//! marker on those types, as `surfaceOpOf` does, without reading its value.
+//! For the tool update it runs every Session check in Session construction's
+//! order: `validateToolUpdateData`, that marker refusal, and
 //! `validateToolUpdate`, whose header, change, and anchor checks the fold
 //! runs. Its `ignorable` check stays behind the whole-log
-//! [`ReplayLimit::Ignorable`]. Session construction's lossless snapshot covers
-//! the whole event, but only `data` is qualified here, so a marker such as
-//! `surfaceOp: -0` is reported as the marker refusal where TypeScript fails
-//! the snapshot; both reject. Each request's tool history is the
+//! [`ReplayLimit::Ignorable`]. Each request's tool history is the
 //! `ToolHistoryProjection` snapshot of its prefix, and its config and tools
 //! come from the latest header, as `foldRequestHeader` reads them.
 //!
@@ -81,27 +89,83 @@ use serde_json::{Map, Value};
 use crate::request::{Fact, FoldRefusal, Request, RequestFold, SurfaceKind, SurfaceOp};
 use crate::{MAX_SAFE_INTEGER, PathPlatform, ScanRefusal, V3CodecEvent, scan_log};
 
-/// The event types this subset admits: those of the committed
-/// request-reconstruction fixture, the compaction records written beside
-/// surface replacements, and tool updates.
-const SUBSET_TYPES: [&str; 17] = [
+/// `KNOWN_SESSION_EVENT_TYPES` in
+/// `packages/core/session/src/known-event-types.ts`, the vocabulary this build
+/// understands. A unit test pins the list against that generated file.
+const KNOWN_EVENT_TYPES: [&str; 60] = [
+    "agent-preset/selected",
     "agent/inbox/spliced",
+    "approval/asked",
+    "approval/decided",
+    "approval/policy",
+    "assistant/attempt",
     "assistant/message",
+    "command/done",
+    "command/run",
     "compaction/end",
     "compaction/prune",
     "compaction/start",
     "compaction/summary",
+    "deliverables/presented",
+    "feedback/message-delete",
+    "feedback/message-put",
+    "feedback/record",
+    "goal/change",
+    "hook/invoked",
+    "hook/result",
+    "image/offload",
+    "llm/retry",
+    "llm/retry-started",
+    "model/selection",
+    "permission/preset",
+    "plan/mode",
     "request/context",
     "request/header",
     "request/tool-update",
+    "sandbox/mode",
+    "schedule/change",
+    "session-log-deepseek/delivery-accepted",
+    "session/end-seed",
+    "session/title",
+    "session/title-llm-request",
     "step/end",
     "step/start",
+    "subagent/catalog",
+    "subagent/descriptor",
+    "subagent/model-selection-policy",
+    "subagent/routing-decision",
     "system/message",
+    "team/member",
+    "team/message/delivered",
+    "team/message/queued",
+    "team/task",
+    "todo/write",
+    "tool-workflow/agent-end",
+    "tool-workflow/agent-start",
+    "tool-workflow/run-end",
+    "tool-workflow/run-start",
     "tool/call",
+    "tool/ptc-dispatch",
+    "tool/ptc-dispatch-start",
     "tool/result",
     "turn/end",
     "turn/start",
     "user/message",
+    "web/deepseek-search-llm-request",
+    "workspace/changes",
+];
+/// Known types this subset still refuses: `image/offload` needs a message
+/// projection, and `session/end-seed` belongs to seeded logs.
+const EXCLUDED_TYPES: [&str; 2] = ["image/offload", "session/end-seed"];
+/// The types whose payload a request can carry. Their payloads keep the
+/// conservative number and depth qualification.
+const PROJECTED_TYPES: [&str; 6] = [
+    "system/message",
+    "user/message",
+    "assistant/message",
+    "tool/result",
+    "request/header",
+    "request/tool-update",
 ];
 /// The `LlmCallConfig` data members in `packages/llm/llm/src/call-config.ts`.
 /// Request assembly spreads `config` before its own members, so this closed
@@ -166,13 +230,18 @@ impl ReplayRefusal {
 }
 
 /// A Session construction check that rejected a prefix event, in the order
-/// Session construction runs them: `validateToolUpdateData`, then
+/// Session construction runs them: the lossless snapshot, then
+/// `validateToolUpdateData`, then
 /// `assertCurrentLlmShape` in `packages/core/session/src/index.ts`, then the
 /// surface metadata and replacement checks of `planSurfaceEvent` in
 /// `packages/core/session/src/surface.ts`, then `validateToolUpdate` in
 /// `packages/core/session/src/tool-history.ts`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SeedRejection {
+    /// The event holds -0, which `snapshotJsonValue` refuses. TypeScript
+    /// throws "seed event at index `seq` is not losslessly
+    /// JSON-serializable" before any other check of the event.
+    LosslessJson,
     /// The message is not an object with a non-empty string `id`.
     MessageIdentity,
     /// The message `role` does not match its event type.
@@ -190,7 +259,7 @@ pub enum SeedRejection {
     ToolResultBlock,
     /// The block's `toolCallId` differs from the source's `callId`.
     ToolCallId,
-    /// An Assistant message's `stream` is not an array. Session construction
+    /// An Assistant message's or attempt's `stream` is not an array. Session construction
     /// also checks `turn` and `step` here, but whole-log qualification refuses
     /// a non-safe-integer coordinate as [`ReplayLimit::Coordinate`] first.
     Settlement,
@@ -246,23 +315,25 @@ pub enum SeedRejection {
 /// Input this subset does not derive, whatever TypeScript does with it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReplayLimit {
-    /// A row type outside this subset's 17 types, including ignorable
-    /// unknown types, `assistant/attempt`, message projections, and
-    /// `session/end-seed`.
+    /// A row type outside the 60 known types, required or ignorable, or the
+    /// known `image/offload`, which needs a message projection, or
+    /// `session/end-seed`, which belongs to seeded logs.
     EventType,
     /// A row carries `ignorable`, including a tool update, which Session
     /// construction refuses only after its data and surface checks.
     Ignorable,
-    /// A prefix payload holds a number other than a safe integer. JavaScript's
-    /// rounding, -0, and underflow cannot be decided from a parsed `f64`.
+    /// A projected prefix payload, that of a surface message, request header,
+    /// or tool update, holds a number other than a safe integer and not -0.
+    /// JavaScript's rounding of what a request copies is not decided here.
     Number,
-    /// A prefix payload nests arrays and objects more than 64 containers deep.
+    /// A projected prefix payload nests arrays and objects more than 64
+    /// containers deep.
     Depth,
-    /// A `step/start` or `assistant/message` coordinate is not an object
-    /// member of safe-integer `turn` and `step`.
+    /// A `step/start`, `assistant/attempt`, or `assistant/message` coordinate
+    /// is not an object member of safe-integer `turn` and `step`.
     Coordinate,
-    /// Two `step/start` rows, or two Assistant settlements, share a
-    /// coordinate. Retries are outside this subset.
+    /// Two `step/start` rows share a coordinate. Several settlements of one
+    /// step are admitted.
     RepeatedCoordinate,
     /// `config` holds a member outside `LlmCallConfig`.
     ConfigMember,
@@ -273,12 +344,17 @@ pub enum ReplayLimit {
 /// One `(turn, step)` pair.
 type Coordinate = (u64, u64);
 
-/// Rebuild the request each step dispatched, as `replayRequests` does.
+/// Rebuild the request each dispatch sent, as `replayRequests` does.
 ///
 /// `log` is a plain, uncompressed log, and `source_budget` bounds each row's
-/// expanded `sourceEventSeqs` as in [`scan_log`]. Each `step/start` yields one
-/// request, in log order: the messages and header of the prefix that ends
-/// before the first Assistant message with the same coordinate.
+/// expanded `sourceEventSeqs` as in [`scan_log`]. Each `step/start` in log
+/// order yields one request per Assistant settlement, `assistant/attempt` or
+/// `assistant/message`, with its coordinate, in log order: the messages and
+/// header of the prefix that ends before that settlement. A step whose first
+/// settlement is missing or earlier refuses the log. A settlement whose
+/// coordinate has no `step/start` cuts nothing. The helper's rule also emits
+/// a request for a settlement after a step's `assistant/message`, which the
+/// loop never writes; so does this one.
 pub fn replay_requests(
     log: &[u8],
     platform: PathPlatform,
@@ -297,49 +373,69 @@ pub fn replay_requests(
     let events: Vec<V3CodecEvent<'_>> = scan.events().collect();
     let mut starts: Vec<(Coordinate, u64)> = Vec::new();
     let mut started = BTreeSet::new();
-    let mut settlements: BTreeMap<Coordinate, u64> = BTreeMap::new();
+    let mut settlements: BTreeMap<Coordinate, Vec<u64>> = BTreeMap::new();
     for event in &events {
         let envelope = event.envelope();
         let seq = envelope.seq;
-        if !SUBSET_TYPES.contains(&envelope.event_type) {
+        if !KNOWN_EVENT_TYPES.contains(&envelope.event_type)
+            || EXCLUDED_TYPES.contains(&envelope.event_type)
+        {
             return Err(limit(seq, ReplayLimit::EventType));
         }
         if envelope.ignorable {
             return Err(limit(seq, ReplayLimit::Ignorable));
         }
-        if !matches!(envelope.event_type, "step/start" | "assistant/message") {
+        if !matches!(
+            envelope.event_type,
+            "step/start" | "assistant/message" | "assistant/attempt"
+        ) {
             continue;
         }
         let at = coordinate(envelope.data).ok_or(limit(seq, ReplayLimit::Coordinate))?;
-        let repeated = if envelope.event_type == "step/start" {
+        if envelope.event_type == "step/start" {
             starts.push((at, seq));
-            !started.insert(at)
+            if !started.insert(at) {
+                return Err(limit(seq, ReplayLimit::RepeatedCoordinate));
+            }
         } else {
-            settlements.insert(at, seq).is_some()
-        };
-        if repeated {
-            return Err(limit(seq, ReplayLimit::RepeatedCoordinate));
+            settlements.entry(at).or_default().push(seq);
         }
     }
-    // With unique coordinates, the first settlement `find` returns is the
-    // only one. A missing or earlier settlement ends the helper at that step,
-    // so later steps contribute no prefix.
-    let cuts: Vec<Option<u64>> = starts
+    // A step whose first settlement is missing or earlier ends the helper
+    // there, so later steps contribute no prefix. Otherwise every settlement
+    // with its coordinate, all later than the step, cuts one request.
+    let cuts: Vec<Option<&[u64]>> = starts
         .iter()
-        .map(|(at, start)| settlements.get(at).copied().filter(|cut| cut > start))
+        .map(|(at, start)| {
+            settlements
+                .get(at)
+                .map(Vec::as_slice)
+                .filter(|cuts| cuts[0] > *start)
+        })
         .collect();
-    let end = cuts.iter().map_while(|cut| *cut).max().unwrap_or(0);
-    let cut_set: BTreeSet<u64> = cuts.iter().flatten().copied().collect();
+    let end = cuts
+        .iter()
+        .map_while(|cuts| *cuts)
+        .flatten()
+        .copied()
+        .max()
+        .unwrap_or(0);
+    let cut_set: BTreeSet<u64> = cuts.iter().flatten().copied().flatten().copied().collect();
+    let rows = scan.rows();
     let mut fold = RequestFold::new(header.id.clone());
     let mut snapshots: BTreeMap<u64, Option<Request>> = BTreeMap::new();
     let mut failure = None;
-    for event in &events[..usize::try_from(end).unwrap_or(events.len())] {
+    for (event, row) in events
+        .iter()
+        .zip(rows)
+        .take(usize::try_from(end).unwrap_or(events.len()))
+    {
         let seq = event.envelope().seq;
         if cut_set.contains(&seq) {
             snapshots.insert(seq, fold.request());
         }
-        if let Err(refusal) =
-            admit(event).and_then(|fact| fold.append(fact).map_err(|refusal| folded(seq, refusal)))
+        if let Err(refusal) = admit(event, row)
+            .and_then(|fact| fold.append(fact).map_err(|refusal| folded(seq, refusal)))
         {
             failure = Some((seq, refusal));
             break;
@@ -348,18 +444,20 @@ pub fn replay_requests(
     if failure.is_none() {
         snapshots.insert(end, fold.request());
     }
-    let mut requests = Vec::with_capacity(cuts.len());
-    for (((turn, step), _), cut) in starts.into_iter().zip(cuts) {
-        let Some(cut) = cut else {
+    let mut requests = Vec::new();
+    for (((turn, step), _), cuts) in starts.into_iter().zip(cuts) {
+        let Some(cuts) = cuts else {
             return Err(ReplayRefusal::NoLaterSettlement { turn, step });
         };
-        if let Some((seq, refusal)) = &failure
-            && *seq < cut
-        {
-            return Err(refusal.clone());
+        for cut in cuts {
+            if let Some((seq, refusal)) = &failure
+                && seq < cut
+            {
+                return Err(refusal.clone());
+            }
+            let snapshot = snapshots.get(cut).cloned().flatten();
+            requests.push(snapshot.ok_or(ReplayRefusal::NoRequestHeader { turn, step })?);
         }
-        let snapshot = snapshots.get(&cut).cloned().flatten();
-        requests.push(snapshot.ok_or(ReplayRefusal::NoRequestHeader { turn, step })?);
     }
     Ok(requests)
 }
@@ -407,13 +505,19 @@ fn non_empty_string(value: Option<&Value>) -> bool {
         .is_some_and(|text| !text.is_empty())
 }
 
-/// Admit one prefix row: qualify its payload, run the Session construction
-/// checks the codec leaves, and convert it to a fact.
-fn admit(event: &V3CodecEvent<'_>) -> Result<Fact, ReplayRefusal> {
+/// Admit one prefix row: check that the whole parsed `row` is lossless JSON,
+/// qualify a projected payload, run the Session construction checks the codec
+/// leaves, and convert it to a fact.
+fn admit(event: &V3CodecEvent<'_>, row: &Value) -> Result<Fact, ReplayRefusal> {
     let envelope = event.envelope();
     let seq = envelope.seq;
     let data = envelope.data;
-    qualify_payload(data).map_err(|refusal| limit(seq, refusal))?;
+    if holds_negative_zero(row) {
+        return Err(seed(seq, SeedRejection::LosslessJson));
+    }
+    if PROJECTED_TYPES.contains(&envelope.event_type) {
+        qualify_payload(data).map_err(|refusal| limit(seq, refusal))?;
+    }
     // Only for the surface types the closure serves did the codec prove the
     // marker: `"append"`, or an exact replacement whose endpoints are safe
     // integers. Other types never read it; an opaque type may carry anything.
@@ -465,13 +569,58 @@ fn admit(event: &V3CodecEvent<'_>) -> Result<Fact, ReplayRefusal> {
         "request/header" => request_header(seq, data),
         "request/tool-update" => {
             let fact = tool_update(seq, data).ok_or(seed(seq, SeedRejection::ToolUpdateData))?;
-            if envelope.surface_op.is_some() || envelope.source_event_seqs.is_some() {
-                return Err(seed(seq, SeedRejection::NonSurfaceMarker));
-            }
+            non_surface_marker(event)?;
             Ok(fact)
         }
-        _ => Ok(Fact::LogOnly),
+        "assistant/attempt" => {
+            // The coordinate scan proved `turn` and `step` safe counts.
+            if !data["stream"].is_array() {
+                return Err(seed(seq, SeedRejection::Settlement));
+            }
+            Ok(Fact::LogOnly)
+        }
+        _ => {
+            non_surface_marker(event)?;
+            Ok(Fact::LogOnly)
+        }
     }
+}
+
+/// `surfaceOpOf`'s refusal of either marker on a known type that is not
+/// surface-eligible. The codec already refuses both on every such type it
+/// knows, so only its opaque known types can reach this check.
+fn non_surface_marker(event: &V3CodecEvent<'_>) -> Result<(), ReplayRefusal> {
+    let envelope = event.envelope();
+    if envelope.surface_op.is_some() || envelope.source_event_seqs.is_some() {
+        return Err(seed(envelope.seq, SeedRejection::NonSurfaceMarker));
+    }
+    Ok(())
+}
+
+/// Whether `value` holds -0 anywhere. `snapshotJsonValue` refuses -0 and
+/// non-finite numbers in a whole prefix event. The scan refuses a number
+/// outside the `f64` range as a native limit, and `float_roundtrip` parsing
+/// keeps the sign of every zero, including an underflowing spelling such as
+/// `-1e-400`, so for an admitted row this is exactly that refusal. The walk is
+/// iterative, so it is safe at any depth the parser produced.
+fn holds_negative_zero(value: &Value) -> bool {
+    let mut pending = vec![value];
+    while let Some(value) = pending.pop() {
+        match value {
+            Value::Number(number) => {
+                if number
+                    .as_f64()
+                    .is_some_and(|n| n == 0.0 && n.is_sign_negative())
+                {
+                    return true;
+                }
+            }
+            Value::Array(items) => pending.extend(items),
+            Value::Object(fields) => pending.extend(fields.values()),
+            Value::Null | Value::Bool(_) | Value::String(_) => {}
+        }
+    }
+    false
 }
 
 /// `validateToolUpdateData` over a qualified payload, as a fact.
@@ -509,12 +658,13 @@ fn tool_update(seq: u64, data: &Value) -> Option<Fact> {
     })
 }
 
-/// `snapshotJsonValue` refuses -0 and non-finite numbers in every prefix
-/// event, and JavaScript rounds integers beyond 2^53. Admitting only safe
-/// integers covers both conservatively. The walk is iterative, so it is safe
-/// at any depth the caller's parser produced. When one payload holds both an
-/// unqualified number and excess depth, which limit is reported depends on
-/// member order and is not specified; neither claims anything.
+/// A projected payload's numbers reach request JSON, and JavaScript rounds
+/// integers beyond 2^53, so admitting only safe integers keeps them exact;
+/// copies and comparisons recurse, so depth is bounded. The walk is
+/// iterative, so it is safe at any depth the caller's parser produced. When
+/// one payload holds both an unqualified number and excess depth, which limit
+/// is reported depends on member order and is not specified; neither claims
+/// anything.
 fn qualify_payload(data: &Value) -> Result<(), ReplayLimit> {
     let mut pending = vec![(data, 1usize)];
     while let Some((value, depth)) = pending.pop() {
@@ -649,4 +799,88 @@ fn request_header(seq: u64, data: &Value) -> Result<Fact, ReplayRefusal> {
         tools,
         resets: data["reason"] == "series" || data.get("startsSeries").is_some(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{EventRejection, V3Rejection, V3RowRefusal, decode_v3_row};
+
+    const SURFACE_TYPES: [&str; 4] = [
+        "system/message",
+        "user/message",
+        "assistant/message",
+        "tool/result",
+    ];
+    /// The known non-surface types the codec treats as opaque, so their
+    /// markers reach Session construction.
+    const CODEC_OPAQUE: [&str; 6] = [
+        "deliverables/presented",
+        "image/offload",
+        "request/tool-update",
+        "subagent/catalog",
+        "subagent/routing-decision",
+        "workspace/changes",
+    ];
+
+    #[test]
+    fn known_types_equal_the_generated_typescript_list() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../packages/core/session/src/known-event-types.ts"
+        );
+        let source = std::fs::read_to_string(path).expect("read known-event-types.ts");
+        let start = source
+            .find("KNOWN_SESSION_EVENT_TYPES: ReadonlySet<string> = new Set([")
+            .expect("known list");
+        let list = &source[start..start + source[start..].find("])").expect("list end")];
+        let names: Vec<&str> = list
+            .lines()
+            .skip(1)
+            .map(|line| line.trim().trim_end_matches(',').trim_matches('\''))
+            .collect();
+        assert_eq!(names, KNOWN_EVENT_TYPES);
+        assert_eq!(names.len(), 60);
+    }
+
+    #[test]
+    fn the_codec_refuses_markers_on_every_known_type_it_classifies() {
+        let mut opaque = Vec::new();
+        for name in KNOWN_EVENT_TYPES {
+            if SURFACE_TYPES.contains(&name) {
+                continue;
+            }
+            let mut refused = 0;
+            for (key, value) in [
+                ("surfaceOp", serde_json::json!("append")),
+                ("sourceEventSeqs", serde_json::json!([0])),
+            ] {
+                // Raw-row admission needs a header object before the envelope.
+                let data = if name == "request/header" {
+                    serde_json::json!({"header": {}})
+                } else {
+                    serde_json::json!({})
+                };
+                let mut row = serde_json::json!({"type": name, "seq": 1, "time": 0, "data": data});
+                row[key] = value;
+                match decode_v3_row(&row, 1, 8) {
+                    Err(V3RowRefusal::Rejected(V3Rejection::Event {
+                        rejection: EventRejection::UnexpectedFields { keys },
+                        ..
+                    })) => {
+                        assert_eq!(keys, [key], "{name}");
+                        refused += 1;
+                    }
+                    Ok(_) => {}
+                    other => panic!("{name} with {key}: {other:?}"),
+                }
+            }
+            match refused {
+                2 => {}
+                0 => opaque.push(name),
+                _ => panic!("{name}: one marker refused"),
+            }
+        }
+        assert_eq!(opaque, CODEC_OPAQUE);
+    }
 }

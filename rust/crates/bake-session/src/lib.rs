@@ -1,7 +1,8 @@
 //! Development-only Session format primitives: one current-format header
 //! record, one event's `sourceEventSeqs` field, one event row's envelope, one
 //! strict V3 codec row decode, a scan of a plain current-format log, and
-//! request derivation over a closed subset of current-format logs.
+//! request derivation over unseeded, plain current-format logs of known event
+//! types.
 //!
 //! [`read_header_record`] decodes the first physical record of a current
 //! (format 3) Session log into its logical header metadata, or refuses it with
@@ -17,11 +18,11 @@
 //! event. [`scan_log`] frames, parses, and decodes an in-memory plain log as
 //! TypeScript's `scanLog` does, keeping the decoded prefix, the inherited cut,
 //! and the committed byte offset. It does not decompress, so it cannot read a
-//! default Zstd-compressed Session file. [`replay_requests`] rebuilds each
-//! step's model request from such a log, as the TypeScript test helper
-//! `replayRequests` does, including tool history across request headers, and
-//! refuses input outside its subset; its requests are not restored Session
-//! state. None reads a file, restores a Session, or encodes a log. The crate
+//! default Zstd-compressed Session file. [`replay_requests`] rebuilds the model
+//! request before each recorded Assistant settlement in such a log, failed
+//! attempts included, as the TypeScript test helper `replayRequests` does,
+//! including tool history across request headers, and refuses input outside
+//! its subset; its requests are not restored Session state. None reads a file, restores a Session, or encodes a log. The crate
 //! is unstable and unshipped; nothing in the workspace depends on it.
 
 mod envelope;
