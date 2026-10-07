@@ -30,7 +30,7 @@
 //! Agent resume. [`restore_zstd_log`] restores default-format compressed bytes
 //! with a caller-supplied plaintext budget and physical torn-tail metadata.
 //! None reads or writes a file or encodes a log. The crate is
-//! unstable and unshipped; nothing in the workspace depends on it.
+//! unstable and unshipped; only the preview's `session inspect` uses it.
 
 mod envelope;
 mod repair;

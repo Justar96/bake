@@ -4,7 +4,7 @@
 
 Run Bake's native fullscreen composer, edit multiline Unicode drafts, and inspect sample agents while preserving your draft. This is an opt-in preview for the [Bake 0.4 Rust roadmap](../docs/roadmap/rust-0.4/README.md).
 
-The preview shows sample content only. It does not connect to a model, read credentials or the Bake home, write sessions, or start agents. The shipped TypeScript terminal is unchanged and remains the default. This preview does not complete any roadmap scope.
+The preview shows sample content only. It does not connect to a model, read credentials or the Bake home, write sessions, or start agents. A separate diagnostic, [`session inspect`](#inspect-a-session-log), reads one Session log that you name. The shipped TypeScript terminal is unchanged and remains the default. This preview does not complete any roadmap scope.
 
 ## Table of Contents
 
@@ -12,6 +12,7 @@ The preview shows sample content only. It does not connect to a model, read cred
 - [Keys](#keys)
 - [Supported subset](#supported-subset)
 - [Terminal ownership](#terminal-ownership)
+- [Inspect a Session log](#inspect-a-session-log)
 - [Layout of this workspace](#layout-of-this-workspace)
 - [Checks](#checks)
 
@@ -69,18 +70,35 @@ Not implemented: model connection, sessions, real agents, inline (scrollback) mo
 
 On Unix, SIGINT, SIGTERM, and SIGHUP are handled while the preview runs. Raw mode turns the Ctrl+C key into input, so SIGINT comes only from another process. The loop restores the terminal and exits with status 128 plus the signal number: 130, 143, and 129. Input is polled with a 250 ms timeout so pending signals are observed without busy-waiting. After the terminal is restored the handlers are unregistered, but signal-hook does not reinstate the previous disposition, so those signals are ignored in the moment before the process exits. A second signal during restoration does not interrupt it, and SIGKILL or SIGSTOP cannot be handled at all.
 
+## Inspect a Session log
+
+```sh
+cargo run --locked -p bake-cli -- session inspect --max-bytes <N> --max-source-seqs <N> [--] <file>
+```
+
+`session inspect` opens one explicitly named Session log read-only, restores it as the production read path does with the [`bake-session`](#layout-of-this-workspace) reader, and prints one JSON record on standard output. It is a development diagnostic in this preview binary, which stays out of the release archives.
+
+- **Budgets.** Both options are required positive decimal integers no greater than 9007199254740991, each given once, in either order. `--max-bytes` bounds the file's size and, for Zstd, the cumulative decoded plaintext; a plain log's plaintext is its file. `--max-source-seqs` bounds each event's expanded `sourceEventSeqs`.
+- **Names.** Only `session.v3.jsonl` (plain) and `session.v3.jsonl.zstd` (Zstd) are opened, and the name alone selects the decoder. A recognized older generation (`session.jsonl`, `session.vN.jsonl`, with or without `.zstd`) or newer one is refused before the file is opened, as is any name TypeScript does not treat as canonical. Nothing is migrated. The path may hold non-UTF-8 components; `--` must precede a path that starts with `-`.
+- **Reading.** On Unix the file is opened without blocking, so a FIFO is refused rather than waited on. The open file must be a regular file within `--max-bytes`; at most one byte more is read, and the read is refused when the file's size, modification time, or, on Unix, device, inode, or change time differ afterwards. This detects ordinary modification; it is not an atomic snapshot or a lease, and it never retries.
+- **Restored record** (exit 0): `status`, `encoding` (`none` or `zstd`), `formatVersion`, `fileBytes`, the logical `header` (`id`, `createdAt`, `cwd`, `parentSession`, `isSeeded`, `origin`, `delegationDepth`, `agentPreset`, each absent optional value `null`), `storedEventCount`, `committedPlaintextBytes`, `inheritedEventCount`, `torn` (`null`, or the physical `truncateTo` offset, `recoveredFrom`, and `recoveredEventCount` of rows recovered from a torn Zstd frame), `repair` (`closerTypes` of the interrupted-turn closers and `endSeedAppended`), and `projection` (`messageCount`, `hasRequestHeader`, `hasRequestContext`). No message, tool, or request content, and not the path, is printed. JSON control characters, including the terminal escape character, are escaped; other Unicode is printed as UTF-8.
+- **Refused record** (exit 3): the same leading fields and a `refusal` with `kind` (`invalid`, `unsupported`, or `native-limit`, where this preview cannot reproduce the production outcome and claims none), a `message`, and the event record `line` (counted from 1 after the header), event `seq`, and physical byte `offset` where the reader reports them, otherwise `null`.
+- **Other exits.** An unsupported name, an unreadable, oversized, irregular, or changing file prints one diagnostic on standard error with exit status 1. Usage errors exit with status 2. When standard output is closed, the command exits with status 1 and prints nothing.
+
+The command does not check the log's stored identity or select a generation in a Session directory, and it does not truncate, repair, migrate, or resume the Session. It reads no Bake home, configuration, or credentials, and changes no terminal mode. Restoration's [native limits](#layout-of-this-workspace), such as `image/offload`, stay `native-limit` refusals.
+
 ## Layout of this workspace
 
 | Crate | Contents |
 |---|---|
 | `crates/bake-tui` | `editor` (pure draft and wrapping), `app` (preview state and keys), `render` (Ratatui drawing), and the terminal owner |
-| `crates/bake-cli` | The `bake-rs` binary: argument parsing, terminal checks, exit statuses |
-| `crates/bake-session` | Development-only readers for one current-format Session header, one source-reference field, one unadmitted row envelope, one strict V3 codec row, and an in-memory plain (uncompressed) current-format log, request derivation over unseeded logs of known event types, one request per Assistant settlement, and restoration of plain or Zstd-compressed bytes as the production read path restores them, with its interrupted-turn closers, all checked against [shared cases](../conformance/README.md). The Zstd reader takes an explicit cumulative plaintext budget and reports physical torn-tail offsets; it opens no file. Decoded V3 rows are not restored events, derived requests are not restored Session state, and restoration is not Agent resume. The crate writes nothing and has no production consumer |
+| `crates/bake-cli` | The `bake-rs` binary: argument parsing, terminal checks, exit statuses, and the read-only `session inspect` diagnostic |
+| `crates/bake-session` | Development-only readers for one current-format Session header, one source-reference field, one unadmitted row envelope, one strict V3 codec row, and an in-memory plain (uncompressed) current-format log, request derivation over unseeded logs of known event types, one request per Assistant settlement, and restoration of plain or Zstd-compressed bytes as the production read path restores them, with its interrupted-turn closers, all checked against [shared cases](../conformance/README.md). The Zstd reader takes an explicit cumulative plaintext budget and reports physical torn-tail offsets; it opens no file. Decoded V3 rows are not restored events, derived requests are not restored Session state, and restoration is not Agent resume. The crate writes nothing; its only consumer is `session inspect` |
 | `crates/bake-conformance` | A synthetic fixture runner for the [migration comparison harness](../conformance/README.md), plus `bake-eval-fake-arm` for the [native eval fixture adapter](../evals/README.md#native-fixture-adapter); no agent runtime |
 
 Dependencies are pinned exactly in `Cargo.toml` and locked in `Cargo.lock`: Ratatui 0.30.2 with only its `crossterm` feature, Crossterm 0.29.0, unicode-segmentation 1.13.3, unicode-width 0.2.2, and on Unix signal-hook 0.3.18, which Crossterm already uses. `ratatui-crossterm` enables Crossterm's default features; `cargo tree --locked -i crossterm` shows one Crossterm version.
 
-The conformance runner uses Serde 1.0.229 and serde_json 1.0.151 for its separate, versioned test input. `bake-session` uses serde_json alone, with its `preserve_order` feature enabled for the whole workspace. That feature adds indexmap 2.14.2 and keeps parsed object members in input order, which request derivation reads when it compares tool schemas as JavaScript text. The dependency-free `float_roundtrip` feature selects serde_json's correctly rounded decimal parser, closer to `JSON.parse`; the log scan refuses integer parts longer than 768 digits, which that parser can round differently. These dependencies do not connect the preview to a model or session store.
+The conformance runner uses Serde 1.0.229 and serde_json 1.0.151 for its separate, versioned test input. `bake-session` uses serde_json alone, with its `preserve_order` feature enabled for the whole workspace. That feature adds indexmap 2.14.2 and keeps parsed object members in input order, which request derivation reads when it compares tool schemas as JavaScript text. The dependency-free `float_roundtrip` feature selects serde_json's correctly rounded decimal parser, closer to `JSON.parse`; the log scan refuses integer parts longer than 768 digits, which that parser can round differently. These dependencies do not connect the preview to a model or session store. On Unix, `bake-cli` also uses libc 0.2.190, already locked for Crossterm and signal-hook, for the nonblocking open flag.
 
 The Session reader pins `zstd-safe` 8.0.0 and `zstd-sys` 2.1.0 with vendored libzstd 1.5.7. The build requires the C compiler listed above, rejects `ZSTD_SYS_USE_PKG_CONFIG`, and requires the vendored build metadata; it cannot silently select a system decoder. The decoder keeps its default streaming window limit. Its BSD-3-Clause notices must accompany native binary distribution when that shipping path is introduced. The current preview remains excluded from release archives.
 
@@ -94,7 +112,7 @@ cargo test --workspace --locked
 cargo build --workspace --locked
 ```
 
-Unit tests cover grapheme editing (including deletions that join neighboring graphemes), input cleanup, undo bounds, draft limits, wrapping and caret placement, refused submission, read-only inspection, draft restoration after navigation, selection by id, and rendering at 40×12, 80×24, 120×36, and every size up to 12×8 with Ratatui's `TestBackend`. A unit test covers the stream check for each combination of terminal and non-terminal input and output, and `crates/bake-cli/tests/cli.rs` runs the built binary without a terminal to check help, version, argument errors, and the refusal to start. Terminal-mode restoration in a real PTY is checked by the repository's PTY scenarios, not by these tests.
+Unit tests cover grapheme editing (including deletions that join neighboring graphemes), input cleanup, undo bounds, draft limits, wrapping and caret placement, refused submission, read-only inspection, draft restoration after navigation, selection by id, and rendering at 40×12, 80×24, 120×36, and every size up to 12×8 with Ratatui's `TestBackend`. A unit test covers the stream check for each combination of terminal and non-terminal input and output, and `crates/bake-cli/tests/cli.rs` runs the built binary without a terminal to check help, version, argument errors, and the refusal to start. `crates/bake-cli/tests/session_inspect.rs` runs the built `session inspect` against expectations written before it first ran: restored and refused plain and Zstd logs drawn from the shared restoration and Zstd tables, both budget boundaries, checksum and wrong-encoding refusals, name routing before any open, directories, a Unix FIFO, Unicode, non-UTF-8 (Linux), and dash-prefixed paths, control-character escaping, argument errors, and a closed standard output. Each child gets an empty owned home directory that must stay empty, and every input's bytes and modification time must be unchanged. Terminal-mode restoration in a real PTY is checked by the repository's PTY scenarios, not by these tests.
 
 From the repository root, `bun run preflight --only native` runs those Cargo checks and `bun run test:rust:pty` against the built binary. The PTY driver checks composer input, caret and undo preservation through inspection, refused submission, multiline paste, resize, and terminal restoration after Ctrl+C, SIGINT, SIGTERM, and SIGHUP. A Linux process-stop barrier exercises a shrink and grow that reach the application as one resize. That barrier is skipped on macOS; all native PTY scenarios are skipped on Windows until ConPTY coverage is implemented. Cargo checks run on Linux, macOS, and Windows in CI.
 
