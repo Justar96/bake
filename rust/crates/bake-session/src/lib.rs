@@ -1,5 +1,5 @@
 //! Development-only Session format primitives: one current-format header
-//! record and one event's `sourceEventSeqs` field.
+//! record, one event's `sourceEventSeqs` field, and one event row's envelope.
 //!
 //! [`read_header_record`] decodes the first physical record of a current
 //! (format 3) Session log into its logical header metadata, or refuses it with
@@ -8,12 +8,20 @@
 //! Where this crate cannot reproduce the TypeScript outcome, it returns
 //! [`HeaderRefusal::NativeSubset`] and claims no TypeScript class.
 //! [`decode_source_event_seqs`] expands one already parsed field value; it does
-//! not admit the row that carries it. Neither reads a whole log, retains input
-//! bytes, or encodes anything. The crate is unstable and unshipped; nothing in
+//! not admit the row that carries it. [`decode_row_envelope`] decodes one
+//! already parsed row's envelope as the released v2 codec's strict decoder
+//! does, borrowing its payload unvalidated; it is not current-format row
+//! admission. None reads a whole log, retains input bytes, or encodes anything.
+//! The crate is unstable and unshipped; nothing in
 //! the workspace depends on it.
 
+mod envelope;
 mod source_event_seqs;
 
+pub use envelope::{
+    EnvelopeLimit, EnvelopeRefusal, EnvelopeRejection, NumberField, RequiredField,
+    UnadmittedEnvelope, decode_row_envelope,
+};
 pub use source_event_seqs::{
     SourceEventSeqsLimit, SourceEventSeqsRefusal, SourceEventSeqsRejection,
     decode_source_event_seqs,
