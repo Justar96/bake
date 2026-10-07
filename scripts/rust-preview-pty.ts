@@ -72,7 +72,7 @@ class Preview {
   async ready(): Promise<void> {
     await this.wait('Rust preview ready', () => this.terminal.buffer.active.type === 'alternate'
       // The sample session's newest lines and the composer show on the first frame.
-      && this.screen.includes('▎ Run the parser tests') && this.screen.includes('❯ Type a draft')
+      && this.screen.includes('rejects it before splitting.') && this.screen.includes('❯ Type a draft')
       && this.raw.includes('\x1b[?2004h'))
     assert.notDeepEqual(this.modes(), this.initialModes, 'preview did not acquire raw mode')
   }
@@ -192,8 +192,10 @@ await scenario('transcript pages, jumps between prompts, and follows output agai
   await preview.wait('following output', () => preview.screen.includes('PgUp scroll · Ctrl+↑ prompts') && preview.screen.includes('before splitting.'))
   preview.send('\x1b[5~')
   await preview.wait('reading history', () => preview.screen.includes('↓ Latest · Ctrl+End') && !preview.screen.includes('before splitting.'))
-  // One prompt back from the newest lines is the code-mode turn: its program, its tree of calls, and what it returned.
+  // Two prompts back from the newest lines is the code-mode turn: its program, its tree of calls, and what it returned.
   preview.send('\x1b[1;5F\x1b[1;5A')
+  await preview.wait('parser turn at the top', () => /^▎ Run the parser tests/u.test(preview.screen))
+  preview.send('\x1b[1;5A')
   await preview.wait('code-mode block', () => /^▎ Find TODO comments/u.test(preview.screen)
     && /✓ Script {2}Find TODOs +13 calls · 1 failed/u.test(preview.screen)
     && /✗ Read {2}src\/m5\.ts +Permission denied/u.test(preview.screen))

@@ -576,8 +576,11 @@ mod tests {
     fn first_screen_names_the_preview_and_sample_agents() {
         for (w, h) in [(80, 24), (120, 36)] {
             let (rows, cursor) = draw(&mut State::default(), w, h);
-            // The transcript follows the sample session's newest lines.
-            assert!(rows.iter().any(|r| r.starts_with("▎ Run the parser tests")));
+            // The transcript follows the sample session's newest line.
+            assert!(
+                rows.iter()
+                    .any(|r| r.trim_end().ends_with("rejects it before splitting."))
+            );
             assert!(rows.iter().any(|r| r.contains("Agents  2 samples")));
             let prompt = row_index(&rows, "│ ❯ Type a draft");
             assert_eq!(cursor, Position::new(TEXT_X, prompt as u16));
@@ -1054,7 +1057,7 @@ mod tests {
         let (rows, _) = draw(&mut app, 80, 16);
         let hint = row_index(&rows, "PgUp scroll");
         assert!(rows[hint].ends_with("PgUp scroll · Ctrl+↑ prompts"));
-        assert_eq!(rows[hint - 1].trim_end(), "  before splitting.");
+        assert_eq!(rows[hint - 1].trim_end(), "  rejects it before splitting.");
         key(&mut app, Key::PageUp);
         let (rows, _) = draw(&mut app, 80, 16);
         assert!(rows.iter().any(|r| r.starts_with("↓ Latest · Ctrl+End")));

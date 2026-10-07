@@ -129,8 +129,28 @@ pub fn sample_session() -> Vec<Row> {
                 " 1 fail",
             ],
         ),
+        Row::Reasoning("The splitter keeps an unterminated quote as text; it should throw instead.".into()),
+        call(
+            "Edit",
+            "src/parser.ts",
+            CallState::Done,
+            None,
+            &[
+                "   const fields = split(line);",
+                "-  if (quote) fields.push(rest);",
+                "+  if (quote) throw new SyntaxError(\"unterminated quote\");",
+                "   return fields;",
+            ],
+        ),
+        call(
+            "Bash",
+            "bun test tests/parser.test.ts",
+            CallState::Done,
+            Some("exit 0"),
+            &["(pass) rejects an unterminated quote", " 4 pass", " 0 fail"],
+        ),
         Row::Answer(
-            "One test fails: an unterminated quote is accepted. The parser should reject it before splitting."
+            "One test failed because an unterminated quote was accepted. The parser now rejects it before splitting."
                 .into(),
         ),
     ]
@@ -424,6 +444,65 @@ pub fn present(rows: &[Row], index: usize, width: usize, look: Look) -> Vec<Line
     lines
 }
 
+/// What kind of work a tool does. It picks the colour of the tool's name,
+/// whether its argument reads as a path, and how its output is drawn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    /// A shell command.
+    Shell,
+    /// Reading a file.
+    Read,
+    /// Changing a file; its output is a diff.
+    Edit,
+    /// Finding files or text.
+    Search,
+    /// Fetching or searching the web.
+    Web,
+    /// Delegating to a subagent.
+    Agent,
+    /// A code-mode program.
+    Script,
+    Other,
+}
+
+/// The kind of a tool, by its name as the session log or the terminal
+/// labels it.
+pub fn kind(tool: &str) -> Kind {
+    match tool.to_ascii_lowercase().as_str() {
+        "bash" | "sh" | "zsh" | "shell" | "pwsh" | "powershell" => Kind::Shell,
+        "read" | "read_file" | "view" => Kind::Read,
+        "edit" | "write" | "write_file" | "multiedit" | "apply_patch" => Kind::Edit,
+        "grep" | "glob" | "find" | "search" | "ls" => Kind::Search,
+        "fetch" | "web_fetch" | "websearch" | "web_search" => Kind::Web,
+        "agent" | "task" | "spawn" => Kind::Agent,
+        "script" | "run_code" => Kind::Script,
+        _ => Kind::Other,
+    }
+}
+
+impl Kind {
+    /// The tool name's style: bold, in the kind's colour. Each colour is a
+    /// TypeScript palette tone that means nothing else in a call's row.
+    pub fn style(self, tones: Tones) -> Style {
+        let (rgb, ansi) = match self {
+            Self::Shell => ((0xfb, 0xbf, 0x24), Color::Yellow),
+            Self::Read => ((0x60, 0xa5, 0xfa), Color::LightBlue),
+            Self::Edit => ((0xa7, 0x8b, 0xfa), Color::LightMagenta),
+            Self::Search => ((0x7d, 0xd3, 0xfc), Color::LightCyan),
+            Self::Web => ((0x2d, 0xd4, 0xbf), Color::Cyan),
+            Self::Agent => ((0xf4, 0x72, 0xb6), Color::Magenta),
+            Self::Script => ((0xc4, 0xb5, 0xfd), Color::LightMagenta),
+            Self::Other => return Style::new().add_modifier(Modifier::BOLD),
+        };
+        colour(tones, rgb, ansi).add_modifier(Modifier::BOLD)
+    }
+
+    /// Whether the argument is a file path, drawn with its directory dim.
+    fn takes_path(self) -> bool {
+        matches!(self, Self::Read | Self::Edit)
+    }
+}
+
 /// A call state's mark and its colour: a white dot that blinks while the
 /// call runs, a green check when it is done, and a red cross when it failed.
 fn mark_of(state: CallState, look: Look) -> (&'static str, Style) {
@@ -462,6 +541,7 @@ fn head(
     look: Look,
 ) -> (Vec<Line<'static>>, Vec<Span<'static>>) {
     let (mark, mark_style) = mark_of(state, look);
+    let kind = kind(tool);
     let lead_cells: usize = lead.iter().map(Span::width).sum();
     let name = format!("{tool:<width$}", width = TOOL_WIDTH.max(tool.width() + 2));
     let indent = lead_cells + 2 + name.width();
@@ -469,10 +549,18 @@ fn head(
     first.extend([
         Span::styled(mark, mark_style),
         pad(1),
-        Span::styled(name, Style::new().add_modifier(Modifier::BOLD)),
+        Span::styled(name, kind.style(look.tones)),
     ]);
     let mut rest = rest;
     rest.push(pad(indent - lead_cells));
+    // A path that fits reads by its file name: the directory is dim.
+    let fits = argument.width() + indent <= width && !argument.contains(char::is_whitespace);
+    if kind.takes_path() && fits {
+        let split = argument.rfind('/').map_or(0, |i| i + 1);
+        first.push(Span::styled(argument[..split].to_owned(), dim()));
+        first.push(Span::raw(argument[split..].to_owned()));
+        return (vec![Line::from(first)], rest);
+    }
     (
         hang(argument, width, indent, first, rest.clone(), Style::new()),
         rest,
@@ -516,6 +604,39 @@ fn ride(
     }
 }
 
+/// A diff line's colour: green for an added line, red for a removed one, and
+/// the output tone for context.
+fn diff_style(line: &str, look: Look) -> Style {
+    match line.as_bytes().first() {
+        Some(b'+') => colour(look.tones, (0x22, 0xc5, 0x5e), Color::Green),
+        Some(b'-') => red(look),
+        _ => output_tone(look.tones),
+    }
+}
+
+/// An edit's status: lines added in green and removed in red, `+1 -1`,
+/// leaving out a side with none.
+fn diff_counts(output: &[String], look: Look) -> Vec<Span<'static>> {
+    let count = |sign: u8| {
+        output
+            .iter()
+            .filter(|l| l.as_bytes().first() == Some(&sign))
+            .count()
+    };
+    let (added, removed) = (count(b'+'), count(b'-'));
+    let mut spans = Vec::new();
+    if added > 0 {
+        spans.push(Span::styled(format!("+{added}"), diff_style("+", look)));
+    }
+    if removed > 0 {
+        if !spans.is_empty() {
+            spans.push(pad(1));
+        }
+        spans.push(Span::styled(format!("-{removed}"), red(look)));
+    }
+    spans
+}
+
 /// A count of lines: `1 line`, `2 lines`; nothing for none.
 fn line_count(count: usize) -> Option<String> {
     match count {
@@ -525,8 +646,8 @@ fn line_count(count: usize) -> Option<String> {
     }
 }
 
-/// A call as one block: `✓ Bash  argument` with its summary right-aligned,
-/// then its output hung from a gutter.
+/// A call as one block: `✓ Bash  argument` with its status after it, then
+/// its output hung from a gutter; an edit's output is its diff.
 fn present_call(
     tool: &str,
     argument: &str,
@@ -548,11 +669,18 @@ fn present_call(
         width,
         look,
     );
-    // Without a summary of its own, a call with output says how much.
+    let edit = kind(tool) == Kind::Edit;
+    // Without a summary of its own, an edit says what it added and removed,
+    // and any other call with output says how much.
     let counted = output.iter().filter(|line| !line.trim().is_empty()).count();
-    if let Some(summary) = summary.map(str::to_owned).or_else(|| line_count(counted)) {
-        ride(&mut lines, vec![Span::styled(summary, quiet)], under, width);
-    }
+    let status = match summary {
+        Some(summary) => vec![Span::styled(summary.to_owned(), quiet)],
+        None if edit => diff_counts(output, look),
+        None => line_count(counted)
+            .map(|count| vec![Span::styled(count, quiet)])
+            .unwrap_or_default(),
+    };
+    ride(&mut lines, status, under, width);
     let gutter = || {
         vec![
             pad(RAIL + 2),
@@ -561,14 +689,14 @@ fn present_call(
     };
     for item in preview(output) {
         match item {
-            Preview::Line(text) => lines.extend(hang(
-                &text,
-                width,
-                OUTPUT,
-                gutter(),
-                gutter(),
-                output_tone(look.tones),
-            )),
+            Preview::Line(text) => {
+                let style = if edit {
+                    diff_style(&text, look)
+                } else {
+                    output_tone(look.tones)
+                };
+                lines.extend(hang(&text, width, OUTPUT, gutter(), gutter(), style))
+            }
             Preview::More(count) => {
                 let mut spans = gutter();
                 spans.push(Span::styled(
@@ -1250,7 +1378,7 @@ mod tests {
         assert!(t.following());
         let last = text(&t.visible());
         assert_eq!(last.len(), 6);
-        assert_eq!(last[5], "  before splitting.");
+        assert_eq!(last[5], "  rejects it before splitting.");
         assert!(t.more_above() && !t.more_below());
 
         t.scroll_up(t.page());
@@ -1483,5 +1611,88 @@ mod tests {
                 "          make target build"
             ]
         );
+    }
+
+    #[test]
+    fn each_kind_of_tool_has_its_own_colour() {
+        let kinds = [
+            "Bash",
+            "Read",
+            "Edit",
+            "Grep",
+            "Fetch",
+            "Agent",
+            "Script",
+            "mcp_custom",
+        ]
+        .map(kind);
+        assert_eq!(
+            kinds,
+            [
+                Kind::Shell,
+                Kind::Read,
+                Kind::Edit,
+                Kind::Search,
+                Kind::Web,
+                Kind::Agent,
+                Kind::Script,
+                Kind::Other
+            ]
+        );
+        let colours: std::collections::HashSet<_> =
+            kinds.iter().map(|k| k.style(Tones::TrueColor).fg).collect();
+        assert_eq!(colours.len(), kinds.len(), "every kind reads apart");
+        assert_eq!(Kind::Other.style(Tones::TrueColor).fg, None);
+        assert!(kinds.iter().all(|k| k.style(Tones::None).fg.is_none()));
+        assert_eq!(kind("run_code"), Kind::Script);
+    }
+
+    #[test]
+    fn a_path_reads_by_its_file_name_and_an_edit_by_its_diff() {
+        let rows = sample_session();
+        let index = rows
+            .iter()
+            .position(|r| matches!(r, Row::Call { tool, .. } if tool == "Edit"))
+            .unwrap();
+        let look = Look {
+            tones: Tones::TrueColor,
+            ..PLAIN
+        };
+        let lines = present(&rows, index, 80, look);
+        assert_eq!(
+            text(&lines),
+            [
+                "",
+                "  ✓ Edit  src/parser.ts  +1 -1",
+                "    │    const fields = split(line);",
+                "    │ -  if (quote) fields.push(rest);",
+                r#"    │ +  if (quote) throw new SyntaxError("unterminated quote");"#,
+                "    │    return fields;",
+            ]
+        );
+        let style = |line: &Line, content: &str| {
+            line.spans
+                .iter()
+                .find(|s| s.content == content)
+                .map(|s| s.style)
+                .unwrap()
+        };
+        let head = &lines[1];
+        assert_eq!(style(head, "Edit  ").fg, Some(Color::Rgb(0xa7, 0x8b, 0xfa)));
+        assert!(style(head, "src/").add_modifier.contains(Modifier::DIM));
+        assert_eq!(style(head, "parser.ts").fg, None);
+        assert_eq!(style(head, "+1").fg, Some(Color::Rgb(0x22, 0xc5, 0x5e)));
+        assert_eq!(style(head, "-1").fg, Some(Color::Rgb(0xef, 0x44, 0x44)));
+        assert_eq!(
+            lines[3].spans.last().unwrap().style.fg,
+            Some(Color::Rgb(0xef, 0x44, 0x44))
+        );
+        assert_eq!(
+            lines[4].spans.last().unwrap().style.fg,
+            Some(Color::Rgb(0x22, 0xc5, 0x5e))
+        );
+        // A path too long for its row wraps like any argument.
+        let narrow = text(&present(&rows, index, 20, PLAIN));
+        assert_eq!(narrow[1], "  ✓ Edit  src/parser");
     }
 }
