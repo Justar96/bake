@@ -221,7 +221,7 @@ await scenario('sample activity is text that advances on its own, then compacts,
   await preview.wait('elapsed time advances', () => preview.screen.includes('thinking · 1s'))
   assert(!/[\u2800-\u28ff]/u.test(preview.screen), 'the activity drew a spinner glyph')
   preview.send('\x14')
-  await preview.wait('call settles with the turn', () => /^ {2}✓ Bash: bun run build +exit 0$/mu.test(preview.screen))
+  await preview.wait('call settles with the turn', () => /^ {2}✓ Bash: bun run build +exit 0 *$/mu.test(preview.screen))
   await preview.wait('sample compaction', () => preview.screen.includes('Compacting history…  preparing · 0s')
     && preview.screen.includes('Compacting… Enter queues · Esc cancels') && !preview.screen.includes('Esc interrupts'))
   preview.send('\x1b')

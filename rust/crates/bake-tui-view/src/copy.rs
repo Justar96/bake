@@ -61,8 +61,14 @@ pub const AGENTS: &str = "Agents";
 pub const AGENTS_SUMMARY: &str = "samples · none running";
 pub const LIST_SUBTITLE: &str = "Fixed examples · nothing is running";
 pub const INSPECT_READ_ONLY: &str = "Read only · typing never reaches an agent or your draft";
-pub const INSPECT_PARENT: &str = "Your draft is kept unchanged while you inspect.";
-pub const INSPECTING: &str = "Inspecting";
+pub const INSPECT_PARENT: &str = "Kept unchanged while you inspect";
+/// The inspection ledger's labels, and the sample agents' state.
+pub const LEDGER_ID: &str = "Id";
+pub const LEDGER_ROLE: &str = "Role";
+pub const LEDGER_STATE: &str = "State";
+pub const LEDGER_INPUT: &str = "Input";
+pub const LEDGER_DRAFT: &str = "Draft";
+pub const LEDGER_STATE_VALUE: &str = "Sample · not running";
 pub const INSPECT_KEYS: &str = "Tab agents · Esc draft";
 /// The status line's model field while no model is selected, and the dim
 /// label before the context reading.

@@ -19,7 +19,7 @@ use crate::layout::{self, Needs};
 use crate::mode::{self, HINT_MIN_COLUMNS};
 use crate::state::{Focus, Notice, Outcome, SAMPLE_AGENTS, SampleAgent, SampleKind, State, agent};
 use crate::status::{self, Tone};
-use crate::transcript::{self, Look};
+use crate::transcript::{self, Look, TagTone};
 
 /// Cells between the terminal's edges and rows drawn outside the box, so
 /// they align with the box's contents.
@@ -305,11 +305,16 @@ fn bar_left(app: &State) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
             )],
             vec![Span::styled(format!("  {}", copy::HEADER_LIST_HINT), dim())],
         ),
-        Focus::Inspect(_) => (
-            vec![Span::styled(
-                copy::INSPECTING,
-                Style::new().add_modifier(Modifier::BOLD),
-            )],
+        // A breadcrumb, as a catalogue's: where it came from, then where it is.
+        Focus::Inspect(id) => (
+            vec![
+                Span::styled(copy::AGENTS, accent().add_modifier(Modifier::UNDERLINED)),
+                Span::styled(" / ", dim()),
+                Span::styled(
+                    agent(id).map_or(id, |a| a.name),
+                    Style::new().add_modifier(Modifier::BOLD),
+                ),
+            ],
             vec![Span::styled(format!("  {}", copy::INSPECT_KEYS), dim())],
         ),
     }
@@ -418,8 +423,16 @@ fn render_body(app: &mut State, area: Rect, buf: &mut Buffer) {
     let classic = app.frame == FrameStyle::Classic;
     let lines = match app.focus {
         Focus::Composer => return render_transcript(app, area, buf),
-        Focus::AgentList => agent_list(app.selected, width, classic),
-        Focus::Inspect(id) => inspection(agent(id).unwrap_or(&SAMPLE_AGENTS[0]), width),
+        Focus::AgentList => agent_list(app.selected, width, classic, app.tones),
+        Focus::Inspect(id) => inspection(
+            agent(id).unwrap_or(&SAMPLE_AGENTS[0]),
+            width,
+            Look {
+                tones: app.tones,
+                classic,
+                lit: true,
+            },
+        ),
     };
     // Anchored to the body's foot, beside the controls, as the transcript is.
     let skip = lines.len().saturating_sub(usize::from(area.height));
@@ -446,21 +459,20 @@ fn indented(text: &str, width: usize, indent: usize, style: Style) -> Vec<Line<'
         .collect()
 }
 
-/// A name on the left and an id right-aligned, when both fit.
-fn titled(lead: Vec<Span<'static>>, id: &str, width: usize) -> Line<'static> {
+/// `lead`, then an id as a blue tag two cells after it, when it fits.
+fn titled(lead: Vec<Span<'static>>, id: &str, width: usize, tones: Tones) -> Line<'static> {
     let mut line = Line::from(lead);
-    let used = line.width();
-    if used + 2 + id.width() <= width {
-        line.spans
-            .push(Span::raw(" ".repeat(width - used - id.width())));
-        line.spans.push(Span::styled(id.to_owned(), dim()));
+    let tag = transcript::tag(id, TagTone::Blue, tones);
+    if line.width() + 2 + tag.width() <= width {
+        line.spans.push(Span::raw("  "));
+        line.spans.push(tag);
     }
     line
 }
 
-/// The agents as cards: a marker on the selected one, its name and id, and
-/// the first line of what it does under it.
-fn agent_list(selected: &str, width: usize, classic: bool) -> Vec<Line<'static>> {
+/// The agents as cards: a marker on the selected one, its name and id tag,
+/// and the first line of what it does under it.
+fn agent_list(selected: &str, width: usize, classic: bool, tones: Tones) -> Vec<Line<'static>> {
     let marker = if classic { ">" } else { "▸" };
     let mut lines = indented(copy::LIST_SUBTITLE, width, INSET.into(), dim());
     for agent in SAMPLE_AGENTS {
@@ -474,7 +486,12 @@ fn agent_list(selected: &str, width: usize, classic: bool) -> Vec<Line<'static>>
             (Span::raw("  "), Span::styled(agent.name, Style::new()))
         };
         lines.push(Line::default());
-        lines.push(titled(vec![Span::raw("  "), mark, name], agent.id, width));
+        lines.push(titled(
+            vec![Span::raw("  "), mark, name],
+            agent.id,
+            width,
+            tones,
+        ));
         let about = agent.detail.first().copied().unwrap_or_default();
         lines.extend(indented(
             about,
@@ -486,29 +503,65 @@ fn agent_list(selected: &str, width: usize, classic: bool) -> Vec<Line<'static>>
     lines
 }
 
-/// One agent, read only: its name and id, the read-only line, what it does,
-/// and that the draft is kept.
-fn inspection(agent: &SampleAgent, width: usize) -> Vec<Line<'static>> {
-    let mut lines = vec![titled(
-        vec![
+/// Cells an inspection ledger's label column takes, its gap included.
+const LEDGER_LABEL: usize = 8;
+
+/// One agent, read only, as a ledger: its name, a dotted rule, then a label
+/// and a value per row, the value wrapped under itself.
+fn inspection(agent: &SampleAgent, width: usize, look: Look) -> Vec<Line<'static>> {
+    let mut lines = vec![
+        Line::from(vec![
             Span::raw("  "),
             Span::styled(agent.name, accent().add_modifier(Modifier::BOLD)),
-        ],
-        agent.id,
-        width,
-    )];
-    lines.extend(indented(
+        ]),
+        transcript::rule(width, look),
+    ];
+    let indent = usize::from(INSET) + LEDGER_LABEL;
+    let labelled = |label: &str, cells: usize, value: Vec<Span<'static>>| {
+        let mut spans = vec![
+            Span::raw("  "),
+            Span::styled(format!("{label:<cells$}"), dim()),
+        ];
+        spans.extend(value);
+        Line::from(spans)
+    };
+    let row = |label: &str, value| labelled(label, LEDGER_LABEL, value);
+    // A tag's padding takes the cell before its column, so its text lines
+    // up with the other values.
+    lines.push(labelled(
+        copy::LEDGER_ID,
+        LEDGER_LABEL - 1,
+        vec![transcript::tag(agent.id, TagTone::Blue, look.tones)],
+    ));
+    let text = |label: &str, value: &str, style: Style| -> Vec<Line<'static>> {
+        transcript::wrap(value, width.saturating_sub(indent))
+            .into_iter()
+            .enumerate()
+            .map(|(i, part)| {
+                let value = vec![Span::styled(part, style)];
+                if i == 0 {
+                    row(label, value)
+                } else {
+                    let mut spans = vec![Span::raw(" ".repeat(indent))];
+                    spans.extend(value);
+                    Line::from(spans)
+                }
+            })
+            .collect()
+    };
+    let about = agent.detail.first().copied().unwrap_or_default();
+    lines.extend(text(copy::LEDGER_ROLE, about, Style::new()));
+    lines.extend(text(
+        copy::LEDGER_STATE,
+        copy::LEDGER_STATE_VALUE,
+        Style::new(),
+    ));
+    lines.extend(text(
+        copy::LEDGER_INPUT,
         copy::INSPECT_READ_ONLY,
-        width,
-        2,
         Style::new().fg(Color::Yellow),
     ));
-    lines.push(Line::default());
-    for detail in agent.detail {
-        lines.extend(indented(detail, width, 2, Style::new()));
-    }
-    lines.push(Line::default());
-    lines.extend(indented(copy::INSPECT_PARENT, width, 2, dim()));
+    lines.extend(text(copy::LEDGER_DRAFT, copy::INSPECT_PARENT, dim()));
     lines
 }
 
@@ -731,13 +784,31 @@ mod tests {
         terminal.draw(|f| render(&mut app, f)).unwrap();
         assert!(!terminal.backend().cursor_visible());
         let (rows, _) = draw(&mut app, 80, 24);
+        // The bar is a breadcrumb back to the list.
         assert!(
             rows.iter()
-                .any(|r| r.starts_with("  Inspecting  Tab agents · Esc draft"))
+                .any(|r| r.starts_with("  Agents / Sample explorer  Tab agents · Esc draft"))
         );
-        let name = row_index(&rows, "Sample explorer");
-        assert!(rows[name].trim_end().ends_with("sample-explorer"));
-        assert!(rows[name + 1].starts_with("  Read only · typing never reaches"));
+        // The body is a ledger under the agent's name and a dotted rule.
+        let name = rows
+            .iter()
+            .position(|r| r.trim_end() == "  Sample explorer")
+            .unwrap();
+        assert!(rows[name + 1].starts_with("  ┄┄┄"));
+        let ledger: Vec<&str> = rows[name + 2..name + 7]
+            .iter()
+            .map(|r| r.trim_end())
+            .collect();
+        assert_eq!(
+            ledger,
+            [
+                "  Id      sample-explorer",
+                "  Role    Example of a child that would read files for its parent.",
+                "  State   Sample · not running",
+                "  Input   Read only · typing never reaches an agent or your draft",
+                "  Draft   Kept unchanged while you inspect",
+            ]
+        );
         assert!(rows.iter().any(|r| r.contains("❯ draft")));
         assert!(
             rows.iter()
@@ -840,7 +911,7 @@ mod tests {
         let at = |needle| row_index(&rows, needle);
         assert_eq!(
             rows[at("Sample reviewer")].trim_end(),
-            format!("  ▸ Sample reviewer{}sample-reviewer", " ".repeat(26))
+            "  ▸ Sample reviewer   sample-reviewer"
         );
         assert!(rows[at("Sample explorer")].starts_with("    Sample explorer"));
         // Each card says what the agent does; a blank separates the cards.

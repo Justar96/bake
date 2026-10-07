@@ -200,10 +200,117 @@ fn sample_script() -> Row {
     }
 }
 
-/// Whether a blank row opens `row`, given the row before it: every row but
-/// the first opens with one, so each call's box stands apart from the next.
-fn opens_section(previous: Option<&Row>, _row: &Row) -> bool {
-    previous.is_some()
+/// Rows that open `row`, given the row before it: none for the first row, a
+/// dotted rule and a blank before a user's turn, and a blank before any
+/// other row, so each call's box stands apart from the next.
+fn opening(previous: Option<&Row>, row: &Row, width: usize, look: Look) -> Vec<Line<'static>> {
+    match (previous, row) {
+        (None, _) => Vec::new(),
+        (Some(_), Row::User(_)) => vec![rule(width, look), Line::default()],
+        (Some(_), _) => vec![Line::default()],
+    }
+}
+
+/// A dim dotted rule across the transcript, inside its rail on both sides,
+/// as a printed catalogue rules off a section.
+pub fn rule(width: usize, look: Look) -> Line<'static> {
+    let cells = width.saturating_sub(2 * RAIL);
+    Line::from(vec![
+        pad(RAIL),
+        Span::styled(look.marks().rule.repeat(cells), dim()),
+    ])
+}
+
+/// The tint of a [`tag`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TagTone {
+    Yellow,
+    Pink,
+    Blue,
+    Green,
+    Red,
+}
+
+/// A short code set off as a tag, as a catalogue prints a stock number: the
+/// text with a cell of padding on each side, light on a dark tint of its
+/// tone. Sixteen colours draw the text in the tone without a tint, and
+/// `NO_COLOR` draws it plain; the padding keeps its width in every case.
+pub fn tag(text: &str, tone: TagTone, tones: Tones) -> Span<'static> {
+    let ((fg, bg), ansi) = match tone {
+        TagTone::Yellow => (((0xfd, 0xe6, 0x8a), (0x3a, 0x34, 0x16)), Color::Yellow),
+        TagTone::Pink => (((0xf9, 0xa8, 0xd4), (0x3b, 0x1f, 0x33)), Color::Magenta),
+        TagTone::Blue => (((0x93, 0xc5, 0xfd), (0x1c, 0x2b, 0x44)), Color::Blue),
+        TagTone::Green => (((0x86, 0xef, 0xac), (0x17, 0x33, 0x22)), Color::Green),
+        TagTone::Red => (((0xfc, 0xa5, 0xa5), (0x3f, 0x1d, 0x22)), Color::Red),
+    };
+    let style = match tones {
+        Tones::TrueColor => Style::new()
+            .fg(Color::Rgb(fg.0, fg.1, fg.2))
+            .bg(Color::Rgb(bg.0, bg.1, bg.2)),
+        Tones::Ansi => Style::new().fg(ansi),
+        Tones::None => Style::new(),
+    };
+    Span::styled(format!(" {text} "), style)
+}
+
+/// A call's status as drawn: an exit code or an interruption as a tag, green
+/// for success and red or yellow otherwise, and any other status as text.
+fn status_spans(summary: &str, quiet: Style, look: Look) -> Vec<Span<'static>> {
+    let tone = match summary.strip_prefix("exit ") {
+        Some("0") => Some(TagTone::Green),
+        Some(code) if code.parse::<i32>().is_ok() => Some(TagTone::Red),
+        _ if summary == copy::INTERRUPTED_NOTE => Some(TagTone::Yellow),
+        _ => None,
+    };
+    match tone {
+        Some(tone) => vec![tag(summary, tone, look.tones)],
+        None => vec![Span::styled(summary.to_owned(), quiet)],
+    }
+}
+
+/// The palette the transcript draws with, as a strip of swatches: the hues,
+/// then the greys. A catalogue prints its inks the same way.
+const SWATCHES: &[(u8, u8, u8, Color)] = &[
+    (0xef, 0x44, 0x44, Color::Red),
+    (0xf9, 0x73, 0x16, Color::LightRed),
+    (0xfb, 0xbf, 0x24, Color::Yellow),
+    (0x22, 0xc5, 0x5e, Color::Green),
+    (0x2d, 0xd4, 0xbf, Color::Cyan),
+    (0x7d, 0xd3, 0xfc, Color::LightCyan),
+    (0x60, 0xa5, 0xfa, Color::Blue),
+    (0xa7, 0x8b, 0xfa, Color::LightMagenta),
+    (0xf4, 0x72, 0xb6, Color::Magenta),
+];
+const GREYS: &[(u8, u8, u8, Color)] = &[
+    (0xe5, 0xe7, 0xeb, Color::White),
+    (0xd1, 0xd5, 0xdb, Color::Gray),
+    (0x9c, 0xa3, 0xaf, Color::Gray),
+    (0x6b, 0x72, 0x80, Color::DarkGray),
+    (0x4b, 0x55, 0x63, Color::DarkGray),
+    (0x37, 0x41, 0x51, Color::DarkGray),
+];
+/// Cells each swatch takes.
+const SWATCH: usize = 2;
+
+/// The swatch strip, or nothing where it cannot be drawn faithfully: under
+/// `NO_COLOR`, and with the classic frame, whose terminals may draw a block
+/// glyph at a width other than the one measured.
+fn swatches(look: Look) -> Vec<Span<'static>> {
+    if look.tones == Tones::None || look.classic {
+        return Vec::new();
+    }
+    let swatch = |&(r, g, b, ansi): &(u8, u8, u8, Color)| {
+        let colour = if look.tones == Tones::TrueColor {
+            Color::Rgb(r, g, b)
+        } else {
+            ansi
+        };
+        Span::styled("█".repeat(SWATCH), Style::new().fg(colour))
+    };
+    let mut spans: Vec<Span<'static>> = SWATCHES.iter().map(swatch).collect();
+    spans.push(pad(1));
+    spans.extend(GREYS.iter().map(swatch));
+    spans
 }
 
 /// Whether calls are drawn in boxes: on a truecolor terminal.
@@ -295,6 +402,8 @@ pub struct Marks {
     pub stem: &'static str,
     /// Before what a script returned.
     pub result: &'static str,
+    /// The dotted rule that opens a user's turn.
+    pub rule: &'static str,
 }
 
 pub const ROUND_MARKS: Marks = Marks {
@@ -308,6 +417,7 @@ pub const ROUND_MARKS: Marks = Marks {
     corner: "└",
     stem: "│",
     result: "→",
+    rule: "┄",
 };
 
 pub const CLASSIC_MARKS: Marks = Marks {
@@ -321,6 +431,7 @@ pub const CLASSIC_MARKS: Marks = Marks {
     corner: "`",
     stem: "|",
     result: ">",
+    rule: "-",
 };
 
 /// How the transcript is drawn: its colours, its marks, and whether a
@@ -508,9 +619,12 @@ pub fn present(rows: &[Row], index: usize, width: usize, look: Look) -> Vec<Line
     let row = &rows[index];
     let marks = look.marks();
     let mut lines = Vec::new();
-    if opens_section(index.checked_sub(1).map(|i| &rows[i]), row) {
-        lines.push(Line::default());
-    }
+    lines.extend(opening(
+        index.checked_sub(1).map(|i| &rows[i]),
+        row,
+        width,
+        look,
+    ));
     let rail = || vec![pad(RAIL)];
     // Inside a box, a call's text keeps clear of the box's right edge.
     let inner = if boxes(look) {
@@ -520,10 +634,18 @@ pub fn present(rows: &[Row], index: usize, width: usize, look: Look) -> Vec<Line
     };
     match row {
         Row::Welcome => {
-            lines.push(Line::from(vec![
+            let mut title = vec![
                 pad(RAIL),
                 Span::styled(copy::TITLE, accent(look.tones).add_modifier(Modifier::BOLD)),
-            ]));
+            ];
+            // The palette beside the title, when it fits whole.
+            let strip = swatches(look);
+            let cells: usize = strip.iter().map(Span::width).sum();
+            if cells > 0 && RAIL + copy::TITLE.width() + 2 + cells <= width {
+                title.push(pad(2));
+                title.extend(strip);
+            }
+            lines.push(Line::from(title));
             for paragraph in copy::INTRO.iter().filter(|p| !p.is_empty()) {
                 lines.extend(hang(paragraph, width, RAIL, rail(), rail(), dim()));
             }
@@ -888,7 +1010,7 @@ fn present_call(
     // and any other call with output says how much.
     let counted = output.iter().filter(|line| !line.trim().is_empty()).count();
     let status = match summary {
-        Some(summary) => vec![Span::styled(summary.to_owned(), quiet)],
+        Some(summary) => status_spans(summary, quiet, look),
         None if edit => diff_counts(output, look),
         None => line_count(counted)
             .map(|count| vec![Span::styled(count, quiet)])
@@ -1386,10 +1508,13 @@ impl Transcript {
 
     /// The line of a user row that holds its first row, past its opening blank.
     fn prompt_line(&self, index: usize) -> usize {
-        usize::from(opens_section(
+        opening(
             index.checked_sub(1).map(|i| &self.rows[i]),
             &self.rows[index],
-        ))
+            self.width,
+            self.look,
+        )
+        .len()
     }
 
     /// Brings the previous user prompt to the top; past the first, the start.
@@ -1534,7 +1659,7 @@ mod tests {
             .unwrap();
         let lines = text(&present(&rows, index, 60, PLAIN));
         assert_eq!(lines[0], "");
-        assert_eq!(lines[1], "  ✗ Bash: bun test tests/parser.test.ts  exit 1");
+        assert_eq!(lines[1], "  ✗ Bash: bun test tests/parser.test.ts   exit 1");
         assert_eq!(
             lines[2..],
             [
@@ -2133,5 +2258,86 @@ mod tests {
         assert_eq!(fg_of(&lines, "quoted"), lime);
         assert_eq!(fg_of(&lines, "string\""), lime);
         assert_eq!(fg_of(&lines, "echo"), Some(Color::Rgb(0x7d, 0xd3, 0xfc)));
+    }
+
+    #[test]
+    fn a_dotted_rule_opens_each_turn_after_the_first_row() {
+        let rows = sample_session();
+        let all: Vec<String> = (0..rows.len())
+            .flat_map(|i| text(&present(&rows, i, 40, PLAIN)))
+            .collect();
+        let user = all
+            .iter()
+            .position(|l| l.starts_with("▎ Find where"))
+            .unwrap();
+        assert_eq!(all[user - 2], format!("  {}", "┄".repeat(36)));
+        assert_eq!(all[user - 1], "");
+        assert_eq!(
+            all.iter().filter(|l| l.contains('┄')).count(),
+            3,
+            "one per turn"
+        );
+        let classic = Look {
+            classic: true,
+            ..PLAIN
+        };
+        assert_eq!(rule(10, classic).to_string(), "  ------");
+    }
+
+    #[test]
+    fn exit_codes_and_interruptions_read_as_tags() {
+        let look = Look {
+            tones: Tones::TrueColor,
+            ..PLAIN
+        };
+        let quiet = dim();
+        let one = |summary| status_spans(summary, quiet, look);
+        let bg = |spans: Vec<Span<'static>>| spans[0].style.bg;
+        assert_eq!(one("exit 0")[0].content, " exit 0 ");
+        assert_eq!(bg(one("exit 0")), Some(Color::Rgb(0x17, 0x33, 0x22)));
+        assert_eq!(bg(one("exit 127")), Some(Color::Rgb(0x3f, 0x1d, 0x22)));
+        assert_eq!(bg(one("interrupted")), Some(Color::Rgb(0x3a, 0x34, 0x16)));
+        // Anything else stays text.
+        assert_eq!(one("412 lines")[0].content, "412 lines");
+        assert_eq!(bg(one("exit code")), None);
+        // The tag keeps its padding, and its width, without colour.
+        let plain = tag("exit 1", TagTone::Red, Tones::None);
+        assert_eq!(
+            (plain.content.as_ref(), plain.style),
+            (" exit 1 ", Style::new())
+        );
+        assert_eq!(
+            tag("x", TagTone::Blue, Tones::Ansi).style.fg,
+            Some(Color::Blue)
+        );
+    }
+
+    #[test]
+    fn the_welcome_title_carries_the_palette_when_it_fits() {
+        let rows = sample_session();
+        let look = Look {
+            tones: Tones::TrueColor,
+            ..PLAIN
+        };
+        let title = |width, look| text(&present(&rows, 0, width, look))[0].clone();
+        let strip = format!(
+            "{} {}",
+            "█".repeat(2 * SWATCHES.len()),
+            "█".repeat(2 * GREYS.len())
+        );
+        assert_eq!(title(80, look), format!("  Bake · Rust preview  {strip}"));
+        // Too narrow, without colour, or with the classic frame: the title alone.
+        assert_eq!(title(40, look), "  Bake · Rust preview");
+        assert_eq!(title(80, PLAIN), "  Bake · Rust preview");
+        assert_eq!(
+            title(
+                80,
+                Look {
+                    classic: true,
+                    ..look
+                }
+            ),
+            "  Bake · Rust preview"
+        );
     }
 }
