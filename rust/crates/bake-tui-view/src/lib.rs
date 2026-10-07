@@ -17,4 +17,5 @@ pub mod mode;
 pub mod render;
 pub mod state;
 pub mod status;
+pub mod syntax;
 pub mod transcript;

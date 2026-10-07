@@ -17,6 +17,7 @@ Status: proposed. The [Rust preview](../../../rust/README.md) implements the com
 - [Layout planner](#layout-planner)
 - [Transcript viewport](#transcript-viewport)
 - [Code mode](#code-mode)
+- [Syntax colour](#syntax-colour)
 - [Architecture](#architecture)
 - [Preview status](#preview-status)
 - [Delivery slices](#delivery-slices)
@@ -278,7 +279,30 @@ A `run_code` call, a program the model writes in TypeScript and runs in the conf
 - **Result.** What the program returned, after `→`, previewed like any output, and red when the script failed.
 - **Classic frame.** `|` and `` ` `` draw the tree and `>` the result.
 
-The preview draws one finished sample script. These remain: a running script's live window, which keeps the head and the newest calls when the live region is short (the TypeScript `fittedAction`), syntax colour for the source and for shell commands, approvals raised by a script's calls, and the session log as the source of the calls.
+The preview draws one finished sample script. These remain: a running script's live window, which keeps the head and the newest calls when the live region is short (the TypeScript `fittedAction`), approvals raised by a script's calls, and the session log as the source of the calls.
+
+## Syntax colour
+
+Colour marks code, so it is used only where the transcript shows code in a known language, and every other row stays in the output tone. A lexer splits each line into tokens without changing a byte, so colour cannot change a cell width or a wrap; a token a wrap splits keeps its colour on every row.
+
+| Where | Language | Notes |
+|---|---|---|
+| A code-mode script's source | TypeScript | Lexed in order across every line, so a block comment or template string that opens on a folded line still colours the lines shown after it |
+| What a script returned | TypeScript | A JavaScript value; a failed script's error stays red |
+| A shell call's command | Shell | The program, its flags, strings, variables, and operators |
+| An edit's diff | From the file's extension | TypeScript and JavaScript, Rust, or shell; any other file is plain |
+| Program output, answers, reasoning | none | Not code in a known language |
+
+| Token | Colour | Sixteen colours |
+|---|---|---|
+| Keyword, shell operator | violet `#c4b5fd` | magenta |
+| String | lime `#bef264` | green |
+| Number, constant (`true`, `null`), shell variable | orange `#fdba74` | yellow |
+| Called name, shell program | sky `#7dd3fc` | cyan |
+| Comment | dim italic | dim italic |
+| Shell flag | dim | dim |
+
+Under `NO_COLOR` only the dim and italic remain. In a call's box, a diff line's sign keeps its green or red, a removed line's code is dim, and an added or removed row is tinted green `#213a2c` or red `#3d2529` between the box's text margins, so the box's own grey frames it. Without a box there is no tint to tell the rows apart, so a diff line keeps its whole-line green or red and no syntax colour. These lexers are deliberately small; a grammar-based highlighter for more languages waits on a dependency decision.
 
 ## Architecture
 

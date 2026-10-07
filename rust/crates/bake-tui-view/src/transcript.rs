@@ -12,6 +12,7 @@
 //! measures from the newest row up; reading, from its anchor down. Neither
 //! measures the whole history.
 
+use std::ops::Range;
 use std::time::Duration;
 
 use ratatui_core::style::{Color, Modifier, Style};
@@ -21,6 +22,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::activity::Tones;
 use crate::copy;
 use crate::editor;
+use crate::syntax::{self, Carry, Lang};
 
 /// Column a user's words, reasoning, answers, and call marks start at.
 pub const RAIL: usize = 2;
@@ -400,6 +402,85 @@ fn hang(
         .collect()
 }
 
+/// `text` with each tab turned into the spaces to its next stop, so the
+/// lexer's byte ranges and the drawn cells agree.
+fn expand_tabs(text: &str) -> String {
+    if !text.contains('\t') {
+        return text.to_owned();
+    }
+    let mut out = String::with_capacity(text.len() + editor::TAB_WIDTH);
+    let mut column = 0;
+    for c in text.chars() {
+        if c == '\t' {
+            let spaces = editor::TAB_WIDTH - column % editor::TAB_WIDTH;
+            out.extend(std::iter::repeat_n(' ', spaces));
+            column += spaces;
+        } else {
+            out.push(c);
+            column += c.to_string().width();
+        }
+    }
+    out
+}
+
+/// The styled runs of one line of code in `lang`, or none for plain text.
+fn code_runs(
+    line: &str,
+    lang: Option<Lang>,
+    carry: &mut Carry,
+    tones: Tones,
+) -> Vec<(Range<usize>, Style)> {
+    let Some(lang) = lang else {
+        return Vec::new();
+    };
+    syntax::tokens(line, lang, carry)
+        .into_iter()
+        .map(|(range, token)| (range, syntax::style(token, tones)))
+        .collect()
+}
+
+/// [`hang`] for text with styled runs: wraps `text` the same way, and each
+/// row keeps the style its bytes have, so a token split by a wrap keeps its
+/// colour on both rows. Bytes no run covers take `base`; a run's style is
+/// laid over `base`. `text` must hold no tabs.
+fn hang_runs(
+    text: &str,
+    runs: &[(Range<usize>, Style)],
+    base: Style,
+    width: usize,
+    indent: usize,
+    first: Vec<Span<'static>>,
+    rest: Vec<Span<'static>>,
+) -> Vec<Line<'static>> {
+    let room = width.saturating_sub(indent).max(1);
+    let layout = editor::layout(text, 0, room + 1);
+    layout
+        .rows
+        .iter()
+        .enumerate()
+        .map(|(i, row)| {
+            let mut spans = if i == 0 { first.clone() } else { rest.clone() };
+            let end = row.start + text[row.start..row.end].trim_end().len();
+            let mut at = row.start;
+            for (range, style) in runs {
+                let (from, to) = (range.start.max(at), range.end.min(end));
+                if from >= to {
+                    continue;
+                }
+                if at < from {
+                    spans.push(Span::styled(text[at..from].to_owned(), base));
+                }
+                spans.push(Span::styled(text[from..to].to_owned(), base.patch(*style)));
+                at = to;
+            }
+            if at < end {
+                spans.push(Span::styled(text[at..end].to_owned(), base));
+            }
+            Line::from(spans)
+        })
+        .collect()
+}
+
 fn pad(cells: usize) -> Span<'static> {
     Span::raw(" ".repeat(cells))
 }
@@ -617,8 +698,20 @@ fn head(
         first.push(Span::raw(argument[split..].to_owned()));
         return (vec![Line::from(first)], rest);
     }
+    // A shell command reads as code: its program, flags, and strings.
+    let argument = expand_tabs(argument);
+    let lang = (kind == Kind::Shell).then_some(Lang::Shell);
+    let runs = code_runs(&argument, lang, &mut Carry::default(), look.tones);
     (
-        hang(argument, width, indent, first, rest.clone(), Style::new()),
+        hang_runs(
+            &argument,
+            &runs,
+            Style::new(),
+            width,
+            indent,
+            first,
+            rest.clone(),
+        ),
         rest,
     )
 }
@@ -658,6 +751,71 @@ fn ride(
             only.style,
         ));
     }
+}
+
+/// The background of an added or removed diff line inside a call's box: a
+/// green or red a step off the box's grey.
+fn diff_tint(sign: u8) -> Option<Color> {
+    match sign {
+        b'+' => Some(Color::Rgb(0x21, 0x3a, 0x2c)),
+        b'-' => Some(Color::Rgb(0x3d, 0x25, 0x29)),
+        _ => None,
+    }
+}
+
+/// One line of an edit's diff. In a box, the sign takes the line's colour,
+/// the code its syntax colour (dim on a removed line), and an added or
+/// removed row a green or red tint from the box's left text column to its
+/// right one. Without a box there is no tint to tell the rows apart, so the
+/// whole line takes green or red, as a plain diff does.
+fn diff_line(
+    text: &str,
+    lang: Option<Lang>,
+    carry: &mut Carry,
+    width: usize,
+    lead: Vec<Span<'static>>,
+    look: Look,
+) -> Vec<Line<'static>> {
+    let text = expand_tabs(text);
+    let sign = text.as_bytes().first().copied().unwrap_or(b' ');
+    if !boxes(look) {
+        return hang(
+            &text,
+            width,
+            BODY,
+            lead.clone(),
+            lead,
+            diff_style(&text, look),
+        );
+    }
+    let base = if sign == b'-' {
+        dim()
+    } else {
+        output_tone(look.tones)
+    };
+    let mut runs = vec![(0..usize::from(!text.is_empty()), diff_style(&text, look))];
+    let code = text.get(1..).unwrap_or_default();
+    runs.extend(
+        code_runs(code, lang, carry, look.tones)
+            .into_iter()
+            .map(|(range, style)| (range.start + 1..range.end + 1, style)),
+    );
+    let mut rows = hang_runs(&text, &runs, base, width, BODY, lead.clone(), lead);
+    if let Some(tint) = diff_tint(sign) {
+        for row in &mut rows {
+            for span in row.spans.iter_mut().skip(1) {
+                span.style = span.style.bg(tint);
+            }
+            let used = row.width();
+            if used < width {
+                row.spans.push(Span::styled(
+                    " ".repeat(width - used),
+                    Style::new().bg(tint),
+                ));
+            }
+        }
+    }
+    rows
 }
 
 /// A diff line's colour: green for an added line, red for a removed one, and
@@ -739,16 +897,25 @@ fn present_call(
     ride(&mut lines, status, under, width);
     let glyph = gutter(look);
     let gutter = || vec![pad(RAIL), Span::styled(format!("{glyph} "), quiet)];
+    let lang = if edit {
+        syntax::lang_for_path(argument)
+    } else {
+        None
+    };
+    let mut carry = Carry::default();
     for item in preview(output) {
         match item {
-            Preview::Line(text) => {
-                let style = if edit {
-                    diff_style(&text, look)
-                } else {
-                    output_tone(look.tones)
-                };
-                lines.extend(hang(&text, width, BODY, gutter(), gutter(), style))
+            Preview::Line(text) if edit => {
+                lines.extend(diff_line(&text, lang, &mut carry, width, gutter(), look));
             }
+            Preview::Line(text) => lines.extend(hang(
+                &text,
+                width,
+                BODY,
+                gutter(),
+                gutter(),
+                output_tone(look.tones),
+            )),
             Preview::More(count) => {
                 let mut spans = gutter();
                 spans.push(Span::styled(
@@ -907,12 +1074,26 @@ fn present_script(
         let returned: Vec<String> = result.lines().map(str::to_owned).collect();
         let mark = || vec![pad(RAIL), Span::styled(format!("{} ", marks.result), dim())];
         let mut first = true;
+        // What a script returns is a JavaScript value, so it reads as code;
+        // a failed script's error stays red.
+        let lang = (state != CallState::Failed).then_some(Lang::TypeScript);
+        let mut carry = Carry::default();
         for item in preview(&returned) {
             let lead = if first { mark() } else { vec![pad(BODY)] };
             first = false;
             match item {
                 Preview::Line(text) => {
-                    lines.extend(hang(&text, width, BODY, lead, vec![pad(BODY)], style))
+                    let text = expand_tabs(&text);
+                    let runs = code_runs(&text, lang, &mut carry, look.tones);
+                    lines.extend(hang_runs(
+                        &text,
+                        &runs,
+                        style,
+                        width,
+                        BODY,
+                        lead,
+                        vec![pad(BODY)],
+                    ))
                 }
                 Preview::More(count) => {
                     let mut spans = lead;
@@ -935,21 +1116,30 @@ fn numbered(source: &[String], width: usize, look: Look) -> Vec<Line<'static>> {
     let rule = || vec![pad(RAIL), Span::styled(format!("{} ", gutter(look)), dim())];
     let digits = source.len().to_string().len();
     let indent = BODY + digits + 2;
+    // Lexed in order, every line, so a comment opened on a folded line
+    // still colours the lines after it.
+    let mut carry = Carry::default();
+    let source: Vec<String> = source.iter().map(|line| expand_tabs(line)).collect();
+    let runs: Vec<_> = source
+        .iter()
+        .map(|line| code_runs(line, Some(Lang::TypeScript), &mut carry, look.tones))
+        .collect();
     let mut lines = Vec::new();
     let mut number = 0;
-    for item in preview_all(source) {
+    for item in preview_all(&source) {
         match item {
             Preview::Line(text) => {
                 number += 1;
                 let mut lead = rule();
                 lead.push(Span::styled(format!("{number:>digits$}  "), dim()));
-                lines.extend(hang(
+                lines.extend(hang_runs(
                     &text,
+                    &runs[number - 1],
+                    Style::new(),
                     width,
                     indent,
                     lead,
                     vec![pad(indent)],
-                    Style::new(),
                 ));
             }
             Preview::More(count) => {
@@ -1735,18 +1925,40 @@ mod tests {
         assert_eq!(style(head, "parser.ts").fg, None);
         assert_eq!(style(head, "+1").fg, Some(Color::Rgb(0x22, 0xc5, 0x5e)));
         assert_eq!(style(head, "-1").fg, Some(Color::Rgb(0xef, 0x44, 0x44)));
+        // The diff: the sign in the line's colour, the code in syntax
+        // colour, a removed line dim, and each changed row tinted.
+        let (removed, added) = (&lines[4], &lines[5]);
+        assert_eq!(style(removed, "-").fg, Some(Color::Rgb(0xef, 0x44, 0x44)));
+        assert_eq!(style(added, "+").fg, Some(Color::Rgb(0x22, 0xc5, 0x5e)));
+        assert_eq!(style(added, "throw").fg, Some(Color::Rgb(0xc4, 0xb5, 0xfd)));
         assert_eq!(
-            style(&lines[4], "-  if (quote) fields.push(rest);").fg,
-            Some(Color::Rgb(0xef, 0x44, 0x44))
+            style(added, r#""unterminated quote""#).fg,
+            Some(Color::Rgb(0xbe, 0xf2, 0x64))
         );
-        assert_eq!(
-            style(
-                &lines[5],
-                r#"+  if (quote) throw new SyntaxError("unterminated quote");"#
-            )
-            .fg,
-            Some(Color::Rgb(0x22, 0xc5, 0x5e))
+        let push = style(removed, "push");
+        assert_eq!(push.fg, Some(Color::Rgb(0x7d, 0xd3, 0xfc)));
+        assert!(push.add_modifier.contains(Modifier::DIM));
+        assert_eq!(push.bg, Some(Color::Rgb(0x3d, 0x25, 0x29)));
+        assert_eq!(style(added, "throw").bg, Some(Color::Rgb(0x21, 0x3a, 0x2c)));
+        // The tint runs from the text column to the box's right margin;
+        // the box's own colour frames it on both sides.
+        let box_bg = Some(Color::Rgb(0x25, 0x28, 0x2f));
+        assert_eq!(added.spans[0].style.bg, box_bg);
+        assert_eq!(added.spans.last().unwrap().style.bg, box_bg);
+        assert_eq!(added.width(), 80);
+        // A context line keeps the box's colour, and without a box the whole
+        // line takes green or red.
+        assert_eq!(style(&lines[3], "const").bg, box_bg);
+        let ansi = present(
+            &rows,
+            index,
+            80,
+            Look {
+                tones: Tones::Ansi,
+                ..PLAIN
+            },
         );
+        assert_eq!(ansi[3].spans.last().unwrap().style.fg, Some(Color::Red));
         // A path too long for its row wraps like any argument.
         let narrow = text(&present(&rows, index, 20, PLAIN));
         assert_eq!(narrow[1], "  ✓ Edit: src/parser");
@@ -1782,7 +1994,10 @@ mod tests {
         ] {
             for line in &lines[1..] {
                 assert_eq!(line.width(), 60, "{line}");
-                assert!(line.spans.iter().all(|s| s.style.bg == Some(bg)), "{line}");
+                // Every cell has a background; the box's own frames each row,
+                // and a diff row's tint fills its middle.
+                assert!(line.spans.iter().all(|s| s.style.bg.is_some()), "{line}");
+                assert_eq!(line.spans[0].style.bg, Some(bg), "{line}");
             }
         }
         // Prose is not boxed, and no box is drawn without truecolor.
@@ -1832,5 +2047,91 @@ mod tests {
             ]
         );
         assert!(lines.iter().all(|l| l.width() == 20));
+    }
+
+    /// The foreground colour of the span drawing `content` among `lines`.
+    fn fg_of(lines: &[Line], content: &str) -> Option<Color> {
+        lines
+            .iter()
+            .flat_map(|l| &l.spans)
+            .find(|s| s.content == content)
+            .unwrap_or_else(|| panic!("no span {content:?}"))
+            .style
+            .fg
+    }
+
+    #[test]
+    fn code_is_coloured_where_the_transcript_shows_code() {
+        let rows = sample_session();
+        let look = Look {
+            tones: Tones::TrueColor,
+            ..PLAIN
+        };
+        let all: Vec<Line> = (0..rows.len())
+            .flat_map(|i| present(&rows, i, 84, look))
+            .collect();
+        let (violet, lime, sky) = (
+            Some(Color::Rgb(0xc4, 0xb5, 0xfd)),
+            Some(Color::Rgb(0xbe, 0xf2, 0x64)),
+            Some(Color::Rgb(0x7d, 0xd3, 0xfc)),
+        );
+        // The script's source and what it returned.
+        assert_eq!(fg_of(&all, "await"), violet);
+        assert_eq!(fg_of(&all, "glob"), sky);
+        assert_eq!(fg_of(&all, r#""src/m3.ts""#), lime);
+        // A shell call's command: the program, its flags, its strings.
+        assert_eq!(fg_of(&all, "rg"), sky);
+        assert_eq!(fg_of(&all, "'*.ts'"), lime);
+        // Program output and prose are never coloured as code.
+        let output = all
+            .iter()
+            .find(|l| l.to_string().contains("controller.ts:45"))
+            .unwrap();
+        assert!(
+            output
+                .spans
+                .iter()
+                .all(|s| s.style.fg != sky && s.style.fg != violet)
+        );
+        assert!(
+            all.iter()
+                .any(|l| l.to_string().contains("Two registrations")
+                    && l.spans.iter().all(|s| s.style.fg.is_none()))
+        );
+    }
+
+    #[test]
+    fn a_token_split_by_a_wrap_keeps_its_colour_on_every_row() {
+        let rows = vec![Row::Call {
+            tool: "Bash".into(),
+            argument: r#"echo "a long quoted string""#.into(),
+            state: CallState::Done,
+            summary: None,
+            output: Vec::new(),
+        }];
+        let lines = present(
+            &rows,
+            0,
+            24,
+            Look {
+                tones: Tones::TrueColor,
+                ..PLAIN
+            },
+        );
+        assert_eq!(
+            text(&lines),
+            [
+                "",
+                "  ✓ Bash: echo \"a long",
+                "          quoted",
+                "          string\"",
+                ""
+            ]
+        );
+        let lime = Some(Color::Rgb(0xbe, 0xf2, 0x64));
+        assert_eq!(fg_of(&lines, "\"a long"), lime);
+        assert_eq!(fg_of(&lines, "quoted"), lime);
+        assert_eq!(fg_of(&lines, "string\""), lime);
+        assert_eq!(fg_of(&lines, "echo"), Some(Color::Rgb(0x7d, 0xd3, 0xfc)));
     }
 }
