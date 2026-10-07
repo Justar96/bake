@@ -325,23 +325,24 @@ mod tests {
         present(&[row], 0, 84, look)
             .iter()
             .map(|line| line.spans.iter().map(|s| s.content.as_ref()).collect())
-            .filter(|line: &String| !line.starts_with("  │ ") || line == "  │")
+            .filter(|line: &String| {
+                !line.starts_with("  │ ")
+                    || line.starts_with("  │    ╰")
+                    || line.starts_with("  │      ")
+            })
             .collect()
     }
 
     #[test]
-    fn a_running_script_shows_its_newest_calls_and_counts_those_in_flight() {
+    fn a_running_script_marks_the_line_in_flight_and_meters_its_calls() {
         assert_eq!(
             drawn(at(ms(900))),
             [
-                "  ● Script: Read every manifest, then build  13 calls · 9 running",
-                "  │",
-                "  ├ ⋯ 8 more calls",
-                "  ├ ✗ tools.read  packages/goal/package.json  Permission denied",
-                "  ├ ● tools.read  packages/subagent/package.json",
-                "  ├ ● tools.read  packages/skill/package.json",
-                "  ├ ● tools.read  packages/web/package.json",
-                "  └ ● tools.read  packages/mcp/package.json",
+                "  ● Codemode: Read every manifest, then build  13 calls · 9 running",
+                "  │    ╰ ✓ tools.glob  packages/*/package.json  12 files",
+                "  ▸ 3    paths.map((path) => tools.read({ path }).catch(() => \"\")),",
+                "  │    ╰ ● tools.read ×12  ━╌╌━╌╌╌✗╌╌╌╌  2 done · 9 running · 1 failed",
+                "  │      ✗ packages/goal/package.json  Permission denied",
             ]
         );
     }
@@ -350,20 +351,13 @@ mod tests {
     fn an_interruption_is_not_counted_as_a_failure() {
         let lines = drawn(settle(ms(900), Settle::Interrupted));
         assert_eq!(
-            lines[0],
-            "  ✗ Script: Read every manifest, then build  13 calls · 1 failed   interrupted "
-        );
-        // The failure that was news stays; the stopped calls fold like any.
-        assert!(
-            lines.contains(&"  ├ ⋯ 6 more calls".to_owned()),
-            "{lines:#?}"
-        );
-        assert!(lines.iter().any(|l| l.ends_with("Permission denied")));
-        assert!(
-            lines
-                .last()
-                .unwrap()
-                .ends_with("mcp/package.json  interrupted")
+            lines,
+            [
+                "  ✗ Codemode: Read every manifest, then build  13 calls · 1 failed   interrupted ",
+                "  │    ╰ ✓ tools.glob  packages/*/package.json  12 files",
+                "  │    ╰ ✗ tools.read ×12  ━╳╳━╳╳╳✗╳╳╳╳  2 done · 1 failed · 9 interrupted",
+                "  │      ✗ packages/goal/package.json  Permission denied",
+            ]
         );
     }
 }

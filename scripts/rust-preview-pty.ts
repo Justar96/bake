@@ -194,13 +194,14 @@ await scenario('transcript pages, jumps between prompts, and follows output agai
   await preview.wait('following output', () => preview.screen.includes('PgUp scroll · Ctrl+↑ prompts') && preview.screen.includes('before splitting.'))
   preview.send('\x1b[5~')
   await preview.wait('reading history', () => /↓ \d+ lines below · Ctrl\+End/u.test(preview.screen) && !preview.screen.includes('before splitting.'))
-  // Two prompts back from the newest lines is the code-mode turn: its program, its tree of calls, and what it returned.
+  // Two prompts back from the newest lines is the code-mode turn: its program, its call sites, and what it returned.
   preview.send('\x1b[1;5F\x1b[1;5A')
   await preview.wait('parser turn at the top', () => /^> Run the parser tests/u.test(preview.screen))
   preview.send('\x1b[1;5A')
   await preview.wait('code-mode block', () => /^> Find TODO comments/u.test(preview.screen)
-    && /✓ Script: Find TODOs +13 calls · 1 failed/u.test(preview.screen)
-    && /✗ tools\.read +src\/m5\.ts +Permission denied/u.test(preview.screen))
+    && /✓ Codemode: Find TODOs +13 calls · 1 failed/u.test(preview.screen)
+    && /╰ ✓ tools\.read ×12 .+11 done · 1 failed/u.test(preview.screen)
+    && /✗ src\/m5\.ts +Permission denied/u.test(preview.screen))
   preview.send('\x1b[1;5H')
   await preview.wait('transcript start', () => /^ {2}Bake · Rust preview/mu.test(preview.screen))
   preview.send('\x1b[1;5B')
@@ -249,18 +250,18 @@ await scenario('sample activity is text that advances on its own, then compacts,
   await preview.wait('sample turn', () => /^ {2}\S+… {2}thinking · 0s +no model/mu.test(preview.screen) && preview.screen.includes('Esc interrupts')
     && preview.screen.includes('Enter steers the next step'))
   // The turn runs a code-mode script: its dot blinks on its own, shown and then a blank in place.
-  await preview.wait('running script shown', () => /^ {2}● Script: Read every manifest, then build/mu.test(preview.screen))
-  await preview.wait('running script blinks', () => /^ {4}Script: Read every manifest, then build/mu.test(preview.screen))
-  await preview.wait('running script shown again', () => /^ {2}● Script: Read every manifest, then build/mu.test(preview.screen))
+  await preview.wait('running script shown', () => /^ {2}● Codemode: Read every manifest, then build/mu.test(preview.screen))
+  await preview.wait('running script blinks', () => /^ {4}Codemode: Read every manifest, then build/mu.test(preview.screen))
+  await preview.wait('running script shown again', () => /^ {2}● Codemode: Read every manifest, then build/mu.test(preview.screen))
   // Its calls arrive on the clock, and the build runs last until the turn ends.
-  await preview.wait('script calls arrive', () => /├ ✗ tools\.read +packages\/goal\/package\.json +Permission denied/u.test(preview.screen)
-    && /└ [● ] tools\.bash +bun run build/u.test(preview.screen))
+  await preview.wait('script calls arrive', () => /✗ packages\/goal\/package\.json +Permission denied/u.test(preview.screen)
+    && /╰ [● ] tools\.bash +bun run build/u.test(preview.screen))
   // No key is pressed: the loop's own timer must redraw the elapsed time.
   await preview.wait('elapsed time advances', () => preview.screen.includes('thinking · 1s'))
   assert(!/[\u2800-\u28ff]/u.test(preview.screen), 'the activity drew a spinner glyph')
   preview.send('\x14')
   // The settled block outgrows the screen; its foot shows the build and what the program returned.
-  await preview.wait('script settles with the turn', () => /└ ✓ tools\.bash +bun run build +exit 0/u.test(preview.screen) && /→ \{ manifests: 12, exitCode: 0 \}/u.test(preview.screen))
+  await preview.wait('script settles with the turn', () => /╰ ✓ tools\.bash +bun run build +exit 0/u.test(preview.screen) && /return +\{ manifests: 12, exitCode: 0 \}/u.test(preview.screen))
   await preview.wait('sample compaction', () => preview.screen.includes('Compacting history…  preparing · 0s')
     && preview.screen.includes('Compacting… Enter queues · Esc cancels') && !preview.screen.includes('Esc interrupts'))
   preview.send('\x1b')

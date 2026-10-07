@@ -42,15 +42,22 @@ pub const UNMODIFIED: &str = "unmodified lines";
 /// A call's line count when it has no summary of its own: `1 line`, `2 lines`.
 pub const LINE: &str = "line";
 pub const LINES: &str = "lines";
-/// Code mode: the label `run_code` calls draw under, and the words of its
-/// call count, `13 calls · 1 failed` or `13 calls · 4 running`, and of its
-/// folded calls.
-pub const SCRIPT: &str = "Script";
+/// Code mode: the label `run_code` calls draw under; the words of its call
+/// count, `13 calls · 1 failed` or `13 calls · 4 running`, and of a call
+/// site's tally, `11 done · 1 failed`; and the count of failures a site
+/// leaves unlisted.
+pub const SCRIPT: &str = "Codemode";
 pub const CALL: &str = "call";
 pub const CALLS: &str = "calls";
+pub const DONE: &str = "done";
 pub const FAILED: &str = "failed";
 pub const RUNNING: &str = "running";
-pub const MORE_CALLS: &str = "more calls";
+pub const MORE_FAILED: &str = "more failed";
+/// What a program hands back to the model, named as the program wrote it:
+/// the lines it logged, the value it returned, or how it failed.
+pub const CONSOLE: &str = "console";
+pub const RETURN: &str = "return";
+pub const ERROR: &str = "error";
 /// The transcript's hint row: its keys while following output, and the way
 /// back while reading history.
 pub const HINT_FOLLOWING: &[(&str, &str)] = &[("Wheel/PgUp", "scroll"), ("Ctrl+↑", "prompts")];
