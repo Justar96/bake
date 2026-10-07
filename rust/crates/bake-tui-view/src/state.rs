@@ -66,6 +66,20 @@ pub struct ScrollTrack {
     pub rows: u16,
 }
 
+/// A run of cells on one row that a press acts on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Spot {
+    pub column: u16,
+    pub row: u16,
+    pub width: u16,
+}
+
+impl Spot {
+    fn holds(self, column: u16, row: u16) -> bool {
+        row == self.row && (self.column..self.column + self.width).contains(&column)
+    }
+}
+
 /// Requests the terminal owner performs on the view's behalf.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Effect {
@@ -197,6 +211,8 @@ pub struct State {
     pub wheel: WheelSteps,
     /// The scrollbar as last drawn, for clicks and drags; `None` when hidden.
     pub track: Option<ScrollTrack>,
+    /// The scroll indicator's pill as last drawn; a press on it follows output.
+    pub latest: Option<Spot>,
     /// Whether a press on the scrollbar is being dragged.
     pub(crate) dragging: bool,
 }
@@ -229,6 +245,7 @@ impl State {
             live_call: None,
             wheel: WheelSteps::default(),
             track: None,
+            latest: None,
             dragging: false,
         }
     }
@@ -301,6 +318,15 @@ fn pointer(state: &mut State, mouse: Mouse) {
             Focus::AgentList => step_selection(state, isize::from(direction)),
             Focus::Inspect(_) => {}
         }
+        return;
+    }
+    if mouse.kind == MouseKind::Down
+        && state.focus == Focus::Composer
+        && state
+            .latest
+            .is_some_and(|spot| spot.holds(mouse.column, mouse.row))
+    {
+        state.transcript.follow();
         return;
     }
     let Some(track) = state.track.filter(|_| state.focus == Focus::Composer) else {

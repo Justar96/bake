@@ -18,7 +18,7 @@ use crate::frame::FrameStyle;
 use crate::layout::{self, Needs};
 use crate::mode::{self, HINT_MIN_COLUMNS};
 use crate::state::{
-    Focus, Notice, Outcome, SAMPLE_AGENTS, SampleAgent, SampleKind, ScrollTrack, State, agent,
+    Focus, Notice, Outcome, SAMPLE_AGENTS, SampleAgent, SampleKind, ScrollTrack, Spot, State, agent,
 };
 use crate::status::{self, Tone};
 use crate::transcript::{self, Look, TagTone};
@@ -60,7 +60,7 @@ pub fn render(app: &mut State, frame: &mut Frame) {
         rect
     };
     let body = next(rows.body);
-    next(rows.gap);
+    let gap = next(rows.gap);
     let notice = next(rows.notice);
     let bar = next(rows.bar);
     let rule = next(rows.top_edge);
@@ -77,7 +77,8 @@ pub fn render(app: &mut State, frame: &mut Frame) {
     };
 
     let buf = frame.buffer_mut();
-    render_body(app, body, buf);
+    app.latest = None;
+    render_body(app, body, gap, buf);
     if let Some(kind) = app.notice {
         let text = match kind {
             Notice::NoModel => copy::NO_MODEL,
@@ -361,15 +362,16 @@ fn tone_style(tone: Tone, tones: Tones) -> Style {
     }
 }
 
-/// Rows the body needs before it gives one to the transcript's hint row.
-const HINT_ROW_MIN: u16 = 4;
-
 /// The transcript viewport, with a hint row at its foot when there is room:
 /// right-aligned keys while following output, and the way back to the
 /// newest line, leading the row, while reading history.
-fn render_transcript(app: &mut State, area: Rect, buf: &mut Buffer) {
-    let hint = area.height >= HINT_ROW_MIN;
-    let rows = area.height - u16::from(hint);
+/// The transcript viewport and its scroll indicator. The indicator takes
+/// the gap row just above the controls, so it reads with the bar and the
+/// box rather than over the text. The planner grants the gap before any
+/// viewport row, so a viewport always has one under it.
+fn render_transcript(app: &mut State, area: Rect, gap: Rect, buf: &mut Buffer) {
+    let rows = area.height;
+    let hint = (gap.height > 0).then_some(gap);
     // The last column is the scrollbar's, whether or not it is drawn, so
     // the text never reflows when the history outgrows the viewport.
     let bar = area.width > SCROLLBAR_MIN_WIDTH;
@@ -408,11 +410,18 @@ fn render_transcript(app: &mut State, area: Rect, buf: &mut Buffer) {
                 .set_style(style);
         }
     }
-    let view = &app.transcript;
-    if !hint {
-        return;
+    if let Some(row) = hint {
+        render_scroll_hint(app, Rect::new(row.x, row.y, width, 1), buf);
     }
-    let row = Rect::new(area.x, area.y + rows, width, 1);
+}
+
+/// The scroll indicator. While following output, the keys that scroll,
+/// right-aligned and quiet. While reading, a pill centred under the text:
+/// `↓ 12 lines below · Ctrl+End`, or `↓ New output · …` in yellow once
+/// output arrives below. The pill gives up its key, then its count, before
+/// it would be cut. Pressing it follows output again.
+fn render_scroll_hint(app: &mut State, row: Rect, buf: &mut Buffer) {
+    let view = &app.transcript;
     if view.following() {
         if !view.more_above() {
             return;
@@ -427,27 +436,82 @@ fn render_transcript(app: &mut State, area: Rect, buf: &mut Buffer) {
         }
         let hint = Line::from(spans);
         let cells = hint.width() as u16;
-        if cells <= width {
+        if cells <= row.width {
             line(
                 buf,
-                Rect::new(area.x + width - cells, row.y, cells, 1),
+                Rect::new(row.x + row.width - cells, row.y, cells, 1),
                 hint,
             );
         }
-    } else {
-        // Reading: the way back on the left, how far below on the right.
-        line(buf, row, Line::styled(copy::HINT_LATEST, accent()));
-        let below = view.total().saturating_sub(view.offset() + view.height);
-        let count = Line::styled(format!("{below} {}", copy::LINES_BELOW), dim());
-        let cells = count.width() as u16;
-        if usize::from(cells) + copy::HINT_LATEST.width() + 2 <= usize::from(width) {
-            line(
-                buf,
-                Rect::new(area.x + width - cells, row.y, cells, 1),
-                count,
-            );
-        }
+        return;
     }
+    let below = view.total().saturating_sub(view.offset() + view.height);
+    let fresh = view.new_below();
+    let Some(pill) = scroll_pill(below, fresh, app.tones, usize::from(row.width)) else {
+        return;
+    };
+    let cells = pill.width() as u16;
+    let x = row.x + (row.width - cells) / 2;
+    line(buf, Rect::new(x, row.y, cells, 1), pill);
+    app.latest = Some(Spot {
+        column: x,
+        row: row.y,
+        width: cells,
+    });
+}
+
+/// The reading pill at its widest that fits `width`, padded a cell each side.
+fn scroll_pill(below: usize, fresh: bool, tones: Tones, width: usize) -> Option<Line<'static>> {
+    let (text, key, back) = match tones {
+        Tones::TrueColor if fresh => (
+            Style::new().fg(Color::Rgb(0xfd, 0xe6, 0x8a)),
+            Style::new().fg(Color::Rgb(0xca, 0xb8, 0x6a)),
+            Some(Color::Rgb(0x3a, 0x34, 0x16)),
+        ),
+        Tones::TrueColor => (
+            Style::new().fg(Color::Rgb(0x7d, 0xd3, 0xfc)),
+            Style::new().fg(Color::Rgb(0x9c, 0xa3, 0xaf)),
+            Some(Color::Rgb(0x25, 0x28, 0x2f)),
+        ),
+        Tones::Ansi => (
+            Style::new().fg(if fresh { Color::Yellow } else { Color::Cyan }),
+            dim(),
+            None,
+        ),
+        Tones::None => (Style::new().add_modifier(Modifier::BOLD), dim(), None),
+    };
+    let count = format!("{below} {}", copy::LINES_BELOW);
+    let key_tail = Some(format!(" · {}", copy::LATEST_KEY));
+    // Widest first: the key goes, then the count.
+    let candidates: Vec<(String, Option<String>)> = if fresh {
+        let new = format!("↓ {}", copy::NEW_OUTPUT);
+        vec![
+            (format!("{new} · {count}"), key_tail.clone()),
+            (format!("{new} · {count}"), None),
+            (new.clone(), key_tail),
+            (new, None),
+        ]
+    } else {
+        vec![
+            (format!("↓ {count}"), key_tail),
+            (format!("↓ {count}"), None),
+            (format!("↓ {below}"), None),
+        ]
+    };
+    for (head, tail) in candidates {
+        let cells = 2 + head.width() + tail.as_ref().map_or(0, |t| t.width());
+        if cells > width {
+            continue;
+        }
+        let paint = |style: Style| back.map_or(style, |bg| style.bg(bg));
+        let mut spans = vec![Span::styled(format!(" {head}"), paint(text))];
+        if let Some(tail) = tail {
+            spans.push(Span::styled(tail, paint(key)));
+        }
+        spans.push(Span::styled(" ", paint(text)));
+        return Some(Line::from(spans));
+    }
+    None
 }
 
 /// Columns the transcript needs before it gives one to the scrollbar.
@@ -481,14 +545,14 @@ fn scrollbar_look(
     (glyphs, styles)
 }
 
-fn render_body(app: &mut State, area: Rect, buf: &mut Buffer) {
+fn render_body(app: &mut State, area: Rect, gap: Rect, buf: &mut Buffer) {
     if area.is_empty() {
         return;
     }
     let width = usize::from(area.width);
     let classic = app.frame == FrameStyle::Classic;
     let lines = match app.focus {
-        Focus::Composer => return render_transcript(app, area, buf),
+        Focus::Composer => return render_transcript(app, area, gap, buf),
         Focus::AgentList => agent_list(app.selected, width, classic, app.tones),
         Focus::Inspect(id) => inspection(
             agent(id).unwrap_or(&SAMPLE_AGENTS[0]),
@@ -1201,7 +1265,7 @@ mod tests {
         assert!(rows[hint - 1].starts_with("  rejects it before splitting.     "));
         key(&mut app, Key::PageUp);
         let (rows, _) = draw(&mut app, 80, 16);
-        assert!(rows.iter().any(|r| r.starts_with("↓ Latest · Ctrl+End")));
+        assert!(rows.iter().any(|r| r.contains(" lines below · Ctrl+End")));
         assert!(
             !rows
                 .iter()
@@ -1246,13 +1310,9 @@ mod tests {
         let (rows, _) = draw(&mut app, 80, 24);
         let column = bar(&rows, track);
         assert!(column.starts_with('┃') && column.ends_with('│'), "{column}");
-        let hint = row_index(&rows, "↓ Latest · Ctrl+End");
         let below = app.transcript.total() - app.transcript.height;
-        assert!(
-            rows[hint]
-                .trim_end()
-                .ends_with(&format!("{below} lines below"))
-        );
+        let pill = format!("↓ {below} lines below · Ctrl+End");
+        assert!(rows.iter().any(|r| r.contains(&pill)), "{pill}");
         // The classic frame draws it in ASCII.
         let mut classic = State::new(FrameStyle::Classic, Tones::None);
         let (rows, _) = draw(&mut classic, 80, 24);
@@ -1341,5 +1401,112 @@ mod tests {
         update(&mut app, mouse(MouseKind::Down, 3, track.top, 50));
         assert!(app.transcript.following());
         assert_eq!(app.draft.text(), "keep");
+    }
+
+    fn screen(terminal: &Terminal<TestBackend>) -> Vec<String> {
+        let buffer = terminal.backend().buffer();
+        (0..buffer.area.height)
+            .map(|y| {
+                (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol().to_owned())
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn reading_puts_a_centred_pill_just_above_the_bar() {
+        let mut app = State::default();
+        let (rows, _) = draw(&mut app, 80, 24);
+        let bar = row_index(&rows, "no model");
+        // Following: the scroll keys sit right-aligned on the row above the bar.
+        assert!(
+            rows[bar - 1]
+                .trim_end()
+                .ends_with("Wheel/PgUp scroll · Ctrl+↑ prompts")
+        );
+        key(&mut app, Key::PageUp);
+        let (rows, _) = draw(&mut app, 80, 24);
+        let pill = &rows[bar - 1];
+        let below = app.transcript.total() - app.transcript.offset() - app.transcript.height;
+        let text = format!(" ↓ {below} lines below · Ctrl+End ");
+        let start = pill.find(&text).expect(pill);
+        // Centred under the text, the scrollbar's column excluded.
+        let left = pill[..start].chars().count();
+        let right = 79 - left - text.chars().count();
+        assert!(left.abs_diff(right) <= 1, "{left} {right}");
+        // Its spot is recorded, and a press there follows output again.
+        let spot = app.latest.unwrap();
+        assert_eq!(
+            (usize::from(spot.row), usize::from(spot.column)),
+            (bar - 1, left)
+        );
+        update(
+            &mut app,
+            mouse(MouseKind::Down, spot.column + 2, spot.row, 0),
+        );
+        assert!(app.transcript.following());
+        let (rows, _) = draw(&mut app, 80, 24);
+        assert_eq!(app.latest, None);
+        assert!(rows[bar - 1].contains("Wheel/PgUp scroll"));
+    }
+
+    #[test]
+    fn output_arriving_while_reading_turns_the_pill_yellow() {
+        let mut app = State::default();
+        app.tones = Tones::TrueColor;
+        draw(&mut app, 80, 24);
+        key(&mut app, Key::PageUp);
+        draw(&mut app, 80, 24);
+        // A sample turn appends its call below what is being read.
+        ctrl_t(&mut app);
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|f| render(&mut app, f)).unwrap();
+        let rows = screen(&terminal);
+        let y = rows
+            .iter()
+            .position(|r| r.contains("↓ New output · "))
+            .unwrap();
+        let x = rows[y][..rows[y].find('↓').unwrap()].chars().count() as u16;
+        let cell = &terminal.backend().buffer()[(x, y as u16)];
+        assert_eq!(cell.fg, Color::Rgb(0xfd, 0xe6, 0x8a));
+        assert_eq!(cell.bg, Color::Rgb(0x3a, 0x34, 0x16));
+        // Following again clears it.
+        update(&mut app, Msg::Key(KeyInput::new(Key::End, Mods::CTRL)));
+        draw(&mut app, 80, 24);
+        assert!(!app.transcript.new_below());
+    }
+
+    #[test]
+    fn the_pill_gives_up_its_key_then_its_count_before_it_is_cut() {
+        let pill = |below, fresh, width| {
+            scroll_pill(below, fresh, Tones::None, width).map(|l| l.to_string())
+        };
+        assert_eq!(
+            pill(12, false, 80).unwrap(),
+            " ↓ 12 lines below · Ctrl+End "
+        );
+        assert_eq!(pill(12, false, 20).unwrap(), " ↓ 12 lines below ");
+        assert_eq!(pill(12, false, 8).unwrap(), " ↓ 12 ");
+        assert_eq!(
+            pill(12, true, 80).unwrap(),
+            " ↓ New output · 12 lines below · Ctrl+End "
+        );
+        assert_eq!(pill(12, true, 30).unwrap(), " ↓ New output · Ctrl+End ");
+        assert_eq!(pill(12, true, 15).unwrap(), " ↓ New output ");
+        assert_eq!(pill(12, false, 4), None);
+    }
+
+    #[test]
+    fn a_notice_sits_between_the_pill_and_the_bar() {
+        let mut app = State::default();
+        app.draft.type_text("x");
+        draw(&mut app, 80, 24);
+        key(&mut app, Key::PageUp);
+        key(&mut app, Key::Enter);
+        let (rows, _) = draw(&mut app, 80, 24);
+        let bar = row_index(&rows, "no model");
+        assert!(rows[bar - 1].contains("Model connection is not available"));
+        assert!(rows[bar - 2].contains("lines below · Ctrl+End"));
     }
 }

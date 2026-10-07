@@ -193,7 +193,7 @@ await scenario('transcript pages, jumps between prompts, and follows output agai
   preview.send('keep')
   await preview.wait('following output', () => preview.screen.includes('PgUp scroll · Ctrl+↑ prompts') && preview.screen.includes('before splitting.'))
   preview.send('\x1b[5~')
-  await preview.wait('reading history', () => preview.screen.includes('↓ Latest · Ctrl+End') && !preview.screen.includes('before splitting.'))
+  await preview.wait('reading history', () => /↓ \d+ lines below · Ctrl\+End/u.test(preview.screen) && !preview.screen.includes('before splitting.'))
   // Two prompts back from the newest lines is the code-mode turn: its program, its tree of calls, and what it returned.
   preview.send('\x1b[1;5F\x1b[1;5A')
   await preview.wait('parser turn at the top', () => /^▎ Run the parser tests/u.test(preview.screen))
@@ -222,7 +222,17 @@ await scenario('the wheel scrolls the transcript and the scrollbar takes clicks 
   const sgr = (button: number, column: number, row: number, press = true) => `\x1b[<${button};${column};${row}${press ? 'M' : 'm'}`
   await preview.wait('scrollbar', () => preview.screen.split('\n').some(line => line.endsWith('┃') || line.endsWith('#')))
   preview.send(sgr(64, 10, 5).repeat(3))
-  await preview.wait('wheel scrolled back', () => /↓ Latest · Ctrl\+End +\d+ lines below/u.test(preview.screen))
+  await preview.wait('wheel scrolled back', () => /↓ \d+ lines below · Ctrl\+End/u.test(preview.screen))
+  // The pill sits on the row just above the status bar, and a press on it follows output.
+  const lines = preview.screen.split('\n')
+  const pillRow = lines.findIndex(line => line.includes(' lines below · Ctrl+End'))
+  assert(lines[pillRow + 1]?.includes('no model'), 'the scroll pill is not just above the status bar')
+  const pillLine = lines[pillRow] ?? ''
+  const pillColumn = [...pillLine.slice(0, pillLine.indexOf('↓'))].length
+  preview.send(sgr(0, pillColumn + 2, pillRow + 1) + sgr(0, pillColumn + 2, pillRow + 1, false))
+  await preview.wait('pill pressed', () => preview.screen.includes('Wheel/PgUp scroll'))
+  preview.send(sgr(64, 10, 5).repeat(3))
+  await preview.wait('wheel scrolled back again', () => /↓ \d+ lines below · Ctrl\+End/u.test(preview.screen))
   preview.send(sgr(65, 10, 5).repeat(40))
   await preview.wait('wheel back to the newest line', () => preview.screen.includes('Wheel/PgUp scroll'))
   // A press at the head of the scrollbar's track goes to the start; the bar is the last column.

@@ -1527,6 +1527,9 @@ pub struct Transcript {
     /// width and look, and again for rows appended or changed since.
     heights: Vec<usize>,
     measured: Option<(usize, Tones, bool)>,
+    /// Rows there were when output was last followed; rows past it arrived
+    /// while reading.
+    seen: usize,
 }
 
 /// Where the scrollbar's thumb sits on its track: its first row and length.
@@ -1570,6 +1573,11 @@ impl Transcript {
     /// Marks row `index` as changed, so its height is measured again.
     pub fn touched(&mut self, index: usize) {
         self.heights.truncate(index);
+    }
+
+    /// Whether rows arrived below while reading.
+    pub fn new_below(&self) -> bool {
+        !self.following() && self.rows.len() > self.seen
     }
 
     /// Lines in the whole transcript, as last measured.
@@ -1840,6 +1848,9 @@ impl Transcript {
         self.height = height;
         self.look = look;
         self.measure();
+        if self.following() {
+            self.seen = self.rows.len();
+        }
         if let Some(anchor) = self.anchor {
             let count = self.count(anchor.row.min(self.rows.len().saturating_sub(1)));
             self.anchor = Some(Anchor {
