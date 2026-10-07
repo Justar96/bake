@@ -1,0 +1,319 @@
+{
+  "schema": "bake/runtime-conformance/requests",
+  "version": 1,
+  "requests": [
+    {
+      "provider": "mock",
+      "model": "mock",
+      "messages": [
+        {
+          "id": "message-1",
+          "role": "system",
+          "content": [{ "type": "text", "text": "stable base" }],
+          "source": { "kind": "plugin", "plugin": "@deepseek-ai/dsh-system-prompt" }
+        },
+        {
+          "id": "message-2",
+          "role": "user",
+          "content": [{ "type": "text", "text": "install fetch" }],
+          "source": { "kind": "user" }
+        }
+      ],
+      "tools": [
+        {
+          "name": "install",
+          "description": "install fetch",
+          "parameters": { "type": "object", "properties": { "name": { "type": "string" } } }
+        }
+      ],
+      "toolHistory": {
+        "tools": [
+          {
+            "name": "install",
+            "description": "install fetch",
+            "parameters": { "type": "object", "properties": { "name": { "type": "string" } } }
+          }
+        ],
+        "updates": []
+      },
+      "sessionId": "dynamic-tools"
+    },
+    {
+      "provider": "mock",
+      "model": "mock",
+      "messages": [
+        {
+          "id": "message-1",
+          "role": "system",
+          "content": [{ "type": "text", "text": "stable base" }],
+          "source": { "kind": "plugin", "plugin": "@deepseek-ai/dsh-system-prompt" }
+        },
+        {
+          "id": "message-2",
+          "role": "user",
+          "content": [{ "type": "text", "text": "install fetch" }],
+          "source": { "kind": "user" }
+        },
+        {
+          "id": "message-3",
+          "role": "assistant",
+          "content": [
+            { "type": "text", "text": "installing" },
+            { "type": "tool-call", "id": "c1", "name": "install", "arguments": "{\"name\":\"fetch\"}" }
+          ],
+          "source": { "kind": "model", "provider": "mock", "model": "mock" }
+        },
+        {
+          "id": "message-4",
+          "role": "user",
+          "content": [
+            {
+              "type": "tool-result",
+              "toolCallId": "c1",
+              "content": [{ "type": "text", "text": "installed" }],
+              "isError": false
+            }
+          ],
+          "source": { "kind": "tool", "callId": "c1" }
+        }
+      ],
+      "tools": [
+        {
+          "name": "fetch",
+          "description": "fetch a url",
+          "parameters": { "type": "object", "properties": { "url": { "type": "string" } } }
+        },
+        {
+          "name": "install",
+          "description": "install fetch",
+          "parameters": { "type": "object", "properties": { "name": { "type": "string" } } }
+        }
+      ],
+      "toolHistory": {
+        "tools": [
+          {
+            "name": "install",
+            "description": "install fetch",
+            "parameters": { "type": "object", "properties": { "name": { "type": "string" } } }
+          }
+        ],
+        "updates": [
+          {
+            "afterMessageId": "message-4",
+            "additions": [
+              {
+                "name": "fetch",
+                "description": "fetch a url",
+                "parameters": { "type": "object", "properties": { "url": { "type": "string" } } }
+              }
+            ],
+            "removals": []
+          }
+        ]
+      },
+      "sessionId": "dynamic-tools"
+    },
+    {
+      "provider": "mock",
+      "model": "mock",
+      "messages": [
+        {
+          "id": "message-1",
+          "role": "system",
+          "content": [{ "type": "text", "text": "stable base" }],
+          "source": { "kind": "plugin", "plugin": "@deepseek-ai/dsh-system-prompt" }
+        },
+        {
+          "id": "message-2",
+          "role": "user",
+          "content": [{ "type": "text", "text": "install fetch" }],
+          "source": { "kind": "user" }
+        },
+        {
+          "id": "message-3",
+          "role": "assistant",
+          "content": [
+            { "type": "text", "text": "installing" },
+            { "type": "tool-call", "id": "c1", "name": "install", "arguments": "{\"name\":\"fetch\"}" }
+          ],
+          "source": { "kind": "model", "provider": "mock", "model": "mock" }
+        },
+        {
+          "id": "message-4",
+          "role": "user",
+          "content": [
+            {
+              "type": "tool-result",
+              "toolCallId": "c1",
+              "content": [{ "type": "text", "text": "installed" }],
+              "isError": false
+            }
+          ],
+          "source": { "kind": "tool", "callId": "c1" }
+        },
+        {
+          "id": "message-5",
+          "role": "assistant",
+          "content": [{ "type": "text", "text": "ready" }],
+          "source": { "kind": "model", "provider": "mock", "model": "mock" }
+        },
+        {
+          "id": "message-6",
+          "role": "user",
+          "content": [{ "type": "text", "text": "drop fetch" }],
+          "source": { "kind": "user" }
+        }
+      ],
+      "tools": [
+        {
+          "name": "install",
+          "description": "install fetch",
+          "parameters": { "type": "object", "properties": { "name": { "type": "string" } } }
+        }
+      ],
+      "toolHistory": {
+        "tools": [
+          {
+            "name": "install",
+            "description": "install fetch",
+            "parameters": { "type": "object", "properties": { "name": { "type": "string" } } }
+          }
+        ],
+        "updates": [
+          {
+            "afterMessageId": "message-4",
+            "additions": [
+              {
+                "name": "fetch",
+                "description": "fetch a url",
+                "parameters": { "type": "object", "properties": { "url": { "type": "string" } } }
+              }
+            ],
+            "removals": []
+          },
+          {
+            "afterMessageId": "message-6",
+            "additions": [],
+            "removals": ["fetch"]
+          }
+        ]
+      },
+      "sessionId": "dynamic-tools"
+    },
+    {
+      "provider": "mock",
+      "model": "mock",
+      "messages": [
+        {
+          "id": "message-1",
+          "role": "system",
+          "content": [{ "type": "text", "text": "stable base" }],
+          "source": { "kind": "plugin", "plugin": "@deepseek-ai/dsh-system-prompt" }
+        },
+        {
+          "id": "message-2",
+          "role": "user",
+          "content": [{ "type": "text", "text": "install fetch" }],
+          "source": { "kind": "user" }
+        },
+        {
+          "id": "message-3",
+          "role": "assistant",
+          "content": [
+            { "type": "text", "text": "installing" },
+            { "type": "tool-call", "id": "c1", "name": "install", "arguments": "{\"name\":\"fetch\"}" }
+          ],
+          "source": { "kind": "model", "provider": "mock", "model": "mock" }
+        },
+        {
+          "id": "message-4",
+          "role": "user",
+          "content": [
+            {
+              "type": "tool-result",
+              "toolCallId": "c1",
+              "content": [{ "type": "text", "text": "installed" }],
+              "isError": false
+            }
+          ],
+          "source": { "kind": "tool", "callId": "c1" }
+        },
+        {
+          "id": "message-5",
+          "role": "assistant",
+          "content": [{ "type": "text", "text": "ready" }],
+          "source": { "kind": "model", "provider": "mock", "model": "mock" }
+        },
+        {
+          "id": "message-6",
+          "role": "user",
+          "content": [{ "type": "text", "text": "drop fetch" }],
+          "source": { "kind": "user" }
+        },
+        {
+          "id": "message-7",
+          "role": "assistant",
+          "content": [{ "type": "text", "text": "dropped" }],
+          "source": { "kind": "model", "provider": "mock", "model": "mock" }
+        },
+        {
+          "id": "message-8",
+          "role": "user",
+          "content": [{ "type": "text", "text": "restore fetch" }],
+          "source": { "kind": "user" }
+        }
+      ],
+      "tools": [
+        {
+          "name": "fetch",
+          "description": "fetch a url",
+          "parameters": { "type": "object", "properties": { "url": { "type": "string" } } }
+        },
+        {
+          "name": "install",
+          "description": "install fetch",
+          "parameters": { "type": "object", "properties": { "name": { "type": "string" } } }
+        }
+      ],
+      "toolHistory": {
+        "tools": [
+          {
+            "name": "install",
+            "description": "install fetch",
+            "parameters": { "type": "object", "properties": { "name": { "type": "string" } } }
+          }
+        ],
+        "updates": [
+          {
+            "afterMessageId": "message-4",
+            "additions": [
+              {
+                "name": "fetch",
+                "description": "fetch a url",
+                "parameters": { "type": "object", "properties": { "url": { "type": "string" } } }
+              }
+            ],
+            "removals": []
+          },
+          {
+            "afterMessageId": "message-6",
+            "additions": [],
+            "removals": ["fetch"]
+          },
+          {
+            "afterMessageId": "message-8",
+            "additions": [
+              {
+                "name": "fetch",
+                "description": "fetch a url",
+                "parameters": { "type": "object", "properties": { "url": { "type": "string" } } }
+              }
+            ],
+            "removals": []
+          }
+        ]
+      },
+      "sessionId": "dynamic-tools"
+    }
+  ]
+}
