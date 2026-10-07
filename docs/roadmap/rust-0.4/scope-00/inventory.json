@@ -114,7 +114,7 @@
     },
     "packages/boot/plugin-manager": {
       "reason": "npm/Cordis plugin installation for profiles.",
-      "pending": "Rust-only shipping is decided; design custom-profile migration and native extension replacements, or obtain an approved support change."
+      "pending": "Custom JavaScript/Cordis profiles and their migration are excluded by D5; decide migration of shipped capabilities, native replacements, or retirement for Cordis tooling under D7."
     },
     "packages/boot/updater": {
       "reason": "Signed manifest and update/rollback; old updaters expect a Node entry point."
@@ -144,7 +144,7 @@
     },
     "packages/extensions": {
       "reason": "Cordis host runner and inspection tools that execute JavaScript plugin operations.",
-      "pending": "Rust-only shipping is decided; design custom-profile migration and native extension replacements, or obtain an approved support change."
+      "pending": "Custom JavaScript/Cordis profiles and their migration are excluded by D5; decide migration of shipped capabilities, native replacements, or retirement for Cordis tooling under D7."
     },
     "packages/feedback": {
       "reason": "Local feedback and explicit-feedback export rules."
@@ -240,7 +240,7 @@
     },
     "preset:cordis": {
       "reason": "Creation preset with Cordis inspection and persistent plugin management.",
-      "pending": "Rust-only shipping is decided; design custom-profile migration and native extension replacements, or obtain an approved support change."
+      "pending": "Custom JavaScript/Cordis profiles and their migration are excluded by D5; decide migration of shipped capabilities, native replacements, or retirement for Cordis tooling under D7."
     },
     "preset:minimal": {
       "reason": "Single persistent-shell preset."
@@ -317,7 +317,7 @@
     },
     "tool:bake-plugin-manager": {
       "reason": "plugin_manager installs and toggles JavaScript profile plugins.",
-      "pending": "Rust-only shipping is decided; design custom-profile migration and native extension replacements, or obtain an approved support change."
+      "pending": "Custom JavaScript/Cordis profiles and their migration are excluded by D5; decide migration of shipped capabilities, native replacements, or retirement for Cordis tooling under D7."
     },
     "tool:bake-schedule": {
       "reason": "Schedule create/list/delete tools and recurrence."
@@ -333,7 +333,7 @@
     },
     "tool:bake-tool-cordis": {
       "reason": "Cordis inspection over a generated JavaScript API catalog that cannot be presented as a Rust API unchanged.",
-      "pending": "Rust-only shipping is decided; design custom-profile migration and native extension replacements, or obtain an approved support change."
+      "pending": "Custom JavaScript/Cordis profiles and their migration are excluded by D5; decide migration of shipped capabilities, native replacements, or retirement for Cordis tooling under D7."
     },
     "tool:bake-tool-fs": {
       "reason": "read/write/edit/read_image schemas, results, and stale-edit guards."
