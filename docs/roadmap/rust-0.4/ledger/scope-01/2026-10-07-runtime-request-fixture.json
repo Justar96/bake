@@ -1,0 +1,308 @@
+{
+  "schema": "bake/rust-migration/qualification-attempt",
+  "version": 1,
+  "id": "2026-10-07-runtime-request-fixture",
+  "scope": "01",
+  "status": "partial",
+  "recordedOn": "2026-10-07",
+  "summary": "TypeScript-oracle evidence only for the tool-call-turn runtime request fixture. PR 59 first merged it at 64483eb1e5f6187e87c88225ac69e0e19503d729; its fixture bytes are unchanged at this candidate, while scripts/tsconfig.conformance.json changed since. A clean checkout of the candidate passed the fixture spec, including its in-suite negative controls. CI tested synthetic merge 20de2f6371b2bdd6392dc54ea93364f6d2774523; that commit, final PR head 219e042a51875b1265eb8d0af5a28dbdd54427cd, and candidate 586083f7545d0cf139e0a9dfc92f03d2a7d0fae8 all have tree f853423a1b9f0333e662f7c4e42b5ae72d873399. No Rust replay or request reconstruction exists; this is not parity or scope acceptance.",
+  "supersedes": [],
+  "provenance": {
+    "base": "e7b3bc16c7d995d6fbbbfd8fe7b0727ab9517ade",
+    "candidate": "586083f7545d0cf139e0a9dfc92f03d2a7d0fae8",
+    "oracle": {
+      "missing": "Scope 00 has not accepted a final frozen TypeScript oracle."
+    }
+  },
+  "support": {
+    "notApplicable": "Development-only test oracle and unshipped reader; this attempt changes no shipped support entry."
+  },
+  "fixtures": {
+    "files": [
+      {
+        "path": "conformance/runtime/request-reconstruction/tool-call-turn/expected-requests.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "460b031e6fd308bd9ac3fd97834aad64729b2384f0f3e803c424d7502f9dfa02"
+      },
+      {
+        "path": "conformance/runtime/request-reconstruction/tool-call-turn/session.jsonl",
+        "role": "shared-fixture-bytes",
+        "sha256": "a7a8222990ef9f4c4f00a051c019de86d3156ca7f6c3c0d28af4be4cc3fbe657"
+      },
+      {
+        "path": "packages/core/agent-loop/tests/request-reconstruction.fixture.spec.ts",
+        "role": "fixture-definition-source",
+        "sha256": "be01183fc161f97c9b7845458573556e9cb02d8e8b04a576348a35e4af546122"
+      },
+      {
+        "path": "packages/core/agent-loop/tests/runtime-fixture.ts",
+        "role": "fixture-definition-source",
+        "sha256": "86d06fccfcb866679de83698881158e20b6df06d3ca33e167dbaf30260b80b0e"
+      }
+    ],
+    "digest": "afa702e17584b6e77dd640ed3cb91f910b8d70035666ec68ddeda7d6c0b4e37d"
+  },
+  "artifacts": {
+    "notApplicable": "The TypeScript oracle runs from the source in the fixture manifest; no compiled artifact is claimed."
+  },
+  "commands": [
+    {
+      "id": "build",
+      "argv": [
+        "bun",
+        "run",
+        "build"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local; kernel 7.2.8-200.fc44.x86_64"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v26.10.0",
+        "git": "2.56.0"
+      },
+      "testedCommit": "586083f7545d0cf139e0a9dfc92f03d2a7d0fae8",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "missing": "Builds the Node runtime and TUI artifacts; it reports no test or gate count."
+      },
+      "evidence": {
+        "reference": ".preflight/header-ledger/evidence/build.json",
+        "sha256": "6989c20c49f708fdabe3cba315e7c4fca6efc602cbf0c52ed768d03fea63e75e"
+      }
+    },
+    {
+      "id": "ts-request-fixture",
+      "argv": [
+        "bun",
+        "run",
+        "test:runtime",
+        "packages/core/agent-loop/tests/request-reconstruction.fixture.spec.ts",
+        "--reporter",
+        "verbose"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local; kernel 7.2.8-200.fc44.x86_64"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v26.10.0",
+        "git": "2.56.0"
+      },
+      "testedCommit": "586083f7545d0cf139e0a9dfc92f03d2a7d0fae8",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 13,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/header-ledger/evidence/ts-request-fixture.json",
+        "sha256": "8ee2d721d0f0dec04c968341dd52d3d75a75010bdbb139311b65702bed5c2638"
+      }
+    },
+    {
+      "id": "ci-runtime-linux",
+      "argv": [
+        "bun",
+        "run",
+        "preflight",
+        "--full",
+        "--only",
+        "build,runtime"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "ubuntu-latest; image ubuntu-24.04 20260927.320.1"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v24.21.0"
+      },
+      "testedCommit": "20de2f6371b2bdd6392dc54ea93364f6d2774523",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": "https://github.com/Justar96/bake/actions/runs/37563430266/job/112605651613",
+        "sha256": "8ba28fbef334f9485f49925d1e3d733a618a2c6ee0d267272b0f6763b43bdb82"
+      }
+    },
+    {
+      "id": "ci-runtime-macos",
+      "argv": [
+        "bun",
+        "run",
+        "preflight",
+        "--full",
+        "--only",
+        "build,runtime"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "darwin",
+        "arch": "arm64",
+        "runner": "macos-latest; image macos-26-arm64 20260907.0351.1"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v24.20.0"
+      },
+      "testedCommit": "20de2f6371b2bdd6392dc54ea93364f6d2774523",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": "https://github.com/Justar96/bake/actions/runs/37563430266/job/112605651668",
+        "sha256": "960d7f6db10d1a5ddd018c1fbdb6acabe412a308b0056ea706ff8d3b0624bf94"
+      }
+    }
+  ],
+  "results": [
+    {
+      "id": "request-oracle",
+      "behavior": "13 fixture spec tests passed: the live turn dispatches the independently authored expected requests, two private runs agree, the stored current-format Session replays to them, abort unwinds through disposal, and a missing fixture file or torn log is refused. Counts describe Vitest tests, including the in-suite negative controls and normalization tests.",
+      "owner": "packages/core/agent-loop/tests/request-reconstruction.fixture.spec.ts",
+      "report": ".preflight/header-ledger/evidence/ts-request-fixture.json",
+      "commands": [
+        "ts-request-fixture"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "ci-runtime",
+      "behavior": "Linux and macOS runtime jobs each passed 3 preflight gates (build, runtime and integration); the whole-suite runtime gate includes this spec. Counts describe gates, not tests.",
+      "owner": "scripts/preflight.ts",
+      "report": "https://github.com/Justar96/bake/actions/runs/37563430266",
+      "commands": [
+        "ci-runtime-linux",
+        "ci-runtime-macos"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "windows",
+      "behavior": "Request fixture spec on Windows.",
+      "owner": "packages/core/agent-loop/tests/request-reconstruction.fixture.spec.ts",
+      "report": "https://github.com/Justar96/bake/actions/runs/37563430266",
+      "commands": [
+        "ci-runtime-linux",
+        "ci-runtime-macos"
+      ],
+      "outcome": "missing",
+      "reason": "The windows-release job runs a fixed list of runtime files that excludes this spec, and the runtime jobs cover Linux and macOS only."
+    }
+  ],
+  "negativeControls": [
+    {
+      "id": "one-byte-tool-argument",
+      "defect": "A live run whose scripted tool argument differs by one byte (\"onf\" for \"one\").",
+      "assertion": "compareJson reports the exact requests[1] argument mismatch. Observed as the passing test \"a one-byte change in the scripted tool argument fails the expected requests\" in the verbose clean-candidate log.",
+      "observed": "rejected",
+      "commands": [
+        "ts-request-fixture"
+      ]
+    },
+    {
+      "id": "changed-tool-result",
+      "defect": "A copy of the committed log whose persisted tool result text changes from \"echo: one\" to \"echo: onx\".",
+      "assertion": "Replay produces a request that fails comparison at the tool-result text. Observed as the passing test \"a changed persisted tool result replays to a mismatching request\" in the verbose clean-candidate log.",
+      "observed": "rejected",
+      "commands": [
+        "ts-request-fixture"
+      ]
+    },
+    {
+      "id": "swapped-message-events",
+      "defect": "A copy of the committed log with the system and user message rows swapped, then renumbered.",
+      "assertion": "The reader refuses the sequence gap; once renumbered, replay fails comparison on the first message role. Observed as the passing test \"swapping the system and user message events is refused, or replays out of order once renumbered\" in the verbose clean-candidate log.",
+      "observed": "rejected",
+      "commands": [
+        "ts-request-fixture"
+      ]
+    },
+    {
+      "id": "dropped-expected-request",
+      "defect": "An expected-request list with its second request removed.",
+      "assertion": "compareJson fails on the request count. Observed as the passing test \"a dropped expected request fails on the request count\" in the verbose clean-candidate log.",
+      "observed": "rejected",
+      "commands": [
+        "ts-request-fixture"
+      ]
+    }
+  ],
+  "missingEvidence": [
+    {
+      "what": "Rust Session replay and request reconstruction",
+      "reason": "No Rust request-reconstruction arm replays this fixture's event rows; scope 02 owns Session types and replay. The scope 03 reader consumes only its header.",
+      "owner": "unassigned"
+    },
+    {
+      "what": "Historical fixture corpus",
+      "reason": "Only the single tool-call-turn fixture exists; released Session generations and other turn shapes are not covered.",
+      "owner": "unassigned"
+    },
+    {
+      "what": "Live native model arm",
+      "reason": "No native agent loop or model route exists.",
+      "owner": "unassigned"
+    },
+    {
+      "what": "Windows run of the request fixture",
+      "reason": "No local or CI Windows command ran this spec.",
+      "owner": "unassigned"
+    },
+    {
+      "what": "CI test-level output and artifact digests",
+      "reason": "Successful preflight job logs retain gate summaries only, not inner test output or binary digests. Local logs live in ignored .preflight and are not published; local digests do not identify CI binaries.",
+      "owner": "scripts/preflight.ts"
+    },
+    {
+      "what": "Scope 00 decisions and accepted full baseline",
+      "reason": "Owner decisions, fixed qualification budgets, minimum supported hosts, and complete baseline qualification remain open.",
+      "owner": "docs/roadmap/rust-0.4/scope-00/support.md"
+    },
+    {
+      "what": "Scope acceptance",
+      "reason": "No qualification reviewer or product-owner acceptance is recorded.",
+      "owner": "unassigned"
+    }
+  ],
+  "evalRecords": {
+    "notApplicable": "Nothing model-visible changes: the request fixture is a test-only oracle and the header reader is not shipped."
+  },
+  "performanceRecords": {
+    "notApplicable": "No performance qualification attempted; command duration is not a performance baseline."
+  },
+  "rollback": {
+    "observed": "The baseline command wrapper observed unchanged source and no command-owned surviving descendants after build and ts-request-fixture on the clean candidate. The fixture spec creates private in-memory Sessions and mutates in-memory copies of the log; no user install or Session storage is touched.",
+    "commands": [
+      "build",
+      "ts-request-fixture"
+    ]
+  },
+  "review": {
+    "missing": "No reviewer has accepted scope 01 qualification. Code review and green CI do not establish scope acceptance."
+  }
+}

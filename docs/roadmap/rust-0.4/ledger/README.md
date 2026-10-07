@@ -39,24 +39,30 @@ Each result names its owner and the commands that observed it. Explain the units
 
 ## Recorded evidence
 
-The initial records cover PR #57's fake native eval arm and existing synthetic comparison harness:
+The scope 01 records cover PR #57's fake native eval arm and synthetic comparison harness, then the runtime request fixture. The scope 03 record covers the Session header reader groundwork. Every record is partial or failed; none closes a scope.
 
 | Attempt | Observed outcome |
 |---|---|
 | [First macOS attempt](scope-01/2026-10-07-native-fixture-macos-failure.json) | The exact environment assertion failed because CoreFoundation added `__CF_USER_TEXT_ENCODING` after exec. The record retains the failed CI job. |
 | [Corrected attempt](scope-01/2026-10-07-native-fixture-evidence.json) | A clean checkout of merged commit `71805dfe1f1e7a9aef7088bd4043740e0d5b4d34` passed 60 Cargo tests, four compiled-arm cases, and three synthetic fixtures. Final CI passed the recorded native and app gates. Scope 01 remains partial. |
+| [Runtime request fixture](scope-01/2026-10-07-runtime-request-fixture.json) | A clean checkout of merged commit `586083f7545d0cf139e0a9dfc92f03d2a7d0fae8` passed 13 fixture spec tests on the TypeScript oracle. Final CI passed the Linux and macOS runtime gates. No Rust request-reconstruction arm or Windows run of this spec exists. |
+| [Session header reader](scope-03/2026-10-07-session-header-reader.json) | The same clean checkout passed 88 TypeScript header tests and 66 Cargo tests, which include the six `bake-session` tests. Final CI passed the native gates on Linux and macOS, three native gates on Windows (with `rust-pty` skipped), and the Windows header spec. Two controls on a private mutated copy were rejected. |
 
-The final PR head, CI synthetic merge, and merged candidate have the same tree, `5c448cfbbdce48cb9912d24d0c0ac542c9dd3c98`; their distinct commit identities remain in the record. CI command counts describe preflight gates. The local `native-check`, `native-eval`, and `conformance` counts describe Cargo tests, compiled-arm cases, and shared fixtures respectively.
+For PR #57, the final PR head, CI synthetic merge, and merged candidate have the same tree, `5c448cfbbdce48cb9912d24d0c0ac542c9dd3c98`; their distinct commit identities remain in the record. CI command counts describe preflight gates. The local `native-check`, `native-eval`, and `conformance` counts describe Cargo tests, compiled-arm cases, and shared fixtures respectively.
 
-For the negative control, an isolated copy of the merged candidate removed only `testsUnchanged` from the evaluator's validated predicate. The correct-edit case passed, then the smoke assertion rejected the tampered-check verdict and exited 1. Those are the two reached cases in its counts. The original source stayed unchanged and the copy was removed. The local command wrapper also observed unchanged source and no surviving command-owned descendants after each clean candidate run.
+For PR #57's negative control, an isolated copy of the merged candidate removed only `testsUnchanged` from the evaluator's validated predicate. The correct-edit case passed, then the smoke assertion rejected the tampered-check verdict and exited 1. Those are the two reached cases in its counts. The original source stayed unchanged and the copy was removed. The local command wrapper also observed unchanged source and no surviving command-owned descendants after each clean candidate run.
 
-Local references under `.preflight/ledger/` identify ignored, host-local evidence by hash; they are not published artifacts. The three clean command references point to check-result JSON that binds the tested commit, source/cleanup observations, and the adjacent log hash. CI references link the actual jobs. Successful CI jobs expose gate summaries but do not retain the smoke JSON or binary digests. The record therefore marks CI artifact hashes missing. The source commits and commands allow new attempts to be reproduced; reproduction creates a new record rather than changing these observations.
+The runtime request fixture and Session header records share candidate `586083f7545d0cf139e0a9dfc92f03d2a7d0fae8`, the merge of PR #61. The candidate, the final PR head, and CI synthetic merge `20de2f6371b2bdd6392dc54ea93364f6d2774523` all have tree `f853423a1b9f0333e662f7c4e42b5ae72d873399`. PR #59 first merged the request fixture; its fixture bytes are unchanged at this candidate. The fixture record's four negative controls are tests inside the fixture spec, observed passing in its verbose log. The header record's two controls ran by hand on a private detached copy. One flipped a shared-table expectation, and both harnesses rejected it. The other removed the reader's version-diagnostic guard, and the Rust test rejected it. Each mutated file was restored to its original hash and the copy was removed. Controls that ran on development trees before the merge are not recorded. Local `.preflight/header-ledger/evidence/` references identify ignored, host-local wrapper results and logs by hash. CI references link the actual jobs, and their sha256 values identify the downloaded raw job logs. The Windows TypeScript header evidence is the `windows-release` runtime step, whose test totals span five files.
+
+PR #57's local references under `.preflight/ledger/` identify ignored, host-local evidence by hash; they are not published artifacts. The three clean command references point to check-result JSON that binds the tested commit, source/cleanup observations, and the adjacent log hash. CI references link the actual jobs. Successful CI jobs expose gate summaries but do not retain the smoke JSON or binary digests. The record therefore marks CI artifact hashes missing. The source commits and commands allow new attempts to be reproduced; reproduction creates a new record rather than changing these observations.
 
 ## Limits
 
 Valid JSON evidence does not prove execution, artifact availability, fixture authenticity, or reviewer acceptance. This validator checks only structure and internal consistency. It does not assign scope requirements, authorize support changes, or update roadmap status.
 
 The initial evidence does not qualify real-runtime fixtures, a live native model arm, the full release target matrix, Windows ConPTY, or user install/session rollback. Scope 00 decisions and full baseline acceptance remain open. `actionlint` was unavailable locally and in the recorded Linux/macOS app CI. These omissions remain visible in the records even though the available checks passed.
+
+The header record claims TypeScript outcome agreement only for header records outside the native subset; it does not cover whole-log replay or any event row. Its 19 native-subset cases are explicit refusals, not parity. The scope 01 request fixture has a TypeScript arm only, with no Rust replay or Windows run.
 
 ## Dev Note
 
