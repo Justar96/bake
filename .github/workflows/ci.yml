@@ -132,6 +132,8 @@ jobs:
         working-directory: rust
         run: rustup toolchain install --no-self-update
       - run: bun run preflight --only native
+      - name: Check Session lookup against the Node backend
+        run: bun run test:runtime packages/session/session-persistence-jsonl/tests/lookup-conformance.spec.ts
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

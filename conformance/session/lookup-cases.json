@@ -1,0 +1,2768 @@
+{
+ "schema": "bake/session-conformance/lookup-cases",
+ "version": 3,
+ "provenance": "Written from the TypeScript sources of JsonlSessionPersistence open(id, \"read\") (assertUsableRoot, ensureRootEncoding, findLog, resolveGenerationInDirectory, requireStoredLog, readGenerationHeader, decodeStoredLog, assertStoredIdentity) and format.ts encodeSegment and projectKey, before either harness ran. Restored counts reuse the source-authored expectations of restore-cases.json (tool-call-turn, packed-source-references) and zstd-cases.json (torn-checksum). No value was copied from TypeScript or Rust output.",
+ "amendments": [
+  "After the first TypeScript run: older-generation-only expected a restored migration, but the frozen v0 fixture is refused as unsupported (jsonl.spec.ts \"refuses the frozen pre-step V0 fixture\"); its expectation now claims that refusal, and older-generation-migrates adds the v2 log that jsonl.spec.ts restores (\"restores canonical replacement envelopes\"), with seven events after the migration adds its system head.",
+  "Version 2, after code review of the first Rust candidate: cases listed in reviewAdditions were added, with expectations derived from the TypeScript sources before their first run; failure cases gained nativeDiagnostic (the Rust diagnostic operation and the case-relative path it names), native byte-budget failures are marked budget, limited cases gained platformReason, and defaults names the budgets for cases that set none. No earlier expectation changed.",
+  "Version 3 adds legacy-named-directory after Windows source review, before its first run. JsonlSessionPersistence exists() opens directories on POSIX and through libuv FILE_FLAG_BACKUP_SEMANTICS on Windows, so the targeted probe refuses the legacy layout. Earlier expectations are unchanged."
+ ],
+ "defaults": {
+  "maxBytes": 1048576,
+  "maxSourceSeqs": 64,
+  "maxEntries": 1024
+ },
+ "inputs": {
+  "tool-call-turn": {
+   "path": "conformance/runtime/request-reconstruction/tool-call-turn/session.jsonl",
+   "sha256": "a7a8222990ef9f4c4f00a051c019de86d3156ca7f6c3c0d28af4be4cc3fbe657"
+  },
+  "released-v0": {
+   "path": "packages/session/session-persistence-jsonl/tests/fixtures/released-v0-real-shapes.jsonl",
+   "sha256": "79f44919a664f867c22d91eb42f97b3de1c88df1a66bd79c0aa3945926873668"
+  },
+  "zstd-cases": {
+   "path": "conformance/session/zstd-cases.json",
+   "sha256": "00af05058ff23d0f2981f605499d5977f637d1ebd9fe7629cc64df7196451b59"
+  }
+ },
+ "segments": [
+  [
+   "a1",
+   "a1"
+  ],
+  [
+   "AZaz09._-",
+   "AZaz09._-"
+  ],
+  [
+   "~",
+   "~007E"
+  ],
+  [
+   ".",
+   "~002E"
+  ],
+  [
+   "..",
+   "~002E~002E"
+  ],
+  [
+   "...",
+   "..."
+  ],
+  [
+   "a/b\\c",
+   "a~002Fb~005Cc"
+  ],
+  [
+   "\u0000",
+   "~0000"
+  ],
+  [
+   "A:b",
+   "A~003Ab"
+  ],
+  [
+   "ü",
+   "~00FC"
+  ],
+  [
+   "😀",
+   "~D83D~DE00"
+  ],
+  [
+   " x",
+   "~0020x"
+  ],
+  [
+   "ÿĀ",
+   "~00FF~0100"
+  ],
+  [
+   "￿",
+   "~FFFF"
+  ],
+  [
+   "ü/😀 .~",
+   "~00FC~002F~D83D~DE00~0020.~007E"
+  ]
+ ],
+ "projectKeys": [
+  [
+   "/",
+   "--root--"
+  ],
+  [
+   "/home/u",
+   "--home-u--"
+  ],
+  [
+   "//a///b/",
+   "--a-b---"
+  ],
+  [
+   "/work/ü 😀~x",
+   "--work-~00FC~0020~D83D~DE00~007Ex--"
+  ],
+  [
+   "C:\\work\\ü 😀~x",
+   "--C-work-~00FC~0020~D83D~DE00~007Ex--"
+  ],
+  [
+   "\\\\server\\share",
+   "--server-share--"
+  ],
+  [
+   "/-a",
+   "--a--"
+  ],
+  [
+   "-",
+   "--root--"
+  ],
+  [
+   "/a.b_c",
+   "--a.b_c--"
+  ],
+  [
+   "/x:y",
+   "--x-y--"
+  ],
+  [
+   "/alias",
+   "--alias--"
+  ],
+  [
+   "/Work",
+   "--Work--"
+  ],
+  [
+   "C:\\Work",
+   "--C-Work--"
+  ],
+  [
+   "/work",
+   "--work--"
+  ],
+  [
+   "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "--aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa--"
+  ],
+  [
+   "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "--aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa--"
+  ],
+  [
+   "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀",
+   "--aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa~D83--"
+  ],
+  [
+   "C:\\aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀",
+   "--C-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa~D83--"
+  ],
+  [
+   "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé",
+   "--aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa~0--"
+  ]
+ ],
+ "cases": [
+  {
+   "id": "plain-no-cwd",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn"
+     }
+    }
+   ],
+   "ts": {
+    "outcome": "restored",
+    "path": "_no-cwd/a1/session.v3.jsonl",
+    "header": {
+     "id": "a1",
+     "cwd": null
+    },
+    "storedEventCount": 16,
+    "closerCount": 0,
+    "messageCount": 5,
+    "inheritedEventCount": 0,
+    "endSeedAppended": true,
+    "torn": null
+   }
+  },
+  {
+   "id": "zstd-no-cwd",
+   "compression": "zstd",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v3.jsonl.zstd",
+     "log": {
+      "input": "tool-call-turn",
+      "encode": "zstd-raw"
+     }
+    }
+   ],
+   "ts": {
+    "outcome": "restored",
+    "path": "_no-cwd/a1/session.v3.jsonl.zstd",
+    "header": {
+     "id": "a1",
+     "cwd": null
+    },
+    "storedEventCount": 16,
+    "closerCount": 0,
+    "messageCount": 5,
+    "inheritedEventCount": 0,
+    "endSeedAppended": true,
+    "torn": null
+   }
+  },
+  {
+   "id": "default-compression-zstd",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v3.jsonl.zstd",
+     "log": {
+      "input": "tool-call-turn",
+      "encode": "zstd-raw"
+     }
+    }
+   ],
+   "ts": {
+    "outcome": "restored",
+    "path": "_no-cwd/a1/session.v3.jsonl.zstd",
+    "header": {
+     "id": "a1",
+     "cwd": null
+    },
+    "storedEventCount": 16,
+    "closerCount": 0,
+    "messageCount": 5,
+    "inheritedEventCount": 0,
+    "endSeedAppended": true,
+    "torn": null
+   }
+  },
+  {
+   "id": "default-compression-refuses-plain",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn"
+     }
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "layout",
+    "reason": "encoding-mismatch",
+    "kind": "invalid",
+    "path": "_no-cwd/a1/session.v3.jsonl"
+   }
+  },
+  {
+   "id": "zstd-torn-recovered",
+   "compression": "zstd",
+   "root": "root",
+   "sessionId": "zstd-fixture",
+   "layout": [
+    {
+     "file": "root/_no-cwd/zstd-fixture/session.v3.jsonl.zstd",
+     "zstdCase": "torn-checksum"
+    }
+   ],
+   "ts": {
+    "outcome": "restored",
+    "path": "_no-cwd/zstd-fixture/session.v3.jsonl.zstd",
+    "header": {
+     "id": "zstd-fixture",
+     "cwd": null
+    },
+    "storedEventCount": 3,
+    "closerCount": 0,
+    "messageCount": 1,
+    "inheritedEventCount": 0,
+    "endSeedAppended": false,
+    "torn": {
+     "truncateTo": 303,
+     "recoveredFrom": 1
+    }
+   }
+  },
+  {
+   "id": "cwd-posix-unicode",
+   "platforms": [
+    "posix"
+   ],
+   "platformReason": "The header cwd is POSIX-absolute; cwd-win32-unicode covers Windows.",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/--work-~00FC~0020~D83D~DE00~007Ex--/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn",
+      "header": "{\"type\":\"session\",\"version\":3,\"id\":\"a1\",\"createdAt\":1791337579861,\"cwd\":\"/work/ü 😀~x\",\"isSeeded\":false,\"delegationDepth\":0}"
+     }
+    }
+   ],
+   "ts": {
+    "outcome": "restored",
+    "path": "--work-~00FC~0020~D83D~DE00~007Ex--/a1/session.v3.jsonl",
+    "header": {
+     "id": "a1",
+     "cwd": "/work/ü 😀~x"
+    },
+    "storedEventCount": 16,
+    "closerCount": 0,
+    "messageCount": 5,
+    "inheritedEventCount": 0,
+    "endSeedAppended": true,
+    "torn": null
+   }
+  },
+  {
+   "id": "cwd-win32-unicode",
+   "platforms": [
+    "win32"
+   ],
+   "platformReason": "The header cwd is Win32-absolute; cwd-posix-unicode covers POSIX.",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/--C-work-~00FC~0020~D83D~DE00~007Ex--/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn",
+      "header": "{\"type\":\"session\",\"version\":3,\"id\":\"a1\",\"createdAt\":1791337579861,\"cwd\":\"C:\\\\work\\\\ü 😀~x\",\"isSeeded\":false,\"delegationDepth\":0}"
+     }
+    }
+   ],
+   "ts": {
+    "outcome": "restored",
+    "path": "--C-work-~00FC~0020~D83D~DE00~007Ex--/a1/session.v3.jsonl",
+    "header": {
+     "id": "a1",
+     "cwd": "C:\\work\\ü 😀~x"
+    },
+    "storedEventCount": 16,
+    "closerCount": 0,
+    "messageCount": 5,
+    "inheritedEventCount": 0,
+    "endSeedAppended": true,
+    "torn": null
+   }
+  },
+  {
+   "id": "unicode-id",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "ü/😀 .~",
+   "layout": [
+    {
+     "file": "root/_no-cwd/~00FC~002F~D83D~DE00~0020.~007E/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn",
+      "header": "{\"type\":\"session\",\"version\":3,\"id\":\"ü/😀 .~\",\"createdAt\":1791337579861,\"isSeeded\":false,\"delegationDepth\":0}"
+     }
+    }
+   ],
+   "ts": {
+    "outcome": "restored",
+    "path": "_no-cwd/~00FC~002F~D83D~DE00~0020.~007E/session.v3.jsonl",
+    "header": {
+     "id": "ü/😀 .~",
+     "cwd": null
+    },
+    "storedEventCount": 16,
+    "closerCount": 0,
+    "messageCount": 5,
+    "inheritedEventCount": 0,
+    "endSeedAppended": true,
+    "torn": null
+   }
+  },
+  {
+   "id": "dot-dot-id",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "..",
+   "layout": [
+    {
+     "file": "root/_no-cwd/~002E~002E/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn",
+      "header": "{\"type\":\"session\",\"version\":3,\"id\":\"..\",\"createdAt\":1791337579861,\"isSeeded\":false,\"delegationDepth\":0}"
+     }
+    }
+   ],
+   "ts": {
+    "outcome": "restored",
+    "path": "_no-cwd/~002E~002E/session.v3.jsonl",
+    "header": {
+     "id": "..",
+     "cwd": null
+    },
+    "storedEventCount": 16,
+    "closerCount": 0,
+    "messageCount": 5,
+    "inheritedEventCount": 0,
+    "endSeedAppended": true,
+    "torn": null
+   }
+  },
+  {
+   "id": "project-key-truncated-posix",
+   "platforms": [
+    "posix"
+   ],
+   "platformReason": "The header cwd is POSIX-absolute; the win32 variant covers Windows.",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/--aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa~D83--/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn",
+      "header": "{\"type\":\"session\",\"version\":3,\"id\":\"a1\",\"createdAt\":1791337579861,\"cwd\":\"/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀\",\"isSeeded\":false,\"delegationDepth\":0}"
+     }
+    }
+   ],
+   "ts": {
+    "outcome": "restored",
+    "path": "--aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa~D83--/a1/session.v3.jsonl",
+    "header": {
+     "id": "a1",
+     "cwd": "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀"
+    },
+    "storedEventCount": 16,
+    "closerCount": 0,
+    "messageCount": 5,
+    "inheritedEventCount": 0,
+    "endSeedAppended": true,
+    "torn": null
+   }
+  },
+  {
+   "id": "project-key-truncated-win32",
+   "platforms": [
+    "win32"
+   ],
+   "platformReason": "The header cwd is Win32-absolute; the posix variant covers POSIX.",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/--C-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa~D83--/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn",
+      "header": "{\"type\":\"session\",\"version\":3,\"id\":\"a1\",\"createdAt\":1791337579861,\"cwd\":\"C:\\\\aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀\",\"isSeeded\":false,\"delegationDepth\":0}"
+     }
+    }
+   ],
+   "ts": {
+    "outcome": "restored",
+    "path": "--C-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa~D83--/a1/session.v3.jsonl",
+    "header": {
+     "id": "a1",
+     "cwd": "C:\\aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀"
+    },
+    "storedEventCount": 16,
+    "closerCount": 0,
+    "messageCount": 5,
+    "inheritedEventCount": 0,
+    "endSeedAppended": true,
+    "torn": null
+   }
+  },
+  {
+   "id": "generation-numeric-max",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn"
+     }
+    },
+    {
+     "file": "root/_no-cwd/a1/session.v10.jsonl",
+     "text": "{\"type\":\"session\",\"version\":10,\"id\":\"a1\",\"createdAt\":1791337579861,\"isSeeded\":false,\"delegationDepth\":0}\n"
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "generation",
+    "reason": "newer-format",
+    "kind": "unsupported",
+    "path": "_no-cwd/a1/session.v10.jsonl"
+   }
+  },
+  {
+   "id": "zstd-generation-numeric-max",
+   "compression": "zstd",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v3.jsonl.zstd",
+     "log": {
+      "input": "tool-call-turn",
+      "encode": "zstd-raw"
+     }
+    },
+    {
+     "file": "root/_no-cwd/a1/session.v10.jsonl.zstd",
+     "frames": [
+      "{\"type\":\"session\",\"version\":10,\"id\":\"a1\",\"createdAt\":1791337579861,\"isSeeded\":false,\"delegationDepth\":0}\n"
+     ]
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "generation",
+    "reason": "newer-format",
+    "kind": "unsupported",
+    "path": "_no-cwd/a1/session.v10.jsonl.zstd"
+   }
+  },
+  {
+   "id": "generation-current-over-historical",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn"
+     }
+    },
+    {
+     "file": "root/_no-cwd/a1/session.jsonl",
+     "text": "not a log\n"
+    },
+    {
+     "file": "root/_no-cwd/a1/session.v2.jsonl",
+     "text": "not a log\n"
+    }
+   ],
+   "ts": {
+    "outcome": "restored",
+    "path": "_no-cwd/a1/session.v3.jsonl",
+    "header": {
+     "id": "a1",
+     "cwd": null
+    },
+    "storedEventCount": 16,
+    "closerCount": 0,
+    "messageCount": 5,
+    "inheritedEventCount": 0,
+    "endSeedAppended": true,
+    "torn": null
+   }
+  },
+  {
+   "id": "noncanonical-names-ignored",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn"
+     }
+    },
+    {
+     "file": "root/_no-cwd/a1/session.v03.jsonl",
+     "text": "not a log\n"
+    },
+    {
+     "file": "root/_no-cwd/a1/session.v4.jsonl.tmp",
+     "text": "not a log\n"
+    },
+    {
+     "file": "root/_no-cwd/a1/Session.v4.jsonl",
+     "text": "not a log\n"
+    },
+    {
+     "file": "root/_no-cwd/a1/session.v4.JSONL",
+     "text": "not a log\n"
+    },
+    {
+     "file": "root/_no-cwd/a1/session.v0.jsonl",
+     "text": "not a log\n"
+    },
+    {
+     "file": "root/_no-cwd/a1/session.v9007199254740992.jsonl",
+     "text": "not a log\n"
+    },
+    {
+     "file": "root/_no-cwd/a1/session.v4.jsonl.zst",
+     "text": "not a log\n"
+    },
+    {
+     "file": "root/_no-cwd/a1/session.v4.jsonl.zstd.tmp",
+     "text": "not a log\n"
+    }
+   ],
+   "ts": {
+    "outcome": "restored",
+    "path": "_no-cwd/a1/session.v3.jsonl",
+    "header": {
+     "id": "a1",
+     "cwd": null
+    },
+    "storedEventCount": 16,
+    "closerCount": 0,
+    "messageCount": 5,
+    "inheritedEventCount": 0,
+    "endSeedAppended": true,
+    "torn": null
+   }
+  },
+  {
+   "id": "future-header-version-mismatch",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v4.jsonl",
+     "text": "{\"type\":\"session\",\"version\":5,\"id\":\"a1\",\"createdAt\":1791337579861,\"isSeeded\":false,\"delegationDepth\":0}\n"
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "generation",
+    "reason": "generation-header-mismatch",
+    "kind": "invalid",
+    "path": "_no-cwd/a1/session.v4.jsonl"
+   }
+  },
+  {
+   "id": "future-header-current-version",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v4.jsonl",
+     "text": "{\"type\":\"session\",\"version\":3,\"id\":\"a1\",\"createdAt\":1791337579861,\"isSeeded\":false,\"delegationDepth\":0}\n"
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "generation",
+    "reason": "generation-header-mismatch",
+    "kind": "invalid",
+    "path": "_no-cwd/a1/session.v4.jsonl"
+   }
+  },
+  {
+   "id": "future-header-malformed",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v4.jsonl",
+     "text": "not json\n"
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "generation",
+    "reason": "malformed-header",
+    "kind": "invalid",
+    "path": "_no-cwd/a1/session.v4.jsonl"
+   }
+  },
+  {
+   "id": "future-header-retired-fields",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v4.jsonl",
+     "text": "{\"type\":\"session\",\"version\":4,\"id\":\"a1\",\"createdAt\":1791337579861,\"isSeeded\":false,\"delegationDepth\":0,\"sandboxMode\":\"workspace-write\"}\n"
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "generation",
+    "reason": "retired-header-fields",
+    "kind": "invalid",
+    "path": "_no-cwd/a1/session.v4.jsonl"
+   }
+  },
+  {
+   "id": "zstd-future-header",
+   "compression": "zstd",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v4.jsonl.zstd",
+     "frames": [
+      "{\"type\":\"session\",\"version\":4,\"id\":\"a1\",\"createdAt\":1791337579861,\"isSeeded\":false,\"delegationDepth\":0}\n",
+      "not json\n"
+     ]
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "generation",
+    "reason": "newer-format",
+    "kind": "unsupported",
+    "path": "_no-cwd/a1/session.v4.jsonl.zstd"
+   }
+  },
+  {
+   "id": "older-generation-only",
+   "platforms": [
+    "posix"
+   ],
+   "platformReason": "The frozen fixture records the POSIX cwd /work.",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "released-v0-real-shapes",
+   "layout": [
+    {
+     "file": "root/--work--/released-v0-real-shapes/session.jsonl",
+     "log": {
+      "input": "released-v0"
+     }
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "generation",
+    "reason": null,
+    "kind": "unsupported",
+    "path": "--work--/released-v0-real-shapes/session.jsonl",
+    "message": "format v2 surface before first step cannot acquire a system head without changing chronology"
+   },
+   "rust": {
+    "outcome": "refused",
+    "stage": "generation",
+    "reason": "migration-required",
+    "kind": "native-limit",
+    "path": "--work--/released-v0-real-shapes/session.jsonl"
+   }
+  },
+  {
+   "id": "older-generation-migrates",
+   "platforms": [
+    "posix"
+   ],
+   "platformReason": "The header cwd /work is POSIX-absolute.",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "released-v2-replacement",
+   "layout": [
+    {
+     "file": "root/--work--/released-v2-replacement/session.v2.jsonl",
+     "text": "{\"type\":\"session\",\"version\":2,\"id\":\"released-v2-replacement\",\"createdAt\":1000,\"cwd\":\"/work\",\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":2,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"user/message\",\"seq\":2,\"time\":3,\"data\":{\"id\":\"original\",\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"question\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"user/message\",\"seq\":3,\"time\":4,\"data\":{\"id\":\"summary\",\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"question\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":{\"op\":\"replace\",\"start\":2,\"end\":2},\"sourceEventSeqs\":[2]}\n{\"type\":\"step/end\",\"seq\":4,\"time\":5,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":5,\"time\":6,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n"
+    }
+   ],
+   "ts": {
+    "outcome": "restored",
+    "path": "--work--/released-v2-replacement/session.v2.jsonl",
+    "header": {
+     "id": "released-v2-replacement",
+     "cwd": "/work"
+    },
+    "storedEventCount": 7
+   },
+   "rust": {
+    "outcome": "refused",
+    "stage": "generation",
+    "reason": "migration-required",
+    "kind": "native-limit",
+    "path": "--work--/released-v2-replacement/session.v2.jsonl"
+   }
+  },
+  {
+   "id": "zstd-root-with-plain-v0-name",
+   "compression": "zstd",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.jsonl",
+     "text": "not a log\n"
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "layout",
+    "reason": "encoding-mismatch",
+    "kind": "invalid",
+    "path": "_no-cwd/a1/session.jsonl"
+   }
+  },
+  {
+   "id": "unrelated-legacy-flat-file",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn"
+     }
+    },
+    {
+     "file": "root/other/old.jsonl",
+     "text": "x\n"
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "layout",
+    "reason": "legacy-layout",
+    "kind": "invalid",
+    "path": "other/old.jsonl"
+   }
+  },
+  {
+   "id": "unrelated-legacy-flat-zstd",
+   "compression": "zstd",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v3.jsonl.zstd",
+     "log": {
+      "input": "tool-call-turn",
+      "encode": "zstd-raw"
+     }
+    },
+    {
+     "file": "root/--elsewhere--/old.jsonl.zstd",
+     "text": "x"
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "layout",
+    "reason": "legacy-layout",
+    "kind": "invalid",
+    "path": "--elsewhere--/old.jsonl.zstd"
+   }
+  },
+  {
+   "id": "unrelated-encoding-mismatch",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn"
+     }
+    },
+    {
+     "file": "root/other/s2/session.v3.jsonl.zstd",
+     "text": "x"
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "layout",
+    "reason": "encoding-mismatch",
+    "kind": "invalid",
+    "path": "other/s2/session.v3.jsonl.zstd"
+   }
+  },
+  {
+   "id": "selected-encoding-mismatch",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn"
+     }
+    },
+    {
+     "file": "root/_no-cwd/a1/session.v2.jsonl.zstd",
+     "text": "x"
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "layout",
+    "reason": "encoding-mismatch",
+    "kind": "invalid",
+    "path": "_no-cwd/a1/session.v2.jsonl.zstd"
+   }
+  },
+  {
+   "id": "root-level-files-ignored",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn"
+     }
+    },
+    {
+     "file": "root/notes.jsonl",
+     "text": "x\n"
+    },
+    {
+     "file": "root/x.jsonl.zstd",
+     "text": "x"
+    }
+   ],
+   "ts": {
+    "outcome": "restored",
+    "path": "_no-cwd/a1/session.v3.jsonl",
+    "header": {
+     "id": "a1",
+     "cwd": null
+    },
+    "storedEventCount": 16,
+    "closerCount": 0,
+    "messageCount": 5,
+    "inheritedEventCount": 0,
+    "endSeedAppended": true,
+    "torn": null
+   }
+  },
+  {
+   "id": "unrelated-corrupt-sessions-ignored",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn"
+     }
+    },
+    {
+     "file": "root/other/b2/session.v3.jsonl",
+     "text": "garbage\n"
+    },
+    {
+     "file": "root/other/b3/session.v99.jsonl",
+     "text": "garbage\n"
+    }
+   ],
+   "ts": {
+    "outcome": "restored",
+    "path": "_no-cwd/a1/session.v3.jsonl",
+    "header": {
+     "id": "a1",
+     "cwd": null
+    },
+    "storedEventCount": 16,
+    "closerCount": 0,
+    "messageCount": 5,
+    "inheritedEventCount": 0,
+    "endSeedAppended": true,
+    "torn": null
+   }
+  },
+  {
+   "id": "project-symlink-skipped",
+   "platforms": [
+    "posix"
+   ],
+   "platformReason": "Windows needs a privilege to create symlinks.",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "dir": "root"
+    },
+    {
+     "file": "outside/proj/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn"
+     }
+    },
+    {
+     "file": "outside/proj/old.jsonl",
+     "text": "x\n"
+    },
+    {
+     "file": "outside/proj/b1/session.v3.jsonl.zstd",
+     "text": "x"
+    },
+    {
+     "symlink": "root/_no-cwd",
+     "target": "../outside/proj"
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "lookup",
+    "reason": "not-found",
+    "kind": "not-found",
+    "path": null
+   }
+  },
+  {
+   "id": "followed-session-dir",
+   "platforms": [
+    "posix"
+   ],
+   "platformReason": "Windows needs a privilege to create symlinks.",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "dir": "root/_no-cwd"
+    },
+    {
+     "file": "outside/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn"
+     }
+    },
+    {
+     "symlink": "root/_no-cwd/a1",
+     "target": "../../outside/a1"
+    }
+   ],
+   "ts": {
+    "outcome": "restored",
+    "path": "_no-cwd/a1/session.v3.jsonl",
+    "header": {
+     "id": "a1",
+     "cwd": null
+    },
+    "storedEventCount": 16,
+    "closerCount": 0,
+    "messageCount": 5,
+    "inheritedEventCount": 0,
+    "endSeedAppended": true,
+    "torn": null
+   }
+  },
+  {
+   "id": "followed-session-dir-encoding-mismatch",
+   "platforms": [
+    "posix"
+   ],
+   "platformReason": "Windows needs a privilege to create symlinks.",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "dir": "root/_no-cwd"
+    },
+    {
+     "file": "outside/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn"
+     }
+    },
+    {
+     "file": "outside/a1/session.v2.jsonl.zstd",
+     "text": "x"
+    },
+    {
+     "symlink": "root/_no-cwd/a1",
+     "target": "../../outside/a1"
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "lookup",
+    "reason": "encoding-mismatch",
+    "kind": "invalid",
+    "path": "_no-cwd/a1/session.v2.jsonl.zstd"
+   }
+  },
+  {
+   "id": "id-legacy-flat-symlink",
+   "platforms": [
+    "posix"
+   ],
+   "platformReason": "Windows needs a privilege to create symlinks.",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn"
+     }
+    },
+    {
+     "file": "outside/flat.txt",
+     "text": "x\n"
+    },
+    {
+     "symlink": "root/_no-cwd/a1.jsonl",
+     "target": "../../outside/flat.txt"
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "lookup",
+    "reason": "legacy-layout",
+    "kind": "invalid",
+    "path": "_no-cwd/a1.jsonl"
+   }
+  },
+  {
+   "id": "id-legacy-dangling-symlink",
+   "platforms": [
+    "posix"
+   ],
+   "platformReason": "Windows needs a privilege to create symlinks.",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn"
+     }
+    },
+    {
+     "symlink": "root/_no-cwd/a1.jsonl.zstd",
+     "target": "../../outside/missing"
+    }
+   ],
+   "ts": {
+    "outcome": "restored",
+    "path": "_no-cwd/a1/session.v3.jsonl",
+    "header": {
+     "id": "a1",
+     "cwd": null
+    },
+    "storedEventCount": 16,
+    "closerCount": 0,
+    "messageCount": 5,
+    "inheritedEventCount": 0,
+    "endSeedAppended": true,
+    "torn": null
+   }
+  },
+  {
+   "id": "duplicate-id-through-symlink",
+   "platforms": [
+    "posix"
+   ],
+   "platformReason": "Windows needs a privilege to create symlinks.",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn"
+     }
+    },
+    {
+     "dir": "root/other"
+    },
+    {
+     "symlink": "root/other/a1",
+     "target": "../_no-cwd/a1"
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "lookup",
+    "reason": "duplicate-id",
+    "kind": "invalid",
+    "path": null
+   }
+  },
+  {
+   "id": "duplicate-id-beats-corrupt-copy",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn"
+     }
+    },
+    {
+     "file": "root/other/a1/session.v3.jsonl",
+     "text": "garbage\n"
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "lookup",
+    "reason": "duplicate-id",
+    "kind": "invalid",
+    "path": null
+   }
+  },
+  {
+   "id": "not-found-empty-root",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "dir": "root"
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "lookup",
+    "reason": "not-found",
+    "kind": "not-found",
+    "path": null
+   }
+  },
+  {
+   "id": "not-found-absent-root",
+   "compression": "none",
+   "root": "missing",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "dir": "elsewhere"
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "lookup",
+    "reason": "not-found",
+    "kind": "not-found",
+    "path": null
+   }
+  },
+  {
+   "id": "not-found-other-id",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/b1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn",
+      "header": "{\"type\":\"session\",\"version\":3,\"id\":\"b1\",\"createdAt\":1791337579861,\"isSeeded\":false,\"delegationDepth\":0}"
+     }
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "lookup",
+    "reason": "not-found",
+    "kind": "not-found",
+    "path": null
+   }
+  },
+  {
+   "id": "not-found-empty-session-dir",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "dir": "root/_no-cwd/a1"
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "lookup",
+    "reason": "not-found",
+    "kind": "not-found",
+    "path": null
+   }
+  },
+  {
+   "id": "root-is-file",
+   "platforms": [
+    "posix"
+   ],
+   "platformReason": "Node's error code for listing a file on Windows is not derived here.",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root",
+     "text": "x"
+    }
+   ],
+   "ts": {
+    "outcome": "failure",
+    "stage": "root",
+    "code": "ENOTDIR"
+   },
+   "nativeDiagnostic": {
+    "text": "cannot list",
+    "path": "root"
+   }
+  },
+  {
+   "id": "id-names-a-file",
+   "platforms": [
+    "posix"
+   ],
+   "platformReason": "Node's error code for listing a file on Windows is not derived here.",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1",
+     "text": "x"
+    }
+   ],
+   "ts": {
+    "outcome": "failure",
+    "stage": "lookup",
+    "code": "ENOTDIR"
+   },
+   "nativeDiagnostic": {
+    "text": "cannot list",
+    "path": "root/_no-cwd/a1"
+   }
+  },
+  {
+   "id": "id-mismatch",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "want",
+   "layout": [
+    {
+     "file": "root/_no-cwd/want/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn"
+     }
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "identity",
+    "reason": "id-mismatch",
+    "kind": "invalid",
+    "path": "_no-cwd/want/session.v3.jsonl"
+   }
+  },
+  {
+   "id": "path-mismatch-project",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/other/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn"
+     }
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "identity",
+    "reason": "path-mismatch",
+    "kind": "invalid",
+    "path": "other/a1/session.v3.jsonl"
+   }
+  },
+  {
+   "id": "corrupt-body-beats-identity",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "want",
+   "layout": [
+    {
+     "file": "root/_no-cwd/want/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn",
+      "edits": [
+       {
+        "row": 3,
+        "text": "not json"
+       }
+      ]
+     }
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "scan",
+    "reason": null,
+    "kind": "invalid",
+    "path": "_no-cwd/want/session.v3.jsonl",
+    "message": "corrupt session log: unparsable committed event at line 4"
+   }
+  },
+  {
+   "id": "zstd-corrupt-frame-beats-identity",
+   "compression": "zstd",
+   "root": "root",
+   "sessionId": "want",
+   "layout": [
+    {
+     "file": "root/_no-cwd/want/session.v3.jsonl.zstd",
+     "frames": [
+      "{\"type\":\"session\",\"version\":3,\"id\":\"a1\",\"createdAt\":1791337579861,\"isSeeded\":false,\"delegationDepth\":0}\n"
+     ],
+     "appendHex": "00000000"
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "scan",
+    "reason": null,
+    "kind": "invalid",
+    "path": "_no-cwd/want/session.v3.jsonl.zstd",
+    "message": "corrupt Zstandard session log: invalid frame magic at byte 113"
+   }
+  },
+  {
+   "id": "identity-beats-restore",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "want",
+   "layout": [
+    {
+     "file": "root/_no-cwd/want/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn",
+      "edits": [
+       {
+        "row": 7,
+        "text": "{\"type\":\"x/unknown\",\"seq\":7,\"time\":1791337579866,\"data\":{}}"
+       }
+      ]
+     }
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "identity",
+    "reason": "id-mismatch",
+    "kind": "invalid",
+    "path": "_no-cwd/want/session.v3.jsonl"
+   }
+  },
+  {
+   "id": "restore-after-identity",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn",
+      "edits": [
+       {
+        "row": 7,
+        "text": "{\"type\":\"x/unknown\",\"seq\":7,\"time\":1791337579866,\"data\":{}}"
+       }
+      ]
+     }
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "restore",
+    "reason": null,
+    "kind": "unsupported",
+    "path": "_no-cwd/a1/session.v3.jsonl",
+    "message": "session \"a1\" contains event type \"x/unknown\" (seq 7) unknown to this harness and not marked ignorable; refusing to interpret the log — it was likely written by a newer harness"
+   },
+   "rust": {
+    "outcome": "refused",
+    "stage": "restore",
+    "reason": null,
+    "kind": "unsupported",
+    "path": "_no-cwd/a1/session.v3.jsonl"
+   }
+  },
+  {
+   "id": "realpath-alias",
+   "platforms": [
+    "posix"
+   ],
+   "platformReason": "Windows needs a privilege to create symlinks.",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/real/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn",
+      "header": "{\"type\":\"session\",\"version\":3,\"id\":\"a1\",\"createdAt\":1791337579861,\"cwd\":\"/alias\",\"isSeeded\":false,\"delegationDepth\":0}"
+     }
+    },
+    {
+     "symlink": "root/--alias--",
+     "target": "real"
+    }
+   ],
+   "ts": {
+    "outcome": "restored",
+    "path": "real/a1/session.v3.jsonl",
+    "header": {
+     "id": "a1",
+     "cwd": "/alias"
+    },
+    "storedEventCount": 16,
+    "closerCount": 0,
+    "messageCount": 5,
+    "inheritedEventCount": 0,
+    "endSeedAppended": true,
+    "torn": null
+   }
+  },
+  {
+   "id": "realpath-alias-missing",
+   "platforms": [
+    "posix"
+   ],
+   "platformReason": "The header cwd is POSIX-absolute.",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/real/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn",
+      "header": "{\"type\":\"session\",\"version\":3,\"id\":\"a1\",\"createdAt\":1791337579861,\"cwd\":\"/alias\",\"isSeeded\":false,\"delegationDepth\":0}"
+     }
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "identity",
+    "reason": "path-mismatch",
+    "kind": "invalid",
+    "path": "real/a1/session.v3.jsonl"
+   }
+  },
+  {
+   "id": "case-alias-posix",
+   "platforms": [
+    "posix"
+   ],
+   "platformReason": "The header cwd is POSIX-absolute; case-alias-win32 covers Windows.",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/--work--/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn",
+      "header": "{\"type\":\"session\",\"version\":3,\"id\":\"a1\",\"createdAt\":1791337579861,\"cwd\":\"/Work\",\"isSeeded\":false,\"delegationDepth\":0}"
+     }
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "identity",
+    "reason": "path-mismatch",
+    "kind": "invalid",
+    "path": "--work--/a1/session.v3.jsonl"
+   },
+   "whenCaseInsensitive": {
+    "outcome": "restored",
+    "path": "--work--/a1/session.v3.jsonl",
+    "header": {
+     "id": "a1",
+     "cwd": "/Work"
+    },
+    "storedEventCount": 16,
+    "closerCount": 0,
+    "messageCount": 5,
+    "inheritedEventCount": 0,
+    "endSeedAppended": true,
+    "torn": null
+   }
+  },
+  {
+   "id": "case-alias-win32",
+   "platforms": [
+    "win32"
+   ],
+   "platformReason": "The header cwd is Win32-absolute; case-alias-posix covers POSIX.",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/--c-work--/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn",
+      "header": "{\"type\":\"session\",\"version\":3,\"id\":\"a1\",\"createdAt\":1791337579861,\"cwd\":\"C:\\\\Work\",\"isSeeded\":false,\"delegationDepth\":0}"
+     }
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "identity",
+    "reason": "path-mismatch",
+    "kind": "invalid",
+    "path": "--c-work--/a1/session.v3.jsonl"
+   },
+   "whenCaseInsensitive": {
+    "outcome": "restored",
+    "path": "--c-work--/a1/session.v3.jsonl",
+    "header": {
+     "id": "a1",
+     "cwd": "C:\\Work"
+    },
+    "storedEventCount": 16,
+    "closerCount": 0,
+    "messageCount": 5,
+    "inheritedEventCount": 0,
+    "endSeedAppended": true,
+    "torn": null
+   }
+  },
+  {
+   "id": "root-dot-dot-through-symlink",
+   "platforms": [
+    "posix"
+   ],
+   "platformReason": "Windows needs a privilege to create symlinks.",
+   "compression": "none",
+   "root": "link/../root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn"
+     }
+    },
+    {
+     "dir": "deep/sub"
+    },
+    {
+     "symlink": "link",
+     "target": "deep/sub"
+    }
+   ],
+   "ts": {
+    "outcome": "restored",
+    "path": "_no-cwd/a1/session.v3.jsonl",
+    "header": {
+     "id": "a1",
+     "cwd": null
+    },
+    "storedEventCount": 16,
+    "closerCount": 0,
+    "messageCount": 5,
+    "inheritedEventCount": 0,
+    "endSeedAppended": true,
+    "torn": null
+   }
+  },
+  {
+   "id": "root-symlink",
+   "platforms": [
+    "posix"
+   ],
+   "platformReason": "Windows needs a privilege to create symlinks.",
+   "compression": "none",
+   "root": "rootlink",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn"
+     }
+    },
+    {
+     "symlink": "rootlink",
+     "target": "root"
+    }
+   ],
+   "ts": {
+    "outcome": "restored",
+    "path": "_no-cwd/a1/session.v3.jsonl",
+    "header": {
+     "id": "a1",
+     "cwd": null
+    },
+    "storedEventCount": 16,
+    "closerCount": 0,
+    "messageCount": 5,
+    "inheritedEventCount": 0,
+    "endSeedAppended": true,
+    "torn": null
+   }
+  },
+  {
+   "id": "root-dot-segments",
+   "compression": "none",
+   "root": "./root/.",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn"
+     }
+    }
+   ],
+   "ts": {
+    "outcome": "restored",
+    "path": "_no-cwd/a1/session.v3.jsonl",
+    "header": {
+     "id": "a1",
+     "cwd": null
+    },
+    "storedEventCount": 16,
+    "closerCount": 0,
+    "messageCount": 5,
+    "inheritedEventCount": 0,
+    "endSeedAppended": true,
+    "torn": null
+   }
+  },
+  {
+   "id": "entry-budget-exact",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn"
+     }
+    },
+    {
+     "file": "root/other/b1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn",
+      "header": "{\"type\":\"session\",\"version\":3,\"id\":\"b1\",\"createdAt\":1791337579861,\"isSeeded\":false,\"delegationDepth\":0}"
+     }
+    },
+    {
+     "file": "root/other/x.txt",
+     "text": "x"
+    }
+   ],
+   "maxEntries": 8,
+   "ts": {
+    "outcome": "restored",
+    "path": "_no-cwd/a1/session.v3.jsonl",
+    "header": {
+     "id": "a1",
+     "cwd": null
+    },
+    "storedEventCount": 16,
+    "closerCount": 0,
+    "messageCount": 5,
+    "inheritedEventCount": 0,
+    "endSeedAppended": true,
+    "torn": null
+   }
+  },
+  {
+   "id": "entry-budget-exceeded",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn"
+     }
+    },
+    {
+     "file": "root/other/b1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn",
+      "header": "{\"type\":\"session\",\"version\":3,\"id\":\"b1\",\"createdAt\":1791337579861,\"isSeeded\":false,\"delegationDepth\":0}"
+     }
+    },
+    {
+     "file": "root/other/x.txt",
+     "text": "x"
+    }
+   ],
+   "maxEntries": 7,
+   "ts": {
+    "outcome": "restored",
+    "path": "_no-cwd/a1/session.v3.jsonl",
+    "header": {
+     "id": "a1",
+     "cwd": null
+    },
+    "storedEventCount": 16,
+    "closerCount": 0,
+    "messageCount": 5,
+    "inheritedEventCount": 0,
+    "endSeedAppended": true,
+    "torn": null
+   },
+   "rust": {
+    "outcome": "refused",
+    "stage": "lookup",
+    "reason": "entry-budget",
+    "kind": "native-limit",
+    "path": null
+   }
+  },
+  {
+   "id": "byte-budget-exact",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn"
+     }
+    }
+   ],
+   "maxBytes": 4533,
+   "ts": {
+    "outcome": "restored",
+    "path": "_no-cwd/a1/session.v3.jsonl",
+    "header": {
+     "id": "a1",
+     "cwd": null
+    },
+    "storedEventCount": 16,
+    "closerCount": 0,
+    "messageCount": 5,
+    "inheritedEventCount": 0,
+    "endSeedAppended": true,
+    "torn": null
+   }
+  },
+  {
+   "id": "byte-budget-exceeded",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn"
+     }
+    }
+   ],
+   "maxBytes": 4532,
+   "ts": {
+    "outcome": "restored",
+    "path": "_no-cwd/a1/session.v3.jsonl",
+    "header": {
+     "id": "a1",
+     "cwd": null
+    },
+    "storedEventCount": 16,
+    "closerCount": 0,
+    "messageCount": 5,
+    "inheritedEventCount": 0,
+    "endSeedAppended": true,
+    "torn": null
+   },
+   "rust": {
+    "outcome": "failure",
+    "stage": "read",
+    "budget": "max-bytes"
+   },
+   "nativeDiagnostic": {
+    "text": "is 4533 bytes, over --max-bytes 4532",
+    "path": "root/_no-cwd/a1/session.v3.jsonl"
+   }
+  },
+  {
+   "id": "source-budget-exact",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn",
+      "edits": [
+       {
+        "row": 10,
+        "find": "\"sourceEventSeqs\":[9]",
+        "replace": "\"sourceEventSeqs\":[[8,9]]"
+       }
+      ]
+     }
+    }
+   ],
+   "maxSourceSeqs": 2,
+   "ts": {
+    "outcome": "restored",
+    "path": "_no-cwd/a1/session.v3.jsonl",
+    "header": {
+     "id": "a1",
+     "cwd": null
+    },
+    "storedEventCount": 16,
+    "closerCount": 0,
+    "messageCount": 5,
+    "inheritedEventCount": 0,
+    "endSeedAppended": true,
+    "torn": null
+   }
+  },
+  {
+   "id": "source-budget-exceeded",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn",
+      "edits": [
+       {
+        "row": 10,
+        "find": "\"sourceEventSeqs\":[9]",
+        "replace": "\"sourceEventSeqs\":[[8,9]]"
+       }
+      ]
+     }
+    }
+   ],
+   "maxSourceSeqs": 1,
+   "ts": {
+    "outcome": "restored",
+    "path": "_no-cwd/a1/session.v3.jsonl",
+    "header": {
+     "id": "a1",
+     "cwd": null
+    },
+    "storedEventCount": 16,
+    "closerCount": 0,
+    "messageCount": 5,
+    "inheritedEventCount": 0,
+    "endSeedAppended": true,
+    "torn": null
+   },
+   "rust": {
+    "outcome": "refused",
+    "stage": "scan",
+    "reason": null,
+    "kind": "native-limit",
+    "path": "_no-cwd/a1/session.v3.jsonl",
+    "message": "an event's sourceEventSeqs expand past --max-source-seqs 1"
+   }
+  },
+  {
+   "id": "non-utf8-project-name",
+   "platforms": [
+    "linux"
+   ],
+   "platformReason": "Only Linux file systems here accept names that are not UTF-8.",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn"
+     }
+    },
+    {
+     "dir": "root",
+     "rawNameHex": "66ff"
+    }
+   ],
+   "ts": {
+    "outcome": "failure",
+    "stage": "layout",
+    "code": "ENOENT"
+   },
+   "rust": {
+    "outcome": "refused",
+    "stage": "layout",
+    "reason": "non-utf8-name",
+    "kind": "native-limit",
+    "path": null
+   }
+  },
+  {
+   "id": "future-header-object-id",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v4.jsonl",
+     "text": "{\"type\":\"session\",\"version\":4,\"id\":{\"toString\":0,\"valueOf\":0},\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+    }
+   ],
+   "ts": {
+    "outcome": "type-error",
+    "stage": "generation"
+   },
+   "rust": {
+    "outcome": "refused",
+    "stage": "generation",
+    "reason": null,
+    "kind": "native-limit",
+    "path": "_no-cwd/a1/session.v4.jsonl"
+   }
+  },
+  {
+   "id": "future-header-object-id-retired-fields",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v4.jsonl",
+     "text": "{\"type\":\"session\",\"version\":4,\"id\":{\"toString\":0,\"valueOf\":0},\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0,\"sandboxMode\":\"x\"}\n"
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "generation",
+    "reason": "retired-header-fields",
+    "kind": "invalid",
+    "path": "_no-cwd/a1/session.v4.jsonl"
+   }
+  },
+  {
+   "id": "future-header-object-id-version-mismatch",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v4.jsonl",
+     "text": "{\"type\":\"session\",\"version\":5,\"id\":{\"toString\":0,\"valueOf\":0},\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "generation",
+    "reason": "generation-header-mismatch",
+    "kind": "invalid",
+    "path": "_no-cwd/a1/session.v4.jsonl"
+   }
+  },
+  {
+   "id": "future-header-array-id",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v4.jsonl",
+     "text": "{\"type\":\"session\",\"version\":4,\"id\":[\"x\"],\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "generation",
+    "reason": "newer-format",
+    "kind": "unsupported",
+    "path": "_no-cwd/a1/session.v4.jsonl"
+   },
+   "rust": {
+    "outcome": "refused",
+    "stage": "generation",
+    "reason": null,
+    "kind": "native-limit",
+    "path": "_no-cwd/a1/session.v4.jsonl"
+   }
+  },
+  {
+   "id": "future-header-trailing-garbage-plain",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v4.jsonl",
+     "text": "{\"type\":\"session\",\"version\":4,\"id\":\"a1\",\"createdAt\":1791337579861,\"isSeeded\":false,\"delegationDepth\":0}\ngarbage"
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "generation",
+    "reason": "newer-format",
+    "kind": "unsupported",
+    "path": "_no-cwd/a1/session.v4.jsonl"
+   }
+  },
+  {
+   "id": "future-header-trailing-corrupt-zstd",
+   "compression": "zstd",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v4.jsonl.zstd",
+     "frames": [
+      "{\"type\":\"session\",\"version\":4,\"id\":\"a1\",\"createdAt\":1791337579861,\"isSeeded\":false,\"delegationDepth\":0}\n"
+     ],
+     "appendHex": "00000000"
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "generation",
+    "reason": "newer-format",
+    "kind": "unsupported",
+    "path": "_no-cwd/a1/session.v4.jsonl.zstd"
+   }
+  },
+  {
+   "id": "future-zstd-corrupt-first-frame",
+   "compression": "zstd",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v4.jsonl.zstd",
+     "text": "garbage"
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "generation",
+    "reason": null,
+    "kind": "invalid",
+    "path": "_no-cwd/a1/session.v4.jsonl.zstd",
+    "message": "corrupt Zstandard session log: invalid frame magic at byte 0"
+   }
+  },
+  {
+   "id": "future-dangling-symlink",
+   "platforms": [
+    "posix"
+   ],
+   "platformReason": "Windows needs a privilege to create symlinks.",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "dir": "root/_no-cwd/a1"
+    },
+    {
+     "symlink": "root/_no-cwd/a1/session.v4.jsonl",
+     "target": "../../../outside/missing"
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "generation",
+    "reason": "malformed-header",
+    "kind": "invalid",
+    "path": "_no-cwd/a1/session.v4.jsonl"
+   }
+  },
+  {
+   "id": "current-dangling-symlink",
+   "platforms": [
+    "posix"
+   ],
+   "platformReason": "Windows needs a privilege to create symlinks.",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "dir": "root/_no-cwd/a1"
+    },
+    {
+     "symlink": "root/_no-cwd/a1/session.v3.jsonl",
+     "target": "../../../outside/missing"
+    }
+   ],
+   "ts": {
+    "outcome": "failure",
+    "stage": "read",
+    "code": "ENOENT"
+   },
+   "nativeDiagnostic": {
+    "text": "cannot open",
+    "path": "root/_no-cwd/a1/session.v3.jsonl"
+   }
+  },
+  {
+   "id": "future-directory-over-current",
+   "platforms": [
+    "posix"
+   ],
+   "platformReason": "Node's error code for reading a directory on Windows is not derived here.",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn"
+     }
+    },
+    {
+     "dir": "root/_no-cwd/a1/session.v4.jsonl"
+    }
+   ],
+   "ts": {
+    "outcome": "failure",
+    "stage": "generation",
+    "code": "EISDIR"
+   },
+   "nativeDiagnostic": {
+    "text": "is not a regular file",
+    "path": "root/_no-cwd/a1/session.v4.jsonl"
+   }
+  },
+  {
+   "id": "current-directory-over-historical",
+   "platforms": [
+    "posix"
+   ],
+   "platformReason": "Node's error code for reading a directory on Windows is not derived here.",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "dir": "root/_no-cwd/a1/session.v3.jsonl"
+    },
+    {
+     "file": "root/_no-cwd/a1/session.v2.jsonl",
+     "text": "not a log\n"
+    }
+   ],
+   "ts": {
+    "outcome": "failure",
+    "stage": "read",
+    "code": "EISDIR"
+   },
+   "nativeDiagnostic": {
+    "text": "is not a regular file",
+    "path": "root/_no-cwd/a1/session.v3.jsonl"
+   }
+  },
+  {
+   "id": "opposite-encoding-directory-entry",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn"
+     }
+    },
+    {
+     "dir": "root/_no-cwd/a1/session.v2.jsonl.zstd"
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "layout",
+    "reason": "encoding-mismatch",
+    "kind": "invalid",
+    "path": "_no-cwd/a1/session.v2.jsonl.zstd"
+   }
+  },
+  {
+   "id": "hardlink-is-not-an-alias",
+   "platforms": [
+    "posix"
+   ],
+   "platformReason": "Windows needs a privilege to create symlinks.",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/real/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn",
+      "header": "{\"type\":\"session\",\"version\":3,\"id\":\"a1\",\"createdAt\":1791337579861,\"cwd\":\"/alias\",\"isSeeded\":false,\"delegationDepth\":0}"
+     }
+    },
+    {
+     "hardlink": "outside/aliasproj/a1/session.v3.jsonl",
+     "target": "root/real/a1/session.v3.jsonl"
+    },
+    {
+     "symlink": "root/--alias--",
+     "target": "../outside/aliasproj"
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "identity",
+    "reason": "path-mismatch",
+    "kind": "invalid",
+    "path": "real/a1/session.v3.jsonl"
+   }
+  },
+  {
+   "id": "current-name-foreign-header-before-identity",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "want",
+   "layout": [
+    {
+     "file": "root/_no-cwd/want/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn",
+      "header": "{\"type\":\"session\",\"version\":4,\"id\":\"a1\",\"createdAt\":1791337579861,\"isSeeded\":false,\"delegationDepth\":0}"
+     }
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "scan",
+    "reason": null,
+    "kind": "unsupported",
+    "path": "_no-cwd/want/session.v3.jsonl"
+   }
+  },
+  {
+   "id": "legacy-before-opposite-in-one-project",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn"
+     }
+    },
+    {
+     "file": "root/other/old.jsonl",
+     "text": "x\n"
+    },
+    {
+     "file": "root/other/s2/session.v3.jsonl.zstd",
+     "text": "x"
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "layout",
+    "reason": "legacy-layout",
+    "kind": "invalid",
+    "path": "other/old.jsonl"
+   }
+  },
+  {
+   "id": "layout-before-duplicate",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn"
+     }
+    },
+    {
+     "file": "root/other/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn"
+     }
+    },
+    {
+     "file": "root/other/s2/session.v3.jsonl.zstd",
+     "text": "x"
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "layout",
+    "reason": "encoding-mismatch",
+    "kind": "invalid",
+    "path": "other/s2/session.v3.jsonl.zstd"
+   }
+  },
+  {
+   "id": "root-dot-dot-lexical",
+   "compression": "none",
+   "root": "x/../root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn"
+     }
+    }
+   ],
+   "ts": {
+    "outcome": "restored",
+    "path": "_no-cwd/a1/session.v3.jsonl",
+    "header": {
+     "id": "a1",
+     "cwd": null
+    },
+    "storedEventCount": 16,
+    "closerCount": 0,
+    "messageCount": 5,
+    "inheritedEventCount": 0,
+    "endSeedAppended": true,
+    "torn": null
+   }
+  },
+  {
+   "id": "root-backslash-dot-dot",
+   "platforms": [
+    "win32"
+   ],
+   "platformReason": "A backslash separates names only on Windows.",
+   "compression": "none",
+   "root": "x\\..\\root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn"
+     }
+    }
+   ],
+   "ts": {
+    "outcome": "restored",
+    "path": "_no-cwd/a1/session.v3.jsonl",
+    "header": {
+     "id": "a1",
+     "cwd": null
+    },
+    "storedEventCount": 16,
+    "closerCount": 0,
+    "messageCount": 5,
+    "inheritedEventCount": 0,
+    "endSeedAppended": true,
+    "torn": null
+   }
+  },
+  {
+   "id": "case-insensitive-id",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/A1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn",
+      "header": "{\"type\":\"session\",\"version\":3,\"id\":\"A1\",\"createdAt\":1791337579861,\"isSeeded\":false,\"delegationDepth\":0}"
+     }
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "lookup",
+    "reason": "not-found",
+    "kind": "not-found",
+    "path": null
+   },
+   "whenCaseInsensitive": {
+    "outcome": "refused",
+    "stage": "identity",
+    "reason": "id-mismatch",
+    "kind": "invalid",
+    "path": "_no-cwd/a1/session.v3.jsonl"
+   }
+  },
+  {
+   "id": "plaintext-budget-exact",
+   "compression": "zstd",
+   "root": "root",
+   "sessionId": "zstd-fixture",
+   "layout": [
+    {
+     "file": "root/_no-cwd/zstd-fixture/session.v3.jsonl.zstd",
+     "zstdCase": "production-compressed-block"
+    }
+   ],
+   "maxBytes": 418,
+   "ts": {
+    "outcome": "restored",
+    "path": "_no-cwd/zstd-fixture/session.v3.jsonl.zstd",
+    "header": {
+     "id": "zstd-fixture",
+     "cwd": null
+    },
+    "storedEventCount": 3,
+    "closerCount": 0,
+    "messageCount": 1,
+    "inheritedEventCount": 0,
+    "endSeedAppended": false,
+    "torn": null
+   }
+  },
+  {
+   "id": "plaintext-budget-exceeded",
+   "compression": "zstd",
+   "root": "root",
+   "sessionId": "zstd-fixture",
+   "layout": [
+    {
+     "file": "root/_no-cwd/zstd-fixture/session.v3.jsonl.zstd",
+     "zstdCase": "production-compressed-block"
+    }
+   ],
+   "maxBytes": 417,
+   "ts": {
+    "outcome": "restored",
+    "path": "_no-cwd/zstd-fixture/session.v3.jsonl.zstd",
+    "header": {
+     "id": "zstd-fixture",
+     "cwd": null
+    },
+    "storedEventCount": 3,
+    "closerCount": 0,
+    "messageCount": 1,
+    "inheritedEventCount": 0,
+    "endSeedAppended": false,
+    "torn": null
+   },
+   "rust": {
+    "outcome": "refused",
+    "stage": "scan",
+    "reason": null,
+    "kind": "native-limit",
+    "path": "_no-cwd/zstd-fixture/session.v3.jsonl.zstd",
+    "message": "decoded plaintext exceeds --max-bytes 417"
+   }
+  },
+  {
+   "id": "future-header-whole-file-budget-exact",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v4.jsonl",
+     "text": "{\"type\":\"session\",\"version\":4,\"id\":\"a1\",\"createdAt\":1791337579861,\"isSeeded\":false,\"delegationDepth\":0}\ngarbage"
+    }
+   ],
+   "maxBytes": 111,
+   "ts": {
+    "outcome": "refused",
+    "stage": "generation",
+    "reason": "newer-format",
+    "kind": "unsupported",
+    "path": "_no-cwd/a1/session.v4.jsonl"
+   }
+  },
+  {
+   "id": "future-header-whole-file-budget-exceeded",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v4.jsonl",
+     "text": "{\"type\":\"session\",\"version\":4,\"id\":\"a1\",\"createdAt\":1791337579861,\"isSeeded\":false,\"delegationDepth\":0}\ngarbage"
+    }
+   ],
+   "maxBytes": 110,
+   "ts": {
+    "outcome": "refused",
+    "stage": "generation",
+    "reason": "newer-format",
+    "kind": "unsupported",
+    "path": "_no-cwd/a1/session.v4.jsonl"
+   },
+   "rust": {
+    "outcome": "failure",
+    "stage": "generation",
+    "budget": "max-bytes"
+   },
+   "nativeDiagnostic": {
+    "text": "is 111 bytes, over --max-bytes 110",
+    "path": "root/_no-cwd/a1/session.v4.jsonl"
+   }
+  },
+  {
+   "id": "non-utf8-session-dir",
+   "platforms": [
+    "linux"
+   ],
+   "platformReason": "Only Linux file systems here accept names that are not UTF-8.",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn"
+     }
+    },
+    {
+     "dir": "root/_no-cwd",
+     "rawNameHex": "66ff"
+    }
+   ],
+   "ts": {
+    "outcome": "restored",
+    "path": "_no-cwd/a1/session.v3.jsonl",
+    "header": {
+     "id": "a1",
+     "cwd": null
+    },
+    "storedEventCount": 16,
+    "closerCount": 0,
+    "messageCount": 5,
+    "inheritedEventCount": 0,
+    "endSeedAppended": true,
+    "torn": null
+   },
+   "rust": {
+    "outcome": "refused",
+    "stage": "layout",
+    "reason": "non-utf8-name",
+    "kind": "native-limit",
+    "path": null
+   }
+  },
+  {
+   "id": "non-utf8-session-dir-file-alias",
+   "platforms": [
+    "linux"
+   ],
+   "platformReason": "Only Linux file systems here accept names that are not UTF-8.",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/_no-cwd/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn"
+     }
+    },
+    {
+     "dir": "root/_no-cwd",
+     "rawNameHex": "66ff"
+    },
+    {
+     "file": "root/_no-cwd/f�",
+     "text": "x"
+    }
+   ],
+   "ts": {
+    "outcome": "failure",
+    "stage": "layout",
+    "code": "ENOTDIR"
+   },
+   "rust": {
+    "outcome": "refused",
+    "stage": "layout",
+    "reason": "non-utf8-name",
+    "kind": "native-limit",
+    "path": null
+   }
+  },
+  {
+   "id": "legacy-named-directory",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "dir": "root/_no-cwd/a1.jsonl"
+    },
+    {
+     "file": "root/_no-cwd/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn"
+     }
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "lookup",
+    "reason": "legacy-layout",
+    "kind": "invalid",
+    "path": "_no-cwd/a1.jsonl"
+   }
+  }
+ ],
+ "reviewAdditions": [
+  "future-header-object-id",
+  "future-header-object-id-retired-fields",
+  "future-header-object-id-version-mismatch",
+  "future-header-array-id",
+  "future-header-trailing-garbage-plain",
+  "future-header-trailing-corrupt-zstd",
+  "future-zstd-corrupt-first-frame",
+  "future-dangling-symlink",
+  "current-dangling-symlink",
+  "future-directory-over-current",
+  "current-directory-over-historical",
+  "opposite-encoding-directory-entry",
+  "hardlink-is-not-an-alias",
+  "current-name-foreign-header-before-identity",
+  "legacy-before-opposite-in-one-project",
+  "layout-before-duplicate",
+  "root-dot-dot-lexical",
+  "root-backslash-dot-dot",
+  "case-insensitive-id",
+  "plaintext-budget-exact",
+  "plaintext-budget-exceeded",
+  "future-header-whole-file-budget-exact",
+  "future-header-whole-file-budget-exceeded",
+  "non-utf8-session-dir",
+  "non-utf8-session-dir-file-alias",
+  "legacy-named-directory"
+ ]
+}

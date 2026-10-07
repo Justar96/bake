@@ -4,9 +4,8 @@
 
 use zstd_safe::{DCtx, InBuffer, OutBuffer};
 
-use crate::restore::restore_scanned;
 use crate::scan::LogScanner;
-use crate::{PathPlatform, RestoreRefusal, RestoredLog, TornTail};
+use crate::{PathPlatform, RestoreRefusal, RestoredLog, StagedLog, TornTail};
 
 /// Production Zstd framing or decoding refusals. Offsets are physical bytes
 /// in the compressed input; plaintext scan refusals remain separate.
@@ -52,8 +51,21 @@ pub fn restore_zstd_log(
     source_budget: usize,
     max_plaintext_bytes: usize,
 ) -> Result<RestoredLog, RestoreRefusal> {
+    stage_zstd_log(log, platform, source_budget, max_plaintext_bytes)?.restore()
+}
+
+/// Decode and scan an in-memory current-format Zstd log, keeping its physical
+/// torn-tail metadata, without the later `validateStoredEvents` passes or
+/// restoration; see [`StagedLog`].
+/// Refuses only with `Zstd`, `Scan`, or `NativePlaintextBudget`.
+pub fn stage_zstd_log(
+    log: &[u8],
+    platform: PathPlatform,
+    source_budget: usize,
+    max_plaintext_bytes: usize,
+) -> Result<StagedLog, RestoreRefusal> {
     use RestoreRefusal::Zstd;
-    let (frames, torn_start) = scan_frames(log).map_err(Zstd)?;
+    let (frames, torn_start) = scan_frames(log, usize::MAX).map_err(Zstd)?;
     let Some(first) = frames.first() else {
         return Err(Zstd(ZstdRefusal::Empty));
     };
@@ -92,12 +104,40 @@ pub fn restore_zstd_log(
     } else {
         None
     };
-    restore_scanned(scanner.finish().map_err(RestoreRefusal::Scan)?, torn)
+    Ok(StagedLog::new(
+        scanner.finish().map_err(RestoreRefusal::Scan)?,
+        torn,
+    ))
+}
+
+/// The first frame's plaintext, as TypeScript's `readFirstZstdLine` reads a
+/// generation header without inspecting the frames after it: `None` when no
+/// complete first frame is present, otherwise one LF-terminated record.
+/// Refuses with `Zstd` for an invalid first frame or one that is not exactly
+/// one header line, and with `NativePlaintextBudget` past
+/// `max_plaintext_bytes`.
+pub fn zstd_header_record(
+    log: &[u8],
+    max_plaintext_bytes: usize,
+) -> Result<Option<Vec<u8>>, RestoreRefusal> {
+    let (frames, _) = scan_frames(log, 1).map_err(RestoreRefusal::Zstd)?;
+    let Some(first) = frames.first() else {
+        return Ok(None);
+    };
+    let header = decode(&log[first.clone()], true, &mut 0, max_plaintext_bytes)
+        .map_err(|error| error.at(first.start, max_plaintext_bytes))?;
+    if header.is_empty() || header.iter().position(|byte| *byte == b'\n') != Some(header.len() - 1)
+    {
+        return Err(RestoreRefusal::Zstd(ZstdRefusal::HeaderFrame));
+    }
+    Ok(Some(header))
 }
 
 type Frames = (Vec<std::ops::Range<usize>>, Option<usize>);
 
-fn scan_frames(bytes: &[u8]) -> Result<Frames, ZstdRefusal> {
+/// Structural frame ranges and the torn final frame's start, stopping after
+/// `max_frames` complete frames as TypeScript's `scanZstdFrames` does.
+fn scan_frames(bytes: &[u8], max_frames: usize) -> Result<Frames, ZstdRefusal> {
     let mut frames = Vec::new();
     let mut offset = 0;
     while offset < bytes.len() {
@@ -162,6 +202,9 @@ fn scan_frames(bytes: &[u8]) -> Result<Frames, ZstdRefusal> {
             offset += 4;
         }
         frames.push(start..offset);
+        if frames.len() == max_frames {
+            return Ok((frames, None));
+        }
     }
     Ok((frames, None))
 }

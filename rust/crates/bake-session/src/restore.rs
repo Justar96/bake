@@ -41,7 +41,8 @@ use crate::repair::interrupted_turn_closers;
 use crate::replay::{KNOWN_EVENT_TYPES, ReplayRefusal, admit, adopt, folded, qualify_payload};
 use crate::request::{FoldRefusal, RequestFold};
 use crate::{
-    PathPlatform, ReplayLimit, ScanRefusal, ScannedLog, SeedRejection, UnadmittedEnvelope, scan_log,
+    PathPlatform, ReplayLimit, ScanRefusal, ScannedLog, SeedRejection, SessionHeader,
+    UnadmittedEnvelope, scan_log,
 };
 
 /// The Session state a stored current-format log restores to.
@@ -195,6 +196,56 @@ pub enum RestoreLimit {
     Projection,
 }
 
+/// A scanned current-format log and its physical recovery metadata, before
+/// the `validateStoredEvents` passes, adoption, and restoration.
+///
+/// TypeScript's `decodeStoredLog` scans the bytes, then checks the header's
+/// stored identity against the artifact path, then runs `validateStoredEvents`.
+/// [`stage_plain_log`] and [`crate::stage_zstd_log`] run the scan, which
+/// already checks the framing, the header, each row's envelope, and the strict
+/// V3 codec; a caller that owns the artifact path checks [`StagedLog::header`]
+/// and then calls [`StagedLog::restore`], which runs the remaining stages on
+/// the same scan.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StagedLog {
+    stored: ScannedLog,
+    torn: Option<TornTail>,
+}
+
+impl StagedLog {
+    pub(crate) const fn new(stored: ScannedLog, torn: Option<TornTail>) -> Self {
+        Self { stored, torn }
+    }
+
+    /// The scanned header's logical metadata.
+    pub const fn header(&self) -> &SessionHeader {
+        self.stored.header()
+    }
+
+    /// Validate, adopt, and restore the scanned events, as
+    /// [`restore_plain_log`] does after its scan. Refuses only with
+    /// `Unsupported`, `Stored`, `Restore`, or `NativeSubset`.
+    pub fn restore(self) -> Result<RestoredLog, RestoreRefusal> {
+        restore_scanned(self.stored, self.torn)
+    }
+}
+
+/// Scan a stored plain current-format log, as [`scan_log`] does, without the
+/// later `validateStoredEvents` passes or restoration. Refuses only with
+/// [`RestoreRefusal::Scan`].
+pub fn stage_plain_log(
+    log: &[u8],
+    platform: PathPlatform,
+    source_budget: usize,
+) -> Result<StagedLog, RestoreRefusal> {
+    let stored = scan_log(log, platform, source_budget).map_err(RestoreRefusal::Scan)?;
+    let torn = (stored.committed_bytes() < log.len()).then_some(TornTail {
+        truncate_to: stored.committed_bytes(),
+        recovered_from: stored.rows().len(),
+    });
+    Ok(StagedLog::new(stored, torn))
+}
+
 /// Restore a stored plain current-format log, as the production read path
 /// does. `log` may end with a torn or recovered tail, which is left out, and
 /// `source_budget` bounds each row's expanded `sourceEventSeqs` as in
@@ -204,15 +255,10 @@ pub fn restore_plain_log(
     platform: PathPlatform,
     source_budget: usize,
 ) -> Result<RestoredLog, RestoreRefusal> {
-    let stored = scan_log(log, platform, source_budget).map_err(RestoreRefusal::Scan)?;
-    let torn = (stored.committed_bytes() < log.len()).then_some(TornTail {
-        truncate_to: stored.committed_bytes(),
-        recovered_from: stored.rows().len(),
-    });
-    restore_scanned(stored, torn)
+    stage_plain_log(log, platform, source_budget)?.restore()
 }
 
-pub(crate) fn restore_scanned(
+fn restore_scanned(
     stored: ScannedLog,
     torn: Option<TornTail>,
 ) -> Result<RestoredLog, RestoreRefusal> {

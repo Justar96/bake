@@ -30,6 +30,9 @@
 //! request context into an immutable [`RestoredLog`]. It is not
 //! Agent resume. [`restore_zstd_log`] restores default-format compressed bytes
 //! with a caller-supplied plaintext budget and physical torn-tail metadata.
+//! [`stage_plain_log`] and [`stage_zstd_log`] stop after the scan, so a caller
+//! can check the stored identity before [`StagedLog::restore`] runs the rest,
+//! and [`zstd_header_record`] decodes only a compressed log's header frame.
 //! None reads or writes a file or encodes a log. The crate is
 //! unstable and unshipped; only the preview's `session inspect` uses it.
 
@@ -52,7 +55,8 @@ pub use offload::OffloadRejection;
 pub use replay::{ReplayLimit, ReplayRefusal, SeedRejection, replay_requests};
 pub use request::Request;
 pub use restore::{
-    RestoreLimit, RestoreRefusal, RestoredLog, TornTail, Unsupported, restore_plain_log,
+    RestoreLimit, RestoreRefusal, RestoredLog, StagedLog, TornTail, Unsupported, restore_plain_log,
+    stage_plain_log,
 };
 pub use scan::{FinishRejection, ScanIssue, ScanLimit, ScanRefusal, ScannedLog, scan_log};
 pub use source_event_seqs::{
@@ -63,7 +67,7 @@ pub use v3_row::{
     Coordinate, Endpoint, EventRejection, StructuralRejection, SystemRecord, V3CodecEvent, V3Limit,
     V3NumberField, V3Rejection, V3RowRefusal, V3Unsupported, decode_v3_row,
 };
-pub use zstd::{ZstdRefusal, restore_zstd_log};
+pub use zstd::{ZstdRefusal, restore_zstd_log, stage_zstd_log, zstd_header_record};
 
 use serde_json::{Map, Value};
 
