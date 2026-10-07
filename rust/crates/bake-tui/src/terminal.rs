@@ -8,25 +8,32 @@
 use std::io::{self, Stdout};
 use std::sync::Once;
 use std::sync::atomic::{AtomicU8, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crossterm::cursor::Show;
 use crossterm::event::{self, DisableBracketedPaste, EnableBracketedPaste, Event};
 use crossterm::execute;
 use crossterm::terminal::{
-    Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+    BeginSynchronizedUpdate, Clear, ClearType, DisableLineWrap, EnableLineWrap,
+    EndSynchronizedUpdate, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
+    enable_raw_mode,
 };
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Rect;
 
+use crate::activity::{self, Tones};
 use crate::app::App;
-use crate::render::render;
+use crate::frame::FrameStyle;
+use crate::render::{View, render};
 
 const OWNED: u8 = 1;
 const RAW: u8 = 1 << 1;
 const ALTERNATE: u8 = 1 << 2;
 const PASTE: u8 = 1 << 3;
+const NO_WRAP: u8 = 1 << 4;
+/// Set while a frame is between synchronized-update markers.
+const SYNC: u8 = 1 << 5;
 
 /// Modes the live session changed. Process-wide so the panic hook can restore
 /// them before the panic message is printed.
@@ -34,6 +41,9 @@ static MODES: AtomicU8 = AtomicU8::new(0);
 
 /// Bounds how long a pending signal waits for the loop to notice it.
 const POLL: Duration = Duration::from_millis(250);
+/// Events applied before a frame is drawn, so a burst of keys or resizes
+/// draws once while signals are still checked between batches.
+const MAX_BATCH: usize = 256;
 
 /// How the preview ended.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -43,9 +53,10 @@ pub enum PreviewExit {
     Signal(i32),
 }
 
-/// Owns raw mode, the alternate screen, bracketed paste, and cursor
-/// visibility. [`TerminalSession::close`] restores them and reports failures;
-/// dropping it restores them silently if `close` did not run.
+/// Owns raw mode, the alternate screen, bracketed paste, autowrap, cursor
+/// visibility, and synchronized output. [`TerminalSession::close`] restores
+/// them and reports failures; dropping it restores them silently if `close`
+/// did not run.
 pub struct TerminalSession {
     terminal: Terminal<CrosstermBackend<Stdout>>,
 }
@@ -69,6 +80,10 @@ impl TerminalSession {
             execute!(out, EnterAlternateScreen, Clear(ClearType::All))?;
             MODES.fetch_or(PASTE, Ordering::SeqCst);
             execute!(out, EnableBracketedPaste)?;
+            // A row the terminal draws wider than measured is clipped at the
+            // right edge instead of wrapping onto the row below.
+            MODES.fetch_or(NO_WRAP, Ordering::SeqCst);
+            execute!(out, DisableLineWrap)?;
             Terminal::new(CrosstermBackend::new(out))
         };
         match setup() {
@@ -87,13 +102,31 @@ impl TerminalSession {
         restore()
     }
 
-    /// Clears the screen and forgets the last frame, so the next draw repaints
-    /// every cell. A shrink and grow between draws can end at the size of the
-    /// last frame while the terminal has reflowed what it showed; Ratatui's own
-    /// size check would then skip the clear and leave stale rows.
-    fn invalidate(&mut self) -> io::Result<()> {
-        let size = self.terminal.size()?;
-        self.terminal.resize(Rect::from(size))
+    /// Draws one frame as a single synchronized update, so a supporting
+    /// terminal never shows it half drawn.
+    ///
+    /// When `stale`, the screen is cleared and the last frame forgotten first,
+    /// so every cell is repainted. A shrink and grow between draws can end at
+    /// the size of the last frame while the terminal has reflowed what it
+    /// showed; Ratatui's own size check would then skip the clear and leave
+    /// stale rows. The clear is inside the update, so a resize does not flash
+    /// an empty screen.
+    fn draw(&mut self, app: &App, view: &mut View, stale: bool) -> io::Result<()> {
+        MODES.fetch_or(SYNC, Ordering::SeqCst);
+        execute!(self.terminal.backend_mut(), BeginSynchronizedUpdate)?;
+        let drawn = (|| {
+            if stale {
+                let size = self.terminal.size()?;
+                self.terminal.resize(Rect::from(size))?;
+            }
+            self.terminal.draw(|frame| render(frame, app, view))?;
+            Ok(())
+        })();
+        let ended = execute!(self.terminal.backend_mut(), EndSynchronizedUpdate);
+        if ended.is_ok() {
+            MODES.fetch_and(!SYNC, Ordering::SeqCst);
+        }
+        drawn.and(ended)
     }
 }
 
@@ -117,6 +150,12 @@ fn restore() -> io::Result<()> {
             result = step;
         }
     };
+    if modes & SYNC != 0 {
+        keep(execute!(out, EndSynchronizedUpdate));
+    }
+    if modes & NO_WRAP != 0 {
+        keep(execute!(out, EnableLineWrap));
+    }
     if modes & PASTE != 0 {
         keep(execute!(out, DisableBracketedPaste));
     }
@@ -160,23 +199,44 @@ pub fn run_preview() -> io::Result<PreviewExit> {
 
 fn run_loop(session: &mut TerminalSession, signals: &signals::Watch) -> io::Result<PreviewExit> {
     let mut app = App::default();
+    let env = |name: &str| std::env::var(name).ok();
+    let mut view = View::new(FrameStyle::from_env(), Tones::resolve(env));
+    // Pure state reads no clock; this one is passed to it as data.
+    let clock = Instant::now();
     let mut dirty = true;
+    let mut stale = false;
     loop {
         if let Some(signal) = signals.received() {
             return Ok(PreviewExit::Signal(signal));
         }
         if dirty {
-            session.terminal.draw(|frame| render(frame, &app))?;
+            view.now = clock.elapsed();
+            session.draw(&app, &mut view, stale)?;
             dirty = false;
+            stale = false;
         }
-        if event::poll(POLL)? {
+        // A running sample redraws on its next shimmer beat, or on the next
+        // second without motion; otherwise only input or a signal wakes us.
+        let next = app.activity.map(|sample| {
+            let elapsed = clock.elapsed().saturating_sub(sample.started);
+            activity::next_change(elapsed, view.tones.moves())
+        });
+        if !event::poll(next.map_or(POLL, |wait| wait.min(POLL)))? {
+            dirty |= next.is_some();
+            continue;
+        }
+        // Apply every event already waiting, then draw once: a burst of
+        // resizes repaints once at the final size, and pasted or fast typing
+        // is not drawn key by key.
+        for _ in 0..MAX_BATCH {
             let event = event::read()?;
-            if matches!(event, Event::Resize(..)) {
-                session.invalidate()?;
-            }
-            dirty = app.handle_event(event);
+            stale |= matches!(event, Event::Resize(..));
+            dirty |= app.handle_event_at(event, clock.elapsed());
             if app.should_quit() {
                 return Ok(PreviewExit::Quit);
+            }
+            if !event::poll(Duration::ZERO)? {
+                break;
             }
         }
     }

@@ -1,7 +1,11 @@
-//! Preview state and key handling. Nothing here touches the terminal.
+//! Preview state and key handling. Nothing here touches the terminal or
+//! reads a clock: time arrives with each event.
+
+use std::time::Duration;
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
+use crate::activity;
 use crate::editor::Draft;
 
 /// A fixed example row for the agent list; it describes no running work.
@@ -47,14 +51,28 @@ pub enum Notice {
     DraftLimit,
 }
 
-/// Presentation state: the parent draft, keyboard focus, and one notice.
-/// Navigation never replaces the draft, so its caret and undo survive it.
+/// A sample of the header's activity line. Nothing runs; it shows how a turn
+/// in progress reads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SampleActivity {
+    /// The turn's word, kept until the sample stops.
+    pub word: &'static str,
+    /// When the sample started, on the clock the caller passes with events.
+    pub started: Duration,
+}
+
+/// Presentation state: the parent draft, keyboard focus, one notice, and the
+/// sample activity. Navigation never replaces the draft, so its caret and
+/// undo survive it.
 #[derive(Debug)]
 pub struct App {
     pub draft: Draft,
     pub focus: Focus,
     pub selected: &'static str,
     pub notice: Option<Notice>,
+    pub activity: Option<SampleActivity>,
+    /// Samples started so far; seeds each sample's word.
+    samples: u32,
     quit: bool,
 }
 
@@ -65,6 +83,8 @@ impl Default for App {
             focus: Focus::Composer,
             selected: SAMPLE_AGENTS[0].id,
             notice: None,
+            activity: None,
+            samples: 0,
             quit: false,
         }
     }
@@ -79,11 +99,18 @@ impl App {
         agent(self.selected).unwrap_or(&SAMPLE_AGENTS[0])
     }
 
-    /// Applies one terminal event. Returns whether the screen needs a redraw.
+    /// Applies one terminal event at time zero. Returns whether the screen
+    /// needs a redraw.
     pub fn handle_event(&mut self, event: Event) -> bool {
+        self.handle_event_at(event, Duration::ZERO)
+    }
+
+    /// Applies one terminal event that arrived at `now`, on the caller's
+    /// clock. Returns whether the screen needs a redraw.
+    pub fn handle_event_at(&mut self, event: Event, now: Duration) -> bool {
         match event {
             Event::Key(key) if key.kind != KeyEventKind::Release => {
-                self.handle_key(key);
+                self.handle_key(key, now);
                 true
             }
             Event::Paste(text) => {
@@ -102,20 +129,20 @@ impl App {
         }
     }
 
-    fn handle_key(&mut self, key: KeyEvent) {
+    fn handle_key(&mut self, key: KeyEvent, now: Duration) {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         if ctrl && key.code == KeyCode::Char('c') {
             self.quit = true;
             return;
         }
         match self.focus {
-            Focus::Composer => self.composer_key(key),
+            Focus::Composer => self.composer_key(key, now),
             Focus::AgentList => self.list_key(key),
             Focus::Inspect(_) => self.inspect_key(key),
         }
     }
 
-    fn composer_key(&mut self, key: KeyEvent) {
+    fn composer_key(&mut self, key: KeyEvent, now: Duration) {
         let mods = key.modifiers;
         let ctrl = mods.contains(KeyModifiers::CONTROL);
         let alt = mods.contains(KeyModifiers::ALT);
@@ -126,8 +153,14 @@ impl App {
                 self.notice = None;
                 return;
             }
+            // Esc stops a sample the way it interrupts a turn.
             KeyCode::Esc => {
+                self.activity = None;
                 self.notice = None;
+                return;
+            }
+            KeyCode::Char('t') if ctrl && !alt => {
+                self.toggle_activity(now);
                 return;
             }
             KeyCode::Enter if alt => complete = self.draft.newline(),
@@ -183,6 +216,18 @@ impl App {
             }
             _ => self.notice = Some(Notice::ReadOnly),
         }
+    }
+
+    fn toggle_activity(&mut self, now: Duration) {
+        self.notice = None;
+        if self.activity.take().is_some() {
+            return;
+        }
+        self.samples = self.samples.wrapping_add(1);
+        self.activity = Some(SampleActivity {
+            word: activity::pick(activity::WORDS, &format!("sample-{}", self.samples)),
+            started: now,
+        });
     }
 
     /// Moves the selection by identity, so a reordered list keeps the same agent.
@@ -300,6 +345,24 @@ mod tests {
             chord(&mut app, KeyCode::Char('c'), KeyModifiers::CONTROL);
             assert!(app.should_quit());
         }
+    }
+
+    #[test]
+    fn ctrl_t_starts_and_stops_a_sample_without_touching_the_draft() {
+        let mut app = App::default();
+        type_str(&mut app, "keep");
+        let ctrl_t = Event::Key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::CONTROL));
+        app.handle_event_at(ctrl_t.clone(), Duration::from_secs(3));
+        let sample = app.activity.expect("sample started");
+        assert_eq!(sample.started, Duration::from_secs(3));
+        assert!(activity::WORDS.contains(&sample.word));
+        app.handle_event_at(ctrl_t.clone(), Duration::from_secs(4));
+        assert_eq!(app.activity, None);
+        // Esc stops it too, as it would interrupt a turn.
+        app.handle_event_at(ctrl_t, Duration::from_secs(5));
+        press(&mut app, KeyCode::Esc);
+        assert_eq!(app.activity, None);
+        assert_eq!((app.draft.text(), app.draft.caret()), ("keep", 4));
     }
 
     #[test]

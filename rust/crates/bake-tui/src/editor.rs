@@ -1,7 +1,8 @@
 //! Pure composer draft: grapheme-safe editing, bounded undo, and wrapping.
 //!
-//! Wrapping and caret placement share [`cell_width`], which delegates to the
-//! measure Ratatui's buffer uses, so drawn text and the cursor agree.
+//! Wrapping, tab expansion, and caret placement share one cell measure, which
+//! delegates to the measure Ratatui's buffer uses, so drawn text and the
+//! cursor agree.
 
 use std::borrow::Cow;
 use std::collections::VecDeque;
@@ -13,7 +14,7 @@ use unicode_segmentation::{GraphemeCursor, UnicodeSegmentation};
 pub const MAX_DRAFT_BYTES: usize = 256 * 1024;
 /// Undo steps retained; the oldest step is dropped first.
 pub const UNDO_DEPTH: usize = 64;
-/// Cells a tab occupies wherever it appears in a row.
+/// Tab stops fall every `TAB_WIDTH` cells from the start of a row.
 pub const TAB_WIDTH: usize = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -213,22 +214,46 @@ pub fn sanitize(input: &str) -> String {
     out
 }
 
-/// Terminal cells one grapheme occupies in the composer.
+/// Terminal cells one grapheme other than a tab occupies.
 pub fn cell_width(grapheme: &str) -> usize {
-    if grapheme == "\t" {
-        TAB_WIDTH
-    } else {
-        usize::from(grapheme.cell_width())
+    usize::from(grapheme.cell_width())
+}
+
+/// Spaces and tabs separate words and may hang past a row's end. Other
+/// whitespace, such as a no-break space, belongs to its word.
+fn is_blank(grapheme: &str) -> bool {
+    grapheme == " " || grapheme == "\t"
+}
+
+/// Cells a grapheme advances a row's column from `col`, where the row's text
+/// ends at `limit`. A tab reaches the next stop. A blank at or past `limit`
+/// hangs: it stays on the row and occupies nothing.
+fn advance(grapheme: &str, col: usize, limit: usize) -> usize {
+    match grapheme {
+        " " => usize::from(col < limit),
+        "\t" => (TAB_WIDTH - col % TAB_WIDTH).min(limit.saturating_sub(col)),
+        _ => cell_width(grapheme),
     }
 }
 
-/// Row text as drawn: tabs become [`TAB_WIDTH`] spaces.
-pub fn display(row: &str) -> Cow<'_, str> {
-    if row.contains('\t') {
-        Cow::Owned(row.replace('\t', &" ".repeat(TAB_WIDTH)))
-    } else {
-        Cow::Borrowed(row)
+/// Row text as drawn: each tab becomes the spaces to its stop. `limit` is the
+/// text width [`layout`] wrapped the row at.
+pub fn display(row: &str, limit: usize) -> Cow<'_, str> {
+    if !row.contains('\t') {
+        return Cow::Borrowed(row);
     }
+    let mut out = String::with_capacity(row.len() + TAB_WIDTH);
+    let mut col = 0;
+    for grapheme in row.graphemes(true) {
+        let cells = advance(grapheme, col, limit);
+        if grapheme == "\t" {
+            out.extend(std::iter::repeat_n(' ', cells));
+        } else {
+            out.push_str(grapheme);
+        }
+        col += cells;
+    }
+    Cow::Owned(out)
 }
 
 /// One visual row: a byte range of the draft without its line break.
@@ -241,61 +266,108 @@ pub struct VisualRow {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DraftLayout {
     pub rows: Vec<VisualRow>,
-    /// Caret as (visual row, cell column); the column is always below `width`.
+    /// Caret as (visual row, cell column). The column is below `width` unless
+    /// a single grapheme is wider than the row.
     pub caret: (usize, usize),
 }
 
-/// Wraps `text` at grapheme boundaries into rows of at most `width` cells. A
-/// grapheme wider than `width` gets a row of its own. A caret at the end of a
-/// full row is placed at the start of an extra empty row.
+/// Wraps `text` the way an editor does, into rows of `width` cells that
+/// include the caret's column, and places the caret.
+///
+/// Ports `layoutDraft` from the TypeScript composer. Rows break after spaces
+/// and tabs, and blanks at a break hang past the row, so a wrapped row never
+/// starts with a space the user did not type. A wide grapheme is a word of
+/// its own, because CJK text has no spaces to break on. A word that does not
+/// fit starts a new row, and splits between graphemes only when it is longer
+/// than a row. Thai, Lao, Khmer, and Myanmar get no dictionary word breaks
+/// here, so a word in those scripts splits between graphemes.
+///
+/// Text takes at most `width - 1` cells of a row, and the rows never depend
+/// on the caret: a caret after a full row's text takes the remaining column,
+/// so moving the caret never moves a word or changes the row count.
 pub fn layout(text: &str, caret: usize, width: usize) -> DraftLayout {
-    let width = width.max(1);
+    let limit = width.saturating_sub(1).max(1);
     let mut rows = Vec::new();
-    let mut caret_at = None;
     let mut line_start = 0;
     for line in text.split('\n') {
-        let line_end = line_start + line.len();
-        let mut row_start = line_start;
-        let mut col = 0;
-        for (offset, grapheme) in line.grapheme_indices(true) {
-            let at = line_start + offset;
-            let w = cell_width(grapheme);
-            // `col >= width` also wraps a zero-width grapheme after a full or
-            // overfilled row, so the caret never sits past the last column.
-            if col > 0 && (col >= width || col + w > width) {
-                rows.push(VisualRow {
-                    start: row_start,
-                    end: at,
-                });
-                row_start = at;
-                col = 0;
-            }
-            if at == caret {
-                caret_at = Some((rows.len(), col));
-            }
-            col += w;
-        }
-        rows.push(VisualRow {
-            start: row_start,
-            end: line_end,
-        });
-        if caret == line_end {
-            caret_at = Some(if col >= width {
-                rows.push(VisualRow {
-                    start: line_end,
-                    end: line_end,
-                });
-                (rows.len() - 1, 0)
-            } else {
-                (rows.len() - 1, col)
-            });
-        }
-        line_start = line_end + 1;
+        wrap_line(line, line_start, limit, &mut rows);
+        line_start += line.len() + 1;
     }
-    DraftLayout {
-        caret: caret_at.unwrap_or((rows.len() - 1, 0)),
-        rows,
+    let caret = place_caret(text, &rows, caret, limit);
+    DraftLayout { rows, caret }
+}
+
+/// Appends the rows of one logical line that starts at byte `base`.
+fn wrap_line(line: &str, base: usize, limit: usize, rows: &mut Vec<VisualRow>) {
+    let graphemes: Vec<(usize, &str)> = line
+        .grapheme_indices(true)
+        .map(|(at, grapheme)| (base + at, grapheme))
+        .collect();
+    let mut start = base;
+    let mut col = 0;
+    let mut i = 0;
+    while i < graphemes.len() {
+        if is_blank(graphemes[i].1) {
+            col += advance(graphemes[i].1, col, limit);
+            i += 1;
+            continue;
+        }
+        let first = i;
+        let mut size = 0;
+        while i < graphemes.len() && !is_blank(graphemes[i].1) {
+            let cells = cell_width(graphemes[i].1);
+            if i > first && (cells > 1 || cell_width(graphemes[i - 1].1) > 1) {
+                break;
+            }
+            size += cells;
+            i += 1;
+        }
+        // A word that does not fit opens a row even when it must then split,
+        // so a pasted path or URL starts at the left edge.
+        if col > 0 && col + size > limit {
+            open_row(rows, &mut start, &mut col, graphemes[first].0);
+        }
+        for &(at, grapheme) in &graphemes[first..i] {
+            let cells = cell_width(grapheme);
+            if col > 0 && col + cells > limit {
+                open_row(rows, &mut start, &mut col, at);
+            }
+            col += cells;
+        }
     }
+    rows.push(VisualRow {
+        start,
+        end: base + line.len(),
+    });
+}
+
+fn open_row(rows: &mut Vec<VisualRow>, start: &mut usize, col: &mut usize, at: usize) {
+    rows.push(VisualRow {
+        start: *start,
+        end: at,
+    });
+    *start = at;
+    *col = 0;
+}
+
+/// The row holding the grapheme at `caret`, or the row a logical line ends on
+/// for a caret after its last grapheme, and the caret's column in it.
+fn place_caret(text: &str, rows: &[VisualRow], caret: usize, limit: usize) -> (usize, usize) {
+    let line_ends_at = |at: usize| text.as_bytes().get(at).is_none_or(|&byte| byte == b'\n');
+    let index = rows
+        .iter()
+        .position(|row| {
+            row.start <= caret && (caret < row.end || (caret == row.end && line_ends_at(row.end)))
+        })
+        .unwrap_or(rows.len() - 1);
+    let row = rows[index];
+    let mut col = 0;
+    if (row.start..=row.end).contains(&caret) {
+        for grapheme in text[row.start..caret].graphemes(true) {
+            col += advance(grapheme, col, limit);
+        }
+    }
+    (index, col)
 }
 
 #[cfg(test)]
@@ -507,39 +579,110 @@ mod tests {
         assert_eq!(rows.caret, (1, 4));
     }
 
-    #[test]
-    fn caret_after_a_full_row_starts_a_new_row() {
-        let rows = layout("abcd", 4, 4);
-        assert_eq!(rows.rows.len(), 2);
-        assert_eq!(rows.caret, (1, 0));
-        let rows = layout("ab\ncd", 2, 4);
-        assert_eq!(rows.caret, (0, 2));
+    fn rows_of(text: &str, width: usize) -> Vec<&str> {
+        layout(text, 0, width)
+            .rows
+            .iter()
+            .map(|row| &text[row.start..row.end])
+            .collect()
     }
 
     #[test]
-    fn zero_width_grapheme_after_a_full_row_starts_a_new_row() {
+    fn rows_break_after_blanks_and_blanks_at_a_break_hang() {
+        assert_eq!(rows_of("hello big world", 10), ["hello big ", "world"]);
+        assert_eq!(rows_of("hello   world", 8), ["hello   ", "world"]);
+        assert_eq!(rows_of("  indented", 40), ["  indented"]);
+    }
+
+    #[test]
+    fn a_long_word_starts_its_own_row_and_splits_between_graphemes() {
+        assert_eq!(
+            rows_of("go https://example.com/x", 10),
+            ["go ", "https://e", "xample.co", "m/x"]
+        );
+    }
+
+    #[test]
+    fn wide_graphemes_are_break_opportunities() {
+        assert_eq!(
+            rows_of("ab\u{4F60}\u{597D}cd", 6),
+            ["ab\u{4F60}", "\u{597D}cd"]
+        );
+    }
+
+    #[test]
+    fn rows_never_depend_on_the_caret_and_fit_their_width() {
+        let text = format!(
+            "one two\tthree {FAMILY} \u{4F60}\u{597D} e\u{301}e\u{301} https://example.com/a/b\n\n   last"
+        );
+        let boundaries: Vec<usize> = text
+            .grapheme_indices(true)
+            .map(|(at, _)| at)
+            .chain([text.len()])
+            .collect();
+        for width in 1..30 {
+            let rows = layout(&text, 0, width).rows;
+            for &at in &boundaries {
+                let placed = layout(&text, at, width);
+                assert_eq!(placed.rows, rows, "width {width}, caret {at}");
+                if width >= 3 {
+                    assert!(placed.caret.1 < width, "width {width}, caret {at}");
+                }
+            }
+            if width < 3 {
+                continue;
+            }
+            let limit = width - 1;
+            for (index, row) in rows.iter().enumerate() {
+                let mut col = 0;
+                for grapheme in text[row.start..row.end].graphemes(true) {
+                    col += advance(grapheme, col, limit);
+                }
+                assert!(col <= limit, "width {width}, row {index} is {col} cells");
+                // Only a logical line's first row may open with a blank.
+                let soft = row.start > 0 && text.as_bytes()[row.start - 1] != b'\n';
+                assert!(
+                    !(soft && text[row.start..].starts_with([' ', '\t'])),
+                    "width {width}, row {index} opens with a blank"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn caret_after_a_full_row_takes_the_remaining_column() {
+        let placed = layout("abcd", 4, 5);
+        assert_eq!((placed.rows.len(), placed.caret), (1, (0, 4)));
+        // A blank typed after a full row hangs; the caret stays on that row.
+        let placed = layout("abcd ", 5, 5);
+        assert_eq!((placed.rows.len(), placed.caret), (1, (0, 4)));
+        // The next word opens a row of its own.
+        assert_eq!(rows_of("abcd x", 5), ["abcd ", "x"]);
+        assert_eq!(layout("ab\ncd", 2, 4).caret, (0, 2));
+    }
+
+    #[test]
+    fn zero_width_graphemes_stay_on_a_full_row() {
         for mark in ["\u{200B}", "\u{2060}", "\u{FEFF}"] {
             let text = format!("abcd{mark}x");
-            let rows = layout(&text, 4, 4);
-            assert_eq!(rows.caret, (1, 0), "caret before {mark:?}");
-            assert_eq!(&text[rows.rows[0].start..rows.rows[0].end], "abcd");
-            assert_eq!(
-                &text[rows.rows[1].start..rows.rows[1].end],
-                format!("{mark}x")
-            );
-            assert_eq!(layout(&text, text.len(), 4).caret, (1, 1));
+            let first = format!("abcd{mark}");
+            assert_eq!(rows_of(&text, 5), [first.as_str(), "x"]);
+            assert_eq!(layout(&text, 4, 5).caret, (0, 4), "caret before {mark:?}");
+            assert_eq!(layout(&text, text.len(), 5).caret, (1, 1));
         }
         // A wide grapheme overfills a one-cell row; what follows still wraps.
         let text = "\u{4F60}\u{200B}";
-        let rows = layout(text, 3, 1);
-        assert_eq!(rows.caret, (1, 0));
-        assert_eq!(&text[rows.rows[1].start..rows.rows[1].end], "\u{200B}");
+        let placed = layout(text, 3, 1);
+        assert_eq!(placed.caret, (1, 0));
+        assert_eq!(&text[placed.rows[1].start..placed.rows[1].end], "\u{200B}");
     }
 
     #[test]
-    fn tabs_count_as_fixed_cells() {
-        let rows = layout("a\tb", 3, 80);
-        assert_eq!(rows.caret, (0, 1 + TAB_WIDTH + 1));
-        assert_eq!(display("a\tb"), "a    b");
+    fn tabs_reach_the_next_stop() {
+        assert_eq!(layout("a\tb", 3, 80).caret, (0, TAB_WIDTH + 1));
+        assert_eq!(display("a\tb", 79), "a   b");
+        assert_eq!(display("abcd\t", 79), "abcd    ");
+        // A tab that reaches the row's end hangs like a space.
+        assert_eq!(rows_of("abc\tdef", 5), ["abc\t", "def"]);
     }
 }

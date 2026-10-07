@@ -115,6 +115,8 @@ class Preview {
     assert.deepEqual(this.modes(), this.initialModes, 'terminal mode flags were not restored')
     assert.equal(this.terminal.buffer.active.type, 'normal', 'alternate screen was not released')
     assert(this.raw.lastIndexOf('\x1b[?2004l') > this.raw.lastIndexOf('\x1b[?2004h'), 'paste mode was not released')
+    assert(this.raw.lastIndexOf('\x1b[?7h') > this.raw.lastIndexOf('\x1b[?7l'), 'autowrap was not restored')
+    assert(this.raw.lastIndexOf('\x1b[?2026l') > this.raw.lastIndexOf('\x1b[?2026h'), 'synchronized output was left open')
     assert(this.raw.lastIndexOf('\x1b[?25h') > this.raw.lastIndexOf('\x1b[?25l'), 'cursor was not restored')
     assert.throws(() => process.kill(this.process.pid, 0), 'application remains alive after exit')
   }
@@ -180,6 +182,17 @@ await scenario('composer, agent inspection, paste, and resize', async (preview) 
   await preview.wait('resized draft', () => preview.screen.includes('line one') && preview.screen.includes('line two'))
   preview.send('\x1a')
   await preview.wait('atomic paste undo', () => preview.screen.includes('draftAB') && !preview.screen.includes('line one'))
+  await preview.quit()
+})
+
+await scenario('sample activity is text that advances on its own and stops', async (preview) => {
+  preview.send('\x14')
+  await preview.wait('sample activity', () => preview.screen.includes('thinking · 0s') && preview.screen.includes('Esc stops the sample'))
+  // No key is pressed: the loop's own timer must redraw the elapsed time.
+  await preview.wait('elapsed time advances', () => preview.screen.includes('thinking · 1s'))
+  assert(!/[\u2800-\u28ff]/u.test(preview.screen), 'the activity drew a spinner glyph')
+  preview.send('\x1b')
+  await preview.wait('sample stopped', () => preview.screen.includes('Rust preview · model not connected') && !preview.screen.includes('Esc stops the sample'))
   await preview.quit()
 })
 
