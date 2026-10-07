@@ -8,3 +8,5 @@ publish.workspace = true
 
 [dependencies]
 serde_json.workspace = true
+zstd-safe = { version = "=8.0.0", default-features = false, features = ["vendored"] }
+zstd-sys = { version = "=2.1.0", default-features = false }

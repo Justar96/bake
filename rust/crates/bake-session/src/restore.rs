@@ -29,7 +29,8 @@
 //! scan's, which Session construction accepts. Restoration is not Agent
 //! resume: it truncates no torn tail, writes no closer or end seed, emits no
 //! `resume` header, and checks no path or stored identity. It does not
-//! decompress, so it cannot read a default Zstd-compressed Session file.
+//! decompress; [`crate::restore_zstd_log`] applies the same post-scan stages
+//! to the default compressed format.
 
 use serde_json::{Map, Value};
 
@@ -40,7 +41,7 @@ use crate::{
     PathPlatform, ReplayLimit, ScanRefusal, ScannedLog, SeedRejection, UnadmittedEnvelope, scan_log,
 };
 
-/// The Session state a stored plain current-format log restores to.
+/// The Session state a stored current-format log restores to.
 ///
 /// The stored log is the scan, kept once: [`ScannedLog::rows`] holds each
 /// committed row as parsed, with packed `sourceEventSeqs` ranges, and
@@ -51,17 +52,34 @@ use crate::{
 #[derive(Debug, Clone, PartialEq)]
 pub struct RestoredLog {
     stored: ScannedLog,
+    torn: Option<TornTail>,
     closers: Vec<Value>,
     end_seed_appended: bool,
     fold: RequestFold,
     context: Option<Map<String, Value>>,
 }
 
+/// Recovery metadata in the physical input and the restored row sequence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TornTail {
+    /// Physical file offset at which a writer would truncate the torn tail.
+    pub truncate_to: usize,
+    /// Index in [`ScannedLog::rows`] where recovered rows start. Plain input
+    /// has no recovered rows, so this equals its stored row count.
+    pub recovered_from: usize,
+}
+
 impl RestoredLog {
     /// The scanned header, inherited cut, committed byte offset, and stored
-    /// events, which exclude any torn or recovered tail.
+    /// events, including complete rows recovered from a torn Zstd frame.
     pub const fn stored(&self) -> &ScannedLog {
         &self.stored
+    }
+
+    /// Physical truncation offset and the start of recovered stored rows.
+    /// This reader never performs the truncation or rewrites those rows.
+    pub const fn torn(&self) -> Option<TornTail> {
+        self.torn
     }
 
     /// The synthetic events `interruptedTurnClosers` appends after the stored
@@ -100,15 +118,22 @@ impl RestoredLog {
     }
 }
 
-/// Why [`restore_plain_log`] restored nothing.
+/// Why a plain or compressed current-format log restored nothing.
 ///
-/// [`RestoreRefusal::Scan`] claims what its [`ScanRefusal`] claims. The
-/// other variants except [`RestoreRefusal::NativeSubset`] claim that
-/// TypeScript refuses the log at that layer and seq, not the error's message.
+/// `Scan` and `Zstd` have their respective reader contracts. `Unsupported`,
+/// `Stored`, and `Restore` claim the TypeScript refusal layer and seq, not
+/// its message. Both native-only variants make no TypeScript outcome claim.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RestoreRefusal {
     /// `scanLog` throws; see [`ScanRefusal`].
     Scan(ScanRefusal),
+    /// Compressed framing or decoding refused the log, as the production
+    /// Zstd reader does. Plaintext scan failures use `Scan`.
+    Zstd(crate::ZstdRefusal),
+    /// The cumulative decoded bytes would exceed the caller's budget.
+    /// Native-only: no TypeScript outcome or refusal precedence is claimed.
+    /// No event seq exists for a refusal while decoding the header.
+    NativePlaintextBudget { max_plaintext_bytes: usize },
     /// `validateStoredEvents` throws `SessionFormatUnsupportedError` for row
     /// `seq`, the first such row.
     Unsupported { seq: u64, cause: Unsupported },
@@ -174,6 +199,17 @@ pub fn restore_plain_log(
     source_budget: usize,
 ) -> Result<RestoredLog, RestoreRefusal> {
     let stored = scan_log(log, platform, source_budget).map_err(RestoreRefusal::Scan)?;
+    let torn = (stored.committed_bytes() < log.len()).then_some(TornTail {
+        truncate_to: stored.committed_bytes(),
+        recovered_from: stored.rows().len(),
+    });
+    restore_scanned(stored, torn)
+}
+
+pub(crate) fn restore_scanned(
+    stored: ScannedLog,
+    torn: Option<TornTail>,
+) -> Result<RestoredLog, RestoreRefusal> {
     let envelopes: Vec<UnadmittedEnvelope<'_>> = stored
         .events()
         .map(|event| event.envelope().clone())
@@ -228,6 +264,7 @@ pub fn restore_plain_log(
     drop(envelopes);
     Ok(RestoredLog {
         stored,
+        torn,
         closers,
         end_seed_appended,
         fold,

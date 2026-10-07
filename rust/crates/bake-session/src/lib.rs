@@ -27,7 +27,9 @@
 //! does: it validates the stored events, builds the closers for an
 //! interrupted turn, and folds the Session's messages, request header, tool
 //! history, and request context into an immutable [`RestoredLog`]. It is not
-//! Agent resume. None reads or writes a file or encodes a log. The crate is
+//! Agent resume. [`restore_zstd_log`] restores default-format compressed bytes
+//! with a caller-supplied plaintext budget and physical torn-tail metadata.
+//! None reads or writes a file or encodes a log. The crate is
 //! unstable and unshipped; nothing in the workspace depends on it.
 
 mod envelope;
@@ -38,6 +40,7 @@ mod restore;
 mod scan;
 mod source_event_seqs;
 mod v3_row;
+mod zstd;
 
 pub use envelope::{
     EnvelopeLimit, EnvelopeRefusal, EnvelopeRejection, NumberField, RequiredField,
@@ -45,7 +48,9 @@ pub use envelope::{
 };
 pub use replay::{ReplayLimit, ReplayRefusal, SeedRejection, replay_requests};
 pub use request::Request;
-pub use restore::{RestoreLimit, RestoreRefusal, RestoredLog, Unsupported, restore_plain_log};
+pub use restore::{
+    RestoreLimit, RestoreRefusal, RestoredLog, TornTail, Unsupported, restore_plain_log,
+};
 pub use scan::{FinishRejection, ScanIssue, ScanLimit, ScanRefusal, ScannedLog, scan_log};
 pub use source_event_seqs::{
     SourceEventSeqsLimit, SourceEventSeqsRefusal, SourceEventSeqsRejection,
@@ -55,6 +60,7 @@ pub use v3_row::{
     Coordinate, Endpoint, EventRejection, StructuralRejection, SystemRecord, V3CodecEvent, V3Limit,
     V3NumberField, V3Rejection, V3RowRefusal, V3Unsupported, decode_v3_row,
 };
+pub use zstd::{ZstdRefusal, restore_zstd_log};
 
 use serde_json::{Map, Value};
 
