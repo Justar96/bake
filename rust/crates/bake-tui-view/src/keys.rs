@@ -116,6 +116,13 @@ pub enum Action {
     InspectSelected,
     ReturnToComposer,
     ReturnToAgentList,
+    /// Transcript navigation, from the composer.
+    PageUp,
+    PageDown,
+    PreviousPrompt,
+    NextPrompt,
+    ToStart,
+    ToLatest,
 }
 
 /// One row of [`BINDINGS`]: `key` in `scope`, with every modifier in
@@ -165,6 +172,12 @@ pub const BINDINGS: &[Binding] = &[
     bind(S::Composer, K::Delete, ANY, ANY, A::Delete),
     bind(S::Composer, K::Left, ANY, ANY, A::Left),
     bind(S::Composer, K::Right, ANY, ANY, A::Right),
+    bind(S::Composer, K::PageUp, ANY, ANY, A::PageUp),
+    bind(S::Composer, K::PageDown, ANY, ANY, A::PageDown),
+    bind(S::Composer, K::Up, Mods::CTRL, ANY, A::PreviousPrompt),
+    bind(S::Composer, K::Down, Mods::CTRL, ANY, A::NextPrompt),
+    bind(S::Composer, K::Home, Mods::CTRL, ANY, A::ToStart),
+    bind(S::Composer, K::End, Mods::CTRL, ANY, A::ToLatest),
     bind(S::Composer, K::Home, ANY, ANY, A::LineStart),
     bind(S::Composer, K::End, ANY, ANY, A::LineEnd),
     bind(S::AgentList, K::Up, ANY, ANY, A::SelectPrevious),
@@ -234,6 +247,17 @@ mod tests {
         );
         assert_eq!(action(Scope::Inspect, tab), Some(Action::ReturnToAgentList));
         assert_eq!(action(Scope::Composer, KeyInput::plain(Key::Up)), None);
+        // Ctrl+Home reaches the transcript's start; Home alone, the line's.
+        let home = |mods| action(Scope::Composer, KeyInput::new(Key::Home, mods));
+        assert_eq!(home(Mods::CTRL), Some(Action::ToStart));
+        assert_eq!(home(Mods::NONE), Some(Action::LineStart));
+        assert_eq!(
+            action(
+                Scope::Composer,
+                KeyInput::new(Key::Up, Mods::CTRL | Mods::SHIFT)
+            ),
+            Some(Action::PreviousPrompt)
+        );
     }
 
     #[test]

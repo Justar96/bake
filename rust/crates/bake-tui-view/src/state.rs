@@ -11,6 +11,7 @@ use crate::frame::FrameStyle;
 use crate::keys::{self, Action, KeyInput, Scope};
 use crate::mode::Mode;
 use crate::status::StatusInput;
+use crate::transcript::{self, Transcript};
 
 /// Everything the frontend applies, in arrival order.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -140,6 +141,9 @@ pub struct State {
     /// What the status line reports. The terminal owner fills in the working
     /// directory and branch; the preview has no model, level, or context.
     pub status: StatusInput,
+    /// The fixed sample session and the viewport over it. Rendering records
+    /// the viewport's size; navigation keys move it.
+    pub transcript: Transcript,
     /// Glyphs for the composer box, chosen once before the first frame.
     pub frame: FrameStyle,
     /// Colours the activity line may use; [`Tones::None`] also stops its shimmer.
@@ -172,6 +176,7 @@ impl State {
                 ascii: frame == FrameStyle::Classic,
                 ..StatusInput::default()
             },
+            transcript: Transcript::new(transcript::sample_session()),
             frame,
             tones,
             now: Duration::ZERO,
@@ -259,6 +264,12 @@ fn composer_key(state: &mut State, bound: Option<Action>, input: KeyInput) {
             state.notice = Some(Notice::NoModel);
             return;
         }
+        Some(Action::PageUp) => return state.transcript.scroll_up(state.transcript.page()),
+        Some(Action::PageDown) => return state.transcript.scroll_down(state.transcript.page()),
+        Some(Action::PreviousPrompt) => return state.transcript.previous_prompt(),
+        Some(Action::NextPrompt) => return state.transcript.next_prompt(),
+        Some(Action::ToStart) => return state.transcript.to_start(),
+        Some(Action::ToLatest) => return state.transcript.follow(),
         Some(Action::Newline) => draft.newline(),
         Some(Action::Undo) => {
             draft.undo();

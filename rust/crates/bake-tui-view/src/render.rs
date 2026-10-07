@@ -349,17 +349,61 @@ fn tone_style(tone: Tone, tones: Tones) -> Style {
     }
 }
 
-fn render_body(app: &State, area: Rect, buf: &mut Buffer) {
+/// Rows the body needs before it gives one to the transcript's hint row.
+const HINT_ROW_MIN: u16 = 4;
+
+/// The transcript viewport, with a hint row at its foot when there is room:
+/// right-aligned keys while following output, and the way back to the
+/// newest line, leading the row, while reading history.
+fn render_transcript(app: &mut State, area: Rect, buf: &mut Buffer) {
+    let hint = area.height >= HINT_ROW_MIN;
+    let rows = area.height - u16::from(hint);
+    let view = &mut app.transcript;
+    view.resize(usize::from(area.width), usize::from(rows), app.tones);
+    for (i, content) in view.visible().into_iter().enumerate() {
+        line(
+            buf,
+            Rect::new(area.x, area.y + i as u16, area.width, 1),
+            content,
+        );
+    }
+    if !hint {
+        return;
+    }
+    let row = Rect::new(area.x, area.y + rows, area.width, 1);
+    if view.following() {
+        if !view.more_above() {
+            return;
+        }
+        let mut spans = Vec::new();
+        for (i, (key, does)) in copy::HINT_FOLLOWING.iter().enumerate() {
+            if i > 0 {
+                spans.push(Span::styled(" · ", dim()));
+            }
+            spans.push(Span::raw(*key));
+            spans.push(Span::styled(format!(" {does}"), dim()));
+        }
+        let hint = Line::from(spans);
+        let width = hint.width() as u16;
+        if width <= area.width {
+            line(
+                buf,
+                Rect::new(area.x + area.width - width, row.y, width, 1),
+                hint,
+            );
+        }
+    } else {
+        line(buf, row, Line::styled(copy::HINT_LATEST, accent()));
+    }
+}
+
+fn render_body(app: &mut State, area: Rect, buf: &mut Buffer) {
     if area.is_empty() {
         return;
     }
     let mut lines: Vec<Line> = Vec::new();
     match app.focus {
-        Focus::Composer => {
-            lines.push(Line::styled(copy::TITLE, accent().bold()));
-            lines.push(Line::default());
-            lines.extend(copy::INTRO.iter().map(|t| Line::raw(*t)));
-        }
+        Focus::Composer => return render_transcript(app, area, buf),
         Focus::AgentList => {
             lines.push(Line::styled(copy::LIST_TITLE, dim()));
             for a in SAMPLE_AGENTS {
@@ -465,7 +509,8 @@ mod tests {
     fn first_screen_names_the_preview_and_sample_agents() {
         for (w, h) in [(80, 24), (120, 36)] {
             let (rows, cursor) = draw(&mut State::default(), w, h);
-            assert!(rows[0].contains("Rust preview"));
+            // The transcript follows the sample session's newest lines.
+            assert!(rows.iter().any(|r| r.starts_with("› Run the parser tests")));
             assert!(rows.iter().any(|r| r.contains("Sample agents")));
             let prompt = row_index(&rows, "│ ❯ Type a draft");
             assert_eq!(cursor, Position::new(TEXT_X, prompt as u16));
@@ -530,7 +575,6 @@ mod tests {
         assert_eq!(usize::from(cursor.y), base_rule - 1);
         assert!(rows[base_rule - 1].contains("end"));
         assert_eq!(cursor.x, TEXT_X + 3);
-        assert!(rows[0].contains("Rust preview"));
         // The top edge counts the rows above the window.
         assert!(rows[row_index(&rows, "above")].starts_with('╭'));
     }
@@ -599,7 +643,10 @@ mod tests {
         let mut app = lines(20);
         for (height, shown) in [(24, 5), (40, 8), (60, 12)] {
             let (rows, _) = draw(&mut app, 80, height);
-            let count = rows.iter().filter(|r| r.contains("line")).count();
+            let count = rows
+                .iter()
+                .filter(|r| r.starts_with('│') && r.contains("line"))
+                .count();
             assert_eq!(count, shown, "{height} rows");
         }
     }
@@ -917,5 +964,28 @@ mod tests {
                 .add_modifier
                 .contains(Modifier::DIM)
         );
+    }
+
+    #[test]
+    fn the_transcript_scrolls_from_the_composer_and_names_the_way_back() {
+        let mut app = State::default();
+        app.draft.type_text("draft");
+        let (rows, _) = draw(&mut app, 80, 16);
+        let hint = row_index(&rows, "PgUp scroll");
+        assert!(rows[hint].ends_with("PgUp scroll · Ctrl+↑ prompts"));
+        assert_eq!(rows[hint - 1].trim_end(), "  before splitting.");
+        key(&mut app, Key::PageUp);
+        let (rows, _) = draw(&mut app, 80, 16);
+        assert!(rows.iter().any(|r| r.starts_with("↓ Latest · Ctrl+End")));
+        assert!(
+            !rows
+                .iter()
+                .any(|r| r.contains("reject it before splitting"))
+        );
+        update(&mut app, Msg::Key(KeyInput::new(Key::End, Mods::CTRL)));
+        let (rows, _) = draw(&mut app, 80, 16);
+        assert!(rows.iter().any(|r| r.contains("PgUp scroll")));
+        // Navigation never touches the draft.
+        assert_eq!((app.draft.text(), app.draft.caret()), ("draft", 5));
     }
 }

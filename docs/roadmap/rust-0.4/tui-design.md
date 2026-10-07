@@ -329,6 +329,9 @@ The [Rust preview](../../../rust/README.md) implements the [composer shape](#sha
 | The idle placeholder names editing keys: `Type a draft · Alt+Enter newline · Ctrl+Z undo` | `Ask anything · / commands · @ files` | `copy.rs`, `PLACEHOLDER`; the preview has no commands or file mentions |
 | Enter shows the no-model notice in every mode, and Alt+↑ does nothing | Enter starts, steers, or queues a turn by mode; Alt+↑ sends steering now | `state.rs`, `composer_key`; there is no runtime port yet |
 | The status line reads `no model`, the branch, and the directory | It also names the model, thinking level, and context occupancy | `status.rs`, `fields`; those readings need a runtime |
+| The transcript is a fixed sample; nothing streams | Committed batches and live rows from the runtime | `transcript.rs`, `sample_session`; there is no runtime port yet |
+| The reading anchor is a row and a line, clamped inside its row after a width change | A row identity, a character offset, and a line, so a width change keeps the same character at the top | `transcript.rs`, `Anchor` |
+| Every visited row is presented again on each frame | At most 32 cached presentations, keyed by row identity, width, and policy | `transcript.rs`, `Transcript::lines` |
 | There is no goal row | The goal has its own standing row under the box ([D7](#intentional-differences)) | `render.rs`; goals arrive with the runtime |
 | The completion and masked sign-in modes do not exist | Each has its own row in the modes table | `mode.rs`, `Mode`; they arrive with completion and sign-in |
 
@@ -339,7 +342,7 @@ These slices are ordered PRs inside [scope 14](README.md#14--terminal-engine-and
 1. **Split and update loop.** Implemented. `bake-tui-view` holds the `Msg`/`Effect` update function and the key-binding table; `bake-tui` decodes input and runs the channel-driven loop. The preview's tests moved with the code, and the screen is unchanged. `Msg` has no mouse or runtime variant until slices 4 and 6 add them, and `Effect` has only `Quit`.
 2. **Composer parity.** Implemented for the idle, running, compacting, and inspection rows of the modes table, driven by the sample activity; the box, wrapping, tab stops, caret column, window, and edge labels came before it. The completion and sign-in rows wait for slice 5 and provider login.
 3. **Chrome.** Implemented for what the preview can show: the layout planner, the header's activity line and a sample turn's summary, the edges with frame glyphs, status fitting by rank, and the agents row's key rule. Summary counts, the goal's standing state, and the runtime's status fields wait for the runtime port.
-4. **Transcript.** The fixture port, row presentation for prose, user turns, and tool cards, the fullscreen viewport with its anchor and keys, and live rows.
+4. **Transcript.** Implemented for a fixed sample session: row presentation for prose, user turns, reasoning, and tool calls with previewed output, and the fullscreen viewport with its anchor, paging, prompt jumps, following, and hint row. The fixture port from the TypeScript transcript, live rows, the presentation cache, and the mouse wheel remain.
 5. **Panels.** Completion with a sample catalog, notices, double-press Ctrl+C, pending input, and attachments.
 6. **Pointer and resilience.** Mouse wheel, click-to-caret, selection and copy, resize during streams, and broken-pipe handling.
 7. **Inline qualification.** The renderer experiment that [the terminal direction](terminal.md#rust-crate-selection) requires.

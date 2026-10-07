@@ -70,7 +70,9 @@ class Preview {
   }
 
   async ready(): Promise<void> {
-    await this.wait('Rust preview ready', () => this.terminal.buffer.active.type === 'alternate' && /Rust preview/iu.test(this.screen)
+    await this.wait('Rust preview ready', () => this.terminal.buffer.active.type === 'alternate'
+      // The sample session's newest lines and the composer show on the first frame.
+      && this.screen.includes('› Run the parser tests') && this.screen.includes('❯ Type a draft')
       && this.raw.includes('\x1b[?2004h'))
     assert.notDeepEqual(this.modes(), this.initialModes, 'preview did not acquire raw mode')
   }
@@ -182,6 +184,21 @@ await scenario('composer, agent inspection, paste, and resize', async (preview) 
   await preview.wait('resized draft', () => preview.screen.includes('line one') && preview.screen.includes('line two'))
   preview.send('\x1a')
   await preview.wait('atomic paste undo', () => preview.screen.includes('draftAB') && !preview.screen.includes('line one'))
+  await preview.quit()
+})
+
+await scenario('transcript pages, jumps between prompts, and follows output again', async (preview) => {
+  preview.send('keep')
+  await preview.wait('following output', () => preview.screen.includes('PgUp scroll · Ctrl+↑ prompts') && preview.screen.includes('before splitting.'))
+  preview.send('\x1b[5~')
+  await preview.wait('reading history', () => preview.screen.includes('↓ Latest · Ctrl+End') && !preview.screen.includes('before splitting.'))
+  preview.send('\x1b[1;5H')
+  await preview.wait('transcript start', () => /^Bake · Rust preview/mu.test(preview.screen))
+  preview.send('\x1b[1;5B')
+  await preview.wait('next prompt at the top', () => /^› Find where the session controller/u.test(preview.screen))
+  preview.send('\x1b[1;5F')
+  await preview.wait('following again', () => preview.screen.includes('PgUp scroll') && preview.screen.includes('before splitting.'))
+  assert(preview.screen.includes('❯ keep'), 'transcript navigation changed the draft')
   await preview.quit()
 })
 

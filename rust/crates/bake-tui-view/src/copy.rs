@@ -29,6 +29,12 @@ pub const COMPACTING: &str = "Compacting history";
 pub const COMPACTING_PHASES: &[&str] = &["preparing", "summarizing", "saving"];
 pub const PHASE_SECONDS: u64 = 4;
 pub const ABOVE: &str = "above";
+/// A result preview's count of the lines it leaves out: `+4 more lines`.
+pub const MORE_LINES: &str = "more lines";
+/// The transcript's hint row: its keys while following output, and the way
+/// back while reading history.
+pub const HINT_FOLLOWING: &[(&str, &str)] = &[("PgUp", "scroll"), ("Ctrl+↑", "prompts")];
+pub const HINT_LATEST: &str = "↓ Latest · Ctrl+End";
 pub const BELOW: &str = "below";
 pub const NO_MODEL: &str = "Model connection is not available in this preview. Your draft is kept.";
 pub const READ_ONLY: &str =
