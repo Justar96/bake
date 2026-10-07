@@ -9,9 +9,10 @@ use crate::composer::ComposerWindow;
 use crate::editor::Draft;
 use crate::frame::FrameStyle;
 use crate::keys::{self, Action, KeyInput, Scope};
+use crate::live;
 use crate::mode::Mode;
 use crate::status::StatusInput;
-use crate::transcript::{self, CallState, Row, Transcript};
+use crate::transcript::{self, Transcript};
 use crate::wheel::{self, WheelSteps};
 
 /// Everything the frontend applies, in arrival order.
@@ -205,7 +206,7 @@ pub struct State {
     pub(crate) window: ComposerWindow,
     /// Samples started so far; seeds each sample's word.
     samples: u32,
-    /// The transcript row of the sample turn's running call.
+    /// The transcript row of the sample turn's running script.
     live_call: Option<usize>,
     /// Rows per wheel report; the terminal owner sets how its terminal reports.
     pub wheel: WheelSteps,
@@ -276,7 +277,16 @@ impl State {
             .transcript
             .running()
             .then(|| transcript::next_pulse(self.now));
-        activity.into_iter().chain(blink).min()
+        // The turn's script changes when its next call starts or settles.
+        let script = self.live_elapsed().and_then(live::next);
+        activity.into_iter().chain(blink).chain(script).min()
+    }
+
+    /// Time since the sample turn started, while its script runs.
+    fn live_elapsed(&self) -> Option<Duration> {
+        let sample = self.activity.filter(|s| s.kind == SampleKind::Turn)?;
+        self.live_call?;
+        Some(self.now.saturating_sub(sample.started))
     }
 }
 
@@ -293,7 +303,10 @@ pub fn update(state: &mut State, msg: Msg) -> Vec<Effect> {
             Focus::Inspect(_) => state.notice = Some(Notice::ReadOnly),
         },
         Msg::Resize { .. } => {}
-        Msg::Tick(now) => state.now = now,
+        Msg::Tick(now) => {
+            state.now = now;
+            advance_script(state);
+        }
         Msg::Mouse(mouse) => pointer(state, mouse),
     }
     Vec::new()
@@ -467,15 +480,10 @@ fn toggle_activity(state: &mut State) {
         None => {
             state.samples = state.samples.wrapping_add(1);
             state.summary = None;
-            // The turn's work: a call that runs until the turn ends.
+            // The turn's work: a code-mode script, whose last call runs
+            // until the turn ends.
             state.live_call = Some(state.transcript.rows.len());
-            state.transcript.rows.push(Row::Call {
-                tool: "Bash".into(),
-                argument: crate::copy::SAMPLE_COMMAND.into(),
-                state: CallState::Running,
-                summary: None,
-                output: Vec::new(),
-            });
+            state.transcript.rows.push(live::at(Duration::ZERO));
             Some(SampleActivity {
                 kind: SampleKind::Turn,
                 word: activity::pick(activity::WORDS, &format!("sample-{}", state.samples)),
@@ -501,24 +509,32 @@ fn end_turn(state: &mut State, outcome: Outcome) {
             elapsed: state.now.saturating_sub(sample.started),
         });
     }
-    // The turn's call settles with it: done when it completed, failed when
-    // Esc stopped it.
-    let live = state.live_call.take();
-    if let Some(index) = live {
+    // The turn's script settles with it: run to its end when the turn
+    // completed, stopped where it was when Esc interrupted it.
+    let elapsed = state.live_elapsed().unwrap_or_default();
+    let Some(index) = state.live_call.take() else {
+        return;
+    };
+    let how = match outcome {
+        Outcome::Completed => live::Settle::Completed,
+        Outcome::Interrupted => live::Settle::Interrupted,
+    };
+    if let Some(row) = state.transcript.rows.get_mut(index) {
+        *row = live::settle(elapsed, how);
         state.transcript.touched(index);
     }
-    if let Some(Row::Call {
-        state: call,
-        summary,
-        ..
-    }) = live.and_then(|index| state.transcript.rows.get_mut(index))
-    {
-        let (settled, note) = match outcome {
-            Outcome::Completed => (CallState::Done, crate::copy::SAMPLE_DONE),
-            Outcome::Interrupted => (CallState::Failed, crate::copy::INTERRUPTED_NOTE),
-        };
-        *call = settled;
-        *summary = Some(note.into());
+}
+
+/// Brings the turn's running script to the clock, re-measuring its row only
+/// when a call started or settled.
+fn advance_script(state: &mut State) {
+    let (Some(elapsed), Some(index)) = (state.live_elapsed(), state.live_call) else {
+        return;
+    };
+    let row = live::at(elapsed);
+    if state.transcript.rows.get(index) != Some(&row) {
+        state.transcript.rows[index] = row;
+        state.transcript.touched(index);
     }
 }
 
@@ -543,6 +559,7 @@ pub fn agent(id: &str) -> Option<&'static SampleAgent> {
 mod tests {
     use super::*;
     use crate::keys::{Key, Mods};
+    use crate::transcript::{CallState, Row};
 
     fn press(state: &mut State, key: Key) -> Vec<Effect> {
         update(state, Msg::Key(KeyInput::plain(key)))
@@ -724,42 +741,46 @@ mod tests {
     }
 
     #[test]
-    fn a_sample_turn_runs_a_call_that_settles_when_the_turn_ends() {
+    fn a_sample_turn_runs_a_script_that_settles_when_the_turn_ends() {
         let mut state = State::default();
         let rows = state.transcript.rows.len();
-        let call = |state: &State| match &state.transcript.rows[rows] {
-            Row::Call {
-                state: call,
+        let script = |state: &State| match &state.transcript.rows[rows] {
+            Row::Script {
+                state: script,
                 summary,
+                calls,
                 ..
-            } => (*call, summary.clone()),
+            } => (*script, summary.clone(), calls.len()),
             other => panic!("{other:?}"),
         };
         update(&mut state, Msg::Tick(Duration::from_millis(250)));
         chord(&mut state, Key::Char('t'), Mods::CTRL);
-        assert_eq!(call(&state), (CallState::Running, None));
+        assert_eq!(script(&state), (CallState::Running, None, 1));
         assert!(state.transcript.running());
-        // The loop wakes for the blink as well as the shimmer.
+        // The loop wakes for the blink as well as the shimmer and the script.
         assert_eq!(
             state.next_change(),
             Some(activity::BEAT.min(Duration::from_millis(350)))
         );
+        // Calls arrive on the clock: the glob settles, and the reads start.
+        update(&mut state, Msg::Tick(Duration::from_millis(650)));
+        assert_eq!(script(&state), (CallState::Running, None, 1 + live::POOL));
         chord(&mut state, Key::Char('t'), Mods::CTRL);
-        assert_eq!(call(&state), (CallState::Done, Some("exit 0".into())));
+        assert_eq!(script(&state).0, CallState::Done);
         assert!(!state.transcript.running());
-        // Esc stops the next turn, and its call fails.
+        // Esc stops the next turn, and its script fails where it stood.
         chord(&mut state, Key::Char('t'), Mods::CTRL);
         chord(&mut state, Key::Char('t'), Mods::CTRL);
         press(&mut state, Key::Esc);
         assert_eq!(state.transcript.rows.len(), rows + 2);
         match &state.transcript.rows[rows + 1] {
-            Row::Call {
-                state: call,
+            Row::Script {
+                state: script,
                 summary,
                 ..
             } => {
                 assert_eq!(
-                    (*call, summary.as_deref()),
+                    (*script, summary.as_deref()),
                     (CallState::Failed, Some("interrupted"))
                 );
             }

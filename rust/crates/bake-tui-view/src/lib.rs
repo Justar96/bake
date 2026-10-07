@@ -14,6 +14,7 @@ pub mod editor;
 pub mod frame;
 pub mod keys;
 pub mod layout;
+pub mod live;
 pub mod mode;
 pub mod render;
 pub mod shell_output;

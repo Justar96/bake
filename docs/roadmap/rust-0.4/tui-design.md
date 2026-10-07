@@ -292,7 +292,10 @@ A `run_code` call, a program the model writes in TypeScript and runs in the conf
 - **Back to the model.** What the program logged with `console.log`, hung from the output gutter and previewed like any output, then what it returned after `→`, coloured as TypeScript. A failed script keeps the lines it logged before it failed, and its error follows `→` in red, as the outer result carries the error and the captured output together.
 - **Classic frame.** `|` and `` ` `` draw the tree and `>` the result.
 
-The preview draws one finished sample script. These remain: a running script's live window, which keeps the head and the newest calls when the live region is short (the TypeScript `fittedAction`), approvals raised by a script's calls, and the session log as the source of the calls.
+- **While it runs.** The head counts the calls in flight after the total, `13 calls · 9 running`, since the tree may fold some of them away. The tree is a window on the five newest calls, where the latest dispatches are, with up to three failures before it kept and the rest counted above it, as the TypeScript `fittedAction` keeps the head and the newest calls. Nothing is drawn below the tree until the script settles, because the runtime hands the logged lines and the value back together.
+- **Interrupted.** Calls in flight end `interrupted`, their note yellow, and calls not yet started never appear. The head carries an ` interrupted ` tag, and stopped calls are neither counted as failures nor kept as news, so a failure of the program's own stays in view. Lines the program logged before it stopped are kept.
+
+The preview's sample session holds one finished script, and Ctrl+T runs a live one on a fixed timeline. These remain: approvals raised by a script's calls, and the session log as the source of the calls.
 
 ## Diffs
 

@@ -69,6 +69,8 @@ pub enum Row {
         description: String,
         source: Vec<String>,
         state: CallState,
+        /// A status for the head after the call count, such as `interrupted`.
+        summary: Option<String>,
         calls: Vec<Nested>,
         /// What the program wrote with `console.log`, in order.
         logs: Vec<String>,
@@ -210,6 +212,7 @@ fn sample_script() -> Row {
         .map(str::to_owned)
         .to_vec(),
         state: CallState::Done,
+        summary: None,
         calls,
         logs: vec!["skipped src/m5.ts: Permission denied".into()],
         result: Some(r#"["src/m3.ts", "src/m9.ts"]"#.into()),
@@ -713,6 +716,7 @@ pub fn present(rows: &[Row], index: usize, width: usize, look: Look) -> Vec<Line
             description,
             source,
             state,
+            summary,
             calls,
             logs,
             result,
@@ -721,6 +725,7 @@ pub fn present(rows: &[Row], index: usize, width: usize, look: Look) -> Vec<Line
                 description,
                 source,
                 *state,
+                summary.as_deref(),
                 calls,
                 logs,
                 result.as_deref(),
@@ -1304,22 +1309,53 @@ pub enum Branch<'a> {
     Folded(usize),
 }
 
-/// The tree a script's calls print as: the first and last [`NESTED_ENDS`],
-/// up to [`NESTED_FAILURES`] calls from the middle that did not succeed, and
-/// a count for each run of the rest. A count that would stand for one call
-/// is that call instead.
+/// Calls a running script's tree shows, newest last; earlier calls fold
+/// into a count above them, but for up to [`NESTED_FAILURES`] that failed.
+pub const LIVE_CALLS: usize = 5;
+
+/// The tree a finished script's calls print as: the first and last
+/// [`NESTED_ENDS`], up to [`NESTED_FAILURES`] calls from the middle that did
+/// not succeed, and a count for each run of the rest. A count that would
+/// stand for one call is that call instead.
 pub fn tree(calls: &[Nested]) -> Vec<Branch<'_>> {
-    let ends = calls.len().saturating_sub(NESTED_ENDS);
-    let mut news = 0;
+    tree_within(calls, NESTED_ENDS, NESTED_ENDS, |call| {
+        call.state != CallState::Done && !stopped(call)
+    })
+}
+
+/// The tree a running script's calls print as: a window on the newest
+/// [`LIVE_CALLS`], where the latest calls are, with up to
+/// [`NESTED_FAILURES`] failures before it kept and the rest counted above.
+/// Calls still running before the window are counted on the head.
+pub fn live_tree(calls: &[Nested]) -> Vec<Branch<'_>> {
+    tree_within(calls, 0, LIVE_CALLS, |call| call.state == CallState::Failed)
+}
+
+/// Whether an interruption stopped `call`: it did not fail on its own, so
+/// it is neither counted as a failure nor kept as news.
+fn stopped(call: &Nested) -> bool {
+    call.state == CallState::Failed && call.note.as_deref() == Some(copy::INTERRUPTED_NOTE)
+}
+
+/// [`tree`] keeping the first `first` and the last `last` calls, and up to
+/// [`NESTED_FAILURES`] between them for which `news` holds.
+fn tree_within(
+    calls: &[Nested],
+    first: usize,
+    last: usize,
+    news: impl Fn(&Nested) -> bool,
+) -> Vec<Branch<'_>> {
+    let ends = calls.len().saturating_sub(last);
+    let mut kept_news = 0;
     let kept: Vec<bool> = calls
         .iter()
         .enumerate()
         .map(|(i, call)| {
-            i < NESTED_ENDS
+            i < first
                 || i >= ends
-                || (call.state != CallState::Done && {
-                    news += 1;
-                    news <= NESTED_FAILURES
+                || (news(call) && {
+                    kept_news += 1;
+                    kept_news <= NESTED_FAILURES
                 })
         })
         .collect();
@@ -1362,6 +1398,7 @@ fn present_script(
     description: &str,
     source: &[String],
     state: CallState,
+    summary: Option<&str>,
     calls: &[Nested],
     logs: &[String],
     result: Option<&str>,
@@ -1379,28 +1416,54 @@ fn present_script(
         look,
     );
     // Failures are counted once the script ends; a running one shows each
-    // failed call red on its own row.
+    // failed call red on its own row. Its own status, such as an
+    // interruption, follows the count.
+    let mut status = Vec::new();
     if !calls.is_empty() {
         let noun = if calls.len() == 1 {
             copy::CALL
         } else {
             copy::CALLS
         };
-        let mut tally = vec![Span::styled(format!("{} {noun}", calls.len()), dim())];
+        status.push(Span::styled(format!("{} {noun}", calls.len()), dim()));
+        // While it runs, how many calls are in flight, since the window may
+        // fold some of them away.
+        let running = calls
+            .iter()
+            .filter(|c| c.state == CallState::Running)
+            .count();
+        if state == CallState::Running && running > 0 {
+            status.push(Span::styled(
+                format!(" · {running} {}", copy::RUNNING),
+                dim(),
+            ));
+        }
+        // The head's own status says what stopped the rest.
         let failed = calls
             .iter()
-            .filter(|c| c.state == CallState::Failed)
+            .filter(|c| c.state == CallState::Failed && !stopped(c))
             .count();
         if state != CallState::Running && failed > 0 {
-            tally.push(Span::styled(
+            status.push(Span::styled(
                 format!(" · {failed} {}", copy::FAILED),
                 red(look),
             ));
         }
-        ride(&mut lines, tally, under, width);
     }
+    if let Some(summary) = summary {
+        if !status.is_empty() {
+            status.push(pad(2));
+        }
+        status.extend(status_spans(summary, red(look), look));
+    }
+    ride(&mut lines, status, under, width);
     lines.extend(numbered(source, width, look));
-    let entries = tree(calls);
+    // While the script runs, the tree is a window on its newest calls.
+    let entries = if state == CallState::Running {
+        live_tree(calls)
+    } else {
+        tree(calls)
+    };
     if !entries.is_empty() {
         // The spine runs on from the source into the tree, so the calls
         // read as the program's own.
@@ -1460,7 +1523,9 @@ fn present_script(
                     look,
                 );
                 if let Some(note) = &call.note {
-                    let style = if call.state == CallState::Failed {
+                    let style = if stopped(call) {
+                        colour(look.tones, (0xfb, 0xbf, 0x24), Color::Yellow)
+                    } else if call.state == CallState::Failed {
                         red(look)
                     } else {
                         dim()
@@ -2324,6 +2389,7 @@ mod tests {
                 "throw new Error(\"boom\");".into(),
             ],
             state: CallState::Failed,
+            summary: None,
             calls: Vec::new(),
             logs: vec!["start".into()],
             result: Some("Error: boom".into()),
@@ -2347,6 +2413,7 @@ mod tests {
             description: "Long".into(),
             source: (1..=14).map(|n| format!("step{n}();")).collect(),
             state: CallState::Running,
+            summary: None,
             calls: Vec::new(),
             logs: Vec::new(),
             result: None,

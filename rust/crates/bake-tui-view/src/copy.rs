@@ -25,9 +25,11 @@ pub const DRAFT_KEPT: &str = "draft kept · Esc returns";
 pub const SAMPLE_PHASES: &[&str] = &["thinking", "writing", "running bash", "running subagent +2"];
 /// The header's word while history is compacted, and the phases it steps through.
 pub const COMPACTING: &str = "Compacting history";
-/// The call a sample turn runs, and its note once the turn completes or Esc
-/// stops it.
+/// The build a sample turn's script runs last, and its note once the turn
+/// completes or Esc stops it.
 pub const SAMPLE_COMMAND: &str = "bun run build";
+/// What the script a sample turn runs is for.
+pub const SAMPLE_SCRIPT: &str = "Read every manifest, then build";
 pub const SAMPLE_DONE: &str = "exit 0";
 pub const INTERRUPTED_NOTE: &str = "interrupted";
 pub const COMPACTING_PHASES: &[&str] = &["preparing", "summarizing", "saving"];
@@ -41,11 +43,13 @@ pub const UNMODIFIED: &str = "unmodified lines";
 pub const LINE: &str = "line";
 pub const LINES: &str = "lines";
 /// Code mode: the label `run_code` calls draw under, and the words of its
-/// call count, `13 calls · 1 failed`, and of its folded calls.
+/// call count, `13 calls · 1 failed` or `13 calls · 4 running`, and of its
+/// folded calls.
 pub const SCRIPT: &str = "Script";
 pub const CALL: &str = "call";
 pub const CALLS: &str = "calls";
 pub const FAILED: &str = "failed";
+pub const RUNNING: &str = "running";
 pub const MORE_CALLS: &str = "more calls";
 /// The transcript's hint row: its keys while following output, and the way
 /// back while reading history.
