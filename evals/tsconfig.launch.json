@@ -1,0 +1,13 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "incremental": false,
+    "noEmit": true,
+    "rootDir": "..",
+    "rewriteRelativeImportExtensions": false,
+    "types": ["node", "bun"]
+  },
+  "include": ["agent-loop/arms.ts", "agent-loop/run.test.ts"],
+  "references": [{ "path": "../packages/compaction/compaction-basic" }]
+}

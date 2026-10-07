@@ -74,7 +74,7 @@
     "build:runtime": "bun run build:native-system && bun run build:lib:host",
     "build:native-system": "bun native/system/scripts/build.ts --host-addon-only",
     "build:lib:host": "bun node_modules/typescript/bin/tsc -b tsconfig.host.json && bun run --bun tsdown",
-    "typecheck": "bun node_modules/typescript/bin/tsc -b tsconfig.host.json && bun apps/tui/scripts/tui.ts check types && bun node_modules/typescript/bin/tsc -p scripts/tsconfig.conformance.json",
+    "typecheck": "bun node_modules/typescript/bin/tsc -b tsconfig.host.json && bun apps/tui/scripts/tui.ts check types && bun node_modules/typescript/bin/tsc -p scripts/tsconfig.conformance.json && bun node_modules/typescript/bin/tsc -p evals/tsconfig.launch.json",
     "check": "bun run verify-workspace && bun run verify-tsconfig-paths && bun test scripts/workspace.test.ts && bun apps/tui/scripts/tui.ts check",
     "test": "bun apps/tui/scripts/tui.ts check unit spec",
     "test:runtime": "node node_modules/vitest/vitest.mjs run",

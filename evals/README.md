@@ -6,7 +6,8 @@ Every Bake version records what its agent loop costs on a fixed task suite, meas
 
 ```text
 evals/agent-loop/
-  run.ts          paired runner: arms, routes, the capturing proxy, sample summaries
+  run.ts          paired runner: routes, the capturing proxy, sample summaries
+  arms.ts         checkout resolution, per-sample Bake overlays, and built CLI arguments
   scenarios.ts    each scenario's prompt, fixture, success predicate, request floor and cap
   composition.ts  each arm's overlay rows, read from its own checkout, and the rendered-prompt check
   run.test.ts     keyless checks of actual Bake and pi launches, configuration, and test cleanup
@@ -123,9 +124,9 @@ Run the evaluator's launch checks without model credentials:
 bun test --timeout=30000 evals/agent-loop/run.test.ts
 ```
 
-The tests run the real evaluator with two small Bake checkout fixtures and a pi recorder. They check each arm's arguments, private homes, settings, overlay order, effort, context window, instruction policy, and stale-writer hooks under both rosters. A hung recorder and a failed readiness check exercise the test harness's process cleanup. The fixtures use dummy credentials and send no model request; every recorded sample remains unsuccessful with no measured usage or prompt-composition result.
+The tests run the real evaluator with two small Bake checkout fixtures and a pi recorder. They check each arm's arguments, private homes, settings, overlay order, effort, context window, instruction policy, and stale-writer hooks under both rosters. A hung recorder, failed readiness check, and failed child lookup exercise the test harness's process cleanup. The fixtures use dummy credentials and send no model request; every recorded sample remains unsuccessful with no measured usage or prompt-composition result.
 
-The process cases require Linux or macOS with `ps`; they are skipped on Windows because the live evaluator uses POSIX process groups and the pi fixture uses a shebang. The hook tests run separately. These checks establish launch configuration only; provider streams, token accounting, and live evaluation still need their own evidence. The `evals-unit` preflight gate includes them.
+The process cases require Linux or macOS with `ps`; they are skipped on Windows because the live evaluator uses POSIX process groups and the pi fixture uses a shebang. The hook tests run separately. These checks establish launch configuration only; provider streams, token accounting, and live evaluation still need their own evidence. The `evals-unit` preflight gate includes them. `bun run typecheck` builds the dependency declarations before checking `arms.ts` and these tests through `tsconfig.launch.json`; running that project alone requires those declarations to exist.
 
 ## Comparing with pi
 

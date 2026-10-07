@@ -23,7 +23,7 @@ const RECORDER = join(import.meta.dir, 'tests/fixtures/launch-recorder.mjs')
 const CLIPROXY_KEY = 'eval-contract-dummy-cliproxyapi'
 const AMBIENT_DEEPSEEK_KEY = 'eval-contract-dummy-ambient-deepseek'
 /** Below the 30 s lane, leaving room to reap a stuck evaluator and its agents before the hook times out. */
-const RUN_DEADLINE_MS = 20_000
+const RUN_DEADLINE_MS = 15_000
 
 type Json = any
 interface Capture {
@@ -131,26 +131,49 @@ const exists = (pid: number) => { try { process.kill(pid, 0); return true } catc
  * groups are killed, then the evaluator, and teardown waits until every one of
  * those groups is gone.
  */
-async function reap(child: ChildProcess, closed: Promise<unknown>): Promise<void> {
+async function reap(child: ChildProcess, closed: Promise<unknown>, root: string, inspect = host): Promise<void> {
   const pid = child.pid!
   let agents: number[] = []
+  let failure: unknown
   try {
     if (!child.kill('SIGSTOP')) return
     await until(async () => {
-      const { code, stdout } = await host('ps', ['-o', 'stat=', '-p', String(pid)])
+      const { code, stdout } = await inspect('ps', ['-o', 'stat=', '-p', String(pid)])
       if (code !== 0 && exists(pid)) throw new Error(`ps could not observe evaluator ${pid}`)
       return !/^[^TZ]/.test(stdout.trim())
     }, `evaluator ${pid} to stop`)
-    const { code, stdout } = await host('ps', ['-A', '-o', 'pid=', '-o', 'ppid='])
+    const { code, stdout } = await inspect('ps', ['-A', '-o', 'pid=', '-o', 'ppid='])
     if (code !== 0) throw new Error('ps could not list the evaluator children')
     agents = stdout.trim().split('\n').map(line => line.trim().split(/\s+/).map(Number)).filter(([, ppid]) => ppid === pid).map(([agent]) => agent!)
     // A child caught between fork and setsid is not yet a group leader, so it is also signalled by PID.
     for (const agent of agents) for (const target of [-agent, agent]) { try { process.kill(target, 'SIGKILL') } catch {} }
+  } catch (error) {
+    failure = error
   } finally {
     child.kill('SIGKILL')
     await closed
   }
+  if (failure !== undefined) {
+    // Once the evaluator exits, parent ids are lost. Only these private recorder
+    // entry points identify its detached groups; no shared executable is matched.
+    const scripts = [...new Set([root, realpathSync(root)])].flatMap(prefix =>
+      ['base/apps/cli/lib/bin.js', 'cand/apps/cli/lib/bin.js', 'pi/bin/pi'].map(path => join(prefix, path)))
+    const { code, stdout } = await host('ps', ['-A', '-o', 'pid=', '-o', 'pgid=', '-o', 'args='])
+    if (code !== 0) throw new Error('ps could not identify private recorder groups', { cause: failure })
+    for (const line of stdout.split('\n')) {
+      const match = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line)
+      if (match === null) continue
+      const [, candidate, group, command = ''] = match
+      if (candidate !== group || !scripts.some(path => `${command} `.includes(` ${path} `))) continue
+      const agent = Number(candidate)
+      agents.push(agent)
+      try { process.kill(-agent, 'SIGKILL') } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
+      }
+    }
+  }
   await until(() => agents.every(agent => !exists(-agent) && !exists(agent)), `agents ${agents.join(', ')} to exit`)
+  if (failure !== undefined) throw failure
 }
 
 /** Resolves when a run should be abandoned; the default is the fixed deadline. */
@@ -163,7 +186,7 @@ const RUN_DEADLINE: Deadline = (_, signal) => sleep(RUN_DEADLINE_MS, undefined, 
  * environment, never this process's, so no ambient credential or home reaches it.
  * A run past its deadline is reaped with its agents before the root goes.
  */
-async function evaluate(options: { roster: 'headless' | 'tui'; models: string; cases: string[]; env?: Record<string, string> | undefined; deadline?: Deadline }): Promise<Evaluation & { root: string; realRoot: string }> {
+async function evaluate(options: { roster: 'headless' | 'tui'; models: string; cases: string[]; env?: Record<string, string> | undefined; deadline?: Deadline; inspect?: typeof host }): Promise<Evaluation & { root: string; realRoot: string }> {
   const root = mkdtempSync(join(tmpdir(), 'bake-eval-contract-'))
   try {
     const realRoot = realpathSync(root)
@@ -209,7 +232,7 @@ async function evaluate(options: { roster: 'headless' | 'tui'; models: string; c
     const timedOut = await Promise.race([closed.then(() => false), expired])
     stop.abort()
     await expired
-    if (timedOut) await reap(child, closed)
+    if (timedOut) await reap(child, closed, root, options.inspect)
     const { code, signal } = await closed
     if (failure) throw failure
     if (deadlineFailure !== undefined) throw deadlineFailure
@@ -431,7 +454,7 @@ function contract(roster: 'headless' | 'tui', setup: { models: string; effort: s
 }
 
 posix('a run past its deadline', () => {
-  test.each(['hang observed', 'readiness failed'])('is reaped with its hung agent when %s', async (reason) => {
+  test.each(['hang observed', 'readiness failed', 'child lookup failed'])('is reaped with its hung agent when %s', async (reason) => {
     let owned: { root: string; evaluator: number; agent: number } | undefined
     // The deadline is the observed hang, not a delay: it fires once the first agent announces itself.
     const deadline: Deadline = async ({ root, evaluator }, signal) => {
@@ -440,8 +463,13 @@ posix('a run past its deadline', () => {
       owned = { root, evaluator, agent: Number.parseInt(hung()!) }
       if (reason === 'readiness failed') throw new Error('recorder readiness failed')
     }
-    await expect(evaluate({ roster: 'headless', models: 'fixture-model', cases: ['ordinary_edit'], env: { EVAL_CONTRACT_HANG: '1' }, deadline }))
-      .rejects.toThrow(reason === 'readiness failed' ? 'recorder readiness failed' : 'run.ts did not finish before its deadline')
+    const inspect: typeof host = (command, args) => {
+      if (reason === 'child lookup failed' && args.includes('ppid=')) throw new Error('child lookup failed')
+      return host(command, args)
+    }
+    await expect(evaluate({ roster: 'headless', models: 'fixture-model', cases: ['ordinary_edit'], env: { EVAL_CONTRACT_HANG: '1' }, deadline, inspect }))
+      .rejects.toThrow(reason === 'hang observed' ? 'run.ts did not finish before its deadline'
+        : reason === 'readiness failed' ? 'recorder readiness failed' : 'child lookup failed')
     expect(owned).toBeDefined()
     const { root, evaluator, agent } = owned!
     expect({ evaluator: exists(evaluator), agent: exists(agent), group: exists(-agent), root: existsSync(root) })

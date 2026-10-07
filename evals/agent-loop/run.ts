@@ -24,12 +24,13 @@
  */
 import { spawn } from 'node:child_process'
 import { mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync, copyFileSync, rmSync, existsSync, realpathSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createHash } from 'node:crypto'
 import YAML from 'yaml'
 import { reconcile } from './accounting.ts'
-import { compositionCheck, ROSTERS, rosterOverlay, systemPromptOf, systemPromptOverlay, type Roster } from './composition.ts'
+import { compositionCheck, ROSTERS, systemPromptOf, type Roster } from './composition.ts'
+import { bakeCommand, bakeOverlay, parseArms, type Arm } from './arms.ts'
 import {
   backgroundStarts, compactions, editCheckSplits, excessRequests, normalizeBake, normalizePi, orientationCalls, ranCheck,
   requestsOverFloor, routingDecisions, runawayAbort, shellEdits, verifiedBeforeFinal,
@@ -43,21 +44,6 @@ import { parseCredentialsDocument } from '../../packages/credentials/credentials
 
 const out = resolve(process.env.EVAL_OUTPUT ?? join('.preflight/evals/agent-loop', new Date().toISOString().replace(/[:.]/g, '-')))
 mkdirSync(out, { recursive: true })
-/**
- * Whether a checkout's base bundle still mounts the retired `llm-deepseek`
- * adapter, which owns `deepseek-official` there. Such an arm configures the
- * route through that adapter's settings section, since an `llm-pi-ai` route of
- * the same id would collide with it.
- */
-function shipsLlmDeepseek(root: string): boolean {
-  const patch = join(root, 'packages/bundle/base/cordis.patch.yml')
-  return existsSync(patch) && /name:\s*['"]?@deepseek-ai\/dsh-llm-deepseek['"]?\s*$/m.test(readFileSync(patch, 'utf8'))
-}
-/**
- * One arm: a built Bake checkout, or the pi coding agent. A pi arm's `root` is
- * its package directory and `bin` the CLI it runs; overlays and settings are
- * Bake's and do not apply to it.
- */
 /** Deep-merges an arm's settings into the route's, so one route key can change without replacing the route; arrays replace. */
 function merge(base: Record<string, unknown>, extra: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = { ...base }
@@ -69,32 +55,9 @@ function merge(base: Record<string, unknown>, extra: Record<string, unknown>): R
   return out
 }
 
-/** `composition` holds a Bake arm's overlay rows read from its own checkout: its system prompt and the roster's tool configs. */
-interface Arm { kind: 'bake' | 'pi'; root: string; bin?: string; version?: string; extra: unknown[]; settings: string; llmDeepseek: boolean; composition: unknown[] }
-/** Resolve `pi` or `pi:<bin>` to the CLI and the package directory that ships it. */
-function piArm(spec: string): Arm {
-  const named = spec.slice('pi'.length).replace(/^:/, '') || Bun.which('pi')
-  if (!named) throw new Error('EVAL_ARMS: pi is not on PATH; pass name=pi:<path to the pi CLI>')
-  const bin = realpathSync(named)
-  let root = dirname(bin)
-  while (!existsSync(join(root, 'package.json')) && dirname(root) !== root) root = dirname(root)
-  const version = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version as string
-  return { kind: 'pi', root, bin, version, extra: [], settings: '{}', llmDeepseek: false, composition: [] }
-}
 const roster = (process.env.EVAL_ROSTER ?? 'headless') as Roster
 if (!ROSTERS.includes(roster)) throw new Error(`EVAL_ROSTER must be one of ${ROSTERS.join(', ')}`)
-const ARMS: Record<string, Arm> = Object.fromEntries((process.env.EVAL_ARMS ?? '').split(',').filter(Boolean).map(entry => {
-  const [name, root] = entry.split('=')
-  if (!name || !root) throw new Error(`EVAL_ARMS entry "${entry}" is not name=checkout`)
-  if (root === 'pi' || root.startsWith('pi:')) return [name, piArm(root)]
-  if (!existsSync(join(root, 'apps/cli/lib/bin.js'))) throw new Error(`arm ${name}: ${root} has no built apps/cli/lib/bin.js; run bun run build there`)
-  const settings = process.env[`EVAL_SETTINGS_${name.toUpperCase()}`] ?? '{}'
-  JSON.parse(settings)
-  return [name, {
-    kind: 'bake', root: resolve(root), extra: JSON.parse(process.env[`EVAL_EXTRA_${name.toUpperCase()}`] ?? '[]'), settings, llmDeepseek: shipsLlmDeepseek(root),
-    composition: [systemPromptOverlay(root), ...rosterOverlay(root, roster)],
-  }]
-}))
+const ARMS = parseArms(process.env.EVAL_ARMS ?? '', roster, process.env)
 const armNames = Object.keys(ARMS)
 if (armNames.length < 2) throw new Error('EVAL_ARMS needs at least two name=checkout pairs, for example base=../bake-v0.2.0,candidate=.')
 /** Named model sets; EVAL_MODELS may list set names, model ids, or both. */
@@ -413,18 +376,10 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
       }), { mode: 0o600 })
       copyFileSync(credentialFile, join(home, '.credentials.yaml'))
       writeFileSync(hookPath, `import { readFileSync, writeFileSync } from 'node:fs';\nimport { resolve } from 'node:path';\nexport const name = 'token-evaluation-external-writer';\nexport function apply(ctx) {\n let changed = false;\n ctx.on('tools/result', (exec, result) => {\n if (exec.name !== 'read' || result.isError || !(${target('exec.arguments?.file_path')})) return;\n ${writeOnce}\n });\n}\n`)
-      const overlay = [
-        ...arm.composition,
-        { id: 'session-title-llm', disabled: true },
-        // Ambient AGENTS stay out, except where the scenario's own AGENTS.md is the point.
-        ...usesAgentInstructions(scenario) ? [] : [{ id: 'agent-instructions', disabled: true }],
-        { id: 'session-persistence-jsonl', config: { root: join(root, 'sessions'), compression: 'none' } },
-        ...(scenario === 'stale_edit' ? [{ insert: [{ id: 'token-evaluation-external-writer', name: hookPath }] }] : []),
-        ...arm.extra,
-      ]
+      const overlay = bakeOverlay(arm, scenario, { sessions: join(root, 'sessions'), staleWriter: hookPath })
       const patch = join(root, 'evaluation.patch.json'); writeFileSync(patch, JSON.stringify(overlay))
       Object.assign(env, { BAKE_HOME: home, DSH_HOME: home, BAKE_AGENTS_HOME: join(root, 'agents'), DSH_AGENTS_HOME: join(root, 'agents') })
-      command = ['node', join(arm.root, 'apps/cli/lib/bin.js'), 'headless', '--patch', patch, '--json', prompts[scenario]!]
+      command = bakeCommand(arm.root, patch, prompts[scenario]!)
     }
     child = spawn(command[0]!, command.slice(1), {
       cwd: workspace, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'],
