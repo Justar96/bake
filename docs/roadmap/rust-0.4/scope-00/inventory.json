@@ -671,6 +671,7 @@
     {"path":"apps/tui/tests/no-bun-runtime.test.ts","lane":"bun-tui","owner":"apps/tui","scopes":["14"],"disposition":"replace-tooling","basis":"apps/tui"},
     {"path":"evals/agent-loop/composition.test.ts","lane":"bun-evals","owner":"evals","scopes":["01","09"],"disposition":"replace-tooling","basis":"evals"},
     {"path":"evals/agent-loop/metrics.test.ts","lane":"bun-evals","owner":"evals","scopes":["01","09"],"disposition":"replace-tooling","basis":"evals"},
+    {"path":"evals/agent-loop/native-fixture.test.ts","lane":"bun-evals","owner":"evals","scopes":["01","09"],"disposition":"replace-tooling","basis":"evals"},
     {"path":"evals/agent-loop/rules.test.ts","lane":"bun-evals","owner":"evals","scopes":["01","09"],"disposition":"replace-tooling","basis":"evals"},
     {"path":"evals/agent-loop/run.test.ts","lane":"bun-evals","owner":"evals","scopes":["01","09"],"disposition":"replace-tooling","basis":"evals"},
     {"path":"evals/agent-loop/scenarios.test.ts","lane":"bun-evals","owner":"evals","scopes":["01","09"],"disposition":"replace-tooling","basis":"evals"},

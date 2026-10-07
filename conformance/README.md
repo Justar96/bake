@@ -2,7 +2,7 @@
 
 ## Summary
 
-Run the same controlled fixtures through TypeScript and Rust, then compare prompt bytes, event order, permission records, and the files each runner changed. The fixtures qualify the comparison tooling for [migration scope 01](../docs/roadmap/rust-0.4/README.md#01--workspace-and-comparison-harness). They do not run Bake's agent, implement its permission policy, or establish runtime parity. Scope 01 remains open for the native eval arm and qualification evidence ledger.
+Run the same controlled fixtures through TypeScript and Rust, then compare prompt bytes, event order, permission records, and the files each runner changed. The fixtures qualify the comparison tooling for [migration scope 01](../docs/roadmap/rust-0.4/README.md#01--workspace-and-comparison-harness). They do not run Bake's agent, implement its permission policy, or establish runtime parity. The separate [native eval fixture adapter](../evals/README.md#native-fixture-adapter) checks a compiled fake arm with the evaluator's existing file predicates. Real-runtime fixtures, a live native eval arm, and the qualification evidence ledger remain open.
 
 ## Table of Contents
 
@@ -70,4 +70,4 @@ The [TypeScript validator](../scripts/rust-conformance/fixture.ts) and Rust pars
 
 Each run owns a private home, temporary directory, workspace, and child process. Children receive a minimal environment rather than inherited model credentials. The driver bounds process time and output, waits for child closure, and removes the run's directories. Workspace observation visits at most 1,024 entries and reads at most 256 regular files, each bounded to 64 KiB. On POSIX, timeout, overflow, and cancellation stop the owned process group; on Windows, they stop the direct child. Both supplied runners are single processes.
 
-The harness runs trusted fixtures and executables. It provides no sandbox boundary for a hostile runner. File comparison rejects symlinks and special files; it does not qualify empty-directory semantics, permissions, or filesystem modes. Generated-identity normalization, actual runtime adapters, live models, and the native eval arm require their own evidence. The Rust workspace and these fixtures remain development files, outside the shipped 0.3 launcher and release archives.
+The harness runs trusted fixtures and executables. It provides no sandbox boundary for a hostile runner. File comparison rejects symlinks and special files; it does not qualify empty-directory semantics, permissions, or filesystem modes. Generated-identity normalization, actual runtime adapters, and live models require their own evidence. The Rust workspace and these fixtures remain development files, outside the shipped 0.3 launcher and release archives.

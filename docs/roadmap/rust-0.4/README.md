@@ -82,7 +82,7 @@ The effort bands are relative: **M** is a bounded subsystem; **L** spans multipl
 | Scope | Deliverable | Band | Exit evidence | State |
 |---|---|---|---|---|
 | 00 | Approved support decisions and frozen comparison baseline | L | Complete behavior inventory and repeatable TypeScript oracle | In progress |
-| 01 | Rust workspace and conformance drivers | M | Native test executable and deliberately failing comparator controls | In progress: workspace, preview, and [synthetic comparison harness](../../../conformance/README.md); native eval arm and qualification ledger remain open |
+| 01 | Rust workspace and conformance drivers | M | Native test executable and deliberately failing comparator controls | In progress: workspace, preview, [synthetic comparison harness](../../../conformance/README.md), and [native eval fixture adapter](../../../evals/README.md#native-fixture-adapter); live native arm and qualification ledger remain open |
 | 02 | Session types and pure projections | L | Historical replay and reconstructed-request equivalence | Planned |
 | 03 | Persistence, migrations, locking, and queries | XL | Cross-runtime reads/writes, crash recovery, writer exclusion | Planned |
 | 04 | Host processes and sandbox enforcement | XL | Real denied effects and process-tree quiescence on each OS | Planned |
@@ -306,4 +306,4 @@ During coexistence, run the current Bake gates for affected TypeScript paths and
 
 ## Dev Note
 
-Scope 00 still owns the remaining compatibility decisions and baseline extraction. Scope 01 has the opt-in workspace, preview, and synthetic comparison harness; native eval-arm support and the qualification ledger remain open. Proposed runtime crates, compatibility adapters, branch/channel changes, and performance budgets require acceptance in their owning scopes. This roadmap provides no calendar commitment.
+Scope 00 still owns the remaining compatibility decisions and baseline extraction. Scope 01 has the opt-in workspace, preview, synthetic comparison harness, and a fixture-only native eval adapter with a compiled test arm. Real-runtime fixtures, a live native model arm, and the qualification ledger remain open. Proposed runtime crates, compatibility adapters, branch/channel changes, and performance budgets require acceptance in their owning scopes. This roadmap provides no calendar commitment.

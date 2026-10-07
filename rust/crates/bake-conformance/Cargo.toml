@@ -10,6 +10,10 @@ publish.workspace = true
 name = "bake-conformance-runner"
 path = "src/bin/bake-conformance-runner.rs"
 
+[[bin]]
+name = "bake-eval-fake-arm"
+path = "src/bin/bake-eval-fake-arm.rs"
+
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
